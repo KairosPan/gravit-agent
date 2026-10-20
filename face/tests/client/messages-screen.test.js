@@ -124,3 +124,14 @@ test('a face archive offers Un-archive; a host archive says so and offers nothin
   assert.match(h, />Archived<[\s\S]*?>By the host</);
   assert.doesNotMatch(h, /data-action="unarchive"|data-action="archive"/);
 });
+
+test('Where offers New channel…; the edit asks for the name', () => {
+  const s = R.startDraft(listed([conv('a')]), {});
+  const h = renderMessagesScreen(s, NOW);
+  assert.match(h, /<option value="__new">New channel…<\/option>/);
+  const naming = R.startEdit(s, { kind: 'newChannel' });
+  const n = renderMessagesScreen(naming, NOW);
+  assert.match(n, /class="inline-edit"/);
+  assert.match(n, /name="channel"[^>]*aria-label="Name the channel"|aria-label="Name the channel"[^>]*name="channel"/);
+  assert.match(renderMessagesScreen(R.editFailed(naming, { error: 'Letters, digits, - or _' }), NOW), /Letters, digits, - or _/);
+});

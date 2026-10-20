@@ -2,7 +2,8 @@
 // the thesis, the latest backtest, the backtests, the journal, the files and the rosters, from /data/channels/overview.
 // Everything here was written by Gravit or the operator into the channel's directory: text through esc, the thesis
 // through the thread's DOM-built markdown.
-import { esc, cls } from '../html.js';
+import { esc, cls, attrs } from '../html.js';
+import { icon } from '../icons.js';
 import { fmtClock, fmtDate } from '../time.js';
 import { chip, markdownHtml } from './thread.js';
 import { kv } from './controls.js';
@@ -40,12 +41,31 @@ function rows(label, list, toLine) {
   return Array.isArray(list) && list.length ? sec(label, list.map(toLine).join('')) : '';
 }
 
-function rosters(data) {
+// a roster's editor: a box per choice, ticked as the store holds it; a seventh bot box is shut while six are ticked
+function rosterEditor(e) {
+  const full = e.which === 'bots' && e.ticked.length >= 6;
+  const boxes = e.choices.map((c, i) => {
+    const on = e.ticked.includes(c.value);
+    return `<label class="opt"><input type="checkbox"${attrs({ id: `roster-${e.which}-${i}`, name: 'roster', value: c.value, checked: on, disabled: !on && full })}><span>${esc(c.label)}</span></label>`;
+  }).join('');
+  return `<div class="roster-edit">${boxes || none('None to choose')}<div class="btn-row">` +
+    `<button type="button" class="key yes" data-action="commitEdit" aria-label="Save">${icon('check', 14, 2.4)}</button>` +
+    `<button type="button" class="key no" data-action="cancelEdit" aria-label="Cancel">${icon('x', 14, 2.4)}</button>` +
+    `${e.error ? `<span class="field-error">${esc(e.error)}</span>` : ''}</div></div>`;
+}
+
+function roster(label, which, names, state, id) {
+  const e = state.edit?.kind === 'roster' && state.edit.which === which && state.edit.workspaceId === id ? state.edit : null;
+  const edit = e ? '' : `<button type="button" class="btn-sm" data-action="editRoster" data-which="${which}" data-id="${esc(id)}">Edit</button>`;
+  const body = e ? rosterEditor(e) : names.length ? names.map(n => `<div class="dsec-line">${esc(n)}</div>`).join('') : none('None');
+  return `<section class="dsec"><div class="dsec-label chan-label">${esc(label)}${edit}</div>${body}</section>`;
+}
+
+function rosters(data, state, id) {
   const names = new Map((Array.isArray(data.allBots) ? data.allBots : []).map(b => [b.id, b.name]));
   const agents = Array.isArray(data.agents) ? data.agents : [];
   const bots = Array.isArray(data.bots) ? data.bots : [];
-  return sec('Agents', agents.length ? agents.map(a => `<div class="dsec-line">${esc(a)}</div>`).join('') : none('None')) +
-    sec('Bots', bots.length ? bots.map(b => `<div class="dsec-line">${esc(names.get(b) ?? b)}</div>`).join('') : none('None'));
+  return roster('Agents', 'agents', agents, state, id) + roster('Bots', 'bots', bots.map(b => names.get(b) ?? b), state, id);
 }
 
 function headline(status) {
@@ -79,7 +99,7 @@ export function renderChannelScreen(state, now) {
     rows('Backtests', body.backtests, b => line(b.file, bytesWord(b.bytes))) +
     rows('Journal', (body.journal ?? []).slice(0, JOURNAL_ROWS), j => `<div class="chan-row"><span class="chan-row-meta">${esc(j.date)}</span><span class="chan-row-name">${esc(j.text)}</span></div>`) +
     rows('Files', body.files, f => line(f.name, [bytesWord(f.bytes), Number.isFinite(Date.parse(f.mtime)) ? fmtDate(Date.parse(f.mtime)) : ''].filter(Boolean).join(' · '))) +
-    rosters(data),
+    rosters(data, state, id),
     head,
   );
 }

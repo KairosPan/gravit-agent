@@ -12,6 +12,7 @@ const row = (id, over = {}) => ({ sessionId: id, updatedAt: 5, agentAvailable: f
 
 // a fake host: the mux records its streams and keeps the options; the calls are canned per endpoint and recorded
 function host({ rows = [], pages = {}, meta = { ok: true, archived: [], deleted: [] } } = {}) {
+  const channelRows = [{ workspaceId: 'w0', name: 'workbench', isRoot: true, sessionIds: [] }];
   const streams = [];
   let opts = null;
   const mux = { stream(name, args, cbs) { const s = { name, args, cbs, cancelled: false }; streams.push(s); return { cancel() { s.cancelled = true; } }; }, answer: async (id, value) => { answered.push([id, value]); }, close() {} };
@@ -26,13 +27,16 @@ function host({ rows = [], pages = {}, meta = { ok: true, archived: [], deleted:
     if (endpoint === 'session/fork') { rows.push(row('s-fork', { updatedAt: 99, agentAvailable: true })); return { sessionId: 's-fork' }; }
     return undefined;
   };
-  const getJson = async path => (path === '/data/channels.json' ? { ok: true, root: '/r', channels: [{ workspaceId: 'w0', name: 'workbench', isRoot: true, sessionIds: [] }], ungrouped: [], archived: [], presets: {} } : path === '/data/sessions-meta.json' ? meta : { bots: [] });
+  const getJson = async path => (path === '/data/channels.json' ? { ok: true, root: '/r', channels: [...channelRows], ungrouped: [], archived: [], presets: {} } : path === '/data/sessions-meta.json' ? meta : { bots: [] });
   const posted = [];
   const postJson = async (path, body) => {
     posted.push([path, body]);
     // the face's two session routes, as the host would apply them to the next list
     if (path === '/data/sessions/delete') { const i = rows.findIndex(r => r.sessionId === body.sessionId); if (i >= 0) rows.splice(i, 1); }
     if (path === '/data/sessions/archive') meta.archived = body.archived ? [...meta.archived, body.sessionId] : meta.archived.filter(id => id !== body.sessionId);
+    if (path === '/data/channels') { const dir = `/r/strategies/${body.name}`; channelRows.push({ workspaceId: `w-${body.name}`, name: body.name, title: body.name, dir, isRoot: false, sessionIds: [] }); return { ok: true, name: body.name, dir, isRoot: false }; }
+    if (path === '/data/channels/overview') return { ok: true, channel: channelRows.find(c => c.workspaceId === body.workspaceId), status: {}, body: {}, agents: [], bots: ['buffett'], allBots: [{ id: 'buffett', name: 'Buffett' }, { id: 'drill-bear', name: 'Bear' }] };
+    if (path === '/data/channels/bots') return { ok: true, bots: body.bots };
     return { ok: true, addressed: [] };
   };
   return { openMux: o => { opts = o; return mux; }, call, getJson, postJson, markdown: null, calls, posted, answered, streams, rows, ready: async () => { opts.onReady({}); await settle(); }, opts: () => opts };
@@ -741,5 +745,41 @@ test('New round opens New message with Where on the channel', async () => {
   f.click({ tagName: 'BUTTON', dataset: { action: 'newRound', id: 'w0' } });
   assert.equal(store.get().route.id, 'new');
   assert.equal(store.get().draft.where, 'w0');
+  store.timers.clear();
+});
+
+test('New channel… creates the channel and selects it in Where', async () => {
+  const f = fakeWindow({ hash: '' });
+  const h = host({ rows: [row('s1')] });
+  const store = started(f, h);
+  await h.ready();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'startDraft' } });
+  f.fire('root', 'change', { target: { tagName: 'SELECT', value: '__new', dataset: { action: 'draftWhere' } } });
+  assert.equal(store.get().edit.kind, 'newChannel');
+  assert.equal(store.get().draft.where, 'w0', 'Where keeps its channel while the name is typed');
+  f.withSelector('.inline-edit [name]', { tagName: 'INPUT', name: 'channel', value: 'gamma ray' });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'commitEdit' } });
+  await settle();
+  assert.deepEqual(h.posted.find(p => p[0] === '/data/channels')[1], { name: 'gamma-ray' });
+  assert.equal(store.get().edit, null);
+  assert.equal(store.get().draft.where, 'w-gamma-ray');
+  assert.match(f.html(), /<option value="w-gamma-ray" selected>gamma-ray<\/option>/);
+  store.timers.clear();
+});
+
+test('the bots editor posts the ticked ids', async () => {
+  const f = fakeWindow({ hash: '#/channel/w0' });
+  const h = host({ rows: [row('s1')] });
+  const store = started(f, h);
+  await h.ready();
+  await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'editRoster', which: 'bots', id: 'w0' } });
+  await settle();
+  assert.deepEqual(store.get().edit.ticked, ['buffett']);
+  f.fire('root', 'change', { target: { tagName: 'INPUT', type: 'checkbox', name: 'roster', value: 'drill-bear', checked: true, dataset: {} } });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'commitEdit' } });
+  await settle();
+  assert.deepEqual(h.posted.find(p => p[0] === '/data/channels/bots')[1], { workspaceId: 'w0', bots: ['buffett', 'drill-bear'] });
+  assert.equal(store.get().edit, null);
   store.timers.clear();
 });

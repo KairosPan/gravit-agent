@@ -44,10 +44,13 @@ export function renderHead(conv, state) {
 function draftScreen(state) {
   const d = state.draft;
   const channels = [...(state.channels ?? [])].sort((a, b) => (b.isRoot ? 1 : 0) - (a.isRoot ? 1 : 0));
-  const options = channels.map(c => `<option value="${esc(c.workspaceId)}"${c.workspaceId === d.where ? ' selected' : ''}>${esc(c.name)}</option>`).join('');
+  const options = channels.map(c => `<option value="${esc(c.workspaceId)}"${c.workspaceId === d.where ? ' selected' : ''}>${esc(c.name)}</option>`).join('') +
+    '<option value="__new">New channel…</option>';
+  // New channel… opens a name box under Where; Where keeps its channel until the new one exists
+  const naming = state.edit?.kind === 'newChannel' ? `<div class="to-line">${inlineEdit([{ name: 'channel', value: '', label: 'Name the channel' }], state.edit.error)}</div>` : '';
   return `<main class="main"><header class="head centered draft"><button type="button" class="btn-sm head-cancel" data-action="cancelDraft">Cancel</button>${avatar('gravit', 44)}` +
     `<label for="nm-title" class="sr-only">Name this</label><input id="nm-title" class="title-input" type="text" autocomplete="off" placeholder="Name this (or your first line is the name)" data-action="draftTitle"${attrs({ value: d.title })}>` +
-    `<div class="to-line"><label class="to-label" for="nm-where">Where</label><select id="nm-where" name="where" class="input small" data-action="draftWhere">${options}</select></div></header>` +
+    `<div class="to-line"><label class="to-label" for="nm-where">Where</label><select id="nm-where" name="where" class="input small" data-action="draftWhere">${options}</select></div>${naming}</header>` +
     `<div class="thread" id="thread"></div>${renderComposer()}${renderStatus(state.status)}</main>`;
 }
 

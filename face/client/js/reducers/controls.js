@@ -23,6 +23,18 @@ export const reducers = {
     }
   },
 
+  // a write the editor asked for was refused: the editor stays open with the words
+  editFailed: (s, { error }) => (s.edit ? fail(s, error) : s),
+  // a roster editor's box: the store holds what is ticked; a seventh bot is never added
+  toggleRosterTick(s, { value, on }) {
+    const e = s.edit;
+    if (e?.kind !== 'roster' || typeof value !== 'string') return s;
+    const has = e.ticked.includes(value);
+    if (on && !has && e.which === 'bots' && e.ticked.length >= 6) return s;
+    const ticked = on ? (has ? e.ticked : [...e.ticked, value]) : e.ticked.filter(v => v !== value);
+    return ticked === e.ticked ? s : { ...s, edit: { ...e, ticked } };
+  },
+
   askConfirm: (s, spec) => ({ ...s, confirm: spec, edit: null }),
   cancelConfirm: s => (s.confirm ? { ...s, confirm: null } : s),
 };

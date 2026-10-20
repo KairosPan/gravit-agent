@@ -206,7 +206,8 @@ export function boot(win, host = {}) {
     for (const [id, value] of typed) {
       const el = doc.getElementById(id);
       // an editor's box (edit-*) keeps what was typed only while the same editor stays open
-      if (el && id !== 'say' && (sameEditor || !id.startsWith('edit-'))) el.value = value;
+      // Where's channel is the store's (draft.where), never the box's: New channel… must not stick in it
+      if (el && id !== 'say' && id !== 'nm-where' && (sameEditor || !id.startsWith('edit-'))) el.value = value;
     }
     // a pick on a question card is the person's own until they press Answer: it lives in the DOM, not the store
     for (const id of ticked) {
@@ -303,10 +304,37 @@ export function boot(win, host = {}) {
     }
   }
 
+  // New channel… in Where: create it, then Where names it; a refusal stays in the editor
+  async function commitNewChannel(name) {
+    const made = await channels.create(name);
+    if (made.error) { store.dispatch('editFailed', { error: made.error }); return; }
+    store.dispatch('cancelEdit');
+    store.dispatch('setDraftWhere', made.workspaceId);
+  }
+  // a channel's roster editor: what the store holds ticked goes to the face
+  async function commitRoster(e) {
+    const done = e.which === 'agents' ? await channels.setAgents(e.workspaceId, e.ticked) : await channels.setBots(e.workspaceId, e.ticked);
+    if (done.error) store.dispatch('editFailed', { error: done.error });
+    else if (store.get().edit?.kind === 'roster') store.dispatch('cancelEdit');
+  }
+  // the choices a roster editor offers: the connected agents, or every bot; a rostered one that is gone stays to untick
+  async function editRoster(which, workspaceId) {
+    const data = store.get().channel?.id === workspaceId ? store.get().channel.data : null;
+    if (!data) return;
+    const rostered = (which === 'agents' ? data.agents : data.bots) ?? [];
+    const offered = which === 'agents'
+      ? (await channels.agentChoices()).map(a => ({ value: a.bin, label: a.label }))
+      : (data.allBots ?? []).map(b => ({ value: b.id, label: b.name }));
+    const choices = [...offered, ...rostered.filter(v => !offered.some(c => c.value === v)).map(v => ({ value: v, label: v }))];
+    store.dispatch('startEdit', { kind: 'roster', which, workspaceId, choices, ticked: [...rostered] });
+  }
+
   // commit the open editor with what its inputs hold; a rename also reaches the host
   function commitEdit() {
     const e = store.get().edit;
+    if (e?.kind === 'roster') { void commitRoster(e); return; }
     const values = Object.fromEntries([...root.querySelectorAll('.inline-edit [name]')].map(el => [el.name, el.value]));
+    if (e?.kind === 'newChannel') { void commitNewChannel(values.channel); return; }
     store.dispatch('commitEdit', { values });
     if (e?.kind === 'rename' && store.get().edit === null) void actions.rename(e.convId, values.title);
   }
@@ -367,6 +395,7 @@ export function boot(win, host = {}) {
     // a channel's page: New round is a new message in that channel; Retry reads it again
     newRound: el => { store.dispatch('startDraft', { now: now(), where: el.dataset.id }); go({ screen: 'messages', id: 'new' }); },
     channelRetry: el => { void channels.overview(el.dataset.id); },
+    editRoster: el => { void editRoster(el.dataset.which, el.dataset.id); },
     cancelDraft: () => { store.dispatch('cancelDraft'); go(store.get().route); },
     toggleRail: () => store.dispatch('toggleRail'),
     toggleGroup: el => store.dispatch('toggleGroup', el.dataset.key),
@@ -474,7 +503,10 @@ export function boot(win, host = {}) {
   root.addEventListener('input', ev => { if (!ev.isComposing && !composing) typed(ev.target); });
   root.addEventListener('change', ev => {
     const el = ev.target;
-    if (el.tagName === 'SELECT' && el.dataset?.action === 'draftWhere') store.dispatch('setDraftWhere', el.value);
+    if (el.tagName === 'SELECT' && el.dataset?.action === 'draftWhere') {
+      if (el.value === '__new') store.dispatch('startEdit', { kind: 'newChannel' }); else store.dispatch('setDraftWhere', el.value);
+    }
+    if (el.type === 'checkbox' && el.name === 'roster') store.dispatch('toggleRosterTick', { value: el.value, on: el.checked === true });
   });
   let pressSeq = 0;   // a press's own timeout ends only that press, never a later one
   root.addEventListener('pointerdown', ev => {

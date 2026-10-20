@@ -86,3 +86,25 @@ test('loading, unavailable with Retry, a stale page after a failed re-read, not 
   const missing = R.channelFailed(on(null, 'loading'), { workspaceId: 'w1', at: NOW, missing: true });
   assert.match(renderChannelScreen(missing, NOW), /Channel not found/);
 });
+
+test('the roster editors tick what is rostered, offer the connected agents and every bot, and stop at six bots', () => {
+  setMarkdown(null);
+  const s = on(overview());
+  const agents = R.startEdit(s, { kind: 'roster', which: 'agents', workspaceId: 'w1', choices: [{ value: 'codex', label: 'Codex' }, { value: 'claude', label: 'Claude' }], ticked: ['codex'] });
+  const a = renderChannelScreen(agents, NOW);
+  assert.match(a, /class="roster-edit"/);
+  assert.match(a, /<input type="checkbox" id="roster-agents-0" name="roster" value="codex" checked>/);
+  assert.match(a, /<input type="checkbox" id="roster-agents-1" name="roster" value="claude">/);
+  assert.match(a, /data-action="commitEdit"/); assert.match(a, /data-action="cancelEdit"/);
+  assert.doesNotMatch(a, /data-action="editRoster" data-which="agents"/, 'the Edit key gives way to the editor');
+  assert.match(renderChannelScreen(s, NOW), /data-action="editRoster" data-which="bots" data-id="w1"/);
+  const six = ['b1', 'b2', 'b3', 'b4', 'b5', 'b6'];
+  const choices = [...six, 'b7'].map(v => ({ value: v, label: v.toUpperCase() }));
+  const full = R.startEdit(s, { kind: 'roster', which: 'bots', workspaceId: 'w1', choices, ticked: six });
+  const b = renderChannelScreen(full, NOW);
+  assert.match(b, /value="b7" disabled>/, 'a seventh bot cannot be ticked while six are');
+  assert.doesNotMatch(b, /value="b1" checked disabled/);
+  assert.equal(R.toggleRosterTick(full, { value: 'b7', on: true }).edit.ticked.length, 6, 'nor added through the store');
+  assert.deepEqual(R.toggleRosterTick(full, { value: 'b1', on: false }).edit.ticked, ['b2', 'b3', 'b4', 'b5', 'b6']);
+  assert.match(renderChannelScreen(R.editFailed(full, { error: 'roster write failed' }), NOW), /roster write failed/);
+});
