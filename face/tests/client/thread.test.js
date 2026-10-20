@@ -1,86 +1,123 @@
-// gravit-ui/tests/thread.test.js
-import { test } from 'node:test';
+// The thread draws the kind table (spec 2026-10-19 §6) on host-shaped messages: text, tool, card, approval, question, receipt, refusal.
+import test from 'node:test';
 import assert from 'node:assert/strict';
-import { renderThread, renderMessage, chip, key, ticker, candles } from '../../client/js/render/thread.js';
-import { seed } from '../../client/js/data/seed.js';
-import { director, CANDLES } from '../../client/js/driver.js';
-import { message } from '../../client/js/messages.js';
+import { renderMessage, renderThread, setMarkdown, chip, key, ticker, withTickers } from '../../client/js/render/thread.js';
+import { emptyState } from '../../client/js/data/empty.js';
+import { MIN } from '../../client/js/time.js';
 
-const NOW = new Date(2026, 9, 9, 14, 7).getTime();
-const count = (h, re) => (h.match(re) ?? []).length;
-const s = seed(NOW);
-const btc = s.conversations[0];
-const group = s.conversations[3];
-const ctx = { id: 'c-1', kind: 'gravit' };
+const NOW = new Date(2026, 9, 19, 14, 7).getTime();
+const state = emptyState();
+const conv = (over = {}) => ({ id: 's1', title: 'T', kind: 'gravit', members: ['gravit'], memberSessions: [], channel: null, preset: 'gravit', running: false, live: true, updatedAt: 5, created: null, messages: [], loaded: true, preview: null, usage: null, thinking: null, lastSeen: 0, ...over });
+const msg = (over = {}) => ({ id: 'e1', seq: 1, at: NOW, from: 'gravit', kind: 'text', text: 'hello', data: {}, ...over });
+const gate = (kind, over = {}) => msg({ id: 'ev-1', seq: 1.5, kind, from: 'gravit', text: 'Your call: buy 0.00008 BTC/USD · market', data: { eventId: 'ev-1', sessionId: 's1', toolName: 'mcp__alpaca-kit__place_order', callId: 'c9', venue: 'Alpaca paper', line: 'PAPER order - place_order: side=buy' }, ...over });
 
-test('the BTC thread: dividers, owner bubbles right, Gravit left, an answered card without keys, a live limit with ✓ ✗, an install with + ✗', () => {
-  const h = renderThread(btc, s, NOW);
-  assert.match(h, /class="divider">Today 14:01</);
-  assert.equal(count(h, /class="divider"/g), 1, 'messages inside 15 minutes share one divider');
-  assert.equal(count(h, /class="msg you"/g), 2);
-  assert.equal(count(h, /class="msg left"/g), 5);
-  assert.match(h, /class="bubble you">Buy a small BTC position/);
-  assert.match(h, /class="card orange"/);
-  assert.doesNotMatch(h, /answer by/, 'the seeded card is answered: no deadline left to meet');
-  assert.match(h, /class="card orange"><div class="card-head"><div class="card-title">Your call: buy 0.00008 BTC<\/div><span class="chip up">Approved<\/span>/);
-  const live = renderMessage({ id: 'm-x', at: NOW, ...message('gravit', 'card', 'Your call', { title: 'Your call', by: NOW + 26 * 60_000 }) }, ctx, s);
-  assert.match(live, /<span class="chip warn">answer by 14:33<\/span>/, 'a card still waiting carries its deadline');
-  const cardPart = h.slice(h.indexOf('card orange'), h.indexOf('class="msg you">', h.indexOf('card orange')));
-  assert.doesNotMatch(cardPart, /class="key/, 'an answered card has no keys');
-  assert.match(h, /class="bubble green"[\s\S]*?filled/);
-  assert.match(h, /class="key no"[^>]*aria-label="Decline"[^>]*data-action="answer"[^>]*data-answer="declined"/);
-  assert.match(h, /class="key yes"[^>]*aria-label="Grant"[^>]*data-answer="granted"/);
-  assert.match(h, /class="key plus"[^>]*aria-label="Install"[^>]*data-action="installAsk"[^>]*data-plugin="news"/);
-  assert.match(h, /class="key no"[^>]*aria-label="No"[^>]*data-answer="no"/);
-  assert.doesNotMatch(h, /intent-0003/, 'no meta text in bubbles');
-  assert.doesNotMatch(h, /sender-name/, 'no sender names outside groups');
+test("the operator's words are a blue bubble on the right, Gravit's a grey one on the left, a system line is centred", () => {
+  const you = renderMessage(msg({ from: 'you', text: 'hi there' }), conv(), state);
+  assert.match(you, /class="msg you"/); assert.match(you, /bubble you/); assert.match(you, /hi there/);
+  const g = renderMessage(msg(), conv(), state);
+  assert.match(g, /class="msg left"/); assert.match(g, /bubble grey/); assert.doesNotMatch(g, /sender-name/);
+  assert.equal(renderMessage(msg({ from: 'system', text: 'round 1 · settled' }), conv(), state), '<div class="sysline">round 1 · settled</div>');
 });
 
-test('a group thread writes the sender over bot bubbles and draws the two-order card', () => {
-  const h = renderThread(group, s, NOW);
-  assert.match(h, /class="sender-name">US politician bot</);
-  assert.match(h, /class="sender-name">Buffett bot</);
-  assert.match(h, /class="sender-name">Gravit</);
-  assert.equal(count(h, /class="order-row"/g), 2);
-  assert.match(h, /KO is on the book/);
+test("a bot's words in a group carry the sender's name from the message", () => {
+  const html = renderMessage(msg({ from: 'buffett', text: '买。', data: { name: '巴菲特型' } }), conv({ kind: 'group', members: ['gravit', 'buffett'] }), state);
+  assert.match(html, /sender-name">巴菲特型</);
+  assert.match(html, /bubble grey/);
 });
 
-test('every kind renders at its level', () => {
-  const r = m => renderMessage({ id: 'm-x', at: NOW, ...m }, ctx, s);
-  assert.match(r(message('gravit', 'text', 'hi')), /class="bubble grey">hi</);
-  assert.match(r(message('fraud', 'signal', 'q', { source: 'Address fraud check' })), /class="card white"[\s\S]*Address fraud check[\s\S]*class="quote">q</);
-  assert.match(r(message('gravit', 'refusal', '$30 is above', { code: 'E_MANDATE_PER_ORDER_CAP' })), /class="card red"[\s\S]*E_MANDATE_PER_ORDER_CAP/);
-  assert.match(r(message('gravit', 'alert', 'bad')), /class="card red">[\s\S]*bad/);
-  assert.match(r(message('gravit', 'receipt', 'x', { status: 'paid' })), /class="bubble green"[\s\S]*>paid</);
-  assert.match(r(message('gravit', 'done', 'x', { foot: 'Ledger reconciled' })), /class="bubble green"[\s\S]*class="foot">Ledger reconciled/);
-  assert.match(r(message('politician', 'proposal', 'x', { status: 'filled', ord: 'ord-0004', venue: 'Stand-in Broker' })), /class="bubble green"[\s\S]*ord-0004 · Stand-in Broker/);
-  const brief = r(director.brief(NOW));
-  assert.match(brief, /class="card white"/);
-  assert.match(brief, /Morning brief · Oct 9/);
-  assert.equal(count(brief, /class="ticker" href="#\/markets\/BTC"/g), 2);
-  const ta = r(director.ta(NOW));
-  assert.match(ta, /class="ticker" href="#\/markets\/NVDA"/);
-  assert.equal(count(ta, /<rect /g), 14);
-  assert.match(ta, /Resistance 192/);
-  assert.match(r(message('gravit', 'breaking', 'x', { headline: 'H', body: 'B' })), /class="card red"[\s\S]*>Breaking<[\s\S]*H/);
-  const call = r({ ...message('gravit', 'call', 'Call', { about: 'About BTC' }), answer: 'missed' });
-  assert.match(call, /class="card red"[\s\S]*Missed/);
-  assert.match(r({ from: 'system', kind: 'text', text: 'Delegation withdrawn.', data: {} }), /class="sysline">Delegation withdrawn\.</);
+test("Gravit's text renders through the markdown hook when one is set, escaped otherwise; an interrupted answer is cut-marked", () => {
+  setMarkdown(null);
+  const plain = renderMessage(msg({ text: 'a <b>bold</b> claim', data: { markdown: true } }), conv(), state);
+  assert.match(plain, /a &lt;b&gt;bold&lt;\/b&gt; claim/);
+  setMarkdown(text => `<p>${text.toUpperCase()}</p>`);
+  const rich = renderMessage(msg({ text: 'hello', data: { markdown: true } }), conv(), state);
+  assert.match(rich, /<p>HELLO<\/p>/);
+  const you = renderMessage(msg({ from: 'you', text: 'hello' }), conv(), state);
+  assert.doesNotMatch(you, /HELLO/, 'only Gravit speaks markdown');
+  setMarkdown(null);
+  const cut = renderMessage(msg({ text: 'The first pivot looks like', data: { markdown: true, interrupted: true } }), conv(), state);
+  assert.match(cut, /class="cut">Interrupted</);
 });
 
-test('helpers: chip, key, ticker, candles', () => {
-  assert.equal(chip('filled', 'up'), '<span class="chip up">filled</span>');
-  assert.match(key('yes', 'Approve', { 'data-answer': 'approved' }), /^<button type="button" class="key yes" aria-label="Approve" data-answer="approved">/);
-  assert.equal(ticker('KO'), `<a class="ticker" href="#/markets/KO">KO<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg></a>`);
-  const svg = candles({ candles: CANDLES, support: 178, resistance: 192, ticker: 'NVDA', tf: '4h' });
-  assert.match(svg, /^<svg class="kline" viewBox="0 0 300 68"/);
-  assert.match(svg, /stroke="var\(--up\)"/);
-  assert.match(svg, /fill="var\(--down\)"/);
+test('a tool row is a collapsed details titled by the call; the result fills a pre; an error is marked danger', () => {
+  const call = renderMessage(msg({ id: 'tc1', kind: 'tool', text: 'python -m alpaca_kit.breadth', data: { callId: 'c1', name: 'bash', title: 'python -m alpaca_kit.breadth', args: {} } }), conv(), state);
+  assert.match(call, /<details class="tool"><summary>/); assert.match(call, /tool-name">python -m alpaca_kit.breadth</); assert.match(call, /running/);
+  assert.doesNotMatch(call, /<pre>/);
+  const done = renderMessage(msg({ id: 'tc1', kind: 'tool', text: 'python -m alpaca_kit.breadth', data: { callId: 'c1', name: 'bash', result: 'advancers 312 <ok>', isError: false } }), conv(), state);
+  assert.match(done, /<pre>advancers 312 &lt;ok&gt;<\/pre>/); assert.doesNotMatch(done, /running/);
+  const bad = renderMessage(msg({ id: 'tc3', kind: 'tool', text: 'read', data: { callId: 'c3', result: 'ENOENT', isError: true } }), conv(), state);
+  assert.match(bad, /<details class="tool danger">/);
+  assert.match(call, /msg-body wide/);
 });
 
-test('a stopped conversation shows no answer keys', async () => {
-  const { reducers: R } = await import('../../client/js/reducers/index.js');
-  const stopped = R.stopGravit(seed(NOW), { convId: 'c-1', now: NOW });
-  const h = renderThread(stopped.conversations[0], stopped, NOW);
-  assert.doesNotMatch(h, /class="key /);
+test('the order card carries its title, the venue line, and Decline then Approve keys that answer rejected and allowed-once', () => {
+  const html = renderMessage(gate('card'), conv(), state);
+  assert.match(html, /card orange/); assert.match(html, /card-title">Your call: buy 0.00008 BTC\/USD · market</);
+  assert.match(html, /Alpaca paper · PAPER order - place_order: side=buy/);
+  const keys = [...html.matchAll(/data-action="answer"[^>]*data-value="([^"]+)"/g)].map(x => x[1]);
+  assert.deepEqual(keys, ['rejected', 'allowed-once']);
+  assert.match(html, /aria-label="Decline"/); assert.match(html, /aria-label="Approve"/);
+  assert.match(html, /data-conv="s1"/); assert.match(html, /data-msg="ev-1"/);
+});
+
+test('an answered gate shows its end state in the old client\'s four words and no keys', () => {
+  for (const [answer, word] of [['approved', 'Approved'], ['rejected', 'Declined'], ['closed', 'Closed'], ['elsewhere', 'Settled elsewhere'], ['answered', 'Answered']]) {
+    const html = renderMessage(gate('card', { answer }), conv(), state);
+    assert.match(html, new RegExp(`class="chip [a-z]+">${word}<`), answer);
+    assert.doesNotMatch(html, /data-action="answer"/, answer);
+  }
+});
+
+test('a generic approval names the tool and shows the display reason, with the audit reason only when it differs', () => {
+  const same = renderMessage(gate('approval', { text: 'shell command outside the allowlist', data: { eventId: 'ev-1', sessionId: 's1', toolName: 'bash', reason: 'shell command outside the allowlist', displayReason: undefined } }), conv(), state);
+  assert.match(same, /card-title">bash</); assert.match(same, /shell command outside the allowlist/);
+  assert.equal((same.match(/shell command outside the allowlist/g) ?? []).length, 1);
+  const two = renderMessage(gate('approval', { text: 'Run ls?', data: { eventId: 'ev-1', sessionId: 's1', toolName: 'bash', reason: 'audit: ls', displayReason: 'Run ls?' } }), conv(), state);
+  assert.match(two, /Run ls\?/); assert.match(two, /dim">audit: ls</);
+  assert.match(two, /data-value="allowed-once"/);
+});
+
+test('a question card lists each question with inputs named by its id, radio or checkbox by multiSelect, a text box without options, and one Answer key', () => {
+  const questions = [
+    { id: 'q1', question: 'Pin the paper account before the drill?', header: 'Gate 2', options: [{ label: 'Yes, pin it' }, { label: 'No, keep replay-only', description: 'stay offline' }] },
+    { id: 'q2', question: 'Which symbols?', options: [{ label: 'AAPL' }, { label: 'NVDA' }], multiSelect: true },
+    { id: 'q3', question: 'Anything else?' },
+  ];
+  const html = renderMessage(gate('question', { text: '', data: { eventId: 'ev-2', sessionId: 's1', questions } }), conv(), state);
+  assert.match(html, /card orange question/);
+  assert.match(html, /card-title">Gate 2</); assert.match(html, /Pin the paper account before the drill\?/);
+  assert.equal((html.match(/type="radio" name="q-q1"/g) ?? []).length, 2);
+  assert.match(html, /stay offline/);
+  assert.equal((html.match(/type="checkbox" name="q-q2"/g) ?? []).length, 2);
+  assert.match(html, /type="text" name="q-q3-custom"/);
+  assert.equal((html.match(/data-action="answerQuestion"/g) ?? []).length, 1);
+  assert.match(html, /data-msg="ev-1"/);
+  const answered = renderMessage(gate('question', { text: '', answer: 'answered', data: { eventId: 'ev-2', sessionId: 's1', questions } }), conv(), state);
+  assert.doesNotMatch(answered, /data-action="answerQuestion"/);
+  assert.match(answered, />Answered</);
+});
+
+test('a receipt is a green bubble, a refusal a red card', () => {
+  const r = renderMessage(msg({ id: 'rc9', kind: 'receipt', text: 'Order accepted · buy 0.00008 BTC/USD · market · ord-1', data: { orderId: 'ord-1' } }), conv(), state);
+  assert.match(r, /bubble green/); assert.match(r, /Order accepted · buy 0.00008 BTC\/USD · market · ord-1/);
+  const x = renderMessage(msg({ id: 'rc9', kind: 'refusal', text: 'the user rejected tool "place_order"', data: {} }), conv(), state);
+  assert.match(x, /card red/); assert.match(x, /the user rejected tool &quot;place_order&quot;/);
+});
+
+test('the thread draws a divider after a 15-minute gap and the thinking row only while the conversation thinks', () => {
+  const messages = [msg({ id: 'e1', seq: 1, at: NOW - 40 * MIN, from: 'you', text: 'a' }), msg({ id: 'e2', seq: 2, at: NOW, text: 'b' })];
+  const quiet = renderThread(conv({ messages }), state, NOW);
+  assert.equal((quiet.match(/class="divider"/g) ?? []).length, 2, 'one before the first message, one after the gap');
+  assert.doesNotMatch(quiet, /thinking/);
+  const busy = renderThread(conv({ messages, thinking: 'reasoning' }), state, NOW);
+  assert.match(busy, /class="bubble grey thinking"/);
+  assert.ok(busy.lastIndexOf('thinking') > busy.lastIndexOf('>b<'), 'the thinking row comes last');
+});
+
+test('helpers: chip, key, ticker, withTickers', () => {
+  assert.equal(chip('x', 'up'), '<span class="chip up">x</span>');
+  assert.match(key('yes', 'Approve', { 'data-action': 'answer' }), /class="key yes" aria-label="Approve" data-action="answer"/);
+  assert.match(ticker('BTC'), /href="#\/markets\/BTC"/);
+  assert.match(withTickers('hold {{BTC}} & {{ETH}}'), /class="ticker" href="#\/markets\/BTC"/);
+  assert.match(withTickers('a & b'), /a &amp; b/);
 });

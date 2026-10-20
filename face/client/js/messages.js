@@ -1,7 +1,7 @@
 // gravit-ui/js/messages.js — the message model: colour is importance (spec §6)
 export const LEVELS = {
-  text: 'grey', proposal: 'green', signal: 'white', ta: 'white', brief: 'white',
-  card: 'orange', limit: 'orange', install: 'orange',
+  text: 'grey', tool: 'grey', proposal: 'green', signal: 'white', ta: 'white', brief: 'white',
+  card: 'orange', approval: 'orange', question: 'orange', limit: 'orange', install: 'orange',
   refusal: 'red', breaking: 'red', call: 'red', alert: 'red',
   receipt: 'green', done: 'green',
 };

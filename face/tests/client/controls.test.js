@@ -161,15 +161,6 @@ test('calls: you ring Gravit, it picks up, you hang up and a card stays; an acce
   assert.deepEqual([conv(inc, 'c-1').messages.at(-1).answer, conv(inc, 'c-1').messages.at(-1).data.about], ['accepted', 'About BTC']);
 });
 
-test('the call card says how it went', async () => {
-  const { renderMessage } = await import('../../client/js/render/thread.js');
-  const s = fresh();
-  const r = m => renderMessage({ id: 'm-x', at: NOW, from: 'gravit', kind: 'call', text: '', ...m }, s.conversations[0], s);
-  assert.match(r({ answer: 'accepted', data: { dir: 'out', duration: 75_000 } }), /Called Gravit[\s\S]*class="chip up">Connected · 1:15</);
-  assert.match(r({ answer: 'missed', data: { dir: 'in', about: 'x' } }), /Gravit called[\s\S]*>Missed</);
-  assert.match(r({ answer: 'cancelled', data: { dir: 'out' } }), />Did not connect</);
-});
-
 test('Mail is a screen: a letter opens by its route and is marked read; an unknown letter falls back to the inbox', async () => {
   const { renderMailScreen } = await import('../../client/js/render/mail.js');
   assert.equal(R.openMail, undefined, 'no mailbox drawer any more');

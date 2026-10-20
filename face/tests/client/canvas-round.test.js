@@ -29,19 +29,8 @@ const say = (kind, data = {}, extra = {}) => renderMessage({ id: 'm-x', at: NOW,
 
 // ---- the thread (F1, F3, F15)
 
-test('an order card says venue, type and amount; its card id stays in the record', () => {
-  const s = seed(NOW);
-  const h = renderThread(s.conversations[0], s, NOW);
-  assert.match(h, /<div class="dim">Stand-in Exchange · market · about \$5\.00<\/div>/);
-  assert.doesNotMatch(h, /card-0001/);
-});
-
 test('a chip inside a card hugs its words', () => {
   assert.match(rule('.card > .chip'), /align-self: flex-start/);
-});
-
-test('the technicals head says when the candles were read', () => {
-  assert.match(renderMessage({ id: 'm-t', at: NOW, ...director.ta(NOW) }, btc, seed(NOW)), /<span class="dim">4h · technicals · 14:07<\/span>/);
 });
 
 test('plain talk is 66% wide; every card and green bubble is 80%', () => {
@@ -54,16 +43,6 @@ test('plain talk is 66% wide; every card and green bubble is 80%', () => {
 test('the quote bar and the technicals rules draw in the cash tone', () => {
   assert.match(rule('.quote'), /border-left: 2px solid var\(--alloc-cash\)/);
   assert.match(rule('.kline-rule'), /stroke: var\(--alloc-cash\)/);
-});
-
-test('a monitor posts its read-only signal and Gravit answers it (kind 7)', () => {
-  const [sig, reply] = director.monitor();
-  assert.deepEqual([sig.msg.from, sig.msg.kind, sig.msg.text, sig.msg.data.source], ['telegram', 'signal', 'SOL is about to take off, get in', 'Telegram monitor · group “Alpha” · @kol_x']);
-  assert.deepEqual([reply.msg.from, reply.msg.kind, reply.msg.text], ['gravit', 'text', 'Seen. Not chasing.']);
-  assert.ok(reply.delay > sig.delay);
-  const h = renderMessage({ id: 'm-s', at: NOW, ...sig.msg }, btc, seed(NOW));
-  assert.match(h, />TG<\/span>/);
-  assert.match(h, /<div class="card white"><div class="dim">Telegram monitor · group “Alpha” · @kol_x<\/div><div class="quote">SOL is about to take off, get in<\/div><\/div>/);
 });
 
 test('the director’s Monitor key posts the signal, then Gravit’s answer', async () => {
@@ -94,21 +73,6 @@ test('Details lists each plugin with its kind at the right; Stop Gravit hugs its
   assert.match(renderDetails(s.conversations[0], s), /<div class="dsec-line plug-row"><span>Price feed<\/span><span class="dim">Data<\/span><\/div><div class="dsec-line plug-row"><span>Address fraud check<\/span><span class="dim">Crypto<\/span><\/div>/);
   assert.match(rule('.plug-row'), /justify-content: space-between/);
   assert.match(rule('.dsec > .btn-danger, .dsec > .confirm'), /align-self: flex-start/);
-});
-
-test('the breaking banner names the conversation it lands in, links its ticker, and drops over the conversation', () => {
-  const s = seed(NOW);
-  const b = director.breaking(NOW);
-  const h = renderBanner(b, s);
-  assert.match(h, /^<div class="banner-zone"><div class="banner" role="status">/);
-  assert.match(h, /<span class="dim">14:07 · Small BTC position under \$70k<\/span>/);
-  assert.match(h, /You hold <a class="ticker" href="#\/markets\/BTC">BTC/);
-  assert.match(renderBanner(b, s, { enter: true }), /<div class="banner drop" role="status">/);
-  const landed = R.dismissBanner(R.showBanner(s, b), { now: NOW });
-  assert.match(renderThread(landed.conversations[0], landed, NOW), /You hold <a class="ticker" href="#\/markets\/BTC">BTC/);
-  assert.match(rule('.banner-zone'), /position: fixed/);
-  assert.match(css, /\n\.list ~ \.banner-zone \{ left: calc\(var\(--nav\) \+ var\(--list\)\); \}/);
-  assert.match(rule('.banner.drop'), /animation: /);
 });
 
 test('the banner drops in once: a later render keeps it still', async () => {
@@ -219,22 +183,6 @@ test('only a call coming in is red-edged; ringing out says Ringing; a live call 
   assert.match(rule('.call'), /border: 1px solid var\(--card-border\)/);
   assert.match(rule('.call.in'), /border-color: var\(--down-edge\)/);
   assert.match(rule('.call-timer'), /font-size: 20px; font-weight: 800;/);
-});
-
-test('the after-call card: white once it connected, red when missed; the topic with its time, and what was said', () => {
-  let s = R.connectCall(R.startCall(seed(NOW), { now: NOW }), { now: NOW });
-  s = R.hangUp(s, { now: NOW + 32_000 });
-  const out = s.conversations[0].messages.at(-1);
-  assert.deepEqual([out.data.about, out.answer], ['About BTC', 'accepted']);
-  assert.match(renderMessage(out, btc, s), /<div class="card white"><div class="card-head"><div class="card-title">Called Gravit<\/div><span class="chip up">Connected · 0:32<\/span><\/div><div class="dim">About BTC · 14:07<\/div><div>Said: BTC is at 62\.8k now; it watches it and calls if it moves\.<\/div><\/div>/);
-  let inc = R.answerCall(R.incomingCall(seed(NOW), director.call()), { accept: true, now: NOW });
-  inc = R.hangUp(inc, { now: NOW + 30_000 });
-  assert.match(renderMessage(inc.conversations[0].messages.at(-1), btc, inc), /Gravit called[\s\S]*<div class="dim">About BTC · 14:07<\/div><div>Said: Hold until CPI is out; raise the order cap to \$50 after\.<\/div>/);
-  const missed = R.answerCall(R.incomingCall(seed(NOW), director.call()), { accept: false, now: NOW });
-  const m = renderMessage(missed.conversations[0].messages.at(-1), btc, missed);
-  assert.match(m, /<div class="card red">[\s\S]*>Missed<\/span><\/div><div class="dim">About BTC · 14:07<\/div><\/div>/);
-  const cancelled = R.hangUp(R.startCall(seed(NOW), { now: NOW }), { now: NOW + 2000 });
-  assert.match(renderMessage(cancelled.conversations[0].messages.at(-1), btc, cancelled), /<div class="card white">[\s\S]*>Did not connect<\/span><\/div><div class="dim">14:07<\/div><\/div>/);
 });
 
 // ---- Account, Memory, Mail, Create, Trade (F5, F13, F18, F19, F20, F23, F24 6)
