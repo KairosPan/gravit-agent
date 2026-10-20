@@ -193,13 +193,13 @@ const older = (): Response => new Response(null, { status: 404 });
 const loaded = (state: string, pid?: number) =>
   ({ ok: true, out: `${JOB} = {\n\tstate = ${state}\n${pid === undefined ? "" : `\tpid = ${pid}\n`}}\n` });
 
-interface Rig { deps: ServiceDeps; calls: string[][]; urls: string[]; sleeps: number[]; plist: string; text(): string }
+interface Rig { deps: ServiceDeps; calls: string[][]; urls: string[]; sleeps: number[]; plist: string; text(): string; reset(): void }
 
 /**
  * A ServiceDeps over fresh temp dirs (homeDir, home = homeDir/.dsh, root) that records every launchctl call,
- * every URL fetched, every sleep and every line printed. `launchctl` answers a call when it returns
- * something; otherwise `print` fails (launchd has no job) and every other call succeeds. `answer` is the
- * port's answer given the calls so far; `undefined` (the default) is a refused connection.
+ * every URL fetched, every sleep and every line printed; `reset` forgets them. `launchctl` answers a call
+ * when it returns something; otherwise `print` fails (launchd has no job) and every other call succeeds.
+ * `answer` is the port's answer given the calls so far; `undefined` (the default) is a refused connection.
  */
 async function rig(o: {
   launchctl?: (args: string[]) => { ok: boolean; out: string } | undefined;
@@ -220,21 +220,31 @@ async function rig(o: {
     nodePath: "/usr/local/bin/node", envPath: "/usr/local/bin:/usr/bin",
     out: (line) => { lines.push(line); }, sleep: async (ms) => { sleeps.push(ms); },
   };
-  return { deps, calls, urls, sleeps, plist: join(homeDir, "Library", "LaunchAgents", `${LABEL}.plist`), text: () => lines.join("\n") };
+  const reset = (): void => { for (const list of [calls, urls, sleeps, lines]) list.length = 0; };
+  return { deps, calls, urls, sleeps, plist: join(homeDir, "Library", "LaunchAgents", `${LABEL}.plist`), text: () => lines.join("\n"), reset };
 }
 
-/** The plist install would write for this rig, put in place. */
-async function putPlist(r: Rig, port?: number): Promise<void> {
-  const p = servicePlan({ root: r.deps.root, home: r.deps.home, homeDir: r.deps.homeDir, node: r.deps.nodePath, path: r.deps.envPath, launchAgentsDir: dirname(r.plist), port });
+/** The plist install would write for this rig, put in place - on `dshHome`, the rig's home unless given. */
+async function putPlist(r: Rig, port?: number, dshHome = r.deps.home): Promise<void> {
+  const p = servicePlan({ root: r.deps.root, home: dshHome, homeDir: r.deps.homeDir, node: r.deps.nodePath, path: r.deps.envPath, launchAgentsDir: dirname(r.plist), port });
   await mkdir(dirname(r.plist), { recursive: true });
   await writeFile(r.plist, p.plist);
 }
 
-/** Put the desk ledger's lines under the rig's home. */
-async function putLedger(r: Rig, lines: object[]): Promise<void> {
-  await mkdir(join(r.deps.home, "face", "desk"), { recursive: true });
-  await writeFile(join(r.deps.home, "face", "desk", "events.jsonl"), lines.map((l) => `${JSON.stringify(l)}\n`).join(""));
+/** Put the desk ledger's lines under a harness home. */
+async function putLedger(dshHome: string, lines: object[]): Promise<void> {
+  await mkdir(join(dshHome, "face", "desk"), { recursive: true });
+  await writeFile(join(dshHome, "face", "desk", "events.jsonl"), lines.map((l) => `${JSON.stringify(l)}\n`).join(""));
 }
+
+/** Put the service's stdout log under a harness home. */
+async function putLog(dshHome: string, text: string): Promise<void> {
+  await mkdir(join(dshHome, "face", "service"), { recursive: true });
+  await writeFile(join(dshHome, "face", "service", "face.log"), text);
+}
+
+/** A ledger `boot` at 15:00 UTC. */
+const boot = (pid: number) => ({ t: "2026-10-19T15:00:00.000Z", kind: "boot", pid, version: "v", deskEnabled: true });
 
 const deskStatusOf = (pid: number): DeskStatus => ({ ok: true, pid, version: "v", bootedAt: "2026-10-19T15:00:00.000Z", uptimeMs: 60_000,
   desk: { enabled: true, dir: "/d" }, asleep: [], runs: [{ bootedAt: "2026-10-19T15:00:00.000Z", pid, lost: false }] });
@@ -362,25 +372,44 @@ test("stop boots the job out - exactly one call - and the plist stays", async ()
   assert.match(stuck.text(), /launchctl bootout gui\/501\/com\.gravit\.face failed: Boot-out failed: 5: Input\/output error/);
 });
 
-test("restart: kickstart -k a loaded job; bootstrap and enable an installed one launchd lacks; not installed is start's answer", async () => {
-  const r = await rig({ launchctl: (args) => (args[0] === "print" ? loaded("running", 42) : undefined), answer: older });
-  await putPlist(r);
-  assert.equal(await runService("restart", [], r.deps), 0);
-  assert.deepEqual(r.calls, [["print", JOB], ["kickstart", "-k", JOB]]);
+test("restart: kickstart -k only a running job; every other state takes start's path, a port another process holds refused", async () => {
+  const running = await rig({ launchctl: (args) => (args[0] === "print" ? loaded("running", 42) : undefined), answer: older });
+  await putPlist(running);
+  assert.equal(await runService("restart", [], running.deps), 0);
+  assert.deepEqual(running.calls, [["print", JOB], ["kickstart", "-k", JOB]], "exactly one kickstart -k, and its own port is no refusal");
+
+  const stoppedHeld = await rig({ launchctl: (args) => (args[0] === "print" ? loaded("not running") : undefined), answer: older });
+  await putPlist(stoppedHeld);
+  assert.equal(await runService("restart", [], stoppedHeld.deps), 1);
+  assert.match(stoppedHeld.text(), /something already answers on 127\.0\.0\.1:3090 - stop it \(a terminal npm start\?\)/);
+  assert.deepEqual(stoppedHeld.calls, [["print", JOB]], "no kickstart into a port another process holds");
+
+  const stopped = await rig({ launchctl: (args) => (args[0] === "print" ? loaded("not running") : undefined) });
+  await putPlist(stopped);
+  assert.equal(await runService("restart", [], stopped.deps), 0);
+  assert.deepEqual(stopped.calls, [["print", JOB], ["kickstart", JOB]]);
+
+  const unloadedHeld = await rig({ answer: older });
+  await putPlist(unloadedHeld);
+  assert.equal(await runService("restart", [], unloadedHeld.deps), 1);
+  assert.match(unloadedHeld.text(), /something already answers on 127\.0\.0\.1:3090/);
+  assert.deepEqual(unloadedHeld.calls, [["print", JOB]]);
+
   const unloaded = await rig();
   await putPlist(unloaded);
   assert.equal(await runService("restart", [], unloaded.deps), 0);
   assert.deepEqual(unloaded.calls, [["print", JOB], ["bootstrap", "gui/501", unloaded.plist], ["enable", JOB]]);
+
   const absent = await rig();
   assert.equal(await runService("restart", [], absent.deps), 1);
-  assert.match(absent.text(), /not installed \(npm run service -- install\)/);
+  assert.equal(absent.text(), "com.gravit.face: not installed (npm run service -- install)");
   assert.ok(!absent.calls.some((c) => c[0] !== "print"), "nothing changed in launchd");
 });
 
 test("uninstall boots the job out and removes the plist; the ledger and the home .env stay", async () => {
   const r = await rig({ launchctl: (args) => (args[0] === "bootout" ? { ok: false, out: "" } : undefined) });
   await putPlist(r);
-  await putLedger(r, [{ t: "2026-10-19T15:00:00.000Z", kind: "boot", pid: 77, version: "v", deskEnabled: true }]);
+  await putLedger(r.deps.home, [boot(77)]);
   await writeFile(join(r.deps.home, ".env"), "DEEPSEEK_API_KEY=d\n");
   assert.equal(await runService("uninstall", [], r.deps), 0, "a failed bootout is ignored");
   assert.deepEqual(r.calls, [["bootout", JOB]]);
@@ -392,7 +421,7 @@ test("uninstall boots the job out and removes the plist; the ledger and the home
 test("status: a plist launchd has no job for is not loaded; with the face silent, one ledger line says how its last run ended", async () => {
   const r = await rig();
   await putPlist(r);
-  await putLedger(r, [{ t: "2026-10-19T15:00:00.000Z", kind: "boot", pid: 77, version: "v", deskEnabled: true }]);
+  await putLedger(r.deps.home, [boot(77)]);
   assert.equal(await runService("status", [], r.deps), 0);
   assert.equal(r.text(), [
     "com.gravit.face: not loaded",
@@ -406,8 +435,7 @@ test("status: a plist launchd has no job for is not loaded; with the face silent
 test("status's ledger line: a clean end, an empty ledger, an unreadable one; none while the face answers", async () => {
   const ended = await rig();
   await putPlist(ended);
-  await putLedger(ended, [{ t: "2026-10-19T15:00:00.000Z", kind: "boot", pid: 77, version: "v", deskEnabled: true },
-    { t: "2026-10-19T16:00:00.000Z", kind: "shutdown", pid: 77, code: 0 }]);
+  await putLedger(ended.deps.home, [boot(77), { t: "2026-10-19T16:00:00.000Z", kind: "shutdown", pid: 77, code: 0 }]);
   await runService("status", [], ended.deps);
   assert.match(ended.text(), /\nledger: last boot 2026-10-19T15:00:00\.000Z \(pid 77\) - ended 2026-10-19T16:00:00\.000Z code 0$/);
   const empty = await rig();
@@ -447,6 +475,45 @@ test("the port is --port, else the installed plist's FACE_PORT, else 3090; a rei
   await putPlist(plain);
   await runService("status", [], plain.deps);
   assert.deepEqual(plain.urls, ["http://127.0.0.1:3090/data/desk/status"]);
+});
+
+test("status, logs and url read the home the installed plist names, else this shell's; install writes this shell's", async () => {
+  const r = await rig();
+  const served = join(await home(), "a&b<c>");
+  await putPlist(r, undefined, served);
+  assert.ok((await readFile(r.plist, "utf8")).includes("<key>DSH_HOME</key><string>"), "the plist names its home");
+  assert.ok((await readFile(r.plist, "utf8")).includes("a&amp;b&lt;c&gt;"), "escaped: the reader must undo it");
+  await putLedger(served, [boot(88)]); await putLedger(r.deps.home, [boot(77)]);
+  await putLog(served, "gravit-face: http://127.0.0.1:3090/?token=served (profile: face)\n");
+  await putLog(r.deps.home, "gravit-face: http://127.0.0.1:3090/?token=shell (profile: face)\n");
+
+  assert.equal(await runService("status", [], r.deps), 0);
+  assert.match(r.text(), /\nsign in: http:\/\/127\.0\.0\.1:3090\/\?token=served\nledger: last boot 2026-10-19T15:00:00\.000Z \(pid 88\) - no shutdown event$/);
+  r.reset();
+  assert.equal(await runService("url", [], r.deps), 0);
+  assert.equal(r.text(), "http://127.0.0.1:3090/?token=served");
+  r.reset();
+  assert.equal(await runService("logs", [], r.deps), 0);
+  assert.equal(r.text(), `== ${join(served, "face", "service", "face.log")}\ngravit-face: http://127.0.0.1:3090/?token=served (profile: face)`);
+  r.reset();
+  assert.equal(await runService("uninstall", [], r.deps), 0);
+  assert.ok(r.text().endsWith(`the ledger (${join(served, "face", "desk")}) and ${join(served, ".env")} are untouched`), "uninstall names the installed home's files");
+
+  await putPlist(r, undefined, served);
+  r.reset();
+  assert.equal(await runService("install", [], r.deps), 0);
+  assert.ok((await readFile(r.plist, "utf8")).includes(`<key>DSH_HOME</key><string>${r.deps.home}</string>`), "install writes this shell's home");
+  r.reset();
+  await runService("status", [], r.deps);
+  assert.match(r.text(), /\nledger: last boot 2026-10-19T15:00:00\.000Z \(pid 77\) - no shutdown event$/, "and status follows the plist there");
+
+  for (const plist of [`<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0">\n<dict>\n  <key>Label</key><string>${LABEL}</string>\n</dict>\n</plist>\n`,
+    servicePlan({ root: r.deps.root, home: "relative/home", homeDir: r.deps.homeDir, node: r.deps.nodePath, path: r.deps.envPath, launchAgentsDir: dirname(r.plist) }).plist]) {
+    await writeFile(r.plist, plist);
+    r.reset();
+    await runService("url", [], r.deps);
+    assert.equal(r.text(), "http://127.0.0.1:3090/?token=shell", "a plist that names no absolute home: this shell's");
+  }
 });
 
 test("logs prints the last 40 lines of each log under its path; url prints the last sign-in URL", async () => {

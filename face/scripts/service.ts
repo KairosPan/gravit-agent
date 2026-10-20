@@ -15,7 +15,9 @@
  *
  * Every command takes `--port N` for a face not on 3090; without it the port is the installed
  * plist's FACE_PORT, else 3090. `install` hands the port to the face as FACE_PORT - the one given,
- * or the installed one, so a reinstall without `--port` does not move the face.
+ * or the installed one, so a reinstall without `--port` does not move the face. The log and the
+ * ledger are read from the home the installed plist names (its DSH_HOME) when it names one, else
+ * from this shell's; `install` writes this shell's home into the plist.
  *
  * What it runs is this checkout - node by its PATH location, tsx, face/src/main.ts, with face/ as
  * the working directory (main.ts moves to the repo root itself) - so a change here reaches it on
@@ -454,10 +456,16 @@ const LAUNCHD_COMMANDS: ReadonlySet<string> = new Set(["install", "uninstall", "
 /** What every command works from, worked out once per run. */
 interface ServiceContext {
   deps: ServiceDeps;
-  /** The LaunchAgent as install would write it now; its `path` is where the plist is, its `log` where the face writes. */
+  /** The LaunchAgent as install would write it now, on this shell's home (`deps.home`); its `path` is where the plist is. */
   plan: ServicePlan;
   /** Whether the plist exists - the test a scratch HOME can pass: launchctl is per user, not per HOME. */
   installed: boolean;
+  /** The home the installed face runs on: the plist's DSH_HOME when it names an absolute path, else
+   * `deps.home` - whose ledger `status` reads and whose ledger and .env `uninstall` names. */
+  home: string;
+  /** The installed face's stdout and stderr logs, under `home`. */
+  log: string;
+  errLog: string;
   /** `--port`, else the installed plist's FACE_PORT, else 3090. */
   port: number;
   /** `gui/<uid>`, the operator's launchd domain. */
@@ -491,10 +499,14 @@ function parseArgs(args: string[]): { port?: number; error?: string } {
   return { port };
 }
 
-/** FACE_PORT from a plist's EnvironmentVariables, as {@link servicePlan} writes it; `undefined` when it names none. */
-function plistPort(plist: string): number | undefined {
-  const env = /<key>EnvironmentVariables<\/key>\s*<dict>([\s\S]*?)<\/dict>/.exec(plist)?.[1] ?? "";
-  return asPort(/<key>FACE_PORT<\/key>\s*<string>([^<]*)<\/string>/.exec(env)?.[1]?.trim());
+/** {@link xml} undone: `&lt;` and `&gt;` first, `&amp;` last, so an escaped `&lt;` comes back as text. */
+const unxml = (s: string): string => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+
+/** A plist's EnvironmentVariables as {@link servicePlan} writes them - each `<key>` and its
+ * `<string>`, unescaped; empty when it has none. */
+function plistEnv(plist: string): Map<string, string> {
+  const dict = /<key>EnvironmentVariables<\/key>\s*<dict>([\s\S]*?)<\/dict>/.exec(plist)?.[1] ?? "";
+  return new Map([...dict.matchAll(/<key>([^<]*)<\/key>\s*<string>([^<]*)<\/string>/g)].map((m) => [unxml(m[1]), unxml(m[2])]));
 }
 
 /** A failure as its code when it has one (EACCES, EISDIR, EEXIST), else its message. */
@@ -529,12 +541,20 @@ function contextOf(deps: ServiceDeps, flagPort: number | undefined): ServiceCont
   const launchAgentsDir = join(deps.homeDir, "Library", "LaunchAgents");
   const plistPath = join(launchAgentsDir, `${LABEL}.plist`);
   const installed = existsSync(plistPath);
+  const env = installed ? plistEnv(readText(plistPath) ?? "") : new Map<string, string>();
   /* The port install writes: the one given, else the installed one - so the port every command
    * checks is the port the plist runs the face on. */
-  const planPort = flagPort ?? (installed ? plistPort(readText(plistPath) ?? "") : undefined);
-  const plan = servicePlan({ root: deps.root, home: deps.home, homeDir: deps.homeDir, node: deps.nodePath, path: deps.envPath, launchAgentsDir, port: planPort });
+  const planPort = flagPort ?? asPort(env.get("FACE_PORT")?.trim());
+  const common = { root: deps.root, homeDir: deps.homeDir, node: deps.nodePath, path: deps.envPath, launchAgentsDir, port: planPort };
+  /* The home the installed face runs on is the plist's; install writes this shell's. */
+  const named = env.get("DSH_HOME");
+  const home = named !== undefined && isAbsolute(named) ? named : deps.home;
+  const served = servicePlan({ ...common, home });
   const domain = `gui/${deps.uid}`;
-  return { deps, plan, installed, port: planPort ?? DEFAULT_PORT, domain, job: `${domain}/${LABEL}` };
+  return {
+    deps, plan: servicePlan({ ...common, home: deps.home }), installed, home, log: served.log, errLog: served.errLog,
+    port: planPort ?? DEFAULT_PORT, domain, job: `${domain}/${LABEL}`,
+  };
 }
 
 function jobInfo(ctx: ServiceContext): JobInfo {
@@ -576,7 +596,7 @@ async function ledgerLine(home: string): Promise<string> {
   return `ledger: last boot ${last.bootedAt} (pid ${last.pid}) - ${end}`;
 }
 
-/** `start`, and `restart`'s answer for a job launchd lacks; `known` is what launchd said, asked here when not given. */
+/** `start`, and `restart`'s answer for a job that is not running; `known` is what launchd said, asked here when not given. */
 async function startJob(ctx: ServiceContext, known?: JobInfo): Promise<number> {
   const { deps } = ctx;
   if (!ctx.installed) {
@@ -675,7 +695,7 @@ const COMMANDS: Record<string, (ctx: ServiceContext) => Promise<number>> = {
       return 1;
     }
     const plist = ctx.installed ? `${plan.path} is removed` : `there was no ${plan.path}`;
-    deps.out(`uninstalled: launchd no longer runs it and ${plist}; the ledger (${deskDir(deps.home)}) and ${join(deps.home, ".env")} are untouched`);
+    deps.out(`uninstalled: launchd no longer runs it and ${plist}; the ledger (${deskDir(ctx.home)}) and ${join(ctx.home, ".env")} are untouched`);
     return 0;
   },
 
@@ -699,7 +719,9 @@ const COMMANDS: Record<string, (ctx: ServiceContext) => Promise<number>> = {
 
   async restart(ctx) {
     const job = jobInfo(ctx);
-    if (!job.loaded) return startJob(ctx, job);
+    /* `kickstart -k` replaces a face that runs, and nothing else: any other state is start's, so a
+     * port another process holds is refused instead of fed to KeepAlive as an EADDRINUSE loop. */
+    if (!(job.loaded && job.state === "running")) return startJob(ctx, job);
     const args = ["kickstart", "-k", ctx.job];
     const result = ctx.deps.launchctl(args);
     if (!result.ok) return failed(ctx, args, result);
@@ -708,25 +730,25 @@ const COMMANDS: Record<string, (ctx: ServiceContext) => Promise<number>> = {
   },
 
   async status(ctx) {
-    const { deps, plan, port } = ctx;
+    const { deps, port } = ctx;
     if (!ctx.installed) {
       deps.out(formatStatus({ label: LABEL, info: {}, installed: false, status: undefined, url: undefined, port }));
       return 0;
     }
     const job = jobInfo(ctx);
     const answer = await fetchStatus(port, deps.fetch);
-    const log = readText(plan.log);
+    const log = readText(ctx.log);
     deps.out(formatStatus({ label: LABEL, info: job.loaded ? job : { state: "not loaded" }, installed: true, status: answer,
       url: log === undefined ? undefined : lastTokenUrl(log), port }));
-    if (answer === undefined) deps.out(await ledgerLine(deps.home));
+    if (answer === undefined) deps.out(await ledgerLine(ctx.home));
     return 0;
   },
 
   async logs(ctx) {
-    const { deps, plan } = ctx;
-    const files = [plan.log, plan.errLog].filter((file) => existsSync(file));
+    const { deps } = ctx;
+    const files = [ctx.log, ctx.errLog].filter((file) => existsSync(file));
     if (files.length === 0) {
-      deps.out(`no log yet: ${plan.log}`);
+      deps.out(`no log yet: ${ctx.log}`);
       return 0;
     }
     let code = 0;
@@ -744,7 +766,7 @@ const COMMANDS: Record<string, (ctx: ServiceContext) => Promise<number>> = {
   },
 
   async url(ctx) {
-    const log = readText(ctx.plan.log);
+    const log = readText(ctx.log);
     ctx.deps.out((log === undefined ? undefined : lastTokenUrl(log)) ?? "no sign-in URL in the log yet (npm run service -- logs)");
     return 0;
   },
@@ -756,7 +778,9 @@ const USAGE = `usage: npm run service -- ${Object.keys(COMMANDS).join(" | ")} [-
  * Run one command - `npm run service -- <cmd> [--port N]` - and return its exit code: 0 when it is
  * done or there was nothing to do (already running, nothing to stop), 1 when it refused or failed, 2
  * for a command or an argument it does not know. Every line goes through `deps.out`; nothing here
- * exits the process. The port is `--port`, else the installed plist's FACE_PORT, else 3090.
+ * exits the process. The port is `--port`, else the installed plist's FACE_PORT, else 3090. The
+ * home whose log and ledger the commands read is the installed plist's DSH_HOME, else `deps.home`;
+ * `install` writes `deps.home`.
  *
  * - `status` (the script's default): not installed when the plist is absent, and launchd is not
  *   asked; otherwise launchd's state (`not loaded` when `print` fails or says nothing), what the
@@ -770,7 +794,8 @@ const USAGE = `usage: npm run service -- ${Object.keys(COMMANDS).join(" | ")} [-
  *   answers; then `kickstart` for a loaded job, `bootstrap` and `enable` for one launchd lacks.
  * - `stop`: `bootout` - not `kill`: a face whose teardown throws exits 1, which KeepAlive would
  *   restart. The plist stays.
- * - `restart`: `kickstart -k` for a loaded job, else `start`.
+ * - `restart`: `kickstart -k` for a running job; in any other state, `start` - so a port another
+ *   process holds is refused, never handed to KeepAlive as an EADDRINUSE loop.
  * - `uninstall`: `bootout` (a job launchd lacks is fine), then the plist goes; the ledger and the
  *   home's .env stay.
  * - `logs`: the last 40 lines of each log that exists; `url`: the log's last sign-in URL.
