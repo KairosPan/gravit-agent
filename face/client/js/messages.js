@@ -9,7 +9,8 @@ export const LEVELS = {
 // a call is red while it rings or once it is missed; one that connected, or that you placed and cancelled, is plain white
 export const levelOf = m => (m.kind === 'call' && (m.answer === 'accepted' || m.answer === 'cancelled') ? 'white' : LEVELS[m.kind] ?? 'grey');
 
-export const needsAnswer = m => ['card', 'limit', 'install', 'call'].includes(m.kind) && !m.answer;
+// the host's three gates (an order card, a generic approval, a question) wait on the operator until answered
+export const needsAnswer = m => ['card', 'approval', 'question', 'limit', 'install', 'call'].includes(m.kind) && !m.answer;
 
 // a stopped or withdrawn conversation is closed: no answers, no more replies
 export const isClosed = c => !!c && (c.status === 'stopped' || c.status === 'withdrawn');
