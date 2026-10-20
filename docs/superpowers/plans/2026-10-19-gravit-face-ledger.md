@@ -594,7 +594,7 @@ Each with what it costs if wrong.
 | 10 The demo's last pieces leave | ab38680 | 1004 / 988 |
 | 11 The tool rows draw their results | 51feb8b | 1013 / 997 |
 | 12 Children and member traces | 397c1a7 | 1020 / 1004; `FACE_SMOKE=1` 1020/1020; typecheck clean |
-| 13 Documents and the manual look | 0ec31bd (the manual look's five fixes), and the docs commit | 1025 / 1009 |
+| 13 Documents and the manual look | 0ec31bd (the manual look's five fixes), d35e06a (the docs) | 1025 / 1009 |
 
 ### The manual look (2026-10-20)
 
@@ -640,3 +640,114 @@ under a test that failed first (0ec31bd), then re-checked on the page.
 Not walked: a conversation's Children and a member's Trace (both need a model that answers), the
 tool rows' tables (no tool ran without a key). The look's bot, channel and scratch home were moved
 into the session scratchpad afterwards, not deleted.
+
+### Final review (2026-10-20)
+
+One fresh reviewer read the whole stage, 24dbb73..d35e06a (14 commits), with the plan, the spec,
+the plan's Review Focus and the 33 rulings: a general-purpose agent on Fable 5.1, because the Opus
+model was at its weekly limit. It ran the suites (1025 tests, 1009 pass, 16 skipped; `FACE_SMOKE=1`
+1025/1025; typecheck clean), read every face route the stage calls against what the client
+assumes, and measured one behaviour in the browser pane on a scratch page. Verdict: **With
+fixes** — no Critical, two Important, six Minor, eight behaviours set aside.
+
+Strengths it named: the thirteen tasks against the plan's Interfaces, every deviation a ruling, the
+deletion greps clean; every route shape the client reads (`/data/channels` and its overview,
+`/data/agents.json` and the rescan's answer, the skill read, `/data/host.json`, the sessions-meta
+read, the 409 words of the archive and bot-settings routes, the `bots/<id> was saved, but` 500,
+`POST /data/bots` → `{ok, bot}`, dsh's model catalog default, `credentials/describe`, the
+interrupt receipt `{accepted: true}`, so ruling 29 holds); Review Focus 3 (markup) on every path it
+traced; Review Focus 1, 4 and 5 (`firstOpen` at every default, the revision in the bot editor's
+ids, the last good list reads, the per-shelf and per-overview sequence guards); ruling 2 (bots in
+the last-good set); the reverse stylesheet check; documents that describe what is built.
+
+**Re-graded by effect** before the fix pass: both Important stand — a Trace that opens nothing on
+its first click looks broken, and another room's steps drawn under an answer are wrong research
+data shown without a sign. The six Minors stay Minor: an archived conversation left on a hidden
+follow when nothing replaces it (an empty page, nothing wrong on it); the focus selector's quote
+(one console error on a click; the keyboard path below is rare); the created-but 500 (the server's
+own words say saved); a broken bot offered on the roster (a hand-broken `bot.yml`, refused when the
+room mounts it); this section's missing subsection; two salvage nits in the tool renderers.
+
+**The fix pass** (431fb3d), every fix under a test that failed first:
+
+1. *A room member's Trace opened only on the second click*: the read's first dispatch re-renders
+   inside the click, the render replaced the `<details>`, and the browser then toggled the element
+   the render had replaced; the second click found the trace ready, rendered nothing, and the
+   browser's toggle opened it. A summary's click now toggles its details itself, cancels the
+   browser's toggle and runs its action on opening only, so closing reads nothing. The fake DOM
+   learned the browser's default for a summary (toggle the clicked element's details unless a
+   listener cancelled) and answers a selector naming `[open]` only with open elements. app-dom
+   `one click opens Trace and the render its read starts keeps it open; a second click closes it
+   without a read`. Checked in a real browser on a scratch page served from the scratchpad: with
+   the old handler one mouse click left it shut; with the new one a click opened it (one action),
+   a second closed it (no action), Enter on the summary opened it again.
+2. *Traces were keyed by the message id alone*, a log sequence two rooms repeat: a second room's
+   answer drew the first room's steps and never read its own member. The slice
+   (`traces[convId][msgId]`), the read guard and the disclosure's id
+   (`trace-<sessionId>-<msgId>`) name the conversation. host-traces `two rooms' answers with the
+   same message id each read their own member's turn`; thread `a loaded trace draws its tool rows;
+   loading and failure say so` (another room's answer with the same id draws its own).
+
+After the pass: face 1027 tests, 1011 pass, 16 skipped; `FACE_SMOKE=1` 1027/1027; typecheck clean.
+
+**The lines it set aside, and a question it asked**, each ruled (`Final: Ruling` in the SDD
+ledger):
+
+- A context row has no id, so one the operator opened closes at the next render (stage 1's
+  renderer): now a finding, graded Minor and deferred — the page renders on every store change,
+  so during a live turn an opened context row shuts at the next event; while nothing arrives it
+  stays open — cost if wrong: an id under the conversation, as Trace's now is.
+- Ruling 32 (a plugin's Chinese tool descriptions, clamped) stands: they are the server's words, as
+  a soul is the bot's — cost if wrong: Chinese on an English screen until descriptions are filtered.
+- A trace's tool rows carry `args: {}` (the loader hands back views, not frames): stands — only the
+  order cards read a call's arguments, and the alpaca-kit dressing reads the name — cost if wrong:
+  an order call in a member's trace drawn as a plain row.
+- Delete is offered on a host-archived idle conversation: stands — the plan's "no key" for the
+  host's archive is the Un-archive key, and a delete is the same delete — cost if wrong: one key.
+- Fork is offered on a conversation with messages but no completed turn (its first turn running,
+  or one that failed before completing): stands — dsh refuses in its own words on the status line
+  and nothing is lost; the list row carries no completed-turn mark — cost if wrong: one refused
+  click in that window.
+- The first-ever failed `/data/channels.json` read yields no channel groups: stands — there is no
+  last good answer yet; the conversations still list and the next good read groups them — cost if
+  wrong: none.
+- `Gravit-Docs-and-Prompt-Loops.html`'s change was not read line by line: stands — it was written by
+  a script whose every replacement had to match exactly once, and the reviewer's stale-module grep
+  over it is clean — cost if wrong: a stale station name on a reference page.
+- The spec's §4 lists `botSettings.js`, `subagents.js` and `member-traces.js` for deletion: ruling 1
+  stands.
+- The question: an archive in another tab never moves this tab's page, though Review Focus 2 says
+  "deleted or archived … in this tab or another" — Task 3 narrowed the move after a list read to a
+  delete elsewhere without a ruling then. Ruled now: it stands — an archived conversation still
+  exists and opens by its id (Review Focus 1), and moving a reader's page for another tab's tidying
+  is worse than the Archived mark the next list draws — cost if wrong: one condition after the
+  list read.
+
+Not walked by the review or the manual look: Trace and Children on a face whose model answers. The
+operator's keyed drills before landing cover them.
+
+### Deferred minors (stage 3)
+
+- Archiving the conversation on screen when no other is open moves the page to the empty state but
+  leaves the live layer following the archived one (Review Focus 2's "stops reading" holds for a
+  delete only); opening it again by its id skips `live.open`, so it is not marked seen.
+- `focusKey` builds a selector from raw data attributes, and Stop's `data-label` is the child's
+  model-chosen label: one holding `"` makes the focus restore's `querySelector` throw inside the
+  render after the page is written — on a click, one console error and the confirm's key unfocused
+  until the next render; with keyboard focus resting on that Stop key when an event lands, the
+  throw stops the live layer's loop for that event, so its later messages miss the view until the
+  next window. `CSS.escape` the values, or read the label from `childrenOf`.
+- `createBot` does not count the `bots/<id> was saved, but …` 500 as saved the way `saveBot` does:
+  the bot exists, Discover's Bots stays stale until Discover is entered again, and the line reads
+  as a failure. Discover's own line (`Changed elsewhere — reloaded`) stays on every Discover page
+  until the next write.
+- The bots roster editor offers a broken bot (and an unlisted one) as a plain box; the old page
+  struck a broken one through with its reason. Rostering one gives the room a member dsh refuses.
+- `tool-result.js`: `salvageRows` searches from the start when `"rows"` is absent (harmless behind
+  the `ok: true` guard); `calendar` joins a non-string day as `[object Object]`.
+- A context row has no id: one the operator opened closes at the next render (ruled above).
+- From the build and the manual look: the composer reads `Tell Gravit…` in a bot's home session;
+  the status line keeps an old model error after the page moves on; a channel whose directory is
+  missing is not greyed on the list; a bot whose soul drifted from its file (`soulInSync`) is not
+  marked; a CLI agent cannot be connected by a name the scan did not find. The participants strip,
+  the discussion card and Gravit's reasoning are not drawn (README says so).

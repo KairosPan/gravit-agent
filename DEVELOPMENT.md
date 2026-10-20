@@ -1414,7 +1414,7 @@ stale stamps, a tool result's `Partial` — are the only explanatory lines a scr
 | `js/reducers/host.js` | the host reducers (§5.3): `hostStatus`, `hostList`, `hostWindow`, `hostEvent`, `hostGate`, `hostGateGone`, `hostProjection`, `hostThinking`, `hostPreview`, `markSeen` |
 | `js/reducers/messages.js`, `controls.js` | what the operator does with the page: `nav` (a market id canonicalised; a missing conversation id becomes `firstOpen`'s; `lastDiscover`, the Discover view a plugin page goes back to), `toggleGroup`, the draft (`startDraft` — Where on the channel New round names, else the root —, `cancelDraft`, `setDraftTitle`, `setDraftWhere`), the optimistic `rename`, `toggleDetails`, `toggleRail`, `setTheme`; the inline editors (`startEdit`/`commitEdit`/`cancelEdit` — a rename, New channel…, a roster, a bot —, `editFailed`, which keeps an editor open with the refusal, `toggleRosterTick`), the two-step confirms (`askConfirm`/`cancelConfirm`) |
 | `js/reducers/markets.js`, `account.js` | the host's markets (`watchlistLoaded`, `quotesUpdated`, `searchUpdated`, `hitQuotesLoaded`, `barsLoading`/`barsLoaded`/`barsFailed`) and the screen's `setMarketsTab`, `setMarketsSort`, `setMarketsQuery`; the host's account (`accountLoading`/`accountLoaded`/`accountFailed`, `credentialsLoaded`, `toolsLoaded`, `probeLoaded`), the drawers' `openStatement`/`closeStatement` and `openSettings`/`closeSettings` |
-| `js/reducers/channels.js`, `discover.js`, `traces.js` | the channel page's read (`channelLoading`, `channelLoaded`, `channelFailed` — a failure keeps that channel's data, a 404 reads `missing`); Discover's (`setDiscoverQuery`, `shelfLoading`/`shelfLoaded`/`shelfFailed` — a failed shelf keeps its data —, `gravitLoaded`, `skillLoading`/`skillLoaded`/`skillFailed`, `modelsLoaded`, `discoverStatus`); a member's trace by the answer it explains (`traceLoading`, `traceLoaded`, `traceFailed`) |
+| `js/reducers/channels.js`, `discover.js`, `traces.js` | the channel page's read (`channelLoading`, `channelLoaded`, `channelFailed` — a failure keeps that channel's data, a 404 reads `missing`); Discover's (`setDiscoverQuery`, `shelfLoading`/`shelfLoaded`/`shelfFailed` — a failed shelf keeps its data —, `gravitLoaded`, `skillLoading`/`skillLoaded`/`skillFailed`, `modelsLoaded`, `discoverStatus`); a member's trace by the answer it explains, under its conversation (`traceLoading`, `traceLoaded`, `traceFailed`) |
 | `js/data/empty.js` | `emptyState()`: the state the page boots into — no conversations, `status.line = "connecting…"`, every slice at its empty shape (§5.5) and no demo slice: no `plugins`, `memory`, `mail`, `banner`, `call` or `compose` |
 | `js/host/kinds.js` | the kind table (spec §6, §5.3): a mapper view → zero, one or two messages; `ORDER_TOOLS`, `isOrderTool`, `orderLine`, `rememberCall`, `toMessages` |
 | `js/host/sessions.js` | `session/list` rows → conversation records: `kindOf`, `conversationOf`, `listConversations`, `unreadOf`; `childRowsOf` (the subagent rows the list leaves out, kept for their parent's Children) and `firstOpen` (the conversation every default opens, never an archived one) |
@@ -1795,11 +1795,12 @@ letters and no id (`Give it an id: a-z, 0-9, -`) before the post, re-reads the b
 the new id (from the route's `{ok, bot}`) or `{error}`.
 
 **Traces** (`js/host/traces.js`). `startTraces({store, call, loadMemberTrace, now})` returns
-`{open(convId, msgId)}`: once per answer (a failed one may be opened again),
+`{open(convId, msgId)}`: once per answer — an answer is its conversation and message id, since a
+message id is its log's sequence and two rooms repeat them (a failed one may be opened again),
 `loadMemberTrace(call, {sessionId: data.memberSessionId, turn: data.memberTurn})` — the projections
 cut, then the history paged back until the turn is found, never a follow — and its views folded
 through `toMessages` and `hostEvent` on a scratch conversation, as a window is, into
-`traceLoaded {msgId, messages}`; a loader error lands as its English words (`traceFailed`).
+`traceLoaded {convId, msgId, messages}`; a loader error lands as its English words (`traceFailed`).
 
 **Stage 3's views** (pure). `groupsOf(state)` (`js/host/list-view.js`) orders grouping.js's
 buckets: every channel a group, an empty one too (a new channel's page is reachable from the
@@ -1850,7 +1851,10 @@ and the held render lands after the click. Clicks are delegated by `data-action`
 `newRound`, `channelRetry`, `editRoster`; Discover's `shelfRetry`, `connectAgent`,
 `disconnectAgent`, `rescanAgents`, `talkTo`, `editBot`; Markets' `mkTab`, `mkSort`, `mkClear`,
 `toggleWatch`, `openMarket`, `handToGravit`; Account's `refreshAccount`,
-`openStatement`/`closeStatement`, `exportStatement`); typing in `#mq` (`mkQuery`) sets the query
+`openStatement`/`closeStatement`, `exportStatement`); a disclosure's own key (Trace's `<summary>`)
+toggles its `<details>` itself and cancels the browser's toggle — the action's first dispatch
+re-renders inside the click, so the browser would toggle the element the render replaced — and
+its action runs on opening only; typing in `#mq` (`mkQuery`) sets the query
 and searches, in `#dq` (`dq`) Discover's query; choosing `New channel…` in Where opens its name
 box, any other channel is `setDraftWhere`; a roster box's change is `toggleRosterTick`; the
 composer's `submit` is `send`, a bot editor's `saveBot`, the Create page's `createBot`; Escape
@@ -1917,7 +1921,7 @@ bot's words in a group under its sender name, through the same markdown hook; a 
 id="tool-<callId>" class="tool">` titled by the call, `running` until the result fills it,
 `.danger` on error — an alpaca-kit result dressed (below) with the raw text in a nested
 `<details id="raw-<callId>">Raw`, any other result its `<pre>`; a room member's answer that names
-its member turn followed by a `Trace` disclosure (`trace-<msgId>`), read on opening: `Loading…`,
+its member turn followed by a `Trace` disclosure (`trace-<sessionId>-<msgId>`), read on opening: `Loading…`,
 the turn's steps (its tool rows drawn as the thread draws them, its context lines), the loader's
 words, or `No steps`; the order card (`Your call: …`, `Alpaca paper · <reason>`, ✗ Decline then ✓ Approve →
 `rejected` / `allowed-once`); the approval card (the tool name, the display reason, the audit
@@ -2011,7 +2015,7 @@ parsed once however often the page renders.
 The store holds the host's facts (§5.3) and the page's own: `route`, `draft`, `detailsOpen`,
 `settingsOpen`, `edit`, `confirm`, `railCollapsed`, `collapsed` (the list groups the viewer
 folded), `theme`, `lastConv`, `lastSeen`, `status`, `orphanGates`, `channels`, `bots`,
-`conversations`, `childRows`, `traces` (a member's trace by the answer it explains); `channel`
+`conversations`, `childRows`, `traces` (a member's trace by the answer it explains, `traces[convId][msgId]`); `channel`
 (`id`, `status`, `data`, `at` — the page's overview); `discover` (`query`, `shelves` — `plugins`,
 `bots`, `agents`, `memory`, each `{status, data, at}` —, `gravit`, `skills`, `models`, `status`);
 `markets` (`tab`, `sort`, `q`, `watchlist`, `watchError`, `quotes`, `providers`, `connection`,
@@ -2171,9 +2175,9 @@ from the member's own log without activating it (§5.4) — it follows no member
 | Command | From | Needs | Measured 2026-09-30 |
 |---|---|---|---|
 | `python -m pytest` | repo root | nothing — offline, no keys, no bed | 400 passed in a clean checkout, ~2 s (2026-10-20; the operator's tree adds the untracked `tests/strategies/`) |
-| `cd face && npm test` | `face/` | nothing — no port, no key | 1025 tests, 1009 pass, 16 skipped (2026-10-20) |
+| `cd face && npm test` | `face/` | nothing — no port, no key | 1027 tests, 1011 pass, 16 skipped (2026-10-20) |
 | `cd face && npm run typecheck` | `face/` | | clean, the dependencies' `.d.ts` included (`skipLibCheck: false`) |
-| `cd face && FACE_SMOKE=1 npm test` | `face/` | boots sixteen real trees into `mkdtemp` homes and binds ports; still no LLM or key (four of the smokes also create, and remove, a gitignored `.bots-smoke-*` bots root at the repo root) | the sixteen skipped tests; 1025/1025 (2026-10-20) |
+| `cd face && FACE_SMOKE=1 npm test` | `face/` | boots sixteen real trees into `mkdtemp` homes and binds ports; still no LLM or key (four of the smokes also create, and remove, a gitignored `.bots-smoke-*` bots root at the repo root) | the sixteen skipped tests; 1027/1027 (2026-10-20) |
 | `cd face && npm run check:fixture` | `face/` | the installed dsh | 26 fixture lines: 23 validated, 0 rejected, 3 with no upstream validator |
 
 ### 7.2 The Python suite
@@ -2202,7 +2206,7 @@ order path.
 
 ### 7.3 The face suite
 
-1025 tests in 100 files (1009 pass, 16 skipped without `FACE_SMOKE=1`), run by `node --test`
+1027 tests in 100 files (1011 pass, 16 skipped without `FACE_SMOKE=1`), run by `node --test`
 through `tsx`:
 
 - **Composition and boot** — `boot` (the layer order ending with the overlay; the policy layer
@@ -2308,12 +2312,14 @@ through `tsx`:
   bot's revision-checked save and a new bot, the shelves and every kind of page, no shop words),
   `tool-result` (each alpaca-kit shape, a spilled result's Partial, nothing for another server's
   tool, every cell escaped), `children-view` and `host-traces` (a conversation's children and their
-  states; a member's trace read once, non-activating), `wire-words` (no Chinese in the six moved
+  states; a member's trace read once per conversation and message, non-activating), `wire-words`
+  (no Chinese in the six moved
   wire modules), `app` and `app-dom` (the boot: routes, the render loop, every data-action against
   the store, a press holding renders until it ends, the open disclosures kept across a render, the
   prefs' folds, fork, archive and delete moving the page, a deletion elsewhere, a channel's page
   and New round, New channel… in Where, the roster editors, Discover's reads, Connect, Talk to, a
-  bot's save and a new bot, a member's trace never followed, a child's Stop; the Markets search,
+  bot's save and a new bot, a member's trace never followed and opened by one click, a child's
+  Stop; the Markets search,
   star, Clear and page, the quotes paused off
   Markets, the bars read once per opening, Hand to Gravit, the account read at boot and on
   entering Account, Refresh, Venues described once, Export CSV, a receipt reloading the account,
