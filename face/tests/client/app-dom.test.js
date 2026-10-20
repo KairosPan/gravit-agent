@@ -365,6 +365,22 @@ test("typing in the search box searches; a star watches and writes the face's ke
   store.timers.clear();
 });
 
+// the manual look (2026-10-20): the render keeps what an input holds, so Clear must empty the box itself
+test('Clear empties the search box as well as the query', async () => {
+  const f = fakeWindow({ hash: '#/markets', storage: memoryStorage() });
+  const mq = f.withId('mq', { tagName: 'INPUT', type: 'search', dataset: { action: 'mkQuery' } });
+  const h = host();
+  const store = bootMarkets(f, h, fakeMarkets());
+  await h.ready();
+  mq.value = 'BTC';
+  f.fire('root', 'input', { target: mq });
+  assert.equal(mq.value, 'BTC', 'a render keeps what was typed');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'mkClear' } });
+  assert.equal(store.get().markets.q, '');
+  assert.equal(mq.value, '', 'the box is empty too');
+  store.timers.clear();
+});
+
 test('leaving Markets pauses the quotes and coming back resumes them; a hidden tab pauses them too', async () => {
   const f = fakeWindow({ hash: '#/markets', storage: memoryStorage() });
   const h = host({ rows: [row('s1')] });

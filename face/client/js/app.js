@@ -363,7 +363,14 @@ export function boot(win, host = {}) {
     // Markets: the tabs, the sort, Clear, the star, a row's page
     mkTab: el => store.dispatch('setMarketsTab', el.dataset.value),
     mkSort: el => store.dispatch('setMarketsSort', el.dataset.value),
-    mkClear: () => { store.dispatch('setMarketsQuery', ''); markets.search(''); doc.getElementById('mq')?.focus?.(); },
+    // the render keeps what an input holds, so Clear empties the box before the query
+    mkClear: () => {
+      const box = doc.getElementById('mq');
+      if (box) box.value = '';
+      store.dispatch('setMarketsQuery', '');
+      markets.search('');
+      doc.getElementById('mq')?.focus?.();
+    },
     toggleWatch: el => {
       const id = canonicalId(el.dataset.id);
       if (store.get().markets.watchlist.some(a => a.id === id)) markets.unwatch(id); else markets.watch(id);
