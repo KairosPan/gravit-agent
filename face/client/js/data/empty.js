@@ -12,7 +12,7 @@ export function emptyState() {
     settingsOpen: false,
     conversations: [],
     childRows: [],
-    // a room member's trace by the answer it explains (host/traces.js)
+    // a room member's trace by the answer it explains, under its conversation (host/traces.js)
     traces: {},
     channels: [],
     // the channel page's read (host/channels.js)

@@ -904,8 +904,33 @@ test("opening Trace reads the member's session without following it", async () =
   await settle();
   assert.ok(h.calls.some(c => c[0] === 'session/page' && c[1].request.address.sessionId === 'm1'));
   assert.equal(h.streams.some(s => s.name === 'session/follow' && s.args.request.address.sessionId === 'm1'), false, 'never followed');
-  assert.equal(store.get().traces.e9.status, 'ready');
+  assert.equal(store.get().traces.room.e9.status, 'ready');
   assert.match(f.html(), /<details id="tool-mc1" class="tool">/);
+  store.timers.clear();
+});
+
+// the read's first dispatch re-renders inside the click: the browser's own toggle would land on the replaced element
+test('one click opens Trace and the render its read starts keeps it open; a second click closes it without a read', async () => {
+  const { memberTurn, memberPage } = await import('./helpers/trace.js');
+  const f = fakeWindow({ hash: '' });
+  const h = host({ rows: [row('room', { agentAvailable: true })], pages: { m1: memberPage(memberTurn()) } });
+  const store = started(f, h);
+  await h.ready();
+  store.dispatch('hostEvent', { convId: 'room', message: { id: 'e9', seq: 9, at: 1, from: 'buffett', kind: 'text', text: 'Hold', data: { name: 'Buffett', markdown: true, memberSessionId: 'm1', memberTurn: 3 } } });
+  // the disclosure on the page when the click lands, and the one each render draws in its place
+  const clicked = f.withSelector('details[id][open]', { tagName: 'DETAILS', id: 'trace-room-e9', open: false });
+  const drawn = f.withId('trace-room-e9', { tagName: 'DETAILS', open: false });
+  const summary = details => ({ tagName: 'SUMMARY', parentElement: details, dataset: { action: 'openTrace', conv: 'room', msg: 'e9' } });
+  f.click(summary(clicked));
+  assert.equal(drawn.open, true, 'open after the render the click started');
+  await settle();
+  assert.equal(store.get().traces.room.e9.status, 'ready');
+  assert.equal(drawn.open, true, 'still open with the steps drawn');
+  const reads = h.calls.filter(c => c[0] === 'session/page').length;
+  f.click(summary(drawn));
+  assert.equal(drawn.open, false, 'a second click closes it');
+  await settle();
+  assert.equal(h.calls.filter(c => c[0] === 'session/page').length, reads, 'closing reads nothing');
   store.timers.clear();
 });
 

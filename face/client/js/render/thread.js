@@ -88,15 +88,15 @@ function body(m, conv) {
 }
 
 // a room member's answer can open the turn that produced it: read on opening (host/traces.js), drawn with the
-// thread's own rows
+// thread's own rows; the slice and the disclosure's id name the conversation, since two rooms repeat message ids
 function trace(m, conv, state) {
   if (typeof m.data?.memberSessionId !== 'string' || typeof m.data?.memberTurn !== 'number') return '';
-  const t = state?.traces?.[m.id];
+  const t = state?.traces?.[conv.id]?.[m.id];
   const item = x => (x.kind === 'tool' ? body(x, conv) : x.from === 'system' ? `<div class="sysline">${esc(x.text)}</div>` : `<div class="dsec-line">${esc(x.text)}</div>`);
   const inner = !t || t.status === 'loading' ? '<div class="dim">Loading…</div>'
     : t.status === 'failed' ? `<div class="dim">${esc(t.line)}</div>`
       : t.messages.length ? t.messages.map(item).join('') : '<div class="dim">No steps</div>';
-  return `<details id="trace-${esc(m.id)}" class="trace"><summary data-action="openTrace" data-conv="${esc(conv.id)}" data-msg="${esc(m.id)}">Trace</summary>` +
+  return `<details id="trace-${esc(conv.id)}-${esc(m.id)}" class="trace"><summary data-action="openTrace" data-conv="${esc(conv.id)}" data-msg="${esc(m.id)}">Trace</summary>` +
     `<div class="trace-body">${inner}</div></details>`;
 }
 

@@ -546,6 +546,13 @@ export function boot(win, host = {}) {
     if (!fn) return;
     if (el.tagName === 'A' && el.dataset.action !== 'open') return;
     if (el.tagName === 'A') ev.preventDefault();
+    // a disclosure's own key (Trace): its action re-renders the page before the browser would toggle the <details>, so
+    // the page toggles it first, where the render's keep-open pass finds it; the action runs on opening only
+    if (el.tagName === 'SUMMARY' && el.parentElement?.tagName === 'DETAILS') {
+      ev.preventDefault();
+      el.parentElement.open = !el.parentElement.open;
+      if (!el.parentElement.open) return;
+    }
     fn(el);
   });
 

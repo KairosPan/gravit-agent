@@ -11,10 +11,13 @@ import { startTraces } from '../../client/js/host/traces.js';
 import { memberTurn, memberPage } from './helpers/trace.js';
 
 const answer = (over = {}) => ({ id: 'e9', seq: 9, at: 1, from: 'buffett', kind: 'text', text: 'Hold', data: { name: 'Buffett', markdown: true, memberSessionId: 'm1', memberTurn: 3, ...over } });
-function rig(message = answer()) {
+const room = (id, memberSessions) => ({ id, title: 'R', kind: 'group', members: ['gravit', 'buffett'], memberSessions, channel: null, preset: 'gravit', running: false, live: true, archived: false, updatedAt: 1, created: null, messages: [], loaded: true, preview: null, usage: null, thinking: null, lastSeen: 0 });
+// `others`: more rooms, each with its own member's answer
+function rig(message = answer(), others = []) {
   const store = createStore({ initial: emptyState(), reducers });
-  store.dispatch('hostList', { conversations: [{ id: 'room', title: 'R', kind: 'group', members: ['gravit', 'buffett'], memberSessions: ['m1'], channel: null, preset: 'gravit', running: false, live: true, archived: false, updatedAt: 1, created: null, messages: [], loaded: true, preview: null, usage: null, thinking: null, lastSeen: 0 }] });
+  store.dispatch('hostList', { conversations: [room('room', ['m1']), ...others.map(o => room(o.id, [o.message.data.memberSessionId]))] });
   store.dispatch('hostEvent', { convId: 'room', message });
+  for (const o of others) store.dispatch('hostEvent', { convId: o.id, message: o.message });
   const calls = [];
   const records = memberTurn();
   const call = async (endpoint, args) => {
@@ -24,7 +27,7 @@ function rig(message = answer()) {
     throw new Error(`unexpected ${endpoint}`);
   };
   const traces = startTraces({ store, call, loadMemberTrace, mapFrame, now: () => 5 });
-  return { store, traces, calls, t: () => store.get().traces.e9 };
+  return { store, traces, calls, t: (convId = 'room') => store.get().traces[convId]?.e9 };
 }
 
 test('open reads projections then pages back, once per message, and folds each call with its result', async () => {
@@ -39,6 +42,16 @@ test('open reads projections then pages back, once per message, and folds each c
   assert.equal(tools.length, 1);
   assert.equal(tools[0].data.name, 'mcp__alpaca-kit__account');
   assert.equal(tools[0].data.result, '{"ok":true,"equity":"100"}');
+});
+
+// a message id is the room log's sequence: two rooms following the same script repeat them
+test("two rooms' answers with the same message id each read their own member's turn", async () => {
+  const r = rig(answer(), [{ id: 'room2', message: answer({ memberSessionId: 'm2' }) }]);
+  await r.traces.open('room', 'e9');
+  await r.traces.open('room2', 'e9');
+  assert.deepEqual(r.calls.filter(c => c[0] === 'session/projections').map(c => c[1].request.sessionId), ['m1', 'm2']);
+  assert.equal(r.t('room').status, 'ready');
+  assert.equal(r.t('room2').status, 'ready');
 });
 
 test('a loader error lands as its words', async () => {

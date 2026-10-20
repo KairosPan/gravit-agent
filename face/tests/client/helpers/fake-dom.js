@@ -3,7 +3,10 @@
 // innerHTML write behaves like the browser replacing the nodes: scroll positions go to 0, typed values and
 // checked boxes go back to what the markup says, and focus falls to <body>. That is what the app has to
 // repair after a render.
-// An element registered with presentIf (a RegExp) is found only while the last render's markup matches it.
+// An element registered with presentIf (a RegExp) is found only while the last render's markup matches it; one
+// registered under a selector naming [open] answers it only while it is open. A click runs the listeners, then the
+// browser's own default for a <summary>: unless a listener cancelled it, the <details> the clicked summary belongs to
+// toggles — that element, even when a render has replaced it meanwhile.
 
 export function fakeWindow({ hash = '#/messages/c-1', storage = null, prompt = () => null, confirm = () => true } = {}) {
   const byId = new Map();
@@ -47,7 +50,7 @@ export function fakeWindow({ hash = '#/messages/c-1', storage = null, prompt = (
     },
     // the typed-text query: inputs and textareas by id, minus the :not([type=…]) kinds the selector names
     querySelectorAll(sel) {
-      if (bySelector.has(sel)) return bySelector.get(sel);
+      if (bySelector.has(sel)) return bySelector.get(sel).filter(e => !sel.includes('[open]') || e.open === true);
       if (!sel.includes('input[id]')) return [];
       const skip = [...sel.matchAll(/:not\(\[type=(\w+)\]\)/g)].map(m => m[1]);
       return [...byId.values()].filter(e => (e.tagName === 'INPUT' && !skip.includes(e.type)) || e.tagName === 'TEXTAREA' || (e.tagName === 'SELECT' && sel.includes('select[id]')));
@@ -91,7 +94,11 @@ export function fakeWindow({ hash = '#/messages/c-1', storage = null, prompt = (
     withSelector(sel, props = {}) { const el = element(props); bySelector.set(sel, [...(bySelector.get(sel) ?? []), el]); return el; },
     fire(target, type, event = {}) { for (const fn of listeners[target][type] ?? []) fn({ preventDefault() {}, ...event }); },
     // a click on an element carrying data-action, the way delegation finds it
-    click(el) { this.fire('root', 'click', { target: { closest: () => el } }); },
+    click(el) {
+      let cancelled = false;
+      this.fire('root', 'click', { target: { closest: () => el }, preventDefault() { cancelled = true; } });
+      if (!cancelled && el.tagName === 'SUMMARY' && el.parentElement?.tagName === 'DETAILS') el.parentElement.open = !el.parentElement.open;
+    },
     tick: () => new Promise(r => setTimeout(r, 0)),
   };
 }

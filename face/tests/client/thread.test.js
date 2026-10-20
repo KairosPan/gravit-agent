@@ -153,7 +153,7 @@ test("a member's answer offers Trace; Gravit's and the operator's do not", () =>
   const room = conv({ id: 'room', kind: 'group', members: ['gravit', 'buffett'] });
   const answer = msg({ id: 'e9', from: 'buffett', text: 'Hold', data: { name: 'Buffett', markdown: true, memberSessionId: 'm1', memberTurn: 3 } });
   const h = renderMessage(answer, room, state);
-  assert.match(h, /<details id="trace-e9" class="trace"><summary data-action="openTrace" data-conv="room" data-msg="e9">Trace<\/summary>/);
+  assert.match(h, /<details id="trace-room-e9" class="trace"><summary data-action="openTrace" data-conv="room" data-msg="e9">Trace<\/summary>/);
   assert.doesNotMatch(renderMessage(msg({ id: 'e1', from: 'gravit', data: { markdown: true } }), room, state), /Trace/);
   assert.doesNotMatch(renderMessage(msg({ id: 'e2', from: 'you', text: 'hi' }), room, state), /Trace/);
   assert.doesNotMatch(renderMessage(msg({ id: 'e3', from: 'buffett', text: 'x', data: { name: 'Buffett' } }), room, state), /Trace/, 'an answer with no member turn has none');
@@ -163,9 +163,13 @@ test('a loaded trace draws its tool rows; loading and failure say so', () => {
   const room = conv({ id: 'room', kind: 'group', members: ['gravit', 'buffett'] });
   const answer = msg({ id: 'e9', from: 'buffett', text: 'Hold', data: { name: 'Buffett', memberSessionId: 'm1', memberTurn: 3 } });
   const tool = msg({ id: 'tmc1', seq: 11, kind: 'tool', text: 'account', data: { callId: 'mc1', name: 'mcp__alpaca-kit__account', result: '{"ok":true,"equity":"100"}', isError: false } });
-  const loaded = renderMessage(answer, room, { ...state, traces: { e9: { status: 'ready', messages: [tool] } } });
+  const loaded = renderMessage(answer, room, { ...state, traces: { room: { e9: { status: 'ready', messages: [tool] } } } });
   assert.match(loaded, /class="trace-body"[\s\S]*?<details id="tool-mc1" class="tool">[\s\S]*?viz-tile-label">equity/);
-  assert.match(renderMessage(answer, room, { ...state, traces: { e9: { status: 'loading' } } }), /trace-body[^>]*>[\s\S]*?Loading…/);
-  assert.match(renderMessage(answer, room, { ...state, traces: { e9: { status: 'failed', line: 'The member session does not exist.' } } }), /The member session does not exist\./);
-  assert.match(renderMessage(answer, room, { ...state, traces: { e9: { status: 'ready', messages: [] } } }), /No steps/);
+  assert.match(renderMessage(answer, room, { ...state, traces: { room: { e9: { status: 'loading' } } } }), /trace-body[^>]*>[\s\S]*?Loading…/);
+  assert.match(renderMessage(answer, room, { ...state, traces: { room: { e9: { status: 'failed', line: 'The member session does not exist.' } } } }), /The member session does not exist\./);
+  assert.match(renderMessage(answer, room, { ...state, traces: { room: { e9: { status: 'ready', messages: [] } } } }), /No steps/);
+  // another room's answer with the same message id is not this one's
+  const other = renderMessage(answer, conv({ id: 'room2', kind: 'group', members: ['gravit', 'buffett'] }), { ...state, traces: { room: { e9: { status: 'ready', messages: [tool] } } } });
+  assert.match(other, /<details id="trace-room2-e9" class="trace">/);
+  assert.doesNotMatch(other, /tool-mc1/);
 });
