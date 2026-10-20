@@ -6,6 +6,7 @@ import { emptyState } from './data/empty.js';
 import { parseHash, toHash } from './router.js';
 import { renderRail } from './render/rail.js';
 import { renderMessagesScreen, currentConversation } from './render/messages.js';
+import { renderMarketsScreen } from './render/markets.js';
 import { renderSettings } from './render/account.js';
 import { setMarkdown } from './render/thread.js';
 import { renderMarkdown } from './wire/markdown.js';
@@ -13,6 +14,10 @@ import { call as wireCall, openMux as wireOpenMux } from './wire/api.js';
 import { mapFrame } from './wire/mapper.js';
 import { startLive } from './host/live.js';
 import { makeActions } from './host/actions.js';
+import { startMarkets } from './host/markets.js';
+import { canonicalId } from './host/market-view.js';
+import { createLiveQuotes } from './wire/market-quotes.js';
+import { createSymbolSearch } from './wire/market-search.js';
 
 export const PREFS_KEY = 'gravit-ui.prefs';
 
@@ -50,7 +55,8 @@ export class Timers {
   }
 }
 
-// per-viewer conveniences only: the theme, the rail's fold, the last conversation, what was seen, the watchlist
+// per-viewer conveniences only: the theme, the rail's fold, the last conversation, what was seen (the watchlist keeps
+// its own key, host/markets.js)
 export function readPrefs(storage) {
   try {
     const raw = storage?.getItem(PREFS_KEY);
@@ -60,7 +66,7 @@ export function readPrefs(storage) {
     return {};
   }
 }
-export const prefsOf = s => ({ theme: s.theme, railCollapsed: s.railCollapsed, lastConv: s.lastConv, lastSeen: s.lastSeen, watch: s.markets.watch });
+export const prefsOf = s => ({ theme: s.theme, railCollapsed: s.railCollapsed, lastConv: s.lastConv, lastSeen: s.lastSeen });
 export function initialState(storage, now = Date.now()) {
   const p = readPrefs(storage);
   const s = emptyState(now);
@@ -70,7 +76,6 @@ export function initialState(storage, now = Date.now()) {
     railCollapsed: p.railCollapsed === true,
     lastConv: typeof p.lastConv === 'string' ? p.lastConv : null,
     lastSeen: p.lastSeen && typeof p.lastSeen === 'object' && !Array.isArray(p.lastSeen) ? p.lastSeen : {},
-    markets: { ...s.markets, watch: Array.isArray(p.watch) ? p.watch : [] },
   };
 }
 // the store never loads a saved state (the host is the state); it writes the prefs on every change
@@ -78,8 +83,8 @@ export function makeStore(storage, now = Date.now()) {
   return createStore({ initial: initialState(storage, now), reducers, storage, key: PREFS_KEY, accept: () => false, persist: prefsOf });
 }
 
-// stage 1 serves Messages; every other screen the router knows folds to it
-const SCREENS = new Set(['messages']);
+// Messages and Markets are served; every other screen the router knows folds to Messages
+const SCREENS = new Set(['messages', 'markets']);
 export const routeOf = hash => { const r = parseHash(hash); return SCREENS.has(r.screen) ? r : { screen: 'messages', id: null }; };
 // route by the address bar; a normalised route says which hash the bar should show instead
 export function settle(store, hash) {
@@ -135,6 +140,18 @@ export function boot(win, host = {}) {
   const live = startLive({ store, openMux: host.openMux ?? wireOpenMux, call, mapFrame, getJson, timers, now });
   // answers go through the live layer, which settles the gate it delivered once the answer wins
   const actions = makeActions({ store, call, answerGate: (eventId, value) => live.answer(eventId, value), postJson });
+  // Markets: the face's live quotes and symbol search (a test hands in its own), the watchlist in this browser's storage
+  const markets = startMarkets({
+    store,
+    createLiveQuotes: host.createLiveQuotes ?? (onUpdate => createLiveQuotes(onUpdate, {
+      fetcher: (...a) => win.fetch(...a),
+      createEventSource: typeof win.EventSource === 'function' ? url => new win.EventSource(url) : null,
+    })),
+    createSymbolSearch: host.createSymbolSearch ?? (onUpdate => createSymbolSearch(onUpdate, { fetcher: (...a) => win.fetch(...a) })),
+    storage, getJson, win,
+  });
+  // the quotes run only while Markets is on screen in a visible tab
+  const showMarkets = () => markets.show(store.get().route.screen === 'markets' && !doc.hidden);
 
   let composerText = '';
   let composing = false;
@@ -164,7 +181,7 @@ export function boot(win, host = {}) {
     const threadAt = thread0 ? { top: thread0.scrollTop, bottom: thread0.scrollHeight - thread0.scrollTop - thread0.clientHeight < 40 } : null;
     const scrolls = { main: root.querySelector('main')?.scrollTop, rows: root.querySelector('.rail-rows')?.scrollTop, drawer: root.querySelector('.drawer-body')?.scrollTop };
 
-    const screen = renderMessagesScreen(s, now());
+    const screen = s.route.screen === 'markets' ? renderMarketsScreen(s, now()) : renderMessagesScreen(s, now());
     root.innerHTML = renderRail(s, now()) + (s.settingsOpen ? screen.replace(/<\/main>$/, renderSettings(s) + '</main>') : screen);
 
     const sameEditor = editorOf(s.edit) === last.editor;
@@ -242,6 +259,7 @@ export function boot(win, host = {}) {
     const fixed = settle(store, win.location.hash);
     if (fixed) win.history.replaceState(null, '', fixed);
     const r = store.get().route;
+    showMarkets();
     // a deep link the list does not carry yet waits for it
     if (asked.screen === 'messages' && asked.id && asked.id !== 'new' && !store.get().conversations.some(c => c.id === asked.id)) wanted = asked.id;
     if (r.screen === 'messages' && r.id && r.id !== 'new' && r.id !== openedId) {
@@ -319,6 +337,15 @@ export function boot(win, host = {}) {
     setTheme: el => { const t = el.dataset.value.toLowerCase(); store.dispatch('setTheme', t); applyTheme(t); },
     forgetMemory: el => store.dispatch('forgetMemory', el.dataset.id),
     memorySwitch: el => store.dispatch('setMemorySwitch', { key: el.dataset.key, value: el.getAttribute('aria-checked') !== 'true' }),
+    // Markets: the tabs, the sort, Clear, the star, a row's page
+    mkTab: el => store.dispatch('setMarketsTab', el.dataset.value),
+    mkSort: el => store.dispatch('setMarketsSort', el.dataset.value),
+    mkClear: () => { store.dispatch('setMarketsQuery', ''); markets.search(''); doc.getElementById('mq')?.focus?.(); },
+    toggleWatch: el => {
+      const id = canonicalId(el.dataset.id);
+      if (store.get().markets.watchlist.some(a => a.id === id)) markets.unwatch(id); else markets.watch(id);
+    },
+    openMarket: el => go({ screen: 'markets', id: el.dataset.id }),
   };
 
   root.addEventListener('click', ev => {
@@ -343,10 +370,11 @@ export function boot(win, host = {}) {
     }
   });
 
-  // typing: the composer keeps its words outside the store; the title goes through it
+  // typing: the composer keeps its words outside the store; the title and the Markets search go through it
   function typed(el) {
     if (el.id === 'say') composerText = el.value;
     else if (el.dataset?.action === 'draftTitle') store.dispatch('setDraftTitle', el.value);
+    else if (el.dataset?.action === 'mkQuery') { store.dispatch('setMarketsQuery', el.value); markets.search(el.value); }
   }
   root.addEventListener('input', ev => { if (!ev.isComposing && !composing) typed(ev.target); });
   root.addEventListener('change', ev => {
@@ -376,6 +404,7 @@ export function boot(win, host = {}) {
   });
 
   win.addEventListener('hashchange', follow);
+  doc.addEventListener('visibilitychange', showMarkets);
   store.subscribe((s, type) => {
     requestRender();
     if (type !== 'hostList') return;
@@ -387,7 +416,7 @@ export function boot(win, host = {}) {
   if (!win.location.hash) win.history.replaceState(null, '', toHash(store.get().route));
   follow();
   render();
-  return Object.assign(store, { timers, live, actions });
+  return Object.assign(store, { timers, live, actions, markets });
 }
 
 if (typeof window !== 'undefined' && window.document) boot(window);

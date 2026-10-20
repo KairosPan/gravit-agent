@@ -16,13 +16,12 @@ export function emptyState() {
     orphanGates: {},
     lastSeen: {},
     discover: { query: '', installedOnly: false, create: null, toast: null },
-    // the host's fields (host/markets.js) beside the demo's, which leave in stage 2's Tasks 6 and 8
+    // the host's markets (host/markets.js) and the screen's own tab, sort and query
     markets: {
-      tab: 'all', sort: 'volume', q: '', interval: '1h', watch: [],
+      tab: 'all', sort: 'volume', q: '',
       watchlist: [], watchError: null, quotes: {}, providers: [], connection: 'idle',
       search: { query: '', status: 'idle', assets: [], partial: false }, hitQuotes: {}, bars: {},
     },
-    trade: { kind: 'crypto', q: '', ticket: null },
     plugins: { installed: [], mine: [], uploaded: [] },
     memory: { entries: [], remember: true, askFirst: false, botsRead: false },
     account: {

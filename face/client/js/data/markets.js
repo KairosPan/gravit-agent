@@ -1,16 +1,7 @@
-// gravit-ui/js/data/markets.js — the markets Markets and Trade show, after Linqi's buyer-agent-demo (ui/markets.js, ui/trade.js):
-// stand-in quotes at the account's venues and public ones, held still so what is shown is what fills
-import { MIN, HOUR, DAY } from '../time.js';
+// gravit-ui/js/data/markets.js — the demo's stand-in markets, after Linqi's buyer-agent-demo (ui/markets.js, ui/trade.js),
+// still read by the demo Account's panels until stage 2's Task 8 removes them with this file
+import { MIN } from '../time.js';
 
-export const TABS = [['all', 'All'], ['crypto', 'Crypto'], ['stocks', 'Stocks'], ['rwas', 'RWAs'], ['predictions', 'Predictions']];
-export const KINDS = [
-  { id: 'crypto', label: 'Crypto', icon: 'coin', of: 'coin', hint: 'Search BTC, ETH, a token…' },
-  { id: 'stocks', label: 'Stocks', icon: 'stock', of: 'stock', hint: 'Search AAPL, NVDA…' },
-  { id: 'rwas', label: 'RWAs', icon: 'rwa', of: 'rwa', hint: 'Search a tokenised stock or fund…' },
-  { id: 'predictions', label: 'Predictions', icon: 'prediction', of: 'event', hint: 'Search the Fed, an election…' },
-];
-export const SORTS = [['volume', 'Most traded'], ['movers', 'Biggest moves'], ['closing', 'Closing soonest']];
-export const INTERVALS = { '5m': 5 * MIN, '1h': HOUR, '1d': DAY };
 // the account's "$100 a move": one owner order may be worth this much at most
 export const CAP_USD = 100;
 // a prepared order is good for ten minutes
@@ -53,30 +44,3 @@ export const INSTRUMENTS = [
 ];
 
 export const instrument = id => INSTRUMENTS.find(i => i.id === String(id ?? '').toUpperCase()) ?? null;
-export const instrumentOf = name => INSTRUMENTS.find(i => i.base === name) ?? null;
-export const listed = inst => inst.tabs.length > 0;
-export const kindOf = inst => ({ coin: 'crypto', stock: 'stocks', rwa: 'rwas', event: 'predictions' })[inst.kind] ?? null;
-
-// 32-bit FNV-1a: a seed for each market's wave
-export function fnv(str) {
-  let h = 2166136261;
-  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
-  return h >>> 0;
-}
-
-// 48 bars that end on the price: a deterministic wave, so a re-render and a test see the same chart
-export function seriesOf(inst, interval, now) {
-  const n = 48;
-  const step = INTERVALS[interval];
-  const amp = { '5m': 0.004, '1h': 0.02, '1d': 0.12 }[interval];
-  const p = inst.kind === 'event' ? inst.outcomes[0].price : inst.price;
-  const h = fnv(inst.id + interval);
-  const a = (h % 628) / 100, b = ((h >>> 10) % 628) / 100;
-  const wave = i => 0.6 * Math.sin(0.35 * i + a) + 0.4 * Math.sin(0.9 * i + b);
-  const end = Math.floor(now / step) * step;
-  return Array.from({ length: n }, (_, i) => {
-    let c = i === n - 1 ? p : p * (1 + (amp * (wave(i) - wave(n - 1))) / 2);
-    if (inst.kind === 'event') c = Math.min(0.99, Math.max(0.01, c));
-    return { t: end - (n - 1 - i) * step, c };
-  });
-}

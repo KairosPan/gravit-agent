@@ -2,7 +2,7 @@
 // What the host says about a conversation lives in reducers/host.js; what the operator does with the page lives here.
 import { nextId } from '../ids.js';
 import { byId } from '../data/plugins.js';
-import { instrument } from '../data/markets.js';
+import { canonicalId } from '../host/market-view.js';
 
 // one drawer at a time: an opener first closes whatever else was open, with any editor or confirm in it
 export const closeOverlays = s => ({
@@ -29,8 +29,8 @@ export const reducers = {
     }
     // a plugin that is not in the shop opens Discover
     if (route.screen === 'plugin' && !byId(route.id, state.plugins.uploaded)) route = { screen: 'discover', id: null };
-    // a market id is matched without case; one that is not a market opens Markets
-    if (route.screen === 'markets' && route.id) route = { screen: 'markets', id: instrument(route.id)?.id ?? null };
+    // a market id is the face's (us:AAPL, crypto:BTC/USD, cn:600519), canonicalised; one that is not opens Markets
+    if (route.screen === 'markets' && route.id) route = { screen: 'markets', id: canonicalId(route.id) };
     // a letter that is not in the mailbox opens the inbox
     if (route.screen === 'mail' && route.id && !state.mail.items.some(m => m.id === route.id)) route = { screen: 'mail', id: null };
     let s = { ...state, route, detailsOpen: false, settingsOpen: false, edit: null, confirm: null };

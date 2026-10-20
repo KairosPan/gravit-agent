@@ -8,13 +8,22 @@ import { withMiniDocument } from './helpers/mini-dom.js';
 
 const memory = () => { const m = new Map(); return { getItem: k => m.get(k) ?? null, setItem: (k, v) => m.set(k, v), removeItem: k => m.delete(k), m }; };
 
-test('parseHash and toHash round-trip; stage 1 folds every other screen to Messages', () => {
+test('parseHash and toHash round-trip; Messages and Markets route, every other screen folds to Messages', () => {
   assert.deepEqual(parseHash('#/messages/s1'), { screen: 'messages', id: 's1' });
   assert.equal(toHash({ screen: 'messages', id: 's1' }), '#/messages/s1');
   assert.deepEqual(routeOf('#/messages/s1'), { screen: 'messages', id: 's1' });
   assert.deepEqual(routeOf('#/discover'), { screen: 'messages', id: null });
-  assert.deepEqual(routeOf('#/markets/BTC'), { screen: 'messages', id: null });
+  assert.deepEqual(routeOf('#/markets/us:AAPL'), { screen: 'markets', id: 'us:AAPL' });
+  assert.deepEqual(routeOf('#/markets'), { screen: 'markets', id: null });
   assert.deepEqual(routeOf(''), { screen: 'messages', id: null });
+  // a crypto id carries its slash: the id is everything after #/markets/, written back raw
+  assert.equal(parseHash('#/markets/crypto:BTC/USD').id, 'crypto:BTC/USD');
+  assert.equal(toHash(parseHash('#/markets/crypto:BTC/USD')), '#/markets/crypto:BTC/USD');
+  assert.equal(parseHash('#/markets/crypto:BTC%2FUSD').id, 'crypto:BTC/USD', 'an encoded link reads the same');
+  assert.equal(parseHash('#/markets/').id, null);
+  assert.deepEqual(parseHash('#/trade'), { screen: 'messages', id: null }, 'Trade is gone');
+  assert.deepEqual(parseHash('#/account/venues'), { screen: 'account', tab: 'venues' });
+  assert.deepEqual(parseHash('#/account/memory'), { screen: 'account', tab: 'portfolio' }, 'Memory is not drawn');
 });
 
 test('initialState is the empty state plus the viewer\'s prefs; garbage prefs are ignored', () => {
@@ -22,11 +31,13 @@ test('initialState is the empty state plus the viewer\'s prefs; garbage prefs ar
   storage.setItem(PREFS_KEY, JSON.stringify({ theme: 'black', railCollapsed: true, lastConv: 's9', lastSeen: { s9: 40 }, watch: ['BTC'] }));
   const s = initialState(storage);
   assert.equal(s.theme, 'black'); assert.equal(s.railCollapsed, true); assert.equal(s.lastConv, 's9');
-  assert.deepEqual(s.lastSeen, { s9: 40 }); assert.deepEqual(s.markets.watch, ['BTC']);
+  assert.deepEqual(s.lastSeen, { s9: 40 });
+  assert.equal('watch' in s.markets, false, 'the watchlist lives under the face key, never in the prefs');
+  assert.deepEqual(s.markets.watchlist, []);
   assert.deepEqual(s.conversations, []);
   storage.setItem(PREFS_KEY, '{"theme":"neon","lastSeen":[1],"watch":"x"}');
   const bad = initialState(storage);
-  assert.equal(bad.theme, 'system'); assert.deepEqual(bad.lastSeen, {}); assert.deepEqual(bad.markets.watch, []);
+  assert.equal(bad.theme, 'system'); assert.deepEqual(bad.lastSeen, {});
   storage.setItem(PREFS_KEY, 'not json');
   assert.equal(initialState(storage).theme, 'system');
   assert.equal(initialState(null).theme, 'system');
@@ -39,9 +50,9 @@ test('the store writes only the prefs, never the conversations, and never loads 
   assert.deepEqual(store.get().conversations, []);
   store.dispatch('toggleRail');
   const saved = JSON.parse(storage.getItem(PREFS_KEY));
-  assert.deepEqual(Object.keys(saved).sort(), ['lastConv', 'lastSeen', 'railCollapsed', 'theme', 'watch']);
+  assert.deepEqual(Object.keys(saved).sort(), ['lastConv', 'lastSeen', 'railCollapsed', 'theme']);
   assert.equal(saved.railCollapsed, true);
-  assert.deepEqual(prefsOf(emptyState()), { theme: 'system', railCollapsed: false, lastConv: null, lastSeen: {}, watch: [] });
+  assert.deepEqual(prefsOf(emptyState()), { theme: 'system', railCollapsed: false, lastConv: null, lastSeen: {} });
 });
 
 test('settle routes by the hash and says which hash the address bar should show', () => {
@@ -49,6 +60,11 @@ test('settle routes by the hash and says which hash the address bar should show'
   assert.equal(settle(store, '#/messages/zz'), '#/messages', 'a missing conversation folds to none while the list is empty');
   assert.equal(store.get().route.screen, 'messages');
   assert.equal(settle(store, '#/trade'), '#/messages');
+  assert.equal(settle(store, '#/markets/us:aapl'), '#/markets/us:AAPL', 'a market id is written in its canonical form');
+  assert.deepEqual(store.get().route, { screen: 'markets', id: 'us:AAPL' });
+  assert.equal(settle(store, '#/markets/crypto:btc-usd'), '#/markets/crypto:BTC/USD');
+  assert.equal(settle(store, '#/markets/garbage'), '#/markets', 'one that is not a market opens Markets');
+  assert.equal(settle(store, '#/markets'), null);
 });
 
 test('Timers tracks pending timers and clear() cancels them', async () => {

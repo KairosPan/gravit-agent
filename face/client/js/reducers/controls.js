@@ -2,8 +2,8 @@
 // and the Account panels the later stages still draw.
 import { money } from '../html.js';
 import { reducers as messages, closeOverlays } from './messages.js';
-import { STANDIN_CASH, instrument, VENUES, CONNECTABLE } from '../data/markets.js';
-import { revalue, markOf, legsOf } from '../trade.js';
+import { STANDIN_CASH, VENUES, CONNECTABLE } from '../data/markets.js';
+import { revalue, markOf } from '../trade.js';
 import { reducers as account } from './account.js';
 
 const num = v => { const n = Number(String(v ?? '').trim()); return Number.isFinite(n) && n > 0 ? n : null; };
@@ -57,14 +57,11 @@ export const reducers = {
   },
   // Connect an account: a stand-in venue answers a moment later (app.js schedules venueConnected)
   connectVenue: (s, name) => (CONNECTABLE.includes(name) && !s.account.venues.some(v => v.name === name) ? { ...s, account: { ...s.account, connecting: name } } : s),
-  // a stand-in account arrives with its own dollars; a ticket waiting on this venue takes it
+  // a stand-in account arrives with its own dollars
   venueConnected(s, name) {
     if (s.account.venues.some(v => v.name === name)) return s;
     const cash = STANDIN_CASH[name] ? { ...s.account.cash, [name]: (s.account.cash?.[name] ?? 0) + STANDIN_CASH[name] } : s.account.cash;
-    const account = revalue({ ...s.account, connecting: null, cash, venues: [...s.account.venues, { name, line: 'Connected · stand-in · Gravit: read only', state: 'Healthy' }] });
-    const t = s.trade?.ticket;
-    const waits = t?.id && !t.venue && legsOf(instrument(t.id), account, t.outcome).some(l => l.state === 'able' && l.venue === name);
-    return { ...s, account, trade: waits ? { ...s.trade, ticket: { ...t, venue: name } } : s.trade };
+    return { ...s, account: revalue({ ...s.account, connecting: null, cash, venues: [...s.account.venues, { name, line: 'Connected · stand-in · Gravit: read only', state: 'Healthy' }] }) };
   },
   setCopied: (s, on) => (s.account.copied === !!on ? s : { ...s, account: { ...s.account, copied: !!on } }),
 

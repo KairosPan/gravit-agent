@@ -314,3 +314,88 @@ test('the theme comes from the prefs before the host answers, and a change is wr
   assert.equal(JSON.parse(m.get('gravit-ui.prefs')).theme, 'cream');
   store.timers.clear();
 });
+
+// Markets through host: fake live quotes and search, the browser's storage a memory
+function fakeMarkets() {
+  const live = { assets: [], visible: [], onUpdate: null };
+  const search = { queries: [], onUpdate: null };
+  return {
+    live, search,
+    createLiveQuotes: onUpdate => { live.onUpdate = onUpdate; return { setAssets(a) { live.assets.push(a.map(x => x.id)); }, setVisible(v) { live.visible.push(v); }, refresh() {}, close() {} }; },
+    createSymbolSearch: onUpdate => {
+      search.onUpdate = onUpdate;
+      return { search(q, market) { search.queries.push([q, market]); onUpdate({ query: q.trim(), market, status: q.trim() ? 'loading' : 'idle', assets: [], partial: false, truncated: false, note: '' }); }, cancel() {} };
+    },
+  };
+}
+const memoryStorage = () => { const m = new Map(); return { getItem: k => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k), m }; };
+const bootMarkets = (f, h, mk) => boot(f.win, { openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, createLiveQuotes: mk.createLiveQuotes, createSymbolSearch: mk.createSymbolSearch });
+const NVDA = { id: 'us:NVDA', market: 'us', symbol: 'NVDA', name: 'NVIDIA', exchange: 'NASDAQ', currency: 'USD' };
+
+test("typing in the search box searches; a star watches and writes the face's key; a row opens its page", async () => {
+  const storage = memoryStorage();
+  const f = fakeWindow({ hash: '#/markets', storage });
+  const mq = f.withId('mq', { tagName: 'INPUT', type: 'search', dataset: { action: 'mkQuery' } });
+  const h = host();
+  const mk = fakeMarkets();
+  const store = bootMarkets(f, h, mk);
+  await h.ready();
+  assert.match(f.html(), /<main class="main mkts">/);
+  assert.match(f.html(), /Nothing watched yet/);
+  mq.value = 'nvd';
+  f.fire('root', 'input', { target: mq });
+  assert.deepEqual(mk.search.queries.at(-1), ['nvd', 'all']);
+  assert.equal(store.get().markets.q, 'nvd');
+  assert.match(f.html(), /Searching…/);
+  mk.search.onUpdate({ query: 'nvd', market: 'all', status: 'success', assets: [NVDA], partial: false, truncated: false, note: '' });
+  await settle();
+  assert.match(f.html(), /<tr data-id="us:NVDA">/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'toggleWatch', id: 'us:NVDA' } });
+  assert.deepEqual(JSON.parse(storage.getItem('gravit.market.watchlist.v1')).items.map(a => [a.id, a.name]), [['us:NVDA', 'NVIDIA']]);
+  assert.match(f.html(), /aria-pressed="true" aria-label="Stop watching NVDA"/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'toggleWatch', id: 'us:NVDA' } });
+  assert.deepEqual(JSON.parse(storage.getItem('gravit.market.watchlist.v1')).items, [], 'a second press stops watching');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'mkClear' } });
+  assert.equal(store.get().markets.q, '');
+  assert.deepEqual(mk.search.queries.at(-1), ['', 'all']);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openMarket', id: 'us:NVDA' } });
+  await settle();
+  assert.equal(f.win.location.hash, '#/markets/us:NVDA');
+  assert.deepEqual(store.get().route, { screen: 'markets', id: 'us:NVDA' });
+  store.timers.clear();
+});
+
+test('leaving Markets pauses the quotes and coming back resumes them; a hidden tab pauses them too', async () => {
+  const f = fakeWindow({ hash: '#/markets', storage: memoryStorage() });
+  const h = host({ rows: [row('s1')] });
+  const mk = fakeMarkets();
+  const store = bootMarkets(f, h, mk);
+  await h.ready();
+  assert.equal(mk.live.visible.at(-1), true);
+  assert.equal(store.get().route.screen, 'markets', 'the list landing does not pull the page to Messages');
+  f.win.location.hash = '#/messages/s1';
+  await settle();
+  assert.equal(mk.live.visible.at(-1), false);
+  f.win.location.hash = '#/markets';
+  await settle();
+  assert.equal(mk.live.visible.at(-1), true);
+  f.doc.hidden = true;
+  f.fire('doc', 'visibilitychange');
+  assert.equal(mk.live.visible.at(-1), false);
+  f.doc.hidden = false;
+  f.fire('doc', 'visibilitychange');
+  assert.equal(mk.live.visible.at(-1), true);
+  store.timers.clear();
+});
+
+test('#/markets/garbage opens Markets; a lower-case id is written canonical', async () => {
+  const f = fakeWindow({ hash: '#/markets/garbage', storage: memoryStorage() });
+  const store = bootMarkets(f, host(), fakeMarkets());
+  assert.equal(f.win.location.hash, '#/markets');
+  assert.deepEqual(store.get().route, { screen: 'markets', id: null });
+  assert.match(f.html(), /<h1 class="head-title">Markets<\/h1>/);
+  f.win.location.hash = '#/markets/us:aapl';
+  await settle();
+  assert.equal(f.win.location.hash, '#/markets/us:AAPL');
+  store.timers.clear();
+});

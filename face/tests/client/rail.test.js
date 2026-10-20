@@ -19,10 +19,11 @@ const listed = (convs, open = convs[0]?.id ?? null, extra = {}) => {
   return R.nav(s, { screen: 'messages', id: open });
 };
 
-test('the first level: Messages, then Markets and Account as links to the old pages; no Discover, Trade, phone or mail', () => {
+test('the first level: Messages, Markets on the face, Account as a link to the old page; no Discover, Trade, phone or mail', () => {
   const h = renderNav(listed([conv('a')]));
   assert.match(h, /href="#\/messages\/a"[^>]*>[\s\S]*?Messages/);
-  assert.match(h, /href="\/market"[^>]*>[\s\S]*?Markets/);
+  assert.match(h, /class="nav-item" href="#\/markets"[^>]*>[\s\S]*?Markets/);
+  assert.doesNotMatch(h, /href="\/market"/);
   assert.match(h, /href="\/account"[^>]*class="account/);
   assert.match(h, /account-title">Account</);
   assert.match(h, /data-action="openSettings"/, 'the theme lives behind a Settings key at the foot');
@@ -105,4 +106,13 @@ test('a draft puts a New message row on top; the list is only on Messages', () =
   assert.ok(h.indexOf('New message') < h.indexOf('T a'));
   assert.equal(renderList({ ...s, route: { screen: 'account', tab: 'portfolio' } }, NOW), '');
   assert.match(renderRail(s, NOW), /class="rail"[\s\S]*class="list"/);
+});
+
+test('Markets links #/markets and is current on the Markets screen and on a market page', () => {
+  const list = renderNav(R.nav(listed([conv('a')]), { screen: 'markets', id: null }));
+  assert.match(list, /class="nav-item current" aria-current="page" href="#\/markets"/);
+  assert.doesNotMatch(list, /class="nav-item current"[^>]*href="#\/messages/);
+  const page = renderNav(R.nav(listed([conv('a')]), { screen: 'markets', id: 'us:AAPL' }));
+  assert.match(page, /class="nav-item current" aria-current="page" href="#\/markets"/);
+  assert.equal(renderList(R.nav(listed([conv('a')]), { screen: 'markets', id: null }), NOW), '', 'the conversation list belongs to Messages');
 });

@@ -52,8 +52,8 @@ function navItem(href, name, label, current, mini, badge = 0) {
     `<span class="nav-label">${esc(label)}</span>${badge ? `<span class="nav-badge">${badge}</span>` : ''}</a>`;
 }
 
-// the first level: Messages (its badge counts the conversations with a card waiting on you), Markets and Account —
-// the two still served as the old pages until stage 2 — and the collapse key; it collapses to a strip of icons
+// the first level: Messages (its badge counts the conversations with a card waiting on you), Markets, and Account —
+// still served as the old page until stage 2 moves it — and the collapse key; it collapses to a strip of icons
 export function renderNav(state) {
   const { screen } = state.route;
   const mini = !!state.railCollapsed;
@@ -64,7 +64,7 @@ export function renderNav(state) {
     `<button type="button" class="rail-toggle" data-action="toggleRail" aria-expanded="${mini ? 'false' : 'true'}" aria-label="${mini ? 'Expand navigation' : 'Collapse navigation'}">${icon(mini ? 'chevRight' : 'chevLeft', 16, 2.2)}</button></div>
   <div class="rail-group">
     ${navItem(messagesHref, 'chat', 'Messages', screen === 'messages', mini, waiting)}
-    ${navItem('/market', 'markets', 'Markets', false, mini)}
+    ${navItem('#/markets', 'markets', 'Markets', screen === 'markets', mini)}
   </div>
   <div class="rail-foot">
     <div class="rail-lines"><button type="button" class="line-key" data-action="openSettings" aria-label="Settings" title="Settings">${icon('bars', 20, 2)}</button></div>
