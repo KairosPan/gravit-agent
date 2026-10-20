@@ -437,3 +437,85 @@ US quotes and Alpaca bars, the bed-served chart (no bed in the worktree). Each i
 tests; the keyed look is the operator's, on a copy of the real home, with the drills before the
 branch lands.
 
+### Final review (2026-10-20)
+
+One fresh reviewer read the whole stage, 21d2a69..05ee46a, with the plan, the spec, the plan's
+Review Focus and the 38 rulings: a general-purpose agent on Opus 5.5, because the Fable model was
+at its usage limit. It ran the suites, ran `face_bars.py` against a real bed without keys, and
+measured the click finding in the browser pane. Verdict: **With fixes** — two Important, eight
+Minor, seventeen behaviours set aside.
+
+Strengths it named: `/data/bars` (fence, method, one id and one day count in range, the shared id
+grammar, exactly `[script, SYMBOL, DAYS]`, the per-key cache, stale on error, no child text in a
+503); `face_bars.py` (its own argument check, every read guarded at the window's end, nulls kept,
+fixed error words); no Chinese reaching a screen; every host and wire string escaped; the races
+handled by sequence numbers and single flights; the routes, the deletions and the docs.
+
+**Re-graded by effect** before the fix pass: five Minors became Important because each misleads
+the operator about money or makes a control look broken — a failed refresh showing the old
+numbers as current (3), the fill hidden by the 60 s account cache (4), partial fills missing from
+the Statement (5), `No quote` without its reason on a keyless face (7), Refresh doing nothing on
+Venues (9, ruling 31 reversed). The other three stay Minor.
+
+**The fix pass**, every fix under a test that failed first:
+
+1. *A click lost when a quote tick re-renders the page between its press and release* (measured:
+   four gestures, four mousedowns, no click). Renders now wait while a primary press is down —
+   at most `POINTER_HOLD_MS` (1 s), ended by `pointerup`, `pointercancel` or a blur, a press's own
+   timeout ending only that press — and land after the click; the store writes the prefs only
+   when they changed, not on every tick. app-dom `a press holds renders until it ends, so a
+   streaming quote cannot swallow the click`; store `save writes only when what it persists
+   changed`.
+2. *Most traded ranked raw units*, so DOGE outranked BTC and a $2.6M stock outranked the exact
+   Bitcoin match: it ranks by dollar volume now, price × volume, with nulls last; the volume still
+   reads in units. market-view `Most traded ranks by dollar volume, price × volume, so a coin and
+   a stock compare`.
+3. *A failed refresh with data loaded showed no sign of failure*: the numbers stay, stamped `As of
+   14:32 · stale`, with Retry. account `a 503 with nothing loaded: Account unavailable and Retry;
+   with data loaded: the data, stamped stale, and Retry`.
+4. *The read after a fill, and Refresh, could be served from the face's 60 s cache*: both ask for
+   `?fresh=1`, which the account route alone honours — skipping the TTL, never the single flight —
+   and only the latest-started read lands. data `?fresh=1 skips the account cache and still shares
+   one spawn; the other producer routes ignore it`; host-account `a fresh load reads ?fresh=1, and
+   its answer wins over a plain read it overlapped`; app-dom's Refresh and receipt tests.
+5. *The Statement dropped partial fills*: every order with a fill is on it, so it reconciles with
+   the positions. account-view `the statement keeps every fill: a partly filled order canceled
+   later, or still working, is on it; an unfilled one is not`.
+6. *A keyless US row read `No quote` without its reason*: a market whose provider is not
+   configured reads `Not configured`, on the row and on its page. market-view `a market whose
+   provider is not configured says so instead of No quote`; markets `with no Alpaca keys a US row
+   and its page say Not configured`.
+7. *Refresh on Venues re-read nothing Venues shows*: it reads the venue facts again too. app-dom
+   `Refresh reloads fresh; entering Account reads again; entering Venues describes, and Refresh
+   there describes again`.
+
+After the pass: face 942 tests, 926 pass, 16 skipped; `FACE_SMOKE=1` 942/942; pytest 400;
+typecheck clean.
+
+**The seventeen lines it set aside**, each ruled: they stand — `/market` and `/account` answer 404
+(the spec removes them; the entry is the sign-in URL); no CSV formula guard (Alpaca symbols cannot
+start with `= + - @`); Hand to Gravit replacing unsent composer words (stage 1's single composer);
+another tab's save replacing an unsaved list (storage failing in one tab only); a throwaway
+EventSource when leaving an unwatched page; a Stale flash while the stream restarts; an old hit
+quote reading Live in a double outage; no sequence guard on the Venues reads; the legend's
+rounding (ruling 33); no stale marker on the rail's net worth; Discover's `wallet` read and the
+dead ticker helpers (rulings 34, 35); the POSIX-only deadline; focus leaving a virtual keyboard; IEX
+volume labelled shares (Source names IEX); `Live · Closed` after the close; a failed bars read
+waiting for a reopen (ruling 27). One became a finding and was corrected in the docs: CLAUDE.md's
+`face/client/` row named stage 3, and CLAUDE.md states present-tense facts.
+
+### Deferred minors (stage 2)
+
+- The Statement's CSV writes the amount as the float it is (3 × 189.23 → `567.6899999999999`);
+  the screen formats to cents.
+- `Nothing watched yet` shows when a tab only filters the watched rows out (AAPL watched, Crypto
+  pressed).
+- `Gravit-Design.md` (lines 48, 103–104 — the charter, the operator's to amend) and
+  `dsh/README.md:155` still name `/market` and `/account`; `face_bars.py` now inherits the paper
+  keys too.
+- The reviewer's recommendations, not taken: a global cap on concurrent bars spawns (each distinct
+  key may start a producer of up to 30 s), a later revoke of the CSV blob URL for Safari, 302s from
+  `/market` and `/account` for old bookmarks, aborting an in-flight bars read when its page is left.
+- From the manual look: the landing page's three images stay captured from the old client until
+  new ones are taken.
+

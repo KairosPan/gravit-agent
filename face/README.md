@@ -489,12 +489,13 @@ tools, behind both gates.
 
 One table under the search box (`Search markets`), the tabs **All · Crypto · Stocks** (Stocks
 holds US and A shares together) and, with two or more rows, the sort **Most traded · Biggest
-moves** (by the quote's volume or the size of its move; a missing value sorts last either way,
-so A shares, whose volume is unavailable, end Most traded). A row: the star (`Watch AAPL` /
+moves** (by dollar volume — price × volume, so a coin's units and a stock's shares compare — or
+by the size of the move; a missing value sorts last either way, so A shares, whose volume is
+unavailable, end Most traded). A row: the star (`Watch AAPL` /
 `Stop watching AAPL`), the name with its symbol and exchange and a `Held` tag for a position,
 the price in its own currency (`$189.24`, `¥1,688.00`), the change, the volume (`52.3M shares`,
-`12.3k BTC`) and the quote's state — `Live`, `Delayed`, `Stale` or `No quote`, `· Closed` when
-the market is. Missing values stay em dashes. Green is a rise and red a fall in every market.
+`12.3k BTC`) and the quote's state — `Live`, `Delayed`, `Stale` or `No quote` (`Not configured`
+when the market's provider has no credentials), `· Closed` when the market is. Missing values stay em dashes. Green is a rise and red a fall in every market.
 
 With no query the rows are the watchlist, then the holdings not on it. With a query they are
 the search's hits (`N markets for “q”`, and Clear), each with one quote read for up to 30 hits.
@@ -533,7 +534,7 @@ known quote with its original timestamp and an explicit stale status.
 | Market | Provider and update path | Coverage and interpretation |
 |---|---|---|
 | US stocks/ETFs | Alpaca snapshots, trades and daily-bar WebSocket updates | `iex` by default, covering only IEX. Its stream subscribes to at most 30 symbols; remaining selected symbols use periodic snapshots. `sip` requires its entitlement; `delayed_sip` is labelled `SIP, delayed`. Changes use the previous session's close. |
-| A shares | iFinD `real_time_quotation`, only requested codes | Requires an iFinD access or refresh token. Without one, Venues reads `iFinD · Not configured` and the rows `No quote`. Polling defaults to 30 seconds while selected. Event timestamps are interpreted as Beijing time. Volume stays unavailable until its provider units can be verified with an account. |
+| A shares | iFinD `real_time_quotation`, only requested codes | Requires an iFinD access or refresh token. Without one, Venues reads `iFinD · Not configured` and the rows `Not configured`. Polling defaults to 30 seconds while selected. Event timestamps are interpreted as Beijing time. Volume stays unavailable until its provider units can be verified with an account. |
 | Cryptocurrency | Coinbase Exchange ticker/heartbeat WebSocket, per-product REST ticker/stats | Public USD pairs supported by Coinbase; a search result is not a guarantee of Coinbase coverage. Changes and volume use a rolling 24-hour window, labelled `24h`. |
 
 Snapshots initialize the display and refresh US/crypto baselines every 60
@@ -615,7 +616,8 @@ titles name the symbol, as links, when there are any.
 ### Account
 
 `/data/account.json` is read at boot (the rail shows the net worth under Account once it is
-known), on entering Account, on **Refresh** and right after a streamed order receipt. The head
+known), on entering Account, on **Refresh** and right after a streamed order receipt — the last
+two ask for a fresh read (`?fresh=1`), past the route's 60-second cache, so a fill shows at once. The head
 carries a `Paper` or `Live` chip from the read hostname — only `paper-api.alpaca.markets` is
 Paper.
 
@@ -624,14 +626,16 @@ Paper.
   change), the orders under Working, Filled, Closed and Other — Alpaca's 50 most recent, all
   statuses — and the Statement key. Without account credentials it reads `No APCA keys in the
   environment` in place of the numbers, never a zero balance; a failed read with nothing loaded
-  reads `Account unavailable` with Retry; a payload served from cache after a failure carries
-  `As of 14:32 · stale`.
-- **The Statement** (a drawer): the filled orders, newest first, with Export CSV — a
+  reads `Account unavailable` with Retry; a failed read after a good one keeps the numbers,
+  stamped `As of 14:32 · stale`, with Retry; a payload the face served from its cache after a
+  failure carries the same stamp.
+- **The Statement** (a drawer): every order with a fill — a partly filled one too, working or
+  canceled since — newest first, with Export CSV — a
   `statement.csv` (`date,side,qty,symbol,price,amount`) built in the browser.
 - **Venues**: the Alpaca row — the host, where the keys come from (`credentials/describe`:
   `Keys · env`, `No keys`, `Keys unknown`) and whether order tools are registered (`Order tools
-  on` / `off`, from the tool registry) — and the quote providers' state, each read on entering
-  Venues.
+  on` / `off`, from the tool registry) — and the quote providers' state, read on entering Venues
+  and again on Refresh there.
 
 | Env | Default | What |
 |---|---|---|
@@ -651,7 +655,8 @@ count of 5–730, both checked again by the producer. A successful payload is ca
 **bars 10 minutes per (symbol, days), at most 64 of them; watchlist 15 minutes, legacy market
 15 minutes, account 60 seconds**. Concurrent cache misses share one producer process. The bars,
 watchlist and account producers have a 30-second timeout; the old market producer has a
-10-minute timeout. Refresh re-reads the relevant endpoint and respects its cache. After a later
+10-minute timeout. A read respects its cache, except the account's Refresh and the read after a
+fill, which ask for `?fresh=1` and skip the 60 seconds (still one producer at a time). After a later
 read failure, the previous good payload is returned with `stale: true`; with nothing to fall
 back on the route answers 503, never with the child's error text.
 
