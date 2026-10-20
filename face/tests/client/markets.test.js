@@ -2,11 +2,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { INSTRUMENTS, TABS, KINDS, instrument, instrumentOf, listed, kindOf, seriesOf } from '../../client/js/data/markets.js';
-import { VENUES, CONNECTABLE } from '../../client/js/data/seed.js';
+import { VENUES, CONNECTABLE } from './helpers/seed.js';
 import { HOUR } from '../../client/js/time.js';
 import { renderMarkets } from '../../client/js/render/markets.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
-import { seed } from '../../client/js/data/seed.js';
+import { seed } from './helpers/seed.js';
 
 const NOW = new Date(2026, 9, 9, 14, 7).getTime();
 

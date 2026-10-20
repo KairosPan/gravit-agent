@@ -19,6 +19,9 @@ export const QUOTE_MS = 10 * MIN;
 export const FEES = { 'Stand-in Exchange': 0.001, 'Stand-in Wallet': 0.003, Coinbase: 0.004 };
 // a stand-in account's dollars the moment it connects
 export const STANDIN_CASH = { Coinbase: 500, 'Interactive Brokers': 1000, Polymarket: 300, Hyperliquid: 500 };
+// the stand-in places the later stages' screens still name (Account's Move form, the ticket's venues) until stage 2 reads the host
+export const VENUES = ['Stand-in Exchange', 'Stand-in Broker', 'Stand-in Wallet'];
+export const CONNECTABLE = ['Coinbase', 'Interactive Brokers', 'Polymarket', 'Hyperliquid'];
 
 const coin = (id, name, price, chg, vol, qtyStep, minQty, at) => ({ id, key: `crypto:${id}`, kind: 'coin', tabs: ['crypto'], name, base: id, price, chg, vol, qtyStep, minQty, at });
 const stock = (id, name, price, chg, vol, leg) => ({ id, key: `equity:${id}`, kind: 'stock', tabs: ['stocks'], name, base: id, price, chg, vol, qtyStep: 0.0001, minQty: 0.0001, minUsd: 1, at: [leg] });

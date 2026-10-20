@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { reducers as R } from '../../client/js/reducers/index.js';
-import { seed, SEED_VERSION } from '../../client/js/data/seed.js';
+import { seed, SEED_VERSION } from './helpers/seed.js';
 import { QUOTE_MS } from '../../client/js/data/markets.js';
 import { prepare, revalue, legsOf, routeOf, handOver, mentions } from '../../client/js/trade.js';
 import { instrument } from '../../client/js/data/markets.js';
@@ -158,18 +158,9 @@ test('cancelling: your own open order at once; Gravit\'s leaves a line in its co
   const ko = R.cancelOrder(fresh(), { id: 'ord-0008', now: NOW });
   assert.equal(ko.account.orders.find(o => o.id === 'ord-0008').status, 'canceled');
   const c4 = ko.conversations.find(c => c.id === 'c-4');
-  assert.deepEqual([c4.messages.at(-1).from, c4.messages.at(-1).text, c4.unread], ['system', 'You canceled ord-0008 (KO limit 58.2) in Trade.', true]);
+  assert.deepEqual([c4.messages.at(-1).from, c4.messages.at(-1).text], ['system', 'You canceled ord-0008 (KO limit 58.2) in Trade.']);
   const s = fresh();
   assert.equal(R.cancelOrder(s, { id: 'ord-0001', now: NOW }), s);
-});
-
-test('moving funds and the wallet keep quantity and value together; net worth stays', () => {
-  const p = R.openPanel(R.nav(fresh(), { screen: 'account', tab: 'portfolio' }), 'move');
-  const moved = R.moveFunds(p, { from: 'Stand-in Wallet', to: 'Stand-in Exchange', asset: 'USDC', amount: '200', now: NOW });
-  for (const h of moved.account.holdings.filter(x => x.name === 'USDC')) assert.equal(h.qty, h.value);
-  assert.equal(moved.account.netWorth, 12480);
-  const top = R.commitEdit(R.startEdit(fresh(), { kind: 'wallet', dir: 'in' }), { values: { amount: '10' }, now: NOW });
-  assert.deepEqual([held(top, 'USDC').qty, held(top, 'USDC').value, top.account.netWorth], [2480, 2480, 12480]);
 });
 
 test('Hand to Gravit words the ticket for the composer; mentions keeps ETH apart from ETH-3K', () => {

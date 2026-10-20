@@ -10,7 +10,7 @@
 <link rel="stylesheet" href="/client/css/app.css">
 <script>
   // the theme before the first paint: the saved choice, else the system's own
-  try { const t = localStorage.getItem('gravit-ui.theme'); if (t === 'cream' || t === 'black') document.documentElement.dataset.theme = t; } catch {}
+  try { const t = JSON.parse(localStorage.getItem('gravit-ui.prefs') ?? '{}').theme; if (t === 'cream' || t === 'black') document.documentElement.dataset.theme = t; } catch {}
 </script>
 </head>
 <body>

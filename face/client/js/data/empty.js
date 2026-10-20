@@ -11,6 +11,7 @@ export function emptyState() {
     settingsOpen: false,
     conversations: [],
     channels: [],
+    bots: [],
     status: { line: 'connecting…', bad: false, connected: false },
     orphanGates: {},
     lastSeen: {},

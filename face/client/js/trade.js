@@ -1,7 +1,7 @@
 // gravit-ui/js/trade.js — the owner's hand orders, after Linqi's live-orders rules (buyer-agent-demo ui/trade.js):
 // which venues can take a market, what an order would be (prepare), how a stand-in venue fills it, and what the fill changes
 import { CAP_USD, QUOTE_MS, FEES, instrument } from './data/markets.js';
-import { VENUES } from './data/seed.js';
+import { VENUES } from './data/markets.js';
 import { usd, dollars, px, cents, qtyFmt, floorTo, round2 } from './market-fmt.js';
 
 export const connectedNames = account => account.venues.filter(v => v.state === 'Healthy').map(v => v.name);

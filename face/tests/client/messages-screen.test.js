@@ -1,139 +1,93 @@
-// gravit-ui/tests/messages-screen.test.js
+// The Messages screen on the host's facts (spec 2026-10-19 §7): the head, the composer, the status line, the new-message
+// screen with its Where, the Details drawer with This task, Members, Usage, Stop and Change words.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { currentConversation, renderMessagesScreen, renderHead, renderComposer, renderDetails, renderBanner, renderCall } from '../../client/js/render/messages.js';
-import { seg, segLinks, kv, sec } from '../../client/js/render/controls.js';
+import { currentConversation, renderMessagesScreen, renderHead, renderComposer, renderDetails, renderStatus } from '../../client/js/render/messages.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
-import { seed } from '../../client/js/data/seed.js';
+import { emptyState } from '../../client/js/data/empty.js';
+import { MIN } from '../../client/js/time.js';
 
-const NOW = new Date(2026, 9, 9, 14, 7).getTime();
+const NOW = new Date(2026, 9, 19, 14, 7).getTime();
 const count = (h, re) => (h.match(re) ?? []).length;
+const conv = (id, over = {}) => ({ id, title: 'T ' + id, kind: 'gravit', members: ['gravit'], memberSessions: [], channel: null, preset: 'gravit', running: false, live: false, updatedAt: NOW - 5 * MIN, created: null, messages: [], loaded: false, preview: null, usage: null, thinking: null, lastSeen: 0, ...over });
+const channels = [{ workspaceId: 'w0', name: 'workbench', isRoot: true }, { workspaceId: 'w1', name: 'alpha', isRoot: false }];
+const bots = [{ id: 'buffett', name: 'Buffett Type' }];
+const listed = (convs, open = convs[0]?.id ?? null) => R.nav(R.hostList(emptyState(), { conversations: convs, channels, bots }), { screen: 'messages', id: open });
 
 test('currentConversation falls back to the first when the route names nothing or a missing id', () => {
-  const s = seed(NOW);
-  assert.equal(currentConversation(s).id, 'c-1');
-  assert.equal(currentConversation({ ...s, route: { screen: 'messages', id: 'c-99' } }).id, 'c-1');
-  assert.equal(currentConversation({ ...s, route: { screen: 'messages', id: 'c-3' } }).id, 'c-3');
+  const s = listed([conv('a'), conv('b')], 'b');
+  assert.equal(currentConversation(s).id, 'b');
+  assert.equal(currentConversation({ ...s, route: { screen: 'messages', id: 'zz' } }).id, 'a');
   assert.equal(currentConversation({ ...s, conversations: [] }), null);
 });
 
-test('F1: the head is title + Working + Details; the thread and the composer follow; no small print', () => {
-  const s = seed(NOW);
-  const h = renderMessagesScreen(s, NOW);
-  assert.match(h, /<main class="main">/);
-  assert.match(h, /<h1 class="head-title">Small BTC position under \$70k<\/h1>/);
-  assert.match(h, /class="status up"[^>]*>[\s\S]*?Working/);
-  assert.match(h, /data-action="toggleDetails" aria-expanded="false"/);
-  assert.match(h, /class="thread" id="thread"/);
+test('the head is the title, a Working chip only while the host runs a turn, and Details', () => {
+  const s = listed([conv('a', { title: 'BTC under 70k' })]);
+  const quiet = renderHead(currentConversation(s), s);
+  assert.match(quiet, /<h1 class="head-title">BTC under 70k<\/h1>/);
+  assert.doesNotMatch(quiet, /status up/);
+  assert.match(quiet, /data-action="toggleDetails"[^>]*aria-expanded="false"/);
+  const busy = renderHead({ ...currentConversation(s), running: true }, { ...s, detailsOpen: true });
+  assert.match(busy, /class="status up"><span class="status-dot"><\/span>Working</);
+  assert.match(busy, /aria-expanded="true"/);
+});
+
+test('a group head clusters the members and names them from the host\'s bots', () => {
+  const s = listed([conv('g', { kind: 'group', members: ['gravit', 'buffett'], title: 'Pick stocks' })]);
+  const h = renderHead(currentConversation(s), s);
+  assert.match(h, /head centered/); assert.equal(count(h, /class="cluster-item"/g), 2);
+  assert.match(h, /Gravit · Buffett Type · 2 members/);
+});
+
+test('the composer is the box and Send: no files, no mic', () => {
+  const h = renderComposer();
   assert.match(h, /<form class="composer" data-action="send">/);
-  assert.match(h, /aria-label="Add a file"/);
-  assert.match(h, /aria-label="Voice input"/);
-  assert.match(h, /type="submit" class="send-key" aria-label="Sign and send"/);
-  assert.match(h, /placeholder="Tell Gravit…"/);
-  assert.doesNotMatch(h, /Sending is/);
-  assert.doesNotMatch(h, /class="drawer/);
+  assert.match(h, /<input id="say" class="composer-input"[^>]*placeholder="Tell Gravit…"/);
+  assert.match(h, /class="send-key" aria-label="Send"/);
+  for (const gone of ['attachFiles', 'toggleMic', 'pickFile', 'attach-input']) assert.doesNotMatch(h, new RegExp(gone));
+  assert.match(renderComposer({ placeholder: 'Tell Gravit… @ a bot by name' }), /@ a bot by name/);
 });
 
-test('F14: a group gets the cluster head with the members line and the @ placeholder', () => {
-  const s = R.nav(seed(NOW), { screen: 'messages', id: 'c-4' });
-  const h = renderMessagesScreen(s, NOW);
-  assert.match(h, /<header class="head centered">/);
-  assert.equal(count(h, /class="cluster-item"/g), 3);
-  assert.match(h, /class="head-task">Pick stocks with Pelosi and Buffett</);
-  assert.match(h, /Gravit · US politician bot · Buffett bot · 3 members/);
-  assert.match(h, /placeholder="Tell Gravit… @ a bot by name"/);
+test('the status line under the composer carries the host\'s word, marked bad when it is', () => {
+  assert.equal(renderStatus({ line: '', bad: false, connected: true }), '');
+  assert.equal(renderStatus({ line: 'Reconnecting…', bad: true, connected: false }), '<div class="status-line bad" role="status">Reconnecting…</div>');
+  const s = R.hostStatus(listed([conv('a')]), { line: 'sent', bad: false });
+  assert.match(renderMessagesScreen(s, NOW), /class="status-line" role="status">sent</);
 });
 
-test('F7: the draft head is avatar + title input + To line; the limit chips sit over the composer; a group draft shows the cluster', () => {
-  let s = R.startDraft(seed(NOW), { now: NOW });
-  s = R.setDraftTitle(s, 'Buy a little SOL');
+test('the new-message screen: a title, Where among the channels with the root first, no To: row, no limit chips', () => {
+  const s = R.startDraft(listed([conv('a')]), { now: NOW });
+  assert.equal(s.draft.where, 'w0', 'the root channel is the default');
   const h = renderMessagesScreen(s, NOW);
-  assert.match(h, /<header class="head centered draft">/);
+  assert.match(h, /<input id="nm-title" class="title-input"[^>]*data-action="draftTitle"/);
+  assert.match(h, /<select id="nm-where" name="where"[^>]*data-action="draftWhere">/);
+  assert.match(h, /<option value="w0" selected>workbench<\/option><option value="w1">alpha<\/option>/);
   assert.match(h, /data-action="cancelDraft"/);
-  assert.match(h, /id="nm-title"[^>]*data-action="draftTitle"[^>]*value="Buy a little SOL"/);
-  assert.match(h, /class="to-label">To:</);
-  assert.match(h, /class="to-chip">[\s\S]*Gravit</);
-  assert.match(h, /data-action="toggleDraftPicker"/);
-  assert.match(h, /class="limit-label">Attach a limit</);
-  assert.match(h, /data-action="draftLimit" data-key="perOrder">\$25 an order/);
-  assert.match(h, /data-key="until">until Oct 15/);
-  assert.match(h, /data-key="venue">on Stand-in Exchange/);
-  assert.match(h, /data-action="toggleDraftAttach">None</);
-  const off = renderMessagesScreen(R.toggleDraftAttach(s), NOW);
-  assert.doesNotMatch(off, /data-key="perOrder"/);
-  assert.match(off, /data-action="toggleDraftAttach">Attach</);
-  const g = R.toggleDraftGroup(s);
-  assert.equal(g.draft.group, true);
-  const gh = renderMessagesScreen(g, NOW);
-  assert.equal(count(gh, /class="cluster-item"/g), 3, 'Gravit plus the two installed bots');
-  const sent = R.send(g, { text: 'You two, look at KO', now: NOW });
-  assert.equal(sent.conversations[0].kind, 'group');
-  assert.deepEqual(sent.conversations[0].members, ['gravit', 'politician', 'buffett']);
+  for (const gone of ['To:', 'Attach a limit', 'toggleDraftPicker', 'draftLimit']) assert.doesNotMatch(h, new RegExp(gone));
+  const moved = R.setDraftWhere(s, 'w1');
+  assert.match(renderMessagesScreen(moved, NOW), /<option value="w1" selected>/);
 });
 
-test('F7 picker: + Add a bot lists the installed bots; picking one makes a group draft with the @ placeholder', () => {
-  let s = R.toggleDraftPicker(R.startDraft(seed(NOW), { now: NOW }));
-  const h = renderMessagesScreen(s, NOW);
-  assert.match(h, /data-action="toggleDraftBot" data-id="politician" aria-pressed="false"/);
-  assert.match(h, /data-action="toggleDraftBot" data-id="buffett" aria-pressed="false"/);
-  s = R.toggleDraftBot(s, 'buffett');
-  const g = renderMessagesScreen(s, NOW);
-  assert.match(g, /data-action="toggleDraftBot" data-id="buffett" aria-pressed="true"/);
-  assert.equal(count(g, /class="cluster-item"/g), 2, 'Gravit and Buffett bot');
-  assert.match(g, /class="to-chip">[\s\S]*?Buffett bot</);
-  assert.match(g, /placeholder="Tell Gravit… @ a bot by name"/);
+test('Details: This task with its facts and Change words, Members for a group, Usage when the host reported it, Stop only while running', () => {
+  const quiet = listed([conv('a', { title: 'BTC under 70k', created: NOW - 3 * 24 * 60 * MIN, channel: { workspaceId: 'w1', name: 'alpha' } })]);
+  const h = renderDetails(currentConversation(quiet), quiet);
+  assert.match(h, /dsec-title">BTC under 70k</);
+  assert.match(h, /data-action="changeWords"/);
+  assert.match(h, />Where<[\s\S]*?>alpha</); assert.match(h, />Agent<[\s\S]*?>Gravit</);
+  assert.match(h, />Created</);
+  for (const gone of ['Limit', 'wallet', 'Mode', 'withdraw', 'Beast', 'stopGravit', 'Usage', 'Members']) assert.doesNotMatch(h, new RegExp(gone), gone);
+  const busy = listed([conv('b', { running: true, kind: 'group', members: ['gravit', 'buffett'], usage: { tokenUsage: { uncachedInputTokens: 8123, outputTokens: 2411, cacheReadTokens: 51200, cacheWriteTokens: 900 }, contextPressure: 0.42 } })]);
+  const d = renderDetails(currentConversation(busy), busy);
+  assert.match(d, /data-action="stopGravit"[^>]*data-conv="b"/);
+  assert.match(d, />Members<[\s\S]*?Buffett Type/);
+  assert.match(d, />Tokens in<[\s\S]*?>59,323</); assert.match(d, />Tokens out<[\s\S]*?>2,411</); assert.match(d, />Context<[\s\S]*?>42%</);
+  assert.match(renderDetails(currentConversation(listed([conv('c', { channel: null, created: null })])), quiet), />Where<[\s\S]*?>Default directory</);
+  const asking = R.askConfirm(busy, { action: 'stopGravit', id: 'b' });
+  assert.match(renderDetails(currentConversation(asking), asking), /data-action="confirmYes"/);
 });
 
-test('F6: no conversations → the empty state with three suggestion chips', () => {
-  const s = { ...seed(NOW), conversations: [], route: { screen: 'messages', id: null } };
-  const h = renderMessagesScreen(s, NOW);
-  assert.match(h, /class="empty-title">Nothing handed to Gravit yet</);
+test('the empty state offers three plain prompts', () => {
+  const h = renderMessagesScreen(listed([]), NOW);
   assert.equal(count(h, /data-action="suggest"/g), 3);
-  assert.match(h, /data-text="Follow Pelosi"/);
-  assert.match(h, /<form class="composer"/);
-});
-
-test('F8: Details drawer sections and keys', () => {
-  const s = R.toggleDetails(seed(NOW));
-  const h = renderMessagesScreen(s, NOW);
-  assert.match(h, /<main class="main with-drawer">/);
-  assert.match(h, /<aside class="drawer details" aria-label="Details">/);
-  assert.match(h, /data-action="toggleDetails" aria-expanded="true"/);
-  const d = renderDetails(s.conversations[0], s);
-  assert.match(d, /Delegated Oct 9 · until Oct 15 · intent-0003/);
-  assert.match(d, /data-action="withdraw" data-conv="c-1"/);
-  assert.match(d, /data-action="changeWords" data-conv="c-1"/);
-  assert.match(d, /\$95/, 'what is left of the limit');
-  assert.match(d, /data-action="endLimit" data-conv="c-1"/);
-  assert.match(d, /Price feed/);
-  assert.match(d, /href="#\/discover"/);
-  assert.match(d, /0xec4c…16c1/);
-  assert.match(d, /class="seg-item pressed" aria-pressed="true" data-action="setMode" data-value="Guard"/);
-  assert.match(d, /class="btn-danger" data-action="stopGravit" data-conv="c-1"/);
-  const none = renderDetails({ ...s.conversations[2] }, s);
-  assert.match(none, /No limit attached/);
-  const renamed = R.rename(s, { convId: 'c-1', title: '  Small BTC  ' });
-  assert.equal(renamed.conversations[0].title, 'Small BTC');
-  assert.equal(R.rename(s, { convId: 'c-1', title: '  ' }), s);
-});
-
-test('banner, call, stub and the controls', () => {
-  const s = seed(NOW);
-  const b = renderBanner({ id: 'b', headline: 'H', body: 'B', at: NOW }, s);
-  assert.match(b, /class="banner" role="status"/);
-  assert.match(b, />Breaking</);
-  assert.match(b, /14:07/);
-  assert.match(b, /data-action="dismissBanner" aria-label="Dismiss"/);
-  assert.match(b, /href="#\/messages\/c-1"/);
-  const c = renderCall({ from: 'gravit', about: 'About BTC' });
-  assert.match(c, /class="call-scrim"/);
-  assert.match(c, /class="key no big" data-action="answerCall" data-accept="0" aria-label="Decline"/);
-  assert.match(c, /class="key yes big" data-action="answerCall" data-accept="1" aria-label="Accept"/);
-  const onC3 = R.nav(s, { screen: 'messages', id: 'c-3' });
-  assert.match(renderBanner({ id: 'b', headline: 'H', body: 'B', at: NOW }, onC3), /href="#\/messages\/c-3"/, 'the banner leads to the thread it covers');
-  assert.equal(seg(['A', 'B'], 'B', 'pick'), '<div class="seg"><button type="button" class="seg-item" aria-pressed="false" data-action="pick" data-value="A">A</button><button type="button" class="seg-item pressed" aria-pressed="true" data-action="pick" data-value="B">B</button></div>');
-  assert.match(segLinks([['Portfolio', '#/account/portfolio', 'portfolio'], ['Memory', '#/account/memory', 'memory']], 'memory'), /class="seg-item pressed" aria-current="page" href="#\/account\/memory"/);
-  assert.equal(kv([['For', '<b>x</b>']]), '<div class="kv-list"><div class="kv"><span class="kv-k">For</span><span class="kv-v"><b>x</b></span></div></div>');
-  assert.equal(sec('How it is paid', ['<Free>']), '<div class="dsec"><div class="dsec-label">How it is paid</div><div class="dsec-line">&lt;Free&gt;</div></div>');
-  assert.match(renderComposer({ placeholder: 'x', above: '<i>a</i>' }), /<form class="composer" data-action="send"><i>a<\/i>/);
+  assert.match(h, /Nothing handed to Gravit yet/);
 });

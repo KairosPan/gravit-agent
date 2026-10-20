@@ -1,38 +1,39 @@
-// gravit-ui/js/render/rail.js — the two-level navigation: a first level that collapses to icons, and the conversation list as the second level on Messages
+// face/client/js/render/rail.js — the two-level navigation on the host's facts (spec 2026-10-19 §7 "Rail", "List"):
+// a first level that collapses to icons, and the conversation list as the second level on Messages.
 import { esc, attrs, cls } from '../html.js';
 import { icon } from '../icons.js';
-import { byId } from '../data/plugins.js';
 import { rowTime } from '../time.js';
+import { needsAnswer } from '../messages.js';
+import { unreadOf } from '../host/sessions.js';
 import { avatar, groupMark } from './avatars.js';
-import { renderMailList } from './mail.js';
 
 const NAME = { you: 'You', gravit: 'Gravit', system: '' };
+// a bot's display name comes with the list (/data/bots.json); an unknown sender keeps its id
 export function senderName(from, state) {
-  return NAME[from] ?? byId(from, state?.plugins?.uploaded ?? [])?.name ?? from;
+  return NAME[from] ?? state?.bots?.find(b => b.id === from)?.name ?? from;
 }
 
+// the host's one-message page fills `preview`; until it lands, the last message drawn stands in
 export function previewOf(conv, state = null) {
+  if (typeof conv.preview === 'string' && conv.preview !== '') return conv.preview;
   const m = conv.messages.at(-1);
   if (!m) return '';
-  const body = {
-    receipt: `${m.data.status} · ${m.text}`, brief: `Morning brief · ${m.data.date}`, ta: `${m.data.ticker} technicals`, breaking: m.data.headline ?? m.text, call: 'Gravit called',
-  }[m.kind] ?? m.text;
   const who = m.from === 'you' ? '' : senderName(m.from, state);
-  return conv.kind === 'group' && who ? `${who}: ${body}` : body;
+  const name = m.data?.name ?? who;
+  return conv.kind === 'group' && name ? `${name}: ${m.text}` : m.text;
 }
 
 function rowMark(conv, state) {
   if (conv.kind === 'group') return groupMark(conv.members, 36, state);
-  const who = conv.kind === 'bot' ? conv.members.find(x => x !== 'gravit') ?? 'gravit' : 'gravit';
+  const who = conv.kind === 'bot' ? conv.preset ?? conv.members.find(x => x !== 'gravit') ?? 'gravit' : 'gravit';
   return avatar(who, 36, state);
 }
 
 function row(conv, state, now) {
   const current = state.route.screen === 'messages' && state.route.id === conv.id;
-  const last = conv.messages.at(-1);
   return `<a${attrs({ class: cls('row', current && 'current'), 'aria-current': current ? 'page' : null, href: `#/messages/${conv.id}`, 'data-action': 'open', 'data-id': conv.id })}>` +
-    `<span class="${cls('dot', conv.unread && 'on')}"></span>${rowMark(conv, state)}` +
-    `<span class="row-body"><span class="row-top"><span class="row-title">${esc(conv.title)}</span><span class="row-time">${last ? rowTime(last.at, now) : ''}</span></span>` +
+    `<span class="${cls('dot', unreadOf(conv) && 'on')}"></span>${rowMark(conv, state)}` +
+    `<span class="row-body"><span class="row-top"><span class="row-title">${esc(conv.title)}</span><span class="row-time">${conv.updatedAt ? rowTime(conv.updatedAt, now) : ''}</span></span>` +
     `<span class="row-preview">${esc(previewOf(conv, state))}</span></span></a>`;
 }
 
@@ -47,35 +48,29 @@ function navItem(href, name, label, current, mini, badge = 0) {
     `<span class="nav-label">${esc(label)}</span>${badge ? `<span class="nav-badge">${badge}</span>` : ''}</a>`;
 }
 
-// the first level: Messages · Discover · Markets · Trade, the phone key and the mail key, Account; it collapses to a strip of icons
+// the first level: Messages (its badge counts the conversations with a card waiting on you), Markets and Account —
+// the two still served as the old pages until stage 2 — and the collapse key; it collapses to a strip of icons
 export function renderNav(state) {
   const { screen } = state.route;
   const mini = !!state.railCollapsed;
-  const unread = state.conversations.filter(c => c.unread).length;
+  const waiting = state.conversations.filter(c => c.messages.some(needsAnswer)).length;
   const messagesHref = `#/messages/${screen === 'messages' && state.route.id && state.route.id !== 'new' ? state.route.id : state.lastConv ?? state.conversations[0]?.id ?? ''}`;
-  const mailUnread = (state.mail?.items ?? []).filter(m => !m.read).length;
-  const accountCurrent = screen === 'account';
-  const mailCurrent = screen === 'mail';
   return `<nav class="${cls('rail', mini && 'mini')}" aria-label="Gravit">
   <div class="brand">${avatar('gravit', 28)}<span class="brand-name">Gravit</span>` +
     `<button type="button" class="rail-toggle" data-action="toggleRail" aria-expanded="${mini ? 'false' : 'true'}" aria-label="${mini ? 'Expand navigation' : 'Collapse navigation'}">${icon(mini ? 'chevRight' : 'chevLeft', 16, 2.2)}</button></div>
   <div class="rail-group">
-    ${navItem(messagesHref, 'chat', 'Messages', screen === 'messages', mini, unread)}
-    ${navItem('#/discover', 'compass', 'Discover', screen === 'discover' || screen === 'plugin', mini)}
-    ${navItem('#/markets', 'markets', 'Markets', screen === 'markets', mini)}
-    ${navItem('#/trade', 'trade', 'Trade', screen === 'trade', mini)}
+    ${navItem(messagesHref, 'chat', 'Messages', screen === 'messages', mini, waiting)}
+    ${navItem('/market', 'markets', 'Markets', false, mini)}
   </div>
   <div class="rail-foot">
-    <div class="rail-lines"><button type="button" class="${cls('line-key', state.call && 'on')}" data-action="phoneCall" aria-label="Phone">${icon('phone', 20, 2)}</button>` +
-      `<a${attrs({ id: 'mail-key', class: cls('line-key', mailCurrent && 'current'), href: '#/mail', 'aria-label': 'Mail', 'aria-current': mailCurrent ? 'page' : null, title: mini ? 'Mail' : null })}>${icon('mail', 20, mailCurrent ? 2.1 : 2)}${mailUnread ? `<span class="nav-badge">${mailUnread}</span>` : ''}</a></div>
-    <a${attrs({ href: '#/account/portfolio', class: cls('account', accountCurrent && 'current'), 'aria-current': accountCurrent ? 'page' : null, title: mini ? 'Account' : null })}>${icon('wallet', 22, accountCurrent ? 2.1 : 2)}<span class="account-body"><span class="account-title">Account</span><span class="account-line">$${state.account.netWorth.toLocaleString('en-US')} · ${state.account.mode === 'beast' ? 'Beast' : 'Guard'}</span></span></a>
+    <div class="rail-lines"><button type="button" class="line-key" data-action="openSettings" aria-label="Settings" title="Settings">${icon('bars', 20, 2)}</button></div>
+    <a${attrs({ href: '/account', class: 'account', title: mini ? 'Account' : null })}>${icon('wallet', 22, 2)}<span class="account-body"><span class="account-title">Account</span></span></a>
   </div>
 </nav>`;
 }
 
-// the second level, open on Messages (the conversations, the new-message key on top) and on Mail (the letters)
+// the second level, open on Messages: the conversations, newest first, with the new-message key on top
 export function renderList(state, now) {
-  if (state.route.screen === 'mail') return renderMailList(state, now);
   if (state.route.screen !== 'messages') return '';
   const rows = (state.draft ? draftRow() : '') + state.conversations.map(c => row(c, state, now)).join('');
   return `<aside class="list" aria-label="Messages"><div class="list-head"><h2 class="list-title">Messages</h2>` +

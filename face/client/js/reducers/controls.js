@@ -1,86 +1,36 @@
-// gravit-ui/js/reducers/controls.js — the in-page controls: inline editors and two-step confirms (they replaced prompt and confirm)
-import { DAY } from '../time.js';
+// face/client/js/reducers/controls.js — the in-page controls: inline editors and two-step confirms (they replaced prompt and confirm),
+// and the Account panels the later stages still draw.
 import { money } from '../html.js';
 import { reducers as messages, closeOverlays } from './messages.js';
-import { STANDIN_CASH, instrument } from '../data/markets.js';
+import { STANDIN_CASH, instrument, VENUES, CONNECTABLE } from '../data/markets.js';
 import { revalue, markOf, legsOf } from '../trade.js';
 import { reducers as account } from './account.js';
-import { VENUES, CONNECTABLE } from '../data/seed.js';
 
 const num = v => { const n = Number(String(v ?? '').trim()); return Number.isFinite(n) && n > 0 ? n : null; };
 const fail = (s, error) => ({ ...s, edit: { ...s.edit, error } });
 const done = s => ({ ...s, edit: null });
-
-// move USDC between you and Gravit's wallet: in = Top up from your USDC holding, out = Take back into it
-// returns the new state, or the reason it cannot move
-function walletMove(s, dir, amount, now) {
-  const w = s.account.wallet;
-  const yours = s.account.holdings.find(h => h.key === 'stable:USDC');
-  if (dir === 'out' && amount > w.usdc) return { error: `The wallet only has ${money(w.usdc)}` };
-  if (dir === 'in' && amount > (yours?.value ?? 0)) return { error: `Your USDC is only ${money(yours?.value ?? 0)}` };
-  const sign = dir === 'in' ? 1 : -1;
-  const round = n => Math.round(n * 100) / 100;
-  return { state: {
-    ...s,
-    account: revalue({
-      ...s.account,
-      wallet: { ...w, usdc: round(w.usdc + sign * amount) },
-      holdings: s.account.holdings.map(h => (h.key === 'stable:USDC' ? { ...h, qty: round((h.qty ?? h.value) - sign * amount), value: round(h.value - sign * amount) } : h)),
-      activity: [{ at: now, text: `${dir === 'in' ? 'Top up' : 'Take back'} ${money(amount)} · Gravit’s wallet`, amount: -sign * amount }, ...s.account.activity],
-    }),
-  } };
-}
 
 export const reducers = {
   startEdit: (s, spec) => ({ ...s, edit: spec, confirm: null }),
   cancelEdit: s => (s.edit ? { ...s, edit: null } : s),
 
   // one commit for every editor: it reads the values the editor's inputs held and checks them
-  commitEdit(s, { values = {}, now }) {
+  commitEdit(s, { values = {} }) {
     const e = s.edit;
     if (!e) return s;
     switch (e.kind) {
-      case 'draftLimit': {
-        if (!s.draft) return done(s);
-        if (e.key === 'venue') return VENUES.includes(values.value) ? done(messages.setDraftLimit(s, { key: 'venue', value: values.value })) : fail(s, 'Pick a venue');
-        const n = num(values.value);
-        if (!n) return fail(s, 'Needs a number above 0');
-        return done(messages.setDraftLimit(s, { key: e.key, value: e.key === 'until' ? now + n * DAY : n }));
-      }
       case 'rename': {
         const t = String(values.title ?? '').trim();
         return t ? done(messages.rename(s, { convId: e.convId, title: t })) : fail(s, 'Cannot be empty');
-      }
-      case 'limit': {
-        const perOrder = num(values.perOrder), total = num(values.total);
-        if (!perOrder || !total) return fail(s, 'Needs a number above 0');
-        if (perOrder > total) return fail(s, 'Per order cannot exceed the total');
-        return done(messages.changeLimit(s, { convId: e.convId, limit: { perOrder, total } }));
       }
       case 'memory': {
         const t = String(values.text ?? '').trim();
         return t ? done(account.editMemory(s, { id: e.id, text: t })) : fail(s, 'Cannot be empty');
       }
-      case 'wallet': {
-        const n = num(values.amount);
-        if (!n) return fail(s, 'Needs a number above 0');
-        const moved = walletMove(s, e.dir, n, now);
-        return moved.state ? done(moved.state) : fail(s, moved.error);
-      }
       default:
         return done(s);
     }
   },
-
-  // the composer's tray of picked files (names and sizes only: this front end never reads them) and the mic
-  addFiles(s, files) {
-    const had = s.compose?.files ?? [];
-    const fresh = (files ?? []).filter(f => f?.name && !had.some(h => h.name === f.name)).map(f => ({ name: String(f.name), size: Number(f.size) || 0 }));
-    return fresh.length ? { ...s, compose: { ...s.compose, files: [...had, ...fresh] } } : s;
-  },
-  removeFile: (s, i) => (s.compose?.files?.[i] ? { ...s, compose: { ...s.compose, files: s.compose.files.filter((_, k) => k !== i) } } : s),
-  setListening: (s, on) => (!!s.compose?.listening === !!on ? s : { ...s, compose: { ...s.compose, listening: !!on } }),
-
 
   // Account's panels (Move, Receive, Statement, Connect): drawers, one at a time
   openPanel: (s, panel) => { const c = closeOverlays(s); return { ...c, account: { ...c.account, panel, panelError: null, copied: false } }; },
@@ -120,11 +70,5 @@ export const reducers = {
 
   askConfirm: (s, spec) => ({ ...s, confirm: spec, edit: null }),
   cancelConfirm: s => (s.confirm ? { ...s, confirm: null } : s),
-
-  // End limit: what is left closes, the total drops to what was spent
-  endLimit(s, { convId }) {
-    const c = s.conversations.find(x => x.id === convId);
-    if (!c?.intent.limit) return s;
-    return messages.changeLimit(s, { convId, limit: { total: c.intent.limit.spent } });
-  },
 };
+

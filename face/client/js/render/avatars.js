@@ -15,9 +15,12 @@ export function mark(spec, size, radius, name) {
 export function avatar(who, size = 28, state = null) {
   if (who === 'you') return `<span class="av av-you" style="width:${size}px;height:${size}px;font-size:${Math.round(size * 0.36)}px">You</span>`;
   if (who === 'gravit') return `<span class="av av-g" style="width:${size}px;height:${size}px;font-size:${Math.round(size * 0.46)}px">G</span>`;
-  const p = byId(who, state?.plugins?.uploaded ?? []);
-  const spec = p?.avatar ?? (p?.logo?.type === 'portrait' ? p.logo : null) ?? { type: 'letter', text: (p?.name ?? who).slice(0, 1).toUpperCase(), tone: 'grey' };
-  return mark(spec, size, '999px', p?.name ?? who);
+  // a bot the host lists gets the letter of its name; the catalogue's marks stay for the later stages' plugins
+  const bot = state?.bots?.find(b => b.id === who);
+  const p = bot ? null : byId(who, state?.plugins?.uploaded ?? []);
+  const name = bot?.name ?? p?.name ?? who;
+  const spec = p?.avatar ?? (p?.logo?.type === 'portrait' ? p.logo : null) ?? { type: 'letter', text: name.slice(0, 1).toUpperCase(), tone: 'grey' };
+  return mark(spec, size, '999px', name);
 }
 
 export function logo(plugin, size = 44) {

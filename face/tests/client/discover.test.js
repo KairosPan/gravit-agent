@@ -3,9 +3,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { renderDiscover, renderPlugin, card, keyFor, pluginPage, renderCreate, renderToast } from '../../client/js/render/discover.js';
 import { byId, PLUGINS } from '../../client/js/data/plugins.js';
-import { nextUpload } from '../../client/js/driver.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
-import { seed } from '../../client/js/data/seed.js';
+import { seed } from './helpers/seed.js';
 
 const NOW = new Date(2026, 9, 9, 14, 7).getTime();
 const count = (h, re) => (h.match(re) ?? []).length;
@@ -147,64 +146,6 @@ test('Create opens Discover\'s own MCP face: its address, its seven tools, a lin
   assert.match(cursor, /value="Cursor" data-action="mcpClient" checked/);
   assert.match(renderCreate(R.setClient(s, 'Codex')), /<div class="snippet-file mono">~\/\.codex\/config\.toml<\/div><pre class="snippet-code mono">\[mcp_servers\.discover\]\nurl = &quot;https:\/\/discover\.stand-in\/mcp&quot;<\/pre>/);
   assert.match(renderCreate(R.setCreateCopied(s, true)), /data-action="copyMcp">Copied<\/button>/);
-});
-
-test('the client connects and calls shop.mine, then asks shop.publish: the owner sees the manifest and signs, or refuses', () => {
-  const s0 = R.openCreate(disc());
-  const r = s0.discover.create.run;
-  const connected = R.clientConnected(R.startClient(s0, { run: r }), { run: r });
-  const c = renderCreate(connected);
-  assert.match(c, /<span class="status up"><span class="status-dot"><\/span>Claude Code connected<\/span>/);
-  assert.doesNotMatch(c, /name="client"|mcp-copy/, 'the line to copy has done its job');
-  assert.match(c, /<div class="tool-row"><span class="mono">shop\.mine\(\)<\/span><span class="spacer"><\/span><span class="tool-state ok">/);
-  const sign = R.clientPublishes(connected, { run: r, manifest: nextUpload([]) });
-  const m = renderCreate(sign);
-  assert.match(m, /<span class="mono">shop\.publish\(moat, private\)<\/span><span class="spacer"><\/span><span class="tool-state wait">…<\/span>/);
-  assert.match(m, /<div class="manifest">[\s\S]*?class="pcard-name">Moat score<[\s\S]*?class="pcard-blurb">Moat scores, ask by ticker<[\s\S]*?class="pcard-kind">DATA</);
-  assert.match(m, /<span class="kv-k">Tools<\/span><span class="kv-v"><span class="mono">moat\.score · moat\.compare<\/span>/);
-  assert.match(m, /<span class="kv-k">What it needs from you<\/span><span class="kv-v">Nothing./);
-  assert.match(m, /type="radio" name="visibility" value="private" data-action="uploadVisibility" checked><span>Just me · Private<\/span>/);
-  assert.match(m, /value="public" data-action="uploadVisibility"><span>Public shop<\/span>/);
-  assert.match(m, /<span class="kv-k">What you sign<\/span><span class="kv-v"><b>publish moat · private<\/b>/);
-  assert.match(m, /<span class="kv-k">For<\/span><span class="kv-v">Gravit · 0xec4c…16c1/);
-  assert.match(m, /<span class="kv-k">May<\/span><span class="kv-v">answer when asked · write into the conversation/);
-  assert.match(m, /<span class="kv-k">Until<\/span><span class="kv-v">you uninstall/);
-  assert.match(m, /data-action="rejectUpload">Refuse<\/button><button type="button" class="btn-primary" data-action="publishUpload">Publish<\/button>/);
-  const pub = renderCreate(R.setUploadVisibility(sign, 'public'));
-  assert.match(pub, /shop\.publish\(moat, public\)/);
-  assert.match(pub, /<b>publish moat · public<\/b>/);
-  assert.match(pub, /<span class="kv-k">For<\/span><span class="kv-v">Public shop/);
-  assert.doesNotMatch(pub, /Until/);
-  const no = renderCreate(R.rejectUpload(sign));
-  assert.match(no, /shop\.publish\(moat, private\)<\/span><span class="spacer"><\/span><span class="tool-state no">/);
-  assert.doesNotMatch(no, /publishUpload|manifest/);
-});
-
-test('a private upload lands first on its shelf, installed, with Open in Messages; a public one waits for review behind a clock key', () => {
-  let s = R.publishUpload(atSign(R.openCreate(disc()), nextUpload([])), { now: NOW });
-  const h = renderDiscover(s);
-  const data = h.slice(h.indexOf('shelf-title">Data'), h.indexOf('shelf-title">Monitors'));
-  assert.match(data, /<div class="shelf-row"><div class="pcard" data-action="openPlugin" data-id="moat"/, 'first on the Data shelf');
-  assert.match(data, /data-id="moat"[\s\S]*?Open in Messages ›[\s\S]*?class="pkey uninstall" data-action="uninstall" data-id="moat"/);
-  assert.match(h, /class="toast" role="status">Moat score uploaded · Private<a class="toast-key" href="#\/messages\/c-5">Open<\/a>/);
-  const moat = byId('moat', s.plugins.uploaded);
-  assert.match(pluginPage(moat, s), /class="dim">Data · Private</);
-  assert.match(pluginPage(moat, s), /<div class="dsec-label">Tools<\/div><div class="dsec-line"><span class="mono">moat\.score<\/span><\/div>/);
-  assert.match(pluginPage(byId('pairs'), s), /class="dim">Quant · Private</, 'your own plugin says where it is, not who made it');
-  assert.match(renderDiscover(R.nav(s, { screen: 'discover', id: 'data' })), /<div class="grid"><div class="pcard in-grid" data-action="openPlugin" data-id="moat"/, 'and first in See all');
-  s = R.publishUpload(R.setUploadVisibility(atSign(R.openCreate(s), nextUpload(s.plugins.uploaded)), 'public'), { now: NOW });
-  const cpi = byId('cpi', s.plugins.uploaded);
-  assert.match(keyFor(cpi, s), /^<span class="pkey-wait" role="img" aria-label="In review">/);
-  const d = pluginPage(cpi, s);
-  assert.match(d, /class="dim">Data · In review</);
-  assert.match(d, /<button type="button" id="plug-key" class="btn-primary" disabled>In review<\/button>/);
-  assert.doesNotMatch(d, /What you sign/);
-  assert.match(renderDiscover(s), /class="toast" role="status">CPI quick read uploaded · In review<\/div>/);
-  const passed = R.reviewPassed(s, { id: 'cpi', now: NOW });
-  assert.match(keyFor(byId('cpi', passed.plugins.uploaded), passed), /class="pkey install" data-action="install" data-id="cpi"/);
-  assert.match(pluginPage(byId('cpi', passed.plugins.uploaded), passed), /class="dim">Data · Public</);
-  assert.match(renderToast(passed.discover.toast), /<a class="toast-key" href="#\/plugin\/cpi">Open<\/a>/);
-  for (const st of [s, passed]) assert.doesNotMatch(renderDiscover(R.toggleInstalledOnly(st)) + renderDiscover(st), /Free|by @|by Gravit|by community|Just installed/);
 });
 
 test('renderToast: the words and Open; it leaves by itself', () => {

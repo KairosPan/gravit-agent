@@ -28,11 +28,11 @@ const prose = m => (m.data?.markdown && markdown ? markdown(m.text ?? '') : esc(
 const ENDED = { approved: ['Approved', 'up'], rejected: ['Declined', 'grey'], answered: ['Answered', 'up'], closed: ['Closed', 'grey'], elsewhere: ['Settled elsewhere', 'grey'] };
 const stateChip = m => (m.answer ? chip(...(ENDED[m.answer] ?? [m.answer, 'grey'])) : '');
 
-// ✗ then ✓, answering rejected / allowed-once (`data-answer` keeps the demo's words until the app boots on the host)
+// ✗ then ✓, answering rejected / allowed-once — the approval vocabulary api.js sends (nothing else reaches the host)
 function gateKeys(m, conv) {
   if (!needsAnswer(m)) return '';
   const d = { 'data-action': 'answer', 'data-conv': conv.id, 'data-msg': m.id };
-  return `<div class="keys right">${key('no', 'Decline', { ...d, 'data-value': 'rejected', 'data-answer': 'rejected' })}${key('yes', 'Approve', { ...d, 'data-value': 'allowed-once', 'data-answer': 'approved' })}</div>`;
+  return `<div class="keys right">${key('no', 'Decline', { ...d, 'data-value': 'rejected' })}${key('yes', 'Approve', { ...d, 'data-value': 'allowed-once' })}</div>`;
 }
 
 function question(m, conv) {

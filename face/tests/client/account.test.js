@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { renderAccount, renderMemory, renderSettings } from '../../client/js/render/account.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
-import { seed } from '../../client/js/data/seed.js';
+import { seed } from './helpers/seed.js';
 
 const NOW = new Date(2026, 9, 9, 14, 7).getTime();
 const count = (h, re) => (h.match(re) ?? []).length;
@@ -62,7 +62,7 @@ test('Memory: entries grouped with their source and two keys, the add box, where
   assert.match(added, /class="mem-label">Added by you</);
 });
 
-test('Settings drawer: theme seg and Reset demo', () => {
+test('Settings drawer: the theme seg', () => {
   const s = R.openSettings(acct());
   const h = renderAccount(s);
   assert.match(h, /<main class="main acct with-drawer">/);
@@ -70,7 +70,6 @@ test('Settings drawer: theme seg and Reset demo', () => {
   assert.match(d, /<aside class="drawer" aria-label="Settings">/);
   assert.match(d, /class="seg-item pressed" aria-pressed="true" data-action="setTheme" data-value="System"/);
   assert.match(d, /data-action="setTheme" data-value="Black"/);
-  assert.match(d, /class="btn-danger" data-action="resetDemo"/);
   const black = renderSettings(R.setTheme(s, 'black'));
   assert.match(black, /class="seg-item pressed" aria-pressed="true" data-action="setTheme" data-value="Black"/);
 });

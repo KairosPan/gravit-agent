@@ -2,7 +2,7 @@
 import { esc, attrs, cls, money } from '../html.js';
 import { icon } from '../icons.js';
 import { fmtDate, fmtClock } from '../time.js';
-import { VENUES, CONNECTABLE } from '../data/seed.js';
+import { VENUES, CONNECTABLE } from '../data/markets.js';
 import { chip, ticker } from './thread.js';
 import { seg, segLinks, inlineEdit, confirmPair } from './controls.js';
 
@@ -97,8 +97,7 @@ export function renderMemory(state) {
 export function renderSettings(state) {
   const theme = { cream: 'Cream', black: 'Black' }[state.theme] ?? 'System';
   return `<aside class="drawer" aria-label="Settings"><div class="drawer-head"><h2>Settings</h2><button type="button" class="close-key" data-action="closeSettings" aria-label="Close">×</button></div><div class="drawer-body">` +
-    `<div class="dsec"><div class="dsec-label">Theme</div>${seg(['Cream', 'Black', 'System'], theme, 'setTheme')}</div>` +
-    `<div class="dsec"><div class="dsec-label">Demo</div>${state.confirm?.action === 'resetDemo' ? confirmPair('Yes, reset') : '<button type="button" class="btn-danger" data-action="resetDemo">Reset demo</button>'}</div></div></aside>`;
+    `<div class="dsec"><div class="dsec-label">Theme</div>${seg(['Cream', 'Black', 'System'], theme, 'setTheme')}</div></div></aside>`;
 }
 
 export function renderAccount(state) {

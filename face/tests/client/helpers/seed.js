@@ -1,5 +1,5 @@
 // gravit-ui/js/data/seed.js — the state the demo boots into: the four conversations of the boards, Memory, the account numbers
-import { MIN, DAY } from '../time.js';
+import { MIN, DAY } from '../../../client/js/time.js';
 
 // 2: the controls round added edit, confirm, compose, mail, account activity and panels
 // 3: round 3 made the mailbox a screen and Create Discover's own MCP face
