@@ -280,12 +280,12 @@ test("boot smoke: sign-in gates /api and the mux, the pages and /data answer, Gr
     const index = await fetch(`${base}/`, { headers: { cookie }, redirect: "manual" });
     assert.equal(index.status, 200);
     assert.equal(index.headers.get("content-type"), "text/html; charset=utf-8");
-    assert.match(await index.text(), /GRAVIT/);
+    assert.match(await index.text(), /<title>Gravit<\/title>/, "the page at / is gravit-ui (spec 2026-10-19)");
 
     // the `prefix /client` route - registerStatic's other half, and the only
     // place it is exercised against a real webserver rather than a recorder.
     // Deliberately WITHOUT the cookie: assets stay public (PLAN D8).
-    const asset = await fetch(`${base}/client/chat.css`);
+    const asset = await fetch(`${base}/client/css/app.css`);
     assert.equal(asset.status, 200);
     assert.equal(asset.headers.get("content-type"), "text/css; charset=utf-8");
     await asset.body?.cancel();
