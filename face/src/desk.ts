@@ -1,11 +1,13 @@
-/** The desk's ledger: `$DSH_HOME/face/desk/events.jsonl`, the face's own record of its lifetime.
+/** The desk's ledger: `$DSH_HOME/face/desk/events.jsonl`, the face's own record of its lifetime -
+ * with the sleep watch that writes into it and the status route that reads it back.
  *
  * The desk is Gravit's always-on side (docs/superpowers/specs/2026-10-19-always-on-gravit-design.md):
  * the face kept running by launchd as a user service (§5.2), and, in the later plans, the clock,
  * the watch and the phone bridge that work in it. Of what §8 gives this module - the ledger, the
- * budget, the `OFF` switch, the two desk tools, the `/desk` page - P0 holds the ledger only, and
- * of the ledger's files (§5.7) only `events.jsonl`, with three kinds of event: a `boot`, a clean
- * `shutdown`, and an `asleep` gap in the face's timers.
+ * budget, the `OFF` switch, the two desk tools, the `/desk` page and `/data/desk/*` - P0 holds the
+ * ledger, the sleep watch and `GET /data/desk/status`, and of the ledger's files (§5.7) only
+ * `events.jsonl`, with three kinds of event: a `boot`, a clean `shutdown`, and an `asleep` gap in
+ * the face's timers.
  *
  * Why a ledger: a service that launchd restarts after a crash or a `kill -9` looks healthy from
  * outside - it is running again. Read back as runs ({@link runsOf}), the ledger says otherwise: a
@@ -18,11 +20,29 @@
  * counts every line that is not an event. A last line torn by a crash mid-append is the case that
  * matters: the writer starts the next event on a fresh line, so the fragment is one skipped line
  * and never takes the next event with it.
+ *
+ * Why a sleep watch (P0's, not §5.5's watch row): a Mac that sleeps takes the face with it, and a
+ * face that wakes looks as though it had never been away (§5.2). {@link installAsleepWatch} ticks
+ * every {@link ASLEEP_TICK_MS} on a plain timer and reads the wall clock at each tick; a gap
+ * between two ticks over {@link ASLEEP_THRESHOLD_MS} is one `asleep` event. Whatever stops the
+ * timers reads the same way - the machine asleep, the process stopped, the event loop blocked -
+ * and so does a wall clock set forward past the threshold; one set back writes nothing.
+ *
+ * {@link installDesk} mounts it all on a booted face. The status route ({@link deskStatus}:
+ * pid, version, uptime, this run's gaps, the ledger's runs) is mounted always, so a face with the
+ * desk off - a second face beside the service, §5.2 - still answers, with `desk.enabled: false`;
+ * the `boot` event, the watch and the `shutdown` event only when the desk is on. An unreadable
+ * ledger is named in the status, never a 500.
  * @module
  */
 import { appendFile, mkdir, open, readFile, rename, stat } from "node:fs/promises";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import { withFileLock } from "@deepseek-ai/dsh-atomic-write";
+import { isTrustedDataRequest } from "./data.ts";
+import { FORBIDDEN, HttpError } from "./http.ts";
+import type { RouteRegistrar } from "./static.ts";
+import { DSH_PIN } from "./version.ts";
 
 /** Diagnostic label, the same string every other `${BIN}:`-prefixed line in this program uses
  * (`roster.ts`, `main.ts`) - copied rather than imported, because it is a label rather than a
@@ -57,8 +77,9 @@ export type DeskEvent =
  * so a kind added to the type and not here fails to compile instead of reading back as skipped. */
 const KINDS: Readonly<Record<DeskEvent["kind"], true>> = { boot: true, shutdown: true, asleep: true };
 
-/** What the failure line names: the error's code when it has one (`ENOTDIR`, `EACCES`, `ENOSPC`),
- * else its message (the lock's timeout carries no code). */
+/** What a failure is reported as - in the append's failure line and the status's `ledgerError`:
+ * the error's code when it has one (`ENOTDIR`, `EACCES`, `ENOSPC`), else its message (the lock's
+ * timeout carries no code). */
 function reasonOf(err: unknown): string {
   const code = (err as { code?: unknown } | null | undefined)?.code;
   if (typeof code === "string") return code;
@@ -214,4 +235,207 @@ export function runsOf(events: DeskEvent[]): DeskRun[] {
     }
   }
   return runs;
+}
+
+/** How often the sleep watch ticks (spec §5.2). */
+export const ASLEEP_TICK_MS = 30_000;
+
+/** The gap between two ticks past which the face was asleep (spec §5.2): four ticks' worth, so a
+ * tick that a busy event loop runs late is not a sleep. */
+export const ASLEEP_THRESHOLD_MS = 120_000;
+
+/** The sleep watch's seams, injected the way room.ts's `RoomClock` is. `append` is the writer and
+ * has no default - {@link installDesk} passes the ledger's. The watch does not await it, so it must
+ * neither throw nor reject; {@link appendEvent} does neither. The rest default to
+ * {@link ASLEEP_TICK_MS}, {@link ASLEEP_THRESHOLD_MS}, `Date.now` and the global timer. */
+export interface AsleepWatchOptions {
+  tickMs?: number;
+  thresholdMs?: number;
+  now?: () => number;
+  setInterval?: (fn: () => void, ms: number) => unknown;
+  clearInterval?: (handle: unknown) => void;
+  append: (event: DeskEvent) => void | Promise<void>;
+}
+
+/**
+ * Start the sleep watch: every `tickMs`, read `now()` and take the gap since the last tick.
+ *
+ * A gap over `thresholdMs` - strictly over - is one `asleep` event from the last tick to this one,
+ * stamped with this tick; any other gap, a negative one from a clock set back included, writes
+ * nothing. Either way this tick becomes the last, so a gap is counted once and a clock set back is
+ * measured from where it landed. The first gap is measured from the call. The default timer is
+ * `unref`'d, as quotes.ts's poller is: the watch never holds the process open by itself.
+ * @param opts - the seams; only `append` is required.
+ * @returns the disposer, which stops the timer.
+ */
+export function installAsleepWatch(opts: AsleepWatchOptions): () => void {
+  const thresholdMs = opts.thresholdMs ?? ASLEEP_THRESHOLD_MS;
+  const now = opts.now ?? Date.now;
+  const start = opts.setInterval ?? ((fn: () => void, ms: number) => setInterval(fn, ms).unref());
+  const stop = opts.clearInterval ?? ((handle: unknown) => clearInterval(handle as NodeJS.Timeout));
+  let last = now();
+  const handle = start(() => {
+    const at = now();
+    const gap = at - last;
+    if (gap > thresholdMs) {
+      const to = new Date(at).toISOString();
+      void opts.append({ t: to, kind: "asleep", from: new Date(last).toISOString(), to, gapMs: gap });
+    }
+    last = at;
+  }, opts.tickMs ?? ASLEEP_TICK_MS);
+  return () => stop(handle);
+}
+
+/** What `GET /data/desk/status` answers. `pid`, `version` (the dsh version this face runs),
+ * `bootedAt` and `uptimeMs` are this process's; `desk` says whether its rows are mounted and where
+ * its files are; `asleep` is this run's gaps; `runs` is every run in the current ledger.
+ * `ledgerError` is present only when the ledger could not be read - its code, or its message when
+ * it has none - and `asleep` and `runs` are then empty: an unreadable ledger is named, never passed
+ * off as an empty one. */
+export interface DeskStatus {
+  ok: true;
+  pid: number;
+  version: string;
+  bootedAt: string;
+  uptimeMs: number;
+  desk: { enabled: boolean; dir: string };
+  asleep: { from: string; to: string; gapMs: number }[];
+  runs: DeskRun[];
+  ledgerError?: string;
+}
+
+/**
+ * The face's status as the desk sees it, read from the ledger afresh on every call.
+ *
+ * `asleep` is every `asleep` event whose `from` is at or after `bootedAt` - this run's gaps, not
+ * those of the runs before it; ISO-8601 UTC strings order as their times do, so the comparison is
+ * on the strings. `runs` is {@link runsOf} over the whole current file. Never rejects on the
+ * ledger: a read that fails ({@link readEvents} rejects on EACCES, EISDIR, EIO by design) is
+ * `ledgerError`.
+ * @param deps - `home`, the harness home; `bootedAt`, when this run began, in ms since the epoch;
+ *   `enabled`, whether the desk's rows are mounted; `now`, `pid` and `version`, defaulting to
+ *   `Date.now`, `process.pid` and {@link DSH_PIN}.
+ */
+export async function deskStatus(deps: {
+  home: string;
+  bootedAt: number;
+  enabled: boolean;
+  now?: () => number;
+  pid?: number;
+  version?: string;
+}): Promise<DeskStatus> {
+  const since = new Date(deps.bootedAt).toISOString();
+  let events: DeskEvent[] = [];
+  let ledgerError: string | undefined;
+  try {
+    events = (await readEvents(deps.home)).events;
+  } catch (err) {
+    ledgerError = reasonOf(err);
+  }
+  const asleep = events.flatMap((e) =>
+    e.kind === "asleep" && e.from >= since ? [{ from: e.from, to: e.to, gapMs: e.gapMs }] : []);
+  return {
+    ok: true,
+    pid: deps.pid ?? process.pid,
+    version: deps.version ?? DSH_PIN,
+    bootedAt: since,
+    uptimeMs: (deps.now ?? Date.now)() - deps.bootedAt,
+    desk: { enabled: deps.enabled, dir: deskDir(deps.home) },
+    asleep,
+    runs: runsOf(events),
+    ...(ledgerError === undefined ? {} : { ledgerError }),
+  };
+}
+
+/**
+ * Mount `GET /data/desk/status`, which answers {@link deskStatus}.
+ *
+ * The handler is panels.ts's `get` shell, restated rather than imported so that desk.ts does not
+ * pull in the panels' dependencies: the browser fence first, refused with the fixed `FORBIDDEN`
+ * body; then `200` with the status; an {@link HttpError} as its own status; anything else a `500`
+ * with a fixed message, so no filesystem error reaches a body. An unreadable ledger is not a
+ * failure here: {@link deskStatus} names it inside a `200`.
+ * @param webServer - the host webserver service, or a test recorder.
+ * @param deps - {@link deskStatus}'s, read on every request, and `isTrusted`, the fence (default
+ *   {@link isTrustedDataRequest}).
+ * @throws when the path is already registered - a duplicate route is a composition error the
+ *   webserver refuses on purpose.
+ */
+export function registerDeskRoutes(
+  webServer: RouteRegistrar,
+  deps: Parameters<typeof deskStatus>[0] & { isTrusted?: (req: IncomingMessage) => boolean },
+): void {
+  const isTrusted = deps.isTrusted ?? isTrustedDataRequest;
+  const send = (res: ServerResponse, status: number, body: unknown): void => {
+    res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
+    res.end(typeof body === "string" ? body : JSON.stringify(body));
+  };
+  webServer.register({
+    kind: "exact",
+    path: "/data/desk/status",
+    handler: async (req, res) => {
+      if (!isTrusted(req)) return send(res, 403, FORBIDDEN);
+      try {
+        return send(res, 200, await deskStatus(deps));
+      } catch (err) {
+        if (err instanceof HttpError) return send(res, err.status, { ok: false, error: err.message });
+        return send(res, 500, { ok: false, error: "request failed" });
+      }
+    },
+  });
+}
+
+/** What {@link installDesk} hands back. `bootedAt` is when this run began, in ms since the epoch;
+ * `ready` settles once the `boot` event is written or its failure logged, and never rejects;
+ * `dispose(code)` ends the run. */
+export interface DeskHandle {
+  enabled: boolean;
+  bootedAt: number;
+  ready: Promise<void>;
+  dispose(code: number): Promise<void>;
+}
+
+/**
+ * Mount the desk's P0 rows on a booted face.
+ *
+ * The status route is mounted whatever `enabled` says. With the desk on, `ready` is the `boot`
+ * event's append - stamped `bootedAt`, which is `now()` at this call and the status's uptime
+ * origin - and the sleep watch starts at once, writing into the ledger. `dispose(code)` stops the
+ * watch, lets the `boot` append settle (two appends started together take the file lock in either
+ * order, and a `shutdown` written before its `boot` reads as a lost run), then appends the
+ * `shutdown` with `code`. It is idempotent: a second call writes nothing and settles with the
+ * first. With the desk off, `ready` is already resolved and `dispose` writes nothing. Nothing here
+ * rejects on the ledger, so a caller need not await `ready`.
+ * @param webServer - the host webserver service, or a test recorder.
+ * @param deps - `home`, the harness home; `enabled`, whether to mount the desk's rows; `now`
+ *   (default `Date.now`) and `version` (default {@link DSH_PIN}), for the events and the status;
+ *   `watch`, the sleep watch's seams for tests - its `append` is always the ledger's.
+ * @throws when the status path is already registered, before anything is written or started.
+ */
+export function installDesk(
+  webServer: RouteRegistrar,
+  deps: { home: string; enabled: boolean; now?: () => number; version?: string; watch?: Partial<AsleepWatchOptions> },
+): DeskHandle {
+  const { home, enabled } = deps;
+  const now = deps.now ?? Date.now;
+  const version = deps.version ?? DSH_PIN;
+  const bootedAt = now();
+  registerDeskRoutes(webServer, { home, bootedAt, enabled, now, version });
+  if (!enabled) return { enabled, bootedAt, ready: Promise.resolve(), dispose: async () => {} };
+  const ready = appendEvent(home, { t: new Date(bootedAt).toISOString(), kind: "boot", pid: process.pid, version, deskEnabled: true });
+  const stopWatch = installAsleepWatch({ now, ...deps.watch, append: (event) => appendEvent(home, event) });
+  let disposing: Promise<void> | undefined;
+  return {
+    enabled,
+    bootedAt,
+    ready,
+    dispose(code) {
+      disposing ??= (async () => {
+        stopWatch();
+        await ready;
+        await appendEvent(home, { t: new Date(now()).toISOString(), kind: "shutdown", pid: process.pid, code });
+      })();
+      return disposing;
+    },
+  };
 }

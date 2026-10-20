@@ -1,10 +1,14 @@
 // face/tests/desk.test.ts
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LEDGER_ROTATE_BYTES, appendEvent, deskDir, readEvents, runsOf, type DeskEvent } from "../src/desk.ts";
+import { recorder } from "./route-recorder.ts";
+import {
+  ASLEEP_THRESHOLD_MS, ASLEEP_TICK_MS, deskStatus, installAsleepWatch, installDesk, registerDeskRoutes,
+} from "../src/desk.ts";
 
 const home = (): Promise<string> => mkdtemp(join(tmpdir(), "face-desk-"));
 const boot = (t: string, pid: number): DeskEvent => ({ t, kind: "boot", pid, version: "0.2.0-rc.2", deskEnabled: true });
@@ -81,4 +85,89 @@ test("a torn last line stays one skipped line: the next boot is kept and the cut
     { bootedAt: "2026-10-19T13:00:00.000Z", pid: 11, lost: true },
     { bootedAt: "2026-10-19T14:00:00.000Z", pid: 12, lost: false },
   ]);
+});
+
+function fakeTimer() {
+  let tick: (() => void) | undefined; let cleared = false;
+  return {
+    setInterval: (fn: () => void) => { tick = fn; return 1; },
+    clearInterval: () => { cleared = true; },
+    fire: () => tick?.(),
+    get cleared() { return cleared; },
+  };
+}
+
+test("the watch writes one asleep event for a gap over two minutes and nothing for a normal tick", () => {
+  const timer = fakeTimer(); let t = 1_700_000_000_000; const got: DeskEvent[] = [];
+  const dispose = installAsleepWatch({ now: () => t, setInterval: timer.setInterval, clearInterval: timer.clearInterval, append: (e) => { got.push(e); } });
+  t += ASLEEP_TICK_MS; timer.fire();
+  assert.equal(got.length, 0);
+  t += 5 * 60_000; timer.fire();
+  assert.equal(got.length, 1);
+  assert.deepEqual(got[0], { t: new Date(t).toISOString(), kind: "asleep", from: new Date(t - 5 * 60_000).toISOString(), to: new Date(t).toISOString(), gapMs: 5 * 60_000 });
+  t += ASLEEP_TICK_MS; timer.fire();
+  assert.equal(got.length, 1, "the gap is counted once");
+  dispose();
+  assert.ok(timer.cleared);
+  assert.equal(ASLEEP_THRESHOLD_MS, 120_000);
+});
+
+test("a backwards clock is no gap", () => {
+  const timer = fakeTimer(); let t = 1_700_000_000_000; const got: DeskEvent[] = [];
+  installAsleepWatch({ now: () => t, setInterval: timer.setInterval, clearInterval: timer.clearInterval, append: (e) => { got.push(e); } });
+  t -= 10 * 60_000; timer.fire();
+  t += ASLEEP_TICK_MS; timer.fire();
+  assert.equal(got.length, 0);
+});
+
+test("deskStatus: pid, version, uptime, the gaps since boot and the runs", async () => {
+  const h = await home();
+  const bootedAt = Date.parse("2026-10-19T13:00:00.000Z");
+  await appendEvent(h, { t: "2026-10-19T12:00:00.000Z", kind: "asleep", from: "2026-10-19T11:50:00.000Z", to: "2026-10-19T12:00:00.000Z", gapMs: 600_000 });
+  await appendEvent(h, boot("2026-10-19T13:00:00.000Z", 11));
+  await appendEvent(h, { t: "2026-10-19T13:10:00.000Z", kind: "asleep", from: "2026-10-19T13:05:00.000Z", to: "2026-10-19T13:10:00.000Z", gapMs: 300_000 });
+  const s = await deskStatus({ home: h, bootedAt, enabled: true, now: () => bootedAt + 3_600_000, pid: 11, version: "v" });
+  assert.equal(s.ok, true); assert.equal(s.pid, 11); assert.equal(s.version, "v");
+  assert.equal(s.bootedAt, "2026-10-19T13:00:00.000Z"); assert.equal(s.uptimeMs, 3_600_000);
+  assert.deepEqual(s.desk, { enabled: true, dir: deskDir(h) });
+  assert.deepEqual(s.asleep.map((g) => g.gapMs), [300_000], "the gap before this boot is not this run's");
+  assert.equal(s.runs.length, 1);
+});
+
+test("GET /data/desk/status is fenced and reports desk.enabled", async () => {
+  const h = await home(); const rec = recorder();
+  registerDeskRoutes(rec, { home: h, bootedAt: Date.now(), enabled: false });
+  assert.deepEqual(rec.paths(), ["/data/desk/status"]);
+  const ok = JSON.parse(await rec.call("/data/desk/status")) as { status: number; body: { ok: boolean; desk: { enabled: boolean } } };
+  assert.equal(ok.status, 200); assert.equal(ok.body.ok, true); assert.equal(ok.body.desk.enabled, false);
+  const forged = JSON.parse(await rec.call("/data/desk/status", { host: "evil.example.com" })) as { status: number; body: { ok: boolean; error: string } };
+  assert.equal(forged.status, 403); assert.deepEqual(forged.body, { ok: false, error: "forbidden" });
+});
+
+test("installDesk: enabled writes boot and shutdown; disabled writes nothing and still answers", async () => {
+  const on = await home(); const timer = fakeTimer();
+  const desk = installDesk(recorder(), { home: on, enabled: true, watch: { setInterval: timer.setInterval, clearInterval: timer.clearInterval } });
+  await desk.ready;
+  await desk.dispose(0);
+  await desk.dispose(0);
+  const { events } = await readEvents(on);
+  assert.deepEqual(events.map((e) => e.kind), ["boot", "shutdown"], "dispose is idempotent");
+  assert.equal((events[1] as { code: number }).code, 0); assert.ok(timer.cleared);
+  const off = await home(); const rec = recorder();
+  const quiet = installDesk(rec, { home: off, enabled: false });
+  await quiet.ready; await quiet.dispose(0);
+  assert.deepEqual(await readEvents(off), { events: [], skipped: 0 });
+  assert.deepEqual(rec.paths(), ["/data/desk/status"]);
+});
+
+test("an unreadable ledger still answers 200: no gaps, no runs, and ledgerError names the code", async () => {
+  const h = await home(); const rec = recorder();
+  await mkdir(join(deskDir(h), "events.jsonl"), { recursive: true }); // a directory where the ledger should be: EISDIR
+  registerDeskRoutes(rec, { home: h, bootedAt: Date.now(), enabled: true });
+  const got = JSON.parse(await rec.call("/data/desk/status")) as { status: number; body: { ok: boolean; asleep: unknown[]; runs: unknown[]; ledgerError?: string } };
+  assert.equal(got.status, 200); assert.equal(got.body.ok, true);
+  assert.deepEqual(got.body.asleep, []); assert.deepEqual(got.body.runs, []);
+  assert.equal(got.body.ledgerError, "EISDIR");
+  const fine = await deskStatus({ home: await home(), bootedAt: Date.now(), enabled: true });
+  assert.equal(Object.hasOwn(fine, "ledgerError"), false, "absent when the ledger reads");
 });
