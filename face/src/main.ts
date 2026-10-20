@@ -21,6 +21,7 @@ import { installBotRuntime, registerBotRuntimeRoutes } from "./bot-runtime.ts";
 import { readBotJournal } from "./bot-journal.ts";
 import { BOTS_ROOT } from "./overlay.ts";
 import { registerDataRoutes } from "./data.ts";
+import { deskDir, installDesk, type DeskHandle } from "./desk.ts";
 import { registerStatic, type IndexAuth } from "./static.ts";
 import { registerSessionRoutes } from "./sessions.ts";
 import { listSessionHeads, registerChannelRoutes, type RegistryLike } from "./channels.ts";
@@ -86,6 +87,9 @@ let dispose: (() => Promise<void>) | undefined;
  * deadline that outlives the process's stop can still cancel a member. */
 let disposeRoom: (() => void) | undefined;
 let disposeData: (() => void) | undefined;
+/** The desk (desk.ts), once it is mounted. Both exits below end its run - the
+ * ledger's `shutdown`, with the exit code - before the tree goes. */
+let desk: DeskHandle | undefined;
 
 /** Tear the tree down, then leave with `code`. A dispose that rejects still
  * exits, and says why: a signal the process has already acknowledged must not
@@ -96,6 +100,7 @@ async function shutdown(code: number): Promise<void> {
   try {
     disposeRoom?.();
     disposeData?.();
+    await desk?.dispose(code);
     await dispose?.();
   } catch (err) {
     console.error(`${BIN}: dispose failed during shutdown:`, err);
@@ -122,6 +127,7 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
  * under a 2 s bound, and exits 1 (:679-728). `release` unwinds what this entry
  * installed on the tree before the tree itself. */
 installFailLoud(BIN, process, async () => {
+  await desk?.dispose(1);
   disposeRoom?.();
   disposeData?.();
   await dispose?.();
@@ -292,6 +298,15 @@ registerRoomRoutes(booted.ctx.webServer, room);
  * already on the roster is registered as a tool for Gravit before the face
  * reports itself up. */
 await registerPanelRoutes(booted.ctx.webServer, deps);
+/* The desk (desk.ts): `/data/desk/status` always; the ledger's `boot` and the
+ * sleep watch unless `FACE_DESK=0`, the switch for a second face beside the
+ * service (spec §5.2) - the ledger assumes one desk-enabled face per home, so a
+ * second face on the service's home runs with it. Mounted here, after
+ * `bootFace` bound the port, so a face that lost the port never writes a
+ * `boot`. `ready` is deliberately not awaited: the ledger must never delay
+ * readiness, and `dispose` orders the `shutdown` after the `boot` anyway. */
+desk = installDesk(booted.ctx.webServer, { home: dshHome, enabled: process.env.FACE_DESK !== "0" });
+console.log(`${BIN}: desk: ${desk.enabled ? `ledger at ${deskDir(dshHome)}` : "rows disabled (FACE_DESK=0)"}`);
 /* Every route is mounted: only now may the gateway admit a browser stream
  * (bootFace was told `deferReady`). It re-checks that the root is still
  * active and throws otherwise - into `installFailLoud` above, which releases

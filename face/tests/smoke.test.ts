@@ -37,6 +37,7 @@ import { setupFaceProfile } from "../src/setup.ts";
 import { bootFace } from "../src/boot.ts";
 import { registerStatic, type IndexAuth } from "../src/static.ts";
 import { registerDataRoutes } from "../src/data.ts";
+import { installDesk } from "../src/desk.ts";
 import { hasApprovalGrant, type ApprovalEventLike } from "../src/orders.ts";
 import { remote, signIn } from "./remote.ts";
 
@@ -426,6 +427,21 @@ test("boot smoke: sign-in gates /api and the mux, the pages and /data answer, Gr
     // separately rather than assumed to ride along with the `/api` one above.
     const forgedData = await sendWithHost(port, "/data/market.json", "evil.example.com");
     assert.equal(forgedData, 403);
+
+    /* 9. The desk (src/desk.ts) on the real webserver: `installDesk` mounts
+     * `/data/desk/status` behind the same `/data` fence (no cookie) and, with
+     * the desk on, writes the ledger's `boot`. On this fresh home that boot is
+     * the ledger's one run, still open, so not `lost`. `dispose(0)` stops the
+     * watch and writes the `shutdown` before the tree goes. */
+    const desk = installDesk(ctx.webServer, { home, enabled: true });
+    await desk.ready;
+    const deskRes = await fetch(`${base}/data/desk/status`);
+    assert.equal(deskRes.status, 200);
+    const deskBody = await deskRes.json() as { ok: boolean; desk: { enabled: boolean }; runs: { lost: boolean }[] };
+    assert.equal(deskBody.ok, true); assert.equal(deskBody.desk.enabled, true);
+    assert.equal(deskBody.runs.length, 1); assert.equal(deskBody.runs[0]!.lost, false);
+    assert.match(readFileSync(join(home, "face", "desk", "events.jsonl"), "utf8"), /"kind":"boot"/);
+    await desk.dispose(0);
   } finally {
     await dispose();
   }
