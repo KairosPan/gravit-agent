@@ -894,7 +894,7 @@ row audit; and the policy layer.
     explaining it, and the room caps.
 
 One `bootFace` per process: given a `dshHome` (as the tests do; `main.ts` passes none) it sets
-`process.env.DSH_HOME` permanently, which is why the fifteen real-boot tests live in separate
+`process.env.DSH_HOME` permanently, which is why the sixteen real-boot tests live in separate
 files. Without `deferReady` it commits `appReady` itself as its last step, which is what every
 smoke that boots without `main.ts` relies on.
 
@@ -1273,7 +1273,7 @@ face's `WorkspaceLike`). Recorded, not fixed.
 | `DSH_TELEMETRY_DISABLED` | `boot.ts` | unset | any non-empty value (`0`, `false` included) disables the telemetry row, and its patch composes after the operator layers, so it wins over an operator's re-enable; the policy layer disables the row by default anyway |
 | `DSH_PERMISSION_MODE` | dsh, not the face | `workspace-write` | `danger-full-access` sets approval policy `never`: it disarms the sandbox-escalation card but **not** Gate 2, which then denies in its own words |
 | `ALPACA_KIT_ENABLE_ORDERS` | the MCP child only | unset | Gate 1; the face cannot read it and consults the tool registry instead |
-| `FACE_SMOKE` | tests | unset | `=1` enables the fifteen real-boot tests |
+| `FACE_SMOKE` | tests | unset | `=1` enables the sixteen real-boot tests |
 | `DEEPSEEK_API_KEY`, `APCA_API_KEY_ID`, `APCA_API_SECRET_KEY` | dsh's credential seam; the producers and the quote routes; the MCP row | — | not auto-loaded from the repo's `.env.*` files |
 
 Every child the face spawns for a local agent run or probe has these scrubbed — an enumerated
@@ -1372,8 +1372,8 @@ needs an answer before the operator's home moves.
 
 Since 2026-10-19 the page at `/` is **gravit-ui** — the settled front end of
 `docs/superpowers/specs/2026-10-09-demo-v2-gravit-frontend-design.md`, mounted on the face by
-`docs/superpowers/specs/2026-10-09-gravit-ui-on-face-design.md`'s route A (the spec is dated
-2026-10-19; stage 1 of its three is built, the plan is
+`docs/superpowers/specs/2026-10-19-gravit-ui-on-face-design.md`'s route A (stage 1 of its
+three is built, the plan is
 `docs/superpowers/plans/2026-10-19-gravit-face-stage-1.md`, its rulings and the drill record
 `docs/superpowers/plans/2026-10-19-gravit-face-ledger.md`). Vanilla ES modules, no bundler, no
 framework: one store, pure reducers, string renderers, one `innerHTML` per render with
@@ -1391,10 +1391,10 @@ explanatory line a screen carries.
 |---|---|
 | `index.html` | the shell: `<title>Gravit</title>`, `#app`, the two sheets, a three-line script that applies the saved theme before first paint, `js/app.js` as a module. Holds not one byte of host data. The Google Fonts link (Manrope · Noto Sans SC · IBM Plex Mono) is the browser's own fetch — offline the system stack stands in |
 | `market.html`, `account.html` + `navigation.js`, `market*.js`, `account*.js`, `chat.css`, `market.css`, `account.css` | the two instrument pages of the old client, unchanged: each built by its own script, sharing the old sheet. They move into the app in stage 2 |
-| `js/app.js` | `boot(win, host)`: the store, the live layer, the actions and the render loop (§5.4); `makeStore`, `routeOf`, `settle`, `answersFrom`, `Timers` are exported for the tests |
+| `js/app.js` | `boot(win, host)`: the store, the live layer, the actions and the render loop (§5.4); `makeStore`, `routeOf`, `settle`, `answersFrom`, `complete`, `gravitMarkdown`, `postJsonVia`, `Timers` are exported for the tests |
 | `js/store.js`, `js/reducers/index.js` | `createStore({initial, reducers, storage, key, accept, persist})` — `dispatch(type, payload)`, `get()`, `subscribe(fn)`; the reducer table is the merge of the per-slice modules |
 | `js/reducers/host.js` | the host reducers (§5.3): `hostStatus`, `hostList`, `hostWindow`, `hostEvent`, `hostGate`, `hostGateGone`, `hostProjection`, `hostThinking`, `hostPreview`, `markSeen` |
-| `js/reducers/messages.js`, `controls.js` | what the operator does with the page: `nav`, the draft (`startDraft`, `cancelDraft`, `setDraftTitle`, `setDraftWhere`), the optimistic `rename`, `toggleDetails`, `toggleRail`, `setTheme`; the inline editors (`startEdit`/`commitEdit`/`cancelEdit`), the two-step confirms (`askConfirm`/`cancelConfirm`), the Settings drawer |
+| `js/reducers/messages.js`, `controls.js` | what the operator does with the page: `nav`, the draft (`startDraft`, `cancelDraft`, `setDraftTitle`, `setDraftWhere`), the optimistic `rename`, `toggleDetails`, `toggleRail`, `setTheme`; the inline editors (`startEdit`/`commitEdit`/`cancelEdit`), the two-step confirms (`askConfirm`/`cancelConfirm`); the Settings drawer's `openSettings` / `closeSettings` live in `js/reducers/account.js` |
 | `js/data/empty.js` | `emptyState()`: the state the page boots into — no conversations, `status.line = "connecting…"` — with every later stage's slice kept at its empty shape so those screens still render in tests |
 | `js/host/kinds.js` | the kind table (spec §6, §5.3): a mapper view → zero, one or two messages; `ORDER_TOOLS`, `isOrderTool`, `orderLine`, `rememberCall`, `toMessages` |
 | `js/host/sessions.js` | `session/list` rows → conversation records: `kindOf`, `conversationOf`, `listConversations`, `unreadOf` |
@@ -1409,9 +1409,10 @@ explanatory line a screen carries.
 | `channels.js`, `grouping.js`, `channelName.js`, `botId.js`, `botSettings.js`, `member-traces.js`, `subagents.js`, `answer-traces.js` | the old chat page's other modules: on disk with their tests (`channels.js` and `member-traces.js` import from `js/wire/`), imported by no page. The channel landing page, the bot pages, a member's trace and the subagent dock return — or go — with stage 3 |
 
 `chat.js` is gone, and with it the two test groups that ran its own source through `vm`
-(`api.test.ts`'s reconnect race, `subagents.test.ts`'s follow/page and dock controllers); the
-policy they proved is re-pinned by name in `tests/client/live.test.js` against a fake host, and
-`tests/client-mux-smoke.test.ts` still drives `api.js` + `mapper.js` against a real boot.
+(`api.test.ts`'s reconnect race, `subagents.test.ts`'s follow/page and dock controllers); most of
+the policy they proved is re-pinned in `tests/client/live.test.js` against a fake host (§7.3 names
+the two cases that are not), and `tests/client-mux-smoke.test.ts` still drives `api.js` +
+`mapper.js` against a real boot.
 
 ### 5.2 Wire contracts
 
@@ -1469,17 +1470,20 @@ drops to `page` with `stale` set — and the status line reads `Reconnecting… 
 conversation: followed again if live, re-paged if cold. A follow the host itself ends is
 re-decided 2 s later the same way — never blindly re-followed.
 
-**Answering a gate** — `mux.answer(eventId, value)` POSTs `$events/result`
+**Answering a gate** — through the live layer's `answer` (§5.3), which calls `mux.answer(eventId,
+value)`: it POSTs `$events/result`
 `{clientId, eventId, outcome:{kind:"result", value}}` under the CURRENT generation's clientId: an
 approval with the bare `"allowed-once"` or `"rejected"` (the host itself would take any value of
 the approval vocabulary, so `api.js` is where `cancelled` and `unavailable` stay host-side), a
 question with `{answers:[{id, selected, custom?}…]}`, the whole batch (`answersFrom` in `app.js`
-reads the card's inputs). The host answers a settled or undelivered gate with a silent `ok`, so
+reads the pressed card's inputs, matched by name; a batch with a question left blank is refused
+on the status line, `Answer every question first`, before anything is sent). The host answers a settled or undelivered gate with a silent `ok`, so
 `api.js` tracks the gates each generation was delivered and refuses: `not-ready` (no clientId
 yet), `not-pending` (this connection does not hold the gate), `gate-gone` (withdrawn while the
 answer was in flight), `bad-value`. A `cancel` that lands after this tab's answer resolved means
 the answer lost a race — the host never cancels the winner — and is reported too (the last 64
-answered ids per generation are remembered). A gate not replayed within 1 s of a reconnect's
+answered ids per generation are remembered); the live layer turns that report into the card's
+`Settled elsewhere`. A gate not replayed within 1 s of a reconnect's
 `ready` was settled while the page was away: `api.js` retires it through `onGateGone`, and the
 live layer owns no grace timer of its own.
 
@@ -1493,7 +1497,9 @@ and the list fold (§5.3), and a member's gate is attributed through that fold.
 channel index, `presets`, `archived`) and `/data/bots.json` (the bots' display names) beside
 `session/list`; either missing is tolerated — the list still lands, with no channels or no names
 (a bare `bootFace` mounts no `/data` route, as `gravit-client-smoke` pins). The list is
-re-polled trailing-edge 1.2 s after its triggers: the `$events` facts
+re-polled at the trailing edge of a fixed 1.2 s window that its first trigger opens — the old
+client's debounce re-armed on every trigger; through a sustained burst this one refreshes every
+1.2 s rather than once at its end — and its triggers are the `$events` facts
 `api-session/added|removed|status|activity` and `agent-preset/selected`, the followed
 session's turn frames, and a control-stream `title` the list does not show yet.
 
@@ -1522,7 +1528,7 @@ merge?}`, ids minted from the host's own: `e<seq>` for a record, `t<callId>` for
 | `bubble` role `operator`, source `user` or none | `from:"you"`, `kind:"text"` (the `mention` list rides in `data`) |
 | `bubble` role `operator`, any other source (a compaction checkpoint, a plugin notice, a runtime snapshot, a member's delta) | `from:"system"` with `data.source` — drawn as a collapsed `context · <source>` details, never as the operator's bubble |
 | `bubble` role `gravit` | `from: speaker` (`gravit`, or the bot in its home session), `data.markdown = true`, `interrupted` carried; an empty text that is not interrupted (a tool-only step) yields nothing — the tool row carries it |
-| `bubble` role `bot` (a member's answer) | `from: <bot id>`, `data.name` the display name |
+| `bubble` role `bot` (a member's answer) | `from: <bot id>`, `data.name` the display name, `data.markdown = true` — a member writes the same markdown Gravit does |
 | `room-line` | a system line, `roundEndLine(view)` |
 | `subagent-message` | a system line, `Report from <child>: …` (no link yet) |
 | `card` phase `call` | `kind:"tool"`, text = the mapper's title (a `bash` command) or the tool name, `data.args` from the `calls` map |
@@ -1537,34 +1543,39 @@ end}` on the message, and `hostEvent` removes every drawn message in that seq ra
 gates before inserting the summary.
 
 **The store as a cache of the host** (`js/reducers/host.js`). `hostList` installs the list as
-given, a surviving conversation keeping its window, preview, usage, thinking and what the
-viewer saw; `hostWindow` installs a window WHOLE — a follow's snapshot or a page — never
+given, with the channel index and the bots' names (`[{id, name}]`, which every screen names a
+bot by), a surviving conversation keeping its window, its preview and when that was read
+(`previewAt`), usage, thinking and what the viewer saw; `hostWindow` installs a window WHOLE — a follow's snapshot or a page — never
 appended to what was drawn; `hostEvent` inserts by `seq` (a `merge` message updates the row it
 names, a repeated id draws once) and clears `thinking` for anything but the operator's own line;
 `hostGate` lands a gate on its conversation after the last event it arrived behind (`seq =
 max + 0.5`), keeps a replayed gate's answer, and parks a gate for a conversation the list does
 not know yet in `orphanGates` (retried after every refresh); `hostGateGone` writes the end state
-(`approved` / `rejected` / `answered` for this tab's own answer, `closed` for a withdrawal)
-unless the card already has one; `hostProjection` takes `title`, `tokenUsage`,
+(`approved` / `rejected` / `answered` for this tab's own answer, `closed` for a withdrawal,
+`elsewhere` for a lost race) — a withdrawal never overwrites this tab's answer, a lost race
+always does; `hostProjection` takes `title`, `tokenUsage`,
 `contextPressure`, `room` (the members, and the kind becomes `group`) and the face's own
 `running`; `markSeen` records what the operator looked at.
 
 **The live layer** (`js/host/live.js`). `startLive({store, openMux, call, mapFrame, getJson,
 timers, now})` opens the mux and the control stream and returns `{open, promote, refresh,
-reconcile, retryOrphans, close, mux}`:
+reconcile, retryOrphans, answer, close, mux}`:
 - **the list** — `refresh()` reads `session/list`, `/data/channels.json` and `/data/bots.json`
   together, builds the member → bot map from the fold, dispatches `hostList`, seeds every row's
   projection block (never a `cached` one — its watermark is not comparable), marks the open
   conversation seen, re-decides the open view (`reconcile`), re-lands the orphan gates, and
-  fetches **previews**: for the first 12 rows without a loaded window or a preview, one
-  non-activating `session/projections` + `session/page` with `maxMessages: 1`, whose last
-  SPOKEN line (through the kind table: never a context row) becomes the row's preview;
+  fetches **previews**: for up to 12 rows other than the one on screen that were never read or
+  whose session moved past the read (`updatedAt > previewAt`), one non-activating
+  `session/projections` + `session/page` with `maxMessages: 1`, whose last SPOKEN line (through
+  the kind table: never a context row) becomes the row's preview — a row read and found silent
+  waits for activity, and the conversation on screen previews from its own window (`previewOf`
+  in `render/rail.js`);
 - **follow or page** — `open(id)` marks the conversation seen and reads it by `viewFor`: a LIVE
   one (`agentAvailable`) is FOLLOWED with the assistant stream, a COLD one is PAGED (upgrade
   decision D16: a follow activates a cold session, and a resume write-opens its log —
   `session.v4.jsonl.zstd`, `session.lock` — irreversibly). The snapshot or the page is folded
   through `hostEvent` on a scratch state and installed by `hostWindow`, its projections seeded,
-  then this conversation's pending gates re-dispatched behind it. `promote(id)` turns a paged
+  then the pending gates that belong to this conversation now re-dispatched behind it. `promote(id)` turns a paged
   view into a follow once this tab WROTE to it (`app.js` calls it after a prompt, a say, or a
   new conversation's first words — the write already activated it); the host's
   `api-session/added` or a list refresh showing it live does the same through `reconcile`;
@@ -1574,8 +1585,15 @@ reconcile, retryOrphans, close, mux}`:
 - **frames** — a pulse sets `thinking`; a `turn` frame sets `running` and schedules a refresh;
   a projection goes to `hostProjection`; everything else goes through `rememberCall` and
   `toMessages` to `hostEvent`;
-- **gates** — `onGate` maps the waterfall and lands it on the session's own conversation, or on
-  the room whose fold lists that session, in the member's bot name; `onGateGone` closes it;
+- **gates** — `onGate` maps the waterfall and keeps the gate in `pending` until it is over; every
+  dispatch places it afresh (`placeGate`) — on its session's own conversation, on the room whose
+  fold lists that session (in the member's bot name), or, while the list does not know the
+  session, parked as an orphan: a gate replayed after a reload arrives before the list does.
+  `answer(eventId, value)` answers through the mux, and once the answer wins the gate leaves
+  `pending` (api.js reports nothing for a winner), so no later window load puts its keys back.
+  `onGateGone` ends a gate `closed`, or `elsewhere` when this tab's answer had won — api.js
+  reports such a gate only for a `cancel` that trailed the win, so another answer or a Stop
+  settled it first;
 - **host facts** — `added`, `activity`, `agent-preset/selected` schedule a refresh; `removed`
   clears `running` and stops the follow; `status` sets `running`; `error` reaches the status
   line when it names the conversation on screen.
@@ -1595,15 +1613,16 @@ through the mux and writes this tab's outcome on the card at once. `stop(session
 
 `boot(win, host)` builds the store (`makeStore`: the prefs, never a saved state), starts the live
 layer and the actions, sets the markdown hook (`setMarkdown` in `render/thread.js` — the DOM-built
-`renderMarkdown(text).outerHTML`; tests hand in a stub or none, and with none set Gravit's text is
+`gravitMarkdown` — `renderMarkdown(text).node.outerHTML`; tests hand in a stub or none, and with none set Gravit's text is
 escaped), and renders on every store change. One render is one string — `renderRail(state)` +
 `renderMessagesScreen(state, now)` (+ `renderSettings` when the drawer is open) — written to
 `#app.innerHTML`; the loop first records and then restores what the person had: focus and caret
 (by element id, else the control's data attributes), the typed value of every input with an id
-(an editor's box only while the same editor stays open), the composer's words (kept in a closure,
+(an editor's box only while the same editor stays open), the ticked radios and checkboxes with
+an id (a question card's picks, the person's own until they press Answer), the composer's words (kept in a closure,
 `composerText`, never in the store), the scroll of the rows, the main pane on the same screen, a
-drawer body while it is the same drawer, and the thread's position unless the person was at the
-bottom, the conversation changed, or it gained a message. While an IME composes (pinyin), renders
+drawer body while it is the same drawer, and the thread's position while the person reads up,
+however much arrives (at the bottom, or on another conversation, the thread follows the tail). While an IME composes (pinyin), renders
 are held until `compositionend`. Clicks are delegated by `data-action` (`open`, `startDraft`,
 `cancelDraft`, `toggleRail`, `changeWords`/`commitEdit`/`cancelEdit`, `stopGravit`/`confirmYes`/
 `cancelConfirm`, `suggest`, `answer`, `answerQuestion`, `toggleDetails`, `openSettings`/
@@ -1637,15 +1656,19 @@ state** (no conversations) offers three suggestion chips that fill the composer.
 the theme (Cream · Black · System).
 
 **The thread** (`render/thread.js`) — the operator's words right in the primary bubble, Gravit's
-left in grey through the markdown hook (an interrupted answer is cut-marked `Interrupted`); a
-bot's words in a group under its sender name; a system line centred; a context row a collapsed
+left in grey through the markdown hook (headings, lists, code, quotes, GFM tables in the
+`.viz-table` style, links coloured and underlined; an interrupted answer is cut-marked
+`Interrupted`); a
+bot's words in a group under its sender name, through the same markdown hook; a system line centred; a context row a collapsed
 `<details class="sysline ctx">` headed `context · <source>`; a tool row a collapsed `<details
 class="tool">` titled by the call, `running` until the result fills its `<pre>`, `.danger` on
 error; the order card (`Your call: …`, `Alpaca paper · <reason>`, ✗ Decline then ✓ Approve →
 `rejected` / `allowed-once`); the approval card (the tool name, the display reason, the audit
-reason only when it differs, the same two keys); the question card (every question with its
-inputs named `q-<id>`, radio or checkbox by `multiSelect`, a text box when there are no options
-or `allowCustom`, one Answer key for the batch); a receipt a green bubble; a refusal a red card
+reason only when it differs, the same two keys); the question card (`data-gate="<eventId>"`;
+every question with its inputs named and id'd `q-<eventId>-<questionId>`, so two pending cards
+never share a radio group, radio or checkbox by `multiSelect`, and a free-answer box beside
+every question — `Other…` beside a menu, `Your answer` without — which is dsh's `custom`; one
+Answer key for the batch); a receipt a green bubble; a refusal a red card
 with the code. An answered or closed gate shows its end state as a chip — `Approved`,
 `Declined`, `Answered`, `Closed`, `Settled elsewhere` — and no keys. Dividers after a
 15-minute gap; the three-dot thinking row at the tail while the host streams a turn.
@@ -1752,7 +1775,7 @@ against the gateway's `stream-protocol`, `api-remotes`' event list, the session 
 check:fixture` validates every line it can against the installed dsh's own acceptance code —
 the session controller's `assertSessionWireEvent`, the gateway's frame parser and `$events` id
 predicates; on 2026-09-30, 23 of 26 lines validated, 0 rejected, and the 3 with no upstream
-validator named) → `FACE_SMOKE=1 npm test` — the fifteen real boots, `order-gate-smoke` and
+validator named) → `FACE_SMOKE=1 npm test` — the sixteen real boots, `order-gate-smoke` and
 `client-mux-smoke` above all, are the contract the structural `*Like` types cannot be → the
 drills. `cordis-plugin-include` is pinned; `loader` and `group` arrive as app-boot peers and
 `timer` through dsh-base, held by the lockfile alone; `cordis-plugin-hmr` is gone.
@@ -1786,9 +1809,9 @@ the pulses of each LIVE member's own `session/follow`.
 | Command | From | Needs | Measured 2026-09-30 |
 |---|---|---|---|
 | `python -m pytest` | repo root | nothing — offline, no keys, no bed | 381 passed in a clean checkout, ~2 s (the operator's tree adds the untracked `tests/strategies/`) |
-| `cd face && npm test` | `face/` | nothing — no port, no key | 708 tests, 693 pass, 15 skipped (2026-10-19) |
+| `cd face && npm test` | `face/` | nothing — no port, no key | 907 tests, 891 pass, 16 skipped (2026-10-20) |
 | `cd face && npm run typecheck` | `face/` | | clean, the dependencies' `.d.ts` included (`skipLibCheck: false`) |
-| `cd face && FACE_SMOKE=1 npm test` | `face/` | boots fifteen real trees into `mkdtemp` homes and binds ports; still no LLM or key (four of the smokes also create, and remove, a gitignored `.bots-smoke-*` bots root at the repo root) | the fifteen skipped tests; 708/708, ~10 s (2026-10-19) |
+| `cd face && FACE_SMOKE=1 npm test` | `face/` | boots sixteen real trees into `mkdtemp` homes and binds ports; still no LLM or key (four of the smokes also create, and remove, a gitignored `.bots-smoke-*` bots root at the repo root) | the fifteen skipped tests; 708/708, ~10 s (2026-10-19) |
 | `cd face && npm run check:fixture` | `face/` | the installed dsh | 26 fixture lines: 23 validated, 0 rejected, 3 with no upstream validator |
 
 ### 7.2 The Python suite
@@ -1816,7 +1839,7 @@ order path.
 
 ### 7.3 The face suite
 
-708 tests in 64 files (693 pass, 15 skipped without `FACE_SMOKE=1`), run by `node --test`
+907 tests in 88 files (891 pass, 16 skipped without `FACE_SMOKE=1`), run by `node --test`
 through `tsx`:
 
 - **Composition and boot** — `boot` (the layer order ending with the overlay; the policy layer
@@ -1892,9 +1915,14 @@ through `tsx`:
   answer as a bot bubble, the round-end line, the operator's `@`, a member's delta, a turn
   boundary for a session not on screen; gate frames by `eventId`; tool titles from the call;
   `agent-message` relays), `summaries`, `member-traces`, `subagents` (the catalog composition;
-  the dock's controllers went with `chat.js`, and `tests/client/live.test.js` re-pins the
-  follow/page policy, gates across reconnects and a failed open still drawing its gates
-  against a fake host), `room-client`,
+  the dock's controllers went with `chat.js`; `tests/client/live.test.js` re-pins against a fake
+  host what they proved of the follow/page policy — a cold open paged, a live one followed, a
+  prompt promoting a paged view, a socket drop suspending and the fresh list re-deciding, the
+  host's alive and gone reports, a refused follow reported once, an ended follow re-decided —
+  and of gates across reconnects: a replay is the same card, a member's gate replayed before
+  the list survives the room's window load. Two cases are NOT pinned by name: a failed open still
+  drawing its conversation's gates, and a new conversation followed before its first prompt
+  (app-dom's New message test runs that path without asserting the follow)), `room-client`,
   `answer-traces`, `speaker`, `grouping`, `channelName`, `botId`, `bot-settings-client`, and
   the instrument pages' `market-model`, `market-quotes`, `market-search`, `account-model`.
 - **The gravit-ui client** (`tests/client/*.test.js`, `node:test` through tsx, a fake DOM in
@@ -1919,7 +1947,7 @@ through `tsx`:
   taking every declaration with it), `bot-plugin` (the persona-prefix slot, a late tool admitted,
   the mask shrinking and re-admitting, a failed re-expansion contained), `bot-journal`,
   `quotes`, `quote-snapshots`, `quote-streams`, `symbol-search`, and the room suites below.
-- **The fifteen `FACE_SMOKE` boots**, below.
+- **The sixteen `FACE_SMOKE` boots**, below.
 
 The room suites are `room-rules` (the caps block verbatim, `GRAVIT.md`'s caps sentence pinned to
 `ROOM_CAPS`, mention resolution, `isPass`, `finalTextOf`, dispatch validation and its two result
@@ -1940,7 +1968,7 @@ cold-room resume and its 404/409 mapping, a re-selected session refused `dispatc
 routes under the fence — and `room-client` (the header fold, the strip and its state
 precedence, the glyph, the mention anchor, the round-end line, the gate speaker).
 
-The fifteen boots each own a file, because `bootFace` sets `process.env.DSH_HOME` for good, and
+The sixteen boots each own a file, because `bootFace` sets `process.env.DSH_HOME` for good, and
 each speaks the browser's wire through `tests/remote.ts` (`mountClient`, `signIn`, `remote`):
 
 - `smoke.test.ts` — the sign-in (`/` 401 without the cookie, the token's 303 and `dsh-auth-*`
@@ -2131,7 +2159,7 @@ stages all of them, with the transport drill, on a copy of the operator's home.
   mounts the real `/` and signs in through it (`tests/remote.ts`: `mountClient`, `signIn`,
   `remote`) before any `/api` call; `client-mux-smoke` drives the page's own `api.js` and
   `mapper.js`. The structural `*Like` types hide most dsh drift from `tsc`, so after every pin
-  bump the fifteen real boots are the contract.
+  bump the sixteen real boots are the contract.
 - **An arc is** brainstorm → spec (`docs/superpowers/specs/`) → plan → build with tests → a
   whole-branch review → a post-build amendments block on the spec. The block is what freezes the
   spec; the Status line is left as written. Of the five post-reset specs, chat-light,
@@ -2471,5 +2499,5 @@ In order; each with what "done" is and which charter row it reopens.
 | `FACE_PORT`, `FACE_PROFILE`, `FACE_PYTHON` | face | port, profile name, producer interpreter |
 | `FACE_AKSHARE_MCP_COMMAND` | face (`akshare.ts`) | the AKShare MCP executable, default `~/.local/bin/akshare-mcp` |
 | `FACE_IFIND_POLL_MS`, `IFIND_ACCESS_TOKEN`, `IFIND_REFRESH_TOKEN` | face (quote routes) | the A-share quote provider's refresh period and credentials |
-| `FACE_SMOKE` | face tests | enables the fifteen real boots |
+| `FACE_SMOKE` | face tests | enables the sixteen real boots |
 | `FASTMCP_LOG_LEVEL` | MCP row | `WARNING` silences FastMCP's INFO noise; never edit `server.py` for it |

@@ -859,6 +859,13 @@ neighbourhood:
 
 ## The master rail (src/panels.ts + the sidebar's four faces)
 
+**On the gravit-ui client (stage 1)** the page at `/` has no master rail and no sidebar faces:
+its rail is Messages, Markets, Settings and Account ("The page (client/)" above), and the four
+links below (`/#strategy`, `/#agent`, `/#memory`, `/#plugin`) open Messages there. What follows
+is the old chat page's rail, which `/market` and `/account` still draw; the routes it reads —
+`/data/channels.json`, `/data/agents.json`, `/data/memory.json`, `/data/plugins.json` — are what
+stage 3's Discover will read.
+
 A narrow icon rail at the far left opens **market** above the sidebar switches
 and **account** at the bottom. Chat, Market and Account share the same
 `client/navigation.js` rail and its fixed 56px layout: all six entries keep
@@ -1469,6 +1476,11 @@ the voice's memory (upgrade decision D11).
 
 ## Temporary subagents (client/subagents.js)
 
+**On the gravit-ui client (stage 1)** the **临时子任务** panel is not built: `client/subagents.js`
+is imported by no page, subagent children are not listed, and a child's report reaches the
+parent's thread as one centred line. The panel, in its minimal form, is stage 3's (spec §7). What
+follows describes the host's subagent stack, which holds either way, and the old chat page's panel.
+
 A temporary subagent is a delegated task with its own durable child conversation. It is
 separate from the operator's named bots and the room roster: creating one writes no bot
 profile or journal. Its label describes the work. The face uses the subagent stack already
@@ -1568,8 +1580,9 @@ says how it ended:
 | The card reads | Meaning |
 |---|---|
 | `Approved`, `Declined`, `Answered` | this tab's answer settled it (a question's outcome is simply `Answered`) |
+| `Settled elsewhere` | this tab's answer resolved, but the host's `cancel` trailed it: another answer or a Stop settled the gate first and this answer was NOT applied — the host answers a late answer with the same silent `ok`, and `api.js` reports the trailing `cancel` |
 | `Closed` | the gate is over without this tab's answer: another tab answered, the turn was stopped, the session went away, or it was settled while the page was disconnected — a `cancel`, or a gate not replayed after `ready`; neither carries an outcome, so the card claims none |
-| the status line, `answer: not-pending` / `answer: gate-gone` / `answer: not-ready` | this answer was refused by `api.js` — this connection does not hold the gate, the host withdrew it while the answer was in flight (a lost race: the host treats a late answer as a silent no-op, and `api.js` turns it into a refusal instead of an `Answered`), or no `ready` has bound a clientId yet; the card closes when the withdrawal lands |
+| the status line, `answer: not-pending` / `answer: gate-gone` / `answer: not-ready` | this answer was refused by `api.js` — this connection does not hold the gate, the host withdrew it while the answer was in flight (a lost race caught in flight; the card reads `Closed` when the withdrawal lands), or no `ready` has bound a clientId yet. A second press while an answer is in flight sends nothing |
 
 An approval card sends only `allowed-once` or `rejected`. At 0.2.0 that is the face client's
 rule — `api.js` refuses anything else as `bad-value` — no longer the host's, which would
@@ -1646,7 +1659,7 @@ page drew (market_snapshot as a Δ%-sorted table with the sign always printed,
 screen/positions/orders/earnings as generic tables, breadth/account as stat tiles or a kv
 grid, daily_bars as an inline SVG close line + volume strip with a crosshair) — is in the
 tree with its tests and not yet called: the stage-1 tool row shows the raw `<pre>`, and
-wiring the pretty views in is stage 2's, with the Markets screen. What holds either way is
+wiring the pretty views in is stage 3's, with the research surfaces. What holds either way is
 the host's side: dsh spills a tool result over its inline budget into head + tail with an
 elision seam and a note naming the full-output file. At 0.2.0 that budget is dsh-base's
 `spill-policy` `maxInlineTokens: 12500`, estimated as characters ÷ 4 — about 50 000
@@ -1661,10 +1674,10 @@ one row cut at the seam is dropped and the table's meta line says so.
 ```bash
 npm test                  # offline unit tests - no keys, no network, no port
 npm run typecheck         # strict tsc against the pinned .d.ts (skipLibCheck: false) - the contract test
-FACE_SMOKE=1 npm test     # + the 15 isolated real boots; local stubs, no external model calls
+FACE_SMOKE=1 npm test     # + the 16 isolated real boots; local stubs, no external model calls
 ```
 
-Offline, `npm test` skips the 15 real boots listed below; `FACE_SMOKE=1` runs
+Offline, `npm test` skips the 16 real boots listed below; `FACE_SMOKE=1` runs
 them too. The typecheck includes the dependencies' own `.d.ts`, so a green one
 means the face compiles against the installed dsh, not just against itself.
 
@@ -2165,7 +2178,7 @@ written.
    which PIT bed to use, 2yr or broad. Ask nothing else and read no files."*
    Naming it is deliberate — this step drills the SEAM, not the judgement.
 3. PASS, part one: the question card renders — an orange card with every
-   question, its options and one Answer key. ONE card for the whole batch,
+   question, its options, a free-answer box beside each and one Answer key. ONE card for the whole batch,
    whatever the number of questions, and one Answer: one `ask()` is one card and
    one answer, never split per question.
 4. **Answer it.** The card settles to `Answered`, the turn continues, and the
@@ -2173,7 +2186,8 @@ written.
    typed answer rides beside a picked option as `custom` (the old card made the
    two replace each other); at 0.2.0 nothing between the card and the asking
    tool checks the batch — at 0.1.1 the host refused a mixed answer as a bare
-   `bad-response`.
+   `bad-response`. A press with a question left blank is refused on the status
+   line (`Answer every question first`) and sends nothing.
 5. **Press Stop Gravit (Details) on a fresh question instead of answering it.**
    The card settles to `Closed` — the Stop ends the turn, the gateway withdraws
    the gate with a `cancel`, and a `cancel` carries no outcome — and the Messages
@@ -2268,8 +2282,9 @@ headers. With the face live:
    **父会话消息**), fork, the folder picker, a channel rename — are not on the stage-1
    client; they return with stage 3.
 
-The approval endings — `Approved`, `Declined`, a second tab's `Closed`, a lost race on
-the status line — belong to the Gate-2 drill; the race needs a socket dropped
+The approval endings — `Approved`, `Declined`, a second tab's `Closed`, a lost race's
+`Settled elsewhere` (or, caught in flight, `answer: gate-gone` on the status line) — belong
+to the Gate-2 drill; the race needs a socket dropped
 mid-answer, which the go-live runbook stages by hand (§7 A) and `tests/api.test.ts` plus
 `tests/client/live.test.js` cover in code. **Walked 2026-10-19** on the stage-1 client,
 a face on a scratch `DSH_HOME` without keys (the ledger,
