@@ -22,6 +22,12 @@ test('parseHash and toHash round-trip; Messages and Markets route, every other s
   assert.equal(parseHash('#/markets/crypto:BTC%2FUSD').id, 'crypto:BTC/USD', 'an encoded link reads the same');
   assert.equal(parseHash('#/markets/').id, null);
   assert.deepEqual(parseHash('#/trade'), { screen: 'messages', id: null }, 'Trade is gone');
+  // a channel page and a plugin page take everything after the screen, decoded, as a market does
+  assert.deepEqual(parseHash('#/channel/ws-1'), { screen: 'channel', id: 'ws-1' });
+  assert.equal(toHash({ screen: 'channel', id: 'ws-1' }), '#/channel/ws-1');
+  assert.deepEqual(routeOf('#/channel/ws-1'), { screen: 'channel', id: 'ws-1' });
+  assert.equal(parseHash('#/plugin/skill%3Arules').id, 'skill:rules');
+  assert.equal(parseHash('#/plugin/mcp:alpaca-kit').id, 'mcp:alpaca-kit');
   assert.deepEqual(parseHash('#/account/venues'), { screen: 'account', tab: 'venues' });
   assert.deepEqual(parseHash('#/account/memory'), { screen: 'account', tab: 'portfolio' }, 'Memory is not drawn');
 });

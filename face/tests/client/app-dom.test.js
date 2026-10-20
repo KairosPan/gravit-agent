@@ -715,3 +715,31 @@ test('collapsing a group hides its rows and the prefs remember it', async () => 
   assert.match(f.html(), /data-id="s2"/);
   store.timers.clear();
 });
+
+test('a channel header opens its page and reads its overview once', async () => {
+  const f = fakeWindow({ hash: '' });
+  const h = host({ rows: [row('s1')] });
+  const store = started(f, h);
+  await h.ready();
+  f.win.location.hash = '#/channel/w0';
+  f.fire('win', 'hashchange');
+  await settle();
+  assert.equal(store.get().route.screen, 'channel');
+  assert.deepEqual(h.posted.filter(p => p[0] === '/data/channels/overview'), [['/data/channels/overview', { workspaceId: 'w0' }]]);
+  assert.match(f.html(), /<main class="main chan">/);
+  assert.match(f.html(), /class="rail-rows"/, 'the list stays beside the channel page');
+  store.dispatch('toggleRail');
+  assert.equal(h.posted.filter(p => p[0] === '/data/channels/overview').length, 1, 'a render reads nothing');
+  store.timers.clear();
+});
+
+test('New round opens New message with Where on the channel', async () => {
+  const f = fakeWindow({ hash: '#/channel/w0' });
+  const h = host({ rows: [row('s1')] });
+  const store = started(f, h);
+  await h.ready();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'newRound', id: 'w0' } });
+  assert.equal(store.get().route.id, 'new');
+  assert.equal(store.get().draft.where, 'w0');
+  store.timers.clear();
+});

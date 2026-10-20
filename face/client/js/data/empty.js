@@ -13,6 +13,8 @@ export function emptyState() {
     conversations: [],
     childRows: [],
     channels: [],
+    // the channel page's read (host/channels.js)
+    channel: { id: null, status: 'idle', data: null, at: null },
     bots: [],
     status: { line: 'connecting…', bad: false, connected: false },
     orphanGates: {},

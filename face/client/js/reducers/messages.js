@@ -66,9 +66,11 @@ export const reducers = {
   },
   setTheme: (s, theme) => ({ ...s, theme }),
 
-  // the new-message screen: a title and where the session goes (a channel), then the first words send it
-  startDraft(s) {
-    return { ...closeOverlays(s), draft: { title: '', where: defaultWhere(s) }, route: { screen: 'messages', id: 'new' } };
+  // the new-message screen: a title and where the session goes (a channel — the one New round names, else the
+  // default), then the first words send it
+  startDraft(s, { where } = {}) {
+    const known = typeof where === 'string' && (s.channels ?? []).some(c => c.workspaceId === where);
+    return { ...closeOverlays(s), draft: { title: '', where: known ? where : defaultWhere(s) }, route: { screen: 'messages', id: 'new' } };
   },
   cancelDraft: s => ({ ...s, draft: null, route: { screen: 'messages', id: firstOpen(s.conversations)?.id ?? null } }),
   setDraftTitle: (s, title) => (s.draft ? { ...s, draft: { ...s.draft, title } } : s),

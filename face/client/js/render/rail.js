@@ -73,7 +73,7 @@ export function renderNav(state) {
   <div class="brand">${avatar('gravit', 28)}<span class="brand-name">Gravit</span>` +
     `<button type="button" class="rail-toggle" data-action="toggleRail" aria-expanded="${mini ? 'false' : 'true'}" aria-label="${mini ? 'Expand navigation' : 'Collapse navigation'}">${icon(mini ? 'chevRight' : 'chevLeft', 16, 2.2)}</button></div>
   <div class="rail-group">
-    ${navItem(messagesHref, 'chat', 'Messages', screen === 'messages', mini, waiting)}
+    ${navItem(messagesHref, 'chat', 'Messages', screen === 'messages' || screen === 'channel', mini, waiting)}
     ${navItem('#/markets', 'markets', 'Markets', screen === 'markets', mini)}
   </div>
   <div class="rail-foot">
@@ -84,10 +84,11 @@ export function renderNav(state) {
 }
 
 // a group's head: the collapse key, then the channel's name as a link to its page (a bot's or the other groups' as text)
-function groupHead(g) {
+function groupHead(g, state) {
   const label = `${g.collapsed ? 'Expand' : 'Collapse'} ${g.label}`;
+  const here = state.route.screen === 'channel' && state.route.id === g.workspaceId;
   const name = g.kind === 'channel'
-    ? `<a class="grp-name" href="#/channel/${esc(encodeURIComponent(g.workspaceId))}">${esc(g.label)}</a>`
+    ? `<a${attrs({ class: cls('grp-name', here && 'current'), 'aria-current': here ? 'page' : null, href: `#/channel/${encodeURIComponent(g.workspaceId)}` })}>${esc(g.label)}</a>`
     : `<span class="grp-name">${esc(g.label)}</span>`;
   return `<div class="grp-head"><button type="button" class="grp-key" data-action="toggleGroup"${attrs({ 'data-key': g.key, 'aria-expanded': g.collapsed ? 'false' : 'true', 'aria-label': label })}>` +
     `${icon(g.collapsed ? 'chevRight' : 'chevDown', 14, 2.2)}</button>${name}</div>`;
@@ -96,8 +97,8 @@ function groupHead(g) {
 // the second level, open on Messages: the new-message key on top, then the groups (host/list-view.js), each its head
 // and its rows, newest first
 export function renderList(state, now) {
-  if (state.route.screen !== 'messages') return '';
-  const rows = (state.draft ? draftRow() : '') + groupsOf(state).map(g => groupHead(g) + g.shown.map(c => row(c, state, now)).join('')).join('');
+  if (state.route.screen !== 'messages' && state.route.screen !== 'channel') return '';
+  const rows = (state.draft ? draftRow() : '') + groupsOf(state).map(g => groupHead(g, state) + g.shown.map(c => row(c, state, now)).join('')).join('');
   return `<aside class="list" aria-label="Messages"><div class="list-head"><h2 class="list-title">Messages</h2>` +
     `<button type="button" class="new-key" data-action="startDraft" aria-label="New message">${icon('plus', 18, 2.2)}</button></div>` +
     `${rows ? `<div class="rail-rows">${rows}</div>` : ''}</aside>`;

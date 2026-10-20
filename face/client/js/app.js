@@ -16,6 +16,8 @@ import { startLive } from './host/live.js';
 import { makeActions } from './host/actions.js';
 import { startMarkets } from './host/markets.js';
 import { startAccount } from './host/account.js';
+import { startChannels } from './host/channels.js';
+import { renderChannelScreen } from './render/channel.js';
 import { statementOf, csvOf } from './host/account-view.js';
 import { canonicalId, assetFor } from './host/market-view.js';
 import { createLiveQuotes } from './wire/market-quotes.js';
@@ -90,8 +92,8 @@ export function makeStore(storage, now = Date.now()) {
   return createStore({ initial: initialState(storage, now), reducers, storage, key: PREFS_KEY, accept: () => false, persist: prefsOf });
 }
 
-// Messages, Markets and Account are served; every other screen the router knows folds to Messages
-const SCREENS = new Set(['messages', 'markets', 'account']);
+// Messages (with a channel's page), Markets and Account are served; every other screen the router knows folds to Messages
+const SCREENS = new Set(['messages', 'channel', 'markets', 'account']);
 export const routeOf = hash => { const r = parseHash(hash); return SCREENS.has(r.screen) ? r : { screen: 'messages', id: null }; };
 // route by the address bar; a normalised route says which hash the bar should show instead
 export function settle(store, hash) {
@@ -160,6 +162,8 @@ export function boot(win, host = {}) {
     createSymbolSearch: host.createSymbolSearch ?? (onUpdate => createSymbolSearch(onUpdate, { fetcher: (...a) => win.fetch(...a) })),
     storage, getJson, win,
   });
+  // a channel's page: its overview read on entering it
+  const channels = startChannels({ store, postJson, getJson, refresh: () => live.refresh(), now });
   // the quotes run only while Markets is on screen in a visible tab
   const showMarkets = () => markets.show(store.get().route.screen === 'markets' && !doc.hidden);
 
@@ -194,7 +198,8 @@ export function boot(win, host = {}) {
     const threadAt = thread0 ? { top: thread0.scrollTop, bottom: thread0.scrollHeight - thread0.scrollTop - thread0.clientHeight < 40 } : null;
     const scrolls = { main: root.querySelector('main')?.scrollTop, rows: root.querySelector('.rail-rows')?.scrollTop, drawer: root.querySelector('.drawer-body')?.scrollTop };
 
-    const screen = s.route.screen === 'markets' ? renderMarketsScreen(s, now()) : s.route.screen === 'account' ? renderAccountScreen(s, now()) : renderMessagesScreen(s, now());
+    const screen = s.route.screen === 'markets' ? renderMarketsScreen(s, now()) : s.route.screen === 'account' ? renderAccountScreen(s, now())
+      : s.route.screen === 'channel' ? renderChannelScreen(s, now()) : renderMessagesScreen(s, now());
     root.innerHTML = renderRail(s, now()) + (s.settingsOpen ? screen.replace(/<\/main>$/, renderSettings(s) + '</main>') : screen);
 
     const sameEditor = editorOf(s.edit) === last.editor;
@@ -284,6 +289,7 @@ export function boot(win, host = {}) {
     if (r.screen === 'markets' && r.id) { if (r.id !== barsFor) { barsFor = r.id; void markets.bars(r.id); } } else barsFor = null;
     if (r.screen === 'account' && was?.screen !== 'account') void account.load();
     if (r.screen === 'account' && r.tab === 'venues' && !(was?.screen === 'account' && was.tab === 'venues')) void account.describe();
+    if (r.screen === 'channel' && !(was?.screen === 'channel' && was.id === r.id)) void channels.overview(r.id);
     was = r;
     // a deep link the list does not carry yet waits for it
     if (asked.screen === 'messages' && asked.id && asked.id !== 'new' && !store.get().conversations.some(c => c.id === asked.id)) wanted = asked.id;
@@ -358,6 +364,9 @@ export function boot(win, host = {}) {
   const act = {
     open: el => go({ screen: 'messages', id: el.dataset.id }),
     startDraft: () => { store.dispatch('startDraft', { now: now() }); go({ screen: 'messages', id: 'new' }); },
+    // a channel's page: New round is a new message in that channel; Retry reads it again
+    newRound: el => { store.dispatch('startDraft', { now: now(), where: el.dataset.id }); go({ screen: 'messages', id: 'new' }); },
+    channelRetry: el => { void channels.overview(el.dataset.id); },
     cancelDraft: () => { store.dispatch('cancelDraft'); go(store.get().route); },
     toggleRail: () => store.dispatch('toggleRail'),
     toggleGroup: el => store.dispatch('toggleGroup', el.dataset.key),
@@ -515,7 +524,7 @@ export function boot(win, host = {}) {
   if (!win.location.hash) win.history.replaceState(null, '', toHash(store.get().route));
   follow();
   render();
-  return Object.assign(store, { timers, live, actions, markets });
+  return Object.assign(store, { timers, live, actions, markets, channels });
 }
 
 if (typeof window !== 'undefined' && window.document) boot(window);

@@ -23,6 +23,8 @@ export const withTickers = text => esc(text).replace(/\{\{([A-Z]+)\}\}/g, (_, t)
 let markdown = null;
 export function setMarkdown(fn) { markdown = typeof fn === 'function' ? fn : null; }
 const prose = m => (m.data?.markdown && markdown ? markdown(m.text ?? '') : esc(m.text ?? ''));
+// any other markdown the screens draw (a channel's thesis), through the same renderer, escaped when none is set
+export const markdownHtml = text => (markdown ? markdown(text ?? '') : esc(text ?? ''));
 
 // a gate's end state, in the old client's words; a card still waiting shows nothing in that slot
 const ENDED = { approved: ['Approved', 'up'], rejected: ['Declined', 'grey'], answered: ['Answered', 'up'], closed: ['Closed', 'grey'], elsewhere: ['Settled elsewhere', 'grey'] };

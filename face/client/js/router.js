@@ -1,9 +1,10 @@
 // face/client/js/router.js — hash routes: #/messages/<id> · #/markets[/<id>] · #/account/<tab> · #/mail[/<letter>] ·
-// #/discover[/<shelf>] · #/plugin/<id>. A market id is the face's (us:AAPL, crypto:BTC/USD, cn:600519): everything after
-// #/markets/, so a coin keeps its slash, written back raw.
+// #/discover[/<shelf>] · #/plugin/<id> · #/channel/<workspaceId>. A market id is the face's (us:AAPL, crypto:BTC/USD,
+// cn:600519): everything after #/markets/, so a coin keeps its slash, written back raw; a plugin's and a channel's id
+// read the same way.
 const TABS = ['portfolio', 'venues'];
 
-function marketId(path) {
+function restOf(path) {
   const at = path.indexOf('/');
   if (at < 0 || at === path.length - 1) return null;
   const raw = path.slice(at + 1);
@@ -15,9 +16,10 @@ export function parseHash(hash) {
   const [screen, a] = path.split('/').filter(Boolean);
   switch (screen) {
     case 'discover': return { screen: 'discover', id: a ?? null };
-    case 'plugin': return { screen: 'plugin', id: a ?? null };
+    case 'plugin': return { screen: 'plugin', id: restOf(path) };
+    case 'channel': return { screen: 'channel', id: restOf(path) };
     case 'account': return { screen: 'account', tab: TABS.includes(a) ? a : 'portfolio' };
-    case 'markets': return { screen: 'markets', id: marketId(path) };
+    case 'markets': return { screen: 'markets', id: restOf(path) };
     case 'messages': return { screen: 'messages', id: a ?? null };
     case 'mail': return { screen: 'mail', id: a ?? null };
     default: return { screen: 'messages', id: null };

@@ -153,3 +153,11 @@ test('group and channel names are escaped', () => {
   assert.doesNotMatch(h, /<b>x<\/b>|<i>bot<\/i>/);
   assert.match(h, /&lt;b&gt;x&lt;\/b&gt;/); assert.match(h, /&lt;i&gt;bot&lt;\/i&gt;/);
 });
+
+test('on a channel page the list stays beside it, Messages is current and the channel is marked', () => {
+  const s = R.nav(listed([conv('a', { channel: { workspaceId: 'w0', name: 'workbench' } })], 'a'), { screen: 'channel', id: 'w0' });
+  const h = renderRail(s, NOW);
+  assert.match(h, /class="nav-item current" aria-current="page" href="#\/messages\/a"/);
+  assert.match(h, /class="list"/);
+  assert.match(h, /<a class="grp-name current" aria-current="page" href="#\/channel\/w0">/);
+});
