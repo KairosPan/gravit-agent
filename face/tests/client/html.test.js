@@ -1,8 +1,8 @@
 // gravit-ui/tests/html.test.js
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { esc, attrs, cls, money } from '../js/html.js';
-import { icon, ICONS } from '../js/icons.js';
+import { esc, attrs, cls, money } from '../../client/js/html.js';
+import { icon, ICONS } from '../../client/js/icons.js';
 
 test('esc neutralises the five HTML characters', () => {
   assert.equal(esc(`<a href="x">it's & more</a>`), '&lt;a href=&quot;x&quot;&gt;it&#39;s &amp; more&lt;/a&gt;');

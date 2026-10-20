@@ -6,8 +6,8 @@
  * re-derive any of it. No innerHTML anywhere, same as the rest of the client.
  * @module
  */
-import { renderMarkdown } from "./markdown.js";
-import { isHostPreset } from "./speaker.js";
+import { renderMarkdown } from "./js/wire/markdown.js";
+import { isHostPreset } from "./js/wire/speaker.js";
 
 /** @param {string} tag @param {string|null} [cls] @param {string} [text] */
 const el = (tag, cls, text) => {

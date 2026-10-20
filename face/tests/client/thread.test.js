@@ -1,10 +1,10 @@
 // gravit-ui/tests/thread.test.js
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { renderThread, renderMessage, chip, key, ticker, candles } from '../js/render/thread.js';
-import { seed } from '../js/data/seed.js';
-import { director, CANDLES } from '../js/driver.js';
-import { message } from '../js/messages.js';
+import { renderThread, renderMessage, chip, key, ticker, candles } from '../../client/js/render/thread.js';
+import { seed } from '../../client/js/data/seed.js';
+import { director, CANDLES } from '../../client/js/driver.js';
+import { message } from '../../client/js/messages.js';
 
 const NOW = new Date(2026, 9, 9, 14, 7).getTime();
 const count = (h, re) => (h.match(re) ?? []).length;
@@ -79,7 +79,7 @@ test('helpers: chip, key, ticker, candles', () => {
 });
 
 test('a stopped conversation shows no answer keys', async () => {
-  const { reducers: R } = await import('../js/reducers/index.js');
+  const { reducers: R } = await import('../../client/js/reducers/index.js');
   const stopped = R.stopGravit(seed(NOW), { convId: 'c-1', now: NOW });
   const h = renderThread(stopped.conversations[0], stopped, NOW);
   assert.doesNotMatch(h, /class="key /);

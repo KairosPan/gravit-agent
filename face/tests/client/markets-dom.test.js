@@ -1,10 +1,10 @@
 // gravit-ui/tests/markets-dom.test.js — boot() against a fake window: Markets' drawer, a hand trade end to end, the signature clock
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { boot, settle, placeFlow, makeStore, Timers } from '../js/app.js';
+import { boot, settle, placeFlow, makeStore, Timers } from '../../client/js/app.js';
 import { fakeWindow } from './helpers/fake-dom.js';
-import { seed } from '../js/data/seed.js';
-import { QUOTE_MS } from '../js/data/markets.js';
+import { seed } from '../../client/js/data/seed.js';
+import { QUOTE_MS } from '../../client/js/data/markets.js';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const noDialogs = { prompt: () => { throw new Error('prompt() is gone'); }, confirm: () => { throw new Error('confirm() is gone'); } };

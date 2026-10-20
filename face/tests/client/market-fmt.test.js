@@ -1,8 +1,8 @@
 // gravit-ui/tests/market-fmt.test.js — Linqi's market formatters, as Markets and Trade print numbers
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { usd, dollars, px, cents, vol, qtyFmt, closeIn, leftWords, chgHtml, floorTo, round2 } from '../js/market-fmt.js';
-import { MIN, HOUR, DAY } from '../js/time.js';
+import { usd, dollars, px, cents, vol, qtyFmt, closeIn, leftWords, chgHtml, floorTo, round2 } from '../../client/js/market-fmt.js';
+import { MIN, HOUR, DAY } from '../../client/js/time.js';
 
 test('dollars and prices: two decimals at a dollar and up, four figures under it; a dash for nothing', () => {
   assert.equal(usd(62800), '$62,800.00');

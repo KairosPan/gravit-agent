@@ -1,11 +1,11 @@
 // gravit-ui/tests/app.test.js
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseHash, toHash } from '../js/router.js';
-import { Timers, initialState, scheduleEvents, makeStore, settle, showBreaking, answerFlow, replyFlow, watchToast } from '../js/app.js';
-import { createStore } from '../js/store.js';
-import { reducers } from '../js/reducers/index.js';
-import { seed, SEED_VERSION } from '../js/data/seed.js';
+import { parseHash, toHash } from '../../client/js/router.js';
+import { Timers, initialState, scheduleEvents, makeStore, settle, showBreaking, answerFlow, replyFlow, watchToast } from '../../client/js/app.js';
+import { createStore } from '../../client/js/store.js';
+import { reducers } from '../../client/js/reducers/index.js';
+import { seed, SEED_VERSION } from '../../client/js/data/seed.js';
 
 const NOW = new Date(2026, 9, 9, 14, 7).getTime();
 const sleep = ms => new Promise(r => setTimeout(r, ms));

@@ -1,12 +1,12 @@
 // gravit-ui/tests/trade.test.js — the owner's hand orders after Linqi's Trade: prepare, sign and place, the stand-in fill, and what it changes
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { reducers as R } from '../js/reducers/index.js';
-import { seed, SEED_VERSION } from '../js/data/seed.js';
-import { QUOTE_MS } from '../js/data/markets.js';
-import { prepare, revalue, legsOf, routeOf, handOver, mentions } from '../js/trade.js';
-import { instrument } from '../js/data/markets.js';
-import { renderTrade } from '../js/render/trade.js';
+import { reducers as R } from '../../client/js/reducers/index.js';
+import { seed, SEED_VERSION } from '../../client/js/data/seed.js';
+import { QUOTE_MS } from '../../client/js/data/markets.js';
+import { prepare, revalue, legsOf, routeOf, handOver, mentions } from '../../client/js/trade.js';
+import { instrument } from '../../client/js/data/markets.js';
+import { renderTrade } from '../../client/js/render/trade.js';
 
 const NOW = new Date(2026, 9, 9, 14, 7).getTime();
 const fresh = () => seed(NOW);
@@ -296,7 +296,7 @@ test('moving all of a holding moves it whole: no negative quantity is left behin
 });
 
 test('a held prediction sells from its drawer and from the picker', async () => {
-  const { renderMarkets } = await import('../js/render/markets.js');
+  const { renderMarkets } = await import('../../client/js/render/markets.js');
   const yes = filled(R.placeOrder(ticket(R.venueConnected(fresh(), 'Polymarket'), 'FED-DEC', { amount: '10' }), { now: NOW }));
   const d = renderMarkets(R.nav(yes, { screen: 'markets', id: 'FED-DEC' }), NOW);
   assert.match(d, /data-action="tradeFrom" data-id="FED-DEC" data-side="sell" data-venue="Polymarket" data-outcome="0">Sell<\/button>/);

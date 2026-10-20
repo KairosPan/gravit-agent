@@ -1,8 +1,8 @@
 // gravit-ui/tests/store.test.js
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createStore } from '../js/store.js';
-import { levelOf, needsAnswer, message, LEVELS } from '../js/messages.js';
+import { createStore } from '../../client/js/store.js';
+import { levelOf, needsAnswer, message, LEVELS } from '../../client/js/messages.js';
 
 function fakeStorage(initial = {}) {
   const m = new Map(Object.entries(initial));

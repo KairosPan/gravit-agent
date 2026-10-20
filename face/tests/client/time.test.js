@@ -1,8 +1,8 @@
 // gravit-ui/tests/time.test.js
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { MIN, HOUR, DAY, fmtClock, rowTime, divider, fmtDate, sameDay } from '../js/time.js';
-import { nextId } from '../js/ids.js';
+import { MIN, HOUR, DAY, fmtClock, rowTime, divider, fmtDate, sameDay } from '../../client/js/time.js';
+import { nextId } from '../../client/js/ids.js';
 
 const NOW = new Date(2026, 9, 9, 14, 7).getTime(); // Oct 9 2026 14:07 local
 

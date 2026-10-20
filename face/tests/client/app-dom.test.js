@@ -1,11 +1,11 @@
 // gravit-ui/tests/app-dom.test.js — boot() against a fake window: what the person sees after typing, sending, scrolling and pressing keys
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { boot } from '../js/app.js';
+import { boot } from '../../client/js/app.js';
 import { fakeWindow } from './helpers/fake-dom.js';
-import { seed } from '../js/data/seed.js';
-import { fromManifest } from '../js/data/plugins.js';
-import { nextUpload } from '../js/driver.js';
+import { seed } from '../../client/js/data/seed.js';
+import { fromManifest } from '../../client/js/data/plugins.js';
+import { nextUpload } from '../../client/js/driver.js';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const send = (f, el) => { const form = { dataset: { action: 'send' } }; f.fire('root', 'submit', { target: { closest: () => form } }); };

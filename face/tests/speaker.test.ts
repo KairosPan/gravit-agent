@@ -21,7 +21,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 // speaker.js is plain ESM JS (it ships to the browser); tsconfig `allowJs`
 // lets this test import it, the same way botId.test.ts imports botId.js.
-import { HOST_NAME, HOST_PRESETS, isHostPreset, speakerFor } from "../client/speaker.js";
+import { HOST_NAME, HOST_PRESETS, isHostPreset, speakerFor } from "../client/js/wire/speaker.js";
 
 /** A roster in the shape `/data/bots.json` returns. */
 const bots = [

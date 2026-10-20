@@ -1,11 +1,11 @@
 // gravit-ui/tests/discover.test.js
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { renderDiscover, renderPlugin, card, keyFor, pluginPage, renderCreate, renderToast } from '../js/render/discover.js';
-import { byId, PLUGINS } from '../js/data/plugins.js';
-import { nextUpload } from '../js/driver.js';
-import { reducers as R } from '../js/reducers/index.js';
-import { seed } from '../js/data/seed.js';
+import { renderDiscover, renderPlugin, card, keyFor, pluginPage, renderCreate, renderToast } from '../../client/js/render/discover.js';
+import { byId, PLUGINS } from '../../client/js/data/plugins.js';
+import { nextUpload } from '../../client/js/driver.js';
+import { reducers as R } from '../../client/js/reducers/index.js';
+import { seed } from '../../client/js/data/seed.js';
 
 const NOW = new Date(2026, 9, 9, 14, 7).getTime();
 const count = (h, re) => (h.match(re) ?? []).length;

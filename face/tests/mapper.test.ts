@@ -17,7 +17,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 // mapper.js is plain ESM JS (it ships to the browser); tsconfig `allowJs`
 // lets this test import it and read its JSDoc-declared view-model type.
-import { mapFrame } from "../client/mapper.js";
+import { mapFrame } from "../client/js/wire/mapper.js";
 
 const frames: unknown[] = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), "fixtures", "events.jsonl"),

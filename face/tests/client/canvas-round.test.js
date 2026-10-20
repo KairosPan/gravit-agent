@@ -2,22 +2,22 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { renderThread, renderMessage } from '../js/render/thread.js';
-import { renderHead, renderDetails, renderBanner, renderCall, renderComposer, renderMessagesScreen } from '../js/render/messages.js';
-import { renderList, renderNav } from '../js/render/rail.js';
-import { avatar } from '../js/render/avatars.js';
-import { confirmPair } from '../js/render/controls.js';
-import { director } from '../js/driver.js';
-import { reducers as R } from '../js/reducers/index.js';
-import { seed } from '../js/data/seed.js';
-import { message } from '../js/messages.js';
-import { fmtDuration } from '../js/time.js';
-import { boot } from '../js/app.js';
+import { renderThread, renderMessage } from '../../client/js/render/thread.js';
+import { renderHead, renderDetails, renderBanner, renderCall, renderComposer, renderMessagesScreen } from '../../client/js/render/messages.js';
+import { renderList, renderNav } from '../../client/js/render/rail.js';
+import { avatar } from '../../client/js/render/avatars.js';
+import { confirmPair } from '../../client/js/render/controls.js';
+import { director } from '../../client/js/driver.js';
+import { reducers as R } from '../../client/js/reducers/index.js';
+import { seed } from '../../client/js/data/seed.js';
+import { message } from '../../client/js/messages.js';
+import { fmtDuration } from '../../client/js/time.js';
+import { boot } from '../../client/js/app.js';
 import { fakeWindow } from './helpers/fake-dom.js';
 
 const NOW = new Date(2026, 9, 9, 14, 7).getTime();
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const css = await readFile(new URL('../css/app.css', import.meta.url), 'utf8');
+const css = await readFile(new URL('../../client/css/app.css', import.meta.url), 'utf8');
 // the first rule written for exactly this selector
 const rule = sel => {
   const i = css.indexOf(`\n${sel} {`);
@@ -240,7 +240,7 @@ test('the after-call card: white once it connected, red when missed; the topic w
 // ---- Account, Memory, Mail, Create, Trade (F5, F13, F18, F19, F20, F23, F24 6)
 
 test('Net worth is a 12 px label; a holding’s change is coloured, not bold', async () => {
-  const { renderAccount } = await import('../js/render/account.js');
+  const { renderAccount } = await import('../../client/js/render/account.js');
   const h = renderAccount(R.nav(seed(NOW), { screen: 'account', tab: 'portfolio' }));
   assert.match(h, /<div class="label">Net worth<\/div>/);
   assert.match(rule('.label'), /font-size: 12px; font-weight: 600; color: var\(--dim\);/);
@@ -248,7 +248,7 @@ test('Net worth is a 12 px label; a holding’s change is coloured, not bold', a
 });
 
 test('Receive takes money into the owner’s Stand-in Wallet: USDC on Base, the QR beside the address', async () => {
-  const { renderAccount } = await import('../js/render/account.js');
+  const { renderAccount } = await import('../../client/js/render/account.js');
   const h = renderAccount(R.openPanel(R.nav(seed(NOW), { screen: 'account', tab: 'portfolio' }), 'receive'));
   assert.match(h, /<aside class="drawer" aria-label="Receive · USDC"><div class="drawer-head"><div class="drawer-title"><h2>Receive · USDC<\/h2><span class="chip grey">Base<\/span><\/div>/);
   assert.match(h, /<div class="receive"><svg class="qr"[\s\S]*<\/svg><div class="receive-side"><div><span class="mono">0x9a7c…d41e<\/span><span class="dim"> · Stand-in Wallet<\/span><\/div><button type="button" class="btn-sm" data-action="copyAddress">Copy address<\/button><\/div><\/div>/);
@@ -257,7 +257,7 @@ test('Receive takes money into the owner’s Stand-in Wallet: USDC on Base, the 
 });
 
 test('Memory reads as the boards word it, with the sources spec §8 lists', async () => {
-  const { renderMemory } = await import('../js/render/account.js');
+  const { renderMemory } = await import('../../client/js/render/account.js');
   const s = seed(NOW);
   const texts = Object.fromEntries(s.memory.entries.map(e => [e.id, [e.text, e.source]]));
   assert.deepEqual(texts['mem-1'], ['Value over hype', 'You said']);
@@ -283,7 +283,7 @@ test('an order on a book says so with the product’s apostrophe', () => {
 });
 
 test('the picker marks the market whose ticket is open', async () => {
-  const { renderTrade } = await import('../js/render/trade.js');
+  const { renderTrade } = await import('../../client/js/render/trade.js');
   const s = R.openTicket(R.nav(seed(NOW), { screen: 'trade' }), { id: 'BTC', venue: 'Stand-in Exchange', side: 'buy', now: NOW });
   const h = renderTrade(s, NOW);
   assert.equal((h.match(/class="tk-row on"/g) ?? []).length, 1, 'one row, the first that names it');
@@ -304,7 +304,7 @@ test('with Details folding the list, the banner zone starts where the first leve
 });
 
 test('a plugin page’s one key keeps its id across Install and Uninstall, so focus stays on it', async () => {
-  const { renderPlugin } = await import('../js/render/discover.js');
+  const { renderPlugin } = await import('../../client/js/render/discover.js');
   const off = R.nav(seed(NOW), { screen: 'plugin', id: 'news' });
   assert.match(renderPlugin(off), /<div class="plug-key"><button type="button" id="plug-key" class="btn-primary" data-action="install" data-id="news">Install<\/button>/);
   assert.match(renderPlugin(R.install(off, { id: 'news', now: NOW })), /<div class="plug-key"><button type="button" id="plug-key" class="btn-primary" data-action="uninstall" data-id="news">Uninstall<\/button>/);
@@ -324,8 +324,8 @@ test('a plugin page’s one key keeps its id across Install and Uninstall, so fo
 });
 
 test('the way back on a plugin or market page keeps focus through a re-render', async () => {
-  const { renderPlugin } = await import('../js/render/discover.js');
-  const { renderMarkets } = await import('../js/render/markets.js');
+  const { renderPlugin } = await import('../../client/js/render/discover.js');
+  const { renderMarkets } = await import('../../client/js/render/markets.js');
   assert.match(renderPlugin(R.nav(seed(NOW), { screen: 'plugin', id: 'news' })), /<a id="page-back" class="back-link page-back" href="#\/discover">‹ Discover<\/a>/);
   assert.match(renderMarkets(R.nav(seed(NOW), { screen: 'markets', id: 'BTC' }), NOW), /<a id="page-back" class="back-link page-back" href="#\/markets">‹ Markets<\/a>/);
   const f = fakeWindow({ hash: '#/markets/FED-DEC' });
@@ -392,7 +392,7 @@ test('back from a market page, the list is where you left it and focus is on the
 });
 
 test('Discover’s dialog does not follow you onto a plugin page; a plugin page opened from a conversation goes back to Discover itself', async () => {
-  const { renderPlugin } = await import('../js/render/discover.js');
+  const { renderPlugin } = await import('../../client/js/render/discover.js');
   const D = { screen: 'discover', id: null };
   const withDialog = R.openCreate(R.nav(seed(NOW), D));
   assert.equal(R.nav(withDialog, { screen: 'plugin', id: 'news' }).discover.create, null);
@@ -445,7 +445,7 @@ test('on a market page, No returns focus to the Cancel key; Yes, once the order 
 });
 
 test('a public upload passing review while you are on its page says so there', async () => {
-  const { nextUpload } = await import('../js/driver.js');
+  const { nextUpload } = await import('../../client/js/driver.js');
   let s = R.openCreate(R.nav(seed(NOW), { screen: 'discover', id: null }));
   const run = s.discover.create.run;
   s = R.clientPublishes(R.clientConnected(R.startClient(s, { run }), { run }), { run, manifest: nextUpload([{ id: 'moat' }]) });
@@ -458,7 +458,7 @@ test('a public upload passing review while you are on its page says so there', a
 });
 
 test('a plugin you made says Never the way the catalogue does', async () => {
-  const { fromManifest } = await import('../js/data/plugins.js');
-  const { nextUpload } = await import('../js/driver.js');
+  const { fromManifest } = await import('../../client/js/data/plugins.js');
+  const { nextUpload } = await import('../../client/js/driver.js');
   assert.deepEqual(fromManifest(nextUpload([]), 'private', NOW).never, ['moves money', 'pays anyone', 'changes a limit']);
 });

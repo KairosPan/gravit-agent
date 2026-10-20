@@ -1,8 +1,8 @@
 // gravit-ui/tests/driver.test.js
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { replyTo, followUp, director, CANDLES } from '../js/driver.js';
-import { message } from '../js/messages.js';
+import { replyTo, followUp, director, CANDLES } from '../../client/js/driver.js';
+import { message } from '../../client/js/messages.js';
 
 const NOW = new Date(2026, 9, 9, 14, 7).getTime();
 const ctx = { installed: ['pricefeed', 'fraud'], now: NOW };
@@ -132,7 +132,7 @@ test('the director can show the door\'s refusal and the close', () => {
 });
 
 test('the scripted client uploads in turn: Moat score (private), CPI quick read (public), then the same again with a number', async () => {
-  const drv = await import('../js/driver.js');
+  const drv = await import('../../client/js/driver.js');
   assert.equal(drv.toolsFor, undefined, 'the round-2 connector script is gone');
   assert.deepEqual(drv.nextUpload([]), { id: 'moat', name: 'Moat score', kind: 'Data', blurb: 'Moat scores, ask by ticker', icon: null, tools: ['moat.score', 'moat.compare'], writes: ['message'], needs: 'none', visibility: 'private' });
   const second = drv.nextUpload([{ id: 'moat' }]);

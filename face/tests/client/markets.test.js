@@ -1,12 +1,12 @@
 // gravit-ui/tests/markets.test.js — the stand-in market catalogue, its price series, and the Markets screen with its drawer
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { INSTRUMENTS, TABS, KINDS, instrument, instrumentOf, listed, kindOf, seriesOf } from '../js/data/markets.js';
-import { VENUES, CONNECTABLE } from '../js/data/seed.js';
-import { HOUR } from '../js/time.js';
-import { renderMarkets } from '../js/render/markets.js';
-import { reducers as R } from '../js/reducers/index.js';
-import { seed } from '../js/data/seed.js';
+import { INSTRUMENTS, TABS, KINDS, instrument, instrumentOf, listed, kindOf, seriesOf } from '../../client/js/data/markets.js';
+import { VENUES, CONNECTABLE } from '../../client/js/data/seed.js';
+import { HOUR } from '../../client/js/time.js';
+import { renderMarkets } from '../../client/js/render/markets.js';
+import { reducers as R } from '../../client/js/reducers/index.js';
+import { seed } from '../../client/js/data/seed.js';
 
 const NOW = new Date(2026, 9, 9, 14, 7).getTime();
 

@@ -1,11 +1,11 @@
 // gravit-ui/tests/reducers.test.js
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { reducers as R } from '../js/reducers/index.js';
-import { seed } from '../js/data/seed.js';
-import { MIN } from '../js/time.js';
-import { REVIEW_MS } from '../js/reducers/discover.js';
-import { nextUpload } from '../js/driver.js';
+import { reducers as R } from '../../client/js/reducers/index.js';
+import { seed } from '../../client/js/data/seed.js';
+import { MIN } from '../../client/js/time.js';
+import { REVIEW_MS } from '../../client/js/reducers/discover.js';
+import { nextUpload } from '../../client/js/driver.js';
 
 const NOW = new Date(2026, 9, 9, 14, 7).getTime();
 const fresh = () => seed(NOW);

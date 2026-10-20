@@ -2,17 +2,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { renderRail } from '../js/render/rail.js';
-import { renderMessagesScreen, renderBanner, renderCall } from '../js/render/messages.js';
-import { renderMarkets } from '../js/render/markets.js';
-import { renderTrade } from '../js/render/trade.js';
-import { renderMailScreen } from '../js/render/mail.js';
-import { renderDiscover, renderPlugin } from '../js/render/discover.js';
-import { renderAccount } from '../js/render/account.js';
-import { director } from '../js/driver.js';
-import { reducers as R } from '../js/reducers/index.js';
-import { seed } from '../js/data/seed.js';
-import { nextUpload } from '../js/driver.js';
+import { renderRail } from '../../client/js/render/rail.js';
+import { renderMessagesScreen, renderBanner, renderCall } from '../../client/js/render/messages.js';
+import { renderMarkets } from '../../client/js/render/markets.js';
+import { renderTrade } from '../../client/js/render/trade.js';
+import { renderMailScreen } from '../../client/js/render/mail.js';
+import { renderDiscover, renderPlugin } from '../../client/js/render/discover.js';
+import { renderAccount } from '../../client/js/render/account.js';
+import { director } from '../../client/js/driver.js';
+import { reducers as R } from '../../client/js/reducers/index.js';
+import { seed } from '../../client/js/data/seed.js';
+import { nextUpload } from '../../client/js/driver.js';
 
 const NOW = new Date(2026, 9, 9, 14, 7).getTime();
 
@@ -79,7 +79,7 @@ function tradeStates(s) {
 }
 
 test('every class the screens emit has a rule in app.css, and app.css names no colour by hex', async () => {
-  const css = await readFile(new URL('../css/app.css', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../../client/css/app.css', import.meta.url), 'utf8');
   assert.doesNotMatch(css, /#[0-9a-fA-F]{3,6}\b/, 'colours come from tokens.css');
   const screen = st => ({ discover: () => renderDiscover(st), plugin: () => renderPlugin(st), account: () => renderAccount(st), mail: () => renderMailScreen(st, NOW), markets: () => renderMarkets(st, NOW), trade: () => renderTrade(st, NOW) })[st.route.screen]?.() ?? renderMessagesScreen(st, NOW);
   const html = everyState().map(st => renderRail(st, NOW) + screen(st)).join('')
@@ -95,7 +95,7 @@ test('every class the screens emit has a rule in app.css, and app.css names no c
 });
 
 test('the layout: one screen tall, the thread scrolls under a pinned composer, the drawer is fixed and the toast sticks to the main column (spec §3.3)', async () => {
-  const css = await readFile(new URL('../css/app.css', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../../client/css/app.css', import.meta.url), 'utf8');
   const rule = sel => css.match(new RegExp(`^${sel.replace(/[.]/g, '\\.')} \\{([^}]*)\\}`, 'm'))?.[1] ?? '';
   assert.match(rule('.main'), /(?:^|;)\s*height: 100vh/, 'a real height, not a minimum');
   assert.match(rule('.thread'), /min-height: 0/);
@@ -109,7 +109,7 @@ test('the layout: one screen tall, the thread scrolls under a pinned composer, t
 });
 
 test('narrow windows, the toast under a drawer, and long words that wrap', async () => {
-  const css = await readFile(new URL('../css/app.css', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../../client/css/app.css', import.meta.url), 'utf8');
   const narrow = css.match(/@media \(max-width: 860px\) \{([\s\S]*?)\n\}/)?.[1] ?? '';
   assert.match(narrow, /\.rail, \.rail\.mini \{[^}]*position: static/, 'below 860 px the first level stops being a sticky column, collapsed or not');
   assert.match(narrow, /\.main \{[^}]*height: auto/);
@@ -126,7 +126,7 @@ test('narrow windows, the toast under a drawer, and long words that wrap', async
 });
 
 test('Details never covers the conversation: it makes room, folding the list away on a medium window; the first level folds to icons below 1180 px', async () => {
-  const css = await readFile(new URL('../css/app.css', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../../client/css/app.css', import.meta.url), 'utf8');
   const block = q => css.match(new RegExp(`@media ${q.replace(/[()]/g, '\\$&')} \\{([\\s\\S]*?)\\n\\}`))?.[1] ?? '';
   const wide = block('(min-width: 861px)');
   assert.match(wide, /\.main\.with-drawer > \.head, \.main\.with-drawer > \.thread, \.main\.with-drawer > \.composer \{ margin-right: 400px; \}/);
@@ -140,7 +140,7 @@ test('Details never covers the conversation: it makes room, folding the list awa
 });
 
 test('app.css is well formed: braces never close more than they opened, so no rule is swallowed', async () => {
-  const css = await readFile(new URL('../css/app.css', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../../client/css/app.css', import.meta.url), 'utf8');
   let depth = 0;
   css.split('\n').forEach((line, i) => {
     for (const ch of line) {
@@ -152,15 +152,15 @@ test('app.css is well formed: braces never close more than they opened, so no ru
 });
 
 test('Markets and Trade: the table folds 24h and Volume when narrow, a link button looks like a link, selects use the page font', async () => {
-  const css = await readFile(new URL('../css/app.css', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../../client/css/app.css', import.meta.url), 'utf8');
   assert.match(css, /@container \(max-width: 620px\) \{[^}]*\.mk-t \.mk-c-chg, \.mk-t \.mk-c-vol \{ display: none; \}/);
   assert.match(css, /^button\.link \{[^}]*border: 0;[^}]*background: none;/m);
   assert.match(css, /^button, input, textarea, select \{ font: inherit; color: inherit; \}/m);
 });
 
 test('the equity blue goes by Linqi\'s own name: no --blue, which his tokens use for the orange RWA colour', async () => {
-  const css = await readFile(new URL('../css/app.css', import.meta.url), 'utf8');
-  const tokens = await readFile(new URL('../css/tokens.css', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../../client/css/app.css', import.meta.url), 'utf8');
+  const tokens = await readFile(new URL('../../client/css/tokens.css', import.meta.url), 'utf8');
   assert.doesNotMatch(css, /var\(--blue\)|var\(--on-blue\)/);
   assert.doesNotMatch(tokens, /--blue:|--on-blue:/);
   assert.match(css, /var\(--alloc-equity\)/);

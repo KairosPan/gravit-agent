@@ -1,9 +1,9 @@
 // gravit-ui/tests/account.test.js
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { renderAccount, renderMemory, renderSettings } from '../js/render/account.js';
-import { reducers as R } from '../js/reducers/index.js';
-import { seed } from '../js/data/seed.js';
+import { renderAccount, renderMemory, renderSettings } from '../../client/js/render/account.js';
+import { reducers as R } from '../../client/js/reducers/index.js';
+import { seed } from '../../client/js/data/seed.js';
 
 const NOW = new Date(2026, 9, 9, 14, 7).getTime();
 const count = (h, re) => (h.match(re) ?? []).length;

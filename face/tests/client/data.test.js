@@ -1,10 +1,10 @@
 // gravit-ui/tests/data.test.js
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import * as plugins from '../js/data/plugins.js';
-import { PLUGINS, KINDS, SHELVES, SHOP_MCP, byId, search, likeFor, fromManifest } from '../js/data/plugins.js';
-import { seed, SEED_VERSION } from '../js/data/seed.js';
-import { MIN, DAY } from '../js/time.js';
+import * as plugins from '../../client/js/data/plugins.js';
+import { PLUGINS, KINDS, SHELVES, SHOP_MCP, byId, search, likeFor, fromManifest } from '../../client/js/data/plugins.js';
+import { seed, SEED_VERSION } from '../../client/js/data/seed.js';
+import { MIN, DAY } from '../../client/js/time.js';
 
 test('the catalogue: unique ids, known kinds, every shelf id resolves, Serenity has her line', () => {
   const ids = PLUGINS.map(p => p.id);
@@ -38,7 +38,7 @@ test('likeFor reads the style out of Memory', () => {
 });
 
 test('firstRun: the seed with no conversations, for the F6 empty state', async () => {
-  const { firstRun } = await import('../js/data/seed.js');
+  const { firstRun } = await import('../../client/js/data/seed.js');
   const now = new Date(2026, 9, 9, 14, 7).getTime();
   const s = firstRun(now);
   assert.equal(s.v, SEED_VERSION);

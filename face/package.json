@@ -9,7 +9,7 @@
   "scripts": {
     "build": "node scripts/build-static.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts",
+    "test": "tsx --test tests/*.test.ts tests/client/*.test.js",
     "start": "tsx src/main.ts",
     "setup": "tsx src/setup.ts",
     "check:fixture": "node scripts/validate-fixture.mjs",

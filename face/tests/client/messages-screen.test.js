@@ -1,10 +1,10 @@
 // gravit-ui/tests/messages-screen.test.js
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { currentConversation, renderMessagesScreen, renderHead, renderComposer, renderDetails, renderBanner, renderCall } from '../js/render/messages.js';
-import { seg, segLinks, kv, sec } from '../js/render/controls.js';
-import { reducers as R } from '../js/reducers/index.js';
-import { seed } from '../js/data/seed.js';
+import { currentConversation, renderMessagesScreen, renderHead, renderComposer, renderDetails, renderBanner, renderCall } from '../../client/js/render/messages.js';
+import { seg, segLinks, kv, sec } from '../../client/js/render/controls.js';
+import { reducers as R } from '../../client/js/reducers/index.js';
+import { seed } from '../../client/js/data/seed.js';
 
 const NOW = new Date(2026, 9, 9, 14, 7).getTime();
 const count = (h, re) => (h.match(re) ?? []).length;

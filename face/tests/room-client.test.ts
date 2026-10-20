@@ -1,7 +1,7 @@
 // face/tests/room-client.test.ts
 import test from "node:test";
 import assert from "node:assert/strict";
-import { avatarGlyph, foldMembers, gateSpeaker, isMemberSession, isMentionText, normalizeRoomDiscussion, normalizeRoomView, roomAnswerDisplay, roundEndLine, stripChips } from "../client/room.js";
+import { avatarGlyph, foldMembers, gateSpeaker, isMemberSession, isMentionText, normalizeRoomDiscussion, normalizeRoomView, roomAnswerDisplay, roundEndLine, stripChips } from "../client/js/wire/room.js";
 import { bucketFor } from "../client/grouping.js";
 
 test("avatarGlyph is deterministic per id and differs between the two template bots", () => {

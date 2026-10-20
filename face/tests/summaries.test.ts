@@ -13,9 +13,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 // summaries.js is plain ESM JS (it ships to the browser); tsconfig `allowJs`
 // lets this test import it, the same way speaker.test.ts imports speaker.js.
-import { summaryOf } from "../client/summaries.js";
-import { foldMembers } from "../client/room.js";
-import { speakerFor } from "../client/speaker.js";
+import { summaryOf } from "../client/js/wire/summaries.js";
+import { foldMembers } from "../client/js/wire/room.js";
+import { speakerFor } from "../client/js/wire/speaker.js";
 
 /** A 0.2.0 list row: no `agentPreset` field of its own. */
 const row = (sessionId: string, values?: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({

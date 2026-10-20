@@ -1,11 +1,11 @@
 // gravit-ui/tests/controls.test.js — the in-page controls that replaced the browser's prompt and confirm: inline editors and two-step confirms
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { reducers as R } from '../js/reducers/index.js';
-import { seed, SEED_VERSION } from '../js/data/seed.js';
-import { renderDetails, renderMessagesScreen } from '../js/render/messages.js';
-import { renderMemory, renderSettings } from '../js/render/account.js';
-import { DAY } from '../js/time.js';
+import { reducers as R } from '../../client/js/reducers/index.js';
+import { seed, SEED_VERSION } from '../../client/js/data/seed.js';
+import { renderDetails, renderMessagesScreen } from '../../client/js/render/messages.js';
+import { renderMemory, renderSettings } from '../../client/js/render/account.js';
+import { DAY } from '../../client/js/time.js';
 
 const NOW = new Date(2026, 9, 9, 14, 7).getTime();
 const fresh = () => seed(NOW);
@@ -108,8 +108,8 @@ test('the draft limit chip turns into its editor; the venue is a pick list', () 
 });
 
 test('the composer holds picked files; a send carries them, even with no words, and empties the tray', async () => {
-  const { renderComposer } = await import('../js/render/messages.js');
-  const { renderMessage } = await import('../js/render/thread.js');
+  const { renderComposer } = await import('../../client/js/render/messages.js');
+  const { renderMessage } = await import('../../client/js/render/thread.js');
   let s = R.addFiles(fresh(), [{ name: 'q3.pdf', size: 120000 }, { name: 'chart.png', size: 4000 }]);
   assert.deepEqual(s.compose.files.map(f => f.name), ['q3.pdf', 'chart.png']);
   assert.deepEqual(R.addFiles(s, [{ name: 'q3.pdf', size: 1 }]).compose.files.length, 2, 'the same name twice is one file');
@@ -128,7 +128,7 @@ test('the composer holds picked files; a send carries them, even with no words, 
 });
 
 test('the mic key shows it is listening and the placeholder says so', async () => {
-  const { renderComposer } = await import('../js/render/messages.js');
+  const { renderComposer } = await import('../../client/js/render/messages.js');
   const on = R.setListening(fresh(), true);
   assert.equal(on.compose.listening, true);
   const c = renderComposer({ compose: on.compose });
@@ -138,7 +138,7 @@ test('the mic key shows it is listening and the placeholder says so', async () =
 });
 
 test('calls: you ring Gravit, it picks up, you hang up and a card stays; an accepted incoming call goes live the same way', async () => {
-  const { renderCall } = await import('../js/render/messages.js');
+  const { renderCall } = await import('../../client/js/render/messages.js');
   let s = R.startCall(fresh(), { now: NOW });
   assert.deepEqual([s.call.dir, s.call.status], ['out', 'ringing']);
   assert.equal(R.startCall(s, { now: NOW }), s, 'one call at a time');
@@ -162,7 +162,7 @@ test('calls: you ring Gravit, it picks up, you hang up and a card stays; an acce
 });
 
 test('the call card says how it went', async () => {
-  const { renderMessage } = await import('../js/render/thread.js');
+  const { renderMessage } = await import('../../client/js/render/thread.js');
   const s = fresh();
   const r = m => renderMessage({ id: 'm-x', at: NOW, from: 'gravit', kind: 'call', text: '', ...m }, s.conversations[0], s);
   assert.match(r({ answer: 'accepted', data: { dir: 'out', duration: 75_000 } }), /Called Gravit[\s\S]*class="chip up">Connected · 1:15</);
@@ -171,7 +171,7 @@ test('the call card says how it went', async () => {
 });
 
 test('Mail is a screen: a letter opens by its route and is marked read; an unknown letter falls back to the inbox', async () => {
-  const { renderMailScreen } = await import('../js/render/mail.js');
+  const { renderMailScreen } = await import('../../client/js/render/mail.js');
   assert.equal(R.openMail, undefined, 'no mailbox drawer any more');
   assert.equal('open' in fresh().mail, false);
   let s = R.nav(R.toggleDetails(fresh()), { screen: 'mail', id: null });
@@ -210,7 +210,7 @@ test('Account panels: Move shifts a holding between venues and logs it; bad move
 });
 
 test('Connect an account: a venue connects after a moment and joins the list; Receive copies; panels render', async () => {
-  const { renderAccount } = await import('../js/render/account.js');
+  const { renderAccount } = await import('../../client/js/render/account.js');
   let s = R.openPanel(R.nav(fresh(), { screen: 'account', tab: 'venues' }), 'connect');
   s = R.connectVenue(s, 'Coinbase');
   assert.equal(s.account.connecting, 'Coinbase');

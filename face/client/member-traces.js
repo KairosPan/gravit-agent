@@ -1,4 +1,4 @@
-import { mapFrame } from "./mapper.js";
+import { mapFrame } from "./js/wire/mapper.js";
 
 /** Read one room answer's process from its member session, without opening,
  * prompting or ACTIVATING that session.

@@ -14,7 +14,8 @@ const assets = new Map([
   ["/client/chat.css", ["chat.css", "text/css"]],
   ["/client/navigation.js", ["navigation.js", "text/javascript"]],
   ["/client/channels.js", ["channels.js", "text/javascript"]],
-  ["/client/markdown.js", ["markdown.js", "text/javascript"]],
+  ["/client/js/wire/markdown.js", ["js/wire/markdown.js", "text/javascript"]],
+  ["/client/js/wire/speaker.js", ["js/wire/speaker.js", "text/javascript"]],
 ]);
 const payload = {
   channel: {

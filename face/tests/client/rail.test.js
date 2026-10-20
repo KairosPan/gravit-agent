@@ -1,11 +1,11 @@
 // gravit-ui/tests/rail.test.js
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { avatar, logo, cluster, groupMark } from '../js/render/avatars.js';
-import { renderRail, previewOf } from '../js/render/rail.js';
-import { seed } from '../js/data/seed.js';
-import { byId } from '../js/data/plugins.js';
-import { reducers as R } from '../js/reducers/index.js';
+import { avatar, logo, cluster, groupMark } from '../../client/js/render/avatars.js';
+import { renderRail, previewOf } from '../../client/js/render/rail.js';
+import { seed } from '../../client/js/data/seed.js';
+import { byId } from '../../client/js/data/plugins.js';
+import { reducers as R } from '../../client/js/reducers/index.js';
 
 const NOW = new Date(2026, 9, 9, 14, 7).getTime();
 const count = (h, re) => (h.match(re) ?? []).length;

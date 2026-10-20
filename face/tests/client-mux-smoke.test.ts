@@ -39,8 +39,8 @@ import { join } from "node:path";
 import { setupFaceProfile } from "../src/setup.ts";
 import { bootFace } from "../src/boot.ts";
 // allowJs (tsconfig): the browser modules are imported as they ship, untranspiled.
-import { call, openMux } from "../client/api.js";
-import { mapFrame } from "../client/mapper.js";
+import { call, openMux } from "../client/js/wire/api.js";
+import { mapFrame } from "../client/js/wire/mapper.js";
 import { makeBotsRoot } from "./bots-fixture.ts";
 import { mountClient, signIn } from "./remote.ts";
 
