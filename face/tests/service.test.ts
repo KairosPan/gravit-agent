@@ -15,9 +15,13 @@ import type { DeskStatus } from "../src/desk.ts";
 const home = (): Promise<string> => mkdtemp(join(tmpdir(), "face-service-"));
 const plan = (port?: number) => servicePlan({ root: "/repo", home: "/h/.dsh", homeDir: "/h", node: "/usr/local/bin/node", path: "/usr/local/bin:/repo/face/node_modules/.bin::/opt/homebrew/bin", launchAgentsDir: "/h/Library/LaunchAgents", port });
 
-test("servicePlan: node, tsx, main.ts; face/ as cwd; only PATH HOME DSH_HOME in the environment; launchd keys", () => {
+test("servicePlan: node imports tsx's loader and runs main.ts itself; face/ as cwd; only PATH HOME DSH_HOME in the environment; launchd keys", () => {
   const p = plan();
-  assert.deepEqual(p.args, ["/usr/local/bin/node", "/repo/face/node_modules/tsx/dist/cli.mjs", "/repo/face/src/main.ts"]);
+  assert.deepEqual(p.args, ["/usr/local/bin/node", "--import", "file:///repo/face/node_modules/tsx/dist/loader.mjs", "/repo/face/src/main.ts"]);
+  assert.ok(p.plist.includes("    <string>/usr/local/bin/node</string>\n    <string>--import</string>\n"
+    + "    <string>file:///repo/face/node_modules/tsx/dist/loader.mjs</string>\n    <string>/repo/face/src/main.ts</string>\n"),
+    "the arguments in the plist, in order");
+  assert.ok(!p.plist.includes("cli.mjs"), "never tsx's CLI, which would run the face in a child launchd does not watch");
   assert.deepEqual(p.env, { PATH: "/usr/local/bin:/opt/homebrew/bin", HOME: "/h", DSH_HOME: "/h/.dsh" });
   assert.equal(p.path, `/h/Library/LaunchAgents/${LABEL}.plist`);
   assert.equal(p.log, "/h/.dsh/face/service/face.log"); assert.equal(p.errLog, "/h/.dsh/face/service/face.err.log");
@@ -34,6 +38,10 @@ test("servicePlan escapes XML in paths", () => {
   assert.ok(p.plist.includes("/re&amp;po/face"));
   const odd = servicePlan({ root: "/r<1>&", home: "/h<1>&", homeDir: "/u<1>&", node: "/n<1>&", path: "/p<1>&", launchAgentsDir: "/l", port: 1 });
   assert.doesNotMatch(odd.plist.replace(/<\/?[A-Za-z!?][^<>]*>/g, ""), /[<>]|&(?!amp;|lt;|gt;)/, "no bare <, > or & left between the tags");
+  assert.equal(odd.args[2], "file:///r%3C1%3E&/face/node_modules/tsx/dist/loader.mjs", "the loader is a file URL: < and > percent-encoded");
+  assert.ok(odd.plist.includes("<string>file:///r%3C1%3E&amp;/face/node_modules/tsx/dist/loader.mjs</string>"), "and its & XML-escaped in the plist");
+  assert.equal(servicePlan({ root: "/my repo", home: "/h", homeDir: "/h", node: "/n", path: "", launchAgentsDir: "/l" }).args[2],
+    "file:///my%20repo/face/node_modules/tsx/dist/loader.mjs", "a space in the checkout's path is percent-encoded");
 });
 
 test("filterPath drops empty and node_modules entries", () => {

@@ -19,9 +19,10 @@
  * ledger are read from the home the installed plist names (its DSH_HOME) when it names one, else
  * from this shell's; `install` writes this shell's home into the plist.
  *
- * What it runs is this checkout - node by its PATH location, tsx, face/src/main.ts, with face/ as
- * the working directory (main.ts moves to the repo root itself) - so a change here reaches it on
- * the next restart. Its environment is PATH, HOME, DSH_HOME and, only when asked, FACE_PORT, never
+ * What it runs is this checkout - node by its PATH location with tsx's loader imported, running
+ * face/src/main.ts as launchd's own process, with face/ as the working directory (main.ts moves to
+ * the repo root itself) - so a change here reaches it on the next restart. Its environment is
+ * PATH, HOME, DSH_HOME and, only when asked, FACE_PORT, never
  * a key: whatever a LaunchAgent's environment holds sits in its plist and shows in `launchctl
  * print`. The keys live in $DSH_HOME/.env (mode 0600), which dsh reads at boot; `install` writes
  * that file from .env.deepseek, .env.alpaca and .env.ifind at the repo root when the home has none,
@@ -42,7 +43,7 @@ import { execFileSync } from "node:child_process";
 import { accessSync, chmodSync, constants, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseEnv } from "node:util";
 import { resolveDshHome } from "@deepseek-ai/dsh-home-paths";
 import { deskDir, readEvents, runsOf, type DeskRun, type DeskStatus } from "../src/desk.ts";
@@ -82,7 +83,7 @@ export interface ServicePlan {
   log: string;
   /** The face's stderr, `$DSH_HOME/face/service/face.err.log`. */
   errLog: string;
-  /** `ProgramArguments`: node, tsx's CLI, main.ts. */
+  /** `ProgramArguments`: node, `--import` and tsx's loader as a file URL, main.ts. */
   args: string[];
   /** `EnvironmentVariables`, in the plist's order. */
   env: Record<string, string>;
@@ -104,8 +105,12 @@ export function filterPath(path: string): string {
  * The LaunchAgent that runs this checkout's face, rendered as the demo's `plan` renders its own.
  * Pure: it reads and writes nothing, and every machine-specific value is an argument.
  *
- * - `ProgramArguments`: `node` by its full path (launchd has no shell to find it), then tsx's CLI
- *   and main.ts, both under `root`'s face/.
+ * - `ProgramArguments`: `node` by its full path (launchd has no shell to find it), `--import` with
+ *   tsx's loader - `face/node_modules/tsx/dist/loader.mjs`, the package's `"."` export, as a file
+ *   URL - and main.ts, both under `root`'s face/. Node runs main.ts itself, so launchd's job is the
+ *   face: the pid `status` prints is the one the ledger's `boot` records, and launchd's SIGTERM
+ *   reaches the face directly. tsx's CLI, which `npm start` uses, would run main.ts in a child
+ *   process and relay signals to it, leaving launchd with the wrapper's pid.
  * - `WorkingDirectory`: face/ - main.ts moves to the repo root itself.
  * - `EnvironmentVariables`: PATH through {@link filterPath}, HOME, DSH_HOME, and FACE_PORT only
  *   when `port` is given - never a key.
@@ -136,7 +141,8 @@ export function servicePlan(opts: {
   const logs = join(opts.home, "face", "service");
   const log = join(logs, "face.log");
   const errLog = join(logs, "face.err.log");
-  const args = [opts.node, join(face, "node_modules", "tsx", "dist", "cli.mjs"), join(face, "src", "main.ts")];
+  const loader = pathToFileURL(join(face, "node_modules", "tsx", "dist", "loader.mjs")).href;
+  const args = [opts.node, "--import", loader, join(face, "src", "main.ts")];
   const env: Record<string, string> = { PATH: filterPath(opts.path), HOME: opts.homeDir, DSH_HOME: opts.home };
   if (opts.port !== undefined) env.FACE_PORT = String(opts.port);
   const plist = `<?xml version="1.0" encoding="UTF-8"?>

@@ -128,9 +128,9 @@ port still works.
 
 Ctrl-C (SIGINT) leaves 130, SIGTERM leaves 0; both dispose the tree first —
 after the desk ledger's `shutdown` with that code, when the desk is on ("Run as
-a service" below). A
-startup failure dsh reports itself — a required row that did not activate, such
-as `webserver` on a port already in use (`… webserver (required) …
+a service" below).
+A startup failure dsh reports itself — a required row that did not activate,
+such as `webserver` on a port already in use (`… webserver (required) …
 EADDRINUSE`) — prints dsh's grouped diagnostic and exits 1. Every refusal in
 "What boot refuses" below reaches app-boot's `installFailLoud`, which prints it
 labelled `gravit-face` and exits 1.
@@ -142,11 +142,13 @@ labelled `gravit-face` and exits 1.
 face as a macOS user service: a LaunchAgent,
 `~/Library/LaunchAgents/com.gravit.face.plist`, which launchd starts at login
 and again after any exit but a clean one — a crash, a `kill -9`, a boot that
-failed — at most once every 30 s. It needs no administrator. It runs this
-checkout's `src/main.ts` (node by its `PATH` location, tsx from
-`face/node_modules`, `face/` as the working directory), so `restart` picks up
-new code; `install` again rewrites the plist — another port, home or node —
-and stops the installed job first.
+failed — at most once every 30 s. It needs no administrator. Its program is
+`node --import <tsx's loader> face/src/main.ts` — node by its `PATH` location,
+the loader from this checkout's `face/node_modules`, `face/` as the working
+directory — and that is one process, the face itself: the pid `status` prints
+is the face's, and the ledger's `boot` line carries it. It runs this checkout's
+files, so `restart` picks up new code; `install` again rewrites the plist —
+another port, home or node — and stops the installed job first.
 
 **Install from the checkout the service should run** — the primary checkout,
 once the work is merged there. The script finds the repo root from its own
@@ -177,10 +179,12 @@ commands that drive launchd refuse off macOS.
 whatever a LaunchAgent's environment holds shows in `launchctl print`. The face
 finds its keys in `$DSH_HOME/.env`, which dsh reads at every boot (dsh's
 credential store may hold `DEEPSEEK_API_KEY` too). When the home has no `.env`,
-`install` writes one, mode `0600`, from the repo root's `.env.deepseek`, `.env.alpaca` and `.env.ifind`, copying an
-allow-list only — `DEEPSEEK_API_KEY`, `APCA_API_KEY_ID`, `APCA_API_SECRET_KEY`,
-`APCA_API_BASE_URL`, `IFIND_ACCESS_TOKEN`, `IFIND_REFRESH_TOKEN` and any
-`ALPHA_*`; an existing `.env` is never rewritten. Two of its lines to read:
+`install` writes one, mode `0600`, from the repo root's `.env.deepseek`,
+`.env.alpaca` and `.env.ifind`, copying an allow-list only — `DEEPSEEK_API_KEY`,
+`APCA_API_KEY_ID`, `APCA_API_SECRET_KEY`, `APCA_API_BASE_URL`,
+`IFIND_ACCESS_TOKEN`, `IFIND_REFRESH_TOKEN` and any `ALPHA_*`; when no key file
+holds one of those names it writes nothing and says so (`wrote no …`). An
+existing `.env` is never rewritten. Two of its lines to read:
 
 - `not in …/.env: …` names the keys the service expects and the file lacks —
   an empty value counts as missing. The face boots without them and fails at
@@ -2603,9 +2607,9 @@ the sleep watch, the status and its fenced route) and `tests/service.test.ts` (t
 home's `.env`, the status text, and every command against a fake `launchctl`); `FACE_SMOKE=1
 npm test` mounts the desk on a real tree (`smoke.test.ts`). What only this drill checks: that
 launchd accepts the commands the script sends (`enable`, `bootstrap`, `kickstart`,
-`kickstart -k`, `bootout`); that launchd's real `print` text parses for the job's state and pid;
-and that the face writes its `shutdown` line within launchd's stop timeout on `stop` and
-`restart`.
+`kickstart -k`, `bootout`); that launchd's real `print` text parses for the job's state and pid,
+and that the pid is the face's own, the one the ledger's `boot` line carries; and that the face
+writes its `shutdown` line within launchd's stop timeout on `stop` and `restart`.
 
 **The drill**, from `face/` in the primary checkout with the work merged there, and no other
 face on 3090:
@@ -2616,17 +2620,19 @@ face on 3090:
    `com.gravit.face: running (pid N)` and, once the face is up,
    `answering at http://127.0.0.1:3090 · … · desk on`; `npm run service -- url` prints the
    `?token=` URL, and the browser opens the chat with it.
-2. `kill -9 N`, the pid `status` printed. PASS, part two: within about 30 s, `status` says
-   `running` with a new pid and `last run: lost (killed or crashed; no shutdown event)`.
+2. `kill -9 N`, the pid `status` printed — the face's own: the last `boot` line in the ledger,
+   `$DSH_HOME/face/desk/events.jsonl` (`~/.dsh` unless `DSH_HOME` is set), shows the same
+   `"pid":N`. PASS, part two: within about 30 s, `status` says `running` with a new pid and
+   `last run: lost (killed or crashed; no shutdown event)`.
 3. `npm run service -- restart`. PASS, part three: `status` says `running` with a new pid and
-   `last run: ended … code 0`; the ledger, `$DSH_HOME/face/desk/events.jsonl` (`~/.dsh` unless
-   `DSH_HOME` is set), shows a `shutdown` line with the old pid and `"code":0` before the new
-   `boot` — the old run ended, it was not lost.
-4. `npm run service -- stop`. PASS, part four: `status` says `com.gravit.face: not loaded` and
-   `not answering on 3090`, and its ledger line reads `ledger: last boot … - ended … code 0`. A
-   `launchctl bootout … failed` from `stop` followed by `not loaded` means the face took longer
-   than the script's 10 s wait to exit: note how long (`DEVELOPMENT.md` §9, R32). Then
-   `npm run service -- start`; `status` says `running` again.
+   `last run: ended … code 0`; the ledger shows a `shutdown` line with the pid `status` showed
+   before the restart and `"code":0`, then the new `boot` — the old run ended, it was not lost.
+4. `time npm run service -- stop`. PASS, part four: `status` says `com.gravit.face: not loaded`
+   and `not answering on 3090`, and its ledger line reads `ledger: last boot … - ended … code 0`.
+   Record how long the stop took — the face's real exit against the script's 10 s wait
+   (`DEVELOPMENT.md` §9, R32); a `launchctl bootout … failed` followed by `not loaded` means the
+   face took longer than that wait. Then `npm run service -- start`; `status` says `running`
+   again.
 5. Log out and back in, and start no face. PASS, part five: `npm run service -- status`, from a
    new terminal, says `running` with a new pid — launchd started it at login.
 6. A second face beside it, on a fresh scratch home:
@@ -2642,7 +2648,8 @@ face on 3090:
    `"enabled":false`; the service's `status` still says `running` on 3090. Stop it with Ctrl-C
    and `rm -rf "$SCRATCH_HOME"` — it holds a `.credentials.yaml`.
 
-**PASS is all six.** Record the date and the commit in `DEVELOPMENT.md` §7.4's **Desk** row.
+**PASS is all six.** Record the date, the commit and step 4's stop time in `DEVELOPMENT.md`
+§7.4's **Desk** row.
 
 **Not yet run.** The automated half passes at `4465ed9`; nothing has run against the real
 launchd.
