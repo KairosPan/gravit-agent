@@ -9,7 +9,7 @@ import { setupFaceProfile } from "../src/setup.ts";
 import { composeFace } from "../src/boot.ts";
 import { AKSHARE_MCP_ROW_ID } from "../src/akshare.ts";
 import { PERSONA_PATH, readPersona } from "../src/persona.ts";
-import { CYCLE_PATH, readCycle } from "../src/cycle.ts";
+import { CYCLE_PATH, DESK_PATH, readCycle, readDesk } from "../src/cycle.ts";
 import { AGENT_INSTRUCTIONS_ROW_ID, INSTRUCTIONS_CONFIG, instructionsPatch } from "../src/instructions.ts";
 import { facePolicyPatches } from "../src/policy.ts";
 import { definitionFor } from "../src/bot-presets.ts";
@@ -442,6 +442,36 @@ test("composeFace refuses a missing cycle file, its message opening with the pat
     const cyclePath = join(dir, "no-such-cycle.md");
     assert.throws(() => composeFace({ profileName: "face", port: 3090, dshHome: home, rolesRoot, cyclePath }),
       (e: Error) => e.message.startsWith(`${cyclePath}: `) && /the cycle file is missing/.test(e.message));
+  } finally {
+    await rm(rolesRoot, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+/* The desk's contract is read beside the cycle's and handed back, not composed: `bootFace` declares the
+ * `gravit-desk` preset from it once the tree has settled (src/desk-preset.ts), so it rides on no static
+ * row - Gravit's own `gravit` row never carries it. A bad file refuses the compose with its path, before
+ * any plugin loads, exactly as a bad cycle file does. `deskPath` points the read at a fixture. */
+test("composeFace returns the desk text and refuses an empty desk.md with its path", async () => {
+  const home = freshHome();
+  const rolesRoot = await makeRolesRoot();
+  const dir = mkdtempSync(join(tmpdir(), "face-desk-"));
+  try {
+    const shipped = composeFace({ profileName: "face", port: 3090, dshHome: home, rolesRoot });
+    assert.equal(shipped.desk, readDesk(DESK_PATH), "unset, the repository's dsh/profile/desk.md");
+    const gravit = composeEntries([shipped.patches]).find((entry) => entry.id === "preset-gravit");
+    const rows = (gravit?.config as { plugins: Array<{ id: string; config: Record<string, unknown> }> }).plugins;
+    assert.equal("desk" in rows.find((row) => row.id === "gravit")!.config, false, "Gravit's own row never carries the desk's contract");
+
+    const deskPath = join(dir, "desk.md");
+    await writeFile(deskPath, "  Inform; never order.\n");
+    assert.equal(composeFace({ profileName: "face", port: 3090, dshHome: home, rolesRoot, deskPath }).desk, "Inform; never order.", "the fixture's text, trimmed");
+    await writeFile(deskPath, " \n");
+    assert.throws(() => composeFace({ profileName: "face", port: 3090, dshHome: home, rolesRoot, deskPath }),
+      (e: Error) => e.message.startsWith(`${deskPath}: `) && /the desk contract is empty/.test(e.message));
+    const missing = join(dir, "no-such-desk.md");
+    assert.throws(() => composeFace({ profileName: "face", port: 3090, dshHome: home, rolesRoot, deskPath: missing }),
+      (e: Error) => e.message.startsWith(`${missing}: `) && /the desk contract file is missing/.test(e.message));
   } finally {
     await rm(rolesRoot, { recursive: true, force: true });
     await rm(dir, { recursive: true, force: true });

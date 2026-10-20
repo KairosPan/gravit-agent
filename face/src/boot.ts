@@ -123,7 +123,8 @@ import { BOTS_ROOT, DEFAULT_PRESET, LEGACY_PRESET, SYSTEM_PROMPT_ROW_ID, faceOve
 import { declareBots, definitionFor, type BotPresets } from "./bot-presets.ts";
 import { GRAVIT_PLUGIN_URL, ROLES_ROOT, gravitRows, readRoles } from "./roles.ts";
 import { PERSONA_PATH, readPersona } from "./persona.ts";
-import { CYCLE_PATH, readCycle } from "./cycle.ts";
+import { CYCLE_PATH, DESK_PATH, readCycle, readDesk } from "./cycle.ts";
+import { declareDeskPreset, deskPresetDefinition, deskRosterProblem } from "./desk-preset.ts";
 import { AGENT_INSTRUCTIONS_ROW_ID, instructionsPatch } from "./instructions.ts";
 import { aksharePatches } from "./akshare.ts";
 import { facePolicyPatches } from "./policy.ts";
@@ -222,6 +223,12 @@ export interface FaceBootOptions {
    * oversized file refuses the compose with that path: a face that ships `roles/` ships the
    * contract they are called under. */
   cyclePath?: string;
+  /** The desk's contract (`dsh/profile/desk.md`); tests point it at a fixture. Defaults to the
+   * repository's. {@link composeFace} reads it beside the cycle and hands the text back, refused the
+   * same way - a MISSING, empty or oversized file refuses the compose with that path, before any
+   * plugin loads - and {@link bootFace} declares the `gravit-desk` preset from it
+   * (src/desk-preset.ts). */
+  deskPath?: string;
   /** Leave the gateway's readiness uncommitted: the caller commits it with
    * {@link BootedFace.commitReady} once its OWN routes are mounted. `main.ts`
    * sets it, because it registers `/`, the `/data` routes, the room engine and
@@ -282,7 +289,10 @@ function composedRowIds(layers: readonly FacePatchList[]): Set<string> {
  * the hmr switch, Gravit's persona, the instructions patch (src/instructions.ts),
  * then the face's host rows last - among them the default preset, rendered
  * here from `roles/` (src/roles.ts) and `dsh/profile/cycle.md` (src/cycle.ts)
- * rather than read from `bots/gravit`.
+ * rather than read from `bots/gravit`. The desk's contract,
+ * `dsh/profile/desk.md`, is read beside the cycle and handed back rather than
+ * composed: no static row carries it, and {@link bootFace} declares the
+ * `gravit-desk` preset from it once the tree has settled (src/desk-preset.ts).
  *
  * Pure with respect to the environment — the home is threaded explicitly into
  * every dsh-app-boot call rather than materialized into `$DSH_HOME` — but NOT
@@ -291,13 +301,15 @@ function composedRowIds(layers: readonly FacePatchList[]): Set<string> {
  * computed in memory by {@link bootFace}.)
  * @param opts - profile name, webserver port, optional harness home.
  * @returns the composed patch stack, the absolute root config path to boot,
- * and the loaded profile (the runtime resolution needs it).
+ * the loaded profile (the runtime resolution needs it), and the desk's
+ * contract, trimmed (the `gravit-desk` preset's `desk`).
  * @throws when the profile does not exist, a bundle was skipped, a
  * patch file cannot load, the roles directory is missing, a role under
- * `roles/` is malformed, or the cycle file is empty, oversized or unreadable
- * (the message opens with the absolute path of the directory or file at fault).
+ * `roles/` is malformed, or the cycle or desk file is missing, empty, oversized
+ * or unreadable (the message opens with the absolute path of the directory or
+ * file at fault).
  */
-export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; rootConfig: string; profile: Profile } {
+export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; rootConfig: string; profile: Profile; desk: string } {
   const home = resolveDshHome(opts.dshHome);
   const profile = loadProfile(BIN, opts.profileName, INSTALL_ANCHOR, home, { userLayer: true });
   /* `loadProfile` never prints and no longer throws on a bundle it cannot load:
@@ -426,9 +438,14 @@ export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; ro
    * packages/preset/agent-preset-registry/src/definition.ts:5-11). */
   const roles = readRoles(opts.rolesRoot ?? ROLES_ROOT);
   const cycle = readCycle(opts.cyclePath ?? CYCLE_PATH);
+  /* The desk's contract, read HERE beside the cycle so a bad file refuses the
+   * compose - and with it the boot, before any plugin loads - with its path,
+   * rather than listing `gravit-desk` broken once the tree is up. Gravit's own
+   * row never carries it: a preset carries one contract or the other. */
+  const desk = readDesk(opts.deskPath ?? DESK_PATH);
   const gravit = definitionFor(opts.botsRoot ?? BOTS_ROOT, DEFAULT_PRESET, gravitRows(roles, { plugin: GRAVIT_PLUGIN_URL, cycle }));
   patches.push(...faceOverlay(opts.port, gravit));
-  return { patches, rootConfig, profile };
+  return { patches, rootConfig, profile, desk };
 }
 
 /** The launcher-owned readiness signal the gateway waits on before it admits
@@ -804,14 +821,16 @@ async function assertOrderGateArmed(gate: OrderGateFibers | undefined): Promise<
  * from the override.
  * @param opts - profile name, webserver port, optional harness home, bots
  * root, roles root (a missing roles directory or a malformed role refuses the
- * boot at compose time, with its path), and whether the caller commits the
+ * boot at compose time, with its path), the cycle and desk contracts (a bad
+ * file refuses it the same way), and whether the caller commits the
  * gateway's readiness itself.
  * @returns the settled root context, an idempotent disposer, the bot preset
  * declarations, and the readiness commit (already done unless deferred).
  * @throws after disposing the tree when any enabled row did not activate, a
  * required service is missing, the `ask_user_question` tool did not register,
  * either half of Gate 2 did not arm, an operator-gated tool escapes the order
- * gate, the preset roster cannot supply its own default, or a declared bot is
+ * gate, the preset roster cannot supply its own default, the registry refuses
+ * the desk's preset or lists it missing or broken, or a declared bot is
  * not listed; `StartupError`
  * (from `boot`) when a required dsh entry is inactive; and whatever `boot`
  * throws when the plugin tree fails to load.
@@ -820,7 +839,7 @@ export async function bootFace(opts: FaceBootOptions): Promise<BootedFace> {
   if (opts.dshHome !== undefined) process.env.DSH_HOME = resolveDshHome(opts.dshHome);
   const home = resolveDshHome();
   const environment = loadLayeredEnv(BIN);
-  const { patches, rootConfig, profile } = composeFace(opts);
+  const { patches, rootConfig, profile, desk } = composeFace(opts);
   /* The package table every bare row name resolves from, computed BEFORE any
    * plugin imports (NEW apps/cli/src/profile-boot.ts:205-206; usage model NEW
    * apps/cli/tests/web-agent-presets.e2e.ts:165-173). Pure: it writes nothing.
@@ -962,6 +981,13 @@ export async function bootFace(opts: FaceBootOptions): Promise<BootedFace> {
      * declarations are child fibers of the root, so `dispose` needs no extra
      * step to unwind them (tests/bot-presets.test.ts). */
     const botPresets = await declareBots(ctx, opts.botsRoot ?? BOTS_ROOT);
+    /* The desk's preset (src/desk-preset.ts), declared right after the bots and
+     * for the same reason: its mask is plugins/bot.js, mounted eagerly at the
+     * declaration, and must find the settled tree. Unlike a bot it is not
+     * survivable: a refused declaration throws the registry's reason into this
+     * try's catch, and a preset that declares but mounts broken is refused by
+     * the roster check below. Disposed with the root, as the bots are. */
+    await declareDeskPreset(ctx, deskPresetDefinition({ desk }));
     let roster: { id: string; broken?: string }[];
     try {
       roster = await presets.list();
@@ -991,6 +1017,11 @@ export async function bootFace(opts: FaceBootOptions): Promise<BootedFace> {
           " - sessions created before 2026-10-08 would not open",
       );
     }
+    /* The desk's preset, refused like the alias: missing or broken, the desk
+     * session could not open, and it should say so at boot rather than at the
+     * operator's first message from the phone. */
+    const deskProblem = deskRosterProblem(roster);
+    if (deskProblem !== undefined) throw new Error(deskProblem);
     /* Every bot this boot declared must be LISTED - the registry is what
      * `session/create`, the rooms and the sidebar read, so a declaration it
      * does not list is a bot that silently vanished. Listed-but-`broken` is

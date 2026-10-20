@@ -19,7 +19,10 @@
  * directories) and is refused as an id here; `gravit` is the default preset,
  * declared by the overlay's static `preset-gravit` row from a composition the
  * face renders out of `roles/` (src/roles.ts; `bots/gravit` supplies only its
- * display metadata), never a bot. Ids keep the retired dsh-agent-presets
+ * display metadata), never a bot; nor is `gravit-desk`, the desk's preset,
+ * which the face declares from memory after boot (src/desk-preset.ts) - every
+ * id in {@link RESERVED_IDS} is refused, declared by no directory, and listed
+ * only when it is the default. Ids keep the retired dsh-agent-presets
  * grammar `[a-z0-9][a-z0-9-]*` (OLD packages/preset/agent-presets/src/preset.ts:18):
  * dsh 0.2.0 requires only a non-blank id (NEW
  * packages/preset/agent-preset-registry/src/index.ts:82), so {@link BOT_ID_RE}
@@ -44,8 +47,13 @@ export const TEMPLATE = "_template";
  *  to 64 code points - kept as the face's own gate now that dsh has none. */
 export const BOT_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 /** Ids the grammar admits but the face refuses: the default preset and its
- *  pre-rename alias are the host, never a bot. */
-export const RESERVED_IDS: ReadonlySet<string> = new Set([DEFAULT_PRESET, LEGACY_PRESET]);
+ *  pre-rename alias are the host, and `gravit-desk` is the desk's preset - none
+ *  is ever a bot. The desk's id is spelled out rather than imported:
+ *  src/desk-preset.ts (its `DESK_PRESET`) imports src/roles.ts, which imports
+ *  this module, and in that cycle - whenever src/desk-preset.ts loads first -
+ *  this set would read the id before it is initialized (tests/bots.test.ts
+ *  ties the two spellings). */
+export const RESERVED_IDS: ReadonlySet<string> = new Set([DEFAULT_PRESET, LEGACY_PRESET, "gravit-desk"]);
 export const isBotId = (value: unknown): value is string =>
   typeof value === "string" && BOT_ID_RE.test(value) && !RESERVED_IDS.has(value);
 
@@ -272,7 +280,10 @@ async function rowFor(
 }
 
 /** Every directory under `bots/` in the grammar, with dsh's view of it merged
- * in, and the face's own declaration failures as broken reasons.
+ * in, and the face's own declaration failures as broken reasons. Of the
+ * reserved ids only the default's directory is listed: a stray `kairos/` or
+ * `gravit-desk/` is no bot, and its name in dsh's roster belongs to the host's
+ * alias or to the desk.
  * @param root - the `bots/` directory.
  * @param presets - dsh's roster (`ctx.agentPresets.list()`).
  * @param declarationErrors - `declareBots(...).errors` (src/bot-presets.ts):
@@ -288,7 +299,7 @@ export async function listBots(root: string, presets: PresetLister, declarationE
   }
   const reported = new Map((await presets()).map((p) => [p.id, p] as const));
   const ids = entries
-    .filter((e) => e.isDirectory() && BOT_ID_RE.test(e.name) && e.name !== LEGACY_PRESET)
+    .filter((e) => e.isDirectory() && BOT_ID_RE.test(e.name) && (e.name === DEFAULT_PRESET || !RESERVED_IDS.has(e.name)))
     .map((e) => e.name)
     .sort((a, b) => a.localeCompare(b));
   return Promise.all(ids.map((id) => withBotLock(join(root, id), () => rowFor(root, id, reported, declarationErrors))));
@@ -351,7 +362,7 @@ export async function createBot(root: string, body: Record<string, unknown>): Pr
   const name = typeof body.name === "string" && body.name.trim() !== "" ? body.name.trim() : undefined;
   const id = body.id !== undefined ? body.id : (name === undefined ? undefined : proposeBotId(name));
   if (!isBotId(id)) {
-    throw new HttpError(400, `invalid bot id (lowercase letters, digits and -; starts with a letter or digit; up to 64; not ${DEFAULT_PRESET}, ${LEGACY_PRESET} or ${TEMPLATE})`);
+    throw new HttpError(400, `invalid bot id (lowercase letters, digits and -; starts with a letter or digit; up to 64; not ${[...RESERVED_IDS].join(", ")} or ${TEMPLATE})`);
   }
   const description = typeof body.description === "string" ? body.description.trim() : "";
   const soul = rejectSoul(body.soul === undefined ? TEMPLATE_SOUL.replace("<bot name>", () => name ?? id) : body.soul);

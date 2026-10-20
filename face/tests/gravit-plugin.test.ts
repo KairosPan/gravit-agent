@@ -207,6 +207,20 @@ test("validateGravitConfig: desk must be a non-empty string when given", () => {
   assert.throws(() => apply(fakeScope().ctx, { desk: 3 }), (e: Error) => e.message === "gravit: desk must be a non-empty string", "apply refuses the mount with it");
 });
 
+/* The two contracts share one slot and two different jobs - the cycle opens goals, the desk never orders -
+ * so a preset carries one or the other: Gravit's row the cycle, the desk's row (src/desk-preset.ts) the
+ * desk. A row carrying both is refused at the mount rather than mounting two contracts that contradict. */
+test("validateGravitConfig: a preset carries the cycle contract or the desk contract, not both", () => {
+  const both = "a preset carries the cycle contract or the desk contract, not both";
+  assert.equal(validateGravitConfig({ cycle: "C", desk: "D" }), both);
+  assert.equal(validateGravitConfig({ roles: [], cycle: "C", desk: "D" }), both);
+  assert.equal(validateGravitConfig({ cycle: "C" }), undefined, "the cycle alone: Gravit's row");
+  assert.equal(validateGravitConfig({ desk: "D" }), undefined, "the desk alone: the desk's row");
+  const tree = fakeScope();
+  assert.throws(() => apply(tree.ctx, { cycle: "C", desk: "D" }), (e: Error) => e.message === `gravit: ${both}`, "apply refuses the mount with it");
+  assert.equal(tree.sections.length, 0, "before registering any section");
+});
+
 /* The desk's contract binds every desk session whatever its allow list leaves it, so its section has NO
  * tool gate: it never looks a tool up, at mount or at assembly, and a scope that can call nothing still
  * reads it. Only the header gates it, as it does the cycle's: a delegated child that is not a fork reads

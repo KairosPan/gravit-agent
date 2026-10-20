@@ -213,3 +213,41 @@ test("apply throws before touching the tree when no allowed tool exists", () => 
   };
   assert.throws(() => apply(ctx, { persona: "x", allow: ["nothing_here"] }), /none of the allowed tools/);
 });
+
+/* The desk's opt-in (src/desk-preset.ts): a row that MASKS and says nothing, so the deployment's global
+ * persona prefix - Gravit's - stays in every prompt of the preset that mounts it. Explicit, never
+ * inferred from a missing persona: `maskOnly: true` takes no persona at all, and only `true` opts in. */
+test("maskOnly: refused with a persona, accepted without; registers no persona section and still masks", async () => {
+  assert.equal(validateBotConfig({ maskOnly: true, allow: ["bash"] }), undefined);
+  for (const persona of ["You are Probe.", "", null])
+    assert.equal(validateBotConfig({ maskOnly: true, persona, allow: ["bash"] }), "maskOnly takes no persona", JSON.stringify(persona));
+  for (const maskOnly of ["true", 1, null])
+    assert.equal(validateBotConfig({ maskOnly, allow: ["bash"] }), "maskOnly must be true or false when given", JSON.stringify(maskOnly));
+  assert.match(validateBotConfig({ maskOnly: true, allow: [] }) ?? "", /allow/, "the allow list is required all the same");
+  assert.throws(() => apply(fakeTree(["bash"]).ctx, { maskOnly: true, persona: "x", allow: ["bash"] }),
+    (e: Error) => e.message === "gravit-bot: maskOnly takes no persona");
+
+  const tree = fakeTree(["bash", "read", "subagent"]);
+  apply(tree.ctx, { maskOnly: true, allow: ["bash", "read", "mcp__*__earnings"] });
+  assert.deepEqual(tree.sections, [], "no persona section: the deployment's prefix - Gravit's persona - stays");
+  assert.deepEqual(tree.slots, [], "the persona slot is never looked up");
+  assert.deepEqual(tree.masks(), [["bash", "read"]], "the mask is allow ∩ tree, as a bot's is");
+  assert.equal(tree.warnings.length, 1, "and the names the tree lacks are warned once, as a bot's are");
+  tree.register("mcp__alpaca-kit__earnings", "mcp__alpaca-kit__place_order", "dispatch");
+  await settle();
+  assert.deepEqual(tree.masks(), [["bash", "read", "mcp__alpaca-kit__earnings"]], "the re-expansion admits exactly the named late tool");
+  tree.unload();
+  assert.deepEqual(tree.masks(), [], "unloading lifts the mask");
+  assert.equal(tree.listeners(), 0);
+});
+
+test("without maskOnly, an empty or missing persona is still refused", () => {
+  for (const config of [{ allow: ["bash"] }, { persona: "", allow: ["bash"] }, { persona: " \n", allow: ["bash"] }, { maskOnly: false, allow: ["bash"] }])
+    assert.equal(validateBotConfig(config), "persona must be a non-empty string", JSON.stringify(config));
+  assert.throws(() => apply(fakeTree(["bash"]).ctx, { allow: ["bash"] }), (e: Error) => e.message === "gravit-bot: persona must be a non-empty string");
+  assert.equal(validateBotConfig({ maskOnly: false, persona: "You are Probe.", allow: ["bash"] }), undefined, "maskOnly: false is a bot like any other");
+  const tree = fakeTree(["bash"]);
+  apply(tree.ctx, { maskOnly: false, persona: "You are Probe.", allow: ["bash"] });
+  assert.deepEqual(tree.sections, [{ name: "deployment:persona-prefix", order: dshSectionOrder("DEPLOYMENT_PERSONA_PREFIX"), text: "You are Probe." }],
+    "and it speaks with its own persona");
+});

@@ -41,10 +41,12 @@
  *
  * GATED ON WHAT THE ASSEMBLING SCOPE CAN CALL, AND ON WHO IS ASSEMBLING. A child
  * JOINS the preset it was delegated from, so a scoped section reaches it too, and
- * an allow list removes tools but cannot remove a sentence. Both of Gravit's own
- * sections - the role list and the cycle contract - are therefore functions of
- * the assembly context, and each resolves to `""` for a delegated child that is
- * not a fork: `canCall(ctx, context, name) && isRootOrFork(context)`.
+ * an allow list removes tools but cannot remove a sentence. The three sections
+ * this plugin gates - the role list, the cycle contract and the desk contract -
+ * are therefore functions of the assembly context, and each resolves to `""` for
+ * a delegated child that is not a fork: the role list and the cycle by
+ * `canCall(ctx, context, name) && isRootOrFork(context)`, the desk contract by
+ * `isRootOrFork(context)` alone (THE DESK, below).
  * {@link canCall} is the registry lookup dsh-tool-web and dsh-tool-subagent gate
  * their own sections with; {@link isRootOrFork} reads the header
  * (`context.agent.session.header`: no `origin`, or `origin: "subagent"` with
@@ -53,7 +55,7 @@
  * was cached under stays byte-identical. A plain `subagent` spawn, a workflow or
  * a ralph worker is unrestricted too and passes the visibility half, but it
  * inherits no prefix and cannot open a goal (`create_goal` needs a direct human
- * turn on a top-level agent), so the header half blanks both sections for it. A
+ * turn on a top-level agent), so the header half blanks each of them for it. A
  * role child gets `""` either way: its allow list removes the `role_<id>` tools
  * and the goal tools. roles-smoke pins the fork, the spawn and the role child on
  * a real boot. In the role list, a role whose tool never registered (no `spawn`
@@ -75,7 +77,8 @@
  * THE DESK. `gravit:desk` carries `dsh/profile/desk.md` (src/cycle.ts
  * `readDesk`) - how Gravit behaves on the desk: it informs and never orders -
  * in the cycle's slot, `DEPLOYMENT_PERSONA_SUFFIX - 50`; a preset carries one
- * contract or the other, never both. It has NO tool gate, unlike the role list
+ * contract or the other, never both, and {@link validateGravitConfig} refuses a
+ * row that carries the two. It has NO tool gate, unlike the role list
  * and the cycle: the contract binds a desk session whatever its allow list
  * leaves it, so the text reads the header alone (`""` for a delegated child
  * that is not a fork) and never looks a tool up. Its text is literal, like the
@@ -83,10 +86,13 @@
  *
  * SCOPED, NOT GLOBAL. `ctx.systemPrompt.section` registers into the CALLING
  * context's scope, the preset revision's standing layer, so each section
- * reaches every session joined to the `gravit` preset (and to its `kairos`
- * alias, which declares the same rows) and nobody else: a bot is its own
- * preset and never sees it. tests/bots-smoke.test.ts pins both halves on a real
- * boot.
+ * reaches every session joined to the preset that mounted the row, and nobody
+ * else: the `gravit` preset (and its `kairos` alias, which declares the same
+ * rows), or the `gravit-desk` preset (src/desk-preset.ts), whose row carries
+ * the desk's contract alone - so Gravit's sessions never read `gravit:desk`,
+ * and a desk session never reads the role list or the cycle. A bot is its own
+ * preset and sees none of them. tests/bots-smoke.test.ts pins Gravit's half
+ * and a bot's on a real boot.
  *
  * It masks nothing. `inject` names `tools` only to READ the registry's view of
  * the assembling scope; this plugin never registers or restricts a tool: the
@@ -125,14 +131,17 @@ const ROLE_TOOL = /^role_[a-z0-9_]+$/;
 
 /** What would fail at mount or render, as a reason; `undefined` when the config
  *  is valid. `{}` is valid (no roles, no cycle, no desk); the row in Gravit's
- *  own preset carries `roles` and `cycle`. All three are optional keys, checked
- *  here when present so a malformed value refuses the mount, loudly, instead of
- *  loading a silently dead config. */
+ *  own preset carries `roles` and `cycle`, the desk's row (src/desk-preset.ts)
+ *  `desk` alone. All three are optional keys, checked here when present so a
+ *  malformed value refuses the mount, loudly, instead of loading a silently dead
+ *  config - and `cycle` and `desk` exclude each other: a preset carries one
+ *  contract or the other. */
 export function validateGravitConfig(config) {
   if (config === null || typeof config !== "object" || Array.isArray(config)) return "config must be an object";
   const { cycle, desk, roles } = config;
   if (cycle !== undefined && (typeof cycle !== "string" || cycle.trim() === "")) return "cycle must be a non-empty string";
   if (desk !== undefined && (typeof desk !== "string" || desk.trim() === "")) return "desk must be a non-empty string";
+  if (cycle !== undefined && desk !== undefined) return "a preset carries the cycle contract or the desk contract, not both";
   if (roles !== undefined) {
     if (!Array.isArray(roles)) return "roles must be an array of { tool, summary }";
     for (const [index, role] of roles.entries()) {

@@ -1,6 +1,7 @@
 // face/plugins/bot.js
 /**
- * `gravit-bot` — the one plugin every bot composition mounts.
+ * `gravit-bot` — the one plugin every bot composition mounts, and the mask of
+ * the desk's preset (MASK ONLY, below).
  *
  * A bot is a dsh agent preset the FACE declares (src/bot-presets.ts): dsh
  * 0.2.0 scans no directory and reads no preset file (NEW
@@ -23,6 +24,15 @@
  * (NEW packages/core/system-prompt/src/index.ts:125-127, 179, 251-253), as
  * 0.1.1's `deployment:persona` did. Gravit's `personaSuffix` is not touched;
  * the face sets none (PLAN S1).
+ *
+ * MASK ONLY. A row with `maskOnly: true` and NO persona registers the mask
+ * and nothing else: no persona section, so the deployment's global prefix -
+ * Gravit's persona - stays in every prompt of the preset that mounts it. The
+ * `gravit-desk` preset does (src/desk-preset.ts): Gravit's voice under the
+ * desk's allow list. The opt-in is explicit and exact - `true` and no persona
+ * key at all - so a bot composition that merely LOST its persona is still
+ * refused, rather than mounting a voice that speaks as Gravit. The mask, its
+ * re-expansion and its unload are the same code either way.
  *
  * ACTIVATION IS EAGER. dsh 0.2.0 mounts a preset when it is DECLARED, not at
  * its first session (NEW agent-preset-registry/src/index.ts:80-118), and a
@@ -59,12 +69,19 @@ export const inject = ["systemPrompt", "tools"];
 export const PERSONA_PREFIX_SECTION = "deployment:persona-prefix";
 
 /** The dsh system prompt is a strict `{{…}}` template with no escape; a bot's
- *  persona interpolates nothing, so any `{{` would fail every render. */
+ *  persona interpolates nothing, so any `{{` would fail every render. A
+ *  `maskOnly: true` row takes no persona at all (MASK ONLY, in the header);
+ *  `maskOnly` is otherwise `false` or absent, and the persona is required. */
 export function validateBotConfig(config) {
   if (config === null || typeof config !== "object") return "config must be an object";
-  const { persona, allow } = config;
-  if (typeof persona !== "string" || persona.trim() === "") return "persona must be a non-empty string";
-  if (persona.includes("{{")) return "persona must not contain '{{' (the system prompt is a strict template with no escape)";
+  const { persona, allow, maskOnly } = config;
+  if (maskOnly !== undefined && typeof maskOnly !== "boolean") return "maskOnly must be true or false when given";
+  if (maskOnly === true) {
+    if (persona !== undefined) return "maskOnly takes no persona";
+  } else {
+    if (typeof persona !== "string" || persona.trim() === "") return "persona must be a non-empty string";
+    if (persona.includes("{{")) return "persona must not contain '{{' (the system prompt is a strict template with no escape)";
+  }
   if (!Array.isArray(allow) || allow.length === 0 || allow.some((n) => typeof n !== "string" || n === "")) {
     return "allow must be a non-empty array of tool names";
   }
@@ -154,11 +171,14 @@ export function apply(ctx, config) {
   };
   sync();
   if (applied === null) throw new Error("gravit-bot: none of the allowed tools exist in this tree; the bot would have no hands at all");
-  ctx.effect(() => ctx.systemPrompt.section({
-    name: PERSONA_PREFIX_SECTION,
-    order: ctx.systemPrompt.getSectionOrder("DEPLOYMENT_PERSONA_PREFIX"),
-    text: config.persona,
-  }));
+  /* A mask-only row says nothing: the deployment's own prefix stays. */
+  if (config.maskOnly !== true) {
+    ctx.effect(() => ctx.systemPrompt.section({
+      name: PERSONA_PREFIX_SECTION,
+      order: ctx.systemPrompt.getSectionOrder("DEPLOYMENT_PERSONA_PREFIX"),
+      text: config.persona,
+    }));
+  }
   /* Coalesced, not synchronous. Every bot re-derives the whole global view per
    * sync (`schemas()` clones each schema), and changes arrive in bursts: every
    * tool of a reconnecting MCP server, every tool of the tree while the face

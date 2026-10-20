@@ -10,10 +10,11 @@ import { dump, load } from "js-yaml";
 import type { WebRoute } from "@deepseek-ai/dsh-host-webserver";
 import { makeBotsRoot } from "./bots-fixture.ts";
 import {
-  BOT_PLUGIN_RELATIVE, DEFAULT_ALLOW, TEMPLATE_SOUL, createBot, isBotId, listBots,
+  BOT_PLUGIN_RELATIVE, DEFAULT_ALLOW, RESERVED_IDS, TEMPLATE_SOUL, createBot, isBotId, listBots,
   registerBotRoutes, rejectSoul, renderComposition, renderPresetMeta, updateBotSettings, updateSoul,
   type BotRouteDeps,
 } from "../src/bots.ts";
+import { DESK_PRESET } from "../src/desk-preset.ts";
 import { HttpError } from "../src/http.ts";
 
 const noPresets = async () => [] as { id: string; broken?: string }[];
@@ -29,7 +30,7 @@ test("createBot refuses both host ids and names them in its error", async () => 
   const root = await makeBotsRoot();
   for (const id of ["gravit", "kairos"]) {
     await assert.rejects(createBot(root, { id, name: "X" }),
-      (err: HttpError) => err.status === 400 && /not gravit, kairos or _template/.test(err.message), id);
+      (err: HttpError) => err.status === 400 && /not gravit, kairos, gravit-desk or _template/.test(err.message), id);
   }
 });
 
@@ -39,6 +40,24 @@ test("listBots never lists a directory named after the pre-rename id", async () 
   await writeFile(join(root, "kairos", "preset.yml"), "name: Stray\n");
   const rows = await listBots(root, noPresets);
   assert.equal(rows.some((row) => row.id === "kairos"), false);
+  assert.equal(rows.find((row) => row.id === "gravit")?.isDefault, true);
+});
+
+/* The desk's preset (src/desk-preset.ts) is declared by the face from memory, never from `bots/`: its id
+ * is no bot's. A directory of that name is not declared (src/bot-presets.ts declares only `isBotId`
+ * directories), not listed and cannot be created, so it can neither collide with the desk's declaration
+ * nor show the desk's roster entry as a bot. */
+test("gravit-desk is a reserved bot id", async () => {
+  assert.equal(isBotId("gravit-desk"), false);
+  assert.equal(isBotId(DESK_PRESET), false);
+  assert.equal(RESERVED_IDS.has(DESK_PRESET), true);
+  const root = await makeBotsRoot();
+  await assert.rejects(createBot(root, { id: "gravit-desk", name: "X" }),
+    (err: HttpError) => err.status === 400 && /not gravit, kairos, gravit-desk or _template/.test(err.message));
+  await mkdir(join(root, "gravit-desk"));
+  await writeFile(join(root, "gravit-desk", "preset.yml"), "name: Stray\n");
+  const rows = await listBots(root, async () => [{ id: "gravit" }, { id: "gravit-desk" }]);
+  assert.equal(rows.some((row) => row.id === "gravit-desk"), false, "a stray directory is never listed: the roster's gravit-desk is the desk, not a bot");
   assert.equal(rows.find((row) => row.id === "gravit")?.isDefault, true);
 });
 

@@ -106,7 +106,9 @@ test("bots smoke: roster, mask, persona, a default that masks nothing, the shipp
 
       const presets = ctx.get("agentPresets") as { defaultId: string; list(): Promise<{ id: string; broken?: string }[]> };
       const roster = await presets.list();
-      assert.deepEqual(roster.map((p) => p.id).sort(), ["cracked", "gravit", "kairos", "probe", "shipped", "trader"], "listed - and never _template");
+      assert.deepEqual(roster.map((p) => p.id).sort(), ["cracked", "gravit", "gravit-desk", "kairos", "probe", "shipped", "trader"],
+        "listed - and never _template; gravit-desk is the desk's preset, which bootFace declares and which is no bot (botPresets.ids() above)");
+      assert.equal(roster.find((p) => p.id === "gravit-desk")?.broken, undefined, "the desk's preset is listed whole");
       assert.equal(presets.defaultId, "gravit");
       assert.match(roster.find((p) => p.id === "cracked")!.broken ?? "", /list/, "a broken preset carries dsh's reason (Rule 5)");
 
