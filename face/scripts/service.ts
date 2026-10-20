@@ -436,16 +436,17 @@ export interface ServiceDeps {
   envPath: string;
   /** Prints a line - or several, joined by newlines. */
   out(line: string): void;
-  /** Waits: install's poll for the port to fall silent. */
+  /** Waits between two asks: for launchd to let go of a job booted out, for the port to fall silent. */
   sleep(ms: number): Promise<void>;
 }
 
 /** main.ts's port when FACE_PORT is unset. */
 const DEFAULT_PORT = 3090;
 
-/** How long install waits for the port to fall silent after it booted out the job it replaces, and how often it asks. */
-const RELEASE_WAIT_MS = 10_000;
-const RELEASE_POLL_MS = 500;
+/** How long the service waits - for launchd to let go of a job it booted out, then for that job's
+ * port to fall silent - and how often it asks. */
+const WAIT_MS = 10_000;
+const POLL_MS = 500;
 
 /** The key files at the repo root that install writes the home's .env from, in order. */
 const KEY_FILES = [".env.deepseek", ".env.alpaca", ".env.ifind"] as const;
@@ -569,10 +570,11 @@ function failed(ctx: ServiceContext, args: string[], result: { out: string }): n
   return 1;
 }
 
-/** Load the plist into launchd, which starts the face (RunAtLoad), then enable the job. A failure is
+/** Enable the job - which needs no loaded job, and clears a `launchctl disable` that would refuse the
+ * bootstrap - then load the plist into launchd, which starts the face (RunAtLoad). A failure is
  * printed and stops it; true when both succeeded. */
 function bootstrapped(ctx: ServiceContext): boolean {
-  for (const args of [["bootstrap", ctx.domain, ctx.plan.path], ["enable", ctx.job]]) {
+  for (const args of [["enable", ctx.job], ["bootstrap", ctx.domain, ctx.plan.path]]) {
     const result = ctx.deps.launchctl(args);
     if (!result.ok) {
       failed(ctx, args, result);
@@ -580,6 +582,23 @@ function bootstrapped(ctx: ServiceContext): boolean {
     }
   }
   return true;
+}
+
+/**
+ * Boot the job out of launchd and wait for launchd to let go of it. bootout's exit code decides
+ * nothing: launchctl answers `Boot-out failed: 36: Operation now in progress` for a job whose
+ * process has not exited yet. Whether launchd still holds the job ({@link jobInfo}) is asked at once
+ * and then every 500 ms, for up to 10 s.
+ * @returns `gone`, whether launchd no longer holds the job at the end; `text`, what bootout printed.
+ */
+async function bootoutAndWait(ctx: ServiceContext): Promise<{ gone: boolean; text: string }> {
+  const { out } = ctx.deps.launchctl(["bootout", ctx.job]);
+  let gone = !jobInfo(ctx).loaded;
+  for (let waited = 0; !gone && waited < WAIT_MS; waited += POLL_MS) {
+    await ctx.deps.sleep(POLL_MS);
+    gone = !jobInfo(ctx).loaded;
+  }
+  return { gone, text: out.trim() };
 }
 
 /** The line `status` adds when the face does not answer: how the ledger's last run ended. */
@@ -644,18 +663,19 @@ const COMMANDS: Record<string, (ctx: ServiceContext) => Promise<number>> = {
     if (env.missing.length > 0) deps.out(`not in ${env.path}: ${env.missing.join(", ")} (the face also reads DEEPSEEK_API_KEY from dsh's credential store)`);
     if (env.skipped.length > 0) deps.out(`not copied (not on the service's allow-list; add them to ${env.path} by hand if the service needs them): ${env.skipped.join(", ")}`);
     if (env.missingSources.length > 0) deps.out(`no source: ${env.missingSources.join(", ")}`);
-    /* A job this install replaces holds the port until launchd has stopped it: boot it out, then
-     * give its face up to 10 s to let go, so that a reinstall is not refused by the service itself. */
+    /* A job this install replaces holds the port until launchd has stopped it: boot it out, wait
+     * for launchd to let go of it, then give its face up to 10 s to let go of the port, so that a
+     * reinstall is not refused by the service itself - and the old face's shutdown is written
+     * before the new face's boot. */
     const replacing = jobInfo(ctx).loaded;
     if (replacing) {
-      const args = ["bootout", ctx.job];
-      deps.out(`stopping the loaded job to replace it: launchctl ${args.join(" ")}`);
-      const result = deps.launchctl(args);
-      if (!result.ok) return failed(ctx, args, result);
+      deps.out(`stopping the loaded job to replace it: launchctl bootout ${ctx.job}`);
+      const { gone, text } = await bootoutAndWait(ctx);
+      if (!gone) return failed(ctx, ["bootout", ctx.job], { out: text });
     }
     let answers = await portAnswers(port, deps.fetch);
-    for (let waited = 0; replacing && answers && waited < RELEASE_WAIT_MS; waited += RELEASE_POLL_MS) {
-      await deps.sleep(RELEASE_POLL_MS);
+    for (let waited = 0; replacing && answers && waited < WAIT_MS; waited += POLL_MS) {
+      await deps.sleep(POLL_MS);
       answers = await portAnswers(port, deps.fetch);
     }
     const { refuse } = installPlan({ port, answers });
@@ -682,38 +702,44 @@ const COMMANDS: Record<string, (ctx: ServiceContext) => Promise<number>> = {
 
   async uninstall(ctx) {
     const { deps, plan } = ctx;
-    /* A job launchd lacks is no failure here: the plist goes either way. */
-    const bootout = deps.launchctl(["bootout", ctx.job]);
-    if (!ctx.installed && !bootout.ok) {
+    const loaded = jobInfo(ctx).loaded;
+    if (!ctx.installed && !loaded) {
       deps.out(`not installed: no ${plan.path}, and launchd has no job ${ctx.job}`);
       return 0;
     }
+    /* The plist goes whether or not launchd lets go of the job: without it, the job does not come
+     * back at the next login. */
+    const left = loaded ? await bootoutAndWait(ctx) : { gone: true, text: "" };
     try {
       rmSync(plan.path, { force: true });
     } catch (err) {
       deps.out(`cannot remove ${plan.path}: ${reasonOf(err)}`);
       return 1;
     }
-    const plist = ctx.installed ? `${plan.path} is removed` : `there was no ${plan.path}`;
-    deps.out(`uninstalled: launchd no longer runs it and ${plist}; the ledger (${deskDir(ctx.home)}) and ${join(ctx.home, ".env")} are untouched`);
-    return 0;
+    const untouched = `the ledger (${deskDir(ctx.home)}) and ${join(ctx.home, ".env")} are untouched`;
+    if (left.gone) {
+      const plist = ctx.installed ? `${plan.path} is removed` : `there was no ${plan.path}`;
+      deps.out(`uninstalled: launchd no longer runs it and ${plist}; ${untouched}`);
+      return 0;
+    }
+    const plist = ctx.installed ? "the plist is removed" : `there was no ${plan.path}`;
+    deps.out(`launchd still holds the job${left.text === "" ? "" : ` (${left.text})`}; ${plist}, so it will not start at the next login; ${untouched}`);
+    return 1;
   },
 
   start: (ctx) => startJob(ctx),
 
   async stop(ctx) {
     const { deps } = ctx;
-    const args = ["bootout", ctx.job];
-    const result = deps.launchctl(args);
-    if (result.ok) {
-      deps.out(ctx.installed
-        ? "stopped: launchd no longer runs it; the plist stays, so the next login or npm run service -- start brings it back"
-        : `stopped: launchd no longer runs it, and with no ${ctx.plan.path} nothing brings it back`);
+    if (!jobInfo(ctx).loaded) {
+      deps.out(`not loaded: launchd has no job ${ctx.job}, so there was nothing to stop`);
       return 0;
     }
-    /* A bootout fails for a job launchd lacks - stopped already - and for one it could not stop. */
-    if (jobInfo(ctx).loaded) return failed(ctx, args, result);
-    deps.out(`not loaded: launchd has no job ${ctx.job}, so there was nothing to stop`);
+    const { gone, text } = await bootoutAndWait(ctx);
+    if (!gone) return failed(ctx, ["bootout", ctx.job], { out: text });
+    deps.out(ctx.installed
+      ? "stopped: launchd no longer runs it; the plist stays, so the next login or npm run service -- start brings it back"
+      : `stopped: launchd no longer runs it, and with no ${ctx.plan.path} nothing brings it back`);
     return 0;
   },
 
@@ -787,18 +813,22 @@ const USAGE = `usage: npm run service -- ${Object.keys(COMMANDS).join(" | ")} [-
  *   face answers on the port ({@link fetchStatus}), the sign-in URL from the log - and, when the
  *   face does not answer, one line from the ledger on how its last run ended.
  * - `install`: the home's .env ({@link ensureHomeEnv}), each finding a line; a job launchd has is
- *   booted out first and its port given up to 10 s to fall silent; refused while the port still
- *   answers ({@link installPlan}); then the logs directory (0700), the plist (0644), `bootstrap`
- *   and `enable`.
+ *   booted out first - a failure when launchd still holds it after 10 s - and its port given up to
+ *   10 s to fall silent; refused while the port still answers ({@link installPlan}); then the logs
+ *   directory (0700), the plist (0644), `enable` and `bootstrap`.
  * - `start`: not installed is a failure; a running job is left alone; refused while the port
- *   answers; then `kickstart` for a loaded job, `bootstrap` and `enable` for one launchd lacks.
- * - `stop`: `bootout` - not `kill`: a face whose teardown throws exits 1, which KeepAlive would
- *   restart. The plist stays.
+ *   answers; then `kickstart` for a loaded job, `enable` and `bootstrap` for one launchd lacks.
+ * - `stop`: nothing to do for a job launchd lacks; otherwise `bootout` - not `kill`: a face whose
+ *   teardown throws exits 1, which KeepAlive would restart - and a failure only when launchd still
+ *   holds the job after 10 s. The plist stays.
  * - `restart`: `kickstart -k` for a running job; in any other state, `start` - so a port another
  *   process holds is refused, never handed to KeepAlive as an EADDRINUSE loop.
- * - `uninstall`: `bootout` (a job launchd lacks is fine), then the plist goes; the ledger and the
- *   home's .env stay.
+ * - `uninstall`: `bootout` for a job launchd has; the plist goes either way, and a job launchd
+ *   still holds after 10 s is a failure, said so; the ledger and the home's .env stay.
  * - `logs`: the last 40 lines of each log that exists; `url`: the log's last sign-in URL.
+ *
+ * Whether a `bootout` worked is never its exit code: launchd is asked until it no longer holds the
+ * job ({@link bootoutAndWait}).
  *
  * `install`, `uninstall`, `start`, `stop` and `restart` refuse off darwin before launchctl is run.
  * @param cmd - the command.

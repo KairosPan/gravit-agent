@@ -193,23 +193,33 @@ const older = (): Response => new Response(null, { status: 404 });
 const loaded = (state: string, pid?: number) =>
   ({ ok: true, out: `${JOB} = {\n\tstate = ${state}\n${pid === undefined ? "" : `\tpid = ${pid}\n`}}\n` });
 
+/** What launchctl answers for a bootout whose job is still stopping. */
+const IN_PROGRESS = { ok: false, out: "Boot-out failed: 36: Operation now in progress" };
+
+/** A job launchd holds - `print` says so - until a bootout, and then not; the bootout itself answers
+ * `bootout` (default: success). */
+const untilBootout = (state: string, pid?: number, bootout?: { ok: boolean; out: string }) =>
+  (args: string[], calls: string[][]) =>
+    args[0] === "bootout" ? bootout : args[0] === "print" && !calls.some((c) => c[0] === "bootout") ? loaded(state, pid) : undefined;
+
 interface Rig { deps: ServiceDeps; calls: string[][]; urls: string[]; sleeps: number[]; plist: string; text(): string; reset(): void }
 
 /**
  * A ServiceDeps over fresh temp dirs (homeDir, home = homeDir/.dsh, root) that records every launchctl call,
- * every URL fetched, every sleep and every line printed; `reset` forgets them. `launchctl` answers a call
- * when it returns something; otherwise `print` fails (launchd has no job) and every other call succeeds.
- * `answer` is the port's answer given the calls so far; `undefined` (the default) is a refused connection.
+ * every URL fetched, every sleep and every line printed; `reset` forgets them. `launchctl` answers a call,
+ * given the calls so far (this one included), when it returns something; otherwise `print` fails (launchd
+ * has no job) and every other call succeeds. `answer` is the port's answer given the calls so far;
+ * `undefined` (the default) is a refused connection.
  */
 async function rig(o: {
-  launchctl?: (args: string[]) => { ok: boolean; out: string } | undefined;
+  launchctl?: (args: string[], calls: string[][]) => { ok: boolean; out: string } | undefined;
   answer?: (calls: string[][]) => Response | undefined;
   platform?: NodeJS.Platform;
 } = {}): Promise<Rig> {
   const homeDir = await home(); const root = await home();
   const calls: string[][] = []; const urls: string[] = []; const sleeps: number[] = []; const lines: string[] = [];
   const deps: ServiceDeps = {
-    launchctl: (args) => { calls.push(args); return o.launchctl?.(args) ?? { ok: args[0] !== "print", out: "" }; },
+    launchctl: (args) => { calls.push(args); return o.launchctl?.(args, calls) ?? { ok: args[0] !== "print", out: "" }; },
     fetch: (async (input: string | URL | Request) => {
       urls.push(String(input));
       const res = o.answer?.(calls);
@@ -258,16 +268,21 @@ test("install with no job and the port answering refuses: no plist, no bootstrap
   await assert.rejects(stat(r.plist), "no plist written");
 });
 
-test("install replaces a running job: bootout, wait for the port to fall silent, then the plist, bootstrap and enable", async () => {
+test("install replaces a running job: a bootout still in progress, launchd let go of, the port fallen silent, then the plist, enable and bootstrap", async () => {
   let afterBootout = 0;
   const r = await rig({
-    launchctl: (args) => (args[0] === "print" ? loaded("running", 42) : undefined),
+    launchctl: (args, calls) => {
+      if (args[0] === "bootout") return IN_PROGRESS;
+      if (args[0] !== "print") return undefined;
+      const at = calls.findIndex((c) => c[0] === "bootout");
+      return at < 0 || calls.slice(at + 1).filter((c) => c[0] === "print").length <= 1 ? loaded("running", 42) : undefined;
+    },
     answer: (calls) => (!calls.some((c) => c[0] === "bootout") || afterBootout++ < 2 ? older() : undefined),
   });
   await writeFile(join(r.deps.root, ".env.deepseek"), "DEEPSEEK_API_KEY=d\n");
-  assert.equal(await runService("install", [], r.deps), 0);
-  assert.deepEqual(r.calls, [["print", JOB], ["bootout", JOB], ["bootstrap", "gui/501", r.plist], ["enable", JOB]]);
-  assert.deepEqual(r.sleeps, [500, 500], "polled every 500 ms until the old face let go of the port");
+  assert.equal(await runService("install", [], r.deps), 0, "bootout's exit code is not the outcome: launchd let go of the job");
+  assert.deepEqual(r.calls, [["print", JOB], ["bootout", JOB], ["print", JOB], ["print", JOB], ["enable", JOB], ["bootstrap", "gui/501", r.plist]]);
+  assert.deepEqual(r.sleeps, [500, 500, 500], "one poll until launchd let go of the job, two until its face let go of the port");
   assert.ok(r.urls.every((u) => u === "http://127.0.0.1:3090/data/desk/status"));
   const written = await readFile(r.plist, "utf8");
   assert.equal(written, servicePlan({ root: r.deps.root, home: r.deps.home, homeDir: r.deps.homeDir, node: "/usr/local/bin/node", path: "/usr/local/bin:/usr/bin", launchAgentsDir: dirname(r.plist) }).plist);
@@ -278,11 +293,21 @@ test("install replaces a running job: bootout, wait for the port to fall silent,
 });
 
 test("install refuses when the port still answers 10 s after the bootout", async () => {
-  const r = await rig({ launchctl: (args) => (args[0] === "print" ? loaded("running", 42) : undefined), answer: older });
+  const r = await rig({ launchctl: untilBootout("running", 42), answer: older });
   assert.equal(await runService("install", [], r.deps), 1);
   assert.equal(r.sleeps.length, 20); assert.ok(r.sleeps.every((ms) => ms === 500));
   assert.match(r.text(), /something already answers on 127\.0\.0\.1:3090/);
-  assert.deepEqual(r.calls, [["print", JOB], ["bootout", JOB]]);
+  assert.deepEqual(r.calls, [["print", JOB], ["bootout", JOB], ["print", JOB]]);
+  await assert.rejects(stat(r.plist));
+});
+
+test("install fails when launchd still holds the job 10 s after the bootout", async () => {
+  const r = await rig({ launchctl: (args) => (args[0] === "print" ? loaded("running", 42) : args[0] === "bootout" ? IN_PROGRESS : undefined), answer: older });
+  assert.equal(await runService("install", [], r.deps), 1);
+  assert.match(r.text(), /\nlaunchctl bootout gui\/501\/com\.gravit\.face failed: Boot-out failed: 36: Operation now in progress$/);
+  assert.equal(r.sleeps.length, 20); assert.ok(r.sleeps.every((ms) => ms === 500));
+  assert.deepEqual(r.calls, [["print", JOB], ["bootout", JOB], ...Array.from({ length: 21 }, () => ["print", JOB])], "asked at once, then every 500 ms");
+  assert.deepEqual(r.urls, [], "the port is not asked about a job launchd still holds");
   await assert.rejects(stat(r.plist));
 });
 
@@ -320,15 +345,19 @@ test("install with nothing to copy writes no .env and says so; a .env it cannot 
   assert.deepEqual(dangling.calls, []);
 });
 
-test("install stops at a failed bootstrap and prints what launchctl said", async () => {
+test("install stops at a failed enable or bootstrap and prints what launchctl said", async () => {
   const r = await rig({ launchctl: (args) => (args[0] === "bootstrap" ? { ok: false, out: "Bootstrap failed: 5: Input/output error" } : undefined) });
   assert.equal(await runService("install", [], r.deps), 1);
   assert.match(r.text(), /launchctl bootstrap gui\/501 .*com\.gravit\.face\.plist failed: Bootstrap failed: 5: Input\/output error$/);
-  assert.deepEqual(r.calls.map((c) => c[0]), ["print", "bootstrap"], "no enable after a failed bootstrap");
+  assert.deepEqual(r.calls.map((c) => c[0]), ["print", "enable", "bootstrap"], "enable first: it clears a disable that would refuse the bootstrap");
   assert.ok(!r.text().includes("installed:"));
+  const off = await rig({ launchctl: (args) => (args[0] === "enable" ? { ok: false, out: "Could not enable service" } : undefined) });
+  assert.equal(await runService("install", [], off.deps), 1);
+  assert.match(off.text(), /\nlaunchctl enable gui\/501\/com\.gravit\.face failed: Could not enable service$/);
+  assert.deepEqual(off.calls.map((c) => c[0]), ["print", "enable"], "no bootstrap after a failed enable");
 });
 
-test("start: a running job is left alone; a loaded one kickstarted; one launchd lacks bootstrapped and enabled; a held port refused", async () => {
+test("start: a running job is left alone; a loaded one kickstarted; one launchd lacks enabled and bootstrapped; a held port refused", async () => {
   const running = await rig({ launchctl: (args) => (args[0] === "print" ? loaded("running", 42) : undefined), answer: older });
   await putPlist(running);
   assert.equal(await runService("start", [], running.deps), 0);
@@ -343,7 +372,7 @@ test("start: a running job is left alone; a loaded one kickstarted; one launchd 
   const unloaded = await rig();
   await putPlist(unloaded);
   assert.equal(await runService("start", [], unloaded.deps), 0);
-  assert.deepEqual(unloaded.calls, [["print", JOB], ["bootstrap", "gui/501", unloaded.plist], ["enable", JOB]]);
+  assert.deepEqual(unloaded.calls, [["print", JOB], ["enable", JOB], ["bootstrap", "gui/501", unloaded.plist]]);
 
   const held = await rig({ answer: older });
   await putPlist(held);
@@ -357,19 +386,30 @@ test("start: a running job is left alone; a loaded one kickstarted; one launchd 
   assert.deepEqual(absent.calls, []);
 });
 
-test("stop boots the job out - exactly one call - and the plist stays", async () => {
-  const r = await rig();
+test("stop boots the job out and waits for launchd to let go of it, whatever bootout returned; the plist stays", async () => {
+  const r = await rig({ launchctl: untilBootout("running", 42) });
   await putPlist(r);
   assert.equal(await runService("stop", [], r.deps), 0);
-  assert.deepEqual(r.calls, [["bootout", JOB]]);
+  assert.deepEqual(r.calls, [["print", JOB], ["bootout", JOB], ["print", JOB]], "one bootout; launchd asked before it and after it");
   assert.equal(r.text(), "stopped: launchd no longer runs it; the plist stays, so the next login or npm run service -- start brings it back");
   await stat(r.plist);
-  const idle = await rig({ launchctl: (args) => (args[0] === "bootout" ? { ok: false, out: "Boot-out failed: 3: No such process" } : undefined) });
+
+  const slow = await rig({ launchctl: untilBootout("running", 42, IN_PROGRESS) });
+  await putPlist(slow);
+  assert.equal(await runService("stop", [], slow.deps), 0, "a bootout still in progress is no failure once launchd lets go");
+  assert.equal(slow.text(), "stopped: launchd no longer runs it; the plist stays, so the next login or npm run service -- start brings it back");
+
+  const stuck = await rig({ launchctl: (args) => (args[0] === "print" ? loaded("running", 42) : args[0] === "bootout" ? IN_PROGRESS : undefined) });
+  await putPlist(stuck);
+  assert.equal(await runService("stop", [], stuck.deps), 1, "a job launchd still holds after 10 s is a failure");
+  assert.equal(stuck.text(), "launchctl bootout gui/501/com.gravit.face failed: Boot-out failed: 36: Operation now in progress");
+  assert.equal(stuck.sleeps.length, 20); assert.ok(stuck.sleeps.every((ms) => ms === 500));
+  assert.equal(stuck.calls.filter((c) => c[0] === "bootout").length, 1, "booted out once, then only asked");
+
+  const idle = await rig();
   assert.equal(await runService("stop", [], idle.deps), 0, "nothing to stop is not a failure");
-  assert.match(idle.text(), /^not loaded: launchd has no job gui\/501\/com\.gravit\.face/);
-  const stuck = await rig({ launchctl: (args) => (args[0] === "print" ? loaded("running", 42) : args[0] === "bootout" ? { ok: false, out: "Boot-out failed: 5: Input/output error" } : undefined) });
-  assert.equal(await runService("stop", [], stuck.deps), 1, "a job launchd still has after a failed bootout is a failure");
-  assert.match(stuck.text(), /launchctl bootout gui\/501\/com\.gravit\.face failed: Boot-out failed: 5: Input\/output error/);
+  assert.equal(idle.text(), "not loaded: launchd has no job gui/501/com.gravit.face, so there was nothing to stop");
+  assert.deepEqual(idle.calls, [["print", JOB]], "no bootout for a job launchd lacks");
 });
 
 test("restart: kickstart -k only a running job; every other state takes start's path, a port another process holds refused", async () => {
@@ -398,7 +438,7 @@ test("restart: kickstart -k only a running job; every other state takes start's 
   const unloaded = await rig();
   await putPlist(unloaded);
   assert.equal(await runService("restart", [], unloaded.deps), 0);
-  assert.deepEqual(unloaded.calls, [["print", JOB], ["bootstrap", "gui/501", unloaded.plist], ["enable", JOB]]);
+  assert.deepEqual(unloaded.calls, [["print", JOB], ["enable", JOB], ["bootstrap", "gui/501", unloaded.plist]]);
 
   const absent = await rig();
   assert.equal(await runService("restart", [], absent.deps), 1);
@@ -406,16 +446,36 @@ test("restart: kickstart -k only a running job; every other state takes start's 
   assert.ok(!absent.calls.some((c) => c[0] !== "print"), "nothing changed in launchd");
 });
 
-test("uninstall boots the job out and removes the plist; the ledger and the home .env stay", async () => {
-  const r = await rig({ launchctl: (args) => (args[0] === "bootout" ? { ok: false, out: "" } : undefined) });
+test("uninstall boots a loaded job out and removes the plist; the ledger and the home .env stay", async () => {
+  const r = await rig({ launchctl: untilBootout("running", 42, IN_PROGRESS) });
   await putPlist(r);
   await putLedger(r.deps.home, [boot(77)]);
   await writeFile(join(r.deps.home, ".env"), "DEEPSEEK_API_KEY=d\n");
-  assert.equal(await runService("uninstall", [], r.deps), 0, "a failed bootout is ignored");
-  assert.deepEqual(r.calls, [["bootout", JOB]]);
+  const untouched = `the ledger (${join(r.deps.home, "face", "desk")}) and ${join(r.deps.home, ".env")} are untouched`;
+  assert.equal(await runService("uninstall", [], r.deps), 0, "a bootout still in progress is no failure once launchd lets go");
+  assert.deepEqual(r.calls, [["print", JOB], ["bootout", JOB], ["print", JOB]]);
+  assert.equal(r.text(), `uninstalled: launchd no longer runs it and ${r.plist} is removed; ${untouched}`);
   await assert.rejects(stat(r.plist), "the plist is gone");
   await stat(join(r.deps.home, "face", "desk", "events.jsonl")); await stat(join(r.deps.home, ".env"));
-  assert.ok(r.text().includes(`the ledger (${join(r.deps.home, "face", "desk")}) and ${join(r.deps.home, ".env")} are untouched`));
+
+  const idle = await rig();
+  await putPlist(idle);
+  assert.equal(await runService("uninstall", [], idle.deps), 0);
+  assert.deepEqual(idle.calls, [["print", JOB]], "no bootout for a job launchd lacks");
+  await assert.rejects(stat(idle.plist));
+
+  const stuck = await rig({ launchctl: (args) => (args[0] === "print" ? loaded("running", 42) : args[0] === "bootout" ? IN_PROGRESS : undefined) });
+  await putPlist(stuck);
+  assert.equal(await runService("uninstall", [], stuck.deps), 1, "launchd still holding the job is no success");
+  assert.equal(stuck.text(), "launchd still holds the job (Boot-out failed: 36: Operation now in progress); the plist is removed, so it will not start at the next login; "
+    + `the ledger (${join(stuck.deps.home, "face", "desk")}) and ${join(stuck.deps.home, ".env")} are untouched`);
+  assert.equal(stuck.sleeps.length, 20);
+  await assert.rejects(stat(stuck.plist), "the plist goes even so");
+
+  const none = await rig();
+  assert.equal(await runService("uninstall", [], none.deps), 0);
+  assert.equal(none.text(), `not installed: no ${none.plist}, and launchd has no job ${JOB}`);
+  assert.deepEqual(none.calls, [["print", JOB]]);
 });
 
 test("status: a plist launchd has no job for is not loaded; with the face silent, one ledger line says how its last run ended", async () => {
