@@ -45,7 +45,11 @@ const orderIdOf = text => { const v = parseArgs(text); return typeof v.id === 's
 function bubble(view, speaker) {
   const b = base(view);
   // a room member's answer is a dsh agent's markdown too, drawn as the bot's home session draws it
-  if (view.role === 'bot') return { ...b, from: view.bot ?? 'bot', kind: 'text', text: view.displayText ?? view.text ?? '', data: { name: view.name, markdown: true } };
+  // it keeps the member turn that produced it, which its Trace reads
+  if (view.role === 'bot') {
+    const member = typeof view.memberSessionId === 'string' ? { memberSessionId: view.memberSessionId, memberTurn: view.memberTurn } : {};
+    return { ...b, from: view.bot ?? 'bot', kind: 'text', text: view.displayText ?? view.text ?? '', data: { name: view.name, markdown: true, ...member } };
+  }
   if (view.role === 'gravit') {
     const text = view.text ?? '';
     if (text.trim() === '' && view.interrupted !== true) return null; // a tool-only step: the tool row carries it

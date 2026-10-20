@@ -160,5 +160,18 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
     }
   }
 
-  return { send, newConversation, answer, stop, rename, command, fork, archive, remove, talkTo };
+  // a running continuable child, stopped by its parent: its current turn is interrupted (a one-shot child is never sent)
+  async function stopChild(parentSessionId, childSessionId, label) {
+    try {
+      const r = await call('subagents/interruptByParent', { childSessionId, parentSessionId, mode: 'continuable' });
+      if (r?.accepted === false) throw new Error('refused');
+      say(`Stopping ${label || 'the child'}`);
+      return true;
+    } catch (err) {
+      fail(err, 'stop');
+      return false;
+    }
+  }
+
+  return { send, newConversation, answer, stop, rename, command, fork, archive, remove, talkTo, stopChild };
 }

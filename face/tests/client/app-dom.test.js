@@ -22,7 +22,7 @@ function host({ rows = [], pages = {}, meta = { ok: true, archived: [], deleted:
     calls.push([endpoint, args]);
     if (endpoint === 'session/list') return { items: rows };
     if (endpoint === 'session/projections') return { asOfSeq: 20, values: {} };
-    if (endpoint === 'session/page') return { records: pages[args.request.address.sessionId] ?? [] };
+    if (endpoint === 'session/page') { const pg = pages[args.request.address.sessionId]; return Array.isArray(pg) || pg === undefined ? { records: pg ?? [] } : pg; }
     if (endpoint === 'session/create' && args.request.agentPreset) { rows.push(row('s-bot', { updatedAt: 120, agentAvailable: true, projections: { values: { agentPreset: args.request.agentPreset } } })); return { sessionId: 's-bot', agentPreset: args.request.agentPreset }; }
     if (endpoint === 'session/create') { rows.push(row('s-new', { agentAvailable: true })); return { sessionId: 's-new', agentPreset: 'gravit' }; }
     if (endpoint === 'session/fork') { rows.push(row('s-fork', { updatedAt: 99, agentAvailable: true })); return { sessionId: 's-fork' }; }
@@ -889,5 +889,38 @@ test('an opened tool row stays open across the next render', async () => {
   const again = f.withId('tool-c1', { tagName: 'DETAILS', open: false });
   store.dispatch('toggleRail');
   assert.equal(again.open, true, 'the render opens it again by its id');
+  store.timers.clear();
+});
+
+test("opening Trace reads the member's session without following it", async () => {
+  const { memberTurn, memberPage } = await import('./helpers/trace.js');
+  const f = fakeWindow({ hash: '' });
+  const h = host({ rows: [row('room', { agentAvailable: true })], pages: { m1: memberPage(memberTurn()) } });
+  const store = started(f, h);
+  await h.ready();
+  store.dispatch('hostEvent', { convId: 'room', message: { id: 'e9', seq: 9, at: 1, from: 'buffett', kind: 'text', text: 'Hold', data: { name: 'Buffett', markdown: true, memberSessionId: 'm1', memberTurn: 3 } } });
+  assert.match(f.html(), /data-action="openTrace" data-conv="room" data-msg="e9"/);
+  f.click({ tagName: 'SUMMARY', dataset: { action: 'openTrace', conv: 'room', msg: 'e9' } });
+  await settle();
+  assert.ok(h.calls.some(c => c[0] === 'session/page' && c[1].request.address.sessionId === 'm1'));
+  assert.equal(h.streams.some(s => s.name === 'session/follow' && s.args.request.address.sessionId === 'm1'), false, 'never followed');
+  assert.equal(store.get().traces.e9.status, 'ready');
+  assert.match(f.html(), /<details id="tool-mc1" class="tool">/);
+  store.timers.clear();
+});
+
+test('Stop on a child asks first, then interrupts it', async () => {
+  const f = fakeWindow({ hash: '' });
+  const h = host({ rows: [row('p', { agentAvailable: true, updatedAt: 9 }), row('c1', { origin: 'subagent', parentSessionId: 'p', running: true })] });
+  const store = started(f, h);
+  await h.ready();
+  h.streams[0].cbs.onItem({ type: 'projection', sessionId: 'p', key: 'subagentCatalog', value: [{ id: 'c1', createdAt: 1, mode: 'continuable', label: 'Check' }], seq: 4 });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'toggleDetails' } });
+  assert.match(f.html(), /data-action="stopChild" data-parent="p" data-child="c1"/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'stopChild', parent: 'p', child: 'c1', label: 'Check' } });
+  assert.equal(h.calls.some(c => c[0] === 'subagents/interruptByParent'), false, 'nothing until the second press');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'confirmYes' } });
+  await settle();
+  assert.deepEqual(h.calls.find(c => c[0] === 'subagents/interruptByParent')[1], { childSessionId: 'c1', parentSessionId: 'p', mode: 'continuable' });
   store.timers.clear();
 });

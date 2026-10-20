@@ -87,6 +87,19 @@ function body(m, conv) {
   }
 }
 
+// a room member's answer can open the turn that produced it: read on opening (host/traces.js), drawn with the
+// thread's own rows
+function trace(m, conv, state) {
+  if (typeof m.data?.memberSessionId !== 'string' || typeof m.data?.memberTurn !== 'number') return '';
+  const t = state?.traces?.[m.id];
+  const item = x => (x.kind === 'tool' ? body(x, conv) : x.from === 'system' ? `<div class="sysline">${esc(x.text)}</div>` : `<div class="dsec-line">${esc(x.text)}</div>`);
+  const inner = !t || t.status === 'loading' ? '<div class="dim">Loading…</div>'
+    : t.status === 'failed' ? `<div class="dim">${esc(t.line)}</div>`
+      : t.messages.length ? t.messages.map(item).join('') : '<div class="dim">No steps</div>';
+  return `<details id="trace-${esc(m.id)}" class="trace"><summary data-action="openTrace" data-conv="${esc(conv.id)}" data-msg="${esc(m.id)}">Trace</summary>` +
+    `<div class="trace-body">${inner}</div></details>`;
+}
+
 export function renderMessage(m, conv, state) {
   // a producer-sourced user record (a runtime snapshot, a plugin notice, a member's delta) is context, folded away under its source;
   // a line the page itself writes (a round end, a child's report) stays a centred line
@@ -100,7 +113,7 @@ export function renderMessage(m, conv, state) {
   const name = conv.kind === 'group' && m.from !== 'gravit' ? `<div class="sender-name">${esc(m.data?.name ?? senderName(m.from, state))}</div>` : '';
   // plain talk keeps a bubble's width; every card, tool row and green bubble runs wider (spec §16)
   const wide = m.kind !== 'text';
-  return `<div class="msg left">${name}<div class="msg-row">${avatar(m.from, 28, state)}<div class="${cls('msg-body', wide && 'wide')}">${body(m, conv)}</div></div></div>`;
+  return `<div class="msg left">${name}<div class="msg-row">${avatar(m.from, 28, state)}<div class="${cls('msg-body', wide && 'wide')}">${body(m, conv)}${trace(m, conv, state)}</div></div></div>`;
 }
 
 // the three-dot row while the host streams a turn

@@ -149,3 +149,10 @@ test("a result row carries the call's name and arguments", () => {
   const [unknown] = toMessages({ ...view, card: { ...view.card, callId: 'c99' } }, known, NOW);
   assert.equal('name' in unknown.data, false, 'a result whose call was never seen carries no name');
 });
+
+test("a member's answer carries its member session and turn", () => {
+  const [m] = toMessages({ kind: 'bubble', role: 'bot', bot: 'buffett', name: 'Buffett', text: 'Hold', seq: 9, time: 1, memberSessionId: 'm1', memberTurn: 3 }, new Map(), NOW);
+  assert.equal(m.data.memberSessionId, 'm1'); assert.equal(m.data.memberTurn, 3);
+  const [plain] = toMessages({ kind: 'bubble', role: 'bot', bot: 'buffett', name: 'Buffett', text: 'Hold', seq: 9, time: 1 }, new Map(), NOW);
+  assert.equal('memberSessionId' in plain.data, false);
+});

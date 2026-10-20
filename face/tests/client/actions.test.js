@@ -179,3 +179,13 @@ test("talkTo opens the bot's newest open home conversation, else creates one in 
   const down = rig({ answers: { 'session/create': err({ code: 'preset/broken' }) } });
   assert.deepEqual(await down.actions.talkTo(bot), { error: 'talk to: preset/broken' });
 });
+
+test('stopChild sends interruptByParent in continuable mode', async () => {
+  const r = rig({ answers: { 'subagents/interruptByParent': { accepted: true } } });
+  assert.equal(await r.actions.stopChild('p', 'c1', 'Check'), true);
+  assert.deepEqual(r.calls, [['subagents/interruptByParent', { childSessionId: 'c1', parentSessionId: 'p', mode: 'continuable' }]]);
+  assert.equal(r.store.get().status.line, 'Stopping Check');
+  const no = rig({ answers: { 'subagents/interruptByParent': err({ code: 'subagent/not-found' }) } });
+  assert.equal(await no.actions.stopChild('p', 'c1', 'Check'), false);
+  assert.equal(no.store.get().status.line, 'stop: subagent/not-found');
+});

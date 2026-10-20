@@ -21,6 +21,8 @@ import { renderChannelScreen } from './render/channel.js';
 import { startDiscover } from './host/discover.js';
 import { renderDiscover, renderPlugin } from './render/discover.js';
 import { itemById } from './host/discover-view.js';
+import { startTraces } from './host/traces.js';
+import { loadMemberTrace } from './wire/member-traces.js';
 import { statementOf, csvOf } from './host/account-view.js';
 import { canonicalId, assetFor } from './host/market-view.js';
 import { createLiveQuotes } from './wire/market-quotes.js';
@@ -170,6 +172,8 @@ export function boot(win, host = {}) {
   const channels = startChannels({ store, postJson, getJson, refresh: () => live.refresh(), now });
   // Discover: the face's inventory, read on entering it; a page's own reads (the Gravit item, a skill) on opening it
   const discover = startDiscover({ store, getJson, postJson, call, now });
+  // a room member's trace, read without activating the member's session
+  const traces = startTraces({ store, call, loadMemberTrace, now });
   // the quotes run only while Markets is on screen in a visible tab
   const showMarkets = () => markets.show(store.get().route.screen === 'markets' && !doc.hidden);
 
@@ -413,6 +417,7 @@ export function boot(win, host = {}) {
     store.dispatch('cancelConfirm');
     if (c.action === 'stopGravit') void actions.stop(c.id);
     if (c.action === 'deleteConv') void deleteNow(c.id);
+    if (c.action === 'stopChild') void actions.stopChild(c.parent, c.id, c.label);
   }
 
   async function sendNow() {
@@ -463,6 +468,9 @@ export function boot(win, host = {}) {
     archive: el => { void archiveNow(el.dataset.conv, true); },
     unarchive: el => { void archiveNow(el.dataset.conv, false); },
     deleteConv: el => store.dispatch('askConfirm', { action: 'deleteConv', id: el.dataset.conv }),
+    // the research surfaces: a child stopped by its parent (asked twice), a member's trace read on opening
+    stopChild: el => store.dispatch('askConfirm', { action: 'stopChild', id: el.dataset.child, parent: el.dataset.parent, label: el.dataset.label }),
+    openTrace: el => { void traces.open(el.dataset.conv, el.dataset.msg); },
     confirmYes: () => confirmYes(),
     cancelConfirm: () => store.dispatch('cancelConfirm'),
     suggest: el => { composerText = el.dataset.text; render(); doc.getElementById('say')?.focus(); },

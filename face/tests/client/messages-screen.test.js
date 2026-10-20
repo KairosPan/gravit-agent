@@ -135,3 +135,19 @@ test('Where offers New channel…; the edit asks for the name', () => {
   assert.match(n, /name="channel"[^>]*aria-label="Name the channel"|aria-label="Name the channel"[^>]*name="channel"/);
   assert.match(renderMessagesScreen(R.editFailed(naming, { error: 'Letters, digits, - or _' }), NOW), /Letters, digits, - or _/);
 });
+
+test('Details lists the children with Stop on the one that can', () => {
+  const s = R.hostList(listed([conv('a', { live: true, subagentCatalog: [{ id: 'live', createdAt: 1, mode: 'continuable', label: 'Check' }, { id: 'once', createdAt: 2, mode: 'one-shot' }] })]),
+    { conversations: [conv('a', { live: true })], childRows: [{ sessionId: 'live', parentSessionId: 'a', running: true, origin: 'subagent' }, { sessionId: 'once', parentSessionId: 'a', running: false, origin: 'subagent' }] });
+  const h = renderDetails(currentConversation(s), s);
+  assert.match(h, />Children</);
+  assert.match(h, /Check[\s\S]*?Continuable · Running/);
+  assert.match(h, /Subagent[\s\S]*?One-shot · Not running/);
+  assert.match(h, /data-action="stopChild" data-parent="a" data-child="live" data-label="Check"/);
+  assert.equal((h.match(/data-action="stopChild"/g) ?? []).length, 1, 'a one-shot child has no Stop');
+  const asking = R.askConfirm(s, { action: 'stopChild', id: 'live', parent: 'a', label: 'Check' });
+  assert.match(renderDetails(currentConversation(asking), asking), /data-action="confirmYes"[^>]*>Yes, stop</);
+  const broken = R.hostProjection(s, { convId: 'a', key: 'subagentCatalog', value: { bad: true } });
+  assert.match(renderDetails(currentConversation(broken), broken), /Children unavailable/);
+  assert.doesNotMatch(renderDetails(currentConversation(listed([conv('b')])), listed([conv('b')])), />Children</);
+});

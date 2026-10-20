@@ -9,6 +9,7 @@ import { senderName } from './rail.js';
 import { kv, inlineEdit, confirmPair } from './controls.js';
 import { firstOpen } from '../host/sessions.js';
 import { needsAnswer } from '../messages.js';
+import { childrenOf } from '../host/children-view.js';
 
 export function currentConversation(state) {
   const id = state.route.screen === 'messages' ? state.route.id : null;
@@ -87,6 +88,21 @@ function rowKeys(conv, state) {
   ].join('');
 }
 
+// the conversation's subagent children: who, how they run, Stop (asked twice) on a running continuable one
+const MODE = { 'one-shot': 'One-shot', continuable: 'Continuable' };
+const STATE = { running: 'Running', inactive: 'Not running', unknown: 'Unknown', unavailable: 'Unavailable' };
+function childrenSection(conv, state) {
+  const { children, unavailable } = childrenOf(conv, state.childRows);
+  if (!children.length && !unavailable) return '';
+  const rows = children.map(c => {
+    const asking = state.confirm?.action === 'stopChild' && state.confirm?.id === c.id;
+    const stop = !c.canStop ? '' : asking ? confirmPair('Yes, stop')
+      : `<button type="button" class="btn-sm" data-action="stopChild" data-parent="${esc(conv.id)}" data-child="${esc(c.id)}" data-label="${esc(c.label)}">Stop</button>`;
+    return `<div class="child-row"><span class="child-name">${esc(c.label)}</span><span class="dim">${[MODE[c.mode], STATE[c.state]].filter(Boolean).join(' · ')}</span>${stop}</div>`;
+  }).join('');
+  return `<section class="dsec"><div class="dsec-label">Children</div>${unavailable ? '<div class="dsec-line dim">Children unavailable</div>' : rows}</section>`;
+}
+
 export function renderDetails(conv, state) {
   const e = state.edit;
   const renaming = !!e && e.kind === 'rename' && e.convId === conv.id;
@@ -102,7 +118,7 @@ export function renderDetails(conv, state) {
   <div class="drawer-head"><h2>Details</h2><button type="button" class="close-key" data-action="toggleDetails" aria-label="Close">×</button></div>
   <div class="drawer-body">
     <section class="dsec"><div class="dsec-label">This task</div>${title}${facts}${renaming ? '' : `<div class="btn-row">${rowKeys(conv, state)}</div>`}</section>
-    ${members}${usageRows(conv.usage)}${stop}
+    ${members}${childrenSection(conv, state)}${usageRows(conv.usage)}${stop}
   </div>
 </aside>`;
 }
