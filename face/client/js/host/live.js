@@ -18,7 +18,9 @@ export const viewFor = conv => (conv?.live ? 'follow' : 'page');
 const address = id => ({ kind: 'session', sessionId: id });
 const codeOf = err => err?.code ?? (err?.status ? `HTTP ${err.status}` : err?.message ?? 'failed');
 
-export function startLive({ store, openMux, call, mapFrame, getJson, timers, now = Date.now }) {
+// onReceipt: called after a streamed order receipt lands (spec §6: the account is read again right after a fill); a
+// receipt folded into a window is history and calls nothing
+export function startLive({ store, openMux, call, mapFrame, getJson, timers, now = Date.now, onReceipt = () => {} }) {
   const calls = new Map();        // callId → {name, args}: the arguments the order card joins on
   const rooms = new Map();        // sessionId → the room projection's value
   const pending = new Map();      // eventId → the gate message as delivered and still open: placed afresh at every dispatch
@@ -67,7 +69,10 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
     }
     if (v.kind === 'projection') { acceptProjection(v); return; }
     rememberCall(calls, frame);
-    for (const m of toMessages(v, calls, now(), speakerOf(convOf(convId)))) store.dispatch('hostEvent', { convId, message: m });
+    for (const m of toMessages(v, calls, now(), speakerOf(convOf(convId)))) {
+      store.dispatch('hostEvent', { convId, message: m });
+      if (m.kind === 'receipt') onReceipt();
+    }
   }
   // a window is folded with the same reducer the stream uses, so backfill and stream draw identically
   function windowOf(convId, records) {

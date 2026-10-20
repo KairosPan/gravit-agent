@@ -70,7 +70,7 @@ export function describeQuote(asset, quote, providers, transportStatus) {
 }
 
 /** Full payload validation prevents an error or malformed snapshot from clearing good quotes. */
-function parsePayload(raw) {
+export function parsePayload(raw) {
   if (!raw || raw.ok !== true || !timestamp(raw.generated_at) || !Array.isArray(raw.quotes) || !Array.isArray(raw.providers)) throw new Error("行情响应格式无效");
   const seen = new Set();
   for (const quote of raw.quotes) {

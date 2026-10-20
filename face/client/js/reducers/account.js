@@ -3,8 +3,18 @@ import { closeOverlays } from './messages.js';
 import { nextId } from '../ids.js';
 
 const mem = (s, patch) => ({ ...s, memory: { ...s.memory, ...patch } });
+const acc = (s, patch) => ({ ...s, account: { ...s.account, ...patch } });
 
 export const reducers = {
+  // the host's account (host/account.js): /data/account.json as read, the keys, the registry's tool names, the quote providers
+  accountLoading: s => acc(s, { status: 'loading' }),
+  accountLoaded: (s, { data, at }) => acc(s, { status: 'ready', data, at }),
+  // a failed read keeps the last data: the screen says it is not current rather than going blank
+  accountFailed: (s, { at }) => acc(s, { status: 'error', at }),
+  credentialsLoaded: (s, creds) => acc(s, { creds }),
+  toolsLoaded: (s, names) => acc(s, { tools: names }),
+  probeLoaded: (s, providers) => acc(s, { probe: providers }),
+
   setMode: (s, mode) => ({ ...s, account: { ...s.account, mode } }),
   openSettings: s => ({ ...closeOverlays(s), settingsOpen: true }),
   closeSettings: s => ({ ...s, settingsOpen: false, edit: null, confirm: null }),

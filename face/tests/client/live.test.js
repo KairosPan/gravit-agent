@@ -16,7 +16,7 @@ const tick = () => new Promise(r => setTimeout(r, 0));
 const settle = async () => { for (let i = 0; i < 6; i++) await tick(); };
 
 // a fake mux: every stream is recorded with its handlers, the options are kept for the test to fire
-function rig({ rows = [], channels = { ok: true, root: '/r', channels: [], ungrouped: [], archived: [], presets: {} }, bots = { bots: [] }, pages = {} } = {}) {
+function rig({ rows = [], channels = { ok: true, root: '/r', channels: [], ungrouped: [], archived: [], presets: {} }, bots = { bots: [] }, pages = {}, onReceipt } = {}) {
   const store = createStore({ initial: emptyState(), reducers });
   const streams = [];
   let opts = null;
@@ -35,7 +35,7 @@ function rig({ rows = [], channels = { ok: true, root: '/r', channels: [], ungro
   const getJson = async path => (path === '/data/channels.json' ? channels : path === '/data/bots.json' ? bots : {});
   const scheduled = [];
   const timers = { after(ms, fn) { scheduled.push({ ms, fn }); } };
-  const live = startLive({ store, openMux: o => { opts = o; return mux; }, call, mapFrame, getJson, timers, now: () => NOW });
+  const live = startLive({ store, openMux: o => { opts = o; return mux; }, call, mapFrame, getJson, timers, now: () => NOW, onReceipt });
   const last = name => [...streams].reverse().find(s => s.name === name);
   const follows = () => streams.filter(s => s.name === 'session/follow');
   return { store, live, streams, calls, scheduled, opts: () => opts, last, follows, ready: async () => { opts.onReady({ home: '/h' }); await settle(); } };
@@ -281,4 +281,23 @@ test('opening marks the conversation seen; the list keeps the open one seen when
   r.store.dispatch('nav', { screen: 'messages', id: 's1' });
   r.live.open('s1'); await settle();
   assert.equal(r.store.get().conversations[0].lastSeen, 50);
+});
+
+// spec 2026-10-19 §6: the account is read again right after a fill
+const orderCall = { type: 'tool/call', seq: 40, time: 1756512200000, data: { turn: 4, step: 1, callId: 'c9', name: 'mcp__alpaca-kit__place_order', arguments: JSON.stringify({ symbol: 'BTC/USD', qty: 0.00008, side: 'buy', order_type: 'market' }) } };
+const orderResult = (seq, text, isError) => ({ type: 'tool/result', seq, time: 1756512201000, surfaceOp: 'append', data: { turn: 4, step: 1, message: { id: `m-${seq}`, role: 'tool', source: { kind: 'tool', callId: 'c9' }, toolCallId: 'c9', content: [{ type: 'text', text }], isError } } });
+
+test('a place_order result that is a receipt calls onReceipt once; a refusal or a backfilled receipt does not', async () => {
+  let receipts = 0;
+  const r = rig({ rows: [row('live', { agentAvailable: true })], onReceipt: () => { receipts++; } });
+  await r.ready();
+  r.live.open('live'); await settle();
+  const f = r.last('session/follow');
+  f.cbs.onItem({ type: 'snapshot', header: { createdAt: 7 }, cursor: 2, records: [{ type: 'event', event: orderCall }, { type: 'event', event: orderResult(41, JSON.stringify({ ok: true, id: 'ord-0' }), false) }] });
+  assert.equal(receipts, 0, 'a receipt in the window is history');
+  f.cbs.onItem({ type: 'event', event: { ...orderCall, seq: 42 } });
+  f.cbs.onItem({ type: 'event', event: orderResult(43, JSON.stringify({ ok: true, id: 'ord-1', status: 'accepted' }), false) });
+  assert.equal(receipts, 1);
+  f.cbs.onItem({ type: 'event', event: orderResult(44, 'the user rejected tool "mcp__alpaca-kit__place_order"', true) });
+  assert.equal(receipts, 1, 'a refusal is no fill');
 });
