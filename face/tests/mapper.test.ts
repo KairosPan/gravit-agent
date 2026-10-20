@@ -31,6 +31,14 @@ test("fixture file and view list stay aligned", () => {
   assert.equal(views.length, 26);
 });
 
+test("a session event's view carries the event time beside its seq; a gate view carries none", () => {
+  assert.equal(views[0].kind, "bubble");
+  assert.equal(views[0].seq, 4);
+  assert.equal(views[0].time, 1756512000000);
+  assert.equal(views[6].kind, "approval");
+  assert.equal(views[6].time, undefined);
+});
+
 test("every fixture line is a 0.2.0 frame: no 0.1.1 envelope or untyped history entry survives", () => {
   const known = new Set(["session/event", "assistant-stream", "waterfall", "cancel", "projection", "snapshot", "error"]);
   frames.forEach((frame, i) => {
@@ -444,7 +452,7 @@ test("a 0.2.0 child report is an agent-message relay: child attribution and the 
   const live = mapFrame({ type: "session/event", sessionId: "parent", event });
   assert.deepEqual(live, mapFrame({ type: "event", sessionId: "parent", event }));
   assert.deepEqual(live, {
-    seq: 44, sessionId: "parent", surfaceOp: "append", kind: "subagent-message", line: "report",
+    seq: 44, time: 1, sessionId: "parent", surfaceOp: "append", kind: "subagent-message", line: "report",
     source: "agent-message", form: "relay", childSessionId: "child-7",
     // Blocks are joined verbatim: upstream's header ends in a space (continuation-messages.ts:68).
     text: "Agent child-7 sent a message: \n已核查样本；结论仍待复现。",
@@ -480,7 +488,7 @@ test("a report migrated from 0.1.1 keeps its subagent-report kind and still rend
   const live = mapFrame({ type: "session/event", sessionId: "parent", event });
   assert.deepEqual(live, mapFrame({ type: "event", sessionId: "parent", event }));
   assert.deepEqual(live, {
-    seq: 44, sessionId: "parent", surfaceOp: "append", kind: "subagent-message", line: "report",
+    seq: 44, time: 1, sessionId: "parent", surfaceOp: "append", kind: "subagent-message", line: "report",
     source: "subagent-report", form: "relay", childSessionId: "child-7",
     text: "Background subagent child-7 reported:\n已核查样本；结论仍待复现。",
   });

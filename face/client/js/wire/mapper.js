@@ -66,6 +66,8 @@
  * @typedef {object} FrameView
  * @property {"bubble"|"card"|"approval"|"question"|"gate-resolved"|"pulse"|"projection"|"room-line"|"subagent-message"|"turn"|"ignore"} kind
  * @property {number} [seq] - the session event's seq; the renderer's dedupe key across backfill and stream.
+ * @property {number} [time] - the session event's `time` (unix ms, SessionEvent in dsh-session's types):
+ *   the clock a renderer dates the message by. Gate, pulse, projection and turn views carry none.
  * @property {string} [sessionId] - which session this belongs to (absent when the frame names none).
  *   Gates: the waterfall's `agentId`, which IS the session id (NEW packages/core/agent/src/index.ts:258-270).
  * @property {SurfaceOpView} [surfaceOp] - on every rendered session event: `append`, or a
@@ -314,6 +316,8 @@ function mapSessionEvent(frame) {
   const base = {
     kind: "ignore",
     seq: typeof event.seq === "number" ? event.seq : undefined,
+    // Present only when the event carries one: a view compares by its own keys.
+    ...(typeof event.time === "number" && Number.isFinite(event.time) ? { time: event.time } : {}),
     sessionId: typeof frame.sessionId === "string" ? frame.sessionId : undefined,
     surfaceOp: surfaceOpOf(event),
   };
