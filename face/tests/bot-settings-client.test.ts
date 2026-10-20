@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { botModelChoices, botSettingsPayload, botToolLabel, draftBotSoul, normalizeBotModel } from "../client/botSettings.js";
+import { botModelChoices, botSettingsPayload, botToolLabel, draftBotSoul, normalizeBotModel } from "../client/js/wire/botSettings.js";
 
 test("empty model inherits the default; explicit routes follow the saved bot grammar", () => {
   assert.equal(normalizeBotModel("  "), null);

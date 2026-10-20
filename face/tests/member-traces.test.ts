@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { loadMemberTrace } from "../client/member-traces.js";
+import { loadMemberTrace } from "../client/js/wire/member-traces.js";
 
 /* The dsh 0.2.0-rc.2 wire (NEW packages/api/session-controller/src/types.ts):
  * a history record is `{type:'event', event}` (:425-429), a page is
@@ -125,23 +125,23 @@ test("excludes events explicitly tagged with another turn even inside the reques
 });
 
 test("missing or incomplete exact turns never fall back to the newest member trace", async () => {
-  await assert.rejects(loadMemberTrace(onePage([start(0, 3), assistant(1, 3, "new"), end(2, 3)]), ref), /未找到/);
-  await assert.rejects(loadMemberTrace(onePage([assistant(1, 2, "partial"), end(2, 2)]), ref), /未找到/);
-  await assert.rejects(loadMemberTrace(onePage([start(0, 2), assistant(1, 2, "partial")]), ref), /不完整/);
-  await assert.rejects(loadMemberTrace(onePage([start(0, 2), start(1, 3), end(2, 2)]), ref), /不完整/);
+  await assert.rejects(loadMemberTrace(onePage([start(0, 3), assistant(1, 3, "new"), end(2, 3)]), ref), /No trace was found/);
+  await assert.rejects(loadMemberTrace(onePage([assistant(1, 2, "partial"), end(2, 2)]), ref), /No trace was found/);
+  await assert.rejects(loadMemberTrace(onePage([start(0, 2), assistant(1, 2, "partial")]), ref), /incomplete/);
+  await assert.rejects(loadMemberTrace(onePage([start(0, 2), start(1, 3), end(2, 2)]), ref), /incomplete/);
 });
 
 test("an unknown member session (projections null) is refused without paging", async () => {
   const calls: string[] = [];
-  await assert.rejects(loadMemberTrace(async (endpoint) => { calls.push(endpoint); return null; }, ref), /不存在/);
+  await assert.rejects(loadMemberTrace(async (endpoint) => { calls.push(endpoint); return null; }, ref), /does not exist/);
   assert.deepEqual(calls, ["session/projections"]);
 });
 
 test("rejects absent turn references without calling the host and propagates read failures", async () => {
   let calls = 0;
   const failing = async () => { calls++; throw new Error("session/page: session/not-found - gone"); };
-  await assert.rejects(loadMemberTrace(failing, { ...ref, turn: 0 }), /未记录/);
-  await assert.rejects(loadMemberTrace(failing, { ...ref, sessionId: "" }), /未记录/);
+  await assert.rejects(loadMemberTrace(failing, { ...ref, turn: 0 }), /recorded no member turn/);
+  await assert.rejects(loadMemberTrace(failing, { ...ref, sessionId: "" }), /recorded no member turn/);
   assert.equal(calls, 0);
   await assert.rejects(loadMemberTrace(failing, ref), /session\/not-found/);
   assert.equal(calls, 1);
@@ -149,18 +149,18 @@ test("rejects absent turn references without calling the host and propagates rea
 
 test("malformed cuts, records and stalled pagination reject instead of silently returning partial data or looping", async () => {
   const cutThen = (page: () => unknown) => async (endpoint: string) => endpoint === "session/projections" ? { asOfSeq: 9, values: {} } : page();
-  await assert.rejects(loadMemberTrace(async () => ({ values: {} }), ref), /格式无效/, "a cut without asOfSeq");
-  await assert.rejects(loadMemberTrace(async () => ({ asOfSeq: -2, values: {} }), ref), /格式无效/, "throughSeq must be >= -1");
-  await assert.rejects(loadMemberTrace(cutThen(() => ({})), ref), /格式无效/);
-  await assert.rejects(loadMemberTrace(cutThen(() => ({ events: [], hasMore: false })), ref), /格式无效/, "0.1.1's page shape is not a 0.2 page");
-  await assert.rejects(loadMemberTrace(cutThen(() => ({ records: [{ type: "event", event: { seq: "1" } }], hasMore: true })), ref), /格式无效/);
-  await assert.rejects(loadMemberTrace(cutThen(() => ({ records: [{ event: { seq: 1, type: "turn/start", data: {} } }], hasMore: true })), ref), /格式无效/,
+  await assert.rejects(loadMemberTrace(async () => ({ values: {} }), ref), /malformed/, "a cut without asOfSeq");
+  await assert.rejects(loadMemberTrace(async () => ({ asOfSeq: -2, values: {} }), ref), /malformed/, "throughSeq must be >= -1");
+  await assert.rejects(loadMemberTrace(cutThen(() => ({})), ref), /malformed/);
+  await assert.rejects(loadMemberTrace(cutThen(() => ({ events: [], hasMore: false })), ref), /malformed/, "0.1.1's page shape is not a 0.2 page");
+  await assert.rejects(loadMemberTrace(cutThen(() => ({ records: [{ type: "event", event: { seq: "1" } }], hasMore: true })), ref), /malformed/);
+  await assert.rejects(loadMemberTrace(cutThen(() => ({ records: [{ event: { seq: 1, type: "turn/start", data: {} } }], hasMore: true })), ref), /malformed/,
     "a record must say it is an event");
-  await assert.rejects(loadMemberTrace(cutThen(() => ({ records: [], hasMore: true })), ref), /未能继续加载/);
+  await assert.rejects(loadMemberTrace(cutThen(() => ({ records: [], hasMore: true })), ref), /stopped loading/);
   let pages = 0;
   await assert.rejects(loadMemberTrace(cutThen(() => {
     pages++;
     return { records: [assistant(5, 3, "unchanged page")], hasMore: true };
-  }), ref), /未能继续加载/);
+  }), ref), /stopped loading/);
   assert.equal(pages, 2);
 });

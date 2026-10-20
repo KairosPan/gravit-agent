@@ -1,4 +1,4 @@
-import { mapFrame } from "./js/wire/mapper.js";
+import { mapFrame } from "./mapper.js";
 
 /** Read one room answer's process from its member session, without opening,
  * prompting or ACTIVATING that session.
@@ -37,7 +37,7 @@ function traceOf(entries, sessionId, turn) {
   const start = entries.findIndex(({ event }) => event.type === "turn/start" && event.data?.turn === turn);
   const end = entries.findIndex(({ event }, index) => index > start && event.type === "turn/end" && event.data?.turn === turn);
   if (end < 0 || entries.slice(start + 1, end).some(({ event }) => event.type === "turn/start")) {
-    throw new Error("该回答的回合记录不完整，暂时无法读取思考轨迹。");
+    throw new Error("This answer's turn is incomplete; its trace cannot be read yet.");
   }
 
   /** @type {import("./mapper.js").FrameView[]} */
@@ -78,13 +78,13 @@ function traceOf(entries, sessionId, turn) {
  */
 export async function loadMemberTrace(call, { sessionId, turn }) {
   if (typeof sessionId !== "string" || sessionId.trim() === "" || !Number.isSafeInteger(turn) || turn < 1) {
-    throw new Error("该回答未记录成员回合，无法读取思考轨迹。");
+    throw new Error("This answer recorded no member turn.");
   }
   const cut = await call("session/projections", { request: { sessionId } });
-  if (cut === null) throw new Error("成员会话不存在，无法读取思考轨迹。");
+  if (cut === null) throw new Error("The member session does not exist.");
   // throughSeq must be an integer >= -1 (history.ts:305-318); -1 is an empty log.
   if (!object(cut) || !Number.isSafeInteger(cut.asOfSeq) || cut.asOfSeq < -1) {
-    throw new Error("思考轨迹的历史记录格式无效。");
+    throw new Error("The trace's history is malformed.");
   }
   const address = { kind: "session", sessionId };
   const entries = new Map();
@@ -94,13 +94,13 @@ export async function loadMemberTrace(call, { sessionId, turn }) {
       request: { address, throughSeq: cut.asOfSeq, maxMessages: 100, ...(beforeSeq === undefined ? {} : { beforeSeq }) },
     });
     if (!object(page) || !Array.isArray(page.records) || typeof page.hasMore !== "boolean") {
-      throw new Error("思考轨迹的历史记录格式无效。");
+      throw new Error("The trace's history is malformed.");
     }
     let oldest = Infinity;
     for (const record of page.records) {
       if (!object(record) || record.type !== "event" || !object(record.event)
         || !Number.isSafeInteger(record.event.seq) || record.event.seq < 0) {
-        throw new Error("思考轨迹的历史记录格式无效。");
+        throw new Error("The trace's history is malformed.");
       }
       oldest = Math.min(oldest, record.event.seq);
       if (!entries.has(record.event.seq)) entries.set(record.event.seq, record);
@@ -109,9 +109,9 @@ export async function loadMemberTrace(call, { sessionId, turn }) {
     if (sorted.some(({ event }) => event.type === "turn/start" && event.data?.turn === turn)) {
       return traceOf(sorted, sessionId, turn);
     }
-    if (!page.hasMore) throw new Error("未找到该回答对应回合的思考轨迹。");
+    if (!page.hasMore) throw new Error("No trace was found for this answer's turn.");
     if (!Number.isFinite(oldest) || (beforeSeq !== undefined && oldest >= beforeSeq)) {
-      throw new Error("思考轨迹的历史记录未能继续加载，请重试。");
+      throw new Error("The trace's history stopped loading; try again.");
     }
     beforeSeq = oldest;
   }

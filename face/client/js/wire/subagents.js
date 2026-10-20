@@ -24,9 +24,9 @@ export const isSubagentRow = (summary) => summary?.origin === "subagent";
  * @param {unknown} value
  * @returns {{entries: any[], parentAvailable: boolean}} */
 export function normalizeSubagentCatalog(value) {
-  if (!object(value)) throw new Error("子任务目录不可用：服务返回了无效记录。");
+  if (!object(value)) throw new Error("The subagent catalog is unavailable: the host returned an invalid record.");
   const body = /** @type {any} */ (value);
-  if (!Array.isArray(body.entries) || typeof body.parentAvailable !== "boolean") throw new Error("子任务目录不可用：服务返回了无效记录。");
+  if (!Array.isArray(body.entries) || typeof body.parentAvailable !== "boolean") throw new Error("The subagent catalog is unavailable: the host returned an invalid record.");
   const seen = new Set();
   const entries = [];
   for (const row of Array.isArray(body.entries) ? body.entries : []) {
@@ -35,7 +35,7 @@ export function normalizeSubagentCatalog(value) {
     if (row.kind === "diagnostic") {
       entries.push({ kind: "diagnostic", id: row.id, reason: ["corrupt", "unsupported", "unavailable"].includes(row.reason) ? row.reason : "unavailable" });
     } else if (row.kind === "child" && (row.mode === "one-shot" || (row.mode === "continuable" && word(row.label)))) {
-      entries.push({ kind: "child", id: row.id, mode: row.mode, label: word(row.label) ? row.label : "临时子任务", activity: ["running", "inactive"].includes(row.activity) ? row.activity : "unknown", hasChildren: row.hasChildren === true });
+      entries.push({ kind: "child", id: row.id, mode: row.mode, label: word(row.label) ? row.label : "Subagent", activity: ["running", "inactive"].includes(row.activity) ? row.activity : "unknown", hasChildren: row.hasChildren === true });
     } else {
       entries.push({ kind: "diagnostic", id: row.id, reason: "unsupported" });
     }
@@ -71,7 +71,7 @@ export function normalizeSubagentCatalog(value) {
  *   projection is "unavailable", never an empty successful listing.
  */
 export function composeSubagentCatalog({ catalog, parentSummary, rows }) {
-  if (catalog !== undefined && !Array.isArray(catalog)) throw new Error("子任务目录不可用：服务返回了无效记录。");
+  if (catalog !== undefined && !Array.isArray(catalog)) throw new Error("The subagent catalog is unavailable: the host returned an invalid record.");
   const listed = (Array.isArray(rows) ? rows : []).filter(object);
   const byId = new Map(listed.map((row) => [String(row.sessionId), row]));
   const entries = [];
@@ -106,7 +106,11 @@ export function subagentAddress(parentSessionId, childSessionId, catalog) {
 
 /** Inactive is deliberately not a success state. A cold parent prevents only
  * follow-up delivery; an admitted interrupt need not stop the child instantly.
+ * The state is an enum the screen words (host/children-view.js); a diagnostic
+ * row carries its reason.
  * @param {any} row @param {boolean} parentAvailable @param {boolean} [waiting]
+ * @returns {{canRead: boolean, canPrompt: boolean, canInterrupt: boolean,
+ *   state: "unavailable"|"waiting"|"running"|"inactive"|"unknown", reason?: string}}
  */
 export function subagentControls(row, parentAvailable, waiting = false) {
   const healthy = row?.kind === "child";
@@ -115,8 +119,8 @@ export function subagentControls(row, parentAvailable, waiting = false) {
     canRead: healthy,
     canPrompt: continuable && parentAvailable,
     canInterrupt: continuable && row.activity === "running",
-    state: !healthy ? `记录不可用 · ${row?.reason ?? "unavailable"}` : waiting ? "等待你的回应" : row.activity === "running" ? "运行中" : row.activity === "inactive" ? "未运行" : "运行状态未知",
-    note: !healthy ? "保留记录，无法读取或续派。" : !continuable ? "一次性任务 · 对话只读" : !parentAvailable ? "父会话未加载；先在父会话发送消息，再续派此任务。查看记录不会加载父会话。" : "可续派任务",
+    state: !healthy ? "unavailable" : waiting ? "waiting" : row.activity === "running" ? "running" : row.activity === "inactive" ? "inactive" : "unknown",
+    ...(healthy ? {} : { reason: row?.reason ?? "unavailable" }),
   };
 }
 

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { composeSubagentCatalog, isSubagentRow, normalizeSubagentCatalog, subagentAddress, subagentControls, subagentResult } from "../client/subagents.js";
+import { composeSubagentCatalog, isSubagentRow, normalizeSubagentCatalog, subagentAddress, subagentControls, subagentResult } from "../client/js/wire/subagents.js";
 
 const catalog = { parentAvailable: true, entries: [
   { kind: "child", id: "live", label: "核查", mode: "continuable", activity: "running", hasChildren: true },
@@ -21,11 +21,11 @@ test("catalog keeps diagnostics and makes unknown schemas visible but uncontroll
   assert.deepEqual(normalized.entries[3], { kind: "diagnostic", id: "bad", reason: "unsupported" });
 });
 test("malformed catalog is unavailable, never an empty successful listing", () => {
-  for (const value of [null, {}, { entries: [], parentAvailable: 1 }, { parentAvailable: false }]) assert.throws(() => normalizeSubagentCatalog(value), /目录不可用/);
+  for (const value of [null, {}, { entries: [], parentAvailable: 1 }, { parentAvailable: false }]) assert.throws(() => normalizeSubagentCatalog(value), /subagent catalog is unavailable/);
 });
 test("unknown activity stays unknown, not inactive", () => {
   const row = normalizeSubagentCatalog({ parentAvailable: true, entries: [{ kind: "child", id: "unknown", mode: "one-shot" }] }).entries[0];
-  assert.equal(subagentControls(row, true).state, "运行状态未知");
+  assert.equal(subagentControls(row, true).state, "unknown");
 });
 test("only a healthy catalog child yields a durable direct-parent address", () => {
   assert.deepEqual(subagentAddress("p", "live", catalog), { parentSessionId: "p", childSessionId: "live", mode: "continuable" });
@@ -35,7 +35,7 @@ test("only a healthy catalog child yields a durable direct-parent address", () =
 });
 test("inactive never means completed; one-shot remains read-only", () => {
   const state = subagentControls(catalog.entries[1], true);
-  assert.equal(state.state, "未运行");
+  assert.equal(state.state, "inactive");
   assert.equal(state.canRead, true);
   assert.equal(state.canPrompt, false);
   assert.equal(state.canInterrupt, false);
@@ -45,11 +45,18 @@ test("cold parent disables continuation while allowing reads and live interrupt"
   assert.equal(state.canRead, true);
   assert.equal(state.canPrompt, false);
   assert.equal(state.canInterrupt, true);
-  assert.match(state.note, /父会话未加载/);
-  assert.equal(subagentControls(catalog.entries[0], true, true).state, "等待你的回应");
+  assert.equal("note" in state, false);
+  assert.equal(subagentControls(catalog.entries[0], true, true).state, "waiting");
+});
+test("subagentControls returns a state enum and no note; a one-shot child without a label is a Subagent", () => {
+  const running = subagentControls(catalog.entries[0], true);
+  assert.equal(running.state, "running");
+  assert.equal("note" in running, false);
+  const once = normalizeSubagentCatalog({ parentAvailable: true, entries: [{ kind: "child", id: "x", mode: "one-shot" }] }).entries[0];
+  assert.equal(once.label, "Subagent");
 });
 test("diagnostics never enable controls", () => {
-  assert.deepEqual(subagentControls(catalog.entries[2], true), { canRead: false, canPrompt: false, canInterrupt: false, state: "记录不可用 · corrupt", note: "保留记录，无法读取或续派。" });
+  assert.deepEqual(subagentControls(catalog.entries[2], true), { canRead: false, canPrompt: false, canInterrupt: false, state: "unavailable", reason: "corrupt" });
 });
 test("last recorded output skips tool-only messages and marks interrupted prefixes", () => {
   // 0.2 page records are `{type:'event', event}` (session-controller src/types.ts:425-429).
@@ -94,7 +101,7 @@ test("compose → normalize keeps every 0.1.1 decision: unknown mode is a diagno
   ]);
   assert.deepEqual(subagentAddress("parent", "live", normalized), { parentSessionId: "parent", childSessionId: "live", mode: "continuable" });
   assert.equal(subagentAddress("parent", "legacy", normalized), null, "an unknown-mode child is never controllable");
-  assert.equal(subagentControls(normalized.entries[3], true).state, "运行状态未知");
+  assert.equal(subagentControls(normalized.entries[3], true).state, "unknown");
 });
 
 test("compose: parent availability is the parent row's agentAvailable, and an unlisted parent is not available", () => {
@@ -105,7 +112,7 @@ test("compose: parent availability is the parent row's agentAvailable, and an un
 test("compose: an absent projection is no children; a present non-list is unavailable, never an empty listing", () => {
   assert.deepEqual(composeSubagentCatalog({ catalog: undefined, parentSummary: rows[0], rows }), { entries: [], parentAvailable: true });
   for (const bad of [null, {}, "live", 3]) {
-    assert.throws(() => composeSubagentCatalog({ catalog: bad, parentSummary: rows[0], rows }), /目录不可用/);
+    assert.throws(() => composeSubagentCatalog({ catalog: bad, parentSummary: rows[0], rows }), /subagent catalog is unavailable/);
   }
   const skipped = composeSubagentCatalog({ catalog: [null, { mode: "one-shot" }, { id: "", mode: "one-shot" }, projected[1]], parentSummary: rows[0], rows });
   assert.deepEqual(skipped.entries.map((e) => e.id), ["once"], "malformed rows are skipped as normalize skips them");
