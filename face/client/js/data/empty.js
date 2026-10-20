@@ -6,6 +6,7 @@ export function emptyState() {
     route: { screen: 'messages', id: null },
     lastConv: null,
     railCollapsed: false,
+    collapsed: {},
     draft: null,
     detailsOpen: false,
     settingsOpen: false,

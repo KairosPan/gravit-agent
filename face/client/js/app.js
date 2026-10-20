@@ -71,7 +71,7 @@ export function readPrefs(storage) {
     return {};
   }
 }
-export const prefsOf = s => ({ theme: s.theme, railCollapsed: s.railCollapsed, lastConv: s.lastConv, lastSeen: s.lastSeen });
+export const prefsOf = s => ({ theme: s.theme, railCollapsed: s.railCollapsed, lastConv: s.lastConv, lastSeen: s.lastSeen, collapsed: s.collapsed });
 export function initialState(storage, now = Date.now()) {
   const p = readPrefs(storage);
   const s = emptyState(now);
@@ -81,6 +81,8 @@ export function initialState(storage, now = Date.now()) {
     railCollapsed: p.railCollapsed === true,
     lastConv: typeof p.lastConv === 'string' ? p.lastConv : null,
     lastSeen: p.lastSeen && typeof p.lastSeen === 'object' && !Array.isArray(p.lastSeen) ? p.lastSeen : {},
+    collapsed: p.collapsed && typeof p.collapsed === 'object' && !Array.isArray(p.collapsed)
+      ? Object.fromEntries(Object.entries(p.collapsed).filter(([, v]) => typeof v === 'boolean')) : {},
   };
 }
 // the store never loads a saved state (the host is the state); it writes the prefs on every change
@@ -358,6 +360,7 @@ export function boot(win, host = {}) {
     startDraft: () => { store.dispatch('startDraft', { now: now() }); go({ screen: 'messages', id: 'new' }); },
     cancelDraft: () => { store.dispatch('cancelDraft'); go(store.get().route); },
     toggleRail: () => store.dispatch('toggleRail'),
+    toggleGroup: el => store.dispatch('toggleGroup', el.dataset.key),
     // inline editors (they replaced prompt): a button starts one, ✓ or Enter commits it, × or Escape cancels it
     changeWords: el => store.dispatch('startEdit', { kind: 'rename', convId: el.dataset.conv }),
     commitEdit: () => commitEdit(),

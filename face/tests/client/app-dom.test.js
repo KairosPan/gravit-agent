@@ -699,3 +699,19 @@ test('deleting the only open conversation stops reading it', async () => {
   assert.equal(followed.cancelled, true, 'the follow of the deleted conversation ends');
   store.timers.clear();
 });
+
+test('collapsing a group hides its rows and the prefs remember it', async () => {
+  const f = fakeWindow({ hash: '', storage: memoryStorage() });
+  const h = host({ rows: [row('s1', { updatedAt: 9 }), row('s2', { updatedAt: 5 })] });
+  const store = started(f, h);
+  await h.ready();
+  assert.equal(store.get().route.id, 's1');
+  assert.match(f.html(), /data-id="s2"/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'toggleGroup', key: '__ungrouped' } });
+  assert.doesNotMatch(f.html(), /data-id="s2"/, 'the collapsed group hides its other rows');
+  assert.match(f.html(), /data-id="s1"/, 'and keeps the one on screen');
+  assert.deepEqual(JSON.parse(f.win.localStorage.getItem('gravit-ui.prefs')).collapsed, { __ungrouped: true });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'toggleGroup', key: '__ungrouped' } });
+  assert.match(f.html(), /data-id="s2"/);
+  store.timers.clear();
+});

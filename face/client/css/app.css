@@ -44,6 +44,13 @@ button.link:disabled { color: var(--dim); cursor: default; }
 .rail-group { display: flex; flex-direction: column; gap: 4px; }
 /* the conversation rows scroll on their own; the list's head stays put */
 .rail-rows { flex: 1 1 auto; display: flex; flex-direction: column; gap: 4px; min-height: 0; overflow-y: auto; }
+/* a list group's head: the fold key and the channel's name (a link to its page) */
+.grp-head { display: flex; align-items: center; gap: 4px; min-height: 28px; margin-top: 8px; padding: 0 6px; }
+.grp-head:first-child { margin-top: 0; }
+.grp-key { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: 0; border-radius: var(--radius-pill); background: transparent; color: var(--dim); }
+.grp-key:hover { background: var(--hover); color: var(--text); }
+.grp-name { min-width: 0; font-size: 12px; font-weight: 700; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .icon-key { display: inline-flex; align-items: center; justify-content: center; width: 44px; min-height: 44px; border: 0; background: transparent; border-radius: var(--radius-s); color: var(--dim); }
 .icon-key:hover { background: var(--hover); }
 .row { display: flex; align-items: center; gap: 10px; min-height: 64px; padding: 8px 10px; border-radius: var(--radius-s); color: var(--text); }

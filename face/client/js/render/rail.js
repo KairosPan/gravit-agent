@@ -8,6 +8,7 @@ import { unreadOf, firstOpen } from '../host/sessions.js';
 import { portfolioOf } from '../host/account-view.js';
 import { money } from '../wire/account-model.js';
 import { avatar, groupMark } from './avatars.js';
+import { groupsOf } from '../host/list-view.js';
 
 const NAME = { you: 'You', gravit: 'Gravit', system: '' };
 // a bot's display name comes with the list (/data/bots.json); an unknown sender keeps its id
@@ -82,10 +83,21 @@ export function renderNav(state) {
 </nav>`;
 }
 
-// the second level, open on Messages: the conversations, newest first, with the new-message key on top
+// a group's head: the collapse key, then the channel's name as a link to its page (a bot's or the other groups' as text)
+function groupHead(g) {
+  const label = `${g.collapsed ? 'Expand' : 'Collapse'} ${g.label}`;
+  const name = g.kind === 'channel'
+    ? `<a class="grp-name" href="#/channel/${esc(encodeURIComponent(g.workspaceId))}">${esc(g.label)}</a>`
+    : `<span class="grp-name">${esc(g.label)}</span>`;
+  return `<div class="grp-head"><button type="button" class="grp-key" data-action="toggleGroup"${attrs({ 'data-key': g.key, 'aria-expanded': g.collapsed ? 'false' : 'true', 'aria-label': label })}>` +
+    `${icon(g.collapsed ? 'chevRight' : 'chevDown', 14, 2.2)}</button>${name}</div>`;
+}
+
+// the second level, open on Messages: the new-message key on top, then the groups (host/list-view.js), each its head
+// and its rows, newest first
 export function renderList(state, now) {
   if (state.route.screen !== 'messages') return '';
-  const rows = (state.draft ? draftRow() : '') + state.conversations.filter(c => !c.archived).map(c => row(c, state, now)).join('');
+  const rows = (state.draft ? draftRow() : '') + groupsOf(state).map(g => groupHead(g) + g.shown.map(c => row(c, state, now)).join('')).join('');
   return `<aside class="list" aria-label="Messages"><div class="list-head"><h2 class="list-title">Messages</h2>` +
     `<button type="button" class="new-key" data-action="startDraft" aria-label="New message">${icon('plus', 18, 2.2)}</button></div>` +
     `${rows ? `<div class="rail-rows">${rows}</div>` : ''}</aside>`;

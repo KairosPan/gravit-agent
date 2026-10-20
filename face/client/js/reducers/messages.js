@@ -4,6 +4,7 @@ import { nextId } from '../ids.js';
 import { byId } from '../data/plugins.js';
 import { canonicalId } from '../host/market-view.js';
 import { firstOpen } from '../host/sessions.js';
+import { ARCHIVED_KEY } from '../wire/grouping.js';
 
 // one drawer at a time: an opener first closes whatever else was open, with any editor or confirm in it
 export const closeOverlays = s => ({
@@ -57,6 +58,12 @@ export const reducers = {
     return s;
   },
   toggleRail: s => ({ ...s, railCollapsed: !s.railCollapsed }),
+  // a list group folds or opens; Archived starts folded (host/list-view.js)
+  toggleGroup(s, key) {
+    if (typeof key !== 'string' || key === '') return s;
+    const was = typeof s.collapsed?.[key] === 'boolean' ? s.collapsed[key] : key === ARCHIVED_KEY;
+    return { ...s, collapsed: { ...(s.collapsed ?? {}), [key]: !was } };
+  },
   setTheme: (s, theme) => ({ ...s, theme }),
 
   // the new-message screen: a title and where the session goes (a channel), then the first words send it

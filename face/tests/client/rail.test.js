@@ -135,3 +135,21 @@ test('the Messages key never points at an archived conversation', () => {
   assert.match(h, /href="#\/messages\/a"/);
   assert.doesNotMatch(h, /href="#\/messages\/z"/);
 });
+
+test('a header per group with its collapse key and its channel link', () => {
+  const s = listed([conv('a', { channel: { workspaceId: 'w0', name: 'workbench' } }), conv('b', { archived: 'face' })], 'a');
+  const h = renderList(s, NOW);
+  assert.match(h, /<div class="grp-head"><button type="button" class="grp-key" data-action="toggleGroup" data-key="w0" aria-expanded="true" aria-label="Collapse workbench">/);
+  assert.match(h, /<a class="grp-name" href="#\/channel\/w0">workbench<\/a>/);
+  assert.match(h, /data-key="__archived" aria-expanded="false" aria-label="Expand Archived"/);
+  assert.doesNotMatch(h, /data-id="b"/, 'the archived row is folded away');
+  assert.match(h, /data-id="a"/);
+});
+
+test('group and channel names are escaped', () => {
+  const s = R.nav(R.hostList(emptyState(), { conversations: [conv('a')], channels: [{ workspaceId: 'w1', name: '<b>x</b>', title: '<b>x</b>', isRoot: true }], bots: [{ id: 'evil', name: '<i>bot</i>' }] }), { screen: 'messages', id: 'a' });
+  const t = R.hostList(s, { conversations: [conv('a'), conv('h', { kind: 'bot', preset: 'evil', members: ['evil'] })] });
+  const h = renderList(t, NOW);
+  assert.doesNotMatch(h, /<b>x<\/b>|<i>bot<\/i>/);
+  assert.match(h, /&lt;b&gt;x&lt;\/b&gt;/); assert.match(h, /&lt;i&gt;bot&lt;\/i&gt;/);
+});
