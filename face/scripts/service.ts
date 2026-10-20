@@ -34,6 +34,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { parseEnv } from "node:util";
 import type { DeskRun, DeskStatus } from "../src/desk.ts";
 
 /** The LaunchAgent's label: the plist is `com.gravit.face.plist`, the job `gui/<uid>/com.gravit.face`. */
@@ -157,15 +158,18 @@ ${Object.entries(env).map(([k, v]) => `    <key>${xml(k)}</key><string>${xml(v)}
   return { plist, path: join(opts.launchAgentsDir, `${LABEL}.plist`), log, errLog, args, env };
 }
 
-/** One `NAME=VALUE` line, an `export ` before the name allowed - what a file that is `source`d
- * and a dotenv reader both take. */
-const ENV_LINE = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/;
+/** One `NAME=VALUE` line, indented by spaces or tabs or not, an `export ` before the name allowed -
+ * what a file that is `source`d and dsh's reader both take. Only spaces and tabs: node's
+ * `util.parseEnv` keeps any other leading character (a form feed, a no-break space) as part of the
+ * name. */
+const ENV_LINE = /^[ \t]*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/;
 
 /**
  * The `NAME=VALUE` lines of an env file, in order, as the home's .env takes them: `line` is the
- * source line without its `export ` prefix, its value untouched - no unquoting, no trimming, an
- * inline `# comment` left for the reader to strip. Blanks, `#` comments and every other line are
- * dropped. A CRLF file reads as an LF one: the `\r` ends the line, it is not part of the value.
+ * source line without its indentation and its `export ` prefix, its value untouched - no
+ * unquoting, no trimming, an inline `# comment` left for the reader to strip. Blanks, `#` comments
+ * and every other line are dropped. A CRLF file reads as an LF one: the `\r` ends the line, it is
+ * not part of the value.
  * @param text - the file's contents.
  */
 export function envLinesOf(text: string): { name: string; line: string }[] {
@@ -180,6 +184,20 @@ export function envLinesOf(text: string): { name: string; line: string }[] {
 }
 
 /**
+ * The names an env file gives dsh: those node's `util.parseEnv` - the reader dsh's boot uses on the
+ * home's .env - reads with a non-empty value, so `KEY=` and `KEY=""` do not count and an indented
+ * `  KEY=v` does. `parseEnv` returns its names sorted; these come in the order the file first gives
+ * them ({@link envLinesOf}), and a name only `parseEnv` finds (`KEY = v`) comes after, sorted.
+ * @param text - the file's contents.
+ */
+function namesOf(text: string): string[] {
+  const parsed = parseEnv(text);
+  const read = Object.keys(parsed).filter((name) => typeof parsed[name] === "string" && parsed[name] !== "");
+  const inFileOrder = envLinesOf(text).map((l) => l.name).filter((name) => read.includes(name));
+  return [...new Set([...inFileOrder, ...read])];
+}
+
+/**
  * Make sure the harness home has its .env - the service's only source of keys - without ever
  * rewriting one.
  *
@@ -190,14 +208,15 @@ export function envLinesOf(text: string): { name: string; line: string }[] {
  * written as the new file, mode 0600, `home` created first (0700), and every other name is
  * `skipped`. When no line is allowed, nothing is written. The file is opened exclusively (`wx`),
  * so one that appears between the check and the write, or a dangling link in its place, is
- * refused rather than overwritten.
+ * refused rather than overwritten. `names` and `missing` are what dsh will read from the file
+ * ({@link namesOf}), not what the lines look like: a key with an empty value is missing.
  * @param home - the harness home (DSH_HOME).
  * @param sources - the key files to copy from, in order (the repo root's .env.deepseek,
  *   .env.alpaca, .env.ifind).
- * @returns `path`, the home's .env; `created`, whether this call wrote it; `names`, the names the
- *   file holds - none when nothing was written; `missing`, the {@link EXPECTED_KEYS} it lacks;
- *   `missingSources`, the sources that do not exist; `skipped`, the names the sources hold that
- *   were not copied, once each, in the order first seen.
+ * @returns `path`, the home's .env; `created`, whether this call wrote it; `names`, the names dsh
+ *   reads from the file with a value - none when nothing was written; `missing`, the
+ *   {@link EXPECTED_KEYS} not among them; `missingSources`, the sources that do not exist;
+ *   `skipped`, the names the sources hold that were not copied, once each, in the order first seen.
  * @throws when a file that exists cannot be read, or the new file cannot be written.
  */
 export function ensureHomeEnv(home: string, sources: string[]): {
@@ -214,16 +233,17 @@ export function ensureHomeEnv(home: string, sources: string[]): {
   for (const source of sources) (existsSync(source) ? present : missingSources).push(source);
   const missingOf = (names: string[]): string[] => EXPECTED_KEYS.filter((key) => !names.includes(key));
   if (existsSync(path)) {
-    const names = envLinesOf(readFileSync(path, "utf8")).map((l) => l.name);
+    const names = namesOf(readFileSync(path, "utf8"));
     return { path, created: false, names, missing: missingOf(names), missingSources, skipped: [] };
   }
   const found = present.flatMap((source) => envLinesOf(readFileSync(source, "utf8")));
   const lines = found.filter((l) => isCopiedKey(l.name));
   const skipped = [...new Set(found.filter((l) => !isCopiedKey(l.name)).map((l) => l.name))];
-  const names = lines.map((l) => l.name);
-  if (lines.length === 0) return { path, created: false, names, missing: missingOf(names), missingSources, skipped };
+  if (lines.length === 0) return { path, created: false, names: [], missing: missingOf([]), missingSources, skipped };
+  const text = `${lines.map((l) => l.line).join("\n")}\n`;
   mkdirSync(home, { recursive: true, mode: 0o700 });
-  writeFileSync(path, `${lines.map((l) => l.line).join("\n")}\n`, { mode: 0o600, flag: "wx" });
+  writeFileSync(path, text, { mode: 0o600, flag: "wx" });
+  const names = namesOf(text);
   return { path, created: true, names, missing: missingOf(names), missingSources, skipped };
 }
 
@@ -231,7 +251,9 @@ export function ensureHomeEnv(home: string, sources: string[]): {
  * The job's state and pid out of `launchctl print gui/<uid>/<label>`: the first `state = ` line,
  * whole - a stopped job's reads `not running` - and the first `pid = ` line, which only a running
  * job has. Each is absent when its line is.
- * @param text - launchctl's output; empty when it failed (the job is not loaded).
+ * @param text - launchctl's output. A print that failed (launchd has no such job) leaves it empty,
+ *   and `{}` says nothing about the job: the caller, which saw the failure, passes `not loaded` to
+ *   {@link formatStatus} itself.
  */
 export function parseLaunchctlPrint(text: string): { state?: string; pid?: number } {
   const state = /state = (.+)/.exec(text)?.[1]?.trim();
@@ -266,11 +288,13 @@ function lastRunLine(runs: DeskRun[]): string | undefined {
 }
 
 /**
- * What `status` prints. Not installed is one line. Otherwise: launchd's state and pid (`loaded`
- * when launchctl could not say); then, when the face answered, its address, uptime, boot time and
- * whether its desk is on - followed by the ledger's read error when there is one, the sleep gaps
- * when there were any, and how the run before it ended - or else `not answering on <port>`; and
- * last the sign-in URL from the log.
+ * What `status` prints. Not installed is one line. Otherwise: launchd's state and pid, or
+ * `state unknown` when no state is given - never `loaded`: the caller passes `not loaded` for a
+ * plist launchd has no job for, so a face answering on the port is not credited to a job launchd
+ * lacks; then, when the face answered, its address, uptime, boot time and whether its desk is on -
+ * followed by the ledger's read error when there is one, the sleep gaps when there were any, and
+ * how the run before it ended - or else `not answering on <port>`; and last the sign-in URL from
+ * the log.
  * @param args - `label`, the job; `info`, {@link parseLaunchctlPrint}'s; `installed`, whether the
  *   plist exists; `status`, what `/data/desk/status` answered, `undefined` when it did not;
  *   `url`, {@link lastTokenUrl}'s; `port`, the port asked.
@@ -285,7 +309,7 @@ export function formatStatus(args: {
 }): string {
   if (!args.installed) return `${args.label}: not installed (npm run service -- install)`;
   const { info, status } = args;
-  const lines = [`${args.label}: ${info.state ?? "loaded"}${info.pid === undefined ? "" : ` (pid ${info.pid})`}`];
+  const lines = [`${args.label}: ${info.state ?? "state unknown"}${info.pid === undefined ? "" : ` (pid ${info.pid})`}`];
   if (status === undefined) lines.push(`not answering on ${args.port}`);
   else {
     const hours = Math.floor(status.uptimeMs / 3_600_000);

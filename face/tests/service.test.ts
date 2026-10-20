@@ -1,10 +1,10 @@
 // face/tests/service.test.ts
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { EXPECTED_KEYS, LABEL, ensureHomeEnv, envLinesOf, filterPath, formatStatus, lastTokenUrl, parseLaunchctlPrint, servicePlan } from "../scripts/service.ts";
+import { COPIED_KEYS, EXPECTED_KEYS, LABEL, ensureHomeEnv, envLinesOf, filterPath, formatStatus, lastTokenUrl, parseLaunchctlPrint, servicePlan } from "../scripts/service.ts";
 import type { DeskStatus } from "../src/desk.ts";
 
 const home = (): Promise<string> => mkdtemp(join(tmpdir(), "face-service-"));
@@ -52,6 +52,7 @@ test("ensureHomeEnv writes .env mode 0600 from the sources once, then leaves it 
   const first = ensureHomeEnv(join(h, ".dsh"), [join(src, ".env.deepseek"), join(src, ".env.alpaca"), join(src, ".env.ifind")]);
   assert.deepEqual(first, { path: join(h, ".dsh", ".env"), created: true, names: [...EXPECTED_KEYS], missing: [], missingSources: [join(src, ".env.ifind")], skipped: [] });
   assert.equal(((await stat(first.path)).mode & 0o777), 0o600);
+  assert.equal(((await stat(join(h, ".dsh"))).mode & 0o777), 0o700, "the home it creates is the operator's alone");
   const text = await readFile(first.path, "utf8");
   assert.equal(text, "DEEPSEEK_API_KEY=d\nAPCA_API_KEY_ID=k\nAPCA_API_SECRET_KEY=s\n");
   const again = ensureHomeEnv(join(h, ".dsh"), [join(src, ".env.deepseek")]);
@@ -79,6 +80,7 @@ test("ensureHomeEnv copies only the allow-list, in source order, and names every
   assert.deepEqual(r.skipped, ["PATH", "NODE_OPTIONS", "ALPACA_KIT_ENABLE_ORDERS"]);
   assert.deepEqual(r.names, ["ALPHA_DATA_FEED", "DEEPSEEK_API_KEY"]); assert.deepEqual(r.missing, ["APCA_API_KEY_ID", "APCA_API_SECRET_KEY"]);
   assert.deepEqual(ensureHomeEnv(h, [join(src, ".env.alpaca")]).skipped, [], "an existing .env: the sources are not read");
+  assert.deepEqual(COPIED_KEYS, ["DEEPSEEK_API_KEY", "APCA_API_KEY_ID", "APCA_API_SECRET_KEY", "APCA_API_BASE_URL", "IFIND_ACCESS_TOKEN", "IFIND_REFRESH_TOKEN"]);
 });
 
 test("ensureHomeEnv writes nothing when no name is on the allow-list, and names them all once", async () => {
@@ -89,6 +91,27 @@ test("ensureHomeEnv writes nothing when no name is on the allow-list, and names 
   assert.deepEqual(r, { path: join(h, ".dsh", ".env"), created: false, names: [], missing: [...EXPECTED_KEYS], missingSources: [],
     skipped: ["PATH", "DSH_HOME", "ALPACA_KIT_ENABLE_ORDERS"] });
   await assert.rejects(stat(join(h, ".dsh")), "nothing written, not even the home");
+});
+
+test("ensureHomeEnv counts a name as dsh reads it: an empty value is missing, an indented line counts and is copied flush", async () => {
+  const h = await home();
+  await writeFile(join(h, ".env"), 'DEEPSEEK_API_KEY=\n  APCA_API_KEY_ID=k\nAPCA_API_SECRET_KEY=""\nALPHA_DATA_FEED = iex\n');
+  const r = ensureHomeEnv(h, []);
+  assert.deepEqual(r.names, ["APCA_API_KEY_ID", "ALPHA_DATA_FEED"], "file order first; a name only dsh's parser finds comes after");
+  assert.deepEqual(r.missing, ["DEEPSEEK_API_KEY", "APCA_API_SECRET_KEY"]);
+  const fresh = await home(); const src = await home();
+  await writeFile(join(src, ".env.alpaca"), "  export APCA_API_KEY_ID=k\n\tAPCA_API_SECRET_KEY=s\n");
+  const w = ensureHomeEnv(join(fresh, ".dsh"), [join(src, ".env.alpaca")]);
+  assert.equal(await readFile(w.path, "utf8"), "APCA_API_KEY_ID=k\nAPCA_API_SECRET_KEY=s\n");
+  assert.deepEqual(w.names, ["APCA_API_KEY_ID", "APCA_API_SECRET_KEY"]); assert.deepEqual(w.missing, ["DEEPSEEK_API_KEY"]);
+});
+
+test("ensureHomeEnv never writes through a dangling link at .env", async () => {
+  const h = await home(); const src = await home();
+  await writeFile(join(src, ".env.deepseek"), "DEEPSEEK_API_KEY=d\n");
+  await symlink(join(h, "elsewhere"), join(h, ".env"));
+  assert.throws(() => ensureHomeEnv(h, [join(src, ".env.deepseek")]), { code: "EEXIST" });
+  await assert.rejects(stat(join(h, "elsewhere")), "the link's target was not created");
 });
 
 test("parseLaunchctlPrint and lastTokenUrl", () => {
@@ -122,6 +145,8 @@ test("formatStatus names a lost last run", () => {
     "sign in: no URL in the log yet (npm run service -- logs)",
   ].join("\n"));
   assert.equal(formatStatus({ label: LABEL, info: {}, installed: true, status: undefined, url: undefined, port: 3090 }),
-    "com.gravit.face: loaded\nnot answering on 3090\nsign in: no URL in the log yet (npm run service -- logs)");
+    "com.gravit.face: state unknown\nnot answering on 3090\nsign in: no URL in the log yet (npm run service -- logs)");
+  assert.match(formatStatus({ label: LABEL, info: { state: "not loaded" }, installed: true, status, url: undefined, port: 3090 }),
+    /^com\.gravit\.face: not loaded\nanswering at /, "a face on the port is not credited to a job launchd lacks");
   assert.match(formatStatus({ label: LABEL, info: {}, installed: false, status: undefined, url: undefined, port: 3090 }), /not installed \(npm run service -- install\)/);
 });
