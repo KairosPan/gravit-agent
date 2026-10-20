@@ -50,7 +50,7 @@ test("ensureHomeEnv writes .env mode 0600 from the sources once, then leaves it 
   await writeFile(join(src, ".env.deepseek"), "export DEEPSEEK_API_KEY=d\n");
   await writeFile(join(src, ".env.alpaca"), "APCA_API_KEY_ID=k\nAPCA_API_SECRET_KEY=s\n");
   const first = ensureHomeEnv(join(h, ".dsh"), [join(src, ".env.deepseek"), join(src, ".env.alpaca"), join(src, ".env.ifind")]);
-  assert.deepEqual(first, { path: join(h, ".dsh", ".env"), created: true, names: [...EXPECTED_KEYS], missing: [], missingSources: [join(src, ".env.ifind")] });
+  assert.deepEqual(first, { path: join(h, ".dsh", ".env"), created: true, names: [...EXPECTED_KEYS], missing: [], missingSources: [join(src, ".env.ifind")], skipped: [] });
   assert.equal(((await stat(first.path)).mode & 0o777), 0o600);
   const text = await readFile(first.path, "utf8");
   assert.equal(text, "DEEPSEEK_API_KEY=d\nAPCA_API_KEY_ID=k\nAPCA_API_SECRET_KEY=s\n");
@@ -68,6 +68,27 @@ test("ensureHomeEnv reports the expected names an existing file lacks, and write
   const none = ensureHomeEnv(empty, ["/nowhere/.env.deepseek"]);
   assert.equal(none.created, false); assert.deepEqual(none.missing, [...EXPECTED_KEYS]);
   await assert.rejects(stat(join(empty, ".env")));
+});
+
+test("ensureHomeEnv copies only the allow-list, in source order, and names every name it skipped", async () => {
+  const h = await home(); const src = await home();
+  await writeFile(join(src, ".env.alpaca"), "PATH=/x\nNODE_OPTIONS=--x\nALPACA_KIT_ENABLE_ORDERS=1\nALPHA_DATA_FEED=iex\nDEEPSEEK_API_KEY=d\n");
+  const r = ensureHomeEnv(h, [join(src, ".env.alpaca")]);
+  assert.equal(r.created, true);
+  assert.equal(await readFile(r.path, "utf8"), "ALPHA_DATA_FEED=iex\nDEEPSEEK_API_KEY=d\n");
+  assert.deepEqual(r.skipped, ["PATH", "NODE_OPTIONS", "ALPACA_KIT_ENABLE_ORDERS"]);
+  assert.deepEqual(r.names, ["ALPHA_DATA_FEED", "DEEPSEEK_API_KEY"]); assert.deepEqual(r.missing, ["APCA_API_KEY_ID", "APCA_API_SECRET_KEY"]);
+  assert.deepEqual(ensureHomeEnv(h, [join(src, ".env.alpaca")]).skipped, [], "an existing .env: the sources are not read");
+});
+
+test("ensureHomeEnv writes nothing when no name is on the allow-list, and names them all once", async () => {
+  const h = await home(); const src = await home();
+  await writeFile(join(src, ".env.a"), "PATH=/x\nDSH_HOME=/elsewhere\n");
+  await writeFile(join(src, ".env.b"), "export PATH=/y\nALPACA_KIT_ENABLE_ORDERS=1\n");
+  const r = ensureHomeEnv(join(h, ".dsh"), [join(src, ".env.a"), join(src, ".env.b")]);
+  assert.deepEqual(r, { path: join(h, ".dsh", ".env"), created: false, names: [], missing: [...EXPECTED_KEYS], missingSources: [],
+    skipped: ["PATH", "DSH_HOME", "ALPACA_KIT_ENABLE_ORDERS"] });
+  await assert.rejects(stat(join(h, ".dsh")), "nothing written, not even the home");
 });
 
 test("parseLaunchctlPrint and lastTokenUrl", () => {

@@ -22,7 +22,10 @@
  * a key: whatever a LaunchAgent's environment holds sits in its plist and shows in `launchctl
  * print`. The keys live in $DSH_HOME/.env (mode 0600), which dsh reads at boot; `install` writes
  * that file from .env.deepseek, .env.alpaca and .env.ifind at the repo root when the home has none,
- * and never rewrites it.
+ * and never rewrites it. It copies an allow-list of names only ({@link COPIED_KEYS}, and any
+ * `ALPHA_*`) and names the rest: dsh refuses a bootstrap-only name (PATH, NODE_OPTIONS, any DSH_*)
+ * in the home's .env at boot, which would fail every start, and Gate 1's ALPACA_KIT_ENABLE_ORDERS
+ * must never reach the real harness home.
  *
  * The exports here are the pure half: the plan, the home's .env, the parsers and the status text.
  * They touch nothing but the paths their arguments name, and importing this file runs nothing and
@@ -40,6 +43,23 @@ export const LABEL = "com.gravit.face";
  * the market data and the paper account. `install` names those the home's file lacks: a face
  * booted without one serves until the first prompt or quote that needs it. */
 export const EXPECTED_KEYS = ["DEEPSEEK_API_KEY", "APCA_API_KEY_ID", "APCA_API_SECRET_KEY"] as const;
+
+/** The names {@link ensureHomeEnv} copies into the home's .env: the expected keys, Alpaca's
+ * endpoint and iFinD's tokens - and, by {@link COPIED_PREFIXES}, the workbench's own `ALPHA_*`
+ * settings. It is an allow-list because a copied line can break or arm the service: dsh refuses a
+ * bootstrap-only name (PATH, NODE_OPTIONS, any DSH_* ...) in the home's .env and the boot fails,
+ * and Gate 1's ALPACA_KIT_ENABLE_ORDERS must never reach the real harness home. */
+export const COPIED_KEYS = [...EXPECTED_KEYS, "APCA_API_BASE_URL", "IFIND_ACCESS_TOKEN", "IFIND_REFRESH_TOKEN"] as const;
+
+/** The name prefixes {@link ensureHomeEnv} copies besides {@link COPIED_KEYS}. */
+export const COPIED_PREFIXES = ["ALPHA_"] as const;
+
+/** Whether {@link ensureHomeEnv} copies `name` into the home's .env: one of {@link COPIED_KEYS},
+ * or a name that starts with one of {@link COPIED_PREFIXES}. Case-sensitive, as dsh reads names
+ * on this system. */
+export function isCopiedKey(name: string): boolean {
+  return (COPIED_KEYS as readonly string[]).includes(name) || COPIED_PREFIXES.some((prefix) => name.startsWith(prefix));
+}
 
 /** The LaunchAgent as data: what {@link servicePlan} returns and `install` writes. */
 export interface ServicePlan {
@@ -163,17 +183,21 @@ export function envLinesOf(text: string): { name: string; line: string }[] {
  * Make sure the harness home has its .env - the service's only source of keys - without ever
  * rewriting one.
  *
- * An existing `<home>/.env` is read, never written: `names` are its own. Otherwise the
- * {@link envLinesOf} lines of every source that exists are concatenated in order and written as
- * the new file, mode 0600, `home` created first (0700) - unless no source yields a line, in which
- * case nothing is written. The file is opened exclusively (`wx`), so one that appears between the
- * check and the write, or a dangling link in its place, is refused rather than overwritten.
+ * An existing `<home>/.env` is read, never written, and the sources are not read at all: `names`
+ * are its own and `skipped` is empty. Otherwise the {@link envLinesOf} lines of every source that
+ * exists are taken in order; those whose name {@link isCopiedKey} allows - an allow-list, because
+ * dsh refuses bootstrap-only names in the home's .env and Gate 1's flag must never reach it - are
+ * written as the new file, mode 0600, `home` created first (0700), and every other name is
+ * `skipped`. When no line is allowed, nothing is written. The file is opened exclusively (`wx`),
+ * so one that appears between the check and the write, or a dangling link in its place, is
+ * refused rather than overwritten.
  * @param home - the harness home (DSH_HOME).
  * @param sources - the key files to copy from, in order (the repo root's .env.deepseek,
  *   .env.alpaca, .env.ifind).
- * @returns `path`, the home's .env; `created`, whether this call wrote it; `names`, the names it
- *   holds; `missing`, the {@link EXPECTED_KEYS} it lacks; `missingSources`, the sources that do
- *   not exist.
+ * @returns `path`, the home's .env; `created`, whether this call wrote it; `names`, the names the
+ *   file holds - none when nothing was written; `missing`, the {@link EXPECTED_KEYS} it lacks;
+ *   `missingSources`, the sources that do not exist; `skipped`, the names the sources hold that
+ *   were not copied, once each, in the order first seen.
  * @throws when a file that exists cannot be read, or the new file cannot be written.
  */
 export function ensureHomeEnv(home: string, sources: string[]): {
@@ -182,6 +206,7 @@ export function ensureHomeEnv(home: string, sources: string[]): {
   names: string[];
   missing: string[];
   missingSources: string[];
+  skipped: string[];
 } {
   const path = join(home, ".env");
   const present: string[] = [];
@@ -190,14 +215,16 @@ export function ensureHomeEnv(home: string, sources: string[]): {
   const missingOf = (names: string[]): string[] => EXPECTED_KEYS.filter((key) => !names.includes(key));
   if (existsSync(path)) {
     const names = envLinesOf(readFileSync(path, "utf8")).map((l) => l.name);
-    return { path, created: false, names, missing: missingOf(names), missingSources };
+    return { path, created: false, names, missing: missingOf(names), missingSources, skipped: [] };
   }
-  const lines = present.flatMap((source) => envLinesOf(readFileSync(source, "utf8")));
+  const found = present.flatMap((source) => envLinesOf(readFileSync(source, "utf8")));
+  const lines = found.filter((l) => isCopiedKey(l.name));
+  const skipped = [...new Set(found.filter((l) => !isCopiedKey(l.name)).map((l) => l.name))];
   const names = lines.map((l) => l.name);
-  if (lines.length === 0) return { path, created: false, names, missing: missingOf(names), missingSources };
+  if (lines.length === 0) return { path, created: false, names, missing: missingOf(names), missingSources, skipped };
   mkdirSync(home, { recursive: true, mode: 0o700 });
   writeFileSync(path, `${lines.map((l) => l.line).join("\n")}\n`, { mode: 0o600, flag: "wx" });
-  return { path, created: true, names, missing: missingOf(names), missingSources };
+  return { path, created: true, names, missing: missingOf(names), missingSources, skipped };
 }
 
 /**
