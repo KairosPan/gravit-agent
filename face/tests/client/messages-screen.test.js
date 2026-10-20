@@ -91,3 +91,36 @@ test('the empty state offers three plain prompts', () => {
   assert.equal(count(h, /data-action="suggest"/g), 3);
   assert.match(h, /Nothing handed to Gravit yet/);
 });
+
+test('Details offers Fork, Archive and Delete on an idle conversation', () => {
+  const s = listed([conv('a', { archived: false })]);
+  const h = renderDetails(currentConversation(s), s);
+  assert.match(h, /data-action="fork"[^>]*data-conv="a"/);
+  assert.match(h, /data-action="archive"[^>]*data-conv="a"/);
+  assert.match(h, /data-action="deleteConv"[^>]*data-conv="a"/);
+  assert.doesNotMatch(h, /data-action="unarchive"/);
+  const asking = R.askConfirm(s, { action: 'deleteConv', id: 'a' });
+  assert.match(renderDetails(currentConversation(asking), asking), /data-action="confirmYes"[^>]*>Yes, delete</);
+});
+
+test('no Archive or Delete while running or while a card waits', () => {
+  const card = { id: 'ev-1', seq: 1.5, at: NOW, from: 'gravit', kind: 'card', text: 'Your call', data: { eventId: 'ev-1', sessionId: 'a' } };
+  for (const over of [{ running: true }, { messages: [card] }]) {
+    const s = listed([conv('a', { archived: false, ...over })]);
+    const h = renderDetails(currentConversation(s), s);
+    assert.match(h, /data-action="fork"/);
+    assert.doesNotMatch(h, /data-action="archive"/);
+    assert.doesNotMatch(h, /data-action="deleteConv"/);
+  }
+});
+
+test('a face archive offers Un-archive; a host archive says so and offers nothing', () => {
+  const face = listed([conv('a', { archived: 'face' })]);
+  const f = renderDetails(currentConversation(face), face);
+  assert.match(f, /data-action="unarchive"[^>]*data-conv="a"/);
+  assert.doesNotMatch(f, /data-action="archive"/);
+  const host = listed([conv('a', { archived: 'host' })]);
+  const h = renderDetails(currentConversation(host), host);
+  assert.match(h, />Archived<[\s\S]*?>By the host</);
+  assert.doesNotMatch(h, /data-action="unarchive"|data-action="archive"/);
+});

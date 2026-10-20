@@ -288,6 +288,10 @@ export function boot(win, host = {}) {
     if (r.screen === 'messages' && r.id && r.id !== 'new' && r.id !== openedId) {
       openedId = r.id;
       live.open(r.id);
+    } else if (r.screen === 'messages' && !r.id && openedId && !store.get().conversations.some(c => c.id === openedId)) {
+      // the last open conversation went (deleted) and nothing took its place: stop reading it
+      openedId = null;
+      live.leave();
     }
   }
 
@@ -299,12 +303,35 @@ export function boot(win, host = {}) {
     if (e?.kind === 'rename' && store.get().edit === null) void actions.rename(e.convId, values.title);
   }
 
+  // the conversation on screen went away (archived or deleted): the first open one takes its place
+  function leaveIfOpen(id) {
+    const s = store.get();
+    if (s.route.screen === 'messages' && s.route.id === id) go({ screen: 'messages', id: firstOpen(s.conversations)?.id ?? null });
+  }
+  async function archiveNow(id, archived) {
+    if (!(await actions.archive(id, archived))) return;
+    await live.refresh();
+    if (archived) leaveIfOpen(id);
+  }
+  async function deleteNow(id) {
+    if (!(await actions.remove(id))) return;
+    await live.refresh();
+    leaveIfOpen(id);
+  }
+  async function forkNow(id) {
+    const child = await actions.fork(id);
+    if (!child) return;
+    await live.refresh();
+    go({ screen: 'messages', id: child });
+  }
+
   // the second press of a two-step confirm
   function confirmYes() {
     const c = store.get().confirm;
     if (!c) return;
     store.dispatch('cancelConfirm');
     if (c.action === 'stopGravit') void actions.stop(c.id);
+    if (c.action === 'deleteConv') void deleteNow(c.id);
   }
 
   async function sendNow() {
@@ -337,6 +364,11 @@ export function boot(win, host = {}) {
     cancelEdit: () => store.dispatch('cancelEdit'),
     // two-step confirms (they replaced confirm): the first press asks in place, the second acts
     stopGravit: el => store.dispatch('askConfirm', { action: 'stopGravit', id: el.dataset.conv }),
+    // the row actions: Fork opens the new conversation; Archive and Delete leave the screen when it was this one
+    fork: el => { void forkNow(el.dataset.conv); },
+    archive: el => { void archiveNow(el.dataset.conv, true); },
+    unarchive: el => { void archiveNow(el.dataset.conv, false); },
+    deleteConv: el => store.dispatch('askConfirm', { action: 'deleteConv', id: el.dataset.conv }),
     confirmYes: () => confirmYes(),
     cancelConfirm: () => store.dispatch('cancelConfirm'),
     suggest: el => { composerText = el.dataset.text; render(); doc.getElementById('say')?.focus(); },
@@ -472,6 +504,8 @@ export function boot(win, host = {}) {
     if (type !== 'hostList') return;
     // the list answered a deep link, or there was no conversation on screen: open one
     if (wanted && s.conversations.some(c => c.id === wanted)) { const id = wanted; wanted = null; go({ screen: 'messages', id }); }
+    // the conversation on screen left the list (deleted here or in another tab)
+    else if (s.route.screen === 'messages' && s.route.id && s.route.id !== 'new' && !s.conversations.some(c => c.id === s.route.id)) go({ screen: 'messages', id: firstOpen(s.conversations)?.id ?? null });
     else if (s.route.screen === 'messages' && s.route.id === null && firstOpen(s.conversations)) go({ screen: 'messages', id: firstOpen(s.conversations).id });
   });
   applyTheme(store.get().theme);

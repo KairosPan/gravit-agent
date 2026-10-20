@@ -3,6 +3,7 @@
 // and the browser's zone; a slash line to commands/execute first; an @ inside a channel to /data/rooms/say first.
 import { randomUuid } from '../wire/api.js';
 import { isMentionText } from '../wire/room.js';
+import { needsAnswer } from '../messages.js';
 
 export const NOT_SIGNED_IN = 'Not signed in — open the URL gravit-face printed';
 
@@ -103,5 +104,48 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
     }
   }
 
-  return { send, newConversation, answer, stop, rename, command };
+  // the row actions (spec §7 Stage 3 "Row actions"): fork, archive / un-archive, delete. One fork per source in flight;
+  // archiving waits for a running turn or a waiting card to end, deleting for a running turn
+  const convOf = id => store.get().conversations.find(c => c.id === id);
+  const forking = new Set();
+  async function fork(sessionId) {
+    if (forking.has(sessionId)) return null;
+    forking.add(sessionId);
+    try {
+      const forked = await call('session/fork', { request: { sessionId } });
+      if (typeof forked?.sessionId !== 'string') throw new Error('session/fork returned no sessionId');
+      return forked.sessionId;
+    } catch (err) {
+      fail(err, 'fork');
+      return null;
+    } finally {
+      forking.delete(sessionId);
+    }
+  }
+
+  async function archive(sessionId, archived) {
+    const c = convOf(sessionId);
+    if (archived && c?.running) { say('Stop Gravit first', true); return false; }
+    if (archived && c?.messages.some(needsAnswer)) { say('Answer the waiting card first', true); return false; }
+    try {
+      await postJson('/data/sessions/archive', { sessionId, archived: archived === true });
+      return true;
+    } catch (err) {
+      fail(err, archived ? 'archive' : 'un-archive');
+      return false;
+    }
+  }
+
+  async function remove(sessionId) {
+    if (convOf(sessionId)?.running) { say('Stop Gravit first', true); return false; }
+    try {
+      await postJson('/data/sessions/delete', { sessionId });
+      return true;
+    } catch (err) {
+      fail(err, 'delete');
+      return false;
+    }
+  }
+
+  return { send, newConversation, answer, stop, rename, command, fork, archive, remove };
 }

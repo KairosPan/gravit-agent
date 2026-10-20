@@ -348,5 +348,6 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
   }
   openControl();
 
-  return { open, promote, refresh, reconcile, retryOrphans, answer, close: () => { closeView(); mux.close(); }, mux };
+  // leave: no conversation is on screen any more (the last open one was deleted): stop reading the one that was
+  return { open, promote, refresh, reconcile, retryOrphans, answer, leave: closeView, close: () => { closeView(); mux.close(); }, mux };
 }

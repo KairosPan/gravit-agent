@@ -23,12 +23,19 @@ function host({ rows = [], pages = {}, meta = { ok: true, archived: [], deleted:
     if (endpoint === 'session/projections') return { asOfSeq: 20, values: {} };
     if (endpoint === 'session/page') return { records: pages[args.request.address.sessionId] ?? [] };
     if (endpoint === 'session/create') { rows.push(row('s-new', { agentAvailable: true })); return { sessionId: 's-new', agentPreset: 'gravit' }; }
+    if (endpoint === 'session/fork') { rows.push(row('s-fork', { updatedAt: 99, agentAvailable: true })); return { sessionId: 's-fork' }; }
     return undefined;
   };
   const getJson = async path => (path === '/data/channels.json' ? { ok: true, root: '/r', channels: [{ workspaceId: 'w0', name: 'workbench', isRoot: true, sessionIds: [] }], ungrouped: [], archived: [], presets: {} } : path === '/data/sessions-meta.json' ? meta : { bots: [] });
   const posted = [];
-  const postJson = async (path, body) => { posted.push([path, body]); return { addressed: [] }; };
-  return { openMux: o => { opts = o; return mux; }, call, getJson, postJson, markdown: null, calls, posted, answered, streams, ready: async () => { opts.onReady({}); await settle(); }, opts: () => opts };
+  const postJson = async (path, body) => {
+    posted.push([path, body]);
+    // the face's two session routes, as the host would apply them to the next list
+    if (path === '/data/sessions/delete') { const i = rows.findIndex(r => r.sessionId === body.sessionId); if (i >= 0) rows.splice(i, 1); }
+    if (path === '/data/sessions/archive') meta.archived = body.archived ? [...meta.archived, body.sessionId] : meta.archived.filter(id => id !== body.sessionId);
+    return { ok: true, addressed: [] };
+  };
+  return { openMux: o => { opts = o; return mux; }, call, getJson, postJson, markdown: null, calls, posted, answered, streams, rows, ready: async () => { opts.onReady({}); await settle(); }, opts: () => opts };
 }
 const started = (f, h) => boot(f.win, { openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown });
 const send = f => f.fire('root', 'submit', { target: { closest: () => ({ dataset: { action: 'send' } }) } });
@@ -618,5 +625,77 @@ test('boot opens the newest open conversation when the newest is archived', asyn
   await h.ready();
   assert.equal(store.get().route.id, 's2');
   assert.equal(store.get().conversations.find(c => c.id === 's1').archived, 'face');
+  store.timers.clear();
+});
+
+test('Fork opens the new conversation', async () => {
+  const f = fakeWindow({ hash: '' });
+  const h = host({ rows: [row('s1')] });
+  const store = started(f, h);
+  await h.ready();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'fork', conv: 's1' } });
+  await settle();
+  assert.deepEqual(h.calls.find(c => c[0] === 'session/fork')[1], { request: { sessionId: 's1' } });
+  assert.equal(store.get().route.id, 's-fork');
+  assert.equal(f.win.location.hash, '#/messages/s-fork');
+  store.timers.clear();
+});
+
+test('Delete asks first, then the page moves to the first open conversation', async () => {
+  const f = fakeWindow({ hash: '' });
+  const h = host({ rows: [row('s1', { updatedAt: 9 }), row('s2', { updatedAt: 5 })] });
+  const store = started(f, h);
+  await h.ready();
+  assert.equal(store.get().route.id, 's1');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'toggleDetails' } });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'deleteConv', conv: 's1' } });
+  assert.deepEqual(h.posted.filter(p => p[0] === '/data/sessions/delete'), [], 'nothing until the second press');
+  assert.match(f.html(), /Yes, delete/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'confirmYes' } });
+  await settle();
+  assert.deepEqual(h.posted.find(p => p[0] === '/data/sessions/delete')[1], { sessionId: 's1' });
+  assert.equal(store.get().route.id, 's2');
+  assert.equal(store.get().conversations.some(c => c.id === 's1'), false);
+  store.timers.clear();
+});
+
+test('Archive moves the page to the first open conversation; the archived one stays in the store', async () => {
+  const f = fakeWindow({ hash: '' });
+  const h = host({ rows: [row('s1', { updatedAt: 9 }), row('s2', { updatedAt: 5 })] });
+  const store = started(f, h);
+  await h.ready();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'archive', conv: 's1' } });
+  await settle();
+  assert.deepEqual(h.posted.find(p => p[0] === '/data/sessions/archive')[1], { sessionId: 's1', archived: true });
+  assert.equal(store.get().conversations.find(c => c.id === 's1').archived, 'face');
+  assert.equal(store.get().route.id, 's2');
+  store.timers.clear();
+});
+
+test('a conversation deleted elsewhere leaves the screen at the next list', async () => {
+  const f = fakeWindow({ hash: '' });
+  const h = host({ rows: [row('s1', { updatedAt: 9 }), row('s2', { updatedAt: 5 })] });
+  const store = started(f, h);
+  await h.ready();
+  assert.equal(store.get().route.id, 's1');
+  h.rows.splice(0, 1);
+  await store.live.refresh();
+  await settle();
+  assert.equal(store.get().route.id, 's2');
+  store.timers.clear();
+});
+
+test('deleting the only open conversation stops reading it', async () => {
+  const f = fakeWindow({ hash: '' });
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const store = started(f, h);
+  await h.ready();
+  const followed = h.streams.find(s => s.name === 'session/follow' && s.args.request.address.sessionId === 's1');
+  assert.ok(followed, 'the live conversation is followed');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'deleteConv', conv: 's1' } });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'confirmYes' } });
+  await settle();
+  assert.equal(store.get().route.id, null);
+  assert.equal(followed.cancelled, true, 'the follow of the deleted conversation ends');
   store.timers.clear();
 });

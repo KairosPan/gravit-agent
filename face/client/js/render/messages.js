@@ -8,6 +8,7 @@ import { renderThread } from './thread.js';
 import { senderName } from './rail.js';
 import { kv, inlineEdit, confirmPair } from './controls.js';
 import { firstOpen } from '../host/sessions.js';
+import { needsAnswer } from '../messages.js';
 
 export function currentConversation(state) {
   const id = state.route.screen === 'messages' ? state.route.id : null;
@@ -69,13 +70,27 @@ function usageRows(usage) {
   return rows.length ? `<section class="dsec"><div class="dsec-label">Usage</div>${kv(rows)}</section>` : '';
 }
 
+// the row actions under This task: Fork always; Archive while nothing runs or waits, Un-archive for the face's own archive
+// (the host's cannot be undone here); Delete while nothing runs or waits, asked twice
+function rowKeys(conv, state) {
+  const key = (action, label, cls = 'btn-sm') => `<button type="button" class="${cls}" data-action="${action}" data-conv="${esc(conv.id)}">${label}</button>`;
+  const idle = !conv.running && !conv.messages.some(needsAnswer);
+  const deleting = state.confirm?.action === 'deleteConv' && state.confirm?.id === conv.id;
+  return [
+    key('changeWords', 'Change words'),
+    key('fork', 'Fork'),
+    conv.archived === 'face' ? key('unarchive', 'Un-archive') : !conv.archived && idle ? key('archive', 'Archive') : '',
+    !idle ? '' : deleting ? confirmPair('Yes, delete') : key('deleteConv', 'Delete', 'btn-danger'),
+  ].join('');
+}
+
 export function renderDetails(conv, state) {
   const e = state.edit;
   const renaming = !!e && e.kind === 'rename' && e.convId === conv.id;
   const asking = state.confirm?.action === 'stopGravit' && state.confirm?.id === conv.id;
   const title = renaming ? inlineEdit([{ name: 'title', value: conv.title, label: 'Name this' }], e.error) : `<div class="dsec-title">${esc(conv.title)}</div>`;
   const agent = conv.kind === 'bot' && conv.preset ? senderName(conv.preset, state) : 'Gravit';
-  const facts = kv([...(conv.created ? [['Created', esc(fmtDate(conv.created))]] : []), ['Where', esc(conv.channel?.name ?? 'Default directory')], ['Agent', esc(agent)]]);
+  const facts = kv([...(conv.created ? [['Created', esc(fmtDate(conv.created))]] : []), ['Where', esc(conv.channel?.name ?? 'Default directory')], ['Agent', esc(agent)], ...(conv.archived === 'host' ? [['Archived', 'By the host']] : [])]);
   const members = conv.kind === 'group' ? `<section class="dsec"><div class="dsec-label">Members</div>${conv.members.map(m => `<div class="dsec-line">${esc(senderName(m, state))}</div>`).join('')}</section>` : '';
   const stop = conv.running
     ? `<section class="dsec">${asking ? confirmPair('Yes, stop Gravit') : `<button type="button" class="btn-danger" data-action="stopGravit" data-conv="${esc(conv.id)}">Stop Gravit</button>`}</section>`
@@ -83,7 +98,7 @@ export function renderDetails(conv, state) {
   return `<aside class="drawer details" aria-label="Details">
   <div class="drawer-head"><h2>Details</h2><button type="button" class="close-key" data-action="toggleDetails" aria-label="Close">×</button></div>
   <div class="drawer-body">
-    <section class="dsec"><div class="dsec-label">This task</div>${title}${facts}${renaming ? '' : `<div class="btn-row"><button type="button" class="btn-sm" data-action="changeWords" data-conv="${esc(conv.id)}">Change words</button></div>`}</section>
+    <section class="dsec"><div class="dsec-label">This task</div>${title}${facts}${renaming ? '' : `<div class="btn-row">${rowKeys(conv, state)}</div>`}</section>
     ${members}${usageRows(conv.usage)}${stop}
   </div>
 </aside>`;
