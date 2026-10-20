@@ -35,18 +35,22 @@ function gateKeys(m, conv) {
   return `<div class="keys right">${key('no', 'Decline', { ...d, 'data-value': 'rejected' })}${key('yes', 'Approve', { ...d, 'data-value': 'allowed-once' })}</div>`;
 }
 
+// every input is named and id'd by the gate and the question (q-<eventId>-<questionId>), so two pending cards asking
+// the same question id are separate radio groups, the app reads the pressed card alone, and a re-render can find a
+// pick or a typed answer again by its id; the free answer is dsh's `custom`, open beside a menu too
 function question(m, conv) {
   const qs = Array.isArray(m.data?.questions) ? m.data.questions : [];
   const blocks = qs.map((q, i) => {
-    const id = `q-${q?.id ?? i}`;
+    const name = `q-${m.id}-${q?.id ?? i}`;
     const options = Array.isArray(q?.options) ? q.options : [];
     const type = q?.multiSelect === true ? 'checkbox' : 'radio';
-    const inputs = options.map(o => `<label class="opt"><input type="${type}" name="${esc(id)}" value="${esc(o?.label ?? '')}"><span>${esc(o?.label ?? '')}</span>${o?.description ? `<span class="dim">${esc(o.description)}</span>` : ''}</label>`).join('');
-    const custom = options.length === 0 || q?.allowCustom === true ? `<input class="input small" type="text" name="${esc(id)}-custom" placeholder="Your answer" aria-label="Your answer">` : '';
+    const inputs = options.map((o, n) => `<label class="opt"><input type="${type}" id="${esc(`${name}-${n}`)}" name="${esc(name)}" value="${esc(o?.label ?? '')}"><span>${esc(o?.label ?? '')}</span>${o?.description ? `<span class="dim">${esc(o.description)}</span>` : ''}</label>`).join('');
+    const hint = options.length ? 'Other…' : 'Your answer';
+    const custom = `<input class="input small" type="text" id="${esc(`${name}-custom`)}" name="${esc(`${name}-custom`)}" placeholder="${hint}" aria-label="${hint}">`;
     return `<div class="q" data-q="${esc(String(q?.id ?? i))}">${q?.header ? `<div class="card-title">${esc(q.header)}</div>` : ''}<div>${esc(q?.question ?? '')}</div>${q?.detail ? `<div class="dim">${esc(q.detail)}</div>` : ''}${inputs}${custom}</div>`;
   }).join('');
   const keys = needsAnswer(m) ? `<div class="keys right"><button type="button" class="btn-primary small" data-action="answerQuestion" data-conv="${esc(conv.id)}" data-msg="${esc(m.id)}">Answer</button></div>` : '';
-  return `<div class="card orange question">${blocks}${stateChip(m)}${keys}</div>`;
+  return `<div class="card orange question" data-gate="${esc(m.id)}">${blocks}${stateChip(m)}${keys}</div>`;
 }
 
 function body(m, conv) {

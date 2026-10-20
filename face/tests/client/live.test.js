@@ -177,6 +177,46 @@ test('a gate lands on its conversation; a replay is the same card; one for a roo
   assert.equal(r.store.get().conversations[0].messages.find(m => m.id === 'ev-1').answer, 'closed');
 });
 
+test("a room member's gate replayed before the list lands survives the room's window load, in the bot's name", async () => {
+  // on a reload the host replays pending gates right after ready, before session/list answers: the gate is an orphan first
+  const r = rig({ rows: [row('s1', { projections: { values: { agentPreset: 'gravit' } } }), row('s-b', { parentSessionId: 's1', projections: { values: { agentPreset: 'buffett' } } })], pages: { s1: [fixture(1)] } });
+  r.opts().onGate({ ...frames[7], agentId: 's-b', eventId: 'ev-m' });
+  assert.deepEqual(Object.keys(r.store.get().orphanGates), ['ev-m']);
+  await r.ready();
+  r.live.open('s1');
+  await settle();
+  const room = r.store.get().conversations.find(c => c.id === 's1');
+  assert.equal(room.loaded, true);
+  const card = room.messages.find(m => m.id === 'ev-m');
+  assert.ok(card, 'the card is still on the room after its window replaced the messages');
+  assert.equal(card.from, 'buffett');
+  assert.deepEqual(r.store.get().orphanGates, {});
+});
+
+test("the bots' display names from /data/bots.json reach the store, so the screens name a bot rather than its id", async () => {
+  const r = rig({ rows: [row('s1')], bots: { bots: [{ id: 'buffett', name: 'Buffett Type' }, { id: 'drill-bear', name: '看空派' }] } });
+  await r.ready();
+  assert.deepEqual(r.store.get().bots, [{ id: 'buffett', name: 'Buffett Type' }, { id: 'drill-bear', name: '看空派' }]);
+});
+
+test('previews: a row is re-read when its session moves, and only then (a row read and found silent waits for activity)', async () => {
+  const rows = [row('p1', { updatedAt: 5 }), row('p2', { updatedAt: 4 })];
+  const pages = { p1: [fixture(1)], p2: [fixture(13)] };
+  const r = rig({ rows, pages });
+  await r.ready();
+  await settle();
+  const reads = id => r.calls.filter(c => c[0] === 'session/page' && c[1].request.maxMessages === 1 && c[1].request.address.sessionId === id).length;
+  assert.equal(r.store.get().conversations.find(c => c.id === 'p1').preview, 'Both pivots are technically valid.');
+  assert.equal(reads('p1'), 1); assert.equal(reads('p2'), 1);
+  await r.live.refresh(); await settle();
+  assert.equal(reads('p1'), 1, 'not moved: not re-read'); assert.equal(reads('p2'), 1, 'silent and not moved: not re-read');
+  rows[0].updatedAt = 9;
+  pages.p1 = [fixture(11)];
+  await r.live.refresh(); await settle();
+  assert.equal(reads('p1'), 2, 'moved: re-read');
+  assert.equal(r.store.get().conversations.find(c => c.id === 'p1').preview, frames[11].event.data.message.content[0].text);
+});
+
 test('a gate for a session the list does not know yet waits, and lands once the list brings it', async () => {
   const r = rig({ rows: [] });
   await r.ready();

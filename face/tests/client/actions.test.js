@@ -96,6 +96,18 @@ test('an answer goes through the mux and marks the card with this tab\'s outcome
   assert.equal(refused.store.get().status.bad, true);
 });
 
+test('a second press while the first answer is in flight sends nothing: one answer per gate, and no red line over an approval that stood', async () => {
+  const r = rig();
+  r.store.dispatch('hostGate', { convId: 's1', message: { id: 'ev-1', at: 1, from: 'gravit', kind: 'card', text: 'Your call', data: { eventId: 'ev-1', sessionId: 's1', toolName: 'mcp__x__place_order' } } });
+  const first = r.actions.answer('ev-1', 'allowed-once');
+  const second = r.actions.answer('ev-1', 'allowed-once');
+  assert.equal(await second, false);
+  assert.equal(await first, true);
+  assert.deepEqual(r.answered, [['ev-1', 'allowed-once']], 'the mux saw one answer');
+  assert.equal(r.store.get().conversations[0].messages.find(m => m.id === 'ev-1').answer, 'approved');
+  assert.equal(r.store.get().status.bad, false);
+});
+
 test('a 401 says to open the printed URL; a business failure names the host\'s code', async () => {
   const out = rig({ answers: { 'session/prompt': err({ status: 401 }) } });
   assert.equal(await out.actions.send('hi'), null);

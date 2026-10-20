@@ -117,11 +117,141 @@ test("an order card's ✓ answers allowed-once through the mux and the chip read
   assert.doesNotMatch(f.html(), /data-action="answer"/);
   h.opts().onGate(frames[7]);
   await settle();
-  f.withSelector('input[name="q-q1"]', { checked: true, value: 'Yes, pin it' });
+  f.withSelector('input', { tagName: 'INPUT', type: 'radio', name: 'q-ev-2-q1', checked: true, value: 'Yes, pin it' });
   f.click({ tagName: 'BUTTON', dataset: { action: 'answerQuestion', conv: 's1', msg: 'ev-2' } });
   await settle();
   assert.deepEqual(h.answered[1], ['ev-2', { answers: [{ id: 'q1', selected: ['Yes, pin it'] }] }]);
   assert.match(f.html(), />Answered</);
+  store.timers.clear();
+});
+
+const orderGate = { type: 'waterfall', event: 'approval/request', eventId: 'ev-9', agentId: 's1', request: { toolName: 'mcp__alpaca-kit__place_order', callId: 'c9', reason: 'PAPER order - place_order: side=buy' } };
+const approve = f => f.click({ tagName: 'BUTTON', dataset: { action: 'answer', conv: 's1', msg: 'ev-9', value: 'allowed-once' } });
+
+test('a gate this tab answered stays answered: re-opening its conversation or a reconnect never brings its keys back', async () => {
+  const f = fakeWindow({ hash: '' });
+  const h = host({ rows: [row('s1', { updatedAt: 9, agentAvailable: true }), row('s2', { updatedAt: 5 })] });
+  const store = started(f, h);
+  await h.ready();
+  // the newest follow of s1 delivers its snapshot, as the host does on every open
+  const snapshot = () => [...h.streams].reverse().find(x => x.name === 'session/follow' && x.args.request.address.sessionId === 's1' && !x.cancelled).cbs.onItem({ type: 'snapshot', records: [{ event: frames[0].event }] });
+  snapshot();
+  h.opts().onGate(orderGate);
+  await settle();
+  approve(f);
+  await settle();
+  assert.match(f.html(), /class="chip up">Approved</);
+  f.click({ tagName: 'A', dataset: { action: 'open', id: 's2' } });
+  await settle();
+  f.click({ tagName: 'A', dataset: { action: 'open', id: 's1' } });
+  await settle();
+  snapshot();
+  await settle();
+  assert.doesNotMatch(f.html(), /data-action="answer"/, 're-opened: no keys on a settled gate');
+  assert.doesNotMatch(f.html(), /nav-badge/, 're-opened: nothing waits on the operator');
+  h.opts().onDown('socket closed');
+  h.opts().onReady({});
+  await settle();
+  snapshot();
+  await settle();
+  assert.doesNotMatch(f.html(), /data-action="answer"/, 'reconnected: no keys on a settled gate');
+  assert.doesNotMatch(f.html(), /nav-badge/);
+  store.timers.clear();
+});
+
+test("a lost race (the host's cancel trails this tab's resolved answer) relabels the card Settled elsewhere", async () => {
+  const f = fakeWindow({ hash: '' });
+  const h = host({ rows: [row('s1')] });
+  const store = started(f, h);
+  await h.ready();
+  h.opts().onGate(orderGate);
+  await settle();
+  approve(f);
+  await settle();
+  assert.match(f.html(), /class="chip up">Approved</);
+  // api.js reports a cancel for a gate this generation already answered: another answer or a Stop settled it first
+  h.opts().onGateGone('ev-9');
+  await settle();
+  assert.match(f.html(), /class="chip grey">Settled elsewhere</);
+  assert.doesNotMatch(f.html(), />Approved</);
+  store.timers.clear();
+});
+
+test("a bare press on a question's Answer sends nothing and says every question needs an answer", async () => {
+  const f = fakeWindow({ hash: '' });
+  const h = host({ rows: [row('s1')] });
+  const store = started(f, h);
+  await h.ready();
+  h.opts().onGate(frames[7]);
+  await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'answerQuestion', conv: 's1', msg: 'ev-2' } });
+  await settle();
+  assert.deepEqual(h.answered, [], 'nothing reached the mux');
+  assert.match(f.html(), /status-line bad" role="status">Answer every question first</);
+  assert.match(f.html(), /data-action="answerQuestion"/, 'the card still waits');
+  store.timers.clear();
+});
+
+test("a question card's pick, free answer and focus survive a re-render while the operator is still answering", async () => {
+  const f = fakeWindow({ hash: '' });
+  const h = host({ rows: [row('s1')] });
+  const store = started(f, h);
+  await h.ready();
+  h.opts().onGate(frames[7]);
+  await settle();
+  const pick = f.withId('q-ev-2-q1-0', { tagName: 'INPUT', type: 'radio', name: 'q-ev-2-q1', value: 'Yes, pin it', presentIf: /id="q-ev-2-q1-0"/ });
+  const other = f.withId('q-ev-2-q1-custom', { tagName: 'INPUT', type: 'text', name: 'q-ev-2-q1-custom', presentIf: /id="q-ev-2-q1-custom"/ });
+  pick.checked = true;
+  other.value = 'and keep the margin';
+  other.focus();
+  store.dispatch('toggleRail'); // any change re-renders the whole page, as a list refresh does every few seconds
+  assert.equal(pick.checked, true, 'the pick survives');
+  assert.equal(other.value, 'and keep the margin', 'the free answer survives');
+  assert.equal(f.doc.activeElement, other, 'focus stays in the box');
+  store.timers.clear();
+});
+
+test("the thread keeps the reader's place when a message arrives while they read up; at the bottom it follows the tail", async () => {
+  const f = fakeWindow({ hash: '' });
+  const thread = f.withId('thread', { scrollHeight: 2000, clientHeight: 400 });
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const store = started(f, h);
+  await h.ready();
+  const follow = h.streams.find(s => s.name === 'session/follow');
+  follow.cbs.onItem({ type: 'snapshot', records: [{ event: frames[0].event }, { event: frames[1].event }] });
+  await settle();
+  thread.scrollTop = 300; // reading up, 1300 px above the bottom
+  follow.cbs.onItem({ type: 'event', event: frames[11].event });
+  await settle();
+  assert.equal(thread.scrollTop, 300, 'a new message does not yank the reader down');
+  thread.scrollTop = 1600; // at the bottom
+  follow.cbs.onItem({ type: 'event', event: frames[16].event });
+  await settle();
+  assert.equal(thread.scrollTop, 2000, 'at the bottom the thread follows the tail');
+  store.timers.clear();
+});
+
+test('an @ goes through the room route: one that addressed a bot sends nothing more; one that fails says so, sends nothing and keeps the words', async () => {
+  const f = fakeWindow({ hash: '' });
+  const say = f.withId('say', { tagName: 'INPUT' });
+  const h = host({ rows: [row('s1')] });
+  const getJson = async path => (path === '/data/channels.json' ? { ok: true, root: '/r', channels: [{ workspaceId: 'w1', name: 'room-drill', isRoot: false, sessionIds: ['s1'] }], ungrouped: [], archived: [], presets: {} } : { bots: [] });
+  const answers = [{ ok: true, status: 200, body: { ok: true, addressed: ['buffett'] } }, { ok: false, status: 409, body: { ok: false, error: 'channel room-drill has no roster' } }];
+  const fetched = [];
+  f.win.fetch = async (path, init) => { fetched.push([path, JSON.parse(init.body)]); const a = answers.shift(); return { ok: a.ok, status: a.status, json: async () => a.body }; };
+  // no postJson handed in: the page's own, on the window's fetch
+  const store = boot(f.win, { openMux: h.openMux, call: h.call, getJson, markdown: null });
+  await h.ready();
+  for (const words of ['@buffett leverage?', '@buffett and now?']) {
+    say.value = words;
+    f.fire('root', 'input', { target: say });
+    send(f);
+    await settle();
+  }
+  assert.deepEqual(fetched.map(x => x[0]), ['/data/rooms/say', '/data/rooms/say']);
+  assert.equal(h.calls.filter(c => c[0] === 'session/prompt').length, 0, 'neither @-line was re-sent to Gravit as a prompt');
+  assert.match(f.html(), /status-line bad" role="status">send: channel room-drill has no roster</);
+  assert.equal(say.value, '@buffett and now?', 'the failed words stay in the composer');
   store.timers.clear();
 });
 

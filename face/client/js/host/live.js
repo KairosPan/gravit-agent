@@ -21,7 +21,8 @@ const codeOf = err => err?.code ?? (err?.status ? `HTTP ${err.status}` : err?.me
 export function startLive({ store, openMux, call, mapFrame, getJson, timers, now = Date.now }) {
   const calls = new Map();        // callId → {name, args}: the arguments the order card joins on
   const rooms = new Map();        // sessionId → the room projection's value
-  const pending = new Map();      // eventId → {convId, message}: gates delivered to this page
+  const pending = new Map();      // eventId → the gate message as delivered and still open: placed afresh at every dispatch
+  const answeredHere = new Set(); // eventIds this tab's answer won: a report for one afterwards means it lost a race
   let memberBot = new Map();      // a room member's session → its bot id
   let openSeq = 0;
   let listSeq = 0;
@@ -83,7 +84,10 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
     const created = typeof snapshot?.header?.createdAt === 'number' ? snapshot.header.createdAt : undefined;
     store.dispatch('hostWindow', { convId, messages: windowOf(convId, snapshot?.records), created });
     seedBlock(convId, snapshot?.projections);
-    for (const g of pending.values()) if (g.convId === convId) store.dispatch('hostGate', { convId, message: g.message }); // after the window
+    for (const m of pending.values()) { // after the window, wherever the list now says each one belongs
+      const g = placeGate(m);
+      if (g.convId === convId) store.dispatch('hostGate', g);
+    }
   }
 
   // ---- the read of the conversation on screen
@@ -166,26 +170,42 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
   }
 
   // ---- gates
+  // where a gate goes NOW: its session's own conversation, or the room whose fold lists that session, in the member's
+  // bot name; a session the list does not know yet keeps its own id, and the reducer parks the gate as an orphan.
+  // Placed at every dispatch, never once at delivery: a gate replayed after a reload arrives before the list does.
+  function placeGate(message) {
+    const sessionId = message.data?.sessionId;
+    const home = homeOf(sessionId);
+    if (!home) return { convId: sessionId, message };
+    const bot = memberBot.get(sessionId);
+    return { convId: home.id, message: bot && home.id !== sessionId ? { ...message, from: bot } : message };
+  }
   function acceptGate(frame) {
     const v = mapFrame(frame);
     if (v.kind !== 'approval' && v.kind !== 'question') return;
     const [m] = toMessages(v, calls, now());
     if (!m) return;
-    const home = homeOf(v.sessionId);
-    const bot = memberBot.get(v.sessionId);
-    const message = bot && home && home.id !== v.sessionId ? { ...m, from: bot } : m;
-    const convId = home?.id ?? v.sessionId;
-    pending.set(m.id, { convId, message });
-    store.dispatch('hostGate', { convId, message });
+    pending.set(m.id, m);
+    store.dispatch('hostGate', placeGate(m));
   }
+  // the mux reports a gate over; for one this tab's answer won, api.js reports only a cancel that trailed the win —
+  // another answer or a Stop settled it first — so the card reads Settled elsewhere, never this tab's outcome
   function gateGone(eventId) {
     pending.delete(eventId);
-    store.dispatch('hostGateGone', { eventId, outcome: 'closed' });
+    const lost = answeredHere.delete(eventId);
+    store.dispatch('hostGateGone', { eventId, outcome: lost ? 'elsewhere' : 'closed' });
+  }
+  // this tab's answer, under the mux's current generation; once it wins, the gate is settled here (api.js reports
+  // nothing for a winner), so no window load brings it back answerable
+  async function answer(eventId, value) {
+    await mux.answer(eventId, value);
+    pending.delete(eventId);
+    answeredHere.add(eventId);
   }
   function retryOrphans() {
-    for (const g of Object.values(state().orphanGates ?? {})) {
-      const home = homeOf(g.convId);
-      if (home) store.dispatch('hostGate', { convId: home.id, message: g.message });
+    for (const [id, g] of Object.entries(state().orphanGates ?? {})) {
+      const placed = placeGate(pending.get(id) ?? g.message);
+      if (convOf(placed.convId)) store.dispatch('hostGate', placed);
     }
   }
 
@@ -221,7 +241,11 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
     const conversations = listConversations(list.items, {
       presets: index?.presets ?? {}, bots, channelOf, rooms, lastSeen: state().lastSeen, archived: new Set(index?.archived ?? []), deleted: new Set(),
     });
-    store.dispatch('hostList', { conversations, channels: channels.map(c => ({ workspaceId: c.workspaceId, name: c.name, isRoot: c.isRoot })) });
+    store.dispatch('hostList', {
+      conversations,
+      channels: channels.map(c => ({ workspaceId: c.workspaceId, name: c.name, isRoot: c.isRoot })),
+      bots: [...bots].map(([id, b]) => ({ id, name: b.name })), // the screens name a bot by these
+    });
     for (const r of list.items) if (typeof r?.sessionId === 'string') seedBlock(r.sessionId, r.projections);
     const openId = state().route.screen === 'messages' ? state().route.id : null;
     const openConv = openId ? convOf(openId) : null;
@@ -242,14 +266,17 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
     }
     return out || null;
   }
+  // a row is read when it was never read, or when its session moved past the read (previewAt is the row's updatedAt
+  // then): a moved row is refreshed, a silent one waits for activity; the one on screen previews from its own window
   async function previews() {
-    const todo = state().conversations.filter(c => !c.loaded && c.preview === null).slice(0, PREVIEW_ROWS);
+    const openId = state().route.screen === 'messages' ? state().route.id : null;
+    const todo = state().conversations.filter(c => c.id !== openId && (c.previewAt === undefined || c.updatedAt > c.previewAt)).slice(0, PREVIEW_ROWS);
     for (const c of todo) {
       try {
         const cut = await call('session/projections', { request: { sessionId: c.id } });
         if (!cut || !Number.isSafeInteger(cut.asOfSeq)) continue;
         const pg = await call('session/page', { request: { address: address(c.id), throughSeq: cut.asOfSeq, maxMessages: 1 } });
-        if (convOf(c.id)) store.dispatch('hostPreview', { convId: c.id, preview: lastText(pg?.records), at: now() });
+        if (convOf(c.id)) store.dispatch('hostPreview', { convId: c.id, preview: lastText(pg?.records), at: c.updatedAt });
       } catch { /* a preview is a nicety; the row keeps its title */ }
     }
   }
@@ -304,5 +331,5 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
   }
   openControl();
 
-  return { open, promote, refresh, reconcile, retryOrphans, close: () => { closeView(); mux.close(); }, mux };
+  return { open, promote, refresh, reconcile, retryOrphans, answer, close: () => { closeView(); mux.close(); }, mux };
 }

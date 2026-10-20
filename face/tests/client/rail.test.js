@@ -58,6 +58,16 @@ test('a row: the title, the time of the last activity, the preview, the unread d
   assert.equal(count(renderList(unread, NOW), /class="dot on"/g), 1, 'b moved after the operator last looked');
 });
 
+test("the conversation on screen previews its own window's last spoken line, not the one-message page read before it loaded", () => {
+  const messages = [
+    { id: 'e1', seq: 1, at: NOW, from: 'you', kind: 'text', text: 'Which bed?', data: {} },
+    { id: 'e2', seq: 2, at: NOW, from: 'gravit', kind: 'text', text: 'Breadth is still positive.', data: {} },
+  ];
+  const open = listed([conv('a', { loaded: true, preview: 'Both pivots are technically valid.', messages }), conv('b', { preview: 'Older words.' })], 'a');
+  assert.equal(previewOf(open.conversations[0], open), 'Breadth is still positive.');
+  assert.equal(previewOf(open.conversations[1], open), 'Older words.', 'a row not on screen keeps its read preview');
+});
+
 test("a row's fallback preview is the last SPOKEN line: a context row (a runtime snapshot) or a tool row never stands in", () => {
   const c = conv('c', { messages: [
     { id: 'e1', seq: 1, at: NOW, from: 'you', kind: 'text', text: 'Which bed?', data: {} },

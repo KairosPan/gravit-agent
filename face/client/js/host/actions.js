@@ -65,8 +65,13 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
     }
   }
 
-  // the mux's answer under the current generation; the card takes this tab's outcome at once
+  // the mux's answer under the current generation; the card takes this tab's outcome at once. One answer per gate is
+  // in flight at a time: a second press (a double-click on ✓) sends nothing, where it would earn api.js's gate-gone
+  // refusal in red over an approval that stood
+  const answering = new Set();
   async function answer(eventId, value) {
+    if (answering.has(eventId)) return false;
+    answering.add(eventId);
     try {
       await answerGate(eventId, value);
       store.dispatch('hostGateGone', { eventId, outcome: value === 'allowed-once' ? 'approved' : value === 'rejected' ? 'rejected' : 'answered' });
@@ -74,6 +79,8 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
     } catch (err) {
       say(`answer: ${err?.code ?? err?.message ?? 'failed'}`, true);
       return false;
+    } finally {
+      answering.delete(eventId);
     }
   }
 

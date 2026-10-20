@@ -84,21 +84,29 @@ test('a generic approval names the tool and shows the display reason, with the a
   assert.match(two, /data-value="allowed-once"/);
 });
 
-test('a question card lists each question with inputs named by its id, radio or checkbox by multiSelect, a text box without options, and one Answer key', () => {
+test('a question card lists each question with inputs named by the gate and the question, radio or checkbox by multiSelect, a free answer beside every question, and one Answer key', () => {
   const questions = [
     { id: 'q1', question: 'Pin the paper account before the drill?', header: 'Gate 2', options: [{ label: 'Yes, pin it' }, { label: 'No, keep replay-only', description: 'stay offline' }] },
     { id: 'q2', question: 'Which symbols?', options: [{ label: 'AAPL' }, { label: 'NVDA' }], multiSelect: true },
     { id: 'q3', question: 'Anything else?' },
   ];
   const html = renderMessage(gate('question', { text: '', data: { eventId: 'ev-2', sessionId: 's1', questions } }), conv(), state);
-  assert.match(html, /card orange question/);
+  assert.match(html, /class="card orange question" data-gate="ev-1"/);
   assert.match(html, /card-title">Gate 2</); assert.match(html, /Pin the paper account before the drill\?/);
-  assert.equal((html.match(/type="radio" name="q-q1"/g) ?? []).length, 2);
+  assert.equal((html.match(/type="radio" id="q-ev-1-q1-\d" name="q-ev-1-q1"/g) ?? []).length, 2);
+  assert.match(html, /type="radio" id="q-ev-1-q1-0" name="q-ev-1-q1" value="Yes, pin it"/);
   assert.match(html, /stay offline/);
-  assert.equal((html.match(/type="checkbox" name="q-q2"/g) ?? []).length, 2);
-  assert.match(html, /type="text" name="q-q3-custom"/);
+  assert.equal((html.match(/type="checkbox" id="q-ev-1-q2-\d" name="q-ev-1-q2"/g) ?? []).length, 2);
+  // the free answer is dsh's `custom`, open beside a menu too: the operator is never forced onto a wrong option
+  assert.match(html, /type="text" id="q-ev-1-q1-custom" name="q-ev-1-q1-custom" placeholder="Other…"/);
+  assert.match(html, /type="text" id="q-ev-1-q2-custom" name="q-ev-1-q2-custom" placeholder="Other…"/);
+  assert.match(html, /type="text" id="q-ev-1-q3-custom" name="q-ev-1-q3-custom" placeholder="Your answer"/);
   assert.equal((html.match(/data-action="answerQuestion"/g) ?? []).length, 1);
   assert.match(html, /data-msg="ev-1"/);
+  // a second pending card asking the same question id is its own radio group
+  const other = renderMessage(gate('question', { id: 'ev-7', text: '', data: { eventId: 'ev-7', sessionId: 's1', questions } }), conv(), state);
+  assert.match(other, /type="radio" id="q-ev-7-q1-0" name="q-ev-7-q1"/);
+  assert.doesNotMatch(other, /name="q-ev-1-/);
   const answered = renderMessage(gate('question', { text: '', answer: 'answered', data: { eventId: 'ev-2', sessionId: 's1', questions } }), conv(), state);
   assert.doesNotMatch(answered, /data-action="answerQuestion"/);
   assert.match(answered, />Answered</);

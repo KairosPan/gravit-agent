@@ -23,7 +23,7 @@ export const reducers = {
     const next = conversations.map(c => {
       const o = old.get(c.id);
       return o
-        ? { ...c, messages: o.messages, loaded: o.loaded, preview: o.preview, usage: o.usage, thinking: o.thinking, created: o.created ?? c.created, lastSeen: Math.max(o.lastSeen ?? 0, c.lastSeen ?? 0) }
+        ? { ...c, messages: o.messages, loaded: o.loaded, preview: o.preview, previewAt: o.previewAt, usage: o.usage, thinking: o.thinking, created: o.created ?? c.created, lastSeen: Math.max(o.lastSeen ?? 0, c.lastSeen ?? 0) }
         : c;
     });
     return { ...s, conversations: next, channels: Array.isArray(channels) ? channels : s.channels, bots: Array.isArray(bots) ? bots : s.bots };
@@ -68,11 +68,12 @@ export const reducers = {
     return upd({ ...s, orphanGates: orphans }, convId, x => ({ ...x, messages: msgs }));
   },
 
-  // the gate is over: this tab's own answer stands, anything else reads as the host's outcome
+  // the gate is over: this tab's own answer stands against a plain withdrawal ('closed'); a lost race ('elsewhere')
+  // overrides it, because then this tab's answer is not the one the host took
   hostGateGone(s, { eventId, outcome }) {
     const { [eventId]: _gone, ...orphans } = s.orphanGates ?? {};
     const conversations = s.conversations.map(c => (c.messages.some(m => m.id === eventId)
-      ? { ...c, messages: c.messages.map(m => (m.id === eventId && !m.answer ? { ...m, answer: outcome } : m)) }
+      ? { ...c, messages: c.messages.map(m => (m.id === eventId && (!m.answer || outcome === 'elsewhere') ? { ...m, answer: outcome } : m)) }
       : c));
     return { ...s, orphanGates: orphans, conversations };
   },

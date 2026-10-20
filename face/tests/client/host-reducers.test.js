@@ -116,6 +116,22 @@ test('hostGateGone marks the card closed unless this tab already answered it, an
   assert.equal(needsAnswer(get(s, 'a').messages.find(m => m.id === 'ev-1')), false);
 });
 
+test("hostGateGone 'elsewhere' overrides this tab's own outcome: an answer that lost a race never reads as the one that stood", () => {
+  let s = withConv(conv('a'));
+  s = R.hostGate(s, { convId: 'a', message: gate('ev-3') });
+  s = R.hostGateGone(s, { eventId: 'ev-3', outcome: 'approved' });
+  s = R.hostGateGone(s, { eventId: 'ev-3', outcome: 'elsewhere' });
+  assert.equal(get(s, 'a').messages.find(m => m.id === 'ev-3').answer, 'elsewhere');
+});
+
+test('hostList keeps when a surviving row\'s preview was read, so a refresh re-reads only rows that moved', () => {
+  let s = withConv(conv('a', { updatedAt: 5 }));
+  s = R.hostPreview(s, { convId: 'a', preview: 'Got it.', at: 5 });
+  s = R.hostList(s, { conversations: [conv('a', { updatedAt: 9 })] });
+  assert.equal(get(s, 'a').preview, 'Got it.');
+  assert.equal(get(s, 'a').previewAt, 5);
+});
+
 test('needsAnswer is true for an unanswered card, approval or question only', () => {
   assert.equal(needsAnswer(gate('x')), true);
   assert.equal(needsAnswer(gate('x', { kind: 'question' })), true);

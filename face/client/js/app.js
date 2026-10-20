@@ -15,6 +15,25 @@ import { startLive } from './host/live.js';
 import { makeActions } from './host/actions.js';
 
 export const PREFS_KEY = 'gravit-ui.prefs';
+
+// Gravit's words as the thread draws them: DOM-built markdown (wire/markdown.js returns {node, doc}), serialized for
+// the string renderers
+export const gravitMarkdown = text => renderMarkdown(text).node.outerHTML;
+
+// a /data POST as the old page's panelData read it: a failed status or the route's own {ok:false, error} rejects,
+// the route's words riding as the code the status line reads; only {ok:true, …} resolves
+export function postJsonVia(fetch) {
+  return async (path, body) => {
+    const r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    let parsed = null;
+    try { parsed = await r.json(); } catch { /* not JSON: the status speaks */ }
+    if (!r.ok || parsed?.ok !== true) {
+      const words = typeof parsed?.error === 'string' && parsed.error !== '' ? parsed.error : `HTTP ${r.status}`;
+      throw Object.assign(new Error(words), { status: r.status, code: words });
+    }
+    return parsed;
+  };
+}
 const THEMES = ['cream', 'black', 'system'];
 
 // timers that a reset can clear together
@@ -69,17 +88,22 @@ export function settle(store, hash) {
   return h !== hash ? h : null;
 }
 
-// the question card's inputs → the batch the host wants: every question answered exactly once
-export function answersFrom(root, questions) {
+// one question card's inputs → the batch the host wants: every question answered exactly once. The inputs are named
+// q-<gate>-<question> (render/thread.js), read from that card alone and matched by name, never by a selector built
+// from the model's question id
+export function answersFrom(card, questions, gateId) {
+  const inputs = [...(card?.querySelectorAll?.('input') ?? [])];
   const answers = (Array.isArray(questions) ? questions : []).map((q, i) => {
     const id = String(q?.id ?? i);
-    const name = `q-${id}`;
-    const selected = [...(root.querySelectorAll(`input[name="${name}"]`) ?? [])].filter(el => el.checked).map(el => String(el.value));
-    const custom = root.querySelector(`input[name="${name}-custom"]`)?.value?.trim();
+    const name = `q-${gateId}-${id}`;
+    const selected = inputs.filter(el => el.name === name && el.checked).map(el => String(el.value));
+    const custom = inputs.find(el => el.name === `${name}-custom`)?.value?.trim();
     return { id, selected, ...(custom ? { custom } : {}) };
   });
   return { answers };
 }
+// a batch the host may take: every question has a pick or words of its own
+export const complete = batch => batch.answers.every(a => a.selected.length > 0 || !!a.custom);
 
 // where focus was, as something a re-render can find again: the id first, else the control's data attributes
 function focusKey(el) {
@@ -104,12 +128,13 @@ export function boot(win, host = {}) {
   const now = () => Date.now();
   const call = host.call ?? wireCall;
   const getJson = host.getJson ?? (path => win.fetch(path).then(r => (r.ok ? r.json() : Promise.reject(Object.assign(new Error(`${path}: HTTP ${r.status}`), { status: r.status })))));
-  const postJson = host.postJson ?? ((path, body) => win.fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json()));
+  const postJson = host.postJson ?? postJsonVia((path, init) => win.fetch(path, init));
   // Gravit's markdown is DOM-built (wire/markdown.js); a test hands in its own or none
   if (host.markdown !== undefined) setMarkdown(host.markdown);
-  else if (typeof document !== 'undefined') setMarkdown(text => renderMarkdown(text).outerHTML);
+  else if (typeof document !== 'undefined') setMarkdown(gravitMarkdown);
   const live = startLive({ store, openMux: host.openMux ?? wireOpenMux, call, mapFrame, getJson, timers, now });
-  const actions = makeActions({ store, call, answerGate: (eventId, value) => live.mux.answer(eventId, value), postJson });
+  // answers go through the live layer, which settles the gate it delivered once the answer wins
+  const actions = makeActions({ store, call, answerGate: (eventId, value) => live.answer(eventId, value), postJson });
 
   let composerText = '';
   let composing = false;
@@ -134,6 +159,7 @@ export function boot(win, host = {}) {
     const activeKey = focusKey(active);
     const caret = active && typeof active.selectionStart === 'number' && active.id ? [active.selectionStart, active.selectionEnd] : null;
     const typed = new Map([...root.querySelectorAll('input[id]:not([type=radio]):not([type=checkbox]):not([type=file]), textarea[id], select[id]')].map(el => [el.id, el.value]));
+    const ticked = [...root.querySelectorAll('input[id]')].filter(el => (el.type === 'radio' || el.type === 'checkbox') && el.checked).map(el => el.id);
     const thread0 = doc.getElementById('thread');
     const threadAt = thread0 ? { top: thread0.scrollTop, bottom: thread0.scrollHeight - thread0.scrollTop - thread0.clientHeight < 40 } : null;
     const scrolls = { main: root.querySelector('main')?.scrollTop, rows: root.querySelector('.rail-rows')?.scrollTop, drawer: root.querySelector('.drawer-body')?.scrollTop };
@@ -147,6 +173,11 @@ export function boot(win, host = {}) {
       // an editor's box (edit-*) keeps what was typed only while the same editor stays open
       if (el && id !== 'say' && (sameEditor || !id.startsWith('edit-'))) el.value = value;
     }
+    // a pick on a question card is the person's own until they press Answer: it lives in the DOM, not the store
+    for (const id of ticked) {
+      const el = doc.getElementById(id);
+      if (el) el.checked = true;
+    }
     const say = doc.getElementById('say');
     if (say) say.value = composerText;
 
@@ -158,9 +189,10 @@ export function boot(win, host = {}) {
     if (main && sameScreen && scrolls.main != null) main.scrollTop = scrolls.main;
     const drawerBody = root.querySelector('.drawer-body');
     if (drawerBody && last.drawer && last.drawer === drawerOf(s) && scrolls.drawer != null) drawerBody.scrollTop = scrolls.drawer;
-    // the thread stays where the person was reading, unless it is another conversation, it gained a message, or they were at the bottom
+    // the thread stays where the person was reading while they read up, however much arrives; at the bottom, or on
+    // another conversation, it follows the tail
     const open = s.route.screen === 'messages' ? currentConversation(s) : null;
-    const threadSig = open ? `${open.id}:${open.messages.length}:${open.thinking ? 1 : 0}` : null;
+    const threadSig = open ? open.id : null;
     const thread = doc.getElementById('thread');
     if (thread) thread.scrollTop = threadAt && !threadAt.bottom && threadSig === last.thread ? threadAt.top : thread.scrollHeight;
 
@@ -272,10 +304,14 @@ export function boot(win, host = {}) {
     suggest: el => { composerText = el.dataset.text; render(); doc.getElementById('say')?.focus(); },
     // the gates: a card's ✗ / ✓, a question card's Answer
     answer: el => { void actions.answer(el.dataset.msg, el.dataset.value); },
+    // the batch is read from the pressed card alone; one with a question left blank is refused before it can settle the gate
     answerQuestion: el => {
       const conv = store.get().conversations.find(c => c.id === el.dataset.conv);
       const m = conv?.messages.find(x => x.id === el.dataset.msg);
-      if (m) void actions.answer(m.id, answersFrom(root, m.data?.questions));
+      if (!m) return;
+      const batch = answersFrom(el.closest?.('[data-gate]') ?? root, m.data?.questions, m.id);
+      if (!complete(batch)) { store.dispatch('hostStatus', { line: 'Answer every question first', bad: true }); return; }
+      void actions.answer(m.id, batch);
     },
     toggleDetails: () => store.dispatch('toggleDetails'),
     openSettings: () => store.dispatch('openSettings'),

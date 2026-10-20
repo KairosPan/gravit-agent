@@ -9,6 +9,8 @@ import { setMarkdown } from '../../client/js/render/thread.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { MIN } from '../../client/js/time.js';
+import { renderMarkdown } from '../../client/js/wire/markdown.js';
+import { withMiniDocument } from './helpers/mini-dom.js';
 
 const NOW = new Date(2026, 9, 19, 14, 7).getTime();
 const css = await readFile(new URL('../../client/css/app.css', import.meta.url), 'utf8');
@@ -73,6 +75,17 @@ test('every token app.css reads is declared: a var(--x) nobody defines falls bac
   const declared = new Set((tokens + css).match(/--[\w-]+(?=\s*:)/g));
   const read = new Set(css.match(/var\(\s*(--[\w-]+)/g).map(x => x.replace(/var\(\s*/, '')));
   assert.deepEqual([...read].filter(t => !declared.has(t)), [], 'tokens read but never declared');
+});
+
+test("Gravit's markdown has its rules: every class markdown.js emits, and links in an answer that look like links", () => {
+  const sample = '## Breadth\n\n**NVDA** leads; see [the filing](https://www.sec.gov/x) and `ADV`.\n\n- one\n  - two\n\n1. first\n\n> a quote\n\n---\n\n```\nzstd -dc log\n```\n\n| sym | chg |\n|---|---|\n| NVDA | +3.1% |\n| AMD | -1.2% |';
+  const html = withMiniDocument(() => renderMarkdown(sample).node.outerHTML);
+  const classes = new Set(html.match(/class="([^"]+)"/g).flatMap(x => x.slice(7, -1).split(/\s+/)));
+  for (const c of ['md', 'md-h', 'md-h2', 'md-code', 'md-list', 'md-quote', 'md-hr', 'md-fence', 'md-tablewrap', 'viz-table', 'num', 'up', 'down']) assert.ok(classes.has(c), `the sample emits ${c}`);
+  const missing = [...classes].filter(c => !new RegExp(`\\.${c.replace(/[-]/g, '\\-')}(?![\\w-])`).test(css));
+  assert.deepEqual(missing, [], 'markdown classes without a rule');
+  assert.match(css, /\.md a\s*\{[^}]*color: var\(--[\w-]+\)/, 'a link in an answer carries a colour of its own');
+  assert.match(css, /\.md-tablewrap\s*\{[^}]*overflow-x: auto/, 'a wide table scrolls inside the bubble');
 });
 
 test('app.css is well formed: braces never close more than they opened, so no rule is swallowed', () => {

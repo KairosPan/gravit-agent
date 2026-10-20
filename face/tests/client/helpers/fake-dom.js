@@ -1,7 +1,8 @@
 // gravit-ui/tests/helpers/fake-dom.js — just enough of a window and document to run boot() under node:test.
 // It does not parse HTML. Elements are registered by id or by selector and persist across renders; each
-// innerHTML write behaves like the browser replacing the nodes: scroll positions go to 0, typed values go
-// back to what the markup says, and focus falls to <body>. That is what the app has to repair after a render.
+// innerHTML write behaves like the browser replacing the nodes: scroll positions go to 0, typed values and
+// checked boxes go back to what the markup says, and focus falls to <body>. That is what the app has to
+// repair after a render.
 // An element registered with presentIf (a RegExp) is found only while the last render's markup matches it.
 
 export function fakeWindow({ hash = '#/messages/c-1', storage = null, prompt = () => null, confirm = () => true } = {}) {
@@ -40,6 +41,7 @@ export function fakeWindow({ hash = '#/messages/c-1', storage = null, prompt = (
         el.scrollTop = 0;
         el.scrollLeft = 0;
         el.value = el.rendered;
+        el.checked = el.renderedChecked ?? false;
       }
       doc.activeElement = body;
     },

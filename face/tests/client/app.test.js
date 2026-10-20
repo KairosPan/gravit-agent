@@ -2,8 +2,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseHash, toHash } from '../../client/js/router.js';
-import { Timers, routeOf, settle, initialState, prefsOf, makeStore, answersFrom, PREFS_KEY } from '../../client/js/app.js';
+import { Timers, routeOf, settle, initialState, prefsOf, makeStore, answersFrom, gravitMarkdown, PREFS_KEY } from '../../client/js/app.js';
 import { emptyState } from '../../client/js/data/empty.js';
+import { withMiniDocument } from './helpers/mini-dom.js';
 
 const memory = () => { const m = new Map(); return { getItem: k => m.get(k) ?? null, setItem: (k, v) => m.set(k, v), removeItem: k => m.delete(k), m }; };
 
@@ -64,15 +65,33 @@ test('Timers tracks pending timers and clear() cancels them', async () => {
   assert.equal(t.pending.size, 0);
 });
 
+// a card as the browser hands it to answersFrom: its own inputs, nothing from any other card
+const card = inputs => ({ querySelectorAll: sel => (sel === 'input' ? inputs : []) });
+
 test('answersFrom reads the card\'s inputs into the host\'s batch: every question once, custom text when typed', () => {
-  const inputs = {
-    'input[name="q-q1"]': [{ checked: false, value: 'Yes' }, { checked: true, value: 'No' }],
-    'input[name="q-q2"]': [{ checked: true, value: 'AAPL' }, { checked: true, value: 'NVDA' }],
-    'input[name="q-q3"]': [],
-  };
-  const customs = { 'input[name="q-q3-custom"]': { value: '  nothing more  ' } };
-  const root = { querySelectorAll: sel => inputs[sel] ?? [], querySelector: sel => customs[sel] ?? null };
-  const batch = answersFrom(root, [{ id: 'q1' }, { id: 'q2', multiSelect: true }, { id: 'q3' }]);
+  const c = card([
+    { type: 'radio', name: 'q-ev-2-q1', checked: false, value: 'Yes' }, { type: 'radio', name: 'q-ev-2-q1', checked: true, value: 'No' },
+    { type: 'text', name: 'q-ev-2-q1-custom', value: '' },
+    { type: 'checkbox', name: 'q-ev-2-q2', checked: true, value: 'AAPL' }, { type: 'checkbox', name: 'q-ev-2-q2', checked: true, value: 'NVDA' },
+    { type: 'text', name: 'q-ev-2-q3-custom', value: '  nothing more  ' },
+  ]);
+  const batch = answersFrom(c, [{ id: 'q1' }, { id: 'q2', multiSelect: true }, { id: 'q3' }], 'ev-2');
   assert.deepEqual(batch, { answers: [{ id: 'q1', selected: ['No'] }, { id: 'q2', selected: ['AAPL', 'NVDA'] }, { id: 'q3', selected: [], custom: 'nothing more' }] });
-  assert.deepEqual(answersFrom(root, undefined), { answers: [] });
+  assert.deepEqual(answersFrom(c, undefined, 'ev-2'), { answers: [] });
+});
+
+test('answersFrom reads only its own card: two pending cards asking the same question id never trade answers', () => {
+  const a = card([{ type: 'radio', name: 'q-ev-a-q1', checked: true, value: 'Yes, pin it' }, { type: 'radio', name: 'q-ev-a-q1', checked: false, value: 'Short' }]);
+  const b = card([{ type: 'radio', name: 'q-ev-b-q1', checked: false, value: 'Yes, pin it' }, { type: 'radio', name: 'q-ev-b-q1', checked: true, value: 'Short' }]);
+  assert.deepEqual(answersFrom(a, [{ id: 'q1' }], 'ev-a'), { answers: [{ id: 'q1', selected: ['Yes, pin it'] }] });
+  assert.deepEqual(answersFrom(b, [{ id: 'q1' }], 'ev-b'), { answers: [{ id: 'q1', selected: ['Short'] }] });
+});
+
+test("the markdown the app installs for Gravit's words is the rendered HTML, never the word undefined", () => {
+  const html = withMiniDocument(() => gravitMarkdown('**NVDA** leads; see [the filing](https://www.sec.gov/x)\n\n| sym | chg |\n|---|---|\n| NVDA | +3.1% |'));
+  assert.doesNotMatch(String(html), /undefined/);
+  assert.match(html, /^<div class="md">/);
+  assert.match(html, /<strong>NVDA<\/strong> leads/);
+  assert.match(html, /<a href="https:\/\/www\.sec\.gov\/x" target="_blank" rel="noopener noreferrer">the filing<\/a>/);
+  assert.match(html, /<div class="md-tablewrap"><table class="viz-table">/);
 });
