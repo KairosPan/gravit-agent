@@ -418,6 +418,7 @@ button.toast-key { border: 0; font: inherit; font-size: 13px; }
 .tool-line { display: flex; flex-direction: column; gap: 2px; padding: 4px 0; font-size: 13px; overflow-wrap: anywhere; }
 .disc-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; background: var(--surface-2); border-radius: var(--radius-s); padding: 12px; }
 .disc-broken { color: var(--down); font-weight: 700; font-size: 13px; }
+.bot-edit { display: flex; flex-direction: column; gap: 14px; max-width: 640px; }
 .plug-body > .plug-blurb { font-size: 15px; color: var(--text); }
 .mk-pg { container-type: inline-size; display: flex; flex-direction: column; gap: 22px; min-width: 0; }
 .mk-pg-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }

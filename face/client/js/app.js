@@ -20,6 +20,7 @@ import { startChannels } from './host/channels.js';
 import { renderChannelScreen } from './render/channel.js';
 import { startDiscover } from './host/discover.js';
 import { renderDiscover, renderPlugin } from './render/discover.js';
+import { itemById } from './host/discover-view.js';
 import { statementOf, csvOf } from './host/account-view.js';
 import { canonicalId, assetFor } from './host/market-view.js';
 import { createLiveQuotes } from './wire/market-quotes.js';
@@ -303,6 +304,7 @@ export function boot(win, host = {}) {
       if (r.id === 'agent:gravit') void discover.gravit();
       else if (typeof r.id === 'string' && r.id.startsWith('skill:')) void discover.skill(r.id.slice('skill:'.length));
     }
+    if (r.screen === 'discover' && r.id === 'create' && !(was?.screen === 'discover' && was.id === 'create')) void discover.modelChoices();
     was = r;
     // a deep link the list does not carry yet waits for it
     if (asked.screen === 'messages' && asked.id && asked.id !== 'new' && !store.get().conversations.some(c => c.id === asked.id)) wanted = asked.id;
@@ -314,6 +316,31 @@ export function boot(win, host = {}) {
       openedId = null;
       live.leave();
     }
+  }
+
+  // a bot from Discover's bots listing, by its id
+  const botOf = id => itemById(store.get().discover, `bot:${id}`)?.source ?? null;
+  async function talkToNow(id) {
+    const bot = botOf(id);
+    if (!bot) return;
+    const r = await actions.talkTo(bot);
+    if (r.error) { store.dispatch('discoverStatus', { line: r.error, bad: true }); return; }
+    await live.refresh();
+    go({ screen: 'messages', id: r.id });
+  }
+  // the editor's boxes are read by the ids the page drew them with: the bot's id and the revision it was drawn from
+  async function saveBotNow(id) {
+    const bot = botOf(id);
+    if (!bot) return;
+    const box = key => doc.getElementById(`bot-${bot.id}-${bot.revision ?? ''}-${key}`)?.value ?? '';
+    const done = await discover.saveBot(bot, { name: box('name'), description: box('description'), model: box('model'), soul: box('soul') });
+    if (done === 'saved' && store.get().edit?.kind === 'bot') store.dispatch('cancelEdit');
+  }
+  async function createBotNow() {
+    const box = key => doc.getElementById(`nb-${key}`)?.value ?? '';
+    const made = await discover.createBot({ name: box('name'), id: box('id'), description: box('description'), model: box('model'), soul: box('soul') });
+    if (typeof made === 'string') { store.dispatch('discoverStatus', { line: null }); go({ screen: 'plugin', id: `bot:${made}` }); }
+    else store.dispatch('discoverStatus', { line: made.error, bad: true });
   }
 
   // New channel… in Where: create it, then Where names it; a refusal stays in the editor
@@ -413,6 +440,9 @@ export function boot(win, host = {}) {
     connectAgent: el => { void discover.connect(el.dataset.bin); },
     disconnectAgent: el => { void discover.disconnect(el.dataset.bin); },
     rescanAgents: () => { void discover.rescan(); },
+    // a bot: Talk to opens its conversation, Edit opens its editor (the model routes read for it)
+    talkTo: el => { void talkToNow(el.dataset.id); },
+    editBot: el => { store.dispatch('startEdit', { kind: 'bot', id: el.dataset.id }); void discover.modelChoices(); },
     cancelDraft: () => { store.dispatch('cancelDraft'); go(store.get().route); },
     toggleRail: () => store.dispatch('toggleRail'),
     toggleGroup: el => store.dispatch('toggleGroup', el.dataset.key),
@@ -509,6 +539,8 @@ export function boot(win, host = {}) {
     if (!form) return;
     ev.preventDefault();
     if (form.dataset.action === 'send') void sendNow();
+    else if (form.dataset.action === 'saveBot') void saveBotNow(form.dataset.id);
+    else if (form.dataset.action === 'createBot') void createBotNow();
   });
 
   // typing: the composer keeps its words outside the store; the title and the Markets search go through it

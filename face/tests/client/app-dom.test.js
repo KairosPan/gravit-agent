@@ -23,6 +23,7 @@ function host({ rows = [], pages = {}, meta = { ok: true, archived: [], deleted:
     if (endpoint === 'session/list') return { items: rows };
     if (endpoint === 'session/projections') return { asOfSeq: 20, values: {} };
     if (endpoint === 'session/page') return { records: pages[args.request.address.sessionId] ?? [] };
+    if (endpoint === 'session/create' && args.request.agentPreset) { rows.push(row('s-bot', { updatedAt: 120, agentAvailable: true, projections: { values: { agentPreset: args.request.agentPreset } } })); return { sessionId: 's-bot', agentPreset: args.request.agentPreset }; }
     if (endpoint === 'session/create') { rows.push(row('s-new', { agentAvailable: true })); return { sessionId: 's-new', agentPreset: 'gravit' }; }
     if (endpoint === 'session/fork') { rows.push(row('s-fork', { updatedAt: 99, agentAvailable: true })); return { sessionId: 's-fork' }; }
     return undefined;
@@ -32,6 +33,7 @@ function host({ rows = [], pages = {}, meta = { ok: true, archived: [], deleted:
     '/data/plugins.json': { ok: true, mcp: [{ server: 'alpaca-kit', phase: 'active', tools: [] }], agentTools: [], rows: [] },
     '/data/agents.json': { ok: true, main: { name: 'Gravit', runtime: 'dsh 0.2.0-rc.2' }, local: [], candidates: [{ bin: 'claude', label: 'Claude Code', version: '2.1' }] },
     '/data/memory.json': { ok: true, groups: [] },
+    '/data/bots.json': { ok: true, bots: [{ id: 'buffett', name: 'Buffett Type', description: '', homeCwd: '/r/bots/buffett/home', soul: '# B', revision: 'r1', isDefault: false, listed: true, skills: [], setupIssues: [] }] },
   };
   const getJson = async path => { reads.push(path); return path === '/data/channels.json' ? { ok: true, root: '/r', channels: [...channelRows], ungrouped: [], archived: [], presets: {} } : path === '/data/sessions-meta.json' ? meta : inventory[path] ?? { ok: true, bots: [] }; };
   const posted = [];
@@ -43,6 +45,8 @@ function host({ rows = [], pages = {}, meta = { ok: true, archived: [], deleted:
     if (path === '/data/channels') { const dir = `/r/strategies/${body.name}`; channelRows.push({ workspaceId: `w-${body.name}`, name: body.name, title: body.name, dir, isRoot: false, sessionIds: [] }); return { ok: true, name: body.name, dir, isRoot: false }; }
     if (path === '/data/channels/overview') return { ok: true, channel: channelRows.find(c => c.workspaceId === body.workspaceId), status: {}, body: {}, agents: [], bots: ['buffett'], allBots: [{ id: 'buffett', name: 'Buffett' }, { id: 'drill-bear', name: 'Bear' }] };
     if (path === '/data/channels/bots') return { ok: true, bots: body.bots };
+    if (path === '/data/bots/settings') { const b = inventory['/data/bots.json'].bots[0]; inventory['/data/bots.json'] = { ok: true, bots: [{ ...b, name: body.name, description: body.description, soul: body.soul, model: body.model ?? undefined, revision: 'r2' }] }; return { ok: true }; }
+    if (path === '/data/bots') { inventory['/data/bots.json'] = { ok: true, bots: [...inventory['/data/bots.json'].bots, { id: body.id ?? 'macro', name: body.name, description: '', homeCwd: '/r/bots/macro/home', soul: '', revision: 'm1', isDefault: false, listed: true, skills: [], setupIssues: [] }] }; return { ok: true, id: body.id ?? 'macro', name: body.name, listed: true }; }
     if (path === '/data/agents/connect') { const c = inventory['/data/agents.json'].candidates.find(a => a.bin === body.bin); inventory['/data/agents.json'] = { ...inventory['/data/agents.json'], local: [{ ...c, found: true, auth: { state: 'ok' } }], candidates: [] }; return { ok: true, agent: c }; }
     return { ok: true, addressed: [] };
   };
@@ -819,5 +823,59 @@ test('Connect on a found agent posts its bin and the shelf re-reads', async () =
   await settle();
   assert.deepEqual(h.posted.find(p => p[0] === '/data/agents/connect')[1], { bin: 'claude' });
   assert.match(f.html(), /data-action="disconnectAgent" data-bin="claude"/);
+  store.timers.clear();
+});
+
+test('Save on the bot page posts and the editor shows the new revision', async () => {
+  const f = fakeWindow({ hash: '#/plugin/bot:buffett' });
+  const h = host({ rows: [row('s1')] });
+  const store = started(f, h);
+  await h.ready();
+  await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'editBot', id: 'buffett' } });
+  await settle();
+  assert.match(f.html(), /id="bot-buffett-r1-name"/);
+  f.withId('bot-buffett-r1-name', { tagName: 'INPUT', value: 'Buffett II' });
+  f.withId('bot-buffett-r1-description', { tagName: 'INPUT', value: 'Holds longer' });
+  f.withId('bot-buffett-r1-model', { tagName: 'SELECT', value: '' });
+  f.withId('bot-buffett-r1-soul', { tagName: 'TEXTAREA', value: '# B2' });
+  f.fire('root', 'submit', { target: { closest: () => ({ dataset: { action: 'saveBot', id: 'buffett' } }) } });
+  await settle();
+  assert.deepEqual(h.posted.find(p => p[0] === '/data/bots/settings')[1], { id: 'buffett', revision: 'r1', name: 'Buffett II', description: 'Holds longer', model: null, soul: '# B2' });
+  assert.equal(store.get().edit, null, 'a saved editor closes');
+  assert.match(f.html(), /plug-name">Buffett II</);
+  store.timers.clear();
+});
+
+test('Create a bot creates it and opens its page', async () => {
+  const f = fakeWindow({ hash: '#/discover/create' });
+  const h = host({ rows: [row('s1')] });
+  const store = started(f, h);
+  await h.ready();
+  await settle();
+  f.withId('nb-name', { tagName: 'INPUT', value: 'Macro' });
+  f.withId('nb-id', { tagName: 'INPUT', value: '' });
+  f.withId('nb-description', { tagName: 'INPUT', value: '' });
+  f.withId('nb-model', { tagName: 'SELECT', value: '' });
+  f.withId('nb-soul', { tagName: 'TEXTAREA', value: '' });
+  f.fire('root', 'submit', { target: { closest: () => ({ dataset: { action: 'createBot' } }) } });
+  await settle();
+  assert.deepEqual(h.posted.find(p => p[0] === '/data/bots')[1], { name: 'Macro' });
+  assert.equal(f.win.location.hash, '#/plugin/bot:macro');
+  assert.match(f.html(), /plug-name">Macro</);
+  store.timers.clear();
+});
+
+test("Talk to opens the bot's conversation", async () => {
+  const f = fakeWindow({ hash: '#/plugin/bot:buffett' });
+  const h = host({ rows: [row('s1')] });
+  const store = started(f, h);
+  await h.ready();
+  await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'talkTo', id: 'buffett' } });
+  await settle();
+  assert.deepEqual(h.calls.find(c => c[0] === 'session/create')[1], { request: { cwd: '/r/bots/buffett/home', agentPreset: 'buffett' } });
+  assert.equal(store.get().route.screen, 'messages');
+  assert.equal(store.get().route.id, 's-bot');
   store.timers.clear();
 });

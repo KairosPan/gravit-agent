@@ -14,4 +14,5 @@ export const reducers = {
   skillLoaded: (s, { name, detail }) => skillOf(s, name, { status: 'ready', detail }),
   skillFailed: (s, { name }) => skillOf(s, name, { status: 'failed' }),
   discoverStatus: (s, { line, bad = false }) => disc(s, { status: typeof line === 'string' && line !== '' ? { line, bad } : null }),
+  modelsLoaded: (s, { choices }) => disc(s, { models: Array.isArray(choices) ? choices : [] }),
 };

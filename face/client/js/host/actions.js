@@ -147,5 +147,18 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
     }
   }
 
-  return { send, newConversation, answer, stop, rename, command, fork, archive, remove };
+  // Talk to <bot>: its newest home conversation that is not archived, else a new one in the bot's home with its preset
+  async function talkTo(bot) {
+    const home = store.get().conversations.filter(c => c.kind === 'bot' && c.preset === bot?.id && !c.archived).sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    if (home) return { id: home.id };
+    try {
+      const created = await call('session/create', { request: { cwd: bot.homeCwd, agentPreset: bot.id } });
+      if (typeof created?.sessionId !== 'string') throw new Error('session/create returned no sessionId');
+      return { id: created.sessionId };
+    } catch (err) {
+      return { error: `talk to: ${err?.code ?? err?.message ?? 'failed'}` };
+    }
+  }
+
+  return { send, newConversation, answer, stop, rename, command, fork, archive, remove, talkTo };
 }

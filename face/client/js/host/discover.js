@@ -2,6 +2,9 @@
 // four listings, each alone; the Gravit item's three reads, each alone; a skill's content; the agent writes. Impure;
 // nothing here draws. A plain read joins the shelf's flight, a read after a write starts a fresh one, and only the
 // latest-started read of a shelf lands.
+import { botSettingsPayload, botModelChoices, normalizeBotModel } from '../wire/botSettings.js';
+import { proposeBotId } from '../wire/botId.js';
+
 export const SHELF_PATHS = Object.freeze({ plugins: '/data/plugins.json', bots: '/data/bots.json', agents: '/data/agents.json', memory: '/data/memory.json' });
 export const GRAVIT_KEYS = Object.freeze(['DEEPSEEK_API_KEY', 'APCA_API_KEY_ID', 'APCA_API_SECRET_KEY']);
 
@@ -86,5 +89,75 @@ export function startDiscover({ store, getJson, postJson, call, now = Date.now }
   const disconnect = bin => agentWrite('/data/agents/disconnect', { bin }, 'disconnect');
   const rescan = () => agentWrite('/data/agents/rescan', {}, 'rescan');
 
-  return { load, read, gravit, skill, connect, disconnect, rescan };
+  // the model routes a bot may name: session/modelCatalog's groups, read once
+  let models = null;
+  function modelChoices() {
+    models ??= Promise.resolve()
+      .then(() => call('session/modelCatalog', {}))
+      .then(catalog => botModelChoices(catalog), () => [])
+      .then(choices => { store.dispatch('modelsLoaded', { choices }); return choices; });
+    return models;
+  }
+
+  // a bot's settings, checked against the revision the page was drawn from: a stale revision is refused by the face
+  // ("changed since this view was loaded") and the bots are read again; a save the face kept but could not re-declare
+  // counts as saved, its words on Discover's line
+  async function saveBot(bot, fields) {
+    let payload;
+    try {
+      payload = botSettingsPayload(bot, fields);
+    } catch (err) {
+      store.dispatch('discoverStatus', { line: err?.message ?? 'save: failed', bad: true });
+      return 'failed';
+    }
+    try {
+      await postJson('/data/bots/settings', payload);
+      store.dispatch('discoverStatus', { line: null });
+      await read('bots', { fresh: true });
+      return 'saved';
+    } catch (err) {
+      const said = words(err);
+      if (err?.status === 409 && /changed since this view was loaded/.test(said)) {
+        store.dispatch('discoverStatus', { line: 'Changed elsewhere — reloaded', bad: true });
+        await read('bots', { fresh: true });
+        return 'stale';
+      }
+      if (err?.status === 500 && /^bots\/\S+ was saved, but/.test(said)) {
+        store.dispatch('discoverStatus', { line: said, bad: true });
+        await read('bots', { fresh: true });
+        return 'saved';
+      }
+      store.dispatch('discoverStatus', { line: `save: ${said}`, bad: true });
+      return 'failed';
+    }
+  }
+
+  // a new bot: blank fields left out (the face proposes the id from the name and fills the soul from its template);
+  // a name with no ASCII letters proposes no id, so it needs one before anything is posted
+  async function createBot({ name, id, description, model, soul }) {
+    const clean = v => (typeof v === 'string' ? v.trim() : '');
+    const n = clean(name);
+    const i = clean(id);
+    if (!n && !i) return { error: 'Give it a name' };
+    if (!i && proposeBotId(n) === '') return { error: 'Give it an id: a-z, 0-9, -' };
+    let route;
+    try {
+      route = normalizeBotModel(typeof model === 'string' ? model : '');
+    } catch (err) {
+      return { error: err?.message ?? 'Use provider/model' };
+    }
+    const body = {
+      ...(n ? { name: n } : {}), ...(i ? { id: i } : {}), ...(clean(description) ? { description: clean(description) } : {}),
+      ...(route ? { model: route } : {}), ...(typeof soul === 'string' && soul.trim() !== '' ? { soul } : {}),
+    };
+    try {
+      const made = await postJson('/data/bots', body);
+      await read('bots', { fresh: true });
+      return typeof made?.id === 'string' ? made.id : { error: 'Created, not listed yet' };
+    } catch (err) {
+      return { error: words(err) };
+    }
+  }
+
+  return { load, read, gravit, skill, connect, disconnect, rescan, modelChoices, saveBot, createBot };
 }

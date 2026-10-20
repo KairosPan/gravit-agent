@@ -134,3 +134,44 @@ test('markup in a soul, a skill, a tool description and a reason stays text', ()
   assert.doesNotMatch(html, /<img/);
   assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
 });
+
+test("the bot page offers Talk to and Edit; the editor's field ids carry the revision", () => {
+  const s = loaded({ screen: 'plugin', id: 'bot:buffett' });
+  const h = renderPlugin(s);
+  assert.match(h, /data-action="talkTo" data-id="buffett"[^>]*>Talk to Buffett Type</);
+  assert.match(h, /data-action="editBot" data-id="buffett"/);
+  const editing = R.startEdit(s, { kind: 'bot', id: 'buffett' });
+  const e = renderPlugin(R.modelsLoaded(editing, { choices: [{ value: 'deepseek/deepseek-chat', label: 'DeepSeek · Chat' }, { value: 'kimi/k2', label: 'Kimi · K2' }] }));
+  assert.match(e, /<form class="bot-edit" data-action="saveBot" data-id="buffett">/);
+  assert.match(e, /id="bot-buffett-r1-name"[^>]*value="Buffett Type"/);
+  assert.match(e, /id="bot-buffett-r1-description"/);
+  assert.match(e, /<select id="bot-buffett-r1-model"[^>]*><option value="">Default<\/option><option value="deepseek\/deepseek-chat" selected>DeepSeek · Chat<\/option><option value="kimi\/k2">Kimi · K2<\/option>/);
+  assert.match(e, /<textarea id="bot-buffett-r1-soul"[^>]*># Buffett\nBuy cheap\.<\/textarea>/);
+  assert.match(e, /data-action="cancelEdit"/);
+  const l = listings();
+  l.bots.data.bots = [{ ...buffett, revision: 'r2', model: 'other/route' }];
+  const later = renderPlugin(R.startEdit(loadedFrom(l, { screen: 'plugin', id: 'bot:buffett' }), { kind: 'bot', id: 'buffett' }));
+  assert.match(later, /id="bot-buffett-r2-name"/, 'a new revision, new boxes');
+  assert.match(later, /<option value="other\/route" selected>other\/route<\/option>/, 'a model not in the catalog is still offered');
+});
+
+test('a broken or unlisted bot offers no Talk to', () => {
+  for (const over of [{ broken: 'cannot mount' }, { listed: false }]) {
+    const l = listings();
+    l.bots.data.bots = [{ ...buffett, ...over }];
+    const h = renderPlugin(loadedFrom(l, { screen: 'plugin', id: 'bot:buffett' }));
+    assert.doesNotMatch(h, /data-action="talkTo"/, JSON.stringify(over));
+    assert.match(h, /data-action="editBot"/);
+  }
+});
+
+test('the Create page', () => {
+  const h = renderDiscover(R.modelsLoaded(loaded({ screen: 'discover', id: 'create' }), { choices: [{ value: 'deepseek/deepseek-chat', label: 'DeepSeek · Chat' }] }));
+  assert.match(h, /href="#\/discover"[^>]*>‹ Discover/);
+  assert.match(h, /<h1 class="plug-name">Create a bot<\/h1>/);
+  assert.match(h, /<form class="bot-edit" data-action="createBot">/);
+  for (const id of ['nb-name', 'nb-id', 'nb-description', 'nb-model', 'nb-soul']) assert.match(h, new RegExp(`id="${id}"`), id);
+  assert.match(h, /<option value="">Default<\/option><option value="deepseek\/deepseek-chat">DeepSeek · Chat<\/option>/);
+  assert.match(h, /type="submit"[^>]*>Create</);
+  assert.doesNotMatch(h, /shelf-title/);
+});

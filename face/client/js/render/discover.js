@@ -58,7 +58,22 @@ function header(state) {
     `<span class="spacer"></span><a class="pill" href="#/discover/create">${icon('plus', 14, 2.2)}Create a bot</a></div>`;
 }
 
+// Create a bot: a name (the id proposed from it unless given), a description, a model, a soul; blank ones are left to the
+// face (its id rule, its template soul, the default route)
+function createPage(state) {
+  const choices = Array.isArray(state.discover.models) ? state.discover.models : [];
+  const options = [{ value: '', label: 'Default' }, ...choices].map(c => `<option${attrs({ value: c.value })}>${esc(c.label)}</option>`).join('');
+  const box = (key, label) => `<label class="field"><span class="field-label">${label}</span><input${attrs({ id: `nb-${key}`, class: 'input', name: key, type: 'text', autocomplete: 'off' })}></label>`;
+  return '<main class="main disc plugin-page"><a id="page-back" class="back-link page-back" href="#/discover">‹ Discover</a>' +
+    '<header class="plug-head"><div class="plug-title"><h1 class="plug-name">Create a bot</h1></div></header>' +
+    `<div class="plug-body"><form class="bot-edit" data-action="createBot">${box('name', 'Name')}${box('id', 'Id')}${box('description', 'Description')}` +
+    `<label class="field"><span class="field-label">Model</span><select id="nb-model" class="input" name="model">${options}</select></label>` +
+    '<label class="field"><span class="field-label">Soul</span><textarea id="nb-soul" class="textarea" name="soul" rows="14"></textarea></label>' +
+    `<div class="btn-row"><button type="submit" class="btn-primary">Create</button></div></form></div>${renderStatus(state.discover.status)}</main>`;
+}
+
 export function renderDiscover(state) {
+  if (state.route.id === 'create') return createPage(state);
   const d = state.discover;
   const items = itemsOf(d);
   let body;
@@ -80,6 +95,21 @@ function mcpPage(m) {
   const tools = Array.isArray(m.tools) ? m.tools.filter(t => t && typeof t.name === 'string') : [];
   return kv([['State', esc(PHASE[m.phase] ?? '—')]]) +
     sec('Tools', tools.length ? tools.map(t => `<div class="tool-line"><span class="mono">${esc(t.name)}</span>${t.description ? `<span class="dim">${esc(t.description)}</span>` : ''}</div>`).join('') : dim('None'));
+}
+
+// a bot's editor: every box's id carries the revision it was drawn from, so a re-read after a stale save brings the
+// saved values instead of the typing that lost the race
+function botEditor(b, state) {
+  const id = `bot-${b.id}-${b.revision ?? ''}`;
+  const choices = Array.isArray(state.discover.models) ? state.discover.models : [];
+  const current = typeof b.model === 'string' && b.model !== '' ? b.model : '';
+  const options = [{ value: '', label: 'Default' }, ...choices, ...(current && !choices.some(c => c.value === current) ? [{ value: current, label: current }] : [])]
+    .map(c => `<option${attrs({ value: c.value, selected: c.value === current })}>${esc(c.label)}</option>`).join('');
+  const box = (key, label, value) => `<label class="field"><span class="field-label">${label}</span><input${attrs({ id: `${id}-${key}`, class: 'input', name: key, type: 'text', autocomplete: 'off', value })}></label>`;
+  return `<form class="bot-edit" data-action="saveBot" data-id="${esc(b.id)}">${box('name', 'Name', b.name ?? '')}${box('description', 'Description', b.description ?? '')}` +
+    `<label class="field"><span class="field-label">Model</span><select${attrs({ id: `${id}-model`, class: 'input', name: 'model' })}>${options}</select></label>` +
+    `<label class="field"><span class="field-label">Soul</span><textarea${attrs({ id: `${id}-soul`, class: 'textarea', name: 'soul', rows: 14 })}>${esc(b.soul ?? '')}</textarea></label>` +
+    '<div class="btn-row"><button type="button" class="btn" data-action="cancelEdit">Cancel</button><button type="submit" class="btn-primary">Save</button></div></form>';
 }
 
 function botPage(b) {
@@ -119,6 +149,12 @@ function skillPage(item, state) {
 const KIND_LINE = { MCP: () => 'MCP server', Bot: () => 'Bot', Skill: i => `Skill · ${i.group}`, Agent: i => (i.id === 'agent:gravit' ? 'Main agent' : 'CLI agent') };
 
 function keysOf(item) {
+  if (item.shelf === 'bots') {
+    const b = item.source;
+    // Talk to needs a bot dsh can run: not broken, and on the preset roster
+    const talk = b.broken || b.listed === false ? '' : `<button type="button" class="btn-primary" data-action="talkTo" data-id="${esc(b.id)}">Talk to ${esc(item.name)}</button>`;
+    return `${talk}<button type="button" class="btn-sm" data-action="editBot" data-id="${esc(b.id)}">Edit</button>`;
+  }
   if (item.shelf !== 'agents' || item.id === 'agent:gravit') return '';
   const bin = esc(item.source.bin);
   return item.source.connected
@@ -129,7 +165,7 @@ function keysOf(item) {
 function bodyOf(item, state) {
   if (item.id === 'agent:gravit') return gravitPage(state);
   if (item.shelf === 'data') return mcpPage(item.source);
-  if (item.shelf === 'bots') return botPage(item.source);
+  if (item.shelf === 'bots') return state.edit?.kind === 'bot' && state.edit.id === item.source.id ? botEditor(item.source, state) : botPage(item.source);
   if (item.shelf === 'agents') return agentPage(item.source);
   return skillPage(item, state);
 }

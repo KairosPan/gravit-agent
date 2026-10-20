@@ -166,3 +166,16 @@ test("a 409 on un-archive puts the route's words on the status line", async () =
   assert.equal(r.store.get().status.line, `un-archive: ${words}`);
   assert.equal(r.store.get().status.bad, true);
 });
+
+test("talkTo opens the bot's newest open home conversation, else creates one in its home with its preset", async () => {
+  const bot = { id: 'buffett', homeCwd: '/r/bots/buffett/home' };
+  const convs = [conv('h-old', { kind: 'bot', preset: 'buffett', updatedAt: 3 }), conv('h-new', { kind: 'bot', preset: 'buffett', updatedAt: 9 }), conv('h-arch', { kind: 'bot', preset: 'buffett', updatedAt: 99, archived: 'face' }), conv('s1')];
+  const r = rig({ convs });
+  assert.deepEqual(await r.actions.talkTo(bot), { id: 'h-new' });
+  assert.deepEqual(r.calls, [], 'an open home conversation needs no call');
+  const fresh = rig({ answers: { 'session/create': { sessionId: 's-home', agentPreset: 'buffett' } } });
+  assert.deepEqual(await fresh.actions.talkTo(bot), { id: 's-home' });
+  assert.deepEqual(fresh.calls, [['session/create', { request: { cwd: '/r/bots/buffett/home', agentPreset: 'buffett' } }]]);
+  const down = rig({ answers: { 'session/create': err({ code: 'preset/broken' }) } });
+  assert.deepEqual(await down.actions.talkTo(bot), { error: 'talk to: preset/broken' });
+});

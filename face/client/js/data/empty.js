@@ -23,7 +23,7 @@ export function emptyState() {
     discover: {
       query: '',
       shelves: Object.fromEntries(['plugins', 'bots', 'agents', 'memory'].map(k => [k, { status: 'idle', data: null, at: null }])),
-      gravit: { host: null, model: null, keys: null }, skills: {}, status: null,
+      gravit: { host: null, model: null, keys: null }, skills: {}, status: null, models: null,
     },
     // the host's markets (host/markets.js) and the screen's own tab, sort and query
     markets: {

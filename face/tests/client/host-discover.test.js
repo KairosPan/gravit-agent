@@ -82,3 +82,55 @@ test("connect posts the bin and re-reads the agents; a 404 puts its words on Dis
   assert.deepEqual(rescan.d().shelves.agents.data.candidates, [{ bin: 'claude', version: '2.1' }], 'rescan answers the listing itself');
   assert.deepEqual(rescan.posted, [['/data/agents/rescan', {}]]);
 });
+
+const bot = { id: 'buffett', name: 'Buffett Type', description: 'Buys cheap', model: 'deepseek/deepseek-chat', soul: '# B', revision: 'r1', homeCwd: '/r/bots/buffett/home' };
+const fields = (over = {}) => ({ name: ' Buffett Type ', description: 'Buys cheaper', model: '', soul: '# B2', ...over });
+
+test('saveBot posts the revision-checked payload and re-reads the bots', async () => {
+  const r = rig({ json: { ...ok } });
+  assert.equal(await r.discover.saveBot(bot, fields()), 'saved');
+  assert.deepEqual(r.posted, [['/data/bots/settings', { id: 'buffett', revision: 'r1', name: 'Buffett Type', description: 'Buys cheaper', model: null, soul: '# B2' }]]);
+  assert.ok(r.reads.includes('/data/bots.json'), 'the bots are read again');
+  assert.equal(await r.discover.saveBot(bot, fields({ model: 'not a route' })), 'failed');
+  assert.match(r.d().status.line, /provider\/model/);
+  assert.equal(r.posted.length, 1, 'a bad model route is refused before the post');
+});
+
+test('a stale revision reads stale and the line says Changed elsewhere', async () => {
+  const words = 'bot settings changed since this view was loaded; reload before saving';
+  const r = rig({ json: { ...ok }, posts: { '/data/bots/settings': Object.assign(new Error(words), { status: 409, code: words }) } });
+  assert.equal(await r.discover.saveBot(bot, fields()), 'stale');
+  assert.deepEqual(r.d().status, { line: 'Changed elsewhere — reloaded', bad: true });
+  assert.ok(r.reads.includes('/data/bots.json'));
+  const other = rig({ posts: { '/data/bots/settings': Object.assign(new Error('bot already exists'), { status: 409, code: 'bot already exists' }) } });
+  assert.equal(await other.discover.saveBot(bot, fields()), 'failed', 'another 409 is a plain refusal');
+  assert.deepEqual(other.d().status, { line: 'save: bot already exists', bad: true });
+});
+
+test('a saved-but 500 counts as saved', async () => {
+  const words = 'bots/buffett was saved, but the running face could not re-declare it';
+  const r = rig({ json: { ...ok }, posts: { '/data/bots/settings': Object.assign(new Error(words), { status: 500, code: words }) } });
+  assert.equal(await r.discover.saveBot(bot, fields()), 'saved');
+  assert.deepEqual(r.d().status, { line: words, bad: true });
+});
+
+test('createBot omits blank fields; a name with no ASCII needs an id before any post', async () => {
+  const r = rig({ json: { ...ok }, posts: { '/data/bots': body => ({ ok: true, id: body.id ?? 'macro-bot', name: body.name, listed: false }) } });
+  assert.equal(await r.discover.createBot({ name: ' Macro Bot ', id: '', description: '', model: '', soul: '  ' }), 'macro-bot');
+  assert.deepEqual(r.posted, [['/data/bots', { name: 'Macro Bot' }]]);
+  assert.ok(r.reads.includes('/data/bots.json'), 'an unlisted new bot sends the face back to the listing');
+  assert.deepEqual(await r.discover.createBot({ name: '宏观派', id: '', description: '', model: '', soul: '' }), { error: 'Give it an id: a-z, 0-9, -' });
+  assert.equal(await r.discover.createBot({ name: '宏观派', id: 'macro', description: 'Top down', model: 'deepseek/deepseek-chat', soul: '# M' }), 'macro');
+  assert.deepEqual(r.posted[1], ['/data/bots', { name: '宏观派', id: 'macro', description: 'Top down', model: 'deepseek/deepseek-chat', soul: '# M' }]);
+  assert.deepEqual(await r.discover.createBot({ name: '', id: '', description: '', model: '', soul: '' }), { error: 'Give it a name' });
+  const taken = rig({ posts: { '/data/bots': Object.assign(new Error('bot already exists'), { status: 409, code: 'bot already exists' }) } });
+  assert.deepEqual(await taken.discover.createBot({ name: 'Macro', id: '', description: '', model: '', soul: '' }), { error: 'bot already exists' });
+});
+
+test('modelChoices reads the catalog once into the store', async () => {
+  const r = rig({ calls: { 'session/modelCatalog': { groups: [{ id: 'deepseek', name: 'DeepSeek', models: [{ id: 'deepseek-chat', name: 'Chat' }] }] } } });
+  await r.discover.modelChoices();
+  await r.discover.modelChoices();
+  assert.deepEqual(r.d().models, [{ value: 'deepseek/deepseek-chat', label: 'DeepSeek · Chat' }]);
+  assert.equal(r.called.filter(c => c[0] === 'session/modelCatalog').length, 1);
+});
