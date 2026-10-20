@@ -4,11 +4,11 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { LEDGER_ROTATE_BYTES, appendEvent, deskDir, readEvents, runsOf, type DeskEvent } from "../src/desk.ts";
-import { recorder } from "./route-recorder.ts";
 import {
-  ASLEEP_THRESHOLD_MS, ASLEEP_TICK_MS, deskStatus, installAsleepWatch, installDesk, registerDeskRoutes,
+  ASLEEP_THRESHOLD_MS, ASLEEP_TICK_MS, LEDGER_ROTATE_BYTES, appendEvent, deskDir, deskStatus, installAsleepWatch,
+  installDesk, readEvents, registerDeskRoutes, runsOf, type DeskEvent,
 } from "../src/desk.ts";
+import { recorder } from "./route-recorder.ts";
 
 const home = (): Promise<string> => mkdtemp(join(tmpdir(), "face-desk-"));
 const boot = (t: string, pid: number): DeskEvent => ({ t, kind: "boot", pid, version: "0.2.0-rc.2", deskEnabled: true });
@@ -88,12 +88,14 @@ test("a torn last line stays one skipped line: the next boot is kept and the cut
 });
 
 function fakeTimer() {
-  let tick: (() => void) | undefined; let cleared = false;
+  let tick: (() => void) | undefined; let cleared = false; let every: number | undefined;
   return {
-    setInterval: (fn: () => void) => { tick = fn; return 1; },
+    setInterval: (fn: () => void, ms: number) => { tick = fn; every = ms; return 1; },
     clearInterval: () => { cleared = true; },
     fire: () => tick?.(),
     get cleared() { return cleared; },
+    /** The interval the watch asked for. */
+    get ms() { return every; },
   };
 }
 
@@ -116,8 +118,24 @@ test("a backwards clock is no gap", () => {
   const timer = fakeTimer(); let t = 1_700_000_000_000; const got: DeskEvent[] = [];
   installAsleepWatch({ now: () => t, setInterval: timer.setInterval, clearInterval: timer.clearInterval, append: (e) => { got.push(e); } });
   t -= 10 * 60_000; timer.fire();
+  const landed = t;
   t += ASLEEP_TICK_MS; timer.fire();
   assert.equal(got.length, 0);
+  t += 5 * 60_000; timer.fire();
+  assert.deepEqual(got, [{ t: new Date(t).toISOString(), kind: "asleep", from: new Date(landed + ASLEEP_TICK_MS).toISOString(), to: new Date(t).toISOString(), gapMs: 5 * 60_000 }],
+    "the watch keeps running, and measures on the clock where it landed");
+  assert.equal(timer.cleared, false);
+});
+
+test("a gap of exactly the threshold is no sleep and one millisecond more is; the tick defaults to ASLEEP_TICK_MS", () => {
+  const timer = fakeTimer(); let t = 1_700_000_000_000; const got: DeskEvent[] = [];
+  installAsleepWatch({ now: () => t, setInterval: timer.setInterval, clearInterval: timer.clearInterval, append: (e) => { got.push(e); } });
+  assert.equal(timer.ms, ASLEEP_TICK_MS); assert.equal(ASLEEP_TICK_MS, 30_000);
+  t += ASLEEP_THRESHOLD_MS; timer.fire();
+  assert.equal(got.length, 0, "strictly greater: a gap of exactly the threshold writes nothing");
+  t += ASLEEP_THRESHOLD_MS + 1; timer.fire();
+  assert.equal(got.length, 1);
+  assert.equal((got[0] as { gapMs: number }).gapMs, ASLEEP_THRESHOLD_MS + 1);
 });
 
 test("deskStatus: pid, version, uptime, the gaps since boot and the runs", async () => {

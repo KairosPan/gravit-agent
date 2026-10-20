@@ -36,11 +36,11 @@
  * @module
  */
 import { appendFile, mkdir, open, readFile, rename, stat } from "node:fs/promises";
-import type { IncomingMessage, ServerResponse } from "node:http";
+import type { IncomingMessage } from "node:http";
 import { join } from "node:path";
 import { withFileLock } from "@deepseek-ai/dsh-atomic-write";
 import { isTrustedDataRequest } from "./data.ts";
-import { FORBIDDEN, HttpError } from "./http.ts";
+import { fencedGet } from "./http.ts";
 import type { RouteRegistrar } from "./static.ts";
 import { DSH_PIN } from "./version.ts";
 
@@ -348,13 +348,10 @@ export async function deskStatus(deps: {
 }
 
 /**
- * Mount `GET /data/desk/status`, which answers {@link deskStatus}.
- *
- * The handler is panels.ts's `get` shell, restated rather than imported so that desk.ts does not
- * pull in the panels' dependencies: the browser fence first, refused with the fixed `FORBIDDEN`
- * body; then `200` with the status; an {@link HttpError} as its own status; anything else a `500`
- * with a fixed message, so no filesystem error reaches a body. An unreadable ledger is not a
- * failure here: {@link deskStatus} names it inside a `200`.
+ * Mount `GET /data/desk/status`, which answers {@link deskStatus} through http.ts's
+ * {@link fencedGet}: the browser fence first, refused with the fixed `FORBIDDEN` body; then `200`
+ * with the status; anything that throws, a `500` with a fixed message. An unreadable ledger is
+ * not a failure here: {@link deskStatus} names it inside a `200`.
  * @param webServer - the host webserver service, or a test recorder.
  * @param deps - {@link deskStatus}'s, read on every request, and `isTrusted`, the fence (default
  *   {@link isTrustedDataRequest}).
@@ -365,23 +362,10 @@ export function registerDeskRoutes(
   webServer: RouteRegistrar,
   deps: Parameters<typeof deskStatus>[0] & { isTrusted?: (req: IncomingMessage) => boolean },
 ): void {
-  const isTrusted = deps.isTrusted ?? isTrustedDataRequest;
-  const send = (res: ServerResponse, status: number, body: unknown): void => {
-    res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
-    res.end(typeof body === "string" ? body : JSON.stringify(body));
-  };
   webServer.register({
     kind: "exact",
     path: "/data/desk/status",
-    handler: async (req, res) => {
-      if (!isTrusted(req)) return send(res, 403, FORBIDDEN);
-      try {
-        return send(res, 200, await deskStatus(deps));
-      } catch (err) {
-        if (err instanceof HttpError) return send(res, err.status, { ok: false, error: err.message });
-        return send(res, 500, { ok: false, error: "request failed" });
-      }
-    },
+    handler: fencedGet(deps.isTrusted ?? isTrustedDataRequest, () => deskStatus(deps)),
   });
 }
 
@@ -409,12 +393,19 @@ export interface DeskHandle {
  * @param webServer - the host webserver service, or a test recorder.
  * @param deps - `home`, the harness home; `enabled`, whether to mount the desk's rows; `now`
  *   (default `Date.now`) and `version` (default {@link DSH_PIN}), for the events and the status;
- *   `watch`, the sleep watch's seams for tests - its `append` is always the ledger's.
+ *   `watch`, the sleep watch's clock and timer seams, for tests - not its `append`, which is
+ *   always the ledger's.
  * @throws when the status path is already registered, before anything is written or started.
  */
 export function installDesk(
   webServer: RouteRegistrar,
-  deps: { home: string; enabled: boolean; now?: () => number; version?: string; watch?: Partial<AsleepWatchOptions> },
+  deps: {
+    home: string;
+    enabled: boolean;
+    now?: () => number;
+    version?: string;
+    watch?: Partial<Omit<AsleepWatchOptions, "append">>;
+  },
 ): DeskHandle {
   const { home, enabled } = deps;
   const now = deps.now ?? Date.now;
