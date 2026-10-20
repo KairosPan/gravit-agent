@@ -256,7 +256,7 @@ git commit -m "feat(face): the gravit-desk preset - Gravit's persona, the desk s
 - Test: `face/tests/orders.test.ts`, `face/tests/order-gate.test.ts`
 
 **Interfaces:**
-- Produces: `orderApprovalDecision(name: string, policy: ApprovalPolicyLike, args?: unknown, visible = true): PreToolDecision | null` — for an order tool with `visible === false` it returns `{ kind: "deny", reason: \`${name} is not available in this session - its preset hides it - so no approval card is raised and the order does not run\` }` before the policy check; everything else is unchanged. The ask listener computes `visible` as `tools.get(exec.name, exec.agent) !== undefined`, with `tools` read lazily from the root context at call time (`gateCtx.get("tools")`); when the tools service is absent it passes `true` (today's behaviour).
+- Produces: `orderApprovalDecision(name: string, policy: ApprovalPolicyLike, args?: unknown, visible = true): PreToolDecision | null` — for an order tool with `visible === false` it returns `{ kind: "deny", reason: \`${name} is not available to this session - it is not registered here, or this session's preset hides it - so no approval card is raised and the order does not run\` }` before the policy check; everything else is unchanged. The ask listener computes `visible` as `tools.get(exec.name, exec.agent) !== undefined`, with `tools` read lazily from the root context at call time (`gateCtx.get("tools")`); when the tools service is absent it passes `true` (today's behaviour).
 
 Why: spike 3 measured that dsh runs the `tools/pre-execute` waterfall before it resolves visibility, so a desk (or masked-bot) model that names a hidden order tool raised a card that could only park; the approved call would then fail `unknown tool`.
 
@@ -266,7 +266,7 @@ Why: spike 3 measured that dsh runs the `tools/pre-execute` waterfall before it 
 // face/tests/orders.test.ts (append)
 test("a hidden order tool is denied in the gate's own words, before the policy", () => {
   const d = orderApprovalDecision("mcp__alpaca-kit__place_order", "ask", { side: "buy" }, false);
-  assert.deepEqual(d, { kind: "deny", reason: "mcp__alpaca-kit__place_order is not available in this session - its preset hides it - so no approval card is raised and the order does not run" });
+  assert.deepEqual(d, { kind: "deny", reason: "mcp__alpaca-kit__place_order is not available to this session - it is not registered here, or this session's preset hides it - so no approval card is raised and the order does not run" });
   assert.equal(orderApprovalDecision("mcp__alpaca-kit__place_order", "ask", { side: "buy" }, true)?.kind, "ask");
   assert.equal(orderApprovalDecision("bash", "ask", {}, false), null);
 });
