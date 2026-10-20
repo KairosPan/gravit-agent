@@ -87,8 +87,10 @@ let dispose: (() => Promise<void>) | undefined;
  * deadline that outlives the process's stop can still cancel a member. */
 let disposeRoom: (() => void) | undefined;
 let disposeData: (() => void) | undefined;
-/** The desk (desk.ts), once it is mounted. Both exits below end its run - the
- * ledger's `shutdown`, with the exit code - before the tree goes. */
+/** The desk (desk.ts), once it is mounted. Both exits below end its run first -
+ * the ledger's `shutdown`, with the code the exit asked for - and only then
+ * release the room engine, the data routes and the tree, so a disposer that
+ * throws cannot cost the run its `shutdown` line. */
 let desk: DeskHandle | undefined;
 
 /** Tear the tree down, then leave with `code`. A dispose that rejects still
@@ -98,9 +100,9 @@ let desk: DeskHandle | undefined;
  * beats waiting on an unbounded teardown. */
 async function shutdown(code: number): Promise<void> {
   try {
+    await desk?.dispose(code);
     disposeRoom?.();
     disposeData?.();
-    await desk?.dispose(code);
     await dispose?.();
   } catch (err) {
     console.error(`${BIN}: dispose failed during shutdown:`, err);
@@ -300,9 +302,10 @@ registerRoomRoutes(booted.ctx.webServer, room);
 await registerPanelRoutes(booted.ctx.webServer, deps);
 /* The desk (desk.ts): `/data/desk/status` always; the ledger's `boot` and the
  * sleep watch unless `FACE_DESK=0`, the switch for a second face beside the
- * service (spec §5.2) - the ledger assumes one desk-enabled face per home, so a
- * second face on the service's home runs with it. Mounted here, after
- * `bootFace` bound the port, so a face that lost the port never writes a
+ * service (docs/superpowers/specs/2026-10-19-always-on-gravit-design.md §5.2),
+ * which runs on a scratch home with `FACE_DESK=0` (face/README.md, "Run as a
+ * service") - the ledger assumes one desk-enabled face per home. Mounted here,
+ * after `bootFace` bound the port, so a face that lost the port never writes a
  * `boot`. `ready` is deliberately not awaited: the ledger must never delay
  * readiness, and `dispose` orders the `shutdown` after the `boot` anyway. */
 desk = installDesk(booted.ctx.webServer, { home: dshHome, enabled: process.env.FACE_DESK !== "0" });

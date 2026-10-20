@@ -212,19 +212,25 @@ const untilBootout = (state: string, pid?: number, bootout?: { ok: boolean; out:
 
 interface Rig { deps: ServiceDeps; calls: string[][]; urls: string[]; sleeps: number[]; plist: string; text(): string; reset(): void }
 
+/** A fake launchctl: given a call and the calls so far (this one included), its answer, or `undefined` for the rig's default. */
+type Launchctl = (args: string[], calls: string[][]) => { ok: boolean; out: string } | undefined;
+
 /**
  * A ServiceDeps over fresh temp dirs (homeDir, home = homeDir/.dsh, root) that records every launchctl call,
  * every URL fetched, every sleep and every line printed; `reset` forgets them. `launchctl` answers a call,
  * given the calls so far (this one included), when it returns something; otherwise `print` fails (launchd
  * has no job) and every other call succeeds. `answer` is the port's answer given the calls so far;
- * `undefined` (the default) is a refused connection.
+ * `undefined` (the default) is a refused connection. The home has the `profiles/face` install requires
+ * unless `profile` is false.
  */
 async function rig(o: {
-  launchctl?: (args: string[], calls: string[][]) => { ok: boolean; out: string } | undefined;
+  launchctl?: Launchctl;
   answer?: (calls: string[][]) => Response | undefined;
   platform?: NodeJS.Platform;
+  profile?: boolean;
 } = {}): Promise<Rig> {
   const homeDir = await home(); const root = await home();
+  if (o.profile !== false) await mkdir(join(homeDir, ".dsh", "profiles", "face"), { recursive: true });
   const calls: string[][] = []; const urls: string[] = []; const sleeps: number[] = []; const lines: string[] = [];
   const deps: ServiceDeps = {
     launchctl: (args) => { calls.push(args); return o.launchctl?.(args, calls) ?? { ok: args[0] !== "print", out: "" }; },
@@ -267,6 +273,33 @@ const boot = (pid: number) => ({ t: "2026-10-19T15:00:00.000Z", kind: "boot", pi
 const deskStatusOf = (pid: number): DeskStatus => ({ ok: true, pid, version: "v", bootedAt: "2026-10-19T15:00:00.000Z", uptimeMs: 60_000,
   desk: { enabled: true, dir: "/d" }, asleep: [], runs: [{ bootedAt: "2026-10-19T15:00:00.000Z", pid, lost: false }] });
 
+/** The route's answer, every time it is asked, from a face of pid `pid`. */
+const answeredBy = (pid: number) => (): Response => new Response(JSON.stringify(deskStatusOf(pid)), { status: 200 });
+
+/** What `url` adds to the log's URL while the face does not answer. */
+const NOT_YET = " (the face is not answering yet; this may be the previous run's URL)";
+
+/** install's line for a checkout inside a folder macOS guards per app. */
+const privacyLine = (folder: string, errLog: string): string => `privacy: the checkout is in ${folder}, which macOS guards per app - `
+  + "on the first start macOS may ask whether node may access it: allow it, or grant node access under System Settings → Privacy & Security → "
+  + `Files and Folders; otherwise the service exits with EPERM, which shows in ${errLog}`;
+
+/** A running job (pid 42) that launchd still holds at the first ask after the bootout and lets go of at
+ * the next, the bootout answering `Operation now in progress`; and its port, which answers until the
+ * bootout and twice after it. */
+function lettingGo(): { launchctl: Launchctl; answer: (calls: string[][]) => Response | undefined } {
+  let afterBootout = 0;
+  return {
+    launchctl: (args, calls) => {
+      if (args[0] === "bootout") return IN_PROGRESS;
+      if (args[0] !== "print") return undefined;
+      const at = calls.findIndex((c) => c[0] === "bootout");
+      return at < 0 || calls.slice(at + 1).filter((c) => c[0] === "print").length <= 1 ? loaded("running", 42) : undefined;
+    },
+    answer: (calls) => (!calls.some((c) => c[0] === "bootout") || afterBootout++ < 2 ? older() : undefined),
+  };
+}
+
 test("install with no job and the port answering refuses: no plist, no bootstrap", async () => {
   const r = await rig({ answer: older });
   assert.equal(await runService("install", [], r.deps), 1);
@@ -277,16 +310,7 @@ test("install with no job and the port answering refuses: no plist, no bootstrap
 });
 
 test("install replaces a running job: a bootout still in progress, launchd let go of, the port fallen silent, then the plist, enable and bootstrap", async () => {
-  let afterBootout = 0;
-  const r = await rig({
-    launchctl: (args, calls) => {
-      if (args[0] === "bootout") return IN_PROGRESS;
-      if (args[0] !== "print") return undefined;
-      const at = calls.findIndex((c) => c[0] === "bootout");
-      return at < 0 || calls.slice(at + 1).filter((c) => c[0] === "print").length <= 1 ? loaded("running", 42) : undefined;
-    },
-    answer: (calls) => (!calls.some((c) => c[0] === "bootout") || afterBootout++ < 2 ? older() : undefined),
-  });
+  const r = await rig(lettingGo());
   await writeFile(join(r.deps.root, ".env.deepseek"), "DEEPSEEK_API_KEY=d\n");
   assert.equal(await runService("install", [], r.deps), 0, "bootout's exit code is not the outcome: launchd let go of the job");
   assert.deepEqual(r.calls, [["print", JOB], ["bootout", JOB], ["print", JOB], ["print", JOB], ["enable", JOB], ["bootstrap", "gui/501", r.plist]]);
@@ -296,8 +320,64 @@ test("install replaces a running job: a bootout still in progress, launchd let g
   assert.equal(written, servicePlan({ root: r.deps.root, home: r.deps.home, homeDir: r.deps.homeDir, node: "/usr/local/bin/node", path: "/usr/local/bin:/usr/bin", launchAgentsDir: dirname(r.plist) }).plist);
   assert.equal((await stat(r.plist)).mode & 0o777, 0o644);
   assert.equal((await stat(join(r.deps.home, "face", "service"))).mode & 0o777, 0o700, "the logs directory is the operator's alone");
-  for (const line of [`installed: ${r.plist}`, `runs: ${join(r.deps.root, "face", "src", "main.ts")}`,
-    `log: ${join(r.deps.home, "face", "service", "face.log")}`, "next: npm run service -- url"]) assert.ok(r.text().split("\n").includes(line), line);
+  assert.deepEqual(r.text().split("\n").slice(-6), [`installed: ${r.plist}`, `runs: ${join(r.deps.root, "face", "src", "main.ts")}`,
+    `home: ${r.deps.home}`, "node: /usr/local/bin/node", `log: ${join(r.deps.home, "face", "service", "face.log")}`, "next: npm run service -- url"],
+  "what it runs, on which home, with which node; no privacy line for a checkout outside ~/Desktop, ~/Documents and ~/Downloads");
+  assert.ok(!r.text().includes("moving"), "no plist named another home");
+});
+
+test("install refuses a home with no profiles/face before any launchctl call or file", async () => {
+  const r = await rig({ profile: false });
+  await writeFile(join(r.deps.root, ".env.deepseek"), "DEEPSEEK_API_KEY=d\n");
+  const profile = join(r.deps.home, "profiles", "face");
+  assert.equal(await runService("install", [], r.deps), 1);
+  assert.equal(r.text(), `no profile at ${profile}: run "cd face && npm run setup" with DSH_HOME=${r.deps.home} first`);
+  assert.deepEqual([r.calls, r.urls], [[], []], "neither launchd nor the port asked");
+  await assert.rejects(stat(r.plist), "no plist");
+  await assert.rejects(stat(join(r.deps.home, ".env")), "no .env, though a key file holds a name it would copy");
+  await mkdir(dirname(profile), { recursive: true });
+  await writeFile(profile, "");
+  r.reset();
+  assert.equal(await runService("install", [], r.deps), 1, "a file where the profile's directory belongs is no profile");
+  assert.match(r.text(), /^no profile at /);
+  assert.deepEqual(r.calls, []);
+});
+
+test("install names a move of the service's home from the one the installed plist names", async () => {
+  const r = await rig();
+  const old = join(await home(), ".dsh");
+  await putPlist(r, undefined, old);
+  assert.equal(await runService("install", [], r.deps), 0);
+  assert.equal(r.text().split("\n")[0], `moving the service's home from ${old} to ${r.deps.home}`);
+  assert.ok((await readFile(r.plist, "utf8")).includes(`<key>DSH_HOME</key><string>${r.deps.home}</string>`));
+  r.reset();
+  assert.equal(await runService("install", [], r.deps), 0);
+  assert.ok(!r.text().includes("moving"), "a reinstall on the installed home moves nothing");
+  const refused = await rig({ profile: false });
+  await putPlist(refused, undefined, old);
+  assert.equal(await runService("install", [], refused.deps), 1);
+  assert.deepEqual(refused.text().split("\n"), [`moving the service's home from ${old} to ${refused.deps.home}`,
+    `no profile at ${join(refused.deps.home, "profiles", "face")}: run "cd face && npm run setup" with DSH_HOME=${refused.deps.home} first`],
+  "the move is said first: it is why the new home is the one checked");
+  assert.ok((await readFile(refused.plist, "utf8")).includes(`<string>${old}</string>`), "a refused install leaves the installed plist alone");
+});
+
+test("install warns before next: that macOS may ask about node for a checkout in ~/Desktop, ~/Documents or ~/Downloads", async () => {
+  for (const folder of ["Desktop", "Documents", "Downloads"]) {
+    const r = await rig();
+    const root = join(r.deps.homeDir, folder, "self-evolve", "evolving-alpha-us");
+    await mkdir(root, { recursive: true });
+    Object.assign(r.deps, { root });
+    assert.equal(await runService("install", [], r.deps), 0, folder);
+    assert.deepEqual(r.text().split("\n").slice(-2), [privacyLine(join(r.deps.homeDir, folder), join(r.deps.home, "face", "service", "face.err.log")),
+      "next: npm run service -- url"], folder);
+  }
+  for (const beside of ["Desktop2", join("Library", "Desktop")]) {
+    const r = await rig();
+    Object.assign(r.deps, { root: join(r.deps.homeDir, beside, "evolving-alpha-us") });
+    assert.equal(await runService("install", [], r.deps), 0, beside);
+    assert.ok(!r.text().includes("privacy:"), `${beside} is not a folder macOS guards`);
+  }
 });
 
 test("install refuses when the port still answers 10 s after the bootout", async () => {
@@ -420,12 +500,41 @@ test("stop boots the job out and waits for launchd to let go of it, whatever boo
   assert.deepEqual(idle.calls, [["print", JOB]], "no bootout for a job launchd lacks");
 });
 
-test("restart: kickstart -k only a running job; every other state takes start's path, a port another process holds refused", async () => {
-  const running = await rig({ launchctl: (args) => (args[0] === "print" ? loaded("running", 42) : undefined), answer: older });
-  await putPlist(running);
-  assert.equal(await runService("restart", [], running.deps), 0);
-  assert.deepEqual(running.calls, [["print", JOB], ["kickstart", "-k", JOB]], "exactly one kickstart -k, and its own port is no refusal");
+test("restart stops a running job as stop does - bootout, launchd let go of, its port fallen silent - then takes start's path: enable, bootstrap", async () => {
+  const r = await rig(lettingGo());
+  await putPlist(r);
+  assert.equal(await runService("restart", [], r.deps), 0, "bootout's exit code is not the outcome: launchd let go of the job");
+  assert.deepEqual(r.calls, [["print", JOB], ["bootout", JOB], ["print", JOB], ["print", JOB], ["enable", JOB], ["bootstrap", "gui/501", r.plist]],
+    "never kickstart -k, whose kill signal launchd does not document; its own port before the bootout is no refusal");
+  assert.deepEqual(r.sleeps, [500, 500, 500], "one poll until launchd let go of the job, two until its face let go of the port");
+  assert.equal(r.text(), [`stopping the running job to start it again: launchctl bootout ${JOB}`,
+    `started: launchd loaded ${r.plist} and runs it (next: npm run service -- url)`].join("\n"));
+});
 
+test("restart fails as stop does when launchd never lets go of the job: no enable, no bootstrap; nor into a port still held", async () => {
+  const stuck = await rig({ launchctl: (args) => (args[0] === "print" ? loaded("running", 42) : args[0] === "bootout" ? IN_PROGRESS : undefined), answer: older });
+  await putPlist(stuck);
+  assert.equal(await runService("restart", [], stuck.deps), 1);
+  assert.equal(stuck.text(), [`stopping the running job to start it again: launchctl bootout ${JOB}`,
+    `launchctl bootout ${JOB} failed: Boot-out failed: 36: Operation now in progress`].join("\n"));
+  assert.deepEqual(stuck.calls, [["print", JOB], ["bootout", JOB], ...Array.from({ length: 21 }, () => ["print", JOB])], "asked at once, then every 500 ms; nothing bootstrapped");
+  assert.equal(stuck.sleeps.length, 20);
+  assert.deepEqual(stuck.urls, [], "the port is not asked about a job launchd still holds");
+
+  const held = await rig({ launchctl: untilBootout("running", 42), answer: older });
+  await putPlist(held);
+  assert.equal(await runService("restart", [], held.deps), 1);
+  assert.match(held.text(), /\nsomething already answers on 127\.0\.0\.1:3090 - stop it \(a terminal npm start\?\)/);
+  assert.deepEqual(held.calls, [["print", JOB], ["bootout", JOB], ["print", JOB]], "stopped, but not bootstrapped into a port still held after 10 s");
+  assert.equal(held.sleeps.length, 20);
+
+  const orphan = await rig({ launchctl: (args) => (args[0] === "print" ? loaded("running", 42) : undefined) });
+  assert.equal(await runService("restart", [], orphan.deps), 1);
+  assert.equal(orphan.text(), "com.gravit.face: not installed (npm run service -- install)");
+  assert.deepEqual(orphan.calls, [["print", JOB]], "with no plist, nothing could bring back a job booted out: it is left running");
+});
+
+test("restart: every state but running takes start's path, a port another process holds refused", async () => {
   const stoppedHeld = await rig({ launchctl: (args) => (args[0] === "print" ? loaded("not running") : undefined), answer: older });
   await putPlist(stoppedHeld);
   assert.equal(await runService("restart", [], stoppedHeld.deps), 1);
@@ -515,8 +624,7 @@ test("status's ledger line: a clean end, an empty ledger, an unreadable one; non
   await mkdir(join(unreadable.deps.home, "face", "desk", "events.jsonl"), { recursive: true });
   await runService("status", [], unreadable.deps);
   assert.match(unreadable.text(), /\nledger: unreadable \(EISDIR\)$/);
-  const answering = await rig({ launchctl: (args) => (args[0] === "print" ? loaded("running", 42) : undefined),
-    answer: () => new Response(JSON.stringify(deskStatusOf(42)), { status: 200 }) });
+  const answering = await rig({ launchctl: (args) => (args[0] === "print" ? loaded("running", 42) : undefined), answer: answeredBy(42) });
   await putPlist(answering);
   await mkdir(join(answering.deps.home, "face", "service"), { recursive: true });
   await writeFile(join(answering.deps.home, "face", "service", "face.log"), "gravit-face: http://127.0.0.1:3090/?token=tok (profile: face)\n");
@@ -524,6 +632,23 @@ test("status's ledger line: a clean end, an empty ledger, an unreadable one; non
   assert.match(answering.text(), /^com\.gravit\.face: running \(pid 42\)\nanswering at http:\/\/127\.0\.0\.1:3090 · up 0h 1m/);
   assert.match(answering.text(), /\nsign in: http:\/\/127\.0\.0\.1:3090\/\?token=tok$/);
   assert.ok(!answering.text().includes("ledger:"));
+  assert.ok(!answering.text().includes("another face"), "the face that answers is launchd's job");
+});
+
+test("status names a face answering on the port that is not launchd's job", async () => {
+  const r = await rig({ launchctl: (args) => (args[0] === "print" ? loaded("running", 42) : undefined), answer: answeredBy(99) });
+  await putPlist(r);
+  assert.equal(await runService("status", [], r.deps), 0);
+  const lines = r.text().split("\n");
+  assert.equal(lines[0], "com.gravit.face: running (pid 42)");
+  assert.deepEqual(lines.slice(-2), ["sign in: no URL in the log yet (npm run service -- logs)",
+    "the face answering on 3090 is pid 99, not launchd's job (pid 42): another face holds the port"], "one line, after formatStatus's output");
+  for (const launchctl of [(args: string[]) => (args[0] === "print" ? loaded("not running") : undefined), undefined]) {
+    const unknown = await rig({ launchctl, answer: answeredBy(99) });
+    await putPlist(unknown);
+    await runService("status", [], unknown.deps);
+    assert.ok(!unknown.text().includes("another face"), "with launchd's pid unknown, there is nothing to compare");
+  }
 });
 
 test("the port is --port, else the installed plist's FACE_PORT, else 3090; a reinstall keeps the installed port", async () => {
@@ -559,7 +684,7 @@ test("status, logs and url read the home the installed plist names, else this sh
   assert.match(r.text(), /\nsign in: http:\/\/127\.0\.0\.1:3090\/\?token=served\nledger: last boot 2026-10-19T15:00:00\.000Z \(pid 88\) - no shutdown event$/);
   r.reset();
   assert.equal(await runService("url", [], r.deps), 0);
-  assert.equal(r.text(), "http://127.0.0.1:3090/?token=served");
+  assert.equal(r.text(), `http://127.0.0.1:3090/?token=served${NOT_YET}`);
   r.reset();
   assert.equal(await runService("logs", [], r.deps), 0);
   assert.equal(r.text(), `== ${join(served, "face", "service", "face.log")}\ngravit-face: http://127.0.0.1:3090/?token=served (profile: face)`);
@@ -571,6 +696,7 @@ test("status, logs and url read the home the installed plist names, else this sh
   r.reset();
   assert.equal(await runService("install", [], r.deps), 0);
   assert.ok((await readFile(r.plist, "utf8")).includes(`<key>DSH_HOME</key><string>${r.deps.home}</string>`), "install writes this shell's home");
+  assert.equal(r.text().split("\n")[0], `moving the service's home from ${served} to ${r.deps.home}`, "and says it moves the service there, unescaped");
   r.reset();
   await runService("status", [], r.deps);
   assert.match(r.text(), /\nledger: last boot 2026-10-19T15:00:00\.000Z \(pid 77\) - no shutdown event$/, "and status follows the plist there");
@@ -580,7 +706,7 @@ test("status, logs and url read the home the installed plist names, else this sh
     await writeFile(r.plist, plist);
     r.reset();
     await runService("url", [], r.deps);
-    assert.equal(r.text(), "http://127.0.0.1:3090/?token=shell", "a plist that names no absolute home: this shell's");
+    assert.equal(r.text(), `http://127.0.0.1:3090/?token=shell${NOT_YET}`, "a plist that names no absolute home: this shell's");
   }
 });
 
@@ -601,10 +727,25 @@ test("logs prints the last 40 lines of each log under its path; url prints the l
   Object.assign(shown.deps, { home: r.deps.home });
   assert.equal(await runService("logs", [], shown.deps), 0);
   assert.equal(shown.text(), [`== ${log}`, ...lines.slice(10), `== ${errLog}`, "boom"].join("\n"));
-  const url = await rig();
+  const url = await rig({ answer: answeredBy(42) });
   Object.assign(url.deps, { home: r.deps.home });
   assert.equal(await runService("url", [], url.deps), 0);
   assert.equal(url.text(), "http://127.0.0.1:3090/?token=new");
+});
+
+test("url says the log's URL may be the previous run's while the face does not answer, asking it once", async () => {
+  for (const answer of [undefined, older]) {
+    const r = await rig({ answer });
+    await putLog(r.deps.home, "gravit-face: http://127.0.0.1:3090/?token=old (profile: face)\n");
+    assert.equal(await runService("url", [], r.deps), 0);
+    assert.equal(r.text(), `http://127.0.0.1:3090/?token=old${NOT_YET}`, answer === undefined ? "a refused connection" : "an answer that is no status");
+    assert.deepEqual(r.urls, ["http://127.0.0.1:3090/data/desk/status"]);
+  }
+  const up = await rig({ answer: answeredBy(42) });
+  await putLog(up.deps.home, "gravit-face: http://127.0.0.1:3090/?token=now (profile: face)\n");
+  assert.equal(await runService("url", [], up.deps), 0);
+  assert.equal(up.text(), "http://127.0.0.1:3090/?token=now");
+  assert.deepEqual(up.urls, ["http://127.0.0.1:3090/data/desk/status"]);
 });
 
 test("an unknown command or argument prints the usage; the launchd commands refuse off macOS before launchctl", async () => {

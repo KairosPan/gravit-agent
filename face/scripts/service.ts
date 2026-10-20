@@ -8,28 +8,32 @@
  *   npm run service -- status       is it loaded, does it answer and since when, how the last run ended, the sign-in URL
  *   npm run service -- start        start it (refused, like install, while anything else answers on the port: a terminal npm start?)
  *   npm run service -- stop         stop it: launchd lets go of the job, and the plist stays for start or the next login
- *   npm run service -- restart      stop it and start it again (after an update, to pick up new code)
+ *   npm run service -- restart      stop it as stop does and start it again (after an update, to pick up new code)
  *   npm run service -- logs         the last 40 lines of each of its two logs
- *   npm run service -- url          the sign-in URL (the one with ?token=) from its log
+ *   npm run service -- url          the sign-in URL (the one with ?token=) from its log - maybe the previous run's while the face does not answer
  *   npm run service -- uninstall    stop it and take it out of launchd; the ledger and $DSH_HOME/.env stay
  *
  * Every command takes `--port N` for a face not on 3090; without it the port is the installed
  * plist's FACE_PORT, else 3090. `install` hands the port to the face as FACE_PORT - the one given,
  * or the installed one, so a reinstall without `--port` does not move the face. The log and the
  * ledger are read from the home the installed plist names (its DSH_HOME) when it names one, else
- * from this shell's; `install` writes this shell's home into the plist.
+ * from this shell's; `install` writes this shell's home into the plist, says so when that moves the
+ * service's home, and refuses a home with no profiles/face - the service runs profile `face`, and
+ * without it would exit 1 every 30 s.
  *
  * What it runs is this checkout - node by its PATH location with tsx's loader imported, running
  * face/src/main.ts as launchd's own process, with face/ as the working directory (main.ts moves to
- * the repo root itself) - so a change here reaches it on the next restart. Its environment is
- * PATH, HOME, DSH_HOME and, only when asked, FACE_PORT, never
- * a key: whatever a LaunchAgent's environment holds sits in its plist and shows in `launchctl
- * print`. The keys live in $DSH_HOME/.env (mode 0600), which dsh reads at boot; `install` writes
- * that file from .env.deepseek, .env.alpaca and .env.ifind at the repo root when the home has none,
- * and never rewrites it. It copies an allow-list of names only ({@link COPIED_KEYS}, and any
- * `ALPHA_*`) and names the rest: dsh refuses a bootstrap-only name (PATH, NODE_OPTIONS, any DSH_*)
- * in the home's .env at boot, which would fail every start, and Gate 1's ALPACA_KIT_ENABLE_ORDERS
- * must never reach the real harness home.
+ * the repo root itself) - so a change here reaches it on the next restart. Under launchd, node is
+ * its own responsible process: for a checkout under ~/Desktop, ~/Documents or ~/Downloads, which
+ * macOS guards per app, `install` warns that the first start may ask whether node may read it. Its
+ * environment is PATH, HOME, DSH_HOME and, only when asked, FACE_PORT, never a key: whatever a
+ * LaunchAgent's environment holds sits in its plist and shows in `launchctl print`. The keys live
+ * in $DSH_HOME/.env (mode 0600), which dsh reads at boot; `install` writes that file from
+ * .env.deepseek, .env.alpaca and .env.ifind at the repo root when the home has none, and never
+ * rewrites it. It copies an allow-list of names only ({@link COPIED_KEYS}, and any `ALPHA_*`) and
+ * names the rest: dsh refuses a bootstrap-only name (PATH, NODE_OPTIONS, any DSH_*) in the home's
+ * .env at boot, which would fail every start, and Gate 1's ALPACA_KIT_ENABLE_ORDERS must never
+ * reach the real harness home.
  *
  * The exports are a pure half - the plan, the home's .env, the parsers and the status text, which
  * touch nothing but the paths their arguments name - and {@link runService}, the commands over
@@ -42,7 +46,7 @@
 import { execFileSync } from "node:child_process";
 import { accessSync, chmodSync, constants, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseEnv } from "node:util";
 import { resolveDshHome } from "@deepseek-ai/dsh-home-paths";
@@ -115,8 +119,9 @@ export function filterPath(path: string): string {
  * - `EnvironmentVariables`: PATH through {@link filterPath}, HOME, DSH_HOME, and FACE_PORT only
  *   when `port` is given - never a key.
  * - `RunAtLoad` and `KeepAlive { SuccessfulExit false }`: started at login, and again after any
- *   exit but a clean one - the face exits 0 on SIGTERM. `stop` does not lean on that: it boots the
- *   job out of launchd, because a face whose teardown throws exits 1 and would be started again.
+ *   exit but a clean one - the face exits 0 on SIGTERM. `stop` and `restart` do not lean on that:
+ *   they boot the job out of launchd, because a face whose teardown throws exits 1 and would be
+ *   started again.
  * - `ThrottleInterval 30`: launchd starts it at most once every 30 s, so a face that cannot boot
  *   (the port taken, a broken checkout) is retried twice a minute, not in a tight loop.
  * - `Umask 63` (077): what the face creates, its logs included, gets no group or other access.
@@ -457,6 +462,13 @@ const POLL_MS = 500;
 /** The key files at the repo root that install writes the home's .env from, in order. */
 const KEY_FILES = [".env.deepseek", ".env.alpaca", ".env.ifind"] as const;
 
+/** The profile the service runs: the plist passes no FACE_PROFILE, so main.ts boots `face`. */
+const PROFILE = "face";
+
+/** The folders in the operator's home that macOS guards per app: a process launchd starts is its
+ * own responsible process, so node itself must be let in. */
+const GUARDED_FOLDERS = ["Desktop", "Documents", "Downloads"] as const;
+
 /** The commands that drive launchd, refused off darwin; `status`, `logs` and `url` only read. */
 const LAUNCHD_COMMANDS: ReadonlySet<string> = new Set(["install", "uninstall", "start", "stop", "restart"]);
 
@@ -544,6 +556,39 @@ function lastLines(text: string, n: number): string[] {
   return body === "" ? [] : body.split("\n").slice(-n);
 }
 
+/** Whether `path` is a directory; a path that is absent or cannot be read is not. */
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/** The folder of {@link GUARDED_FOLDERS} under `homeDir` that `path` is in - the folder itself
+ * included, a sibling that only starts with its name (`Desktop2`) not - or `undefined`. Compared as
+ * the paths are spelled. */
+function guardedFolderOf(path: string, homeDir: string): string | undefined {
+  for (const name of GUARDED_FOLDERS) {
+    const folder = join(homeDir, name);
+    const rel = relative(folder, path);
+    if (rel === "" || (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`))) return folder;
+  }
+  return undefined;
+}
+
+/** Ask the port at once, then every 500 ms for up to 10 s, until nothing answers there: a job of the
+ * service's own that launchd has let go of may still hold it while its face exits. True when
+ * something still answers at the end. */
+async function answersAfterWait(ctx: ServiceContext): Promise<boolean> {
+  let answers = await portAnswers(ctx.port, ctx.deps.fetch);
+  for (let waited = 0; answers && waited < WAIT_MS; waited += POLL_MS) {
+    await ctx.deps.sleep(POLL_MS);
+    answers = await portAnswers(ctx.port, ctx.deps.fetch);
+  }
+  return answers;
+}
+
 function contextOf(deps: ServiceDeps, flagPort: number | undefined): ServiceContext {
   const launchAgentsDir = join(deps.homeDir, "Library", "LaunchAgents");
   const plistPath = join(launchAgentsDir, `${LABEL}.plist`);
@@ -621,7 +666,8 @@ async function ledgerLine(home: string): Promise<string> {
   return `ledger: last boot ${last.bootedAt} (pid ${last.pid}) - ${end}`;
 }
 
-/** `start`, and `restart`'s answer for a job that is not running; `known` is what launchd said, asked here when not given. */
+/** `start`, and `restart`'s answer for a job that is not running and its last step for one it has
+ * just booted out; `known` is what launchd said, asked here when not given. */
 async function startJob(ctx: ServiceContext, known?: JobInfo): Promise<number> {
   const { deps } = ctx;
   if (!ctx.installed) {
@@ -654,6 +700,16 @@ async function startJob(ctx: ServiceContext, known?: JobInfo): Promise<number> {
 const COMMANDS: Record<string, (ctx: ServiceContext) => Promise<number>> = {
   async install(ctx) {
     const { deps, plan, port } = ctx;
+    /* The home install writes into the plist is this shell's: say so when the installed plist
+     * names another, before anything else - a shell with another DSH_HOME moves the service. */
+    if (ctx.installed && ctx.home !== deps.home) deps.out(`moving the service's home from ${ctx.home} to ${deps.home}`);
+    /* The service runs profile face on that home: without it every start exits 1, and launchd
+     * starts it again every 30 s. Refused before any file is written or launchd is asked. */
+    const profile = join(deps.home, "profiles", PROFILE);
+    if (!isDirectory(profile)) {
+      deps.out(`no profile at ${profile}: run "cd face && npm run setup" with DSH_HOME=${deps.home} first`);
+      return 1;
+    }
     const envFile = join(deps.home, ".env");
     let env: ReturnType<typeof ensureHomeEnv>;
     try {
@@ -679,11 +735,7 @@ const COMMANDS: Record<string, (ctx: ServiceContext) => Promise<number>> = {
       const { gone, text } = await bootoutAndWait(ctx);
       if (!gone) return failed(ctx, ["bootout", ctx.job], { out: text });
     }
-    let answers = await portAnswers(port, deps.fetch);
-    for (let waited = 0; replacing && answers && waited < WAIT_MS; waited += POLL_MS) {
-      await deps.sleep(POLL_MS);
-      answers = await portAnswers(port, deps.fetch);
-    }
+    const answers = replacing ? await answersAfterWait(ctx) : await portAnswers(port, deps.fetch);
     const { refuse } = installPlan({ port, answers });
     if (refuse !== undefined) {
       deps.out(refuse);
@@ -701,7 +753,16 @@ const COMMANDS: Record<string, (ctx: ServiceContext) => Promise<number>> = {
     if (!bootstrapped(ctx)) return 1;
     deps.out(`installed: ${plan.path}`);
     deps.out(`runs: ${plan.args.at(-1)}`);
+    deps.out(`home: ${deps.home}`);
+    deps.out(`node: ${plan.args[0]}`);
     deps.out(`log: ${plan.log}`);
+    /* A terminal face reads the checkout under the terminal's grant; under launchd node is its own
+     * responsible process, which macOS asks about - or refuses with EPERM - in these folders. */
+    const guarded = guardedFolderOf(deps.root, deps.homeDir);
+    if (guarded !== undefined) {
+      deps.out(`privacy: the checkout is in ${guarded}, which macOS guards per app - on the first start macOS may ask whether node may access it: `
+        + `allow it, or grant node access under System Settings → Privacy & Security → Files and Folders; otherwise the service exits with EPERM, which shows in ${plan.errLog}`);
+    }
     deps.out("next: npm run service -- url");
     return 0;
   },
@@ -751,14 +812,20 @@ const COMMANDS: Record<string, (ctx: ServiceContext) => Promise<number>> = {
 
   async restart(ctx) {
     const job = jobInfo(ctx);
-    /* `kickstart -k` replaces a face that runs, and nothing else: any other state is start's, so a
-     * port another process holds is refused instead of fed to KeepAlive as an EADDRINUSE loop. */
-    if (!(job.loaded && job.state === "running")) return startJob(ctx, job);
-    const args = ["kickstart", "-k", ctx.job];
-    const result = ctx.deps.launchctl(args);
-    if (!result.ok) return failed(ctx, args, result);
-    ctx.deps.out(`restarted: launchd stopped ${ctx.job} and runs it again, with a new sign-in URL (next: npm run service -- url)`);
-    return 0;
+    /* Only a running job with its plist in place is stopped here. Any other state is start's, so a
+     * port another process holds is refused instead of fed to KeepAlive as an EADDRINUSE loop; and
+     * without the plist, start could not bring back a job this booted out. */
+    if (!ctx.installed || !(job.loaded && job.state === "running")) return startJob(ctx, job);
+    /* Stopped as stop stops it: bootout is launchd's documented stop - SIGTERM, then its exit
+     * timeout - and the face answers SIGTERM with its ledger's shutdown line. kickstart -k's kill
+     * signal is not documented; were it SIGKILL, every restart would read as a lost run. Then the
+     * port is given up to 10 s to fall silent, as install gives it, and start's path enables and
+     * bootstraps the job launchd no longer has. */
+    ctx.deps.out(`stopping the running job to start it again: launchctl bootout ${ctx.job}`);
+    const { gone, text } = await bootoutAndWait(ctx);
+    if (!gone) return failed(ctx, ["bootout", ctx.job], { out: text });
+    await answersAfterWait(ctx);
+    return startJob(ctx, { loaded: false });
   },
 
   async status(ctx) {
@@ -773,6 +840,11 @@ const COMMANDS: Record<string, (ctx: ServiceContext) => Promise<number>> = {
     deps.out(formatStatus({ label: LABEL, info: job.loaded ? job : { state: "not loaded" }, installed: true, status: answer,
       url: log === undefined ? undefined : lastTokenUrl(log), port }));
     if (answer === undefined) deps.out(await ledgerLine(ctx.home));
+    /* The face that answered is not the one launchd runs - a terminal npm start, say - so what it
+     * said above is that face's, not the job's. */
+    else if (job.loaded && job.pid !== undefined && answer.pid !== job.pid) {
+      deps.out(`the face answering on ${port} is pid ${answer.pid}, not launchd's job (pid ${job.pid}): another face holds the port`);
+    }
     return 0;
   },
 
@@ -799,7 +871,15 @@ const COMMANDS: Record<string, (ctx: ServiceContext) => Promise<number>> = {
 
   async url(ctx) {
     const log = readText(ctx.log);
-    ctx.deps.out((log === undefined ? undefined : lastTokenUrl(log)) ?? "no sign-in URL in the log yet (npm run service -- logs)");
+    const url = log === undefined ? undefined : lastTokenUrl(log);
+    if (url === undefined) {
+      ctx.deps.out("no sign-in URL in the log yet (npm run service -- logs)");
+      return 0;
+    }
+    /* The log's last URL is the current run's only once that run has printed it: a face still
+     * booting, or one that never came up, leaves the previous run's last. */
+    const answering = (await fetchStatus(ctx.port, ctx.deps.fetch)) !== undefined;
+    ctx.deps.out(answering ? url : `${url} (the face is not answering yet; this may be the previous run's URL)`);
     return 0;
   },
 };
@@ -817,21 +897,31 @@ const USAGE = `usage: npm run service -- ${Object.keys(COMMANDS).join(" | ")} [-
  * - `status` (the script's default): not installed when the plist is absent, and launchd is not
  *   asked; otherwise launchd's state (`not loaded` when `print` fails or says nothing), what the
  *   face answers on the port ({@link fetchStatus}), the sign-in URL from the log - and, when the
- *   face does not answer, one line from the ledger on how its last run ended.
- * - `install`: the home's .env ({@link ensureHomeEnv}), each finding a line; a job launchd has is
- *   booted out first - a failure when launchd still holds it after 10 s - and its port given up to
- *   10 s to fall silent; refused while the port still answers ({@link installPlan}); then the logs
- *   directory (0700), the plist (0644), `enable` and `bootstrap`.
+ *   face does not answer, one line from the ledger on how its last run ended; when the face that
+ *   answers is not launchd's job (its pid is not the job's), one line saying another face holds the
+ *   port.
+ * - `install`: a move of the service's home from the one the installed plist names is said; a
+ *   `deps.home` with no profiles/face is refused before any file is written or launchd asked; the
+ *   home's .env ({@link ensureHomeEnv}), each finding a line; a job launchd has is booted out first
+ *   - a failure when launchd still holds it after 10 s - and its port given up to 10 s to fall
+ *   silent; refused while the port still answers ({@link installPlan}); then the logs directory
+ *   (0700), the plist (0644), `enable` and `bootstrap`; then the plist, the main.ts, home, node and
+ *   log it runs with, and - for a checkout under ~/Desktop, ~/Documents or ~/Downloads - that macOS
+ *   may ask whether node may access it.
  * - `start`: not installed is a failure; a running job is left alone; refused while the port
  *   answers; then `kickstart` for a loaded job, `enable` and `bootstrap` for one launchd lacks.
  * - `stop`: nothing to do for a job launchd lacks; otherwise `bootout` - not `kill`: a face whose
  *   teardown throws exits 1, which KeepAlive would restart - and a failure only when launchd still
  *   holds the job after 10 s. The plist stays.
- * - `restart`: `kickstart -k` for a running job; in any other state, `start` - so a port another
- *   process holds is refused, never handed to KeepAlive as an EADDRINUSE loop.
+ * - `restart`: for a running job with its plist, `stop`'s `bootout` and wait - a failure, with no
+ *   start, when launchd still holds the job after 10 s - then up to 10 s for the port to fall
+ *   silent, then `start`'s path: `enable` and `bootstrap`. Never `kickstart -k`, whose kill signal
+ *   launchd does not document. In any other state, `start` - so a port another process holds is
+ *   refused, never handed to KeepAlive as an EADDRINUSE loop.
  * - `uninstall`: `bootout` for a job launchd has; the plist goes either way, and a job launchd
  *   still holds after 10 s is a failure, said so; the ledger and the home's .env stay.
- * - `logs`: the last 40 lines of each log that exists; `url`: the log's last sign-in URL.
+ * - `logs`: the last 40 lines of each log that exists; `url`: the log's last sign-in URL, said to be
+ *   maybe the previous run's when the face does not answer ({@link fetchStatus}).
  *
  * Whether a `bootout` worked is never its exit code: launchd is asked until it no longer holds the
  * job ({@link bootoutAndWait}).
