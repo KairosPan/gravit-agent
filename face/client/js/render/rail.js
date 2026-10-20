@@ -5,6 +5,8 @@ import { icon } from '../icons.js';
 import { rowTime } from '../time.js';
 import { needsAnswer } from '../messages.js';
 import { unreadOf } from '../host/sessions.js';
+import { portfolioOf } from '../host/account-view.js';
+import { money } from '../wire/account-model.js';
 import { avatar, groupMark } from './avatars.js';
 
 const NAME = { you: 'You', gravit: 'Gravit', system: '' };
@@ -52,8 +54,13 @@ function navItem(href, name, label, current, mini, badge = 0) {
     `<span class="nav-label">${esc(label)}</span>${badge ? `<span class="nav-badge">${badge}</span>` : ''}</a>`;
 }
 
-// the first level: Messages (its badge counts the conversations with a card waiting on you), Markets, and Account —
-// still served as the old page until stage 2 moves it — and the collapse key; it collapses to a strip of icons
+// the first level: Messages (its badge counts the conversations with a card waiting on you), Markets, Account with the
+// net worth once the account has answered, and the collapse key; it collapses to a strip of icons
+function worthLine(state) {
+  const p = portfolioOf(state.account?.data);
+  return p.available && p.netWorth !== null ? `<span class="account-line">${esc(money(p.netWorth, p.currency))}</span>` : '';
+}
+
 export function renderNav(state) {
   const { screen } = state.route;
   const mini = !!state.railCollapsed;
@@ -68,7 +75,7 @@ export function renderNav(state) {
   </div>
   <div class="rail-foot">
     <div class="rail-lines"><button type="button" class="line-key" data-action="openSettings" aria-label="Settings" title="Settings">${icon('bars', 20, 2)}</button></div>
-    <a${attrs({ href: '/account', class: 'account', title: mini ? 'Account' : null })}>${icon('wallet', 22, 2)}<span class="account-body"><span class="account-title">Account</span></span></a>
+    <a${attrs({ class: cls('account', screen === 'account' && 'current'), 'aria-current': screen === 'account' ? 'page' : null, href: '#/account/portfolio', title: mini ? 'Account' : null })}>${icon('wallet', 22, 2)}<span class="account-body"><span class="account-title">Account</span>${worthLine(state)}</span></a>
   </div>
 </nav>`;
 }

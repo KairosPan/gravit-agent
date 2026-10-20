@@ -98,7 +98,7 @@ export function seed(now = Date.now()) {
     account: {
       mode: 'guard', netWorth: 12480, today: 86, todayPct: 0.7,
       alloc: [{ name: 'Cash', pct: 30, token: 'cash' }, { name: 'Stablecoins', pct: 20, token: 'stable' }, { name: 'Crypto', pct: 30, token: 'crypto' }, { name: 'Stocks', pct: 20, token: 'equity' }],
-      // quantities at the stand-in quotes of js/data/markets.js; value = quantity × price
+      // quantities at the demo's stand-in quotes; value = quantity × price
       holdings: [
         { key: 'crypto:BTC', name: 'BTC', venue: 'Stand-in Exchange', qty: 0.05955, value: 3739.74, chg: 1.2 },
         { key: 'equity:AAPL', name: 'AAPL', venue: 'Stand-in Broker', qty: 10.99, value: 2510.12, chg: -0.4 },

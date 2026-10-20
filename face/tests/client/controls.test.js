@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { seed, SEED_VERSION } from './helpers/seed.js';
 import { renderDetails, renderMessagesScreen } from '../../client/js/render/messages.js';
-import { renderMemory, renderSettings } from '../../client/js/render/account.js';
+import { renderSettings } from '../../client/js/render/account.js';
 import { DAY } from '../../client/js/time.js';
 
 const NOW = new Date(2026, 9, 9, 14, 7).getTime();
@@ -23,12 +23,6 @@ test('an inline edit starts, cancels, and commits through one reducer', () => {
   assert.equal(conv(blank, 'c-1').title, conv(fresh(), 'c-1').title);
   const f = fresh();
   assert.equal(R.commitEdit(f, { values: {}, now: NOW }), f, 'nothing to commit without an edit');
-});
-
-test('a memory edits in place; a blank one is refused', () => {
-  const s = R.startEdit(fresh(), { kind: 'memory', id: 'mem-2' });
-  assert.equal(R.commitEdit(s, { values: { text: 'No leverage, no options either' }, now: NOW }).memory.entries[1].text, 'No leverage, no options either');
-  assert.equal(R.commitEdit(s, { values: { text: ' ' }, now: NOW }).edit.error, 'Cannot be empty');
 });
 
 test('a two-step confirm is asked and cancelled', () => {
@@ -58,59 +52,19 @@ test('Mail is a screen: a letter opens by its route and is marked read; an unkno
   assert.deepEqual(R.nav(fresh(), { screen: 'mail', id: 'mail-9' }).route, { screen: 'mail', id: null });
 });
 
-test('Account panels: Move shifts a holding between venues and logs it; bad moves are refused in the panel', () => {
-  let s = R.openPanel(R.openSettings(R.nav(fresh(), { screen: 'account', tab: 'portfolio' })), 'move');
-  assert.deepEqual([s.account.panel, s.settingsOpen], ['move', false], 'one drawer at a time');
-  const moved = R.moveFunds(s, { from: 'Stand-in Wallet', to: 'Stand-in Exchange', asset: 'USDC', amount: '200', now: NOW });
-  assert.equal(moved.account.panel, null);
-  assert.equal(moved.account.holdings.find(h => h.name === 'USDC' && h.venue === 'Stand-in Wallet').value, 2290);
-  assert.equal(moved.account.holdings.find(h => h.name === 'USDC' && h.venue === 'Stand-in Exchange').value, 200);
-  assert.match(moved.account.activity[0].text, /Move \$200 USDC · Stand-in Wallet → Stand-in Exchange/);
-  assert.equal(moved.account.netWorth, 12480, 'a move does not change what you own');
-  const again = R.moveFunds(R.openPanel(moved, 'move'), { from: 'Stand-in Wallet', to: 'Stand-in Exchange', asset: 'USDC', amount: '10', now: NOW });
-  assert.equal(again.account.holdings.find(h => h.name === 'USDC' && h.venue === 'Stand-in Exchange').value, 210, 'a second move adds to the same holding');
-  const err = (from, to, asset, amount) => R.moveFunds(s, { from, to, asset, amount, now: NOW }).account.panelError;
-  assert.equal(err('Stand-in Wallet', 'Stand-in Exchange', 'USDC', '0'), 'Needs a number above 0');
-  assert.equal(err('Stand-in Wallet', 'Stand-in Wallet', 'USDC', '5'), 'Pick a different destination');
-  assert.equal(err('Stand-in Exchange', 'Stand-in Broker', 'AAPL', '5'), 'Stand-in Exchange has no AAPL');
-  assert.equal(err('Stand-in Wallet', 'Stand-in Exchange', 'USDC', '9999'), 'Stand-in Wallet only has $2,490');
-});
-
-test('Connect an account: a venue connects after a moment and joins the list; Receive copies; panels render', async () => {
-  const { renderAccount } = await import('../../client/js/render/account.js');
-  let s = R.openPanel(R.nav(fresh(), { screen: 'account', tab: 'venues' }), 'connect');
-  s = R.connectVenue(s, 'Coinbase');
-  assert.equal(s.account.connecting, 'Coinbase');
-  assert.match(renderAccount(s), /Connecting…/);
-  s = R.venueConnected(s, 'Coinbase');
-  assert.equal(s.account.connecting, null);
-  assert.deepEqual(s.account.venues.at(-1), { name: 'Coinbase', line: 'Connected · stand-in · Gravit: read only', state: 'Healthy' });
-  assert.match(renderAccount(s), /data-name="Coinbase"[^>]*disabled>Connected</);
-  assert.equal(R.venueConnected(s, 'Coinbase'), s, 'connecting twice is one venue');
-  const p = R.nav(fresh(), { screen: 'account', tab: 'portfolio' });
-  const page = renderAccount(p);
-  for (const name of ['move', 'receive', 'statement']) assert.match(page, new RegExp(`data-action="openPanel" data-panel="${name}"`), name);
-  assert.match(renderAccount(R.nav(fresh(), { screen: 'account', tab: 'venues' })), /data-action="openPanel" data-panel="connect"/);
-  const move = renderAccount(R.openPanel(p, 'move'));
-  assert.match(move, /<form class="move-form" data-action="moveFunds">/);
-  for (const n of ['from', 'asset', 'to', 'amount']) assert.match(move, new RegExp(`name="${n}"`), n);
-  const receive = renderAccount(R.openPanel(p, 'receive'));
-  assert.match(receive, /<svg class="qr"/);
-  assert.match(receive, /0x9a7c…d41e/);
-  assert.match(receive, /data-action="copyAddress">Copy address</);
-  assert.match(renderAccount(R.setCopied(R.openPanel(p, 'receive'), true)), />Copied</);
-  const statement = renderAccount(R.openPanel(p, 'statement'));
-  assert.equal((statement.match(/class="activity-row"/g) ?? []).length, 4);
-  assert.match(statement, /data-action="exportStatement">Export CSV</);
-});
-
 // round-two review fixes
 
-test('one drawer at a time: each opener closes the others, and an Account panel does not follow you off Account', () => {
-  const panel = R.openPanel(R.nav(fresh(), { screen: 'account', tab: 'portfolio' }), 'receive');
-  const mailed = R.nav(R.askConfirm(panel, { action: 'forgetAll' }), { screen: 'mail', id: null });
-  assert.deepEqual([mailed.account.panel, mailed.confirm], [null, null], 'going to Mail closes a panel and drops a pending confirm');
-  assert.equal(R.openSettings(panel).account.panel, null);
-  assert.equal(R.nav(panel, { screen: 'discover', id: null }).account.panel, null, 'leaving Account closes its panel');
-  assert.equal(R.nav(panel, { screen: 'account', tab: 'venues' }).account.panel, 'receive', 'moving inside Account keeps it');
+test('one drawer at a time: each opener closes the others, and the Statement does not follow you off Account', () => {
+  const st = R.openStatement(R.nav(fresh(), { screen: 'account', tab: 'portfolio' }));
+  assert.equal(st.account.statementOpen, true);
+  const mailed = R.nav(R.askConfirm(st, { action: 'stopGravit', id: 'c-1' }), { screen: 'mail', id: null });
+  assert.deepEqual([mailed.account.statementOpen, mailed.confirm], [false, null], 'going to Mail closes the Statement and drops a pending confirm');
+  assert.equal(R.openSettings(st).account.statementOpen, false);
+  assert.equal(R.openStatement(R.openSettings(st)).settingsOpen, false, 'the Statement closes Settings');
+  assert.equal(R.toggleDetails(st).account.statementOpen, false);
+  assert.equal(R.nav(st, { screen: 'markets', id: null }).account.statementOpen, false, 'leaving Account closes it');
+  assert.equal(R.nav(st, { screen: 'account', tab: 'venues' }).account.statementOpen, true, 'moving inside Account keeps it');
+  assert.equal(R.closeStatement(st).account.statementOpen, false);
+  const shut = R.closeStatement(st);
+  assert.equal(R.closeStatement(shut), shut, 'closing a closed Statement changes nothing');
 });

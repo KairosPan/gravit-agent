@@ -1,4 +1,5 @@
-// gravit-ui/js/reducers/account.js — Account: mode, Memory, settings
+// face/client/js/reducers/account.js — Account on the face: what host/account.js brings in, the Statement drawer, the
+// Settings drawer; and Memory, which Discover's Like shelf still reads until stage 3
 import { closeOverlays } from './messages.js';
 import { nextId } from '../ids.js';
 
@@ -14,8 +15,10 @@ export const reducers = {
   credentialsLoaded: (s, creds) => acc(s, { creds }),
   toolsLoaded: (s, names) => acc(s, { tools: names }),
   probeLoaded: (s, providers) => acc(s, { probe: providers }),
+  // the Statement is a drawer: one at a time, as Settings and Details are
+  openStatement: s => { const c = closeOverlays(s); return { ...c, account: { ...c.account, statementOpen: true } }; },
+  closeStatement: s => (s.account.statementOpen ? acc(s, { statementOpen: false }) : s),
 
-  setMode: (s, mode) => ({ ...s, account: { ...s.account, mode } }),
   openSettings: s => ({ ...closeOverlays(s), settingsOpen: true }),
   closeSettings: s => ({ ...s, settingsOpen: false, edit: null, confirm: null }),
   addMemory(s, { text, now }) {

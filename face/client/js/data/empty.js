@@ -24,11 +24,8 @@ export function emptyState() {
     },
     plugins: { installed: [], mine: [], uploaded: [] },
     memory: { entries: [], remember: true, askFirst: false, botsRead: false },
-    account: {
-      mode: 'guard', netWorth: 0, today: 0, todayPct: 0, alloc: [], holdings: [], cash: {}, orders: [], venues: [],
-      wallet: null, receive: null, activity: [], panel: null, connecting: null, copied: false, panelError: null,
-      status: 'idle', data: null, at: null, creds: null, tools: null, probe: [], statementOpen: false,
-    },
+    // the host's account (host/account.js) and the Statement drawer
+    account: { status: 'idle', data: null, at: null, creds: null, tools: null, probe: [], statementOpen: false },
     banner: null,
     call: null,
     edit: null,

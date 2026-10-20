@@ -454,13 +454,10 @@ button.toast-key { border: 0; font: inherit; font-size: 13px; }
 
 /* ---- Account ---- */
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr)); gap: 16px; align-items: start; }
-.cards.two { grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr)); }
-.stack { display: flex; flex-direction: column; gap: 16px; }
 .cardbox { display: flex; flex-direction: column; gap: 12px; background: var(--surface); border: 1px solid var(--card-border); border-radius: var(--radius-m); padding: 18px 20px; box-shadow: var(--shadow-card); min-width: 0; }
 .cardbox-title { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
 .networth { font-size: 52px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.05; font-variant-numeric: tabular-nums; }
 .delta { display: flex; align-items: center; gap: 8px; font-size: 13px; }
-.spark { height: 56px; border-radius: var(--radius-s); background: var(--surface-2); }
 .alloc-bar { display: flex; height: 8px; border-radius: var(--radius-pill); overflow: hidden; }
 .alloc-seg { display: block; }
 .alloc-cash { background: var(--alloc-cash); } .alloc-stable { background: var(--alloc-stable); } .alloc-crypto { background: var(--alloc-crypto); } .alloc-equity { background: var(--alloc-equity); } .alloc-rwa { background: var(--alloc-rwa); } .alloc-event { background: var(--alloc-event); }
@@ -470,28 +467,14 @@ button.toast-key { border: 0; font: inherit; font-size: 13px; }
 .holding { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
 .venues { display: flex; flex-direction: column; gap: 10px; }
 .venue { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-s); }
-.mem-group { display: flex; flex-direction: column; }
-.mem-label { font-size: 12px; font-weight: 700; color: var(--dim); padding: 12px 0 4px; }
-.mem-entry { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); }
-.mem-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.mem-text { font-size: 14px; }
-.mem-source { font-size: 12px; color: var(--dim); }
-.mem-keys { display: flex; gap: 6px; }
+/* the face's own words where the numbers would be: keyless, unavailable, loading, stale, no orders */
+.acct-note { margin: 0; color: var(--dim); font-size: 13px; }
+.acct-orders { display: flex; flex-direction: column; gap: 2px; }
+.order-row { padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 14px; font-variant-numeric: tabular-nums; }
+.order-row:last-child { border-bottom: 0; }
 .small-key { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface); color: var(--dim); }
 .small-key.danger { color: var(--down); }
-.mem-add { display: flex; gap: 8px; margin: 6px 0 0; }
-.where { display: flex; flex-direction: column; gap: 8px; font-size: 14px; }
-.where-row { display: flex; align-items: center; gap: 10px; }
-.switch-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 12px 0; border-top: 1px solid var(--border); }
-.switch-label { font-size: 14px; font-weight: 600; }
-.switch { position: relative; width: 40px; height: 24px; border: 0; border-radius: var(--radius-pill); background: var(--alloc-cash); padding: 0; }
-.switch.on { background: var(--primary); }
-.knob { position: absolute; left: 2px; top: 2px; width: 20px; height: 20px; border-radius: var(--radius-pill); background: var(--surface); transition: left 120ms; }
-.switch.on .knob { left: 18px; }
 
-/* ---- the demo director (keyboard d) ---- */
-.director { position: fixed; right: 16px; bottom: 88px; display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: var(--radius-m); background: var(--surface); border: 1px solid var(--card-border); box-shadow: var(--shadow-lift); z-index: 49; }
-.director-key { min-height: 32px; padding: 0 12px; border: 0; border-radius: var(--radius-pill); background: var(--surface-2); color: var(--text); font-size: 13px; text-align: left; }
 
 /* narrow windows: the first level is a bar of icons on top, the list a block under it, and the page scrolls as one */
 /* Markets, after Linqi's ui/markets.css (renamed mk-*: his .card, .quote, .spark, .empty, .tabs, .t would restyle gravit's own) */
@@ -601,13 +584,7 @@ a.mk-line:hover .mk-t1 { text-decoration: underline; text-underline-offset: 3px;
   .main.mail:not(.has-letter) { display: none; }
 }
 
-/* ---- Account's panels: Move, Receive, Statement, Connect an account ---- */
-.move-form { display: flex; flex-direction: column; gap: 16px; }
-.receive { display: flex; align-items: center; gap: 16px; }
-.receive-side { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; overflow-wrap: anywhere; }
-.receive .qr { width: 88px; height: 88px; flex: none; }
-.drawer-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.qr { width: 184px; height: 184px; padding: 8px; border-radius: var(--radius-s); background: var(--surface); border: 1px solid var(--border); fill: var(--text); }
+/* ---- the Statement drawer: the filled orders among the 50 most recent ---- */
 .activity { display: flex; flex-direction: column; }
 .activity-row { display: grid; grid-template-columns: auto 1fr auto; align-items: baseline; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
 .activity-text { min-width: 0; overflow-wrap: anywhere; }

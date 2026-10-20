@@ -440,3 +440,119 @@ test('Hand to Gravit opens New message with the words in the composer', async ()
   assert.equal(f.doc.activeElement, say);
   store.timers.clear();
 });
+
+// Account through host: /data/account.json and the Venues reads, recorded
+const KEYED = { ok: true, available: true, host: 'paper-api.alpaca.markets', account: { equity: '123346.11', last_equity: '122011.09', cash: '50000', currency: 'USD' },
+  positions: [{ symbol: 'AAPL', asset_class: 'us_equity', qty: '5', market_value: '600', change_today: '0.01' }],
+  orders: [{ id: 'o2', symbol: 'AAPL', side: 'buy', qty: '3', filled_qty: '3', filled_avg_price: '189.5', type: 'market', status: 'filled', submitted_at: '2026-10-18T14:00:00Z', filled_at: '2026-10-18T14:00:05Z' }],
+  generated_at: '2026-10-19T14:00:00Z' };
+function accountHost(opts = {}) {
+  const h = host(opts);
+  const reads = [];
+  const getJson = async path => {
+    reads.push(path);
+    if (path === '/data/account.json') return KEYED;
+    if (path === '/data/plugins.json') return { mcp: [{ server: 'alpaca-kit', phase: 'active', tools: [{ name: 'mcp__alpaca-kit__place_order', description: '' }] }], agentTools: [], rows: [] };
+    if (path.startsWith('/data/quotes')) return { ok: true, generated_at: '2026-10-19T14:30:01Z', quotes: [], providers: [{ id: 'alpaca', market: 'us', status: 'connected', source: 'Alpaca', feed: 'iex', transport: 'stream', message: '' }] };
+    return h.getJson(path);
+  };
+  const call = async (endpoint, args) => (endpoint === 'credentials/describe' ? (h.calls.push([endpoint, args]), { APCA_API_KEY_ID: { configured: true, source: 'env' }, APCA_API_SECRET_KEY: { configured: true, source: 'env' } }) : h.call(endpoint, args));
+  return { ...h, getJson, call, reads, accountReads: () => reads.filter(p => p === '/data/account.json').length };
+}
+const bootAccount = (f, h, mk = fakeMarkets()) => boot(f.win, { openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, createLiveQuotes: mk.createLiveQuotes, createSymbolSearch: mk.createSymbolSearch });
+
+test('the account loads at boot and the rail shows the net worth', async () => {
+  const f = fakeWindow({ hash: '', storage: memoryStorage() });
+  const h = accountHost({ rows: [row('s1')] });
+  const store = bootAccount(f, h);
+  await h.ready();
+  assert.equal(h.accountReads(), 1);
+  assert.equal(store.get().account.status, 'ready');
+  assert.match(f.html(), /<span class="account-line">\$123,346\.11<\/span>/);
+  store.timers.clear();
+});
+
+test('Refresh reloads; entering Account reads again; entering Venues describes once', async () => {
+  const f = fakeWindow({ hash: '#/account/portfolio', storage: memoryStorage() });
+  const h = accountHost({ rows: [row('s1')] });
+  const store = bootAccount(f, h);
+  await h.ready();
+  assert.equal(h.accountReads(), 1, 'boot and entering Account share one flight');
+  assert.match(f.html(), /class="networth">\$123,346\.11</);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'refreshAccount' } });
+  await settle();
+  assert.equal(h.accountReads(), 2);
+  const describes = () => h.calls.filter(c => c[0] === 'credentials/describe').length;
+  assert.equal(describes(), 0);
+  f.win.location.hash = '#/account/venues';
+  await settle();
+  assert.equal(describes(), 1);
+  assert.equal(h.reads.filter(p => p === '/data/plugins.json').length, 1);
+  assert.match(f.html(), /Keys · env · Order tools on/);
+  assert.match(f.html(), /Alpaca · Connected/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'refreshAccount' } });
+  await settle();
+  assert.equal(describes(), 1, 'a refresh on Venues reads the account, not the venue facts');
+  f.win.location.hash = '#/messages/s1';
+  await settle();
+  f.win.location.hash = '#/account/portfolio';
+  await settle();
+  assert.equal(h.accountReads(), 4, 'entering Account again reads it again');
+  store.timers.clear();
+});
+
+test('Export CSV hands the browser a blob with the statement and revokes it', async () => {
+  const f = fakeWindow({ hash: '#/account/portfolio', storage: memoryStorage() });
+  const blobs = [];
+  const Blob = f.win.Blob;
+  f.win.Blob = class extends Blob { constructor(parts, opts) { super(parts, opts); blobs.push(this); } };
+  const anchors = [];
+  f.doc.createElement = () => { const a = f.element({ tagName: 'A' }); anchors.push(a); return a; };
+  const h = accountHost({ rows: [row('s1')] });
+  const store = bootAccount(f, h);
+  await h.ready();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openStatement' } });
+  await settle();
+  assert.match(f.html(), /aria-label="Statement"/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'exportStatement' } });
+  await settle();
+  assert.equal(blobs.length, 1);
+  assert.equal(blobs[0].type, 'text/csv');
+  assert.equal(blobs[0].parts.join(''), 'date,side,qty,symbol,price,amount\r\n2026-10-18T14:00:05Z,buy,3,AAPL,189.5,568.5\r\n');
+  assert.equal(anchors.at(-1).download, 'statement.csv');
+  assert.equal(anchors.at(-1).href, 'blob:fake');
+  assert.equal(anchors.at(-1).clicks, 1);
+  assert.deepEqual(f.revoked, ['blob:fake']);
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  assert.equal(store.get().account.statementOpen, false, 'Escape closes the Statement');
+  store.timers.clear();
+});
+
+test('a receipt in a conversation reloads the account', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1', storage: memoryStorage() });
+  const h = accountHost({ rows: [row('s1', { agentAvailable: true })] });
+  const store = bootAccount(f, h);
+  await h.ready();
+  const before = h.accountReads();
+  const follow = [...h.streams].reverse().find(x => x.name === 'session/follow' && x.args.request.address.sessionId === 's1');
+  follow.cbs.onItem({ type: 'snapshot', records: [] });
+  follow.cbs.onItem({ type: 'event', event: { type: 'tool/call', seq: 40, time: 1756512200000, data: { turn: 4, step: 1, callId: 'c9', name: 'mcp__alpaca-kit__place_order', arguments: JSON.stringify({ symbol: 'AAPL', qty: 1, side: 'buy', order_type: 'market' }) } } });
+  follow.cbs.onItem({ type: 'event', event: { type: 'tool/result', seq: 41, time: 1756512201000, surfaceOp: 'append', data: { turn: 4, step: 1, message: { id: 'm-41', role: 'tool', source: { kind: 'tool', callId: 'c9' }, toolCallId: 'c9', content: [{ type: 'text', text: JSON.stringify({ ok: true, id: 'ord-1' }) }], isError: false } } } });
+  await settle();
+  assert.equal(h.accountReads(), before + 1);
+  store.timers.clear();
+});
+
+test('Open the Statement on a Market page lands on Account with the Statement open', async () => {
+  const f = fakeWindow({ hash: '#/markets/us:AAPL', storage: memoryStorage() });
+  const h = accountHost({ rows: [row('s1')] });
+  const store = bootAccount(f, h);
+  await h.ready();
+  assert.match(f.html(), /class="link mk-link" data-action="openStatement">Open the Statement →</);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openStatement' } });
+  await settle();
+  assert.equal(f.win.location.hash, '#/account/portfolio');
+  assert.equal(store.get().account.statementOpen, true);
+  assert.match(f.html(), /aria-label="Statement"/);
+  store.timers.clear();
+});

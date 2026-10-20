@@ -70,7 +70,7 @@ export function renderMarketsScreen(state, now) {
 
 const KIND = { us: 'Stock', cn: 'A-share', crypto: 'Crypto' };
 const ACCOUNT_CLASS = { us: 'us_equity', crypto: 'crypto' };
-const section = (label, inner) => `<section class="dsec" aria-label="${label}"><div class="mk-h2">${label}</div>${inner}</section>`;
+const section = (label, inner, key = '') => `<section class="dsec" aria-label="${label}">${key ? `<div class="mk-sec-head"><div class="mk-h2">${label}</div>${key}</div>` : `<div class="mk-h2">${label}</div>`}${inner}</section>`;
 const line = (mark, t1, t2, markClass = '') => `<div class="mk-line"><span class="${cls('mk-mark', markClass)}">${mark}</span><div class="mk-line-b"><div class="mk-t1">${t1}</div><div class="mk-t2">${t2}</div></div></div>`;
 const qtyWord = n => (n === null || n === undefined ? '' : Number(n).toLocaleString('en-US', { maximumFractionDigits: 8 }));
 const when = (at, now) => { const t = Date.parse(at); return Number.isNaN(t) ? '' : sameDay(t, now) ? fmtClock(t) : `${fmtDate(t)} ${fmtClock(t)}`; };
@@ -112,7 +112,8 @@ export function marketPage(asset, state, now) {
     const fills = statementOf(data).filter(r => positionId({ symbol: r.symbol, asset_class: ACCOUNT_CLASS[asset.market] }) === asset.id).slice(0, 8)
       .map(r => line('✓', `${r.side === 'sell' ? 'Sell' : 'Buy'} ${esc(qtyWord(r.qty))} ${esc(r.symbol)} · ${esc(price(r.price, p.currency))}`,
         `${esc(when(r.at, now))}${r.amount !== null ? ` · ${esc(money(r.amount, p.currency))}` : ''}`, 'ok'));
-    right.push(section('On the statement', fills.length ? `<div class="mk-feed">${fills.join('')}</div>` : '<p class="mk-empty">Nothing on the statement about it yet.</p>'));
+    right.push(section('On the statement', fills.length ? `<div class="mk-feed">${fills.join('')}</div>` : '<p class="mk-empty">Nothing on the statement about it yet.</p>',
+      '<button type="button" class="link mk-link" data-action="openStatement">Open the Statement →</button>'));
   }
 
   const about = mentionsOf(state.conversations, asset).map(c => `<a class="mk-line" href="#/messages/${esc(c.id)}" data-action="open" data-id="${esc(c.id)}"><span class="mk-mark">→</span>` +

@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { renderRail } from '../../client/js/render/rail.js';
 import { renderMessagesScreen } from '../../client/js/render/messages.js';
 import { renderMarketsScreen } from '../../client/js/render/markets.js';
-import { renderSettings } from '../../client/js/render/account.js';
+import { renderSettings, renderAccountScreen } from '../../client/js/render/account.js';
 import { setMarkdown } from '../../client/js/render/thread.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
@@ -51,6 +51,23 @@ function marketStates() {
   ];
 }
 
+// Account: Portfolio keyed (stale), keyless, failed with nothing loaded, loading, the Statement open, Venues read and unread
+function accountStates() {
+  const on = R.nav(emptyState(), { screen: 'account', tab: 'portfolio' });
+  const data = { ok: true, available: true, host: 'paper-api.alpaca.markets', account: { equity: '1000', last_equity: '990', cash: '400', currency: 'USD' },
+    positions: [{ symbol: 'AAPL', asset_class: 'us_equity', qty: '5', market_value: '600', change_today: '0.01' }, { symbol: 'X', asset_class: 'us_option', qty: '1', market_value: '0', change_today: null }],
+    orders: [{ id: 'o1', symbol: 'AAPL', side: 'buy', qty: '1', filled_qty: '1', filled_avg_price: '10', type: 'market', status: 'filled', submitted_at: '2026-10-18T14:00:00Z', filled_at: '2026-10-18T14:00:00Z' }, { id: 'o2', symbol: 'AAPL', side: 'buy', qty: '1', filled_qty: '0', type: 'limit', limit_price: '9', status: 'new', submitted_at: '2026-10-18T14:00:00Z' }],
+    generated_at: '2026-10-19T14:00:00Z', stale: true };
+  const keyed = R.accountLoaded(on, { data, at: NOW });
+  const venues = R.nav(keyed, { screen: 'account', tab: 'venues' });
+  return [
+    keyed, R.accountLoaded(on, { data: { ok: true, available: false, reason: 'no APCA keys in the environment' }, at: NOW }), R.accountFailed(on, { at: NOW }), R.accountLoading(on),
+    R.openStatement(keyed), R.openSettings(keyed), venues,
+    R.probeLoaded(R.toolsLoaded(R.credentialsLoaded(venues, { APCA_API_KEY_ID: { configured: true, source: 'env' }, APCA_API_SECRET_KEY: { configured: true, source: 'env' } }), ['mcp__alpaca-kit__place_order']),
+      [{ id: 'alpaca', market: 'us', status: 'connected', source: 'Alpaca', feed: 'iex', transport: 'stream', message: '' }]),
+  ];
+}
+
 // the states stage 1 can show: empty, a conversation with every kind, a group thinking, Details, Settings, a draft, a bad status, the rail folded
 function everyState() {
   const base = R.hostList(emptyState(), { conversations: [conv('s1', { messages: KINDS, running: true, usage: { tokenUsage: { outputTokens: 1 }, contextPressure: 0.5 }, created: NOW }), conv('g', { kind: 'group', members: ['gravit', 'buffett'], thinking: 'text' })], channels: [{ workspaceId: 'w0', name: 'workbench', isRoot: true }], bots: [{ id: 'buffett', name: 'Buffett Type' }] });
@@ -58,16 +75,16 @@ function everyState() {
   return [
     emptyState(), open, R.nav(base, { screen: 'messages', id: 'g' }), R.toggleDetails(open), R.askConfirm(R.toggleDetails(open), { action: 'stopGravit', id: 's1' }),
     R.startEdit(R.toggleDetails(open), { kind: 'rename', convId: 's1', error: 'Cannot be empty' }), R.openSettings(open), R.startDraft(open, { now: NOW }),
-    R.hostStatus(open, { line: 'Reconnecting…', bad: true }), R.toggleRail(open), ...marketStates(),
+    R.hostStatus(open, { line: 'Reconnecting…', bad: true }), R.toggleRail(open), ...marketStates(), ...accountStates(),
   ];
 }
-const screenOf = (st, now) => (st.route.screen === 'markets' ? renderMarketsScreen(st, now) : renderMessagesScreen(st, now));
+const screenOf = (st, now) => (st.route.screen === 'markets' ? renderMarketsScreen(st, now) : st.route.screen === 'account' ? renderAccountScreen(st, now) : renderMessagesScreen(st, now));
 
 test('every class the screens emit has a rule in app.css, and app.css names no colour by hex', () => {
   assert.doesNotMatch(css, /#[0-9a-fA-F]{3,6}\b/, 'colours come from tokens.css');
   setMarkdown(null);
   const html = everyState().map(st => renderRail(st, NOW) + screenOf(st, NOW) + (st.settingsOpen ? renderSettings(st) : '')).join('');
-  for (const c of ['mkts', 'mk-tab', 'mk-star', 'mk-name', 'mk-tag', 'mk-q', 'mk-clear', 'mk-note', 'mk-empty', 'mk-st', 'page-back', 'mk-chart', 'mk-axis', 'mk-facts', 'mk-big', 'mk-basis', 'mk-asof', 'mk-d-acts', 'mk-line', 'mk-on']) assert.match(html, new RegExp(`class="[^"]*\\b${c}\\b`), `Markets emits ${c}`);
+  for (const c of ['mkts', 'mk-tab', 'mk-star', 'mk-name', 'mk-tag', 'mk-q', 'mk-clear', 'mk-note', 'mk-empty', 'mk-st', 'page-back', 'mk-chart', 'mk-axis', 'mk-facts', 'mk-big', 'mk-basis', 'mk-asof', 'mk-d-acts', 'mk-line', 'mk-on', 'acct', 'networth', 'alloc-seg', 'holding', 'order-row', 'acct-note', 'activity-row', 'venue', 'account-line']) assert.match(html, new RegExp(`class="[^"]*\\b${c}\\b`), `Markets emits ${c}`);
   const classes = new Set(html.match(/class="([^"]+)"/g).flatMap(x => x.slice(7, -1).split(/\s+/)));
   const missing = [...classes].filter(c => c && !new RegExp(`\\.${c.replace(/[-]/g, '\\-')}(?![\\w-])`).test(css));
   assert.deepEqual(missing, [], 'classes without a rule');

@@ -7,7 +7,7 @@ import { parseHash, toHash } from './router.js';
 import { renderRail } from './render/rail.js';
 import { renderMessagesScreen, currentConversation } from './render/messages.js';
 import { renderMarketsScreen } from './render/markets.js';
-import { renderSettings } from './render/account.js';
+import { renderSettings, renderAccountScreen } from './render/account.js';
 import { setMarkdown } from './render/thread.js';
 import { renderMarkdown } from './wire/markdown.js';
 import { call as wireCall, openMux as wireOpenMux } from './wire/api.js';
@@ -15,6 +15,8 @@ import { mapFrame } from './wire/mapper.js';
 import { startLive } from './host/live.js';
 import { makeActions } from './host/actions.js';
 import { startMarkets } from './host/markets.js';
+import { startAccount } from './host/account.js';
+import { statementOf, csvOf } from './host/account-view.js';
 import { canonicalId, assetFor } from './host/market-view.js';
 import { createLiveQuotes } from './wire/market-quotes.js';
 import { createSymbolSearch } from './wire/market-search.js';
@@ -83,8 +85,8 @@ export function makeStore(storage, now = Date.now()) {
   return createStore({ initial: initialState(storage, now), reducers, storage, key: PREFS_KEY, accept: () => false, persist: prefsOf });
 }
 
-// Messages and Markets are served; every other screen the router knows folds to Messages
-const SCREENS = new Set(['messages', 'markets']);
+// Messages, Markets and Account are served; every other screen the router knows folds to Messages
+const SCREENS = new Set(['messages', 'markets', 'account']);
 export const routeOf = hash => { const r = parseHash(hash); return SCREENS.has(r.screen) ? r : { screen: 'messages', id: null }; };
 // route by the address bar; a normalised route says which hash the bar should show instead
 export function settle(store, hash) {
@@ -119,8 +121,8 @@ function focusKey(el) {
   const sel = `[data-action="${data.action}"]` + Object.entries(data).filter(([k]) => k !== 'action').map(([k, v]) => `[data-${k.replace(/[A-Z]/g, c => '-' + c.toLowerCase())}="${v}"]`).join('');
   return { sel };
 }
-const overlayOf = s => (s.detailsOpen || s.settingsOpen ? 'drawer' : null);
-const drawerOf = s => (s.detailsOpen ? 'details' : s.settingsOpen ? 'settings' : null);
+const overlayOf = s => (s.detailsOpen || s.settingsOpen || s.account.statementOpen ? 'drawer' : null);
+const drawerOf = s => (s.detailsOpen ? 'details' : s.settingsOpen ? 'settings' : s.account.statementOpen ? 'statement' : null);
 const editorOf = e => (e ? [e.kind, e.convId, e.id].join('|') : null);
 const screenOf = s => `${s.route.screen}/${s.route.id ?? ''}`;
 
@@ -137,7 +139,10 @@ export function boot(win, host = {}) {
   // Gravit's markdown is DOM-built (wire/markdown.js); a test hands in its own or none
   if (host.markdown !== undefined) setMarkdown(host.markdown);
   else if (typeof document !== 'undefined') setMarkdown(gravitMarkdown);
-  const live = startLive({ store, openMux: host.openMux ?? wireOpenMux, call, mapFrame, getJson, timers, now });
+  // the paper account: read at boot, on entering Account, on Refresh, and right after a fill
+  const account = startAccount({ store, getJson, call, now });
+  void account.load();
+  const live = startLive({ store, openMux: host.openMux ?? wireOpenMux, call, mapFrame, getJson, timers, now, onReceipt: () => { void account.load(); } });
   // answers go through the live layer, which settles the gate it delivered once the answer wins
   const actions = makeActions({ store, call, answerGate: (eventId, value) => live.answer(eventId, value), postJson });
   // Markets: the face's live quotes and symbol search (a test hands in its own), the watchlist in this browser's storage
@@ -158,6 +163,7 @@ export function boot(win, host = {}) {
   let pending = false;
   let openedId = null;   // the conversation the live layer was told to open
   let barsFor = null;    // the market page whose daily bars were last asked for
+  let was = null;        // the route follow() last settled: entering Account reads it, entering Venues describes
   let wanted = null;     // a deep link the list has not answered yet
   let last = { overlay: null, opener: null, screen: null, drawer: null, thread: null, editor: null, confirm: null };
   let confirmFrom = null;
@@ -182,7 +188,7 @@ export function boot(win, host = {}) {
     const threadAt = thread0 ? { top: thread0.scrollTop, bottom: thread0.scrollHeight - thread0.scrollTop - thread0.clientHeight < 40 } : null;
     const scrolls = { main: root.querySelector('main')?.scrollTop, rows: root.querySelector('.rail-rows')?.scrollTop, drawer: root.querySelector('.drawer-body')?.scrollTop };
 
-    const screen = s.route.screen === 'markets' ? renderMarketsScreen(s, now()) : renderMessagesScreen(s, now());
+    const screen = s.route.screen === 'markets' ? renderMarketsScreen(s, now()) : s.route.screen === 'account' ? renderAccountScreen(s, now()) : renderMessagesScreen(s, now());
     root.innerHTML = renderRail(s, now()) + (s.settingsOpen ? screen.replace(/<\/main>$/, renderSettings(s) + '</main>') : screen);
 
     const sameEditor = editorOf(s.edit) === last.editor;
@@ -263,6 +269,9 @@ export function boot(win, host = {}) {
     showMarkets();
     // a market page reads its daily bars once per opening (crypto and cn have none to read)
     if (r.screen === 'markets' && r.id) { if (r.id !== barsFor) { barsFor = r.id; void markets.bars(r.id); } } else barsFor = null;
+    if (r.screen === 'account' && was?.screen !== 'account') void account.load();
+    if (r.screen === 'account' && r.tab === 'venues' && !(was?.screen === 'account' && was.tab === 'venues')) void account.describe();
+    was = r;
     // a deep link the list does not carry yet waits for it
     if (asked.screen === 'messages' && asked.id && asked.id !== 'new' && !store.get().conversations.some(c => c.id === asked.id)) wanted = asked.id;
     if (r.screen === 'messages' && r.id && r.id !== 'new' && r.id !== openedId) {
@@ -285,7 +294,6 @@ export function boot(win, host = {}) {
     if (!c) return;
     store.dispatch('cancelConfirm');
     if (c.action === 'stopGravit') void actions.stop(c.id);
-    else if (c.action === 'forgetAll') store.dispatch('forgetAll');
   }
 
   async function sendNow() {
@@ -314,12 +322,10 @@ export function boot(win, host = {}) {
     toggleRail: () => store.dispatch('toggleRail'),
     // inline editors (they replaced prompt): a button starts one, ✓ or Enter commits it, × or Escape cancels it
     changeWords: el => store.dispatch('startEdit', { kind: 'rename', convId: el.dataset.conv }),
-    editMemory: el => store.dispatch('startEdit', { kind: 'memory', id: el.dataset.id }),
     commitEdit: () => commitEdit(),
     cancelEdit: () => store.dispatch('cancelEdit'),
     // two-step confirms (they replaced confirm): the first press asks in place, the second acts
     stopGravit: el => store.dispatch('askConfirm', { action: 'stopGravit', id: el.dataset.conv }),
-    forgetAll: () => store.dispatch('askConfirm', { action: 'forgetAll' }),
     confirmYes: () => confirmYes(),
     cancelConfirm: () => store.dispatch('cancelConfirm'),
     suggest: el => { composerText = el.dataset.text; render(); doc.getElementById('say')?.focus(); },
@@ -338,8 +344,22 @@ export function boot(win, host = {}) {
     openSettings: () => store.dispatch('openSettings'),
     closeSettings: () => store.dispatch('closeSettings'),
     setTheme: el => { const t = el.dataset.value.toLowerCase(); store.dispatch('setTheme', t); applyTheme(t); },
-    forgetMemory: el => store.dispatch('forgetMemory', el.dataset.id),
-    memorySwitch: el => store.dispatch('setMemorySwitch', { key: el.dataset.key, value: el.getAttribute('aria-checked') !== 'true' }),
+    // Account: Refresh (and Retry), the Statement, its CSV
+    refreshAccount: () => { void account.load(); },
+    openStatement: () => {
+      if (store.get().route.screen !== 'account') go({ screen: 'account', tab: 'portfolio' });
+      store.dispatch('openStatement');
+    },
+    closeStatement: () => store.dispatch('closeStatement'),
+    exportStatement: () => {
+      const csv = csvOf(statementOf(store.get().account.data));
+      const url = win.URL.createObjectURL(new win.Blob([csv], { type: 'text/csv' }));
+      const a = doc.createElement('a');
+      a.href = url;
+      a.download = 'statement.csv';
+      a.click();
+      timers.after(0, () => win.URL.revokeObjectURL(url));
+    },
     // Markets: the tabs, the sort, Clear, the star, a row's page
     mkTab: el => store.dispatch('setMarketsTab', el.dataset.value),
     mkSort: el => store.dispatch('setMarketsSort', el.dataset.value),
@@ -377,11 +397,6 @@ export function boot(win, host = {}) {
     if (!form) return;
     ev.preventDefault();
     if (form.dataset.action === 'send') void sendNow();
-    else if (form.dataset.action === 'addMemory') {
-      const f = new win.FormData(form);
-      form.reset?.();
-      store.dispatch('addMemory', { text: f.get('text'), now: now() });
-    }
   });
 
   // typing: the composer keeps its words outside the store; the title and the Markets search go through it
@@ -411,6 +426,7 @@ export function boot(win, host = {}) {
       if (s.confirm) { store.dispatch('cancelConfirm'); return; }
       if (s.detailsOpen) store.dispatch('toggleDetails');
       else if (s.settingsOpen) store.dispatch('closeSettings');
+      else if (s.account.statementOpen) store.dispatch('closeStatement');
       return;
     }
     const a = doc.activeElement;

@@ -19,12 +19,13 @@ const listed = (convs, open = convs[0]?.id ?? null, extra = {}) => {
   return R.nav(s, { screen: 'messages', id: open });
 };
 
-test('the first level: Messages, Markets on the face, Account as a link to the old page; no Discover, Trade, phone or mail', () => {
+test('the first level: Messages, Markets and Account on the face; no Discover, Trade, phone or mail', () => {
   const h = renderNav(listed([conv('a')]));
   assert.match(h, /href="#\/messages\/a"[^>]*>[\s\S]*?Messages/);
   assert.match(h, /class="nav-item" href="#\/markets"[^>]*>[\s\S]*?Markets/);
   assert.doesNotMatch(h, /href="\/market"/);
-  assert.match(h, /href="\/account"[^>]*class="account/);
+  assert.match(h, /class="account" href="#\/account\/portfolio"/);
+  assert.doesNotMatch(h, /href="\/account"/);
   assert.match(h, /account-title">Account</);
   assert.match(h, /data-action="openSettings"/, 'the theme lives behind a Settings key at the foot');
   for (const gone of ['#/discover', '#/trade', 'phoneCall', '#/mail', 'nav-badge', 'Guard']) assert.doesNotMatch(h, new RegExp(gone), gone);
@@ -115,4 +116,15 @@ test('Markets links #/markets and is current on the Markets screen and on a mark
   const page = renderNav(R.nav(listed([conv('a')]), { screen: 'markets', id: 'us:AAPL' }));
   assert.match(page, /class="nav-item current" aria-current="page" href="#\/markets"/);
   assert.equal(renderList(R.nav(listed([conv('a')]), { screen: 'markets', id: null }), NOW), '', 'the conversation list belongs to Messages');
+});
+
+test('Account links #/account/portfolio, is current on Account, and carries the net worth once the account has answered', () => {
+  const on = R.nav(listed([conv('a')]), { screen: 'account', tab: 'venues' });
+  assert.match(renderNav(on), /class="account current" aria-current="page" href="#\/account\/portfolio"/);
+  assert.doesNotMatch(renderNav(on), /account-line/, 'no number before the account answers');
+  const read = R.accountLoaded(on, { data: { ok: true, available: true, host: 'paper-api.alpaca.markets', account: { equity: '123346.11', currency: 'USD' }, positions: [], orders: [] }, at: NOW });
+  assert.match(renderNav(read), /<span class="account-title">Account<\/span><span class="account-line">\$123,346\.11<\/span>/);
+  const keyless = R.accountLoaded(on, { data: { ok: true, available: false, reason: 'no APCA keys in the environment' }, at: NOW });
+  assert.doesNotMatch(renderNav(keyless), /account-line/);
+  assert.doesNotMatch(renderNav(R.nav(read, { screen: 'markets', id: null })), /class="account current"/);
 });

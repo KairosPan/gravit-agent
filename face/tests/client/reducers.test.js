@@ -42,9 +42,9 @@ test('discover: install adds the plugin, a teaching conversation and a toast; un
   assert.equal(R.dismissToast(s4).discover.toast, null);
 });
 
-test('account: mode, memory add/edit/forget/forget all, switches, settings', () => {
-  let s = R.setMode(fresh(), 'beast');
-  assert.equal(s.account.mode, 'beast');
+test('account: memory add/edit/forget/forget all, switches, settings; no mode', () => {
+  let s = fresh();
+  assert.equal(R.setMode, undefined, 'Guard | Beast is gone');
   assert.equal(R.addMemory(s, { text: '  ', now: NOW }), s);
   s = R.addMemory(s, { text: 'No new positions on Fridays', now: NOW });
   const added = s.memory.entries.at(-1);

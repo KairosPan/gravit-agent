@@ -7,7 +7,7 @@ import { canonicalId } from '../host/market-view.js';
 // one drawer at a time: an opener first closes whatever else was open, with any editor or confirm in it
 export const closeOverlays = s => ({
   ...s, detailsOpen: false, settingsOpen: false, edit: null, confirm: null,
-  account: { ...s.account, panel: null, panelError: null },
+  account: { ...s.account, statementOpen: false },
   discover: { ...s.discover, create: null },
 });
 const upd = (state, id, fn) => ({ ...state, conversations: state.conversations.map(c => (c.id === id ? fn(c) : c)) });
@@ -37,8 +37,8 @@ export const reducers = {
     if (route.screen === 'mail' && route.id) s.mail = { ...s.mail, items: s.mail.items.map(m => (m.id === route.id && !m.read ? { ...m, read: true } : m)) };
     // the first level's Messages key returns to the conversation you last had open
     if (route.screen === 'messages' && route.id && route.id !== 'new') s.lastConv = route.id;
-    // an Account panel belongs to Account
-    if (route.screen !== 'account' && s.account.panel) s.account = { ...s.account, panel: null, panelError: null };
+    // the Statement belongs to Account
+    if (route.screen !== 'account' && s.account.statementOpen) s.account = { ...s.account, statementOpen: false };
     // a plugin page goes back to the Discover view it was opened from; opened from outside Discover, to Discover itself
     if (route.screen === 'discover') s.lastDiscover = route;
     else if (route.screen === 'plugin' && state.route.screen !== 'discover' && state.route.screen !== 'plugin') s.lastDiscover = { screen: 'discover', id: null };
