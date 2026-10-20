@@ -399,3 +399,44 @@ test('#/markets/garbage opens Markets; a lower-case id is written canonical', as
   assert.equal(f.win.location.hash, '#/markets/us:AAPL');
   store.timers.clear();
 });
+
+test('opening a us page reads /data/bars once; a crypto page reads none', async () => {
+  const f = fakeWindow({ hash: '#/markets/us:AAPL', storage: memoryStorage() });
+  const h = host();
+  const reads = [];
+  const bars = { ok: true, id: 'us:AAPL', source: 'alpaca', feed: 'iex', as_of: '2026-10-17', rows: [{ date: '2026-10-16', close: 10 }, { date: '2026-10-17', close: 11 }] };
+  const getJson = async path => { reads.push(path); return path.startsWith('/data/bars') ? bars : h.getJson(path); };
+  const mk = fakeMarkets();
+  const store = boot(f.win, { openMux: h.openMux, call: h.call, getJson, postJson: h.postJson, markdown: h.markdown, createLiveQuotes: mk.createLiveQuotes, createSymbolSearch: mk.createSymbolSearch });
+  await h.ready();
+  const barReads = () => reads.filter(p => p.startsWith('/data/bars'));
+  assert.deepEqual(barReads(), ['/data/bars?id=us%3AAAPL&days=120']);
+  assert.match(f.html(), /<svg class="mk-chart"/);
+  mk.live.onUpdate({ quotes: {}, providers: [], status: 'streaming', refreshing: false, generatedAt: null, note: '', limited: 0 });
+  await settle();
+  assert.equal(barReads().length, 1, 'a re-render reads nothing');
+  f.win.location.hash = '#/markets/crypto:BTC/USD';
+  await settle();
+  assert.equal(barReads().length, 1, 'a crypto page has no bar source');
+  f.win.location.hash = '#/markets/us:AAPL';
+  await settle();
+  assert.equal(barReads().length, 2, 'opening the page again reads again');
+  store.timers.clear();
+});
+
+test('Hand to Gravit opens New message with the words in the composer', async () => {
+  const storage = memoryStorage();
+  storage.setItem('gravit.market.watchlist.v1', JSON.stringify({ version: 1, items: [{ id: 'us:AAPL', market: 'us', symbol: 'AAPL', name: 'Apple', exchange: 'NASDAQ', currency: 'USD' }] }));
+  const f = fakeWindow({ hash: '#/markets/us:AAPL', storage });
+  const say = f.withId('say', { tagName: 'TEXTAREA' });
+  const h = host({ rows: [row('s1')] });
+  const store = bootMarkets(f, h, fakeMarkets());
+  await h.ready();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'handToGravit', id: 'us:AAPL' } });
+  await settle();
+  assert.deepEqual(store.get().route, { screen: 'messages', id: 'new' });
+  assert.equal(store.get().draft.where, 'w0', 'the root channel');
+  assert.equal(say.value, 'Look at AAPL (Apple)');
+  assert.equal(f.doc.activeElement, say);
+  store.timers.clear();
+});

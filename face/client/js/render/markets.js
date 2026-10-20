@@ -4,10 +4,15 @@
 import { esc, attrs, cls } from '../html.js';
 import { icon } from '../icons.js';
 import { chgHtml } from '../market-fmt.js';
+import { fmtClock, fmtDate, rowTime, sameDay } from '../time.js';
 import { price, number } from '../wire/market-model.js';
+import { money, pct, sign } from '../wire/account-model.js';
+import { portfolioOf, statementOf } from '../host/account-view.js';
 import { seg } from './controls.js';
+import { chartSvg } from './chart.js';
 import {
-  MARKET_TABS, MARKET_SORTS, marketRows, assetFor, quoteWord, connectionWord, searchWord, watchWord, volumeWord,
+  MARKET_TABS, MARKET_SORTS, marketRows, assetFor, positionId, mentionsOf,
+  quoteWord, connectionWord, searchWord, watchWord, volumeWord, basisWord, sourceWord, barsWord,
 } from '../host/market-view.js';
 
 const baseOf = asset => (asset.market === 'crypto' ? String(asset.symbol).split('/')[0] : String(asset.symbol));
@@ -60,12 +65,62 @@ export function renderMarketsScreen(state, now) {
     `<div class="mk">${tabs}${bar}${words}${body}</div></main>`;
 }
 
-const KIND = { us: 'Stock', cn: 'A-share', crypto: 'Crypto' };
+// ---- a market's page: its head and keys, the price and its facts, then the chart beside what you hold of it, the
+// statement's fills and the conversations that name it
 
-// a market's page: the way back and its head; the price, the chart and what you hold of it follow
+const KIND = { us: 'Stock', cn: 'A-share', crypto: 'Crypto' };
+const ACCOUNT_CLASS = { us: 'us_equity', crypto: 'crypto' };
+const section = (label, inner) => `<section class="dsec" aria-label="${label}"><div class="mk-h2">${label}</div>${inner}</section>`;
+const line = (mark, t1, t2, markClass = '') => `<div class="mk-line"><span class="${cls('mk-mark', markClass)}">${mark}</span><div class="mk-line-b"><div class="mk-t1">${t1}</div><div class="mk-t2">${t2}</div></div></div>`;
+const qtyWord = n => (n === null || n === undefined ? '' : Number(n).toLocaleString('en-US', { maximumFractionDigits: 8 }));
+const when = (at, now) => { const t = Date.parse(at); return Number.isNaN(t) ? '' : sameDay(t, now) ? fmtClock(t) : `${fmtDate(t)} ${fmtClock(t)}`; };
+const changeSpan = fraction => { const s = sign(fraction); return `<span class="${s === 'pos' ? 'up' : s === 'neg' ? 'down' : 'flat'}">${esc(pct(fraction))}</span>`; };
+// a holding in its own unit: shares of a stock, the base of a coin
+const heldWord = (asset, qty) => (asset.market === 'crypto' ? `${qtyWord(qty)} ${baseOf(asset)}` : `${qtyWord(qty)} share${qty === 1 ? '' : 's'}`);
+
 export function marketPage(asset, state, now) {
+  const m = state.markets;
+  const data = state.account?.data;
+  const id = esc(asset.id);
+  const quote = m.quotes[asset.id] ?? m.hitQuotes[asset.id];
+  const watched = m.watchlist.some(a => a.id === asset.id);
   const sub = [KIND[asset.market], asset.symbol, asset.exchange].filter(Boolean).join(' · ');
   const who = `<div class="mk-who">${mkAv(asset, 'lg')}<div><h1 class="head-title">${esc(nameOf(asset))}</h1><span class="mk-sub">${esc(sub)}</span></div></div>`;
+  const keys = `<div class="mk-d-acts"><button type="button" class="btn" data-action="handToGravit" data-id="${id}">${icon('agent', 16, 2)}Hand to Gravit</button>` +
+    `<button type="button" class="${cls('btn', watched && 'mk-on')}" data-action="toggleWatch" data-id="${id}" aria-pressed="${watched}">${icon('star', 16, 2)}${watched ? 'Watching' : 'Watch'}</button></div>`;
+
+  const priced = number(quote?.price) !== null;
+  const asOf = priced && quote.as_of && when(quote.as_of, now) ? `as of ${when(quote.as_of, now)} · ` : '';
+  const facts = [['Previous close', price(quote?.prev_close, asset.currency)], ['Volume', volumeWord(asset, quote)], ['Source', sourceWord(quote ?? { market: asset.market })]];
+  const top = `<div class="mk-d-px"><span class="mk-big">${esc(price(quote?.price, asset.currency))}</span>` +
+    `${priced ? `${chgHtml(number(quote.change_pct))}<span class="mk-basis">${esc(basisWord(quote))}</span>` : ''}</div>` +
+    `<p class="mk-asof">${esc(asOf + quoteWord(quote))}</p>` +
+    `<dl class="mk-facts">${facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>`;
+
+  const left = [];
+  const right = [];
+  // daily bars exist for a us id only; the chart shows once they hold two closes
+  const bars = asset.market === 'us' ? m.bars[asset.id]?.payload : null;
+  const chart = bars ? chartSvg(bars.rows, { currency: asset.currency }) : '';
+  if (chart) left.push(section('Price history', chart + note(barsWord(bars))));
+
+  const p = portfolioOf(data);
+  if (p.available) {
+    const held = p.holdings.filter(h => h.id === asset.id)
+      .map(h => line('·', `${esc(heldWord(asset, h.qty))} · ${esc(money(h.value, p.currency))}`, changeSpan(h.changeToday)));
+    right.push(section('You hold', held.length ? `<div class="mk-feed">${held.join('')}</div>` : '<p class="mk-empty">You don’t hold any.</p>'));
+    const fills = statementOf(data).filter(r => positionId({ symbol: r.symbol, asset_class: ACCOUNT_CLASS[asset.market] }) === asset.id).slice(0, 8)
+      .map(r => line('✓', `${r.side === 'sell' ? 'Sell' : 'Buy'} ${esc(qtyWord(r.qty))} ${esc(r.symbol)} · ${esc(price(r.price, p.currency))}`,
+        `${esc(when(r.at, now))}${r.amount !== null ? ` · ${esc(money(r.amount, p.currency))}` : ''}`, 'ok'));
+    right.push(section('On the statement', fills.length ? `<div class="mk-feed">${fills.join('')}</div>` : '<p class="mk-empty">Nothing on the statement about it yet.</p>'));
+  }
+
+  const about = mentionsOf(state.conversations, asset).map(c => `<a class="mk-line" href="#/messages/${esc(c.id)}" data-action="open" data-id="${esc(c.id)}"><span class="mk-mark">→</span>` +
+    `<div class="mk-line-b"><div class="mk-t1">${esc(c.title)}</div>${c.updatedAt ? `<div class="mk-t2">${esc(rowTime(c.updatedAt, now))}</div>` : ''}</div></a>`);
+  if (about.length) right.push(section('Gravit on it', `<div class="mk-feed">${about.join('')}</div>`));
+
+  const cols = [left, right].filter(c => c.length).map(c => `<div class="mk-pg-col">${c.join('')}</div>`).join('');
   return `<main class="main mkts mk-page"><a id="page-back" class="back-link page-back" href="#/markets">‹ Markets</a><div class="mk-pg">` +
-    `<header class="mk-pg-head">${who}</header></div></main>`;
+    `<header class="mk-pg-head">${who}${keys}</header><div class="mk-pg-top">${top}</div>` +
+    `${cols ? `<div class="mk-pg-cols">${cols}</div>` : ''}</div></main>`;
 }

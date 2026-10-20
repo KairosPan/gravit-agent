@@ -15,7 +15,7 @@ import { mapFrame } from './wire/mapper.js';
 import { startLive } from './host/live.js';
 import { makeActions } from './host/actions.js';
 import { startMarkets } from './host/markets.js';
-import { canonicalId } from './host/market-view.js';
+import { canonicalId, assetFor } from './host/market-view.js';
 import { createLiveQuotes } from './wire/market-quotes.js';
 import { createSymbolSearch } from './wire/market-search.js';
 
@@ -157,6 +157,7 @@ export function boot(win, host = {}) {
   let composing = false;
   let pending = false;
   let openedId = null;   // the conversation the live layer was told to open
+  let barsFor = null;    // the market page whose daily bars were last asked for
   let wanted = null;     // a deep link the list has not answered yet
   let last = { overlay: null, opener: null, screen: null, drawer: null, thread: null, editor: null, confirm: null };
   let confirmFrom = null;
@@ -260,6 +261,8 @@ export function boot(win, host = {}) {
     if (fixed) win.history.replaceState(null, '', fixed);
     const r = store.get().route;
     showMarkets();
+    // a market page reads its daily bars once per opening (crypto and cn have none to read)
+    if (r.screen === 'markets' && r.id) { if (r.id !== barsFor) { barsFor = r.id; void markets.bars(r.id); } } else barsFor = null;
     // a deep link the list does not carry yet waits for it
     if (asked.screen === 'messages' && asked.id && asked.id !== 'new' && !store.get().conversations.some(c => c.id === asked.id)) wanted = asked.id;
     if (r.screen === 'messages' && r.id && r.id !== 'new' && r.id !== openedId) {
@@ -346,6 +349,17 @@ export function boot(win, host = {}) {
       if (store.get().markets.watchlist.some(a => a.id === id)) markets.unwatch(id); else markets.watch(id);
     },
     openMarket: el => go({ screen: 'markets', id: el.dataset.id }),
+    // a new message in the root channel with the market named in the composer: the operator says what to look for
+    handToGravit: el => {
+      const s = store.get();
+      const asset = assetFor(s.markets, s.account?.data, el.dataset.id);
+      if (!asset) return;
+      store.dispatch('startDraft', { now: now() });
+      composerText = `Look at ${asset.symbol}${asset.name && asset.name !== asset.symbol ? ` (${asset.name})` : ''}`;
+      go({ screen: 'messages', id: 'new' });
+      render();
+      doc.getElementById('say')?.focus();
+    },
   };
 
   root.addEventListener('click', ev => {

@@ -142,8 +142,103 @@ test('no Trade, Connect, Where, Buy or Sell', () => {
   for (const word of [/Trade/, /Connect/, /Where/, />Buy</, />Sell</, /mk-card/, /tradeFrom/]) assert.doesNotMatch(html, word, String(word));
 });
 
-test("a market's page has the way back to Markets", () => {
-  const { html } = screen({ watch: [asset('us:AAPL', { name: 'Apple' })], route: { screen: 'markets', id: 'us:AAPL' } });
-  assert.match(html, /<a id="page-back" class="back-link page-back" href="#\/markets">‹ Markets<\/a>/);
-  assert.match(html, /<h1 class="head-title">Apple<\/h1>/);
+
+// ---- a market's page (#/markets/<id>)
+const conv = (id, over = {}) => ({ id, title: 'T ' + id, kind: 'gravit', members: ['gravit'], memberSessions: [], channel: null, preset: 'gravit', running: false, live: false, updatedAt: NOW - 60_000, created: null, messages: [], loaded: false, preview: null, usage: null, thinking: null, lastSeen: 0, ...over });
+const barRows = closes => closes.map((close, i) => ({ date: `2026-10-${String(10 + i).padStart(2, '0')}`, open: close, high: close, low: close, close, volume: 100 }));
+const account = (positions, orders = []) => ({ ok: true, available: true, host: 'paper-api.alpaca.markets', account: { equity: '1000', last_equity: '990', cash: '400', currency: 'USD' }, positions, orders, generated_at: 'g' });
+const filled = (id, symbol, side, qty, price, at) => ({ id, symbol, side, qty: String(qty), filled_qty: String(qty), filled_avg_price: String(price), type: 'market', status: 'filled', submitted_at: at, filled_at: at });
+
+function page(id, { watch = [], quotes = [], bars = null, data = null, conversations = [] } = {}) {
+  let s = R.nav(emptyState(), { screen: 'markets', id });
+  s = R.watchlistLoaded(s, { items: watch, error: null });
+  s = R.quotesUpdated(s, { quotes: Object.fromEntries(quotes.map(x => [x.id, x])), providers: [], status: 'streaming' });
+  if (bars === 'failed') s = R.barsFailed(s, { id });
+  else if (bars === 'loading') s = R.barsLoading(s, { id });
+  else if (bars) s = R.barsLoaded(s, { id, payload: bars });
+  if (data) s = R.accountLoaded(s, { data, at: NOW });
+  if (conversations.length) s = { ...s, conversations };
+  return renderMarketsScreen(s, NOW);
+}
+const section = (html, label) => html.match(new RegExp(`<section class="dsec" aria-label="${label}">[\\s\\S]*?</section>`))?.[0] ?? '';
+
+test('a us page: price, change against the previous close, facts, the chart with its source stamp, holdings, the statement and Gravit on it', () => {
+  const html = page('us:AAPL', {
+    watch: [asset('us:AAPL', { name: 'Apple', exchange: 'NASDAQ' })],
+    quotes: [quote('us:AAPL', { price: 189.24, prev_close: 186.5, change_pct: 1.47, volume: 52_300_000, as_of: new Date(NOW - 60_000).toISOString() })],
+    bars: { ok: true, id: 'us:AAPL', source: 'alpaca', feed: 'iex', as_of: '2026-10-12', rows: barRows([180, 185, 189]) },
+    data: account([{ symbol: 'AAPL', asset_class: 'us_equity', qty: '5', market_value: '600.0', change_today: '0.0084' }],
+      [filled('o1', 'AAPL', 'buy', 3, 189.5, '2026-10-18T14:00:05Z'), filled('o2', 'MSFT', 'sell', 1, 400, '2026-10-17T14:00:05Z'), { id: 'o3', symbol: 'AAPL', side: 'buy', qty: '2', filled_qty: '0', type: 'limit', limit_price: '150', status: 'accepted', submitted_at: '2026-10-19T14:00:00Z' }]),
+    conversations: [conv('s1', { title: 'Is AAPL breaking out?' }), conv('s2', { title: 'AAPLX notes' })],
+  });
+  assert.match(html, /^<main class="main mkts mk-page"><a id="page-back" class="back-link page-back" href="#\/markets">‹ Markets<\/a>/);
+  assert.match(html, /<h1 class="head-title">Apple<\/h1><span class="mk-sub">Stock · AAPL · NASDAQ<\/span>/);
+  assert.match(html, /data-action="handToGravit" data-id="us:AAPL">[\s\S]*?Hand to Gravit<\/button>/);
+  assert.match(html, /class="btn mk-on" data-action="toggleWatch" data-id="us:AAPL" aria-pressed="true">[\s\S]*?Watching<\/button>/);
+  assert.match(html, /<span class="mk-big">\$189\.24<\/span><span class="up">[\s\S]*?1\.5%<\/span><span class="mk-basis">vs previous close<\/span>/);
+  assert.match(html, /class="mk-asof">as of \d\d:\d\d · Live</);
+  assert.match(html, /<dt>Previous close<\/dt><dd>\$186\.50<\/dd>/);
+  assert.match(html, /<dt>Volume<\/dt><dd>52\.3M shares<\/dd>/);
+  assert.match(html, /<dt>Source<\/dt><dd>Alpaca · IEX<\/dd>/);
+  const chart = section(html, 'Price history');
+  assert.match(chart, /<svg class="mk-chart"/);
+  assert.match(chart, /class="mk-note">Daily · Alpaca IEX</);
+  const hold = section(html, 'You hold');
+  assert.match(hold, /5 shares · \$600\.00/);
+  assert.match(hold, /class="up">\+0\.84%</);
+  const statement = section(html, 'On the statement');
+  assert.match(statement, /Buy 3 AAPL · \$189\.50/);
+  assert.match(statement, /\$568\.50/);
+  assert.doesNotMatch(statement, /MSFT|150/, 'other symbols and unfilled orders stay off');
+  const gravit = section(html, 'Gravit on it');
+  assert.match(gravit, /<a class="mk-line" href="#\/messages\/s1" data-action="open" data-id="s1">[\s\S]*?Is AAPL breaking out\?/);
+  assert.doesNotMatch(gravit, /s2|AAPLX/);
+  assert.doesNotMatch(html, /Buy<\/button>|Sell<\/button>|Across|Bid|Ask/);
+});
+
+test('a crypto page: 24h basis, no Price history', () => {
+  const html = page('crypto:BTC/USD', {
+    watch: [asset('crypto:BTC/USD', { name: 'Bitcoin' })],
+    quotes: [quote('crypto:BTC/USD', { price: 62_800, basis: '24h', source: 'Coinbase', feed: 'exchange', volume: 12_345 })],
+    data: account([{ symbol: 'BTCUSD', asset_class: 'crypto', qty: '0.5', market_value: '31400', change_today: '-0.02' }]),
+  });
+  assert.match(html, /<span class="mk-sub">Crypto · BTC\/USD<\/span>/);
+  assert.match(html, /<span class="mk-basis">24h<\/span>/);
+  assert.match(html, /<dt>Source<\/dt><dd>Coinbase<\/dd>/);
+  assert.match(html, /<dt>Volume<\/dt><dd>12\.3k BTC<\/dd>/);
+  assert.doesNotMatch(html, /Price history|mk-chart/);
+  assert.match(section(html, 'You hold'), /0\.5 BTC · \$31,400\.00/);
+  assert.match(section(html, 'You hold'), /class="down">-2\.00%</);
+});
+
+test('a us page whose bars failed, or hold fewer than two closes, draws no Price history', () => {
+  const base = { watch: [asset('us:AAPL')], quotes: [quote('us:AAPL')] };
+  for (const bars of ['failed', 'loading', { ok: true, source: 'alpaca', feed: 'iex', as_of: '2026-10-12', rows: barRows([180]) }, { ok: true, source: 'alpaca', feed: 'iex', as_of: '2026-10-12', rows: barRows([null, 181, null]) }]) {
+    assert.doesNotMatch(page('us:AAPL', { ...base, bars }), /Price history/, JSON.stringify(bars));
+  }
+});
+
+test('a valid id on no list opens by its symbol with No quote; an A-share names its exchange', () => {
+  const html = page('us:MSFT');
+  assert.match(html, /<h1 class="head-title">MSFT<\/h1><span class="mk-sub">Stock · MSFT<\/span>/);
+  assert.match(html, /<span class="mk-big">—<\/span>/);
+  assert.match(html, /class="mk-asof">No quote</);
+  assert.match(html, /class="btn" data-action="toggleWatch" data-id="us:MSFT" aria-pressed="false">[\s\S]*?Watch<\/button>/);
+  assert.doesNotMatch(html, /You hold|On the statement|Gravit on it/, 'no account read, no conversation naming it');
+  assert.match(page('cn:600519', { watch: [asset('cn:600519', { name: 'Kweichow Moutai', exchange: 'SH' })] }), /A-share · 600519 · SH/);
+});
+
+test('host conversations without demo fields never break the page; an account with nothing of it says so', () => {
+  const host = [{ id: 's9', title: 'Is AAPL breaking out?', kind: 'gravit', members: ['gravit'], messages: [] }, { id: 's8', title: 'Untitled', kind: 'bot', members: ['gravit', 'buffett'], messages: [] }];
+  const html = page('us:AAPL', { conversations: host, data: account([]) });
+  assert.match(section(html, 'Gravit on it'), /href="#\/messages\/s9"/);
+  assert.match(section(html, 'You hold'), /You don’t hold any\./);
+  assert.match(section(html, 'On the statement'), /Nothing on the statement about it yet\./);
+  assert.doesNotMatch(page('us:AAPL', { data: { ok: true, available: false, reason: 'no APCA keys in the environment' } }), /You hold/, 'a keyless account has nothing to say about holdings');
+});
+
+test('a bed-served chart is stamped PIT bed · as of, and a stale one says so', () => {
+  const bars = { ok: true, id: 'us:AAPL', source: 'bed', feed: null, as_of: '2026-07-09', rows: barRows([10, 11]) };
+  assert.match(section(page('us:AAPL', { bars }), 'Price history'), /class="mk-note">Daily · PIT bed · as of 2026-07-09</);
+  assert.match(page('us:AAPL', { bars: { ...bars, stale: true } }), /Daily · PIT bed · as of 2026-07-09 · stale/);
 });
