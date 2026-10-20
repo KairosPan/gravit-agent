@@ -131,14 +131,16 @@ labelled `gravit-face` and exits 1.
 as its client by route A of `docs/superpowers/specs/2026-10-19-gravit-ui-on-face-design.md`:
 vanilla ES modules under `client/js`, one sheet, no bundler, no back end of its own —
 everything on screen is what dsh and the face's `/data` routes say (`DEVELOPMENT.md` §5).
-Stages 1 and 2 of three are built:
+All three of its stages are built:
 
-- **host-fed**: Messages — the session list (every session the host lists, newest first, a
-  room's members folded under it, subagent children left out), a conversation's real
+- **host-fed**: Messages — the session list (every session the host lists, grouped by channel —
+  "Channels" below — newest first, a room's members folded under it, subagent children left
+  out, archived ones under a folded `Archived`), a conversation's real
   transcript (a live session followed with its pulses, a cold one paged and never activated),
   the composer (a prompt; a `/` line to `commands/execute`; an `@` in a channel through the
-  room engine), New message (a title, Where — a channel — and the first words), Details (the
-  title with Change words, Created, Where, Agent, Members, Usage, Stop Gravit), the three gate
+  room engine), New message (a title, Where — a channel, or `New channel…` — and the first
+  words), Details (the title with Change words, Fork, Archive or Un-archive, Delete; Created,
+  Where, Agent, Members, Children with Stop, Usage, Stop Gravit), the three gate
   cards (the order card, an approval, a question) answered through the mux, the one status
   line under the composer (not signed in, reconnecting, a host error, a command's word), and
   Settings (Cream · Black · System);
@@ -146,12 +148,15 @@ Stages 1 and 2 of three are built:
   with the face's live quotes, and a market's page with its daily bars — and Account
   (`#/account/portfolio`, `#/account/venues`) — the paper account's Portfolio, the Statement and
   Venues ("Markets and Account" below). The old `/market` and `/account` pages are gone (404);
-- **not yet built**: Discover (the plugin shop, the channel inventory, the bots' and roles'
-  pages, the host facts), the row actions beyond rename (archive, delete, fork), the subagent
-  dock, Mail — stage 3's.
+- **host-fed since stage 3**: a channel's page (`#/channel/<id>`: its status, thesis, backtests,
+  journal, files, and its agent and bot rosters with their editors), Discover (`#/discover`, the
+  inventory of what Gravit runs — "Discover" below), the row actions, a tool result drawn as a
+  table, tiles or a chart with its raw text a click away, a conversation's subagent children
+  ("Temporary subagents" below) and a room member's trace. There is no shop, no Mail and no
+  Memory: what the demo drew with no back end left the tree.
 
 What the browser keeps is two keys: `localStorage["gravit-ui.prefs"]` — the theme, the rail's
-fold, the last conversation, what was seen — and the watchlist under
+fold, the list groups you folded, the last conversation, what was seen — and the watchlist under
 `gravit.market.watchlist.v1`. Nothing else: a reload rebuilds the page from the host. The demo's director (`d`), its scripted Gravit and its seed are gone with
 the move; `tests/client/*.test.js` keep the renderers and the host layer honest on a fake DOM
 and a fake host, and `gravit-client-smoke.test.ts` opens one real session over the real wire.
@@ -668,7 +673,7 @@ the whole bed (~284 seconds measured); later runs read its disk cache under
 source and as-of day. `scripts/face_data.py` still produces both this legacy
 payload and account data.
 
-## Channels (src/channels.ts + src/roster.ts + the session picker)
+## Channels (src/channels.ts + src/roster.ts + the list's groups and a channel's page)
 
 A channel is one directory, given an identity by the host and a roster by the
 operator. Three layers, split by who may write them:
@@ -688,51 +693,58 @@ returns the existing title unchanged — so a channel Gravit makes with a plain
 `mkdir` becomes a channel on the very next listing.
 
 **The reconcile** (`reconcileChannels`, `src/channels.ts`) runs on every
-listing — both the `GET` that feeds the sidebar and picker and the `POST`
-that feeds a channel's own page — and is idempotent by construction: `create`
+listing — both the `GET` that feeds the list and New message's Where and the
+`POST` that feeds a channel's own page — and is idempotent by construction: `create`
 is a no-op past its first call, `attachSession` early-outs on membership
 before validating anything, and seeding a roster (`seedRoster`) is a no-op
 once the channel has one. A steady-state listing performs no writes at all.
 Because it CAN write on a `GET`, `channels.json`'s two writers — the
 reconcile's seed and the operator's roster edit — both go through
 `withFileLock` + `writeFileAtomic`, reading the file *inside* the lock, so a
-sidebar poll racing an operator's toggle cannot silently revert it. A
-workspace whose directory has vanished is reported greyed (`missing-dir`),
-never deleted; its sessions stay attached and reachable.
+list refresh racing an operator's save cannot silently revert it. A
+workspace whose directory has vanished is reported (`missingDir`), never
+deleted; its sessions stay attached and reachable (the gravit-ui client lists
+such a channel like any other, and its page reads empty).
 
-**The picker and the sidebar are registry-driven now, not directory-scanned.**
-On the gravit-ui client (stage 1) **New message** offers **Where** — a select of
-the channels from `/data/channels.json`, the root first — and `session/create`
-takes the chosen `workspaceId`. (The old chat page's picker, `showStrategyPicker`,
-read the same index and added a `choose a local folder…` row through the OS's
-own dialog, `directoryPicker/pick`, which answers a bare path or `null`; that row
-waits for stage 3.) The old sidebar
-grouped sessions by channel MEMBERSHIP, not by path prefix: a session no
-channel claimed folded into a counted `ungrouped` bucket — never dropped,
-charter Rule 5; the stage-1 list is one list, newest first, each row's channel
-in Details — and the archive fold is the UNION of the face's own
-reversible set (`archived.json`) and the host's one-way
+**Where and the list are registry-driven, not directory-scanned.** **New
+message** offers **Where** — a select of the channels from `/data/channels.json`
+by their display titles, the root first, then **New channel…**, which opens a
+name box under it (the name folded as below, `POST /data/channels`, the new
+channel selected once the list carries it) — and `session/create` takes the
+chosen `workspaceId`. (The old chat page's picker also had a `choose a local
+folder…` row through the OS's own dialog, `directoryPicker/pick`; the gravit-ui
+client has none.) The list groups sessions by channel MEMBERSHIP, not by path
+prefix: every channel is a group — an empty one too, so a new channel's page is
+reachable — the root first, then by each group's newest session; a bot's home
+sessions under the bot; a session no channel claims under **No channel** —
+never dropped, charter Rule 5 — and the archived ones last, under a folded
+**Archived**. The archive is the UNION of the face's own reversible set
+(`archived.json`, read through `/data/sessions-meta.json`) and the host's one-way
 `workspaceRegistry.archivedSessionIds`, because the two already disagree on
 disk and neither alone is honest about what is archived.
 
-On the old chat page groups fold (chevron on the header; view state per browser), and
-each session row carries four hover actions (the stage-1 list has rename alone, as
-Details' **Change words**; the rest wait for stage 3): rename and fork are the host's own Remotes
-(`session/rename`, `session/fork` — a fork opens immediately; a rename resumes
-the session first, so on a cold one it is a write like a prompt, see "The wire
-and the transcript"); archive and delete are face routes. dsh 0.2.0-rc.2 has no
+Groups fold (the chevron on a group's head; the fold is per browser, in
+`gravit-ui.prefs`, and a folded group still shows the conversation on screen),
+and a conversation's **Details** carries its row actions: **Change words** and
+**Fork** are the host's own Remotes (`session/rename`, `session/fork` — a fork
+opens at once; dsh forks only from a completed turn, so a conversation with
+nothing in it offers no Fork; a rename resumes the session first, so on a cold
+one it is a write like a prompt, see "The wire and the transcript"); **Archive**
+(or **Un-archive**) and **Delete** are face routes, neither offered while Gravit
+runs or a card waits. dsh 0.2.0-rc.2 has no
 session delete Remote at all, and its archive (`workspace/archiveSession`) is
 not presentation: a host-archived session runs no model step until the host
 restores it. So the face keeps its own fold — metadata in
-`$DSH_HOME/face/archived.json`; the session still exists, folded into an
-`archived` group at the bottom, reversible — and never un-archives a host
-archive: that click answers 409 with the reason (upgrade decision D14). Delete
-removes the session's persistence directory permanently (confirm-gated, never
-offered on a running session, no undo) and tombstones the id: a session
-deleted while its agent is still attached keeps listing from host memory until
-the next face restart — and write-behind can even re-persist its directory —
-so the sidebar hides tombstoned ids unconditionally and the ghost dies with the
-restart. Opening a cold session no longer attaches it (it is paged, not
+`$DSH_HOME/face/archived.json`; the session still exists, under **Archived** at
+the list's end, reversible — and never un-archives a host archive: Details says
+`Archived · By the host` and offers no key, and the route answers 409 with the
+reason (upgrade decision D14). Delete removes the session's persistence
+directory permanently (asked twice, never offered on a running session, no
+undo) and tombstones the id: a session deleted while its agent is still
+attached keeps listing from host memory until the next face restart — and
+write-behind can even re-persist its directory — so the list hides tombstoned
+ids unconditionally and the ghost dies with the restart. Archiving or deleting
+the conversation on screen opens the first open one. Opening a cold session no longer attaches it (it is paged, not
 followed — D16), so viewing and then deleting stays off that path; the
 attached case is a session this face run prompted, renamed or `@`-addressed.
 `deleteSession` also constrains itself to sessions whose `cwd` resolves inside
@@ -749,7 +761,7 @@ registry's `sessionIds`, because the host's `workspace/*` Remotes at 0.2.0-rc.2
 `insertSessionBefore`, `archiveSession`, `unarchiveSession`, `pinSession`,
 `unpinSession`, and the `follow` stream — offer no way to remove one session
 from a workspace. The orphan is inert — nothing resolves it, so nothing renders it,
-and the sidebar counts rendered rows rather than `sessionIds` — but
+and the list draws rows, not `sessionIds` — but
 `/data/channels.json` does carry dead ids, and a reader counting that array
 will over-count. Drilled 2026-09-04: deleting a session left its id under
 `storage-chain` with its persistence directory gone.
@@ -768,24 +780,31 @@ treating that fence as authentication:
 | Route | What |
 |---|---|
 | `GET /data/channels.json` | the reconciled list, the `ungrouped` bucket, the archive set |
-| `POST /data/channels/overview` | one channel's landing-page payload — `{workspaceId}` in |
+| `POST /data/channels/overview` | one channel's page payload — `{workspaceId}` in |
 | `POST /data/channels/agents` | the operator's roster write — `{workspaceId, agents}` in |
-| `POST /data/channels` | create — `{name}`, copies `strategies/_template`, then reconciles |
+| `POST /data/channels` | create — `{name}`, copies `strategies/_template`, then reconciles; answers `{name, dir, isRoot}` (no workspace id — the client finds the new channel by its `dir` in the next listing) |
 
-**The landing page** (`client/channels.js`) opens on clicking a channel's
-title in the sidebar's group header — the chevron still only folds it. Seven
-blocks, every one quietly skipped when its source is absent: header (title,
-inline-rename, status badge, a `missing-dir` warning, the roster's agent
-chips, the directory path); the optional `status.yaml` headline (`one_line`,
-`next`, `numbers` — see `GRAVIT.md`); the thesis (`THESIS.md`, with an
-untouched `_template` copy detected byte-exact and shown as "no thesis yet"
-rather than presented as content); latest evidence (the newest
-`backtests/*.json`, flattened to a summary table, with the FULL json always
-reachable in a collapsed `<details>` alongside it — nothing is dropped
-because nothing is hidden); the journal (`journal.md`'s `- YYYY-MM-DD:` lines
-as a timeline); files (one level of the directory, `__pycache__` filtered);
-and sessions (the channel's own, joined against `session/list`, plus "new
-round").
+**A channel's page** (`client/js/render/channel.js`, `#/channel/<workspaceId>`)
+opens from a channel's name in its group head — the chevron only folds the
+group — and the list stays beside it. The head: the channel by its title, the
+`status.yaml` status as a chip, and **New round** (New message with Where on
+this channel). Then, each skipped when its source is absent: the headline
+(`one_line`, `Next: <next>`, `numbers` as rows — see `GRAVIT.md`); **Thesis**
+(`THESIS.md` drawn as markdown, an untouched `_template` copy detected
+byte-exact and shown as `No thesis yet` rather than presented as content);
+**Latest backtest** (the newest `backtests/*.json`: its file name and up to
+twelve of its top-level scalar fields — the whole file stays in the channel's
+directory); **Backtests** (file and size); **Journal** (`journal.md`'s `-
+YYYY-MM-DD:` lines, the newest twenty); **Files** (one level of the directory,
+`__pycache__` filtered: name, size, date); **Agents** and **Bots** — the
+channel's rosters, each with **Edit**: a box per choice (the connected CLI
+agents that answered on this machine; every bot but Gravit's own composition),
+ticked as rostered, a rostered one no longer offered kept to untick, at most six
+bots; ✓ saves through the roster routes and re-reads the page. A failed read
+says `Channel unavailable` with Retry, or keeps the page under `As of HH:MM ·
+stale`; an unknown id reads `Channel not found`. Everything on the page was
+written into the channel's directory and is drawn as text (the thesis through
+the DOM-built markdown), never as markup.
 
 **The roster**, `$DSH_HOME/face/channels.json` (`src/roster.ts`), keyed by
 workspace id so a directory rename never loses it:
@@ -841,7 +860,7 @@ down this file:
    is no roster to consult and tools are registered tree-wide regardless of
    channel. It is also cheap to reach, not a rare edge case: the old chat page's
    **`choose a local folder…`** row created a session straight from a raw
-   `cwd`, never a `workspaceId` (`showStrategyPicker`; the stage-1 New message
+   `cwd`, never a `workspaceId` (`showStrategyPicker`; the gravit-ui client's New message
    offers channels only, and a create with no channel lands in the host's
    default directory, which no channel claims either), so
    such a session resolves to no channel and is never roster-checked; a channel directory
@@ -896,65 +915,48 @@ neighbourhood:
    from `dsh/profile/persona.md` (at 0.2.0 the key is `personaPrefix`; see
    "The profile").
 
-## The master rail (src/panels.ts + the sidebar's four faces)
+## Discover (src/panels.ts + client/js/host/discover.js + client/js/render/discover.js)
 
-**On the gravit-ui client** the page at `/` has no master rail and no sidebar faces: its rail
-is Messages, Markets, Settings and Account ("The page (client/)" above), and the four links
-below (`/#strategy`, `/#agent`, `/#memory`, `/#plugin`) open Messages there. What follows is the
-old chat page's rail, which no page draws any more — the last two that did, `/market` and
-`/account`, left with stage 2, and `client/navigation.js` with them. It stays here as the record
-of what stage 3's Discover will read: `/data/channels.json`, `/data/agents.json`,
-`/data/memory.json`, `/data/plugins.json`.
+**Discover** (`#/discover`, in the rail's first level) is the inventory of what Gravit runs —
+there is no shop: nothing to install, buy, publish or count. Entering it reads four face routes,
+each alone — a failed one says `Couldn't read <Shelf>` with Retry beside the others drawn:
+**Data**, the MCP servers and their tools (`GET /data/plugins.json`); **Bots**, the operator's
+voices (`GET /data/bots.json`, never Gravit's own composition); **Agents**, Gravit first, then the
+local CLI agents (`GET /data/agents.json`); **Skills**, Gravit's standing knowledge (`GET
+/data/memory.json`). A search box matches names and lines across the shelves, `See all` opens a
+shelf as a grid, and every card opens its item's page, `#/plugin/<id>`, under a namespaced id
+(`mcp:<server>`, `bot:<id>`, `agent:gravit`, `agent:<bin>`, `skill:<name>`). Discover's refusals
+go to its own status line. (The old chat page's master rail and its four sidebar faces —
+strategy, agent, memory, plugin — are gone with that page; their `/#agent`-style links open
+Messages.)
 
-A narrow icon rail at the far left opened **market** above the sidebar switches
-and **account** at the bottom; chat, Market and Account shared one rail and its
-fixed 56px layout. The four switches picked which face the sidebar shows:
-**strategy** (the working face — everything above), **agent**, **memory**,
-**plugin**. One pattern across all four (operator direction): the sidebar is
-always an INDEX — rows, never content — and clicking a row opens that item's
-page in the RIGHT pane, in place of the chat (`.main.detail-mode` hides the
-flow + composer; the topbar names the open item; picking a session or
-"+ new" always brings the chat back). Strategy's "content" is the chat
-itself. The three instrument faces are read-only, refetch on every open, and
-split by data source:
-
-- **agent** indexes four sections. *Main agent* is Gravit — the dsh runtime
-  this face hosts; its page is a card grid over three reads:
-  `session/modelCatalog`'s `default` (provider, model and reasoning effort —
-  the selection a new session starts from, i.e. the D2 row), the face's own
-  `/data/host.json` (`{cwd, home, attachedSessions, version}` — dsh 0.2 has no
-  `host.describe`), and `credentials/describe` (each key `set · <source>` or
-  `not set`, never a value; an absent entry reads `unknown`, a malformed
-  answer an error). `settings/describe` is not called: it needs the
-  `profileContext` the face does not provide (D1). Its *session usage* card is
-  fed by the `session/control` stream's projection items (tokenUsage /
-  contextPressure, from dsh-token-meter's projection units) — a per-session
-  store keeps whole values with higher seq winning, seeded by the control
-  baseline, a follow's snapshot or a paged session's `session/projections`
-  read; a list row's `cached` block never seeds it, because its watermark is
-  not comparable with a live session's. The context bar turns
-  danger-colored at 80%. *Local agents* is an
-  OPERATOR-CURATED roster, not a fixed list: it starts empty and lives in
-  `$DSH_HOME/face/agents.json`. The `+ connect` row opens the roster page,
-  three parts: what is *connected* (each row deletable); what auto-discovery
-  *detected on this machine* — the panels.ts suggestion list, fifteen
-  coding-agent CLIs by their PATH names, each probed with `<bin> --version`
-  (execFile, no shell, scrubbed env, 3 s kill; absent, hung and nonzero all
-  read as "not here"), offered in list order when it answers and is not yet
-  connected, one click to connect, with a ↻ refresh that forgets the
-  one-minute probe cache and looks again (`POST /data/agents/rescan`); and
-  connect-by-name for anything the list does not know.
-  `POST /data/agents/connect` admits a binary ONLY if it answers `--version`
-  (the name is fenced to one bare PATH token, so a request body can never
-  steer a probe to a path) and probes fresh; rows also disconnect from a
-  hover `×` in the index or the agent's own page
-  (`POST /data/agents/disconnect`); a
-  connected binary that stops answering stays listed greyed rather than
-  vanishing. Each agent's page is its directory entry (status / binary /
-  version / signed-in state — read through the agent's OWN status command,
-  `claude auth status`, `codex login status` or `hermes status`, the last a
-  config report rather than a login gate, so a pinned provider reads as
-  signed in — never its credential store) and names the tool it became.
+- **Gravit** (the first card on Agents) — its page is three cards over three reads:
+  `session/modelCatalog`'s `default` (provider, model and reasoning effort — the selection a new
+  session starts from, i.e. the D2 row), the face's own `/data/host.json` (`{cwd, home,
+  attachedSessions, version}` — dsh 0.2 has no `host.describe`), and `credentials/describe` for
+  `DEEPSEEK_API_KEY`, `APCA_API_KEY_ID` and `APCA_API_SECRET_KEY` (each `Present` or `Absent`,
+  never a value). Each card reads `Loading…`, `Couldn't read` alone on a failure, or its rows.
+  `settings/describe` is not called: it needs the `profileContext` the face does not provide (D1).
+  A session's usage — the `session/control` stream's `tokenUsage` and `contextPressure` — is in
+  that conversation's Details.
+- **Local agents** are an OPERATOR-CURATED roster, not a fixed list: it starts empty and lives in
+  `$DSH_HOME/face/agents.json`. The Agents shelf lists what is *connected* (`Connected`; a
+  connected binary that stops answering stays listed, `Not found`, rather than vanishing) and
+  what auto-discovery *found on this machine* (`Found · <version>`) — the panels.ts suggestion
+  list, fifteen coding-agent CLIs by their PATH names, each probed with `<bin> --version`
+  (execFile, no shell, scrubbed env, 3 s kill; absent, hung and nonzero all read as "not here"),
+  offered in list order when it answers and is not yet connected. **Rescan** forgets the
+  one-minute probe cache and looks again (`POST /data/agents/rescan`). An agent's page is its
+  directory entry — Version, Sign-in (`Signed in`, `Not signed in` or `Unknown`, read through the
+  agent's OWN status command, `claude auth status`, `codex login status` or `hermes status`, the
+  last a config report rather than a login gate, so a pinned provider reads as signed in — never
+  its credential store) and the tool it became — with **Connect** for a found one or
+  **Disconnect** for a connected one. `POST /data/agents/connect` admits a binary ONLY if it
+  answers `--version` (the name is fenced to one bare PATH token, so a request body can never
+  steer a probe to a path) and probes fresh; a refusal (`binary did not answer on this machine`)
+  lands on Discover's line; `POST /data/agents/disconnect` removes a row. The gravit-ui client
+  offers no connect-by-name for a binary the suggestion list does not know (the route takes any
+  bare PATH token).
 
   **What a connection is FOR.** The face has no run box of its own: a
   connected agent the face has a recipe for is registered in the dsh tree as
@@ -993,31 +995,26 @@ split by data source:
   the alpaca-kit tools it raises no approval card; a `tools/pre-execute`
   `ask` hook is the knob if the operator ever wants one per delegation.
   Hermes deliberately has NO recipe: its default provider config reuses those
-  tokens, so it stays a directory entry until its provider is pinned. *Bots*
-  indexes the operator's own voices, one directory each under `bots/`, plus a
-  `+ new bot` row (see "Bots" below). *A2A network* is a declared placeholder
-  page — network agents land there when that opens.
-- **memory** indexes the skill catalog — Gravit's standing knowledge. The
-  wire `skills/list` is addressed by a session and carries no SKILL.md body or
-  pack, so two face routes read `ctx.skills` in-process: `GET /data/memory.json`
-  (grouped by pack — the directory under `dsh/skills/`, mechanics first) and
-  `POST /data/memory/skill` (`{name}`, kebab-validated). A skill's page is
-  the full SKILL.md body at document width, rendered by the old chat page with
-  the same markdown module the bubbles use (`client/js/wire/markdown.js`); the
-  gravit-ui client reaches memory from stage 3.
-- **plugin** indexes the MCP servers and the composed row tree:
-  `GET /data/plugins.json` projects `ctx.loader.entries()` (the same short
-  projection `dsh-host-plugin-inventory` makes — at 0.2.0 a
-  `pluginInventory/list` Remote and an exported `readPluginInventory(ctx)`,
-  mounted only by dsh-web-app; the face restates it rather than mount a row)
-  plus `ctx.tools.schemas()` grouped under each `dsh-mcp-client` row's
-  `serverName`. A row's `options.config` is never serialized — the MCP row's
-  env block carries the APCA keys; `serverName` is the one field read. A
-  server's page is its live tool table; the tree's page is the full
-  module/id/phase table — about 110 rows at 0.2.0-rc.2, ids of the form
-  `include:<row id>` — its index row calling out any `failed` count.
+  tokens, so it stays a directory entry until its provider is pinned.
+  The **Bots** shelf indexes the operator's own voices, one directory each under `bots/`, and
+  Discover's head carries **Create a bot** (see "Bots" below).
+- **Skills** — the wire's `skills/list` is addressed by a session and carries no SKILL.md body
+  or pack, so two face routes read `ctx.skills` in-process: `GET /data/memory.json` (grouped by
+  pack — the directory under `dsh/skills/`, mechanics first) and `POST /data/memory/skill`
+  (`{name}`, kebab-validated). A skill's page is its group, its description and its full
+  SKILL.md body as text, read once when the page opens.
+- **MCP servers** — `GET /data/plugins.json` projects `ctx.loader.entries()` (the same short
+  projection `dsh-host-plugin-inventory` makes — at 0.2.0 a `pluginInventory/list` Remote and an
+  exported `readPluginInventory(ctx)`, mounted only by dsh-web-app; the face restates it rather
+  than mount a row) plus `ctx.tools.schemas()` grouped under each `dsh-mcp-client` row's
+  `serverName`. A row's `options.config` is never serialized — the MCP row's env block carries
+  the APCA keys; `serverName` is the one field read. A server's page is its state (`Pending`,
+  `Loading`, `Active`, `Failed`, `Unloading`) and its live tool table, each tool's description
+  clamped to two lines (a server may describe a tool with a whole method list — AKShare's run to
+  thousands of characters). The composed row tree the listing also carries (`rows` — about 110 at
+  0.2.0-rc.2, ids of the form `include:<row id>`) is not drawn; it is in the JSON.
 
-Every `/data` route — the panels', the instruments', the strategy and session
+Every `/data` route — Discover's, the instruments', the strategy and session
 routes — stands behind a browser-trust fence modelled on the one the harness
 puts in front of `/api` (`isTrustedDataRequest`): a loopback Host, no
 Fetch-Metadata `cross-site`, and a present `Origin` that matches the Host —
@@ -1030,7 +1027,7 @@ with a fixed argv and writes nothing durable of its own — a Codex call gets a
 `mkdtemp` scratch directory under the OS tmpdir for `-o`, read once and
 removed when the run ends. `panelDeps` fails loud at boot when
 `skills`/`tools`/`loader`/`workspaceRegistry`/`agents` are missing from the
-tree — a dead panel with nothing on stderr is the failure mode it exists to
+tree — a dead shelf with nothing on stderr is the failure mode it exists to
 prevent.
 
 ## Bots (src/bots.ts + src/bot-presets.ts + plugins/bot.js + bots/)
@@ -1145,46 +1142,55 @@ escalation hint (`[sandbox: escalation available — retry this exact command on
 sandbox_permissions …]`), inviting a voice to retry once and raise an approval card — which
 only the operator can grant.
 
-**Authoring is the face's own copy.** The **New bot** form (agent face → bots → `+ new bot`;
-`POST /data/bots`) copies `bots/_template`, writes `preset.yml` and `SOUL.md`, and RENDERS
+**Authoring is the face's own copy.** **Create a bot** (Discover's head → `#/discover/create`:
+Name, Id, Description, Model, Soul; `POST /data/bots`, which answers `{ok, bot: <the new row>}`
+and opens its page) copies `bots/_template`, writes `preset.yml` and `SOUL.md`, and RENDERS
 `agent.cordis.yml` so the persona row's text is the soul's (`renderComposition`) — dsh's
-`!!js` cannot read a sibling file. The settings page edits name, description, default model,
-and SOUL together. Its optional role guide builds a local draft from the operator's
-perspective, evidence standard, revision criteria, participation rules, and style.
-Creating without a SOUL replaces the template's `<bot name>` with the chosen name.
+`!!js` cannot read a sibling file. A bot's page on Discover has **Edit**: name, description,
+default model (`Default`, or a route `session/modelCatalog` offers — one it does not offer but
+the bot names is still listed) and SOUL together, through `POST /data/bots/settings`. (The old
+settings page's role guide, which drafted a soul from six answers, is not on the gravit-ui
+client; `client/js/wire/botSettings.js` `draftBotSoul` remains.) Creating without a SOUL
+replaces the template's `<bot name>` with the chosen name.
 Saving updates the persona inside the existing composition, preserving other plugin rows,
 paths, allow patterns, and skill configuration. The legacy soul endpoint remains supported.
 The parser uses the Loader's own entry-list schema (`entryListSchema`) so `!!js`
 expressions round-trip without evaluation. An entirely dynamic bot config must be edited by
 hand; SOUL saving refuses it with 409. An unparseable composition retains the legacy repair
-behavior of rebuilding template rows. Same-bot reads and writes serialize; the UI supplies a
-saved-file revision, and a stale save returns 409 without losing the editor draft. Files are staged before
-replacement, with rollback on ordinary I/O failure; this is not a crash-safe multi-file
-transaction. A hand edit to `SOUL.md` reaches nothing until the face saves it again. The
-page flags source/persona drift and placeholder text. No `{{` anywhere in a soul: the
+behavior of rebuilding template rows. Same-bot reads and writes serialize; the page supplies
+the saved-file revision it was drawn from, and a stale save returns 409 — the page reads it as
+`Changed elsewhere — reloaded`, reads the bots again and shows the saved revision's values (every
+box's id carries the revision, so the typing that lost the race is not restored); a 500 `bots/<id>
+was saved, but the running face could not re-declare it …` kept the files and counts as saved.
+Files are staged before replacement, with rollback on ordinary I/O failure; this is not a
+crash-safe multi-file transaction. A hand edit to `SOUL.md` reaches nothing until the face saves
+it again. The page shows the setup issues the face found and a broken bot's reason (`Can't run ·
+<reason>`); source/persona drift (`soulInSync`) is in the listing and not drawn. No `{{` anywhere
+in a soul: the
 prompt is a strict template with no escape, and both write paths (`rejectSoul`, on the way
 in) and the plugin itself (`validateBotConfig`, at mount) refuse it.
 
 **A bot's home** is a session created with `cwd = bots/<id>/journal` and `agentPreset = <id>`
-— the old chat page's `openBotHome` armed the next prompt exactly as a channel's "new round"
-did (the stage-1 client opens an existing home session from the list and creates none),
-and the host's own `session/create` mounts the preset (no in-process agent creation).
-The list shows a bot's home session with the bot's avatar and name (the old sidebar
-bucketed it under the bot) from the session's preset, which
+— **Talk to <bot>** on its page opens its newest home conversation that is not archived, else
+creates one with exactly that cwd and preset (`session/create {cwd, agentPreset}`; not offered
+for a broken bot or one the preset roster does not list) — and the host's own `session/create`
+mounts the preset (no in-process agent creation). The list groups a bot's home sessions under
+the bot, each with the bot's letter, from the session's preset, which
 0.2.0's `session/list` rows no longer carry: `client/js/wire/summaries.js` `summaryOf` restores it
 from the row's `agentPreset` projection first, then from `/data/channels.json`'s `presets`
 (built from the persisted and live session headers), and leaves it absent rather than
-guess (the old sidebar's `grouping.js` `bucketFor`, `BOT_KEY_PREFIX`; stage 1's `kindOf` in
-`client/js/host/sessions.js`); the old strategy picker never offered a
-journal as a "local folder" (`knownFolders` skips every cwd under `bots/`). Reading the same
-preset, the transcript names the voice: in a bot's session its display name stands over
-every reply, its ask cards read `<bot> asks` and the composer says `Message <bot>…`, while
-Gravit's own sessions stay `Gravit` (`speaker.js` `speakerFor`). Ids keep the retired 0.1.1
+guess (`client/js/wire/grouping.js` `bucketFor`, `BOT_KEY_PREFIX`, ordered by
+`client/js/host/list-view.js` `groupsOf`; `kindOf` in `client/js/host/sessions.js`). Reading the
+same preset, the transcript names the voice: in a bot's home session the assistant's replies are
+the bot's, under its letter (`client/js/host/kinds.js` speaks the assistant role as the bot);
+the composer still reads `Tell Gravit…` there. Ids keep the retired 0.1.1
 preset grammar `[a-z0-9][a-z0-9-]*`, bounded to 64 code points (`BOT_ID_RE`) — dsh 0.2.0
-asks only for a non-blank id, so this is the face's own gate. The form proposes an id from
-the display name (`botId.js` `proposeBotId`, the browser twin of the server's —
-`botId.test.ts` pins that a non-empty proposal is always an id `isBotId` accepts) and the
-server refuses anything else — `gravit` by name (`RESERVED_IDS`) and `_template` by the
+asks only for a non-blank id, so this is the face's own gate. A blank Id is left to the face,
+which proposes one from the display name; the page refuses before posting a name that proposes
+none — no ASCII letter or digit — and has no id (`Give it an id: a-z, 0-9, -`), through
+`client/js/wire/botId.js` `proposeBotId`, the browser twin of the server's (`botId.test.ts` pins
+that a non-empty proposal is always an id `isBotId` accepts), and the server refuses anything
+else — `gravit` by name (`RESERVED_IDS`) and `_template` by the
 grammar, which admits no leading underscore (both through `isBotId`).
 
 **Default model and inspection** (`src/bot-runtime.ts`). **New test conversation** uses
@@ -1361,7 +1367,7 @@ reviewer `job_output`), because those sections are global and ignore the restric
 `roles-smoke.test.ts` pins the child's side on a real boot ("Tests" below); "The role drill"
 at the end of this file is the live check.
 
-## Rooms (src/room.ts + src/room-rules.ts + src/room-contract.ts + src/room-projection.ts + client/room.js)
+## Rooms (src/room.ts + src/room-rules.ts + src/room-contract.ts + src/room-projection.ts + client/js/wire/room.js)
 
 A room is an ordinary channel session whose agent is Gravit and which has **members**: one
 session per bot the channel rosters, created lazily the first time that bot is named. Nothing
@@ -1457,33 +1463,26 @@ room messages the 0.2 migration refuses - the file stays on disk untouched`.
 caps left.
 
 **The client.** A member's answer renders as a bubble in the bot's own voice — its display name
-and an avatar — never as a context row (`client/js/wire/room.js`, `mapper.js`); the round end is a
-room line, on the old chat page followed by a **本轮讨论对照** card when discussion data exists
-(the stage-1 thread draws the line alone; the card, the member bubbles' disclosures and the
-participants strip below wait for stage 3). The card shows the
-brief, each speaker's position and supporting details, declared disagreements and speakers
-who supplied plain text only. Member bubbles expose evidence, uncertainty and change conditions
-in a disclosure and keep the valid JSON fence out of the prose. Old logs still render as before.
-The dispatch card reads as the who-was-called line. The **participants strip** above
-the transcript shows Gravit (`organizing` while its turn is open) and every rostered voice:
-coarse states from the projection, fine states (`thinking` / `writing` / `tool`) from the
-members' own pulses, `waiting for you` when a gate is pending on the member, `left` for a member
-the roster no longer carries. The pulses come from one `session/follow` (assistant stream, a
-one-message window) per LIVE member of the room on screen — opened from the list's
-`agentAvailable`, the host's `api-session/added` and the room projection's members — and a
-member that is not followed reads `thinking` from `api-session/status`. A cold member is never
-followed, because following a cold session activates it ("The wire and the transcript"); the
-residual is a member that goes cold between its `agentAvailable` snapshot and the follow's
-open, which that open activates. A member's question or escalation card renders **inline in the
-room**, headed with the bot's name, and is answered against the member's own session. Member
-sessions have **no separate Members dropdown** in the sidebar. Each member answer has the same
-bottom-right **思考轨迹** disclosure as Gravit. Opening it reads the exact member session and
-turn recorded on that answer, paging older history as needed; it does not resume or prompt
-the member. Context, thinking and tool results stay scoped to that turn, with visible loading,
-empty and retry states. Membership still follows the header: `parentSessionId` set, no
-`origin`, a bot preset, the parent running the host. A
-pending gate on a session or its members marks the session row, the channel header and the
-landing page (needs-you at the index level).
+over it and its letter — never as a context row (`client/js/wire/room.js`, `mapper.js`,
+`client/js/host/kinds.js`): the room's `displayText` when the answer has one (the prose of a
+structured answer, its valid JSON fence kept out), else its text, through the same markdown hook
+as Gravit's. The round end is a room line. The old chat page also drew a **本轮讨论对照** card
+after that line when discussion data existed (the brief, each speaker's position and supporting
+details, declared disagreements, the speakers who supplied plain text only), disclosures on the
+member bubbles (evidence, uncertainty, change conditions) and a **participants strip** above the
+transcript (coarse states from the projection, fine ones from one `session/follow` per LIVE
+member); the gravit-ui client draws none of the three. Its group head shows the members — a
+cluster and their names — from the `room` projection and the list's fold, and no member session
+is followed (following a cold session activates it, "The wire and the transcript"). A member's
+question or escalation card renders **inline in the room**, under the bot's name, and is answered
+against the member's own session. A member's answer that records its member session and turn
+carries a **Trace** disclosure under it: opening it reads that exact turn — the projections cut,
+then the history paged back as needed, never a follow — so it does not resume or prompt the
+member; its tool rows draw as the thread draws them, with `Loading…`, the loader's words or `No
+steps` (`client/js/host/traces.js` over `client/js/wire/member-traces.js`). Membership still
+follows the header: `parentSessionId` set, no `origin`, a bot preset, the parent running the host.
+A pending gate in a room counts toward the rail's Messages badge (the conversations with a card
+waiting on you).
 
 **The honest limits, in the register of the channels section.** Dispatch grants nothing and the
 mask is visibility; a member's write fence is its sandbox mode, its order fence is Gate 2,
@@ -1510,12 +1509,16 @@ the voice's memory (upgrade decision D11).
 | `POST /data/rooms/say` | `{sessionId, text}` → `{addressed: [...]}`; 400 a bad id or empty text, 404 not in a channel or no such session, 409 a corrupt roster or a room dsh cannot resume (dsh's code and message) |
 | `POST /data/rooms/state` | `{sessionId}` → `{roster, members, caps, round?}`; never resumes a session |
 
-## Temporary subagents (client/subagents.js)
+## Temporary subagents (client/js/wire/subagents.js + client/js/host/children-view.js)
 
-**On the gravit-ui client (stage 1)** the **临时子任务** panel is not built: `client/subagents.js`
-is imported by no page, subagent children are not listed, and a child's report reaches the
-parent's thread as one centred line. The panel, in its minimal form, is stage 3's (spec §7). What
-follows describes the host's subagent stack, which holds either way, and the old chat page's panel.
+**On the gravit-ui client** the old **临时子任务** panel is a conversation's **Children**, a
+section of its Details, in its minimal form: each direct child's label (`Subagent` for a
+one-shot child without one), `One-shot` or `Continuable`, and `Running`, `Not running`, `Unknown`
+or `Unavailable`, with **Stop** — asked twice — on a running continuable child; a malformed
+catalog reads `Children unavailable`, never an empty list. A child's report reaches the parent's
+thread as one centred line. Reading a child's transcript, its latest output and a human
+follow-up are not on it. What follows describes the host's subagent stack, which holds either
+way, and the old chat page's panel.
 
 A temporary subagent is a delegated task with its own durable child conversation. It is
 separate from the operator's named bots and the room roster: creating one writes no bot
@@ -1534,8 +1537,8 @@ Gravit can continue independent work or end its turn to await that notice. A for
 `subagent` call (`run_in_background: false`) waits and returns a one-shot result;
 `subagent_fork` also remains one-shot and copies a prefix of its parent's history.
 
-The session's **临时子任务** panel lists its direct children, including one-shot history and
-catalog diagnostics. **委派子任务** prepares a prompt for the operator to complete and send to
+On the old chat page the session's **临时子任务** panel listed its direct children, including
+one-shot history and catalog diagnostics. **委派子任务** prepares a prompt for the operator to complete and send to
 Gravit. **查看最近输出** reads a labelled snapshot; reopening it reads the latest log again.
 Opening a child follows its durable subagent address, which dsh never activates. The child page
 uses its task label, links back to its direct parent, and routes continuations and
@@ -1550,21 +1553,21 @@ the session Remotes:
 
 | Remote | What the face uses it for |
 |---|---|
-| `session/projections` on the parent | The direct-child catalog (`values.subagentCatalog`: durable mode and label), joined in the client with the `session/list` rows for the parent's availability (`agentAvailable`) and each child's activity (`running`); no activation |
+| `session/projections` on the parent | The direct-child catalog (`values.subagentCatalog`: durable mode and label — on the gravit-ui client it arrives on the control stream and the list's projection blocks), joined in the client with the `session/list` rows for the parent's availability (`agentAvailable`) and each child's activity (`running`); no activation |
 | `session/follow` / `session/page` on a subagent address `{kind: "subagent", parentSessionId, childSessionId, mode}` | A child's transcript (followed), and **查看最近输出** (the child's own `session/projections` cut, then one `session/page` of 12 messages); neither activates anything |
 | `subagents/prompt` | Human follow-up to a continuable child, through its exact live parent (`requestId`, `delivery: "queue"`); acceptance returns a message id |
-| `subagents/interruptByParent` | Request interruption of a continuable child's current turn; acceptance does not mean it has stopped yet |
+| `subagents/interruptByParent` | Request interruption of a continuable child's current turn — Children's **Stop**, which says `Stopping <label>`; acceptance does not mean it has stopped yet |
 
 Refusals arrive as the host's own codes — `subagent/unauthorized`,
 `subagent/parent-unavailable`, `subagent/not-found`, `subagent/catalog-diagnostic`.
 
-**State and limits.** **运行中** means the child is mid-turn (its list row's `running`) and
-**未运行** (`inactive`) that it is not — which proves neither success, completion nor
-failure. At 0.1.1 **运行中** meant resident in the host, so an idle resident child now reads
-**未运行** and offers no interrupt. A child the list does not show reads **运行状态未知**. A
-child the 0.2.0 migration could not classify (catalog mode `unknown`) shows as the
-`unsupported` diagnostic: visible, never controllable. One-shot children are read-only
-history in this panel. A cold parent
+**State and limits.** **Running** (the old page's **运行中**) means the child is mid-turn (its
+list row's `running`) and **Not running** (`inactive`, **未运行**) that it is not — which proves
+neither success, completion nor failure. At 0.1.1 running meant resident in the host, so an idle
+resident child now reads Not running and offers no interrupt. A child the list does not show
+reads **Unknown** (**运行状态未知**). A child the 0.2.0 migration could not classify (catalog
+mode `unknown`) shows as the `unsupported` diagnostic, **Unavailable**: visible, never
+controllable. One-shot children are read-only history and have no Stop. A cold parent
 cannot authorize a continuation: send a message in the parent conversation first, then retry.
 Merely viewing the parent's history does not reactivate it. Interruption preserves unclaimed
 queued messages and published descendants; it neither deletes the child nor stops its whole
@@ -1631,7 +1634,8 @@ irreversibly. 0.1.1's history read was read-only, so the page keeps it that way
 (`viewFor` and the view record in `client/js/host/live.js`):
 
 - a LIVE session (its list row says `agentAvailable`) is FOLLOWED, with pulses (subagent
-  children are not listed in stage 1 — the dock is stage 3's);
+  children are not listed; a parent's Details names them under Children, from its catalog,
+  without reading them);
 - a COLD session is PAGED: `session/projections` fixes the cut and `session/page`
   reads the tail window through it (the host's default window), and neither call
   activates anything;
@@ -1654,8 +1658,8 @@ prompt; the command's result is its only feedback, on the status line (red for a
 Every prompt carries a client-minted `requestId`.
 
 **Face routes that fill what 0.2.0 dropped.** `GET /data/host.json` →
-`{ok, cwd, home, attachedSessions, version}`, 0.1.1 `host.describe`'s host facts (read by the
-old agent panel; the gravit-ui client reaches it from stage 3);
+`{ok, cwd, home, attachedSessions, version}`, 0.1.1 `host.describe`'s host facts (read by
+Discover's Gravit item);
 `/data/channels.json` gains `presets`, sessionId → the `agentPreset` its header names,
 because `session/list` rows lost that field (`client/js/wire/summaries.js` reads it). Both are
 fence-only like every `/data` read.
@@ -1665,45 +1669,51 @@ fence-only like every `/data` read.
 
 ## Chat rendering (client/js/render/thread.js)
 
-The stage-1 thread draws the kind table (`client/js/host/kinds.js`, `DEVELOPMENT.md` §5.3):
-the operator's words right, Gravit's left through DOM-built markdown, a bot's words in a
-group under its name, a context row — a compaction checkpoint, a plugin notice, the runtime
-snapshot — as a collapsed `context · <source>` details, a tool row as a collapsed details
-titled by the call (`running` until the result fills its `<pre>`, `.danger` on error), the
-order card, the approval card, the question card, a receipt and a refusal; an answered or
-closed gate shows its end state as a chip and no keys. The old chat page's closed
-**思考轨迹** disclosure (`client/answer-traces.js`) — context, thinking and tool calls folded
-under the answer — is not built on the new client: tool rows stand in the thread in order,
-and there is no `think` row yet (the reasoning text the mapper carries is dropped until a
-later stage decides where it goes).
+The thread draws the kind table (`client/js/host/kinds.js`, `DEVELOPMENT.md` §5.3): the
+operator's words right, Gravit's left through DOM-built markdown, a bot's words in a group under
+its name, a context row — a compaction checkpoint, a plugin notice, the runtime snapshot — as a
+collapsed `context · <source>` details, a tool row as a collapsed details titled by the call
+(`running` until the result fills it, `.danger` on error; an alpaca-kit result drawn for
+reading with its raw text in a nested **Raw**, any other result its `<pre>` — "Market-data
+renderers" below), the order card, the approval card, the question card, a receipt and a
+refusal; an answered or closed gate shows its end state as a chip and no keys. A disclosure you
+opened (a tool row, its Raw, a Trace) stays open across the page's renders. The old chat page's
+closed **思考轨迹** disclosure (`client/answer-traces.js`, deleted) folded context, thinking and
+tool calls under every answer; on the gravit-ui client Gravit's own tool rows stand in the thread
+in order, a room member's answer has its **Trace** ("Rooms" above), and there is no `think` row
+(the reasoning text the mapper carries is not drawn).
 
 Thinking follows dsh's design: while the host streams a turn the thread's tail carries one
 ephemeral three-dot row — NEVER content — set by the assistant-stream pulses of the followed
 session, and gone when the message settles. The pulses come only from a follow opened with
 the assistant stream — the session on screen — and the stream's deltas themselves are never
-drawn. The live members of a room on screen are not followed in stage 1, so their pulses do
-not show.
+drawn. The live members of a room on screen are not followed, so their pulses do not show.
 
-Gravit's own bubbles render markdown (`client/js/wire/markdown.js`, DOM-built, serialized for
-the string renderer): headings, bold, inline code, links, lists, fenced code, quotes, and GFM
-tables; the operator's own messages render exactly as typed.
+Gravit's bubbles, a room member's and a channel's thesis render markdown
+(`client/js/wire/markdown.js`, DOM-built, serialized for the string renderer): headings, bold,
+inline code, links, lists, fenced code, quotes, and GFM tables; the operator's own messages
+render exactly as typed.
 
 ### Market-data renderers
 
-`client/js/wire/render.js` — the pretty renderers for alpaca-kit tool results the old chat
-page drew (market_snapshot as a Δ%-sorted table with the sign always printed,
-screen/positions/orders/earnings as generic tables, breadth/account as stat tiles or a kv
-grid, daily_bars as an inline SVG close line + volume strip with a crosshair) — is in the
-tree with its tests and not yet called: the stage-1 tool row shows the raw `<pre>`, and
-wiring the pretty views in is stage 3's, with the research surfaces. What holds either way is
-the host's side: dsh spills a tool result over its inline budget into head + tail with an
+`client/js/render/tool-result.js` — the old chat page's pretty renderers for alpaca-kit tool
+results (its `client/js/wire/render.js`, DOM-built, deleted), ported to strings:
+market_snapshot as a table sorted by the change against the previous close with the sign always
+printed, screen/positions/orders/earnings/corp_actions as tables of their first eight columns
+(deltas signed and coloured), breadth/account as stat tiles or a key-value list (Alpaca's decimal
+strings read as numbers), daily_bars as the Market page's close chart (the old crosshair and
+volume strip are not ported), calendar as its days. Only an `mcp__alpaca-kit__<tool>` result
+whose payload parses with `ok: true` is dressed — another server's tool of the same name, an
+error result, `ok: false` or garbage keep the raw `<pre>`. What holds either way is the host's
+side: dsh spills a tool result over its inline budget into head + tail with an
 elision seam and a note naming the full-output file. At 0.2.0 that budget is dsh-base's
 `spill-policy` `maxInlineTokens: 12500`, estimated as characters ÷ 4 — about 50 000
 characters of ASCII, where 0.1.1 counted 50 000 bytes — so CJK-heavy AKShare results now stay
 inline about three times longer in bytes. The face keeps dsh-base's default (upgrade decision
-D18); a `spill-policy` row in the profile patch changes it. The old parser first tries the
-complete text, then the text up to the note, then salvages whole row objects one by one — the
-one row cut at the seam is dropped and the table's meta line says so.
+D18); a `spill-policy` row in the profile patch changes it. The parser (ported as it was)
+first tries the complete text, then the text up to the note, then salvages whole row objects one
+by one — the one row cut at the seam is dropped — and a drawing made from anything but the
+complete text is stamped `Partial`.
 
 ## Tests
 
@@ -2205,8 +2215,8 @@ written.
 
 **The drill**, with the face live and a session open:
 
-1. `GET /data/plugins.json` (the old chat page's **plugin** panel showed it; the
-   stage-1 client has no such panel yet) → the composed row tree. `dsh-tool-ask-user`
+1. `GET /data/plugins.json` (the old chat page's **plugin** panel showed it; Discover
+   draws its MCP servers, not the tree) → the composed row tree. `dsh-tool-ask-user`
    is listed as `include:tool-ask-user`, phase **active**. A row stuck at
    `pending` — its inject (`tools`, `userQuestions`) never satisfied — no
    longer reaches a running face: the strict row audit refuses such a boot.
@@ -2313,10 +2323,12 @@ headers. With the face live:
    model turn starts; a failing command shows in red.
 6. Details → **Change words**, a new title. PASS, part six: the head and the row take it
    at once, and keep it after the next list refresh (the host's `title` projection).
-7. The old page's steps — the agent panel (provider, model, effort; the host facts of
-   `/data/host.json`), the subagent dock (**临时子任务**, **续派**, **中断当前轮**,
-   **父会话消息**), fork, the folder picker, a channel rename — are not on the stage-1
-   client; they return with stage 3.
+7. Details → **Fork** on a conversation that has a completed turn. PASS, part seven: the new
+   conversation opens at once with that history and lists beside its source; an empty
+   conversation offers no Fork (dsh forks from a completed turn). Discover → **Gravit**: the
+   provider, model and effort, the host facts of `/data/host.json` and the three keys. The old
+   page's other steps — the subagent dock's **续派** and **父会话消息** (Details' Children keeps
+   only Stop), the folder picker, a channel rename — are not on the gravit-ui client.
 
 The approval endings — `Approved`, `Declined`, a second tab's `Closed`, a lost race's
 `Settled elsewhere` (or, caught in flight, `answer: gate-gone` on the status line) — belong
@@ -2335,10 +2347,11 @@ are the runbook's §7 A, on a copy of the real home.
 
 A mask never pulled is presumed decorative.
 
-**On the gravit-ui client (stage 1)** the bot pages (create, persona, settings,
-inspection) and the sidebar buckets are not built; the steps below that use them are
-the old chat page's and wait for stage 3 — the roster, header and transcript facts
-hold, and a bot's home session shows on the list with the bot's avatar and name.
+**On the gravit-ui client** the bot pages are on Discover: **Create a bot** on its head, a bot's
+page (model, home, soul, skills, setup issues) with **Edit** and **Talk to <bot>**; the list
+groups a bot's home sessions under the bot. The steps below were written on the old chat page:
+read "agent face → bots → `+ new bot`" as Discover → Create a bot, its settings page as the bot
+page's Edit, "New test conversation" as Talk to, and "the sidebar" as the list.
 
 **Step 0, no model, no key.** `FACE_SMOKE=1 npm test` boots isolated real trees.
 `bots-smoke.test.ts` proves the face declares every bot directory and never `_template`, that
@@ -2397,11 +2410,12 @@ step 6 included — is still owed** (go-live runbook).
 
 A room whose strip never moved is presumed decorative.
 
-**On the gravit-ui client (stage 1)** the channel page, the participants strip, the
-discussion card and a member's trace are not built; the steps below that read them wait
-for stage 3. What holds: a room's members in the head cluster and Details, an `@` through
-`/data/rooms/say`, a member's answer in the bot's voice, the round end as a line, a
-member's question on the room in the bot's name.
+**On the gravit-ui client** a channel's page checks voices in (Bots → **Edit**, the boxes
+standing for the old page's chips) and a member's answer opens its **Trace**; the participants
+strip and the discussion card are not drawn, so the steps that watch them do not apply. What
+holds: a room's members in the head cluster and Details, an `@` through `/data/rooms/say`, a
+member's answer in the bot's voice, the round end as a line, a member's question on the room in
+the bot's name.
 
 **Step 0, no model, no key.** `FACE_SMOKE=1 npm test` boots `room-smoke.test.ts`: a stub model
 route, three bots in a temp channel, one operator prompt → Gravit dispatches all three in

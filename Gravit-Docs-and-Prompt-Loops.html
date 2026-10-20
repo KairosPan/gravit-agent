@@ -109,7 +109,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
 <body>
 <main>
 <header>
-  <div class="eyebrow">Gravit workbench · 2026-10-19 · local main @ b398dff · dsh 0.2.0-rc.2</div>
+  <div class="eyebrow">Gravit workbench · 2026-10-19 · local main @ b398dff · dsh 0.2.0-rc.2 · 浏览器两站 2026-10-20 按 gravit-ui 客户端（feat/gravit-face）更新</div>
   <h1>Gravit 文档与提示词环路</h1>
   <p class="lede">这棵树上给代理看的文档（<code>AGENTS.md</code>、<code>CLAUDE.md</code>、<code>GRAVIT.md</code>、preset、profile）、产品宪章稿、前后端开发稿各自是什么，dsh 原装的 persona 是什么；以及两条环路：操作员的一句话怎样变成一次 Model API 请求，模型的输出又怎样经过工具、审批卡、日志回到操作员眼前。每一站都标出它读到或注入的文档与提示词。</p>
   <div class="meta"><span>依据：仓库文件 + face/node_modules 里安装的 dsh 包源码</span><span>机制以代码为准</span><span>字节数为 wc -c 当日实测</span></div>
@@ -336,7 +336,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
   <circle class="dot2" cx="535" cy="258" r="4"/><circle class="dot2" cx="325" cy="258" r="4"/>
   <text class="t2" x="447" y="282">② 输出 → 执行 → 渲染：SSE 流 · assistant/message · tools/pre-execute（Gate 2、沙箱升级）· tool/result · turn/end · 日志与投影 · session/follow</text>
   <g class="box"><rect x="40" y="135" width="150" height="60" rx="8"/><text x="115" y="160">操作员</text><text class="sub" x="115" y="180">浏览器 127.0.0.1:3090</text></g>
-  <g class="box"><rect x="250" y="135" width="150" height="60" rx="8"/><text x="325" y="160">gravit-face</text><text class="sub" x="325" y="180">Node 进程 · client/chat.js</text></g>
+  <g class="box"><rect x="250" y="135" width="150" height="60" rx="8"/><text x="325" y="160">gravit-face</text><text class="sub" x="325" y="180">Node 进程 · client/js/app.js</text></g>
   <g class="box"><rect x="460" y="135" width="150" height="60" rx="8"/><text x="535" y="160">dsh 0.2.0-rc.2</text><text class="sub" x="535" y="180">进程内 harness · 会话日志</text></g>
   <g class="box"><rect x="700" y="135" width="160" height="60" rx="8"/><text x="780" y="160">DeepSeek API</text><text class="sub" x="780" y="180">api.deepseek.com/anthropic</text></g>
   <g class="side"><rect x="462" y="298" width="146" height="26" rx="6"/><text x="535" y="315">侧环路：角色子代理 · 房间 bots · 目标回合</text></g>
@@ -355,9 +355,9 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
 <h2 id="loop1">10. 环路一：操作员指令 → Model API</h2>
 <p>以 Gravit 在一个频道会话（cwd = <code>strategies/&lt;name&gt;/</code>）里收到第一句话为例。黑体是发生的事，芯片是这一站读到或写入的文档与提示词。</p>
 <ol class="flow flow-down">
-<li class="station"><span class="st-no">1</span><span class="st-where">浏览器 · face/client/chat.js</span>
+<li class="station"><span class="st-no">1</span><span class="st-where">浏览器 · face/client/js/host/actions.js</span>
 <h4>操作员在作曲框按下发送</h4>
-<p><code>send()</code> 先分流：文本含 <code>@</code> 且会话在频道里 → 先 <code>POST /data/rooms/say</code>，命中花名册则作为操作员自己的消息追加进房间（带 <code>{kind:'user', mention:[…]}</code>），每个被点名的成员各自转一轮，Gravit 不被唤醒，到此为止；命中空则继续。以 <code>/</code> 开头 → <code>commands/execute</code>（<code>/goal resume</code>、<code>/compact</code> 等由 dsh-base 的命令插件回答），无命令认领的再当提示。其余 → 若没有活动会话先 <code>session/create</code>（<code>workspaceId</code> 或 <code>cwd</code>，开 bot 家会话时还带 <code>agentPreset</code>），先开 <code>session/follow</code> 再发 <code>session/prompt</code>：<code>{requestId: uuid, sessionId, mode: "queue", content: [{type:"text", text}], clientTimeZone}</code>。</p>
+<p><code>send()</code> 先分流：文本含 <code>@</code> 且会话在频道里 → 先 <code>POST /data/rooms/say</code>，命中花名册则作为操作员自己的消息追加进房间（带 <code>{kind:'user', mention:[…]}</code>），每个被点名的成员各自转一轮，Gravit 不被唤醒，到此为止；命中空则继续。以 <code>/</code> 开头 → <code>commands/execute</code>（<code>/goal resume</code>、<code>/compact</code> 等由 dsh-base 的命令插件回答），无命令认领的再当提示。其余 → 新消息先 <code>session/create</code>（频道用 <code>workspaceId</code>，默认目录用 <code>{}</code>；Discover 上 Talk to 开 bot 家会话时用 <code>cwd</code> 加 <code>agentPreset</code>），填了标题先 <code>session/rename</code>，再发 <code>session/prompt</code>：<code>{requestId: uuid, sessionId, mode: "queue", content: [{type:"text", text}], clientTimeZone}</code>；之后实时层（<code>client/js/host/live.js</code>）把这个会话转为 <code>session/follow</code>——写入已经激活了它。</p>
 <div class="chips"><span class="chip wire">POST /api/session/prompt</span><span class="chip wire">POST /data/rooms/say</span><span class="chip wire">POST /api/commands/execute</span><span class="chip wire">dsh-auth-* cookie（Host/Origin 围栏先于它）</span></div>
 </li>
 <li class="station"><span class="st-no">2</span><span class="st-where">face 进程里的 dsh · typert-gateway → session-controller</span>
@@ -458,7 +458,7 @@ no cache_control（10-10 追踪）· 流空闲超时 300 s · 被策略层关掉
 <li class="station"><span class="st-no">7</span><span class="st-where">dsh 持久层 → face 路由 → 浏览器</span>
 <h4>日志落盘、投影缓存、三条流把它投到页面上；文件系统里是真正的产出</h4>
 <p><strong>磁盘</strong>：每条事件进 <code>session.v4.jsonl.zstd</code>；投影缓存 <code>$DSH_HOME/storages/session_projcache/sessions/&lt;id&gt;.json</code>（每 200 事件 / 5 s 写一次：<code>tokenUsage</code>、<code>contextBreakdown</code>、<code>contextPressure</code>、<code>title</code>、<code>room</code>、<code>subagentCatalog</code>、goal）；模型通过工具写下的 <code>strategies/&lt;name&gt;/THESIS.md · journal.md · status.yaml · backtests/*.json · screen.py · backtest.py</code>，bot 家会话写的 <code>bots/&lt;id&gt;/journal/notes.md</code>。</p>
-<p><strong>浏览器</strong>：<code>session/follow</code> 的 <code>{type:"event"}</code> 记录 → <code>client/mapper.js</code> 纯映射 → <code>chat.js</code>：Gravit 气泡（DOM 构建的 markdown，可折叠的“思考轨迹”行来自 reasoning 块）、按 <code>callId</code> 配对的工具卡（<code>render.js</code> 认得 <code>market_snapshot</code> 表、<code>daily_bars</code> SVG、calendar、breadth、account 时画漂亮版，原始 <code>&lt;pre&gt;</code> 总在）、审批卡与问卡（终态：answered · approve|deny / closed / closed · no longer pending / closed · settled elsewhere）、注入的 user 消息（GRAVIT.md 基线、运行时上下文、技能目录、目标回合）折叠成 <code>context · &lt;source&gt;</code> 行、房间答案以 bot 的声音、回合结束的房间行、子代理的 <code>send_message</code> 中继行。<code>session/control</code> 的投影喂侧栏（标题、用量、上下文压力、房间条、子任务目录）。频道页 <code>POST /data/channels/overview</code> 读回 <code>status.yaml</code> 的徽章与三个标题键、THESIS、日志、backtests。操作员最后读的是 <code>git diff</code>——宪章说 git 是账本。</p>
+<p><strong>浏览器</strong>：<code>session/follow</code> 的 <code>{type:"event"}</code> 记录 → <code>client/js/wire/mapper.js</code> 纯映射 → <code>client/js/host/kinds.js</code> 种类表 → <code>client/js/render/thread.js</code>：Gravit 气泡（DOM 构建的 markdown；reasoning 块不画）、按 <code>callId</code> 配对的工具行（<code>client/js/render/tool-result.js</code> 认得 alpaca-kit 的 <code>market_snapshot</code>、<code>daily_bars</code>、calendar、breadth、account 等结果时画成表格、卡片或图，原始文本收在嵌套的 Raw 里）、审批卡与问卡（终态：answered · approve|deny / closed / closed · no longer pending / closed · settled elsewhere）、注入的 user 消息（GRAVIT.md 基线、运行时上下文、技能目录、目标回合）折叠成 <code>context · &lt;source&gt;</code> 行、房间答案以 bot 的声音（其成员回合可在答案下的 Trace 里非激活地读出）、回合结束的房间行、子代理的 <code>send_message</code> 中继行。<code>session/control</code> 的投影喂会话列表与 Details（标题、用量、上下文压力、房间成员、子任务目录 → Children）。频道页（<code>#/channel/&lt;id&gt;</code>）<code>POST /data/channels/overview</code> 读回 <code>status.yaml</code> 的徽章与三个标题键、THESIS、日志、backtests。操作员最后读的是 <code>git diff</code>——宪章说 git 是账本。</p>
 <div class="chips"><span class="chip doc">session.v4.jsonl.zstd</span><span class="chip doc">session_projcache/sessions/&lt;id&gt;.json</span><span class="chip doc">strategies/&lt;name&gt;/{THESIS.md, journal.md, status.yaml, backtests/}</span><span class="chip wire">session/follow · session/control · $events</span><span class="chip wire">POST /data/channels/overview</span></div>
 </li>
 </ol>

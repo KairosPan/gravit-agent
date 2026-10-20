@@ -35,9 +35,9 @@ repository, so §4.8 is where those decisions are recorded now.
 | `docs/backtest-rules.md` | the five honest-eval rules, the bed-window table, the warmup facts |
 | `docs/superpowers/specs/`, `plans/`, `runbooks/` | only the five specs and eight plans dated 2026-08-29 or later (skeleton, face chat-light, face instruments, channels, bots-and-rooms) describe this system, and none of them the dsh 0.2.0 re-host; the 54 earlier specs, 50 earlier plans and `runbooks/p-b-p-c-activation.md` are the retired product's history, filed unmarked in the same directories. `runbooks/2026-09-30-dsh-0.2.0-rc.2-go-live.md` is current: the operator's procedure for taking the harness home to 0.2.0 (§4.8, §10 item 14) |
 | `docs/design/prototypes/` | the face prototypes (`BRIEF.md`, rounds a/b/c and r2–r4) that §5.5 refers to; the R2 instrument grammar and the R4 palette live here |
-| `docs/research/` | frozen inputs, never edited: `2026-08-22-deepseek-harness-dsh-survey.md` is the survey the profile template cites, `2026-08-30-dsh-wiring-recon.md` the 0.1.1-era wiring recon; the rows the face composes today, and its MCP tools, are read live from the plugin panel (`/data/plugins.json`, §4.4) |
+| `docs/research/` | frozen inputs, never edited: `2026-08-22-deepseek-harness-dsh-survey.md` is the survey the profile template cites, `2026-08-30-dsh-wiring-recon.md` the 0.1.1-era wiring recon; the rows the face composes today, and its MCP tools, are read live from `/data/plugins.json` (§4.4), whose MCP servers and their tools Discover's Data shelf draws (§5.4) |
 | `dsh/README.md` | the profile install path, the operator's two profile rows and the default-model row |
-| `face/README.md` | run and sign-in, profile and policy layer, AKShare, Markets and Account (the quote providers, search, a market's page and its bars, the paper account), channels, master rail, bots, rooms, temporary subagents, tests, upgrade order, the drills |
+| `face/README.md` | run and sign-in, profile and policy layer, AKShare, Markets and Account (the quote providers, search, a market's page and its bars, the paper account), channels, Discover, bots, rooms, temporary subagents, tests, upgrade order, the drills |
 
 ---
 
@@ -457,7 +457,7 @@ because it anchors on `__file__`.
 
 `status.yaml`: `status` ∈ `idea | researching | validated | paper | retired` (`paper` is
 reserved until the order gate opens), plus optional `one_line`, `next`, `numbers` that the
-channel landing page renders. The face reads `status` through a regex floor first, tolerates
+channel page renders (§5.4). The face reads `status` through a regex floor first, tolerates
 malformed YAML, and does **not** validate the vocabulary — status is a badge, not a gate.
 
 Naming: the create box accepts `NAME_RE` — first code point a letter or digit, then letters,
@@ -498,8 +498,9 @@ local agent or room (measured 2026-09-30 against a boot of the 0.1.1 composition
 sessions see that roster plus the role tools. dsh-base 0.2.0 alone would differ — `web_fetch` and
 three MCP resource tools on, `ralph` and `str_replace_editor` gone — and the policy layer undoes
 each (PLAN D6, D7, D9). The rows a running face actually composed, and its MCP and `agent_<bin>`
-tools, are listed by the plugin panel (`/data/plugins.json`). The `role_<id>` tools never are:
-they are scoped to Gravit's preset and the panel reads the global tool view. They show in the
+tools, are listed by `/data/plugins.json` (Discover's Data shelf draws its MCP servers and their
+tools). The `role_<id>` tools never are: they are scoped to Gravit's preset and the listing reads
+the global tool view. They show in the
 `tools` of each `request/header` event in Gravit's own session log, and the boot's `agent
 presets:` line lists `gravit` only when every role row mounted (a row that fails lists the
 default broken, and the boot refuses).
@@ -521,7 +522,7 @@ default broken, and the boot refuses).
 | `mcp__akshare__*` | project `mcp-akshare` row | public A-share/other market queries, unguarded; check source errors and truncation |
 | `agent_<bin>` | face `agents.ts` | roster-gated per channel (§6.5) |
 | `dispatch` | face `room.ts` (`installRoom`) | Gravit's own: refused in any session whose header or `agentPreset` projection names a bot (§6.8) |
-| `role_<id>` (one per `roles/<id>/`) | one `dsh-tool-subagent` row per role inside Gravit's preset, rendered by `src/roles.ts` (§3.8) | scoped: a bot never sees one, and a role child removes them through its own allow list (a `subagent_fork` child, restricted by nothing, keeps them, and so does a plain `subagent` child, though neither its roles section nor the cycle contract reaches it, §3.8); a one-shot `spawn` child with the role's persona and exactly the role's tools; the arguments are `description` (its label in the 临时子任务 panel) and `prompt`, and the call waits unless `run_in_background` is set |
+| `role_<id>` (one per `roles/<id>/`) | one `dsh-tool-subagent` row per role inside Gravit's preset, rendered by `src/roles.ts` (§3.8) | scoped: a bot never sees one, and a role child removes them through its own allow list (a `subagent_fork` child, restricted by nothing, keeps them, and so does a plain `subagent` child, though neither its roles section nor the cycle contract reaches it, §3.8); a one-shot `spawn` child with the role's persona and exactly the role's tools; the arguments are `description` (its label in Details' Children, §5.4) and `prompt`, and the call waits unless `run_in_background` is set |
 
 Not tools, but in the same prompt: a connected MCP server's `instructions` (the `mcp:akshare`
 section, §3.1). The MCP resource tools and their prompt section are off by policy (PLAN D7).
@@ -574,7 +575,7 @@ through the face or a restart.
 
 Naming: the face keeps the retired dsh-agent-presets grammar `[a-z0-9][a-z0-9-]*`, bounded to 64
 code points (`BOT_ID_RE`), as its own gate — dsh 0.2.0 asks only for a non-blank id; the display
-name folds to a proposal through `proposeBotId` (`src/bots.ts`, twinned in `client/botId.js`) and
+name folds to a proposal through `proposeBotId` (`src/bots.ts`, twinned in `client/js/wire/botId.js`) and
 the field stays editable. `gravit` is refused by name (`RESERVED_IDS`), `_template` by the
 grammar, which admits no leading underscore — both through `isBotId`. A soul carrying `{{` is
 refused twice, at `rejectSoul` and again at the plugin's `validateBotConfig`: the system prompt
@@ -777,7 +778,7 @@ rebases from a relative one for a bot, and each must import nothing). Pins:
 a tilde range) and `CORDIS_INCLUDE_PIN = 1.0.9` (the one cordis plugin the face imports itself);
 all three are asserted by `tests/version.test.ts`, which also refuses the three package names
 0.2.0 retired. `face/README.md` carries the run table, the profile rules, the instruments,
-channels, the master rail, bots, roles, the upgrade order, and the drills. Beside the server,
+channels, Discover, bots, roles, the upgrade order, and the drills. Beside the server,
 `face/scripts/` holds four operator tools — `check-home.ts`, the go-live dry run that boots the
 face on a COPY of a harness home and read-opens every session (it refuses the live home by
 device and inode, and a copy without its `DRY-RUN-COPY` marker), `validate-fixture.mjs`
@@ -874,8 +875,8 @@ row audit; and the policy layer.
    bed path is wrong) leaves the row ACTIVE and the tree healthy with no `mcp__alpaca-kit__*`
    tools, no `order gate armed` line and no error from the face — only `mcp-client(alpaca-kit):
    connection failed … no tools were registered` on stdout; reconnect exhaustion unregisters the
-   tools for the life of the process. Check the plugin panel's tool list or that stdout line; the
-   fix is the row's `command` and a restart.
+   tools for the life of the process. Check the server's page on Discover (Data → the server: its
+   tools) or that stdout line; the fix is the row's `command` and a restart.
 8. The preset roster: the registry present and its default `gravit`; every other bot declared
    (`declareBots`, §3.7) — a bot that cannot be declared does not fail the boot, its reason is
    kept for `/data/bots.json`; the default listed and not broken; every declared bot listed. Log
@@ -935,7 +936,7 @@ smoke that boots without `main.ts` relies on.
 | `instructions.ts` | the instructions patch (§4.3): `AGENT_INSTRUCTIONS_ROW_ID`, `INSTRUCTION_FILE` and `LOCAL_INSTRUCTION_FILE` (`GRAVIT.md`, `GRAVIT.local.md`), `INSTRUCTIONS_CONFIG` (`satisfies` the package's own `Config`) and `instructionsPatch(inherited?)`, which spreads the inherited row config and applies the two lists last, a fresh object on every call; imports the package's type only |
 | `plugins/bot.js` | the `gravit-bot` composition plugin: a scoped `deployment:persona-prefix` section (shadows Gravit's prefix; no suffix) + an allow-list `tools.restrict`, re-expanded after each burst of `tools/change` — coalesced to one timer turn, so a tool that registers after the declaration is admitted when the allow list names it (`expandAllow` resolves `mcp__*__<raw>` against the live tree); dependency-free |
 | `plugins/gravit.js` | the `gravit` composition plugin, the first row of the default preset's rendered composition (`gravitRows` in `src/roles.ts`; `bots/gravit/agent.cordis.yml` is its generated mirror): a scoped `deployment:today` section (`Today is YYYY-MM-DD, Weekday (Zone).`), its text a function re-evaluated at every assembly, in the process's own zone — `resolveZone()` falls back to `UTC`, labelled `(UTC)`, when `TZ` is empty or not a zone Intl can format in, so an unusable `TZ` cannot throw at assembly — ordered right after the persona prefix, `interpolate: false`; and, only when its `roles` config is present, a scoped `gravit:roles` section at `getSectionOrder("TOOL_SUBAGENT") + 1` (the role intro and one `- role_<id> — <summary>` line per role, `interpolate: false`, listing only the roles whose tool the assembling scope resolves — `canCall`, `ctx.tools.get(name, context.scope)`, so a role child reads none and a `subagent_fork` child Gravit's whole list, §3.8); only when its `cycle` config is present, a scoped `gravit:cycle` section at `getSectionOrder("DEPLOYMENT_PERSONA_SUFFIX") - 50` (`interpolate: false`; the contract's text when the assembling scope can call `create_goal`, `''` otherwise, §4.3); both sections also `''` for a delegated child that is not a fork (`isRootOrFork`, read from `context.agent.session.header`: no `origin`, or `isSeeded`); `inject` is `systemPrompt` and `tools`, the registry only read, so it masks no tool; `validateGravitConfig` accepts `{}` and checks `cycle` and `roles` when present; dependency-free |
-| `panels.ts` | the master rail's feeds: host facts (`/data/host.json`), the local-agent roster (probe, auth, connect, disconnect), memory (skills), plugins (loader rows + tool schemas); builds `PanelDeps` (it requires `skills`, `tools`, `loader`, `workspaceRegistry` and `agents`), whose `channelFor` answers `{workspaceId, name, dir}` — the `dir` is what the room engine gives a member as its `cwd` |
+| `panels.ts` | Discover's feeds (§5.3): host facts (`/data/host.json`), the local-agent roster (probe, auth, connect, disconnect), memory (skills), plugins (loader rows + tool schemas); builds `PanelDeps` (it requires `skills`, `tools`, `loader`, `workspaceRegistry` and `agents`), whose `channelFor` answers `{workspaceId, name, dir}` — the `dir` is what the room engine gives a member as its `cwd` |
 | `version.ts` | the three pins |
 
 The smokes share one client for the host's wire, `tests/remote.ts`: `mountClient(ctx)` mounts
@@ -1213,7 +1214,7 @@ passes on `Host` alone — `curl` works, which is residual R3 in §9.
 | `GET /data/quotes?ids=`, `/data/quotes/stream?ids=` | `quotes.ts` | the selected ids' live quotes (at most 100), as JSON or as server-sent events; empty selections reach no upstream |
 | `GET /data/bars?id=&days=` | `bars.ts` | one us id's daily bars for the Market page's chart: fence first (403), then 405 for any method but GET, 400 `invalid bars request` for a malformed target, a missing or repeated `id` or `days`, a non-us or ill-formed id, or days outside 5–730 (default 120); then the per-(symbol, days) cache (600 s TTL, 64 keys), single-flight, a spawn of `face_bars.py SYMBOL DAYS` (30 s); a later failure re-serves the last good payload flagged `stale:true`, and with nothing to fall back on it answers 503 like the producers above — the producer's own `{ok:false}`, `producer failed`, or `producer spawn failed` + the code, never the child's error text |
 | `GET /data/channels.json` | `channels.ts` | **reconciles on every GET**: registry `create` per directory, `attachSession`, `seedRoster`; returns `{root, channels, ungrouped, archived, presets}` — `presets` maps a session id to its header's `agentPreset`, the client's fallback where a 0.2 list row names none |
-| `POST /data/channels/overview` `{workspaceId}` | `channels.ts` | reconcile + `status.yaml`, thesis, the whole journal newest-first (the client folds entries past five), backtests newest-first with the newest dated one parsed as `latest`, file list, roster |
+| `POST /data/channels/overview` `{workspaceId}` | `channels.ts` | reconcile + `status.yaml`, thesis, the whole journal newest-first (the channel page draws the newest 20), backtests newest-first with the newest dated one parsed as `latest`, file list, roster |
 | `POST /data/channels/agents` `{workspaceId, agents[]}` | `channels.ts` | `setRoster` → `channels.json` (409 on a corrupt file), then a dated line to `roster.log` and stdout |
 | `POST /data/channels/bots` `{workspaceId, bots[]}` | `channels.ts` | `setBots` → `channels.json` (`bots[]` beside `agents[]`; 400 an id outside the bot grammar or more than `ROOM_CAPS.maxMembers` ids, 404 no such channel, 409 a corrupt file), then a dated `bots` line to `roster.log`. The overview answers `bots` (the roster) and `allBots` (every preset dsh reports, `broken` reasons included) |
 | `POST /data/channels` `{name}` | `channels.ts` | `NAME_RE` + NFC; copies `_template` (409 if exists); a reconcile failure after the copy is a warning, not a 500 — the directory exists and a 500 would make the retry 409 |
@@ -1376,50 +1377,63 @@ needs an answer before the operator's home moves.
 
 Since 2026-10-19 the page at `/` is **gravit-ui** — the settled front end of
 `docs/superpowers/specs/2026-10-09-demo-v2-gravit-frontend-design.md`, mounted on the face by
-`docs/superpowers/specs/2026-10-19-gravit-ui-on-face-design.md`'s route A (stages 1 and 2 of
-its three are built, the plans are `docs/superpowers/plans/2026-10-19-gravit-face-stage-1.md` and
-`docs/superpowers/plans/2026-10-20-gravit-face-stage-2.md`, their rulings and the drill record
+`docs/superpowers/specs/2026-10-19-gravit-ui-on-face-design.md`'s route A (all three of its
+stages are built; the plans are `docs/superpowers/plans/2026-10-19-gravit-face-stage-1.md`,
+`docs/superpowers/plans/2026-10-20-gravit-face-stage-2.md` and
+`docs/superpowers/plans/2026-10-20-gravit-face-stage-3.md`, their rulings and the drill record
 `docs/superpowers/plans/2026-10-19-gravit-face-ledger.md`). Vanilla ES modules, no bundler, no
 framework: one store, pure reducers, string renderers, one `innerHTML` per render with
 `data-action` delegation. Every host string passes through `esc()` (`js/html.js`) before it
-reaches the page; the one HTML the page builds from host text is Gravit's markdown, DOM-built by
-`js/wire/markdown.js` and serialized. Stage 1 serves **Messages** — the session list, a session's
-real transcript, the composer, the three gate cards, rooms; stage 2 **Markets** (the watchlist,
-the holdings and the search with the face's live quotes, a market's page with its daily bars)
-and **Account** (the paper account: Portfolio, the Statement, Venues), which replaced the old
-`/market` and `/account` pages; Discover, the channel inventory and the row actions are stage
-3's. The product speaks English, and the wire's Chinese prose (a quote's or a provider's
-message, a search note, an account error) never reaches a screen: every word is drawn from the
-wire's enums. The muted lines that say what something is doing — the status line under the
-composer, the quotes' connection, a search's state, the watchlist's trouble, the account's stale
-stamp — are the only explanatory lines a screen carries.
+reaches the page; the one HTML the page builds from host text is markdown — Gravit's answers, a
+room member's, a channel's thesis — DOM-built by `js/wire/markdown.js` and serialized. Stage 1
+serves **Messages** — the session list, a session's real transcript, the composer, the three gate
+cards, rooms; stage 2 **Markets** (the watchlist, the holdings and the search with the face's
+live quotes, a market's page with its daily bars) and **Account** (the paper account: Portfolio,
+the Statement, Venues), which replaced the old `/market` and `/account` pages; stage 3 the list
+grouped by channel with a page per channel (its status, thesis, backtests, journal, files and
+agent and bot rosters), the row actions (fork, archive, un-archive, delete), **Discover** — the
+inventory of what Gravit runs: the MCP servers, the bots, the local CLI agents and Gravit itself,
+the skills, with the face's few runtime actions and no shop — and the research surfaces (tool
+results drawn as tables, tiles and charts; a conversation's subagent children, with Stop; a room
+member's trace). The product speaks English, and the wire's Chinese prose (a quote's or a
+provider's message, a search note, an account error) never reaches a screen: a state is worded
+from the wire's enums, and the old chat page's pure modules moved under `js/wire/` with their
+words in English; what the operator and Gravit wrote (a channel's files, a bot's name and soul, a
+skill) and what a server says of its tools are drawn as written, escaped. The muted lines that
+say what something is doing — the status line under the composer, Discover's own line, the
+quotes' connection, a search's state, the watchlist's trouble, the account's and a channel's
+stale stamps, a tool result's `Partial` — are the only explanatory lines a screen carries.
 
 ### 5.1 Pages and files
 
 | File | Role |
 |---|---|
 | `index.html` | the shell: `<title>Gravit</title>`, `#app`, the two sheets, a three-line script that applies the saved theme before first paint, `js/app.js` as a module. Holds not one byte of host data. The Google Fonts link (Manrope · Noto Sans SC · IBM Plex Mono) is the browser's own fetch — offline the system stack stands in |
-| `js/app.js` | `boot(win, host)`: the store, the live layer, the actions, the markets and account host layers and the render loop (§5.4); `makeStore`, `routeOf`, `settle`, `answersFrom`, `complete`, `gravitMarkdown`, `postJsonVia`, `Timers` are exported for the tests |
+| `js/app.js` | `boot(win, host)`: the store, the live layer, the actions, the markets, account, channel, Discover and trace host layers and the render loop (§5.4); `makeStore`, `initialState`, `prefsOf`, `routeOf`, `settle`, `answersFrom`, `complete`, `gravitMarkdown`, `postJsonVia`, `Timers` are exported for the tests |
 | `js/store.js`, `js/reducers/index.js` | `createStore({initial, reducers, storage, key, accept, persist})` — `dispatch(type, payload)`, `get()`, `subscribe(fn)`; the reducer table is the merge of the per-slice modules |
 | `js/reducers/host.js` | the host reducers (§5.3): `hostStatus`, `hostList`, `hostWindow`, `hostEvent`, `hostGate`, `hostGateGone`, `hostProjection`, `hostThinking`, `hostPreview`, `markSeen` |
-| `js/reducers/messages.js`, `controls.js` | what the operator does with the page: `nav` (a market id canonicalised), the draft (`startDraft`, `cancelDraft`, `setDraftTitle`, `setDraftWhere`), the optimistic `rename`, `toggleDetails`, `toggleRail`, `setTheme`; the inline editor (`startEdit`/`commitEdit`/`cancelEdit`, a rename), the two-step confirms (`askConfirm`/`cancelConfirm`) |
-| `js/reducers/markets.js`, `account.js` | the host's markets (`watchlistLoaded`, `quotesUpdated`, `searchUpdated`, `hitQuotesLoaded`, `barsLoading`/`barsLoaded`/`barsFailed`) and the screen's `setMarketsTab`, `setMarketsSort`, `setMarketsQuery`; the host's account (`accountLoading`/`accountLoaded`/`accountFailed`, `credentialsLoaded`, `toolsLoaded`, `probeLoaded`), the drawers' `openStatement`/`closeStatement` and `openSettings`/`closeSettings`, and the memory reducers Discover's Like shelf still reads |
-| `js/data/empty.js` | `emptyState()`: the state the page boots into — no conversations, `status.line = "connecting…"`, the markets and account slices empty — with Discover's slices kept at their empty shape so its screen still renders in tests |
+| `js/reducers/messages.js`, `controls.js` | what the operator does with the page: `nav` (a market id canonicalised; a missing conversation id becomes `firstOpen`'s; `lastDiscover`, the Discover view a plugin page goes back to), `toggleGroup`, the draft (`startDraft` — Where on the channel New round names, else the root —, `cancelDraft`, `setDraftTitle`, `setDraftWhere`), the optimistic `rename`, `toggleDetails`, `toggleRail`, `setTheme`; the inline editors (`startEdit`/`commitEdit`/`cancelEdit` — a rename, New channel…, a roster, a bot —, `editFailed`, which keeps an editor open with the refusal, `toggleRosterTick`), the two-step confirms (`askConfirm`/`cancelConfirm`) |
+| `js/reducers/markets.js`, `account.js` | the host's markets (`watchlistLoaded`, `quotesUpdated`, `searchUpdated`, `hitQuotesLoaded`, `barsLoading`/`barsLoaded`/`barsFailed`) and the screen's `setMarketsTab`, `setMarketsSort`, `setMarketsQuery`; the host's account (`accountLoading`/`accountLoaded`/`accountFailed`, `credentialsLoaded`, `toolsLoaded`, `probeLoaded`), the drawers' `openStatement`/`closeStatement` and `openSettings`/`closeSettings` |
+| `js/reducers/channels.js`, `discover.js`, `traces.js` | the channel page's read (`channelLoading`, `channelLoaded`, `channelFailed` — a failure keeps that channel's data, a 404 reads `missing`); Discover's (`setDiscoverQuery`, `shelfLoading`/`shelfLoaded`/`shelfFailed` — a failed shelf keeps its data —, `gravitLoaded`, `skillLoading`/`skillLoaded`/`skillFailed`, `modelsLoaded`, `discoverStatus`); a member's trace by the answer it explains (`traceLoading`, `traceLoaded`, `traceFailed`) |
+| `js/data/empty.js` | `emptyState()`: the state the page boots into — no conversations, `status.line = "connecting…"`, every slice at its empty shape (§5.5) and no demo slice: no `plugins`, `memory`, `mail`, `banner`, `call` or `compose` |
 | `js/host/kinds.js` | the kind table (spec §6, §5.3): a mapper view → zero, one or two messages; `ORDER_TOOLS`, `isOrderTool`, `orderLine`, `rememberCall`, `toMessages` |
-| `js/host/sessions.js` | `session/list` rows → conversation records: `kindOf`, `conversationOf`, `listConversations`, `unreadOf` |
+| `js/host/sessions.js` | `session/list` rows → conversation records: `kindOf`, `conversationOf`, `listConversations`, `unreadOf`; `childRowsOf` (the subagent rows the list leaves out, kept for their parent's Children) and `firstOpen` (the conversation every default opens, never an archived one) |
 | `js/host/live.js` | the impure half: the mux, the follow-or-page policy, the list and its previews, gates, projections, host facts — all into the store, nothing into the DOM |
-| `js/host/actions.js` | a `data-action` → the Remote the old client sent: `send`, `newConversation`, `answer`, `stop`, `rename`, `command` |
+| `js/host/actions.js` | a `data-action` → the Remote or face route the old client sent: `send`, `newConversation`, `answer`, `stop`, `rename`, `command`; the row actions `fork`, `archive`, `remove`; `talkTo` (a bot's home conversation), `stopChild` |
+| `js/host/list-view.js`, `discover-view.js`, `children-view.js` | stage 3's pure views (§5.3): `groupsOf` (the list's groups); `SHELVES`, `SOURCE`, `itemsOf`, `searchItems`, `itemById` (Discover's items under namespaced ids); `childrenOf` (a conversation's subagent children and their states) |
+| `js/host/channels.js`, `discover.js`, `traces.js` | stage 3's impure halves: `startChannels` (a channel's overview, a new channel, the two roster writes; `MAX_BOTS`), `startDiscover` (the four listings, the Gravit item's three reads, a skill's content, the CLI agents' writes, the model routes, a bot's save and create; `SHELF_PATHS`, `GRAVIT_KEYS`), `startTraces` (a room member's trace, read once per answer) |
 | `js/host/market-view.js`, `account-view.js` | the pure views (§5.3): face ids (`canonicalId`, `positionId`, `holdingAssets`), the list (`listAssets`, `marketRows`, `assetFor`, `mentionsOf`), the words (`quoteWord`, `connectionWord`, `providerWord`, `basisWord`, `sourceWord`, `volumeWord`, `searchWord`, `watchWord`, `barsWord`); `portfolioOf`, `orderLine`, `statementOf`, `csvOf`, `venueOf` |
 | `js/host/markets.js`, `account.js` | the impure halves: `startMarkets` (live quotes, search, the watchlist in this browser's storage, bars) and `startAccount` (`/data/account.json` in one flight, the Venues reads) |
 | `js/wire/api.js`, `mapper.js` | the old client's wire, moved unmodified but for one field: `call(endpoint, args)`, `openMux({onReady, onEvent, onGate, onGateGone, onDown})` with `stream()` and `answer()`, `randomUuid()`; `mapFrame` (frame → view-model), whose session-event views now carry `time` (the record's clock, the message's `at`) |
-| `js/wire/summaries.js`, `room.js`, `speaker.js`, `markdown.js`, `render.js` | moved with them: `summaryOf` (restores `agentPreset` on a list row — the projection first, `/data/channels.json`'s `presets` second, never a guess), the pure room rules (`foldMembers`, `isMentionText`, `roundEndLine`, …), `isHostPreset`/`speakerFor`, the DOM-built markdown, the pretty renderers for alpaca-kit tool results (not yet called by stage 1's tool row — the raw `<pre>` is drawn) |
+| `js/wire/summaries.js`, `room.js`, `speaker.js`, `markdown.js` | moved with them: `summaryOf` (restores `agentPreset` on a list row — the projection first, `/data/channels.json`'s `presets` second, never a guess), the pure room rules (`foldMembers`, `isMentionText`, `roundEndLine`, …), `isHostPreset`/`speakerFor`, the DOM-built markdown |
+| `js/wire/grouping.js`, `channelName.js`, `botId.js`, `botSettings.js`, `subagents.js`, `member-traces.js` | the old chat page's other pure modules, moved in stage 3 with their words in English (`tests/client/wire-words.test.js` greps the six for Chinese): `bucketFor` and its sentinel keys (`ARCHIVED_KEY`, `UNGROUPED_KEY`, `BOT_KEY_PREFIX`); `foldChannelName`; `proposeBotId`; `normalizeBotModel`, `botModelChoices`, `botSettingsPayload`; `isSubagentRow`, `composeSubagentCatalog`, `normalizeSubagentCatalog` and `subagentControls`, which returns a state enum (`unavailable`, `waiting`, `running`, `inactive`, `unknown`) with a diagnostic's `reason` and no sentence; `loadMemberTrace`. `draftBotSoul`, `botToolLabel`, `isBotKey`, `subagentAddress` and `subagentResult` moved too, and no page calls them |
 | `js/wire/market-model.js`, `market-quotes.js`, `market-search.js`, `account-model.js` | moved from the old instrument pages in stage 2: `normalizeAsset`, `readWatchlist`/`saveWatchlist` (the face's key, the kairos key read until the first save), `price`, `number`; `createLiveQuotes` (the SSE stream with its 15 s polling fallback; `parsePayload` exported for the hit read and the probe); `createSymbolSearch` (250 ms debounce, a 10 s timeout); `money`, `signedMoney`, `pct`, `sign`, `orderMatches`. Their Chinese labels and notes stay in the wire and never reach a screen |
-| `js/render/rail.js`, `messages.js`, `thread.js`, `avatars.js`, `controls.js` | the two-level rail and the list; the Messages screen (head, Details, composer, status line, new message, empty state); the thread's kinds; avatars and clusters; the segs, the inline editor and confirm pair |
+| `js/render/rail.js`, `messages.js`, `thread.js`, `avatars.js`, `controls.js` | the two-level rail (Discover in the first level) and the list's groups; the Messages screen (head, Details with the row actions and Children, composer, status line, new message with New channel…, empty state); the thread's kinds, a tool row's dressed result and its Raw, a member's Trace; avatars and clusters (a bot's letter from the host's bot names); the segs, the key-value rows, the inline editor and confirm pair |
 | `js/render/markets.js`, `chart.js`, `account.js`, `js/market-fmt.js` | stage 2's screens (§5.4): Markets and a market's page; the daily-close chart (`chartSvg`); Account (`renderAccountScreen`, the Statement drawer, Venues) and the Settings drawer (`renderSettings`); `chgHtml`, a change with its arrow |
-| `js/render/{discover,mail}.js`, `js/reducers/discover.js`, `js/data/plugins.js` | stage 3's screens, in the tree and unreachable: `routeOf` folds every route but Messages, Markets and Account to Messages; their tests run on the seed fixture `tests/client/helpers/seed.js` until stage 3 feeds them from the host |
-| `js/html.js`, `icons.js`, `time.js`, `router.js`, `ids.js`, `messages.js` | `esc`/`attrs`/`cls`; the inline SVG icon set; `rowTime`/`divider`/`fmtDate`; `parseHash`/`toHash`; id minting for the page's own lines; `levelOf`/`needsAnswer` |
+| `js/render/channel.js`, `discover.js`, `tool-result.js` | stage 3's screens (§5.4): a channel's page (`renderChannelScreen`, `bytesWord`); Discover, a shelf's grid, the Create page and an item's page (`renderDiscover`, `renderPlugin`); a tool row's dressed result (`toolResultHtml`, `toolResultFor`, `parsePayload` — the old `js/wire/render.js` ported to strings) |
+| `js/html.js`, `icons.js`, `time.js`, `router.js`, `messages.js` | `esc`/`attrs`/`cls`; the inline SVG icon set; `rowTime`/`divider`/`fmtDate`/`fmtClock`; `parseHash`/`toHash`; `LEVELS` — the host's kinds alone: text and tool grey, card, approval and question orange, refusal red, receipt green — `levelOf`/`needsAnswer` |
 | `css/tokens.css`, `css/app.css` | the tokens (Linqi's Cream and Black values, demo @ 0ef5131) and the one sheet |
-| `channels.js`, `grouping.js`, `channelName.js`, `botId.js`, `botSettings.js`, `member-traces.js`, `subagents.js`, `answer-traces.js` | the old chat page's other modules: on disk with their tests (`channels.js` and `member-traces.js` import from `js/wire/`), imported by no page. The channel landing page, the bot pages, a member's trace and the subagent dock return — or go — with stage 3 |
+| `market-catalog.js` | the one module left at the client's top level: the reference catalog `src/watchlist.ts` imports for the legacy `/data/watchlist.json`; no page loads it |
 
 The old `/market` and `/account` pages are gone too (stage 2): their documents, scripts
 (`market.js`, `account.js`, `account-view.js`, `navigation.js`) and sheets (`chat.css`,
@@ -1428,7 +1442,12 @@ The old `/market` and `/account` pages are gone too (stage 2): their documents, 
 (`api.test.ts`'s reconnect race, `subagents.test.ts`'s follow/page and dock controllers); most of
 the policy they proved is re-pinned in `tests/client/live.test.js` against a fake host (§7.3 names
 the two cases that are not), and `tests/client-mux-smoke.test.ts` still drives `api.js` +
-`mapper.js` against a real boot.
+`mapper.js` against a real boot. Stage 3 deleted the rest of the old page — `channels.js` and
+`answer-traces.js` (DOM, replaced by string renderers), `js/wire/render.js` (ported to
+`render/tool-result.js`) — and the demo's last pieces: the shop's catalogue (`js/data/plugins.js`),
+Mail (`js/render/mail.js`), the page-made ids (`js/ids.js`), the seed fixture
+(`tests/client/helpers/seed.js`) and the tests that stood on them (`tests/client/data.test.js`,
+`tests/answer-traces.test.ts`).
 
 ### 5.2 Wire contracts
 
@@ -1447,17 +1466,23 @@ resolves the value, and rejects with the host's `code` (`session/not-found`,
 `gateway/arguments-invalid`, …) or the HTTP `status`. Every wire parameter is sent
 (`{_request:{}}`, `{request:{…}}`): an unknown top-level key is `gateway/arguments-invalid`. The
 Remotes stage 1 calls: `session/list`; `session/create` (`{workspaceId}` for a channel, `{}` for
-the host's default project directory — the repo root; never `cwd`); `session/prompt`
+the host's default project directory — the repo root; `cwd` only for Talk to, below); `session/prompt`
 (`mode:"queue"`, a client-minted `requestId` — a retry with the same id is admitted once — one
 text part, the browser's `clientTimeZone`); `commands/execute` (a slash line, which 0.2.0's
 prompt would hand to the model as text; `undefined` — no command claims the line — falls back to
 a prompt); `session/cancel`; `session/rename`; `session/projections` and `session/page`, the two
 non-activating reads. Stage 2 adds `credentials/describe` with `{refs: ["APCA_API_KEY_ID",
 "APCA_API_SECRET_KEY"]}` on entering Venues: per ref `{configured, source?, writable}`, never a
-value. Not called yet: `session/fork`, `session/modelCatalog`, `subagents/*`,
-`workspace/rename`, `directoryPicker/pick`, `/data/host.json` — stage 3's, with the Discover
-inventory and the row actions. The surface stays closed by design:
-`session/selectModel`, `agentPresets/*` and `settings/describe` are not called.
+value. Stage 3 adds `session/fork` (`{request:{sessionId}}` → the child's `sessionId`; the host
+refuses `session/fork-unavailable` for a session with no completed turn, which is why an empty
+conversation offers no Fork); `session/create` with `{cwd: <the bot's homeCwd>, agentPreset:
+<its id>}` for Talk to; `session/modelCatalog` (`{}`: its `default` selection on the Gravit item,
+its groups as a bot's model routes); `credentials/describe` again on the Gravit item, with
+`DEEPSEEK_API_KEY` and the two APCA refs; and `subagents/interruptByParent`
+(`{childSessionId, parentSessionId, mode:"continuable"}`, bare, as the old client sent it) for a
+child's Stop. Not called: `subagents/prompt`, `workspace/rename`, `directoryPicker/pick`. The
+surface stays closed by design: `session/selectModel`, `agentPresets/*` and `settings/describe`
+are not called.
 
 **Streams** — one WebSocket, `/api/remote.mux`, carries any number of logical streams keyed by a
 client-chosen `streamId`: client frames `open` / `cancel`, host frames `item` / `end` / `error`,
@@ -1508,13 +1533,16 @@ live layer owns no grace timer of its own.
 **Room routes** — `/data/rooms/say` is called **before** `session/prompt` whenever the composer's
 text carries `(^|\s)@` and the conversation is in a channel; an answer of `addressed: []` means
 the text named nobody on the roster and it goes out as an ordinary prompt instead.
-`/data/rooms/state` is not called in stage 1: a room's members come from the `room` projection
-and the list fold (§5.3), and a member's gate is attributed through that fold.
+`/data/rooms/state` is not called: a room's members come from the `room` projection and the
+list fold (§5.3), and a member's gate is attributed through that fold.
 
 **`/data` routes** — fence only, no cookie. Every list refresh reads `/data/channels.json` (the
-channel index, `presets`, `archived`) and `/data/bots.json` (the bots' display names) beside
-`session/list`; either missing is tolerated — the list still lands, with no channels or no names
-(a bare `bootFace` mounts no `/data` route, as `gravit-client-smoke` pins). The list is
+channel index, `presets`, the host's `archived`), `/data/bots.json` (the bots' display names) and
+`/data/sessions-meta.json` (the face's own `archived` and `deleted` ids) beside `session/list`;
+a failed or malformed one keeps its last good answer — the groups never blank and nothing is
+un-archived by a failure — and before any good answer the list still lands, with no channels, no
+names and nothing archived (a bare `bootFace` mounts no `/data` route, as `gravit-client-smoke`
+pins). The list is
 re-polled at the trailing edge of a fixed 1.2 s window that its first trigger opens — the old
 client's debounce re-armed on every trigger; through a sustained burst this one refreshes every
 1.2 s rather than once at its end — and its triggers are the `$events` facts
@@ -1534,20 +1562,44 @@ Refresh there, `credentials/describe`, `GET /data/plugins.json` (the order tools
 are on when any tool name ends `__place_order`) and a `GET /data/quotes?ids=us:SPY,crypto:BTC/USD,
 cn:600519` probe for the providers' state — three reads, each standing alone.
 
+**Stage 3's `/data` reads and writes** — a channel's page: `POST /data/channels/overview
+{workspaceId}` on entering it and on Retry; its editors: `GET /data/agents.json` for the agent
+choices, then `POST /data/channels/agents {workspaceId, agents}` or `POST /data/channels/bots
+{workspaceId, bots}` (at most six, refused before the post), each followed by the overview again;
+New channel…: `POST /data/channels {name}` (the name folded by `foldChannelName` and checked
+against the face's `NAME_RE` first), then a list refresh and the new channel found by the `dir`
+the route answered — it answers no workspace id. Discover: on entering it, `GET /data/plugins.json`,
+`/data/bots.json`, `/data/agents.json` and `/data/memory.json`, each alone; a skill's page `POST
+/data/memory/skill {name}` once; the Gravit item `GET /data/host.json`; `POST
+/data/agents/connect|disconnect {bin}` and `/data/agents/rescan {}`, then the agents listing again
+(rescan answers the listing itself); `POST /data/bots` (a new bot — the route answers `{ok, bot:
+<the row>}`) and `POST /data/bots/settings {id, revision, name, description, model, soul}` (a
+stale revision is a 409 `changed since this view was loaded`; a 500 `bots/<id> was saved, but …`
+kept the files), each followed by `/data/bots.json` again. The row actions: `POST
+/data/sessions/archive {sessionId, archived}` (an explicit boolean both ways; the host's own
+archive cannot be undone there — a 409) and `POST /data/sessions/delete {sessionId}`.
+
 ### 5.3 The host layer
 
 **Rows → conversations** (`js/host/sessions.js`, pure). `listConversations(items, ctx)` runs
 every row through `summaryOf` (the preset restored), folds a room's member sessions under their
 host session (`foldMembers`), drops the members, every row with an `origin` (a subagent child —
-the dock is stage 3's) and every id the channel index lists as archived, and sorts newest
-first. A conversation is `{id, title, kind, members, memberSessions, channel, preset, running,
-live, updatedAt, created, messages, loaded, preview, usage, thinking, lastSeen}`: `title` is the
+`childRowsOf(items)` keeps those rows' `{sessionId, parentSessionId, running}` for their parent's
+Children) and every id `/data/sessions-meta.json` lists as deleted, and sorts newest first; an
+archived conversation stays, marked. A conversation is `{id, title, kind, members,
+memberSessions, channel, archived, preset, running, live, updatedAt, created, messages, loaded,
+preview, usage, thinking, lastSeen}` (and `subagentCatalog` once its projection arrives):
+`archived` is `'host'` when `/data/channels.json`'s `archived` lists it (the host's archive, which
+the face cannot undo), `'face'` when `/data/sessions-meta.json`'s does, else `false`; `title` is the
 `title` projection or `Untitled`; `kind` is `group` when the `room` projection reads
 `kind:"room"` or the fold found members, `bot` when the preset names a bot (its home session —
 the assistant bubbles are the bot's words), else `gravit`; `members` is `['gravit', …bots]`,
 `[preset]` or `['gravit']`; `live` is the row's `agentAvailable`, `running` its `running`;
 `channel` is `{workspaceId, name}` from the index or `null`; `created` is filled by a follow
-snapshot's header. `unreadOf(conv)` is `updatedAt > lastSeen`.
+snapshot's header. `unreadOf(conv)` is `updatedAt > lastSeen`. `firstOpen(conversations)` is the
+first conversation not archived — the one every default opens: boot, Cancel, a missing id, the
+rail's Messages key (which skips a `lastConv` since archived), the screen's fallback, the page
+after an archive or a delete; an archived conversation opens by its own id alone.
 
 **Views → messages** (`js/host/kinds.js`, pure). `toMessages(view, calls, now, speaker)` turns
 one mapper view into zero, one or two messages `{id, seq?, at, from, kind, text, data, replace?,
@@ -1559,11 +1611,11 @@ merge?}`, ids minted from the host's own: `e<seq>` for a record, `t<callId>` for
 | `bubble` role `operator`, source `user` or none | `from:"you"`, `kind:"text"` (the `mention` list rides in `data`) |
 | `bubble` role `operator`, any other source (a compaction checkpoint, a plugin notice, a runtime snapshot, a member's delta) | `from:"system"` with `data.source` — drawn as a collapsed `context · <source>` details, never as the operator's bubble |
 | `bubble` role `gravit` | `from: speaker` (`gravit`, or the bot in its home session), `data.markdown = true`, `interrupted` carried; an empty text that is not interrupted (a tool-only step) yields nothing — the tool row carries it |
-| `bubble` role `bot` (a member's answer) | `from: <bot id>`, `data.name` the display name, `data.markdown = true` — a member writes the same markdown Gravit does |
+| `bubble` role `bot` (a member's answer) | `from: <bot id>`, `data.name` the display name, `data.markdown = true` — a member writes the same markdown Gravit does; `data.memberSessionId` and `data.memberTurn` when the record names the member turn that produced it (its Trace reads them) |
 | `room-line` | a system line, `roundEndLine(view)` |
 | `subagent-message` | a system line, `Report from <child>: …` (no link yet) |
 | `card` phase `call` | `kind:"tool"`, text = the mapper's title (a `bash` command) or the tool name, `data.args` from the `calls` map |
-| `card` phase `result` | the same id with `merge: true` — `data.result`, `data.isError` fill the row; for an order tool (`place_order`, `cancel_order`, raw or `mcp__<server>__<raw>`) a second message follows: `kind:"receipt"` (`Order accepted · <side qty symbol · type> · <order id>`) or, on error, `kind:"refusal"` with the result text |
+| `card` phase `result` | the same id with `merge: true` — `data.result`, `data.isError` fill the row, and the call's `name` and `args` when its `tool/call` was seen (the renderer dresses alpaca-kit's results by name); for an order tool (`place_order`, `cancel_order`, raw or `mcp__<server>__<raw>`) a second message follows: `kind:"receipt"` (`Order accepted · <side qty symbol · type> · <order id>`) or, on error, `kind:"refusal"` with the result text |
 | `approval` | `kind:"approval"` (tool name, `reason`, `displayReason`) — or, for an order tool, `kind:"card"`: `Your call: <order line>`, venue `Alpaca paper`, the arguments from `calls` |
 | `question` | `kind:"question"` with the batch's questions |
 
@@ -1574,9 +1626,10 @@ end}` on the message, and `hostEvent` removes every drawn message in that seq ra
 gates before inserting the summary.
 
 **The store as a cache of the host** (`js/reducers/host.js`). `hostList` installs the list as
-given, with the channel index and the bots' names (`[{id, name}]`, which every screen names a
-bot by), a surviving conversation keeping its window, its preview and when that was read
-(`previewAt`), usage, thinking and what the viewer saw; `hostWindow` installs a window WHOLE — a follow's snapshot or a page — never
+given, with the channel index (each row `{workspaceId, name, title, dir, isRoot, missingDir,
+sessionIds}`), the bots' names (`[{id, name}]`, which every screen names a bot by) and the child
+rows (kept when a list carries none), a surviving conversation keeping its window, its preview and
+when that was read (`previewAt`), usage, thinking, its `subagentCatalog` and what the viewer saw; `hostWindow` installs a window WHOLE — a follow's snapshot or a page — never
 appended to what was drawn; `hostEvent` inserts by `seq` (a `merge` message updates the row it
 names, a repeated id draws once) and clears `thinking` for anything but the operator's own line;
 `hostGate` lands a gate on its conversation after the last event it arrived behind (`seq =
@@ -1585,14 +1638,18 @@ not know yet in `orphanGates` (retried after every refresh); `hostGateGone` writ
 (`approved` / `rejected` / `answered` for this tab's own answer, `closed` for a withdrawal,
 `elsewhere` for a lost race) — a withdrawal never overwrites this tab's answer, a lost race
 always does; `hostProjection` takes `title`, `tokenUsage`,
-`contextPressure`, `room` (the members, and the kind becomes `group`) and the face's own
-`running`; `markSeen` records what the operator looked at.
+`contextPressure`, `room` (the members, and the kind becomes `group`), `subagentCatalog` (kept as
+the host sent it — the Children section validates it) and the face's own `running`; `markSeen`
+records what the operator looked at.
 
 **The live layer** (`js/host/live.js`). `startLive({store, openMux, call, mapFrame, getJson,
 timers, now, onReceipt})` opens the mux and the control stream and returns `{open, promote,
-refresh, reconcile, retryOrphans, answer, close, mux}`:
-- **the list** — `refresh()` reads `session/list`, `/data/channels.json` and `/data/bots.json`
-  together, builds the member → bot map from the fold, dispatches `hostList`, seeds every row's
+refresh, reconcile, retryOrphans, answer, leave, close, mux}` (`leave` stops reading the
+conversation that was on screen when the last open one was deleted and nothing took its place):
+- **the list** — `refresh()` reads `session/list`, `/data/channels.json`, `/data/bots.json` and
+  `/data/sessions-meta.json` together (each of the three `/data` reads keeping its last good
+  answer through a failure), builds the member → bot map from the fold, dispatches `hostList`
+  with the child rows, seeds every row's
   projection block (never a `cached` one — its watermark is not comparable), marks the open
   conversation seen, re-decides the open view (`reconcile`), re-lands the orphan gates, and
   fetches **previews**: for up to 12 rows other than the one on screen that were never read or
@@ -1639,8 +1696,18 @@ for an error; `undefined` means no command claimed it and the line continues as 
 was typed, prompts the first words, and returns the id. `answer(eventId, value)` answers
 through the mux and writes this tab's outcome on the card at once. `stop(sessionId)` is
 `session/cancel` and the line `Stopped. A paused goal resumes with /goal resume`;
-`rename(sessionId, title)` is `session/rename`. Every failure is one status line: `<what>:
-<code | HTTP status | message>`, or `Not signed in — open the URL gravit-face printed` on a 401.
+`rename(sessionId, title)` is `session/rename`. The row actions: `fork(sessionId)` is
+`session/fork`, one in flight per source, and resolves the child's id (`app.js` refreshes and
+opens it); `archive(sessionId, archived)` posts the explicit boolean and refuses, without a call,
+to archive while the conversation runs (`Stop Gravit first`) or a card waits on it (`Answer the
+waiting card first`); `remove(sessionId)` deletes and refuses a running conversation (`Stop Gravit
+first`); archiving or deleting the conversation on screen opens `firstOpen`, and after any list a
+messages route whose conversation left it (deleted in another tab) does the same. `talkTo(bot)`
+answers `{id}` — the bot's newest home conversation that is not archived, else a new one from
+`session/create {cwd: bot.homeCwd, agentPreset: bot.id}` — or `{error}`, which `app.js` puts on
+Discover's own line. `stopChild(parent, child, label)` sends `subagents/interruptByParent` in
+continuable mode and says `Stopping <label>`. Every failure is one status line: `<what>: <code |
+HTTP status | message>`, or `Not signed in — open the URL gravit-face printed` on a 401.
 
 **Markets** (`js/host/markets.js`). `startMarkets({store, createLiveQuotes, createSymbolSearch,
 storage, getJson, win})` returns `{show, search, watch, unwatch, bars, close}`. It starts the
@@ -1693,20 +1760,82 @@ AAPL · limit 150 · 0 of 2 filled`, a notional order `Buy $500 NVDA · market`)
 and `Paper`/`Live`, where the keys come from — `env`, `file`, `none`, … — and whether order tools
 are registered, each `unknown` until read).
 
+**Channels** (`js/host/channels.js`). `startChannels({store, postJson, getJson, refresh, now})`
+returns `{overview, create, agentChoices, setAgents, setBots}`. `overview(workspaceId)` posts the
+overview and lands it as `channelLoaded`, only the latest-started read landing; a failure is
+`channelFailed`, which keeps that channel's data (stamped stale by the page), a 404 reading
+`missing`. `create(name)` folds the name (`foldChannelName`), refuses one the face's `NAME_RE`
+would refuse (or `_template`) before any post with `Letters, digits, - or _`, posts it, refreshes
+the list and answers `{workspaceId}` of the channel whose `dir` the route answered, or `{error}`.
+`agentChoices()` is the connected CLI agents that answered (`/data/agents.json`'s `local` rows
+with `found`), `[]` on a failure. `setAgents` and `setBots` post the roster (`setBots` refuses more
+than `MAX_BOTS`, six, before the post) and re-read the overview: each answers `{ok: true}` or
+`{error: <the route's words>}` for the editor that asked.
+
+**Discover** (`js/host/discover.js`). `startDiscover({store, getJson, postJson, call, now})`
+returns `{load, read, gravit, skill, connect, disconnect, rescan, modelChoices, saveBot,
+createBot}`. `load()` reads the four listings (`SHELF_PATHS`: plugins, bots, agents, memory), each
+alone — a plain read joins its shelf's flight, a read after a write (`read(shelf, {fresh:
+true})`) starts a fresh one, and only the latest-started read of a shelf lands; a listing without
+its array is a failure, and `shelfFailed` keeps the last good one. `gravit()` makes the Gravit
+item's three reads, each failing alone (`gravitLoaded {host, model, keys}`, each the value, or
+`false` when its read failed; the model is the catalog's `default`, `null` when it names none);
+`GRAVIT_KEYS` are `DEEPSEEK_API_KEY`, `APCA_API_KEY_ID`, `APCA_API_SECRET_KEY`. `skill(name)`
+reads a skill's content once. `connect(bin)`, `disconnect(bin)` and `rescan()` post, put a
+refusal on Discover's line (`connect: binary did not answer on this machine`), and read the
+agents again (rescan answers the listing itself). `modelChoices()` reads `session/modelCatalog`
+once into `discover.models` (`botModelChoices`: `{value: 'provider/model', label}` pairs).
+`saveBot(bot, fields)` posts `botSettingsPayload(bot, fields)` (a model route that is not one is
+refused before the post, in `normalizeBotModel`'s words) and answers `'saved'`, `'stale'` (the
+face's `changed since this view was loaded`: the line says `Changed elsewhere — reloaded`) or
+`'failed'`; a `bots/<id> was saved, but …` 500 counts as saved with those words on the line; every
+outcome but a plain failure re-reads the bots. `createBot({name, id, description, model, soul})`
+leaves blank fields to the face, refuses a nameless bot (`Give it a name`) and a name with no ASCII
+letters and no id (`Give it an id: a-z, 0-9, -`) before the post, re-reads the bots, and answers
+the new id (from the route's `{ok, bot}`) or `{error}`.
+
+**Traces** (`js/host/traces.js`). `startTraces({store, call, loadMemberTrace, now})` returns
+`{open(convId, msgId)}`: once per answer (a failed one may be opened again),
+`loadMemberTrace(call, {sessionId: data.memberSessionId, turn: data.memberTurn})` — the projections
+cut, then the history paged back until the turn is found, never a follow — and its views folded
+through `toMessages` and `hostEvent` on a scratch conversation, as a window is, into
+`traceLoaded {msgId, messages}`; a loader error lands as its English words (`traceFailed`).
+
+**Stage 3's views** (pure). `groupsOf(state)` (`js/host/list-view.js`) orders grouping.js's
+buckets: every channel a group, an empty one too (a new channel's page is reachable from the
+list), the root first, then each group by its newest conversation, the empty channels by name; a
+bot's home sessions under the bot (`bot:<id>`), the rest under `No channel`; `Archived` last. Each
+group is `{key, label, kind, workspaceId, isRoot, conversations, collapsed, shown}`: a channel goes
+by `channelLabel` (its display title, else its name — the label New message's Where and Details
+use too), `collapsed` is the viewer's `collapsed[key]`, else true for Archived alone, and a
+collapsed group shows only the conversation on screen. `itemsOf(discover)` (`discover-view.js`)
+turns the listings into cards under namespaced ids — `mcp:<server>` with its tool count on Data,
+`bot:<id>` on Bots (never the default composition), `agent:gravit` first then the connected and
+the found CLI agents (`agent:<bin>`, `Connected`, `Not found`, `Found · <version>`) on Agents,
+`skill:<name>` with its group on Skills; `searchItems` matches name and line, `itemById` finds an
+item for its page. `childrenOf(conv, childRows)` (`children-view.js`) composes the parent's
+`subagentCatalog` with the child rows (`composeSubagentCatalog` → `normalizeSubagentCatalog` →
+`subagentControls`): `{children: [{id, label, mode, state, canStop}], unavailable}` — a malformed
+catalog is unavailable, never an empty list; an unknown-mode entry is `unavailable` and never
+stoppable; `canStop` is a running continuable child.
+
 ### 5.4 Rendering
 
 `boot(win, host)` builds the store (`makeStore`: the prefs, never a saved state), starts the live
 layer and the actions, sets the markdown hook (`setMarkdown` in `render/thread.js` — the DOM-built
 `gravitMarkdown` — `renderMarkdown(text).node.outerHTML`; tests hand in a stub or none, and with none set Gravit's text is
 escaped), starts `startMarkets` (the wire's quote and search factories over `win.fetch` and
-`win.EventSource`, the browser's storage) and `startAccount` (and reads the account at once), and
-renders on every store change. One render is one string — `renderRail(state)` + the screen
-(`renderMessagesScreen`, `renderMarketsScreen` or `renderAccountScreen`) (+ `renderSettings` when
-the drawer is open) — written to
+`win.EventSource`, the browser's storage) and `startAccount` (and reads the account at once),
+then `startChannels`, `startDiscover` and `startTraces`, and renders on every store change. One
+render is one string — `renderRail(state)` + the screen (`renderMessagesScreen`,
+`renderChannelScreen`, `renderMarketsScreen`, `renderDiscover`, `renderPlugin` or
+`renderAccountScreen`) (+ `renderSettings` when the drawer is open) — written to
 `#app.innerHTML`; the loop first records and then restores what the person had: focus and caret
 (by element id, else the control's data attributes), the typed value of every input with an id
-(an editor's box only while the same editor stays open), the ticked radios and checkboxes with
-an id (a question card's picks, the person's own until they press Answer), the composer's words (kept in a closure,
+(an editor's box only while the same editor stays open; New message's Where select never — its
+channel is the store's), the ticked radios and checkboxes with an id (a question card's picks, the
+person's own until they press Answer), every `<details>` with an id the person had open (a tool
+row, its Raw, a Trace — open again by id), the composer's words (kept in a closure,
 `composerText`, never in the store), the scroll of the rows, the main pane on the same screen, a
 drawer body while it is the same drawer, and the thread's position while the person reads up,
 however much arrives (at the bottom, or on another conversation, the thread follows the tail). While an IME composes (pinyin), renders
@@ -1714,44 +1843,68 @@ are held until `compositionend`; while a primary press is down they are held too
 `POINTER_HOLD_MS` (1 s), a `pointercancel` or a blur ends it — so a quote tick (the page renders on
 each, about twice a second while a coin streams) cannot replace the element a click is aimed at,
 and the held render lands after the click. Clicks are delegated by `data-action` (`open`, `startDraft`,
-`cancelDraft`, `toggleRail`, `changeWords`/`commitEdit`/`cancelEdit`, `stopGravit`/`confirmYes`/
-`cancelConfirm`, `suggest`, `answer`, `answerQuestion`, `toggleDetails`, `openSettings`/
-`closeSettings`, `setTheme`; Markets' `mkTab`, `mkSort`, `mkClear`, `toggleWatch`, `openMarket`,
-`handToGravit`; Account's `refreshAccount`, `openStatement`/`closeStatement`,
-`exportStatement`); typing in `#mq` (`mkQuery`) sets the query and searches; the composer's
-`submit` is `send`; Escape cancels an editor, a confirm, or closes a drawer (Details, Settings,
-the Statement); Enter commits an inline editor.
+`cancelDraft`, `toggleRail`, `toggleGroup`, `changeWords`/`commitEdit`/`cancelEdit`,
+`stopGravit`/`confirmYes`/`cancelConfirm`, `suggest`, `answer`, `answerQuestion`,
+`toggleDetails`, `openSettings`/`closeSettings`, `setTheme`; the row actions `fork`, `archive`,
+`unarchive`, `deleteConv`; the research surfaces' `stopChild` and `openTrace`; a channel page's
+`newRound`, `channelRetry`, `editRoster`; Discover's `shelfRetry`, `connectAgent`,
+`disconnectAgent`, `rescanAgents`, `talkTo`, `editBot`; Markets' `mkTab`, `mkSort`, `mkClear`,
+`toggleWatch`, `openMarket`, `handToGravit`; Account's `refreshAccount`,
+`openStatement`/`closeStatement`, `exportStatement`); typing in `#mq` (`mkQuery`) sets the query
+and searches, in `#dq` (`dq`) Discover's query; choosing `New channel…` in Where opens its name
+box, any other channel is `setDraftWhere`; a roster box's change is `toggleRosterTick`; the
+composer's `submit` is `send`, a bot editor's `saveBot`, the Create page's `createBot`; Escape
+cancels an editor, a confirm, or closes a drawer (Details, Settings, the Statement); Enter commits
+an inline editor.
 
 **Routes** — `#/messages/<sessionId>`, `#/messages/new`; `#/markets` and `#/markets/<id>` with
 the face's ids (`us:AAPL`, `cn:600519`, `crypto:BTC/USD` — the id is everything after
 `#/markets/`, so a coin keeps its slash; a percent-encoded link is decoded; `nav` canonicalises
-it, and one that is not a market opens Markets); `#/account/portfolio`, `#/account/venues`.
-`routeOf` folds every other route the router knows to Messages (`#/trade` included), and
-`settle` rewrites the address bar when it normalised one. `hashchange` → `follow()`: the
-conversation the route names is handed to `live.open` once; a deep link the list has not
-answered yet waits for the `hostList` that carries it, and with no conversation on screen the
-list's first row is opened; the quotes run only on Markets in a visible tab (`visibilitychange`
-pauses them too); a us page's bars are read once per opening; entering Account reads the
-account, entering Venues makes the three Venues reads.
+it, and one that is not a market opens Markets); `#/channel/<workspaceId>`; `#/discover`,
+`#/discover/<shelf>` (`data`, `bots`, `agents`, `skills`), `#/discover/create`; `#/plugin/<id>`
+(a channel's and a plugin's id are read like a market's: everything after the screen, decoded);
+`#/account/portfolio`, `#/account/venues`. `routeOf` folds every other route the router knows to
+Messages (`#/trade` and `#/mail` included), and `settle` rewrites the address bar when it
+normalised one. `hashchange` → `follow()`: the conversation the route names is handed to
+`live.open` once; a deep link the list has not answered yet waits for the `hostList` that carries
+it, and with no conversation on screen the list's first open conversation (`firstOpen`) is opened;
+when the last open conversation was deleted and nothing took its place, `live.leave()`; the quotes
+run only on Markets in a visible tab (`visibilitychange` pauses them too); a us page's bars are
+read once per opening; entering Account reads the account, entering Venues makes the three
+Venues reads; entering a channel's page reads its overview once; entering Discover from outside it
+(a shelf or an item's page included) reads the four listings; an item's page reads its own cards
+on opening (the Gravit item's three reads, a skill's content), the Create page the model routes.
 
 **The rail** (`render/rail.js`) — the first level: the brand, Messages (its badge counts the
-conversations with a card waiting on you), Markets (`#/markets`, current on Markets and a
-market's page), Settings at the foot, Account (`#/account/portfolio`, current on Account, with the
-net worth under it once the account has answered); it collapses to a strip of icons. The second level, on
-Messages: the new-message key and the rows, newest first — the unread dot (`unreadOf`), the
-avatar by kind (a bot's own, a cluster for a group), the title, `rowTime`, the preview (the
-host's one-message page; until it lands, the last message drawn).
+conversations with a card waiting on you; current on a channel's page too), Markets (`#/markets`,
+current on Markets and a market's page), Discover (`#/discover`, current on Discover and an item's
+page), Settings at the foot, Account (`#/account/portfolio`, current on Account, with the net worth
+under it once the account has answered); it collapses to a strip of icons. The second level, on
+Messages and beside a channel's page: the new-message key, then the groups (`groupsOf`, §5.3) —
+each a head (its fold key, `Collapse <label>` / `Expand <label>`; a channel's name a link to its
+page, marked while that page is open) and its rows, newest first — the unread dot (`unreadOf`),
+the avatar by kind (a bot's letter, a cluster for a group), the title, `rowTime`, the preview (the
+host's one-message page; until it lands, the last message drawn). A folded group shows only the
+conversation on screen; Archived is last and folded until opened.
 
 **The screen** (`render/messages.js`) — the head (the title; a centred cluster, the member
 names and count for a group; `Working` while `running`; the Details key), the thread, the
 composer (`Tell Gravit…`, `… @ a bot by name` in a group) and the status line (`role="status"`,
 `.bad` red). **Details** carries This task (the title with `Change words` → an inline editor →
-`session/rename`; Created from the snapshot header; Where — the channel or `Default directory`;
-Agent — Gravit or the bot), Members for a group, Usage from the projections (Tokens in = uncached
-input + cache reads, Tokens out, Context as a percentage) and `Stop Gravit` while running, a
-two-step confirm. **New message** is a title (`Name this (or your first line is the name)`),
-Where — a select of the channels, the root first — and the composer; the first words create,
-name and prompt, then the new conversation is opened and promoted to a follow. The **empty
+`session/rename`; Created from the snapshot header; Where — the channel by its title, or `Default
+directory`; Agent — Gravit or the bot; `Archived · By the host` for the host's own archive) and
+its row keys — `Change words`; `Fork` once there is something to fork (dsh forks from a completed
+turn); `Archive`, or `Un-archive` for the face's own archive; `Delete`, asked twice (`Yes,
+delete`) — Archive and Delete absent while Gravit runs or a card waits; Members for a group;
+**Children** when the conversation's catalog names any (`childrenOf`: the label, `One-shot` or
+`Continuable`, `Running` / `Not running` / `Unknown` / `Unavailable`, and `Stop` — asked twice,
+`Yes, stop` — on a running continuable child; `Children unavailable` for a malformed catalog);
+Usage from the projections (Tokens in = uncached input + cache reads, Tokens out, Context as a
+percentage) and `Stop Gravit` while running, a two-step confirm. **New message** is a title
+(`Name this (or your first line is the name)`), Where — a select of the channels by their titles,
+the root first, then `New channel…`, which opens a name box under it (a refusal stays in the box;
+the new channel is selected once it exists) — and the composer; the first words create, name and
+prompt, then the new conversation is opened and promoted to a follow. The **empty
 state** (no conversations) offers three suggestion chips that fill the composer. **Settings** is
 the theme (Cream · Black · System).
 
@@ -1761,8 +1914,12 @@ left in grey through the markdown hook (headings, lists, code, quotes, GFM table
 `Interrupted`); a
 bot's words in a group under its sender name, through the same markdown hook; a system line centred; a context row a collapsed
 `<details class="sysline ctx">` headed `context · <source>`; a tool row a collapsed `<details
-class="tool">` titled by the call, `running` until the result fills its `<pre>`, `.danger` on
-error; the order card (`Your call: …`, `Alpaca paper · <reason>`, ✗ Decline then ✓ Approve →
+id="tool-<callId>" class="tool">` titled by the call, `running` until the result fills it,
+`.danger` on error — an alpaca-kit result dressed (below) with the raw text in a nested
+`<details id="raw-<callId>">Raw`, any other result its `<pre>`; a room member's answer that names
+its member turn followed by a `Trace` disclosure (`trace-<msgId>`), read on opening: `Loading…`,
+the turn's steps (its tool rows drawn as the thread draws them, its context lines), the loader's
+words, or `No steps`; the order card (`Your call: …`, `Alpaca paper · <reason>`, ✗ Decline then ✓ Approve →
 `rejected` / `allowed-once`); the approval card (the tool name, the display reason, the audit
 reason only when it differs, the same two keys); the question card (`data-gate="<eventId>"`;
 every question with its inputs named and id'd `q-<eventId>-<questionId>`, so two pending cards
@@ -1806,15 +1963,63 @@ filled orders`. **Venues**: the Alpaca row (`Alpaca paper`, the host, `Keys · e
 `Keys unknown`, `Order tools on` / `off` / `unknown`) and, once probed, Quotes with one line per
 provider; Refresh there reads them again. No Guard | Beast, no Trading-on chip, no Move, Receive, Connect or Memory.
 
+**A channel's page** (`render/channel.js`, `#/channel/<workspaceId>`) — part of Messages: the list
+stays beside it. The head (the channel by its title, its status chip, `New round` — a new message
+with Where on the channel); the one-line headline, `Next: …` and the numbers as rows; **Thesis**
+through the markdown hook (`No thesis yet` for the template or none); **Latest backtest** — its
+file and up to twelve of its scalar fields; **Backtests** (file and size), **Journal** (the newest
+twenty, date before text), **Files** (name, size, date); **Agents** and **Bots** — the rostered
+names, each with `Edit`: a box per choice (the connected CLI agents; every bot but the host's own
+composition), ticked as rostered, a seventh bot box shut while six are ticked, ✓ and ×. `Loading…`,
+`Channel unavailable` with Retry, a failed re-read keeping the page under `As of HH:MM · stale` and
+Retry, `Channel not found`. Every channel-written string is text.
+
+**Discover** (`render/discover.js`) — the head (`Discover`, the search box `#dq`, `Search`, the
+`Create a bot` key); the shelves **Data**, **Bots**, **Agents** (with `Rescan`), **Skills**, each
+with `See all` and its cards (the mark, the name, one line, the kind tag), a failed listing saying
+`Couldn't read <Shelf>` with Retry beside the others, `Loading…`, or the shelf's empty words; a
+search draws one grid (`N results`); `#/discover/<shelf>` the shelf as a grid with `‹ Discover`.
+**An item's page** (`#/plugin/<id>`, `‹ Discover` back to the view it came from): an MCP server's
+State (`Pending`, `Loading`, `Active`, `Failed`, `Unloading`) and its tools, each description
+clamped to two lines (a server may describe a tool with a whole method list); a bot's model
+(`Default` when it names none), home, description, soul (pre-wrapped text), skills, setup issues
+and `Can't run · <reason>`, with `Talk to <name>` (absent for a broken or unlisted bot) and `Edit`
+— Name, Description, Model (Default, the catalog's routes, a route it lacks still offered), Soul,
+each box's id carrying the revision it was drawn from; a CLI agent's version, sign-in (`Signed
+in`, `Not signed in`, `Unknown`) and tool, with Connect or Disconnect; Gravit's Model, Host and
+Keys cards, each `Loading…`, `Couldn't read` or its rows (`Present` / `Absent` per key); a skill's
+group, description and content. An unknown id reads `Loading…` while its listing is read, then
+`Not found`. **The Create page** (`#/discover/create`): Name, Id, Description, Model, Soul,
+`Create`; the new bot's page opens. Discover's own status line carries its refusals. No Install,
+Uninstall, Publish, review, install count or price.
+
+**Tool results** (`render/tool-result.js`) — `toolResultHtml(name, text)` dresses only an
+`mcp__alpaca-kit__<tool>` result whose payload parses with `ok: true` — another server's tool of
+the same name, an error, `ok: false` or garbage draw nothing and keep the raw text:
+`market_snapshot` a table sorted by the change against the previous close, its sign printed;
+`screen`, `positions`, `orders`, `earnings`, `corp_actions` a table of their first eight columns,
+deltas signed and coloured (`0 rows` when empty); `daily_bars` the Market page's `chartSvg`, a
+single close a table; `account`, `breadth` tiles (up to eight fields) or a key-value list, Alpaca's
+decimal strings read as numbers and a fraction under a `pct` or `plpc` key as a percentage;
+`calendar` its days. `parsePayload` tolerates dsh's spill: the whole JSON, else up to the last
+closing brace (a note after it), else the whole rows salvaged around the seam — anything but the
+first stamped `Partial`. `toolResultFor(data)` memoises per message data object, so a result is
+parsed once however often the page renders.
+
 ### 5.5 State
 
 The store holds the host's facts (§5.3) and the page's own: `route`, `draft`, `detailsOpen`,
-`settingsOpen`, `edit`, `confirm`, `railCollapsed`, `theme`, `lastConv`, `lastSeen`, `status`,
-`orphanGates`, `channels`, `bots`, `conversations`; `markets` (`tab`, `sort`, `q`, `watchlist`,
-`watchError`, `quotes`, `providers`, `connection`, `search`, `hitQuotes`, `bars`) and `account`
-(`status`, `data`, `at`, `creds`, `tools`, `probe`, `statementOpen`). It never loads a saved state
+`settingsOpen`, `edit`, `confirm`, `railCollapsed`, `collapsed` (the list groups the viewer
+folded), `theme`, `lastConv`, `lastSeen`, `status`, `orphanGates`, `channels`, `bots`,
+`conversations`, `childRows`, `traces` (a member's trace by the answer it explains); `channel`
+(`id`, `status`, `data`, `at` — the page's overview); `discover` (`query`, `shelves` — `plugins`,
+`bots`, `agents`, `memory`, each `{status, data, at}` —, `gravit`, `skills`, `models`, `status`);
+`markets` (`tab`, `sort`, `q`, `watchlist`, `watchError`, `quotes`, `providers`, `connection`,
+`search`, `hitQuotes`, `bars`) and `account` (`status`, `data`, `at`, `creds`, `tools`, `probe`,
+`statementOpen`). The editors keep their own state in `edit`: a rename, New channel…, a roster
+(`which`, `workspaceId`, `choices`, `ticked`), a bot (`id`). It never loads a saved state
 (`accept: () => false` — the host is the state) and persists one key,
-`localStorage["gravit-ui.prefs"]`: `{theme, railCollapsed, lastConv, lastSeen}` — the per-viewer
+`localStorage["gravit-ui.prefs"]`: `{theme, railCollapsed, lastConv, lastSeen, collapsed}` — the per-viewer
 conveniences, every access in try/catch, written only when it changed (a quote tick rewrites
 nothing). The watchlist keeps its own key,
 `gravit.market.watchlist.v1`, read and written by `host/markets.js` — the key the old market page
@@ -1833,7 +2038,12 @@ head script applies the saved theme before first paint, `setTheme` at runtime. T
 the rail `--rail: 248px`. `css/app.css` is the one sheet: the rail and its mini strip, the list,
 the thread's bubbles and cards, the drawers, the responsive breaks (the list hides beside an open
 drawer between 861 and 1399 px), Markets' table narrowing (Volume and the quote's state leave
-at 620 px, the change at 440 px), `prefers-reduced-motion`. Client assets carry **no cache headers**:
+at 620 px, the change at 440 px), the list's group heads, a channel's page, Discover's shelves,
+cards and item pages (a tool description clamped to two lines), a tool result's tables, tiles
+and stamp (`.viz-*`), `prefers-reduced-motion`. The sheet and the screens are checked both ways
+(`tests/client/css.test.js`): every class a screen emits has a rule, and every class the sheet
+styles is emitted by some state (the page shell and a markdown sample included), so a rule cannot
+outlive its screen. Client assets carry **no cache headers**:
 hard-reload after any client edit, or you drill a stale module.
 
 ---
@@ -1885,10 +2095,13 @@ each directory, `registry.create` (create-or-reuse by real path) → attach ever
 header `cwd` is that directory (persisted ∪ live, live wins) → seed a roster entry if absent
 (inside the file lock) → report missing directories rather than deleting channels →
 `{channels, ungrouped, archived, presets}`, `presets` naming each session's header preset for
-the client's `summaryOf`.
+the client's `summaryOf`. The client groups the list by these channels (`groupsOf`, §5.3) — a
+channel by its display title — and opening a channel's head posts `/data/channels/overview` for
+its page (§5.4).
 
-**6.5 A local agent call.** Operator connects `claude` on the agent page (probe → `agents.json`
-→ `agent_claude` registered tree-wide) and rosters it on a channel → Gravit calls `agent_claude`
+**6.5 A local agent call.** Operator connects `claude` on Discover (Agents → its page → Connect:
+probe → `agents.json` → `agent_claude` registered tree-wide) and rosters it on a channel's page
+(Agents → Edit) → Gravit calls `agent_claude`
 in a session → `execute` resolves the session's channel by `cwd`; on the roster → spawn with a
 fixed argv, prompt on stdin, scrubbed env, the session's cwd, one run per bin at a time (hard
 limits: prompt ≤ 32,000 characters, 600 s per run — SIGTERM, then SIGKILL 5 s later — 16 MiB of
@@ -1927,8 +2140,9 @@ validator named) → `FACE_SMOKE=1 npm test` — the sixteen real boots, `order-
 drills. `cordis-plugin-include` is pinned; `loader` and `group` arrive as app-boot peers and
 `timer` through dsh-base, held by the lockfile alone; `cordis-plugin-hmr` is gone.
 
-**6.8 A room round.** Operator checks two bots into a channel (`POST /data/channels/bots` →
-`channels.json` `bots[]`) → asks a question in a channel session → Gravit calls `dispatch` with
+**6.8 A room round.** Operator ticks two bots on a channel's page (Bots → Edit → `POST
+/data/channels/bots` → `channels.json` `bots[]`) → asks a question in a channel session → Gravit
+calls `dispatch` with
 a brief (`tool/call`) → the engine refuses a session whose header or `agentPreset` projection
 names a bot, validates against the roster, starts the round and returns at once (`tool/result`
 naming who was not called) → per bot: find the member session (the room log's record of it,
@@ -1944,8 +2158,9 @@ open (else held until its `turn/end`) → peer `@`s queue continuations (≤ 2) 
 held answer flushed, then ONE `followup` naming who answered and who passed → Gravit's synthesis
 turn. A cold room the operator `@`s is resumed through `sessionController.resolveAgent`, the
 host's own composition. Every step is a known event; the `room` projection folds them; the
-client renders each answer in the bot's voice as it lands and the strip from the projection plus
-the pulses of each LIVE member's own `session/follow`.
+client draws each answer in the bot's voice as it lands, the room's members from the projection
+and the list's fold, and under an answer that names its member turn a Trace that reads that turn
+from the member's own log without activating it (§5.4) — it follows no member session.
 
 ---
 
@@ -1956,9 +2171,9 @@ the pulses of each LIVE member's own `session/follow`.
 | Command | From | Needs | Measured 2026-09-30 |
 |---|---|---|---|
 | `python -m pytest` | repo root | nothing — offline, no keys, no bed | 400 passed in a clean checkout, ~2 s (2026-10-20; the operator's tree adds the untracked `tests/strategies/`) |
-| `cd face && npm test` | `face/` | nothing — no port, no key | 942 tests, 926 pass, 16 skipped (2026-10-20) |
+| `cd face && npm test` | `face/` | nothing — no port, no key | 1025 tests, 1009 pass, 16 skipped (2026-10-20) |
 | `cd face && npm run typecheck` | `face/` | | clean, the dependencies' `.d.ts` included (`skipLibCheck: false`) |
-| `cd face && FACE_SMOKE=1 npm test` | `face/` | boots sixteen real trees into `mkdtemp` homes and binds ports; still no LLM or key (four of the smokes also create, and remove, a gitignored `.bots-smoke-*` bots root at the repo root) | the sixteen skipped tests; 942/942 (2026-10-20) |
+| `cd face && FACE_SMOKE=1 npm test` | `face/` | boots sixteen real trees into `mkdtemp` homes and binds ports; still no LLM or key (four of the smokes also create, and remove, a gitignored `.bots-smoke-*` bots root at the repo root) | the sixteen skipped tests; 1025/1025 (2026-10-20) |
 | `cd face && npm run check:fixture` | `face/` | the installed dsh | 26 fixture lines: 23 validated, 0 rejected, 3 with no upstream validator |
 
 ### 7.2 The Python suite
@@ -1987,7 +2202,7 @@ order path.
 
 ### 7.3 The face suite
 
-942 tests in 93 files (926 pass, 16 skipped without `FACE_SMOKE=1`), run by `node --test`
+1025 tests in 100 files (1009 pass, 16 skipped without `FACE_SMOKE=1`), run by `node --test`
 through `tsx`:
 
 - **Composition and boot** — `boot` (the layer order ending with the overlay; the policy layer
@@ -2062,7 +2277,8 @@ through `tsx`:
   `assertSessionWireEvent`: every 0.1.1 shape maps to `ignore`; the room's views — a member's
   answer as a bot bubble, the round-end line, the operator's `@`, a member's delta, a turn
   boundary for a session not on screen; gate frames by `eventId`; tool titles from the call;
-  `agent-message` relays), `summaries`, `member-traces`, `subagents` (the catalog composition;
+  `agent-message` relays), `summaries`, `member-traces` (the non-activating trace read, its
+  English errors), `subagents` (the catalog composition, the state enum;
   the dock's controllers went with `chat.js`; `tests/client/live.test.js` re-pins against a fake
   host what they proved of the follow/page policy — a cold open paged, a live one followed, a
   prompt promoting a paged view, a socket drop suspending and the fresh list re-deciding, the
@@ -2071,16 +2287,34 @@ through `tsx`:
   the list survives the room's window load. Two cases are NOT pinned by name: a failed open still
   drawing its conversation's gates, and a new conversation followed before its first prompt
   (app-dom's New message test runs that path without asserting the follow)), `room-client`,
-  `answer-traces`, `speaker`, `grouping`, `channelName`, `botId`, `bot-settings-client`, and
-  the client wire modules' `market-model`, `market-quotes`, `market-search`, `account-model`.
+  `speaker`, `grouping`, `channelName`, `botId`, `bot-settings-client` — these six import their
+  modules from `client/js/wire/` — and the client wire modules' `market-model`, `market-quotes`,
+  `market-search`, `account-model`.
 - **The gravit-ui client** (`tests/client/*.test.js`, `node:test` through tsx, a fake DOM in
   `tests/client/helpers/fake-dom.js`) — `kinds` (the kind table, the order line, receipts and
-  refusals), `sessions` (rows → conversations, the fold, `Untitled`), `host-reducers` (windows
+  refusals, a result row's call name, a member's turn), `sessions` (rows → conversations, the
+  fold, `Untitled`, the archived marks, the child rows, `firstOpen`), `host-reducers` (windows
   replace, events dedupe by id and insert by seq, a checkpoint's replace range, gates and
-  orphans), `actions` (the Remotes each data-action sends), `live` (follow or page, promote,
-  suspend and re-decide, gates by `eventId`, previews, host facts), `thread`, `rail`,
-  `messages-screen`, `app` and `app-dom` (the boot: routes, the render loop, every
-  data-action against the store, a press holding renders until it ends, the Markets search, star, Clear and page, the quotes paused off
+  orphans, the catalog kept across a list), `actions` (the Remotes and routes each data-action
+  sends: the row actions and their refusals, Talk to, a child's Stop), `live` (follow or page,
+  promote, suspend and re-decide, gates by `eventId`, previews, host facts, the last good
+  channels, sessions-meta and bots), `thread` (a tool result dressed with its Raw, a member's
+  Trace), `rail` (the groups and their heads, Discover in the first level), `list-view` (the
+  groups' order and folds), `messages-screen` (Details' row keys, Children, Where's channels by
+  their titles and New channel…), `channel` and `host-channels` (a channel's page in every state —
+  markup in every field stays text — its editors, the overview's latest-wins read, New channel,
+  the roster writes), `discover-view`, `host-discover` and `discover` (Discover's items under
+  namespaced ids, the four listings each alone, the Gravit item, a skill, the agent writes, a
+  bot's revision-checked save and a new bot, the shelves and every kind of page, no shop words),
+  `tool-result` (each alpaca-kit shape, a spilled result's Partial, nothing for another server's
+  tool, every cell escaped), `children-view` and `host-traces` (a conversation's children and their
+  states; a member's trace read once, non-activating), `wire-words` (no Chinese in the six moved
+  wire modules), `app` and `app-dom` (the boot: routes, the render loop, every data-action against
+  the store, a press holding renders until it ends, the open disclosures kept across a render, the
+  prefs' folds, fork, archive and delete moving the page, a deletion elsewhere, a channel's page
+  and New round, New channel… in Where, the roster editors, Discover's reads, Connect, Talk to, a
+  bot's save and a new bot, a member's trace never followed, a child's Stop; the Markets search,
+  star, Clear and page, the quotes paused off
   Markets, the bars read once per opening, Hand to Gravit, the account read at boot and on
   entering Account, Refresh, Venues described once, Export CSV, a receipt reloading the account,
   Open the Statement from a market's page), `market-view` and `account-view` (the pure views: face
@@ -2090,9 +2324,12 @@ through `tsx`:
   storage and a recording `getJson`), `markets` and `chart` (the list and a market's page from
   built states — no Chinese reaches the HTML — and the chart's geometry), `account` (Portfolio,
   keyless, unavailable, stale, the Statement, Venues, no demo controls), `market-fmt`, `css`
-  (every emitted class has a rule — the Markets and Account states included — no hex colour,
-  every token read is declared), plus Discover and Mail on the seed fixture;
-  `client-page.test.ts` pins `index.html`'s assets under `/client/` and its language.
+  (every emitted class has a rule and every class the sheet styles is emitted by some state —
+  every screen's states included — no hex colour, every token read is declared, a tool
+  description clamped), `controls`, `reducers` and `store` (the editors and confirms, the routes
+  and defaults, the empty state without a demo slice, the message model's host kinds), all on
+  host-shaped states — the seed fixture is gone; `client-page.test.ts` pins `index.html`'s assets
+  under `/client/` and its language.
 - **Server modules** — `channels` (the `presets` hints among the rest), `panels`
   (`/data/host.json`), `data` (`?fresh=1` skips the account route's TTL alone), `http`, `sessions` (`pickGenerationLog`; a v4-only session
   deleted and fenced; a migrated v0 + v4 directory decided by the v4 header; a lock-and-temps
@@ -2126,7 +2363,8 @@ serial accumulation, continuations bounded to one turn per member per round, the
 open and the hard cap that cancels with `keepInbox`, an `@` queued behind a running turn, the
 cold-room resume and its 404/409 mapping, a re-selected session refused `dispatch`, and the two
 routes under the fence — and `room-client` (the header fold, the strip and its state
-precedence, the glyph, the mention anchor, the round-end line, the gate speaker).
+precedence, the glyph, the mention anchor, the round-end line, the gate speaker, against
+`js/wire/room.js` and `js/wire/grouping.js`).
 
 The sixteen boots each own a file, because `bootFace` sets `process.env.DSH_HOME` for good, and
 each speaks the browser's wire through `tests/remote.ts` (`mountClient`, `signIn`, `remote`):
@@ -2290,7 +2528,7 @@ the re-host added (§10, item 14).
 | **Order approval** — automated half | the listener is registered, reaches the live approval service, defaults to `ask`, catches renamed servers, leaves `orders` alone (mutation-proven: removing the registration fails it); the positive path — a grant logged by the real approval service, the guard finding it through `snapshotEvents()`, the order dispatching, a rejection not — and the same answer over the real `$events` channel | that a human can read the card; containment | passes 2026-09-30 (`order-gate`, `order-gate-smoke`) |
 | **Order approval** — manual half (arm Gate 1 in a *scratch* home, ask for one paper order, deny, see the audit pair) | the card, end to end | | **not yet run** — the condition before the flag flips in the real home |
 | **Client transport** — automated (`client-mux-smoke`) | the page's own `api.js` + `mapper.js` against a real host: gates, replays, withdrawals, follows, the non-activating reads | the DOM: the page's rendering and its view modes run on a fake DOM (`tests/client/app-dom`, `live`), and `gravit-client-smoke` opens one real session through the host layer, not a browser | passes 2026-09-30; `gravit-client-smoke` 2026-10-19 |
-| **Transport** — manual (`face/README.md`) | the browser half of the wire: the tokenized sign-in and the per-authority cookie; a cold session opened page-only, gaining no `session.v4.jsonl.zstd` or `session.lock` until it is prompted; a reconnect redrawing the window once; a new session's reply streaming without a click; `/compact` answered by `commands/execute`; the agent panel; the subagent dock; rename, fork, the directory picker, a channel rename (on the gravit-ui client the panel, the dock, fork, the picker and the channel rename wait for stage 3) | the approval card's endings, which are the Gate-2 drill's | **not yet run** on 0.2.0 against the real home — a headless load of the page on a scratch home reached `connected` with no console errors; the stage-1 page was walked 2026-10-19 on a scratch home without keys (the ledger): sign-in, a New message in `workbench` created, named and prompted, the missing-key error on the status line, a restart then a reload opening the cold session paged |
+| **Transport** — manual (`face/README.md`) | the browser half of the wire: the tokenized sign-in and the per-authority cookie; a cold session opened page-only, gaining no `session.v4.jsonl.zstd` or `session.lock` until it is prompted; a reconnect redrawing the window once; a new session's reply streaming without a click; `/compact` answered by `commands/execute`; the agent panel; the subagent dock; rename, fork, the directory picker, a channel rename (on the gravit-ui client Discover's Gravit item stands for the agent panel, Details' Children for the dock and Details' Fork for fork; the directory picker and a channel rename are not on it) | the approval card's endings, which are the Gate-2 drill's | **not yet run** on 0.2.0 against the real home — a headless load of the page on a scratch home reached `connected` with no console errors; the stage-1 page was walked 2026-10-19 on a scratch home without keys (the ledger): sign-in, a New message in `workbench` created, named and prompted, the missing-key error on the status line, a restart then a reload opening the cold session paged |
 | **Bots** — automated (`bots-smoke`, `bot-runtime-smoke`, `bot-sandbox-smoke`, `askuser-noclient-smoke`) | roster listing incl. broken; header `agentPreset`; mask = allow ∩ tree, following late tools; persona shadow; the default's roster equal to the host's plus the role tools (never a bot's), its date section and its cycle contract (`Step 0 — ask once`) scoped to Gravit (never a bot, though the probe bot can call `create_goal`); the shipped relative plugin path, rebased; a save re-declaring; Gate 2 refusing an order tool the bot's own mask admits; the S4/S7 observations | that the approval CARD renders (no client) — a bot in a room and a home session's write to `../SOUL.md` were this row's two gaps until `room-smoke` closed both | passes 2026-09-30; re-run 2026-10-19 with the role tools in the default's roster and the cycle contract in its prompt |
 | **Bots** — manual (`face/README.md`) | create → home → persona → tools named and not named → `{{` refused; the sidebar buckets the home session under the bot; a restart's boot line lists the id; the transcript names the speaker on all four surfaces (second run) | no automated test pins the four naming surfaces or the reconnect path; per-message attribution in a room is the Room rows below | passed 2026-09-07; re-run 2026-09-08 on `main` with the R12 fix in, passed; owed on 0.2.0 |
 | **Room** — automated (`room-smoke`, `room-discussion-smoke`) | a real round on a stub model: dispatch → three members (answered / passed / failed) → answers on the log before one wake → synthesis in one turn; members parented, preset-joined, `read-only` first, `GRAVIT.md` chain, no `dispatch`; the projection on the row and in the cache; the `@` route with a member's write refused in content; a home refused on `../SOUL.md`; the structured brief and views; the journal | that a human can read the strip; a real model's behaviour on the four standing rules | passes 2026-09-30 |
@@ -2465,7 +2703,9 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
   Observed in the room drill (2026-09-09): the member sessions are shown and counted, so Rule 5
   holds — nothing is hidden — but the rows carry no voice, while the sidebar's own fold labels
   each member with its bot's name. Polish, not a truth problem; a member's transcript names its
-  voice the moment it is opened.
+  voice the moment it is opened. Closed with the old page: the gravit-ui client has no landing
+  list of sessions — the conversation list folds a room's members under the room (§5.3) and a
+  channel's page lists none.
 - **R19 — Dispatch is Gravit's judgment, and nothing checks it.** Gravit chooses whom to call and
   in which mode; it can under-call or over-call a voice, and no rule in the engine says otherwise.
   Three things push against it and none removes it: the tool result names who was NOT called, the
@@ -2528,8 +2768,8 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
   CONTINUABLE children, one-shot and external-provider runs are outside it (dsh-subagent's
   README), and every `role_*` call is one-shot, several of which `run_in_background` lets
   overlap. So `dsh/profile/cycle.md` tells Gravit to count its `role_*` calls in the journal and
-  stop at 12. Every call is in the child history (the 临时子任务 panel) and the operator reads
-  the journal. The first overrun adds a face-side counter on `agent/created` for one session's
+  stop at 12. Every call is in the parent's subagent catalog (Details' Children, §5.4) and the
+  operator reads the journal. The first overrun adds a face-side counter on `agent/created` for one session's
   children.
 - **R30 — A goal survives a restart disarmed; the operator's next message is the resume path,
   and a paused goal is the operator's alone.** After a restart the goal is still active and

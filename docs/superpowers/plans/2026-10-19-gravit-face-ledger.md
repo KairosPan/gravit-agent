@@ -519,3 +519,124 @@ waiting for a reopen (ruling 27). One became a finding and was corrected in the 
 - From the manual look: the landing page's three images stay captured from the old client until
   new ones are taken.
 
+## Stage 3 (2026-10-20)
+
+The rulings made while executing `2026-10-20-gravit-face-stage-3.md` (spec §7 Stage 3): Discover as
+the inventory of what Gravit runs, the list grouped by channel and the channel page, the row
+actions, the tool rows' renderers, a conversation's children and a room member's trace, and the
+demo's last pieces leaving. Executed inline (superpowers:executing-plans) on 2026-10-20 in the same
+worktree, `feat/gravit-face` from 24dbb73 (stage 2's final 9d5338c plus the plan); the operator's
+words were still "先做完A" and "按A做吧", so every answer below is again the executor's. Baseline
+before Task 1: face 942 tests, 926 pass, 16 skipped (`FACE_SMOKE=1` 942/942), typecheck clean.
+
+### Pre-flight
+
+The shared interfaces checked before Task 1 — the moved wire modules against the list's child
+rows and the groups (`isSubagentRow`, `bucketFor` against the `archived` marks), `firstOpen` and
+`archived` against the row actions, the channel rows' `dir` against New channel, `startChannels`
+against its writes, the router's plugin id against Discover, `startDiscover` and `itemsOf`
+against the screens and the bot writes, the subagent state enum, `subagentCatalog`, `childRows`,
+`toolResultHtml` and the disclosure restore against the Children section and the traces, and the
+demo Discover leaving before the seed: no conflicts (`draftBotSoul`'s arguments, read when Task 9
+began, led to ruling 22).
+
+### Rulings, in the order made
+
+Each with what it costs if wrong.
+
+1. **Task 1.** botSettings.js, subagents.js and member-traces.js moved under js/wire with English words instead of being deleted (spec §4 lists them for deletion) — their decisions are pure and were earned in drills; subagentControls returns a state enum and lost its note sentences — cost if wrong: three wire modules whose words changed and a renamed field.
+2. **Task 2.** /data/bots.json joins the last-good set beside channels.json and sessions-meta.json — a failed bots read blanked the bots' names (hostList took the empty list) — cost if wrong: a stale bot name until the next good read.
+3. **Task 2.** a conversation without an archived field counts as open (!c.archived), not only archived === false — demo-built and older test states carry no field — cost if wrong: none observable; host conversations always carry it.
+4. **Task 2.** the rail's Messages key skips lastConv once that conversation is archived, and render/messages.js's screen fallback uses firstOpen too — both are defaults the Review Focus names — cost if wrong: one more click back to an archived conversation.
+5. **Task 3.** live gains leave() (closeView) and app.js calls it when the last open conversation was deleted and nothing took its place — the plan's Review Focus 2 asks that the live layer stop reading it, and without a replacement no open() closed the old view — cost if wrong: one more method on the live layer.
+6. **Task 3.** the new keys reuse btn-sm and btn-danger, so the stylesheet gains no rule and css.test.js no state — cost if wrong: none.
+7. **Task 4.** groupsOf returns each group's shown rows (the folded group's conversation on screen alone) beside its conversations, so the list-view test pins the keep-the-open-row rule rather than the renderer — cost if wrong: one more field on a group.
+8. **Task 4.** a channel link's id is URI-encoded in the href (the router decodes it, Task 5) — workspace ids are host-made, but a href must not carry raw path characters — cost if wrong: none.
+9. **Task 5.** startDraft's where must name a listed channel, else the default — a stale id from New round or a link cannot send a session nowhere — cost if wrong: New round on a vanished channel starts in the root instead.
+10. **Task 5.** the channel page has no back link (the list stays beside it, Messages current) and its stale stamp carries the last good read's time — cost if wrong: one more click to leave the page.
+11. **Task 6.** create, setAgents and setBots answer {ok: true} or {error: <words>} instead of a boolean — the editor that asked shows the route's refusal in its own words — cost if wrong: a different return shape than the plan's Interfaces.
+12. **Task 6.** Where's select is the store's alone (app.js's typed-value restore skips nm-where) — otherwise New channel… stuck in the box after the new channel was chosen — cost if wrong: none; every change already went through setDraftWhere.
+13. **Task 6.** a roster editor's ticks live in the store (edit.ticked, toggleRosterTick), so the six-bot cap is drawn and enforced in one place, and a rostered agent or bot no longer offered stays as a box to untick — cost if wrong: one more reducer.
+14. **Task 7.** the Gravit item is on Agents before the agents listing answers (its line empty until then) — the main agent always exists and its page reads its own three cards — cost if wrong: a card with no line for a moment.
+15. **Task 7.** a read after an agent write starts a fresh flight and only the latest-started read of a shelf lands (per-shelf sequence), so a listing begun before a Connect cannot overwrite the one after it — cost if wrong: none.
+16. **Task 7.** the default selection is null (drawn —) when the catalog answers without one, and false only when the read failed — cost if wrong: none.
+17. **Task 8.** tests/client/data.test.js leaves here rather than in Task 10 — it tested the demo catalogue deleted in this task, and the seed fixture's own version — cost if wrong: none; the seed still serves the tests Task 10 rebuilds.
+18. **Task 8.** a Discover card is a plain link to #/plugin/<id> (the router opens the page) rather than a role=button div with a data-action — cost if wrong: none.
+19. **Task 8.** Rescan sits in the Agents shelf's head and on its grid page — it is a listing-wide action — cost if wrong: one key to move.
+20. **Task 9.** talkTo answers {id} or {error} and the error goes to Discover's own line — the Messages status line is not drawn on Discover — cost if wrong: a different return shape than the plan's Interfaces.
+21. **Task 9.** modelChoices hands the editor botModelChoices' {value, label} pairs (read once, kept in discover.models), not bare route strings — the select shows the catalog's names — cost if wrong: none.
+22. **Task 9.** the Create page's Soul starts empty and a blank soul is left to the face's template, rather than prefilled through draftBotSoul — that helper builds a soul from six answers the page does not ask — cost if wrong: an operator starts from the face's template instead of a drafted one.
+23. **Task 10.** ids.js leaves with its test — its only callers were the page-made message stamps and the memory reducers, both gone — cost if wrong: none.
+24. **Task 10.** the plan's grep for seed still matches live.js's seedBlock/seedBaseline and a test helper's parameter name — unrelated words; the demo seed fixture is gone — cost if wrong: none.
+25. **Task 10.** the reverse stylesheet check counts the page shell (index.html) and a markdown sample with every heading level as emitters, and states were added for a context row, a group member's name, crypto and other holdings and a broken bot, so only demo rules were deleted (about 125) — cost if wrong: a rule for a state the check cannot reach would have to be kept by adding that state.
+26. **Task 10.** the operator bubble's file chips, inlineEdit's word label and the avatar's portrait mark leave with their last callers (no host message carries files since stage 1 removed the + key) — cost if wrong: a later file feature re-adds its own chip.
+27. **Task 11.** the old renderers' meta sentences (rows sorted by, first 8 of N columns, raw notes the path) are not drawn — the screens carry no explanatory small print; a cut result carries the muted Partial stamp and the Raw disclosure has everything — cost if wrong: a reader not told a table dropped columns.
+28. **Task 11.** the memo is keyed by the message's data object (toolResultFor), so toolResultHtml stays a pure function of name and text — cost if wrong: none.
+29. **Task 12.** stopChild treats any answer but accepted:false as accepted (the old client checked nothing) and says Stopping <label> — the child's state updates with the next list — cost if wrong: a refusal the host words otherwise reads as accepted until the list moves.
+30. **Task 12.** a trace's steps draw inline in its disclosure (tool rows through the thread's own body, context lines as system lines, other text plain), not as full message rows with avatars — cost if wrong: none.
+31. **Task 12.** a failed trace may be opened again (the once-per-answer guard holds only while a read is in flight or after it landed) — cost if wrong: a second read of a member session that already failed.
+32. **Task 13.** a plugin server's tool descriptions are drawn as its own text, Chinese domain terms included (AKShare names 沪深京, 涨停板), clamped to two lines — they are the plugin's words like a soul is the bot's, not host status — cost if wrong: Chinese on an English screen until descriptions are filtered.
+33. **Task 13.** the look's bot (bots/look-bot), channel (strategies/look-3) and scratch home were moved out of the worktree into the session scratchpad, not deleted — cost if wrong: none.
+
+### Tasks
+
+| Task | Commits | Result |
+|---|---|---|
+| 1 The old client's pure modules move under `js/wire`, in English | d7d22bb | 944 tests, 928 pass |
+| 2 The list keeps archived conversations, subagent children and the last good facts | 04b5f97 | 952 / 936 |
+| 3 Row actions — fork, archive, un-archive, delete | 1246f06 | 965 / 949 |
+| 4 The list groups by channel | b82812c | 971 / 955 |
+| 5 The channel page | d8a70df | 981 / 965 |
+| 6 The rosters and New channel | d1d1049 | 989 / 973 |
+| 7 Discover's host layer and views | f26fe16 | 1000 / 984 |
+| 8 Discover on screen; the demo shop leaves | 7e08c79 | 992 / 976 (the demo catalogue's tests left) |
+| 9 Talk to a bot, its settings, Create a bot | 3e9ad58 | 1004 / 988 |
+| 10 The demo's last pieces leave | ab38680 | 1004 / 988 |
+| 11 The tool rows draw their results | 51feb8b | 1013 / 997 |
+| 12 Children and member traces | 397c1a7 | 1020 / 1004; `FACE_SMOKE=1` 1020/1020; typecheck clean |
+| 13 Documents and the manual look | 0ec31bd (the manual look's five fixes), and the docs commit | 1025 / 1009 |
+
+### The manual look (2026-10-20)
+
+A face on a scratch `DSH_HOME` under the worktree's ignored `.superpowers/look-3` (profile set up,
+no APCA, DeepSeek or iFinD key, no PIT bed), on port 3091, started in a Terminal tab and opened in
+the browser pane through the printed `?token=` URL at 1280 × 800. Every defect it showed was fixed
+under a test that failed first (0ec31bd), then re-checked on the page.
+
+1. Messages: the list's groups — the root channel (titled `gravit-face` after the worktree's
+   directory), `aqr-r1000`, `room-drill` — with their fold keys; the empty state beside them.
+2. The `room-drill` channel page: the `idea` chip, the one-line headline, the thesis drawn as
+   markdown, the journal, five files with their sizes and dates, Agents and Bots `None` (the
+   scratch home has no rosters). **Defect:** the Bots editor offered `Gravit` — the host's own
+   composition — among the bots; the old page filtered the host presets. Fixed (the kairos alias
+   too); after the fix the editor offered the six bots, `看空派` and `看多派` were ticked (each tick
+   re-renders the page), Save posted the roster and the page read them back.
+3. Discover: Data (`akshare`, 14 tools; the alpaca-kit row is not mounted on a scratch home), Bots,
+   Agents (Gravit, then Claude Code, Codex and Hermes found but not connected) and Skills (`No
+   skills`). The Gravit page: Model `deepseek-official` / `deepseek-flash`, the host facts, the
+   three keys `Absent`. **Defect:** the AKShare page drew every tool's description whole — each a
+   method list thousands of characters long, a wall. A description now shows two lines, the page
+   keeping the rest. A search for `codex` drew `1 result`, the box kept its words and focus.
+4. Create a bot `Look Bot` (description only): **defect** — `Created, not listed yet`, though the
+   bot was written: the route answers `{ok, bot: <row>}` and the client read the id from the top
+   (the test fixtures had the flat row too). Fixed; the bot's page: Talk to and Edit (**cosmetic
+   defect**: the two keys touched — a gap now), Model `Default`, its home, the template soul. Edit
+   showed the boxes with the revision in their ids; a new description saved and the editor closed.
+5. Talk to Look Bot opened an `Untitled` conversation under a `Look Bot` group. Details: Change
+   words, Fork, Archive, Delete. Archive moved the page to the empty state and the conversation
+   into a folded `Archived` group; opened from there, Un-archive brought it back under `Look Bot`.
+   **Defect:** Fork answered `fork: session/fork-unavailable` — dsh forks only from a completed turn
+   and this conversation had none; an empty conversation now offers no Fork. Delete asked `Yes,
+   delete`, then the conversation and its group left and the page moved to the empty state.
+6. New message: **defect** — Where named the root channel `workbench` (its directory name) while
+   the list named it `gravit-face` (its display title); Details' Where did the same. A channel now
+   goes by its title everywhere. `New channel…` opened the name box under Where; `look 3` became
+   `look-3`, was created, selected in Where and listed as an empty group. A first line `look at
+   breadth` created the conversation there (the model's missing key reached the status line); Fork
+   then opened a second `look at breadth`. The `look-3` page read `No thesis yet` and its five
+   template files; its Agents editor offered `None to choose` (no CLI agent connected on the
+   scratch home) and Escape closed it.
+
+Not walked: a conversation's Children and a member's Trace (both need a model that answers), the
+tool rows' tables (no tool ran without a key). The look's bot, channel and scratch home were moved
+into the session scratchpad afterwards, not deleted.
