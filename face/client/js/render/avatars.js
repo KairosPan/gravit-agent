@@ -1,7 +1,6 @@
-// gravit-ui/js/render/avatars.js — the round marks: You, G, a bot's letter, a portrait slot, a glyph; logos are the 44 px rounded squares of Discover
+// face/client/js/render/avatars.js — the round marks: You, G, a bot's letter, a portrait slot, a glyph
 import { esc } from '../html.js';
 import { icon } from '../icons.js';
-import { byId } from '../data/plugins.js';
 
 const SILHOUETTE = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="9" r="4.2"></circle><path d="M3.5 24a8.5 8.5 0 0 1 17 0z"></path></svg>';
 
@@ -15,16 +14,9 @@ export function mark(spec, size, radius, name) {
 export function avatar(who, size = 28, state = null) {
   if (who === 'you') return `<span class="av av-you" style="width:${size}px;height:${size}px;font-size:${Math.round(size * 0.36)}px">You</span>`;
   if (who === 'gravit') return `<span class="av av-g" style="width:${size}px;height:${size}px;font-size:${Math.round(size * 0.46)}px">G</span>`;
-  // a bot the host lists gets the letter of its name; the catalogue's marks stay for the later stages' plugins
-  const bot = state?.bots?.find(b => b.id === who);
-  const p = bot ? null : byId(who, state?.plugins?.uploaded ?? []);
-  const name = bot?.name ?? p?.name ?? who;
-  const spec = p?.avatar ?? (p?.logo?.type === 'portrait' ? p.logo : null) ?? { type: 'letter', text: name.slice(0, 1).toUpperCase(), tone: 'grey' };
-  return mark(spec, size, '999px', name);
-}
-
-export function logo(plugin, size = 44) {
-  return mark(plugin.logo, size, '10px', plugin.name);
+  // a bot the host lists gets the letter of its name; anyone else the letter of their id
+  const name = state?.bots?.find(b => b.id === who)?.name ?? String(who);
+  return mark({ type: 'letter', text: name.slice(0, 1).toUpperCase(), tone: 'grey' }, size, '999px', name);
 }
 
 // the group head: overlapping avatars (spec §5.1)

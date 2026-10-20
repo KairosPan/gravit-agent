@@ -3,19 +3,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { itemsOf, searchItems, itemById, SHELVES } from '../../client/js/host/discover-view.js';
+import { listings } from './helpers/inventory.js';
 
 const shelf = data => ({ status: 'ready', data, at: 1 });
-export const listings = () => ({
-  plugins: shelf({ ok: true, mcp: [{ server: 'alpaca-kit', phase: 'active', tools: [{ name: 'mcp__alpaca-kit__account', description: 'The paper account' }, { name: 'mcp__alpaca-kit__screen', description: 'Screen' }] }, { server: 'akshare', phase: 'failed', tools: [] }], agentTools: [], rows: [] }),
-  bots: shelf({ ok: true, bots: [
-    { id: 'gravit', name: 'Gravit', description: 'host', isDefault: true, listed: true },
-    { id: 'buffett', name: 'Buffett Type', description: 'Buys cheap, holds long', isDefault: false, listed: true },
-  ] }),
-  agents: shelf({ ok: true, main: { name: 'Gravit', runtime: 'dsh 0.2.0-rc.2' },
-    local: [{ bin: 'codex', label: 'Codex', found: true, version: '0.9', auth: { state: 'ok' } }, { bin: 'gone', label: 'Gone', found: false, auth: { state: 'unknown' } }],
-    candidates: [{ bin: 'claude', label: 'Claude Code', version: '2.1' }] }),
-  memory: shelf({ ok: true, groups: [{ name: 'mechanics', skills: [{ name: 'rules', description: 'The five honest-eval rules' }] }, { name: 'style-gravit', skills: [{ name: 'voice', description: 'How Gravit writes' }] }] }),
-});
+
 const discover = (over = {}) => ({ query: '', shelves: { ...listings(), ...over } });
 
 test('the four shelves, in order', () => {

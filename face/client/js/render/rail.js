@@ -75,6 +75,7 @@ export function renderNav(state) {
   <div class="rail-group">
     ${navItem(messagesHref, 'chat', 'Messages', screen === 'messages' || screen === 'channel', mini, waiting)}
     ${navItem('#/markets', 'markets', 'Markets', screen === 'markets', mini)}
+    ${navItem('#/discover', 'compass', 'Discover', screen === 'discover' || screen === 'plugin', mini)}
   </div>
   <div class="rail-foot">
     <div class="rail-lines"><button type="button" class="line-key" data-action="openSettings" aria-label="Settings" title="Settings">${icon('bars', 20, 2)}</button></div>

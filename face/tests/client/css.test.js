@@ -7,6 +7,8 @@ import { renderMessagesScreen } from '../../client/js/render/messages.js';
 import { renderMarketsScreen } from '../../client/js/render/markets.js';
 import { renderSettings, renderAccountScreen } from '../../client/js/render/account.js';
 import { renderChannelScreen } from '../../client/js/render/channel.js';
+import { renderDiscover, renderPlugin } from '../../client/js/render/discover.js';
+import { listings } from './helpers/inventory.js';
 import { setMarkdown } from '../../client/js/render/thread.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
@@ -83,6 +85,22 @@ function channelStates() {
   return [loaded, editing, R.channelLoading(on, { workspaceId: 'w1' }), R.channelFailed(on, { workspaceId: 'w1', at: NOW }), R.channelFailed(loaded, { workspaceId: 'w1', at: NOW }), R.nav(on, { screen: 'channel', id: 'w9' })];
 }
 
+// Discover: the shelves, a failed shelf, a query, a shelf's grid, every kind of page, its own line
+function discoverStates() {
+  let all = emptyState();
+  for (const [shelf, v] of Object.entries(listings())) all = R.shelfLoaded(all, { shelf, data: v.data, at: 1 });
+  const at = route => R.nav(all, route);
+  const page = id => at({ screen: 'plugin', id });
+  return [
+    at({ screen: 'discover', id: null }), R.shelfFailed(at({ screen: 'discover', id: null }), { shelf: 'bots', at: 1 }), R.nav(emptyState(), { screen: 'discover', id: null }),
+    R.setDiscoverQuery(at({ screen: 'discover', id: null }), 'rules'), at({ screen: 'discover', id: 'agents' }),
+    page('mcp:alpaca-kit'), page('bot:buffett'), page('agent:codex'), page('agent:claude'), page('agent:gravit'), page('bot:nobody'),
+    R.gravitLoaded(page('agent:gravit'), { host: { cwd: '/r', home: '/h', attachedSessions: 1, version: 'v' }, model: false, keys: { DEEPSEEK_API_KEY: { configured: true } } }),
+    R.skillLoaded(page('skill:rules'), { name: 'rules', detail: { content: '# R', group: 'mechanics' } }),
+    R.discoverStatus(at({ screen: 'discover', id: null }), { line: 'connect: binary did not answer on this machine', bad: true }),
+  ];
+}
+
 // the states stage 1 can show: empty, a conversation with every kind, a group thinking, Details, Settings, a draft, a bad status, the rail folded
 function everyState() {
   const base = R.hostList(emptyState(), { conversations: [conv('s1', { messages: KINDS, running: true, usage: { tokenUsage: { outputTokens: 1 }, contextPressure: 0.5 }, created: NOW }), conv('g', { kind: 'group', members: ['gravit', 'buffett'], thinking: 'text' })], channels: [{ workspaceId: 'w0', name: 'workbench', isRoot: true }], bots: [{ id: 'buffett', name: 'Buffett Type' }] });
@@ -91,11 +109,12 @@ function everyState() {
     emptyState(), open, R.nav(base, { screen: 'messages', id: 'g' }), R.toggleDetails(open), R.askConfirm(R.toggleDetails(open), { action: 'stopGravit', id: 's1' }),
     R.startEdit(R.toggleDetails(open), { kind: 'rename', convId: 's1', error: 'Cannot be empty' }), R.openSettings(open), R.startDraft(open, { now: NOW }),
     R.startEdit(R.startDraft(open, { now: NOW }), { kind: 'newChannel', error: 'Letters, digits, - or _' }),
-    R.hostStatus(open, { line: 'Reconnecting…', bad: true }), R.toggleRail(open), ...marketStates(), ...accountStates(), ...channelStates(),
+    R.hostStatus(open, { line: 'Reconnecting…', bad: true }), R.toggleRail(open), ...marketStates(), ...accountStates(), ...channelStates(), ...discoverStates(),
   ];
 }
 const screenOf = (st, now) => (st.route.screen === 'markets' ? renderMarketsScreen(st, now) : st.route.screen === 'account' ? renderAccountScreen(st, now)
-  : st.route.screen === 'channel' ? renderChannelScreen(st, now) : renderMessagesScreen(st, now));
+  : st.route.screen === 'channel' ? renderChannelScreen(st, now) : st.route.screen === 'discover' ? renderDiscover(st, now)
+  : st.route.screen === 'plugin' ? renderPlugin(st, now) : renderMessagesScreen(st, now));
 
 test('every class the screens emit has a rule in app.css, and app.css names no colour by hex', () => {
   assert.doesNotMatch(css, /#[0-9a-fA-F]{3,6}\b/, 'colours come from tokens.css');

@@ -12,7 +12,11 @@ test('parseHash and toHash round-trip; Messages and Markets route, every other s
   assert.deepEqual(parseHash('#/messages/s1'), { screen: 'messages', id: 's1' });
   assert.equal(toHash({ screen: 'messages', id: 's1' }), '#/messages/s1');
   assert.deepEqual(routeOf('#/messages/s1'), { screen: 'messages', id: 's1' });
-  assert.deepEqual(routeOf('#/discover'), { screen: 'messages', id: null });
+  assert.deepEqual(routeOf('#/discover'), { screen: 'discover', id: null });
+  assert.deepEqual(routeOf('#/discover/agents'), { screen: 'discover', id: 'agents' });
+  assert.deepEqual(routeOf('#/discover/create'), { screen: 'discover', id: 'create' });
+  assert.deepEqual(routeOf('#/plugin/agent:gravit'), { screen: 'plugin', id: 'agent:gravit' });
+  assert.deepEqual(routeOf('#/mail'), { screen: 'messages', id: null }, 'Mail folds to Messages');
   assert.deepEqual(routeOf('#/markets/us:AAPL'), { screen: 'markets', id: 'us:AAPL' });
   assert.deepEqual(routeOf('#/markets'), { screen: 'markets', id: null });
   assert.deepEqual(routeOf(''), { screen: 'messages', id: null });

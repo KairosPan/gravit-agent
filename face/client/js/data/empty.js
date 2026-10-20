@@ -21,7 +21,7 @@ export function emptyState() {
     lastSeen: {},
     // Discover from the face (host/discover.js): the four listings, the Gravit item, the skills read, its own line
     discover: {
-      query: '', installedOnly: false, create: null, toast: null,
+      query: '',
       shelves: Object.fromEntries(['plugins', 'bots', 'agents', 'memory'].map(k => [k, { status: 'idle', data: null, at: null }])),
       gravit: { host: null, model: null, keys: null }, skills: {}, status: null,
     },

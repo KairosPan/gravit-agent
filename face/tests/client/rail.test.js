@@ -28,7 +28,7 @@ test('the first level: Messages, Markets and Account on the face; no Discover, T
   assert.doesNotMatch(h, /href="\/account"/);
   assert.match(h, /account-title">Account</);
   assert.match(h, /data-action="openSettings"/, 'the theme lives behind a Settings key at the foot');
-  for (const gone of ['#/discover', '#/trade', 'phoneCall', '#/mail', 'nav-badge', 'Guard']) assert.doesNotMatch(h, new RegExp(gone), gone);
+  for (const gone of ['#/trade', 'phoneCall', '#/mail', 'nav-badge', 'Guard']) assert.doesNotMatch(h, new RegExp(gone), gone);
 });
 
 test('the Messages badge counts the conversations holding an unanswered gate', () => {
@@ -160,4 +160,13 @@ test('on a channel page the list stays beside it, Messages is current and the ch
   assert.match(h, /class="nav-item current" aria-current="page" href="#\/messages\/a"/);
   assert.match(h, /class="list"/);
   assert.match(h, /<a class="grp-name current" aria-current="page" href="#\/channel\/w0">/);
+});
+
+test('Discover is in the first level, current on Discover and on a plugin page', () => {
+  const base = listed([conv('a')]);
+  assert.match(renderNav(base), /class="nav-item" href="#\/discover"[^>]*>[\s\S]*?Discover/);
+  for (const route of [{ screen: 'discover', id: null }, { screen: 'plugin', id: 'bot:buffett' }]) {
+    assert.match(renderNav(R.nav(base, route)), /class="nav-item current" aria-current="page" href="#\/discover"/, route.screen);
+  }
+  assert.equal(renderList(R.nav(base, { screen: 'discover', id: null }), NOW), '', 'no conversation list beside Discover');
 });

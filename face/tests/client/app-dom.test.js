@@ -27,7 +27,13 @@ function host({ rows = [], pages = {}, meta = { ok: true, archived: [], deleted:
     if (endpoint === 'session/fork') { rows.push(row('s-fork', { updatedAt: 99, agentAvailable: true })); return { sessionId: 's-fork' }; }
     return undefined;
   };
-  const getJson = async path => (path === '/data/channels.json' ? { ok: true, root: '/r', channels: [...channelRows], ungrouped: [], archived: [], presets: {} } : path === '/data/sessions-meta.json' ? meta : { bots: [] });
+  const reads = [];
+  const inventory = {
+    '/data/plugins.json': { ok: true, mcp: [{ server: 'alpaca-kit', phase: 'active', tools: [] }], agentTools: [], rows: [] },
+    '/data/agents.json': { ok: true, main: { name: 'Gravit', runtime: 'dsh 0.2.0-rc.2' }, local: [], candidates: [{ bin: 'claude', label: 'Claude Code', version: '2.1' }] },
+    '/data/memory.json': { ok: true, groups: [] },
+  };
+  const getJson = async path => { reads.push(path); return path === '/data/channels.json' ? { ok: true, root: '/r', channels: [...channelRows], ungrouped: [], archived: [], presets: {} } : path === '/data/sessions-meta.json' ? meta : inventory[path] ?? { ok: true, bots: [] }; };
   const posted = [];
   const postJson = async (path, body) => {
     posted.push([path, body]);
@@ -37,9 +43,10 @@ function host({ rows = [], pages = {}, meta = { ok: true, archived: [], deleted:
     if (path === '/data/channels') { const dir = `/r/strategies/${body.name}`; channelRows.push({ workspaceId: `w-${body.name}`, name: body.name, title: body.name, dir, isRoot: false, sessionIds: [] }); return { ok: true, name: body.name, dir, isRoot: false }; }
     if (path === '/data/channels/overview') return { ok: true, channel: channelRows.find(c => c.workspaceId === body.workspaceId), status: {}, body: {}, agents: [], bots: ['buffett'], allBots: [{ id: 'buffett', name: 'Buffett' }, { id: 'drill-bear', name: 'Bear' }] };
     if (path === '/data/channels/bots') return { ok: true, bots: body.bots };
+    if (path === '/data/agents/connect') { const c = inventory['/data/agents.json'].candidates.find(a => a.bin === body.bin); inventory['/data/agents.json'] = { ...inventory['/data/agents.json'], local: [{ ...c, found: true, auth: { state: 'ok' } }], candidates: [] }; return { ok: true, agent: c }; }
     return { ok: true, addressed: [] };
   };
-  return { openMux: o => { opts = o; return mux; }, call, getJson, postJson, markdown: null, calls, posted, answered, streams, rows, ready: async () => { opts.onReady({}); await settle(); }, opts: () => opts };
+  return { openMux: o => { opts = o; return mux; }, call, getJson, postJson, markdown: null, calls, posted, answered, streams, rows, reads, ready: async () => { opts.onReady({}); await settle(); }, opts: () => opts };
 }
 const started = (f, h) => boot(f.win, { openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown });
 const send = f => f.fire('root', 'submit', { target: { closest: () => ({ dataset: { action: 'send' } }) } });
@@ -781,5 +788,36 @@ test('the bots editor posts the ticked ids', async () => {
   await settle();
   assert.deepEqual(h.posted.find(p => p[0] === '/data/channels/bots')[1], { workspaceId: 'w0', bots: ['buffett', 'drill-bear'] });
   assert.equal(store.get().edit, null);
+  store.timers.clear();
+});
+
+test('entering Discover reads the four listings once', async () => {
+  const f = fakeWindow({ hash: '' });
+  const h = host({ rows: [row('s1')] });
+  const store = started(f, h);
+  await h.ready();
+  h.reads.length = 0;
+  f.win.location.hash = '#/discover';
+  await settle();
+  assert.equal(store.get().route.screen, 'discover');
+  assert.deepEqual(h.reads.filter(p => /plugins|agents|memory|bots/.test(p)).sort(), ['/data/agents.json', '/data/bots.json', '/data/memory.json', '/data/plugins.json']);
+  assert.match(f.html(), /pcard-name">alpaca-kit</);
+  f.win.location.hash = '#/discover/agents';
+  await settle();
+  assert.equal(h.reads.filter(p => p === '/data/plugins.json').length, 1, 'moving within Discover reads nothing again');
+  store.timers.clear();
+});
+
+test('Connect on a found agent posts its bin and the shelf re-reads', async () => {
+  const f = fakeWindow({ hash: '#/plugin/agent:claude' });
+  const h = host({ rows: [row('s1')] });
+  const store = started(f, h);
+  await h.ready();
+  await settle();
+  assert.match(f.html(), /data-action="connectAgent" data-bin="claude"/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'connectAgent', bin: 'claude' } });
+  await settle();
+  assert.deepEqual(h.posted.find(p => p[0] === '/data/agents/connect')[1], { bin: 'claude' });
+  assert.match(f.html(), /data-action="disconnectAgent" data-bin="claude"/);
   store.timers.clear();
 });

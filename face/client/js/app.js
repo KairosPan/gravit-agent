@@ -18,6 +18,8 @@ import { startMarkets } from './host/markets.js';
 import { startAccount } from './host/account.js';
 import { startChannels } from './host/channels.js';
 import { renderChannelScreen } from './render/channel.js';
+import { startDiscover } from './host/discover.js';
+import { renderDiscover, renderPlugin } from './render/discover.js';
 import { statementOf, csvOf } from './host/account-view.js';
 import { canonicalId, assetFor } from './host/market-view.js';
 import { createLiveQuotes } from './wire/market-quotes.js';
@@ -92,8 +94,9 @@ export function makeStore(storage, now = Date.now()) {
   return createStore({ initial: initialState(storage, now), reducers, storage, key: PREFS_KEY, accept: () => false, persist: prefsOf });
 }
 
-// Messages (with a channel's page), Markets and Account are served; every other screen the router knows folds to Messages
-const SCREENS = new Set(['messages', 'channel', 'markets', 'account']);
+// Messages (with a channel's page), Markets, Discover (with an item's page) and Account are served; every other screen the
+// router knows folds to Messages
+const SCREENS = new Set(['messages', 'channel', 'markets', 'discover', 'plugin', 'account']);
 export const routeOf = hash => { const r = parseHash(hash); return SCREENS.has(r.screen) ? r : { screen: 'messages', id: null }; };
 // route by the address bar; a normalised route says which hash the bar should show instead
 export function settle(store, hash) {
@@ -164,6 +167,8 @@ export function boot(win, host = {}) {
   });
   // a channel's page: its overview read on entering it
   const channels = startChannels({ store, postJson, getJson, refresh: () => live.refresh(), now });
+  // Discover: the face's inventory, read on entering it; a page's own reads (the Gravit item, a skill) on opening it
+  const discover = startDiscover({ store, getJson, postJson, call, now });
   // the quotes run only while Markets is on screen in a visible tab
   const showMarkets = () => markets.show(store.get().route.screen === 'markets' && !doc.hidden);
 
@@ -199,7 +204,8 @@ export function boot(win, host = {}) {
     const scrolls = { main: root.querySelector('main')?.scrollTop, rows: root.querySelector('.rail-rows')?.scrollTop, drawer: root.querySelector('.drawer-body')?.scrollTop };
 
     const screen = s.route.screen === 'markets' ? renderMarketsScreen(s, now()) : s.route.screen === 'account' ? renderAccountScreen(s, now())
-      : s.route.screen === 'channel' ? renderChannelScreen(s, now()) : renderMessagesScreen(s, now());
+      : s.route.screen === 'channel' ? renderChannelScreen(s, now()) : s.route.screen === 'discover' ? renderDiscover(s)
+      : s.route.screen === 'plugin' ? renderPlugin(s) : renderMessagesScreen(s, now());
     root.innerHTML = renderRail(s, now()) + (s.settingsOpen ? screen.replace(/<\/main>$/, renderSettings(s) + '</main>') : screen);
 
     const sameEditor = editorOf(s.edit) === last.editor;
@@ -291,6 +297,12 @@ export function boot(win, host = {}) {
     if (r.screen === 'account' && was?.screen !== 'account') void account.load();
     if (r.screen === 'account' && r.tab === 'venues' && !(was?.screen === 'account' && was.tab === 'venues')) void account.describe();
     if (r.screen === 'channel' && !(was?.screen === 'channel' && was.id === r.id)) void channels.overview(r.id);
+    const inDiscover = route => route?.screen === 'discover' || route?.screen === 'plugin';
+    if (inDiscover(r) && !inDiscover(was)) void discover.load();
+    if (r.screen === 'plugin' && !(was?.screen === 'plugin' && was.id === r.id)) {
+      if (r.id === 'agent:gravit') void discover.gravit();
+      else if (typeof r.id === 'string' && r.id.startsWith('skill:')) void discover.skill(r.id.slice('skill:'.length));
+    }
     was = r;
     // a deep link the list does not carry yet waits for it
     if (asked.screen === 'messages' && asked.id && asked.id !== 'new' && !store.get().conversations.some(c => c.id === asked.id)) wanted = asked.id;
@@ -396,6 +408,11 @@ export function boot(win, host = {}) {
     newRound: el => { store.dispatch('startDraft', { now: now(), where: el.dataset.id }); go({ screen: 'messages', id: 'new' }); },
     channelRetry: el => { void channels.overview(el.dataset.id); },
     editRoster: el => { void editRoster(el.dataset.which, el.dataset.id); },
+    // Discover: a shelf read again, the CLI agents' three writes
+    shelfRetry: el => { void discover.read(el.dataset.shelf, { fresh: true }); },
+    connectAgent: el => { void discover.connect(el.dataset.bin); },
+    disconnectAgent: el => { void discover.disconnect(el.dataset.bin); },
+    rescanAgents: () => { void discover.rescan(); },
     cancelDraft: () => { store.dispatch('cancelDraft'); go(store.get().route); },
     toggleRail: () => store.dispatch('toggleRail'),
     toggleGroup: el => store.dispatch('toggleGroup', el.dataset.key),
@@ -499,6 +516,7 @@ export function boot(win, host = {}) {
     if (el.id === 'say') composerText = el.value;
     else if (el.dataset?.action === 'draftTitle') store.dispatch('setDraftTitle', el.value);
     else if (el.dataset?.action === 'mkQuery') { store.dispatch('setMarketsQuery', el.value); markets.search(el.value); }
+    else if (el.dataset?.action === 'dq') store.dispatch('setDiscoverQuery', el.value);
   }
   root.addEventListener('input', ev => { if (!ev.isComposing && !composing) typed(ev.target); });
   root.addEventListener('change', ev => {
@@ -556,7 +574,7 @@ export function boot(win, host = {}) {
   if (!win.location.hash) win.history.replaceState(null, '', toHash(store.get().route));
   follow();
   render();
-  return Object.assign(store, { timers, live, actions, markets, channels });
+  return Object.assign(store, { timers, live, actions, markets, channels, discover });
 }
 
 if (typeof window !== 'undefined' && window.document) boot(window);

@@ -413,6 +413,11 @@ button.toast-key { border: 0; font: inherit; font-size: 13px; }
 .plug-key { flex: none; }
 .plug-key > * { min-width: 140px; }
 .plug-body { display: flex; flex-direction: column; gap: 16px; max-width: 760px; }
+/* Discover's inventory: a shelf's state line, a tool of a server, a soul or a skill's text, a bot that cannot run */
+.disc-none { display: flex; align-items: center; gap: 10px; font-size: 13px; padding: 4px 0; }
+.tool-line { display: flex; flex-direction: column; gap: 2px; padding: 4px 0; font-size: 13px; overflow-wrap: anywhere; }
+.disc-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; background: var(--surface-2); border-radius: var(--radius-s); padding: 12px; }
+.disc-broken { color: var(--down); font-weight: 700; font-size: 13px; }
 .plug-body > .plug-blurb { font-size: 15px; color: var(--text); }
 .mk-pg { container-type: inline-size; display: flex; flex-direction: column; gap: 22px; min-width: 0; }
 .mk-pg-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }

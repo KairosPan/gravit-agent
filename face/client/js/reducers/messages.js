@@ -1,7 +1,6 @@
 // face/client/js/reducers/messages.js — the conversation side on the host (spec 2026-10-19 §5, §7): routes, the draft, Details.
 // What the host says about a conversation lives in reducers/host.js; what the operator does with the page lives here.
 import { nextId } from '../ids.js';
-import { byId } from '../data/plugins.js';
 import { canonicalId } from '../host/market-view.js';
 import { firstOpen } from '../host/sessions.js';
 import { ARCHIVED_KEY } from '../wire/grouping.js';
@@ -10,7 +9,6 @@ import { ARCHIVED_KEY } from '../wire/grouping.js';
 export const closeOverlays = s => ({
   ...s, detailsOpen: false, settingsOpen: false, edit: null, confirm: null,
   account: { ...s.account, statementOpen: false },
-  discover: { ...s.discover, create: null },
 });
 const upd = (state, id, fn) => ({ ...state, conversations: state.conversations.map(c => (c.id === id ? fn(c) : c)) });
 
@@ -29,8 +27,6 @@ export const reducers = {
     if (route.screen === 'messages' && !(route.id === 'new' && state.draft) && !state.conversations.some(c => c.id === route.id)) {
       route = { screen: 'messages', id: firstOpen(state.conversations)?.id ?? null };
     }
-    // a plugin that is not in the shop opens Discover
-    if (route.screen === 'plugin' && !byId(route.id, state.plugins.uploaded)) route = { screen: 'discover', id: null };
     // a market id is the face's (us:AAPL, crypto:BTC/USD, cn:600519), canonicalised; one that is not opens Markets
     if (route.screen === 'markets' && route.id) route = { screen: 'markets', id: canonicalId(route.id) };
     // a letter that is not in the mailbox opens the inbox
@@ -44,8 +40,6 @@ export const reducers = {
     // a plugin page goes back to the Discover view it was opened from; opened from outside Discover, to Discover itself
     if (route.screen === 'discover') s.lastDiscover = route;
     else if (route.screen === 'plugin' && state.route.screen !== 'discover' && state.route.screen !== 'plugin') s.lastDiscover = { screen: 'discover', id: null };
-    if (route.screen !== 'discover' && s.discover.create) s = { ...s, discover: { ...s.discover, create: null } };
-    if (route.screen !== 'discover' && route.screen !== 'plugin' && s.discover.toast) s = { ...s, discover: { ...s.discover, toast: null } };
     // opening a conversation reads it: the dot goes until the host moves it again
     if (route.screen === 'messages' && route.id && route.id !== 'new') {
       const c = s.conversations.find(x => x.id === route.id);
