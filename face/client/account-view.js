@@ -1,5 +1,5 @@
 /** Paper-trading-style portfolio view; all figures come from the account payload. */
-import { number, money, signedMoney, pct, sign, text, accountMode, unrealizedTotal, orderMatches } from "./account-model.js";
+import { number, money, signedMoney, pct, sign, text, accountMode, unrealizedTotal, orderMatches } from "./js/wire/account-model.js";
 
 function el(tag, cls, value) {
   const node = document.createElement(tag);

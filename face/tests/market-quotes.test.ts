@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createLiveQuotes, describeQuote, quoteConnectionLabel, quoteSource, type QuoteState } from "../client/market-quotes.js";
+import { createLiveQuotes, describeQuote, quoteConnectionLabel, quoteSource, type QuoteState } from "../client/js/wire/market-quotes.js";
 import type { LiveQuote, ProviderState, QuotePayload } from "../src/quote-types.js";
 
 const aapl = { id: "us:AAPL", market: "us", symbol: "AAPL" };

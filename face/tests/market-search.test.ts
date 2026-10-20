@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createSymbolSearch, type SearchState } from "../client/market-search.js";
+import { createSymbolSearch, type SearchState } from "../client/js/wire/market-search.js";
 
 const cn = { market: "cn", symbol: "603986", name: "兆易创新", exchange: "SSE" };
 const us = { market: "us", symbol: "AAPL", name: "Apple" };

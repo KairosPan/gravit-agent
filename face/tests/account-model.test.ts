@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   accountMode, money, number, orderMatches, pct, sign, signedMoney, text, unrealizedTotal,
-} from "../client/account-model.js";
+} from "../client/js/wire/account-model.js";
 
 test("missing and malformed broker amounts never become zero or a balance", () => {
   for (const value of [undefined, null, "", " \n ", true, false, {}, [], [3], NaN, Infinity, -Infinity, "NaN", "Infinity", "n/a"]) {

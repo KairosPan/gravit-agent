@@ -1,7 +1,7 @@
 import { normalizeAsset, number } from "./market-model.js";
 
-/** @typedef {import('../src/quote-types.ts').LiveQuote} LiveQuote */
-/** @typedef {import('../src/quote-types.ts').ProviderState} ProviderState */
+/** @typedef {import('../../../src/quote-types.ts').LiveQuote} LiveQuote */
+/** @typedef {import('../../../src/quote-types.ts').ProviderState} ProviderState */
 /** @typedef {{quotes: Record<string, LiveQuote>, providers: ProviderState[], status: 'idle'|'connecting'|'streaming'|'polling'|'error'|'paused', refreshing: boolean, generatedAt: string|null, note: string, limited: number}} QuoteState */
 /** @typedef {{addEventListener: (name: string, listener: (event: {data?: string}) => void) => void, close: () => void}} QuoteEvents */
 

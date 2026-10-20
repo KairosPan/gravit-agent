@@ -1,9 +1,9 @@
 /** Personal cross-market watchlist. Search discovers instruments on demand;
  * reference suggestions contain identities, never sample quotations. */
 import { REFERENCE_ASSETS } from "./market-catalog.js";
-import { createSymbolSearch } from "./market-search.js";
-import { createLiveQuotes, describeQuote, quoteConnectionLabel, quoteSource } from "./market-quotes.js";
-import { STORAGE_KEY, MARKET_INFO, normalizeAsset, readWatchlist, saveWatchlist, filterWatchlist, sortWatchlist, number, price, signed, percent, quoteTime } from "./market-model.js";
+import { createSymbolSearch } from "./js/wire/market-search.js";
+import { createLiveQuotes, describeQuote, quoteConnectionLabel, quoteSource } from "./js/wire/market-quotes.js";
+import { STORAGE_KEY, MARKET_INFO, normalizeAsset, readWatchlist, saveWatchlist, filterWatchlist, sortWatchlist, number, price, signed, percent, quoteTime } from "./js/wire/market-model.js";
 
 const $ = (selector) => document.querySelector(selector);
 const dialog = $("#symbol-search");
