@@ -55,7 +55,7 @@ const gated = process.env.FACE_SMOKE !== "1";
 /** The listener's refusal of `mcp__drill__place_order` from a caller that
  * cannot see it, verbatim (src/orders.ts orderApprovalDecision). */
 const HIDDEN_PLACE_ORDER =
-  "mcp__drill__place_order is not available in this session - its preset hides it - so no approval card is raised and the order does not run";
+  "mcp__drill__place_order is not available to this session - it is not registered here, or this session's preset hides it - so no approval card is raised and the order does not run";
 
 /** An empty session exactly as the REAL `ApprovalService.overrideOf` reads
  * one at dsh 0.2.0: it walks `session.seq - 1` down to 0 through
@@ -224,12 +224,16 @@ test("order gate: registered on a real tree, asks for orders, leaves everything 
      * it fires, globally: the stub agents here see the global view, and so
      * does Gravit. Nothing is behind them; each body only records, and `ran`
      * must stay empty - nothing in this file dispatches an order. Left to the
-     * tree's disposal, which takes every registration with it. */
+     * tree's disposal, which takes every registration with it. NO
+     * `(operator-gated)` marker on purpose: the listener keys on the NAME, so
+     * the renamed-server check below cannot pass on a marker match. The guard
+     * gates these by name alone (orders.ts `isGatedTool`), and the boot audit
+     * ran before they existed. */
     const ran: unknown[] = [];
     for (const name of ["mcp__drill__place_order", "mcp__drill__cancel_order", "mcp__whatever_they_call_it__place_order"]) {
       registry.register({
         name,
-        description: `place or cancel a PAPER order - drill stand-in, nothing behind it ${OPERATOR_GATED_MARKER}`,
+        description: "place or cancel a PAPER order - drill stand-in, nothing behind it",
         parameters: {
           type: "object",
           properties: { symbol: { type: "string" }, qty: { type: "number" }, side: { type: "string" }, order_id: { type: "string" } },
@@ -402,6 +406,23 @@ test("order gate: registered on a real tree, asks for orders, leaves everything 
         assert.deepEqual(cards, [{ toolName: NAME, callId: "drill-gravit-visible" }], "exactly one card was raised: Gravit's");
         assert.ok(gravit.session.snapshotEvents().some((event) =>
           event.type === "approval/asked" && event.data?.callId === "drill-gravit-visible"), "and it is in Gravit's log");
+
+        /* THE DEFAULT CONFIGURATION: Gate 1 closed, so no order tool is
+         * registered at all, and Gravit's model names one anyway. "Not
+         * registered here" is the sentence's first cause: refused the same
+         * way, with no card that could never dispatch. */
+        const unregistered = "mcp__nowhere__place_order";
+        assert.equal(registry.get(unregistered, gravit), undefined, "nothing registers it");
+        gravit.session.append("turn/start", { turn: 2 });
+        const unseen = await registry.execute({
+          callId: "drill-gravit-unregistered", name: unregistered, arguments: ORDER, agent: gravit, signal: new AbortController().signal,
+        });
+        gravit.session.append("turn/end", { turn: 2, reason: { kind: "completed" } });
+        assert.equal(unseen.content?.[0]?.text,
+          "Error: mcp__nowhere__place_order is not available to this session - it is not registered here, or this session's preset hides it - so no approval card is raised and the order does not run");
+        assert.equal(cards.length, 1, "no second card: Gravit's visible order raised the only one");
+        assert.equal(gravit.session.snapshotEvents().some((event) =>
+          event.type === "approval/asked" && event.data?.callId === "drill-gravit-unregistered"), false);
         assert.deepEqual(ran, [], "no order body ran in this file");
       } finally {
         offCards();

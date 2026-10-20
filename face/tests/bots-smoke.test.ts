@@ -246,7 +246,7 @@ test("bots smoke: roster, mask, persona, a default that masks nothing, the shipp
          * approved, would fail `unknown tool` at dispatch (spike 3). */
         assert.deepEqual(await fire(probe, "bot-hidden"), {
           kind: "deny",
-          reason: "mcp__drill__place_order is not available in this session - its preset hides it - so no approval card is raised and the order does not run",
+          reason: "mcp__drill__place_order is not available to this session - it is not registered here, or this session's preset hides it - so no approval card is raised and the order does not run",
         }, "an order from a bot that cannot see the tool raises no card");
         assert.equal(bodyRan, false, "no stand-in body ever runs");
       } finally {

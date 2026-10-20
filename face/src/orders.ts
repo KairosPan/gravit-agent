@@ -118,13 +118,18 @@ export function effectiveApprovalPolicy(
  * runtime switch to the `danger-full-access` preset.
  *
  * An order tool the calling scope cannot SEE is denied first, before the
- * policy. Spike 3 measured that dsh runs the `tools/pre-execute` waterfall
- * before it resolves visibility (dsh-tools `prepareExecution`, and only then
- * `dispatchToolBody`'s `ToolNotFoundError`), so a session whose preset masks
- * the tool - the desk, a bot - still reaches this gate when its model names
- * one. Asking there raises a card that can only park with no browser, and an
- * approved call would then fail `unknown tool` at dispatch; under `never` the
- * policy sentence would send the operator to a setting that cannot help.
+ * policy - whether it is not registered in this tree at all or this
+ * session's preset hides it. Spike 3 measured that dsh runs the
+ * `tools/pre-execute` waterfall before it resolves visibility (dsh-tools
+ * `prepareExecution`, and only then `dispatchToolBody`'s `ToolNotFoundError`),
+ * so a model that names such a tool still reaches this gate: the desk's or a
+ * bot's masked one, and in the default configuration - Gate 1 closed, no
+ * order tool registered - Gravit's too. Asking there would raise a card that
+ * can only park with no browser, and an approved call would then fail
+ * `unknown tool` at dispatch. Denying instead means an unregistered order
+ * tool called from Gravit no longer raises a card that could never dispatch,
+ * and under `never` no policy sentence sends the operator to a setting that
+ * cannot help.
  * @param name - the registered tool name (`exec.name`).
  * @param policy - the session's effective approval policy.
  * @param args - `exec.arguments`, rendered onto the card so the human can decide.
@@ -143,7 +148,7 @@ export function orderApprovalDecision(
   if (!visible) {
     return {
       kind: "deny",
-      reason: `${name} is not available in this session - its preset hides it - so no approval card is raised and the order does not run`,
+      reason: `${name} is not available to this session - it is not registered here, or this session's preset hides it - so no approval card is raised and the order does not run`,
     };
   }
   if (policy === "never") {

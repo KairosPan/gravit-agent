@@ -357,7 +357,7 @@ test("orderGuardReasonForSession: a drifted Session API never bricks a tool the 
 
 test("a hidden order tool is denied in the gate's own words, before the policy", () => {
   const d = orderApprovalDecision("mcp__alpaca-kit__place_order", "ask", { side: "buy" }, false);
-  assert.deepEqual(d, { kind: "deny", reason: "mcp__alpaca-kit__place_order is not available in this session - its preset hides it - so no approval card is raised and the order does not run" });
+  assert.deepEqual(d, { kind: "deny", reason: "mcp__alpaca-kit__place_order is not available to this session - it is not registered here, or this session's preset hides it - so no approval card is raised and the order does not run" });
   assert.equal(orderApprovalDecision("mcp__alpaca-kit__place_order", "ask", { side: "buy" }, true)?.kind, "ask");
   assert.equal(orderApprovalDecision("bash", "ask", {}, false), null);
 });
@@ -369,7 +369,7 @@ test("orderApprovalDecision: a hidden order tool under policy `never` gets the h
   for (const name of ["mcp__alpaca-kit__place_order", "mcp__alpaca-kit__cancel_order"]) {
     assert.deepEqual(orderApprovalDecision(name, "never", undefined, false), {
       kind: "deny",
-      reason: `${name} is not available in this session - its preset hides it - so no approval card is raised and the order does not run`,
+      reason: `${name} is not available to this session - it is not registered here, or this session's preset hides it - so no approval card is raised and the order does not run`,
     }, name);
   }
   /* A VISIBLE tool keeps both of today's answers, and `visible` defaults to true, so a caller

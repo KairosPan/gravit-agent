@@ -713,13 +713,18 @@ interface GateEventsLike {
  * to the front.)
  *
  * VISIBILITY. The listener denies an order tool the CALLING scope cannot see
- * (`tools.get(exec.name, exec.agent)` is `undefined`) instead of asking. Spike
- * 3 measured that dsh runs `tools/pre-execute` before it resolves visibility,
- * so a desk or masked-bot model that named a hidden order tool raised a card
- * that could only park, and an approved one would then fail `unknown tool` at
- * dispatch. The listener reads `tools` lazily, from its own context at call
- * time; `tools` is not in its inject list, so its arming and re-arming above
- * are unchanged, and while no registry is live it decides as before.
+ * (`tools.get(exec.name, exec.agent)` is `undefined`: the tool is not
+ * registered here, or the session's preset hides it) instead of asking.
+ * Spike 3 measured that dsh runs `tools/pre-execute` before it resolves
+ * visibility, so a desk or masked-bot model that named a hidden order tool
+ * raised a card that could only park, and an approved one would then fail
+ * `unknown tool` at dispatch. The same held for Gravit in the default
+ * configuration, where Gate 1 is closed and no order tool is registered: an
+ * unregistered order tool called from Gravit no longer raises a card that
+ * could never dispatch. The listener reads `tools` lazily, from its own
+ * context at call time; `tools` is not in its inject list, so its arming and
+ * re-arming above are unchanged, and while no registry is live it decides as
+ * before.
  * @param hostCtx - the root context `boot()` hands `prepare`.
  * @returns the two fibers, for {@link assertOrderGateArmed} once `boot()` settles.
  */
