@@ -76,7 +76,14 @@ function body(m, conv) {
 }
 
 export function renderMessage(m, conv, state) {
-  if (m.from === 'system') return `<div class="sysline">${esc(m.text)}</div>`;
+  // a producer-sourced user record (a runtime snapshot, a plugin notice, a member's delta) is context, folded away under its source;
+  // a line the page itself writes (a round end, a child's report) stays a centred line
+  if (m.from === 'system') {
+    const source = typeof m.data?.source === 'string' && m.data.source !== '' ? m.data.source : null;
+    return source
+      ? `<details class="sysline ctx"><summary>context · ${esc(source)}</summary><pre>${esc(m.text)}</pre></details>`
+      : `<div class="sysline">${esc(m.text)}</div>`;
+  }
   if (m.from === 'you') {
     const files = (m.data?.files ?? []).map(n => `<span class="file-chip">${icon('file', 13, 2)}${esc(n)}</span>`).join('');
     return `<div class="msg you"><div class="bubble you">${files}${m.text ? esc(m.text) : ''}</div>${avatar('you', 28)}</div>`;

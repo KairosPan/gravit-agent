@@ -19,6 +19,13 @@ test("the operator's words are a blue bubble on the right, Gravit's a grey one o
   assert.equal(renderMessage(msg({ from: 'system', text: 'round 1 · settled' }), conv(), state), '<div class="sysline">round 1 · settled</div>');
 });
 
+test('an injected context row (a system message with a source) is a collapsed details headed by its source; a room line stays a centred line', () => {
+  const ctx = renderMessage(msg({ from: 'system', text: 'AGENTS.md changed on disk.\n<system-reminder>…</system-reminder>', data: { source: 'plugin:fs-observation' } }), conv(), state);
+  assert.match(ctx, /^<details class="sysline ctx"><summary>context · plugin:fs-observation<\/summary><pre>AGENTS\.md changed on disk\.\n&lt;system-reminder&gt;…&lt;\/system-reminder&gt;<\/pre><\/details>$/);
+  assert.doesNotMatch(ctx, /open/, 'closed until the operator opens it');
+  assert.equal(renderMessage(msg({ from: 'system', text: 'round 1 · settled', data: {} }), conv(), state), '<div class="sysline">round 1 · settled</div>');
+});
+
 test("a bot's words in a group carry the sender's name from the message", () => {
   const html = renderMessage(msg({ from: 'buffett', text: '买。', data: { name: '巴菲特型' } }), conv({ kind: 'group', members: ['gravit', 'buffett'] }), state);
   assert.match(html, /sender-name">巴菲特型</);

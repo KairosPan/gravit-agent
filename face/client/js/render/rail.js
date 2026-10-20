@@ -13,10 +13,11 @@ export function senderName(from, state) {
   return NAME[from] ?? state?.bots?.find(b => b.id === from)?.name ?? from;
 }
 
-// the host's one-message page fills `preview`; until it lands, the last message drawn stands in
+// the host's one-message page fills `preview`; until it lands, the last SPOKEN line drawn stands in —
+// never a context row (a runtime snapshot, a plugin notice) or a tool row
 export function previewOf(conv, state = null) {
   if (typeof conv.preview === 'string' && conv.preview !== '') return conv.preview;
-  const m = conv.messages.at(-1);
+  const m = conv.messages.findLast(x => x.from !== 'system' && x.kind !== 'tool' && typeof x.text === 'string' && x.text !== '');
   if (!m) return '';
   const who = m.from === 'you' ? '' : senderName(m.from, state);
   const name = m.data?.name ?? who;

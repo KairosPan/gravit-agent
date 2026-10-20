@@ -58,6 +58,15 @@ test('a row: the title, the time of the last activity, the preview, the unread d
   assert.equal(count(renderList(unread, NOW), /class="dot on"/g), 1, 'b moved after the operator last looked');
 });
 
+test("a row's fallback preview is the last SPOKEN line: a context row (a runtime snapshot) or a tool row never stands in", () => {
+  const c = conv('c', { messages: [
+    { id: 'e1', seq: 1, at: NOW, from: 'you', kind: 'text', text: 'Which bed?', data: {} },
+    { id: 'tc1', seq: 2, at: NOW, from: 'gravit', kind: 'tool', text: 'bash', data: { callId: 'c1' } },
+    { id: 'e3', seq: 3, at: NOW, from: 'system', kind: 'text', text: 'Current runtime context…', data: { source: 'runtime-context' } },
+  ] });
+  assert.equal(previewOf(c), 'Which bed?');
+});
+
 test("a row's preview falls back to the last message's words, and a row with nothing says nothing", () => {
   const s = listed([conv('a', { messages: [{ id: 'e1', seq: 1, at: NOW, from: 'gravit', kind: 'text', text: 'Both pivots hold.', data: {} }] }), conv('b')]);
   const h = renderList(s, NOW);

@@ -68,6 +68,13 @@ test('the tool row, the question card and the thinking row have their rules', ()
   }
 });
 
+test('every token app.css reads is declared: a var(--x) nobody defines falls back to inherit and the rule silently does nothing', async () => {
+  const tokens = await readFile(new URL('../../client/css/tokens.css', import.meta.url), 'utf8');
+  const declared = new Set((tokens + css).match(/--[\w-]+(?=\s*:)/g));
+  const read = new Set(css.match(/var\(\s*(--[\w-]+)/g).map(x => x.replace(/var\(\s*/, '')));
+  assert.deepEqual([...read].filter(t => !declared.has(t)), [], 'tokens read but never declared');
+});
+
 test('app.css is well formed: braces never close more than they opened, so no rule is swallowed', () => {
   let depth = 0;
   for (const ch of css) {

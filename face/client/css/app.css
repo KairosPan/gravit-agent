@@ -147,6 +147,12 @@ button.link:disabled { color: var(--dim); cursor: default; }
 .thread { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 6px; padding: 18px 28px 22px; overflow-y: auto; }
 .divider { text-align: center; font-size: 11px; font-weight: 600; color: var(--dim); padding: 4px 0 8px; }
 .sysline { text-align: center; font-size: 11px; color: var(--dim); padding: 4px 0; }
+/* an injected context row folds away under its source; opened, it reads as the record it is */
+.sysline.ctx summary { cursor: pointer; list-style: none; }
+.sysline.ctx summary::-webkit-details-marker { display: none; }
+.sysline.ctx summary::before { content: '› '; font-weight: 700; }
+.sysline.ctx[open] summary::before { content: '⌄ '; }
+.sysline.ctx pre { text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; margin: 6px 0 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--surface); font: 11px/1.5 var(--font-mono); color: var(--text); }
 .msg { display: flex; align-items: flex-end; gap: 8px; }
 .msg.you { justify-content: flex-end; }
 .msg.left { flex-direction: column; align-items: stretch; gap: 2px; }
@@ -181,8 +187,8 @@ button.link:disabled { color: var(--dim); cursor: default; }
 .tool summary::-webkit-details-marker { display: none; }
 .tool summary::before { content: '›'; color: var(--dim); font-weight: 700; transition: transform 120ms; }
 .tool[open] summary::before { transform: rotate(90deg); }
-.tool-name { font-family: var(--mono); font-size: 12.5px; overflow-wrap: anywhere; }
-.tool pre { margin: 0; padding: 8px 12px 12px; border-top: 1px solid var(--border); font-family: var(--mono); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; }
+.tool-name { font-family: var(--font-mono); font-size: 12.5px; overflow-wrap: anywhere; }
+.tool pre { margin: 0; padding: 8px 12px 12px; border-top: 1px solid var(--border); font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; }
 .tool.danger { border-color: var(--down-edge); }
 .tool.danger pre { color: var(--down); }
 /* a question batch: one block per question, inputs named by its id, one Answer key */

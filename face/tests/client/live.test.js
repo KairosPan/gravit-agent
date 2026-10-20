@@ -227,6 +227,14 @@ test('previews: the first rows get one non-activating page of one message each',
   assert.equal(r.store.get().conversations[PREVIEW_ROWS + 1].preview, null);
 });
 
+test('previews: the last SPOKEN line, never an injected context row (a plugin notice, a runtime snapshot)', async () => {
+  // frames[13] is a user-role record from plugin:fs-observation — a context row in the thread, not words anyone said
+  const r = rig({ rows: [row('p1')], pages: { p1: [fixture(1), fixture(13)] } });
+  await r.ready();
+  await settle(); await settle();
+  assert.equal(r.store.get().conversations[0].preview, 'Both pivots are technically valid.');
+});
+
 test('opening marks the conversation seen; the list keeps the open one seen when its activity moves', async () => {
   const r = rig({ rows: [row('s1', { updatedAt: 50 })] });
   await r.ready();
