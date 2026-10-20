@@ -62,16 +62,18 @@ test("deskPresetDefinition: the gravit row carries only the desk text; the mask 
 
 test("DESK_ALLOW names no order, approval, goal, delegation or A-share tool", () => {
   for (const banned of ["place_order", "cancel_order", "orders", "account", "positions", "ask_user_question", "create_goal",
-    "get_goal", "update_goal", "subagent", "subagent_fork", "send_message", "interrupt_agent", "list_agents", "ralph", "workflow", "akshare", "dispatch", "agent_"])
+    "get_goal", "update_goal", "subagent", "subagent_fork", "send_message", "interrupt_agent", "list_agents", "ralph", "workflow", "akshare", "dispatch", "agent_",
+    "bash", "job_"])
     assert.ok(DESK_ALLOW.every((name) => !name.includes(banned)), banned);
 });
 
-/* The plan's Global Constraints list, verbatim and in its order: the mask a desk session lives under is a
- * B2 boundary, so a name added or dropped is a decision to see in a diff, never a drift. */
-test("DESK_ALLOW is the plan's list exactly, in its order, and cannot be changed at run time", () => {
+/* The plan's Global Constraints list, verbatim and in its order. Every name reaches every unattended desk
+ * turn, and the desk reads text it does not control, so the list is pinned name for name: a shell (`bash`,
+ * or the `job_*` tools that serve its background jobs) beside readable key files and an open network would
+ * be an exfiltration path, and a later edit must not add one back quietly. */
+test("DESK_ALLOW is exactly the plan's 14 names, in order - no shell, no job tools - and cannot be changed at run time", () => {
   assert.deepEqual([...DESK_ALLOW], [
-    "bash", "read", "write", "edit", "read_image", "glob", "grep", "str_replace_editor", "skill", "web_search",
-    "todo_write", "job_output", "job_list", "job_kill",
+    "read", "write", "edit", "read_image", "glob", "grep", "str_replace_editor", "skill", "web_search", "todo_write",
     "mcp__*__earnings", "mcp__*__daily_bars", "mcp__*__calendar", "mcp__*__corp_actions",
   ]);
   assert.equal(Object.isFrozen(DESK_ALLOW), true);

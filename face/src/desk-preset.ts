@@ -12,6 +12,11 @@
  *   registers no persona section, so the deployment's global persona prefix - Gravit's - stays; the desk
  *   sees {@link DESK_ALLOW} ∩ the tree, re-expanded after every tool change exactly as a bot's mask is.
  *
+ * NO SHELL. The desk runs unattended on text it does not control (web results, filings, forwarded
+ * messages), and with a shell an injected turn could read the repository's and the harness home's key
+ * files and send them to any host - an exfiltration path. So {@link DESK_ALLOW} names neither `bash` nor
+ * the `job_*` tools, which serve only background shell jobs; the face runs the desk's producers itself.
+ *
  * The two desk tools, `desk_quotes` and `desk_state`, are not in this composition. An allow mask filters
  * what the preset's own layer registers too, and `tools.restrict` refuses to name such a tool, so a row
  * here could not offer them past the mask; they are registered into each desk agent's own layer instead,
@@ -46,16 +51,18 @@ const messageOf = (error: unknown): string => error instanceof Error ? error.mes
  * imports src/roles.ts, which imports src/bots.ts (tests/bots.test.ts ties the two spellings). */
 export const DESK_PRESET = "gravit-desk";
 
-/** What a desk session may see, in this order (the plan's Global Constraints): the shell, file read and
- * edit, search, skills, web search, its own todos, the background jobs a long `bash` command becomes,
- * and the live market reads of the alpaca-kit MCP server under whatever name the operator mounts it
- * (`mcp__*__<raw>`, expanded by plugins/bot.js). Absent by design: every order and account tool, the
+/** What a desk session may see, in this order (the plan's Global Constraints): file read and edit,
+ * search, skills, web search, its own todos, and the live market reads of the alpaca-kit MCP server
+ * under whatever name the operator mounts it (`mcp__*__<raw>`, expanded by plugins/bot.js). Writes stay:
+ * the session's sandbox confines them to `desk/journal/`, and the face's instruction-chain fence (the
+ * plan's Global Constraints) refuses a desk turn while an instruction file sits there. Absent by design:
+ * the shell and its background-job tools (NO SHELL, in the header), every order and account tool, the
  * question tool, goals, delegation (`subagent*`, `send_message`, `interrupt_agent`, `list_agents`,
  * `workflow`, `ralph`, the room's `dispatch`, every `agent_<bin>`), the AKShare tools, and the bed-backed
- * reads (`market_snapshot`, `screen`, `breadth`). Frozen: it is the B2 boundary of every desk session. */
+ * reads (`market_snapshot`, `screen`, `breadth`). Frozen, and pinned name for name by
+ * tests/desk-preset.test.ts: whatever is added here reaches every unattended desk turn. */
 export const DESK_ALLOW: readonly string[] = Object.freeze([
-  "bash", "read", "write", "edit", "read_image", "glob", "grep", "str_replace_editor", "skill", "web_search",
-  "todo_write", "job_output", "job_list", "job_kill",
+  "read", "write", "edit", "read_image", "glob", "grep", "str_replace_editor", "skill", "web_search", "todo_write",
   "mcp__*__earnings", "mcp__*__daily_bars", "mcp__*__calendar", "mcp__*__corp_actions",
 ]);
 
