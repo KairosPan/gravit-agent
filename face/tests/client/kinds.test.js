@@ -45,6 +45,9 @@ test("Gravit's words are a text message flagged for markdown, the bot's words ca
   assert.equal(g.data.markdown, true);
   const b = one(21);
   assert.equal(b.from, 'buffett'); assert.equal(b.kind, 'text'); assert.equal(b.data.name, '巴菲特型'); assert.equal(b.text, '买。理由：便宜。');
+  // a member writes the same markdown Gravit does (news-scout's sources are [name](url) links): drawn as markdown
+  // in a room as in its home session, as the old client drew it
+  assert.equal(b.data.markdown, true);
 });
 
 test("in a bot's home session Gravit's role speaks as the bot", () => {
