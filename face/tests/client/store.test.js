@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createStore } from '../../client/js/store.js';
-import { levelOf, needsAnswer, message, LEVELS } from '../../client/js/messages.js';
+import { levelOf, needsAnswer, LEVELS } from '../../client/js/messages.js';
 
 function fakeStorage(initial = {}) {
   const m = new Map(Object.entries(initial));
@@ -55,18 +55,15 @@ test('reset replaces the state and notifies with type reset', () => {
   assert.deepEqual(last, [9, 'reset']);
 });
 
-test('the message model: levels by kind, what needs an answer', () => {
-  assert.equal(levelOf(message('gravit', 'text', 'hi')), 'grey');
-  assert.equal(levelOf(message('gravit', 'card', 'x')), 'orange');
-  assert.equal(levelOf(message('gravit', 'refusal', 'x')), 'red');
-  assert.equal(levelOf(message('gravit', 'receipt', 'x')), 'green');
-  assert.equal(levelOf(message('gravit', 'brief', 'x')), 'white');
-  assert.equal(LEVELS.call, 'red');
-  assert.equal(levelOf(message('gravit', 'alert', 'x')), 'red');
-  assert.equal(needsAnswer(message('gravit', 'card', 'x')), true);
-  assert.equal(needsAnswer({ ...message('gravit', 'card', 'x'), answer: 'approved' }), false);
-  assert.equal(needsAnswer(message('gravit', 'text', 'x')), false);
-  assert.deepEqual(message('you', 'text', 'hi'), { from: 'you', kind: 'text', text: 'hi', data: {} });
+test("the message model: levels by the host's kinds, what needs an answer", () => {
+  const m = kind => ({ from: 'gravit', kind, text: 'x', data: {} });
+  assert.equal(levelOf(m('text')), 'grey'); assert.equal(levelOf(m('tool')), 'grey');
+  for (const k of ['card', 'approval', 'question']) { assert.equal(levelOf(m(k)), 'orange', k); assert.equal(needsAnswer(m(k)), true, k); }
+  assert.equal(levelOf(m('refusal')), 'red'); assert.equal(levelOf(m('receipt')), 'green');
+  assert.equal(levelOf(m('brief')), 'grey', 'a demo kind has no level of its own');
+  assert.deepEqual(Object.keys(LEVELS).sort(), ['approval', 'card', 'question', 'receipt', 'refusal', 'text', 'tool']);
+  assert.equal(needsAnswer({ ...m('card'), answer: 'approved' }), false);
+  assert.equal(needsAnswer(m('text')), false);
 });
 
 test('save writes only when what it persists changed: a quote tick rewrites no prefs', () => {

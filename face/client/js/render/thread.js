@@ -10,7 +10,7 @@ import { senderName } from './rail.js';
 export const chip = (text, tone = 'grey') => `<span class="${cls('chip', tone)}">${esc(text)}</span>`;
 
 export function key(type, label, data = {}) {
-  const glyph = { yes: 'check', no: 'x', plus: 'plus' }[type];
+  const glyph = { yes: 'check', no: 'x' }[type];
   return `<button type="button"${attrs({ class: `key ${type}`, 'aria-label': label, ...data })}>${icon(glyph, 14, 2.4)}</button>`;
 }
 
@@ -90,10 +90,7 @@ export function renderMessage(m, conv, state) {
       ? `<details class="sysline ctx"><summary>context · ${esc(source)}</summary><pre>${esc(m.text)}</pre></details>`
       : `<div class="sysline">${esc(m.text)}</div>`;
   }
-  if (m.from === 'you') {
-    const files = (m.data?.files ?? []).map(n => `<span class="file-chip">${icon('file', 13, 2)}${esc(n)}</span>`).join('');
-    return `<div class="msg you"><div class="bubble you">${files}${m.text ? esc(m.text) : ''}</div>${avatar('you', 28)}</div>`;
-  }
+  if (m.from === 'you') return `<div class="msg you"><div class="bubble you">${m.text ? esc(m.text) : ''}</div>${avatar('you', 28)}</div>`;
   const name = conv.kind === 'group' && m.from !== 'gravit' ? `<div class="sender-name">${esc(m.data?.name ?? senderName(m.from, state))}</div>` : '';
   // plain talk keeps a bubble's width; every card, tool row and green bubble runs wider (spec §16)
   const wide = m.kind !== 'text';

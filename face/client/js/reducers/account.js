@@ -1,9 +1,7 @@
 // face/client/js/reducers/account.js — Account on the face: what host/account.js brings in, the Statement drawer, the
-// Settings drawer; and Memory, which Discover's Like shelf still reads until stage 3
+// Settings drawer
 import { closeOverlays } from './messages.js';
-import { nextId } from '../ids.js';
 
-const mem = (s, patch) => ({ ...s, memory: { ...s.memory, ...patch } });
 const acc = (s, patch) => ({ ...s, account: { ...s.account, ...patch } });
 
 export const reducers = {
@@ -21,14 +19,4 @@ export const reducers = {
 
   openSettings: s => ({ ...closeOverlays(s), settingsOpen: true }),
   closeSettings: s => ({ ...s, settingsOpen: false, edit: null, confirm: null }),
-  addMemory(s, { text, now }) {
-    const t = (text ?? '').trim();
-    if (!t) return s;
-    const { id, counters } = nextId(s.counters, 'mem');
-    return { ...mem(s, { entries: [...s.memory.entries, { id, group: 'Added by you', text: t, source: 'You said', at: now }] }), counters };
-  },
-  editMemory: (s, { id, text }) => mem(s, { entries: s.memory.entries.map(e => (e.id === id ? { ...e, text: (text ?? '').trim() || e.text } : e)) }),
-  forgetMemory: (s, id) => mem(s, { entries: s.memory.entries.filter(e => e.id !== id) }),
-  forgetAll: s => mem(s, { entries: [] }),
-  setMemorySwitch: (s, { key, value }) => (['remember', 'askFirst', 'botsRead'].includes(key) ? mem(s, { [key]: !!value }) : s),
 };

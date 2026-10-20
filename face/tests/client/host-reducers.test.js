@@ -20,8 +20,8 @@ test('the empty state has no conversations, a connecting status line and the sha
   assert.deepEqual(s.orphanGates, {}); assert.deepEqual(s.lastSeen, {}); assert.deepEqual(s.channels, []);
   assert.deepEqual(s.route, { screen: 'messages', id: null }); assert.equal(s.theme, 'system'); assert.equal(s.draft, null);
   assert.equal(s.counters, undefined);
-  assert.deepEqual(s.plugins, { installed: [], mine: [], uploaded: [] }); assert.deepEqual(s.mail.items, []); assert.equal(s.discover.query, '');
-  assert.deepEqual(s.compose, { files: [], listening: false });
+  assert.equal(s.discover.query, ''); assert.deepEqual(s.discover.shelves.bots, { status: 'idle', data: null, at: null });
+  assert.deepEqual(s.channel, { id: null, status: 'idle', data: null, at: null }); assert.deepEqual(s.childRows, []); assert.deepEqual(s.collapsed, {});
 });
 
 test('hostStatus merges the line, the flag and the connection', () => {

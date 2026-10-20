@@ -2,7 +2,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { MIN, HOUR, DAY, fmtClock, rowTime, divider, fmtDate, sameDay } from '../../client/js/time.js';
-import { nextId } from '../../client/js/ids.js';
 
 const NOW = new Date(2026, 9, 9, 14, 7).getTime(); // Oct 9 2026 14:07 local
 
@@ -32,16 +31,6 @@ test('fmtDate is Mon D', () => {
   assert.equal(fmtDate(NOW + 6 * DAY), 'Oct 15');
 });
 
-test('nextId formats by kind and never mutates the counters it was given', () => {
-  const c0 = { intent: 3 };
-  const a = nextId(c0, 'intent');
-  assert.equal(a.id, 'intent-0004');
-  assert.deepEqual(c0, { intent: 3 });
-  const b = nextId(a.counters, 'ord');
-  assert.equal(b.id, 'ord-0001');
-  assert.equal(nextId(b.counters, 'ledger').id, '#1');
-  assert.equal(nextId({ ledger: 41 }, 'ledger').id, '#42');
-  assert.equal(nextId({}, 'msg').id, 'm-1');
-  assert.equal(nextId({ conv: 4 }, 'conv').id, 'c-5');
+test('an hour is sixty minutes', () => {
   assert.equal(HOUR, 60 * MIN);
 });

@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { renderRail } from '../../client/js/render/rail.js';
 import { renderMessagesScreen } from '../../client/js/render/messages.js';
 import { renderMarketsScreen } from '../../client/js/render/markets.js';
@@ -29,6 +30,7 @@ const KINDS = [
   m('ev-4', { kind: 'card', text: 'Done', answer: 'elsewhere', data: { eventId: 'ev-4', sessionId: 's1' } }),
   m('rc1', { kind: 'receipt', text: 'Order accepted', data: {} }), m('rc2', { kind: 'refusal', text: 'no', data: { code: 'E1' } }),
   m('e9', { from: 'buffett', text: '买', data: { name: '巴菲特型' } }),
+  m('e10', { from: 'system', text: 'runtime snapshot', data: { source: 'runtime' } }),
 ];
 
 const asset = (id, over = {}) => ({ id, market: id.slice(0, id.indexOf(':')), symbol: id.slice(id.indexOf(':') + 1), name: id.slice(id.indexOf(':') + 1), exchange: 'NASDAQ', currency: id.startsWith('cn:') ? 'CNY' : 'USD', ...over });
@@ -58,7 +60,7 @@ function marketStates() {
 function accountStates() {
   const on = R.nav(emptyState(), { screen: 'account', tab: 'portfolio' });
   const data = { ok: true, available: true, host: 'paper-api.alpaca.markets', account: { equity: '1000', last_equity: '990', cash: '400', currency: 'USD' },
-    positions: [{ symbol: 'AAPL', asset_class: 'us_equity', qty: '5', market_value: '600', change_today: '0.01' }, { symbol: 'X', asset_class: 'us_option', qty: '1', market_value: '0', change_today: null }],
+    positions: [{ symbol: 'AAPL', asset_class: 'us_equity', qty: '5', market_value: '600', change_today: '0.01' }, { symbol: 'X', asset_class: 'us_option', qty: '1', market_value: '50', change_today: null }, { symbol: 'BTCUSD', asset_class: 'crypto', qty: '0.001', market_value: '100', change_today: '-0.02' }],
     orders: [{ id: 'o1', symbol: 'AAPL', side: 'buy', qty: '1', filled_qty: '1', filled_avg_price: '10', type: 'market', status: 'filled', submitted_at: '2026-10-18T14:00:00Z', filled_at: '2026-10-18T14:00:00Z' }, { id: 'o2', symbol: 'AAPL', side: 'buy', qty: '1', filled_qty: '0', type: 'limit', limit_price: '9', status: 'new', submitted_at: '2026-10-18T14:00:00Z' }],
     generated_at: '2026-10-19T14:00:00Z', stale: true };
   const keyed = R.accountLoaded(on, { data, at: NOW });
@@ -100,12 +102,13 @@ function discoverStates() {
     R.discoverStatus(at({ screen: 'discover', id: null }), { line: 'connect: binary did not answer on this machine', bad: true }),
     R.modelsLoaded(R.startEdit(page('bot:buffett'), { kind: 'bot', id: 'buffett' }), { choices: [{ value: 'deepseek/deepseek-chat', label: 'DeepSeek · Chat' }] }),
     R.modelsLoaded(at({ screen: 'discover', id: 'create' }), { choices: [] }),
+    R.shelfLoaded(page('bot:buffett'), { shelf: 'bots', data: { ok: true, bots: [{ ...listings().bots.data.bots[1], broken: 'cannot mount' }] }, at: 2 }),
   ];
 }
 
 // the states stage 1 can show: empty, a conversation with every kind, a group thinking, Details, Settings, a draft, a bad status, the rail folded
 function everyState() {
-  const base = R.hostList(emptyState(), { conversations: [conv('s1', { messages: KINDS, running: true, usage: { tokenUsage: { outputTokens: 1 }, contextPressure: 0.5 }, created: NOW }), conv('g', { kind: 'group', members: ['gravit', 'buffett'], thinking: 'text' })], channels: [{ workspaceId: 'w0', name: 'workbench', isRoot: true }], bots: [{ id: 'buffett', name: 'Buffett Type' }] });
+  const base = R.hostList(emptyState(), { conversations: [conv('s1', { messages: KINDS, running: true, usage: { tokenUsage: { outputTokens: 1 }, contextPressure: 0.5 }, created: NOW }), conv('g', { kind: 'group', members: ['gravit', 'buffett'], thinking: 'text', messages: [m('g1', { from: 'buffett', text: 'hold', data: { name: 'Buffett Type', markdown: true } })] })], channels: [{ workspaceId: 'w0', name: 'workbench', isRoot: true }], bots: [{ id: 'buffett', name: 'Buffett Type' }] });
   const open = R.nav(base, { screen: 'messages', id: 's1' });
   return [
     emptyState(), open, R.nav(base, { screen: 'messages', id: 'g' }), R.toggleDetails(open), R.askConfirm(R.toggleDetails(open), { action: 'stopGravit', id: 's1' }),
@@ -129,6 +132,17 @@ test('every class the screens emit has a rule in app.css, and app.css names no c
   assert.match(css, /--rail/);
   assert.match(css, /\.key\.yes[^{]*\{[^}]*color: var\(--up\)/);
   assert.match(css, /\.key\.no[^{]*\{[^}]*color: var\(--down\)/);
+});
+
+test('every class app.css styles is emitted by some screen: no rule outlives the screen it styled', () => {
+  setMarkdown(null);
+  const sample = '# H1\n\n## H\n\n### H3\n\n#### H4\n\n**b** `c` [l](https://x.test)\n\n- a\n\n> q\n\n---\n\n```\nx\n```\n\n| s | c |\n|---|---|\n| A | +1% |\n| B | -1% |';
+  const page = readFileSync(new URL('../../client/index.html', import.meta.url), 'utf8');
+  const html = page + everyState().map(st => renderRail(st, NOW) + screenOf(st, NOW) + (st.settingsOpen ? renderSettings(st) : '')).join('') +
+    withMiniDocument(() => renderMarkdown(sample).node.outerHTML);
+  const emitted = new Set(html.match(/class="([^"]+)"/g).flatMap(x => x.slice(7, -1).split(/\s+/)));
+  const styled = new Set([...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/\.([a-zA-Z][\w-]*)/g)].map(m => m[1]));
+  assert.deepEqual([...styled].filter(c => !emitted.has(c)).sort(), [], 'rules for classes no screen emits');
 });
 
 test('the layout: one screen tall, the thread scrolls under a pinned composer, the drawer is fixed', () => {

@@ -19,15 +19,15 @@ export function sec(label, lines, html = false) {
 }
 
 // an inline editor: its inputs, a ✓ that commits and a × that cancels (app.js reads every [name] inside .inline-edit)
-// fields: { name, value, type = 'text' | 'number', label, word?, options? } — a word is the box's visible name, the label its full
-// accessible name (it contains the word); options make a pick list
+// fields: { name, value, type = 'text' | 'number', label, options? } — the label is the box's accessible name; options make
+// a pick list
 export function inlineEdit(fields, error = null) {
   const input = f => {
     const named = { 'aria-label': f.label };
     const box = f.options
       ? `<select${attrs({ id: `edit-${f.name}`, class: 'input small', name: f.name, ...named })}>${f.options.map(o => `<option${attrs({ value: o, selected: o === f.value })}>${esc(o)}</option>`).join('')}</select>`
       : `<input${attrs({ id: `edit-${f.name}`, class: 'input small', name: f.name, type: f.type ?? 'text', value: f.value, ...named })}>`;
-    return (f.word ? `<label class="edit-word" for="edit-${esc(f.name)}">${esc(f.word)}</label>` : '') + box;
+    return box;
   };
   return `<span class="inline-edit">${fields.map(input).join('')}` +
     `<button type="button" class="key yes" data-action="commitEdit" aria-label="Save">${icon('check', 14, 2.4)}</button>` +

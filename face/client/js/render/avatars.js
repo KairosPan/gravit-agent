@@ -1,12 +1,9 @@
-// face/client/js/render/avatars.js — the round marks: You, G, a bot's letter, a portrait slot, a glyph
+// face/client/js/render/avatars.js — the round marks: You, G, a bot's letter, a glyph
 import { esc } from '../html.js';
 import { icon } from '../icons.js';
 
-const SILHOUETTE = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="9" r="4.2"></circle><path d="M3.5 24a8.5 8.5 0 0 1 17 0z"></path></svg>';
-
 export function mark(spec, size, radius, name) {
   const box = `width:${size}px;height:${size}px;border-radius:${radius}`;
-  if (spec.type === 'portrait') return `<span class="av av-portrait tone-${spec.tone ?? 'warm'}" role="img" aria-label="${esc(name)}’s portrait" style="${box}">${SILHOUETTE}</span>`;
   if (spec.type === 'glyph') return `<span class="av av-glyph" style="${box}">${icon(spec.icon, Math.round(size / 2), 2)}</span>`;
   return `<span class="av av-letter tone-${spec.tone ?? 'grey'}" style="${box};font-size:${Math.round(size * 0.42)}px">${esc(spec.text)}</span>`;
 }

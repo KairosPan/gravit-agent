@@ -31,15 +31,9 @@ export function emptyState() {
       watchlist: [], watchError: null, quotes: {}, providers: [], connection: 'idle',
       search: { query: '', status: 'idle', assets: [], partial: false }, hitQuotes: {}, bars: {},
     },
-    plugins: { installed: [], mine: [], uploaded: [] },
-    memory: { entries: [], remember: true, askFirst: false, botsRead: false },
     // the host's account (host/account.js) and the Statement drawer
     account: { status: 'idle', data: null, at: null, creds: null, tools: null, probe: [], statementOpen: false },
-    banner: null,
-    call: null,
     edit: null,
     confirm: null,
-    compose: { files: [], listening: false },
-    mail: { address: '', items: [] },
   };
 }

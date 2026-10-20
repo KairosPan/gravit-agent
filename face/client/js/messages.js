@@ -1,20 +1,7 @@
-// gravit-ui/js/messages.js — the message model: colour is importance (spec §6)
-export const LEVELS = {
-  text: 'grey', tool: 'grey', proposal: 'green', signal: 'white', ta: 'white', brief: 'white',
-  card: 'orange', approval: 'orange', question: 'orange', limit: 'orange', install: 'orange',
-  refusal: 'red', breaking: 'red', call: 'red', alert: 'red',
-  receipt: 'green', done: 'green',
-};
+// face/client/js/messages.js — the message model: colour is importance (front-end spec §6), over the host's kinds alone
+export const LEVELS = { text: 'grey', tool: 'grey', card: 'orange', approval: 'orange', question: 'orange', refusal: 'red', receipt: 'green' };
 
-// a call is red while it rings or once it is missed; one that connected, or that you placed and cancelled, is plain white
-export const levelOf = m => (m.kind === 'call' && (m.answer === 'accepted' || m.answer === 'cancelled') ? 'white' : LEVELS[m.kind] ?? 'grey');
+export const levelOf = m => LEVELS[m.kind] ?? 'grey';
 
 // the host's three gates (an order card, a generic approval, a question) wait on the operator until answered
-export const needsAnswer = m => ['card', 'approval', 'question', 'limit', 'install', 'call'].includes(m.kind) && !m.answer;
-
-// a stopped or withdrawn conversation is closed: no answers, no more replies
-export const isClosed = c => !!c && (c.status === 'stopped' || c.status === 'withdrawn');
-
-export function message(from, kind, text, data = {}) {
-  return { from, kind, text, data };
-}
+export const needsAnswer = m => ['card', 'approval', 'question'].includes(m.kind) && !m.answer;

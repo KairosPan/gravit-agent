@@ -1,4 +1,4 @@
-// face/client/js/router.js — hash routes: #/messages/<id> · #/markets[/<id>] · #/account/<tab> · #/mail[/<letter>] ·
+// face/client/js/router.js — hash routes: #/messages/<id> · #/markets[/<id>] · #/account/<tab> ·
 // #/discover[/<shelf>] · #/plugin/<id> · #/channel/<workspaceId>. A market id is the face's (us:AAPL, crypto:BTC/USD,
 // cn:600519): everything after #/markets/, so a coin keeps its slash, written back raw; a plugin's and a channel's id
 // read the same way.
@@ -21,7 +21,6 @@ export function parseHash(hash) {
     case 'account': return { screen: 'account', tab: TABS.includes(a) ? a : 'portfolio' };
     case 'markets': return { screen: 'markets', id: restOf(path) };
     case 'messages': return { screen: 'messages', id: a ?? null };
-    case 'mail': return { screen: 'mail', id: a ?? null };
     default: return { screen: 'messages', id: null };
   }
 }
