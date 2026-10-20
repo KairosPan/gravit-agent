@@ -6,15 +6,16 @@
  *
  *   npm run service -- install      write $DSH_HOME/.env from the repo's key files when the home has none, then run the face in the background, from now on
  *   npm run service -- status       is it loaded, does it answer and since when, how the last run ended, the sign-in URL
- *   npm run service -- start        start it (refused, like install, while anything answers on the port: a terminal npm start?)
- *   npm run service -- stop         stop it: the face exits 0, which launchd leaves stopped until start, restart or the next login
+ *   npm run service -- start        start it (refused, like install, while anything else answers on the port: a terminal npm start?)
+ *   npm run service -- stop         stop it: launchd lets go of the job, and the plist stays for start or the next login
  *   npm run service -- restart      stop it and start it again (after an update, to pick up new code)
  *   npm run service -- logs         the last 40 lines of each of its two logs
  *   npm run service -- url          the sign-in URL (the one with ?token=) from its log
  *   npm run service -- uninstall    stop it and take it out of launchd; the ledger and $DSH_HOME/.env stay
  *
- * `install`, `start` and `status` take `--port N` for a face not on 3090; `install` hands it to the
- * face as FACE_PORT.
+ * Every command takes `--port N` for a face not on 3090; without it the port is the installed
+ * plist's FACE_PORT, else 3090. `install` hands the port to the face as FACE_PORT - the one given,
+ * or the installed one, so a reinstall without `--port` does not move the face.
  *
  * What it runs is this checkout - node by its PATH location, tsx, face/src/main.ts, with face/ as
  * the working directory (main.ts moves to the repo root itself) - so a change here reaches it on
@@ -27,15 +28,22 @@
  * in the home's .env at boot, which would fail every start, and Gate 1's ALPACA_KIT_ENABLE_ORDERS
  * must never reach the real harness home.
  *
- * The exports here are the pure half: the plan, the home's .env, the parsers and the status text.
- * They touch nothing but the paths their arguments name, and importing this file runs nothing and
- * loads no face code - the desk's types come in as types only.
+ * The exports are a pure half - the plan, the home's .env, the parsers and the status text, which
+ * touch nothing but the paths their arguments name - and {@link runService}, the commands over
+ * injected {@link ServiceDeps} (launchctl, fetch, the paths, the printer, the clock), so that the
+ * tests drive every command against a fake launchctl and never the operator's launchd. Importing
+ * this file runs nothing; it loads desk.ts, whose ledger reader `status` uses. Run as a script, the
+ * guard at the end builds the real deps and exits with the command's code.
  * @module
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { execFileSync } from "node:child_process";
+import { accessSync, chmodSync, constants, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { homedir, userInfo } from "node:os";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
-import type { DeskRun, DeskStatus } from "../src/desk.ts";
+import { resolveDshHome } from "@deepseek-ai/dsh-home-paths";
+import { deskDir, readEvents, runsOf, type DeskRun, type DeskStatus } from "../src/desk.ts";
 
 /** The LaunchAgent's label: the plist is `com.gravit.face.plist`, the job `gui/<uid>/com.gravit.face`. */
 export const LABEL = "com.gravit.face";
@@ -100,7 +108,8 @@ export function filterPath(path: string): string {
  * - `EnvironmentVariables`: PATH through {@link filterPath}, HOME, DSH_HOME, and FACE_PORT only
  *   when `port` is given - never a key.
  * - `RunAtLoad` and `KeepAlive { SuccessfulExit false }`: started at login, and again after any
- *   exit but a clean one - the face exits 0 on SIGTERM, so a stopped service stays stopped.
+ *   exit but a clean one - the face exits 0 on SIGTERM. `stop` does not lean on that: it boots the
+ *   job out of launchd, because a face whose teardown throws exits 1 and would be started again.
  * - `ThrottleInterval 30`: launchd starts it at most once every 30 s, so a face that cannot boot
  *   (the port taken, a broken checkout) is retried twice a minute, not in a tight loop.
  * - `Umask 63` (077): what the face creates, its logs included, gets no group or other access.
@@ -323,4 +332,509 @@ export function formatStatus(args: {
   }
   lines.push(args.url === undefined ? "sign in: no URL in the log yet (npm run service -- logs)" : `sign in: ${args.url}`);
   return lines.join("\n");
+}
+
+/** The face's desk status route on loopback: what `status` and the port checks ask. */
+const statusUrl = (port: number): string => `http://127.0.0.1:${port}/data/desk/status`;
+
+/**
+ * Whether anything answers on the port: `GET /data/desk/status` with a 1,500 ms timeout. Any HTTP
+ * response is yes - an older face, which has no such route, answers 404, and whatever answers holds
+ * the port; a refused connection or a timeout is no. The body is discarded.
+ * @param port - the port on 127.0.0.1.
+ * @param fetchImpl - `fetch`, or a test's.
+ */
+export async function portAnswers(port: number, fetchImpl: typeof fetch = fetch): Promise<boolean> {
+  let res: Response;
+  try {
+    res = await fetchImpl(statusUrl(port), { signal: AbortSignal.timeout(1_500) });
+  } catch {
+    return false;
+  }
+  await res.body?.cancel().catch(() => undefined);
+  return true;
+}
+
+/**
+ * What the face on the port says of itself: `GET /data/desk/status` with a 2,000 ms timeout.
+ * `undefined` unless it answers `200` with a JSON object whose `ok` is `true` - an older face's 404,
+ * a refused connection, a timeout and a body that is not such JSON all read as no status. Only `ok`
+ * is checked: the route is the face's own, and the rest of its shape is desk.ts's to keep.
+ * @param port - the port on 127.0.0.1.
+ * @param fetchImpl - `fetch`, or a test's.
+ */
+export async function fetchStatus(port: number, fetchImpl: typeof fetch = fetch): Promise<DeskStatus | undefined> {
+  try {
+    const res = await fetchImpl(statusUrl(port), { signal: AbortSignal.timeout(2_000) });
+    if (res.status !== 200) {
+      await res.body?.cancel().catch(() => undefined);
+      return undefined;
+    }
+    const body: unknown = await res.json();
+    return body !== null && typeof body === "object" && (body as { ok?: unknown }).ok === true ? (body as DeskStatus) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Whether `install` or `start` may go ahead: refused while anything answers on the port. A second
+ * face there would fail to bind, exit 1, and be started again by launchd every 30 s.
+ * @param args - `port`, the port the service runs on; `answers`, {@link portAnswers}'s.
+ */
+export function installPlan(args: { port: number; answers: boolean }): { refuse?: string } {
+  if (!args.answers) return {};
+  return { refuse: `something already answers on 127.0.0.1:${args.port} - stop it (a terminal npm start?) before installing or starting the service` };
+}
+
+/**
+ * The node the plist runs: the first `node` on `path` that is an executable file in an absolute
+ * folder and not under a `node_modules` - npm puts its own folders first while it runs a script.
+ * Kept as PATH names it, not resolved: Homebrew's /opt/homebrew/bin/node outlives an upgrade, the
+ * versioned folder it links to does not.
+ * @param path - a PATH value.
+ * @returns the file, or `undefined` when PATH has none (the script then runs `process.execPath`).
+ */
+export function nodeOnPath(path: string): string | undefined {
+  for (const dir of path.split(":")) {
+    if (!isAbsolute(dir)) continue;
+    const node = join(dir, "node");
+    if (node.includes("/node_modules/")) continue;
+    try {
+      if (!statSync(node).isFile()) continue;
+      accessSync(node, constants.X_OK);
+      return node;
+    } catch {
+      /* none here, or not executable: the next folder */
+    }
+  }
+  return undefined;
+}
+
+/** What {@link runService} touches, injected: the script passes the real ones; a test passes fakes,
+ * and so never reaches the operator's launchd. */
+export interface ServiceDeps {
+  /** Runs `launchctl <args>`: `ok` when it exits 0; `out`, what it printed - on a failure, its error text. */
+  launchctl(args: string[]): { ok: boolean; out: string };
+  /** For the face's status route. */
+  fetch: typeof fetch;
+  /** The operator's home directory (HOME), whose Library/LaunchAgents holds the plist. */
+  homeDir: string;
+  /** The harness home (DSH_HOME): its .env, the ledger, the service's logs. */
+  home: string;
+  /** The repo root: the checkout the service runs, and where the key files are. */
+  root: string;
+  /** The operator's uid: the job is `gui/<uid>/com.gravit.face`. */
+  uid: number;
+  /** The launchd commands run on darwin only. */
+  platform: NodeJS.Platform;
+  /** The node the plist runs. */
+  nodePath: string;
+  /** The PATH the plist's PATH is filtered from. */
+  envPath: string;
+  /** Prints a line - or several, joined by newlines. */
+  out(line: string): void;
+  /** Waits: install's poll for the port to fall silent. */
+  sleep(ms: number): Promise<void>;
+}
+
+/** main.ts's port when FACE_PORT is unset. */
+const DEFAULT_PORT = 3090;
+
+/** How long install waits for the port to fall silent after it booted out the job it replaces, and how often it asks. */
+const RELEASE_WAIT_MS = 10_000;
+const RELEASE_POLL_MS = 500;
+
+/** The key files at the repo root that install writes the home's .env from, in order. */
+const KEY_FILES = [".env.deepseek", ".env.alpaca", ".env.ifind"] as const;
+
+/** The commands that drive launchd, refused off darwin; `status`, `logs` and `url` only read. */
+const LAUNCHD_COMMANDS: ReadonlySet<string> = new Set(["install", "uninstall", "start", "stop", "restart"]);
+
+/** What every command works from, worked out once per run. */
+interface ServiceContext {
+  deps: ServiceDeps;
+  /** The LaunchAgent as install would write it now; its `path` is where the plist is, its `log` where the face writes. */
+  plan: ServicePlan;
+  /** Whether the plist exists - the test a scratch HOME can pass: launchctl is per user, not per HOME. */
+  installed: boolean;
+  /** `--port`, else the installed plist's FACE_PORT, else 3090. */
+  port: number;
+  /** `gui/<uid>`, the operator's launchd domain. */
+  domain: string;
+  /** `gui/<uid>/com.gravit.face`. */
+  job: string;
+}
+
+/** What launchd says of the job: loaded when `print` succeeds and says something, and then the state and pid it names. */
+interface JobInfo {
+  loaded: boolean;
+  state?: string;
+  pid?: number;
+}
+
+/** `text` as a TCP port - one to five digits, 1 to 65535 - or `undefined`. */
+function asPort(text: string | undefined): number | undefined {
+  if (text === undefined || !/^\d{1,5}$/.test(text)) return undefined;
+  const port = Number(text);
+  return port >= 1 && port <= 65_535 ? port : undefined;
+}
+
+/** The arguments after the command: `--port N`, and nothing else. */
+function parseArgs(args: string[]): { port?: number; error?: string } {
+  let port: number | undefined;
+  for (let i = 0; i < args.length; i += 2) {
+    if (args[i] !== "--port") return { error: `unknown argument: ${args[i]}` };
+    port = asPort(args[i + 1]);
+    if (port === undefined) return { error: `--port takes a port from 1 to 65535${args[i + 1] === undefined ? "" : `, not ${args[i + 1]}`}` };
+  }
+  return { port };
+}
+
+/** FACE_PORT from a plist's EnvironmentVariables, as {@link servicePlan} writes it; `undefined` when it names none. */
+function plistPort(plist: string): number | undefined {
+  const env = /<key>EnvironmentVariables<\/key>\s*<dict>([\s\S]*?)<\/dict>/.exec(plist)?.[1] ?? "";
+  return asPort(/<key>FACE_PORT<\/key>\s*<string>([^<]*)<\/string>/.exec(env)?.[1]?.trim());
+}
+
+/** A failure as its code when it has one (EACCES, EISDIR, EEXIST), else its message. */
+function reasonOf(err: unknown): string {
+  const code = (err as { code?: unknown } | null | undefined)?.code;
+  if (typeof code === "string") return code;
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** The path a filesystem error names, if it names one. */
+function pathOf(err: unknown): string | undefined {
+  const path = (err as { path?: unknown } | null | undefined)?.path;
+  return typeof path === "string" ? path : undefined;
+}
+
+/** A file's text, or `undefined` when it is absent or cannot be read. */
+function readText(path: string): string | undefined {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+/** The last `n` lines of a text; the newline that ends it opens no line. */
+function lastLines(text: string, n: number): string[] {
+  const body = text.endsWith("\n") ? text.slice(0, -1) : text;
+  return body === "" ? [] : body.split("\n").slice(-n);
+}
+
+function contextOf(deps: ServiceDeps, flagPort: number | undefined): ServiceContext {
+  const launchAgentsDir = join(deps.homeDir, "Library", "LaunchAgents");
+  const plistPath = join(launchAgentsDir, `${LABEL}.plist`);
+  const installed = existsSync(plistPath);
+  /* The port install writes: the one given, else the installed one - so the port every command
+   * checks is the port the plist runs the face on. */
+  const planPort = flagPort ?? (installed ? plistPort(readText(plistPath) ?? "") : undefined);
+  const plan = servicePlan({ root: deps.root, home: deps.home, homeDir: deps.homeDir, node: deps.nodePath, path: deps.envPath, launchAgentsDir, port: planPort });
+  const domain = `gui/${deps.uid}`;
+  return { deps, plan, installed, port: planPort ?? DEFAULT_PORT, domain, job: `${domain}/${LABEL}` };
+}
+
+function jobInfo(ctx: ServiceContext): JobInfo {
+  const { ok, out } = ctx.deps.launchctl(["print", ctx.job]);
+  return ok && out.trim() !== "" ? { loaded: true, ...parseLaunchctlPrint(out) } : { loaded: false };
+}
+
+/** Print a launchctl call that failed - its command line and what launchctl said - and return 1. */
+function failed(ctx: ServiceContext, args: string[], result: { out: string }): number {
+  const said = result.out.trim();
+  ctx.deps.out(`launchctl ${args.join(" ")} failed${said === "" ? "" : `: ${said}`}`);
+  return 1;
+}
+
+/** Load the plist into launchd, which starts the face (RunAtLoad), then enable the job. A failure is
+ * printed and stops it; true when both succeeded. */
+function bootstrapped(ctx: ServiceContext): boolean {
+  for (const args of [["bootstrap", ctx.domain, ctx.plan.path], ["enable", ctx.job]]) {
+    const result = ctx.deps.launchctl(args);
+    if (!result.ok) {
+      failed(ctx, args, result);
+      return false;
+    }
+  }
+  return true;
+}
+
+/** The line `status` adds when the face does not answer: how the ledger's last run ended. */
+async function ledgerLine(home: string): Promise<string> {
+  let runs: DeskRun[];
+  try {
+    runs = runsOf((await readEvents(home)).events);
+  } catch (err) {
+    return `ledger: unreadable (${reasonOf(err)})`;
+  }
+  const last = runs.at(-1);
+  if (last === undefined) return "ledger: empty";
+  const end = last.endedAt === undefined ? "no shutdown event" : `ended ${last.endedAt} code ${last.code}`;
+  return `ledger: last boot ${last.bootedAt} (pid ${last.pid}) - ${end}`;
+}
+
+/** `start`, and `restart`'s answer for a job launchd lacks; `known` is what launchd said, asked here when not given. */
+async function startJob(ctx: ServiceContext, known?: JobInfo): Promise<number> {
+  const { deps } = ctx;
+  if (!ctx.installed) {
+    deps.out(`${LABEL}: not installed (npm run service -- install)`);
+    return 1;
+  }
+  const job = known ?? jobInfo(ctx);
+  if (job.loaded && job.state === "running") {
+    deps.out(`already running${job.pid === undefined ? "" : ` (pid ${job.pid})`}`);
+    return 0;
+  }
+  const { refuse } = installPlan({ port: ctx.port, answers: await portAnswers(ctx.port, deps.fetch) });
+  if (refuse !== undefined) {
+    deps.out(refuse);
+    return 1;
+  }
+  if (job.loaded) {
+    const args = ["kickstart", ctx.job];
+    const result = deps.launchctl(args);
+    if (!result.ok) return failed(ctx, args, result);
+    deps.out(`started: launchd runs the loaded job ${ctx.job} again (next: npm run service -- url)`);
+    return 0;
+  }
+  if (!bootstrapped(ctx)) return 1;
+  deps.out(`started: launchd loaded ${ctx.plan.path} and runs it (next: npm run service -- url)`);
+  return 0;
+}
+
+/** The commands, in the order the usage line lists them; each returns its exit code. */
+const COMMANDS: Record<string, (ctx: ServiceContext) => Promise<number>> = {
+  async install(ctx) {
+    const { deps, plan, port } = ctx;
+    const envFile = join(deps.home, ".env");
+    let env: ReturnType<typeof ensureHomeEnv>;
+    try {
+      env = ensureHomeEnv(deps.home, KEY_FILES.map((name) => join(deps.root, name)));
+    } catch (err) {
+      const where = pathOf(err);
+      deps.out(`cannot write ${envFile}: ${reasonOf(err)}${where === undefined || where === envFile ? "" : ` (${where})`}`);
+      return 1;
+    }
+    if (env.created) deps.out(`wrote ${env.path} with: ${env.names.join(", ")}`);
+    else if (existsSync(env.path)) deps.out(`kept ${env.path}`);
+    else deps.out(`wrote no ${env.path}: no source holds a name on the service's allow-list`);
+    if (env.missing.length > 0) deps.out(`not in ${env.path}: ${env.missing.join(", ")} (the face also reads DEEPSEEK_API_KEY from dsh's credential store)`);
+    if (env.skipped.length > 0) deps.out(`not copied (not on the service's allow-list; add them to ${env.path} by hand if the service needs them): ${env.skipped.join(", ")}`);
+    if (env.missingSources.length > 0) deps.out(`no source: ${env.missingSources.join(", ")}`);
+    /* A job this install replaces holds the port until launchd has stopped it: boot it out, then
+     * give its face up to 10 s to let go, so that a reinstall is not refused by the service itself. */
+    const replacing = jobInfo(ctx).loaded;
+    if (replacing) {
+      const args = ["bootout", ctx.job];
+      deps.out(`stopping the loaded job to replace it: launchctl ${args.join(" ")}`);
+      const result = deps.launchctl(args);
+      if (!result.ok) return failed(ctx, args, result);
+    }
+    let answers = await portAnswers(port, deps.fetch);
+    for (let waited = 0; replacing && answers && waited < RELEASE_WAIT_MS; waited += RELEASE_POLL_MS) {
+      await deps.sleep(RELEASE_POLL_MS);
+      answers = await portAnswers(port, deps.fetch);
+    }
+    const { refuse } = installPlan({ port, answers });
+    if (refuse !== undefined) {
+      deps.out(refuse);
+      return 1;
+    }
+    try {
+      mkdirSync(dirname(plan.log), { recursive: true, mode: 0o700 });
+      mkdirSync(dirname(plan.path), { recursive: true });
+      writeFileSync(plan.path, plan.plist, { mode: 0o644 });
+      chmodSync(plan.path, 0o644);
+    } catch (err) {
+      deps.out(`cannot write ${pathOf(err) ?? plan.path}: ${reasonOf(err)}`);
+      return 1;
+    }
+    if (!bootstrapped(ctx)) return 1;
+    deps.out(`installed: ${plan.path}`);
+    deps.out(`runs: ${plan.args.at(-1)}`);
+    deps.out(`log: ${plan.log}`);
+    deps.out("next: npm run service -- url");
+    return 0;
+  },
+
+  async uninstall(ctx) {
+    const { deps, plan } = ctx;
+    /* A job launchd lacks is no failure here: the plist goes either way. */
+    const bootout = deps.launchctl(["bootout", ctx.job]);
+    if (!ctx.installed && !bootout.ok) {
+      deps.out(`not installed: no ${plan.path}, and launchd has no job ${ctx.job}`);
+      return 0;
+    }
+    try {
+      rmSync(plan.path, { force: true });
+    } catch (err) {
+      deps.out(`cannot remove ${plan.path}: ${reasonOf(err)}`);
+      return 1;
+    }
+    const plist = ctx.installed ? `${plan.path} is removed` : `there was no ${plan.path}`;
+    deps.out(`uninstalled: launchd no longer runs it and ${plist}; the ledger (${deskDir(deps.home)}) and ${join(deps.home, ".env")} are untouched`);
+    return 0;
+  },
+
+  start: (ctx) => startJob(ctx),
+
+  async stop(ctx) {
+    const { deps } = ctx;
+    const args = ["bootout", ctx.job];
+    const result = deps.launchctl(args);
+    if (result.ok) {
+      deps.out(ctx.installed
+        ? "stopped: launchd no longer runs it; the plist stays, so the next login or npm run service -- start brings it back"
+        : `stopped: launchd no longer runs it, and with no ${ctx.plan.path} nothing brings it back`);
+      return 0;
+    }
+    /* A bootout fails for a job launchd lacks - stopped already - and for one it could not stop. */
+    if (jobInfo(ctx).loaded) return failed(ctx, args, result);
+    deps.out(`not loaded: launchd has no job ${ctx.job}, so there was nothing to stop`);
+    return 0;
+  },
+
+  async restart(ctx) {
+    const job = jobInfo(ctx);
+    if (!job.loaded) return startJob(ctx, job);
+    const args = ["kickstart", "-k", ctx.job];
+    const result = ctx.deps.launchctl(args);
+    if (!result.ok) return failed(ctx, args, result);
+    ctx.deps.out(`restarted: launchd stopped ${ctx.job} and runs it again, with a new sign-in URL (next: npm run service -- url)`);
+    return 0;
+  },
+
+  async status(ctx) {
+    const { deps, plan, port } = ctx;
+    if (!ctx.installed) {
+      deps.out(formatStatus({ label: LABEL, info: {}, installed: false, status: undefined, url: undefined, port }));
+      return 0;
+    }
+    const job = jobInfo(ctx);
+    const answer = await fetchStatus(port, deps.fetch);
+    const log = readText(plan.log);
+    deps.out(formatStatus({ label: LABEL, info: job.loaded ? job : { state: "not loaded" }, installed: true, status: answer,
+      url: log === undefined ? undefined : lastTokenUrl(log), port }));
+    if (answer === undefined) deps.out(await ledgerLine(deps.home));
+    return 0;
+  },
+
+  async logs(ctx) {
+    const { deps, plan } = ctx;
+    const files = [plan.log, plan.errLog].filter((file) => existsSync(file));
+    if (files.length === 0) {
+      deps.out(`no log yet: ${plan.log}`);
+      return 0;
+    }
+    let code = 0;
+    for (const file of files) {
+      deps.out(`== ${file}`);
+      try {
+        const tail = lastLines(readFileSync(file, "utf8"), 40);
+        if (tail.length > 0) deps.out(tail.join("\n"));
+      } catch (err) {
+        deps.out(`cannot read ${file}: ${reasonOf(err)}`);
+        code = 1;
+      }
+    }
+    return code;
+  },
+
+  async url(ctx) {
+    const log = readText(ctx.plan.log);
+    ctx.deps.out((log === undefined ? undefined : lastTokenUrl(log)) ?? "no sign-in URL in the log yet (npm run service -- logs)");
+    return 0;
+  },
+};
+
+const USAGE = `usage: npm run service -- ${Object.keys(COMMANDS).join(" | ")} [--port N]`;
+
+/**
+ * Run one command - `npm run service -- <cmd> [--port N]` - and return its exit code: 0 when it is
+ * done or there was nothing to do (already running, nothing to stop), 1 when it refused or failed, 2
+ * for a command or an argument it does not know. Every line goes through `deps.out`; nothing here
+ * exits the process. The port is `--port`, else the installed plist's FACE_PORT, else 3090.
+ *
+ * - `status` (the script's default): not installed when the plist is absent, and launchd is not
+ *   asked; otherwise launchd's state (`not loaded` when `print` fails or says nothing), what the
+ *   face answers on the port ({@link fetchStatus}), the sign-in URL from the log - and, when the
+ *   face does not answer, one line from the ledger on how its last run ended.
+ * - `install`: the home's .env ({@link ensureHomeEnv}), each finding a line; a job launchd has is
+ *   booted out first and its port given up to 10 s to fall silent; refused while the port still
+ *   answers ({@link installPlan}); then the logs directory (0700), the plist (0644), `bootstrap`
+ *   and `enable`.
+ * - `start`: not installed is a failure; a running job is left alone; refused while the port
+ *   answers; then `kickstart` for a loaded job, `bootstrap` and `enable` for one launchd lacks.
+ * - `stop`: `bootout` - not `kill`: a face whose teardown throws exits 1, which KeepAlive would
+ *   restart. The plist stays.
+ * - `restart`: `kickstart -k` for a loaded job, else `start`.
+ * - `uninstall`: `bootout` (a job launchd lacks is fine), then the plist goes; the ledger and the
+ *   home's .env stay.
+ * - `logs`: the last 40 lines of each log that exists; `url`: the log's last sign-in URL.
+ *
+ * `install`, `uninstall`, `start`, `stop` and `restart` refuse off darwin before launchctl is run.
+ * @param cmd - the command.
+ * @param args - what follows it.
+ * @param deps - the world it acts on.
+ */
+export async function runService(cmd: string, args: string[], deps: ServiceDeps): Promise<number> {
+  if (!Object.hasOwn(COMMANDS, cmd)) {
+    deps.out(USAGE);
+    return 2;
+  }
+  const { port, error } = parseArgs(args);
+  if (error !== undefined) {
+    deps.out(error);
+    deps.out(USAGE);
+    return 2;
+  }
+  if (LAUNCHD_COMMANDS.has(cmd) && deps.platform !== "darwin") {
+    deps.out(`${cmd} needs macOS: the service is a launchd LaunchAgent - on ${deps.platform}, run npm start under the system's own service manager`);
+    return 1;
+  }
+  return COMMANDS[cmd](contextOf(deps, port));
+}
+
+/** The real deps: launchctl run with its output captured (a failure's error text comes back as
+ * `out`, never straight to the terminal), and this checkout, this operator, this harness home. */
+function realDeps(): ServiceDeps {
+  const envPath = process.env.PATH ?? "";
+  return {
+    launchctl(args) {
+      try {
+        return { ok: true, out: execFileSync("launchctl", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) };
+      } catch (err) {
+        const { stdout, stderr } = err as { stdout?: unknown; stderr?: unknown };
+        return { ok: false, out: [stdout, stderr].filter((text): text is string => typeof text === "string").join("").trim() };
+      }
+    },
+    fetch,
+    homeDir: homedir(),
+    home: resolveDshHome(undefined),
+    root: resolve(dirname(fileURLToPath(import.meta.url)), "..", ".."),
+    uid: userInfo().uid,
+    platform: process.platform,
+    nodePath: nodeOnPath(envPath) ?? process.execPath,
+    envPath,
+    out: (line) => console.log(line),
+    sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
+  };
+}
+
+/* Run only as a script - the tests import runService. Compared as real paths, as check-home.ts
+ * does: a checkout reached through a symlink spells the same file two ways. */
+const invokedAs = process.argv[1];
+if (invokedAs !== undefined && existsSync(invokedAs) && realpathSync(invokedAs) === realpathSync(fileURLToPath(import.meta.url))) {
+  const [cmd = "status", ...args] = process.argv.slice(2);
+  const code = await runService(cmd, args, realDeps()).catch((err: unknown) => {
+    console.error(err);
+    return 1;
+  });
+  /* Exit with the command's code once stdout has drained: on macOS a pipe is written
+   * asynchronously, and process.exit drops what is still queued (measured: 65,500 of 1,000,000
+   * bytes reached a slow reader). */
+  process.stdout.write("", () => process.exit(code));
 }

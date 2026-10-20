@@ -13,7 +13,8 @@
     "start": "tsx src/main.ts",
     "setup": "tsx src/setup.ts",
     "check:fixture": "node scripts/validate-fixture.mjs",
-    "render:roles": "tsx scripts/render-roles.ts"
+    "render:roles": "tsx scripts/render-roles.ts",
+    "service": "tsx scripts/service.ts"
   },
   "dependencies": {
     "@deepseek-ai/cordis": "4.0.4",

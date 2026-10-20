@@ -1,10 +1,15 @@
 // face/tests/service.test.ts
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, stat, symlink, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { chmod, mkdir, mkdtemp, readFile, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { COPIED_KEYS, EXPECTED_KEYS, LABEL, ensureHomeEnv, envLinesOf, filterPath, formatStatus, lastTokenUrl, parseLaunchctlPrint, servicePlan } from "../scripts/service.ts";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  COPIED_KEYS, EXPECTED_KEYS, LABEL, ensureHomeEnv, envLinesOf, fetchStatus, filterPath, formatStatus, installPlan, lastTokenUrl, nodeOnPath,
+  parseLaunchctlPrint, portAnswers, runService, servicePlan, type ServiceDeps,
+} from "../scripts/service.ts";
 import type { DeskStatus } from "../src/desk.ts";
 
 const home = (): Promise<string> => mkdtemp(join(tmpdir(), "face-service-"));
@@ -149,4 +154,352 @@ test("formatStatus names a lost last run", () => {
   assert.match(formatStatus({ label: LABEL, info: { state: "not loaded" }, installed: true, status, url: undefined, port: 3090 }),
     /^com\.gravit\.face: not loaded\nanswering at /, "a face on the port is not credited to a job launchd lacks");
   assert.match(formatStatus({ label: LABEL, info: {}, installed: false, status: undefined, url: undefined, port: 3090 }), /not installed \(npm run service -- install\)/);
+});
+
+const fakeFetch = (status: number, body?: unknown): typeof fetch =>
+  (async () => new Response(body === undefined ? null : JSON.stringify(body), { status })) as unknown as typeof fetch;
+const refusing: typeof fetch = (async () => { throw new TypeError("fetch failed"); }) as unknown as typeof fetch;
+
+test("portAnswers: any HTTP answer is yes, a refused connection is no", async () => {
+  assert.equal(await portAnswers(3090, fakeFetch(404)), true);
+  assert.equal(await portAnswers(3090, refusing), false);
+});
+
+test("fetchStatus: only a 200 with ok:true counts", async () => {
+  assert.equal(await fetchStatus(3090, fakeFetch(404)), undefined);
+  assert.equal(await fetchStatus(3090, fakeFetch(200, { ok: false })), undefined);
+  assert.equal((await fetchStatus(3090, fakeFetch(200, { ok: true, pid: 1 })))?.pid, 1);
+});
+
+test("install refuses while the port answers", () => {
+  assert.match(installPlan({ port: 3090, answers: true }).refuse ?? "", /something already answers on 127\.0\.0\.1:3090 - stop it/);
+  assert.equal(installPlan({ port: 3090, answers: false }).refuse, undefined);
+});
+
+test("the CLI's status against an empty temp home says not installed", async () => {
+  const h = await home();
+  const script = join(dirname(fileURLToPath(import.meta.url)), "..", "scripts", "service.ts");
+  const out = await new Promise<string>((resolve, reject) => execFile(process.execPath, [join(dirname(script), "..", "node_modules", "tsx", "dist", "cli.mjs"), script, "status", "--port", "1"],
+    { env: { ...process.env, HOME: h, DSH_HOME: join(h, ".dsh") }, encoding: "utf8" }, (err, stdout) => (err ? reject(err) : resolve(stdout))));
+  assert.match(out, /com\.gravit\.face: not installed \(npm run service -- install\)/);
+});
+
+/* The commands, driven through runService against a fake launchctl: no test touches the operator's launchd. */
+
+const JOB = `gui/501/${LABEL}`;
+const older = (): Response => new Response(null, { status: 404 });
+
+/** What `launchctl print` answers for a job launchd has. */
+const loaded = (state: string, pid?: number) =>
+  ({ ok: true, out: `${JOB} = {\n\tstate = ${state}\n${pid === undefined ? "" : `\tpid = ${pid}\n`}}\n` });
+
+interface Rig { deps: ServiceDeps; calls: string[][]; urls: string[]; sleeps: number[]; plist: string; text(): string }
+
+/**
+ * A ServiceDeps over fresh temp dirs (homeDir, home = homeDir/.dsh, root) that records every launchctl call,
+ * every URL fetched, every sleep and every line printed. `launchctl` answers a call when it returns
+ * something; otherwise `print` fails (launchd has no job) and every other call succeeds. `answer` is the
+ * port's answer given the calls so far; `undefined` (the default) is a refused connection.
+ */
+async function rig(o: {
+  launchctl?: (args: string[]) => { ok: boolean; out: string } | undefined;
+  answer?: (calls: string[][]) => Response | undefined;
+  platform?: NodeJS.Platform;
+} = {}): Promise<Rig> {
+  const homeDir = await home(); const root = await home();
+  const calls: string[][] = []; const urls: string[] = []; const sleeps: number[] = []; const lines: string[] = [];
+  const deps: ServiceDeps = {
+    launchctl: (args) => { calls.push(args); return o.launchctl?.(args) ?? { ok: args[0] !== "print", out: "" }; },
+    fetch: (async (input: string | URL | Request) => {
+      urls.push(String(input));
+      const res = o.answer?.(calls);
+      if (res === undefined) throw new TypeError("fetch failed");
+      return res;
+    }) as typeof fetch,
+    homeDir, home: join(homeDir, ".dsh"), root, uid: 501, platform: o.platform ?? "darwin",
+    nodePath: "/usr/local/bin/node", envPath: "/usr/local/bin:/usr/bin",
+    out: (line) => { lines.push(line); }, sleep: async (ms) => { sleeps.push(ms); },
+  };
+  return { deps, calls, urls, sleeps, plist: join(homeDir, "Library", "LaunchAgents", `${LABEL}.plist`), text: () => lines.join("\n") };
+}
+
+/** The plist install would write for this rig, put in place. */
+async function putPlist(r: Rig, port?: number): Promise<void> {
+  const p = servicePlan({ root: r.deps.root, home: r.deps.home, homeDir: r.deps.homeDir, node: r.deps.nodePath, path: r.deps.envPath, launchAgentsDir: dirname(r.plist), port });
+  await mkdir(dirname(r.plist), { recursive: true });
+  await writeFile(r.plist, p.plist);
+}
+
+/** Put the desk ledger's lines under the rig's home. */
+async function putLedger(r: Rig, lines: object[]): Promise<void> {
+  await mkdir(join(r.deps.home, "face", "desk"), { recursive: true });
+  await writeFile(join(r.deps.home, "face", "desk", "events.jsonl"), lines.map((l) => `${JSON.stringify(l)}\n`).join(""));
+}
+
+const deskStatusOf = (pid: number): DeskStatus => ({ ok: true, pid, version: "v", bootedAt: "2026-10-19T15:00:00.000Z", uptimeMs: 60_000,
+  desk: { enabled: true, dir: "/d" }, asleep: [], runs: [{ bootedAt: "2026-10-19T15:00:00.000Z", pid, lost: false }] });
+
+test("install with no job and the port answering refuses: no plist, no bootstrap", async () => {
+  const r = await rig({ answer: older });
+  assert.equal(await runService("install", [], r.deps), 1);
+  assert.match(r.text(), /something already answers on 127\.0\.0\.1:3090 - stop it \(a terminal npm start\?\)/);
+  assert.deepEqual(r.calls, [["print", JOB]], "asked launchd once, changed nothing");
+  assert.deepEqual(r.sleeps, [], "no job of its own to wait for");
+  await assert.rejects(stat(r.plist), "no plist written");
+});
+
+test("install replaces a running job: bootout, wait for the port to fall silent, then the plist, bootstrap and enable", async () => {
+  let afterBootout = 0;
+  const r = await rig({
+    launchctl: (args) => (args[0] === "print" ? loaded("running", 42) : undefined),
+    answer: (calls) => (!calls.some((c) => c[0] === "bootout") || afterBootout++ < 2 ? older() : undefined),
+  });
+  await writeFile(join(r.deps.root, ".env.deepseek"), "DEEPSEEK_API_KEY=d\n");
+  assert.equal(await runService("install", [], r.deps), 0);
+  assert.deepEqual(r.calls, [["print", JOB], ["bootout", JOB], ["bootstrap", "gui/501", r.plist], ["enable", JOB]]);
+  assert.deepEqual(r.sleeps, [500, 500], "polled every 500 ms until the old face let go of the port");
+  assert.ok(r.urls.every((u) => u === "http://127.0.0.1:3090/data/desk/status"));
+  const written = await readFile(r.plist, "utf8");
+  assert.equal(written, servicePlan({ root: r.deps.root, home: r.deps.home, homeDir: r.deps.homeDir, node: "/usr/local/bin/node", path: "/usr/local/bin:/usr/bin", launchAgentsDir: dirname(r.plist) }).plist);
+  assert.equal((await stat(r.plist)).mode & 0o777, 0o644);
+  assert.equal((await stat(join(r.deps.home, "face", "service"))).mode & 0o777, 0o700, "the logs directory is the operator's alone");
+  for (const line of [`installed: ${r.plist}`, `runs: ${join(r.deps.root, "face", "src", "main.ts")}`,
+    `log: ${join(r.deps.home, "face", "service", "face.log")}`, "next: npm run service -- url"]) assert.ok(r.text().split("\n").includes(line), line);
+});
+
+test("install refuses when the port still answers 10 s after the bootout", async () => {
+  const r = await rig({ launchctl: (args) => (args[0] === "print" ? loaded("running", 42) : undefined), answer: older });
+  assert.equal(await runService("install", [], r.deps), 1);
+  assert.equal(r.sleeps.length, 20); assert.ok(r.sleeps.every((ms) => ms === 500));
+  assert.match(r.text(), /something already answers on 127\.0\.0\.1:3090/);
+  assert.deepEqual(r.calls, [["print", JOB], ["bootout", JOB]]);
+  await assert.rejects(stat(r.plist));
+});
+
+test("install names the keys the home .env lacks, the names it did not copy and the sources it did not find", async () => {
+  const r = await rig();
+  await writeFile(join(r.deps.root, ".env.alpaca"), "PATH=/x\nAPCA_API_KEY_ID=k\nAPCA_API_SECRET_KEY=s\n");
+  assert.equal(await runService("install", [], r.deps), 0);
+  const env = join(r.deps.home, ".env");
+  const lines = r.text().split("\n");
+  for (const line of [`wrote ${env} with: APCA_API_KEY_ID, APCA_API_SECRET_KEY`,
+    `not in ${env}: DEEPSEEK_API_KEY (the face also reads DEEPSEEK_API_KEY from dsh's credential store)`,
+    `not copied (not on the service's allow-list; add them to ${env} by hand if the service needs them): PATH`,
+    `no source: ${join(r.deps.root, ".env.deepseek")}, ${join(r.deps.root, ".env.ifind")}`]) assert.ok(lines.includes(line), line);
+  assert.equal(await readFile(env, "utf8"), "APCA_API_KEY_ID=k\nAPCA_API_SECRET_KEY=s\n");
+  const again = await rig();
+  Object.assign(again.deps, { home: r.deps.home, root: r.deps.root });
+  assert.equal(await runService("install", [], again.deps), 0);
+  assert.ok(again.text().split("\n").includes(`kept ${env}`), "a second install keeps the file");
+  assert.ok(!again.text().includes("not copied"), "an existing .env: the sources are not read");
+});
+
+test("install with nothing to copy writes no .env and says so; a .env it cannot write stops it before launchd", async () => {
+  const r = await rig();
+  assert.equal(await runService("install", [], r.deps), 0);
+  const env = join(r.deps.home, ".env");
+  assert.ok(r.text().split("\n").includes(`wrote no ${env}: no source holds a name on the service's allow-list`));
+  assert.ok(r.text().split("\n").includes(`not in ${env}: DEEPSEEK_API_KEY, APCA_API_KEY_ID, APCA_API_SECRET_KEY (the face also reads DEEPSEEK_API_KEY from dsh's credential store)`));
+  await assert.rejects(stat(env));
+  const dangling = await rig();
+  await mkdir(dangling.deps.home, { recursive: true });
+  await writeFile(join(dangling.deps.root, ".env.deepseek"), "DEEPSEEK_API_KEY=d\n");
+  await symlink(join(dangling.deps.home, "elsewhere"), join(dangling.deps.home, ".env"));
+  assert.equal(await runService("install", [], dangling.deps), 1);
+  assert.equal(dangling.text(), `cannot write ${join(dangling.deps.home, ".env")}: EEXIST`);
+  assert.deepEqual(dangling.calls, []);
+});
+
+test("install stops at a failed bootstrap and prints what launchctl said", async () => {
+  const r = await rig({ launchctl: (args) => (args[0] === "bootstrap" ? { ok: false, out: "Bootstrap failed: 5: Input/output error" } : undefined) });
+  assert.equal(await runService("install", [], r.deps), 1);
+  assert.match(r.text(), /launchctl bootstrap gui\/501 .*com\.gravit\.face\.plist failed: Bootstrap failed: 5: Input\/output error$/);
+  assert.deepEqual(r.calls.map((c) => c[0]), ["print", "bootstrap"], "no enable after a failed bootstrap");
+  assert.ok(!r.text().includes("installed:"));
+});
+
+test("start: a running job is left alone; a loaded one kickstarted; one launchd lacks bootstrapped and enabled; a held port refused", async () => {
+  const running = await rig({ launchctl: (args) => (args[0] === "print" ? loaded("running", 42) : undefined), answer: older });
+  await putPlist(running);
+  assert.equal(await runService("start", [], running.deps), 0);
+  assert.equal(running.text(), "already running (pid 42)");
+  assert.deepEqual(running.calls, [["print", JOB]], "no kickstart");
+
+  const stopped = await rig({ launchctl: (args) => (args[0] === "print" ? loaded("not running") : undefined) });
+  await putPlist(stopped);
+  assert.equal(await runService("start", [], stopped.deps), 0);
+  assert.deepEqual(stopped.calls, [["print", JOB], ["kickstart", JOB]]);
+
+  const unloaded = await rig();
+  await putPlist(unloaded);
+  assert.equal(await runService("start", [], unloaded.deps), 0);
+  assert.deepEqual(unloaded.calls, [["print", JOB], ["bootstrap", "gui/501", unloaded.plist], ["enable", JOB]]);
+
+  const held = await rig({ answer: older });
+  await putPlist(held);
+  assert.equal(await runService("start", [], held.deps), 1);
+  assert.match(held.text(), /something already answers on 127\.0\.0\.1:3090 - stop it/);
+  assert.deepEqual(held.calls, [["print", JOB]], "refused before launchd was asked to do anything");
+
+  const absent = await rig();
+  assert.equal(await runService("start", [], absent.deps), 1);
+  assert.equal(absent.text(), "com.gravit.face: not installed (npm run service -- install)");
+  assert.deepEqual(absent.calls, []);
+});
+
+test("stop boots the job out - exactly one call - and the plist stays", async () => {
+  const r = await rig();
+  await putPlist(r);
+  assert.equal(await runService("stop", [], r.deps), 0);
+  assert.deepEqual(r.calls, [["bootout", JOB]]);
+  assert.equal(r.text(), "stopped: launchd no longer runs it; the plist stays, so the next login or npm run service -- start brings it back");
+  await stat(r.plist);
+  const idle = await rig({ launchctl: (args) => (args[0] === "bootout" ? { ok: false, out: "Boot-out failed: 3: No such process" } : undefined) });
+  assert.equal(await runService("stop", [], idle.deps), 0, "nothing to stop is not a failure");
+  assert.match(idle.text(), /^not loaded: launchd has no job gui\/501\/com\.gravit\.face/);
+  const stuck = await rig({ launchctl: (args) => (args[0] === "print" ? loaded("running", 42) : args[0] === "bootout" ? { ok: false, out: "Boot-out failed: 5: Input/output error" } : undefined) });
+  assert.equal(await runService("stop", [], stuck.deps), 1, "a job launchd still has after a failed bootout is a failure");
+  assert.match(stuck.text(), /launchctl bootout gui\/501\/com\.gravit\.face failed: Boot-out failed: 5: Input\/output error/);
+});
+
+test("restart: kickstart -k a loaded job; bootstrap and enable an installed one launchd lacks; not installed is start's answer", async () => {
+  const r = await rig({ launchctl: (args) => (args[0] === "print" ? loaded("running", 42) : undefined), answer: older });
+  await putPlist(r);
+  assert.equal(await runService("restart", [], r.deps), 0);
+  assert.deepEqual(r.calls, [["print", JOB], ["kickstart", "-k", JOB]]);
+  const unloaded = await rig();
+  await putPlist(unloaded);
+  assert.equal(await runService("restart", [], unloaded.deps), 0);
+  assert.deepEqual(unloaded.calls, [["print", JOB], ["bootstrap", "gui/501", unloaded.plist], ["enable", JOB]]);
+  const absent = await rig();
+  assert.equal(await runService("restart", [], absent.deps), 1);
+  assert.match(absent.text(), /not installed \(npm run service -- install\)/);
+  assert.ok(!absent.calls.some((c) => c[0] !== "print"), "nothing changed in launchd");
+});
+
+test("uninstall boots the job out and removes the plist; the ledger and the home .env stay", async () => {
+  const r = await rig({ launchctl: (args) => (args[0] === "bootout" ? { ok: false, out: "" } : undefined) });
+  await putPlist(r);
+  await putLedger(r, [{ t: "2026-10-19T15:00:00.000Z", kind: "boot", pid: 77, version: "v", deskEnabled: true }]);
+  await writeFile(join(r.deps.home, ".env"), "DEEPSEEK_API_KEY=d\n");
+  assert.equal(await runService("uninstall", [], r.deps), 0, "a failed bootout is ignored");
+  assert.deepEqual(r.calls, [["bootout", JOB]]);
+  await assert.rejects(stat(r.plist), "the plist is gone");
+  await stat(join(r.deps.home, "face", "desk", "events.jsonl")); await stat(join(r.deps.home, ".env"));
+  assert.ok(r.text().includes(`the ledger (${join(r.deps.home, "face", "desk")}) and ${join(r.deps.home, ".env")} are untouched`));
+});
+
+test("status: a plist launchd has no job for is not loaded; with the face silent, one ledger line says how its last run ended", async () => {
+  const r = await rig();
+  await putPlist(r);
+  await putLedger(r, [{ t: "2026-10-19T15:00:00.000Z", kind: "boot", pid: 77, version: "v", deskEnabled: true }]);
+  assert.equal(await runService("status", [], r.deps), 0);
+  assert.equal(r.text(), [
+    "com.gravit.face: not loaded",
+    "not answering on 3090",
+    "sign in: no URL in the log yet (npm run service -- logs)",
+    "ledger: last boot 2026-10-19T15:00:00.000Z (pid 77) - no shutdown event",
+  ].join("\n"));
+  assert.deepEqual(r.calls, [["print", JOB]]);
+});
+
+test("status's ledger line: a clean end, an empty ledger, an unreadable one; none while the face answers", async () => {
+  const ended = await rig();
+  await putPlist(ended);
+  await putLedger(ended, [{ t: "2026-10-19T15:00:00.000Z", kind: "boot", pid: 77, version: "v", deskEnabled: true },
+    { t: "2026-10-19T16:00:00.000Z", kind: "shutdown", pid: 77, code: 0 }]);
+  await runService("status", [], ended.deps);
+  assert.match(ended.text(), /\nledger: last boot 2026-10-19T15:00:00\.000Z \(pid 77\) - ended 2026-10-19T16:00:00\.000Z code 0$/);
+  const empty = await rig();
+  await putPlist(empty);
+  await runService("status", [], empty.deps);
+  assert.match(empty.text(), /\nledger: empty$/);
+  const unreadable = await rig();
+  await putPlist(unreadable);
+  await mkdir(join(unreadable.deps.home, "face", "desk", "events.jsonl"), { recursive: true });
+  await runService("status", [], unreadable.deps);
+  assert.match(unreadable.text(), /\nledger: unreadable \(EISDIR\)$/);
+  const answering = await rig({ launchctl: (args) => (args[0] === "print" ? loaded("running", 42) : undefined),
+    answer: () => new Response(JSON.stringify(deskStatusOf(42)), { status: 200 }) });
+  await putPlist(answering);
+  await mkdir(join(answering.deps.home, "face", "service"), { recursive: true });
+  await writeFile(join(answering.deps.home, "face", "service", "face.log"), "gravit-face: http://127.0.0.1:3090/?token=tok (profile: face)\n");
+  assert.equal(await runService("status", [], answering.deps), 0);
+  assert.match(answering.text(), /^com\.gravit\.face: running \(pid 42\)\nanswering at http:\/\/127\.0\.0\.1:3090 · up 0h 1m/);
+  assert.match(answering.text(), /\nsign in: http:\/\/127\.0\.0\.1:3090\/\?token=tok$/);
+  assert.ok(!answering.text().includes("ledger:"));
+});
+
+test("the port is --port, else the installed plist's FACE_PORT, else 3090; a reinstall keeps the installed port", async () => {
+  const r = await rig();
+  await putPlist(r, 3091);
+  await runService("status", [], r.deps);
+  assert.deepEqual(r.urls, ["http://127.0.0.1:3091/data/desk/status"]);
+  assert.match(r.text(), /not answering on 3091/);
+  await runService("status", ["--port", "3092"], r.deps);
+  assert.equal(r.urls.at(-1), "http://127.0.0.1:3092/data/desk/status");
+  assert.equal(await runService("install", [], r.deps), 0);
+  assert.equal(r.urls.at(-1), "http://127.0.0.1:3091/data/desk/status", "install checks the port the plist runs on");
+  assert.ok((await readFile(r.plist, "utf8")).includes("<key>FACE_PORT</key><string>3091</string>"));
+  assert.equal(await runService("install", ["--port", "3093"], r.deps), 0);
+  assert.ok((await readFile(r.plist, "utf8")).includes("<key>FACE_PORT</key><string>3093</string>"));
+  const plain = await rig();
+  await putPlist(plain);
+  await runService("status", [], plain.deps);
+  assert.deepEqual(plain.urls, ["http://127.0.0.1:3090/data/desk/status"]);
+});
+
+test("logs prints the last 40 lines of each log under its path; url prints the last sign-in URL", async () => {
+  const r = await rig();
+  const log = join(r.deps.home, "face", "service", "face.log"); const errLog = join(r.deps.home, "face", "service", "face.err.log");
+  assert.equal(await runService("logs", [], r.deps), 0);
+  assert.equal(r.text(), `no log yet: ${log}`);
+  const none = await rig();
+  assert.equal(await runService("url", [], none.deps), 0);
+  assert.equal(none.text(), "no sign-in URL in the log yet (npm run service -- logs)");
+  await mkdir(dirname(log), { recursive: true });
+  const lines = Array.from({ length: 50 }, (_, i) => `line ${i + 1}`);
+  lines[44] = "gravit-face: http://127.0.0.1:3090/?token=new (profile: face)"; lines[4] = "gravit-face: http://127.0.0.1:3090/?token=old (profile: face)";
+  await writeFile(log, `${lines.join("\n")}\n`);
+  await writeFile(errLog, "boom\n");
+  const shown = await rig();
+  Object.assign(shown.deps, { home: r.deps.home });
+  assert.equal(await runService("logs", [], shown.deps), 0);
+  assert.equal(shown.text(), [`== ${log}`, ...lines.slice(10), `== ${errLog}`, "boom"].join("\n"));
+  const url = await rig();
+  Object.assign(url.deps, { home: r.deps.home });
+  assert.equal(await runService("url", [], url.deps), 0);
+  assert.equal(url.text(), "http://127.0.0.1:3090/?token=new");
+});
+
+test("an unknown command or argument prints the usage; the launchd commands refuse off macOS before launchctl", async () => {
+  const r = await rig({ platform: "linux" });
+  assert.equal(await runService("bogus", [], r.deps), 2);
+  assert.equal(r.text(), "usage: npm run service -- install | uninstall | start | stop | restart | status | logs | url [--port N]");
+  for (const args of [["--port"], ["--port", "0"], ["--port", "3090x"], ["--verbose"]]) {
+    const bad = await rig();
+    assert.equal(await runService("status", args, bad.deps), 2, args.join(" "));
+    assert.match(bad.text(), /usage: npm run service -- /);
+  }
+  for (const cmd of ["install", "uninstall", "start", "stop", "restart"]) {
+    const off = await rig({ platform: "linux" });
+    assert.equal(await runService(cmd, [], off.deps), 1, cmd);
+    assert.equal(off.text().split("\n").length, 1, `${cmd}: one line`);
+    assert.match(off.text(), /needs macOS/);
+    assert.deepEqual(off.calls, [], `${cmd}: no launchctl`);
+  }
+  const status = await rig({ platform: "linux" });
+  assert.equal(await runService("status", [], status.deps), 0, "status, logs and url run anywhere");
+  assert.equal(status.text(), "com.gravit.face: not installed (npm run service -- install)");
+  assert.deepEqual([status.calls, status.urls], [[], []], "no plist: neither launchd nor the port is asked");
+});
+
+test("nodeOnPath: the first executable node on PATH, never one under node_modules", async () => {
+  const d = await home();
+  for (const dir of [join("node_modules", ".bin"), "plain", "bin"]) await mkdir(join(d, dir), { recursive: true });
+  await writeFile(join(d, "node_modules", ".bin", "node"), ""); await chmod(join(d, "node_modules", ".bin", "node"), 0o755);
+  await writeFile(join(d, "plain", "node"), ""); await chmod(join(d, "plain", "node"), 0o644);
+  await writeFile(join(d, "bin", "node"), ""); await chmod(join(d, "bin", "node"), 0o755);
+  assert.equal(nodeOnPath([join(d, "node_modules", ".bin"), join(d, "plain"), "", "relative", join(d, "bin")].join(":")), join(d, "bin", "node"));
+  assert.equal(nodeOnPath(join(d, "plain")), undefined);
 });
