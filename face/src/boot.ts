@@ -74,11 +74,11 @@
  *    listener and no guard existed: the order dispatched with no card
  *    (REVIEW-adversarial finding 1, proven by a probe;
  *    tests/order-gate-midboot-smoke.test.ts keeps it closed). Each half now
- *    waits, through `hostCtx.inject`, for exactly the service it reads — the
- *    guard for `tools`, the ask listener for `approval` — so the guard exists
- *    from the first moment the tool registry does, whatever order the rows
- *    activate in. Only the registrations moved: every audit still runs after
- *    `boot()`, plus {@link assertOrderGateArmed}.
+ *    waits, through `hostCtx.inject`, for exactly the service it cannot decide
+ *    without — the guard for `tools`, the ask listener for `approval` — so the
+ *    guard exists from the first moment the tool registry does, whatever order
+ *    the rows activate in. Only the registrations moved: every audit still
+ *    runs after `boot()`, plus {@link assertOrderGateArmed}.
  * The telemetry opt-out is honored exactly as the CLI honors it.
  *
  * LAYERING, and the one place the face inverts the CLI's: {@link faceOverlay}
@@ -641,9 +641,10 @@ interface GateApprovalLike {
   config?: { policy?: ApprovalPolicyLike };
 }
 
-/** The tool registry as the guard reads it: the guard seam itself
+/** The tool registry as Gate 2 reads it: the guard seam itself
  * (`ToolGuard`, NEW packages/core/tools/src/index.ts:731, 1136-1142) and the
- * live lookup of a call's description. */
+ * live lookup `get(name, scope)` - the guard reads a call's description
+ * through it, the ask listener whether the calling scope sees the tool at all. */
 interface GateToolsLike {
   get(name: string, scope?: unknown): { description?: string } | undefined;
   guard(check: (exec: { name: string; callId?: unknown; agent?: { session: unknown } }) => string | undefined): () => void;
@@ -675,7 +676,7 @@ interface GateEventsLike {
  * becomes.
  *
  * WHEN. Each half is a `hostCtx.inject` fiber (NEW vendor/cordis/src/
- * registry.ts:300-302): it runs once the service it reads is ACTIVE, and
+ * registry.ts:300-302): it runs once the service it injects is ACTIVE, and
  * everything it registers is an effect of THAT fiber - `ctx.on` through the
  * events service (vendor/cordis/src/events.ts:254-260, 292-301), `tools.guard`
  * through the calling context, which owns the effect (tools/src/index.ts:
@@ -683,15 +684,16 @@ interface GateEventsLike {
  * never outlive or double its service: when `approval` or `tools` is replaced,
  * cordis unloads the fiber - disposing the old registration - before it runs
  * the callback again for the new service (vendor/cordis/src/fiber.ts:625-696),
- * and disposing the host disposes both. Each half waits for exactly what it
- * reads, so neither is held back by the other: the guard arms with `tools`
- * alone, and while `approval` is absent an order is DENIED by the guard (no
- * logged grant can exist) rather than dispatched. And the guard arms before
- * any row can reach the new registry: `reflect.notify` wakes fibers in
- * registry order (vendor/cordis/src/reflect.ts:314-330) and these two were
- * registered before any config-tree row existed, so each one's single
- * microtask of `_reload` (fiber.ts:646-650) runs ahead of every row woken by
- * the same service.
+ * and disposing the host disposes both. Each half waits for exactly the one
+ * service it cannot decide without (the listener also reads `tools`, but
+ * lazily: VISIBILITY, below), so neither is held back by the other: the guard
+ * arms with `tools` alone, and while `approval` is absent an order is DENIED
+ * by the guard (no logged grant can exist) rather than dispatched. And the
+ * guard arms before any row can reach the new registry: `reflect.notify`
+ * wakes fibers in registry order (vendor/cordis/src/reflect.ts:314-330) and
+ * these two were registered before any config-tree row existed, so each one's
+ * single microtask of `_reload` (fiber.ts:646-650) runs ahead of every row
+ * woken by the same service.
  *
  * ORDER. `prepend` puts the listener in front of everything registered before
  * it - which, from `prepare`, is nothing. cordis runs a waterfall
@@ -709,6 +711,15 @@ interface GateEventsLike {
  * that swallows our `ask` can at worst turn an order into a denial, never into
  * an unapproved dispatch. (A re-armed listener prepends again, so it returns
  * to the front.)
+ *
+ * VISIBILITY. The listener denies an order tool the CALLING scope cannot see
+ * (`tools.get(exec.name, exec.agent)` is `undefined`) instead of asking. Spike
+ * 3 measured that dsh runs `tools/pre-execute` before it resolves visibility,
+ * so a desk or masked-bot model that named a hidden order tool raised a card
+ * that could only park, and an approved one would then fail `unknown tool` at
+ * dispatch. The listener reads `tools` lazily, from its own context at call
+ * time; `tools` is not in its inject list, so its arming and re-arming above
+ * are unchanged, and while no registry is live it decides as before.
  * @param hostCtx - the root context `boot()` hands `prepare`.
  * @returns the two fibers, for {@link assertOrderGateArmed} once `boot()` settles.
  */
@@ -731,10 +742,16 @@ export function armOrderGate(hostCtx: Context): OrderGateFibers {
           reason: `${exec.name} needs a per-order approval card and this call has no session to ask in`,
         };
       }
+      /* Can the CALLER see this tool? Looked up per call, through the registry
+       * live at this moment, and never injected (VISIBILITY, above). No
+       * registry: the listener decides as it did before it could look. */
+      const tools = gateCtx.get("tools") as GateToolsLike | undefined;
+      const visible = tools === undefined || tools.get(exec.name, exec.agent) !== undefined;
       const decision = orderApprovalDecision(
         exec.name,
         effectiveApprovalPolicy(approval, session),
         exec.arguments,
+        visible,
       );
       return decision ?? next();
     }, { prepend: true });

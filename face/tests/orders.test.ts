@@ -352,3 +352,31 @@ test("orderGuardReasonForSession: a drifted Session API never bricks a tool the 
     assert.equal(orderGuardReasonForSession(name, description, throwing, "c1"), undefined, name);
   }
 });
+
+/* --- an order tool the caller cannot see (spike 3) ------------------------- */
+
+test("a hidden order tool is denied in the gate's own words, before the policy", () => {
+  const d = orderApprovalDecision("mcp__alpaca-kit__place_order", "ask", { side: "buy" }, false);
+  assert.deepEqual(d, { kind: "deny", reason: "mcp__alpaca-kit__place_order is not available in this session - its preset hides it - so no approval card is raised and the order does not run" });
+  assert.equal(orderApprovalDecision("mcp__alpaca-kit__place_order", "ask", { side: "buy" }, true)?.kind, "ask");
+  assert.equal(orderApprovalDecision("bash", "ask", {}, false), null);
+});
+
+test("orderApprovalDecision: a hidden order tool under policy `never` gets the hidden-tool sentence, not the policy one", () => {
+  /* Visibility comes first: under `never` the policy sentence would send the operator to
+   * DSH_PERMISSION_MODE for a tool no setting lets this session call. cancel_order is refused
+   * the same way, by name, like every order tool. */
+  for (const name of ["mcp__alpaca-kit__place_order", "mcp__alpaca-kit__cancel_order"]) {
+    assert.deepEqual(orderApprovalDecision(name, "never", undefined, false), {
+      kind: "deny",
+      reason: `${name} is not available in this session - its preset hides it - so no approval card is raised and the order does not run`,
+    }, name);
+  }
+  /* A VISIBLE tool keeps both of today's answers, and `visible` defaults to true, so a caller
+   * that does not pass it decides exactly as before. */
+  const never = orderApprovalDecision("mcp__alpaca-kit__place_order", "never", undefined, true);
+  assert.match(never?.kind === "deny" ? never.reason : "", /approval policy is "never"/);
+  assert.deepEqual(orderApprovalDecision("mcp__alpaca-kit__place_order", "never"), never);
+  assert.deepEqual(orderApprovalDecision("mcp__alpaca-kit__place_order", "ask", { symbol: "AAPL" }),
+    orderApprovalDecision("mcp__alpaca-kit__place_order", "ask", { symbol: "AAPL" }, true));
+});

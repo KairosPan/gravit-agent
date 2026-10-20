@@ -116,17 +116,36 @@ export function effectiveApprovalPolicy(
  * never saw. Denying in our own words keeps the transcript honest, and makes
  * the gate un-disarmable by `DSH_PERMISSION_MODE=danger-full-access` or by a
  * runtime switch to the `danger-full-access` preset.
+ *
+ * An order tool the calling scope cannot SEE is denied first, before the
+ * policy. Spike 3 measured that dsh runs the `tools/pre-execute` waterfall
+ * before it resolves visibility (dsh-tools `prepareExecution`, and only then
+ * `dispatchToolBody`'s `ToolNotFoundError`), so a session whose preset masks
+ * the tool - the desk, a bot - still reaches this gate when its model names
+ * one. Asking there raises a card that can only park with no browser, and an
+ * approved call would then fail `unknown tool` at dispatch; under `never` the
+ * policy sentence would send the operator to a setting that cannot help.
  * @param name - the registered tool name (`exec.name`).
  * @param policy - the session's effective approval policy.
  * @param args - `exec.arguments`, rendered onto the card so the human can decide.
+ * @param visible - whether the calling scope resolves this tool
+ *   (`tools.get(name, agent) !== undefined`, src/boot.ts armOrderGate). It
+ *   defaults to `true`, the decision as it was before the gate could tell.
  * @returns the decision, or `null` when this call is none of our business.
  */
 export function orderApprovalDecision(
   name: string,
   policy: ApprovalPolicyLike,
   args?: unknown,
+  visible = true,
 ): PreToolDecision | null {
   if (!isOrderTool(name)) return null;
+  if (!visible) {
+    return {
+      kind: "deny",
+      reason: `${name} is not available in this session - its preset hides it - so no approval card is raised and the order does not run`,
+    };
+  }
   if (policy === "never") {
     return {
       kind: "deny",

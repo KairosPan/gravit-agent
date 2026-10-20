@@ -55,6 +55,13 @@ const gated = process.env.FACE_SMOKE !== "1";
  *  can refuse it, which is exactly the layer under test here. */
 const STAND_IN = "mcp__drill__submit_order";
 
+/** The order-gate drill's ORDER stand-in: a name the pre-execute listener does
+ *  claim. The listener asks only for an order tool its caller can see (spike 3:
+ *  dsh runs the waterfall before it resolves visibility), so `trader`'s mask
+ *  admits it - the bot meets the card Gravit would - and `probe`'s does not -
+ *  the bot is refused before any card. */
+const ORDER_STAND_IN = "mcp__drill__place_order";
+
 /** The opening words of the research-cycle contract (`dsh/profile/cycle.md`, the `gravit:cycle` section): enough
  *  to tell whether the section reached a prompt, without copying the contract into a test. The em dash is U+2014. */
 const CYCLE_HEADING = "Step 0 — ask once";
@@ -81,12 +88,13 @@ test("bots smoke: roster, mask, persona, a default that masks nothing, the shipp
     await writeFile(join(bots, "probe", "agent.cordis.yml"),
       renderComposition({ soul: "You are Probe, a test voice.", allow: ["bash", "read", "ask_user_question", "create_goal", "role_screener", "no_such_tool"], plugin: PLUGIN_ABS }));
     await createBot(bots, { id: "shipped", name: "Shipped", soul: "You are Shipped, the relative-path probe." });
-    /* The Gate-2 bot: its mask ADMITS the order stand-in. That is the point -
-     * the guard must refuse it anyway, so the refusal cannot be credited to
-     * the mask. */
+    /* The Gate-2 bot: its mask ADMITS both stand-ins. That is the point -
+     * the guard must refuse the marked one anyway, so the refusal cannot be
+     * credited to the mask, and the listener must ask for the order one,
+     * which the bot can see, as it would for Gravit. */
     await createBot(bots, { id: "trader", name: "Trader", soul: "You are Trader, a masked-in order probe." });
     await writeFile(join(bots, "trader", "agent.cordis.yml"),
-      renderComposition({ soul: "You are Trader, a masked-in order probe.", allow: ["bash", STAND_IN], plugin: PLUGIN_ABS }));
+      renderComposition({ soul: "You are Trader, a masked-in order probe.", allow: ["bash", STAND_IN, ORDER_STAND_IN], plugin: PLUGIN_ABS }));
     await mkdir(join(bots, "cracked"));
     await writeFile(join(bots, "cracked", "agent.cordis.yml"), "not: a list\n");
 
@@ -179,11 +187,11 @@ test("bots smoke: roster, mask, persona, a default that masks nothing, the shipp
       assert.ok(expected.includes("bash"), "and the mask is not empty");
       assert.equal(names(tools.schemas(shipped)).includes("subagent"), false, "delegation is never in it");
 
-      /* GATE 2 FROM A BOT SESSION (spec §8). The stand-in is registered here,
+      /* GATE 2 FROM A BOT SESSION (spec §8). The stand-ins are registered here,
        * AFTER `trader`'s preset was declared and mounted - under 0.1.1 an allow
-       * mask computed at the mount would have shut it out. plugins/bot.js
-       * re-expands on `tools/change`, so `trader`'s mask, which names it, now
-       * ADMITS it. The refusal below therefore cannot be the mask's: it is the
+       * mask computed at the mount would have shut them out. plugins/bot.js
+       * re-expands on `tools/change`, so `trader`'s mask, which names them, now
+       * ADMITS them. The refusal below therefore cannot be the mask's: it is the
        * tree-wide guard, and it is the same refusal `order-gate.test.ts` drills
        * for a bare session. Gate 2 is tree-wide: a preset-joined agent whose
        * mask admits an order tool meets the same guard as Gravit (spec
@@ -196,11 +204,20 @@ test("bots smoke: roster, mask, persona, a default that masks nothing, the shipp
         output: { schema: { type: "object" }, render: () => [{ type: "text", text: "ok" }] },
         execute: async () => { bodyRan = true; return {}; },
       });
+      const unregisterOrder = tools.register({
+        name: ORDER_STAND_IN,
+        description: "place a PAPER order - drill stand-in, nothing behind it (operator-gated)",
+        parameters: {},
+        output: { schema: { type: "object" }, render: () => [{ type: "text", text: "ok" }] },
+        execute: async () => { bodyRan = true; return {}; },
+      });
       try {
         await settle();
         const t = await create({ cwd: join(bots, "trader", "journal"), agentPreset: "trader" });
         const trader = agentOf(t.sessionId);
         assert.ok(names(tools.schemas(trader)).includes(STAND_IN), "the bot's own mask ADMITS the order tool registered after its mount");
+        assert.ok(names(tools.schemas(trader)).includes(ORDER_STAND_IN), "and the order stand-in beside it");
+        assert.equal(names(tools.schemas(probe)).includes(ORDER_STAND_IN), false, "while probe's mask, which never names it, hides it");
         const refused = await tools.execute({
           callId: "bot-guard", name: STAND_IN, arguments: {},
           agent: trader, signal: new AbortController().signal,
@@ -215,15 +232,25 @@ test("bots smoke: roster, mask, persona, a default that masks nothing, the shipp
          * cannot be answered here. The terminal is the registry's own ALLOW, so
          * an `ask` can only have come from the listener - and this call carries
          * a BOT's agent, which is what makes it the tree-wide claim. */
-        const decision = await (ctx as unknown as {
+        const fire = (agent: Agent, callId: string) => (ctx as unknown as {
           waterfall(name: "tools/pre-execute", exec: object, next: () => Promise<{ kind: string; reason?: string }>): Promise<{ kind: string; reason?: string }>;
         }).waterfall("tools/pre-execute", {
-          name: "mcp__drill__place_order", callId: "bot-ask", arguments: { symbol: "AAPL", qty: 1, side: "buy" },
-          agent: trader, signal: new AbortController().signal,
+          name: ORDER_STAND_IN, callId, arguments: { symbol: "AAPL", qty: 1, side: "buy" },
+          agent, signal: new AbortController().signal,
         }, () => Promise.resolve({ kind: "allow" }));
+        const decision = await fire(trader, "bot-ask");
         assert.equal(decision.kind, "ask", "an order from a bot raises the same card Gravit's would");
         assert.match(decision.reason ?? "", /AAPL/);
+        /* A bot whose mask hides the order tool is refused in the gate's own
+         * words before any card - a card it raised could only park, and,
+         * approved, would fail `unknown tool` at dispatch (spike 3). */
+        assert.deepEqual(await fire(probe, "bot-hidden"), {
+          kind: "deny",
+          reason: "mcp__drill__place_order is not available in this session - its preset hides it - so no approval card is raised and the order does not run",
+        }, "an order from a bot that cannot see the tool raises no card");
+        assert.equal(bodyRan, false, "no stand-in body ever runs");
       } finally {
+        unregisterOrder();
         unregister();
       }
 

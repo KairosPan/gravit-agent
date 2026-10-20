@@ -91,8 +91,14 @@ class FakeTools extends Service {
     }, "fake tools.guard()");
   }
 
-  get(): undefined {
-    return undefined;
+  /** The live lookup the guard (a call's description) and the ask listener
+   * (whether the caller sees the tool at all) read. It resolves the order
+   * stand-in for every caller, as the real registry resolves a global tool,
+   * and nothing else: the listener refuses an order tool its caller cannot
+   * see, and this drill is about arming, not visibility
+   * (tests/order-gate.test.ts drills that). */
+  get(name: string): { description: string } | undefined {
+    return name === NAME ? { description: `place a PAPER order - offline drill stand-in ${OPERATOR_GATED_MARKER}` } : undefined;
   }
 }
 
