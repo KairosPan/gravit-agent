@@ -18,7 +18,7 @@ export const reducers = {
   },
 
   // the list as the host gives it; a surviving conversation keeps its window and what the viewer did with it
-  hostList(s, { conversations }) {
+  hostList(s, { conversations, channels }) {
     const old = new Map(s.conversations.map(c => [c.id, c]));
     const next = conversations.map(c => {
       const o = old.get(c.id);
@@ -26,7 +26,7 @@ export const reducers = {
         ? { ...c, messages: o.messages, loaded: o.loaded, preview: o.preview, usage: o.usage, thinking: o.thinking, created: o.created ?? c.created, lastSeen: Math.max(o.lastSeen ?? 0, c.lastSeen ?? 0) }
         : c;
     });
-    return { ...s, conversations: next };
+    return { ...s, conversations: next, channels: Array.isArray(channels) ? channels : s.channels };
   },
 
   // a follow snapshot or a page: the window whole, never appended to what was drawn
