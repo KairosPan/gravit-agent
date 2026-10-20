@@ -34,7 +34,11 @@ function portfolio(state, now) {
   // the keyless face says so in the face's own words; any other unreadable answer is unavailable, its text never drawn
   if (!p.available) return note(data.ok === true ? 'No APCA keys in the environment' : 'Account unavailable');
   const cur = p.currency;
-  const stale = data.stale === true ? note(`As of ${when(data.generated_at, now) || 'earlier'} · stale`) : '';
+  // a payload served from the face's cache after a failure, or a read that failed after a good one: the last good
+  // numbers, stamped with when they were read, and a way to try again
+  const failed = a.status === 'error';
+  const stale = data.stale === true || failed ? note(`As of ${when(data.generated_at, now) || 'earlier'} · stale`) : '';
+  const retry = failed ? '<button type="button" class="btn-sm" data-action="refreshAccount">Retry</button>' : '';
   const bar = p.alloc.length
     ? `<div class="alloc-bar">${p.alloc.map(x => `<span class="alloc-seg alloc-${x.token}" style="flex:${x.pct.toFixed(2)}"></span>`).join('')}</div>` +
       `<div class="alloc-legend">${p.alloc.map(x => `<span>${esc(x.label)} ${Math.round(x.pct)}%</span>`).join('')}</div>`
@@ -43,7 +47,7 @@ function portfolio(state, now) {
     `<span class="dim"> · ${esc(heldWord(h))}</span></span><span class="num">${esc(money(h.value, cur))}</span><span class="${tone(h.changeToday)}">${esc(pct(h.changeToday))}</span></div>`).join('');
   const worth = box(`<div class="label">Net worth</div><div class="networth">${esc(money(p.netWorth, cur))}</div>` +
     `<div class="delta"><span class="${tone(p.today)}">${esc(signedMoney(p.today, cur))} · ${esc(pct(p.todayPct))}</span><span class="dim">today</span></div>${stale}${bar}` +
-    `${holdings ? `<div class="holdings">${holdings}</div>` : ''}<div class="btn-row"><button type="button" class="btn-sm" data-action="openStatement">Statement</button></div>`, 'Portfolio');
+    `${holdings ? `<div class="holdings">${holdings}</div>` : ''}<div class="btn-row">${retry}<button type="button" class="btn-sm" data-action="openStatement">Statement</button></div>`, 'Portfolio');
   const groups = BUCKETS.filter(([k]) => p.orders[k].length)
     .map(([k, label]) => `<div class="acct-orders"><div class="dsec-label">${label}</div>${p.orders[k].map(o => `<div class="order-row">${esc(orderLine(o))}</div>`).join('')}</div>`).join('');
   const orders = box(`<div class="cardbox-title">Orders</div>${groups || note('No orders')}`, 'Orders');

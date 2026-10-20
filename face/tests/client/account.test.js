@@ -74,13 +74,15 @@ test('the keyless face says No APCA keys in the environment and draws no numbers
   for (const gone of [/networth/, /alloc-bar/, /\$/, /class="chip/, /data-action="openStatement"/]) assert.doesNotMatch(html, gone, String(gone));
 });
 
-test('a 503 with nothing loaded: Account unavailable and Retry; with data loaded: the data and no error', () => {
+test('a 503 with nothing loaded: Account unavailable and Retry; with data loaded: the data, stamped stale, and Retry', () => {
   const bare = screen({ failed: true }).html;
   assert.match(bare, /<p class="acct-note">Account unavailable<\/p>/);
   assert.match(bare, /data-action="refreshAccount">Retry</);
   const loaded = screen({ data: keyed(), failed: true }).html;
   assert.match(loaded, /class="networth">\$123,346\.11</);
-  assert.doesNotMatch(loaded, /unavailable|Retry/);
+  assert.match(loaded, /<p class="acct-note">As of 14:32 · stale<\/p>/, 'the numbers are the last good read, and say so');
+  assert.match(loaded, /data-action="refreshAccount">Retry</);
+  assert.doesNotMatch(loaded, /unavailable/);
   assert.match(screen({ loading: true }).html, /<p class="acct-note">Loading…<\/p>/);
 });
 

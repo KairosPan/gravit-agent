@@ -15,19 +15,26 @@ function toolNamesOf(listing) {
 
 export function startAccount({ store, getJson, call, now = Date.now }) {
   let flight = null;
+  let flightFresh = false;
+  let seq = 0;   // only the latest-started read lands: a fresh one must not be overwritten by an older plain one
 
-  function load() {
-    if (flight) return flight;
+  // fresh: past the face's 60 s cache (`?fresh=1`) — Refresh and the read right after a fill; a plain read joins any
+  // flight, a fresh one joins only a fresh one
+  function load({ fresh = false } = {}) {
+    if (flight && (flightFresh || !fresh)) return flight;
+    const mine = ++seq;
     store.dispatch('accountLoading');
     // the read starts on the next microtask, so `flight` is set before anything can settle it
     const current = Promise.resolve()
-      .then(() => getJson('/data/account.json'))
+      .then(() => getJson(fresh ? '/data/account.json?fresh=1' : '/data/account.json'))
       .then(data => {
+        if (mine !== seq) return;
         if (data && data.ok === true) store.dispatch('accountLoaded', { data, at: now() });
         else store.dispatch('accountFailed', { at: now() });
-      }, () => { store.dispatch('accountFailed', { at: now() }); })
-      .finally(() => { if (flight === current) flight = null; });
+      }, () => { if (mine === seq) store.dispatch('accountFailed', { at: now() }); })
+      .finally(() => { if (flight === current) { flight = null; flightFresh = false; } });
     flight = current;
+    flightFresh = fresh;
     return current;
   }
 

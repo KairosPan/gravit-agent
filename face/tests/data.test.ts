@@ -363,3 +363,21 @@ test("a rejecting spawn leaves no unhandled rejection behind", async () => {
     process.off("unhandledRejection", onUnhandled);
   }
 });
+
+test("?fresh=1 skips the account cache and still shares one spawn; the other producer routes ignore it", async () => {
+  let calls = 0;
+  const byPath = routesWith(async () => ({ stdout: JSON.stringify({ ok: true, n: ++calls }), code: 0 }), () => 0);
+  const fresh = (path: string) => ({ headers: { host: "127.0.0.1:3090" }, url: `${path}?fresh=1` }) as unknown as IncomingMessage;
+  const account = byPath.get("/data/account.json")!;
+  assert.equal(JSON.parse((await call(account)).body).n, 1);
+  assert.equal(JSON.parse((await call(account)).body).n, 1, "a plain read within the TTL is the cache");
+  const [a, b] = await Promise.all([call(account, fresh("/data/account.json")), call(account, fresh("/data/account.json"))]);
+  assert.equal(calls, 2, "two fresh reads at once share one spawn");
+  assert.equal(JSON.parse(a.body).n, 2);
+  assert.equal(JSON.parse(b.body).n, 2);
+  assert.equal(JSON.parse((await call(account)).body).n, 2, "and refresh the cache");
+  const market = byPath.get("/data/market.json")!;
+  await call(market);
+  await call(market, fresh("/data/market.json"));
+  assert.equal(calls, 3, "the market route keeps its cache whatever the query");
+});

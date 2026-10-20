@@ -83,11 +83,12 @@ export function orderLine(order) {
 
 const time = at => { const t = Date.parse(at); return Number.isNaN(t) ? -Infinity : t; };
 
-/** The statement: the filled orders, newest first, with what each cost. */
+/** The statement: every order with a fill — filled, partly filled and still working, or partly filled and then
+ * canceled — newest first, with what each cost, so it reconciles with the positions. */
 export function statementOf(data) {
   if (!data?.ok || !data.available || !Array.isArray(data.orders)) return [];
   return data.orders
-    .filter(order => orderMatches(order, 'filled'))
+    .filter(order => orderMatches(order, 'filled') || (number(order?.filled_qty) ?? 0) > 0)
     .map(order => {
       const qty = number(order.filled_qty) ?? number(order.qty);
       const price = number(order.filled_avg_price);

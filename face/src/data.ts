@@ -241,8 +241,12 @@ export function registerDataRoutes(
      * be able to start a producer process either. */
     if (!isTrustedDataRequest(req)) return send(res, 403, FORBIDDEN);
 
+    /* `?fresh=1` on the account route only — Refresh and the read right after a fill — skips the TTL, never the
+     * single flight; nothing from the query reaches the child. The market producer's bed walk is never re-run on
+     * demand. */
+    const fresh = mode === "account" && new URL(req.url ?? "/", "http://localhost").searchParams.get("fresh") === "1";
     const hit = cache.get(mode);
-    if (hit && now() - hit.at < TTL_MS[mode]) return send(res, 200, hit.body);
+    if (hit && !fresh && now() - hit.at < TTL_MS[mode]) return send(res, 200, hit.body);
 
     let flight = inflight.get(mode);
     if (!flight) {

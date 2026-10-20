@@ -23,7 +23,7 @@ export function mkAv(asset, size = '') {
   return `<span class="${cls('mk-av', size && `mk-av-${size}`)}" aria-hidden="true">${esc(baseOf(asset).slice(0, 4))}</span>`;
 }
 
-function row({ asset, quote, watched, held }) {
+function row({ asset, quote, watched, held }, providers) {
   const id = esc(asset.id);
   const sub = [asset.symbol, asset.exchange].filter(Boolean).join(' · ');
   return `<tr data-id="${id}">` +
@@ -33,13 +33,13 @@ function row({ asset, quote, watched, held }) {
     `<td class="r">${esc(price(quote?.price, asset.currency))}</td>` +
     `<td class="r mk-c-chg">${chgHtml(number(quote?.change_pct))}</td>` +
     `<td class="r mk-c-vol">${esc(volumeWord(asset, quote))}</td>` +
-    `<td class="r mk-c-st"><span class="mk-st">${esc(quoteWord(quote))}</span></td></tr>`;
+    `<td class="r mk-c-st"><span class="mk-st">${esc(quoteWord(quote, providers, asset.market))}</span></td></tr>`;
 }
 
-function table(rows) {
+function table(rows, providers) {
   const head = '<tr><th scope="col"><span class="sr-only">Watch</span></th><th scope="col" class="mk-c-name">Market</th><th scope="col" class="r">Price</th>' +
     '<th scope="col" class="r mk-c-chg">Change</th><th scope="col" class="r mk-c-vol">Volume</th><th scope="col" class="r mk-c-st"><span class="sr-only">Quote</span></th></tr>';
-  return `<section class="cardbox mk-tcard" aria-label="Markets"><div class="mk-wrap"><table class="mk-t"><thead>${head}</thead><tbody>${rows.map(row).join('')}</tbody></table></div></section>`;
+  return `<section class="cardbox mk-tcard" aria-label="Markets"><div class="mk-wrap"><table class="mk-t"><thead>${head}</thead><tbody>${rows.map(r => row(r, providers)).join('')}</tbody></table></div></section>`;
 }
 
 const note = text => (text ? `<p class="mk-note">${esc(text)}</p>` : '');
@@ -59,7 +59,7 @@ export function renderMarketsScreen(state, now) {
     : '<span></span>';
   const bar = `<div class="mk-bar">${left}${rows.length > 1 ? seg(MARKET_SORTS.map(s => s.label), pressed, 'mkSort') : ''}</div>`;
   const words = (q ? note(searchWord(m.search)) : note(connectionWord(m.connection))) + note(watchWord(m.watchError));
-  const body = rows.length ? table(rows) : q ? '' : '<p class="mk-empty">Nothing watched yet</p>';
+  const body = rows.length ? table(rows, m.providers) : q ? '' : '<p class="mk-empty">Nothing watched yet</p>';
   return `<main class="main mkts"><div class="mk-head"><h1 class="head-title">Markets</h1>` +
     `<div class="search"><label for="mq" class="sr-only">Search markets</label>${icon('search', 18, 2)}<input id="mq" type="search" autocomplete="off" placeholder="Search markets" data-action="mkQuery"${attrs({ value: m.q })}></div></div>` +
     `<div class="mk">${tabs}${bar}${words}${body}</div></main>`;
@@ -94,7 +94,7 @@ export function marketPage(asset, state, now) {
   const facts = [['Previous close', price(quote?.prev_close, asset.currency)], ['Volume', volumeWord(asset, quote)], ['Source', sourceWord(quote ?? { market: asset.market })]];
   const top = `<div class="mk-d-px"><span class="mk-big">${esc(price(quote?.price, asset.currency))}</span>` +
     `${priced ? `${chgHtml(number(quote.change_pct))}<span class="mk-basis">${esc(basisWord(quote))}</span>` : ''}</div>` +
-    `<p class="mk-asof">${esc(asOf + quoteWord(quote))}</p>` +
+    `<p class="mk-asof">${esc(asOf + quoteWord(quote, m.providers, asset.market))}</p>` +
     `<dl class="mk-facts">${facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>`;
 
   const left = [];

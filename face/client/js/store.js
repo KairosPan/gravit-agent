@@ -3,6 +3,7 @@
 // persist(state) is what gets written: the app strips what must never reach storage (a typed key, a moment's overlay).
 export function createStore({ initial, reducers, storage = null, key = 'gravit-ui.state', accept = () => true, persist = s => s }) {
   let state = load() ?? initial;
+  let lastSaved = null;   // what this store last wrote: a dispatch that leaves it unchanged writes nothing
   const subs = new Set();
 
   function load() {
@@ -15,7 +16,12 @@ export function createStore({ initial, reducers, storage = null, key = 'gravit-u
     }
   }
   function save() {
-    try { storage?.setItem(key, JSON.stringify(persist(state))); } catch { /* storage may be unavailable: the demo still runs */ }
+    try {
+      const text = JSON.stringify(persist(state));
+      if (text === lastSaved) return;
+      storage?.setItem(key, text);
+      lastSaved = text;
+    } catch { /* storage may be unavailable: the page still runs */ }
   }
   function notify(type) {
     for (const fn of subs) fn(state, type);

@@ -58,9 +58,13 @@ export function listAssets(markets, accountData) {
   return [...watchlist, ...holdingAssets(accountData).filter(a => !ids.has(a.id))];
 }
 
+// Most traded ranks by dollar volume (price × volume), so a coin's units and a stock's shares compare; Biggest moves by
+// the size of the move
 function sortKey(sort, quote) {
   if (sort === 'movers') { const c = number(quote?.change_pct); return c === null ? null : Math.abs(c); }
-  return number(quote?.volume);
+  const price = number(quote?.price);
+  const volume = number(quote?.volume);
+  return price === null || volume === null ? null : price * volume;
 }
 
 /** The rows: the list on the current tab, each with its quote, sorted with nulls last and list order on ties. */
@@ -94,9 +98,13 @@ export function assetFor(markets, accountData, id) {
   return known ?? normalizeAsset({ id: canonical });
 }
 
-/** The quote's state in a word or two: Live, Delayed, Stale or No quote, and Closed when the market is. */
-export function quoteWord(quote) {
-  if (!quote || number(quote.price) === null || !QUOTE_STATUS[quote.quote_status]) return 'No quote';
+/** The quote's state in a word or two: Live, Delayed, Stale or No quote, and Closed when the market is; with no price
+ * from a market whose provider is not configured (no Alpaca keys, no iFinD token), Not configured. */
+export function quoteWord(quote, providers = [], market = quote?.market) {
+  if (!quote || number(quote.price) === null || !QUOTE_STATUS[quote.quote_status]) {
+    const provider = (Array.isArray(providers) ? providers : []).find(p => p?.market === market);
+    return provider?.status === 'unconfigured' ? 'Not configured' : 'No quote';
+  }
   return QUOTE_STATUS[quote.quote_status] + (quote.market_status === 'closed' ? ' · Closed' : '');
 }
 

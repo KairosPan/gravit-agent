@@ -467,13 +467,13 @@ function accountHost(opts = {}) {
   const reads = [];
   const getJson = async path => {
     reads.push(path);
-    if (path === '/data/account.json') return KEYED;
+    if (path.startsWith('/data/account.json')) return KEYED;
     if (path === '/data/plugins.json') return { mcp: [{ server: 'alpaca-kit', phase: 'active', tools: [{ name: 'mcp__alpaca-kit__place_order', description: '' }] }], agentTools: [], rows: [] };
     if (path.startsWith('/data/quotes')) return { ok: true, generated_at: '2026-10-19T14:30:01Z', quotes: [], providers: [{ id: 'alpaca', market: 'us', status: 'connected', source: 'Alpaca', feed: 'iex', transport: 'stream', message: '' }] };
     return h.getJson(path);
   };
   const call = async (endpoint, args) => (endpoint === 'credentials/describe' ? (h.calls.push([endpoint, args]), { APCA_API_KEY_ID: { configured: true, source: 'env' }, APCA_API_SECRET_KEY: { configured: true, source: 'env' } }) : h.call(endpoint, args));
-  return { ...h, getJson, call, reads, accountReads: () => reads.filter(p => p === '/data/account.json').length };
+  return { ...h, getJson, call, reads, accountReads: () => reads.filter(p => p.startsWith('/data/account.json')).length };
 }
 const bootAccount = (f, h, mk = fakeMarkets()) => boot(f.win, { openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, createLiveQuotes: mk.createLiveQuotes, createSymbolSearch: mk.createSymbolSearch });
 
@@ -488,7 +488,7 @@ test('the account loads at boot and the rail shows the net worth', async () => {
   store.timers.clear();
 });
 
-test('Refresh reloads; entering Account reads again; entering Venues describes once', async () => {
+test('Refresh reloads fresh; entering Account reads again; entering Venues describes, and Refresh there describes again', async () => {
   const f = fakeWindow({ hash: '#/account/portfolio', storage: memoryStorage() });
   const h = accountHost({ rows: [row('s1')] });
   const store = bootAccount(f, h);
@@ -498,6 +498,7 @@ test('Refresh reloads; entering Account reads again; entering Venues describes o
   f.click({ tagName: 'BUTTON', dataset: { action: 'refreshAccount' } });
   await settle();
   assert.equal(h.accountReads(), 2);
+  assert.equal(h.reads.filter(p => p.startsWith('/data/account.json')).at(-1), '/data/account.json?fresh=1', 'Refresh skips the 60 s cache');
   const describes = () => h.calls.filter(c => c[0] === 'credentials/describe').length;
   assert.equal(describes(), 0);
   f.win.location.hash = '#/account/venues';
@@ -508,7 +509,7 @@ test('Refresh reloads; entering Account reads again; entering Venues describes o
   assert.match(f.html(), /Alpaca · Connected/);
   f.click({ tagName: 'BUTTON', dataset: { action: 'refreshAccount' } });
   await settle();
-  assert.equal(describes(), 1, 'a refresh on Venues reads the account, not the venue facts');
+  assert.equal(describes(), 2, 'a refresh on Venues reads the venue facts again too');
   f.win.location.hash = '#/messages/s1';
   await settle();
   f.win.location.hash = '#/account/portfolio';
@@ -556,6 +557,7 @@ test('a receipt in a conversation reloads the account', async () => {
   follow.cbs.onItem({ type: 'event', event: { type: 'tool/result', seq: 41, time: 1756512201000, surfaceOp: 'append', data: { turn: 4, step: 1, message: { id: 'm-41', role: 'tool', source: { kind: 'tool', callId: 'c9' }, toolCallId: 'c9', content: [{ type: 'text', text: JSON.stringify({ ok: true, id: 'ord-1' }) }], isError: false } } } });
   await settle();
   assert.equal(h.accountReads(), before + 1);
+  assert.equal(h.reads.filter(p => p.startsWith('/data/account.json')).at(-1), '/data/account.json?fresh=1', 'a fill is read past the cache');
   store.timers.clear();
 });
 
@@ -570,5 +572,41 @@ test('Open the Statement on a Market page lands on Account with the Statement op
   assert.equal(f.win.location.hash, '#/account/portfolio');
   assert.equal(store.get().account.statementOpen, true);
   assert.match(f.html(), /aria-label="Statement"/);
+  store.timers.clear();
+});
+
+// the final review: the page re-renders on every quote tick, so a click whose press and release straddle a render
+// never fires; renders wait while a press is down
+test('a press holds renders until it ends, so a streaming quote cannot swallow the click', async () => {
+  const storage = memoryStorage();
+  storage.setItem('gravit.market.watchlist.v1', JSON.stringify({ version: 1, items: [{ id: 'crypto:BTC/USD', market: 'crypto', symbol: 'BTC/USD', name: 'Bitcoin', exchange: '', currency: 'USD' }] }));
+  const f = fakeWindow({ hash: '#/markets', storage });
+  const h = host();
+  const mk = fakeMarkets();
+  const store = boot(f.win, { openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, createLiveQuotes: mk.createLiveQuotes, createSymbolSearch: mk.createSymbolSearch, pointerHoldMs: 20 });
+  await h.ready();
+  const quote = price => ({ id: 'crypto:BTC/USD', market: 'crypto', symbol: 'BTC/USD', price, prev_close: 1, change: 1, change_pct: 1, volume: 1, as_of: '2026-10-20T14:00:00Z', received_at: null, volume_as_of: null, source: 'Coinbase', feed: 'exchange', basis: '24h', quote_status: 'live', market_status: 'open', message: '' });
+  const tick = price => mk.live.onUpdate({ quotes: { 'crypto:BTC/USD': quote(price) }, providers: [], status: 'streaming', refreshing: false, generatedAt: 'x', note: '', limited: 0 });
+  const before = f.writes;
+  f.fire('root', 'pointerdown', { button: 0 });
+  tick(82_000);
+  tick(82_001);
+  assert.equal(f.writes, before, 'no render while the press is down');
+  f.fire('doc', 'pointerup', { button: 0 });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'toggleWatch', id: 'crypto:BTC/USD' } });
+  assert.deepEqual(store.get().markets.watchlist, [], 'the click ran');
+  await settle();
+  assert.match(f.html(), /Nothing watched yet/, 'the held render landed');
+  const held = f.writes;
+  f.fire('root', 'pointerdown', { button: 0 });
+  tick(82_002);
+  assert.equal(f.writes, held);
+  await new Promise(r => setTimeout(r, 40));
+  await settle();
+  assert.ok(f.writes > held, 'a press that never comes back up lets go after pointerHoldMs');
+  const right = f.writes;
+  f.fire('root', 'pointerdown', { button: 2 });
+  tick(82_003);
+  assert.ok(f.writes > right, 'a right press holds nothing');
   store.timers.clear();
 });

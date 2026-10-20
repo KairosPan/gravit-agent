@@ -79,3 +79,12 @@ test('venueOf: keys and order tools, each unknown until read', () => {
   assert.equal(venueOf({ ...keyed(), host: 'api.alpaca.markets' }, creds, []).mode, 'Live');
   assert.deepEqual(venueOf({ ok: true, available: false }, null, null), { host: null, mode: '', keys: 'unknown', orders: 'unknown' });
 });
+
+test('the statement keeps every fill: a partly filled order canceled later, or still working, is on it; an unfilled one is not', () => {
+  const data = { ...keyed(), orders: [
+    { id: 'p1', symbol: 'AAPL', side: 'buy', qty: '10', filled_qty: '4', filled_avg_price: '150', type: 'limit', limit_price: '150', status: 'canceled', submitted_at: '2026-10-17T14:00:00Z', filled_at: '2026-10-17T14:05:00Z' },
+    { id: 'p2', symbol: 'KO', side: 'buy', qty: '10', filled_qty: '3', filled_avg_price: '60', type: 'limit', limit_price: '60', status: 'partially_filled', submitted_at: '2026-10-19T14:00:00Z', filled_at: null },
+    { id: 'p3', symbol: 'MSFT', side: 'sell', qty: '1', filled_qty: '0', type: 'market', status: 'canceled', submitted_at: '2026-10-18T14:00:00Z' },
+  ] };
+  assert.deepEqual(statementOf(data).map(r => [r.symbol, r.qty, r.amount]), [['KO', 3, 180], ['AAPL', 4, 600]]);
+});

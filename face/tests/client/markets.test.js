@@ -242,3 +242,10 @@ test('a bed-served chart is stamped PIT bed · as of, and a stale one says so', 
   assert.match(section(page('us:AAPL', { bars }), 'Price history'), /class="mk-note">Daily · PIT bed · as of 2026-07-09</);
   assert.match(page('us:AAPL', { bars: { ...bars, stale: true } }), /Daily · PIT bed · as of 2026-07-09 · stale/);
 });
+
+test('with no Alpaca keys a US row and its page say Not configured', () => {
+  const providers = [{ id: 'alpaca', market: 'us', status: 'unconfigured', source: 'Alpaca', feed: '', transport: 'poll', message: '美股行情待配置' }];
+  const quotes = [quote('us:AAPL', { price: null, change_pct: null, volume: null, quote_status: 'unavailable' })];
+  assert.match(rowOf(screen({ watch: [asset('us:AAPL')], quotes, providers }).html, 'us:AAPL'), /class="mk-st">Not configured</);
+  assert.match(screen({ watch: [asset('us:AAPL')], quotes, providers, route: { screen: 'markets', id: 'us:AAPL' } }).html, /class="mk-asof">Not configured</);
+});

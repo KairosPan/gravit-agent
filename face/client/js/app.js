@@ -22,6 +22,8 @@ import { createLiveQuotes } from './wire/market-quotes.js';
 import { createSymbolSearch } from './wire/market-search.js';
 
 export const PREFS_KEY = 'gravit-ui.prefs';
+// how long a press may hold renders: a click lands well inside it, and a release that never arrives cannot freeze the page
+export const POINTER_HOLD_MS = 1000;
 
 // Gravit's words as the thread draws them: DOM-built markdown (wire/markdown.js returns {node, doc}), serialized for
 // the string renderers
@@ -142,7 +144,7 @@ export function boot(win, host = {}) {
   // the paper account: read at boot, on entering Account, on Refresh, and right after a fill
   const account = startAccount({ store, getJson, call, now });
   void account.load();
-  const live = startLive({ store, openMux: host.openMux ?? wireOpenMux, call, mapFrame, getJson, timers, now, onReceipt: () => { void account.load(); } });
+  const live = startLive({ store, openMux: host.openMux ?? wireOpenMux, call, mapFrame, getJson, timers, now, onReceipt: () => { void account.load({ fresh: true }); } });
   // answers go through the live layer, which settles the gate it delivered once the answer wins
   const actions = makeActions({ store, call, answerGate: (eventId, value) => live.answer(eventId, value), postJson });
   // Markets: the face's live quotes and symbol search (a test hands in its own), the watchlist in this browser's storage
@@ -160,6 +162,7 @@ export function boot(win, host = {}) {
 
   let composerText = '';
   let composing = false;
+  let pressed = false;   // a primary press is down: a render now would replace the element the click is aimed at
   let pending = false;
   let openedId = null;   // the conversation the live layer was told to open
   let barsFor = null;    // the market page whose daily bars were last asked for
@@ -248,10 +251,17 @@ export function boot(win, host = {}) {
     last = { overlay, opener, screen: screenOf(s), drawer: drawerOf(s), thread: threadSig, editor: editorOf(s.edit), confirm: s.confirm };
   }
 
-  // while an IME composes (pinyin), a render would replace the input and lose the composition: hold it until compositionend
+  // while an IME composes (pinyin), a render would replace the input and lose the composition: hold it until
+  // compositionend. While a press is down a render would replace the element under it, and the press's release would
+  // fire no click (quotes re-render the page twice a second): hold it until the press ends, then render after the click
   function requestRender() {
-    if (composing) { pending = true; return; }
+    if (composing || pressed) { pending = true; return; }
     render();
+  }
+  function release() {
+    if (!pressed) return;
+    pressed = false;
+    if (pending) timers.after(0, () => { if (!pending || composing || pressed) return; pending = false; render(); });
   }
 
   function go(route) {
@@ -345,7 +355,11 @@ export function boot(win, host = {}) {
     closeSettings: () => store.dispatch('closeSettings'),
     setTheme: el => { const t = el.dataset.value.toLowerCase(); store.dispatch('setTheme', t); applyTheme(t); },
     // Account: Refresh (and Retry), the Statement, its CSV
-    refreshAccount: () => { void account.load(); },
+    refreshAccount: () => {
+      void account.load({ fresh: true });
+      const r = store.get().route;
+      if (r.screen === 'account' && r.tab === 'venues') void account.describe();
+    },
     openStatement: () => {
       if (store.get().route.screen !== 'account') go({ screen: 'account', tab: 'portfolio' });
       store.dispatch('openStatement');
@@ -417,6 +431,16 @@ export function boot(win, host = {}) {
     const el = ev.target;
     if (el.tagName === 'SELECT' && el.dataset?.action === 'draftWhere') store.dispatch('setDraftWhere', el.value);
   });
+  let pressSeq = 0;   // a press's own timeout ends only that press, never a later one
+  root.addEventListener('pointerdown', ev => {
+    if (ev.button !== undefined && ev.button !== 0) return;
+    pressed = true;
+    const mine = ++pressSeq;
+    timers.after(host.pointerHoldMs ?? POINTER_HOLD_MS, () => { if (mine === pressSeq) release(); });
+  });
+  doc.addEventListener('pointerup', release);
+  doc.addEventListener('pointercancel', release);
+  win.addEventListener('blur', release);
   root.addEventListener('compositionstart', () => { composing = true; });
   root.addEventListener('compositionend', ev => {
     composing = false;

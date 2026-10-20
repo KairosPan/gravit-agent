@@ -68,3 +68,14 @@ test('the message model: levels by kind, what needs an answer', () => {
   assert.equal(needsAnswer(message('gravit', 'text', 'x')), false);
   assert.deepEqual(message('you', 'text', 'hi'), { from: 'you', kind: 'text', text: 'hi', data: {} });
 });
+
+test('save writes only when what it persists changed: a quote tick rewrites no prefs', () => {
+  const writes = [];
+  const storage = { getItem: () => null, setItem: (k, v) => writes.push(v) };
+  const store = createStore({ initial: { n: 0, m: 0 }, reducers: { ...reducers, bump: s => ({ ...s, m: s.m + 1 }) }, storage, key: 'k', persist: s => ({ n: s.n }) });
+  store.dispatch('bump');
+  store.dispatch('bump');
+  assert.deepEqual(writes, ['{"n":0}'], 'the first save writes, an unchanged one does not');
+  store.dispatch('inc');
+  assert.deepEqual(writes, ['{"n":0}', '{"n":1}']);
+});

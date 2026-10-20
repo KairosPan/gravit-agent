@@ -98,3 +98,20 @@ test('describe makes three reads, and one failing leaves the others', async () =
   assert.deepEqual(garbled.a().probe, []);
   assert.deepEqual(garbled.a().creds, creds);
 });
+
+test('a fresh load reads ?fresh=1, and its answer wins over a plain read it overlapped', async () => {
+  const pending = {};
+  const r = rig({ json: { '/data/account.json': path => new Promise(res => { pending[path] = res; }) } });
+  const plain = r.account.load();
+  const fresh = r.account.load({ fresh: true });
+  await tick();
+  assert.deepEqual(r.reads, ['/data/account.json', '/data/account.json?fresh=1']);
+  assert.equal(r.account.load({ fresh: true }), fresh, 'a second fresh ask shares the fresh flight');
+  assert.equal(r.account.load(), fresh, 'and so does a plain one');
+  pending['/data/account.json?fresh=1'](keyed({ account: { equity: '200' } }));
+  await fresh;
+  pending['/data/account.json'](keyed({ account: { equity: '100' } }));
+  await plain;
+  assert.equal(r.a().data.account.equity, '200', 'the older plain answer is dropped');
+  assert.equal(r.a().status, 'ready');
+});

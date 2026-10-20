@@ -139,3 +139,26 @@ test('volumeWord: shares for a stock, the base for a coin, — for null', () => 
   assert.equal(volumeWord(asset('cn:600519'), quote('cn:600519', { volume: null })), '—');
   assert.equal(volumeWord(asset('us:AAPL'), undefined), '—');
 });
+
+test('Most traded ranks by dollar volume, price × volume, so a coin and a stock compare', () => {
+  const m = markets({
+    watchlist: [asset('crypto:DOGE/USD'), asset('crypto:ETH/USD'), asset('crypto:BTC/USD'), asset('us:BTCS')],
+    quotes: {
+      'crypto:DOGE/USD': quote('crypto:DOGE/USD', { price: 0.12, volume: 910_000_000 }),
+      'crypto:ETH/USD': quote('crypto:ETH/USD', { price: 2630, volume: 98_000 }),
+      'crypto:BTC/USD': quote('crypto:BTC/USD', { price: 82_710, volume: 5_200 }),
+      'us:BTCS': quote('us:BTCS', { price: 3.1, volume: 840_000 }),
+    },
+  });
+  assert.deepEqual(marketRows(m, null).map(r => r.asset.id), ['crypto:BTC/USD', 'crypto:ETH/USD', 'crypto:DOGE/USD', 'us:BTCS']);
+  assert.equal(volumeWord(asset('crypto:BTC/USD'), m.quotes['crypto:BTC/USD']), '5.2k BTC', 'the volume still reads in units');
+});
+
+test('a market whose provider is not configured says so instead of No quote', () => {
+  const unconfigured = [{ id: 'alpaca', market: 'us', status: 'unconfigured', source: 'Alpaca', feed: '', transport: 'poll', message: '美股行情待配置' }];
+  assert.equal(quoteWord(undefined, unconfigured, 'us'), 'Not configured');
+  assert.equal(quoteWord(quote('us:AAPL', { price: null, quote_status: 'unavailable' }), unconfigured), 'Not configured');
+  assert.equal(quoteWord(quote('us:AAPL'), unconfigured), 'Live', 'a price is a price');
+  assert.equal(quoteWord(undefined, unconfigured, 'crypto'), 'No quote');
+  assert.equal(quoteWord(undefined), 'No quote');
+});
