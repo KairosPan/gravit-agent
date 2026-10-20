@@ -821,9 +821,10 @@ row audit; and the policy layer.
    no folder chosen) is fenced to the whole repo, where `data/pit/`, `dsh/skills/` and
    `alpaca_kit/` are all writable with no card (§9, R9).
 3. Install SIGINT (exit 130) / SIGTERM (exit 0) handlers and app-boot's own `installFailLoud`,
-   before the boot it guards. A signal releases the room engine and the data routes, ends the
-   desk's run if it has one — its `shutdown` event carries the exit code (`desk.ts`, §4.2) — and
-   disposes the tree. `installFailLoud` covers `unhandledRejection` and `uncaughtException`,
+   before the boot it guards. A signal first ends the desk's run if it has one — its `shutdown`
+   event carries the code the exit asked for (`desk.ts`, §4.2) — then releases the room engine
+   and the data routes and disposes the tree, so a disposer that throws cannot cost the run its
+   `shutdown` line. `installFailLoud` covers `unhandledRejection` and `uncaughtException`,
    skips the rejections boot's startup audit already reported, prints one labelled diagnostic,
    releases the desk first (code 1), then the room engine, the data routes and the tree, under a
    2 s bound, and exits 1.
@@ -912,7 +913,7 @@ smoke that boots without `main.ts` relies on.
 
 | File | Responsibility |
 |---|---|
-| `main.ts` | entry: chdir, signal handlers and `installFailLoud`, boot with `deferReady`, the sign-in route and every route family (the room engine, the bot runtime and the desk behind `FACE_DESK` included), `commitReady`, the tokenized URL; both exits end the desk's run before the tree is disposed |
+| `main.ts` | entry: chdir, signal handlers and `installFailLoud`, boot with `deferReady`, the sign-in route and every route family (the room engine, the bot runtime and the desk behind `FACE_DESK` included), `commitReady`, the tokenized URL; both exits end the desk's run first, before the room engine, the data routes and the tree are released |
 | `boot.ts` | the mirror of the dsh CLI's `runProfile` (§4.1): `composeFace` (its last step renders the default preset from `roles/` and `dsh/profile/cycle.md`), the runtime resolution, the strict row audit, the required-service and answerer checks, `ask_user_question` in the live registry, Gate 2 registration, the preset-roster checks, `declareBots`, `commitReady` |
 | `overlay.ts` | the thirteen host rows `dsh-base` does not mount (§4.3), `satisfies`-checked against each plugin's own config type; `BOTS_ROOT`, `DEFAULT_PRESET`, `GRAVIT_PLUGIN_RELATIVE`, `presetRowId` |
 | `policy.ts` | the policy layer (§4.3): `POLICY_ID_PATCHES`, `POLICY_INSERTS`, `facePolicyPatches` — each row a PLAN decision; a missing target is reported on stderr, never skipped silently |
@@ -946,7 +947,7 @@ smoke that boots without `main.ts` relies on.
 | `panels.ts` | the master rail's feeds: host facts (`/data/host.json`), the local-agent roster (probe, auth, connect, disconnect), memory (skills), plugins (loader rows + tool schemas); builds `PanelDeps` (it requires `skills`, `tools`, `loader`, `workspaceRegistry` and `agents`), whose `channelFor` answers `{workspaceId, name, dir}` — the `dir` is what the room engine gives a member as its `cwd` |
 | `desk.ts` | the desk's P0 (spec `docs/superpowers/specs/2026-10-19-always-on-gravit-design.md`, §5.2, §5.7): the ledger, `$DSH_HOME/face/desk/events.jsonl` — `appendEvent` (one JSON line per event under `withFileLock`, files created `0600`; past `LEDGER_ROTATE_BYTES`, 50 MB, the next append first renames the file to `events.<t>.jsonl`; a torn last line gets its closing newline first, so it stays one skipped line; a failure is one `gravit-face:` line on stderr, never a throw), `readEvents` (the current file only; a line that is not an event is skipped and counted; an absent ledger is empty, any other read failure rejects) and `runsOf` (one run per `boot`; a `boot` while a run is open marks that run `lost`); the sleep watch, `installAsleepWatch` (a plain timer every `ASLEEP_TICK_MS`, 30 s; a gap strictly over `ASLEEP_THRESHOLD_MS`, 120 s, is one `asleep` event; a clock set back writes nothing); `deskStatus`, which never rejects on the ledger (`ledgerError`); `registerDeskRoutes` (`GET /data/desk/status` through `fencedGet`, §4.4); `installDesk` (the route always; the `boot` event and the watch only when enabled; `dispose(code)` idempotent, writing the `shutdown` once the `boot` has settled) |
 | `version.ts` | the three pins |
-| `scripts/service.ts` | `npm run service -- <command>`, run outside the face process: gravit-face as a macOS LaunchAgent, `com.gravit.face` (the desk spec's §5.2). The pure half — `servicePlan` (the plist: `node --import <tsx's loader> face/src/main.ts`, one process — node by its PATH location, the loader (`face/node_modules/tsx/dist/loader.mjs`, the package's `"."` export, as a file URL) and main.ts under this checkout's `face/`, which is the working directory — so launchd's job pid, the one `status` prints, is the face's own and the one the ledger's `boot` records (tsx's CLI, which `npm start` uses, would run the face in a child process); an environment of exactly `PATH`, `HOME`, `DSH_HOME` and, for a port asked for (`--port`, kept by a reinstall), `FACE_PORT`; `RunAtLoad`, `KeepAlive {SuccessfulExit false}`, `ThrottleInterval 30`, `Umask 077`; stdout and stderr to `$DSH_HOME/face/service/face.log` and `face.err.log`), `ensureHomeEnv` (§4.5's `$DSH_HOME/.env`: `COPIED_KEYS` and any `ALPHA_*`, never overwritten), `parseLaunchctlPrint`, `lastTokenUrl`, `formatStatus` — and `runService`, the eight commands (`install`, `uninstall`, `start`, `stop`, `restart`, `status`, `logs`, `url`) over injected `ServiceDeps` (launchctl, fetch, the paths, the clock), so no test reaches launchd. A `bootout` is judged by whether launchd still holds the job, asked every 500 ms for up to 10 s, never by its exit code. `status` reads `/data/desk/status`, and the ledger through `desk.ts` when the face does not answer. The port is `--port`, else the installed plist's, else 3090; the reading commands use the home the installed plist names, and `install` writes this shell's `DSH_HOME` into the plist |
+| `scripts/service.ts` | `npm run service -- <command>`, run outside the face process: gravit-face as a macOS LaunchAgent, `com.gravit.face` (the desk spec's §5.2). The pure half — `servicePlan` (the plist: `node --import <tsx's loader> face/src/main.ts`, one process — node by its PATH location, the loader (`face/node_modules/tsx/dist/loader.mjs`, the package's `"."` export, as a file URL) and main.ts under this checkout's `face/`, which is the working directory — so launchd's job pid, the one `status` prints, is the face's own and the one the ledger's `boot` records (tsx's CLI, which `npm start` uses, would run the face in a child process); an environment of exactly `PATH`, `HOME`, `DSH_HOME` and, for a port asked for (`--port`, kept by a reinstall), `FACE_PORT`; `RunAtLoad`, `KeepAlive {SuccessfulExit false}`, `ThrottleInterval 30`, `Umask 077`; stdout and stderr to `$DSH_HOME/face/service/face.log` and `face.err.log`), `ensureHomeEnv` (§4.5's `$DSH_HOME/.env`: `COPIED_KEYS` and any `ALPHA_*`, never overwritten), `parseLaunchctlPrint`, `lastTokenUrl`, `formatStatus` — and `runService`, the eight commands (`install`, `uninstall`, `start`, `stop`, `restart`, `status`, `logs`, `url`) over injected `ServiceDeps` (launchctl, fetch, the paths, the clock), so no test reaches launchd. A `bootout` is judged by whether launchd still holds the job, asked every 500 ms for up to 10 s, never by its exit code. `stop` is a `bootout`; so is `restart` of a running job — launchd's documented stop, SIGTERM then its exit timeout, never `kickstart -k`, whose kill signal is not documented — followed by up to 10 s for the port to fall silent and then `start`'s `enable` and `bootstrap`; a job launchd never lets go of fails the restart with nothing started, and a running job with no plist is left running. `install` refuses a home with no `profiles/face` before it writes a file or asks launchd anything (the service runs profile `face`, which would otherwise exit 1 every 30 s), says when it moves the service's home from the one the installed plist names, prints the `main.ts`, home and node the plist runs, and, for a checkout under `~/Desktop`, `~/Documents` or `~/Downloads`, warns before `next:` that macOS may ask whether node may access it (under launchd node is its own responsible process; refused, the service exits with `EPERM`). `status` reads `/data/desk/status` — adding one line when the face that answers is not launchd's job, their pids differing — and the ledger through `desk.ts` when the face does not answer; `url` marks the log's URL as maybe the previous run's while the face does not answer. The port is `--port`, else the installed plist's, else 3090; the reading commands use the home the installed plist names, and `install` writes this shell's `DSH_HOME` into the plist |
 
 The smokes share one client for the host's wire, `tests/remote.ts`: `mountClient(ctx)` mounts
 the real `/` (a bare `bootFace` mounts no page), `signIn` trades the launch token for the cookie,
@@ -1238,7 +1239,7 @@ passes on `Host` alone — `curl` works, which is residual R3 in §9.
 | `GET /data/bots/runtime?id=&sessionId=` | `bot-runtime.ts` | an attached bot session's mounted persona, model, tools, skills and journal snapshot (the last request's facts while a turn runs); a cold one is reported unattached, never resumed |
 | `POST /data/rooms/say` `{sessionId, text}` | `room.ts` | the operator's `@`: mentions resolved against the roster (by id, by one-token display name); nobody named → `addressed: []` and the client sends an ordinary prompt; else the message is appended to the room as the operator's own (never a prompt), a cold room is resumed through `sessionController.resolveAgent` — the host's own composition, model selection and preset join — and each named member turns. 400 a bad id or empty text, 404 not in a channel or `session/not-found`, 409 a corrupt roster or any other resolve failure, with dsh's code and message and, when the log predates dsh 0.2, the legacy-format note |
 | `POST /data/rooms/state` `{sessionId}` | `room.ts` | the roster, the members the engine drove this boot, the caps left; never resumes |
-| `GET /data/desk/status` | `desk.ts` | fence first (403, the fixed `FORBIDDEN`), then `deskStatus` through http.ts's `fencedGet`, read from the ledger afresh on every request: `{ok, pid, version, bootedAt, uptimeMs, desk: {enabled, dir}, asleep, runs}` — `pid`, `version` (`DSH_PIN`), `bootedAt` (ISO-8601) and `uptimeMs` are this process's; `desk.enabled` says whether this face mounted the desk's rows (`FACE_DESK`) and `desk.dir` is the ledger's directory; `asleep` is the ledger's gaps since this face booted, `{from, to, gapMs}`; `runs` is every run in the current ledger file, `{bootedAt, pid, endedAt?, code?, lost}` — the home's ledger whichever face answers, so a `FACE_DESK=0` face on the service's home reports the service's gaps and runs. `ledgerError`, present only when the ledger could not be read, names its code (`EACCES`, `EISDIR`) or its message, and `asleep` and `runs` are then empty: an unreadable ledger is a 200 that says so, never a 500. Mounted with the desk off too, so a `FACE_DESK=0` face answers `desk.enabled: false`. `npm run service` reads it — `status`, and `install` and `start`, which take any HTTP answer there for a held port — with no `Origin`, so it passes on `Host` |
+| `GET /data/desk/status` | `desk.ts` | fence first (403, the fixed `FORBIDDEN`), then `deskStatus` through http.ts's `fencedGet`, read from the ledger afresh on every request: `{ok, pid, version, bootedAt, uptimeMs, desk: {enabled, dir}, asleep, runs}` — `pid`, `version` (`DSH_PIN`), `bootedAt` (ISO-8601) and `uptimeMs` are this process's; `desk.enabled` says whether this face mounted the desk's rows (`FACE_DESK`) and `desk.dir` is the ledger's directory; `asleep` is the ledger's gaps since this face booted, `{from, to, gapMs}`; `runs` is every run in the current ledger file, `{bootedAt, pid, endedAt?, code?, lost}` — the home's ledger whichever face answers, so a `FACE_DESK=0` face reports its home's runs and gaps, never a run of its own (a second face beside the service runs on a scratch home, §4.6). `ledgerError`, present only when the ledger could not be read, names its code (`EACCES`, `EISDIR`) or its message, and `asleep` and `runs` are then empty: an unreadable ledger is a 200 that says so, never a 500. Mounted with the desk off too, so a `FACE_DESK=0` face answers `desk.enabled: false`. `npm run service` reads it — `status`, which compares its `pid` with launchd's job's, and `url`; and `install`, `start` and `restart`, which take any HTTP answer there for a held port — with no `Origin`, so it passes on `Host` |
 
 ### 4.5 Persistent state the face writes
 
@@ -1257,7 +1258,7 @@ passes on `Host` alone — `curl` works, which is residual R3 in §9.
 | `$DSH_HOME/face/desk/events.jsonl` | `desk.ts` (`appendEvent`) | the desk's ledger, written only by a face with the desk on: one JSON event per line, each with its `t` — `boot` (`pid`, `version`, `deskEnabled`), `shutdown` (`pid`, the exit `code`), `asleep` (`from`, `to`, `gapMs`); append-only under `withFileLock` (`events.jsonl.lock` beside it), created `0600`; past 50 MB the next append first moves it to `events.<t>.jsonl` (`:` as `-`), which nothing reads; a failed write is one `gravit-face:` line on stderr, and the face serves on |
 | `$DSH_HOME/face/service/face.log`, `face.err.log` | launchd: the service's stdout and stderr | appended across runs, never rotated; `install` creates the directory `0700`, and the plist's `Umask 077` gives the logs, like everything else the service's face creates, no group or other access; `npm run service -- logs` and `url` read them |
 | `~/Library/LaunchAgents/com.gravit.face.plist` | `npm run service -- install` (the operator) | the LaunchAgent (`scripts/service.ts`, §4.2), mode `0644`, carrying no key; rewritten by every `install`, removed by `uninstall` |
-| `$DSH_HOME/.env` | `npm run service -- install` (the operator), or the operator by hand | created by `install` only when the home has none: the allow-listed names (`DEEPSEEK_API_KEY`, `APCA_API_KEY_ID`, `APCA_API_SECRET_KEY`, `APCA_API_BASE_URL`, `IFIND_ACCESS_TOKEN`, `IFIND_REFRESH_TOKEN`, any `ALPHA_*`) from the repo root's `.env.deepseek`, `.env.alpaca` and `.env.ifind`, every other name reported and left out — when no key file holds an allow-listed name, `install` writes nothing and says so (`wrote no …`); mode `0600`, opened exclusively, so a file or a dangling link that appears in its place is refused; never rewritten — `install` reads an existing one only to name the expected keys it lacks. dsh's layered env load reads it at every boot (§1) |
+| `$DSH_HOME/.env` | `npm run service -- install` (the operator), or the operator by hand | created by `install` only when the home has none: the allow-listed names (`DEEPSEEK_API_KEY`, `APCA_API_KEY_ID`, `APCA_API_SECRET_KEY`, `APCA_API_BASE_URL`, `IFIND_ACCESS_TOKEN`, `IFIND_REFRESH_TOKEN`, any `ALPHA_*`) from the repo root's `.env.deepseek`, `.env.alpaca` and `.env.ifind`, every other name reported and left out — when no key file holds an allow-listed name, `install` writes nothing and says so (`wrote no …`); mode `0600`, opened exclusively, so a file or a dangling link that appears in its place is refused; never rewritten — `install` reads an existing one only to name the expected keys it lacks — so it is a copy: a key rotated in the repo's key files reaches a terminal face but not the service until this file is edited too, and a line is copied as written, a `$(…)` or `${…}` arriving literally. dsh's layered env load reads it at every boot (§1) |
 | `$DSH_HOME/sessions/<slug>/<id>/` | `deleteSession` | removed with every generation, the lock and the temps, cwd-fenced |
 | `strategies/<name>/` | `createChannel` | copied from `_template`, never overwritten |
 | `bots/<id>/` | `createBot`, `updateBotSettings`, `updateSoul` | copied from `_template`; `preset.yml`, `SOUL.md` and the composition's persona row rewritten together, staged then renamed; never overwritten by create |
@@ -1283,7 +1284,7 @@ face's `WorkspaceLike`). Recorded, not fixed.
 |---|---|---|---|
 | `FACE_PORT` | `main.ts` | `3090` | `"0"` asks the OS; `""` means default |
 | `FACE_PROFILE` | `main.ts`, `setup.ts` | `face` | honored by both `setup` and `start` |
-| `FACE_DESK` | `main.ts` | unset (on) | `0` mounts none of the desk's rows — no `boot`, no sleep watch, no `shutdown` — while `/data/desk/status` still answers `desk.enabled: false`; any other value, empty included, leaves them on. The switch for a second face beside the service: the ledger assumes one desk-enabled face per home (§9, R32) |
+| `FACE_DESK` | `main.ts` | unset (on) | `0` mounts none of the desk's rows — no `boot`, no sleep watch, no `shutdown` — while `/data/desk/status` still answers `desk.enabled: false`; any other value, empty included, leaves them on. The switch for a second face beside the service, which runs on a scratch home (`DSH_HOME=<scratch> FACE_DESK=0 FACE_PORT=3091`, `face/README.md` "Run as a service"): two dsh processes on one harness home are unexamined, and the ledger assumes one desk-enabled face per home (§9, R32) |
 | `FACE_PYTHON` | `data.ts` | `python3` | the producers' interpreter; must `import alpaca_kit` |
 | `FACE_AKSHARE_MCP_COMMAND` | `akshare.ts` | `~/.local/bin/akshare-mcp` | the AKShare server's executable |
 | `FACE_IFIND_POLL_MS`, `IFIND_ACCESS_TOKEN`, `IFIND_REFRESH_TOKEN`, `ALPHA_DATA_FEED` | the quote routes | `30000`, —, —, `iex` | the watchlist's live quotes (`face/README.md`, "Market credentials") |
@@ -1727,9 +1728,9 @@ the pulses of each LIVE member's own `session/follow`.
 | Command | From | Needs | Measured 2026-09-30 |
 |---|---|---|---|
 | `python -m pytest` | repo root | nothing — offline, no keys, no bed | 381 passed in a clean checkout, ~2 s (the operator's tree adds the untracked `tests/strategies/`) |
-| `cd face && npm test` | `face/` | nothing — no port, no key | 757 tests, 742 pass, 15 skipped (2026-10-20) |
+| `cd face && npm test` | `face/` | nothing — no port, no key | 764 tests, 749 pass, 15 skipped (2026-10-20) |
 | `cd face && npm run typecheck` | `face/` | | clean, the dependencies' `.d.ts` included (`skipLibCheck: false`) |
-| `cd face && FACE_SMOKE=1 npm test` | `face/` | boots fifteen real trees into `mkdtemp` homes and binds ports; still no LLM or key (four of the smokes also create, and remove, a gitignored `.bots-smoke-*` bots root at the repo root) | the fifteen skipped tests; 757/757, ~10 s (2026-10-20) |
+| `cd face && FACE_SMOKE=1 npm test` | `face/` | boots fifteen real trees into `mkdtemp` homes and binds ports; still no LLM or key (four of the smokes also create, and remove, a gitignored `.bots-smoke-*` bots root at the repo root) | the fifteen skipped tests; 764/764, ~10 s (2026-10-20) |
 | `cd face && npm run check:fixture` | `face/` | the installed dsh | 26 fixture lines: 23 validated, 0 rejected, 3 with no upstream validator |
 
 ### 7.2 The Python suite
@@ -1757,7 +1758,7 @@ order path.
 
 ### 7.3 The face suite
 
-757 tests in 66 files (742 pass, 15 skipped without `FACE_SMOKE=1`), run by `node --test`
+764 tests in 66 files (749 pass, 15 skipped without `FACE_SMOKE=1`), run by `node --test`
 through `tsx`:
 
 - **Composition and boot** — `boot` (the layer order ending with the overlay; the policy layer
@@ -1865,13 +1866,20 @@ through `tsx`:
   only with a port — the launchd keys and no credential name; XML escaping, the loader's URL
   percent-encoded; the home's `.env` written `0600` once and never again, the allow-list copied
   in source order with every other name reported, an empty value counted missing, a dangling
-  link refused; launchd's `print` parsed; the status text; then every command through `runService` against a fake
-  `launchctl`: `install` refusing a held port, replacing a running job only once launchd has
-  let go of it and the port is silent, stopping at a failed `enable` or `bootstrap`; `start`,
+  link refused; launchd's `print` parsed; the status text; then every command through
+  `runService` against a fake `launchctl`: `install` refusing a home with no `profiles/face`
+  before any call or file, refusing a held port, replacing a running job only once launchd has
+  let go of it and the port is silent, stopping at a failed `enable` or `bootstrap`, printing
+  the home and the node it runs, naming a move of the home, and warning before `next:` for a
+  checkout in `~/Desktop`, `~/Documents` or `~/Downloads` and not for one beside them; `start`,
   `stop`, `restart` and `uninstall` against a running job, a loaded one that is not running,
   one launchd lacks and a bootout still in progress — bootout's exit code never the outcome;
-  the port and the home read from the installed plist; the launchd commands refused off macOS;
-  the CLI's `status` on an empty home).
+  `restart` of a running job booting it out, waiting out its port and bootstrapping it, never
+  `kickstart -k`, starting nothing when launchd never lets go or the port stays held, and
+  leaving a running job with no plist alone; `status` naming a face on the port that is not
+  launchd's job; `url` marking the log's URL while the face does not answer; the port and the
+  home read from the installed plist; the launchd commands refused off macOS; the CLI's
+  `status` on an empty home).
 - **The fifteen `FACE_SMOKE` boots**, below.
 
 The room suites are `room-rules` (the caps block verbatim, `GRAVIT.md`'s caps sentence pinned to
@@ -2060,8 +2068,8 @@ the re-host added (§10, item 14).
 | **Role** — manual (`face/README.md`, five steps and a clean-up) | on a scratch copy of the operator's home: Gravit calls `role_screener`; the child's log shows exactly the screener's tools and its persona, not Gravit's; a `role_backtester` run past bash-sandbox's 60 s default either passes `timeoutMs` or reads its moved job before reporting; an unmounted alpaca-kit row fails the delegation with `tools.restrict()` naming the tools and creates no child; Gravit's own log shows the role tools and the roles paragraph | a real model's judgement over several delegations | **not yet run** |
 | **Cycle** — automated (`cycle`, `gravit-plugin`, `boot`, `roles`; `bots-smoke`, `roles-smoke`, `goal-smoke`) | the shipped `cycle.md` reads, fits its 3,000 bytes and carries the steps, the caps, the resume path, the blocked vocabulary and only shipped role names; the reader's refusals, path first; the `gravit:cycle` section's order, literalness and gate; the mirror carrying the text; on a real tree Gravit's prompt carries `Step 0 — ask once`, a probe bot's (which can call `create_goal`), a role child's and a plain `subagent` child's do not, a `subagent_fork` child's does and equals Gravit's; the goal loop itself (`goal-smoke`): `create_goal` in a human turn, the round message at idle, blocked refused in round 1 and accepted in round 3 with the `<goal_blocked>` wrap-up, a second goal refused, the silent `round-limit` cap, Stop pausing the goal with the model's resume refused and `/goal resume` re-arming it, a restart disarming it until "continue" | that a real model asks once, opens the goal, runs rounds by itself, is resumed by "continue" after a restart and ends in a verdict; a cycle's rounds, role calls, wall time and usage | passes 2026-10-19 (`goal-smoke` since `fae4f61`) |
 | **Cycle** — manual (`face/README.md` "The cycle drill", five steps) | on the operator's face with a real model and a channel from `_template`: one batched `ask_user_question` and no file before it; `create_goal`, then rounds with no card and no question (no commit inside the rounds), `role_*` calls and journal entries with artifact paths; a verdict in `status.yaml` and the journal's last entry with the usage line to fill, the goal complete on `validated` or `retired` and blocked on `researching`, on a named code; a restart that continues only on "continue"; the rounds, role calls, wall time, usage and first-request figures recorded in §4.3 | whether the verdict is better research (charter D14); the 12-call count (R29) and a model's handling of a paused goal (R30) beyond what the run happens to meet — the mechanism itself is `goal-smoke`'s | **not yet run** — the operator's, on the real face |
-| **Desk** — automated (`desk`, `service`, `http`; `smoke`) | the ledger, its runs and the lost run, the sleep watch on a fake clock, the status and its fenced route, a disabled desk that writes nothing; the plist, the home's `.env` and its allow-list, the status text, and every service command against a fake `launchctl`; on a real tree, the route answering with one open run and the `boot` line written | launchd itself: that it takes the commands, what its `print` really says, how long a real stop takes; `main.ts`'s `FACE_DESK` parse, which only the drill's step 6 exercises | passes 2026-10-20 (`4465ed9`) |
-| **Desk** — manual (`face/README.md` "The desk drill", six steps) | on the operator's launchd, installed from the primary checkout: the sign-in through `url`; the pid `status` prints equal to the ledger's `boot` pid; a `kill -9` of it that KeepAlive brings back, read as `last run: lost`; `restart` and `stop` each leaving a `shutdown` with code 0; `start`; a login that starts the face with no terminal; a second face beside it with `FACE_DESK=0`, its rows disabled — the spec's P0 done criterion | an `asleep` gap on a real sleep (the watch's tests run on a fake clock); the desk rows P1–P4 add | **not yet run** — the operator's |
+| **Desk** — automated (`desk`, `service`, `http`; `smoke`) | the ledger, its runs and the lost run, the sleep watch on a fake clock, the status and its fenced route, a disabled desk that writes nothing; the plist, the home's `.env` and its allow-list, the status text, and every service command against a fake `launchctl` — `install`'s home checks and privacy line, `restart` by `bootout` and `bootstrap`, `status`'s foreign-face line, `url`'s note; on a real tree, the route answering with one open run and the `boot` line written | launchd itself: that it takes the commands, what its `print` really says, how long a real stop takes, that a `bootout` reaches the face as SIGTERM; whether macOS lets node read the checkout; `main.ts`'s `FACE_DESK` parse, which only the drill's step 6 exercises | passes 2026-10-20 |
+| **Desk** — manual (`face/README.md` "The desk drill", six steps and an optional seventh) | on the operator's launchd, installed from the primary checkout and the shell the face runs from: the sign-in through `url`; the service's face working — no `EPERM` in `face.err.log`, a prompt answered, a quote on `/market`; the pid `status` prints equal to the ledger's `boot` pid; a `kill -9` of it that KeepAlive brings back, read as `last run: lost`, with an observation of whether an MCP child of the killed run is left; `restart` and `stop` each leaving a `shutdown` with code 0 (a `lost` after `restart` means launchd stopped the face without SIGTERM, a finding to record); `start`; a login that starts the face with no terminal; a second face beside it on a scratch home with `FACE_DESK=0`, its rows disabled — the spec's P0 done criterion; optionally, an `asleep` gap on a real `pmset sleepnow` | an `asleep` gap on a real sleep unless the optional step ran (the watch's tests run on a fake clock); `start`'s `kickstart`, which only a loaded job that is not running takes; the desk rows P1–P4 add | **not yet run** — the operator's |
 
 Owed besides, from the re-host, never yet run in a browser: the Gate-2 drill's new card endings
 — a second tab's `closed`, a lost race's `closed · settled elsewhere`, a stale card's `closed ·
@@ -2326,23 +2334,32 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
   for a bot — is the operator's decision on those numbers, in the next round (§10).
 - **R32 — The desk's P0 assumes one desk-enabled face per home, and has not yet met launchd.** A
   `boot` while a run is open marks that run `lost` (`runsOf`), so a second desk-enabled face on
-  the service's home reads as the service's run lost; a second face runs with `FACE_DESK=0`
-  (§4.6). A `kill -9` inside an append can leave `events.jsonl.lock` behind; `withFileLock` takes
-  a lock over only while its recorded pid is gone, so once that pid is reused every append waits
-  its 2 s and fails with one stderr line until the lock is removed by hand. `withFileLock` also
-  never takes over a record that is not a pid line (`holderExited`, dsh-atomic-write), so a kill
-  between the lock's create and its pid write leaves an empty lock that wedges the appends the
-  same way. On the fail-loud path, where `main.ts` ends the desk's run first, that wait can spend
-  `installFailLoud`'s whole 2 s release bound, so the process may exit before the room engine,
-  the data routes and the tree are released. A face running code from before the desk — any
-  checkout the merge has not reached — answers 404 at `/data/desk/status`, so
-  `npm run service -- status` says `not answering` while that face holds the port (`install` and
-  `start` still refuse it: there any HTTP answer counts). The 10 s that `stop`, `install` and
-  `uninstall` wait for launchd to let go of the job may be shorter than launchd's default exit
-  timeout (system-defined, unmeasured until the drill; the plist sets no `ExitTimeOut`), and the
-  face's teardown is unbounded: a face that takes longer than 10 s to exit is reported as a
-  failure, though it stops. And no launchd call has run for real — the tests drive a fake
-  `launchctl` — so the desk drill (§7.4) is the first.
+  the service's home would read as the service's run lost; and two dsh processes on one harness
+  home are unexamined, so a second face runs on a scratch home with `FACE_DESK=0` (§4.6,
+  `face/README.md` "Run as a service"), never on the service's. A `kill -9` inside an append can
+  leave `events.jsonl.lock` behind; `withFileLock` takes a lock over only while its recorded pid
+  is gone, so once that pid is reused every append waits its 2 s and fails with one stderr line
+  until the lock is removed by hand. `withFileLock` also never takes over a record that is not a
+  pid line (`holderExited`, dsh-atomic-write), so a kill between the lock's create and its pid
+  write leaves an empty lock that wedges the appends the same way. Both exits in `main.ts` end
+  the desk's run first, so that wait delays every teardown by its 2 s; on the fail-loud path it
+  can spend `installFailLoud`'s whole 2 s release bound, so the process may exit before the room
+  engine, the data routes and the tree are released. A face running code from before the desk —
+  any checkout the merge has not reached — answers 404 at `/data/desk/status`, so
+  `npm run service -- status` says `not answering`, and `url` marks the log's URL as maybe the
+  previous run's, while that face holds the port (`install`, `start` and `restart` still refuse
+  it: there any HTTP answer counts); when a face that does answer the route is not launchd's
+  job, its pid differing, `status` says so in one line. The 10 s that `stop`, `restart`,
+  `install` and `uninstall` wait for launchd to let go of the job may be shorter than launchd's
+  default exit timeout (system-defined, unmeasured until the drill; the plist sets no
+  `ExitTimeOut`), and the face's teardown is unbounded: a face that takes longer than 10 s to
+  exit is reported as a failure, though it stops — and `restart` then starts nothing, so the
+  service stays stopped until `start` or the next login. Under launchd node is its own
+  responsible process, and macOS guards `~/Desktop`, `~/Documents` and `~/Downloads` per app:
+  for a checkout there (the operator's is in `~/Desktop`) the first start may raise a privacy
+  prompt, possibly at a login nobody watches, or fail with `EPERM` in `face.err.log` every 30 s;
+  `install` warns, and cannot tell whether access was granted. And no launchd call has run for
+  real — the tests drive a fake `launchctl` — so the desk drill (§7.4) is the first.
 
 ---
 
@@ -2372,13 +2389,15 @@ In order; each with what "done" is and which charter row it reopens.
    bullets were brought to the tree on 2026-09-30.)
 5. **The desk** (spec `docs/superpowers/specs/2026-10-19-always-on-gravit-design.md`), which
    replaces the daily cadence this item and ROADMAP item (2) used to name. P0, the service, is
-   built on `feat/desk` (`desk.ts` and `scripts/service.ts`, §4.2; R32): done when the operator's
-   desk drill passes (`face/README.md`, §7.4) — the face has survived a `kill -9` and a login
-   without a terminal, and a second face has booted beside it with `FACE_DESK=0`. P1–P4 — the
-   desk session and the Telegram bridge, the clock and the pre-close brief, the watch, the
-   pre-market strategy report — follow the spec's §12, each landing the charter amendments its
-   mechanism introduces (the spec's §10). P2's first scheduled run is a D5 revisit trigger
-   (spend accounting); the spec answers it with a daily token budget for desk sessions.
+   built on `feat/desk` from `8ed2c34` (`desk.ts` and `scripts/service.ts`, §4.2; R32): done
+   when the operator's desk drill passes (`face/README.md`, §7.4) — the face has survived a
+   `kill -9` and a login without a terminal, and a second face has booted beside it on a scratch
+   home with `FACE_DESK=0`; the drill also asks that the service's face works — a prompt
+   answered, a quote on `/market`. P1–P4 — the desk session and the Telegram bridge, the clock
+   and the pre-close brief, the watch, the pre-market strategy report — follow the spec's §12,
+   each landing the charter amendments its mechanism introduces (the spec's §10). P2's first
+   scheduled run is a D5 revisit trigger (spend accounting); the spec answers it with a daily
+   token budget for desk sessions.
 6. **Paper forward-testing** behind the gate (`status: paper`) — after 1 and after an
    independent evaluator exists (D1, D7).
 7. **FINRA and float live endpoints**; then a **second data vendor** for pre-2021 history.

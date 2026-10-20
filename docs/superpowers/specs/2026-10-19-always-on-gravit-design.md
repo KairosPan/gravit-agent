@@ -351,6 +351,8 @@ battery mid-turn) is why the default machine is "this Mac on mains" and why the 
 a gap whenever the process was asleep (a missed timer tick longer than two minutes is logged as
 `asleep` in the ledger).
 
+**As built (P0, 2026-10-20):** `ProgramArguments` run the face as one process, `node --import <tsx's loader.mjs>` then `face/src/main.ts` (tsx's CLI would spawn it as a child); a killed run reads `lost` in the ledger and in `status`; see `DEVELOPMENT.md` §4.2.
+
 ### 5.3 The desk
 
 **Directory.** `desk/` at the repo root:

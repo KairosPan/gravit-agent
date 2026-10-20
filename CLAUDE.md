@@ -70,6 +70,9 @@ npm start                   # prints http://127.0.0.1:3090/?token=… — open t
   30-day cookie for the exact host:port (`localhost` is not `127.0.0.1`); `/api` 401s without it.
 - **`face/client/*` is served with no cache headers** — hard-reload the browser after any client
   edit, or you drill a stale `chat.js`.
+- **The installed service holds 127.0.0.1:3090**, so the primary checkout's `face` preview cannot
+  bind there (give it another `FACE_PORT`); `npm run service` drives the operator's own launchd,
+  so it is never run from an agent or a worktree.
 
 Reading order for a new session: `Gravit-Design.md` §1–§2 → the `DEVELOPMENT.md` section you
 are touching → `GRAVIT.md` for what Gravit itself sees.

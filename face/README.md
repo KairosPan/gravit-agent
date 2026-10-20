@@ -112,7 +112,7 @@ outside the whole repo.
 |---|---|---|
 | `FACE_PORT` | `3090` | webserver port. `0` asks the OS for a free one |
 | `FACE_PROFILE` | `face` | profile directory name — honored by BOTH `npm run setup` and `npm start` |
-| `FACE_DESK` | unset | `0` mounts none of the desk's rows — no ledger `boot` or `shutdown`, no sleep watch — for a second face beside the service ("Run as a service" below); `/data/desk/status` still answers, `desk.enabled: false`. Any other value, empty included, leaves the desk on |
+| `FACE_DESK` | unset | `0` mounts none of the desk's rows — no ledger `boot` or `shutdown`, no sleep watch — for a second face beside the service, which runs on a scratch home ("Run as a service" below); `/data/desk/status` still answers, `desk.enabled: false`. Any other value, empty included, leaves the desk on |
 | `DSH_HOME` | `~/.dsh` | the harness home: profiles, sessions, storages, credentials — the browser-session signing secret included |
 | `DEEPSEEK_API_KEY` | — | resolved per request through the credential seam, then the environment |
 | `DSH_TELEMETRY_DISABLED` | unset | the telemetry row is already off by the face's policy layer (D3); this switch matters only once an operator patch re-enables it, and then still wins — ANY non-empty value (`0` and `false` included) disables it again |
@@ -126,9 +126,9 @@ outside the whole repo.
 restart. `"0"` is a non-empty string, so deliberately asking for an OS-assigned
 port still works.
 
-Ctrl-C (SIGINT) leaves 130, SIGTERM leaves 0; both dispose the tree first —
-after the desk ledger's `shutdown` with that code, when the desk is on ("Run as
-a service" below).
+Ctrl-C (SIGINT) leaves 130, SIGTERM leaves 0; both first write the desk
+ledger's `shutdown` with that code, when the desk is on ("Run as a service"
+below), and then dispose the tree.
 A startup failure dsh reports itself — a required row that did not activate,
 such as `webserver` on a port already in use (`… webserver (required) …
 EADDRINUSE`) — prints dsh's grouped diagnostic and exits 1. Every refusal in
@@ -164,15 +164,55 @@ npm run service -- url         # the sign-in URL (?token=) from the face's log
 npm run service -- logs        # the last 40 lines of face.log and face.err.log
 npm run service -- stop        # launchd lets go of the job; the plist stays, so start or the next login brings it back
 npm run service -- start       # run it again; a running job is left alone
-npm run service -- restart     # stop and start it, with a new token (after an update)
+npm run service -- restart     # stop it as stop does, then start it, with a new token (after an update)
 npm run service -- uninstall   # stop it and remove the plist; the ledger and $DSH_HOME/.env stay
 ```
 
 Every command takes `--port N` for a face not on 3090; without it the port is
 the installed plist's, else 3090. `install`, `start` and `restart` refuse while
 anything else answers on that port — a terminal `npm start`, say: a second
-face there would fail to bind, exit 1, and be started again every 30 s. The
-commands that drive launchd refuse off macOS.
+face there would fail to bind, exit 1, and be started again every 30 s. When a
+face answers there that is not launchd's job, `status` says so in one line —
+`the face answering on 3090 is pid N, not launchd's job (pid M): another face
+holds the port` — so the uptime above it is that face's. `restart` stops a
+running job as `stop` does, with launchd's `bootout` (SIGTERM, then launchd's
+exit timeout), waits up to 10 s for the port to fall silent, and starts it as
+`start` does. The commands that drive launchd refuse off macOS.
+
+**First install on this Mac.** The checkout lives in `~/Desktop`, which macOS
+protects per process, as it does `~/Documents` and `~/Downloads`. A terminal
+`npm start` reads it under the terminal's permission; under launchd, node is
+its own responsible process, so the service's first start may raise "node
+would like to access files in your Desktop folder" — possibly at a login
+nobody is watching — or fail with `EPERM`, which shows in `face.err.log` while
+launchd retries every 30 s. Allow it, or grant node Desktop access in System
+Settings → Privacy & Security → Files and Folders, or keep the checkout
+outside `~/Desktop`, `~/Documents` and `~/Downloads`; `install` prints a
+`privacy: …` line before `next:` when the checkout is inside one of them.
+macOS 13 and later also posts "Background Items Added" for the new
+LaunchAgent: leave its Login Items entry allowed — turned off, it stops the
+job loading.
+
+**Install from the shell you run the face from.** `install` freezes that
+shell's `PATH` into the plist (less the `node_modules` folders npm puts first)
+and runs the first `node` on it, which it prints with the home (`home: …`,
+`node: …`). That `PATH` must find the same `node` and a `python3` with
+`alpaca_kit` installed (`pip install -e .` at the repo root): that python
+serves the instruments' producers, and the Alpaca MCP server too if the
+operator's row runs `python -m alpaca_kit.mcp`. The service runs profile
+`face` on the shell's `DSH_HOME`, so `install` refuses a home with no
+`profiles/face` — `no profile at …: run "cd face && npm run setup" with
+DSH_HOME=… first` — rather than install a face that would exit 1 every 30 s.
+A shell whose `DSH_HOME` differs from the one the installed plist names moves
+the service there, and `install` says so (`moving the service's home from …
+to …`).
+
+**Terminal-only variables do not reach the service.** Its environment is the
+plist's and what dsh reads from the home's `.env` at boot: `FACE_PYTHON`,
+`FACE_PROFILE`, `FACE_AKSHARE_MCP_COMMAND`, `DSH_PERMISSION_MODE` and anything
+else exported only in a terminal never reach it — it runs `python3` from its
+`PATH`, profile `face`, AKShare at `~/.local/bin/akshare-mcp` and the
+`workspace-write` sandbox mode.
 
 **Keys.** The plist's environment is `PATH`, `HOME` and `DSH_HOME`, plus
 `FACE_PORT` for a port asked for (`--port`, kept by a reinstall) — never a key:
@@ -195,10 +235,20 @@ existing `.env` is never rewritten. Two of its lines to read:
   and Gate 1's `ALPACA_KIT_ENABLE_ORDERS` must never reach the real harness
   home.
 
+**The home `.env` is a copy.** `install` copies the key files once and never
+rewrites `$DSH_HOME/.env`: a key rotated in `.env.alpaca` reaches the next
+terminal `npm start`, which sources it, but not the service — update the
+home's `.env` too, then `npm run service -- restart`. The lines are copied as
+written and dsh does not evaluate them, so a value that depends on shell
+evaluation (`$(…)`, `${…}`) arrives literally.
+
 **Sign-in.** The token is new on every start, the service's restarts
 included: `npm run service -- url` prints the last one in the face's log — the
-current run's once it is up. A browser already signed in to that host:port
-keeps its 30-day cookie across restarts ("Sign-in" below).
+current run's once it is up. While the face does not answer, `url` adds `(the
+face is not answering yet; this may be the previous run's URL)`: a face still
+booting, or one that never came up, has not printed its own. A browser
+already signed in to that host:port keeps its 30-day cookie across restarts
+("Sign-in" below).
 
 **Logs and the ledger.** The face's stdout and stderr go to
 `$DSH_HOME/face/service/face.log` and `face.err.log`, which nothing rotates;
@@ -209,15 +259,22 @@ and each `asleep` gap — more than two minutes between two of the face's 30 s
 timer ticks. `status` reads it back: a run that the next boot followed with no
 `shutdown` between is `last run: lost` — a crash or a `kill -9`, which
 launchd's restart would otherwise hide. When the face does not answer,
-`status` adds one ledger line on how its last run ended.
+`status` adds one ledger line on how its last run ended. `stop` and `restart`
+should end a run cleanly — launchd's `bootout` sends SIGTERM, and the face's
+desk writes its `shutdown` before anything else is torn down; the desk
+drill's steps 3 and 4 check it.
 
-**A second face** beside the service — a terminal `npm start`, a drill face —
-takes its own `FACE_PORT` and `FACE_DESK=0`, which mounts none of the desk's
-rows; its `/data/desk/status` still answers, `desk.enabled: false`. On the
-service's home the ledger assumes one desk-enabled face (a second one's `boot`
-would mark the service's run lost); on any home, the later plans' desk rows
-hold the one Telegram poller a bot token allows and the one IEX stream a key
-allows (P1 and P3 in the spec's §12).
+**A second face uses a scratch home.** A face beside the service — a terminal
+`npm start`, a drill face — runs on its own home and port with the desk off:
+`DSH_HOME=<scratch> FACE_DESK=0 FACE_PORT=3091`, after `npm run setup` with
+that `DSH_HOME`, as the desk drill's step 6 does. Two dsh processes on one
+harness home are unexamined, so no second face runs on the service's home —
+where the ledger, too, assumes one desk-enabled face (a second one's `boot`
+would mark the service's run lost). `FACE_DESK=0` mounts none of the desk's
+rows, and its `/data/desk/status` still answers, `desk.enabled: false`; it
+matters on any home, because the later plans' desk rows hold the one Telegram
+poller a bot token allows and the one IEX stream a key allows (P1 and P3 in
+the spec's §12).
 
 **Sleep:** on mains, `sudo pmset -c sleep 0`; the display may sleep; on battery
 the Mac sleeps mid-turn (the 2026-10-13 measurement), and the ledger records
@@ -2599,34 +2656,48 @@ date and the pin.
 The P0 half of the desk spec's drill
 (`../docs/superpowers/specs/2026-10-19-always-on-gravit-design.md` §9 and §12): the face as a
 service. It is the operator's, never an agent's — every step drives the operator's own launchd
-and harness home. PASS is P0's done criterion: the face has survived a `kill -9` and a login
-without a terminal, and a second face has booted beside it with `FACE_DESK=0`.
+and harness home. PASS is P0's done criterion — the face has survived a `kill -9` and a login
+without a terminal, and a second face has booted beside it, on a scratch home, with
+`FACE_DESK=0` — and one thing more: the service's face works, not only survives.
 
 **The automated half, no launchd.** `npm test` runs `tests/desk.test.ts` (the ledger, its runs,
 the sleep watch, the status and its fenced route) and `tests/service.test.ts` (the plist, the
 home's `.env`, the status text, and every command against a fake `launchctl`); `FACE_SMOKE=1
 npm test` mounts the desk on a real tree (`smoke.test.ts`). What only this drill checks: that
-launchd accepts the commands the script sends (`enable`, `bootstrap`, `kickstart`,
-`kickstart -k`, `bootout`); that launchd's real `print` text parses for the job's state and pid,
-and that the pid is the face's own, the one the ledger's `boot` line carries; and that the face
-writes its `shutdown` line within launchd's stop timeout on `stop` and `restart`.
+launchd accepts the commands the script sends — `enable`, `bootstrap` and `bootout` (no step
+reaches `start`'s `kickstart`, which runs only for a loaded job that is not running); that
+launchd's real `print` text parses for the job's state and pid, and that the pid is the face's
+own, the one the ledger's `boot` line carries; that the face writes its `shutdown` line within
+launchd's stop timeout on `stop` and `restart`; and that the face works under launchd — macOS
+lets node read the checkout, and the plist's `PATH` and the home's `.env` carry what a prompt
+and a quote need.
 
-**The drill**, from `face/` in the primary checkout with the work merged there, and no other
-face on 3090:
+**The drill**, from `face/` in the primary checkout with the work merged there, from the shell
+you run the face from ("Run as a service"), and no other face on 3090:
 
 1. `npm run service -- install`. PASS, part one: it prints `installed: …`,
-   `runs: <the primary checkout>/face/src/main.ts` and `log: …` (read its `not in` and
-   `not copied` lines, "Run as a service"); `npm run service -- status` says
-   `com.gravit.face: running (pid N)` and, once the face is up,
+   `runs: <the primary checkout>/face/src/main.ts`, `home: …`, `node: …` and `log: …` (read its
+   `not in`, `not copied` and `privacy:` lines, "Run as a service"); `npm run service -- status`
+   says `com.gravit.face: running (pid N)` and, once the face is up,
    `answering at http://127.0.0.1:3090 · … · desk on`; `npm run service -- url` prints the
-   `?token=` URL, and the browser opens the chat with it.
+   `?token=` URL, and the browser opens the chat with it. And it works: `face.err.log`
+   (`npm run service -- logs`) holds no `EPERM` — if it does, allow node's privacy prompt or
+   grant node access ("Run as a service", first install), and launchd's next start, within
+   30 s, reads the checkout; one prompt is answered in the browser; and `/market` shows a quote.
 2. `kill -9 N`, the pid `status` printed — the face's own: the last `boot` line in the ledger,
    `$DSH_HOME/face/desk/events.jsonl` (`~/.dsh` unless `DSH_HOME` is set), shows the same
    `"pid":N`. PASS, part two: within about 30 s, `status` says `running` with a new pid and
-   `last run: lost (killed or crashed; no shutdown event)`.
-3. `npm run service -- restart`. PASS, part three: `status` says `running` with a new pid and
+   `last run: lost (killed or crashed; no shutdown event)`. Observe, too, that no MCP child of
+   the killed run is left: `pgrep -fl akshare-mcp` and `pgrep -fl alpaca_kit.mcp` show only the
+   new run's, whose parent (`ps -o ppid= -p <pid>`) is the new pid — never `1`. Record what you
+   see.
+3. `npm run service -- restart`. PASS, part three: it prints `stopping the running job to start
+   it again: …` and `started: …`; `status` says `running` with a new pid and
    `last run: ended … code 0`; the ledger shows a `shutdown` line with the pid `status` showed
    before the restart and `"code":0`, then the new `boot` — the old run ended, it was not lost.
+   `restart` stops the face as `stop` does, with launchd's `bootout`, then bootstraps it again,
+   so a `last run: lost` here means launchd stopped the face without SIGTERM — a finding, and it
+   belongs in the drill record.
 4. `time npm run service -- stop`. PASS, part four: `status` says `com.gravit.face: not loaded`
    and `not answering on 3090`, and its ledger line reads `ledger: last boot … - ended … code 0`.
    Record how long the stop took — the face's real exit against the script's 10 s wait
@@ -2647,9 +2718,13 @@ face on 3090:
    own sign-in URL on 3091; `curl -s http://127.0.0.1:3091/data/desk/status` reads
    `"enabled":false`; the service's `status` still says `running` on 3090. Stop it with Ctrl-C
    and `rm -rf "$SCRATCH_HOME"` — it holds a `.credentials.yaml`.
+7. Optional — a real sleep. `pmset sleepnow`, and wake the Mac after more than 2 minutes. PASS,
+   the optional part: `npm run service -- status` shows `asleep: 1 gap(s) since boot` — one gap
+   more than before the sleep, if this run already had one — and the ledger an `asleep` line
+   whose `gapMs` spans the sleep.
 
-**PASS is all six.** Record the date, the commit and step 4's stop time in `DEVELOPMENT.md`
-§7.4's **Desk** row.
+**PASS is steps 1–6; step 7 is optional.** Record the date, the commit, step 4's stop time,
+step 2's observation and, when it ran, step 7 in `DEVELOPMENT.md` §7.4's **Desk** row.
 
-**Not yet run.** The automated half passes at `4465ed9`; nothing has run against the real
+**Not yet run.** The automated half passes 2026-10-20; nothing has run against the real
 launchd.
