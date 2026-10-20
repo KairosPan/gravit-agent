@@ -128,3 +128,10 @@ test('Account links #/account/portfolio, is current on Account, and carries the 
   assert.doesNotMatch(renderNav(keyless), /account-line/);
   assert.doesNotMatch(renderNav(R.nav(read, { screen: 'markets', id: null })), /class="account current"/);
 });
+
+test('the Messages key never points at an archived conversation', () => {
+  const s = R.nav(listed([conv('z', { archived: 'face', updatedAt: NOW }), conv('a')], 'a'), { screen: 'markets', id: null });
+  const h = renderNav({ ...s, lastConv: null });
+  assert.match(h, /href="#\/messages\/a"/);
+  assert.doesNotMatch(h, /href="#\/messages\/z"/);
+});

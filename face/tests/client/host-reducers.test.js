@@ -158,3 +158,14 @@ test('markSeen raises the last-seen seq on the conversation and in the per-viewe
   s = R.markSeen(s, { convId: 'a', seq: 4 });
   assert.equal(get(s, 'a').lastSeen, 9); assert.deepEqual(s.lastSeen, { a: 9 });
 });
+
+test("hostList keeps a conversation's subagentCatalog and stores the child rows", () => {
+  let s = withConv(conv('p'));
+  s = R.hostProjection(s, { convId: 'p', key: 'subagentCatalog', value: [{ id: 'c1', createdAt: 1, mode: 'one-shot' }] });
+  assert.deepEqual(get(s, 'p').subagentCatalog, [{ id: 'c1', createdAt: 1, mode: 'one-shot' }]);
+  const childRows = [{ sessionId: 'c1', parentSessionId: 'p', running: false, origin: 'subagent' }];
+  s = R.hostList(s, { conversations: [conv('p')], childRows });
+  assert.deepEqual(get(s, 'p').subagentCatalog, [{ id: 'c1', createdAt: 1, mode: 'one-shot' }]);
+  assert.deepEqual(s.childRows, childRows);
+  assert.deepEqual(R.hostList(s, { conversations: [conv('p')] }).childRows, childRows, 'a list without child rows keeps the last');
+});

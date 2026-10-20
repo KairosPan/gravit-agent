@@ -4,7 +4,7 @@ import { esc, attrs, cls } from '../html.js';
 import { icon } from '../icons.js';
 import { rowTime } from '../time.js';
 import { needsAnswer } from '../messages.js';
-import { unreadOf } from '../host/sessions.js';
+import { unreadOf, firstOpen } from '../host/sessions.js';
 import { portfolioOf } from '../host/account-view.js';
 import { money } from '../wire/account-model.js';
 import { avatar, groupMark } from './avatars.js';
@@ -65,7 +65,9 @@ export function renderNav(state) {
   const { screen } = state.route;
   const mini = !!state.railCollapsed;
   const waiting = state.conversations.filter(c => c.messages.some(needsAnswer)).length;
-  const messagesHref = `#/messages/${screen === 'messages' && state.route.id && state.route.id !== 'new' ? state.route.id : state.lastConv ?? state.conversations[0]?.id ?? ''}`;
+  // the last one open, unless it has since been archived; else the first open one
+  const last = state.lastConv && !state.conversations.some(c => c.id === state.lastConv && c.archived) ? state.lastConv : null;
+  const messagesHref = `#/messages/${screen === 'messages' && state.route.id && state.route.id !== 'new' ? state.route.id : last ?? firstOpen(state.conversations)?.id ?? ''}`;
   return `<nav class="${cls('rail', mini && 'mini')}" aria-label="Gravit">
   <div class="brand">${avatar('gravit', 28)}<span class="brand-name">Gravit</span>` +
     `<button type="button" class="rail-toggle" data-action="toggleRail" aria-expanded="${mini ? 'false' : 'true'}" aria-label="${mini ? 'Expand navigation' : 'Collapse navigation'}">${icon(mini ? 'chevRight' : 'chevLeft', 16, 2.2)}</button></div>
@@ -83,7 +85,7 @@ export function renderNav(state) {
 // the second level, open on Messages: the conversations, newest first, with the new-message key on top
 export function renderList(state, now) {
   if (state.route.screen !== 'messages') return '';
-  const rows = (state.draft ? draftRow() : '') + state.conversations.map(c => row(c, state, now)).join('');
+  const rows = (state.draft ? draftRow() : '') + state.conversations.filter(c => !c.archived).map(c => row(c, state, now)).join('');
   return `<aside class="list" aria-label="Messages"><div class="list-head"><h2 class="list-title">Messages</h2>` +
     `<button type="button" class="new-key" data-action="startDraft" aria-label="New message">${icon('plus', 18, 2.2)}</button></div>` +
     `${rows ? `<div class="rail-rows">${rows}</div>` : ''}</aside>`;

@@ -7,10 +7,11 @@ import { avatar, cluster } from './avatars.js';
 import { renderThread } from './thread.js';
 import { senderName } from './rail.js';
 import { kv, inlineEdit, confirmPair } from './controls.js';
+import { firstOpen } from '../host/sessions.js';
 
 export function currentConversation(state) {
   const id = state.route.screen === 'messages' ? state.route.id : null;
-  return state.conversations.find(c => c.id === id) ?? state.conversations[0] ?? null;
+  return state.conversations.find(c => c.id === id) ?? firstOpen(state.conversations);
 }
 
 // the box and Send; the words are prompted to the session (host/actions.js)

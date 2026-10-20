@@ -11,7 +11,7 @@ const settle = async () => { for (let i = 0; i < 8; i++) await tick(); };
 const row = (id, over = {}) => ({ sessionId: id, updatedAt: 5, agentAvailable: false, running: false, blank: false, ...over });
 
 // a fake host: the mux records its streams and keeps the options; the calls are canned per endpoint and recorded
-function host({ rows = [], pages = {} } = {}) {
+function host({ rows = [], pages = {}, meta = { ok: true, archived: [], deleted: [] } } = {}) {
   const streams = [];
   let opts = null;
   const mux = { stream(name, args, cbs) { const s = { name, args, cbs, cancelled: false }; streams.push(s); return { cancel() { s.cancelled = true; } }; }, answer: async (id, value) => { answered.push([id, value]); }, close() {} };
@@ -25,7 +25,7 @@ function host({ rows = [], pages = {} } = {}) {
     if (endpoint === 'session/create') { rows.push(row('s-new', { agentAvailable: true })); return { sessionId: 's-new', agentPreset: 'gravit' }; }
     return undefined;
   };
-  const getJson = async path => (path === '/data/channels.json' ? { ok: true, root: '/r', channels: [{ workspaceId: 'w0', name: 'workbench', isRoot: true, sessionIds: [] }], ungrouped: [], archived: [], presets: {} } : { bots: [] });
+  const getJson = async path => (path === '/data/channels.json' ? { ok: true, root: '/r', channels: [{ workspaceId: 'w0', name: 'workbench', isRoot: true, sessionIds: [] }], ungrouped: [], archived: [], presets: {} } : path === '/data/sessions-meta.json' ? meta : { bots: [] });
   const posted = [];
   const postJson = async (path, body) => { posted.push([path, body]); return { addressed: [] }; };
   return { openMux: o => { opts = o; return mux; }, call, getJson, postJson, markdown: null, calls, posted, answered, streams, ready: async () => { opts.onReady({}); await settle(); }, opts: () => opts };
@@ -608,5 +608,15 @@ test('a press holds renders until it ends, so a streaming quote cannot swallow t
   f.fire('root', 'pointerdown', { button: 2 });
   tick(82_003);
   assert.ok(f.writes > right, 'a right press holds nothing');
+  store.timers.clear();
+});
+
+test('boot opens the newest open conversation when the newest is archived', async () => {
+  const f = fakeWindow({ hash: '' });
+  const h = host({ rows: [row('s1', { updatedAt: 9 }), row('s2', { updatedAt: 5 })], meta: { ok: true, archived: ['s1'], deleted: [] } });
+  const store = started(f, h);
+  await h.ready();
+  assert.equal(store.get().route.id, 's2');
+  assert.equal(store.get().conversations.find(c => c.id === 's1').archived, 'face');
   store.timers.clear();
 });

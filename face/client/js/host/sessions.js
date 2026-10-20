@@ -4,6 +4,7 @@
 import { summaryOf } from '../wire/summaries.js';
 import { foldMembers } from '../wire/room.js';
 import { isHostPreset } from '../wire/speaker.js';
+import { isSubagentRow } from '../wire/subagents.js';
 
 const str = v => (typeof v === 'string' && v !== '' ? v : undefined);
 // the restored field first (summaryOf), the row's own projection when a raw row is handed in
@@ -29,6 +30,8 @@ export function conversationOf(summary, ctx, fold = { ids: [], sessions: [] }) {
     title: str(summary.projections?.values?.title) ?? 'Untitled',
     kind, members, memberSessions: fold.sessions,
     channel: ctx.channelOf?.(id) ?? null,
+    // archived by the host (channels.json) or by the face (sessions-meta.json); only the face's can be undone
+    archived: ctx.hostArchived?.has(id) ? 'host' : ctx.archived?.has(id) ? 'face' : false,
     preset,
     running: summary.running === true,
     live: summary.agentAvailable === true,
@@ -39,19 +42,30 @@ export function conversationOf(summary, ctx, fold = { ids: [], sessions: [] }) {
   };
 }
 
-// the whole list: members folded away, subagent children (origin) and archived or deleted ids dropped, newest first
+// the whole list: members folded away, subagent children (origin) and deleted ids dropped, archived ones kept and
+// marked, newest first
 export function listConversations(items, ctx) {
   const rows = (Array.isArray(items) ? items : []).map(r => summaryOf(r, ctx.presets));
   const fold = foldMembers(rows);
   const out = [];
   for (const s of rows) {
     const id = String(s.sessionId);
-    if (fold.members.has(id) || s.origin !== undefined || ctx.archived?.has(id) || ctx.deleted?.has(id)) continue;
+    if (fold.members.has(id) || s.origin !== undefined || ctx.deleted?.has(id)) continue;
     const memberRows = fold.rooms.get(id) ?? [];
     out.push(conversationOf(s, ctx, { ids: memberRows.map(m => String(m.agentPreset)), sessions: memberRows.map(m => String(m.sessionId)) }));
   }
   return out.sort((a, b) => b.updatedAt - a.updatedAt);
 }
+
+// the subagent children the list leaves out, kept for their parent's Children section: who, under whom, running
+export function childRowsOf(items) {
+  return (Array.isArray(items) ? items : []).filter(isSubagentRow).map(r => ({
+    sessionId: String(r.sessionId), parentSessionId: str(r.parentSessionId), running: r.running === true, origin: 'subagent',
+  }));
+}
+
+// the conversation a default opens: the first that is not archived
+export const firstOpen = conversations => (Array.isArray(conversations) ? conversations.find(c => !c.archived) : undefined) ?? null;
 
 // the host moved it after the operator last looked
 export const unreadOf = conv => conv.updatedAt > (conv.lastSeen ?? 0);

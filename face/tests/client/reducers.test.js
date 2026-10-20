@@ -5,6 +5,7 @@ import { reducers as R } from '../../client/js/reducers/index.js';
 import { seed } from './helpers/seed.js';
 import { MIN } from '../../client/js/time.js';
 import { REVIEW_MS } from '../../client/js/reducers/discover.js';
+import { emptyState } from '../../client/js/data/empty.js';
 
 const NOW = new Date(2026, 9, 9, 14, 7).getTime();
 const fresh = () => seed(NOW);
@@ -101,4 +102,16 @@ test('an install conversation knows which plugin it teaches', () => {
   assert.equal(R.install(s0, { id: 'no-such-plugin', now: NOW }), s0);
   const t = R.install(R.uninstall(fresh(), 'buffett'), { id: 'buffett', now: NOW });
   assert.equal(t.conversations[0].teach, 'buffett');
+});
+
+const hostConv = (id, over = {}) => ({ id, title: id, kind: 'gravit', members: ['gravit'], memberSessions: [], channel: null, preset: 'gravit', running: false, live: false, archived: false, updatedAt: 1, created: null, messages: [], loaded: false, preview: null, usage: null, thinking: null, lastSeen: 0, ...over });
+
+test('nav to a missing id and Cancel open the first open conversation, never an archived one', () => {
+  const s = { ...emptyState(), conversations: [hostConv('old', { archived: 'face' }), hostConv('a')] };
+  assert.equal(R.nav(s, { screen: 'messages', id: 'gone' }).route.id, 'a');
+  assert.equal(R.nav(s, { screen: 'messages', id: null }).route.id, 'a');
+  assert.equal(R.nav(s, { screen: 'messages', id: 'old' }).route.id, 'old', 'an archived conversation opens by its id');
+  assert.equal(R.cancelDraft(R.startDraft(s, { now: NOW })).route.id, 'a');
+  const allArchived = { ...s, conversations: [hostConv('old', { archived: 'host' })] };
+  assert.equal(R.nav(allArchived, { screen: 'messages', id: null }).route.id, null);
 });

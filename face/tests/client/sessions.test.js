@@ -1,9 +1,9 @@
 // Session rows become conversations (spec 2026-10-19 §5, §7 "List"): title, kind, members, channel, liveness.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { kindOf, conversationOf, listConversations, unreadOf } from '../../client/js/host/sessions.js';
+import { kindOf, conversationOf, listConversations, unreadOf, childRowsOf, firstOpen } from '../../client/js/host/sessions.js';
 
-const ctx = (over = {}) => ({ presets: {}, bots: new Map([['buffett', { name: 'Buffett' }]]), channelOf: () => null, rooms: new Map(), lastSeen: {}, archived: new Set(), deleted: new Set(), ...over });
+const ctx = (over = {}) => ({ presets: {}, bots: new Map([['buffett', { name: 'Buffett' }]]), channelOf: () => null, rooms: new Map(), lastSeen: {}, archived: new Set(), hostArchived: new Set(), deleted: new Set(), ...over });
 const row = (id, over = {}) => ({ sessionId: id, updatedAt: 5, agentAvailable: false, running: false, blank: false, ...over });
 const titled = (id, title, preset, over = {}) => row(id, { projections: { values: { title, ...(preset ? { agentPreset: preset } : {}) } }, ...over });
 
@@ -13,7 +13,7 @@ test('a bare row is an Untitled Gravit conversation that is not live', () => {
   assert.deepEqual(c.members, ['gravit']); assert.equal(c.live, false); assert.equal(c.running, false);
   assert.equal(c.updatedAt, 5); assert.equal(c.channel, null); assert.equal(c.preset, undefined);
   assert.deepEqual(c.messages, []); assert.equal(c.loaded, false); assert.equal(c.preview, null); assert.equal(c.usage, null); assert.equal(c.thinking, null);
-  assert.equal(c.lastSeen, 0);
+  assert.equal(c.lastSeen, 0); assert.equal(c.archived, false);
 });
 
 test("a bot's home session is kind bot, titled by its projection, with the bot as its one member", () => {
@@ -36,7 +36,7 @@ test('kindOf: host preset → gravit, a bot preset → bot, members from the fol
   assert.equal(kindOf(titled('a', 'x', 'gravit'), undefined, ['buffett']), 'group');
 });
 
-test('the list drops room members, subagent children, archived and deleted rows, and sorts newest first', () => {
+test('archived conversations stay, marked host or face; deleted ones, children and members leave; newest first', () => {
   const items = [
     titled('old', 'Old', 'gravit', { updatedAt: 1 }),
     titled('room', 'Room', 'gravit', { updatedAt: 3 }),
@@ -46,8 +46,11 @@ test('the list drops room members, subagent children, archived and deleted rows,
     titled('dead', 'dead', 'gravit', { updatedAt: 6 }),
     titled('new', 'New', 'gravit', { updatedAt: 4 }),
   ];
-  const list = listConversations(items, ctx({ archived: new Set(['gone']), deleted: new Set(['dead']) }));
-  assert.deepEqual(list.map(c => c.id), ['new', 'room', 'old']);
+  const list = listConversations(items, ctx({ archived: new Set(['gone', 'old']), hostArchived: new Set(['old']), deleted: new Set(['dead']) }));
+  assert.deepEqual(list.map(c => c.id), ['gone', 'new', 'room', 'old']);
+  assert.equal(list.find(c => c.id === 'gone').archived, 'face');
+  assert.equal(list.find(c => c.id === 'old').archived, 'host', 'the host archive wins over the face one');
+  assert.equal(list.find(c => c.id === 'new').archived, false);
   const room = list.find(c => c.id === 'room');
   assert.equal(room.kind, 'group', 'the fold alone makes a room');
   assert.deepEqual(room.members, ['gravit', 'buffett']);
@@ -68,4 +71,19 @@ test('unread means the host moved it after the operator last looked', () => {
   assert.equal(unreadOf({ updatedAt: 10, lastSeen: 5 }), true);
   assert.equal(unreadOf({ updatedAt: 10, lastSeen: 10 }), false);
   assert.equal(unreadOf({ updatedAt: 10, lastSeen: 0 }), true);
+});
+
+test('childRowsOf keeps the subagent rows with their parent and whether they run', () => {
+  const items = [row('p'), row('c1', { origin: 'subagent', parentSessionId: 'p', running: true }), row('c2', { origin: 'subagent', parentSessionId: 'c1' }), row('m', { parentSessionId: 'p', agentPreset: 'buffett' }), null];
+  assert.deepEqual(childRowsOf(items), [
+    { sessionId: 'c1', parentSessionId: 'p', running: true, origin: 'subagent' },
+    { sessionId: 'c2', parentSessionId: 'c1', running: false, origin: 'subagent' },
+  ]);
+  assert.deepEqual(childRowsOf(undefined), []);
+});
+
+test('firstOpen skips archived conversations', () => {
+  assert.equal(firstOpen([{ id: 'a', archived: 'face' }, { id: 'b', archived: false }]).id, 'b');
+  assert.equal(firstOpen([{ id: 'a', archived: 'host' }]), null);
+  assert.equal(firstOpen([]), null);
 });

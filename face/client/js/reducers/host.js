@@ -18,15 +18,18 @@ export const reducers = {
   },
 
   // the list as the host gives it; a surviving conversation keeps its window and what the viewer did with it
-  hostList(s, { conversations, channels, bots }) {
+  hostList(s, { conversations, channels, bots, childRows }) {
     const old = new Map(s.conversations.map(c => [c.id, c]));
     const next = conversations.map(c => {
       const o = old.get(c.id);
       return o
-        ? { ...c, messages: o.messages, loaded: o.loaded, preview: o.preview, previewAt: o.previewAt, usage: o.usage, thinking: o.thinking, created: o.created ?? c.created, lastSeen: Math.max(o.lastSeen ?? 0, c.lastSeen ?? 0) }
+        ? { ...c, messages: o.messages, loaded: o.loaded, preview: o.preview, previewAt: o.previewAt, usage: o.usage, thinking: o.thinking, subagentCatalog: o.subagentCatalog, created: o.created ?? c.created, lastSeen: Math.max(o.lastSeen ?? 0, c.lastSeen ?? 0) }
         : c;
     });
-    return { ...s, conversations: next, channels: Array.isArray(channels) ? channels : s.channels, bots: Array.isArray(bots) ? bots : s.bots };
+    return {
+      ...s, conversations: next, channels: Array.isArray(channels) ? channels : s.channels, bots: Array.isArray(bots) ? bots : s.bots,
+      childRows: Array.isArray(childRows) ? childRows : s.childRows,
+    };
   },
 
   // a follow snapshot or a page: the window whole, never appended to what was drawn
@@ -93,6 +96,9 @@ export const reducers = {
       }
       case 'running':
         return typeof value === 'boolean' ? upd(s, convId, c => ({ ...c, running: value })) : s;
+      // the parent's record of its children, kept as the host sent it; the Children section validates it
+      case 'subagentCatalog':
+        return upd(s, convId, c => ({ ...c, subagentCatalog: value }));
       default:
         return s;
     }

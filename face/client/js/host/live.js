@@ -4,7 +4,7 @@
 import { foldMembers } from '../wire/room.js';
 import { summaryOf } from '../wire/summaries.js';
 import { rememberCall, toMessages } from './kinds.js';
-import { listConversations } from './sessions.js';
+import { listConversations, childRowsOf } from './sessions.js';
 import { reducers as host } from '../reducers/host.js';
 
 export const LIST_REFRESH_MS = 1200;   // the list is re-read this long after a burst of host facts
@@ -30,6 +30,10 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
   let listSeq = 0;
   let view = null;                // {id, token, mode: 'follow' | 'page', handle, stale?, failed?}
   let listPending = false;
+  // the last good answer of each /data read the list joins: a failed read keeps it, never an empty set in its place
+  let lastIndex = null;
+  let lastMeta = null;
+  let lastBots = null;
 
   const state = () => store.get();
   const convOf = id => state().conversations.find(c => c.id === id);
@@ -222,12 +226,13 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
   }
   async function refresh() {
     const token = ++listSeq;
-    let list, index, botsBody;
+    let list, index, botsBody, meta;
     try {
-      [list, index, botsBody] = await Promise.all([
+      [list, index, botsBody, meta] = await Promise.all([
         call('session/list', { _request: {} }),
         getJson('/data/channels.json').catch(() => null),
         getJson('/data/bots.json').catch(() => null),
+        getJson('/data/sessions-meta.json').catch(() => null),
       ]);
     } catch (err) {
       say(`list: ${codeOf(err)}`, true);
@@ -235,8 +240,13 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
     }
     if (token !== listSeq) return;
     if (!Array.isArray(list?.items)) { say('the host answered without a session list', true); return; }
+    if (Array.isArray(index?.channels)) lastIndex = index; else index = lastIndex;
+    if (Array.isArray(meta?.archived)) lastMeta = meta; else meta = lastMeta;
+    if (Array.isArray(botsBody?.bots)) lastBots = botsBody; else botsBody = lastBots;
     const channels = (Array.isArray(index?.channels) ? index.channels : []).map(ch => ({
-      workspaceId: ch.workspaceId, name: ch.name, isRoot: ch.isRoot === true, sessionIds: Array.isArray(ch.sessionIds) ? ch.sessionIds : [],
+      workspaceId: ch.workspaceId, name: ch.name, title: typeof ch.title === 'string' && ch.title !== '' ? ch.title : ch.name,
+      dir: typeof ch.dir === 'string' ? ch.dir : null, isRoot: ch.isRoot === true, missingDir: ch.missingDir === true,
+      sessionIds: Array.isArray(ch.sessionIds) ? ch.sessionIds : [],
     }));
     const channelOf = id => { const ch = channels.find(c => c.sessionIds.includes(id)); return ch ? { workspaceId: ch.workspaceId, name: ch.name } : null; };
     const bots = new Map((Array.isArray(botsBody?.bots) ? botsBody.bots : []).map(b => [b.id, { name: b.name }]));
@@ -244,12 +254,14 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
     memberBot = new Map();
     for (const members of foldMembers(rows).rooms.values()) for (const m of members) memberBot.set(String(m.sessionId), String(m.agentPreset));
     const conversations = listConversations(list.items, {
-      presets: index?.presets ?? {}, bots, channelOf, rooms, lastSeen: state().lastSeen, archived: new Set(index?.archived ?? []), deleted: new Set(),
+      presets: index?.presets ?? {}, bots, channelOf, rooms, lastSeen: state().lastSeen,
+      archived: new Set(meta?.archived ?? []), hostArchived: new Set(index?.archived ?? []), deleted: new Set(Array.isArray(meta?.deleted) ? meta.deleted : []),
     });
     store.dispatch('hostList', {
       conversations,
-      channels: channels.map(c => ({ workspaceId: c.workspaceId, name: c.name, isRoot: c.isRoot })),
+      channels,
       bots: [...bots].map(([id, b]) => ({ id, name: b.name })), // the screens name a bot by these
+      childRows: childRowsOf(list.items),
     });
     for (const r of list.items) if (typeof r?.sessionId === 'string') seedBlock(r.sessionId, r.projections);
     const openId = state().route.screen === 'messages' ? state().route.id : null;

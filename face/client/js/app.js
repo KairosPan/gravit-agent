@@ -19,6 +19,7 @@ import { startAccount } from './host/account.js';
 import { statementOf, csvOf } from './host/account-view.js';
 import { canonicalId, assetFor } from './host/market-view.js';
 import { createLiveQuotes } from './wire/market-quotes.js';
+import { firstOpen } from './host/sessions.js';
 import { createSymbolSearch } from './wire/market-search.js';
 
 export const PREFS_KEY = 'gravit-ui.prefs';
@@ -471,7 +472,7 @@ export function boot(win, host = {}) {
     if (type !== 'hostList') return;
     // the list answered a deep link, or there was no conversation on screen: open one
     if (wanted && s.conversations.some(c => c.id === wanted)) { const id = wanted; wanted = null; go({ screen: 'messages', id }); }
-    else if (s.route.screen === 'messages' && s.route.id === null && s.conversations.length) go({ screen: 'messages', id: s.conversations[0].id });
+    else if (s.route.screen === 'messages' && s.route.id === null && firstOpen(s.conversations)) go({ screen: 'messages', id: firstOpen(s.conversations).id });
   });
   applyTheme(store.get().theme);
   if (!win.location.hash) win.history.replaceState(null, '', toHash(store.get().route));

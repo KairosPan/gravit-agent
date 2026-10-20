@@ -16,7 +16,7 @@ const tick = () => new Promise(r => setTimeout(r, 0));
 const settle = async () => { for (let i = 0; i < 6; i++) await tick(); };
 
 // a fake mux: every stream is recorded with its handlers, the options are kept for the test to fire
-function rig({ rows = [], channels = { ok: true, root: '/r', channels: [], ungrouped: [], archived: [], presets: {} }, bots = { bots: [] }, pages = {}, onReceipt } = {}) {
+function rig({ rows = [], channels = { ok: true, root: '/r', channels: [], ungrouped: [], archived: [], presets: {} }, bots = { bots: [] }, meta = { ok: true, archived: [], deleted: [] }, pages = {}, onReceipt } = {}) {
   const store = createStore({ initial: emptyState(), reducers });
   const streams = [];
   let opts = null;
@@ -32,13 +32,15 @@ function rig({ rows = [], channels = { ok: true, root: '/r', channels: [], ungro
     if (endpoint === 'session/page') return { records: pages[args.request.address.sessionId] ?? [] };
     return undefined;
   };
-  const getJson = async path => (path === '/data/channels.json' ? channels : path === '/data/bots.json' ? bots : {});
+  // the /data answers by path; a test swaps one for an Error to fail that read
+  const answers = { '/data/channels.json': channels, '/data/bots.json': bots, '/data/sessions-meta.json': meta };
+  const getJson = async path => { const a = answers[path]; if (a instanceof Error) throw a; return a ?? {}; };
   const scheduled = [];
   const timers = { after(ms, fn) { scheduled.push({ ms, fn }); } };
   const live = startLive({ store, openMux: o => { opts = o; return mux; }, call, mapFrame, getJson, timers, now: () => NOW, onReceipt });
   const last = name => [...streams].reverse().find(s => s.name === name);
   const follows = () => streams.filter(s => s.name === 'session/follow');
-  return { store, live, streams, calls, scheduled, opts: () => opts, last, follows, ready: async () => { opts.onReady({ home: '/h' }); await settle(); } };
+  return { store, live, streams, calls, scheduled, answers, opts: () => opts, last, follows, ready: async () => { opts.onReady({ home: '/h' }); await settle(); } };
 }
 const fixture = i => ({ type: 'event', event: frames[i].event });
 
@@ -300,4 +302,39 @@ test('a place_order result that is a receipt calls onReceipt once; a refusal or 
   assert.equal(receipts, 1);
   f.cbs.onItem({ type: 'event', event: orderResult(44, 'the user rejected tool "mcp__alpaca-kit__place_order"', true) });
   assert.equal(receipts, 1, 'a refusal is no fill');
+});
+
+test('refresh reads sessions-meta; a failed channels, sessions-meta or bots read keeps the last good answer', async () => {
+  const alpha = { workspaceId: 'w1', name: 'alpha', title: 'Alpha', dir: '/r/strategies/alpha', isRoot: false, missingDir: false, sessionIds: ['s1'] };
+  const r = rig({
+    rows: [row('s1'), row('s2'), row('s3'), row('s4')],
+    channels: { ok: true, root: '/r', channels: [alpha], ungrouped: [], archived: ['s3'], presets: {} },
+    meta: { ok: true, archived: ['s2'], deleted: ['s4'] },
+    bots: { bots: [{ id: 'buffett', name: 'Buffett' }] },
+  });
+  await r.ready();
+  const get = id => r.store.get().conversations.find(c => c.id === id);
+  assert.equal(get('s2').archived, 'face'); assert.equal(get('s3').archived, 'host'); assert.equal(get('s4'), undefined, 'a deleted session leaves');
+  assert.deepEqual(r.store.get().channels, [alpha]);
+  assert.deepEqual(get('s1').channel, { workspaceId: 'w1', name: 'alpha' });
+  for (const path of ['/data/channels.json', '/data/sessions-meta.json', '/data/bots.json']) r.answers[path] = new Error('HTTP 500');
+  await r.live.refresh();
+  assert.equal(get('s2').archived, 'face', 'a failed sessions-meta read un-archives nothing');
+  assert.equal(get('s4'), undefined, 'nor brings back a deleted one');
+  assert.equal(get('s3').archived, 'host');
+  assert.deepEqual(r.store.get().channels, [alpha], 'a failed channels read keeps the groups');
+  assert.deepEqual(get('s1').channel, { workspaceId: 'w1', name: 'alpha' });
+  assert.deepEqual(r.store.get().bots, [{ id: 'buffett', name: 'Buffett' }], 'a failed bots read keeps the names');
+});
+
+test('the subagentCatalog projection reaches the conversation, and the list carries the child rows', async () => {
+  const r = rig({ rows: [row('p'), row('c1', { origin: 'subagent', parentSessionId: 'p', running: true })] });
+  await r.ready();
+  const catalog = [{ id: 'c1', createdAt: 1, mode: 'continuable', label: 'Check' }];
+  r.streams[0].cbs.onItem({ type: 'projection', sessionId: 'p', key: 'subagentCatalog', value: catalog, seq: 4 });
+  const p = () => r.store.get().conversations.find(c => c.id === 'p');
+  assert.deepEqual(p().subagentCatalog, catalog);
+  assert.deepEqual(r.store.get().childRows, [{ sessionId: 'c1', parentSessionId: 'p', running: true, origin: 'subagent' }]);
+  await r.live.refresh();
+  assert.deepEqual(p().subagentCatalog, catalog, 'a list refresh keeps it');
 });

@@ -10,6 +10,7 @@ export function emptyState() {
     detailsOpen: false,
     settingsOpen: false,
     conversations: [],
+    childRows: [],
     channels: [],
     bots: [],
     status: { line: 'connecting…', bad: false, connected: false },

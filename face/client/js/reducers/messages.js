@@ -3,6 +3,7 @@
 import { nextId } from '../ids.js';
 import { byId } from '../data/plugins.js';
 import { canonicalId } from '../host/market-view.js';
+import { firstOpen } from '../host/sessions.js';
 
 // one drawer at a time: an opener first closes whatever else was open, with any editor or confirm in it
 export const closeOverlays = s => ({
@@ -23,9 +24,9 @@ const defaultWhere = s => s.channels?.find(c => c.isRoot)?.workspaceId ?? s.chan
 
 export const reducers = {
   nav(state, route) {
-    // a missing id, or new without a draft, opens the first conversation
+    // a missing id, or new without a draft, opens the first open conversation (an archived one opens by its id alone)
     if (route.screen === 'messages' && !(route.id === 'new' && state.draft) && !state.conversations.some(c => c.id === route.id)) {
-      route = { screen: 'messages', id: state.conversations[0]?.id ?? null };
+      route = { screen: 'messages', id: firstOpen(state.conversations)?.id ?? null };
     }
     // a plugin that is not in the shop opens Discover
     if (route.screen === 'plugin' && !byId(route.id, state.plugins.uploaded)) route = { screen: 'discover', id: null };
@@ -62,7 +63,7 @@ export const reducers = {
   startDraft(s) {
     return { ...closeOverlays(s), draft: { title: '', where: defaultWhere(s) }, route: { screen: 'messages', id: 'new' } };
   },
-  cancelDraft: s => ({ ...s, draft: null, route: { screen: 'messages', id: s.conversations[0]?.id ?? null } }),
+  cancelDraft: s => ({ ...s, draft: null, route: { screen: 'messages', id: firstOpen(s.conversations)?.id ?? null } }),
   setDraftTitle: (s, title) => (s.draft ? { ...s, draft: { ...s.draft, title } } : s),
   setDraftWhere: (s, where) => (s.draft ? { ...s, draft: { ...s.draft, where: where || null } } : s),
 
