@@ -1,10 +1,10 @@
 /** America/New_York, the desk's clock: the operator's and the market's. Every time the desk shows
  * the operator is written in it - `14:03 ET` on the phone and in `npm run service -- status`,
- * `2026-10-20` in a provenance line - and its day, from 00:00 ET, is the day the desk counts its
- * turns and their tokens in (spec §5.8). The zone is named rather than taken from the machine, so
- * a face or a test run under another zone reads the same.
+ * `2026-10-20` in a provenance line, `IEX 15:21:03 ET` on a quote - and its day, from 00:00 ET, is
+ * the day the desk counts its turns and their tokens in (spec §5.8). The zone is named rather than
+ * taken from the machine, so a face or a test run under another zone reads the same.
  *
- * One `Intl.DateTimeFormat` serves all three helpers: `hourCycle: "h23"`, so midnight is `00` and
+ * One `Intl.DateTimeFormat` serves all four helpers: `hourCycle: "h23"`, so midnight is `00` and
  * never `24`; and `timeZoneName: "shortOffset"`, whose `GMT-4` or `GMT-5` is how
  * {@link etDayStart} finds the offset in force at a midnight. EDT and EST both print as `ET`: the
  * operator reads the hour on the wall clock, not the offset.
@@ -18,16 +18,17 @@ const FORMAT = new Intl.DateTimeFormat("en-US", {
   day: "2-digit",
   hour: "2-digit",
   minute: "2-digit",
+  second: "2-digit",
   hourCycle: "h23",
   timeZoneName: "shortOffset",
 });
 
 /** The fields of {@link FORMAT}'s parts the helpers read. */
-type Field = "year" | "month" | "day" | "hour" | "minute" | "timeZoneName";
+type Field = "year" | "month" | "day" | "hour" | "minute" | "second" | "timeZoneName";
 
-/** `d` in New York, field by field: `2026`, `10`, `20`, `14`, `03`, `GMT-4`. */
+/** `d` in New York, field by field: `2026`, `10`, `20`, `14`, `03`, `09`, `GMT-4`. */
 function partsOf(d: Date): Record<Field, string> {
-  const parts: Record<Field, string> = { year: "", month: "", day: "", hour: "", minute: "", timeZoneName: "" };
+  const parts: Record<Field, string> = { year: "", month: "", day: "", hour: "", minute: "", second: "", timeZoneName: "" };
   for (const { type, value } of FORMAT.formatToParts(d)) {
     if (Object.hasOwn(parts, type)) parts[type as Field] = value;
   }
@@ -56,6 +57,16 @@ function offsetAt(ms: number): number {
 export function etTime(d: Date): string {
   const { hour, minute } = partsOf(d);
   return `${hour}:${minute} ET`;
+}
+
+/**
+ * The wall-clock time in New York to the second, bare: `"15:21:03"`, `"00:00:00"` at midnight -
+ * for a time quoted with its source, as a quote's is (`IEX 15:21:03 ET`).
+ * @param at - the instant.
+ */
+export function etClock(at: Date): string {
+  const { hour, minute, second } = partsOf(at);
+  return `${hour}:${minute}:${second}`;
 }
 
 /**

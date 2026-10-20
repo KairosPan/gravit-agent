@@ -3,28 +3,38 @@
  * (docs/superpowers/specs/2026-10-19-always-on-gravit-design.md §5.3, §8). Every agent on the `gravit-desk`
  * preset has them; no other agent does.
  *
- * WHERE THEY REGISTER: into each desk agent's OWN tool layer, from one root `agent/created` listener
- * ({@link installDeskTools}). The desk's preset carries an allow mask (src/desk-preset.ts), and a mask
- * filters every layer an agent inherits - the global one and its preset's alike - so a tool registered in
- * either would be hidden from the desk by its own mask, and `tools.restrict` refuses to name a tool its
- * scope does not inherit. An agent's own registrations are the one layer no restriction filters
- * (dsh-tools `view`). So `DESK_ALLOW` does not list these two, Gravit's agents never see them, and the
- * global view - `/data/plugins.json` - never lists them, as with the role tools. They unwind with the
- * agent.
+ * WHERE THEY REGISTER: into each desk agent's OWN tool layer, from one root `agent/created` listener and
+ * one sweep of the agents already live ({@link installDeskTools}). The desk's preset carries an allow mask
+ * (src/desk-preset.ts), and a mask filters every layer an agent inherits - the global one and its
+ * preset's alike - so a tool registered in either would be hidden from the desk by its own mask, and
+ * `tools.restrict` refuses to name a tool its scope does not inherit. An agent's own registrations are
+ * the one layer no restriction filters (dsh-tools `view`). So `DESK_ALLOW` does not list these two,
+ * Gravit's agents never see them, and the global view - `/data/plugins.json` - never lists them, as with
+ * the role tools. They unwind with the agent.
  *
  * WHAT THEY CLOSE OVER: process state main.ts owns, as `agent_<bin>` and `dispatch` close over theirs
  * (src/agents.ts, src/room.ts) - the quote hub main.ts creates once and shares with `/data/quotes`, and
  * the desk's status reader, which src/desk.ts `installDesk` binds to the deps of `GET /data/desk/status`,
- * so the tool and the route agree. `desk_quotes` asks the hub for a snapshot: a REST call for any symbol
- * the hub has not refreshed in the last five seconds. `desk_state` reads the ledger and `OFF` afresh.
+ * so the tool and the route agree on all but `runs`, which the tool cuts to the last ten. `desk_quotes`
+ * asks the hub for a snapshot: a REST call for any symbol the hub has not refreshed in the last five
+ * seconds. `desk_state` reads the ledger and `OFF` afresh.
+ *
+ * WHAT THE MODEL READS: `desk_quotes` renders one line per quote, its time as the desk contract quotes
+ * one (dsh/profile/desk.md: `IEX 15:21:03 ET`), so the model never converts a UTC time itself; its value
+ * keeps the hub's own fields, times in UTC. `desk_state` renders its value as JSON.
+ *
+ * MODULE WEIGHT: the preset id comes from src/desk-names.ts, a leaf, not from src/desk-preset.ts. This
+ * module is loaded wherever src/desk.ts is - by `npm run desk` and scripts/service.ts too - and
+ * src/desk-preset.ts would bring src/roles.ts, src/bots.ts and js-yaml with it.
  *
  * Both follow the call's cancellation: a cancelled call settles at once. What it started runs on - the
  * hub's refresh is shared with every other reader and keeps its own deadline, so it is not one call's
  * to stop.
  * @module
  */
-import { DESK_PRESET } from "./desk-preset.ts";
+import { DESK_PRESET } from "./desk-names.ts";
 import type { DeskStatus } from "./desk.ts";
+import { etClock, etDate } from "./et.ts";
 import { HttpError } from "./http.ts";
 import type { QuoteHub } from "./quotes.ts";
 import type { LiveQuote, QuoteIdentity, QuotePayload } from "./quote-types.ts";
@@ -53,10 +63,12 @@ export interface DeskToolDefinition {
   presentCall(args: unknown): { card: "generic"; title: string; kind: "read"; rawInput?: unknown };
 }
 
-/** What the two tools close over: the quote hub's snapshot, and the desk's status, read on every call. */
+/** What the two tools close over: the quote hub's snapshot, the desk's status, read on every call, and
+ * `now` (default `Date.now`), the clock a quote's time is dated against, for tests. */
 export interface DeskToolDeps {
   hub: Pick<QuoteHub, "snapshot">;
   readState: () => Promise<DeskStatus>;
+  now?: () => number;
 }
 
 /** An agent as {@link installDeskTools} sees it: its id, for the log, and its own context, which the
@@ -68,14 +80,20 @@ export interface DeskAgentLike {
 
 /** The slice of the booted ROOT context {@link installDeskTools} uses: the `agent/created` event, a
  * serial dispatch that fires on every agent's create and resume once its setup - its preset's mount
- * included - is done, and the preset registry (`composedPreset`, dsh-agent-preset-registry). */
+ * included - is done; the agent registry's live agents (`agents.list()`, dsh-agent); and the preset
+ * registry (`composedPreset`, dsh-agent-preset-registry). */
 export interface DeskToolsCtxLike {
   on(name: "agent/created", listener: (event: { agent: DeskAgentLike }) => undefined): () => unknown;
+  agents: { list(): readonly DeskAgentLike[] };
   agentPresets: { composedPreset(agentCtx: unknown): string | undefined };
 }
 
 /** The most symbols one `desk_quotes` call takes. */
 const QUOTES_MAX = 20;
+
+/** The most runs `desk_state` answers - the ledger's last ones. Every face start adds a run, and the
+ * ledger keeps them until it rotates at 50 MB, so all of them would grow every call's tokens. */
+const STATE_RUNS = 10;
 
 /** A US ticker as `desk_quotes` takes it: a capital, then up to nine capitals, digits, dots or dashes. */
 const SYMBOL_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
@@ -103,8 +121,9 @@ const QUOTE_SCHEMA = {
   additionalProperties: false,
 };
 
-/** The fields of {@link DeskStatus} every status carries, and those it carries when there is something
- * to say. Open, so a field the status gains later is no failure. */
+/** `desk_state`'s value: the fields of {@link DeskStatus} every status carries - `runs` cut to the last
+ * {@link STATE_RUNS} - with `runsInLedger`, and those it carries when there is something to say. Open,
+ * so a field the status gains later is no failure. */
 const STATE_SCHEMA = {
   type: "object",
   properties: {
@@ -116,13 +135,14 @@ const STATE_SCHEMA = {
     desk: { type: "object" },
     asleep: { type: "array" },
     runs: { type: "array" },
+    runsInLedger: { type: "integer" },
     off: { type: "object" },
     deskSession: { type: "string" },
     turnsToday: { type: "object" },
     telegram: { type: "object" },
     ledgerError: { type: "string" },
   },
-  required: ["ok", "pid", "version", "bootedAt", "uptimeMs", "desk", "asleep", "runs", "turnsToday"],
+  required: ["ok", "pid", "version", "bootedAt", "uptimeMs", "desk", "asleep", "runs", "runsInLedger", "turnsToday"],
 };
 
 const messageOf = (error: unknown): string => error instanceof Error ? error.message : String(error);
@@ -163,6 +183,36 @@ function deskQuote(quote: LiveQuote) {
   };
 }
 
+/** One quote in `desk_quotes`' value. */
+type DeskQuote = ReturnType<typeof deskQuote>;
+
+/**
+ * A quote's time as the desk contract quotes one (`IEX 15:21:03 ET`): the feed upper-cased, then New
+ * York's clock to the second, with the New York date before it when that is not `now`'s - a quote from
+ * before midnight in New York is dated, whatever the UTC date says. A time `Date` cannot read stays as
+ * the hub gave it.
+ * @param feed - the quote's feed, `iex`, `sip` or `delayed_sip`; empty when the hub has none.
+ * @param asOf - the quote's time, as the hub gave it.
+ * @param now - the time the call is answered at, in ms since the epoch.
+ */
+function quoteTime(feed: string, asOf: string, now: number): string {
+  const at = new Date(asOf);
+  const clock = Number.isNaN(at.getTime()) ? asOf
+    : etDate(at) === etDate(new Date(now)) ? `${etClock(at)} ET` : `${etDate(at)} ${etClock(at)} ET`;
+  return feed === "" ? clock : `${feed.toUpperCase()} ${clock}`;
+}
+
+/** One quote as one line of `desk_quotes`' text -
+ * `NVDA 182.31, +1.20% vs prev close 180.15 | IEX 15:21:03 ET | stream | live` - its change only with a
+ * previous close, its time only with one, and `no price` when it has none. */
+function quoteLine(quote: DeskQuote, now: number): string {
+  const head = quote.price === null ? `${quote.symbol} no price`
+    : quote.change_pct === null || quote.prev_close === null ? `${quote.symbol} ${quote.price}`
+    : `${quote.symbol} ${quote.price}, ${quote.change_pct > 0 ? "+" : ""}${quote.change_pct.toFixed(2)}% vs prev close ${quote.prev_close}`;
+  const time = quote.as_of === null ? [] : [quoteTime(quote.feed, quote.as_of, now)];
+  return [head, ...time, quote.transport, quote.status].join(" | ");
+}
+
 /**
  * `work()`'s outcome, or `signal`'s reason the moment it aborts: at once, and without starting `work`,
  * when it already has. Whatever `work` started runs on to its own end (see the module header); its
@@ -195,17 +245,21 @@ const asJson = (_args: unknown, value: unknown): { type: "text"; text: string }[
  *   asked of the hub as `us:` assets; answers `{ quotes: [{ symbol, price, as_of, change_pct, prev_close,
  *   feed, transport, status }] }` from the hub's quotes, `status` being its `quote_status` and its UI
  *   `message` left out. A 429 from the hub answers `{ error: "busy: …" }`; a refused argument, and any
- *   other failure, is the call's error.
- * - `desk_state` (`timeoutMs` 5,000): no parameters; answers `await deps.readState()`.
- * @param deps - the quote hub and the status reader.
+ *   other failure, is the call's error. The model reads one line per quote ({@link quoteLine}), its time
+ *   in New York as the desk quotes one, or the `error` as it is.
+ * - `desk_state` (`timeoutMs` 5,000): no parameters; answers `deps.readState()`'s status with `runs` cut
+ *   to the last {@link STATE_RUNS} and `runsInLedger`, how many the ledger holds - the route
+ *   `GET /data/desk/status` answers them all.
+ * @param deps - the quote hub, the status reader and the clock.
  */
 export function deskToolDefinitions(deps: DeskToolDeps): DeskToolDefinition[] {
+  const now = deps.now ?? Date.now;
   const quotes: DeskToolDefinition = {
     name: "desk_quotes",
     description:
-      "The price now for 1 to 20 US stocks, from the face's live quote hub (Alpaca). Each quote: price (null when unavailable); " +
-      "as_of, the price's exchange time in ISO-8601 UTC; change_pct and prev_close, against the previous close; feed (iex, sip or " +
-      "delayed_sip); transport (stream or poll); status (live, delayed, stale or unavailable). The price now, never backtest evidence.",
+      "The price now for 1 to 20 US stocks, from the face's live quote hub (Alpaca), one line each: the price and its change on " +
+      "the previous close; the feed and the exchange time in New York (IEX 15:21:03 ET, dated when not today); transport (stream " +
+      "or poll); status (live, delayed, stale or unavailable). The price now, never backtest evidence.",
     parameters: {
       type: "object",
       properties: {
@@ -227,7 +281,12 @@ export function deskToolDefinitions(deps: DeskToolDeps): DeskToolDefinition[] {
           { type: "object", properties: { error: { type: "string" } }, required: ["error"], additionalProperties: false },
         ],
       },
-      render: asJson,
+      render(_args, value) {
+        const answer = value as { quotes?: DeskQuote[]; error?: string };
+        const at = now();
+        const text = answer.error ?? (answer.quotes ?? []).map((quote) => quoteLine(quote, at)).join("\n");
+        return [{ type: "text", text: text === "" ? "no quotes" : text }];
+      },
     },
     timeoutMs: 15_000,
     async execute(args, exec) {
@@ -251,12 +310,16 @@ export function deskToolDefinitions(deps: DeskToolDeps): DeskToolDefinition[] {
     name: "desk_state",
     description:
       "What the desk knows about itself, read afresh: this face's pid, version, boot time and uptime; whether the desk is enabled, " +
-      "and its directory; this run's sleep gaps; every run in the ledger (a lost run ended without a clean shutdown); the pause in " +
-      "force (off), if any; the desk conversation's session id; today's desk turns and their tokens.",
+      "and its directory; this run's sleep gaps; the last 10 runs in the ledger (a lost run ended without a clean shutdown) and " +
+      "runsInLedger, how many it holds; the pause in force (off), if any; the desk conversation's session id; today's desk turns " +
+      "and their tokens.",
     parameters: { type: "object", properties: {}, additionalProperties: false },
     output: { schema: STATE_SCHEMA, render: asJson },
     timeoutMs: 5_000,
-    execute: (_args, exec) => untilCancelled(exec.signal, () => deps.readState()),
+    execute: (_args, exec) => untilCancelled(exec.signal, async () => {
+      const status = await deps.readState();
+      return { ...status, runs: status.runs.slice(-STATE_RUNS), runsInLedger: status.runs.length };
+    }),
     presentCall: () => ({ card: "generic", title: "Desk state", kind: "read" }),
   };
   return [quotes, state];
@@ -265,15 +328,20 @@ export function deskToolDefinitions(deps: DeskToolDeps): DeskToolDefinition[] {
 /**
  * Give every `gravit-desk` agent `definitions`, in its own tool layer: one listener on the ROOT
  * context's `agent/created`, which sees every agent's create and resume - the face's, a browser's
- * `session/create` with `agentPreset: "gravit-desk"`, a controller's resume.
+ * `session/create` with `agentPreset: "gravit-desk"`, a controller's resume - and, in the same tick, one
+ * sweep of `ctx.agents.list()`, the agents already live. bootFace serves unary `/api` before main.ts
+ * reaches `installDesk`, so a desk agent can be created before the listener exists; an agent created
+ * after the listener is the listener's, one created before it is in the list.
  *
  * The listener is synchronous and never throws: `agent/created` is a serial, awaited dispatch, and a
  * throw or rejection there fails the agent's creation (src/bot-runtime.ts says the same). An agent whose
  * preset `ctx.agentPresets.composedPreset(agent.ctx)` reads as `gravit-desk` - the registry read late,
  * so a reloaded registry is followed - and that it has not seen gets `agent.ctx.tools.register(d)` for
- * each definition. It is marked seen first, in a `WeakSet`, so a registration that fails is logged once
- * and never retried, and none is made twice; any failure, the registry's included, is one
- * `gravit-face:` line through `log`.
+ * each definition, by the listener or the sweep alike. It is marked seen first, in a `WeakSet`, so an
+ * agent both reach is equipped once, a registration that fails is logged once and never retried, and
+ * none is made twice; any failure, the registry's and the sweep's own included, is one `gravit-face:`
+ * line through `log`. An agent still composing when swept - its preset not mounted yet - is not marked,
+ * and the listener equips it when its creation is announced.
  * @param ctx - the booted ROOT context.
  * @param definitions - the tools to give, {@link deskToolDefinitions}'s.
  * @param options - `log`, where a failure is written (default `console.error`), for tests.
@@ -287,16 +355,24 @@ export function installDeskTools(
 ): () => void {
   const log = options.log ?? ((line: string) => console.error(line));
   const equipped = new WeakSet<DeskAgentLike>();
-  const off = ctx.on("agent/created", ({ agent }) => {
+  const equip = (agent: DeskAgentLike): void => {
     try {
-      if (equipped.has(agent) || ctx.agentPresets.composedPreset(agent.ctx) !== DESK_PRESET) return undefined;
+      if (equipped.has(agent) || ctx.agentPresets.composedPreset(agent.ctx) !== DESK_PRESET) return;
       equipped.add(agent);
       for (const definition of definitions) agent.ctx.tools.register(definition);
     } catch (error) {
       log(`${BIN}: the desk tools were not registered for agent ${agent.id}: ${messageOf(error)}`);
     }
+  };
+  const off = ctx.on("agent/created", ({ agent }) => {
+    equip(agent);
     return undefined;
   });
+  try {
+    for (const agent of ctx.agents.list()) equip(agent);
+  } catch (error) {
+    log(`${BIN}: the desk tools could not reach the agents already live: ${messageOf(error)}`);
+  }
   return () => {
     off();
   };

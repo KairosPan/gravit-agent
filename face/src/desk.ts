@@ -319,8 +319,10 @@ export function runsOf(events: DeskEvent[]): DeskRun[] {
       open = { bootedAt: event.t, pid: event.pid, lost: false };
       runs.push(open);
     } else if (event.kind === "shutdown" && open !== undefined && event.pid === open.pid) {
-      open.endedAt = event.t;
-      open.code = event.code;
+      /* Each only when the line carries it: the reader checks `t` and `kind` alone, and a hand-written
+       * `shutdown` may lack a `code` - its run then has none, absent rather than `undefined`. */
+      if (typeof event.t === "string") open.endedAt = event.t;
+      if (event.code !== undefined) open.code = event.code;
       open = undefined;
     }
   }
@@ -739,17 +741,18 @@ export interface DeskHandle {
  * Mount the desk's rows on a booted face.
  *
  * The status route is mounted whatever `enabled` says, and so, given both `ctx` and `hub`, are the
- * two desk tools (src/desk-tools.ts): every `gravit-desk` agent gets `desk_quotes` over `hub` and
- * `desk_state` over {@link deskStatus} with the status route's own deps, so the tool and the route
- * agree - a face with the desk off still opens an old desk conversation with its tools. With the
- * desk on, `ready` is the `boot` event's append - stamped `bootedAt`, which is `now()` at this call
- * and the status's uptime origin - and the sleep watch starts at once, writing into the ledger.
- * `dispose(code)` removes the tools' listener, stops the watch, lets the `boot` append settle (two
- * appends started together take the file lock in either order, and a `shutdown` written before its
- * `boot` reads as a lost run), then appends the `shutdown` with `code`. It is idempotent: a second
- * call writes nothing and settles with the first. With the desk off, `ready` is already resolved
- * and `dispose` only removes the listener. Nothing here rejects on the ledger, so a caller need not
- * await `ready`.
+ * two desk tools (src/desk-tools.ts): every `gravit-desk` agent, those already live included, gets
+ * `desk_quotes` over `hub` and `desk_state` over {@link deskStatus} with the status route's own
+ * deps, so the tool and the route agree - but for `runs`, which the tool cuts to the last ten and
+ * counts in `runsInLedger` - and a face with the desk off still opens an old desk conversation
+ * with its tools. With the desk on, `ready` is the `boot` event's append - stamped `bootedAt`,
+ * which is `now()` at this call and the status's uptime origin - and the sleep watch starts at
+ * once, writing into the ledger. `dispose(code)` removes the tools' listener, stops the watch, lets
+ * the `boot` append settle (two appends started together take the file lock in either order, and a
+ * `shutdown` written before its `boot` reads as a lost run), then appends the `shutdown` with
+ * `code`. It is idempotent: a second call writes nothing and settles with the first. With the desk
+ * off, `ready` is already resolved and `dispose` only removes the listener. Nothing here rejects on
+ * the ledger, so a caller need not await `ready`.
  * @param webServer - the host webserver service, or a test recorder.
  * @param deps - `home`, the harness home; `enabled`, whether to mount the desk's rows; `now`
  *   (default `Date.now`) and `version` (default {@link DSH_PIN}), for the events and the status;

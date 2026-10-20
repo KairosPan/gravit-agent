@@ -74,6 +74,20 @@ test("runsOf marks a boot with no shutdown before the next boot as lost", () => 
   ]);
 });
 
+/* The reader checks only `t` and `kind`, so a line written by hand can lack a field the face always
+ * writes. A run takes `endedAt` and `code` only when its `shutdown` carries them: an `undefined` key
+ * would fail dsh's lossless snapshot of `desk_state`'s value, and the route would drop it anyway. */
+test("runsOf: a hand-written shutdown with no code ends its run without one - absent, never undefined", async () => {
+  const h = await home();
+  await mkdir(deskDir(h), { recursive: true });
+  await writeFile(join(deskDir(h), "events.jsonl"),
+    '{"t":"2026-10-20T13:00:00.000Z","kind":"boot","pid":11,"version":"v","deskEnabled":true}\n' +
+    '{"t":"2026-10-20T14:00:00.000Z","kind":"shutdown","pid":11}\n');
+  const runs = runsOf((await readEvents(h)).events);
+  assert.deepEqual(runs, [{ bootedAt: "2026-10-20T13:00:00.000Z", pid: 11, endedAt: "2026-10-20T14:00:00.000Z", lost: false }]);
+  assert.equal(Object.hasOwn(runs[0], "code"), false);
+});
+
 test("a torn last line stays one skipped line: the next boot is kept and the cut-off run reads as lost", async () => {
   const h = await home();
   await appendEvent(h, boot("2026-10-19T13:00:00.000Z", 11));

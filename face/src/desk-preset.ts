@@ -39,6 +39,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { Context } from "@deepseek-ai/cordis";
 import type { PresetDefinition } from "@deepseek-ai/dsh-agent-preset-registry";
+import { DESK_PRESET } from "./desk-names.ts";
 import { GRAVIT_PLUGIN_URL, GRAVIT_ROW_ID } from "./roles.ts";
 
 const BIN = "gravit-face";
@@ -47,9 +48,11 @@ const BIN = "gravit-face";
 const FIBER_ACTIVE = 2;
 const messageOf = (error: unknown): string => error instanceof Error ? error.message : String(error);
 
-/** The desk's preset id. src/bots.ts reserves it, spelling it out rather than importing it: this module
- * imports src/roles.ts, which imports src/bots.ts (tests/bots.test.ts ties the two spellings). */
-export const DESK_PRESET = "gravit-desk";
+/** The desk's preset id, defined in src/desk-names.ts - a leaf that src/desk-tools.ts, and through it
+ * the pause switch, can load without this module's imports - and re-exported here for this module's
+ * importers. src/bots.ts reserves it, spelling it out rather than importing it: this module imports
+ * src/roles.ts, which imports src/bots.ts (tests/bots.test.ts ties the two spellings). */
+export { DESK_PRESET };
 
 /** What a desk session may see, in this order (the plan's Global Constraints): file read and edit,
  * search, skills, web search, its own todos, and the live market reads of the alpaca-kit MCP server

@@ -1,7 +1,7 @@
 // face/tests/et.test.ts
 import test from "node:test";
 import assert from "node:assert/strict";
-import { etDate, etDayStart, etTime } from "../src/et.ts";
+import { etClock, etDate, etDayStart, etTime } from "../src/et.ts";
 
 test("etTime and etDate render America/New_York across DST", () => {
   assert.equal(etTime(new Date("2026-10-20T18:03:00Z")), "14:03 ET");      // EDT
@@ -38,4 +38,15 @@ test("etDayStart on the second Sunday of March 2026: a 23-hour day that begins o
   assert.equal(etTime(new Date("2026-03-08T06:59:59.999Z")), "01:59 ET", "01:59 EST");
   assert.equal(etTime(new Date("2026-03-08T07:00:00Z")), "03:00 ET", "02:00 never happens");
   assert.equal(etDayStart(Date.parse("2026-03-09T04:00:00Z")), Date.parse("2026-03-09T04:00:00Z"), "the next day begins 23 hours later, at 00:00 EDT");
+});
+
+test("etClock reads New York's wall clock to the second across the fall-back of 2026-11-01", () => {
+  // at 02:00 EDT (06:00 UTC) on 2026-11-01 the clocks go back to 01:00 EST
+  assert.equal(etClock(new Date("2026-10-31T19:21:03Z")), "15:21:03", "the Saturday before, on EDT");
+  assert.equal(etClock(new Date("2026-11-01T05:30:15Z")), "01:30:15", "01:30:15 EDT");
+  assert.equal(etClock(new Date("2026-11-01T06:30:15Z")), "01:30:15", "01:30:15 EST, the same second again an hour later");
+  assert.equal(etClock(new Date("2026-11-02T20:21:03Z")), "15:21:03", "the Monday after, on EST: an hour later in UTC");
+  assert.equal(etClock(new Date("2026-11-02T05:00:00Z")), "00:00:00", "midnight is 00, never 24");
+  assert.equal(etClock(new Date("2026-10-20T19:21:03.999Z")), "15:21:03", "a fraction of a second is cut, not rounded");
+  assert.equal(etTime(new Date("2026-10-20T19:21:03Z")), "15:21 ET", "etTime still stops at the minute");
 });
