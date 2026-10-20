@@ -386,14 +386,12 @@ test("boot smoke: sign-in gates /api and the mux, the pages and /data answer, Gr
       tabB.close();
     }
 
-    // The other two pages registerStatic mounts. Static documents, so what is
-    // proven here is the MOUNT — an exact route answering with the right file —
-    // and not what they render, which is the client's own to test. No cookie:
-    // only `/` is behind the sign-in (D8).
+    // The old instrument pages are gone (stage 2): Markets and Account are
+    // screens of the client at `/`, and nothing answers at their old addresses.
     for (const path of ["/market", "/account"]) {
       const page = await fetch(`${base}${path}`);
-      assert.equal(page.status, 200, path);
-      assert.match(await page.text(), /GRAVIT/);
+      assert.equal(page.status, 404, path);
+      await page.body?.cancel();
     }
 
     /* 8. The data plumbing, end to end through a STUB producer: route → cache →

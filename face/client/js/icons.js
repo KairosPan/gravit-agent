@@ -40,7 +40,7 @@ export const ICONS = {
   sigma: '<path d="M18 5H6l6 7-6 7h12"></path>',
   clock: '<circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path>',
   bolt: '<path d="M13 2L4 14h7l-1 8 9-12h-7z"></path>',
-  // Linqi's sprite (buyer-agent-demo account.html) for Markets and Trade; coin is his i-trade
+  // Linqi's sprite (the buyer-agent-demo's account page) for Markets and Trade; coin is his i-trade
   star: '<path d="m12 4 2.4 5 5.6.8-4 3.9.9 5.5L12 16.6 7.1 19.2l.9-5.5-4-3.9 5.6-.8z"></path>',
   plug: '<path d="M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0z"></path><path d="M12 16v5"></path>',
   agent: '<rect x="4" y="7" width="16" height="12" rx="3"></rect><path d="M12 3v4M9 12h.01M15 12h.01M9 16h6"></path>',

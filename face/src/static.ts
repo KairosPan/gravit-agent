@@ -1,11 +1,12 @@
-/** The face's static UI mount: four routes on the host webserver, no framework.
+/** The face's static UI mount: two routes on the host webserver, no framework.
  *
  * dsh-host-webserver "knows no harness concepts and serves no files" (its own
  * header) — the composing app owns dist serving. dsh-web-app does that through
  * the webserver's single `registerFallback` seat; the face deliberately does
- * NOT, and takes NAMED routes instead: `exact /` for the chat page, `exact
- * /market` and `exact /account` for the two instrument pages, and
- * `prefix /client` for their assets. The seat is left empty on purpose. It is a
+ * NOT, and takes NAMED routes instead: `exact /` for the client (Messages,
+ * Markets and Account are its screens, `#/messages`, `#/markets`, `#/account`)
+ * and `prefix /client` for its assets. The old `/market` and `/account` pages
+ * left with stage 2; nothing answers there. The seat is left empty on purpose. It is a
  * one-owner seat that throws on a second claim, and everything it would catch
  * here is a 404 anyway; leaving it free keeps it available to a later row (a
  * frontend bundle, a dev proxy) without the face having to give it up first.
@@ -23,12 +24,10 @@
  * `authorizeIndex` also OWNS the refusal: when it returns false it has already
  * written the 303 or the 401, so the handler must not touch the response.
  *
- * `/market`, `/account` and `/client/*` stay unauthenticated: the 0.1.1 posture
- * for everything that is not `/api` (PLAN D8 keeps `/data` fence-only too), and
- * upstream's own dist server keeps non-index assets public the same way (NEW
- * packages/host/frontend-static/src/index.ts:6-9, 88-90, 136). Their `/data`
- * reads do not need the cookie; their `/api` reads would, and the cookie is
- * `Path=/` for the whole authority once `/` minted it.
+ * `/client/*` stays unauthenticated: the 0.1.1 posture for everything that is
+ * not `/api` (PLAN D8 keeps `/data` fence-only too), and upstream's own dist
+ * server keeps non-index assets public the same way (NEW
+ * packages/host/frontend-static/src/index.ts:6-9, 88-90, 136).
  * @module
  */
 import { readFile } from "node:fs/promises";
@@ -58,7 +57,7 @@ export function contentTypeFor(path: string): string {
  * Map a `/client/...` request target to an absolute path inside `clientDir`.
  *
  * The query and fragment are cut FIRST: `req.url` is a request-target, not a
- * path, so `/client/chat.css?v=2` would otherwise be resolved as a file whose
+ * path, so `/client/css/app.css?v=2` would otherwise be resolved as a file whose
  * name ends in `?v=2` and 404 — a cache-busted asset silently failing to load.
  * The containment check is then made on the RESOLVED absolute path rather than
  * on the text of the request, so it holds for every spelling of a traversal
@@ -115,13 +114,10 @@ export interface IndexAuth {
 
 /** The pages, as (route path → file name, behind the sign-in?). Each is an
  * EXACT route: a page is one address, not a subtree, and nothing under it is
- * served by accident. The instrument pages are plain documents against the
- * `/data/*.json` routes — no server-side rendering, so a page is a file like
- * the chat's. Only `/` is gated, because only `/` can mint the cookie. */
+ * served by accident. One page since stage 2, behind the sign-in, because only
+ * `/` can mint the cookie. */
 const PAGES: ReadonlyArray<readonly [path: string, file: string, gated: boolean]> = [
   ["/", "index.html", true],
-  ["/market", "market.html", false],
-  ["/account", "account.html", false],
 ];
 
 /**
