@@ -1,0 +1,571 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>gravit-ui 匹配度</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* layout: a patch panel — the front end's screens on one side, the back end's doors on the other, every need a wire with a verdict on it */
+  :root {
+    --bg: #f4f6f4; --surface: #ffffff; --surface-2: #e9eeec; --fg: #171c20; --muted: #5d686f; --line: #d5dcda;
+    --accent: #0f5c6b; --on-accent: #ffffff; --meter: #2a78d6; --meter-track: #dfe6ea;
+    --v-fit: #007a1f; --v-partial: #e0a000; --v-gap: #2a78d6; --v-conflict: #d03b3b; --v-lost: #6250d6;
+    --sans: "IBM Plex Sans", "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Microsoft YaHei", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, "PingFang SC", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121619; --surface: #1a2024; --surface-2: #222b30; --fg: #e7eae8; --muted: #9aa6ab; --line: #2d373d;
+      --accent: #63b9c8; --on-accent: #0b1316; --meter: #3987e5; --meter-track: #2a343a;
+      --v-fit: #14a03a; --v-partial: #c98500; --v-gap: #3987e5; --v-conflict: #e05252; --v-lost: #9085e9;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #121619; --surface: #1a2024; --surface-2: #222b30; --fg: #e7eae8; --muted: #9aa6ab; --line: #2d373d;
+    --accent: #63b9c8; --on-accent: #0b1316; --meter: #3987e5; --meter-track: #2a343a;
+    --v-fit: #14a03a; --v-partial: #c98500; --v-gap: #3987e5; --v-conflict: #e05252; --v-lost: #9085e9;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--fg); font: 15px/1.6 var(--sans); margin: 0;
+    padding-block: 28px 64px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .wrap { max-width: 1120px; margin: 0 auto; display: grid; gap: 40px; }
+  h1, h2, h3 { margin: 0; text-wrap: balance; line-height: 1.25; }
+  h1 { font-size: 30px; font-weight: 700; }
+  h2 { font-size: 20px; font-weight: 600; }
+  h3 { font-size: 15px; font-weight: 600; }
+  p { margin: 0; }
+  a { color: var(--accent); }
+  code, .mono { font-family: var(--mono); font-size: 0.92em; }
+  .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+  .muted { color: var(--muted); }
+  .lede { font-size: 16px; max-width: 66ch; }
+  section { display: grid; gap: 16px; scroll-margin-top: 16px; }
+  .head { display: grid; gap: 6px; }
+  .note { font-size: 13px; color: var(--muted); max-width: 72ch; }
+
+  /* hero */
+  .hero { display: grid; gap: 18px; padding-bottom: 28px; border-bottom: 1px solid var(--line); }
+  .bar { display: flex; gap: 2px; height: 22px; border-radius: 4px; overflow: hidden; background: var(--surface); }
+  .bar > span { display: block; min-width: 2px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 13px; }
+  .legend > span { display: inline-flex; align-items: center; gap: 7px; }
+  .swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+  .glyph { font-family: var(--mono); font-weight: 500; }
+  .count { font-variant-numeric: tabular-nums; color: var(--muted); }
+
+  /* screen tiles */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+  .tile { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: grid; gap: 8px; text-align: left; color: inherit; font: inherit; cursor: pointer; min-width: 0; }
+  .tile:hover { border-color: var(--accent); }
+  .tile:focus-visible, button:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .tile .pct { font-size: 26px; font-weight: 600; line-height: 1; }
+  .tile .pct small { font-size: 12px; font-weight: 400; color: var(--muted); margin-left: 4px; }
+  .meter { height: 6px; background: var(--meter-track); border-radius: 3px; overflow: hidden; }
+  .meter > span { display: block; height: 100%; background: var(--meter); border-radius: 3px; }
+  .tile .counts { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  /* back ends */
+  .doors { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+  .door { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: grid; gap: 8px; background: var(--surface); min-width: 0; }
+  .door ul { margin: 0; padding-left: 18px; font-size: 14px; }
+  .door li { margin: 2px 0; }
+  .callout { border-left: 3px solid var(--accent); padding: 8px 14px; background: var(--surface-2); border-radius: 0 8px 8px 0; font-size: 14px; }
+
+  /* matrix controls */
+  .controls { display: grid; gap: 10px; position: sticky; top: env(safe-area-inset-top, 0px); background: var(--bg); padding-block: 10px 12px; z-index: 2; border-bottom: 1px solid var(--line); }
+  .chips, .tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip, .tab { font: inherit; font-size: 13px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+  .chip .swatch { width: 10px; height: 10px; }
+  .chip[aria-pressed="false"] { opacity: 0.45; }
+  .tab[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+  .row-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .search { font: inherit; font-size: 14px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--fg); min-width: 0; flex: 1 1 220px; }
+  .switch { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+  .switch input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+  .summary-line { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  /* rows */
+  .group { display: grid; gap: 8px; }
+  .group-head { display: flex; align-items: baseline; gap: 10px; padding-top: 12px; }
+  .group-head .count { font-size: 13px; }
+  .rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+  .row { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: grid; gap: 8px; border-left-width: 4px; min-width: 0; }
+  .row.fit { border-left-color: var(--v-fit); } .row.partial { border-left-color: var(--v-partial); } .row.gap { border-left-color: var(--v-gap); } .row.conflict { border-left-color: var(--v-conflict); } .row.lost { border-left-color: var(--v-lost); }
+  .row-top { display: grid; grid-template-columns: 52px minmax(0, 1.1fr) minmax(0, 1fr) auto; gap: 6px 14px; align-items: start; }
+  .row-top .id { font-family: var(--mono); font-size: 12px; color: var(--muted); padding-top: 3px; }
+  .row-top .need { font-weight: 600; min-width: 0; }
+  .row-top .cp { font-size: 14px; color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+  .row-top .cp code { color: var(--fg); }
+  .verdicts { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+  /* a verdict chip: the dot carries the colour, the words carry the meaning (text stays in ink) */
+  .v { --vc: var(--muted); display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 2px 9px 2px 7px; border-radius: 999px; white-space: nowrap; color: var(--fg); background: color-mix(in srgb, var(--vc) 14%, var(--surface)); }
+  .v::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--vc); flex: none; }
+  .v.fit { --vc: var(--v-fit); } .v.partial { --vc: var(--v-partial); } .v.gap { --vc: var(--v-gap); } .v.conflict { --vc: var(--v-conflict); } .v.lost { --vc: var(--v-lost); }
+  .ra { font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+  .ra.keep { color: var(--accent); border-color: var(--accent); }
+  .ra.adapt { color: var(--fg); border-color: var(--fg); }
+  .ra.cut { text-decoration: line-through; }
+  .row .text { font-size: 14px; color: var(--fg); overflow-wrap: anywhere; }
+  .row details { font-size: 12px; color: var(--muted); }
+  .row summary { cursor: pointer; width: max-content; }
+  .row details ul { margin: 4px 0 0; padding-left: 18px; font-family: var(--mono); font-size: 11.5px; }
+  .empty { padding: 18px; color: var(--muted); border: 1px dashed var(--line); border-radius: 10px; }
+
+  /* kinds table */
+  .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-top: 1px solid var(--line); vertical-align: top; }
+  thead th { border-top: 0; font-size: 12px; color: var(--muted); font-weight: 500; letter-spacing: 0.03em; text-transform: uppercase; }
+  td.num { font-variant-numeric: tabular-nums; color: var(--muted); width: 36px; }
+  td.kind { font-weight: 600; white-space: nowrap; }
+  td.how { color: var(--muted); }
+  tr.new td.kind::after { content: " 新增"; font-size: 11px; color: var(--accent); margin-left: 6px; font-weight: 500; }
+
+  /* routes */
+  .routes { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+  .route { border: 1px solid var(--line); border-radius: 10px; padding: 16px; background: var(--surface); display: grid; gap: 10px; min-width: 0; }
+  .route.reco { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .route ol, .route ul { margin: 0; padding-left: 20px; font-size: 14px; }
+  .route li { margin: 3px 0; }
+  .seams { margin: 0; padding-left: 20px; font-size: 14px; display: grid; gap: 6px; }
+  .foot { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 16px; display: grid; gap: 6px; }
+
+  @media (max-width: 720px) {
+    h1 { font-size: 24px; }
+    .row-top { grid-template-columns: 1fr; gap: 4px; }
+    .row-top .id { padding-top: 0; }
+    .verdicts { flex-direction: row; align-items: center; }
+    .controls { position: static; }
+  }
+  @media (prefers-reduced-motion: no-preference) { .meter > span { transition: width 300ms ease; } }
+</style>
+
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="eyebrow">2026-10-19 · feat/gravit-ui @ 2418df7 对 main @ f6e7ca9 · 64 条断言由 6 个校验 agent 对代码逐条核过，21 条改正、50 条补充</div>
+    <h1>gravit-ui 与现有后端的匹配度</h1>
+    <p class="lede">这版前端是按 Linqi 的账户服务画的（spec §1.1、§1.5、§9），拿它替换 main 的 face 客户端等于把它反过来挂到 dsh 上。对 dsh 这边：会话、审批卡、群聊三样核心接得上——审批卡比原设计更真；行情和持仓只读能接一半；额度、手动下单、钱包、Memory、插件商店、邮件、电话、推送八块要么没有后端、要么直接撞宪章。</p>
+    <div>
+      <div class="bar" id="bar" role="img" aria-label="按结论分的需求条数"></div>
+      <div class="legend" id="legend"></div>
+    </div>
+  </header>
+
+  <section id="screens">
+    <div class="head">
+      <h2>按屏幕</h2>
+      <p class="note">按行计：FIT 算 1、PARTIAL 算 0.5、GAP 和 CONFLICT 算 0；点一块只看那一屏的行。</p>
+    </div>
+    <div class="tiles" id="tiles"></div>
+  </section>
+
+  <section id="backends">
+    <div class="head"><h2>三个"后端"</h2></div>
+    <div class="doors">
+      <div class="door">
+        <h3>face + dsh（主对照）</h3>
+        <p class="note">face/ 进程内托管 dsh 0.2.0-rc.2，127.0.0.1:3090，cookie 登录。</p>
+        <ul>
+          <li>Remote：<code>session/*</code>、<code>commands/execute</code>、<code>subagents/*</code>、<code>workspace/*</code>、<code>credentials/describe</code></li>
+          <li>三种流：<code>$events</code>（审批、提问）、<code>session/control</code>（投影）、<code>session/follow</code>（事件 + 流式）</li>
+          <li><code>/data/*</code>：channels、sessions、host、memory、plugins、agents、bots、rooms、account、quotes、symbols（只围栏、不要 cookie）</li>
+          <li>face 自己的客户端 <code>face/client</code>：33 个文件 11,148 行</li>
+        </ul>
+      </div>
+      <div class="door">
+        <h3>alpaca_kit MCP</h3>
+        <p class="note">dsh 的 MCP 子进程；浏览器不直接碰。</p>
+        <ul>
+          <li>工具结果以 <code>tool/call</code> / <code>tool/result</code> 事件进会话流——收据、拒绝、K 线、持仓的数据都从这里来</li>
+          <li>下单 = Gravit 的 <code>place_order</code>，Gate 1（旗标 + 钥匙才注册）+ Gate 2（浏览器的审批卡）</li>
+          <li><code>/data/account.json</code> 的生产者 <code>face_data.py</code> 原样透传 Alpaca 的 account / positions / orders</li>
+        </ul>
+      </div>
+      <div class="door">
+        <h3>demo 账户服务（第二候选）</h3>
+        <p class="note">Linqi 的 buyer-agent-demo @ 0ef5131，4820/4821；posture C，face 和 dsh 没有任何代码调用它。</p>
+        <ul>
+          <li><code>/api/account/*</code>（explore、asset、candles、market、compare、quotes、holdings、statement、receive）、<code>/api/order</code>、<code>/api/say</code>、<code>/api/approve</code>、<code>/api/exchange</code>（EIP-712 签名信封）</li>
+          <li>Markets / Trade / Account 三屏就是从它的页面移植的，连词汇都对得上</li>
+          <li>默认真钱（<code>real: true</code>，每单/每次转账 100 美元上限）</li>
+        </ul>
+      </div>
+    </div>
+    <div class="callout">demo 服务只答自己的页面：<code>server.ts:324-338</code> 的中间件拒绝外来 Host、Origin 和跨站 Sec-Fetch-Site。face 在 3090 端的页面不能从浏览器调 4820。"一个前端两个后端"只有把页挂进 demo 进程（spec §9.1）或 face 侧做代理（demo 的文档明确不要）两条路。</div>
+  </section>
+
+  <section id="matrix">
+    <div class="head">
+      <h2>逐项核对</h2>
+      <p class="note">每行：前端要的东西 · 后端里的对应物 · 结论；展开"证据"看 file:line。打开"路线 A 视图"看每一行在路线 A 下的处置。</p>
+    </div>
+    <div class="controls">
+      <div class="chips" id="chips" role="group" aria-label="按结论筛选"></div>
+      <div class="tabs" id="tabs" role="group" aria-label="按屏幕筛选"></div>
+      <div class="row-controls">
+        <input class="search" id="q" type="search" placeholder="搜需求、对应物、说明（如 Gate 2、session/list、钱包）" aria-label="搜索">
+        <label class="switch"><input type="checkbox" id="routeA"> 路线 A 视图（留 / 适配 / 砍 / 下一轮）</label>
+        <span class="summary-line" id="summary"></span>
+      </div>
+    </div>
+    <div id="groups"></div>
+  </section>
+
+  <section id="kinds">
+    <div class="head">
+      <h2>十六种消息 + 两种要新增的</h2>
+      <p class="note">直接 4 · 部分 6 · 无后端 4 · 冲突 2；通用审批卡和提问卡在 dsh 的线上是真的，gravit-ui 没画。</p>
+    </div>
+    <div class="table-wrap">
+      <table id="kinds-table">
+        <thead><tr><th>#</th><th>种类</th><th>结论</th><th>对应 · 说明</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="routes">
+    <div class="head"><h2>两条路线</h2></div>
+    <div class="routes">
+      <div class="route reco">
+        <div class="eyebrow">建议 · 路线 A</div>
+        <h3>gravit-ui 做 face 的新客户端</h3>
+        <ol>
+          <li>壳 + Messages + 两张卡（订单、提问）+ 房间——这一期就能替掉现有客户端的大半，审批卡比原设计更真。</li>
+          <li>Markets + Account 只读：搜索、行情、自选、持仓、订单；新加一条 bars 路由和 bid/ask 两个字段。</li>
+          <li>Discover 退化成"我的插件"清单 + 频道入口（在哪建会话、落地页）。</li>
+        </ol>
+        <p class="note">按宪章从界面拿掉、不留假门：额度 chip、Beast、Trade 的手动下单与 Cancel（只留 Hand to Gravit）、钱包 / Move / Receive、Mail、电话、早报 / 横幅 / 监控推送、Memory（等 §10.16 那一轮）。补回必须的研究面：频道选择、过程卡的折叠视图、fork / 归档 / 删除、斜杠命令。先写 spec：这步改的是产品边界，不是实现细节。</p>
+      </div>
+      <div class="route">
+        <div class="eyebrow">路线 B</div>
+        <h3>按 spec 原意挂到 demo 的账户服务</h3>
+        <ul>
+          <li>Markets / Trade / Account 几乎 1:1：持仓键、<code>CAP_USD</code> = <code>--live-cap</code> 默认 100、<code>QUOTE_MS</code> = <code>MONEY_TTL_MS</code> 十分钟、What you sign 的字段就是 liveOrder 的形状；两处不同：mode 在线上叫 guard | open，IBKR 接不了。</li>
+          <li>要补客户端的 prepare → 签名 → <code>/api/exchange</code>（配对码、P-256 设备钥、nonce 信封）——gravit-ui 现在"按一下就当签了"。</li>
+          <li>Messages 侧 §9.2–§9.6（每任务日志、signed say、商店 MCP 面、Memory、定时推送）在 demo 里同样没有。</li>
+          <li>face 不动，两件产品继续各自是各自；demo 默认真钱。</li>
+        </ul>
+      </div>
+      <div class="route">
+        <div class="eyebrow">不可行</div>
+        <h3>一个前端同时接两个后端</h3>
+        <ul>
+          <li>demo 的围栏不答外来页面（见上）。</li>
+          <li>真要做就是把 2026-10-05 记录的五个冲突——gate、signer、network、card-per-write、ledger——逐个决定（<code>docs/superpowers/plans/2026-10-05-venue-plugins-unification-handoff.md</code> §12.1）。</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="seams">
+    <div class="head">
+      <h2>顺手发现的 dsh 座席（face 没用过）</h2>
+      <p class="note">都不在 DEVELOPMENT.md 里；用之前再对一遍 <code>face/node_modules/@deepseek-ai/*</code>。</p>
+    </div>
+    <ul class="seams">
+      <li><code>session/search</code>：全文检索，<code>{query}</code> → 20 条 <code>{sessionId, snippet}</code>，索引消息文本、工具名和参数、工具结果；是否挂了 <code>ctx.sessionQuery</code> 未证实。</li>
+      <li><code>dsh-tool-ask-user</code> 的 <code>timed</code> 模式：<code>timeout</code> → <code>wait.timed</code>、宿主算的 <code>remainingMs</code> 流、<code>userQuestions</code> 投影——整棵树里唯一真实的"answer by"；face 跑的是无配置的 legacy 阻塞模式。</li>
+      <li><code>session/list</code> 的行没有标题字段（在 <code>projections.values.title</code>）、没有未读、没有预览；每条 v4 事件都带 <code>time</code>，mapper 的 FrameView 只留了 <code>seq</code>。</li>
+      <li>运行时挂 MCP 服务器：<code>dsh-mcp-client</code> 的 <code>apply(ctx, config)</code> 是普通 cordis 插件，可像 <code>declareBots</code> 那样挂为子 fiber；缺一个 face 自己的持久化文件和界面。<code>dsh-plugin-manager</code>、<code>config-editor</code>、<code>hmr</code> 装着但按 D1 不挂。</li>
+      <li>dsh 只是 MCP 客户端：装的是 <code>@modelcontextprotocol/client</code> + <code>core</code>，<code>server</code> 是 devDependency 没装；face 当不了 MCP 服务器。</li>
+      <li>工具名合约：带点号的原始名（<code>shop.search</code>）会被规范化并加 12 位 SHA-256 后缀。</li>
+      <li><code>PromptContentPart</code> = text | image{base64} | file{receiptId}；上传走 <code>/api/session/uploadFileBinary</code> 或 <code>fileUploads/upload</code>，收据按 agent 作用域——先有会话才能传文件。</li>
+      <li><code>workspace/archiveSession</code> / <code>unarchiveSession</code>：归档后不跑模型；face 的 <code>/data/sessions/archive</code> 按 D14 只是展示层。</li>
+      <li>Gate 2 的卡不带参数，但 follow 流里同一 <code>callId</code> 的 <code>tool/call</code> 带 <code>data.arguments</code>；bot 的 allow 表是可见性不是权限——真写进 <code>place_order</code>，Gate 2 照样在成员会话上弹卡。</li>
+      <li>行情线：每请求 100 个 id、8 个并发、200 个活跃 id、IEX 流 30 个美股；crypto 只有 USD 腿；cn 成交量永远 null；线上没有 bid/ask，但 Alpaca snapshot 和 Coinbase ticker 都带。</li>
+    </ul>
+  </section>
+
+  <footer class="foot">
+    <div>方法：先手写 64 条匹配断言，再由 6 个校验 agent 各对一个切片，逐条到代码里找证据给出 CONFRIMED / CORRECTED / UNSURE，另有 1 个查漏 agent 独立枚举两边的面（workflow wf_85469855-78e）。证据里 face 的行号对 main @ f6e7ca9，gravit-ui 的对 feat/gravit-ui @ 2418df7，dsh 包的对 face/node_modules 里钉住的 0.2.0-rc.2。</div>
+    <div>文字版：<code>docs/research/2026-10-19-gravit-ui-vs-face-backend-fit.md</code>；后端六扇门的图：<code>docs/design/2026-10-13-backend-architecture.md</code>；spec：<code>docs/superpowers/specs/2026-10-09-demo-v2-gravit-frontend-design.md</code>。</div>
+  </footer>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var V = {
+    fit: { label: 'FIT', zh: '接得上', glyph: '✓' },
+    partial: { label: 'PARTIAL', zh: '接一半', glyph: '◐' },
+    gap: { label: 'GAP', zh: '缺后端，可补', glyph: '○' },
+    conflict: { label: 'CONFLICT', zh: '撞宪章', glyph: '✕' },
+    lost: { label: 'LOST', zh: '替换会丢', glyph: '↓' }
+  };
+  var VORDER = ['fit', 'partial', 'gap', 'conflict', 'lost'];
+  // the bar's segments touch, so their order is the colour-vision-safe one the palette validator passed (green, blue, amber, violet, red)
+  var BAR_ORDER = ['fit', 'gap', 'partial', 'lost', 'conflict'];
+  var RA = { keep: '留', adapt: '适配', cut: '砍', later: '下一轮' };
+  var SCREENS = [
+    ['shell', '壳与传输'], ['messages', 'Messages'], ['mail', 'Mail'], ['discover', 'Discover'],
+    ['markets', 'Markets'], ['trade', 'Trade'], ['account', 'Account'], ['lost', 'face 有、gravit-ui 没有']
+  ];
+  var SCORED = ['messages', 'mail', 'discover', 'markets', 'trade', 'account'];
+
+  // id, screen, need, counterpart, verdict, routeA, note, evidence[]
+  var ROWS = [
+    ['B1', 'shell', '页面挂载（index.html、静态资源）', 'static.ts：`exact /`（cookie 后）+ `prefix /client`', 'fit', 'adapt', 'index.html 的 ./css、./js 要改成 /client/…（face 自己的 index.html 就是这样），lang="zh-CN" 改 en；Google Fonts 保留（face 的第一个非回环资源，没有 CSP）；static.ts 不发缓存头，改完要硬刷新；serve.js 去掉。', ['gravit-ui/index.html:7-18', 'face/src/static.ts:121-125, 138-161', 'face/client/index.html:7-10']],
+    ['B2', 'shell', '路由（hash 单页）', '三条页面路由 `/`、`/market`、`/account`', 'fit', 'keep', 'router.js 只认 hash，未知路由由 nav 归一；/market、/account 改跳转或删掉——它们的 /data 读是只围栏不要 cookie 的，并到受 cookie 保护的 / 下不丢任何东西。', ['gravit-ui/js/router.js:1-22', 'face/src/static.ts:26-31, 116-125']],
+    ['B3', 'shell', '线（Remote 调用、三种流）', 'face/client/api.js（call / openMux / randomUuid）+ mapper.js', 'fit', 'adapt', 'api.js 853 行无 DOM、含重连和 gate 重放，可原样复用；mapper.js 476 行是纯函数（帧 → 11 种视图）。gravit-ui 的入口是 append reducer 和 scheduleEvents；适配层要补三样：按 sessionId:seq 去重、压缩检查点的区间替换、append 不再把宿主事件丢进本地"已关闭"的会话。', ['face/client/api.js:315, 484-767', 'face/client/mapper.js:67, 187-193', 'gravit-ui/js/reducers/messages.js:140-154']],
+    ['B4', 'shell', '状态真相在哪', '宿主：session/list、follow 快照 + 事件、冷会话 session/page（D16：不激活）', 'partial', 'adapt', 'gravit-ui 把整份状态存 localStorage（gravit-ui.state、gravit-ui.theme）并当真相；要改成宿主状态的缓存，initialState 的 accept 是唯一接入点。主题、折叠、lastConv、自选这些按浏览器的方便可以留在本地（face 也只留两把钥匙）。', ['gravit-ui/js/app.js:32, 48-72', 'gravit-ui/js/store.js:17-19', 'DEVELOPMENT.md:1562-1586']],
+    ['B5', 'shell', '主题 cream / black / system', 'face 客户端只有亮色', 'fit', 'keep', 'tokens.css 按 data-theme 和 prefers-color-scheme 定义；是增益。', ['gravit-ui/css/tokens.css:3, 21, 34-35']],
+    ['B6', 'shell', '导演菜单与脚本（d 键、driver.js、模拟 venue、评审计时、种子）', '无', 'gap', 'cut', '舞台机关。随它一起去掉的：replyTo / followUp 的脚本 Gravit（由 follow 流替代）、脚本麦克风、脚本商店客户端、placeFlow / connectVenue、REVIEW_MS、种子。或保留为演示模式。', ['gravit-ui/js/app.js:132, 594-605', 'gravit-ui/js/driver.js:44-138']],
+    ['B7', 'shell', '断线、重连、卡片终态、错误提示面', 'api.js：1.5 s 重连、gate 重放、not-ready / not-pending / gate-gone / bad-value；chat.js 的四种卡片终态；$events 后 1.2 s 重拉列表', 'gap', 'adapt', 'gravit-ui 的卡只有未答 / 已答，没有"已撤回 / 别处已答"；也没有任何连接状态或错误面（唯一的瞬时面是 Discover 的 toast）；没有列表刷新触发。', ['face/client/api.js:51, 64, 143-181', 'face/client/chat.js:1413-1446, 4335-4395']],
+    ['B8', 'shell', '每条消息的时间', 'v4 事件带 time（unix ms）；session/list 行带 updatedAt', 'fit', 'adapt', '宿主有数据，只是 mapper 的 FrameView 只留 seq；加一个字段，时间分隔线、行时间、技术分析头的时钟就都有了。', ['dsh-session/lib/types/types.d.ts:489-495', 'face/client/mapper.js:66-69']],
+
+    ['C1', 'messages', '会话列表（标题、时间、预览、未读）', 'session/list 行 + summaries.js + /data/channels.json 的 presets', 'partial', 'adapt', '行只有 sessionId / updatedAt / running / agentAvailable / projections：标题在 projections.values.title，没有未读、没有预览。预览要逐行 session/projections + session/page{maxMessages:1}（face 对子会话就这么做）或新加一条 /data 路由；未读可按本地 last-seen seq 推；别的会话有卡在等 ↔ 未读点 / 角标。', ['dsh-api-session-controller/lib/types/types.d.ts:159-176', 'face/client/summaries.js:48-64', 'face/client/chat.js:1760-1766']],
+    ['C2', 'messages', '会话三种：gravit / bot / group', '普通会话 / 房间 / bot 家会话', 'partial', 'adapt', 'gravit ↔ 普通会话、group ↔ 房间成立；但 gravit-ui 的 bot 种类是 Gravit 和一个 bot 都说话 = face 的单成员房间，不是 bot 家会话（只有 bot 一人、Gravit 不在）；bot 家会话在 gravit-ui 里没有种类，草稿里挑了任何 bot 都变 group。', ['gravit-ui/js/data/seed.js:36-45', 'gravit-ui/js/reducers/messages.js:122-131', 'face/client/chat.js:3327-3345']],
+    ['C3', 'messages', '额度 / mandate（每单、总额、到期、venue、花了多少、Give a limit、End limit、Change limit）', '无。审批结果只有 allowed-once / rejected；策略只有 ask / never（never = 拒单）', 'conflict', 'cut', '宿主没有任何常设额度对象；宪章"Nothing starts unattended"，Gate 2 一单一批。要做只能作为审批策略重新设计（宪章 §4 / §7）。', ['dsh-user-approval/lib/types/types.d.ts:26', 'face/src/orders.ts:42-44, 78-100', 'Gravit-Design.md:55']],
+    ['C4', 'messages', '你的话、群里的 @', 'session/prompt{mode queue, requestId, content parts, clientTimeZone}；/data/rooms/say', 'fit', 'keep', '群里文本带 (^|\\s)@ 时先 rooms/say，addressed 为空再当普通 prompt；gravit-ui 按显示名在客户端解析 @，结果形状一样。"每句话都是签名指令"没有对应，Sign and send 只是字面。', ['face/client/chat.js:2815-2856', 'face/client/room.js:35']],
+    ['C4b', 'messages', '斜杠命令（/goal resume 等）', 'commands/execute', 'gap', 'adapt', 'gravit-ui 的发送路径不认斜杠，"/…"是普通消息；而 goal 被 Stop 暂停后只有 /goal resume 能续（R30）。', ['face/client/chat.js:2837-2846', 'DEVELOPMENT.md:2249-2264']],
+    ['C5', 'messages', 'Gravit 的话', 'assistant/message → bubble；assistant-stream 的 pulse', 'fit', 'keep', '定稿文本成立。gravit-ui 的 text 气泡只 esc(text)：没有 markdown，连 ticker 链接也只在 brief / breaking 上做；pulse、思考行、answer-traces 没有落点；from:\'system\' 的居中 sysline 是放 context 行 / 压缩标记 / 截断标记的槽。', ['face/client/mapper.js:322-330, 381-391', 'gravit-ui/js/render/thread.js']],
+    ['C6', 'messages', '待批订单卡（kind 3）', 'Gate 2：$events 的 approval/request → approval{eventId, sessionId, toolName, callId, reason, displayReason}；答 mux.answer(eventId, \'allowed-once\' | \'rejected\')', 'fit', 'keep', '全表最强。卡上的 venue / type / amount 不用解析那行 40 字截断的 PAPER order - mcp__<server>__place_order: side=… qty=…：用 callId 关联 follow 流里同一次 tool/call 的 data.arguments（模型发的原始 JSON）。宿主没有截止时间——Gravit 自己会话里的卡一直等并重放给下一个浏览器，"answer by"只是装饰；成员会话上的卡受房间引擎的轮次超时约束。', ['face/src/orders.ts:140, 170-199', 'face/client/mapper.js:331-338, 406-418', 'dsh-user-approval/lib/types/types.d.ts:55-71']],
+    ['C6b', 'messages', '通用审批卡（沙箱越界写、bot 的 write / bash 升级）', '同一条审批流，displayReason 不同', 'gap', 'adapt', '需要新种类：沙箱越界（read-only → workspace-write）走同一个 approval/request；每个 bot 的 allow 表都带 write / edit / bash，在 read-only 下被拒会升一级来要人批，房间引擎为它延长截止、face 把卡题为 <bot> · <tool>。现在会被误画成订单卡。', ['face/src/bots.ts:70-74', 'face/src/room.ts:244-264, 637-645']],
+    ['C7', 'messages', '提问卡（ask_user_question）', 'user-questions/request → question{questions[]}；答 {answers:[{id, selected[], custom?}]}（每题恰好一次，否则 BAD_ANSWER）', 'gap', 'adapt', 'gravit-ui 没有提问种类，kind 4 的 ✓ / ✗ 是最近的形状。dsh 还有 face 没开的 timed 模式：timeout → wait.timed、宿主算的 remainingMs 流、userQuestions 投影——整棵树里唯一真实的"answer by"。审批没有这种模式。', ['face/client/mapper.js:420-428', 'dsh-user-questions/lib/types/types.d.ts:32-116']],
+    ['C8', 'messages', '要装插件（kind 5，+ 开插件页）', '无', 'gap', 'cut', '依赖 Discover（E 组）。face 对 bot 的唯一运行时"安装"是 POST /data/bots + 挂进频道名册；Data / Monitor 插件是 cordis.patch.yml 里的一行，启动时组合。', ['face/src/bots.ts:372', 'face/src/room.ts:676-680']],
+    ['C9', 'messages', 'bot 在额度内自己执行（kind 6）', 'bot 的 allow 表没有下单 / 账户工具；persona"你从不交易"；成员会话钉 read-only', 'conflict', 'cut', '这是配置和合约不是围栏：validateBotConfig 不禁止 allow 里写 mcp__*__place_order，真放进去，Gate 2 是全树的，bot 下单会在它自己的成员会话上弹同一张卡（引擎已预期成员的 gate）。能对上的只有 bot 的房间回答 = kind 15。', ['face/src/bots.ts:59-80', 'face/plugins/bot.js:39-49']],
+    ['C10', 'messages', '监控信号（kind 7）', '应答半边：tool/call + tool/result；推送半边：无', 'partial', 'adapt', '应答（欺诈检查答你的话）按工具名提升即可；推送（Telegram 监控自己发话）没有任何来源——face 里唯一从外面往会话注入 user/message 的是房间引擎。现有 mapper 只认 source.kind === \'room\'，别的 kind 的 user/message 会画成你的气泡：适配层第一天就要有 kind → 消息种类表。', ['gravit-ui/js/driver.js:87-93, 130-133', 'face/src/room.ts:399-416, 806-815', 'face/client/mapper.js:247-277']],
+    ['C11', 'messages', '门的拒绝（kind 8，错误码）', 'dsh 的 the user rejected tool、orders.ts 的两句、alpaca-kit 的 {ok:false, error}、TradingAPIError；都落在 tool/result(isError) 或 Gravit 的话里', 'partial', 'adapt', '可按 isError 提升。dsh 有 ToolErrorInfo{name, code} 的结构槽（deny.info → error.info），face 和 alpaca-kit 都没填，mapper 只把 data.error 当布尔；E_MANDATE_* 是 Linqi 的词表。', ['dsh-tools/lib/types/index.d.ts:377-383', 'face/src/orders.ts:50-63, 130-138', 'face/client/mapper.js:355']],
+    ['C12', 'messages', '收据（kind 9：成交 @ 价 · ord · ledger #）', 'place_order 的结果 = {ok:true, …Alpaca order}（accepted / new）', 'partial', 'adapt', '成交不推送（行情流只有报价）；之后从 orders / positions 工具或 /data/account.json 读（50 条全状态，60 s TTL）；没有 ledger 编号。gravit-ui 的收据还扣会话额度的 spent（C3）。', ['alpaca_kit/mcp/tools.py:288-307', 'scripts/face_data.py:196-213', 'face/src/data.ts:47']],
+    ['C13', 'messages', '收尾 / 会话状态（Working · Done · Stopped · Withdrawn）', 'api-session/status[running]、turn 帧、update_goal complete、频道 status.yaml 的生命周期、展示层归档', 'partial', 'adapt', '会话没有 done 态；Working 有推送源（running 标）；Done / Stopped / Withdrawn 没有宿主来源；宿主也不会拒绝归档或取消后的后续轮次。', ['gravit-ui/js/reducers/messages.js:41-49, 173-182', 'face/client/mapper.js:358-362', 'face/client/chat.js:4351-4366']],
+    ['C14', 'messages', 'K 线技术分析（kind 11）', 'daily_bars 的 tool/result 行（date / open / high / low / close / volume）', 'partial', 'adapt', '蜡烛画得出（face 自己画的是收盘线不是蜡烛）；只有日线，"4h"没来源；支撑 / 阻力 / 结论是模型散文；Gravit 的文本里没有 withTickers 要的 {{TICKER}} 标记。', ['face/client/render.js:176-265, 330-346', 'alpaca_kit/mcp/tools.py:83-88, 173-176']],
+    ['C15', 'messages', '早报（kind 12，7:30）', '无定时器', 'gap', 'cut', '装的树里没有 schedule 包（有 cordis-plugin-timer 原语、owner-fenced 的 jobs、goal-round-driver 的同会话再提示，都不是定时推送）；宪章"无人值守不启动"；always-on 还在想。若要做，座席是 face 侧定时器调 agent.followup 或在日志安静时 session.append（房间引擎的做法）。', ['DEVELOPMENT.md:511, 515, 2309-2310']],
+    ['C16', 'messages', '突发横幅（kind 13）', '传输都在（$events、follow、SSE 心跳）；缺生产者', 'gap', 'cut', 'gravit-ui 要 {id, headline, body, at}，在主栏上方停 5 s 再落进当前会话。', ['gravit-ui/js/app.js:85-89', 'gravit-ui/js/reducers/messages.js:185-197']],
+    ['C17', 'messages', '来电 / 电话键（kind 14）', '无语音线', 'gap', 'cut', 'face/src 和 face/client 里 voice / speech / twilio / phone / webrtc 一个都没有。', ['gravit-ui/js/reducers/messages.js:198-229']],
+    ['C18', 'messages', '群聊（kind 15）', '房间：成员答 = bubble{role bot, bot, name}，轮次结束 = room-line，成员条 = room 投影，@ = /data/rooms/say，Gravit 综合', 'fit', 'keep', '次强。差别：gravit-ui 在新消息时挑成员；face 按频道挂 bot（POST /data/channels/bots，上限 6），频道里的会话在第一次 dispatch 或 @ 时才变成房间，成员会话按（房间, bot）懒生成并复用。丢掉的：成员的结构化 room-view（立场 / 证据 / 不确定性）和 member-traces。', ['face/client/mapper.js:247-264', 'face/client/room.js:101-126', 'face/src/room.ts:33-40, 506-560, 676-680']],
+    ['C19', 'messages', '警报（kind 16，一句红边）', '无标记', 'partial', 'adapt', '只能启发式；最近的宿主标记是 isError 的 tool/result，但那是 kind 8。', ['gravit-ui/js/messages.js:2-7']],
+    ['C20', 'messages', '附件', 'PromptContentPart = text | image{base64} | file{receiptId}；上传走 /api/session/uploadFileBinary 或 fileUploads/upload', 'partial', 'adapt', '座席在、两边都没用：收据按 agent 作用域，先有会话才能传文件（gravit-ui 的草稿发送前不建会话；顺序变成 create → upload → prompt）；现有 face 客户端只发文本；gravit-ui 只留文件名和大小。', ['dsh-api-session-controller/lib/types/types.d.ts:72-89', 'dsh-client-file-upload/lib/typert.remote-client.d.ts:14-20']],
+    ['C20b', 'messages', '麦克风', '无', 'gap', 'cut', '两边都没有真的语音；要做是浏览器 Web Speech，与后端无关。', ['gravit-ui/js/app.js（startMic / stopMic）']],
+    ['C21', 'messages', 'Stop Gravit', 'session/cancel', 'fit', 'adapt', '机械上成立，语义不同：cancel 只停当前一轮，会话还活着、队列保留、下一句继续（goal 被暂停，只有 /goal resume 能续）；gravit-ui 的 Stop 是终态（status \'stopped\'，此后 append 丢掉所有非你的消息）。要选：Stop = cancel（可逆）还是 cancel + 归档（终态）。', ['face/client/chat.js:2871-2887', 'gravit-ui/js/reducers/messages.js:143-144, 173-176']],
+    ['C22', 'messages', 'Withdraw（撤回委托，此后不再落消息）', '/data/sessions/archive 只是展示层；宿主的 workspace/archiveSession（归档后不跑模型）face 按 D14 不用', 'partial', 'adapt', '没有 mandate 可撤；最近的是归档（删除在运行中被拒）。', ['face/src/sessions.ts:5-13, 92-125', 'dsh-api-workspace-controller/lib/typert.remote-client.d.ts:33, 42']],
+    ['C23', 'messages', 'Details：This task、Change words', '标题 ↔ 投影 title / session/rename；createdAt 在 follow 快照头里', 'fit', 'keep', '构建里的 Change words 就是重命名（不是改委托文本）；"until"和 intent id 没有来源。', ['gravit-ui/js/reducers/controls.js:50-53', 'face/client/chat.js:1810-1818']],
+    ['C23b', 'messages', 'Details：本会话的插件', '频道的 agents[] / bots[] 名册 + 全局 /data/plugins.json', 'partial', 'adapt', 'face 的插件是全局的（MCP 行）或按频道的（名册），不是按会话的。', ['DEVELOPMENT.md:1221']],
+    ['C23c', 'messages', 'Details：Gravit 的钱包、Top up、Take back', '无钱包', 'gap', 'cut', 'face/src 里没有任何 wallet。', ['gravit-ui/js/render/messages.js:89-119']],
+    ['C23d', 'messages', 'Mode：Guard | Beast（Details、Account 头、rail 的"$… · Guard"）', '唯一能去掉卡片的开关是 approval policy never，而它是拒单', 'conflict', 'cut', 'Guard ≈ ask；Beast = 不弹卡就交易 = 宪章排除；不存在 allow-always。', ['face/src/orders.ts:96-100, 130-137', 'gravit-ui/js/app.js:483']],
+    ['C24', 'messages', '新消息（标题、To:、额度 chip、第一句）', 'session/create{workspaceId | cwd}（+ agentPreset）→ session/rename → session/prompt', 'partial', 'adapt', '挑了任何 bot 都变 group = 房间，而房间要先有一个挂好这些 bot 的频道；gravit-ui 没有频道概念，要么给默认频道，要么发明按会话的名册。"在哪建"（workspaceId / cwd）没有入口——所有会话会落在仓库根，Gravit 的策略产物没有家。额度 chip 无（C3）。两边都在第一句时才建会话。', ['face/client/chat.js:2777-2800, 2319-2334', 'gravit-ui/js/reducers/messages.js:122-133']],
+    ['C25', 'messages', '订单与会话的归属（by / how / conv）', '无：place_order 不设 client_order_id，/data/account.json 原样透传', 'gap', 'adapt', '唯一链接是 Gate 2 卡（sessionId、callId）和那个会话里的 tool/result，客户端要在 ✓ 时记住。Trade 的 Under way、市场页的 Gravit on it、Recent 都读它。', ['gravit-ui/js/render/trade.js:63-67', 'alpaca_kit/account.py:85-92']],
+    ['C26', 'messages', '签名语法（"每句话都是签名指令"、For · May · May not · Until 表、十分钟签名、nonce）', 'face 的授权 = GET /?token= 铸的 cookie + 每张卡一次 $events/result', 'conflict', 'cut', '没有密钥、签名载荷、地址、有效期——整套语法在宿主里没有对象。', ['spec:171, 187-188, 516-520', 'gravit-ui/js/render/discover.js:65-68, 103-106']],
+    ['C27', 'messages', '头像 / logo（bot、插件）', 'bots.json 行没有图片；客户端从 id 推字形（avatarGlyph）', 'gap', 'adapt', '适配层合成字母标。', ['face/client/room.js:26', 'gravit-ui/js/render/avatars.js:15-25']],
+
+    ['D1', 'mail', '信箱、地址、信（含 Discover 写的"通过审核"信）', '无', 'gap', 'cut', '三封种子信各自也没有来源：月结单（部分，account.json 的订单，没有 PDF）、Form 4: Pelosi（EDGAR 读的是 XBRL 和发行表，不读 Form 4）、周报（没有定时器）。', ['gravit-ui/js/data/seed.js:140-147', 'alpaca_kit/feeds/edgar.py']],
+
+    ['E1', 'discover', '货架与目录（Like · Data · Monitors · Bots · Crypto · Quant）', '装着的清单：/data/plugins.json（MCP 行 + mcp__* / agent_* schema）、/data/bots.json、/data/agents.json（15 个 CLI 探测）、/data/memory.json（skills）', 'partial', 'adapt', '商店没有；"我的插件"可以如实列出 face 在跑的：两个 MCP 服务（alpaca-kit、akshare）、接上的 CLI、bots、skills。构建里没有 Agents 架，接上的 claude / codex 没有落点；Like 架读 memory.entries，memory.json 不带。目录条目有一半其实已在跑：Backtest / Factor screen ↔ role_backtester / screen，Earnings calendar ↔ earnings / calendar，Price feed ↔ 行情线，News sentiment ↔ web_search。', ['gravit-ui/js/data/plugins.js:2, 48-55', 'face/src/panels.ts:105-121, 523-543', 'roles/screener/role.yml']],
+    ['E2', 'discover', '安装 / 卸载', 'CLI：POST /data/agents/connect | disconnect 即时；bot：POST /data/bots 建、没有删；MCP 行：profile 启动时组合', 'partial', 'adapt', 'face 没有运行时加 MCP 服务器的路由，但 dsh 可以：dsh-mcp-client 的 apply(ctx, config) 是普通 cordis 插件，可像 declareBots 那样挂为子 fiber，工具随即注册、bot 掩码随 tools/change 重展开；缺一个 face 自己的持久化文件（agents.json 是先例）和界面。dsh-plugin-manager / config-editor / hmr 装着但按 D1 不挂。', ['face/src/boot.ts:163-172, 319-344', 'dsh-mcp-client/lib/types/index.d.ts:1-14, 81-89']],
+    ['E3', 'discover', 'What you sign（May / May not / Until / slug）', '每个 preset 的工具掩码：bot 的 allow（plugins/bot.js tools.restrict，"可见性不是权限边界"）、role 的 allow + NEVER 表', 'partial', 'adapt', '没有 Until、没有 For、没有 slug、不按安装铸；没有路由能改 bot 的 allow（只能手改 agent.cordis.yml 再保存）。', ['face/plugins/bot.js:39-49, 83-102', 'face/src/bots.ts:400-433']],
+    ['E4', 'discover', 'Create = Discover 自己的 MCP 面（shop.*、plugin.call、客户端接入、publish → 审核 → 信）', '无。dsh 只装了 MCP 客户端包（@modelcontextprotocol/client + core），当不了服务器', 'gap', 'cut', '仓库里真的 MCP 服务器：alpaca_kit（python）和 demo 的 portfolio/mcp.ts + 每个 venue 的 stdio 座席（posture C，face 不调）。dsh 的工具名合约会把点号名改写：shop.search 这类被规范化并加 12 位哈希后缀——spec §7.7 的工具表要改下划线名。', ['dsh-mcp-client/package.json:43-53', 'dsh-mcp-client/lib/types/tools.d.ts:32-46', 'demo/src/portfolio/mcp.ts']],
+    ['E5', 'discover', '安装后的教学会话', 'session/create + session/prompt', 'partial', 'adapt', '宿主从不先开口：会话的第一条记录是操作员的 prompt，gravit-ui 里由插件发的第一句要变成 Gravit 对一条合成 prompt 的回答；unread 没有对应。MCP 服务器的 instructions 进的是 Gravit 的提示（教 Gravit，不教你）。', ['face/client/chat.js:2783, 2849', 'face/src/akshare.ts:13-18']],
+    ['E6', 'discover', '安装计数、公私有、审核', '无', 'gap', 'cut', '最近的是 dsh-plugin-manager 的注册表安装（未挂）；bot 行的 listed / broken、agent 行的 found / auth 是状态不是审核。', ['face/src/panels.ts:137-144', 'dsh-plugin-manager/README.md:34-62']],
+
+    ['F1', 'markets', '标签页 All · Crypto · Stocks · RWAs · Predictions', '行情线的市场只有 us | cn | crypto', 'partial', 'adapt', 'stocks ↔ us、crypto ↔ crypto；RWA、预测没有线；cn 没有标签页。id 语法两边不同（crypto:BTC vs crypto:BTC/USD，equity:AAPL vs us:AAPL），线上的 crypto 只有 USD 腿。', ['face/src/quote-types.ts:2', 'face/src/quotes.ts:26-33', 'gravit-ui/js/data/markets.js:5']],
+    ['F2', 'markets', '搜索', 'GET /data/symbols/search?q=&market=（腾讯 cn、Yahoo us / crypto；30 条、60 s 缓存）', 'fit', 'keep', '命中只有身份（id / market / symbol / name / currency / exchange / aliases）不带价，行要补一次 /data/quotes?ids=。', ['face/src/symbol-search.ts:1-54']],
+    ['F3', 'markets', '行情', 'GET /data/quotes?ids=、/data/quotes/stream（SSE，event: quotes，15 s 心跳）：price / prev_close / change / change_pct / volume / as_of / quote_status / market_status / providers[]', 'fit', 'keep', '边界：每请求 100 个 id、8 个并发客户端、200 个活跃 id、IEX 流只覆盖 30 个美股（其余 60 s 轮询）、500 ms 合并。线上的人类可读消息都是中文；crypto 的 market_status 永远 open，cn 的成交量永远 null；gravit-ui 的"24h"列对 us / cn 其实是对前收。face/client/market-quotes.js（SSE + 轮询回退 + 看门狗）可原样复用。', ['face/src/quotes.ts:293-313', 'face/src/quote-types.ts:30-53', 'face/client/market-quotes.js:94-106']],
+    ['F4', 'markets', '排序（Most traded / Biggest moves / Closing soonest）', '客户端按 volume、change_pct', 'fit', 'keep', 'cn 成交量 null 排不了；crypto 的量是 24h 基础单位，美股是当日股数，跨市场不可比；Closing soonest 只对预测，线上没有收盘时间。', ['gravit-ui/js/render/markets.js:88-93', 'face/src/quote-snapshots.ts:208-210']],
+    ['F5', 'markets', '自选（Watching）', '本地 localStorage（face：gravit.market.watchlist.v1）', 'fit', 'adapt', '两把钥匙、两种 id 语法：要么迁移，要么 gravit-ui 读写 face 的钥匙和 normalizeAsset 形状；face 的页面还听跨标签的 storage 事件。', ['face/client/market-model.js:3-6, 69-123', 'gravit-ui/js/reducers/markets.js:34-39']],
+    ['F6a', 'markets', '市场页：买卖价（bid / ask）', '线上没有；两个供应商其实都有（Alpaca snapshot 的 latestQuote、Coinbase ticker）', 'partial', 'adapt', '两个字段的线改，不是新供应商；预测的 bid / ask 没有来源。', ['face/src/quote-snapshots.ts:132-158, 244-247']],
+    ['F6b', 'markets', '市场页：K 线 5m · 1h · 1d', '没有给浏览器的 bars 路由；daily_bars 是 Gravit 的 MCP 工具、只有日线', 'gap', 'adapt', '新一条 /data 路由包 daily_bars（床内日线）；5m / 1h 要带钥匙调 Alpaca REST。/data/watchlist.json 给每个美股 30 点日收盘 spark、/data/market.json 给筛选行的 spark，都是床到 2026-07-09 为止、没有页面在读。', ['face/src/data.ts:283-285', 'scripts/face_watchlist.py:39-43, 76-86']],
+    ['F6c', 'markets', '市场页：跨 venue 比价', '单一 venue（Alpaca paper）', 'gap', 'cut', '无。', ['alpaca_kit/account.py:16-17']],
+    ['F6d', 'markets', '市场页：You hold、On the statement', '/data/account.json 的 positions、orders', 'fit', 'keep', '订单按 Alpaca 状态分桶即可（face 的 account-model.js 已有）。', ['scripts/face_data.py:209-211', 'face/client/account-model.js:87-104']],
+    ['F6e', 'markets', '市场页：Gravit on it（关于它的会话）', 'session/search{query} → 20 条 {sessionId, snippet}（face 没调；是否挂了 ctx.sessionQuery 未证实）', 'partial', 'adapt', '挂了就是全文；没挂只能按标题。', ['dsh-api-session-controller/lib/types/types.d.ts:172-180, 270-279']],
+    ['F7', 'markets', 'Hand to Gravit', '一句 prompt', 'fit', 'keep', '工单变成"Buy $25 of BTC, limit 60000"进草稿；随它设的额度 chip 和 attach 没有对应（C3）；Gravit 的 place_order 只收 symbol / qty / side / order_type / limit_price，美元 → 数量是 Gravit 的算术；话里的 stand-in venue 在 paper 账户里不存在。', ['gravit-ui/js/trade.js:151-163', 'alpaca_kit/mcp/tools.py:299-303']],
+    ['F8', 'markets', '列表第一页从哪来', '行情按 id 拉，没有"列市场"的路由；搜索只给身份', 'gap', 'adapt', '来源候选：自选（F5）、/data/watchlist.json（床里最新快照的全部美股，价到 2026-07-09）、/data/market.json 的两个筛选（各 40 行）。', ['face/src/quotes.ts:19-21', 'scripts/face_watchlist.py']],
+
+    ['G1', 'trade', '手动下单（工单 → Sign and place）', '无操作员下单路；下单只有 Gravit 的 place_order，前面 Gate 1（旗标 + 钥匙注册）和 Gate 2（卡）', 'conflict', 'cut', 'TradingClient.place_order 只有 paper 主机钉没有旗标——加一条 /data 路由就是绕过两道闸的新门（宪章 §1"read-only by default… never been armed"，§4）。合规的路：工单变 prompt → Gravit 调工具 → 卡 → ✓（只留 Hand to Gravit）。', ['face/src/orders.ts:1-24, 81-110', 'Gravit-Design.md:21-59']],
+    ['G2', 'trade', 'Where（各 venue 最优价、Connect to trade）、十分钟签名、nonce', '单一主机；face/src 里没有 EIP-712 / 设备钥 / 签名', 'gap', 'cut', 'face 的 connect 流是给 CLI agent 的；供应商状态是行情源不是交易 venue。', ['alpaca_kit/account.py:16-17, 32', 'face/src/quote-types.ts:6-14']],
+    ['G3', 'trade', 'Under way（在途 / 在簿订单、等答的卡）', 'account.json 的 orders（50 条全状态，60 s TTL）+ 待决 gate', 'partial', 'adapt', '状态分桶 face 已有；by / how / conv 丢（C25）；Gravit 下的单最多 60 s 后才出现在 account.json，除非 tool/result 后立即重拉。', ['scripts/face_data.py:151, 196-212', 'face/client/account-model.js:87-104']],
+    ['G4', 'trade', '撤单（Trade、Markets、Account 的 Cancel）', 'cancel_order 是 Gravit 的受闸 MCP 工具；没有操作员路由', 'conflict', 'cut', '同 G1：一句 prompt 点名订单 id → Gravit 的 cancel_order → 卡 → ✓。', ['alpaca_kit/mcp/tools.py:298, 305-307', 'face/src/orders.ts:35, 93-109']],
+    ['G5', 'trade', 'picker 三组：You hold · Recent · Most traded', 'positions / 无 by:\'you\' 的订单 / 只能在已拉到的 id 内排', 'partial', 'adapt', 'Recent 在 face 上要么空要么列 Gravit 的；搜索改走 /data/symbols/search。', ['gravit-ui/js/render/trade.js:38-51']],
+    ['G6', 'trade', '"Trading on · $100 a move" chip（被测试钉住）与每笔上限', 'orders_gate.gate1_registered 给开 / 关；没有任何每笔上限', 'gap', 'cut', 'Gate 2 是是 / 否的卡，没有金额规则；TradingClient 收数量不收名义额。', ['scripts/face_data.py:154-177', 'gravit-ui/js/render/trade.js:157']],
+
+    ['H1', 'account', 'Portfolio：净值、今日、配置条、持仓、各 venue 现金', '/data/account.json：{available, host, account（Alpaca /v2/account 原样）, positions（原样）, orders[:50], orders_gate}；无钥匙时 {available:false, reason, orders_gate}', 'partial', 'adapt', '今日 = equity − last_equity（face 已算）；配置按 positions 的 asset_class（paper 也能持 crypto）；每只持仓的 chg 有 change_today；stale 不是生产者字段，是 data.ts 出错回旧数据时加的标。"Guard"≠ orders_gate：那是注册 / 钉住的状态不是模式。', ['scripts/face_data.py:189-215', 'face/src/data.ts:45, 267-270', 'face/client/account-view.js:36-41']],
+    ['H2', 'account', 'Venues 与 Connect an account', '一个券商（Alpaca paper，钥匙在 env；credentials/describe 报三把钥匙在不在）+ 三个行情源的 ProviderState', 'partial', 'adapt', '列表能诚实：Alpaca paper（host、account.status）+ alpaca / coinbase / ifind 的健康 chip（unconfigured | limited ↔"Not served here"）；"Gravit may trade"↔ gate1_registered。Connect（Coinbase、IBKR、Polymarket、Hyperliquid）没有。', ['face/src/quote-types.ts:6-14', 'scripts/face_data.py:165', 'face/client/chat.js:3763, 3796-3800']],
+    ['H3', 'account', 'Move / Receive（地址、二维码）/ Statement（CSV）', 'face 只读 account / positions / orders；没有钱包、地址、转账、活动流（不读 /v2/account/activities）', 'gap', 'cut', 'Statement 只能从成交订单（filled_avg_price、filled_qty）派生，CSV 在客户端生成；Move / Receive 无。gravit-ui 另有 account.orders 列表（Under way、On the statement 读它）——那才是 account.json orders 的直接落点。', ['gravit-ui/js/render/account.js:14-52', 'gravit-ui/js/reducers/controls.js:89-107']],
+    ['H4', 'account', 'Memory（带来源的条目、三个开关、导出、忘记；Like 架；Where it is used）', 'face 的"memory"是 skills 目录（/data/memory.json 按包分组，/data/memory/skill 给 SKILL.md）', 'gap', 'later', '宪章 §7.3"不建记忆层"，DEVELOPMENT §10.16 把 persona / memory / 教学频道推到下一轮——是推迟的设计不是对抗；F13 是那一轮 spec 的输入。过渡期：skills 目录可当只读的"Gravit 知道什么"；dsh/skills/style-gravit 的 doctrine / lessons / signals 正是 Style / Rules 组的现有家。', ['face/src/panels.ts:523-549', 'Gravit-Design.md:275-297', 'DEVELOPMENT.md:2346-2353']],
+    ['H5', 'account', 'Settings（主题、Reset demo）', '客户端', 'fit', 'keep', '主题纯本地；Reset demo 重播种子，状态在宿主后没有意义，去掉或变演示模式控件。', ['gravit-ui/js/render/account.js:97-101']],
+    ['H6', 'account', '旧数据标（stale）与 60 s 缓存', 'data.ts 出错回旧数据并标 stale:true', 'gap', 'adapt', '规则 9 说不要小字，但不标会把旧数当现数；至少一个弱化的时间戳。', ['face/src/data.ts:45, 267-270', 'face/client/account-view.js:261-265']],
+
+    ['I1', 'lost', '频道 = 策略目录', '落地页（status.yaml / THESIS / journal / backtests / 文件）、新建频道、每频道的 agent 与 bot 名册、按 workspaceId 分桶', 'lost', 'adapt', '宪章的"一天"从选频道开始；/data/channels.json 的 presets 还是列表里识别 bot 家会话和房间的线索——路由本身要留。', ['face/client/channels.js:60-212', 'face/client/grouping.js:62-68']],
+    ['I2', 'lost', '过程面', 'tool/call、tool/result 卡（market_snapshot 表、daily_bars 图、calendar、breadth / account 平铺、通用表；原始 <pre> 永远在）、思考轨迹、pulse、context 行、压缩、截断标记、markdown', 'lost', 'adapt', '收据 / 拒绝 / K 线的适配层消费的正是这些帧，"丢"的前提是没人提升它们；一个可折叠的过程卡视图能留住大半。', ['face/client/render.js:330-349', 'face/client/chat.js:9, 740-777']],
+    ['I3', 'lost', '临时子代理 dock、成员轨迹、成员条、轮次行', 'subagents/prompt、interruptByParent、subagentCatalog 投影；session/projections + session/page 不激活地读成员', 'lost', 'later', 'gravit-ui 里没有 subagent / trace 的任何字。', ['face/client/subagents.js:65-121', 'face/client/chat.js:202-232']],
+    ['I4', 'lost', 'bot 页（设置、检查）', 'POST /data/bots/settings（revision 409）、/data/bots/runtime', 'lost', 'later', 'gravit-ui 里 bot 只是 Discover 的一张卡。', ['face/client/chat.js:3444-3560']],
+    ['I5', 'lost', '四个面板', 'strategy / agent（模型目录、host.json、CLI 接入 / 断开 / 重扫、用量卡）/ memory（skills）/ plugin（MCP 行与工具 schema）', 'lost', 'adapt', '接上的 claude / codex 在 gravit-ui 里连货架都没有（E1）。', ['face/client/chat.js:3156-3166, 3753-3975']],
+    ['I6', 'lost', '会话操作与投影', 'fork、归档 / 取消归档、删除、斜杠命令、waiting 标、token 用量 / 上下文压力', 'lost', 'adapt', 'gravit-ui 只有重命名。', ['face/client/chat.js:1805-1865, 3087-3121']],
+    ['I7', 'lost', 'A 股整条线', '行情 cn（iFinD）、腾讯搜索、mcp__akshare__* 13 个工具', 'lost', 'adapt', '标签页没有位置；Stocks 要放宽。', ['face/src/quote-types.ts:2-3', 'face/src/symbol-search.ts:9, 72']],
+    ['I8', 'lost', '账户台 / 行情页的小字', 'gate 状态块、stale 标、供应商状态行、轮询回退提示', 'lost', 'adapt', '规则 9 的代价（H6）。', ['face/client/account-view.js:234-265', 'face/client/market.js:18']],
+    ['I9', 'lost', '测试', 'face/tests 71 个文件 17,059 行，覆盖线、闸、房间', 'lost', 'adapt', 'gravit-ui 的 3,938 行测试跑在假 DOM 上不碰线；新客户端一行都继承不到。', ['face/tests', 'gravit-ui/tests/helpers/fake-dom.js']]
+  ];
+
+  var KINDS = [
+    [1, '你的话', 'fit', 'session/prompt；群里 @ 先走 /data/rooms/say。"签名指令"没有对应。'],
+    [2, 'Gravit 的话', 'fit', '定稿文本；丢 markdown、思考轨迹、pulse。'],
+    [3, '待批订单', 'fit', 'Gate 2 的 approval/request；精确参数来自同 callId 的 tool/call；"answer by"只是装饰。'],
+    [4, '要额度', 'conflict', '形式是提问卡；语义（授常设额度）没有对象，审批只有 allowed-once / rejected。'],
+    [5, '要装插件', 'gap', '依赖 Discover。'],
+    [6, 'bot 在额度内已执行', 'conflict', 'bot 不交易（配置 + 合约）；真放进去也会弹同一张卡。'],
+    [7, '监控信号', 'partial', '应答半边 = tool/call + tool/result；推送半边没有来源。'],
+    [8, '门的拒绝', 'partial', '四种拒绝都在 tool/result(isError) 或 Gravit 的话里；错误码槽存在但没填。'],
+    [9, '收据', 'partial', 'place_order 的结果 = 已受理；成交不推送，之后从 account.json 读；无 ledger 编号。'],
+    [10, '收尾', 'partial', '没有 done 态；turn/end、goal complete、status.yaml。'],
+    [11, 'K 线技术分析', 'partial', 'daily_bars 的 OHLCV 行可画蜡烛；只有日线；结论是散文。'],
+    [12, '早报', 'gap', '没有定时器；宪章"无人值守不启动"。'],
+    [13, '突发横幅', 'gap', '传输在，生产者没有。'],
+    [14, '来电', 'gap', '没有语音线。'],
+    [15, '群聊', 'fit', '房间：成员答、轮次行、成员条、@、Gravit 综合；bot 按频道挂。'],
+    [16, '警报', 'partial', '一句红边的 Gravit 话，宿主无标记。'],
+    ['+', '通用审批卡', 'gap', '沙箱越界写（含 bot 的 write / bash 升级）走同一条审批流，现在会被画成订单卡。'],
+    ['+', '提问卡', 'gap', 'ask_user_question 的批量问答；dsh 的 timed 模式是唯一真实的"answer by"。']
+  ];
+
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); };
+  var codeify = function (s) { return esc(s).replace(/`([^`]+)`/g, '<code>$1</code>'); };
+
+  var rows = ROWS.map(function (r) { return { id: r[0], screen: r[1], need: r[2], cp: r[3], v: r[4], ra: r[5], note: r[6], ev: r[7] }; });
+
+  // ---- hero bar
+  (function () {
+    var counts = {}; VORDER.forEach(function (k) { counts[k] = 0; });
+    rows.forEach(function (r) { counts[r.v]++; });
+    var total = rows.length;
+    var bar = $('bar'), legend = $('legend');
+    bar.setAttribute('aria-label', '共 ' + total + ' 行：' + BAR_ORDER.map(function (k) { return V[k].label + ' ' + counts[k]; }).join('，'));
+    BAR_ORDER.forEach(function (k) {
+      var s = document.createElement('span');
+      s.style.flex = counts[k] + ' 0 0'; s.style.background = 'var(--v-' + k + ')';
+      s.title = V[k].label + ' · ' + V[k].zh + ' · ' + counts[k];
+      bar.appendChild(s);
+      var l = document.createElement('span');
+      l.innerHTML = '<i class="swatch" style="background:var(--v-' + k + ')"></i><span class="glyph">' + V[k].glyph + '</span> ' + V[k].label + ' <span class="muted">' + V[k].zh + '</span> <span class="count">' + counts[k] + '</span>';
+      legend.appendChild(l);
+    });
+    var t = document.createElement('span'); t.className = 'count'; t.textContent = '共 ' + total + ' 行';
+    legend.appendChild(t);
+  })();
+
+  // ---- state
+  var state = { verdicts: VORDER.slice(), screen: 'all', q: '', routeA: false };
+  try {
+    var saved = JSON.parse(localStorage.getItem('gravit-fit.filters') || 'null');
+    if (saved && Array.isArray(saved.verdicts)) state.verdicts = saved.verdicts.filter(function (k) { return V[k]; });
+    if (saved && typeof saved.screen === 'string') state.screen = saved.screen;
+    if (saved && typeof saved.routeA === 'boolean') state.routeA = saved.routeA;
+  } catch (e) { /* storage unavailable: defaults */ }
+  var persist = function () { try { localStorage.setItem('gravit-fit.filters', JSON.stringify({ verdicts: state.verdicts, screen: state.screen, routeA: state.routeA })); } catch (e) { /* ignore */ } };
+
+  // ---- screen tiles
+  (function () {
+    var tiles = $('tiles');
+    SCORED.forEach(function (key) {
+      var name = SCREENS.filter(function (s) { return s[0] === key; })[0][1];
+      var mine = rows.filter(function (r) { return r.screen === key; });
+      var c = { fit: 0, partial: 0, gap: 0, conflict: 0 };
+      mine.forEach(function (r) { if (c[r.v] !== undefined) c[r.v]++; });
+      var n = c.fit + c.partial + c.gap + c.conflict;
+      var pct = n ? Math.round(100 * (c.fit + 0.5 * c.partial) / n) : 0;
+      var b = document.createElement('button'); b.type = 'button'; b.className = 'tile'; b.setAttribute('data-screen', key);
+      b.innerHTML = '<div class="eyebrow">' + esc(name) + '</div>' +
+        '<div class="pct">' + pct + '%<small>' + n + ' 行</small></div>' +
+        '<div class="meter" role="img" aria-label="' + esc(name) + ' ' + pct + '%"><span style="width:' + pct + '%"></span></div>' +
+        '<div class="counts">' + ['fit', 'partial', 'gap', 'conflict'].map(function (k) { return '<span><span class="glyph">' + V[k].glyph + '</span> ' + c[k] + '</span>'; }).join('') + '</div>';
+      b.addEventListener('click', function () { setScreen(key); $('matrix').scrollIntoView({ block: 'start' }); });
+      tiles.appendChild(b);
+    });
+  })();
+
+  // ---- controls
+  var chips = $('chips'), tabs = $('tabs');
+  VORDER.forEach(function (k) {
+    var b = document.createElement('button'); b.type = 'button'; b.className = 'chip'; b.setAttribute('data-v', k);
+    b.innerHTML = '<i class="swatch" style="background:var(--v-' + k + ')"></i>' + V[k].label + ' <span class="muted">' + V[k].zh + '</span>';
+    b.addEventListener('click', function () {
+      var i = state.verdicts.indexOf(k);
+      if (i >= 0) state.verdicts.splice(i, 1); else state.verdicts.push(k);
+      render();
+    });
+    chips.appendChild(b);
+  });
+  [['all', '全部']].concat(SCREENS).forEach(function (s) {
+    var b = document.createElement('button'); b.type = 'button'; b.className = 'tab'; b.setAttribute('data-screen', s[0]); b.textContent = s[1];
+    b.addEventListener('click', function () { setScreen(s[0]); });
+    tabs.appendChild(b);
+  });
+  function setScreen(key) { state.screen = key; render(); }
+  $('q').addEventListener('input', function (e) { state.q = e.target.value.trim().toLowerCase(); render(); });
+  $('routeA').checked = state.routeA;
+  $('routeA').addEventListener('change', function (e) { state.routeA = e.target.checked; render(); });
+
+  // ---- matrix
+  function matches(r) {
+    if (state.verdicts.indexOf(r.v) < 0) return false;
+    if (state.screen !== 'all' && r.screen !== state.screen) return false;
+    if (state.q) {
+      var hay = (r.id + ' ' + r.need + ' ' + r.cp + ' ' + r.note + ' ' + r.ev.join(' ')).toLowerCase();
+      if (hay.indexOf(state.q) < 0) return false;
+    }
+    return true;
+  }
+  function rowNode(r) {
+    var li = document.createElement('li'); li.className = 'row ' + r.v; li.id = 'row-' + r.id;
+    var ra = state.routeA ? '<span class="ra ' + r.ra + '">' + RA[r.ra] + '</span>' : '';
+    li.innerHTML =
+      '<div class="row-top">' +
+        '<span class="id">' + esc(r.id) + '</span>' +
+        '<div class="need">' + codeify(r.need) + '</div>' +
+        '<div class="cp">' + codeify(r.cp) + '</div>' +
+        '<div class="verdicts"><span class="v ' + r.v + '"><span class="glyph">' + V[r.v].glyph + '</span>' + V[r.v].label + '</span>' + ra + '</div>' +
+      '</div>' +
+      '<div class="text">' + codeify(r.note) + '</div>' +
+      '<details><summary>证据 · ' + r.ev.length + '</summary><ul>' + r.ev.map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') + '</ul></details>';
+    return li;
+  }
+  function render() {
+    persist();
+    chips.querySelectorAll('.chip').forEach(function (b) { b.setAttribute('aria-pressed', String(state.verdicts.indexOf(b.getAttribute('data-v')) >= 0)); });
+    tabs.querySelectorAll('.tab').forEach(function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-screen') === state.screen)); });
+    var host = $('groups'); host.innerHTML = '';
+    var shown = 0, raCounts = { keep: 0, adapt: 0, cut: 0, later: 0 };
+    SCREENS.forEach(function (s) {
+      var mine = rows.filter(function (r) { return r.screen === s[0] && matches(r); });
+      if (!mine.length) return;
+      shown += mine.length;
+      var g = document.createElement('div'); g.className = 'group';
+      g.innerHTML = '<div class="group-head"><h3>' + esc(s[1]) + '</h3><span class="count">' + mine.length + ' 行</span></div>';
+      var ul = document.createElement('ul'); ul.className = 'rows';
+      mine.forEach(function (r) { ul.appendChild(rowNode(r)); raCounts[r.ra]++; });
+      g.appendChild(ul); host.appendChild(g);
+    });
+    if (!shown) { var e = document.createElement('div'); e.className = 'empty'; e.textContent = '没有符合筛选的行。'; host.appendChild(e); }
+    var line = '显示 ' + shown + ' / ' + rows.length + ' 行';
+    if (state.routeA) line += ' · 路线 A：留 ' + raCounts.keep + ' · 适配 ' + raCounts.adapt + ' · 砍 ' + raCounts.cut + ' · 下一轮 ' + raCounts.later;
+    $('summary').textContent = line;
+  }
+  render();
+
+  // ---- kinds
+  (function () {
+    var tb = $('kinds-table').querySelector('tbody');
+    KINDS.forEach(function (k) {
+      var tr = document.createElement('tr'); if (k[0] === '+') tr.className = 'new';
+      tr.innerHTML = '<td class="num">' + esc(k[0]) + '</td><td class="kind">' + esc(k[1]) + '</td>' +
+        '<td><span class="v ' + k[2] + '"><span class="glyph">' + V[k[2]].glyph + '</span>' + V[k[2]].label + '</span></td>' +
+        '<td class="how">' + codeify(k[3]) + '</td>';
+      tb.appendChild(tr);
+    });
+  })();
+
+  // ---- deep link to a row (#row-C6) or a section
+  if (location.hash && /^#row-/.test(location.hash)) {
+    var target = document.getElementById(location.hash.slice(1));
+    if (target) { target.scrollIntoView({ block: 'center' }); target.querySelector('details').open = true; }
+  }
+})();
+</script>
+</body>
+</html>
