@@ -3,7 +3,9 @@
 // channel first, then each group by its newest conversation, the empty channels by name, Archived last.
 import { bucketFor, ARCHIVED_KEY, UNGROUPED_KEY, BOT_KEY_PREFIX } from '../wire/grouping.js';
 
-const labelOf = ch => (typeof ch.title === 'string' && ch.title !== '' ? ch.title : ch.name);
+// a channel goes by one name everywhere: its display title (the registry's, the operator's to change), else its name
+export const channelLabel = ch => (typeof ch.title === 'string' && ch.title !== '' ? ch.title : ch.name);
+const labelOf = channelLabel;
 const newest = g => g.conversations.reduce((top, c) => Math.max(top, c.updatedAt ?? 0), -1);
 
 // [{key, label, kind: 'channel'|'bot'|'none'|'archived', workspaceId, isRoot, conversations, collapsed, shown}]; a

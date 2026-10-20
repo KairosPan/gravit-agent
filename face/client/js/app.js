@@ -23,6 +23,7 @@ import { renderDiscover, renderPlugin } from './render/discover.js';
 import { itemById } from './host/discover-view.js';
 import { startTraces } from './host/traces.js';
 import { loadMemberTrace } from './wire/member-traces.js';
+import { isHostPreset } from './wire/speaker.js';
 import { statementOf, csvOf } from './host/account-view.js';
 import { canonicalId, assetFor } from './host/market-view.js';
 import { createLiveQuotes } from './wire/market-quotes.js';
@@ -373,7 +374,7 @@ export function boot(win, host = {}) {
     const rostered = (which === 'agents' ? data.agents : data.bots) ?? [];
     const offered = which === 'agents'
       ? (await channels.agentChoices()).map(a => ({ value: a.bin, label: a.label }))
-      : (data.allBots ?? []).map(b => ({ value: b.id, label: b.name }));
+      : (data.allBots ?? []).filter(b => !isHostPreset(b.id)).map(b => ({ value: b.id, label: b.name })); // Gravit's own composition is no bot
     const choices = [...offered, ...rostered.filter(v => !offered.some(c => c.value === v)).map(v => ({ value: v, label: v }))];
     store.dispatch('startEdit', { kind: 'roster', which, workspaceId, choices, ticked: [...rostered] });
   }

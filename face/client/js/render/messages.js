@@ -10,6 +10,7 @@ import { kv, inlineEdit, confirmPair } from './controls.js';
 import { firstOpen } from '../host/sessions.js';
 import { needsAnswer } from '../messages.js';
 import { childrenOf } from '../host/children-view.js';
+import { channelLabel } from '../host/list-view.js';
 
 export function currentConversation(state) {
   const id = state.route.screen === 'messages' ? state.route.id : null;
@@ -45,7 +46,7 @@ export function renderHead(conv, state) {
 function draftScreen(state) {
   const d = state.draft;
   const channels = [...(state.channels ?? [])].sort((a, b) => (b.isRoot ? 1 : 0) - (a.isRoot ? 1 : 0));
-  const options = channels.map(c => `<option value="${esc(c.workspaceId)}"${c.workspaceId === d.where ? ' selected' : ''}>${esc(c.name)}</option>`).join('') +
+  const options = channels.map(c => `<option value="${esc(c.workspaceId)}"${c.workspaceId === d.where ? ' selected' : ''}>${esc(channelLabel(c))}</option>`).join('') +
     '<option value="__new">New channel…</option>';
   // New channel… opens a name box under Where; Where keeps its channel until the new one exists
   const naming = state.edit?.kind === 'newChannel' ? `<div class="to-line">${inlineEdit([{ name: 'channel', value: '', label: 'Name the channel' }], state.edit.error)}</div>` : '';
@@ -74,7 +75,13 @@ function usageRows(usage) {
   return rows.length ? `<section class="dsec"><div class="dsec-label">Usage</div>${kv(rows)}</section>` : '';
 }
 
-// the row actions under This task: Fork always; Archive while nothing runs or waits, Un-archive for the face's own archive
+// where the conversation lives, named as the list names its channel
+const whereOf = (conv, state) => {
+  const ch = (state.channels ?? []).find(c => c.workspaceId === conv.channel?.workspaceId);
+  return ch ? channelLabel(ch) : conv.channel?.name ?? 'Default directory';
+};
+
+// the row actions under This task: Fork once there is something to fork; Archive while nothing runs or waits, Un-archive for the face's own archive
 // (the host's cannot be undone here); Delete while nothing runs or waits, asked twice
 function rowKeys(conv, state) {
   const key = (action, label, cls = 'btn-sm') => `<button type="button" class="${cls}" data-action="${action}" data-conv="${esc(conv.id)}">${label}</button>`;
@@ -82,7 +89,8 @@ function rowKeys(conv, state) {
   const deleting = state.confirm?.action === 'deleteConv' && state.confirm?.id === conv.id;
   return [
     key('changeWords', 'Change words'),
-    key('fork', 'Fork'),
+    // dsh forks from a completed turn: a conversation with nothing in it yet has none
+    conv.messages.length ? key('fork', 'Fork') : '',
     conv.archived === 'face' ? key('unarchive', 'Un-archive') : !conv.archived && idle ? key('archive', 'Archive') : '',
     !idle ? '' : deleting ? confirmPair('Yes, delete') : key('deleteConv', 'Delete', 'btn-danger'),
   ].join('');
@@ -109,7 +117,7 @@ export function renderDetails(conv, state) {
   const asking = state.confirm?.action === 'stopGravit' && state.confirm?.id === conv.id;
   const title = renaming ? inlineEdit([{ name: 'title', value: conv.title, label: 'Name this' }], e.error) : `<div class="dsec-title">${esc(conv.title)}</div>`;
   const agent = conv.kind === 'bot' && conv.preset ? senderName(conv.preset, state) : 'Gravit';
-  const facts = kv([...(conv.created ? [['Created', esc(fmtDate(conv.created))]] : []), ['Where', esc(conv.channel?.name ?? 'Default directory')], ['Agent', esc(agent)], ...(conv.archived === 'host' ? [['Archived', 'By the host']] : [])]);
+  const facts = kv([...(conv.created ? [['Created', esc(fmtDate(conv.created))]] : []), ['Where', esc(whereOf(conv, state))], ['Agent', esc(agent)], ...(conv.archived === 'host' ? [['Archived', 'By the host']] : [])]);
   const members = conv.kind === 'group' ? `<section class="dsec"><div class="dsec-label">Members</div>${conv.members.map(m => `<div class="dsec-line">${esc(senderName(m, state))}</div>`).join('')}</section>` : '';
   const stop = conv.running
     ? `<section class="dsec">${asking ? confirmPair('Yes, stop Gravit') : `<button type="button" class="btn-danger" data-action="stopGravit" data-conv="${esc(conv.id)}">Stop Gravit</button>`}</section>`

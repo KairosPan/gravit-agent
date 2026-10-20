@@ -167,6 +167,12 @@ test('Details never covers the conversation: it makes room, folding the list awa
   assert.match(css, /@media \(min-width: 861px\) and \(max-width: 1399px\) \{\s*\.list:has\(~ \.main\.with-drawer\) \{ display: none; \}/);
 });
 
+test('a long tool description is clamped to two lines, and the page keys keep a gap', () => {
+  const rule = sel => css.match(new RegExp(`^${sel.replace(/[.]/g, '\\.')} \\{([^}]*)\\}`, 'm'))?.[1] ?? '';
+  assert.match(rule('.tool-desc'), /-webkit-line-clamp: 2/);
+  assert.match(rule('.plug-key'), /gap: 8px/);
+});
+
 test('the tool row, the question card and the thinking row have their rules', () => {
   for (const sel of ['.tool summary', '.tool pre', '.tool.danger', '.question .q', '.opt', '.thinking span', '.cut', '.status-line.bad']) {
     assert.ok(new RegExp(sel.replace(/[.]/g, '\\.') + '\\s*\\{').test(css), sel);

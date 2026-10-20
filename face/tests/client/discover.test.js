@@ -175,3 +175,12 @@ test('the Create page', () => {
   assert.match(h, /type="submit"[^>]*>Create</);
   assert.doesNotMatch(h, /shelf-title/);
 });
+
+test("a server's tool description is drawn clamped, its whole text kept for the reader", () => {
+  const l = listings();
+  const long = 'A-share stock data: quotes. ## Available Methods - **a**() one - **b**() two'.repeat(40);
+  l.plugins.data.mcp[0].tools[0].description = long;
+  const h = renderPlugin(loadedFrom(l, { screen: 'plugin', id: 'mcp:alpaca-kit' }));
+  assert.match(h, /<span class="tool-desc">A-share stock data: quotes\./);
+  assert.ok(h.includes(long.slice(-40)), 'the whole description stays on the page');
+});

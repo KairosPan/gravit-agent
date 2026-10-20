@@ -93,7 +93,8 @@ test('the empty state offers three plain prompts', () => {
 });
 
 test('Details offers Fork, Archive and Delete on an idle conversation', () => {
-  const s = listed([conv('a', { archived: false })]);
+  const said = { id: 'e1', seq: 1, at: NOW, from: 'you', kind: 'text', text: 'hi', data: {} };
+  const s = listed([conv('a', { archived: false, loaded: true, messages: [said] })]);
   const h = renderDetails(currentConversation(s), s);
   assert.match(h, /data-action="fork"[^>]*data-conv="a"/);
   assert.match(h, /data-action="archive"[^>]*data-conv="a"/);
@@ -105,7 +106,8 @@ test('Details offers Fork, Archive and Delete on an idle conversation', () => {
 
 test('no Archive or Delete while running or while a card waits', () => {
   const card = { id: 'ev-1', seq: 1.5, at: NOW, from: 'gravit', kind: 'card', text: 'Your call', data: { eventId: 'ev-1', sessionId: 'a' } };
-  for (const over of [{ running: true }, { messages: [card] }]) {
+  const said = { id: 'e1', seq: 1, at: NOW, from: 'you', kind: 'text', text: 'hi', data: {} };
+  for (const over of [{ running: true, messages: [said] }, { messages: [said, card] }]) {
     const s = listed([conv('a', { archived: false, ...over })]);
     const h = renderDetails(currentConversation(s), s);
     assert.match(h, /data-action="fork"/);
@@ -150,4 +152,19 @@ test('Details lists the children with Stop on the one that can', () => {
   const broken = R.hostProjection(s, { convId: 'a', key: 'subagentCatalog', value: { bad: true } });
   assert.match(renderDetails(currentConversation(broken), broken), /Children unavailable/);
   assert.doesNotMatch(renderDetails(currentConversation(listed([conv('b')])), listed([conv('b')])), />Children</);
+});
+
+test('an empty conversation offers no Fork: dsh forks from a completed turn', () => {
+  const s = listed([conv('a', { archived: false, loaded: true, messages: [] })]);
+  const h = renderDetails(currentConversation(s), s);
+  assert.doesNotMatch(h, /data-action="fork"/);
+  assert.match(h, /data-action="archive"/); assert.match(h, /data-action="deleteConv"/);
+});
+
+test('a channel goes by its display title in Where and in Details, as the list names it', () => {
+  const titled = [{ workspaceId: 'w0', name: 'workbench', title: 'evolving-alpha-us', isRoot: true }, { workspaceId: 'w1', name: 'alpha', title: 'Alpha momentum', isRoot: false }];
+  const base = R.nav(R.hostList(emptyState(), { conversations: [conv('a', { channel: { workspaceId: 'w1', name: 'alpha' } })], channels: titled, bots }), { screen: 'messages', id: 'a' });
+  const draft = renderMessagesScreen(R.startDraft(base, {}), NOW);
+  assert.match(draft, /<option value="w0" selected>evolving-alpha-us<\/option><option value="w1">Alpha momentum<\/option>/);
+  assert.match(renderDetails(currentConversation(base), base), />Where<[\s\S]*?>Alpha momentum</);
 });

@@ -340,12 +340,14 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .page-back { align-self: flex-start; min-height: 32px; display: inline-flex; align-items: center; }
 .plug-head { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
 .plug-title { flex: 1 1 240px; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-.plug-key { flex: none; }
+.plug-key { flex: none; display: flex; gap: 8px; }
 .plug-key > * { min-width: 140px; }
 .plug-body { display: flex; flex-direction: column; gap: 16px; max-width: 760px; }
 /* Discover's inventory: a shelf's state line, a tool of a server, a soul or a skill's text, a bot that cannot run */
 .disc-none { display: flex; align-items: center; gap: 10px; font-size: 13px; padding: 4px 0; }
 .tool-line { display: flex; flex-direction: column; gap: 2px; padding: 4px 0; font-size: 13px; overflow-wrap: anywhere; }
+/* a server may describe a tool at length (a whole method list): two lines show, the page keeps the rest */
+.tool-desc { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--dim); }
 .disc-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; background: var(--surface-2); border-radius: var(--radius-s); padding: 12px; }
 .disc-broken { color: var(--down); font-weight: 700; font-size: 13px; }
 .bot-edit { display: flex; flex-direction: column; gap: 14px; max-width: 640px; }

@@ -94,7 +94,7 @@ export function renderDiscover(state) {
 function mcpPage(m) {
   const tools = Array.isArray(m.tools) ? m.tools.filter(t => t && typeof t.name === 'string') : [];
   return kv([['State', esc(PHASE[m.phase] ?? '—')]]) +
-    sec('Tools', tools.length ? tools.map(t => `<div class="tool-line"><span class="mono">${esc(t.name)}</span>${t.description ? `<span class="dim">${esc(t.description)}</span>` : ''}</div>`).join('') : dim('None'));
+    sec('Tools', tools.length ? tools.map(t => `<div class="tool-line"><span class="mono">${esc(t.name)}</span>${t.description ? `<span class="tool-desc">${esc(t.description)}</span>` : ''}</div>`).join('') : dim('None'));
 }
 
 // a bot's editor: every box's id carries the revision it was drawn from, so a re-read after a stale save brings the

@@ -153,7 +153,9 @@ export function startDiscover({ store, getJson, postJson, call, now = Date.now }
     try {
       const made = await postJson('/data/bots', body);
       await read('bots', { fresh: true });
-      return typeof made?.id === 'string' ? made.id : { error: 'Created, not listed yet' };
+      // the face answers {ok, bot: <the new row>} (src/bots.ts declared())
+      const id = made?.bot?.id;
+      return typeof id === 'string' ? id : { error: 'Created, not listed yet' };
     } catch (err) {
       return { error: words(err) };
     }

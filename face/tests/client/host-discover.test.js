@@ -115,7 +115,8 @@ test('a saved-but 500 counts as saved', async () => {
 });
 
 test('createBot omits blank fields; a name with no ASCII needs an id before any post', async () => {
-  const r = rig({ json: { ...ok }, posts: { '/data/bots': body => ({ ok: true, id: body.id ?? 'macro-bot', name: body.name, listed: false }) } });
+  // the face answers {ok, bot: <the row>} (src/bots.ts declared())
+  const r = rig({ json: { ...ok }, posts: { '/data/bots': body => ({ ok: true, bot: { id: body.id ?? 'macro-bot', name: body.name, listed: false } }) } });
   assert.equal(await r.discover.createBot({ name: ' Macro Bot ', id: '', description: '', model: '', soul: '  ' }), 'macro-bot');
   assert.deepEqual(r.posted, [['/data/bots', { name: 'Macro Bot' }]]);
   assert.ok(r.reads.includes('/data/bots.json'), 'an unlisted new bot sends the face back to the listing');
