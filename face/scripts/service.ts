@@ -39,8 +39,9 @@
  * touch nothing but the paths their arguments name - and {@link runService}, the commands over
  * injected {@link ServiceDeps} (launchctl, fetch, the paths, the printer, the clock), so that the
  * tests drive every command against a fake launchctl and never the operator's launchd. Importing
- * this file runs nothing; it loads desk.ts, whose ledger reader `status` uses. Run as a script, the
- * guard at the end builds the real deps and exits with the command's code.
+ * this file runs nothing; it loads desk.ts, whose ledger reader `status` uses, and et.ts, for the
+ * New York times `status` prints. Run as a script, the guard at the end builds the real deps and
+ * exits with the command's code.
  * @module
  */
 import { execFileSync } from "node:child_process";
@@ -50,7 +51,8 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseEnv } from "node:util";
 import { resolveDshHome } from "@deepseek-ai/dsh-home-paths";
-import { deskDir, readEvents, runsOf, type DeskRun, type DeskStatus } from "../src/desk.ts";
+import { deskDir, readEvents, runsOf, type DeskRun, type DeskStatus, type OffState, type TelegramStatus } from "../src/desk.ts";
+import { etTime } from "../src/et.ts";
 
 /** The LaunchAgent's label: the plist is `com.gravit.face.plist`, the job `gui/<uid>/com.gravit.face`. */
 export const LABEL = "com.gravit.face";
@@ -309,14 +311,36 @@ function lastRunLine(runs: DeskRun[]): string | undefined {
   return undefined;
 }
 
+/** The line about a paused desk: since when and by whom, until when for a timed pause, and the
+ * terminal command that lifts it. */
+function offLine(off: OffState): string {
+  const until = off.until === undefined ? "" : ` until ${etTime(new Date(off.until))}`;
+  return `desk: paused since ${etTime(new Date(off.setAt))} by ${off.by}${until} (npm run desk -- resume)`;
+}
+
+/** The line about the Telegram bridge: where its keys go while it has none; else whether it
+ * polls, its last poll, what it dropped and holds queued, and its last conflict when it had one. */
+function telegramLine(telegram: TelegramStatus): string {
+  if (!telegram.configured) return "telegram: not configured (TELEGRAM_BOT_TOKEN and TELEGRAM_OPERATOR_ID in $DSH_HOME/.env)";
+  const parts = [
+    telegram.polling ? "polling" : "not polling",
+    telegram.lastPollAt === undefined ? "no poll yet" : `last poll ${etTime(new Date(telegram.lastPollAt))}`,
+    `${telegram.dropped} dropped`,
+    `${telegram.queued} queued`,
+  ];
+  if (telegram.conflictAt !== undefined) parts.push(`conflict at ${etTime(new Date(telegram.conflictAt))}`);
+  return `telegram: ${parts.join(", ")}`;
+}
+
 /**
  * What `status` prints. Not installed is one line. Otherwise: launchd's state and pid, or
  * `state unknown` when no state is given - never `loaded`: the caller passes `not loaded` for a
  * plist launchd has no job for, so a face answering on the port is not credited to a job launchd
  * lacks; then, when the face answered, its address, uptime, boot time and whether its desk is on -
- * followed by the ledger's read error when there is one, the sleep gaps when there were any, and
- * how the run before it ended - or else `not answering on <port>`; and last the sign-in URL from
- * the log.
+ * followed by the pause when the desk is paused and the Telegram bridge when the face reports one,
+ * their times in New York, then the ledger's read error when there is one, the sleep gaps when
+ * there were any, and how the run before it ended - or else `not answering on <port>`; and last
+ * the sign-in URL from the log.
  * @param args - `label`, the job; `info`, {@link parseLaunchctlPrint}'s; `installed`, whether the
  *   plist exists; `status`, what `/data/desk/status` answered, `undefined` when it did not;
  *   `url`, {@link lastTokenUrl}'s; `port`, the port asked.
@@ -338,6 +362,8 @@ export function formatStatus(args: {
     const minutes = Math.floor(status.uptimeMs / 60_000) % 60;
     const desk = status.desk.enabled ? "on" : "off (FACE_DESK=0)";
     lines.push(`answering at http://127.0.0.1:${args.port} · up ${hours}h ${minutes}m since ${status.bootedAt} · desk ${desk}`);
+    if (status.off !== undefined) lines.push(offLine(status.off));
+    if (status.telegram !== undefined) lines.push(telegramLine(status.telegram));
     if (status.ledgerError !== undefined) lines.push(`ledger: unreadable (${status.ledgerError})`);
     if (status.asleep.length > 0) lines.push(`asleep: ${status.asleep.length} gap(s) since boot`);
     const last = lastRunLine(status.runs);

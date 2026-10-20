@@ -1,12 +1,13 @@
 // face/tests/desk.test.ts
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  ASLEEP_THRESHOLD_MS, ASLEEP_TICK_MS, LEDGER_ROTATE_BYTES, appendEvent, deskDir, deskStatus, installAsleepWatch,
-  installDesk, readEvents, registerDeskRoutes, runsOf, type DeskEvent,
+  ASLEEP_THRESHOLD_MS, ASLEEP_TICK_MS, LEDGER_ROTATE_BYTES, OFF_FILE, appendEvent, appendRecord, clearOff, deskDir, deskStatus,
+  installAsleepWatch, installDesk, lastDeskSession, parseDuration, readEvents, readOffState, registerDeskRoutes, runsOf, writeOff,
+  type DeskEvent, type TurnUsage,
 } from "../src/desk.ts";
 import { recorder } from "./route-recorder.ts";
 
@@ -188,4 +189,175 @@ test("an unreadable ledger still answers 200: no gaps, no runs, and ledgerError 
   assert.equal(got.body.ledgerError, "EISDIR");
   const fine = await deskStatus({ home: await home(), bootedAt: Date.now(), enabled: true });
   assert.equal(Object.hasOwn(fine, "ledgerError"), false, "absent when the ledger reads");
+});
+
+/* P1: the desk's other files, the OFF switch, the desk's records and what the status makes of them. */
+
+test("appendRecord writes any file under the desk's directory as the ledger is written: 0600, a torn line kept to itself, rotated under its record's t", async () => {
+  const h = await home();
+  const file = join(deskDir(h), "telegram.jsonl");
+  await appendRecord(h, "telegram.jsonl", { t: "2026-10-20T13:00:00.000Z", kind: "sent", parts: 1, chars: 5 });
+  assert.equal(((await stat(file)).mode & 0o777), 0o600);
+  await writeFile(file, `{"t":"2026-10-20T13:01:00.000Z","kind":"se`, { flag: "a" }); // a write cut short
+  await appendRecord(h, "telegram.jsonl", { t: "2026-10-20T13:02:00.000Z", kind: "queued", chars: 9 });
+  assert.equal(await readFile(file, "utf8"), `{"t":"2026-10-20T13:00:00.000Z","kind":"sent","parts":1,"chars":5}\n`
+    + `{"t":"2026-10-20T13:01:00.000Z","kind":"se\n{"t":"2026-10-20T13:02:00.000Z","kind":"queued","chars":9}\n`);
+  await appendRecord(h, "telegram.jsonl", { t: "2026-10-20T14:00:00.000Z", kind: "conflict" }, { rotateBytes: 10 });
+  assert.equal(await readFile(file, "utf8"), `{"t":"2026-10-20T14:00:00.000Z","kind":"conflict"}\n`);
+  assert.deepEqual((await readdir(deskDir(h))).sort(), ["telegram.2026-10-20T14-00-00.000Z.jsonl", "telegram.jsonl"]);
+  assert.deepEqual(await readEvents(h), { events: [], skipped: 0 }, "the events ledger is another file");
+});
+
+test("appendRecord rotates a record with no t under the time of the append, and logs a failure naming its file", async () => {
+  const h = await home();
+  await appendRecord(h, "notes.jsonl", { text: "a" });
+  await appendRecord(h, "notes.jsonl", { text: "b" }, { rotateBytes: 1 });
+  const names = await readdir(deskDir(h));
+  assert.equal(names.length, 2, names.join(","));
+  assert.ok(names.some((n) => /^notes\.\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z\.jsonl$/.test(n)), names.join(","));
+  const blocked = await home();
+  await writeFile(join(blocked, "face"), "a file where the directory should be");
+  const lines: string[] = [];
+  await appendRecord(blocked, "telegram.jsonl", { t: "2026-10-20T13:00:00.000Z", kind: "sent" }, { log: (l) => lines.push(l) });
+  assert.deepEqual(lines, [`gravit-face: the desk ledger at ${join(deskDir(blocked), "telegram.jsonl")} could not be written: ENOTDIR`]);
+});
+
+test("the ledger reads back P1's kinds in order, and runsOf passes over them", async () => {
+  const h = await home();
+  const usage: TurnUsage = { uncachedInputTokens: 1, outputTokens: 2, cacheReadTokens: 3, cacheWriteTokens: 4, routes: ["deepseek-official/deepseek-flash"] };
+  const events: DeskEvent[] = [
+    boot("2026-10-20T13:00:00.000Z", 11),
+    { t: "2026-10-20T13:01:00.000Z", kind: "off-set", by: "telegram", until: "2026-10-20T15:01:00.000Z" },
+    { t: "2026-10-20T13:02:00.000Z", kind: "off-cleared", by: "expiry" },
+    { t: "2026-10-20T13:03:00.000Z", kind: "desk-session", sessionId: "session-a", reason: "created" },
+    { t: "2026-10-20T13:04:00.000Z", kind: "desk-turn", sessionId: "session-a", source: "telegram", turn: 1, outcome: "ended", wallMs: 4_200, usage },
+    { t: "2026-10-20T13:05:00.000Z", kind: "desk-refused", reason: "instruction chain", path: "GRAVIT.md" },
+  ];
+  for (const event of events) await appendEvent(h, event);
+  assert.deepEqual(await readEvents(h), { events, skipped: 0 });
+  assert.deepEqual(runsOf(events), [{ bootedAt: "2026-10-20T13:00:00.000Z", pid: 11, lost: false }]);
+});
+
+test("lastDeskSession is the sessionId of the last desk-session event", () => {
+  assert.equal(lastDeskSession([]), undefined);
+  assert.equal(lastDeskSession([boot("2026-10-20T13:00:00.000Z", 11)]), undefined);
+  assert.equal(lastDeskSession([
+    { t: "2026-10-20T13:00:00.000Z", kind: "desk-session", sessionId: "session-a", reason: "created" },
+    { t: "2026-10-20T14:00:00.000Z", kind: "desk-session", sessionId: "session-b", reason: "new" },
+    { t: "2026-10-20T14:05:00.000Z", kind: "desk-turn", sessionId: "session-b", source: "telegram", turn: 1, outcome: "ended", wallMs: 1 },
+  ]), "session-b");
+});
+
+test("writeOff, readOffState and clearOff round-trip with ledger events", async () => {
+  const h = await home(); const now = () => Date.parse("2026-10-20T18:00:00Z");
+  const s = await writeOff(h, { by: "telegram", until: now() + 7_200_000 }, now);
+  assert.deepEqual(s, { setAt: "2026-10-20T18:00:00.000Z", by: "telegram", until: "2026-10-20T20:00:00.000Z" });
+  assert.equal(((await stat(join(deskDir(h), "OFF"))).mode & 0o777), 0o600);
+  assert.deepEqual(await readOffState(h, now), { state: s, expired: false });
+  assert.equal((await readOffState(h, () => now() + 7_200_001)).expired, true);
+  assert.equal(await clearOff(h, "terminal"), true);
+  assert.equal(await clearOff(h, "terminal"), false, "no file, no second event");
+  assert.deepEqual((await readEvents(h)).events.map((e) => e.kind), ["off-set", "off-cleared"]);
+});
+
+test("OFF holds the state as JSON and the events carry it; a pause without until never expires; at until it has", async () => {
+  const h = await home(); const now = () => Date.parse("2026-10-20T18:00:00Z");
+  assert.deepEqual(await readOffState(h, now), { expired: false }, "no switch: not paused");
+  const timed = await writeOff(h, { by: "page", until: now() + 60_000 }, now);
+  assert.deepEqual(JSON.parse(await readFile(join(deskDir(h), OFF_FILE), "utf8")), timed);
+  assert.equal((await readOffState(h, () => now() + 59_999)).expired, false);
+  assert.equal((await readOffState(h, () => now() + 60_000)).expired, true, "at until the pause is over");
+  const open = await writeOff(h, { by: "terminal" }, () => now() + 1_000);
+  assert.deepEqual(open, { setAt: "2026-10-20T18:00:01.000Z", by: "terminal" }, "no until key at all");
+  assert.deepEqual(await readOffState(h, () => now() + 365 * 86_400_000), { state: open, expired: false }, "the second write replaced the first");
+  assert.equal(await clearOff(h, "expiry", () => now() + 2_000), true);
+  assert.deepEqual(await readOffState(h, now), { expired: false });
+  assert.deepEqual((await readEvents(h)).events, [
+    { t: "2026-10-20T18:00:00.000Z", kind: "off-set", by: "page", until: "2026-10-20T18:01:00.000Z" },
+    { t: "2026-10-20T18:00:01.000Z", kind: "off-set", by: "terminal" },
+    { t: "2026-10-20T18:00:02.000Z", kind: "off-cleared", by: "expiry" },
+  ]);
+});
+
+test("an unparseable OFF file still reads as paused", async () => {
+  const h = await home();
+  await mkdir(deskDir(h), { recursive: true });
+  const file = join(deskDir(h), OFF_FILE);
+  const mtime = new Date("2026-10-20T12:34:56.000Z");
+  const later = () => Date.parse("2027-01-01T00:00:00Z");
+  // "" is what `touch` leaves; the rest are not { setAt, by, until? }
+  for (const text of ["junk", "", "null", "[]", "{}", `{"setAt":"2026-10-20T18:00:00.000Z","by":"phone"}`, `{"setAt":"later","by":"page"}`,
+    `{"setAt":"2026-10-20T18:00:00.000Z","by":"page","until":"soon"}`, `{"setAt":"2026-10-20T18:00:00.000Z","by":"page","until":1}`]) {
+    await writeFile(file, text);
+    await utimes(file, mtime, mtime);
+    assert.deepEqual(await readOffState(h, later), { state: { setAt: "2026-10-20T12:34:56.000Z", by: "terminal" }, expired: false }, JSON.stringify(text));
+  }
+  assert.equal(await clearOff(h, "terminal"), true, "resume clears it like any other");
+  assert.deepEqual(await readOffState(h, later), { expired: false });
+});
+
+test("an OFF that is not a file still reads as paused and clearOff will not remove it; no desk directory is no switch", async () => {
+  const h = await home();
+  const dir = join(deskDir(h), OFF_FILE);
+  await mkdir(dir, { recursive: true }); // the read fails with EISDIR
+  const mtime = new Date("2026-10-20T12:34:56.000Z");
+  await utimes(dir, mtime, mtime);
+  assert.deepEqual(await readOffState(h), { state: { setAt: "2026-10-20T12:34:56.000Z", by: "terminal" }, expired: false });
+  await assert.rejects(clearOff(h, "terminal"));
+  assert.deepEqual(await readEvents(h), { events: [], skipped: 0 }, "no off-cleared for a switch still there");
+  const blocked = await home();
+  await writeFile(join(blocked, "face"), "a file where the directory should be"); // ENOTDIR: no switch can be there
+  assert.deepEqual(await readOffState(blocked), { expired: false });
+  assert.equal(await clearOff(blocked, "terminal"), false);
+});
+
+test("parseDuration", () => {
+  assert.equal(parseDuration("30m"), 1_800_000); assert.equal(parseDuration("2h"), 7_200_000); assert.equal(parseDuration("1d"), 86_400_000);
+  for (const bad of ["", "2", "2x", "-1h", "1.5h", " 2h", "0m"]) assert.equal(parseDuration(bad), undefined, bad);
+});
+
+test("parseDuration refuses every zero, every other spelling and an amount past a safe integer", () => {
+  for (const bad of ["0h", "0d", "00m", "2h ", "2H", "+2h", "2hm", "h", "1e3m", "2 h", "99999999999999999999d"]) assert.equal(parseDuration(bad), undefined, bad);
+  assert.equal(parseDuration("90m"), 5_400_000);
+  assert.equal(parseDuration("010m"), 600_000, "a leading zero is still a digit");
+});
+
+test("deskStatus reports off, the desk session and today's desk turns", async () => {
+  const h = await home();
+  const now = () => Date.parse("2026-10-20T18:00:00Z"); // 14:00 ET: the ET day began at 04:00 UTC
+  const usage = (uncachedInputTokens: number, outputTokens: number, cacheReadTokens: number, cacheWriteTokens: number): TurnUsage =>
+    ({ uncachedInputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, routes: ["deepseek-official/deepseek-flash"] });
+  const turn = (t: string, sessionId: string, n: number, u?: TurnUsage): DeskEvent =>
+    ({ t, kind: "desk-turn", sessionId, source: "telegram", turn: n, outcome: "ended", wallMs: 1_000, ...(u === undefined ? {} : { usage: u }) });
+  await appendEvent(h, { t: "2026-10-19T20:00:00.000Z", kind: "desk-session", sessionId: "session-a", reason: "created" });
+  await appendEvent(h, turn("2026-10-20T03:59:59.999Z", "session-a", 1, usage(7, 7, 7, 7))); // 23:59 ET on the 19th: yesterday
+  await appendEvent(h, turn("2026-10-20T04:00:00.000Z", "session-a", 2, usage(100, 10, 1000, 0)));
+  await appendEvent(h, { t: "2026-10-20T17:00:00.000Z", kind: "desk-session", sessionId: "session-b", reason: "new" });
+  await appendEvent(h, turn("2026-10-20T17:30:00.000Z", "session-b", 1, usage(50, 5, 0, 0)));
+  const off = await writeOff(h, { by: "page", until: now() + 3_600_000 }, now);
+  const s = await deskStatus({ home: h, bootedAt: now() - 60_000, enabled: true, now, telegram: () => ({ configured: true, polling: true, dropped: 2, queued: 1 }) });
+  assert.equal(s.deskSession, "session-b");
+  assert.deepEqual(s.turnsToday, { count: 2, usage: { uncachedInputTokens: 150, outputTokens: 15, cacheReadTokens: 1000, cacheWriteTokens: 0 } });
+  assert.deepEqual(s.off, off);
+  assert.deepEqual(s.telegram, { configured: true, polling: true, dropped: 2, queued: 1 });
+
+  await appendEvent(h, turn("2026-10-20T18:30:00.000Z", "session-b", 2)); // a turn may end with no usage
+  const later = await deskStatus({ home: h, bootedAt: now() - 60_000, enabled: true, now: () => now() + 3_600_000 });
+  assert.deepEqual(later.turnsToday, { count: 3, usage: { uncachedInputTokens: 150, outputTokens: 15, cacheReadTokens: 1000, cacheWriteTokens: 0 } },
+    "it counts and adds nothing");
+  assert.equal(Object.hasOwn(later, "off"), false, "a pause past its until is not in force");
+  assert.equal(Object.hasOwn(later, "telegram"), false, "no provider, no field");
+
+  const empty = await deskStatus({ home: await home(), bootedAt: now(), enabled: true, now });
+  assert.deepEqual(empty.turnsToday, { count: 0, usage: { uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 } });
+  for (const key of ["off", "deskSession", "telegram", "ledgerError"]) assert.equal(Object.hasOwn(empty, key), false, key);
+});
+
+test("deskStatus still answers when the desk's directory cannot be read: ledgerError names it, and there is no off", async () => {
+  const h = join(await home(), "x".repeat(300)); // a name past NAME_MAX: every read under it fails ENAMETOOLONG
+  const s = await deskStatus({ home: h, bootedAt: Date.now(), enabled: true });
+  assert.equal(s.ok, true);
+  assert.equal(s.ledgerError, "ENAMETOOLONG");
+  assert.equal(Object.hasOwn(s, "off"), false);
+  await assert.rejects(readOffState(h), { code: "ENAMETOOLONG" }, "readOffState itself says it cannot tell");
 });

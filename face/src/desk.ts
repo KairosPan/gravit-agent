@@ -1,13 +1,17 @@
 /** The desk's ledger: `$DSH_HOME/face/desk/events.jsonl`, the face's own record of its lifetime -
- * with the sleep watch that writes into it and the status route that reads it back.
+ * with the sleep watch that writes into it, the `OFF` switch that pauses the desk, and the status
+ * route that reads them back.
  *
  * The desk is Gravit's always-on side (docs/superpowers/specs/2026-10-19-always-on-gravit-design.md):
  * the face kept running by launchd as a user service (§5.2), and, in the later plans, the clock,
  * the watch and the phone bridge that work in it. Of what §8 gives this module - the ledger, the
  * budget, the `OFF` switch, the two desk tools, the `/desk` page and `/data/desk/*` - P0 holds the
- * ledger, the sleep watch and `GET /data/desk/status`, and of the ledger's files (§5.7) only
- * `events.jsonl`, with three kinds of event: a `boot`, a clean `shutdown`, and an `asleep` gap in
- * the face's timers.
+ * ledger, the sleep watch and `GET /data/desk/status`, and P1 adds the `OFF` switch. Of the
+ * ledger's files (§5.7) this module keeps `events.jsonl` and `OFF`; {@link appendRecord} is the
+ * append path for the others. `events.jsonl` has eight kinds of event: P0's `boot`, clean
+ * `shutdown` and `asleep` gap in the face's timers, and P1's `off-set` and `off-cleared`, a
+ * `desk-session` for each desk conversation the face opens, a `desk-turn` for each turn on it, and
+ * a `desk-refused` for a turn the face would not open.
  *
  * Why a ledger: a service that launchd restarts after a crash or a `kill -9` looks healthy from
  * outside - it is running again. Read back as runs ({@link runsOf}), the ledger says otherwise: a
@@ -28,18 +32,28 @@
  * timers reads the same way - the machine asleep, the process stopped, the event loop blocked -
  * and so does a wall clock set forward past the threshold; one set back writes nothing.
  *
+ * Why an `OFF` switch: the operator quiets the desk from wherever they are - the phone, the Desk
+ * panel, a terminal - and only a terminal makes it loud again (§5.8). The switch is a file, `OFF`,
+ * beside the ledger: while it is there the desk is paused. What it holds ({@link OffState}: who
+ * set it, when, until when) only adds to that - an `OFF` that says nothing a state can be read
+ * from, `touch OFF` included, is a pause from a terminal. A pause lifts at its `until`, on
+ * `npm run desk -- resume` ({@link clearOff}) or when the file is deleted; each set and each lift
+ * that goes through this module is an event.
+ *
  * {@link installDesk} mounts it all on a booted face. The status route ({@link deskStatus}:
- * pid, version, uptime, this run's gaps, the ledger's runs) is mounted always, so a face with the
- * desk off - a second face beside the service, §5.2 - still answers, with `desk.enabled: false`;
- * the `boot` event, the watch and the `shutdown` event only when the desk is on. An unreadable
- * ledger is named in the status, never a 500.
+ * pid, version, uptime, this run's gaps, the ledger's runs, the pause in force, the desk
+ * conversation, today's desk turns and their tokens, and the Telegram bridge when one is passed)
+ * is mounted always, so a face with the desk off - a second face beside the service, §5.2 - still
+ * answers, with `desk.enabled: false`; the `boot` event, the watch and the `shutdown` event only
+ * when the desk is on. An unreadable ledger is named in the status, never a 500.
  * @module
  */
-import { appendFile, mkdir, open, readFile, rename, stat } from "node:fs/promises";
+import { appendFile, lstat, mkdir, open, readFile, rename, stat, unlink } from "node:fs/promises";
 import type { IncomingMessage } from "node:http";
-import { join } from "node:path";
-import { withFileLock } from "@deepseek-ai/dsh-atomic-write";
+import { extname, join } from "node:path";
+import { withFileLock, writeFileAtomic } from "@deepseek-ai/dsh-atomic-write";
 import { isTrustedDataRequest } from "./data.ts";
+import { etDayStart } from "./et.ts";
 import { fencedGet } from "./http.ts";
 import type { RouteRegistrar } from "./static.ts";
 import { DSH_PIN } from "./version.ts";
@@ -64,18 +78,49 @@ export const EVENTS_FILE = "events.jsonl";
 /** The size past which the next append first moves the file aside (spec §5.7). */
 export const LEDGER_ROTATE_BYTES = 50 * 1024 * 1024;
 
-/** One ledger line. `t` is when the face recorded the event; `t`, `from` and `to` are ISO-8601 UTC
- * (`new Date(ms).toISOString()`). A `boot` names the process, the dsh version it runs and whether
- * it mounted the desk; a `shutdown` is a clean stop with the exit code the face leaves with; an
- * `asleep` is a gap in the face's timers, from the last tick before it to the tick that found it. */
+/** A desk turn's tokens in the four buckets the harness meters them in (`deriveTurnTokenUsage`,
+ * `@deepseek-ai/dsh-token-meter`), and every route the turn ran on, as `provider/model`. */
+export interface TurnUsage {
+  uncachedInputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  routes: string[];
+}
+
+/** One ledger line. `t` is when the face recorded the event; `t`, `from`, `to` and `until` are
+ * ISO-8601 UTC (`new Date(ms).toISOString()`). A `boot` names the process, the dsh version it runs
+ * and whether it mounted the desk; a `shutdown` is a clean stop with the exit code the face leaves
+ * with; an `asleep` is a gap in the face's timers, from the last tick before it to the tick that
+ * found it. An `off-set` is a pause - who set it and, for a timed one, until when - and an
+ * `off-cleared` its lift, from a terminal or by its own expiry. A `desk-session` names a desk
+ * conversation when the face opens one: `created` when there was none to resume, `new` when the
+ * operator asked for another. A `desk-turn` is one turn on it: the kind of message that opened it
+ * (`source`), its number, whether it ended or the face's deadline cut it off, its wall time and,
+ * when the harness reported them, its tokens. A `desk-refused` is a turn the face would not open:
+ * why, and the path that made it refuse when a path did. */
 export type DeskEvent =
   | { t: string; kind: "boot"; pid: number; version: string; deskEnabled: boolean }
   | { t: string; kind: "shutdown"; pid: number; code: number }
-  | { t: string; kind: "asleep"; from: string; to: string; gapMs: number };
+  | { t: string; kind: "asleep"; from: string; to: string; gapMs: number }
+  | { t: string; kind: "off-set"; by: "telegram" | "page" | "terminal"; until?: string }
+  | { t: string; kind: "off-cleared"; by: "terminal" | "expiry" }
+  | { t: string; kind: "desk-session"; sessionId: string; reason: "created" | "new" }
+  | { t: string; kind: "desk-turn"; sessionId: string; source: string; turn: number; outcome: "ended" | "timed-out"; wallMs: number; usage?: TurnUsage }
+  | { t: string; kind: "desk-refused"; reason: string; path?: string };
 
 /** Every kind {@link DeskEvent} has, and only those. A record over the union rather than a list,
  * so a kind added to the type and not here fails to compile instead of reading back as skipped. */
-const KINDS: Readonly<Record<DeskEvent["kind"], true>> = { boot: true, shutdown: true, asleep: true };
+const KINDS: Readonly<Record<DeskEvent["kind"], true>> = {
+  boot: true,
+  shutdown: true,
+  asleep: true,
+  "off-set": true,
+  "off-cleared": true,
+  "desk-session": true,
+  "desk-turn": true,
+  "desk-refused": true,
+};
 
 /** What a failure is reported as - in the append's failure line and the status's `ledgerError`:
  * the error's code when it has one (`ENOTDIR`, `EACCES`, `ENOSPC`), else its message (the lock's
@@ -108,25 +153,75 @@ async function endsMidLine(file: string, size: number): Promise<boolean> {
   }
 }
 
+/** Whether a failure says the path is not there: `ENOENT`, or `ENOTDIR` - a non-directory where
+ * `face/` or `face/desk/` should be, so that nothing can be there. */
+function isAbsent(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException | null | undefined)?.code;
+  return code === "ENOENT" || code === "ENOTDIR";
+}
+
+/** The name `file` is moved aside to: the stamp - each `:` made `-` - before its extension, so
+ * `events.jsonl` becomes `events.<t>.jsonl`. */
+function rotatedName(file: string, stamp: string): string {
+  const ext = extname(file);
+  return `${file.slice(0, file.length - ext.length)}.${stamp.replaceAll(":", "-")}${ext}`;
+}
+
 /**
- * Append one event to `$DSH_HOME/face/desk/events.jsonl`.
+ * Append one record, as one JSON line, to `file` in the desk's directory - the ledger's
+ * `events.jsonl` ({@link appendEvent}) or any other of its JSONL files.
  *
  * The directory is made first, because `withFileLock` creates its lock beside the file
  * (`roster.ts`'s `update` keeps the same order). Inside the lock, a file over `rotateBytes` is
- * renamed to `events.<t>.jsonl` - the `t` of the event being appended, each `:` made `-` - and the
- * line goes to a fresh file. A file whose last byte is not a newline ends in a write that a crash
- * or a full disk cut short; the line then opens with a newline, so the fragment stays one skipped
- * line instead of swallowing this event - a swallowed `boot` would leave the killed run reading
- * as the live one. The lock makes the size check, the rename, that one-byte read and the append
- * one step, so no writer's line lands in a file another has just moved aside. Files are created
- * `0600`; the mode applies on creation only, as `roster.log`'s does.
+ * renamed to `<name>.<t>.<ext>` ({@link rotatedName}) - `t` being the record's own `t` when it
+ * carries one as a string, else the time of the append - and the line goes to a fresh file. A file
+ * whose last byte is not a newline ends in a write that a crash or a full disk cut short; the line
+ * then opens with a newline, so the fragment stays one skipped line instead of swallowing this
+ * record - a swallowed `boot` would leave the killed run reading as the live one. The lock makes
+ * the size check, the rename, that one-byte read and the append one step, so no writer's line
+ * lands in a file another has just moved aside. Files are created `0600`; the mode applies on
+ * creation only, as `roster.log`'s does.
  *
  * Never rejects. Any failure - directory, lock, rename, tail read, append - is one call to
  * `log` (default `console.error`) naming the file and the error's code, or its message when it
- * has none, and the event is dropped: the ledger is a record, never a gate on the face. The lock's
+ * has none, and the record is dropped: the ledger is a record, never a gate on the face. The lock's
  * retries are not jittered, so appenders that start together take it about one per retry round,
  * and a burst of a dozen or more can outlast its two-second wait (measured: 20 at once, 6
- * dropped); the desk's events come one or two at a time.
+ * dropped); the desk's records come one or two at a time.
+ * @param home - the harness home.
+ * @param file - the file's name in {@link deskDir} - a name, not a path.
+ * @param record - the record, written as one JSON line.
+ * @param opts - `rotateBytes`, default {@link LEDGER_ROTATE_BYTES}; `log`, for the failure line.
+ */
+export async function appendRecord(
+  home: string,
+  file: string,
+  record: object,
+  opts: { rotateBytes?: number; log?: (line: string) => void } = {},
+): Promise<void> {
+  const dir = deskDir(home);
+  const path = join(dir, file);
+  try {
+    await mkdir(dir, { recursive: true });
+    await withFileLock(path, async () => {
+      let size = await sizeOf(path);
+      if (size > (opts.rotateBytes ?? LEDGER_ROTATE_BYTES)) {
+        const { t } = record as { t?: unknown };
+        await rename(path, join(dir, rotatedName(file, typeof t === "string" ? t : new Date().toISOString())));
+        size = 0;
+      }
+      const lead = size > 0 && (await endsMidLine(path, size)) ? "\n" : "";
+      await appendFile(path, `${lead}${JSON.stringify(record)}\n`, { encoding: "utf8", mode: 0o600 });
+    });
+  } catch (err) {
+    const log = opts.log ?? ((line: string) => console.error(line));
+    log(`${BIN}: the desk ledger at ${path} could not be written: ${reasonOf(err)}`);
+  }
+}
+
+/**
+ * Append one event to `$DSH_HOME/face/desk/events.jsonl`: {@link appendRecord} on
+ * {@link EVENTS_FILE}, rotated under the event's `t`. Never rejects; a failure is one `log` line.
  * @param home - the harness home.
  * @param event - the event, written as one JSON line.
  * @param opts - `rotateBytes`, default {@link LEDGER_ROTATE_BYTES}; `log`, for the failure line.
@@ -136,23 +231,7 @@ export async function appendEvent(
   event: DeskEvent,
   opts: { rotateBytes?: number; log?: (line: string) => void } = {},
 ): Promise<void> {
-  const dir = deskDir(home);
-  const file = join(dir, EVENTS_FILE);
-  try {
-    await mkdir(dir, { recursive: true });
-    await withFileLock(file, async () => {
-      let size = await sizeOf(file);
-      if (size > (opts.rotateBytes ?? LEDGER_ROTATE_BYTES)) {
-        await rename(file, join(dir, `events.${event.t.replaceAll(":", "-")}.jsonl`));
-        size = 0;
-      }
-      const lead = size > 0 && (await endsMidLine(file, size)) ? "\n" : "";
-      await appendFile(file, `${lead}${JSON.stringify(event)}\n`, { encoding: "utf8", mode: 0o600 });
-    });
-  } catch (err) {
-    const log = opts.log ?? ((line: string) => console.error(line));
-    log(`${BIN}: the desk ledger at ${file} could not be written: ${reasonOf(err)}`);
-  }
+  await appendRecord(home, EVENTS_FILE, event, opts);
 }
 
 /** One line as an event, or `undefined`: not JSON, not an object, or without a string `t` and a
@@ -216,8 +295,9 @@ export interface DeskRun {
 /**
  * Fold events into runs: one per `boot`, in order. A `shutdown` with the open run's `pid` ends
  * it; a `boot` while a run is still open marks that run `lost`. The last run, when no `shutdown`
- * has ended it, is not lost - it may be the process that is running now. `asleep` events, and a
- * `shutdown` that matches no open run, change nothing.
+ * has ended it, is not lost - it may be the process that is running now. Events of every other
+ * kind - `asleep`, the pause's, the desk conversation's - and a `shutdown` that matches no open
+ * run change nothing.
  * @param events - the ledger's events in file order, as {@link readEvents} returns them.
  */
 export function runsOf(events: DeskEvent[]): DeskRun[] {
@@ -235,6 +315,20 @@ export function runsOf(events: DeskEvent[]): DeskRun[] {
     }
   }
   return runs;
+}
+
+/**
+ * The desk conversation the ledger names last: the `sessionId` of its last `desk-session` event,
+ * or `undefined` when it has none - the one a face that boots again resumes rather than opening
+ * another.
+ * @param events - the ledger's events in file order, as {@link readEvents} returns them.
+ */
+export function lastDeskSession(events: DeskEvent[]): string | undefined {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    if (event.kind === "desk-session") return event.sessionId;
+  }
+  return undefined;
 }
 
 /** How often the sleep watch ticks (spec §5.2). */
@@ -286,12 +380,164 @@ export function installAsleepWatch(opts: AsleepWatchOptions): () => void {
   return () => stop(handle);
 }
 
+/** The switch's file in {@link deskDir}: while it is there, the desk is paused (spec §5.8). */
+export const OFF_FILE = "OFF";
+
+/** What `OFF` holds: when the pause was set and by whom - the phone, the Desk panel or a
+ * terminal - and, for a timed pause, when it lifts; both times ISO-8601 UTC. */
+export interface OffState {
+  setAt: string;
+  by: "telegram" | "page" | "terminal";
+  until?: string;
+}
+
+/** Every setter {@link OffState} names, and only those. */
+const SETTERS: Readonly<Record<OffState["by"], true>> = { telegram: true, page: true, terminal: true };
+
+/** Whether `value` is a time: a string `Date.parse` reads. */
+const isTime = (value: unknown): value is string => typeof value === "string" && !Number.isNaN(Date.parse(value));
+
+/** `OFF`'s text as a state - JSON with a time `setAt`, a known `by` and, if any, a time `until`;
+ * other keys dropped - or `undefined` when it is anything else. */
+function offStateOf(text: string): OffState | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  if (parsed === null || typeof parsed !== "object") return undefined;
+  const { setAt, by, until } = parsed as { setAt?: unknown; by?: unknown; until?: unknown };
+  if (!isTime(setAt) || typeof by !== "string" || !Object.hasOwn(SETTERS, by)) return undefined;
+  if (until !== undefined && !isTime(until)) return undefined;
+  return { setAt, by: by as OffState["by"], ...(until === undefined ? {} : { until }) };
+}
+
+/**
+ * Whether the desk is paused: `OFF`'s state, and whether its `until` has come.
+ *
+ * No `OFF` - none written, or a non-directory where `face/` or `face/desk/` should be, so that
+ * none can exist - is `{ expired: false }`, with no state. An `OFF` that holds a state is that
+ * state, `expired` once `now()` reaches its `until`; one without an `until` never expires.
+ * Anything else at `OFF` - the empty file `touch` leaves, text that is no state, a directory, a
+ * file the face may not read - is a pause all the same, read as `{ setAt: <its mtime>, by:
+ * "terminal" }`, never expiring: the switch is the file being there, and what it holds only says
+ * who and until when. Rejects only when not even the file's `lstat` answers - the desk's
+ * directory itself unreadable - so a switch that cannot be read never reads as no switch. Expiry
+ * is read here, not acted on: whoever finds it expired lifts it with {@link clearOff}.
+ * @param home - the harness home.
+ * @param now - the clock `until` is compared with, default `Date.now`.
+ */
+export async function readOffState(home: string, now: () => number = Date.now): Promise<{ state?: OffState; expired: boolean }> {
+  const file = join(deskDir(home), OFF_FILE);
+  let text: string | undefined;
+  try {
+    text = await readFile(file, "utf8");
+  } catch (err) {
+    if (isAbsent(err)) return { expired: false };
+    /* there, but not a file the face can read: a pause, below */
+  }
+  const state = text === undefined ? undefined : offStateOf(text);
+  if (state !== undefined) return { state, expired: state.until !== undefined && Date.parse(state.until) <= now() };
+  let mtime: Date;
+  try {
+    mtime = (await lstat(file)).mtime;
+  } catch (err) {
+    if (isAbsent(err)) return { expired: false }; // removed since the read
+    throw err;
+  }
+  return { state: { setAt: mtime.toISOString(), by: "terminal" }, expired: false };
+}
+
+/**
+ * Pause the desk: write `OFF`, then record an `off-set` event that carries the same state.
+ *
+ * The file is replaced in one step (`writeFileAtomic`: a sibling written `0600`, renamed over
+ * `OFF`), so a reader finds the old state or the new, never part of one, and a pause written over
+ * a pause replaces it. Rejects when `OFF` cannot be written - a pause that did not happen must not
+ * report one - and, before writing anything, on an `until` that is no time (`RangeError`); the
+ * event, written after the file, never rejects ({@link appendEvent}).
+ * @param home - the harness home.
+ * @param input - `by`, who paused; `until`, when the pause lifts in ms since the epoch, absent for
+ *   a pause that lasts until a resume.
+ * @param now - the clock `setAt` is read from, default `Date.now`.
+ * @returns the state written.
+ */
+export async function writeOff(home: string, input: { by: OffState["by"]; until?: number }, now: () => number = Date.now): Promise<OffState> {
+  const until = input.until === undefined ? undefined : new Date(input.until).toISOString();
+  const state: OffState = { setAt: new Date(now()).toISOString(), by: input.by, ...(until === undefined ? {} : { until }) };
+  await writeFileAtomic(join(deskDir(home), OFF_FILE), `${JSON.stringify(state)}\n`, { mode: 0o600 });
+  await appendEvent(home, { t: state.setAt, kind: "off-set", by: state.by, ...(until === undefined ? {} : { until }) });
+  return state;
+}
+
+/**
+ * Lift the pause: remove `OFF`, then - only when there was one to remove - record an
+ * `off-cleared` event, so a second resume, or one racing another, records nothing.
+ *
+ * `by` is `terminal` for `npm run desk -- resume` and `expiry` for a pause found past its
+ * `until`: the phone and the Desk panel only ever pause. No `OFF` - or a non-directory where its
+ * directory should be - is `false`. Rejects when `OFF` is there and cannot be removed (a
+ * directory, a directory the face may not write): the pause stands, and the caller says so.
+ * @param home - the harness home.
+ * @param by - what lifted it.
+ * @param now - the event's clock, default `Date.now`.
+ * @returns whether a pause was lifted.
+ */
+export async function clearOff(home: string, by: "terminal" | "expiry", now: () => number = Date.now): Promise<boolean> {
+  try {
+    await unlink(join(deskDir(home), OFF_FILE));
+  } catch (err) {
+    if (isAbsent(err)) return false;
+    throw err;
+  }
+  await appendEvent(home, { t: new Date(now()).toISOString(), kind: "off-cleared", by });
+  return true;
+}
+
+/** A pause's length as the phone, the Desk panel and the terminal spell it. */
+const DURATION = /^(\d+)(m|h|d)$/;
+
+/** Each unit of {@link DURATION} in milliseconds. */
+const UNIT_MS: Readonly<Record<string, number>> = { m: 60_000, h: 3_600_000, d: 86_400_000 };
+
+/**
+ * A pause's length in milliseconds: digits, then `m`, `h` or `d` - `30m`, `2h`, `1d`. Anything
+ * else is `undefined`: a sign, a space, a fraction, a capital unit, a zero amount (a pause of
+ * nothing is none) and an amount past `Number.MAX_SAFE_INTEGER` milliseconds.
+ * @param text - the duration as typed.
+ */
+export function parseDuration(text: string): number | undefined {
+  const match = DURATION.exec(text);
+  if (match === null) return undefined;
+  const ms = Number(match[1]) * UNIT_MS[match[2]];
+  return ms > 0 && Number.isSafeInteger(ms) ? ms : undefined;
+}
+
+/** The Telegram bridge as the status reports it: `configured`, whether its token and the
+ * operator's id are both set; `polling`, whether its loop runs; `lastPollAt`, its last poll;
+ * `dropped`, the updates it refused as not the operator's private chat, and `lastDroppedFrom`,
+ * the last one's sender; `queued`, the messages waiting in its outbox; `conflictAt`, the last time
+ * Telegram said another poller holds the token. */
+export interface TelegramStatus {
+  configured: boolean;
+  polling: boolean;
+  lastPollAt?: string;
+  dropped: number;
+  lastDroppedFrom?: number;
+  queued: number;
+  conflictAt?: string;
+}
+
 /** What `GET /data/desk/status` answers. `pid`, `version` (the dsh version this face runs),
  * `bootedAt` and `uptimeMs` are this process's; `desk` says whether its rows are mounted and where
- * its files are; `asleep` is this run's gaps; `runs` is every run in the current ledger.
- * `ledgerError` is present only when the ledger could not be read - its code, or its message when
- * it has none - and `asleep` and `runs` are then empty: an unreadable ledger is named, never passed
- * off as an empty one. */
+ * its files are; `asleep` is this run's gaps; `runs` is every run in the current ledger. `off` is
+ * the pause in force, present only while one is; `deskSession`, the desk conversation the ledger
+ * names last ({@link lastDeskSession}), present only when it names one; `turnsToday`, the desk
+ * turns recorded since 00:00 America/New_York and their tokens; `telegram`, the bridge's state,
+ * present only when a bridge is passed. `ledgerError` is present only when the ledger could not be
+ * read - its code, or its message when it has none - and `asleep` and `runs` are then empty, and
+ * `turnsToday` zero: an unreadable ledger is named, never passed off as an empty one. */
 export interface DeskStatus {
   ok: true;
   pid: number;
@@ -301,20 +547,31 @@ export interface DeskStatus {
   desk: { enabled: boolean; dir: string };
   asleep: { from: string; to: string; gapMs: number }[];
   runs: DeskRun[];
+  off?: OffState;
+  deskSession?: string;
+  turnsToday: { count: number; usage: Omit<TurnUsage, "routes"> };
+  telegram?: TelegramStatus;
   ledgerError?: string;
 }
 
 /**
- * The face's status as the desk sees it, read from the ledger afresh on every call.
+ * The face's status as the desk sees it, read from the ledger and `OFF` afresh on every call, at
+ * one reading of the clock.
  *
  * `asleep` is every `asleep` event whose `from` is at or after `bootedAt` - this run's gaps, not
  * those of the runs before it; ISO-8601 UTC strings order as their times do, so the comparison is
- * on the strings. `runs` is {@link runsOf} over the whole current file. Never rejects on the
- * ledger: a read that fails ({@link readEvents} rejects on EACCES, EISDIR, EIO by design) is
- * `ledgerError`.
+ * on the strings, as it is for `turnsToday`: the `desk-turn` events whose `t` is at or after the
+ * start of today in New York ({@link etDayStart}), counted, their tokens summed - a turn recorded
+ * without usage counts and adds nothing. `runs` is {@link runsOf} over the whole current file.
+ * `off` is {@link readOffState}'s state unless it has expired: a pause past its `until` is no
+ * longer in force, though its file waits for whoever lifts it. Never rejects on the ledger: a read
+ * that fails ({@link readEvents} rejects on EACCES, EISDIR, EIO by design) is `ledgerError`; a
+ * switch that cannot be read at all is left out, the directory that holds it being the ledger's
+ * too.
  * @param deps - `home`, the harness home; `bootedAt`, when this run began, in ms since the epoch;
  *   `enabled`, whether the desk's rows are mounted; `now`, `pid` and `version`, defaulting to
- *   `Date.now`, `process.pid` and {@link DSH_PIN}.
+ *   `Date.now`, `process.pid` and {@link DSH_PIN}; `telegram`, the bridge's status, read once
+ *   per call when given.
  */
 export async function deskStatus(deps: {
   home: string;
@@ -323,7 +580,9 @@ export async function deskStatus(deps: {
   now?: () => number;
   pid?: number;
   version?: string;
+  telegram?: () => TelegramStatus;
 }): Promise<DeskStatus> {
+  const at = (deps.now ?? Date.now)();
   const since = new Date(deps.bootedAt).toISOString();
   let events: DeskEvent[] = [];
   let ledgerError: string | undefined;
@@ -332,17 +591,39 @@ export async function deskStatus(deps: {
   } catch (err) {
     ledgerError = reasonOf(err);
   }
+  let off: OffState | undefined;
+  try {
+    const { state, expired } = await readOffState(deps.home, () => at);
+    if (!expired) off = state;
+  } catch {
+    /* the desk's directory cannot be read: ledgerError names it */
+  }
   const asleep = events.flatMap((e) =>
     e.kind === "asleep" && e.from >= since ? [{ from: e.from, to: e.to, gapMs: e.gapMs }] : []);
+  const today = new Date(etDayStart(at)).toISOString();
+  const turnsToday = { count: 0, usage: { uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 } };
+  for (const e of events) {
+    if (e.kind !== "desk-turn" || e.t < today) continue;
+    turnsToday.count += 1;
+    turnsToday.usage.uncachedInputTokens += e.usage?.uncachedInputTokens ?? 0;
+    turnsToday.usage.outputTokens += e.usage?.outputTokens ?? 0;
+    turnsToday.usage.cacheReadTokens += e.usage?.cacheReadTokens ?? 0;
+    turnsToday.usage.cacheWriteTokens += e.usage?.cacheWriteTokens ?? 0;
+  }
+  const deskSession = lastDeskSession(events);
   return {
     ok: true,
     pid: deps.pid ?? process.pid,
     version: deps.version ?? DSH_PIN,
     bootedAt: since,
-    uptimeMs: (deps.now ?? Date.now)() - deps.bootedAt,
+    uptimeMs: at - deps.bootedAt,
     desk: { enabled: deps.enabled, dir: deskDir(deps.home) },
     asleep,
     runs: runsOf(events),
+    ...(off === undefined ? {} : { off }),
+    ...(deskSession === undefined ? {} : { deskSession }),
+    turnsToday,
+    ...(deps.telegram === undefined ? {} : { telegram: deps.telegram() }),
     ...(ledgerError === undefined ? {} : { ledgerError }),
   };
 }

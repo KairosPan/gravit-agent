@@ -13,7 +13,9 @@ import {
 import type { DeskStatus } from "../src/desk.ts";
 
 const home = (): Promise<string> => mkdtemp(join(tmpdir(), "face-service-"));
-const plan = (port?: number) => servicePlan({ root: "/repo", home: "/h/.dsh", homeDir: "/h", node: "/usr/local/bin/node", path: "/usr/local/bin:/repo/face/node_modules/.bin::/opt/homebrew/bin", launchAgentsDir: "/h/Library/LaunchAgents", port });
+/** A status's `turnsToday` on a day with no desk turn. */
+const noTurns: DeskStatus["turnsToday"] = { count: 0, usage: { uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 } };
+const plan =(port?: number) => servicePlan({ root: "/repo", home: "/h/.dsh", homeDir: "/h", node: "/usr/local/bin/node", path: "/usr/local/bin:/repo/face/node_modules/.bin::/opt/homebrew/bin", launchAgentsDir: "/h/Library/LaunchAgents", port });
 
 test("servicePlan: node imports tsx's loader and runs main.ts itself; face/ as cwd; only PATH HOME DSH_HOME in the environment; launchd keys", () => {
   const p = plan();
@@ -137,19 +139,19 @@ test("parseLaunchctlPrint and lastTokenUrl", () => {
 
 test("formatStatus names a lost last run", () => {
   const status: DeskStatus = { ok: true, pid: 7, version: "v", bootedAt: "2026-10-19T15:00:00.000Z", uptimeMs: 90 * 60_000, desk: { enabled: true, dir: "/d" }, asleep: [],
-    runs: [{ bootedAt: "2026-10-19T14:00:00.000Z", pid: 6, lost: true }, { bootedAt: "2026-10-19T15:00:00.000Z", pid: 7, lost: false }] };
+    runs: [{ bootedAt: "2026-10-19T14:00:00.000Z", pid: 6, lost: true }, { bootedAt: "2026-10-19T15:00:00.000Z", pid: 7, lost: false }], turnsToday: noTurns };
   const text = formatStatus({ label: LABEL, info: { state: "running", pid: 7 }, installed: true, status, url: "http://127.0.0.1:3090/?token=t", port: 3090 });
   assert.match(text, /^com\.gravit\.face: running \(pid 7\)/);
   assert.match(text, /answering at http:\/\/127\.0\.0\.1:3090 · up 1h 30m since 2026-10-19T15:00:00\.000Z · desk on/);
   assert.match(text, /last run: lost \(killed or crashed; no shutdown event\)/);
   assert.match(text, /sign in: http:\/\/127\.0\.0\.1:3090\/\?token=t/);
   const unreadable: DeskStatus = { ok: true, pid: 7, version: "v", bootedAt: "2026-10-19T15:00:00.000Z", uptimeMs: 90 * 60_000, desk: { enabled: true, dir: "/d" }, asleep: [],
-    runs: [], ledgerError: "EACCES" };
+    runs: [], turnsToday: noTurns, ledgerError: "EACCES" };
   assert.match(formatStatus({ label: LABEL, info: { state: "running", pid: 7 }, installed: true, status: unreadable, url: undefined, port: 3090 }), /· desk on\nledger: unreadable \(EACCES\)\n/);
   const quiet: DeskStatus = { ok: true, pid: 9, version: "v", bootedAt: "2026-10-19T15:00:00.000Z", uptimeMs: 7_559_999, desk: { enabled: false, dir: "/d" },
     asleep: [{ from: "2026-10-19T15:10:00.000Z", to: "2026-10-19T15:20:00.000Z", gapMs: 600_000 }, { from: "2026-10-19T16:00:00.000Z", to: "2026-10-19T16:30:00.000Z", gapMs: 1_800_000 }],
     runs: [{ bootedAt: "2026-10-19T13:00:00.000Z", pid: 7, lost: true }, { bootedAt: "2026-10-19T14:00:00.000Z", pid: 8, endedAt: "2026-10-19T14:30:00.000Z", code: 0, lost: false },
-      { bootedAt: "2026-10-19T15:00:00.000Z", pid: 9, lost: false }] };
+      { bootedAt: "2026-10-19T15:00:00.000Z", pid: 9, lost: false }], turnsToday: noTurns };
   assert.equal(formatStatus({ label: LABEL, info: { state: "running", pid: 9 }, installed: true, status: quiet, url: undefined, port: 3091 }), [
     "com.gravit.face: running (pid 9)",
     "answering at http://127.0.0.1:3091 · up 2h 5m since 2026-10-19T15:00:00.000Z · desk off (FACE_DESK=0)",
@@ -164,7 +166,36 @@ test("formatStatus names a lost last run", () => {
   assert.match(formatStatus({ label: LABEL, info: {}, installed: false, status: undefined, url: undefined, port: 3090 }), /not installed \(npm run service -- install\)/);
 });
 
-const fakeFetch = (status: number, body?: unknown): typeof fetch =>
+test("formatStatus prints the pause and telegram lines", () => {
+  const base: DeskStatus = { ok: true, pid: 7, version: "v", bootedAt: "2026-10-20T13:00:00.000Z", uptimeMs: 90 * 60_000, desk: { enabled: true, dir: "/d" },
+    asleep: [], runs: [], turnsToday: noTurns };
+  const lines = (status: DeskStatus): string[] =>
+    formatStatus({ label: LABEL, info: { state: "running", pid: 7 }, installed: true, status, url: undefined, port: 3090 }).split("\n");
+  const head = ["com.gravit.face: running (pid 7)", "answering at http://127.0.0.1:3090 · up 1h 30m since 2026-10-20T13:00:00.000Z · desk on"];
+  const tail = "sign in: no URL in the log yet (npm run service -- logs)";
+  const polled = { configured: true, polling: true, lastPollAt: "2026-10-20T18:03:00.000Z", dropped: 2, queued: 1 };
+  assert.deepEqual(lines({ ...base, off: { setAt: "2026-10-20T18:00:00.000Z", by: "telegram", until: "2026-10-20T20:00:00.000Z" }, telegram: polled }), [...head,
+    "desk: paused since 14:00 ET by telegram until 16:00 ET (npm run desk -- resume)",
+    "telegram: polling, last poll 14:03 ET, 2 dropped, 1 queued",
+    tail]);
+  assert.deepEqual(lines({ ...base, off: { setAt: "2026-12-01T19:00:00.000Z", by: "terminal" },
+    telegram: { ...polled, dropped: 0, queued: 0, conflictAt: "2026-12-01T19:05:00.000Z" } }), [...head,
+    "desk: paused since 14:00 ET by terminal (npm run desk -- resume)",
+    "telegram: polling, last poll 14:03 ET, 0 dropped, 0 queued, conflict at 14:05 ET",
+    tail], "no until, no clause; a conflict, its own; EST renders as ET as EDT does");
+  assert.deepEqual(lines({ ...base, telegram: { configured: false, polling: false, dropped: 0, queued: 0 } }), [...head,
+    "telegram: not configured (TELEGRAM_BOT_TOKEN and TELEGRAM_OPERATOR_ID in $DSH_HOME/.env)",
+    tail]);
+  assert.equal(lines({ ...base, telegram: { configured: true, polling: false, dropped: 0, queued: 3 } })[2],
+    "telegram: not polling, no poll yet, 0 dropped, 3 queued", "a bridge that has not polled says so");
+  assert.deepEqual(lines(base), [...head, tail], "neither line without its field");
+  assert.deepEqual(lines({ ...base, off: { setAt: "2026-10-20T18:00:00.000Z", by: "page" }, ledgerError: "EACCES" }), [...head,
+    "desk: paused since 14:00 ET by page (npm run desk -- resume)",
+    "ledger: unreadable (EACCES)",
+    tail], "right after the answering line, before the ledger's own");
+});
+
+const fakeFetch =(status: number, body?: unknown): typeof fetch =>
   (async () => new Response(body === undefined ? null : JSON.stringify(body), { status })) as unknown as typeof fetch;
 const refusing: typeof fetch = (async () => { throw new TypeError("fetch failed"); }) as unknown as typeof fetch;
 
@@ -271,7 +302,7 @@ async function putLog(dshHome: string, text: string): Promise<void> {
 const boot = (pid: number) => ({ t: "2026-10-19T15:00:00.000Z", kind: "boot", pid, version: "v", deskEnabled: true });
 
 const deskStatusOf = (pid: number): DeskStatus => ({ ok: true, pid, version: "v", bootedAt: "2026-10-19T15:00:00.000Z", uptimeMs: 60_000,
-  desk: { enabled: true, dir: "/d" }, asleep: [], runs: [{ bootedAt: "2026-10-19T15:00:00.000Z", pid, lost: false }] });
+  desk: { enabled: true, dir: "/d" }, asleep: [], runs: [{ bootedAt: "2026-10-19T15:00:00.000Z", pid, lost: false }], turnsToday: noTurns });
 
 /** The route's answer, every time it is asked, from a face of pid `pid`. */
 const answeredBy = (pid: number) => (): Response => new Response(JSON.stringify(deskStatusOf(pid)), { status: 200 });

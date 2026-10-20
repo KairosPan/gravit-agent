@@ -14,7 +14,8 @@
     "setup": "tsx src/setup.ts",
     "check:fixture": "node scripts/validate-fixture.mjs",
     "render:roles": "tsx scripts/render-roles.ts",
-    "service": "tsx scripts/service.ts"
+    "service": "tsx scripts/service.ts",
+    "desk": "tsx scripts/desk.ts"
   },
   "dependencies": {
     "@deepseek-ai/cordis": "4.0.4",

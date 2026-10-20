@@ -114,3 +114,11 @@ deck.png
 # the operator's machine-local instruction overlay for dsh agents (GRAVIT.md's twin);
 # anchored to the root: a nested one would load into a channel's sessions yet hide from git
 /GRAVIT.local.md
+# the desk (B4): the operator's levels and holdings stay on this machine; desk/journal/ is the
+# desk session's cwd, tracked by its .gitkeep alone; face/tests/tmp/ holds the smokes' fixtures
+/desk/levels.yml
+/desk/holdings.yml
+/desk/journal/*
+!/desk/journal/.gitkeep
+/strategies/*/levels.yml
+/face/tests/tmp/
