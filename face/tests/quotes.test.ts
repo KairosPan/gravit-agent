@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { WebRoute } from "@deepseek-ai/dsh-host-webserver";
-import { createQuoteHub, parseQuoteRequest, registerQuoteRoutes, QUOTE_CLIENT_LIMIT } from "../src/quotes.ts";
+import { createQuoteHub, parseInstrumentId, parseQuoteRequest, registerQuoteRoutes, QUOTE_CLIENT_LIMIT } from "../src/quotes.ts";
 import { isTrustedDataRequest } from "../src/data.ts";
 import type { ProviderState, QuoteIdentity, QuotePayload, QuoteUpdate, SnapshotResult, StreamCallbacks } from "../src/quote-types.ts";
 
@@ -22,6 +22,14 @@ test("quote requests accept only bounded canonical watchlist identities", () => 
   for (const suffix of ["", "?ids=us:AAPL&ids=us:MSFT", "?ids=https://evil.example", "?ids=cn:603986:extra", "?ids=cn:123", "?ids=us:aapl", "?ids=us:AA%00", "?ids=%ZZ", "?ids=" + Array(101).fill("us:AAPL").join(",")]) {
     assert.throws(() => parseQuoteRequest(`/data/quotes${suffix}`), suffix);
   }
+});
+
+test("parseInstrumentId accepts the three grammars and refuses the rest", () => {
+  assert.deepEqual(parseInstrumentId("us:AAPL"), US);
+  assert.deepEqual(parseInstrumentId("us:BRK.B"), { id: "us:BRK.B", market: "us", symbol: "BRK.B" });
+  assert.deepEqual(parseInstrumentId(" cn:603986 "), CN);
+  assert.deepEqual(parseInstrumentId("crypto:BTC/USD"), BTC);
+  for (const bad of ["us:aapl", "us:", "cn:12345", "crypto:BTC", "us:AAPL:X", "AAPL", "us:-X", ""]) assert.equal(parseInstrumentId(bad), null, bad);
 });
 
 test("hub shares overlapping browser subscriptions and removes unused upstream identities", async () => {

@@ -25,6 +25,20 @@ export class HttpError extends Error {
   }
 }
 
+/** Re-serve a cached body flagged `stale: true`, so the client can say so.
+ * An unparseable body is passed through unchanged rather than replaced by an
+ * error: it was served as a good payload once, and the flag is the only thing
+ * being added. Shared by the producer routes (data.ts) and `/data/bars`. */
+export function markStale(body: string): string {
+  try {
+    const parsed = JSON.parse(body) as Record<string, unknown>;
+    parsed.stale = true;
+    return JSON.stringify(parsed);
+  } catch {
+    return body;
+  }
+}
+
 /** Collect a request body up to `limit` bytes (default {@link BODY_LIMIT});
  * longer is refused with a 413 before the bytes are kept. */
 export async function readBody(req: IncomingMessage, limit: number = BODY_LIMIT): Promise<string> {

@@ -1,12 +1,15 @@
 /** `/data/market.json`, `/data/account.json`, `/data/watchlist.json`: cached,
- * single-flight spawns of fixed read-only producer scripts.
+ * single-flight spawns of fixed read-only producer scripts; `/data/bars`
+ * (bars.ts) mounted beside them on the same fence and spawner.
  *
  * The face holds no market state of its own. Each producer route is a thin cache in
  * front of ONE producer process whose argv is FIXED — the script path and a
- * mode word, nothing else. No request data ever reaches the child (spec v2
- * section 3.1), so these routes cannot be turned into a command-injection
- * surface by a crafted URL; the one header the handlers read is `Host`, and
- * they read it to REFUSE, not to build anything with. The child's stderr goes
+ * mode word, nothing else. No unvalidated request data reaches a child: these
+ * routes pass a fixed argv (spec v2 section 3.1), and `/data/bars` passes a
+ * symbol and a day count that its `parseBarsRequest` has checked — so no route
+ * here can be turned into a command-injection surface by a crafted URL. The
+ * one header the producer handlers read is `Host`, and they read it to
+ * REFUSE, not to build anything with. The child's stderr goes
  * to the face's stderr and never into a response body — not even inside an
  * error message (see the catch path).
  *
@@ -27,6 +30,8 @@ import { fileURLToPath } from "node:url";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { RouteRegistrar } from "./static.ts";
 import { withWatchlistCatalog } from "./watchlist.ts";
+import { markStale } from "./http.ts";
+import { registerBarsRoute } from "./bars.ts";
 import { registerSymbolSearchRoutes } from "./symbol-search.ts";
 import { registerQuoteRoutes } from "./quotes.ts";
 
@@ -67,6 +72,7 @@ const moduleDir = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(moduleDir, "..", "..");
 const SCRIPT = join(REPO_ROOT, "scripts", "face_data.py");
 const WATCHLIST_SCRIPT = join(REPO_ROOT, "scripts", "face_watchlist.py");
+const BARS_SCRIPT = join(REPO_ROOT, "scripts", "face_bars.py");
 
 /** Body of a refused (non-loopback) request. Fixed text: the Host that was
  * refused is attacker-controlled and is never echoed back. */
@@ -283,20 +289,7 @@ export function registerDataRoutes(
   webServer.register({ kind: "exact", path: "/data/market.json", handler: handler("market") });
   webServer.register({ kind: "exact", path: "/data/account.json", handler: handler("account") });
   webServer.register({ kind: "exact", path: "/data/watchlist.json", handler: handler("watchlist") });
+  registerBarsRoute(webServer, { isTrusted: isTrustedDataRequest, spawn, script: BARS_SCRIPT, now });
   registerSymbolSearchRoutes(webServer, { isTrusted: isTrustedDataRequest, now });
   return registerQuoteRoutes(webServer, { isTrusted: isTrustedDataRequest });
-}
-
-/** Re-serve a cached body flagged `stale: true`, so the client can say so.
- * An unparseable body is passed through unchanged rather than replaced by an
- * error: it was served as a good payload once, and the flag is the only thing
- * being added. */
-function markStale(body: string): string {
-  try {
-    const parsed = JSON.parse(body) as Record<string, unknown>;
-    parsed.stale = true;
-    return JSON.stringify(parsed);
-  } catch {
-    return body;
-  }
 }

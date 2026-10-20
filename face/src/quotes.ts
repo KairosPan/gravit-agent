@@ -13,6 +13,19 @@ const CACHE_LIMIT = 512;
 const CACHE_MS = 5_000;
 const PROVIDERS = { us: "alpaca", cn: "ifind", crypto: "coinbase" } as const;
 
+/** One instrument id in the face's grammar — `us:AAPL`, `cn:600519`, `crypto:BTC/USD` — or null. The one
+ * check the quote routes and `/data/bars` share; a us symbol that passes it is also what reaches
+ * face_bars.py's argv, so it admits no leading `-`, no `/` and nothing lower-case. */
+export function parseInstrumentId(raw: string): QuoteIdentity | null {
+  const [market, symbol, extra] = raw.trim().split(":");
+  if (extra !== undefined || !symbol || !(
+    market === "us" && /^[A-Z][A-Z0-9.-]{0,14}$/.test(symbol)
+    || market === "cn" && /^\d{6}$/.test(symbol)
+    || market === "crypto" && /^[A-Z0-9]{1,15}\/[A-Z0-9]{2,10}$/.test(symbol)
+  )) return null;
+  return { id: `${market}:${symbol}`, market: market as QuoteMarket, symbol };
+}
+
 export function parseQuoteRequest(rawUrl: string): QuoteIdentity[] {
   if (rawUrl.length > 8192 || /%(?![a-f\d]{2})/i.test(rawUrl)) throw new HttpError(400, "invalid quote request");
   const url = new URL(rawUrl, "http://localhost");
@@ -23,14 +36,9 @@ export function parseQuoteRequest(rawUrl: string): QuoteIdentity[] {
   if (parts.length > QUOTE_LIMIT) throw new HttpError(400, `最多同时查询 ${QUOTE_LIMIT} 个自选。`);
   const assets = new Map<string, QuoteIdentity>();
   for (const part of parts) {
-    const [market, symbol, extra] = part.trim().split(":");
-    if (extra !== undefined || !symbol || !(
-      market === "us" && /^[A-Z][A-Z0-9.-]{0,14}$/.test(symbol)
-      || market === "cn" && /^\d{6}$/.test(symbol)
-      || market === "crypto" && /^[A-Z0-9]{1,15}\/[A-Z0-9]{2,10}$/.test(symbol)
-    )) throw new HttpError(400, "invalid quote symbol");
-    const id = `${market}:${symbol}`;
-    assets.set(id, { id, market: market as QuoteMarket, symbol });
+    const identity = parseInstrumentId(part);
+    if (!identity) throw new HttpError(400, "invalid quote symbol");
+    assets.set(identity.id, identity);
   }
   return [...assets.values()];
 }
