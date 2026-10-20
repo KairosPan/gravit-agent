@@ -6,6 +6,8 @@ import type { WebRoute } from "@deepseek-ai/dsh-host-webserver";
 import {
   isJsonBody, isLoopbackHost, isTrustedDataRequest, registerDataRoutes, SPAWN_TIMEOUT_MS, TTL_MS, type Spawner,
 } from "../src/data.ts";
+import type { QuoteHub } from "../src/quotes.ts";
+import type { QuoteIdentity, QuotePayload } from "../src/quote-types.ts";
 
 /** Captured status/body from one handler call. Same structural stand-in as
  * static.test.ts uses: the handler owns the whole response, so what it wrote IS
@@ -362,4 +364,30 @@ test("a rejecting spawn leaves no unhandled rejection behind", async () => {
   } finally {
     process.off("unhandledRejection", onUnhandled);
   }
+});
+
+/* main.ts creates the quote hub once and hands it to these routes and to the desk tools, so the
+ * page and the desk share one cache and one upstream. The routes must serve the hub they are
+ * given, not one of their own, and their disposer - run only at shutdown - closes it. */
+test("registerDataRoutes hands its hub to the quote routes", async () => {
+  const payload: QuotePayload = { ok: true, generated_at: "2026-10-20T19:21:04.000Z", quotes: [], providers: [] };
+  const asked: QuoteIdentity[][] = [];
+  let closed = false;
+  const hub: QuoteHub = {
+    async snapshot(assets) { asked.push(assets); return payload; },
+    subscribe: () => () => {},
+    close: () => { closed = true; },
+  };
+  const routes: WebRoute[] = [];
+  const dispose = registerDataRoutes({ register: (route) => routes.push(route) }, { spawn: async () => ({ stdout: "{}", code: 0 }), now: () => 0, hub });
+  const quotes = routes.find((route) => route.path === "/data/quotes")!;
+  const req = { headers: { host: "127.0.0.1:3090" }, method: "GET", url: "/data/quotes?ids=us:NVDA" } as unknown as IncomingMessage;
+  const { out, res } = fakeRes();
+  await quotes.handler(req, res);
+  assert.equal(out.status, 200);
+  assert.deepEqual(JSON.parse(out.body), payload, "what /data/quotes serves is the given hub's snapshot");
+  assert.deepEqual(asked, [[{ id: "us:NVDA", market: "us", symbol: "NVDA" }]]);
+  assert.equal(closed, false);
+  dispose();
+  assert.equal(closed, true, "the routes' disposer closes the hub they were given");
 });

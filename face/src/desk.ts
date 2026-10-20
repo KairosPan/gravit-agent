@@ -6,12 +6,13 @@
  * the face kept running by launchd as a user service (§5.2), and, in the later plans, the clock,
  * the watch and the phone bridge that work in it. Of what §8 gives this module - the ledger, the
  * budget, the `OFF` switch, the two desk tools, the `/desk` page and `/data/desk/*` - P0 holds the
- * ledger, the sleep watch and `GET /data/desk/status`, and P1 adds the `OFF` switch. Of the
- * ledger's files (§5.7) this module keeps `events.jsonl` and `OFF`; {@link appendRecord} is the
- * append path for the others. `events.jsonl` has eight kinds of event: P0's `boot`, clean
- * `shutdown` and `asleep` gap in the face's timers, and P1's `off-set` and `off-cleared`, a
- * `desk-session` for each desk conversation the face opens, a `desk-turn` for each turn on it, and
- * a `desk-refused` for a turn the face would not open.
+ * ledger, the sleep watch and `GET /data/desk/status`, and P1 adds the `OFF` switch and mounts the
+ * two desk tools, which src/desk-tools.ts defines. Of the ledger's files (§5.7) this module keeps
+ * `events.jsonl` and `OFF`; {@link appendRecord} is the append path for the others. `events.jsonl`
+ * has eight kinds of event: P0's `boot`, clean `shutdown` and `asleep` gap in the face's timers,
+ * and P1's `off-set` and `off-cleared`, a `desk-session` for each desk conversation the face
+ * opens, a `desk-turn` for each turn on it, and a `desk-refused` for a turn the face would not
+ * open.
  *
  * Why a ledger: a service that launchd restarts after a crash or a `kill -9` looks healthy from
  * outside - it is running again. Read back as runs ({@link runsOf}), the ledger says otherwise: a
@@ -44,9 +45,10 @@
  * {@link installDesk} mounts it all on a booted face. The status route ({@link deskStatus}:
  * pid, version, uptime, this run's gaps, the ledger's runs, the pause in force, the desk
  * conversation, today's desk turns and their tokens, and the Telegram bridge when one is passed)
- * is mounted always, so a face with the desk off - a second face beside the service, §5.2 - still
- * answers, with `desk.enabled: false`; the `boot` event, the watch and the `shutdown` event only
- * when the desk is on. An unreadable ledger is named in the status, never a 500.
+ * is mounted always, and so are the desk tools, so a face with the desk off - a second face beside
+ * the service, §5.2 - still answers, with `desk.enabled: false`, and an old desk conversation it
+ * opens keeps its tools; the `boot` event, the watch and the `shutdown` event only when the desk is
+ * on. An unreadable ledger is named in the status, never a 500.
  * @module
  */
 import { appendFile, lstat, mkdir, open, readFile, rename, stat, unlink } from "node:fs/promises";
@@ -54,8 +56,10 @@ import type { IncomingMessage } from "node:http";
 import { basename, extname, join } from "node:path";
 import { withFileLock, writeFileAtomic } from "@deepseek-ai/dsh-atomic-write";
 import { isTrustedDataRequest } from "./data.ts";
+import { deskToolDefinitions, installDeskTools, type DeskToolsCtxLike } from "./desk-tools.ts";
 import { etDate, etDayStart, etTime } from "./et.ts";
 import { fencedGet } from "./http.ts";
+import type { QuoteHub } from "./quotes.ts";
 import type { RouteRegistrar } from "./static.ts";
 import { DSH_PIN } from "./version.ts";
 
@@ -732,21 +736,26 @@ export interface DeskHandle {
 }
 
 /**
- * Mount the desk's P0 rows on a booted face.
+ * Mount the desk's rows on a booted face.
  *
- * The status route is mounted whatever `enabled` says. With the desk on, `ready` is the `boot`
- * event's append - stamped `bootedAt`, which is `now()` at this call and the status's uptime
- * origin - and the sleep watch starts at once, writing into the ledger. `dispose(code)` stops the
- * watch, lets the `boot` append settle (two appends started together take the file lock in either
- * order, and a `shutdown` written before its `boot` reads as a lost run), then appends the
- * `shutdown` with `code`. It is idempotent: a second call writes nothing and settles with the
- * first. With the desk off, `ready` is already resolved and `dispose` writes nothing. Nothing here
- * rejects on the ledger, so a caller need not await `ready`.
+ * The status route is mounted whatever `enabled` says, and so, given both `ctx` and `hub`, are the
+ * two desk tools (src/desk-tools.ts): every `gravit-desk` agent gets `desk_quotes` over `hub` and
+ * `desk_state` over {@link deskStatus} with the status route's own deps, so the tool and the route
+ * agree - a face with the desk off still opens an old desk conversation with its tools. With the
+ * desk on, `ready` is the `boot` event's append - stamped `bootedAt`, which is `now()` at this call
+ * and the status's uptime origin - and the sleep watch starts at once, writing into the ledger.
+ * `dispose(code)` removes the tools' listener, stops the watch, lets the `boot` append settle (two
+ * appends started together take the file lock in either order, and a `shutdown` written before its
+ * `boot` reads as a lost run), then appends the `shutdown` with `code`. It is idempotent: a second
+ * call writes nothing and settles with the first. With the desk off, `ready` is already resolved
+ * and `dispose` only removes the listener. Nothing here rejects on the ledger, so a caller need not
+ * await `ready`.
  * @param webServer - the host webserver service, or a test recorder.
  * @param deps - `home`, the harness home; `enabled`, whether to mount the desk's rows; `now`
  *   (default `Date.now`) and `version` (default {@link DSH_PIN}), for the events and the status;
  *   `watch`, the sleep watch's clock and timer seams, for tests - not its `append`, which is
- *   always the ledger's.
+ *   always the ledger's; `ctx`, the booted ROOT context, and `hub`, the quote hub main.ts owns,
+ *   which the desk tools need both of.
  * @throws when the status path is already registered, before anything is written or started.
  */
 export function installDesk(
@@ -757,6 +766,8 @@ export function installDesk(
     now?: () => number;
     version?: string;
     watch?: Partial<Omit<AsleepWatchOptions, "append">>;
+    ctx?: DeskToolsCtxLike;
+    hub?: Pick<QuoteHub, "snapshot">;
   },
 ): DeskHandle {
   const { home, enabled } = deps;
@@ -764,7 +775,11 @@ export function installDesk(
   const version = deps.version ?? DSH_PIN;
   const bootedAt = now();
   registerDeskRoutes(webServer, { home, bootedAt, enabled, now, version });
-  if (!enabled) return { enabled, bootedAt, ready: Promise.resolve(), dispose: async () => {} };
+  const removeTools = deps.ctx === undefined || deps.hub === undefined ? () => {} : installDeskTools(deps.ctx, deskToolDefinitions({
+    hub: deps.hub,
+    readState: () => deskStatus({ home, bootedAt, enabled, now, version }),
+  }));
+  if (!enabled) return { enabled, bootedAt, ready: Promise.resolve(), dispose: async () => { removeTools(); } };
   const ready = appendEvent(home, { t: new Date(bootedAt).toISOString(), kind: "boot", pid: process.pid, version, deskEnabled: true });
   const stopWatch = installAsleepWatch({ now, ...deps.watch, append: (event) => appendEvent(home, event) });
   let disposing: Promise<void> | undefined;
@@ -774,6 +789,7 @@ export function installDesk(
     ready,
     dispose(code) {
       disposing ??= (async () => {
+        removeTools();
         stopWatch();
         await ready;
         await appendEvent(home, { t: new Date(now()).toISOString(), kind: "shutdown", pid: process.pid, code });

@@ -28,7 +28,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { RouteRegistrar } from "./static.ts";
 import { withWatchlistCatalog } from "./watchlist.ts";
 import { registerSymbolSearchRoutes } from "./symbol-search.ts";
-import { registerQuoteRoutes } from "./quotes.ts";
+import { registerQuoteRoutes, type QuoteHub } from "./quotes.ts";
 
 /** Run the producer and report what it wrote and how it exited.
  *
@@ -204,18 +204,24 @@ interface Entry { body: string; at: number }
  * and a fixed message when it did not. Only a run that exited 0 WITH output is
  * cached — the next request after any failure retries immediately.
  *
+ * The live quote routes (`/data/quotes`, `/data/quotes/stream`, quotes.ts)
+ * serve `opts.hub` - main.ts's, which the desk tools share - or a hub of their
+ * own when none is given.
+ *
  * @param webServer - the host webserver service (`ctx.webServer`), or a test
  * recorder; the same {@link RouteRegistrar} contract static.ts registers under,
  * so a route shape that drifts in an rc bump fails tsc in one place.
  * @param opts - injection seams: `spawn` (default {@link defaultSpawner} over
  * `$FACE_PYTHON`), `now` (default `Date.now`), `python` (default
- * `$FACE_PYTHON`, else `python3`).
+ * `$FACE_PYTHON`, else `python3`); and `hub`, the quote hub to serve.
+ * @returns the quote routes' disposer, which ends their streams and closes the
+ * hub, given or their own.
  * @throws when either path is already registered — a duplicate route is a
  * composition error the webserver refuses on purpose.
  */
 export function registerDataRoutes(
   webServer: RouteRegistrar,
-  opts: { spawn?: Spawner; now?: () => number; python?: string } = {},
+  opts: { spawn?: Spawner; now?: () => number; python?: string; hub?: QuoteHub } = {},
 ): () => void {
   /* `||` on the env var, not `??` — the face's convention throughout (main.ts,
    * setup.ts): `FACE_PYTHON=""` is a var the operator meant to leave at its
@@ -284,7 +290,7 @@ export function registerDataRoutes(
   webServer.register({ kind: "exact", path: "/data/account.json", handler: handler("account") });
   webServer.register({ kind: "exact", path: "/data/watchlist.json", handler: handler("watchlist") });
   registerSymbolSearchRoutes(webServer, { isTrusted: isTrustedDataRequest, now });
-  return registerQuoteRoutes(webServer, { isTrusted: isTrustedDataRequest });
+  return registerQuoteRoutes(webServer, { isTrusted: isTrustedDataRequest, hub: opts.hub });
 }
 
 /** Re-serve a cached body flagged `stale: true`, so the client can say so.

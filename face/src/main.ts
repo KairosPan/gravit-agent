@@ -22,6 +22,7 @@ import { readBotJournal } from "./bot-journal.ts";
 import { BOTS_ROOT } from "./overlay.ts";
 import { registerDataRoutes } from "./data.ts";
 import { deskDir, installDesk, type DeskHandle } from "./desk.ts";
+import { createQuoteHub } from "./quotes.ts";
 import { registerStatic, type IndexAuth } from "./static.ts";
 import { registerSessionRoutes } from "./sessions.ts";
 import { listSessionHeads, registerChannelRoutes, type RegistryLike } from "./channels.ts";
@@ -169,11 +170,15 @@ if (connection === undefined) {
   throw new Error(`${BIN}: the connection service is missing - / could not sign the browser in`);
 }
 registerStatic(booted.ctx.webServer, clientDir, connection);
-/* The instruments' data, on the same webserver as the page that reads it. Left
- * at its defaults on purpose: the producer is spawned with `$FACE_PYTHON` (else
- * `python3`) from the repo root this process just chdir'd to, and no injection
- * seam belongs on the entry point — `spawn`/`now` exist for the tests. */
-disposeData = registerDataRoutes(booted.ctx.webServer);
+/* The live quote hub, one per process: `/data/quotes` and the desk's
+ * `desk_quotes` read the same cache over the same upstream. */
+const hub = createQuoteHub(); // closed by disposeData (the quote routes' disposer), which only the two exits above run
+/* The instruments' data, on the same webserver as the page that reads it.
+ * Given the hub above and otherwise left at its defaults on purpose: the
+ * producer is spawned with `$FACE_PYTHON` (else `python3`) from the repo root
+ * this process just chdir'd to, and no injection seam belongs on the entry
+ * point — `spawn`/`now` exist for the tests. */
+disposeData = registerDataRoutes(booted.ctx.webServer, { hub });
 /* The channel picker's data (sidebar + landing page) and the new-channel copy
  * action. `process.cwd()` is the workbench repo root — the chdir above put it
  * there. `dshHome` is resolved the same way every other route family here
@@ -300,15 +305,18 @@ registerRoomRoutes(booted.ctx.webServer, room);
  * already on the roster is registered as a tool for Gravit before the face
  * reports itself up. */
 await registerPanelRoutes(booted.ctx.webServer, deps);
-/* The desk (desk.ts): `/data/desk/status` always; the ledger's `boot` and the
- * sleep watch unless `FACE_DESK=0`, the switch for a second face beside the
- * service (docs/superpowers/specs/2026-10-19-always-on-gravit-design.md §5.2),
- * which runs on a scratch home with `FACE_DESK=0` (face/README.md, "Run as a
+/* The desk (desk.ts): `/data/desk/status` and the two desk tools always - every
+ * `gravit-desk` agent gets `desk_quotes` over the hub above and `desk_state`
+ * (desk-tools.ts), so an old desk conversation keeps its tools in a face with
+ * the desk off; the ledger's `boot` and the sleep watch unless `FACE_DESK=0`,
+ * the switch for a second face beside the service
+ * (docs/superpowers/specs/2026-10-19-always-on-gravit-design.md §5.2), which
+ * runs on a scratch home with `FACE_DESK=0` (face/README.md, "Run as a
  * service") - the ledger assumes one desk-enabled face per home. Mounted here,
  * after `bootFace` bound the port, so a face that lost the port never writes a
  * `boot`. `ready` is deliberately not awaited: the ledger must never delay
  * readiness, and `dispose` orders the `shutdown` after the `boot` anyway. */
-desk = installDesk(booted.ctx.webServer, { home: dshHome, enabled: process.env.FACE_DESK !== "0" });
+desk = installDesk(booted.ctx.webServer, { home: dshHome, enabled: process.env.FACE_DESK !== "0", ctx: booted.ctx, hub });
 console.log(`${BIN}: desk: ${desk.enabled ? `ledger at ${deskDir(dshHome)}` : "rows disabled (FACE_DESK=0)"}`);
 /* Every route is mounted: only now may the gateway admit a browser stream
  * (bootFace was told `deferReady`). It re-checks that the root is still
