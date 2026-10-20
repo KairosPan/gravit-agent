@@ -31,6 +31,12 @@ const KINDS = [
   m('rc1', { kind: 'receipt', text: 'Order accepted', data: {} }), m('rc2', { kind: 'refusal', text: 'no', data: { code: 'E1' } }),
   m('e9', { from: 'buffett', text: '买', data: { name: '巴菲特型' } }),
   m('e10', { from: 'system', text: 'runtime snapshot', data: { source: 'runtime' } }),
+  m('tc2', { kind: 'tool', text: 'market_snapshot', data: { callId: 'c2', name: 'mcp__alpaca-kit__market_snapshot', result: JSON.stringify({ ok: true, rows: [{ symbol: 'A', close: 2, prev_close: 1, volume: 1 }, { symbol: 'B', close: 1, prev_close: 2, volume: 1 }] }) + '\n(Omitted 9 bytes. Full formatted result stored at: /tmp/x)' } }),
+  m('tc3', { kind: 'tool', text: 'account', data: { callId: 'c3', name: 'mcp__alpaca-kit__account', result: JSON.stringify({ ok: true, equity: '1', cash: '2' }) } }),
+  m('tc4', { kind: 'tool', text: 'breadth', data: { callId: 'c4', name: 'mcp__alpaca-kit__breadth', result: JSON.stringify({ ok: true, ...Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`k${i}`, i])) }) } }),
+  m('tc5', { kind: 'tool', text: 'daily_bars', data: { callId: 'c5', name: 'mcp__alpaca-kit__daily_bars', result: JSON.stringify({ ok: true, rows: [{ date: '2026-10-16', close: 1 }, { date: '2026-10-17', close: 2 }] }) } }),
+  m('tc6', { kind: 'tool', text: 'calendar', data: { callId: 'c6', name: 'mcp__alpaca-kit__calendar', result: JSON.stringify({ ok: true, days: ['2026-10-19'] }) } }),
+  m('tc7', { kind: 'tool', text: 'positions', data: { callId: 'c7', name: 'mcp__alpaca-kit__positions', result: JSON.stringify({ ok: true, rows: [] }) } }),
 ];
 
 const asset = (id, over = {}) => ({ id, market: id.slice(0, id.indexOf(':')), symbol: id.slice(id.indexOf(':') + 1), name: id.slice(id.indexOf(':') + 1), exchange: 'NASDAQ', currency: id.startsWith('cn:') ? 'CNY' : 'USD', ...over });

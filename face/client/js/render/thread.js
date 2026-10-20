@@ -6,6 +6,7 @@ import { divider } from '../time.js';
 import { levelOf, needsAnswer } from '../messages.js';
 import { avatar } from './avatars.js';
 import { senderName } from './rail.js';
+import { toolResultFor } from './tool-result.js';
 
 export const chip = (text, tone = 'grey') => `<span class="${cls('chip', tone)}">${esc(text)}</span>`;
 
@@ -59,8 +60,13 @@ function body(m, conv) {
   const d = m.data ?? {};
   switch (m.kind) {
     case 'tool': {
+      // the row and its Raw keep ids, so a render opens again what the person opened
       const running = d.result === undefined;
-      return `<details class="${cls('tool', d.isError && 'danger')}"><summary><span class="tool-name">${esc(m.text || d.title || d.name || 'tool')}</span>${running ? '<span class="dim">running</span>' : ''}</summary>${running ? '' : `<pre>${esc(d.result)}</pre>`}</details>`;
+      const id = esc(String(d.callId ?? m.id));
+      const raw = `<pre>${esc(d.result)}</pre>`;
+      const pretty = running ? null : toolResultFor(d);
+      const result = running ? '' : pretty ? `${pretty}<details id="raw-${id}" class="raw"><summary>Raw</summary>${raw}</details>` : raw;
+      return `<details id="tool-${id}" class="${cls('tool', d.isError && 'danger')}"><summary><span class="tool-name">${esc(m.text || d.title || d.name || 'tool')}</span>${running ? '<span class="dim">running</span>' : ''}</summary>${result}</details>`;
     }
     case 'card':
       return `<div class="card orange"><div class="card-head"><div class="card-title">${esc(d.title ?? m.text)}</div>${stateChip(m)}</div>` +

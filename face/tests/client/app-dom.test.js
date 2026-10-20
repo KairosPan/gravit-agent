@@ -879,3 +879,15 @@ test("Talk to opens the bot's conversation", async () => {
   assert.equal(store.get().route.id, 's-bot');
   store.timers.clear();
 });
+
+test('an opened tool row stays open across the next render', async () => {
+  const f = fakeWindow({ hash: '' });
+  const h = host({ rows: [row('s1')] });
+  const store = started(f, h);
+  await h.ready();
+  f.withSelector('details[id][open]', { tagName: 'DETAILS', id: 'tool-c1', open: true });
+  const again = f.withId('tool-c1', { tagName: 'DETAILS', open: false });
+  store.dispatch('toggleRail');
+  assert.equal(again.open, true, 'the render opens it again by its id');
+  store.timers.clear();
+});

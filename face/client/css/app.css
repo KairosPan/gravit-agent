@@ -196,6 +196,22 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .viz-table th.num, .viz-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .viz-table td.up { color: var(--up); }
 .viz-table td.down { color: var(--down); }
+/* a tool result drawn for reading: its table, tiles, days or chart; Partial when the host cut it; the raw text a click away */
+.viz { display: flex; flex-direction: column; gap: 8px; padding: 8px 12px 12px; border-top: 1px solid var(--border); }
+.viz-scroll { overflow-x: auto; max-height: 320px; overflow-y: auto; }
+.viz-table td.sym { font-weight: 700; white-space: nowrap; }
+.viz-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
+.viz-tile { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: var(--radius-s); background: var(--surface-2); }
+.viz-tile-label { font-size: 11px; color: var(--dim); }
+.viz-tile-value { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.viz-kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; font-size: 12.5px; }
+.viz-kv dt { color: var(--dim); }
+.viz-kv dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.viz-meta { font-size: 12px; color: var(--dim); }
+.viz-days { font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.viz-stamp { align-self: flex-start; font-size: 11px; font-weight: 700; color: var(--dim); }
+.raw { border-top: 1px solid var(--border); }
+.raw summary { padding: 6px 12px; font-size: 12px; color: var(--dim); cursor: pointer; }
 .card { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border-radius: 18px 18px 18px 4px; background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-card); }
 .card.orange { border-color: var(--warn-edge); }
 .card.red { border-color: var(--down-edge); }

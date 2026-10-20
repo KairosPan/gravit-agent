@@ -65,7 +65,8 @@ function toolMessages(view, calls) {
   if (c.phase === 'call') {
     return [{ ...base(view), id: `t${callId}`, from: 'gravit', kind: 'tool', text: c.title ?? c.name ?? '', data: { callId, name: c.name, title: c.title, args: known?.args ?? {} } }];
   }
-  const row = { ...base(view), id: `t${callId}`, merge: true, from: 'gravit', kind: 'tool', text: '', data: { callId, result: c.text ?? '', isError: c.isError === true } };
+  // the result names its call (the renderer dresses alpaca-kit's results by name), when the call was seen
+  const row = { ...base(view), id: `t${callId}`, merge: true, from: 'gravit', kind: 'tool', text: '', data: { callId, result: c.text ?? '', isError: c.isError === true, ...(known ? { name: known.name, args: known.args } : {}) } };
   if (!known || !isOrderTool(known.name)) return [row];
   const lift = c.isError === true
     ? { ...base(view), id: `r${callId}`, from: 'gravit', kind: 'refusal', text: c.text ?? '', data: { toolName: known.name, callId } }

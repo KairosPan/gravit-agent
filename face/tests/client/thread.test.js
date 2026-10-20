@@ -48,12 +48,12 @@ test("Gravit's text renders through the markdown hook when one is set, escaped o
 
 test('a tool row is a collapsed details titled by the call; the result fills a pre; an error is marked danger', () => {
   const call = renderMessage(msg({ id: 'tc1', kind: 'tool', text: 'python -m alpaca_kit.breadth', data: { callId: 'c1', name: 'bash', title: 'python -m alpaca_kit.breadth', args: {} } }), conv(), state);
-  assert.match(call, /<details class="tool"><summary>/); assert.match(call, /tool-name">python -m alpaca_kit.breadth</); assert.match(call, /running/);
+  assert.match(call, /<details id="tool-c1" class="tool"><summary>/); assert.match(call, /tool-name">python -m alpaca_kit.breadth</); assert.match(call, /running/);
   assert.doesNotMatch(call, /<pre>/);
   const done = renderMessage(msg({ id: 'tc1', kind: 'tool', text: 'python -m alpaca_kit.breadth', data: { callId: 'c1', name: 'bash', result: 'advancers 312 <ok>', isError: false } }), conv(), state);
   assert.match(done, /<pre>advancers 312 &lt;ok&gt;<\/pre>/); assert.doesNotMatch(done, /running/);
   const bad = renderMessage(msg({ id: 'tc3', kind: 'tool', text: 'read', data: { callId: 'c3', result: 'ENOENT', isError: true } }), conv(), state);
-  assert.match(bad, /<details class="tool danger">/);
+  assert.match(bad, /<details id="tool-c3" class="tool danger">/);
   assert.match(call, /msg-body wide/);
 });
 
@@ -135,4 +135,16 @@ test('helpers: chip, key, ticker, withTickers', () => {
   assert.match(ticker('BTC'), /href="#\/markets\/BTC"/);
   assert.match(withTickers('hold {{BTC}} & {{ETH}}'), /class="ticker" href="#\/markets\/BTC"/);
   assert.match(withTickers('a & b'), /a &amp; b/);
+});
+
+test('a recognised result draws pretty with Raw nested; another draws its pre', () => {
+  const result = JSON.stringify({ ok: true, rows: [{ symbol: 'AAPL', close: 101, prev_close: 100, volume: 5 }] });
+  const pretty = renderMessage(msg({ id: 'tc5', kind: 'tool', text: 'market_snapshot', data: { callId: 'c5', name: 'mcp__alpaca-kit__market_snapshot', result, isError: false } }), conv(), state);
+  assert.match(pretty, /<details id="tool-c5" class="tool">/);
+  assert.match(pretty, /<table class="viz-table">/);
+  assert.match(pretty, /<details id="raw-c5" class="raw"><summary>Raw<\/summary><pre>\{&quot;ok&quot;:true/);
+  const plain = renderMessage(msg({ id: 'tc6', kind: 'tool', text: 'ls', data: { callId: 'c6', name: 'bash', result: 'a\nb', isError: false } }), conv(), state);
+  assert.match(plain, /<pre>a\nb<\/pre>/); assert.doesNotMatch(plain, /viz-|class="raw"/);
+  const failed = renderMessage(msg({ id: 'tc7', kind: 'tool', text: 'account', data: { callId: 'c7', name: 'mcp__alpaca-kit__account', result: JSON.stringify({ ok: true, equity: '1' }), isError: true } }), conv(), state);
+  assert.doesNotMatch(failed, /viz-tiles/, 'an error result stays raw');
 });

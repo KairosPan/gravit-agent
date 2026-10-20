@@ -137,3 +137,15 @@ test('an accepted order result is the tool row plus a green receipt; a failed on
   assert.equal(bad.length, 2);
   assert.equal(bad[1].kind, 'refusal'); assert.equal(bad[1].id, 'rc9'); assert.equal(bad[1].text, 'the user rejected tool "mcp__alpaca-kit__place_order"');
 });
+
+test("a result row carries the call's name and arguments", () => {
+  const known = new Map();
+  rememberCall(known, { type: 'session/event', sessionId: 's1', event: { type: 'tool/call', seq: 50, time: 1, data: { turn: 1, step: 1, callId: 'c50', name: 'mcp__alpaca-kit__screen', arguments: JSON.stringify({ kind: 'gainers' }) } } });
+  const view = { kind: 'card', seq: 51, time: 2, card: { callId: 'c50', phase: 'result', text: '{"ok":true,"rows":[]}', isError: false } };
+  const [row] = toMessages(view, known, NOW);
+  assert.equal(row.kind, 'tool');
+  assert.equal(row.data.name, 'mcp__alpaca-kit__screen');
+  assert.deepEqual(row.data.args, { kind: 'gainers' });
+  const [unknown] = toMessages({ ...view, card: { ...view.card, callId: 'c99' } }, known, NOW);
+  assert.equal('name' in unknown.data, false, 'a result whose call was never seen carries no name');
+});
