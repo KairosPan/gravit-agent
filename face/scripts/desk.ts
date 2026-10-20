@@ -20,8 +20,7 @@ import { existsSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveDshHome } from "@deepseek-ai/dsh-home-paths";
-import { OFF_FILE, clearOff, deskDir, parseDuration, writeOff, type OffState } from "../src/desk.ts";
-import { etTime } from "../src/et.ts";
+import { OFF_FILE, clearOff, deskDir, deskTime, parseDuration, writeOff, type OffState } from "../src/desk.ts";
 
 /** What {@link runDesk} prints for a command or an argument it does not know. */
 const USAGE = "usage: npm run desk -- pause [Nm | Nh | Nd] | resume";
@@ -40,9 +39,10 @@ function reasonOf(err: unknown): string {
  * the process.
  *
  * - `pause [duration]`: writes `OFF`, set by `terminal` - with `until` the duration after `now()`
- *   when one is given ({@link parseDuration}) - and prints `paused`, or `paused until HH:MM ET`.
- *   A pause over a pause replaces it. A duration that does not parse, a zero one included, or a
- *   second argument is the usage line, and nothing is written.
+ *   when one is given ({@link parseDuration}) - and prints `paused`, or `paused until HH:MM ET`,
+ *   dated `YYYY-MM-DD HH:MM ET` when that is not today in New York ({@link deskTime}). A terminal
+ *   pause replaces whatever pause is there. A duration that does not parse - a zero one, one past
+ *   36,500 days - or a second argument is the usage line, and nothing is written.
  * - `resume`: removes `OFF` and prints `resumed`, or `not paused` when there was none. An argument
  *   is the usage line.
  *
@@ -67,7 +67,7 @@ export async function runDesk(cmd: string, args: string[], deps: { home: string;
       deps.out(`cannot write ${file}: ${reasonOf(err)}`);
       return 1;
     }
-    deps.out(state.until === undefined ? "paused" : `paused until ${etTime(new Date(state.until))}`);
+    deps.out(state.until === undefined ? "paused" : `paused until ${deskTime(new Date(state.until), new Date(at))}`);
     return 0;
   }
   if (cmd === "resume" && args.length === 0) {

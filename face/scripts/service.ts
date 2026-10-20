@@ -51,7 +51,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseEnv } from "node:util";
 import { resolveDshHome } from "@deepseek-ai/dsh-home-paths";
-import { deskDir, readEvents, runsOf, type DeskRun, type DeskStatus, type OffState, type TelegramStatus } from "../src/desk.ts";
+import { deskDir, deskTime, readEvents, runsOf, type DeskRun, type DeskStatus, type OffState, type TelegramStatus } from "../src/desk.ts";
 import { etTime } from "../src/et.ts";
 
 /** The LaunchAgent's label: the plist is `com.gravit.face.plist`, the job `gui/<uid>/com.gravit.face`. */
@@ -311,16 +311,18 @@ function lastRunLine(runs: DeskRun[]): string | undefined {
   return undefined;
 }
 
-/** The line about a paused desk: since when and by whom, until when for a timed pause, and the
- * terminal command that lifts it. */
-function offLine(off: OffState): string {
-  const until = off.until === undefined ? "" : ` until ${etTime(new Date(off.until))}`;
-  return `desk: paused since ${etTime(new Date(off.setAt))} by ${off.by}${until} (npm run desk -- resume)`;
+/** The line about a paused desk: since when and by whom, until when for a timed pause - each
+ * dated when not on `now`'s New York date ({@link deskTime}) - and the terminal command that
+ * lifts it. */
+function offLine(off: OffState, now: Date): string {
+  const until = off.until === undefined ? "" : ` until ${deskTime(new Date(off.until), now)}`;
+  return `desk: paused since ${deskTime(new Date(off.setAt), now)} by ${off.by}${until} (npm run desk -- resume)`;
 }
 
 /** The line about the Telegram bridge: where its keys go while it has none; else whether it
- * polls, its last poll, what it dropped and holds queued, and its last conflict when it had one. */
-function telegramLine(telegram: TelegramStatus): string {
+ * polls, its last poll, what it dropped and holds queued, and its last conflict when it had one -
+ * dated when not on `now`'s New York date. */
+function telegramLine(telegram: TelegramStatus, now: Date): string {
   if (!telegram.configured) return "telegram: not configured (TELEGRAM_BOT_TOKEN and TELEGRAM_OPERATOR_ID in $DSH_HOME/.env)";
   const parts = [
     telegram.polling ? "polling" : "not polling",
@@ -328,7 +330,7 @@ function telegramLine(telegram: TelegramStatus): string {
     `${telegram.dropped} dropped`,
     `${telegram.queued} queued`,
   ];
-  if (telegram.conflictAt !== undefined) parts.push(`conflict at ${etTime(new Date(telegram.conflictAt))}`);
+  if (telegram.conflictAt !== undefined) parts.push(`conflict at ${deskTime(new Date(telegram.conflictAt), now)}`);
   return `telegram: ${parts.join(", ")}`;
 }
 
@@ -338,12 +340,13 @@ function telegramLine(telegram: TelegramStatus): string {
  * plist launchd has no job for, so a face answering on the port is not credited to a job launchd
  * lacks; then, when the face answered, its address, uptime, boot time and whether its desk is on -
  * followed by the pause when the desk is paused and the Telegram bridge when the face reports one,
- * their times in New York, then the ledger's read error when there is one, the sleep gaps when
- * there were any, and how the run before it ended - or else `not answering on <port>`; and last
- * the sign-in URL from the log.
+ * their times in New York and dated when not today, then the ledger's read error when there is
+ * one, the sleep gaps when there were any, and how the run before it ended - or else
+ * `not answering on <port>`; and last the sign-in URL from the log.
  * @param args - `label`, the job; `info`, {@link parseLaunchctlPrint}'s; `installed`, whether the
  *   plist exists; `status`, what `/data/desk/status` answered, `undefined` when it did not;
- *   `url`, {@link lastTokenUrl}'s; `port`, the port asked.
+ *   `url`, {@link lastTokenUrl}'s; `port`, the port asked; `now`, when the lines are read, in ms
+ *   since the epoch (default `Date.now()`), which decides what "today" is.
  */
 export function formatStatus(args: {
   label: string;
@@ -352,6 +355,7 @@ export function formatStatus(args: {
   status: DeskStatus | undefined;
   url: string | undefined;
   port: number;
+  now?: number;
 }): string {
   if (!args.installed) return `${args.label}: not installed (npm run service -- install)`;
   const { info, status } = args;
@@ -362,8 +366,9 @@ export function formatStatus(args: {
     const minutes = Math.floor(status.uptimeMs / 60_000) % 60;
     const desk = status.desk.enabled ? "on" : "off (FACE_DESK=0)";
     lines.push(`answering at http://127.0.0.1:${args.port} · up ${hours}h ${minutes}m since ${status.bootedAt} · desk ${desk}`);
-    if (status.off !== undefined) lines.push(offLine(status.off));
-    if (status.telegram !== undefined) lines.push(telegramLine(status.telegram));
+    const now = new Date(args.now ?? Date.now());
+    if (status.off !== undefined) lines.push(offLine(status.off, now));
+    if (status.telegram !== undefined) lines.push(telegramLine(status.telegram, now));
     if (status.ledgerError !== undefined) lines.push(`ledger: unreadable (${status.ledgerError})`);
     if (status.asleep.length > 0) lines.push(`asleep: ${status.asleep.length} gap(s) since boot`);
     const last = lastRunLine(status.runs);

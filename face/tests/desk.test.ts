@@ -1,11 +1,12 @@
 // face/tests/desk.test.ts
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readdir, readFile, stat, utimes, writeFile } from "node:fs/promises";
+import { lstat, lutimes, mkdir, mkdtemp, readdir, readFile, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { withFileLock } from "@deepseek-ai/dsh-atomic-write";
 import {
-  ASLEEP_THRESHOLD_MS, ASLEEP_TICK_MS, LEDGER_ROTATE_BYTES, OFF_FILE, appendEvent, appendRecord, clearOff, deskDir, deskStatus,
+  ASLEEP_THRESHOLD_MS, ASLEEP_TICK_MS, LEDGER_ROTATE_BYTES, OFF_FILE, appendEvent, appendRecord, clearOff, deskDir, deskStatus, deskTime,
   installAsleepWatch, installDesk, lastDeskSession, parseDuration, readEvents, readOffState, registerDeskRoutes, runsOf, writeOff,
   type DeskEvent, type TurnUsage,
 } from "../src/desk.ts";
@@ -222,6 +223,16 @@ test("appendRecord rotates a record with no t under the time of the append, and 
   assert.deepEqual(lines, [`gravit-face: the desk ledger at ${join(deskDir(blocked), "telegram.jsonl")} could not be written: ENOTDIR`]);
 });
 
+test("appendRecord refuses a path for a file name with a TypeError, before anything is touched", async () => {
+  const h = await home();
+  for (const file of ["../escape.jsonl", "sub/notes.jsonl", join(h, "abs.jsonl"), "..", ".", ""]) {
+    const lines: string[] = [];
+    await assert.rejects(appendRecord(h, file, { t: "2026-10-20T13:00:00.000Z" }, { log: (l) => lines.push(l) }), TypeError, JSON.stringify(file));
+    assert.deepEqual(lines, [], "a caller's mistake, not a ledger failure");
+  }
+  assert.deepEqual(await readdir(h), [], "not even the desk's directory was made");
+});
+
 test("the ledger reads back P1's kinds in order, and runsOf passes over them", async () => {
   const h = await home();
   const usage: TurnUsage = { uncachedInputTokens: 1, outputTokens: 2, cacheReadTokens: 3, cacheWriteTokens: 4, routes: ["deepseek-official/deepseek-flash"] };
@@ -270,13 +281,102 @@ test("OFF holds the state as JSON and the events carry it; a pause without until
   const open = await writeOff(h, { by: "terminal" }, () => now() + 1_000);
   assert.deepEqual(open, { setAt: "2026-10-20T18:00:01.000Z", by: "terminal" }, "no until key at all");
   assert.deepEqual(await readOffState(h, () => now() + 365 * 86_400_000), { state: open, expired: false }, "the second write replaced the first");
-  assert.equal(await clearOff(h, "expiry", () => now() + 2_000), true);
+  assert.equal(await clearOff(h, "terminal", () => now() + 2_000), true);
   assert.deepEqual(await readOffState(h, now), { expired: false });
   assert.deepEqual((await readEvents(h)).events, [
     { t: "2026-10-20T18:00:00.000Z", kind: "off-set", by: "page", until: "2026-10-20T18:01:00.000Z" },
     { t: "2026-10-20T18:00:01.000Z", kind: "off-set", by: "terminal" },
-    { t: "2026-10-20T18:00:02.000Z", kind: "off-cleared", by: "expiry" },
+    { t: "2026-10-20T18:00:02.000Z", kind: "off-cleared", by: "terminal" },
   ]);
+});
+
+/** 14:00 ET on 2026-10-20, and the clock `ms` after it. */
+const AT = Date.parse("2026-10-20T18:00:00Z");
+const after = (ms: number) => (): number => AT + ms;
+
+/** The OFF file's text under the home `h`. */
+const offText = (h: string): Promise<string> => readFile(join(deskDir(h), OFF_FILE), "utf8");
+
+test("a phone or page pause never shortens one in force: nothing is written or recorded, and the pause that stands is returned", async () => {
+  const open = await home();
+  const terminal = await writeOff(open, { by: "terminal" }, after(0));
+  const before = await offText(open);
+  assert.deepEqual(await writeOff(open, { by: "telegram", until: AT + 1_000 + 60_000 }, after(1_000)), terminal, "an open-ended pause survives a phone /pause 1m");
+  assert.equal(await offText(open), before, "the file is as it was");
+  assert.deepEqual(await readOffState(open, after(3_600_000)), { state: terminal, expired: false }, "and the minute passing lifts nothing");
+  assert.deepEqual((await readEvents(open)).events.map((e) => e.kind), ["off-set"], "no event for a file left alone");
+
+  const twoHours = await home();
+  const held = await writeOff(twoHours, { by: "terminal", until: AT + 7_200_000 }, after(0));
+  assert.deepEqual(await writeOff(twoHours, { by: "page", until: AT + 60_000 }, after(0)), held, "a 2 h pause survives a page 1 m pause");
+  assert.deepEqual(await writeOff(twoHours, { by: "telegram", until: AT + 7_200_000 }, after(0)), held, "and an equal one changes nothing");
+  assert.deepEqual((await readOffState(twoHours, after(0))).state, held);
+  assert.equal((await readEvents(twoHours)).events.length, 1);
+
+  const touched = await home();
+  await mkdir(deskDir(touched), { recursive: true });
+  await writeFile(join(deskDir(touched), OFF_FILE), "");
+  const asRead = (await readOffState(touched)).state;
+  assert.deepEqual(await writeOff(touched, { by: "telegram", until: AT + 60_000 }, after(0)), asRead, "a touched OFF is an open-ended pause");
+  assert.equal(await offText(touched), "");
+});
+
+test("a phone or page pause that outlasts the one in force replaces it: a later until, or no end at all", async () => {
+  const h = await home();
+  await writeOff(h, { by: "page", until: AT + 3_600_000 }, after(0));
+  const longer = await writeOff(h, { by: "telegram", until: AT + 1_000 + 10_800_000 }, after(1_000));
+  assert.deepEqual(longer, { setAt: "2026-10-20T18:00:01.000Z", by: "telegram", until: "2026-10-20T21:00:01.000Z" }, "a 1 h pause extended by a phone 3 h pause");
+  assert.deepEqual((await readOffState(h, after(7_200_000))).state, longer, "still in force when the hour has gone");
+  const open = await writeOff(h, { by: "page" }, after(2_000));
+  assert.deepEqual(open, { setAt: "2026-10-20T18:00:02.000Z", by: "page" }, "an open-ended pause outlasts any timed one");
+  assert.deepEqual((await readEvents(h)).events.map((e) => [e.kind, (e as { by?: string }).by]), [["off-set", "page"], ["off-set", "telegram"], ["off-set", "page"]]);
+});
+
+test("the terminal's pause replaces any pause, and an expired one is replaced from anywhere as though there were none", async () => {
+  const h = await home();
+  await writeOff(h, { by: "telegram" }, after(0));
+  const short = await writeOff(h, { by: "terminal", until: AT + 60_000 }, after(0));
+  assert.deepEqual(short, { setAt: "2026-10-20T18:00:00.000Z", by: "terminal", until: "2026-10-20T18:01:00.000Z" }, "the terminal replaces an open-ended pause with a 1 m one");
+  assert.equal((await readOffState(h, after(60_000))).expired, true, "which then ends on time");
+  const fresh = await writeOff(h, { by: "page", until: AT + 120_000 + 60_000 }, after(120_000));
+  assert.deepEqual(fresh, { setAt: "2026-10-20T18:02:00.000Z", by: "page", until: "2026-10-20T18:03:00.000Z" }, "an expired pause is replaced as if absent");
+  assert.deepEqual((await readOffState(h, after(120_000))).state, fresh);
+  assert.equal((await readEvents(h)).events.length, 3);
+});
+
+test("clearOff by expiry reads OFF again under the lock: a fresh or open-ended pause stays, an expired one goes", async () => {
+  const h = await home();
+  const fresh = await writeOff(h, { by: "telegram", until: AT + 60_000 }, after(0));
+  assert.equal(await clearOff(h, "expiry", after(0)), false, "a pause written since the caller found one expired");
+  assert.deepEqual(await readOffState(h, after(0)), { state: fresh, expired: false }, "is left as it is");
+  assert.equal(await clearOff(h, "expiry", after(60_000)), true);
+  assert.deepEqual(await readOffState(h), { expired: false });
+  await writeOff(h, { by: "terminal" }, after(0));
+  assert.equal(await clearOff(h, "expiry", after(365 * 86_400_000)), false, "an open-ended pause never expires");
+  assert.deepEqual((await readEvents(h)).events.map((e) => [e.kind, (e as { by?: string }).by]),
+    [["off-set", "telegram"], ["off-cleared", "expiry"], ["off-set", "terminal"]]);
+});
+
+test("writeOff and clearOff wait for the switch's lock", async () => {
+  const h = await home();
+  await mkdir(deskDir(h), { recursive: true });
+  const lock = join(deskDir(h), OFF_FILE);
+  let writing: Promise<unknown> = Promise.resolve();
+  await withFileLock(lock, async () => {
+    writing = writeOff(h, { by: "terminal" });
+    await new Promise((done) => setTimeout(done, 100));
+    assert.deepEqual(await readOffState(h), { expired: false }, "nothing written while another holds the lock");
+  });
+  await writing;
+  assert.equal((await readOffState(h)).state?.by, "terminal", "written once it was let go");
+  let clearing: Promise<boolean> = Promise.resolve(false);
+  await withFileLock(lock, async () => {
+    clearing = clearOff(h, "terminal");
+    await new Promise((done) => setTimeout(done, 100));
+    assert.equal((await readOffState(h)).state?.by, "terminal", "nothing removed while another holds the lock");
+  });
+  assert.equal(await clearing, true);
+  assert.deepEqual(await readOffState(h), { expired: false });
 });
 
 test("an unparseable OFF file still reads as paused", async () => {
@@ -311,15 +411,41 @@ test("an OFF that is not a file still reads as paused and clearOff will not remo
   assert.equal(await clearOff(blocked, "terminal"), false);
 });
 
+test("a link to nothing at OFF still reads as paused, at the link's own time, and resume removes the link", async () => {
+  const h = await home();
+  await mkdir(deskDir(h), { recursive: true });
+  const link = join(deskDir(h), OFF_FILE);
+  await symlink(join(h, "nowhere"), link);
+  const mtime = new Date("2026-10-20T12:34:56.000Z");
+  await lutimes(link, mtime, mtime);
+  assert.deepEqual(await readOffState(h), { state: { setAt: "2026-10-20T12:34:56.000Z", by: "terminal" }, expired: false });
+  assert.equal(await clearOff(h, "expiry"), false, "it never expires");
+  assert.equal(await clearOff(h, "terminal"), true);
+  await assert.rejects(lstat(link), { code: "ENOENT" });
+  await assert.rejects(stat(join(h, "nowhere")), { code: "ENOENT" }, "nothing was made where it pointed");
+});
+
 test("parseDuration", () => {
   assert.equal(parseDuration("30m"), 1_800_000); assert.equal(parseDuration("2h"), 7_200_000); assert.equal(parseDuration("1d"), 86_400_000);
   for (const bad of ["", "2", "2x", "-1h", "1.5h", " 2h", "0m"]) assert.equal(parseDuration(bad), undefined, bad);
 });
 
-test("parseDuration refuses every zero, every other spelling and an amount past a safe integer", () => {
-  for (const bad of ["0h", "0d", "00m", "2h ", "2H", "+2h", "2hm", "h", "1e3m", "2 h", "99999999999999999999d"]) assert.equal(parseDuration(bad), undefined, bad);
+test("parseDuration refuses every zero, every other spelling and anything past 36,500 days", () => {
+  for (const bad of ["0h", "0d", "00m", "2h ", "2H", "+2h", "2hm", "h", "1e3m", "2 h", "36501d", "876001h", "99999999d", "99999999999999999999d"]) {
+    assert.equal(parseDuration(bad), undefined, bad);
+  }
   assert.equal(parseDuration("90m"), 5_400_000);
   assert.equal(parseDuration("010m"), 600_000, "a leading zero is still a digit");
+  assert.equal(parseDuration("36500d"), 36_500 * 86_400_000, "a hundred years is the longest");
+  assert.ok(new Date(Date.now() + (parseDuration("36500d") ?? 0)).getTime() > 0, "and its end is a time");
+});
+
+test("deskTime dates a time on another New York date than now's, and only then", () => {
+  const now = new Date("2026-10-21T03:30:00Z"); // 23:30 ET on the 20th
+  assert.equal(deskTime(new Date("2026-10-20T04:00:00Z"), now), "00:00 ET", "the 20th's first minute");
+  assert.equal(deskTime(new Date("2026-10-21T03:59:00Z"), now), "23:59 ET", "its last, though UTC says the 21st");
+  assert.equal(deskTime(new Date("2026-10-21T04:00:00Z"), now), "2026-10-21 00:00 ET", "the 21st");
+  assert.equal(deskTime(new Date("2026-10-20T03:59:00Z"), now), "2026-10-19 23:59 ET", "the 19th");
 });
 
 test("deskStatus reports off, the desk session and today's desk turns", async () => {

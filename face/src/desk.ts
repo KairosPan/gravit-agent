@@ -33,12 +33,13 @@
  * and so does a wall clock set forward past the threshold; one set back writes nothing.
  *
  * Why an `OFF` switch: the operator quiets the desk from wherever they are - the phone, the Desk
- * panel, a terminal - and only a terminal makes it loud again (§5.8). The switch is a file, `OFF`,
+ * panel, a terminal - and only a terminal makes it loud again (§5.8), so a pause from the phone or
+ * the panel never shortens the one in force ({@link writeOff}). The switch is a file, `OFF`,
  * beside the ledger: while it is there the desk is paused. What it holds ({@link OffState}: who
- * set it, when, until when) only adds to that - an `OFF` that says nothing a state can be read
- * from, `touch OFF` included, is a pause from a terminal. A pause lifts at its `until`, on
- * `npm run desk -- resume` ({@link clearOff}) or when the file is deleted; each set and each lift
- * that goes through this module is an event.
+ * set it, when, until when) only adds to that - anything by that name that says nothing a state
+ * can be read from, `touch OFF` included, is a pause from a terminal. A pause lifts at its
+ * `until`, on `npm run desk -- resume` ({@link clearOff}) or when the file is deleted; each set
+ * and each lift that goes through this module is an event, written under the switch's lock.
  *
  * {@link installDesk} mounts it all on a booted face. The status route ({@link deskStatus}:
  * pid, version, uptime, this run's gaps, the ledger's runs, the pause in force, the desk
@@ -50,10 +51,10 @@
  */
 import { appendFile, lstat, mkdir, open, readFile, rename, stat, unlink } from "node:fs/promises";
 import type { IncomingMessage } from "node:http";
-import { extname, join } from "node:path";
+import { basename, extname, join } from "node:path";
 import { withFileLock, writeFileAtomic } from "@deepseek-ai/dsh-atomic-write";
 import { isTrustedDataRequest } from "./data.ts";
-import { etDayStart } from "./et.ts";
+import { etDate, etDayStart, etTime } from "./et.ts";
 import { fencedGet } from "./http.ts";
 import type { RouteRegistrar } from "./static.ts";
 import { DSH_PIN } from "./version.ts";
@@ -182,12 +183,14 @@ function rotatedName(file: string, stamp: string): string {
  * lands in a file another has just moved aside. Files are created `0600`; the mode applies on
  * creation only, as `roster.log`'s does.
  *
- * Never rejects. Any failure - directory, lock, rename, tail read, append - is one call to
- * `log` (default `console.error`) naming the file and the error's code, or its message when it
- * has none, and the record is dropped: the ledger is a record, never a gate on the face. The lock's
- * retries are not jittered, so appenders that start together take it about one per retry round,
- * and a burst of a dozen or more can outlast its two-second wait (measured: 20 at once, 6
- * dropped); the desk's records come one or two at a time.
+ * Never rejects on the ledger. Any failure - directory, lock, rename, tail read, append - is one
+ * call to `log` (default `console.error`) naming the file and the error's code, or its message
+ * when it has none, and the record is dropped: the ledger is a record, never a gate on the face.
+ * The lock's retries are not jittered, so appenders that start together take it about one per
+ * retry round, and a burst of a dozen or more can outlast its two-second wait (measured: 20 at
+ * once, 6 dropped); the desk's records come one or two at a time. A `file` that is not a plain
+ * name - a path, `.`, `..`, empty - is the caller's mistake, not the ledger's: it rejects with a
+ * `TypeError` before anything is touched, so no record lands outside the desk's directory.
  * @param home - the harness home.
  * @param file - the file's name in {@link deskDir} - a name, not a path.
  * @param record - the record, written as one JSON line.
@@ -199,6 +202,9 @@ export async function appendRecord(
   record: object,
   opts: { rotateBytes?: number; log?: (line: string) => void } = {},
 ): Promise<void> {
+  if (basename(file) !== file || file === "" || file === "." || file === "..") {
+    throw new TypeError(`appendRecord takes a file name in the desk's directory, not ${JSON.stringify(file)}`);
+  }
   const dir = deskDir(home);
   const path = join(dir, file);
   try {
@@ -416,15 +422,17 @@ function offStateOf(text: string): OffState | undefined {
 /**
  * Whether the desk is paused: `OFF`'s state, and whether its `until` has come.
  *
- * No `OFF` - none written, or a non-directory where `face/` or `face/desk/` should be, so that
- * none can exist - is `{ expired: false }`, with no state. An `OFF` that holds a state is that
- * state, `expired` once `now()` reaches its `until`; one without an `until` never expires.
- * Anything else at `OFF` - the empty file `touch` leaves, text that is no state, a directory, a
- * file the face may not read - is a pause all the same, read as `{ setAt: <its mtime>, by:
- * "terminal" }`, never expiring: the switch is the file being there, and what it holds only says
- * who and until when. Rejects only when not even the file's `lstat` answers - the desk's
- * directory itself unreadable - so a switch that cannot be read never reads as no switch. Expiry
- * is read here, not acted on: whoever finds it expired lifts it with {@link clearOff}.
+ * No `OFF` - nothing by that name, or a non-directory where `face/` or `face/desk/` should be, so
+ * that nothing can be there - is `{ expired: false }`, with no state. An `OFF` that holds a state
+ * is that state, `expired` once `now()` reaches its `until`; one without an `until` never
+ * expires. Anything else by that name - the empty file `touch` leaves, text that is no state, a
+ * link to nothing, a directory, a file the face may not read - is a pause all the same, read as
+ * `{ setAt: <its own mtime>, by: "terminal" }`, never expiring: the switch is the name being
+ * there, and what the file holds only says who and until when. Whether the name is there is
+ * `lstat`'s answer, so a link is judged as itself, not by what it points at. Rejects only when
+ * not even `lstat` answers - the desk's directory itself unreadable - so a switch that cannot be
+ * read never reads as no switch. Expiry is read here, not acted on: whoever finds it expired lifts
+ * it with {@link clearOff}.
  * @param home - the harness home.
  * @param now - the clock `until` is compared with, default `Date.now`.
  */
@@ -433,9 +441,8 @@ export async function readOffState(home: string, now: () => number = Date.now): 
   let text: string | undefined;
   try {
     text = await readFile(file, "utf8");
-  } catch (err) {
-    if (isAbsent(err)) return { expired: false };
-    /* there, but not a file the face can read: a pause, below */
+  } catch {
+    /* nothing to read - no OFF, a link to nothing, a directory, a file shut to the face: lstat tells which */
   }
   const state = text === undefined ? undefined : offStateOf(text);
   if (state !== undefined) return { state, expired: state.until !== undefined && Date.parse(state.until) <= now() };
@@ -443,56 +450,103 @@ export async function readOffState(home: string, now: () => number = Date.now): 
   try {
     mtime = (await lstat(file)).mtime;
   } catch (err) {
-    if (isAbsent(err)) return { expired: false }; // removed since the read
+    if (isAbsent(err)) return { expired: false };
     throw err;
   }
   return { state: { setAt: mtime.toISOString(), by: "terminal" }, expired: false };
 }
 
+/** Whether a pause until `until` outlasts one in force until `held`, either being `undefined` for
+ * a pause with no end: an open-ended pause outlasts any timed one and is outlasted by none; of two
+ * timed pauses, the later `until` outlasts. */
+function outlasts(until: string | undefined, held: string | undefined): boolean {
+  if (held === undefined) return false;
+  if (until === undefined) return true;
+  return Date.parse(until) > Date.parse(held);
+}
+
 /**
- * Pause the desk: write `OFF`, then record an `off-set` event that carries the same state.
+ * Pause the desk: write `OFF` and record an `off-set` event carrying the same state - unless the
+ * phone or the Desk panel asks for less than the pause already in force.
  *
- * The file is replaced in one step (`writeFileAtomic`: a sibling written `0600`, renamed over
- * `OFF`), so a reader finds the old state or the new, never part of one, and a pause written over
- * a pause replaces it. Rejects when `OFF` cannot be written - a pause that did not happen must not
- * report one - and, before writing anything, on an `until` that is no time (`RangeError`); the
- * event, written after the file, never rejects ({@link appendEvent}).
+ * The phone and the panel can only make the desk quieter (§5.8), so from `telegram` or `page` a
+ * pause in force stands unless the one asked for outlasts it: an open-ended pause stands against
+ * any, and of two timed pauses the later `until` wins. Were it otherwise, a phone's `/pause 1m`
+ * over a terminal's open-ended pause would lift it a minute later. A `terminal` pause replaces
+ * whatever is there; an expired pause is replaced from anywhere, as though there were none. When
+ * the pause in force stands, nothing is written and no event recorded, and that pause is what
+ * this returns - so a reply built from the result says what is true.
+ *
+ * All under the switch's lock, which {@link clearOff} takes too - its directory made first, as
+ * {@link appendRecord} makes its own: reading the pause in force, writing and recording are one
+ * step, so a pause racing a pause or a resume leaves the file and the ledger in agreement. The
+ * file is replaced in one step (`writeFileAtomic`: a sibling written `0600`, renamed over `OFF`),
+ * so a reader, which takes no lock, finds the old state or the new, never part of one. Rejects
+ * when `OFF` cannot be written or its lock taken - a pause that did not happen must not report
+ * one - and, before anything, on an `until` that is no time (`RangeError`); the event never
+ * rejects ({@link appendEvent}).
  * @param home - the harness home.
  * @param input - `by`, who paused; `until`, when the pause lifts in ms since the epoch, absent for
  *   a pause that lasts until a resume.
- * @param now - the clock `setAt` is read from, default `Date.now`.
- * @returns the state written.
+ * @param now - the clock `setAt` is read from and the pause in force is judged expired by,
+ *   default `Date.now`.
+ * @returns the pause in force afterwards: the one written, or the one that stood.
  */
 export async function writeOff(home: string, input: { by: OffState["by"]; until?: number }, now: () => number = Date.now): Promise<OffState> {
   const until = input.until === undefined ? undefined : new Date(input.until).toISOString();
-  const state: OffState = { setAt: new Date(now()).toISOString(), by: input.by, ...(until === undefined ? {} : { until }) };
-  await writeFileAtomic(join(deskDir(home), OFF_FILE), `${JSON.stringify(state)}\n`, { mode: 0o600 });
-  await appendEvent(home, { t: state.setAt, kind: "off-set", by: state.by, ...(until === undefined ? {} : { until }) });
-  return state;
+  const dir = deskDir(home);
+  const file = join(dir, OFF_FILE);
+  await mkdir(dir, { recursive: true });
+  return withFileLock(file, async () => {
+    const at = now();
+    if (input.by !== "terminal") {
+      const { state: held, expired } = await readOffState(home, () => at);
+      if (held !== undefined && !expired && !outlasts(until, held.until)) return held;
+    }
+    const state: OffState = { setAt: new Date(at).toISOString(), by: input.by, ...(until === undefined ? {} : { until }) };
+    await writeFileAtomic(file, `${JSON.stringify(state)}\n`, { mode: 0o600 });
+    await appendEvent(home, { t: state.setAt, kind: "off-set", by: state.by, ...(until === undefined ? {} : { until }) });
+    return state;
+  });
 }
 
 /**
  * Lift the pause: remove `OFF`, then - only when there was one to remove - record an
  * `off-cleared` event, so a second resume, or one racing another, records nothing.
  *
- * `by` is `terminal` for `npm run desk -- resume` and `expiry` for a pause found past its
- * `until`: the phone and the Desk panel only ever pause. No `OFF` - or a non-directory where its
- * directory should be - is `false`. Rejects when `OFF` is there and cannot be removed (a
- * directory, a directory the face may not write): the pause stands, and the caller says so.
+ * `by` is `terminal` for `npm run desk -- resume`, which lifts whatever is there, and `expiry` for
+ * a pause found past its `until`, which lifts it only if it still is: `OFF` is read again under
+ * the switch's lock, which {@link writeOff} takes too, so a pause written between the caller's
+ * read and this call stands. The phone and the Desk panel only ever pause. No `OFF` - or a
+ * non-directory where its directory should be - is `false`, before any lock, and so is an
+ * `expiry` that finds the pause in force or without an end. Rejects when `OFF` is there and cannot
+ * be removed (a directory, a directory the face may not write) or its lock cannot be taken: the
+ * pause stands, and the caller says so.
  * @param home - the harness home.
- * @param by - what lifted it.
- * @param now - the event's clock, default `Date.now`.
+ * @param by - what lifts it.
+ * @param now - the clock the event is stamped with and `expiry` judges by, default `Date.now`.
  * @returns whether a pause was lifted.
  */
 export async function clearOff(home: string, by: "terminal" | "expiry", now: () => number = Date.now): Promise<boolean> {
+  const file = join(deskDir(home), OFF_FILE);
   try {
-    await unlink(join(deskDir(home), OFF_FILE));
+    await lstat(file); // nothing there is nothing to lift; something there means the lock's directory exists
   } catch (err) {
     if (isAbsent(err)) return false;
     throw err;
   }
-  await appendEvent(home, { t: new Date(now()).toISOString(), kind: "off-cleared", by });
-  return true;
+  return withFileLock(file, async () => {
+    const at = now();
+    if (by === "expiry" && !(await readOffState(home, () => at)).expired) return false;
+    try {
+      await unlink(file);
+    } catch (err) {
+      if (isAbsent(err)) return false;
+      throw err;
+    }
+    await appendEvent(home, { t: new Date(at).toISOString(), kind: "off-cleared", by });
+    return true;
+  });
 }
 
 /** A pause's length as the phone, the Desk panel and the terminal spell it. */
@@ -501,17 +555,34 @@ const DURATION = /^(\d+)(m|h|d)$/;
 /** Each unit of {@link DURATION} in milliseconds. */
 const UNIT_MS: Readonly<Record<string, number>> = { m: 60_000, h: 3_600_000, d: 86_400_000 };
 
+/** The longest pause a duration asks for: 36,500 days, a hundred years - far inside what a `Date`
+ * can hold, so now plus any duration is a time. */
+const MAX_PAUSE_MS = 36_500 * 86_400_000;
+
 /**
  * A pause's length in milliseconds: digits, then `m`, `h` or `d` - `30m`, `2h`, `1d`. Anything
  * else is `undefined`: a sign, a space, a fraction, a capital unit, a zero amount (a pause of
- * nothing is none) and an amount past `Number.MAX_SAFE_INTEGER` milliseconds.
+ * nothing is none) and an amount past 36,500 days ({@link MAX_PAUSE_MS}), so that a pause's end
+ * is always a time a `Date` can hold.
  * @param text - the duration as typed.
  */
 export function parseDuration(text: string): number | undefined {
   const match = DURATION.exec(text);
   if (match === null) return undefined;
   const ms = Number(match[1]) * UNIT_MS[match[2]];
-  return ms > 0 && Number.isSafeInteger(ms) ? ms : undefined;
+  return ms > 0 && ms <= MAX_PAUSE_MS ? ms : undefined;
+}
+
+/**
+ * A time as the desk shows it to the operator: `14:03 ET` on the same New York date as `now`, and
+ * `2026-10-21 14:03 ET` on any other - so a pause until tomorrow, or one set yesterday, never
+ * reads as today's.
+ * @param at - the time shown.
+ * @param now - the time it is read at.
+ */
+export function deskTime(at: Date, now: Date): string {
+  const date = etDate(at);
+  return date === etDate(now) ? etTime(at) : `${date} ${etTime(at)}`;
 }
 
 /** The Telegram bridge as the status reports it: `configured`, whether its token and the

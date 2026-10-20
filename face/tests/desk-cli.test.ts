@@ -48,8 +48,19 @@ test("runDesk pause 2h writes OFF and prints the ET time; resume clears it; a ba
   ], "the ledger's record of it, on the command's clock");
 });
 
-test("runDesk: an unknown command, an extra argument and a zero pause are usage, and write nothing", async () => {
-  const cases: [string, string[]][] = [["", []], ["bogus", []], ["status", []], ["pause", ["0m"]], ["pause", ["2h", "3h"]], ["resume", ["now"]]];
+test("runDesk dates a pause that ends on another New York day", async () => {
+  const h = await home(); const r = rig(h);
+  assert.equal(await runDesk("pause", ["1d"], r.deps), 0);
+  assert.deepEqual(r.take(), ["paused until 2026-10-21 14:00 ET"], "1d at 14:00 ET: tomorrow");
+  assert.equal(await runDesk("pause", ["10h"], r.deps), 0);
+  assert.deepEqual(r.take(), ["paused until 2026-10-21 00:00 ET"], "past midnight is tomorrow too");
+  assert.equal(await runDesk("pause", ["599m"], r.deps), 0);
+  assert.deepEqual(r.take(), ["paused until 23:59 ET"], "the last minute of today is undated");
+});
+
+test("runDesk: an unknown command, an extra argument, a zero pause and one past 36,500 days are usage, and write nothing", async () => {
+  const cases: [string, string[]][] = [["", []], ["bogus", []], ["status", []], ["pause", ["0m"]], ["pause", ["99999999d"]], ["pause", ["2h", "3h"]],
+    ["resume", ["now"]]];
   for (const [cmd, args] of cases) {
     const h = await home(); const r = rig(h);
     assert.equal(await runDesk(cmd, args, r.deps), 2, [cmd, ...args].join(" "));
@@ -83,7 +94,7 @@ test("the CLI acts on the home DSH_HOME names and exits with the command's code 
     { env: { ...process.env, DSH_HOME: h }, encoding: "utf8" }, (err, stdout) => resolve({ code: err === null ? 0 : (err.code ?? null), stdout })));
   const paused = await run(["pause", "30m"]);
   assert.equal(paused.code, 0);
-  assert.match(paused.stdout, /^paused until \d{2}:\d{2} ET\n$/);
+  assert.match(paused.stdout, /^paused until (\d{4}-\d{2}-\d{2} )?\d{2}:\d{2} ET\n$/, "dated when run in the half hour before midnight ET");
   assert.equal((await readOffState(h)).state?.by, "terminal");
   assert.deepEqual(await run(["resume"]), { code: 0, stdout: "resumed\n" });
   assert.deepEqual(await run(["pause", "soon"]), { code: 2, stdout: `${USAGE}\n` });
