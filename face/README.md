@@ -3,9 +3,9 @@
 One Node 22 process. It boots the DeepSeek Harness — dsh `0.2.0-rc.2`, pinned in
 `src/version.ts` — from the `face` profile (bundles: `@deepseek-ai/dsh-base`
 only), composes its policy defaults below the operator's patch layer and its own
-host rows on top of it, and serves the operator's chat UI — and the two
-read-only instrument pages below — at http://127.0.0.1:3090/, behind the
-tokenized sign-in URL it prints at start. No build step — `tsx` runs the
+host rows on top of it, and serves the operator's client — Messages, Markets and
+Account — at http://127.0.0.1:3090/, behind the tokenized sign-in URL it prints at
+start. No build step — `tsx` runs the
 TypeScript directly. Specs: `../docs/superpowers/specs/2026-08-30-face-chat-light-design.md`
 and `../docs/superpowers/specs/2026-08-31-face-instruments-design.md` — dated
 design history, written against dsh 0.1.1-rc.2; this file and
@@ -33,16 +33,11 @@ No API keys, backend, workbench files or runtime data are
 published. The previous public `/market` and `/account` URLs permanently
 redirect to the landing page's `/#product` section.
 
-Screenshot fixtures are isolated from the local host. Run
-`node scripts/serve-research-demo.mjs` to serve the real channel renderer with
-a fictional English research record at `http://127.0.0.1:4182` (1440 × 1080).
-Capture that preview separately at 1440 × 1080 into `landing/demo-research.webp`.
-From `face/`, run `node scripts/capture-demo-assets.mjs --capture` to regenerate
-the Market and Account images at the same size. It serves the actual clients
-with in-memory fictional responses on port 4181, uses an installed Playwright
-CLI from the npm cache (or `PLAYWRIGHT_CLI_PATH`), then closes the fixture.
-Omit `--capture` to inspect the preview manually. These capture helpers are
-not included in the Vercel upload or public build.
+The three images were captured, at 1440 × 1080 with fictional data, from the
+old client's channel page and its `/market` and `/account` pages. Those pages
+left with stage 2 of route A, and the two capture helpers that served them went
+with them (`scripts/serve-research-demo.mjs`, `scripts/capture-demo-assets.mjs`);
+the images stay as they are until new ones are captured from the current client.
 
 To deploy again after signing in with `vercel login`:
 
@@ -135,7 +130,8 @@ labelled `gravit-face` and exits 1.
 (`docs/superpowers/specs/2026-10-09-demo-v2-gravit-frontend-design.md`), mounted on the face
 as its client by route A of `docs/superpowers/specs/2026-10-19-gravit-ui-on-face-design.md`:
 vanilla ES modules under `client/js`, one sheet, no bundler, no back end of its own —
-everything on screen is what dsh says (`DEVELOPMENT.md` §5). Stage 1 of three is built:
+everything on screen is what dsh and the face's `/data` routes say (`DEVELOPMENT.md` §5).
+Stages 1 and 2 of three are built:
 
 - **host-fed**: Messages — the session list (every session the host lists, newest first, a
   room's members folded under it, subagent children left out), a conversation's real
@@ -146,15 +142,17 @@ everything on screen is what dsh says (`DEVELOPMENT.md` §5). Stage 1 of three i
   cards (the order card, an approval, a question) answered through the mux, the one status
   line under the composer (not signed in, reconnecting, a host error, a command's word), and
   Settings (Cream · Black · System);
-- **still the old pages**: Markets (`/market`) and Account (`/account`), linked from the rail —
-  stage 2 moves them into the app and gives them the host's data;
+- **host-fed since stage 2**: Markets (`#/markets`) — the watchlist, the holdings and a search
+  with the face's live quotes, and a market's page with its daily bars — and Account
+  (`#/account/portfolio`, `#/account/venues`) — the paper account's Portfolio, the Statement and
+  Venues ("Markets and Account" below). The old `/market` and `/account` pages are gone (404);
 - **not yet built**: Discover (the plugin shop, the channel inventory, the bots' and roles'
   pages, the host facts), the row actions beyond rename (archive, delete, fork), the subagent
   dock, Mail — stage 3's.
 
-What the browser keeps is one key, `localStorage["gravit-ui.prefs"]` — the theme, the rail's
-fold, the last conversation, what was seen, the watchlist. Nothing else: a reload rebuilds the
-page from the host. The demo's director (`d`), its scripted Gravit and its seed are gone with
+What the browser keeps is two keys: `localStorage["gravit-ui.prefs"]` — the theme, the rail's
+fold, the last conversation, what was seen — and the watchlist under
+`gravit.market.watchlist.v1`. Nothing else: a reload rebuilds the page from the host. The demo's director (`d`), its scripted Gravit and its seed are gone with
 the move; `tests/client/*.test.js` keep the renderers and the host layer honest on a fake DOM
 and a fake host, and `gravit-client-smoke.test.ts` opens one real session over the real wire.
 Client assets carry no cache headers: hard-reload after any edit under `client/`.
@@ -184,10 +182,10 @@ dsh's `connection.authorizeIndex`):
   restarting mints a new secret, which signs every browser out.
 - A tab whose cookie expired reads `not signed in - open the URL gravit-face
   printed when it started (…/?token=…)` on its status line.
-- `/market`, `/account` and `/client/*` stay public files, and every `/data/*`
-  route keeps only its own loopback Host/Origin fence (`isTrustedDataRequest`,
-  `src/data.ts`) — no cookie, exactly as at 0.1.1 (upgrade decision D8). The
-  instrument pages therefore work without a sign-in; the chat page does not.
+- `/client/*` stays public files, and every `/data/*` route keeps only its own
+  loopback Host/Origin fence (`isTrustedDataRequest`, `src/data.ts`) — no cookie,
+  exactly as at 0.1.1 (upgrade decision D8). The page itself, at `/`, needs the
+  sign-in; the old `/market` and `/account` pages, which did not, are gone.
 
 ### What boot refuses
 
@@ -263,7 +261,7 @@ Pass that to `mcp__akshare__akshare_stock_a`. This fetches the whole vendor
 snapshot before returning at most 500 rows; inspect `truncated` and `row_count`
 before drawing whole-market conclusions. Calls have a 120-second timeout.
 These public-source queries have no PIT guard and are for interactive research;
-they do not supply historical replay or the `/market` page's US PIT instruments.
+they do not supply historical replay or the PIT bed's US instruments.
 Data timestamps and retrieval time are different, and source errors must remain
 visible (the Eastmoney and Xueqiu quote tests failed on 2026-09-15).
 
@@ -468,7 +466,7 @@ these. Each has a default in the code and is the operator's to revisit:
 | D1 | No `profileContext`: no settings service (`settings/describe` has none), `$DSH_HOME/settings.yaml` unread, no config editor, plugin manager or `dsh-hmr` | `src/boot.ts` header, divergence 2 |
 | D2 | Default model = the profile's `agent-default-model` row, else `deepseek-official/deepseek-flash` | above |
 | D3–D7, D9, D15 | The policy rows | above |
-| D8 | No browser cookie outside `/` and `/api`: `/data/*` keeps only its loopback fence, `/market` and `/account` stay public | "Sign-in" |
+| D8 | No browser cookie outside `/` and `/api`: `/data/*` keeps only its loopback fence (the `/market` and `/account` pages it also covered left with stage 2) | "Sign-in" |
 | D10 | No HTTP proxy policy | "Run", env table |
 | D11 | Pre-0.2 room logs stay on disk untouched; a legacy member session becomes that member's failed turn | "Sessions written before 0.2.0" |
 | D12 | The 0.1.1 CLI and the pre-upgrade face do not run on a home 0.2.0 has written — an operator practice, not code | "Upgrading dsh" |
@@ -478,40 +476,50 @@ these. Each has a default in the code and is the operator's to revisit:
 | D17 | Three descriptor-v2 subagent children and one seq-gap log stay unreadable on disk, like D11 | "Sessions written before 0.2.0" |
 | D18 | The tool-result spill budget stays at dsh-base's `maxInlineTokens: 12500` | "Market-data renderers" |
 
-## Market and Account
+## Markets and Account
 
-The primary navigation opens **`/market`**, a personal watchlist spanning US
-stocks, A shares and cryptocurrency pairs, and **`/account`**, the read-only
-account console. These pages never place or cancel orders.
+The rail opens **Markets** (`#/markets`) — the watchlist, the account's holdings and a search
+across US stocks, A shares and cryptocurrency pairs, with the face's live quotes — and
+**Account** (`#/account/portfolio`), the read-only paper account. Both are screens of the client
+at `/` since stage 2 of route A; the old `/market` and `/account` pages are gone, and their
+addresses answer 404. Neither screen places or cancels an order: Gravit orders through the MCP
+tools, behind both gates.
 
-### Market watchlist
+### Markets
 
-The top search button (also **Cmd/Ctrl K**) queries an on-demand instrument
-search API by name or code. Search supports market filters, keyboard
-navigation and adding/removing selections. The list supports market tabs,
-addition-order/code/percentage-change sorting and undoing the most recent
-removal. Missing prices remain em dashes and sort after available prices.
-Quotes retain their own currency, source and observation date; green means a
-rise and red a fall across all three markets.
+One table under the search box (`Search markets`), the tabs **All · Crypto · Stocks** (Stocks
+holds US and A shares together) and, with two or more rows, the sort **Most traded · Biggest
+moves** (by the quote's volume or the size of its move; a missing value sorts last either way,
+so A shares, whose volume is unavailable, end Most traded). A row: the star (`Watch AAPL` /
+`Stop watching AAPL`), the name with its symbol and exchange and a `Held` tag for a position,
+the price in its own currency (`$189.24`, `¥1,688.00`), the change, the volume (`52.3M shares`,
+`12.3k BTC`) and the quote's state — `Live`, `Delayed`, `Stale` or `No quote`, `· Closed` when
+the market is. Missing values stay em dashes. Green is a rise and red a fall in every market.
 
-A first visit starts empty. Selections are stored under
-`gravit.market.watchlist.v1` in this browser's `localStorage`, with
-market-qualified identifiers such as `us:AAPL`, `cn:600519` and
-`crypto:BTC/USD`. They are independent of the broker account and are not
-synchronized across devices. A browser that saved its list before the
-2026-10-08 rename keeps it: the page reads `kairos.market.watchlist.v1` while
-the new key is absent and never writes or deletes the old one. Same-origin
-browser tabs synchronize through storage events. Storage failures are shown
-explicitly.
+With no query the rows are the watchlist, then the holdings not on it. With a query they are
+the search's hits (`N markets for “q”`, and Clear), each with one quote read for up to 30 hits.
+Three muted one-liners say what is going on and nothing else: the quotes' connection
+(`Connecting…`, `Updating every 15 s` while the stream is down, `Quotes unavailable`), or while
+searching the search's state (`Searching…`, `Nothing matches “q”`, `Search is unavailable`,
+`Some results may be missing`), and the watchlist's trouble (`Couldn't save the watchlist`,
+`The watchlist is full`, `Couldn't read the saved watchlist`). Nothing watched and no query
+reads `Nothing watched yet`. The wire's own words — a quote's or a provider's message, a search
+note — are Chinese and never reach the screen; every word is drawn from the wire's enums.
 
-The live Market page uses `GET /data/quotes/stream?ids=us:AAPL,cn:603986,crypto:BTC/USD`
-for Server-Sent Events (SSE). Each named `quotes` event contains the current
-selected-set snapshot; named `heartbeat` events arrive every 15 seconds.
-`GET /data/quotes?ids=...` provides the same JSON contract for manual refresh
-and a 15-second browser fallback when SSE is unavailable. Only selected
-identities are requested, with at most 100 per page. Empty selections make
-no upstream requests. Adding/removing a selection updates subscriptions;
-hidden pages release their connections and reconnect when visible.
+The watchlist is this browser's: at most 100 market-qualified identities (`us:AAPL`,
+`cn:600519`, `crypto:BTC/USD`) under `gravit.market.watchlist.v1` in `localStorage` — the key the
+old page wrote, so a list carries over. A browser that saved before the 2026-10-08 rename keeps
+its list too: `kairos.market.watchlist.v1` is read while the new key is absent and never written
+or deleted. Same-origin tabs stay in step through storage events. The list is independent of the
+broker account and not synchronised across devices.
+
+The quotes use `GET /data/quotes/stream?ids=us:AAPL,cn:603986,crypto:BTC/USD` for Server-Sent
+Events (SSE). Each named `quotes` event carries the selected set's whole snapshot; named
+`heartbeat` events arrive every 15 seconds. `GET /data/quotes?ids=...` serves the same JSON
+contract for a hit's one read and for the 15-second fallback while SSE is unavailable. The
+screen subscribes to a market page's own asset, the watchlist and the holdings — at most 100
+identities — and re-subscribes when that set changes; empty selections make no upstream
+request. The quotes run only while Markets is on screen in a visible tab and pause otherwise.
 
 The server shares one Alpaca and one Coinbase socket across active pages,
 subscribing to their union without whole-market wildcards. A latest-value
@@ -524,9 +532,9 @@ known quote with its original timestamp and an explicit stale status.
 
 | Market | Provider and update path | Coverage and interpretation |
 |---|---|---|
-| US stocks/ETFs | Alpaca snapshots, trades and daily-bar WebSocket updates | `iex` by default, covering only IEX. Its stream subscribes to at most 30 symbols; remaining selected symbols use periodic snapshots. `sip` requires its entitlement; `delayed_sip` is explicitly labelled 15-minute delayed. Changes use the previous session's close. |
-| A shares | iFinD `real_time_quotation`, only requested codes | Requires an iFinD access or refresh token. Without one the page says the source is unconfigured. Polling defaults to 30 seconds while selected. Event timestamps are interpreted as Beijing time. Volume stays unavailable until its provider units can be verified with an account. |
-| Cryptocurrency | Coinbase Exchange ticker/heartbeat WebSocket, per-product REST ticker/stats | Public USD pairs supported by Coinbase; a search result is not a guarantee of Coinbase coverage. Changes and volume use a rolling 24-hour window, and are labelled accordingly. |
+| US stocks/ETFs | Alpaca snapshots, trades and daily-bar WebSocket updates | `iex` by default, covering only IEX. Its stream subscribes to at most 30 symbols; remaining selected symbols use periodic snapshots. `sip` requires its entitlement; `delayed_sip` is labelled `SIP, delayed`. Changes use the previous session's close. |
+| A shares | iFinD `real_time_quotation`, only requested codes | Requires an iFinD access or refresh token. Without one, Venues reads `iFinD · Not configured` and the rows `No quote`. Polling defaults to 30 seconds while selected. Event timestamps are interpreted as Beijing time. Volume stays unavailable until its provider units can be verified with an account. |
+| Cryptocurrency | Coinbase Exchange ticker/heartbeat WebSocket, per-product REST ticker/stats | Public USD pairs supported by Coinbase; a search result is not a guarantee of Coinbase coverage. Changes and volume use a rolling 24-hour window, labelled `24h`. |
 
 Snapshots initialize the display and refresh US/crypto baselines every 60
 seconds while streaming, or every 15 seconds while their socket is unavailable.
@@ -536,35 +544,27 @@ trades. Quote time always comes from a provider event, never local retrieval
 time. Old or missing data is not replaced by historical PIT prices. These
 live, interactive reads are not guarded replay/backtest evidence.
 
+`GET /data/symbols/search?q=兆易创新&market=all` queries Tencent smartbox for
+A shares and Yahoo Finance search for US stocks/ETFs and USD cryptocurrency
+pairs. `market` accepts `all`, `us`, `cn`, or `crypto` (the screen searches
+`all`). Search does not download or save a whole-market directory. The backend
+caches up to 128 successful queries in memory for 60 seconds, shares duplicate
+in-flight requests, and bounds each provider request to six seconds. The API
+uses the same browser trust checks as the other data routes and requires a
+running local backend with outbound HTTPS access to the providers. The screen
+waits 250 ms after typing stops, cancels a superseded request and ignores a
+late answer; an outage reads `Search is unavailable` or `Some results may be
+missing`, never a successful empty search. Search returns identities, not
+prices: a hit can be watched even when no provider covers it, and reads `No
+quote`.
+
 The legacy `GET /data/watchlist.json` remains available and runs the fixed, read-only
 `scripts/face_watchlist.py` producer, then merges the shared reference directory
 from `client/market-catalog.js`. The producer reads the latest captured US
-snapshot through `GuardedSource` and `AsOfGuard`; the face's former breadth
-walk is not needed to open Market. The shipped 2yr bed currently supplies 797
+snapshot through `GuardedSource` and `AsOfGuard`. The shipped 2yr bed currently supplies 797
 US rows dated **2026-07-09**, with raw daily closes and changes relative to the
-previous close. These are historical snapshots, not live quotations, and the
-live Market page no longer requests this route.
-
-`GET /data/symbols/search?q=兆易创新&market=all` queries Tencent smartbox for
-A shares and Yahoo Finance search for US stocks/ETFs and USD cryptocurrency
-pairs. `market` accepts `all`, `us`, `cn`, or `crypto`. Search does not download
-or save a whole-market directory. The backend caches up to 128 successful
-queries in memory for 60 seconds, shares duplicate in-flight requests, and
-bounds each provider request to six seconds. The API uses the same browser
-trust checks as the other data routes and requires a running local backend
-with outbound HTTPS access to the providers.
-
-The frontend debounces input, cancels superseded requests and ignores late
-responses. Provider outages appear as search errors or explicitly partial
-results; they are not reported as a successful empty search. A blank query
-shows saved selections and 35 built-in suggestions (12 US instruments, 15
-A shares, 8 cryptocurrency pairs); these do not limit online search coverage.
-On a static deployment or disconnected backend, these suggestions and
-watchlist management remain available, while online search reports an error.
-
-Online search returns instrument identities, not prices. Results can be saved
-even when the selected quote provider does not cover them; missing prices stay
-em dashes. Search and live quotes operate independently.
+previous close. These are historical snapshots, not live quotations, and no
+screen reads this route.
 
 #### Market credentials
 
@@ -588,42 +588,76 @@ Provider references: [Alpaca streams](https://docs.alpaca.markets/us/docs/real-t
 [iFinD manual](https://quantapi.10jqka.com.cn/gwstatic/static/ds_web/quantapi-web/help-center/manual.html),
 [iFinD quotas](https://quantapi.10jqka.com.cn/gwstatic/static/ds_web/quantapi-web/help-center/permission.html).
 
-### Account console
+### A market's page
 
-`/account` reads `/data/account.json`: balances, positions and Alpaca's latest
-50 orders (all statuses). Equity comes first, with cash, buying power and
-unrealized P&L, then positions/orders tabs. Search and order-status filters
-narrow the loaded rows only. Unrealized P&L is shown only when every position
-reports its amount. Connection and order-gate details remain collapsed until
-opened. The environment badge follows the actual read hostname: only
-`paper-api.alpaca.markets` is labelled Paper.
+`#/markets/<id>` — a row's name opens it, and a pasted link works too (`#/markets/us:aapl` is
+rewritten `#/markets/us:AAPL`; an id that is no market opens Markets). The head names the market
+(`Stock · AAPL · NASDAQ`, `A-share · 600519 · SH`, `Crypto · BTC/USD`) with **Hand to Gravit** —
+a new message in the root channel with `Look at AAPL (Apple)` in the composer — and **Watch** /
+**Watching**. Then the price, the change against the previous close (`24h` for a coin), the
+quote's time and state, and the facts Previous close, Volume and Source.
+
+**Price history** charts a US market's daily closes from `GET /data/bars?id=us:AAPL&days=120`,
+read once each time the page opens. The face spawns `scripts/face_bars.py AAPL 120`: with both
+APCA keys it reads Alpaca's RAW, unadjusted daily bars under a 12-second deadline; without
+them, or when that read fails or runs out of time, it reads the PIT bed (`ALPHA_PIT_ROOT`,
+default `data/pit/2yr`) over the 120 days before the bed's last captured snapshot. Every read
+goes through `GuardedSource` + `AsOfGuard`. The chart shows once there are two closes, stamped
+`Daily · Alpaca IEX` or `Daily · PIT bed · as of 2026-07-09` (` · stale` when the route served
+its cache after a failure); without a source it is simply absent. Crypto and A-share pages have
+no chart until a bar source exists for them.
+
+Once the account has answered, **You hold** (the quantity in shares or the coin's base, its
+value and today's change, or `You don’t hold any.`) and **On the statement** (up to eight fills
+on the symbol, and `Open the Statement →`) follow. **Gravit on it** lists the conversations whose
+titles name the symbol, as links, when there are any.
+
+### Account
+
+`/data/account.json` is read at boot (the rail shows the net worth under Account once it is
+known), on entering Account, on **Refresh** and right after a streamed order receipt. The head
+carries a `Paper` or `Live` chip from the read hostname — only `paper-api.alpaca.markets` is
+Paper.
+
+- **Portfolio**: the net worth, today's change in money and percent, the allocation bar by asset
+  class plus cash, the holdings (each linking its market page, with quantity, value and today's
+  change), the orders under Working, Filled, Closed and Other — Alpaca's 50 most recent, all
+  statuses — and the Statement key. Without account credentials it reads `No APCA keys in the
+  environment` in place of the numbers, never a zero balance; a failed read with nothing loaded
+  reads `Account unavailable` with Retry; a payload served from cache after a failure carries
+  `As of 14:32 · stale`.
+- **The Statement** (a drawer): the filled orders, newest first, with Export CSV — a
+  `statement.csv` (`date,side,qty,symbol,price,amount`) built in the browser.
+- **Venues**: the Alpaca row — the host, where the keys come from (`credentials/describe`:
+  `Keys · env`, `No keys`, `Keys unknown`) and whether order tools are registered (`Order tools
+  on` / `off`, from the tool registry) — and the quote providers' state, each read on entering
+  Venues.
 
 | Env | Default | What |
 |---|---|---|
 | `FACE_PYTHON` | `python3` | interpreter able to import `alpaca_kit`; install the project into that environment |
-| `ALPHA_PIT_ROOT` | `data/pit/2yr` | captured bed for US watchlist quotes and the legacy market data endpoint |
-| `APCA_API_KEY_ID` / `APCA_API_SECRET_KEY` | — | account credentials inherited at startup; source `../.env.alpaca` before `npm start` |
+| `ALPHA_PIT_ROOT` | `data/pit/2yr` | captured bed for the chart's fallback, the legacy watchlist and the legacy market data endpoint |
+| `APCA_API_KEY_ID` / `APCA_API_SECRET_KEY` | — | account and bar credentials inherited at startup; source `../.env.alpaca` before `npm start` |
 
-Without account credentials the page shows an unconnected account, not a zero
-balance. The actual computed gate state is still available in details.
-`ALPACA_KIT_ENABLE_ORDERS` stays unset; these views do not operate either gate.
+`ALPACA_KIT_ENABLE_ORDERS` stays unset; Account reads, it never operates either gate.
 
 ### Data routes and caches
 
-All producer, search and quote routes retain the loopback Host/Origin fence from `src/data.ts`,
-and need no browser cookie: dsh 0.2.0's sign-in covers `/` and `/api` only, and
-the face keeps `/data`, `/market` and `/account` as they were (upgrade decision D8).
-Request data never enters the child process arguments. A successful payload
-is cached in memory: **watchlist 15 minutes, legacy market 15 minutes, account
-60 seconds**. Concurrent cache misses share one producer process. Watchlist
-and account producers have a 30-second timeout; the old market producer has
-a 10-minute timeout. Refresh re-reads the relevant endpoint and respects its
-cache. After a later read failure, the previous good payload is returned with
-`stale: true`; the watchlist marks it as a retained snapshot.
+All producer, bar, search and quote routes retain the loopback Host/Origin fence from
+`src/data.ts`, and need no browser cookie: dsh 0.2.0's sign-in covers `/` and `/api` only, and
+the face keeps `/data` as it was (upgrade decision D8). Request data never enters a child's
+arguments unchecked: `/data/bars` passes exactly a symbol in the face's US grammar and a day
+count of 5–730, both checked again by the producer. A successful payload is cached in memory:
+**bars 10 minutes per (symbol, days), at most 64 of them; watchlist 15 minutes, legacy market
+15 minutes, account 60 seconds**. Concurrent cache misses share one producer process. The bars,
+watchlist and account producers have a 30-second timeout; the old market producer has a
+10-minute timeout. Refresh re-reads the relevant endpoint and respects its cache. After a later
+read failure, the previous good payload is returned with `stale: true`; with nothing to fall
+back on the route answers 503, never with the child's error text.
 
 The original **`/data/market.json` remains available for compatibility**, with
 its tape, breadth, screens, warmup metadata and two assembly/serve timestamps.
-It is no longer the `/market` page's data source. A cold legacy assembly walks
+No screen reads it. A cold legacy assembly walks
 the whole bed (~284 seconds measured); later runs read its disk cache under
 `data/.face_cache`. That cache key includes the resolved bed path, producer
 source and as-of day. `scripts/face_data.py` still produces both this legacy
@@ -859,20 +893,17 @@ neighbourhood:
 
 ## The master rail (src/panels.ts + the sidebar's four faces)
 
-**On the gravit-ui client (stage 1)** the page at `/` has no master rail and no sidebar faces:
-its rail is Messages, Markets, Settings and Account ("The page (client/)" above), and the four
-links below (`/#strategy`, `/#agent`, `/#memory`, `/#plugin`) open Messages there. What follows
-is the old chat page's rail, which `/market` and `/account` still draw; the routes it reads —
-`/data/channels.json`, `/data/agents.json`, `/data/memory.json`, `/data/plugins.json` — are what
-stage 3's Discover will read.
+**On the gravit-ui client** the page at `/` has no master rail and no sidebar faces: its rail
+is Messages, Markets, Settings and Account ("The page (client/)" above), and the four links
+below (`/#strategy`, `/#agent`, `/#memory`, `/#plugin`) open Messages there. What follows is the
+old chat page's rail, which no page draws any more — the last two that did, `/market` and
+`/account`, left with stage 2, and `client/navigation.js` with them. It stays here as the record
+of what stage 3's Discover will read: `/data/channels.json`, `/data/agents.json`,
+`/data/memory.json`, `/data/plugins.json`.
 
-A narrow icon rail at the far left opens **market** above the sidebar switches
-and **account** at the bottom. Chat, Market and Account share the same
-`client/navigation.js` rail and its fixed 56px layout: all six entries keep
-their icons, order and positions while only the active highlight changes.
-The four chat links (`/#strategy`, `/#agent`, `/#memory`, `/#plugin`) also work
-from either instrument page, and browser history restores the selected panel.
-The four switches pick which face the sidebar shows:
+A narrow icon rail at the far left opened **market** above the sidebar switches
+and **account** at the bottom; chat, Market and Account shared one rail and its
+fixed 56px layout. The four switches picked which face the sidebar shows:
 **strategy** (the working face — everything above), **agent**, **memory**,
 **plugin**. One pattern across all four (operator direction): the sidebar is
 always an INDEX — rows, never content — and clicking a row opens that item's
@@ -1691,11 +1722,11 @@ and `node --test` gives each file its own:
 
 | File | What it proves on a real tree |
 |---|---|
-| `smoke.test.ts` | the sign-in (`/` 401, token 303 + cookie, page 200); `session/list` over the new wire; `/api` 401 without the cookie and 403 on a forged `Host` even with one (the fence runs before auth); the mux upgrade has NO route until `commitReady()`, then answers 401 without the cookie and 101 with it; the Gate-2 answer channel end to end — two signed-in `$events` tabs get the same approval, one answers, the other gets `cancel`, the grant lands in the session log; `ask_user_question`, `str_replace_editor` and `ralph` registered, `web_fetch` and the MCP resource tools not; zero inactive rows; `/market`, `/account`, `/client/*` and `/data` served without the cookie, the `/data` fence drilled on its own |
+| `smoke.test.ts` | the sign-in (`/` 401, token 303 + cookie, page 200); `session/list` over the new wire; `/api` 401 without the cookie and 403 on a forged `Host` even with one (the fence runs before auth); the mux upgrade has NO route until `commitReady()`, then answers 401 without the cookie and 101 with it; the Gate-2 answer channel end to end — two signed-in `$events` tabs get the same approval, one answers, the other gets `cancel`, the grant lands in the session log; `ask_user_question`, `str_replace_editor` and `ralph` registered, `web_fetch` and the MCP resource tools not; zero inactive rows; `/client/*` and `/data` served without the cookie, the `/data` fence drilled on its own, and `/market` and `/account` answering 404 |
 | `order-gate.test.ts` (its real-tree case) | Gate 2's listener is registered: it asks for `mcp__drill__place_order` (the card naming `AAPL` and `side=buy`), `cancel_order` and a renamed server's twin, refuses an agentless call, lets `mcp__drill__orders` through; the guard refuses a marked tool the gate cannot name, and a session whose log it cannot read with its own sentence |
 | `order-gate-smoke.test.ts` | Gate 2's POSITIVE path: an approved stand-in order dispatches, a rejected one does not; then the same through the real `$events` channel |
 | `order-gate-midboot-smoke.test.ts` | Gate 2 armed while `boot()` is still pending: a slow fixture row holds the boot open while an order stand-in registers, and with `bootFace` unresolved and unary `/api` already serving, the order call is HELD with `approval/asked` logged and its body not run, an agentless call is denied by the listener, a marked tool the gate cannot name is denied by the guard alone; once the boot is released the held card reaches the first tab and `allowed-once` dispatches exactly once; a restart of the real `approval` row re-arms the listener once |
-| `gravit-client-smoke.test.ts` | the new page on a real boot: `/` with its title and script, the modules under `/client` with their types, the old `chat.js` gone; the host layer (`client/js/host/live.js` over the page's own wire) listing a session just created and opening it (live, so a follow) into a loaded window with a clean status line; a bare `bootFace` mounts no `/data` route, which the list tolerates |
+| `gravit-client-smoke.test.ts` | the new page on a real boot: `/` with its title and script, the modules under `/client` with their types (Markets' `js/wire/market-quotes.js` and `js/host/markets.js` among them), the old `chat.js` gone and `/market` and `/account` answering 404; the host layer (`client/js/host/live.js` over the page's own wire) listing a session just created and opening it (live, so a follow) into a loaded window with a clean status line; a bare `bootFace` mounts no `/data` route, which the list tolerates |
 | `client-mux-smoke.test.ts` | the page's own `client/js/wire/api.js` and `client/js/wire/mapper.js`, unmodified, against the host: ready, calls, emits, the control baseline, a follow's snapshot and tail, an approval answered and one rejected, a second tab's `cancel` and its refused late answer, Stop withdrawing a gate, a question answered, a gate replayed to a late tab, the non-activating page and projections reads |
 | `askuser-noclient-smoke.test.ts` | with no browser connected, an agent's question BLOCKS (parked for the next client); an agentless one is refused `NO_PROVIDER` |
 | `bots-smoke.test.ts` | the roster (a broken fixture listed with its reason, never `_template`); the shipped relative plugin path rebased onto the real `plugins/bot.js`; a bot sees allow ∩ tree, never a `role_<id>` tool, while Gravit sees the host's whole roster plus the role tools; a tool registered after the declaration is admitted; the bot's persona shadows Gravit's; Gravit's prompt carries the `deployment:today` line and the cycle contract (`Step 0 — ask once`) and a bot's carries neither — the probe bot can call `create_goal`, so its missing contract is the preset's scoping, not the `create_goal` gate; a session naming a broken preset is refused with dsh's `agent-preset/*` code; Gate 2 holds for a bot |

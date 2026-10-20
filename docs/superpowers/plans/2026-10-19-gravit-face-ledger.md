@@ -1,4 +1,4 @@
-# gravit-ui on the face, stage 1 — the ledger
+# gravit-ui on the face, stages 1 and 2 — the ledger
 
 The rulings made while executing `2026-10-19-gravit-face-stage-1.md` (spec
 `docs/superpowers/specs/2026-10-19-gravit-ui-on-face-design.md`, route A), the manual look, and
@@ -323,3 +323,117 @@ are matched by name); rows read and found silent were re-paged on every refresh 
   observes it); a gate's `at` being its arrival time (the waterfall carries no time); the open
   conversation marked seen on every refresh (intended); the market watchlist's legacy key
   (stage 2). The one declined line the fix pass overturned is fix 6's: two clicks on a gate key.
+
+## Stage 2 (2026-10-20)
+
+The rulings made while executing `2026-10-20-gravit-face-stage-2.md` (spec §7 Stage 2 and §8):
+Markets and Account on the face, `GET /data/bars`, the old `/market` and `/account` pages and
+Trade removed. Executed inline (superpowers:executing-plans) on 2026-10-20 in the same worktree,
+`feat/gravit-face` from 21d2a69 (stage 1's final 87c6dc3 plus the plan); the operator's words
+were still "先做完A" and "按A做吧", so every answer below is again the executor's. Baselines
+before Task 1: face 891 pass / 16 skipped (`FACE_SMOKE=1` 907/907), pytest 381, typecheck clean.
+
+### Pre-flight
+
+The shared interfaces checked before Task 1 — the four wire modules' paths, the route's
+`[SYMBOL, DAYS]` argv against `face_bars.py`'s, the bars payload against `barsWord` and
+`chartSvg`, the views' state fields against the host reducers, `startMarkets` / `startAccount` /
+`onReceipt` against the boot wiring, the page's Statement key against the Account route, and the
+order in which `trade.js`, `data/markets.js` and `market-fmt.js` lose their last importers: no
+conflicts.
+
+### Rulings, in the order made
+
+Each with what it costs if wrong.
+
+1. **Task 2.** markStale moves from data.ts to http.ts (the shared HTTP primitives), so data.ts and bars.ts share it without bars.ts importing a runtime value from data.ts (data.ts imports bars.ts); the plan's file list did not name http.ts — cost if wrong: none.
+2. **Task 2.** a repeated days parameter is a 400 like a repeated id (the plan's contract named only a repeated id) — one value per key, no guessing which wins — cost if wrong: one condition.
+3. **Task 4.** a notional order adds "· <n> filled" once it has fills; the brief's "Buy $500 AAPL · market" is the unfilled case — a filled notional order would otherwise hide how much it bought — cost if wrong: one clause dropped.
+4. **Task 4.** the allocation buckets keep the fixed order cash, equity, crypto, stable and omit empty ones — colour follows the bucket, never its rank — cost if wrong: a reorder.
+5. **Task 4.** while searching, a watched hit shows its live quote over the one REST hit quote; with no query a row never shows a hit quote — the stream is fresher, and an old hit quote must not read Live on a watched row — cost if wrong: one fallback line.
+6. **Task 4.** sourceWord names the provider by the quote's market (us Alpaca, crypto Coinbase, cn iFinD), not by the wire's source string — the cn source string is Chinese — cost if wrong: a cn quote served by another source reads iFinD.
+7. **Task 4.** positionId lives in market-view.js and account-view.js imports it — one mapping from a position to a face id — cost if wrong: none.
+8. **Task 5.** a market page's own asset joins the live subscription first (page, watchlist, holdings) — the spec's page shows a price that moves, and a page opened from a hit would otherwise read No quote — cost if wrong: one more id in the stream.
+9. **Task 5.** wire/market-quotes.js exports its parsePayload — the hits' REST read and the Venues probe pass the stream's own validation — cost if wrong: one export on a wire module.
+10. **Task 5.** startMarkets pauses the live quotes at start and keeps the subscription current while hidden — a paused wire opens no connection, and show(true) resumes on the set already chosen — cost if wrong: none.
+11. **Task 5.** startAccount takes an optional now (default Date.now) for the read's at — the plan's signature has none and the test needs a clock — cost if wrong: none.
+12. **Task 5.** an ok:false body from /data/account.json reads as a failure, like a rejection — only ok:true is an answer — cost if wrong: none.
+13. **Task 5.** barsLoading keeps the previous payload while a reload is in flight, barsFailed drops it, and a later call's answer wins over an earlier one — no blink on reload, no chart without a current answer — cost if wrong: a chart blinks on reload.
+14. **Task 6.** venueConnected (reducers/controls.js) drops its ticket hand-off with the trade slice — the ticket is gone and the Connect panel itself leaves in Task 8 — cost if wrong: none.
+15. **Task 6.** data/markets.js loses TABS, KINDS, SORTS, INTERVALS, instrumentOf, listed, kindOf, fnv and seriesOf now, keeping only what the Account panels read until Task 8 deletes the file — the brief's grep pins INTERVALS gone — cost if wrong: none.
+16. **Task 6.** the quote's state is its own muted column (mk-c-st); a narrow table (620px) drops Volume and the state, a phone (440px) the change too — the brief names the columns, not their narrow behaviour — cost if wrong: CSS only.
+17. **Task 6.** with a query the one-liner is the search's word, without one the quotes' connection word; the watchlist's word shows in both — the connection is about the list, not the hits — cost if wrong: a connection word hidden while searching.
+18. **Task 6.** #/markets/<id> draws a stub page (the way back and the head) until Task 7 fills it, and an id no list knows opens by its symbol — cost if wrong: none.
+19. **Task 6.** the router decodes a percent-encoded market id (crypto:BTC%2FUSD) and settle writes the raw form back — a pasted link reads the same — cost if wrong: none.
+20. **Task 6.** boot's default quote and search factories bind to win.fetch and win.EventSource, so a test window without them never connects — cost if wrong: none.
+21. **Task 7.** You hold and On the statement are drawn only once /data/account.json answered with an account; keyless or unread, both are absent rather than saying "You don’t hold any." — an unknown is not a none — cost if wrong: two sections missing on a keyless face.
+22. **Task 7.** the page's quote is the live one, else the hit's REST quote; with none the price reads — and the state No quote, and Source still names the market's provider — cost if wrong: none.
+23. **Task 7.** the as-of time reads HH:MM today, else "Oct 17 14:30", in the viewer's zone through time.js (the wire's quoteTime writes Chinese) — cost if wrong: format only.
+24. **Task 7.** the chart's dates are the bars' own ISO days, like barsWord's as-of — cost if wrong: format only.
+25. **Task 7.** the page matches statement fills to the asset by positionId over the order's symbol, so BTC/USD and BTCUSD both land on crypto:BTC/USD — cost if wrong: none.
+26. **Task 7.** Hand to Gravit names the symbol, and the name when it differs ("Look at AAPL (Apple)", "Look at MSFT"), and focus lands in the composer — cost if wrong: none.
+27. **Task 7.** a page reads its bars once per opening; leaving and coming back reads again, a re-render never does — the route caches for ten minutes, so a reopen is cheap — cost if wrong: one extra read per reopen.
+28. **Task 8.** the Statement omits Export CSV when it has no filled rows (No filled orders) — there is nothing to export — cost if wrong: a key that exports a header only.
+29. **Task 8.** Loading… shows while the first read is in flight and nothing is loaded — a status word, like the connecting line — cost if wrong: one word.
+30. **Task 8.** any unreadable answer that reaches the store reads Account unavailable, and the keyless one reads the face's own words, never the wire's reason or error text — cost if wrong: none.
+31. **Task 8.** Refresh on Venues reads the account only; the venue facts are read on each entry into Venues — they change rarely — cost if wrong: key or tool facts stale until the next entry.
+32. **Task 8.** Export CSV revokes its object URL on the next tick rather than synchronously — some browsers cancel a download whose URL is revoked in the same task — cost if wrong: none.
+33. **Task 8.** the allocation legend rounds each bucket to a whole percent while the bar keeps two decimals — cost if wrong: a legend summing to 99 or 101.
+34. **Task 8.** render/discover.js still reads state.account.wallet, which the empty state no longer carries; Discover is not routed until stage 3 rewrites it — cost if wrong: Discover throws if routed before stage 3.
+35. **Task 8.** thread.js keeps ticker and withTickers (the demo's #/markets/<SYMBOL> links, no caller on screen now, pinned by thread.test.js) for stage 3's tool-row renderers to replace — cost if wrong: one dead helper.
+36. **Task 9.** scripts/serve-research-demo.mjs leaves with the pages — it served chat.css and navigation.js, both deleted here, so it could no longer draw its fixture; the landing image it produced stays — cost if wrong: the research screenshot fixture has to be rebuilt on the new client.
+37. **Task 9.** chgHtml drops its cents unit with the prediction cards, and market-fmt.js keeps chgHtml alone — cost if wrong: none.
+38. **Task 9.** client/channels.js and the old chat page's other tested modules stay (DEVELOPMENT.md keeps them for stage 3), although the research fixture was channels.js's only importer — cost if wrong: one more orphan until stage 3.
+
+### Tasks
+
+| Task | Commits | Result |
+|---|---|---|
+| 1 The market and account wire modules move under `js/wire` | 0bb9deb | green |
+| 2 `parseInstrumentId` and `GET /data/bars` | ba9e2df | green |
+| 3 `scripts/face_bars.py` | 37e47d4 | pytest 400 passed |
+| 4 The market and account views (pure) | fa75ba3 | green |
+| 5 The markets and account host layers | bb099fc | green |
+| 6 Markets on screen; the demo Markets and Trade leave | 4315232 | green |
+| 7 The Market page and its chart | e00c5ab | green |
+| 8 Account on screen; the demo Account leaves | 5ac3772 | green |
+| 9 The old pages leave | fca1814 | green; `FACE_SMOKE=1` 933/933 |
+| 10 Documents and the manual look | ca8355b (the manual look's fix), and the docs commit | 918 pass / 16 skipped; `FACE_SMOKE=1` 934/934 |
+
+### The manual look (2026-10-20)
+
+A face on a scratch `DSH_HOME` under the worktree's ignored `.superpowers/look` (profile set up,
+the operator's rows absent, no APCA, DeepSeek or iFinD key, `ALPHA_PIT_ROOT` pointed at a missing
+directory so no bed), on port 3091, started in a Terminal tab — the browser pane's own process
+cannot read inside the worktree — and opened in the pane through the printed `?token=` URL at
+1280 × 800:
+
+1. Markets: `Nothing watched yet` under the search box and the three tabs.
+2. Search `AAPL`: `5 markets for “AAPL”`, Apple Inc. first; every row `—` and `No quote` (no
+   Alpaca keys). The star watched Apple.
+3. Search `BTC`: `4 markets for “BTC”`; Bitcoin USD `$82,710.53 ▲ 1.1% 5.2k BTC Live` from its one
+   REST read (Coinbase). The star watched it. Clear brought the watchlist back — Bitcoin first
+   under Most traded, its price moving on the stream, Apple last with `No quote` — but left `BTC`
+   in the search box: the render loop keeps what an input holds. Fixed under a test that failed
+   first (ca8355b) and re-checked on the page: the box empty, focus in it, the watchlist's two
+   rows.
+4. The Apple page: `Stock · AAPL · NASDAQ`, Hand to Gravit and Watching, the price `—`, `No
+   quote`, the facts (`—`, `—`, `Alpaca · IEX`) and no Price history:
+   `/data/bars?id=us%3AAAPL&days=120` answered 503 with the producer's own `{"ok": false,
+   "error": "no bar source"}`. No You hold or On the statement on a keyless face (ruling 21).
+5. Hand to Gravit: New message, Where `workbench`, `Look at AAPL (Apple Inc.)` in the composer —
+   cancelled, never sent.
+6. Account: `No APCA keys in the environment`, no chip, Account current in the rail. Venues: the
+   `Alpaca` row reading `No keys · Order tools off` (the scratch home has no alpaca-kit row), and
+   Quotes `Alpaca · Not configured`, `Coinbase · Connected`, `iFinD · Not configured`.
+7. `/market`, `/account` and `/client/market.html` answered 404, `/client/js/host/markets.js`
+   200; the console held only those probes and the two bars 503s, no script error.
+8. A reload kept the watchlist. One reload made while the pane was hidden booted `Paused`
+   (`document.hidden` at boot) and resumed on the next `visibilitychange` — the screen follows
+   `document.hidden` by design; a reload in a visible pane streamed at once.
+
+Not walked: a keyed account (holdings, the Statement, Export CSV through a real download), live
+US quotes and Alpaca bars, the bed-served chart (no bed in the worktree). Each is pinned by
+tests; the keyed look is the operator's, on a copy of the real home, with the drills before the
+branch lands.
+
