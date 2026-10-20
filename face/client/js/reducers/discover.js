@@ -13,7 +13,21 @@ export const REVIEW_MS = 5000;
 const inRun = (s, run, step) => s.discover.create?.run === run && s.discover.create.step === step;
 const withCreate = (s, patch) => disc(s, { create: { ...s.discover.create, ...patch } });
 
+const shelf = (s, name, patch) => disc(s, { shelves: { ...s.discover.shelves, [name]: { ...(s.discover.shelves?.[name] ?? { status: 'idle', data: null, at: null }), ...patch } } });
+const skillOf = (s, name, patch) => disc(s, { skills: { ...(s.discover.skills ?? {}), [name]: { ...(s.discover.skills?.[name] ?? {}), ...patch } } });
+
 export const reducers = {
+  // the face's inventory (host/discover.js): a listing per shelf, a failed read keeping what it had
+  setDiscoverQuery: (s, query) => disc(s, { query: typeof query === 'string' ? query : '' }),
+  shelfLoading: (s, { shelf: name }) => shelf(s, name, { status: 'loading' }),
+  shelfLoaded: (s, { shelf: name, data, at }) => shelf(s, name, { status: 'ready', data, at }),
+  shelfFailed: (s, { shelf: name, at }) => shelf(s, name, { status: 'failed', at: s.discover.shelves?.[name]?.at ?? at }),
+  gravitLoaded: (s, { host, model, keys }) => disc(s, { gravit: { host, model, keys } }),
+  skillLoading: (s, { name }) => skillOf(s, name, { status: 'loading' }),
+  skillLoaded: (s, { name, detail }) => skillOf(s, name, { status: 'ready', detail }),
+  skillFailed: (s, { name }) => skillOf(s, name, { status: 'failed' }),
+  discoverStatus: (s, { line, bad = false }) => disc(s, { status: typeof line === 'string' && line !== '' ? { line, bad } : null }),
+
   setQuery: (s, query) => disc(s, { query: query ?? '' }),
   toggleInstalledOnly: s => disc(s, { installedOnly: !s.discover.installedOnly }),
   dismissToast: s => (s.discover.toast ? disc(s, { toast: null }) : s),
