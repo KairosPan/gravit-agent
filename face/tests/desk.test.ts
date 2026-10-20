@@ -67,3 +67,18 @@ test("runsOf marks a boot with no shutdown before the next boot as lost", () => 
     { bootedAt: "2026-10-19T15:00:00.000Z", pid: 13, lost: false },
   ]);
 });
+
+test("a torn last line stays one skipped line: the next boot is kept and the cut-off run reads as lost", async () => {
+  const h = await home();
+  await appendEvent(h, boot("2026-10-19T13:00:00.000Z", 11));
+  // a write that a crash or a full disk cut short: no closing newline
+  await writeFile(join(deskDir(h), "events.jsonl"), `{"t":"2026-10-19T13:30:00.000Z","kind":"asl`, { flag: "a" });
+  await appendEvent(h, boot("2026-10-19T14:00:00.000Z", 12));
+  const { events, skipped } = await readEvents(h);
+  assert.deepEqual(events.map((e) => e.kind), ["boot", "boot"], "both boots kept");
+  assert.equal(skipped, 1, "the fragment is one skipped line of its own");
+  assert.deepEqual(runsOf(events), [
+    { bootedAt: "2026-10-19T13:00:00.000Z", pid: 11, lost: true },
+    { bootedAt: "2026-10-19T14:00:00.000Z", pid: 12, lost: false },
+  ]);
+});

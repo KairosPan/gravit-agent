@@ -15,11 +15,12 @@
  * `0600`, and rotates the file once it is over {@link LEDGER_ROTATE_BYTES}. It never throws into
  * the face: an append that fails is one `gravit-face:` line on stderr, and a face whose ledger
  * cannot be written still boots and serves. The reader takes the current file only, and skips and
- * counts every line that is not an event - a last line torn by a crash mid-append is the case that
- * matters.
+ * counts every line that is not an event. A last line torn by a crash mid-append is the case that
+ * matters: the writer starts the next event on a fresh line, so the fragment is one skipped line
+ * and never takes the next event with it.
  * @module
  */
-import { appendFile, mkdir, readFile, rename, stat } from "node:fs/promises";
+import { appendFile, mkdir, open, readFile, rename, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { withFileLock } from "@deepseek-ai/dsh-atomic-write";
 
@@ -74,17 +75,32 @@ async function sizeOf(file: string): Promise<number> {
   }
 }
 
+/** Whether the ledger ends mid-line: its last byte, at `size - 1`, is there and is not a newline -
+ * the tail of a write that a crash or a full disk cut short. */
+async function endsMidLine(file: string, size: number): Promise<boolean> {
+  const handle = await open(file, "r");
+  try {
+    const { bytesRead, buffer } = await handle.read(Buffer.alloc(1), 0, 1, size - 1);
+    return bytesRead === 1 && buffer[0] !== "\n".charCodeAt(0);
+  } finally {
+    await handle.close();
+  }
+}
+
 /**
  * Append one event to `$DSH_HOME/face/desk/events.jsonl`.
  *
  * The directory is made first, because `withFileLock` creates its lock beside the file
  * (`roster.ts`'s `update` keeps the same order). Inside the lock, a file over `rotateBytes` is
  * renamed to `events.<t>.jsonl` - the `t` of the event being appended, each `:` made `-` - and the
- * line goes to a fresh file. The lock is for that rotation: it makes the size check, the rename
- * and the append one step, so no writer's line lands in a file another has just moved aside.
- * Files are created `0600`; the mode applies on creation only, as `roster.log`'s does.
+ * line goes to a fresh file. A file whose last byte is not a newline ends in a write that a crash
+ * or a full disk cut short; the line then opens with a newline, so the fragment stays one skipped
+ * line instead of swallowing this event - a swallowed `boot` would leave the killed run reading
+ * as the live one. The lock makes the size check, the rename, that one-byte read and the append
+ * one step, so no writer's line lands in a file another has just moved aside. Files are created
+ * `0600`; the mode applies on creation only, as `roster.log`'s does.
  *
- * Never rejects. Any failure - the directory, the lock, the rename, the append - is one call to
+ * Never rejects. Any failure - directory, lock, rename, tail read, append - is one call to
  * `log` (default `console.error`) naming the file and the error's code, or its message when it
  * has none, and the event is dropped: the ledger is a record, never a gate on the face. The lock's
  * retries are not jittered, so appenders that start together take it about one per retry round,
@@ -104,10 +120,13 @@ export async function appendEvent(
   try {
     await mkdir(dir, { recursive: true });
     await withFileLock(file, async () => {
-      if ((await sizeOf(file)) > (opts.rotateBytes ?? LEDGER_ROTATE_BYTES)) {
+      let size = await sizeOf(file);
+      if (size > (opts.rotateBytes ?? LEDGER_ROTATE_BYTES)) {
         await rename(file, join(dir, `events.${event.t.replaceAll(":", "-")}.jsonl`));
+        size = 0;
       }
-      await appendFile(file, `${JSON.stringify(event)}\n`, { encoding: "utf8", mode: 0o600 });
+      const lead = size > 0 && (await endsMidLine(file, size)) ? "\n" : "";
+      await appendFile(file, `${lead}${JSON.stringify(event)}\n`, { encoding: "utf8", mode: 0o600 });
     });
   } catch (err) {
     const log = opts.log ?? ((line: string) => console.error(line));
