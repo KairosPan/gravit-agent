@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import SystemPrompt from "@deepseek-ai/dsh-system-prompt";
-import { CYCLE_SECTION, ROLES_SECTION, TODAY_SECTION, apply, canCall, inject, isRootOrFork, name, resolveZone, rolesText, todayText, validateGravitConfig } from "../plugins/gravit.js";
+import { CYCLE_SECTION, DESK_SECTION, ROLES_SECTION, TODAY_SECTION, apply, canCall, inject, isRootOrFork, name, resolveZone, rolesText, todayText, validateGravitConfig } from "../plugins/gravit.js";
 
 const dshSectionOrder = (slot: "DEPLOYMENT_PERSONA_PREFIX" | "DEPLOYMENT_PERSONA_SUFFIX" | "TOOL_SUBAGENT"): number => SystemPrompt.prototype.getSectionOrder(slot);
 
@@ -197,4 +197,43 @@ test("gravit: both sections are blank for a delegated child that is not a fork, 
   }
   assert.equal(isRootOrFork(undefined), true, "total on a missing context");
   tree.unload();
+});
+
+test("validateGravitConfig: desk must be a non-empty string when given", () => {
+  assert.equal(validateGravitConfig({}), undefined, "absent: valid, as before");
+  assert.equal(validateGravitConfig({ desk: "x" }), undefined);
+  for (const desk of ["", " \n", 3, null, ["x"]])
+    assert.equal(validateGravitConfig({ desk }), "desk must be a non-empty string", JSON.stringify(desk));
+  assert.throws(() => apply(fakeScope().ctx, { desk: 3 }), (e: Error) => e.message === "gravit: desk must be a non-empty string", "apply refuses the mount with it");
+});
+
+/* The desk's contract binds every desk session whatever its allow list leaves it, so its section has NO
+ * tool gate: it never looks a tool up, at mount or at assembly, and a scope that can call nothing still
+ * reads it. Only the header gates it, as it does the cycle's: a delegated child that is not a fork reads
+ * nothing; a root session and a fork child read the text verbatim. It takes the cycle's slot (a preset
+ * carries one contract or the other), and a config without `desk` - Gravit's own among them - mounts none. */
+test("the desk section registers only with a desk key, after the persona, and is blank for a non-fork child", () => {
+  const tree = fakeScope();
+  apply(tree.ctx, { desk: "D" });
+  assert.equal(DESK_SECTION, "gravit:desk");
+  assert.deepEqual(tree.sections.map((s) => s.name).sort(), [TODAY_SECTION, DESK_SECTION].sort(), "the date and the desk: no roles, no cycle");
+  const section = tree.sections.find((s) => s.name === DESK_SECTION)!;
+  assert.ok(section.order > dshSectionOrder("DEPLOYMENT_PERSONA_PREFIX"), "after the persona prefix");
+  assert.equal(section.order, dshSectionOrder("DEPLOYMENT_PERSONA_SUFFIX") - 50, "the cycle's slot, just before the persona suffix");
+  assert.equal(section.interpolate, false);
+  assert.equal(typeof section.text, "function");
+  const text = section.text as (c: unknown) => string;
+  assert.equal(text({ agent: { session: { header: {} } } }), "D", "a root session");
+  assert.equal(text({ agent: { session: { header: { origin: "subagent" } } } }), "", "a delegated child that is not a fork");
+  assert.equal(text({ agent: { session: { header: { origin: "subagent", isSeeded: true } } } }), "D", "a subagent_fork child (seeded)");
+  assert.equal(text({ scope: { visible: [] }, agent: { session: { header: {} } } }), "D", "a scope that can call nothing: no tool gate");
+  assert.equal(text({}), "D", "a context with no agent (the global view)");
+  assert.equal(tree.lookups.length, 0, "no tool is looked up, at mount or at assembly");
+  tree.unload();
+  assert.equal(tree.sections.length, 0, "unloading the preset revision takes the desk section out with the date's");
+  for (const config of [{}, { roles: [{ tool: "role_screener", summary: "runs the screen" }], cycle: "# The research cycle" }]) {
+    const other = fakeScope();
+    apply(other.ctx, config);
+    assert.equal(other.sections.some((s) => s.name === DESK_SECTION), false, `no desk key, no desk section: ${JSON.stringify(config)}`);
+  }
 });

@@ -5,9 +5,10 @@
  * `gravitRows`; `bots/gravit/agent.cordis.yml` is the render's generated
  * mirror). It holds what only Gravit is told: the date (`deployment:today`),
  * the list of its roles (`gravit:roles`, from the `roles` config key, which
- * `gravitRows` fills from `roles/`) and the research-cycle contract
+ * `gravitRows` fills from `roles/`), the research-cycle contract
  * (`gravit:cycle`, from the `cycle` config key, which `composeFace` fills from
- * `dsh/profile/cycle.md` through src/cycle.ts).
+ * `dsh/profile/cycle.md` through src/cycle.ts) and the desk's contract
+ * (`gravit:desk`, from the `desk` config key; THE DESK, below).
  *
  * WHY A DATE. The 2026-10-10 prompt trace found no date anywhere in the
  * assembled prompt, so Gravit could not tell a fresh bar from a stale one or
@@ -71,6 +72,15 @@
  * tool-policy paragraphs do. The text is the file's, not a template:
  * `interpolate: false`, so a brace in it is literal.
  *
+ * THE DESK. `gravit:desk` carries `dsh/profile/desk.md` (src/cycle.ts
+ * `readDesk`) - how Gravit behaves on the desk: it informs and never orders -
+ * in the cycle's slot, `DEPLOYMENT_PERSONA_SUFFIX - 50`; a preset carries one
+ * contract or the other, never both. It has NO tool gate, unlike the role list
+ * and the cycle: the contract binds a desk session whatever its allow list
+ * leaves it, so the text reads the header alone (`""` for a delegated child
+ * that is not a fork) and never looks a tool up. Its text is literal, like the
+ * cycle's.
+ *
  * SCOPED, NOT GLOBAL. `ctx.systemPrompt.section` registers into the CALLING
  * context's scope, the preset revision's standing layer, so each section
  * reaches every session joined to the `gravit` preset (and to its `kairos`
@@ -82,7 +92,7 @@
  * the assembling scope; this plugin never registers or restricts a tool: the
  * `role_<id>` tools come from the sibling rows (bots-smoke S3 pins the roster).
  *
- * `interpolate: false` on all three sections because their text is prose, not a
+ * `interpolate: false` on all four sections because their text is prose, not a
  * template: the dsh system prompt is a strict `{{...}}` template with no
  * escape. The date's order is the persona slot's + 1, so the date follows
  * identity - harness identity, the persona prefix, then the date - and
@@ -102,6 +112,10 @@ export const ROLES_SECTION = "gravit:roles";
  *  own name, like the date's. */
 export const CYCLE_SECTION = "gravit:cycle";
 
+/** The desk's contract. Registered only when the config carries `desk`; its own
+ *  name, like the date's. */
+export const DESK_SECTION = "gravit:desk";
+
 /** What a role is, said once above the list. The list's lines follow it. */
 const ROLES_INTRO = "Roles. One-shot delegates on your team, each with its own persona and tools; call one by its tool name with a self-contained brief, and treat its report as a claim to check, never a result to copy. Every report carries four headings: status, what was measured, paths, limits.";
 
@@ -110,14 +124,15 @@ const ROLES_INTRO = "Roles. One-shot delegates on your team, each with its own p
 const ROLE_TOOL = /^role_[a-z0-9_]+$/;
 
 /** What would fail at mount or render, as a reason; `undefined` when the config
- *  is valid. `{}` is valid (no roles, no cycle); the shipped row carries
- *  `roles` and `cycle`. Both are optional keys, checked here when present so a
- *  malformed value refuses the mount, loudly, instead of loading a silently
- *  dead config. */
+ *  is valid. `{}` is valid (no roles, no cycle, no desk); the row in Gravit's
+ *  own preset carries `roles` and `cycle`. All three are optional keys, checked
+ *  here when present so a malformed value refuses the mount, loudly, instead of
+ *  loading a silently dead config. */
 export function validateGravitConfig(config) {
   if (config === null || typeof config !== "object" || Array.isArray(config)) return "config must be an object";
-  const { cycle, roles } = config;
+  const { cycle, desk, roles } = config;
   if (cycle !== undefined && (typeof cycle !== "string" || cycle.trim() === "")) return "cycle must be a non-empty string";
+  if (desk !== undefined && (typeof desk !== "string" || desk.trim() === "")) return "desk must be a non-empty string";
   if (roles !== undefined) {
     if (!Array.isArray(roles)) return "roles must be an array of { tool, summary }";
     for (const [index, role] of roles.entries()) {
@@ -216,6 +231,17 @@ export function apply(ctx, config) {
       order: ctx.systemPrompt.getSectionOrder("DEPLOYMENT_PERSONA_SUFFIX") - 50,
       interpolate: false,
       text: (context) => isRootOrFork(context) && canCall(ctx, context, "create_goal") ? config.cycle : "",
+    }));
+  }
+  /* The cycle's slot: a preset carries one contract or the other. No tool gate - the desk's
+   * contract binds a desk session whatever its allow list leaves it - only the header: a
+   * delegated child that is not a fork is told nothing, as with the cycle. */
+  if (config.desk !== undefined) {
+    ctx.effect(() => ctx.systemPrompt.section({
+      name: DESK_SECTION,
+      order: ctx.systemPrompt.getSectionOrder("DEPLOYMENT_PERSONA_SUFFIX") - 50,
+      interpolate: false,
+      text: (context) => isRootOrFork(context) ? config.desk : "",
     }));
   }
 }

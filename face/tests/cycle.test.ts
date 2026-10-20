@@ -2,8 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
-import { CYCLE_MAX_BYTES, CYCLE_PATH, readCycle } from "../src/cycle.ts";
+import { dirname, join, relative } from "node:path";
+import { CYCLE_MAX_BYTES, CYCLE_PATH, DESK_MAX_BYTES, DESK_PATH, readCycle, readDesk } from "../src/cycle.ts";
 import { ROLES_ROOT, readRoles } from "../src/roles.ts";
 
 test("the shipped cycle.md reads, fits its budget, and carries the six steps and the caps", () => {
@@ -84,6 +84,61 @@ test("readCycle: the limit is inclusive and counts raw bytes - CYCLE_MAX_BYTES a
     const dashOver = join(dir, "dash-over.md");
     await writeFile(dashOver, "—".repeat(dashes + 1));
     assert.throws(() => readCycle(dashOver), (e: Error) => e.message === `${dashOver}: is ${CYCLE_MAX_BYTES + 3} bytes; the limit is ${CYCLE_MAX_BYTES}`);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+/* The desk's contract (`dsh/profile/desk.md`, the `gravit:desk` section) sits beside the cycle's, under
+ * its own 3,000-byte budget. Each phrase is a rule it must state: inform and never order; a quiet turn
+ * is one line; the two desk tools; the four files a desk turn never writes; the names that must not
+ * appear under its directory; and the three bracketed lines that say where a message came from. */
+test("the shipped desk.md reads, fits 3,000 bytes and states the desk rules", () => {
+  assert.equal(DESK_MAX_BYTES, 3000);
+  assert.equal(dirname(DESK_PATH), dirname(CYCLE_PATH), "desk.md sits beside cycle.md, resolved from the module the same way");
+  const text = readDesk(DESK_PATH);
+  assert.ok(Buffer.byteLength(text, "utf8") <= DESK_MAX_BYTES);
+  for (const phrase of ["You inform", "never place, cancel or propose an order", "one line", "desk_quotes", "desk_state",
+    "STANDING.md", "levels.yml", "rules.yml", "holdings.yml", "GRAVIT.md", ".git", "[telegram · operator", "[schedule ·", "[alert ·"])
+    assert.ok(text.includes(phrase), phrase);
+  assert.ok(!text.includes("{{"));
+});
+
+/* readDesk is readCycle's reader under the desk's own name and cap: the same refusals, each opening with
+ * the absolute path - missing, unreadable, empty, and over DESK_MAX_BYTES counted in raw bytes with the
+ * limit inclusive - and the same trimmed, literal text. The desk's text has middle dots in it: "·"
+ * (U+00B7) is two bytes and one UTF-16 unit, so 1,500 of them are exactly the limit, accepted, and 1,501
+ * are refused at 3,002 bytes - a cap on the string's length (1,501) would let them through. */
+test("readDesk refuses missing, empty and oversized files with the path first", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "face-desk-"));
+  try {
+    const good = join(dir, "desk.md");
+    await writeFile(good, "\n# The desk\n\nYou inform {{nothing}}.\n\n");
+    assert.equal(readDesk(good), "# The desk\n\nYou inform {{nothing}}.", "trimmed, and a brace is literal");
+    const missing = join(dir, "no-such-desk.md");
+    assert.throws(() => readDesk(missing), (e: Error) => e.message === `${missing}: the desk contract file is missing`);
+    assert.throws(() => readDesk(relative(process.cwd(), missing)), (e: Error) => e.message === `${missing}: the desk contract file is missing`, "a relative spelling is reported absolute");
+    const notAFile = join(dir, "a-directory.md");
+    await mkdir(notAFile);
+    assert.throws(() => readDesk(notAFile), (e: Error) => e.message.startsWith(`${notAFile}: cannot be read: `) && e.message.includes("EISDIR"));
+    const empty = join(dir, "empty.md");
+    await writeFile(empty, "  \n");
+    assert.throws(() => readDesk(empty), (e: Error) => e.message === `${empty}: the desk contract is empty`);
+    const atLimit = join(dir, "at-limit.md");
+    await writeFile(atLimit, "x".repeat(DESK_MAX_BYTES - 1) + "\n");
+    assert.equal(readDesk(atLimit), "x".repeat(DESK_MAX_BYTES - 1), "exactly the limit in raw bytes is accepted");
+    const over = join(dir, "over.md");
+    await writeFile(over, "x".repeat(DESK_MAX_BYTES) + "\n");
+    assert.throws(() => readDesk(over), (e: Error) => e.message === `${over}: is ${DESK_MAX_BYTES + 1} bytes; the limit is ${DESK_MAX_BYTES}`, "one raw byte more is refused, though its trimmed text is exactly the limit");
+    assert.equal(DESK_MAX_BYTES % 2, 0, "the multibyte cases below assume the limit is a whole number of middle dots");
+    const dots = DESK_MAX_BYTES / 2;
+    assert.equal(Buffer.byteLength("·".repeat(dots)), DESK_MAX_BYTES);
+    const dotAtLimit = join(dir, "dot-at-limit.md");
+    await writeFile(dotAtLimit, "·".repeat(dots));
+    assert.equal(readDesk(dotAtLimit), "·".repeat(dots));
+    const dotOver = join(dir, "dot-over.md");
+    await writeFile(dotOver, "·".repeat(dots + 1));
+    assert.throws(() => readDesk(dotOver), (e: Error) => e.message === `${dotOver}: is ${DESK_MAX_BYTES + 2} bytes; the limit is ${DESK_MAX_BYTES}`);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

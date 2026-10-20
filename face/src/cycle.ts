@@ -15,6 +15,10 @@
  * one are refused where the file is read, each with its absolute path first (src/roles.ts refuses
  * a role file the same way), so a boot names the file at fault instead of shipping a Gravit with
  * no contract or a heavier prompt than was budgeted.
+ *
+ * The desk's contract, `dsh/profile/desk.md` - the `gravit:desk` section (plugins/gravit.js) - is
+ * read the same way: {@link readDesk} shares {@link readCycle}'s private reader, so it is refused for
+ * the same faults, path first, under its own cap, {@link DESK_MAX_BYTES}.
  * @module
  */
 import { readFileSync } from "node:fs";
@@ -27,27 +31,48 @@ export const CYCLE_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", ".
 /** The largest `cycle.md`, in bytes as `wc -c` counts them. */
 export const CYCLE_MAX_BYTES = 3000;
 
+/** Beside `cycle.md`, resolved from this module the same way. */
+export const DESK_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "dsh", "profile", "desk.md");
+
+/** The largest `desk.md`, in bytes as `wc -c` counts them. */
+export const DESK_MAX_BYTES = 3000;
+
 const messageOf = (error: unknown): string => error instanceof Error ? error.message : String(error);
 
 /** Every refusal opens with the absolute path of the file it is about, as src/roles.ts's do. */
 const refusal = (file: string, reason: string, cause?: unknown): Error =>
   new Error(`${file}: ${reason}`, cause === undefined ? undefined : { cause });
 
-/** The cycle text, trimmed. Throws an `Error` whose message opens with the absolute path of `path`
- * when the file is missing, cannot be read, is empty, or is over {@link CYCLE_MAX_BYTES}. The cap
- * is on the file's raw bytes, not the trimmed text's, and is inclusive: exactly the limit is
- * accepted. Braces are allowed: the section does not interpolate. */
-export function readCycle(path: string): string {
+/** The contract at `path`, trimmed - the one reader behind {@link readCycle} and {@link readDesk}, so
+ * the two refuse alike. `max` is the cap in raw bytes, inclusive; `label` names the contract in a
+ * refusal. */
+function readContract(path: string, max: number, label: string): string {
   const file = resolve(path);
   let bytes: Buffer;
   try {
     bytes = readFileSync(file);
   } catch (error) {
     const missing = (error as NodeJS.ErrnoException).code === "ENOENT";
-    throw refusal(file, missing ? "the cycle file is missing" : `cannot be read: ${messageOf(error)}`, error);
+    throw refusal(file, missing ? `the ${label} file is missing` : `cannot be read: ${messageOf(error)}`, error);
   }
   const text = bytes.toString("utf8").trim();
-  if (text === "") throw refusal(file, "the cycle is empty");
-  if (bytes.length > CYCLE_MAX_BYTES) throw refusal(file, `is ${bytes.length} bytes; the limit is ${CYCLE_MAX_BYTES}`);
+  if (text === "") throw refusal(file, `the ${label} is empty`);
+  if (bytes.length > max) throw refusal(file, `is ${bytes.length} bytes; the limit is ${max}`);
   return text;
+}
+
+/** The cycle text, trimmed. Throws an `Error` whose message opens with the absolute path of `path`
+ * when the file is missing, cannot be read, is empty, or is over {@link CYCLE_MAX_BYTES}. The cap
+ * is on the file's raw bytes, not the trimmed text's, and is inclusive: exactly the limit is
+ * accepted. Braces are allowed: the section does not interpolate. */
+export function readCycle(path: string): string {
+  return readContract(path, CYCLE_MAX_BYTES, "cycle");
+}
+
+/** The desk's contract, trimmed, refused as {@link readCycle} refuses - the absolute path of `path`
+ * first - when the file is missing, cannot be read, is empty, or is over {@link DESK_MAX_BYTES},
+ * counted in raw bytes and inclusive, as the cycle's cap is. Braces are allowed: the section does
+ * not interpolate. */
+export function readDesk(path: string): string {
+  return readContract(path, DESK_MAX_BYTES, "desk contract");
 }
