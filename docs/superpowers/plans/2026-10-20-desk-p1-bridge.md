@@ -31,11 +31,11 @@
 
 ## Review Focus
 
-1. **The operator writes again while a phone turn is still running.** The second text must queue (the session's inbox), be answered after the first, and each turn must keep its own deadline and send its own reply — no double send, no lost message. — Task 6, test "a second followup during a turn is supervised as its own turn".
-2. **Telegram delivers an update the bridge cannot use** (an edited message, a sticker, a channel post, a message with no `from`). The bridge must reply or ignore as specified and still advance the offset, so the update is never redelivered forever. — Task 7, test "unusable updates advance the offset".
-3. **The face restarts with a stored offset and a non-empty outbox.** No update may be processed twice, and queued messages must flush in their original order before new replies. — Task 7, test "restart resumes from the stored offset and flushes the outbox first".
-4. **A second face polls with the same token** (a dev face started without `FACE_DESK=0`). Telegram answers 409; the bridge must record the conflict at most once a minute, back off, keep running, and show it in status. — Task 7, test "409 conflict is recorded once a minute and backed off".
-5. **A pause whose `until` has passed** must clear itself (an `off-cleared` event, `by: "expiry"`) and the next text must open a turn, not get the paused reply. — Task 7, test "an expired pause clears itself and the text opens a turn".
+1. **The operator writes again while a phone turn is still running.** The second text must queue (the session's inbox), be answered after the first, and each turn must keep its own deadline and send its own reply — no double send, no lost message. — Task 6, test "a second followup during a turn is supervised as its own turn", and Task 7, test "two posts at once ensure once and open two turns in order".
+2. **Telegram delivers an update the bridge cannot use** (an edited message, a sticker, a channel post, a message with no `from`). The bridge must reply or ignore as specified and still advance the offset, so the update is never redelivered forever. — Task 7b, test "unusable updates advance the offset".
+3. **The face restarts with a stored offset and a non-empty outbox.** No update may be processed twice, and queued messages must flush in their original order before new replies. — Task 7b, test "restart resumes from the stored offset and flushes the outbox first".
+4. **A second face polls with the same token** (a dev face started without `FACE_DESK=0`). Telegram answers 409; the bridge must record the conflict at most once a minute, back off, keep running, and show it in status. — Task 7b, test "409 conflict is recorded once a minute and backed off".
+5. **A pause whose `until` has passed** must clear itself (an `off-cleared` event, `by: "expiry"`) and the next text must open a turn, not get the paused reply. — Task 7, test "an expired pause clears itself and the post opens a turn".
 
 ---
 
@@ -397,70 +397,137 @@ git commit -m "feat(face): the desk session - ensure, supervise every turn with 
 
 ---
 
-### Task 7: The Telegram bridge
+### Task 7: The desk conversation — one owner of the desk session
+
+> Amended 2026-10-20 by the controller (SDD ledger, "T7 restructure"): the P3 research found that a supervisor created only by the Telegram bridge leaves desk turns without a deadline, a fence check or a usage record when Telegram is not configured, and that P3's annotations need the same owner. The old Task 7 is split: this task builds the owner; Task 7b builds the bridge on it.
+
+**Files:**
+- Create: `face/src/desk-conversation.ts`
+- Modify: `face/src/desk.ts` (`installDesk` creates the conversation), `face/src/main.ts`, `dsh/profile/desk.md` (two lines)
+- Test: `face/tests/desk-conversation.test.ts`, `face/tests/desk.test.ts`, and the existing desk.md content test if a line it pins moves
+
+**Interfaces:**
+- Consumes: Task 1 (`readOffState`, `clearOff`, `appendEvent`, `deskTime`), Task 5 (`installDesk`'s `ctx` and `hub`), Task 6 (`ensureDeskSession`, `DeskSessionDeps`, `superviseDeskTurns`, `DeskTurnRecord`, `DeskClock`, `SessionEventsOn`, `AgentLike`, `findDeskFenceViolation`, `fenceRefusalLine`, `provenanceLine`, `DeskSource`, `resolveDeskRoute`), `createUserMessage` (`dsh-llm`).
+- Produces:
+  - `interface DeskOutlet { send(text: string, opts?: { replyTo?: number }): Promise<{ sent: number[] } | { queued: true }> }` — Task 7b's bridge is one; P3 may add none.
+  - `type PostResult = { opened: true; sessionId: string } | { refused: "paused"; line: string } | { refused: "fence"; path: string; line: string } | { refused: "error"; line: string }`.
+  - `interface DeskConversationDeps { session: DeskSessionDeps; on: SessionEventsOn; deadlineMs?: number; deadlineFor?: (kind: string) => number | undefined; clock?: DeskClock; log?: (line: string) => void }` (`deadlineMs` default 300,000; P1 passes no `deadlineFor`; P3 adds `alert`).
+  - `interface DeskConversation { start(): Promise<void>; post(input: { text: string; source: DeskSource; message: { kind: string } & Record<string, unknown> }): Promise<PostResult>; renew(): Promise<{ sessionId: string }>; stop(reason: string): Promise<boolean>; setOutlet(outlet: DeskOutlet | undefined): void; current(): { sessionId?: string; running: boolean }; dispose(): Promise<void> }`; `createDeskConversation(deps: DeskConversationDeps): DeskConversation`.
+  - `start()` ensures the desk session (`ensureDeskSession(deps.session)`) and supervises it, so a turn the operator opens from the browser is supervised, fenced and recorded like a phone turn; a failure is one `gravit-face: desk:` line and the next `post` retries.
+  - `post` runs, serialized behind any earlier `post`, `renew` or `start`:
+    1. **OFF.** `readOffState(home, now)`: expired → `clearOff(home, "expiry", now)` and go on; in force → `{ refused: "paused", line }` with the Global Constraints line `paused since <HH:MM ET> by <by>[ until <HH:MM ET>]; a terminal resumes it: npm run desk -- resume`, each time through `deskTime` (a time on another ET day carries its date); no turn and no new event.
+    2. **Fence.** `findDeskFenceViolation(root)` → a path: a `desk-refused` event `{ reason: "fence", path }` and `{ refused: "fence", path, line: fenceRefusalLine(path) }`; no turn.
+    3. **Ensure.** `ensureDeskSession(deps.session)`; when the session id or the agent object differs from the one supervised, the old supervision is disposed and the new one started.
+    4. **Open.** `agent.followup(createUserMessage({ content: [{ type: "text", text: provenanceLine(source, now) + "\n" + text }], source: message }))` → `{ opened: true, sessionId }`.
+    - An ensure or followup failure → one log line and `{ refused: "error", line: "the desk could not open a turn: <reason>" }`.
+  - Supervision is `superviseDeskTurns({ on, sessionId, agent, deadlineMs, deadlineFor, clock, fence: () => findDeskFenceViolation(root), onTurnEnd })`. At each turn's end:
+    - `outcome === "refused"` → a `desk-refused` event `{ reason: "fence", path: violation }`, then deliver `fenceRefusalLine(violation)`;
+    - otherwise → a `desk-turn` event `{ sessionId, source, turn, outcome, wallMs, usage }`, then deliver the final text — or, when `outcome === "timed-out"` and the final text is empty, the timed-out line: `timed out after 5 min; a card or a long tool was pending` for a 300,000 ms deadline, `timed out after <n> s; a card or a long tool was pending` for any other;
+    - **who is delivered to:** a turn whose source is `telegram`, `alert` or `wake` goes to the outlet; a `user` turn (the operator typing in the browser) is not sent — its answer is in the transcript;
+    - with no outlet nothing is sent and the event still stands; a rejected `send` is one log line.
+  - `renew()` = `ensureDeskSession(deps.session, { fresh: true })`, re-supervised; it resolves the new id.
+  - `stop(reason)` cancels the running desk turn with `{ kind: "hook", reason }` and resolves `true`, or `false` when none runs.
+  - `dispose()` cancels a running turn with `{ kind: "hook", reason: "shutdown" }`, disposes the supervision and resolves once; a second call settles with the first.
+  - `installDesk` gains `root?`, `route?`, `sessionCtx?` and `installModelSelection?`. With `enabled` and all four given it creates the conversation, calls `start()` without awaiting it, exposes it as `DeskHandle.conversation`, and `dispose` disposes it before the `shutdown` event. A disabled desk creates none.
+  - `main.ts`: `resolveDeskRoute(booted.ctx, process.env.FACE_DESK_MODEL, console.log)` and `installModelSelection` imported from `@deepseek-ai/dsh-agent` (as `room.ts`'s deps receive it), passed to `installDesk` with `root` and `sessionCtx: booted.ctx`.
+  - `dsh/profile/desk.md`: the sentence "Your final text goes back to the phone, as plain text." leaves the telegram bullet and becomes its own line after the three bullets: `Your final text goes to the operator's phone, as plain text. A message with no bracketed line is the operator at the browser; your answer stays there.`; and "propose a change in your message instead" becomes "propose a change in your message or your journal instead".
+  - Scope note: the desk state the spec injects beside each phone message (levels near their trigger, holdings, today's alerts) comes with P3, through this owner; in P1 the model reads `desk_state` on demand.
+
+- [ ] **Step 1: Write the failing tests** (fake session deps, fake bus, fake clock, a recording outlet; fixtures under `face/tests/tmp/<pid>/`)
+
+```ts
+// face/tests/desk-conversation.test.ts
+test("post opens a turn with the provenance line and the message source", async () => {
+  // followup content[0].text === "[telegram · operator · 14:03 ET]\nhi"; source deepEquals { kind: "telegram", from: 42, chat: 42, messageId: 7 }
+});
+test("a paused desk refuses with the paused line and opens no turn", async () => { /* … */ });
+test("an expired pause clears itself and the post opens a turn", async () => { /* Review Focus 5 */ });
+test("a fence violation refuses with the repo-relative line and a desk-refused event", async () => { /* plant desk/journal/.git and desk/GRAVIT.md */ });
+test("a turn the supervisor refuses records desk-refused and delivers the refusal line", async () => { /* … */ });
+test("telegram, alert and wake turns are delivered; a user turn is not; no outlet records only", async () => { /* … */ });
+test("a timed-out turn with no text delivers the timed-out line for its deadline", async () => { /* 300,000 → the 5 min line; 90,000 via deadlineFor → "timed out after 90 s; …" */ });
+test("two posts at once ensure once and open two turns in order", async () => { /* Review Focus 1 */ });
+test("renew supervises the new session and stop cancels with the reason", async () => { /* … */ });
+test("start supervises the desk session before any post", async () => { /* a browser-sourced turn/start on that session is timed and recorded */ });
+test("dispose cancels a running turn with the shutdown reason, once", async () => { /* … */ });
+// face/tests/desk.test.ts (append): installDesk creates the conversation only when enabled with root, route, sessionCtx and installModelSelection; dispose order
+```
+
+- [ ] **Step 2: Run them to verify they fail** — `cd face && npx tsx --test tests/desk-conversation.test.ts tests/desk.test.ts`.
+
+- [ ] **Step 3: Implement** `desk-conversation.ts`, the `installDesk` and `main.ts` wiring and the two `desk.md` lines.
+
+- [ ] **Step 4: Run them to verify they pass**, then `npm test && npm run typecheck`, and `FACE_SMOKE=1 npx tsx --test tests/smoke.test.ts`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add face/src/desk-conversation.ts face/src/desk.ts face/src/main.ts dsh/profile/desk.md face/tests/desk-conversation.test.ts face/tests/desk.test.ts
+git commit -m "feat(face): the desk conversation - one owner of the desk session, Telegram or not: supervise, fence, record, deliver"
+```
+
+---
+
+### Task 7b: The Telegram bridge
 
 **Files:**
 - Create: `face/src/telegram.ts`
-- Modify: `face/src/desk.ts` (`installDesk` gains the bridge), `face/src/main.ts`, `face/src/agents.ts` (`SCRUBBED_ENV`), `face/src/data.ts` (`defaultSpawner` env), `face/src/policy.ts`, `face/scripts/service.ts` (`COPIED_KEYS`, the `.env.telegram` source)
-- Test: `face/tests/telegram.test.ts`, `face/tests/agents.test.ts`, `face/tests/policy.test.ts`, `face/tests/service.test.ts`, `face/tests/data.test.ts`
+- Modify: `face/src/desk.ts` (`installDesk` gains the bridge; `deskStatusLines`), `face/src/main.ts`, `face/src/agents.ts` (`SCRUBBED_ENV`), `face/src/data.ts` (`defaultSpawner` env), `face/scripts/service.ts` (`COPIED_KEYS`, the `.env.telegram` source, `formatStatus` through `deskStatusLines`)
+- Test: `face/tests/telegram.test.ts`, `face/tests/agents.test.ts`, `face/tests/service.test.ts`, `face/tests/data.test.ts`, `face/tests/desk.test.ts`
 
 **Interfaces:**
-- Consumes: Task 1 (`writeOff`, `readOffState`, `clearOff`, `parseDuration`, `appendRecord`, `appendEvent`, `TelegramStatus`, `DeskStatus`, `etTime`), Task 6 (`ensureDeskSession`, `superviseDeskTurns`, `findFenceViolation`, `deskJournalDir`, `provenanceLine`, `DeskTurnRecord`, `resolveDeskRoute`).
+- Consumes: Task 1 (`writeOff`, `parseDuration`, `appendRecord`, `TelegramStatus`, `DeskStatus`, `deskTime`), Task 7 (`DeskConversation`, `DeskOutlet`, `PostResult`).
 - Produces:
-  - `interface TelegramConfig { token: string; operatorId: number; apiBase?: string; fetch?: typeof fetch; pollTimeoutS?: number; phoneDeadlineMs?: number; clock?: DeskClock }` (defaults `https://api.telegram.org`, global `fetch`, 50, 300,000).
+  - `interface TelegramConfig { token: string; operatorId: number; apiBase?: string; fetch?: typeof fetch; pollTimeoutS?: number; clock?: DeskClock }` (defaults `https://api.telegram.org`, global `fetch`, 50).
   - `telegramConfigFromEnv(env: NodeJS.ProcessEnv): TelegramConfig | undefined` — both names present, the id `^\d+$`.
   - `splitMessage(text: string, max = 4000): string[]`; `parseCommand(text: string): { cmd: "status" | "pause" | "new" | "stop"; arg?: string } | undefined` (`/pause 2h`, `/pause@botname 2h`; anything else `undefined`).
-  - `interface BridgeDeps { config: TelegramConfig; home: string; root: string; session: { ensure(fresh?: boolean): Promise<{ agent: AgentLike; sessionId: string }>; on: SessionEventsOn }; status: () => Promise<DeskStatus>; log?: (line: string) => void }`; `interface BridgeHandle { status(): TelegramStatus; send(text: string): Promise<void>; dispose(): Promise<void> }`; `installTelegramBridge(deps: BridgeDeps): BridgeHandle`. `send` is how P2 and P3 push firings and alerts.
+  - `interface BridgeDeps { config: TelegramConfig; home: string; conversation: Pick<DeskConversation, "post" | "renew" | "stop" | "setOutlet">; status: () => Promise<DeskStatus>; log?: (line: string) => void }`; `interface BridgeHandle { status(): TelegramStatus; send(text: string, opts?: { replyTo?: number }): Promise<{ sent: number[] } | { queued: true }>; dispose(): Promise<void> }`; `installTelegramBridge(deps: BridgeDeps): BridgeHandle`. The bridge registers itself with `conversation.setOutlet({ send })` and clears it on `dispose`. `send` resolves the Telegram `message_id` of every part sent (P3 threads an annotation under its alert with `replyTo`), or `{ queued: true }` when the text went to the outbox.
+  - `deskStatusLines(status: DeskStatus, now: Date): string[]` in `desk.ts` — the desk, pause and telegram lines `formatStatus` prints today, a time on another ET day carrying its date; `formatStatus` and the `/status` reply both use it.
   - Ledger files under `deskDir(home)`: `telegram.jsonl` (`{ t, kind: "drop", from?, chatType? }`, `{ t, kind: "sent", parts, chars }`, `{ t, kind: "queued", chars }`, `{ t, kind: "conflict" }`, `{ t, kind: "poll-error", reason }`), `telegram.offset` (the next `update_id`), `outbox.json` (`[{ t, text }]`, atomic).
   - Behaviour, per update (after which the offset advances, whatever happened):
     - not a `message` with `from.id === operatorId` and `chat.type === "private"` → dropped, counted, recorded (no reply);
     - no `text` → reply `text only on the desk`;
-    - a command → `/status`: a reply built from `status()` (the same lines as `formatStatus`'s desk and telegram lines plus `desk session <id>` and `turns today <n>`); `/pause [d]` → `writeOff({ by: "telegram", until })`, reply `paused[ until <HH:MM ET>]; a terminal resumes it: npm run desk -- resume`; `/new` → `ensure(true)`, reply `a new desk conversation`; `/stop` → cancel the desk agent's running turn with `{ kind: "hook", reason: "stopped from the phone" }`, reply `stopped` or `nothing is running`;
-    - text, with OFF expired → `clearOff(home, "expiry")` first; with OFF in force → the paused reply (Global Constraints) and no turn;
-    - text, with a fence violation → the refusal line and a `desk-refused` event, no turn;
-    - text → `ensure()`, supervise that session once (re-supervise when `/new` changes it), then `agent.followup(createUserMessage({ content: [{ type: "text", text: provenanceLine({ kind: "telegram" }, now) + "\n" + text }], source: { kind: "telegram", from, chat, messageId } }))`.
-  - Every supervised turn's end → a `desk-turn` event, then `send(finalText)` (or the timed-out system line when `outcome === "timed-out"` and the final text is empty).
+    - a command → `/status`: `deskStatusLines(status())` plus `desk session <id>` and `turns today <n>`; `/pause [d]` → `writeOff({ by: "telegram", until })`, reply `paused[ until <HH:MM ET>]; a terminal resumes it: npm run desk -- resume`; `/new` → `conversation.renew()`, reply `a new desk conversation`; `/stop` → `conversation.stop("stopped from the phone")`, reply `stopped` or `nothing is running`;
+    - text → `conversation.post({ text, source: { kind: "telegram" }, message: { kind: "telegram", from, chat, messageId } })`; a refused result → reply its `line`.
   - The loop: flush the outbox, then `getUpdates` (`offset`, `timeout`, `allowed_updates: ["message"]`) with an `AbortController`; HTTP 409 → a `conflict` record at most once per 60 s and a 30 s wait; any other failure → `poll-error` at most once per 60 s and a backoff from 5 s doubling to 60 s.
-  - `dispose()` aborts the poll, stops the loop, cancels a running desk turn with `{ kind: "hook", reason: "shutdown" }`, keeps the outbox.
-  - `installDesk` gains `root?`, `route?`, `telegram?: TelegramConfig`, `sessionCtx?`, `installModelSelection?`; when `enabled` and `telegram` are both set it creates the bridge (not awaited), passes `bridge.status` as `deskStatus`'s `telegram` provider, and `dispose` disposes the bridge first. Without `telegram`, status carries `telegram: { configured: false, polling: false, dropped: 0, queued: 0 }`.
-  - `main.ts`: `telegramConfigFromEnv(process.env)`, `resolveDeskRoute(booted.ctx, process.env.FACE_DESK_MODEL, console.log)`, and `installModelSelection` imported from `@deepseek-ai/dsh-agent` (as `room.ts`'s deps receive it).
-  - Scope note: the desk state the spec injects beside each phone message (levels near their trigger, holdings, today's alerts) comes with P3, where those exist; in P1 the model reads `desk_state` on demand.
-  - `SCRUBBED_ENV` gains `TELEGRAM_BOT_TOKEN`; `data.ts`'s `defaultSpawner` runs producers with `process.env` minus `TELEGRAM_BOT_TOKEN`; `policy.ts` appends `{ decision: "D19 desk wake cap", patch: { id: "tool-jobs", config: { maxConsecutiveWakes: 8 } } }` (D19 continues the re-host plan's decision sequence in DEVELOPMENT §4.8, not the charter's debts); `service.ts` `COPIED_KEYS` gains `TELEGRAM_BOT_TOKEN` and `TELEGRAM_OPERATOR_ID`, and install's sources gain `<root>/.env.telegram`.
+  - `dispose()` aborts the poll, stops the loop, clears the outlet, keeps the outbox. (The conversation, not the bridge, cancels a running turn at shutdown.)
+  - `installDesk` gains `telegram?: TelegramConfig`; when `enabled`, `telegram` and the conversation are all present it creates the bridge (not awaited), passes `bridge.status` as `deskStatus`'s `telegram` provider, and `dispose` disposes the bridge first, then the conversation. Without `telegram`, status carries `telegram: { configured: false, polling: false, dropped: 0, queued: 0 }`.
+  - `main.ts`: `telegramConfigFromEnv(process.env)` passed to `installDesk`.
+  - `SCRUBBED_ENV` gains `TELEGRAM_BOT_TOKEN`; `data.ts`'s `defaultSpawner` runs producers with `process.env` minus `TELEGRAM_BOT_TOKEN`; `service.ts` `COPIED_KEYS` gains `TELEGRAM_BOT_TOKEN` and `TELEGRAM_OPERATOR_ID`, and install's sources gain `<root>/.env.telegram`. (No policy row: the desk has no `job_*` tools, so no wake cap is added — controller ruling.)
 
-- [ ] **Step 1: Write the failing tests** (fake `fetch` answering by URL, fake session port, fake clock; no network)
+- [ ] **Step 1: Write the failing tests** (fake `fetch` answering by URL, a fake conversation port, fake clock; no network)
 
 ```ts
 // face/tests/telegram.test.ts
 test("a foreign sender and a group chat are dropped, counted and recorded; no reply", async () => { /* … */ });
-test("operator text opens a turn with the provenance line and the telegram source", async () => {
-  // followup message content[0].text === "[telegram · operator · 14:03 ET]\nhi"; source deepEquals { kind: "telegram", from: 42, chat: 42, messageId: 7 }
+test("operator text is posted to the conversation with the telegram source", async () => {
+  // post called with { text: "hi", source: { kind: "telegram" }, message: { kind: "telegram", from: 42, chat: 42, messageId: 7 } }
 });
-test("a supervised turn's final text is sent to the operator's chat only, split at 4,000", async () => { /* 9,000 chars → three sendMessage calls, chat_id 42 each */ });
+test("a refused post replies with its line", async () => { /* paused, fence and error results → the exact line, chat 42 */ });
+test("send goes to the operator's chat only, split at 4,000, and resolves the message ids", async () => { /* 9,000 chars → three sendMessage calls, chat_id 42 each; { sent: [m1, m2, m3] } */ });
 test("splitMessage never breaks a surrogate pair", () => { /* "😀".repeat(2500) → every part valid UTF-16, joined back equal */ });
-test("/status, /pause 2h, /new and /stop", async () => { /* replies exact; OFF file written with until; ensure(true) called; cancel called with the phone reason */ });
-test("text while paused gets the paused reply and opens no turn", async () => { /* … */ });
-test("an expired pause clears itself and the text opens a turn", async () => { /* Review Focus 5 */ });
-test("a fence violation refuses the turn with the path and a desk-refused event", async () => { /* plant journal/.git */ });
+test("/status, /pause 2h, /new and /stop", async () => { /* replies exact; OFF file written with until; renew called; stop called with the phone reason */ });
 test("unusable updates advance the offset", async () => { /* Review Focus 2: edited_message, sticker, channel_post, no from → offset after each; never redelivered */ });
 test("restart resumes from the stored offset and flushes the outbox first", async () => { /* Review Focus 3 */ });
-test("a failed send is queued with its time and flushed in order", async () => { /* … */ });
+test("a failed send is queued with its time, resolves queued, and is flushed in order", async () => { /* … */ });
 test("409 conflict is recorded once a minute and backed off", async () => { /* Review Focus 4 */ });
-test("dispose aborts the poll and cancels a running turn with the shutdown reason", async () => { /* … */ });
+test("the bridge is the conversation's outlet until dispose", async () => { /* setOutlet(outlet) then setOutlet(undefined) */ });
+test("dispose aborts the poll", async () => { /* … */ });
 test("telegramConfigFromEnv needs both names and a numeric id", () => { /* … */ });
-// face/tests/agents.test.ts, policy.test.ts, service.test.ts, data.test.ts (append): TELEGRAM_BOT_TOKEN scrubbed; D19 patch present and well-formed; COPIED_KEYS + .env.telegram; producers' env lacks the token
+// face/tests/agents.test.ts, service.test.ts, data.test.ts, desk.test.ts (append): TELEGRAM_BOT_TOKEN scrubbed; COPIED_KEYS + .env.telegram; producers' env lacks the token; deskStatusLines dates another day's times and formatStatus prints through it
 ```
 
-- [ ] **Step 2: Run them to verify they fail** — `cd face && npx tsx --test tests/telegram.test.ts tests/agents.test.ts tests/policy.test.ts tests/service.test.ts tests/data.test.ts`.
+- [ ] **Step 2: Run them to verify they fail** — `cd face && npx tsx --test tests/telegram.test.ts tests/agents.test.ts tests/service.test.ts tests/data.test.ts tests/desk.test.ts`.
 
-- [ ] **Step 3: Implement** `telegram.ts`, the `installDesk` and `main.ts` wiring, and the four small changes.
+- [ ] **Step 3: Implement** `telegram.ts`, `deskStatusLines`, the `installDesk` and `main.ts` wiring, and the three small changes.
 
 - [ ] **Step 4: Run them to verify they pass**, then `npm test && npm run typecheck`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add face/src/telegram.ts face/src/desk.ts face/src/main.ts face/src/agents.ts face/src/data.ts face/src/policy.ts face/scripts/service.ts face/tests/telegram.test.ts face/tests/agents.test.ts face/tests/policy.test.ts face/tests/service.test.ts face/tests/data.test.ts
-git commit -m "feat(face): the Telegram bridge - one operator, private chat, commands, pause, fence, supervised turns, outbox"
+git add face/src/telegram.ts face/src/desk.ts face/src/main.ts face/src/agents.ts face/src/data.ts face/scripts/service.ts face/tests/telegram.test.ts face/tests/agents.test.ts face/tests/service.test.ts face/tests/data.test.ts face/tests/desk.test.ts
+git commit -m "feat(face): the Telegram bridge - one operator, private chat, commands, the conversation's outlet, outbox"
 ```
 
 ---
