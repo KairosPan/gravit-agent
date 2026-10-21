@@ -601,7 +601,9 @@ export function deskTime(at: Date, now: Date): string {
  * operator's id are both set; `polling`, whether its loop runs; `lastPollAt`, its last poll;
  * `dropped`, the updates it refused as not the operator's private chat, and `lastDroppedFrom`,
  * the last one's sender; `queued`, the messages waiting in its outbox; `conflictAt`, the last time
- * Telegram said another poller holds the token. */
+ * Telegram said another poller holds the token; `blocked`, present while Telegram's last answer to
+ * a send was 403 - the operator blocked the bot, or never started it - and no send has gone
+ * through since. */
 export interface TelegramStatus {
   configured: boolean;
   polling: boolean;
@@ -610,6 +612,7 @@ export interface TelegramStatus {
   lastDroppedFrom?: number;
   queued: number;
   conflictAt?: string;
+  blocked?: boolean;
 }
 
 /** What `GET /data/desk/status` answers. `pid`, `version` (the dsh version this face runs),
@@ -719,11 +722,13 @@ function offLine(off: OffState, now: Date): string {
   return `desk: paused since ${deskTime(new Date(off.setAt), now)} by ${off.by}${until} (npm run desk -- resume)`;
 }
 
-/** The Telegram line: where its keys go while it has none; else whether it polls, its last poll, what it
- * dropped and holds queued, and its last conflict when it had one. */
+/** The Telegram line: where its keys go while it has none; else, first, that the operator blocked the bot
+ * when Telegram says so, then whether it polls, its last poll, what it dropped and holds queued, and its
+ * last conflict when it had one. */
 function telegramLine(telegram: TelegramStatus, now: Date): string {
   if (!telegram.configured) return "telegram: not configured (TELEGRAM_BOT_TOKEN and TELEGRAM_OPERATOR_ID in $DSH_HOME/.env)";
   const parts = [
+    ...(telegram.blocked === true ? ["blocked (403)"] : []),
     telegram.polling ? "polling" : "not polling",
     telegram.lastPollAt === undefined ? "no poll yet" : `last poll ${deskTime(new Date(telegram.lastPollAt), now)}`,
     `${telegram.dropped} dropped`,

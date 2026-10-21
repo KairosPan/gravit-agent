@@ -15,11 +15,11 @@
  * has one stdio MCP child - tests/fixtures/mcp-standin.js, the operator's `alpaca-kit` row's stand-in, spawned
  * by dsh's own MCP client - and that child reports which `TELEGRAM_*` names reached it.
  *
- * THE SEAMS. The bridge's long poll is 1 s, and its clock shortens a wait of 30 s or more - the 30 s it sleeps
- * after a 409, and no other wait any scenario here reaches - to 200 ms; every other timer, the requests'
- * deadlines included, is the real one. Every desk turn's deadline is 1,500 ms (`installDesk`'s
- * `deskDeadlineMs`), so a parked card is cut in a second and a half. The model is the shared stub on
- * `stub/echo`.
+ * THE SEAMS. The bridge's long poll is 1 s, and its clock shortens the 30 s it sleeps after a 409 - the first
+ * wait of 30 s or more it asks for once the stub has answered one - to 200 ms; every other timer, the
+ * requests' deadlines and the 30 s bound on a post included, is the real one. Every desk turn's deadline is
+ * 1,500 ms (`installDesk`'s `deskDeadlineMs`), so a parked card is cut in a second and a half. The model is
+ * the shared stub on `stub/echo`.
  *
  * WHERE IT RUNS. `tests/tmp/telegram-smoke-<pid>/`, inside the repository and without a `.git` of its own, as
  * tests/desk-smoke.test.ts explains: `repo/` (the desk's four guarded files; the face makes the journal),
@@ -85,10 +85,17 @@ const GUARDED: readonly (readonly [string, string])[] = [
   ["holdings.yml", "holdings: []\n"],
 ];
 
-/** The bridge's clock: real time, but a wait of 30 s or more - the 409 wait - is 200 ms. */
+/** Set when the stub answers a 409: the bridge's next wait of 30 s or more is the 409 wait. */
+const conflictWait = { due: false };
+/** The bridge's clock: real time, but the 409 wait is 200 ms. Only that one: the 30 s bound on a post is a wait
+ * of 30 s too, and shortened it would answer a post that is merely slow. */
 const SHORT_WAITS: DeskClock = {
   now: () => Date.now(),
-  setTimeout: (fn, ms) => setTimeout(fn, ms >= 30_000 ? 200 : ms),
+  setTimeout: (fn, ms) => {
+    if (ms < 30_000 || !conflictWait.due) return setTimeout(fn, ms);
+    conflictWait.due = false;
+    return setTimeout(fn, 200);
+  },
   clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout),
 };
 
@@ -163,6 +170,7 @@ class BotApiStub {
     if (method === "getUpdates") {
       if (this.conflicts > 0) {
         this.conflicts -= 1;
+        conflictWait.due = true;
         return answer(res, 409, { ok: false, error_code: 409, description: "Conflict: terminated by other getUpdates request; make sure that only one bot instance is running" });
       }
       const offset = typeof body.offset === "number" ? body.offset : 0;

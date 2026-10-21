@@ -10,31 +10,39 @@
  * from.
  *
  * WHAT A MESSAGE DOES. A text goes to the desk conversation (src/desk-conversation.ts) with the telegram
- * source; a post the conversation refuses is answered with its line, and an opened turn's answer comes back
- * through the outlet - the bridge is the conversation's outlet from install to dispose. Four commands are the
- * bridge's own: /status, /pause [duration], /new and /stop, with or without the bot's name after them; any
- * other /word is text for Gravit. There is no /resume: the phone only ever makes the desk quieter (§5.8). A
- * message with no text gets one line.
+ * source and the time the operator wrote it - Telegram's own `date`, not the time it arrived, which after a
+ * night the Mac slept can be hours later. A post the conversation refuses is answered with its line, and an
+ * opened turn's answer comes back through the outlet - the bridge is the conversation's outlet from install
+ * to dispose. Four commands are the bridge's own: /status, /pause [duration], /new and /stop, in any case,
+ * with or without the bot's name after them; any other /word is text for Gravit. There is no /resume: the
+ * phone only ever makes the desk quieter (§5.8). A message with no text gets one line. A post or a /new
+ * that takes more than 30 s is answered that the desk is slow, and the bridge goes on to the next update;
+ * a refusal that comes later is still answered when it does.
  *
- * THE OFFSET. After each update, whatever happened to it, the offset moves past it and is stored in
+ * THE OFFSET. After each update, whatever happened to it, the offset is set past it and stored in
  * `telegram.offset`, so an update is taken once across restarts, and one the bridge cannot use is never
- * delivered again.
+ * delivered again. Every update a poll answers is taken, in order - one numbered below the stored offset
+ * too, with one line: after about a week with no update Telegram may number them afresh, and passing those
+ * over would leave the phone unheard while the status read healthy.
  *
  * THE OUTBOX. Plain text, no parse mode, split at 4,000 UTF-16 code units ({@link splitMessage}). A send that
- * fails - unreachable, past its 15 s, any answer but a refusal - goes to `outbox.json` with the time it was
- * sent at, and resolves `{ queued: true }`. The outbox is flushed, in order, before each poll and before any
- * later send, so what waits there always goes first; a queued message Telegram refuses outright (HTTP 400)
- * is dropped with one line, so it cannot hold up the rest, and a fresh one it refuses rejects.
+ * fails - unreachable, past its 15 s, any answer but a refusal - goes to `outbox.json`, at most 100 messages
+ * long, with the time it was written; a send that got part of the way queues only what did not go. The
+ * outbox is flushed, in order, before each poll and before any later send, so what waits there always goes
+ * first, and a message it sends more than 2 minutes after it was written opens with a line that says so.
+ * A message Telegram refuses outright - HTTP 400, or 403 for a bot the operator blocked - is never queued: a
+ * queued one is dropped with one line, so it cannot hold up the rest, and a fresh one rejects; after a 403
+ * the status reads `blocked` until a send goes through.
  *
  * THE POLL'S FAILURES. Every Bot API request has its own deadline: the long poll plus 15 s for getUpdates
  * (65 s), 15 s for sendMessage. HTTP 409 - another poller holds the token, a second face started without
- * `FACE_DESK=0` - is a `conflict` record at most once a minute and a 30 s wait; any other failure, a
- * `poll-error` record at most once a minute and a backoff from 5 s doubling to 60 s, which a poll that
- * answers resets. The loop never stops on a failure.
+ * `FACE_DESK=0`, or a webhook is set - is a `conflict` record, carrying Telegram's own description, at most
+ * once a minute and a 30 s wait; any other failure, a `poll-error` record at most once a minute and a
+ * backoff from 5 s doubling to 60 s, which a poll that answers resets. The loop never stops on a failure.
  *
  * THE TOKEN appears in one place: the path of each request's URL (`/bot<token>/<method>`). Every line this
- * module writes, every reason it records and every text it sends or queues passes through a redactor first,
- * so no log line, record, file or status field carries it.
+ * module writes, every reason and description it records, every error it rejects with and every text it
+ * sends or queues passes through a redactor first, so no log line, record, file or status field carries it.
  *
  * MODULE WEIGHT. src/desk.ts loads this module on first use (`installDesk`, with the desk on and Telegram
  * configured), so the pause switch and scripts/service.ts, which import src/desk.ts, never load it; the face
@@ -46,7 +54,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { writeFileAtomic } from "@deepseek-ai/dsh-atomic-write";
 import { appendRecord, deskDir, deskStatusLines, deskTime, parseDuration, writeOff, type DeskStatus, type TelegramStatus } from "./desk.ts";
-import type { DeskConversation, DeskOutlet } from "./desk-conversation.ts";
+import type { DeskConversation, DeskOutlet, PostResult } from "./desk-conversation.ts";
 import type { DeskClock } from "./desk-session.ts";
 
 /** Diagnostic label, the one every `${BIN}:`-prefixed line in the face uses; the bridge's lines add `telegram:`. */
@@ -60,17 +68,23 @@ const POLL_TIMEOUT_S = 50;
 const POLL_SLACK_MS = 15_000;
 /** A sendMessage's deadline. */
 const SEND_DEADLINE_MS = 15_000;
-/** The wait after Telegram says another poller holds the token. */
+/** The wait after Telegram answers a poll with 409. */
 const CONFLICT_WAIT_MS = 30_000;
 /** The backoff after any other failed poll: 5 s, doubling to 60 s. */
 const BACKOFF_FIRST_MS = 5_000;
 const BACKOFF_MAX_MS = 60_000;
 /** A conflict, or a failed poll, is recorded at most this often. */
 const RECORD_EVERY_MS = 60_000;
+/** How long an update's post or /new may take before the bridge answers that the desk is slow and goes on. */
+const POST_BOUND_MS = 30_000;
 /** How long {@link BridgeHandle.dispose} waits for the update in hand and the sends under way. */
 const DISPOSE_MS = 2_000;
 /** The longest part a message is sent in: 4,000 UTF-16 code units, under Telegram's 4,096. */
 const PART_MAX = 4_000;
+/** The most messages the outbox holds; one more drops the oldest. */
+const OUTBOX_MAX = 100;
+/** A message flushed later than this after it was written says so. */
+const LATE_MS = 120_000;
 
 /** The bridge's files in the desk's directory (src/desk.ts `deskDir`). */
 const RECORDS_FILE = "telegram.jsonl";
@@ -81,6 +95,8 @@ const OUTBOX_FILE = "outbox.json";
 const TEXT_ONLY = "text only on the desk";
 const RESUMES = "a terminal resumes it: npm run desk -- resume";
 const PAUSE_USAGE = "/pause takes Nm, Nh or Nd - 30m, 2h, 1d - or nothing; nothing was paused";
+const RENEWED = "a new desk conversation";
+const SLOW = "the desk is slow to take this; it will answer when it can";
 /** What `/stop` cancels the turn under way with. */
 const STOP_REASON = "stopped from the phone";
 
@@ -155,20 +171,21 @@ export function splitMessage(text: string, max = PART_MAX): string[] {
 /** A command the bridge answers itself, and what followed it. */
 export type Command = { cmd: "status" | "pause" | "new" | "stop"; arg?: string };
 
-/** The four commands, as Telegram sends them: the word, then the bot's name when the operator picked the
- * command from the menu, then anything after a space. */
-const COMMAND = /^\/(status|pause|new|stop)(?:@[A-Za-z0-9_]+)?(?:\s+([\s\S]*))?$/;
+/** The four commands, as Telegram sends them: the word in any case, then the bot's name when the operator
+ * picked the command from the menu, then anything after a space. */
+const COMMAND = /^\/(status|pause|new|stop)(?:@[A-Za-z0-9_]+)?(?:\s+([\s\S]*))?$/i;
 
 /**
- * `text` as one of the bridge's own commands - `/status`, `/pause [duration]`, `/new`, `/stop`, each also
- * as `/pause@botname 2h` - with what follows it as `arg`, trimmed, when anything does; anything else, any
- * other `/word` included, is `undefined`: text for Gravit.
+ * `text` as one of the bridge's own commands - `/status`, `/pause [duration]`, `/new`, `/stop`, in any case
+ * (`/Status`, `/PAUSE@botname 2h`) - with what follows it as `arg`, trimmed, when anything does; anything
+ * else, any other `/word` included, is `undefined`: text for Gravit. The argument is left as typed: a
+ * duration stays exact (src/desk.ts `parseDuration`).
  * @param text - the message's text.
  */
 export function parseCommand(text: string): Command | undefined {
   const match = COMMAND.exec(text.trim());
   if (match === null) return undefined;
-  const cmd = match[1] as Command["cmd"];
+  const cmd = match[1].toLowerCase() as Command["cmd"];
   const arg = match[2]?.trim();
   return arg === undefined || arg === "" ? { cmd } : { cmd, arg };
 }
@@ -187,12 +204,13 @@ export interface BridgeDeps {
 }
 
 /** The running bridge. `status` is what the desk's status reports of it; `send` sends `text` to the
- * operator, as a reply to `replyTo` when given, and resolves the message id of every part it sent, or
- * `{ queued: true }` when the text went to the outbox - rejecting only when Telegram refuses it outright;
- * `dispose` ends the bridge (see {@link installTelegramBridge}). */
+ * operator, as a reply to `replyTo` when given, and resolves the message id of every part it sent - with
+ * `queued: true` too when the rest of the text went to the outbox - or `{ queued: true }` when all of it
+ * did, rejecting only when Telegram refuses it outright; `dispose` ends the bridge (see
+ * {@link installTelegramBridge}). */
 export interface BridgeHandle {
   status(): TelegramStatus;
-  send(text: string, opts?: { replyTo?: number }): Promise<{ sent: number[] } | { queued: true }>;
+  send(text: string, opts?: { replyTo?: number }): Promise<{ sent: number[]; queued?: true } | { queued: true }>;
   dispose(): Promise<void>;
 }
 
@@ -201,11 +219,12 @@ interface TgMessage {
   message_id?: unknown;
   from?: { id?: unknown } | null;
   chat?: { id?: unknown; type?: unknown } | null;
+  date?: unknown;
   text?: unknown;
 }
 type TgUpdate = { update_id?: unknown; message?: TgMessage | null } & Record<string, unknown>;
 
-/** One message waiting in the outbox: when it was sent, its text, and the message it answers, if any. */
+/** One message waiting in the outbox: when it was written, its text, and the message it answers, if any. */
 interface OutboxEntry {
   t: string;
   text: string;
@@ -214,15 +233,15 @@ interface OutboxEntry {
 
 /** A Bot API answer that was not `ok`: its HTTP status - or Telegram's `error_code` - and what it said. */
 class BotApiError extends Error {
-  constructor(message: string, readonly status: number) {
-    super(message);
+  constructor(readonly status: number, readonly description: string) {
+    super(`HTTP ${status}${description === "" ? "" : ` ${description}`}`);
   }
 }
 
-/** A send that stopped at a part: how many parts went before it and their size, the text that did not go,
- * and the error it stopped on. */
+/** A send that stopped at a part: the ids and the size of the parts that went before it, the text that did
+ * not go, and the error it stopped on. */
 class SendFailure extends Error {
-  constructor(readonly parts: number, readonly chars: number, readonly rest: string, readonly error: unknown) {
+  constructor(readonly ids: number[], readonly parts: number, readonly chars: number, readonly rest: string, readonly error: unknown) {
     super(reasonOf(error));
   }
 }
@@ -236,10 +255,13 @@ function reasonOf(err: unknown): string {
   return typeof code === "string" && !err.message.includes(code) ? `${err.message} (${code})` : err.message;
 }
 
-/** Telegram refused the request itself (400): sending it again cannot help. */
-const isRefused = (err: unknown): boolean => err instanceof BotApiError && err.status === 400;
-/** Another poller holds the token (409). */
-const isConflict = (err: unknown): boolean => err instanceof BotApiError && err.status === 409;
+/** Telegram refused the message outright - 400, the request itself; 403, a bot the operator blocked or
+ * never started: sending it again cannot help. */
+const isRefused = (err: unknown): boolean => err instanceof BotApiError && (err.status === 400 || err.status === 403);
+/** The operator blocked the bot, or never started it (403). */
+const isBlocked = (err: unknown): boolean => err instanceof BotApiError && err.status === 403;
+/** Another poller holds the token, or a webhook is set (409). */
+const isConflict = (err: unknown): err is BotApiError => err instanceof BotApiError && err.status === 409;
 
 /** Every spelling of `token` a line could carry - as it is and as a URL encodes it - made `<token>`. */
 function redactorOf(token: string): (text: string) => string {
@@ -247,8 +269,8 @@ function redactorOf(token: string): (text: string) => string {
   return (text) => spellings.reduce((out, spelling) => out.split(spelling).join("<token>"), text);
 }
 
-/** `outbox.json`'s text as entries - those that are `{ t, text }` with a whole-number `replyTo` if any -
- * and how many were not; `undefined` when it is not a JSON list at all. */
+/** `outbox.json`'s text as entries - those that are `{ t, text }`, `t` a time, with a whole-number
+ * `replyTo` if any - and how many were not; `undefined` when it is not a JSON list at all. */
 function outboxOf(text: string): { entries: OutboxEntry[]; skipped: number } | undefined {
   let parsed: unknown;
   try {
@@ -260,7 +282,8 @@ function outboxOf(text: string): { entries: OutboxEntry[]; skipped: number } | u
   const entries: OutboxEntry[] = [];
   for (const item of parsed as unknown[]) {
     const { t, text: body, replyTo } = (item ?? {}) as { t?: unknown; text?: unknown; replyTo?: unknown };
-    if (typeof t !== "string" || typeof body !== "string" || (replyTo !== undefined && !Number.isSafeInteger(replyTo))) continue;
+    if (typeof t !== "string" || Number.isNaN(Date.parse(t)) || typeof body !== "string") continue;
+    if (replyTo !== undefined && !Number.isSafeInteger(replyTo)) continue;
     entries.push({ t, text: body, ...(replyTo === undefined ? {} : { replyTo: replyTo as number }) });
   }
   return { entries, skipped: parsed.length - entries.length };
@@ -276,6 +299,9 @@ function payloadOf(update: TgUpdate): TgMessage | undefined {
   return undefined;
 }
 
+/** How a promise settled within a bound: with its value, with its error, or not yet. */
+type Bounded<T> = { settled: true; value: T } | { settled: true; error: unknown } | { settled: false };
+
 /**
  * Start the bridge: it is the conversation's outlet at once, and its loop - load the offset and the outbox,
  * then, until dispose, flush the outbox and poll - starts without being awaited. Never throws, and nothing
@@ -286,7 +312,9 @@ function payloadOf(update: TgUpdate): TgMessage | undefined {
  * the bridge - `/status` with the desk's lines (src/desk.ts `deskStatusLines`) and `desk session <id>` and
  * `turns today <n>` after them, `/pause [d]` with the pause in force once it is written (src/desk.ts
  * `writeOff`, set by `telegram`), `/new` and `/stop` with what the conversation did; and a text is posted to
- * the conversation, a refusal answered with its line. Then the offset moves past it.
+ * the conversation, a refusal answered with its line. A post or a `/new` still under way after 30 s on the
+ * clock is answered `the desk is slow to take this; it will answer when it can`, and what it comes to is
+ * answered when it settles. Then the offset is set past the update.
  *
  * `dispose()` aborts the poll and the sends under way - a send cut short waits in the outbox - stops the
  * loop, lets go of the outlet, and keeps the outbox; it waits up to 2 s for the update in hand and the
@@ -314,6 +342,8 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
   let dropped = 0;
   let lastDroppedFrom: number | undefined;
   let conflictAt: string | undefined;
+  /** Whether the last answer to a send was a 403, with no send through since. */
+  let blocked = false;
   /** The next update the bridge has not taken; `undefined` until it has a stored one or takes one. */
   let offset: number | undefined;
   let outbox: OutboxEntry[] = [];
@@ -323,6 +353,15 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
   const stopping = new AbortController();
   /** Ends the loop's wait early, at dispose. */
   let wake: (() => void) | undefined;
+
+  /** How `p` settled within `ms` on the clock; never rejects. */
+  const bounded = <T>(ms: number, p: Promise<T>): Promise<Bounded<T>> => new Promise((settle) => {
+    const timer = clock.setTimeout(() => { settle({ settled: false }); }, ms);
+    p.then(
+      (value) => { clock.clearTimeout(timer); settle({ settled: true, value }); },
+      (error: unknown) => { clock.clearTimeout(timer); settle({ settled: true, error }); },
+    );
+  });
 
   /* ---------- the Bot API ---------- */
 
@@ -351,8 +390,7 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
       }
       if (res.ok && answer?.ok === true) return answer.result;
       const status = typeof answer?.error_code === "number" ? answer.error_code : res.status;
-      const said = typeof answer?.description === "string" ? answer.description : res.statusText;
-      throw new BotApiError(`HTTP ${status}${said === "" ? "" : ` ${said}`}`, status);
+      throw new BotApiError(status, typeof answer?.description === "string" ? answer.description : res.statusText);
     } finally {
       clock.clearTimeout(timer);
       stopping.signal.removeEventListener("abort", stop);
@@ -360,7 +398,8 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
   };
 
   /** Send `text` to the operator's chat in parts, the first as a reply to `replyTo` when given. Resolves
-   * the ids and the size of what went; rejects with a {@link SendFailure} at the first part that does not. */
+   * the ids and the size of what went; rejects with a {@link SendFailure} at the first part that does not.
+   * A part that goes ends a 403's `blocked`; a 403 sets it. */
   const deliver = async (text: string, replyTo: number | undefined): Promise<{ ids: number[]; parts: number; chars: number }> => {
     const parts = splitMessage(text).filter((part) => part.trim() !== "");
     const ids: number[] = [];
@@ -371,8 +410,10 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
       try {
         result = await call("sendMessage", { chat_id: operatorId, text: part, ...reply }, SEND_DEADLINE_MS);
       } catch (err) {
-        throw new SendFailure(i, chars, parts.slice(i).join(""), err);
+        if (isBlocked(err)) blocked = true;
+        throw new SendFailure(ids, i, chars, parts.slice(i).join(""), err);
       }
+      blocked = false;
       const id = (result as { message_id?: unknown } | null | undefined)?.message_id;
       if (typeof id === "number") ids.push(id);
       chars += part.length;
@@ -397,11 +438,22 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
     }
   };
 
-  const enqueue = async (entry: OutboxEntry): Promise<{ queued: true }> => {
+  /** Queue `entry` - the oldest message dropped, with one line, when the outbox would hold more than 100. */
+  const enqueue = async (entry: OutboxEntry): Promise<void> => {
     outbox.push(entry);
+    if (outbox.length > OUTBOX_MAX) {
+      const oldest = outbox.shift() as OutboxEntry;
+      log(`${BIN}: telegram: the outbox holds ${OUTBOX_MAX} messages; the oldest, written ${deskTime(new Date(oldest.t), new Date(clock.now()))}, is dropped`);
+    }
     await persistOutbox();
     await record({ t: stamp(), kind: "queued", chars: entry.text.length });
-    return { queued: true };
+  };
+
+  /** The line a message written at `t` opens with when it is sent more than 2 minutes later - the time as
+   * src/desk.ts `deskTime` shows it - and nothing otherwise. */
+  const lateLine = (t: string): string => {
+    const now = clock.now();
+    return now - Date.parse(t) > LATE_MS ? `(written ${deskTime(new Date(t), new Date(now))}, sent late)\n` : "";
   };
 
   /** Send what waits in the outbox, in order, until it is empty or a message does not go - that one stays
@@ -409,8 +461,10 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
   const flush = async (): Promise<void> => {
     while (outbox.length > 0 && !disposed) {
       const head = outbox[0];
+      /* the late line rides in the first part, so what does not go is always the head's own text */
+      const late = lateLine(head.t);
       try {
-        const done = await deliver(head.text, head.replyTo);
+        const done = await deliver(`${late}${head.text}`, head.replyTo);
         outbox.shift();
         await persistOutbox();
         if (done.parts > 0) await record({ t: stamp(), kind: "sent", parts: done.parts, chars: done.chars });
@@ -432,13 +486,16 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
     }
   };
 
-  const send = (text: string, opts: { replyTo?: number } = {}): Promise<{ sent: number[] } | { queued: true }> => outbound(async () => {
+  const send = (text: string, opts: { replyTo?: number } = {}): Promise<{ sent: number[]; queued?: true } | { queued: true }> => outbound(async () => {
     const t = stamp();
     const body = redact(text);
     const { replyTo } = opts;
     if (body.trim() === "") return { sent: [] };
     if (outbox.length > 0) await flush();
-    if (disposed || outbox.length > 0) return enqueue({ t, text: body, ...(replyTo === undefined ? {} : { replyTo }) });
+    if (disposed || outbox.length > 0) {
+      await enqueue({ t, text: body, ...(replyTo === undefined ? {} : { replyTo }) });
+      return { queued: true };
+    }
     try {
       const done = await deliver(body, replyTo);
       if (done.parts > 0) await record({ t: stamp(), kind: "sent", parts: done.parts, chars: done.chars });
@@ -446,9 +503,10 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
     } catch (err) {
       const failure = err as SendFailure;
       if (failure.parts > 0) await record({ t: stamp(), kind: "sent", parts: failure.parts, chars: failure.chars });
-      if (isRefused(failure.error)) throw new Error(`Telegram refused the message: ${failure.message}`);
+      if (isRefused(failure.error)) throw new Error(redact(`Telegram refused the message: ${failure.message}`));
       log(`${BIN}: telegram: a message could not be sent (${failure.message}); it waits in the outbox`);
-      return enqueue({ t, text: failure.rest, ...(failure.parts === 0 && replyTo !== undefined ? { replyTo } : {}) });
+      await enqueue({ t, text: failure.rest, ...(failure.parts === 0 && replyTo !== undefined ? { replyTo } : {}) });
+      return failure.parts > 0 ? { sent: failure.ids, queued: true } : { queued: true };
     }
   });
 
@@ -539,26 +597,24 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
     }
   };
 
-  const commandReply = async (command: Command): Promise<string> => {
-    switch (command.cmd) {
-      case "status":
-        return statusReply();
-      case "pause":
-        return pauseReply(command.arg);
-      case "new":
-        try {
-          await conversation.renew();
-          return "a new desk conversation";
-        } catch (err) {
-          return `a new desk conversation could not be opened: ${reasonOf(err)}`;
-        }
-      case "stop":
-        try {
-          return (await conversation.stop(STOP_REASON)) ? "stopped" : "nothing is running";
-        } catch (err) {
-          return `the desk could not be stopped: ${reasonOf(err)}`;
-        }
+  const stopReply = async (): Promise<string> => {
+    try {
+      return (await conversation.stop(STOP_REASON)) ? "stopped" : "nothing is running";
+    } catch (err) {
+      return `the desk could not be stopped: ${reasonOf(err)}`;
     }
+  };
+
+  /** Wait up to 30 s for `line`, the answer to a post or a `/new`: past that, answer that the desk is slow
+   * and leave `line` to be answered when it settles - an empty one, as an opened turn's is, says nothing. */
+  const answerWithin = async (line: Promise<string>): Promise<void> => {
+    const answered = await bounded(POST_BOUND_MS, line);
+    if (answered.settled) {
+      if ("value" in answered && answered.value !== "") await reply(answered.value);
+      return;
+    }
+    await reply(SLOW);
+    void line.then((late) => (late === "" ? undefined : reply(late)), () => undefined);
   };
 
   const handle = async (update: TgUpdate): Promise<void> => {
@@ -574,31 +630,46 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
       return;
     }
     const command = parseCommand(message.text);
-    if (command !== undefined) {
-      await reply(await commandReply(command));
+    if (command?.cmd === "new") {
+      await answerWithin(conversation.renew().then(() => RENEWED, (err: unknown) => `a new desk conversation could not be opened: ${reasonOf(err)}`));
       return;
     }
-    const posted = await conversation.post({
+    if (command !== undefined) {
+      await reply(command.cmd === "status" ? await statusReply() : command.cmd === "pause" ? await pauseReply(command.arg) : await stopReply());
+      return;
+    }
+    const { date } = message;
+    const at = typeof date === "number" && Number.isSafeInteger(date) && date > 0 ? date * 1_000 : undefined;
+    const posted = conversation.post({
       text: message.text,
-      source: { kind: "telegram" },
+      source: { kind: "telegram", ...(at === undefined ? {} : { at }) },
       message: { kind: "telegram", from: operatorId, chat: operatorId, messageId },
     });
-    if ("refused" in posted) await reply(posted.line);
+    await answerWithin(posted.then(
+      (result: PostResult) => ("refused" in result ? result.line : ""),
+      (err: unknown) => {
+        log(`${BIN}: telegram: the desk did not take update ${String(update.update_id)}: ${reasonOf(err)}`);
+        return "";
+      },
+    ));
   };
 
-  /** Take one update, whatever it is, then move the offset past it. One taken already is passed over. */
+  /** Take one update, whatever it is, then set the offset past it. An update numbered below the stored
+   * offset is taken too - Telegram has numbered its updates afresh - with one line. */
   const take = async (raw: unknown): Promise<void> => {
     const update = (raw !== null && typeof raw === "object" ? raw : {}) as TgUpdate;
     const id = update.update_id;
     const numbered = typeof id === "number" && Number.isSafeInteger(id) && id >= 0;
-    if (numbered && offset !== undefined && id < offset) return;
+    if (numbered && offset !== undefined && id < offset) {
+      log(`${BIN}: desk: Telegram update ${id} is below the stored offset ${offset}: Telegram has numbered its updates afresh, so the bridge takes it and goes on from ${id + 1}`);
+    }
     try {
       await handle(update);
     } catch (err) {
       log(`${BIN}: telegram: update ${numbered ? id : "without an id"} could not be handled: ${reasonOf(err)}`);
     }
     if (!numbered) return;
-    offset = Math.max(offset ?? 0, id + 1);
+    offset = id + 1;
     await persistOffset();
   };
 
@@ -648,8 +719,10 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
           conflictAt = t;
           if (at - conflictRecordedAt >= RECORD_EVERY_MS) {
             conflictRecordedAt = at;
-            await record({ t, kind: "conflict" });
-            log(`${BIN}: telegram: another poller holds the bot's token (HTTP 409 - a second face without FACE_DESK=0?); polling again in ${CONFLICT_WAIT_MS / 1000} s`);
+            const description = redact(err.description);
+            await record({ t, kind: "conflict", description });
+            log(`${BIN}: telegram: getUpdates got HTTP 409 (${description}): another poller holds the bot's token - a second face without `
+              + `FACE_DESK=0? - or a webhook is set; polling again in ${CONFLICT_WAIT_MS / 1000} s`);
           }
           await sleep(CONFLICT_WAIT_MS);
           continue;
@@ -677,16 +750,6 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
     .catch((err: unknown) => { log(`${BIN}: telegram: the bridge stopped: ${reasonOf(err)}`); })
     .finally(() => { polling = false; });
 
-  /** How `p` settled within `ms` on the clock - or not; never rejects. */
-  const within = (ms: number, p: Promise<unknown>): Promise<void> => new Promise((done) => {
-    const timer = clock.setTimeout(() => { done(); }, ms);
-    const settle = (): void => {
-      clock.clearTimeout(timer);
-      done();
-    };
-    p.then(settle, settle);
-  });
-
   const outlet: DeskOutlet = { send: (text, opts) => send(text, opts) };
   conversation.setOutlet(outlet);
 
@@ -699,6 +762,7 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
       ...(lastDroppedFrom === undefined ? {} : { lastDroppedFrom }),
       queued: outbox.length,
       ...(conflictAt === undefined ? {} : { conflictAt }),
+      ...(blocked ? { blocked: true } : {}),
     }),
     send,
     dispose() {
@@ -708,7 +772,7 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
         conversation.setOutlet(undefined);
         stopping.abort(new Error("the bridge is shut down"));
         wake?.();
-        await within(DISPOSE_MS, Promise.all([loop, chain]));
+        await bounded(DISPOSE_MS, Promise.all([loop, chain]));
       })();
       return disposing;
     },

@@ -46,9 +46,8 @@ import { join, resolve } from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
 import { installModelSelection as installDshModelSelection } from "@deepseek-ai/dsh-agent";
 import { deriveTurnTokenUsage } from "@deepseek-ai/dsh-token-meter/client";
-import { appendEvent, lastDeskSession, readEvents, type TurnUsage } from "./desk.ts";
+import { appendEvent, deskTime, lastDeskSession, readEvents, type TurnUsage } from "./desk.ts";
 import { DESK_PRESET } from "./desk-preset.ts";
-import { etTime } from "./et.ts";
 import type { AgentLike, MemberSetup, ResumeMemberOptions, RoomContextLike, RoomDeps, SessionLike } from "./room.ts";
 import { finalTextOf, parseModelRoute, type EventLike } from "./room-rules.ts";
 
@@ -195,16 +194,20 @@ export function fenceRefusalLine(path: string): string {
 
 /* ---------- provenance and the desk's message sources ---------- */
 
-/** Where a message the face sends the desk came from, as its provenance line names it. */
+/** Where a message the face sends the desk came from, as its provenance line names it. A phone's text
+ * carries `at`, when the operator wrote it in ms since the epoch (Telegram's own `date`), when the bridge
+ * has it. */
 export type DeskSource =
-  | { kind: "telegram" }
+  | { kind: "telegram"; at?: number }
   | { kind: "schedule"; order: string; date: string }
   | { kind: "alert"; symbol: string; rule: string };
 
 /**
  * The bracketed first line of every message the face sends the desk:
  * `[telegram · operator · 14:03 ET]`, `[schedule · <order> · <YYYY-MM-DD>]`, `[alert · <SYMBOL> · <rule>]`.
- * The time is `now` in America/New_York (src/et.ts); a schedule line carries its firing's own date.
+ * A phone's time is when the operator wrote it - the source's `at`, else `now` - in America/New_York as
+ * src/desk.ts `deskTime` shows it: dated when it falls on another New York date than `now`'s, as a text
+ * written before a night the Mac slept through does. A schedule line carries its firing's own date.
  * `dsh/profile/desk.md` tells the model how to read each form (tests/desk-session.test.ts ties the two).
  * @param source - where the message came from.
  * @param now - when the face sends it.
@@ -212,7 +215,7 @@ export type DeskSource =
 export function provenanceLine(source: DeskSource, now: Date): string {
   switch (source.kind) {
     case "telegram":
-      return `[telegram · operator · ${etTime(now)}]`;
+      return `[telegram · operator · ${deskTime(source.at === undefined ? now : new Date(source.at), now)}]`;
     case "schedule":
       return `[schedule · ${source.order} · ${source.date}]`;
     case "alert":

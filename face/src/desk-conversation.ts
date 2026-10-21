@@ -86,7 +86,7 @@ const JOURNAL = "desk/journal";
 /** Where a turn's answer goes when it should leave the face: the Telegram bridge is one, and P3 adds no other.
  * `send` resolves the ids of the messages it sent, or `{ queued: true }` when it kept the text to send later. */
 export interface DeskOutlet {
-  send(text: string, opts?: { replyTo?: number }): Promise<{ sent: number[] } | { queued: true }>;
+  send(text: string, opts?: { replyTo?: number }): Promise<{ sent: number[]; queued?: true } | { queued: true }>;
 }
 
 /** What {@link DeskConversation.post} answers: the turn opened on `sessionId`, or why not, with the line the

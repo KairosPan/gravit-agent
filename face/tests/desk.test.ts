@@ -743,6 +743,8 @@ test("deskStatusLines: the desk line, then the pause and the telegram lines, a t
     ["telegram: not configured (TELEGRAM_BOT_TOKEN and TELEGRAM_OPERATOR_ID in $DSH_HOME/.env)"]);
   assert.deepEqual(deskStatusLines({ ...base, telegram: { configured: true, polling: false, dropped: 0, queued: 3 } }, now).slice(1),
     ["telegram: not polling, no poll yet, 0 dropped, 3 queued"]);
+  assert.deepEqual(deskStatusLines({ ...base, telegram: { ...polled, blocked: true } }, now).slice(1),
+    ["telegram: blocked (403), polling, last poll 14:29 ET, 2 dropped, 1 queued"], "a bot the operator blocked says so first");
 });
 
 /* The pause switch (scripts/desk.ts) and scripts/service.ts import desk.ts; neither runs a bridge, so

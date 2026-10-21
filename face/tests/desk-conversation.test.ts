@@ -295,6 +295,17 @@ test("post opens a turn with the provenance line and the message source", async 
   assert.deepEqual(h.lines, []);
 });
 
+/* The bridge passes Telegram's own date as the source's `at`: a text written before a night the Mac slept
+ * through reaches the desk with the time it was written, not the time it arrived. */
+test("a phone's provenance line carries when the operator wrote it, dated when that was another day", async () => {
+  const h = await harness();
+  await post(h, "written at noon", { kind: "telegram", at: AT - 2 * 3_600_000 - 3 * 60_000 });
+  await post(h, "written last night", { kind: "telegram", at: AT - 16 * 3_600_000 });
+  const agent = h.tree.agents[0];
+  assert.equal(agent.text(0), "[telegram · operator · 12:00 ET]\nwritten at noon");
+  assert.equal(agent.text(1), "[telegram · operator · 2026-10-19 22:03 ET]\nwritten last night");
+});
+
 test("a paused desk refuses with the paused line and opens no turn", async () => {
   const today = await harness();
   await writeOff(today.home, { by: "telegram", until: AT + 7_200_000 }, () => AT - 60_000);

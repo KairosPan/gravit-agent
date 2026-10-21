@@ -265,6 +265,10 @@ test("provenanceLine renders the three forms in ET", () => {
   assert.equal(provenanceLine({ kind: "schedule", order: "preclose", date: "2026-10-20" }, at), "[schedule · preclose · 2026-10-20]");
   assert.equal(provenanceLine({ kind: "alert", symbol: "NVDA", rule: "buy_zone" }, at), "[alert · NVDA · buy_zone]");
   assert.equal(provenanceLine({ kind: "telegram" }, new Date("2026-12-01T19:03:00Z")), "[telegram · operator · 14:03 ET]", "EST reads ET too");
+  assert.equal(provenanceLine({ kind: "telegram", at: Date.parse("2026-10-20T13:30:00Z") }, at), "[telegram · operator · 09:30 ET]",
+    "a phone's time is when the operator wrote it, not when it arrived");
+  assert.equal(provenanceLine({ kind: "telegram", at: Date.parse("2026-10-20T03:30:00Z") }, at), "[telegram · operator · 2026-10-19 23:30 ET]",
+    "dated when it was written on another New York day");
 });
 
 test("the desk contract names every fence name and the provenance forms the code writes", () => {

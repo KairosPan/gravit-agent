@@ -6,10 +6,11 @@
  * tests/tmp/telegram-<pid>/, and are removed afterwards. */
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { chmod, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { OFF_FILE, deskDir, type DeskStatus } from "../src/desk.ts";
+import { OFF_FILE, deskDir, deskStatusLines, type DeskStatus } from "../src/desk.ts";
 import type { DeskConversation, DeskOutlet, PostResult } from "../src/desk-conversation.ts";
 import type { DeskClock } from "../src/desk-session.ts";
 import {
@@ -172,9 +173,12 @@ class FakeConversation {
   /** What the next posts answer, in order; once it is empty, a post opens its turn. */
   readonly answers: PostResult[] = [];
   stopAnswer = true;
+  stopFails: string | undefined;
   renewFails: string | undefined;
   /** When set, every post waits for it. */
   gate: Promise<void> | undefined;
+  /** When set, every renew waits for it. */
+  renewGate: Promise<void> | undefined;
   readonly post = async (input: PostInput): Promise<PostResult> => {
     this.posts.push(input);
     if (this.gate !== undefined) await this.gate;
@@ -182,11 +186,13 @@ class FakeConversation {
   };
   readonly renew = async (): Promise<{ sessionId: string }> => {
     this.renews += 1;
+    if (this.renewGate !== undefined) await this.renewGate;
     if (this.renewFails !== undefined) throw new Error(this.renewFails);
     return { sessionId: `desk-s${this.renews + 1}` };
   };
   readonly stop = async (reason: string): Promise<boolean> => {
     this.stops.push(reason);
+    if (this.stopFails !== undefined) throw new Error(this.stopFails);
     return this.stopAnswer;
   };
   readonly setOutlet = (outlet: DeskOutlet | undefined): void => { this.outlets.push(outlet); };
@@ -211,15 +217,16 @@ interface Rig {
   bridge: BridgeHandle;
 }
 
-/** A bridge over a fake Bot API, a fake conversation and a manual clock at {@link NOW}; every part can be given. */
-async function rig(label: string, o: Partial<Omit<Rig, "bridge" | "lines">> & { status?: () => Promise<DeskStatus> } = {}): Promise<Rig> {
+/** A bridge over a fake Bot API, a fake conversation and a manual clock at {@link NOW}; every part can be given,
+ * and `pollTimeoutS`, the long poll - a test that moves the clock past a held poll's 65 s gives a longer one. */
+async function rig(label: string, o: Partial<Omit<Rig, "bridge" | "lines">> & { status?: () => Promise<DeskStatus>; pollTimeoutS?: number } = {}): Promise<Rig> {
   const home = o.home ?? await freshHome(label);
   const api = o.api ?? new FakeBotApi();
   const clock = o.clock ?? new Clock(NOW);
   const conversation = o.conversation ?? new FakeConversation();
   const lines: string[] = [];
   const bridge = installTelegramBridge({
-    config: { token: TOKEN, operatorId: OPERATOR, apiBase: API, fetch: api.fetch, clock },
+    config: { token: TOKEN, operatorId: OPERATOR, apiBase: API, fetch: api.fetch, clock, ...(o.pollTimeoutS === undefined ? {} : { pollTimeoutS: o.pollTimeoutS }) },
     home, conversation, status: o.status ?? (async () => STATUS), log: (line) => { lines.push(line); },
   });
   return { home, api, clock, conversation, lines, bridge };
@@ -230,12 +237,22 @@ async function polled(r: Rig, n: number): Promise<void> {
   await waitFor(`poll ${n} held open`, () => r.api.polls().length === n && r.api.pending === 1);
 }
 
-/** A message in an update: from the operator, in their private chat, unless `over` says otherwise. */
+/** A message in an update: from the operator, in their private chat, written at {@link NOW} (Telegram's
+ * `date` is in seconds), unless `over` says otherwise. */
 function message(updateId: number, over: Record<string, unknown> = {}): Update {
   return {
     update_id: updateId,
-    message: { message_id: updateId + 1000, from: { id: OPERATOR, is_bot: false, first_name: "Op" }, chat: { id: OPERATOR, type: "private" }, date: 0, ...over },
+    message: {
+      message_id: updateId + 1000, from: { id: OPERATOR, is_bot: false, first_name: "Op" }, chat: { id: OPERATOR, type: "private" },
+      date: NOW / 1_000, ...over,
+    },
   };
+}
+/** A promise and the hand that settles it. */
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve: () => void = () => {};
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
 }
 const text = (updateId: number, body: string, messageId = updateId + 1000): Update => message(updateId, { text: body, message_id: messageId });
 
@@ -295,11 +312,30 @@ test("operator text is posted to the conversation with the telegram source", asy
     r.api.push(text(5, "hi", 7));
     await polled(r, 2);
     assert.deepEqual(r.conversation.posts, [
-      { text: "hi", source: { kind: "telegram" }, message: { kind: "telegram", from: OPERATOR, chat: OPERATOR, messageId: 7 } },
+      { text: "hi", source: { kind: "telegram", at: NOW }, message: { kind: "telegram", from: OPERATOR, chat: OPERATOR, messageId: 7 } },
     ]);
     assert.deepEqual(r.api.sent, [], "an opened turn answers through the outlet, not here");
     assert.deepEqual(r.api.polls()[1], { offset: 6, timeout: 50, allowed_updates: ["message"] }, "the long poll: 50 s, messages only, past the update");
     assert.deepEqual(r.api.polls()[0], { timeout: 50, allowed_updates: ["message"] }, "no offset before the first update");
+  } finally {
+    await r.bridge.dispose();
+  }
+});
+
+test("a text carries when the operator wrote it - Telegram's own date - not when it arrived", async () => {
+  const r = await rig("written");
+  try {
+    await polled(r, 1);
+    const written = NOW - 10 * 3_600_000; // 04:30 ET, before the Mac woke
+    r.api.push(
+      message(1, { text: "written before the Mac woke", date: written / 1_000 }),
+      message(2, { text: "no date", date: undefined }),
+      message(3, { text: "a date that is no time", date: "yesterday" }),
+      message(4, { text: "the epoch", date: 0 }),
+    );
+    await polled(r, 2);
+    assert.deepEqual(r.conversation.posts.map((p) => p.source), [{ kind: "telegram", at: written }, { kind: "telegram" }, { kind: "telegram" }, { kind: "telegram" }],
+      "the time it was written, when Telegram gives one; else the conversation's own clock decides");
   } finally {
     await r.bridge.dispose();
   }
@@ -371,14 +407,18 @@ test("splitMessage never breaks a surrogate pair", () => {
 
 /* ---------- the four commands ---------- */
 
-test("parseCommand reads the four commands, with or without the bot's name; anything else is text", () => {
+test("parseCommand reads the four commands in any case, with or without the bot's name; anything else is text", () => {
   assert.deepEqual(parseCommand("/status"), { cmd: "status" });
   assert.deepEqual(parseCommand("/pause 2h"), { cmd: "pause", arg: "2h" });
   assert.deepEqual(parseCommand("/pause@gravit_desk_bot 2h"), { cmd: "pause", arg: "2h" });
   assert.deepEqual(parseCommand("  /pause  "), { cmd: "pause" });
   assert.deepEqual(parseCommand("/new"), { cmd: "new" });
   assert.deepEqual(parseCommand("/stop@gravit_desk_bot"), { cmd: "stop" });
-  for (const other of ["/help", "/start", "/pause2h", "/statuses", "status", "hi /status", "/resume", "/Status"]) {
+  assert.deepEqual(parseCommand("/Status"), { cmd: "status" }, "a phone's capital");
+  assert.deepEqual(parseCommand("/PAUSE@Gravit_Desk_Bot 2H"), { cmd: "pause", arg: "2H" }, "the word in any case; the argument as typed");
+  assert.deepEqual(parseCommand("/New"), { cmd: "new" });
+  assert.deepEqual(parseCommand("/sToP@GRAVIT_DESK_BOT"), { cmd: "stop" });
+  for (const other of ["/help", "/start", "/pause2h", "/statuses", "/Statuses", "status", "hi /status", "/resume", "/Resume"]) {
     assert.equal(parseCommand(other), undefined, other);
   }
 });
@@ -401,15 +441,15 @@ test("/status, /pause 2h, /new and /stop", async () => {
     await polled(r, 3);
     assert.equal(r.api.texts()[1], "paused until 16:30 ET; a terminal resumes it: npm run desk -- resume");
     assert.deepEqual(JSON.parse(await fileText(r.home, OFF_FILE)), { setAt: "2026-10-20T18:30:00.000Z", by: "telegram", until: "2026-10-20T20:30:00.000Z" });
-    r.api.push(text(3, "/pause@gravit_desk_bot 1h"));
+    r.api.push(text(3, "/Pause@Gravit_Desk_Bot 1h"));
     await polled(r, 4);
     assert.equal(r.api.texts()[2], "paused until 16:30 ET; a terminal resumes it: npm run desk -- resume", "a shorter pause stands aside: the reply names the pause in force");
     r.api.push(text(4, "/pause 1d"));
     await polled(r, 5);
     assert.equal(r.api.texts()[3], "paused until 2026-10-21 14:30 ET; a terminal resumes it: npm run desk -- resume", "an end on another New York date carries it");
-    r.api.push(text(5, "/pause soon"));
+    r.api.push(text(5, "/PAUSE 2H"));
     await polled(r, 6);
-    assert.equal(r.api.texts()[4], "/pause takes Nm, Nh or Nd - 30m, 2h, 1d - or nothing; nothing was paused");
+    assert.equal(r.api.texts()[4], "/pause takes Nm, Nh or Nd - 30m, 2h, 1d - or nothing; nothing was paused", "the command in any case, the duration exact");
     assert.equal(JSON.parse(await fileText(r.home, OFF_FILE)).until, "2026-10-21T18:30:00.000Z", "a duration that does not parse writes nothing");
     r.api.push(text(6, "/pause"));
     await polled(r, 7);
@@ -424,7 +464,7 @@ test("/status, /pause 2h, /new and /stop", async () => {
     await polled(r, 9);
     assert.equal(r.api.texts()[7], "a new desk conversation could not be opened: the desk is shut down");
 
-    r.api.push(text(9, "/stop"));
+    r.api.push(text(9, "/Stop"));
     await polled(r, 10);
     r.conversation.stopAnswer = false;
     r.api.push(text(10, "/stop@gravit_desk_bot"));
@@ -436,6 +476,92 @@ test("/status, /pause 2h, /new and /stop", async () => {
     r.api.push(text(11, "/help"));
     await polled(r, 12);
     assert.deepEqual(r.conversation.posts.map((p) => p.text), ["/help"], "any other /word is");
+  } finally {
+    await r.bridge.dispose();
+  }
+});
+
+/* A desk directory the face may not write makes the switch's lock fail at once (EACCES), as root never sees. */
+test("a pause that cannot be written and a stop that fails each answer with why", { skip: process.getuid?.() === 0 && "root writes anywhere" }, async () => {
+  const r = await rig("command-failures");
+  try {
+    await polled(r, 1);
+    await mkdir(deskDir(r.home), { recursive: true });
+    await chmod(deskDir(r.home), 0o500);
+    try {
+      r.api.push(text(1, "/pause 2h"));
+      await polled(r, 2);
+    } finally {
+      await chmod(deskDir(r.home), 0o700);
+    }
+    assert.match(r.api.texts()[0], /^the pause could not be set: EACCES\b/);
+    assert.equal(existsSync(join(deskDir(r.home), OFF_FILE)), false, "and no pause was written");
+    r.conversation.stopFails = "the agent is gone";
+    r.api.push(text(2, "/stop"));
+    await polled(r, 3);
+    assert.deepEqual(r.conversation.stops, ["stopped from the phone"]);
+    assert.equal(r.api.texts()[1], "the desk could not be stopped: the agent is gone");
+  } finally {
+    await r.bridge.dispose();
+  }
+});
+
+/* ---------- a desk that is slow to take a message ---------- */
+
+test("a post the desk is slow to take is answered so after 30 s and the offset moves on; a late refusal still gets its line", async () => {
+  const conversation = new FakeConversation();
+  conversation.gate = new Promise(() => {}); // the first post never settles
+  const r = await rig("slow-post", { conversation });
+  try {
+    await polled(r, 1);
+    r.api.push(text(1, "never taken"));
+    await waitFor("the post's 30 s", () => conversation.posts.length === 1 && r.clock.has(30_000));
+    r.clock.advance(29_999);
+    await new Promise((done) => setTimeout(done, 20));
+    assert.deepEqual(r.api.texts(), [], "not before 30 s");
+    r.clock.advance(1);
+    await polled(r, 2);
+    assert.deepEqual(r.api.texts(), ["the desk is slow to take this; it will answer when it can"]);
+    assert.equal(await fileText(r.home, "telegram.offset"), "2\n", "the offset moved on");
+
+    const late = deferred();
+    conversation.gate = late.promise;
+    conversation.answers.push({ refused: "paused", line: "paused since 14:00 ET by terminal; a terminal resumes it: npm run desk -- resume" });
+    r.api.push(text(2, "taken late"));
+    await waitFor("the second post's 30 s", () => conversation.posts.length === 2 && r.clock.has(30_000));
+    r.clock.advance(30_000);
+    await polled(r, 3);
+    r.api.push(text(3, "/status"));
+    await polled(r, 4);
+    assert.ok(r.api.texts()[2].startsWith("up "), "the bridge goes on while a post is under way");
+    late.resolve();
+    await waitFor("the late refusal's line", () => r.api.texts().length === 4);
+    assert.deepEqual(r.api.texts(), [
+      "the desk is slow to take this; it will answer when it can",
+      "the desk is slow to take this; it will answer when it can",
+      r.api.texts()[2],
+      "paused since 14:00 ET by terminal; a terminal resumes it: npm run desk -- resume",
+    ]);
+  } finally {
+    await r.bridge.dispose();
+  }
+});
+
+test("a /new the desk is slow to open is answered so after 30 s, then with the new conversation when it comes", async () => {
+  const conversation = new FakeConversation();
+  const opened = deferred();
+  conversation.renewGate = opened.promise;
+  const r = await rig("slow-new", { conversation });
+  try {
+    await polled(r, 1);
+    r.api.push(text(1, "/new"));
+    await waitFor("the renew's 30 s", () => conversation.renews === 1 && r.clock.has(30_000));
+    r.clock.advance(30_000);
+    await polled(r, 2);
+    assert.deepEqual(r.api.texts(), ["the desk is slow to take this; it will answer when it can"]);
+    opened.resolve();
+    await waitFor("the late answer", () => r.api.texts().length === 2);
+    assert.equal(r.api.texts()[1], "a new desk conversation");
   } finally {
     await r.bridge.dispose();
   }
@@ -482,9 +608,10 @@ test("unusable updates advance the offset", async () => {
 test("restart resumes from the stored offset and flushes the outbox first", async () => {
   const home = await freshHome("restart");
   await putFile(home, "telegram.offset", "101\n");
+  /* queued a minute before this boot: not late (that is its own test) */
   await putFile(home, "outbox.json", JSON.stringify([
-    { t: "2026-10-20T13:00:00.000Z", text: "first queued" },
-    { t: "2026-10-20T13:01:00.000Z", text: "second queued" },
+    { t: new Date(NOW - 60_000).toISOString(), text: "first queued" },
+    { t: new Date(NOW - 30_000).toISOString(), text: "second queued" },
   ]));
   const api = new FakeBotApi();
   api.updates.push(text(100, "handled before the restart"), text(101, "new since"));
@@ -515,18 +642,26 @@ test("restart resumes from the stored offset and flushes the outbox first", asyn
   }
 });
 
-test("an update below the stored offset is passed over, even when the Bot API sends it again", async () => {
-  const home = await freshHome("below");
+/* After about a week with no update Telegram may number its updates afresh, and telegram-bot-api answers from
+ * the head of its queue whatever offset is asked: the ids fall below the stored offset. Passed over, every
+ * message after it - /stop included - would go unheard while the status read healthy. */
+test("a renumbered queue: ids below the stored offset are taken, and the next poll asks for the last id + 1", async () => {
+  const home = await freshHome("renumbered");
   await putFile(home, "telegram.offset", "101\n");
   const api = new FakeBotApi();
   api.ignoreOffsetOnce = true;
-  api.updates.push(text(100, "taken before the restart"), text(101, "new"));
-  const r = await rig("below", { home, api });
+  api.updates.push(text(5, "after a quiet week"), text(6, "/stop"), text(7, "still there?"));
+  const r = await rig("renumbered", { home, api });
   try {
     await polled(r, 2);
-    assert.equal(api.polls()[0].offset, 101);
-    assert.deepEqual(r.conversation.posts.map((p) => p.text), ["new"], "update 100 came back, and was passed over");
-    assert.equal(await fileText(home, "telegram.offset"), "102\n");
+    assert.equal(api.polls()[0].offset, 101, "the poll asked from the stored offset");
+    assert.deepEqual(r.conversation.posts.map((p) => p.text), ["after a quiet week", "still there?"], "every update taken, in order");
+    assert.deepEqual(r.conversation.stops, ["stopped from the phone"], "the command among them too");
+    assert.equal(api.polls()[1].offset, 8, "the offset set from the last id, not kept at the old one");
+    assert.equal(await fileText(home, "telegram.offset"), "8\n");
+    assert.deepEqual(r.lines, [
+      "gravit-face: desk: Telegram update 5 is below the stored offset 101: Telegram has numbered its updates afresh, so the bridge takes it and goes on from 6",
+    ], "one line, for the first update below the offset");
   } finally {
     await r.bridge.dispose();
   }
@@ -576,7 +711,8 @@ test("a send that fails part of the way queues only what did not go", async () =
     await polled(r, 1);
     let calls = 0;
     r.api.send = () => (++calls === 2 ? "network" : undefined);
-    assert.deepEqual(await r.bridge.send("a".repeat(9_000), { replyTo: 5 }), { queued: true });
+    assert.deepEqual(await r.bridge.send("a".repeat(9_000), { replyTo: 5 }), { sent: [501], queued: true },
+      "the id of the part that went, and that the rest is queued");
     assert.deepEqual(r.api.sent.map((m) => m.text.length), [4_000]);
     assert.deepEqual(JSON.parse(await fileText(r.home, "outbox.json")), [{ t: new Date(NOW).toISOString(), text: "a".repeat(5_000) }],
       "the rest, and no longer a reply: its first part went as one");
@@ -593,7 +729,7 @@ test("a send that fails part of the way queues only what did not go", async () =
 
 test("a queued message that goes part of the way stays queued as the rest, under its own time", async () => {
   const home = await freshHome("partial-flush");
-  const queuedAt = "2026-10-20T13:00:00.000Z";
+  const queuedAt = new Date(NOW - 60_000).toISOString();
   await putFile(home, "outbox.json", JSON.stringify([{ t: queuedAt, text: "b".repeat(9_000) }]));
   const api = new FakeBotApi();
   let calls = 0;
@@ -609,6 +745,98 @@ test("a queued message that goes part of the way stays queued as the rest, under
     assert.deepEqual(api.sent.map((m) => m.text.length), [4_000, 4_000, 1_000], "each part once");
     assert.deepEqual(JSON.parse(await fileText(home, "outbox.json")), []);
     assert.deepEqual((await records(home)).map((x) => [x.kind, x.parts, x.chars]), [["sent", 1, 4_000], ["sent", 2, 5_000]]);
+  } finally {
+    await r.bridge.dispose();
+  }
+});
+
+/* The Mac slept: a reply queued before it went to sleep is flushed when it wakes, hours later. */
+test("a message flushed more than 2 minutes after it was written opens with the time it was written", async () => {
+  const r = await rig("late", { pollTimeoutS: 200_000 }); // a poll held across a day's clock is not cut
+  try {
+    await polled(r, 1);
+    const queue = async (body: string): Promise<void> => {
+      r.api.send = () => "network";
+      assert.deepEqual(await r.bridge.send(body), { queued: true });
+      r.api.send = () => undefined;
+    };
+    await queue("written at 14:30");
+    r.clock.advance(120_000);
+    await r.bridge.send("fresh one");
+    assert.deepEqual(r.api.texts(), ["written at 14:30", "fresh one"], "two minutes is not late, and a fresh send never is");
+    await queue("written at 14:32");
+    r.clock.advance(120_001);
+    await r.bridge.send("fresh two");
+    assert.deepEqual(r.api.texts().slice(2), ["(written 14:32 ET, sent late)\nwritten at 14:32", "fresh two"]);
+    await queue("written the day before");
+    r.clock.advance(24 * 3_600_000);
+    r.api.endPoll();
+    await polled(r, 2);
+    assert.equal(r.api.texts()[4], "(written 2026-10-20 14:34 ET, sent late)\nwritten the day before", "the loop's flush says so too, dated on another day");
+  } finally {
+    await r.bridge.dispose();
+  }
+});
+
+/* Telegram answers 403 when the operator has blocked the bot (or never started it): sending again cannot help
+ * until they unblock it, so the message is not kept - and the status says why the phone hears nothing. */
+test("a 403 drops the message with one line, and the status reads blocked until a send goes through", async () => {
+  const home = await freshHome("blocked");
+  await putFile(home, "outbox.json", JSON.stringify([{ t: "2026-10-20T18:00:00.000Z", text: "queued before the block" }]));
+  const api = new FakeBotApi();
+  api.send = () => ({ status: 403, description: "Forbidden: bot was blocked by the user" });
+  const r = await rig("blocked", { home, api });
+  try {
+    await polled(r, 1);
+    assert.deepEqual(JSON.parse(await fileText(home, "outbox.json")), [], "the queued message is dropped");
+    assert.deepEqual(r.lines, ["gravit-face: telegram: Telegram refused a queued message (HTTP 403 Forbidden: bot was blocked by the user); it is dropped from the outbox"]);
+    assert.equal(r.bridge.status().blocked, true);
+    await assert.rejects(r.bridge.send("a fresh one"), /^Error: Telegram refused the message: HTTP 403 Forbidden: bot was blocked by the user$/,
+      "a fresh one rejects: its caller's line is the one line");
+    assert.equal(r.bridge.status().queued, 0, "and is never queued");
+    assert.equal(deskStatusLines({ ...STATUS, telegram: r.bridge.status() }, new Date(NOW)).at(-1), "telegram: blocked (403), polling, no poll yet, 0 dropped, 0 queued");
+    api.send = () => undefined;
+    assert.deepEqual(await r.bridge.send("unblocked"), { sent: [501] });
+    assert.equal(Object.hasOwn(r.bridge.status(), "blocked"), false, "a send that goes through ends it");
+  } finally {
+    await r.bridge.dispose();
+  }
+});
+
+test("the outbox holds at most 100 messages: one more drops the oldest, with one line", async () => {
+  const home = await freshHome("cap");
+  const writtenAt = (i: number): string => new Date(NOW - (200 - i) * 60_000).toISOString();
+  await putFile(home, "outbox.json", JSON.stringify(Array.from({ length: 100 }, (_, i) => ({ t: writtenAt(i), text: `m${i}` }))));
+  const api = new FakeBotApi();
+  api.send = () => "network";
+  const r = await rig("cap", { home, api });
+  try {
+    await polled(r, 1);
+    assert.equal(r.bridge.status().queued, 100);
+    assert.deepEqual(await r.bridge.send("m100"), { queued: true });
+    const kept = (JSON.parse(await fileText(home, "outbox.json")) as { text: string }[]).map((e) => e.text);
+    assert.equal(kept.length, 100);
+    assert.deepEqual([kept[0], kept.at(-1)], ["m1", "m100"], "the oldest went; the newest is last");
+    assert.deepEqual(r.lines, ["gravit-face: telegram: the outbox holds 100 messages; the oldest, written 11:10 ET, is dropped"]);
+    assert.equal(r.bridge.status().queued, 100);
+  } finally {
+    await r.bridge.dispose();
+  }
+});
+
+test("the bridge's files are the operator's alone: outbox.json, telegram.offset and telegram.jsonl are 0600", async () => {
+  const r = await rig("modes");
+  try {
+    await polled(r, 1);
+    r.api.send = () => "network";
+    await r.bridge.send("held");
+    r.api.send = () => undefined;
+    r.api.push(text(1, "hi"));
+    await polled(r, 2);
+    const mode = async (name: string): Promise<number> => (await stat(join(deskDir(r.home), name))).mode & 0o777;
+    for (const name of ["outbox.json", "telegram.offset", "telegram.jsonl"]) assert.equal(await mode(name), 0o600, name);
+    assert.deepEqual(JSON.parse(await fileText(r.home, "outbox.json")), [], "the flush before the second poll rewrote it");
+    assert.equal(await mode("outbox.json"), 0o600, "and a rewritten file is 0600 too");
   } finally {
     await r.bridge.dispose();
   }
@@ -633,7 +861,7 @@ test("the loop flushes the outbox before each poll", async () => {
 
 test("a queued message Telegram refuses is dropped, so it cannot hold up the rest; a fresh one it refuses rejects", async () => {
   const home = await freshHome("refusal");
-  await putFile(home, "outbox.json", JSON.stringify([{ t: "2026-10-20T13:00:00.000Z", text: "bad" }, { t: "2026-10-20T13:01:00.000Z", text: "good" }]));
+  await putFile(home, "outbox.json", JSON.stringify([{ t: new Date(NOW - 60_000).toISOString(), text: "bad" }, { t: new Date(NOW - 30_000).toISOString(), text: "good" }]));
   const api = new FakeBotApi();
   api.send = (body) => (body.text === "bad" ? { status: 400, description: "Bad Request: message is too long" } : undefined);
   const r = await rig("refusal", { home, api });
@@ -652,13 +880,17 @@ test("a queued message Telegram refuses is dropped, so it cannot hold up the res
 /* ---------- the poll's failures ---------- */
 
 test("409 conflict is recorded once a minute and backed off", async () => {
+  const POLLER = "Conflict: terminated by other getUpdates request; make sure that only one bot instance is running";
+  const WEBHOOK = "Conflict: can't use getUpdates method while webhook is active; use deleteWebhook to delete the webhook first";
   const api = new FakeBotApi();
-  api.poll = () => ({ status: 409, description: "Conflict: terminated by other getUpdates request; make sure that only one bot instance is running" });
+  let conflicts = 0;
+  /* a second poller, then - from the third conflict on - a webhook left set: both answer 409 */
+  api.poll = () => ({ status: 409, description: ++conflicts < 3 ? POLLER : WEBHOOK });
   const r = await rig("conflict", { api });
   try {
     const at = (s: number): string => new Date(NOW + s * 1_000).toISOString();
     await waitFor("the first conflict's wait", () => r.clock.has(30_000));
-    assert.deepEqual(await records(r.home), [{ t: at(0), kind: "conflict" }]);
+    assert.deepEqual(await records(r.home), [{ t: at(0), kind: "conflict", description: POLLER }]);
     assert.equal(r.bridge.status().conflictAt, at(0));
     r.clock.advance(29_999);
     await new Promise((done) => setTimeout(done, 20));
@@ -668,9 +900,12 @@ test("409 conflict is recorded once a minute and backed off", async () => {
       await waitFor(`conflict ${n}`, () => r.api.polls().length === n && r.clock.has(30_000));
       assert.equal(r.bridge.status().conflictAt, at(s), "the status names the last conflict");
     }
-    assert.deepEqual(await records(r.home), [{ t: at(0), kind: "conflict" }, { t: at(60), kind: "conflict" }], "once a minute");
-    assert.equal(r.lines.length, 2);
-    assert.match(r.lines[0], /^gravit-face: telegram: another poller holds the bot's token \(HTTP 409/);
+    assert.deepEqual(await records(r.home), [{ t: at(0), kind: "conflict", description: POLLER }, { t: at(60), kind: "conflict", description: WEBHOOK }],
+      "once a minute, each with what Telegram said");
+    assert.deepEqual(r.lines, [
+      `gravit-face: telegram: getUpdates got HTTP 409 (${POLLER}): another poller holds the bot's token - a second face without FACE_DESK=0? - or a webhook is set; polling again in 30 s`,
+      `gravit-face: telegram: getUpdates got HTTP 409 (${WEBHOOK}): another poller holds the bot's token - a second face without FACE_DESK=0? - or a webhook is set; polling again in 30 s`,
+    ]);
     r.api.poll = () => undefined;
     r.clock.advance(30_000);
     await polled(r, 5);
@@ -806,6 +1041,8 @@ test("the token is only ever in a request's path: no log line, record, file or s
       r.clock.advance(wait * 1_000);
     }
     await waitFor("the 502 recorded", async () => (await records(r.home)).length === 2);
+    /* the record is written before the backoff is armed: move the clock only once it is */
+    await waitFor("the 60 s backoff", () => r.clock.has(60_000));
     r.api.poll = () => undefined;
     r.clock.advance(60_000);
     await polled(r, 6);
@@ -814,6 +1051,16 @@ test("the token is only ever in a request's path: no log line, record, file or s
     r.api.send = () => undefined;
     r.api.push(text(1, "/status"), message(2, { from: { id: 99 }, chat: { id: 99, type: "private" }, text: "x" }));
     await polled(r, 7);
+    /* a refusal whose description carries the token rejects with it redacted */
+    r.api.send = () => ({ status: 400, description: `Bad Request: ${API}/bot${TOKEN}/sendMessage` });
+    const refused = await r.bridge.send("refused outright").then(() => undefined, (err: unknown) => err as Error);
+    assert.ok(refused instanceof Error, "a fresh 400 rejects");
+    assert.equal(refused.message, `Telegram refused the message: HTTP 400 Bad Request: ${API}/bot<token>/sendMessage`);
+    r.api.send = () => undefined;
+    /* and a 409 whose description carries it is recorded and said redacted */
+    r.api.poll = () => ({ status: 409, description: `Conflict: a webhook is set at ${API}/bot${TOKEN}/hook` });
+    r.api.endPoll();
+    await waitFor("the conflict recorded", async () => (await records(r.home)).some((x) => x.kind === "conflict"));
 
     const everything = [
       ...r.lines,
@@ -825,6 +1072,7 @@ test("the token is only ever in a request's path: no log line, record, file or s
     assert.equal(everything.includes(TOKEN), false, "the token is nowhere but the URLs");
     assert.ok(r.lines.some((l) => l.includes("<token>")), "a line that carried it says <token> instead");
     assert.ok((await records(r.home)).some((x) => String(x.reason).includes("<token>")), "and so does a record");
+    assert.ok((await records(r.home)).some((x) => x.kind === "conflict" && String(x.description).includes("<token>")), "a conflict's description too");
     for (const call of r.api.calls) {
       assert.equal(call.url, `${API}/bot${TOKEN}/${call.method}`);
       assert.equal(JSON.stringify(call.body).includes(TOKEN), false, "never in a request's body");
