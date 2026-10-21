@@ -1,15 +1,23 @@
 // face/tests/desk-cli.test.ts
-import test from "node:test";
+import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runDesk } from "../scripts/desk.ts";
 import { OFF_FILE, deskDir, readEvents, readOffState } from "../src/desk.ts";
 
-const home = (): Promise<string> => mkdtemp(join(tmpdir(), "face-desk-cli-"));
+/** Every harness home made with {@link home}, removed once the file's tests are done. */
+const homes: string[] = [];
+after(() => Promise.all(homes.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))));
+/** A fresh harness home under the system's temp directory, removed after the file's tests. */
+const home = async (): Promise<string> => {
+  const made = await mkdtemp(join(tmpdir(), "face-desk-cli-"));
+  homes.push(made);
+  return made;
+};
 const USAGE = "usage: npm run desk -- pause [Nm | Nh | Nd] | resume";
 /** 14:00 ET on a Tuesday in October (EDT). */
 const NOW = Date.parse("2026-10-20T18:00:00Z");
