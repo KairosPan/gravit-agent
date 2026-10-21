@@ -8,7 +8,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 // desk-panel.js is plain ESM JS (it ships to the browser); tsconfig `allowJs` lets this test import it.
 import {
-  DESK_GLYPHS, PAUSE_CHOICES, RESUME_LINE, createDeskPanel, deskLineText, deskSessionsOf, deskTime, deskTitle,
+  DESK_GLYPHS, DESK_POLL_MS, PAUSE_CHOICES, RESUME_COMMAND, RESUME_LINE, createDeskPanel, deskLineNode, deskLineText, deskSessionsOf,
+  deskTime, deskTitle, phoneWhoNode,
 } from "../client/desk-panel.js";
 
 /** The DOM operations the panel uses, and nothing else. */
@@ -134,10 +135,28 @@ const SESSIONS = [
   { sessionId: "session-bot", agentPreset: "buffett", cwd: "/repo/bots/buffett/journal", updatedAt: AT },
 ];
 
-/** A panel over `panel`, with every data call recorded and answered by `answer`, every open recorded. */
+/** A fake interval timer: what was armed, at what period, and a hand to fire it. */
+function fakeTimer() {
+  const armed = new Map<number, { fn: () => void; ms: number }>();
+  let next = 1;
+  return {
+    setInterval: (fn: () => void, ms: number): unknown => { const id = next++; armed.set(id, { fn, ms }); return id; },
+    clearInterval: (id: unknown) => { armed.delete(id as number); },
+    periods: () => [...armed.values()].map((t) => t.ms),
+    fire: () => { for (const { fn } of [...armed.values()]) fn(); },
+  };
+}
+
+/** A panel over `panel`, with every data call recorded and answered by `answer`, every open recorded.
+ * `waiting` and `archived` are the sets the page's predicates read; `rail` is the Desk rail item. */
 function harness(panel: Element, answer: (path: string, body?: Record<string, unknown>) => Promise<Record<string, any>>, opts: { sessions?: unknown[]; active?: string | null } = {}) {
   const calls: [string, Record<string, unknown> | undefined][] = [];
   const opened: string[] = [];
+  const waiting = new Set<string>();
+  const archived = new Set<string>();
+  const rail = new Element("a");
+  rail.setAttribute("aria-label", "Desk");
+  const timer = fakeTimer();
   let sessions = opts.sessions ?? SESSIONS;
   const desk = createDeskPanel({
     panel: () => panel as any,
@@ -146,9 +165,17 @@ function harness(panel: Element, answer: (path: string, body?: Record<string, un
     activeSession: () => opts.active ?? null,
     open: (id: string) => { opened.push(id); },
     now: () => AT,
+    waiting: (id: string) => waiting.has(id),
+    archived: (id: string) => archived.has(id),
+    rail: () => rail as any,
+    setInterval: timer.setInterval,
+    clearInterval: timer.clearInterval,
   });
-  return { desk, calls, opened, setSessions: (next: unknown[]) => { sessions = next; } };
+  return { desk, calls, opened, waiting, archived, rail, timer, setSessions: (next: unknown[]) => { sessions = next; } };
 }
+
+/** The rail item's badge, when it carries one. */
+const badgeOf = (rail: Element): Element | undefined => byClass(rail, "rail-badge")[0];
 
 /** The Pause control's select and button. */
 const pauseControl = (panel: Element) => ({
@@ -448,4 +475,123 @@ test("no panel element is no drawing, and no failure", () => withDOM(async () =>
   await desk.refresh();
   desk.syncSessions();
   desk.mark("session-desk-1");
+  desk.hide();
+}));
+
+/** The chips a node carries, in order. */
+const chipsOf = (node: Element): string[] => byClass(node, "chip").map((c) => c.textContent);
+
+test("a desk session with a parked gate carries a waiting chip on its row and its conversation card, the rail's Desk item a badge while another panel is shown; both clear once the gate settles", () => withDOM(async (panel) => {
+  const { desk, waiting, rail } = harness(panel, async () => status());
+  const rows = () => byClass(section(panel, "sessions"), "desk-row");
+  await desk.show();
+  waiting.add("session-desk-1"); // a gate arrives; the list refresh it schedules follows
+  desk.syncSessions();
+  assert.deepEqual(chipsOf(rows()[0]), ["waiting", "current", "running"], "waiting first: it is the one that needs the operator");
+  assert.equal(byClass(rows()[0], "waiting").length, 1, "the sidebar's own waiting chip");
+  assert.deepEqual(chipsOf(rows()[1]), []);
+  assert.deepEqual(chipsOf(section(panel, "conversation")), ["waiting"], "the desk conversation's card says it too");
+  assert.equal(badgeOf(rail), undefined, "no badge while the Desk panel is shown: its chips say it");
+
+  desk.hide(); // the operator moves to another panel
+  assert.ok(badgeOf(rail), "the rail's Desk item is badged");
+  assert.equal(rail.getAttribute("aria-label"), "Desk, waiting on you");
+  desk.syncSessions();
+  assert.equal(byClass(rail, "rail-badge").length, 1, "one badge however many refreshes");
+
+  waiting.delete("session-desk-1"); // the gate settles; the list refresh it schedules follows
+  desk.syncSessions();
+  assert.equal(badgeOf(rail), undefined);
+  assert.equal(rail.getAttribute("aria-label"), "Desk");
+  assert.deepEqual(chipsOf(rows()[0]), ["current", "running"], "the hidden panel's rows clear too");
+  assert.deepEqual(chipsOf(section(panel, "conversation")), []);
+
+  waiting.add("session-desk-0"); // a gate on an older desk session, while another panel is shown
+  desk.syncSessions();
+  assert.ok(badgeOf(rail));
+  await desk.show(); // the operator opens the Desk panel: its chips take over from the badge
+  assert.equal(badgeOf(rail), undefined);
+  assert.deepEqual(chipsOf(rows()[1]), ["waiting"]);
+}));
+
+test("the rail is badged before the Desk panel was ever opened: the badge reads the session list, not the status", () => withDOM(async (panel) => {
+  const { desk, waiting, rail, calls } = harness(panel, async () => status());
+  desk.hide(); // the page opened on another panel
+  assert.equal(badgeOf(rail), undefined);
+  waiting.add("session-desk-1");
+  desk.syncSessions();
+  assert.ok(badgeOf(rail));
+  assert.deepEqual(calls, [], "no status read for it");
+  assert.equal(panel.children.length, 0, "and nothing drawn into a panel never shown");
+}));
+
+test("an archived desk session is listed once, in the strategy list's archived bucket: the Desk panel leaves it out, and its gate does not badge the rail", () => withDOM(async (panel) => {
+  const { desk, archived, waiting, rail } = harness(panel, async () => status());
+  archived.add("session-desk-0");
+  assert.deepEqual(deskSessionsOf(SESSIONS, (id: string) => archived.has(id)).map((s: any) => s.sessionId), ["session-desk-1"]);
+  assert.deepEqual(deskSessionsOf(SESSIONS).map((s: any) => s.sessionId), ["session-desk-1", "session-desk-0"], "no predicate, nothing archived");
+  await desk.show();
+  assert.deepEqual(byClass(section(panel, "sessions"), "desk-row").map((row) => row.dataset.sessionId), ["session-desk-1"]);
+  desk.hide();
+  waiting.add("session-desk-0");
+  desk.syncSessions();
+  assert.equal(badgeOf(rail), undefined, "its waiting mark is the archived bucket's header's, where it is listed");
+}));
+
+test("while shown, the status is read again every 30 seconds - so a pause that lifted at its until stops showing - and hidden, never", () => withDOM(async (panel) => {
+  let next = status({ off: { setAt: "2026-10-20T17:30:00.000Z", by: "page", until: "2026-10-20T18:00:30.000Z" } });
+  const { desk, calls, timer } = harness(panel, async () => next);
+  assert.equal(DESK_POLL_MS, 30_000);
+  await desk.show();
+  assert.deepEqual(timer.periods(), [30_000]);
+  assert.equal(pauseLine(panel), "paused since 13:30 ET by page until 14:00 ET");
+  next = status(); // past its until: the face's status no longer carries the pause
+  timer.fire();
+  await settle();
+  assert.equal(pauseLine(panel), "not paused");
+  assert.deepEqual(calls.map(([path]) => path), ["/data/desk/status", "/data/desk/status"]);
+
+  await desk.show(); // shown again - the rail item clicked a second time: still one timer
+  assert.deepEqual(timer.periods(), [30_000]);
+  desk.hide();
+  assert.deepEqual(timer.periods(), [], "hidden, it reads nothing");
+  const before = calls.length;
+  timer.fire();
+  await settle();
+  assert.equal(calls.length, before);
+}));
+
+test("the transcript's desk marks: a phone message's who-line, and a firing's or an alert's line", () => withDOM(() => {
+  const who = phoneWhoNode() as unknown as Element;
+  assert.equal(who.className, "who phone-who");
+  const [glyph, name] = who.children;
+  assert.equal(glyph.textContent, DESK_GLYPHS.telegram);
+  assert.equal(glyph.getAttribute("aria-hidden"), "true", "the glyph is decoration; the name is read");
+  assert.equal(name.textContent, "phone");
+  assert.match(who.title, /phone/);
+
+  const text = "[schedule · preclose · 2026-10-20]\nCheck the book before the close.";
+  const line = deskLineNode({ kind: "desk-line", line: "schedule", order: "preclose", firing: "preclose:2026-10-20", date: "2026-10-20", text }) as unknown as Element;
+  assert.equal(line.className, "room-line desk-line", "drawn as a room's line is");
+  assert.equal(line.children[0].textContent, DESK_GLYPHS.schedule);
+  assert.equal(line.children[0].getAttribute("aria-hidden"), "true");
+  assert.equal(line.children[1].className, "room-line-text");
+  assert.equal(line.children[1].textContent, "schedule · preclose · 2026-10-20");
+  assert.equal(line.title, text, "the message the desk was sent, on hover");
+
+  const alert = deskLineNode({ kind: "desk-line", line: "alert", alert: "a-0001", symbol: "NVDA", text: "" }) as unknown as Element;
+  assert.equal(alert.children[0].textContent, DESK_GLYPHS.alert);
+  assert.equal(alert.children[1].textContent, "alert · NVDA · a-0001");
+  assert.equal(alert.title, "—");
+  const odd = deskLineNode({ kind: "desk-line", line: "constructor" }) as unknown as Element;
+  assert.equal(odd.children[0].textContent, "", "a line with no glyph of its own gets none, never an inherited member");
+}));
+
+test("the resume line keeps its command whole", () => withDOM(async (panel) => {
+  const { desk } = harness(panel, async () => status({ off: { setAt: "2026-10-20T17:00:00.000Z", by: "terminal" } }));
+  await desk.refresh();
+  assert.equal(RESUME_LINE, `a terminal resumes it: ${RESUME_COMMAND}`);
+  assert.equal(RESUME_COMMAND, "npm run desk -- resume");
+  const command = one(section(panel, "desk"), (node) => node.hasClass("desk-resume-cmd"), "resume command");
+  assert.equal(command.textContent, RESUME_COMMAND, "one element, which the page keeps from wrapping at its --");
 }));

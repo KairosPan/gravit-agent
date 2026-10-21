@@ -52,9 +52,20 @@ export const PAUSE_CHOICES = Object.freeze([
   Object.freeze({ until: "", label: "until resumed" }),
 ]);
 
+/** The terminal command that lifts a pause - the only thing that does. */
+export const RESUME_COMMAND = "npm run desk -- resume";
+
+/** The words before it on the resume line. */
+const RESUME_PREFIX = "a terminal resumes it: ";
+
 /** The one line the panel shows while the desk is paused - the phone's words for it
- * (src/telegram.ts `RESUMES`): the page has no resume control. */
-export const RESUME_LINE = "a terminal resumes it: npm run desk -- resume";
+ * (src/telegram.ts `RESUMES`): the page has no resume control. Drawn with the
+ * command in an element of its own, which chat.css keeps from wrapping at `--`. */
+export const RESUME_LINE = `${RESUME_PREFIX}${RESUME_COMMAND}`;
+
+/** How often the status is read again while the Desk panel is shown: often enough that a
+ * pause past its `until` stops showing as one, the face's status having dropped it. */
+export const DESK_POLL_MS = 30_000;
 
 /* ---------- time, New York's ---------- */
 
@@ -103,13 +114,16 @@ export function deskTime(at, now) {
 /**
  * The desk's sessions in a session list, in its order: every row whose
  * `agentPreset` (restored by summaries.js) is the desk's - the desk
- * conversation, the conversations before it, and the desk's firings.
+ * conversation, the conversations before it, and the desk's firings - but an
+ * archived one, which the strategy list's archived bucket lists instead
+ * (grouping.js: archived comes before the desk), so it is listed once.
  * @param {unknown[]} sessions - chat.js's `lastSessions`.
+ * @param {(sessionId: string) => boolean} [archived] - whether a session is archived; none is by default.
  * @returns {Record<string, any>[]}
  */
-export function deskSessionsOf(sessions) {
+export function deskSessionsOf(sessions, archived = () => false) {
   return (Array.isArray(sessions) ? sessions : []).filter((s) =>
-    s !== null && typeof s === "object" && typeof s.sessionId === "string" && isDeskPreset(s.agentPreset));
+    s !== null && typeof s === "object" && typeof s.sessionId === "string" && isDeskPreset(s.agentPreset) && !archived(s.sessionId));
 }
 
 /**
@@ -180,10 +194,47 @@ function kv(card, label, value, hint, tone) {
   card.append(row);
 }
 
-/** @param {string} text @param {string} [hint] @returns {any} one status chip. */
-function chip(text, hint) {
-  const node = el("span", "chip", text);
+/** @param {string} text @param {string} [hint] @param {string} [cls] @returns {any} one status chip. */
+function chip(text, hint, cls) {
+  const node = el("span", cls ? `chip ${cls}` : "chip", text);
   if (hint) node.title = hint;
+  return node;
+}
+
+/** The sidebar's "this session is waiting on you" chip (chat.js `waitingChip`'s look). @returns {any} */
+const waitingChip = () => chip("waiting", "a card is waiting on you in this session", "waiting");
+
+/* ---------- the transcript's desk marks (chat.js places them) ---------- */
+
+/**
+ * The who-line over a message from the operator's phone: the phone glyph and
+ * `phone`, in the operator's lane, as a bot's avatar and name sit over its
+ * answer. chat.js `bubbleNode` puts it over the bubble.
+ * @returns {any}
+ */
+export function phoneWhoNode() {
+  const who = el("div", "who phone-who");
+  who.title = "sent from your phone, through the desk's Telegram bridge";
+  const glyph = el("span", "phone-glyph", DESK_GLYPHS.telegram);
+  glyph.setAttribute("aria-hidden", "true");
+  who.append(glyph, el("span", "who-name", "phone"));
+  return who;
+}
+
+/**
+ * A firing of the desk's clock or an alert of its watch (mapper.js
+ * `desk-line`): the face's words, no operator's, as one quiet line like a
+ * room's - its glyph, {@link deskLineText}, and the message the desk was sent
+ * on hover. chat.js `accept` places it.
+ * @param {Record<string, any>} view @returns {any}
+ */
+export function deskLineNode(view) {
+  const line = view?.line;
+  const node = el("div", "room-line desk-line");
+  const glyph = el("span", "desk-glyph", typeof line === "string" && Object.hasOwn(DESK_GLYPHS, line) ? DESK_GLYPHS[line] : "");
+  glyph.setAttribute("aria-hidden", "true");
+  node.append(glyph, el("span", "room-line-text", deskLineText(view)));
+  node.title = typeof view?.text === "string" && view.text !== "" ? view.text : EM;
   return node;
 }
 
@@ -236,7 +287,8 @@ function pauseText(off, now) {
  * @property {string|undefined} error
  * @property {Date} now
  * @property {Record<string, any>[]} list - the whole session list.
- * @property {Record<string, any>[]} sessions - its desk sessions.
+ * @property {Record<string, any>[]} sessions - its desk sessions, the archived ones left out.
+ * @property {(sessionId: string) => boolean} waiting - whether a card waits on the operator in a session.
  * @property {string|null} active
  * @property {string} choice
  * @property {boolean} pausing
@@ -267,7 +319,11 @@ function drawDesk(card, ctx) {
     if (typeof status.ledgerError === "string") card.append(note(`ledger unreadable: ${status.ledgerError}`, true));
     const off = isOffState(status.off) ? status.off : undefined;
     card.append(el("div", off === undefined ? "desk-pause-line" : "desk-pause-line paused", pauseText(off, ctx.now)));
-    if (off !== undefined) card.append(note(RESUME_LINE));
+    if (off !== undefined) {
+      const resume = el("div", "sp-note desk-resume");
+      resume.append(el("span", null, RESUME_PREFIX), el("span", "desk-resume-cmd", RESUME_COMMAND));
+      card.append(resume);
+    }
   }
   const row = el("div", "desk-pause");
   const select = el("select", "picker-input desk-pause-until");
@@ -311,7 +367,8 @@ function drawTelegram(card, { status, now }) {
 }
 
 /** The desk conversation: the session the ledger names last, the one the phone
- * talks to - by its title when the list carries it, else by its id.
+ * talks to - by its title when the list carries it, else by its id, and with
+ * the waiting chip while a card waits on the operator in it.
  * @param {any} card @param {DrawContext} ctx */
 function drawConversation(card, ctx) {
   const id = typeof ctx.status?.deskSession === "string" && ctx.status.deskSession !== "" ? ctx.status.deskSession : undefined;
@@ -322,7 +379,7 @@ function drawConversation(card, ctx) {
   }
   const open = button("open", "sp-title-btn desk-open", () => ctx.open(id));
   open.title = "put the desk conversation on screen";
-  head(card, "desk conversation", open);
+  head(card, "desk conversation", ...(ctx.waiting(id) ? [waitingChip()] : []), open);
   const summary = ctx.list.find((s) => s !== null && typeof s === "object" && s.sessionId === id);
   kv(card, "session", summary === undefined ? id : deskTitle(summary), id);
 }
@@ -341,7 +398,8 @@ function drawTurns(card, { status }) {
 }
 
 /** The desk's sessions, newest first as the list orders them: each a row that
- * opens it in place, marked when it is the desk conversation or running.
+ * opens it in place, marked when a card waits on the operator in it, when it is
+ * the desk conversation, and when it is running.
  * @param {any} card @param {DrawContext} ctx */
 function drawSessions(card, ctx) {
   head(card, "desk sessions", el("span", "sp-count", String(ctx.sessions.length)));
@@ -358,6 +416,7 @@ function drawSessions(card, ctx) {
     row.tabIndex = 0;
     row.append(el("div", "sp-row-name", deskTitle(summary)));
     const chips = [];
+    if (ctx.waiting(id)) chips.push(waitingChip());
     if (id === ctx.status?.deskSession) chips.push(chip("current", "the desk conversation: the one the phone talks to"));
     if (summary.running === true) chips.push(chip("running"));
     if (chips.length > 0) {
@@ -409,23 +468,50 @@ const SECTIONS = Object.freeze([
  * @property {() => (string|null)} activeSession - the session on screen.
  * @property {(sessionId: string) => void} open - put a session on screen, in place (chat.js `openSession`).
  * @property {() => number} [now] - the clock times are shown against; default `Date.now`.
+ * @property {(sessionId: string) => boolean} [waiting] - whether a card waits on the operator in a
+ *   session (chat.js `needsYou`); none does by default.
+ * @property {(sessionId: string) => boolean} [archived] - whether a session is archived; none is by default.
+ * @property {() => any} [rail] - the rail's Desk item, which carries the badge; none by default.
+ * @property {(fn: () => void, ms: number) => unknown} [setInterval] - the poll's timer; the global by default.
+ * @property {(handle: unknown) => void} [clearInterval] - and its stop.
  */
 
 /**
  * The Desk panel over `deps.panel()`.
  *
- * `refresh` reads the status and draws every section - "loading…" until the
- * first read settles; an answer that lands after a later read began, or after a
- * pause the panel made, is dropped. `syncSessions` draws again only the sections
- * that read the session list, with no read. `mark` marks the row of the session
- * on screen. A click on Pause posts the chosen length and draws the pause the
- * face answered with; while it is in flight the button is disabled, and a
- * refusal is one line under it. A pause made while no status is read reads it.
+ * `show` is the panel coming on screen: it reads the status now and every
+ * {@link DESK_POLL_MS} after, until `hide` - another panel on screen - stops
+ * the reads. `refresh` reads the status and draws every section - "loading…"
+ * until the first read settles; an answer that lands after a later read began,
+ * or after a pause the panel made, is dropped. `syncSessions` draws again only
+ * the sections that read the session list, with no read, once a read has
+ * settled. `mark` marks the row of the session on screen. A click on Pause posts
+ * the chosen length and draws the pause the face answered with; while it is in
+ * flight the button is disabled, and a refusal is one line under it. A pause
+ * made while no status is read reads it.
+ *
+ * THE BADGE. The desk's sessions have no rows in the strategy list, so their
+ * waiting chips - a card parked on a desk session, the one nobody watches - live
+ * in this panel; while another panel is shown, the rail's Desk item carries a
+ * badge instead whenever a desk session the panel lists has a card waiting.
+ * `show`, `hide` and `syncSessions` - which the page calls on every list
+ * refresh, and a gate's arrival or settling schedules one - each set it.
  * @param {DeskPanelDeps} deps
- * @returns {{refresh: () => Promise<void>, syncSessions: () => void, mark: (sessionId: string|null) => void}}
+ * @returns {{show: () => Promise<void>, hide: () => void, refresh: () => Promise<void>, syncSessions: () => void, mark: (sessionId: string|null) => void}}
  */
 export function createDeskPanel(deps) {
   const now = deps.now ?? Date.now;
+  const waiting = deps.waiting ?? (() => false);
+  const archived = deps.archived ?? (() => false);
+  const startTimer = deps.setInterval ?? ((fn, ms) => setInterval(fn, ms));
+  const stopTimer = deps.clearInterval ?? ((handle) => clearInterval(/** @type {any} */ (handle)));
+  /** Whether the Desk panel is the face on screen. */
+  let shown = false;
+  /** The poll's timer while shown, else `null`. */
+  let timer = null;
+  /** The rail's badge, made on first need; and the rail item it is in, `null` while it is in none. */
+  let badge = null;
+  let badgedOn = null;
   /** @type {Record<string, any>|undefined} the last status read; `undefined` while none is. */
   let status;
   /** @type {string|undefined} why the last read failed. */
@@ -451,12 +537,38 @@ export function createDeskPanel(deps) {
     for (const [id, row] of rows) row.classList.toggle("sel", id === sessionId);
   }
 
+  /** @returns {Record<string, any>[]} the page's session list, as an array. */
+  function listed() {
+    const list = deps.sessions();
+    return Array.isArray(list) ? list : [];
+  }
+
+  /** Badge the rail's Desk item while another panel is shown and a desk session the panel
+   * lists has a card waiting; else take the badge off. Its label says so to a screen
+   * reader too, the badge itself being a dot. */
+  function syncRail() {
+    const link = deps.rail?.() ?? null;
+    const on = !shown && link !== null && deskSessionsOf(listed(), archived).some((s) => waiting(s.sessionId));
+    if (badgedOn !== null && (!on || badgedOn !== link)) {
+      badge.remove();
+      badgedOn.setAttribute("aria-label", "Desk");
+      badgedOn = null;
+    }
+    if (!on || badgedOn === link) return;
+    if (badge === null) {
+      badge = el("span", "rail-badge");
+      badge.setAttribute("aria-hidden", "true");
+    }
+    link.append(badge);
+    link.setAttribute("aria-label", "Desk, waiting on you");
+    badgedOn = link;
+  }
+
   /** @returns {DrawContext} */
   function context() {
-    const listed = deps.sessions();
-    const list = Array.isArray(listed) ? listed : [];
+    const list = listed();
     return {
-      status, error, now: new Date(now()), list, sessions: deskSessionsOf(list), active: deps.activeSession(),
+      status, error, now: new Date(now()), list, sessions: deskSessionsOf(list, archived), waiting, active: deps.activeSession(),
       choice, pausing, pauseError, rows,
       refresh: () => { void refresh(); },
       pause: () => { void pause(); },
@@ -478,10 +590,10 @@ export function createDeskPanel(deps) {
       panel.replaceChildren(note("loading…"));
       return;
     }
-    const shown = SECTIONS.filter((s) => !s.needsStatus || status !== undefined);
+    const drawable = SECTIONS.filter((s) => !s.needsStatus || status !== undefined);
     const ids0 = [...cards.keys()];
-    if (drawnInto !== panel || ids0.length !== shown.length || shown.some((s, i) => ids0[i] !== s.id)) {
-      cards = new Map(shown.map((s) => {
+    if (drawnInto !== panel || ids0.length !== drawable.length || drawable.some((s, i) => ids0[i] !== s.id)) {
+      cards = new Map(drawable.map((s) => {
         const card = el("section", "sp-card desk-section");
         card.dataset.section = s.id;
         return [s.id, card];
@@ -491,7 +603,7 @@ export function createDeskPanel(deps) {
       ids = undefined;
     }
     const ctx = context();
-    for (const s of shown) {
+    for (const s of drawable) {
       if (ids !== undefined && !ids.includes(s.id)) continue;
       const card = cards.get(s.id);
       card.replaceChildren();
@@ -542,9 +654,32 @@ export function createDeskPanel(deps) {
     if (answered !== undefined && status === undefined) void refresh();
   }
 
+  /** The panel comes on screen: no badge, the status read now and every DESK_POLL_MS. */
+  function show() {
+    shown = true;
+    if (timer === null) timer = startTimer(() => { void refresh(); }, DESK_POLL_MS);
+    syncRail();
+    return refresh();
+  }
+
+  /** Another panel is on screen: no more reads, and the badge stands in for the chips. */
+  function hide() {
+    shown = false;
+    if (timer !== null) {
+      stopTimer(timer);
+      timer = null;
+    }
+    syncRail();
+  }
+
   return {
+    show,
+    hide,
     refresh,
-    syncSessions: () => { if (loaded) draw(SECTIONS.filter((s) => s.readsSessions).map((s) => s.id)); },
+    syncSessions: () => {
+      if (loaded) draw(SECTIONS.filter((s) => s.readsSessions).map((s) => s.id));
+      syncRail();
+    },
     mark,
   };
 }

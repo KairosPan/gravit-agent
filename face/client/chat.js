@@ -64,7 +64,7 @@ import { proposeBotId } from "./botId.js";
 import { botModelChoices, botSettingsPayload, botToolLabel, draftBotSoul, normalizeBotModel } from "./botSettings.js";
 import { foldChannelName } from "./channelName.js";
 import { HOST_NAME, isDeskPreset, isHostPreset, speakerFor } from "./speaker.js";
-import { createDeskPanel, DESK_GLYPHS, deskLineText, deskTitle } from "./desk-panel.js";
+import { createDeskPanel, deskLineNode, deskTitle, phoneWhoNode } from "./desk-panel.js";
 import { composeSubagentCatalog, isSubagentRow, normalizeSubagentCatalog, subagentAddress, subagentControls, subagentResult } from "./subagents.js";
 import { avatarGlyph, foldMembers, gateSpeaker, isMemberSession, isMentionText, normalizeRoomDiscussion, roomAnswerDisplay, roundEndLine, stripChips } from "./room.js";
 
@@ -725,16 +725,7 @@ function bubbleNode(view) {
   const hasText = typeof view.text === "string" && view.text !== "";
   if (hasText) {
     if (lane === "k") wrap.append(el("div", "who", speaker));
-    /* The operator's words from the phone (the desk's Telegram bridge): their
-     * own lane, under a phone glyph - the same who-line a bot's avatar uses. */
-    else if (view.source === "telegram") {
-      const who = el("div", "who phone-who");
-      who.title = "sent from your phone, through the desk's Telegram bridge";
-      const glyph = el("span", "phone-glyph", DESK_GLYPHS.telegram);
-      glyph.setAttribute("aria-hidden", "true");
-      who.append(glyph, el("span", "who-name", "phone"));
-      wrap.append(who);
-    }
+    else if (view.source === "telegram") wrap.append(phoneWhoNode()); // the operator, from the phone (desk-panel.js)
     /* Gravit writes markdown; the operator's own words render exactly as
      * typed. A markdown answer with document structure (headings, tables)
      * widens its lane — a chat-sized reply keeps the bubble. */
@@ -962,18 +953,6 @@ function roomDiscussionNode(discussion, turns) {
     missing.append(list);
     node.append(missing);
   }
-  return node;
-}
-
-/** A firing of the desk's clock or an alert of its watch: the face's words, no
- * operator's, as one quiet line like a room's - the order or the symbol under
- * its glyph, the message the desk was sent on hover. @param {Record<string, any>} view */
-function deskLineNode(view) {
-  const node = el("div", "room-line desk-line");
-  const glyph = el("span", "desk-glyph", DESK_GLYPHS[view.line] ?? "");
-  glyph.setAttribute("aria-hidden", "true");
-  node.append(glyph, el("span", "room-line-text", deskLineText(view)));
-  node.title = dash(view.text);
   return node;
 }
 
@@ -1646,7 +1625,7 @@ function accept(view) {
   }
   else if (view.kind === "desk-line") {
     answerTraces.boundary(); // a firing opens the turn its answer belongs to, as a prompt does
-    place(view, deskLineNode(view));
+    place(view, deskLineNode(view)); // drawn like a room line (desk-panel.js)
   }
 }
 
@@ -2028,7 +2007,7 @@ async function refreshSessions() {
   reconcileActiveView(); // a paged session on screen may be live now
   renderStrip(); // the member fold and `running` may both have moved
   syncPickerFolders(); // a picker already on screen learns the folders the list just revealed
-  if (activePanel === "desk") deskPanel.syncSessions(); // the desk's sessions are this list's too
+  deskPanel.syncSessions(); // the desk's rows and the rail's badge read this list, and `gates`, too
   void loadSubagentInfo();
 }
 
@@ -3197,6 +3176,7 @@ function setPanel(name) {
   $(".sidebar").dataset.panel = name;
   $("#conv-list").hidden = name !== "strategy";
   for (const panel of ["desk", "agent", "memory", "plugin"]) $(`#panel-${panel}`).hidden = panel !== name;
+  if (name !== "desk") deskPanel.hide(); // its reads stop, and the rail's badge stands in for its chips
   if (name === "desk") void refreshDeskPanel();
   else if (name === "agent") void refreshAgentPanel();
   else if (name === "memory") void refreshMemoryPanel();
@@ -3265,21 +3245,27 @@ const LOGIN_HINTS = {
 /* -- desk -- */
 
 /** The Desk panel (desk-panel.js): the desk's status as named sections, its
- * Pause, and the desk's sessions, which open in place. Everything the panel is
- * lives in its module; this hands it the page's reads and calls it at three
- * moments - the panel opens ({@link setPanel}), the session list moves
- * ({@link refreshSessions}), the session on screen changes ({@link markActive}). */
+ * Pause, and the desk's sessions, which open in place, each with the waiting
+ * chip while a card waits in it - and the rail's badge for them while another
+ * panel is shown, the desk's sessions having no strategy-list rows. Everything
+ * the panel is lives in its module; this hands it the page's reads and calls it
+ * at three moments - the panel opens or closes ({@link setPanel}), the session
+ * list moves ({@link refreshSessions}, which a gate's arrival and settling
+ * schedule), the session on screen changes ({@link markActive}). */
 const deskPanel = createDeskPanel({
   panel: () => document.querySelector("#panel-desk"),
   data: panelData,
   sessions: () => lastSessions,
   activeSession: () => activeSession,
   open: (id) => { void openSession(id); },
+  waiting: (id) => needsYou(id),
+  archived: (id) => archivedSet.has(id) || (channelIndex?.archived ?? []).includes(id),
+  rail: () => document.querySelector('.rail-btn[data-nav="desk"]'),
 });
 
-/** Read the desk's status and draw the Desk panel. @returns {Promise<void>} */
+/** Put the Desk panel on screen: its status read now and every 30 s while it stays. @returns {Promise<void>} */
 function refreshDeskPanel() {
-  return deskPanel.refresh();
+  return deskPanel.show();
 }
 
 /* -- agent -- */

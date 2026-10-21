@@ -1644,8 +1644,8 @@ body {
    under a phone glyph, as a bot's answer sits under its avatar. A firing of the
    desk's clock or an alert of its watch is the face's: a quiet line like a
    room's, under its glyph. The Desk panel's cards are the sidebar's .sp-card
-   furniture; only the pause row, the pause line and the session rows are its
-   own (client/desk-panel.js). */
+   furniture; only the pause row and line, the resume command, the session
+   rows and the rail's badge are its own (client/desk-panel.js). */
 .msg.op .phone-who {
   display: flex;
   align-items: center;
@@ -1659,6 +1659,22 @@ body {
 
 .desk-pause-line { font-size: 12px; padding: 4px 0 2px; overflow-wrap: anywhere; }
 .desk-pause-line.paused { color: var(--danger); }
+/* the resume command stays one piece: never broken at its `--` */
+.desk-resume-cmd { white-space: nowrap; font-family: var(--mono); }
+/* a card waits on a desk session while another panel is shown: the rail's
+   Desk item carries the needs-you colour as a dot, the desk's sessions
+   having no strategy-list row to carry a waiting chip */
+.rail-btn[data-nav="desk"] { position: relative; }
+.rail-badge {
+  position: absolute;
+  top: 6px;
+  right: 9px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--danger);
+  box-shadow: 0 0 0 2px var(--side-bg);
+}
 .desk-pause { display: flex; gap: 6px; margin-top: 6px; }
 .desk-pause .picker-input { padding: 4px 8px; font-size: 12px; }
 .desk-pause .picker-btn { padding: 4px 12px; }

@@ -73,6 +73,21 @@ test("fencedPost: the fence, the method and the media type, in that order, each 
   assert.deepEqual(acted, [], "none of them reached the action");
 });
 
+test("fencedPost refuses before it reads: a forged Host with an oversized body is a 403, a GET with a body a 405 - never readBody's 413 or 400", async () => {
+  const rec = recorder();
+  const acted: unknown[] = [];
+  rec.register({ kind: "exact", path: "/act", handler: fencedPost((req) => req.headers.host === "127.0.0.1:3090", (body) => { acted.push(body); return {}; }) });
+  const json = { "content-type": "application/json" };
+  const oversized = "x".repeat(5000);
+  assert.deepEqual(JSON.parse(await rec.call("/act", { method: "POST", body: oversized, headers: json, host: "evil.example.com" })),
+    { status: 403, body: { ok: false, error: "forbidden" } }, "the fence answers before a byte is read: 403, not 413");
+  assert.deepEqual(JSON.parse(await rec.call("/act", { method: "GET", body: oversized, headers: json })),
+    { status: 405, body: { ok: false, error: "POST only" } }, "the method answers before a byte is read: 405, not 413");
+  assert.deepEqual(JSON.parse(await rec.call("/act", { method: "GET", json: { until: "2h" } })),
+    { status: 405, body: { ok: false, error: "POST only" } }, "a GET with a good JSON body is still a 405");
+  assert.deepEqual(acted, []);
+});
+
 test("fencedPost: a body that is no JSON object is a 400, whatever it is instead", async () => {
   const rec = recorder();
   const acted: unknown[] = [];

@@ -310,12 +310,13 @@ registerRoomRoutes(booted.ctx.webServer, room);
  * already on the roster is registered as a tool for Gravit before the face
  * reports itself up. */
 await registerPanelRoutes(booted.ctx.webServer, deps);
-/* The desk (desk.ts): `/data/desk/status` and the two desk tools always - every
- * `gravit-desk` agent gets `desk_quotes` over the hub above and `desk_state`
- * (desk-tools.ts), so an old desk conversation keeps its tools in a face with
- * the desk off; the ledger's `boot` and the sleep watch unless `FACE_DESK=0`,
- * the switch for a second face beside the service
- * (docs/superpowers/specs/2026-10-19-always-on-gravit-design.md §5.2), which
+/* The desk (desk.ts): `/data/desk/status`, the Desk panel's
+ * `POST /data/desk/pause` (it only pauses; a terminal resumes) and the two
+ * desk tools always - every `gravit-desk` agent gets `desk_quotes` over the
+ * hub above and `desk_state` (desk-tools.ts), so an old desk conversation
+ * keeps its tools in a face with the desk off; the ledger's `boot` and the
+ * sleep watch unless `FACE_DESK=0`, the switch for a second face beside the
+ * service (docs/superpowers/specs/2026-10-19-always-on-gravit-design.md §5.2), which
  * runs on a scratch home with `FACE_DESK=0` (face/README.md, "Run as a
  * service") - the ledger assumes one desk-enabled face per home. Mounted here,
  * after `bootFace` bound the port, so a face that lost the port never writes a
