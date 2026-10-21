@@ -886,6 +886,7 @@ git commit -m "test(face): schedule-smoke - a real firing end to end, its deadli
   - §1: `Nothing *starts* unattended.` becomes, verbatim, *Nothing starts unattended except a standing order the operator armed in the harness home, with a cap and an expiry; a standing turn informs the operator — it never orders, asks, opens a goal or edits what it runs.*
   - §3: the clock row.
   - §4: `schedule.ts` writes `firings.jsonl` and its events; the operator writes `STANDING.md` and `standing.yml`; Gravit writes `desk/journal/briefs/`.
+  - §5, D17 extended (spec §10 puts the arming file under it): the operator's `standing.yml` in the harness home is written only from a terminal (`npm run desk -- arm`/`rearm`), never by a route or the phone — say so in D17, and that a standing turn cannot write it (outside its cwd and its sandbox).
   - §5:
     - D5 is *partially closed: desk sessions have a thresholded daily budget; interactive sessions still have per-session usage only*;
     - **D19** *holdings are what the operator typed — the desk's book is stale the moment they trade* (held by the brief naming the file's last edit; revisit: any broker read);

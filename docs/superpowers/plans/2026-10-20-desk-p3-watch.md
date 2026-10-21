@@ -1233,6 +1233,7 @@ git commit -m "test(face): watch-smoke - streamed, polled and gap alerts, restar
 - [ ] **Step 1: `Gravit-Design.md`.**
   - §3: the watch row and the hub's server subscription.
   - §4: `watch.ts` writes `alerts.jsonl`, `filings.jsonl`, `watch.lease` and its events; `telegram.ts` writes `MUTE`; the operator writes `rules.yml` and the `watch:` pin.
+  - §5, D17 revisited (its Due-when is a phone command that writes more than the pause): `/mute` writes `MUTE` from the phone — say so in D17, with what holds it (a required duration, never shortened from the phone, no phone unmute), and in D18's phone powers.
   - §5 gains:
 
     | D20 | A strategy's `levels.yml` sits in a directory its research sessions (and P4's report firings) can write, and the watch sends its plans verbatim | held by the load caps, the alert caps, the firing ledger's files-written line, and the watch's `changed (sha256 <8 hex>)` line on the phone for every levels file it re-reads | the first levels change the operator did not make; P4 pins each strategy's `levels.yml` at arming |
@@ -1255,7 +1256,7 @@ git commit -m "test(face): watch-smoke - streamed, polled and gap alerts, restar
     - First-observation semantics after a restart (ruling 1).
     - Repeat counts are lost on a restart.
     - An `alerts.jsonl` rotated mid-day can fire a `gap` twice.
-    - `scripts/desk_filings.py` is held by its sha256 pin in `standing.yml` (`npm run desk -- arm-watch`), with a hash-then-exec window of milliseconds. The face's own code is not pinned (P3-16; the charter's §7 by P1 Task 10).
+    - `scripts/desk_filings.py` is held by its sha256 pin in `standing.yml` (`npm run desk -- arm-watch`), with a hash-then-exec window of milliseconds. The face's own code is not pinned (P3-16; charter §5 row D24, landed by P1 Task 10).
     - The SEC `Z` reading (ruling 10).
     - Each poll downloads every symbol's whole submissions JSON.
     - Telegram's per-chat flood limit can push a burst's later alerts into P1's outbox, where they lose their threading.
