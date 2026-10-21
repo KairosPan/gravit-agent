@@ -515,7 +515,7 @@ test("orderApprovalDecision: an earn product and a pay body are key fields - who
   const body = JSON.stringify({ prompt: "x".repeat(80) });
   const pay = orderApprovalDecision("mcp__account__portfolio_pay", "ask", { url: "https://api.example.com/x", maxAmount: 1, from: "float-1", method: "POST", body });
   assert.equal(pay?.kind, "ask");
-  assert.ok(reasonOf(pay).includes(`body=${body}`), `a short body is shown whole: ${reasonOf(pay)}`);
+  assert.ok(reasonOf(pay).includes(`body=${JSON.stringify(body)}`), `a short body is shown whole, quoted since it carries quotes and spaces: ${reasonOf(pay)}`);
   const long = orderApprovalDecision("mcp__account__portfolio_pay", "ask", { url: "https://api.example.com/x", maxAmount: 1, from: "float-1", method: "POST", body: "x".repeat(121) });
   assert.equal(long?.kind, "deny");
   assert.match(reasonOf(long), /its body is 121 characters, too long to show whole on a card/);
@@ -530,4 +530,18 @@ test("orderGuardReason: a seat write with no grant is denied, with a logged allo
   assert.equal(orderGuardReason("mcp__account__portfolio_account", undefined, [], "c1"), undefined);
   assert.equal(orderGuardReasonForSession(write, undefined, { snapshotEvents: () => seatGrant }, "c1"), undefined);
   assert.match(orderGuardReasonForSession(write, undefined, { snapshotEvents: () => [] }, "c1") ?? "", /without a logged allowed-once/);
+});
+
+/* The security review of 2026-10-21 (the client's card titled from this line): a value that carries whitespace, a
+ * quote, a bracket or a semicolon is drawn as a JSON string, so the line parses back pair by pair and a value can never
+ * pass itself off as another pair (`symbol="AAPL venue=okx" venue=paper-1`). */
+test("describeOrder: a value with whitespace or a bracket is quoted, so the line parses back pair by pair", () => {
+  assert.equal(describeOrder("mcp__account__portfolio_live_order", { venue: "paper-1", symbol: "AAPL venue=okx", side: "buy", usd: 10 }),
+    'mcp__account__portfolio_live_order: side=buy usd=10 symbol="AAPL venue=okx" venue=paper-1');
+  assert.equal(describeOrder("mcp__account__portfolio_pay", { url: "https://api.example.com/x?a=b&c=d", maxAmount: 2, from: "float-1", body: '{"q": 1}' }),
+    'mcp__account__portfolio_pay: from=float-1 url=https://api.example.com/x?a=b&c=d maxAmount=2 body="{\\"q\\": 1}"');
+  assert.equal(describeOrder("mcp__account__portfolio_live_batch", { legs: [{ venue: "ex", symbol: "BTC/USD", side: "buy", usd: 10, note: "a; b" }] }),
+    'mcp__account__portfolio_live_batch: legs=[1: side=buy usd=10 symbol=BTC/USD venue=ex note="a; b"]');
+  assert.equal(describeOrder("mcp__account__portfolio_sweep", { venue: "paper-1", memo: `${"m".repeat(30)} ${"n".repeat(30)}` }),
+    `mcp__account__portfolio_sweep: venue=paper-1 memo="${"m".repeat(30)} ${"n".repeat(9)}…"`, "a cut value is cut first, then quoted");
 });

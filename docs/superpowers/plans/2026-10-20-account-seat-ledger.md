@@ -334,3 +334,16 @@ tool-name card"): a gate is drawn again at most once — the first call under it
 chance — and only when the call's arguments agree with the host's Gate 2 reason line key by key
 (a key field whole, any other value as the forty-character cut, bounded on both sides so `usd=10` is
 not `usd=100`; a batch leg by leg); on a mismatch the card keeps the host's line as its only text.
+
+A second review of that fix (two MEDIUMs: a non-scalar on a title key skipped by the agreement
+check; the allowlist of checked keys incomplete and a batch's legs not matched segment by segment)
+ended the "redraw from the call" design altogether: the card's title is now made from the host's own
+reason line and nothing else (`reasonArgs` in `kinds.js` parses Gate 2's `key=value` pairs back,
+nested objects and legs included, and titles nothing when the line names another tool or no pair),
+so what the title says is what the dim line says, a late or repeated `tool/call` changes nothing, and
+`live.js`'s pending-view machinery is gone. On the host, `describeOrder` now draws a value that
+carries whitespace, a quote, a bracket or a semicolon as a JSON string (cut first where it is cut),
+so no value can pass itself off as another pair, a leg or the end of one — `orders`: "describeOrder:
+a value with whitespace or a bracket is quoted…", `kinds`: "reasonArgs parses Gate 2's line back…"
+and the card tests re-pointed at the line, `live`: "a seat gate is titled from the host's line before
+its tool/call reaches the page…" — all RED→GREEN; the seat smoke re-run.

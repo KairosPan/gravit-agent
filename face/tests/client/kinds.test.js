@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { mapFrame } from '../../client/js/wire/mapper.js';
-import { ORDER_TOOLS, SEAT_TOOLS, isOrderTool, isSeatWriteTool, parseArgs, orderLine, seatLine, rememberCall, toMessages, seatLift, argsAgreeWithReason } from '../../client/js/host/kinds.js';
+import { ORDER_TOOLS, SEAT_TOOLS, isOrderTool, isSeatWriteTool, parseArgs, orderLine, seatLine, rememberCall, toMessages, seatLift, reasonArgs } from '../../client/js/host/kinds.js';
 
 // the Account seat's twelve write tools (spec 2026-10-20 §6.1), spelled here as the gate's test spells them
 const SEAT = ['portfolio_live_order', 'portfolio_live_batch', 'portfolio_live_amend', 'portfolio_live_cancel', 'portfolio_live_close',
@@ -59,9 +59,8 @@ const seatGate = { type: 'waterfall', event: 'approval/request', eventId: 'ev-10
 const seatResult = (text, isError, callId = 'c10') => ({ type: 'session/event', sessionId: 's1', event: { type: 'tool/result', seq: 61, time: 1756512301000, surfaceOp: 'append', data: { turn: 5, step: 1, message: { id: 'm-61', role: 'tool', source: { kind: 'tool', callId }, toolCallId: callId, content: [{ type: 'text', text }], isError } } } });
 const seatCallAs = (callId, name, args) => ({ ...seatCall, event: { ...seatCall.event, data: { ...seatCall.event.data, callId, name, arguments: JSON.stringify(args) } } });
 
-test('a seat order approval is the orange card with the seat line and the venue from its arguments', () => {
+test("a seat order approval is the orange card with the seat line and the venue from the host's own reason line, with or without its call", () => {
   const c = new Map();
-  rememberCall(c, seatCall);
   const [card] = toMessages(mapFrame(seatGate), c, NOW);
   assert.equal(card.kind, 'card'); assert.equal(card.id, 'ev-10');
   assert.equal(card.text, 'Your call: buy $100 of AAPL · market · paper-1');
@@ -73,7 +72,7 @@ test('a seat order approval is the orange card with the seat line and the venue 
 test("a batch's card lists its legs and its venues", () => {
   const c = new Map();
   rememberCall(c, seatCallAs('c16', 'mcp__account__portfolio_live_batch', { legs: [{ venue: 'paper-1', symbol: 'BTC/USD', side: 'buy', usd: 10 }, { venue: 'okx', symbol: 'SOL/USDT', side: 'sell', qty: 500 }, { venue: 'paper-1', symbol: 'ETH/USD', side: 'buy', usd: 5 }] }));
-  const [card] = toMessages(mapFrame({ ...seatGate, eventId: 'ev-16', request: { ...seatGate.request, toolName: 'mcp__account__portfolio_live_batch', callId: 'c16', reason: 'Account seat - mcp__account__portfolio_live_batch: legs=[…]' } }), c, NOW);
+  const [card] = toMessages(mapFrame({ ...seatGate, eventId: 'ev-16', request: { ...seatGate.request, toolName: 'mcp__account__portfolio_live_batch', callId: 'c16', reason: 'Account seat - mcp__account__portfolio_live_batch: legs=[1: side=buy usd=10 symbol=BTC/USD orderType=market venue=paper-1; 2: side=sell qty=500 symbol=SOL/USDT venue=okx; 3: side=buy usd=5 symbol=ETH/USD venue=paper-1]' } }), c, NOW);
   assert.equal(card.kind, 'card');
   assert.equal(card.text, 'Your call: batch · 3 legs: buy $10 of BTC/USD · market; sell 500 SOL/USDT · market; buy $5 of ETH/USD · market');
   assert.equal(card.data.venue, 'paper-1, okx');
@@ -84,10 +83,10 @@ test("a gate joins only its own session's call of the same tool; another session
   const c = new Map();
   rememberCall(c, seatCall);   // session s1, c10: buy $100 of AAPL at paper-1
   const other = toMessages(mapFrame({ ...seatGate, eventId: 'ev-20', agentId: 's2', request: { ...seatGate.request, reason: 'Account seat - mcp__account__portfolio_live_order: side=buy usd=900 symbol=TSLA venue=okx' } }), c, NOW);
-  assert.equal(other[0].kind, 'card'); assert.equal(other[0].text, 'Your call: mcp__account__portfolio_live_order', "another session's call is not joined");
-  assert.equal(other[0].data.venue, 'Account seat');
+  assert.equal(other[0].kind, 'card'); assert.equal(other[0].text, 'Your call: buy $900 of TSLA · market · okx', "the title is the gate's own line, never another session's call");
+  assert.equal(other[0].data.venue, 'okx');
   const renamed = toMessages(mapFrame({ ...seatGate, eventId: 'ev-21', request: { ...seatGate.request, toolName: 'mcp__account__portfolio_live_close' } }), c, NOW);
-  assert.equal(renamed[0].text, 'Your call: mcp__account__portfolio_live_close', "a call of another tool is not joined");
+  assert.equal(renamed[0].text, 'Your call: mcp__account__portfolio_live_close', "a line that names another tool titles nothing");
   const own = toMessages(mapFrame(seatGate), c, NOW);
   assert.equal(own[0].text, 'Your call: buy $100 of AAPL · market · paper-1');
   const result = toMessages(mapFrame({ ...seatResult(JSON.stringify({ ok: true, order: { id: 'ord-9' } }), false), sessionId: 's2' }), c, NOW);
@@ -97,11 +96,11 @@ test("a gate joins only its own session's call of the same tool; another session
 test('a seat tool without a venue, or one the face never classified, is a card at the Account seat', () => {
   const c = new Map();
   rememberCall(c, seatCallAs('c11', 'mcp__account__portfolio_pay', { url: 'https://api.example.com/v1/x', maxAmount: 2, from: 'agent-1' }));
-  const [pay] = toMessages(mapFrame({ ...seatGate, eventId: 'ev-11', request: { ...seatGate.request, toolName: 'mcp__account__portfolio_pay', callId: 'c11' } }), c, NOW);
+  const [pay] = toMessages(mapFrame({ ...seatGate, eventId: 'ev-11', request: { ...seatGate.request, toolName: 'mcp__account__portfolio_pay', callId: 'c11', reason: 'Account seat - mcp__account__portfolio_pay: from=agent-1 url=https://api.example.com/v1/x maxAmount=2' } }), c, NOW);
   assert.equal(pay.kind, 'card'); assert.equal(pay.text, 'Your call: pay up to $2 · api.example.com'); assert.equal(pay.data.venue, 'Account seat');
   // the host cards a seat tool it has not classified; the client follows the host
-  const [unknown] = toMessages(mapFrame({ ...seatGate, eventId: 'ev-12', request: { ...seatGate.request, toolName: 'mcp__account__portfolio_sweep', callId: 'c12' } }), new Map(), NOW);
-  assert.equal(unknown.kind, 'card'); assert.equal(unknown.text, 'Your call: mcp__account__portfolio_sweep'); assert.equal(unknown.data.venue, 'Account seat');
+  const [unknown] = toMessages(mapFrame({ ...seatGate, eventId: 'ev-12', request: { ...seatGate.request, toolName: 'mcp__account__portfolio_sweep', callId: 'c12', reason: 'Account seat - mcp__account__portfolio_sweep: all=true' } }), new Map(), NOW);
+  assert.equal(unknown.kind, 'card'); assert.equal(unknown.text, 'Your call: portfolio_sweep', 'the raw name and the venue of the line, if any (spec 6.1)'); assert.equal(unknown.data.venue, 'Account seat');
 });
 
 test("a seat write's result lifts a card-raised line, a placed or canceled order, the Account's refusal, or a batch count; a seat read lifts nothing", () => {
@@ -244,9 +243,11 @@ test('an order approval is the orange card with the exact arguments joined from 
   assert.match(card.data.line, /^PAPER order/);
 });
 
-test('an order approval whose call was never seen falls back to the tool name', () => {
+test("an order approval is titled from the host's line even when its call was never seen; a line without pairs falls back to the tool name", () => {
   const [card] = toMessages(mapFrame(orderGate), new Map(), NOW);
-  assert.equal(card.kind, 'card'); assert.equal(card.text, 'Your call: mcp__alpaca-kit__place_order');
+  assert.equal(card.kind, 'card'); assert.equal(card.text, 'Your call: buy 0.00008 BTC/USD · market');
+  const [bare] = toMessages(mapFrame({ ...orderGate, eventId: 'ev-9b', request: { ...orderGate.request, reason: 'PAPER order - mcp__alpaca-kit__place_order', displayReason: undefined } }), new Map(), NOW);
+  assert.equal(bare.text, 'Your call: mcp__alpaca-kit__place_order');
 });
 
 test('an accepted order result is the tool row plus a green receipt; a failed one the row plus a red refusal', () => {
@@ -296,21 +297,23 @@ test("a seat refusal prefixed \"Error: \" by dsh still lifts as the Account's co
   assert.equal(plain.text, 'the user rejected tool "mcp__account__portfolio_live_order"', "dsh's own refusal keeps its words without the prefix");
 });
 
-// the security review of 2026-10-21: a card drawn again from a later tool/call must agree with the host's own reason
-// line, key by key, with a boundary after each value (usd=10 is not usd=100), legs included
-test("argsAgreeWithReason: the call's title keys must each appear in the host's reason line, whole or as the cut the card shows", () => {
-  const reason = 'Account seat - mcp__account__portfolio_live_order: side=buy usd=10 symbol=BTC/USD orderType=market venue=paper-momentum';
-  assert.equal(argsAgreeWithReason({ venue: 'paper-momentum', symbol: 'BTC/USD', side: 'buy', usd: 10, orderType: 'market' }, reason), true);
-  assert.equal(argsAgreeWithReason({ venue: 'paper-momentum', symbol: 'BTC/USD', side: 'buy', usd: 100 }, reason), false, 'usd=10 is not usd=100');
-  assert.equal(argsAgreeWithReason({ venue: 'okx', symbol: 'BTC/USD', side: 'buy', usd: 10 }, reason), false, 'another venue');
-  assert.equal(argsAgreeWithReason({ venue: 'paper-momentum', symbol: 'BTC/USD', side: 'sell', usd: 10 }, reason), false, 'another side');
-  assert.equal(argsAgreeWithReason({ venue: 'paper-momentum' }, reason), true, 'a call that carries fewer keys still agrees on the ones it has');
-  assert.equal(argsAgreeWithReason({ venue: 'paper-momentum', symbol: 'BTC/USD', side: 'buy', usd: 10, note: 'x'.repeat(60) }, reason), true, 'a key the card does not title is not checked');
-  const to = `0x${'a'.repeat(40)}`;
-  assert.equal(argsAgreeWithReason({ kind: 'send', from: 'wallet', asset: 'USDC', amount: 5, to }, `Account seat - mcp__account__portfolio_live_move: kind=send from=wallet asset=USDC amount=5 to=${to}`), true, 'a key field shown whole');
-  assert.equal(argsAgreeWithReason({ kind: 'send', from: 'wallet', asset: 'USDC', amount: 5, to: `0x${'b'.repeat(40)}` }, `Account seat - mcp__account__portfolio_live_move: kind=send from=wallet asset=USDC amount=5 to=${to}`), false, 'another address');
-  const batch = 'Account seat - mcp__account__portfolio_live_batch: legs=[1: side=buy usd=10 symbol=BTC/USD orderType=market venue=ex; 2: side=buy usd=12 symbol=ETH/USD orderType=market venue=ex]';
-  assert.equal(argsAgreeWithReason({ legs: [{ venue: 'ex', symbol: 'BTC/USD', side: 'buy', usd: 10 }, { venue: 'ex', symbol: 'ETH/USD', side: 'buy', usd: 12 }] }, batch), true);
-  assert.equal(argsAgreeWithReason({ legs: [{ venue: 'ex', symbol: 'BTC/USD', side: 'buy', usd: 10 }, { venue: 'paper-momentum', symbol: 'ETH/USD', side: 'buy', usd: 12 }] }, batch), false, 'a leg at another venue');
-  assert.equal(argsAgreeWithReason({ venue: 'paper-momentum' }, undefined), false, 'no reason, no agreement');
+
+// the security review of 2026-10-21: the card's title is made from the host's own reason line and nothing else, so what
+// the title says is what the host said — a tool/call that reaches the page late, or a later one under the same id, changes
+// nothing; the host quotes a value that would not parse back bare, and the parser reads the quote
+test("reasonArgs parses Gate 2's line back pair by pair: scalars coerced, a nested object, a batch's legs, a quoted value, the tool it names", () => {
+  assert.deepEqual(reasonArgs('Account seat - mcp__account__portfolio_live_order: side=buy usd=10 symbol=BTC/USD orderType=market venue=paper-momentum'),
+    { tool: 'mcp__account__portfolio_live_order', args: { side: 'buy', usd: 10, symbol: 'BTC/USD', orderType: 'market', venue: 'paper-momentum' } });
+  assert.deepEqual(reasonArgs('PAPER order - mcp__alpaca-kit__place_order: side=buy qty=0.00008 symbol=BTC/USD order_type=market').args,
+    { side: 'buy', qty: 0.00008, symbol: 'BTC/USD', order_type: 'market' });
+  assert.deepEqual(reasonArgs('Account seat - mcp__account__portfolio_sweep: venue=paper-1 all=true nested={a=1 b=x}').args,
+    { venue: 'paper-1', all: true, nested: { a: 1, b: 'x' } });
+  assert.deepEqual(reasonArgs('Account seat - mcp__account__portfolio_live_batch: legs=[1: side=buy usd=10 symbol=BTC/USD venue=ex; 2: side=sell qty=500 symbol=SOL/USDT venue=okx]').args,
+    { legs: [{ side: 'buy', usd: 10, symbol: 'BTC/USD', venue: 'ex' }, { side: 'sell', qty: 500, symbol: 'SOL/USDT', venue: 'okx' }] });
+  assert.deepEqual(reasonArgs('Account seat - mcp__account__portfolio_live_order: side=buy usd=10 symbol="AAPL venue=okx" venue=paper-1').args,
+    { side: 'buy', usd: 10, symbol: 'AAPL venue=okx', venue: 'paper-1' }, 'a quoted value is one value, whatever it carries');
+  assert.deepEqual(reasonArgs('Account seat - mcp__account__portfolio_pay: url=https://api.example.com/x?a=b&c=d maxAmount=2 body="{\\"q\\": 1}"').args,
+    { url: 'https://api.example.com/x?a=b&c=d', maxAmount: 2, body: '{"q": 1}' });
+  assert.deepEqual(reasonArgs('Account seat - mcp__account__portfolio_live_order'), { tool: 'mcp__account__portfolio_live_order', args: {} });
+  assert.deepEqual(reasonArgs(undefined), { tool: undefined, args: {} });
 });

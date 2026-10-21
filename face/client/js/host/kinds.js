@@ -190,25 +190,27 @@ function toolMessages(view, calls) {
   return [row, lift];
 }
 
-function gate(view, calls, now) {
+function gate(view, now) {
   const data = { eventId: view.id, sessionId: view.sessionId, toolName: view.toolName, callId: view.callId, reason: view.reason, displayReason: view.displayReason };
   const line = view.displayReason ?? view.reason ?? '';
   if (!isOrderTool(view.toolName) && !isSeatGate(view.toolName)) return { id: view.id, at: now, from: 'gravit', kind: 'approval', text: line, data };
-  // the gate's own session's call of the same tool, or nothing: a headline must never come from another session's call
-  const known = callOf(calls, view, view.callId, view.toolName);
-  // a seat card: the seat line, and the argument's venue as the chip — a batch's venues, or the seat itself when the tool names none
+  // the title is made from the host's own reason line and nothing else (reasonArgs): never from a tool/call frame, which may
+  // reach the page after the gate or come later under the same id; a line that names another tool, or no pair, titles nothing
+  const read = reasonArgs(view.reason ?? view.displayReason);
+  const args = read.tool === view.toolName && Object.keys(read.args).length > 0 ? read.args : null;
+  // a seat card: the seat line, and the line's venue as the chip — a batch's venues, or the seat itself when the tool names none
   if (isSeatGate(view.toolName)) {
-    const venue = typeof known?.args?.venue === 'string' && known.args.venue !== '' ? known.args.venue : (venuesOf(known?.args?.legs) || 'Account seat');
+    const venue = args && typeof args.venue === 'string' && args.venue !== '' ? args.venue : (venuesOf(args?.legs) || 'Account seat');
     return {
       id: view.id, at: now, from: 'gravit', kind: 'card',
-      text: `Your call: ${known ? seatLine(view.toolName, known.args) : view.toolName}`,
-      data: { ...data, venue, line, args: known?.args ?? {} },
+      text: `Your call: ${args ? seatLine(view.toolName, args) : view.toolName}`,
+      data: { ...data, venue, line, args: args ?? {} },
     };
   }
   return {
     id: view.id, at: now, from: 'gravit', kind: 'card',
-    text: `Your call: ${known ? orderLine(known.args) : view.toolName}`,
-    data: { ...data, venue: 'Alpaca paper', line, args: known?.args ?? {} },
+    text: `Your call: ${args ? orderLine(args) : view.toolName}`,
+    data: { ...data, venue: 'Alpaca paper', line, args: args ?? {} },
   };
 }
 
@@ -219,41 +221,84 @@ export function toMessages(view, calls, now, speaker = 'gravit') {
     case 'room-line': return [sys(view, roundEndLine(view))];
     case 'subagent-message': return [sys(view, `Report from ${view.childSessionId ?? 'a child'}: ${view.text ?? ''}`)];
     case 'card': return toolMessages(view, calls);
-    case 'approval': return [gate(view, calls, now)];
+    case 'approval': return [gate(view, now)];
     case 'question': return [{ id: view.id, at: now, from: 'gravit', kind: 'question', text: '', data: { eventId: view.id, sessionId: view.sessionId, questions: Array.isArray(view.questions) ? view.questions : [] } }];
     default: return [];
   }
 }
 
-// the keys a card's title is made of (seatLine, orderLine): a card drawn again from a call must find each one the call
-// carries in the host's own reason line (Gate 2's describeOrder: `key=value` pairs, a key field whole, another value cut
-// at forty characters), bounded on both sides so `usd=10` is not `usd=100`; a batch's legs the same, leg by leg
-const TITLE_KEYS = ['venue', 'symbol', 'side', 'usd', 'qty', 'kind', 'from', 'to', 'asset', 'amount', 'url', 'order', 'order_id', 'orderType', 'order_type', 'leverage', 'maxAmount', 'limit_price', 'limitPrice'];
-const LEG_KEYS = ['venue', 'symbol', 'side', 'usd', 'qty', 'orderType', 'order_type'];
-const escapeRe = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const pairIn = (reason, key, value) => {
-  const shown = String(value);
-  const whole = new RegExp(`(^|[\\s\\[;{(])${escapeRe(key)}=${escapeRe(shown)}(?=$|[\\s;\\]})])`, 'u').test(reason);
-  if (whole || shown.length <= 40) return whole; // a key field is shown whole (up to 120); any other value is cut at forty
-  return new RegExp(`(^|[\\s\\[;{(])${escapeRe(key)}=${escapeRe(shown.slice(0, 40))}…`, 'u').test(reason);
-};
-const scalarsAgree = (row, keys, reason) => keys.every(key => {
-  const value = row[key];
-  return value === undefined || value === null || typeof value === 'object' || pairIn(reason, key, value);
-});
-export function argsAgreeWithReason(args, reason) {
-  if (!args || typeof args !== 'object' || typeof reason !== 'string' || reason === '') return false;
-  if (!scalarsAgree(args, TITLE_KEYS, reason)) return false;
-  if (Array.isArray(args.legs)) return args.legs.every(leg => !leg || typeof leg !== 'object' || scalarsAgree(leg, LEG_KEYS, reason));
-  return true;
+// ---- the host's reason line, read back
+// Gate 2 draws `<prefix> - <tool>: key=value key=value …` (src/orders.ts describeOrder): a bare value carries no whitespace,
+// quote, bracket or semicolon — any other value is a JSON string —, a nested object is `{k=v …}`, a batch's legs are
+// `[1: k=v …; 2: …]`. A card's title is made from this line and nothing else, so what the title says is what the host said:
+// a tool/call that reaches the page late, or a later one under the same id, changes nothing (the security review of
+// 2026-10-21). The first pair of a key wins.
+const scalarOf = word => (word === 'true' ? true : word === 'false' ? false : /^-?\d+(\.\d+)?$/.test(word) ? Number(word) : word);
+// the JSON string at text[i] === '"': its value and the index after its closing quote (an unterminated one: its raw text)
+function quotedAt(text, i) {
+  let j = i + 1;
+  while (j < text.length && text[j] !== '"') j += text[j] === '\\' ? 2 : 1;
+  const end = Math.min(j + 1, text.length);
+  try { return { value: JSON.parse(text.slice(i, end)), end }; } catch { return { value: text.slice(i + 1, j), end }; }
 }
-
-// a gate drawn before its own tool/call reached the page: its card again, from the call's arguments, only when they agree
-// with the host's reason line — the server's Gate 2 text is the authority, and a card the operator may already be reading
-// is never replaced by a call that says otherwise. Null: no agreeing call of this gate's session, id and tool
-export function redressGate(view, calls, now) {
-  const known = callOf(calls, view, view.callId, view.toolName);
-  if (!known || !argsAgreeWithReason(known.args, view.reason ?? view.displayReason)) return null;
-  const [m] = toMessages(view, calls, now);
-  return m ?? null;
+// the index of the bracket that closes the one at text[i], quoted strings skipped; -1 when none
+function closingAt(text, i) {
+  const close = text[i] === '[' ? ']' : '}';
+  let j = i + 1;
+  while (j < text.length) {
+    if (text[j] === '"') { j = quotedAt(text, j).end; continue; }
+    if (text[j] === close) return j;
+    j += 1;
+  }
+  return -1;
+}
+function pairsFrom(text) {
+  const out = {};
+  let i = 0;
+  while (i < text.length) {
+    while (i < text.length && text[i] === ' ') i += 1;
+    const km = /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(text.slice(i));
+    if (!km) { const sp = text.indexOf(' ', i); if (sp < 0) break; i = sp + 1; continue; }
+    const key = km[1];
+    i += km[0].length;
+    let value;
+    const c = text[i];
+    if (c === '"') { const q = quotedAt(text, i); value = q.value; i = q.end; }
+    else if (c === '[' || c === '{') {
+      const end = closingAt(text, i);
+      const inner = text.slice(i + 1, end < 0 ? text.length : end);
+      value = c === '[' ? legsFrom(inner) : pairsFrom(inner);
+      i = end < 0 ? text.length : end + 1;
+    } else {
+      const sp = text.indexOf(' ', i);
+      value = scalarOf(sp < 0 ? text.slice(i) : text.slice(i, sp));
+      i = sp < 0 ? text.length : sp;
+    }
+    if (!(key in out)) out[key] = value;
+  }
+  return out;
+}
+// `1: k=v …; 2: …` → one object per leg, in order (a leg drawn as `?` is an empty one); quoted values never split a leg
+function legsFrom(inner) {
+  const legs = [];
+  let i = 0;
+  let start = -1;
+  const flush = end => { if (start >= 0) legs.push(pairsFrom(inner.slice(start, end))); };
+  while (i < inner.length) {
+    if (inner[i] === '"') { i = quotedAt(inner, i).end; continue; }
+    const m = (i === 0 ? /^(\d+): / : /^; (\d+): /).exec(inner.slice(i));
+    if (m) { flush(i); start = i + m[0].length; i = start; continue; }
+    i += 1;
+  }
+  flush(inner.length);
+  return legs;
+}
+export function reasonArgs(reason) {
+  if (typeof reason !== 'string') return { tool: undefined, args: {} };
+  const colon = reason.indexOf(': ');
+  const head = colon < 0 ? reason : reason.slice(0, colon);
+  const body = colon < 0 ? '' : reason.slice(colon + 2);
+  const dash = head.lastIndexOf(' - ');
+  const tool = (dash < 0 ? head : head.slice(dash + 3)).trim();
+  return { tool: tool === '' ? undefined : tool, args: pairsFrom(body) };
 }

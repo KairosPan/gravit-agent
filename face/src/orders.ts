@@ -354,11 +354,20 @@ const KNOWN_KEYS = [
 function scalarWord(key: string, value: unknown): string {
   if (key === "url") {
     const u = urlShown(value);
-    return "shown" in u ? u.shown : "?";
+    return "shown" in u ? shown(u.shown) : "?";
   }
   const text = String(value);
-  if (WHOLE_KEYS.includes(key)) return text.length > MAX_KEY_FIELD ? `${text.slice(0, MAX_KEY_FIELD)}…` : text;
-  return text.length > 40 ? `${text.slice(0, 40)}…` : text;
+  if (WHOLE_KEYS.includes(key)) return shown(text.length > MAX_KEY_FIELD ? `${text.slice(0, MAX_KEY_FIELD)}…` : text);
+  return shown(text.length > 40 ? `${text.slice(0, 40)}…` : text);
+}
+
+/** A value as the line carries it: bare when it reads back as one word, else a
+ * JSON string. The client titles its card from this line and nothing else
+ * (`face/client/js/host/kinds.js` `reasonArgs`), so a value carrying
+ * whitespace, a quote, a bracket or a semicolon — which could pass itself off
+ * as another pair, a leg or the end of one — is quoted, cut first where it is cut. */
+function shown(text: string): string {
+  return /^[^\s"[\]{};]*$/.test(text) ? text : JSON.stringify(text);
 }
 
 /** A nested value on the card: a list as `[1: …; 2: …]` (a batch's legs, each

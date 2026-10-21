@@ -357,9 +357,10 @@ test('the subagentCatalog projection reaches the conversation, and the list carr
   assert.deepEqual(p().subagentCatalog, catalog, 'a list refresh keeps it');
 });
 
-// the drill of 2026-10-21: the approval waterfall and the session's follow stream are two streams on one socket, and
-// the card reached the page before its tool/call did, so it read the tool name with no arguments and stayed so
-test("a seat gate drawn before its tool/call arrives is drawn again with the call's arguments once the call lands, in place", async () => {
+// the drill and the security review of 2026-10-21: the approval waterfall and the session's follow stream are two streams
+// on one socket, so a gate can reach the page before its tool/call; the card's title is made from the host's own reason
+// line, so it never waits on the call and no later call under the same id can change it
+test("a seat gate is titled from the host's line before its tool/call reaches the page, and a call landing later changes nothing", async () => {
   const r = rig({ rows: [row('s1', { agentAvailable: true })] });
   await r.ready();
   r.live.open('s1'); await settle();
@@ -369,36 +370,11 @@ test("a seat gate drawn before its tool/call arrives is drawn again with the cal
   r.opts().onGate(gate);
   const conv = () => r.store.get().conversations.find(c => c.id === 's1');
   const card = () => conv().messages.find(m => m.id === 'ev-seat');
-  assert.equal(card().text, 'Your call: mcp__account__portfolio_live_order', 'before the call lands, the card knows only the tool');
+  assert.equal(card().text, 'Your call: buy $100 of AAPL · market · paper-1');
+  assert.equal(card().data.venue, 'paper-1');
   const seq = card().seq;
-  f.cbs.onItem({ type: 'event', event: { type: 'tool/call', seq: 60, time: NOW, data: { turn: 5, step: 1, callId: 'c10', name: 'mcp__account__portfolio_live_order', arguments: JSON.stringify({ venue: 'paper-1', symbol: 'AAPL', side: 'buy', usd: 100, orderType: 'market' }) } } });
-  assert.equal(card().text, 'Your call: buy $100 of AAPL · market · paper-1');
-  assert.equal(card().data.venue, 'paper-1');
-  assert.equal(card().seq, seq, 'the card keeps its place in the thread');
+  f.cbs.onItem({ type: 'event', event: { type: 'tool/call', seq: 60, time: NOW, data: { turn: 5, step: 1, callId: 'c10', name: 'mcp__account__portfolio_live_order', arguments: JSON.stringify({ venue: 'okx', symbol: 'BTC/USDT', side: 'sell', usd: 500 }) } } });
+  assert.equal(card().text, 'Your call: buy $100 of AAPL · market · paper-1', 'a call under the same id, saying otherwise, changes nothing');
+  assert.equal(card().seq, seq);
   assert.equal(conv().messages.filter(m => m.id === 'ev-seat').length, 1);
-  // another call of the same tool, under another id, never redresses this card
-  f.cbs.onItem({ type: 'event', event: { type: 'tool/call', seq: 61, time: NOW, data: { turn: 5, step: 2, callId: 'c11', name: 'mcp__account__portfolio_live_order', arguments: JSON.stringify({ venue: 'okx', symbol: 'BTC/USDT', side: 'sell', usd: 500 }) } } });
-  assert.equal(card().text, 'Your call: buy $100 of AAPL · market · paper-1');
-  // the security review of 2026-10-21: a later call under the SAME id never replaces a card the operator may be reading
-  f.cbs.onItem({ type: 'event', event: { type: 'tool/call', seq: 62, time: NOW, data: { turn: 5, step: 3, callId: 'c10', name: 'mcp__account__portfolio_live_order', arguments: JSON.stringify({ venue: 'okx', symbol: 'BTC/USDT', side: 'sell', usd: 500 }) } } });
-  assert.equal(card().text, 'Your call: buy $100 of AAPL · market · paper-1', 'drawn again at most once');
-  assert.equal(card().data.venue, 'paper-1');
-});
-
-test("a gate is drawn again only from a call whose arguments agree with the host's own reason line; a mismatch keeps the tool-name card", async () => {
-  const r = rig({ rows: [row('s1', { agentAvailable: true })] });
-  await r.ready();
-  r.live.open('s1'); await settle();
-  const f = r.last('session/follow');
-  f.cbs.onItem({ type: 'snapshot', header: { createdAt: 7 }, cursor: 2, records: [fixture(0), fixture(1)] });
-  const gate = { ...frames[6], eventId: 'ev-spoof', agentId: 's1', request: { toolName: 'mcp__account__portfolio_live_order', callId: 'c20', reason: 'Account seat - mcp__account__portfolio_live_order: side=buy usd=100 symbol=AAPL orderType=market venue=paper-1' } };
-  r.opts().onGate(gate);
-  const card = () => r.store.get().conversations.find(c => c.id === 's1').messages.find(m => m.id === 'ev-spoof');
-  f.cbs.onItem({ type: 'event', event: { type: 'tool/call', seq: 70, time: NOW, data: { turn: 6, step: 1, callId: 'c20', name: 'mcp__account__portfolio_live_order', arguments: JSON.stringify({ venue: 'okx', symbol: 'AAPL', side: 'buy', usd: 100, orderType: 'market' }) } } });
-  assert.equal(card().text, 'Your call: mcp__account__portfolio_live_order', "the call's venue is not the reason's: the card keeps the host's line as its only text");
-  assert.equal(card().data.venue, 'Account seat');
-  assert.deepEqual(card().data.args, {});
-  // the agreeing call comes later under the same id: the mismatch spent the one redraw, the card stays as it was
-  f.cbs.onItem({ type: 'event', event: { type: 'tool/call', seq: 71, time: NOW, data: { turn: 6, step: 2, callId: 'c20', name: 'mcp__account__portfolio_live_order', arguments: JSON.stringify({ venue: 'paper-1', symbol: 'AAPL', side: 'buy', usd: 100, orderType: 'market' }) } } });
-  assert.equal(card().text, 'Your call: mcp__account__portfolio_live_order');
 });

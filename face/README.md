@@ -2720,9 +2720,8 @@ limit on it ("The Account seat" above), the face started with keys, a channel se
    - mcp__account__portfolio_live_order: side=buy usd=10 symbol=AAPL …`; press ✓; the tool row's
    answer and the receipt `Card raised on the Account page · card-NNNN · answer it there`; the
    Venues box counting `1 card waiting`. A model left to itself previews first
-   (`portfolio_live_markets`, `portfolio_live_preview`: reads, no card), and the card's title is the
-   seat line once its `tool/call` has reached the page — the approval can arrive a moment before
-   it, and the card is drawn again then.
+   (`portfolio_live_markets`, `portfolio_live_preview`: reads, no card); the card's title is made
+   from the dim line, the host's own words, so it never waits on anything else.
 4. **The Account's card.** On the Account page (Portfolio › Waiting for you) the card `Gravit asks
    to PAPER · buy … AAPL at paper-1 …`; approve and sign. Gravit's `portfolio_wait` returns
    `done`; the Account's statement shows the fill marked paper; on Refresh the Venues box drops

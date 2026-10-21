@@ -3,7 +3,7 @@
 // (chat.js on main, its open/follow/page/reconcile and host-event handling), ported; nothing here touches the DOM.
 import { foldMembers } from '../wire/room.js';
 import { summaryOf } from '../wire/summaries.js';
-import { rememberCall, toMessages, redressGate } from './kinds.js';
+import { rememberCall, toMessages } from './kinds.js';
 import { listConversations, childRowsOf } from './sessions.js';
 import { reducers as host } from '../reducers/host.js';
 
@@ -24,8 +24,6 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
   const calls = new Map();        // callId → {name, args}: the arguments the order card joins on
   const rooms = new Map();        // sessionId → the room projection's value
   const pending = new Map();      // eventId → the gate message as delivered and still open: placed afresh at every dispatch
-  // a pending gate's VIEW, kept to draw its card again when its tool/call lands after it (two streams, one socket)
-  const pendingViews = new Map();
   const answeredHere = new Set(); // eventIds this tab's answer won: a report for one afterwards means it lost a race
   let memberBot = new Map();      // a room member's session → its bot id
   let openSeq = 0;
@@ -75,27 +73,9 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
     }
     if (v.kind === 'projection') { acceptProjection(v); return; }
     rememberCall(calls, frame);
-    redressGates(frame);
     for (const m of toMessages(v, calls, now(), speakerOf(convOf(convId)))) {
       store.dispatch('hostEvent', { convId, message: m });
       if (m.kind === 'receipt') onReceipt(m);
-    }
-  }
-  // the approval waterfall and the session's follow stream are two streams on one socket: a gate can reach the page
-  // before its own tool/call does, and then its card knew only the tool. Once the call lands, every pending gate of
-  // that session and call id is drawn again with the arguments, in place (hostGate keeps the seq and the answer)
-  function redressGates(frame) {
-    const event = frame?.event;
-    if (!event || event.type !== 'tool/call') return;
-    const callId = event.data?.callId;
-    if (typeof callId !== 'string') return;
-    for (const [id, v] of pendingViews) {
-      if (v.callId !== callId || v.sessionId !== frame.sessionId) continue;
-      pendingViews.delete(id); // one chance: the first call under this id decides, and no later one replaces the card
-      const m = redressGate(v, calls, now()); // only a call whose arguments agree with the host's own reason line
-      if (!m) continue;
-      pending.set(m.id, m);
-      store.dispatch('hostGate', placeGate(m));
     }
   }
   // a window is folded with the same reducer the stream uses, so backfill and stream draw identically
@@ -215,15 +195,12 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
     const [m] = toMessages(v, calls, now());
     if (!m) return;
     pending.set(m.id, m);
-    // only a card drawn without its call's arguments waits to be drawn again; one that knew them is final
-    if (m.kind === 'card' && Object.keys(m.data?.args ?? {}).length === 0) pendingViews.set(m.id, v);
     store.dispatch('hostGate', placeGate(m));
   }
   // the mux reports a gate over; for one this tab's answer won, api.js reports only a cancel that trailed the win —
   // another answer or a Stop settled it first — so the card reads Settled elsewhere, never this tab's outcome
   function gateGone(eventId) {
     pending.delete(eventId);
-    pendingViews.delete(eventId);
     const lost = answeredHere.delete(eventId);
     store.dispatch('hostGateGone', { eventId, outcome: lost ? 'elsewhere' : 'closed' });
   }
@@ -232,7 +209,6 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
   async function answer(eventId, value) {
     await mux.answer(eventId, value);
     pending.delete(eventId);
-    pendingViews.delete(eventId);
     answeredHere.add(eventId);
   }
   function retryOrphans() {
