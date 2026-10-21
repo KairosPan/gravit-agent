@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   auditOrderTools, describeOrder, effectiveApprovalPolicy, hasApprovalGrant, isGatedTool,
-  isOrderTool, orderApprovalDecision, orderGuardReason, orderGuardReasonForSession,
+  isOrderTool, isSeatWriteTool, orderApprovalDecision, orderGuardReason, orderGuardReasonForSession,
   unreadableSessionLogReason, type PreToolDecision,
 } from "../src/orders.ts";
 
@@ -351,4 +351,71 @@ test("orderGuardReasonForSession: a drifted Session API never bricks a tool the 
     const throwing = { snapshotEvents: () => { throw new Error("never read for an ungated tool"); } };
     assert.equal(orderGuardReasonForSession(name, description, throwing, "c1"), undefined, name);
   }
+});
+
+/* --- the Account seat's writes (spec 2026-10-20 §5.2) ---------------------- */
+
+/** The seat's twelve write tools, spelled here on purpose: an independent copy of the gate's list. */
+const SEAT = [
+  "portfolio_live_order", "portfolio_live_batch", "portfolio_live_amend", "portfolio_live_cancel", "portfolio_live_close",
+  "portfolio_live_leverage", "portfolio_live_move", "portfolio_live_earn", "portfolio_pay",
+  "portfolio_order", "portfolio_execute", "portfolio_transfer",
+];
+
+test("isOrderTool: the Account seat's twelve write tools match, raw and as dsh mints them; its reads, waits and words never", () => {
+  for (const raw of SEAT) {
+    assert.ok(isOrderTool(raw), raw);
+    assert.ok(isOrderTool(`mcp__account__${raw}`), raw);
+    assert.ok(isSeatWriteTool(`mcp__broker__${raw}`), `${raw} under a renamed server`);
+  }
+  for (const read of ["portfolio_account", "portfolio_holdings", "portfolio_venues", "portfolio_live_preview", "portfolio_live_markets",
+    "portfolio_live_positions", "portfolio_wait", "portfolio_approval", "portfolio_ask", "portfolio_report", "portfolio_remember", "portfolio_desk_say"]) {
+    assert.equal(isOrderTool(`mcp__account__${read}`), false, read);
+    assert.equal(isSeatWriteTool(`mcp__account__${read}`), false, read);
+  }
+  assert.equal(isSeatWriteTool("mcp__alpaca-kit__place_order"), false, "an Alpaca order is not a seat write");
+});
+
+test("describeOrder: a seat order reads side, size, symbol, type and venue in that order, then the rest", () => {
+  assert.equal(
+    describeOrder("mcp__account__portfolio_live_order", { venue: "paper-1", symbol: "AAPL", side: "buy", usd: 100, orderType: "market", tif: "day" }),
+    "mcp__account__portfolio_live_order: side=buy usd=100 symbol=AAPL orderType=market venue=paper-1 tif=day",
+  );
+  assert.equal(describeOrder("mcp__account__portfolio_live_cancel", { venue: "paper-1", order: "ord-0001" }),
+    "mcp__account__portfolio_live_cancel: order=ord-0001 venue=paper-1");
+});
+
+test("orderApprovalDecision: a seat tool's reason opens with Account seat, never PAPER", () => {
+  const d = orderApprovalDecision("mcp__account__portfolio_live_order", "ask", { venue: "paper-1", symbol: "AAPL", side: "buy", usd: 100 });
+  assert.equal(d?.kind, "ask");
+  const reason = d?.kind === "ask" ? d.reason ?? "" : "";
+  assert.match(reason, /^Account seat - mcp__account__portfolio_live_order: side=buy usd=100 symbol=AAPL venue=paper-1$/);
+  assert.doesNotMatch(reason, /PAPER/);
+  assert.deepEqual(d?.kind === "ask" ? d.displayReason : undefined, { en: reason });
+});
+
+test("auditOrderTools: the seat's write tools are gated, its reads are not, an unknown seat tool is gated until classified", () => {
+  const audit = auditOrderTools([
+    { name: "mcp__account__portfolio_live_order", description: "Place a REAL order at a venue the owner connected live" },
+    { name: "mcp__account__portfolio_pay", description: "Pay for something at a URL" },
+    { name: "mcp__account__portfolio_account", description: "Who this seat is" },
+    { name: "mcp__account__portfolio_wait", description: "Wait on a card" },
+    { name: "mcp__account__portfolio_sweep", description: "a tool the Account grew after the pin" },
+  ]);
+  assert.deepEqual(audit.gated, ["mcp__account__portfolio_live_order", "mcp__account__portfolio_pay", "mcp__account__portfolio_sweep"]);
+  assert.deepEqual(audit.ungated, []);
+});
+
+/* The Account moves fast (26 pull requests in the twelve days before the pin). A seat tool the face
+ * has never classified is carded like a write until the read list grows — a card per call is the
+ * safe default — and never refuses the boot. Only the face's own server name gets this: another
+ * server's unknown tool is nobody's, and a renamed seat server keeps the twelve by raw suffix. */
+test("isOrderTool: an unknown tool at the seat is carded until it is classified; a listed read is not; another server's unknown tool is nobody's", () => {
+  assert.ok(isOrderTool("mcp__account__portfolio_sweep"));
+  assert.ok(isSeatWriteTool("mcp__account__portfolio_sweep") === false, "unknown is not one of the twelve");
+  assert.equal(isOrderTool("mcp__account__portfolio_holdings"), false);
+  assert.equal(isOrderTool("mcp__account__portfolio_desk"), false);
+  assert.equal(isOrderTool("mcp__other__portfolio_sweep"), false);
+  const d = orderApprovalDecision("mcp__account__portfolio_sweep", "ask", { venue: "paper-1", all: true });
+  assert.match(d?.kind === "ask" ? d.reason ?? "" : "", /^Account seat - mcp__account__portfolio_sweep: venue=paper-1 all=true$/);
 });

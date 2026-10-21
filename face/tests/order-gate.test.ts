@@ -121,6 +121,13 @@ test("order gate: registered on a real tree, asks for orders, leaves everything 
 
     assert.equal((await fire(pending("mcp__drill__cancel_order", { order_id: "x" }))).kind, "ask");
 
+    /* The Account seat's writes (spec 2026-10-20 §5.2): carded under the
+     * default policy with the seat's own reason, never PAPER; its reads pass. */
+    const seat = await fire(pending("mcp__drill__portfolio_live_order", { venue: "paper-1", symbol: "AAPL", side: "buy", usd: 100 }));
+    assert.equal(seat.kind, "ask", "a seat order must raise a card");
+    assert.match(seat.kind === "ask" ? seat.reason ?? "" : "", /^Account seat - .*venue=paper-1/);
+    assert.equal((await fire(pending("mcp__drill__portfolio_account", {}))).kind, "allow", "a seat read is never gated");
+
     /* No session, nobody to ask: deny in our own words rather than let the
      * registry report a refusal nobody made. */
     assert.equal((await fire(agentless("mcp__drill__place_order"))).kind, "deny");

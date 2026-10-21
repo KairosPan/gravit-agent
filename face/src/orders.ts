@@ -23,6 +23,8 @@
  * @module
  */
 
+import { SEAT_TOOL_PREFIX } from "./account-seat.ts";
+
 /** The mutating tools, matched by their RAW names rather than by a full public
  * name. dsh mints `mcp__<serverName>__<rawName>` (NEW
  * `packages/mcp/mcp-client/src/tools.ts:81-87`, `publicToolName`)
@@ -32,7 +34,47 @@
  *
  * The read-only `orders` listing (`alpaca_kit/mcp/tools.py:292`) deliberately
  * does NOT match: a substring test for "order" would gate a harmless query. */
-const ORDER_RAW_NAMES = ["place_order", "cancel_order"] as const;
+const ALPACA_RAW_NAMES = ["place_order", "cancel_order"] as const;
+
+/** The Account seat's write tools (src/account-seat.ts; spec 2026-10-20 §5.2):
+ * everything that places, changes or cancels an order, moves money, pays or
+ * sets leverage at Linqi's Account — read at buyer-agent-demo @ 133b9a7 — plus
+ * the three the seat registers only against a simulated service. Its reads
+ * (`portfolio_account`, `portfolio_holdings`, `portfolio_wait`, …) and its
+ * signed words (`portfolio_ask`, `portfolio_report`, `portfolio_remember`,
+ * `portfolio_forget`, `portfolio_desk_say`) grant nothing and move nothing, so
+ * they are not here. The seat's descriptions carry no `(operator-gated)`
+ * marker, so a rename on the Account's side is caught by the seat smoke
+ * (`tests/account-seat-smoke.test.ts`), not by the boot audit. */
+export const SEAT_WRITE_RAW_NAMES = [
+  "portfolio_live_order", "portfolio_live_batch", "portfolio_live_amend", "portfolio_live_cancel", "portfolio_live_close",
+  "portfolio_live_leverage", "portfolio_live_move", "portfolio_live_earn", "portfolio_pay",
+  "portfolio_order", "portfolio_execute", "portfolio_transfer",
+] as const;
+
+/** The seat's reads, waits and signed words at the same pin: the tools the
+ * face has classified as NOT a write. A tool under the face's own seat prefix
+ * (`mcp__account__`) that is in neither list — one the Account grew after the
+ * pin — is carded like a write until it is classified here: a card per call
+ * is the safe default, and it never refuses the boot (the Account moves fast;
+ * a boot refusal for a new read would brick the operator's face). Only the
+ * face's own server name gets this fallback; a renamed seat server keeps the
+ * twelve by raw suffix and nothing more. */
+export const SEAT_READ_RAW_NAMES = [
+  "portfolio_overview", "portfolio_read", "portfolio_markets", "portfolio_quote", "portfolio_account", "portfolio_approval",
+  "portfolio_wait", "portfolio_statement", "portfolio_explore", "portfolio_holdings", "portfolio_history", "portfolio_asset",
+  "portfolio_candles", "portfolio_book", "portfolio_receive", "portfolio_venues", "portfolio_earn", "portfolio_watchlist",
+  "portfolio_report", "portfolio_ask", "portfolio_memory", "portfolio_remember", "portfolio_forget", "portfolio_desk",
+  "portfolio_desk_say", "portfolio_live_preview", "portfolio_live_markets", "portfolio_live_compare", "portfolio_live_positions",
+  "portfolio_openness",
+] as const;
+
+const ORDER_RAW_NAMES = [...ALPACA_RAW_NAMES, ...SEAT_WRITE_RAW_NAMES] as const;
+
+/** A tool under the face's own seat prefix that is neither a known write nor a known read. */
+function isUnclassifiedSeatTool(name: string): boolean {
+  return name.startsWith(SEAT_TOOL_PREFIX) && !SEAT_READ_RAW_NAMES.some((raw) => name === `${SEAT_TOOL_PREFIX}${raw}`);
+}
 
 /** The marker alpaca-kit stamps on both mutating tools' descriptions
  * (`alpaca_kit/mcp/tools.py:303,307`). Cross-checked against the name test in
@@ -72,7 +114,21 @@ export interface ToolSchemaLike {
  * would)? Matches the raw name itself and any `mcp__<server>__<raw>` minting of
  * it, so an operator's server rename cannot slip a live order tool past. */
 export function isOrderTool(name: string): boolean {
-  return ORDER_RAW_NAMES.some((raw) => name === raw || name.endsWith(`__${raw}`));
+  return ORDER_RAW_NAMES.some((raw) => name === raw || name.endsWith(`__${raw}`)) || isUnclassifiedSeatTool(name);
+}
+
+/** Whether `name` is one of the Account seat's twelve write tools (by the same
+ * raw-suffix rule). */
+export function isSeatWriteTool(name: string): boolean {
+  return SEAT_WRITE_RAW_NAMES.some((raw) => name === raw || name.endsWith(`__${raw}`));
+}
+
+/** Whether a card for `name` is the seat's: one of the twelve under any server
+ * name, or anything under the face's own seat prefix. Its card says "Account
+ * seat", not "PAPER order" — the face does not know a venue's kind, and the
+ * Account's own card says PAPER in its own words. */
+function isSeatTool(name: string): boolean {
+  return isSeatWriteTool(name) || name.startsWith(SEAT_TOOL_PREFIX);
 }
 
 /** Reconstruct the policy an ask would resolve under, from PUBLIC surface only.
@@ -137,7 +193,7 @@ export function orderApprovalDecision(
         `and try again.`,
     };
   }
-  const reason = `PAPER order - ${describeOrder(name, args)}`;
+  const reason = `${isSeatTool(name) ? "Account seat" : "PAPER order"} - ${describeOrder(name, args)}`;
   /* `displayReason` is what a localized approval UI prefers to render - the
    * upstream panel draws it INSTEAD of `reason` whenever it is present
    * (NEW packages/client/ui-approval/src/client/ApprovalPanel.tsx:17, fed by
@@ -180,10 +236,17 @@ export function describeOrder(name: string, args: unknown): string {
     return text.length > 40 ? `${text.slice(0, 40)}…` : text;
   };
   /* place_order(symbol, qty, side, order_type, limit_price) and
-   * cancel_order(order_id) - alpaca_kit/mcp/tools.py:298-307. Unknown keys are
-   * appended rather than dropped, so a tool that grows a field still shows it
-   * (charter Rule 5: what is never surfaced is never governed). */
-  const known = ["side", "qty", "symbol", "order_type", "limit_price", "order_id"];
+   * cancel_order(order_id) - alpaca_kit/mcp/tools.py:298-307 - and the Account
+   * seat's keys (portfolio_live_order's venue, symbol, side, orderType, qty or
+   * usd, limitPrice, stopPrice; amend and cancel's order; move's kind, from,
+   * asset, amount; leverage; pay's url and maxAmount) in a readable order:
+   * side, size, symbol, type, then the venue. Unknown keys are appended
+   * rather than dropped, so a tool that grows a field still shows it (charter
+   * Rule 5: what is never surfaced is never governed). */
+  const known = [
+    "side", "qty", "usd", "symbol", "order_type", "orderType", "limit_price", "limitPrice", "stopPrice", "order_id", "order",
+    "venue", "kind", "from", "asset", "amount", "leverage", "url", "maxAmount",
+  ];
   const parts = known.map((key) => {
     const value = scalar(key);
     return value === undefined ? undefined : `${key}=${value}`;
