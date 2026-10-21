@@ -4,6 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { mapFrame } from '../../client/js/wire/mapper.js';
+import { describeOrder } from '../../src/orders.ts';
 import { ORDER_TOOLS, SEAT_TOOLS, isOrderTool, isSeatWriteTool, parseArgs, orderLine, seatLine, rememberCall, toMessages, seatLift, reasonArgs } from '../../client/js/host/kinds.js';
 
 // the Account seat's twelve write tools (spec 2026-10-20 §6.1), spelled here as the gate's test spells them
@@ -316,4 +317,24 @@ test("reasonArgs parses Gate 2's line back pair by pair: scalars coerced, a nest
     { url: 'https://api.example.com/x?a=b&c=d', maxAmount: 2, body: '{"q": 1}' });
   assert.deepEqual(reasonArgs('Account seat - mcp__account__portfolio_live_order'), { tool: 'mcp__account__portfolio_live_order', args: {} });
   assert.deepEqual(reasonArgs(undefined), { tool: undefined, args: {} });
+});
+
+// the security review of 2026-10-21 (third): the host draws the line, the client reads it back — the round trip must hold
+// for every title-relevant field, values that need quoting included
+test("round trip: reasonArgs(describeOrder(…)) gives back the title-relevant fields the host was given", () => {
+  const cases = [
+    ['mcp__account__portfolio_live_order', { venue: 'paper-momentum', symbol: 'BTC/USD', side: 'buy', usd: 10, orderType: 'market' }],
+    ['mcp__account__portfolio_live_order', { venue: 'paper-1', symbol: 'AAPL venue=okx', side: 'sell', qty: 3, orderType: 'limit', limitPrice: 187.4 }],
+    ['mcp__account__portfolio_live_batch', { legs: [{ venue: 'ex', symbol: 'BTC/USD', side: 'buy', usd: 10, note: 'a; b' }, { venue: 'ex', symbol: 'ETH/USD', side: 'buy', usd: 12 }] }],
+    ['mcp__account__portfolio_live_move', { kind: 'send', from: 'wallet', asset: 'USDC', amount: 5, to: `0x${'a'.repeat(40)}` }],
+    ['mcp__account__portfolio_pay', { url: 'https://api.example.com/x?a=b&c=d', maxAmount: 2, from: 'float-1', method: 'POST', body: '{"q": [1, 2]}' }],
+    ['mcp__account__portfolio_live_earn', { venue: 'paper-1', kind: 'supply', product: 'okx-flexible-usdt', asset: 'USDT', amount: 5 }],
+    ['mcp__account__portfolio_sweep', { venue: 'paper-1', all: true, intent: { kind: 'close', why: 'end of "day"' } }],
+    ['mcp__alpaca-kit__place_order', { symbol: 'BTC/USD', qty: 0.00008, side: 'buy', order_type: 'market' }],
+  ];
+  for (const [name, args] of cases) {
+    const read = reasonArgs(`Account seat - ${describeOrder(name, args)}`);
+    assert.equal(read.tool, name);
+    assert.deepEqual(read.args, args, `${name}: ${describeOrder(name, args)}`);
+  }
 });

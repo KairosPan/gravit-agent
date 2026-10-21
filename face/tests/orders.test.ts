@@ -545,3 +545,19 @@ test("describeOrder: a value with whitespace or a bracket is quoted, so the line
   assert.equal(describeOrder("mcp__account__portfolio_sweep", { venue: "paper-1", memo: `${"m".repeat(30)} ${"n".repeat(30)}` }),
     `mcp__account__portfolio_sweep: venue=paper-1 memo="${"m".repeat(30)} ${"n".repeat(9)}…"`, "a cut value is cut first, then quoted");
 });
+
+/* The security review of 2026-10-21 (third): a key is written bare on the line, so a key that is not a name — `x venue`,
+ * `a=b`, `legs;` — could pass itself off as another pair when the client reads the line back. Denied before any card,
+ * at any depth, a batch's legs included. */
+test("orderApprovalDecision: a key that is not a name is denied before a card, at any depth", () => {
+  const deny = (name: string, args: Record<string, unknown>): string => {
+    const d = orderApprovalDecision(name, "ask", args);
+    return d?.kind === "deny" ? d.reason : String(d?.kind);
+  };
+  assert.match(deny("mcp__account__portfolio_live_order", { venue: "paper-1", "x venue": "okx", side: "buy", usd: 10 }), /its "x venue" is not a name a card can show, so nothing was asked/);
+  assert.match(deny("mcp__account__portfolio_live_order", { venue: "paper-1", "a=b": 1 }), /its "a=b" is not a name a card can show/);
+  assert.match(deny("mcp__account__portfolio_live_batch", { legs: [{ venue: "ex", symbol: "BTC/USD", "side usd": 5 }] }), /its legs\[1\]\."side usd" is not a name a card can show/);
+  assert.match(deny("mcp__account__portfolio_sweep", { venue: "paper-1", intent: { "k;": 1 } }), /its intent\."k;" is not a name a card can show/);
+  assert.match(deny("mcp__account__portfolio_sweep", { venue: "paper-1", "": 1 }), /its "" is not a name a card can show/);
+  assert.equal(deny("mcp__account__portfolio_live_order", { venue: "paper-1", symbol: "AAPL", side: "buy", usd: 10, order_type: "market", _note: "x" }), "ask");
+});

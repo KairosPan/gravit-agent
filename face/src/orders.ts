@@ -220,6 +220,12 @@ export function orderApprovalDecision(
  * own case ({@link urlWord}). */
 const WHOLE_KEYS = ["venue", "from", "to", "symbol", "order", "asset", "account", "base", "order_id", "product", "body"];
 
+/** The shape of a key the line writes bare: a key is never quoted, so one that
+ * is not a name — `x venue`, `a=b`, `legs;` — could pass itself off as another
+ * pair when the client reads the line back for its card's title; the gate
+ * denies such a call before any card, at any depth. */
+const KEY_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
 /** Most characters a key field may have and still be shown whole on a card;
  * past it the call is denied rather than carded with a cut ({@link unshowableKeyField}). */
 const MAX_KEY_FIELD = 120;
@@ -265,6 +271,7 @@ function unshowableScalar(key: string, value: unknown, at: string): { key: strin
 function unshowableIn(row: Record<string, unknown>, path: string, depth: number): { key: string; why: string } | undefined {
   for (const [key, value] of Object.entries(row)) {
     const at = `${path}${key}`;
+    if (!KEY_NAME.test(key)) return { key: `${path}${JSON.stringify(key)}`, why: "is not a name a card can show" };
     if (value === undefined || value === null) continue;
     if (typeof value !== "object") {
       const bad = unshowableScalar(key, value, at);

@@ -347,3 +347,10 @@ so no value can pass itself off as another pair, a leg or the end of one — `or
 a value with whitespace or a bracket is quoted…", `kinds`: "reasonArgs parses Gate 2's line back…"
 and the card tests re-pointed at the line, `live`: "a seat gate is titled from the host's line before
 its tool/call reaches the page…" — all RED→GREEN; the seat smoke re-run.
+
+A third review (HIGH, parser differential): keys are written bare on the line, so a key that is not a
+name could pass itself off as another pair when the client reads the line back. The gate now denies
+such a call before any card, at any depth, a batch's legs included (`orders`: "a key that is not a
+name is denied before a card, at any depth" RED→GREEN), and the client suite carries the round trip
+the review asked for (`kinds`: "round trip: reasonArgs(describeOrder(…)) gives back the title-relevant
+fields the host was given", eight calls, quoted values and legs among them).

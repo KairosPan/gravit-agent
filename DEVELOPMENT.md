@@ -1350,7 +1350,8 @@ because neither alone suffices:
    same line>}}` under policy `ask` — `Account seat - <tool>: side=… usd=… symbol=… venue=…` for a seat
    tool, since the face does not know a venue's kind and the Account's own card says PAPER
    (`describeOrder`: `key=value` pairs in a readable order, values capped at 40 characters, unknown keys
-   appended; a value that carries whitespace, a quote, a bracket or a semicolon is drawn as a JSON
+   appended; a key that is not a name (`x venue`, `a=b`) is denied before any card, at any depth, since
+   keys are written bare; a value that carries whitespace, a quote, a bracket or a semicolon is drawn as a JSON
    string, cut first where it is cut, so the line reads back pair by pair — the client's card is
    titled from it — and no value can pass itself off as another pair; the key fields the operator
    decides on — a venue, a symbol, an id, an address, a payee's URL, an earn product, a pay's body —
