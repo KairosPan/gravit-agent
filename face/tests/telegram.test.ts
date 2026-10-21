@@ -352,16 +352,21 @@ test("a refused post replies with its line", async () => {
     { refused: "paused", line: "paused since 14:00 ET by telegram until 16:00 ET; a terminal resumes it: npm run desk -- resume" },
     { refused: "fence", path: "desk/journal/GRAVIT.md", line: "refused: desk/journal/GRAVIT.md exists; it would steer every later desk turn. Remove it, then write again." },
     { refused: "error", line: "the desk could not open a turn: EACCES" },
+    {
+      refused: "budget",
+      line: "the desk's token budget for today is spent: 2,013,402 of 2,000,000 tokens since 00:00 ET. It opens again at midnight ET, or raise budget.dailyTokens in standing.yml",
+    },
   );
   const r = await rig("refused", { conversation });
   try {
     await polled(r, 1);
-    r.api.push(text(1, "one"), text(2, "two"), text(3, "three"));
+    r.api.push(text(1, "one"), text(2, "two"), text(3, "three"), text(4, "four"));
     await polled(r, 2);
     assert.deepEqual(r.api.sent.map((m) => [m.chat_id, m.text]), [
       [OPERATOR, "paused since 14:00 ET by telegram until 16:00 ET; a terminal resumes it: npm run desk -- resume"],
       [OPERATOR, "refused: desk/journal/GRAVIT.md exists; it would steer every later desk turn. Remove it, then write again."],
       [OPERATOR, "the desk could not open a turn: EACCES"],
+      [OPERATOR, "the desk's token budget for today is spent: 2,013,402 of 2,000,000 tokens since 00:00 ET. It opens again at midnight ET, or raise budget.dailyTokens in standing.yml"],
     ]);
   } finally {
     await r.bridge.dispose();

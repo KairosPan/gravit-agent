@@ -8,13 +8,15 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { withFileLock } from "@deepseek-ai/dsh-atomic-write";
 import {
-  ASLEEP_THRESHOLD_MS, ASLEEP_TICK_MS, LEDGER_ROTATE_BYTES, OFF_FILE, appendEvent, appendRecord, clearOff, deskDir, deskStatus, deskStatusLines, deskTime,
-  installAsleepWatch, installDesk, lastDeskSession, parseDuration, readEvents, readOffState, registerDeskRoutes, runsOf, writeOff,
-  type DeskEvent, type DeskStatus, type TurnUsage,
+  ASLEEP_THRESHOLD_MS, ASLEEP_TICK_MS, EVENTS_FILE, FIRINGS_FILE, LEDGER_ROTATE_BYTES, OFF_FILE, appendEvent, appendRecord, appendRecordOnce, budgetReplyLine,
+  budgetState, clearOff, deskDir, deskStatus, deskStatusLines, deskTime, installAsleepWatch, installDesk, lastDeskSession, noteBudgetSpent, parseDuration,
+  readBudget, readEvents, readOffState, readRecords, registerDeskRoutes, runsOf, writeOff,
+  type BudgetState, type DeskEvent, type DeskStatus, type TurnUsage,
 } from "../src/desk.ts";
 import type { DeskConversationCtxLike } from "../src/desk-conversation.ts";
 import type { AgentLike, SessionLike } from "../src/room.ts";
 import type { EventLike } from "../src/room-rules.ts";
+import type { StandingStatus } from "../src/standing.ts";
 import { recorder } from "./route-recorder.ts";
 
 /** Every harness home made with {@link home}, removed once the file's tests are done. */
@@ -910,4 +912,210 @@ test("installDesk runs the Telegram bridge only with the desk on, Telegram confi
   } finally {
     await Promise.all(made.map((h) => rm(h, { recursive: true, force: true })));
   }
+});
+
+/* P2: the day's token budget, the once-only append, any desk JSONL read back, and what the status carries of them. */
+
+/** A desk turn recorded at `t`, opened by `source`, ending `outcome`, with its four buckets in the ledger's order. */
+const tokenTurn = (t: string, source: string, u: [number, number, number, number], outcome: "ended" | "timed-out" | "cancelled" | "failed" = "ended"): DeskEvent => ({
+  t, kind: "desk-turn", sessionId: "s", source, turn: 1, outcome, wallMs: 1,
+  usage: { uncachedInputTokens: u[0], outputTokens: u[1], cacheReadTokens: u[2], cacheWriteTokens: u[3], routes: [] },
+});
+/** A day's budget spent: 2,013,402 tokens of 2,000,000. */
+const SPENT: BudgetState = {
+  dailyTokens: 2_000_000,
+  used: { uncachedInputTokens: 13_402, outputTokens: 0, cacheReadTokens: 2_000_000, cacheWriteTokens: 0, total: 2_013_402 },
+  spent: true,
+};
+
+test("budgetState sums the four buckets of today's desk turns, phone and schedule alike, from 00:00 ET", () => {
+  const now = Date.parse("2026-11-27T17:00:00Z");   // 12:00 ET
+  const turn = (t: string, source: string, u: [number, number, number, number]) => ({ t, kind: "desk-turn" as const, sessionId: "s", source, turn: 1,
+    outcome: "ended" as const, wallMs: 1, usage: { uncachedInputTokens: u[0], outputTokens: u[1], cacheReadTokens: u[2], cacheWriteTokens: u[3], routes: [] } });
+  const events = [turn("2026-11-27T04:59:00.000Z", "telegram", [999, 0, 0, 0]),   // 23:59 ET on the 26th
+    turn("2026-11-27T05:03:00.000Z", "telegram", [1, 1, 1, 1]),                      // 00:03 ET: the new day
+    turn("2026-11-27T15:00:00.000Z", "telegram", [100, 10, 1000, 5]), turn("2026-11-27T16:00:00.000Z", "schedule", [50, 5, 0, 0])];
+  assert.deepEqual(budgetState(events, now), { used: { uncachedInputTokens: 151, outputTokens: 16, cacheReadTokens: 1001, cacheWriteTokens: 6, total: 1174 }, spent: false });
+  assert.equal(budgetState(events, now, 1174).spent, true); assert.equal(budgetState(events, now, 1175).spent, false);
+});
+
+test("budgetState: a cancelled, failed or timed-out turn's tokens count; a turn without usage, any other event and a bucket that is no count add nothing", () => {
+  const now = Date.parse("2026-11-27T17:00:00Z");
+  const handWritten = { ...tokenTurn("2026-11-27T14:50:00.000Z", "telegram", [0, 0, 0, 0]),
+    usage: { uncachedInputTokens: "7", outputTokens: -3, cacheReadTokens: null, routes: [] } } as unknown as DeskEvent; // the reader checks t and kind only
+  const events: DeskEvent[] = [
+    tokenTurn("2026-11-27T14:00:00.000Z", "telegram", [10, 1, 0, 0], "cancelled"),
+    tokenTurn("2026-11-27T14:10:00.000Z", "schedule", [20, 2, 0, 0], "failed"),
+    tokenTurn("2026-11-27T14:20:00.000Z", "alert", [30, 3, 0, 0], "timed-out"),
+    { t: "2026-11-27T14:30:00.000Z", kind: "desk-turn", sessionId: "s", source: "telegram", turn: 2, outcome: "ended", wallMs: 1 },
+    { t: "2026-11-27T14:40:00.000Z", kind: "budget-spent", date: "2026-11-27", used: 5_000_000, dailyTokens: 1 },
+    handWritten,
+  ];
+  assert.deepEqual(budgetState(events, now, 66), {
+    dailyTokens: 66, used: { uncachedInputTokens: 60, outputTokens: 6, cacheReadTokens: 0, cacheWriteTokens: 0, total: 66 }, spent: true,
+  });
+});
+
+test("budgetReplyLine is the phone's line for a post while the budget is spent", () => {
+  assert.equal(budgetReplyLine(SPENT),
+    "the desk's token budget for today is spent: 2,013,402 of 2,000,000 tokens since 00:00 ET. It opens again at midnight ET, or raise budget.dailyTokens in standing.yml");
+  assert.equal(budgetReplyLine({ used: SPENT.used, spent: false }),
+    "the desk's token budget for today is spent: 2,013,402 tokens since 00:00 ET. It opens again at midnight ET, or raise budget.dailyTokens in standing.yml",
+    "a state with no cap names none");
+});
+
+test("appendRecordOnce appends a key once even when two callers race", async () => {   // Review Focus 4
+  const h = await home();
+  const rec = { t: "2026-11-27T17:30:10.000Z", kind: "started", key: "preclose:2026-11-27" };
+  const same = (x: unknown) => (x as { kind?: string; key?: string }).kind === "started" && (x as { key?: string }).key === rec.key;
+  assert.deepEqual((await Promise.all([appendRecordOnce(h, "firings.jsonl", rec, same), appendRecordOnce(h, "firings.jsonl", rec, same)])).sort(), ["appended", "duplicate"]);
+  const file = join(deskDir(h), FIRINGS_FILE);
+  assert.equal(FIRINGS_FILE, "firings.jsonl");
+  assert.equal(await readFile(file, "utf8"), `${JSON.stringify(rec)}\n`, "the file holds one line");
+  assert.equal(((await stat(file)).mode & 0o777), 0o600);
+
+  /* A torn last line is skipped by the check, and stays a line of its own. */
+  const torn = `{"t":"2026-11-30T17:30:05.000Z","kind":"started","key":"preclose:2026-11-3`;
+  await writeFile(file, torn, { flag: "a" });
+  const next = { t: "2026-11-30T17:30:10.000Z", kind: "started", key: "preclose:2026-11-30" };
+  const nextSame = (x: unknown) => (x as { key?: unknown }).key === next.key;
+  assert.equal(await appendRecordOnce(h, FIRINGS_FILE, next, nextSame), "appended");
+  assert.equal(await appendRecordOnce(h, FIRINGS_FILE, next, nextSame), "duplicate");
+  assert.deepEqual((await readFile(file, "utf8")).split("\n"), [JSON.stringify(rec), torn, JSON.stringify(next), ""]);
+
+  /* The check is handed every line that is a JSON object, in order, and nothing else. */
+  await writeFile(file, `null\n7\n"text"\n[1]\n`, { flag: "a" });
+  const handed: unknown[] = [];
+  const noted = { t: "2026-12-01T17:30:10.000Z", kind: "noted" };
+  assert.equal(await appendRecordOnce(h, FIRINGS_FILE, noted, (x) => { handed.push(x); return false; }), "appended");
+  assert.deepEqual(handed, [rec, next]);
+
+  /* The check reads the whole file before any rotation: a duplicate in a file past rotateBytes is found and nothing moves;
+   * a new record rotates the file, which then opens with what carry hands on. */
+  const big = await home();
+  await appendRecord(big, FIRINGS_FILE, rec);
+  assert.equal(await appendRecordOnce(big, FIRINGS_FILE, rec, same, { rotateBytes: 10 }), "duplicate");
+  assert.deepEqual(await readdir(deskDir(big)), [FIRINGS_FILE], "nothing moved");
+  assert.equal(await appendRecordOnce(big, FIRINGS_FILE, next, nextSame, { rotateBytes: 10, carry: () => ['{"carried":true}'] }), "appended");
+  assert.deepEqual((await readdir(deskDir(big))).sort(), ["firings.2026-11-30T17-30-10.000Z.jsonl", FIRINGS_FILE]);
+  assert.equal(await readFile(join(deskDir(big), FIRINGS_FILE), "utf8"), `{"carried":true}\n${JSON.stringify(next)}\n`);
+
+  /* A failure is one line and "failed" - never a rejection, a check that throws included; a path for a name is the caller's TypeError. */
+  const blocked = await home();
+  await mkdir(join(deskDir(blocked), FIRINGS_FILE), { recursive: true }); // a directory where firings.jsonl should be
+  const lines: string[] = [];
+  assert.equal(await appendRecordOnce(blocked, FIRINGS_FILE, rec, same, { log: (l) => lines.push(l) }), "failed");
+  assert.deepEqual(lines, [`gravit-face: the desk ledger at ${join(deskDir(blocked), FIRINGS_FILE)} could not be written: EISDIR`]);
+  const thrown: string[] = [];
+  assert.equal(await appendRecordOnce(h, FIRINGS_FILE, rec, () => { throw new Error("a broken check"); }, { log: (l) => thrown.push(l) }), "failed");
+  assert.deepEqual(thrown, [`gravit-face: the desk ledger at ${file} could not be written: a broken check`]);
+  await assert.rejects(appendRecordOnce(h, "../firings.jsonl", rec, same), TypeError);
+});
+
+test("noteBudgetSpent appends one budget-spent per ET date", async () => {
+  const h = await home();
+  const at = Date.parse("2026-11-27T17:30:10.000Z");
+  const noted = (t: string, date: string): DeskEvent => ({ t, kind: "budget-spent", date, used: 2_013_402, dailyTokens: 2_000_000 });
+  assert.equal(await noteBudgetSpent(h, at, SPENT), true);
+  assert.equal(await noteBudgetSpent(h, at + 3_600_000, SPENT), false, "the same ET date");
+  assert.equal(await noteBudgetSpent(h, Date.parse("2026-11-28T04:59:59.999Z"), SPENT), false, "23:59 ET is still the 27th");
+  assert.equal(await noteBudgetSpent(h, Date.parse("2026-11-28T05:00:00.000Z"), SPENT), true, "00:00 ET opens the 28th");
+  assert.deepEqual(await readEvents(h), { events: [noted("2026-11-27T17:30:10.000Z", "2026-11-27"), noted("2026-11-28T05:00:00.000Z", "2026-11-28")], skipped: 0 });
+
+  const raced = await home();
+  assert.deepEqual((await Promise.all([noteBudgetSpent(raced, at, SPENT), noteBudgetSpent(raced, at, SPENT)])).sort(), [false, true], "two faces at once: one notes it");
+  assert.equal(await noteBudgetSpent(raced, Date.parse("2026-11-30T17:30:10.000Z"), { ...SPENT, spent: false }), false, "a budget that is not spent notes nothing");
+  assert.equal((await readEvents(raced)).events.length, 1);
+
+  /* events.jsonl is the ledger: a rotation the note makes carries the desk conversation on. */
+  const rotating = await home();
+  const session = { t: "2026-11-27T13:00:00.000Z", kind: "desk-session", sessionId: "session-a", reason: "created" } as const;
+  await appendEvent(rotating, session);
+  assert.equal(await noteBudgetSpent(rotating, at, SPENT, { rotateBytes: 10 }), true);
+  assert.deepEqual((await readEvents(rotating)).events, [session, noted("2026-11-27T17:30:10.000Z", "2026-11-27")]);
+
+  /* A ledger that cannot be written is one line, and true: nothing says the day has heard it already. */
+  const blocked = await home();
+  await writeFile(join(blocked, "face"), "a file where the directory should be");
+  const lines: string[] = [];
+  assert.equal(await noteBudgetSpent(blocked, at, SPENT, { log: (l) => lines.push(l) }), true);
+  assert.deepEqual(lines, [`gravit-face: the desk ledger at ${join(deskDir(blocked), EVENTS_FILE)} could not be written: ENOTDIR`]);
+});
+
+test("readRecords reads any desk JSONL through a guard; events.jsonl takes the three new kinds", async () => {
+  const h = await home();
+  type Started = { t: string; kind: "started"; key: string };
+  const isStarted = (x: unknown): x is Started => (x as { kind?: unknown }).kind === "started" && typeof (x as { key?: unknown }).key === "string";
+  assert.deepEqual(await readRecords(h, FIRINGS_FILE, isStarted), { records: [], skipped: 0 }, "no file holds nothing");
+  const a: Started = { t: "2026-11-27T17:30:10.000Z", kind: "started", key: "preclose:2026-11-27" };
+  const b: Started = { t: "2026-11-30T17:30:10.000Z", kind: "started", key: "preclose:2026-11-30" };
+  await appendRecord(h, FIRINGS_FILE, a);
+  await appendRecord(h, FIRINGS_FILE, { t: "2026-11-27T17:36:00.000Z", kind: "finished", key: a.key });
+  await writeFile(join(deskDir(h), FIRINGS_FILE), `null\n{"t":"2026-11-28T17:30:10.000Z","kind":"sta`, { flag: "a" });
+  await appendRecord(h, FIRINGS_FILE, b);
+  assert.deepEqual(await readRecords(h, FIRINGS_FILE, isStarted), { records: [a, b], skipped: 3 },
+    "what the guard refuses, a line that is no object and the torn line: each skipped and counted, the guard never handed a non-object");
+
+  const fresh: DeskEvent[] = [
+    { t: "2026-11-27T17:00:00.000Z", kind: "standing-error", errors: ["orders[0] (preclose): not armed: npm run desk -- arm desk --id preclose"] },
+    { t: "2026-11-27T17:00:30.000Z", kind: "calendar-error", date: "2026-11-27", python: "python3", error: "pandas_market_calendars is not importable in /x" },
+    { t: "2026-11-27T17:30:10.000Z", kind: "budget-spent", date: "2026-11-27", used: 2_013_402, dailyTokens: 2_000_000 },
+  ];
+  const ledger = await home();
+  for (const event of fresh) await appendEvent(ledger, event);
+  assert.deepEqual(await readEvents(ledger), { events: fresh, skipped: 0 });
+
+  const broken = await home();
+  await mkdir(join(deskDir(broken), FIRINGS_FILE), { recursive: true });
+  await assert.rejects(readRecords(broken, FIRINGS_FILE, isStarted), { code: "EISDIR" }, "an unreadable file never reads as an empty one");
+  await assert.rejects(readRecords(h, "../events.jsonl", isStarted), TypeError);
+  await assert.rejects(readRecords(h, "", isStarted), TypeError);
+});
+
+test("deskStatus carries the budget and passes the standing provider through", async () => {
+  const h = await home();
+  const now = () => Date.parse("2026-11-27T17:00:00Z"); // 12:00 ET
+  await appendEvent(h, tokenTurn("2026-11-27T04:59:00.000Z", "telegram", [999, 0, 0, 0])); // 23:59 ET on the 26th
+  await appendEvent(h, tokenTurn("2026-11-27T15:00:00.000Z", "telegram", [100, 10, 1000, 5]));
+  await appendEvent(h, tokenTurn("2026-11-27T16:00:00.000Z", "schedule", [50, 5, 0, 0], "cancelled"));
+  const used = { uncachedInputTokens: 150, outputTokens: 15, cacheReadTokens: 1000, cacheWriteTokens: 5, total: 1170 };
+  const standing: StandingStatus = {
+    file: { path: join(deskDir(h), "standing.yml"), state: "loaded", loadedAt: "2026-11-27T16:59:30.000Z" },
+    calendar: { python: "python3", state: "ok", today: { date: "2026-11-27", open: "2026-11-27T14:30:00.000Z", close: "2026-11-27T18:00:00.000Z", early: true } },
+    orders: [], queued: [], recent: [],
+  };
+  let asked = 0;
+  const s = await deskStatus({ home: h, bootedAt: now() - 60_000, enabled: true, now, dailyTokens: () => { asked += 1; return 1_000; }, standing: () => standing });
+  assert.deepEqual(s.budget, { dailyTokens: 1_000, used, spent: true });
+  assert.equal(asked, 1, "the cap is read once a call");
+  assert.deepEqual(s.standing, standing);
+  assert.deepEqual(s.turnsToday, { count: 2, usage: { uncachedInputTokens: 150, outputTokens: 15, cacheReadTokens: 1000, cacheWriteTokens: 5 } }, "the turns the budget counts");
+
+  const none = await deskStatus({ home: h, bootedAt: now() - 60_000, enabled: true, now, dailyTokens: () => undefined, standing: () => undefined });
+  assert.deepEqual(none.budget, { used, spent: false }, "no cap: never spent, and no dailyTokens key");
+  assert.equal(Object.hasOwn(none, "standing"), false, "no standing orders read yet: no key");
+  assert.deepEqual((await deskStatus({ home: h, bootedAt: now(), enabled: true, now })).budget, { used, spent: false }, "always set, providers or none");
+  const rec = recorder();
+  registerDeskRoutes(rec, { home: h, bootedAt: now(), enabled: true, now, dailyTokens: () => 2_000, standing: () => standing });
+  const routed = JSON.parse(await rec.call("/data/desk/status")) as { body: DeskStatus };
+  assert.deepEqual([routed.body.budget, routed.body.standing], [{ dailyTokens: 2_000, used, spent: false }, standing], "the route carries both");
+
+  /* An unreadable ledger is zeros and not spent, its code in error: in the status and from readBudget alike. */
+  const broken = await home();
+  await mkdir(join(deskDir(broken), EVENTS_FILE), { recursive: true });
+  const zeros = { uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, total: 0 };
+  assert.deepEqual((await deskStatus({ home: broken, bootedAt: now(), enabled: true, now, dailyTokens: () => 1_000 })).budget,
+    { dailyTokens: 1_000, used: zeros, spent: false, error: "EISDIR" });
+  assert.deepEqual(await readBudget(broken, now(), 1_000), { dailyTokens: 1_000, used: zeros, spent: false, error: "EISDIR" });
+  assert.deepEqual(await readBudget(h, now(), 1_170), { dailyTokens: 1_170, used, spent: true });
+  assert.deepEqual(await readBudget(h, now()), { used, spent: false });
+  assert.deepEqual(await readBudget(await home(), now(), 1), { dailyTokens: 1, used: zeros, spent: false }, "no ledger yet: nothing used");
+});
+
+/* The pause switch (scripts/desk.ts) imports desk.ts, and standing.ts brings js-yaml: desk.ts names it for its types alone. */
+test("desk.ts names standing.ts for its types alone", async () => {
+  const source = await readFile(join(dirname(fileURLToPath(import.meta.url)), "..", "src", "desk.ts"), "utf8");
+  const statics = (source.match(/^import\b.*$/gm) ?? []).filter((line) => line.includes('"./standing.ts"'));
+  assert.equal(statics.length, 1);
+  assert.match(statics[0], /^import type /, `a value edge: ${statics[0]}`);
 });

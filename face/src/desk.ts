@@ -11,11 +11,19 @@
  * than a `/desk` page), mounts the two desk tools and the desk's guard, which src/desk-tools.ts
  * defines, and runs the Telegram bridge, src/telegram.ts.
  * Of the ledger's files (§5.7) this module keeps `events.jsonl` and `OFF`; {@link appendRecord} is
- * the append path for the others, the bridge's `telegram.jsonl` among them. `events.jsonl`
- * has eight kinds of event: P0's `boot`, clean `shutdown` and `asleep` gap in the face's timers,
- * and P1's `off-set` and `off-cleared`, a `desk-session` for each desk conversation the face
- * opens, a `desk-turn` for each turn on it, and a `desk-refused` for a turn the face would not
- * open.
+ * the append path for the others, the bridge's `telegram.jsonl` and P2's firing ledger,
+ * {@link FIRINGS_FILE}, among them, {@link appendRecordOnce} the path for a record that must land
+ * once, and {@link readRecords} reads any of them back. `events.jsonl` has eleven kinds of event:
+ * P0's `boot`, clean `shutdown` and `asleep` gap in the face's timers; P1's `off-set` and
+ * `off-cleared`, a `desk-session` for each desk conversation the face opens, a `desk-turn` for each
+ * turn on it, and a `desk-refused` for a turn the face would not open; and P2's `standing-error`,
+ * `calendar-error` and `budget-spent`, which the standing orders' clock writes.
+ *
+ * Why a budget (P2, ruling P2-8): the desk spends tokens unattended - the phone's turns, the
+ * standing orders' firings - so `standing.yml`'s `budget.dailyTokens` caps the day's: the plain sum
+ * of the four buckets of every `desk-turn` since 00:00 ET, whatever opened it and however it ended
+ * ({@link budgetState}). Once it is spent, firings are refused and each phone post is answered with
+ * one line ({@link budgetReplyLine}) instead of a turn; the pause outranks it.
  *
  * Why a ledger: a service that launchd restarts after a crash or a `kill -9` looks healthy from
  * outside - it is running again. Read back as runs ({@link runsOf}), the ledger says otherwise: a
@@ -48,7 +56,8 @@
  *
  * {@link installDesk} mounts it all on a booted face. The status route ({@link deskStatus}:
  * pid, version, uptime, this run's gaps, the ledger's runs, the pause in force, the desk
- * conversation, today's desk turns and their tokens, and the Telegram bridge) and the pause route
+ * conversation, today's desk turns and their tokens, the day's budget, the standing orders when
+ * their clock runs, and the Telegram bridge) and the pause route
  * are mounted always, and so are the desk tools and the guard, so a face with the desk off -
  * a second face beside the service, §5.2 - still answers, with `desk.enabled: false`, and an old
  * desk conversation it opens keeps its tools and its guard; the `boot` event, the watch, the desk
@@ -68,6 +77,7 @@ import { deskToolDefinitions, installDeskGuard, installDeskTools, type DeskGuard
 import { etDate, etDayStart, etTime } from "./et.ts";
 import { fencedGet, fencedPost, HttpError } from "./http.ts";
 import type { QuoteHub } from "./quotes.ts";
+import type { StandingStatus } from "./standing.ts";
 import type { RouteRegistrar } from "./static.ts";
 import type { BridgeHandle, TelegramConfig } from "./telegram.ts";
 import { DSH_PIN } from "./version.ts";
@@ -88,6 +98,11 @@ export function deskDir(home: string): string {
 
 /** The ledger's current file; a rotated one sits beside it as `events.<t>.jsonl`. */
 export const EVENTS_FILE = "events.jsonl";
+
+/** The firing ledger (P2): each standing order's firing, step by step, in the desk's directory beside
+ * `events.jsonl` - appended through {@link appendRecord}, its key-consuming `started` through
+ * {@link appendRecordOnce}, read back through {@link readRecords}. */
+export const FIRINGS_FILE = "firings.jsonl";
 
 /** The size past which the next append first moves the file aside (spec §5.7). */
 export const LEDGER_ROTATE_BYTES = 50 * 1024 * 1024;
@@ -115,7 +130,10 @@ export interface TurnUsage {
  * failed - with the `error` it failed on - its wall time and, when the harness reported them, its
  * tokens. A
  * `desk-refused` is a turn the face would not open: why, and the path that made it refuse when a path
- * did. */
+ * did. P2's clock adds three: a `standing-error`, when `standing.yml` is refused or the firing ledger
+ * cannot be read - the errors that say why; a `calendar-error`, a session date the market calendar did
+ * not answer for - the date, the interpreter asked and its error; and a `budget-spent`, once per ET
+ * date ({@link noteBudgetSpent}) - the date, the tokens used and the day's cap. */
 export type DeskEvent =
   | { t: string; kind: "boot"; pid: number; version: string; deskEnabled: boolean }
   | { t: string; kind: "shutdown"; pid: number; code: number }
@@ -127,7 +145,10 @@ export type DeskEvent =
     t: string; kind: "desk-turn"; sessionId: string; source: string; turn: number; outcome: "ended" | "timed-out" | "cancelled" | "failed";
     wallMs: number; usage?: TurnUsage; cancel?: string; error?: string;
   }
-  | { t: string; kind: "desk-refused"; reason: string; path?: string };
+  | { t: string; kind: "desk-refused"; reason: string; path?: string }
+  | { t: string; kind: "standing-error"; errors: string[] }
+  | { t: string; kind: "calendar-error"; date: string; python: string; error: string }
+  | { t: string; kind: "budget-spent"; date: string; used: number; dailyTokens: number };
 
 /** Every kind {@link DeskEvent} has, and only those. A record over the union rather than a list,
  * so a kind added to the type and not here fails to compile instead of reading back as skipped. */
@@ -140,6 +161,9 @@ const KINDS: Readonly<Record<DeskEvent["kind"], true>> = {
   "desk-session": true,
   "desk-turn": true,
   "desk-refused": true,
+  "standing-error": true,
+  "calendar-error": true,
+  "budget-spent": true,
 };
 
 /** What a failure is reported as - in the append's failure line and the status's `ledgerError`:
@@ -187,6 +211,50 @@ function rotatedName(file: string, stamp: string): string {
   return `${file.slice(0, file.length - ext.length)}.${stamp.replaceAll(":", "-")}${ext}`;
 }
 
+/** Throws a `TypeError` naming `fn` unless `file` is a plain name - not a path, `.`, `..` or empty: the
+ * caller's mistake, never the ledger's, caught before anything is touched. */
+function requireName(fn: string, file: string): void {
+  if (basename(file) !== file || file === "" || file === "." || file === "..") {
+    throw new TypeError(`${fn} takes a file name in the desk's directory, not ${JSON.stringify(file)}`);
+  }
+}
+
+/** What {@link appendRecord} and {@link appendRecordOnce} take: `rotateBytes`, default
+ * {@link LEDGER_ROTATE_BYTES}; `log`, for the failure line; `carry`, the lines a rotation hands on to
+ * the fresh file, none when absent. */
+export interface AppendOptions {
+  rotateBytes?: number;
+  log?: (line: string) => void;
+  carry?: (rotated: string) => readonly string[];
+}
+
+/** {@link appendRecord}'s one failure line, to `log` (default `console.error`). */
+function ledgerFailed(path: string, err: unknown, log: ((line: string) => void) | undefined): void {
+  (log ?? ((line: string) => console.error(line)))(`${BIN}: the desk ledger at ${path} could not be written: ${reasonOf(err)}`);
+}
+
+/** The append itself, inside `file`'s lock, which the caller holds: the rotation, the newline after a
+ * torn tail, the line (see {@link appendRecord}). Rejects on any failure. */
+async function appendLocked(dir: string, file: string, record: object, opts: AppendOptions): Promise<void> {
+  const path = join(dir, file);
+  let size = await sizeOf(path);
+  if (size > (opts.rotateBytes ?? LEDGER_ROTATE_BYTES)) {
+    const { t } = record as { t?: unknown };
+    const rotated = join(dir, rotatedName(file, typeof t === "string" ? t : new Date().toISOString()));
+    await rename(path, rotated);
+    size = 0;
+    /* what the old file hands the new one, line by line, before the record that rotated it */
+    const carried = opts.carry === undefined ? [] : opts.carry(await readFile(rotated, "utf8"));
+    if (carried.length > 0) {
+      const text = carried.map((line) => `${line}\n`).join("");
+      await appendFile(path, text, { encoding: "utf8", mode: 0o600 });
+      size = Buffer.byteLength(text);
+    }
+  }
+  const lead = size > 0 && (await endsMidLine(path, size)) ? "\n" : "";
+  await appendFile(path, `${lead}${JSON.stringify(record)}\n`, { encoding: "utf8", mode: 0o600 });
+}
+
 /**
  * Append one record, as one JSON line, to `file` in the desk's directory - the ledger's
  * `events.jsonl` ({@link appendEvent}) or any other of its JSONL files.
@@ -215,44 +283,79 @@ function rotatedName(file: string, stamp: string): string {
  * @param home - the harness home.
  * @param file - the file's name in {@link deskDir} - a name, not a path.
  * @param record - the record, written as one JSON line.
- * @param opts - `rotateBytes`, default {@link LEDGER_ROTATE_BYTES}; `log`, for the failure line;
- *   `carry`, the lines a rotation hands on to the fresh file, none when absent.
+ * @param opts - see {@link AppendOptions}.
  */
-export async function appendRecord(
-  home: string,
-  file: string,
-  record: object,
-  opts: { rotateBytes?: number; log?: (line: string) => void; carry?: (rotated: string) => readonly string[] } = {},
-): Promise<void> {
-  if (basename(file) !== file || file === "" || file === "." || file === "..") {
-    throw new TypeError(`appendRecord takes a file name in the desk's directory, not ${JSON.stringify(file)}`);
-  }
+export async function appendRecord(home: string, file: string, record: object, opts: AppendOptions = {}): Promise<void> {
+  requireName("appendRecord", file);
   const dir = deskDir(home);
   const path = join(dir, file);
   try {
     await mkdir(dir, { recursive: true });
-    await withFileLock(path, async () => {
-      let size = await sizeOf(path);
-      if (size > (opts.rotateBytes ?? LEDGER_ROTATE_BYTES)) {
-        const { t } = record as { t?: unknown };
-        const rotated = join(dir, rotatedName(file, typeof t === "string" ? t : new Date().toISOString()));
-        await rename(path, rotated);
-        size = 0;
-        /* what the old file hands the new one, line by line, before the record that rotated it */
-        const carried = opts.carry === undefined ? [] : opts.carry(await readFile(rotated, "utf8"));
-        if (carried.length > 0) {
-          const text = carried.map((line) => `${line}\n`).join("");
-          await appendFile(path, text, { encoding: "utf8", mode: 0o600 });
-          size = Buffer.byteLength(text);
-        }
-      }
-      const lead = size > 0 && (await endsMidLine(path, size)) ? "\n" : "";
-      await appendFile(path, `${lead}${JSON.stringify(record)}\n`, { encoding: "utf8", mode: 0o600 });
+    await withFileLock(path, () => appendLocked(dir, file, record, opts));
+  } catch (err) {
+    ledgerFailed(path, err, opts.log);
+  }
+}
+
+/**
+ * Append `record` to `file` unless the file already holds one that `isDuplicate` matches: the
+ * check-and-append that consumes a key once, however many faces on one harness home reach for it at
+ * once (ruling P2-23 - a firing's `started`; the day's `budget-spent`, {@link noteBudgetSpent}).
+ *
+ * Under `file`'s lock, as {@link appendRecord} takes it: the file is read whole - before any rotation,
+ * so the check sees everything it held - and `isDuplicate` is asked of each line that is a JSON object,
+ * in file order, a torn line and any other value passed over; a match answers `duplicate` and writes
+ * nothing. Else the record goes in as {@link appendRecord} puts it - the rotation and `carry`, the
+ * newline after a torn tail, `0600`. A rotation leaves the earlier lines in the rotated file, which no
+ * later check reads: a key is once per current file.
+ *
+ * Never rejects on the ledger: any failure - the directory, the lock (its two-second wait), the read,
+ * the append, an `isDuplicate` that throws - is one `log` line, as {@link appendRecord}'s, and
+ * `failed`, nothing known to be written. A `file` that is not a plain name is the caller's
+ * `TypeError`, before anything is touched.
+ * @param home - the harness home.
+ * @param file - the file's name in {@link deskDir} - a name, not a path.
+ * @param record - the record, written as one JSON line.
+ * @param isDuplicate - whether a line already there is this record's: handed each JSON object the file holds.
+ * @param opts - see {@link AppendOptions}.
+ * @returns `appended`, `duplicate` or `failed`.
+ */
+export async function appendRecordOnce(
+  home: string,
+  file: string,
+  record: object,
+  isDuplicate: (existing: unknown) => boolean,
+  opts: AppendOptions = {},
+): Promise<"appended" | "duplicate" | "failed"> {
+  requireName("appendRecordOnce", file);
+  const dir = deskDir(home);
+  const path = join(dir, file);
+  try {
+    await mkdir(dir, { recursive: true });
+    return await withFileLock(path, async (): Promise<"appended" | "duplicate"> => {
+      if (await holdsMatch(path, isDuplicate)) return "duplicate";
+      await appendLocked(dir, file, record, opts);
+      return "appended";
     });
   } catch (err) {
-    const log = opts.log ?? ((line: string) => console.error(line));
-    log(`${BIN}: the desk ledger at ${path} could not be written: ${reasonOf(err)}`);
+    ledgerFailed(path, err, opts.log);
+    return "failed";
   }
+}
+
+/** Whether a line of the file at `path` - none when there is no file - is a JSON object `matches` takes. */
+async function holdsMatch(path: string, matches: (existing: unknown) => boolean): Promise<boolean> {
+  let text: string;
+  try {
+    text = await readFile(path, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw err;
+  }
+  return linesOf(text).some((line) => {
+    const object = objectOf(line);
+    return object !== undefined && matches(object);
+  });
 }
 
 /**
@@ -278,57 +381,90 @@ export async function appendEvent(
 function carryDeskSession(rotated: string): string[] {
   const lines = rotated.split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
-    if (eventOf(lines[i])?.kind === "desk-session") return [lines[i]];
+    const object = objectOf(lines[i]);
+    if (object !== undefined && isDeskEvent(object) && object.kind === "desk-session") return [lines[i]];
   }
   return [];
 }
 
-/** One line as an event, or `undefined`: not JSON, not an object, or without a string `t` and a
- * known `kind`. Only those two fields are checked - the face is the file's one writer, and the
- * rest of the shape is the writer's to keep. */
-function eventOf(line: string): DeskEvent | undefined {
+/** A file's lines: its text split at each newline, less the empty one after the newline that ends the
+ * last line. */
+function linesOf(text: string): string[] {
+  const lines = text.split("\n");
+  if (lines.at(-1) === "") lines.pop();
+  return lines;
+}
+
+/** One line as a JSON object - not `null`, not an array - or `undefined`: not JSON (a torn line, a
+ * blank one), or JSON that is no object. */
+function objectOf(line: string): object | undefined {
   let parsed: unknown;
   try {
     parsed = JSON.parse(line);
   } catch {
     return undefined;
   }
-  if (parsed === null || typeof parsed !== "object") return undefined;
-  const { t, kind } = parsed as { t?: unknown; kind?: unknown };
-  if (typeof t !== "string" || typeof kind !== "string" || !Object.hasOwn(KINDS, kind)) return undefined;
-  return parsed as DeskEvent;
+  return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : undefined;
+}
+
+/** Whether a line's object is an event: a string `t` and a known `kind`. Only those two fields are
+ * checked - the face is the file's one writer, and the rest of the shape is the writer's to keep. */
+function isDeskEvent(x: unknown): x is DeskEvent {
+  const { t, kind } = x as { t?: unknown; kind?: unknown };
+  return typeof t === "string" && typeof kind === "string" && Object.hasOwn(KINDS, kind);
 }
 
 /**
- * The current ledger's events, in file order, and how many lines were not events.
+ * The records of `file` in the desk's directory, in file order, and how many lines were not records:
+ * any of the desk's JSONL files read back - `events.jsonl` ({@link readEvents}), the firing ledger
+ * ({@link FIRINGS_FILE}) - each line taken when it is a JSON object `guard` accepts.
+ *
+ * Reads the current file only, never a rotated one. An absent file - none written yet, or a
+ * non-directory where `face/` or `face/desk/` should be, so that none can exist - is
+ * `{ records: [], skipped: 0 }`; any other read failure rejects, so an unreadable file never reads as
+ * an empty one. Every other line is skipped and counted - a torn one, a blank one, JSON that is no
+ * object (`guard` is never handed one), an object `guard` refuses; the newline that ends the last line
+ * opens no line of its own. A `file` that is not a plain name is the caller's `TypeError`.
+ * @param home - the harness home.
+ * @param file - the file's name in {@link deskDir} - a name, not a path.
+ * @param guard - whether a line's object is a record.
+ */
+export async function readRecords<T>(
+  home: string,
+  file: string,
+  guard: (x: unknown) => x is T,
+): Promise<{ records: T[]; skipped: number }> {
+  requireName("readRecords", file);
+  let text: string;
+  try {
+    text = await readFile(join(deskDir(home), file), "utf8");
+  } catch (err) {
+    if (isAbsent(err)) return { records: [], skipped: 0 };
+    throw err;
+  }
+  const records: T[] = [];
+  let skipped = 0;
+  for (const line of linesOf(text)) {
+    const object = objectOf(line);
+    if (object !== undefined && guard(object)) records.push(object);
+    else skipped += 1;
+  }
+  return { records, skipped };
+}
+
+/**
+ * The current ledger's events, in file order, and how many lines were not events: {@link readRecords}
+ * on {@link EVENTS_FILE}, a line being an event when it has a string `t` and a known `kind`.
  *
  * Reads `events.jsonl` only, never a rotated file - a rotation hands its last `desk-session` on
- * ({@link appendEvent}), and the runs and turns before it stay behind. An absent ledger - none written yet, or a
- * non-directory where `face/` or `face/desk/` should be, so that none can exist - is
- * `{ events: [], skipped: 0 }`; any other read failure rejects, so an unreadable ledger never
- * reads as an empty one. Every line that {@link eventOf} refuses is skipped and counted, a blank
- * one included; the newline that ends the last line opens no line of its own.
+ * ({@link appendEvent}), and the runs and turns before it stay behind. An absent ledger is
+ * `{ events: [], skipped: 0 }`; any other read failure rejects, so an unreadable ledger never reads
+ * as an empty one.
  * @param home - the harness home.
  */
 export async function readEvents(home: string): Promise<{ events: DeskEvent[]; skipped: number }> {
-  let text: string;
-  try {
-    text = await readFile(join(deskDir(home), EVENTS_FILE), "utf8");
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === "ENOENT" || code === "ENOTDIR") return { events: [], skipped: 0 };
-    throw err;
-  }
-  const lines = text.split("\n");
-  if (lines.at(-1) === "") lines.pop();
-  const events: DeskEvent[] = [];
-  let skipped = 0;
-  for (const line of lines) {
-    const event = eventOf(line);
-    if (event === undefined) skipped += 1;
-    else events.push(event);
-  }
-  return { events, skipped };
+  const { records, skipped } = await readRecords(home, EVENTS_FILE, isDeskEvent);
+  return { events: records, skipped };
 }
 
 /** One process's life as the ledger tells it. `endedAt` and `code` are present only when a
@@ -631,6 +767,122 @@ export function deskTime(at: Date, now: Date): string {
   return date === etDate(now) ? etTime(at) : `${date} ${etTime(at)}`;
 }
 
+/** The day's tokens against its cap (ruling P2-8). `dailyTokens` is `standing.yml`'s
+ * `budget.dailyTokens`, present only when there is one - no key, no cap. `used` is the four buckets
+ * of every `desk-turn` since 00:00 America/New_York and their plain sum, `total`; `spent`, whether a
+ * cap is set and `total` has reached it. `error` is present only when the ledger could not be read -
+ * its code, or its message when it has none - and `used` is then zeros: an unreadable ledger never
+ * spends the budget (the plan's ruling 8), and the status names it. */
+export interface BudgetState {
+  dailyTokens?: number;
+  used: { uncachedInputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; total: number };
+  spent: boolean;
+  error?: string;
+}
+
+/** A bucket as the day counts it: a count - a finite number, not below zero - or nothing. The ledger's
+ * reader checks a line's `t` and `kind` only, so a hand-written `desk-turn` may carry anything. */
+const tokensOf = (value: unknown): number => (typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0);
+
+/** The `desk-turn` events at or after `since`, ISO-8601 UTC strings ordering as their times do: how
+ * many, and their tokens bucket by bucket with the plain sum. A turn without usage counts and adds
+ * nothing. */
+function turnsSince(events: readonly DeskEvent[], since: string): { count: number; used: BudgetState["used"] } {
+  const used = { uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, total: 0 };
+  let count = 0;
+  for (const e of events) {
+    if (e.kind !== "desk-turn" || e.t < since) continue;
+    count += 1;
+    const usage = e.usage as Partial<Record<keyof TurnUsage, unknown>> | undefined;
+    used.uncachedInputTokens += tokensOf(usage?.uncachedInputTokens);
+    used.outputTokens += tokensOf(usage?.outputTokens);
+    used.cacheReadTokens += tokensOf(usage?.cacheReadTokens);
+    used.cacheWriteTokens += tokensOf(usage?.cacheWriteTokens);
+  }
+  used.total = used.uncachedInputTokens + used.outputTokens + used.cacheReadTokens + used.cacheWriteTokens;
+  return { count, used };
+}
+
+/** The state of `used` against `dailyTokens`, each optional key present only when it has a value. */
+function budgetOf(used: BudgetState["used"], dailyTokens: number | undefined, error?: string): BudgetState {
+  return {
+    ...(dailyTokens === undefined ? {} : { dailyTokens }),
+    used,
+    spent: dailyTokens !== undefined && used.total >= dailyTokens,
+    ...(error === undefined ? {} : { error }),
+  };
+}
+
+/**
+ * The day's budget from the ledger's events: the four buckets of every `desk-turn` from 00:00
+ * America/New_York on the ET date of `now` ({@link etDayStart}) - the phone's, the browser's, a
+ * firing's, whatever opened it, and however it ended: a cancelled, failed or timed-out turn spent its
+ * tokens too - summed; spent once that sum reaches `dailyTokens`. No cap, never spent.
+ * @param events - the ledger's events, as {@link readEvents} returns them.
+ * @param now - when the budget is read, in ms since the epoch: what today is.
+ * @param dailyTokens - the day's cap, `standing.yml`'s `budget.dailyTokens`; none when absent.
+ */
+export function budgetState(events: readonly DeskEvent[], now: number, dailyTokens?: number): BudgetState {
+  return budgetOf(turnsSince(events, new Date(etDayStart(now)).toISOString()).used, dailyTokens);
+}
+
+/**
+ * The day's budget as the ledger has it now: {@link budgetState} over {@link readEvents}. Never
+ * rejects: a ledger that cannot be read is zeros and not spent, with `error` its code - the budget
+ * fails open, the plan's ruling 8, and the status says why.
+ * @param home - the harness home.
+ * @param now - when the budget is read, in ms since the epoch.
+ * @param dailyTokens - the day's cap; none when absent.
+ */
+export async function readBudget(home: string, now: number, dailyTokens?: number): Promise<BudgetState> {
+  try {
+    return budgetState((await readEvents(home)).events, now, dailyTokens);
+  } catch (err) {
+    return budgetOf({ uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, total: 0 }, dailyTokens, reasonOf(err));
+  }
+}
+
+/**
+ * Note that the budget is spent: one `budget-spent` event per ET date, appended through
+ * {@link appendRecordOnce} under the ledger's lock, so two faces on one home, or two firings at once,
+ * note it once - the clock's cue for the day's one phone line. The event carries the date, `used`'s
+ * `total` and the cap, stamped `now`; a rotation hands the desk conversation on, as
+ * {@link appendEvent}'s does. Only the current file is read for the day's note, so a ledger that
+ * rotates mid-day may note the day twice.
+ * @param home - the harness home.
+ * @param now - when, in ms since the epoch: its ET date is the day noted.
+ * @param state - the day's budget; one that is not spent, or has no cap, notes nothing.
+ * @param opts - `rotateBytes`, default {@link LEDGER_ROTATE_BYTES}; `log`, for the failure line.
+ * @returns `true` when the event was appended - or could not be, with one line: nothing then says the
+ *   day was noted before, so the caller's line goes out rather than none; `false` when the day already
+ *   has its note, or there is nothing to note.
+ */
+export async function noteBudgetSpent(
+  home: string,
+  now: number,
+  state: BudgetState,
+  opts: { rotateBytes?: number; log?: (line: string) => void } = {},
+): Promise<boolean> {
+  if (!state.spent || state.dailyTokens === undefined) return false;
+  const date = etDate(new Date(now));
+  const event: DeskEvent = { t: new Date(now).toISOString(), kind: "budget-spent", date, used: state.used.total, dailyTokens: state.dailyTokens };
+  const sameDay = (existing: unknown): boolean => isDeskEvent(existing) && existing.kind === "budget-spent" && existing.date === date;
+  return (await appendRecordOnce(home, EVENTS_FILE, event, sameDay, { ...opts, carry: carryDeskSession })) !== "duplicate";
+}
+
+/**
+ * The phone's line for a post while the day's budget is spent (the plan's Global Constraints):
+ * `the desk's token budget for today is spent: 2,013,402 of 2,000,000 tokens since 00:00 ET. It opens
+ * again at midnight ET, or raise budget.dailyTokens in standing.yml` - numbers as `en-US` writes them,
+ * and no `of <cap>` for a state that has none.
+ * @param state - the day's budget.
+ */
+export function budgetReplyLine(state: BudgetState): string {
+  const cap = state.dailyTokens === undefined ? "" : ` of ${state.dailyTokens.toLocaleString("en-US")}`;
+  return `the desk's token budget for today is spent: ${state.used.total.toLocaleString("en-US")}${cap} tokens since 00:00 ET. `
+    + "It opens again at midnight ET, or raise budget.dailyTokens in standing.yml";
+}
+
 /** The Telegram bridge as the status reports it: `configured`, whether its token and the
  * operator's id are both set; `polling`, whether its loop runs; `lastPollAt`, its last poll;
  * `dropped`, the updates it refused as not the operator's private chat, and `lastDroppedFrom`,
@@ -657,11 +909,15 @@ export interface TelegramStatus {
  * its files are; `asleep` is this run's gaps; `runs` is every run in the current ledger. `off` is
  * the pause in force, present only while one is; `deskSession`, the desk conversation the ledger
  * names last ({@link lastDeskSession}), present only when it names one; `turnsToday`, the desk
- * turns recorded since 00:00 America/New_York and their tokens; `telegram`, the bridge's state,
- * present only when a provider is passed - {@link installDesk} always passes one, so the route and
- * `desk_state` always carry it. `ledgerError` is present only when the ledger could not be
- * read - its code, or its message when it has none - and `asleep` and `runs` are then empty, and
- * `turnsToday` zero: an unreadable ledger is named, never passed off as an empty one. */
+ * turns recorded since 00:00 America/New_York and their tokens; `budget`, those tokens against the
+ * day's cap ({@link BudgetState}) - optional in the type, so a status built by hand may leave it out,
+ * and always set by {@link deskStatus}; `standing`, the standing orders as their clock reports them
+ * (src/standing.ts `StandingStatus`), present only while a provider has one; `telegram`, the bridge's
+ * state, present only when a provider is passed - {@link installDesk} always passes one, so the route
+ * and `desk_state` always carry it. `ledgerError` is present only when the ledger could not be
+ * read - its code, or its message when it has none - and `asleep` and `runs` are then empty,
+ * `turnsToday` zero, and the budget zeros and not spent, its `error` the same: an unreadable ledger is
+ * named, never passed off as an empty one. */
 export interface DeskStatus {
   ok: true;
   pid: number;
@@ -674,6 +930,8 @@ export interface DeskStatus {
   off?: OffState;
   deskSession?: string;
   turnsToday: { count: number; usage: Omit<TurnUsage, "routes"> };
+  budget?: BudgetState;
+  standing?: StandingStatus;
   telegram?: TelegramStatus;
   ledgerError?: string;
 }
@@ -686,16 +944,19 @@ export interface DeskStatus {
  * those of the runs before it; ISO-8601 UTC strings order as their times do, so the comparison is
  * on the strings, as it is for `turnsToday`: the `desk-turn` events whose `t` is at or after the
  * start of today in New York ({@link etDayStart}), counted, their tokens summed - a turn recorded
- * without usage counts and adds nothing. `runs` is {@link runsOf} over the whole current file.
+ * without usage counts and adds nothing. `budget` is the same turns' tokens against `dailyTokens`'
+ * cap ({@link budgetState}). `runs` is {@link runsOf} over the whole current file.
  * `off` is {@link readOffState}'s state unless it has expired: a pause past its `until` is no
  * longer in force, though its file waits for whoever lifts it. Never rejects on the ledger: a read
- * that fails ({@link readEvents} rejects on EACCES, EISDIR, EIO by design) is `ledgerError`; a
- * switch that cannot be read at all is left out, the directory that holds it being the ledger's
- * too.
+ * that fails ({@link readEvents} rejects on EACCES, EISDIR, EIO by design) is `ledgerError`, and the
+ * budget's `error`; a switch that cannot be read at all is left out, the directory that holds it
+ * being the ledger's too.
  * @param deps - `home`, the harness home; `bootedAt`, when this run began, in ms since the epoch;
  *   `enabled`, whether the desk's rows are mounted; `now`, `pid` and `version`, defaulting to
- *   `Date.now`, `process.pid` and {@link DSH_PIN}; `telegram`, the bridge's status, read once
- *   per call when given.
+ *   `Date.now`, `process.pid` and {@link DSH_PIN}; `telegram`, the bridge's status, `dailyTokens`,
+ *   the day's cap (the standing orders' last good load), and `standing`, the standing orders'
+ *   status - each read once per call when given, `dailyTokens` and `standing` answering `undefined`
+ *   while there is none.
  */
 export async function deskStatus(deps: {
   home: string;
@@ -705,6 +966,8 @@ export async function deskStatus(deps: {
   pid?: number;
   version?: string;
   telegram?: () => TelegramStatus;
+  dailyTokens?: () => number | undefined;
+  standing?: () => StandingStatus | undefined;
 }): Promise<DeskStatus> {
   const at = (deps.now ?? Date.now)();
   const since = new Date(deps.bootedAt).toISOString();
@@ -724,16 +987,11 @@ export async function deskStatus(deps: {
   }
   const asleep = events.flatMap((e) =>
     e.kind === "asleep" && e.from >= since ? [{ from: e.from, to: e.to, gapMs: e.gapMs }] : []);
-  const today = new Date(etDayStart(at)).toISOString();
-  const turnsToday = { count: 0, usage: { uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 } };
-  for (const e of events) {
-    if (e.kind !== "desk-turn" || e.t < today) continue;
-    turnsToday.count += 1;
-    turnsToday.usage.uncachedInputTokens += e.usage?.uncachedInputTokens ?? 0;
-    turnsToday.usage.outputTokens += e.usage?.outputTokens ?? 0;
-    turnsToday.usage.cacheReadTokens += e.usage?.cacheReadTokens ?? 0;
-    turnsToday.usage.cacheWriteTokens += e.usage?.cacheWriteTokens ?? 0;
-  }
+  const today = turnsSince(events, new Date(etDayStart(at)).toISOString());
+  const { uncachedInputTokens, outputTokens, cacheReadTokens, cacheWriteTokens } = today.used;
+  const turnsToday = { count: today.count, usage: { uncachedInputTokens, outputTokens, cacheReadTokens, cacheWriteTokens } };
+  const budget = budgetOf(today.used, deps.dailyTokens?.(), ledgerError);
+  const standing = deps.standing?.();
   const deskSession = lastDeskSession(events);
   return {
     ok: true,
@@ -747,6 +1005,8 @@ export async function deskStatus(deps: {
     ...(off === undefined ? {} : { off }),
     ...(deskSession === undefined ? {} : { deskSession }),
     turnsToday,
+    budget,
+    ...(standing === undefined ? {} : { standing }),
     ...(deps.telegram === undefined ? {} : { telegram: deps.telegram() }),
     ...(ledgerError === undefined ? {} : { ledgerError }),
   };

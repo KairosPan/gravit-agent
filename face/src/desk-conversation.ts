@@ -9,20 +9,29 @@
  * operator opens in the browser gets the same deadline, fence check and ledger record as a phone turn.
  *
  * BEFORE A TURN ({@link DeskConversation.post}), in this order: the pause - an `OFF` past its `until` is lifted,
- * one in force refuses (src/desk.ts); the instruction-chain fence - a violation refuses, and is a `desk-refused`
- * event (src/desk-session.ts `findDeskFenceViolation`); the desk session, ensured - live, resumed or created;
- * then the message, its provenance line first. A refusal comes back as a {@link PostResult} carrying the line
- * the phone gets; nothing here sends it.
+ * one in force refuses (src/desk.ts); the day's token budget, when the owner passes one - spent, it refuses
+ * with src/desk.ts `budgetReplyLine`, no turn and no event, and one that cannot be read lets the post go on,
+ * with a line (ruling P2-8: the pause outranks the budget, and a paused post never reads it); the
+ * instruction-chain fence - a violation refuses, and is a `desk-refused` event (src/desk-session.ts
+ * `findDeskFenceViolation`); the desk session, ensured - live, resumed or created; then the message, its
+ * provenance line first. A refusal comes back as a {@link PostResult} carrying the line the phone gets; nothing
+ * here sends it.
  *
  * EVERY TURN on the session, whoever opened it, is supervised (src/desk-session.ts `superviseDeskTurns`): its
  * deadline and its fence check run from its `turn/start`. At its end it is one ledger event - a `desk-turn`,
  * or a `desk-refused` when its fence check cut it - and then, for a turn opened by the phone, an alert or a
- * wake, one delivery to the outlet: the fence's refusal line for a refused turn; else its final text - with
- * `(cut off: <what cut it>)` after it when a cut interrupted the answer mid-stream - or, when it said
- * nothing, the timed-out line for a turn the deadline cut and the failed line for one that ended on an error.
- * A browser turn's answer stays in its transcript. Records keep turn order and so do deliveries, each
- * delivery after its own record and none waiting on an outlet more than a minute; nothing at a turn's end
+ * wake, one delivery through {@link DeskConversation.deliver}: the fence's refusal line for a refused turn; else
+ * its final text - with `(cut off: <what cut it>)` after it when a cut interrupted the answer mid-stream - or,
+ * when it said nothing, the timed-out line for a turn the deadline cut and the failed line for one that ended
+ * on an error. A browser turn's answer stays in its transcript. Records keep turn order and so do deliveries,
+ * each delivery after its own record and none waiting on an outlet more than a minute; nothing at a turn's end
  * can reject - a send that fails is one line.
+ *
+ * DELIVERY (rulings P2-7, P2-19). Everything the desk sends leaves through {@link DeskConversation.deliver} - a
+ * turn's answer, and in P2 and P3 a firing's text and an alert. It holds a text back while the pause is in force
+ * - read, never lifted, so a delivery writes nothing - and holds it back too when the switch cannot be read; with
+ * no outlet it says so; else it is the outlet's answer, a send that fails or keeps the outlet past a minute
+ * being one line and an `undelivered` reason.
  *
  * A CUT CUTS ONE TURN. The phone's `/stop` ({@link DeskConversation.stop}), like the deadline, cancels the turn
  * under way and only it: the messages queued behind it are kept and answered, each in its own turn
@@ -55,7 +64,7 @@
  * @module
  */
 import type { MessageSource } from "@deepseek-ai/dsh-llm";
-import type { OffState } from "./desk.ts";
+import type { BudgetState, OffState } from "./desk.ts";
 import type { DeskClock, DeskSessionCtxLike, DeskSessionDeps, DeskSource, DeskTurnRecord, SessionEventsOn } from "./desk-session.ts";
 import type { AgentLike } from "./room.ts";
 import type { EventLike, MessageLike } from "./room-rules.ts";
@@ -94,11 +103,17 @@ export interface DeskOutlet {
   send(text: string, opts?: { replyTo?: number }): Promise<{ sent: number[]; queued?: true } | { queued: true }>;
 }
 
+/** What {@link DeskConversation.deliver} answers: the outlet's own answer, or why the text did not reach it -
+ * `paused`, `telegram not configured`, `send failed: <reason>`, `the outlet did not answer in 60 s`,
+ * `the pause could not be read: <reason>`, or `the desk could not load: <reason>`. */
+export type DeliverResult = Awaited<ReturnType<DeskOutlet["send"]>> | { undelivered: string };
+
 /** What {@link DeskConversation.post} answers: the turn opened on `sessionId`, or why not, with the line the
  * phone gets. */
 export type PostResult =
   | { opened: true; sessionId: string }
   | { refused: "paused"; line: string }
+  | { refused: "budget"; line: string }
   | { refused: "fence"; path: string; line: string }
   | { refused: "error"; line: string };
 
@@ -110,13 +125,15 @@ export type DeskConversationCtxLike = DeskSessionCtxLike & {
 
 /** What {@link createDeskConversation} needs. `session` is src/desk-session.ts's ensure deps, whose `root` and
  * `home` this reads too; `on`, the root bus; `deadlineMs`, every turn's deadline (five minutes by default),
- * which `deadlineFor` may only shorten for a source (P3's alerts); `clock`, the timers and the stamps (the
- * global ones); `log`, where a failure line goes (stderr). */
+ * which `deadlineFor` may only shorten for a source (P3's alerts); `budget`, the day's token budget, read by
+ * each post the pause lets through (src/desk.ts `readBudget` over the standing orders' cap) - no budget, no
+ * check; `clock`, the timers and the stamps (the global ones); `log`, where a failure line goes (stderr). */
 export interface DeskConversationDeps {
   session: DeskSessionDeps;
   on: SessionEventsOn;
   deadlineMs?: number;
   deadlineFor?: (kind: string) => number | undefined;
+  budget?: () => Promise<BudgetState>;
   clock?: DeskClock;
   log?: (line: string) => void;
 }
@@ -136,6 +153,13 @@ export interface DeskConversation {
    * reason }`, and only it: the messages queued behind it are kept and answered, each in its own turn
    * (src/desk-session.ts `cancelKeepingQueue`); `true` when there was some, `false` when nothing was under way. */
   stop(reason: string): Promise<boolean>;
+  /** Send `text` to the outlet - the first part as a reply to `replyTo` when given - and answer what the outlet
+   * answered, or why the text did not reach it ({@link DeliverResult}): `paused` while the pause is in force (a
+   * pause past its `until` is not; the switch is read, never lifted, and a switch that cannot be read holds the
+   * text back too, with one line), `telegram not configured` with no outlet, `send failed: <reason>` with one line
+   * when the send throws or rejects, and, with one line, an outlet that has not answered in a minute. The way
+   * every desk text leaves the face - each turn's answer, a firing's, an alert. Never rejects. */
+  deliver(text: string, opts?: { replyTo?: number }): Promise<DeliverResult>;
   /** Where answers go from now on: read at each delivery, so `undefined` stops them while records go on. */
   setOutlet(outlet: DeskOutlet | undefined): void;
   /** The conversation supervised now, and whether a supervised agent's status reads `running` - a snapshot:
@@ -249,8 +273,12 @@ interface Watch {
   readonly unwatch: () => void;
 }
 
-/** How a promise settled within a bound: `ok`, `failed` with its error, or `late` - left to settle alone. */
-type Within = { kind: "ok" } | { kind: "failed"; error: unknown } | { kind: "late" };
+/** How a promise settled within a bound: `ok` with its value, `failed` with its error, or `late` - left to settle
+ * alone. */
+type Within<T> = { kind: "ok"; value: T } | { kind: "failed"; error: unknown } | { kind: "late" };
+
+/** What the outlet answers a send. */
+type OutletResult = Awaited<ReturnType<DeskOutlet["send"]>>;
 
 /**
  * The desk session's one owner. Nothing runs until a member is called: src/desk.ts `installDesk` calls
@@ -275,10 +303,10 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
 
   /** How `p` settled within `ms` on the clock. Never rejects; a `p` left late is still handled when it
    * rejects, so it cannot become an unhandled rejection. */
-  const within = (ms: number, p: Promise<unknown>): Promise<Within> => new Promise((done) => {
+  const within = <T>(ms: number, p: Promise<T>): Promise<Within<T>> => new Promise((done) => {
     const timer = clock.setTimeout(() => done({ kind: "late" }), ms);
     p.then(
-      () => { clock.clearTimeout(timer); done({ kind: "ok" }); },
+      (value) => { clock.clearTimeout(timer); done({ kind: "ok", value }); },
       (error: unknown) => { clock.clearTimeout(timer); done({ kind: "failed", error }); },
     );
   });
@@ -309,22 +337,55 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
     }, { log });
   };
 
-  const deliver = async (r: DeskTurnRecord, m: Machinery): Promise<void> => {
-    const to = outlet;
-    if (to === undefined || !DELIVERED.has(r.source)) return;
-    const text = replyOf(r, m);
-    if (text === "") return; // it ended on a tool: there is nothing to say
-    const unsent = `${BIN}: desk: the reply to turn ${r.turn} on desk session ${r.sessionId} could not be sent`;
-    let sending: Promise<unknown>;
+  /** {@link DeskConversation.deliver}, its failure lines opening with `unsent` - the turn's reply, or a message -
+   * and a late one ending with `lateTail`. Never rejects. */
+  const sendOut = async (text: string, opts: { replyTo?: number } | undefined, unsent: string, lateTail: string): Promise<DeliverResult> => {
+    const heldBack = (reason: string): DeliverResult => {
+      log(`${unsent}: ${reason}`);
+      return { undelivered: reason };
+    };
+    let m: Machinery;
     try {
-      sending = Promise.resolve(to.send(text));
+      m = await loadMachinery();
+    } catch (err) {
+      return heldBack(`the desk could not load: ${errText(err)}`);
+    }
+    /* the switch read, never lifted: a delivery writes nothing, and one under way at shutdown cannot land after it */
+    let paused: boolean;
+    try {
+      const { state, expired } = await m.desk.readOffState(home, () => clock.now());
+      paused = state !== undefined && !expired;
+    } catch (err) {
+      return heldBack(`the pause could not be read: ${errText(err)}`);
+    }
+    if (paused) return { undelivered: "paused" };
+    const to = outlet;
+    if (to === undefined) return { undelivered: "telegram not configured" };
+    let sending: Promise<OutletResult>;
+    try {
+      sending = Promise.resolve(opts?.replyTo === undefined ? to.send(text) : to.send(text, { replyTo: opts.replyTo }));
     } catch (err) {
       log(`${unsent}: ${errText(err)}`);
-      return;
+      return { undelivered: `send failed: ${errText(err)}` };
     }
     const sent = await within(DELIVERY_MS, sending);
-    if (sent.kind === "failed") log(`${unsent}: ${errText(sent.error)}`);
-    else if (sent.kind === "late") log(`${unsent}: the outlet did not answer in ${DELIVERY_MS / 1000} s; the next reply goes ahead`);
+    if (sent.kind === "ok") return sent.value;
+    if (sent.kind === "failed") {
+      log(`${unsent}: ${errText(sent.error)}`);
+      return { undelivered: `send failed: ${errText(sent.error)}` };
+    }
+    const late = `the outlet did not answer in ${DELIVERY_MS / 1000} s`;
+    log(`${unsent}: ${late}${lateTail}`);
+    return { undelivered: late };
+  };
+
+  /** A turn's end, delivered: its reply ({@link replyOf}) through {@link sendOut}, for a source the outlet
+   * answers. */
+  const deliverTurn = async (r: DeskTurnRecord, m: Machinery): Promise<void> => {
+    if (!DELIVERED.has(r.source)) return;
+    const text = replyOf(r, m);
+    if (text === "") return; // it ended on a tool: there is nothing to say
+    await sendOut(text, undefined, `${BIN}: desk: the reply to turn ${r.turn} on desk session ${r.sessionId} could not be sent`, "; the next reply goes ahead");
   };
 
   /** The supervisor's hand at a turn's end. Synchronous, and nothing it starts can reject: an unhandled
@@ -335,7 +396,7 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
       log(`${BIN}: desk: ${where} could not be recorded: ${errText(err)}`);
     });
     recording = recorded;
-    delivering = delivering.then(() => recorded).then(() => deliver(r, m)).catch((err: unknown) => {
+    delivering = delivering.then(() => recorded).then(() => deliverTurn(r, m)).catch((err: unknown) => {
       log(`${BIN}: desk: ${where} could not be delivered: ${errText(err)}`);
     });
   };
@@ -430,6 +491,21 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
     return off.state !== undefined && !off.expired ? off.state : undefined;
   };
 
+  /** The day's budget as a post reads it: its state when it is spent, else `undefined` - and `undefined`, with a
+   * line, when it cannot be read, the budget failing open (the plan's ruling 8) where the pause and the fence fail
+   * closed. No budget, no read. */
+  const spentBudget = async (): Promise<BudgetState | undefined> => {
+    const read = deps.budget;
+    if (read === undefined) return undefined;
+    try {
+      const state = await read();
+      return state.spent ? state : undefined;
+    } catch (err) {
+      log(`${BIN}: desk: the token budget could not be read (${errText(err)}); the desk goes on`);
+      return undefined;
+    }
+  };
+
   return {
     start() {
       return serially(async () => {
@@ -449,6 +525,8 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
           const m = await loadMachinery();
           const paused = await pause(m);
           if (paused !== undefined) return { refused: "paused", line: pausedLine(paused, new Date(clock.now()), m.desk.deskTime) };
+          const spent = await spentBudget();
+          if (spent !== undefined) return { refused: "budget", line: m.desk.budgetReplyLine(spent) };
           const path = await m.session.findDeskFenceViolation(root);
           if (path !== undefined) {
             await m.desk.appendEvent(home, { t: stamp(), kind: "desk-refused", reason: "fence", path }, { log });
@@ -482,6 +560,10 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
       const m = await loadMachinery();
       const stopped = await Promise.all(all.map(async (w) => (await busy(w.agent)) && cancel(w, { kind: "hook", reason }, m)));
       return stopped.includes(true);
+    },
+
+    deliver(text, opts) {
+      return sendOut(text, opts, `${BIN}: desk: a message could not be sent`, "");
     },
 
     setOutlet(next) {

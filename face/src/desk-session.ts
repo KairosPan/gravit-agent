@@ -18,7 +18,9 @@
  * skill roots. So one of those names in `desk/journal/`, or in `desk/` above it, would steer every later
  * desk turn, and git never shows it: the journal is ignored. A symlink would put another tree's files
  * where the desk reads, so every symlink in the journal counts too, as do a symlinked `desk/` or journal
- * and the repository's own skill roots. {@link findDeskFenceViolation} looks for one;
+ * and the repository's own skill roots. {@link findChainViolation} looks for one along the chain from the
+ * repository root to any cwd inside it - P2's firings run in the journal and, in P4, in `strategies/<name>` -
+ * and {@link findDeskFenceViolation} is that check for the journal;
  * {@link superviseDeskTurns} runs the check at every turn's start and cuts a turn that starts over a
  * violation, and an owner can check before it opens a turn at all, {@link fenceRefusalLine} being its
  * reply. The check fails closed: what it cannot read counts as found. It is the second line: a file that
@@ -45,7 +47,7 @@
 import { randomUUID } from "node:crypto";
 import type { Dirent } from "node:fs";
 import { lstat, mkdir, readdir } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
 import { installModelSelection as installDshModelSelection } from "@deepseek-ai/dsh-agent";
 import { deriveTurnTokenUsage } from "@deepseek-ai/dsh-token-meter/client";
@@ -132,52 +134,98 @@ const JOURNAL = "desk/journal";
  * neither, so either one there is a violation. */
 const ROOT_SKILL_ROOTS = [".dsh", ".agents"] as const;
 
+/** The entry of `names` that is a {@link FENCE_NAMES} name, compared as a case-insensitive volume compares it
+ * (src/desk-names.ts `fenceNameOf`), as it is named on disk: the names taken in {@link FENCE_NAMES}' order,
+ * and for each the first such entry in code-unit order; `undefined` when there is none. */
+function fenceEntry(names: readonly string[]): string | undefined {
+  const sorted = [...names].sort();
+  for (const name of FENCE_NAMES) {
+    const entry = sorted.find((candidate) => fenceNameOf(candidate) === name);
+    if (entry !== undefined) return entry;
+  }
+  return undefined;
+}
+
 /**
- * The first thing in the repository that would steer a desk session from where the desk can be steered,
- * as a path relative to `root` - `.agents`, `desk`, `desk/GRAVIT.md`, `desk/journal/a/.git` - or
- * `undefined` when there is none. Every lookup is an `lstat`, so a symlink is judged as itself, dangling
- * or not, and the volume's own case rule applies. In this order:
- * - the repository's skill roots ({@link ROOT_SKILL_ROOTS}): either one present, or not known to be
- *   absent, is its own name;
- * - `desk/` itself: a symlink is `desk`; a missing `desk/` holds nothing, and anything else it cannot
- *   tell is `desk`;
- * - the five {@link FENCE_NAMES} directly in `desk/`, in that order, without recursion: dsh reads the
- *   instruction files at every level from the project root down to the cwd, so `desk/GRAVIT.md` reaches
- *   every desk session, and a `.git` at `desk/` would make it the project root with its own skill roots.
- *   The desk's sandbox cannot write there; a workbench session at the repository root can. One there is
- *   `desk/<name>`; a `desk/` that cannot be searched is `desk`;
- * - the journal, through {@link findFenceViolation}: its answer under `desk/journal/`, and
- *   `desk/journal` for its `"."` - the journal a symlink, or unreadable.
+ * The first thing in the repository that would steer a desk session whose cwd is `cwd`, as a path relative to
+ * `root` - `.agents`, `strategies/demo`, `desk/GRAVIT.md`, `desk/journal/a/.git` - or `undefined` when there is
+ * none: the instruction-chain fence for any cwd (rulings P2-4, P2-15). dsh reads `GRAVIT.md` and
+ * `GRAVIT.local.md` in every directory from the project root - the nearest ancestor holding a `.git` - down to
+ * the cwd, and below it whenever a turn touches a file there; under a project root, `.dsh/skills` and
+ * `.agents/skills` are skill roots. So a desk session can be steered from the directories strictly between
+ * `root` and its cwd, from anywhere under the cwd, and from the repository's own skill roots - all three of which
+ * a workbench session at the repository root can write. In this order:
+ * - the repository's skill roots ({@link ROOT_SKILL_ROOTS}), by `lstat`: either one present, or not known to be
+ *   absent, is its own name. The root's own `GRAVIT.md`, `GRAVIT.local.md` and `.git` are the repository's, and
+ *   are not checked;
+ * - each directory from the first below `root` down to `cwd` itself, top down, by `lstat`: a symlink is the
+ *   violation, by its path; one that is not there (ENOENT, ENOTDIR) ends the check clean, nothing below it
+ *   being there either; any other failure is the violation. Each directory strictly between `root` and `cwd` is
+ *   then listed, before the directory below it, for the five {@link FENCE_NAMES} ({@link fenceEntry}) - without
+ *   recursion, case-folded, answered as named on disk: `.git` there would make it the project root with skill
+ *   roots of its own. One that cannot be listed - a file where a directory should be included - is the
+ *   violation, by its path; one gone since its `lstat` (ENOENT) holds nothing;
+ * - `cwd`'s own tree, through {@link findFenceViolation}: a fence name at any depth, any symlink, or a directory
+ *   it cannot list is the violation, under `cwd`'s path; `cwd` itself when it cannot be listed at all.
  *
- * Never rejects.
+ * Every lookup is an `lstat` or a listing, so a symlink is judged as itself, dangling or not; paths are joined
+ * with `/`. It fails closed: what it cannot read counts as found. Never rejects, but on a `cwd` that is not
+ * strictly inside `root` - `root` itself, outside it, or out of it through `..`; both are resolved first -
+ * which is the caller's mistake: a `TypeError`, before the disk is touched.
  * @param root - the repository root.
+ * @param cwd - the session's working directory, strictly inside `root`.
  */
-export async function findDeskFenceViolation(root: string): Promise<string | undefined> {
+export async function findChainViolation(root: string, cwd: string): Promise<string | undefined> {
+  const base = resolve(root);
+  const rel = relative(base, resolve(cwd));
+  if (rel === "" || isAbsolute(rel) || rel === ".." || rel.startsWith(`..${sep}`)) {
+    throw new TypeError(`findChainViolation takes a cwd strictly inside ${base}, not ${JSON.stringify(cwd)}`);
+  }
   for (const name of ROOT_SKILL_ROOTS) {
     try {
-      await lstat(join(root, name));
+      await lstat(join(base, name));
       return name;
     } catch (err) {
       if (codeOf(err) !== "ENOENT") return name;
     }
   }
-  const desk = join(root, "desk");
-  try {
-    if ((await lstat(desk)).isSymbolicLink()) return "desk";
-  } catch (err) {
-    return codeOf(err) === "ENOENT" ? undefined : "desk";
-  }
-  for (const name of FENCE_NAMES) {
+  const segments = rel.split(sep);
+  for (let depth = 1; depth <= segments.length; depth++) {
+    const dir = join(base, ...segments.slice(0, depth));
+    const at = segments.slice(0, depth).join("/");
     try {
-      await lstat(join(desk, name));
-      return `desk/${name}`;
+      if ((await lstat(dir)).isSymbolicLink()) return at;
     } catch (err) {
-      if (codeOf(err) !== "ENOENT") return "desk";
+      const code = codeOf(err);
+      return code === "ENOENT" || code === "ENOTDIR" ? undefined : at;
     }
+    if (depth === segments.length) break; // the cwd: walked below
+    let names: string[];
+    try {
+      names = await readdir(dir);
+    } catch (err) {
+      if (codeOf(err) === "ENOENT") continue; // gone since its lstat: the levels below find nothing there either
+      return at;
+    }
+    const entry = fenceEntry(names);
+    if (entry !== undefined) return `${at}/${entry}`;
   }
-  const found = await findFenceViolation(deskJournalDir(root));
+  const at = segments.join("/");
+  const found = await findFenceViolation(join(base, ...segments));
   if (found === undefined) return undefined;
-  return found === "." ? JOURNAL : `${JOURNAL}/${found}`;
+  return found === "." ? at : `${at}/${found}`;
+}
+
+/**
+ * The first thing in the repository that would steer the desk conversation, whose cwd is the journal:
+ * {@link findChainViolation} over `<root>/desk/journal` ({@link deskJournalDir}) - the repository's skill roots,
+ * `desk/` and the journal by `lstat`, the five {@link FENCE_NAMES} in `desk/`, the journal's tree - answered
+ * repo-relative: `.agents`, `desk`, `desk/GRAVIT.md`, `desk/journal`, `desk/journal/a/.git`. The desk's sandbox
+ * cannot write `desk/`; a workbench session at the repository root can. Never rejects.
+ * @param root - the repository root.
+ */
+export async function findDeskFenceViolation(root: string): Promise<string | undefined> {
+  return findChainViolation(root, deskJournalDir(root));
 }
 
 /**

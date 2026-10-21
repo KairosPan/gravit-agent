@@ -1,18 +1,19 @@
 // face/tests/desk-conversation.test.ts
 /** The desk conversation (src/desk-conversation.ts): the one owner of the desk session - the pause, the
- * fence and the ensure before a turn opens, the provenance line on the message, the supervision of every
- * turn, the ledger record at each turn's end and the delivery to the outlet, the switch to a renewed
- * session, stop and dispose. Offline: the real ensure (src/desk-session.ts) over a fake root slice, a fake
- * bus, a manual clock and a recording outlet. Repositories and homes sit INSIDE the repository, under
+ * budget, the fence and the ensure before a turn opens, the provenance line on the message, the supervision
+ * of every turn, the ledger record at each turn's end and the delivery through `deliver`, the switch to a
+ * renewed session, stop and dispose. Offline: the real ensure (src/desk-session.ts) over a fake root slice, a
+ * fake bus, a manual clock and a recording outlet. Repositories and homes sit INSIDE the repository, under
  * tests/tmp/<pid>/, as src/desk-session.ts's own tests keep theirs, and are removed afterwards. */
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
-import { chmod, mkdir, rm, stat, writeFile } from "node:fs/promises";
+import fsp, { chmod, mkdir, rm, stat, writeFile } from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { withFileLock } from "@deepseek-ai/dsh-atomic-write";
 import { DESK_PATH, readDesk } from "../src/cycle.ts";
-import { OFF_FILE, deskDir, readEvents, readOffState, writeOff, type DeskEvent } from "../src/desk.ts";
+import { OFF_FILE, clearOff, deskDir, readEvents, readOffState, writeOff, type BudgetState, type DeskEvent } from "../src/desk.ts";
 import {
   createDeskConversation, type DeskConversation, type DeskConversationDeps, type DeskOutlet, type PostResult,
 } from "../src/desk-conversation.ts";
@@ -1048,4 +1049,143 @@ test("dispose waits five seconds at most for a start, post or renew under way", 
   open();
   await starting;
   assert.equal(h.bus.listeners.size, 0, "a start that finishes after dispose supervises nothing");
+});
+
+/* ---------- deliver and the budget (P2) ---------- */
+
+test("deliver goes to the outlet, or says why not", async () => {
+  const h = await harness();
+  assert.deepEqual(await h.desk.deliver("nobody to hear it"), { undelivered: "telegram not configured" });
+  await writeOff(h.home, { by: "page" }, () => AT);
+  assert.deepEqual(await h.desk.deliver("nobody to hear it"), { undelivered: "paused" }, "the pause is read first: it outranks a missing outlet");
+  await clearOff(h.home, "terminal");
+
+  const asked: unknown[][] = [];
+  let answer = (): Promise<{ sent: number[]; queued?: true } | { queued: true }> => Promise.resolve({ sent: [11] });
+  h.desk.setOutlet({ send: (...args) => { asked.push(args); return answer(); } });
+  assert.deepEqual(await h.desk.deliver("the pre-close brief"), { sent: [11] });
+  assert.deepEqual(await h.desk.deliver("an annotation", { replyTo: 77 }), { sent: [11] });
+  answer = () => Promise.resolve({ queued: true });
+  assert.deepEqual(await h.desk.deliver("Telegram is unreachable"), { queued: true }, "the outlet's answer, whatever it is");
+  assert.deepEqual(asked, [["the pre-close brief"], ["an annotation", { replyTo: 77 }], ["Telegram is unreachable"]]);
+
+  /* OFF holds a text back and the outlet is never asked; deliver reads the switch and lifts nothing, and a pause past its
+   * until is not in force. */
+  await writeOff(h.home, { by: "telegram", until: AT + 3_600_000 }, () => AT - 60_000);
+  assert.deepEqual(await h.desk.deliver("held back"), { undelivered: "paused" });
+  assert.equal(asked.length, 3, "the outlet was not called");
+  await writeOff(h.home, { by: "terminal", until: AT - 1 }, () => AT - 3_600_000);
+  answer = () => Promise.resolve({ sent: [12] });
+  assert.deepEqual(await h.desk.deliver("after the pause"), { sent: [12] });
+  assert.deepEqual(await kinds(h), ["off-set", "off-cleared", "off-set", "off-set"], "deliver wrote nothing: no off-cleared for the expired pause");
+  await clearOff(h.home, "terminal");
+
+  /* A send that rejects or throws is one line and send failed; one that keeps the outlet past a minute is one line too. */
+  answer = () => Promise.reject(new Error("boom"));
+  assert.deepEqual(await h.desk.deliver("lost"), { undelivered: "send failed: boom" });
+  answer = () => { throw new Error("the bridge fell over"); };
+  assert.deepEqual(await h.desk.deliver("also lost"), { undelivered: "send failed: the bridge fell over" });
+  answer = () => new Promise(() => {});
+  const stuck = h.desk.deliver("into the void");
+  await waitFor("the stuck send", () => asked.length === 7);
+  await h.time.fake.advance(59_999);
+  let settled = false;
+  void stuck.then(() => { settled = true; });
+  await h.time.fake.flush();
+  assert.equal(settled, false, "a minute is the bound, not less");
+  await h.time.fake.advance(1);
+  assert.deepEqual(await stuck, { undelivered: "the outlet did not answer in 60 s" });
+  assert.deepEqual(h.lines, [
+    "gravit-face: desk: a message could not be sent: boom",
+    "gravit-face: desk: a message could not be sent: the bridge fell over",
+    "gravit-face: desk: a message could not be sent: the outlet did not answer in 60 s",
+  ]);
+});
+
+test("deliver holds a text back when the switch cannot be read: it never reads as no switch", async () => {
+  const unreadable = join(await fixture("long"), "x".repeat(300)); // a name past NAME_MAX: every read under it fails
+  const h = await harness({}, { home: unreadable });
+  const outlet = recordingOutlet();
+  h.desk.setOutlet(outlet);
+  const result = await h.desk.deliver("hi");
+  assert.match((result as { undelivered: string }).undelivered, /^the pause could not be read: ENAMETOOLONG: /);
+  assert.deepEqual(outlet.sent, [], "the outlet was not called");
+  assert.equal(h.lines.length, 1);
+  assert.match(h.lines[0], /^gravit-face: desk: a message could not be sent: the pause could not be read: ENAMETOOLONG: /);
+});
+
+/* P2-19: a turn's reply leaves through deliver. Deliveries keep turn order, so once turn 2's reply is sent, turn 1's was
+ * decided - and the switch was read for it exactly once, while the pause held: the test counts the reads of OFF, so the
+ * resume never races turn 1's delivery. */
+test("a turn's text leaves through deliver, so a pause set during the turn holds it back", async (t) => {
+  const h = await harness();
+  const outlet = recordingOutlet();
+  h.desk.setOutlet(outlet);
+  const { sessionId } = (await post(h, "hi")) as { sessionId: string };
+  startTurn(h, sessionId, 1, PHONE);
+  await writeOff(h.home, { by: "telegram" }, () => AT); // the operator pauses from the phone while the turn runs
+  const off = join(deskDir(h.home), OFF_FILE);
+  let offReads = 0;
+  const real = fsp.readFile as unknown as (...args: unknown[]) => Promise<unknown>;
+  t.mock.method(fsp, "readFile", (async (...args: unknown[]) => {
+    try {
+      return await real(...args);
+    } finally {
+      if (String(args[0]) === off) offReads += 1;
+    }
+  }) as unknown as typeof fsp.readFile);
+  syncBuiltinESMExports();
+  try {
+    answer(h, sessionId, 1, "an answer the pause holds back");
+    endTurn(h, sessionId, 1);
+    await waitFor("turn 1's delivery reading the switch", () => offReads === 1);
+    await clearOff(h.home, "terminal");
+    turn(h, sessionId, 2, PHONE, "an answer after the resume");
+    await waitFor("turn 2's delivery", () => outlet.sent.length === 1);
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  }
+  assert.deepEqual(outlet.sent, ["an answer after the resume"], "turn 1's reply was held back");
+  assert.deepEqual((await turnsOf(h)).map((e) => [e.turn, e.outcome]), [[1, "ended"], [2, "ended"]], "and its turn recorded all the same");
+  assert.deepEqual(h.lines, [], "a pause holding a reply back is no failure");
+});
+
+test("a spent budget answers a post with the budget line and opens no turn; OFF outranks it", async () => {
+  let state: BudgetState = {
+    dailyTokens: 2_000_000,
+    used: { uncachedInputTokens: 13_402, outputTokens: 0, cacheReadTokens: 2_000_000, cacheWriteTokens: 0, total: 2_013_402 },
+    spent: true,
+  };
+  let asked = 0;
+  const h = await harness({ budget: async () => { asked += 1; return state; } });
+  await put(h.root, "desk/journal/.git/"); // the budget is read before the fence: a spent desk refuses as spent
+  assert.deepEqual(await post(h, "hi"), {
+    refused: "budget",
+    line: "the desk's token budget for today is spent: 2,013,402 of 2,000,000 tokens since 00:00 ET. It opens again at midnight ET, or raise budget.dailyTokens in standing.yml",
+  });
+  assert.equal(h.tree.created.length, 0, "no session ensured, no turn");
+  assert.deepEqual(await kinds(h), [], "and no event");
+
+  await writeOff(h.home, { by: "telegram" }, () => AT);
+  const paused = await post(h, "hi");
+  assert.equal((paused as { refused?: string }).refused, "paused", "OFF outranks the budget: the paused line, never the budget's");
+  assert.equal(asked, 1, "a paused post does not read the budget");
+  await clearOff(h.home, "terminal");
+
+  state = { ...state, used: { ...state.used, cacheReadTokens: 1_986_597, total: 1_999_999 }, spent: false };
+  await rm(join(h.root, "desk", "journal", ".git"), { recursive: true });
+  const opened = await post(h, "hi");
+  assert.deepEqual(opened, { opened: true, sessionId: h.tree.agents[0].id }, "under the cap, the post opens its turn");
+  assert.equal(asked, 2);
+  assert.equal(h.tree.agents[0].followups.length, 1);
+  assert.deepEqual(h.lines, []);
+});
+
+test("a budget that cannot be read is one line, and the desk goes on", async () => {
+  for (const budget of [() => Promise.reject(new Error("the ledger is gone")), () => { throw new Error("the ledger is gone"); }]) {
+    const h = await harness({ budget: budget as () => Promise<BudgetState> });
+    assert.deepEqual(await post(h, "hi"), { opened: true, sessionId: h.tree.agents[0].id });
+    assert.deepEqual(h.lines, ["gravit-face: desk: the token budget could not be read (the ledger is gone); the desk goes on"]);
+  }
 });

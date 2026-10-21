@@ -16,8 +16,8 @@ import { appendEvent, readEvents } from "../src/desk.ts";
 import { AGENT_FILE_NAMES } from "../src/desk-names.ts";
 import { DESK_PRESET } from "../src/desk-preset.ts";
 import {
-  DESK_DEFAULT_ROUTE, FENCE_NAMES, cancelKeepingQueue, createDeskAgent, deskJournalDir, ensureDeskSession, fenceRefusalLine, findDeskFenceViolation,
-  findFenceViolation, provenanceLine, resolveDeskRoute, superviseDeskTurns,
+  DESK_DEFAULT_ROUTE, FENCE_NAMES, cancelKeepingQueue, createDeskAgent, deskJournalDir, ensureDeskSession, fenceRefusalLine, findChainViolation,
+  findDeskFenceViolation, findFenceViolation, provenanceLine, resolveDeskRoute, superviseDeskTurns,
   type CreateDeskAgentOptions, type DeskClock, type DeskSessionCtxLike, type DeskSessionDeps, type DeskTurnRecord,
   type SessionEventsOn, type SuperviseDeskTurnsDeps,
 } from "../src/desk-session.ts";
@@ -245,6 +245,137 @@ test("findDeskFenceViolation fails closed on a desk/ it cannot search", { skip: 
     assert.equal(await findDeskFenceViolation(repo), "desk");
   } finally {
     await chmod(join(repo, "desk"), 0o755);
+  }
+});
+
+/* P2: the same fence for any cwd strictly inside the repository - a firing's in desk/journal, a strategy's in strategies/<name>. */
+
+test("findChainViolation: the root's skill roots, every directory down to the cwd, the five names between, and the cwd's tree", async () => {
+  const demo = (root: string): string => join(root, "strategies", "demo");
+
+  /* The root's own GRAVIT.md, GRAVIT.local.md and .git are the repository's; a sibling channel's GRAVIT.md is off the chain. */
+  const clean = await fixture("chain-clean");
+  for (const rel of ["GRAVIT.md", "GRAVIT.local.md", ".git/", "strategies/README.md", "strategies/other/GRAVIT.md", "strategies/demo/levels.yml", "strategies/demo/notes/a.md"]) {
+    await put(clean, rel);
+  }
+  assert.equal(await findChainViolation(clean, demo(clean)), undefined);
+  assert.equal(await findChainViolation(clean, `${demo(clean)}/`), undefined, "a trailing slash is the same cwd");
+
+  for (const name of [".agents", ".dsh"]) {
+    const repo = await fixture("chain-skill-root");
+    await put(repo, `${name}/`);
+    await put(repo, "strategies/demo/levels.yml");
+    assert.equal(await findChainViolation(repo, demo(repo)), name);
+  }
+
+  /* Between the root and the cwd, the five names case-folded, each answered as it is named on disk. */
+  for (const name of ["GRAVIT.md", "Gravit.md", "GRAVIT.local.md", ".git", ".GIT", ".dsh", ".agents"]) {
+    const repo = await fixture("chain-between");
+    await put(repo, name.endsWith(".md") ? `strategies/${name}` : `strategies/${name}/`);
+    await put(repo, "strategies/demo/levels.yml");
+    assert.equal(await findChainViolation(repo, demo(repo)), `strategies/${name}`, name);
+  }
+  const desk = await fixture("chain-desk");
+  await put(desk, "desk/.git/");
+  await put(desk, "desk/journal/notes.md");
+  assert.equal(await findChainViolation(desk, deskJournalDir(desk)), "desk/.git");
+
+  /* Every directory on the chain by lstat: a symlinked cwd, or one above it, is the violation. */
+  const linkedCwd = await fixture("chain-linked-cwd");
+  await put(linkedCwd, "elsewhere/levels.yml");
+  await mkdir(join(linkedCwd, "strategies"));
+  await symlink(join(linkedCwd, "elsewhere"), demo(linkedCwd));
+  assert.equal(await findChainViolation(linkedCwd, demo(linkedCwd)), "strategies/demo");
+  const linkedBetween = await fixture("chain-linked-between");
+  await put(linkedBetween, "elsewhere/demo/levels.yml");
+  await symlink(join(linkedBetween, "elsewhere"), join(linkedBetween, "strategies"));
+  assert.equal(await findChainViolation(linkedBetween, demo(linkedBetween)), "strategies");
+
+  /* The cwd's tree: a fence name at any depth, and any symlink. */
+  const deep = await fixture("chain-deep");
+  await put(deep, "strategies/demo/a/.agents/");
+  assert.equal(await findChainViolation(deep, demo(deep)), "strategies/demo/a/.agents");
+  const noted = await fixture("chain-link-in-cwd");
+  await put(noted, "strategies/demo/levels.yml");
+  await symlink(join(noted, "strategies", "demo", "levels.yml"), join(noted, "strategies", "demo", "notes"));
+  assert.equal(await findChainViolation(noted, demo(noted)), "strategies/demo/notes");
+
+  /* A level's names come before the level below it, as P1's desk fence answered: desk/GRAVIT.md before a symlinked journal. */
+  const order = await fixture("chain-order");
+  await put(order, "desk/GRAVIT.md");
+  await put(order, "elsewhere/notes.md");
+  await symlink(join(order, "elsewhere"), join(order, "desk", "journal"));
+  assert.equal(await findChainViolation(order, deskJournalDir(order)), "desk/GRAVIT.md");
+  assert.equal(await findDeskFenceViolation(order), "desk/GRAVIT.md");
+
+  /* A chain not there yet holds nothing; a directory that cannot be listed is the violation, by its path. */
+  const none = await fixture("chain-none");
+  assert.equal(await findChainViolation(none, demo(none)), undefined, "no strategies/");
+  const partial = await fixture("chain-partial");
+  await put(partial, "strategies/README.md");
+  assert.equal(await findChainViolation(partial, demo(partial)), undefined, "strategies/ without demo/");
+  const fileBetween = await fixture("chain-file-between");
+  await put(fileBetween, "strategies");
+  assert.equal(await findChainViolation(fileBetween, demo(fileBetween)), "strategies", "a file where a directory between should be cannot be searched");
+  const fileCwd = await fixture("chain-file-cwd");
+  await put(fileCwd, "strategies/demo");
+  assert.equal(await findChainViolation(fileCwd, demo(fileCwd)), "strategies/demo", "nor can a cwd that is a file be listed");
+
+  /* The cwd must be strictly inside the root: anything else is the caller's TypeError, before the disk is touched. */
+  const root = join(TMP, "no-such-root");
+  for (const cwd of [root, `${root}/`, join(root, ".."), `${root}-sibling/strategies/demo`, join(root, "strategies", "..", "..", "x"), "relative/strategies/demo"]) {
+    await assert.rejects(findChainViolation(root, cwd), TypeError, cwd);
+  }
+});
+
+test("findChainViolation: a directory between that vanished since its lstat holds nothing; one it cannot list is the violation", async (t) => {
+  const repo = await fixture("chain-raced");
+  await put(repo, "strategies/demo/levels.yml");
+  const between = join(repo, "strategies");
+  let code = "ENOENT";
+  const real = fsp.readdir as unknown as (path: unknown, options: unknown) => Promise<unknown>;
+  t.mock.method(fsp, "readdir", ((path: unknown, options: unknown) =>
+    (String(path) === between ? Promise.reject(Object.assign(new Error(`${code}: ${String(path)}`), { code })) : real(path, options))) as unknown as typeof fsp.readdir);
+  syncBuiltinESMExports();
+  try {
+    assert.equal(await findChainViolation(repo, join(between, "demo")), undefined, "ENOENT: gone, so it holds nothing; the levels below decide");
+    code = "EIO";
+    assert.equal(await findChainViolation(repo, join(between, "demo")), "strategies");
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  }
+});
+
+test("findChainViolation: a level gone or no directory any more since the level above was listed ends the check clean; one that cannot be read is the violation", async (t) => {
+  const repo = await fixture("chain-raced-level");
+  await put(repo, "strategies/demo/levels.yml");
+  const cwd = join(repo, "strategies", "demo");
+  let code = "ENOTDIR";
+  const real = fsp.lstat as unknown as (path: unknown) => Promise<unknown>;
+  t.mock.method(fsp, "lstat", ((path: unknown) =>
+    (String(path) === cwd ? Promise.reject(Object.assign(new Error(`${code}: ${String(path)}`), { code })) : real(path))) as unknown as typeof fsp.lstat);
+  syncBuiltinESMExports();
+  try {
+    assert.equal(await findChainViolation(repo, cwd), undefined, "ENOTDIR: strategies/ became a file, so nothing is below it");
+    code = "ENOENT";
+    assert.equal(await findChainViolation(repo, cwd), undefined);
+    code = "EIO";
+    assert.equal(await findChainViolation(repo, cwd), "strategies/demo");
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  }
+});
+
+test("findChainViolation fails closed on a directory between it cannot search", { skip: AS_ROOT }, async () => {
+  const repo = await fixture("chain-locked");
+  await put(repo, "strategies/demo/levels.yml");
+  await chmod(join(repo, "strategies"), 0o000);
+  try {
+    assert.equal(await findChainViolation(repo, join(repo, "strategies", "demo")), "strategies");
+  } finally {
+    await chmod(join(repo, "strategies"), 0o755);
   }
 });
 
