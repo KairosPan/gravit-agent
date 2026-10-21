@@ -502,7 +502,7 @@ test("a strategy firing's fence lines name the strategy, and the desk's keep P2'
   // checkFiring with strategies/GRAVIT.md planted → { refuse: { reason: "fence", detail: "strategies/GRAVIT.md" } }
   assert.equal(LINES.fence(STRATEGY_ITEM, "strategies/GRAVIT.md"),
     "demo-report · 2026-11-30 refused: strategies/GRAVIT.md exists; it would steer every turn in strategies/demo. Remove it.");
-  // a turn writing notes/GRAVIT.md → deliver calls, in order: [<text>,
+  // notes/GRAVIT.md planted by the harness while the turn runs (a desk turn's own write of it is denied by P1's write guard, Task 8b) → deliver calls, in order: [<text>,
   //   "demo-report · 2026-11-30 left strategies/demo/notes/GRAVIT.md behind; every firing in strategies/demo is refused, and every session in it reads it, until it is removed",
   //   "demo-report · 2026-11-30 wrote outside reports/: strategies/demo/notes/GRAVIT.md"]
 });
