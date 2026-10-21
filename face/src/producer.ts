@@ -11,14 +11,23 @@
  * line of at most {@link STDERR_LOG_MAX} characters. Every producer's text, a builtin's too, is cut at
  * {@link PRODUCER_TEXT_MAX} by {@link capText}; the cut is the firing's step, not this module's.
  *
+ * The runner executes exactly the bytes it verified ({@link runScriptProducer}): it reads the script
+ * once, checks those bytes against the hash pinned at arming, and runs a private copy of them, never
+ * the file in `scripts/`, which another process could swap between the check and the exec. The copy
+ * lives outside the repository, so a producer finds the repository through `GRAVIT_ROOT`, set in its
+ * environment, and opens with:
+ *
+ *     sys.path.insert(0, os.environ.get("GRAVIT_ROOT") or str(Path(__file__).resolve().parents[1]))
+ *
  * Self-contained: it imports none of the face's modules and the pause switch (`npm run desk`) does not
  * load it.
  * @module
  */
 import { execFile, type ExecFileException } from "node:child_process";
-import { realpath, stat } from "node:fs/promises";
-import { constants } from "node:os";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { createHash } from "node:crypto";
+import { constants as fsConstants, mkdtemp, open, realpath, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
+import { constants, tmpdir } from "node:os";
+import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 const BIN = "gravit-face";
 
@@ -306,40 +315,115 @@ function outputOf(result: RunResult, timeoutMs: number): ProducerOutput {
   return { ok: false, error: `exit ${result.code}`, text: result.stdout };
 }
 
+/** A script producer's run as the firing reads it. `refused: "hash"` means nothing ran: the runner could
+ * not verify the armed bytes, and the firing takes its refused-hash path. */
+export interface ScriptRun {
+  output: ProducerOutput;
+  code: number | null;
+  timedOut: boolean;
+  wallMs: number;
+  chars: number;
+  refused?: "hash";
+}
+
+/** A run's private directory under the system's temporary directory: this prefix and mkdtemp's six. */
+const RUN_DIR_PREFIX = "gravit-producer-";
+
+/** The hex SHA-256 of `bytes`, as `arm` pins a script. */
+function sha256Hex(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
 /**
- * Run a script producer once: `[<root>/<script>]` under `opts.run`, cwd `root`, the environment
- * {@link producerEnv} of the face's, stdin `JSON.stringify(input)`. Exit 0 is `{ ok: true, text: stdout }`;
- * another exit `{ ok: false, error: "exit <code>", text: stdout }` - a producer's own failure report is
- * worth quoting; a kill at the deadline `timed out after <duration>`, an overflow `stdout over 1 MiB` (or
- * `stderr`), a spawn failure `could not start: <code>` - none of those three with text, since a killed or
- * unstarted child's output cannot be trusted. Any stderr is ONE `log` line, `gravit-face: desk: producer
- * <script> wrote to stderr: <its first 2,000 characters, line breaks as ⏎>`, and never in the output.
- * The text is returned whole: capping it is the firing's step. A `script` outside the producer grammar
- * is refused without running.
- * @param opts - `root` the repository root; `script` the spec's `scripts/<file>.py`; `run` the runner;
- *   `input` what the producer is told; `timeoutMs` its deadline; `log` the face's log; `now` the clock
- *   for `wallMs` (`Date.now` by default).
- * @returns the output; the exit `code` and `timedOut` as the runner gave them; `wallMs`, the run's wall
- *   time; `chars`, the length of everything it wrote to stdout.
+ * Read a resolved script's bytes once, from what is still a regular file at the checked path: the open
+ * follows no link swapped in for it (`O_NOFOLLOW`; the path is a real path, so a link there is a swap) and
+ * never waits on a FIFO (`O_NONBLOCK`), and the type is checked on the descriptor that is read.
+ * @param path - the script's real path, from {@link resolveScript}.
+ * @returns the bytes, or `undefined` when the path no longer opens as a regular file.
+ */
+async function readScriptBytes(path: string): Promise<Buffer | undefined> {
+  let handle: FileHandle | undefined;
+  try {
+    handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
+    if (!(await handle.stat()).isFile()) return undefined;
+    return await handle.readFile();
+  } catch {
+    return undefined;
+  } finally {
+    await handle?.close().catch(() => {});
+  }
+}
+
+/**
+ * Run a script producer once, on exactly the bytes armed. The script is found by {@link resolveScript},
+ * its bytes read ONCE and hashed; a script that cannot be found or read, or whose bytes do not hash to
+ * `sha256`, is refused with nothing run - `refused: "hash"`, `code` null, `chars` 0, the error
+ * `<script> is missing`, `<script> leaves scripts/`, `<script> is not a regular file` or `<script> changed
+ * since arming`. Verified bytes are written to a private copy - a fresh `gravit-producer-*` directory
+ * (0700) under the system's temporary directory, holding the script's file name (0400) - and `[<copy>]`
+ * runs under `opts.run`: cwd `root`, the environment {@link producerEnv} of the face's plus `GRAVIT_ROOT`
+ * (the absolute `root`), stdin `JSON.stringify(input)`. The directory is removed afterwards whatever
+ * happened; one that cannot be is one `log` line.
+ *
+ * Exit 0 is `{ ok: true, text: stdout }`. Another exit is `{ ok: false, error: "exit <code>", text: stdout }`,
+ * as a producer's own failure report is worth quoting. A kill at the deadline is `timed out after
+ * <duration>`, an overflow `stdout over 1 MiB` (or `stderr`), a spawn failure or a copy that could not be
+ * made `could not start: <code>`; none of those carries text, since a killed or unstarted child's output
+ * cannot be trusted. Any stderr is ONE `log` line, `gravit-face: desk: producer <script> wrote to
+ * stderr: <its first 2,000 characters, line breaks as ⏎>`, and never in the output. The text is returned
+ * whole: capping it is the firing's step. A `script` outside the producer grammar is refused at once,
+ * without `refused` (no parsed spec can name one).
+ * @param opts - `root` the repository root; `script` the spec's `scripts/<file>.py`; `sha256` the hex hash
+ *   pinned at arming; `run` the runner; `input` what the producer is told; `timeoutMs` its deadline; `log`
+ *   the face's log; `now` the clock for `wallMs` (`Date.now` by default).
+ * @returns the output; the exit `code` and `timedOut` as the runner gave them; `wallMs`, the step's wall
+ *   time, the check and the copy included; `chars`, the length of everything it wrote to stdout;
+ *   `refused` when nothing ran for want of the armed bytes.
  */
 export async function runScriptProducer(opts: {
   root: string;
   script: string;
+  sha256: string;
   run: ProducerRunner;
   input: ProducerInput;
   timeoutMs: number;
   log: (line: string) => void;
   now?: () => number;
-}): Promise<{ output: ProducerOutput; code: number | null; timedOut: boolean; wallMs: number; chars: number }> {
+}): Promise<ScriptRun> {
   if (!SCRIPT_RE.test(opts.script)) return { output: { ok: false, error: GRAMMAR }, code: null, timedOut: false, wallMs: 0, chars: 0 };
   const now = opts.now ?? Date.now;
   const started = now();
-  const result = await opts.run([resolve(opts.root, opts.script)], {
-    cwd: opts.root,
-    env: producerEnv(process.env),
-    timeoutMs: opts.timeoutMs,
-    stdin: JSON.stringify(opts.input),
-  });
+  const refuse = (error: string): ScriptRun =>
+    ({ output: { ok: false, error }, code: null, timedOut: false, wallMs: now() - started, chars: 0, refused: "hash" });
+  const found = await resolveScript(opts.root, opts.script);
+  if ("error" in found) return refuse(found.error);
+  const bytes = await readScriptBytes(found.path);
+  if (bytes === undefined || sha256Hex(bytes) !== opts.sha256) return refuse(`${opts.script} changed since arming`);
+
+  let dir: string | undefined;
+  let result: RunResult;
+  try {
+    dir = await mkdtemp(join(tmpdir(), RUN_DIR_PREFIX));
+    const copy = join(dir, basename(opts.script));
+    await writeFile(copy, bytes, { mode: 0o400, flag: "wx" });
+    result = await opts.run([copy], {
+      cwd: opts.root,
+      env: { ...producerEnv(process.env), GRAVIT_ROOT: resolve(opts.root) },
+      timeoutMs: opts.timeoutMs,
+      stdin: JSON.stringify(opts.input),
+    });
+  } catch (error) {
+    /* The copy could not be made (no temporary directory, a full disk), or a runner broke its
+     * never-reject contract: nothing ran that could be reported. */
+    result = { code: null, stdout: "", stderr: "", timedOut: false, error: codeOf(error) };
+  } finally {
+    if (dir !== undefined) {
+      const runDir = dir;
+      await rm(runDir, { recursive: true, force: true }).catch((error: unknown) => {
+        opts.log(`${BIN}: desk: producer ${opts.script} left its run directory ${runDir} behind: ${codeOf(error)}`);
+      });
+    }
+  }
   const wallMs = now() - started;
   if (result.stderr !== "") {
     opts.log(`${BIN}: desk: producer ${opts.script} wrote to stderr: ${oneLine(capText(result.stderr, STDERR_LOG_MAX).text)}`);
