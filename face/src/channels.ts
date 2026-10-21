@@ -490,7 +490,7 @@ export async function reconcileChannels(deps: {
  * points, opening with a letter or digit - so `.`/`..`, dotfiles, separators,
  * spaces and control characters never reach a path. Compared and created in
  * NFC, so one word typed in two normalizations is one directory. */
-const NAME_RE = /^[\p{L}\p{N}][\p{L}\p{N}\p{M}_-]{0,40}$/u;
+export const NAME_RE = /^[\p{L}\p{N}][\p{L}\p{N}\p{M}_-]{0,40}$/u;
 
 /** Birth `strategies/<name>` from the template. Refuses a malformed name, a
  * taken name, and a missing template - never overwrites anything. */

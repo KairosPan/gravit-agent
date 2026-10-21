@@ -1,29 +1,59 @@
-/** The desk's switch from a terminal: pause the desk, and - from here only - resume it. The switch
- * is desk.ts's `OFF` file ({@link writeOff}, {@link clearOff}); the phone and the Desk panel can
- * set it too, but nothing but this command, the file's deletion or its own expiry lifts it.
- * Spec: docs/superpowers/specs/2026-10-19-always-on-gravit-design.md §5.8.
+/** The desk's switch from a terminal: pause the desk, and - from here only - resume it; and arm the standing
+ * orders it fires on the exchange calendar. The switch is desk.ts's `OFF` file ({@link writeOff},
+ * {@link clearOff}); the phone and the Desk panel can set it too, but nothing but this command, the file's
+ * deletion or its own expiry lifts it. The orders are `standing.yml` beside it (src/standing.ts), which only
+ * the operator writes: here, or by hand.
+ * Spec: docs/superpowers/specs/2026-10-19-always-on-gravit-design.md §5.8; rulings P2-9, P2-16, P2-22, P2-24.
  *
  *   npm run desk -- pause          pause the desk until a resume
  *   npm run desk -- pause 2h       pause it for a while: Nm, Nh or Nd, a whole number of minutes, hours or days
  *   npm run desk -- resume         lift the pause
+ *   npm run desk -- arm desk --id preclose --at close-30m --producer builtin:brief --expires 2026-11-30
+ *                                  arm a standing order: pin its text's hash (and its script's), add it to standing.yml
+ *   npm run desk -- rearm preclose take a changed text's (or script's) new hash, after reviewing the change
  *
  * It acts on the harness home this shell resolves - `$DSH_HOME`, else ~/.dsh - as `npm start` and
- * `npm run service -- install` do. No face need be running: the switch is a file, which the face
- * reads when it needs it, and each set and lift is a line in the desk's ledger.
+ * `npm run service -- install` do, and pins files in the repository this script sits in. No face need be
+ * running: the switch and the orders are files, which the face reads when it needs them; each set and lift of
+ * the switch is a line in the desk's ledger, and the face reads `standing.yml` again within 30 s of a change.
  *
- * The export is {@link runDesk}, the commands over an injected home, printer and clock, which the
- * tests drive against temp homes. Importing this file runs nothing; run as a script, the guard at
- * the end resolves the home and exits with the command's code.
+ * The export is {@link runDesk}, the commands over an injected home, printer, clock, repository root and
+ * market clock, which the tests drive against temp homes. Importing this file runs nothing; run as a script,
+ * the guard at the end resolves the home and exits with the command's code.
+ *
+ * MODULE WEIGHT. `arm` and `rearm` load src/standing.ts (with js-yaml), src/producer.ts and
+ * src/market-clock.ts on their first use, so `pause` and `resume` load no more than they did.
  * @module
  */
 import { existsSync, realpathSync } from "node:fs";
-import { join } from "node:path";
+import { constants as fsConstants, open, readFile, type FileHandle } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveDshHome } from "@deepseek-ai/dsh-home-paths";
 import { OFF_FILE, clearOff, deskDir, deskTime, parseDuration, writeOff, type OffState } from "../src/desk.ts";
+import { etDate } from "../src/et.ts";
+import type { MarketClock } from "../src/market-clock.ts";
 
 /** What {@link runDesk} prints for a command or an argument it does not know. */
-const USAGE = "usage: npm run desk -- pause [Nm | Nh | Nd] | resume";
+const USAGE = "usage: npm run desk -- pause [Nm | Nh | Nd] | resume | arm <desk | strategies/NAME> --id ID --at ANCHOR --expires YYYY-MM-DD"
+  + " [--producer scripts/FILE.py | builtin:NAME] [--model PROVIDER/MODEL] [--turn-deadline DURATION] [--producer-deadline DURATION] [--no-wake] | rearm ID";
+
+/** The repository this script sits in: `<root>/face/scripts/desk.ts`. */
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+
+/** What {@link runDesk} runs over. */
+export interface DeskDeps {
+  /** The harness home. */
+  home: string;
+  /** The printer: one call per line printed. */
+  out: (line: string) => void;
+  /** The clock, `Date.now` by default. */
+  now?: () => number;
+  /** The repository whose files `arm` and `rearm` pin, this script's own by default. */
+  root?: string;
+  /** The market clock `arm` asks, `pythonMarketClock` under `FACE_PYTHON || python3` by default. */
+  marketClock?: MarketClock;
+}
 
 /** A failure as its code when it has one (ENOTDIR, EACCES, EPERM), else its message. */
 function reasonOf(err: unknown): string {
@@ -33,10 +63,9 @@ function reasonOf(err: unknown): string {
 }
 
 /**
- * Run one command - `npm run desk -- <cmd> [duration]` - and return its exit code: 0 when it is
- * done or there was nothing to do, 1 when the switch could not be written or removed, 2 for a
- * command or an argument it does not know. Every line goes through `deps.out`; nothing here exits
- * the process.
+ * Run one command - `npm run desk -- <cmd> [arguments]` - and return its exit code: 0 when it is done or there
+ * was nothing to do, 1 when it was refused or the file could not be written or removed, 2 for a command or an
+ * argument it does not know. Every line goes through `deps.out`; nothing here exits the process.
  *
  * - `pause [duration]`: writes `OFF`, set by `terminal` - with `until` the duration after `now()`
  *   when one is given ({@link parseDuration}) - and prints `paused`, or `paused until HH:MM ET`,
@@ -45,13 +74,17 @@ function reasonOf(err: unknown): string {
  *   36,500 days - or a second argument is the usage line, and nothing is written.
  * - `resume`: removes `OFF` and prints `resumed`, or `not paused` when there was none. An argument
  *   is the usage line.
+ * - `arm <desk | strategies/NAME> --id ID --at ANCHOR --expires YYYY-MM-DD [--producer …] [--model …]
+ *   [--turn-deadline …] [--producer-deadline …] [--no-wake]`: arms a standing order (see {@link arm}).
+ * - `rearm ID`: takes the new hashes of an armed order's changed files (see {@link rearm}).
  *
  * A switch it cannot write or remove is one line naming the file and the error's code.
  * @param cmd - the command.
  * @param args - what follows it.
- * @param deps - `home`, the harness home; `out`, the printer; `now`, the clock, default `Date.now`.
+ * @param deps - `home`, the harness home; `out`, the printer; `now`, the clock, default `Date.now`; `root`, the
+ *   repository `arm` and `rearm` pin files in; `marketClock`, the clock `arm` asks.
  */
-export async function runDesk(cmd: string, args: string[], deps: { home: string; out: (line: string) => void; now?: () => number }): Promise<number> {
+export async function runDesk(cmd: string, args: string[], deps: DeskDeps): Promise<number> {
   const at = (deps.now ?? Date.now)();
   const file = join(deskDir(deps.home), OFF_FILE);
   if (cmd === "pause" && args.length <= 1) {
@@ -81,8 +114,304 @@ export async function runDesk(cmd: string, args: string[], deps: { home: string;
     deps.out(lifted ? "resumed" : "not paused");
     return 0;
   }
+  if (cmd === "arm") return arm(args, deps, at);
+  if (cmd === "rearm") return rearm(args, deps);
   deps.out(USAGE);
   return 2;
+}
+
+/* ---------- what arm and rearm load on first use ---------- */
+
+/** src/standing.ts, src/producer.ts and src/market-clock.ts, as arm and rearm use them. */
+interface Machinery {
+  standing: typeof import("../src/standing.ts");
+  producer: typeof import("../src/producer.ts");
+  clock: typeof import("../src/market-clock.ts");
+}
+
+let machinery: Promise<Machinery> | undefined;
+
+/** The machinery, imported on the first arm or rearm and shared after it (see the module header's MODULE WEIGHT). */
+function loadMachinery(): Promise<Machinery> {
+  machinery ??= Promise.all([import("../src/standing.ts"), import("../src/producer.ts"), import("../src/market-clock.ts")])
+    .then(([standing, producer, clock]) => ({ standing, producer, clock }))
+    .catch((err: unknown) => {
+      machinery = undefined;
+      throw err;
+    });
+  return machinery;
+}
+
+/* ---------- the files an order pins ---------- */
+
+/**
+ * An order's text, `<root>/<dir>/<file>`, read and hashed: a regular file - not a link, not a FIFO - of at most
+ * `maxBytes`, all of it UTF-8.
+ * @returns its sha256, or why it cannot be pinned, naming it `<dir>/<file>`: `is missing`, `is not a regular
+ *   file`, `is <n> bytes; the limit is 16,384`, `is not UTF-8` or `cannot be read: <code>`.
+ */
+async function hashText(m: Machinery, root: string, dir: string, file: string): Promise<{ sha256: string } | { error: string }> {
+  const label = `${dir}/${file}`;
+  const limit = m.standing.STANDING_TEXT_MAX_BYTES;
+  let handle: FileHandle;
+  try {
+    handle = await open(join(root, dir, file), fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
+  } catch (err) {
+    const code = reasonOf(err);
+    if (code === "ENOENT" || code === "ENOTDIR") return { error: `${label} is missing` };
+    if (code === "ELOOP") return { error: `${label} is not a regular file` };
+    return { error: `${label} cannot be read: ${code}` };
+  }
+  try {
+    const info = await handle.stat();
+    if (!info.isFile()) return { error: `${label} is not a regular file` };
+    const bytes = info.size > limit ? undefined : await handle.readFile();
+    const size = bytes?.length ?? info.size;
+    if (bytes === undefined || size > limit) return { error: `${label} is ${size.toLocaleString("en-US")} bytes; the limit is ${limit.toLocaleString("en-US")}` };
+    try {
+      new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+      return { error: `${label} is not UTF-8` };
+    }
+    return { sha256: m.standing.sha256Hex(bytes) };
+  } catch (err) {
+    return { error: `${label} cannot be read: ${reasonOf(err)}` };
+  } finally {
+    await handle.close().catch(() => {});
+  }
+}
+
+/**
+ * A script producer's bytes, found as a firing finds them (producer.ts's `resolveScript`: a regular file under
+ * `<root>/scripts/`), hashed.
+ * @returns its sha256, or why not: resolveScript's `<script> is missing`, `leaves scripts/` or `is not a
+ *   regular file`, or `<script> cannot be read: <code>`.
+ */
+async function hashScript(m: Machinery, root: string, script: string): Promise<{ sha256: string } | { error: string }> {
+  const found = await m.producer.resolveScript(root, script);
+  if ("error" in found) return found;
+  try {
+    return { sha256: m.standing.sha256Hex(await readFile(found.path)) };
+  } catch (err) {
+    return { error: `${script} cannot be read: ${reasonOf(err)}` };
+  }
+}
+
+/**
+ * `standing.yml`'s text: `""` and `found: false` when there is none.
+ * @returns the text, or `cannot read <path>: <code>`.
+ */
+async function readStanding(path: string): Promise<{ text: string; found: boolean } | { error: string }> {
+  try {
+    return { text: await readFile(path, "utf8"), found: true };
+  } catch (err) {
+    if (reasonOf(err) === "ENOENT") return { text: "", found: false };
+    return { error: `cannot read ${path}: ${reasonOf(err)}` };
+  }
+}
+
+/** The first 12 hex digits of a hash, as the lines print it. */
+const short = (sha256: string): string => `${sha256.slice(0, 12)}…`;
+
+/* ---------- arm ---------- */
+
+/** arm's flags that take a value. */
+const VALUE_FLAGS: ReadonlySet<string> = new Set(["--id", "--at", "--expires", "--producer", "--model", "--turn-deadline", "--producer-deadline"]);
+
+/** arm's arguments, read: exactly one directory, each flag at most once, `--id`, `--at` and `--expires` given. */
+interface ArmArgs {
+  dir: string;
+  flags: Map<string, string>;
+  noWake: boolean;
+}
+
+/** Read arm's arguments, or `undefined` - the usage line - for an unknown flag, a flag without its value (a
+ * value may not open with `--`), a flag given twice, a second directory, or a missing directory or flag. */
+function parseArmArgs(args: string[]): ArmArgs | undefined {
+  let dir: string | undefined;
+  const flags = new Map<string, string>();
+  let noWake = false;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--no-wake") {
+      if (noWake) return undefined;
+      noWake = true;
+    } else if (VALUE_FLAGS.has(arg)) {
+      const value = args[i + 1];
+      if (value === undefined || value.startsWith("--") || flags.has(arg)) return undefined;
+      flags.set(arg, value);
+      i += 1;
+    } else if (arg.startsWith("-") || dir !== undefined) {
+      return undefined;
+    } else {
+      dir = arg;
+    }
+  }
+  if (dir === undefined || !flags.has("--id") || !flags.has("--at") || !flags.has("--expires")) return undefined;
+  return { dir, flags, noWake };
+}
+
+/**
+ * `arm <dir> --id ID --at ANCHOR --expires YYYY-MM-DD [--producer scripts/FILE.py | builtin:NAME]
+ * [--model PROVIDER/MODEL] [--turn-deadline DURATION] [--producer-deadline DURATION] [--no-wake]`.
+ *
+ * An unknown flag or a missing value is the usage line, exit 2, before any file is read or the clock asked.
+ * Then, in order: the id; the directory (`desk` or `strategies/NAME`); `<dir>/STANDING.md` (a regular file,
+ * at most 16,384 bytes, UTF-8), hashed; the producer, a script's bytes hashed (`--no-wake` needs one);
+ * `--at`; `--expires`, a date not before today in New York; the deadlines and the room before the close
+ * (P2-16); `--model`'s syntax; `standing.yml` loads; the id is not taken; the market clock answers for today.
+ * The entry - `armedAt` now - is appended ({@link Machinery}'s `appendOrder`) and the file written 0600.
+ *
+ * Prints `armed <id> in <root>: <dir>/STANDING.md sha256 <12 hex>…, at <at>, expires <date>[, producer
+ * <spec>[ sha256 <12 hex>…]]; the face reads standing.yml again within 30 s`, exit 0; or one line
+ * `cannot arm <id>: <reason>`, exit 1, and nothing written.
+ */
+async function arm(args: string[], deps: DeskDeps, now: number): Promise<number> {
+  const parsed = parseArmArgs(args);
+  if (parsed === undefined) {
+    deps.out(USAGE);
+    return 2;
+  }
+  const m = await loadMachinery();
+  const { standing } = m;
+  const { dir, flags } = parsed;
+  const id = flags.get("--id") as string;
+  const refuse = (reason: string): number => {
+    deps.out(`cannot arm ${id}: ${reason}`);
+    return 1;
+  };
+  const root = deps.root ?? REPO_ROOT;
+
+  if (!standing.isOrderId(id)) return refuse(`--id ${id} is not an order id: a-z, 0-9 and -, opening with a letter, at most 40 characters`);
+  if (!standing.isOrderDir(dir)) return refuse(`${dir} is not desk or strategies/NAME`);
+  const file = standing.STANDING_TEXT_FILE;
+  const text = await hashText(m, root, dir, file);
+  if ("error" in text) return refuse(text.error);
+
+  const producerFlag = flags.get("--producer");
+  const spec = producerFlag === undefined ? undefined : m.producer.parseProducer(producerFlag);
+  if (spec !== undefined && "error" in spec) return refuse(spec.error);
+  if (spec === undefined && parsed.noWake) return refuse("--no-wake needs a --producer: an order with neither runs nothing");
+  let scriptSha: string | undefined;
+  if (spec?.kind === "script") {
+    const script = await hashScript(m, root, spec.script);
+    if ("error" in script) return refuse(script.error);
+    scriptSha = script.sha256;
+  }
+
+  const atFlag = flags.get("--at") as string;
+  const anchor = standing.parseAnchor(atFlag);
+  if (anchor === undefined) {
+    return refuse(`--at ${atFlag} is not open, close, open±Nm, close±Nm (N 1-600; open-Nm at most 570, close+Nm at most 479) or HH:MM`);
+  }
+
+  const expires = flags.get("--expires") as string;
+  const today = etDate(new Date(now));
+  if (!standing.isEtDate(expires)) return refuse(`--expires ${expires} is not a date, YYYY-MM-DD`);
+  if (expires < today) return refuse(`--expires ${expires} is before today, ${today} ET`);
+
+  const turnDeadline = flags.get("--turn-deadline") ?? standing.formatStandingDuration(standing.DEFAULT_TURN_DEADLINE_MS);
+  const turnMs = standing.parseStandingDuration(turnDeadline, standing.TURN_DEADLINE_MIN_MS, standing.TURN_DEADLINE_MAX_MS);
+  if (turnMs === undefined) return refuse(`--turn-deadline ${turnDeadline} must be <n>s or <n>m, from 1 min to 30 min`);
+  const producerDeadline = flags.get("--producer-deadline") ?? standing.formatStandingDuration(standing.DEFAULT_PRODUCER_DEADLINE_MS);
+  const producerMs = standing.parseStandingDuration(producerDeadline, standing.PRODUCER_DEADLINE_MIN_MS, standing.PRODUCER_DEADLINE_MAX_MS);
+  if (producerMs === undefined) return refuse(`--producer-deadline ${producerDeadline} must be <n>s or <n>m, from 10 s to 180 min`);
+  const room = standing.roomProblem(anchor, {
+    ...(spec === undefined ? {} : { producerMs }),
+    ...(parsed.noWake ? {} : { turnMs }),
+  });
+  if (room !== undefined) return refuse(room);
+
+  const model = flags.get("--model");
+  if (model !== undefined && !standing.isModelRoute(model)) return refuse(`--model ${model} is not PROVIDER/MODEL`);
+
+  const path = join(deskDir(deps.home), standing.STANDING_FILE);
+  const read = await readStanding(path);
+  if ("error" in read) return refuse(read.error);
+  const load = standing.parseStanding(read.text);
+  if (!load.ok) return refuse(`${path} is refused, so nothing is added to it until it is fixed: ${load.errors.join("; ")}`);
+  if (load.orders.some((order) => order.id === id)) return refuse(`${id} is already armed; npm run desk -- rearm ${id} takes a changed file's new hash`);
+
+  const python = process.env.FACE_PYTHON || "python3";
+  const ask = deps.marketClock ?? m.clock.pythonMarketClock({ root, python });
+  const day = await m.clock.createMarketCalendar({ ask, python }).today(now);
+  if (!day.ok) return refuse(`the market calendar failed in ${python}: ${day.error}; FACE_PYTHON must name an interpreter with pandas_market_calendars`);
+
+  const producerText = spec === undefined ? undefined : m.producer.formatProducer(spec);
+  const next = standing.appendOrder(read.text, {
+    id, dir, file, sha256: text.sha256, at: atFlag,
+    ...(producerText === undefined ? {} : { producer: producerText }),
+    ...(scriptSha === undefined ? {} : { producerSha256: scriptSha }),
+    wake: !parsed.noWake,
+    ...(model === undefined ? {} : { model }),
+    turnDeadline, producerDeadline, expires, armedAt: new Date(now).toISOString(),
+  });
+  if ("error" in next) return refuse(next.error);
+  try {
+    await standing.writeStanding(deps.home, next.text, { expect: read.found ? read.text : null });
+  } catch (err) {
+    return refuse(`cannot write ${path}: ${reasonOf(err)}`);
+  }
+  const producerPart = producerText === undefined ? "" : `, producer ${producerText}${scriptSha === undefined ? "" : ` sha256 ${short(scriptSha)}`}`;
+  deps.out(`armed ${id} in ${root}: ${dir}/${file} sha256 ${short(text.sha256)}, at ${atFlag}, expires ${expires}${producerPart}; the face reads standing.yml again within 30 s`);
+  return 0;
+}
+
+/* ---------- rearm ---------- */
+
+/**
+ * `rearm ID`: after the operator has reviewed a change to an armed order's text - or its script - take the new
+ * hashes. The order's `<dir>/<file>` (and a script producer's bytes) are hashed as `arm` hashes them; when
+ * nothing changed it prints `<id>: nothing changed since arming`, exit 0; else only that order's hash lines are
+ * rewritten (`rehashOrder`; `armedAt` and everything else stay) and it prints `re-armed <id>: <dir>/<file>
+ * sha256 <12 hex>…[, <script> sha256 <12 hex>…]`, exit 0. A refusal is one line, `cannot re-arm <id>:
+ * <reason>` - `no such order in standing.yml` among them - exit 1, and nothing written. Anything but one
+ * argument is the usage line, exit 2. The market clock is not asked.
+ */
+async function rearm(args: string[], deps: DeskDeps): Promise<number> {
+  if (args.length !== 1) {
+    deps.out(USAGE);
+    return 2;
+  }
+  const [id] = args;
+  const refuse = (reason: string): number => {
+    deps.out(`cannot re-arm ${id}: ${reason}`);
+    return 1;
+  };
+  const m = await loadMachinery();
+  const { standing } = m;
+  const root = deps.root ?? REPO_ROOT;
+  const path = join(deskDir(deps.home), standing.STANDING_FILE);
+  const read = await readStanding(path);
+  if ("error" in read) return refuse(read.error);
+  const load = standing.parseStanding(read.text);
+  if (!load.ok) return refuse(`${path} is refused, so nothing in it changes until it is fixed: ${load.errors.join("; ")}`);
+  const order = load.orders.find((o) => o.id === id);
+  if (order === undefined) return refuse("no such order in standing.yml");
+
+  const text = await hashText(m, root, order.dir, order.file);
+  if ("error" in text) return refuse(text.error);
+  const script = order.producer?.kind === "script" ? order.producer.script : undefined;
+  let scriptSha: string | undefined;
+  if (script !== undefined) {
+    const hashed = await hashScript(m, root, script);
+    if ("error" in hashed) return refuse(hashed.error);
+    scriptSha = hashed.sha256;
+  }
+  if (text.sha256 === order.sha256 && scriptSha === order.producerSha256) {
+    deps.out(`${id}: nothing changed since arming`);
+    return 0;
+  }
+  const next = standing.rehashOrder(read.text, id, { sha256: text.sha256, ...(scriptSha === undefined ? {} : { producerSha256: scriptSha }) });
+  if ("error" in next) return refuse(next.error);
+  try {
+    await standing.writeStanding(deps.home, next.text, { expect: read.found ? read.text : null });
+  } catch (err) {
+    return refuse(`cannot write ${path}: ${reasonOf(err)}`);
+  }
+  const scriptPart = script === undefined || scriptSha === undefined ? "" : `, ${script} sha256 ${short(scriptSha)}`;
+  deps.out(`re-armed ${id}: ${order.dir}/${order.file} sha256 ${short(text.sha256)}${scriptPart}`);
+  return 0;
 }
 
 /* Run only as a script - the tests import runDesk. Compared as real paths, as service.ts does: a
