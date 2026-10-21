@@ -25,7 +25,7 @@ export type FenceName = (typeof FENCE_NAMES)[number];
  * `.GIT` for `.git` and `.dſh` for `.dsh`. Upper, then lower, folds that `ſ` to `s` as the volume
  * does, which lower alone would not. On a case-sensitive volume this matches a few names dsh would not
  * read: the safe side. */
-export const foldName = (name: string): string => name.toUpperCase().toLowerCase();
+const foldName = (name: string): string => name.toUpperCase().toLowerCase();
 
 /** Each folded fence name, to its {@link FENCE_NAMES} spelling. */
 const FENCED: ReadonlyMap<string, FenceName> = new Map(FENCE_NAMES.map((name) => [foldName(name), name]));

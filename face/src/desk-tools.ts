@@ -24,10 +24,11 @@
  * keeps the hub's own fields, times in UTC. `desk_state` renders its value as JSON.
  *
  * THE WRITE GUARD. This module also holds the desk's write guard ({@link installDeskWriteGuard}): one root
- * `tools/pre-execute` listener that denies a `gravit-desk` agent's `write`, `edit` or `str_replace_editor`
- * whose path names an instruction file, a project root or a skill root (src/desk-names.ts `FENCE_NAMES`)
- * at any depth - before the write, so a desk turn cannot steer the rest of itself. src/desk.ts `installDesk`
- * installs it beside the tools.
+ * `tools/pre-execute` listener, and a `tools.guard` behind it that no listener can talk out of a denial, that
+ * deny a desk agent's `write`, `edit` or `str_replace_editor` (a `view` excepted) whose path names an
+ * instruction file, a project root or a skill root (src/desk-names.ts `FENCE_NAMES`) at any depth below its
+ * common ancestor with the session's cwd - before the write, so a desk turn cannot steer the rest of itself.
+ * src/desk.ts `installDesk` installs it beside the tools.
  *
  * MODULE WEIGHT: the preset id and the fence names come from src/desk-names.ts, a leaf, not from
  * src/desk-preset.ts or src/desk-session.ts. This module is loaded wherever src/desk.ts is - by `npm run
@@ -39,7 +40,7 @@
  * to stop.
  * @module
  */
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { DESK_PRESET, fenceNameOf, type FenceName } from "./desk-names.ts";
 import type { DeskStatus } from "./desk.ts";
 import { etClock, etDate } from "./et.ts";
@@ -400,9 +401,9 @@ export type DeskWriteTool = (typeof DESK_WRITE_TOOLS)[number];
  * declare them (tests/desk-smoke.test.ts pins every parameter each takes, off a real tree's schemas):
  * - `write` and `edit` (dsh-tool-fs): `file_path`, which the tool resolves against the calling session's cwd,
  *   `exec.agent.session.header.cwd` - or the sandbox policy's workspace root, which is that same cwd;
- * - `str_replace_editor` (dsh-tool-str-replace-editor): `path`, which must be absolute, for every command.
- *   `view` reads, and is judged with the rest: the guard judges the tool, not the command, and a desk that
- *   wants to read one of these names has `read`.
+ * - `str_replace_editor` (dsh-tool-str-replace-editor): `path`, which must be absolute, for each of its four
+ *   commands, `view`, `create`, `str_replace` and `insert` (desk-smoke pins the enum). `view` reads, and
+ *   passes ({@link deskWriteDecision}); every other command, a missing or unknown one too, is judged.
  *
  * Their other parameters - the content, the edit strings, the sandbox's escalation pair - name no path.
  */
@@ -423,10 +424,21 @@ const UNCHECKED = "the desk could not check this write's path; nothing was writt
 
 const isDeskWriteTool = (name: unknown): name is DeskWriteTool => (DESK_WRITE_TOOLS as readonly unknown[]).includes(name);
 
-/** The first of `path`'s names that is a fence name, in its `FENCE_NAMES` spelling, or `undefined`. The names
- * are split at `/`, and at `\` too: a name with a backslash in it is refused rather than guessed at. */
-function fencedName(path: string): FenceName | undefined {
-  for (const name of path.split(/[\\/]/)) {
+/** The names a path spells, split at `/` and at `\` - a name with a backslash in it is judged in parts rather
+ * than guessed at - leaving out the empty and the `.` ones, which name nothing. */
+const namesOf = (path: string): string[] => path.split(/[\\/]/).filter((name) => name !== "" && name !== ".");
+
+/** `names` past their longest common prefix with `base`: what a path names below its common ancestor with the
+ * cwd. Compared exactly, so a spelling that differs from the cwd's only in case is judged whole: the safe side. */
+function below(names: readonly string[], base: readonly string[]): readonly string[] {
+  let common = 0;
+  while (common < names.length && common < base.length && names[common] === base[common]) common += 1;
+  return names.slice(common);
+}
+
+/** The first of `names` that is a fence name, in its `FENCE_NAMES` spelling, or `undefined`. */
+function fencedName(names: readonly string[]): FenceName | undefined {
+  for (const name of names) {
     const fenced = fenceNameOf(name);
     if (fenced !== undefined) return fenced;
   }
@@ -436,14 +448,20 @@ function fencedName(path: string): FenceName | undefined {
 /**
  * The write guard's decision for one call: a deny, or `null` to leave the call alone. Pure and synchronous.
  *
- * `null` for any tool that is not one of {@link DESK_WRITE_TOOLS}. For a write tool, each of its
- * {@link DESK_WRITE_PATH_ARGS} is placed against `cwd` - as `path.resolve` places it, `..` collapsed - and the
- * call is denied when any name on that path is a fence name (src/desk-names.ts `FENCE_NAMES`, compared as the
- * volume compares names, `fenceNameOf`), with `the desk never writes <name>: it would steer every desk turn
- * after it`, `<name>` in its `FENCE_NAMES` spelling. Any name the argument spells counts too, though a `..`
- * leaves it behind: dsh-fs-local keeps a path with `..` as spelled and lets the volume walk it. dsh reads the
- * instruction files in every directory from the cwd to any file a tool touches, so a desk turn that wrote
- * `GRAVIT.md` would steer the rest of that same turn, before the fence (src/desk-session.ts) checks again.
+ * `null` for any tool that is not one of {@link DESK_WRITE_TOOLS}, and for `str_replace_editor`'s `view`, which
+ * reads. Any other call to a write tool - every other command of `str_replace_editor`, a missing or unknown one
+ * too - has each of its {@link DESK_WRITE_PATH_ARGS} judged by the names it reaches below its longest common
+ * ancestor with `cwd`: the checkout's own ancestors are never the desk's to write, so a checkout that sits under
+ * a directory named `.git` refuses nothing. Two spellings are judged: the path placed against `cwd` as
+ * `path.resolve` places it, `..` collapsed; and the argument as spelled - every name of a relative one, the
+ * names below the common ancestor of an absolute one - so a name that a `..` leaves behind counts too, as
+ * dsh-fs-local keeps a path with `..` as spelled and lets the volume walk it. The call is denied when any of
+ * those names is a fence name (src/desk-names.ts `FENCE_NAMES`, compared as the volume compares names,
+ * `fenceNameOf`), with `the desk never writes <name>: it would steer every desk turn after it`, `<name>` in its
+ * `FENCE_NAMES` spelling - in the journal, above it (`../GRAVIT.md`), at the repository's skill roots
+ * (`../../.agents/...`) and in the harness home (`~/.dsh/...`) alike. dsh reads the instruction files in every
+ * directory from the cwd to any file a tool touches, so a desk turn that wrote `GRAVIT.md` would steer the rest
+ * of that same turn, before the fence (src/desk-session.ts) checks again.
  *
  * It fails closed: a write tool whose arguments are no object, whose path argument is missing or is not a
  * string, or a `cwd` that is not a string, is denied with `the desk could not check this write's path;
@@ -455,10 +473,13 @@ function fencedName(path: string): FenceName | undefined {
 export function deskWriteDecision(toolName: string, args: unknown, cwd: string): DeskWriteDeny | null {
   if (!isDeskWriteTool(toolName)) return null;
   if (typeof cwd !== "string" || args === null || typeof args !== "object") return { kind: "deny", reason: UNCHECKED };
+  if (toolName === "str_replace_editor" && (args as { command?: unknown }).command === "view") return null;
+  const base = namesOf(resolve(cwd));
   for (const arg of DESK_WRITE_PATH_ARGS[toolName]) {
     const path: unknown = (args as Record<string, unknown>)[arg];
     if (typeof path !== "string") return { kind: "deny", reason: UNCHECKED };
-    const fenced = fencedName(resolve(cwd, path)) ?? fencedName(path);
+    const spelled = namesOf(path);
+    const fenced = fencedName(below(namesOf(resolve(cwd, path)), base)) ?? fencedName(isAbsolute(path) ? below(spelled, base) : spelled);
     if (fenced !== undefined) return { kind: "deny", reason: `the desk never writes ${fenced}: it would steer every desk turn after it` };
   }
   return null;
@@ -474,81 +495,153 @@ export type DeskPreDecision =
   | { kind: "ask"; reason?: string; displayReason?: { readonly en: string; readonly [locale: string]: string } };
 
 /** The slice of dsh-tools' `ToolExecution` the guard reads: the tool's name, its arguments as the model sent
- * them, and the calling agent - its context, for the preset registry, and its session's cwd. */
+ * them, and the calling agent - its context, for the preset registry, and its session's header: the preset the
+ * session was created with, fixed then, and its cwd. */
 export interface DeskGuardExecution {
   name: string;
   arguments?: unknown;
-  agent?: { id: string; ctx: unknown; session: { header: { cwd?: string } } };
+  agent?: { id: string; ctx: unknown; session: { header: { cwd?: string; agentPreset?: string } } };
+}
+
+/** The tool registry's guard seam as the backstop uses it - dsh-tools `ToolRuntime.guard`, a monotonic
+ * `ToolGuard`: a synchronous check run after the whole `tools/pre-execute` waterfall, and only on a call it
+ * allowed (`prepareExecution`), whose returned string denies the call; no guard can force-allow a call another
+ * denied. A guard registered through a context is that context's effect, withdrawn with it. */
+export interface DeskGuardToolsLike {
+  guard(check: (exec: DeskGuardExecution) => string | undefined): () => unknown;
+}
+
+/** The context an `inject` callback runs in, as the backstop reads it: the tool registry, through `get`. */
+export interface DeskGuardInjectCtxLike {
+  get(name: "tools"): unknown;
 }
 
 /** The booted ROOT context as {@link installDeskWriteGuard} uses it: {@link DeskToolsCtxLike}, since
- * `installDesk` hands both installers one context, and the `tools/pre-execute` waterfall (dsh-tools), run
- * before every call dispatches. A listener takes the pending call and `next`, and answers a decision; one
- * that answers without calling `next` vetoes every listener behind it, and the call. */
+ * `installDesk` hands both installers one context; the `tools/pre-execute` waterfall (dsh-tools), run before
+ * every call dispatches - a listener takes the pending call and `next`, and answers a decision, and one that
+ * answers without calling `next` vetoes every listener behind it, and the call; and cordis's `inject`, which
+ * runs a callback in a fiber of its own once the services it names are live, again whenever one is replaced,
+ * and withdraws what the callback registered when the fiber is disposed. */
 export type DeskWriteGuardCtxLike = DeskToolsCtxLike & {
   on(
     name: "tools/pre-execute",
     listener: (exec: DeskGuardExecution, next: () => Promise<DeskPreDecision>) => Promise<DeskPreDecision>,
     options?: { prepend?: boolean },
   ): () => unknown;
+  inject(deps: ["tools"], callback: (ctx: DeskGuardInjectCtxLike) => void): { dispose(): Promise<void> };
 };
 
-/** The guard's one line for a call it could not judge; it cannot throw. */
+/** A thrown value as a line shows it; it cannot throw. */
+function shownError(error: unknown): string {
+  try {
+    return messageOf(error);
+  } catch {
+    return "an error that cannot be shown";
+  }
+}
+
+/** The guard's line for a call it could not judge, and denied; it cannot throw. */
 function unjudgedLine(exec: DeskGuardExecution, error: unknown): string {
   try {
-    return `${BIN}: desk: the write guard could not judge a ${String(exec.name)} call from agent ${String(exec.agent?.id)}, and denied it: ${messageOf(error)}`;
+    return `${BIN}: desk: the write guard could not judge a ${String(exec.name)} call from agent ${String(exec.agent?.id)}, and denied it: ${shownError(error)}`;
   } catch {
     return `${BIN}: desk: the write guard could not judge a call, and denied it`;
   }
 }
 
+/** The guard's line for a write it let go on the session's own word, the registry having failed; it cannot throw. */
+function headerLine(exec: DeskGuardExecution, error: unknown): string {
+  try {
+    return `${BIN}: desk: the write guard could not read agent ${String(exec.agent?.id)}'s preset (${shownError(error)}); its session was not created as ${DESK_PRESET}, so its ${String(exec.name)} call goes on`;
+  } catch {
+    return `${BIN}: desk: the write guard could not read an agent's preset; its session was not created as ${DESK_PRESET}, so the call goes on`;
+  }
+}
+
 /**
- * Deny every `gravit-desk` agent's write of an instruction file, before it happens: one listener on the ROOT
- * context's `tools/pre-execute` waterfall, registered in front (`prepend`), as src/boot.ts `armOrderGate`
- * registers Gate 2's. A root listener sees every agent's calls - dsh filters by scope, and the root is every
- * scope's - so it covers the desk conversation, a browser's desk session and P2's and P4's firings alike,
- * in whatever cwd they run.
+ * Deny every desk agent's write of an instruction file, before it happens, with two registrations, as src/boot.ts
+ * `armOrderGate` arms Gate 2:
+ * - one listener on the ROOT context's `tools/pre-execute` waterfall, registered in front (`prepend`). A root
+ *   listener sees every agent's calls - dsh filters by scope, and the root is every scope's - so it covers the
+ *   desk conversation, a browser's desk session and P2's and P4's firings alike, in whatever cwd they run;
+ * - the backstop, one `tools.guard` armed through `ctx.inject(["tools"])`, so a registry that is replaced gets it
+ *   again. A listener registered later in front of this one could answer `allow` without calling `next`, and
+ *   dsh consults its guards only on an allowed call - which is exactly when the backstop runs, and no guard can
+ *   force-allow. It judges the call afresh, as the waterfall left it: a listener behind this one may have
+ *   changed the call's name or arguments since, so it never reuses the listener's verdict.
  *
- * For a call to one of {@link DESK_WRITE_TOOLS} from an agent whose preset
- * `ctx.agentPresets.composedPreset(agent.ctx)` reads as `gravit-desk` - read at the call, so a reloaded
- * registry is followed - it answers {@link deskWriteDecision}'s deny, over the agent's session cwd, without
- * calling `next`; anything else it hands on to `next` unjudged, and a call to a tool that writes nothing never
- * reaches the registry. It never throws: a failure to judge - the registry's, an agent whose session or cwd
- * cannot be read - is the fail-closed deny, `the desk could not check this write's path; nothing was
- * written`, with one `gravit-face: desk:` line through `log`. Where the registry fails it cannot tell whose
- * write it is, so it denies whoever's; a malformed call from the desk is denied the same way, with no line.
+ * Both judge alike. A call to a tool outside {@link DESK_WRITE_TOOLS} is handed on at the cost of a name check,
+ * and never reaches the registry. A desk agent is one whose preset `ctx.agentPresets.composedPreset(agent.ctx)`
+ * reads as `gravit-desk` - read at the call, so a reloaded registry is followed - or whose session was created
+ * as `gravit-desk` (its header's `agentPreset`, fixed then): its write gets {@link deskWriteDecision}'s answer
+ * over the session's cwd. Anyone else's write is handed on unjudged.
  *
- * The fence (src/desk-session.ts) stays behind it, for a file another session plants.
+ * Neither ever throws. A failure to judge - an agent whose session or cwd cannot be read, or a registry that
+ * throws for a session created as the desk's - is the fail-closed deny, `the desk could not check this write's
+ * path; nothing was written`, with one `gravit-face: desk:` line through `log`. A registry that throws for any
+ * other session leaves the session's own word: its write goes on, with one line. One call is one line, however
+ * many of the two judge it, and a `log` that throws costs the line, never the decision. A malformed call from
+ * the desk is denied without a line: nothing failed.
+ *
+ * The fence (src/desk-session.ts) stays behind both, for a file another session plants.
  * @param ctx - the booted ROOT context.
- * @param options - `log`, where a failure is written (default `console.error`), for tests.
- * @returns the disposer that removes the listener.
+ * @param options - `log`, where a line is written (default `console.error`), for tests.
+ * @returns the disposer: it removes the listener at once, then disposes the backstop's fiber, which withdraws
+ *   the guard, and settles once it has; it never rejects.
  */
-export function installDeskWriteGuard(ctx: DeskWriteGuardCtxLike, options: { log?: (line: string) => void } = {}): () => void {
+export function installDeskWriteGuard(ctx: DeskWriteGuardCtxLike, options: { log?: (line: string) => void } = {}): () => Promise<void> {
   const log = options.log ?? ((line: string) => console.error(line));
-  /** The guard's decision for `exec`; `null` when the call is not its to judge. Throws when it cannot tell. */
-  const judge = (exec: DeskGuardExecution): DeskWriteDeny | null => {
-    if (!isDeskWriteTool(exec.name)) return null;
-    const agent = exec.agent;
-    if (agent === undefined || ctx.agentPresets.composedPreset(agent.ctx) !== DESK_PRESET) return null;
-    const cwd: unknown = agent.session.header.cwd;
-    if (typeof cwd !== "string") throw new Error("its session has no cwd");
-    return deskWriteDecision(exec.name, exec.arguments, cwd);
-  };
-  const off = ctx.on("tools/pre-execute", async (exec, next) => {
-    let decision: DeskWriteDeny | null;
-    try {
-      decision = judge(exec);
-    } catch (error) {
-      decision = { kind: "deny", reason: UNCHECKED };
-      try {
-        log(unjudgedLine(exec, error));
-      } catch {
-        /* the denial stands without its line */
-      }
+  /** The calls already given a line: the listener and the backstop can judge one call alike. */
+  const told = new WeakSet<object>();
+  const tell = (exec: unknown, line: string): void => {
+    if (typeof exec === "object" && exec !== null) {
+      if (told.has(exec)) return;
+      told.add(exec);
     }
-    return decision ?? next();
-  }, { prepend: true });
-  return () => {
+    try {
+      log(line);
+    } catch {
+      /* the decision stands without its line */
+    }
+  };
+  /** The guard's decision for `exec`, read afresh: `null` when the call is not its to judge, else the deny. Never throws. */
+  const judge = (exec: DeskGuardExecution): DeskWriteDeny | null => {
+    try {
+      if (!isDeskWriteTool(exec?.name)) return null;
+      const agent = exec.agent;
+      if (agent === undefined) return null;
+      const header = agent.session.header;
+      let composed: string | undefined;
+      try {
+        composed = ctx.agentPresets.composedPreset(agent.ctx);
+      } catch (error) {
+        if (header.agentPreset !== DESK_PRESET) {
+          tell(exec, headerLine(exec, error));
+          return null;
+        }
+        throw error;
+      }
+      if (composed !== DESK_PRESET && header.agentPreset !== DESK_PRESET) return null;
+      const cwd: unknown = header.cwd;
+      if (typeof cwd !== "string") throw new Error("its session has no cwd");
+      return deskWriteDecision(exec.name, exec.arguments, cwd);
+    } catch (error) {
+      tell(exec, unjudgedLine(exec, error));
+      return { kind: "deny", reason: UNCHECKED };
+    }
+  };
+  const off = ctx.on("tools/pre-execute", async (exec, next) => judge(exec) ?? next(), { prepend: true });
+  const backstop = ctx.inject(["tools"], function deskWriteBackstop(injected) {
+    const tools = injected.get("tools") as DeskGuardToolsLike | undefined;
+    if (tools === undefined) throw new Error(`${BIN}: desk: the tools service vanished before the write guard's backstop armed`);
+    tools.guard((exec) => judge(exec)?.reason);
+  });
+  return async () => {
     off();
+    try {
+      await backstop.dispose();
+    } catch (error) {
+      tell(undefined, `${BIN}: desk: the write guard's backstop could not be withdrawn: ${shownError(error)}`);
+    }
   };
 }

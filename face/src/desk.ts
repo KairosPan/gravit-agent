@@ -837,10 +837,11 @@ export interface DeskHandle {
  * deps, so the tool and the route agree - but for `runs`, which the tool cuts to the last ten and
  * counts in `runsInLedger` - and a face with the desk off still opens an old desk conversation
  * with its tools. Given `ctx`, hub or none and whatever `enabled` says, the desk's write guard
- * (src/desk-tools.ts `installDeskWriteGuard`) is installed too: every `gravit-desk` agent's
- * `write`, `edit` or `str_replace_editor` of an instruction file is denied before it runs. With
- * the desk on, `ready` is the `boot` event's append - stamped `bootedAt`, which is `now()` at this
- * call and the status's uptime origin - and the sleep watch starts at once, writing into the ledger. Given `root`, `route`, `sessionCtx` and `installModelSelection`
+ * (src/desk-tools.ts `installDeskWriteGuard`) is installed too, its listener and its backstop: every
+ * desk agent's `write`, `edit` or `str_replace_editor` of an instruction file is denied before it
+ * runs. With the desk on, `ready` is the `boot` event's append - stamped `bootedAt`, which is
+ * `now()` at this call and the status's uptime origin - and the sleep watch starts at once, writing
+ * into the ledger. Given `root`, `route`, `sessionCtx` and `installModelSelection`
  * too, the desk conversation's owner (src/desk-conversation.ts) is created on the same `now` and
  * started without being awaited - its `start` never rejects - so the desk session is ensured and
  * supervised before any phone message, and a turn the operator opens from the browser is timed,
@@ -853,11 +854,11 @@ export interface DeskHandle {
  * then the conversation, which cancels the desk turns under way as `shutdown`, gives each cut agent
  * two seconds to go idle so the cut turn is recorded, and gives a start, post or renew under way
  * five seconds to settle, so nothing the conversation writes lands after the `shutdown` - then
- * removes the tools' listener and the guard's, stops the watch, lets the `boot` append settle (two
+ * removes the tools' listener and the guard, stops the watch, lets the `boot` append settle (two
  * appends started together take the file lock in either order, and a `shutdown` written before its
  * `boot` reads as a lost run), then appends the `shutdown` with `code`. It is idempotent: a second
  * call writes nothing and settles with the first. With the desk off, `ready` is already resolved,
- * there is no conversation and no bridge, and `dispose` only removes the two listeners. Nothing here
+ * there is no conversation and no bridge, and `dispose` only removes the tools and the guard. Nothing here
  * rejects on the ledger, so a caller need not await `ready`.
  * @param webServer - the host webserver service, or a test recorder.
  * @param deps - `home`, the harness home; `enabled`, whether to mount the desk's rows; `now`
@@ -903,12 +904,12 @@ export function installDesk(
   const telegram = (): TelegramStatus => bridge?.status() ?? { configured: deps.telegram !== undefined, polling: false, dropped: 0, queued: 0 };
   const status = { home, bootedAt, enabled, now, version, telegram };
   registerDeskRoutes(webServer, status);
-  const removeGuard = deps.ctx === undefined ? () => {} : installDeskWriteGuard(deps.ctx);
+  const removeGuard = deps.ctx === undefined ? async () => {} : installDeskWriteGuard(deps.ctx);
   const removeTools = deps.ctx === undefined || deps.hub === undefined ? () => {} : installDeskTools(deps.ctx, deskToolDefinitions({
     hub: deps.hub,
     readState: () => deskStatus(status),
   }));
-  if (!enabled) return { enabled, bootedAt, ready: Promise.resolve(), dispose: async () => { removeTools(); removeGuard(); } };
+  if (!enabled) return { enabled, bootedAt, ready: Promise.resolve(), dispose: async () => { removeTools(); await removeGuard(); } };
   const ready = appendEvent(home, { t: new Date(bootedAt).toISOString(), kind: "boot", pid: process.pid, version, deskEnabled: true });
   const stopWatch = installAsleepWatch({ now, ...deps.watch, append: (event) => appendEvent(home, event) });
   const clock: DeskClock = { now, setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout) };
@@ -954,7 +955,7 @@ export function installDesk(
         await bridge?.dispose();
         await conversation?.dispose();
         removeTools();
-        removeGuard();
+        await removeGuard();
         stopWatch();
         await ready;
         await appendEvent(home, { t: new Date(now()).toISOString(), kind: "shutdown", pid: process.pid, code });

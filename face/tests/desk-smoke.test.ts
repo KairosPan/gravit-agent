@@ -1,8 +1,9 @@
 // face/tests/desk-smoke.test.ts
 /** The desk on a REAL composed tree (docs/superpowers/plans/2026-10-20-desk-p1-bridge.md, Tasks 8 and 8b):
- * the `gravit-desk` preset's roster, the parameters of its write tools that the write guard was written
- * against, its prompt - against a Gravit session's, the control - Gate 2's refusal from a desk turn, the
- * sandbox fence around `desk/journal/`, the write guard leaving a Gravit session's writes alone, the
+ * the `gravit-desk` preset's roster, the parameters of its write tools - and str_replace_editor's commands -
+ * that the write guard was written against, its prompt - against a Gravit session's, the control - Gate 2's
+ * refusal from a desk turn, the sandbox fence around `desk/journal/`, the write guard leaving a Gravit
+ * session's writes alone, the guard's backstop holding when a listener in front of it answers allow, the
  * instruction-chain threat the face's fence exists for, and the ledger's `desk-turn` record with its tokens.
  * The desk runs as main.ts runs it: `installDesk` on the booted face, its conversation
  * (src/desk-conversation.ts) the one owner of the desk session, every turn opened through `post`. That the
@@ -56,6 +57,7 @@ import { rolesText } from "../plugins/gravit.js";
 import { GRAVIT_PLUGIN_ABS, REPO as REPOSITORY, populateBotsRoot } from "./bots-fixture.ts";
 import { mountClient, remote, signIn } from "./remote.ts";
 import { StubAdapter, type StubReply } from "./stub-llm.ts";
+import { unwind } from "./unwind.ts";
 
 const gated = process.env.FACE_SMOKE !== "1";
 
@@ -98,6 +100,8 @@ const WRITE_PARAMETERS: Readonly<Record<DeskWriteTool, readonly string[]>> = {
   edit: ["file_path", "justification", "new_string", "old_string", "replace_all", "sandbox_permissions"],
   str_replace_editor: ["command", "file_text", "insert_line", "new_str", "old_str", "path", "view_range"],
 };
+/** The write guard's refusal of a desk write of GRAVIT.md (src/desk-tools.ts `deskWriteDecision`). */
+const GUARD_DENIAL = "the desk never writes GRAVIT.md: it would steer every desk turn after it";
 /** What Gravit's control turn writes in `repo/notes/GRAVIT.md`, off the desk's instruction chain. */
 const GRAVIT_NOTE = "DESK-SMOKE-GRAVIT-NOTE-5c1e: a Gravit session's own notes";
 /** The roles section's opening line, from plugins/gravit.js itself. */
@@ -150,22 +154,6 @@ async function waitFor(what: string, check: () => boolean | Promise<boolean>, ms
   }
 }
 
-/** Run every cleanup step, in order, each whatever the steps before it did. A step that fails fails the test
- * when the test itself passed; a test that failed keeps its own error, and the step's is logged beside it. */
-async function unwind(passed: boolean, steps: readonly (readonly [string, () => unknown])[]): Promise<void> {
-  const failures: string[] = [];
-  for (const [what, step] of steps) {
-    try {
-      await step();
-    } catch (error) {
-      failures.push(`${what}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-  if (failures.length === 0) return;
-  if (passed) throw new Error(`the cleanup failed - ${failures.join("; ")}`);
-  console.error(`desk smoke: the cleanup failed too - ${failures.join("; ")}`);
-}
-
 interface Ev { type: string; data?: Record<string, unknown> }
 type DeskTurnEvent = Extract<DeskEvent, { kind: "desk-turn" }>;
 
@@ -210,8 +198,9 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
     booted = await bootFace({ profileName: "face", port: 0, dshHome: HOME, botsRoot: BOTS });
     const { ctx } = booted;
     const tools = ctx.get("tools") as {
-      schemas(scope?: object): { name: string; parameters?: { properties?: Record<string, { type?: unknown }>; required?: string[] } }[];
+      schemas(scope?: object): { name: string; parameters?: { properties?: Record<string, { type?: unknown; enum?: unknown }>; required?: string[] } }[];
       register(definition: unknown): () => void;
+      execute(exec: object): Promise<{ isError: boolean; content?: { text?: string }[] }>;
     };
     const names = (schemas: { name: string }[]): string[] => schemas.map((s) => s.name).sort();
 
@@ -314,6 +303,10 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
         assert.ok(parameters.required?.includes(arg), `${tool}'s ${arg} is required`);
       }
     }
+    /* str_replace_editor's commands: view, which the guard lets through, and three that write. A command a dsh bump
+     * adds is judged, as an unknown one is, and fails here until it is weighed. */
+    assert.deepEqual(deskSchemas.find((s) => s.name === "str_replace_editor")?.parameters?.properties?.command?.enum,
+      ["view", "create", "str_replace", "insert"], "str_replace_editor's command enum is the one the guard was written against");
     assert.equal(names(tools.schemas(deskAgent)).includes(ORDER_STAND_IN), false, "the desk never sees the order stand-in");
     for (const deskTool of ["desk_quotes", "desk_state"]) assert.equal(known.has(deskTool), false, `the global view has no ${deskTool}`);
     const base = `http://127.0.0.1:${ctx.webServer.port}`;
@@ -373,7 +366,30 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
      * turn - in repo/notes/, off the desk's instruction chain - went through. */
     assert.equal(await readFile(join(ROOT, "notes", "GRAVIT.md"), "utf8"), `${GRAVIT_NOTE}\n`, "Gravit's own write of a GRAVIT.md landed");
 
-    /* 5. THE THREAT the face's fence exists for: an instruction file planted in the journal reaches the first
+    /* 5. THE WRITE GUARD'S BACKSTOP through the real waterfall: a tools/pre-execute listener registered after the
+     * guard, in front of it, answers allow without calling next - so the guard's own listener never runs, and
+     * dsh asks its guards, where the backstop denies the desk's write of GRAVIT.md all the same. The control:
+     * under the same listener, an ordinary journal write goes through. */
+    let swallowed = 0;
+    const swallow = ctx.on("tools/pre-execute", async () => {
+      swallowed += 1;
+      return { kind: "allow" as const };
+    }, { prepend: true });
+    try {
+      const signal = new AbortController().signal;
+      const lifted = await tools.execute({ callId: "backstop-probe", name: "write", arguments: { file_path: "GRAVIT.md", content: "lifted\n" }, agent: deskAgent, signal });
+      assert.equal(lifted.isError, true, "the desk's write of GRAVIT.md is denied with its listener out of the way");
+      assert.equal(lifted.content?.[0]?.text, `Error: ${GUARD_DENIAL}`, `by the backstop, in the guard's words; saw ${JSON.stringify(lifted.content)}`);
+      assert.equal(existsSync(join(JOURNAL, "GRAVIT.md")), false, "and no GRAVIT.md was written");
+      const control = await tools.execute({ callId: "backstop-control", name: "write", arguments: { file_path: "backstop-control.md", content: "a note\n" }, agent: deskAgent, signal });
+      assert.equal(control.isError, false, `the control: an ordinary journal write goes through; saw ${JSON.stringify(control.content)}`);
+      assert.equal(await readFile(join(JOURNAL, "backstop-control.md"), "utf8"), "a note\n");
+      assert.equal(swallowed, 2, "the swallowing listener answered both calls");
+    } finally {
+      swallow();
+    }
+
+    /* 6. THE THREAT the face's fence exists for: an instruction file planted in the journal reaches the first
      * request of a desk session opened over it - behind the repository's own GRAVIT.md, which heads the chain.
      * The probe is a desk agent from the firings' create path (createDeskAgent), driven directly: no fence check
      * runs in front of its turn, so it shows what one would let through. The fence finds the file, and the
@@ -406,7 +422,7 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
     assert.equal(requests.get(deskId)?.some((r) => r.messages.some((m) => textOf(m).includes("after the plant"))), false, "and the model never saw the text");
     await rm(join(JOURNAL, "GRAVIT.md"));
 
-    /* 6. THE TOKENS: each supervised turn is one desk-turn record, its usage the four buckets summed over its
+    /* 7. THE TOKENS: each supervised turn is one desk-turn record, its usage the four buckets summed over its
      * model calls - one for the roster turn, two for the order (the call, then the answer), four for the writes -
      * on the stub's route. */
     assert.deepEqual([roster, order, writes].map((r) => [r.source, r.outcome]), [["telegram", "ended"], ["telegram", "ended"], ["telegram", "ended"]]);
@@ -417,7 +433,7 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
     assert.equal(existsSync(join(JOURNAL, "levels.yml")), false);
     passed = true;
   } finally {
-    await unwind(passed, [
+    await unwind("desk smoke", passed, [
       ["the probe agent", () => probe?.dispose()],
       ["the desk", () => desk?.dispose(0)],
       ["the face", () => booted?.dispose()],

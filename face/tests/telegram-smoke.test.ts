@@ -58,6 +58,7 @@ import { telegramConfigFromEnv } from "../src/telegram.ts";
 import { GRAVIT_PLUGIN_ABS, populateBotsRoot } from "./bots-fixture.ts";
 import { mountClient, remote, signIn } from "./remote.ts";
 import { StubAdapter, type StubReply } from "./stub-llm.ts";
+import { unwind } from "./unwind.ts";
 
 const gated = process.env.FACE_SMOKE !== "1";
 
@@ -260,22 +261,6 @@ async function waitFor(what: string, check: () => boolean | Promise<boolean>, ms
     if (Date.now() > until) throw new Error(`timed out waiting for ${what}`);
     await new Promise((done) => setTimeout(done, 25));
   }
-}
-
-/** Run every cleanup step, in order, each whatever the steps before it did. A step that fails fails the test
- * when the test itself passed; a test that failed keeps its own error, and the step's is logged beside it. */
-async function unwind(passed: boolean, steps: readonly (readonly [string, () => unknown])[]): Promise<void> {
-  const failures: string[] = [];
-  for (const [what, step] of steps) {
-    try {
-      await step();
-    } catch (error) {
-      failures.push(`${what}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-  if (failures.length === 0) return;
-  if (passed) throw new Error(`the cleanup failed - ${failures.join("; ")}`);
-  console.error(`telegram smoke: the cleanup failed too - ${failures.join("; ")}`);
 }
 
 /** Every file named like one of {@link GUARDED_NAMES} under `dir`, by its path under the fixture, with its text. */
@@ -567,7 +552,7 @@ test("telegram smoke: one operator, the commands, the outbox through an outage, 
     assert.deepEqual(shortened, [30_000], "the bridge's clock shortened one wait, the 409's 30 s: no request deadline and no post bound was cut");
     passed = true;
   } finally {
-    await unwind(passed, [
+    await unwind("telegram smoke", passed, [
       ["the desk", () => desk?.dispose(0)],
       ["the face", () => booted?.dispose()],
       ["the Bot API stub", () => api.close()],

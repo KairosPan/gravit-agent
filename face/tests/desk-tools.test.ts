@@ -21,12 +21,13 @@ type Listener = (event: { agent: DeskAgentLike }) => undefined;
 /** A root context with the event the desk tools listen to, the live agents `live`, and a preset registry
  * that reads a fake agent's preset off its context. `presetError` makes the registry throw and `listError`
  * the agent listing. `calls` records `on("agent/created")` and `list` in the order they came; `create` plays
- * one agent's creation through every listener and hands back what each answered. The write guard's
- * `tools/pre-execute` listener, which `installDesk` installs beside the tools, lands in `guards`, apart -
- * tests/desk-guard.test.ts drives it. */
+ * one agent's creation through every listener and hands back what each answered. The write guard, which
+ * `installDesk` installs beside the tools, lands apart - its `tools/pre-execute` listener in `guards`, its
+ * backstop's `tools.guard`, armed through `inject`, in `backstops` - and tests/desk-guard.test.ts drives it. */
 function fakeRoot(options: { presetError?: Error; listError?: Error; live?: DeskAgentLike[] } = {}) {
   const listeners: Listener[] = [];
   const guards: unknown[] = [];
+  const backstops: unknown[] = [];
   const calls: string[] = [];
   const ctx: DeskWriteGuardCtxLike = {
     on(name: string, listener: (...args: never[]) => unknown) {
@@ -40,6 +41,15 @@ function fakeRoot(options: { presetError?: Error; listError?: Error; live?: Desk
         const at = list.indexOf(listener);
         if (at >= 0) list.splice(at, 1);
         return at >= 0;
+      };
+    },
+    inject(_deps, callback) {
+      const owned: unknown[] = [];
+      callback({ get: () => ({ guard: (check: unknown) => { backstops.push(check); owned.push(check); return () => {}; } }) });
+      return {
+        dispose: async () => {
+          for (const check of owned.splice(0)) backstops.splice(backstops.indexOf(check), 1);
+        },
       };
     },
     agents: {
@@ -56,7 +66,7 @@ function fakeRoot(options: { presetError?: Error; listError?: Error; live?: Desk
       },
     },
   };
-  return { ctx, listeners, guards, calls, create: (agent: DeskAgentLike): unknown[] => listeners.map((listener) => listener({ agent })) };
+  return { ctx, listeners, guards, backstops, calls, create: (agent: DeskAgentLike): unknown[] => listeners.map((listener) => listener({ agent })) };
 }
 
 /** An agent joined to `preset` (none when `undefined`), whose own tool layer records what is registered in it. */
@@ -329,6 +339,7 @@ test("installDesk installs the desk tools whatever enabled says, desk_state read
     const desk = installDesk(rec, { home, enabled, now: () => at, version: "v", watch, ctx: root.ctx, hub: fakeHub().hub });
     assert.equal(root.listeners.length, 1, `the listener is installed (enabled: ${enabled})`);
     assert.equal(root.guards.length, 1, `and the write guard beside it (enabled: ${enabled})`);
+    assert.equal(root.backstops.length, 1, `with its backstop (enabled: ${enabled})`);
     const agent = fakeAgent(`desk-${enabled}`, DESK_PRESET);
     root.create(agent.agent);
     assert.deepEqual(agent.names(), ["desk_quotes", "desk_state"]);
@@ -345,10 +356,12 @@ test("installDesk installs the desk tools whatever enabled says, desk_state read
     await desk.dispose(0);
     assert.equal(root.listeners.length, 0, `dispose removes the listener (enabled: ${enabled})`);
     assert.equal(root.guards.length, 0, `and the guard (enabled: ${enabled})`);
+    assert.equal(root.backstops.length, 0, `and its backstop (enabled: ${enabled})`);
   }
   /* The tools need both: a context with no hub installs no tools - only the write guard, which needs no hub. */
   const root = fakeRoot();
   installDesk(recorder(), { home: await mkdtemp(join(tmpdir(), "face-desk-tools-")), enabled: false, ctx: root.ctx });
   assert.equal(root.listeners.length, 0, "no tools without a hub");
   assert.equal(root.guards.length, 1, "but the guard");
+  assert.equal(root.backstops.length, 1, "and its backstop");
 });
