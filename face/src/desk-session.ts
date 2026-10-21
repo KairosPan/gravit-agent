@@ -16,9 +16,11 @@
  * - the nearest ancestor holding a `.git` - down to the session's cwd, and in the directories below it
  * whenever a turn touches a file there; under a project root, `.dsh/skills` and `.agents/skills` are
  * skill roots. So one of those names in `desk/journal/`, or in `desk/` above it, would steer every later
- * desk turn, and git never shows it: the journal is ignored. {@link findDeskFenceViolation} looks for
- * one; {@link superviseDeskTurns} runs the check at every turn's start and cuts a turn that starts over
- * a violation, and an owner can check before it opens a turn at all, {@link fenceRefusalLine} being its
+ * desk turn, and git never shows it: the journal is ignored. A symlink would put another tree's files
+ * where the desk reads, so every symlink in the journal counts too, as do a symlinked `desk/` or journal
+ * and the repository's own skill roots. {@link findDeskFenceViolation} looks for one;
+ * {@link superviseDeskTurns} runs the check at every turn's start and cuts a turn that starts over a
+ * violation, and an owner can check before it opens a turn at all, {@link fenceRefusalLine} being its
  * reply. The check fails closed: what it cannot read counts as found.
  *
  * PROVENANCE (§5.9). The model never sees a message's `source` (spike 4): the DeepSeek adapter puts no
@@ -40,14 +42,14 @@
 import { randomUUID } from "node:crypto";
 import type { Dirent } from "node:fs";
 import { lstat, mkdir, readdir } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
 import { installModelSelection as installDshModelSelection } from "@deepseek-ai/dsh-agent";
 import { deriveTurnTokenUsage } from "@deepseek-ai/dsh-token-meter/client";
 import { appendEvent, lastDeskSession, readEvents, type TurnUsage } from "./desk.ts";
 import { DESK_PRESET } from "./desk-preset.ts";
 import { etTime } from "./et.ts";
-import type { AgentLike, MemberSetup, ResumeMemberOptions, RoomContextLike, RoomDeps } from "./room.ts";
+import type { AgentLike, MemberSetup, ResumeMemberOptions, RoomContextLike, RoomDeps, SessionLike } from "./room.ts";
 import { finalTextOf, parseModelRoute, type EventLike } from "./room-rules.ts";
 
 /** Diagnostic label, the one every `${BIN}:`-prefixed line in the face uses; desk lines add `desk:`. */
@@ -84,16 +86,19 @@ const byName = (a: Dirent, b: Dirent): number => (a.name < b.name ? -1 : a.name 
  * `journalDir` (`a/b/GRAVIT.md`), or `undefined` when there is none.
  *
  * Walks every depth, depth first, each directory's entries in code-unit order, and answers with the
- * first entry named like a {@link FENCE_NAMES} entry - the name compared as a case-insensitive volume
- * compares it ({@link folded}), whatever the entry is: file, directory or symlink, dangling or not. A
- * symlink is never followed. It fails closed: a missing journal (ENOENT at the root) holds nothing,
- * but a journal it cannot list for any other reason is `"."`, and a directory under it that it cannot
- * list is itself the answer, by its path. Never rejects.
+ * first entry that is a symlink - any symlink, whatever its name, dangling or not: one is never
+ * followed, and what it points at is not the journal's - or that is named like a {@link FENCE_NAMES}
+ * entry, the name compared as a case-insensitive volume compares it ({@link folded}). The journal itself
+ * is `"."` when it is a symlink. It fails closed: a missing journal (ENOENT at the root) holds nothing,
+ * but a journal it cannot read for any other reason is `"."`, and a directory under it that it cannot
+ * list is itself the answer, by its path - unless that directory went away or stopped being one between
+ * the listing and the descent (ENOENT, ENOTDIR), which is skipped as gone. Never rejects.
  * @param journalDir - the desk's journal ({@link deskJournalDir}).
  */
 export async function findFenceViolation(journalDir: string): Promise<string | undefined> {
   let entries: Dirent[];
   try {
+    if ((await lstat(journalDir)).isSymbolicLink()) return ".";
     entries = await readdir(journalDir, { withFileTypes: true });
   } catch (err) {
     return codeOf(err) === "ENOENT" ? undefined : ".";
@@ -105,13 +110,15 @@ export async function findFenceViolation(journalDir: string): Promise<string | u
 async function walkFence(dir: string, rel: string, entries: Dirent[]): Promise<string | undefined> {
   for (const entry of [...entries].sort(byName)) {
     const path = rel === "" ? entry.name : `${rel}/${entry.name}`;
-    if (FENCED.has(folded(entry.name))) return path;
-    if (!entry.isDirectory()) continue; // a symlink lists as a link, never as what it points at
+    if (entry.isSymbolicLink() || FENCED.has(folded(entry.name))) return path;
+    if (!entry.isDirectory()) continue;
     const child = join(dir, entry.name);
     let children: Dirent[];
     try {
       children = await readdir(child, { withFileTypes: true });
-    } catch {
+    } catch (err) {
+      const code = codeOf(err);
+      if (code === "ENOENT" || code === "ENOTDIR") continue; // gone, or no directory any more, since the listing
       return path;
     }
     const found = await walkFence(child, path, children);
@@ -123,22 +130,46 @@ async function walkFence(dir: string, rel: string, entries: Dirent[]): Promise<s
 /** The journal, repo-relative: what a fence check that could not run refuses as. */
 const JOURNAL = "desk/journal";
 
+/** The repository's own project skill roots: dsh-skill-filesystem reads `<root>/.dsh/skills` and
+ * `<root>/.agents/skills` for every session whose project root is the repository. This repository has
+ * neither, so either one there is a violation. */
+const ROOT_SKILL_ROOTS = [".dsh", ".agents"] as const;
+
 /**
- * The first thing in the repository's `desk/` that would steer a desk session, as a path relative to
- * `root` - `desk/GRAVIT.md`, `desk/journal/a/.git` - or `undefined` when there is none.
+ * The first thing in the repository that would steer a desk session from where the desk can be steered,
+ * as a path relative to `root` - `.agents`, `desk`, `desk/GRAVIT.md`, `desk/journal/a/.git` - or
+ * `undefined` when there is none. Every lookup is an `lstat`, so a symlink is judged as itself, dangling
+ * or not, and the volume's own case rule applies. In this order:
+ * - the repository's skill roots ({@link ROOT_SKILL_ROOTS}): either one present, or not known to be
+ *   absent, is its own name;
+ * - `desk/` itself: a symlink is `desk`; a missing `desk/` holds nothing, and anything else it cannot
+ *   tell is `desk`;
+ * - the five {@link FENCE_NAMES} directly in `desk/`, in that order, without recursion: dsh reads the
+ *   instruction files at every level from the project root down to the cwd, so `desk/GRAVIT.md` reaches
+ *   every desk session, and a `.git` at `desk/` would make it the project root with its own skill roots.
+ *   The desk's sandbox cannot write there; a workbench session at the repository root can. One there is
+ *   `desk/<name>`; a `desk/` that cannot be searched is `desk`;
+ * - the journal, through {@link findFenceViolation}: its answer under `desk/journal/`, and
+ *   `desk/journal` for its `"."` - the journal a symlink, or unreadable.
  *
- * `desk/` itself first: dsh reads the instruction files at every level from the project root down to
- * the cwd, so `desk/GRAVIT.md` reaches every desk session, and a `.git` at `desk/` would make it the
- * project root with its own skill roots. The desk's sandbox cannot write there; a workbench session at
- * the repository root can. The five {@link FENCE_NAMES} are looked up there in that order, by `lstat`
- * and without recursion - so a symlink by one of those names counts, and the volume's own case rule
- * applies. A missing `desk/` holds nothing; a `desk/` that cannot be searched for any other reason is
- * `desk`. Then the journal, through {@link findFenceViolation}: its answer under `desk/journal/`, and
- * `desk/journal` for its `"."`. Never rejects.
+ * Never rejects.
  * @param root - the repository root.
  */
 export async function findDeskFenceViolation(root: string): Promise<string | undefined> {
+  for (const name of ROOT_SKILL_ROOTS) {
+    try {
+      await lstat(join(root, name));
+      return name;
+    } catch (err) {
+      if (codeOf(err) !== "ENOENT") return name;
+    }
+  }
   const desk = join(root, "desk");
+  try {
+    if ((await lstat(desk)).isSymbolicLink()) return "desk";
+  } catch (err) {
+    return codeOf(err) === "ENOENT" ? undefined : "desk";
+  }
   for (const name of FENCE_NAMES) {
     try {
       await lstat(join(desk, name));
@@ -264,14 +295,14 @@ export interface CreateDeskAgentOptions {
 }
 
 /** What the desk session reads of the booted ROOT context, stated structurally as src/room.ts states its
- * own: the agent registry, the preset join and the permission fact. `create` answers dsh-agent's
- * `AgentHandle`, `{ agent, dispose }` - the disposer only its holder has (dsh-agent
- * lib/types/index.d.ts:129-146). */
+ * own: the agent registry, the preset join and the permission fact. `create` and `resume` answer
+ * dsh-agent's `AgentHandle`, `{ agent, dispose }` - the disposer only its holder has (dsh-agent
+ * lib/types/index.d.ts:129-146); `get` answers a bare agent, someone else's to dispose. */
 export interface DeskSessionCtxLike {
   agents: {
     get(id: string): AgentLike | undefined;
     create(options: CreateDeskAgentOptions): Promise<{ agent: AgentLike; dispose(): Promise<void> }>;
-    resume(options: ResumeMemberOptions): Promise<{ agent: AgentLike }>;
+    resume(options: ResumeMemberOptions): Promise<{ agent: AgentLike; dispose(): Promise<void> }>;
   };
   agentPresets: RoomContextLike["agentPresets"];
   permissionPresets: RoomContextLike["permissionPresets"];
@@ -338,13 +369,7 @@ export async function createDeskAgent(
   });
   let disposing: Promise<void> | undefined;
   const dispose = (): Promise<void> => {
-    disposing ??= (async () => {
-      try {
-        await handle.dispose();
-      } catch (err) {
-        log(`${BIN}: desk: desk session ${sessionId} could not be disposed: ${errText(err)}`);
-      }
-    })();
+    disposing ??= disposeQuietly(handle, sessionId, log);
     return disposing;
   };
   try {
@@ -357,15 +382,25 @@ export async function createDeskAgent(
 }
 
 /**
- * The desk conversation: the one the ledger names last, live or resumed, else a new one.
+ * The desk conversation: the one the ledger names last, live or resumed, while it still is a desk
+ * session; else a new one.
  *
  * Makes the journal first (`mkdir -p`). Unless `opts.fresh`, it takes the newest `desk-session` the
  * ledger names: the live agent when there is one (`agents.get`), else a resume on the desk's route with
- * the desk's setup (never re-pinned). With no id, a resume that fails - one `gravit-face: desk:` line -
- * or `fresh`, it creates one in the journal ({@link createDeskAgent}) and records it as a `desk-session`
- * event, `created`, or `new` when `fresh`. Only a creation is recorded. Whichever path, the session must
- * run `workspace-write` or this rejects. Rejects too when the ledger cannot be read (src/desk.ts
- * `readEvents`): a conversation the face could not find again is not opened.
+ * the desk's setup (never re-pinned); a resume that fails is one `gravit-face: desk:` line. The ledger
+ * is a file in the harness home, so the id read from it is checked, never trusted: the session must be
+ * a desk session by its header - the preset it was created with is `gravit-desk` (the resume's own
+ * setup mounts that preset whatever the session was, so the mounted one proves nothing) and its cwd is
+ * the journal. One that is not is one line and is not used. One that is must run `workspace-write`, or
+ * this rejects. An agent this call resumed and does not hand back is disposed again; a live agent is
+ * someone else's and never is. With no id, no usable session, or `fresh`, it creates one in the journal
+ * ({@link createDeskAgent}) and records it as a `desk-session` event, `created`, or `new` when `fresh`.
+ * Only a creation is recorded. Rejects too when the ledger cannot be read (src/desk.ts `readEvents`): a
+ * conversation the face could not find again is not opened.
+ *
+ * ONE CALLER AT A TIME. Two calls at once would both find no conversation in the ledger and both open
+ * one. The desk's one owner, src/desk-conversation.ts, runs each call once the one before has settled;
+ * any other caller must do the same.
  * @param deps - see {@link DeskSessionDeps}.
  * @param opts - `fresh`, for another conversation (the phone's `/new`).
  */
@@ -378,13 +413,8 @@ export async function ensureDeskSession(
   const log = deps.log ?? defaultLog;
   if (opts.fresh !== true) {
     const id = lastDeskSession((await readEvents(deps.home)).events);
-    if (id !== undefined) {
-      const agent = deps.ctx.agents.get(id) ?? (await resumeDesk(deps, id, log));
-      if (agent !== undefined) {
-        requireWorkspaceWrite(deps, agent, id);
-        return { agent, sessionId: id, created: false };
-      }
-    }
+    const found = id === undefined ? undefined : await reopenDesk(deps, id, journal, log);
+    if (found !== undefined) return found;
   }
   const { agent, sessionId } = await createDeskAgent(deps, { cwd: journal });
   const t = new Date((deps.now ?? Date.now)()).toISOString();
@@ -392,14 +422,68 @@ export async function ensureDeskSession(
   return { agent, sessionId, created: true };
 }
 
-/** The cold desk conversation `id`, resumed, or `undefined` - with its line - when it cannot be. */
-async function resumeDesk(deps: DeskSessionDeps, id: string, log: (line: string) => void): Promise<AgentLike | undefined> {
+/** The ledger's desk conversation `id`, live or resumed, when it is a desk session in `journal` that runs
+ * `workspace-write`; `undefined`, with a line, when it cannot be had or is not a desk session; a
+ * rejection when it runs anything but `workspace-write`. What this resumed and does not return, it
+ * disposes. */
+async function reopenDesk(
+  deps: DeskSessionDeps,
+  id: string,
+  journal: string,
+  log: (line: string) => void,
+): Promise<{ agent: AgentLike; sessionId: string; created: false } | undefined> {
+  const live = deps.ctx.agents.get(id);
+  const resumed = live === undefined ? await resumeDesk(deps, id, log) : undefined;
+  const agent = live ?? resumed?.agent;
+  if (agent === undefined) return undefined;
+  const wrong = notTheDesk(agent.session.header, journal);
+  if (wrong !== undefined) {
+    log(`${BIN}: desk: session ${id}, the ledger's desk conversation, is not a desk session (${wrong}); opening a new one`);
+    if (resumed !== undefined) await disposeQuietly(resumed, id, log);
+    return undefined;
+  }
+  try {
+    requireWorkspaceWrite(deps, agent, id);
+  } catch (err) {
+    if (resumed !== undefined) await disposeQuietly(resumed, id, log);
+    throw err;
+  }
+  return { agent, sessionId: id, created: false };
+}
+
+/** The cold desk conversation `id`, resumed - its handle, so the face can dispose what it resumed - or
+ * `undefined`, with its line, when it cannot be. */
+async function resumeDesk(
+  deps: DeskSessionDeps,
+  id: string,
+  log: (line: string) => void,
+): Promise<{ agent: AgentLike; dispose(): Promise<void> } | undefined> {
   try {
     const route = { provider: deps.route.provider, model: deps.route.model };
-    return (await deps.ctx.agents.resume({ resumeSessionId: id, agentOptions: route, setup: deskSetup(deps, route, false) })).agent;
+    return await deps.ctx.agents.resume({ resumeSessionId: id, agentOptions: route, setup: deskSetup(deps, route, false) });
   } catch (err) {
     log(`${BIN}: desk: desk session ${id} could not be resumed (${errText(err)}); opening a new one`);
     return undefined;
+  }
+}
+
+/** A header value as a line quotes it: `"gravit"`, or `unset`. */
+const quoted = (value: string | undefined): string => (value === undefined ? "unset" : JSON.stringify(value));
+
+/** Why `header` is not a desk session's, or `undefined` when it is one: created with the `gravit-desk`
+ * preset, in `journal`. */
+function notTheDesk(header: SessionLike["header"], journal: string): string | undefined {
+  if (header.agentPreset !== DESK_PRESET) return `its preset is ${quoted(header.agentPreset)}, not ${DESK_PRESET}`;
+  if (header.cwd === undefined || resolve(header.cwd) !== resolve(journal)) return `its cwd is ${quoted(header.cwd)}, not ${journal}`;
+  return undefined;
+}
+
+/** Dispose a handle the face holds; a failure is one line, never a rejection. */
+async function disposeQuietly(handle: { dispose(): Promise<void> }, id: string, log: (line: string) => void): Promise<void> {
+  try {
+    await handle.dispose();
+  } catch (err) {
+    log(`${BIN}: desk: desk session ${id} could not be disposed: ${errText(err)}`);
   }
 }
 
@@ -422,36 +506,40 @@ const defaultClock: DeskClock = {
 
 /** One supervised turn, as its owner records it. `source` is the kind of the turn's first
  * `user/message` (`telegram`, `schedule`, `alert`, ...), or `wake` for a background job's notice
- * (`tool-jobs`) and for a turn that claimed no message. `outcome` is `ended`; `timed-out` when the
- * supervisor's deadline cut the turn; or `refused` when its fence check found `violation`
- * (repo-relative) while the turn ran. `finalText` is the turn's final assistant text (src/room-rules.ts
- * `finalTextOf`), empty when it ended on a tool; `usage`, its tokens in the ledger's four buckets with
- * every route as `provider/model`, absent when the harness could not account for the turn. `startedAt`
- * is ISO-8601 UTC; `wallMs`, from `turn/start` to `turn/end`; `deadlineMs`, the deadline that applied. */
+ * (`tool-jobs`) and for a turn that claimed no message. `outcome` is `timed-out` when the supervisor's
+ * deadline cut the turn, or `refused` when its fence check found `violation` (repo-relative) while the
+ * turn ran - the supervisor's own cut wins over whatever the turn ended in; else `failed` when the turn
+ * ended on an error or a blocked pre-step, `error` saying which ({@link failureOf}); else `ended`.
+ * `finalText` is the turn's final assistant text (src/room-rules.ts `finalTextOf`), empty when it ended
+ * on a tool; `usage`, its tokens in the ledger's four buckets with every route as `provider/model`,
+ * absent when the harness could not account for the turn. `startedAt` is ISO-8601 UTC; `wallMs`, from
+ * `turn/start` to `turn/end`; `deadlineMs`, the deadline that applied. */
 export interface DeskTurnRecord {
   sessionId: string;
   turn: number;
   source: string;
-  outcome: "ended" | "timed-out" | "refused";
+  outcome: "ended" | "timed-out" | "refused" | "failed";
   finalText: string;
   usage?: TurnUsage;
   startedAt: string;
   wallMs: number;
   deadlineMs: number;
   violation?: string;
+  error?: string;
 }
 
-/** What {@link superviseDeskTurns} needs. `deadlineMs` is every turn's deadline and the ceiling of any
- * shorter one `deadlineFor` gives a source; `onTurnEnd`, the owner's hand for each record; `fence`, the
- * instruction-chain check run at every turn's start (none when absent); `clock`, the timers (the
- * global ones by default); `log`, where a failure line goes (stderr). */
+/** What {@link superviseDeskTurns} needs. `deadlineMs` is every turn's deadline - a whole number of
+ * milliseconds in 1..2147483647, the longest a timer holds - and the ceiling of any shorter one
+ * `deadlineFor` gives a source; `onTurnEnd`, the owner's hand for each record, synchronous or async;
+ * `fence`, the instruction-chain check run at every turn's start (none when absent); `clock`, the timers
+ * (the global ones by default); `log`, where a failure line goes (stderr). */
 export interface SuperviseDeskTurnsDeps {
   on: SessionEventsOn;
   sessionId: string;
   agent: AgentLike;
   deadlineMs: number;
   clock?: DeskClock;
-  onTurnEnd: (record: DeskTurnRecord) => void;
+  onTurnEnd: (record: DeskTurnRecord) => void | Promise<void>;
   fence?: () => Promise<string | undefined>;
   deadlineFor?: (sourceKind: string) => number | undefined;
   log?: (line: string) => void;
@@ -472,6 +560,33 @@ interface OpenTurn {
 
 /** A source kind as a record names it: a job's notice and a turn that claimed no message are `wake`. */
 const sourceName = (kind: unknown): string => (typeof kind !== "string" || kind === "" || kind === "tool-jobs" ? "wake" : kind);
+
+/** The longest `error` a record carries, in characters (code points, so a surrogate pair is never cut). */
+const ERROR_MAX_CHARS = 200;
+
+/**
+ * Why a turn failed, from its `turn/end` reason as dsh-agent-loop writes it (lib/index.js: the reason
+ * is appended at 1027): `blocked` for `{ kind: "blocked" }`, a pre-step that rejected the step (959);
+ * for `{ kind: "error", error }` (1017-1023), where `error` is an `LlmFailure` or `{ message:
+ * errorChain(error), code: "UNKNOWN" }`, the error's message - its first line, at most
+ * {@link ERROR_MAX_CHARS} characters - or its `code` when the message is empty. Any other reason -
+ * `completed`, `aborted`, ... - is no failure: `undefined`.
+ * @param reason - the `turn/end` event's `reason`.
+ */
+function failureOf(reason: unknown): string | undefined {
+  const r = reason as { kind?: unknown; error?: { message?: unknown; code?: unknown } } | null | undefined;
+  if (r?.kind === "blocked") return "blocked";
+  if (r?.kind !== "error") return undefined;
+  const message = typeof r.error?.message === "string" ? r.error.message : "";
+  const line = (message.split(/\r?\n/, 1)[0] ?? "").trim();
+  const code = typeof r.error?.code === "string" && r.error.code !== "" ? r.error.code : "error";
+  return Array.from(line === "" ? code : line).slice(0, ERROR_MAX_CHARS).join("");
+}
+
+/** The longest delay a timer keeps: 2^31 - 1 ms, about 24.8 days. Node fires a longer one at once. */
+const MAX_TIMER_MS = 2_147_483_647;
+/** Whether `ms` is a deadline a timer can hold: a whole number of milliseconds in 1..{@link MAX_TIMER_MS}. */
+const isTimerMs = (ms: number): boolean => Number.isInteger(ms) && ms >= 1 && ms <= MAX_TIMER_MS;
 
 /** A turn's tokens as the ledger keeps them, or `undefined` when `deriveTurnTokenUsage` cannot prove
  * them. A bucket it leaves out is 0 and absent routes are `[]`; `totalTokens` and `reasoningTokens` are
@@ -496,22 +611,32 @@ function turnUsage(events: readonly EventLike[]): TurnUsage | undefined {
  * running tool, not for a pending card - that cancels the turn with `{ kind: "hook", reason: "desk
  * deadline" }`, keeping the inbox; and, when `fence` is given, the fence check, which cancels the turn
  * with `{ kind: "hook", reason: "desk fence" }` if it finds a violation while the turn still runs. A
- * check that rejects counts as a violation at `desk/journal`, with one line; a check that settles after
- * the turn ended changes nothing, and the next turn's check finds the violation again. When the turn's
- * first `user/message` arrives, `deadlineFor` is asked by the source's name as the record gives it; a
- * finite answer below `deadlineMs` moves the deadline to that long after `turn/start` - or cancels at
- * once, when that moment has passed. Only the first cancel of a turn is sent.
+ * check that rejects while its turn runs counts as a violation at `desk/journal`, with one line; a check
+ * that settles after the turn ended, either way, changes nothing and says nothing, and the next turn's
+ * check runs again. When the turn's first `user/message` arrives, `deadlineFor` is asked by the
+ * source's name as the record gives it. An answer below `deadlineMs` moves the deadline to that long
+ * after `turn/start` - or cancels at once, when that moment has passed. No answer, or a non-finite one,
+ * changes nothing; a finite one that is not a deadline a timer can hold (a whole number of milliseconds
+ * in 1..2147483647) changes nothing either, with one line, and so does a `deadlineFor` that throws.
+ * Only the first cancel of a turn is sent; a cancel that throws is one line.
  *
  * Every event of the turn is collected from the bus, and at its `turn/end` the turn is one
  * {@link DeskTurnRecord}, handed to `onTurnEnd` in a microtask: the bus calls this listener inside the
  * session's own append, which refuses reentry, so nothing an owner does in reply - a followup, a cancel -
  * runs there; for the same reason a cancel that is due at once waits for a microtask. A throw from
- * `onTurnEnd` is one line, never an exception in the append. A turn already running when the supervisor
- * is installed is not this supervisor's.
+ * `onTurnEnd`, or the rejection of the promise it returns, is one line - never an exception in the
+ * append, never an unhandled rejection, which ends the face (main.ts `installFailLoud`). A turn already
+ * running when the supervisor is installed is not this supervisor's; a `turn/start` while a turn is open
+ * drops that turn, unrecorded, with one line.
  * @param deps - see {@link SuperviseDeskTurnsDeps}.
  * @returns the disposer: it clears every timer and the listener, and is idempotent.
+ * @throws a `RangeError`, before anything is installed, unless `deadlineMs` is a whole number of
+ *   milliseconds in 1..2147483647.
  */
 export function superviseDeskTurns(deps: SuperviseDeskTurnsDeps): () => void {
+  if (!isTimerMs(deps.deadlineMs)) {
+    throw new RangeError(`superviseDeskTurns: deadlineMs must be a whole number of milliseconds in 1..${MAX_TIMER_MS}, got ${String(deps.deadlineMs)}`);
+  }
   const clock = deps.clock ?? defaultClock;
   const log = deps.log ?? defaultLog;
   const where = `desk session ${deps.sessionId}`;
@@ -561,7 +686,7 @@ export function superviseDeskTurns(deps: SuperviseDeskTurnsDeps): () => void {
           if (path !== undefined) cut(turn, { by: "fence", violation: path });
         },
         (err: unknown) => {
-          if (disposed) return;
+          if (disposed || open !== turn) return; // the turn is over: nothing to refuse, nothing to say
           log(`${BIN}: desk: the fence check for turn ${turn.turn} on ${where} failed (${errText(err)}); it counts as a violation at ${JOURNAL}`);
           cut(turn, { by: "fence", violation: JOURNAL });
         },
@@ -574,10 +699,15 @@ export function superviseDeskTurns(deps: SuperviseDeskTurnsDeps): () => void {
     try {
       ms = deps.deadlineFor?.(turn.source);
     } catch (err) {
-      log(`${BIN}: desk: no deadline for a ${turn.source} turn (${errText(err)}); turn ${turn.turn} on ${where} keeps ${turn.deadlineMs} ms`);
+      log(`${BIN}: desk: deadlineFor failed for the ${turn.source} turn ${turn.turn} on ${where} (${errText(err)}); it keeps ${turn.deadlineMs} ms`);
       return;
     }
-    if (typeof ms !== "number" || !Number.isFinite(ms) || ms >= turn.deadlineMs) return;
+    if (typeof ms !== "number" || !Number.isFinite(ms)) return;
+    if (!isTimerMs(ms)) {
+      log(`${BIN}: desk: deadlineFor gave ${ms} ms for the ${turn.source} turn ${turn.turn} on ${where}, not a whole number of milliseconds in 1..${MAX_TIMER_MS}; it keeps ${turn.deadlineMs} ms`);
+      return;
+    }
+    if (ms >= turn.deadlineMs) return;
     turn.deadlineMs = ms;
     const left = turn.startedAt + ms - clock.now();
     if (left > 0) {
@@ -588,7 +718,7 @@ export function superviseDeskTurns(deps: SuperviseDeskTurnsDeps): () => void {
     queueMicrotask(() => cut(turn, { by: "deadline" }));
   };
 
-  const end = (turn: OpenTurn): void => {
+  const end = (turn: OpenTurn, event: EventLike): void => {
     disarm(turn);
     open = undefined;
     let usage: TurnUsage | undefined;
@@ -597,25 +727,30 @@ export function superviseDeskTurns(deps: SuperviseDeskTurnsDeps): () => void {
     } catch (err) {
       log(`${BIN}: desk: the tokens of turn ${turn.turn} on ${where} could not be read: ${errText(err)}`);
     }
+    /* The supervisor's own cut wins: the turn its cancel ended may well report an error too. */
+    const failure = turn.cut === undefined ? failureOf((event.data as { reason?: unknown } | undefined)?.reason) : undefined;
+    const outcome: DeskTurnRecord["outcome"] = turn.cut !== undefined
+      ? (turn.cut.by === "deadline" ? "timed-out" : "refused")
+      : failure !== undefined ? "failed" : "ended";
     const record: DeskTurnRecord = {
       sessionId: deps.sessionId,
       turn: turn.turn,
       source: turn.source ?? "wake",
-      outcome: turn.cut === undefined ? "ended" : turn.cut.by === "deadline" ? "timed-out" : "refused",
+      outcome,
       finalText: finalTextOf(turn.events, turn.turn),
       ...(usage === undefined ? {} : { usage }),
       startedAt: new Date(turn.startedAt).toISOString(),
       wallMs: clock.now() - turn.startedAt,
       deadlineMs: turn.deadlineMs,
       ...(turn.cut?.by === "fence" ? { violation: turn.cut.violation } : {}),
+      ...(failure === undefined ? {} : { error: failure }),
     };
-    queueMicrotask(() => {
-      try {
-        deps.onTurnEnd(record);
-      } catch (err) {
+    /* A then-callback, not a bare call: a throw and a rejected promise both end in the one catch. */
+    void Promise.resolve()
+      .then(() => deps.onTurnEnd(record))
+      .catch((err: unknown) => {
         log(`${BIN}: desk: turn ${record.turn} on ${where} ended but its owner failed on it: ${errText(err)}`);
-      }
-    });
+      });
   };
 
   const off = deps.on("session/event", (session, event) => {
@@ -629,7 +764,7 @@ export function superviseDeskTurns(deps: SuperviseDeskTurnsDeps): () => void {
     if (turn === undefined) return;
     turn.events.push(event);
     if (event.type === "user/message" && turn.source === undefined) firstMessage(turn, event);
-    else if (event.type === "turn/end" && n === turn.turn) end(turn);
+    else if (event.type === "turn/end" && n === turn.turn) end(turn, event);
   });
 
   return () => {

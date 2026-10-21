@@ -6,7 +6,8 @@
  * the sandbox lets a desk write through, so the face's own fixtures stay where the desk's would). */
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
-import { chmod, mkdir, rm, stat, symlink, writeFile } from "node:fs/promises";
+import fsp, { chmod, mkdir, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createUserMessage } from "@deepseek-ai/dsh-llm";
@@ -83,12 +84,18 @@ test("findFenceViolation finds each fence name at any depth and nothing else", a
   assert.equal(await findFenceViolation(join(TMP, "no-such-journal")), undefined, "a missing journal holds nothing");
 });
 
-test("findFenceViolation never follows a symlink, and returns the first violation in sorted order", async () => {
+test("findFenceViolation counts every symlink, whatever its name, and returns the first violation in sorted order", async () => {
   const outside = await fixture("outside");
-  await put(outside, "GRAVIT.md");
+  await put(outside, "notes.md");
   const viaLink = await fixture("via-link");
+  await put(viaLink, "a.md");
   await symlink(outside, join(viaLink, "shared"));
-  assert.equal(await findFenceViolation(viaLink), undefined);
+  assert.equal(await findFenceViolation(viaLink), "shared", "a symlinked directory is never followed: it is the violation");
+
+  const fileLink = await fixture("file-link");
+  await put(fileLink, "notes/2026-10-20.md");
+  await symlink(join(fileLink, "notes", "2026-10-20.md"), join(fileLink, "notes", "today.md"));
+  assert.equal(await findFenceViolation(fileLink), "notes/today.md", "so is a link to a plain note");
 
   const order = await fixture("order");
   await put(order, "b/GRAVIT.md");
@@ -106,14 +113,41 @@ test("findFenceViolation matches names the way a case-insensitive volume opens t
   }
 });
 
-test("findFenceViolation fails closed: a journal it cannot list is '.'", async () => {
+test("findFenceViolation fails closed: a journal it cannot list, or one that is a symlink, is '.'", async () => {
   const file = join(await fixture("file-journal"), "journal");
   await writeFile(file, "a file where the journal should be");
   assert.equal(await findFenceViolation(file), ".");
 
   const loop = join(await fixture("loop-journal"), "journal");
   await symlink(loop, loop);
-  assert.equal(await findFenceViolation(loop), ".", "ELOOP");
+  assert.equal(await findFenceViolation(loop), ".", "a link to itself");
+
+  const target = await fixture("real-journal");
+  await put(target, "notes.md");
+  const linked = join(await fixture("linked-journal"), "journal");
+  await symlink(target, linked);
+  assert.equal(await findFenceViolation(linked), ".", "depth 0: the journal itself is no symlink either");
+});
+
+test("findFenceViolation skips a child that vanished or changed type since the listing; any other child error fails closed", async (t) => {
+  const dir = await fixture("raced");
+  for (const rel of ["gone/notes.md", "swapped/notes.md", "zz/GRAVIT.md"]) await put(dir, rel);
+  // The race, staged: these children are listed as directories, then fail when the walk descends.
+  const failing = new Map<string, string>([[join(dir, "gone"), "ENOENT"], [join(dir, "swapped"), "ENOTDIR"]]);
+  const real = fsp.readdir as unknown as (path: unknown, options: unknown) => Promise<unknown>;
+  t.mock.method(fsp, "readdir", ((path: unknown, options: unknown) => {
+    const code = failing.get(String(path));
+    return code === undefined ? real(path, options) : Promise.reject(Object.assign(new Error(`${code}: ${String(path)}`), { code }));
+  }) as unknown as typeof fsp.readdir);
+  syncBuiltinESMExports();
+  try {
+    assert.equal(await findFenceViolation(dir), "zz/GRAVIT.md", "both skipped, and the walk goes on past them");
+    failing.set(join(dir, "gone"), "EIO");
+    assert.equal(await findFenceViolation(dir), "gone");
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  }
 });
 
 test("findFenceViolation fails closed: an entry it cannot read is the violation", { skip: AS_ROOT }, async () => {
@@ -170,6 +204,37 @@ test("findDeskFenceViolation checks desk/ itself, then the journal, and answers 
   assert.equal(await findDeskFenceViolation(deskFile), "desk", "ENOTDIR is not ENOENT");
 });
 
+test("findDeskFenceViolation refuses a symlinked desk/ or journal, and the repository's own skill roots", async () => {
+  const deskTarget = await fixture("desk-target");
+  await put(deskTarget, "journal/notes.md");
+  const deskLinked = await fixture("repo-desk-symlink");
+  await symlink(deskTarget, join(deskLinked, "desk"));
+  assert.equal(await findDeskFenceViolation(deskLinked), "desk");
+
+  const journalTarget = await fixture("journal-target");
+  await put(journalTarget, "notes.md");
+  const journalLinked = await fixture("repo-journal-symlink");
+  await mkdir(join(journalLinked, "desk"));
+  await symlink(journalTarget, join(journalLinked, "desk", "journal"));
+  assert.equal(await findDeskFenceViolation(journalLinked), "desk/journal");
+
+  // dsh treats <root>/.dsh/skills and <root>/.agents/skills as skill roots for every session in the repository
+  for (const name of [".dsh", ".agents"]) {
+    const repo = await fixture("repo-skill-root");
+    await put(repo, `${name}/`);
+    await put(repo, "desk/journal/notes.md");
+    assert.equal(await findDeskFenceViolation(repo), name);
+  }
+  const linkedRoot = await fixture("repo-skill-root-link");
+  await symlink(join(linkedRoot, "nowhere"), join(linkedRoot, ".agents"));
+  assert.equal(await findDeskFenceViolation(linkedRoot), ".agents", "present by lstat, dangling or not");
+
+  const first = await fixture("repo-skill-root-first");
+  await put(first, ".agents/");
+  await put(first, "desk/GRAVIT.md");
+  assert.equal(await findDeskFenceViolation(first), ".agents", "the repository's roots are checked before desk/");
+});
+
 test("findDeskFenceViolation fails closed on a desk/ it cannot search", { skip: AS_ROOT }, async () => {
   const repo = await fixture("repo-locked-desk");
   await put(repo, "desk/journal/notes.md");
@@ -204,7 +269,9 @@ test("provenanceLine renders the three forms in ET", () => {
 
 test("the desk contract names every fence name and the provenance forms the code writes", () => {
   const contract = readDesk(DESK_PATH);
-  for (const name of FENCE_NAMES) assert.ok(contract.includes(name), `desk.md does not name ${name}`);
+  const names = `${FENCE_NAMES.slice(0, -1).join(", ")} or ${FENCE_NAMES.at(-1)}`;
+  const lines = contract.split("\n").filter((line) => line.includes(names));
+  assert.deepEqual(lines, [`- Never a ${names} under your directory: the face refuses every desk turn while one exists.`], "one line lists the fence names, all of them, in order");
   assert.ok(contract.includes(provenanceLine({ kind: "telegram" }, new Date("2026-10-20T18:03:00Z"))), "the telegram line");
   assert.ok(contract.includes("[schedule · "), "the schedule prefix");
   assert.ok(contract.includes("[alert · "), "the alert prefix");
@@ -257,12 +324,15 @@ test("resolveDeskRoute takes FACE_DESK_MODEL when the tree serves it, else the d
 
 /* ---------- ensure and create ---------- */
 
-/** The slice of a booted root the desk session reads, recording every call. A session's permission
- * preset is a durable fact here as in dsh: setup's pin, else this fake's user default ("read-only",
- * not the desk's) pinned at publication, and a resume finds whatever the log holds. */
+/** The slice of a booted root the desk session reads, recording every call. A session's header and its
+ * permission preset are durable facts here as in dsh: the header is what creation's `meta` said, and the
+ * preset is setup's pin, else this fake's user default ("read-only", not the desk's) pinned at
+ * publication; a resume finds both as the log holds them. Disposing a handle - a create's or a resume's
+ * - is recorded by session id. */
 class FakeDeskTree {
   readonly live = new Map<string, AgentLike>();
   readonly stored = new Map<string, string>();
+  readonly headers = new Map<string, SessionLike["header"]>();
   readonly created: CreateDeskAgentOptions[] = [];
   readonly resumed: ResumeMemberOptions[] = [];
   readonly mounts: string[] = [];
@@ -273,9 +343,32 @@ class FakeDeskTree {
   overrideAfterPublish: string | undefined;
   failDispose = false;
 
-  private agentFor(id: string): AgentLike {
-    const session: SessionLike = { id, header: {}, seq: 0, snapshotEvents: () => [], append: () => undefined };
+  private agentFor(id: string, header: SessionLike["header"]): AgentLike {
+    const session: SessionLike = { id, header, seq: 0, snapshotEvents: () => [], append: () => undefined };
     return { id, status: "idle", session, followup: () => {}, cancel: () => {} };
+  }
+
+  private handle(id: string, agent: AgentLike): { agent: AgentLike; dispose(): Promise<void> } {
+    return {
+      agent,
+      dispose: async () => {
+        this.disposed.push(id);
+        if (this.failDispose) throw new Error("the loop would not stop");
+        this.live.delete(id);
+      },
+    };
+  }
+
+  /** A session on disk: the header its log opens with and the permission preset it holds. */
+  persist(id: string, header: SessionLike["header"], preset = "workspace-write"): void {
+    this.headers.set(id, header);
+    this.stored.set(id, preset);
+  }
+
+  /** A session on disk and live in the registry - someone else's agent, as far as the face knows. */
+  goLive(id: string, header: SessionLike["header"], preset = "workspace-write"): void {
+    this.persist(id, header, preset);
+    this.live.set(id, this.agentFor(id, header));
   }
 
   readonly install = (_agentCtx: AgentCtxLike, ref: ModelSelectionRefLike): (() => void) => {
@@ -288,27 +381,23 @@ class FakeDeskTree {
       get: (id) => this.live.get(id),
       create: async (options) => {
         this.created.push(options);
-        const agent = this.agentFor(options.sessionId);
+        const header = { cwd: options.meta.cwd, agentPreset: options.meta.agentPreset };
+        this.headers.set(options.sessionId, header);
+        const agent = this.agentFor(options.sessionId, header);
         await options.setup({ fakeAgentId: options.sessionId }, agent);
         this.live.set(options.sessionId, agent);
         if (!this.stored.has(options.sessionId)) this.stored.set(options.sessionId, "read-only");
         if (this.overrideAfterPublish !== undefined) this.stored.set(options.sessionId, this.overrideAfterPublish);
-        return {
-          agent,
-          dispose: async () => {
-            this.disposed.push(options.sessionId);
-            if (this.failDispose) throw new Error("the loop would not stop");
-            this.live.delete(options.sessionId);
-          },
-        };
+        return this.handle(options.sessionId, agent);
       },
       resume: async (options) => {
         this.resumed.push(options);
-        if (!this.stored.has(options.resumeSessionId)) throw new Error(`session "${options.resumeSessionId}" not found`);
-        const agent = this.agentFor(options.resumeSessionId);
+        const header = this.headers.get(options.resumeSessionId);
+        if (header === undefined || !this.stored.has(options.resumeSessionId)) throw new Error(`session "${options.resumeSessionId}" not found`);
+        const agent = this.agentFor(options.resumeSessionId, header);
         await options.setup({ fakeAgentId: options.resumeSessionId }, agent);
         this.live.set(options.resumeSessionId, agent);
-        return { agent };
+        return this.handle(options.resumeSessionId, agent);
       },
     },
     agentPresets: {
@@ -395,25 +484,65 @@ test("ensureDeskSession: live, cold, missing and fresh paths; records only creat
   ]);
 });
 
-test("ensureDeskSession refuses a desk session whose permission preset is not workspace-write", async () => {
+test("ensureDeskSession refuses a desk session whose permission preset is not workspace-write, disposing only what it resumed", async () => {
   const root = await fixture("refuse-repo");
   const home = await fixture("refuse-home");
   const tree = new FakeDeskTree();
   const deps = sessionDeps(tree, root, home);
+  const desk = { cwd: deskJournalDir(root), agentPreset: DESK_PRESET };
+  const refused = /desk session session-old is "danger-full-access", not workspace-write/;
 
   // the operator switched the conversation to full access in the browser: neither the cold nor the live path prompts it
   await appendEvent(home, { t: "2026-10-20T13:00:00.000Z", kind: "desk-session", sessionId: "session-old", reason: "created" });
-  tree.stored.set("session-old", "danger-full-access");
-  await assert.rejects(ensureDeskSession(deps), /desk session session-old is "danger-full-access", not workspace-write/);
-  assert.ok(tree.live.has("session-old"), "resumed, then refused");
-  await assert.rejects(ensureDeskSession(deps), /desk session session-old is "danger-full-access", not workspace-write/);
+  tree.persist("session-old", desk, "danger-full-access");
+  await assert.rejects(ensureDeskSession(deps), refused);
+  assert.equal(tree.resumed.length, 1);
+  assert.deepEqual(tree.disposed, ["session-old"], "the face resumed it, so the face disposes it again");
+  assert.equal(tree.live.has("session-old"), false);
+
+  tree.goLive("session-old", desk, "danger-full-access");
+  await assert.rejects(ensureDeskSession(deps), refused);
+  assert.deepEqual(tree.disposed, ["session-old"], "a live agent is someone else's: refused, never disposed");
+  assert.ok(tree.live.has("session-old"));
 
   // a pin that does not hold after publication: refused, the new agent disposed, nothing recorded
   tree.overrideAfterPublish = "read-only";
   await assert.rejects(ensureDeskSession(deps, { fresh: true }), /is "read-only", not workspace-write/);
   assert.equal(tree.created.length, 1);
-  assert.deepEqual(tree.disposed, [tree.created[0].sessionId]);
+  assert.deepEqual(tree.disposed, ["session-old", tree.created[0].sessionId]);
   assert.equal((await readEvents(home)).events.length, 1, "only the seeded record");
+});
+
+test("ensureDeskSession opens a new desk session when the ledger's is not one, disposing only what it resumed", async () => {
+  const cases: { label: string; live: boolean; header: (journal: string) => SessionLike["header"]; why: RegExp }[] = [
+    { label: "a resumed session of another preset", live: false, header: (j) => ({ cwd: j, agentPreset: "gravit" }), why: /its preset is "gravit", not gravit-desk/ },
+    { label: "a resumed session in another directory", live: false, header: (j) => ({ cwd: dirname(j), agentPreset: DESK_PRESET }), why: /its cwd is ".*\/desk", not .*\/desk\/journal/ },
+    { label: "a live session of another preset", live: true, header: (j) => ({ cwd: j, agentPreset: "gravit" }), why: /its preset is "gravit", not gravit-desk/ },
+    { label: "a live session with no cwd", live: true, header: () => ({ agentPreset: DESK_PRESET }), why: /its cwd is unset, not .*\/desk\/journal/ },
+  ];
+  for (const c of cases) {
+    const root = await fixture("identity-repo");
+    const home = await fixture("identity-home");
+    const tree = new FakeDeskTree();
+    const lines: string[] = [];
+    await appendEvent(home, { t: "2026-10-20T13:00:00.000Z", kind: "desk-session", sessionId: "session-other", reason: "created" });
+    const header = c.header(deskJournalDir(root));
+    if (c.live) tree.goLive("session-other", header);
+    else tree.persist("session-other", header);
+
+    const opened = await ensureDeskSession(sessionDeps(tree, root, home, lines));
+    assert.equal(opened.created, true, c.label);
+    assert.notEqual(opened.sessionId, "session-other", c.label);
+    assert.equal(tree.resumed.length, c.live ? 0 : 1, c.label);
+    assert.deepEqual(tree.disposed, c.live ? [] : ["session-other"], `${c.label}: only an agent the face resumed is disposed`);
+    assert.equal(tree.live.has("session-other"), c.live, c.label);
+    assert.equal(lines.length, 1, c.label);
+    assert.match(lines[0], /^gravit-face: desk: session session-other, the ledger's desk conversation, is not a desk session \(/, c.label);
+    assert.match(lines[0], c.why, c.label);
+    assert.match(lines[0], /\); opening a new one$/, c.label);
+    const last = (await readEvents(home)).events.at(-1);
+    assert.deepEqual(last, { t: "2026-10-20T18:03:00.000Z", kind: "desk-session", sessionId: opened.sessionId, reason: "created" }, c.label);
+  }
 });
 
 test("createDeskAgent opens a desk agent in its cwd with the desk's setup and records nothing", async () => {
@@ -707,6 +836,67 @@ test("a fence check that rejects refuses the turn as desk/journal, with one line
   assert.match(h.lines[0], /^gravit-face: desk: .*turn 4.*EACCES: permission denied, scandir/);
 });
 
+test("a turn that ends on an error or a blocked pre-step is recorded as failed, with why", async () => {
+  const h = supervise();
+  const long = `HTTP 429: rate limited ${"x".repeat(300)}`;
+  startTurn(h, 1, phone("NVDA now?"));
+  endTurn(h, 1, { kind: "error", error: { message: `${long}\nretry-after: 30\n{"error":"too many requests"}`, code: "RATE_LIMITED", status: 429 } });
+  startTurn(h, 2, phone("again"));
+  endTurn(h, 2, { kind: "blocked" });
+  startTurn(h, 3, phone("emoji"));
+  endTurn(h, 3, { kind: "error", error: { message: "😀".repeat(250), code: "UNKNOWN" } });
+  startTurn(h, 4, phone("no message"));
+  endTurn(h, 4, { kind: "error", error: { message: "", code: "AUTH_FAILED" } });
+  startTurn(h, 5, phone("fine"));
+  answer(h, 5, "all good");
+  endTurn(h, 5);
+  startTurn(h, 6, phone("revoked"));
+  endTurn(h, 6, { kind: "error", error: { message: "HTTP 401: the API key was revoked\n    at DeepSeekAdapter.request (lib/index.js:1993)\n    at async Agent.step", code: "AUTH_FAILED", status: 401 } });
+  await h.time.fake.flush();
+  assert.deepEqual(h.records.map((r) => [r.turn, r.outcome, r.error]), [
+    [1, "failed", long.slice(0, 200)],
+    [2, "failed", "blocked"],
+    [3, "failed", "😀".repeat(200)],
+    [4, "failed", "AUTH_FAILED"],
+    [5, "ended", undefined],
+    [6, "failed", "HTTP 401: the API key was revoked"],
+  ]);
+  assert.equal("error" in h.records[4], false, "an ended turn carries no error");
+});
+
+test("a deadline that cut the turn wins over the error its cancel ended in, and so does the fence", async () => {
+  const late = supervise();
+  startTurn(late, 1, phone("slow"));
+  await late.time.fake.advance(300_000);
+  assert.deepEqual(late.cancels, [DEADLINE_CANCEL]);
+  endTurn(late, 1, { kind: "error", error: { message: "the request was aborted", code: "UNKNOWN" } });
+
+  const fenced = supervise({ fence: async () => "desk/journal/.git" });
+  startTurn(fenced, 1, phone("over a .git"));
+  await fenced.time.fake.flush();
+  assert.deepEqual(fenced.cancels, [FENCE_CANCEL]);
+  endTurn(fenced, 1, { kind: "error", error: { message: "the request was aborted", code: "UNKNOWN" } });
+
+  await late.time.fake.flush();
+  await fenced.time.fake.flush();
+  assert.deepEqual(late.records.map((r) => [r.outcome, r.error]), [["timed-out", undefined]]);
+  assert.deepEqual(fenced.records.map((r) => [r.outcome, r.violation, r.error]), [["refused", "desk/journal/.git", undefined]]);
+});
+
+test("a fence check that rejects after its turn ended changes nothing and says nothing", async () => {
+  let fail: (err: Error) => void = () => {};
+  const h = supervise({ fence: () => new Promise((_resolve, reject) => { fail = reject; }) });
+  startTurn(h, 1, phone("quick"));
+  answer(h, 1, "done");
+  endTurn(h, 1);
+  await h.time.fake.flush();
+  fail(new Error("EIO: i/o error, scandir"));
+  await h.time.fake.flush();
+  assert.deepEqual(h.cancels, []);
+  assert.deepEqual(h.lines, [], "no line about a turn that is over");
+  assert.deepEqual(h.records.map((r) => [r.outcome, r.violation]), [["ended", undefined]]);
+});
+
 test("deadlineFor shortens a turn's deadline by its source and never lengthens it", async () => {
   const deadlineFor = (kind: string): number | undefined => (kind === "alert" ? 90_000 : kind === "schedule" ? 400_000 : undefined);
 
@@ -743,6 +933,47 @@ test("deadlineFor shortens a turn's deadline by its source and never lengthens i
   assert.deepEqual(cut.time.armed, [300_000, 90_000], "armed at the default at turn/start, re-armed from the turn's start once its source is known");
 });
 
+test("deadlineMs must be a whole number of ms a timer can hold; an invalid deadlineFor answer is ignored, with one line", async () => {
+  for (const bad of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2_147_483_648]) {
+    assert.throws(() => supervise({ deadlineMs: bad }), /deadlineMs must be a whole number of milliseconds in 1\.\.2147483647/, String(bad));
+  }
+  supervise({ deadlineMs: 1 }).dispose();
+  supervise({ deadlineMs: 2_147_483_647 }).dispose();
+
+  for (const bad of [0, -5, 50.5, 3_000_000_000]) {
+    const h = supervise({ deadlineFor: () => bad });
+    startTurn(h, 1, alert());
+    assert.equal(h.lines.length, 1, String(bad));
+    assert.match(h.lines[0], /^gravit-face: desk: .*alert turn.*not a whole number of milliseconds in 1\.\.2147483647/, String(bad));
+    await h.time.fake.advance(299_999);
+    assert.deepEqual(h.cancels, [], String(bad));
+    await h.time.fake.advance(1);
+    assert.deepEqual(h.cancels, [DEADLINE_CANCEL], `${bad}: the default deadline stands`);
+    endTurn(h, 1, ABORTED);
+    await h.time.fake.flush();
+    assert.equal(h.records[0].deadlineMs, 300_000);
+  }
+
+  const silent = supervise({ deadlineFor: () => Number.NaN });
+  startTurn(silent, 1, alert());
+  assert.deepEqual(silent.lines, [], "a non-finite answer changes nothing, as no answer does");
+  silent.dispose();
+});
+
+test("a deadlineFor that throws leaves the turn on the default deadline, with one line", async () => {
+  const h = supervise({ deadlineFor: () => { throw new Error("no deadline map"); } });
+  startTurn(h, 1, alert());
+  assert.equal(h.lines.length, 1);
+  assert.match(h.lines[0], /^gravit-face: desk: .*alert turn.*no deadline map/);
+  await h.time.fake.advance(299_999);
+  assert.deepEqual(h.cancels, []);
+  await h.time.fake.advance(1);
+  assert.deepEqual(h.cancels, [DEADLINE_CANCEL]);
+  endTurn(h, 1, ABORTED);
+  await h.time.fake.flush();
+  assert.deepEqual(h.records.map((r) => [r.source, r.outcome, r.deadlineMs]), [["alert", "timed-out", 300_000]]);
+});
+
 test("a source deadline already past when the turn's first message lands cancels at once", async () => {
   const h = supervise({ deadlineFor: () => 50 });
   startTurn(h, 1);
@@ -768,6 +999,53 @@ test("onTurnEnd runs after the append that ended the turn, and a throw from it i
   assert.deepEqual(seen, [1]);
   assert.equal(h.lines.length, 1);
   assert.match(h.lines[0], /^gravit-face: desk: .*ledger exploded/);
+});
+
+test("an async onTurnEnd that rejects is one line, never an unhandled rejection", async () => {
+  const unhandled: unknown[] = [];
+  const probe = (reason: unknown): void => { unhandled.push(reason); };
+  process.on("unhandledRejection", probe);
+  try {
+    const h = supervise({ onTurnEnd: async () => { throw new Error("the ledger is full"); } });
+    startTurn(h, 1, phone("hi"));
+    answer(h, 1, "hello");
+    endTurn(h, 1);
+    await h.time.fake.flush();
+    await new Promise((done) => setTimeout(done, 20)); // past the process's check for unhandled rejections
+    assert.deepEqual(unhandled, [], "the face exits on an unhandled rejection (main.ts installFailLoud)");
+    assert.equal(h.lines.length, 1);
+    assert.match(h.lines[0], /^gravit-face: desk: .*the ledger is full/);
+  } finally {
+    process.off("unhandledRejection", probe);
+  }
+});
+
+test("an agent.cancel that throws is one line, never an exception out of the deadline's timer", async () => {
+  const h = supervise({ agent: { cancel: () => { throw new Error("the loop is gone"); } } as unknown as AgentLike });
+  startTurn(h, 1, phone("hi"));
+  await h.time.fake.advance(300_000); // the timer fires and the cancel throws inside it
+  assert.equal(h.lines.length, 1);
+  assert.match(h.lines[0], /^gravit-face: desk: turn 1 on desk session session-desk could not be cancelled: the loop is gone$/);
+  endTurn(h, 1);
+  await h.time.fake.flush();
+  assert.deepEqual(h.records.map((r) => [r.turn, r.outcome]), [[1, "timed-out"]], "the deadline fired: the record says so");
+});
+
+test("a turn/start while a turn is still open drops the open turn, with one line, and supervises the new one", async () => {
+  const h = supervise();
+  startTurn(h, 1, phone("first")); // its turn/end never reaches the bus
+  await h.time.fake.advance(10_000);
+  startTurn(h, 2, phone("second"));
+  assert.equal(h.lines.length, 1);
+  assert.match(h.lines[0], /^gravit-face: desk: turn 1 on desk session session-desk saw no turn\/end before turn 2 began; it goes unrecorded$/);
+  assert.equal(h.time.pending.size, 1, "turn 1's timer went with it");
+  await h.time.fake.advance(299_999);
+  assert.deepEqual(h.cancels, [], "turn 2's deadline runs from turn 2's start");
+  answer(h, 2, "two");
+  endTurn(h, 2);
+  endTurn(h, 1); // a late end for the dropped turn
+  await h.time.fake.flush();
+  assert.deepEqual(h.records.map((r) => [r.turn, r.finalText, r.wallMs]), [[2, "two", 299_999]]);
 });
 
 test("another session's turns are not supervised, and the disposer clears every timer and the listener", async () => {

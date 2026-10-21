@@ -104,9 +104,10 @@ export interface TurnUsage {
  * `off-cleared` its lift, from a terminal or by its own expiry. A `desk-session` names a desk
  * conversation when the face opens one: `created` when there was none to resume, `new` when the
  * operator asked for another. A `desk-turn` is one turn on it: the kind of message that opened it
- * (`source`), its number, whether it ended or the face's deadline cut it off, its wall time and,
- * when the harness reported them, its tokens. A `desk-refused` is a turn the face would not open:
- * why, and the path that made it refuse when a path did. */
+ * (`source`), its number, whether it ended, the face's deadline cut it off or it failed - with the
+ * `error` it failed on - its wall time and, when the harness reported them, its tokens. A
+ * `desk-refused` is a turn the face would not open: why, and the path that made it refuse when a path
+ * did. */
 export type DeskEvent =
   | { t: string; kind: "boot"; pid: number; version: string; deskEnabled: boolean }
   | { t: string; kind: "shutdown"; pid: number; code: number }
@@ -114,7 +115,7 @@ export type DeskEvent =
   | { t: string; kind: "off-set"; by: "telegram" | "page" | "terminal"; until?: string }
   | { t: string; kind: "off-cleared"; by: "terminal" | "expiry" }
   | { t: string; kind: "desk-session"; sessionId: string; reason: "created" | "new" }
-  | { t: string; kind: "desk-turn"; sessionId: string; source: string; turn: number; outcome: "ended" | "timed-out"; wallMs: number; usage?: TurnUsage }
+  | { t: string; kind: "desk-turn"; sessionId: string; source: string; turn: number; outcome: "ended" | "timed-out" | "failed"; wallMs: number; usage?: TurnUsage; error?: string }
   | { t: string; kind: "desk-refused"; reason: string; path?: string };
 
 /** Every kind {@link DeskEvent} has, and only those. A record over the union rather than a list,

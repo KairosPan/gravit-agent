@@ -60,8 +60,8 @@ class FakeDeskAgent implements AgentLike {
   failFollowup: string | undefined;
   private readonly idle: (() => void)[] = [];
   readonly session: SessionLike;
-  constructor(readonly id: string) {
-    this.session = { id, header: {}, seq: 0, snapshotEvents: () => [], append: () => undefined };
+  constructor(readonly id: string, header: SessionLike["header"]) {
+    this.session = { id, header, seq: 0, snapshotEvents: () => [], append: () => undefined };
   }
   followup(message: MessageLike): void {
     if (this.failFollowup !== undefined) throw new Error(this.failFollowup);
@@ -82,10 +82,12 @@ class FakeDeskAgent implements AgentLike {
 }
 
 /** The slice of a booted root the real ensure reads, as tests/desk-session.test.ts fakes it: a session's
- * permission preset is a durable fact - setup's pin, else "read-only" - and a resume finds what it holds. */
+ * header (what creation's `meta` said) and its permission preset (setup's pin, else "read-only") are
+ * durable facts, and a resume finds both as they were. */
 class FakeDeskTree {
   readonly live = new Map<string, FakeDeskAgent>();
   readonly stored = new Map<string, string>();
+  readonly headers = new Map<string, SessionLike["header"]>();
   readonly created: CreateDeskAgentOptions[] = [];
   readonly resumed: ResumeMemberOptions[] = [];
   /** Every agent ever made, in order. */
@@ -97,7 +99,7 @@ class FakeDeskTree {
   readonly install = (_agentCtx: AgentCtxLike, _ref: ModelSelectionRefLike): (() => void) => () => {};
 
   private async make(id: string, setup: (agentCtx: AgentCtxLike, agent: AgentLike) => Promise<void>): Promise<FakeDeskAgent> {
-    const agent = new FakeDeskAgent(id);
+    const agent = new FakeDeskAgent(id, this.headers.get(id) ?? {});
     await setup({}, agent);
     this.live.set(id, agent);
     this.agents.push(agent);
@@ -112,6 +114,7 @@ class FakeDeskTree {
         await new Promise((done) => setImmediate(done)); // a real create yields: two at once interleave
         if (this.gate !== undefined) await this.gate;
         if (this.failCreate !== undefined) throw new Error(this.failCreate);
+        this.headers.set(options.sessionId, { cwd: options.meta.cwd, agentPreset: options.meta.agentPreset });
         const agent = await this.make(options.sessionId, options.setup);
         if (!this.stored.has(options.sessionId)) this.stored.set(options.sessionId, "read-only");
         return { agent, dispose: async () => { this.live.delete(options.sessionId); } };
@@ -119,7 +122,8 @@ class FakeDeskTree {
       resume: async (options) => {
         this.resumed.push(options);
         if (!this.stored.has(options.resumeSessionId)) throw new Error(`session "${options.resumeSessionId}" not found`);
-        return { agent: await this.make(options.resumeSessionId, options.setup) };
+        const agent = await this.make(options.resumeSessionId, options.setup);
+        return { agent, dispose: async () => { this.live.delete(options.resumeSessionId); } };
       },
     },
     agentPresets: { mount: async (_agentCtx, id) => ({ id }) },
