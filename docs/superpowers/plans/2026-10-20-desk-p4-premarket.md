@@ -301,7 +301,7 @@ git commit -m "feat(face): builtin:report - a strategy's screen line, status, ve
   - `needsLevelsPin(o: { dir: string; wake: boolean }): boolean`, true when `dir` opens with `strategies/` and `wake` holds;
   - `StandingOrder.levelsSha256?: string`;
   - `ArmEntry.levelsSha256?: string`, rendered after `producerSha256`, or after `sha256` when there is no script;
-  - `rehashOrder`'s hashes gain `levelsSha256?`.
+  - `OrderChange`, `rehashOrder`'s third argument, gains `levelsSha256?`, and `REWRITTEN_LINE_RE` gains the key `levelsSha256` (its `none` rewritten like a hash, double-quoted); the by-hand keys list it after `producerSha256` and before `expires`.
 - **`parseStanding`** gains:
   - missing where `needsLevelsPin` → P2's `not armed`;
   - present elsewhere → `orders[<i>] (<id>): levelsSha256 is only for an order that wakes in strategies/<name>`;
@@ -358,7 +358,9 @@ test("arm pins an absent levels.yml as none, refuses one it cannot take, and pin
   // --no-wake --producer scripts/p.py in strategies/demo → no levelsSha256 and no levels part; builtin:report in desk or with --no-wake → REPORT_PLACE
 });
 test("rearm re-takes levels.yml: an edit, a removal, nothing changed, a broken file", async () => {
-  // edit → `re-armed demo-report: strategies/demo/STANDING.md sha256 <12>…, strategies/demo/levels.yml sha256 <new 12>…`;
+  // edit → `re-armed demo-report: strategies/demo/STANDING.md sha256 <12>…, strategies/demo/levels.yml sha256 <new 12>…` (the levels part after a script's
+  //   and before P2's `, expires <date>`); with --expires, an edited levels.yml is refused as P2 refuses a changed text or script, named after them:
+  //   "cannot re-arm demo-report: strategies/demo/levels.yml changed since arming; review it, then: npm run desk -- rearm demo-report";
   // removed → `…, no strategies/demo/levels.yml`; again → "demo-report: nothing changed since arming"; "a: 1" → exit 1, "cannot re-arm demo-report: …"
 });
 ```

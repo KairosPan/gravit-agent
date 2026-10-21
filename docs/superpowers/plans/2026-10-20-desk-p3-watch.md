@@ -471,7 +471,7 @@ git commit -m "feat(face): rules.yml under CORE_SCHEMA - move_pct, gap and filin
   - **Mute copy:**
     - `muteReplyLine(state, now: Date): string` gives the `/mute` row; with no `until`, it reads `until a terminal lifts it`;
     - `MUTE_USAGE = "mute needs a duration: /mute 30m, /mute 2h or /mute 1d"`.
-- `face/scripts/desk.ts`: `unmute` calls `clearMute(home, "terminal")` and prints `unmuted` or `not muted`, exit 0 either way. `USAGE` ends `| rearm ID | unmute`.
+- `face/scripts/desk.ts`: `unmute` calls `clearMute(home, "terminal")` and prints `unmuted` or `not muted`, exit 0 either way. `USAGE` ends `| rearm ID [--expires YYYY-MM-DD] | unmute`.
 - `face/src/telegram.ts`:
   - `parseCommand` gains `{ cmd: "mute"; arg?: string }`, for `/mute 2h` and `/mute@<bot> 2h`.
   - No duration, or one `parseDuration` refuses, replies `MUTE_USAGE`.
@@ -836,7 +836,7 @@ git commit -m "feat(face): the alert copy - the plan verbatim, IEX or snapshot w
   - `appendWatchPin(text, pin): { text } | { error }` places a `watch:` block (strings double-quoted) immediately before the top-level `orders:` line, so that P2's `appendOrder` still finds `orders:` last. With no `orders:` line, it goes at the end.
   - `rehashWatchPin(text, sha256): { text } | { error }` rewrites only that block's `sha256:` line.
   - Both keep an edit only when `parseStanding` shows exactly that change. Otherwise the error carries the block, to paste by hand.
-- **Produces, the CLI in `face/scripts/desk.ts`:** the commands import lazily. `USAGE` ends `| rearm ID | unmute | arm-watch | rearm-watch`.
+- **Produces, the CLI in `face/scripts/desk.ts`:** the commands import lazily. `USAGE` ends `| rearm ID [--expires YYYY-MM-DD] | unmute | arm-watch | rearm-watch`.
   - `arm-watch` hashes `<root>/scripts/desk_filings.py` through `resolveScript` and writes the pin, mode `0600`, with `armedAt` set to now.
     - It prints `armed the watch's filings: scripts/desk_filings.py sha256 <12 hex>…; the face reads standing.yml again within 30 s` and exits 0.
     - A refusal prints `cannot arm the watch: <reason>` and exits 1. One such reason: `the watch's filings are already armed; npm run desk -- rearm-watch takes a changed script's new hash`.

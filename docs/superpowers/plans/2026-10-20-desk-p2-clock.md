@@ -24,7 +24,7 @@ Values the spec and the rulings leave open, chosen here; each line ends with the
 4. **Grammar.** `id` `^[a-z][a-z0-9-]{0,39}$`; `at` `open`, `close`, `open±Nm`, `close±Nm` (N 1–600) or `HH:MM`; durations `<n>s`/`<n>m` (turn 1–30 min, producer 10 s–180 min); `file` a plain `*.md` name; `renderOrder` double-quotes string scalars. Cost: another spelling is refused with a line naming the key.
 5. **Before arming.** An anchor earlier than the required `armedAt` (P2-22) is neither fired nor missed. Cost: an order armed after today's anchor first fires next session.
 6. **Refusals.** A refusal never consumes the key (P2-9); an identical refusal for a key is recorded once; a key whose grace passes refused is not reported missed. Cost: a refused day reads "refused", never "missed".
-7. **Arming.** `arm` refuses a taken id; `rearm <id>` rewrites only that order's hashes. Both edit `standing.yml` as text and keep the edit only if a re-parse shows exactly that change, else print the entry to paste by hand. Cost: a flow-style `standing.yml` is re-armed by hand.
+7. **Arming.** `arm` refuses a taken id; `rearm <id>` rewrites only that order's hashes, and `rearm <id> --expires <date>` only its `expires` - refused while a pinned file has changed since arming, which the plain `rearm` re-pins after review. Both edit `standing.yml` as text and keep the edit only if a re-parse shows exactly that change, else print the entry or the keys to paste by hand; both write only over the file they read (a compare-and-swap under the file lock). Cost: a flow-style `standing.yml` is re-armed by hand.
 8. **The budget's edges.** The cap is the last good load's; a browser turn counts but is never refused; an unreadable `events.jsonl` reads as not spent, its error in the status. A turn may finish over the cap, and a mid-day `events.jsonl` rotation undercounts — both residuals. Cost: the day can pass the cap by one turn.
 9. **The brief's symbols.** Indexes SPY, QQQ, IWM, DIA; sector ETFs XLB, XLC, XLE, XLF, XLI, XLK, XLP, XLRE, XLU, XLV, XLY; stops, targets and near levels from `desk/levels.yml` and every `strategies/<name>/levels.yml`. Cost: a sector the operator follows is missing until the constant changes.
 10. **The firing watchdog.** No `turn/end` 60,000 ms after the turn deadline: the turn is cancelled and recorded `no-turn` (no `turn/start` seen) or `timed-out`. Cost: a hung session ends a minute late.
@@ -245,11 +245,11 @@ git commit -m "feat: the market clock - scripts/market_clock.py over pandas_mark
 ### Task 3: `standing.yml`, its anchors, and the arming CLI
 
 **Files:**
-- Create: `face/src/standing.ts`, `face/tests/standing.test.ts`
-- Modify: `face/scripts/desk.ts` (`arm`, `rearm`, the usage line), `face/src/channels.ts` (export `NAME_RE`), `face/tests/desk-cli.test.ts` (its pinned `USAGE` follows)
+- Create: `face/src/standing.ts`, `face/src/channel-name.ts` (`NAME_RE`, a leaf that imports nothing), `face/tests/standing.test.ts`, `face/tests/desk-arm.test.ts`
+- Modify: `face/scripts/desk.ts` (`arm`, `rearm`, the usage line), `face/src/channels.ts` (imports `NAME_RE` from `channel-name.ts` and re-exports it), `face/src/producer.ts` (exports `readScriptBytes`), `face/tests/desk-cli.test.ts` (its pinned `USAGE` follows)
 
 **Interfaces:**
-- Consumes: Task 1 (`producer.ts`), Task 2 (`market-clock.ts`), `et.ts`, `room-rules.ts` (`parseModelRoute`), `desk.ts` (`deskDir`, `TurnUsage`), `@deepseek-ai/dsh-atomic-write`, `channels.ts` (`NAME_RE`).
+- Consumes: Task 1 (`producer.ts`, `readScriptBytes` among it), Task 2 (`market-clock.ts`), `et.ts`, `room-rules.ts` (`parseModelRoute`), `desk.ts` (`deskDir`, `TurnUsage`), `@deepseek-ai/dsh-atomic-write`, `channel-name.ts` (`NAME_RE`) - not `channels.ts`, whose graph (bots, roster, cordis) `arm` would otherwise load.
 - Produces (`face/src/standing.ts`):
   - `STANDING_FILE = "standing.yml"`, `STANDING_YAML_MAX_BYTES = 65_536`, `STANDING_TEXT_MAX_BYTES = 16_384`, `DEFAULT_TURN_DEADLINE_MS = 600_000`, `DEFAULT_PRODUCER_DEADLINE_MS = 300_000`, `GRACE_MS = 300_000`.
   - `readDeskYaml(text: string): unknown` is `load(text, { schema: CORE_SCHEMA })`, throwing js-yaml's first message line. `isEtDate(value: unknown): value is string`.
@@ -258,22 +258,37 @@ git commit -m "feat: the market clock - scripts/market_clock.py over pandas_mark
   - `anchorInstant(a: Anchor, session: MarketSession): number` is `open`/`close` plus the offset; `HH:MM` is `etDayStart(Date.parse(session.open)) + h·3,600,000 + m·60,000`, not moved by an early close.
   - `parseStandingDuration(value: unknown, minMs: number, maxMs: number): number | undefined` (`^\d+(s|m)$`).
   - `interface StandingOrder { id; dir; file; sha256; at: string; anchor: Anchor; producer?: ProducerSpec; producerSha256?: string; wake: boolean; model?: string; turnDeadlineMs: number; producerDeadlineMs: number; expires: string; enabled: boolean; armedAt: string }`.
-  - `type StandingLoad = { ok: true; budget?: { dailyTokens: number }; orders: StandingOrder[] } | { ok: false; errors: string[] }`; `parseStanding(text: string): StandingLoad`. Errors open `orders[<i>] (<id>): ` (or `orders[<i>]: `). Unknown keys are refused at both levels, and ids are unique; `wake: false` needs a producer; an empty file, comments only, or a bare `orders:` is no orders. Exact texts:
+  - `type StandingLoad = { ok: true; budget?: { dailyTokens: number }; orders: StandingOrder[] } | { ok: false; errors: string[] }`; `parseStanding(text: string): StandingLoad`. Errors open `orders[<i>] (<id>): ` (or `orders[<i>]: `), then the key and a space - `producer names an unknown builtin "<name>"`. Unknown keys are refused at both levels, and ids are unique; `wake: false` needs a producer - `orders[<i>] (<id>): wake is false, so it needs a producer: an order with neither runs nothing`, that order's one line, no room rule asked of it; an empty file, comments only, or a bare `orders:` is no orders. Exact texts:
     - a missing `armedAt`, `sha256` or (script producer) `producerSha256`: `orders[<i>] (<id>): not armed: npm run desk -- arm <dir> …` (the `…` literal);
-    - the room rule: `orders[<i>] (<id>): close-<N>m leaves <N> min before the close; its producer (<p>), its turn (<t>) and the 5-minute grace need <sum>`, `its producer (<p>), ` only with a producer and `its turn (<t>) and ` only with `wake`, durations by `formatDuration`.
+    - the room rule: `orders[<i>] (<id>): close-<N>m leaves <N> min before the close; its producer (<p>), its turn (<t>) and the 5-minute grace need <sum>`, `its producer (<p>)` only with a producer and `its turn (<t>)` only with `wake`, joined so it reads - `its producer (5 min) and the 5-minute grace need 10 min` without a turn - durations by `formatDuration`; `roomProblem(anchor, need: RoomNeed)` holds it, `RoomNeed` a producer's deadline, a turn's, or both, never neither.
+  - `unarmedOrders(errors: readonly string[]): string[]` - the not-armed orders' labels, `orders[<i>] (<id>)` or `orders[<i>]`, for the way out a refusal names.
   - `isOrderDir(dir)`; `orderCwd(root, dir)` (a `TypeError` on a refused dir); `sha256Hex(bytes: Buffer | string): string` (lowercase hex).
   - `interface ArmEntry { id; dir; file; sha256; at; producer?: string; producerSha256?: string; wake: boolean; model?: string; turnDeadline: string; producerDeadline: string; expires: string; armedAt: string }`; `renderOrder(entry, indent): string` — block YAML in that key order, `enabled: true` after `expires`, every string scalar double-quoted.
-  - `appendOrder(text: string, entry: ArmEntry): { text: string } | { error: string }` appends under `orders:` when it is the last top-level key (`orders: []` becomes `orders:`), or adds `orders:` at the end, and keeps the edit only when `parseStanding(new)` is the old load plus this order, the budget unchanged; else `standing.yml has a shape arm cannot append to safely; add this entry under orders: by hand:\n<rendered>`.
-  - `rehashOrder(text: string, id: string, hashes: { sha256: string; producerSha256?: string }): { text: string } | { error: string }` rewrites the hash value lines in the block opening `- id: <id>` (quoted or not), verified the same way; on failure the error names the hashes to paste by hand.
-  - `writeStanding(home: string, text: string): Promise<void>` — the desk directory made, then `withFileLock` and `writeFileAtomic(path, text, { mode: 0o600 })`.
+  - `appendOrder(text: string, entry: ArmEntry): { text: string } | { error: string }` appends under `orders:` when it is the last top-level key (`orders: []`, `orders: ~` or CORE's `null` becomes `orders:`), or adds `orders:` at the end, and keeps the edit only when `parseStanding(new)` is the old load plus this order, the budget unchanged; else `standing.yml has a shape arm cannot append to safely; add this entry under orders: by hand:\n<rendered>`.
+  - `rehashOrder(text: string, id: string, change: OrderChange): { text: string } | { error: string }`, `interface OrderChange { sha256: string; producerSha256?: string; expires?: string }`, rewrites those value lines - each exactly once, double-quoted, a comment on the line kept - in the block opening `- id: <id>` (quoted or not), verified the same way; else `standing.yml has a shape rearm cannot rewrite safely; set these keys of <id> by hand:` and the lines to paste (`    sha256: "<hex>"`, then `producerSha256`, then `expires`).
+  - `writeStanding(home: string, text: string, opts?: { expect?: string | null }): Promise<void>` — the desk directory made, then `withFileLock` and `writeFileAtomic(path, text, { mode: 0o600 })`; with `expect` (the text the edit was made from, `null` for no file) it re-reads under the lock and rejects `it changed since it was read; run the command again` when that no longer holds - the compare-and-swap `arm` and `rearm` use.
+  - Also exported: `STANDING_TEXT_FILE`, the deadline ranges (`TURN_DEADLINE_MIN_MS`/`MAX` 1–30 min, `PRODUCER_DEADLINE_MIN_MS`/`MAX` 10 s–180 min), `formatStandingDuration`, `isOrderId`, `isModelRoute`.
   - Types filled by Task 8, read by Tasks 6 and 9: `interface FiringSummary { key; order; date; kind: "finished" | "refused" | "missed" | "interrupted" | "expired"; outcome: string; t: string; sessionId?; wallMs?; usage?: TurnUsage; files?: number }`; `interface StandingStatus { file: { path; state: "missing" | "loaded" | "refused"; loadedAt?; errors?: string[] }; ledger?: { error: string }; calendar: { python; state: "unknown" | "ok" | "stale" | "failed"; source?; today?: { date; closed: true } | { date; open; close; early }; error? }; orders: { id; dir; file; at; producer?; wake; enabled; expires; expired: boolean; hash: "ok" | "changed" | "missing" | "unknown"; producerHash?: same; nextAnchor?: string; last?: FiringSummary }[] /* the last good load */; running?: { key; startedAt; sessionId? }; queued: string[]; recent: FiringSummary[] /* newest first, ≤ 10 */ }`.
 - Produces (`face/scripts/desk.ts`):
   - `runDesk` deps gain `root?: string` (default: the repo root from this module) and `marketClock?: MarketClock` (default `pythonMarketClock({ root, python: process.env.FACE_PYTHON || "python3" })`). `arm` and `rearm` `await import()` `standing.ts`, `producer.ts` and `market-clock.ts` inside the command, so `pause` and `resume` stay light.
-  - `USAGE` becomes `usage: npm run desk -- pause [Nm | Nh | Nd] | resume | arm <desk | strategies/NAME> --id ID --at ANCHOR --expires YYYY-MM-DD [--producer scripts/FILE.py | builtin:NAME] [--model PROVIDER/MODEL] [--turn-deadline DURATION] [--producer-deadline DURATION] [--no-wake] | rearm ID`.
-  - `arm`: an unknown flag or a missing value is the usage line, exit 2. It validates, in order, the dir; `<dir>/STANDING.md` (present, ≤ 16,384 bytes, UTF-8); the producer; `--at`; `--expires` not before today ET; the deadlines and the room rule; the `--model` syntax; `standing.yml` parses; the id is free; the market clock answers for `etDate(now)`. It appends with `armedAt` = now, written `0600`.
+  - `USAGE` becomes `usage: npm run desk -- pause [Nm | Nh | Nd] | resume | arm <desk | strategies/NAME> --id ID --at ANCHOR --expires YYYY-MM-DD [--producer scripts/FILE.py | builtin:NAME] [--model PROVIDER/MODEL] [--turn-deadline DURATION] [--producer-deadline DURATION] [--no-wake] | rearm ID [--expires YYYY-MM-DD]`.
+  - `runDesk` reads the clock once per command, where the command needs it: `rearm` only for `--expires`, after it has read `standing.yml`.
+  - `arm`: an unknown flag, a missing value (or one opening with `--`), a repeated flag or a second directory is the usage line, exit 2. It validates, in order, the id; the dir (a trailing slash dropped); `<dir>/STANDING.md` (a regular file - no link, no FIFO - ≤ 16,384 bytes, UTF-8); the producer (a script found and read as a firing does, `resolveScript` and `readScriptBytes`; `--no-wake` needs one); `--at`; `--expires` not before today ET; the deadlines and the room rule; the `--model` syntax; `standing.yml` parses; the id is free; the market clock answers for `etDate(now)`. Then it builds the entry (`appendOrder`) with `armedAt` = now and writes it `0600` - only over the file it read.
     - Success: `armed <id> in <root>: <dir>/<file> sha256 <first 12 hex>…, at <at>, expires <expires>[, producer <spec>[ sha256 <12 hex>…]]; the face reads standing.yml again within 30 s`, exit 0.
-    - A refusal: `cannot arm <id>: <reason>`, exit 1, nothing written; a taken id's reason `<id> is already armed; npm run desk -- rearm <id> takes a changed file's new hash`, a failed calendar's `the market calendar failed in <python>: <error>; FACE_PYTHON must name an interpreter with pandas_market_calendars`.
-  - `rearm <id>`: `re-armed <id>: <dir>/<file> sha256 <12 hex>…[, <script> sha256 <12 hex>…]`, exit 0; `<id>: nothing changed since arming`, exit 0; `cannot re-arm <id>: no such order in standing.yml`, exit 1.
+    - A refusal: `cannot arm <id>: <reason>`, exit 1, nothing written. Reasons with fixed texts:
+      - a taken id: `<id> is already armed; npm run desk -- rearm <id> takes a changed file's new hash`;
+      - a failed calendar: `the market calendar failed in <python>: <error>; FACE_PYTHON must name an interpreter with pandas_market_calendars`;
+      - a refused file: `<path> is refused, so nothing is added to it until it is fixed: <errors joined "; ">`, and, when some are not armed, the way out `; remove orders[<i>] (<id>) from standing.yml, then arm it again` (several: `orders[0] (a) and orders[1] (b) … then arm them again`);
+      - an edit made between the read and the write: `cannot write <path>: it changed since it was read; run the command again`;
+      - `--expires <x> is not a date, YYYY-MM-DD` and `--expires <x> is before today, <today> ET`.
+  - `rearm <id> [--expires YYYY-MM-DD]`: the flag before or after the id; anything else is the usage line, exit 2. Plain, it re-pins the changed hashes. With `--expires` it moves only the order's last day, checked as `arm` checks one.
+    - Success: `re-armed <id>: <dir>/<file> sha256 <12 hex>…[, <script> sha256 <12 hex>…][, expires <date>]`, exit 0; `<id>: nothing changed since arming` (the same hashes, and the same date or none), exit 0.
+    - A refusal: `cannot re-arm <id>: <reason>`, exit 1, nothing written:
+      - `no such order in standing.yml`;
+      - the two `--expires` reasons above;
+      - with `--expires`, a pinned file whose hash moved: `<dir>/<file> changed since arming; review it, then: npm run desk -- rearm <id>` - repo-relative, `STANDING.md` named first, then the producer. An expired order is never fired, so no firing refused that edit; the way through is the plain `rearm <id>` after the review, then `rearm <id> --expires <date>`;
+      - a refused file: `<path> is refused, so nothing in it changes until it is fixed: …`, with the same way out;
+      - the compare-and-swap's `cannot write <path>: it changed since it was read; run the command again`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -325,7 +340,7 @@ test("appendOrder appends verified, keeps comments and the budget, and refuses a
   // "orders: []\n" → one order; orders before budget → "…add this entry under orders: by hand:…"; flow style → the same error
 });
 test("rehashOrder replaces only that order's hashes", () => { /* a and b; rehash b → only b's sha256 moves; an order whose "- id:" is not its first line → the paste-by-hand error */ });
-// face/tests/desk-cli.test.ts (append; its USAGE constant becomes the new line)
+// face/tests/desk-arm.test.ts (new; face/tests/desk-cli.test.ts's USAGE constant becomes the new line)
 test("arm hashes STANDING.md, checks the calendar, appends a verified 0600 entry and prints it", async () => {
   // fixture root face/tests/tmp/desk-cli-<pid>/root with desk/STANDING.md and scripts/p.py; a fake marketClock; now 2026-10-20T18:00:00Z
   const code = await runDesk("arm", ["desk", "--id", "preclose", "--at", "close-30m", "--producer", "builtin:brief", "--expires", "2026-11-30"], { home, root, out, now, marketClock });
@@ -342,15 +357,18 @@ test("arm refuses a taken id, a bad --at, a past --expires, a non-.py script, a 
 test("rearm takes a changed text's new hash and leaves the rest", async () => {
   // edit STANDING.md → `re-armed preclose: desk/STANDING.md sha256 <12>…`, armedAt unchanged; again → "preclose: nothing changed since arming"; nope → exit 1
 });
+test("rearm --expires extends an order, an expired one too, and checks the date as arm does", async () => { /* `…, expires 2026-12-31`; an edited text → "… changed since arming; review it, then: npm run desk -- rearm preclose", nothing written */ });
+test("an edit made while an order was expired is reviewed and re-pinned before it is extended: rearm, then rearm --expires", async () => { /* the script, then the text named first; plain rearm; then --expires */ });
+test("arm and rearm write only over the file they read: an edit made in between is refused and kept", async () => { /* a clock that edits standing.yml; rearm's via deps.now */ });
 ```
 
-- [ ] **Step 2: Run them to verify they fail** — `cd face && npx tsx --test tests/standing.test.ts tests/desk-cli.test.ts`. Expected: FAIL.
-- [ ] **Step 3: Implement** `face/src/standing.ts`, the `NAME_RE` export, and the two commands; `arm` reads files and calls the clock only after its flags parse.
+- [ ] **Step 2: Run them to verify they fail** — `cd face && npx tsx --test tests/standing.test.ts tests/desk-arm.test.ts tests/desk-cli.test.ts`. Expected: FAIL.
+- [ ] **Step 3: Implement** `face/src/standing.ts`, `face/src/channel-name.ts` (`NAME_RE`, which `channels.ts` imports and re-exports), the `readScriptBytes` export, and the two commands; `arm` reads files and calls the clock only after its flags parse.
 - [ ] **Step 4: Run them to verify they pass**, then `npm test && npm run typecheck`. Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add face/src/standing.ts face/tests/standing.test.ts face/scripts/desk.ts face/tests/desk-cli.test.ts face/src/channels.ts
+git add face/src/standing.ts face/src/channel-name.ts face/tests/standing.test.ts face/scripts/desk.ts face/tests/desk-arm.test.ts face/tests/desk-cli.test.ts face/src/channels.ts face/src/producer.ts
 git commit -m "feat(face): standing.yml under CORE_SCHEMA - anchors, hash pins, the room rule, fail-closed - and npm run desk -- arm and rearm"
 ```
 
@@ -746,7 +764,7 @@ test("no covering calendar: one calendar-error and one line a day, nothing that 
   // an ask that throws synchronously → one "gravit-face: desk: schedule calendar: …" line and the next tick armed
 });
 test("a closed day is silent and the next session fires", async () => { /* 2026-11-26 and 2026-11-28 ticks across 17:30Z: no queue, no missed, no line; 2026-11-27 17:30:10Z → run */ });
-test("an expired order is reported once and never fires; a disabled one is silent", async () => { /* "preclose expired after 2026-11-26 and no longer fires; extend it with npm run desk -- rearm <id> --expires <YYYY-MM-DD> to keep it" once across reinstalls */ });
+test("an expired order is reported once and never fires; a disabled one is silent", async () => { /* "preclose expired after 2026-11-26 and no longer fires; extend it with npm run desk -- rearm preclose --expires <YYYY-MM-DD> to keep it" once across reinstalls */ });
 test("the ET date change asks the calendar again", async () => { /* 04:59:30Z then 05:00:30Z on 2026-11-27 → asked "2026-11-26" then "2026-11-27" */ });
 test("status: hash state, next anchor, last outcome, running, queued and recent", async () => {
   // at 2026-11-25T21:00Z, after its anchor, with 11-26 closed → orders[0].nextAnchor "2026-11-27T17:30:00.000Z"; hash "ok"; last.outcome "delivered"
@@ -899,14 +917,14 @@ git commit -m "test(face): schedule-smoke - a real firing end to end, its deadli
   - the brief quotes every `strategies/<name>/levels.yml` plan into an unattended turn, and research sessions can write those files (D20's exposure, landed by P3);
   - a turn may overshoot the budget, and a mid-day `events.jsonl` rotation undercounts the day;
   - the disarmed-cycle boot line is not built (P2-17).
-- [ ] **Step 3: `face/README.md`.** "The desk" gains "Standing orders": `npm run desk -- arm desk --id preclose --at close-30m --producer builtin:brief --expires <date>` (run from the checkout the service runs) and `rearm`; `budget.dailyTokens`, set after the first measured week; the phone lines; `FACE_PYTHON`, an interpreter with `alpaca_kit` and `pandas_market_calendars` (`pip install -e ".[live]"`) that the service reads from `$DSH_HOME/.env`, else the first `python3` on the install shell's `PATH`. The environment table and "Tests" follow. "The desk drill" gains its P2 half:
+- [ ] **Step 3: `face/README.md`.** "The desk" gains "Standing orders": `npm run desk -- arm desk --id preclose --at close-30m --producer builtin:brief --expires <date>` (run from the checkout the service runs); `npm run desk -- rearm <id>`, which re-pins a changed `STANDING.md` or script after the operator has reviewed it; `npm run desk -- rearm <id> --expires YYYY-MM-DD`, which extends an order, an expired one too, and is refused while a pinned file has changed - the two-step path after an edit is review, `rearm <id>`, then `rearm <id> --expires <date>`; a file refused for an unarmed order is fixed by removing that order and arming it again; `budget.dailyTokens`, set after the first measured week; the phone lines; `FACE_PYTHON`, an interpreter with `alpaca_kit` and `pandas_market_calendars` (`pip install -e ".[live]"`) that the service reads from `$DSH_HOME/.env`, else the first `python3` on the install shell's `PATH`. The environment table and "Tests" follow. "The desk drill" gains its P2 half:
   1. Arm `preclose`.
   2. On three sessions in a row, confirm the brief reached the phone before the close and the Desk panel shows `delivered`.
   3. Edit one word of `desk/STANDING.md`; the next anchor is refused with its line.
   4. Run `npm run desk -- rearm preclose`; the next anchor runs.
   5. On 2026-11-27, if it falls inside the drill, confirm the brief arrives at 12:30 ET.
 - [ ] **Step 4: `CLAUDE.md`** (P2-18): one new row for the clock — `scripts/market_clock.py` and `face/src/{schedule,firing,standing,producer,market-clock,brief,desk-book}.ts`: standing orders in `$DSH_HOME/face/desk/standing.yml` (`npm run desk -- arm`) on the XNYS calendar, `desk/STANDING.md` with `builtin:brief`; and the tests row's real-boot count set to the fresh `FACE_SMOKE=1 npm test` run.
-- [ ] **Step 5: `ROADMAP.md` and the spec.** `ROADMAP.md`: item (2) reads P0–P2 built, P3–P4 to come; Part II gains the P2 entry (plan path, commit range, the drill owed). The spec's §5.4 gains an "As built (P2)" note: `standing.yml` is a mapping read with `CORE_SCHEMA`; producers are `scripts/<file>.py` or `builtin:<name>`, and no `desk_brief.py`; `dir: desk` runs in `desk/journal` behind the chain fence; the calendar is asked at boot and on each ET date change; a busy firing queues; `arm` and `rearm`; the budget is the plain sum of the four buckets; delivery stops at the order's market moment.
+- [ ] **Step 5: `ROADMAP.md` and the spec.** `ROADMAP.md`: item (2) reads P0–P2 built, P3–P4 to come; Part II gains the P2 entry (plan path, commit range, the drill owed). The spec's §5.4 gains an "As built (P2)" note: `standing.yml` is a mapping read with `CORE_SCHEMA`; producers are `scripts/<file>.py` or `builtin:<name>`, and no `desk_brief.py`; `dir: desk` runs in `desk/journal` behind the chain fence; the calendar is asked at boot and on each ET date change; a busy firing queues; `arm`, `rearm` and `rearm --expires`, which extends only what was reviewed; the budget is the plain sum of the four buckets; delivery stops at the order's market moment.
 - [ ] **Step 6: Verify and commit** — `cd face && npm test && npm run typecheck`, `FACE_SMOKE=1 npm test`, `python -m pytest`; every count in the documents matches the run.
 
 ```bash
