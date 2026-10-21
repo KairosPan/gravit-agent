@@ -150,7 +150,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
 <tr><td><code>roles/&lt;id&gt;/ROLE.md</code> + <code>role.yml</code></td><td class="num">435–1,465</td><td>角色子代理（persona）；Gravit（一行摘要）</td><td class="yes">是：子代理的 persona-prefix；Gravit 的 <code>gravit:roles</code> 段</td><td>操作员手改；启动时读一次；镜像 <code>bots/gravit/agent.cordis.yml</code></td></tr>
 <tr><td><code>bots/&lt;id&gt;/SOUL.md</code> → <code>agent.cordis.yml</code>，<code>preset.yml</code></td><td class="num">—</td><td>该 bot 的会话</td><td class="yes">是：bot 的 persona-prefix（遮蔽 Gravit 的）</td><td>face 保存时生成；手改 SOUL.md 不生效直到下次保存</td></tr>
 <tr><td><code>bots/&lt;id&gt;/journal/notes.md</code></td><td class="num">≤ 12 KiB 读</td><td>该 bot</td><td class="yes">是：每次请求的 runtime-context 快照</td><td>bot 在自己家会话里写</td></tr>
-<tr><td><code>dsh/skills/**/SKILL.md</code>（5 个）</td><td class="num">—</td><td>所有能调 <code>skill</code> 的代理</td><td class="yes">目录（名字 + 描述）在首个请求；全文在 <code>skill</code> 调用时</td><td>操作员；frontmatter 缺 name/description 会被静默丢弃</td></tr>
+<tr><td><code>dsh/skills/**/SKILL.md</code>（6 个）</td><td class="num">—</td><td>所有能调 <code>skill</code> 的代理</td><td class="yes">目录（名字 + 描述）在首个请求；全文在 <code>skill</code> 调用时</td><td>操作员；frontmatter 缺 name/description 会被静默丢弃</td></tr>
 <tr><td><code>bots/&lt;id&gt;/skills/</code></td><td class="num">—</td><td>该 bot</td><td class="yes">目录</td><td>bot 自己的立场包（今天只有 README）</td></tr>
 <tr><td><code>Gravit-Design.md</code>（产品宪章稿）</td><td class="num">32,126</td><td>人</td><td class="no">否</td><td>意图优先于一切；机制问题让位给代码</td></tr>
 <tr><td><code>DEVELOPMENT.md</code>（前后端开发稿）</td><td class="num">225,291</td><td>人</td><td class="no">否</td><td>as-built；与代码不符时文档是 bug</td></tr>

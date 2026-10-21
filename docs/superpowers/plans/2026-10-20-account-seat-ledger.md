@@ -5,7 +5,7 @@ on branch `feat/account-seat`, cut from `feat/gravit-face` @ b21da25 on 2026-10-
 (executing-plans), one task after another, each under tests that failed first, with one fresh
 whole-branch review at the end. Baseline on the branch's first commit: face 1027 tests (1011 pass,
 16 skipped), pytest 400. The SDD workspace's `progress.md` was moved to the session scratchpad
-afterwards, not deleted.
+after the final review, not deleted.
 
 ## Pre-flight
 
@@ -154,8 +154,9 @@ process over stdio with the checkout's own MCP client, as dsh would.
 4. On the stand-in's page, paired with its code: Agents → `Gravit asks to be let in 0xcae75e…6f97` →
    Let it in… (name Gravit, 30 days) → `Gravit is in. Give it a limit next.`; Every agent › → Change
    limit → only `paper-momentum`, $25 an order, $100 in all → Save → `trading limit: paper-momentum ·
-   up to $25 an order · $100 of orders in all`. Refresh on the face: `Gravit · admitted until Nov 19`
-   (the find's text; the box line) with `trade · paper-momentum · $25 an order · $100 of $100 left`.
+   up to $25 an order · $100 of orders in all`. Refresh on the face: `Gravit · admitted` with `trade ·
+   paper-momentum · $25 an order · $100 of $100 left` — and no `until`: the Account sends ISO times
+   and the view took numbers only (the final review's Important 3, fixed in the pass).
 5. The script's `portfolio_live_order {venue: paper-momentum, symbol: BTC/USD, side: buy, usd: 10}`:
    `pending: true, card: card-0002` (`Gravit asks to PAPER · buy 0.00015 BTC at Momentum · paper ·
    market · about $9.42`, flight GR-0003). Refresh: `$90.38 of $100 left` (the card reserving $9.62),
@@ -170,3 +171,79 @@ process over stdio with the checkout's own MCP client, as dsh would.
 Not walked by the look: the face's own card from a conversation (a model is needed) — that is
 `account-seat-smoke`'s half; and the real service (`npm run account`) with its egress — the
 operator's drill (`face/README.md` "The account-seat drill").
+
+## Final review (2026-10-21)
+
+One fresh reviewer read the whole branch, b21da25..281ecaf (16 commits), with the plan, the spec, the
+plan's Review Focus and the rulings: a general-purpose agent on Opus 5.5. It ran the suite (1060
+tests, 1043 pass, 17 skipped), the typecheck and the seat smoke alone (1/1, 13.8 s), and probed the
+Account's stand-in at 133b9a7 with scripts of its own. Verdict: **With fixes** — one Critical, five
+Important, ten Minor, thirteen behaviours set aside.
+
+Strengths it named: the gate's name lists complete (the Account's 42 tools split exactly into the
+twelve writes and thirty reads, matching the Account's own header); a new tool under `mcp__account__`
+carded until classified, so a renamed or added write cannot slip through; the guard reused unchanged;
+key fields whole or the call denied, tested; `seat.ts` copying only named fields, bounding error codes
+by a regex, aborting at 7 s, one flight, the fence first; the row failing soft, every existing smoke
+disabling it, `check-home` disabling it by package name; the smoke a real end-to-end run with the
+Account's own stand-in; the documents honest about the manual drill, R32–R35 and the egress.
+
+**Re-graded by effect**: all six stand. A card that read `legs=?` approved up to ten orders blind
+(Critical); a Guard-mode batch receipt saying `placed` when the Account had raised cards (Important);
+the box misreading the Account's real data — its ISO expiries dropped, a re-admitted seat shown
+revoked, an unknown key status shown admitted (three Important); a card headline and venue chip
+joined to another session's call of the same id (Important). The ten Minors stay Minor, except the
+all-refused batch's raw JSON, which the same function's fix covered.
+
+**The fix pass**, every fix under a test that failed first (suite 1066 tests, 1049 pass, 17 skipped;
+typecheck clean; the seat smoke 1/1 with its new batch and expiry steps):
+
+1. *A batch's card*: `describeOrder` describes a nested object one level deep and a list entry by
+   entry — a batch's `legs` each as one order, in the same readable order — and `unshowableKeyField`
+   walks into them, so a leg's venue, symbol, id or address is whole or the call is denied, and more
+   than ten legs is denied. The client's `seatLine` lists every leg (`batch · 3 legs: buy $10 of
+   BTC/USD · market; …`) and the chip names the legs' venues (`paper-1, okx`).
+2. *A batch's receipt*: `seatLift` counts a leg with an order as placed, a leg with a card as raised,
+   a refused leg as refused — `Batch · 2 cards raised on the Account page · 1 refused` — and an
+   all-refused batch reads `Batch · 2 of 2 legs refused · <code> · <message>`.
+3. *The expiry*: `seatView` takes the Account's ISO times as well as numbers; the fixtures are ISO;
+   the smoke asserts the box's `validUntil` is a number past now. The look's record was corrected:
+   the box had read `Gravit · admitted`, with no `until`.
+4. *A re-admitted seat*: the standing is the best of the name's keys — `ok`, else a request knocking,
+   else expired, else revoked — and the limits and cards are the chosen key's, by address.
+5. *An unknown status*: a listed key whose status the face does not know is `unknown`, drawn as
+   `Gravit · on the account · standing unknown`, never admitted.
+6. *The calls map*: a call is kept by session and id, and a gate joins only its own session's call of
+   the same tool; another session's call of the same id, or another tool's, is not it.
+
+The branch's own false document statements were corrected in the same pass: seventeen real boots
+(CLAUDE.md, face/README.md with the seat smoke listed), the skills list (DEVELOPMENT §3.2,
+dsh/README.md, the loops page), the drill's step 4 (Refresh), DEVELOPMENT §4.7 and §5.3 for the
+batch.
+
+**The lines it set aside, each ruled** (`Final: Ruling` in the SDD ledger): the name match (spec);
+the signed words ungated (spec); two cards (spec non-goal, R32); the fence with no cookie (every
+`/data` route); `FACE_ACCOUNT_URL` unchecked (operator configuration); the 30 s cache of an
+unreachable answer (Task 6's ruling); writes on with `--live-cap 1` (spec and README); the tool
+block's cost (R35, the operator's); a tool that keeps its name but starts writing (outside any
+name-based canary, R33); a service half-open at boot (now a Minor, deferred: the seat's startup GET
+has no timeout, dsh waits for the first connection); a pre-existing seat key with earlier grants
+(operator environment; a README line deferred); the full `FACE_SMOKE` and pytest not run by the
+reviewer (the executor's runs stand); and the spec's §6.1 naming `batch · 3 legs` as the card — a
+spec defect, recorded here, the spec to be amended in the next docs pass.
+
+### Deferred minors (final review)
+
+- A venue's `stale` is a string reason at the Account; `seatView` marks stale only on `true`.
+- The earn `product` and pay `body` fields are cut at 40 characters on the card (no such limit is
+  granted this round).
+- A body stalling past the abort after the headers arrive reads `unreadable`, not `timeout`.
+- A `?fresh=1` read joins an in-flight plain read; the read right after a receipt can return a view
+  from before the card existed, cached 30 s.
+- `GRAVIT.md` calls every seat tool a public unguarded query; only its market reads are.
+- No unit pin that `orderGuardReason` refuses a seat write without a grant and admits it with one.
+- R34/D17 lack the seat's R1: a shell turn can read the seat's key file and sign at the Account's
+  door with no Gate 2.
+- The box ignores a patched row (it reads the env and the constant name, not the composed config).
+- A README line to check for an agent already named Gravit before the first boot; a drill for a
+  service that hangs at boot; the seat's startup GET without a timeout.

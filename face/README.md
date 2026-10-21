@@ -1798,10 +1798,10 @@ complete text is stamped `Partial`.
 ```bash
 npm test                  # offline unit tests - no keys, no network, no port
 npm run typecheck         # strict tsc against the pinned .d.ts (skipLibCheck: false) - the contract test
-FACE_SMOKE=1 npm test     # + the 16 isolated real boots; local stubs, no external model calls
+FACE_SMOKE=1 npm test     # + the 17 isolated real boots; local stubs, no external model calls
 ```
 
-Offline, `npm test` skips the 16 real boots listed below; `FACE_SMOKE=1` runs
+Offline, `npm test` skips the 17 real boots listed below; `FACE_SMOKE=1` runs
 them too. The typecheck includes the dependencies' own `.d.ts`, so a green one
 means the face compiles against the installed dsh, not just against itself.
 
@@ -1819,6 +1819,7 @@ and `node --test` gives each file its own:
 | `order-gate.test.ts` (its real-tree case) | Gate 2's listener is registered: it asks for `mcp__drill__place_order` (the card naming `AAPL` and `side=buy`), `cancel_order` and a renamed server's twin, refuses an agentless call, lets `mcp__drill__orders` through; the guard refuses a marked tool the gate cannot name, and a session whose log it cannot read with its own sentence |
 | `order-gate-smoke.test.ts` | Gate 2's POSITIVE path: an approved stand-in order dispatches, a rejected one does not; then the same through the real `$events` channel |
 | `order-gate-midboot-smoke.test.ts` | Gate 2 armed while `boot()` is still pending: a slow fixture row holds the boot open while an order stand-in registers, and with `bootFace` unresolved and unary `/api` already serving, the order call is HELD with `approval/asked` logged and its body not run, an agentless call is denied by the listener, a marked tool the gate cannot name is denied by the guard alone; once the boot is released the held card reaches the first tab and `allowed-once` dispatches exactly once; a restart of the real `approval` row re-arms the listener once |
+| `account-seat-smoke.test.ts` | the Account seat against the Account's own stand-in (skipped unless `FACE_ACCOUNT_SEAT_DIR` names an installed checkout): the seat's 35 tools and exactly its nine real-account writes gated, a read as the admitted seat, a seat order rejected at the face's card never reaching the seat, the same order allowed once answered by the stand-in with a card, a batch answered leg by leg with cards, and `/data/seat.json` reading that standing with the Account's ISO expiry as milliseconds |
 | `gravit-client-smoke.test.ts` | the new page on a real boot: `/` with its title and script, the modules under `/client` with their types (Markets' `js/wire/market-quotes.js` and `js/host/markets.js` among them), the old `chat.js` gone and `/market` and `/account` answering 404; the host layer (`client/js/host/live.js` over the page's own wire) listing a session just created and opening it (live, so a follow) into a loaded window with a clean status line; a bare `bootFace` mounts no `/data` route, which the list tolerates |
 | `client-mux-smoke.test.ts` | the page's own `client/js/wire/api.js` and `client/js/wire/mapper.js`, unmodified, against the host: ready, calls, emits, the control baseline, a follow's snapshot and tail, an approval answered and one rejected, a second tab's `cancel` and its refused late answer, Stop withdrawing a gate, a question answered, a gate replayed to a late tab, the non-activating page and projections reads |
 | `askuser-noclient-smoke.test.ts` | with no browser connected, an agent's question BLOCKS (parked for the next client); an agentless one is refused `NO_PROVIDER` |
@@ -2713,8 +2714,8 @@ limit on it ("The Account seat" above), the face started with keys, a channel se
    Venues box counting `1 card waiting`.
 4. **The Account's card.** On the Account page (Portfolio › Waiting for you) the card `Gravit asks
    to PAPER · buy … AAPL at paper-1 …`; approve and sign. Gravit's `portfolio_wait` returns
-   `done`; the Account's statement shows the fill marked paper; the Venues box drops back to no
-   cards and the limit's `left` falls by the order's worth.
+   `done`; the Account's statement shows the fill marked paper; on Refresh the Venues box drops
+   back to no cards and the limit's `left` falls by the order's worth.
 5. **The refusal.** Ask: "Sell $10 of AAPL on okx." Expect the face's card (the venue `okx`) and,
    on ✓, the Account's refusal `E_MANDATE_RECIPIENT · …` as a red refusal line — no card on the
    Account page, nothing placed.

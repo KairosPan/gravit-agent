@@ -412,6 +412,7 @@ and the drill are in `face/README.md` "The Account seat".
 | Pack | Owner (charter §4) | Content |
 |---|---|---|
 | `dsh/skills/mechanics/backtest-rules` | operator; law, not style | the five rules, the bed-window table, warmup, the results-file contract |
+| `dsh/skills/mechanics/account-seat-guide` | operator | the Account seat's mechanics (§3.1): paper venues only, the two cards and their thirty minutes, waiting on a card, what to ask the owner for and never, the codes that mean stop, the quotes unguarded |
 | `dsh/skills/mechanics/alpaca-kit-guide` | operator | MCP-vs-import split, the registration matrix, RAW, `announce_date := process_date`, bed and warmup dates, fail-soft `ok=false` |
 | `dsh/skills/style-gravit/doctrine` | operator; Gravit proposes in journal or conversation, never edits | 39 entries, 9 tagged `(red-line)` |
 | `dsh/skills/style-gravit/signals` | operator | six named setups |
@@ -1348,7 +1349,9 @@ because neither alone suffices:
    appended; the key fields the operator decides on — a venue, a symbol, an id, an address, a payee's
    URL — are shown WHOLE up to 120 characters, and a call whose key field cannot be shown whole is
    **denied** before any card: too long, or a URL that is not http(s), carries userinfo or does not
-   parse). The approval request carries no arguments — only the
+   parse; a batch's `legs` are each described as one order and a nested object is shown one level
+   deep, with the same key fields whole or denied, and more than ten legs is denied — a card that
+   read `legs=?` would approve ten orders blind). The approval request carries no arguments — only the
    tool name, the call id, `reason` and `displayReason` — and `api-remotes` forwards it to every
    connected browser's `$events` stream as an `approval/request` waterfall keyed by `eventId`.
    The card shows the tool name, the order line and two buttons; an upstream-style panel draws
@@ -1659,7 +1662,7 @@ merge?}`, ids minted from the host's own: `e<seq>` for a record, `t<callId>` for
 | `room-line` | a system line, `roundEndLine(view)` |
 | `subagent-message` | a system line, `Report from <child>: …` (no link yet) |
 | `card` phase `call` | `kind:"tool"`, text = the mapper's title (a `bash` command) or the tool name, `data.args` from the `calls` map |
-| `card` phase `result` | the same id with `merge: true` — `data.result`, `data.isError` fill the row, and the call's `name` and `args` when its `tool/call` was seen (the renderer dresses alpaca-kit's results by name); for an order tool (`place_order`, `cancel_order`, raw or `mcp__<server>__<raw>`) a second message follows: `kind:"receipt"` (`Order accepted · <side qty symbol · type> · <order id>`) or, on error, `kind:"refusal"` with the result text; for a seat write (the twelve, raw or minted) `seatLift` follows instead: `Card raised on the Account page · card-… · answer it there` (pending), `Order placed` / `Order canceled · <seat line> · ord-… [· paper]`, `Batch · n of m legs placed`, or `kind:"refusal"` with `<code> · <message>` in the Account's words — each flagged `data.seat`, which routes the app's reload to the seat; a seat read lifts nothing |
+| `card` phase `result` | the same id with `merge: true` — `data.result`, `data.isError` fill the row, and the call's `name` and `args` when its `tool/call` was seen (the renderer dresses alpaca-kit's results by name); for an order tool (`place_order`, `cancel_order`, raw or `mcp__<server>__<raw>`) a second message follows: `kind:"receipt"` (`Order accepted · <side qty symbol · type> · <order id>`) or, on error, `kind:"refusal"` with the result text; for a seat write (the twelve, raw or minted) `seatLift` follows instead: `Card raised on the Account page · card-… · answer it there` (pending), `Order placed` / `Order canceled · <seat line> · ord-… [· paper]`, `Batch · n of m legs placed · k cards raised on the Account page · j refused` (in Guard the Account answers a leg with a card of its own, which is not a fill), or `kind:"refusal"` with `<code> · <message>` in the Account's words — each flagged `data.seat`, which routes the app's reload to the seat; a seat read lifts nothing |
 | `approval` | `kind:"approval"` (tool name, `reason`, `displayReason`) — or, for an order tool, `kind:"card"`: `Your call: <order line>`, venue `Alpaca paper`, the arguments from `calls`; for a seat tool (the twelve under any server, or anything under the face's own `mcp__account__` prefix, which the host cards) `Your call: <seat line>` with the argument's venue as the chip, or `Account seat` when the tool names none |
 | `question` | `kind:"question"` with the batch's questions |
 
