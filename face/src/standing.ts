@@ -36,14 +36,15 @@
  *
  * THE ARMING EDITS. `arm` and `rearm` edit the file as text, so the operator's comments, spacing and budget
  * stay as they wrote them: {@link appendOrder} adds an entry at the end of `orders:` and {@link rehashOrder}
- * rewrites one order's hash lines. Each keeps its edit only when the edited text parses to exactly the old
- * load plus that change; any other shape - a flow-style list, `orders:` before another key, an order whose
- * `- id:` is not its first line - gets the text to paste by hand instead. {@link writeStanding} replaces the
- * file in one step under the face's file lock.
+ * rewrites one order's hash lines - and its `expires`, when `rearm --expires` extends it. Each keeps its edit
+ * only when the edited text parses to exactly the old load plus that change; any other shape - a flow-style
+ * list, `orders:` before another key, an order whose `- id:` is not its first line - gets the text to paste
+ * by hand instead. {@link writeStanding} replaces the file in one step under the face's file lock, refusing
+ * a file that changed since the edit read it.
  *
- * MODULE WEIGHT. js-yaml and `channels.ts` come with this module, so neither the face's desk (src/desk.ts)
- * nor the pause switch (scripts/desk.ts) imports it at load: the switch's `arm` and `rearm` and the
- * schedule load it on first use.
+ * MODULE WEIGHT. js-yaml comes with this module, so neither the face's desk (src/desk.ts) nor the pause
+ * switch (scripts/desk.ts) imports it at load: the switch's `arm` and `rearm` and the schedule load it on
+ * first use. The channel-name rule comes from the leaf channel-name.ts, not channels.ts and its graph.
  * @module
  */
 import { createHash } from "node:crypto";
@@ -52,7 +53,7 @@ import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { withFileLock, writeFileAtomic } from "@deepseek-ai/dsh-atomic-write";
 import { CORE_SCHEMA, load } from "js-yaml";
-import { NAME_RE } from "./channels.ts";
+import { NAME_RE } from "./channel-name.ts";
 import { deskDir, type TurnUsage } from "./desk.ts";
 import { etDayStart } from "./et.ts";
 import type { MarketSession } from "./market-clock.ts";
@@ -181,17 +182,21 @@ export function anchorInstant(a: Anchor, session: MarketSession): number {
   return Date.parse(a.kind === "open" ? session.open : session.close) + a.offsetMin * 60_000;
 }
 
+/** What an order runs before the close: its producer, its turn, or both - never neither, since an order with
+ * neither runs nothing and is refused before its room is asked about. Each is the deadline it runs under. */
+export type RoomNeed = { producerMs: number; turnMs?: number } | { producerMs?: number; turnMs: number };
+
 /**
  * Why a `close-Nm` anchor cannot hold what must fit before the close (P2-16) - the producer's deadline when
  * there is a producer, the turn's when it wakes one, and the 5-minute grace - or `undefined` when it can, or
  * when the anchor is anything but `close-Nm`.
  * @param anchor - the anchor.
  * @param need - `producerMs`, the producer's deadline, absent without a producer; `turnMs`, the turn's
- *   deadline, absent when nothing is woken.
+ *   deadline, absent when nothing is woken; at least one of the two.
  * @returns `close-<N>m leaves <N> min before the close; its producer (<p>), its turn (<t>) and the 5-minute
  *   grace need <sum>`, the parts present only when they count, durations as producer.ts's `formatDuration`.
  */
-export function roomProblem(anchor: Anchor, need: { producerMs?: number; turnMs?: number }): string | undefined {
+export function roomProblem(anchor: Anchor, need: RoomNeed): string | undefined {
   if (anchor.kind !== "close" || anchor.offsetMin >= 0) return undefined;
   const room = -anchor.offsetMin * 60_000;
   const sum = (need.producerMs ?? 0) + (need.turnMs ?? 0) + GRACE_MS;
@@ -200,7 +205,7 @@ export function roomProblem(anchor: Anchor, need: { producerMs?: number; turnMs?
     ...(need.producerMs === undefined ? [] : [`its producer (${formatDuration(need.producerMs)})`]),
     ...(need.turnMs === undefined ? [] : [`its turn (${formatDuration(need.turnMs)})`]),
   ];
-  const listed = parts.length === 0 ? "" : parts.length === 1 ? `${parts[0]} and ` : `${parts.join(", ")} and `;
+  const listed = parts.length === 1 ? `${parts[0]} and ` : `${parts.join(", ")} and `;
   return `${formatAnchor(anchor)} leaves ${-anchor.offsetMin} min before the close; ${listed}the 5-minute grace need ${formatDuration(sum)}`;
 }
 
@@ -353,9 +358,10 @@ function parseBudget(raw: unknown, errors: string[]): { dailyTokens: number } | 
   return { dailyTokens: tokens };
 }
 
-/** producer.ts's refusal as an order's: naming the key once. */
+/** producer.ts's refusal as an order's, opening with the key: `producer must be …` as it is, `unknown builtin
+ * "x"` as `producer names an unknown builtin "x"`. */
 function producerFault(error: string): string {
-  return error.startsWith("producer ") ? error : `producer: ${error}`;
+  return error.startsWith("producer ") ? error : `producer names an ${error}`;
 }
 
 /** One order, read; its faults land in `errors`, each opening `orders[<i>] (<id>): `. */
@@ -418,7 +424,7 @@ function parseOrder(raw: unknown, i: number, seen: Map<string, number>, errors: 
 
   const wake = raw.wake === undefined ? true : raw.wake;
   if (typeof wake !== "boolean") fault(`wake must be true or false (got ${shown(raw.wake)})`);
-  else if (!wake && producerRead && producer === undefined) fault("wake: false needs a producer: an order with neither runs nothing");
+  else if (!wake && producerRead && producer === undefined) fault("wake is false, so it needs a producer: an order with neither runs nothing");
 
   if (raw.model !== undefined && !isModelRoute(raw.model)) fault(`model must be PROVIDER/MODEL (got ${shown(raw.model)})`);
 
@@ -439,11 +445,13 @@ function parseOrder(raw: unknown, i: number, seen: Map<string, number>, errors: 
 
   if (raw.armedAt !== undefined && !isIsoInstant(raw.armedAt)) fault(`armedAt must be a UTC time as arm writes it, 2026-10-20T18:00:00.000Z (got ${shown(raw.armedAt)})`);
 
+  /* The room rule, only once everything it reads is good - and never for an order with neither a producer nor a
+   * turn, whose one fault is the line above: one fault, one line. */
   if (anchor !== undefined && producerRead && typeof wake === "boolean" && turnDeadlineMs !== undefined && producerDeadlineMs !== undefined) {
-    const room = roomProblem(anchor, {
-      ...(producer === undefined ? {} : { producerMs: producerDeadlineMs }),
-      ...(wake ? { turnMs: turnDeadlineMs } : {}),
-    });
+    let need: RoomNeed | undefined;
+    if (wake) need = producer === undefined ? { turnMs: turnDeadlineMs } : { producerMs: producerDeadlineMs, turnMs: turnDeadlineMs };
+    else if (producer !== undefined) need = { producerMs: producerDeadlineMs };
+    const room = need === undefined ? undefined : roomProblem(anchor, need);
     if (room !== undefined) fault(room);
   }
 
@@ -516,6 +524,23 @@ export function parseStanding(text: string): StandingLoad {
   const orders = parseOrders(doc.orders, errors);
   if (errors.length > 0) return { ok: false, errors };
   return { ok: true, ...(budget === undefined ? {} : { budget }), orders };
+}
+
+/** A not-armed fault as {@link parseOrder} writes it: the order's label, then `not armed: `. */
+const NOT_ARMED_RE = /^(orders\[\d+\](?: \([a-z][a-z0-9-]*\))?): not armed: /;
+
+/**
+ * The orders a refused load names as not armed (P2-22), labelled as their refusals label them -
+ * `orders[<i>] (<id>)`, or `orders[<i>]` without a good id - so a refusal can name the way out: such an order
+ * is removed and armed again, since `arm` adds nothing to a refused file.
+ * @param errors - a refused load's errors.
+ * @returns the labels, in file order; none when no fault is a not-armed one.
+ */
+export function unarmedOrders(errors: readonly string[]): string[] {
+  return errors.flatMap((error) => {
+    const match = NOT_ARMED_RE.exec(error);
+    return match === null ? [] : [match[1]];
+  });
 }
 
 /* ---------- what the schedule reports (filled by the schedule, read by the status) ---------- */
@@ -639,8 +664,8 @@ function entryOrder(entry: ArmEntry): StandingOrder | undefined {
 
 /** A top-level key's line: at column 0, not a comment, a list item or a document marker; the key up to its `:`. */
 const TOP_KEY_RE = /^([^\s#\-][^:]*?)[ \t]*:(?:[ \t]|\r?$)/;
-/** `orders:` with nothing after it but `[]` and a comment. */
-const ORDERS_LINE_RE = /^orders:[ \t]*(\[\][ \t]*)?(#.*)?(\r?)$/;
+/** `orders:` with nothing after it but an empty list or a null - `[]`, `~` or CORE's `null` - and a comment. */
+const ORDERS_LINE_RE = /^orders:[ \t]*((?:\[\]|~|null|Null|NULL)[ \t]*)?(#.*)?(\r?)$/;
 
 /** The top-level keys of `lines`, in file order, with their line numbers. */
 function topLevelKeys(lines: readonly string[]): { name: string; line: number }[] {
@@ -659,9 +684,9 @@ function endingInNewline(text: string): string {
 
 /**
  * Append an armed entry to `standing.yml`'s text: at the end of the file, under `orders:` when it is the last
- * top-level key (`orders: []` becoming `orders:`, the list's own indentation kept), or under an `orders:`
- * added at the end when there is none. The edit is kept only when the new text parses to the old load plus
- * exactly this order, the budget unchanged.
+ * top-level key (`orders: []` or `orders: ~` becoming `orders:`, the list's own indentation kept), or under an
+ * `orders:` added at the end when there is none. The edit is kept only when the new text parses to the old
+ * load plus exactly this order, the budget unchanged.
  * @param text - the file's text, `""` when there is none.
  * @param entry - the entry.
  * @returns the new text, or the error to print: `standing.yml has a shape arm cannot append to safely; add
@@ -699,23 +724,37 @@ export function appendOrder(text: string, entry: ArmEntry): { text: string } | {
   return { text: next };
 }
 
-/** A hash line at an order's key column: the key, its value - double-quoted, single-quoted or plain - and a comment. */
-const HASH_LINE_RE = /^( *)(sha256|producerSha256):([ \t]*)("[^"]*"|'[^']*'|[^\s#'"][^\s#]*)([ \t]+#.*)?(\r?)$/;
+/** A line rearm rewrites, at an order's key column: the key, its value - double-quoted, single-quoted or plain -
+ * and a comment. */
+const REWRITTEN_LINE_RE = /^( *)(sha256|producerSha256|expires):([ \t]*)("[^"]*"|'[^']*'|[^\s#'"][^\s#]*)([ \t]+#.*)?(\r?)$/;
+
+/** What `rearm` changes in one order: its text's hash, a script producer's, and - `rearm --expires` - its last day. */
+export interface OrderChange {
+  sha256: string;
+  producerSha256?: string;
+  expires?: string;
+}
 
 /**
- * Rewrite one order's hashes in `standing.yml`'s text: the `sha256:` line - and, when `producerSha256` is
- * given, the `producerSha256:` line - of the block that opens `- id: <id>` (the id plain or quoted), each
- * value written double-quoted, a comment on the line kept. Nothing else moves; the edit is kept only when the
- * new text parses to the old load with exactly those hashes changed.
+ * Rewrite one order's hashes in `standing.yml`'s text - and its `expires`, when `rearm --expires` extends it:
+ * the `sha256:` line, and the `producerSha256:` and `expires:` lines when those are given, of the block that
+ * opens `- id: <id>` (the id plain or quoted), each value written double-quoted, a comment on the line kept.
+ * Each must be there exactly once. Nothing else moves; the edit is kept only when the new text parses to the
+ * old load with exactly those values changed.
  * @param text - the file's text.
  * @param id - the order's id.
- * @param hashes - the new hashes.
- * @returns the new text, or the error to print: `standing.yml has a shape rearm cannot rewrite safely; set the
- *   hashes of <id> by hand:` and the hash lines to paste.
+ * @param change - the new values.
+ * @returns the new text, or the error to print: `standing.yml has a shape rearm cannot rewrite safely; set these
+ *   keys of <id> by hand:` and the lines to paste.
  */
-export function rehashOrder(text: string, id: string, hashes: { sha256: string; producerSha256?: string }): { text: string } | { error: string } {
-  const pasted = [`    sha256: ${JSON.stringify(hashes.sha256)}`, ...(hashes.producerSha256 === undefined ? [] : [`    producerSha256: ${JSON.stringify(hashes.producerSha256)}`])];
-  const byHand = { error: `${STANDING_FILE} has a shape rearm cannot rewrite safely; set the hashes of ${id} by hand:\n${pasted.join("\n")}` };
+export function rehashOrder(text: string, id: string, change: OrderChange): { text: string } | { error: string } {
+  const wanted = new Map<string, string>([
+    ["sha256", change.sha256],
+    ...(change.producerSha256 === undefined ? [] : [["producerSha256", change.producerSha256] as [string, string]]),
+    ...(change.expires === undefined ? [] : [["expires", change.expires] as [string, string]]),
+  ]);
+  const pasted = [...wanted].map(([key, value]) => `    ${key}: ${JSON.stringify(value)}`);
+  const byHand = { error: `${STANDING_FILE} has a shape rearm cannot rewrite safely; set these keys of ${id} by hand:\n${pasted.join("\n")}` };
   const old = parseStanding(text);
   if (!old.ok || !isOrderId(id)) return byHand;
   const index = old.orders.findIndex((order) => order.id === id);
@@ -725,30 +764,27 @@ export function rehashOrder(text: string, id: string, hashes: { sha256: string; 
   const starts = lines.flatMap((line, i) => (opener.test(line) ? [i] : []));
   if (starts.length !== 1) return byHand;
   const dash = lines[starts[0]].indexOf("-");
-  let sha = 0;
-  let producerSha = 0;
+  const rewritten = new Map<string, number>();
   for (let i = starts[0] + 1; i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trim();
     if (trimmed === "" || trimmed.startsWith("#")) continue;
     if (line.length - line.trimStart().length <= dash) break;
-    const match = HASH_LINE_RE.exec(line);
+    const match = REWRITTEN_LINE_RE.exec(line);
     if (match === null || match[1].length !== dash + 2) continue;
     const [, pad, key, space, , comment = "", cr] = match;
-    if (key === "sha256") {
-      lines[i] = `${pad}${key}:${space || " "}${JSON.stringify(hashes.sha256)}${comment}${cr}`;
-      sha += 1;
-    } else if (hashes.producerSha256 !== undefined) {
-      lines[i] = `${pad}${key}:${space || " "}${JSON.stringify(hashes.producerSha256)}${comment}${cr}`;
-      producerSha += 1;
-    }
+    const value = wanted.get(key);
+    if (value === undefined) continue;
+    lines[i] = `${pad}${key}:${space || " "}${JSON.stringify(value)}${comment}${cr}`;
+    rewritten.set(key, (rewritten.get(key) ?? 0) + 1);
   }
-  if (sha !== 1 || producerSha !== (hashes.producerSha256 === undefined ? 0 : 1)) return byHand;
+  if ([...wanted.keys()].some((key) => rewritten.get(key) !== 1)) return byHand;
   const next = lines.join("\n");
   const want = old.orders.map((order, i) => (i !== index ? order : {
     ...order,
-    sha256: hashes.sha256,
-    ...(hashes.producerSha256 === undefined ? {} : { producerSha256: hashes.producerSha256 }),
+    sha256: change.sha256,
+    ...(change.producerSha256 === undefined ? {} : { producerSha256: change.producerSha256 }),
+    ...(change.expires === undefined ? {} : { expires: change.expires }),
   }));
   const got = parseStanding(next);
   if (!got.ok || !isDeepStrictEqual(got.budget, old.budget) || !isDeepStrictEqual(got.orders, want)) return byHand;

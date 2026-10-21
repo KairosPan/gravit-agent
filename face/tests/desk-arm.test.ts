@@ -1,12 +1,14 @@
 // face/tests/desk-arm.test.ts
 /** `npm run desk -- arm` and `rearm` (scripts/desk.ts over src/standing.ts): arming hashes the order's text and
  * its script, checks the market calendar, and appends a verified entry to standing.yml, written 0600; every
- * refusal is one line and leaves standing.yml as it was; re-arming takes a changed file's new hash and leaves
- * the rest. Offline: a fake market clock. The fixture repository roots and harness homes sit INSIDE the
- * repository, under tests/tmp/desk-arm-<pid>/, and are removed afterwards. */
+ * refusal is one line and leaves standing.yml as it was - a file refused for an unarmed order names the way out;
+ * re-arming takes a changed file's new hash and leaves the rest, and `--expires` extends an order, an expired one
+ * too; neither writes over an edit made after it read the file. Offline: a fake market clock. The fixture
+ * repository roots and harness homes sit INSIDE the repository, under tests/tmp/desk-arm-<pid>/, and are removed
+ * afterwards. */
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { mkdir, readFile, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,7 +21,8 @@ const TEST_DIR = join(dirname(fileURLToPath(import.meta.url)), "tmp", `desk-arm-
 after(() => rm(TEST_DIR, { recursive: true, force: true }));
 
 const USAGE = "usage: npm run desk -- pause [Nm | Nh | Nd] | resume | arm <desk | strategies/NAME> --id ID --at ANCHOR --expires YYYY-MM-DD"
-  + " [--producer scripts/FILE.py | builtin:NAME] [--model PROVIDER/MODEL] [--turn-deadline DURATION] [--producer-deadline DURATION] [--no-wake] | rearm ID";
+  + " [--producer scripts/FILE.py | builtin:NAME] [--model PROVIDER/MODEL] [--turn-deadline DURATION] [--producer-deadline DURATION] [--no-wake]"
+  + " | rearm ID [--expires YYYY-MM-DD]";
 /** 14:00 ET on Tuesday 2026-10-20 (EDT). */
 const NOW = Date.parse("2026-10-20T18:00:00Z");
 const ARMED_AT = "2026-10-20T18:00:00.000Z";
@@ -47,8 +50,9 @@ interface Rig {
 }
 
 let made = 0;
-/** A fresh repository root - desk/STANDING.md, scripts/p.py, strategies/alpha/STANDING.md - and harness home, under TEST_DIR. */
-async function rig(clock?: (calls: string[]) => MarketClock): Promise<Rig> {
+/** A fresh repository root - desk/STANDING.md, scripts/p.py, strategies/alpha/STANDING.md - and harness home, under TEST_DIR.
+ * `clock` makes the market clock from the ask log and the rig's standing.yml path; {@link goodClock} by default. */
+async function rig(clock?: (calls: string[], standing: string) => MarketClock): Promise<Rig> {
   const dir = join(TEST_DIR, String(++made));
   const root = join(dir, "root");
   const home = join(dir, "home");
@@ -59,10 +63,11 @@ async function rig(clock?: (calls: string[]) => MarketClock): Promise<Rig> {
   await writeFile(join(root, "scripts", "p.py"), P_PY);
   await writeFile(join(root, "strategies", "alpha", "STANDING.md"), "# alpha\nReport before the open.\n");
   const calls: string[] = [];
+  const standing = join(deskDir(home), STANDING_FILE);
   let lines: string[] = [];
   return {
-    root, home, standing: join(deskDir(home), STANDING_FILE), calls,
-    deps: { home, root, out: (line) => { lines.push(line); }, now: () => NOW, marketClock: (clock ?? goodClock)(calls) },
+    root, home, standing, calls,
+    deps: { home, root, out: (line) => { lines.push(line); }, now: () => NOW, marketClock: (clock ?? goodClock)(calls, standing) },
     take: () => { const got = lines; lines = []; return got; },
   };
 }
@@ -92,8 +97,9 @@ test("arm hashes STANDING.md, checks the calendar, appends a verified 0600 entry
   const first = await readFile(r.standing, "utf8");
   assert.match(first, /^orders:\n {2}- id: "preclose"\n/, "the entry as renderOrder writes it");
 
-  /* a second order, in a strategy, with a model, a deadline in seconds, a time anchor, and today as its last day */
-  assert.equal(await runDesk("arm", ["strategies/alpha", "--id", "alpha-open", "--at", "09:00", "--expires", "2026-10-20",
+  /* a second order, in a strategy - its directory typed with a trailing slash - with a model, a deadline in seconds, a
+   * time anchor, and today as its last day */
+  assert.equal(await runDesk("arm", ["strategies/alpha/", "--id", "alpha-open", "--at", "09:00", "--expires", "2026-10-20",
     "--model", "deepseek-official/deepseek-v4-pro", "--turn-deadline", "90s"], r.deps), 0);
   const alphaSha = sha256Hex("# alpha\nReport before the open.\n");
   assert.deepEqual(r.take(), [`armed alpha-open in ${r.root}: strategies/alpha/STANDING.md sha256 ${alphaSha.slice(0, 12)}…, at 09:00, expires 2026-10-20; the face reads standing.yml again within 30 s`]);
@@ -152,6 +158,9 @@ test("arm refuses a taken id, a bad --at, a past --expires, a non-.py script, a 
   await writeFile(join(r.root, "strategies", "latin", "STANDING.md"), Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x0a]));
   await mkdir(join(r.root, "strategies", "linked"), { recursive: true });
   await symlink(join(r.root, "desk", "STANDING.md"), join(r.root, "strategies", "linked", "STANDING.md"));
+  await writeFile(join(r.root, "outside.py"), "print('outside')\n");
+  await symlink(join(r.root, "outside.py"), join(r.root, "scripts", "out.py"));
+  await writeFile(join(r.root, "scripts", "locked.py"), "print('locked')\n", { mode: 0o000 });
   const x = (...more: string[]): string[] => ["desk", "--id", "x", "--at", "close-30m", "--expires", "2026-11-30", ...more];
   const refusals: [args: string[], line: string][] = [
     [["desk", "--id", "preclose", "--at", "close-30m", "--expires", "2026-11-30"],
@@ -163,6 +172,9 @@ test("arm refuses a taken id, a bad --at, a past --expires, a non-.py script, a 
     [x("--producer", "scripts/x.mjs"), "cannot arm x: producer must be scripts/<file>.py or builtin:<name>"],
     [x("--producer", "builtin:nope"), 'cannot arm x: unknown builtin "nope"'],
     [x("--producer", "scripts/gone.py"), "cannot arm x: scripts/gone.py is missing"],
+    [x("--producer", "scripts/out.py"), "cannot arm x: scripts/out.py leaves scripts/"],
+    /* hashed as a firing reads it: a script that cannot be read is missing to both, in the firing's words */
+    [x("--producer", "scripts/locked.py"), "cannot arm x: scripts/locked.py is missing"],
     [["desk", "--id", "x", "--at", "close-10m", "--producer", "builtin:brief", "--expires", "2026-11-30"],
       "cannot arm x: close-10m leaves 10 min before the close; its producer (5 min), its turn (10 min) and the 5-minute grace need 20 min"],
     [x("--turn-deadline", "45m"), "cannot arm x: --turn-deadline 45m must be <n>s or <n>m, from 1 min to 30 min"],
@@ -209,6 +221,24 @@ test("arm refuses a taken id, a bad --at, a past --expires, a non-.py script, a 
   const holey = await rig(() => async (_from, days) => ({ from: "2026-10-21", days, source: "fake", python: "fake", sessions: [] }));
   assert.equal(await runDesk("arm", PRECLOSE, holey.deps), 1);
   assert.deepEqual(holey.take(), [`cannot arm preclose: the market calendar failed in ${PYTHON}: the market clock answered a window from 2026-10-21 for 10 days, which does not hold 2026-10-20; FACE_PYTHON must name an interpreter with pandas_market_calendars`]);
+
+  /* a file refused for orders that are not armed: the way out, since arm adds nothing to a refused file */
+  const unarmed = await rig();
+  await mkdir(deskDir(unarmed.home), { recursive: true });
+  await writeFile(unarmed.standing, "orders:\n  - id: preclose\n    dir: desk\n    at: close-30m\n    expires: 2026-11-30\n");
+  const unarmedBefore = await readFile(unarmed.standing);
+  const wayOut = "orders[0] (preclose): not armed: npm run desk -- arm desk …; remove orders[0] (preclose) from standing.yml, then arm it again";
+  assert.equal(await runDesk("arm", PRECLOSE, unarmed.deps), 1);
+  assert.deepEqual(unarmed.take(), [`cannot arm preclose: ${unarmed.standing} is refused, so nothing is added to it until it is fixed: ${wayOut}`]);
+  assert.equal(await runDesk("rearm", ["preclose"], unarmed.deps), 1);
+  assert.deepEqual(unarmed.take(), [`cannot re-arm preclose: ${unarmed.standing} is refused, so nothing in it changes until it is fixed: ${wayOut}`]);
+  assert.deepEqual(await readFile(unarmed.standing), unarmedBefore);
+  await writeFile(unarmed.standing, `${unarmedBefore.toString("utf8")}  - id: other\n    dir: strategies/alpha\n    at: "09:00"\n    expires: 2026-11-30\n`);
+  assert.equal(await runDesk("arm", PRECLOSE, unarmed.deps), 1);
+  assert.ok(unarmed.take()[0].endsWith("; remove orders[0] (preclose) and orders[1] (other) from standing.yml, then arm them again"));
+  await writeFile(unarmed.standing, "orders:\n");
+  assert.equal(await runDesk("arm", PRECLOSE, unarmed.deps), 0, "the way out: removed, then armed");
+  unarmed.take();
 
   /* a refused standing.yml */
   const broken = await rig();
@@ -276,4 +306,88 @@ test("rearm takes a changed text's new hash and leaves the rest", async () => {
   assert.equal(await runDesk("rearm", ["preclose"], r.deps), 1);
   assert.deepEqual(r.take(), [`cannot re-arm preclose: ${r.standing} is refused, so nothing in it changes until it is fixed: orderz is not a key standing.yml takes (budget, orders)`]);
   assert.deepEqual(r.calls, ["2026-10-20"], "rearm never asks the calendar");
+});
+
+test("rearm --expires extends an order, an expired one too, and checks the date as arm does", async () => {
+  const r = await rig();
+  assert.equal(await runDesk("arm", ["desk", "--id", "preclose", "--at", "close-30m", "--producer", "builtin:brief", "--expires", "2026-10-20"], r.deps), 0);
+  r.take();
+  const armed = await readFile(r.standing, "utf8");
+  const sha = sha256Hex(STANDING_MD);
+  /** Two weeks on: the order expired after 2026-10-20. */
+  const later = { ...r.deps, now: () => Date.parse("2026-11-03T18:00:00Z") };
+
+  assert.equal(await runDesk("rearm", ["preclose", "--expires", "2026-12-31"], later), 0);
+  assert.deepEqual(r.take(), [`re-armed preclose: desk/STANDING.md sha256 ${sha.slice(0, 12)}…, expires 2026-12-31`]);
+  assert.equal(await readFile(r.standing, "utf8"), armed.replace('expires: "2026-10-20"', 'expires: "2026-12-31"'), "only its last day moved");
+  const [order] = await ordersIn(r);
+  assert.equal(order.expires, "2026-12-31");
+  assert.equal(order.armedAt, ARMED_AT, "armedAt stays");
+  assert.equal((await stat(r.standing)).mode & 0o777, 0o600);
+  assert.equal(await runDesk("rearm", ["preclose", "--expires", "2026-12-31"], later), 0);
+  assert.deepEqual(r.take(), ["preclose: nothing changed since arming"]);
+
+  const edited = "# Pre-close\nBrief me ten minutes earlier.\n";
+  await writeFile(join(r.root, "desk", "STANDING.md"), edited);
+  assert.equal(await runDesk("rearm", ["--expires", "2027-01-15", "preclose"], later), 0, "the flag before the id");
+  assert.deepEqual(r.take(), [`re-armed preclose: desk/STANDING.md sha256 ${sha256Hex(edited).slice(0, 12)}…, expires 2027-01-15`]);
+  const [both] = await ordersIn(r);
+  assert.deepEqual([both.sha256, both.expires], [sha256Hex(edited), "2027-01-15"], "a changed text and a new date together");
+
+  const before = await readFile(r.standing);
+  const refusals: [string[], string][] = [
+    [["preclose", "--expires", "2026-11-31"], "cannot re-arm preclose: --expires 2026-11-31 is not a date, YYYY-MM-DD"],
+    [["preclose", "--expires", "2026-11-02"], "cannot re-arm preclose: --expires 2026-11-02 is before today, 2026-11-03 ET"],
+    [["nope", "--expires", "2026-12-31"], "cannot re-arm nope: no such order in standing.yml"],
+  ];
+  for (const [args, line] of refusals) {
+    assert.equal(await runDesk("rearm", args, later), 1, args.join(" "));
+    assert.deepEqual(r.take(), [line]);
+    assert.deepEqual(await readFile(r.standing), before);
+  }
+  for (const args of [["preclose", "--expires"], ["--expires", "2026-12-31"], ["preclose", "--expires", "2026-12-31", "--expires", "2027-01-01"],
+    ["preclose", "--until", "2026-12-31"], ["preclose", "--expires", "--no-wake"]]) {
+    assert.equal(await runDesk("rearm", args, later), 2, args.join(" "));
+    assert.deepEqual(r.take(), [USAGE]);
+  }
+  assert.deepEqual(await readFile(r.standing), before);
+});
+
+test("arm and rearm write only over the file they read: an edit made in between is refused and kept", async () => {
+  /* arm asks the market clock after it has read standing.yml and built its edit, so a clock that edits the file stands
+   * in for the operator's editor saving while arm runs */
+  let meddle = true;
+  const edit = "# edited by hand while arm ran\norders: []\n";
+  const r = await rig((calls, standing) => async (from, days) => {
+    calls.push(from);
+    if (meddle) {
+      await mkdir(dirname(standing), { recursive: true });
+      await writeFile(standing, edit);
+    }
+    return { from, days, source: "a fake calendar", python: "fake", sessions: [{ date: from, open: `${from}T13:30:00Z`, close: `${from}T20:00:00Z`, early: false }] };
+  });
+  const changed = (verb: string, id: string): string => `cannot ${verb} ${id}: cannot write ${r.standing}: it changed since it was read; run the command again`;
+
+  assert.equal(await runDesk("arm", PRECLOSE, r.deps), 1, "no file when read, one when written");
+  assert.deepEqual(r.take(), [changed("arm", "preclose")]);
+  assert.equal(await readFile(r.standing, "utf8"), edit, "the file that appeared meanwhile is kept");
+
+  meddle = false;
+  assert.equal(await runDesk("arm", PRECLOSE, r.deps), 0);
+  r.take();
+  const armed = await readFile(r.standing, "utf8");
+  assert.ok(armed.startsWith("# edited by hand while arm ran\norders:\n  - id: \"preclose\"\n"), "armed on top of the edit");
+
+  meddle = true;
+  assert.equal(await runDesk("arm", ["desk", "--id", "second", "--at", "close-30m", "--expires", "2026-11-30"], r.deps), 1);
+  assert.deepEqual(r.take(), [changed("arm", "second")]);
+  assert.equal(await readFile(r.standing, "utf8"), edit, "the edit made meanwhile is kept, not the file arm built from what it read");
+
+  /* rearm --expires reads the clock after standing.yml, so a clock that edits the file stands in the same way */
+  await writeFile(r.standing, armed);
+  const meanwhile = `# edited by hand while rearm ran\n${armed}`;
+  const meddling = { ...r.deps, now: (): number => { writeFileSync(r.standing, meanwhile); return NOW; } };
+  assert.equal(await runDesk("rearm", ["preclose", "--expires", "2026-12-31"], meddling), 1);
+  assert.deepEqual(r.take(), [changed("re-arm", "preclose")]);
+  assert.equal(await readFile(r.standing, "utf8"), meanwhile);
 });

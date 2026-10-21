@@ -18,6 +18,7 @@ import { isJsonBody, isTrustedDataRequest } from "./data.ts";
 import { FORBIDDEN, HttpError, readBody } from "./http.ts";
 import { botsFor, logBotsWrite, logRosterWrite, rosterFor, seedRoster, setBots, setRoster } from "./roster.ts";
 import { ROOM_CAPS } from "./room-rules.ts";
+import { NAME_RE } from "./channel-name.ts";
 
 /** Diagnostic label, the same string every other `${BIN}:`-prefixed line in this
  * program uses (`roster.ts:24`, `main.ts:26`) - copied rather than imported,
@@ -485,12 +486,9 @@ export async function reconcileChannels(deps: {
 /* ---------- creating a channel, and the four routes over all of the above
  * (Task 7) ---------- */
 
-/** Exactly a channel directory name: one path segment of letters and digits
- * in ANY script (a Chinese name is a name) plus `-` and `_`, 1-41 code
- * points, opening with a letter or digit - so `.`/`..`, dotfiles, separators,
- * spaces and control characters never reach a path. Compared and created in
- * NFC, so one word typed in two normalizations is one directory. */
-export const NAME_RE = /^[\p{L}\p{N}][\p{L}\p{N}\p{M}_-]{0,40}$/u;
+/* NAME_RE, a channel directory's name, lives in the leaf channel-name.ts (imported at the top), so
+ * standing.ts can read the rule without loading this module's graph; it is re-exported here. */
+export { NAME_RE };
 
 /** Birth `strategies/<name>` from the template. Refuses a malformed name, a
  * taken name, and a missing template - never overwrites anything. */

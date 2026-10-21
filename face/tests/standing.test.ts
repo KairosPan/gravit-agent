@@ -15,7 +15,7 @@ import type { MarketSession } from "../src/market-clock.ts";
 import {
   DEFAULT_PRODUCER_DEADLINE_MS, DEFAULT_TURN_DEADLINE_MS, GRACE_MS, STANDING_FILE, STANDING_TEXT_MAX_BYTES, STANDING_YAML_MAX_BYTES,
   anchorInstant, appendOrder, formatAnchor, isEtDate, isOrderDir, orderCwd, parseAnchor, parseStanding, parseStandingDuration,
-  readDeskYaml, rehashOrder, renderOrder, sha256Hex, writeStanding,
+  readDeskYaml, rehashOrder, renderOrder, sha256Hex, unarmedOrders, writeStanding,
   type ArmEntry, type StandingLoad, type StandingOrder,
 } from "../src/standing.ts";
 
@@ -137,45 +137,50 @@ test("parseStanding reads the mapping under CORE_SCHEMA: dates stay strings, onl
     enabled: false, turnDeadlineMs: 90_000,
   }, "a script producer with its hash, a model, CORE's False, a deadline in seconds");
 
-  /* refused, each one edit of FULL, each error naming its key */
-  const refusals: [label: string, text: string, key: string][] = [
-    ["enabled: yes", FULL.replace("enabled: true", "enabled: yes"), "enabled"],
-    ["wake: no", FULL.replace("wake: true", "wake: no"), "wake"],
-    ["at: 0930", FULL.replace("at: close-30m", "at: 0930"), "at"],
-    ["at: 9:30", FULL.replace("at: close-30m", "at: 9:30"), "at"],
-    ["expires: 2026-13-01", FULL.replace("expires: 2026-11-30", "expires: 2026-13-01"), "expires"],
-    ["expires: Nov 30", FULL.replace("expires: 2026-11-30", "expires: Nov 30"), "expires"],
-    ["wakeup: true", FULL.replace("    wake: true\n", "    wakeup: true\n"), "wakeup"],
-    ["top-level orderz", FULL.replace("orders:", "orderz:"), "orderz"],
-    ["orders a mapping", FULL.replace("  - id: preclose\n", "  preclose:\n    id: preclose\n"), "orders"],
-    ["a second id preclose", FULL + ORDER, "id"],
-    ["id: 123", FULL.replace("id: preclose", "id: 123"), "id"],
-    ["id: true", FULL.replace("id: preclose", "id: true"), "id"],
-    ["dir: strategies/_template", FULL.replace("dir: desk", "dir: strategies/_template"), "dir"],
-    ["dir: ../x", FULL.replace("dir: desk", "dir: ../x"), "dir"],
-    ["dir: desk/journal", FULL.replace("dir: desk", "dir: desk/journal"), "dir"],
-    ["producer: builtin:nope", FULL.replace("builtin:brief", "builtin:nope"), "producer"],
-    ["producer: scripts/x.mjs", FULL.replace("builtin:brief", "scripts/x.mjs"), "producer"],
-    ["producerSha256 with builtin:brief", FULL.replace("    wake: true\n", `    producerSha256: ${SHA_B}\n    wake: true\n`), "producerSha256"],
-    ["wake: false with no producer", FULL.replace("    producer: builtin:brief\n", "").replace("wake: true", "wake: false"), "wake"],
-    ["model: flash", FULL.replace("    wake: true\n", "    wake: true\n    model: flash\n"), "model"],
-    ["turnDeadline: 45m", FULL.replace("turnDeadline: 10m", "turnDeadline: 45m"), "turnDeadline"],
-    ["producerDeadline: 5s", FULL.replace("producerDeadline: 5m", "producerDeadline: 5s"), "producerDeadline"],
-    ["sha256: abc", FULL.replace(`sha256: ${SHA}`, "sha256: abc"), "sha256"],
-    ["dailyTokens: 0", FULL.replace("dailyTokens: 2000000", "dailyTokens: 0"), "dailyTokens"],
-    ["dailyTokens: 2M", FULL.replace("dailyTokens: 2000000", "dailyTokens: 2M"), "dailyTokens"],
-    ["file: x/STANDING.md", FULL.replace("file: STANDING.md", "file: x/STANDING.md"), "file"],
-    ["armedAt: yesterday", FULL.replace(`armedAt: "${ARMED}"`, "armedAt: yesterday"), "armedAt"],
-    ["at: 15:30:00", FULL.replace("at: close-30m", "at: 15:30:00"), "at"],
+  /* refused, each one edit of FULL, each one line opening with what it is about and the key */
+  const order = (key: string): string => `orders[0] (preclose): ${key} `;
+  const refusals: [label: string, text: string, opening: string][] = [
+    ["enabled: yes", FULL.replace("enabled: true", "enabled: yes"), order("enabled")],
+    ["wake: no", FULL.replace("wake: true", "wake: no"), order("wake")],
+    ["at: 0930", FULL.replace("at: close-30m", "at: 0930"), order("at")],
+    ["at: 9:30", FULL.replace("at: close-30m", "at: 9:30"), order("at")],
+    ["expires: 2026-13-01", FULL.replace("expires: 2026-11-30", "expires: 2026-13-01"), order("expires")],
+    ["expires: Nov 30", FULL.replace("expires: 2026-11-30", "expires: Nov 30"), order("expires")],
+    ["wakeup: true", FULL.replace("    wake: true\n", "    wakeup: true\n"), order("wakeup")],
+    ["top-level orderz", FULL.replace("orders:", "orderz:"), "orderz "],
+    ["orders a mapping", FULL.replace("  - id: preclose\n", "  preclose:\n    id: preclose\n"), "orders "],
+    ["a second id preclose", FULL + ORDER, "orders[1] (preclose): id "],
+    ["id: 123", FULL.replace("id: preclose", "id: 123"), "orders[0]: id "],
+    ["id: true", FULL.replace("id: preclose", "id: true"), "orders[0]: id "],
+    ["dir: strategies/_template", FULL.replace("dir: desk", "dir: strategies/_template"), order("dir")],
+    ["dir: ../x", FULL.replace("dir: desk", "dir: ../x"), order("dir")],
+    ["dir: desk/journal", FULL.replace("dir: desk", "dir: desk/journal"), order("dir")],
+    ["producer: builtin:nope", FULL.replace("builtin:brief", "builtin:nope"), order("producer")],
+    ["producer: scripts/x.mjs", FULL.replace("builtin:brief", "scripts/x.mjs"), order("producer")],
+    ["producerSha256 with builtin:brief", FULL.replace("    wake: true\n", `    producerSha256: ${SHA_B}\n    wake: true\n`), order("producerSha256")],
+    ["wake: false with no producer", FULL.replace("    producer: builtin:brief\n", "").replace("wake: true", "wake: false"), order("wake")],
+    ["model: flash", FULL.replace("    wake: true\n", "    wake: true\n    model: flash\n"), order("model")],
+    ["turnDeadline: 45m", FULL.replace("turnDeadline: 10m", "turnDeadline: 45m"), order("turnDeadline")],
+    ["producerDeadline: 5s", FULL.replace("producerDeadline: 5m", "producerDeadline: 5s"), order("producerDeadline")],
+    ["sha256: abc", FULL.replace(`sha256: ${SHA}`, "sha256: abc"), order("sha256")],
+    ["dailyTokens: 0", FULL.replace("dailyTokens: 2000000", "dailyTokens: 0"), "budget.dailyTokens "],
+    ["dailyTokens: 2M", FULL.replace("dailyTokens: 2000000", "dailyTokens: 2M"), "budget.dailyTokens "],
+    ["file: x/STANDING.md", FULL.replace("file: STANDING.md", "file: x/STANDING.md"), order("file")],
+    ["armedAt: yesterday", FULL.replace(`armedAt: "${ARMED}"`, "armedAt: yesterday"), order("armedAt")],
+    ["at: 15:30:00", FULL.replace("at: close-30m", "at: 15:30:00"), order("at")],
   ];
-  for (const [label, text, key] of refusals) {
+  for (const [label, text, opening] of refusals) {
     assert.notEqual(text, FULL, `${label}: the edit applies`);
     const errors = errorsOf(parseStanding(text), label);
     assert.equal(errors.length, 1, `${label}: ${errors.join(" | ")}`);
-    assert.ok(errors[0].includes(key), `${label} names ${key}: ${errors[0]}`);
+    assert.ok(errors[0].startsWith(opening), `${label} opens ${JSON.stringify(opening)}: ${errors[0]}`);
   }
-  assert.deepEqual(errorsOf(parseStanding(FULL.replace("id: preclose", "id: 123")), "id: 123")[0].slice(0, 15), "orders[0]: id m",
-    "an order without a good id opens with its index alone");
+  assert.equal(errorsOf(parseStanding(FULL.replace("builtin:brief", "builtin:nope")), "builtin:nope")[0],
+    'orders[0] (preclose): producer names an unknown builtin "nope"');
+  assert.deepEqual(errorsOf(parseStanding(FULL.replace("    producer: builtin:brief\n", "").replace("wake: true", "wake: false").replace("close-30m", "close-4m")),
+    "wake: false, no producer, close-4m"),
+  ["orders[0] (preclose): wake is false, so it needs a producer: an order with neither runs nothing"],
+  "one fault, one line: an order that runs nothing has no room to ask about");
   assert.ok(errorsOf(parseStanding(FULL + ORDER), "a second id")[0].startsWith("orders[1] (preclose): id preclose "));
   assert.deepEqual(errorsOf(parseStanding(FULL.replace("dailyTokens: 2000000", "dailyToken: 2000000")), "budget.dailyToken"),
     ["budget.dailyToken is not a key budget takes (dailyTokens)", "budget.dailyTokens is missing"], "unknown keys are refused in the budget too");
@@ -239,6 +244,13 @@ test("an order without its arming fields is refused: not armed", () => {        
     "a script producer without producerSha256");
   assert.deepEqual(parseStanding(FULL.replace("dir: desk", "dir: strategies/alpha").replace(/^\s*armedAt:.*\n/m, "").replace(/^\s*sha256:.*\n/m, "")),
     { ok: false, errors: ["orders[0] (preclose): not armed: npm run desk -- arm strategies/alpha …"] }, "one line however many fields are missing");
+
+  /* the not-armed orders, labelled for the way out a refusal names */
+  const unarmedSecond = `${FULL}  - id: Second\n    dir: desk\n    at: close\n    expires: 2026-11-30\n`;
+  const errors = errorsOf(parseStanding(`${unarmedSecond.replace(/^\s*armedAt:.*\n/m, "")}orderz: 1\n`), "two unarmed");
+  assert.deepEqual(unarmedOrders(errors), ["orders[0] (preclose)", "orders[1]"], "in file order; one without a good id by its index");
+  assert.deepEqual(unarmedOrders(errorsOf(parseStanding(FULL.replace("enabled: true", "enabled: yes")), "armed")), [], "no not-armed fault, no label");
+  assert.deepEqual(unarmedOrders(['orders[0] (x): "not armed: npm run desk -- arm desk …" is not a key an order takes']), [], "only the fault itself");
 });
 
 test("orderCwd maps desk to desk/journal and strategies/<name> to itself, and refuses the rest", () => {
@@ -323,6 +335,11 @@ test("appendOrder appends verified, keeps comments and the budget, and refuses a
   assert.ok("text" in emptyList);
   assert.equal(emptyList.text, `orders:\n${renderOrder(ENTRY, 2)}`, "orders: [] becomes orders:");
   assert.deepEqual(parseStanding(emptyList.text), { ok: true, orders: [expected] });
+  for (const none of ["orders: ~", "orders: null", "orders: ~ # none yet"]) {
+    const nulled = appendOrder(`budget:\n  dailyTokens: 5\n${none}\n`, ENTRY);
+    assert.ok("text" in nulled, `${none}: ${JSON.stringify(nulled)}`);
+    assert.equal(nulled.text, `budget:\n  dailyTokens: 5\n${none.replace(/ (~|null)/, "")}\n${renderOrder(ENTRY, 2)}`, `${none} appends like an empty list`);
+  }
 
   const flush = appendOrder(`orders:\n${ORDER_A.replace(/^ {2}/gm, "")}`, ENTRY);
   assert.ok("text" in flush, JSON.stringify(flush));
@@ -365,13 +382,28 @@ test("rehashOrder replaces only that order's hashes", () => {
   assert.ok(parseStanding(reordered).ok);
   const refused = rehashOrder(reordered, "b", { sha256: NEW });
   assert.ok("error" in refused);
-  assert.equal(refused.error, `standing.yml has a shape rearm cannot rewrite safely; set the hashes of b by hand:\n    sha256: "${NEW}"`,
+  assert.equal(refused.error, `standing.yml has a shape rearm cannot rewrite safely; set these keys of b by hand:\n    sha256: "${NEW}"`,
     "an order whose - id: is not its first line");
   const refusedBoth = rehashOrder(`orders:\n${ORDER_A}`, "a", { sha256: NEW, producerSha256: NEW_P });
-  assert.deepEqual(refusedBoth, { error: `standing.yml has a shape rearm cannot rewrite safely; set the hashes of a by hand:\n    sha256: "${NEW}"\n    producerSha256: "${NEW_P}"` },
+  assert.deepEqual(refusedBoth, { error: `standing.yml has a shape rearm cannot rewrite safely; set these keys of a by hand:\n    sha256: "${NEW}"\n    producerSha256: "${NEW_P}"` },
     "a script hash for an order that has no line for one");
   assert.ok("error" in rehashOrder(two, "nope", { sha256: NEW }), "no such order");
   assert.ok("error" in rehashOrder(two, "b", { sha256: "abc" }), "verified: a hash the file would refuse is never written");
+
+  /* rearm --expires: the order's last day moves with its hashes */
+  const extended = rehashOrder(two, "a", { sha256: NEW, expires: "2027-01-31" });
+  assert.ok("text" in extended, JSON.stringify(extended));
+  assert.equal(extended.text, two.replace(`sha256: ${SHA_C}`, `sha256: "${NEW}"`).replace("expires: 2026-12-31", 'expires: "2027-01-31"'),
+    "a plain date rewritten double-quoted; b's quoted expires stays");
+  const both3 = rehashOrder(two, "b", { sha256: SHA_B, producerSha256: NEW_P, expires: "2027-01-31" });
+  assert.ok("text" in both3, JSON.stringify(both3));
+  assert.equal(both3.text, two.replace(`producerSha256: "${SHA_B}"`, `producerSha256: "${NEW_P}"`).replace('expires: "2026-11-30"', 'expires: "2027-01-31"'));
+  assert.deepEqual(rehashOrder(two, "a", { sha256: NEW, expires: "2027-02-30" }),
+    { error: `standing.yml has a shape rearm cannot rewrite safely; set these keys of a by hand:\n    sha256: "${NEW}"\n    expires: "2027-02-30"` },
+    "verified: a date the file would refuse is never written");
+  const folded = `orders:\n${ORDER_A.replace("    expires: 2026-12-31\n", "    expires: >-\n      2026-12-31\n")}`;
+  assert.ok(parseStanding(folded).ok, "a block-scalar date loads");
+  assert.ok("error" in rehashOrder(folded, "a", { sha256: NEW, expires: "2027-01-31" }), "verified: a block-scalar date is left to the hand");
 });
 
 test("writeStanding makes the desk directory and writes standing.yml 0600, and refuses a file that changed since it was read", async () => {

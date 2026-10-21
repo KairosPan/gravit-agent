@@ -19,7 +19,8 @@ const home = async (): Promise<string> => {
   return made;
 };
 const USAGE = "usage: npm run desk -- pause [Nm | Nh | Nd] | resume | arm <desk | strategies/NAME> --id ID --at ANCHOR --expires YYYY-MM-DD"
-  + " [--producer scripts/FILE.py | builtin:NAME] [--model PROVIDER/MODEL] [--turn-deadline DURATION] [--producer-deadline DURATION] [--no-wake] | rearm ID";
+  + " [--producer scripts/FILE.py | builtin:NAME] [--model PROVIDER/MODEL] [--turn-deadline DURATION] [--producer-deadline DURATION] [--no-wake]"
+  + " | rearm ID [--expires YYYY-MM-DD]";
 /** 14:00 ET on a Tuesday in October (EDT). */
 const NOW = Date.parse("2026-10-20T18:00:00Z");
 

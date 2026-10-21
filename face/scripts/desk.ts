@@ -11,6 +11,8 @@
  *   npm run desk -- arm desk --id preclose --at close-30m --producer builtin:brief --expires 2026-11-30
  *                                  arm a standing order: pin its text's hash (and its script's), add it to standing.yml
  *   npm run desk -- rearm preclose take a changed text's (or script's) new hash, after reviewing the change
+ *   npm run desk -- rearm preclose --expires 2026-12-31
+ *                                  ...and extend its last day, an expired order's too
  *
  * It acts on the harness home this shell resolves - `$DSH_HOME`, else ~/.dsh - as `npm start` and
  * `npm run service -- install` do, and pins files in the repository this script sits in. No face need be
@@ -36,7 +38,8 @@ import type { MarketClock } from "../src/market-clock.ts";
 
 /** What {@link runDesk} prints for a command or an argument it does not know. */
 const USAGE = "usage: npm run desk -- pause [Nm | Nh | Nd] | resume | arm <desk | strategies/NAME> --id ID --at ANCHOR --expires YYYY-MM-DD"
-  + " [--producer scripts/FILE.py | builtin:NAME] [--model PROVIDER/MODEL] [--turn-deadline DURATION] [--producer-deadline DURATION] [--no-wake] | rearm ID";
+  + " [--producer scripts/FILE.py | builtin:NAME] [--model PROVIDER/MODEL] [--turn-deadline DURATION] [--producer-deadline DURATION] [--no-wake]"
+  + " | rearm ID [--expires YYYY-MM-DD]";
 
 /** The repository this script sits in: `<root>/face/scripts/desk.ts`. */
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -76,18 +79,21 @@ function reasonOf(err: unknown): string {
  *   is the usage line.
  * - `arm <desk | strategies/NAME> --id ID --at ANCHOR --expires YYYY-MM-DD [--producer …] [--model …]
  *   [--turn-deadline …] [--producer-deadline …] [--no-wake]`: arms a standing order (see {@link arm}).
- * - `rearm ID`: takes the new hashes of an armed order's changed files (see {@link rearm}).
+ * - `rearm ID [--expires YYYY-MM-DD]`: takes the new hashes of an armed order's changed files, and extends its
+ *   last day when asked (see {@link rearm}).
  *
  * A switch it cannot write or remove is one line naming the file and the error's code.
  * @param cmd - the command.
  * @param args - what follows it.
- * @param deps - `home`, the harness home; `out`, the printer; `now`, the clock, default `Date.now`; `root`, the
- *   repository `arm` and `rearm` pin files in; `marketClock`, the clock `arm` asks.
+ * @param deps - `home`, the harness home; `out`, the printer; `now`, the clock, default `Date.now` - read once,
+ *   where the command needs the time; `root`, the repository `arm` and `rearm` pin files in; `marketClock`, the
+ *   clock `arm` asks.
  */
 export async function runDesk(cmd: string, args: string[], deps: DeskDeps): Promise<number> {
-  const at = (deps.now ?? Date.now)();
+  const now = deps.now ?? Date.now;
   const file = join(deskDir(deps.home), OFF_FILE);
   if (cmd === "pause" && args.length <= 1) {
+    const at = now();
     const ms = args.length === 0 ? undefined : parseDuration(args[0]);
     if (args.length === 1 && ms === undefined) {
       deps.out(USAGE);
@@ -104,6 +110,7 @@ export async function runDesk(cmd: string, args: string[], deps: DeskDeps): Prom
     return 0;
   }
   if (cmd === "resume" && args.length === 0) {
+    const at = now();
     let lifted: boolean;
     try {
       lifted = await clearOff(deps.home, "terminal", () => at);
@@ -114,8 +121,8 @@ export async function runDesk(cmd: string, args: string[], deps: DeskDeps): Prom
     deps.out(lifted ? "resumed" : "not paused");
     return 0;
   }
-  if (cmd === "arm") return arm(args, deps, at);
-  if (cmd === "rearm") return rearm(args, deps);
+  if (cmd === "arm") return arm(args, deps, now());
+  if (cmd === "rearm") return rearm(args, deps, now);
   deps.out(USAGE);
   return 2;
 }
@@ -182,19 +189,19 @@ async function hashText(m: Machinery, root: string, dir: string, file: string): 
 }
 
 /**
- * A script producer's bytes, found as a firing finds them (producer.ts's `resolveScript`: a regular file under
- * `<root>/scripts/`), hashed.
- * @returns its sha256, or why not: resolveScript's `<script> is missing`, `leaves scripts/` or `is not a
- *   regular file`, or `<script> cannot be read: <code>`.
+ * A script producer's bytes, found and read exactly as a firing finds and reads them - producer.ts's
+ * `resolveScript` (a regular file whose real path lies under `<root>/scripts/`) and `readScriptBytes` (no link
+ * followed, no FIFO waited on, the type checked on the descriptor read) - and hashed.
+ * @returns its sha256, or why not, in the firing's words: `<script> is missing`, `leaves scripts/` or `is not a
+ *   regular file`.
  */
 async function hashScript(m: Machinery, root: string, script: string): Promise<{ sha256: string } | { error: string }> {
   const found = await m.producer.resolveScript(root, script);
   if ("error" in found) return found;
-  try {
-    return { sha256: m.standing.sha256Hex(await readFile(found.path)) };
-  } catch (err) {
-    return { error: `${script} cannot be read: ${reasonOf(err)}` };
-  }
+  const bytes = await m.producer.readScriptBytes(found.path);
+  if (bytes === "missing") return { error: `${script} is missing` };
+  if (bytes === "irregular") return { error: `${script} is not a regular file` };
+  return { sha256: m.standing.sha256Hex(bytes) };
 }
 
 /**
@@ -212,6 +219,29 @@ async function readStanding(path: string): Promise<{ text: string; found: boolea
 
 /** The first 12 hex digits of a hash, as the lines print it. */
 const short = (sha256: string): string => `${sha256.slice(0, 12)}…`;
+
+/**
+ * Why `standing.yml` is refused, as a refusal's reason ends: its faults, and - when some are orders that are
+ * not armed (P2-22) - the way out, since `arm` adds nothing to a refused file and `rearm` changes nothing in
+ * one: `; remove orders[<i>] (<id>) from standing.yml, then arm it again`.
+ */
+function refusedFile(m: Machinery, errors: readonly string[]): string {
+  const unarmed = m.standing.unarmedOrders(errors);
+  if (unarmed.length === 0) return errors.join("; ");
+  const named = unarmed.length === 1 ? unarmed[0] : `${unarmed.slice(0, -1).join(", ")} and ${unarmed[unarmed.length - 1]}`;
+  return `${errors.join("; ")}; remove ${named} from standing.yml, then arm ${unarmed.length === 1 ? "it" : "them"} again`;
+}
+
+/**
+ * Check a new last day as `arm` checks `--expires`: a real date, `YYYY-MM-DD`, not before today in New York.
+ * @returns why not, or `undefined`.
+ */
+function expiresProblem(m: Machinery, expires: string, now: number): string | undefined {
+  const today = etDate(new Date(now));
+  if (!m.standing.isEtDate(expires)) return `--expires ${expires} is not a date, YYYY-MM-DD`;
+  if (expires < today) return `--expires ${expires} is before today, ${today} ET`;
+  return undefined;
+}
 
 /* ---------- arm ---------- */
 
@@ -256,11 +286,13 @@ function parseArmArgs(args: string[]): ArmArgs | undefined {
  * [--model PROVIDER/MODEL] [--turn-deadline DURATION] [--producer-deadline DURATION] [--no-wake]`.
  *
  * An unknown flag or a missing value is the usage line, exit 2, before any file is read or the clock asked.
- * Then, in order: the id; the directory (`desk` or `strategies/NAME`); `<dir>/STANDING.md` (a regular file,
- * at most 16,384 bytes, UTF-8), hashed; the producer, a script's bytes hashed (`--no-wake` needs one);
- * `--at`; `--expires`, a date not before today in New York; the deadlines and the room before the close
- * (P2-16); `--model`'s syntax; `standing.yml` loads; the id is not taken; the market clock answers for today.
- * The entry - `armedAt` now - is appended ({@link Machinery}'s `appendOrder`) and the file written 0600.
+ * Then, in order: the id; the directory (`desk` or `strategies/NAME`, a trailing slash dropped);
+ * `<dir>/STANDING.md` (a regular file, at most 16,384 bytes, UTF-8), hashed; the producer, a script's bytes
+ * hashed as a firing reads them (`--no-wake` needs one); `--at`; `--expires`, a date not before today in New
+ * York; the deadlines and the room before the close (P2-16); `--model`'s syntax; `standing.yml` loads - a file
+ * refused for an order that is not armed names the way out; the id is not taken; the market clock answers for
+ * today. The entry - `armedAt` now - is appended ({@link Machinery}'s `appendOrder`) and the file written 0600,
+ * unless it changed since it was read.
  *
  * Prints `armed <id> in <root>: <dir>/STANDING.md sha256 <12 hex>…, at <at>, expires <date>[, producer
  * <spec>[ sha256 <12 hex>…]]; the face reads standing.yml again within 30 s`, exit 0; or one line
@@ -274,7 +306,8 @@ async function arm(args: string[], deps: DeskDeps, now: number): Promise<number>
   }
   const m = await loadMachinery();
   const { standing } = m;
-  const { dir, flags } = parsed;
+  const { flags } = parsed;
+  const dir = parsed.dir.replace(/\/+$/, "");
   const id = flags.get("--id") as string;
   const refuse = (reason: string): number => {
     deps.out(`cannot arm ${id}: ${reason}`);
@@ -283,7 +316,7 @@ async function arm(args: string[], deps: DeskDeps, now: number): Promise<number>
   const root = deps.root ?? REPO_ROOT;
 
   if (!standing.isOrderId(id)) return refuse(`--id ${id} is not an order id: a-z, 0-9 and -, opening with a letter, at most 40 characters`);
-  if (!standing.isOrderDir(dir)) return refuse(`${dir} is not desk or strategies/NAME`);
+  if (!standing.isOrderDir(dir)) return refuse(`${parsed.dir} is not desk or strategies/NAME`);
   const file = standing.STANDING_TEXT_FILE;
   const text = await hashText(m, root, dir, file);
   if ("error" in text) return refuse(text.error);
@@ -306,9 +339,8 @@ async function arm(args: string[], deps: DeskDeps, now: number): Promise<number>
   }
 
   const expires = flags.get("--expires") as string;
-  const today = etDate(new Date(now));
-  if (!standing.isEtDate(expires)) return refuse(`--expires ${expires} is not a date, YYYY-MM-DD`);
-  if (expires < today) return refuse(`--expires ${expires} is before today, ${today} ET`);
+  const expiry = expiresProblem(m, expires, now);
+  if (expiry !== undefined) return refuse(expiry);
 
   const turnDeadline = flags.get("--turn-deadline") ?? standing.formatStandingDuration(standing.DEFAULT_TURN_DEADLINE_MS);
   const turnMs = standing.parseStandingDuration(turnDeadline, standing.TURN_DEADLINE_MIN_MS, standing.TURN_DEADLINE_MAX_MS);
@@ -316,10 +348,8 @@ async function arm(args: string[], deps: DeskDeps, now: number): Promise<number>
   const producerDeadline = flags.get("--producer-deadline") ?? standing.formatStandingDuration(standing.DEFAULT_PRODUCER_DEADLINE_MS);
   const producerMs = standing.parseStandingDuration(producerDeadline, standing.PRODUCER_DEADLINE_MIN_MS, standing.PRODUCER_DEADLINE_MAX_MS);
   if (producerMs === undefined) return refuse(`--producer-deadline ${producerDeadline} must be <n>s or <n>m, from 10 s to 180 min`);
-  const room = standing.roomProblem(anchor, {
-    ...(spec === undefined ? {} : { producerMs }),
-    ...(parsed.noWake ? {} : { turnMs }),
-  });
+  /* Never neither: --no-wake without a producer was refused above. */
+  const room = standing.roomProblem(anchor, parsed.noWake ? { producerMs } : { ...(spec === undefined ? {} : { producerMs }), turnMs });
   if (room !== undefined) return refuse(room);
 
   const model = flags.get("--model");
@@ -329,7 +359,7 @@ async function arm(args: string[], deps: DeskDeps, now: number): Promise<number>
   const read = await readStanding(path);
   if ("error" in read) return refuse(read.error);
   const load = standing.parseStanding(read.text);
-  if (!load.ok) return refuse(`${path} is refused, so nothing is added to it until it is fixed: ${load.errors.join("; ")}`);
+  if (!load.ok) return refuse(`${path} is refused, so nothing is added to it until it is fixed: ${refusedFile(m, load.errors)}`);
   if (load.orders.some((order) => order.id === id)) return refuse(`${id} is already armed; npm run desk -- rearm ${id} takes a changed file's new hash`);
 
   const python = process.env.FACE_PYTHON || "python3";
@@ -359,21 +389,46 @@ async function arm(args: string[], deps: DeskDeps, now: number): Promise<number>
 
 /* ---------- rearm ---------- */
 
+/** rearm's arguments, read: the id, and `--expires` at most once with its value; else `undefined`, the usage line. */
+function parseRearmArgs(args: string[]): { id: string; expires?: string } | undefined {
+  let id: string | undefined;
+  let expires: string | undefined;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--expires") {
+      const value = args[i + 1];
+      if (value === undefined || value.startsWith("--") || expires !== undefined) return undefined;
+      expires = value;
+      i += 1;
+    } else if (arg.startsWith("-") || id !== undefined) {
+      return undefined;
+    } else {
+      id = arg;
+    }
+  }
+  return id === undefined ? undefined : { id, ...(expires === undefined ? {} : { expires }) };
+}
+
 /**
- * `rearm ID`: after the operator has reviewed a change to an armed order's text - or its script - take the new
- * hashes. The order's `<dir>/<file>` (and a script producer's bytes) are hashed as `arm` hashes them; when
- * nothing changed it prints `<id>: nothing changed since arming`, exit 0; else only that order's hash lines are
- * rewritten (`rehashOrder`; `armedAt` and everything else stay) and it prints `re-armed <id>: <dir>/<file>
- * sha256 <12 hex>…[, <script> sha256 <12 hex>…]`, exit 0. A refusal is one line, `cannot re-arm <id>:
- * <reason>` - `no such order in standing.yml` among them - exit 1, and nothing written. Anything but one
- * argument is the usage line, exit 2. The market clock is not asked.
+ * `rearm ID [--expires YYYY-MM-DD]`: after the operator has reviewed a change to an armed order's text - or its
+ * script - take the new hashes; with `--expires`, also move its last day, which is how an expired order fires
+ * again. The order is found first; then the new date is checked as `arm` checks one (a real date, not before
+ * today in New York - the clock is read there, after `standing.yml`); then the order's `<dir>/<file>` (and a
+ * script producer's bytes) are hashed as `arm` hashes them. When nothing would change it prints `<id>: nothing
+ * changed since arming`, exit 0; else only that order's hash lines - and its `expires:` line - are rewritten
+ * (`rehashOrder`; `armedAt` and everything else stay), the file written only if it has not changed since it was
+ * read, and it prints `re-armed <id>: <dir>/<file> sha256 <12 hex>…[, <script> sha256 <12 hex>…][, expires
+ * <date>]`, exit 0. A refusal is one line, `cannot re-arm <id>: <reason>` - `no such order in standing.yml`
+ * among them - exit 1, and nothing written. Other arguments are the usage line, exit 2. The market clock is not
+ * asked.
  */
-async function rearm(args: string[], deps: DeskDeps): Promise<number> {
-  if (args.length !== 1) {
+async function rearm(args: string[], deps: DeskDeps, now: () => number): Promise<number> {
+  const parsed = parseRearmArgs(args);
+  if (parsed === undefined) {
     deps.out(USAGE);
     return 2;
   }
-  const [id] = args;
+  const { id, expires } = parsed;
   const refuse = (reason: string): number => {
     deps.out(`cannot re-arm ${id}: ${reason}`);
     return 1;
@@ -385,9 +440,13 @@ async function rearm(args: string[], deps: DeskDeps): Promise<number> {
   const read = await readStanding(path);
   if ("error" in read) return refuse(read.error);
   const load = standing.parseStanding(read.text);
-  if (!load.ok) return refuse(`${path} is refused, so nothing in it changes until it is fixed: ${load.errors.join("; ")}`);
+  if (!load.ok) return refuse(`${path} is refused, so nothing in it changes until it is fixed: ${refusedFile(m, load.errors)}`);
   const order = load.orders.find((o) => o.id === id);
   if (order === undefined) return refuse("no such order in standing.yml");
+  if (expires !== undefined) {
+    const expiry = expiresProblem(m, expires, now());
+    if (expiry !== undefined) return refuse(expiry);
+  }
 
   const text = await hashText(m, root, order.dir, order.file);
   if ("error" in text) return refuse(text.error);
@@ -398,11 +457,15 @@ async function rearm(args: string[], deps: DeskDeps): Promise<number> {
     if ("error" in hashed) return refuse(hashed.error);
     scriptSha = hashed.sha256;
   }
-  if (text.sha256 === order.sha256 && scriptSha === order.producerSha256) {
+  if (text.sha256 === order.sha256 && scriptSha === order.producerSha256 && (expires === undefined || expires === order.expires)) {
     deps.out(`${id}: nothing changed since arming`);
     return 0;
   }
-  const next = standing.rehashOrder(read.text, id, { sha256: text.sha256, ...(scriptSha === undefined ? {} : { producerSha256: scriptSha }) });
+  const next = standing.rehashOrder(read.text, id, {
+    sha256: text.sha256,
+    ...(scriptSha === undefined ? {} : { producerSha256: scriptSha }),
+    ...(expires === undefined ? {} : { expires }),
+  });
   if ("error" in next) return refuse(next.error);
   try {
     await standing.writeStanding(deps.home, next.text, { expect: read.found ? read.text : null });
@@ -410,7 +473,8 @@ async function rearm(args: string[], deps: DeskDeps): Promise<number> {
     return refuse(`cannot write ${path}: ${reasonOf(err)}`);
   }
   const scriptPart = script === undefined || scriptSha === undefined ? "" : `, ${script} sha256 ${short(scriptSha)}`;
-  deps.out(`re-armed ${id}: ${order.dir}/${order.file} sha256 ${short(text.sha256)}${scriptPart}`);
+  const expiresPart = expires === undefined ? "" : `, expires ${expires}`;
+  deps.out(`re-armed ${id}: ${order.dir}/${order.file} sha256 ${short(text.sha256)}${scriptPart}${expiresPart}`);
   return 0;
 }
 

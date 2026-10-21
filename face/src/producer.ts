@@ -342,12 +342,14 @@ function sha256Hex(bytes: Uint8Array): string {
 /**
  * Read a resolved script's bytes once, from what is still a regular file at the checked path: the open
  * follows no link swapped in for it (`O_NOFOLLOW`; the path is a real path, so a link there is a swap) and
- * never waits on a FIFO (`O_NONBLOCK`), and the type is checked on the descriptor that is read.
+ * never waits on a FIFO (`O_NONBLOCK`), and the type is checked on the descriptor that is read. The firing's
+ * read ({@link runScriptProducer}) and `npm run desk -- arm`'s, so a script is hashed at arming exactly as
+ * strictly as it is read before it runs.
  * @param path - the script's real path, from {@link resolveScript}.
  * @returns the bytes; `"irregular"` when the path now holds a link, a FIFO or anything but a regular file;
  *   `"missing"` when it cannot be opened or read at all (gone, or no longer readable).
  */
-async function readScriptBytes(path: string): Promise<Buffer | "irregular" | "missing"> {
+export async function readScriptBytes(path: string): Promise<Buffer | "irregular" | "missing"> {
   let handle: FileHandle | undefined;
   try {
     handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
