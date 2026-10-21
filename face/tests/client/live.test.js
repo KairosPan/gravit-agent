@@ -304,6 +304,24 @@ test('a place_order result that is a receipt calls onReceipt once; a refusal or 
   assert.equal(receipts, 1, 'a refusal is no fill');
 });
 
+// spec 2026-10-20 §6.2: a seat write's receipt reaches the app flagged seat, so it reloads the seat's standing, not the account
+test("a seat write's receipt reaches onReceipt flagged seat; a seat read's result calls nothing", async () => {
+  const seen = [];
+  const r = rig({ rows: [row('live', { agentAvailable: true })], onReceipt: m => { seen.push(m); } });
+  await r.ready();
+  r.live.open('live'); await settle();
+  const f = r.last('session/follow');
+  f.cbs.onItem({ type: 'snapshot', header: { createdAt: 7 }, cursor: 2, records: [] });
+  const seatCall = { type: 'tool/call', seq: 60, time: 1756512300000, data: { turn: 5, step: 1, callId: 'c10', name: 'mcp__account__portfolio_live_order', arguments: JSON.stringify({ venue: 'paper-1', symbol: 'AAPL', side: 'buy', usd: 100 }) } };
+  const result = (seq, callId, text) => ({ type: 'tool/result', seq, time: 1756512301000, surfaceOp: 'append', data: { turn: 5, step: 1, message: { id: `m-${seq}`, role: 'tool', source: { kind: 'tool', callId }, toolCallId: callId, content: [{ type: 'text', text }], isError: false } } });
+  f.cbs.onItem({ type: 'event', event: seatCall });
+  f.cbs.onItem({ type: 'event', event: result(61, 'c10', JSON.stringify({ ok: true, pending: true, card: { id: 'card-0007' } })) });
+  assert.equal(seen.length, 1); assert.equal(seen[0].kind, 'receipt'); assert.equal(seen[0].data.seat, true); assert.equal(seen[0].data.cardId, 'card-0007');
+  f.cbs.onItem({ type: 'event', event: { ...seatCall, seq: 62, data: { ...seatCall.data, callId: 'c11', name: 'mcp__account__portfolio_account', arguments: '{}' } } });
+  f.cbs.onItem({ type: 'event', event: result(63, 'c11', JSON.stringify({ ok: true })) });
+  assert.equal(seen.length, 1, 'a read is no receipt');
+});
+
 test('refresh reads sessions-meta; a failed channels, sessions-meta or bots read keeps the last good answer', async () => {
   const alpha = { workspaceId: 'w1', name: 'alpha', title: 'Alpha', dir: '/r/strategies/alpha', isRoot: false, missingDir: false, sessionIds: ['s1'] };
   const r = rig({

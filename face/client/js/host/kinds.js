@@ -3,10 +3,21 @@
 // carries every tool call's arguments because the mapper's card keeps only a title.
 import { roundEndLine } from '../wire/room.js';
 
-export const ORDER_TOOLS = Object.freeze(['place_order', 'cancel_order']);
+// the Account seat's twelve write tools (spec 2026-10-20 §6.1): what the host's Gate 2 cards under any server name
+export const SEAT_TOOLS = Object.freeze(['portfolio_live_order', 'portfolio_live_batch', 'portfolio_live_amend', 'portfolio_live_cancel',
+  'portfolio_live_close', 'portfolio_live_leverage', 'portfolio_live_move', 'portfolio_live_earn', 'portfolio_pay',
+  'portfolio_order', 'portfolio_execute', 'portfolio_transfer']);
+export const ORDER_TOOLS = Object.freeze(['place_order', 'cancel_order', ...SEAT_TOOLS]);
+// the face's own seat server (face/src/account-seat.ts): the host cards every tool under it that it has not classified as a
+// read, so an approval arriving under this prefix is a seat card whatever its raw name
+const SEAT_PREFIX = 'mcp__account__';
 
+const bySuffix = (list, name) => typeof name === 'string' && list.some(raw => name === raw || name.endsWith('__' + raw));
 // the raw name or the minted `mcp__<server>__<raw>`; the read-only `orders` listing never matches
-export const isOrderTool = name => typeof name === 'string' && ORDER_TOOLS.some(raw => name === raw || name.endsWith('__' + raw));
+export const isOrderTool = name => bySuffix(ORDER_TOOLS, name);
+export const isSeatWriteTool = name => bySuffix(SEAT_TOOLS, name);
+const isSeatGate = name => isSeatWriteTool(name) || (typeof name === 'string' && name.startsWith(SEAT_PREFIX));
+const rawOf = name => { if (typeof name !== 'string') return ''; const i = name.lastIndexOf('__'); return i < 0 ? name : name.slice(i + 2); };
 
 // a tool's arguments as the model sent them: JSON, or nothing
 export function parseArgs(raw) {
@@ -25,6 +36,69 @@ export function orderLine(args = {}) {
   const head = [args.side, args.qty, args.symbol].filter(v => v !== undefined && v !== null && v !== '').join(' ');
   const type = args.order_type === 'limit' && args.limit_price !== undefined ? `limit ${args.limit_price}` : args.order_type;
   return type ? `${head} · ${type}` : head;
+}
+
+const has = v => v !== undefined && v !== null && v !== '';
+const words = (...parts) => parts.filter(has).join(' ');
+const money = n => `$${Number(n).toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+const at = (line, venue) => (typeof venue === 'string' && venue !== '' ? `${line} · ${venue}` : line);
+// a seat order's type in words: "market", "limit 187.4", "stop 150 limit 148", "trailing 2%"
+function typeWord(a) {
+  const t = a.orderType ?? 'market';
+  if (t === 'limit') return has(a.limitPrice) ? `limit ${a.limitPrice}` : 'limit';
+  if (t === 'stop') return has(a.stopPrice) ? `stop ${a.stopPrice}` : 'stop';
+  if (t === 'stop_limit') return `stop ${has(a.stopPrice) ? a.stopPrice : '?'} limit ${has(a.limitPrice) ? a.limitPrice : '?'}`;
+  if (t === 'trailing_stop') return has(a.trailPercent) ? `trailing ${a.trailPercent}%` : has(a.trailPrice) ? `trailing ${a.trailPrice}` : 'trailing';
+  return String(t);
+}
+// a seat write in words (spec 2026-10-20 §6.1): "buy $100 of AAPL · market · paper-1", "cancel ord-0001 · paper-1",
+// "move 50 USDC · withdraw from okx", "pay up to $2 · api.example.com"; a tool the face never classified is its raw name
+export function seatLine(name, a = {}) {
+  const raw = rawOf(name);
+  switch (raw) {
+    case 'portfolio_live_order': {
+      const size = has(a.usd) ? `${money(a.usd)} of ${has(a.symbol) ? a.symbol : '?'}` : words(a.qty, a.symbol);
+      return at(`${has(a.side) ? a.side : 'order'} ${size} · ${typeWord(a)}`, a.venue);
+    }
+    case 'portfolio_live_batch': { const n = Array.isArray(a.legs) ? a.legs.length : 0; return `batch · ${n} leg${n === 1 ? '' : 's'}`; }
+    case 'portfolio_live_amend': return at(`amend ${has(a.order) ? a.order : '?'}`, a.venue);
+    case 'portfolio_live_cancel': return at(`cancel ${has(a.order) ? a.order : '?'}`, a.venue);
+    case 'portfolio_live_close': return at(`close ${words(a.qty, a.symbol) || '?'}`, a.venue);
+    case 'portfolio_live_leverage': return at(`leverage ${has(a.symbol) ? a.symbol : '?'} ${has(a.leverage) ? a.leverage : '?'}x`, a.venue);
+    case 'portfolio_live_move': return `move ${words(a.amount, a.asset) || '?'} · ${has(a.kind) ? a.kind : 'move'} from ${has(a.from) ? a.from : '?'}${has(a.to) ? ` to ${a.to}` : ''}`;
+    case 'portfolio_live_earn': return at(`earn ${words(a.kind, a.amount, a.asset) || '?'}`, a.venue);
+    case 'portfolio_pay': {
+      let host = '';
+      try { host = new URL(String(a.url)).host; } catch { host = typeof a.url === 'string' ? a.url : ''; }
+      return `pay up to ${money(has(a.maxAmount) ? a.maxAmount : 0)}${host ? ` · ${host}` : ''}`;
+    }
+    case 'portfolio_order': return `${has(a.side) ? a.side : 'order'} ${words(a.qty, a.base) || '?'}`;
+    case 'portfolio_execute': return `execute at ${has(a.account) ? a.account : '?'}`;
+    case 'portfolio_transfer': return `transfer ${words(a.amount, has(a.token) ? a.token : 'USD')} · ${has(a.from) ? a.from : '?'} to ${has(a.to) ? a.to : '?'}`;
+    default: return at(raw, a.venue);
+  }
+}
+
+// a seat write's answer, lifted under its tool row (spec 2026-10-20 §6.2): the card the Account raised, the order it placed or
+// canceled, its refusal in its own words, a batch's count; anything else lifts nothing. `seat: true` routes the reload.
+export function seatLift(name, args, text, isError, callId) {
+  const v = parseArgs(text);
+  if (isError || v.ok === false) {
+    const line = typeof v.code === 'string' && typeof v.message === 'string' ? `${v.code} · ${v.message}` : typeof v.message === 'string' ? v.message : text;
+    return { kind: 'refusal', text: line, data: { seat: true, toolName: name, callId } };
+  }
+  if (v.pending === true && typeof v.card?.id === 'string') {
+    return { kind: 'receipt', text: `Card raised on the Account page · ${v.card.id} · answer it there`, data: { seat: true, cardId: v.card.id, callId } };
+  }
+  if (typeof v.order?.id === 'string') {
+    const word = v.order.status === 'canceled' ? 'Order canceled' : 'Order placed';
+    return { kind: 'receipt', text: `${word} · ${seatLine(name, args)} · ${v.order.id}${v.order.paper === true ? ' · paper' : ''}`, data: { seat: true, orderId: v.order.id, callId } };
+  }
+  if (Array.isArray(v.legs)) {
+    const placed = v.legs.filter(l => l && typeof l === 'object' && (l.ok === true || (l.order && typeof l.order === 'object'))).length;
+    return { kind: 'receipt', text: `Batch · ${placed} of ${v.legs.length} legs placed`, data: { seat: true, callId } };
+  }
+  return null;
 }
 
 // the live layer calls this on every raw frame before mapping it: a tool/call's arguments are kept by callId
@@ -71,7 +145,12 @@ function toolMessages(view, calls) {
   }
   // the result names its call (the renderer dresses alpaca-kit's results by name), when the call was seen
   const row = { ...base(view), id: `t${callId}`, merge: true, from: 'gravit', kind: 'tool', text: '', data: { callId, result: c.text ?? '', isError: c.isError === true, ...(known ? { name: known.name, args: known.args } : {}) } };
-  if (!known || !isOrderTool(known.name)) return [row];
+  if (!known) return [row];
+  if (isSeatWriteTool(known.name)) {
+    const lift = seatLift(known.name, known.args, c.text ?? '', c.isError === true, callId);
+    return lift ? [row, { ...base(view), id: `r${callId}`, from: 'gravit', ...lift }] : [row];
+  }
+  if (!isOrderTool(known.name)) return [row];
   const lift = c.isError === true
     ? { ...base(view), id: `r${callId}`, from: 'gravit', kind: 'refusal', text: c.text ?? '', data: { toolName: known.name, callId } }
     : { ...base(view), id: `r${callId}`, from: 'gravit', kind: 'receipt', text: `Order accepted · ${orderLine(known.args)} · ${orderIdOf(c.text)}`, data: { orderId: orderIdOf(c.text), callId } };
@@ -81,8 +160,17 @@ function toolMessages(view, calls) {
 function gate(view, calls, now) {
   const data = { eventId: view.id, sessionId: view.sessionId, toolName: view.toolName, callId: view.callId, reason: view.reason, displayReason: view.displayReason };
   const line = view.displayReason ?? view.reason ?? '';
-  if (!isOrderTool(view.toolName)) return { id: view.id, at: now, from: 'gravit', kind: 'approval', text: line, data };
+  if (!isOrderTool(view.toolName) && !isSeatGate(view.toolName)) return { id: view.id, at: now, from: 'gravit', kind: 'approval', text: line, data };
   const known = typeof view.callId === 'string' ? calls.get(view.callId) : undefined;
+  // a seat card: the seat line, and the argument's venue as the chip (or the seat itself when the tool names none)
+  if (isSeatGate(view.toolName)) {
+    const venue = typeof known?.args?.venue === 'string' && known.args.venue !== '' ? known.args.venue : 'Account seat';
+    return {
+      id: view.id, at: now, from: 'gravit', kind: 'card',
+      text: `Your call: ${known ? seatLine(view.toolName, known.args) : view.toolName}`,
+      data: { ...data, venue, line, args: known?.args ?? {} },
+    };
+  }
   return {
     id: view.id, at: now, from: 'gravit', kind: 'card',
     text: `Your call: ${known ? orderLine(known.args) : view.toolName}`,

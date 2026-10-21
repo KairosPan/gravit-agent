@@ -67,6 +67,14 @@ test('the order card carries its title, the venue line, and Decline then Approve
   assert.match(html, /data-conv="s1"/); assert.match(html, /data-msg="ev-1"/);
 });
 
+test("a seat card's dim line is the argument's venue and the seat's reason", () => {
+  const html = renderMessage(gate('card', { text: 'Your call: buy $100 of AAPL · market · paper-1', data: { eventId: 'ev-1', sessionId: 's1', toolName: 'mcp__account__portfolio_live_order', callId: 'c10', venue: 'paper-1', line: 'Account seat - portfolio_live_order: side=buy' } }), conv(), state);
+  assert.match(html, /card-title">Your call: buy \$100 of AAPL · market · paper-1</);
+  assert.match(html, /paper-1 · Account seat - portfolio_live_order: side=buy/);
+  const keys = [...html.matchAll(/data-action="answer"[^>]*data-value="([^"]+)"/g)].map(x => x[1]);
+  assert.deepEqual(keys, ['rejected', 'allowed-once']);
+});
+
 test('an answered gate shows its end state in the old client\'s four words and no keys', () => {
   for (const [answer, word] of [['approved', 'Approved'], ['rejected', 'Declined'], ['closed', 'Closed'], ['elsewhere', 'Settled elsewhere'], ['answered', 'Answered']]) {
     const html = renderMessage(gate('card', { answer }), conv(), state);

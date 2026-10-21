@@ -156,7 +156,8 @@ export function boot(win, host = {}) {
   // the paper account: read at boot, on entering Account, on Refresh, and right after a fill
   const account = startAccount({ store, getJson, call, now });
   void account.load();
-  const live = startLive({ store, openMux: host.openMux ?? wireOpenMux, call, mapFrame, getJson, timers, now, onReceipt: () => { void account.load({ fresh: true }); } });
+  // a receipt from the Account seat reloads the seat's standing (host/seat.js, stage B); an Alpaca fill reloads the account
+  const live = startLive({ store, openMux: host.openMux ?? wireOpenMux, call, mapFrame, getJson, timers, now, onReceipt: m => { if (!m?.data?.seat) void account.load({ fresh: true }); } });
   // answers go through the live layer, which settles the gate it delivered once the answer wins
   const actions = makeActions({ store, call, answerGate: (eventId, value) => live.answer(eventId, value), postJson });
   // Markets: the face's live quotes and symbol search (a test hands in its own), the watchlist in this browser's storage

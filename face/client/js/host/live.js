@@ -75,7 +75,7 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
     rememberCall(calls, frame);
     for (const m of toMessages(v, calls, now(), speakerOf(convOf(convId)))) {
       store.dispatch('hostEvent', { convId, message: m });
-      if (m.kind === 'receipt') onReceipt();
+      if (m.kind === 'receipt') onReceipt(m);
     }
   }
   // a window is folded with the same reducer the stream uses, so backfill and stream draw identically
