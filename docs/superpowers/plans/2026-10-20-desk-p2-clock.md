@@ -69,7 +69,7 @@ Values the spec and the rulings leave open, chosen here; each line ends with the
   | the budget spent (first refusal of the ET day) | `standing orders are refused for the rest of the day: the desk's token budget is spent (<used> of <cap> tokens since 00:00 ET)` |
   | missed | `<id> · <date> missed its <HH:MM ET> anchor: <why>. A standing order never runs late`, `<why>` one of `the face was asleep from <HH:MM ET> to <HH:MM ET>`, `the face was not running`, `found at <HH:MM ET>, past the 5-minute grace` |
   | interrupted | `<id> · <date> was cut off by a restart; a standing order never runs twice` |
-  | expired | `<id> expired after <expires> and no longer fires; arm it again with a later --expires to keep it` |
+  | expired | `<id> expired after <expires> and no longer fires; extend it with npm run desk -- rearm <id> --expires <YYYY-MM-DD> to keep it` |
   | a `wake: false` producer failed | `<id> · <date> producer <spec> failed (<error>); nothing was woken` |
   | `standing.yml` refused (per distinct error) | `standing.yml is refused, so no standing order runs until it is fixed: <errors joined by "; ", cut at 500 characters>` |
   | `firings.jsonl` unreadable (per distinct reason) | `the firing ledger <path> cannot be read (<code>), so no standing order runs until it can` |
@@ -746,7 +746,7 @@ test("no covering calendar: one calendar-error and one line a day, nothing that 
   // an ask that throws synchronously → one "gravit-face: desk: schedule calendar: …" line and the next tick armed
 });
 test("a closed day is silent and the next session fires", async () => { /* 2026-11-26 and 2026-11-28 ticks across 17:30Z: no queue, no missed, no line; 2026-11-27 17:30:10Z → run */ });
-test("an expired order is reported once and never fires; a disabled one is silent", async () => { /* "preclose expired after 2026-11-26 and no longer fires; arm it again with a later --expires to keep it" once across reinstalls */ });
+test("an expired order is reported once and never fires; a disabled one is silent", async () => { /* "preclose expired after 2026-11-26 and no longer fires; extend it with npm run desk -- rearm <id> --expires <YYYY-MM-DD> to keep it" once across reinstalls */ });
 test("the ET date change asks the calendar again", async () => { /* 04:59:30Z then 05:00:30Z on 2026-11-27 → asked "2026-11-26" then "2026-11-27" */ });
 test("status: hash state, next anchor, last outcome, running, queued and recent", async () => {
   // at 2026-11-25T21:00Z, after its anchor, with 11-26 closed → orders[0].nextAnchor "2026-11-27T17:30:00.000Z"; hash "ok"; last.outcome "delivered"
