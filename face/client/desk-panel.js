@@ -22,15 +22,23 @@
  * NAMED SECTIONS. The status is drawn as one card per entry of
  * {@link SECTIONS}, in order: the desk (on or off, up how long, the pause and
  * its control), the Telegram bridge, the desk conversation, today's desk turns
- * and their tokens, and the desk's sessions. A later block - P2's standing
- * orders, P3's watch - is one more entry there. A section that reads the status
- * is left out while there is none, so a status that cannot be read still
- * leaves the desk's own section - its Pause control - and the sessions on
- * screen. Each card is kept across redraws, and stays on the page when the
+ * and their tokens, the standing orders and the day's budget, and the desk's
+ * sessions. A later block - P3's watch - is one more entry there. A section
+ * that reads the status is left out while there is none, so a status that
+ * cannot be read still leaves the desk's own section - its Pause control - and
+ * the sessions on screen; the standing orders' card is left out, too, while the
+ * status carries neither the day's budget nor the standing orders. Each card is
+ * kept across redraws, and stays on the page when the
  * sections around it come and go; the desk's own card keeps its Pause row
  * itself, built once, so neither a redraw of the sessions when the list moves
  * nor the status read again every {@link DESK_POLL_MS} while the panel is shown
  * touches the control under the operator's hand.
+ *
+ * THE STANDING ORDERS. Their card (desk-standing.js puts it in words) lists
+ * the recent firings, and one that woke a session opens it in place, where its
+ * last message is read. A firing's session is one of the desk's sessions, and
+ * the panel names it `<order> · <date>` from the last status read
+ * ({@link deskTitle}) - the page too, through the panel's `titles`.
  *
  * THE PAUSE. The panel only pauses, as the phone does: 30 minutes, 2 hours,
  * 1 day, or until a resume (no `until`). A pause from here never shortens one in
@@ -44,6 +52,7 @@
  * the page through `textContent`; nothing here parses HTML.
  * @module
  */
+import { NONE_ARMED, firingTitles, standingView } from "./desk-standing.js";
 import { isDeskPreset } from "./speaker.js";
 
 /** Rendered in place of a value the face did not give. */
@@ -137,13 +146,20 @@ export function deskSessionsOf(sessions, archived = () => false) {
 }
 
 /**
- * A desk session's name: its title, else `Desk · <YYYY-MM-DD>` - the New York
- * date of its last update, the one date a list row carries (it has no creation
- * time) - else `Desk`.
+ * A desk session's name: a firing's `<order> · <date>` when `titles` names it
+ * (desk-standing.js `firingTitles`), else its title, else `Desk · <YYYY-MM-DD>` -
+ * the New York date of its last update, the one date a list row carries (it has
+ * no creation time) - else `Desk`. The firing's name comes first because dsh
+ * titles every fresh session from its first message, so a firing's session
+ * always has a title - the wake message's leading words, then a model's summary
+ * of them - and a name after it would never show.
  * @param {Record<string, any>} summary - a list row.
+ * @param {Record<string, string>} [titles] - the firing sessions' names, by session id; none by default.
  * @returns {string}
  */
-export function deskTitle(summary) {
+export function deskTitle(summary, titles = {}) {
+  const id = summary?.sessionId;
+  if (typeof id === "string" && Object.hasOwn(titles, id)) return titles[id];
   const title = summary?.projections?.values?.title;
   if (typeof title === "string" && title !== "") return title;
   const at = typeof summary?.updatedAt === "number" ? new Date(summary.updatedAt) : undefined;
@@ -298,6 +314,7 @@ function pauseText(off, now) {
  * @property {Date} now
  * @property {Record<string, any>[]} list - the whole session list.
  * @property {Record<string, any>[]} sessions - its desk sessions, the archived ones left out.
+ * @property {Record<string, string>} titles - the firing sessions' names, from the last status read ({@link deskTitle}).
  * @property {(sessionId: string) => boolean} waiting - whether a card waits on the operator in a session.
  * @property {string|null} active
  * @property {string} choice
@@ -423,7 +440,7 @@ function drawConversation(card, ctx) {
   open.title = "put the desk conversation on screen";
   head(card, "desk conversation", ...(ctx.waiting(id) ? [waitingChip()] : []), open);
   const summary = ctx.list.find((s) => s !== null && typeof s === "object" && s.sessionId === id);
-  kv(card, "session", summary === undefined ? id : deskTitle(summary), id);
+  kv(card, "session", summary === undefined ? id : deskTitle(summary, ctx.titles), id);
 }
 
 /** Today's desk turns, from 00:00 New York time, and their tokens.
@@ -439,9 +456,28 @@ function drawTurns(card, { status }) {
   kv(card, "cache write", fmtTokens(usage.cacheWriteTokens));
 }
 
+/** Make `row` open the session `sessionId` in place, by click or by Enter or
+ * Space, marking its desk session row first: a button to the keyboard and to a
+ * screen reader. @param {any} row @param {string} sessionId @param {DrawContext} ctx */
+function opensSession(row, sessionId, ctx) {
+  row.setAttribute("role", "button");
+  row.tabIndex = 0;
+  const pick = () => {
+    ctx.select(sessionId);
+    ctx.open(sessionId);
+  };
+  row.addEventListener("click", pick);
+  row.addEventListener("keydown", (/** @type {any} */ event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    pick();
+  });
+}
+
 /** The desk's sessions, newest first as the list orders them: each a row that
- * opens it in place, marked when a card waits on the operator in it, when it is
- * the desk conversation, and when it is running.
+ * opens it in place, named as {@link deskTitle} names it, and marked when a card
+ * waits on the operator in it, when it is the desk conversation, and when it is
+ * running.
  * @param {any} card @param {DrawContext} ctx */
 function drawSessions(card, ctx) {
   head(card, "desk sessions", el("span", "sp-count", String(ctx.sessions.length)));
@@ -454,9 +490,7 @@ function drawSessions(card, ctx) {
     const id = summary.sessionId;
     const row = el("div", "sp-row desk-row");
     row.dataset.sessionId = id;
-    row.setAttribute("role", "button");
-    row.tabIndex = 0;
-    row.append(el("div", "sp-row-name", deskTitle(summary)));
+    row.append(el("div", "sp-row-name", deskTitle(summary, ctx.titles)));
     const chips = [];
     if (ctx.waiting(id)) chips.push(waitingChip());
     if (id === ctx.status?.deskSession) chips.push(chip("current", "the desk conversation: the one the phone talks to"));
@@ -469,34 +503,98 @@ function drawSessions(card, ctx) {
     const updated = typeof summary.updatedAt === "number" ? `updated ${deskTime(new Date(summary.updatedAt), ctx.now)}` : "";
     row.title = [summary.cwd, id, updated].filter((part) => typeof part === "string" && part !== "").join("\n");
     row.classList.toggle("sel", id === ctx.active);
-    const pick = () => {
-      ctx.select(id);
-      ctx.open(id);
-    };
-    row.addEventListener("click", pick);
-    row.addEventListener("keydown", (/** @type {any} */ event) => {
-      if (event.key !== "Enter" && event.key !== " ") return;
-      event.preventDefault();
-      pick();
-    });
+    opensSession(row, id, ctx);
     ctx.rows.set(id, row);
     card.append(row);
   }
 }
 
+/** One standing order: its name and anchor, beside when it next fires or what
+ * holds it; under them, a pin that moved, in the error colour, and its last
+ * firing - after `hash ok`, or `hash unknown`, while its pins hold.
+ * @param {{id: string, at: string, next: string, hash: string, last: string}} order @returns {any} */
+function orderRow(order) {
+  const row = el("div", "standing-order");
+  const top = el("div", "standing-order-head");
+  top.append(el("span", "standing-order-name", `${order.id} · ${order.at}`), el("span", "standing-order-next", order.next));
+  row.append(top);
+  const holds = order.hash === "ok" || order.hash === "unknown";
+  if (!holds) row.append(el("div", "standing-order-sub bad", order.hash));
+  row.append(el("div", "standing-order-sub", holds ? `hash ${order.hash} · last ${order.last}` : `last ${order.last}`));
+  return row;
+}
+
+/** One recent firing: its order and session date beside its outcome; under
+ * them New York's time, its wall time, its tokens and the files its turn wrote,
+ * those it has. One that woke a session opens it in place.
+ * @param {{when: string, order: string, date: string, outcome: string, wall: string, tokens: string, files: string, sessionId?: string}} firing
+ * @param {DrawContext} ctx @returns {any} */
+function firingRow(firing, ctx) {
+  const row = el("div", "standing-firing");
+  const top = el("div", "standing-firing-head");
+  top.append(el("span", "standing-firing-name", `${firing.order} · ${firing.date}`), el("span", "standing-firing-outcome", firing.outcome));
+  const parts = [
+    firing.when === EM ? EM : `${firing.when} ET`,
+    firing.wall,
+    firing.tokens === EM ? EM : `${firing.tokens} tokens`,
+    firing.files === EM ? EM : `${firing.files} ${firing.files === "1" ? "file" : "files"}`,
+  ];
+  row.append(top, el("div", "standing-firing-sub", parts.filter((part) => part !== EM).join(" · ")));
+  const id = firing.sessionId;
+  if (id === undefined) return row;
+  row.classList.add("opens");
+  row.title = `open the firing's session\n${id}`;
+  opensSession(row, id, ctx);
+  return row;
+}
+
+/** The standing orders and the day's budget, in desk-standing.js's words: the
+ * budget line, in the needs-you colour once the day's cap is reached; the
+ * banner, when something stops every order or the day has no calendar; an
+ * order a row ({@link orderRow}) - or, for an empty book, how to arm one; and
+ * the recent firings ({@link firingRow}). Without the standing orders - no
+ * clock runs, as with the desk off - it is the budget line alone.
+ * @param {any} card @param {DrawContext} ctx */
+function drawStanding(card, ctx) {
+  head(card, "standing orders");
+  const view = standingView(ctx.status, ctx.now.toISOString());
+  card.append(el("div", view.spent ? "standing-budget spent" : "standing-budget", view.budget));
+  if (!isRecord(ctx.status?.standing)) return;
+  if (view.banner !== undefined) {
+    const banner = note(view.banner, true);
+    banner.classList.add("standing-banner");
+    card.append(banner);
+  } else if (view.orders.length === 0) {
+    card.append(note(NONE_ARMED));
+  }
+  for (const order of view.orders) card.append(orderRow(order));
+  if (view.recent.length === 0) return;
+  card.append(el("div", "standing-recent", "recent firings"));
+  for (const firing of view.recent) card.append(firingRow(firing, ctx));
+}
+
+/** @param {unknown} value @returns {boolean} whether `value` is a non-null, non-array object. */
+const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+
+/** Whether the status carries what the standing orders' card draws: the day's
+ * budget, or the standing orders. @param {Record<string, any>|undefined} status @returns {boolean} */
+const carriesStanding = (status) => isRecord(status?.budget) || isRecord(status?.standing);
+
 /**
  * The panel's sections, in order. `needsStatus`: drawn only while a status is
- * read. `readsSessions`: drawn again when the session list moves
- * ({@link createDeskPanel}'s `syncSessions`). `keeps`: the section keeps what it
- * drew in its card and redraws only what changes - the card is not emptied
- * before each draw. P2's standing orders and P3's watch are one more entry each.
- * @type {ReadonlyArray<{id: string, needsStatus: boolean, readsSessions: boolean, keeps: boolean, draw: (card: any, ctx: DrawContext) => void}>}
+ * read. `shows`, when there is one: drawn only while it says the status carries
+ * what the section draws. `readsSessions`: drawn again when the session list
+ * moves ({@link createDeskPanel}'s `syncSessions`). `keeps`: the section keeps
+ * what it drew in its card and redraws only what changes - the card is not
+ * emptied before each draw. P3's watch is one more entry.
+ * @type {ReadonlyArray<{id: string, needsStatus: boolean, shows?: (status: Record<string, any>|undefined) => boolean, readsSessions: boolean, keeps: boolean, draw: (card: any, ctx: DrawContext) => void}>}
  */
 const SECTIONS = Object.freeze([
   Object.freeze({ id: "desk", needsStatus: false, readsSessions: false, keeps: true, draw: drawDesk }),
   Object.freeze({ id: "telegram", needsStatus: true, readsSessions: false, keeps: false, draw: drawTelegram }),
   Object.freeze({ id: "conversation", needsStatus: true, readsSessions: true, keeps: false, draw: drawConversation }),
   Object.freeze({ id: "turns", needsStatus: true, readsSessions: false, keeps: false, draw: drawTurns }),
+  Object.freeze({ id: "standing", needsStatus: true, shows: carriesStanding, readsSessions: false, keeps: false, draw: drawStanding }),
   Object.freeze({ id: "sessions", needsStatus: false, readsSessions: true, keeps: false, draw: drawSessions }),
 ]);
 
@@ -528,7 +626,10 @@ const SECTIONS = Object.freeze([
  * until the first read settles; an answer that lands after a later read began,
  * or after a pause the panel made, is dropped. `syncSessions` draws again only
  * the sections that read the session list, with no read, once a read has
- * settled. `mark` marks the row of the session on screen. A click on Pause posts
+ * settled. `mark` marks the row of the session on screen. `titles` is the
+ * firing sessions' names from the last status read - none before one, and a
+ * read that fails keeps them - for the page to name those sessions as the panel
+ * does ({@link deskTitle}). A click on Pause posts
  * the chosen length and draws the pause the face answered with; while it is in
  * flight the button is disabled, and a refusal is one line under it. A pause
  * made while no status is read reads it.
@@ -540,7 +641,7 @@ const SECTIONS = Object.freeze([
  * `show`, `hide` and `syncSessions` - which the page calls on every list
  * refresh, and a gate's arrival or settling schedules one - each set it.
  * @param {DeskPanelDeps} deps
- * @returns {{show: () => Promise<void>, hide: () => void, refresh: () => Promise<void>, syncSessions: () => void, mark: (sessionId: string|null) => void}}
+ * @returns {{show: () => Promise<void>, hide: () => void, refresh: () => Promise<void>, syncSessions: () => void, mark: (sessionId: string|null) => void, titles: () => Record<string, string>}}
  */
 export function createDeskPanel(deps) {
   const now = deps.now ?? Date.now;
@@ -559,6 +660,8 @@ export function createDeskPanel(deps) {
   let status;
   /** @type {string|undefined} why the last read failed. */
   let error;
+  /** @type {Record<string, string>} the firing sessions' names from the last status read; a failed read keeps them. */
+  let titles = {};
   /** Whether any read has settled. */
   let loaded = false;
   /** Read generation: a read whose number is no longer this one draws nothing. */
@@ -611,7 +714,7 @@ export function createDeskPanel(deps) {
   function context() {
     const list = listed();
     return {
-      status, error, now: new Date(now()), list, sessions: deskSessionsOf(list, archived), waiting, active: deps.activeSession(),
+      status, error, now: new Date(now()), list, sessions: deskSessionsOf(list, archived), titles, waiting, active: deps.activeSession(),
       choice, pausing, pauseError, rows,
       refresh: () => { void refresh(); },
       pause: () => { void pause(); },
@@ -629,7 +732,8 @@ export function createDeskPanel(deps) {
   }
 
   /** Draw the sections named in `ids`, every one when absent. When the set of
-   * sections shown changes - a status read, or no longer read - the cards of the
+   * sections shown changes - a status read, or no longer read, or one carrying
+   * what a section's `shows` asks for or no longer - the cards of the
    * sections that stay stay where they are, never taken off the page: only those
    * that come or go are put in or taken out, and every section is drawn. A card
    * that `keeps` is drawn into as it is; any other is emptied first.
@@ -644,7 +748,7 @@ export function createDeskPanel(deps) {
       panel.replaceChildren(note("loading…"));
       return;
     }
-    const drawable = SECTIONS.filter((s) => !s.needsStatus || status !== undefined);
+    const drawable = SECTIONS.filter((s) => (!s.needsStatus || status !== undefined) && (s.shows === undefined || s.shows(status)));
     const ids0 = [...cards.keys()];
     if (drawnInto !== panel) {
       cards = new Map(drawable.map((s) => [s.id, newCard(s.id)]));
@@ -688,6 +792,7 @@ export function createDeskPanel(deps) {
     if (token !== generation) return;
     status = failure === undefined ? next : undefined;
     error = failure;
+    if (status !== undefined) titles = firingTitles(status.standing);
     loaded = true;
     draw();
   }
@@ -742,5 +847,6 @@ export function createDeskPanel(deps) {
       syncRail();
     },
     mark,
+    titles: () => titles,
   };
 }

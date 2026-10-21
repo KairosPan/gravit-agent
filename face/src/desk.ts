@@ -63,7 +63,8 @@
  * desk conversation it opens keeps its tools and its guard; the `boot` event, the watch, the desk
  * conversation's owner (src/desk-conversation.ts), the bridge and the `shutdown` event only when
  * the desk is on. An unreadable ledger is named in the status, never a 500. {@link deskStatusLines}
- * is the status as the terminal and the phone read it.
+ * is the status as the terminal and the phone read it, the day's budget ({@link budgetLine}) and the
+ * standing orders ({@link standingLines}) among its lines.
  * @module
  */
 import { appendFile, lstat, mkdir, open, readFile, rename, stat, unlink } from "node:fs/promises";
@@ -1040,13 +1041,96 @@ function telegramLine(telegram: TelegramStatus, now: Date): string {
 }
 
 /**
+ * The day's budget as one status line (ruling P2-8), numbers as `en-US` writes them: `budget: 1,234,567
+ * tokens today, cap not set (budget.dailyTokens in standing.yml)` with no cap; `budget: 1,234,567 of
+ * 2,000,000 tokens today` under it; `budget: spent, 2,013,402 of 2,000,000 tokens today; standing orders
+ * and phone turns wait for 00:00 ET` once it is reached - and after any of them ` (ledger unreadable:
+ * <error>)` when the ledger could not be read, the zeros then counted being no measure of the day.
+ * @param b - the day's budget.
+ */
+export function budgetLine(b: BudgetState): string {
+  const used = b.used.total.toLocaleString("en-US");
+  const cap = b.dailyTokens?.toLocaleString("en-US");
+  const line = cap === undefined
+    ? `budget: ${used} tokens today, cap not set (budget.dailyTokens in standing.yml)`
+    : b.spent
+      ? `budget: spent, ${used} of ${cap} tokens today; standing orders and phone turns wait for 00:00 ET`
+      : `budget: ${used} of ${cap} tokens today`;
+  return b.error === undefined ? line : `${line} (ledger unreadable: ${b.error})`;
+}
+
+/** How many characters of a refused `standing.yml`'s errors its status line quotes - the first fault or
+ * two; the phone's line when the file is refused quotes 500. */
+const REFUSED_SHOWN_MAX = 200;
+
+/** `text` cut to `max` characters (code points), the last a `…` when it is cut, as desk-book.ts and
+ * market-clock.ts cut theirs. */
+function cutText(text: string, max: number): string {
+  const chars = [...text];
+  return chars.length <= max ? text : `${chars.slice(0, max - 1).join("")}…`;
+}
+
+/** A time the standing orders' status holds, as {@link deskTime} shows it - or as written when it is no
+ * time: a firing's `t` comes from the firing ledger, a file the operator may edit, and a status line
+ * must never throw. */
+function statusTime(iso: string, now: Date): string {
+  return Number.isNaN(Date.parse(iso)) ? iso : deskTime(new Date(iso), now);
+}
+
+/** One standing order's state as its line says it: the first of these that holds - its firing running,
+ * the order disabled, expired, its text's pin moved or the text gone, the same of its script - else its
+ * anchor and when it next falls, or that the calendar's window holds no session for it. A pin not yet
+ * checked (`unknown`) claims nothing. A firing's key is `<id>:<date>`, and an id holds no `:`. */
+function orderState(order: StandingStatus["orders"][number], running: StandingStatus["running"], now: Date): string {
+  if (running !== undefined && running.key.startsWith(`${order.id}:`)) return `running since ${statusTime(running.startedAt, now)}`;
+  if (!order.enabled) return "disabled";
+  if (order.expired) return `expired after ${order.expires}`;
+  const rearm = `changed since arming (npm run desk -- rearm ${order.id})`;
+  const text = `${order.dir}/${order.file}`;
+  if (order.hash === "changed") return `${text} ${rearm}`;
+  if (order.hash === "missing") return `${text} is missing`;
+  const script = order.producer ?? "its producer";
+  if (order.producerHash === "changed") return `${script} ${rearm}`;
+  if (order.producerHash === "missing") return `${script} is missing`;
+  return order.nextAnchor === undefined
+    ? `${order.at}, no session in the calendar's window`
+    : `${order.at}, next ${statusTime(order.nextAnchor, now)}`;
+}
+
+/**
+ * The standing orders' lines (src/standing.ts `StandingStatus`) as the terminal and the phone print them:
+ * first what holds the whole book - `standing orders: none armed (npm run desk -- arm)` while it has no
+ * order and is not refused, else `standing orders stopped: standing.yml is refused: <its errors, joined by
+ * "; " and cut at 200 characters>`; `standing orders stopped: the firing ledger cannot be read (<code>)`;
+ * `standing orders: no calendar today, <python>: <error>` - then a line per order of the last good load,
+ * `standing <id>: <state>` ({@link orderState}), with `; last <outcome> <time>` after it once the order
+ * has fired. Times are New York's, as {@link deskTime} shows them.
+ * @param s - the standing orders' status.
+ * @param now - when the lines are read: what "today" is.
+ */
+export function standingLines(s: StandingStatus, now: Date): string[] {
+  const lines: string[] = [];
+  if (s.file.state === "refused") {
+    lines.push(`standing orders stopped: standing.yml is refused: ${cutText((s.file.errors ?? []).join("; "), REFUSED_SHOWN_MAX)}`);
+  } else if (s.orders.length === 0) lines.push("standing orders: none armed (npm run desk -- arm)");
+  if (s.ledger !== undefined) lines.push(`standing orders stopped: the firing ledger cannot be read (${s.ledger.error})`);
+  if (s.calendar.state === "failed") lines.push(`standing orders: no calendar today, ${s.calendar.python}: ${s.calendar.error ?? "no reason given"}`);
+  for (const order of s.orders) {
+    const last = order.last === undefined ? "" : `; last ${order.last.outcome} ${statusTime(order.last.t, now)}`;
+    lines.push(`standing ${order.id}: ${orderState(order, s.running, now)}${last}`);
+  }
+  return lines;
+}
+
+/**
  * The desk's lines as the operator reads them, in `npm run service -- status` (scripts/service.ts
  * `formatStatus`) and in the phone's `/status` (src/telegram.ts): the desk line - how long the face has
- * been up and since when, and whether the desk is on - then, while a pause is in force, the pause line,
- * and, when the status carries the bridge, the Telegram line. Each time is New York's, as
- * {@link deskTime} shows it - dated when it falls on another New York date than `now`'s; the boot time
- * stays ISO-8601 UTC, which carries its date anyway. The desk line is the tail of `formatStatus`'s
- * `answering at` line, which puts the port before it.
+ * been up and since when, and whether the desk is on - then, while a pause is in force, the pause line;
+ * when the status carries the bridge, the Telegram line; when it carries the day's budget, the budget
+ * line ({@link budgetLine}); and when it carries the standing orders - while their clock runs - their
+ * lines ({@link standingLines}). Each time is New York's, as {@link deskTime} shows it - dated when it
+ * falls on another New York date than `now`'s; the boot time stays ISO-8601 UTC, which carries its date
+ * anyway. The desk line is the tail of `formatStatus`'s `answering at` line, which puts the port before it.
  * @param status - what {@link deskStatus} answered.
  * @param now - when the lines are read: what "today" is.
  */
@@ -1056,6 +1140,8 @@ export function deskStatusLines(status: DeskStatus, now: Date): string[] {
   const lines = [`up ${hours}h ${minutes}m since ${status.bootedAt} · desk ${status.desk.enabled ? "on" : "off (FACE_DESK=0)"}`];
   if (status.off !== undefined) lines.push(offLine(status.off, now));
   if (status.telegram !== undefined) lines.push(telegramLine(status.telegram, now));
+  if (status.budget !== undefined) lines.push(budgetLine(status.budget));
+  if (status.standing !== undefined) lines.push(...standingLines(status.standing, now));
   return lines;
 }
 

@@ -213,6 +213,44 @@ test("formatStatus prints the desk's lines through deskStatusLines: the desk lin
   assert.equal(lines[3], "telegram: polling, last poll 2026-10-19 19:00 ET, 0 dropped, 0 queued", "a last poll on another New York date carries it");
 });
 
+test("formatStatus prints the standing and budget lines after the telegram line", () => {
+  const now = Date.parse("2026-11-27T16:00:00Z"); // 11:00 ET
+  const used = { uncachedInputTokens: 34_567, outputTokens: 200_000, cacheReadTokens: 900_000, cacheWriteTokens: 100_000, total: 1_234_567 };
+  const order = {
+    id: "preclose", dir: "desk", file: "STANDING.md", at: "close-30m", producer: "builtin:brief", wake: true, enabled: true, expires: "2026-12-31", expired: false,
+    hash: "ok" as const, nextAnchor: "2026-11-27T17:30:00.000Z",
+    last: { key: "preclose:2026-11-26", order: "preclose", date: "2026-11-26", kind: "finished" as const, outcome: "delivered", t: "2026-11-26T20:31:40.000Z" },
+  };
+  const status: DeskStatus = {
+    ok: true, pid: 7, version: "v", bootedAt: "2026-11-27T14:30:00.000Z", uptimeMs: 90 * 60_000, desk: { enabled: true, dir: "/d" }, asleep: [], runs: [],
+    turnsToday: noTurns, telegram: { configured: true, polling: true, lastPollAt: "2026-11-27T15:59:00.000Z", dropped: 0, queued: 0 },
+    budget: { dailyTokens: 2_000_000, used, spent: false },
+    standing: {
+      file: { path: "/d/standing.yml", state: "loaded" }, calendar: { python: "python3", state: "failed", error: "exit 1" },
+      orders: [order, { ...order, id: "weekly", dir: "strategies/alpha", file: "WEEKLY.md", hash: "changed", last: undefined }], queued: [], recent: [],
+    },
+  };
+  const lines = (s: DeskStatus): string[] =>
+    formatStatus({ label: LABEL, info: { state: "running", pid: 7 }, installed: true, status: s, url: undefined, port: 3090, now }).split("\n");
+  assert.deepEqual(lines(status), [
+    "com.gravit.face: running (pid 7)",
+    "answering at http://127.0.0.1:3090 · up 1h 30m since 2026-11-27T14:30:00.000Z · desk on",
+    "telegram: polling, last poll 10:59 ET, 0 dropped, 0 queued",
+    "budget: 1,234,567 of 2,000,000 tokens today",
+    "standing orders: no calendar today, python3: exit 1",
+    "standing preclose: close-30m, next 12:30 ET; last delivered 2026-11-26 15:31 ET",
+    "standing weekly: strategies/alpha/WEEKLY.md changed since arming (npm run desk -- rearm weekly)",
+    "sign in: no URL in the log yet (npm run service -- logs)",
+  ]);
+  assert.deepEqual(lines({ ...status, ledgerError: "EACCES", budget: { dailyTokens: 2_000_000, used: { ...used, total: 0 }, spent: false, error: "EACCES" } }).slice(3, -1), [
+    "budget: 0 of 2,000,000 tokens today (ledger unreadable: EACCES)",
+    "standing orders: no calendar today, python3: exit 1",
+    "standing preclose: close-30m, next 12:30 ET; last delivered 2026-11-26 15:31 ET",
+    "standing weekly: strategies/alpha/WEEKLY.md changed since arming (npm run desk -- rearm weekly)",
+    "ledger: unreadable (EACCES)",
+  ], "the ledger's own line after them");
+});
+
 const fakeFetch = (status: number, body?: unknown): typeof fetch =>
   (async () => new Response(body === undefined ? null : JSON.stringify(body), { status })) as unknown as typeof fetch;
 const refusing: typeof fetch = (async () => { throw new TypeError("fetch failed"); }) as unknown as typeof fetch;

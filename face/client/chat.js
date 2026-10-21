@@ -1769,7 +1769,8 @@ function when(at) {
  * @param {Record<string, any>} summary @returns {string}
  */
 function titleOf(summary) {
-  if (isDeskPreset(summary?.agentPreset)) return deskTitle(summary); // `Desk · <date>` when it has none
+  /* a firing's `<order> · <date>` from the Desk panel's last status read, else its title, else `Desk · <date>` */
+  if (isDeskPreset(summary?.agentPreset)) return deskTitle(summary, deskPanel.titles());
   const title = summary?.projections?.values?.title;
   return typeof title === "string" && title !== "" ? title : "untitled";
 }

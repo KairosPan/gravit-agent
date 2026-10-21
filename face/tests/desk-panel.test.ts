@@ -667,3 +667,128 @@ test("the resume line keeps its command whole", () => withDOM(async (panel) => {
   const command = one(section(panel, "desk"), (node) => node.hasClass("desk-resume-cmd"), "resume command");
   assert.equal(command.textContent, RESUME_COMMAND, "one element, which the page keeps from wrapping at its --");
 }));
+
+/* P2: the standing orders and the day's budget (client/desk-standing.js reads them), and the firings' sessions by name. */
+
+/** The day's budget (src/desk.ts `BudgetState`): spent, 2,013,402 of 2,000,000. */
+const SPENT = { dailyTokens: 2_000_000, used: { uncachedInputTokens: 13_402, outputTokens: 0, cacheReadTokens: 2_000_000, cacheWriteTokens: 0, total: 2_013_402 }, spent: true };
+const OPEN_BUDGET = { dailyTokens: 2_000_000, used: { uncachedInputTokens: 0, outputTokens: 1_234_567, cacheReadTokens: 0, cacheWriteTokens: 0, total: 1_234_567 }, spent: false };
+/** Today's pre-close brief, delivered at 13:31 ET in the firing session `session-fire-1`. */
+const FIRED = {
+  key: "preclose:2026-10-20", order: "preclose", date: "2026-10-20", kind: "finished", outcome: "delivered", t: "2026-10-20T17:31:40.000Z", sessionId: "session-fire-1",
+  wallMs: 252_000, usage: { uncachedInputTokens: 34_567, outputTokens: 200_000, cacheReadTokens: 900_000, cacheWriteTokens: 100_000, routes: [] }, files: 1,
+};
+/** Yesterday's, refused before it ran: no session. */
+const REFUSED = { key: "preclose:2026-10-19", order: "preclose", date: "2026-10-19", kind: "refused", outcome: "refused (budget)", t: "2026-10-19T19:30:05.000Z" };
+/** The standing orders while their clock runs (src/standing.ts `StandingStatus`): the brief, and a channel's order whose text moved. */
+const standingStatus = (fields: Record<string, unknown> = {}): Record<string, any> => ({
+  file: { path: "/home/.dsh/face/desk/standing.yml", state: "loaded" },
+  calendar: { python: "python3", state: "ok" },
+  orders: [
+    { id: "preclose", dir: "desk", file: "STANDING.md", at: "close-30m", producer: "builtin:brief", wake: true, enabled: true, expires: "2026-12-31", expired: false,
+      hash: "ok", nextAnchor: "2026-10-20T19:30:00.000Z", last: FIRED },
+    { id: "weekly", dir: "strategies/alpha", file: "WEEKLY.md", at: "open-15m", wake: true, enabled: true, expires: "2026-12-31", expired: false,
+      hash: "changed", nextAnchor: "2026-10-21T13:15:00.000Z" },
+  ],
+  queued: [], recent: [FIRED, REFUSED],
+  ...fields,
+});
+/** The texts of the nodes under `root` that carry `cls`, in order. */
+const textsOf = (root: Element, cls: string): string[] => byClass(root, cls).map((node) => node.textContent);
+/** A firing's session among the desk's, as dsh titles it from its first message. */
+const FIRING_SESSION = {
+  sessionId: "session-fire-1", agentPreset: "gravit-desk", cwd: "/repo/desk/journal", updatedAt: AT - 1_000,
+  projections: { values: { title: "[schedule · preclose · 2026-10-20] Standing order preclose," } },
+};
+
+test("the standing orders card comes after today's turns: the budget line, in the needs-you colour once spent; why the orders stop; an order a row; the recent firings, opening their sessions in place", () => withDOM(async (panel) => {
+  const { desk, opened } = harness(panel, async () => status({ budget: SPENT, standing: standingStatus({ ledger: { error: "EISDIR" } }) }), { sessions: [FIRING_SESSION, ...SESSIONS] });
+  await desk.refresh();
+  assert.deepEqual(sectionIds(panel), ["desk", "telegram", "conversation", "turns", "standing", "sessions"]);
+  const card = section(panel, "standing");
+  assert.match(card.children[0].textContent, /^standing orders$/);
+  const budget = one(card, (node) => node.hasClass("standing-budget"), "budget line");
+  assert.equal(budget.textContent, "budget: spent, 2,013,402 of 2,000,000 tokens today; standing orders and phone turns wait for 00:00 ET");
+  assert.ok(budget.hasClass("spent"), "styled once the day's cap is reached");
+  const banner = one(card, (node) => node.hasClass("standing-banner"), "banner");
+  assert.equal(banner.textContent, "stopped: the firing ledger cannot be read (EISDIR)");
+  assert.ok(banner.hasClass("err"));
+
+  assert.deepEqual(textsOf(card, "standing-order-name"), ["preclose · close-30m", "weekly · open-15m"]);
+  assert.deepEqual(textsOf(card, "standing-order-next"), ["next 15:30 ET", "next 2026-10-21 09:15 ET"]);
+  const [preclose, weekly] = byClass(card, "standing-order");
+  assert.deepEqual(textsOf(preclose, "standing-order-sub"), ["hash ok · last delivered 13:31 ET"]);
+  assert.deepEqual(textsOf(weekly, "standing-order-sub"), ["strategies/alpha/WEEKLY.md changed since arming (npm run desk -- rearm weekly)", "last none yet"]);
+  assert.ok(byClass(weekly, "standing-order-sub")[0].hasClass("bad"), "a moved pin is the operator's to review");
+
+  assert.equal(one(card, (node) => node.hasClass("standing-recent"), "recent heading").textContent, "recent firings");
+  const firings = byClass(card, "standing-firing");
+  assert.deepEqual(firings.map((row) => textsOf(row, "standing-firing-name")[0]), ["preclose · 2026-10-20", "preclose · 2026-10-19"]);
+  assert.deepEqual(firings.map((row) => textsOf(row, "standing-firing-outcome")[0]), ["delivered", "refused (budget)"]);
+  assert.deepEqual(firings.map((row) => textsOf(row, "standing-firing-sub")[0]), ["13:31 ET · 4m 12s · 1,234,567 tokens · 1 file", "2026-10-19 15:30 ET"],
+    "New York's time, the wall time, the four buckets' sum and the files written - what a firing has");
+
+  const [fired, refused] = firings;
+  assert.equal(fired.getAttribute("role"), "button");
+  assert.equal(fired.tabIndex, 0);
+  fired.fire("click");
+  assert.deepEqual(opened, ["session-fire-1"], "its session opens in place, where its last message is read");
+  assert.ok(byClass(section(panel, "sessions"), "desk-row").find((row) => row.dataset.sessionId === "session-fire-1")!.hasClass("sel"), "and its desk session row is marked");
+  assert.equal(fired.fire("keydown", { key: "Enter" }).prevented, true);
+  assert.deepEqual(opened, ["session-fire-1", "session-fire-1"]);
+  assert.equal(refused.getAttribute("role"), null, "a firing that never ran has no session to open");
+  refused.fire("click");
+  assert.deepEqual(opened, ["session-fire-1", "session-fire-1"]);
+}));
+
+test("without the standing orders' status the card is the budget line alone; with neither field there is no card; an empty book says none armed", () => withDOM(async (panel) => {
+  let next = status({ budget: OPEN_BUDGET });
+  const { desk } = harness(panel, async () => next);
+  await desk.refresh();
+  assert.deepEqual(sectionIds(panel), ["desk", "telegram", "conversation", "turns", "standing", "sessions"]);
+  let card = section(panel, "standing");
+  assert.deepEqual(card.children.map((node) => node.textContent), ["standing orders", "budget: 1,234,567 of 2,000,000 tokens today"], "no clock runs: the budget line alone");
+  assert.equal(byClass(card, "standing-budget")[0].hasClass("spent"), false);
+
+  next = status();
+  await desk.refresh();
+  assert.deepEqual(sectionIds(panel), ["desk", "telegram", "conversation", "turns", "sessions"], "a status with neither: no card");
+
+  next = status({ budget: OPEN_BUDGET, standing: standingStatus({ orders: [], recent: [] }) });
+  await desk.refresh();
+  card = section(panel, "standing");
+  assert.deepEqual(card.children.map((node) => node.textContent).slice(2), ["none armed (npm run desk -- arm)"]);
+  assert.equal(byClass(card, "standing-recent").length, 0, "no heading over no firings");
+
+  next = status({ budget: OPEN_BUDGET, standing: standingStatus({ file: { path: "/s", state: "refused", errors: ["orders[0]: id is missing"] }, orders: [], recent: [] }) });
+  await desk.refresh();
+  card = section(panel, "standing");
+  assert.deepEqual(card.children.map((node) => node.textContent).slice(2), ["stopped: standing.yml is refused: orders[0]: id is missing"], "a refused file is not an empty book");
+}));
+
+test("a firing's session is named <order> · <date> from the status, before its own title and Desk · <date>; titles() hands the names to the page and keeps them across a failed read", () => withDOM(async (panel) => {
+  const titles = { "session-fire-1": "preclose · 2026-10-20" };
+  assert.equal(deskTitle(FIRING_SESSION, titles), "preclose · 2026-10-20", "the ledger's name before the one dsh took from the first message");
+  assert.equal(deskTitle(FIRING_SESSION), "[schedule · preclose · 2026-10-20] Standing order preclose,", "no names, the session's own title");
+  assert.equal(deskTitle({ sessionId: "session-desk-9", updatedAt: AT }, titles), "Desk · 2026-10-20", "a session the names leave out");
+  assert.equal(deskTitle({ sessionId: "constructor", updatedAt: AT }, {}), "Desk · 2026-10-20", "never an inherited member");
+
+  let next: () => Promise<Record<string, any>> = async () => status({ budget: OPEN_BUDGET, standing: standingStatus() });
+  const { desk } = harness(panel, () => next(), { sessions: [FIRING_SESSION, ...SESSIONS] });
+  assert.deepEqual(desk.titles(), {}, "nothing read, no names");
+  await desk.refresh();
+  const names = () => byClass(section(panel, "sessions"), "desk-row").map((row) => textsOf(row, "sp-row-name")[0]);
+  assert.deepEqual(names(), ["preclose · 2026-10-20", "Desk · 2026-10-20", "Monday's desk"]);
+  assert.deepEqual(desk.titles(), titles, "the page names the session the same way (chat.js titleOf)");
+  assert.equal(kvValue(section(panel, "conversation"), "session"), "Desk · 2026-10-20", "the desk conversation is no firing");
+
+  next = async () => { throw new Error("HTTP 500"); };
+  await desk.refresh();
+  assert.deepEqual(desk.titles(), titles, "a failed read forgets no name");
+  assert.deepEqual(names(), ["preclose · 2026-10-20", "Desk · 2026-10-20", "Monday's desk"]);
+
+  next = async () => status();
+  await desk.refresh();
+  assert.deepEqual(desk.titles(), {}, "a status without the standing orders names none");
+  assert.deepEqual(names(), ["[schedule · preclose · 2026-10-20] Standing order preclose,", "Desk · 2026-10-20", "Monday's desk"]);
+}));

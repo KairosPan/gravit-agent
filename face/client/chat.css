@@ -1645,7 +1645,8 @@ body {
    desk's clock or an alert of its watch is the face's: a quiet line like a
    room's, under its glyph. The Desk panel's cards are the sidebar's .sp-card
    furniture; only the pause row and line, the resume command, the session
-   rows and the rail's badge are its own (client/desk-panel.js). */
+   rows, the standing orders' card and the rail's badge are its own
+   (client/desk-panel.js). */
 .msg.op .phone-who {
   display: flex;
   align-items: center;
@@ -1680,3 +1681,28 @@ body {
 .desk-pause .picker-btn { padding: 4px 12px; }
 .sp-v.bad { color: var(--red); }
 .desk-row-sub { display: flex; gap: 6px; margin-top: 3px; }
+/* the standing orders' card (client/desk-standing.js puts it in words): the
+   budget line, in the needs-you colour once the day's cap is reached; the
+   banner, a line each for what stops every order; an order a row; the recent
+   firings, a row each, which opens its session when it woke one. Every line
+   wraps: an order's state and a refusal are sentences, not values. */
+.standing-budget { font-size: 12px; padding: 2px 0 4px; overflow-wrap: anywhere; }
+.standing-budget.spent { color: var(--danger); }
+.standing-banner { white-space: pre-line; overflow-wrap: anywhere; padding: 2px 0 6px; }
+.standing-order { padding: 6px 0 4px; border-top: 1px solid var(--line); }
+.standing-order-head, .standing-firing-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; column-gap: 8px; }
+.standing-order-name, .standing-firing-name { font: 600 12px/1.4 var(--mono); overflow-wrap: anywhere; }
+.standing-order-next, .standing-firing-outcome { margin-left: auto; font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; }
+.standing-order-sub, .standing-firing-sub { font-size: 11.5px; line-height: 1.5; color: var(--dim); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.standing-order-sub.bad { color: var(--red); }
+.standing-recent {
+  font: 600 10px/1 var(--mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+  padding: 10px 0 4px;
+  border-top: 1px solid var(--line);
+}
+.standing-firing { margin: 0 -6px; padding: 5px 6px; border-radius: 6px; }
+.standing-firing.opens { cursor: pointer; }
+.standing-firing.opens:hover { background: var(--active-bg); }

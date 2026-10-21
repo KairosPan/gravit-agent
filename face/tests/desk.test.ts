@@ -8,15 +8,15 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { withFileLock } from "@deepseek-ai/dsh-atomic-write";
 import {
-  ASLEEP_THRESHOLD_MS, ASLEEP_TICK_MS, EVENTS_FILE, FIRINGS_FILE, LEDGER_ROTATE_BYTES, OFF_FILE, appendEvent, appendRecord, appendRecordOnce, budgetReplyLine,
-  budgetState, clearOff, deskDir, deskStatus, deskStatusLines, deskTime, installAsleepWatch, installDesk, lastDeskSession, noteBudgetSpent, parseDuration,
-  readBudget, readEvents, readOffState, readRecords, registerDeskRoutes, runsOf, writeOff,
+  ASLEEP_THRESHOLD_MS, ASLEEP_TICK_MS, EVENTS_FILE, FIRINGS_FILE, LEDGER_ROTATE_BYTES, OFF_FILE, appendEvent, appendRecord, appendRecordOnce, budgetLine,
+  budgetReplyLine, budgetState, clearOff, deskDir, deskStatus, deskStatusLines, deskTime, installAsleepWatch, installDesk, lastDeskSession, noteBudgetSpent,
+  parseDuration, readBudget, readEvents, readOffState, readRecords, registerDeskRoutes, runsOf, standingLines, writeOff,
   type BudgetState, type DeskEvent, type DeskStatus, type TurnUsage,
 } from "../src/desk.ts";
 import type { DeskConversationCtxLike } from "../src/desk-conversation.ts";
 import type { AgentLike, SessionLike } from "../src/room.ts";
 import type { EventLike } from "../src/room-rules.ts";
-import type { StandingStatus } from "../src/standing.ts";
+import type { FiringSummary, StandingStatus } from "../src/standing.ts";
 import { recorder } from "./route-recorder.ts";
 
 /** Every harness home made with {@link home}, removed once the file's tests are done. */
@@ -1118,4 +1118,99 @@ test("desk.ts names standing.ts for its types alone", async () => {
   const statics = (source.match(/^import\b.*$/gm) ?? []).filter((line) => line.includes('"./standing.ts"'));
   assert.equal(statics.length, 1);
   assert.match(statics[0], /^import type /, `a value edge: ${statics[0]}`);
+});
+
+/* P2: the standing orders and the day's budget as the terminal's `status` and the phone's /status print them. */
+
+test("standingLines and budgetLine print the orders, the calendar and the budget exactly", () => {
+  const now = new Date("2026-11-27T16:00:00Z"); // 11:00 ET
+  const last: FiringSummary = {
+    key: "preclose:2026-11-26", order: "preclose", date: "2026-11-26", kind: "finished", outcome: "delivered", t: "2026-11-26T20:31:40.000Z",
+    sessionId: "session-26", wallMs: 252_000, files: 1,
+  };
+  type Order = StandingStatus["orders"][number];
+  const bare: Order = {
+    id: "preclose", dir: "desk", file: "STANDING.md", at: "close-30m", producer: "builtin:brief", wake: true, enabled: true,
+    expires: "2026-12-31", expired: false, hash: "ok", nextAnchor: "2026-11-27T17:30:00.000Z",
+  };
+  const loaded: StandingStatus = {
+    file: { path: "/h/face/desk/standing.yml", state: "loaded", loadedAt: "2026-11-27T15:59:30.000Z" },
+    calendar: { python: "python3", state: "ok", today: { date: "2026-11-27", open: "2026-11-27T14:30:00.000Z", close: "2026-11-27T18:00:00.000Z", early: true } },
+    orders: [{ ...bare, last }], queued: [], recent: [last],
+  };
+  const lastLine = "standing preclose: close-30m, next 12:30 ET; last delivered 2026-11-26 15:31 ET";
+  assert.deepEqual(standingLines(loaded, now), [lastLine]);
+
+  /* An order's line says the first that holds of: its firing running, disabled, expired, its text's pin, its script's pin, its schedule. */
+  const one = (fields: Partial<Order>, s: Partial<StandingStatus> = {}): string[] => standingLines({ ...loaded, ...s, orders: [{ ...bare, ...fields }] }, now);
+  assert.deepEqual(one({ hash: "changed" }), ["standing preclose: desk/STANDING.md changed since arming (npm run desk -- rearm preclose)"]);
+  assert.deepEqual(one({ hash: "missing" }), ["standing preclose: desk/STANDING.md is missing"]);
+  assert.deepEqual(one({ producer: "scripts/p.py", producerHash: "changed" }), ["standing preclose: scripts/p.py changed since arming (npm run desk -- rearm preclose)"]);
+  assert.deepEqual(one({ producer: "scripts/p.py", producerHash: "missing" }), ["standing preclose: scripts/p.py is missing"]);
+  assert.deepEqual(one({ hash: "changed", producer: "scripts/p.py", producerHash: "changed" }),
+    ["standing preclose: desk/STANDING.md changed since arming (npm run desk -- rearm preclose)"], "the text's pin before the script's");
+  assert.deepEqual(one({ hash: "unknown" }), ["standing preclose: close-30m, next 12:30 ET"], "a pin not yet checked claims nothing");
+  assert.deepEqual(one({ nextAnchor: undefined }), ["standing preclose: close-30m, no session in the calendar's window"]);
+  assert.deepEqual(one({ at: "15:30", nextAnchor: "2026-11-30T20:30:00.000Z" }), ["standing preclose: 15:30, next 2026-11-30 15:30 ET"], "another New York date carries it");
+  assert.deepEqual(one({ enabled: false, hash: "changed" }), ["standing preclose: disabled"]);
+  assert.deepEqual(one({ expired: true, expires: "2026-11-26", hash: "changed" }), ["standing preclose: expired after 2026-11-26"]);
+  const running = { key: "preclose:2026-11-27", startedAt: "2026-11-27T17:30:04.000Z", sessionId: "session-run" };
+  assert.deepEqual(one({ enabled: false }, { running }), ["standing preclose: running since 12:30 ET"]);
+  assert.deepEqual(one({}, { running: { ...running, key: "preclose-2:2026-11-27" } }), ["standing preclose: close-30m, next 12:30 ET"], "another order's firing is not this one's");
+  assert.deepEqual(one({ enabled: false, last: { ...last, outcome: "refused (budget)", t: "2026-11-27T15:30:10.000Z" } }),
+    ["standing preclose: disabled; last refused (budget) 10:30 ET"], "the last firing after any state");
+  assert.deepEqual(one({ last: { ...last, t: "yesterday" } }), ["standing preclose: close-30m, next 12:30 ET; last delivered yesterday"],
+    "a time the ledger holds that is no time is shown as written, never a throw");
+
+  /* The whole book's lines, before the orders': none armed, a refused file, an unreadable ledger, no calendar today. */
+  assert.deepEqual(standingLines({ ...loaded, orders: [] }, now), ["standing orders: none armed (npm run desk -- arm)"]);
+  assert.deepEqual(standingLines({ ...loaded, file: { path: "/h/face/desk/standing.yml", state: "missing" }, orders: [] }, now), ["standing orders: none armed (npm run desk -- arm)"]);
+  const errors = [
+    'orders[0] (preclose): at must be an anchor - open, close, open-Nm, close-Nm or HH:MM - not "9:30"',
+    "orders[1] (weekly): not armed: npm run desk -- arm strategies/alpha --id weekly …",
+    'budget.dailyTokens must be a whole number above zero, not "lots"',
+  ];
+  const refused: StandingStatus["file"] = { path: "/h/face/desk/standing.yml", state: "refused", errors };
+  assert.deepEqual(standingLines({ ...loaded, file: refused, orders: [] }, now), [
+    'standing orders stopped: standing.yml is refused: orders[0] (preclose): at must be an anchor - open, close, open-Nm, close-Nm or HH:MM - not "9:30"; '
+    + "orders[1] (weekly): not armed: npm run desk -- arm strategies/alpha --id weekly …; budget.dailyToken…",
+  ], "the errors joined and cut at 200 characters; a refused file is not an empty book");
+  assert.deepEqual(standingLines({ ...loaded, file: { ...refused, errors: errors.slice(2) } }, now), [
+    'standing orders stopped: standing.yml is refused: budget.dailyTokens must be a whole number above zero, not "lots"',
+    lastLine,
+  ], "the last good load's orders still listed");
+  assert.deepEqual(standingLines({ ...loaded, ledger: { error: "EISDIR" } }, now), ["standing orders stopped: the firing ledger cannot be read (EISDIR)", lastLine]);
+  assert.deepEqual(standingLines({ ...loaded, calendar: { python: "python3", state: "failed", error: "pandas_market_calendars is not importable in /usr/bin/python3" } }, now),
+    ["standing orders: no calendar today, python3: pandas_market_calendars is not importable in /usr/bin/python3", lastLine]);
+  assert.deepEqual(standingLines({ ...loaded, calendar: { python: "python3", state: "stale" } }, now), [lastLine], "a stale window still covers today");
+  assert.deepEqual(standingLines({ ...loaded, orders: [], ledger: { error: "EACCES" }, calendar: { python: "python3", state: "failed", error: "exit 1" } }, now), [
+    "standing orders: none armed (npm run desk -- arm)",
+    "standing orders stopped: the firing ledger cannot be read (EACCES)",
+    "standing orders: no calendar today, python3: exit 1",
+  ]);
+
+  const used = (total: number): BudgetState["used"] => ({ uncachedInputTokens: 0, outputTokens: total, cacheReadTokens: 0, cacheWriteTokens: 0, total });
+  assert.equal(budgetLine({ used: { uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, total: 1234567 }, spent: false }),
+    "budget: 1,234,567 tokens today, cap not set (budget.dailyTokens in standing.yml)");
+  assert.equal(budgetLine({ dailyTokens: 2_000_000, used: used(1_234_567), spent: false }), "budget: 1,234,567 of 2,000,000 tokens today");
+  assert.equal(budgetLine({ dailyTokens: 2_000_000, used: used(2_013_402), spent: true }),
+    "budget: spent, 2,013,402 of 2,000,000 tokens today; standing orders and phone turns wait for 00:00 ET");
+  assert.equal(budgetLine({ dailyTokens: 2_000_000, used: used(0), spent: false, error: "EACCES" }), "budget: 0 of 2,000,000 tokens today (ledger unreadable: EACCES)");
+
+  /* deskStatusLines: the budget line, then the standing orders', after the telegram line - each only with its field. */
+  const base: DeskStatus = {
+    ok: true, pid: 7, version: "v", bootedAt: "2026-11-27T14:30:00.000Z", uptimeMs: 90 * 60_000, desk: { enabled: true, dir: "/d" }, asleep: [], runs: [],
+    turnsToday: { count: 0, usage: { uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 } },
+    telegram: { configured: true, polling: true, lastPollAt: "2026-11-27T15:59:00.000Z", dropped: 0, queued: 0 },
+  };
+  const budget: BudgetState = { dailyTokens: 2_000_000, used: used(1_234_567), spent: false };
+  assert.deepEqual(deskStatusLines({ ...base, budget, standing: { ...loaded, orders: [{ ...bare, last }, { ...bare, id: "weekly", hash: "changed" }] } }, now).slice(1), [
+    "telegram: polling, last poll 10:59 ET, 0 dropped, 0 queued",
+    "budget: 1,234,567 of 2,000,000 tokens today",
+    lastLine,
+    "standing weekly: desk/STANDING.md changed since arming (npm run desk -- rearm weekly)",
+  ]);
+  assert.deepEqual(deskStatusLines({ ...base, budget }, now).slice(1), ["telegram: polling, last poll 10:59 ET, 0 dropped, 0 queued", "budget: 1,234,567 of 2,000,000 tokens today"],
+    "no standing orders' clock, no lines of theirs");
+  assert.deepEqual(deskStatusLines(base, now).slice(1), ["telegram: polling, last poll 10:59 ET, 0 dropped, 0 queued"], "a status with neither field: neither line");
 });
