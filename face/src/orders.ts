@@ -193,6 +193,17 @@ export function orderApprovalDecision(
         `and try again.`,
     };
   }
+  /* A key field the card could only show cut is not asked about: the cut could
+   * hide the address's tail or the host, and an operator approving what they
+   * cannot read is a click-through. Denied in our own words, nobody asked. */
+  const over = overlongKeyField(args);
+  if (over !== undefined) {
+    return {
+      kind: "deny",
+      reason: `${name}: its ${over.key} is ${over.length} characters, too long to show whole on a card, ` +
+        `so nothing was asked and the call does not run.`,
+    };
+  }
   const reason = `${isSeatTool(name) ? "Account seat" : "PAPER order"} - ${describeOrder(name, args)}`;
   /* `displayReason` is what a localized approval UI prefers to render - the
    * upstream panel draws it INSTEAD of `reason` whenever it is present
@@ -203,6 +214,47 @@ export function orderApprovalDecision(
    * whichever field a client draws, the human sees symbol, side and size -
    * never a bare tool name. Presentation only: never persisted (types.ts:72). */
   return { kind: "ask", reason, displayReason: { en: reason } };
+}
+
+/** The argument keys the operator decides on — where a cut could hide what
+ * matters (an address's tail, an id's tail, a venue, a symbol); a URL is its
+ * own case ({@link urlWord}). */
+const WHOLE_KEYS = ["venue", "from", "to", "symbol", "order", "asset", "account", "base", "order_id"];
+
+/** Most characters a key field may have and still be shown whole on a card;
+ * past it the call is denied rather than carded with a cut ({@link overlongKeyField}). */
+const MAX_KEY_FIELD = 120;
+
+/** A payee's URL on the card: its origin whole (scheme and host, no userinfo —
+ * said when there was some), its path and query cut to 24 characters; a value
+ * that is not a URL is `?`, never echoed. */
+function urlWord(value: unknown): string {
+  try {
+    const u = new URL(String(value));
+    const path = `${u.pathname}${u.search}`;
+    const shown = path.length > 24 ? `${path.slice(0, 24)}…` : path;
+    return `${u.origin}${shown}${u.username !== "" || u.password !== "" ? " (userinfo stripped)" : ""}`;
+  } catch {
+    return "?";
+  }
+}
+
+/** The first key field too long to show whole on a card — a URL counts by its
+ * host — so the gate denies the call instead of raising a card whose cut could
+ * hide what matters; `undefined` when every key field fits. */
+function overlongKeyField(args: unknown): { key: string; length: number } | undefined {
+  if (args === null || typeof args !== "object" || Array.isArray(args)) return undefined;
+  const row = args as Record<string, unknown>;
+  for (const key of [...WHOLE_KEYS, "url"]) {
+    const value = row[key];
+    if (value === undefined || value === null || typeof value === "object") continue;
+    let text = String(value);
+    if (key === "url") {
+      try { text = new URL(text).host; } catch { /* not a URL: its whole text is what the card would have to show */ }
+    }
+    if (text.length > MAX_KEY_FIELD) return { key, length: text.length };
+  }
+  return undefined;
 }
 
 /** One line an operator can actually decide on.
@@ -231,8 +283,15 @@ export function describeOrder(name: string, args: unknown): string {
     if (value === undefined || value === null) return undefined;
     if (typeof value === "object") return undefined;
     /* Model-controlled text on the operator's only line of information: bound it
-     * so a crafted field cannot push a plausible sentence past the real one. */
+     * so a crafted field cannot push a plausible sentence past the real one —
+     * but never cut where the cut could hide what the operator decides on: a
+     * payee's URL keeps its whole origin and loses only its path (and says when
+     * userinfo was in it); an address, an id, a venue or a symbol is cut in the
+     * MIDDLE so both ends stay (a field too long for that is denied before a
+     * card, {@link overlongKeyField}). */
+    if (key === "url") return urlWord(value);
     const text = String(value);
+    if (WHOLE_KEYS.includes(key)) return text.length > 40 ? `${text.slice(0, 24)}…${text.slice(-12)}` : text;
     return text.length > 40 ? `${text.slice(0, 40)}…` : text;
   };
   /* place_order(symbol, qty, side, order_type, limit_price) and

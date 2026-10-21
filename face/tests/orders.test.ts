@@ -260,6 +260,35 @@ test("describeOrder: a crafted field cannot run away with the operator's only li
   assert.match(line, /…/);
 });
 
+/* The fields the operator decides on are never cut where the cut could hide what matters: a payee's URL shows its
+ * origin whole and cuts only the path (userinfo is stripped and said); an address or an id is cut in the middle so both
+ * ends stay; a key field too long to show whole is a denial, not a card. */
+test("describeOrder: a pay's URL shows its origin whole and cuts only the path; userinfo is stripped and said; a bad URL is ?", () => {
+  const line = describeOrder("mcp__account__portfolio_pay", { url: `https://api.example.com/v1/${"x".repeat(80)}`, maxAmount: 2, from: "agent-1" });
+  assert.match(line, /url=https:\/\/api\.example\.com\/v1\/x+…/);
+  assert.ok(line.length < 160, `got ${line.length}`);
+  assert.match(describeOrder("mcp__account__portfolio_pay", { url: "https://u:p@api.example.com/x" }), /url=https:\/\/api\.example\.com\/x \(userinfo stripped\)/);
+  assert.match(describeOrder("mcp__account__portfolio_pay", { url: "not a url" }), /url=\?/);
+});
+
+test("describeOrder: an address or an id is cut in the middle so both ends stay", () => {
+  const addr = `0x${"a".repeat(20)}${"b".repeat(20)}`;
+  const line = describeOrder("mcp__account__portfolio_live_move", { kind: "send", from: "wallet", asset: "USDC", amount: 5, to: addr });
+  assert.match(line, /to=0xaaaaaaaaaaaaaaaaaaaabb…bbbbbbbbbbbb/);
+  assert.match(describeOrder("mcp__account__portfolio_live_cancel", { venue: "paper-1", order: `ord-${"9".repeat(60)}` }), /order=ord-9{20}…9{12}/);
+});
+
+test("orderApprovalDecision: a key field too long to show whole is denied, not carded", () => {
+  const d = orderApprovalDecision("mcp__account__portfolio_live_move", "ask", { kind: "send", from: "wallet", asset: "USDC", amount: 5, to: `0x${"f".repeat(300)}` });
+  assert.equal(d?.kind, "deny");
+  assert.match(d?.kind === "deny" ? d.reason : "", /its to is 302 characters/);
+  assert.match(d?.kind === "deny" ? d.reason : "", /nothing was asked/);
+  const u = orderApprovalDecision("mcp__account__portfolio_pay", "ask", { url: `https://${"h".repeat(300)}.example.com/x`, maxAmount: 1 });
+  assert.equal(u?.kind, "deny");
+  const fine = orderApprovalDecision("mcp__account__portfolio_pay", "ask", { url: "https://api.example.com/x", maxAmount: 1, body: "b".repeat(500) });
+  assert.equal(fine?.kind, "ask", "a long field that is not a key field is cut, not denied");
+});
+
 test("orderGuardReason: everything else passes untouched", () => {
   for (const [name, description] of [["bash", "run"], ["mcp__x__orders", "list orders"]]) {
     assert.equal(orderGuardReason(name, description, [], "c1"), undefined, name);
