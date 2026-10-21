@@ -161,7 +161,8 @@ run (`runs: …`).
 ```bash
 cd face
 npm run service -- install     # write $DSH_HOME/.env if the home has none; run the face now and at every login
-npm run service -- status      # the default: launchd's state and pid, uptime, the desk, its pause and Telegram bridge, how the last run ended, the sign-in URL
+npm run service -- status      # the default: launchd's state and pid, uptime, the desk, its pause
+                               # and Telegram bridge, how the last run ended, the sign-in URL
 npm run service -- url         # the sign-in URL (?token=) from the face's log
 npm run service -- logs        # the last 40 lines of face.log and face.err.log
 npm run service -- stop        # launchd lets go of the job; the plist stays, so start or the next login brings it back
@@ -1692,9 +1693,12 @@ cannot see it.
 
 Every turn on the desk session is supervised, whoever opened it — the phone or the browser: a
 5-minute deadline from its start that no card or tool extends, the fence below checked at its
-start, and one ledger line: a `desk-turn` with its outcome, wall time and tokens, or a
-`desk-refused` when the fence cut the turn. A turn from the phone answers to the phone; a turn
-opened in the browser answers in the browser only.
+start, and one ledger line: a `desk-turn` with its outcome — `ended`, `timed-out`, `cancelled`
+with what cancelled it (`stopped from the phone`, `shutdown`, `stopped in the browser`), or
+`failed` with its error — wall time and tokens, or a `desk-refused` when the fence cut the turn.
+A turn from the phone answers to the phone; a turn opened in the browser answers in the browser
+only. A cut — the deadline, or `/stop` — cuts one turn: the texts you sent while it ran are
+answered after it, each in its own turn, in the order you sent them.
 
 **Set up the bot**, once:
 
@@ -1734,23 +1738,33 @@ keeps its reads off them (below).
 so the face's desk guard holds the desk's reads (`DEVELOPMENT.md` §4.2), and refuses before the
 tool runs:
 
-- a read outside the repository — `$DSH_HOME`, `~/.ssh`, `~/.config`, another checkout, through
-  a symlink too: `the desk reads only inside the repository; <path> is outside it`;
+- a read outside the repository — `$DSH_HOME`, `~/.ssh`, `~/.config`, a checkout outside it,
+  through a symlink too: `the desk reads only inside the repository; <path> is outside it`;
 - a `.env`, `.env.<anything>` or `.git` name, in any letter case: `the desk never reads <name>: it
   can hold a key`;
+- any other name that starts with a dot, below the repository root — `.mcp.json`,
+  `.claude/settings.local.json`, `.codex/`, the worktree checkouts under `.claude/worktrees/` —
+  as spelled or where a symlink lands: `the desk never reads dot-files: <name>`;
 - a search that could reach a dot-file — a `grep` include whose segment starts with `.`, `*`,
-  `?`, `[` or `{`, or a `glob` pattern whose segment starts with `.`: `the desk never searches
-  dot-files`, so a `grep` include `notes*.md` goes and `*.md` does not, ripgrep's `--glob`
-  lifting its skip of hidden files;
+  `?`, `[` or `{`, or a `glob` pattern whose segment starts with `.`:
+  `the desk never searches dot-files: search with no include, or one that starts with a name`,
+  so a `grep` include `notes*.md` goes and `*.md` does not, ripgrep's `--glob` lifting its skip
+  of hidden files;
 - any call — a search, a market read, a write — whose arguments carry the value of a key in the
   face's environment: `the desk never sends a secret: this call carries one`.
 
 The bridge then replaces every such value with `<secret>`, and the token with `<token>`, in
-everything it sends, queues or keeps. What remains: a key kept in a file whose name says
-nothing (`credentials.json`, a note), or one an MCP tool returns, reaches DeepSeek in the tool
-result, and the phone too unless the face's environment holds that value; and a hard link, or a
-symlink swapped between the check and the read, is not seen (`DEVELOPMENT.md` §9, R34). Keep
-keys in `.env` files or in the harness home.
+everything it sends, queues or keeps. The secret check is a backstop: it finds a value as it is,
+JSON-escaped or URL-encoded, and misses a lower-case `%3a`, a base64 spelling and a value split
+across arguments, so the read refusals above are what keep a key out. What remains: a key kept
+in a file whose name says nothing and starts with no dot (`credentials.json`, a note), or one an
+MCP tool returns, reaches DeepSeek in the tool result, and the phone too unless the face's
+environment holds that value; a hard link, or a symlink swapped between the check and the read,
+is not seen; and a `grep` with no include, which ripgrep keeps off hidden files, searches one
+that an ignore file whitelists — a negation such as `!.env.alpaca` in a `.gitignore`, `.ignore`
+or `.rgignore` in the tree it searches or above it; a test keeps the repository's tracked ignore
+files free of one, and the desk cannot write one (`DEVELOPMENT.md` §9, R34). Keep keys in `.env`
+files, in dot-files or in the harness home.
 
 **The model.** `FACE_DESK_MODEL` is the desk's route, `provider/model`; unset, it is
 `deepseek-official/deepseek-flash`. A route the tree does not serve falls back to the tree's
@@ -1773,25 +1787,29 @@ the count. Text goes to the desk under a first line Gravit reads as its provenan
 | `/pause` | pauses the desk until a terminal resumes it: `paused; a terminal resumes it: npm run desk -- resume` |
 | `/pause 30m` (`Nm`, `Nh`, `Nd`) | pauses it for that long: `paused until 14:33 ET; …`; any other argument pauses nothing and says how to write one |
 | `/new` | opens another desk conversation: `a new desk conversation`; a turn under way on the old one still answers |
-| `/stop` | cancels the turn under way: `stopped`, or `nothing is running` |
+| `/stop` | cancels the turn under way, and only it: `stopped`, or `nothing is running`; texts you sent while it ran are answered after it, in order |
 
 Any other `/word` is text for Gravit. There is no `/resume`: the phone only makes the desk
 quieter, and a pause from the phone never shortens one in force — `/pause 1m` during a 2-hour
 pause leaves the 2 hours, and the reply says so.
 
 What comes back: the answer as plain text, in parts of at most 4,000 characters, cut at line
-ends where it can be; `timed out after 5 min; a card or a long tool was pending` when the
-deadline cut a turn before it said anything; `the desk could not answer: <error>; nothing was
-done - send it again later` when the model call failed; and `the desk is slow to take this; it
-will answer when it can` when the desk took more than 30 s to accept a text. A send that fails
+ends where it can be — followed by a line `(cut off: <what cut it>)`, such as `(cut off: timed
+out after 5 min)` or `(cut off: stopped from the phone)`, when a cut caught the answer
+mid-sentence; `timed out after 5 min; a
+card or a long tool was pending` when the deadline cut a turn before it said anything; `the desk
+could not answer: <error>; nothing was done - send it again later` when the model call failed;
+and `the desk is slow to take this; it will answer when it can` when the desk took more than 30 s
+to accept a text. A send that fails
 waits in `outbox.json` (at most 100 messages) and goes out, in order, before the next poll; one
 sent more than 2 minutes after it was written opens with `(written 14:03 ET, sent late)`.
 Telegram's 403 — you blocked the bot, or never started it — drops the message, and `status`
 says `blocked (403)` until a send goes through. Telegram's 409 means another poller holds the
 token — a second face started without `FACE_DESK=0`, a webhook, or someone else with the
-token — and `status` says `conflict at …`; the bridge waits 30 s and polls again. Every value of
-a key in the face's environment goes out as `<secret>`, the token as `<token>`, and an outbox an
-earlier run left is redacted as it is read.
+token — and `status` says `conflict at …`; the bridge waits 30 s and polls again. A revoked or
+mistyped token fails every poll, and `status` says `poll failing since <time>: <reason>` until a
+poll answers. Every value of a key in the face's environment goes out as `<secret>`, the token as
+`<token>`, and an outbox an earlier run left is redacted as it is read.
 
 **A lost phone.** The bridge admits by your user id, not by the device, so a phone that is still
 signed in to your Telegram account keeps chatting with the desk — having it read inside the
@@ -1846,7 +1864,13 @@ it (`../GRAVIT.md`), anywhere else in the repository and in the harness home (`~
 the names judged below the repository root — with `the desk never writes GRAVIT.md: it would
 steer every desk turn after it`; a `str_replace_editor` `view` passes. A desk session whose own
 directory sits under such a name writes nothing at all (`the desk does not write while its
-directory sits under <name>`). The fence is for what another session plants.
+directory sits under <name>`). The same check denies the files other tools obey: any file or
+directory whose name starts with a dot — a `desk/journal/.gitignore` holding `!*` would have git
+list the journal, your book, for the next `git add -A` — with
+`the desk never writes dot-files: <name>`; and any `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md` or
+`AGENTS.override.md`, in any letter case — your coding agents load them from the folder they work
+in — with `the desk never writes <name>: another agent reads it`. The fence is for what another
+session plants.
 The root `GRAVIT.local.md` is not fenced: it is the operator's own overlay, read by every desk
 turn (`DEVELOPMENT.md` §9).
 
@@ -1855,7 +1879,9 @@ on or off, up since when, the pause and its control — then the Telegram bridge
 conversation, today's desk turns and their tokens, and the desk's sessions. Pause offers 30
 minutes, 2 hours, 1 day or until resumed (`POST /data/desk/pause`), and the panel shows the pause
 the face answered with, which may be a longer one that stood; there is no resume control. The
-cards refresh every 30 s while the panel shows. A desk session opens in place, titled
+cards refresh every 30 s while the panel shows, leaving the Pause control as it is — a dropdown
+you hold open stays open — and the Telegram card shows `poll failing since …` while the polls
+fail. A desk session opens in place, titled
 `Desk · <date>` when it has no title of its own; a text from the phone carries a ☎ over the
 operator's bubble. A card parked on a desk session — the session nobody watches — puts a
 `waiting` chip on its row and on the conversation card, and a badge on the rail's Desk item while
@@ -2039,7 +2065,7 @@ and `node --test` gives each file its own:
 | `instructions-smoke.test.ts` | what the `agent-instructions` baseline carries on a first request after the face's instructions patch: `GRAVIT.md` and `GRAVIT.local.md` for Gravit at the repo root; the root file plus the channel's own `strategies/x/GRAVIT.md` for a channel session; the root file for a bot session; `AGENTS.md` for none of them, `CLAUDE.md` for neither Gravit nor the channel session |
 | `roles-smoke.test.ts` | a role is a one-shot child with its own persona and tools: `role_reviewer` and `role_screener` each spawn a child whose tool list EQUALS the role's `allow` (every `role_*` tool and the forbidden ones gone — compared exactly, because dsh exempts a scope's own registrations from `restrict()`); for the reviewer's child the smoke also checks the system prompt — the role's persona (shadowing Gravit's), the date line, no `gravit:roles` section and no cycle contract — the header (`origin: subagent`, `agentPreset: gravit`, its parent's cwd), the root `GRAVIT.md` in its `agent-instructions` baseline, and its text returning through the tool, while Gravit's own prompt carries the roles section and the cycle contract (`Step 0 — ask once`); a `subagent_fork` child's first request carries Gravit's system text whole — the cycle contract included — and Gravit's tools in order; a plain `subagent` child (unseeded) can call `create_goal` and every role tool yet carries neither the cycle contract nor the roles section, only the date; a role naming a tool the tree lacks fails at delegation with `tools.restrict() names unknown global tool "…"` and creates no child. The MCP tools the roles name are stand-ins under their production names; a foreground one-shot child leaves `ctx.sessions` as its result returns, so the smoke copies each session's header while serving its request |
 | `goal-smoke.test.ts` | the goal loop `../dsh/profile/cycle.md` rests on, through the face's own wire (prompts, the Stop button's `session/cancel`, a slash line's `commands/execute`): `create_goal` in a human turn returns the id and revision 1, armed; each round arrives at idle as a user message whose source is `goal` (`<goal_round>`, the objective, `Round: n/N`); the model's `blocked` in round 1 is refused (`blocked requires at least 3 consecutive goal rounds; current round is 1`), in round 3 accepted with the code `model-reported` and followed by the `<goal_blocked>` wrap-up; a second `create_goal` is refused while that goal is blocked (`GOAL_ALREADY_EXISTS`); at the cap the driver blocks with `round-limit` and sends the model nothing more; Stop mid-round pauses the goal, the model's resume of it is refused (`GOAL_TOOL_RESUME_PAUSED`: `the model cannot resume a paused goal; the user must resume it`) and `/goal resume` re-arms it; a face stopped mid-round and booted again on the same home leaves the goal active and disarmed with no request until "continue", whose `update_goal` resume bumps the revision and re-arms the rounds |
-| `desk-smoke.test.ts` | the desk on a real tree, as `main.ts` installs it, its fixture root inside the repository so the repository's `GRAVIT.md` heads the chain: the `gravit-desk` session runs in `desk/journal/` under `workspace-write`; its tools are exactly `DESK_ALLOW` expanded on this tree plus `desk_quotes` and `desk_state`, each `mcp__*__<raw>` entry matching one server's tool, and neither desk tool reaches Gravit's session or the global view; the write tools take the path arguments the guard's write check reads, and `str_replace_editor`'s commands are `view`, `create`, `str_replace` and `insert`; the desk's prompt carries Gravit's persona prefix, the date and `# The desk`, and no cycle contract or roles section; a desk turn naming the order stand-in gets Gate 2's visibility refusal and its body never runs; a `write` to `../levels.yml` is refused by the sandbox inside the tool's content while a journal write lands, with no card; Gravit's own write of a `GRAVIT.md` lands; with a listener in front answering allow, the guard's backstop still denies the desk's write of `GRAVIT.md` and its read of a `.env` file, while Gravit's own read of that file goes through unjudged; the read tools take exactly the parameters the read check reads; a `GRAVIT.md` planted in the journal reaches a desk session's first request behind the repository's, which is the threat the fence refuses, and the next post is refused with `desk-refused` and no turn; each supervised turn is one `desk-turn` with four token buckets and the stub's route |
+| `desk-smoke.test.ts` | the desk on a real tree, as `main.ts` installs it, its fixture root inside the repository so the repository's `GRAVIT.md` heads the chain: the `gravit-desk` session runs in `desk/journal/` under `workspace-write`; its tools are exactly `DESK_ALLOW` expanded on this tree plus `desk_quotes` and `desk_state`, each `mcp__*__<raw>` entry matching one server's tool, and neither desk tool reaches Gravit's session or the global view; the write tools take the path arguments the guard's write check reads, and `str_replace_editor`'s commands are `view`, `create`, `str_replace` and `insert`; the desk's prompt carries Gravit's persona prefix, the date and `# The desk`, and no cycle contract or roles section; a desk turn naming the order stand-in gets Gate 2's visibility refusal and its body never runs; a `write` to `../levels.yml` is refused by the sandbox inside the tool's content while a journal write lands, with no card; Gravit's own write of a `GRAVIT.md` lands; with a listener in front answering allow, the guard's backstop still denies the desk's write of `GRAVIT.md` and its read of a `.env` file, while Gravit's own read of that file goes through unjudged; `/stop` on a turn parked on an escalation card, two texts queued behind it, cuts that turn alone — recorded `cancelled`, `stopped from the phone` — and both texts are answered, in order; the desk's write of a journal `.gitignore` holding `!*` and of a `CLAUDE.md` are denied with no file written, and its read of a dot-config in the repository is denied by name while Gravit reads it; the read tools take exactly the parameters the read check reads; a `GRAVIT.md` planted in the journal reaches a desk session's first request behind the repository's, which is the threat the fence refuses, and the next post is refused with `desk-refused` and no turn; each supervised turn is one `desk-turn` with four token buckets and the stub's route |
 | `telegram-smoke.test.ts` | the bridge end to end on a real tree against a `node:http` Bot API stub on 127.0.0.1: the token and the operator's id come from the scratch home's `.env`, and the MCP child dsh spawns has the id and not the token; a stranger and a group are dropped and counted, unanswered, and the operator's `hi` is answered in the operator's chat; `/status` counts the drops and names the desk session; `/pause` writes `OFF` by `telegram`, a text then gets the paused line and opens no turn, and `/resume` is text that never reaches the model; a 503 queues the reply in the outbox and the next poll flushes it, in order, each reply sent once; a 409 is recorded and waited out; a card parked by an escalated write to `../levels.yml` is cut at the desk's deadline (1,500 ms here) with the timed-out line; the canary — the desk's write of `GRAVIT.md` is denied by the desk guard and no request carries a planted text, then a `GRAVIT.md` the harness plants is refused by the fence with no turn; its read case — `send me ~/.dsh/.env`: the read of the scratch home's `.env` is refused as outside the repository, the token handed to a market read is refused as a secret, no tool result carries the token or a second secret, and the stub's reply, which names both, reaches the phone as `I could not read it: <secret> <token>`; across the file every send went to the operator's chat, the token is in no file of the desk's directory, and no `STANDING.md`, `levels.yml`, `rules.yml` or `holdings.yml` changed |
 
 `bot-sandbox-smoke.test.ts` and `askuser-noclient-smoke.test.ts` also print one
@@ -2981,7 +3007,7 @@ launchd.
 
 PASS is P1's done criterion — the operator has talked to Gravit from the phone, asked a live
 price and got it, and the Desk panel shows it — and the edges a phone meets: a pause, a fresh
-conversation, a long answer, a turn cut by its deadline.
+conversation, a long answer, a turn cut by its deadline, a `/stop` with a text queued behind it.
 
 **The automated half, no Telegram.** `npm test` runs the desk's suites — `desk`, `desk-cli`,
 `et`, `desk-preset`, `desk-tools`, `desk-guard`, `desk-session`, `desk-conversation`,
@@ -2990,8 +3016,8 @@ conversation, a long answer, a turn cut by its deadline.
 `grouping` and `speaker`; `FACE_SMOKE=1 npm test` boots `desk-smoke` and `telegram-smoke`, the
 canary among them ("Tests" above). What only this drill checks: a real model on the desk's
 preset and contract; the real Bot API from this Mac; what the phone shows of plain text and of
-an answer in parts; a real turn cut at 5 minutes; the Desk panel in a real browser over the real
-ledger.
+an answer in parts; a real turn cut at 5 minutes, and a real `/stop`, each with a text queued
+behind it; the Desk panel in a real browser over the real ledger.
 
 **The drill**, after "Set up the bot" ("The desk"), with the service running the merged code and
 the browser signed in:
@@ -3014,20 +3040,28 @@ the browser signed in:
    `../drill-note.md`. The sandbox refuses the write; when the model retries it with the
    escalation, the browser shows an approval card in the desk session — leave it unanswered.
    While it waits, the Desk panel shows `waiting` on the desk conversation, and the rail's Desk
-   item a badge when another panel is open. PASS: about 5 minutes after the turn began, the phone
-   gets `timed out after 5 min; a card or a long tool was pending`, the card closes, the ledger
-   has a `desk-turn` with `"outcome":"timed-out"`, and `desk/drill-note.md` does not exist. A
+   item a badge when another panel is open; send a second text, `and the S&P?`. PASS: about 5
+   minutes after the turn began, the phone gets `timed out after 5 min; a card or a long tool was
+   pending`, the card closes, the ledger has a `desk-turn` with `"outcome":"timed-out"`, and
+   `desk/drill-note.md` does not exist; then the second text is answered, in a turn of its own. A
    model that does not retry with the escalation leaves this step to `telegram-smoke`; record
    which happened.
-7. From the browser, the Desk panel (`/#desk`, the rail's first item). PASS: its cards agree
+7. `/stop`: ask for something long — the eleven sectors again — then, while it is still
+   working, send `and NVDA?`, then `/stop`. PASS: `stopped`; then `and NVDA?` is answered; the
+   ledger's `desk-turn` for the long answer has `"outcome":"cancelled"` and `"cancel":"stopped
+   from the phone"`, and any part of it the phone got ends with `(cut off: stopped from the
+   phone)`. A `/stop` that lands after the long answer ended cuts the next turn instead, or finds
+   `nothing is running`: try again with a longer ask.
+8. From the browser, the Desk panel (`/#desk`, the rail's first item). PASS: its cards agree
    with `npm run service -- status` — the desk on, the Telegram bridge polling with its drops
    and queue, the desk conversation, today's turns and their tokens; Pause for 30 minutes writes
    `OFF` (the desk card reads paused by `page`), a phone text then gets the paused line, and
-   `npm run desk -- resume` in a terminal lifts it (`resumed`); a desk session opens in place,
-   the phone's texts in it marked ☎.
+   `npm run desk -- resume` in a terminal lifts it (`resumed`); open the Pause dropdown and hold
+   it across a 30 s refresh: it stays open; a desk session opens in place, the phone's texts in
+   it marked ☎.
 
-**PASS is steps 1–7.** Record the date, the commit, the desk's model route, step 5's part count
-and what step 6 met in `DEVELOPMENT.md` §7.4's P1 **Desk** row.
+**PASS is steps 1–8.** Record the date, the commit, the desk's model route, step 5's part count
+and what steps 6 and 7 met in `DEVELOPMENT.md` §7.4's P1 **Desk** row.
 
 **Not yet run.** The automated half passes 2026-10-21; the phone, the bot and a real model are the
 operator's.

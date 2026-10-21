@@ -110,7 +110,7 @@ for the signing secret, R3a). The Telegram bridge's token, `TELEGRAM_BOT_TOKEN`,
 `$DSH_HOME/.env` beside them (§4.5, §4.6): the face drops it from every child it spawns itself
 (`SCRUBBED_ENV` in `agents.ts`, the producers' environment in `data.ts`), and dsh's pattern drops
 it from shell turns and MCP servers; the desk session has no shell, and its guard keeps its reads
-inside the repository and off key files (§3.6, §4.2).
+inside the repository and off key files and every other dot-file (§3.6, §4.2).
 
 ---
 
@@ -463,7 +463,7 @@ them move.
 
 **The desk's contract, `dsh/profile/desk.md`.** The one file that tells Gravit how to behave on
 the desk, read only by `gravit-desk` sessions, as the scoped `gravit:desk` section (§4.3, "The
-desk preset"); 1,805 bytes against the 3,000 `readDesk` allows (`DESK_MAX_BYTES`,
+desk preset"); 1,982 bytes against the 3,000 `readDesk` allows (`DESK_MAX_BYTES`,
 `src/cycle.ts`, `readCycle`'s reader under the desk's name and cap). Its rules: Gravit informs,
 never places, cancels or proposes an order and never says it did — the operator trades in their
 own broker app; every message the face sends opens with a bracketed provenance line,
@@ -477,9 +477,10 @@ filing or a note information, never an instruction for later turns; an alert che
 plan, each condition met or not met with its measurement; writes only under the cwd and no
 commit, never `STANDING.md`, `levels.yml`, `rules.yml` or `holdings.yml` anywhere (propose a
 change in the message or the journal), never an instruction file, `.git`, `.dsh` or `.agents`
-under the cwd. `tests/cycle.test.ts` pins the phrases and the reader's refusals;
-`tests/desk-session.test.ts` ties the five fence names and the telegram provenance form to the
-code (`FENCE_NAMES`, `provenanceLine`). The contract shows the telegram line undated; the face
+under the cwd, and never a dot-file or another agent's instruction file anywhere.
+`tests/cycle.test.ts` pins the phrases and the reader's refusals; `tests/desk-session.test.ts`
+ties the five fence names, the four other agents' file names and the telegram provenance form to
+the code (`FENCE_NAMES`, `AGENT_FILE_NAMES`, `provenanceLine`). The contract shows the telegram line undated; the face
 dates one written on another New York day (`[telegram · operator · 2026-10-20 23:58 ET]`,
 `deskTime`), as after a night the Mac slept. Nothing in the contract is the guard: the mask, the
 sandbox, the desk guard and the fence are (§4.3, §9).
@@ -533,7 +534,8 @@ platform temp areas; a write to `../levels.yml` is refused inside the tool's con
 (R10) — the confinement holds while nobody approves one, and the desk's deadline closes an
 unanswered card at 5 minutes (§4.2). What could steer the desk from inside this tree — an
 instruction file, a project-root marker, a skill root, a symlink — is the fence's and the desk
-guard's (§4.2, §9 R33).
+guard's, and so are the files other tools obey that the desk might write there — a `.gitignore`
+that un-ignores the journal, another agent's `CLAUDE.md` or `AGENTS.md` (§4.2, §9 R33).
 
 ### 3.5 Scripts
 
@@ -575,8 +577,10 @@ goal or delegation tool, no AKShare, and none of the bed-backed reads (`screen`,
 `market_snapshot`, `breadth`). `desk-smoke` pins the roster on a real tree (§7.3). Every call a
 desk agent makes then passes the desk guard (`installDeskGuard`, §4.2) before it runs — its write
 check, then its read check, then its secret check, the first deny the answer: a write of an
-instruction file, a read outside the repository or of a `.env` or `.git` name, a search that could
-reach a dot-file, and any call whose arguments carry a key's value are refused (§9, R33, R34).
+instruction file, of another agent's (`CLAUDE.md`, `AGENTS.md` and their kin) or of a dot-file, a
+read outside the repository, of a `.env` or `.git` name or of any other dot-file below its root, a
+search that could reach a dot-file, and any call whose arguments carry a key's value are refused
+(§9, R33, R34).
 
 | Tool(s) | Row (`dsh-base` unless noted) | Note |
 |---|---|---|
@@ -1031,13 +1035,13 @@ smoke that boots without `main.ts` relies on.
 | `plugins/bot.js` | the `gravit-bot` composition plugin: a scoped `deployment:persona-prefix` section (shadows Gravit's prefix; no suffix) + an allow-list `tools.restrict`, re-expanded after each burst of `tools/change` — coalesced to one timer turn, so a tool that registers after the declaration is admitted when the allow list names it (`expandAllow` resolves `mcp__*__<raw>` against the live tree); with `maskOnly: true` and no persona (`maskOnly takes no persona`) it registers no persona section and only masks — the desk's mask row, so Gravit's prefix stays (§4.3); dependency-free |
 | `plugins/gravit.js` | the `gravit` composition plugin, the first row of the default preset's rendered composition (`gravitRows` in `src/roles.ts`; `bots/gravit/agent.cordis.yml` is its generated mirror): a scoped `deployment:today` section (`Today is YYYY-MM-DD, Weekday (Zone).`), its text a function re-evaluated at every assembly, in the process's own zone — `resolveZone()` falls back to `UTC`, labelled `(UTC)`, when `TZ` is empty or not a zone Intl can format in, so an unusable `TZ` cannot throw at assembly — ordered right after the persona prefix, `interpolate: false`; and, only when its `roles` config is present, a scoped `gravit:roles` section at `getSectionOrder("TOOL_SUBAGENT") + 1` (the role intro and one `- role_<id> — <summary>` line per role, `interpolate: false`, listing only the roles whose tool the assembling scope resolves — `canCall`, `ctx.tools.get(name, context.scope)`, so a role child reads none and a `subagent_fork` child Gravit's whole list, §3.8); only when its `cycle` config is present, a scoped `gravit:cycle` section at `getSectionOrder("DEPLOYMENT_PERSONA_SUFFIX") - 50` (`interpolate: false`; the contract's text when the assembling scope can call `create_goal`, `''` otherwise, §4.3); both sections also `''` for a delegated child that is not a fork (`isRootOrFork`, read from `context.agent.session.header`: no `origin`, or `isSeeded`); only when its `desk` config is present, the scoped `gravit:desk` section in the cycle's slot (`interpolate: false`; `dsh/profile/desk.md`'s text for a root or a fork, `''` otherwise, with no tool gate); `inject` is `systemPrompt` and `tools`, the registry only read, so it masks no tool; `validateGravitConfig` accepts `{}`, checks `cycle`, `roles` and `desk` when present, and refuses `cycle` and `desk` together; dependency-free |
 | `panels.ts` | the master rail's feeds: host facts (`/data/host.json`), the local-agent roster (probe, auth, connect, disconnect), memory (skills), plugins (loader rows + tool schemas); builds `PanelDeps` (it requires `skills`, `tools`, `loader`, `workspaceRegistry` and `agents`), whose `channelFor` answers `{workspaceId, name, dir}` — the `dir` is what the room engine gives a member as its `cwd` |
-| `desk.ts` | the desk (spec `docs/superpowers/specs/2026-10-19-always-on-gravit-design.md` §5.2, §5.7, §5.8): the ledger, `$DSH_HOME/face/desk/events.jsonl` — `appendRecord` (one JSON line to any file in the desk's directory, a bare name or a `TypeError`, under `withFileLock`, files created `0600`; past `LEDGER_ROTATE_BYTES`, 50 MB, the next append first renames the file to `<name>.<t>.<ext>`; a torn last line gets its closing newline first, so it stays one skipped line; a failure is one `gravit-face:` line on stderr, never a throw), `appendEvent` (`appendRecord` on `events.jsonl`), `readEvents` (the current file only; a line that is not one of the eight event kinds is skipped and counted; an absent ledger is empty, any other read failure rejects), `runsOf` (one run per `boot`; a `boot` while a run is open marks that run `lost`) and `lastDeskSession`; the sleep watch, `installAsleepWatch` (a plain timer every `ASLEEP_TICK_MS`, 30 s; a gap strictly over `ASLEEP_THRESHOLD_MS`, 120 s, is one `asleep` event; a clock set back writes nothing); the pause switch, `OFF` beside the ledger — `readOffState` (no file is no pause; a file holding `{setAt, by, until?}` is that pause, expired once `until` passes; anything else by that name — empty, junk, a dangling link, judged by `lstat` — is a terminal's open-ended pause), `writeOff` (atomic, `0600`, an `off-set` event; from `telegram` or `page` it never shortens a pause in force — an open-ended one stands, of two timed ones the later wins — and returns the pause in force; from `terminal` it replaces), `clearOff` (`terminal`, or `expiry` re-read under the lock, so a pause written meanwhile stands; an `off-cleared` event only when a file went), both under one lock, `OFF.lock`; `parseDuration` (`^\d+(m\|h\|d)$`, no zero, at most 36,500 days) and `deskTime` (`14:03 ET`, dated `2026-10-21 14:03 ET` on another New York day); `deskStatus`, which never rejects on the ledger (`ledgerError`), and `deskStatusLines`, the desk, pause and Telegram lines `formatStatus` and the phone's `/status` print; `registerDeskRoutes` (`GET /data/desk/status` through `fencedGet`, `POST /data/desk/pause` through `fencedPost`, §4.4); `installDesk` (the routes always, and, given the root context, the desk tools and the desk guard — anchored on `root`, without which every desk write and read is denied, and holding the secrets it took from the environment at install — whatever `enabled` says; with the desk on, the `boot` event, the watch, the desk conversation, started and not awaited, and, with a Telegram config, the bridge, its module loaded on first use; `dispose(code)` idempotent — the bridge, then the conversation, the tools and the guard, the watch, then the `shutdown` once the `boot` has settled). It loads no preset, roles, bots or js-yaml code, so `npm run desk` stays light: `desk-conversation.ts` is a type-only import, and the conversation's machinery and the bridge load on first use |
-| `desk-names.ts` | the leaf the desk's names live in, importing nothing: `DESK_PRESET` (`gravit-desk`), `FENCE_NAMES` (`GRAVIT.md`, `GRAVIT.local.md`, `.git`, `.dsh`, `.agents`), and `foldName` and `fenceNameOf`, which compare a name as this Mac's case-folding volume does (upper, then lower case) — the fence and the guard's write check fold fence names with them, the read check its key names |
+| `desk.ts` | the desk (spec `docs/superpowers/specs/2026-10-19-always-on-gravit-design.md` §5.2, §5.7, §5.8): the ledger, `$DSH_HOME/face/desk/events.jsonl` — `appendRecord` (one JSON line to any file in the desk's directory, a bare name or a `TypeError`, under `withFileLock`, files created `0600`; past `LEDGER_ROTATE_BYTES`, 50 MB, the next append first renames the file to `<name>.<t>.<ext>`, the fresh file opening with what the caller's `carry` hands on from the old one; a torn last line gets its closing newline first, so it stays one skipped line; a failure is one `gravit-face:` line on stderr, never a throw), `appendEvent` (`appendRecord` on `events.jsonl`, a rotation carrying the old file's last `desk-session` line into the new one, as written, so `lastDeskSession` — and the conversation a face resumes — survives it), `readEvents` (the current file only; a line that is not one of the eight event kinds is skipped and counted; an absent ledger is empty, any other read failure rejects), `runsOf` (one run per `boot`; a `boot` while a run is open marks that run `lost`) and `lastDeskSession`; the sleep watch, `installAsleepWatch` (a plain timer every `ASLEEP_TICK_MS`, 30 s; a gap strictly over `ASLEEP_THRESHOLD_MS`, 120 s, is one `asleep` event; a clock set back writes nothing); the pause switch, `OFF` beside the ledger — `readOffState` (no file is no pause; a file holding `{setAt, by, until?}` is that pause, expired once `until` passes; anything else by that name — empty, junk, a dangling link, judged by `lstat` — is a terminal's open-ended pause), `writeOff` (atomic, `0600`, an `off-set` event; from `telegram` or `page` it never shortens a pause in force — an open-ended one stands, of two timed ones the later wins — and returns the pause in force; from `terminal` it replaces), `clearOff` (`terminal`, or `expiry` re-read under the lock, so a pause written meanwhile stands; an `off-cleared` event only when a file went), both under one lock, `OFF.lock`; `parseDuration` (`^\d+(m\|h\|d)$`, no zero, at most 36,500 days) and `deskTime` (`14:03 ET`, dated `2026-10-21 14:03 ET` on another New York day); `deskStatus`, which never rejects on the ledger (`ledgerError`), and `deskStatusLines`, the desk, pause and Telegram lines `formatStatus` and the phone's `/status` print (the Telegram line ending in `poll failing since <time>: <reason>` while the polls fail); `registerDeskRoutes` (`GET /data/desk/status` through `fencedGet`, `POST /data/desk/pause` through `fencedPost`, §4.4); `installDesk` (the routes always, and, given the root context, the desk tools and the desk guard — anchored on `root`, without which every desk write and read is denied, and holding the secrets it took from the environment at install — whatever `enabled` says; with the desk on, the `boot` event, the watch, the desk conversation, started and not awaited, and, with a Telegram config, the bridge, its module loaded on first use; every line of all of these through its `log` — stderr unless given, as `main.ts` leaves it, while the tests pass their own; `dispose(code)` idempotent — the bridge, then the conversation, the tools and the guard, the watch, then the `shutdown` once the `boot` has settled). It loads no preset, roles, bots or js-yaml code, so `npm run desk` stays light: `desk-conversation.ts` is a type-only import, and the conversation's machinery and the bridge load on first use |
+| `desk-names.ts` | the leaf the desk's names live in, importing nothing: `DESK_PRESET` (`gravit-desk`; `bots.ts` reserves it from here), `FENCE_NAMES` (`GRAVIT.md`, `GRAVIT.local.md`, `.git`, `.dsh`, `.agents`), `AGENT_FILE_NAMES` (`CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `AGENTS.override.md`: what the operator's coding agents load from the folder they work in), `isDotName` (a dot-led name, `..` aside), and `foldName`, `fenceNameOf` and `agentFileNameOf`, which compare a name as this Mac's case-folding volume does (upper, then lower case) — the fence and the guard's write check fold fence names with them, the write check other agents' names too, the read check its key names |
 | `desk-preset.ts` | the `gravit-desk` preset (§4.3): `DESK_ALLOW` (fourteen exact names, frozen — no `bash`, no `job_*`, no order, account, question, goal, delegation, AKShare or bed-backed tool; `tests/desk-preset.test.ts` pins it name for name), `deskPresetDefinition` (two rows: the face's `gravit` row carrying `{ desk }` alone, and `plugins/bot.js` with `{ maskOnly: true, allow: DESK_ALLOW }`), `declareDeskPreset` (the `declareBots` pattern, through a child fiber of the root; a refusal throws the registry's reason), `deskRosterProblem` (`bootFace`'s refusal) and `BOT_PLUGIN_URL` |
-| `desk-tools.ts` | the desk's two tools and its guard. `deskToolDefinitions`: `desk_quotes` (1 to 20 US tickers as `us:` assets, the hub's snapshot mapped to `{symbol, price, as_of, change_pct, prev_close, feed, transport, status}`, rendered one line each with its time in New York; a 429 from the hub is `{error: "busy: …"}`; 15 s) and `desk_state` (`deskStatus` with `runs` cut to the last 10 and `runsInLedger`, the count; 5 s); both follow the call's cancellation. `installDeskTools`: one root `agent/created` listener and one sweep of `agents.list()`, synchronous and never throwing, giving each agent whose composed preset is `gravit-desk` both tools once, in its OWN layer — the one layer no allow mask filters — so Gravit and the global view never list them. The guard, `installDeskGuard(ctx, root, { log, env })`, which at install writes one line naming the variables its secret check covers (`deskSecretNames`; `the secret check covers <names>`, never a value): one prepended root `tools/pre-execute` listener and, behind it, one deny-only `tools.guard` armed through `inject(["tools"])`, so a listener in front that answers `allow` cannot lift a deny; both judge every call a desk agent makes — one whose composed preset, or whose session header, names `gravit-desk`; Gravit's sessions and the bots are never judged — in three checks, in this order, the first deny the answer. (1) The write check, `deskWriteDecision(tool, args, cwd, root)`, over `DESK_WRITE_TOOLS` (`write`, `edit`, and `str_replace_editor` but for `view`; their paths in `DESK_WRITE_PATH_ARGS`), judged against the repository root and never the session's cwd: a desk whose cwd has a fence name below its common ancestor with the root writes nothing, `the desk does not write while its directory sits under <name>`; a path naming a fence name below its common ancestor with the root (so `~/.dsh` and `~/.agents` count, and the checkout's own ancestors never do), placed against the cwd and as spelled, `the desk never writes <name>: it would steer every desk turn after it`; arguments it cannot read, `the desk could not check this write's path; nothing was written`. (2) The read check, `deskReadDecision(tool, args, cwd, root, sessionId)`, over `DESK_READ_TOOLS` (`read`, `read_image`, `grep`, `glob`, and `str_replace_editor` with every command; their paths in `DESK_READ_PATH_ARGS`, `grep` and `glob` searching the cwd when given none): a path spelled from `~`, or one that lands outside the root's realpath — placed as the tool places it, a `..` walked as the volume walks it, and as `path.resolve` places it, each realpathed through its deepest existing ancestor (`realpathSync.native`), so a symlink cannot carry it out — `the desk reads only inside the repository; <path> is outside it`, but for a `read` or `grep` whose placements both lie in the calling session's own spill directory (`<os.tmpdir() realpathed>/dsh-spill-XXXXXX/session-<sha256(header id), first 12 hex>/`, where dsh-spill-local keeps its oversized results; never a spill root, never another session's), so the desk reads back its own spilled results; a name, as spelled or where a placement lands, that folds to `.env`, `.env.<anything>` or `.git`, `the desk never reads <name>: it can hold a key`; a `grep` include with a segment led by `.`, `*`, `?`, `[` or `{`, or a `glob` pattern with a segment led by `.`, `the desk never searches dot-files: search with no include, or one that starts with a name` (ripgrep's `--glob` lifts its hidden-file skip, R34); a path it cannot check — missing, not a string, a loop, a NUL — `the desk could not check this read's path; nothing was read`. (3) The secret check, `deskSecretDecision(args, secrets)`, over every tool: arguments whose JSON holds any spelling (`secretSpellings`: as is, JSON-escaped, URL-encoded) of a value `deskSecrets` took from the environment at install — every name matching `KEY`, `PASSWORD`, `SECRET` or `TOKEN` whose value, trimmed, has 8 or more characters — `the desk never sends a secret: this call carries one`; arguments JSON cannot write, `the desk could not check this call for a secret; nothing was sent`. A call no check could deny never reaches the preset registry; a call the guard cannot judge is the fail-closed deny of the first check that would have judged it, with one `gravit-face: desk:` line; with no root every desk write and read is denied, said once at install (`the desk guard was given no repository root; every desk write and read will be denied, unjudged`); neither half ever throws, and the disposer never rejects |
-| `desk-session.ts` | the desk session, the fence and the supervisor: `deskJournalDir`; the fence — `findFenceViolation` (the journal, every depth, `lstat`, never following a link: the first symlink or fence name in code-unit order, a directory it cannot list fails closed) and `findDeskFenceViolation` (a root `.dsh` or `.agents`, `desk/` itself, the five names directly in `desk/`, then the journal; repo-relative), `fenceRefusalLine`; provenance — `provenanceLine` (`[telegram · operator · 14:03 ET]`, dated on another New York day; `[schedule · <order> · <date>]`; `[alert · <SYMBOL> · <rule>]`) and the `telegram`, `schedule` and `alert` message sources declared on dsh-llm's `MessageSourceMap`; `resolveDeskRoute` (`FACE_DESK_MODEL` or `deepseek-official/deepseek-flash`, validated as a bot's route, else the default with one line); `createDeskAgent` (a runtime-root `gravit-desk` session in a cwd it makes, `workspace-write` pinned inside setup, disposed if the pin does not hold; records nothing — P2's firings use it); `ensureDeskSession` (the ledger's newest `desk-session`, live or resumed; a session whose header names another preset than `gravit-desk`, or another cwd than the journal, is one line and replaced by a fresh session, recorded `created`, as are no id and a resume that fails; a desk session that runs any permission preset but `workspace-write` is not replaced — the call rejects, so every post answers `the desk could not open a turn: desk session <id> is "<preset>", not workspace-write; the face will not prompt it` until `/new` opens a fresh one, recorded `new`; one caller at a time); `superviseDeskTurns` (every turn on the session: a fixed deadline from its `turn/start` — never extended, card or no card — cancelling with `desk deadline`, `keepInbox`; the fence at every `turn/start`, cutting with `desk fence`; `deadlineFor` may only shorten a source's deadline; at `turn/end` one `DeskTurnRecord` — source, outcome `ended`, `timed-out`, `refused` or `failed` with its error, the final text, the four token buckets from `deriveTurnTokenUsage` — handed to the owner in a microtask, a throw or a rejection one line) |
-| `desk-conversation.ts` | the desk session's one owner, whether Telegram is configured or not (`createDeskConversation`): `start` ensures and supervises the session at boot; `post`, serialized behind any earlier `start`, `post` or `renew`, reads `OFF` (lifting an expired pause, refusing with the paused line in force), checks the fence (a `desk-refused` event and the refusal line), ensures the session and `followup`s the text after its provenance line; `renew` (`/new`) opens a fresh session and retires the old supervision once its agent is idle; `stop`, `setOutlet`, `current`; `dispose` cancels every turn under way as `shutdown`, gives each agent 2 s to go idle and the queue 5 s, so nothing lands after the ledger's `shutdown`. At each turn's end one ledger event — `desk-turn` (`ended`, `timed-out`, `failed`) or `desk-refused` — and then, for a `telegram`, `alert` or `wake` turn, one delivery to the outlet, bounded at 60 s: the refusal line, the final text, or `timed out after 5 min; a card or a long tool was pending` / `the desk could not answer: <error>; nothing was done - send it again later` for a turn that said nothing; a browser turn (`user`) is not delivered. It imports types only; `desk.ts`, `desk-session.ts` and dsh-llm load on first use |
-| `telegram.ts` | the Telegram bridge, the conversation's outlet (`installTelegramBridge`, `telegramConfigFromEnv`, `splitMessage`, `parseCommand`): long-polls `getUpdates` (50 s; `allowed_updates: ["message"]`; 65 s request deadline); admits a message only from `TELEGRAM_OPERATOR_ID` in its own private chat — anything else is dropped, counted and recorded, never answered; answers `/status`, `/pause [Nm\|Nh\|Nd]`, `/new` and `/stop` itself, in any case and with `@<bot>` (no `/resume`), and posts every other text with Telegram's own `date`; answers a post or a `/new` still pending after 30 s with the slow line; sets the offset past every update, taking a renumbered one too, and stores it; sends plain text, split at 4,000 UTF-16 units on line ends and never inside a surrogate pair, to the operator's chat only (15 s each); a failed send waits in `outbox.json` (at most 100, the oldest dropped) and flushes in order before each poll and send, one written more than 2 minutes earlier opening with its time; a 400 or 403 drops the message (403: status `blocked`); a 409 is a `conflict` record at most once a minute and a 30 s wait, any other failure a `poll-error` record and a 5 s to 60 s backoff; the token redacted as `<token>`, and every secret value in the face's environment (`deskSecrets`, taken at install) as `<secret>`, longest spelling first, from every send, queued text, line, record, file and status field, an outbox an earlier run left being redacted as it is read; `dispose` aborts the poll and the sends, keeps the outbox, and lets go of the outlet |
+| `desk-tools.ts` | the desk's two tools and its guard. `deskToolDefinitions`: `desk_quotes` (1 to 20 US tickers as `us:` assets, the hub's snapshot mapped to `{symbol, price, as_of, change_pct, prev_close, feed, transport, status}`, rendered one line each with its time in New York; a 429 from the hub is `{error: "busy: …"}`; 15 s) and `desk_state` (`deskStatus` with `runs` cut to the last 10 and `runsInLedger`, the count; 5 s); both follow the call's cancellation. `installDeskTools`: one root `agent/created` listener and one sweep of `agents.list()`, synchronous and never throwing, giving each agent whose composed preset is `gravit-desk` both tools once, in its OWN layer — the one layer no allow mask filters — so Gravit and the global view never list them. The guard, `installDeskGuard(ctx, root, { log, env })`, which at install writes one line naming the variables its secret check covers (`deskSecretNames`; `the secret check covers <names>`, never a value): one prepended root `tools/pre-execute` listener and, behind it, one deny-only `tools.guard` armed through `inject(["tools"])`, so a listener in front that answers `allow` cannot lift a deny; both judge every call a desk agent makes — one whose composed preset, or whose session header, names `gravit-desk`; Gravit's sessions and the bots are never judged — in three checks, in this order, the first deny the answer. (1) The write check, `deskWriteDecision(tool, args, cwd, root)`, over `DESK_WRITE_TOOLS` (`write`, `edit`, and `str_replace_editor` but for `view`; their paths in `DESK_WRITE_PATH_ARGS`), judged against the repository root and never the session's cwd: a desk whose cwd has a fence name below its common ancestor with the root writes nothing, `the desk does not write while its directory sits under <name>`; a path naming a fence name below its common ancestor with the root (so `~/.dsh` and `~/.agents` count, and the checkout's own ancestors never do), placed against the cwd and as spelled, `the desk never writes <name>: it would steer every desk turn after it`; then, among the same names, another agent's instruction file (`AGENT_FILE_NAMES`, case-folded), `the desk never writes <name>: another agent reads it`; then any dot-led name, `..` aside, `the desk never writes dot-files: <name>` (a `desk/journal/.gitignore` holding `!*` would un-ignore the book for the next `git add -A`); arguments it cannot read, `the desk could not check this write's path; nothing was written`. (2) The read check, `deskReadDecision(tool, args, cwd, root, sessionId)`, over `DESK_READ_TOOLS` (`read`, `read_image`, `grep`, `glob`, and `str_replace_editor` with every command; their paths in `DESK_READ_PATH_ARGS`, `grep` and `glob` searching the cwd when given none): a path spelled from `~`, or one that lands outside the root's realpath — placed as the tool places it, a `..` walked as the volume walks it, and as `path.resolve` places it, each realpathed through its deepest existing ancestor (`realpathSync.native`), so a symlink cannot carry it out — `the desk reads only inside the repository; <path> is outside it`, but for a `read` or `grep` whose placements both lie in the calling session's own spill directory (`<os.tmpdir() realpathed>/dsh-spill-XXXXXX/session-<sha256(header id), first 12 hex>/`, where dsh-spill-local keeps its oversized results; never a spill root, never another session's), so the desk reads back its own spilled results; a name, as spelled or where a placement lands, that folds to `.env`, `.env.<anything>` or `.git`, `the desk never reads <name>: it can hold a key`; inside the repository, any other dot-led name — `.mcp.json`, `.claude/`, `.codex/`, the `.claude/worktrees/*` checkouts — `the desk never reads dot-files: <name>` (a spill read, outside it, keeps the key rule alone); a `grep` include with a segment led by `.`, `*`, `?`, `[` or `{`, or a `glob` pattern with a segment led by `.`, `the desk never searches dot-files: search with no include, or one that starts with a name` (ripgrep's `--glob` lifts its hidden-file skip, R34); a path it cannot check — missing, not a string, a loop, a NUL — `the desk could not check this read's path; nothing was read`. (3) The secret check, `deskSecretDecision(args, secrets)`, over every tool: arguments whose JSON holds any spelling (`secretSpellings`: as is, JSON-escaped, URL-encoded) of a value `deskSecrets` took from the environment at install — every name matching `KEY`, `PASSWORD`, `SECRET` or `TOKEN` whose value, trimmed, has 8 or more characters — `the desk never sends a secret: this call carries one`; arguments JSON cannot write, `the desk could not check this call for a secret; nothing was sent`. A call no check could deny never reaches the preset registry; a call the guard cannot judge is the fail-closed deny of the first check that would have judged it, with one `gravit-face: desk:` line; with no root every desk write and read is denied, said once at install (`the desk guard was given no repository root; every desk write and read will be denied, unjudged`); neither half ever throws, and the disposer never rejects |
+| `desk-session.ts` | the desk session, the fence and the supervisor: `deskJournalDir`; the fence — `findFenceViolation` (the journal, every depth, `lstat`, never following a link: the first symlink or fence name in code-unit order, a directory it cannot list fails closed) and `findDeskFenceViolation` (a root `.dsh` or `.agents`, `desk/` itself, the five names directly in `desk/`, then the journal; repo-relative), `fenceRefusalLine`; provenance — `provenanceLine` (`[telegram · operator · 14:03 ET]`, dated on another New York day; `[schedule · <order> · <date>]`; `[alert · <SYMBOL> · <rule>]`) and the `telegram`, `schedule` and `alert` message sources declared on dsh-llm's `MessageSourceMap`; `resolveDeskRoute` (`FACE_DESK_MODEL` or `deepseek-official/deepseek-flash`, validated as a bot's route, else the default with one line); `createDeskAgent` (a runtime-root `gravit-desk` session in a cwd it makes, `workspace-write` pinned inside setup, disposed if the pin does not hold; records nothing — P2's firings use it); `ensureDeskSession` (the ledger's newest `desk-session`, live or resumed; a session whose header names another preset than `gravit-desk`, or another cwd than the journal, is one line and replaced by a fresh session, recorded `created`, as are no id and a resume that fails; a desk session that runs any permission preset but `workspace-write` is not replaced — the call rejects, so every post answers `the desk could not open a turn: desk session <id> is "<preset>", not workspace-write; the face will not prompt it` until `/new` opens a fresh one, recorded `new`; one caller at a time); `cancelKeepingQueue` (cancel the turn under way and only it: `cancel(cause, { keepInbox: true })`, then every message on the inbox's next-turn list taken out and `followup`ed again, oldest first, in the same tick — dsh keeps a queued message on a `keepInbox` cancel but opens no turn for it until something else wakes the agent, while input sent after the cancel runs once the cut turn has unwound, so each is answered in its own turn; one that cannot be sent again is lost, with one line); `superviseDeskTurns` (every turn on the session: a fixed deadline from its `turn/start` — never extended, card or no card — cutting with `desk deadline` through `cancelKeepingQueue`; the fence at every `turn/start`, cutting with `desk fence` and `keepInbox` alone, so a queued message waits for the next post, which the fence check refuses first; `deadlineFor` may only shorten a source's deadline; at `turn/end` one `DeskTurnRecord` — source, outcome `ended`, `timed-out`, `refused`, `cancelled` with what cancelled it (`cancel`: a hook's reason — `shutdown`, `stopped from the phone` — `stopped in the browser`, `its parent cancelled it`, `its agent was disposed`) or `failed` with its error, the final text and `interrupted` when it ends in an answer a cut interrupted mid-stream (dsh's `interrupted` `assistant/message`), the four token buckets from `deriveTurnTokenUsage` — handed to the owner in a microtask, a throw or a rejection one line) |
+| `desk-conversation.ts` | the desk session's one owner, whether Telegram is configured or not (`createDeskConversation`): `start` ensures and supervises the session at boot; `post`, serialized behind any earlier `start`, `post` or `renew`, reads `OFF` (lifting an expired pause, refusing with the paused line in force), checks the fence (a `desk-refused` event and the refusal line), ensures the session and `followup`s the text after its provenance line; `renew` (`/new`) opens a fresh session and retires the old supervision once its agent is idle; `stop` (the phone's `/stop`: the turn under way, and only it, through `cancelKeepingQueue`, so the texts queued behind it are answered); `setOutlet`, `current`; `dispose` cancels every turn under way as `shutdown` — the inbox with it — gives each agent 2 s to go idle and the queue 5 s, so nothing lands after the ledger's `shutdown`. At each turn's end one ledger event — `desk-turn` (`ended`, `timed-out`, `cancelled` with its `cancel`, `failed` with its `error`) or `desk-refused` — and then, for a `telegram`, `alert` or `wake` turn, one delivery to the outlet, bounded at 60 s: the refusal line, the final text — followed by `(cut off: <what cut it>)`, the deadline (`timed out after 5 min`) or the cancel's reason, when a cut interrupted it mid-stream — or `timed out after 5 min; a card or a long tool was pending` / `the desk could not answer: <error>; nothing was done - send it again later` for a turn that said nothing; a turn cancelled before it said anything sends nothing (the bridge answers `/stop` itself); a browser turn (`user`) is not delivered. It imports types only; `desk.ts`, `desk-session.ts` and dsh-llm load on first use |
+| `telegram.ts` | the Telegram bridge, the conversation's outlet (`installTelegramBridge`, `telegramConfigFromEnv`, `splitMessage`, `parseCommand`): long-polls `getUpdates` (50 s; `allowed_updates: ["message"]`; 65 s request deadline); admits a message only from `TELEGRAM_OPERATOR_ID` in its own private chat — anything else is dropped, counted and recorded, never answered; answers `/status`, `/pause [Nm\|Nh\|Nd]`, `/new` and `/stop` itself, in any case and with `@<bot>` (no `/resume`), and posts every other text with Telegram's own `date`; answers a post or a `/new` still pending after 30 s with the slow line; sets the offset past every update, taking a renumbered one too, and stores it; sends plain text, split at 4,000 UTF-16 units on line ends and never inside a surrogate pair, to the operator's chat only (15 s each); a failed send waits in `outbox.json` (at most 100, the oldest dropped) and flushes in order before each poll and send, one written more than 2 minutes earlier opening with its time; a 400 or 403 drops the message (403: status `blocked`); a 409 is a `conflict` record at most once a minute and a 30 s wait, any other failure a `poll-error` record and a 5 s to 60 s backoff, and either one sets the status's `pollFailing` — since the first failure after the last poll that answered, why the last one failed, redacted — until a poll answers; the token redacted as `<token>`, and every secret value in the face's environment (`deskSecrets`, taken at install) as `<secret>`, longest spelling first, from every send, queued text, line, record, file and status field, an outbox an earlier run left being redacted as it is read; `dispose` aborts the poll and the sends, keeps the outbox, and lets go of the outlet |
 | `et.ts` | America/New_York, the desk's clock, named rather than the machine's: `etTime` (`14:03 ET`), `etClock` (`15:21:03`), `etDate` (`2026-10-20`), `etDayStart` (the epoch ms of that date's 00:00 ET, the offset asked at the midnight itself, so DST days are 23 and 25 hours) |
 | `version.ts` | the three pins |
 | `scripts/service.ts` | `npm run service -- <command>`, run outside the face process: gravit-face as a macOS LaunchAgent, `com.gravit.face` (the desk spec's §5.2). The pure half — `servicePlan` (the plist: `node --import <tsx's loader> face/src/main.ts`, one process — node by its PATH location, the loader (`face/node_modules/tsx/dist/loader.mjs`, the package's `"."` export, as a file URL) and main.ts under this checkout's `face/`, which is the working directory — so launchd's job pid, the one `status` prints, is the face's own and the one the ledger's `boot` records (tsx's CLI, which `npm start` uses, would run the face in a child process); an environment of exactly `PATH`, `HOME`, `DSH_HOME` and, for a port asked for (`--port`, kept by a reinstall), `FACE_PORT`; `RunAtLoad`, `KeepAlive {SuccessfulExit false}`, `ThrottleInterval 30`, `Umask 077`; stdout and stderr to `$DSH_HOME/face/service/face.log` and `face.err.log`), `ensureHomeEnv` (§4.5's `$DSH_HOME/.env`: `COPIED_KEYS` — the Telegram pair among them — and any `ALPHA_*`, from `.env.deepseek`, `.env.alpaca`, `.env.ifind` and `.env.telegram`, never overwritten), `parseLaunchctlPrint`, `lastTokenUrl`, `formatStatus` (its desk, pause and Telegram lines through `desk.ts`'s `deskStatusLines`) — and `runService`, the eight commands (`install`, `uninstall`, `start`, `stop`, `restart`, `status`, `logs`, `url`) over injected `ServiceDeps` (launchctl, fetch, the paths, the clock), so no test reaches launchd. A `bootout` is judged by whether launchd still holds the job, asked every 500 ms for up to 10 s, never by its exit code. `stop` is a `bootout`; so is `restart` of a running job — launchd's documented stop, SIGTERM then its exit timeout, never `kickstart -k`, whose kill signal is not documented — followed by up to 10 s for the port to fall silent and then `start`'s `enable` and `bootstrap`; a job launchd never lets go of fails the restart with nothing started, and a running job with no plist is left running. `install` refuses a home with no `profiles/face` before it writes a file or asks launchd anything (the service runs profile `face`, which would otherwise exit 1 every 30 s), says when it moves the service's home from the one the installed plist names, prints the `main.ts`, home and node the plist runs, and, for a checkout under `~/Desktop`, `~/Documents` or `~/Downloads`, warns before `next:` that macOS may ask whether node may access it (under launchd node is its own responsible process; refused, the service exits with `EPERM`). `status` reads `/data/desk/status` — adding one line when the face that answers is not launchd's job, their pids differing — and the ledger through `desk.ts` when the face does not answer; `url` marks the log's URL as maybe the previous run's while the face does not answer. The port is `--port`, else the installed plist's, else 3090; the reading commands use the home the installed plist names, and `install` writes this shell's `DSH_HOME` into the plist |
@@ -1378,7 +1382,7 @@ passes on `Host` alone — `curl` works, which is residual R3 in §9.
 | `$DSH_HOME/face/channels.json` | `roster.ts` | `{version:1, channels:{<wsId>:{agents[], bots[]}}}`; file lock + atomic write, mode 0600; the one file that needs a cross-process lock because the reconcile writes on GET |
 | `$DSH_HOME/face/roster.log` | `roster.ts` | append-only, one dated line per operator roster write |
 | `$DSH_HOME/face/agents.json` | `panels.ts` | `{connected:[{bin,label}]}` |
-| `$DSH_HOME/face/desk/events.jsonl` | `desk.ts` (`appendEvent`) | the desk's ledger: one JSON event per line, each with its `t` — `boot` (`pid`, `version`, `deskEnabled`), `shutdown` (`pid`, the exit `code`), `asleep` (`from`, `to`, `gapMs`), written by a face with the desk on; `off-set` (`by`: `telegram`, `page` or `terminal`; `until` for a timed pause) and `off-cleared` (`by`: `terminal` or `expiry`), written wherever the switch moves — the phone, any face's Pause route, `npm run desk`, the post that finds a pause expired; `desk-session` (`sessionId`, `reason`: `created` or `new`), `desk-turn` (`sessionId`, `source` — `telegram`, `user`, `alert`, `wake`, … — `turn`, `outcome`: `ended`, `timed-out` or `failed`, `wallMs`, `usage` when the harness accounted for the turn — the four buckets and `routes` — and `error` for a failed one) and `desk-refused` (`reason: "fence"`, the repo-relative `path`), written by the desk conversation; append-only under `withFileLock` (`events.jsonl.lock` beside it), created `0600`; past 50 MB the next append first moves it to `events.<t>.jsonl` (`:` as `-`), which nothing reads; a failed write is one `gravit-face:` line on stderr, and the face serves on |
+| `$DSH_HOME/face/desk/events.jsonl` | `desk.ts` (`appendEvent`) | the desk's ledger: one JSON event per line, each with its `t` — `boot` (`pid`, `version`, `deskEnabled`), `shutdown` (`pid`, the exit `code`), `asleep` (`from`, `to`, `gapMs`), written by a face with the desk on; `off-set` (`by`: `telegram`, `page` or `terminal`; `until` for a timed pause) and `off-cleared` (`by`: `terminal` or `expiry`), written wherever the switch moves — the phone, any face's Pause route, `npm run desk`, the post that finds a pause expired; `desk-session` (`sessionId`, `reason`: `created` or `new`), `desk-turn` (`sessionId`, `source` — `telegram`, `user`, `alert`, `wake`, … — `turn`, `outcome`: `ended`, `timed-out`, `cancelled` or `failed`, `wallMs`, `usage` when the harness accounted for the turn — the four buckets and `routes` — `cancel` for a cancelled one, saying what cancelled it, and `error` for a failed one) and `desk-refused` (`reason: "fence"`, the repo-relative `path`), written by the desk conversation; append-only under `withFileLock` (`events.jsonl.lock` beside it), created `0600`; past 50 MB the next append first moves it to `events.<t>.jsonl` (`:` as `-`), which nothing reads, and the new file opens with the old one's last `desk-session` line, so the desk conversation is found again; a failed write is one `gravit-face:` line on stderr, and the face serves on |
 | `$DSH_HOME/face/desk/OFF`, `OFF.lock` | `desk.ts` (`writeOff`, `clearOff`), from the phone's `/pause`, the Desk panel's Pause and `npm run desk`; the operator by hand | the pause switch: while a file by that name exists the desk opens no turn (§4.2). Written atomically, `0600`, as `{setAt, by, until?}`; an empty or unreadable file, `touch`'s, is a terminal's open-ended pause. Lifted by `npm run desk -- resume`, by deleting it, or at its `until` (the next post lifts it, an `off-cleared` by `expiry`). `OFF.lock` is the switch's writer lock, held only around one set or lift, for up to 2 s (§9, R36) |
 | `$DSH_HOME/face/desk/telegram.jsonl` | `telegram.ts` (through `appendRecord`) | the bridge's records, one JSON line each: `drop` (`from`, `chatType` when the update had them), `sent` (`parts`, `chars`), `queued` (`chars`), `conflict` (Telegram's own description), `poll-error` (`reason`) — the last two at most once a minute; never a message's text; the token redacted from every field; `0600`, locked and rotated as the ledger is |
 | `$DSH_HOME/face/desk/telegram.offset` | `telegram.ts` | the next `update_id` to ask for, written atomically (`0600`) after every update the bridge took, whatever became of it — so a restart takes no update twice, except one whose reply went out before a crash stored the offset (§9, R35) |
@@ -1553,7 +1557,7 @@ literals (`navigation.js`, `market.js`).
 | `room.js` | the pure room rules: `foldMembers` (the membership fold — a bot session parented by a host session, no `origin`), `isMemberSession`, `stripChips` (the strip's chips and their state precedence), `avatarGlyph`, `isMentionText` (the composer anchor), `roundEndLine`, `gateSpeaker` |
 | `speaker.js` | the name the transcript writes over a turn: `speakerFor(summary, bots)` reads the session's `agentPreset` — a rostered bot's display name, its id when the roster has none, `Gravit` for the host, for the desk (`isDeskPreset`, `gravit-desk`, which is not a host preset) and for no session. Per session, never per message; an unknown preset falls to the id, never to the host |
 | `navigation.js` | the primary navigation rail shared by the chat, market and account pages: Desk first, then market, the four sidebar faces and account |
-| `desk-panel.js` | the Desk panel (`#panel-desk`, the rail's first item), in a module of its own so a client that replaces `chat.js` can carry it: `/data/desk/status` drawn as named sections — the desk (on or off, uptime, the pause and its control), the Telegram bridge, the desk conversation, today's turns and their tokens, the desk's sessions — refreshed every 30 s while it shows; Pause posts `/data/desk/pause` (30 minutes, 2 hours, 1 day or until resumed) and draws the pause the face answered with; no resume control; the desk sessions open in place, `Desk · <date>` when untitled; a `waiting` chip on a desk session with a parked card and on the conversation card, and a badge on the rail's Desk item while another panel shows; the transcript's glyphs for the three desk sources (`☎`, `⧗`, `⚑`) and a desk line's words. Times New York's; every string through `textContent` |
+| `desk-panel.js` | the Desk panel (`#panel-desk`, the rail's first item), in a module of its own so a client that replaces `chat.js` can carry it: `/data/desk/status` drawn as named sections — the desk (on or off, uptime, the pause and its control), the Telegram bridge, the desk conversation, today's turns and their tokens, the desk's sessions — refreshed every 30 s while it shows, the cards staying on the page as sections come and go and the desk card keeping its Pause row, built once, so neither the poll nor a list refresh closes a dropdown under the operator's hand; the Telegram card shows `poll failing since <time>: <reason>` while the polls fail; Pause posts `/data/desk/pause` (30 minutes, 2 hours, 1 day or until resumed) and draws the pause the face answered with; no resume control; the desk sessions open in place, `Desk · <date>` when untitled; a `waiting` chip on a desk session with a parked card and on the conversation card, and a badge on the rail's Desk item while another panel shows; the transcript's glyphs for the three desk sources (`☎`, `⧗`, `⚑`) and a desk line's words. Times New York's; every string through `textContent` |
 | `market.js`, `market-model.js`, `market-search.js`, `market-quotes.js`, `market-catalog.js` | the market watchlist: selections kept in this browser's `localStorage`, on-demand search (`/data/symbols/search`), live quotes over server-sent events with a polling fallback (`/data/quotes/stream`, `/data/quotes`), a reference catalog of identities (never prices) |
 | `account.js`, `account-view.js`, `account-model.js` | the read-only paper account dashboard over `/data/account.json` |
 | `chat.css`; `market.css`, `account.css` | one sheet shared by all three pages — every color a `:root` token (radii only about half — four `--r-*` tokens, the rest literal px); light only — plus each instrument's own |
@@ -1863,7 +1867,8 @@ the pulses of each LIVE member's own `session/follow`.
 `telegram.ts`) returns the update → not a message from `TELEGRAM_OPERATOR_ID` in its private chat:
 dropped, counted, a `drop` record; a command: the bridge answers it itself (`/status` from the
 desk's status, `/pause` writes `OFF`, `/new` renews the conversation, `/stop` cancels the turn
-under way); any other text: `post` on the desk conversation (`desk-conversation.ts`), serialized
+under way and only it, the texts queued behind it sent again so each is answered,
+`cancelKeepingQueue`); any other text: `post` on the desk conversation (`desk-conversation.ts`), serialized
 behind any earlier one → `OFF` read (an expired pause lifted with an `off-cleared`, one in force
 refused with its line) → the fence (`findDeskFenceViolation`: a violation is a `desk-refused`
 event and the refusal line) → `ensureDeskSession` (the ledger's newest desk session, checked by
@@ -1873,8 +1878,9 @@ update → dsh opens the turn; the supervisor sees its `turn/start`, arms the 5-
 runs the fence again → the model, on the desk's roster and the `gravit:desk` contract; every call
 passes the desk guard — write, read, secret — and a write the sandbox after it; an order tool is
 Gate 2's visibility refusal →
-`turn/end` → one `desk-turn` event with the turn's four token buckets (`deriveTurnTokenUsage`) →
-the final text to the outlet: `sendMessage` to the operator's chat, in parts of at most 4,000, or
+`turn/end` → one `desk-turn` event with the turn's outcome and its four token buckets
+(`deriveTurnTokenUsage`) → the final text to the outlet, with `(cut off: …)` after it when a cut
+interrupted it mid-stream: `sendMessage` to the operator's chat, in parts of at most 4,000, or
 `outbox.json` when the send fails, flushed before the next poll. A refusal is answered with its
 line and opens no turn. A prompt typed in the browser on the desk session takes the same
 supervision and the same record, and its answer stays in the transcript.
@@ -1888,9 +1894,9 @@ supervision and the same record, and its answer stays in the transcript.
 | Command | From | Needs | Measured 2026-09-30 |
 |---|---|---|---|
 | `python -m pytest` | repo root | nothing — offline, no keys, no bed | 381 passed in a clean checkout, ~2 s (the operator's tree adds the untracked `tests/strategies/`) |
-| `cd face && npm test` | `face/` | nothing — no port, no key | 1,005 tests, 988 pass, 17 skipped (2026-10-21) |
+| `cd face && npm test` | `face/` | nothing — no port, no key | 1,045 tests, 1,028 pass, 17 skipped (2026-10-21) |
 | `cd face && npm run typecheck` | `face/` | | clean, the dependencies' `.d.ts` included (`skipLibCheck: false`) |
-| `cd face && FACE_SMOKE=1 npm test` | `face/` | boots seventeen real trees into `mkdtemp` homes and binds ports; still no LLM or key (four of the smokes also create, and remove, a gitignored `.bots-smoke-*` bots root at the repo root; `desk-smoke` and `telegram-smoke` keep their fixture roots under `face/tests/tmp/`, also ignored, and `telegram-smoke` runs a Bot API stub on 127.0.0.1) | the seventeen skipped tests; 1,006/1,006 — one subtest more than `npm test` counts — ~10 s (2026-10-21) |
+| `cd face && FACE_SMOKE=1 npm test` | `face/` | boots seventeen real trees into `mkdtemp` homes and binds ports; still no LLM or key (four of the smokes also create, and remove, a gitignored `.bots-smoke-*` bots root at the repo root; `desk-smoke` and `telegram-smoke` keep their fixture roots under `face/tests/tmp/`, also ignored, and `telegram-smoke` runs a Bot API stub on 127.0.0.1) | the seventeen skipped tests; 1,046/1,046 — one subtest more than `npm test` counts — ~11 s (2026-10-21) |
 | `cd face && npm run check:fixture` | `face/` | the installed dsh | 26 fixture lines: 23 validated, 0 rejected, 3 with no upstream validator |
 
 ### 7.2 The Python suite
@@ -1918,7 +1924,7 @@ order path.
 
 ### 7.3 The face suite
 
-1,005 tests in 77 files (988 pass, 17 skipped without `FACE_SMOKE=1`), run by `node --test`
+1,045 tests in 79 files (1,028 pass, 17 skipped without `FACE_SMOKE=1`), run by `node --test`
 through `tsx`:
 
 - **Composition and boot** — `boot` (the layer order ending with the overlay; the policy layer
@@ -2051,24 +2057,33 @@ through `tsx`:
   `deskSession`, `turnsToday` and `telegram`; the pause route — `OFF` by `page`, 400 on a bad
   `until`, 403 on a forged `Host`, the longer pause that stood; `installDesk` creating the
   conversation only with everything it needs and disposing the bridge, the conversation, then the
-  tools and the guard. `et` (the four helpers across DST, midnight as `00`); `desk-cli` (`npm run
-  desk`'s pause, resume and usage, lines and exit codes); `desk-preset` (`DESK_ALLOW` name for
+  tools and the guard, its lines through its `log`; a rotation opening the new ledger with the old
+  one's last `desk-session` line, as written, and carrying nothing into any other file; the
+  Telegram line's `poll failing since`. `et` (the four helpers across DST, midnight as `00`);
+  `desk-cli` (`npm run desk`'s pause, resume and usage, lines and exit codes, its temp homes
+  removed); `desk-preset` (`DESK_ALLOW` name for
   name, no `bash` and no `job_*`, no order, question, goal, delegation or AKShare tool; the two
   rows; the declaration and its refusals); `desk-tools` (both tools given once to a desk agent
   live before the install or created after it, never to Gravit's; a throwing registration
   logged, never thrown; `desk_quotes`' validation, cap, mapping, New York times and 429;
   `desk_state`'s last ten runs and `runsInLedger`); `desk-guard` (the write check: each write
   tool denied for every fence name at any depth, case-folded, below the repository root and as
-  spelled —
-  `~/.dsh` reached from the journal too; a desk cwd under a fence name writing nothing, its views
-  still going; a root checked out under `.git` still writing its journal; `view` and ordinary
-  journal writes passing; a path that is no string, or no root, failing closed. The read check:
-  reads outside the repository denied — `~`, `~user`, `..`, absolute, another checkout, and
+  spelled — `~/.dsh` reached from the journal too; a dot-led name below the root, and below the
+  common ancestor outside it, denied as a dot-file, `..` aside; `CLAUDE.md`, `CLAUDE.local.md`,
+  `AGENTS.md` and `AGENTS.override.md` denied anywhere, case-folded; a fence name winning over both,
+  another agent's file over a dot-file; a desk cwd under a fence name writing nothing, its views
+  still going; a root checked out under `.git`, or any dot-led directory, still writing its
+  journal; `view` and ordinary journal writes, look-alikes included (`CLAUDE.md.bak`,
+  `notes.gitignore`), passing; a path that is no string, or no root, failing closed. The read
+  check: reads outside the repository denied — `~`, `~user`, `..`, absolute, a sibling checkout, and
   through a symlink as a file, a directory or a missing tail, by the volume's physical walk and
   by the lexical one; `.env`, `.env.<anything>` and `.git` names denied as spelled, in another
-  case and behind an innocent link, their look-alikes (`.gitignore`, `.github`, `notes.env`)
-  passing; `grep` includes led by a dot or a wildcard and `glob` patterns led by a dot denied;
-  every `str_replace_editor` command judged; a NUL or a loop failing closed. The secret check:
+  case and behind an innocent link, their look-alikes (`notes.env`, `x.git`) passing; every other
+  dot-led name below the root denied as a dot-file — `.mcp.json`, `.claude/settings.local.json`,
+  `.codex/`, the worktrees — as spelled and behind an innocent link, a key name keeping its own
+  reason; `grep` includes led by a dot or a wildcard and `glob` patterns led by a dot denied;
+  every `str_replace_editor` command judged; a NUL or a loop failing closed; no tracked ignore
+  file negating a key name, a doublestar that ends a negation counted. The secret check:
   every tool, nested arguments, the JSON-escaped and URL-encoded spellings; `deskSecrets`' names,
   length, trimming and duplicates. The guard: the three checks in order; only `gravit-desk`
   agents judged, by the composed preset or the session header; the registry never asked for a
@@ -2078,21 +2093,31 @@ through `tsx`:
   at every depth, symlinks, `desk/`, the root's skill roots and unreadable entries; the
   provenance forms; the route's fallback line; `ensureDeskSession`'s live, cold, missing, fresh
   and mismatched paths, what it disposes, and the pin; the supervisor's fixed deadline with a card
-  pending, its fence cut, the failed outcome, the usage buckets, a second turn supervised as its
-  own, `deadlineFor` that can only shorten, an owner whose `onTurnEnd` rejects); `desk-conversation`
-  (a post's pause, expiry, fence and error refusals, its provenance line and source; posts in
-  order; delivery by source — the phone, an alert and a wake delivered, a browser turn not; the
-  timed-out and failed lines; renew retiring the old supervision; stop; dispose's shutdown cut and
-  its bounded waits; nothing at a turn's end rejecting); `telegram` (admission, drops and their
+  pending, its fence cut, the failed outcome, the cancelled outcome and what cancelled it, a cut
+  answer marked `interrupted`, the usage buckets, a second turn supervised as its own,
+  `deadlineFor` that can only shorten, an owner whose `onTurnEnd` rejects; `cancelKeepingQueue`
+  against a fake with dsh's inbox and wake (`tests/inbox-fake.ts`) — the inbox kept, each queued
+  message sent again in order so the agent wakes for them, the control that `keepInbox` alone
+  wakes nothing, a message it cannot send again one line — and the deadline's cut waking for what
+  waits where the fence's does not); `desk-conversation` (a post's pause, expiry, fence and error
+  refusals, its provenance line and source; posts in order; delivery by source — the phone, an
+  alert and a wake delivered, a browser turn not; the timed-out and failed lines, and
+  `(cut off: …)` after an answer a cut interrupted; renew retiring the old supervision; stop
+  cutting only the turn under way, the texts queued behind it answered in order, the cut turn
+  recorded `cancelled`; dispose's shutdown cut, recorded `cancelled` by `shutdown`, and its
+  bounded waits; nothing at a turn's end rejecting); `telegram` (admission, drops and their
   count; the four commands in any case and with `@<bot>`; refused posts answered with their line;
   the 30 s slow line; splitting that never breaks a surrogate pair; the offset past every update,
   a renumbered queue taken; the outbox — order, flush before sends, cap, the late line, 400 and 403
-  dropped; 409 once a minute; the backoff; redaction — every secret value as `<secret>` beside the
-  `<token>`, longest first, an outbox an earlier run left redacted as it is read; dispose);
-  `desk-panel` (the named sections in order, the pause control and the pause the face answered with, the sessions opening in place,
-  the waiting chip and the rail's badge, the 30 s refresh while shown, the transcript's desk
-  marks); and the desk's cases in `http` (`fencedPost`'s outcomes, a forged `Host` refused before
-  the body), `cycle` (`desk.md`'s size, phrases and refusals), `gravit-plugin` (the `gravit:desk`
+  dropped; 409 once a minute; the backoff; a failing poll in the status, since its first failure
+  and why the last, redacted, cleared by a poll that answers; redaction — every secret value as
+  `<secret>` beside the `<token>`, longest first, an outbox an earlier run left redacted as it is
+  read; dispose); `desk-panel` (the named sections in order, the pause control and the pause the
+  face answered with, the sessions opening in place, the waiting chip and the rail's badge, the
+  30 s refresh while shown — the Pause row's nodes never taken off the page by it, nor by a failed
+  read between — the failing poll's row, the transcript's desk marks); and the desk's cases in
+  `http` (`fencedPost`'s outcomes, a forged `Host` refused before the body), `cycle` (`desk.md`'s
+  size, phrases and refusals), `gravit-plugin` (the `gravit:desk`
   section, and `cycle` and `desk` refused together), `bot-plugin` (`maskOnly`), `boot`, `bots`,
   `agents`, `data`, `mapper`, `grouping` and `speaker`.
 - **The seventeen `FACE_SMOKE` boots**, below.
@@ -2264,7 +2289,14 @@ each speaks the browser's wire through `tests/remote.ts` (`mountClient`, `signIn
   journal write lands, no card raised; Gravit's own write of a `GRAVIT.md` lands; with a
   listener in front answering `allow`, the guard's backstop still denies the desk's write of
   `GRAVIT.md`, and its read of a `.env` file, while Gravit's own read of that file goes through
-  unjudged; the read tools take exactly the parameters the read check reads; a `GRAVIT.md`
+  unjudged; the phone's `/stop` on a turn parked on an escalation card, with two texts queued
+  behind it, cuts that turn alone — recorded `cancelled`, `stopped from the phone` — and the two are
+  answered, in the order sent, at the outlet (dsh's `keepInbox` cancel alone left both unanswered:
+  measured here before the fix), `levels.yml` unchanged; the desk's write of a journal
+  `.gitignore` holding `!*`, its `edit` of a `CLAUDE.md` and its `str_replace_editor` create of one
+  are denied in the write check's words with no file written, and its read of a dot-config in the
+  repository is denied by name, from the journal too, while Gravit reads that file; the read tools
+  take exactly the parameters the read check reads; a `GRAVIT.md`
   planted in the journal reaches a desk session's first request behind the repository's — the
   threat the fence exists for — and the next post is refused with a
   `desk-refused` event and no turn; each supervised turn is one `desk-turn` record with the four
@@ -2330,9 +2362,9 @@ the re-host added (§10, item 14).
 | **Cycle** — automated (`cycle`, `gravit-plugin`, `boot`, `roles`; `bots-smoke`, `roles-smoke`, `goal-smoke`) | the shipped `cycle.md` reads, fits its 3,000 bytes and carries the steps, the caps, the resume path, the blocked vocabulary and only shipped role names; the reader's refusals, path first; the `gravit:cycle` section's order, literalness and gate; the mirror carrying the text; on a real tree Gravit's prompt carries `Step 0 — ask once`, a probe bot's (which can call `create_goal`), a role child's and a plain `subagent` child's do not, a `subagent_fork` child's does and equals Gravit's; the goal loop itself (`goal-smoke`): `create_goal` in a human turn, the round message at idle, blocked refused in round 1 and accepted in round 3 with the `<goal_blocked>` wrap-up, a second goal refused, the silent `round-limit` cap, Stop pausing the goal with the model's resume refused and `/goal resume` re-arming it, a restart disarming it until "continue" | that a real model asks once, opens the goal, runs rounds by itself, is resumed by "continue" after a restart and ends in a verdict; a cycle's rounds, role calls, wall time and usage | passes 2026-10-19 (`goal-smoke` since `fae4f61`) |
 | **Cycle** — manual (`face/README.md` "The cycle drill", five steps) | on the operator's face with a real model and a channel from `_template`: one batched `ask_user_question` and no file before it; `create_goal`, then rounds with no card and no question (no commit inside the rounds), `role_*` calls and journal entries with artifact paths; a verdict in `status.yaml` and the journal's last entry with the usage line to fill, the goal complete on `validated` or `retired` and blocked on `researching`, on a named code; a restart that continues only on "continue"; the rounds, role calls, wall time, usage and first-request figures recorded in §4.3 | whether the verdict is better research (charter D14); the 12-call count (R29) and a model's handling of a paused goal (R30) beyond what the run happens to meet — the mechanism itself is `goal-smoke`'s | **not yet run** — the operator's, on the real face |
 | **Desk** — automated, P0 (`desk`, `service`, `http`; `smoke`) | the ledger, its runs and the lost run, the sleep watch on a fake clock, the status and its fenced route, a disabled desk that writes nothing; the plist, the home's `.env` and its allow-list, the status text, and every service command against a fake `launchctl` — `install`'s home checks and privacy line, `restart` by `bootout` and `bootstrap`, `status`'s foreign-face line, `url`'s note; on a real tree, the route answering with one open run and the `boot` line written | launchd itself: that it takes the commands, what its `print` really says, how long a real stop takes, that a `bootout` reaches the face as SIGTERM; whether macOS lets node read the checkout; `main.ts`'s `FACE_DESK` parse, which only the drill's step 6 exercises | passes 2026-10-20 |
-| **Desk** — automated, P1 (`desk`, `desk-cli`, `et`, `desk-preset`, `desk-tools`, `desk-guard`, `desk-session`, `desk-conversation`, `telegram`, `desk-panel` and the desk's cases elsewhere; `desk-smoke`, `telegram-smoke`) | the preset's roster and prompt on a real tree; the desk tools per agent; Gate 2's visibility refusal from a desk turn; the sandbox around the journal; the desk guard and its backstop — a write of `GRAVIT.md`, a read of a key file and of a file outside the repository, a dot-file search, a call carrying a secret, each refused; the fence on a planted file; the supervisor's deadline cutting a parked card; the ledger's `desk-turn` with its tokens; the bridge against a Bot API stub — one operator, the commands, the pause, an outage through the outbox, a 409, the canary; the Desk panel in a fake DOM | a real model on the desk's contract; the real Bot API from this Mac; what a phone shows; a real 5-minute cut; the Desk panel in a browser over the operator's ledger | passes 2026-10-21 |
+| **Desk** — automated, P1 (`desk`, `desk-cli`, `et`, `desk-preset`, `desk-tools`, `desk-guard`, `desk-session`, `desk-conversation`, `telegram`, `desk-panel` and the desk's cases elsewhere; `desk-smoke`, `telegram-smoke`) | the preset's roster and prompt on a real tree; the desk tools per agent; Gate 2's visibility refusal from a desk turn; the sandbox around the journal; the desk guard and its backstop — a write of `GRAVIT.md`, of a `.gitignore` or of a `CLAUDE.md`, a read of a key file, of a dot-config and of a file outside the repository, a dot-file search, a call carrying a secret, each refused; the fence on a planted file; the supervisor's deadline cutting a parked card; the phone's `/stop` cutting one turn while the texts queued behind it are answered, in order, on a real tree; the ledger's `desk-turn` with its tokens; the bridge against a Bot API stub — one operator, the commands, the pause, an outage through the outbox, a 409, the canary; the Desk panel in a fake DOM | a real model on the desk's contract; the real Bot API from this Mac; what a phone shows; a real 5-minute cut; the Desk panel in a browser over the operator's ledger | passes 2026-10-21 |
 | **Desk** — manual, P0 (`face/README.md` "The desk drill", P0, six steps and an optional seventh) | on the operator's launchd, installed from the primary checkout and the shell the face runs from: the sign-in through `url`; the service's face working — no `EPERM` in `face.err.log`, a prompt answered, a quote on `/market`; the pid `status` prints equal to the ledger's `boot` pid; a `kill -9` of it that KeepAlive brings back, read as `last run: lost`, with an observation of whether an MCP child of the killed run is left; `restart` and `stop` each leaving a `shutdown` with code 0 (a `lost` after `restart` means launchd stopped the face without SIGTERM, a finding to record); `start`; a login that starts the face with no terminal; a second face beside it on a scratch home with `FACE_DESK=0`, its rows disabled — the spec's P0 done criterion; optionally, an `asleep` gap on a real `pmset sleepnow` | an `asleep` gap on a real sleep unless the optional step ran (the watch's tests run on a fake clock); `start`'s `kickstart`, which only a loaded job that is not running takes; the desk rows P1–P4 add | **not yet run** — the operator's |
-| **Desk** — manual, P1 (`face/README.md` "The desk drill", P1, seven steps, after "Set up the bot") | from the phone, on the service with a real model: `hi` and a live price with its source and time, each a `desk-turn` with tokens; `/status`; `/pause 1m`, a text refused while paused, the pause lifting itself; `/new` and a `desk-session` `new`; a long answer in parts; a turn cut by the deadline with an unanswered card, the Desk panel's `waiting` mark meanwhile; from the browser, the Desk panel against `status`, its Pause and a terminal's resume — P1's done criterion | an afternoon's use (the spec's "for an afternoon"); that a model escalates the step-6 write rather than giving up; a second Telegram user or a group, which the bridge drops (`telegram-smoke`) and this drill does not try | **not yet run** — the operator's |
+| **Desk** — manual, P1 (`face/README.md` "The desk drill", P1, eight steps, after "Set up the bot") | from the phone, on the service with a real model: `hi` and a live price with its source and time, each a `desk-turn` with tokens; `/status`; `/pause 1m`, a text refused while paused, the pause lifting itself; `/new` and a `desk-session` `new`; a long answer in parts; a turn cut by the deadline with an unanswered card, the Desk panel's `waiting` mark meanwhile, and a text sent while it waits answered after the cut; `/stop` on a long answer with a text queued behind it, that text answered and the cut turn `cancelled`; from the browser, the Desk panel against `status`, its Pause and a terminal's resume — P1's done criterion | an afternoon's use (the spec's "for an afternoon"); that a model escalates the step-6 write rather than giving up; a second Telegram user or a group, which the bridge drops (`telegram-smoke`) and this drill does not try | **not yet run** — the operator's |
 
 Owed besides, from the re-host, never yet run in a browser: the Gate-2 drill's new card endings
 — a second tab's `closed`, a lost race's `closed · settled elsewhere`, a stale card's `closed ·
@@ -2625,7 +2657,13 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
   real — the tests drive a fake `launchctl` — so the desk drill (§7.4) is the first. Since P1 the
   bot token is one more thing a second face must not share: a desk-enabled face with the same
   token, on any home, is a second poller, Telegram answers one of the two 409, both bridges record
-  the conflict, and the updates go to whichever poll Telegram serves.
+  the conflict, and the updates go to whichever poll Telegram serves. Nothing enforces one
+  desk-enabled face per home — it is the operator's discipline (`CLAUDE.md`, `face/README.md`): a
+  second face started without `FACE_DESK=0` on the service's home interleaves its `boot` lines, so
+  the live run reads as lost; it cannot resume the service's desk session, which dsh holds under a
+  cross-process lock, so it records a `desk-session` of its own, and the two faces then hand the
+  conversation back and forth at every post; and it splits the phone's updates with the service,
+  in alternating 409s. P2 adds a lease on the desk, so that a second face refuses it loudly.
 - **R33 — The desk's cwd sits on dsh's instruction chain; the face holds it, not the sandbox**
   (charter D23). dsh reads `GRAVIT.md` and `GRAVIT.local.md` in every directory from the project
   root — the nearest `.git` — down to a session's cwd, and in the directories between the cwd and
@@ -2634,12 +2672,19 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
   ignored by git, so a file planted there would steer every later desk turn and no diff would
   show it. Two lines in the face hold it. The desk guard's write check (`desk-tools.ts`,
   `installDeskGuard`) denies, before it runs, a desk agent's `write`, `edit` or
-  `str_replace_editor` (any command but `view`) whose path
-  names one of the five (`FENCE_NAMES`, case-folded) — a file the turn wrote would steer the rest
-  of that same turn, which no check at a turn's start can see — with a deny-only `tools.guard`
+  `str_replace_editor` (any command but `view`) whose path names one of the five (`FENCE_NAMES`,
+  case-folded) — a file the turn wrote would steer the rest of that same turn, which no check at
+  a turn's start can see — with a deny-only `tools.guard`
   behind its listener, so no later `tools/pre-execute` listener can talk it out of a denial. The
-  fence (`desk-session.ts`) refuses every desk turn while one of the five sits directly in `desk/`
-  or anywhere under the journal, a `.dsh` or `.agents` sits at the repository root, any symlink
+  same check holds the files other tools obey, which dsh's names do not cover: any dot-file below
+  the root (`the desk never writes dot-files: <name>`) — a `desk/journal/.gitignore` holding `!*`
+  would make git list the journal, the operator's book, for the next `git add -A` (charter D22),
+  and an ignore file's negation would lift ripgrep's hidden-file skip (R34) — and any `CLAUDE.md`,
+  `CLAUDE.local.md`, `AGENTS.md` or `AGENTS.override.md` below it, case-folded
+  (`the desk never writes <name>: another agent reads it`), which the operator's coding agents load
+  from the folder they work in, a shell behind them, and which git would never show in the ignored
+  journal. The fence (`desk-session.ts`) refuses every desk turn while one of the five sits directly
+  in `desk/` or anywhere under the journal, a `.dsh` or `.agents` sits at the repository root, any symlink
   sits in the fenced tree (`desk/` and the journal lstatted themselves), or an entry cannot be
   read; the conversation checks before it opens a turn for a post, and the supervisor at every
   `turn/start`. What they do not hold: the root `GRAVIT.local.md` — the operator's machine-local
@@ -2649,10 +2694,15 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
   start. A turn the browser or a background job's notice opens is checked at its `turn/start` and
   cut, not refused before it opens, so its first model request may already carry a planted text
   (the desk has no job tools, so no wake comes today; P3 evaluates a pre-step reject hook when
-  wakes exist). The guard judges names, not where a link points — any symlink already refuses
-  every turn, and the desk cannot make one — and never the checkout's own ancestors (it judges a
-  path's names below their common ancestor with the repository root, and as spelled; a desk
-  session whose own cwd sits under a fence name writes nothing). On a case-sensitive
+  wakes exist). The write check judges names, not where a link points — any symlink already
+  refuses every turn, and the desk cannot make one — and never the checkout's own ancestors (it
+  judges a path's names below their common ancestor with the repository root, and as spelled; a
+  desk session whose own cwd sits under a fence name writes nothing), so a root that sits under a
+  fence-named directory leaves that directory's other subtrees unjudged (no production checkout
+  has one). Its root is taken as given: a relative one is accepted, not refused (production passes
+  `process.cwd()`, absolute and physical); `deskWriteDecision` lets a `view` with a cwd that is no
+  string through, which the installed guard never hands it (it throws first, and denies); and the
+  case of a cwd above the root is in its comment, not its tests. On a case-sensitive
   volume the fold refuses a few names dsh would not read: the safe side. Two everyday trips, both
   intended: an Emacs lock file (`.#name`, a dangling symlink) refuses every desk turn while a
   journal note has unsaved edits, and a root `.agents/` or `.dsh/` adopted for another tool
@@ -2666,24 +2716,45 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
   side is the desk guard's (§4.2): its read check denies a `read`, `read_image`, `grep`, `glob`
   or `str_replace_editor` that reaches outside the repository — where the volume says the path
   lands, so a symlink cannot carry it out — or names a `.env`, `.env.<anything>` or `.git`, or
-  searches dot-files; its secret check denies any call whose arguments carry a key's value from
-  the face's environment, to DeepSeek's search, to an MCP server or to a file; the bridge redacts
-  every such value from what reaches the phone. `glob` lists names and reads none. What remains:
-  a key kept in a file whose name carries no key — a `credentials.json`, a note — or one an MCP
-  tool returns still reaches DeepSeek in the tool result, since nothing filters tool results; and
-  it reaches the phone too unless the face's environment holds that value. The realpath cannot see
-  a hard link inside the repository to a key file elsewhere, and a symlink swapped between the
-  check and the tool's open is not seen: the desk can make neither, having no shell and its writes
-  kept to its journal, but another session could. And the dot-file rule rests on ripgrep's
+  any other dot-file below the root — the checkout the service runs from holds `.mcp.json`,
+  `.claude/settings.local.json` and `.codex/`, formats made to carry tokens, and the
+  `.claude/worktrees/*` checkouts — or searches dot-files; its secret check denies any call whose
+  arguments carry a key's value from the face's environment, to DeepSeek's search, to an MCP
+  server or to a file; the bridge redacts every such value from what reaches the phone. `glob`
+  lists names and reads none. The secret check is a backstop, not the line: it finds a value as
+  it is, as JSON writes it inside a string and as `encodeURIComponent` encodes it (an upper-case
+  `%3A`), and misses a lower-case `%3a`, a base64 spelling and a value split across arguments; the
+  read check, which keeps the key files out of the turn, is what holds. What remains: a key kept
+  in a file whose name carries no key and no dot — a `credentials.json`, a note — or one an MCP
+  tool returns still reaches DeepSeek in the tool result, since nothing filters a desk agent's
+  tool results today; and it reaches the phone too unless the face's environment holds that
+  value. That filter is a follow-up, not missing infrastructure: dsh-tools 0.2.0-rc.2 already runs
+  a `tools/post-execute` waterfall that can replace a result's content (`lib/index.js` about
+  3503-3529; `lib/types/index.d.ts` 70, 465), so the face could redact its secret values from
+  every desk agent's tool results (§10, item 5). The realpath cannot see a hard link inside the
+  repository to a key file elsewhere, and a symlink swapped between the check and the tool's open
+  is not seen: the desk can make neither, having no shell and its writes kept to its journal and
+  the temp areas, but another session could. Two refusals are false positives, left as they are:
+  a spilled image attachment, which `read_image` would read from a spill directory the allowance
+  gives only `read` and `grep`; and a spill root configured elsewhere (`spill-local.root`), which
+  the allowance does not know. And the dot-file rule rests on ripgrep's
   behaviour as measured with rg 15.0.0, the binary dsh packages: a `--glob` lifts ripgrep's
   hidden-file skip, and its `*`, `?`, `[...]` and `{...}` all match a leading dot (`*.alpaca`
   searched `.env.alpaca`), so a `grep` include led by a wildcard is refused — `*.md` included,
   since no rule that admits `*.md` stops `*.alpaca` — while `glob`, whose pattern lists names, is
-  refused only a dot-led one; a ripgrep that behaves otherwise changes what the rule must be. The
-  ruling's cost: the desk cannot compute with a shell or read outside the repository — a desk
-  session whose cwd lies outside it can read nothing there — and `str_replace_editor`'s writing
-  commands outside it, `/tmp` included, are refused too. Adding `bash` back, or a read outside the
-  repository, is the operator's decision, taken with eyes open (charter §8).
+  refused only a dot-led one; a ripgrep that behaves otherwise changes what the rule must be. A
+  `grep` with no include is kept off hidden files by ripgrep itself — unless an ignore file it
+  reads whitelists one: a negation (`!.env.alpaca`, or a doublestar that ends one) in a
+  `.gitignore`, `.ignore` or `.rgignore` in the tree it searches, or in a directory above it,
+  which ripgrep reads too, lifts the skip for what it matches. `desk-guard` keeps the repository's
+  tracked ignore files free of such a negation; an untracked one, git's own exclude files and those
+  above the repository it does not see. The desk cannot write one — each is a dot-file — but
+  another session could. The ruling's cost: the desk cannot compute with a shell or read outside
+  the repository — a desk session whose cwd lies outside it can read nothing there — nor read any
+  dot-file in it, and `str_replace_editor`'s writing commands outside it, `/tmp` included, are
+  refused too. Adding `bash` back is a charter §8 trigger (the desk's preset given a shell);
+  widening its reads past the repository, or to its dot-files, is the operator's decision too,
+  taken with eyes open.
 - **R35 — The phone: one token, one operator id, outbound only** (charter D18). The token is a key
   file like the others (R1): in `$DSH_HOME/.env`, readable by a workbench session's shell turn
   (never by the desk, whose read check keeps it inside the repository). Whoever holds the token
@@ -2701,11 +2772,15 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
   only — as it already reaches the ledger and the browser. The offset is stored after an update's
   reply, so a crash between the two takes that update again after the restart, and its reply goes
   twice; Telegram itself pops a renumbered update numbered within 10 below the stored offset
-  before the bridge sees it (negligible). The face's own fetches — the bridge's to
-  `api.telegram.org`, the quote hub's — pass no egress policy: the policy layer shapes the model's
-  tools and the rows' uploads (§4.3), there is no proxy policy (PLAN D10), and nothing but the
-  code limits the hosts the face process reaches, so the spec's "egress gains `api.telegram.org`"
-  has no policy to land in.
+  before the bridge sees it (negligible). A revoked token fails every poll (401), a mistyped one
+  too (404), and the loop polls on: the status says so — `poll failing since <time>: <reason>`,
+  redacted — until a poll answers. The outbox's cap of 100 is kept as messages are queued, so an
+  outbox edited by hand past it stays over until it drains; and the `(written …, sent late)` line
+  on a message only part of which went before is untested, sharing the tested path. The face's
+  own fetches — the bridge's to `api.telegram.org`, the quote hub's — pass no egress policy: the
+  policy layer shapes the model's tools and the rows' uploads (§4.3), there is no proxy policy
+  (PLAN D10), and nothing but the code limits the hosts the face process reaches, so the spec's
+  "egress gains `api.telegram.org`" has no policy to land in.
 - **R36 — The desk's switch and conversation, at their edges.** `npm run desk` acts on the harness
   home its shell resolves, not the one the installed plist names; with a home set elsewhere the
   two can differ. A pause and a resume take `OFF.lock` for up to 2 s, so a resume can time out
@@ -2713,10 +2788,27 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
   holder whose pid has since been reused stays until it is removed by hand, while deleting `OFF`
   still lifts the pause. A conversation that `/new` replaced stays live — the browser may hold it
   — and once its last turn ends nothing supervises it: a turn the browser opens there has no
-  deadline, no fence check and no record. A live desk session re-selected to another preset in the
-  browser before its first turn passes the header check, which reads the preset the session was
-  created with (low); a mismatched cold session is resumed under the desk's setup for a moment
-  before the check disposes it (harmless). With a desk turn under way, shutdown takes up to about
+  deadline, no fence check and no record. A cut cuts one turn: the phone's `/stop` and the
+  deadline cancel the turn under way keeping the inbox, and send each text queued behind it again,
+  so it is answered (`cancelKeepingQueue`; dsh's `keepInbox` alone keeps a queued text but answers
+  it only when something else wakes the agent, measured in `desk-smoke`); the fence's cut keeps
+  the inbox without that, so a queued text waits for the next post, which the fence refuses first;
+  steering input waiting for the next step (a browser's) is kept and not sent again, as dsh's own
+  stop leaves it. A phone text in flight at a restart is neither answered nor acknowledged: the
+  bridge is disposed first, so the outlet is gone; the conversation then cancels the turn as
+  `shutdown`, which clears the inbox — the texts queued behind it too — and the offset has already
+  moved past them, so after a `KeepAlive` restart the operator never learns they died; and a post
+  still pending at its 30 s bound when the bridge goes queues the slow line, which the next boot
+  sends late. P2's `interrupted` pattern — a ledger mark and one line at the next boot — would
+  close it. A `deadlineFor` answer that is not finite is ignored without a line (P1 passes none;
+  P3's is a constant), and `deskDeadlineMs`, which shortens every desk turn's deadline, is a test
+  seam `main.ts` never passes. Two pause-switch cases are pinned only through others: `writeOff`'s
+  expired-pause guard (any duration outlasts an expired pause) and the ledger of a touched `OFF`.
+  The Desk panel's badge is the chat page's only, not `/market`'s or `/account`'s. A live desk
+  session re-selected to another preset in the browser before its first turn passes the header
+  check, which reads the preset the session was created with (low); a mismatched cold session is
+  resumed under the desk's setup for a moment before the check disposes it (harmless). With a
+  desk turn under way, shutdown takes up to about
   7 s more — 2 s for a cut agent to go idle, 5 s for a start, post or renew to settle — under the
   20 s launchd is commonly said to allow before SIGKILL (its documented default is
   system-defined and unmeasured, above), but counted against the 10 s R32's commands wait. The
@@ -2739,7 +2831,21 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
   through the `agentPresets/select` Remote gets neither — no event fires; the face client never
   calls `select`, and both tools only read. The desk guard is not per agent: it judges a call by
   the preset composed when the call runs, or by the session header, so such a session's writes,
-  reads and secrets are judged all the same.
+  reads and secrets are judged all the same. A bot composition edited by hand can opt into
+  `plugins/bot.js`'s `maskOnly` and so speak as Gravit, with Gravit's persona under its own mask;
+  it shows in the row `bot-presets.ts` renders (`rowFor`), and nothing refuses it. And Gate 2's
+  check that an order tool nothing registered is refused is asserted in Gravit's scope only: the
+  global view's answer follows from the registry and is not asserted apart.
+- **R39 — The desk conversation carries what it read into its later turns.** A desk turn reads
+  text nobody vetted — a forwarded message, a web page, a filing — and that text stays in the
+  conversation's history, with anything the turn put in its `todo_write` list, for every later turn
+  of the same conversation until the phone's `/new` opens another. An instruction smuggled in once
+  can steer the turns after it: this is the persistence a poisoned phone turn has, now that the
+  guard denies it the instruction files, the dot-files and other agents' files. Neither the fence
+  nor the guard sees history — it is what a long-lived conversation is. What holds: the desk
+  contract (`dsh/profile/desk.md`) has the model treat such text as information, never as an
+  instruction for later turns; the desk orders nothing (Gate 2, no order path from the phone); its
+  guard holds every write and read; and `/new` leaves the history behind.
 
 ---
 
@@ -2774,9 +2880,13 @@ In order; each with what "done" is and which charter row it reopens.
    `kill -9` and a login without a terminal, and a second face has booted beside it on a scratch
    home with `FACE_DESK=0`; the drill also asks that the service's face works — a prompt
    answered, a quote on `/market`. P1, the desk session and the Telegram bridge, is built on
-   `feat/desk-p1-p4` from `4b25ae5` (§3.3, §3.4, §3.6, §4.2–§4.7, §5.1, §6.9; R33–R38): done
-   when the operator has talked to Gravit from the phone, asked a live price and got it, and the
-   Desk panel shows it — the desk drill's P1 half (§7.4). P2–P4 — the clock and the pre-close
+   `feat/desk-p1-p4`, cut at `42c40db` (its first commit `4b25ae5`; §3.3, §3.4, §3.6, §4.2–§4.7,
+   §5.1, §6.9; R33–R39): done when the operator has talked to Gravit from the phone, asked a live
+   price and got it, and the Desk panel shows it — the desk drill's P1 half (§7.4). Two
+   follow-ups P1 leaves: the face redacting its secret values from a desk agent's tool results,
+   which dsh-tools 0.2.0-rc.2's `tools/post-execute` seam already allows (R34, charter D25); and a
+   lease on the desk, so a second desk-enabled face on the home refuses it, which P2 adds (R32).
+   P2–P4 — the clock and the pre-close
    brief, the watch, the pre-market strategy report — follow the spec's §12, each landing the
    charter amendments its mechanism introduces (the spec's §10). P2's first scheduled run is a D5
    revisit trigger (spend accounting); the spec answers it with a daily token budget for desk

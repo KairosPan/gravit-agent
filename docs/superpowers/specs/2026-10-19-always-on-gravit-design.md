@@ -476,13 +476,17 @@ be written in the plan's first task and pinned by a test the way `cycle.test.ts`
   agent makes before it runs — one listener and a deny-only backstop, three checks in order. Its
   write check denies a write of `GRAVIT.md`, `GRAVIT.local.md`, `.git`, `.dsh` or `.agents`,
   because a file the turn wrote would steer the rest of that turn; the pre-turn fence covers what
-  other sessions plant. Its read check denies a read outside the repository or of a `.env` or
-  `.git` name, and a search that could reach a dot-file, because dsh's sandbox lets every read
-  through, which §7's list of what a poisoned turn can do left out. Its secret check denies any
-  call whose arguments carry a key's value, and the bridge redacts every such value from the
-  phone. Tool
-  results are not filtered: a key kept under another name still reaches the model (§7; the
-  charter's D23 and D25).
+  other sessions plant. It denies too a write of any dot-file — a journal `.gitignore` holding
+  `!*` would un-ignore the book for the next `git add -A` — and of any `CLAUDE.md`,
+  `CLAUDE.local.md`, `AGENTS.md` or `AGENTS.override.md`, which the operator's coding agents load:
+  §7's list of what controls later turns named only dsh's files. Its read check denies a read
+  outside the repository or of any dot-file in it — a `.env` or `.git` name, `.mcp.json`,
+  `.claude/`, `.codex/` — and a search that could reach a dot-file, because dsh's sandbox lets
+  every read through, which §7's list of what a poisoned turn can do left out. Its secret check
+  denies any call whose arguments carry a key's value, and the bridge redacts every such value from
+  the phone. Tool results are not filtered yet: a key kept under another name still reaches the
+  model (§7; the charter's D23 and D25); dsh's `tools/post-execute` seam would let the face redact
+  them, a follow-up.
 - **No wake cap** (§5.8's `maxConsecutiveWakes` row): with no job tools, no background job wakes
   the desk.
   The Desk page is a panel in the chat page's sidebar (`face/client/desk-panel.js`) over
@@ -659,6 +663,14 @@ name it.
 - **In the face**: the desk session is an ordinary session in the Desk entry; the chat client
   renders `telegram`-, `schedule`- and `alert`-sourced user messages with a glyph and the
   source's fields, as it renders room-sourced ones today, and never breaks on an unknown kind.
+
+**As built (P1, 2026-10-21):** `/stop` cancels the current turn and only it, and so does the
+5-minute deadline: dsh's cancel keeping the inbox keeps a text queued behind the turn but opens no
+turn for it until something else wakes the agent (measured on a real tree), so the face sends each
+queued text again after the cancel and each is answered, in order — the "never queued in silence"
+above. A turn something else cancelled is recorded `cancelled`, with what cancelled it; an answer
+a cut interrupted mid-stream reaches the phone with `(cut off: <what cut it>)` after it; and while
+the polls fail — a revoked token's 401 — the status says `poll failing since <time>: <reason>`.
 
 ### 5.7 The ledger and the Desk page
 
@@ -874,7 +886,8 @@ usage.
   sessions still have per-session usage only. New rows: **D17** the arming file and the OFF
   switch are hand-edited files in the home, and the Pause route is loopback-reachable (safe
   direction); **D18** the Telegram token is a key file like the others (R1) and a lost phone chats
-  read-only and can pause until the token rotates; **D19** holdings are what the operator typed —
+  read-only and can pause until the token rotates (as built, it does neither: see §7's As-built
+  note); **D19** holdings are what the operator typed —
   the desk's book is stale the moment they trade; **D20** a strategy's `levels.yml` sits in a
   directory its research sessions can write; held by the load cap, the alert caps and the ledger's
   files-written line; **D21** alert prices are IEX trades, not the NBBO, and only 30 symbols

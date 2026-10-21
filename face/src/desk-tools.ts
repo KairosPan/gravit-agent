@@ -738,7 +738,8 @@ const mayMatchDotName = (segment: string): boolean => dotLed(segment) || "*?[{".
  *   symlink before it - and as `path.resolve` places it, `..` collapsed; each placement is realpathed
  *   ({@link realTarget}), and when either lies outside the root's own realpath the call is denied with
  *   `the desk reads only inside the repository; <path> is outside it`, `<path>` as spelled. That is the harness home,
- *   `~/.ssh`, `~/.config` and every other checkout, however they are reached;
+ *   `~/.ssh`, `~/.config` and every checkout outside the repository, however they are reached - those under
+ *   `.claude/worktrees/`, inside it, are dot-files (below);
  * - but for one place outside it: a `read` or a `grep` whose two placements both lie in the calling session's own spill
  *   directory - `<the realpath of os.tmpdir()>/dsh-spill-XXXXXX/session-<sha256(sessionId)[:12]>/`, the directory itself
  *   or below it ({@link spillHomeOf}) - goes on, since the spill notice of a result too large to show inline tells the
