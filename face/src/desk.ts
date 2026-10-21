@@ -837,9 +837,10 @@ export interface DeskHandle {
  * deps, so the tool and the route agree - but for `runs`, which the tool cuts to the last ten and
  * counts in `runsInLedger` - and a face with the desk off still opens an old desk conversation
  * with its tools. Given `ctx`, hub or none and whatever `enabled` says, the desk's write guard
- * (src/desk-tools.ts `installDeskWriteGuard`) is installed too, its listener and its backstop: every
- * desk agent's `write`, `edit` or `str_replace_editor` of an instruction file is denied before it
- * runs. With the desk on, `ready` is the `boot` event's append - stamped `bootedAt`, which is
+ * (src/desk-tools.ts `installDeskWriteGuard`) is installed too, its listener and its backstop,
+ * anchored on `root`: every desk agent's `write`, `edit` or `str_replace_editor` of an instruction
+ * file is denied before it runs - and, without a `root`, every desk write. With the desk on, `ready`
+ * is the `boot` event's append - stamped `bootedAt`, which is
  * `now()` at this call and the status's uptime origin - and the sleep watch starts at once, writing
  * into the ledger. Given `root`, `route`, `sessionCtx` and `installModelSelection`
  * too, the desk conversation's owner (src/desk-conversation.ts) is created on the same `now` and
@@ -865,8 +866,8 @@ export interface DeskHandle {
  *   (default `Date.now`) and `version` (default {@link DSH_PIN}), for the events and the status;
  *   `watch`, the sleep watch's clock and timer seams, for tests - not its `append`, which is
  *   always the ledger's; `ctx`, the booted ROOT context, and `hub`, the quote hub main.ts owns,
- *   which the desk tools need both of - the write guard needs `ctx` alone; `root`, the
- *   repository whose `desk/journal/` the desk session runs in, `route`, its model route
+ *   which the desk tools need both of - the write guard needs `ctx`, and judges below `root`;
+ *   `root`, the repository whose `desk/journal/` the desk session runs in, `route`, its model route
  *   (src/desk-session.ts `resolveDeskRoute`), `sessionCtx`, the booted ROOT context as the
  *   conversation reads it, and
  *   `installModelSelection`, dsh-agent's - the four the conversation needs; `telegram`, the
@@ -904,7 +905,7 @@ export function installDesk(
   const telegram = (): TelegramStatus => bridge?.status() ?? { configured: deps.telegram !== undefined, polling: false, dropped: 0, queued: 0 };
   const status = { home, bootedAt, enabled, now, version, telegram };
   registerDeskRoutes(webServer, status);
-  const removeGuard = deps.ctx === undefined ? async () => {} : installDeskWriteGuard(deps.ctx);
+  const removeGuard = deps.ctx === undefined ? async () => {} : installDeskWriteGuard(deps.ctx, deps.root);
   const removeTools = deps.ctx === undefined || deps.hub === undefined ? () => {} : installDeskTools(deps.ctx, deskToolDefinitions({
     hub: deps.hub,
     readState: () => deskStatus(status),

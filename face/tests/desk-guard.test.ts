@@ -21,11 +21,14 @@ import {
 import type { QuotePayload } from "../src/quote-types.ts";
 import { recorder } from "./route-recorder.ts";
 
-/** The desk session's cwd, as src/desk-session.ts `deskJournalDir` makes it: no name on it is a fence name. */
-const CWD = "/repo/desk/journal";
+/** The repository root the face runs from (main.ts passes `process.cwd()` as `installDesk`'s `root`). */
+const REPO = "/repo";
+/** The desk session's cwd, as src/desk-session.ts `deskJournalDir` makes it: no name below the root is a fence name. */
+const CWD = `${REPO}/desk/journal`;
 
 const denied = (name: FenceName) => ({ kind: "deny", reason: `the desk never writes ${name}: it would steer every desk turn after it` });
 const UNCHECKED = { kind: "deny", reason: "the desk could not check this write's path; nothing was written" };
+const sitsUnder = (name: FenceName) => ({ kind: "deny", reason: `the desk does not write while its directory sits under ${name}` });
 
 /** A well-formed call's arguments to `tool`, its path argument `arg` set to `path`: only the path varies. */
 function argsFor(tool: string, arg: string, path: unknown): Record<string, unknown> {
@@ -68,7 +71,8 @@ test("each write tool is denied for every fence name at any depth, case-folded",
     ["GRAVIT.local.md", "GRAVIT.local.md"],
   ];
   /* And the spellings around them: deeper, folded as the volume folds (the long s too), with a trailing slash,
-   * above the journal, out of it, through a `..` that leaves the fenced name behind, and at a backslash. */
+   * above the journal, out of the repository, through a `..` that leaves the fenced name behind, and at a
+   * backslash. */
   const around: readonly (readonly [string, FenceName])[] = [
     ["a/b/c/d/e/f/GRAVIT.md", "GRAVIT.md"],
     ["./Gravit.MD", "GRAVIT.md"],
@@ -90,11 +94,11 @@ test("each write tool is denied for every fence name at any depth, case-folded",
   assertThreePairs();
   for (const [tool, arg] of PATH_ARGS) {
     for (const [path, name] of cases) {
-      assert.deepEqual(deskWriteDecision(tool, argsFor(tool, arg, path), CWD), denied(name), `${tool} ${arg}: ${JSON.stringify(path)}`);
+      assert.deepEqual(deskWriteDecision(tool, argsFor(tool, arg, path), CWD, REPO), denied(name), `${tool} ${arg}: ${JSON.stringify(path)}`);
     }
   }
   /* Each FENCE_NAMES entry, as itself, is named in its own spelling. */
-  for (const name of FENCE_NAMES) assert.deepEqual(deskWriteDecision("write", argsFor("write", "file_path", name), CWD), denied(name));
+  for (const name of FENCE_NAMES) assert.deepEqual(deskWriteDecision("write", argsFor("write", "file_path", name), CWD, REPO), denied(name));
 });
 
 test("ordinary journal writes pass", () => {
@@ -105,48 +109,79 @@ test("ordinary journal writes pass", () => {
   ];
   assertThreePairs();
   for (const [tool, arg] of PATH_ARGS) {
-    for (const path of ordinary) assert.equal(deskWriteDecision(tool, argsFor(tool, arg, path), CWD), null, `${tool} ${arg}: ${path}`);
+    for (const path of ordinary) assert.equal(deskWriteDecision(tool, argsFor(tool, arg, path), CWD, REPO), null, `${tool} ${arg}: ${path}`);
   }
 });
 
-test("the checkout's own ancestors are never judged: only names below the common ancestor with the cwd, and a relative path's own", () => {
-  /* A checkout that sits under a fenced name: its own ancestors are never the desk's to write, so they never count. */
-  const under = "/x/.git/repo/desk/journal";
+test("the repository's own ancestors are never judged: names below the root, a path's names below its common ancestor with it, a relative path's own", () => {
+  /* A checkout that sits under a fenced name: the root's ancestors are never the desk's to write, so they never count. */
+  const repo = "/x/.git/repo";
+  const under = `${repo}/desk/journal`;
   assertThreePairs();
   for (const [tool, arg] of PATH_ARGS) {
     /* str_replace_editor takes absolute paths only, and an absolute path carries every ancestor of the checkout. */
     const spell = (relative: string): string => (tool === "str_replace_editor" ? join(under, relative) : relative);
-    assert.equal(deskWriteDecision(tool, argsFor(tool, arg, spell("notes/a.md")), under), null, `${tool}: notes/a.md`);
-    assert.equal(deskWriteDecision(tool, argsFor(tool, arg, join(under, "notes", "a.md")), under), null, `${tool}: the same, absolute`);
-    assert.equal(deskWriteDecision(tool, argsFor(tool, arg, "/x/.git/repo/desk/journal/./notes/a.md"), under), null, `${tool}: with a ./`);
-    assert.equal(deskWriteDecision(tool, argsFor(tool, arg, "/tmp/desk-scratch.md"), under), null, `${tool}: a temp area`);
+    assert.equal(deskWriteDecision(tool, argsFor(tool, arg, spell("notes/a.md")), under, repo), null, `${tool}: notes/a.md`);
+    assert.equal(deskWriteDecision(tool, argsFor(tool, arg, join(under, "notes", "a.md")), under, repo), null, `${tool}: the same, absolute`);
+    assert.equal(deskWriteDecision(tool, argsFor(tool, arg, `${under}/./notes/a.md`), under, repo), null, `${tool}: with a ./`);
+    assert.equal(deskWriteDecision(tool, argsFor(tool, arg, `${repo}/strategies/s/notes.md`), under, repo), null, `${tool}: elsewhere in the repository`);
+    assert.equal(deskWriteDecision(tool, argsFor(tool, arg, "/tmp/desk-scratch.md"), under, repo), null, `${tool}: a temp area`);
     const cases: readonly (readonly [string, FenceName])[] = [
       ["../GRAVIT.md", "GRAVIT.md"],
       ["../../.agents/skills/x/SKILL.md", ".agents"],
-      ["/x/.git/repo/desk/GRAVIT.md", "GRAVIT.md"],
-      ["/x/.git/repo/.dsh/skills/x/SKILL.md", ".dsh"],
-      ["/x/.git/repo/desk/journal/notes/.git/config", ".git"],
-      /* a `..` that leaves a fenced name behind still counts below the common ancestor */
-      ["/x/.git/repo/desk/journal/.git/../notes.md", ".git"],
+      [`${repo}/desk/GRAVIT.md`, "GRAVIT.md"],
+      [`${repo}/.dsh/skills/x/SKILL.md`, ".dsh"],
+      [`${repo}/.git/hooks/pre-commit`, ".git"],
+      [`${under}/notes/.git/config`, ".git"],
+      /* a `..` that leaves a fenced name behind still counts below the root */
+      [`${under}/.git/../notes.md`, ".git"],
       ["~/.dsh/skills/x/SKILL.md", ".dsh"],
       ["~/.agents/skills/x/SKILL.md", ".agents"],
       ["~/.dsh/profiles/face/cordis.patch.yml", ".dsh"],
     ];
     for (const [path, name] of cases) {
-      assert.deepEqual(deskWriteDecision(tool, argsFor(tool, arg, path), under), denied(name), `${tool}: ${path}`);
+      assert.deepEqual(deskWriteDecision(tool, argsFor(tool, arg, path), under, repo), denied(name), `${tool}: ${path}`);
     }
-    /* The harness home, as an absolute path beside a checkout in the same home. */
-    const home = "/Users/op/work/repo/desk/journal";
+    /* The harness home, as an absolute path beside a checkout in the same home: the names below their common
+     * ancestor with the root. */
+    const home = "/Users/pan/Desktop/self-evolve/evolving-alpha-us";
     for (const [path, name] of [
-      ["/Users/op/.dsh/skills/x/SKILL.md", ".dsh"],
-      ["/Users/op/.agents/skills/x/SKILL.md", ".agents"],
-      ["/Users/op/.dsh/profiles/face/cordis.patch.yml", ".dsh"],
-      ["/Users/op/work/repo/.git/hooks/pre-commit", ".git"],
-      ["/Users/op/work/repo/GRAVIT.local.md", "GRAVIT.local.md"],
+      ["/Users/pan/.dsh/skills/x/SKILL.md", ".dsh"],
+      ["/Users/pan/.agents/skills/x/SKILL.md", ".agents"],
+      ["/Users/pan/.dsh/profiles/face/cordis.patch.yml", ".dsh"],
+      [`${home}/.git/hooks/pre-commit`, ".git"],
+      [`${home}/GRAVIT.local.md`, "GRAVIT.local.md"],
     ] as const) {
-      assert.deepEqual(deskWriteDecision(tool, argsFor(tool, arg, path), home), denied(name), `${tool}: ${path}`);
+      assert.deepEqual(deskWriteDecision(tool, argsFor(tool, arg, path), `${home}/desk/journal`, home), denied(name), `${tool}: ${path}`);
     }
   }
+});
+
+test("a desk whose cwd sits under a fence name writes nothing at all; its views and a cwd off the fence still go", () => {
+  assertThreePairs();
+  const cwds: readonly (readonly [string, string, FenceName])[] = [
+    ["/Users/pan/.dsh/desk/run", "/x/repo", ".dsh"],
+    ["/Users/pan/.dsh", "/x/repo", ".dsh"],
+    ["/Users/pan/.DSH/run", "/x/repo", ".dsh"],
+    ["/Users/pan/.agents/work", "/x/repo", ".agents"],
+    /* below the root too: a cwd inside a project root or under an instruction file's name */
+    ["/x/repo/desk/.git/work", "/x/repo", ".git"],
+    ["/x/repo/GRAVIT.md/journal", "/x/repo", "GRAVIT.md"],
+  ];
+  for (const [cwd, repo, name] of cwds) {
+    for (const [tool, arg] of PATH_ARGS) {
+      for (const path of [tool === "str_replace_editor" ? `${cwd}/notes/a.md` : "notes/a.md", "/tmp/desk-scratch.md", `${repo}/desk/journal/notes.md`, "GRAVIT.md"]) {
+        assert.deepEqual(deskWriteDecision(tool, argsFor(tool, arg, path), cwd, repo), sitsUnder(name), `${tool} from ${cwd}: ${path}`);
+      }
+    }
+    assert.equal(deskWriteDecision("str_replace_editor", { command: "view", path: `${cwd}/notes/a.md` }, cwd, repo), null, `a view from ${cwd} reads`);
+    assert.equal(deskWriteDecision("read", { file_path: "notes/a.md" }, cwd, repo), null);
+  }
+  /* A cwd outside the repository that sits under no fence name writes as any other. */
+  assert.equal(deskWriteDecision("write", argsFor("write", "file_path", "notes/a.md"), "/tmp/firing", "/x/repo"), null);
+  assert.deepEqual(deskWriteDecision("write", argsFor("write", "file_path", "GRAVIT.md"), "/tmp/firing", "/x/repo"), denied("GRAVIT.md"));
+  /* A cwd above the root, or the root itself, sits under nothing of the repository's own. */
+  assert.equal(deskWriteDecision("write", argsFor("write", "file_path", "notes/a.md"), "/x/.git/repo", "/x/.git/repo"), null);
 });
 
 test("a write tool with no string path fails closed", () => {
@@ -160,25 +195,26 @@ test("a write tool with no string path fails closed", () => {
       argsFor(tool, arg === "path" ? "file_path" : "path", "notes/today.md"),
     ];
     for (const args of malformed) {
-      assert.deepEqual(deskWriteDecision(tool, args, CWD), UNCHECKED, `${tool}: ${JSON.stringify(args) ?? String(args)}`);
+      assert.deepEqual(deskWriteDecision(tool, args, CWD, REPO), UNCHECKED, `${tool}: ${JSON.stringify(args) ?? String(args)}`);
     }
   }
-  /* And a cwd that is not one: a relative path could not be placed. */
-  assert.deepEqual(deskWriteDecision("write", argsFor("write", "file_path", "notes/today.md"), undefined as unknown as string), UNCHECKED);
+  /* And a cwd, or a root, that is not one: a path could not be placed, nor judged. */
+  assert.deepEqual(deskWriteDecision("write", argsFor("write", "file_path", "notes/today.md"), undefined as unknown as string, REPO), UNCHECKED);
+  assert.deepEqual(deskWriteDecision("write", argsFor("write", "file_path", "notes/today.md"), CWD, undefined as unknown as string), UNCHECKED);
 });
 
 test("str_replace_editor's view passes; every other command is judged, a missing or unknown one too", () => {
-  for (const path of [`${CWD}/GRAVIT.md`, "/repo/.git/config", `${CWD}/.agents`]) {
-    assert.equal(deskWriteDecision("str_replace_editor", { command: "view", path }, CWD), null, `view ${path} reads`);
+  for (const path of [`${CWD}/GRAVIT.md`, `${REPO}/.git/config`, `${CWD}/.agents`]) {
+    assert.equal(deskWriteDecision("str_replace_editor", { command: "view", path }, CWD, REPO), null, `view ${path} reads`);
   }
   /* view is a read whatever its path says: the tool refuses a path that is none. */
-  assert.equal(deskWriteDecision("str_replace_editor", { command: "view" }, CWD), null);
+  assert.equal(deskWriteDecision("str_replace_editor", { command: "view" }, CWD, REPO), null);
   for (const command of ["create", "str_replace", "insert", "VIEW", "view ", "undo_edit", undefined, null, 42, ["view"]]) {
-    assert.deepEqual(deskWriteDecision("str_replace_editor", { command, path: `${CWD}/GRAVIT.md`, file_text: "x" }, CWD), denied("GRAVIT.md"),
+    assert.deepEqual(deskWriteDecision("str_replace_editor", { command, path: `${CWD}/GRAVIT.md`, file_text: "x" }, CWD, REPO), denied("GRAVIT.md"),
       `command ${JSON.stringify(command)} is judged`);
   }
   /* The exemption is str_replace_editor's: write and edit take no command. */
-  assert.deepEqual(deskWriteDecision("write", { command: "view", file_path: "GRAVIT.md", content: "x" }, CWD), denied("GRAVIT.md"));
+  assert.deepEqual(deskWriteDecision("write", { command: "view", file_path: "GRAVIT.md", content: "x" }, CWD, REPO), denied("GRAVIT.md"));
 });
 
 test("non-write tools are never judged", () => {
@@ -189,7 +225,7 @@ test("non-write tools are never judged", () => {
   ];
   for (const tool of readers) {
     for (const args of [{ file_path: "GRAVIT.md" }, { path: `${CWD}/.git/config` }, {}, undefined, null, "GRAVIT.md"]) {
-      assert.equal(deskWriteDecision(tool, args, CWD), null, `${JSON.stringify(tool)}: ${JSON.stringify(args)}`);
+      assert.equal(deskWriteDecision(tool, args, CWD, REPO), null, `${JSON.stringify(tool)}: ${JSON.stringify(args)}`);
     }
   }
 });
@@ -294,7 +330,7 @@ async function pipeline(listeners: readonly GuardListener[], guards: readonly Gu
 test("the listener judges only gravit-desk agents and never throws", async () => {
   const root = fakeRoot();
   const lines: string[] = [];
-  const dispose = installDeskWriteGuard(root.ctx, { log: (line) => lines.push(line) });
+  const dispose = installDeskWriteGuard(root.ctx, REPO, { log: (line) => lines.push(line) });
   assert.equal(root.preExecute.length, 1, "one root tools/pre-execute listener");
   assert.deepEqual(root.registeredWith, [{ prepend: true }], "registered in front, as Gate 2's is");
   const listener = root.preExecute[0];
@@ -315,6 +351,11 @@ test("the listener judges only gravit-desk agents and never throws", async () =>
     { decision: denied(".git"), nexts: 0 });
   assert.deepEqual(await judged(listener, call("edit", { file_path: "../../.agents/skills/x/SKILL.md", old_string: "a", new_string: "b" }, desk)),
     { decision: denied(".agents"), nexts: 0 });
+  /* A desk session whose cwd sits under a fence name writes nothing; Gravit's session in the same place is no desk's. */
+  const homeDesk = agentOn(DESK_PRESET, { cwd: "/Users/pan/.dsh/desk/run", agentPreset: DESK_PRESET });
+  assert.deepEqual(await judged(listener, write("notes/today.md", homeDesk)), { decision: sitsUnder(".dsh"), nexts: 0 });
+  assert.deepEqual(await judged(listener, write("notes/today.md", agentOn("gravit", { cwd: "/Users/pan/.dsh/desk/run", agentPreset: "gravit" }))),
+    { decision: ALLOW, nexts: 1 });
   /* Its ordinary write is handed on; so is its view and its read of anything - and a reader never costs a registry read. */
   assert.deepEqual(await judged(listener, write("notes/today.md", desk)), { decision: ALLOW, nexts: 1 });
   assert.deepEqual(await judged(listener, call("str_replace_editor", { command: "view", path: `${CWD}/GRAVIT.md` }, desk)), { decision: ALLOW, nexts: 1 });
@@ -337,7 +378,7 @@ test("the listener judges only gravit-desk agents and never throws", async () =>
   assert.deepEqual(await judged(listener, write("notes/today.md", anonymous)), { decision: UNCHECKED, nexts: 0 });
   assert.equal(lines.at(-1), "gravit-face: desk: the write guard could not judge a call, and denied it");
   const loud = fakeRoot();
-  installDeskWriteGuard(loud.ctx, { log: () => { throw new Error("the log is gone"); } });
+  installDeskWriteGuard(loud.ctx, REPO, { log: () => { throw new Error("the log is gone"); } });
   assert.deepEqual(await judged(loud.preExecute[0], write("notes/today.md", unreadable)), { decision: UNCHECKED, nexts: 0 });
   assert.equal(loud.guards[0](write("notes/today.md", unreadable)), UNCHECKED.reason, "the backstop too");
   assert.deepEqual(await judged(loud.preExecute[0], write("notes/today.md", anonymous)), { decision: UNCHECKED, nexts: 0 });
@@ -346,7 +387,7 @@ test("the listener judges only gravit-desk agents and never throws", async () =>
    * line; Gravit's write goes on, with one line too. */
   const broken = fakeRoot({ presetError: new Error("the registry is gone") });
   const brokenLines: string[] = [];
-  installDeskWriteGuard(broken.ctx, { log: (line) => brokenLines.push(line) });
+  installDeskWriteGuard(broken.ctx, REPO, { log: (line) => brokenLines.push(line) });
   assert.deepEqual(await judged(broken.preExecute[0], write("notes/today.md", desk)), { decision: UNCHECKED, nexts: 0 });
   assert.equal(brokenLines.length, 1);
   assert.match(brokenLines[0], /^gravit-face: desk: .*the registry is gone/);
@@ -358,7 +399,7 @@ test("the listener judges only gravit-desk agents and never throws", async () =>
   /* A thrown value that is no Error, whose message cannot even be shown, still leaves Gravit's write going on. */
   const odd = fakeRoot({ presetError: { toString() { throw new Error("unshowable"); } } });
   const oddLines: string[] = [];
-  installDeskWriteGuard(odd.ctx, { log: (line) => oddLines.push(line) });
+  installDeskWriteGuard(odd.ctx, REPO, { log: (line) => oddLines.push(line) });
   assert.deepEqual(await judged(odd.preExecute[0], write("notes/today.md", agentOn("gravit"))), { decision: ALLOW, nexts: 1 });
   assert.equal(oddLines.length, 1);
 
@@ -368,17 +409,33 @@ test("the listener judges only gravit-desk agents and never throws", async () =>
   await dispose();
 });
 
+test("a guard given no repository root denies every desk write, says so once, and judges nobody else's", async () => {
+  const root = fakeRoot();
+  const lines: string[] = [];
+  const dispose = installDeskWriteGuard(root.ctx, undefined, { log: (line) => lines.push(line) });
+  assert.equal(lines.length, 1, "one line, at install");
+  assert.match(lines[0], /^gravit-face: desk: the write guard was given no repository root/);
+  const desk = agentOn(DESK_PRESET);
+  assert.deepEqual(await judged(root.preExecute[0], write("notes/today.md", desk)), { decision: UNCHECKED, nexts: 0 });
+  assert.equal(root.guards[0](write("notes/today.md", desk)), UNCHECKED.reason);
+  assert.deepEqual(await judged(root.preExecute[0], call("str_replace_editor", { command: "view", path: `${CWD}/notes/today.md` }, desk)), { decision: ALLOW, nexts: 1 });
+  assert.deepEqual(await judged(root.preExecute[0], write("notes/today.md", agentOn("gravit"))), { decision: ALLOW, nexts: 1 });
+  assert.equal(lines.length, 1, "and no line per call");
+  await dispose();
+});
+
 test("the backstop re-judges the call as the waterfall left it, for gravit-desk agents only, and never throws", async () => {
   const root = fakeRoot();
   const lines: string[] = [];
-  const dispose = installDeskWriteGuard(root.ctx, { log: (line) => lines.push(line) });
+  const dispose = installDeskWriteGuard(root.ctx, REPO, { log: (line) => lines.push(line) });
   assert.deepEqual(root.injected, [["tools"]], "armed through inject([\"tools\"]), as Gate 2's guard is");
   assert.equal(root.guards.length, 1, "one tools.guard");
   const backstop = root.guards[0];
   const desk = agentOn(DESK_PRESET);
 
   assert.equal(backstop(write("GRAVIT.md", desk)), denied("GRAVIT.md").reason);
-  assert.equal(backstop(call("str_replace_editor", { command: "insert", path: "/repo/.agents/skills/x/SKILL.md", new_str: "x", insert_line: 1 }, desk)), denied(".agents").reason);
+  assert.equal(backstop(call("str_replace_editor", { command: "insert", path: `${REPO}/.agents/skills/x/SKILL.md`, new_str: "x", insert_line: 1 }, desk)), denied(".agents").reason);
+  assert.equal(backstop(write("notes/today.md", agentOn(DESK_PRESET, { cwd: "/Users/pan/.dsh", agentPreset: DESK_PRESET }))), sitsUnder(".dsh").reason);
   for (const exec of [write("notes/today.md", desk), write("GRAVIT.md", agentOn("gravit")), write("GRAVIT.md"),
     call("str_replace_editor", { command: "view", path: `${CWD}/GRAVIT.md` }, desk)]) {
     assert.equal(backstop(exec), undefined);
@@ -410,7 +467,7 @@ test("the backstop re-judges the call as the waterfall left it, for gravit-desk 
 
 test("a later prepend listener answering allow cannot lift a desk write's deny", async () => {
   const root = fakeRoot();
-  const dispose = installDeskWriteGuard(root.ctx, { log: () => {} });
+  const dispose = installDeskWriteGuard(root.ctx, REPO, { log: () => {} });
   /* Registered after the guard and in front of it, it answers allow without calling next: the guard's listener
    * never runs. */
   let swallowed = 0;
@@ -429,6 +486,21 @@ test("a later prepend listener answering allow cannot lift a desk write's deny",
   await dispose();
 });
 
+test("the disposer never rejects: a listener that cannot be removed and a backstop that cannot be withdrawn cost a line each", async () => {
+  const root = fakeRoot();
+  const failing: DeskWriteGuardCtxLike = {
+    ...root.ctx,
+    on: () => () => { throw new Error("the listener cannot be removed"); },
+    inject: () => ({ dispose: async () => { throw new Error("the fiber cannot be disposed"); } }),
+  };
+  const lines: string[] = [];
+  const dispose = installDeskWriteGuard(failing, REPO, { log: (line) => lines.push(line) });
+  await dispose();
+  assert.equal(lines.length, 2);
+  assert.match(lines[0], /^gravit-face: desk: .*the listener cannot be removed/);
+  assert.match(lines[1], /^gravit-face: desk: .*the fiber cannot be disposed/);
+});
+
 test("installDesk installs the guard with the tools, whatever enabled says, and dispose removes it", async (t) => {
   const homes: string[] = [];
   t.after(async () => { for (const dir of homes) await rm(dir, { recursive: true, force: true }); });
@@ -442,12 +514,15 @@ test("installDesk installs the guard with the tools, whatever enabled says, and 
   const deskWrite = write("GRAVIT.md", agentOn(DESK_PRESET));
   for (const enabled of [false, true]) {
     const root = fakeRoot();
-    const desk = installDesk(recorder(), { home: await home(), enabled, watch, ctx: root.ctx, hub });
+    const desk = installDesk(recorder(), { home: await home(), enabled, watch, ctx: root.ctx, hub, root: REPO });
     assert.equal(root.preExecute.length, 1, `the guard's listener is installed (enabled: ${enabled})`);
     assert.equal(root.guards.length, 1, `and its backstop (enabled: ${enabled})`);
     assert.equal(root.agentCreated.length, 1, `beside the tools' listener (enabled: ${enabled})`);
     assert.deepEqual(await judged(root.preExecute[0], deskWrite), { decision: denied("GRAVIT.md"), nexts: 0 });
     assert.equal(root.guards[0](deskWrite), denied("GRAVIT.md").reason);
+    /* installDesk's root is the guard's: a desk under the harness home writes nothing. */
+    assert.deepEqual(await judged(root.preExecute[0], write("notes/a.md", agentOn(DESK_PRESET, { cwd: "/Users/pan/.dsh/desk/run", agentPreset: DESK_PRESET }))),
+      { decision: sitsUnder(".dsh"), nexts: 0 });
     await desk.dispose(0);
     assert.equal(root.preExecute.length, 0, `dispose removes the listener (enabled: ${enabled})`);
     assert.equal(root.guards.length, 0, `and the backstop (enabled: ${enabled})`);
@@ -455,7 +530,7 @@ test("installDesk installs the guard with the tools, whatever enabled says, and 
   }
   /* Given the context alone, the guard - which needs no hub - is installed, and the tools are not. */
   const root = fakeRoot();
-  const desk = installDesk(recorder(), { home: await home(), enabled: false, ctx: root.ctx });
+  const desk = installDesk(recorder(), { home: await home(), enabled: false, ctx: root.ctx, root: REPO });
   assert.equal(root.preExecute.length, 1);
   assert.equal(root.guards.length, 1);
   assert.equal(root.agentCreated.length, 0);

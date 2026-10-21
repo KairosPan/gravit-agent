@@ -336,7 +336,7 @@ test("installDesk installs the desk tools whatever enabled says, desk_state read
     const root = fakeRoot();
     const rec = recorder();
     const at = Date.parse("2026-10-20T14:00:00.000Z");
-    const desk = installDesk(rec, { home, enabled, now: () => at, version: "v", watch, ctx: root.ctx, hub: fakeHub().hub });
+    const desk = installDesk(rec, { home, enabled, now: () => at, version: "v", watch, ctx: root.ctx, hub: fakeHub().hub, root: "/repo" });
     assert.equal(root.listeners.length, 1, `the listener is installed (enabled: ${enabled})`);
     assert.equal(root.guards.length, 1, `and the write guard beside it (enabled: ${enabled})`);
     assert.equal(root.backstops.length, 1, `with its backstop (enabled: ${enabled})`);
@@ -360,7 +360,7 @@ test("installDesk installs the desk tools whatever enabled says, desk_state read
   }
   /* The tools need both: a context with no hub installs no tools - only the write guard, which needs no hub. */
   const root = fakeRoot();
-  installDesk(recorder(), { home: await mkdtemp(join(tmpdir(), "face-desk-tools-")), enabled: false, ctx: root.ctx });
+  installDesk(recorder(), { home: await mkdtemp(join(tmpdir(), "face-desk-tools-")), enabled: false, ctx: root.ctx, root: "/repo" });
   assert.equal(root.listeners.length, 0, "no tools without a hub");
   assert.equal(root.guards.length, 1, "but the guard");
   assert.equal(root.backstops.length, 1, "and its backstop");
