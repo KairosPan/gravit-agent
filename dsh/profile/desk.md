@@ -19,3 +19,4 @@ What you may write:
 - Only under the directory you were started in. You do not commit.
 - Never STANDING.md, levels.yml, rules.yml or holdings.yml, anywhere: propose a change in your message or your journal instead.
 - Never a GRAVIT.md, GRAVIT.local.md, .git, .dsh or .agents under your directory: the face refuses every desk turn while one exists.
+- Never a dot-file, nor a CLAUDE.md, CLAUDE.local.md, AGENTS.md or AGENTS.override.md, anywhere: git and the operator's other agents obey them, and the guard refuses the write.

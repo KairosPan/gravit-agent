@@ -22,8 +22,9 @@
  * boot that the next boot follows with no `shutdown` between is `lost`.
  *
  * The writer appends one JSON object per line under the face's file lock, creates its files
- * `0600`, and rotates the file once it is over {@link LEDGER_ROTATE_BYTES}. It never throws into
- * the face: an append that fails is one `gravit-face:` line on stderr, and a face whose ledger
+ * `0600`, and rotates the file once it is over {@link LEDGER_ROTATE_BYTES}, the new file opening
+ * with the old one's last `desk-session`, so the desk conversation is found again. It never throws
+ * into the face: an append that fails is one `gravit-face:` line on stderr, and a face whose ledger
  * cannot be written still boots and serves. The reader takes the current file only, and skips and
  * counts every line that is not an event. A last line torn by a crash mid-append is the case that
  * matters: the writer starts the next event on a fresh line, so the fragment is one skipped line
@@ -109,8 +110,10 @@ export interface TurnUsage {
  * `off-cleared` its lift, from a terminal or by its own expiry. A `desk-session` names a desk
  * conversation when the face opens one: `created` when there was none to resume, `new` when the
  * operator asked for another. A `desk-turn` is one turn on it: the kind of message that opened it
- * (`source`), its number, whether it ended, the face's deadline cut it off or it failed - with the
- * `error` it failed on - its wall time and, when the harness reported them, its tokens. A
+ * (`source`), its number, whether it ended, the face's deadline cut it off, something else cancelled
+ * it - with what `cancel`led it: `shutdown`, `stopped from the phone`, `stopped in the browser` - or it
+ * failed - with the `error` it failed on - its wall time and, when the harness reported them, its
+ * tokens. A
  * `desk-refused` is a turn the face would not open: why, and the path that made it refuse when a path
  * did. */
 export type DeskEvent =
@@ -120,7 +123,10 @@ export type DeskEvent =
   | { t: string; kind: "off-set"; by: "telegram" | "page" | "terminal"; until?: string }
   | { t: string; kind: "off-cleared"; by: "terminal" | "expiry" }
   | { t: string; kind: "desk-session"; sessionId: string; reason: "created" | "new" }
-  | { t: string; kind: "desk-turn"; sessionId: string; source: string; turn: number; outcome: "ended" | "timed-out" | "failed"; wallMs: number; usage?: TurnUsage; error?: string }
+  | {
+    t: string; kind: "desk-turn"; sessionId: string; source: string; turn: number; outcome: "ended" | "timed-out" | "cancelled" | "failed";
+    wallMs: number; usage?: TurnUsage; cancel?: string; error?: string;
+  }
   | { t: string; kind: "desk-refused"; reason: string; path?: string };
 
 /** Every kind {@link DeskEvent} has, and only those. A record over the union rather than a list,
@@ -188,7 +194,9 @@ function rotatedName(file: string, stamp: string): string {
  * The directory is made first, because `withFileLock` creates its lock beside the file
  * (`roster.ts`'s `update` keeps the same order). Inside the lock, a file over `rotateBytes` is
  * renamed to `<name>.<t>.<ext>` ({@link rotatedName}) - `t` being the record's own `t` when it
- * carries one as a string, else the time of the append - and the line goes to a fresh file. A file
+ * carries one as a string, else the time of the append - and the line goes to a fresh file, after
+ * what `carry`, given the renamed file's text, hands on to it, one line each (the ledger's last
+ * `desk-session`, {@link appendEvent}; nothing for any other file). A file
  * whose last byte is not a newline ends in a write that a crash or a full disk cut short; the line
  * then opens with a newline, so the fragment stays one skipped line instead of swallowing this
  * record - a swallowed `boot` would leave the killed run reading as the live one. The lock makes
@@ -207,13 +215,14 @@ function rotatedName(file: string, stamp: string): string {
  * @param home - the harness home.
  * @param file - the file's name in {@link deskDir} - a name, not a path.
  * @param record - the record, written as one JSON line.
- * @param opts - `rotateBytes`, default {@link LEDGER_ROTATE_BYTES}; `log`, for the failure line.
+ * @param opts - `rotateBytes`, default {@link LEDGER_ROTATE_BYTES}; `log`, for the failure line;
+ *   `carry`, the lines a rotation hands on to the fresh file, none when absent.
  */
 export async function appendRecord(
   home: string,
   file: string,
   record: object,
-  opts: { rotateBytes?: number; log?: (line: string) => void } = {},
+  opts: { rotateBytes?: number; log?: (line: string) => void; carry?: (rotated: string) => readonly string[] } = {},
 ): Promise<void> {
   if (basename(file) !== file || file === "" || file === "." || file === "..") {
     throw new TypeError(`appendRecord takes a file name in the desk's directory, not ${JSON.stringify(file)}`);
@@ -226,8 +235,16 @@ export async function appendRecord(
       let size = await sizeOf(path);
       if (size > (opts.rotateBytes ?? LEDGER_ROTATE_BYTES)) {
         const { t } = record as { t?: unknown };
-        await rename(path, join(dir, rotatedName(file, typeof t === "string" ? t : new Date().toISOString())));
+        const rotated = join(dir, rotatedName(file, typeof t === "string" ? t : new Date().toISOString()));
+        await rename(path, rotated);
         size = 0;
+        /* what the old file hands the new one, line by line, before the record that rotated it */
+        const carried = opts.carry === undefined ? [] : opts.carry(await readFile(rotated, "utf8"));
+        if (carried.length > 0) {
+          const text = carried.map((line) => `${line}\n`).join("");
+          await appendFile(path, text, { encoding: "utf8", mode: 0o600 });
+          size = Buffer.byteLength(text);
+        }
       }
       const lead = size > 0 && (await endsMidLine(path, size)) ? "\n" : "";
       await appendFile(path, `${lead}${JSON.stringify(record)}\n`, { encoding: "utf8", mode: 0o600 });
@@ -240,7 +257,10 @@ export async function appendRecord(
 
 /**
  * Append one event to `$DSH_HOME/face/desk/events.jsonl`: {@link appendRecord} on
- * {@link EVENTS_FILE}, rotated under the event's `t`. Never rejects; a failure is one `log` line.
+ * {@link EVENTS_FILE}, rotated under the event's `t` - the new file opening with the last
+ * `desk-session` line of the old one, as it was written ({@link carryDeskSession}), so the desk
+ * conversation a face resumes ({@link lastDeskSession}) is still the current file's. Never rejects;
+ * a failure is one `log` line.
  * @param home - the harness home.
  * @param event - the event, written as one JSON line.
  * @param opts - `rotateBytes`, default {@link LEDGER_ROTATE_BYTES}; `log`, for the failure line.
@@ -250,7 +270,17 @@ export async function appendEvent(
   event: DeskEvent,
   opts: { rotateBytes?: number; log?: (line: string) => void } = {},
 ): Promise<void> {
-  await appendRecord(home, EVENTS_FILE, event, opts);
+  await appendRecord(home, EVENTS_FILE, event, { ...opts, carry: carryDeskSession });
+}
+
+/** What a rotated ledger hands the new one: its last line that is a `desk-session` event, as it was
+ * written, or nothing when it has none. Read once per rotation, from the end. */
+function carryDeskSession(rotated: string): string[] {
+  const lines = rotated.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (eventOf(lines[i])?.kind === "desk-session") return [lines[i]];
+  }
+  return [];
 }
 
 /** One line as an event, or `undefined`: not JSON, not an object, or without a string `t` and a
@@ -272,7 +302,8 @@ function eventOf(line: string): DeskEvent | undefined {
 /**
  * The current ledger's events, in file order, and how many lines were not events.
  *
- * Reads `events.jsonl` only, never a rotated file. An absent ledger - none written yet, or a
+ * Reads `events.jsonl` only, never a rotated file - a rotation hands its last `desk-session` on
+ * ({@link appendEvent}), and the runs and turns before it stay behind. An absent ledger - none written yet, or a
  * non-directory where `face/` or `face/desk/` should be, so that none can exist - is
  * `{ events: [], skipped: 0 }`; any other read failure rejects, so an unreadable ledger never
  * reads as an empty one. Every line that {@link eventOf} refuses is skipped and counted, a blank
@@ -606,7 +637,9 @@ export function deskTime(at: Date, now: Date): string {
  * the last one's sender; `queued`, the messages waiting in its outbox; `conflictAt`, the last time
  * Telegram said another poller holds the token; `blocked`, present while Telegram's last answer to
  * a send was 403 - the operator blocked the bot, or never started it - and no send has gone
- * through since. */
+ * through since; `pollFailing`, present while the polls fail - a revoked token's 401, a mistyped
+ * one's 404, a 409, the network - `since` the first that failed after the last that answered, and
+ * `reason`, why the last one failed, redacted as every line of the bridge's is. */
 export interface TelegramStatus {
   configured: boolean;
   polling: boolean;
@@ -616,6 +649,7 @@ export interface TelegramStatus {
   queued: number;
   conflictAt?: string;
   blocked?: boolean;
+  pollFailing?: { since: string; reason: string };
 }
 
 /** What `GET /data/desk/status` answers. `pid`, `version` (the dsh version this face runs),
@@ -726,8 +760,9 @@ function offLine(off: OffState, now: Date): string {
 }
 
 /** The Telegram line: where its keys go while it has none; else, first, that the operator blocked the bot
- * when Telegram says so, then whether it polls, its last poll, what it dropped and holds queued, and its
- * last conflict when it had one. */
+ * when Telegram says so, then whether it polls, its last poll, what it dropped and holds queued, its
+ * last conflict when it had one, and - last, its reason being Telegram's own words - `poll failing since
+ * <time>: <reason>` while the polls fail. */
 function telegramLine(telegram: TelegramStatus, now: Date): string {
   if (!telegram.configured) return "telegram: not configured (TELEGRAM_BOT_TOKEN and TELEGRAM_OPERATOR_ID in $DSH_HOME/.env)";
   const parts = [
@@ -738,6 +773,9 @@ function telegramLine(telegram: TelegramStatus, now: Date): string {
     `${telegram.queued} queued`,
   ];
   if (telegram.conflictAt !== undefined) parts.push(`conflict at ${deskTime(new Date(telegram.conflictAt), now)}`);
+  if (telegram.pollFailing !== undefined) {
+    parts.push(`poll failing since ${deskTime(new Date(telegram.pollFailing.since), now)}: ${telegram.pollFailing.reason}`);
+  }
   return `telegram: ${parts.join(", ")}`;
 }
 
@@ -876,7 +914,10 @@ export interface DeskHandle {
  *   bridge's token and operator id (src/telegram.ts `telegramConfigFromEnv`), absent when either
  *   is unset; `deskDeadlineMs`, every desk turn's deadline, handed to the conversation as its
  *   `deadlineMs` (its own five minutes when absent) - a test seam, which tests/telegram-smoke.test.ts
- *   sets to 1,500 so a parked card is cut in a second and a half; main.ts never passes it.
+ *   sets to 1,500 so a parked card is cut in a second and a half; main.ts never passes it; `log`,
+ *   where every line of the desk's goes - the guard's, its line at install naming what the secret
+ *   check covers included, the tools', the ledger's, the conversation's and the bridge's - stderr
+ *   when absent, as main.ts leaves it; tests pass their own, or one that drops the line.
  * @throws when a desk route's path is already registered, before anything is written or started.
  */
 export function installDesk(
@@ -895,11 +936,13 @@ export function installDesk(
     installModelSelection?: NonNullable<DeskSessionDeps["installModelSelection"]>;
     telegram?: TelegramConfig;
     deskDeadlineMs?: number;
+    log?: (line: string) => void;
   },
 ): DeskHandle {
   const { home, enabled } = deps;
   const now = deps.now ?? Date.now;
   const version = deps.version ?? DSH_PIN;
+  const log = deps.log ?? ((line: string): void => { console.error(line); });
   const bootedAt = now();
   /* The bridge once it runs; until then, and in a face that runs none, the status says only whether its
    * two names are set. */
@@ -907,20 +950,20 @@ export function installDesk(
   const telegram = (): TelegramStatus => bridge?.status() ?? { configured: deps.telegram !== undefined, polling: false, dropped: 0, queued: 0 };
   const status = { home, bootedAt, enabled, now, version, telegram };
   registerDeskRoutes(webServer, status);
-  const removeGuard = deps.ctx === undefined ? async () => {} : installDeskGuard(deps.ctx, deps.root);
+  const removeGuard = deps.ctx === undefined ? async () => {} : installDeskGuard(deps.ctx, deps.root, { log });
   const removeTools = deps.ctx === undefined || deps.hub === undefined ? () => {} : installDeskTools(deps.ctx, deskToolDefinitions({
     hub: deps.hub,
     readState: () => deskStatus(status),
-  }));
+  }), { log });
   if (!enabled) return { enabled, bootedAt, ready: Promise.resolve(), dispose: async () => { removeTools(); await removeGuard(); } };
-  const ready = appendEvent(home, { t: new Date(bootedAt).toISOString(), kind: "boot", pid: process.pid, version, deskEnabled: true });
-  const stopWatch = installAsleepWatch({ now, ...deps.watch, append: (event) => appendEvent(home, event) });
+  const ready = appendEvent(home, { t: new Date(bootedAt).toISOString(), kind: "boot", pid: process.pid, version, deskEnabled: true }, { log });
+  const stopWatch = installAsleepWatch({ now, ...deps.watch, append: (event) => appendEvent(home, event, { log }) });
   const clock: DeskClock = { now, setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout) };
   const { root, route, sessionCtx, installModelSelection } = deps;
   const conversation = root === undefined || route === undefined || sessionCtx === undefined || installModelSelection === undefined
     ? undefined
     : createDeskConversation({
-      session: { ctx: sessionCtx, root, home, route, installModelSelection, now },
+      session: { ctx: sessionCtx, root, home, route, installModelSelection, now, log },
       /* called on the context, as cordis's `on` must be */
       on: (name, listener) => {
         const off = sessionCtx.on(name, listener);
@@ -928,6 +971,7 @@ export function installDesk(
       },
       deadlineMs: deps.deskDeadlineMs,
       clock,
+      log,
     });
   void conversation?.start();
   let disposing: Promise<void> | undefined;
@@ -943,9 +987,10 @@ export function installDesk(
         home,
         conversation,
         status: () => deskStatus(status),
+        log,
       });
     },
-    (err: unknown) => { console.error(`${BIN}: desk: the Telegram bridge could not be loaded: ${reasonOf(err)}`); },
+    (err: unknown) => { log(`${BIN}: desk: the Telegram bridge could not be loaded: ${reasonOf(err)}`); },
   );
   return {
     enabled,
@@ -961,7 +1006,7 @@ export function installDesk(
         await removeGuard();
         stopWatch();
         await ready;
-        await appendEvent(home, { t: new Date(now()).toISOString(), kind: "shutdown", pid: process.pid, code });
+        await appendEvent(home, { t: new Date(now()).toISOString(), kind: "shutdown", pid: process.pid, code }, { log });
       })();
       return disposing;
     },

@@ -665,8 +665,8 @@ test("a renumbered queue: ids below the stored offset are taken, and the next po
     assert.equal(api.polls()[1].offset, 8, "the offset set from the last id, not kept at the old one");
     assert.equal(await fileText(home, "telegram.offset"), "8\n");
     assert.deepEqual(r.lines, [
-      "gravit-face: desk: Telegram update 5 is below the stored offset 101: Telegram has numbered its updates afresh, so the bridge takes it and goes on from 6",
-    ], "one line, for the first update below the offset");
+      "gravit-face: telegram: Telegram update 5 is below the stored offset 101: Telegram has numbered its updates afresh, so the bridge takes it and goes on from 6",
+    ], "one line, for the first update below the offset, in the bridge's own words");
   } finally {
     await r.bridge.dispose();
   }
@@ -947,6 +947,50 @@ test("a failed poll is recorded once a minute and backed off from 5 s, doubling 
     r.api.poll = () => "network";
     r.api.endPoll();
     await waitFor("a fresh 5 s backoff", () => r.api.polls().length === 9 && r.clock.has(5_000));
+  } finally {
+    await r.bridge.dispose();
+  }
+});
+
+/* A revoked token answers every poll 401, a mistyped one 404: the loop goes on, `polling` stays true and only the
+ * last poll's time goes stale - so the status says so, since when and why, until a poll answers. */
+test("a failing poll shows in the status and its line - since when, and why, redacted - and a poll that answers clears it", async () => {
+  const api = new FakeBotApi();
+  /* Telegram's own words, and - as a careless proxy might - the token and a secret in them */
+  api.poll = () => ({ status: 401, description: `Unauthorized for /bot${TOKEN}/getUpdates (key made-up-poll-secret-0042)` });
+  const r = await rig("failing-poll", { api, secrets: ["made-up-poll-secret-0042"] });
+  try {
+    const at = (s: number): string => new Date(NOW + s * 1_000).toISOString();
+    const reason = "HTTP 401 Unauthorized for /bot<token>/getUpdates (key <secret>)";
+    await waitFor("the first backoff", () => r.clock.has(5_000));
+    assert.deepEqual(r.bridge.status().pollFailing, { since: at(0), reason }, "since the first failure, why the last");
+    assert.equal(r.bridge.status().polling, true, "the loop goes on");
+    assert.equal(deskStatusLines({ ...STATUS, telegram: r.bridge.status() }, new Date(NOW)).at(-1),
+      `telegram: polling, no poll yet, 0 dropped, 0 queued, poll failing since 14:30 ET: ${reason}`);
+    /* A mistyped token, five seconds on: still failing since the first, now for the new reason. */
+    api.poll = () => ({ status: 404, description: "Not Found" });
+    r.clock.advance(5_000);
+    await waitFor("the second backoff", () => r.api.polls().length === 2 && r.clock.has(10_000));
+    assert.deepEqual(r.bridge.status().pollFailing, { since: at(0), reason: "HTTP 404 Not Found" });
+    for (const line of [...r.lines, JSON.stringify(r.bridge.status()), JSON.stringify(await records(r.home))]) {
+      assert.equal(line.includes(TOKEN) || line.includes("made-up-poll-secret-0042"), false, `nothing carries the token or the secret: ${line}`);
+    }
+    /* A poll that answers clears it - not one merely under way. */
+    api.poll = () => undefined;
+    r.clock.advance(10_000);
+    await polled(r, 3);
+    assert.equal(Object.hasOwn(r.bridge.status(), "pollFailing"), true, "a poll Telegram holds open has not answered yet");
+    api.endPoll();
+    await polled(r, 4);
+    assert.equal(Object.hasOwn(r.bridge.status(), "pollFailing"), false);
+    assert.equal(r.bridge.status().lastPollAt, at(15));
+    assert.equal(deskStatusLines({ ...STATUS, telegram: r.bridge.status() }, new Date(NOW)).at(-1), "telegram: polling, last poll 14:30 ET, 0 dropped, 0 queued");
+    /* And a 409 is a failing poll too, beside its conflict. */
+    api.poll = () => ({ status: 409, description: "Conflict: terminated by other getUpdates request" });
+    api.endPoll();
+    await waitFor("the conflict's wait", () => r.clock.has(30_000));
+    assert.deepEqual(r.bridge.status().pollFailing, { since: at(15), reason: "HTTP 409 Conflict: terminated by other getUpdates request" });
+    assert.equal(r.bridge.status().conflictAt, at(15));
   } finally {
     await r.bridge.dispose();
   }

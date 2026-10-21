@@ -36,6 +36,7 @@ import { join, relative, resolve } from "node:path";
 import { entryListSchema } from "@deepseek-ai/cordis-plugin-include";
 import { dump, load } from "js-yaml";
 import { isJsonBody, isTrustedDataRequest } from "./data.ts";
+import { DESK_PRESET } from "./desk-names.ts";
 import { FORBIDDEN, HttpError, readBody } from "./http.ts";
 import { DEFAULT_PRESET, LEGACY_PRESET } from "./overlay.ts";
 import type { RouteRegistrar } from "./static.ts";
@@ -48,12 +49,9 @@ export const TEMPLATE = "_template";
 export const BOT_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 /** Ids the grammar admits but the face refuses: the default preset and its
  *  pre-rename alias are the host, and `gravit-desk` is the desk's preset - none
- *  is ever a bot. The desk's id is spelled out rather than imported:
- *  src/desk-preset.ts (its `DESK_PRESET`) imports src/roles.ts, which imports
- *  this module, and in that cycle - whenever src/desk-preset.ts loads first -
- *  this set would read the id before it is initialized (tests/bots.test.ts
- *  ties the two spellings). */
-export const RESERVED_IDS: ReadonlySet<string> = new Set([DEFAULT_PRESET, LEGACY_PRESET, "gravit-desk"]);
+ *  is ever a bot. The desk's id comes from src/desk-names.ts, a leaf that imports
+ *  nothing, so no import cycle can read it before it is set. */
+export const RESERVED_IDS: ReadonlySet<string> = new Set([DEFAULT_PRESET, LEGACY_PRESET, DESK_PRESET]);
 export const isBotId = (value: unknown): value is string =>
   typeof value === "string" && BOT_ID_RE.test(value) && !RESERVED_IDS.has(value);
 

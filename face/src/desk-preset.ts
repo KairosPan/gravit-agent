@@ -51,8 +51,8 @@ const messageOf = (error: unknown): string => error instanceof Error ? error.mes
 
 /** The desk's preset id, defined in src/desk-names.ts - a leaf that src/desk-tools.ts, and through it
  * the pause switch, can load without this module's imports - and re-exported here for this module's
- * importers. src/bots.ts reserves it, spelling it out rather than importing it: this module imports
- * src/roles.ts, which imports src/bots.ts (tests/bots.test.ts ties the two spellings). */
+ * importers. src/bots.ts reserves it, importing it from the leaf too: this module imports src/roles.ts,
+ * which imports src/bots.ts, and the leaf is outside that cycle. */
 export { DESK_PRESET };
 
 /** What a desk session may see, in this order (the plan's Global Constraints): file read and edit,

@@ -17,11 +17,16 @@
  * EVERY TURN on the session, whoever opened it, is supervised (src/desk-session.ts `superviseDeskTurns`): its
  * deadline and its fence check run from its `turn/start`. At its end it is one ledger event - a `desk-turn`,
  * or a `desk-refused` when its fence check cut it - and then, for a turn opened by the phone, an alert or a
- * wake, one delivery to the outlet: the fence's refusal line for a refused turn; else its final text, or,
- * when it said nothing, the timed-out line for a turn the deadline cut and the failed line for one that ended
- * on an error. A browser turn's answer stays in its transcript. Records keep turn order and so do deliveries,
- * each delivery after its own record and none waiting on an outlet more than a minute; nothing at a turn's
- * end can reject - a send that fails is one line.
+ * wake, one delivery to the outlet: the fence's refusal line for a refused turn; else its final text - with
+ * `(cut off: <what cut it>)` after it when a cut interrupted the answer mid-stream - or, when it said
+ * nothing, the timed-out line for a turn the deadline cut and the failed line for one that ended on an error.
+ * A browser turn's answer stays in its transcript. Records keep turn order and so do deliveries, each
+ * delivery after its own record and none waiting on an outlet more than a minute; nothing at a turn's end
+ * can reject - a send that fails is one line.
+ *
+ * A CUT CUTS ONE TURN. The phone's `/stop` ({@link DeskConversation.stop}), like the deadline, cancels the turn
+ * under way and only it: the messages queued behind it are kept and answered, each in its own turn
+ * (src/desk-session.ts `cancelKeepingQueue`). A shutdown keeps nothing.
  *
  * ONE AT A TIME. `start`, `post` and `renew` run in the order they were called, each once the one before has
  * settled: two ensures at once would both find no conversation in the ledger and open two. `stop`,
@@ -128,7 +133,8 @@ export interface DeskConversation {
    * Rejects when the ensure does, and when the conversation is disposed before or while it runs. */
   renew(): Promise<{ sessionId: string }>;
   /** Cancel the work under way - on the current conversation and on any it retired - with `{ kind: "hook",
-   * reason }`; `true` when there was some, `false` when nothing was under way. */
+   * reason }`, and only it: the messages queued behind it are kept and answered, each in its own turn
+   * (src/desk-session.ts `cancelKeepingQueue`); `true` when there was some, `false` when nothing was under way. */
   stop(reason: string): Promise<boolean>;
   /** Where answers go from now on: read at each delivery, so `undefined` stops them while records go on. */
   setOutlet(outlet: DeskOutlet | undefined): void;
@@ -166,11 +172,20 @@ function pausedLine(state: OffState, now: Date, deskTime: Machinery["desk"]["des
   return `paused since ${deskTime(new Date(state.setAt), now)} by ${state.by}${until}; a terminal resumes it: npm run desk -- resume`;
 }
 
-/** The phone's line for a turn its deadline cut before it said anything: the Global Constraints' "5 min" for
- * the default deadline, whole or fractional seconds for any other. */
+/** A deadline as the phone's lines name it: the Global Constraints' "5 min" for the default deadline, whole or
+ * fractional seconds for any other. */
+const deadlineText = (deadlineMs: number): string => (deadlineMs === 300_000 ? "5 min" : `${deadlineMs / 1000} s`);
+
+/** The phone's line for a turn its deadline cut before it said anything. */
 function timedOutLine(deadlineMs: number): string {
-  const after = deadlineMs === 300_000 ? "5 min" : `${deadlineMs / 1000} s`;
-  return `timed out after ${after}; a card or a long tool was pending`;
+  return `timed out after ${deadlineText(deadlineMs)}; a card or a long tool was pending`;
+}
+
+/** The line after an answer a cut interrupted mid-stream: `(cut off: <what cut it>)` - the deadline, or what
+ * cancelled the turn (`stopped from the phone`, `shutdown`, `stopped in the browser`). */
+function cutOffLine(r: DeskTurnRecord): string {
+  const by = r.outcome === "timed-out" ? `timed out after ${deadlineText(r.deadlineMs)}` : r.cancel ?? r.outcome;
+  return `(cut off: ${by})`;
 }
 
 /** The phone's line for a turn that ended on an error before it said anything. */
@@ -180,11 +195,13 @@ const notAnsweredLine = (error: string): string => `the desk could not answer: $
 const SHUT_DOWN = "the desk is shut down";
 const notOpenedLine = (reason: string): string => `the desk could not open a turn: ${reason}`;
 
-/** What a turn's end sends: the refusal line for a refused turn; else its final text; else why it said
- * nothing - cut by its deadline, or failed - and `""`, nothing to send, for one that just ended on a tool. */
+/** What a turn's end sends: the refusal line for a refused turn; else its final text - with a line naming the cut
+ * when a cut interrupted it mid-stream; else why it said nothing - cut by its deadline, or failed - and `""`,
+ * nothing to send, for one that just ended on a tool or was cancelled before it said anything (the phone's `/stop`
+ * is answered by the bridge, a shutdown by nobody). */
 function replyOf(r: DeskTurnRecord, m: Machinery): string {
   if (r.outcome === "refused") return m.session.fenceRefusalLine(r.violation ?? JOURNAL);
-  if (r.finalText !== "") return r.finalText;
+  if (r.finalText !== "") return r.interrupted === true ? `${r.finalText}\n${cutOffLine(r)}` : r.finalText;
   if (r.outcome === "timed-out") return timedOutLine(r.deadlineMs);
   if (r.outcome === "failed") return notAnsweredLine(r.error ?? "error");
   return "";
@@ -287,6 +304,7 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
     await m.desk.appendEvent(home, {
       t, kind: "desk-turn", sessionId: r.sessionId, source: r.source, turn: r.turn, outcome: r.outcome, wallMs: r.wallMs,
       ...(r.usage === undefined ? {} : { usage: r.usage }),
+      ...(r.cancel === undefined ? {} : { cancel: r.cancel }),
       ...(r.error === undefined ? {} : { error: r.error }),
     }, { log });
   };
@@ -375,10 +393,13 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
     return { agent, sessionId };
   };
 
-  /** Cancel `w`'s work under way with `cause`; whether the cancel went through. */
-  const cancel = (w: Watch, cause: { kind: "hook"; reason: string }): boolean => {
+  /** Cancel `w`'s work under way with `cause`; whether the cancel went through. `keep`, the phone's stop: only the
+   * turn under way, the messages queued behind it kept and answered (src/desk-session.ts `cancelKeepingQueue`);
+   * without it, a shutdown: the inbox goes too. */
+  const cancel = (w: Watch, cause: { kind: "hook"; reason: string }, keep?: Machinery): boolean => {
     try {
-      w.agent.cancel(cause);
+      if (keep === undefined) w.agent.cancel(cause);
+      else keep.session.cancelKeepingQueue(w.agent, cause, log);
       return true;
     } catch (err) {
       log(`${BIN}: desk: the turn on desk session ${w.sessionId} could not be cancelled: ${errText(err)}`);
@@ -456,7 +477,10 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
     },
 
     async stop(reason) {
-      const stopped = await Promise.all(watches().map(async (w) => (await busy(w.agent)) && cancel(w, { kind: "hook", reason })));
+      const all = watches();
+      if (all.length === 0) return false;
+      const m = await loadMachinery();
+      const stopped = await Promise.all(all.map(async (w) => (await busy(w.agent)) && cancel(w, { kind: "hook", reason }, m)));
       return stopped.includes(true);
     },
 

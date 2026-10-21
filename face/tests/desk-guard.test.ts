@@ -35,12 +35,17 @@ const REPO = "/repo";
 const CWD = `${REPO}/desk/journal`;
 
 const denied = (name: FenceName) => ({ kind: "deny", reason: `the desk never writes ${name}: it would steer every desk turn after it` });
+/** The write check's refusals of a dot-file, by its name as found, and of another agent's instruction file, by its
+ * `AGENT_FILE_NAMES` spelling (src/desk-tools.ts `deskWriteDecision`). */
+const dotWrite = (name: string) => ({ kind: "deny", reason: `the desk never writes dot-files: ${name}` });
+const agentWrite = (name: string) => ({ kind: "deny", reason: `the desk never writes ${name}: another agent reads it` });
 const UNCHECKED = { kind: "deny", reason: "the desk could not check this write's path; nothing was written" };
 const sitsUnder = (name: FenceName) => ({ kind: "deny", reason: `the desk does not write while its directory sits under ${name}` });
 
 /** The read guard's refusals (src/desk-tools.ts `deskReadDecision`). */
 const outside = (path: string) => ({ kind: "deny", reason: `the desk reads only inside the repository; ${path} is outside it` });
 const keyRead = (name: string) => ({ kind: "deny", reason: `the desk never reads ${name}: it can hold a key` });
+const dotRead = (name: string) => ({ kind: "deny", reason: `the desk never reads dot-files: ${name}` });
 const DOT_FILES = { kind: "deny", reason: "the desk never searches dot-files: search with no include, or one that starts with a name" };
 const READ_UNCHECKED = { kind: "deny", reason: "the desk could not check this read's path; nothing was read" };
 /** The secret check's refusals (src/desk-tools.ts `deskSecretDecision`). */
@@ -177,13 +182,77 @@ test("each write tool is denied for every fence name at any depth, case-folded",
 test("ordinary journal writes pass", () => {
   const ordinary = [
     "notes/today.md", "GRAVIT.md.bak", "gravitas.md", "reports/x.md",
-    "x.GRAVIT.md", "GRAVIT", "GRAVIT.md.d/x.md", ".gitignore", ".github/x.yml", "git/config", "dsh/notes.md", "agents/x.md",
-    `${CWD}/notes/today.md`, "../journal/notes.md", "/tmp/desk-scratch.md",
+    "x.GRAVIT.md", "GRAVIT", "GRAVIT.md.d/x.md", "git/config", "dsh/notes.md", "agents/x.md",
+    /* names that only look like another agent's instruction file, or a dot-file's */
+    "CLAUDE.md.bak", "my-CLAUDE.md", "claude/notes.md", "AGENTS.md.txt", "agents.md.d/x.md", "notes.gitignore", "x.",
+    `${CWD}/notes/today.md`, "../journal/notes.md", "./notes/today.md", "/tmp/desk-scratch.md",
   ];
   assertThreePairs();
   for (const [tool, arg] of PATH_ARGS) {
     for (const path of ordinary) assert.equal(deskWriteDecision(tool, argsFor(tool, arg, path), CWD, REPO), null, `${tool} ${arg}: ${path}`);
   }
+});
+
+/* Files git and the operator's coding agents obey: a desk/journal/.gitignore holding `!*` would un-ignore the journal
+ * - the book - for the next `git add -A`; a desk/journal/CLAUDE.md is loaded by Claude Code from that folder. */
+test("each write tool is denied a dot-led name below the root, and another agent's instruction file anywhere below it", () => {
+  const dotted: readonly (readonly [string, string])[] = [
+    [".gitignore", ".gitignore"],
+    ["notes/.gitignore", ".gitignore"],
+    [".GitIgnore", ".GitIgnore"],
+    [".github/workflows/x.yml", ".github"],
+    [".rgignore", ".rgignore"],
+    [".ignore", ".ignore"],
+    ["notes/.hidden/x.md", ".hidden"],
+    ["...", "..."],
+    ["..notes", "..notes"],
+    ["../.gitignore", ".gitignore"],
+    ["../../.mcp.json", ".mcp.json"],
+    ["../../.claude/settings.local.json", ".claude"],
+    ["../../.codex/config.toml", ".codex"],
+    [`${CWD}/.gitignore`, ".gitignore"],
+    [`${REPO}/.claude/worktrees/x/desk/journal/notes.md`, ".claude"],
+    /* a `..` that leaves a dot-led name behind still counts, as spelled */
+    [".hidden/../notes.md", ".hidden"],
+    /* outside the repository, the names below its common ancestor with the root */
+    ["/elsewhere/.hidden/x.md", ".hidden"],
+    ["/tmp/.x", ".x"],
+  ];
+  const agents: readonly (readonly [string, string])[] = [
+    ["CLAUDE.md", "CLAUDE.md"],
+    ["notes/claude.md", "CLAUDE.md"],
+    ["Claude.Local.MD", "CLAUDE.local.md"],
+    ["AGENTS.md", "AGENTS.md"],
+    ["agents.override.MD", "AGENTS.override.md"],
+    ["../CLAUDE.local.md", "CLAUDE.local.md"],
+    ["../../strategies/x/AGENTS.md", "AGENTS.md"],
+    [`${REPO}/CLAUDE.md`, "CLAUDE.md"],
+    [`${CWD}/a/b/c/AGENTS.override.md`, "AGENTS.override.md"],
+    ["CLAUDE.md/", "CLAUDE.md"],
+    ["notes\\CLAUDE.md", "CLAUDE.md"],
+    /* another agent's instruction file wins over the dot-led directory it sits in */
+    [".claude/CLAUDE.md", "CLAUDE.md"],
+    ["/elsewhere/AGENTS.md", "AGENTS.md"],
+  ];
+  assertThreePairs();
+  for (const [tool, arg] of PATH_ARGS) {
+    for (const [path, name] of dotted) {
+      assert.deepEqual(deskWriteDecision(tool, argsFor(tool, arg, path), CWD, REPO), dotWrite(name), `${tool} ${arg}: ${JSON.stringify(path)}`);
+    }
+    for (const [path, name] of agents) {
+      assert.deepEqual(deskWriteDecision(tool, argsFor(tool, arg, path), CWD, REPO), agentWrite(name), `${tool} ${arg}: ${JSON.stringify(path)}`);
+    }
+    /* A fence name keeps its own reason, though it is dot-led too, and wins over every other name the path holds. */
+    for (const [path, name] of [[".git/config", ".git"], [".dsh/CLAUDE.md", ".dsh"], [".hidden/GRAVIT.md", "GRAVIT.md"], [".agents", ".agents"]] as const) {
+      assert.deepEqual(deskWriteDecision(tool, argsFor(tool, arg, path), CWD, REPO), denied(name), `${tool} ${arg}: ${path}`);
+    }
+  }
+  /* The root's own ancestors are never judged: a checkout under a dot-led directory writes its journal. */
+  assert.equal(deskWriteDecision("write", argsFor("write", "file_path", "notes/a.md"), "/x/.cache/repo/desk/journal", "/x/.cache/repo"), null);
+  assert.deepEqual(deskWriteDecision("write", argsFor("write", "file_path", ".gitignore"), "/x/.cache/repo/desk/journal", "/x/.cache/repo"), dotWrite(".gitignore"));
+  /* A view reads: the write check leaves it to the read check. */
+  assert.equal(deskWriteDecision("str_replace_editor", { command: "view", path: `${CWD}/.gitignore` }, CWD, REPO), null);
+  assert.equal(deskWriteDecision("str_replace_editor", { command: "view", path: `${CWD}/CLAUDE.md` }, CWD, REPO), null);
 });
 
 test("the repository's own ancestors are never judged: names below the root, a path's names below its common ancestor with it, a relative path's own", () => {
@@ -393,13 +462,59 @@ test("key and git names are denied inside the repository, case-folded, as spelle
   assert.deepEqual(deskReadDecision("read", { file_path: join(root, ".ENV.ALPACA") }, journal, root), keyRead(".ENV.ALPACA"));
 });
 
+/* The primary checkout the service runs from holds .mcp.json, .claude/settings.local.json and .codex/ - formats made to
+ * carry tokens - and the .claude/worktrees/* checkouts. None of them is the desk's to read: every dot-led name below the
+ * root is refused, by name; a key name keeps its own reason. Nothing here opens a real one: the paths under /x/repo
+ * name nothing, and the scratch tree's are fakes. */
+test("dot-led names below the root are denied, as spelled and where a symlink lands; a key name keeps its own reason", async (t) => {
+  const repo = "/x/repo";
+  const cwd = `${repo}/desk/journal`;
+  const cases: readonly (readonly [string, string])[] = [
+    [`${repo}/.mcp.json`, ".mcp.json"],
+    ["../../.mcp.json", ".mcp.json"],
+    [`${repo}/.claude/settings.local.json`, ".claude"],
+    [`${repo}/.claude/worktrees/x/desk/STANDING.md`, ".claude"],
+    [`${repo}/.codex/config.toml`, ".codex"],
+    [`${repo}/.playwright-mcp/page.yml`, ".playwright-mcp"],
+    [".gitignore", ".gitignore"],
+    ["../../.github/workflows/x.yml", ".github"],
+    [".environment", ".environment"],
+    ["notes/.hidden.md", ".hidden.md"],
+    [".MCP.JSON", ".MCP.JSON"],
+    ["...", "..."],
+    /* a `..` that leaves a dot-led name behind still counts, as spelled */
+    [".claude/../notes.md", ".claude"],
+  ];
+  for (const [path, name] of cases) {
+    for (const [tool, args] of readerCalls(path)) assert.deepEqual(deskReadDecision(tool, args, cwd, repo), dotRead(name), `${tool}: ${path}`);
+  }
+  /* A key name is refused as a key, wherever it sits: .env and .git first. */
+  for (const [path, name] of [[`${repo}/.claude/.env`, ".env"], [".git/config", ".git"], [`${repo}/.env.alpaca`, ".env.alpaca"]] as const) {
+    for (const [tool, args] of readerCalls(path)) assert.deepEqual(deskReadDecision(tool, args, cwd, repo), keyRead(name), `${tool}: ${path}`);
+  }
+  /* A dot-config reached through a name that is none - a link in the journal - is found by its target. */
+  const { root, journal } = await scratch(t, "dots");
+  await writeFile(join(root, ".mcp.json"), "{\"made-up\": true}\n");
+  await mkdir(join(root, ".claude"), { recursive: true });
+  await writeFile(join(root, ".claude", "settings.local.json"), "{}\n");
+  await symlink(join(root, ".mcp.json"), join(journal, "cfg-link"));
+  await symlink(join(root, ".claude"), join(journal, "settings-dir"));
+  for (const [path, name] of [["cfg-link", ".mcp.json"], ["settings-dir/settings.local.json", ".claude"], [join(root, ".mcp.json"), ".mcp.json"]] as const) {
+    for (const [tool, args] of readerCalls(path)) assert.deepEqual(deskReadDecision(tool, args, journal, root), dotRead(name), `${tool}: ${path}`);
+  }
+  /* The root's own ancestors are never judged: a checkout under a dot-led directory reads its journal. */
+  assert.equal(deskReadDecision("read", { file_path: "notes/a.md" }, "/x/.cache/repo/desk/journal", "/x/.cache/repo"), null);
+  assert.equal(deskReadDecision("grep", { pattern: "x" }, "/x/.cache/repo/desk/journal", "/x/.cache/repo"), null);
+  assert.deepEqual(deskReadDecision("read", { file_path: ".mcp.json" }, "/x/.cache/repo/desk/journal", "/x/.cache/repo"), dotRead(".mcp.json"));
+});
+
 test("ordinary repository reads pass", () => {
   const repo = "/x/repo";
   const cwd = `${repo}/desk/journal`;
   const ordinary = [
-    "notes/today.md", "../STANDING.md", `${repo}/strategies/x/status.yaml`, `${repo}/desk/levels.yml`, ".", "..", `${repo}`,
-    /* names that only look like a key's */
-    ".gitignore", ".github/workflows/x.yml", "notes.env", "env/notes.md", "x.git", ".environment", "GRAVIT.md", "dsh/notes.md",
+    "notes/today.md", "../STANDING.md", `${repo}/strategies/x/status.yaml`, `${repo}/desk/levels.yml`, ".", "..", `${repo}`, "../..",
+    /* names that only look like a key's, or a dot-file's */
+    "notes.env", "env/notes.md", "x.git", "GRAVIT.md", "dsh/notes.md", "notes.mcp.json", "x.", "claude/settings.json",
   ];
   for (const path of ordinary) {
     for (const [tool, args] of readerCalls(path)) assert.equal(deskReadDecision(tool, args, cwd, repo), null, `${tool}: ${path}`);
@@ -559,23 +674,35 @@ function globSegmentRegExp(segment: string): RegExp {
   return new RegExp(`^${out}$`);
 }
 
-/** Whether an ignore-file negation - the pattern after its `!` - can match a key name at any of its segments, so lift
- * ripgrep's hidden-file skip for a key file. */
-const negatesKeyName = (pattern: string): boolean =>
-  pattern.split("/").filter((segment) => segment !== "" && segment !== "**")
-    .some((segment) => KEY_NAMES.some((name) => globSegmentRegExp(segment).test(name)));
+/**
+ * Whether an ignore-file negation - the pattern after its `!` - can match a key name at any of its segments, so lift
+ * ripgrep's hidden-file skip for a key file. A doublestar that ends the pattern - `**`, `/**`, `sub/**`, or any of them
+ * with a slash after it - matches every name below it, dot-files included; one with a segment after it stands for the
+ * directories before that segment, which the segment itself must then match.
+ */
+function negatesKeyName(pattern: string): boolean {
+  const segments = pattern.split("/").filter((segment) => segment !== "");
+  return segments.some((segment, i) => segment === "**"
+    ? i === segments.length - 1
+    : KEY_NAMES.some((name) => globSegmentRegExp(segment).test(name)));
+}
 
 test("no tracked ignore file negates a key name: a negation would lift ripgrep's hidden-file skip for a grep with no include", () => {
   /* The control first: the matcher finds the negations that lift the skip (rg 15.0.0: a .ignore holding !.env.alpaca,
-   * a .rgignore holding !.env*, a .gitignore holding !sub/.env each made a grep with no include search the key file)
-   * and passes the repository's own !/desk/journal/.gitkeep, which lifts it for an empty .gitkeep. */
-  for (const negated of [".env.alpaca", ".env*", "*.alpaca", "/.env", "sub/.env", ".git/", ".ENV.LOCAL", "**/.env.local", "[.]env", "{.env,x}", "*.md", "*"]) {
+   * a .rgignore holding !.env*, a .gitignore holding !sub/.env each made a grep with no include search the key file,
+   * and so did a doublestar alone, after a slash, before one, and after a directory's name) and passes the repository's
+   * own !/desk/journal/.gitkeep, which lifts it for an empty .gitkeep. */
+  for (const negated of [".env.alpaca", ".env*", "*.alpaca", "/.env", "sub/.env", ".git/", ".ENV.LOCAL", "**/.env.local", "[.]env", "{.env,x}", "*.md", "*",
+    "**", "/**", "**/", "sub/**", "/desk/journal/**", "a/**/"]) {
     assert.ok(negatesKeyName(negated), `!${negated} can match a key name`);
   }
-  for (const negated of ["/desk/journal/.gitkeep", ".gitkeep", "notes.md", "env/", "data/today.csv", "\\.envy"]) {
+  for (const negated of ["/desk/journal/.gitkeep", ".gitkeep", "notes.md", "env/", "data/today.csv", "\\.envy", "**/.gitkeep", "a/**/notes.md"]) {
     assert.equal(negatesKeyName(negated), false, `!${negated} matches no key name`);
   }
-  /* Every .gitignore, .ignore and .rgignore git tracks - a submodule's too, once it is checked out. */
+  /* Every .gitignore, .ignore and .rgignore git tracks - a submodule's too, once it is checked out. Not what ripgrep also
+   * reads that git does not track: an untracked ignore file in the tree, git's own exclude files, and the ignore files in
+   * the directories above the one it searches - the repository's root for a grep in the journal, and above the
+   * repository too. The desk cannot write any of them: each is a dot-file, which the write check refuses. */
   const repo = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
   const tracked = execFileSync("git", ["ls-files", "-z", "--recurse-submodules", "--", "*.gitignore", "*.ignore", "*.rgignore"], { cwd: repo, encoding: "utf8" })
     .split("\0").filter((path) => [".gitignore", ".ignore", ".rgignore"].includes(basename(path)));
@@ -886,6 +1013,13 @@ test("the guard judges a desk agent's call in order - its write, its read, its s
     [call("grep", { pattern: "KEY", include: ".env*" }, desk), DOT_FILES],
     [call("glob", { pattern: "**/*.md", path: "~/.dsh" }, desk), outside("~/.dsh")],
     [call("str_replace_editor", { command: "view", path: "/Users/op/.ssh/id_ed25519" }, desk), outside("/Users/op/.ssh/id_ed25519")],
+    [call("read", { file_path: `${REPO}/.mcp.json` }, desk), dotRead(".mcp.json")],
+    [call("grep", { pattern: "token", path: `${REPO}/.claude` }, desk), dotRead(".claude")],
+  ];
+  /* Writes git or another agent obeys: a dot-file, another agent's instruction file. */
+  const writes: readonly (readonly [DeskGuardExecution, unknown])[] = [
+    [call("write", { file_path: ".gitignore", content: "!*\n" }, desk), dotWrite(".gitignore")],
+    [call("edit", { file_path: "notes/CLAUDE.md", old_string: "a", new_string: "b" }, desk), agentWrite("CLAUDE.md")],
   ];
   /* Secrets, in any tool: the search, a market read, the desk's own tool, a write. */
   const secrets: readonly (readonly [DeskGuardExecution, unknown])[] = [
@@ -898,10 +1032,13 @@ test("the guard judges a desk agent's call in order - its write, its read, its s
   /* The order: a write deny before a read deny before a secret deny. */
   const ordered: readonly (readonly [DeskGuardExecution, unknown])[] = [
     [call("str_replace_editor", { command: "create", path: `${CWD}/GRAVIT.md`, file_text: SECRET }, desk), denied("GRAVIT.md")],
-    [call("str_replace_editor", { command: "create", path: `${CWD}/.env.local`, file_text: SECRET }, desk), keyRead(".env.local")],
+    /* a key name is a dot-file too, which the write check refuses first: a create outside the repository, which it
+     * lets through, is the read check's */
+    [call("str_replace_editor", { command: "create", path: `${CWD}/.env.local`, file_text: SECRET }, desk), dotWrite(".env.local")],
+    [call("str_replace_editor", { command: "create", path: "/tmp/desk-scratch.md", file_text: SECRET }, desk), outside("/tmp/desk-scratch.md")],
     [call("str_replace_editor", { command: "create", path: `${CWD}/notes.md`, file_text: SECRET }, desk), CARRIES_SECRET],
   ];
-  for (const [exec, decision] of [...reads, ...secrets, ...ordered]) {
+  for (const [exec, decision] of [...reads, ...writes, ...secrets, ...ordered]) {
     assert.deepEqual(await judged(listener, exec), { decision, nexts: 0 }, `${exec.name} ${JSON.stringify(exec.arguments)}`);
     assert.equal(backstop(exec), (decision as { reason: string }).reason, `the backstop agrees: ${exec.name}`);
   }
@@ -913,7 +1050,7 @@ test("the guard judges a desk agent's call in order - its write, its read, its s
   }
   /* Gravit's, a bot's and an agentless call are never judged, whatever they read or carry. */
   for (const agent of [agentOn("gravit"), agentOn("drill-bull"), agentOn(undefined), undefined]) {
-    for (const [exec] of [...reads, ...secrets, ...ordered]) {
+    for (const [exec] of [...reads, ...writes, ...secrets, ...ordered]) {
       const theirs = call(exec.name, exec.arguments, agent);
       assert.deepEqual(await judged(listener, theirs), { decision: ALLOW, nexts: 1 }, `${agent?.id ?? "no agent"}: ${exec.name}`);
       assert.equal(backstop(theirs), undefined);
@@ -1090,6 +1227,9 @@ test("the backstop judges reads and secrets too: a later prepend listener answer
     [call("read", { file_path: `${REPO}/.env.alpaca` }, desk), keyRead(".env.alpaca").reason],
     [call("grep", { pattern: "KEY", include: "*" }, desk), DOT_FILES.reason],
     [call("str_replace_editor", { command: "view", path: "/Users/op/.dsh/.env" }, desk), outside("/Users/op/.dsh/.env").reason],
+    [call("read", { file_path: `${REPO}/.claude/settings.local.json` }, desk), dotRead(".claude").reason],
+    [call("write", { file_path: ".gitignore", content: "!*\n" }, desk), dotWrite(".gitignore").reason],
+    [call("write", { file_path: "CLAUDE.md", content: "x\n" }, desk), agentWrite("CLAUDE.md").reason],
     [call("web_search", { query: SECRET }, desk), CARRIES_SECRET.reason],
     [call("mcp__alpaca-kit__daily_bars", { symbol: SECRET }, desk), CARRIES_SECRET.reason],
   ];
@@ -1130,9 +1270,17 @@ test("installDesk installs the guard with the tools, whatever enabled says, and 
   const hub = { snapshot: async (): Promise<QuotePayload> => ({ ok: true, generated_at: "2026-10-21T14:00:00.000Z", quotes: [], providers: [] }) };
   const deskWrite = write("GRAVIT.md", agentOn(DESK_PRESET));
   const deskRead = call("read", { file_path: `${REPO}/.env.alpaca` }, agentOn(DESK_PRESET));
+  /* installDesk hands the guard its `log`: the install line goes there, and nothing reaches stderr. */
+  const stray: string[] = [];
+  const stderr = console.error;
+  console.error = (...args: unknown[]): void => { stray.push(args.map(String).join(" ")); };
+  t.after(() => { console.error = stderr; });
   for (const enabled of [false, true]) {
     const root = fakeRoot();
-    const desk = installDesk(recorder(), { home: await home(), enabled, watch, ctx: root.ctx, hub, root: REPO });
+    const lines: string[] = [];
+    const desk = installDesk(recorder(), { home: await home(), enabled, watch, ctx: root.ctx, hub, root: REPO, log: (line) => { lines.push(line); } });
+    assert.equal(lines.length, 1, `one line at install, through installDesk's log (enabled: ${enabled})`);
+    assert.match(lines[0], /^gravit-face: desk: the secret check covers /);
     assert.equal(root.preExecute.length, 1, `the guard's listener is installed (enabled: ${enabled})`);
     assert.equal(root.guards.length, 1, `and its backstop (enabled: ${enabled})`);
     assert.equal(root.agentCreated.length, 1, `beside the tools' listener (enabled: ${enabled})`);
@@ -1150,13 +1298,14 @@ test("installDesk installs the guard with the tools, whatever enabled says, and 
   }
   /* Given the context alone, the guard - which needs no hub - is installed, and the tools are not. */
   const root = fakeRoot();
-  const desk = installDesk(recorder(), { home: await home(), enabled: false, ctx: root.ctx, root: REPO });
+  const desk = installDesk(recorder(), { home: await home(), enabled: false, ctx: root.ctx, root: REPO, log: () => {} });
   assert.equal(root.preExecute.length, 1);
   assert.equal(root.guards.length, 1);
   assert.equal(root.agentCreated.length, 0);
   await desk.dispose(0);
   assert.equal(root.preExecute.length, 0);
   assert.equal(root.guards.length, 0);
+  assert.deepEqual(stray, [], "nothing went to stderr");
 });
 
 test("installDesk's guard takes its secrets from the environment once, at install", async (t) => {
@@ -1170,7 +1319,7 @@ test("installDesk's guard takes its secrets from the environment once, at instal
   let desk: ReturnType<typeof installDesk> | undefined;
   try {
     process.env[NOW_SET] = "made-up-env-token-0001";
-    desk = installDesk(recorder(), { home: made, enabled: false, ctx: root.ctx, root: REPO });
+    desk = installDesk(recorder(), { home: made, enabled: false, ctx: root.ctx, root: REPO, log: () => {} });
   } finally {
     delete process.env[NOW_SET];
   }

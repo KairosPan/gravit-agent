@@ -6,7 +6,7 @@
  * a real tree shows them to the desk's sessions and to nobody else's is the smokes' to prove. */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DESK_PRESET } from "../src/desk-preset.ts";
@@ -323,10 +323,19 @@ test("a hub that fails after its call was cancelled leaves no unhandled rejectio
   }
 });
 
-test("installDesk installs the desk tools whatever enabled says, desk_state reads what the status route reads, and dispose removes the listener", async () => {
+test("installDesk installs the desk tools whatever enabled says, desk_state reads what the status route reads, and dispose removes the listener", async (t) => {
   const watch = { setInterval: () => 1, clearInterval: () => {} };
+  /* Every home made here is removed after the test; the guard's install line goes to a log that drops it. */
+  const homes: string[] = [];
+  t.after(() => Promise.all(homes.map((dir) => rm(dir, { recursive: true, force: true }))));
+  const freshHome = async (): Promise<string> => {
+    const made = await mkdtemp(join(tmpdir(), "face-desk-tools-"));
+    homes.push(made);
+    return made;
+  };
+  const quiet = (): void => {};
   for (const enabled of [false, true]) {
-    const home = await mkdtemp(join(tmpdir(), "face-desk-tools-"));
+    const home = await freshHome();
     /* Twelve runs already in the ledger, so the tool's cut shows. */
     for (let i = 0; i < 12; i++) {
       const pid = 100 + i;
@@ -336,7 +345,7 @@ test("installDesk installs the desk tools whatever enabled says, desk_state read
     const root = fakeRoot();
     const rec = recorder();
     const at = Date.parse("2026-10-20T14:00:00.000Z");
-    const desk = installDesk(rec, { home, enabled, now: () => at, version: "v", watch, ctx: root.ctx, hub: fakeHub().hub, root: "/repo" });
+    const desk = installDesk(rec, { home, enabled, now: () => at, version: "v", watch, ctx: root.ctx, hub: fakeHub().hub, root: "/repo", log: quiet });
     assert.equal(root.listeners.length, 1, `the listener is installed (enabled: ${enabled})`);
     assert.equal(root.guards.length, 1, `and the desk guard beside it (enabled: ${enabled})`);
     assert.equal(root.backstops.length, 1, `with its backstop (enabled: ${enabled})`);
@@ -360,8 +369,9 @@ test("installDesk installs the desk tools whatever enabled says, desk_state read
   }
   /* The tools need both: a context with no hub installs no tools - only the desk guard, which needs no hub. */
   const root = fakeRoot();
-  installDesk(recorder(), { home: await mkdtemp(join(tmpdir(), "face-desk-tools-")), enabled: false, ctx: root.ctx, root: "/repo" });
+  const guardOnly = installDesk(recorder(), { home: await freshHome(), enabled: false, ctx: root.ctx, root: "/repo", log: quiet });
   assert.equal(root.listeners.length, 0, "no tools without a hub");
   assert.equal(root.guards.length, 1, "but the guard");
   assert.equal(root.backstops.length, 1, "and its backstop");
+  await guardOnly.dispose(0);
 });

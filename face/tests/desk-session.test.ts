@@ -13,15 +13,17 @@ import { fileURLToPath } from "node:url";
 import { createUserMessage } from "@deepseek-ai/dsh-llm";
 import { DESK_PATH, readDesk } from "../src/cycle.ts";
 import { appendEvent, readEvents } from "../src/desk.ts";
+import { AGENT_FILE_NAMES } from "../src/desk-names.ts";
 import { DESK_PRESET } from "../src/desk-preset.ts";
 import {
-  DESK_DEFAULT_ROUTE, FENCE_NAMES, createDeskAgent, deskJournalDir, ensureDeskSession, fenceRefusalLine, findDeskFenceViolation,
+  DESK_DEFAULT_ROUTE, FENCE_NAMES, cancelKeepingQueue, createDeskAgent, deskJournalDir, ensureDeskSession, fenceRefusalLine, findDeskFenceViolation,
   findFenceViolation, provenanceLine, resolveDeskRoute, superviseDeskTurns,
   type CreateDeskAgentOptions, type DeskClock, type DeskSessionCtxLike, type DeskSessionDeps, type DeskTurnRecord,
   type SessionEventsOn, type SuperviseDeskTurnsDeps,
 } from "../src/desk-session.ts";
 import type { AgentCtxLike, AgentLike, ModelSelectionRefLike, ResumeMemberOptions, SessionLike } from "../src/room.ts";
-import type { EventLike } from "../src/room-rules.ts";
+import type { EventLike, MessageLike } from "../src/room-rules.ts";
+import { InboxModel } from "./inbox-fake.ts";
 import { FakeClock } from "./room-fake.ts";
 
 /* ---------- fixtures, inside the repository ---------- */
@@ -279,6 +281,11 @@ test("the desk contract names every fence name and the provenance forms the code
   assert.ok(contract.includes(provenanceLine({ kind: "telegram" }, new Date("2026-10-20T18:03:00Z"))), "the telegram line");
   assert.ok(contract.includes("[schedule · "), "the schedule prefix");
   assert.ok(contract.includes("[alert · "), "the alert prefix");
+  /* and the write guard's other refusals: every other agent's instruction file, in order, and the dot-files */
+  const agents = `${AGENT_FILE_NAMES.slice(0, -1).join(", ")} or ${AGENT_FILE_NAMES.at(-1)}`;
+  assert.deepEqual(contract.split("\n").filter((line) => line.includes(agents)),
+    [`- Never a dot-file, nor a ${agents}, anywhere: git and the operator's other agents obey them, and the guard refuses the write.`],
+    "one line lists them, all of them, in order");
 });
 
 test("telegram, schedule and alert are message sources dsh-llm's createUserMessage accepts", () => {
@@ -1050,6 +1057,180 @@ test("a turn/start while a turn is still open drops the open turn, with one line
   endTurn(h, 1); // a late end for the dropped turn
   await h.time.fake.flush();
   assert.deepEqual(h.records.map((r) => [r.turn, r.finalText, r.wallMs]), [[2, "two", 299_999]]);
+});
+
+/* ---------- cuts: what is kept, what is recorded, what the phone is told ---------- */
+
+/** A desk agent whose inbox and wake behave as dsh's (tests/inbox-fake.ts): what it was asked to cancel and to send. */
+function inboxAgent(opts: { failFollowup?: (message: MessageLike) => boolean } = {}) {
+  const model = new InboxModel();
+  const cancels: unknown[][] = [];
+  const followups: MessageLike[] = [];
+  const agent = {
+    id: SID,
+    get status(): "idle" | "running" { return model.running ? "running" : "idle"; },
+    inbox: model.inbox,
+    followup(message: MessageLike): void {
+      if (opts.failFollowup?.(message) === true) throw new Error("the session is closed");
+      followups.push(message);
+      model.send(message);
+    },
+    cancel(...args: unknown[]): void {
+      cancels.push(args);
+      model.cancel(args[1] as { keepInbox?: boolean } | undefined);
+    },
+  };
+  return { agent: agent as unknown as AgentLike, model, cancels, followups };
+}
+const queued = (text: string): MessageLike => phone(text) as unknown as MessageLike;
+const STOPPED = { kind: "hook", reason: "stopped from the phone" } as const;
+
+test("cancelKeepingQueue cuts the turn under way, keeps the inbox, and sends each queued message again so the agent wakes for them, in order", () => {
+  const second = queued("second");
+  const third = queued("third");
+  const { agent, model, cancels, followups } = inboxAgent();
+  model.running = true;
+  agent.followup(second);
+  agent.followup(third);
+  const lines: string[] = [];
+  assert.equal(cancelKeepingQueue(agent, STOPPED, (line) => { lines.push(line); }), 2, "two messages sent again");
+  assert.deepEqual(cancels, [[STOPPED, { keepInbox: true }]]);
+  assert.deepEqual(model.pending.map((m) => m.id), [second.id, third.id], "both still queued, in the order they were sent");
+  assert.deepEqual(followups.map((m) => m.id), [second.id, third.id, second.id, third.id], "each sent again after the cancel");
+  assert.equal(model.converge(), true, "so the driver wakes for them once the cut turn has unwound");
+  assert.deepEqual([model.claim()?.id, model.claim()?.id], [second.id, third.id]);
+  assert.deepEqual(lines, []);
+
+  /* The control: dsh's cancel keeping the inbox, and nothing more, leaves them queued and the driver asleep. */
+  const bare = inboxAgent();
+  bare.model.running = true;
+  bare.agent.followup(queued("parked"));
+  bare.agent.cancel(STOPPED, { keepInbox: true });
+  assert.equal(bare.model.pending.length, 1, "kept");
+  assert.equal(bare.model.converge(), false, "but nothing wakes the driver for it");
+});
+
+test("cancelKeepingQueue with nothing queued, or an agent with no inbox, only cancels; a message it cannot send again is one line", () => {
+  const empty = inboxAgent();
+  empty.model.running = true;
+  assert.equal(cancelKeepingQueue(empty.agent, STOPPED, () => assert.fail("no line")), 0);
+  assert.deepEqual(empty.cancels, [[STOPPED, { keepInbox: true }]]);
+  assert.deepEqual(empty.followups, []);
+  assert.equal(empty.model.converge(), false, "nothing to wake for");
+
+  const cancels: unknown[][] = [];
+  const bare = { id: SID, status: "running", cancel: (...args: unknown[]) => { cancels.push(args); } } as unknown as AgentLike;
+  assert.equal(cancelKeepingQueue(bare, STOPPED, () => assert.fail("no line")), 0);
+  assert.deepEqual(cancels, [[STOPPED, { keepInbox: true }]]);
+
+  /* The second of three cannot be sent again: one line, and the first and the third are still answered. */
+  const [first, second, third] = [queued("one"), queued("two"), queued("three")];
+  const failing = inboxAgent({ failFollowup: (message) => message.id === second.id && failing.model.aborted });
+  failing.model.running = true;
+  for (const message of [first, second, third]) failing.agent.followup(message);
+  const lines: string[] = [];
+  assert.equal(cancelKeepingQueue(failing.agent, STOPPED, (line) => { lines.push(line); }), 2);
+  assert.deepEqual(failing.model.pending.map((m) => m.id), [first.id, third.id]);
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /^gravit-face: desk: a message queued on desk session session-desk could not be queued again after the cut, and is lost: the session is closed$/);
+  assert.equal(failing.model.converge(), true);
+
+  /* A cancel that throws is the caller's: nothing is sent again. */
+  const throwing = { id: SID, status: "running", followup: () => assert.fail("nothing sent"), cancel: () => { throw new Error("the loop is gone"); } } as unknown as AgentLike;
+  assert.throws(() => cancelKeepingQueue(throwing, STOPPED, () => {}), /the loop is gone/);
+});
+
+test("the deadline's cut keeps the operator's later messages and wakes the agent for them; the fence's leaves them parked", async () => {
+  const late = inboxAgent();
+  const h = supervise({ agent: late.agent });
+  late.model.running = true;
+  startTurn(h, 1, phone("first"));
+  late.agent.followup(queued("second")); // sent while turn 1 runs: it waits for a turn of its own
+  await h.time.fake.advance(300_000);
+  assert.deepEqual(late.cancels, [DEADLINE_CANCEL]);
+  assert.deepEqual(late.model.pending.map((m) => m.content[0]?.text), ["[telegram · operator · 14:03 ET]\nsecond"]);
+  assert.equal(late.model.converge(), true, "the timed-out turn leaves no later phone message queued in silence");
+
+  const fenced = inboxAgent();
+  const f = supervise({ agent: fenced.agent, fence: async () => "desk/journal/GRAVIT.md" });
+  fenced.model.running = true;
+  startTurn(f, 1, phone("first"));
+  fenced.agent.followup(queued("second"));
+  await f.time.fake.flush();
+  assert.deepEqual(fenced.cancels, [FENCE_CANCEL]);
+  assert.equal(fenced.followups.length, 1, "nothing sent again: a turn would open over the violation before its own check");
+  assert.equal(fenced.model.pending.length, 1, "kept");
+  assert.equal(fenced.model.converge(), false, "and left for the next post, which the owner's fence check refuses first");
+});
+
+test("a turn something else cancelled is recorded cancelled, with why; the supervisor's own cuts keep their outcomes", async () => {
+  const h = supervise();
+  const reasons: readonly object[] = [
+    { kind: "aborted", reason: { kind: "hook", reason: "stopped from the phone" } },
+    { kind: "aborted", reason: { kind: "hook", reason: "shutdown" } },
+    { kind: "aborted", reason: { kind: "user" } },
+    { kind: "aborted", reason: { kind: "disposed" } },
+    { kind: "aborted", reason: { kind: "parent" } },
+    { kind: "aborted" },
+  ];
+  for (const [i, reason] of reasons.entries()) {
+    startTurn(h, i + 1, phone(`turn ${i + 1}`));
+    endTurn(h, i + 1, reason);
+  }
+  await h.time.fake.flush();
+  assert.deepEqual(h.records.map((r) => [r.turn, r.outcome, r.cancel, r.error]), [
+    [1, "cancelled", "stopped from the phone", undefined],
+    [2, "cancelled", "shutdown", undefined],
+    [3, "cancelled", "stopped in the browser", undefined],
+    [4, "cancelled", "its agent was disposed", undefined],
+    [5, "cancelled", "its parent cancelled it", undefined],
+    [6, "cancelled", "unknown", undefined],
+  ]);
+
+  /* The deadline's and the fence's own cuts are timed-out and refused, with no cancel. */
+  const late = supervise();
+  startTurn(late, 1, phone("slow"));
+  await late.time.fake.advance(300_000);
+  endTurn(late, 1, ABORTED);
+  const fenced = supervise({ fence: async () => "desk/journal/.git" });
+  startTurn(fenced, 1, phone("over a .git"));
+  await fenced.time.fake.flush();
+  endTurn(fenced, 1, { kind: "aborted", reason: { kind: "hook", reason: "desk fence" } });
+  await late.time.fake.flush();
+  await fenced.time.fake.flush();
+  assert.deepEqual([...late.records, ...fenced.records].map((r) => [r.outcome, "cancel" in r]), [["timed-out", false], ["refused", false]]);
+});
+
+test("a turn cut mid-answer is marked interrupted: its final text ends in the message the cut interrupted", async () => {
+  const h = supervise();
+  /* the phone's /stop lands while the model is still writing */
+  startTurn(h, 1, phone("tell me about NVDA"));
+  h.emit("assistant/message", { ...reply(1, 1, "NVDA is trading at 18"), interrupted: true });
+  endTurn(h, 1, { kind: "aborted", reason: { kind: "hook", reason: "stopped from the phone" } });
+  /* the deadline lands mid-stream, after a tool has answered */
+  startTurn(h, 2, phone("the filing?"));
+  h.emit("assistant/message", reply(2, 1, "Let me read the filing."));
+  h.emit("tool/result", { turn: 2, step: 1, callId: "c1" });
+  h.emit("assistant/message", { ...reply(2, 2, "The 10-Q says revenue"), interrupted: true });
+  await h.time.fake.advance(300_000);
+  endTurn(h, 2, ABORTED);
+  /* a text that was whole when the cut came - the turn then waited on a card - is no cut answer */
+  startTurn(h, 3, phone("note it"));
+  answer(h, 3, "Noting it.");
+  await h.time.fake.advance(300_000);
+  endTurn(h, 3, ABORTED);
+  /* an interruption with no text of its own leaves the turn's text as it was: whole */
+  startTurn(h, 4, phone("think hard"));
+  h.emit("assistant/message", { turn: 4, step: 1, message: { id: "a-4-1", role: "assistant", content: [{ type: "thinking", thinking: "hm" }], source: { kind: "model", provider: "stub", model: "echo" } }, interrupted: true });
+  endTurn(h, 4, { kind: "aborted", reason: { kind: "user" } });
+  await h.time.fake.flush();
+  assert.deepEqual(h.records.map((r) => [r.turn, r.outcome, r.finalText, r.interrupted]), [
+    [1, "cancelled", "NVDA is trading at 18", true],
+    [2, "timed-out", "The 10-Q says revenue", true],
+    [3, "timed-out", "Noting it.", undefined],
+    [4, "cancelled", "", undefined],
+  ]);
+  assert.equal("interrupted" in h.records[2], false, "no key on a turn whose text was whole");
 });
 
 test("another session's turns are not supervised, and the disposer clears every timer and the listener", async () => {

@@ -38,7 +38,9 @@
  * (65 s), 15 s for sendMessage. HTTP 409 - another poller holds the token, a second face started without
  * `FACE_DESK=0`, or a webhook is set - is a `conflict` record, carrying Telegram's own description, at most
  * once a minute and a 30 s wait; any other failure, a `poll-error` record at most once a minute and a
- * backoff from 5 s doubling to 60 s, which a poll that answers resets. The loop never stops on a failure.
+ * backoff from 5 s doubling to 60 s, which a poll that answers resets. The loop never stops on a failure,
+ * so its status says one goes on: `pollFailing`, since the first poll that failed after the last that
+ * answered and why the last one failed - a revoked token's 401 polls on forever - until a poll answers.
  *
  * THE TOKEN appears in one place: the path of each request's URL (`/bot<token>/<method>`). Every line this
  * module writes, every reason and description it records, every error it rejects with and every text it
@@ -359,6 +361,8 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
   let dropped = 0;
   let lastDroppedFrom: number | undefined;
   let conflictAt: string | undefined;
+  /** While polls fail: since the first that failed after the last that answered, and why the last failed, redacted. */
+  let pollFailing: { since: string; reason: string } | undefined;
   /** Whether the last answer to a send was a 403, with no send through since. */
   let blocked = false;
   /** The next update the bridge has not taken; `undefined` until it has a stored one or takes one. */
@@ -679,7 +683,7 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
     const id = update.update_id;
     const numbered = typeof id === "number" && Number.isSafeInteger(id) && id >= 0;
     if (numbered && offset !== undefined && id < offset) {
-      log(`${BIN}: desk: Telegram update ${id} is below the stored offset ${offset}: Telegram has numbered its updates afresh, so the bridge takes it and goes on from ${id + 1}`);
+      log(`${BIN}: telegram: Telegram update ${id} is below the stored offset ${offset}: Telegram has numbered its updates afresh, so the bridge takes it and goes on from ${id + 1}`);
     }
     try {
       await handle(update);
@@ -733,6 +737,7 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
         if (disposed) break;
         const at = clock.now();
         const t = new Date(at).toISOString();
+        pollFailing = { since: pollFailing?.since ?? t, reason: redact(reasonOf(err)) };
         if (isConflict(err)) {
           conflictAt = t;
           if (at - conflictRecordedAt >= RECORD_EVERY_MS) {
@@ -757,6 +762,7 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
       }
       backoff = 0;
       lastPollAt = stamp();
+      pollFailing = undefined;
       for (const update of updates) {
         if (disposed) break;
         await take(update);
@@ -781,6 +787,7 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
       queued: outbox.length,
       ...(conflictAt === undefined ? {} : { conflictAt }),
       ...(blocked ? { blocked: true } : {}),
+      ...(pollFailing === undefined ? {} : { pollFailing: { ...pollFailing } }),
     }),
     send,
     dispose() {

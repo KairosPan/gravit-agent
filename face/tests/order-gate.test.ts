@@ -26,10 +26,14 @@
  * THE HIDDEN ORDER TOOL (spike 3). dsh runs `tools/pre-execute` before it
  * resolves whether the calling scope can see the tool, so the listener asks
  * the registry itself and refuses an order tool the caller cannot see, with
- * no card. Drilled offline on a bare cordis tree, and on the real one by the
- * subtest at the end: a `gravit-desk` session, whose mask never admits an
- * order tool, names the stand-in and is refused in the gate's words with no
- * `approval/asked`, while Gravit's session, on the same tool, gets its card.
+ * no card - for either cause the refusal names: the tool is not registered
+ * here (the default: Gate 1 closed, nothing registers an order tool), or the
+ * session's preset hides it. Drilled offline on a bare cordis tree, and on the
+ * real one by the subtest at the end, for both: a `gravit-desk` session, whose
+ * mask never admits an order tool, names the stand-in, and a Gravit session
+ * names one nothing registered; each is refused in the gate's words with no
+ * `approval/asked`, while Gravit's session, on the registered stand-in, gets
+ * its card.
  *
  * Gated behind `FACE_SMOKE=1` and in its own FILE for the reason `smoke.test.ts`
  * states: `bootFace` sets `process.env.DSH_HOME` permanently, so one boot per
@@ -333,12 +337,14 @@ test("order gate: registered on a real tree, asks for orders, leaves everything 
     /* THE HIDDEN ORDER TOOL (spike 3). dsh runs `tools/pre-execute` BEFORE it
      * resolves whether the calling scope can see the tool (dsh-tools
      * `prepareExecution`, then `dispatchToolBody`'s `ToolNotFoundError`), so a
-     * session whose preset masks an order tool used to reach the listener and
-     * raise a card - which, with no browser, parks, and which, approved, would
-     * fail `unknown tool` at dispatch. The desk's preset is such a session:
-     * its mask (src/desk-preset.ts DESK_ALLOW) never admits an order tool. A
-     * subtest, not a second test: one boot per process. */
-    await t.test("a masked preset's call to the stand-in order tool is denied with no approval/asked event", async () => {
+     * call to an order tool the session cannot see used to reach the listener
+     * and raise a card - which, with no browser, parks, and which, approved,
+     * would fail `unknown tool` at dispatch. A session cannot see one for
+     * either of two causes: its preset masks it - the desk's mask
+     * (src/desk-preset.ts DESK_ALLOW) never admits an order tool - or nothing
+     * registered it, which with Gate 1 closed is every session's default. Both
+     * are drilled here. A subtest, not a second test: one boot per process. */
+    await t.test("an order tool the session cannot see - masked by its preset, or never registered - is denied with no approval/asked event", async () => {
       const base = `http://127.0.0.1:${ctx.webServer.port}`;
       mountClient(ctx);
       const cookie = await signIn(ctx, base);

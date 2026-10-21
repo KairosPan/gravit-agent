@@ -26,6 +26,9 @@ class Element {
   type = "";
   tabIndex = -1;
   dataset: Record<string, string> = {};
+  /** How often the node was taken off its parent - removed, moved, or cleared out by `replaceChildren` - as a
+   * browser would drop its focus and close its dropdown. */
+  detaches = 0;
   private own = "";
   private attributes = new Map<string, string>();
   private listeners = new Map<string, ((event: unknown) => void)[]>();
@@ -49,15 +52,35 @@ class Element {
     for (const node of nodes) { node.remove(); node.parent = this; this.children.push(node); }
   }
   replaceChildren(...nodes: Element[]) {
-    for (const child of this.children) child.parent = null;
+    for (const child of this.children) {
+      child.parent = null;
+      child.detaches += 1;
+    }
     this.children = [];
     this.own = "";
     this.append(...nodes);
   }
   remove() {
-    if (this.parent) this.parent.children.splice(this.parent.children.indexOf(this), 1);
+    if (this.parent) {
+      this.parent.children.splice(this.parent.children.indexOf(this), 1);
+      this.detaches += 1;
+    }
     this.parent = null;
   }
+  /** Put `node` before `before`, a child of this node, or last when `before` is `null`; the node is moved, as a browser moves it. */
+  insertBefore(node: Element, before: Element | null) {
+    node.remove();
+    node.parent = this;
+    const at = before === null ? -1 : this.children.indexOf(before);
+    if (at < 0) this.children.push(node);
+    else this.children.splice(at, 0, node);
+    return node;
+  }
+  get nextSibling(): Element | null {
+    if (this.parent === null) return null;
+    return this.parent.children[this.parent.children.indexOf(this) + 1] ?? null;
+  }
+  get parentNode(): Element | null { return this.parent; }
   addEventListener(type: string, listener: (event: unknown) => void) {
     this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
   }
@@ -417,8 +440,53 @@ test("syncSessions redraws the conversation and the sessions only: the Pause con
   assert.deepEqual(byClass(section(panel, "sessions"), "desk-row").map((row) => row.dataset.sessionId), ["session-desk-2", "session-desk-1", "session-desk-0"]);
   assert.equal(calls.length, 1, "no status read for a list that moved");
   await desk.refresh();
-  assert.notEqual(pauseControl(panel).select, select);
-  assert.equal(pauseControl(panel).select.value, "1d", "a full redraw keeps the operator's choice");
+  assert.equal(pauseControl(panel).select, select, "nor by a full redraw");
+  assert.equal(pauseControl(panel).select.value, "1d", "which keeps the operator's choice");
+}));
+
+/* The poll redraws every 30 s while the panel is shown: a Pause row rebuilt under the operator's hand would close its
+ * open dropdown and drop its focus. */
+test("the 30 s poll redraws the status and leaves the Pause row alone: the same nodes, never taken off the page, a failed read between included", () => withDOM(async (panel) => {
+  let next: () => Promise<Record<string, any>> = async () => status();
+  const { desk, timer, calls } = harness(panel, () => next());
+  await desk.show();
+  const { select, button } = pauseControl(panel);
+  const row = select.parent!;
+  const card = section(panel, "desk");
+  select.value = "1d";
+  select.fire("change"); // the operator's hand on the dropdown
+  const kept = [card, row, select, button];
+  const detaches = (): number[] => kept.map((node) => node.detaches);
+  const before = detaches();
+
+  next = async () => status({ off: { setAt: "2026-10-20T17:00:00.000Z", by: "telegram" }, uptimeMs: 4 * 3_600_000 });
+  timer.fire();
+  await settle();
+  assert.equal(pauseLine(panel), "paused since 13:00 ET by telegram", "the status is drawn again");
+  assert.equal(kvValue(section(panel, "desk"), "up"), "4h 0m");
+  assert.equal(pauseControl(panel).select, select, "the same select");
+  assert.equal(pauseControl(panel).button, button, "the same button");
+  assert.equal(select.value, "1d", "holding the operator's choice");
+  assert.deepEqual(detaches(), before, "none of them taken off the page");
+
+  /* A read that fails takes the status's sections away, and one that answers brings them back - around the desk card. */
+  next = async () => { throw new Error("HTTP 500"); };
+  timer.fire();
+  await settle();
+  assert.deepEqual(sectionIds(panel), ["desk", "sessions"]);
+  next = async () => status();
+  timer.fire();
+  await settle();
+  assert.deepEqual(sectionIds(panel), ["desk", "telegram", "conversation", "turns", "sessions"]);
+  assert.equal(section(panel, "desk"), card);
+  assert.equal(pauseControl(panel).select, select);
+  assert.deepEqual(detaches(), before, "still never taken off the page");
+
+  /* And it still pauses, with the operator's choice. */
+  button.fire("click");
+  assert.deepEqual(calls.at(-1), ["/data/desk/pause", { until: "1d" }]);
+  assert.equal(button.textContent, "pausing…");
+  assert.equal(button.disabled, true);
 }));
 
 test("the quiet cases: no desk session yet, no Telegram, the desk off, an unreadable ledger, a blocked bot", () => withDOM(async (panel) => {
@@ -432,7 +500,10 @@ test("the quiet cases: no desk session yet, no Telegram, the desk off, an unread
   assert.deepEqual(all(section(panel, "conversation"), (node) => node.tagName === "button"), [], "nothing to open");
   assert.match(section(panel, "sessions").textContent, /no desk sessions yet/);
 
-  next = status({ deskSession: "session-gone", telegram: { configured: true, polling: false, dropped: 0, queued: 3, blocked: true, conflictAt: "2026-10-20T17:00:00.000Z" } });
+  next = status({ deskSession: "session-gone", telegram: {
+    configured: true, polling: false, dropped: 0, queued: 3, blocked: true, conflictAt: "2026-10-20T17:00:00.000Z",
+    pollFailing: { since: "2026-10-20T17:30:00.000Z", reason: "HTTP 401 Unauthorized" },
+  } });
   await desk.refresh();
   const telegram = section(panel, "telegram");
   assert.equal(kvValue(telegram, "send"), "blocked (403)");
@@ -440,6 +511,7 @@ test("the quiet cases: no desk session yet, no Telegram, the desk off, an unread
   assert.equal(kvValue(telegram, "last poll"), "none yet");
   assert.equal(kvValue(telegram, "dropped"), "0");
   assert.equal(kvValue(telegram, "conflict"), "13:00 ET");
+  assert.equal(kvValue(telegram, "poll"), "failing since 13:30 ET: HTTP 401 Unauthorized", "a failing poll, since when and why");
   assert.equal(kvValue(section(panel, "conversation"), "session"), "session-gone", "a session the list does not carry is named by its id");
 }));
 

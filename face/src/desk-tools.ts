@@ -29,21 +29,26 @@
  * - the write check ({@link deskWriteDecision}) denies a `write`, `edit` or `str_replace_editor` (a `view`
  *   excepted) whose path names an instruction file, a project root or a skill root (src/desk-names.ts
  *   `FENCE_NAMES`) at any depth below the repository root, or below a path's common ancestor with it - and every
- *   write from a desk whose cwd sits under one - so a desk turn cannot steer the rest of itself;
+ *   write from a desk whose cwd sits under one - so a desk turn cannot steer the rest of itself; and, the same way,
+ *   one that names another agent's instruction file (`CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`,
+ *   `AGENTS.override.md`) or any dot-file - a `.gitignore` git obeys, an ignore file ripgrep obeys;
  * - the read check ({@link deskReadDecision}) denies a `read`, `read_image`, `grep`, `glob` or `str_replace_editor`
  *   (every command) that reaches outside the repository - after the volume's own realpath, so a symlink cannot
- *   smuggle a path out - or names a key file (`.env`, `.env.<anything>`, `.git`), or searches dot-files; dsh's
- *   sandbox lets every read through, and what a desk turn reads goes to DeepSeek in the tool result;
+ *   smuggle a path out - or names a key file (`.env`, `.env.<anything>`, `.git`) or any other dot-file below the
+ *   root (`.mcp.json`, `.claude/`, `.codex/`), or searches dot-files; dsh's sandbox lets every read through, and what
+ *   a desk turn reads goes to DeepSeek in the tool result;
  * - the secret check ({@link deskSecretDecision}) denies any call, of any tool, whose arguments carry the value of
  *   a key, password, secret or token in the face's environment ({@link deskSecrets}): to DeepSeek's search, to an
  *   MCP server, or to a file.
  * src/desk.ts `installDesk` installs it beside the tools, anchored on its `root`. The Telegram bridge
  * (src/telegram.ts) is the second line on the way out: it redacts the same secrets from everything it sends.
  *
- * MODULE WEIGHT: the preset id, the fence names and their fold come from src/desk-names.ts, a leaf, not from
+ * MODULE WEIGHT: the preset id, the guard's names and their fold come from src/desk-names.ts, a leaf, not from
  * src/desk-preset.ts or src/desk-session.ts. This module is loaded wherever src/desk.ts is - by `npm run
  * desk` and scripts/service.ts too - and src/desk-preset.ts would bring src/roles.ts, src/bots.ts and
- * js-yaml with it. The guard adds `node:path` and `node:fs`, built in, which the face loads already.
+ * js-yaml with it. The guard adds `node:crypto` (a session's spill directory is named by a hash of its id),
+ * `node:fs`, `node:os` (the temp directory spills lie under) and `node:path`, all built in, which the face loads
+ * already.
  *
  * Both tools follow the call's cancellation: a cancelled call settles at once. What it started runs on - the
  * hub's refresh is shared with every other reader and keeps its own deadline, so it is not one call's
@@ -54,7 +59,7 @@ import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { DESK_PRESET, fenceNameOf, foldName, type FenceName } from "./desk-names.ts";
+import { agentFileNameOf, DESK_PRESET, fenceNameOf, foldName, isDotName, type AgentFileName, type FenceName } from "./desk-names.ts";
 import type { DeskStatus } from "./desk.ts";
 import { etClock, etDate } from "./et.ts";
 import { HttpError } from "./http.ts";
@@ -462,6 +467,26 @@ function fencedName(names: readonly string[]): FenceName | undefined {
   return undefined;
 }
 
+/** The first of `names` that is another agent's instruction file, in its `AGENT_FILE_NAMES` spelling, or `undefined`. */
+function agentFileName(names: readonly string[]): AgentFileName | undefined {
+  for (const name of names) {
+    const found = agentFileNameOf(name);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+/** The write check's refusal of a write that reaches `names`, or `undefined`: a fence name first, wherever it sits
+ * among them; then another agent's instruction file; then the first dot-led name. */
+function writeRefusal(names: readonly string[]): string | undefined {
+  const fenced = fencedName(names);
+  if (fenced !== undefined) return `the desk never writes ${fenced}: it would steer every desk turn after it`;
+  const agent = agentFileName(names);
+  if (agent !== undefined) return `the desk never writes ${agent}: another agent reads it`;
+  const dotted = names.find(isDotName);
+  return dotted === undefined ? undefined : `the desk never writes dot-files: ${dotted}`;
+}
+
 /**
  * The write guard's decision for one call: a deny, or `null` to leave the call alone. Pure and synchronous.
  *
@@ -476,18 +501,26 @@ function fencedName(names: readonly string[]): FenceName | undefined {
  *   inside the repository, every name below the root; outside it, the names below where it leaves the root's
  *   ancestors, so `~/.dsh/...` and `~/.agents/...` count - and as the argument spells it, every name of a
  *   relative one and those below the same common ancestor of an absolute one, so a name that a `..` leaves
- *   behind counts too, as dsh-fs-local keeps a path with `..` as spelled and lets the volume walk it. The call
- *   is denied when any of those names is a fence name, with `the desk never writes <name>: it would steer every
- *   desk turn after it` - in the journal, above it (`../GRAVIT.md`), at the repository's skill roots
- *   (`../../.agents/...`) and in the harness home alike.
+ *   behind counts too, as dsh-fs-local keeps a path with `..` as spelled and lets the volume walk it. Of those
+ *   names, in this order:
+ *   - any fence name denies the call with `the desk never writes <name>: it would steer every desk turn after
+ *     it` - in the journal, above it (`../GRAVIT.md`), at the repository's skill roots (`../../.agents/...`) and
+ *     in the harness home alike - `<name>` its `FENCE_NAMES` spelling;
+ *   - then any instruction file another agent loads from the folder it works in - Claude Code's `CLAUDE.md` and
+ *     `CLAUDE.local.md`, Codex's `AGENTS.md` and `AGENTS.override.md` (`AGENT_FILE_NAMES`) - with `the desk never
+ *     writes <name>: another agent reads it`, `<name>` its `AGENT_FILE_NAMES` spelling: those agents have a shell,
+ *     and the journal is ignored, so git would never show one there;
+ *   - then any name that begins with a dot, `..` aside, with `the desk never writes dot-files: <name>`, `<name>`
+ *     as found: a `.gitignore` holding `!*` in the journal would un-ignore it - the operator's book - for the next
+ *     `git add -A`, and an ignore file's negation would lift ripgrep's hidden-file skip; nothing the desk does
+ *     needs a dot-file.
  *
- * `<name>` is the `FENCE_NAMES` spelling of the name found (src/desk-names.ts; compared as the volume compares
- * names, `fenceNameOf`). The root's own ancestors are never judged, in the cwd or in a path: they are not the
- * desk's to write. So a repository checked out under a directory named `.git` still writes its journal, and
- * what a path reaches below its root - or, outside it, below where the path leaves the root's ancestors - is
- * judged as any other repository's. dsh reads the instruction files in every
- * directory from the cwd to any file a tool touches, so a desk turn that wrote `GRAVIT.md` would steer the rest
- * of that same turn, before the fence (src/desk-session.ts) checks again.
+ * Names are compared as the volume compares them (src/desk-names.ts `fenceNameOf`, `agentFileNameOf`). The root's
+ * own ancestors are never judged, in the cwd or in a path: they are not the desk's to write. So a repository checked
+ * out under a directory named `.git`, or any dot-led one, still writes its journal, and what a path reaches below its
+ * root - or, outside it, below where the path leaves the root's ancestors - is judged as any other repository's. dsh
+ * reads the instruction files in every directory from the cwd to any file a tool touches, so a desk turn that wrote
+ * `GRAVIT.md` would steer the rest of that same turn, before the fence (src/desk-session.ts) checks again.
  *
  * It fails closed: a write tool whose arguments are no object, whose path argument is missing or is not a
  * string, or a `cwd` or `root` that is not a string, is denied with `the desk could not check this write's
@@ -509,8 +542,8 @@ export function deskWriteDecision(toolName: string, args: unknown, cwd: string, 
     const path: unknown = (args as Record<string, unknown>)[arg];
     if (typeof path !== "string") return { kind: "deny", reason: UNCHECKED };
     const spelled = namesOf(path);
-    const fenced = fencedName(below(namesOf(resolve(cwd, path)), base)) ?? fencedName(isAbsolute(path) ? below(spelled, base) : spelled);
-    if (fenced !== undefined) return { kind: "deny", reason: `the desk never writes ${fenced}: it would steer every desk turn after it` };
+    const refusal = writeRefusal([...below(namesOf(resolve(cwd, path)), base), ...(isAbsolute(path) ? below(spelled, base) : spelled)]);
+    if (refusal !== undefined) return deny(refusal);
   }
   return null;
 }
@@ -558,6 +591,7 @@ const READ_UNCHECKED = "the desk could not check this read's path; nothing was r
 const DOT_FILES = "the desk never searches dot-files: search with no include, or one that starts with a name";
 const outsideRefusal = (path: string): string => `the desk reads only inside the repository; ${path} is outside it`;
 const keyRefusal = (name: string): string => `the desk never reads ${name}: it can hold a key`;
+const dotRefusal = (name: string): string => `the desk never reads dot-files: ${name}`;
 
 const isDeskReadTool = (name: unknown): name is DeskReadTool => (DESK_READ_TOOLS as readonly unknown[]).includes(name);
 const searchesCwd = (name: DeskReadTool): boolean => (DESK_READ_CWD_TOOLS as readonly string[]).includes(name);
@@ -644,7 +678,8 @@ function inOwnSpill(home: SpillHome, target: string): boolean {
 }
 
 /**
- * One path's verdict, by {@link deskReadDecision}'s rules: outside the repository, a key name, or `null`.
+ * One path's verdict, by {@link deskReadDecision}'s rules: outside the repository, a key name, a dot-file below the
+ * root, or `null`.
  * @param path - the path as the model spelled it, or the cwd ripgrep searches.
  * @param cwd - the session's cwd, absolute.
  * @param base - the root's names, as given.
@@ -674,7 +709,10 @@ function judgeReadPath(path: string, cwd: string, base: readonly string[], realR
     ...namesBelow(anchor, lexical),
   ];
   const key = names.find(isKeyName);
-  return key === undefined ? null : deny(keyRefusal(key));
+  if (key !== undefined) return deny(keyRefusal(key));
+  /* below the root, no dot-file at all; the session's own spills lie outside it, and keep only the key rule */
+  const dotted = anchor === realRoot ? names.find(isDotName) : undefined;
+  return dotted === undefined ? null : deny(dotRefusal(dotted));
 }
 
 /** A glob's segments, split at `/`, the one separator ripgrep's globs take, leaving out the empty ones. */
@@ -711,7 +749,13 @@ const mayMatchDotName = (segment: string): boolean => dotLed(segment) || "*?[{".
  *   the root of an absolute one, as the write check counts them - or a name either placement reaches below the root,
  *   or below the temp directory for a spill, case-folds to `.env`, `.env.<anything>` or `.git`, the call is denied
  *   with `the desk never reads <name>: it can hold a key`, `<name>` as found. A symlink with an innocent name and a key
- *   file behind it is found by its target.
+ *   file behind it is found by its target;
+ * - inside the repository, when any of those names begins with a dot, `..` aside, the call is denied with `the desk
+ *   never reads dot-files: <name>`, `<name>` as found: the checkout the service runs from holds `.mcp.json`,
+ *   `.claude/settings.local.json` and `.codex/` - formats made to carry tokens, which the secret check knows only by
+ *   the values in the face's environment - and the `.claude/worktrees/*` checkouts, and nothing the desk does needs a
+ *   dot-file. ripgrep keeps a `grep` or `glob` with no such name in its path off them already. The session's own
+ *   spill directory lies outside the repository, so its read keeps the key rule alone.
  *
  * Then the glob the tool hands ripgrep as `--glob=<value>` ({@link DESK_READ_GLOB_ARGS}) is judged segment by segment,
  * split at `/`. Ripgrep skips hidden files and directories by default, but a `--glob` that matches one lifts the skip,
@@ -724,10 +768,13 @@ const mayMatchDotName = (segment: string): boolean => dotLed(segment) || "*?[{".
  *   or `{` is denied with `the desk never searches dot-files: search with no include, or one that starts with a name` -
  *   `*.md` included, since no rule that lets `*.md` through can stop `*.alpaca`. A literal-led include (`notes*.md`)
  *   goes, and so does a `grep` with none, narrowed by its `path`, which ripgrep keeps off hidden files - unless an
- *   ignore file in the tree it searches whitelists one: a negation such as `!.env.alpaca` in a `.gitignore`, `.ignore`
- *   or `.rgignore` lifts the hidden-file skip for what it matches (measured: a `.ignore` holding `!.env.alpaca` made a
- *   grep with no include search `.env.alpaca`). tests/desk-guard.test.ts keeps the repository's tracked ignore files
- *   free of a negation that can match a key name; an untracked one, or git's own exclude files, it does not see;
+ *   ignore file it reads whitelists one: a negation such as `!.env.alpaca`, or a doublestar that ends one, in a
+ *   `.gitignore`, `.ignore` or `.rgignore` lifts the hidden-file skip for what it matches (measured: a `.ignore`
+ *   holding `!.env.alpaca` made a grep with no include search `.env.alpaca`), and ripgrep reads those files in the tree
+ *   it searches and in the directories above it - the repository's root for a grep in the journal, and above the
+ *   repository too. tests/desk-guard.test.ts keeps the repository's tracked ignore files free of a negation that can
+ *   match a key name; an untracked one, git's own exclude files and those above the repository it does not see. The
+ *   desk cannot write one: each is a dot-file, which the write check refuses;
  * - `glob`'s `pattern`, which lists names only: a segment led by a dot is denied, so `.*` is, and so is a doublestar
  *   `.env*`, and a doublestar `*.md` goes.
  *

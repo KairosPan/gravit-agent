@@ -19,6 +19,7 @@ import {
 import type { CreateDeskAgentOptions, DeskClock, DeskSessionCtxLike, SessionEventsOn } from "../src/desk-session.ts";
 import type { AgentCtxLike, AgentLike, ModelSelectionRefLike, ResumeMemberOptions, SessionLike } from "../src/room.ts";
 import type { EventLike, MessageLike } from "../src/room-rules.ts";
+import { InboxModel, type InboxLike } from "./inbox-fake.ts";
 import { FakeClock } from "./room-fake.ts";
 
 /* ---------- fixtures, inside the repository ---------- */
@@ -58,23 +59,31 @@ async function waitFor(what: string, ok: () => boolean | Promise<boolean>, ms = 
 /** A desk agent as the conversation drives it: what it was sent, how it was cancelled, and a status the
  * test sets. `whenIdle` is dsh-agent's: it resolves once the agent's driver retires ({@link settle}).
  * `maintaining` is dsh's maintenance with a followup latched behind it: the status reads `idle`, but
- * `whenIdle` waits. */
+ * `whenIdle` waits. With `model` (the tree's `inboxes`), it has dsh's inbox and wake too (tests/inbox-fake.ts):
+ * what it is sent queues there, and a cancel clears it or keeps it as dsh's does. */
 class FakeDeskAgent implements AgentLike {
   status: "idle" | "running" = "idle";
   maintaining = false;
   readonly followups: MessageLike[] = [];
   readonly cancels: unknown[][] = [];
   failFollowup: string | undefined;
+  model: InboxModel | undefined;
   private readonly idle: (() => void)[] = [];
   readonly session: SessionLike;
   constructor(readonly id: string, header: SessionLike["header"]) {
     this.session = { id, header, seq: 0, snapshotEvents: () => [], append: () => undefined };
   }
+  /** dsh-agent's `Agent.inbox`, when the agent has the model's. */
+  get inbox(): InboxLike | undefined { return this.model?.inbox; }
   followup(message: MessageLike): void {
     if (this.failFollowup !== undefined) throw new Error(this.failFollowup);
     this.followups.push(message);
+    this.model?.send(message);
   }
-  cancel(...args: unknown[]): void { this.cancels.push(args); }
+  cancel(...args: unknown[]): void {
+    this.cancels.push(args);
+    this.model?.cancel(args[1] as { keepInbox?: boolean } | undefined);
+  }
   whenIdle(): Promise<void> {
     if (this.status !== "running" && !this.maintaining) return Promise.resolve();
     return new Promise((done) => { this.idle.push(done); });
@@ -103,11 +112,14 @@ class FakeDeskTree {
   failCreate: string | undefined;
   /** When set, a create waits for it: a test can land something while an ensure is under way. */
   gate: Promise<void> | undefined;
+  /** When set, every agent made has dsh's inbox and wake ({@link FakeDeskAgent.model}). */
+  inboxes = false;
 
   readonly install = (_agentCtx: AgentCtxLike, _ref: ModelSelectionRefLike): (() => void) => () => {};
 
   private async make(id: string, setup: (agentCtx: AgentCtxLike, agent: AgentLike) => Promise<void>): Promise<FakeDeskAgent> {
     const agent = new FakeDeskAgent(id, this.headers.get(id) ?? {});
+    if (this.inboxes) agent.model = new InboxModel();
     await setup({}, agent);
     this.live.set(id, agent);
     this.agents.push(agent);
@@ -729,7 +741,7 @@ test("renew supervises the new session and stop cancels with the reason", async 
   fresh.status = "running";
   assert.deepEqual(h.desk.current(), { sessionId: renewed.sessionId, running: true });
   assert.equal(await h.desk.stop("stopped from the phone"), true);
-  assert.deepEqual(fresh.cancels, [[{ kind: "hook", reason: "stopped from the phone" }]]);
+  assert.deepEqual(fresh.cancels, [[{ kind: "hook", reason: "stopped from the phone" }, { keepInbox: true }]], "the turn under way, and only it");
   const next = await post(h, "after the renew");
   assert.deepEqual(next, { opened: true, sessionId: renewed.sessionId }, "posts go to the new conversation");
 });
@@ -773,8 +785,80 @@ test("a stop reaches a retiring turn as well as the current one, and current() s
   const freshAgent = h.tree.agent(fresh);
   freshAgent.status = "running";
   assert.equal(await h.desk.stop("stopped from the phone"), true);
-  assert.deepEqual(oldAgent.cancels, [[{ kind: "hook", reason: "stopped from the phone" }]]);
-  assert.deepEqual(freshAgent.cancels, [[{ kind: "hook", reason: "stopped from the phone" }]]);
+  assert.deepEqual(oldAgent.cancels, [[{ kind: "hook", reason: "stopped from the phone" }, { keepInbox: true }]]);
+  assert.deepEqual(freshAgent.cancels, [[{ kind: "hook", reason: "stopped from the phone" }, { keepInbox: true }]]);
+});
+
+/* The operator sends Q1, then Q2 and Q3 while Q1 runs, then /stop: the stop cancels "the desk session's current turn"
+ * (spec §5.6), not the operator's later messages. The agent here has dsh's inbox and wake (tests/inbox-fake.ts): a
+ * cancel that cleared the inbox would drop Q2 and Q3 unrecorded, and one that only kept it would leave them queued
+ * and unanswered until the next message, as tests/desk-smoke.test.ts measures on a real tree. */
+test("stop cuts only the turn under way: the messages queued behind it are answered, in order, and the cut turn is recorded cancelled", async () => {
+  const h = await harness();
+  h.tree.inboxes = true;
+  const outlet = recordingOutlet();
+  h.desk.setOutlet(outlet);
+  const { sessionId } = (await post(h, "first")) as { sessionId: string };
+  const agent = h.tree.agent(sessionId);
+  const model = agent.model!;
+  assert.equal(model.claim()?.content[0]?.text, "[telegram · operator · 14:03 ET]\nfirst", "the driver takes the first message for turn 1");
+  model.running = true;
+  agent.status = "running";
+  startTurn(h, sessionId, 1, PHONE);
+  assert.deepEqual(await post(h, "second"), { opened: true, sessionId });
+  assert.deepEqual(await post(h, "third"), { opened: true, sessionId });
+  assert.equal(model.pending.length, 2, "both wait for turns of their own");
+
+  assert.equal(await h.desk.stop("stopped from the phone"), true);
+  assert.deepEqual(agent.cancels, [[{ kind: "hook", reason: "stopped from the phone" }, { keepInbox: true }]], "the turn under way, the inbox kept");
+  endTurn(h, sessionId, 1, ABORTED("stopped from the phone"));
+  agent.settle();
+  assert.equal(model.converge(), true, "the agent wakes for what was queued once the cut turn has unwound");
+  for (const [n, text] of [[2, "second"], [3, "third"]] as const) {
+    assert.equal(model.claim()?.content[0]?.text, `[telegram · operator · 14:03 ET]\n${text}`, `turn ${n} takes ${text}, in the order it was sent`);
+    turn(h, sessionId, n, PHONE, `the ${text} answer`);
+  }
+  await waitFor("both answers", () => outlet.sent.length === 2);
+  assert.deepEqual(outlet.sent, ["the second answer", "the third answer"], "the stopped turn said nothing; the bridge answers /stop itself");
+  assert.deepEqual((await turnsOf(h)).map((e) => [e.turn, e.outcome, e.cancel]), [
+    [1, "cancelled", "stopped from the phone"], [2, "ended", undefined], [3, "ended", undefined],
+  ]);
+  assert.deepEqual(h.lines, []);
+});
+
+/** Step 1 of turn `turn` writes `text` and is cut mid-stream: dsh writes what it had as an interrupted message. */
+function interrupted(h: Harness, sessionId: string, turn: number, text: string): void {
+  h.bus.emit(sessionId, "assistant/message", {
+    turn, step: 1, interrupted: true,
+    message: { id: `a-${sessionId}-${turn}`, role: "assistant", content: say(text), source: { kind: "model", provider: "stub", model: "echo" } },
+  });
+}
+
+test("an answer cut mid-stream reaches the phone with a line naming the cut; a whole one goes as it is", async () => {
+  const h = await harness();
+  const outlet = recordingOutlet();
+  h.desk.setOutlet(outlet);
+  const { sessionId } = (await post(h, "hi")) as { sessionId: string };
+  startTurn(h, sessionId, 1, PHONE);
+  interrupted(h, sessionId, 1, "NVDA is trading at 18");
+  endTurn(h, sessionId, 1, ABORTED("stopped from the phone"));
+  startTurn(h, sessionId, 2, ALERT);
+  interrupted(h, sessionId, 2, "The 10-Q says revenue");
+  await h.time.fake.advance(300_000);
+  endTurn(h, sessionId, 2, ABORTED("desk deadline"));
+  /* the browser's stop after the answer was whole: the phone gets the answer, unmarked */
+  startTurn(h, sessionId, 3, PHONE);
+  answer(h, sessionId, 3, "Noting it.");
+  endTurn(h, sessionId, 3, { kind: "aborted", reason: { kind: "user" } });
+  await waitFor("three replies", () => outlet.sent.length === 3);
+  assert.deepEqual(outlet.sent, [
+    "NVDA is trading at 18\n(cut off: stopped from the phone)",
+    "The 10-Q says revenue\n(cut off: timed out after 5 min)",
+    "Noting it.",
+  ]);
+  assert.deepEqual((await turnsOf(h)).map((e) => [e.turn, e.outcome, e.cancel]), [
+    [1, "cancelled", "stopped from the phone"], [2, "timed-out", undefined], [3, "cancelled", "stopped in the browser"],
+  ]);
 });
 
 test("a retiring turn keeps its deadline", async () => {
@@ -826,7 +910,8 @@ test("a turn cut at shutdown is recorded before dispose resolves", async () => {
   endTurn(h, sessionId, 1, ABORTED("shutdown")); // the loop ends the turn after the cancel
   agent.settle();
   await disposing;
-  assert.deepEqual((await turnsOf(h)).map((e) => [e.sessionId, e.turn, e.source, e.wallMs]), [[sessionId, 1, "telegram", 1_000]]);
+  assert.deepEqual((await turnsOf(h)).map((e) => [e.sessionId, e.turn, e.source, e.wallMs, e.outcome, e.cancel]), [[sessionId, 1, "telegram", 1_000, "cancelled", "shutdown"]],
+    "recorded as cancelled, by the shutdown");
   assert.equal(h.bus.listeners.size, 0);
 });
 
@@ -873,7 +958,7 @@ test("work the status does not show - maintenance with a followup latched - is w
   oldAgent.maintaining = true; // dsh reads idle here, while whenIdle waits
   assert.deepEqual(h.desk.current(), { sessionId: old, running: false }, "the status says idle");
   assert.equal(await h.desk.stop("stopped from the phone"), true, "stop goes by whenIdle");
-  assert.deepEqual(oldAgent.cancels, [[{ kind: "hook", reason: "stopped from the phone" }]]);
+  assert.deepEqual(oldAgent.cancels, [[{ kind: "hook", reason: "stopped from the phone" }, { keepInbox: true }]]);
   const { sessionId: fresh } = await h.desk.renew();
   assert.equal(h.bus.listeners.size, 2, "retired, not ended: whenIdle still waits");
   const disposing = h.desk.dispose();

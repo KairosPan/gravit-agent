@@ -17,7 +17,15 @@ import type { AgentLike, SessionLike } from "../src/room.ts";
 import type { EventLike } from "../src/room-rules.ts";
 import { recorder } from "./route-recorder.ts";
 
-const home = (): Promise<string> => mkdtemp(join(tmpdir(), "face-desk-"));
+/** Every harness home made with {@link home}, removed once the file's tests are done. */
+const homes: string[] = [];
+afterAll(() => Promise.all(homes.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))));
+/** A fresh harness home under the system's temp directory, removed after the file's tests. */
+const home = async (): Promise<string> => {
+  const made = await mkdtemp(join(tmpdir(), "face-desk-"));
+  homes.push(made);
+  return made;
+};
 const boot = (t: string, pid: number): DeskEvent => ({ t, kind: "boot", pid, version: "0.2.0-rc.2", deskEnabled: true });
 
 test("appendEvent creates face/desk/events.jsonl mode 0600 and readEvents round-trips in order", async () => {
@@ -54,6 +62,40 @@ test("appendEvent rotates a ledger over rotateBytes into a dated sibling", async
   const names = await readdir(deskDir(h));
   assert.ok(names.some((n) => /^events\.2026-10-19T14-00-00\.000Z\.jsonl$/.test(n)), names.join(","));
   assert.equal(LEDGER_ROTATE_BYTES, 50 * 1024 * 1024);
+});
+
+/* After a rotation the current file would hold no desk-session, and the next post would open a new desk conversation
+ * (src/desk-session.ts `ensureDeskSession` reads the current file only): the new file opens with the last one. */
+test("a rotation carries the ledger's last desk-session into the new file, as written, so the desk conversation is found again", async () => {
+  const h = await home();
+  const sessionA = { t: "2026-10-19T13:00:01.000Z", kind: "desk-session", sessionId: "session-a", reason: "created" } as const;
+  const sessionB = { t: "2026-10-19T15:00:00.000Z", kind: "desk-session", sessionId: "session-b", reason: "new" } as const;
+  const turn = { t: "2026-10-19T15:01:00.000Z", kind: "desk-turn", sessionId: "session-b", source: "telegram", turn: 1, outcome: "ended", wallMs: 900 } as const;
+  for (const event of [boot("2026-10-19T13:00:00.000Z", 11), sessionA, sessionB, turn] as DeskEvent[]) await appendEvent(h, event);
+  const before = await readFile(join(deskDir(h), "events.jsonl"), "utf8");
+  const asleep: DeskEvent = { t: "2026-10-20T14:00:00.000Z", kind: "asleep", from: "2026-10-20T13:00:00.000Z", to: "2026-10-20T14:00:00.000Z", gapMs: 3_600_000 };
+  await appendEvent(h, asleep, { rotateBytes: 10 });
+  const { events, skipped } = await readEvents(h);
+  assert.equal(skipped, 0);
+  assert.deepEqual(events, [sessionB, asleep], "the new file opens with the last desk-session, then the event that rotated it");
+  assert.equal(lastDeskSession(events), "session-b");
+  assert.equal(readFileSync(join(deskDir(h), "events.jsonl"), "utf8").split("\n")[0], JSON.stringify(sessionB), "the line as it was written");
+  const rotated = (await readdir(deskDir(h))).filter((name) => /^events\..+\.jsonl$/.test(name));
+  assert.equal(rotated.length, 1);
+  assert.equal(await readFile(join(deskDir(h), rotated[0]), "utf8"), before, "the rotated file keeps every line it had");
+  /* A desk-session that rotates the file follows the one carried, and is the last. */
+  const sessionC = { t: "2026-10-21T09:00:00.000Z", kind: "desk-session", sessionId: "session-c", reason: "new" } as const;
+  await appendEvent(h, sessionC, { rotateBytes: 10 });
+  assert.deepEqual((await readEvents(h)).events, [sessionB, sessionC]);
+  assert.equal(lastDeskSession((await readEvents(h)).events), "session-c");
+  /* A ledger with no desk-session carries nothing; and the carry is the ledger's: another JSONL rotates bare. */
+  const bare = await home();
+  await appendEvent(bare, boot("2026-10-19T13:00:00.000Z", 11));
+  await appendEvent(bare, boot("2026-10-19T14:00:00.000Z", 12), { rotateBytes: 10 });
+  assert.deepEqual((await readEvents(bare)).events.map((e) => e.kind), ["boot"]);
+  await appendRecord(bare, "telegram.jsonl", { t: "2026-10-19T13:00:00.000Z", kind: "desk-session", sessionId: "session-x" });
+  await appendRecord(bare, "telegram.jsonl", { t: "2026-10-19T14:00:00.000Z", kind: "sent" }, { rotateBytes: 10 });
+  assert.deepEqual(readFileSync(join(deskDir(bare), "telegram.jsonl"), "utf8"), `${JSON.stringify({ t: "2026-10-19T14:00:00.000Z", kind: "sent" })}\n`);
 });
 
 test("an unwritable ledger logs and does not throw", async () => {

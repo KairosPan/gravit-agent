@@ -1,16 +1,23 @@
 /** The Desk panel: the always-on desk at a glance, in the chat page's sidebar
  * (`#panel-desk`, the rail's first item) - what `GET /data/desk/status`
  * answers, drawn as named sections; the Pause control, which posts
- * `POST /data/desk/pause`; and the desk's sessions, which open in place. Also
- * the desk's marks in the transcript that chat.js draws: the glyphs of its
- * three message sources, and the words of a desk line.
+ * `POST /data/desk/pause`; the desk's sessions, which open in place, each with
+ * the waiting chip while a card waits in it; and the badge on the rail's Desk
+ * item while another panel is shown. Also the desk's marks in the transcript
+ * that chat.js places: the glyphs of its three message sources
+ * ({@link DESK_GLYPHS}), the who-line over a phone message
+ * ({@link phoneWhoNode}), and a firing's or an alert's line and its words
+ * ({@link deskLineNode}, {@link deskLineText}).
  *
  * WHY A MODULE OF ITS OWN. Another branch replaces `face/client` with a new
  * client, and whichever of the two lands second ports the Desk panel - so
- * everything the panel is lives here, and chat.js only hooks it in: it hands
- * over `panelData`, the session list, the session on screen and `openSession`,
- * and calls `refresh` when the panel opens, `syncSessions` when the list moves
- * and `mark` when the session on screen changes.
+ * everything the panel is lives here, and chat.js only hooks it in
+ * ({@link createDeskPanel}): it hands over `panelData`, the session list, the
+ * session on screen, `openSession`, whether a card waits in a session
+ * (`needsYou`), whether a session is archived and the rail's Desk item; and it
+ * calls `show` and `hide` as the panel comes on screen and goes, `syncSessions`
+ * when the list moves - a gate's arrival or settling schedules that too - and
+ * `mark` when the session on screen changes.
  *
  * NAMED SECTIONS. The status is drawn as one card per entry of
  * {@link SECTIONS}, in order: the desk (on or off, up how long, the pause and
@@ -19,8 +26,11 @@
  * orders, P3's watch - is one more entry there. A section that reads the status
  * is left out while there is none, so a status that cannot be read still
  * leaves the desk's own section - its Pause control - and the sessions on
- * screen. Each card is kept across redraws, so a redraw of the sessions when
- * the list moves leaves the Pause control under the operator's hand alone.
+ * screen. Each card is kept across redraws, and stays on the page when the
+ * sections around it come and go; the desk's own card keeps its Pause row
+ * itself, built once, so neither a redraw of the sessions when the list moves
+ * nor the status read again every {@link DESK_POLL_MS} while the panel is shown
+ * touches the control under the operator's hand.
  *
  * THE PAUSE. The panel only pauses, as the phone does: 30 minutes, 2 hours,
  * 1 day, or until a resume (no `until`). A pause from here never shortens one in
@@ -301,47 +311,74 @@ function pauseText(off, now) {
  * @property {(sessionId: string) => void} open
  */
 
+/**
+ * The desk section's parts, by its card, built on the card's first draw: its
+ * title row, the status lines under it, the Pause row and the line under that.
+ * `ctx` is the last draw's: the title's ↻ and the Pause row's handlers act
+ * through it.
+ * @type {WeakMap<any, {info: any, row: any, select: any, go: any, after: any, ctx: DrawContext}>}
+ */
+const deskParts = new WeakMap();
+
 /** The desk's own section: on or off, up how long, an unreadable ledger, the
  * pause in force, and the Pause control - drawn with or without a status.
+ * It keeps its card ({@link SECTIONS}' `keeps`): the title row and the Pause
+ * row are built on the card's first draw and never again - a redraw, the 30 s
+ * poll's included, redraws the lines between and after them, and sets the
+ * button's label and state and the select's value only where they changed, so
+ * a dropdown the operator holds open stays open, and the focus stays where it is.
  * @param {any} card @param {DrawContext} ctx */
 function drawDesk(card, ctx) {
-  const refresh = button("↻", "sp-title-btn desk-refresh", ctx.refresh);
-  refresh.title = "read the desk's status again";
-  refresh.setAttribute("aria-label", "refresh the desk's status");
-  head(card, "desk", refresh);
+  let parts = deskParts.get(card);
+  if (parts === undefined) {
+    const refresh = button("↻", "sp-title-btn desk-refresh", () => parts.ctx.refresh());
+    refresh.title = "read the desk's status again";
+    refresh.setAttribute("aria-label", "refresh the desk's status");
+    head(card, "desk", refresh);
+    const info = el("div", "desk-info");
+    const row = el("div", "desk-pause");
+    const select = el("select", "picker-input desk-pause-until");
+    select.setAttribute("aria-label", "pause the desk for");
+    for (const { until, label } of PAUSE_CHOICES) {
+      const option = el("option", null, label);
+      option.value = until;
+      option.selected = until === ctx.choice;
+      select.append(option);
+    }
+    select.value = ctx.choice;
+    select.addEventListener("change", () => parts.ctx.choose(select.value));
+    const go = button("Pause", "picker-btn desk-pause-btn", () => parts.ctx.pause());
+    go.title = "pause the desk; only a terminal resumes it";
+    row.append(select, go);
+    const after = el("div", "desk-pause-after");
+    card.append(info, row, after);
+    parts = { info, row, select, go, after, ctx };
+    deskParts.set(card, parts);
+  }
+  parts.ctx = ctx;
+  const { info } = parts;
+  info.replaceChildren();
   const { status } = ctx;
   if (status === undefined) {
-    card.append(note(`desk status: ${ctx.error ?? "not read yet"}`, true));
+    info.append(note(`desk status: ${ctx.error ?? "not read yet"}`, true));
   } else {
     const enabled = status.desk?.enabled;
-    kv(card, "desk", enabled === true ? "on" : enabled === false ? "off (FACE_DESK=0)" : EM);
-    kv(card, "up", upFor(status.uptimeMs), typeof status.bootedAt === "string" ? `since ${status.bootedAt}` : undefined);
-    if (typeof status.ledgerError === "string") card.append(note(`ledger unreadable: ${status.ledgerError}`, true));
+    kv(info, "desk", enabled === true ? "on" : enabled === false ? "off (FACE_DESK=0)" : EM);
+    kv(info, "up", upFor(status.uptimeMs), typeof status.bootedAt === "string" ? `since ${status.bootedAt}` : undefined);
+    if (typeof status.ledgerError === "string") info.append(note(`ledger unreadable: ${status.ledgerError}`, true));
     const off = isOffState(status.off) ? status.off : undefined;
-    card.append(el("div", off === undefined ? "desk-pause-line" : "desk-pause-line paused", pauseText(off, ctx.now)));
+    info.append(el("div", off === undefined ? "desk-pause-line" : "desk-pause-line paused", pauseText(off, ctx.now)));
     if (off !== undefined) {
       const resume = el("div", "sp-note desk-resume");
       resume.append(el("span", null, RESUME_PREFIX), el("span", "desk-resume-cmd", RESUME_COMMAND));
-      card.append(resume);
+      info.append(resume);
     }
   }
-  const row = el("div", "desk-pause");
-  const select = el("select", "picker-input desk-pause-until");
-  select.setAttribute("aria-label", "pause the desk for");
-  for (const { until, label } of PAUSE_CHOICES) {
-    const option = el("option", null, label);
-    option.value = until;
-    option.selected = until === ctx.choice;
-    select.append(option);
-  }
-  select.value = ctx.choice;
-  select.addEventListener("change", () => ctx.choose(select.value));
-  const go = button(ctx.pausing ? "pausing…" : "Pause", "picker-btn desk-pause-btn", ctx.pause);
-  go.disabled = ctx.pausing;
-  go.title = "pause the desk; only a terminal resumes it";
-  row.append(select, go);
-  card.append(row);
-  if (ctx.pauseError !== undefined) card.append(note(`pause: ${ctx.pauseError}`, true));
+  if (parts.select.value !== ctx.choice) parts.select.value = ctx.choice;
+  const label = ctx.pausing ? "pausing…" : "Pause";
+  if (parts.go.textContent !== label) parts.go.textContent = label;
+  if (parts.go.disabled !== ctx.pausing) parts.go.disabled = ctx.pausing;
+  parts.after.replaceChildren(...(ctx.pauseError !== undefined ? [note(`pause: ${ctx.pauseError}`, true)] : []));
 }
 
 /** The Telegram bridge, as the status reports it (src/desk.ts `TelegramStatus`).
@@ -364,6 +401,11 @@ function drawTelegram(card, { status, now }) {
     "updates refused as not the operator's private chat");
   kv(card, "queued", count(t.queued), "messages waiting in the outbox");
   if (typeof t.conflictAt === "string") kv(card, "conflict", deskTime(new Date(t.conflictAt), now), "the last time Telegram said another poller holds the token");
+  const failing = t.pollFailing;
+  if (failing !== null && typeof failing === "object" && typeof failing.since === "string" && typeof failing.reason === "string") {
+    kv(card, "poll", `failing since ${deskTime(new Date(failing.since), now)}: ${failing.reason}`,
+      "every poll since then has failed - a revoked or mistyped token fails them all; a poll that answers clears it", "bad");
+  }
 }
 
 /** The desk conversation: the session the ledger names last, the one the phone
@@ -445,16 +487,17 @@ function drawSessions(card, ctx) {
 /**
  * The panel's sections, in order. `needsStatus`: drawn only while a status is
  * read. `readsSessions`: drawn again when the session list moves
- * ({@link createDeskPanel}'s `syncSessions`). P2's standing orders and P3's
- * watch are one more entry each.
- * @type {ReadonlyArray<{id: string, needsStatus: boolean, readsSessions: boolean, draw: (card: any, ctx: DrawContext) => void}>}
+ * ({@link createDeskPanel}'s `syncSessions`). `keeps`: the section keeps what it
+ * drew in its card and redraws only what changes - the card is not emptied
+ * before each draw. P2's standing orders and P3's watch are one more entry each.
+ * @type {ReadonlyArray<{id: string, needsStatus: boolean, readsSessions: boolean, keeps: boolean, draw: (card: any, ctx: DrawContext) => void}>}
  */
 const SECTIONS = Object.freeze([
-  Object.freeze({ id: "desk", needsStatus: false, readsSessions: false, draw: drawDesk }),
-  Object.freeze({ id: "telegram", needsStatus: true, readsSessions: false, draw: drawTelegram }),
-  Object.freeze({ id: "conversation", needsStatus: true, readsSessions: true, draw: drawConversation }),
-  Object.freeze({ id: "turns", needsStatus: true, readsSessions: false, draw: drawTurns }),
-  Object.freeze({ id: "sessions", needsStatus: false, readsSessions: true, draw: drawSessions }),
+  Object.freeze({ id: "desk", needsStatus: false, readsSessions: false, keeps: true, draw: drawDesk }),
+  Object.freeze({ id: "telegram", needsStatus: true, readsSessions: false, keeps: false, draw: drawTelegram }),
+  Object.freeze({ id: "conversation", needsStatus: true, readsSessions: true, keeps: false, draw: drawConversation }),
+  Object.freeze({ id: "turns", needsStatus: true, readsSessions: false, keeps: false, draw: drawTurns }),
+  Object.freeze({ id: "sessions", needsStatus: false, readsSessions: true, keeps: false, draw: drawSessions }),
 ]);
 
 /**
@@ -578,8 +621,19 @@ export function createDeskPanel(deps) {
     };
   }
 
-  /** Draw the sections named in `ids`, every one when absent. The cards are
-   * rebuilt only when the set of sections shown changes. @param {string[]} [ids] */
+  /** A section's card, empty. @param {string} id */
+  function newCard(id) {
+    const card = el("section", "sp-card desk-section");
+    card.dataset.section = id;
+    return card;
+  }
+
+  /** Draw the sections named in `ids`, every one when absent. When the set of
+   * sections shown changes - a status read, or no longer read - the cards of the
+   * sections that stay stay where they are, never taken off the page: only those
+   * that come or go are put in or taken out, and every section is drawn. A card
+   * that `keeps` is drawn into as it is; any other is emptied first.
+   * @param {string[]} [ids] */
   function draw(ids) {
     const panel = deps.panel();
     if (panel === null || panel === undefined) return;
@@ -592,21 +646,28 @@ export function createDeskPanel(deps) {
     }
     const drawable = SECTIONS.filter((s) => !s.needsStatus || status !== undefined);
     const ids0 = [...cards.keys()];
-    if (drawnInto !== panel || ids0.length !== drawable.length || drawable.some((s, i) => ids0[i] !== s.id)) {
-      cards = new Map(drawable.map((s) => {
-        const card = el("section", "sp-card desk-section");
-        card.dataset.section = s.id;
-        return [s.id, card];
-      }));
+    if (drawnInto !== panel) {
+      cards = new Map(drawable.map((s) => [s.id, newCard(s.id)]));
       panel.replaceChildren(...cards.values());
       drawnInto = panel;
+      ids = undefined;
+    } else if (ids0.length !== drawable.length || drawable.some((s, i) => ids0[i] !== s.id)) {
+      const next = new Map(drawable.map((s) => [s.id, cards.get(s.id) ?? newCard(s.id)]));
+      for (const [id, card] of cards) if (!next.has(id)) card.remove();
+      /* from the last card back, each put before the one after it - unless it is there already */
+      let after = null;
+      for (const card of [...next.values()].reverse()) {
+        if (card.parentNode !== panel || card.nextSibling !== after) panel.insertBefore(card, after);
+        after = card;
+      }
+      cards = next;
       ids = undefined;
     }
     const ctx = context();
     for (const s of drawable) {
       if (ids !== undefined && !ids.includes(s.id)) continue;
       const card = cards.get(s.id);
-      card.replaceChildren();
+      if (!s.keeps) card.replaceChildren();
       s.draw(card, ctx);
     }
   }

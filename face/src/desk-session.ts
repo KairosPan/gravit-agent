@@ -53,7 +53,7 @@ import { appendEvent, deskTime, lastDeskSession, readEvents, type TurnUsage } fr
 import { FENCE_NAMES, fenceNameOf } from "./desk-names.ts";
 import { DESK_PRESET } from "./desk-preset.ts";
 import type { AgentLike, MemberSetup, ResumeMemberOptions, RoomContextLike, RoomDeps, SessionLike } from "./room.ts";
-import { finalTextOf, parseModelRoute, type EventLike } from "./room-rules.ts";
+import { finalTextOf, parseModelRoute, type EventLike, type MessageLike } from "./room-rules.ts";
 
 /** Diagnostic label, the one every `${BIN}:`-prefixed line in the face uses; desk lines add `desk:`. */
 const BIN = "gravit-face";
@@ -509,23 +509,28 @@ const defaultClock: DeskClock = {
  * `user/message` (`telegram`, `schedule`, `alert`, ...), or `wake` for a background job's notice
  * (`tool-jobs`) and for a turn that claimed no message. `outcome` is `timed-out` when the supervisor's
  * deadline cut the turn, or `refused` when its fence check found `violation` (repo-relative) while the
- * turn ran - the supervisor's own cut wins over whatever the turn ended in; else `failed` when the turn
- * ended on an error or a blocked pre-step, `error` saying which ({@link failureOf}); else `ended`.
- * `finalText` is the turn's final assistant text (src/room-rules.ts `finalTextOf`), empty when it ended
- * on a tool; `usage`, its tokens in the ledger's four buckets with every route as `provider/model`,
- * absent when the harness could not account for the turn. `startedAt` is ISO-8601 UTC; `wallMs`, from
- * `turn/start` to `turn/end`; `deadlineMs`, the deadline that applied. */
+ * turn ran - the supervisor's own cut wins over whatever the turn ended in; else `cancelled` when
+ * something else cancelled it - a shutdown, the phone's `/stop`, the browser's stop - `cancel` saying
+ * what ({@link cancelOf}); else `failed` when the turn ended on an error or a blocked pre-step, `error`
+ * saying which ({@link failureOf}); else `ended`. `finalText` is the turn's final assistant text
+ * (src/room-rules.ts `finalTextOf`), empty when it ended on a tool; `interrupted` is there, `true`, when
+ * that text ends in the answer a cut interrupted mid-stream (dsh writes it as an `assistant/message`
+ * marked `interrupted`). `usage`, its tokens in the ledger's four buckets with every route as
+ * `provider/model`, absent when the harness could not account for the turn. `startedAt` is ISO-8601
+ * UTC; `wallMs`, from `turn/start` to `turn/end`; `deadlineMs`, the deadline that applied. */
 export interface DeskTurnRecord {
   sessionId: string;
   turn: number;
   source: string;
-  outcome: "ended" | "timed-out" | "refused" | "failed";
+  outcome: "ended" | "timed-out" | "refused" | "cancelled" | "failed";
   finalText: string;
+  interrupted?: true;
   usage?: TurnUsage;
   startedAt: string;
   wallMs: number;
   deadlineMs: number;
   violation?: string;
+  cancel?: string;
   error?: string;
 }
 
@@ -584,6 +589,97 @@ function failureOf(reason: unknown): string | undefined {
   return Array.from(line === "" ? code : line).slice(0, ERROR_MAX_CHARS).join("");
 }
 
+/**
+ * What cancelled a turn, from its `turn/end` reason as dsh-agent-loop writes an aborted one (lib/index.js:
+ * `{ kind: "aborted", reason }`, the reason copied from the cancel's cause, 731-744 and 1009-1014): a hook's
+ * own words (`shutdown`, `stopped from the phone`), `stopped in the browser` for the operator's stop button
+ * (`user`), `its parent cancelled it` (`parent`) and `its agent was disposed` (`disposed`); `unknown` for an
+ * aborted turn that names no cause. `undefined` for any reason that is no abort.
+ * @param reason - the `turn/end` event's `reason`.
+ */
+function cancelOf(reason: unknown): string | undefined {
+  const r = reason as { kind?: unknown; reason?: { kind?: unknown; reason?: unknown } } | null | undefined;
+  if (r?.kind !== "aborted") return undefined;
+  const cause = r.reason;
+  switch (cause?.kind) {
+    case "hook":
+      return typeof cause.reason === "string" && cause.reason !== "" ? cause.reason : "unknown";
+    case "user":
+      return "stopped in the browser";
+    case "parent":
+      return "its parent cancelled it";
+    case "disposed":
+      return "its agent was disposed";
+    default:
+      return "unknown";
+  }
+}
+
+/**
+ * Whether turn `turn`'s final text ends in an answer a cut interrupted: its last `assistant/message` after the
+ * last `tool/result` - the message the final text ends in - is one dsh marked `interrupted`, which it writes
+ * only for a stream an abort cut short (dsh-agent-loop lib/index.js 1083-1100), and the final text is not empty.
+ * @param events - the turn's events.
+ * @param turn - its number.
+ * @param finalText - its final text (src/room-rules.ts `finalTextOf`).
+ */
+function cutMidAnswer(events: readonly EventLike[], turn: number, finalText: string): boolean {
+  if (finalText === "") return false;
+  let last: { interrupted?: unknown } | undefined;
+  for (const event of events) {
+    const data = event.data as { turn?: unknown; interrupted?: unknown } | undefined;
+    if (data === undefined || data.turn !== turn) continue;
+    if (event.type === "tool/result") last = undefined;
+    else if (event.type === "assistant/message") last = data;
+  }
+  return last?.interrupted === true;
+}
+
+/** dsh-agent's `Agent.inbox` as the desk reads it, which the structural {@link AgentLike} leaves out: the messages
+ * waiting for turns of their own, oldest first, and taking one out (dsh-agent `Inbox`). */
+type InboxAware = { inbox?: { readonly nextTurn: readonly MessageLike[]; remove(id: string): boolean } };
+
+/**
+ * Cancel the turn under way on `agent` with `cause` - and only that turn: what waits in its inbox is kept, and every
+ * message queued for a turn of its own is answered.
+ *
+ * dsh's `cancel(cause, { keepInbox: true })` keeps the inbox, but a message queued while the turn ran then waits
+ * there, unanswered, until something else wakes the agent: once the cut turn has unwound, the driver goes idle
+ * without looking at the inbox (dsh-agent-loop lib/index.js `kick`; tests/desk-smoke.test.ts measures it on a real
+ * tree). A message sent after the cancel, though, is queued for the next turn and runs once the cut turn has
+ * unwound (dsh-agent `Agent.send`). So, in the same tick as the cancel, each message on the inbox's next-turn list
+ * is taken out and sent again with `followup`, oldest first: the list ends as it began, in the order the operator
+ * sent them, and each is answered in its own turn - with its own deadline, fence check and record. The input waiting
+ * for the next step (a browser's steer) is kept and not sent again: dsh's own stop leaves it so. An agent without an
+ * inbox is only cancelled.
+ *
+ * The phone's `/stop` (src/desk-conversation.ts) and the supervisor's deadline ({@link superviseDeskTurns}) cut this
+ * way. The fence's cut keeps the inbox but sends nothing again: a turn opened that way would start over the violation
+ * before its own check ran, so a queued message waits for the next post, which the owner's fence check refuses first.
+ * Shutdown keeps nothing (src/desk-conversation.ts `dispose`).
+ * @param agent - the desk agent.
+ * @param cause - the cancel's cause.
+ * @param log - where the line goes for a message that could not be sent again: taken out, it is lost.
+ * @returns how many messages it sent again.
+ * @throws what `agent.cancel` throws; then nothing is sent again.
+ */
+export function cancelKeepingQueue(agent: AgentLike, cause: { kind: "hook"; reason: string }, log: (line: string) => void): number {
+  agent.cancel(cause, { keepInbox: true });
+  const inbox = (agent as AgentLike & InboxAware).inbox;
+  if (inbox === undefined) return 0;
+  let sent = 0;
+  for (const message of [...inbox.nextTurn]) {
+    if (!inbox.remove(message.id)) continue; // taken by a turn since: it is answered there
+    try {
+      agent.followup(message);
+      sent += 1;
+    } catch (err) {
+      log(`${BIN}: desk: a message queued on desk session ${agent.id} could not be queued again after the cut, and is lost: ${errText(err)}`);
+    }
+  }
+  return sent;
+}
+
 /** The longest delay a timer keeps: 2^31 - 1 ms, about 24.8 days. Node fires a longer one at once. */
 const MAX_TIMER_MS = 2_147_483_647;
 /** Whether `ms` is a deadline a timer can hold: a whole number of milliseconds in 1..{@link MAX_TIMER_MS}. */
@@ -610,8 +706,10 @@ function turnUsage(events: readonly EventLike[]): TurnUsage | undefined {
  *
  * At each `turn/start` on that session: a timer of exactly `deadlineMs`, never extended - not for a
  * running tool, not for a pending card - that cancels the turn with `{ kind: "hook", reason: "desk
- * deadline" }`, keeping the inbox; and, when `fence` is given, the fence check, which cancels the turn
- * with `{ kind: "hook", reason: "desk fence" }` if it finds a violation while the turn still runs. A
+ * deadline" }`, keeping the inbox and waking the agent for what waits there ({@link cancelKeepingQueue}),
+ * so a cut turn never leaves the operator's later messages queued in silence; and, when `fence` is given,
+ * the fence check, which cancels the turn with `{ kind: "hook", reason: "desk fence" }`, keeping the inbox
+ * for the next post, if it finds a violation while the turn still runs. A
  * check that rejects while its turn runs counts as a violation at `desk/journal`, with one line; a check
  * that settles after the turn ended, either way, changes nothing and says nothing, and the next turn's
  * check runs again. When the turn's first `user/message` arrives, `deadlineFor` is asked by the
@@ -656,7 +754,9 @@ export function superviseDeskTurns(deps: SuperviseDeskTurnsDeps): () => void {
     if (disposed || open !== turn || turn.cut !== undefined) return;
     turn.cut = why;
     try {
-      deps.agent.cancel({ kind: "hook", reason: why.by === "deadline" ? "desk deadline" : "desk fence" }, { keepInbox: true });
+      /* the deadline's later messages are answered; the fence's wait for a post the fence check refuses first */
+      if (why.by === "deadline") cancelKeepingQueue(deps.agent, { kind: "hook", reason: "desk deadline" }, log);
+      else deps.agent.cancel({ kind: "hook", reason: "desk fence" }, { keepInbox: true });
     } catch (err) {
       log(`${BIN}: desk: turn ${turn.turn} on ${where} could not be cancelled: ${errText(err)}`);
     }
@@ -729,21 +829,26 @@ export function superviseDeskTurns(deps: SuperviseDeskTurnsDeps): () => void {
       log(`${BIN}: desk: the tokens of turn ${turn.turn} on ${where} could not be read: ${errText(err)}`);
     }
     /* The supervisor's own cut wins: the turn its cancel ended may well report an error too. */
-    const failure = turn.cut === undefined ? failureOf((event.data as { reason?: unknown } | undefined)?.reason) : undefined;
+    const reason = (event.data as { reason?: unknown } | undefined)?.reason;
+    const cancel = turn.cut === undefined ? cancelOf(reason) : undefined;
+    const failure = turn.cut === undefined && cancel === undefined ? failureOf(reason) : undefined;
     const outcome: DeskTurnRecord["outcome"] = turn.cut !== undefined
       ? (turn.cut.by === "deadline" ? "timed-out" : "refused")
-      : failure !== undefined ? "failed" : "ended";
+      : cancel !== undefined ? "cancelled" : failure !== undefined ? "failed" : "ended";
+    const finalText = finalTextOf(turn.events, turn.turn);
     const record: DeskTurnRecord = {
       sessionId: deps.sessionId,
       turn: turn.turn,
       source: turn.source ?? "wake",
       outcome,
-      finalText: finalTextOf(turn.events, turn.turn),
+      finalText,
+      ...(cutMidAnswer(turn.events, turn.turn, finalText) ? { interrupted: true as const } : {}),
       ...(usage === undefined ? {} : { usage }),
       startedAt: new Date(turn.startedAt).toISOString(),
       wallMs: clock.now() - turn.startedAt,
       deadlineMs: turn.deadlineMs,
       ...(turn.cut?.by === "fence" ? { violation: turn.cut.violation } : {}),
+      ...(cancel === undefined ? {} : { cancel }),
       ...(failure === undefined ? {} : { error: failure }),
     };
     /* A then-callback, not a bare call: a throw and a rejected promise both end in the one catch. */
