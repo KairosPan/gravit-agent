@@ -324,3 +324,13 @@ operator to read each card's name before signing. The model once reported an ask
 (no `portfolio_ask` row in the thread), and on its next turn read `myAsks: []`, said so, and filed
 it (ask-0003): the thread's tool rows are the fact, the prose is not. Suite after the fixes: 1077
 tests, 1060 pass, 17 skipped; typecheck clean.
+
+A background security review of that commit (MEDIUM, approval-card integrity / UI spoofing, TOCTOU):
+the redraw could let a later `tool/call` under the same session and call id replace a card the
+operator was reading. Fixed under failing tests (`kinds`: "argsAgreeWithReason: the call's title keys
+must each appear in the host's reason line…", `live`: "…drawn again at most once" and "a gate is drawn
+again only from a call whose arguments agree with the host's own reason line; a mismatch keeps the
+tool-name card"): a gate is drawn again at most once — the first call under its id spends the one
+chance — and only when the call's arguments agree with the host's Gate 2 reason line key by key
+(a key field whole, any other value as the forty-character cut, bounded on both sides so `usd=10` is
+not `usd=100`; a batch leg by leg); on a mismatch the card keeps the host's line as its only text.

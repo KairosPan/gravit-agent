@@ -3,7 +3,7 @@
 // (chat.js on main, its open/follow/page/reconcile and host-event handling), ported; nothing here touches the DOM.
 import { foldMembers } from '../wire/room.js';
 import { summaryOf } from '../wire/summaries.js';
-import { rememberCall, toMessages } from './kinds.js';
+import { rememberCall, toMessages, redressGate } from './kinds.js';
 import { listConversations, childRowsOf } from './sessions.js';
 import { reducers as host } from '../reducers/host.js';
 
@@ -89,9 +89,10 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
     if (!event || event.type !== 'tool/call') return;
     const callId = event.data?.callId;
     if (typeof callId !== 'string') return;
-    for (const v of pendingViews.values()) {
+    for (const [id, v] of pendingViews) {
       if (v.callId !== callId || v.sessionId !== frame.sessionId) continue;
-      const [m] = toMessages(v, calls, now());
+      pendingViews.delete(id); // one chance: the first call under this id decides, and no later one replaces the card
+      const m = redressGate(v, calls, now()); // only a call whose arguments agree with the host's own reason line
       if (!m) continue;
       pending.set(m.id, m);
       store.dispatch('hostGate', placeGate(m));
@@ -214,7 +215,8 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
     const [m] = toMessages(v, calls, now());
     if (!m) return;
     pending.set(m.id, m);
-    pendingViews.set(m.id, v);
+    // only a card drawn without its call's arguments waits to be drawn again; one that knew them is final
+    if (m.kind === 'card' && Object.keys(m.data?.args ?? {}).length === 0) pendingViews.set(m.id, v);
     store.dispatch('hostGate', placeGate(m));
   }
   // the mux reports a gate over; for one this tab's answer won, api.js reports only a cancel that trailed the win —

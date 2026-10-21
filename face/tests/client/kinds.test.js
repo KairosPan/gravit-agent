@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { mapFrame } from '../../client/js/wire/mapper.js';
-import { ORDER_TOOLS, SEAT_TOOLS, isOrderTool, isSeatWriteTool, parseArgs, orderLine, seatLine, rememberCall, toMessages, seatLift } from '../../client/js/host/kinds.js';
+import { ORDER_TOOLS, SEAT_TOOLS, isOrderTool, isSeatWriteTool, parseArgs, orderLine, seatLine, rememberCall, toMessages, seatLift, argsAgreeWithReason } from '../../client/js/host/kinds.js';
 
 // the Account seat's twelve write tools (spec 2026-10-20 §6.1), spelled here as the gate's test spells them
 const SEAT = ['portfolio_live_order', 'portfolio_live_batch', 'portfolio_live_amend', 'portfolio_live_cancel', 'portfolio_live_close',
@@ -294,4 +294,23 @@ test("a seat refusal prefixed \"Error: \" by dsh still lifts as the Account's co
   assert.equal(batch.text, 'Batch · 2 of 2 legs refused · E_MANDATE_RECIPIENT · ex is not in your limit');
   const plain = seatLift('mcp__account__portfolio_live_order', {}, 'Error: the user rejected tool "mcp__account__portfolio_live_order"', true, 'c3');
   assert.equal(plain.text, 'the user rejected tool "mcp__account__portfolio_live_order"', "dsh's own refusal keeps its words without the prefix");
+});
+
+// the security review of 2026-10-21: a card drawn again from a later tool/call must agree with the host's own reason
+// line, key by key, with a boundary after each value (usd=10 is not usd=100), legs included
+test("argsAgreeWithReason: the call's title keys must each appear in the host's reason line, whole or as the cut the card shows", () => {
+  const reason = 'Account seat - mcp__account__portfolio_live_order: side=buy usd=10 symbol=BTC/USD orderType=market venue=paper-momentum';
+  assert.equal(argsAgreeWithReason({ venue: 'paper-momentum', symbol: 'BTC/USD', side: 'buy', usd: 10, orderType: 'market' }, reason), true);
+  assert.equal(argsAgreeWithReason({ venue: 'paper-momentum', symbol: 'BTC/USD', side: 'buy', usd: 100 }, reason), false, 'usd=10 is not usd=100');
+  assert.equal(argsAgreeWithReason({ venue: 'okx', symbol: 'BTC/USD', side: 'buy', usd: 10 }, reason), false, 'another venue');
+  assert.equal(argsAgreeWithReason({ venue: 'paper-momentum', symbol: 'BTC/USD', side: 'sell', usd: 10 }, reason), false, 'another side');
+  assert.equal(argsAgreeWithReason({ venue: 'paper-momentum' }, reason), true, 'a call that carries fewer keys still agrees on the ones it has');
+  assert.equal(argsAgreeWithReason({ venue: 'paper-momentum', symbol: 'BTC/USD', side: 'buy', usd: 10, note: 'x'.repeat(60) }, reason), true, 'a key the card does not title is not checked');
+  const to = `0x${'a'.repeat(40)}`;
+  assert.equal(argsAgreeWithReason({ kind: 'send', from: 'wallet', asset: 'USDC', amount: 5, to }, `Account seat - mcp__account__portfolio_live_move: kind=send from=wallet asset=USDC amount=5 to=${to}`), true, 'a key field shown whole');
+  assert.equal(argsAgreeWithReason({ kind: 'send', from: 'wallet', asset: 'USDC', amount: 5, to: `0x${'b'.repeat(40)}` }, `Account seat - mcp__account__portfolio_live_move: kind=send from=wallet asset=USDC amount=5 to=${to}`), false, 'another address');
+  const batch = 'Account seat - mcp__account__portfolio_live_batch: legs=[1: side=buy usd=10 symbol=BTC/USD orderType=market venue=ex; 2: side=buy usd=12 symbol=ETH/USD orderType=market venue=ex]';
+  assert.equal(argsAgreeWithReason({ legs: [{ venue: 'ex', symbol: 'BTC/USD', side: 'buy', usd: 10 }, { venue: 'ex', symbol: 'ETH/USD', side: 'buy', usd: 12 }] }, batch), true);
+  assert.equal(argsAgreeWithReason({ legs: [{ venue: 'ex', symbol: 'BTC/USD', side: 'buy', usd: 10 }, { venue: 'paper-momentum', symbol: 'ETH/USD', side: 'buy', usd: 12 }] }, batch), false, 'a leg at another venue');
+  assert.equal(argsAgreeWithReason({ venue: 'paper-momentum' }, undefined), false, 'no reason, no agreement');
 });

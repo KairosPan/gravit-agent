@@ -224,3 +224,36 @@ export function toMessages(view, calls, now, speaker = 'gravit') {
     default: return [];
   }
 }
+
+// the keys a card's title is made of (seatLine, orderLine): a card drawn again from a call must find each one the call
+// carries in the host's own reason line (Gate 2's describeOrder: `key=value` pairs, a key field whole, another value cut
+// at forty characters), bounded on both sides so `usd=10` is not `usd=100`; a batch's legs the same, leg by leg
+const TITLE_KEYS = ['venue', 'symbol', 'side', 'usd', 'qty', 'kind', 'from', 'to', 'asset', 'amount', 'url', 'order', 'order_id', 'orderType', 'order_type', 'leverage', 'maxAmount', 'limit_price', 'limitPrice'];
+const LEG_KEYS = ['venue', 'symbol', 'side', 'usd', 'qty', 'orderType', 'order_type'];
+const escapeRe = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const pairIn = (reason, key, value) => {
+  const shown = String(value);
+  const whole = new RegExp(`(^|[\\s\\[;{(])${escapeRe(key)}=${escapeRe(shown)}(?=$|[\\s;\\]})])`, 'u').test(reason);
+  if (whole || shown.length <= 40) return whole; // a key field is shown whole (up to 120); any other value is cut at forty
+  return new RegExp(`(^|[\\s\\[;{(])${escapeRe(key)}=${escapeRe(shown.slice(0, 40))}…`, 'u').test(reason);
+};
+const scalarsAgree = (row, keys, reason) => keys.every(key => {
+  const value = row[key];
+  return value === undefined || value === null || typeof value === 'object' || pairIn(reason, key, value);
+});
+export function argsAgreeWithReason(args, reason) {
+  if (!args || typeof args !== 'object' || typeof reason !== 'string' || reason === '') return false;
+  if (!scalarsAgree(args, TITLE_KEYS, reason)) return false;
+  if (Array.isArray(args.legs)) return args.legs.every(leg => !leg || typeof leg !== 'object' || scalarsAgree(leg, LEG_KEYS, reason));
+  return true;
+}
+
+// a gate drawn before its own tool/call reached the page: its card again, from the call's arguments, only when they agree
+// with the host's reason line — the server's Gate 2 text is the authority, and a card the operator may already be reading
+// is never replaced by a call that says otherwise. Null: no agreeing call of this gate's session, id and tool
+export function redressGate(view, calls, now) {
+  const known = callOf(calls, view, view.callId, view.toolName);
+  if (!known || !argsAgreeWithReason(known.args, view.reason ?? view.displayReason)) return null;
+  const [m] = toMessages(view, calls, now);
+  return m ?? null;
+}
