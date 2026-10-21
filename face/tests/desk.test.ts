@@ -14,6 +14,7 @@ import {
 } from "../src/desk.ts";
 import type { DeskConversationCtxLike } from "../src/desk-conversation.ts";
 import type { AgentLike, SessionLike } from "../src/room.ts";
+import type { EventLike } from "../src/room-rules.ts";
 import { recorder } from "./route-recorder.ts";
 
 const home = (): Promise<string> => mkdtemp(join(tmpdir(), "face-desk-"));
@@ -643,6 +644,76 @@ test("installDesk's dispose lets a start still ensuring finish first, so its des
     assert.equal(fake.listeners.size, 0, "a start that finished after dispose began supervises nothing");
   } finally {
     await rm(h, { recursive: true, force: true });
+  }
+});
+
+/* installDesk's deadline seam (tests/telegram-smoke.test.ts cuts a parked card at 1,500 ms through it): the
+ * conversation it creates times every desk turn by `deskDeadlineMs`, and by its own five minutes without it. */
+test("installDesk's deskDeadlineMs is every desk turn's deadline; without it a turn is timed by the conversation's five minutes", async () => {
+  const made: string[] = [];
+  /* Disposed in `finally` too: a failure would otherwise leave a supervisor's five-minute timer holding the process. */
+  const desks: { dispose(code: number): Promise<void> }[] = [];
+  const realSetTimeout = globalThis.setTimeout;
+  try {
+    /** A desk on the fake root, its conversation started, with the bus, the agent and what reached the outlet. */
+    const deskWith = async (label: string, deskDeadlineMs: number | undefined) => {
+      const h = join(TMP, `deadline-${label}`);
+      await mkdir(h, { recursive: true });
+      made.push(h);
+      const fake = conversationRoot(() => "");
+      const timer = fakeTimer();
+      const desk = installDesk(recorder(), {
+        home: h, enabled: true, watch: { setInterval: timer.setInterval, clearInterval: timer.clearInterval },
+        root: join(TMP, `repo-deadline-${label}`), route: { provider: "stub", model: "echo" }, sessionCtx: fake.ctx, installModelSelection: () => () => {},
+        ...(deskDeadlineMs === undefined ? {} : { deskDeadlineMs }),
+      });
+      desks.push(desk);
+      await until(`the ${label} conversation's start`, () => fake.listeners.size === 1);
+      const agent = fake.agents[0];
+      const sent: string[] = [];
+      desk.conversation?.setOutlet({ send: async (text) => { sent.push(text); return { sent: [1] }; } });
+      /** One event of the desk session on the root bus, as the supervisor hears it. */
+      const emit = (type: string, data: Record<string, unknown>): void => {
+        for (const listener of fake.listeners) (listener as (session: { id: string }, event: EventLike) => void)({ id: agent.id }, { type, seq: 0, data });
+      };
+      return { h, desk, agent, sent, emit };
+    };
+
+    const cut = await deskWith("seam", 40);
+    cut.emit("turn/start", { turn: 1 });
+    cut.emit("user/message", { turn: 1, source: { kind: "telegram" } });
+    await until("the 40 ms deadline's cancel", () => cut.agent.cancels.length === 1);
+    assert.deepEqual(cut.agent.cancels, [[{ kind: "hook", reason: "desk deadline" }, { keepInbox: true }]], "the seam's deadline cut the turn");
+    cut.emit("turn/end", { turn: 1, reason: { kind: "aborted" } });
+    await until("the timed-out line at the outlet", () => cut.sent.length === 1);
+    assert.deepEqual(cut.sent, ["timed out after 0.04 s; a card or a long tool was pending"], "the line names the seam's deadline");
+    assert.deepEqual((await readEvents(cut.h)).events.filter((e) => e.kind === "desk-turn").map((e) => (e as { outcome?: unknown }).outcome), ["timed-out"]);
+    await cut.desk.dispose(0);
+
+    const plain = await deskWith("default", undefined);
+    const armed: unknown[] = [];
+    /* The supervisor arms a turn's timer inside the bus listener, synchronously, on the global timers
+     * installDesk's clock calls: the delay it asks for is the deadline in force. */
+    globalThis.setTimeout = ((fn: (...args: unknown[]) => void, ms?: number, ...rest: unknown[]) => {
+      armed.push(ms);
+      return realSetTimeout(fn, ms, ...rest);
+    }) as unknown as typeof setTimeout;
+    try {
+      plain.emit("turn/start", { turn: 1 });
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+    }
+    assert.deepEqual(armed, [300_000], "with no seam the deadline is the conversation's five minutes");
+    plain.emit("user/message", { turn: 1, source: { kind: "telegram" } });
+    plain.emit("turn/end", { turn: 1, reason: { kind: "completed" } });
+    await until("the default turn's record", () => existsSync(join(deskDir(plain.h), "events.jsonl"))
+      && readFileSync(join(deskDir(plain.h), "events.jsonl"), "utf8").includes(`"kind":"desk-turn"`));
+    assert.deepEqual(plain.agent.cancels, [], "a turn that ended inside five minutes is never cut");
+    await plain.desk.dispose(0);
+  } finally {
+    globalThis.setTimeout = realSetTimeout;
+    await Promise.all(desks.map((desk) => desk.dispose(0)));
+    await Promise.all(made.map((h) => rm(h, { recursive: true, force: true })));
   }
 });
 

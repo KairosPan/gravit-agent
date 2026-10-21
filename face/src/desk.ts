@@ -826,7 +826,9 @@ export interface DeskHandle {
  *   `sessionCtx`, the booted ROOT context as the conversation reads it, and
  *   `installModelSelection`, dsh-agent's - the four the conversation needs; `telegram`, the
  *   bridge's token and operator id (src/telegram.ts `telegramConfigFromEnv`), absent when either
- *   is unset.
+ *   is unset; `deskDeadlineMs`, every desk turn's deadline, handed to the conversation as its
+ *   `deadlineMs` (its own five minutes when absent) - a test seam, which tests/telegram-smoke.test.ts
+ *   sets to 1,500 so a parked card is cut in a second and a half; main.ts never passes it.
  * @throws when the status path is already registered, before anything is written or started.
  */
 export function installDesk(
@@ -844,6 +846,7 @@ export function installDesk(
     sessionCtx?: DeskConversationCtxLike;
     installModelSelection?: NonNullable<DeskSessionDeps["installModelSelection"]>;
     telegram?: TelegramConfig;
+    deskDeadlineMs?: number;
   },
 ): DeskHandle {
   const { home, enabled } = deps;
@@ -874,6 +877,7 @@ export function installDesk(
         const off = sessionCtx.on(name, listener);
         return () => { off(); };
       },
+      deadlineMs: deps.deskDeadlineMs,
       clock,
     });
   void conversation?.start();
