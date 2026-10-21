@@ -47,8 +47,9 @@
  * conversation, today's desk turns and their tokens, and the Telegram bridge when one is passed)
  * is mounted always, and so are the desk tools, so a face with the desk off - a second face beside
  * the service, §5.2 - still answers, with `desk.enabled: false`, and an old desk conversation it
- * opens keeps its tools; the `boot` event, the watch and the `shutdown` event only when the desk is
- * on. An unreadable ledger is named in the status, never a 500.
+ * opens keeps its tools; the `boot` event, the watch, the desk conversation's owner
+ * (src/desk-conversation.ts) and the `shutdown` event only when the desk is on. An unreadable
+ * ledger is named in the status, never a 500.
  * @module
  */
 import { appendFile, lstat, mkdir, open, readFile, rename, stat, unlink } from "node:fs/promises";
@@ -56,6 +57,8 @@ import type { IncomingMessage } from "node:http";
 import { basename, extname, join } from "node:path";
 import { withFileLock, writeFileAtomic } from "@deepseek-ai/dsh-atomic-write";
 import { isTrustedDataRequest } from "./data.ts";
+import { createDeskConversation, type DeskConversation, type DeskConversationCtxLike } from "./desk-conversation.ts";
+import type { DeskSessionDeps } from "./desk-session.ts";
 import { deskToolDefinitions, installDeskTools, type DeskToolsCtxLike } from "./desk-tools.ts";
 import { etDate, etDayStart, etTime } from "./et.ts";
 import { fencedGet } from "./http.ts";
@@ -729,11 +732,13 @@ export function registerDeskRoutes(
 
 /** What {@link installDesk} hands back. `bootedAt` is when this run began, in ms since the epoch;
  * `ready` settles once the `boot` event is written or its failure logged, and never rejects;
- * `dispose(code)` ends the run. */
+ * `conversation` is the desk session's owner (src/desk-conversation.ts), present only when the
+ * desk is on and `installDesk` was given what it needs; `dispose(code)` ends the run. */
 export interface DeskHandle {
   enabled: boolean;
   bootedAt: number;
   ready: Promise<void>;
+  conversation?: DeskConversation;
   dispose(code: number): Promise<void>;
 }
 
@@ -747,18 +752,26 @@ export interface DeskHandle {
  * counts in `runsInLedger` - and a face with the desk off still opens an old desk conversation
  * with its tools. With the desk on, `ready` is the `boot` event's append - stamped `bootedAt`,
  * which is `now()` at this call and the status's uptime origin - and the sleep watch starts at
- * once, writing into the ledger. `dispose(code)` removes the tools' listener, stops the watch, lets
- * the `boot` append settle (two appends started together take the file lock in either order, and a
+ * once, writing into the ledger. Given `root`, `route`, `sessionCtx` and `installModelSelection`
+ * too, the desk conversation's owner (src/desk-conversation.ts) is created on the same `now` and
+ * started without being awaited - its `start` never rejects - so the desk session is ensured and
+ * supervised before any phone message, and a turn the operator opens from the browser is timed,
+ * fenced and recorded like a phone turn. `dispose(code)` disposes that owner first, cancelling a
+ * running desk turn as `shutdown`, then removes the tools' listener, stops the watch, lets the
+ * `boot` append settle (two appends started together take the file lock in either order, and a
  * `shutdown` written before its `boot` reads as a lost run), then appends the `shutdown` with
  * `code`. It is idempotent: a second call writes nothing and settles with the first. With the desk
- * off, `ready` is already resolved and `dispose` only removes the listener. Nothing here rejects on
- * the ledger, so a caller need not await `ready`.
+ * off, `ready` is already resolved, there is no conversation, and `dispose` only removes the
+ * listener. Nothing here rejects on the ledger, so a caller need not await `ready`.
  * @param webServer - the host webserver service, or a test recorder.
  * @param deps - `home`, the harness home; `enabled`, whether to mount the desk's rows; `now`
  *   (default `Date.now`) and `version` (default {@link DSH_PIN}), for the events and the status;
  *   `watch`, the sleep watch's clock and timer seams, for tests - not its `append`, which is
  *   always the ledger's; `ctx`, the booted ROOT context, and `hub`, the quote hub main.ts owns,
- *   which the desk tools need both of.
+ *   which the desk tools need both of; `root`, the repository whose `desk/journal/` the desk
+ *   session runs in, `route`, its model route (src/desk-session.ts `resolveDeskRoute`),
+ *   `sessionCtx`, the booted ROOT context as the conversation reads it, and
+ *   `installModelSelection`, dsh-agent's - the four the conversation needs.
  * @throws when the status path is already registered, before anything is written or started.
  */
 export function installDesk(
@@ -771,6 +784,10 @@ export function installDesk(
     watch?: Partial<Omit<AsleepWatchOptions, "append">>;
     ctx?: DeskToolsCtxLike;
     hub?: Pick<QuoteHub, "snapshot">;
+    root?: string;
+    route?: { provider: string; model: string };
+    sessionCtx?: DeskConversationCtxLike;
+    installModelSelection?: NonNullable<DeskSessionDeps["installModelSelection"]>;
   },
 ): DeskHandle {
   const { home, enabled } = deps;
@@ -785,13 +802,28 @@ export function installDesk(
   if (!enabled) return { enabled, bootedAt, ready: Promise.resolve(), dispose: async () => { removeTools(); } };
   const ready = appendEvent(home, { t: new Date(bootedAt).toISOString(), kind: "boot", pid: process.pid, version, deskEnabled: true });
   const stopWatch = installAsleepWatch({ now, ...deps.watch, append: (event) => appendEvent(home, event) });
+  const { root, route, sessionCtx, installModelSelection } = deps;
+  const conversation = root === undefined || route === undefined || sessionCtx === undefined || installModelSelection === undefined
+    ? undefined
+    : createDeskConversation({
+      session: { ctx: sessionCtx, root, home, route, installModelSelection, now },
+      /* called on the context, as cordis's `on` must be */
+      on: (name, listener) => {
+        const off = sessionCtx.on(name, listener);
+        return () => { off(); };
+      },
+      clock: { now, setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout) },
+    });
+  void conversation?.start();
   let disposing: Promise<void> | undefined;
   return {
     enabled,
     bootedAt,
     ready,
+    ...(conversation === undefined ? {} : { conversation }),
     dispose(code) {
       disposing ??= (async () => {
+        await conversation?.dispose();
         removeTools();
         stopWatch();
         await ready;

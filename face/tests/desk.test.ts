@@ -1,15 +1,19 @@
 // face/tests/desk.test.ts
-import test from "node:test";
+import test, { after as afterAll } from "node:test";
 import assert from "node:assert/strict";
-import { lstat, lutimes, mkdir, mkdtemp, readdir, readFile, stat, symlink, utimes, writeFile } from "node:fs/promises";
+import { existsSync, readFileSync } from "node:fs";
+import { lstat, lutimes, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { withFileLock } from "@deepseek-ai/dsh-atomic-write";
 import {
   ASLEEP_THRESHOLD_MS, ASLEEP_TICK_MS, LEDGER_ROTATE_BYTES, OFF_FILE, appendEvent, appendRecord, clearOff, deskDir, deskStatus, deskTime,
   installAsleepWatch, installDesk, lastDeskSession, parseDuration, readEvents, readOffState, registerDeskRoutes, runsOf, writeOff,
   type DeskEvent, type TurnUsage,
 } from "../src/desk.ts";
+import type { DeskConversationCtxLike } from "../src/desk-conversation.ts";
+import type { AgentLike, SessionLike } from "../src/room.ts";
 import { recorder } from "./route-recorder.ts";
 
 const home = (): Promise<string> => mkdtemp(join(tmpdir(), "face-desk-"));
@@ -500,4 +504,108 @@ test("deskStatus still answers when the desk's directory cannot be read: ledgerE
   assert.equal(s.ledgerError, "ENAMETOOLONG");
   assert.equal(Object.hasOwn(s, "off"), false);
   await assert.rejects(readOffState(h), { code: "ENAMETOOLONG" }, "readOffState itself says it cannot tell");
+});
+
+/* P1: the desk conversation installDesk creates (src/desk-conversation.ts). Its repository root - the desk
+ * session runs in <root>/desk/journal - sits under tests/tmp/, inside the repository, as the fence's fixtures do. */
+
+const TMP = join(dirname(fileURLToPath(import.meta.url)), "tmp", `desk-${process.pid}`);
+afterAll(() => rm(TMP, { recursive: true, force: true }));
+
+/** A desk agent whose status the test sets, recording its cancels. */
+class FakeAgent implements AgentLike {
+  status: "idle" | "running" = "idle";
+  readonly cancels: unknown[][] = [];
+  readonly session: SessionLike;
+  constructor(readonly id: string) {
+    this.session = { id, header: {}, seq: 0, snapshotEvents: () => [], append: () => undefined };
+  }
+  followup(): void {}
+  cancel(...args: unknown[]): void { this.cancels.push(args); }
+}
+
+/** A booted root as the desk conversation reads it. Its bus's disposer notes what the ledger held when the
+ * conversation let go of it. */
+function conversationRoot(ledger: () => string) {
+  const agents: FakeAgent[] = [];
+  const stored = new Map<string, string>();
+  const listeners = new Set<unknown>();
+  const letGo: string[] = [];
+  const ctx: DeskConversationCtxLike = {
+    agents: {
+      get: (id) => agents.find((agent) => agent.id === id),
+      create: async (options) => {
+        const agent = new FakeAgent(options.sessionId);
+        await options.setup({}, agent);
+        agents.push(agent);
+        return { agent, dispose: async () => {} };
+      },
+      resume: async (options) => { throw new Error(`no ${options.resumeSessionId} here`); },
+    },
+    agentPresets: { mount: async (_agentCtx, id) => ({ id }) },
+    permissionPresets: { set: (session, name) => { stored.set(session.id, name); }, current: (session) => stored.get(session.id) ?? "read-only" },
+    on: (_name, listener) => {
+      listeners.add(listener);
+      return () => {
+        const file = ledger();
+        letGo.push(existsSync(file) ? readFileSync(file, "utf8") : "");
+        listeners.delete(listener);
+      };
+    },
+  };
+  return { ctx, agents, listeners, letGo };
+}
+
+async function until(what: string, ok: () => boolean): Promise<void> {
+  const limit = Date.now() + 5_000;
+  while (!ok()) {
+    if (Date.now() > limit) throw new Error(`timed out waiting for ${what}`);
+    await new Promise((done) => setTimeout(done, 2));
+  }
+}
+
+test("installDesk creates the desk conversation only when enabled with root, route, sessionCtx and installModelSelection, and disposes it before the shutdown", async () => {
+  let ledger = "";
+  const fake = conversationRoot(() => ledger);
+  const full = {
+    root: join(TMP, "repo"),
+    route: { provider: "stub", model: "echo" },
+    sessionCtx: fake.ctx,
+    installModelSelection: () => () => {},
+  };
+  const quiet = installDesk(recorder(), { home: await home(), enabled: false, ...full });
+  assert.equal(quiet.conversation, undefined, "a disabled desk creates none");
+  await quiet.dispose(0);
+  for (const [left, partial] of [
+    ["root", { ...full, root: undefined }],
+    ["route", { ...full, route: undefined }],
+    ["sessionCtx", { ...full, sessionCtx: undefined }],
+    ["installModelSelection", { ...full, installModelSelection: undefined }],
+  ] as const) {
+    const timer = fakeTimer();
+    const desk = installDesk(recorder(), { home: await home(), enabled: true, watch: { setInterval: timer.setInterval, clearInterval: timer.clearInterval }, ...partial });
+    assert.equal(desk.conversation, undefined, `none without ${left}`);
+    await desk.dispose(0);
+  }
+  assert.equal(fake.agents.length, 0);
+
+  const h = await home();
+  ledger = join(deskDir(h), "events.jsonl");
+  const timer = fakeTimer();
+  const desk = installDesk(recorder(), { home: h, enabled: true, watch: { setInterval: timer.setInterval, clearInterval: timer.clearInterval }, ...full });
+  assert.notEqual(desk.conversation, undefined);
+  await until("the conversation's start, which installDesk does not await", () => fake.listeners.size === 1);
+  assert.equal(fake.agents.length, 1);
+  const agent = fake.agents[0];
+  assert.deepEqual(desk.conversation?.current(), { sessionId: agent.id, running: false });
+
+  agent.status = "running";
+  await desk.dispose(0);
+  await desk.dispose(0);
+  assert.deepEqual(agent.cancels, [[{ kind: "hook", reason: "shutdown" }]], "the running desk turn is cancelled once");
+  assert.equal(fake.listeners.size, 0);
+  assert.equal(fake.letGo.length, 1);
+  assert.doesNotMatch(fake.letGo[0], /"kind":"shutdown"/, "the conversation was let go before the shutdown was written");
+  const kinds = (await readEvents(h)).events.map((e) => e.kind);
+  assert.deepEqual([kinds.slice(0, 2).sort(), kinds.slice(2)], [["boot", "desk-session"], ["shutdown"]]);
 });

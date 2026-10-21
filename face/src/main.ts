@@ -13,6 +13,8 @@
  */
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import type { Context } from "@deepseek-ai/cordis";
+import { installModelSelection } from "@deepseek-ai/dsh-agent";
 import { installFailLoud, StartupError } from "@deepseek-ai/dsh-app-boot";
 import { resolveDshHome } from "@deepseek-ai/dsh-home-paths";
 import { bootFace, type BootedFace } from "./boot.ts";
@@ -22,6 +24,8 @@ import { readBotJournal } from "./bot-journal.ts";
 import { BOTS_ROOT } from "./overlay.ts";
 import { registerDataRoutes } from "./data.ts";
 import { deskDir, installDesk, type DeskHandle } from "./desk.ts";
+import type { DeskConversationCtxLike } from "./desk-conversation.ts";
+import { resolveDeskRoute } from "./desk-session.ts";
 import { createQuoteHub } from "./quotes.ts";
 import { registerStatic, type IndexAuth } from "./static.ts";
 import { registerSessionRoutes } from "./sessions.ts";
@@ -315,8 +319,31 @@ await registerPanelRoutes(booted.ctx.webServer, deps);
  * service") - the ledger assumes one desk-enabled face per home. Mounted here,
  * after `bootFace` bound the port, so a face that lost the port never writes a
  * `boot`. `ready` is deliberately not awaited: the ledger must never delay
- * readiness, and `dispose` orders the `shutdown` after the `boot` anyway. */
-desk = installDesk(booted.ctx.webServer, { home: dshHome, enabled: process.env.FACE_DESK !== "0", ctx: booted.ctx, hub });
+ * readiness, and `dispose` orders the `shutdown` after the `boot` anyway.
+ *
+ * With the desk on, `installDesk` also creates the desk conversation's owner
+ * (desk-conversation.ts) and starts it without awaiting it: the desk session -
+ * cwd `desk/journal/` under the repo root this process chdir'd to - is ensured
+ * and supervised from here on, Telegram or not, so a turn the operator opens in
+ * the browser gets the desk's deadline, fence check and ledger record too. Its
+ * model route is `FACE_DESK_MODEL`, validated as a bot's route is and falling
+ * back to the default with one line (`resolveDeskRoute`); only a desk that is on
+ * resolves one. `installModelSelection` is dsh-agent's, wrapped the way room.ts's
+ * own default wraps it. */
+const deskEnabled = process.env.FACE_DESK !== "0";
+const deskRoute = deskEnabled
+  ? await resolveDeskRoute(booted.ctx as unknown as RoomContextLike, process.env.FACE_DESK_MODEL, console.log)
+  : undefined;
+desk = installDesk(booted.ctx.webServer, {
+  home: dshHome,
+  enabled: deskEnabled,
+  ctx: booted.ctx,
+  hub,
+  root: process.cwd(),
+  route: deskRoute,
+  sessionCtx: booted.ctx as unknown as DeskConversationCtxLike,
+  installModelSelection: (agentCtx, ref) => installModelSelection(agentCtx as unknown as Context, ref),
+});
 console.log(`${BIN}: desk: ${desk.enabled ? `ledger at ${deskDir(dshHome)}` : "rows disabled (FACE_DESK=0)"}`);
 /* Every route is mounted: only now may the gateway admit a browser stream
  * (bootFace was told `deferReady`). It re-checks that the root is still
