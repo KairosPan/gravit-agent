@@ -48,15 +48,18 @@
  * desk is paused the panel says so in one line, and it offers no resume.
  *
  * Times are New York's, as the desk shows them everywhere (src/et.ts): `14:03 ET`
- * on the same New York date as now, dated on any other. Every string reaches
+ * on the same New York date as now, dated on any other - written through
+ * desk-time.js, which the standing orders' card writes its times through too,
+ * and whose {@link deskTime} this module hands on. Every string reaches
  * the page through `textContent`; nothing here parses HTML.
  * @module
  */
 import { NONE_ARMED, firingTitles, standingView } from "./desk-standing.js";
+import { EM, deskTime, isRecord, isTime, nyDate } from "./desk-time.js";
 import { isDeskPreset } from "./speaker.js";
 
-/** Rendered in place of a value the face did not give. */
-const EM = "—";
+/** The panel's times, from desk-time.js: the page and the tests read them here. */
+export { deskTime };
 
 /** The glyph each of the desk's message sources carries in the transcript: the
  * operator's phone over their own bubble, the face's clock and watch on a desk line. */
@@ -85,48 +88,6 @@ export const RESUME_LINE = `${RESUME_PREFIX}${RESUME_COMMAND}`;
 /** How often the status is read again while the Desk panel is shown: often enough that a
  * pause past its `until` stops showing as one, the face's status having dropped it. */
 export const DESK_POLL_MS = 30_000;
-
-/* ---------- time, New York's ---------- */
-
-/** One formatter for both helpers: `hourCycle: "h23"`, so midnight is `00`, never `24`. */
-const NY = new Intl.DateTimeFormat("en-US", {
-  timeZone: "America/New_York",
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-  hour: "2-digit",
-  minute: "2-digit",
-  hourCycle: "h23",
-});
-
-/** @param {Date} d @returns {Record<string, string>} `d` in New York, field by field. */
-function nyParts(d) {
-  /** @type {Record<string, string>} */
-  const parts = {};
-  for (const { type, value } of NY.formatToParts(d)) parts[type] = value;
-  return parts;
-}
-
-/** @param {unknown} d @returns {boolean} whether `d` is a Date that holds a time. */
-const isTime = (d) => d instanceof Date && !Number.isNaN(d.getTime());
-
-/** @param {Date} d @returns {string} the date in New York: `2026-10-20`. */
-function nyDate(d) {
-  const { year, month, day } = nyParts(d);
-  return `${year}-${month}-${day}`;
-}
-
-/**
- * A time as the desk shows it (src/desk.ts `deskTime`): `14:03 ET` on the same
- * New York date as `now`, `2026-10-21 14:03 ET` on any other; `—` for no time.
- * @param {Date} at @param {Date} now @returns {string}
- */
-export function deskTime(at, now) {
-  if (!isTime(at)) return EM;
-  const { hour, minute } = nyParts(at);
-  const time = `${hour}:${minute} ET`;
-  return isTime(now) && nyDate(at) === nyDate(now) ? time : `${nyDate(at)} ${time}`;
-}
 
 /* ---------- the desk's sessions and lines ---------- */
 
@@ -511,7 +472,8 @@ function drawSessions(card, ctx) {
 
 /** One standing order: its name and anchor, beside when it next fires or what
  * holds it; under them, a pin that moved, in the error colour, and its last
- * firing - after `hash ok`, or `hash unknown`, while its pins hold.
+ * firing or `no firing yet` - after `hash ok`, or `hash unknown`, while its
+ * pins hold.
  * @param {{id: string, at: string, next: string, hash: string, last: string}} order @returns {any} */
 function orderRow(order) {
   const row = el("div", "standing-order");
@@ -520,7 +482,7 @@ function orderRow(order) {
   row.append(top);
   const holds = order.hash === "ok" || order.hash === "unknown";
   if (!holds) row.append(el("div", "standing-order-sub bad", order.hash));
-  row.append(el("div", "standing-order-sub", holds ? `hash ${order.hash} · last ${order.last}` : `last ${order.last}`));
+  row.append(el("div", "standing-order-sub", holds ? `hash ${order.hash} · ${order.last}` : order.last));
   return row;
 }
 
@@ -572,9 +534,6 @@ function drawStanding(card, ctx) {
   card.append(el("div", "standing-recent", "recent firings"));
   for (const firing of view.recent) card.append(firingRow(firing, ctx));
 }
-
-/** @param {unknown} value @returns {boolean} whether `value` is a non-null, non-array object. */
-const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 
 /** Whether the status carries what the standing orders' card draws: the day's
  * budget, or the standing orders. @param {Record<string, any>|undefined} status @returns {boolean} */

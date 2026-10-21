@@ -3,7 +3,10 @@
  * times, wall time, tokens and files - and the firing sessions' names. Pure: a status in, words out.
  */
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 // desk-standing.js is plain ESM JS (it ships to the browser); tsconfig `allowJs` lets this test import it.
 import { NONE_ARMED, firingTitles, standingView } from "../client/desk-standing.js";
 
@@ -54,8 +57,8 @@ test("standingView renders the orders, the budget and the recent firings in ET",
     budget: "budget: 1,234,567 of 2,000,000 tokens today",
     spent: false,
     orders: [
-      { id: "preclose", at: "close-30m", next: "next 12:30 ET", hash: "ok", last: "delivered 2026-11-26 15:31 ET" },
-      { id: "weekly", at: "open-15m", next: "next 2026-11-30 09:15 ET", hash: "strategies/alpha/WEEKLY.md changed since arming (npm run desk -- rearm weekly)", last: "none yet" },
+      { id: "preclose", at: "close-30m", next: "next 12:30 ET", hash: "ok", last: "last delivered 2026-11-26 15:31 ET" },
+      { id: "weekly", at: "open-15m", next: "next 2026-11-30 09:15 ET", hash: "strategies/alpha/WEEKLY.md changed since arming (npm run desk -- rearm weekly)", last: "no firing yet" },
     ],
     recent: [
       { when: "10:40", order: "weekly", date: "2026-11-27", outcome: "missed", wall: "—", tokens: "—", files: "—" },
@@ -120,7 +123,8 @@ test("an order's next anchor or the state that holds it, its pins and its last f
     "the text's pin before the script's");
   assert.equal(order({ hash: "unknown" }).hash, "unknown", "a pin not yet checked claims nothing");
   assert.equal(order({ producer: "scripts/p.py", producerHash: "unknown" }).hash, "unknown");
-  assert.equal(order({ last: { ...DELIVERED, outcome: "refused (budget)", t: "2026-11-27T17:30:10.000Z" } }).last, "refused (budget) 12:30 ET");
+  assert.equal(order({ last: { ...DELIVERED, outcome: "refused (budget)", t: "2026-11-27T17:30:10.000Z" } }).last, "last refused (budget) 12:30 ET");
+  assert.equal(order({ last: undefined }).last, "no firing yet");
 });
 
 test("without the standing orders' status the card is the budget line alone", () => {
@@ -140,4 +144,13 @@ test("firingTitles names firing sessions from the ledger", () => {
     { "session-run": "weekly · 2026-11-27" }, "the firing running now");
   assert.deepEqual(firingTitles(undefined), {});
   assert.deepEqual(firingTitles(standing({ orders: [null], recent: [null, { order: "x", date: "y", sessionId: "" }], running: { key: "nocolon", sessionId: "s" } })), {});
+});
+
+/* Two copies of the New York clock could part on when a time is dated; the desk's client keeps one. */
+test("the desk's client writes New York's time in one place: desk-time.js, which the panel and the card import", async () => {
+  const client = join(dirname(fileURLToPath(import.meta.url)), "..", "client");
+  const sources = Object.fromEntries(await Promise.all(["desk-time.js", "desk-panel.js", "desk-standing.js"].map(
+    async (file) => [file, await readFile(join(client, file), "utf8")] as const)));
+  assert.deepEqual(Object.keys(sources).filter((file) => sources[file].includes("America/New_York")), ["desk-time.js"]);
+  for (const file of ["desk-panel.js", "desk-standing.js"]) assert.match(sources[file], /^import \{[^}]*\} from "\.\/desk-time\.js";$/m, file);
 });

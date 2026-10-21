@@ -11,6 +11,7 @@ import {
   DESK_GLYPHS, DESK_POLL_MS, PAUSE_CHOICES, RESUME_COMMAND, RESUME_LINE, createDeskPanel, deskLineNode, deskLineText, deskSessionsOf,
   deskTime, deskTitle, phoneWhoNode,
 } from "../client/desk-panel.js";
+import { deskTime as sharedDeskTime } from "../client/desk-time.js";
 
 /** The DOM operations the panel uses, and nothing else. */
 class Element {
@@ -219,6 +220,7 @@ test("deskSessionsOf keeps the desk's sessions in list order; deskTitle is the t
 });
 
 test("deskTime writes New York's wall clock, dated only on another New York date than now's", () => {
+  assert.equal(deskTime, sharedDeskTime, "one copy: the panel hands on desk-time.js's own, which the standing orders' card writes through too");
   const now = new Date(AT);
   assert.equal(deskTime(new Date("2026-10-20T18:03:00Z"), now), "14:03 ET");
   assert.equal(deskTime(new Date("2026-10-20T04:00:00Z"), now), "00:00 ET", "midnight is 00, never 24");
@@ -718,7 +720,7 @@ test("the standing orders card comes after today's turns: the budget line, in th
   assert.deepEqual(textsOf(card, "standing-order-next"), ["next 15:30 ET", "next 2026-10-21 09:15 ET"]);
   const [preclose, weekly] = byClass(card, "standing-order");
   assert.deepEqual(textsOf(preclose, "standing-order-sub"), ["hash ok · last delivered 13:31 ET"]);
-  assert.deepEqual(textsOf(weekly, "standing-order-sub"), ["strategies/alpha/WEEKLY.md changed since arming (npm run desk -- rearm weekly)", "last none yet"]);
+  assert.deepEqual(textsOf(weekly, "standing-order-sub"), ["strategies/alpha/WEEKLY.md changed since arming (npm run desk -- rearm weekly)", "no firing yet"]);
   assert.ok(byClass(weekly, "standing-order-sub")[0].hasClass("bad"), "a moved pin is the operator's to review");
 
   assert.equal(one(card, (node) => node.hasClass("standing-recent"), "recent heading").textContent, "recent firings");
@@ -759,6 +761,11 @@ test("without the standing orders' status the card is the budget line alone; wit
   card = section(panel, "standing");
   assert.deepEqual(card.children.map((node) => node.textContent).slice(2), ["none armed (npm run desk -- arm)"]);
   assert.equal(byClass(card, "standing-recent").length, 0, "no heading over no firings");
+
+  const armed = standingStatus().orders[0];
+  next = status({ budget: OPEN_BUDGET, standing: standingStatus({ orders: [{ ...armed, last: undefined }], recent: [] }) });
+  await desk.refresh();
+  assert.deepEqual(textsOf(section(panel, "standing"), "standing-order-sub"), ["hash ok · no firing yet"], "an order armed and not yet fired");
 
   next = status({ budget: OPEN_BUDGET, standing: standingStatus({ file: { path: "/s", state: "refused", errors: ["orders[0]: id is missing"] }, orders: [], recent: [] }) });
   await desk.refresh();

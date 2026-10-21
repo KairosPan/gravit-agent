@@ -23,12 +23,11 @@
  *
  * Times are New York's, as the desk shows them everywhere (src/et.ts): `14:03 ET`
  * on the same New York date as now, dated on any other - a recent firing's
- * `when` without its ` ET`, which the card adds.
+ * `when` without its ` ET`, which the card adds. They are written through
+ * desk-time.js, as the rest of the panel's are.
  * @module
  */
-
-/** Rendered in place of a value the status did not give (desk-panel.js's own). */
-const EM = "—";
+import { EM, deskStamp, deskTime, isRecord } from "./desk-time.js";
 
 /** The card's line for a book with no order in it: the terminal's words, less their `standing orders:`. */
 export const NONE_ARMED = "none armed (npm run desk -- arm)";
@@ -42,56 +41,10 @@ const RECENT_MAX = 10;
 /** A turn's four token buckets (src/desk.ts `TurnUsage`), whose plain sum is its tokens. */
 const BUCKETS = Object.freeze(["uncachedInputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens"]);
 
-/* ---------- time, New York's ---------- */
-
-/** `hourCycle: "h23"`, so midnight is `00`, never `24` (desk-panel.js's formatter). */
-const NY = new Intl.DateTimeFormat("en-US", {
-  timeZone: "America/New_York",
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-  hour: "2-digit",
-  minute: "2-digit",
-  hourCycle: "h23",
-});
-
-/** @param {Date} d @returns {Record<string, string>} `d` in New York, field by field. */
-function nyParts(d) {
-  /** @type {Record<string, string>} */
-  const parts = {};
-  for (const { type, value } of NY.formatToParts(d)) parts[type] = value;
-  return parts;
-}
-
-/** @param {Date} d @returns {string} the date in New York: `2026-11-27`. */
-function nyDate(d) {
-  const { year, month, day } = nyParts(d);
-  return `${year}-${month}-${day}`;
-}
-
-/**
- * A time the status holds, in New York: `15:31` on the same New York date as
- * `now`, `2026-11-26 15:31` on any other; `—` for no time.
- * @param {unknown} at - ISO-8601. @param {Date} now @returns {string}
- */
-function stamp(at, now) {
-  const d = typeof at === "string" ? new Date(at) : undefined;
-  if (d === undefined || Number.isNaN(d.getTime())) return EM;
-  const { hour, minute } = nyParts(d);
-  const today = Number.isNaN(now.getTime()) ? undefined : nyDate(now);
-  return nyDate(d) === today ? `${hour}:${minute}` : `${nyDate(d)} ${hour}:${minute}`;
-}
-
-/** @param {unknown} at @param {Date} now @returns {string} {@link stamp} with its ` ET`, as src/desk.ts `deskTime` writes it. */
-function deskTime(at, now) {
-  const text = stamp(at, now);
-  return text === EM ? EM : `${text} ET`;
-}
-
 /* ---------- the parts ---------- */
 
-/** @param {unknown} value @returns {value is Record<string, any>} a non-null, non-array object. */
-const record = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+/** @param {unknown} at @returns {Date|undefined} a time the status holds, ISO-8601, as a Date - no time for anything but a string. */
+const dateOf = (at) => (typeof at === "string" ? new Date(at) : undefined);
 
 /** @param {unknown} n @returns {n is number} a count: finite, not below zero. */
 const isCount = (n) => typeof n === "number" && Number.isFinite(n) && n >= 0;
@@ -139,7 +92,7 @@ function bannerOf(standing) {
     const errors = listOf(standing.file.errors).filter((error) => typeof error === "string");
     lines.push(`stopped: standing.yml is refused: ${cut(errors.join("; "), REFUSED_SHOWN_MAX)}`);
   }
-  if (record(standing.ledger)) lines.push(`stopped: the firing ledger cannot be read (${standing.ledger.error})`);
+  if (isRecord(standing.ledger)) lines.push(`stopped: the firing ledger cannot be read (${standing.ledger.error})`);
   const calendar = standing.calendar;
   if (calendar?.state === "failed") lines.push(`no calendar today, ${calendar.python}: ${calendar.error ?? "no reason given"}`);
   return lines.length === 0 ? undefined : lines.join("\n");
@@ -152,10 +105,10 @@ function bannerOf(standing) {
  * @param {Record<string, any>} order @param {unknown} running @param {Date} now @returns {string}
  */
 function nextOf(order, running, now) {
-  if (record(running) && typeof running.key === "string" && running.key.startsWith(`${order.id}:`)) return `running since ${deskTime(running.startedAt, now)}`;
+  if (isRecord(running) && typeof running.key === "string" && running.key.startsWith(`${order.id}:`)) return `running since ${deskTime(dateOf(running.startedAt), now)}`;
   if (order.enabled === false) return "disabled";
   if (order.expired === true) return `expired after ${order.expires}`;
-  if (typeof order.nextAnchor === "string") return `next ${deskTime(order.nextAnchor, now)}`;
+  if (typeof order.nextAnchor === "string") return `next ${deskTime(dateOf(order.nextAnchor), now)}`;
   return "no session in the calendar's window";
 }
 
@@ -188,7 +141,7 @@ function wallOf(ms) {
 
 /** @param {unknown} usage @returns {string} a turn's tokens, its four buckets' plain sum as `en-US` writes it; `—` for no usage. */
 function tokensOf(usage) {
-  if (!record(usage)) return EM;
+  if (!isRecord(usage)) return EM;
   return BUCKETS.reduce((sum, bucket) => sum + (isCount(usage[bucket]) ? usage[bucket] : 0), 0).toLocaleString("en-US");
 }
 
@@ -207,28 +160,29 @@ function tokensOf(usage) {
 
 /**
  * The standing orders' card from the desk's status: the budget line; the
- * banner; each order's anchor, next anchor or state, pins (`ok`, `unknown`, or
- * the one that moved) and last firing (`none yet` before any); and the recent
- * firings. A status without the standing orders - no clock runs - is the budget
- * line alone: no banner, no orders, no firings.
+ * banner; each order's anchor, next anchor or state (`next 12:30 ET`, `disabled`),
+ * pins (`ok`, `unknown`, or the one that moved) and last firing (`last delivered
+ * 15:31 ET`, or `no firing yet`); and the recent firings. A status without the
+ * standing orders - no clock runs - is the budget line alone: no banner, no
+ * orders, no firings.
  * @param {Record<string, any>} status - what `GET /data/desk/status` answered.
  * @param {string} nowIso - when it is read, ISO-8601: what today is in New York.
  * @returns {StandingView}
  */
 export function standingView(status, nowIso) {
   const now = new Date(nowIso);
-  const budget = record(status?.budget) ? status.budget : undefined;
-  const standing = record(status?.standing) ? status.standing : undefined;
+  const budget = isRecord(status?.budget) ? status.budget : undefined;
+  const standing = isRecord(status?.standing) ? status.standing : undefined;
   const banner = standing === undefined ? undefined : bannerOf(standing);
-  const orders = listOf(standing?.orders).filter((order) => record(order) && typeof order.id === "string").map((order) => ({
+  const orders = listOf(standing?.orders).filter((order) => isRecord(order) && typeof order.id === "string").map((order) => ({
     id: order.id,
     at: textOf(order.at),
     next: nextOf(order, standing?.running, now),
     hash: hashOf(order),
-    last: record(order.last) ? `${textOf(order.last.outcome)} ${deskTime(order.last.t, now)}` : "none yet",
+    last: isRecord(order.last) ? `last ${textOf(order.last.outcome)} ${deskTime(dateOf(order.last.t), now)}` : "no firing yet",
   }));
-  const recent = listOf(standing?.recent).filter(record).slice(0, RECENT_MAX).map((firing) => ({
-    when: stamp(firing.t, now),
+  const recent = listOf(standing?.recent).filter(isRecord).slice(0, RECENT_MAX).map((firing) => ({
+    when: deskStamp(dateOf(firing.t), now),
     order: textOf(firing.order),
     date: textOf(firing.date),
     outcome: textOf(firing.outcome),
@@ -249,15 +203,15 @@ export function standingView(status, nowIso) {
  * @returns {Record<string, string>}
  */
 export function firingTitles(standing) {
-  if (!record(standing)) return {};
+  if (!isRecord(standing)) return {};
   /** @param {unknown} id @returns {id is string} */
   const isId = (id) => typeof id === "string" && id !== "";
   const firings = [...listOf(standing.recent), ...listOf(standing.orders).map((order) => order?.last)];
   /** @type {[string, string][]} */
-  const named = firings.flatMap((f) => (record(f) && isId(f.sessionId) && typeof f.order === "string" && typeof f.date === "string"
+  const named = firings.flatMap((f) => (isRecord(f) && isId(f.sessionId) && typeof f.order === "string" && typeof f.date === "string"
     ? [[f.sessionId, `${f.order} · ${f.date}`]] : []));
   const running = standing.running;
   const colon = typeof running?.key === "string" ? running.key.indexOf(":") : -1;
-  if (record(running) && isId(running.sessionId) && colon > 0) named.push([running.sessionId, `${running.key.slice(0, colon)} · ${running.key.slice(colon + 1)}`]);
+  if (isRecord(running) && isId(running.sessionId) && colon > 0) named.push([running.sessionId, `${running.key.slice(0, colon)} · ${running.key.slice(colon + 1)}`]);
   return Object.fromEntries(named);
 }
