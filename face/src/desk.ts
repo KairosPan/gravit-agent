@@ -7,7 +7,8 @@
  * the watch and the phone bridge that work in it. Of what §8 gives this module - the ledger, the
  * budget, the `OFF` switch, the two desk tools, the `/desk` page and `/data/desk/*` - P0 holds the
  * ledger, the sleep watch and `GET /data/desk/status`, and P1 adds the `OFF` switch, mounts the
- * two desk tools, which src/desk-tools.ts defines, and runs the Telegram bridge, src/telegram.ts.
+ * two desk tools and the desk's write guard, which src/desk-tools.ts defines, and runs the Telegram
+ * bridge, src/telegram.ts.
  * Of the ledger's files (§5.7) this module keeps `events.jsonl` and `OFF`; {@link appendRecord} is
  * the append path for the others, the bridge's `telegram.jsonl` among them. `events.jsonl`
  * has eight kinds of event: P0's `boot`, clean `shutdown` and `asleep` gap in the face's timers,
@@ -46,11 +47,12 @@
  * {@link installDesk} mounts it all on a booted face. The status route ({@link deskStatus}:
  * pid, version, uptime, this run's gaps, the ledger's runs, the pause in force, the desk
  * conversation, today's desk turns and their tokens, and the Telegram bridge) is mounted always,
- * and so are the desk tools, so a face with the desk off - a second face beside the service, §5.2
- * - still answers, with `desk.enabled: false`, and an old desk conversation it opens keeps its
- * tools; the `boot` event, the watch, the desk conversation's owner (src/desk-conversation.ts), the
- * bridge and the `shutdown` event only when the desk is on. An unreadable ledger is named in the
- * status, never a 500. {@link deskStatusLines} is the status as the terminal and the phone read it.
+ * and so are the desk tools and the write guard, so a face with the desk off - a second face beside
+ * the service, §5.2 - still answers, with `desk.enabled: false`, and an old desk conversation it
+ * opens keeps its tools and its guard; the `boot` event, the watch, the desk conversation's owner
+ * (src/desk-conversation.ts), the bridge and the `shutdown` event only when the desk is on. An
+ * unreadable ledger is named in the status, never a 500. {@link deskStatusLines} is the status as the
+ * terminal and the phone read it.
  * @module
  */
 import { appendFile, lstat, mkdir, open, readFile, rename, stat, unlink } from "node:fs/promises";
@@ -60,7 +62,7 @@ import { withFileLock, writeFileAtomic } from "@deepseek-ai/dsh-atomic-write";
 import { isTrustedDataRequest } from "./data.ts";
 import { createDeskConversation, type DeskConversation, type DeskConversationCtxLike } from "./desk-conversation.ts";
 import type { DeskClock, DeskSessionDeps } from "./desk-session.ts";
-import { deskToolDefinitions, installDeskTools, type DeskToolsCtxLike } from "./desk-tools.ts";
+import { deskToolDefinitions, installDeskTools, installDeskWriteGuard, type DeskWriteGuardCtxLike } from "./desk-tools.ts";
 import { etDate, etDayStart, etTime } from "./et.ts";
 import { fencedGet } from "./http.ts";
 import type { QuoteHub } from "./quotes.ts";
@@ -800,9 +802,11 @@ export interface DeskHandle {
  * `desk_quotes` over `hub` and `desk_state` over {@link deskStatus} with the status route's own
  * deps, so the tool and the route agree - but for `runs`, which the tool cuts to the last ten and
  * counts in `runsInLedger` - and a face with the desk off still opens an old desk conversation
- * with its tools. With the desk on, `ready` is the `boot` event's append - stamped `bootedAt`,
- * which is `now()` at this call and the status's uptime origin - and the sleep watch starts at
- * once, writing into the ledger. Given `root`, `route`, `sessionCtx` and `installModelSelection`
+ * with its tools. Given `ctx`, hub or none and whatever `enabled` says, the desk's write guard
+ * (src/desk-tools.ts `installDeskWriteGuard`) is installed too: every `gravit-desk` agent's
+ * `write`, `edit` or `str_replace_editor` of an instruction file is denied before it runs. With
+ * the desk on, `ready` is the `boot` event's append - stamped `bootedAt`, which is `now()` at this
+ * call and the status's uptime origin - and the sleep watch starts at once, writing into the ledger. Given `root`, `route`, `sessionCtx` and `installModelSelection`
  * too, the desk conversation's owner (src/desk-conversation.ts) is created on the same `now` and
  * started without being awaited - its `start` never rejects - so the desk session is ensured and
  * supervised before any phone message, and a turn the operator opens from the browser is timed,
@@ -815,20 +819,21 @@ export interface DeskHandle {
  * then the conversation, which cancels the desk turns under way as `shutdown`, gives each cut agent
  * two seconds to go idle so the cut turn is recorded, and gives a start, post or renew under way
  * five seconds to settle, so nothing the conversation writes lands after the `shutdown` - then
- * removes the tools' listener, stops the watch, lets the `boot` append settle (two appends started
- * together take the file lock in either order, and a `shutdown` written before its `boot` reads as
- * a lost run), then appends the `shutdown` with `code`. It is idempotent: a second call writes
- * nothing and settles with the first. With the desk off, `ready` is already resolved, there is no
- * conversation and no bridge, and `dispose` only removes the listener. Nothing here rejects on the
- * ledger, so a caller need not await `ready`.
+ * removes the tools' listener and the guard's, stops the watch, lets the `boot` append settle (two
+ * appends started together take the file lock in either order, and a `shutdown` written before its
+ * `boot` reads as a lost run), then appends the `shutdown` with `code`. It is idempotent: a second
+ * call writes nothing and settles with the first. With the desk off, `ready` is already resolved,
+ * there is no conversation and no bridge, and `dispose` only removes the two listeners. Nothing here
+ * rejects on the ledger, so a caller need not await `ready`.
  * @param webServer - the host webserver service, or a test recorder.
  * @param deps - `home`, the harness home; `enabled`, whether to mount the desk's rows; `now`
  *   (default `Date.now`) and `version` (default {@link DSH_PIN}), for the events and the status;
  *   `watch`, the sleep watch's clock and timer seams, for tests - not its `append`, which is
  *   always the ledger's; `ctx`, the booted ROOT context, and `hub`, the quote hub main.ts owns,
- *   which the desk tools need both of; `root`, the repository whose `desk/journal/` the desk
- *   session runs in, `route`, its model route (src/desk-session.ts `resolveDeskRoute`),
- *   `sessionCtx`, the booted ROOT context as the conversation reads it, and
+ *   which the desk tools need both of - the write guard needs `ctx` alone; `root`, the
+ *   repository whose `desk/journal/` the desk session runs in, `route`, its model route
+ *   (src/desk-session.ts `resolveDeskRoute`), `sessionCtx`, the booted ROOT context as the
+ *   conversation reads it, and
  *   `installModelSelection`, dsh-agent's - the four the conversation needs; `telegram`, the
  *   bridge's token and operator id (src/telegram.ts `telegramConfigFromEnv`), absent when either
  *   is unset; `deskDeadlineMs`, every desk turn's deadline, handed to the conversation as its
@@ -844,7 +849,7 @@ export function installDesk(
     now?: () => number;
     version?: string;
     watch?: Partial<Omit<AsleepWatchOptions, "append">>;
-    ctx?: DeskToolsCtxLike;
+    ctx?: DeskWriteGuardCtxLike;
     hub?: Pick<QuoteHub, "snapshot">;
     root?: string;
     route?: { provider: string; model: string };
@@ -864,11 +869,12 @@ export function installDesk(
   const telegram = (): TelegramStatus => bridge?.status() ?? { configured: deps.telegram !== undefined, polling: false, dropped: 0, queued: 0 };
   const status = { home, bootedAt, enabled, now, version, telegram };
   registerDeskRoutes(webServer, status);
+  const removeGuard = deps.ctx === undefined ? () => {} : installDeskWriteGuard(deps.ctx);
   const removeTools = deps.ctx === undefined || deps.hub === undefined ? () => {} : installDeskTools(deps.ctx, deskToolDefinitions({
     hub: deps.hub,
     readState: () => deskStatus(status),
   }));
-  if (!enabled) return { enabled, bootedAt, ready: Promise.resolve(), dispose: async () => { removeTools(); } };
+  if (!enabled) return { enabled, bootedAt, ready: Promise.resolve(), dispose: async () => { removeTools(); removeGuard(); } };
   const ready = appendEvent(home, { t: new Date(bootedAt).toISOString(), kind: "boot", pid: process.pid, version, deskEnabled: true });
   const stopWatch = installAsleepWatch({ now, ...deps.watch, append: (event) => appendEvent(home, event) });
   const clock: DeskClock = { now, setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout) };
@@ -914,6 +920,7 @@ export function installDesk(
         await bridge?.dispose();
         await conversation?.dispose();
         removeTools();
+        removeGuard();
         stopWatch();
         await ready;
         await appendEvent(home, { t: new Date(now()).toISOString(), kind: "shutdown", pid: process.pid, code });

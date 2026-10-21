@@ -1,16 +1,21 @@
 // face/tests/desk-smoke.test.ts
-/** The desk on a REAL composed tree (docs/superpowers/plans/2026-10-20-desk-p1-bridge.md, Task 8): the
- * `gravit-desk` preset's roster, its prompt, Gate 2's refusal from a desk turn, the sandbox fence around
- * `desk/journal/`, the instruction-chain threat the face's fence exists for, and the ledger's `desk-turn`
- * record with its tokens. The desk runs as main.ts runs it: `installDesk` on the booted face, its conversation
- * (src/desk-conversation.ts) the one owner of the desk session, every turn opened through `post`.
+/** The desk on a REAL composed tree (docs/superpowers/plans/2026-10-20-desk-p1-bridge.md, Tasks 8 and 8b):
+ * the `gravit-desk` preset's roster, the parameters of its write tools that the write guard was written
+ * against, its prompt - against a Gravit session's, the control - Gate 2's refusal from a desk turn, the
+ * sandbox fence around `desk/journal/`, the write guard leaving a Gravit session's writes alone, the
+ * instruction-chain threat the face's fence exists for, and the ledger's `desk-turn` record with its tokens.
+ * The desk runs as main.ts runs it: `installDesk` on the booted face, its conversation
+ * (src/desk-conversation.ts) the one owner of the desk session, every turn opened through `post`. That the
+ * guard denies a desk turn's own write of GRAVIT.md is tests/telegram-smoke.test.ts's canary.
  *
  * WHERE IT RUNS. The fixture root is `tests/tmp/desk-smoke-<pid>/`, INSIDE the repository and without a
  * `.git` of its own, so the repository's `.git` is the project root: the repository's GRAVIT.md heads the
  * desk's instruction chain, and the sandbox's writable roots - the session's cwd and the temp areas - leave
  * `desk/` outside them (spike 6: under $TMPDIR the same write goes through). Under it: `repo/`, the root the
  * desk runs under (`desk/STANDING.md`, `levels.yml`, `rules.yml`, `holdings.yml`, and the journal the face
- * makes); `home/`, the harness home; `bots/`, the bots root. Removed in `finally`.
+ * makes); `home/`, the harness home; `bots/`, the bots root. Everything from the fixture's making on runs
+ * inside the test's `try`; its cleanup runs each step whatever the one before it did - the probe agent, the
+ * desk, the face, the fixture.
  *
  * WHAT STANDS IN. The model is a stub on the `stub/echo` route whose every reply - text or tool call - reports
  * all four token buckets (the shared stub reports two, which `deriveTurnTokenUsage` cannot account for), so the
@@ -34,12 +39,14 @@ import { installModelSelection, type Agent } from "@deepseek-ai/dsh-agent";
 import { createUserMessage, type GenerateOptions, type StreamChunk } from "@deepseek-ai/dsh-llm";
 import { SessionId } from "@deepseek-ai/dsh-session";
 import { bootFace, type BootedFace } from "../src/boot.ts";
+import { CYCLE_PATH, readCycle } from "../src/cycle.ts";
 import { installDesk, readEvents, type DeskEvent, type DeskHandle } from "../src/desk.ts";
 import type { DeskConversationCtxLike } from "../src/desk-conversation.ts";
 import { DESK_ALLOW } from "../src/desk-preset.ts";
 import {
   createDeskAgent, deskJournalDir, fenceRefusalLine, findDeskFenceViolation, findFenceViolation, type DeskSessionDeps,
 } from "../src/desk-session.ts";
+import { DESK_WRITE_PATH_ARGS, DESK_WRITE_TOOLS, type DeskWriteTool } from "../src/desk-tools.ts";
 import { OPERATOR_GATED_MARKER } from "../src/orders.ts";
 import { PERSONA_PATH, readPersona } from "../src/persona.ts";
 import type { MessageLike } from "../src/room-rules.ts";
@@ -79,8 +86,20 @@ const ORDER_STAND_IN = "mcp__drill__place_order";
 /** Gate 2's refusal for an order tool the calling scope cannot see (src/orders.ts `orderApprovalDecision`). */
 const HIDDEN_ORDER = `${ORDER_STAND_IN} is not available to this session - it is not registered here, or this session's preset hides it - so no approval card is raised and the order does not run`;
 
-/** The opening words of the research-cycle contract (`dsh/profile/cycle.md`); the em dash is U+2014. */
-const CYCLE_HEADING = "Step 0 — ask once";
+/** The research-cycle contract as the face mounts it on Gravit's preset - `dsh/profile/cycle.md`, trimmed, read
+ *  by the face's own reader - and its heading, which the desk's prompt must not hold. */
+const CYCLE = readCycle(CYCLE_PATH);
+const CYCLE_HEADING = CYCLE.split("\n")[0];
+/** Every parameter each of DESK_WRITE_TOOLS takes in this tree, as the write guard was written against them:
+ *  dsh-tool-fs's `write` and `edit` with the sandbox's escalation pair (the desk's sandbox confines), and
+ *  dsh-tool-str-replace-editor. Only DESK_WRITE_PATH_ARGS's name a path. */
+const WRITE_PARAMETERS: Readonly<Record<DeskWriteTool, readonly string[]>> = {
+  write: ["content", "file_path", "justification", "sandbox_permissions"],
+  edit: ["file_path", "justification", "new_string", "old_string", "replace_all", "sandbox_permissions"],
+  str_replace_editor: ["command", "file_text", "insert_line", "new_str", "old_str", "path", "view_range"],
+};
+/** What Gravit's control turn writes in `repo/notes/GRAVIT.md`, off the desk's instruction chain. */
+const GRAVIT_NOTE = "DESK-SMOKE-GRAVIT-NOTE-5c1e: a Gravit session's own notes";
 /** The roles section's opening line, from plugins/gravit.js itself. */
 const ROLES_INTRO = rolesText([{ tool: "role_probe", summary: "probe" }]).split("\n")[0];
 /** Planted in `desk/journal/GRAVIT.md`: what a desk session's instruction baseline carries when it read the file. */
@@ -131,50 +150,67 @@ async function waitFor(what: string, check: () => boolean | Promise<boolean>, ms
   }
 }
 
+/** Run every cleanup step, in order, each whatever the steps before it did. A step that fails fails the test
+ * when the test itself passed; a test that failed keeps its own error, and the step's is logged beside it. */
+async function unwind(passed: boolean, steps: readonly (readonly [string, () => unknown])[]): Promise<void> {
+  const failures: string[] = [];
+  for (const [what, step] of steps) {
+    try {
+      await step();
+    } catch (error) {
+      failures.push(`${what}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  if (failures.length === 0) return;
+  if (passed) throw new Error(`the cleanup failed - ${failures.join("; ")}`);
+  console.error(`desk smoke: the cleanup failed too - ${failures.join("; ")}`);
+}
+
 interface Ev { type: string; data?: Record<string, unknown> }
 type DeskTurnEvent = Extract<DeskEvent, { kind: "desk-turn" }>;
 
 test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sandbox fence, the instruction-chain threat, and the turn's tokens", {
   skip: gated && "set FACE_SMOKE=1", timeout: 180_000,
 }, async () => {
-  await rm(BASE, { recursive: true, force: true });
-  await mkdir(join(ROOT, "desk"), { recursive: true });
-  for (const [name, text] of GUARDED) await writeFile(join(ROOT, "desk", name), text);
-  await mkdir(BOTS, { recursive: true });
-  await populateBotsRoot(BOTS, GRAVIT_PLUGIN_ABS);
-  setupFaceProfile(HOME);
-  const patchPath = join(HOME, "profiles", "face", "cordis.patch.yml");
-  const patch = readFileSync(patchPath, "utf8").replace(/^\[\][ \t]*$/m, "");
-  writeFileSync(patchPath, [
-    patch,
-    // This smoke owns a scratch profile: never the operator's data server, never a real model.
-    "- id: mcp-akshare",
-    "  disabled: true",
-    "- id: agent-default-model",
-    "  config:",
-    `    provider: ${STUB.provider}`,
-    `    model: ${STUB.model}`,
-    "- insert:",
-    `    - id: mcp-${SERVER}`,
-    `      name: "@deepseek-ai/dsh-mcp-client"`,
-    "      config:",
-    "        transport: stdio",
-    `        serverName: ${SERVER}`,
-    `        command: ${JSON.stringify(process.execPath)}`,
-    `        args: [${JSON.stringify(STANDIN)}]`,
-    "        toolCallTimeoutMs: 10000",
-    "        failOnStartupError: true",
-    "",
-  ].join("\n"));
-
   let booted: BootedFace | undefined;
   let desk: DeskHandle | undefined;
   let probe: { dispose(): Promise<void> } | undefined;
+  let passed = false;
   try {
+    await rm(BASE, { recursive: true, force: true });
+    await mkdir(join(ROOT, "desk"), { recursive: true });
+    for (const [name, text] of GUARDED) await writeFile(join(ROOT, "desk", name), text);
+    await mkdir(BOTS, { recursive: true });
+    await populateBotsRoot(BOTS, GRAVIT_PLUGIN_ABS);
+    setupFaceProfile(HOME);
+    const patchPath = join(HOME, "profiles", "face", "cordis.patch.yml");
+    const patch = readFileSync(patchPath, "utf8").replace(/^\[\][ \t]*$/m, "");
+    writeFileSync(patchPath, [
+      patch,
+      // This smoke owns a scratch profile: never the operator's data server, never a real model.
+      "- id: mcp-akshare",
+      "  disabled: true",
+      "- id: agent-default-model",
+      "  config:",
+      `    provider: ${STUB.provider}`,
+      `    model: ${STUB.model}`,
+      "- insert:",
+      `    - id: mcp-${SERVER}`,
+      `      name: "@deepseek-ai/dsh-mcp-client"`,
+      "      config:",
+      "        transport: stdio",
+      `        serverName: ${SERVER}`,
+      `        command: ${JSON.stringify(process.execPath)}`,
+      `        args: [${JSON.stringify(STANDIN)}]`,
+      "        toolCallTimeoutMs: 10000",
+      "        failOnStartupError: true",
+      "",
+    ].join("\n"));
+
     booted = await bootFace({ profileName: "face", port: 0, dshHome: HOME, botsRoot: BOTS });
     const { ctx } = booted;
     const tools = ctx.get("tools") as {
-      schemas(scope?: object): { name: string }[];
+      schemas(scope?: object): { name: string; parameters?: { properties?: Record<string, { type?: unknown }>; required?: string[] } }[];
       register(definition: unknown): () => void;
     };
     const names = (schemas: { name: string }[]): string[] => schemas.map((s) => s.name).sort();
@@ -195,6 +231,9 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
         if (results === 1) return { kind: "tool", name: "write", args: { file_path: "../levels.yml", content: "levels: [HACKED]\n" } };
         if (results === 2) return { kind: "tool", name: "write", args: { file_path: "probe.md", content: "a journal note\n" } };
         return { kind: "text", text: "the writes are done" };
+      }
+      if (said.includes("GRAVIT_CONTROL")) {
+        return results === 0 ? { kind: "tool", name: "write", args: { file_path: "notes/GRAVIT.md", content: `${GRAVIT_NOTE}\n` } } : { kind: "text", text: "noted" };
       }
       return { kind: "text", text: "noted" };
     };
@@ -255,9 +294,25 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
     const first = requests.get(deskId)?.[0];
     assert.ok(first !== undefined, "the desk's first request reached the model");
     assert.deepEqual((first.tools ?? []).map((t) => t.name).sort(), expected, "the first desk request offers exactly that set");
-    for (const entry of DESK_ALLOW.filter((name) => name.startsWith("mcp__*__"))) {
+    const wildcards = DESK_ALLOW.filter((name) => name.startsWith("mcp__*__"));
+    assert.deepEqual(wildcards, ["mcp__*__earnings", "mcp__*__daily_bars", "mcp__*__calendar", "mcp__*__corp_actions"],
+      "DESK_ALLOW's wildcards are the four market reads");
+    for (const entry of wildcards) {
       assert.deepEqual(expandAllow([entry], known).allow, [`mcp__${SERVER}__${entry.slice("mcp__*__".length)}`],
         `${entry} expands to exactly one server's tool in this tree`);
+    }
+    /* The write guard's path arguments are this tree's own: each write tool, as the desk sees it, takes exactly
+     * the parameters the guard was written against, its path arguments required strings - so a dsh bump that
+     * renames one, or adds a parameter that could name a path, fails here before a desk write goes unjudged. */
+    const deskSchemas = tools.schemas(deskAgent);
+    for (const tool of DESK_WRITE_TOOLS) {
+      const parameters = deskSchemas.find((s) => s.name === tool)?.parameters;
+      assert.ok(parameters !== undefined, `the desk sees ${tool}`);
+      assert.deepEqual(Object.keys(parameters.properties ?? {}).sort(), WRITE_PARAMETERS[tool], `${tool} takes the parameters the guard was written against`);
+      for (const arg of DESK_WRITE_PATH_ARGS[tool]) {
+        assert.equal(parameters.properties?.[arg]?.type, "string", `${tool}'s ${arg} is a string`);
+        assert.ok(parameters.required?.includes(arg), `${tool}'s ${arg} is required`);
+      }
     }
     assert.equal(names(tools.schemas(deskAgent)).includes(ORDER_STAND_IN), false, "the desk never sees the order stand-in");
     for (const deskTool of ["desk_quotes", "desk_state"]) assert.equal(known.has(deskTool), false, `the global view has no ${deskTool}`);
@@ -273,7 +328,10 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
     for (const deskTool of ["desk_quotes", "desk_state"]) assert.equal(gravitTools.includes(deskTool), false, `Gravit's session has no ${deskTool}`);
 
     /* 2. THE PROMPT the desk's first request carried: Gravit's persona, the date, the desk contract - and neither
-     * the cycle contract nor the roles section, which belong to Gravit's preset. */
+     * the cycle contract nor the roles section, which belong to Gravit's preset. The control is a turn on the
+     * Gravit session: its first request carries the cycle contract word for word, so the needle is the text the
+     * face mounts and the desk's lack of it is its preset's doing. (The turn also writes notes/GRAVIT.md, which
+     * section 4 reads back.) */
     assert.equal(first.messages[0]?.role, "system");
     const system = textOf(first.messages[0]);
     assert.ok(system.includes(readPersona(PERSONA_PATH).split("{{")[0]), "the desk is told it is Gravit: the global persona prefix stays");
@@ -281,6 +339,12 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
     assert.ok(system.includes("# The desk"), "the desk contract, gravit:desk");
     assert.equal(system.includes(CYCLE_HEADING), false, "no research-cycle contract on the desk");
     assert.equal(system.includes(ROLES_INTRO), false, "no roles section on the desk");
+    gravit.followup(createUserMessage({ content: [{ type: "text", text: "GRAVIT_CONTROL" }], source: { kind: "user" } }));
+    await waitFor("the Gravit session's first request", () => (requests.get(g.sessionId)?.length ?? 0) > 0);
+    await gravit.whenIdle();
+    const gravitFirst = requests.get(g.sessionId)?.[0];
+    assert.ok(gravitFirst !== undefined && gravitFirst.messages[0]?.role === "system");
+    assert.ok(textOf(gravitFirst.messages[0]).includes(CYCLE), "the control: Gravit's prompt carries the cycle contract, heading and all");
 
     /* 3. GATE 2 FROM A DESK TURN: the model names the order stand-in, which the desk cannot see; the gate denies
      * it in its own words before any card, and the stand-in's body never runs. */
@@ -305,6 +369,9 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
     assert.equal(await readFile(join(JOURNAL, "probe.md"), "utf8"), "a journal note\n", "a write inside the journal lands");
     assert.equal((deskAgent.session.snapshotEvents() as unknown as Ev[]).some((e) => e.type === "approval/asked"), false,
       "no card was ever raised on the desk session: not for the order, not for the refused write");
+    /* And the write guard is the desk's alone: the Gravit session's write of a GRAVIT.md, in section 2's control
+     * turn - in repo/notes/, off the desk's instruction chain - went through. */
+    assert.equal(await readFile(join(ROOT, "notes", "GRAVIT.md"), "utf8"), `${GRAVIT_NOTE}\n`, "Gravit's own write of a GRAVIT.md landed");
 
     /* 5. THE THREAT the face's fence exists for: an instruction file planted in the journal reaches the first
      * request of a desk session opened over it - behind the repository's own GRAVIT.md, which heads the chain.
@@ -348,10 +415,13 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
     assert.deepEqual(writes.usage, usageOf(4));
     for (const [name, text] of GUARDED) assert.equal(await readFile(join(ROOT, "desk", name), "utf8"), text, `${name} is unchanged`);
     assert.equal(existsSync(join(JOURNAL, "levels.yml")), false);
+    passed = true;
   } finally {
-    await probe?.dispose();
-    await desk?.dispose(0);
-    await booted?.dispose();
-    await rm(BASE, { recursive: true, force: true });
+    await unwind(passed, [
+      ["the probe agent", () => probe?.dispose()],
+      ["the desk", () => desk?.dispose(0)],
+      ["the face", () => booted?.dispose()],
+      ["the fixture", () => rm(BASE, { recursive: true, force: true })],
+    ]);
   }
 });

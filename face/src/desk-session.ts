@@ -21,7 +21,10 @@
  * and the repository's own skill roots. {@link findDeskFenceViolation} looks for one;
  * {@link superviseDeskTurns} runs the check at every turn's start and cuts a turn that starts over a
  * violation, and an owner can check before it opens a turn at all, {@link fenceRefusalLine} being its
- * reply. The check fails closed: what it cannot read counts as found.
+ * reply. The check fails closed: what it cannot read counts as found. It is the second line: a file that
+ * a desk turn writes steers the rest of that same turn, which no check at a turn's start can see, so
+ * src/desk-tools.ts's write guard denies a desk agent's write of any of these names before it happens.
+ * The fence is for what another session plants.
  *
  * PROVENANCE (§5.9). The model never sees a message's `source` (spike 4): the DeepSeek adapter puts no
  * user-message source on the wire. So every message the face sends the desk opens with one bracketed
@@ -47,6 +50,7 @@ import type { Context } from "@deepseek-ai/cordis";
 import { installModelSelection as installDshModelSelection } from "@deepseek-ai/dsh-agent";
 import { deriveTurnTokenUsage } from "@deepseek-ai/dsh-token-meter/client";
 import { appendEvent, deskTime, lastDeskSession, readEvents, type TurnUsage } from "./desk.ts";
+import { FENCE_NAMES, fenceNameOf } from "./desk-names.ts";
 import { DESK_PRESET } from "./desk-preset.ts";
 import type { AgentLike, MemberSetup, ResumeMemberOptions, RoomContextLike, RoomDeps, SessionLike } from "./room.ts";
 import { finalTextOf, parseModelRoute, type EventLike } from "./room-rules.ts";
@@ -65,17 +69,11 @@ export function deskJournalDir(root: string): string {
 
 /* ---------- the instruction-chain fence ---------- */
 
-/** The names that steer a desk session from inside its own tree: the workspace instruction files the
- * face's agent-instructions row reads, dsh's project-root marker, and the two project skill roots. */
-export const FENCE_NAMES = ["GRAVIT.md", "GRAVIT.local.md", ".git", ".dsh", ".agents"] as const;
-
-/** A name as a case-insensitive volume compares it. macOS's APFS folds case, so dsh's probe,
- * `stat("<dir>/GRAVIT.md")`, opens `Gravit.md` as well - measured on the operator's volume, along with
- * `.GIT` for `.git` and `.dſh` for `.dsh`. Upper, then lower, folds that `ſ` to `s` as the volume
- * does, which lower alone would not. On a case-sensitive volume this refuses a few names dsh would not
- * read: the safe side. */
-const folded = (name: string): string => name.toUpperCase().toLowerCase();
-const FENCED: ReadonlySet<string> = new Set(FENCE_NAMES.map(folded));
+/** The names that steer a desk session from inside its own tree, compared as a case-insensitive volume
+ * compares them (`fenceNameOf`). They live in src/desk-names.ts, a leaf, because src/desk-tools.ts's write
+ * guard - which denies a desk turn's write of one before it happens - matches them too, and src/desk.ts
+ * loads that module statically; they are re-exported here for this module's importers. */
+export { FENCE_NAMES };
 
 /** Code-unit order: the same on every machine, unlike `localeCompare`. */
 const byName = (a: Dirent, b: Dirent): number => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
@@ -87,8 +85,8 @@ const byName = (a: Dirent, b: Dirent): number => (a.name < b.name ? -1 : a.name 
  * Walks every depth, depth first, each directory's entries in code-unit order, and answers with the
  * first entry that is a symlink - any symlink, whatever its name, dangling or not: one is never
  * followed, and what it points at is not the journal's - or that is named like a {@link FENCE_NAMES}
- * entry, the name compared as a case-insensitive volume compares it ({@link folded}). The journal itself
- * is `"."` when it is a symlink. It fails closed: a missing journal (ENOENT at the root) holds nothing,
+ * entry, the name compared as a case-insensitive volume compares it (src/desk-names.ts
+ * `fenceNameOf`). The journal itself is `"."` when it is a symlink. It fails closed: a missing journal (ENOENT at the root) holds nothing,
  * but a journal it cannot read for any other reason is `"."`, and a directory under it that it cannot
  * list is itself the answer, by its path - unless that directory went away or stopped being one between
  * the listing and the descent (ENOENT, ENOTDIR), which is skipped as gone. Never rejects.
@@ -109,7 +107,7 @@ export async function findFenceViolation(journalDir: string): Promise<string | u
 async function walkFence(dir: string, rel: string, entries: Dirent[]): Promise<string | undefined> {
   for (const entry of [...entries].sort(byName)) {
     const path = rel === "" ? entry.name : `${rel}/${entry.name}`;
-    if (entry.isSymbolicLink() || FENCED.has(folded(entry.name))) return path;
+    if (entry.isSymbolicLink() || fenceNameOf(entry.name) !== undefined) return path;
     if (!entry.isDirectory()) continue;
     const child = join(dir, entry.name);
     let children: Dirent[];
