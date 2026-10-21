@@ -222,7 +222,7 @@ type DeskQuote = ReturnType<typeof deskQuote>;
  * @param asOf - the quote's time, as the hub gave it.
  * @param now - the time the call is answered at, in ms since the epoch.
  */
-function quoteTime(feed: string, asOf: string, now: number): string {
+export function quoteTime(feed: string, asOf: string, now: number): string {
   const at = new Date(asOf);
   const clock = Number.isNaN(at.getTime()) ? asOf
     : etDate(at) === etDate(new Date(now)) ? `${etClock(at)} ET` : `${etDate(at)} ${etClock(at)} ET`;
