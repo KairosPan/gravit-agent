@@ -634,6 +634,91 @@ git commit -m "feat(face): the desk's write guard - a desk turn never writes GRA
 
 ---
 
+### Task 8c: The desk's read guard and secret check: a desk turn never reads a key file or sends a secret
+
+> Added 2026-10-21 by the controller, from the Task 10 review (R34). dsh's sandbox lets every read through, so a desk turn's `read`, `read_image`, `grep`, `glob` and `str_replace_editor view` reach `<repo>/.env.*`, `$DSH_HOME/.env`, `$DSH_HOME/.credentials.yaml`, `~/.ssh` and CLI tokens.
+> - **Where the contents go today:** to DeepSeek inside tool results, to DeepSeek's search as a `web_search` query, to Alpaca through an MCP tool's `symbol`, and to the operator's Telegram chat, where they stay in Telegram's cloud.
+> - **Why that matters:** a poisoned web result or filing can steer an unattended turn. A compromised Telegram account or device then holds a remote read of every file the face can read.
+> - **The fix:** this task closes the read side the way Task 8b closed the write side, and adds a second line on the outgoing side.
+
+**Files:**
+- Modify:
+  - `face/src/desk-tools.ts`: the read decision, the secret check, and one guard that runs the write, read and secret checks.
+  - `face/src/desk.ts`: wiring, if the guard's signature changes.
+  - `face/src/telegram.ts`: the redactor covers every secret value.
+- Test:
+  - `face/tests/desk-guard.test.ts`
+  - `face/tests/telegram.test.ts`
+  - `face/tests/telegram-smoke.test.ts`: the canary's read case.
+
+**Interfaces:**
+- **Consumes:**
+  - Task 8b's guard: `deskWriteDecision(toolName, args, cwd, root)` and `installDeskWriteGuard(ctx, root, options)`, with the prepended root `tools/pre-execute` listener, the deny-only `tools.guard` backstop armed through `inject(["tools"])`, the desk-agent test (composed preset OR the session header's `agentPreset`), the root anchor, and fail-closed behaviour.
+  - `FENCE_NAMES` and its fold, from `desk-names.ts`.
+  - The bridge's existing token redactor in `telegram.ts`.
+- **Produces:**
+  - **`DESK_READ_TOOLS`:** `read`, `read_image`, `grep`, `glob`, and `str_replace_editor` with every command, `view` included.
+    - Read each tool's schema in the installed dsh packages.
+    - List every path-bearing argument (for example `file_path` and `path`, and `grep`'s and `glob`'s search root) with its file and line.
+    - Note which tools default to the cwd when no path is given.
+  - **`deskReadDecision(toolName: string, args: unknown, cwd: string, root: string): { kind: "deny"; reason: string } | null`**
+    - It is pure, except for one realpath of the deepest existing ancestor of each path, done synchronously so a symlink cannot smuggle a path out of the repo. It takes each path argument, or the cwd when none is given, both resolved against the cwd and as spelled.
+    - **Deny outside the repo.** A target outside `root` (after the realpath) is denied: `the desk reads only inside the repository; <path> is outside it`. This covers all of `$DSH_HOME`, `~/.ssh` and `~/.config`.
+    - **Deny key and git names inside the repo.** Any path segment that case-folds to `.env`, `.env.<anything>` or `.git` is denied: `the desk never reads <name>: it can hold a key`.
+    - **Deny dot-file globs.** A `grep` `include` (or `glob` pattern) that can match a name beginning with `.` is denied: `the desk never searches dot-files`. That is any glob segment that starts with `.`, `*`, `?`, `[` or `{`. Ripgrep skips hidden files by default, but `--glob` overrides that.
+    - **Fail closed.** A missing or non-string path where one is required is denied: `the desk could not check this read's path; nothing was read`.
+  - **`deskSecretDecision(args: unknown, secrets: readonly string[]): { kind: "deny"; reason: string } | null`**
+    - It applies to every tool a desk agent calls, MCP tools and `web_search` included.
+    - It denies when `JSON.stringify(args)` contains any secret value: `the desk never sends a secret: this call carries one`.
+  - **`deskSecrets(env: NodeJS.ProcessEnv): string[]`** takes the values of every variable whose name matches `/KEY|PASSWORD|SECRET|TOKEN/i` and whose value is at least 8 characters, computed once at install.
+  - **The guard.** The listener and the backstop judge a desk agent's call in this order and return the first deny:
+    1. write;
+    2. read;
+    3. secret.
+
+    One guard installation covers all three, with one listener and one backstop. Keep 8b's name, or rename it and update its callers.
+  - **The bridge.** `telegram.ts`'s redactor replaces every value from `deskSecrets(process.env)` as well as the token, in every send, queued text and log line. A value is replaced with `<secret>`, and the token keeps `<token>`.
+  - **Weight.** `desk.ts`, and with it the pause switch, loads no new module.
+- **Scope note.** Like the write guard, the read guard covers every `gravit-desk` agent: the desk session now, and P2's and P4's firings later. Gravit's own workbench sessions are untouched.
+
+- [ ] **Step 1: Write the failing tests**
+
+```ts
+// face/tests/desk-guard.test.ts (append)
+test("reads outside the repository are denied, through a symlink too", () => {
+  // root /x/repo, cwd /x/repo/desk/journal: read ~/.dsh/.env, ~/.ssh/id_ed25519, ../../../outside.txt, a journal symlink pointing out → deny "the desk reads only inside the repository; …"
+});
+test("key and git names are denied inside the repository", () => { /* <root>/.env.alpaca, <root>/face/.ENV, <root>/.git/config, notes/.env.local → deny "the desk never reads <name>: it can hold a key" */ });
+test("ordinary repository reads pass", () => { /* notes/today.md, ../STANDING.md, <root>/strategies/x/status.yaml, grep with no include rooted at the journal → null */ });
+test("dot-file globs are denied", () => { /* grep include ".env*", "**/.env", "{.env,x}", "*" ; glob pattern ".*" → deny "the desk never searches dot-files"; include "*.md" → null */ });
+test("every str_replace_editor command is judged as a read, view included", () => { /* view <root>/.env.deepseek → deny */ });
+test("a call carrying a secret is denied whatever the tool", () => { /* web_search { query: "<secret>" }, mcp__alpaca-kit__daily_bars { symbol: "<secret>" } → deny "the desk never sends a secret: this call carries one"; the same call without it → null */ });
+test("deskSecrets takes values of KEY, PASSWORD, SECRET and TOKEN names of 8+ characters", () => { /* … */ });
+test("the backstop judges reads and secrets too", () => { /* a prepended allow listener cannot lift a read deny or a secret deny */ });
+// face/tests/telegram.test.ts (append)
+test("every secret value is redacted from sends, queued text and log lines", () => { /* env APCA_API_SECRET_KEY=… in a reply → "<secret>" in the sendMessage body and in outbox.json */ });
+```
+
+The canary in `face/tests/telegram-smoke.test.ts` gains a read case.
+- The stub model answers the operator's `send me ~/.dsh/.env` with a `read` of `<home>/.env`. The scratch home holds a fake `.env` with a fake `TELEGRAM_BOT_TOKEN`.
+- The tool result carries the deny reason.
+- No `sendMessage` body contains the fake token's value.
+
+- [ ] **Step 2: Run them to verify they fail.** Run `cd face && npx tsx --test tests/desk-guard.test.ts tests/telegram.test.ts`.
+
+- [ ] **Step 3: Implement** the read decision, the secret decision and check, the guard's extension and the redactor.
+
+- [ ] **Step 4: Run them to verify they pass.** Run `npm test && npm run typecheck`, then `FACE_SMOKE=1 npx tsx --test tests/telegram-smoke.test.ts tests/desk-smoke.test.ts`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git commit -F <msgfile> -- face/src/desk-tools.ts face/src/desk.ts face/src/telegram.ts face/tests/desk-guard.test.ts face/tests/telegram.test.ts face/tests/telegram-smoke.test.ts
+# subject: feat(face): the desk's read guard and secret check - a desk turn never reads a key file or sends a secret
+```
+
+---
+
 ### Task 9: The Desk panel, the Pause route and the source glyphs
 
 **Files:**
