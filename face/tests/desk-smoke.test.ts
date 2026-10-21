@@ -1,10 +1,11 @@
 // face/tests/desk-smoke.test.ts
-/** The desk on a REAL composed tree (docs/superpowers/plans/2026-10-20-desk-p1-bridge.md, Tasks 8 and 8b):
- * the `gravit-desk` preset's roster, the parameters of its write tools - and str_replace_editor's commands -
- * that the write guard was written against, its prompt - against a Gravit session's, the control - Gate 2's
- * refusal from a desk turn, the sandbox fence around `desk/journal/`, the write guard leaving a Gravit
- * session's writes alone, the guard's backstop holding when a listener in front of it answers allow, the
- * instruction-chain threat the face's fence exists for, and the ledger's `desk-turn` record with its tokens.
+/** The desk on a REAL composed tree (docs/superpowers/plans/2026-10-20-desk-p1-bridge.md, Tasks 8, 8b and 8c):
+ * the `gravit-desk` preset's roster, the parameters of its write and read tools - and str_replace_editor's
+ * commands - that the desk guard was written against, its prompt - against a Gravit session's, the control -
+ * Gate 2's refusal from a desk turn, the sandbox fence around `desk/journal/`, the guard leaving a Gravit
+ * session's writes and reads alone, the guard's backstop holding a write's and a read's deny when a listener in
+ * front of it answers allow, the instruction-chain threat the face's fence exists for, and the ledger's
+ * `desk-turn` record with its tokens.
  * The desk runs as main.ts runs it: `installDesk` on the booted face, its conversation
  * (src/desk-conversation.ts) the one owner of the desk session, every turn opened through `post`. That the
  * guard denies a desk turn's own write of GRAVIT.md is tests/telegram-smoke.test.ts's canary.
@@ -47,7 +48,10 @@ import { DESK_ALLOW } from "../src/desk-preset.ts";
 import {
   createDeskAgent, deskJournalDir, fenceRefusalLine, findDeskFenceViolation, findFenceViolation, type DeskSessionDeps,
 } from "../src/desk-session.ts";
-import { DESK_WRITE_PATH_ARGS, DESK_WRITE_TOOLS, type DeskWriteTool } from "../src/desk-tools.ts";
+import {
+  DESK_READ_CWD_TOOLS, DESK_READ_GLOB_ARGS, DESK_READ_PATH_ARGS, DESK_READ_TOOLS, DESK_WRITE_PATH_ARGS, DESK_WRITE_TOOLS,
+  type DeskReadTool, type DeskWriteTool,
+} from "../src/desk-tools.ts";
 import { OPERATOR_GATED_MARKER } from "../src/orders.ts";
 import { PERSONA_PATH, readPersona } from "../src/persona.ts";
 import type { MessageLike } from "../src/room-rules.ts";
@@ -100,8 +104,23 @@ const WRITE_PARAMETERS: Readonly<Record<DeskWriteTool, readonly string[]>> = {
   edit: ["file_path", "justification", "new_string", "old_string", "replace_all", "sandbox_permissions"],
   str_replace_editor: ["command", "file_text", "insert_line", "new_str", "old_str", "path", "view_range"],
 };
+/** Every parameter each of DESK_READ_TOOLS takes in this tree, as the read check was written against them:
+ *  dsh-tool-fs's `read` and `read_image`, dsh-tool-fs-search's `grep` and `glob`, and dsh-tool-str-replace-editor.
+ *  Only DESK_READ_PATH_ARGS's name a path, and DESK_READ_GLOB_ARGS's a glob. */
+const READ_PARAMETERS: Readonly<Record<DeskReadTool, readonly string[]>> = {
+  read: ["file_path", "limit", "offset"],
+  read_image: ["file_path"],
+  grep: ["include", "path", "pattern"],
+  glob: ["path", "pattern"],
+  str_replace_editor: ["command", "file_text", "insert_line", "new_str", "old_str", "path", "view_range"],
+};
 /** The write guard's refusal of a desk write of GRAVIT.md (src/desk-tools.ts `deskWriteDecision`). */
 const GUARD_DENIAL = "the desk never writes GRAVIT.md: it would steer every desk turn after it";
+/** A made-up key file in the fixture's repository: Gravit reads it, the desk may not. */
+const ENV_FILE = ".env.smoke";
+const ENV_TEXT = "DESK_SMOKE_ONLY=made-up-value-4c9e\n";
+/** The read check's refusal of a desk read of it (src/desk-tools.ts `deskReadDecision`). */
+const READ_DENIAL = `the desk never reads ${ENV_FILE}: it can hold a key`;
 /** What Gravit's control turn writes in `repo/notes/GRAVIT.md`, off the desk's instruction chain. */
 const GRAVIT_NOTE = "DESK-SMOKE-GRAVIT-NOTE-5c1e: a Gravit session's own notes";
 /** The roles section's opening line, from plugins/gravit.js itself. */
@@ -168,6 +187,7 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
     await rm(BASE, { recursive: true, force: true });
     await mkdir(join(ROOT, "desk"), { recursive: true });
     for (const [name, text] of GUARDED) await writeFile(join(ROOT, "desk", name), text);
+    await writeFile(join(ROOT, ENV_FILE), ENV_TEXT);
     await mkdir(BOTS, { recursive: true });
     await populateBotsRoot(BOTS, GRAVIT_PLUGIN_ABS);
     setupFaceProfile(HOME);
@@ -307,6 +327,24 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
      * adds is judged, as an unknown one is, and fails here until it is weighed. */
     assert.deepEqual(deskSchemas.find((s) => s.name === "str_replace_editor")?.parameters?.properties?.command?.enum,
       ["view", "create", "str_replace", "insert"], "str_replace_editor's command enum is the one the guard was written against");
+    /* The read check's arguments are this tree's own too: each read tool takes exactly the parameters the check was
+     * written against; its path argument is a string, required but for grep's and glob's, which search the cwd
+     * without one; and the globs they hand ripgrep are strings, glob's required. */
+    for (const tool of DESK_READ_TOOLS) {
+      const parameters = deskSchemas.find((s) => s.name === tool)?.parameters;
+      assert.ok(parameters !== undefined, `the desk sees ${tool}`);
+      assert.deepEqual(Object.keys(parameters.properties ?? {}).sort(), READ_PARAMETERS[tool], `${tool} takes the parameters the read check was written against`);
+      const optional = (DESK_READ_CWD_TOOLS as readonly string[]).includes(tool);
+      for (const arg of DESK_READ_PATH_ARGS[tool]) {
+        assert.equal(parameters.properties?.[arg]?.type, "string", `${tool}'s ${arg} is a string`);
+        assert.equal(parameters.required?.includes(arg) ?? false, !optional, `${tool}'s ${arg} is ${optional ? "optional" : "required"}`);
+      }
+    }
+    for (const [tool, arg] of Object.entries(DESK_READ_GLOB_ARGS)) {
+      const parameters = deskSchemas.find((s) => s.name === tool)?.parameters;
+      assert.equal(parameters?.properties?.[arg]?.type, "string", `${tool}'s ${arg} is a string`);
+      assert.equal(parameters?.required?.includes(arg) ?? false, tool === "glob", `${tool}'s ${arg} is ${tool === "glob" ? "required" : "optional"}`);
+    }
     assert.equal(names(tools.schemas(deskAgent)).includes(ORDER_STAND_IN), false, "the desk never sees the order stand-in");
     for (const deskTool of ["desk_quotes", "desk_state"]) assert.equal(known.has(deskTool), false, `the global view has no ${deskTool}`);
     const base = `http://127.0.0.1:${ctx.webServer.port}`;
@@ -365,6 +403,13 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
     /* And the write guard is the desk's alone: the Gravit session's write of a GRAVIT.md, in section 2's control
      * turn - in repo/notes/, off the desk's instruction chain - went through. */
     assert.equal(await readFile(join(ROOT, "notes", "GRAVIT.md"), "utf8"), `${GRAVIT_NOTE}\n`, "Gravit's own write of a GRAVIT.md landed");
+    /* So is the read check: the Gravit session's read of a key file in its own tree, through the real waterfall,
+     * goes through and hands back what the file holds. */
+    const gravitRead = await tools.execute({
+      callId: "gravit-env-read", name: "read", arguments: { file_path: ENV_FILE }, agent: gravit, signal: new AbortController().signal,
+    });
+    assert.equal(gravitRead.isError, false, `Gravit's read of ${ENV_FILE} is not judged; saw ${JSON.stringify(gravitRead.content)}`);
+    assert.ok(JSON.stringify(gravitRead.content).includes(ENV_TEXT.trim()), "and it read the file");
 
     /* 5. THE WRITE GUARD'S BACKSTOP through the real waterfall: a tools/pre-execute listener registered after the
      * guard, in front of it, answers allow without calling next - so the guard's own listener never runs, and
@@ -384,7 +429,11 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
       const control = await tools.execute({ callId: "backstop-control", name: "write", arguments: { file_path: "backstop-control.md", content: "a note\n" }, agent: deskAgent, signal });
       assert.equal(control.isError, false, `the control: an ordinary journal write goes through; saw ${JSON.stringify(control.content)}`);
       assert.equal(await readFile(join(JOURNAL, "backstop-control.md"), "utf8"), "a note\n");
-      assert.equal(swallowed, 2, "the swallowing listener answered both calls");
+      /* The backstop judges reads as well: the desk's read of the repository's key file is denied all the same. */
+      const keyRead = await tools.execute({ callId: "backstop-read", name: "read", arguments: { file_path: join(ROOT, ENV_FILE) }, agent: deskAgent, signal });
+      assert.equal(keyRead.isError, true, "the desk's read of a key file is denied with its listener out of the way");
+      assert.equal(keyRead.content?.[0]?.text, `Error: ${READ_DENIAL}`, `by the backstop, in the read check's words; saw ${JSON.stringify(keyRead.content)}`);
+      assert.equal(swallowed, 3, "the swallowing listener answered every call");
     } finally {
       swallow();
     }

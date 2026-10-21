@@ -5,7 +5,8 @@
  * src/desk.ts, so the pause switch would otherwise load the bots' and the roles' code to write one
  * file. src/desk-preset.ts re-exports the id, so its importers keep working. The fence's names live here
  * for the same reason: src/desk-session.ts's fence and src/desk-tools.ts's write guard both match them,
- * and src/desk-session.ts re-exports them.
+ * and src/desk-session.ts re-exports them; the desk guard's read check compares its key names by the
+ * same fold.
  * @module
  */
 
@@ -25,7 +26,7 @@ export type FenceName = (typeof FENCE_NAMES)[number];
  * `.GIT` for `.git` and `.dſh` for `.dsh`. Upper, then lower, folds that `ſ` to `s` as the volume
  * does, which lower alone would not. On a case-sensitive volume this matches a few names dsh would not
  * read: the safe side. */
-const foldName = (name: string): string => name.toUpperCase().toLowerCase();
+export const foldName = (name: string): string => name.toUpperCase().toLowerCase();
 
 /** Each folded fence name, to its {@link FENCE_NAMES} spelling. */
 const FENCED: ReadonlyMap<string, FenceName> = new Map(FENCE_NAMES.map((name) => [foldName(name), name]));

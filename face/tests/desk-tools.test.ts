@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DESK_PRESET } from "../src/desk-preset.ts";
 import { appendEvent, installDesk, type DeskRun, type DeskStatus } from "../src/desk.ts";
-import { deskToolDefinitions, installDeskTools, type DeskAgentLike, type DeskToolDefinition, type DeskWriteGuardCtxLike } from "../src/desk-tools.ts";
+import { deskToolDefinitions, installDeskTools, type DeskAgentLike, type DeskGuardCtxLike, type DeskToolDefinition } from "../src/desk-tools.ts";
 import { HttpError } from "../src/http.ts";
 import type { LiveQuote, QuoteIdentity, QuotePayload } from "../src/quote-types.ts";
 import { recorder } from "./route-recorder.ts";
@@ -21,7 +21,7 @@ type Listener = (event: { agent: DeskAgentLike }) => undefined;
 /** A root context with the event the desk tools listen to, the live agents `live`, and a preset registry
  * that reads a fake agent's preset off its context. `presetError` makes the registry throw and `listError`
  * the agent listing. `calls` records `on("agent/created")` and `list` in the order they came; `create` plays
- * one agent's creation through every listener and hands back what each answered. The write guard, which
+ * one agent's creation through every listener and hands back what each answered. The desk guard, which
  * `installDesk` installs beside the tools, lands apart - its `tools/pre-execute` listener in `guards`, its
  * backstop's `tools.guard`, armed through `inject`, in `backstops` - and tests/desk-guard.test.ts drives it. */
 function fakeRoot(options: { presetError?: Error; listError?: Error; live?: DeskAgentLike[] } = {}) {
@@ -29,7 +29,7 @@ function fakeRoot(options: { presetError?: Error; listError?: Error; live?: Desk
   const guards: unknown[] = [];
   const backstops: unknown[] = [];
   const calls: string[] = [];
-  const ctx: DeskWriteGuardCtxLike = {
+  const ctx: DeskGuardCtxLike = {
     on(name: string, listener: (...args: never[]) => unknown) {
       const list: unknown[] = name === "tools/pre-execute" ? guards : listeners;
       if (name !== "tools/pre-execute") {
@@ -338,7 +338,7 @@ test("installDesk installs the desk tools whatever enabled says, desk_state read
     const at = Date.parse("2026-10-20T14:00:00.000Z");
     const desk = installDesk(rec, { home, enabled, now: () => at, version: "v", watch, ctx: root.ctx, hub: fakeHub().hub, root: "/repo" });
     assert.equal(root.listeners.length, 1, `the listener is installed (enabled: ${enabled})`);
-    assert.equal(root.guards.length, 1, `and the write guard beside it (enabled: ${enabled})`);
+    assert.equal(root.guards.length, 1, `and the desk guard beside it (enabled: ${enabled})`);
     assert.equal(root.backstops.length, 1, `with its backstop (enabled: ${enabled})`);
     const agent = fakeAgent(`desk-${enabled}`, DESK_PRESET);
     root.create(agent.agent);
@@ -358,7 +358,7 @@ test("installDesk installs the desk tools whatever enabled says, desk_state read
     assert.equal(root.guards.length, 0, `and the guard (enabled: ${enabled})`);
     assert.equal(root.backstops.length, 0, `and its backstop (enabled: ${enabled})`);
   }
-  /* The tools need both: a context with no hub installs no tools - only the write guard, which needs no hub. */
+  /* The tools need both: a context with no hub installs no tools - only the desk guard, which needs no hub. */
   const root = fakeRoot();
   installDesk(recorder(), { home: await mkdtemp(join(tmpdir(), "face-desk-tools-")), enabled: false, ctx: root.ctx, root: "/repo" });
   assert.equal(root.listeners.length, 0, "no tools without a hub");

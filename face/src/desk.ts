@@ -8,7 +8,7 @@
  * budget, the `OFF` switch, the two desk tools, the `/desk` page and `/data/desk/*` - P0 holds the
  * ledger, the sleep watch and `GET /data/desk/status`, and P1 adds the `OFF` switch and the Desk
  * panel's `POST /data/desk/pause` (the panel itself is client/desk-panel.js, in the chat page rather
- * than a `/desk` page), mounts the two desk tools and the desk's write guard, which src/desk-tools.ts
+ * than a `/desk` page), mounts the two desk tools and the desk's guard, which src/desk-tools.ts
  * defines, and runs the Telegram bridge, src/telegram.ts.
  * Of the ledger's files (§5.7) this module keeps `events.jsonl` and `OFF`; {@link appendRecord} is
  * the append path for the others, the bridge's `telegram.jsonl` among them. `events.jsonl`
@@ -48,7 +48,7 @@
  * {@link installDesk} mounts it all on a booted face. The status route ({@link deskStatus}:
  * pid, version, uptime, this run's gaps, the ledger's runs, the pause in force, the desk
  * conversation, today's desk turns and their tokens, and the Telegram bridge) and the pause route
- * are mounted always, and so are the desk tools and the write guard, so a face with the desk off -
+ * are mounted always, and so are the desk tools and the guard, so a face with the desk off -
  * a second face beside the service, §5.2 - still answers, with `desk.enabled: false`, and an old
  * desk conversation it opens keeps its tools and its guard; the `boot` event, the watch, the desk
  * conversation's owner (src/desk-conversation.ts), the bridge and the `shutdown` event only when
@@ -63,7 +63,7 @@ import { withFileLock, writeFileAtomic } from "@deepseek-ai/dsh-atomic-write";
 import { isTrustedDataRequest } from "./data.ts";
 import { createDeskConversation, type DeskConversation, type DeskConversationCtxLike } from "./desk-conversation.ts";
 import type { DeskClock, DeskSessionDeps } from "./desk-session.ts";
-import { deskToolDefinitions, installDeskTools, installDeskWriteGuard, type DeskWriteGuardCtxLike } from "./desk-tools.ts";
+import { deskToolDefinitions, installDeskGuard, installDeskTools, type DeskGuardCtxLike } from "./desk-tools.ts";
 import { etDate, etDayStart, etTime } from "./et.ts";
 import { fencedGet, fencedPost, HttpError } from "./http.ts";
 import type { QuoteHub } from "./quotes.ts";
@@ -836,10 +836,12 @@ export interface DeskHandle {
  * `desk_quotes` over `hub` and `desk_state` over {@link deskStatus} with the status route's own
  * deps, so the tool and the route agree - but for `runs`, which the tool cuts to the last ten and
  * counts in `runsInLedger` - and a face with the desk off still opens an old desk conversation
- * with its tools. Given `ctx`, hub or none and whatever `enabled` says, the desk's write guard
- * (src/desk-tools.ts `installDeskWriteGuard`) is installed too, its listener and its backstop,
- * anchored on `root`: every desk agent's `write`, `edit` or `str_replace_editor` of an instruction
- * file is denied before it runs - and, without a `root`, every desk write. With the desk on, `ready`
+ * with its tools. Given `ctx`, hub or none and whatever `enabled` says, the desk's guard
+ * (src/desk-tools.ts `installDeskGuard`) is installed too, its listener and its backstop,
+ * anchored on `root`, its secrets taken from `process.env` now: every desk agent's `write`, `edit`
+ * or `str_replace_editor` of an instruction file, its read outside `root` or of a key file, and any
+ * call of its that carries a secret are denied before they run - and, without a `root`, every desk
+ * write and read. With the desk on, `ready`
  * is the `boot` event's append - stamped `bootedAt`, which is
  * `now()` at this call and the status's uptime origin - and the sleep watch starts at once, writing
  * into the ledger. Given `root`, `route`, `sessionCtx` and `installModelSelection`
@@ -866,7 +868,7 @@ export interface DeskHandle {
  *   (default `Date.now`) and `version` (default {@link DSH_PIN}), for the events and the status;
  *   `watch`, the sleep watch's clock and timer seams, for tests - not its `append`, which is
  *   always the ledger's; `ctx`, the booted ROOT context, and `hub`, the quote hub main.ts owns,
- *   which the desk tools need both of - the write guard needs `ctx`, and judges below `root`;
+ *   which the desk tools need both of - the guard needs `ctx`, and judges below `root`;
  *   `root`, the repository whose `desk/journal/` the desk session runs in, `route`, its model route
  *   (src/desk-session.ts `resolveDeskRoute`), `sessionCtx`, the booted ROOT context as the
  *   conversation reads it, and
@@ -885,7 +887,7 @@ export function installDesk(
     now?: () => number;
     version?: string;
     watch?: Partial<Omit<AsleepWatchOptions, "append">>;
-    ctx?: DeskWriteGuardCtxLike;
+    ctx?: DeskGuardCtxLike;
     hub?: Pick<QuoteHub, "snapshot">;
     root?: string;
     route?: { provider: string; model: string };
@@ -905,7 +907,7 @@ export function installDesk(
   const telegram = (): TelegramStatus => bridge?.status() ?? { configured: deps.telegram !== undefined, polling: false, dropped: 0, queued: 0 };
   const status = { home, bootedAt, enabled, now, version, telegram };
   registerDeskRoutes(webServer, status);
-  const removeGuard = deps.ctx === undefined ? async () => {} : installDeskWriteGuard(deps.ctx, deps.root);
+  const removeGuard = deps.ctx === undefined ? async () => {} : installDeskGuard(deps.ctx, deps.root);
   const removeTools = deps.ctx === undefined || deps.hub === undefined ? () => {} : installDeskTools(deps.ctx, deskToolDefinitions({
     hub: deps.hub,
     readState: () => deskStatus(status),

@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { OFF_FILE, deskDir, deskStatusLines, type DeskStatus } from "../src/desk.ts";
 import type { DeskConversation, DeskOutlet, PostResult } from "../src/desk-conversation.ts";
 import type { DeskClock } from "../src/desk-session.ts";
+import { deskSecrets } from "../src/desk-tools.ts";
 import {
   installTelegramBridge, parseCommand, splitMessage, telegramConfigFromEnv, type BridgeHandle,
 } from "../src/telegram.ts";
@@ -218,8 +219,12 @@ interface Rig {
 }
 
 /** A bridge over a fake Bot API, a fake conversation and a manual clock at {@link NOW}; every part can be given,
- * and `pollTimeoutS`, the long poll - a test that moves the clock past a held poll's 65 s gives a longer one. */
-async function rig(label: string, o: Partial<Omit<Rig, "bridge" | "lines">> & { status?: () => Promise<DeskStatus>; pollTimeoutS?: number } = {}): Promise<Rig> {
+ * and `pollTimeoutS`, the long poll - a test that moves the clock past a held poll's 65 s gives a longer one - and
+ * `secrets`, what the bridge redacts beside the token (none unless given: never this process's environment). */
+async function rig(
+  label: string,
+  o: Partial<Omit<Rig, "bridge" | "lines">> & { status?: () => Promise<DeskStatus>; pollTimeoutS?: number; secrets?: readonly string[] } = {},
+): Promise<Rig> {
   const home = o.home ?? await freshHome(label);
   const api = o.api ?? new FakeBotApi();
   const clock = o.clock ?? new Clock(NOW);
@@ -227,7 +232,7 @@ async function rig(label: string, o: Partial<Omit<Rig, "bridge" | "lines">> & { 
   const lines: string[] = [];
   const bridge = installTelegramBridge({
     config: { token: TOKEN, operatorId: OPERATOR, apiBase: API, fetch: api.fetch, clock, ...(o.pollTimeoutS === undefined ? {} : { pollTimeoutS: o.pollTimeoutS }) },
-    home, conversation, status: o.status ?? (async () => STATUS), log: (line) => { lines.push(line); },
+    home, conversation, status: o.status ?? (async () => STATUS), log: (line) => { lines.push(line); }, secrets: o.secrets ?? [],
   });
   return { home, api, clock, conversation, lines, bridge };
 }
@@ -1077,6 +1082,53 @@ test("the token is only ever in a request's path: no log line, record, file or s
       assert.equal(call.url, `${API}/bot${TOKEN}/${call.method}`);
       assert.equal(JSON.stringify(call.body).includes(TOKEN), false, "never in a request's body");
     }
+  } finally {
+    await r.bridge.dispose();
+  }
+});
+
+test("every secret value is redacted from sends, queued text and log lines; the token keeps <token>", async () => {
+  /* Made-up secrets as the face's environment would hold them (src/desk-tools.ts `deskSecrets`): the token is one
+   * too, and still reads <token>; a secret that wraps it goes whole. */
+  const SECRET = "made-up-alpaca-secret-0001";
+  const WRAPPED = `wrapped-${TOKEN}`;
+  const secrets = deskSecrets({ APCA_API_SECRET_KEY: SECRET, TELEGRAM_BOT_TOKEN: TOKEN, WRAPPED_TOKEN: WRAPPED });
+  assert.deepEqual(secrets, [SECRET, TOKEN, WRAPPED]);
+  /* An outbox an earlier run left with a secret in it, and Telegram down: the leftover stays queued, and when a new
+   * message is queued behind it the outbox is written whole - the leftover redacted as it was read back. */
+  const home = await freshHome("secrets");
+  await putFile(home, "outbox.json", JSON.stringify([{ t: "2026-10-20T18:29:00.000Z", text: `left over: ${SECRET}` }]));
+  const api = new FakeBotApi();
+  api.send = () => ({ status: 503, description: "Service Unavailable" });
+  const r = await rig("secrets", { home, secrets, api });
+  try {
+    await polled(r, 1);
+    assert.deepEqual(await r.bridge.send(`queued: ${SECRET}`), { queued: true });
+    assert.deepEqual(JSON.parse(await fileText(r.home, "outbox.json")), [
+      { t: "2026-10-20T18:29:00.000Z", text: "left over: <secret>" },
+      { t: "2026-10-20T18:30:00.000Z", text: "queued: <secret>" },
+    ], "both queued texts are written redacted, the earlier run's included");
+    /* Telegram back: both go first, redacted; then a reply carrying the secret, the token and a secret that wraps it. */
+    r.api.send = () => undefined;
+    assert.deepEqual(await r.bridge.send(`the key is ${SECRET}; the bot is ${TOKEN}; both are ${WRAPPED}`), { sent: [503] });
+    assert.deepEqual(r.api.texts(), ["left over: <secret>", "queued: <secret>", "the key is <secret>; the bot is <token>; both are <secret>"]);
+    /* A send that fails is queued redacted, and the line that says so is redacted too. */
+    r.api.send = () => ({ status: 503, description: `Service Unavailable: upstream echoed ${SECRET}` });
+    assert.deepEqual(await r.bridge.send(`again: ${SECRET}`), { queued: true });
+    assert.deepEqual(JSON.parse(await fileText(r.home, "outbox.json")), [{ t: "2026-10-20T18:30:00.000Z", text: "again: <secret>" }]);
+    assert.ok(r.lines.some((l) => l.includes("upstream echoed <secret>")), `the failure's line says <secret>; saw ${JSON.stringify(r.lines)}`);
+    r.api.send = () => undefined;
+    assert.deepEqual(await r.bridge.send("after"), { sent: [505] });
+    assert.deepEqual(r.api.texts().slice(3), ["again: <secret>", "after"], "the queued one went first, redacted");
+    const everything = [
+      ...r.lines,
+      JSON.stringify(await records(r.home)),
+      await fileText(r.home, "outbox.json"),
+      JSON.stringify(r.api.sent),
+      JSON.stringify(r.bridge.status()),
+    ].join("\n");
+    assert.equal(everything.includes(SECRET), false, "the secret is in no send, queued text, line, record or status");
+    assert.equal(everything.includes(TOKEN), false, "nor is the token");
   } finally {
     await r.bridge.dispose();
   }

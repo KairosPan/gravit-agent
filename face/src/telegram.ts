@@ -43,11 +43,18 @@
  * THE TOKEN appears in one place: the path of each request's URL (`/bot<token>/<method>`). Every line this
  * module writes, every reason and description it records, every error it rejects with and every text it
  * sends or queues passes through a redactor first, so no log line, record, file or status field carries it.
+ * The same redactor takes out every SECRET in the face's environment (src/desk-tools.ts `deskSecrets`, taken
+ * at install): a desk turn's answer, or a line, that carries the model's key, Alpaca's or any other reaches the
+ * operator's chat - and Telegram's cloud - as `<secret>`; the token stays `<token>`. It is the second line
+ * behind the desk guard's secret check: whatever a turn learned, the phone never carries it out. A text is
+ * redacted before it is sent or queued, and the outbox is redacted again as it is read back, so one an earlier
+ * run wrote is too.
  *
  * MODULE WEIGHT. src/desk.ts loads this module on first use (`installDesk`, with the desk on and Telegram
  * configured), so the pause switch and scripts/service.ts, which import src/desk.ts, never load it; the face
  * itself (src/main.ts) imports it for {@link telegramConfigFromEnv}. It imports src/desk.ts's values
- * directly; the edge back is that dynamic import, so there is no static cycle.
+ * directly; the edge back is that dynamic import, so there is no static cycle. It imports src/desk-tools.ts,
+ * which src/desk.ts loads already, for the secrets.
  * @module
  */
 import { readFile } from "node:fs/promises";
@@ -56,6 +63,7 @@ import { writeFileAtomic } from "@deepseek-ai/dsh-atomic-write";
 import { appendRecord, deskDir, deskStatusLines, deskTime, parseDuration, writeOff, type DeskStatus, type TelegramStatus } from "./desk.ts";
 import type { DeskConversation, DeskOutlet, PostResult } from "./desk-conversation.ts";
 import type { DeskClock } from "./desk-session.ts";
+import { deskSecrets, secretSpellings } from "./desk-tools.ts";
 
 /** Diagnostic label, the one every `${BIN}:`-prefixed line in the face uses; the bridge's lines add `telegram:`. */
 const BIN = "gravit-face";
@@ -194,13 +202,15 @@ export function parseCommand(text: string): Command | undefined {
 
 /** What {@link installTelegramBridge} needs: the configuration; the harness home, whose desk directory
  * holds the bridge's files; the desk conversation, as the bridge uses it; `status`, what `/status` reads
- * (src/desk.ts `deskStatus`); `log`, where a line goes (stderr). */
+ * (src/desk.ts `deskStatus`); `log`, where a line goes (stderr); `secrets`, the values redacted as `<secret>`
+ * beside the token (src/desk-tools.ts `deskSecrets` of `process.env`, taken at install, unless given). */
 export interface BridgeDeps {
   config: TelegramConfig;
   home: string;
   conversation: Pick<DeskConversation, "post" | "renew" | "stop" | "setOutlet">;
   status: () => Promise<DeskStatus>;
   log?: (line: string) => void;
+  secrets?: readonly string[];
 }
 
 /** The running bridge. `status` is what the desk's status reports of it; `send` sends `text` to the
@@ -263,10 +273,17 @@ const isBlocked = (err: unknown): boolean => err instanceof BotApiError && err.s
 /** Another poller holds the token, or a webhook is set (409). */
 const isConflict = (err: unknown): err is BotApiError => err instanceof BotApiError && err.status === 409;
 
-/** Every spelling of `token` a line could carry - as it is and as a URL encodes it - made `<token>`. */
-function redactorOf(token: string): (text: string) => string {
-  const spellings = [...new Set([token, encodeURIComponent(token)])];
-  return (text) => spellings.reduce((out, spelling) => out.split(spelling).join("<token>"), text);
+/** Every spelling of `token` and of each of `secrets` a line could carry - as it is, as JSON escapes it, as a URL
+ * encodes it (src/desk-tools.ts `secretSpellings`) - made `<token>` and `<secret>`, the token's label winning where a
+ * spelling is both. The longest spelling goes first, so a secret that holds another is taken out whole. */
+function redactorOf(token: string, secrets: readonly string[]): (text: string) => string {
+  const labels = new Map<string, string>();
+  for (const spelling of secretSpellings(token)) labels.set(spelling, "<token>");
+  for (const secret of secrets) {
+    for (const spelling of secretSpellings(secret)) if (!labels.has(spelling)) labels.set(spelling, "<secret>");
+  }
+  const order = [...labels].sort(([a], [b]) => b.length - a.length);
+  return (text) => order.reduce((out, [spelling, label]) => out.split(spelling).join(label), text);
 }
 
 /** `outbox.json`'s text as entries - those that are `{ t, text }`, `t` a time, with a whole-number
@@ -329,7 +346,7 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
   const fetchImpl = config.fetch ?? fetch;
   const pollTimeoutS = config.pollTimeoutS ?? POLL_TIMEOUT_S;
   const clock = config.clock ?? defaultClock;
-  const redact = redactorOf(token);
+  const redact = redactorOf(token, deps.secrets ?? deskSecrets(process.env));
   const sink = deps.log ?? ((line: string): void => { console.error(line); });
   const log = (line: string): void => { sink(redact(line)); };
   const stamp = (): string => new Date(clock.now()).toISOString();
@@ -546,7 +563,8 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
       return;
     }
     if (read.skipped > 0) log(`${BIN}: telegram: ${read.skipped} entr${read.skipped === 1 ? "y" : "ies"} in ${outboxPath} are not messages and are not sent`);
-    outbox = read.entries;
+    /* an earlier run may have queued what this one redacts: the next write of the outbox holds it redacted */
+    outbox = read.entries.map((entry) => ({ ...entry, text: redact(entry.text) }));
   };
 
   const persistOffset = async (): Promise<void> => {

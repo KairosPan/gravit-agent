@@ -23,26 +23,36 @@
  * one (dsh/profile/desk.md: `IEX 15:21:03 ET`), so the model never converts a UTC time itself; its value
  * keeps the hub's own fields, times in UTC. `desk_state` renders its value as JSON.
  *
- * THE WRITE GUARD. This module also holds the desk's write guard ({@link installDeskWriteGuard}): one root
- * `tools/pre-execute` listener, and a `tools.guard` behind it that no listener can talk out of a denial, that
- * deny a desk agent's `write`, `edit` or `str_replace_editor` (a `view` excepted) whose path names an
- * instruction file, a project root or a skill root (src/desk-names.ts `FENCE_NAMES`) at any depth below the
- * repository root, or below a path's common ancestor with it - and every write from a desk whose cwd sits under
- * one - before the write, so a desk turn cannot steer the rest of itself. src/desk.ts `installDesk` installs it
- * beside the tools, anchored on its `root`.
+ * THE GUARD. This module also holds the desk's guard ({@link installDeskGuard}): one root `tools/pre-execute`
+ * listener, and a `tools.guard` behind it that no listener can talk out of a denial, that judge every call a desk
+ * agent makes, in three checks, before it runs:
+ * - the write check ({@link deskWriteDecision}) denies a `write`, `edit` or `str_replace_editor` (a `view`
+ *   excepted) whose path names an instruction file, a project root or a skill root (src/desk-names.ts
+ *   `FENCE_NAMES`) at any depth below the repository root, or below a path's common ancestor with it - and every
+ *   write from a desk whose cwd sits under one - so a desk turn cannot steer the rest of itself;
+ * - the read check ({@link deskReadDecision}) denies a `read`, `read_image`, `grep`, `glob` or `str_replace_editor`
+ *   (every command) that reaches outside the repository - after the volume's own realpath, so a symlink cannot
+ *   smuggle a path out - or names a key file (`.env`, `.env.<anything>`, `.git`), or searches dot-files; dsh's
+ *   sandbox lets every read through, and what a desk turn reads goes to DeepSeek in the tool result;
+ * - the secret check ({@link deskSecretDecision}) denies any call, of any tool, whose arguments carry the value of
+ *   a key, password, secret or token in the face's environment ({@link deskSecrets}): to DeepSeek's search, to an
+ *   MCP server, or to a file.
+ * src/desk.ts `installDesk` installs it beside the tools, anchored on its `root`. The Telegram bridge
+ * (src/telegram.ts) is the second line on the way out: it redacts the same secrets from everything it sends.
  *
- * MODULE WEIGHT: the preset id and the fence names come from src/desk-names.ts, a leaf, not from
+ * MODULE WEIGHT: the preset id, the fence names and their fold come from src/desk-names.ts, a leaf, not from
  * src/desk-preset.ts or src/desk-session.ts. This module is loaded wherever src/desk.ts is - by `npm run
  * desk` and scripts/service.ts too - and src/desk-preset.ts would bring src/roles.ts, src/bots.ts and
- * js-yaml with it. The guard adds `node:path`, which src/desk.ts loads already.
+ * js-yaml with it. The guard adds `node:path` and `node:fs`, built in, which the face loads already.
  *
  * Both tools follow the call's cancellation: a cancelled call settles at once. What it started runs on - the
  * hub's refresh is shared with every other reader and keeps its own deadline, so it is not one call's
  * to stop.
  * @module
  */
-import { isAbsolute, resolve } from "node:path";
-import { DESK_PRESET, fenceNameOf, type FenceName } from "./desk-names.ts";
+import { realpathSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { DESK_PRESET, fenceNameOf, foldName, type FenceName } from "./desk-names.ts";
 import type { DeskStatus } from "./desk.ts";
 import { etClock, etDate } from "./et.ts";
 import { HttpError } from "./http.ts";
@@ -388,10 +398,10 @@ export function installDeskTools(
   };
 }
 
-/* ---------- the write guard ---------- */
+/* ---------- the guard's write check ---------- */
 
 /** The desk's tools that write a file: of `DESK_ALLOW` (src/desk-preset.ts), exactly these three. Every other
- * name there reads (tests/desk-guard.test.ts holds the list, so a name added there is judged here first). */
+ * name there writes nothing (tests/desk-guard.test.ts holds the list, so a name added there is judged here first). */
 export const DESK_WRITE_TOOLS = Object.freeze(["write", "edit", "str_replace_editor"] as const);
 
 /** One of {@link DESK_WRITE_TOOLS}. */
@@ -414,11 +424,14 @@ export const DESK_WRITE_PATH_ARGS: Readonly<Record<DeskWriteTool, readonly strin
   str_replace_editor: Object.freeze(["path"]),
 });
 
-/** The guard's refusal: dsh-tools' deny decision, its reason what the model reads as the call's error. */
-export interface DeskWriteDeny {
+/** The guard's refusal, of a write, a read or a secret alike: dsh-tools' deny decision, its reason what the model
+ * reads as the call's error. */
+export interface DeskDeny {
   kind: "deny";
   reason: string;
 }
+
+const deny = (reason: string): DeskDeny => ({ kind: "deny", reason });
 
 /** The refusal of a write whose path the guard could not read. */
 const UNCHECKED = "the desk could not check this write's path; nothing was written";
@@ -482,7 +495,7 @@ function fencedName(names: readonly string[]): FenceName | undefined {
  * @param cwd - the calling session's cwd, which a relative path is placed against.
  * @param root - the repository root (src/desk.ts `installDesk`'s `root`), which the names are judged below.
  */
-export function deskWriteDecision(toolName: string, args: unknown, cwd: string, root: string): DeskWriteDeny | null {
+export function deskWriteDecision(toolName: string, args: unknown, cwd: string, root: string): DeskDeny | null {
   if (!isDeskWriteTool(toolName)) return null;
   if (args === null || typeof args !== "object") return { kind: "deny", reason: UNCHECKED };
   if (toolName === "str_replace_editor" && (args as { command?: unknown }).command === "view") return null;
@@ -500,9 +513,273 @@ export function deskWriteDecision(toolName: string, args: unknown, cwd: string, 
   return null;
 }
 
+/* ---------- the guard's read check ---------- */
+
+/** The desk's tools that read a file, list a directory or search one: of `DESK_ALLOW` (src/desk-preset.ts), exactly
+ * these five - `str_replace_editor` with every command, `view` included, so its writing commands meet both checks.
+ * Every other name there names no path, and the secret check alone judges it (tests/desk-guard.test.ts holds the
+ * list, so a name added there is weighed here first). */
+export const DESK_READ_TOOLS = Object.freeze(["read", "read_image", "grep", "glob", "str_replace_editor"] as const);
+
+/** One of {@link DESK_READ_TOOLS}. */
+export type DeskReadTool = (typeof DESK_READ_TOOLS)[number];
+
+/**
+ * The argument of each of {@link DESK_READ_TOOLS} that names a path, as the installed dsh 0.2.0-rc.2 tools declare it
+ * (tests/desk-smoke.test.ts pins every parameter each takes, off a real tree's schemas):
+ * - `read` and `read_image` (dsh-tool-fs): `file_path`, required. dsh-fs-local places it against the calling
+ *   session's cwd - a path with a `..` in it as spelled, for the volume to walk, any other one normalized - and
+ *   realpaths it;
+ * - `grep` and `glob` (dsh-tool-fs-search): `path`, optional. Ripgrep runs in the session's cwd with the path behind
+ *   `--`, so a relative one is the cwd's and none at all searches the cwd itself ({@link DESK_READ_CWD_TOOLS});
+ * - `str_replace_editor` (dsh-tool-str-replace-editor): `path`, required and absolute, for every command.
+ *
+ * None of them expands `~`: no shell stands between the model and a tool.
+ */
+export const DESK_READ_PATH_ARGS: Readonly<Record<DeskReadTool, readonly string[]>> = Object.freeze({
+  read: Object.freeze(["file_path"]),
+  read_image: Object.freeze(["file_path"]),
+  grep: Object.freeze(["path"]),
+  glob: Object.freeze(["path"]),
+  str_replace_editor: Object.freeze(["path"]),
+});
+
+/** The read tools whose path may be left out: ripgrep's two, which then search the session's cwd. */
+export const DESK_READ_CWD_TOOLS = Object.freeze(["grep", "glob"] as const);
+
+/** The argument each ripgrep tool hands ripgrep as `--glob=<value>`: `grep`'s `include`, optional, and `glob`'s
+ * `pattern`, required. */
+export const DESK_READ_GLOB_ARGS = Object.freeze({ grep: "include", glob: "pattern" } as const);
+
+/** The read check's refusals. */
+const READ_UNCHECKED = "the desk could not check this read's path; nothing was read";
+const DOT_FILES = "the desk never searches dot-files";
+const outsideRefusal = (path: string): string => `the desk reads only inside the repository; ${path} is outside it`;
+const keyRefusal = (name: string): string => `the desk never reads ${name}: it can hold a key`;
+
+const isDeskReadTool = (name: unknown): name is DeskReadTool => (DESK_READ_TOOLS as readonly unknown[]).includes(name);
+const searchesCwd = (name: DeskReadTool): boolean => (DESK_READ_CWD_TOOLS as readonly string[]).includes(name);
+
+/** A `..` segment at either separator: dsh-fs-local's own test for a path it leaves as spelled. */
+const PARENT_SEGMENT = /(?:^|[\\/])\.\.(?:[\\/]|$)/;
+
+/** Whether `name` can hold a key: `.env`, `.env.<anything>` or `.git`, compared as the volume compares names
+ * (src/desk-names.ts `foldName`). */
+function isKeyName(name: string): boolean {
+  const folded = foldName(name);
+  return folded === ".env" || folded.startsWith(".env.") || folded === ".git";
+}
+
+/**
+ * Where `path` really is: the realpath of its deepest existing ancestor - the path itself when it exists - with the
+ * names below that ancestor appended, a `..` among them collapsed, since nothing on the volume can follow it.
+ * `realpathSync.native` asks the volume, so a symlink anywhere on the way, and a `..` after one, is followed as the
+ * volume follows it - Node's own `realpathSync` collapses a `..` first, which the volume does not - and an existing
+ * name comes back in its on-disk case. Synchronous. Throws when an ancestor cannot be resolved for any reason but its
+ * absence: a symlink loop, a permission, a NUL in the path.
+ */
+function realTarget(path: string): string {
+  const missing: string[] = [];
+  let at = path;
+  for (;;) {
+    try {
+      const real = realpathSync.native(at);
+      return missing.length === 0 ? real : join(real, ...missing);
+    } catch (error) {
+      const code = (error as { code?: unknown } | null)?.code;
+      if (code !== "ENOENT" && code !== "ENOTDIR") throw error;
+      const parent = dirname(at);
+      if (parent === at) throw error;
+      missing.unshift(basename(at));
+      at = parent;
+    }
+  }
+}
+
+/** Whether `target` is `root` or lies below it; both real. */
+function within(root: string, target: string): boolean {
+  const rel = relative(root, target);
+  return rel === "" || (!isAbsolute(rel) && rel.split(sep)[0] !== "..");
+}
+
+/** The names `target` reaches below `root`, both real: none for the root itself. */
+const namesBelow = (root: string, target: string): string[] => relative(root, target).split(sep).filter((name) => name !== "");
+
+/**
+ * One path's verdict, by {@link deskReadDecision}'s rules: outside the repository, a key name, or `null`.
+ * @param path - the path as the model spelled it, or the cwd ripgrep searches.
+ * @param cwd - the session's cwd, absolute.
+ * @param base - the root's names, as given.
+ * @param realRoot - the root's realpath.
+ * @throws when the volume cannot resolve the path.
+ */
+function judgeReadPath(path: string, cwd: string, base: readonly string[], realRoot: string): DeskDeny | null {
+  if (!isAbsolute(path) && path.startsWith("~")) return deny(outsideRefusal(path));
+  const placed = resolve(cwd, path);
+  const spelled = isAbsolute(path) ? path : `${cwd}${sep}${path}`;
+  const walked = PARENT_SEGMENT.test(spelled) ? spelled : placed;
+  const physical = realTarget(walked);
+  const lexical = walked === placed ? physical : realTarget(placed);
+  if (!within(realRoot, physical) || !within(realRoot, lexical)) return deny(outsideRefusal(path));
+  const names = [
+    ...(isAbsolute(path) ? below(namesOf(path), base) : namesOf(path)),
+    ...namesBelow(realRoot, physical),
+    ...namesBelow(realRoot, lexical),
+  ];
+  const key = names.find(isKeyName);
+  return key === undefined ? null : deny(keyRefusal(key));
+}
+
+/** A glob's segments, split at `/`, the one separator ripgrep's globs take, leaving out the empty ones. */
+const globSegments = (glob: string): string[] => glob.split("/").filter((segment) => segment !== "");
+
+/** Whether a glob segment is led by a dot, a backslash-escaped one included: it matches only names that begin with one. */
+const dotLed = (segment: string): boolean => segment.startsWith(".") || segment.startsWith("\\.");
+
+/** Whether a glob segment can match a name that begins with a dot: one led by a dot, or by a wildcard - `*`, `?`, a
+ * class `[...]` or an alternation `{...}` - each of which ripgrep lets match a leading dot. */
+const mayMatchDotName = (segment: string): boolean => dotLed(segment) || "*?[{".includes(segment.charAt(0));
+
+/**
+ * The read check's decision for one call: a deny, or `null` to leave the call alone. Pure, but for the volume's
+ * realpath of the root and of each path's deepest existing ancestor, made synchronously.
+ *
+ * `null` for any tool that is not one of {@link DESK_READ_TOOLS}. For one that is, each of its
+ * {@link DESK_READ_PATH_ARGS} - or, for `grep` and `glob` given none, the cwd ripgrep then searches - is judged against
+ * `root`, the repository the face runs from, never against the session's cwd:
+ * - a path spelled from `~` names a home directory, as a shell would take it - dsh never expands it, and would read
+ *   `<cwd>/~/...` - so it is outside the repository;
+ * - the path is placed as the tool places it - against the cwd, a `..` left for the volume to walk, so through a
+ *   symlink before it - and as `path.resolve` places it, `..` collapsed; each placement is realpathed
+ *   ({@link realTarget}), and when either lies outside the root's own realpath the call is denied with
+ *   `the desk reads only inside the repository; <path> is outside it`, `<path>` as spelled. That is the harness home,
+ *   `~/.ssh`, `~/.config` and every other checkout, however they are reached;
+ * - inside it, when a name the path spells - every name of a relative one; those below its common ancestor with the
+ *   root of an absolute one, as the write check counts them - or a name either placement reaches below the root
+ *   case-folds to `.env`, `.env.<anything>` or `.git`, the call is denied with `the desk never reads <name>: it can
+ *   hold a key`, `<name>` as found. A symlink with an innocent name and a key file behind it is found by its target.
+ *
+ * Then the glob the tool hands ripgrep as `--glob=<value>` ({@link DESK_READ_GLOB_ARGS}) is judged segment by segment,
+ * split at `/`. Ripgrep skips hidden files and directories by default, but a `--glob` that matches one lifts the skip,
+ * and its `*`, `?`, `[...]` and `{...}` all match a leading dot. Measured with rg 15.0.0, the binary dsh packages, on a
+ * scratch tree: with grep's argv (`--glob` and no `--hidden`), `*.md` searched `.hidden.md`; `*.alpaca` and
+ * `*.{md,alpaca}` searched `.env.alpaca`; `sub/*` searched `sub/.env`; `*env*`, `?env*` and `[.]env*` searched
+ * `.env.alpaca` and `sub/.env`; `*.Upper` searched `.ENV.Upper`. glob's argv adds `--hidden --no-ignore`, so a
+ * doublestar `*.md` pattern listed `.hidden.md` and `.dsh/x.md` - by name, never their contents. So:
+ * - `grep`'s `include`, which reads contents: a segment led by a dot (an escaped one, `\.`, too) or by `*`, `?`, `[`
+ *   or `{` is denied with `the desk never searches dot-files` - `*.md` included, since no rule that lets `*.md` through
+ *   can stop `*.alpaca`. A literal-led include (`notes*.md`) goes, and so does a `grep` with none, which ripgrep keeps
+ *   off hidden files, narrowed by its `path`;
+ * - `glob`'s `pattern`, which lists names only: a segment led by a dot is denied, so `.*` is, and so is a doublestar
+ *   `.env*`, and a doublestar `*.md` goes.
+ *
+ * It fails closed: a read tool whose arguments are no object; whose required path is missing or not a string; whose
+ * `grep` or `glob` path, or `grep` include, is there but not a string; or whose `glob` pattern is missing or not a
+ * string; a `cwd` or `root` that is not a string; and a path, or a root, the volume cannot resolve - a loop, a NUL -
+ * is denied with `the desk could not check this read's path; nothing was read`. A path's refusal comes before its
+ * glob's.
+ * @param toolName - the call's tool name (`exec.name`).
+ * @param args - the call's arguments (`exec.arguments`).
+ * @param cwd - the calling session's cwd, which a relative path is placed against and ripgrep runs in.
+ * @param root - the repository root (src/desk.ts `installDesk`'s `root`), which every read must stay inside.
+ */
+export function deskReadDecision(toolName: string, args: unknown, cwd: string, root: string): DeskDeny | null {
+  if (!isDeskReadTool(toolName)) return null;
+  if (args === null || typeof args !== "object" || typeof cwd !== "string" || typeof root !== "string") return deny(READ_UNCHECKED);
+  const given = args as Record<string, unknown>;
+  try {
+    const at = isAbsolute(cwd) ? cwd : resolve(cwd);
+    const realRoot = realTarget(resolve(root));
+    const base = namesOf(resolve(root));
+    for (const arg of DESK_READ_PATH_ARGS[toolName]) {
+      const path = given[arg];
+      if (path !== undefined && typeof path !== "string") return deny(READ_UNCHECKED);
+      if (path === undefined && !searchesCwd(toolName)) return deny(READ_UNCHECKED);
+      const verdict = judgeReadPath(path ?? at, at, base, realRoot);
+      if (verdict !== null) return verdict;
+    }
+  } catch {
+    return deny(READ_UNCHECKED);
+  }
+  if (toolName !== "grep" && toolName !== "glob") return null;
+  const glob = given[DESK_READ_GLOB_ARGS[toolName]];
+  if (glob === undefined && toolName === "grep") return null;
+  if (typeof glob !== "string") return deny(READ_UNCHECKED);
+  return globSegments(glob).some(toolName === "grep" ? mayMatchDotName : dotLed) ? deny(DOT_FILES) : null;
+}
+
+/* ---------- the guard's secret check ---------- */
+
+/** The names whose values are secrets: any that names a key, a password, a secret or a token. */
+const SECRET_NAME = /KEY|PASSWORD|SECRET|TOKEN/i;
+/** The fewest characters a secret has, trimmed: a shorter value turns up by chance too easily. */
+const SECRET_MIN_LENGTH = 8;
+
+/**
+ * The secrets in `env`: the value of every variable whose name matches `/KEY|PASSWORD|SECRET|TOKEN/i` and whose value,
+ * trimmed, is at least 8 characters - trimmed, so a blank value is none and a padded one is looked for as it is used
+ * - each once, in the order first found. The face takes them once, at install, from `process.env`, which by then
+ * holds `$DSH_HOME/.env` (src/desk.ts `installDesk`, which installs the guard, and src/telegram.ts): the model's key,
+ * Alpaca's pair, the bot's token.
+ * @param env - the environment.
+ */
+export function deskSecrets(env: NodeJS.ProcessEnv): string[] {
+  const found = new Set<string>();
+  for (const [name, value] of Object.entries(env)) {
+    if (typeof value !== "string" || !SECRET_NAME.test(name)) continue;
+    const secret = value.trim();
+    if (secret.length >= SECRET_MIN_LENGTH) found.add(secret);
+  }
+  return [...found];
+}
+
+/**
+ * Every spelling a secret travels in: as it is, as JSON writes it inside a string - a quote or a backslash escaped -
+ * and as a URL encodes it; each once, none empty.
+ * @param value - the secret.
+ */
+export function secretSpellings(value: string): string[] {
+  let encoded: string[] = [];
+  try {
+    encoded = [encodeURIComponent(value)];
+  } catch {
+    /* a lone surrogate, which no URL can carry */
+  }
+  return [...new Set([value, JSON.stringify(value).slice(1, -1), ...encoded])].filter((spelling) => spelling !== "");
+}
+
+/** The secret check's refusals. */
+const CARRIES_SECRET = "the desk never sends a secret: this call carries one";
+const SECRET_UNCHECKED = "the desk could not check this call for a secret; nothing was sent";
+
+/**
+ * The secret check's decision for one call: a deny, or `null` to leave the call alone. Pure. It judges every tool
+ * alike - the search, an MCP tool, a write, the desk's own tools - since any argument can carry a value out: to
+ * DeepSeek's search as a query, to Alpaca as a symbol, to a file the next turn reads back. The call is denied with
+ * `the desk never sends a secret: this call carries one` when its arguments, as JSON, hold any spelling of any of
+ * `secrets` ({@link secretSpellings}), and with `the desk could not check this call for a secret; nothing was sent`
+ * when JSON cannot write them. Arguments JSON writes as nothing - none at all - carry nothing.
+ * @param args - the call's arguments (`exec.arguments`).
+ * @param secrets - the values to look for: {@link deskSecrets}'s.
+ */
+export function deskSecretDecision(args: unknown, secrets: readonly string[]): DeskDeny | null {
+  if (secrets.length === 0) return null;
+  let json: string | undefined;
+  try {
+    json = JSON.stringify(args);
+  } catch {
+    return deny(SECRET_UNCHECKED);
+  }
+  if (json === undefined) return null;
+  const text = json;
+  return secrets.some((secret) => secretSpellings(secret).some((spelling) => text.includes(spelling))) ? deny(CARRIES_SECRET) : null;
+}
+
+/* ---------- the guard ---------- */
+
 /** A `tools/pre-execute` decision as the guard sees one: dsh-tools' `PreToolDecision`, stated structurally as
  * src/orders.ts states its own, `deny.info` spelled as dsh's `ToolErrorInfo` so that the booted root context
- * is a {@link DeskWriteGuardCtxLike}. The guard makes only the deny; any other it hands on from `next()`. */
+ * is a {@link DeskGuardCtxLike}. The guard makes only the deny; any other it hands on from `next()`. */
 export type DeskPreDecision =
   | { kind: "allow" }
   | { kind: "deny"; reason: string; info?: { name: string; code: string; reason?: string } }
@@ -531,13 +808,13 @@ export interface DeskGuardInjectCtxLike {
   get(name: "tools"): unknown;
 }
 
-/** The booted ROOT context as {@link installDeskWriteGuard} uses it: {@link DeskToolsCtxLike}, since
+/** The booted ROOT context as {@link installDeskGuard} uses it: {@link DeskToolsCtxLike}, since
  * `installDesk` hands both installers one context; the `tools/pre-execute` waterfall (dsh-tools), run before
  * every call dispatches - a listener takes the pending call and `next`, and answers a decision, and one that
  * answers without calling `next` vetoes every listener behind it, and the call; and cordis's `inject`, which
  * runs a callback in a fiber of its own once the services it names are live, again whenever one is replaced,
  * and withdraws what the callback registered when the fiber is disposed. */
-export type DeskWriteGuardCtxLike = DeskToolsCtxLike & {
+export type DeskGuardCtxLike = DeskToolsCtxLike & {
   on(
     name: "tools/pre-execute",
     listener: (exec: DeskGuardExecution, next: () => Promise<DeskPreDecision>) => Promise<DeskPreDecision>,
@@ -558,24 +835,45 @@ function shownError(error: unknown): string {
 /** The guard's line for a call it could not judge, and denied; it cannot throw. */
 function unjudgedLine(exec: DeskGuardExecution, error: unknown): string {
   try {
-    return `${BIN}: desk: the write guard could not judge a ${String(exec.name)} call from agent ${String(exec.agent?.id)}, and denied it: ${shownError(error)}`;
+    return `${BIN}: desk: the desk guard could not judge a ${String(exec.name)} call from agent ${String(exec.agent?.id)}, and denied it: ${shownError(error)}`;
   } catch {
-    return `${BIN}: desk: the write guard could not judge a call, and denied it`;
+    return `${BIN}: desk: the desk guard could not judge a call, and denied it`;
   }
 }
 
-/** The guard's line for a write it let go on the session's own word, the registry having failed; it cannot throw. */
+/** The guard's line for a call it let go on the session's own word, the registry having failed; it cannot throw. */
 function headerLine(exec: DeskGuardExecution, error: unknown): string {
   try {
-    return `${BIN}: desk: the write guard could not read agent ${String(exec.agent?.id)}'s preset (${shownError(error)}); its session was not created as ${DESK_PRESET}, so its ${String(exec.name)} call goes on`;
+    return `${BIN}: desk: the desk guard could not read agent ${String(exec.agent?.id)}'s preset (${shownError(error)}); its session was not created as ${DESK_PRESET}, so its ${String(exec.name)} call goes on`;
   } catch {
-    return `${BIN}: desk: the write guard could not read an agent's preset; its session was not created as ${DESK_PRESET}, so the call goes on`;
+    return `${BIN}: desk: the desk guard could not read an agent's preset; its session was not created as ${DESK_PRESET}, so the call goes on`;
   }
+}
+
+/** The fail-closed reason for a call the guard could not judge: that of the first check that would have judged it -
+ * the write check's for a write tool, the read check's for a read tool, else the secret check's. It cannot throw. */
+function uncheckedFor(exec: unknown): string {
+  let name: unknown;
+  try {
+    name = (exec as { name?: unknown } | null | undefined)?.name;
+  } catch {
+    /* a name that cannot be read: the secret check's reason, which every call meets */
+  }
+  return isDeskWriteTool(name) ? UNCHECKED : isDeskReadTool(name) ? READ_UNCHECKED : SECRET_UNCHECKED;
+}
+
+/** What {@link installDeskGuard} takes beside the context and the root: `log`, where a line is written (default
+ * `console.error`), and `secrets`, the values the secret check looks for (default {@link deskSecrets} of
+ * `process.env`, taken at install) - both for tests. */
+export interface DeskGuardOptions {
+  log?: (line: string) => void;
+  secrets?: readonly string[];
 }
 
 /**
- * Deny every desk agent's write of an instruction file, before it happens, with two registrations, as src/boot.ts
- * `armOrderGate` arms Gate 2:
+ * Judge every call a desk agent makes, before it runs - its write ({@link deskWriteDecision}), then its read
+ * ({@link deskReadDecision}), then the secrets it carries ({@link deskSecretDecision}), the first deny the answer - with
+ * two registrations, as src/boot.ts `armOrderGate` arms Gate 2:
  * - one listener on the ROOT context's `tools/pre-execute` waterfall, registered in front (`prepend`). A root
  *   listener sees every agent's calls - dsh filters by scope, and the root is every scope's - so it covers the
  *   desk conversation, a browser's desk session and P2's and P4's firings alike, in whatever cwd they run;
@@ -585,35 +883,41 @@ function headerLine(exec: DeskGuardExecution, error: unknown): string {
  *   force-allow. It judges the call afresh, as the waterfall left it: a listener behind this one may have
  *   changed the call's name or arguments since, so it never reuses the listener's verdict.
  *
- * Both judge alike. A call to a tool outside {@link DESK_WRITE_TOOLS} is handed on at the cost of a name check,
- * and never reaches the registry. A desk agent is one whose preset `ctx.agentPresets.composedPreset(agent.ctx)`
- * reads as `gravit-desk` - read at the call, so a reloaded registry is followed - or whose session was created
- * as `gravit-desk` (its header's `agentPreset`, fixed then): its write gets {@link deskWriteDecision}'s answer
- * over the session's cwd and `root`. Anyone else's write is handed on unjudged.
+ * Both judge alike. A call that no check could deny - a tool outside {@link DESK_WRITE_TOOLS} and
+ * {@link DESK_READ_TOOLS} whose arguments carry no secret - is handed on at the cost of a name check and a look for
+ * the secrets, and never reaches the registry. A desk agent is one whose preset
+ * `ctx.agentPresets.composedPreset(agent.ctx)` reads as `gravit-desk` - read at the call, so a reloaded registry is
+ * followed - or whose session was created as `gravit-desk` (its header's `agentPreset`, fixed then): its call gets
+ * the three checks' answer, the write and the read over the session's cwd and `root`. Anyone else's call - Gravit's
+ * workbench sessions, a bot's - is handed on unjudged.
  *
- * Neither ever throws. A failure to judge - an agent whose session or cwd cannot be read, or a registry that
- * throws for a session created as the desk's - is the fail-closed deny, `the desk could not check this write's
- * path; nothing was written`, with one `gravit-face: desk:` line through `log`. A registry that throws for any
- * other session leaves the session's own word: its write goes on, with one line. One call is one line, however
- * many of the two judge it, and a `log` that throws costs the line, never the decision. A malformed call from
- * the desk is denied without a line: nothing failed. Given no `root`, the guard can judge no path: every desk
- * write is the could-not-check deny, said once, at install, rather than once a call.
+ * Neither ever throws. A failure to judge - an agent whose session or cwd cannot be read, or a registry that throws
+ * for a session created as the desk's - is the fail-closed deny of the first check that would have judged the call
+ * (`the desk could not check this write's path; nothing was written`, `...this read's path; nothing was read`, or
+ * `the desk could not check this call for a secret; nothing was sent`), with one `gravit-face: desk:` line through
+ * `log`. A registry that throws for any other session leaves the session's own word: its call goes on, with one
+ * line. One call is one line, however many of the two judge it, and a `log` that throws costs the line, never the
+ * decision. A malformed call from the desk is denied without a line: nothing failed. Given no `root`, the guard can
+ * judge no path: every desk write and read is its check's could-not-check deny, said once, at install, rather than
+ * once a call; the secret check needs no root.
  *
  * The fence (src/desk-session.ts) stays behind both, for a file another session plants.
  * @param ctx - the booted ROOT context.
  * @param root - the repository root the face runs from (src/desk.ts `installDesk`'s `root`, main.ts's
- *   `process.cwd()`), which every desk write is judged below; `undefined` when the face has none.
- * @param options - `log`, where a line is written (default `console.error`), for tests.
+ *   `process.cwd()`), which every desk write is judged below and every desk read must stay inside; `undefined` when
+ *   the face has none.
+ * @param options - see {@link DeskGuardOptions}.
  * @returns the disposer. It removes the listener at once, then disposes the backstop's fiber, which withdraws
  *   the guard, and settles once it has. Each step is guarded on its own: a listener that cannot be removed, or a
  *   fiber that cannot be disposed, is one line, the other step runs regardless, and the disposer never rejects.
  */
-export function installDeskWriteGuard(
-  ctx: DeskWriteGuardCtxLike,
+export function installDeskGuard(
+  ctx: DeskGuardCtxLike,
   root: string | undefined,
-  options: { log?: (line: string) => void } = {},
+  options: DeskGuardOptions = {},
 ): () => Promise<void> {
   const log = options.log ?? ((line: string) => console.error(line));
+  const secrets: readonly string[] = [...(options.secrets ?? deskSecrets(process.env))];
   /** The calls already given a line: the listener and the backstop can judge one call alike. */
   const told = new WeakSet<object>();
   const tell = (exec: unknown, line: string): void => {
@@ -628,9 +932,14 @@ export function installDeskWriteGuard(
     }
   };
   /** The guard's decision for `exec`, read afresh: `null` when the call is not its to judge, else the deny. Never throws. */
-  const judge = (exec: DeskGuardExecution): DeskWriteDeny | null => {
+  const judge = (exec: DeskGuardExecution): DeskDeny | null => {
     try {
-      if (!isDeskWriteTool(exec?.name)) return null;
+      const name = exec?.name;
+      const writes = isDeskWriteTool(name);
+      const reads = isDeskReadTool(name);
+      /* looked for in every call, first: a call that no check could deny never costs a registry read */
+      const secret = deskSecretDecision(exec?.arguments, secrets);
+      if (!writes && !reads && secret === null) return null;
       const agent = exec.agent;
       if (agent === undefined) return null;
       const header = agent.session.header;
@@ -645,32 +954,37 @@ export function installDeskWriteGuard(
         throw error;
       }
       if (composed !== DESK_PRESET && header.agentPreset !== DESK_PRESET) return null;
-      const cwd: unknown = header.cwd;
-      if (typeof cwd !== "string") throw new Error("its session has no cwd");
-      /* no root: deskWriteDecision's own fail-closed deny, without a line - the install said it once */
-      return deskWriteDecision(exec.name, exec.arguments, cwd, root as string);
+      if (writes || reads) {
+        const cwd: unknown = header.cwd;
+        if (typeof cwd !== "string") throw new Error("its session has no cwd");
+        /* no root: each check's own fail-closed deny, without a line - the install said it once */
+        const decided = (writes ? deskWriteDecision(exec.name, exec.arguments, cwd, root as string) : null)
+          ?? (reads ? deskReadDecision(exec.name, exec.arguments, cwd, root as string) : null);
+        if (decided !== null) return decided;
+      }
+      return secret;
     } catch (error) {
       tell(exec, unjudgedLine(exec, error));
-      return { kind: "deny", reason: UNCHECKED };
+      return deny(uncheckedFor(exec));
     }
   };
-  if (root === undefined) tell(undefined, `${BIN}: desk: the write guard was given no repository root; every desk write will be denied, unjudged`);
+  if (root === undefined) tell(undefined, `${BIN}: desk: the desk guard was given no repository root; every desk write and read will be denied, unjudged`);
   const off = ctx.on("tools/pre-execute", async (exec, next) => judge(exec) ?? next(), { prepend: true });
-  const backstop = ctx.inject(["tools"], function deskWriteBackstop(injected) {
+  const backstop = ctx.inject(["tools"], function deskGuardBackstop(injected) {
     const tools = injected.get("tools") as DeskGuardToolsLike | undefined;
-    if (tools === undefined) throw new Error(`${BIN}: desk: the tools service vanished before the write guard's backstop armed`);
+    if (tools === undefined) throw new Error(`${BIN}: desk: the tools service vanished before the desk guard's backstop armed`);
     tools.guard((exec) => judge(exec)?.reason);
   });
   return async () => {
     try {
       off();
     } catch (error) {
-      tell(undefined, `${BIN}: desk: the write guard's listener could not be removed: ${shownError(error)}`);
+      tell(undefined, `${BIN}: desk: the desk guard's listener could not be removed: ${shownError(error)}`);
     }
     try {
       await backstop.dispose();
     } catch (error) {
-      tell(undefined, `${BIN}: desk: the write guard's backstop could not be withdrawn: ${shownError(error)}`);
+      tell(undefined, `${BIN}: desk: the desk guard's backstop could not be withdrawn: ${shownError(error)}`);
     }
   };
 }
