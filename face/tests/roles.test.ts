@@ -12,7 +12,7 @@ const FORBIDDEN = new Set(["ask_user_question", "web_search", "web_fetch", "suba
   "mcp__alpaca-kit__place_order", "mcp__alpaca-kit__cancel_order"]);
 /** The account and order tools under ANY server name, matched by their raw suffix as src/orders.ts
  *  `isOrderTool` matches the order tools: an independent copy of the reader's rule. */
-const ACCOUNT_OR_ORDER = /(^|__)(account|positions|orders|place_order|cancel_order)$/;
+const ACCOUNT_OR_ORDER = /(^|__)(account|positions|orders|place_order|cancel_order|portfolio_live_order|portfolio_live_batch|portfolio_live_amend|portfolio_live_cancel|portfolio_live_close|portfolio_live_leverage|portfolio_live_move|portfolio_live_earn|portfolio_pay|portfolio_order|portfolio_execute|portfolio_transfer)$/;
 const JOB_TOOLS = ["job_output", "job_list", "job_kill"];
 
 test("toolNameFor: role_ plus the id with dashes as underscores", () => {
@@ -28,7 +28,7 @@ test("the shipped roles: three, exact names only, skill on every list, nothing f
     assert.ok(role.description.length <= 300 && role.description.length > 0, role.id);
     for (const name of role.allow) {
       assert.equal(name.includes("*"), false, `${role.id}: ${name} is exact`);
-      assert.equal(FORBIDDEN.has(name) || ACCOUNT_OR_ORDER.test(name) || name.startsWith("role_") || name.startsWith("mcp__akshare__") || name.startsWith("agent_"), false, `${role.id}: ${name} is never a role's`);
+      assert.equal(FORBIDDEN.has(name) || ACCOUNT_OR_ORDER.test(name) || name.startsWith("role_") || name.startsWith("mcp__akshare__") || name.startsWith("mcp__account__") || name.startsWith("agent_"), false, `${role.id}: ${name} is never a role's`);
     }
     /* A bash command past the executor's default moves to a background job the child owns; the job tools
      * are how it reads and stops one, and they mean nothing to a role that cannot start a command. */
@@ -170,12 +170,15 @@ test("readRoles refuses every other malformed shape in one line that opens with 
 
 /* The account and order names are refused under any server name, the way Gate 2 matches the order
  * tools by raw suffix (src/orders.ts `isOrderTool`): a server mounted as `broker` cannot slip them in. */
-const RENAMED_SERVER = ["account", "positions", "orders", "place_order", "cancel_order"].map((raw) => `mcp__broker__${raw}`);
+const RENAMED_SERVER = ["account", "positions", "orders", "place_order", "cancel_order", "portfolio_live_order", "portfolio_pay"].map((raw) => `mcp__broker__${raw}`);
 
 test("readRoles refuses every tool a role never carries, naming role.yml and why", async () => {
   const root = await makeRolesRoot();
   try {
-    for (const entry of [...FORBIDDEN, ...RENAMED_SERVER, "role_screener", "agent_codex", "mcp__akshare__stock_zh_a_hist"]) {
+    /* The Account seat's tools (spec 2026-10-20 §5.3): every tool under the seat's prefix — a role has no reason to read
+     * the account — and its twelve writes under any server name. */
+    for (const entry of [...FORBIDDEN, ...RENAMED_SERVER, "role_screener", "agent_codex", "mcp__akshare__stock_zh_a_hist",
+      "mcp__account__portfolio_holdings", "mcp__account__portfolio_wait", "portfolio_live_close"]) {
       await writeFile(join(root, "probe", "role.yml"), `name: Probe\ndescription: x\nallow:\n  - read\n  - ${entry}\n`);
       assert.throws(() => readRoles(root), (e: Error) =>
         e.message.startsWith(`${join(root, "probe", "role.yml")}: allow entry ${JSON.stringify(entry)}: a role never carries `), entry);
