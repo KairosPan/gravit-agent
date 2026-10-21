@@ -244,50 +244,66 @@ function urlShown(value: unknown): { shown: string } | { why: string } {
 /** The most legs a card shows: the Account takes at most ten in one batch. */
 const MAX_LEGS = 10;
 
-/** The first key field in `row` the card could not show WHOLE, its name
- * prefixed by `path` (`legs[2].`, `intent.`). */
-function unshowableIn(row: Record<string, unknown>, path: string): { key: string; why: string } | undefined {
-  for (const key of [...WHOLE_KEYS, "url"]) {
-    const value = row[key];
-    if (value === undefined || value === null || typeof value === "object") continue;
-    if (key === "url") {
-      const u = urlShown(value);
-      if ("why" in u) return { key: `${path}${key}`, why: u.why };
+/** One scalar the card could not show whole under `key`'s rule, at `at`:
+ * a key field too long, or a URL the card cannot show. */
+function unshowableScalar(key: string, value: unknown, at: string): { key: string; why: string } | undefined {
+  if (key === "url") {
+    const u = urlShown(value);
+    return "why" in u ? { key: at, why: u.why } : undefined;
+  }
+  if (!WHOLE_KEYS.includes(key)) return undefined;
+  const text = String(value);
+  return text.length > MAX_KEY_FIELD ? { key: at, why: `is ${text.length} characters, too long to show whole on a card` } : undefined;
+}
+
+/** The first value in `row` the card could not show, its path prefixed by
+ * `path`: a key field too long or a URL the card cannot show — under its own
+ * key, or its parent key's rule inside a list (`to[2]`, `url[1]`); a value
+ * nested deeper than the one level a card draws (`depth` 1 is already inside
+ * a nested object or a list entry: a card draws it as `?`, and what a card
+ * cannot show it must not approve); a list longer than a card shows. */
+function unshowableIn(row: Record<string, unknown>, path: string, depth: number): { key: string; why: string } | undefined {
+  for (const [key, value] of Object.entries(row)) {
+    const at = `${path}${key}`;
+    if (value === undefined || value === null) continue;
+    if (typeof value !== "object") {
+      const bad = unshowableScalar(key, value, at);
+      if (bad !== undefined) return bad;
       continue;
     }
-    const text = String(value);
-    if (text.length > MAX_KEY_FIELD) return { key: `${path}${key}`, why: `is ${text.length} characters, too long to show whole on a card` };
+    if (depth > 0) return { key: at, why: "is nested deeper than a card shows" };
+    if (!Array.isArray(value)) {
+      const bad = unshowableIn(value as Record<string, unknown>, `${at}.`, 1);
+      if (bad !== undefined) return bad;
+      continue;
+    }
+    if (value.length > MAX_LEGS) return { key: at, why: `has ${value.length} entries, more than the ten a card shows` };
+    for (const [i, entry] of value.entries()) {
+      const here = `${at}[${i + 1}]`;
+      if (entry === undefined || entry === null) continue;
+      if (typeof entry !== "object") {
+        const bad = unshowableScalar(key, entry, here);
+        if (bad !== undefined) return bad;
+        continue;
+      }
+      if (Array.isArray(entry)) return { key: here, why: "is nested deeper than a card shows" };
+      const bad = unshowableIn(entry as Record<string, unknown>, `${here}.`, 1);
+      if (bad !== undefined) return bad;
+    }
   }
   return undefined;
 }
 
-/** The first key field the card could not show WHOLE — too long, or a URL
- * that is not http(s), carries userinfo or does not parse — at the top level,
- * inside a nested object (`intent.to`) or inside each entry of a list
- * (`legs[2].symbol`; a batch is several orders, and each is described as
- * one), or a list longer than a card shows — so the gate denies the call
- * instead of raising a card with a cut that could hide what matters;
- * `undefined` when every key field can be shown. */
+/** The first thing the card could not show whole — a key field too long, a
+ * URL that is not http(s), carries userinfo or does not parse, a value nested
+ * deeper than a card draws, a list longer than a card shows — at the top
+ * level, inside a nested object (`intent.to`) or inside a list's entries
+ * (`legs[2].symbol`, `to[1]`), so the gate denies the call instead of raising
+ * a card with a cut or a `?` that could hide what matters; `undefined` when
+ * everything can be shown. */
 function unshowableKeyField(args: unknown): { key: string; why: string } | undefined {
   if (args === null || typeof args !== "object" || Array.isArray(args)) return undefined;
-  const row = args as Record<string, unknown>;
-  const top = unshowableIn(row, "");
-  if (top !== undefined) return top;
-  for (const [key, value] of Object.entries(row)) {
-    if (value === null || typeof value !== "object") continue;
-    if (Array.isArray(value)) {
-      if (value.length > MAX_LEGS) return { key, why: `has ${value.length} entries, more than the ten a card shows` };
-      for (const [i, entry] of value.entries()) {
-        if (entry === null || typeof entry !== "object" || Array.isArray(entry)) continue;
-        const bad = unshowableIn(entry as Record<string, unknown>, `${key}[${i + 1}].`);
-        if (bad !== undefined) return bad;
-      }
-      continue;
-    }
-    const bad = unshowableIn(value as Record<string, unknown>, `${key}.`);
-    if (bad !== undefined) return bad;
-  }
-  return undefined;
+  return unshowableIn(args as Record<string, unknown>, "", 0);
 }
 
 /** One line an operator can actually decide on.
@@ -346,14 +362,15 @@ function scalarWord(key: string, value: unknown): string {
 }
 
 /** A nested value on the card: a list as `[1: …; 2: …]` (a batch's legs, each
- * described as an order), an object as `{k=v …}`; one level only — deeper is
- * `?`, and the gate denies what a card cannot show whole anyway. */
-function nestedWord(value: object): string {
+ * described as an order; a scalar entry by its parent key's rule), an object
+ * as `{k=v …}`; one level only — deeper is `?`, which the gate never lets a
+ * card approve ({@link unshowableKeyField}). */
+function nestedWord(value: object, key: string): string {
   if (Array.isArray(value)) {
     return `[${value.map((entry, i) => {
       const word = entry === null || entry === undefined ? "?"
         : typeof entry === "object" ? (Array.isArray(entry) ? "?" : pairsOf(entry as Record<string, unknown>, 1))
-          : scalarWord("", entry);
+          : scalarWord(key, entry);
       return `${i + 1}: ${word}`;
     }).join("; ")}]`;
   }
@@ -367,7 +384,7 @@ function pairsOf(row: Record<string, unknown>, depth: number): string {
   const word = (key: string): string | undefined => {
     const value = row[key];
     if (value === undefined || value === null) return undefined;
-    if (typeof value === "object") return depth === 0 ? nestedWord(value) : "?";
+    if (typeof value === "object") return depth === 0 ? nestedWord(value, key) : "?";
     return scalarWord(key, value);
   };
   const parts = KNOWN_KEYS.map((key) => {

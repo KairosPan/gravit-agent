@@ -326,6 +326,24 @@ test("orderApprovalDecision: a batch leg's key field is whole or the call is den
   assert.match(ok?.kind === "ask" ? ok.reason ?? "" : "", /^Account seat - mcp__account__portfolio_live_batch: legs=\[1: side=buy usd=10 symbol=BTC\/USD venue=paper-1; 2: side=sell qty=500 symbol=SOL\/USDT venue=okx\]$/);
 });
 
+/* What a card would draw as `?` it must not approve: a value nested deeper than the one level a card shows is denied, and
+ * a scalar inside a list is held to its parent key's rule — an address in `to: [...]` whole or denied, a URL in `url: [...]`
+ * http(s) or denied — not cut at forty characters under a blank key. */
+test("orderApprovalDecision: a value nested deeper than a card shows is denied; a list's scalars follow their parent key's rule", () => {
+  const deny = (name: string, args: Record<string, unknown>): string => {
+    const d = orderApprovalDecision(name, "ask", args);
+    return d?.kind === "deny" ? d.reason : String(d?.kind);
+  };
+  assert.match(deny("mcp__account__portfolio_live_batch", { legs: [{ venue: "paper-1", symbol: "BTC/USD", side: "buy", usd: 10, extra: { a: 1 } }] }), /its legs\[1\]\.extra is nested deeper than a card shows, so nothing was asked/);
+  assert.match(deny("mcp__account__portfolio_live_batch", { legs: [[1, 2]] }), /its legs\[1\] is nested deeper than a card shows/);
+  assert.match(deny("mcp__account__portfolio_execute", { account: "a", intent: { kind: "trade", legs: [1] } }), /its intent\.legs is nested deeper than a card shows/);
+  assert.match(deny("mcp__account__portfolio_sweep", { venue: "paper-1", to: [`0x${"f".repeat(300)}`] }), /its to\[1\] is 302 characters, too long to show whole on a card/);
+  assert.match(deny("mcp__account__portfolio_sweep", { venue: "paper-1", url: ["https://api.example.com/x", "ftp://files.example.com/x"] }), /its url\[2\] is not http or https/);
+  assert.equal(deny("mcp__account__portfolio_sweep", { venue: "paper-1", symbols: ["AAPL", "MSFT"], to: [`0x${"a".repeat(40)}`] }), "ask", "a list of key fields that fit, and a list under a plain key, are asked about");
+  assert.equal(describeOrder("mcp__account__portfolio_sweep", { venue: "paper-1", to: [`0x${"a".repeat(40)}`], symbols: ["AAPL", "N".repeat(50)] }),
+    `mcp__account__portfolio_sweep: venue=paper-1 to=[1: 0x${"a".repeat(40)}] symbols=[1: AAPL; 2: ${"N".repeat(40)}…]`, "a list's scalars draw by their parent key's rule: an address whole, a plain field cut");
+});
+
 test("orderGuardReason: everything else passes untouched", () => {
   for (const [name, description] of [["bash", "run"], ["mcp__x__orders", "list orders"]]) {
     assert.equal(orderGuardReason(name, description, [], "c1"), undefined, name);

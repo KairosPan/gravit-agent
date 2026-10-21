@@ -216,6 +216,14 @@ typecheck clean; the seat smoke 1/1 with its new batch and expiry steps):
 6. *The calls map*: a call is kept by session and id, and a gate joins only its own session's call of
    the same tool; another session's call of the same id, or another tool's, is not it.
 
+A fourth background security review, of the fix commit itself, found two more blind spots in the
+batch card and they were fixed the same way (`face: Gate 2 denies what a card would draw as a
+question mark`): a value nested deeper than the one level a card draws — an object or a list inside
+a leg or a nested object, a list inside a list — is denied before a card, where the card drew `?`;
+and a list's scalars follow their parent key's rule on the card and at the gate (an address in
+`to: [...]` whole or denied, a URL in `url: [...]` http(s) or denied) where they were cut under a
+blank key. Under a failing test first; the seat smoke re-run.
+
 The branch's own false document statements were corrected in the same pass: seventeen real boots
 (CLAUDE.md, face/README.md with the seat smoke listed), the skills list (DEVELOPMENT §3.2,
 dsh/README.md, the loops page), the drill's step 4 (Refresh), DEVELOPMENT §4.7 and §5.3 for the

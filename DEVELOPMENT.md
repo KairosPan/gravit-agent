@@ -1350,8 +1350,10 @@ because neither alone suffices:
    URL — are shown WHOLE up to 120 characters, and a call whose key field cannot be shown whole is
    **denied** before any card: too long, or a URL that is not http(s), carries userinfo or does not
    parse; a batch's `legs` are each described as one order and a nested object is shown one level
-   deep, with the same key fields whole or denied, and more than ten legs is denied — a card that
-   read `legs=?` would approve ten orders blind). The approval request carries no arguments — only the
+   deep, with the same key fields whole or denied, a list's scalars under their parent key's rule
+   (`to[2]`, `url[1]`), anything nested deeper than that one level denied, and more than ten legs
+   denied — a card that read `legs=?`, or `extra=?` inside a leg, would approve blind). The approval
+   request carries no arguments — only the
    tool name, the call id, `reason` and `displayReason` — and `api-remotes` forwards it to every
    connected browser's `$events` stream as an `approval/request` waterfall keyed by `eventId`.
    The card shows the tool name, the order line and two buttons; an upstream-style panel draws
