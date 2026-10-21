@@ -254,39 +254,38 @@ test("hasApprovalGrant: an id-less asked event cannot pair with an id-less decis
   assert.equal(hasApprovalGrant(events, "c1", "mcp__x__place_order"), false);
 });
 
-test("describeOrder: a crafted field cannot run away with the operator's only line", () => {
-  const line = describeOrder("t", { symbol: "X".repeat(200) });
+test("describeOrder: a crafted field that is not a key field cannot run away with the operator's only line", () => {
+  const line = describeOrder("t", { symbol: "X", note: "N".repeat(200) });
   assert.ok(line.length < 80, `card line must stay readable; got ${line.length} chars`);
-  assert.match(line, /…/);
+  assert.match(line, /note=N{40}…/);
 });
 
-/* The fields the operator decides on are never cut where the cut could hide what matters: a payee's URL shows its
- * origin whole and cuts only the path (userinfo is stripped and said); an address or an id is cut in the middle so both
- * ends stay; a key field too long to show whole is a denial, not a card. */
-test("describeOrder: a pay's URL shows its origin whole and cuts only the path; userinfo is stripped and said; a bad URL is ?", () => {
-  const line = describeOrder("mcp__account__portfolio_pay", { url: `https://api.example.com/v1/${"x".repeat(80)}`, maxAmount: 2, from: "agent-1" });
-  assert.match(line, /url=https:\/\/api\.example\.com\/v1\/x+…/);
-  assert.ok(line.length < 160, `got ${line.length}`);
-  assert.match(describeOrder("mcp__account__portfolio_pay", { url: "https://u:p@api.example.com/x" }), /url=https:\/\/api\.example\.com\/x \(userinfo stripped\)/);
-  assert.match(describeOrder("mcp__account__portfolio_pay", { url: "not a url" }), /url=\?/);
-});
-
-test("describeOrder: an address or an id is cut in the middle so both ends stay", () => {
+/* The fields the operator decides on — a venue, a symbol, an id, an address, a payee's URL — are shown WHOLE or not at
+ * all: whole up to 120 characters, and a field the card cannot show whole is a denial, not a card with a cut that could
+ * hide what matters. A payee's URL must be http or https, carry no userinfo, parse, and fit. */
+test("describeOrder: a pay's URL and a key field are shown whole up to 120 characters", () => {
+  const url = "https://api.example.com/v1/pay?item=42";
+  assert.match(describeOrder("mcp__account__portfolio_pay", { url, maxAmount: 2, from: "agent-1" }), /: from=agent-1 url=https:\/\/api\.example\.com\/v1\/pay\?item=42 maxAmount=2$/);
   const addr = `0x${"a".repeat(20)}${"b".repeat(20)}`;
-  const line = describeOrder("mcp__account__portfolio_live_move", { kind: "send", from: "wallet", asset: "USDC", amount: 5, to: addr });
-  assert.match(line, /to=0xaaaaaaaaaaaaaaaaaaaabb…bbbbbbbbbbbb/);
-  assert.match(describeOrder("mcp__account__portfolio_live_cancel", { venue: "paper-1", order: `ord-${"9".repeat(60)}` }), /order=ord-9{20}…9{12}/);
+  assert.match(describeOrder("mcp__account__portfolio_live_move", { kind: "send", from: "wallet", asset: "USDC", amount: 5, to: addr }), new RegExp(`to=${addr}`));
+  const id = `ord-${"9".repeat(100)}`;
+  assert.match(describeOrder("mcp__account__portfolio_live_cancel", { venue: "paper-1", order: id }), new RegExp(`order=${id} venue=paper-1`));
 });
 
-test("orderApprovalDecision: a key field too long to show whole is denied, not carded", () => {
-  const d = orderApprovalDecision("mcp__account__portfolio_live_move", "ask", { kind: "send", from: "wallet", asset: "USDC", amount: 5, to: `0x${"f".repeat(300)}` });
-  assert.equal(d?.kind, "deny");
-  assert.match(d?.kind === "deny" ? d.reason : "", /its to is 302 characters/);
-  assert.match(d?.kind === "deny" ? d.reason : "", /nothing was asked/);
-  const u = orderApprovalDecision("mcp__account__portfolio_pay", "ask", { url: `https://${"h".repeat(300)}.example.com/x`, maxAmount: 1 });
-  assert.equal(u?.kind, "deny");
-  const fine = orderApprovalDecision("mcp__account__portfolio_pay", "ask", { url: "https://api.example.com/x", maxAmount: 1, body: "b".repeat(500) });
-  assert.equal(fine?.kind, "ask", "a long field that is not a key field is cut, not denied");
+test("orderApprovalDecision: a key field the card cannot show whole is denied, not carded — too long, or a URL that is not http(s), carries userinfo or does not parse", () => {
+  const deny = (args: Record<string, unknown>): string => {
+    const d = orderApprovalDecision("mcp__account__portfolio_pay", "ask", args);
+    return d?.kind === "deny" ? d.reason : String(d?.kind);
+  };
+  assert.match(deny({ url: "https://api.example.com/x", maxAmount: 1, from: `0x${"f".repeat(300)}` }), /its from is 302 characters, too long to show whole on a card, so nothing was asked/);
+  assert.match(deny({ url: `https://api.example.com/${"p".repeat(200)}`, maxAmount: 1 }), /its url is 2\d\d characters/);
+  assert.match(deny({ url: "ftp://files.example.com/x", maxAmount: 1 }), /its url is not http or https, so nothing was asked/);
+  assert.match(deny({ url: "https://u:p@api.example.com/x", maxAmount: 1 }), /its url carries userinfo/);
+  assert.match(deny({ url: "not a url", maxAmount: 1 }), /its url does not parse/);
+  assert.equal(deny({ url: "https://api.example.com/x", maxAmount: 1 }), "ask");
+  assert.equal(deny({ url: "https://api.example.com/x", maxAmount: 1, body: "b".repeat(500) }), "ask", "a long field that is not a key field is cut, not denied");
+  const move = orderApprovalDecision("mcp__account__portfolio_live_move", "ask", { kind: "send", from: "wallet", asset: "USDC", amount: 5, to: `0x${"f".repeat(40)}` });
+  assert.equal(move?.kind, "ask", "a 42-character address is shown whole and asked about");
 });
 
 test("orderGuardReason: everything else passes untouched", () => {

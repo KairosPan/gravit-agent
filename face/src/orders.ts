@@ -193,15 +193,14 @@ export function orderApprovalDecision(
         `and try again.`,
     };
   }
-  /* A key field the card could only show cut is not asked about: the cut could
-   * hide the address's tail or the host, and an operator approving what they
-   * cannot read is a click-through. Denied in our own words, nobody asked. */
-  const over = overlongKeyField(args);
-  if (over !== undefined) {
+  /* A key field the card could not show whole is not asked about: a cut could
+   * hide an address's tail or a payee's host, and an operator approving what
+   * they cannot read is a click-through. Denied in our own words, nobody asked. */
+  const bad = unshowableKeyField(args);
+  if (bad !== undefined) {
     return {
       kind: "deny",
-      reason: `${name}: its ${over.key} is ${over.length} characters, too long to show whole on a card, ` +
-        `so nothing was asked and the call does not run.`,
+      reason: `${name}: its ${bad.key} ${bad.why}, so nothing was asked and the call does not run.`,
     };
   }
   const reason = `${isSeatTool(name) ? "Account seat" : "PAPER order"} - ${describeOrder(name, args)}`;
@@ -225,34 +224,40 @@ const WHOLE_KEYS = ["venue", "from", "to", "symbol", "order", "asset", "account"
  * past it the call is denied rather than carded with a cut ({@link overlongKeyField}). */
 const MAX_KEY_FIELD = 120;
 
-/** A payee's URL on the card: its origin whole (scheme and host, no userinfo —
- * said when there was some), its path and query cut to 24 characters; a value
- * that is not a URL is `?`, never echoed. */
-function urlWord(value: unknown): string {
+/** A payee's URL as the card may show it: whole, when it is http or https,
+ * carries no userinfo, parses, and fits {@link MAX_KEY_FIELD} — else why not.
+ * The text shown is the parsed `href`, the form the consumer resolves, so the
+ * card and the venue agree on what was approved. */
+function urlShown(value: unknown): { shown: string } | { why: string } {
+  let u: URL;
   try {
-    const u = new URL(String(value));
-    const path = `${u.pathname}${u.search}`;
-    const shown = path.length > 24 ? `${path.slice(0, 24)}…` : path;
-    return `${u.origin}${shown}${u.username !== "" || u.password !== "" ? " (userinfo stripped)" : ""}`;
+    u = new URL(String(value));
   } catch {
-    return "?";
+    return { why: "does not parse" };
   }
+  if (u.protocol !== "https:" && u.protocol !== "http:") return { why: "is not http or https" };
+  if (u.username !== "" || u.password !== "") return { why: "carries userinfo" };
+  if (u.href.length > MAX_KEY_FIELD) return { why: `is ${u.href.length} characters, too long to show whole on a card` };
+  return { shown: u.href };
 }
 
-/** The first key field too long to show whole on a card — a URL counts by its
- * host — so the gate denies the call instead of raising a card whose cut could
- * hide what matters; `undefined` when every key field fits. */
-function overlongKeyField(args: unknown): { key: string; length: number } | undefined {
+/** The first key field the card could not show WHOLE — too long, or a URL
+ * that is not http(s), carries userinfo or does not parse — so the gate denies
+ * the call instead of raising a card with a cut that could hide what matters;
+ * `undefined` when every key field can be shown. */
+function unshowableKeyField(args: unknown): { key: string; why: string } | undefined {
   if (args === null || typeof args !== "object" || Array.isArray(args)) return undefined;
   const row = args as Record<string, unknown>;
   for (const key of [...WHOLE_KEYS, "url"]) {
     const value = row[key];
     if (value === undefined || value === null || typeof value === "object") continue;
-    let text = String(value);
     if (key === "url") {
-      try { text = new URL(text).host; } catch { /* not a URL: its whole text is what the card would have to show */ }
+      const u = urlShown(value);
+      if ("why" in u) return { key, why: u.why };
+      continue;
     }
-    if (text.length > MAX_KEY_FIELD) return { key, length: text.length };
+    const text = String(value);
+    if (text.length > MAX_KEY_FIELD) return { key, why: `is ${text.length} characters, too long to show whole on a card` };
   }
   return undefined;
 }
@@ -284,14 +289,17 @@ export function describeOrder(name: string, args: unknown): string {
     if (typeof value === "object") return undefined;
     /* Model-controlled text on the operator's only line of information: bound it
      * so a crafted field cannot push a plausible sentence past the real one —
-     * but never cut where the cut could hide what the operator decides on: a
-     * payee's URL keeps its whole origin and loses only its path (and says when
-     * userinfo was in it); an address, an id, a venue or a symbol is cut in the
-     * MIDDLE so both ends stay (a field too long for that is denied before a
-     * card, {@link overlongKeyField}). */
-    if (key === "url") return urlWord(value);
+     * but never cut what the operator decides on: a payee's URL, an address, an
+     * id, a venue or a symbol is shown WHOLE up to MAX_KEY_FIELD, and a call
+     * whose key field cannot be shown whole is denied before any card
+     * ({@link unshowableKeyField}); the cuts below those keys never reach a
+     * card and only keep this function total. */
+    if (key === "url") {
+      const u = urlShown(value);
+      return "shown" in u ? u.shown : "?";
+    }
     const text = String(value);
-    if (WHOLE_KEYS.includes(key)) return text.length > 40 ? `${text.slice(0, 24)}…${text.slice(-12)}` : text;
+    if (WHOLE_KEYS.includes(key)) return text.length > MAX_KEY_FIELD ? `${text.slice(0, MAX_KEY_FIELD)}…` : text;
     return text.length > 40 ? `${text.slice(0, 40)}…` : text;
   };
   /* place_order(symbol, qty, side, order_type, limit_price) and
