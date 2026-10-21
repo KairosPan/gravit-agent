@@ -565,6 +565,75 @@ git commit -m "test(face): desk-smoke and telegram-smoke - the preset's roster, 
 
 ---
 
+### Task 8b: The desk's write guard — a desk turn never writes an instruction file
+
+> Added 2026-10-21 by the controller, from Task 8's report. The canary showed that a desk turn which writes `GRAVIT.md` inside its own journal steers the rest of that same turn. dsh reads instruction files in the directories between the cwd and any file a tool touches, so the turn's next model call already carries the planted text. The fence checks only at `turn/start`, so it protects later turns. This task denies the write itself, before it happens. The fence stays as the second line, for files other sessions plant.
+
+**Files:**
+- Create: `face/tests/desk-guard.test.ts`
+- Modify:
+  - `face/src/desk-names.ts`: `FENCE_NAMES` moves here; `desk-session.ts` re-exports it.
+  - `face/src/desk-tools.ts`: the guard.
+  - `face/src/desk.ts`: `installDesk` installs the guard beside the tools.
+  - `face/tests/telegram-smoke.test.ts`: the canary.
+
+**Interfaces:**
+- **Consumes:**
+  - `DESK_PRESET` (`desk-names.ts`);
+  - `FENCE_NAMES` (moved; still case-folded, as Task 6 matches them);
+  - Gate 2's pre-execute listener pattern in `face/src/orders.ts`, and its decision shape `{ kind: "deny", reason }`;
+  - `ctx.agentPresets.composedPreset(agent.ctx)`, as `desk-tools.ts` uses it.
+- **Produces:**
+  - `DESK_WRITE_TOOLS`: the exact names of the desk's tools that write a file. From `DESK_ALLOW` these are `write`, `edit` and `str_replace_editor`. Read each tool's schema in the installed dsh packages, and record every path-bearing argument name it takes, citing the file and line in your report.
+  - `deskWriteDecision(toolName: string, args: unknown, cwd: string): { kind: "deny"; reason: string } | null`. It is pure and synchronous.
+    - It returns `null` for any tool that is not a write tool.
+    - For a write tool, it resolves each path argument against `cwd` and denies when any path segment case-folds to one of `FENCE_NAMES`.
+    - The reason is exactly `the desk never writes <name>: it would steer every desk turn after it`, where `<name>` is the `FENCE_NAMES` spelling.
+    - A write tool whose path argument is missing or not a string is denied with `the desk could not check this write's path; nothing was written`. This fails closed.
+  - `installDeskWriteGuard(ctx: DeskToolsCtxLike & { on(event: "tools/pre-execute", ...): ... }): () => void`. It registers a root `tools/pre-execute` listener, mirroring Gate 2's registration.
+    - For an execution whose agent's composed preset is `DESK_PRESET`, it returns `deskWriteDecision(exec.name, exec.args, <the agent's session cwd>)`.
+    - For any other agent it returns nothing.
+    - It never throws. A throw inside it becomes the fail-closed deny for a desk agent and is logged as one `gravit-face: desk:` line.
+    - The disposer removes the listener.
+  - `installDesk` installs the guard wherever it installs the desk tools: with `ctx` given, whatever `enabled` says. The handle's dispose removes it.
+  - **Weight:** `desk.ts`, and so the pause switch, loads no new module. `desk-names.ts` stays a leaf, and the guard imports nothing heavy.
+- **Scope note:** P2's firing sessions and P4's strategy firings also run with `gravit-desk`, so the guard covers them too, in whichever cwd they run.
+
+- [ ] **Step 1: Write the failing tests**
+
+```ts
+// face/tests/desk-guard.test.ts
+test("each write tool is denied for every fence name at any depth, case-folded", () => {
+  // for each of DESK_WRITE_TOOLS and each of its path args: "GRAVIT.md", "notes/gravit.md", ".git/config", "a/.dsh/skills/x/SKILL.md", ".agents", "GRAVIT.local.md"
+  // → { kind: "deny", reason: "the desk never writes <FENCE_NAMES spelling>: it would steer every desk turn after it" }
+});
+test("ordinary journal writes pass", () => { /* "notes/today.md", "GRAVIT.md.bak", "gravitas.md", "reports/x.md" → null */ });
+test("a write tool with no string path fails closed", () => { /* … the exact line */ });
+test("non-write tools are never judged", () => { /* read, grep, glob, desk_quotes → null */ });
+test("the listener judges only gravit-desk agents and never throws", () => { /* fake ctx: a Gravit agent's write of GRAVIT.md → undefined; a desk agent's → deny; a throwing composedPreset → fail-closed deny + one line */ });
+test("installDesk installs the guard with the tools, whatever enabled says, and dispose removes it", () => { /* … */ });
+```
+
+The canary in `face/tests/telegram-smoke.test.ts` changes:
+- The stub model's `write` of `GRAVIT.md` in the journal returns the deny reason. No file appears, and the next text is answered normally.
+- Then the harness plants `desk/journal/GRAVIT.md` itself, standing in for another session. The next text gets the fence refusal line `refused: desk/journal/GRAVIT.md exists; it would steer every later desk turn. Remove it, then write again.` and opens no turn.
+- Every other canary assertion stands.
+
+- [ ] **Step 2: Run them to verify they fail.** Run `cd face && npx tsx --test tests/desk-guard.test.ts`.
+
+- [ ] **Step 3: Implement** the move, the decision, the listener and the `installDesk` wiring.
+
+- [ ] **Step 4: Run them to verify they pass.** Run `npm test && npm run typecheck`, then `FACE_SMOKE=1 npx tsx --test tests/telegram-smoke.test.ts tests/desk-smoke.test.ts`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add face/src/desk-names.ts face/src/desk-session.ts face/src/desk-tools.ts face/src/desk.ts face/tests/desk-guard.test.ts face/tests/telegram-smoke.test.ts
+git commit -m "feat(face): the desk's write guard - a desk turn never writes GRAVIT.md, .git, .dsh or .agents"
+```
+
+---
+
 ### Task 9: The Desk panel, the Pause route and the source glyphs
 
 **Files:**
