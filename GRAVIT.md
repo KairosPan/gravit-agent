@@ -66,10 +66,9 @@ ordinary prompt; no voice answers it, so the answer is Gravit's own.
 ## The desk
 
 `desk/` is the operator's; Gravit writes only `desk/journal/`. A desk turn informs; it never
-orders, asks, opens a goal or commits. `desk_quotes` is the price now, never evidence. No
-shell: an unattended turn on untrusted text must not read key files and reach the network.
-The face refuses desk turns while a `GRAVIT.md`, `GRAVIT.local.md`, `.git`, `.dsh` or
-`.agents` is under `desk/journal/`.
+orders, asks, opens a goal or commits. `desk_quotes` is the price now, never evidence. Desk
+turns are refused while `GRAVIT.md`, `GRAVIT.local.md`, `.git`, `.dsh` or `.agents` is under
+`desk/journal/`.
 
 ## Tests
 

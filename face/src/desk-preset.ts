@@ -31,8 +31,9 @@
  * ({@link deskRosterProblem}).
  *
  * WHAT THE MASK IS NOT. Visibility, not authority (plugins/bot.js, WHAT THIS IS NOT): what a desk turn
- * may write is its session's sandbox, and what it may order is nothing - Gate 2 stands between every
- * session and every order tool.
+ * may write is its session's sandbox and the face's desk guard (src/desk-tools.ts `installDeskGuard`: no
+ * write of an instruction file, no read outside the repository or of a key file, no call carrying a
+ * secret), and what it may order is nothing - Gate 2 stands between every session and every order tool.
  * @module
  */
 import { dirname, join } from "node:path";
@@ -57,8 +58,10 @@ export { DESK_PRESET };
 /** What a desk session may see, in this order (the plan's Global Constraints): file read and edit,
  * search, skills, web search, its own todos, and the live market reads of the alpaca-kit MCP server
  * under whatever name the operator mounts it (`mcp__*__<raw>`, expanded by plugins/bot.js). Writes stay:
- * the session's sandbox confines them to `desk/journal/`, and the face's instruction-chain fence (the
- * plan's Global Constraints) refuses a desk turn while an instruction file sits there. Absent by design:
+ * the session's sandbox keeps them to `desk/journal/` and the temp areas, an escalation asking the
+ * operator; the face's desk guard (src/desk-tools.ts `installDeskGuard`) denies a desk turn's write of an
+ * instruction file and its read outside the repository or of a key file; and the face's instruction-chain
+ * fence (src/desk-session.ts) refuses a desk turn while an instruction file sits there. Absent by design:
  * the shell and its background-job tools (NO SHELL, in the header), every order and account tool, the
  * question tool, goals, delegation (`subagent*`, `send_message`, `interrupt_agent`, `list_agents`,
  * `workflow`, `ralph`, the room's `dispatch`, every `agent_<bin>`), the AKShare tools, and the bed-backed

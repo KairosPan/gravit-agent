@@ -221,14 +221,14 @@ in the review):
   rows in dsh-base); a long-lived desk conversation relies on it, and on the ledger (§5.7) for
   what compaction forgets.
 
-**As built (P1, 2026-10-21):** usage comes from the projections, not from `ctx.tokenMeter`, whose
-`measure` is context pressure (spike 2). The `tokenUsage` projection is cumulative over a
-session's whole log, so a desk turn's own usage is `deriveTurnTokenUsage`
-(`@deepseek-ai/dsh-token-meter/client`, pinned at `0.2.0-rc.2`) over that turn's events, folded
+**As built (P1, 2026-10-21):** a desk turn's usage is `deriveTurnTokenUsage`
+(`@deepseek-ai/dsh-token-meter/client`, pinned at `0.2.0-rc.2`) over the turn's own events, folded
 by the supervisor at its `turn/end` and recorded as a `desk-turn` ledger event in four buckets
 (`uncachedInputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`) with its routes;
-the desk's day sums those events from 00:00 ET. The wake cap the bullet on background-job wakes
-calls for was not set: the desk has no `job_*` tools, so nothing wakes it (§5.3's note).
+the desk's day sums those events from 00:00 ET. It reads neither `ctx.tokenMeter`, whose
+`measure` is context pressure (spike 2), nor the `tokenUsage` projection, which is cumulative over
+a session's whole log. The wake cap the bullet on background-job wakes calls for was not set: the
+desk has no `job_*` tools, so no background job wakes it (§5.3's note).
 
 ### 4.2 The face, as built
 
@@ -472,10 +472,19 @@ be written in the plan's first task and pinned by a test the way `cycle.test.ts`
   `turn/start`, a `desk-turn` record; and delivers telegram, alert and wake turns to the bridge,
   its outlet, while a browser turn's answer stays in the transcript. The desk state injected
   beside a phone message (§5.6) comes with P3; in P1 the model reads `desk_state` on demand.
-- **A write guard** denies a desk turn's write of `GRAVIT.md`, `GRAVIT.local.md`, `.git`, `.dsh`
-  or `.agents` before it runs, because a file the turn wrote would steer the rest of that turn;
-  the pre-turn fence covers what other sessions plant (§7; the charter's D23).
-- **No wake cap** (§5.8's `maxConsecutiveWakes` row): with no job tools, nothing wakes the desk.
+- **The desk guard** (`installDeskGuard`, `face/src/desk-tools.ts`) judges every call a desk
+  agent makes before it runs — one listener and a deny-only backstop, three checks in order. Its
+  write check denies a write of `GRAVIT.md`, `GRAVIT.local.md`, `.git`, `.dsh` or `.agents`,
+  because a file the turn wrote would steer the rest of that turn; the pre-turn fence covers what
+  other sessions plant. Its read check denies a read outside the repository or of a `.env` or
+  `.git` name, and a search that could reach a dot-file, because dsh's sandbox lets every read
+  through, which §7's list of what a poisoned turn can do left out. Its secret check denies any
+  call whose arguments carry a key's value, and the bridge redacts every such value from the
+  phone. Tool
+  results are not filtered: a key kept under another name still reaches the model (§7; the
+  charter's D23 and D25).
+- **No wake cap** (§5.8's `maxConsecutiveWakes` row): with no job tools, no background job wakes
+  the desk.
   The Desk page is a panel in the chat page's sidebar (`face/client/desk-panel.js`) over
   `GET /data/desk/status` and `POST /data/desk/pause`, not a `/desk` page.
 
@@ -773,6 +782,15 @@ a skill or a schedule and fires days later under a legitimate instruction. Mappe
 - **Prompts are not access control** (charter Rule 2, the report's iron rule): the above holds
   by placement, sandbox, hash and allow-list, not by `desk.md`. The canary drill (§9) is how it is
   shown to hold.
+
+**As built (P1, 2026-10-21):** the bridge admits by the operator's user id, so rotating the token
+does not stop a lost phone that is still signed in: the remedy is to end that device's session from
+another device (Telegram → Settings → Devices), or to unset `TELEGRAM_OPERATOR_ID` until then, and
+to rotate the token only when the token itself leaked. Such a phone is not read-only either: it can
+have the desk read inside the repository and write in its journal. Whoever holds the token can read
+what the operator sends — `getUpdates`, or a webhook of its own — which the bridge sees only as a
+409. And a poisoned turn could read: dsh's sandbox lets every read through, so the desk's reads are
+held by its guard (§5.3's note), not by placement (the charter's D18 and D25).
 
 ## 8. Changes by file
 
