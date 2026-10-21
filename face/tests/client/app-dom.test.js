@@ -490,6 +490,7 @@ function accountHost(opts = {}) {
   const getJson = async path => {
     reads.push(path);
     if (path.startsWith('/data/account.json')) return KEYED;
+    if (path.startsWith('/data/seat.json')) return { ok: true, url: 'http://127.0.0.1:4820', reachable: true, asOf: '2026-10-19T18:40:00.000Z', mode: 'guard', writes: { on: true, capUsd: 100 }, seat: { name: 'Gravit', status: 'admitted', limits: [] }, venues: [], cards: [], others: 0 };
     if (path === '/data/plugins.json') return { mcp: [{ server: 'alpaca-kit', phase: 'active', tools: [{ name: 'mcp__alpaca-kit__place_order', description: '' }] }], agentTools: [], rows: [] };
     if (path.startsWith('/data/quotes')) return { ok: true, generated_at: '2026-10-19T14:30:01Z', quotes: [], providers: [{ id: 'alpaca', market: 'us', status: 'connected', source: 'Alpaca', feed: 'iex', transport: 'stream', message: '' }] };
     return h.getJson(path);
@@ -580,6 +581,33 @@ test('a receipt in a conversation reloads the account', async () => {
   await settle();
   assert.equal(h.accountReads(), before + 1);
   assert.equal(h.reads.filter(p => p.startsWith('/data/account.json')).at(-1), '/data/account.json?fresh=1', 'a fill is read past the cache');
+  store.timers.clear();
+});
+
+// spec 2026-10-20 §6.3: the seat's standing is read on entering Venues, past the cache on Refresh there and after a seat receipt
+test('entering Venues reads /data/seat.json; Refresh there reads it fresh; a seat receipt reloads it fresh and not the account', async () => {
+  const f = fakeWindow({ hash: '#/account/venues', storage: memoryStorage() });
+  const h = accountHost({ rows: [row('s1', { agentAvailable: true })] });
+  const store = bootAccount(f, h);
+  await h.ready();
+  const seatReads = () => h.reads.filter(p => p.startsWith('/data/seat.json'));
+  assert.deepEqual(seatReads(), ['/data/seat.json'], 'entering Venues reads the seat once');
+  assert.equal(store.get().seat.status, 'ready');
+  assert.match(f.html(), /127\.0\.0\.1:4820 · reachable/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'refreshAccount' } });
+  await settle();
+  assert.equal(seatReads().at(-1), '/data/seat.json?fresh=1', 'Refresh on Venues reads the seat past the cache');
+  const accountBefore = h.accountReads();
+  const seatBefore = seatReads().length;
+  f.win.location.hash = '#/messages/s1'; f.fire('win', 'hashchange'); await settle();
+  const follow = [...h.streams].reverse().find(x => x.name === 'session/follow' && x.args.request.address.sessionId === 's1');
+  follow.cbs.onItem({ type: 'snapshot', records: [] });
+  follow.cbs.onItem({ type: 'event', event: { type: 'tool/call', seq: 60, time: 1756512300000, data: { turn: 5, step: 1, callId: 'c10', name: 'mcp__account__portfolio_live_order', arguments: JSON.stringify({ venue: 'paper-1', symbol: 'AAPL', side: 'buy', usd: 100 }) } } });
+  follow.cbs.onItem({ type: 'event', event: { type: 'tool/result', seq: 61, time: 1756512301000, surfaceOp: 'append', data: { turn: 5, step: 1, message: { id: 'm-61', role: 'tool', source: { kind: 'tool', callId: 'c10' }, toolCallId: 'c10', content: [{ type: 'text', text: JSON.stringify({ ok: true, pending: true, card: { id: 'card-0007' } }) }], isError: false } } } });
+  await settle();
+  assert.equal(seatReads().length, seatBefore + 1, 'a seat receipt reloads the seat');
+  assert.equal(seatReads().at(-1), '/data/seat.json?fresh=1');
+  assert.equal(h.accountReads(), accountBefore, 'and not the Alpaca account');
   store.timers.clear();
 });
 

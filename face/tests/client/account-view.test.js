@@ -2,7 +2,40 @@
 // the orders by bucket, the statement and its CSV, and the venue's facts.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { portfolioOf, orderLine, statementOf, csvOf, venueOf } from '../../client/js/host/account-view.js';
+import { portfolioOf, orderLine, statementOf, csvOf, venueOf, seatWords } from '../../client/js/host/account-view.js';
+
+// spec 2026-10-20 §6.3: the Account seat's standing (/data/seat.json) in the words the Venues box draws
+const seatView = (over = {}) => ({
+  ok: true, url: 'http://127.0.0.1:4820', reachable: true, asOf: '2026-10-19T18:40:00.000Z', mode: 'guard', writes: { on: true, capUsd: 100 }, cardMinutes: 30,
+  seat: { name: 'Gravit', status: 'admitted', address: '0xab12', validUntil: new Date(2026, 10, 19).getTime(), limits: [{ scope: 'trade', allow: ['paper-1'], perOrderUsd: 100, budgetUsd: 1000, spentUsd: 100, reservedUsd: 50, leftUsd: 850, validUntil: 1, expired: false }] },
+  venues: [{ id: 'paper-1', name: 'Paper account · paper', paper: true, usd: 10000 }, { id: 'okx', name: 'OKX', paper: false, usd: 0, stale: true, notServed: 'OKX does not serve this location' }],
+  cards: [{ id: 'card-7', usd: 56 }, { id: 'card-9', usd: 12 }], others: 1, ...over,
+});
+
+test('seatWords: nothing read, not reachable, and every standing in its words', () => {
+  assert.deepEqual(seatWords(null), { service: '', mode: '', writes: '', seat: '', limits: [], venues: [], cards: '', url: '' });
+  const off = seatWords({ ok: true, url: 'http://127.0.0.1:4820', reachable: false, error: 'ECONNREFUSED' });
+  assert.equal(off.service, '127.0.0.1:4820 · not reachable'); assert.equal(off.seat, ''); assert.equal(off.mode, ''); assert.equal(off.url, 'http://127.0.0.1:4820');
+  const on = seatWords(seatView());
+  assert.equal(on.service, '127.0.0.1:4820 · reachable'); assert.equal(on.mode, 'Guard'); assert.equal(on.writes, 'Trading on · $100 a move');
+  assert.equal(on.seat, 'Gravit · admitted until Nov 19');
+  assert.deepEqual(on.limits, ['trade · paper-1 · $100 an order · $850 of $1,000 left']);
+  assert.deepEqual(on.venues, [{ id: 'paper-1', name: 'Paper account · paper', paper: true, usd: '$10,000', note: '' }, { id: 'okx', name: 'OKX', paper: false, usd: '$0', note: 'OKX does not serve this location' }]);
+  assert.equal(on.cards, '2 cards waiting'); assert.equal(on.url, 'http://127.0.0.1:4820');
+  const standing = status => seatWords(seatView({ seat: { name: 'Gravit', status, limits: [] } })).seat;
+  assert.equal(standing('knocking'), 'Gravit · knocking — admit it on the Account page');
+  assert.equal(standing('absent'), 'Gravit · not on the account');
+  assert.equal(standing('expired'), 'Gravit · expired');
+  assert.equal(standing('revoked'), 'Gravit · revoked');
+  assert.equal(seatWords(seatView({ cards: [{ id: 'c', usd: 1 }] })).cards, '1 card waiting');
+  assert.equal(seatWords(seatView({ cards: [] })).cards, '');
+  assert.equal(seatWords(seatView({ mode: 'open' })).mode, 'Beast');
+  assert.equal(seatWords(seatView({ writes: { on: false, capUsd: null } })).writes, 'Read-only');
+  const lim = l => seatWords(seatView({ seat: { name: 'Gravit', status: 'admitted', limits: [l] } })).limits[0];
+  assert.equal(lim({ scope: 'trade', allow: ['paper-1'], perOrderUsd: 100, budgetUsd: 1000, spentUsd: 0, reservedUsd: 0, leftUsd: 1000, validUntil: 1, expired: true }), 'trade · paper-1 · $100 an order · $1,000 of $1,000 left · expired');
+  assert.equal(lim({ scope: 'trade', allow: ['paper-1', 'ex'], perOrderUsd: 100, budgetUsd: null, spentUsd: 0, reservedUsd: 0, leftUsd: null, validUntil: null, expired: false }), 'trade · paper-1, ex · $100 an order');
+  assert.deepEqual(seatWords(seatView({ venues: [{ id: 'v', name: '', paper: false, usd: null, stale: true }] })).venues, [{ id: 'v', name: 'v', paper: false, usd: '', note: 'stale' }]);
+});
 
 const keyed = () => ({
   ok: true, available: true, host: 'paper-api.alpaca.markets',

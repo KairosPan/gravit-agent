@@ -33,7 +33,7 @@ const providers = [
   { id: 'ifind', market: 'cn', status: 'unconfigured', source: 'iFinD', feed: '', transport: 'poll', message: 'A 股行情待配置 iFinD' },
 ];
 
-function screen({ tab = 'portfolio', data, failed = false, loading = false, keys = null, tools = null, probe = [], statement = false } = {}) {
+function screen({ tab = 'portfolio', data, failed = false, loading = false, keys = null, tools = null, probe = [], statement = false, seat, seatFailed = false } = {}) {
   let s = R.nav(emptyState(), { screen: 'account', tab });
   if (data !== undefined) s = R.accountLoaded(s, { data, at: NOW });
   if (failed) s = R.accountFailed(s, { at: NOW });
@@ -42,8 +42,19 @@ function screen({ tab = 'portfolio', data, failed = false, loading = false, keys
   if (tools) s = R.toolsLoaded(s, tools);
   if (probe.length) s = R.probeLoaded(s, probe);
   if (statement) s = R.openStatement(s);
+  if (seat !== undefined) s = R.seatLoaded(s, { data: seat, at: NOW });
+  if (seatFailed) s = R.seatFailed(s, { at: NOW });
   return { s, html: renderAccountScreen(s, NOW) };
 }
+
+// spec 2026-10-20 §6.3: the Account seat's standing as /data/seat.json serves it
+const seatView = (over = {}) => ({
+  ok: true, url: 'http://127.0.0.1:4820', reachable: true, asOf: new Date(2026, 9, 19, 14, 32).toISOString(), mode: 'guard', writes: { on: true, capUsd: 100 }, cardMinutes: 30,
+  seat: { name: 'Gravit', status: 'admitted', address: '0xab12', validUntil: new Date(2026, 10, 19).getTime(), limits: [{ scope: 'trade', allow: ['paper-1'], perOrderUsd: 100, budgetUsd: 1000, spentUsd: 100, reservedUsd: 50, leftUsd: 850, validUntil: 1, expired: false }] },
+  venues: [{ id: 'paper-1', name: 'Paper account · paper', paper: true, usd: 10000 }, { id: 'okx', name: 'OKX', paper: false, usd: 0, stale: true, notServed: 'OKX does not serve this location' }],
+  cards: [{ id: 'card-7', usd: 56 }, { id: 'card-9', usd: 12 }], others: 1, ...over,
+});
+const SEAT_BOX = /<section class="cardbox" aria-label="Account seat">[\s\S]*?<\/section>/;
 
 test('Portfolio from a keyed payload: net worth, today with its sign, the bar, holdings linking their market, orders by bucket', () => {
   const { html } = screen({ data: keyed() });
@@ -125,9 +136,35 @@ test('no Chinese ever reaches the HTML', () => {
   for (const { html } of states) assert.doesNotMatch(html, CJK);
 });
 
-test('no Guard, Beast, Trading on, Move, Receive, Connect or Memory', () => {
+test('Venues: the Account seat box — nothing read, not reachable, knocking, admitted with its limit, the paper venue, the cards and the link', () => {
+  const idle = screen({ tab: 'venues', data: keyed() }).html;
+  assert.match(idle, /<section class="cardbox" aria-label="Account seat"><div class="cardbox-title">Account seat<\/div><p class="acct-note">Loading…<\/p>/);
+  const off = screen({ tab: 'venues', data: keyed(), seat: { ok: true, url: 'http://127.0.0.1:4820', reachable: false, error: 'ECONNREFUSED' } }).html;
+  assert.match(off, /<div class="venues"><div class="venue"><span><b>127\.0\.0\.1:4820 · not reachable<\/b><\/span><\/div><\/div>/);
+  assert.doesNotMatch(off, /Gravit ·/);
+  assert.match(off, /<div class="btn-row"><a class="btn-sm" href="http:\/\/127\.0\.0\.1:4820" target="_blank" rel="noopener">Open the Account page<\/a><button type="button" class="btn-sm" data-action="refreshAccount">Refresh<\/button><\/div>/);
+  const knocking = screen({ tab: 'venues', data: keyed(), seat: seatView({ seat: { name: 'Gravit', status: 'knocking', limits: [] }, cards: [], venues: [] }) }).html;
+  assert.match(knocking, /<div class="venue"><span><b>Gravit · knocking — admit it on the Account page<\/b><\/span><\/div>/);
+  assert.match(knocking, /<p class="acct-note">As of 14:32<\/p>/);
+  const on = screen({ tab: 'venues', data: keyed(), seat: seatView() }).html;
+  assert.match(on, /<div class="venue"><span><b>127\.0\.0\.1:4820 · reachable<\/b><br><span class="dim">Guard · Trading on · \$100 a move<\/span><\/span><\/div>/);
+  assert.match(on, /<div class="venue"><span><b>Gravit · admitted until Nov 19<\/b><br><span class="dim">trade · paper-1 · \$100 an order · \$850 of \$1,000 left<\/span><\/span><\/div>/);
+  assert.match(on, /<div class="venue"><span><b>Paper account · paper<\/b> <span class="chip grey">Paper<\/span><br><span class="dim">\$10,000<\/span><\/span><\/div>/);
+  assert.match(on, /<div class="venue"><span><b>OKX<\/b><br><span class="dim">\$0 · OKX does not serve this location<\/span><\/span><\/div>/);
+  assert.match(on, /<p class="acct-note">2 cards waiting · As of 14:32<\/p>/);
+  const stale = screen({ tab: 'venues', data: keyed(), seat: seatView(), seatFailed: true }).html;
+  assert.match(stale, /<p class="acct-note">2 cards waiting · As of 14:32 · stale<\/p>/);
+  assert.doesNotMatch(on, CJK);
+});
+
+test('no Guard, Beast, Trading on, Move, Receive, Connect or Memory — and with a seat read, the Account\'s own mode words only inside its box', () => {
   const html = screen({ data: keyed() }).html + screen({ tab: 'venues', data: keyed() }).html;
   for (const gone of [/Guard/, /Beast/, /Trading on/, /Move/, /Receive/, /Connect/, /Memory/, /openPanel/]) assert.doesNotMatch(html, gone, String(gone));
+  const read = screen({ tab: 'venues', data: keyed(), seat: seatView({ mode: 'open' }) }).html;
+  const box = read.match(SEAT_BOX)?.[0] ?? '';
+  assert.match(box, /Beast · Trading on/);
+  const outside = read.replace(SEAT_BOX, '');
+  for (const gone of [/Guard/, /Beast/, /Trading on/, /Move/, /Receive/, /Connect/, /Memory/, /openPanel/]) assert.doesNotMatch(outside, gone, String(gone));
 });
 
 test('Settings drawer: the theme seg', () => {

@@ -35,6 +35,8 @@ export function emptyState() {
     },
     // the host's account (host/account.js) and the Statement drawer
     account: { status: 'idle', data: null, at: null, creds: null, tools: null, probe: [], statementOpen: false },
+    // the Account seat's standing (host/seat.js): /data/seat.json as read
+    seat: { status: 'idle', data: null, at: null },
     edit: null,
     confirm: null,
   };

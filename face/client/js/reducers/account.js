@@ -3,8 +3,13 @@
 import { closeOverlays } from './messages.js';
 
 const acc = (s, patch) => ({ ...s, account: { ...s.account, ...patch } });
+const seat = (s, patch) => ({ ...s, seat: { ...s.seat, ...patch } });
 
 export const reducers = {
+  // the Account seat's standing (host/seat.js): /data/seat.json as read; a failed read keeps the last view
+  seatLoading: s => seat(s, { status: 'loading' }),
+  seatLoaded: (s, { data, at }) => seat(s, { status: 'ready', data, at }),
+  seatFailed: (s, { at }) => seat(s, { status: 'error', at }),
   // the host's account (host/account.js): /data/account.json as read, the keys, the registry's tool names, the quote providers
   accountLoading: s => acc(s, { status: 'loading' }),
   accountLoaded: (s, { data, at }) => acc(s, { status: 'ready', data, at }),

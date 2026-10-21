@@ -16,6 +16,7 @@ import { startLive } from './host/live.js';
 import { makeActions } from './host/actions.js';
 import { startMarkets } from './host/markets.js';
 import { startAccount } from './host/account.js';
+import { startSeat } from './host/seat.js';
 import { startChannels } from './host/channels.js';
 import { renderChannelScreen } from './render/channel.js';
 import { startDiscover } from './host/discover.js';
@@ -156,8 +157,10 @@ export function boot(win, host = {}) {
   // the paper account: read at boot, on entering Account, on Refresh, and right after a fill
   const account = startAccount({ store, getJson, call, now });
   void account.load();
-  // a receipt from the Account seat reloads the seat's standing (host/seat.js, stage B); an Alpaca fill reloads the account
-  const live = startLive({ store, openMux: host.openMux ?? wireOpenMux, call, mapFrame, getJson, timers, now, onReceipt: m => { if (!m?.data?.seat) void account.load({ fresh: true }); } });
+  // the Account seat's standing (spec 2026-10-20 §6.3): read on entering Venues, on Refresh there, and right after a seat receipt
+  const seat = startSeat({ store, getJson, now });
+  // a receipt from the Account seat reloads the seat's standing; an Alpaca fill reloads the account
+  const live = startLive({ store, openMux: host.openMux ?? wireOpenMux, call, mapFrame, getJson, timers, now, onReceipt: m => { if (m?.data?.seat) void seat.load({ fresh: true }); else void account.load({ fresh: true }); } });
   // answers go through the live layer, which settles the gate it delivered once the answer wins
   const actions = makeActions({ store, call, answerGate: (eventId, value) => live.answer(eventId, value), postJson });
   // Markets: the face's live quotes and symbol search (a test hands in its own), the watchlist in this browser's storage
@@ -308,7 +311,7 @@ export function boot(win, host = {}) {
     // a market page reads its daily bars once per opening (crypto and cn have none to read)
     if (r.screen === 'markets' && r.id) { if (r.id !== barsFor) { barsFor = r.id; void markets.bars(r.id); } } else barsFor = null;
     if (r.screen === 'account' && was?.screen !== 'account') void account.load();
-    if (r.screen === 'account' && r.tab === 'venues' && !(was?.screen === 'account' && was.tab === 'venues')) void account.describe();
+    if (r.screen === 'account' && r.tab === 'venues' && !(was?.screen === 'account' && was.tab === 'venues')) { void account.describe(); void seat.load(); }
     if (r.screen === 'channel' && !(was?.screen === 'channel' && was.id === r.id)) void channels.overview(r.id);
     const inDiscover = route => route?.screen === 'discover' || route?.screen === 'plugin';
     if (inDiscover(r) && !inDiscover(was)) void discover.load();
@@ -495,7 +498,7 @@ export function boot(win, host = {}) {
     refreshAccount: () => {
       void account.load({ fresh: true });
       const r = store.get().route;
-      if (r.screen === 'account' && r.tab === 'venues') void account.describe();
+      if (r.screen === 'account' && r.tab === 'venues') { void account.describe(); void seat.load({ fresh: true }); }
     },
     openStatement: () => {
       if (store.get().route.screen !== 'account') go({ screen: 'account', tab: 'portfolio' });

@@ -2,6 +2,7 @@
 // Alpaca's own decimal strings become the portfolio, the orders by bucket, the statement and its CSV, and the venue's facts.
 // An amount that does not parse is null, never NaN and never 0. No DOM.
 import { number, orderMatches } from '../wire/account-model.js';
+import { fmtDate } from '../time.js';
 import { positionId } from './market-view.js';
 
 const CLASSES = { us_equity: ['equity', 'Stocks'], crypto: ['crypto', 'Crypto'] };
@@ -129,4 +130,47 @@ export function venueOf(data, creds, toolNames) {
   }
   const orders = Array.isArray(toolNames) ? (toolNames.some(name => typeof name === 'string' && name.endsWith('__place_order')) ? 'on' : 'off') : 'unknown';
   return { host, mode, keys, orders };
+}
+
+const isNum = v => typeof v === 'number' && Number.isFinite(v);
+// whole dollars where they are whole: "$100", "$1,000", "$56.17"
+const dollars = n => `$${Number(n).toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+const EMPTY_SEAT = { service: '', mode: '', writes: '', seat: '', limits: [], venues: [], cards: '', url: '' };
+
+/** The Account seat's standing (/data/seat.json; spec 2026-10-20 §6.3) in the words the Venues box draws: the service, the
+ *  Account's own mode and writes, the seat's standing, each limit, the venues with the paper ones marked, the cards waiting.
+ *  Nothing read, or a view that is not one, is all blanks; a service not reachable is that line and nothing else. */
+export function seatWords(data) {
+  if (!data || data.ok !== true) return EMPTY_SEAT;
+  const url = typeof data.url === 'string' ? data.url : '';
+  let host = url;
+  try { host = new URL(url).host; } catch { /* a bare address stays as it is */ }
+  if (data.reachable !== true) return { ...EMPTY_SEAT, service: `${host} · not reachable`, url };
+  const mode = data.mode === 'guard' ? 'Guard' : data.mode === 'open' ? 'Beast' : '';
+  const w = data.writes;
+  const writes = w && typeof w === 'object' ? (w.on === true ? `Trading on${isNum(w.capUsd) ? ` · ${dollars(w.capUsd)} a move` : ''}` : 'Read-only') : '';
+  const s = data.seat && typeof data.seat === 'object' ? data.seat : {};
+  const name = typeof s.name === 'string' && s.name ? s.name : 'Gravit';
+  const seat = s.status === 'admitted' ? `${name} · admitted${isNum(s.validUntil) ? ` until ${fmtDate(s.validUntil)}` : ''}`
+    : s.status === 'knocking' ? `${name} · knocking — admit it on the Account page`
+      : s.status === 'expired' ? `${name} · expired`
+        : s.status === 'revoked' ? `${name} · revoked`
+          : `${name} · not on the account`;
+  const limits = (Array.isArray(s.limits) ? s.limits : []).map(l => [
+    l.scope,
+    (Array.isArray(l.allow) ? l.allow : []).join(', '),
+    isNum(l.perOrderUsd) ? `${dollars(l.perOrderUsd)} an order` : '',
+    isNum(l.budgetUsd) ? `${dollars(isNum(l.leftUsd) ? l.leftUsd : 0)} of ${dollars(l.budgetUsd)} left` : '',
+    l.expired === true ? 'expired' : '',
+  ].filter(Boolean).join(' · '));
+  const venues = (Array.isArray(data.venues) ? data.venues : []).map(v => ({
+    id: typeof v.id === 'string' ? v.id : '',
+    name: typeof v.name === 'string' && v.name ? v.name : (typeof v.id === 'string' ? v.id : ''),
+    paper: v.paper === true,
+    usd: isNum(v.usd) ? dollars(v.usd) : '',
+    note: typeof v.notServed === 'string' && v.notServed ? v.notServed : (v.stale === true ? 'stale' : ''),
+  }));
+  const n = Array.isArray(data.cards) ? data.cards.length : 0;
+  const cards = n === 0 ? '' : `${n} card${n === 1 ? '' : 's'} waiting`;
+  return { service: `${host} · reachable`, mode, writes, seat, limits, venues, cards, url };
 }

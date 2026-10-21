@@ -5,7 +5,7 @@ import { esc, cls } from '../html.js';
 import { fmtClock, fmtDate, sameDay } from '../time.js';
 import { money, signedMoney, pct, sign } from '../wire/account-model.js';
 import { price } from '../wire/market-model.js';
-import { portfolioOf, orderLine, statementOf, venueOf } from '../host/account-view.js';
+import { portfolioOf, orderLine, statementOf, venueOf, seatWords } from '../host/account-view.js';
 import { providerWord } from '../host/market-view.js';
 import { chip } from './thread.js';
 import { seg, segLinks } from './controls.js';
@@ -54,14 +54,37 @@ function portfolio(state, now) {
   return `<div class="cards">${worth}${orders}</div>`;
 }
 
-function venues(state) {
+function venues(state, now) {
   const a = state.account;
   const v = venueOf(a.data, a.creds, a.tools);
   const facts = [v.host, KEYS[v.keys], ORDERS[v.orders]].filter(Boolean).join(' · ');
   const alpaca = `<div class="venue"><span><b>Alpaca${v.mode ? ` ${v.mode.toLowerCase()}` : ''}</b><br><span class="dim">${esc(facts)}</span></span></div>`;
   const quotes = (a.probe ?? []).map(p => `<div class="venue"><span>${esc(providerWord(p))}</span></div>`).join('');
   return `<div class="cards">${box(`<div class="cardbox-title">Venues</div><div class="venues">${alpaca}</div>` +
-    `${quotes ? `<div class="cardbox-title">Quotes</div><div class="venues">${quotes}</div>` : ''}`, 'Venues')}</div>`;
+    `${quotes ? `<div class="cardbox-title">Quotes</div><div class="venues">${quotes}</div>` : ''}`, 'Venues')}${seatBox(state, now)}</div>`;
+}
+
+// the Account seat's standing (spec 2026-10-20 §6.3): the service with the Account's own mode and writes, the seat and its
+// limits, the venues with the paper ones marked, the cards waiting on the Account page — and the way there, the only place a
+// card is signed. Its words are the Account's; the stamp is when the face read them.
+function seatBox(state, now) {
+  const s = state.seat;
+  const w = seatWords(s.data);
+  const row = (title, dims = [], chipText = '') => `<div class="venue"><span><b>${esc(title)}</b>${chipText ? ` ${chip(chipText)}` : ''}` +
+    `${dims.filter(Boolean).map(d => `<br><span class="dim">${esc(d)}</span>`).join('')}</span></div>`;
+  let body;
+  if (!s.data) body = note(s.status === 'error' ? 'Seat unavailable' : 'Loading…');
+  else if (!w.service) body = note('Seat unavailable');
+  else {
+    const rows = [row(w.service, [[w.mode, w.writes].filter(Boolean).join(' · ')])];
+    if (w.seat) rows.push(row(w.seat, w.limits));
+    for (const v of w.venues) rows.push(row(v.name, [[v.usd, v.note].filter(Boolean).join(' · ')], v.paper ? 'Paper' : ''));
+    const stamp = `As of ${when(s.data.asOf ?? s.at, now) || 'earlier'}${s.status === 'error' ? ' · stale' : ''}`;
+    body = `<div class="venues">${rows.join('')}</div>${note([w.cards, stamp].filter(Boolean).join(' · '))}`;
+  }
+  const keys = `<div class="btn-row">${w.url ? `<a class="btn-sm" href="${esc(w.url)}" target="_blank" rel="noopener">Open the Account page</a>` : ''}` +
+    `<button type="button" class="btn-sm" data-action="refreshAccount">Refresh</button></div>`;
+  return box(`<div class="cardbox-title">Account seat</div>${body}${keys}`, 'Account seat');
 }
 
 // the Statement: the filled orders among the 50 most recent, newest first, and their CSV
@@ -90,6 +113,6 @@ export function renderAccountScreen(state, now) {
     `<button type="button" class="pill" data-action="refreshAccount">Refresh</button><button type="button" class="pill" data-action="openSettings">Settings</button></div>`;
   const tabs = segLinks([['Portfolio', '#/account/portfolio', 'portfolio'], ['Venues', '#/account/venues', 'venues']], tab);
   const statement = a.statementOpen && !state.settingsOpen;
-  return `<main class="${cls('main', 'acct', (state.settingsOpen || statement) && 'with-drawer')}">${head}${tabs}${tab === 'venues' ? venues(state) : portfolio(state, now)}` +
+  return `<main class="${cls('main', 'acct', (state.settingsOpen || statement) && 'with-drawer')}">${head}${tabs}${tab === 'venues' ? venues(state, now) : portfolio(state, now)}` +
     `${statement ? renderStatement(state, now) : ''}</main>`;
 }
