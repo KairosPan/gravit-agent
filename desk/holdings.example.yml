@@ -1,0 +1,10 @@
+# The operator's book at their broker, typed by hand: the holdings the pre-close brief prices.
+# Copy it to desk/holdings.yml, which is gitignored and stays on this machine; this example is tracked.
+- symbol: NVDA
+  qty: 100              # a number other than 0; below 0 is a short
+  avg_cost: 120.50      # above 0
+  opened: 2026-03-02    # if wanted: the date it was opened, YYYY-MM-DD
+  broker: IBKR          # if wanted: one line, at most 40 characters
+- symbol: SPY
+  qty: 20
+  avg_cost: 560.00

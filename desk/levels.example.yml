@@ -1,0 +1,23 @@
+# The operator's price levels, each with its plan: what the brief measures and the watch will alert on.
+# Copy it to desk/levels.yml (or strategies/<name>/levels.yml), both gitignored; this example is tracked.
+- symbol: NVDA
+  kind: stop                # buy_zone, stop, target or watch
+  price: 170                # above 0; or range: [low, high] with when: enter
+  when: cross_down          # cross_up or cross_down with a price, enter with a range
+  plan: if it closes below 170, sell half at the next open and reread the thesis   # required, one line, at most 300 characters
+  source: the August swing low   # if wanted: where it came from, at most 200 characters
+  expires: 2026-12-31       # required: the last date it holds
+- symbol: AAPL
+  kind: buy_zone
+  range: [218, 222]
+  when: enter
+  plan: buy 10 shares if SPY is above its 20-day average
+  expires: 2026-12-31
+  cooldown: 60m             # between two alerts on this level: 1m to 1440m, 30m by default
+- symbol: NVDA
+  kind: target
+  price: 210
+  when: cross_up
+  plan: sell a third and raise the stop to the entry price
+  expires: 2026-12-31
+  annotate: false           # true by default: a plan-check turn follows the alert
