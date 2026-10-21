@@ -60,7 +60,7 @@ test("roles smoke: persona, exact tools, the result, the baseline, a fork's iden
     setupFaceProfile(home);
     const patchPath = join(home, "profiles", "face", "cordis.patch.yml");
     const patch = readFileSync(patchPath, "utf8").replace(/^\[\][ \t]*$/m, "");
-    writeFileSync(patchPath, `${patch}\n- id: mcp-akshare\n  disabled: true\n- id: agent-default-model\n  config:\n    provider: stub\n    model: echo\n`);
+    writeFileSync(patchPath, `${patch}\n- id: mcp-akshare\n  disabled: true\n- id: mcp-account\n  disabled: true\n- id: agent-default-model\n  config:\n    provider: stub\n    model: echo\n`);
     const booted = await bootFace({ profileName: "face", port: 0, dshHome: home, botsRoot: bots });
     dispose = booted.dispose;
     const { ctx } = booted;

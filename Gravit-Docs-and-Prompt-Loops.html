@@ -178,7 +178,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
 <p>自述“描述性而非规定性”，全仓库唯一的 CLAUDE.md，2026-09-30 最后通审。四块：</p>
 <ul>
 <li><strong>What this is</strong>：一人一机一主代理的市场–策略–账户研究工作台，2026-08-29 从旧产品重置；MARKET + ACCOUNT 是 <code>alpaca_kit</code>（库 + MCP 服务器），STRATEGY 是 <code>strategies/</code>，跑在 face 里的 dsh 上。</li>
-<li><strong>Map</strong>：一张表，每行一个目录或文件及其职责——宪章、开发稿、AGENTS/GRAVIT/ROADMAP、<code>alpaca_kit</code> 各模块、<code>strategies/ data/ scripts/</code>、<code>dsh/</code>、<code>face/</code>、<code>face/src/akshare.ts</code>、<code>bots/</code>、<code>roles/</code>、<code>docs/</code>、两套测试、<code>demo/</code> 子模块（buyer-agent-demo @ 0ef5131）。</li>
+<li><strong>Map</strong>：一张表，每行一个目录或文件及其职责——宪章、开发稿、AGENTS/GRAVIT/ROADMAP、<code>alpaca_kit</code> 各模块、<code>strategies/ data/ scripts/</code>、<code>dsh/</code>、<code>face/</code>、<code>face/src/akshare.ts</code>、<code>bots/</code>、<code>roles/</code>、<code>docs/</code>、两套测试、Account 席位行（<code>face/src/account-seat.ts</code>，Linqi 的账户程序是外部安装的，不再钉子模块）。</li>
 <li><strong>Commands</strong>：<code>pip install -e ".[dev]"</code>、<code>pytest</code>、<code>python -m alpaca_kit.mcp</code>；face 的 <code>npm run setup</code>、<code>npm test &amp;&amp; npm run typecheck</code>、<code>npm start</code>。</li>
 <li><strong>Gotchas</strong>：公司行动以 <code>announce_date := process_date</code> 为键；<code>ALPHA_DATA_FEED</code> 默认 <code>iex</code>；价格 RAW 未复权且 <code>make_source()</code> 按约返回裸源；回测只走 <code>replay_days</code> 且必须用 <code>start=/end=</code> 圈在床窗口内（无 warmup）；两道下单门都在 MCP 工具面上，都不是封闭；<code>cordis.yml</code> 每次启动被重写为 <code>[]</code>，操作员改 <code>cordis.patch.yml</code>；聊天 URL 带 token，cookie 绑定精确 host:port；<code>face/client/*</code> 无缓存头，改完硬刷新。</li>
 </ul>
@@ -260,7 +260,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
 <ol>
 <li>bundle 层：dsh-base 的 <code>cordis.patch.yml</code>（含存储链、投影缓存、所有工具行）；</li>
 <li>face 的策略层 <code>src/policy.ts</code>：恢复 0.1.1 的姿态——D3 关遥测、D4 关 <code>session-log-deepseek</code>（本会把 ≤ 8 MiB 会话事件随每个 DeepSeek 请求上传）、D5 关包清单上传、D6 关 <code>web_fetch</code>（<code>tool-web {fetch:false, searchTimeoutMs:60000}</code>，<code>web {searchProvider: deepseek-official}</code>，<code>web-fetch-http</code> 禁用）、D7 关 MCP resource 三个工具及其提示段、D9 开 <code>ralph</code> 并插回 <code>str_replace_editor</code>；</li>
-<li>项目的 AKShare 连接 <code>src/akshare.ts</code>（<code>mcp-akshare</code>，<code>~/.local/bin/akshare-mcp</code>，500 行限制，120 s 超时，启动失败不停机）；</li>
+<li>项目的 AKShare 连接 <code>src/akshare.ts</code>（<code>mcp-akshare</code>，<code>~/.local/bin/akshare-mcp</code>，500 行限制，120 s 超时，启动失败不停机）和 Account 席位行 <code>src/account-seat.ts</code>（<code>mcp-account</code>，Linqi 的账户程序的 MCP 席位，操作员自装的 checkout <code>FACE_ACCOUNT_SEAT_DIR</code>，服务地址 <code>FACE_ACCOUNT_URL</code>，90 s 超时，启动失败不停机；它的 35 个工具 schema 进每次请求的工具块，没有提示段）；</li>
 <li>profile 的 <code>cordis.patch.yml</code>（上面三行）；</li>
 <li>家目录层 <code>$DSH_HOME/cordis.patch.yml</code>，然后仅工具用的内存层 <code>extraPatches</code>；</li>
 <li>face 的开关：<code>DSH_TELEMETRY_DISABLED</code> 时关遥测行、<code>hmr</code> 永远关、<strong>persona patch</strong>（只写 <code>system-prompt.personaPrefix</code> = persona.md，其余键原样展开）、<strong>instructions patch</strong>（只写两个候选名单）；</li>

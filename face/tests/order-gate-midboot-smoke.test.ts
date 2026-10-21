@@ -314,6 +314,8 @@ test("mid-boot: while a slow row holds boot() open, a live order tool is held fo
     patch,
     "- id: mcp-akshare",
     "  disabled: true",
+    "- id: mcp-account",
+    "  disabled: true",
     "- insert:",
     "    - id: midboot-order-standin",
     `      name: ${JSON.stringify(pathToFileURL(join(FIXTURES, "midboot-order-standin.js")).href)}`,

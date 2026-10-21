@@ -31,7 +31,7 @@ import { resolveDshHome } from "@deepseek-ai/dsh-home-paths";
 import { EXIT_INCOMPLETE, EXIT_REFUSED, liveHomeCandidates } from "./check-home.ts";
 
 /** Prefix groups in print order; a tool joins the first prefix it starts with, else the host's. */
-const GROUPS = ["mcp__alpaca-kit__", "mcp__akshare__", "agent_", "role_"];
+const GROUPS = ["mcp__alpaca-kit__", "mcp__akshare__", "mcp__account__", "agent_", "role_"];
 const HOST = "(host)";
 
 const idOf = (path: string): string | undefined => {

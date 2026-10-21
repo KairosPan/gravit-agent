@@ -50,7 +50,7 @@ test("gravit client smoke: the page at /, its modules under /client, and the liv
   const patchPath = join(home, "profiles", "face", "cordis.patch.yml");
   const patch = readFileSync(patchPath, "utf8").replace(/^\[\][ \t]*$/m, "");
   // This smoke owns a scratch profile and must not start the operator's data server.
-  writeFileSync(patchPath, `${patch}\n- id: mcp-akshare\n  disabled: true\n`);
+  writeFileSync(patchPath, `${patch}\n- id: mcp-akshare\n  disabled: true\n- id: mcp-account\n  disabled: true\n`);
   const { ctx, dispose } = await bootFace({ profileName: "face", port: 0, dshHome: home, botsRoot: await makeBotsRoot() });
 
   const scope = globalThis as Record<string, unknown>;

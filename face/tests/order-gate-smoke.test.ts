@@ -141,7 +141,7 @@ test("Gate 2 positive path: an approved PAPER order dispatches; a rejected one d
   setupFaceProfile(home);
   const patchPath = join(home, "profiles", "face", "cordis.patch.yml");
   const patch = readFileSync(patchPath, "utf8").replace(/^\[\][ \t]*$/m, "");
-  writeFileSync(patchPath, `${patch}\n- id: mcp-akshare\n  disabled: true\n`);
+  writeFileSync(patchPath, `${patch}\n- id: mcp-akshare\n  disabled: true\n- id: mcp-account\n  disabled: true\n`);
   const { ctx, dispose } = await bootFace({ profileName: "face", port: 0, dshHome: home, botsRoot: await makeBotsRoot() });
   const cleanups: (() => void)[] = [];
   try {

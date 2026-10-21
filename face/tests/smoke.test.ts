@@ -200,7 +200,7 @@ test("boot smoke: sign-in gates /api and the mux, the pages and /data answer, Gr
   const patchPath = join(home, "profiles", "face", "cordis.patch.yml");
   const patch = readFileSync(patchPath, "utf8").replace(/^\[\][ \t]*$/m, "");
   // This smoke owns a scratch profile and must not start the operator's data server.
-  writeFileSync(patchPath, `${patch}\n- id: mcp-akshare\n  disabled: true\n`);
+  writeFileSync(patchPath, `${patch}\n- id: mcp-akshare\n  disabled: true\n- id: mcp-account\n  disabled: true\n`);
   /* Booted the way main.ts boots: `deferReady`, so the browser streams open
    * only when `commitReady()` runs after the face's own routes (step 7 below
    * drills both sides of that commit). Every other smoke takes the default,

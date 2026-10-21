@@ -83,7 +83,7 @@ test("bot runtime smoke: actual home routing, saved-versus-mounted identity, rea
     /* This smoke owns a scratch profile and must not start the operator's data
      * server. The host default is the profile's `agent-default-model` row, the
      * only place a face default route can come from (see the header). */
-    writeFileSync(patchPath, `${patch}\n- id: mcp-akshare\n  disabled: true\n` +
+    writeFileSync(patchPath, `${patch}\n- id: mcp-akshare\n  disabled: true\n- id: mcp-account\n  disabled: true\n` +
       "- id: agent-default-model\n  config:\n    provider: stub\n    model: host-default\n");
     const { ctx, dispose, botPresets } = await bootFace({ profileName: "face", port: 0, dshHome: home, botsRoot: bots });
     let disposeRuntime = (): void => undefined;
