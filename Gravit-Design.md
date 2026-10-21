@@ -40,7 +40,10 @@ one execution context.
   (As of 2026-09-04 only the template is committed; the three live strategies are untracked, so
   their ledger is not yet written — `DEVELOPMENT.md` §3.4.)
 - **ACCOUNT** — an Alpaca paper account, read-only by default. Order capability exists in code
-  behind two gates (§4); it has never been armed in the operator's real harness home.
+  behind two gates (§4); it has never been armed in the operator's real harness home. Since
+  2026-10-20 also a seat at the operator's Account — Linqi's buyer-agent-demo, an external program
+  on this machine — through one MCP row, on its paper venues only: every seat write passes Gate 2
+  here and the Account's own card there (D17).
 
 **What a working day looks like.** The operator opens the face at `127.0.0.1:3090`, picks a
 channel, and talks to Gravit. Gravit screens, backtests and reads the market through the
@@ -119,6 +122,8 @@ the design economizes it but never designs it away.
 │ Alpaca REST · EDGAR ·          │ Alpaca paper: account /         │
 │ offline PIT beds               │ positions / orders queries      │
 │                                │ (order tools double-gated)      │
+│                                │ + the Account seat: an external │
+│                                │ program's paper venues, carded  │
 └────────────────────────────────┴─────────────────────────────────┘
 ```
 
@@ -145,6 +150,7 @@ Who may change what. This table is the charter's core; everything else supports 
 | `dsh/profile/cycle.md` | operator only | the research-cycle contract Gravit runs; Gravit proposes changes in conversation and never edits it; git |
 | `data/pit/` beds | nobody — read-only captured artifacts | a `CHECKSUMS` manifest on the 2yr bed (the broad bed predates the manifest and carries none), checked by hand; recapture is the only legitimate write |
 | paper orders | nobody today | **Gate 1** (registration; enforced, test-pinned): the order tools exist in a session only when the operator's flag AND broker keys are both present. **Gate 2** (per-order approval; built 2026-09-04, in the face): every call to an order tool stops for a card the operator must answer (under a `never` policy, or with no session to ask in, it is denied outright rather than asked), and a guard admits the call only on a logged one-shot approval for that exact call and tool. Its automated drill passed and is mutation-proven for the refusing half (the card is raised, the read-only listing is not gated, an unapproved order does not dispatch); the admitting half — a real logged grant letting an approved order through the live pipeline — is automated too (2026-09-30), over the browser's own answer channel as well; its human half — a person reading the card against armed tools in a scratch home — has not been run (D3). It binds only when dsh runs inside the face (D8) |
+| orders at the Account seat (`mcp__account__*` writes) | nobody today — Gravit, under both cards, once the operator admits the seat as Gravit on the Account page and signs it a `trade` limit naming a paper venue | **Gate 2** cards every seat write before it leaves dsh (the twelve writes, and any seat tool the face has not classified), and the Account's Guard cards it again under the owner's device key; the seat's reach is exactly the limits the operator signs there — the face holds no key, signs nothing and does not model the Account's venues (D17); a limit on a real venue is the real-money trigger (§8) |
 
 Three honesty notes the table depends on. First, both order gates hold the MCP tool *surface*,
 not the account: the library's order function carries no flag, the broker key file is readable
@@ -182,6 +188,7 @@ solved would be worse than carrying them.
 | D14 | Structured room evidence, child-task results and role reports have no independent verification or result-acceptance mechanism; passing runtime drills does not establish better research | originals, request snapshots and task histories remain reviewable; Gravit checks results and the operator judges them | before claiming a research-quality gain or reducing review on the strength of these features |
 | D15 | Bot journal context is a bounded read of historical notes; freshness, conflicts and note selection still depend on manual maintenance | each request records what it consumed and exposes missing or truncated notes | when stale, conflicting or omitted notes materially affect a conclusion |
 | D16 | The per-cycle role-call cap (12) is a count Gravit keeps in the journal, not a threshold the harness enforces (Rule 1) | the round cap is enforced by the goal (the 24 is Gravit's argument to create_goal, as cycle.md instructs; dsh's own default is 256), every call is in the child history, and the operator reads the journal | the first overrun |
+| D17 | The Account seat's fence is the operator's grants on the Account page, not code in this tree: a limit signed on a real venue would reach real money through the same two cards, and the face cannot tell a paper venue from a real one; two cards per seat write meanwhile; the seat's key file is written by a child of the face outside the workspace, in the Account's home; the seat is matched by the name the owner typed | paper venues only by the operator's rule; the Account's own Guard, `--live-cap` and limits; both cards; one operator, one machine | the first limit signed on a non-paper venue, or a real venue connected to that Account with the seat granted reach — the real-money trigger (§8); a second human |
 
 ## 6. Rules carried forward
 
@@ -290,7 +297,10 @@ has hands and no voice, a bot a voice and no hands. A role's report is a claim G
   costs).
 - **No multi-tenant, cryptographic, or kernel-level machinery.** One operator, one machine.
   The risks are named here in one line each instead of being built against: a hosted or
-  multi-user deployment invalidates this charter rather than extending it.
+  multi-user deployment invalidates this charter rather than extending it. The Account seat's key
+  and the owner's device key are the Account's — Linqi's program, its home, its page — not this
+  tree's: the face holds no key and signs nothing, and Gate 2 stays the face's only gate
+  (2026-10-20).
 - **No memory substrate beyond what exists.** Git, strategy artifacts, bot journals and dsh's
   own session histories are the memory. A dedicated store is chosen when content demands one.
 
@@ -311,6 +321,7 @@ Few and concrete. Each names the section it reopens.
 | Claiming better research or reducing review because rooms or delegation are available | D1 · D14 · real-task comparison and explicit result acceptance |
 | Stale, conflicting or truncated journal notes affect a conclusion | §7.1 · D15 · maintenance and retrieval requirements before choosing a new memory store |
 | Expanding the interface migration in §9 | §3 (the FACE row) · §7.3 "No bespoke harness" and "No hosted face" · the two pins · the row and RPC inventory against the CLI's |
+| A limit signed for the Account seat on a venue that is not a paper account, or a real venue connected to that Account with the seat granted reach there | §4 both gates · D8 · D17 · the next charter (the venue-plugins handoff's §12.1, C1–C5) |
 | A second human, or any hosted deployment | this charter is the wrong document; write the next one |
 
 ## 9. Forward
@@ -335,6 +346,11 @@ Remaining directions below are not completed capabilities. Further design remain
   runs in other projects, or gets a home of its own. Bot inspection and native child-task
   controls are implemented parts of this direction; complete frontend replacement and the
   shared-home decision remain open.
+- **The Account seat** (built 2026-10-20; `docs/superpowers/specs/2026-10-20-account-seat-design.md`):
+  Gravit sits at Linqi's Account through one MCP row, on paper venues only, every write carded
+  twice. Open: real venues (the venue-plugins handoff's C1–C5, the next charter); one card per write
+  (a per-seat paper autonomy on the Account's side); the seat's tool block (`DEVELOPMENT.md` §4.3,
+  15,727 heuristic tokens) against the mask on Gravit's preset.
 - **Evaluate real research and make acceptance explicit** (D14, D16). Compare representative
   research tasks for evidence accuracy, useful disagreement, revision of conclusions, operator
   effort, elapsed time and usage. Develop traceability from claims to source material and from

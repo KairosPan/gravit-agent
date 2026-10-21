@@ -392,6 +392,21 @@ bot's carry an `mcp:akshare` section — and instructions over 32 KiB fail the c
 negotiation starts a probe process before the serving one, so each MCP server is spawned twice
 per connect. Installation, source limitations and the live-roster check are in `face/README.md`.
 
+The Account seat is the second project-owned row, `face/src/account-seat.ts` (spec
+`docs/superpowers/specs/2026-10-20-account-seat-design.md`): a stdio `mcp-account` row composed right
+after AKShare, below the operator's patches, that spawns the MCP seat of Linqi's Account
+(`linqizhe07/buyer-agent-demo`, an external program the operator installs at `FACE_ACCOUNT_SEAT_DIR`,
+default `~/buyer-agent-demo`, and runs at `FACE_ACCOUNT_URL`, default `http://127.0.0.1:4820`) with
+this process's node and the checkout's `tsx`, never `npx`; the seat is named `Gravit`
+(`PORTFOLIO_AGENT`), its key the Account's (`$BUYER_HOME/seats/gravit.json`, made by the seat on its
+first tool call), the call timeout 90 s (`portfolio_wait` runs 55 s at most), startup failure logged
+and not fatal. The seat sets no `instructions`; it registers its 35 real-account tools even with no
+service to reach (§4.3 prices them). A missing checkout is a spawn failure dsh logs: the row stays
+ACTIVE with no tools and the Account screen's seat box says the service is not reachable. The seat's
+twelve writes are Gate 2's (§4.7); its standing reaches the screen through `/data/seat.json` (§4.4);
+a role never carries a seat tool (§3.8's never-list). The install, what the service does on its own
+and the drill are in `face/README.md` "The Account seat".
+
 ### 3.2 Skill packs
 
 | Pack | Owner (charter §4) | Content |
@@ -418,7 +433,7 @@ strategy directory contract and lifecycle, the bed windows (its table is pinned 
 with its verdict": a session's sandbox root is its own cwd (dsh-base's `sandbox-policy` takes
 the header's `cwd`), so a commit from a channel session writes `.git` above it and raises an
 approval card, which inside the rounds would stall the run (`cycle.md` says the same). Budget
-4,500 bytes — 4,283 used — no `{{` (`face/tests/gravit-md.test.ts`). The Step 0 rule — a new
+4,500 bytes — 4,493 used — no `{{` (`face/tests/gravit-md.test.ts`). The Step 0 rule — a new
 strategy starts with one batched `ask_user_question` and no code — is not among them: it lives in
 `dsh/profile/cycle.md` (§4.3), not in the file every agent reads, so `GRAVIT.md` carries the
 facts and rules of the tree only.
@@ -520,6 +535,7 @@ default broken, and the boot refuses).
 | `ask_user_question` | `tool-ask-user` (face overlay; the blocking `legacy` mode) | §4.3; the answer is model-visible, so not a gate |
 | `mcp__alpaca-kit__*` | the operator's MCP row | §2.7 registration matrix |
 | `mcp__akshare__*` | project `mcp-akshare` row | public A-share/other market queries, unguarded; check source errors and truncation |
+| `mcp__account__*` | project `mcp-account` row (§3.1) | the Account seat: Linqi's Account at `127.0.0.1:4820`, an external program; 35 real-account tools (42 against a simulated service); the twelve writes carded by Gate 2 (§4.7), the reads public, seconds old and unguarded — never backtest evidence; `portfolio_wait` polls a card or an order for 55 s at most |
 | `agent_<bin>` | face `agents.ts` | roster-gated per channel (§6.5) |
 | `dispatch` | face `room.ts` (`installRoom`) | Gravit's own: refused in any session whose header or `agentPreset` projection names a bot (§6.8) |
 | `role_<id>` (one per `roles/<id>/`) | one `dsh-tool-subagent` row per role inside Gravit's preset, rendered by `src/roles.ts` (§3.8) | scoped: a bot never sees one, and a role child removes them through its own allow list (a `subagent_fork` child, restricted by nothing, keeps them, and so does a plain `subagent` child, though neither its roles section nor the cycle contract reaches it, §3.8); a one-shot `spawn` child with the role's persona and exactly the role's tools; the arguments are `description` (its label in Details' Children, §5.4) and `prompt`, and the call waits unless `run_in_background` is set |
@@ -909,11 +925,13 @@ smoke that boots without `main.ts` relies on.
 | `overlay.ts` | the thirteen host rows `dsh-base` does not mount (§4.3), `satisfies`-checked against each plugin's own config type; `BOTS_ROOT`, `DEFAULT_PRESET`, `GRAVIT_PLUGIN_RELATIVE`, `presetRowId` |
 | `policy.ts` | the policy layer (§4.3): `POLICY_ID_PATCHES`, `POLICY_INSERTS`, `facePolicyPatches` — each row a PLAN decision; a missing target is reported on stderr, never skipped silently |
 | `akshare.ts` | project AKShare MCP defaults, composed below operator profile/home patches |
-| `orders.ts` | Gate 2 decision logic, pure: `isOrderTool`, `effectiveApprovalPolicy`, `orderApprovalDecision` (with the `displayReason` twin), `describeOrder`, `hasApprovalGrant`, `isGatedTool`, `orderGuardReason`, `orderGuardReasonForSession` (the guard's one producer; reads `snapshotEvents()`, a distinct denial for an unreadable log), `auditOrderTools`, `OPERATOR_GATED_MARKER` — depends on nothing (structural types only) |
+| `account-seat.ts` | the Account seat row (§3.1): `ACCOUNT_SEAT_ROW_ID`, `ACCOUNT_SEAT_SERVER`, `SEAT_TOOL_PREFIX`, `ACCOUNT_SEAT_NAME`, `seatDir`/`seatUrl` (the env or the defaults), `accountSeatPatches` — this process's node, the checkout's `tsx`, the seat's env, 90 s, failing soft; composed right after AKShare |
+| `orders.ts` | Gate 2 decision logic, pure: `isOrderTool` (the Alpaca pair, the seat's twelve writes — `SEAT_WRITE_RAW_NAMES` — and any tool under the face's own seat prefix outside `SEAT_READ_RAW_NAMES`), `isSeatWriteTool`, `effectiveApprovalPolicy`, `orderApprovalDecision` (with the `displayReason` twin), `describeOrder` (the seat's keys in a readable order; a key field shown whole or the call denied), `hasApprovalGrant`, `isGatedTool`, `orderGuardReason`, `orderGuardReasonForSession` (the guard's one producer; reads `snapshotEvents()`, a distinct denial for an unreadable log), `auditOrderTools`, `OPERATOR_GATED_MARKER` — depends on nothing (structural types only) |
 | `setup.ts` | one-shot `$DSH_HOME/profiles/<name>` creation with `PATCH_HEADER`; refuses to overwrite |
 | `http.ts` | `HttpError`, `readBody` (4,096 B cap → 413), the fixed `FORBIDDEN` body |
 | `static.ts` | `/` behind `IndexAuth` (`ctx.connection.authorizeIndex`) and `/client/*` with a traversal-safe resolver — the one page since stage 2; the `RouteRegistrar` contract |
 | `data.ts` | `/data/{market,account,watchlist}.json`: fixed-argv `execFile` of the producers, TTL cache, single-flight, stale-on-error; mounts the bars, search and quote routes; **the trust fence every `/data` route reuses** |
+| `seat.ts` | `/data/seat.json` (§4.4): `seatView` (the Account's `/api/account` reduced to the seat's standing, total over any shape) and `registerSeatRoute` (the fence, a 30 s cache, `?fresh=1`, one flight, a 7 s abort, the failure's code and never its text) |
 | `bars.ts` | `/data/bars?id=&days=`: the request checked (one us id, 5–730 days, default 120), a per-(symbol, days) cache (600 s, 64 keys, least recently used out), single-flight, stale-on-error, `face_bars.py` spawned with exactly `[SYMBOL, DAYS]`; `quotes.ts`'s `parseInstrumentId` is the id grammar both routes share |
 | `watchlist.ts` | joins the watchlist producer's US snapshots with the reference-only search catalog |
 | `quotes.ts`, `quote-snapshots.ts`, `quote-streams.ts`, `quote-types.ts` | the Markets screen's live quotes: `/data/quotes` (JSON) and `/data/quotes/stream` (server-sent events), one shared upstream subscription per provider (Alpaca stream and snapshots, Coinbase, iFinD), a bounded latest-value cache; no credential reaches the browser |
@@ -1137,6 +1155,7 @@ row):
 | Group | Tools | Bytes | bytes/4 | chars/4 |
 |---|---|---|---|---|
 | `mcp__akshare__` | 14 | 134,452 | 33,613 | 24,426 |
+| `mcp__account__` — the Account seat, its own run of 2026-10-20 (AKShare off, no service to reach; not in the total below) | 35 | 63,221 | 15,806 | 15,727 |
 | the host's own | 26 | 23,468 | 5,867 | 5,857 |
 | `role_` (Gravit's preset) | 3 | 2,750 | 688 | 685 |
 | `mcp__alpaca-kit__`, keyless: `screen`, `market_snapshot`, `corp_actions`, `daily_bars`, `earnings`, `calendar`, `breadth` | 7 | 2,613 | 654 | 654 |
@@ -1155,6 +1174,17 @@ seven keyless tools, 654. Against the 2026-10-10 figure of 32,003, the groups th
 carried — the host's, AKShare's and these seven — come to 30,937 here, leaving 1,066 for the three
 account tools that register only with keys plus whatever the host's roster has gained or lost
 since: a residual, not a measurement; the operator's keyed run settles the account tools' share.
+
+**The Account seat's block**, measured on 2026-10-20 on a scratch home of its own (`setupFaceProfile`,
+`mcp-akshare` disabled, the seat row pointed at a checkout of buyer-agent-demo @ 133b9a7 with
+`FACE_ACCOUNT_URL=http://127.0.0.1:4` — no service: the seat registers its real-account tools all the
+same): 35 tools, 63,221 bytes, 15,806 bytes/4, 15,727 chars/4 — 64% of AKShare's 24,426, and the
+second-largest group the prompt can carry. Its six largest (bytes · bytes/4 · chars/4):
+`portfolio_live_preview` 5,347 · 1,337 · 1,332; `portfolio_live_order` 4,987 · 1,247 · 1,244;
+`portfolio_explore` 4,106 · 1,027 · 1,019; `portfolio_live_move` 3,432 · 858 · 854; `portfolio_account`
+3,374 · 844 · 838; `portfolio_live_batch` 3,194 · 799 · 797 — four of them larger than `workflow`.
+With AKShare, the seat and the keyless alpaca-kit row all mounted, the heuristic block would read
+about 47,300 chars/4, the 31,620 above plus the seat's 15,727 (R35).
 
 The two units part by 9,187 tokens on the AKShare group alone: its JSON holds 18,375 non-ASCII
 characters (18,211 of them CJK ideographs) among some 97,700, and the heuristic prices every UTF-16
@@ -1210,6 +1240,7 @@ passes on `Host` alone — `curl` works, which is residual R3 in §9.
 | `GET /` | `static.ts` | the sign-in and the app page (gravit-ui, §5): `authorizeIndex` first — a valid `?token=` is answered `303 ./` with the cookie, a cookie gets `index.html`, anything else a 401, and on a refusal the face writes nothing itself |
 | `/client/*` | `static.ts` | the client's assets; public (PLAN D8), no cache headers; path containment on the resolved absolute path. `/market` and `/account` left with stage 2 (Markets and Account are screens of the client at `/`) and reach no route: 404 |
 | `GET /data/account.json`, `/data/market.json`, `/data/watchlist.json` | `data.ts` | fence first, then cache, then spawn `$FACE_PYTHON` on the producer from the repo root (account: `face_data.py account`, 30 s, 60 s TTL; market: `face_data.py market`, 600 s, 15 min; watchlist: `face_watchlist.py`, 30 s, 15 min, joined with the reference catalog); single-flight (on the account route alone `?fresh=1` skips the TTL, never the single flight: Refresh and the read right after a fill); a later failure re-serves the last good payload flagged `stale:true`; with nothing to fall back on, 503 carrying the producer's own `{ok:false}` when it wrote one, the fixed `producer failed` when it exited 0 with no output, or `producer spawn failed` + the error code (`ENOENT`, `null` for a timeout kill, an exit number) — **never the child's error text**, which carries stderr and possibly keys. Only the Account screen reads its route (§5.3); `market.json` and `watchlist.json` remain for compatibility and no screen reads them |
+| `GET /data/seat.json` (`?fresh=1`) | `seat.ts` | the Account seat's standing (§3.1): fence first, then a 30 s cache (`?fresh=1` skips it; one flight), then a plain loopback `fetch` of the Account's own `GET /api/account` (7 s abort, `redirect: "error"`, no Origin — its fence answers a bare local request), reduced by `seatView` to the service, its mode and writes, the seat by the name the owner typed (`absent` · `knocking` · `admitted` · `expired` · `revoked`) with its limits and what is left of them, the venues with the paper ones marked, this seat's cards and the others' count; an unreachable, refusing, hanging or unreadable service is `reachable: false` with the failure's CODE (`ECONNREFUSED`, `http 403`, `timeout`, `unreadable`), never its text, and nothing is served stale; touches no key and no home |
 | `GET /data/symbols/search?q=&market=` | `symbol-search.ts` | instrument search across the Tencent and Yahoo endpoints, cached per query in memory |
 | `GET /data/quotes?ids=`, `/data/quotes/stream?ids=` | `quotes.ts` | the selected ids' live quotes (at most 100), as JSON or as server-sent events; empty selections reach no upstream |
 | `GET /data/bars?id=&days=` | `bars.ts` | one us id's daily bars for the Market page's chart: fence first (403), then 405 for any method but GET, 400 `invalid bars request` for a malformed target, a missing or repeated `id` or `days`, a non-us or ill-formed id, or days outside 5–730 (default 120); then the per-(symbol, days) cache (600 s TTL, 64 keys), single-flight, a spawn of `face_bars.py SYMBOL DAYS` (30 s); a later failure re-serves the last good payload flagged `stale:true`, and with nothing to fall back on it answers 503 like the producers above — the producer's own `{ok:false}`, `producer failed`, or `producer spawn failed` + the code, never the child's error text |
@@ -1272,13 +1303,15 @@ face's `WorkspaceLike`). Recorded, not fixed.
 | `FACE_PROFILE` | `main.ts`, `setup.ts` | `face` | honored by both `setup` and `start` |
 | `FACE_PYTHON` | `data.ts` | `python3` | the producers' interpreter; must `import alpaca_kit` |
 | `FACE_AKSHARE_MCP_COMMAND` | `akshare.ts` | `~/.local/bin/akshare-mcp` | the AKShare server's executable |
+| `FACE_ACCOUNT_SEAT_DIR` | `account-seat.ts` | `~/buyer-agent-demo` | the installed checkout of Linqi's Account (buyer-agent-demo, `npm ci` there) the seat process runs from |
+| `FACE_ACCOUNT_URL` | `account-seat.ts`, `seat.ts` | `http://127.0.0.1:4820` | the running Account service the seat and `/data/seat.json` read |
 | `FACE_IFIND_POLL_MS`, `IFIND_ACCESS_TOKEN`, `IFIND_REFRESH_TOKEN`, `ALPHA_DATA_FEED` | the quote routes; `face_bars.py` reads `ALPHA_DATA_FEED` for the chart's feed stamp | `30000`, —, —, `iex` | the Markets screen's live quotes (`face/README.md`, "Market credentials") |
 | `ALPHA_PIT_ROOT` | the producers (`face_data.py market`, `face_watchlist.py`, `face_bars.py`) | `data/pit/2yr` | the bed the market producers and the chart's fallback read |
 | `DSH_HOME` | `main.ts`, `boot.ts`, `sessions.ts`, `panels.ts` and dsh itself via `resolveDshHome`; `setup.ts` reads it raw (`?? ~/.dsh`) | `~/.dsh` | written by `bootFace` when a test passes an override; `resolveDshHome` treats an empty or whitespace value as unset and expands `~`, `setup.ts` does neither, so such a value sends `setup` and `start` to different homes |
 | `DSH_TELEMETRY_DISABLED` | `boot.ts` | unset | any non-empty value (`0`, `false` included) disables the telemetry row, and its patch composes after the operator layers, so it wins over an operator's re-enable; the policy layer disables the row by default anyway |
 | `DSH_PERMISSION_MODE` | dsh, not the face | `workspace-write` | `danger-full-access` sets approval policy `never`: it disarms the sandbox-escalation card but **not** Gate 2, which then denies in its own words |
 | `ALPACA_KIT_ENABLE_ORDERS` | the MCP child only | unset | Gate 1; the face cannot read it and consults the tool registry instead |
-| `FACE_SMOKE` | tests | unset | `=1` enables the sixteen real-boot tests |
+| `FACE_SMOKE` | tests | unset | `=1` enables the seventeen real-boot tests; the seat smoke also needs `FACE_ACCOUNT_SEAT_DIR` |
 | `DEEPSEEK_API_KEY`, `APCA_API_KEY_ID`, `APCA_API_SECRET_KEY` | dsh's credential seam; the producers and the quote routes; the MCP row | — | not auto-loaded from the repo's `.env.*` files |
 
 Every child the face spawns for a local agent run or probe has these scrubbed — an enumerated
@@ -1302,12 +1335,20 @@ because neither alone suffices:
 
 1. A **`tools/pre-execute` listener**, registered `prepend` so it is outermost in the waterfall
    and an inner listener cannot swallow its answer. Non-order tools pass through. For
-   `place_order` / `cancel_order` — matched on the **raw name suffix**
+   `place_order` / `cancel_order`, the Account seat's twelve writes (`SEAT_WRITE_RAW_NAMES`, §3.1) and
+   any tool under the face's own `mcp__account__` prefix that is neither one of them nor one of the
+   thirty reads the gate knows (`SEAT_READ_RAW_NAMES`; carded until classified, so an Account that grows
+   a tool cannot grow an ungated write) — matched on the **raw name suffix**
    (`name === raw || name.endsWith("__" + raw)`), so an operator renaming the MCP server row
    cannot slip a tool past, while the read-only `orders` listing is never matched — it returns
    `{kind:"ask", reason:"PAPER order - <tool>: side=… qty=… symbol=… …", displayReason:{en: <the
-   same line>}}` under policy `ask` (`describeOrder`: `key=value` pairs, values capped at 40
-   characters, unknown keys appended). The approval request carries no arguments — only the
+   same line>}}` under policy `ask` — `Account seat - <tool>: side=… usd=… symbol=… venue=…` for a seat
+   tool, since the face does not know a venue's kind and the Account's own card says PAPER
+   (`describeOrder`: `key=value` pairs in a readable order, values capped at 40 characters, unknown keys
+   appended; the key fields the operator decides on — a venue, a symbol, an id, an address, a payee's
+   URL — are shown WHOLE up to 120 characters, and a call whose key field cannot be shown whole is
+   **denied** before any card: too long, or a URL that is not http(s), carries userinfo or does not
+   parse). The approval request carries no arguments — only the
    tool name, the call id, `reason` and `displayReason` — and `api-remotes` forwards it to every
    connected browser's `$events` stream as an `approval/request` waterfall keyed by `eventId`.
    The card shows the tool name, the order line and two buttons; an upstream-style panel draws
@@ -1331,13 +1372,16 @@ because neither alone suffices:
    register after boot) and denies any `mcp__*` tool carrying `(operator-gated)` that the gate
    cannot name, with a fix hint.
 3. A **boot audit**: if any `mcp__*` tool is marked `(operator-gated)` but not name-matched, the
-   face disposes the tree and throws — a gate that covers nothing must not look healthy. Boot
+   face disposes the tree and throws — a gate that covers nothing must not look healthy. The seat's
+   tools carry no marker, so a write the Account renames falls out of the list unseen here;
+   `tests/account-seat-smoke.test.ts` against the installed checkout is that canary (§7.3). Boot
    also refuses a tree with no ACTIVE `api-remotes` entry (§4.1), without which every ask
    resolves `unavailable` and every order is denied at once, with no card anywhere.
 
 Consequences worth knowing: a card with no connected browser **blocks**, it does not deny —
 the gateway holds the request and replays it, same `eventId`, to the next `$events` client;
-grants are one-shot (`allowed-once`, no allow-always); `cancel_order` is gated identically, so
+grants are one-shot (`allowed-once`, no allow-always); `cancel_order` is gated identically (and so is
+the seat's `portfolio_live_cancel`, which the Account itself never cards), so
 under policy `never` the risk-reducing action is refused too; and the gate binds only when dsh
 runs inside the face — a dsh tree composed without the face has Gate 1 alone. The answer is the
 browser's `POST /api/$events/result` under its `$events` clientId (§5.2); the host would accept
@@ -1413,23 +1457,23 @@ stale stamps, a tool result's `Partial` — are the only explanatory lines a scr
 | `js/store.js`, `js/reducers/index.js` | `createStore({initial, reducers, storage, key, accept, persist})` — `dispatch(type, payload)`, `get()`, `subscribe(fn)`; the reducer table is the merge of the per-slice modules |
 | `js/reducers/host.js` | the host reducers (§5.3): `hostStatus`, `hostList`, `hostWindow`, `hostEvent`, `hostGate`, `hostGateGone`, `hostProjection`, `hostThinking`, `hostPreview`, `markSeen` |
 | `js/reducers/messages.js`, `controls.js` | what the operator does with the page: `nav` (a market id canonicalised; a missing conversation id becomes `firstOpen`'s; `lastDiscover`, the Discover view a plugin page goes back to), `toggleGroup`, the draft (`startDraft` — Where on the channel New round names, else the root —, `cancelDraft`, `setDraftTitle`, `setDraftWhere`), the optimistic `rename`, `toggleDetails`, `toggleRail`, `setTheme`; the inline editors (`startEdit`/`commitEdit`/`cancelEdit` — a rename, New channel…, a roster, a bot —, `editFailed`, which keeps an editor open with the refusal, `toggleRosterTick`), the two-step confirms (`askConfirm`/`cancelConfirm`) |
-| `js/reducers/markets.js`, `account.js` | the host's markets (`watchlistLoaded`, `quotesUpdated`, `searchUpdated`, `hitQuotesLoaded`, `barsLoading`/`barsLoaded`/`barsFailed`) and the screen's `setMarketsTab`, `setMarketsSort`, `setMarketsQuery`; the host's account (`accountLoading`/`accountLoaded`/`accountFailed`, `credentialsLoaded`, `toolsLoaded`, `probeLoaded`), the drawers' `openStatement`/`closeStatement` and `openSettings`/`closeSettings` |
+| `js/reducers/markets.js`, `account.js` | the host's markets (`watchlistLoaded`, `quotesUpdated`, `searchUpdated`, `hitQuotesLoaded`, `barsLoading`/`barsLoaded`/`barsFailed`) and the screen's `setMarketsTab`, `setMarketsSort`, `setMarketsQuery`; the host's account (`accountLoading`/`accountLoaded`/`accountFailed`, `credentialsLoaded`, `toolsLoaded`, `probeLoaded`), the Account seat's (`seatLoading`/`seatLoaded`/`seatFailed`, a failure keeping the last view), the drawers' `openStatement`/`closeStatement` and `openSettings`/`closeSettings` |
 | `js/reducers/channels.js`, `discover.js`, `traces.js` | the channel page's read (`channelLoading`, `channelLoaded`, `channelFailed` — a failure keeps that channel's data, a 404 reads `missing`); Discover's (`setDiscoverQuery`, `shelfLoading`/`shelfLoaded`/`shelfFailed` — a failed shelf keeps its data —, `gravitLoaded`, `skillLoading`/`skillLoaded`/`skillFailed`, `modelsLoaded`, `discoverStatus`); a member's trace by the answer it explains, under its conversation (`traceLoading`, `traceLoaded`, `traceFailed`) |
-| `js/data/empty.js` | `emptyState()`: the state the page boots into — no conversations, `status.line = "connecting…"`, every slice at its empty shape (§5.5) and no demo slice: no `plugins`, `memory`, `mail`, `banner`, `call` or `compose` |
-| `js/host/kinds.js` | the kind table (spec §6, §5.3): a mapper view → zero, one or two messages; `ORDER_TOOLS`, `isOrderTool`, `orderLine`, `rememberCall`, `toMessages` |
+| `js/data/empty.js` | `emptyState()`: the state the page boots into — no conversations, `status.line = "connecting…"`, every slice at its empty shape (§5.5), the `seat` slice among them (`{status, data, at}`), and no demo slice: no `plugins`, `memory`, `mail`, `banner`, `call` or `compose` |
+| `js/host/kinds.js` | the kind table (spec §6, §5.3): a mapper view → zero, one or two messages; `ORDER_TOOLS` (the Alpaca pair and `SEAT_TOOLS`, the seat's twelve writes), `isOrderTool`, `isSeatWriteTool`, `orderLine`, `seatLine` (a seat write in words), `seatLift` (a seat write's answer as a receipt, a refusal or nothing), `rememberCall`, `toMessages` |
 | `js/host/sessions.js` | `session/list` rows → conversation records: `kindOf`, `conversationOf`, `listConversations`, `unreadOf`; `childRowsOf` (the subagent rows the list leaves out, kept for their parent's Children) and `firstOpen` (the conversation every default opens, never an archived one) |
 | `js/host/live.js` | the impure half: the mux, the follow-or-page policy, the list and its previews, gates, projections, host facts — all into the store, nothing into the DOM |
 | `js/host/actions.js` | a `data-action` → the Remote or face route the old client sent: `send`, `newConversation`, `answer`, `stop`, `rename`, `command`; the row actions `fork`, `archive`, `remove`; `talkTo` (a bot's home conversation), `stopChild` |
 | `js/host/list-view.js`, `discover-view.js`, `children-view.js` | stage 3's pure views (§5.3): `groupsOf` (the list's groups); `SHELVES`, `SOURCE`, `itemsOf`, `searchItems`, `itemById` (Discover's items under namespaced ids); `childrenOf` (a conversation's subagent children and their states) |
 | `js/host/channels.js`, `discover.js`, `traces.js` | stage 3's impure halves: `startChannels` (a channel's overview, a new channel, the two roster writes; `MAX_BOTS`), `startDiscover` (the four listings, the Gravit item's three reads, a skill's content, the CLI agents' writes, the model routes, a bot's save and create; `SHELF_PATHS`, `GRAVIT_KEYS`), `startTraces` (a room member's trace, read once per answer) |
-| `js/host/market-view.js`, `account-view.js` | the pure views (§5.3): face ids (`canonicalId`, `positionId`, `holdingAssets`), the list (`listAssets`, `marketRows`, `assetFor`, `mentionsOf`), the words (`quoteWord`, `connectionWord`, `providerWord`, `basisWord`, `sourceWord`, `volumeWord`, `searchWord`, `watchWord`, `barsWord`); `portfolioOf`, `orderLine`, `statementOf`, `csvOf`, `venueOf` |
-| `js/host/markets.js`, `account.js` | the impure halves: `startMarkets` (live quotes, search, the watchlist in this browser's storage, bars) and `startAccount` (`/data/account.json` in one flight, the Venues reads) |
+| `js/host/market-view.js`, `account-view.js` | the pure views (§5.3): face ids (`canonicalId`, `positionId`, `holdingAssets`), the list (`listAssets`, `marketRows`, `assetFor`, `mentionsOf`), the words (`quoteWord`, `connectionWord`, `providerWord`, `basisWord`, `sourceWord`, `volumeWord`, `searchWord`, `watchWord`, `barsWord`); `portfolioOf`, `orderLine`, `statementOf`, `csvOf`, `venueOf`, `seatWords` (the seat's standing in the Venues box's words) |
+| `js/host/markets.js`, `account.js` | the impure halves: `startMarkets` (live quotes, search, the watchlist in this browser's storage, bars) and `startAccount` (`/data/account.json` in one flight, the Venues reads); `seat.js`'s `startSeat` (`/data/seat.json` in one flight, fresh on Refresh and after a seat receipt) |
 | `js/wire/api.js`, `mapper.js` | the old client's wire, moved unmodified but for one field: `call(endpoint, args)`, `openMux({onReady, onEvent, onGate, onGateGone, onDown})` with `stream()` and `answer()`, `randomUuid()`; `mapFrame` (frame → view-model), whose session-event views now carry `time` (the record's clock, the message's `at`) |
 | `js/wire/summaries.js`, `room.js`, `speaker.js`, `markdown.js` | moved with them: `summaryOf` (restores `agentPreset` on a list row — the projection first, `/data/channels.json`'s `presets` second, never a guess), the pure room rules (`foldMembers`, `isMentionText`, `roundEndLine`, …), `isHostPreset`/`speakerFor`, the DOM-built markdown |
 | `js/wire/grouping.js`, `channelName.js`, `botId.js`, `botSettings.js`, `subagents.js`, `member-traces.js` | the old chat page's other pure modules, moved in stage 3 with their words in English (`tests/client/wire-words.test.js` greps the six for Chinese): `bucketFor` and its sentinel keys (`ARCHIVED_KEY`, `UNGROUPED_KEY`, `BOT_KEY_PREFIX`); `foldChannelName`; `proposeBotId`; `normalizeBotModel`, `botModelChoices`, `botSettingsPayload`; `isSubagentRow`, `composeSubagentCatalog`, `normalizeSubagentCatalog` and `subagentControls`, which returns a state enum (`unavailable`, `waiting`, `running`, `inactive`, `unknown`) with a diagnostic's `reason` and no sentence; `loadMemberTrace`. `draftBotSoul`, `botToolLabel`, `isBotKey`, `subagentAddress` and `subagentResult` moved too, and no page calls them |
 | `js/wire/market-model.js`, `market-quotes.js`, `market-search.js`, `account-model.js` | moved from the old instrument pages in stage 2: `normalizeAsset`, `readWatchlist`/`saveWatchlist` (the face's key, the kairos key read until the first save), `price`, `number`; `createLiveQuotes` (the SSE stream with its 15 s polling fallback; `parsePayload` exported for the hit read and the probe); `createSymbolSearch` (250 ms debounce, a 10 s timeout); `money`, `signedMoney`, `pct`, `sign`, `orderMatches`. Their Chinese labels and notes stay in the wire and never reach a screen |
 | `js/render/rail.js`, `messages.js`, `thread.js`, `avatars.js`, `controls.js` | the two-level rail (Discover in the first level) and the list's groups; the Messages screen (head, Details with the row actions and Children, composer, status line, new message with New channel…, empty state); the thread's kinds, a tool row's dressed result and its Raw, a member's Trace; avatars and clusters (a bot's letter from the host's bot names); the segs, the key-value rows, the inline editor and confirm pair |
-| `js/render/markets.js`, `chart.js`, `account.js`, `js/market-fmt.js` | stage 2's screens (§5.4): Markets and a market's page; the daily-close chart (`chartSvg`); Account (`renderAccountScreen`, the Statement drawer, Venues) and the Settings drawer (`renderSettings`); `chgHtml`, a change with its arrow |
+| `js/render/markets.js`, `chart.js`, `account.js`, `js/market-fmt.js` | stage 2's screens (§5.4): Markets and a market's page; the daily-close chart (`chartSvg`); Account (`renderAccountScreen`, the Statement drawer, Venues with the Account seat box: the service with the Account's own mode and writes, the seat and its limits, the venues with `Paper` chips, the cards waiting, the stamp, and the link to the Account page — the only place a card is signed) and the Settings drawer (`renderSettings`); `chgHtml`, a change with its arrow |
 | `js/render/channel.js`, `discover.js`, `tool-result.js` | stage 3's screens (§5.4): a channel's page (`renderChannelScreen`, `bytesWord`); Discover, a shelf's grid, the Create page and an item's page (`renderDiscover`, `renderPlugin`); a tool row's dressed result (`toolResultHtml`, `toolResultFor`, `parsePayload` — the old `js/wire/render.js` ported to strings) |
 | `js/html.js`, `icons.js`, `time.js`, `router.js`, `messages.js` | `esc`/`attrs`/`cls`; the inline SVG icon set; `rowTime`/`divider`/`fmtDate`/`fmtClock`; `parseHash`/`toHash`; `LEVELS` — the host's kinds alone: text and tool grey, card, approval and question orange, refusal red, receipt green — `levelOf`/`needsAnswer` |
 | `css/tokens.css`, `css/app.css` | the tokens (Linqi's Cream and Black values, demo @ 0ef5131) and the one sheet |
@@ -1615,8 +1659,8 @@ merge?}`, ids minted from the host's own: `e<seq>` for a record, `t<callId>` for
 | `room-line` | a system line, `roundEndLine(view)` |
 | `subagent-message` | a system line, `Report from <child>: …` (no link yet) |
 | `card` phase `call` | `kind:"tool"`, text = the mapper's title (a `bash` command) or the tool name, `data.args` from the `calls` map |
-| `card` phase `result` | the same id with `merge: true` — `data.result`, `data.isError` fill the row, and the call's `name` and `args` when its `tool/call` was seen (the renderer dresses alpaca-kit's results by name); for an order tool (`place_order`, `cancel_order`, raw or `mcp__<server>__<raw>`) a second message follows: `kind:"receipt"` (`Order accepted · <side qty symbol · type> · <order id>`) or, on error, `kind:"refusal"` with the result text |
-| `approval` | `kind:"approval"` (tool name, `reason`, `displayReason`) — or, for an order tool, `kind:"card"`: `Your call: <order line>`, venue `Alpaca paper`, the arguments from `calls` |
+| `card` phase `result` | the same id with `merge: true` — `data.result`, `data.isError` fill the row, and the call's `name` and `args` when its `tool/call` was seen (the renderer dresses alpaca-kit's results by name); for an order tool (`place_order`, `cancel_order`, raw or `mcp__<server>__<raw>`) a second message follows: `kind:"receipt"` (`Order accepted · <side qty symbol · type> · <order id>`) or, on error, `kind:"refusal"` with the result text; for a seat write (the twelve, raw or minted) `seatLift` follows instead: `Card raised on the Account page · card-… · answer it there` (pending), `Order placed` / `Order canceled · <seat line> · ord-… [· paper]`, `Batch · n of m legs placed`, or `kind:"refusal"` with `<code> · <message>` in the Account's words — each flagged `data.seat`, which routes the app's reload to the seat; a seat read lifts nothing |
+| `approval` | `kind:"approval"` (tool name, `reason`, `displayReason`) — or, for an order tool, `kind:"card"`: `Your call: <order line>`, venue `Alpaca paper`, the arguments from `calls`; for a seat tool (the twelve under any server, or anything under the face's own `mcp__account__` prefix, which the host cards) `Your call: <seat line>` with the argument's venue as the chip, or `Account seat` when the tool names none |
 | `question` | `kind:"question"` with the batch's questions |
 
 The mapper's card keeps a title and not the arguments, so `rememberCall(calls, frame)` reads
@@ -2175,9 +2219,9 @@ from the member's own log without activating it (§5.4) — it follows no member
 | Command | From | Needs | Measured 2026-09-30 |
 |---|---|---|---|
 | `python -m pytest` | repo root | nothing — offline, no keys, no bed | 400 passed in a clean checkout, ~2 s (2026-10-20; the operator's tree adds the untracked `tests/strategies/`) |
-| `cd face && npm test` | `face/` | nothing — no port, no key | 1027 tests, 1011 pass, 16 skipped (2026-10-20) |
+| `cd face && npm test` | `face/` | nothing — no port, no key | 1060 tests, 1043 pass, 17 skipped (2026-10-20) |
 | `cd face && npm run typecheck` | `face/` | | clean, the dependencies' `.d.ts` included (`skipLibCheck: false`) |
-| `cd face && FACE_SMOKE=1 npm test` | `face/` | boots sixteen real trees into `mkdtemp` homes and binds ports; still no LLM or key (four of the smokes also create, and remove, a gitignored `.bots-smoke-*` bots root at the repo root) | the sixteen skipped tests; 1027/1027 (2026-10-20) |
+| `cd face && FACE_SMOKE=1 npm test` | `face/` | boots seventeen real trees into `mkdtemp` homes and binds ports; still no LLM or key (four of the smokes also create, and remove, a gitignored `.bots-smoke-*` bots root at the repo root) | the seventeen skipped tests; 1060/1060 (2026-10-20, with `FACE_ACCOUNT_SEAT_DIR` naming a checkout of buyer-agent-demo @ 133b9a7; without it the seat smoke stays skipped) |
 | `cd face && npm run check:fixture` | `face/` | the installed dsh | 26 fixture lines: 23 validated, 0 rejected, 3 with no upstream validator |
 
 ### 7.2 The Python suite
@@ -2206,11 +2250,12 @@ order path.
 
 ### 7.3 The face suite
 
-1027 tests in 100 files (1011 pass, 16 skipped without `FACE_SMOKE=1`), run by `node --test`
+1060 tests in 103 files (1043 pass, 17 skipped without `FACE_SMOKE=1`), run by `node --test`
 through `tsx`:
 
 - **Composition and boot** — `boot` (the layer order ending with the overlay; the policy layer
-  between bundle and AKShare; the storage chain and projection cache composed once, from
+  between bundle and AKShare, the Account seat row right after AKShare with its config from
+  `FACE_ACCOUNT_SEAT_DIR` and `FACE_ACCOUNT_URL` and an operator's disable kept; the storage chain and projection cache composed once, from
   dsh-base, and reachable by an operator patch; the persona patch setting `personaPrefix` and
   keeping the operator's other `system-prompt` keys; the instructions patch setting
   `agent-instructions`' two candidate lists to `GRAVIT.md` and `GRAVIT.local.md`, after the
@@ -2350,7 +2395,7 @@ through `tsx`:
   `quotes`, `quote-snapshots`, `quote-streams`, `symbol-search`, `bars` (`/data/bars`: the
   fence, the request grammar, the cache per key, single flight, stale on error, the fixed
   failure words), and the room suites below.
-- **The sixteen `FACE_SMOKE` boots**, below.
+- **The seventeen `FACE_SMOKE` boots**, below.
 
 The room suites are `room-rules` (the caps block verbatim, `GRAVIT.md`'s caps sentence pinned to
 `ROOM_CAPS`, mention resolution, `isPass`, `finalTextOf`, dispatch validation and its two result
@@ -2372,7 +2417,7 @@ routes under the fence — and `room-client` (the header fold, the strip and its
 precedence, the glyph, the mention anchor, the round-end line, the gate speaker, against
 `js/wire/room.js` and `js/wire/grouping.js`).
 
-The sixteen boots each own a file, because `bootFace` sets `process.env.DSH_HOME` for good, and
+The seventeen boots each own a file, because `bootFace` sets `process.env.DSH_HOME` for good, and
 each speaks the browser's wire through `tests/remote.ts` (`mountClient`, `signIn`, `remote`):
 
 - `smoke.test.ts` — the sign-in (`/` 401 without the cookie, the token's 303 and `dsh-auth-*`
@@ -2406,6 +2451,26 @@ each speaks the browser's wire through `tests/remote.ts` (`mountClient`, `signIn
   denied by the guard alone; after the latch releases, the held card reaches the first `$events`
   tab and `allowed-once` dispatches exactly once; a restart of the real `approval` row re-arms the
   listener exactly once (outermost again); after dispose no `tools/pre-execute` record remains.
+- `account-seat-smoke.test.ts` — the Account seat end to end but for the human (skipped unless
+  `FACE_ACCOUNT_SEAT_DIR` names an installed checkout of buyer-agent-demo): the Account's own stand-in
+  started on a free port (no network, a fresh temp home, writes on), the face booted on a scratch home
+  with the `mcp-account` row replaced whole by an id patch — the operator's own override path — pointed
+  at the stand-in as its seeded agent (a key derived from the name, `PORTFOLIO_SEAT_KEYS=sim`; a
+  scratch `BUYER_HOME`, so nothing lands in `~/.buyer-agent-demo`), then: the seat's 35 real-account
+  tools registered and exactly its nine real-account writes in `auditOrderTools().gated`, nothing
+  ungated; `portfolio_account` answering as the admitted seat with `paper-momentum`; a
+  `portfolio_live_order` at the stand-in's exchange `rejected` at the face's card never reaching the
+  seat, the card's reason `Account seat - … venue=ex`; the same order `allowed-once` reaching the seat,
+  signed, and answered by the stand-in in Guard with `pending: true` and a `card-…` id; and
+  `registerSeatRoute` against the stand-in reading the seat admitted, the paper venue marked and that
+  card waiting. `order-gate.test.ts`'s real-tree case also asks about `mcp__drill__portfolio_live_order`
+  with the seat's reason and lets `mcp__drill__portfolio_account` pass. Offline, the seat is `seat`
+  (`seatView` over the Account's shapes and odd ones; the route's fence, cache, `?fresh=1`, one flight,
+  the code never the text, the timeout), `orders` (the twelve, the unclassified fallback, the seat's
+  reason and order, the key fields whole or denied), `roles` (the seat refused to a role), and the
+  client's `kinds`, `thread`, `live`, `host-seat`, `account-view`, `account` and `app-dom` (the seat
+  line, the card's venue, the receipts, the slice, the words, the box, the reads on Venues, Refresh and
+  a seat receipt).
 - `gravit-client-smoke.test.ts` — the new page on a real boot: `/` with its title and script,
   the modules under `/client` with their types, the old `chat.js` gone (404); then the host
   layer (`js/host/live.js` over the page's own `api.js` + `mapper.js`) on the real wire —
@@ -2533,6 +2598,8 @@ the re-host added (§10, item 14).
 | **Approval channel** (the README heading still reads "The Gate-2 drill"; its PASSED line calls it the approval-channel drill) — a file write outside the workspace escalates | request → answerer → card → outcome → paired `approval/asked` / `decided`; deny blocks, approve runs once | a producer for an MCP tool call | passed live 2026-08-31; re-run 2026-09-08 on `main`, passed. At 0.2.0 the channel itself — `api-remotes`, `$events`, `$events/result`, a second holder's `cancel` — is automated (`smoke`, `order-gate-smoke`, `client-mux-smoke`); the live browser re-run is owed |
 | **Order approval** — automated half | the listener is registered, reaches the live approval service, defaults to `ask`, catches renamed servers, leaves `orders` alone (mutation-proven: removing the registration fails it); the positive path — a grant logged by the real approval service, the guard finding it through `snapshotEvents()`, the order dispatching, a rejection not — and the same answer over the real `$events` channel | that a human can read the card; containment | passes 2026-09-30 (`order-gate`, `order-gate-smoke`) |
 | **Order approval** — manual half (arm Gate 1 in a *scratch* home, ask for one paper order, deny, see the audit pair) | the card, end to end | | **not yet run** — the condition before the flag flips in the real home |
+| **Account seat** — automated (`account-seat-smoke`; `orders`, `seat`, `roles`, the client's `kinds`, `account`, `host-seat`, `app-dom`) | on a real tree against the Account's own stand-in: the seat mounts with its 35 tools, exactly its nine real-account writes gated, a read answers as the admitted seat, a seat order rejected at the face's card never reaches the seat, the same order allowed once is signed by the seat and answered by the Account with a card of its own, and `/data/seat.json` reads that standing | that a human signs the Account's card; a real venue; the real service's own egress; the two-card flow from a conversation with a model | passes 2026-10-20 against buyer-agent-demo @ 133b9a7's stand-in (`FACE_SMOKE=1` with `FACE_ACCOUNT_SEAT_DIR`) |
+| **Account seat** — manual (`face/README.md` "The account-seat drill") | the operator's keyed run: the real service with a paper venue, the seat admitted as Gravit, a `trade` limit on that venue, Gravit asked to buy on paper → the face's card → ✓ → the Account's card → signed → `portfolio_wait` → the receipt in the conversation, the order on the Account's statement, the seat box on Venues counting the card then not | | **not yet run** — the condition before the branch lands |
 | **Client transport** — automated (`client-mux-smoke`) | the page's own `api.js` + `mapper.js` against a real host: gates, replays, withdrawals, follows, the non-activating reads | the DOM: the page's rendering and its view modes run on a fake DOM (`tests/client/app-dom`, `live`), and `gravit-client-smoke` opens one real session through the host layer, not a browser | passes 2026-09-30; `gravit-client-smoke` 2026-10-19 |
 | **Transport** — manual (`face/README.md`) | the browser half of the wire: the tokenized sign-in and the per-authority cookie; a cold session opened page-only, gaining no `session.v4.jsonl.zstd` or `session.lock` until it is prompted; a reconnect redrawing the window once; a new session's reply streaming without a click; `/compact` answered by `commands/execute`; the agent panel; the subagent dock; rename, fork, the directory picker, a channel rename (on the gravit-ui client Discover's Gravit item stands for the agent panel, Details' Children for the dock and Details' Fork for fork; the directory picker and a channel rename are not on it) | the approval card's endings, which are the Gate-2 drill's | **not yet run** on 0.2.0 against the real home — a headless load of the page on a scratch home reached `connected` with no console errors; the stage-1 page was walked 2026-10-19 on a scratch home without keys (the ledger): sign-in, a New message in `workbench` created, named and prompted, the missing-key error on the status line, a restart then a reload opening the cold session paged |
 | **Bots** — automated (`bots-smoke`, `bot-runtime-smoke`, `bot-sandbox-smoke`, `askuser-noclient-smoke`) | roster listing incl. broken; header `agentPreset`; mask = allow ∩ tree, following late tools; persona shadow; the default's roster equal to the host's plus the role tools (never a bot's), its date section and its cycle contract (`Step 0 — ask once`) scoped to Gravit (never a bot, though the probe bot can call `create_goal`); the shipped relative plugin path, rebased; a save re-declaring; Gate 2 refusing an order tool the bot's own mask admits; the S4/S7 observations | that the approval CARD renders (no client) — a bot in a room and a home session's write to `../SOUL.md` were this row's two gaps until `room-smoke` closed both | passes 2026-09-30; re-run 2026-10-19 with the role tools in the default's roster and the cycle contract in its prompt |
@@ -2810,6 +2877,32 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
   of a token each. Which tools Gravit may lose — the
   lever is a mask on its own preset, `tools.restrict` in `gravit.js`, as `plugins/bot.js` does
   for a bot — is the operator's decision on those numbers, in the next round (§10).
+- **R32 — Two cards per seat write.** A seat order stops for the face's Gate 2 card in the conversation
+  and then for the Account's own Guard card on its page, signed with the owner's device key there: the
+  face cannot sign the Account's card (the key lives in the browser's origin at the Account's page), and
+  the Account's per-seat paper autonomy covers only its Desk, never an outside seat
+  (`src/portfolio/account/desk.ts:1129-1137` at 133b9a7). Accepted for the paper stage; one card per write
+  is a request to Linqi, not a change here.
+- **R33 — The Account moves under the face, and the face pins nothing of it.** Twenty-six pull requests
+  landed in the twelve days before the pin. The gate's twelve write names and thirty read names are
+  spelled at 133b9a7; a write the Account renames falls out of the list — with no `(operator-gated)`
+  marker on the seat's tools the boot audit cannot see it, so an unknown seat tool is carded until
+  classified and `account-seat-smoke` against the installed checkout is the canary (re-run it after
+  pulling the checkout). A changed `/api/account` shape turns the Venues box into blanks, never a wrong
+  number (`seatView` is total). The seat is matched by the name the owner typed: admitted under another
+  name, it shows as knocking or absent.
+- **R34 — The seat's key is written outside the workspace, and the seat's reach is the owner's grants.**
+  The seat process, a child of the face, writes `$BUYER_HOME/seats/gravit.json` into the Account's home
+  (D10's clause, a second writer); the face never reads it. What the seat may do is exactly the limits
+  the operator signs on the Account page: the face does not model the Account's venues, so a limit
+  signed on a real venue would reach real money through the same two cards — the charter's §8 trigger
+  and D17, not a fence in this tree. The service's own egress — venue probes every thirty minutes, the
+  location lookups, the public quotes — is Linqi's program's (`face/README.md` lists the hosts); the
+  face's loopback posture is unchanged.
+- **R35 — The seat's tool block is the second lever.** 15,727 heuristic tokens for 35 tools (§4.3),
+  64% of AKShare's; four seat tools are larger than the host's largest. Mounted together they put the
+  block near 47,300 chars/4 before any mask; the mask on Gravit's preset (R31) is still the lever, and
+  still the operator's decision.
 
 ---
 
@@ -2882,6 +2975,11 @@ In order; each with what "done" is and which charter row it reopens.
    answers, the schema block (R31) — and the persona's `subagent` paragraph (review the returned
    evidence and state its limits), which now overlaps `role_reviewer`. Done when the operator has approved a spec for it; reopens
    charter §7.3 ("No memory substrate beyond what exists"), Rule 8 and P2.
+17. **Real venues at the Account seat.** The seat sits at the Account's paper venues only, by the
+   operator's rule and the limits they sign there (R34). Connecting a real venue to that Account with
+   the seat granted reach, or signing it a limit on one, is the charter's real-money trigger (§8) and
+   the venue-plugins handoff's agenda (§12.1, C1–C5 for real money): the next charter, before any such
+   grant. One card per write (R32) and the tool block (R35) wait on the same round.
 
 ---
 
@@ -2898,6 +2996,7 @@ In order; each with what "done" is and which charter row it reopens.
 | `ALPHA_UNIVERSE_SCREEN` | `universe.py` | `gainer` \| `trend_template` |
 | `ALPHA_EDGAR_USER_AGENT`, `ALPHA_FINRA_USER_AGENT`, `ALPHA_FLOAT_USER_AGENT` | feeds | outbound UA strings |
 | `ALPACA_KIT_ENABLE_ORDERS` | MCP child (operator's row only) | Gate 1 |
+| `FACE_ACCOUNT_SEAT_DIR`, `FACE_ACCOUNT_URL` | `account-seat.ts`, `seat.ts` | the Account seat's checkout and service (§4.6) |
 | `DEEPSEEK_API_KEY` | dsh credential seam | the LLM and `web_search` |
 | `DSH_HOME` | dsh, face | harness home |
 | `DSH_PERMISSION_MODE` | dsh | sandbox preset; `danger-full-access` ⇒ approval policy `never` |

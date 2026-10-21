@@ -299,6 +299,78 @@ No installed profile patch is rewritten to add this connection.
   and AKShare servers are live-drill items of the go-live runbook
   (`../docs/superpowers/runbooks/2026-09-30-dsh-0.2.0-rc.2-go-live.md`).
 
+## The Account seat — Gravit at Linqi's Account
+
+Since 2026-10-20 the face composes a second project-owned MCP row beside AKShare,
+`mcp-account` (`src/account-seat.ts`): the MCP seat of Linqi's Account —
+[linqizhe07/buyer-agent-demo](https://github.com/linqizhe07/buyer-agent-demo), the program
+that puts your exchange, broker, wallet and prediction-market accounts on one page at
+`127.0.0.1:4820` and lets agents trade inside limits you sign. Gravit's tools gain
+`mcp__account__portfolio_*` (35 on a real account). The Account is yours to install and run;
+the face never starts it. **Paper venues only** in this round
+(`../docs/superpowers/specs/2026-10-20-account-seat-design.md`; the charter's §8 names a real
+venue as the real-money trigger).
+
+Install once:
+
+```bash
+git clone https://github.com/linqizhe07/buyer-agent-demo.git ~/buyer-agent-demo
+cd ~/buyer-agent-demo && npm ci          # tsx is a devDependency the seat needs
+```
+
+Run the service in its own terminal (or as its LaunchAgent, `npm run account:service --
+install`) with writes ON — `--read-only` refuses paper orders too — and connect no real venue;
+`--live-cap 1` bounds any real order to a dollar should one ever be granted:
+
+```bash
+cd ~/buyer-agent-demo && npm run account -- --live-cap 1
+```
+
+Pair your browser with the code it prints, open a paper account (Trade's first-run card, or
+Connect an account → Paper account: `paper-1`, $10,000), then start the face. Gravit's first
+`portfolio_account` call makes the seat knock; on the Account page admit it as **Gravit**
+(Agents → the request; at most 180 days) and sign it a `trade` limit naming the paper venue
+(`allow: paper-1` — never `*`, which expands to every venue connected at that moment). From then
+on an order Gravit places there is two cards: the face's `Your call` card in the conversation,
+then the Account's Guard card on its Portfolio page (thirty minutes), signed with your device
+key; Gravit waits on it with `portfolio_wait`.
+
+| Env | Default | What |
+|---|---|---|
+| `FACE_ACCOUNT_SEAT_DIR` | `~/buyer-agent-demo` | the installed checkout the seat process runs from |
+| `FACE_ACCOUNT_URL` | `http://127.0.0.1:4820` | the running service (the seat's `PORTFOLIO_URL`; `/data/seat.json` reads the same) |
+
+The checks: after a boot, `/data/plugins.json` lists `server: "account"` with 35 tools and the
+boot line reads `order gate armed for mcp__account__portfolio_live_order, …`; Account › Venues
+shows the **Account seat** box — the service reachable, the seat admitted until when with its
+limit, the paper venue marked, the cards waiting, and **Open the Account page**. A missing
+checkout or a stopped service is a logged spawn failure and a `not reachable` box, never a
+failed boot. The seat's key is the Account's, `~/.buyer-agent-demo/seats/gravit.json` (0600),
+made on the seat's first call; the face never reads it. An operator patch can disable the row
+(`- { id: mcp-account, disabled: true }`) or replace its config whole.
+
+What the service does on its own, with no venue connected (read at 133b9a7,
+`src/portfolio/live/reach.ts`, `location.ts`): every thirty minutes a keyless probe of each
+connector it knows — nineteen exchanges through ccxt, `api.alpaca.markets`,
+`trading.robinhood.com`, `external-api.kalshi.com`, `gateway.polymarket.us`, `polymarket.com`,
+`api.hyperliquid.xyz` and its testnet, `agent.robinhood.com`, seven chains' RPC, and
+`mm auth status` when MetaMask's CLI is installed — plus a place lookup
+(`polymarket.com/api/geoblock`, Cloudflare's trace, `ipapi.co`); on reads, the public quotes
+(Kraken, Coinbase, OKX, Binance, Bybit tickers; Kalshi and Polymarket; `api.robinhood.com`,
+`api.nasdaq.com`, `cdn-api.cboe.com` for US shares; LI.FI for tokenised stocks). No flag turns
+the probes off. That is Linqi's program's egress, not the face's: the face talks to it over
+loopback only.
+
+**Re-run the seat smoke after pulling the checkout** — the Account moves fast, and a renamed
+write tool would fall out of Gate 2's list unseen by any offline test:
+
+```bash
+cd face && FACE_SMOKE=1 FACE_ACCOUNT_SEAT_DIR=~/buyer-agent-demo npx tsx --test tests/account-seat-smoke.test.ts
+```
+
+It starts the Account's own stand-in (no network, no money), mounts the seat against it and
+proves the chain up to the Account's card (`DEVELOPMENT.md` §7.3).
+
 ## The profile
 
 `npm run setup` writes THREE files into `$DSH_HOME/profiles/<name>/`, and
@@ -640,7 +712,13 @@ Paper.
 - **Venues**: the Alpaca row — the host, where the keys come from (`credentials/describe`:
   `Keys · env`, `No keys`, `Keys unknown`) and whether order tools are registered (`Order tools
   on` / `off`, from the tool registry) — and the quote providers' state, read on entering Venues
-  and again on Refresh there.
+  and again on Refresh there. Under them, the **Account seat** box (`/data/seat.json`, read on
+  entering Venues, on Refresh there and right after a seat receipt): the service reachable or not
+  with the Account's own mode and writes (`Guard · Trading on · $1 a move`), the seat (`Gravit ·
+  admitted until Nov 19`, `knocking — admit it on the Account page`, `not on the account`,
+  `expired`, `revoked`) with each limit (`trade · paper-1 · $100 an order · $850 of $1,000
+  left`), the venues with a `Paper` chip on the paper ones, `N cards waiting`, the stamp, and
+  **Open the Account page** — the only place a card is signed.
 
 | Env | Default | What |
 |---|---|---|
@@ -2613,3 +2691,40 @@ date and the pin.
 **Not yet run live.** The automated half passes at `fae4f61` (`cycle.test.ts`,
 `goal-smoke.test.ts`, and the cycle assertions of `bots-smoke` and `roles-smoke` under
 `FACE_SMOKE=1 npm test`); steps 1–5 are the operator's.
+
+
+## The account-seat drill (run after any change to the seat, and before the branch lands)
+
+The operator's keyed run of the two-card path on a real model. Needs: the Account service up
+with writes on and a paper venue (`paper-1`), the seat admitted as **Gravit** with a `trade`
+limit on it ("The Account seat" above), the face started with keys, a channel session.
+
+1. **The standing.** Account › Venues: the Account seat box reads `127.0.0.1:4820 · reachable`,
+   `Guard · Trading on · $1 a move`, `Gravit · admitted until <date>`, `trade · paper-1 · $<n> an
+   order · $<left> of $<budget> left`, the paper venue with its `Paper` chip, no cards. Discover's
+   MCP shelf lists `account` with 35 tools.
+2. **The read.** Ask Gravit: "What is my seat at the Account, and which paper venues are there?"
+   Expect `portfolio_account` in the tool row, no card, and an answer naming the seat as
+   authorised and `paper-1`.
+3. **The order.** Ask: "Buy $10 of AAPL on paper-1, market." Expect, in order: the face's orange
+   card `Your call: buy $10 of AAPL · market · paper-1` with the dim line `paper-1 · Account seat
+   - mcp__account__portfolio_live_order: side=buy usd=10 symbol=AAPL …`; press ✓; the tool row's
+   answer and the receipt `Card raised on the Account page · card-NNNN · answer it there`; the
+   Venues box counting `1 card waiting`.
+4. **The Account's card.** On the Account page (Portfolio › Waiting for you) the card `Gravit asks
+   to PAPER · buy … AAPL at paper-1 …`; approve and sign. Gravit's `portfolio_wait` returns
+   `done`; the Account's statement shows the fill marked paper; the Venues box drops back to no
+   cards and the limit's `left` falls by the order's worth.
+5. **The refusal.** Ask: "Sell $10 of AAPL on okx." Expect the face's card (the venue `okx`) and,
+   on ✓, the Account's refusal `E_MANDATE_RECIPIENT · …` as a red refusal line — no card on the
+   Account page, nothing placed.
+6. **Decline.** Ask for another paper order and press ✗: the tool answer is dsh's `the user
+   rejected tool "mcp__account__portfolio_live_order"`, nothing reaches the seat (the Account's
+   page shows no new card).
+
+**PASS criteria are observations.** Record the run in `DEVELOPMENT.md` §7.4 with the date and
+the checkout's pin (`git -C ~/buyer-agent-demo rev-parse --short HEAD`).
+
+**Not yet run live.** The automated half passes (`account-seat-smoke` under `FACE_SMOKE=1` with
+`FACE_ACCOUNT_SEAT_DIR`, against the Account's stand-in at 133b9a7); steps 1–6 are the
+operator's.

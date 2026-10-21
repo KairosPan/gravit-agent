@@ -71,6 +71,12 @@ npm start                   # prints http://127.0.0.1:3090/?token=… — open t
   30-day cookie for the exact host:port (`localhost` is not `127.0.0.1`); `/api` 401s without it.
 - **`face/client/*` is served with no cache headers** — hard-reload the browser after any client
   edit, or you drill a stale module.
+- **The Account seat is an external install.** `face/src/account-seat.ts` spawns the MCP seat of
+  Linqi's Account from `FACE_ACCOUNT_SEAT_DIR` (default `~/buyer-agent-demo`: clone it, `npm ci`
+  there) and talks to the service you run (`npm run account`, writes on — `--read-only` refuses
+  paper orders too); paper venues only: admit the seat as **Gravit** on the Account page and sign
+  it a `trade` limit naming a paper venue, never a real one. Every seat write is two cards, Gate 2
+  here and the Account's there; re-run `account-seat-smoke` after pulling the checkout.
 
 Reading order for a new session: `Gravit-Design.md` §1–§2 → the `DEVELOPMENT.md` section you
 are touching → `GRAVIT.md` for what Gravit itself sees.
