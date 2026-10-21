@@ -12,22 +12,39 @@
  * a refused entry is a refusal in the brief, a refused file an error, and a missing file is `missing` (holdings) or
  * absent from `files` (levels). Then ONE `hub.snapshot()` over the index ETFs, the sector ETFs, the holdings and the
  * levels' symbols, in that order, each once: the face's live quotes, the numbers `desk_quotes` shows (P2-2 - no
- * Python and no bars).
+ * Python and no bars). Before any of it, the firing's ET date is checked once: one that is not `YYYY-MM-DD` fails the
+ * producer with one error, and nothing is read or asked.
  *
  * EVERY NUMBER NAMES ITS SOURCE AND TIME (dsh/profile/desk.md). A price carries `at`, desk-tools.ts's `quoteTime`:
  * the feed and New York's clock to the second (`IEX 15:21:03 ET`), dated when the quote is from another ET day. The
  * brief's own time is `takenAt`, and the holdings file's last edit is `edited`, as desk.ts's `deskTime` writes a
- * time. Nothing is computed that the snapshot does not hold: a quote without a price - or without the time that
- * price was traded at - has `last: null`, and every number measured from it (a move, a P&L, a distance) is null
- * too. Percentages and P&L are rounded to 2 decimals, half away from zero.
+ * time. Nothing is shown that the snapshot cannot time: a quote without a price - or without the time that price was
+ * traded at - shows no number at all (`last`, `prevClose`, `chgPct` and `at` null), and every number measured from
+ * it (a P&L, a distance) is null too. Percentages and P&L are rounded to 2 decimals, half away from zero.
  *
  * INFORMS ONLY (B2). It measures - a day's move from the previous close, P&L against the operator's own cost, the
- * distance to the operator's own levels - and proposes nothing.
+ * distance to the operator's own levels - and proposes nothing. A holding's `dayPnl` is measured from the previous
+ * close, as if the position was held at it: for a position opened today it is not the broker's day P&L, which runs
+ * from the fill.
  *
- * FAILURES ARE DATA. A hub that throws makes the output `{ ok: false, error: "quotes unavailable: <message>" }`,
- * which still carries the brief - the files read, every price null, `quotesError` set - so the firing quotes it and
- * the model can say what is unavailable. A `strategies/` that cannot be listed is a levels error naming
- * `strategies/` and its code. {@link briefProducer} never rejects.
+ * FAILURES ARE DATA. Past the date check, the brief fails - `{ ok: false }` - only when its prices are unavailable,
+ * and it still carries itself: the files read, every price null, `quotesError` set, so the firing quotes it and the
+ * model can say what is unavailable. `quotesError` is:
+ * - `quotes unavailable: busy` when the hub refuses with 429 - its own message is the quotes page's, in Chinese;
+ * - `quotes unavailable: <message>` for any other throw;
+ * - `quotes unavailable: the hub has no price for any symbol (alpaca <state>)` when the snapshot answers without a
+ *   single price - no keys, or a feed that is down - `<state>` the US provider's state as its English word
+ *   (`unconfigured`, `error`, …), and `unknown` when the payload names no US provider or a state that is not one of
+ *   those words: never its UI message. A brief with no price is no success.
+ * A file that is missing, refused or unreadable is named in its block and never fails the brief, and a
+ * `strategies/` that cannot be listed is a levels error naming `strategies/` and its code. {@link briefProducer}
+ * never rejects.
+ *
+ * A CUT KEEPS THE ERRORS. The firing quotes at most 32,768 characters of a producer's text (producer.ts
+ * `PRODUCER_TEXT_MAX`) and cuts the rest, so the brief's keys are written with the long lists last: `quotesError`
+ * straight after the session, ahead of every quote; in each block, the file's state and its errors ahead of its rows,
+ * near levels and refusals; `notYet` at the very end. A book past the cap loses the tail of its refusals and of its
+ * near levels - nearest first, so the farthest go - before any error.
  *
  * MODULE WEIGHT. It brings desk-book.ts (and js-yaml with it), channels.ts and desk.ts, so only a firing loads it
  * - through the schedule, itself loaded on first use - and the pause switch (scripts/desk.ts) never does.
@@ -35,13 +52,15 @@
  */
 import { join } from "node:path";
 import { listChannelDirs } from "./channels.ts";
-import { loadHoldings, loadLevels, type Holding, type Level, type LevelKind, type LoadRefusal, type LoadResult } from "./desk-book.ts";
+import { loadHoldings, loadLevels, type Holding, type Level, type LevelKind, type LoadRefusal } from "./desk-book.ts";
 import { deskTime } from "./desk.ts";
 import { quoteTime } from "./desk-tools.ts";
 import { etClock, etTime } from "./et.ts";
+import { HttpError } from "./http.ts";
 import type { BuiltinProducer, ProducerInput, ProducerOutput } from "./producer.ts";
 import type { QuoteHub } from "./quotes.ts";
-import type { LiveQuote, QuoteIdentity } from "./quote-types.ts";
+import type { LiveQuote, ProviderState, QuoteIdentity, QuotePayload } from "./quote-types.ts";
+import { isEtDate } from "./standing.ts";
 
 /* ---------- the symbols ---------- */
 
@@ -66,6 +85,14 @@ const NOT_YET = "alerts, suppressed alerts and filings arrive with the watch (P3
 /** A quote's status when the snapshot holds none for its symbol: the hub's own word for a symbol without a price. */
 const UNAVAILABLE = "unavailable";
 
+/** `quotesError` when the hub refuses with 429, in the plan's words: the hub's own message is the quotes page's, in
+ * Chinese, and never reaches the model. */
+const QUOTES_BUSY = "quotes unavailable: busy";
+
+/** The states a priceless brief may name: quote-types.ts's `ProviderState` status, English words all. Anything else
+ * the payload holds is written `unknown`. */
+const PROVIDER_STATES: ReadonlySet<string> = new Set<ProviderState["status"]>(["connecting", "connected", "unconfigured", "error", "limited"]);
+
 /* ---------- the shapes ---------- */
 
 /** What the brief closes over: the quote hub's snapshot (the one hub main.ts shares with `/data/quotes` and
@@ -79,7 +106,8 @@ export interface BriefDeps {
 
 /** One quote as the brief carries it: the last price; its move from the previous close, in percent; the previous
  * close; `at`, the feed and New York's time (`IEX 15:21:03 ET`); and `status`, the hub's `quote_status`. Without a
- * price, `last`, `chgPct` and `at` are null. The hub's UI message is left out. */
+ * price, or without the time it was traded at, `last`, `chgPct`, `prevClose` and `at` are all null. The hub's UI
+ * message is left out. */
 export interface BriefQuote {
   symbol: string;
   last: number | null;
@@ -89,19 +117,21 @@ export interface BriefQuote {
   status: string;
 }
 
-/** A holding's stop or target: the level's price - or its range, for a level written as one - how far it is from
- * the last price, in percent (null without a price), and the file it came from. */
+/** A holding's stop or target: the level's price - or its range, for a level written as one - and its `when`, so a
+ * level the price has already gone through reads as crossed (a `cross_down` stop with a distance above 0); how far
+ * it is from the last price, in percent (null without a price); and the file it came from. */
 export interface LevelRef {
   price?: number;
   range?: [number, number];
+  when: Level["when"];
   distancePct: number | null;
   file: string;
 }
 
 /** One holding, priced: its quote; what the operator typed - `qty` (below 0, a short), `avgCost`, and `opened` and
- * `broker` when written; the day's P&L, `qty·(last − prevClose)`, and the open P&L, `qty·(last − avgCost)`; the
- * stop and the target nearest the last price, from any levels file; and `noStop`, true when no loaded level is a
- * stop for its symbol. */
+ * `broker` when written; the day's P&L, `qty·(last − prevClose)` - not the broker's for a position opened today -
+ * and the open P&L, `qty·(last − avgCost)`; the stop and the target nearest the last price, from any levels file;
+ * and `noStop`, true when no loaded level is a stop for its symbol. */
 export type HoldingRow = BriefQuote & {
   qty: number;
   avgCost: number;
@@ -129,14 +159,16 @@ export interface NearLevel {
   distancePct: number;
 }
 
-/** The brief, as its text holds it (see the module header). `session` is the firing's session in New York's time;
- * `holdings.edited` is when `desk/holdings.yml` was last written, null when it was not read; `levels.files` lists
- * the levels files present, read or refused; `levels.loaded` counts the levels that loaded; `near` lists the near
- * levels nearest first; `sectors` come strongest first, those without a move after them. */
+/** The brief, as its text holds it, its keys in the order its text writes them (see the module header: a cut keeps
+ * the errors). `session` is the firing's session in New York's time; `holdings.edited` is when `desk/holdings.yml`
+ * was last written, null when it was not read; `levels.files` lists the levels files present, read or refused;
+ * `levels.loaded` counts the levels that loaded; `near` lists the near levels nearest first; `sectors` come
+ * strongest first, those without a move after them. */
 export interface Brief {
   date: string;
   takenAt: string;
   session: { open: string; close: string; early: boolean };
+  quotesError?: string;
   indexes: BriefQuote[];
   sectors: BriefQuote[];
   holdings: {
@@ -150,11 +182,10 @@ export interface Brief {
   levels: {
     files: string[];
     loaded: number;
+    errors: { file: string; error: string }[];
     near: NearLevel[];
     refusals: LoadRefusal[];
-    errors: { file: string; error: string }[];
   };
-  quotesError?: string;
   notYet: "alerts, suppressed alerts and filings arrive with the watch (P3)";
 }
 
@@ -212,18 +243,20 @@ function levelAt(level: Level): { price: number } | { range: [number, number] } 
 
 /**
  * One quote as the brief carries it ({@link BriefQuote}), from the snapshot's quote for `symbol`. A price counts only
- * with the time it was traded at - the hub's own rule for `unavailable` - so a number that cannot name its time is
- * never shown.
+ * with the time it was traded at - the hub's own rule for `unavailable` - and a quote without one shows no number at
+ * all, its previous close included: a number that cannot name its time is never shown.
  * @param symbol - the ticker.
  * @param quote - the snapshot's quote; `undefined` when the snapshot holds none for it, or failed.
  * @param now - when the brief is taken: what "today" is for {@link quoteTime}.
  */
 function briefQuote(symbol: string, quote: LiveQuote | undefined, now: number): BriefQuote {
-  if (quote === undefined) return { symbol, last: null, chgPct: null, prevClose: null, at: null, status: UNAVAILABLE };
-  const status = quote.quote_status ?? UNAVAILABLE;
+  const status = quote?.quote_status ?? UNAVAILABLE;
+  const price = quote?.price;
+  const asOf = quote?.as_of;
+  if (quote === undefined || !isPrice(price) || typeof asOf !== "string") {
+    return { symbol, last: null, chgPct: null, prevClose: null, at: null, status };
+  }
   const prevClose = isPrice(quote.prev_close) ? quote.prev_close : null;
-  const { price, as_of: asOf } = quote;
-  if (!isPrice(price) || typeof asOf !== "string") return { symbol, last: null, chgPct: null, prevClose, at: null, status };
   return {
     symbol,
     last: price,
@@ -241,6 +274,16 @@ function strongestFirst(quotes: readonly BriefQuote[]): BriefQuote[] {
   return [...moved, ...quotes.filter((quote) => quote.chgPct === null)];
 }
 
+/** The US provider's state in a snapshot's payload, as its English word ({@link PROVIDER_STATES}); `unknown` when
+ * the payload names none, or names something else. */
+function usProviderState(payload: QuotePayload | undefined): string {
+  const providers: unknown = payload?.providers;
+  const state = Array.isArray(providers)
+    ? (providers as Partial<ProviderState>[]).find((provider) => provider?.market === "us")?.status
+    : undefined;
+  return typeof state === "string" && PROVIDER_STATES.has(state) ? state : "unknown";
+}
+
 /* ---------- the book ---------- */
 
 /** The level among `levels` nearest `last`, as a {@link LevelRef}: the first in file order on a tie, and the first
@@ -256,7 +299,12 @@ function nearestRef(levels: readonly Level[], last: number | null): LevelRef | n
     }
   }
   if (best === undefined) return null;
-  return { ...levelAt(best), distancePct: last === null ? null : round2(levelDistancePct(best, last)), file: best.file };
+  return {
+    ...levelAt(best),
+    when: best.when,
+    distancePct: last === null ? null : round2(levelDistancePct(best, last)),
+    file: best.file,
+  };
 }
 
 /** One holding priced from its quote, with its stop and target from `levels`, every levels file's. */
@@ -295,16 +343,6 @@ function nearLevels(levels: readonly Level[], quotes: ReadonlyMap<string, BriefQ
   return near.sort((a, b) => Math.abs(a.distancePct) - Math.abs(b.distancePct));
 }
 
-/** A loader's result - or, should the loader throw, the file refused with the error's message, so one file's
- * failure never costs the brief the others. */
-async function loaded<T>(file: string, load: () => Promise<LoadResult<T>>): Promise<LoadResult<T>> {
-  try {
-    return await load();
-  } catch (error) {
-    return { file, entries: [], refusals: [], error: messageOf(error) };
-  }
-}
-
 /** Each strategy's levels file, `strategies/<name>/levels.yml`, for the strategies channels.ts lists - or the code
  * of the failure when `strategies/` cannot be listed (`ENOTDIR`, `EACCES`; a missing `strategies/` is no strategies). */
 async function strategyLevelFiles(root: string): Promise<{ path: string; file: string }[] | { error: string }> {
@@ -324,23 +362,28 @@ function sessionTime(instant: string): string {
 /* ---------- the brief ---------- */
 
 /**
- * Build the pre-close brief for one firing (see the module header): read the book, take one snapshot, price the
- * book from it. Never rejects for a file or a hub: what fails is named in the brief.
+ * Build the pre-close brief for one firing (see the module header): check the firing's date, read the book, take
+ * one snapshot, price the book from it. Never rejects for a file or a hub: what fails is named in the brief.
  * @param deps - the hub, the repository root and the clock.
  * @param input - the firing: `date` is the ET date a level's expiry is judged against, `session` the times shown.
- * @returns `{ ok: true, text }`, the {@link Brief} as JSON; or, when the hub threw, `{ ok: false, error: "quotes
- *   unavailable: <message>", text }`, the brief with every price null and `quotesError` set.
+ * @returns `{ ok: true, text }`, the {@link Brief} as JSON; when the prices are unavailable - the hub threw, or its
+ *   snapshot holds no price at all - `{ ok: false, error, text }`, `error` being the brief's `quotesError` and
+ *   `text` the brief with every price null; and when `input.date` is not a `YYYY-MM-DD` date, `{ ok: false, error:
+ *   "the brief takes the firing's ET date as YYYY-MM-DD, not \"<date>\"" }`, nothing read and nothing asked.
  */
 export async function buildBrief(deps: BriefDeps, input: ProducerInput): Promise<ProducerOutput> {
+  if (!isEtDate(input.date)) {
+    return { ok: false, error: `the brief takes the firing's ET date as YYYY-MM-DD, not ${JSON.stringify(String(input.date).slice(0, 40))}` };
+  }
   const clock = deps.now ?? Date.now;
+  /* The loaders never throw: a file's every fault is in its result, and the one argument they refuse - the date - is
+   * checked above. */
   const [holdings, deskLevels, listed] = await Promise.all([
-    loaded(HOLDINGS_FILE, () => loadHoldings(join(deps.root, "desk", "holdings.yml"), HOLDINGS_FILE)),
-    loaded(DESK_LEVELS_FILE, () => loadLevels(join(deps.root, "desk", "levels.yml"), DESK_LEVELS_FILE, input.date)),
+    loadHoldings(join(deps.root, "desk", "holdings.yml"), HOLDINGS_FILE),
+    loadLevels(join(deps.root, "desk", "levels.yml"), DESK_LEVELS_FILE, input.date),
     strategyLevelFiles(deps.root),
   ]);
-  const strategyLevels = Array.isArray(listed)
-    ? await Promise.all(listed.map(({ path, file }) => loaded(file, () => loadLevels(path, file, input.date))))
-    : [];
+  const strategyLevels = Array.isArray(listed) ? await Promise.all(listed.map(({ path, file }) => loadLevels(path, file, input.date))) : [];
   const levelResults = [deskLevels, ...strategyLevels];
   const levels = levelResults.flatMap((result) => result.entries);
 
@@ -348,24 +391,30 @@ export async function buildBrief(deps: BriefDeps, input: ProducerInput): Promise
     ...BRIEF_INDEXES, ...BRIEF_SECTORS, ...holdings.entries.map((holding) => holding.symbol), ...levels.map((level) => level.symbol),
   ])];
   const snapshot = new Map<string, LiveQuote>();
+  let payload: QuotePayload | undefined;
   let quotesError: string | undefined;
   try {
     const assets = symbols.map((symbol): QuoteIdentity => ({ id: `us:${symbol}`, market: "us", symbol }));
-    const payload = await deps.hub.snapshot(assets);
+    payload = await deps.hub.snapshot(assets);
     for (const quote of payload.quotes) snapshot.set(quote.id, quote);
   } catch (error) {
-    quotesError = `quotes unavailable: ${messageOf(error)}`;
+    quotesError = error instanceof HttpError && error.status === 429 ? QUOTES_BUSY : `quotes unavailable: ${messageOf(error)}`;
   }
 
   const now = clock();
   const quotes = new Map(symbols.map((symbol) => [symbol, briefQuote(symbol, snapshot.get(`us:${symbol}`), now)] as const));
+  if (quotesError === undefined && ![...quotes.values()].some((quote) => quote.last !== null)) {
+    quotesError = `quotes unavailable: the hub has no price for any symbol (alpaca ${usProviderState(payload)})`;
+  }
   /* Every symbol the brief prices is one the snapshot was asked for, so each has its quote. */
   const quoteFor = (symbol: string): BriefQuote => quotes.get(symbol) as BriefQuote;
 
+  /* The keys in the order the text writes them: the errors ahead of the long lists, so a cut keeps them. */
   const brief: Brief = {
     date: input.date,
     takenAt: `${etClock(new Date(now))} ET`,
     session: { open: sessionTime(input.session.open), close: sessionTime(input.session.close), early: input.session.early },
+    ...(quotesError === undefined ? {} : { quotesError }),
     indexes: BRIEF_INDEXES.map((symbol) => quoteFor(symbol)),
     sectors: strongestFirst(BRIEF_SECTORS.map((symbol) => quoteFor(symbol))),
     holdings: {
@@ -379,15 +428,14 @@ export async function buildBrief(deps: BriefDeps, input: ProducerInput): Promise
     levels: {
       files: levelResults.filter((result) => result.missing !== true).map((result) => result.file),
       loaded: levels.length,
-      near: nearLevels(levels, quotes),
-      refusals: levelResults.flatMap((result) => result.refusals),
       errors: [
         ...(deskLevels.error === undefined ? [] : [{ file: deskLevels.file, error: deskLevels.error }]),
         ...(Array.isArray(listed) ? [] : [{ file: STRATEGIES, error: listed.error }]),
         ...strategyLevels.flatMap((result) => (result.error === undefined ? [] : [{ file: result.file, error: result.error }])),
       ],
+      near: nearLevels(levels, quotes),
+      refusals: levelResults.flatMap((result) => result.refusals),
     },
-    ...(quotesError === undefined ? {} : { quotesError }),
     notYet: NOT_YET,
   };
   const text = JSON.stringify(brief);

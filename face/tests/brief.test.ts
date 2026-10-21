@@ -2,9 +2,10 @@
 /** The pre-close brief (src/brief.ts), `builtin:brief`, and the order it serves (desk/STANDING.md). The brief reads
  * the operator's book through the desk's loaders, takes ONE snapshot from the quote hub over the index ETFs, the
  * sector ETFs, the holdings and the levels' symbols, and prices the book from it: every price carries the feed and
- * New York's time, nothing is computed that the snapshot does not hold, and a file that is missing, refused or
- * unreadable - or a hub that throws - is named in the brief, never skipped. Every hub here is a fake. Offline; the
- * fixture roots sit under tests/tmp/brief-<pid>/ and are removed afterwards. */
+ * New York's time, nothing is shown that the snapshot cannot time, and a file that is missing, refused or
+ * unreadable - or a hub that throws, or has no price at all - is named in the brief, never skipped; its errors come
+ * ahead of its long lists, so the firing's cut keeps them. Every hub here is a fake. Offline; the fixture roots sit
+ * under tests/tmp/brief-<pid>/ and are removed afterwards. */
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -14,8 +15,8 @@ import { fileURLToPath } from "node:url";
 import { BRIEF_INDEXES, BRIEF_SECTORS, NEAR_PCT, briefProducer, buildBrief, type Brief } from "../src/brief.ts";
 import { loadHoldings, loadLevels } from "../src/desk-book.ts";
 import { HttpError } from "../src/http.ts";
-import type { ProducerInput, ProducerOutput } from "../src/producer.ts";
-import type { LiveQuote, QuoteIdentity, QuotePayload } from "../src/quote-types.ts";
+import { capText, PRODUCER_TEXT_MAX, type ProducerInput, type ProducerOutput } from "../src/producer.ts";
+import type { LiveQuote, ProviderState, QuoteIdentity, QuotePayload } from "../src/quote-types.ts";
 import { STANDING_TEXT_MAX_BYTES } from "../src/standing.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -74,19 +75,30 @@ function quoteOf(asset: QuoteIdentity, p: Priced | undefined): LiveQuote {
   };
 }
 
-/** A hub whose snapshot prices the symbols in `prices` (the rest have no price), recording each snapshot's assets;
- * with `fail`, every snapshot throws it after being recorded. */
-function fakeHub(prices: Record<string, Priced>, fail?: Error) {
+/** A hub whose snapshot prices the symbols in `prices` (the rest have no price) and answers `providers` (none by
+ * default), recording each snapshot's assets; with `fail`, every snapshot throws it after being recorded. */
+function fakeHub(prices: Record<string, Priced>, options: { fail?: Error; providers?: ProviderState[] } = {}) {
   const calls: QuoteIdentity[][] = [];
   const hub = {
     async snapshot(assets: QuoteIdentity[]): Promise<QuotePayload> {
       calls.push(assets);
-      if (fail !== undefined) throw fail;
-      return { ok: true, generated_at: "2026-10-20T19:30:05.000Z", quotes: assets.map((asset) => quoteOf(asset, prices[asset.symbol])), providers: [] };
+      if (options.fail !== undefined) throw options.fail;
+      return {
+        ok: true, generated_at: "2026-10-20T19:30:05.000Z",
+        quotes: assets.map((asset) => quoteOf(asset, prices[asset.symbol])), providers: options.providers ?? [],
+      };
     },
   };
   return { hub, calls };
 }
+
+/** The hub's Alpaca provider in `status`, with the UI message the hub's page shows - in Chinese - for it. */
+const alpaca = (status: ProviderState["status"]): ProviderState => ({
+  id: "alpaca", market: "us", status, source: "Alpaca", feed: "iex", transport: "stream", message: "美股行情待配置 Alpaca API 凭据",
+});
+
+/** The hub's own 429 from a snapshot: its message is the quotes page's. */
+const HUB_BUSY = new HttpError(429, "行情请求过多，请稍后重试。");
 
 /** The brief a producer output carries. */
 function briefOf(out: ProducerOutput): Brief {
@@ -151,7 +163,7 @@ test("buildBrief prices indexes, sectors, holdings and near levels from one snap
         {
           symbol: "NVDA", last: 181.2, chgPct: 1.2, prevClose: 179.05, at: "IEX 15:21:03 ET", status: "live",
           qty: 100, avgCost: 120.5, opened: "2026-03-02", broker: "IBKR", dayPnl: 215, openPnl: 6070,
-          stop: { price: 170, distancePct: -6.18, file: "desk/levels.yml" }, target: null, noStop: false,
+          stop: { price: 170, when: "cross_down", distancePct: -6.18, file: "desk/levels.yml" }, target: null, noStop: false,
         },
         {
           symbol: "AAPL", last: 228.9, chgPct: null, prevClose: null, at: "IEX 15:21:03 ET", status: "live",
@@ -173,6 +185,10 @@ test("buildBrief prices indexes, sectors, holdings and near levels from one snap
     notYet: "alerts, suppressed alerts and filings arrive with the watch (P3)",
   }, "MSFT's watch is 4.76% away, so it is not near; NVDA's stop is 6.18% away");
   assert.ok(!(out.text ?? "").includes("最近成交"), "the hub's UI message is left out");
+  /* The text's own key order (deepEqual ignores it): the errors ahead of the long lists, notYet last. */
+  assert.deepEqual(Object.keys(b), ["date", "takenAt", "session", "indexes", "sectors", "holdings", "levels", "notYet"]);
+  assert.deepEqual(Object.keys(b.holdings), ["file", "edited", "rows", "refusals"]);
+  assert.deepEqual(Object.keys(b.levels), ["files", "loaded", "errors", "near", "refusals"]);
 });
 
 test("a quote from another ET day is dated, and so is a holdings file edited on one", async () => {
@@ -200,37 +216,76 @@ test("the session is shown in New York's time, an early close included", async (
   assert.equal(b.takenAt, "12:30:04 ET");
 });
 
-test("a hub that throws still gives a block that says the prices are unavailable", async () => {
+test("a hub that throws still gives a block that says the prices are unavailable; its 429 says busy, in English", async () => {
   const root = await makeRoot("throws", { "desk/holdings.yml": HOLDINGS_YML, "desk/levels.yml": LEVELS_YML });
-  const hub = fakeHub({ SPY: { price: 581.23, prev: 583.68 } }, new HttpError(429, "busy"));
+  const hub = fakeHub({ SPY: { price: 581.23, prev: 583.68 } }, { fail: HUB_BUSY });
 
   const out = await buildBrief({ hub: hub.hub, root, now: () => NOW }, INPUT);
 
   assert.equal(hub.calls.length, 1, "asked once, never retried");
   assert.equal(out.ok, false);
   assert.equal((out as { error: string }).error, "quotes unavailable: busy");
+  assert.ok(!(out.text ?? "").includes("行情"), "the hub's own 429 message never reaches the model");
   const b = briefOf(out);
   assert.equal(b.quotesError, "quotes unavailable: busy");
+  assert.deepEqual(Object.keys(b).slice(0, 4), ["date", "takenAt", "session", "quotesError"], "quotesError comes ahead of every quote");
   for (const quote of [...b.indexes, ...b.sectors, ...b.holdings.rows]) {
     assert.equal(quote.last, null, quote.symbol);
+    assert.equal(quote.prevClose, null, quote.symbol);
     assert.equal(quote.at, null, quote.symbol);
     assert.equal(quote.status, "unavailable", quote.symbol);
   }
   assert.deepEqual(b.holdings.rows.map((row) => [row.symbol, row.dayPnl, row.openPnl, row.noStop]), [["NVDA", null, null, false], ["AAPL", null, null, true]],
     "the holdings rows are present: the files were still read");
-  assert.deepEqual(b.holdings.rows[0].stop, { price: 170, distancePct: null, file: "desk/levels.yml" }, "a stop with no price to measure from");
+  assert.deepEqual(b.holdings.rows[0].stop, { price: 170, when: "cross_down", distancePct: null, file: "desk/levels.yml" }, "a stop with no price to measure from");
   assert.deepEqual(b.levels.near, []);
   assert.equal(b.levels.loaded, 3);
   assert.equal(b.takenAt, "15:30:05 ET");
+
+  /* Any other throw keeps its own message. */
+  const other = await buildBrief({ hub: fakeHub({}, { fail: new Error("socket hang up") }).hub, root, now: () => NOW }, INPUT);
+  assert.equal((other as { error: string }).error, "quotes unavailable: socket hang up");
+});
+
+test("a snapshot with no price at all fails the brief, naming the provider's state in English, and still carries it", async () => {
+  const root = await makeRoot("priceless", { "desk/holdings.yml": HOLDINGS_YML, "desk/levels.yml": LEVELS_YML });
+  const hub = fakeHub({}, { providers: [alpaca("unconfigured")] });
+
+  const out = await buildBrief({ hub: hub.hub, root, now: () => NOW }, INPUT);
+
+  assert.equal(hub.calls.length, 1);
+  assert.equal(out.ok, false, "a brief with no price is no success");
+  assert.equal((out as { error: string }).error, "quotes unavailable: the hub has no price for any symbol (alpaca unconfigured)");
+  assert.ok(!(out.text ?? "").includes("美股"), "the provider's UI message never reaches the model");
+  const b = briefOf(out);
+  assert.equal(b.quotesError, "quotes unavailable: the hub has no price for any symbol (alpaca unconfigured)");
+  assert.deepEqual(b.holdings.rows.map((row) => [row.symbol, row.last, row.noStop]), [["NVDA", null, false], ["AAPL", null, true]], "the files were still read");
+  assert.equal(b.levels.loaded, 3);
+
+  /* No US provider in the payload, or a state that is not one of the hub's words: unknown. */
+  const bare = await buildBrief({ hub: fakeHub({}).hub, root, now: () => NOW }, INPUT);
+  assert.equal((bare as { error: string }).error, "quotes unavailable: the hub has no price for any symbol (alpaca unknown)");
+  const odd = { ...alpaca("error"), status: "断开" as ProviderState["status"] };
+  const strange = await buildBrief({ hub: fakeHub({}, { providers: [odd] }).hub, root, now: () => NOW }, INPUT);
+  assert.equal((strange as { error: string }).error, "quotes unavailable: the hub has no price for any symbol (alpaca unknown)");
+
+  /* One price anywhere - a holding's, with every index and sector unpriced - and the brief is ok. */
+  const one = await buildBrief({ hub: fakeHub({ AAPL: { price: 228.9 } }, { providers: [alpaca("limited")] }).hub, root, now: () => NOW }, INPUT);
+  assert.equal(one.ok, true);
+  assert.equal(briefOf(one).quotesError, undefined);
 });
 
 test("missing, broken and unlistable inputs are named, not invented", async () => {
+  /* SPY has a price, so the brief itself is fine: only the files fail. */
+  const spy = (): ReturnType<typeof fakeHub> => fakeHub({ SPY: { price: 581.23, prev: 583.68 } });
+
   /* No holdings file; a levels file that is not a list. */
   const broken = await makeRoot("broken", { "desk/levels.yml": "a: 1\n" });
-  const one = await buildBrief({ hub: fakeHub({}).hub, root: broken, now: () => NOW }, INPUT);
+  const one = await buildBrief({ hub: spy().hub, root: broken, now: () => NOW }, INPUT);
   assert.equal(one.ok, true, "the producer is still ok");
   const b1 = briefOf(one);
   assert.deepEqual(b1.holdings, { file: "desk/holdings.yml", edited: null, missing: true, rows: [], refusals: [] });
+  assert.deepEqual(Object.keys(b1.holdings), ["file", "edited", "missing", "rows", "refusals"]);
   assert.deepEqual(b1.levels, {
     files: ["desk/levels.yml"], loaded: 0, near: [], refusals: [],
     errors: [{ file: "desk/levels.yml", error: "desk/levels.yml must be a list of entries" }],
@@ -238,7 +293,7 @@ test("missing, broken and unlistable inputs are named, not invented", async () =
 
   /* A file named strategies: the strategies cannot be listed. */
   const unlistable = await makeRoot("unlistable", { strategies: "not a directory\n" });
-  const two = await buildBrief({ hub: fakeHub({}).hub, root: unlistable, now: () => NOW }, INPUT);
+  const two = await buildBrief({ hub: spy().hub, root: unlistable, now: () => NOW }, INPUT);
   assert.equal(two.ok, true, "the producer is still ok");
   assert.deepEqual(briefOf(two).levels, { files: [], loaded: 0, near: [], refusals: [], errors: [{ file: "strategies/", error: "ENOTDIR" }] });
 
@@ -257,20 +312,23 @@ test("missing, broken and unlistable inputs are named, not invented", async () =
   assert.deepEqual(b3.holdings.rows.map((row) => [row.symbol, row.noStop, row.stop]), [["NVDA", true, null]]);
   assert.equal(b3.levels.loaded, 0);
 
-  /* A date the levels loader refuses costs each levels file, never the brief: the holdings still price. */
-  const misdated = briefOf(await buildBrief({ hub: fakeHub({ NVDA: { price: 181.2 } }).hub, root: refusing, now: () => NOW }, { ...INPUT, date: "2026-13-45" }));
-  assert.deepEqual(misdated.levels.errors.map((error) => error.file), ["desk/levels.yml"]);
-  assert.match(misdated.levels.errors[0].error, /2026-13-45/);
-  assert.deepEqual(misdated.holdings.rows.map((row) => [row.symbol, row.last]), [["NVDA", 181.2]]);
+  /* A firing date that is not a date fails the brief once, up front: nothing is read and the hub is not asked. */
+  const misdatedHub = spy();
+  for (const date of ["2026-13-45", "2026-02-30", "20261020"]) {
+    assert.deepEqual(await buildBrief({ hub: misdatedHub.hub, root: refusing, now: () => NOW }, { ...INPUT, date }),
+      { ok: false, error: `the brief takes the firing's ET date as YYYY-MM-DD, not "${date}"` });
+  }
+  assert.equal(misdatedHub.calls.length, 0);
 
   /* A holdings file that is not YAML is the block's error, with no rows. */
   const garbled = await makeRoot("garbled", { "desk/holdings.yml": "- symbol: NVDA\n\tqty: 1\n" });
-  const b4 = briefOf(await buildBrief({ hub: fakeHub({}).hub, root: garbled, now: () => NOW }, INPUT));
+  const b4 = briefOf(await buildBrief({ hub: spy().hub, root: garbled, now: () => NOW }, INPUT));
   const garbledLoad = await loadHoldings(join(garbled, "desk", "holdings.yml"), "desk/holdings.yml");
   assert.ok(garbledLoad.error !== undefined);
   assert.equal(b4.holdings.error, garbledLoad.error);
   assert.deepEqual(b4.holdings.rows, []);
   assert.equal(b4.holdings.missing, undefined);
+  assert.deepEqual(Object.keys(b4.holdings), ["file", "edited", "error", "rows", "refusals"], "the file's state ahead of its rows");
 });
 
 test("a strategy's levels.yml gives a holding its stop; the template, hidden directories and the root's are not read", async () => {
@@ -285,7 +343,7 @@ test("a strategy's levels.yml gives a holding its stop; the template, hidden dir
   const b = briefOf(await buildBrief({ hub: fakeHub({ NVDA: { price: 181.2 }, AAPL: { price: 228.9 } }).hub, root, now: () => NOW }, INPUT));
   const [nvda, aapl] = b.holdings.rows;
   assert.equal(nvda.noStop, false);
-  assert.deepEqual(nvda.stop, { price: 165, distancePct: -8.94, file: "strategies/demo/levels.yml" });
+  assert.deepEqual(nvda.stop, { price: 165, when: "cross_down", distancePct: -8.94, file: "strategies/demo/levels.yml" });
   assert.equal(aapl.noStop, true);
   assert.equal(aapl.stop, null);
   assert.deepEqual(b.levels.files, ["strategies/demo/levels.yml", "strategies/zeta/levels.yml"], "desk/levels.yml is missing, which is no fault");
@@ -318,10 +376,10 @@ test("the nearest stop and target win, a range is measured to its nearest edge, 
   const b = briefOf(await buildBrief({ hub: hub.hub, root, now: () => NOW }, INPUT));
 
   const [nvda, msft] = b.holdings.rows;
-  assert.deepEqual(nvda.stop, { price: 175, distancePct: -3.42, file: "strategies/alpha/levels.yml" },
+  assert.deepEqual(nvda.stop, { price: 175, when: "cross_down", distancePct: -3.42, file: "strategies/alpha/levels.yml" },
     "the nearest of four stops, from any file; on a tie, the first file's");
-  assert.deepEqual(nvda.target, { price: 185, distancePct: 2.1, file: "desk/levels.yml" }, "the nearer of two targets, though it comes first");
-  assert.deepEqual(msft.stop, { range: [430, 435], distancePct: 2.38, file: "desk/levels.yml" }, "a range stop, to its nearest edge");
+  assert.deepEqual(nvda.target, { price: 185, when: "cross_up", distancePct: 2.1, file: "desk/levels.yml" }, "the nearer of two targets, though it comes first");
+  assert.deepEqual(msft.stop, { range: [430, 435], when: "enter", distancePct: 2.38, file: "desk/levels.yml" }, "a range stop, to its nearest edge");
   assert.equal(msft.dayPnl, 10, "a short gains when the price falls");
   assert.equal(msft.openPnl, 100);
   assert.deepEqual(b.levels.near.map((near) => [near.symbol, near.distancePct]), [["AAPL", 0], ["AMD", -1.9]],
@@ -349,8 +407,62 @@ test("the sector ETFs come strongest first, those without a move after them in t
   ]);
   assert.equal(b.sectors.find((quote) => quote.symbol === "XLU")?.last, 80, "a price without a previous close has no move");
   assert.deepEqual(b.sectors.find((quote) => quote.symbol === "XLY"),
-    { symbol: "XLY", last: null, chgPct: null, prevClose: 200, at: null, status: "unavailable" }, "a price that cannot name its time is not shown");
+    { symbol: "XLY", last: null, chgPct: null, prevClose: null, at: null, status: "unavailable" },
+    "a price that cannot name its time is not shown, nor the previous close that came with it");
   assert.deepEqual(b.indexes.map((quote) => [quote.symbol, quote.chgPct]), [["SPY", -0.5], ["QQQ", 1], ["IWM", null], ["DIA", 0.2]]);
+});
+
+test("a stop the price has already gone through carries its when, so it reads as crossed", async () => {
+  const root = await makeRoot("crossed", {
+    "desk/holdings.yml": "- symbol: NVDA\n  qty: 100\n  avg_cost: 120.5\n",
+    "desk/levels.yml": level("NVDA", "stop", "price: 190", "cross_down", "sell half"),
+  });
+  const b = briefOf(await buildBrief({ hub: fakeHub({ NVDA: { price: 181.2 } }).hub, root, now: () => NOW }, INPUT));
+  assert.deepEqual(b.holdings.rows[0].stop, { price: 190, when: "cross_down", distancePct: 4.86, file: "desk/levels.yml" },
+    "a cross_down stop 4.86% above the price: the price is already through it");
+});
+
+test("a cut at the firing's cap keeps quotesError and every levels error: the long lists go first", async () => {
+  const broken = { "strategies/aa-broken/levels.yml": "- [\n", "strategies/zz-broken/levels.yml": "x: 2\n" };
+  /** Every levels error and the quotesError `b` holds, as its text writes them, are in `capped`. */
+  const keeps = (b: Brief, capped: string): void => {
+    assert.equal(b.levels.errors.length, 2);
+    for (const error of b.levels.errors) assert.ok(capped.includes(JSON.stringify(error)), `${error.file} survives the cut`);
+    if (b.quotesError !== undefined) assert.ok(capped.includes(`"quotesError":${JSON.stringify(b.quotesError)}`), "quotesError survives the cut");
+  };
+
+  /* A busy hub, and a book whose bulk is refusals: eight strategies of 40 levels, none with a plan. */
+  const refused: Record<string, string> = { "desk/holdings.yml": HOLDINGS_YML, "desk/levels.yml": LEVELS_YML, ...broken };
+  for (let s = 1; s <= 8; s += 1) {
+    const symbols = Array.from({ length: 40 }, (_, i) => `S${s}A${String(i).padStart(2, "0")}`);
+    refused[`strategies/s${s}/levels.yml`] = symbols.map((symbol) => `- symbol: ${symbol}\n  kind: watch\n  price: 10\n  when: cross_up\n  expires: 2026-12-31\n`).join("");
+  }
+  const busy = await buildBrief({ hub: fakeHub({}, { fail: HUB_BUSY }).hub, root: await makeRoot("cut-refusals", refused), now: () => NOW }, INPUT);
+  assert.ok(busy.text !== undefined && busy.text.length > PRODUCER_TEXT_MAX, `${busy.text?.length} characters, past the cap`);
+  const busyCut = capText(busy.text);
+  assert.equal(busyCut.cut, true);
+  const b1 = briefOf(busy);
+  assert.equal(b1.quotesError, "quotes unavailable: busy");
+  assert.equal(b1.levels.refusals.length, 320);
+  keeps(b1, busyCut.text);
+  assert.ok(!busyCut.text.includes(JSON.stringify(b1.levels.refusals.at(-1))), "the cut takes the refusals' tail");
+
+  /* Prices, and a book whose bulk is near levels: three strategies of 40 watches 1% away, each with a 300-character plan. */
+  const nearBook: Record<string, string> = { ...broken };
+  const prices: Record<string, Priced> = { SPY: { price: 581.23, prev: 583.68 } };
+  for (let s = 1; s <= 3; s += 1) {
+    const symbols = Array.from({ length: 40 }, (_, i) => `N${s}A${String(i).padStart(2, "0")}`);
+    for (const symbol of symbols) prices[symbol] = { price: 100, prev: 99 };
+    nearBook[`strategies/n${s}/levels.yml`] = symbols.map((symbol) => level(symbol, "watch", "price: 101", "cross_up", "p".repeat(300))).join("");
+  }
+  const priced = await buildBrief({ hub: fakeHub(prices).hub, root: await makeRoot("cut-near", nearBook), now: () => NOW }, INPUT);
+  assert.equal(priced.ok, true);
+  assert.ok(priced.text !== undefined && priced.text.length > PRODUCER_TEXT_MAX, `${priced.text?.length} characters, past the cap`);
+  const pricedCut = capText(priced.text);
+  const b2 = briefOf(priced);
+  assert.equal(b2.levels.near.length, 120);
+  keeps(b2, pricedCut.text);
+  assert.ok(!pricedCut.text.includes(JSON.stringify(b2.levels.near.at(-1))), "the cut takes the near levels' tail");
 });
 
 test("briefProducer is the brief as a builtin: it stops with its signal and never rejects", async () => {
