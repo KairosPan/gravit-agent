@@ -3,9 +3,9 @@
  * the `gravit-desk` preset's roster, the parameters of its write and read tools - and str_replace_editor's
  * commands - that the desk guard was written against, its prompt - against a Gravit session's, the control -
  * Gate 2's refusal from a desk turn, the sandbox fence around `desk/journal/`, the guard leaving a Gravit
- * session's writes and reads alone, the guard's backstop holding a write's and a read's deny when a listener in
- * front of it answers allow, the instruction-chain threat the face's fence exists for, and the ledger's
- * `desk-turn` record with its tokens.
+ * session's writes and reads alone, a desk grep spilled past its 250 matches and the desk reading its own spill
+ * back, the guard's backstop holding a write's and a read's deny when a listener in front of it answers allow, the
+ * instruction-chain threat the face's fence exists for, and the ledger's `desk-turn` record with its tokens.
  * The desk runs as main.ts runs it: `installDesk` on the booted face, its conversation
  * (src/desk-conversation.ts) the one owner of the desk session, every turn opened through `post`. That the
  * guard denies a desk turn's own write of GRAVIT.md is tests/telegram-smoke.test.ts's canary.
@@ -32,9 +32,11 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Context } from "@deepseek-ai/cordis";
 import { installModelSelection, type Agent } from "@deepseek-ai/dsh-agent";
@@ -121,6 +123,12 @@ const ENV_FILE = ".env.smoke";
 const ENV_TEXT = "DESK_SMOKE_ONLY=made-up-value-4c9e\n";
 /** The read check's refusal of a desk read of it (src/desk-tools.ts `deskReadDecision`). */
 const READ_DENIAL = `the desk never reads ${ENV_FILE}: it can hold a key`;
+/** The spill probe: a journal file whose lines a grep matches past its 250 inline matches, so dsh spills the result. */
+const SPILL_FILE = "spill-probe.md";
+const SPILL_LINE = "SPILL-PROBE-LINE";
+const SPILL_LINES = 300;
+/** Where dsh-tool-fs-search says a capped grep's complete result is. */
+const SPILL_NOTICE = /Full grep result stored at: (\S+)\. Use read/;
 /** What Gravit's control turn writes in `repo/notes/GRAVIT.md`, off the desk's instruction chain. */
 const GRAVIT_NOTE = "DESK-SMOKE-GRAVIT-NOTE-5c1e: a Gravit session's own notes";
 /** The roles section's opening line, from plugins/gravit.js itself. */
@@ -154,6 +162,11 @@ class MeteredStub extends StubAdapter {
 type Message = GenerateOptions["messages"][number];
 const sourceKind = (m: Message): string => String(((m.source ?? {}) as { kind?: unknown }).kind);
 const textOf = (m: Message): string => m.content.map((b) => ("text" in b ? b.text : "")).join("\n");
+/** The text of the last tool result in a request, as the model reads it. */
+function lastToolText(r: GenerateOptions): string {
+  const results = r.messages.filter((m) => sourceKind(m) === "tool");
+  return results.length === 0 ? "" : textOf(results[results.length - 1]);
+}
 /** The last message a person sent - the phone's, the browser's - and how many tool results came after it. */
 function lastSaid(r: GenerateOptions): { said: string; tools: number } {
   for (let i = r.messages.length - 1; i >= 0; i -= 1) {
@@ -243,6 +256,13 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
       }
       if (said.includes("GRAVIT_CONTROL")) {
         return results === 0 ? { kind: "tool", name: "write", args: { file_path: "notes/GRAVIT.md", content: `${GRAVIT_NOTE}\n` } } : { kind: "text", text: "noted" };
+      }
+      if (said.includes("SPILL_PROBE")) {
+        /* a grep past 250 matches spills; then the spill notice's own path, read as the notice says */
+        if (results === 0) return { kind: "tool", name: "grep", args: { pattern: SPILL_LINE } };
+        const spilled = SPILL_NOTICE.exec(lastToolText(r))?.[1];
+        if (results === 1 && spilled !== undefined) return { kind: "tool", name: "read", args: { file_path: spilled, offset: 1, limit: 5 } };
+        return { kind: "text", text: spilled === undefined ? "no spill notice" : "the spill was read" };
       }
       return { kind: "text", text: "noted" };
     };
@@ -410,6 +430,24 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
     });
     assert.equal(gravitRead.isError, false, `Gravit's read of ${ENV_FILE} is not judged; saw ${JSON.stringify(gravitRead.content)}`);
     assert.ok(JSON.stringify(gravitRead.content).includes(ENV_TEXT.trim()), "and it read the file");
+
+    /* THE SPILL: a desk grep past its 250 inline matches is spilled by dsh, under the OS temp directory, into the desk
+     * session's own spill directory - session-<the first 12 hex digits of sha256(its id)>, as the read check reckons
+     * it - and the desk reads it back from the path the notice gives, outside the repository. */
+    await writeFile(join(JOURNAL, SPILL_FILE), `${Array.from({ length: SPILL_LINES }, (_, i) => `${SPILL_LINE} ${i + 1}`).join("\n")}\n`);
+    const spill = await turn("SPILL_PROBE");
+    const spillEvents = eventsOf(deskAgent, spill.turn);
+    assert.deepEqual(spillEvents.filter((e) => e.type === "tool/call").map((e) => e.data?.name), ["grep", "read"], "the grep, then the read of its spill");
+    const spillResults = spillEvents.filter((e) => e.type === "tool/result").map((e) => JSON.stringify(e.data));
+    assert.equal(spillResults.length, 2);
+    const spilledPath = SPILL_NOTICE.exec(spillResults[0])?.[1];
+    assert.ok(spilledPath !== undefined, `the grep was spilled; saw ${spillResults[0].slice(0, 400)}`);
+    assert.equal(basename(dirname(spilledPath)), `session-${createHash("sha256").update(deskId).digest("hex").slice(0, 12)}`,
+      "into the desk session's own spill directory, named as the read check names it");
+    assert.match(basename(dirname(dirname(spilledPath))), /^dsh-spill-[A-Za-z0-9]{6}$/, "under a spill root of dsh-spill-local's shape");
+    assert.equal(dirname(dirname(dirname(await realpath(spilledPath)))), await realpath(tmpdir()), "in the OS temp directory");
+    assert.match(spillResults[1], /"isError":false/, `the desk's read of its own spill went through; saw ${spillResults[1].slice(0, 400)}`);
+    assert.ok(spillResults[1].includes(`${SPILL_LINE} 1`), "and read the spilled matches back");
 
     /* 5. THE WRITE GUARD'S BACKSTOP through the real waterfall: a tools/pre-execute listener registered after the
      * guard, in front of it, answers allow without calling next - so the guard's own listener never runs, and

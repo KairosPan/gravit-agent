@@ -50,7 +50,9 @@
  * to stop.
  * @module
  */
+import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { DESK_PRESET, fenceNameOf, foldName, type FenceName } from "./desk-names.ts";
 import type { DeskStatus } from "./desk.ts";
@@ -553,7 +555,7 @@ export const DESK_READ_GLOB_ARGS = Object.freeze({ grep: "include", glob: "patte
 
 /** The read check's refusals. */
 const READ_UNCHECKED = "the desk could not check this read's path; nothing was read";
-const DOT_FILES = "the desk never searches dot-files";
+const DOT_FILES = "the desk never searches dot-files: search with no include, or one that starts with a name";
 const outsideRefusal = (path: string): string => `the desk reads only inside the repository; ${path} is outside it`;
 const keyRefusal = (name: string): string => `the desk never reads ${name}: it can hold a key`;
 
@@ -605,26 +607,71 @@ function within(root: string, target: string): boolean {
 /** The names `target` reaches below `root`, both real: none for the root itself. */
 const namesBelow = (root: string, target: string): string[] => relative(root, target).split(sep).filter((name) => name !== "");
 
+/** A spill root as dsh-spill-local creates one (`mkdtempSync(join(tmpdir(), "dsh-spill-"))`) and its own startup sweep
+ * recognises one (`DEFAULT_ROOT_RE`): `dsh-spill-` and the six characters `mkdtemp` appends, in the OS temp directory. */
+const SPILL_ROOT = /^dsh-spill-[A-Za-z0-9]{6}$/;
+
+/** The read tools a spilled result is retrieved with: the spill notice tells the model to `read` it with offset and
+ * limit, or to `grep` it. */
+const SPILL_READERS: readonly DeskReadTool[] = Object.freeze(["read", "grep"]);
+
+/** Where one session's spilled results lie: the realpath of the OS temp directory, and the name of the session's own
+ * directory under a spill root there. */
+interface SpillHome {
+  tmp: string;
+  session: string;
+}
+
+/**
+ * The {@link SpillHome} of the session `sessionId`: dsh-spill-local keeps every result too large to show inline - a
+ * result over the spill policy's 12,500 tokens, a `grep` past 250 matches, a `glob` past 100 paths - in a file under
+ * `<os.tmpdir()>/dsh-spill-XXXXXX/session-<the first 12 hex digits of sha256(session id)>/`, the session being the
+ * calling agent's (`exec.agent.session.header.id`, dsh-spill-policy and dsh-tool-fs-search alike), and names that
+ * directory so (dsh-spill-local `sessionDir`). Throws when the temp directory cannot be resolved.
+ */
+function spillHomeOf(sessionId: string): SpillHome {
+  return {
+    tmp: realTarget(tmpdir()),
+    session: `session-${createHash("sha256").update(sessionId).digest("hex").slice(0, 12)}`,
+  };
+}
+
+/** Whether `target`, real, is the session's own spill directory or lies below it - `<tmp>/<spill root>/<session>/...` -
+ * and so never the temp directory, never a spill root itself, never another session's directory. */
+function inOwnSpill(home: SpillHome, target: string): boolean {
+  const [spillRoot, session] = relative(home.tmp, target).split(sep);
+  return session === home.session && SPILL_ROOT.test(spillRoot);
+}
+
 /**
  * One path's verdict, by {@link deskReadDecision}'s rules: outside the repository, a key name, or `null`.
  * @param path - the path as the model spelled it, or the cwd ripgrep searches.
  * @param cwd - the session's cwd, absolute.
  * @param base - the root's names, as given.
  * @param realRoot - the root's realpath.
+ * @param spill - the calling session's {@link SpillHome}, asked only for a path outside the repository; absent when
+ *   the call may not read spilled results.
  * @throws when the volume cannot resolve the path.
  */
-function judgeReadPath(path: string, cwd: string, base: readonly string[], realRoot: string): DeskDeny | null {
+function judgeReadPath(path: string, cwd: string, base: readonly string[], realRoot: string, spill?: () => SpillHome): DeskDeny | null {
   if (!isAbsolute(path) && path.startsWith("~")) return deny(outsideRefusal(path));
   const placed = resolve(cwd, path);
   const spelled = isAbsolute(path) ? path : `${cwd}${sep}${path}`;
   const walked = PARENT_SEGMENT.test(spelled) ? spelled : placed;
   const physical = realTarget(walked);
   const lexical = walked === placed ? physical : realTarget(placed);
-  if (!within(realRoot, physical) || !within(realRoot, lexical)) return deny(outsideRefusal(path));
+  /* the names each placement reaches are judged below the place it was let into: the repository, or the temp
+   * directory that holds the session's own spills */
+  let anchor = realRoot;
+  if (!within(realRoot, physical) || !within(realRoot, lexical)) {
+    const home = spill?.();
+    if (home === undefined || !inOwnSpill(home, physical) || !inOwnSpill(home, lexical)) return deny(outsideRefusal(path));
+    anchor = home.tmp;
+  }
   const names = [
     ...(isAbsolute(path) ? below(namesOf(path), base) : namesOf(path)),
-    ...namesBelow(realRoot, physical),
-    ...namesBelow(realRoot, lexical),
+    ...namesBelow(anchor, physical),
+    ...namesBelow(anchor, lexical),
   ];
   const key = names.find(isKeyName);
   return key === undefined ? null : deny(keyRefusal(key));
@@ -654,10 +701,17 @@ const mayMatchDotName = (segment: string): boolean => dotLed(segment) || "*?[{".
  *   ({@link realTarget}), and when either lies outside the root's own realpath the call is denied with
  *   `the desk reads only inside the repository; <path> is outside it`, `<path>` as spelled. That is the harness home,
  *   `~/.ssh`, `~/.config` and every other checkout, however they are reached;
- * - inside it, when a name the path spells - every name of a relative one; those below its common ancestor with the
- *   root of an absolute one, as the write check counts them - or a name either placement reaches below the root
- *   case-folds to `.env`, `.env.<anything>` or `.git`, the call is denied with `the desk never reads <name>: it can
- *   hold a key`, `<name>` as found. A symlink with an innocent name and a key file behind it is found by its target.
+ * - but for one place outside it: a `read` or a `grep` whose two placements both lie in the calling session's own spill
+ *   directory - `<the realpath of os.tmpdir()>/dsh-spill-XXXXXX/session-<sha256(sessionId)[:12]>/`, the directory itself
+ *   or below it ({@link spillHomeOf}) - goes on, since the spill notice of a result too large to show inline tells the
+ *   model to read it so. Never the temp directory, never a spill root itself, never another session's directory - those
+ *   hold Gravit's spills, which can hold a key file's text - and only for the session the call comes from, by the
+ *   `sessionId` the guard reads off its header; given none, nothing outside the repository is read;
+ * - inside either, when a name the path spells - every name of a relative one; those below its common ancestor with
+ *   the root of an absolute one, as the write check counts them - or a name either placement reaches below the root,
+ *   or below the temp directory for a spill, case-folds to `.env`, `.env.<anything>` or `.git`, the call is denied
+ *   with `the desk never reads <name>: it can hold a key`, `<name>` as found. A symlink with an innocent name and a key
+ *   file behind it is found by its target.
  *
  * Then the glob the tool hands ripgrep as `--glob=<value>` ({@link DESK_READ_GLOB_ARGS}) is judged segment by segment,
  * split at `/`. Ripgrep skips hidden files and directories by default, but a `--glob` that matches one lifts the skip,
@@ -667,9 +721,13 @@ const mayMatchDotName = (segment: string): boolean => dotLed(segment) || "*?[{".
  * `.env.alpaca` and `sub/.env`; `*.Upper` searched `.ENV.Upper`. glob's argv adds `--hidden --no-ignore`, so a
  * doublestar `*.md` pattern listed `.hidden.md` and `.dsh/x.md` - by name, never their contents. So:
  * - `grep`'s `include`, which reads contents: a segment led by a dot (an escaped one, `\.`, too) or by `*`, `?`, `[`
- *   or `{` is denied with `the desk never searches dot-files` - `*.md` included, since no rule that lets `*.md` through
- *   can stop `*.alpaca`. A literal-led include (`notes*.md`) goes, and so does a `grep` with none, which ripgrep keeps
- *   off hidden files, narrowed by its `path`;
+ *   or `{` is denied with `the desk never searches dot-files: search with no include, or one that starts with a name` -
+ *   `*.md` included, since no rule that lets `*.md` through can stop `*.alpaca`. A literal-led include (`notes*.md`)
+ *   goes, and so does a `grep` with none, narrowed by its `path`, which ripgrep keeps off hidden files - unless an
+ *   ignore file in the tree it searches whitelists one: a negation such as `!.env.alpaca` in a `.gitignore`, `.ignore`
+ *   or `.rgignore` lifts the hidden-file skip for what it matches (measured: a `.ignore` holding `!.env.alpaca` made a
+ *   grep with no include search `.env.alpaca`). tests/desk-guard.test.ts keeps the repository's tracked ignore files
+ *   free of a negation that can match a key name; an untracked one, or git's own exclude files, it does not see;
  * - `glob`'s `pattern`, which lists names only: a segment led by a dot is denied, so `.*` is, and so is a doublestar
  *   `.env*`, and a doublestar `*.md` goes.
  *
@@ -682,8 +740,10 @@ const mayMatchDotName = (segment: string): boolean => dotLed(segment) || "*?[{".
  * @param args - the call's arguments (`exec.arguments`).
  * @param cwd - the calling session's cwd, which a relative path is placed against and ripgrep runs in.
  * @param root - the repository root (src/desk.ts `installDesk`'s `root`), which every read must stay inside.
+ * @param sessionId - the calling session's id (its header's `id`), whose own spill directory a `read` or a `grep` may
+ *   read; absent, or empty, when the guard has none.
  */
-export function deskReadDecision(toolName: string, args: unknown, cwd: string, root: string): DeskDeny | null {
+export function deskReadDecision(toolName: string, args: unknown, cwd: string, root: string, sessionId?: string): DeskDeny | null {
   if (!isDeskReadTool(toolName)) return null;
   if (args === null || typeof args !== "object" || typeof cwd !== "string" || typeof root !== "string") return deny(READ_UNCHECKED);
   const given = args as Record<string, unknown>;
@@ -691,11 +751,16 @@ export function deskReadDecision(toolName: string, args: unknown, cwd: string, r
     const at = isAbsolute(cwd) ? cwd : resolve(cwd);
     const realRoot = realTarget(resolve(root));
     const base = namesOf(resolve(root));
+    /* worked out once, and only for a path outside the repository */
+    let home: SpillHome | undefined;
+    const spill = typeof sessionId === "string" && sessionId !== "" && SPILL_READERS.includes(toolName)
+      ? (): SpillHome => (home ??= spillHomeOf(sessionId))
+      : undefined;
     for (const arg of DESK_READ_PATH_ARGS[toolName]) {
       const path = given[arg];
       if (path !== undefined && typeof path !== "string") return deny(READ_UNCHECKED);
       if (path === undefined && !searchesCwd(toolName)) return deny(READ_UNCHECKED);
-      const verdict = judgeReadPath(path ?? at, at, base, realRoot);
+      const verdict = judgeReadPath(path ?? at, at, base, realRoot, spill);
       if (verdict !== null) return verdict;
     }
   } catch {
@@ -715,6 +780,19 @@ const SECRET_NAME = /KEY|PASSWORD|SECRET|TOKEN/i;
 /** The fewest characters a secret has, trimmed: a shorter value turns up by chance too easily. */
 const SECRET_MIN_LENGTH = 8;
 
+/** The variables of `env` the secret check covers, each as its name and its value trimmed, in the environment's
+ * order: every one whose name matches {@link SECRET_NAME} and whose value, trimmed, is at least
+ * {@link SECRET_MIN_LENGTH} characters. */
+function secretVariables(env: NodeJS.ProcessEnv): (readonly [string, string])[] {
+  const found: (readonly [string, string])[] = [];
+  for (const [name, value] of Object.entries(env)) {
+    if (typeof value !== "string" || !SECRET_NAME.test(name)) continue;
+    const secret = value.trim();
+    if (secret.length >= SECRET_MIN_LENGTH) found.push([name, secret]);
+  }
+  return found;
+}
+
 /**
  * The secrets in `env`: the value of every variable whose name matches `/KEY|PASSWORD|SECRET|TOKEN/i` and whose value,
  * trimmed, is at least 8 characters - trimmed, so a blank value is none and a padded one is looked for as it is used
@@ -724,13 +802,16 @@ const SECRET_MIN_LENGTH = 8;
  * @param env - the environment.
  */
 export function deskSecrets(env: NodeJS.ProcessEnv): string[] {
-  const found = new Set<string>();
-  for (const [name, value] of Object.entries(env)) {
-    if (typeof value !== "string" || !SECRET_NAME.test(name)) continue;
-    const secret = value.trim();
-    if (secret.length >= SECRET_MIN_LENGTH) found.add(secret);
-  }
-  return [...found];
+  return [...new Set(secretVariables(env).map(([, secret]) => secret))];
+}
+
+/**
+ * The names of the variables whose values {@link deskSecrets} takes from `env`, in the environment's order - for the
+ * line the guard writes at install, which names what the secret check covers and never a value.
+ * @param env - the environment.
+ */
+export function deskSecretNames(env: NodeJS.ProcessEnv): string[] {
+  return secretVariables(env).map(([name]) => name);
 }
 
 /**
@@ -788,11 +869,11 @@ export type DeskPreDecision =
 
 /** The slice of dsh-tools' `ToolExecution` the guard reads: the tool's name, its arguments as the model sent
  * them, and the calling agent - its context, for the preset registry, and its session's header: the preset the
- * session was created with, fixed then, and its cwd. */
+ * session was created with, fixed then, its cwd, and its id, which names the session's own spill directory. */
 export interface DeskGuardExecution {
   name: string;
   arguments?: unknown;
-  agent?: { id: string; ctx: unknown; session: { header: { cwd?: string; agentPreset?: string } } };
+  agent?: { id: string; ctx: unknown; session: { header: { id?: string; cwd?: string; agentPreset?: string } } };
 }
 
 /** The tool registry's guard seam as the backstop uses it - dsh-tools `ToolRuntime.guard`, a monotonic
@@ -863,11 +944,11 @@ function uncheckedFor(exec: unknown): string {
 }
 
 /** What {@link installDeskGuard} takes beside the context and the root: `log`, where a line is written (default
- * `console.error`), and `secrets`, the values the secret check looks for (default {@link deskSecrets} of
- * `process.env`, taken at install) - both for tests. */
+ * `console.error`), and `env`, the environment the secret check takes its secrets from, once, at install (default
+ * `process.env`) - both for tests. */
 export interface DeskGuardOptions {
   log?: (line: string) => void;
-  secrets?: readonly string[];
+  env?: NodeJS.ProcessEnv;
 }
 
 /**
@@ -899,7 +980,12 @@ export interface DeskGuardOptions {
  * line. One call is one line, however many of the two judge it, and a `log` that throws costs the line, never the
  * decision. A malformed call from the desk is denied without a line: nothing failed. Given no `root`, the guard can
  * judge no path: every desk write and read is its check's could-not-check deny, said once, at install, rather than
- * once a call; the secret check needs no root.
+ * once a call; the secret check needs no root. At install it also writes one line naming the variables whose values
+ * the secret check took ({@link deskSecretNames}) - `gravit-face: desk: the secret check covers DEEPSEEK_API_KEY,
+ * APCA_API_KEY_ID, ...` - by name, never by value, or saying that it covers none.
+ *
+ * The read check is given the calling session's id, its header's `id`, so a desk turn's `read` or `grep` can retrieve
+ * its own spilled results, and nobody else's ({@link deskReadDecision}).
  *
  * The fence (src/desk-session.ts) stays behind both, for a file another session plants.
  * @param ctx - the booted ROOT context.
@@ -917,7 +1003,9 @@ export function installDeskGuard(
   options: DeskGuardOptions = {},
 ): () => Promise<void> {
   const log = options.log ?? ((line: string) => console.error(line));
-  const secrets: readonly string[] = [...(options.secrets ?? deskSecrets(process.env))];
+  const env = options.env ?? process.env;
+  const secrets: readonly string[] = deskSecrets(env);
+  const covered = deskSecretNames(env);
   /** The calls already given a line: the listener and the backstop can judge one call alike. */
   const told = new WeakSet<object>();
   const tell = (exec: unknown, line: string): void => {
@@ -957,9 +1045,11 @@ export function installDeskGuard(
       if (writes || reads) {
         const cwd: unknown = header.cwd;
         if (typeof cwd !== "string") throw new Error("its session has no cwd");
+        /* the header's id names the session's own spill directory, which its read and grep may read */
+        const id: unknown = header.id;
         /* no root: each check's own fail-closed deny, without a line - the install said it once */
         const decided = (writes ? deskWriteDecision(exec.name, exec.arguments, cwd, root as string) : null)
-          ?? (reads ? deskReadDecision(exec.name, exec.arguments, cwd, root as string) : null);
+          ?? (reads ? deskReadDecision(exec.name, exec.arguments, cwd, root as string, typeof id === "string" ? id : undefined) : null);
         if (decided !== null) return decided;
       }
       return secret;
@@ -968,6 +1058,10 @@ export function installDeskGuard(
       return deny(uncheckedFor(exec));
     }
   };
+  /* what the secret check covers, by name and never by value: the operator reads which keys are kept in */
+  tell(undefined, covered.length === 0
+    ? `${BIN}: desk: the secret check covers no variable in the environment; no call will be denied for a secret`
+    : `${BIN}: desk: the secret check covers ${covered.join(", ")}`);
   if (root === undefined) tell(undefined, `${BIN}: desk: the desk guard was given no repository root; every desk write and read will be denied, unjudged`);
   const off = ctx.on("tools/pre-execute", async (exec, next) => judge(exec) ?? next(), { prepend: true });
   const backstop = ctx.inject(["tools"], function deskGuardBackstop(injected) {

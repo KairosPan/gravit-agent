@@ -11,15 +11,19 @@
  * and its call carrying a secret, and nobody else's, is the smokes' to prove. Every secret here is made up. */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { DESK_PRESET, FENCE_NAMES, type FenceName } from "../src/desk-names.ts";
 import { DESK_ALLOW } from "../src/desk-preset.ts";
 import { installDesk } from "../src/desk.ts";
 import {
   DESK_READ_CWD_TOOLS, DESK_READ_GLOB_ARGS, DESK_READ_PATH_ARGS, DESK_READ_TOOLS, DESK_WRITE_PATH_ARGS, DESK_WRITE_TOOLS,
-  deskReadDecision, deskSecretDecision, deskSecrets, deskWriteDecision, installDeskGuard,
+  deskReadDecision, deskSecretDecision, deskSecretNames, deskSecrets, deskWriteDecision, installDeskGuard,
   type DeskGuardCtxLike, type DeskGuardExecution, type DeskGuardToolsLike, type DeskPreDecision,
 } from "../src/desk-tools.ts";
 import type { QuotePayload } from "../src/quote-types.ts";
@@ -37,13 +41,24 @@ const sitsUnder = (name: FenceName) => ({ kind: "deny", reason: `the desk does n
 /** The read guard's refusals (src/desk-tools.ts `deskReadDecision`). */
 const outside = (path: string) => ({ kind: "deny", reason: `the desk reads only inside the repository; ${path} is outside it` });
 const keyRead = (name: string) => ({ kind: "deny", reason: `the desk never reads ${name}: it can hold a key` });
-const DOT_FILES = { kind: "deny", reason: "the desk never searches dot-files" };
+const DOT_FILES = { kind: "deny", reason: "the desk never searches dot-files: search with no include, or one that starts with a name" };
 const READ_UNCHECKED = { kind: "deny", reason: "the desk could not check this read's path; nothing was read" };
 /** The secret check's refusals (src/desk-tools.ts `deskSecretDecision`). */
 const CARRIES_SECRET = { kind: "deny", reason: "the desk never sends a secret: this call carries one" };
 const SECRET_UNCHECKED = { kind: "deny", reason: "the desk could not check this call for a secret; nothing was sent" };
 /** A made-up secret: no key anywhere holds this value. */
 const SECRET = "made-up-desk-secret-0001";
+/** The environment a guard under test takes its secrets from: the made-up one, under a name the check takes. */
+const ENV: NodeJS.ProcessEnv = { DESK_GUARD_TEST_SECRET: SECRET };
+/** The guard's line at install over {@link ENV}, and over an environment with nothing in it for the check. */
+const COVERS = "gravit-face: desk: the secret check covers DESK_GUARD_TEST_SECRET";
+const COVERS_NONE = "gravit-face: desk: the secret check covers no variable in the environment; no call will be denied for a secret";
+/** The desk session's id in the spill tests, and another session's. */
+const DESK_SESSION = "desk-session-0001";
+const OTHER_SESSION = "gravit-session-0001";
+/** The directory dsh-spill-local keeps a session's spills in, under a spill root: `session-` and the first 12 hex digits
+ * of the sha256 of its id (dsh-spill-local `sessionDir`; tests/desk-smoke.test.ts reads a real spill back). */
+const spillSession = (id: string): string => `session-${createHash("sha256").update(id).digest("hex").slice(0, 12)}`;
 
 /** A well-formed call's arguments to `tool`, its path argument `arg` set to `path`: only the path varies. */
 function argsFor(tool: string, arg: string, path: unknown): Record<string, unknown> {
@@ -430,6 +445,148 @@ test("every str_replace_editor command is judged as a read, view included", () =
   }
 });
 
+test("a read or a grep of the desk session's own spilled results goes on; the spill root, another session's, a link out and every other tool do not", async (t) => {
+  const repo = "/x/repo";
+  const cwd = `${repo}/desk/journal`;
+  /* A spill tree as dsh-spill-local makes one, in the real temp directory: a dsh-spill-XXXXXX root - mkdtemp's six
+   * characters - and under it each session's own directory. */
+  const spillRoot = await mkdtemp(join(tmpdir(), "dsh-spill-"));
+  t.after(() => rm(spillRoot, { recursive: true, force: true }));
+  assert.match(basename(spillRoot), /^dsh-spill-[A-Za-z0-9]{6}$/);
+  const own = join(spillRoot, spillSession(DESK_SESSION));
+  const other = join(spillRoot, spillSession(OTHER_SESSION));
+  await mkdir(own, { mode: 0o700 });
+  await mkdir(other, { mode: 0o700 });
+  const ownFile = join(own, "0a1b2c3d4e5f-grep-results.txt");
+  const otherFile = join(other, "5f4e3d2c1b0a-read.txt");
+  await writeFile(ownFile, "SPILL-LINE 1\n");
+  await writeFile(otherFile, "made-up gravit spill\n");
+  await symlink(otherFile, join(own, "to-other.txt"));
+  await symlink("/etc/hosts", join(own, "to-etc.txt"));
+  /* Links whose `..` the volume walks the other way from the spelling: from its own directory into another
+   * session's, and from another session's back into its own. */
+  await mkdir(join(other, "sub"));
+  await symlink(join(other, "sub"), join(own, "away"));
+  await mkdir(join(own, "sub"));
+  await symlink(join(own, "sub"), join(other, "back"));
+  /* The path the spill notice hands the model, and the same place through the temp directory's realpath: both go,
+   * read with offset and limit or grepped - the file, or the session's whole directory. */
+  for (const path of [ownFile, await realpath(ownFile)]) {
+    assert.equal(deskReadDecision("read", { file_path: path, offset: 1, limit: 50 }, cwd, repo, DESK_SESSION), null, `read ${path}`);
+    assert.equal(deskReadDecision("grep", { pattern: "SPILL", path }, cwd, repo, DESK_SESSION), null, `grep ${path}`);
+  }
+  assert.equal(deskReadDecision("grep", { pattern: "SPILL", path: own }, cwd, repo, DESK_SESSION), null, "a grep over its own spill directory");
+  assert.equal(deskReadDecision("grep", { pattern: "SPILL", path: own, include: "0a1b*" }, cwd, repo, DESK_SESSION), null);
+  /* Inside it the read check's own rules still stand: a dot-file search, a key name. */
+  assert.deepEqual(deskReadDecision("grep", { pattern: "SPILL", path: own, include: "*.txt" }, cwd, repo, DESK_SESSION), DOT_FILES);
+  assert.deepEqual(deskReadDecision("read", { file_path: join(own, ".env.local") }, cwd, repo, DESK_SESSION), keyRead(".env.local"));
+  /* Nothing else outside the repository: another session's spills - Gravit's can hold a key file's text - the spill
+   * root, the temp directory, a link out of its own directory, a `..` out of it; and no spill at all to a call that
+   * names no session, or another one. */
+  const refused: readonly (readonly [string, Record<string, unknown>, string | undefined])[] = [
+    ["read", { file_path: otherFile }, DESK_SESSION],
+    ["grep", { pattern: "x", path: other }, DESK_SESSION],
+    ["grep", { pattern: "x", path: spillRoot }, DESK_SESSION],
+    ["grep", { pattern: "x", path: tmpdir() }, DESK_SESSION],
+    ["read", { file_path: join(own, "to-other.txt") }, DESK_SESSION],
+    ["read", { file_path: join(own, "to-etc.txt") }, DESK_SESSION],
+    ["read", { file_path: `${own}/../${spillSession(OTHER_SESSION)}/${basename(otherFile)}` }, DESK_SESSION],
+    /* the spelling stays in its own directory, but the volume walks the link and its `..` into another session's */
+    ["read", { file_path: `${own}/away/../${basename(otherFile)}` }, DESK_SESSION],
+    /* the volume lands in its own directory, but the spelling's `..` stays in another session's: both must be its own */
+    ["read", { file_path: `${other}/back/../${basename(ownFile)}` }, DESK_SESSION],
+    ["read", { file_path: ownFile }, undefined],
+    ["read", { file_path: ownFile }, ""],
+    ["read", { file_path: ownFile }, OTHER_SESSION],
+  ];
+  for (const [tool, args, session] of refused) {
+    const spelled = String(args.file_path ?? args.path);
+    assert.deepEqual(deskReadDecision(tool, args, cwd, repo, session), outside(spelled), `${tool} ${spelled} from ${String(session)}`);
+  }
+  /* Only read and grep, which the notice names: no other reader reaches a spill. */
+  for (const [tool, args] of readerCalls(ownFile)) {
+    if (tool === "read" || tool === "grep") continue;
+    assert.deepEqual(deskReadDecision(tool, args, cwd, repo, DESK_SESSION), outside(ownFile), `${tool} of its own spill`);
+  }
+  /* A directory that only looks like a spill root holds none of the session's spills. */
+  const lookalike = await mkdtemp(join(tmpdir(), "dsh-spill-x-"));
+  t.after(() => rm(lookalike, { recursive: true, force: true }));
+  await mkdir(join(lookalike, spillSession(DESK_SESSION)));
+  const lookalikeFile = join(lookalike, spillSession(DESK_SESSION), "0a1b2c3d4e5f-read.txt");
+  await writeFile(lookalikeFile, "x\n");
+  assert.deepEqual(deskReadDecision("read", { file_path: lookalikeFile }, cwd, repo, DESK_SESSION), outside(lookalikeFile));
+});
+
+/** Key names a negation in an ignore file must never match: ripgrep matches ignore globs case-sensitively, so the
+ * spellings a case-folding volume opens alike are listed apart. */
+const KEY_NAMES = [
+  ".env", ".env.alpaca", ".env.deepseek", ".env.ifind", ".env.telegram", ".env.local", ".env.example", ".env.md", ".env.csv",
+  ".git", ".ENV", ".ENV.LOCAL", ".Env.Local", ".GIT",
+];
+
+/** A glob segment, as an ignore file's pattern spells one, as a regular expression over one name: `*` and `?` within
+ * the name, a class `[...]` (`[!...]` negated), an alternation `{a,b}`, and a backslash escaping what follows. */
+function globSegmentRegExp(segment: string): RegExp {
+  const literal = (c: string): string => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  let out = "";
+  let braces = 0;
+  for (let i = 0; i < segment.length; i += 1) {
+    const c = segment[i];
+    if (c === "\\" && i + 1 < segment.length) {
+      i += 1;
+      out += literal(segment[i]);
+    } else if (c === "*") {
+      out += "[^/]*";
+    } else if (c === "?") {
+      out += "[^/]";
+    } else if (c === "[" && segment.indexOf("]", i + 2) > 0) {
+      const end = segment.indexOf("]", i + 2);
+      const body = segment.slice(i + 1, end);
+      out += `[${body.startsWith("!") ? `^${body.slice(1)}` : body}]`;
+      i = end;
+    } else if (c === "{") {
+      braces += 1;
+      out += "(?:";
+    } else if (c === "}" && braces > 0) {
+      braces -= 1;
+      out += ")";
+    } else if (c === "," && braces > 0) {
+      out += "|";
+    } else {
+      out += literal(c);
+    }
+  }
+  return new RegExp(`^${out}$`);
+}
+
+/** Whether an ignore-file negation - the pattern after its `!` - can match a key name at any of its segments, so lift
+ * ripgrep's hidden-file skip for a key file. */
+const negatesKeyName = (pattern: string): boolean =>
+  pattern.split("/").filter((segment) => segment !== "" && segment !== "**")
+    .some((segment) => KEY_NAMES.some((name) => globSegmentRegExp(segment).test(name)));
+
+test("no tracked ignore file negates a key name: a negation would lift ripgrep's hidden-file skip for a grep with no include", () => {
+  /* The control first: the matcher finds the negations that lift the skip (rg 15.0.0: a .ignore holding !.env.alpaca,
+   * a .rgignore holding !.env*, a .gitignore holding !sub/.env each made a grep with no include search the key file)
+   * and passes the repository's own !/desk/journal/.gitkeep, which lifts it for an empty .gitkeep. */
+  for (const negated of [".env.alpaca", ".env*", "*.alpaca", "/.env", "sub/.env", ".git/", ".ENV.LOCAL", "**/.env.local", "[.]env", "{.env,x}", "*.md", "*"]) {
+    assert.ok(negatesKeyName(negated), `!${negated} can match a key name`);
+  }
+  for (const negated of ["/desk/journal/.gitkeep", ".gitkeep", "notes.md", "env/", "data/today.csv", "\\.envy"]) {
+    assert.equal(negatesKeyName(negated), false, `!${negated} matches no key name`);
+  }
+  /* Every .gitignore, .ignore and .rgignore git tracks - a submodule's too, once it is checked out. */
+  const repo = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+  const tracked = execFileSync("git", ["ls-files", "-z", "--recurse-submodules", "--", "*.gitignore", "*.ignore", "*.rgignore"], { cwd: repo, encoding: "utf8" })
+    .split("\0").filter((path) => [".gitignore", ".ignore", ".rgignore"].includes(basename(path)));
+  assert.ok(tracked.includes(".gitignore") && tracked.includes("face/.gitignore"), `the repository's own are found; saw ${JSON.stringify(tracked)}`);
+  const offending = tracked.flatMap((path) => readFileSync(join(repo, path), "utf8").split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("!") && negatesKeyName(line.slice(1)))
+    .map((line) => `${path}: ${line}`));
+  assert.deepEqual(offending, [], "no tracked ignore file whitelists a key name past ripgrep's hidden-file skip");
+});
+
 test("a read whose path or glob cannot be checked fails closed", async (t) => {
   const repo = "/x/repo";
   const cwd = `${repo}/desk/journal`;
@@ -514,6 +671,11 @@ test("deskSecrets takes the values of KEY, PASSWORD, SECRET and TOKEN names of 8
     "PKMADEUPKEYID00001", "madeUpSecretValue0001", "1234:MadeUpBotToken", "made-up-password", "made-up-lowercase-name", "12345678", "made-up-padded",
   ]);
   assert.deepEqual(deskSecrets({}), []);
+  /* deskSecretNames names the same variables, each - two that hold one value both - and nothing it did not take. */
+  assert.deepEqual(deskSecretNames(env), [
+    "APCA_API_KEY_ID", "APCA_API_SECRET_KEY", "TELEGRAM_BOT_TOKEN", "DB_PASSWORD", "my_api_key", "EIGHT_TOKEN", "PADDED_SECRET", "DUPLICATE_TOKEN",
+  ]);
+  assert.deepEqual(deskSecretNames({}), []);
 });
 
 /* ---------- the guard ---------- */
@@ -580,8 +742,8 @@ function fakeRoot(options: { presetError?: unknown } = {}) {
 }
 
 /** An agent whose composition reads as `composed` (none when `undefined`) and whose session's header is `header` -
- * by default the header such an agent is created with: its cwd the journal, its preset `composed`. */
-const agentOn = (composed: string | undefined, header: { cwd?: unknown; agentPreset?: unknown } = { cwd: CWD, agentPreset: composed }) =>
+ * by default the header such an agent is created with: its cwd the journal, its preset `composed`, and no id. */
+const agentOn = (composed: string | undefined, header: { id?: unknown; cwd?: unknown; agentPreset?: unknown } = { cwd: CWD, agentPreset: composed }) =>
   ({ id: `agent-${composed ?? "none"}`, ctx: { preset: composed }, session: { header } });
 
 const ALLOW: DeskPreDecision = { kind: "allow" };
@@ -618,7 +780,8 @@ async function pipeline(listeners: readonly GuardListener[], guards: readonly Gu
 test("the listener judges only gravit-desk agents and never throws", async () => {
   const root = fakeRoot();
   const lines: string[] = [];
-  const dispose = installDeskGuard(root.ctx, REPO, { log: (line) => lines.push(line), secrets: [SECRET] });
+  const dispose = installDeskGuard(root.ctx, REPO, { log: (line) => lines.push(line), env: ENV });
+  assert.deepEqual(lines.splice(0), [COVERS], "one line at install: what the secret check covers, by name");
   assert.equal(root.preExecute.length, 1, "one root tools/pre-execute listener");
   assert.deepEqual(root.registeredWith, [{ prepend: true }], "registered in front, as Gate 2's is");
   const listener = root.preExecute[0];
@@ -679,7 +842,8 @@ test("the listener judges only gravit-desk agents and never throws", async () =>
    * line each. */
   const broken = fakeRoot({ presetError: new Error("the registry is gone") });
   const brokenLines: string[] = [];
-  installDeskGuard(broken.ctx, REPO, { log: (line) => brokenLines.push(line), secrets: [SECRET] });
+  installDeskGuard(broken.ctx, REPO, { log: (line) => brokenLines.push(line), env: ENV });
+  assert.deepEqual(brokenLines.splice(0), [COVERS]);
   assert.deepEqual(await judged(broken.preExecute[0], write("notes/today.md", desk)), { decision: UNCHECKED, nexts: 0 });
   assert.equal(brokenLines.length, 1);
   assert.match(brokenLines[0], /^gravit-face: desk: .*the registry is gone/);
@@ -696,7 +860,8 @@ test("the listener judges only gravit-desk agents and never throws", async () =>
   /* A thrown value that is no Error, whose message cannot even be shown, still leaves Gravit's write going on. */
   const odd = fakeRoot({ presetError: { toString() { throw new Error("unshowable"); } } });
   const oddLines: string[] = [];
-  installDeskGuard(odd.ctx, REPO, { log: (line) => oddLines.push(line) });
+  installDeskGuard(odd.ctx, REPO, { log: (line) => oddLines.push(line), env: {} });
+  assert.deepEqual(oddLines.splice(0), [COVERS_NONE]);
   assert.deepEqual(await judged(odd.preExecute[0], write("notes/today.md", agentOn("gravit"))), { decision: ALLOW, nexts: 1 });
   assert.equal(oddLines.length, 1);
 
@@ -709,7 +874,8 @@ test("the listener judges only gravit-desk agents and never throws", async () =>
 test("the guard judges a desk agent's call in order - its write, its read, its secret - and leaves everyone else's alone", async () => {
   const root = fakeRoot();
   const lines: string[] = [];
-  const dispose = installDeskGuard(root.ctx, REPO, { log: (line) => lines.push(line), secrets: [SECRET] });
+  const dispose = installDeskGuard(root.ctx, REPO, { log: (line) => lines.push(line), env: ENV });
+  assert.deepEqual(lines.splice(0), [COVERS]);
   const listener = root.preExecute[0];
   const backstop = root.guards[0];
   const desk = agentOn(DESK_PRESET);
@@ -759,7 +925,7 @@ test("the guard judges a desk agent's call in order - its write, its read, its s
 
 test("a call no check could deny never asks the preset registry", async () => {
   const root = fakeRoot();
-  const dispose = installDeskGuard(root.ctx, REPO, { log: () => {}, secrets: [SECRET] });
+  const dispose = installDeskGuard(root.ctx, REPO, { log: () => {}, env: ENV });
   const desk = agentOn(DESK_PRESET);
   const before = root.presetReads();
   for (const exec of [call("todo_write", { todos: [] }, desk), call("desk_quotes", { symbols: ["NVDA"] }, desk), call("skill", { name: "x" }, desk),
@@ -778,12 +944,63 @@ test("a call no check could deny never asks the preset registry", async () => {
   await dispose();
 });
 
+test("the guard lets a desk session read and grep its own spilled results, by the id on its header, and no other session's", async (t) => {
+  const spillRoot = await mkdtemp(join(tmpdir(), "dsh-spill-"));
+  t.after(() => rm(spillRoot, { recursive: true, force: true }));
+  const ownFile = join(spillRoot, spillSession(DESK_SESSION), "0a1b2c3d4e5f-read.txt");
+  await mkdir(dirname(ownFile), { mode: 0o700 });
+  await writeFile(ownFile, "SPILL-LINE 1\n");
+  const root = fakeRoot();
+  const dispose = installDeskGuard(root.ctx, REPO, { log: () => {}, env: {} });
+  const desk = agentOn(DESK_PRESET, { id: DESK_SESSION, cwd: CWD, agentPreset: DESK_PRESET });
+  for (const exec of [call("read", { file_path: ownFile, offset: 1, limit: 20 }, desk), call("grep", { pattern: "SPILL", path: ownFile }, desk)]) {
+    assert.deepEqual(await judged(root.preExecute[0], exec), { decision: ALLOW, nexts: 1 }, `the desk's ${exec.name} of its own spill goes on`);
+    assert.equal(root.guards[0](exec), undefined, "the backstop agrees");
+  }
+  /* Another desk session's, and one whose header names no id - none, or one that is no string, however it prints -
+   * read no spill of this one's. */
+  const noString = [DESK_SESSION];
+  for (const agent of [agentOn(DESK_PRESET, { id: OTHER_SESSION, cwd: CWD, agentPreset: DESK_PRESET }), agentOn(DESK_PRESET, { id: 42, cwd: CWD, agentPreset: DESK_PRESET }),
+    agentOn(DESK_PRESET, { id: noString, cwd: CWD, agentPreset: DESK_PRESET }), agentOn(DESK_PRESET)]) {
+    const exec = call("read", { file_path: ownFile }, agent);
+    assert.deepEqual(await judged(root.preExecute[0], exec), { decision: outside(ownFile), nexts: 0 }, `header id ${JSON.stringify(agent.session.header.id)}`);
+    assert.equal(root.guards[0](exec), outside(ownFile).reason);
+  }
+  await dispose();
+});
+
+test("at install the guard names the variables its secret check covers, and never a value", async () => {
+  const env: NodeJS.ProcessEnv = {
+    APCA_API_KEY_ID: "PKMADEUPKEYID00002",
+    APCA_API_SECRET_KEY: "madeUpSecretValue0002",
+    TELEGRAM_BOT_TOKEN: "1234:MadeUpBotToken2",
+    TELEGRAM_OPERATOR_ID: "424242",
+    APCA_API_BASE_URL: "https://paper-api.example.test",
+    SHORT_TOKEN: "1234567",
+    HOME: "/Users/op",
+  };
+  const lines: string[] = [];
+  const root = fakeRoot();
+  const dispose = installDeskGuard(root.ctx, REPO, { log: (line) => lines.push(line), env });
+  assert.deepEqual(lines, ["gravit-face: desk: the secret check covers APCA_API_KEY_ID, APCA_API_SECRET_KEY, TELEGRAM_BOT_TOKEN"]);
+  for (const value of Object.values(env)) assert.equal(lines[0].includes(String(value)), false, "no value of the environment is in the line");
+  /* The secrets it names are the ones it checks for. */
+  assert.deepEqual(await judged(root.preExecute[0], call("web_search", { query: "madeUpSecretValue0002" }, agentOn(DESK_PRESET))), { decision: CARRIES_SECRET, nexts: 0 });
+  await dispose();
+  /* And an environment with nothing in it for the check says so. */
+  const none: string[] = [];
+  const disposeNone = installDeskGuard(fakeRoot().ctx, REPO, { log: (line) => none.push(line), env: { HOME: "/Users/op", SHORT_TOKEN: "1234567" } });
+  assert.deepEqual(none, [COVERS_NONE]);
+  await disposeNone();
+});
+
 test("a guard given no repository root denies every desk write and read, says so once, and judges nobody else's", async () => {
   const root = fakeRoot();
   const lines: string[] = [];
-  const dispose = installDeskGuard(root.ctx, undefined, { log: (line) => lines.push(line), secrets: [SECRET] });
-  assert.equal(lines.length, 1, "one line, at install");
-  assert.match(lines[0], /^gravit-face: desk: the desk guard was given no repository root/);
+  const dispose = installDeskGuard(root.ctx, undefined, { log: (line) => lines.push(line), env: ENV });
+  assert.equal(lines.length, 2, "two lines, at install: what the secret check covers, and the missing root");
+  assert.equal(lines[0], COVERS);
+  assert.match(lines[1], /^gravit-face: desk: the desk guard was given no repository root/);
   const desk = agentOn(DESK_PRESET);
   assert.deepEqual(await judged(root.preExecute[0], write("notes/today.md", desk)), { decision: UNCHECKED, nexts: 0 });
   assert.equal(root.guards[0](write("notes/today.md", desk)), UNCHECKED.reason);
@@ -796,14 +1013,15 @@ test("a guard given no repository root denies every desk write and read, says so
   assert.deepEqual(await judged(root.preExecute[0], call("web_search", { query: "NVDA" }, desk)), { decision: ALLOW, nexts: 1 });
   assert.deepEqual(await judged(root.preExecute[0], write("notes/today.md", agentOn("gravit"))), { decision: ALLOW, nexts: 1 });
   assert.deepEqual(await judged(root.preExecute[0], call("read", { file_path: ".env" }, agentOn("gravit"))), { decision: ALLOW, nexts: 1 });
-  assert.equal(lines.length, 1, "and no line per call");
+  assert.equal(lines.length, 2, "and no line per call");
   await dispose();
 });
 
 test("the backstop re-judges the call as the waterfall left it, for gravit-desk agents only, and never throws", async () => {
   const root = fakeRoot();
   const lines: string[] = [];
-  const dispose = installDeskGuard(root.ctx, REPO, { log: (line) => lines.push(line) });
+  const dispose = installDeskGuard(root.ctx, REPO, { log: (line) => lines.push(line), env: {} });
+  assert.deepEqual(lines.splice(0), [COVERS_NONE]);
   assert.deepEqual(root.injected, [["tools"]], "armed through inject([\"tools\"]), as Gate 2's guard is");
   assert.equal(root.guards.length, 1, "one tools.guard");
   const backstop = root.guards[0];
@@ -865,7 +1083,7 @@ test("a later prepend listener answering allow cannot lift a desk write's deny",
 
 test("the backstop judges reads and secrets too: a later prepend listener answering allow lifts neither deny", async () => {
   const root = fakeRoot();
-  const dispose = installDeskGuard(root.ctx, REPO, { log: () => {}, secrets: [SECRET] });
+  const dispose = installDeskGuard(root.ctx, REPO, { log: () => {}, env: ENV });
   const offSwallower = root.ctx.on("tools/pre-execute", async () => ALLOW, { prepend: true });
   const desk = agentOn(DESK_PRESET);
   const cases: readonly (readonly [DeskGuardExecution, string])[] = [
@@ -892,7 +1110,8 @@ test("the disposer never rejects: a listener that cannot be removed and a backst
     inject: () => ({ dispose: async () => { throw new Error("the fiber cannot be disposed"); } }),
   };
   const lines: string[] = [];
-  const dispose = installDeskGuard(failing, REPO, { log: (line) => lines.push(line) });
+  const dispose = installDeskGuard(failing, REPO, { log: (line) => lines.push(line), env: {} });
+  assert.deepEqual(lines.splice(0), [COVERS_NONE]);
   await dispose();
   assert.equal(lines.length, 2);
   assert.match(lines[0], /^gravit-face: desk: .*the listener cannot be removed/);
