@@ -32,7 +32,7 @@
   - the filings script is pinned.
 - This revision answers `p3-plan-review.md`. The seams are in `p3-p4-interfaces.md` §0–§6 and §9.
 
-**Base:** `feat/desk-p1-p4` after P2's final review; each task's Consumes names what it uses. One fact recurs: the outlet's `send(text, { replyTo })` resolves `{ sent: number[] } | { queued: true }`.
+**Base:** `feat/desk-p1-p4` after P2's final review; each task's Consumes names what it uses. One fact recurs: the outlet's `send(text, { replyTo })` resolves `{ sent: number[]; queued?: true } | { queued: true }`.
 
 **Done (spec §12, P3) — the operator's drill, written by Task 11:**
 - a real level crossing on a streamed symbol reached the phone in under 5 s, with its plan;
@@ -984,7 +984,7 @@ git commit -m "feat: filings for the desk - an 8-K and Form 4 reader with accept
     3. Each hit is recorded as an `AlertHit` with its `gate` decision, appended without being awaited. A filing hit is decided before `gate`: outside the window it is `suppressed: window`, and inside its `filing:<rule>:<symbol>` cooldown it is `suppressed: cooldown`.
     4. Each `send` is delivered, in order: `deliver(alertText(hit, now, annotate ? (spent ? "budget" : "follows") : "none"))`, then one `delivered` record.
     5. The hits delivered (`sent` or `queued`) with `follows` make one post on a second chain, which the pass never awaits:
-       - `post({ ...annotationPost(…), replyTo: <the first one's sent[0], when it has one> })`;
+       - `post({ ...annotationPost(…), replyTo: <the first one's sent[0] when its result has "sent" - a partial send resolves { sent, queued: true } and still carries the id; narrow on "sent" in r, never on "queued" in r> })`;
        - then its `annotation` record;
        - a refused post's `line` goes as a reply, once per ET date per line.
   - **`stateText()`** is `undefined` unless the watch runs. Otherwise it is `stateBody` over `hub.snapshot(holdings ∪ level symbols)`, raced at 3,000 ms; on lateness or an error, it gives the counts with `prices: "unavailable: <reason>"`.
