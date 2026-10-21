@@ -14,9 +14,12 @@ import {
   type BudgetState, type DeskEvent, type DeskStatus, type TurnUsage,
 } from "../src/desk.ts";
 import type { DeskConversationCtxLike } from "../src/desk-conversation.ts";
+import { DESK_PRESET } from "../src/desk-names.ts";
+import type { DeskGuardCtxLike, DeskToolDefinition } from "../src/desk-tools.ts";
 import type { AgentLike, SessionLike } from "../src/room.ts";
 import type { EventLike } from "../src/room-rules.ts";
-import type { FiringSummary, StandingStatus } from "../src/standing.ts";
+import { renderOrder, sha256Hex, writeStanding, type FiringSummary, type StandingStatus } from "../src/standing.ts";
+import { fakeCalendar, WallClock } from "./desk-fakes.ts";
 import { recorder } from "./route-recorder.ts";
 
 /** Every harness home made with {@link home}, removed once the file's tests are done. */
@@ -1213,4 +1216,106 @@ test("standingLines and budgetLine print the orders, the calendar and the budget
   assert.deepEqual(deskStatusLines({ ...base, budget }, now).slice(1), ["telegram: polling, last poll 10:59 ET, 0 dropped, 0 queued", "budget: 1,234,567 of 2,000,000 tokens today"],
     "no standing orders' clock, no lines of theirs");
   assert.deepEqual(deskStatusLines(base, now).slice(1), ["telegram: polling, last poll 10:59 ET, 0 dropped, 0 queued"], "a status with neither field: neither line");
+});
+
+/* P2: the clock row (src/schedule.ts), which installDesk loads on first use, once the bridge has set the outlet. */
+
+/** The booted root as the desk tools and the guard read it: one live `gravit-desk` agent, whose own tool layer keeps
+ * what is registered in it; `state` calls its desk_state. */
+function deskToolsRoot() {
+  const registered: DeskToolDefinition[] = [];
+  const agent = { id: "desk-agent", ctx: { preset: DESK_PRESET, tools: { register(definition: DeskToolDefinition) { registered.push(definition); return () => {}; } } } };
+  const ctx: DeskGuardCtxLike = {
+    on: () => () => true,
+    inject: () => ({ dispose: async () => {} }),
+    agents: { list: () => [agent] },
+    agentPresets: { composedPreset: (agentCtx) => (agentCtx as { preset?: string }).preset },
+  };
+  const state = async (): Promise<DeskStatus> => {
+    const tool = registered.find((definition) => definition.name === "desk_state");
+    assert.ok(tool, "desk_state is registered");
+    return await tool.execute({}, { signal: new AbortController().signal }) as DeskStatus;
+  };
+  return { ctx, state };
+}
+
+test("installDesk loads the schedule only with the conversation; its status reaches the route and desk_state; dispose stops it first", async () => {
+  const h = join(TMP, "schedule-home");
+  const root = join(TMP, "repo-schedule");
+  await mkdir(deskDir(h), { recursive: true });
+  await mkdir(join(root, "desk", "journal"), { recursive: true });
+  await writeFile(join(root, "desk", "STANDING.md"), "# The brief\n");
+  await writeStanding(h, `budget:\n  dailyTokens: 1000\norders:\n${renderOrder({
+    id: "preclose", dir: "desk", file: "STANDING.md", sha256: sha256Hex("# The brief\n"), at: "close-30m", producer: "builtin:brief", wake: true,
+    turnDeadline: "10m", producerDeadline: "5m", expires: "2026-12-31", armedAt: "2026-11-20T15:00:00.000Z",
+  }, 2)}`);
+  await appendEvent(h, tokenTurn("2026-11-27T15:00:00.000Z", "telegram", [600, 400, 0, 0])); // the day's 1,000 tokens: the cap
+
+  const fake = conversationRoot(() => "");
+  const clock = new WallClock("2026-11-27T16:00:00Z");
+  /* how many of the clock row's timers are still armed when the conversation lets go of the bus */
+  const armedAtLetGo: number[] = [];
+  const on = fake.ctx.on;
+  fake.ctx.on = (name, listener) => {
+    const off = on(name, listener);
+    return () => {
+      armedAtLetGo.push(clock.pending());
+      return off();
+    };
+  };
+  const tools = deskToolsRoot();
+  const rec = recorder();
+  const timer = fakeTimer();
+  const desk = installDesk(rec, {
+    home: h, enabled: true, now: () => Date.parse("2026-11-27T16:00:00Z"), watch: { setInterval: timer.setInterval, clearInterval: timer.clearInterval },
+    ctx: tools.ctx, hub: { snapshot: async () => ({ ok: true, generated_at: "2026-11-27T16:00:00.000Z", quotes: [], providers: [] }) },
+    root, route: { provider: "stub", model: "echo" }, sessionCtx: fake.ctx, installModelSelection: () => () => {},
+    python: "python3",
+    schedule: { clock, calendar: fakeCalendar({ "2026-11-27": { date: "2026-11-27", open: "2026-11-27T14:30:00Z", close: "2026-11-27T18:00:00Z", early: true } }), tickMs: 86_400_000 },
+    log: () => {},
+  });
+  assert.ok(desk.schedule !== undefined, "a desk with its conversation loads the clock row");
+  const schedule = await desk.schedule;
+  assert.ok(schedule !== undefined);
+  await until("the conversation's start", () => fake.listeners.size === 1);
+  await clock.advance(0);
+  await schedule.tick();
+  assert.equal(schedule.status().orders[0].id, "preclose");
+
+  const routed = JSON.parse(await rec.call("/data/desk/status")) as { body: DeskStatus };
+  assert.equal(routed.body.standing?.orders[0].id, "preclose", "the route reads the clock row's status");
+  assert.deepEqual([routed.body.budget?.dailyTokens, routed.body.budget?.spent], [1000, true], "and its cap");
+  const state = await tools.state();
+  assert.equal(state.standing?.orders[0].id, "preclose", "and so does desk_state");
+  const posted = await desk.conversation?.post({ text: "how is the book?", source: { kind: "telegram" }, message: { kind: "telegram", from: 42, chat: 42, messageId: 7 } });
+  assert.deepEqual(posted, {
+    refused: "budget",
+    line: "the desk's token budget for today is spent: 1,000 of 1,000 tokens since 00:00 ET. It opens again at midnight ET, or raise budget.dailyTokens in standing.yml",
+  }, "the conversation's budget is the clock row's cap");
+
+  await desk.dispose(0);
+  assert.deepEqual(armedAtLetGo, [0], "the clock row was disposed before the conversation let go of the bus");
+  assert.equal(clock.pending(), 0, "and nothing of it is armed");
+
+  /* a desk disposed before the clock's module arrives starts no clock */
+  const early = new WallClock("2026-11-27T16:00:00Z");
+  const brief = installDesk(recorder(), {
+    home: h, enabled: true, now: () => Date.parse("2026-11-27T16:00:00Z"), watch: { setInterval: timer.setInterval, clearInterval: timer.clearInterval },
+    root, route: { provider: "stub", model: "echo" }, sessionCtx: conversationRoot(() => "").ctx, installModelSelection: () => () => {},
+    schedule: { clock: early, calendar: fakeCalendar({}), tickMs: 86_400_000 }, log: () => {},
+  });
+  const stopped = brief.dispose(0);
+  assert.equal(await brief.schedule, undefined);
+  await stopped;
+  assert.equal(early.pending(), 0, "nothing armed on its clock");
+
+  for (const label of ["off", "no conversation"] as const) {
+    const quiet = installDesk(recorder(), {
+      home: join(TMP, `schedule-${label.replace(" ", "-")}`), enabled: label !== "off", watch: { setInterval: timer.setInterval, clearInterval: timer.clearInterval },
+      root, route: { provider: "stub", model: "echo" }, sessionCtx: label === "off" ? conversationRoot(() => "").ctx : undefined,
+      installModelSelection: () => () => {}, log: () => {},
+    });
+    assert.equal(quiet.schedule, undefined, `no clock row (${label})`);
+    await quiet.dispose(0);
+  }
 });

@@ -73,11 +73,12 @@ import { basename, extname, join } from "node:path";
 import { withFileLock, writeFileAtomic } from "@deepseek-ai/dsh-atomic-write";
 import { isTrustedDataRequest } from "./data.ts";
 import { createDeskConversation, type DeskConversation, type DeskConversationCtxLike } from "./desk-conversation.ts";
-import type { DeskClock, DeskSessionDeps } from "./desk-session.ts";
+import type { DeskClock, DeskSessionDeps, SessionEventsOn } from "./desk-session.ts";
 import { deskToolDefinitions, installDeskGuard, installDeskTools, type DeskGuardCtxLike } from "./desk-tools.ts";
 import { etDate, etDayStart, etTime } from "./et.ts";
 import { fencedGet, fencedPost, HttpError } from "./http.ts";
 import type { QuoteHub } from "./quotes.ts";
+import type { FiringRouteCtx, ScheduleDeps, ScheduleHandle } from "./schedule.ts";
 import type { StandingStatus } from "./standing.ts";
 import type { RouteRegistrar } from "./static.ts";
 import type { BridgeHandle, TelegramConfig } from "./telegram.ts";
@@ -1199,15 +1200,26 @@ export function registerDeskRoutes(
   });
 }
 
+/** The root bus as the desk's owners listen to it: `on` called on the context, as cordis's must be. */
+function busOf(ctx: DeskConversationCtxLike): SessionEventsOn {
+  return (name, listener) => {
+    const off = ctx.on(name, listener);
+    return () => { off(); };
+  };
+}
+
 /** What {@link installDesk} hands back. `bootedAt` is when this run began, in ms since the epoch;
  * `ready` settles once the `boot` event is written or its failure logged, and never rejects;
  * `conversation` is the desk session's owner (src/desk-conversation.ts), present only when the
- * desk is on and `installDesk` was given what it needs; `dispose(code)` ends the run. */
+ * desk is on and `installDesk` was given what it needs; `schedule`, present with the conversation,
+ * settles to the standing orders' clock (src/schedule.ts) once its module has loaded - `undefined` when it
+ * could not load, or when the desk was disposed first - and never rejects; `dispose(code)` ends the run. */
 export interface DeskHandle {
   enabled: boolean;
   bootedAt: number;
   ready: Promise<void>;
   conversation?: DeskConversation;
+  schedule?: Promise<ScheduleHandle | undefined>;
   dispose(code: number): Promise<void>;
 }
 
@@ -1236,8 +1248,13 @@ export interface DeskHandle {
  * (src/telegram.ts) runs on that conversation: its module loads on first use and the bridge starts
  * without being awaited, on the same `now`. The status route and `desk_state` report the bridge's
  * own status ({@link TelegramStatus}); a face that runs no bridge reports `configured` - whether
- * `telegram` was given - and nothing polling, dropped or queued. `dispose(code)` disposes the
- * bridge first - no phone text is posted from then on, and its outbox stays for the next boot -
+ * `telegram` was given - and nothing polling, dropped or queued. With the conversation, the standing
+ * orders' clock (src/schedule.ts) runs too: its module loads on first use, once the bridge has set the
+ * outlet, and `schedule` settles to it; its firings deliver through the conversation, the status route
+ * and `desk_state` read its orders and its cap, and the conversation's budget is the day's tokens
+ * against that cap (ruling P2-8). `dispose(code)` stops the clock first - the firing under way
+ * aborted, waited for two seconds at most - then the bridge - no phone text is posted from then on,
+ * and its outbox stays for the next boot -
  * then the conversation, which cancels the desk turns under way as `shutdown`, gives each cut agent
  * two seconds to go idle so the cut turn is recorded, and gives a start, post or renew under way
  * five seconds to settle, so nothing the conversation writes lands after the `shutdown` - then
@@ -1255,15 +1272,19 @@ export interface DeskHandle {
  *   which the desk tools need both of - the guard needs `ctx`, and judges below `root`;
  *   `root`, the repository whose `desk/journal/` the desk session runs in, `route`, its model route
  *   (src/desk-session.ts `resolveDeskRoute`), `sessionCtx`, the booted ROOT context as the
- *   conversation reads it, and
+ *   conversation reads it - and its default model and model calls, which a standing order's route
+ *   is resolved on - and
  *   `installModelSelection`, dsh-agent's - the four the conversation needs; `telegram`, the
  *   bridge's token and operator id (src/telegram.ts `telegramConfigFromEnv`), absent when either
  *   is unset; `deskDeadlineMs`, every desk turn's deadline, handed to the conversation as its
  *   `deadlineMs` (its own five minutes when absent) - a test seam, which tests/telegram-smoke.test.ts
- *   sets to 1,500 so a parked card is cut in a second and a half; main.ts never passes it; `log`,
+ *   sets to 1,500 so a parked card is cut in a second and a half; main.ts never passes it;
+ *   `python`, the face's interpreter (`FACE_PYTHON || python3`, main.ts's), which runs the market
+ *   clock and a script producer - `python3` when absent; `schedule`, the clock's seams for tests - its
+ *   clock, calendar, script runner, builtins, tick and grace; `log`,
  *   where every line of the desk's goes - the guard's, its line at install naming what the secret
- *   check covers included, the tools', the ledger's, the conversation's and the bridge's - stderr
- *   when absent, as main.ts leaves it; tests pass their own, or one that drops the line.
+ *   check covers included, the tools', the ledger's, the conversation's, the bridge's and the clock's -
+ *   stderr when absent, as main.ts leaves it; tests pass their own, or one that drops the line.
  * @throws when a desk route's path is already registered, before anything is written or started.
  */
 export function installDesk(
@@ -1278,10 +1299,12 @@ export function installDesk(
     hub?: Pick<QuoteHub, "snapshot">;
     root?: string;
     route?: { provider: string; model: string };
-    sessionCtx?: DeskConversationCtxLike;
+    sessionCtx?: DeskConversationCtxLike & Partial<FiringRouteCtx>;
     installModelSelection?: NonNullable<DeskSessionDeps["installModelSelection"]>;
     telegram?: TelegramConfig;
     deskDeadlineMs?: number;
+    python?: string;
+    schedule?: { clock?: DeskClock } & Partial<Pick<ScheduleDeps, "calendar" | "runScript" | "builtins" | "tickMs" | "graceMs">>;
     log?: (line: string) => void;
   },
 ): DeskHandle {
@@ -1294,7 +1317,14 @@ export function installDesk(
    * two names are set. */
   let bridge: BridgeHandle | undefined;
   const telegram = (): TelegramStatus => bridge?.status() ?? { configured: deps.telegram !== undefined, polling: false, dropped: 0, queued: 0 };
-  const status = { home, bootedAt, enabled, now, version, telegram };
+  /* The standing orders' clock once it runs: the status's orders and the day's cap are its; until then, and in a
+   * face that runs none, there are no orders and no cap. */
+  let schedule: ScheduleHandle | undefined;
+  const status = {
+    home, bootedAt, enabled, now, version, telegram,
+    dailyTokens: () => schedule?.dailyTokens(),
+    standing: () => schedule?.status(),
+  };
   registerDeskRoutes(webServer, status);
   const removeGuard = deps.ctx === undefined ? async () => {} : installDeskGuard(deps.ctx, deps.root, { log });
   const removeTools = deps.ctx === undefined || deps.hub === undefined ? () => {} : installDeskTools(deps.ctx, deskToolDefinitions({
@@ -1306,16 +1336,17 @@ export function installDesk(
   const stopWatch = installAsleepWatch({ now, ...deps.watch, append: (event) => appendEvent(home, event, { log }) });
   const clock: DeskClock = { now, setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout) };
   const { root, route, sessionCtx, installModelSelection } = deps;
-  const conversation = root === undefined || route === undefined || sessionCtx === undefined || installModelSelection === undefined
+  const wiring = root === undefined || route === undefined || sessionCtx === undefined || installModelSelection === undefined
+    ? undefined
+    : { root, sessionCtx, session: { ctx: sessionCtx, root, home, route, installModelSelection, now, log }, on: busOf(sessionCtx) };
+  const conversation = wiring === undefined
     ? undefined
     : createDeskConversation({
-      session: { ctx: sessionCtx, root, home, route, installModelSelection, now, log },
-      /* called on the context, as cordis's `on` must be */
-      on: (name, listener) => {
-        const off = sessionCtx.on(name, listener);
-        return () => { off(); };
-      },
+      session: wiring.session,
+      on: wiring.on,
       deadlineMs: deps.deskDeadlineMs,
+      /* the day's budget against the standing orders' cap - none until their clock has read standing.yml (P2-8) */
+      budget: () => readBudget(home, now(), schedule?.dailyTokens()),
       clock,
       log,
     });
@@ -1338,13 +1369,41 @@ export function installDesk(
     },
     (err: unknown) => { log(`${BIN}: desk: the Telegram bridge could not be loaded: ${reasonOf(err)}`); },
   );
+  /* The standing orders' clock (src/schedule.ts) loads on first use too - with it src/firing.ts, src/standing.ts and
+   * js-yaml - once the bridge has set the outlet, so the boot's lines reach the phone. It never rejects: a module that
+   * cannot load, or a clock that cannot start, is one line and `undefined`; one that arrives once dispose has begun
+   * starts nothing. */
+  const scheduling = wiring === undefined || conversation === undefined ? undefined : bridging
+    .then(() => import("./schedule.ts"))
+    .then((scheduleModule) => {
+      if (disposing !== undefined) return undefined;
+      schedule = scheduleModule.createDeskSchedule({
+        home,
+        root: wiring.root,
+        python: deps.python ?? "python3",
+        hub: deps.hub,
+        session: wiring.session,
+        sessionCtx: wiring.sessionCtx,
+        on: wiring.on,
+        deliver: (text) => conversation.deliver(text),
+        log,
+        seams: deps.schedule,
+      });
+      return schedule;
+    })
+    .catch((err: unknown) => {
+      log(`${BIN}: desk: the standing orders' clock could not be loaded: ${reasonOf(err)}`);
+      return undefined;
+    });
   return {
     enabled,
     bootedAt,
     ready,
     ...(conversation === undefined ? {} : { conversation }),
+    ...(scheduling === undefined ? {} : { schedule: scheduling }),
     dispose(code) {
       disposing ??= (async () => {
+        await (await scheduling)?.dispose();
         await bridging;
         await bridge?.dispose();
         await conversation?.dispose();

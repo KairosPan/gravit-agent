@@ -9,15 +9,19 @@
  * {@link pythonMarketClock} runs the script through a {@link ProducerRunner}: by path, under the face's
  * interpreter (`FACE_PYTHON || python3`, the one `face_data.py` runs on), cwd the repository root, a
  * {@link MARKET_CLOCK_TIMEOUT_MS} deadline and {@link baseEnv}'s environment - PATH, HOME, LANG, TZ and
- * LC_*, never a market key: the calendar is offline and needs none. It is not hash-pinned, unlike a
- * standing order's producer: like `face_data.py` it is face infrastructure. A recorded residual: a
- * change to it in the tree takes effect at the face's next ask, unreviewed.
+ * LC_*, never a market key: the calendar is offline and needs none. A run that answers no window hands
+ * the tail of its stderr - a Python traceback ends in its cause - to its owner, one line, which the
+ * clock row logs. It is not hash-pinned, unlike a standing order's producer: like `face_data.py` it is
+ * face infrastructure. A recorded residual: a change to it in the tree takes effect at the face's next
+ * ask, unreviewed.
  *
  * {@link createMarketCalendar} keeps the answer. It asks for a {@link CALENDAR_DAYS}-day window once per
  * New York date - at the first `today()`, then whenever `etDate(now)` changes - and concurrent calls
- * share the ask. A failed ask is never retried inside its date: the date is answered from the newest
- * window that still holds it, marked `stale`, and with none it is `{ ok: false }` until the date
- * changes, so no calendar-anchored order fires that day.
+ * share the ask. A failed ask is asked again, at most every {@link CALENDAR_RETRY_MS}, until an ask
+ * returns a window that holds the date (P2 Task 8's ruling 1: a transient failure at the first ask after
+ * a boot must not cost the day's anchored orders). Meanwhile the date is answered from the newest window
+ * that still holds it, marked `stale`, and with none it is `{ ok: false }`, so no calendar-anchored order
+ * fires until a window comes.
  *
  * Of the face's modules it imports only `producer.ts` and `et.ts`, and the pause switch (`npm run desk`)
  * does not load it.
@@ -25,7 +29,7 @@
  */
 import { resolve } from "node:path";
 import { etDate } from "./et.ts";
-import { baseEnv, defaultProducerRunner, formatDuration, type ProducerRunner } from "./producer.ts";
+import { baseEnv, defaultProducerRunner, formatDuration, type ProducerRunner, type RunResult } from "./producer.ts";
 
 /* ---------- the window ---------- */
 
@@ -88,6 +92,15 @@ function oneLine(text: string): string {
   const flat = text.replace(/\s+/g, " ").trim();
   const chars = [...flat];
   return chars.length <= ERROR_MAX ? flat : `${chars.slice(0, ERROR_MAX - 1).join("")}…`;
+}
+
+/** The end of `text` on one line, at most {@link ERROR_MAX} characters (code points; a cut opens with `…`), or
+ * `undefined` when it holds nothing but blanks. */
+function lastLine(text: string): string | undefined {
+  const flat = text.replace(/\s+/g, " ").trim();
+  if (flat === "") return undefined;
+  const chars = [...flat];
+  return chars.length <= ERROR_MAX ? flat : `…${chars.slice(chars.length - (ERROR_MAX - 1)).join("")}`;
 }
 
 /** The clock's own `error`, one line; a missing one is named. */
@@ -196,31 +209,57 @@ function failureOf(stdout: string): string | undefined {
  * The face's clock: `scripts/market_clock.py` under `python`, run by path - not hash-pinned (the module
  * doc's residual). Each ask runs `[<root>/scripts/market_clock.py, "sessions", "--from", from, "--days",
  * String(days)]` with cwd `root`, `baseEnv(process.env)` as read at that ask (no market key), no stdin and
- * the deadline. Its stderr is dropped: a crash reads `exit <code>`, and running the script by hand shows why.
+ * the deadline. Its stderr never reaches the answer: a crash reads `exit <code>`. A run that answers no
+ * window - whatever its exit - hands its stderr's tail to `stderr` when it wrote anything but blanks: its
+ * last 300 characters on one line (a cut opens with `…`), where a Python traceback names its cause (P2 Task
+ * 8's ruling 2). A hook that throws costs nothing but its line.
  * @param opts - `root` the repository root; `python` the interpreter, named in a failure to start;
  *   `run` the runner, `defaultProducerRunner(python)` by default; `timeoutMs` the deadline,
- *   {@link MARKET_CLOCK_TIMEOUT_MS} by default.
+ *   {@link MARKET_CLOCK_TIMEOUT_MS} by default; `stderr`, where a failed run's stderr tail goes - dropped
+ *   when absent.
  * @returns a {@link MarketClock} that resolves with {@link parseMarketWindow}'s window of an exit 0, and
  *   rejects with the clock's own `error` (an exit with `{ ok: false }`, or `ok: false` at exit 0),
  *   `exit <code>` (an exit without it), `timed out after 30 s`, `stdout over 1 MiB` or `stderr over 1 MiB`,
  *   `could not start <python>: <code>` (a spawn failure: `ENOENT`, `EACCES`, …), or parseMarketWindow's fault.
  */
-export function pythonMarketClock(opts: { root: string; python: string; run?: ProducerRunner; timeoutMs?: number }): MarketClock {
+export function pythonMarketClock(opts: {
+  root: string;
+  python: string;
+  run?: ProducerRunner;
+  timeoutMs?: number;
+  stderr?: (tail: string) => void;
+}): MarketClock {
   const run = opts.run ?? defaultProducerRunner(opts.python);
   const timeoutMs = opts.timeoutMs ?? MARKET_CLOCK_TIMEOUT_MS;
   const script = resolve(opts.root, "scripts", "market_clock.py");
-  return async (from, days) => {
-    const result = await run([script, "sessions", "--from", from, "--days", String(days)], {
-      cwd: opts.root,
-      env: baseEnv(process.env),
-      timeoutMs,
-    });
+  /** The window a run answered, or why it answered none. */
+  const windowOf = (result: RunResult): MarketWindow => {
     if (result.timedOut) throw new Error(`timed out after ${formatDuration(timeoutMs)}`);
     if (result.error !== undefined) {
       throw new Error(OVERFLOWS.has(result.error) ? result.error : `could not start ${opts.python}: ${result.error}`);
     }
     if (result.code !== 0) throw new Error(failureOf(result.stdout) ?? `exit ${result.code}`);
     return parseMarketWindow(result.stdout);
+  };
+  return async (from, days) => {
+    const result = await run([script, "sessions", "--from", from, "--days", String(days)], {
+      cwd: opts.root,
+      env: baseEnv(process.env),
+      timeoutMs,
+    });
+    try {
+      return windowOf(result);
+    } catch (error) {
+      const tail = lastLine(result.stderr);
+      if (tail !== undefined) {
+        try {
+          opts.stderr?.(tail);
+        } catch {
+          /* the owner's log failed: the ask's own error still answers */
+        }
+      }
+      throw error;
+    }
   };
 }
 
@@ -229,6 +268,9 @@ export function pythonMarketClock(opts: { root: string; python: string; run?: Pr
 /** How many days the face asks for: today and the nine after, enough to cross a long weekend and to
  * name the next session on a closed day. */
 export const CALENDAR_DAYS = 10;
+
+/** How long after a failed ask its date may be asked again: ten minutes (P2 Task 8's ruling 1). */
+export const CALENDAR_RETRY_MS = 600_000;
 
 /** A New York date's answer: its session or `"closed"`, from the window's `source` - `stale` when that
  * date's own ask failed and an older window still holds the date - or, with no window holding it, the
@@ -241,8 +283,8 @@ export type DayAnswer =
 export interface MarketCalendar {
   /** The interpreter the clock runs in, for the lines that name it. */
   readonly python: string;
-  /** The answer for `etDate(now)`. Asks the clock only when that date differs from the last one asked;
-   * never rejects for a failed ask. */
+  /** The answer for `etDate(now)`. Asks the clock only when that date differs from the last one asked, or
+   * when its last ask failed {@link CALENDAR_RETRY_MS} or more before `now`; never rejects for a failed ask. */
   today(now: number): Promise<DayAnswer>;
   /** The latest date's answer so far, without asking; `undefined` before the first. */
   peek(): DayAnswer | undefined;
@@ -264,18 +306,20 @@ function errorText(error: unknown): string {
  * @param opts - `ask` the clock ({@link pythonMarketClock} in the face); `python` its interpreter, kept for
  *   the lines that name it; `days` the window asked for, {@link CALENDAR_DAYS} by default.
  * @returns a {@link MarketCalendar}. Its `today(now)` asks once per New York date, and calls for the date
- *   being asked share the one ask. A date whose own ask returned a window is answered from it. A failed ask
- *   - a rejection, a throw, or a window that does not hold the date - is answered from the newest window
- *   that still holds the date, with `stale: { error }`, or with none as `{ ok: false, date, error }`; either
- *   way it stands for the rest of that date, and only the next date asks again. An ask settling after a
- *   later date's replaces neither the newest window nor what `peek()` says.
+ *   being asked share the one ask. A date whose own ask returned a window is answered from it, and never
+ *   asked again. A failed ask - a rejection, a throw, or a window that does not hold the date - is answered
+ *   from the newest window that still holds the date, with `stale: { error }`, or with none as
+ *   `{ ok: false, date, error }`; a `today(now)` {@link CALENDAR_RETRY_MS} or more after that ask began
+ *   asks again, until an ask returns a window that holds the date. An ask settling after a later date's
+ *   replaces neither the newest window nor what `peek()` says.
  */
 export function createMarketCalendar(opts: { ask: MarketClock; python: string; days?: number }): MarketCalendar {
   const days = opts.days ?? CALENDAR_DAYS;
   /** The newest window any ask returned: the fallback for a date whose own ask failed. */
   let newest: MarketWindow | undefined;
-  /** The ask for the date asked last, settling to its window or its error. */
-  let asked: { date: string; settled: Promise<AskResult> } | undefined;
+  /** The ask for the date asked last: when it began, settling to its window or its error, and - once it has
+   * settled with an error - `failed`. */
+  let asked: { date: string; at: number; settled: Promise<AskResult>; failed: boolean } | undefined;
   /** The latest date's answer, for peek(). */
   let latest: DayAnswer | undefined;
 
@@ -312,9 +356,12 @@ export function createMarketCalendar(opts: { ask: MarketClock; python: string; d
     async today(now) {
       const date = etDate(new Date(now));
       let flight = asked;
-      if (flight === undefined || flight.date !== date) {
-        flight = { date, settled: askFor(date) };
-        asked = flight;
+      if (flight === undefined || flight.date !== date || (flight.failed && now - flight.at >= CALENDAR_RETRY_MS)) {
+        const next = { date, at: now, settled: askFor(date), failed: false };
+        /* registered before any caller awaits the ask, so `failed` is set by the time one reads the answer */
+        void next.settled.then((result) => { next.failed = result.error !== undefined; });
+        asked = next;
+        flight = next;
       }
       return answer(date, await flight.settled);
     },

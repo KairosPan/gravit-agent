@@ -1,16 +1,16 @@
 // face/tests/market-clock.test.ts
 /** The market clock (src/market-clock.ts): reading the clock's JSON, a window's sessions and closed days,
- * running the clock (its argv, its keyless environment, its deadline and how each failure reads), and the
- * calendar's cache - one ask per New York date, shared by concurrent calls, a failed ask answered from a
- * window that still covers the date and never retried inside it. Offline: a fake runner and a fake ask,
- * except one test that runs scripts/market_clock.py under the face's interpreter and skips when that
- * interpreter has no pandas_market_calendars. */
+ * running the clock (its argv, its keyless environment, its deadline, how each failure reads and the tail of
+ * a failed run's stderr), and the calendar's cache - one ask per New York date, shared by concurrent calls, a
+ * failed ask answered from a window that still covers the date and asked again every ten minutes until a
+ * window holds it. Offline: a fake runner and a fake ask, except one test that runs scripts/market_clock.py
+ * under the face's interpreter and skips when that interpreter has no pandas_market_calendars. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  CALENDAR_DAYS, MARKET_CLOCK_TIMEOUT_MS, createMarketCalendar, parseMarketWindow, pythonMarketClock, sessionFor, windowCovers,
+  CALENDAR_DAYS, CALENDAR_RETRY_MS, MARKET_CLOCK_TIMEOUT_MS, createMarketCalendar, parseMarketWindow, pythonMarketClock, sessionFor, windowCovers,
   type DayAnswer, type MarketClock, type MarketSession, type MarketWindow,
 } from "../src/market-clock.ts";
 import { baseEnv, type ProducerRunner, type RunResult } from "../src/producer.ts";
@@ -200,14 +200,21 @@ function fakeAsk(windows: Record<string, MarketWindow>): { ask: MarketClock; ask
 }
 
 const W24 = parseMarketWindow(JSON.stringify(WINDOW));
+const W25 = parseMarketWindow(edited((c) => {
+  c.from = "2026-11-25";
+  c.source = "pandas_market_calendars 5.4.0 (25th)";
+  c.sessions = c.sessions.slice(1);
+}));
 const W26 = parseMarketWindow(edited((c) => {
   c.from = "2026-11-26";
   c.source = "pandas_market_calendars 5.4.1";
   c.sessions = [...c.sessions.slice(2), FULL("2026-12-04")];
 }));
 
-test("createMarketCalendar asks once per ET date and falls back to a covering window, never retrying inside a date", async () => {
-  const fake = fakeAsk({ "2026-11-24": W24, "2026-11-26": W26 });
+test("createMarketCalendar asks once per ET date, falls back to a covering window, and asks a failed date again every ten minutes until a window holds it", async () => {
+  assert.equal(CALENDAR_RETRY_MS, 600_000);
+  const windows: Record<string, MarketWindow> = { "2026-11-24": W24, "2026-11-26": W26 };
+  const fake = fakeAsk(windows);
   const cal = createMarketCalendar({ ask: fake.ask, python: "python3" });
   assert.equal(cal.python, "python3");
   assert.equal(cal.peek(), undefined);
@@ -232,12 +239,24 @@ test("createMarketCalendar asks once per ET date and falls back to a covering wi
     stale: { error: "pandas_market_calendars is not importable in /x" },
   });
 
-  // never retried inside the date, even once the clock would answer
-  fake.fail = undefined;
-  assert.deepEqual(await cal.today(at("2026-11-25T20:59:00Z")), stale);
+  // inside ten minutes of the failed ask, nothing is asked; at ten it is asked again, fails again, and stays stale
+  assert.deepEqual(await cal.today(at("2026-11-25T05:09:59Z")), stale);
   assert.equal(fake.asks.length, 2);
-  assert.deepEqual(cal.peek(), stale);
-  assert.equal(cal.window(), W24);
+  assert.deepEqual(await cal.today(at("2026-11-25T05:10:00Z")), stale);
+  assert.deepEqual(fake.asks, [["2026-11-24", 10], ["2026-11-25", 10], ["2026-11-25", 10]]);
+
+  // the clock answers again: ten minutes on, the date takes its own window, and is never asked again that day
+  fake.fail = undefined;
+  windows["2026-11-25"] = W25;
+  assert.deepEqual(await cal.today(at("2026-11-25T05:19:59Z")), stale, "not yet ten minutes since the last ask");
+  assert.equal(fake.asks.length, 3);
+  const fresh = await cal.today(at("2026-11-25T05:20:00Z"));
+  assert.deepEqual(fresh, { ok: true, date: "2026-11-25", session: FULL("2026-11-25"), source: "pandas_market_calendars 5.4.0 (25th)" });
+  assert.equal(fake.asks.length, 4);
+  assert.deepEqual(await cal.today(at("2026-11-25T20:59:00Z")), fresh);
+  assert.equal(fake.asks.length, 4);
+  assert.deepEqual(cal.peek(), fresh);
+  assert.equal(cal.window(), W25);
 
   // the next date asks again: Thanksgiving, closed, from the fresh window
   const closed = await cal.today(at("2026-11-26T15:00:00Z"));
@@ -245,19 +264,70 @@ test("createMarketCalendar asks once per ET date and falls back to a covering wi
   assert.deepEqual(closed, { ok: true, date: "2026-11-26", session: "closed", source: "pandas_market_calendars 5.4.1" });
   assert.equal(cal.window(), W26);
 
-  // a fresh calendar whose first ask fails: { ok: false } for all of that date, one ask; the next date asks
-  const failing = fakeAsk({ "2026-11-25": W24 });
+  // a fresh calendar whose first ask fails: { ok: false } until an ask ten minutes on answers - a transient
+  // failure at the first ask after a boot costs ten minutes, not the day's anchored orders
+  const failing = fakeAsk({ "2026-11-24": W24, "2026-11-25": W25 });
   failing.fail = "timed out after 30 s";
   const lone = createMarketCalendar({ ask: failing.ask, python: "/opt/py/bin/python3", days: 7 });
   const none: DayAnswer = { ok: false, date: "2026-11-24", error: "timed out after 30 s" };
   assert.deepEqual(await lone.today(at("2026-11-24T15:00:00Z")), none);
-  assert.deepEqual(await lone.today(at("2026-11-24T21:30:00Z")), none);
+  assert.deepEqual(await lone.today(at("2026-11-24T15:09:00Z")), none);
   assert.deepEqual(failing.asks, [["2026-11-24", 7]]);
   assert.deepEqual(lone.peek(), none);
   assert.equal(lone.window(), undefined);
   failing.fail = undefined;
-  assert.deepEqual(await lone.today(at("2026-11-25T15:00:00Z")), { ok: true, date: "2026-11-25", session: FULL("2026-11-25"), source: "pandas_market_calendars 5.4.0" });
-  assert.deepEqual(failing.asks, [["2026-11-24", 7], ["2026-11-25", 7]]);
+  const answered = await lone.today(at("2026-11-24T15:10:00Z"));
+  assert.deepEqual(answered, { ok: true, date: "2026-11-24", session: FULL("2026-11-24"), source: "pandas_market_calendars 5.4.0" });
+  assert.deepEqual(failing.asks, [["2026-11-24", 7], ["2026-11-24", 7]]);
+  assert.deepEqual(await lone.today(at("2026-11-24T21:30:00Z")), answered);
+  assert.equal(failing.asks.length, 2, "a date its own ask answered is never asked again");
+  assert.equal(lone.window(), W24);
+  assert.deepEqual(await lone.today(at("2026-11-25T15:00:00Z")), { ok: true, date: "2026-11-25", session: FULL("2026-11-25"), source: "pandas_market_calendars 5.4.0 (25th)" });
+  assert.deepEqual(failing.asks.at(-1), ["2026-11-25", 7]);
+
+  // a re-ask under way is shared: two calls ten minutes on make one ask
+  const flaky = fakeAsk({});
+  flaky.fail = "exit 1";
+  const shared = createMarketCalendar({ ask: flaky.ask, python: "python3" });
+  await shared.today(at("2026-11-24T15:00:00Z"));
+  const [one, two] = await Promise.all([shared.today(at("2026-11-24T15:10:00Z")), shared.today(at("2026-11-24T15:10:01Z"))]);
+  assert.deepEqual(one, two);
+  assert.equal(flaky.asks.length, 2);
+  assert.deepEqual(await shared.today(at("2026-11-24T15:19:59Z")), one);
+  assert.equal(flaky.asks.length, 2, "ten minutes from the re-ask, not from the first");
+  await shared.today(at("2026-11-24T15:20:00Z"));
+  assert.equal(flaky.asks.length, 3);
+});
+
+test("pythonMarketClock hands the tail of a failed run's stderr - its last 300 characters, on one line - to stderr", async () => {
+  let result: RunResult = { code: 0, stdout: JSON.stringify(WINDOW), stderr: "", timedOut: false };
+  const run: ProducerRunner = async () => result;
+  const told: string[] = [];
+  const clock = pythonMarketClock({ root: "/repo", python: "python3", run, stderr: (tail) => { told.push(tail); } });
+  const fails = async (r: RunResult, message: string): Promise<void> => {
+    result = r;
+    await assert.rejects(clock("2026-11-24", 10), { message });
+  };
+  await fails({ code: 1, stdout: "", stderr: "Traceback (most recent call last):\n  File \"x\", line 1\nSystemError: boom\n", timedOut: false }, "exit 1");
+  assert.deepEqual(told, ["Traceback (most recent call last): File \"x\", line 1 SystemError: boom"]);
+  await fails({ code: 1, stdout: "", stderr: `${"a".repeat(1_000)}\nthe end\n`, timedOut: false }, "exit 1");
+  const tail = told.at(-1) ?? "";
+  assert.ok(tail.startsWith("…a") && tail.endsWith("a the end") && [...tail].length === 300, tail);
+  await fails({ code: null, stdout: "", stderr: "still loading\n", timedOut: true }, "timed out after 30 s");
+  await fails({ code: 0, stdout: "nope", stderr: "a warning\n", timedOut: false }, "not JSON");
+  assert.deepEqual(told.slice(2), ["still loading", "a warning"], "any run that answers no window hands its stderr");
+  await fails({ code: 1, stdout: '{"ok":false,"error":"pandas_market_calendars is not importable in /x"}', stderr: "", timedOut: false },
+    "pandas_market_calendars is not importable in /x");
+  await fails({ code: 1, stdout: "", stderr: " \n\t\n", timedOut: false }, "exit 1");
+  assert.equal(told.length, 4, "no stderr, or only blanks: nothing");
+  result = { code: 0, stdout: JSON.stringify(WINDOW), stderr: "DeprecationWarning: x\n", timedOut: false };
+  assert.equal((await clock("2026-11-24", 10)).sessions.length, 7);
+  assert.equal(told.length, 4, "a run that answered hands nothing");
+
+  /* a hook that throws costs the ask nothing but the line: the ask still rejects with its own error */
+  const throwing = pythonMarketClock({ root: "/repo", python: "python3", run, stderr: () => { throw new Error("a broken log"); } });
+  result = { code: 1, stdout: "", stderr: "boom\n", timedOut: false };
+  await assert.rejects(throwing("2026-11-24", 10), { message: "exit 1" });
 });
 
 test("createMarketCalendar: two concurrent today() calls share one ask", async () => {

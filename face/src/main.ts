@@ -337,7 +337,13 @@ await registerPanelRoutes(booted.ctx.webServer, deps);
  * set - `$DSH_HOME/.env`, which `bootFace` read into this process's environment -
  * the Telegram bridge (telegram.ts) runs on that conversation: the operator's
  * phone. Either name missing, and there is no bridge and the status says
- * `telegram: not configured`. */
+ * `telegram: not configured`.
+ *
+ * With the desk on, the standing orders' clock (schedule.ts) runs on that
+ * conversation too, loaded on first use: `standing.yml` beside the ledger, fired
+ * on the XNYS calendar that `scripts/market_clock.py` gives under `FACE_PYTHON ||
+ * python3` - the interpreter `face_data.py` already needs, here with
+ * pandas_market_calendars - which also runs a standing order's script producer. */
 const deskEnabled = process.env.FACE_DESK !== "0";
 const deskRoute = deskEnabled
   ? await resolveDeskRoute(booted.ctx as unknown as RoomContextLike, process.env.FACE_DESK_MODEL, console.log)
@@ -352,6 +358,7 @@ desk = installDesk(booted.ctx.webServer, {
   sessionCtx: booted.ctx as unknown as DeskConversationCtxLike,
   installModelSelection: (agentCtx, ref) => installModelSelection(agentCtx as unknown as Context, ref),
   telegram: telegramConfigFromEnv(process.env),
+  python: process.env.FACE_PYTHON || "python3",
 });
 console.log(`${BIN}: desk: ${desk.enabled ? `ledger at ${deskDir(dshHome)}` : "rows disabled (FACE_DESK=0)"}`);
 /* Every route is mounted: only now may the gateway admit a browser stream
