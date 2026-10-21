@@ -10,7 +10,7 @@ import {
   COPIED_KEYS, EXPECTED_KEYS, LABEL, ensureHomeEnv, envLinesOf, fetchStatus, filterPath, formatStatus, installPlan, lastTokenUrl, nodeOnPath,
   parseLaunchctlPrint, portAnswers, runService, servicePlan, type ServiceDeps,
 } from "../scripts/service.ts";
-import type { DeskStatus } from "../src/desk.ts";
+import { deskStatusLines, type DeskStatus } from "../src/desk.ts";
 
 const home = (): Promise<string> => mkdtemp(join(tmpdir(), "face-service-"));
 /** A status's `turnsToday` on a day with no desk turn. */
@@ -95,7 +95,8 @@ test("ensureHomeEnv copies only the allow-list, in source order, and names every
   assert.deepEqual(r.skipped, ["PATH", "NODE_OPTIONS", "ALPACA_KIT_ENABLE_ORDERS"]);
   assert.deepEqual(r.names, ["ALPHA_DATA_FEED", "DEEPSEEK_API_KEY"]); assert.deepEqual(r.missing, ["APCA_API_KEY_ID", "APCA_API_SECRET_KEY"]);
   assert.deepEqual(ensureHomeEnv(h, [join(src, ".env.alpaca")]).skipped, [], "an existing .env: the sources are not read");
-  assert.deepEqual(COPIED_KEYS, ["DEEPSEEK_API_KEY", "APCA_API_KEY_ID", "APCA_API_SECRET_KEY", "APCA_API_BASE_URL", "IFIND_ACCESS_TOKEN", "IFIND_REFRESH_TOKEN"]);
+  assert.deepEqual(COPIED_KEYS, ["DEEPSEEK_API_KEY", "APCA_API_KEY_ID", "APCA_API_SECRET_KEY", "APCA_API_BASE_URL", "IFIND_ACCESS_TOKEN", "IFIND_REFRESH_TOKEN",
+    "TELEGRAM_BOT_TOKEN", "TELEGRAM_OPERATOR_ID"]);
 });
 
 test("ensureHomeEnv writes nothing when no name is on the allow-list, and names them all once", async () => {
@@ -199,6 +200,17 @@ test("formatStatus prints the pause and telegram lines", () => {
     "desk: paused since 14:00 ET by page (npm run desk -- resume)",
     "ledger: unreadable (EACCES)",
     tail], "right after the answering line, before the ledger's own");
+});
+
+test("formatStatus prints the desk's lines through deskStatusLines: the desk line after the port, then the rest", () => {
+  const now = Date.parse("2026-10-20T18:30:00Z"); // 14:30 ET
+  const status: DeskStatus = { ok: true, pid: 7, version: "v", bootedAt: "2026-10-20T13:00:00.000Z", uptimeMs: 90 * 60_000, desk: { enabled: true, dir: "/d" },
+    asleep: [], runs: [], turnsToday: noTurns, off: { setAt: "2026-10-20T18:00:00.000Z", by: "terminal" },
+    telegram: { configured: true, polling: true, lastPollAt: "2026-10-19T23:00:00.000Z", dropped: 0, queued: 0 } };
+  const [desk, ...rest] = deskStatusLines(status, new Date(now));
+  const lines = formatStatus({ label: LABEL, info: { state: "running", pid: 7 }, installed: true, status, url: undefined, port: 3090, now }).split("\n");
+  assert.deepEqual(lines.slice(1, 2 + rest.length), [`answering at http://127.0.0.1:3090 · ${desk}`, ...rest]);
+  assert.equal(lines[3], "telegram: polling, last poll 2026-10-19 19:00 ET, 0 dropped, 0 queued", "a last poll on another New York date carries it");
 });
 
 const fakeFetch = (status: number, body?: unknown): typeof fetch =>
@@ -445,13 +457,26 @@ test("install names the keys the home .env lacks, the names it did not copy and 
   for (const line of [`wrote ${env} with: APCA_API_KEY_ID, APCA_API_SECRET_KEY`,
     `not in ${env}: DEEPSEEK_API_KEY (the face also reads DEEPSEEK_API_KEY from dsh's credential store)`,
     `not copied (not on the service's allow-list; add them to ${env} by hand if the service needs them): PATH`,
-    `no source: ${join(r.deps.root, ".env.deepseek")}, ${join(r.deps.root, ".env.ifind")}`]) assert.ok(lines.includes(line), line);
+    `no source: ${join(r.deps.root, ".env.deepseek")}, ${join(r.deps.root, ".env.ifind")}, ${join(r.deps.root, ".env.telegram")}`]) assert.ok(lines.includes(line), line);
   assert.equal(await readFile(env, "utf8"), "APCA_API_KEY_ID=k\nAPCA_API_SECRET_KEY=s\n");
   const again = await rig();
   Object.assign(again.deps, { home: r.deps.home, root: r.deps.root });
   assert.equal(await runService("install", [], again.deps), 0);
   assert.ok(again.text().split("\n").includes(`kept ${env}`), "a second install keeps the file");
   assert.ok(!again.text().includes("not copied"), "an existing .env: the sources are not read");
+});
+
+test("install copies the Telegram bridge's two names from .env.telegram, after the other key files; the plist carries neither", async () => {
+  const r = await rig();
+  await writeFile(join(r.deps.root, ".env.deepseek"), "DEEPSEEK_API_KEY=d\n");
+  await writeFile(join(r.deps.root, ".env.telegram"), "TELEGRAM_BOT_TOKEN=424242:fake\nTELEGRAM_OPERATOR_ID=42\nTELEGRAM_OTHER=x\n");
+  assert.equal(await runService("install", [], r.deps), 0);
+  const env = join(r.deps.home, ".env");
+  assert.equal(await readFile(env, "utf8"), "DEEPSEEK_API_KEY=d\nTELEGRAM_BOT_TOKEN=424242:fake\nTELEGRAM_OPERATOR_ID=42\n");
+  const lines = r.text().split("\n");
+  assert.ok(lines.includes(`wrote ${env} with: DEEPSEEK_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_OPERATOR_ID`));
+  assert.ok(lines.includes(`not copied (not on the service's allow-list; add them to ${env} by hand if the service needs them): TELEGRAM_OTHER`));
+  assert.doesNotMatch(await readFile(r.plist, "utf8"), /TELEGRAM/, "no key reaches the plist");
 });
 
 test("install with nothing to copy writes no .env and says so; a .env it cannot write stops it before launchd", async () => {

@@ -148,8 +148,21 @@ export function isJsonBody(req: IncomingMessage): boolean {
   return (req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json");
 }
 
+/** The names a producer never inherits from the face: the desk's Telegram bot token, whose one user is
+ * the face's own bridge (telegram.ts). The rest of the environment passes - the producers read the Alpaca
+ * keys and the workbench's `ALPHA_*` settings from it. */
+const PRODUCER_SCRUBBED_ENV = ["TELEGRAM_BOT_TOKEN"] as const;
+
+/** `process.env` minus {@link PRODUCER_SCRUBBED_ENV}, read at each spawn. */
+function producerEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const name of PRODUCER_SCRUBBED_ENV) delete env[name];
+  return env;
+}
+
 /**
- * The real spawner: `execFile` (no shell) of `python`, cwd at the repo root.
+ * The real spawner: `execFile` (no shell) of `python`, cwd at the repo root, with the face's environment
+ * minus the Telegram bot token ({@link PRODUCER_SCRUBBED_ENV}).
  * @param python - the interpreter to run; an absolute path or a `PATH` name.
  * @returns a {@link Spawner} over the fixed producer script.
  */
@@ -158,7 +171,7 @@ export function defaultSpawner(python: string): Spawner {
     execFile(
       python,
       argv,
-      { cwd: REPO_ROOT, timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024 },
+      { cwd: REPO_ROOT, timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024, env: producerEnv() },
       (err, stdout, stderr) => {
         if (stderr) process.stderr.write(`face-data: ${stderr}`);
         /* Reject on the two failures whose stdout cannot be trusted as a

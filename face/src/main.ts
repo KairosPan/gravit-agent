@@ -26,6 +26,7 @@ import { registerDataRoutes } from "./data.ts";
 import { deskDir, installDesk, type DeskHandle } from "./desk.ts";
 import type { DeskConversationCtxLike } from "./desk-conversation.ts";
 import { resolveDeskRoute } from "./desk-session.ts";
+import { telegramConfigFromEnv } from "./telegram.ts";
 import { createQuoteHub } from "./quotes.ts";
 import { registerStatic, type IndexAuth } from "./static.ts";
 import { registerSessionRoutes } from "./sessions.ts";
@@ -329,7 +330,13 @@ await registerPanelRoutes(booted.ctx.webServer, deps);
  * model route is `FACE_DESK_MODEL`, validated as a bot's route is and falling
  * back to the default with one line (`resolveDeskRoute`); only a desk that is on
  * resolves one. `installModelSelection` is dsh-agent's, wrapped the way room.ts's
- * own default wraps it. */
+ * own default wraps it.
+ *
+ * And with the desk on and both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_OPERATOR_ID`
+ * set - `$DSH_HOME/.env`, which `bootFace` read into this process's environment -
+ * the Telegram bridge (telegram.ts) runs on that conversation: the operator's
+ * phone. Either name missing, and there is no bridge and the status says
+ * `telegram: not configured`. */
 const deskEnabled = process.env.FACE_DESK !== "0";
 const deskRoute = deskEnabled
   ? await resolveDeskRoute(booted.ctx as unknown as RoomContextLike, process.env.FACE_DESK_MODEL, console.log)
@@ -343,6 +350,7 @@ desk = installDesk(booted.ctx.webServer, {
   route: deskRoute,
   sessionCtx: booted.ctx as unknown as DeskConversationCtxLike,
   installModelSelection: (agentCtx, ref) => installModelSelection(agentCtx as unknown as Context, ref),
+  telegram: telegramConfigFromEnv(process.env),
 });
 console.log(`${BIN}: desk: ${desk.enabled ? `ledger at ${deskDir(dshHome)}` : "rows disabled (FACE_DESK=0)"}`);
 /* Every route is mounted: only now may the gateway admit a browser stream

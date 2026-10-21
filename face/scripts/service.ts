@@ -29,19 +29,18 @@
  * environment is PATH, HOME, DSH_HOME and, only when asked, FACE_PORT, never a key: whatever a
  * LaunchAgent's environment holds sits in its plist and shows in `launchctl print`. The keys live
  * in $DSH_HOME/.env (mode 0600), which dsh reads at boot; `install` writes that file from
- * .env.deepseek, .env.alpaca and .env.ifind at the repo root when the home has none, and never
- * rewrites it. It copies an allow-list of names only ({@link COPIED_KEYS}, and any `ALPHA_*`) and
- * names the rest: dsh refuses a bootstrap-only name (PATH, NODE_OPTIONS, any DSH_*) in the home's
- * .env at boot, which would fail every start, and Gate 1's ALPACA_KIT_ENABLE_ORDERS must never
- * reach the real harness home.
+ * .env.deepseek, .env.alpaca, .env.ifind and .env.telegram at the repo root when the home has
+ * none, and never rewrites it. It copies an allow-list of names only ({@link COPIED_KEYS}, and any
+ * `ALPHA_*`) and names the rest: dsh refuses a bootstrap-only name (PATH, NODE_OPTIONS, any DSH_*)
+ * in the home's .env at boot, which would fail every start, and Gate 1's ALPACA_KIT_ENABLE_ORDERS
+ * must never reach the real harness home.
  *
  * The exports are a pure half - the plan, the home's .env, the parsers and the status text, which
  * touch nothing but the paths their arguments name - and {@link runService}, the commands over
  * injected {@link ServiceDeps} (launchctl, fetch, the paths, the printer, the clock), so that the
  * tests drive every command against a fake launchctl and never the operator's launchd. Importing
- * this file runs nothing; it loads desk.ts, whose ledger reader `status` uses, and et.ts, for the
- * New York times `status` prints. Run as a script, the guard at the end builds the real deps and
- * exits with the command's code.
+ * this file runs nothing; it loads desk.ts, whose ledger reader and status lines `status` uses.
+ * Run as a script, the guard at the end builds the real deps and exits with the command's code.
  * @module
  */
 import { execFileSync } from "node:child_process";
@@ -51,8 +50,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseEnv } from "node:util";
 import { resolveDshHome } from "@deepseek-ai/dsh-home-paths";
-import { deskDir, deskTime, readEvents, runsOf, type DeskRun, type DeskStatus, type OffState, type TelegramStatus } from "../src/desk.ts";
-import { etTime } from "../src/et.ts";
+import { deskDir, deskStatusLines, readEvents, runsOf, type DeskRun, type DeskStatus } from "../src/desk.ts";
 
 /** The LaunchAgent's label: the plist is `com.gravit.face.plist`, the job `gui/<uid>/com.gravit.face`. */
 export const LABEL = "com.gravit.face";
@@ -63,11 +61,14 @@ export const LABEL = "com.gravit.face";
 export const EXPECTED_KEYS = ["DEEPSEEK_API_KEY", "APCA_API_KEY_ID", "APCA_API_SECRET_KEY"] as const;
 
 /** The names {@link ensureHomeEnv} copies into the home's .env: the expected keys, Alpaca's
- * endpoint and iFinD's tokens - and, by {@link COPIED_PREFIXES}, the workbench's own `ALPHA_*`
- * settings. It is an allow-list because a copied line can break or arm the service: dsh refuses a
- * bootstrap-only name (PATH, NODE_OPTIONS, any DSH_* ...) in the home's .env and the boot fails,
- * and Gate 1's ALPACA_KIT_ENABLE_ORDERS must never reach the real harness home. */
-export const COPIED_KEYS = [...EXPECTED_KEYS, "APCA_API_BASE_URL", "IFIND_ACCESS_TOKEN", "IFIND_REFRESH_TOKEN"] as const;
+ * endpoint, iFinD's tokens and the desk's Telegram bot and operator (src/telegram.ts) - and, by
+ * {@link COPIED_PREFIXES}, the workbench's own `ALPHA_*` settings. It is an allow-list because a
+ * copied line can break or arm the service: dsh refuses a bootstrap-only name (PATH, NODE_OPTIONS,
+ * any DSH_* ...) in the home's .env and the boot fails, and Gate 1's ALPACA_KIT_ENABLE_ORDERS must
+ * never reach the real harness home. */
+export const COPIED_KEYS = [
+  ...EXPECTED_KEYS, "APCA_API_BASE_URL", "IFIND_ACCESS_TOKEN", "IFIND_REFRESH_TOKEN", "TELEGRAM_BOT_TOKEN", "TELEGRAM_OPERATOR_ID",
+] as const;
 
 /** The name prefixes {@link ensureHomeEnv} copies besides {@link COPIED_KEYS}. */
 export const COPIED_PREFIXES = ["ALPHA_"] as const;
@@ -236,7 +237,7 @@ function namesOf(text: string): string[] {
  * ({@link namesOf}), not what the lines look like: a key with an empty value is missing.
  * @param home - the harness home (DSH_HOME).
  * @param sources - the key files to copy from, in order (the repo root's .env.deepseek,
- *   .env.alpaca, .env.ifind).
+ *   .env.alpaca, .env.ifind, .env.telegram).
  * @returns `path`, the home's .env; `created`, whether this call wrote it; `names`, the names dsh
  *   reads from the file with a value - none when nothing was written; `missing`, the
  *   {@link EXPECTED_KEYS} not among them; `missingSources`, the sources that do not exist;
@@ -311,38 +312,16 @@ function lastRunLine(runs: DeskRun[]): string | undefined {
   return undefined;
 }
 
-/** The line about a paused desk: since when and by whom, until when for a timed pause - each
- * dated when not on `now`'s New York date ({@link deskTime}) - and the terminal command that
- * lifts it. */
-function offLine(off: OffState, now: Date): string {
-  const until = off.until === undefined ? "" : ` until ${deskTime(new Date(off.until), now)}`;
-  return `desk: paused since ${deskTime(new Date(off.setAt), now)} by ${off.by}${until} (npm run desk -- resume)`;
-}
-
-/** The line about the Telegram bridge: where its keys go while it has none; else whether it
- * polls, its last poll, what it dropped and holds queued, and its last conflict when it had one -
- * dated when not on `now`'s New York date. */
-function telegramLine(telegram: TelegramStatus, now: Date): string {
-  if (!telegram.configured) return "telegram: not configured (TELEGRAM_BOT_TOKEN and TELEGRAM_OPERATOR_ID in $DSH_HOME/.env)";
-  const parts = [
-    telegram.polling ? "polling" : "not polling",
-    telegram.lastPollAt === undefined ? "no poll yet" : `last poll ${etTime(new Date(telegram.lastPollAt))}`,
-    `${telegram.dropped} dropped`,
-    `${telegram.queued} queued`,
-  ];
-  if (telegram.conflictAt !== undefined) parts.push(`conflict at ${deskTime(new Date(telegram.conflictAt), now)}`);
-  return `telegram: ${parts.join(", ")}`;
-}
-
 /**
  * What `status` prints. Not installed is one line. Otherwise: launchd's state and pid, or
  * `state unknown` when no state is given - never `loaded`: the caller passes `not loaded` for a
  * plist launchd has no job for, so a face answering on the port is not credited to a job launchd
- * lacks; then, when the face answered, its address, uptime, boot time and whether its desk is on -
- * followed by the pause when the desk is paused and the Telegram bridge when the face reports one,
- * their times in New York and dated when not today, then the ledger's read error when there is
- * one, the sleep gaps when there were any, and how the run before it ended - or else
- * `not answering on <port>`; and last the sign-in URL from the log.
+ * lacks; then, when the face answered, its address and the desk's lines (src/desk.ts
+ * `deskStatusLines`, which the phone's `/status` prints too): uptime, boot time and whether its
+ * desk is on on the address's line, then the pause when the desk is paused and the Telegram bridge
+ * when the face reports one, their times in New York and dated when not today; then the ledger's
+ * read error when there is one, the sleep gaps when there were any, and how the run before it
+ * ended - or else `not answering on <port>`; and last the sign-in URL from the log.
  * @param args - `label`, the job; `info`, {@link parseLaunchctlPrint}'s; `installed`, whether the
  *   plist exists; `status`, what `/data/desk/status` answered, `undefined` when it did not;
  *   `url`, {@link lastTokenUrl}'s; `port`, the port asked; `now`, when the lines are read, in ms
@@ -362,13 +341,8 @@ export function formatStatus(args: {
   const lines = [`${args.label}: ${info.state ?? "state unknown"}${info.pid === undefined ? "" : ` (pid ${info.pid})`}`];
   if (status === undefined) lines.push(`not answering on ${args.port}`);
   else {
-    const hours = Math.floor(status.uptimeMs / 3_600_000);
-    const minutes = Math.floor(status.uptimeMs / 60_000) % 60;
-    const desk = status.desk.enabled ? "on" : "off (FACE_DESK=0)";
-    lines.push(`answering at http://127.0.0.1:${args.port} · up ${hours}h ${minutes}m since ${status.bootedAt} · desk ${desk}`);
-    const now = new Date(args.now ?? Date.now());
-    if (status.off !== undefined) lines.push(offLine(status.off, now));
-    if (status.telegram !== undefined) lines.push(telegramLine(status.telegram, now));
+    const [desk, ...rest] = deskStatusLines(status, new Date(args.now ?? Date.now()));
+    lines.push(`answering at http://127.0.0.1:${args.port} · ${desk}`, ...rest);
     if (status.ledgerError !== undefined) lines.push(`ledger: unreadable (${status.ledgerError})`);
     if (status.asleep.length > 0) lines.push(`asleep: ${status.asleep.length} gap(s) since boot`);
     const last = lastRunLine(status.runs);
@@ -491,7 +465,7 @@ const WAIT_MS = 10_000;
 const POLL_MS = 500;
 
 /** The key files at the repo root that install writes the home's .env from, in order. */
-const KEY_FILES = [".env.deepseek", ".env.alpaca", ".env.ifind"] as const;
+const KEY_FILES = [".env.deepseek", ".env.alpaca", ".env.ifind", ".env.telegram"] as const;
 
 /** The profile the service runs: the plist passes no FACE_PROFILE, so main.ts boots `face`. */
 const PROFILE = "face";

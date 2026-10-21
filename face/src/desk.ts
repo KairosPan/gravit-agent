@@ -6,9 +6,10 @@
  * the face kept running by launchd as a user service (§5.2), and, in the later plans, the clock,
  * the watch and the phone bridge that work in it. Of what §8 gives this module - the ledger, the
  * budget, the `OFF` switch, the two desk tools, the `/desk` page and `/data/desk/*` - P0 holds the
- * ledger, the sleep watch and `GET /data/desk/status`, and P1 adds the `OFF` switch and mounts the
- * two desk tools, which src/desk-tools.ts defines. Of the ledger's files (§5.7) this module keeps
- * `events.jsonl` and `OFF`; {@link appendRecord} is the append path for the others. `events.jsonl`
+ * ledger, the sleep watch and `GET /data/desk/status`, and P1 adds the `OFF` switch, mounts the
+ * two desk tools, which src/desk-tools.ts defines, and runs the Telegram bridge, src/telegram.ts.
+ * Of the ledger's files (§5.7) this module keeps `events.jsonl` and `OFF`; {@link appendRecord} is
+ * the append path for the others, the bridge's `telegram.jsonl` among them. `events.jsonl`
  * has eight kinds of event: P0's `boot`, clean `shutdown` and `asleep` gap in the face's timers,
  * and P1's `off-set` and `off-cleared`, a `desk-session` for each desk conversation the face
  * opens, a `desk-turn` for each turn on it, and a `desk-refused` for a turn the face would not
@@ -44,12 +45,12 @@
  *
  * {@link installDesk} mounts it all on a booted face. The status route ({@link deskStatus}:
  * pid, version, uptime, this run's gaps, the ledger's runs, the pause in force, the desk
- * conversation, today's desk turns and their tokens, and the Telegram bridge when one is passed)
- * is mounted always, and so are the desk tools, so a face with the desk off - a second face beside
- * the service, §5.2 - still answers, with `desk.enabled: false`, and an old desk conversation it
- * opens keeps its tools; the `boot` event, the watch, the desk conversation's owner
- * (src/desk-conversation.ts) and the `shutdown` event only when the desk is on. An unreadable
- * ledger is named in the status, never a 500.
+ * conversation, today's desk turns and their tokens, and the Telegram bridge) is mounted always,
+ * and so are the desk tools, so a face with the desk off - a second face beside the service, §5.2
+ * - still answers, with `desk.enabled: false`, and an old desk conversation it opens keeps its
+ * tools; the `boot` event, the watch, the desk conversation's owner (src/desk-conversation.ts), the
+ * bridge and the `shutdown` event only when the desk is on. An unreadable ledger is named in the
+ * status, never a 500. {@link deskStatusLines} is the status as the terminal and the phone read it.
  * @module
  */
 import { appendFile, lstat, mkdir, open, readFile, rename, stat, unlink } from "node:fs/promises";
@@ -58,12 +59,13 @@ import { basename, extname, join } from "node:path";
 import { withFileLock, writeFileAtomic } from "@deepseek-ai/dsh-atomic-write";
 import { isTrustedDataRequest } from "./data.ts";
 import { createDeskConversation, type DeskConversation, type DeskConversationCtxLike } from "./desk-conversation.ts";
-import type { DeskSessionDeps } from "./desk-session.ts";
+import type { DeskClock, DeskSessionDeps } from "./desk-session.ts";
 import { deskToolDefinitions, installDeskTools, type DeskToolsCtxLike } from "./desk-tools.ts";
 import { etDate, etDayStart, etTime } from "./et.ts";
 import { fencedGet } from "./http.ts";
 import type { QuoteHub } from "./quotes.ts";
 import type { RouteRegistrar } from "./static.ts";
+import type { BridgeHandle, TelegramConfig } from "./telegram.ts";
 import { DSH_PIN } from "./version.ts";
 
 /** Diagnostic label, the same string every other `${BIN}:`-prefixed line in this program uses
@@ -616,7 +618,8 @@ export interface TelegramStatus {
  * the pause in force, present only while one is; `deskSession`, the desk conversation the ledger
  * names last ({@link lastDeskSession}), present only when it names one; `turnsToday`, the desk
  * turns recorded since 00:00 America/New_York and their tokens; `telegram`, the bridge's state,
- * present only when a bridge is passed. `ledgerError` is present only when the ledger could not be
+ * present only when a provider is passed - {@link installDesk} always passes one, so the route and
+ * `desk_state` always carry it. `ledgerError` is present only when the ledger could not be
  * read - its code, or its message when it has none - and `asleep` and `runs` are then empty, and
  * `turnsToday` zero: an unreadable ledger is named, never passed off as an empty one. */
 export interface DeskStatus {
@@ -709,6 +712,47 @@ export async function deskStatus(deps: {
   };
 }
 
+/** The pause line: since when and by whom, until when for a timed pause, and the terminal command that
+ * lifts it. */
+function offLine(off: OffState, now: Date): string {
+  const until = off.until === undefined ? "" : ` until ${deskTime(new Date(off.until), now)}`;
+  return `desk: paused since ${deskTime(new Date(off.setAt), now)} by ${off.by}${until} (npm run desk -- resume)`;
+}
+
+/** The Telegram line: where its keys go while it has none; else whether it polls, its last poll, what it
+ * dropped and holds queued, and its last conflict when it had one. */
+function telegramLine(telegram: TelegramStatus, now: Date): string {
+  if (!telegram.configured) return "telegram: not configured (TELEGRAM_BOT_TOKEN and TELEGRAM_OPERATOR_ID in $DSH_HOME/.env)";
+  const parts = [
+    telegram.polling ? "polling" : "not polling",
+    telegram.lastPollAt === undefined ? "no poll yet" : `last poll ${deskTime(new Date(telegram.lastPollAt), now)}`,
+    `${telegram.dropped} dropped`,
+    `${telegram.queued} queued`,
+  ];
+  if (telegram.conflictAt !== undefined) parts.push(`conflict at ${deskTime(new Date(telegram.conflictAt), now)}`);
+  return `telegram: ${parts.join(", ")}`;
+}
+
+/**
+ * The desk's lines as the operator reads them, in `npm run service -- status` (scripts/service.ts
+ * `formatStatus`) and in the phone's `/status` (src/telegram.ts): the desk line - how long the face has
+ * been up and since when, and whether the desk is on - then, while a pause is in force, the pause line,
+ * and, when the status carries the bridge, the Telegram line. Each time is New York's, as
+ * {@link deskTime} shows it - dated when it falls on another New York date than `now`'s; the boot time
+ * stays ISO-8601 UTC, which carries its date anyway. The desk line is the tail of `formatStatus`'s
+ * `answering at` line, which puts the port before it.
+ * @param status - what {@link deskStatus} answered.
+ * @param now - when the lines are read: what "today" is.
+ */
+export function deskStatusLines(status: DeskStatus, now: Date): string[] {
+  const hours = Math.floor(status.uptimeMs / 3_600_000);
+  const minutes = Math.floor(status.uptimeMs / 60_000) % 60;
+  const lines = [`up ${hours}h ${minutes}m since ${status.bootedAt} · desk ${status.desk.enabled ? "on" : "off (FACE_DESK=0)"}`];
+  if (status.off !== undefined) lines.push(offLine(status.off, now));
+  if (status.telegram !== undefined) lines.push(telegramLine(status.telegram, now));
+  return lines;
+}
+
 /**
  * Mount `GET /data/desk/status`, which answers {@link deskStatus} through http.ts's
  * {@link fencedGet}: the browser fence first, refused with the fixed `FORBIDDEN` body; then `200`
@@ -757,16 +801,21 @@ export interface DeskHandle {
  * too, the desk conversation's owner (src/desk-conversation.ts) is created on the same `now` and
  * started without being awaited - its `start` never rejects - so the desk session is ensured and
  * supervised before any phone message, and a turn the operator opens from the browser is timed,
- * fenced and recorded like a phone turn. `dispose(code)` disposes that owner first - it cancels the
- * desk turns under way as `shutdown`, gives each cut agent two seconds to go idle so the cut turn
- * is recorded, and gives a start, post or renew under way five seconds to settle, so nothing the
- * conversation writes lands after the `shutdown` - then removes the tools' listener, stops the
- * watch, lets the `boot` append settle (two appends started together take the file lock in either
- * order, and a `shutdown` written before its `boot` reads as a lost run), then appends the
- * `shutdown` with `code`. It is idempotent: a second call writes nothing and settles with the
- * first. With the desk off, `ready` is already resolved, there is no conversation, and `dispose`
- * only removes the listener. Nothing here rejects on the ledger, so a caller need not await
- * `ready`.
+ * fenced and recorded like a phone turn. Given `telegram` as well, the Telegram bridge
+ * (src/telegram.ts) runs on that conversation: its module loads on first use and the bridge starts
+ * without being awaited, on the same `now`. The status route and `desk_state` report the bridge's
+ * own status ({@link TelegramStatus}); a face that runs no bridge reports `configured` - whether
+ * `telegram` was given - and nothing polling, dropped or queued. `dispose(code)` disposes the
+ * bridge first - no phone text is posted from then on, and its outbox stays for the next boot -
+ * then the conversation, which cancels the desk turns under way as `shutdown`, gives each cut agent
+ * two seconds to go idle so the cut turn is recorded, and gives a start, post or renew under way
+ * five seconds to settle, so nothing the conversation writes lands after the `shutdown` - then
+ * removes the tools' listener, stops the watch, lets the `boot` append settle (two appends started
+ * together take the file lock in either order, and a `shutdown` written before its `boot` reads as
+ * a lost run), then appends the `shutdown` with `code`. It is idempotent: a second call writes
+ * nothing and settles with the first. With the desk off, `ready` is already resolved, there is no
+ * conversation and no bridge, and `dispose` only removes the listener. Nothing here rejects on the
+ * ledger, so a caller need not await `ready`.
  * @param webServer - the host webserver service, or a test recorder.
  * @param deps - `home`, the harness home; `enabled`, whether to mount the desk's rows; `now`
  *   (default `Date.now`) and `version` (default {@link DSH_PIN}), for the events and the status;
@@ -775,7 +824,9 @@ export interface DeskHandle {
  *   which the desk tools need both of; `root`, the repository whose `desk/journal/` the desk
  *   session runs in, `route`, its model route (src/desk-session.ts `resolveDeskRoute`),
  *   `sessionCtx`, the booted ROOT context as the conversation reads it, and
- *   `installModelSelection`, dsh-agent's - the four the conversation needs.
+ *   `installModelSelection`, dsh-agent's - the four the conversation needs; `telegram`, the
+ *   bridge's token and operator id (src/telegram.ts `telegramConfigFromEnv`), absent when either
+ *   is unset.
  * @throws when the status path is already registered, before anything is written or started.
  */
 export function installDesk(
@@ -792,20 +843,27 @@ export function installDesk(
     route?: { provider: string; model: string };
     sessionCtx?: DeskConversationCtxLike;
     installModelSelection?: NonNullable<DeskSessionDeps["installModelSelection"]>;
+    telegram?: TelegramConfig;
   },
 ): DeskHandle {
   const { home, enabled } = deps;
   const now = deps.now ?? Date.now;
   const version = deps.version ?? DSH_PIN;
   const bootedAt = now();
-  registerDeskRoutes(webServer, { home, bootedAt, enabled, now, version });
+  /* The bridge once it runs; until then, and in a face that runs none, the status says only whether its
+   * two names are set. */
+  let bridge: BridgeHandle | undefined;
+  const telegram = (): TelegramStatus => bridge?.status() ?? { configured: deps.telegram !== undefined, polling: false, dropped: 0, queued: 0 };
+  const status = { home, bootedAt, enabled, now, version, telegram };
+  registerDeskRoutes(webServer, status);
   const removeTools = deps.ctx === undefined || deps.hub === undefined ? () => {} : installDeskTools(deps.ctx, deskToolDefinitions({
     hub: deps.hub,
-    readState: () => deskStatus({ home, bootedAt, enabled, now, version }),
+    readState: () => deskStatus(status),
   }));
   if (!enabled) return { enabled, bootedAt, ready: Promise.resolve(), dispose: async () => { removeTools(); } };
   const ready = appendEvent(home, { t: new Date(bootedAt).toISOString(), kind: "boot", pid: process.pid, version, deskEnabled: true });
   const stopWatch = installAsleepWatch({ now, ...deps.watch, append: (event) => appendEvent(home, event) });
+  const clock: DeskClock = { now, setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout) };
   const { root, route, sessionCtx, installModelSelection } = deps;
   const conversation = root === undefined || route === undefined || sessionCtx === undefined || installModelSelection === undefined
     ? undefined
@@ -816,10 +874,26 @@ export function installDesk(
         const off = sessionCtx.on(name, listener);
         return () => { off(); };
       },
-      clock: { now, setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout) },
+      clock,
     });
   void conversation?.start();
   let disposing: Promise<void> | undefined;
+  /* The bridge's module loads on first use, as the conversation's machinery does (src/desk-conversation.ts,
+   * MODULE WEIGHT): the pause switch and scripts/service.ts import this module and never run a bridge. Not
+   * awaited, and it never rejects; a module that arrives once dispose has begun installs nothing. */
+  const config = deps.telegram;
+  const bridging = config === undefined || conversation === undefined ? Promise.resolve() : import("./telegram.ts").then(
+    (telegramModule) => {
+      if (disposing !== undefined) return;
+      bridge = telegramModule.installTelegramBridge({
+        config: { ...config, clock: config.clock ?? clock },
+        home,
+        conversation,
+        status: () => deskStatus(status),
+      });
+    },
+    (err: unknown) => { console.error(`${BIN}: desk: the Telegram bridge could not be loaded: ${reasonOf(err)}`); },
+  );
   return {
     enabled,
     bootedAt,
@@ -827,6 +901,8 @@ export function installDesk(
     ...(conversation === undefined ? {} : { conversation }),
     dispose(code) {
       disposing ??= (async () => {
+        await bridging;
+        await bridge?.dispose();
         await conversation?.dispose();
         removeTools();
         stopWatch();

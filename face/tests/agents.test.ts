@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { agentToolDefinition, runAgentRecipe, type RunOutcome } from "../src/agents.ts";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { agentToolDefinition, runAgentRecipe, scrubbedEnv, type RunOutcome } from "../src/agents.ts";
 import type { PanelDeps } from "../src/panels.ts";
 import { setRoster } from "../src/roster.ts";
 
@@ -294,4 +295,32 @@ test("a channel with no roster entry yet - file present and valid, just not seed
     "names the not-yet-seeded situation, and must not misdiagnose it as an unreadable file",
   );
   assert.deepEqual(ran, []);
+});
+
+/* The face holds the desk's Telegram bot token in its own environment ($DSH_HOME/.env, read at boot);
+ * a coding agent's child has no use for it. The operator's id is no secret and passes. */
+test("an agent run never carries the Telegram bot's token, though the face holds it", async () => {
+  assert.deepEqual(scrubbedEnv({ PATH: "/bin", TELEGRAM_BOT_TOKEN: "424242:fake", TELEGRAM_OPERATOR_ID: "42" }), { PATH: "/bin", TELEGRAM_OPERATOR_ID: "42" });
+  const saved = process.env.TELEGRAM_BOT_TOKEN;
+  const root = join(dirname(fileURLToPath(import.meta.url)), "tmp", `agents-${process.pid}`);
+  process.env.TELEGRAM_BOT_TOKEN = "424242:fake";
+  try {
+    await mkdir(root, { recursive: true });
+    const envs: NodeJS.ProcessEnv[] = [];
+    const deps: PanelDeps = {
+      ...fakeDeps(root),
+      runAgent: async (_bin, _argv, opts) => {
+        envs.push(opts.env);
+        return ran('{"type":"result","is_error":false,"num_turns":1,"result":"ok","session_id":"11111111-2222-4333-8444-555555555555"}');
+      },
+    };
+    await runAgentRecipe(deps, { bin: "claude", prompt: "hi" });
+    assert.equal(envs.length, 1);
+    assert.equal(envs[0].TELEGRAM_BOT_TOKEN, undefined, "scrubbed from the run");
+    assert.ok(envs[0].PATH, "the rest of the environment passes");
+  } finally {
+    if (saved === undefined) delete process.env.TELEGRAM_BOT_TOKEN;
+    else process.env.TELEGRAM_BOT_TOKEN = saved;
+    await rm(root, { recursive: true, force: true });
+  }
 });

@@ -110,6 +110,8 @@ const SCRUBBED_ENV = [
   "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY",
   // the workbench's own secrets — no business in a coding agent's child
   "APCA_API_KEY_ID", "APCA_API_SECRET_KEY", "DEEPSEEK_API_KEY",
+  // the desk's Telegram bot token: the face's own bridge (telegram.ts) is its one user
+  "TELEGRAM_BOT_TOKEN",
 ] as const;
 
 /** `process.env` (or `base`) minus {@link SCRUBBED_ENV}. */

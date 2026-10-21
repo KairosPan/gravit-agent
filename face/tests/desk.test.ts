@@ -8,9 +8,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { withFileLock } from "@deepseek-ai/dsh-atomic-write";
 import {
-  ASLEEP_THRESHOLD_MS, ASLEEP_TICK_MS, LEDGER_ROTATE_BYTES, OFF_FILE, appendEvent, appendRecord, clearOff, deskDir, deskStatus, deskTime,
+  ASLEEP_THRESHOLD_MS, ASLEEP_TICK_MS, LEDGER_ROTATE_BYTES, OFF_FILE, appendEvent, appendRecord, clearOff, deskDir, deskStatus, deskStatusLines, deskTime,
   installAsleepWatch, installDesk, lastDeskSession, parseDuration, readEvents, readOffState, registerDeskRoutes, runsOf, writeOff,
-  type DeskEvent, type TurnUsage,
+  type DeskEvent, type DeskStatus, type TurnUsage,
 } from "../src/desk.ts";
 import type { DeskConversationCtxLike } from "../src/desk-conversation.ts";
 import type { AgentLike, SessionLike } from "../src/room.ts";
@@ -643,5 +643,107 @@ test("installDesk's dispose lets a start still ensuring finish first, so its des
     assert.equal(fake.listeners.size, 0, "a start that finished after dispose began supervises nothing");
   } finally {
     await rm(h, { recursive: true, force: true });
+  }
+});
+
+/* P1: the desk's lines as the terminal and the phone read them, and the Telegram bridge (src/telegram.ts),
+ * which installDesk loads on first use. */
+
+test("deskStatusLines: the desk line, then the pause and the telegram lines, a time on another New York date carrying it", () => {
+  const now = new Date("2026-10-20T18:30:00Z"); // 14:30 ET
+  const base: DeskStatus = {
+    ok: true, pid: 7, version: "v", bootedAt: "2026-10-20T17:00:00.000Z", uptimeMs: 90 * 60_000 + 59_999, desk: { enabled: true, dir: "/d" },
+    asleep: [], runs: [], turnsToday: { count: 0, usage: { uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 } },
+  };
+  assert.deepEqual(deskStatusLines(base, now), ["up 1h 30m since 2026-10-20T17:00:00.000Z · desk on"], "neither line without its field");
+  assert.deepEqual(deskStatusLines({ ...base, desk: { enabled: false, dir: "/d" } }, now), ["up 1h 30m since 2026-10-20T17:00:00.000Z · desk off (FACE_DESK=0)"]);
+  const polled = { configured: true, polling: true, lastPollAt: "2026-10-20T18:29:00.000Z", dropped: 2, queued: 1 };
+  assert.deepEqual(deskStatusLines({ ...base, off: { setAt: "2026-10-20T18:00:00.000Z", by: "telegram", until: "2026-10-20T20:00:00.000Z" },
+    telegram: { ...polled, conflictAt: "2026-10-20T18:10:00.000Z" } }, now).slice(1), [
+    "desk: paused since 14:00 ET by telegram until 16:00 ET (npm run desk -- resume)",
+    "telegram: polling, last poll 14:29 ET, 2 dropped, 1 queued, conflict at 14:10 ET",
+  ]);
+  assert.deepEqual(deskStatusLines({ ...base, off: { setAt: "2026-10-19T18:00:00.000Z", by: "page", until: "2026-10-21T18:00:00.000Z" },
+    telegram: { ...polled, lastPollAt: "2026-10-20T03:59:00.000Z", conflictAt: "2026-10-19T22:00:00.000Z" } }, now).slice(1), [
+    "desk: paused since 2026-10-19 14:00 ET by page until 2026-10-21 14:00 ET (npm run desk -- resume)",
+    "telegram: polling, last poll 2026-10-19 23:59 ET, 2 dropped, 1 queued, conflict at 2026-10-19 18:00 ET",
+  ], "every time, the last poll's too: 03:59 UTC on the 20th is still the 19th in New York");
+  assert.deepEqual(deskStatusLines({ ...base, telegram: { configured: false, polling: false, dropped: 0, queued: 0 } }, now).slice(1),
+    ["telegram: not configured (TELEGRAM_BOT_TOKEN and TELEGRAM_OPERATOR_ID in $DSH_HOME/.env)"]);
+  assert.deepEqual(deskStatusLines({ ...base, telegram: { configured: true, polling: false, dropped: 0, queued: 3 } }, now).slice(1),
+    ["telegram: not polling, no poll yet, 0 dropped, 3 queued"]);
+});
+
+/* The pause switch (scripts/desk.ts) and scripts/service.ts import desk.ts; neither runs a bridge, so
+ * desk.ts names telegram.ts statically for its types alone and loads it with a dynamic import. */
+test("desk.ts loads the Telegram bridge on first use: its one static import of telegram.ts is types", async () => {
+  const source = await readFile(join(dirname(fileURLToPath(import.meta.url)), "..", "src", "desk.ts"), "utf8");
+  const statics = (source.match(/^import\b.*$/gm) ?? []).filter((line) => line.includes('"./telegram.ts"'));
+  assert.equal(statics.length, 1);
+  assert.match(statics[0], /^import type /, `a value edge: ${statics[0]}`);
+  assert.match(source, /import\("\.\/telegram\.ts"\)/, "the module itself comes through a dynamic import");
+});
+
+test("installDesk runs the Telegram bridge only with the desk on, Telegram configured and a conversation; the status is the bridge's; dispose ends it before the conversation", async () => {
+  const token = "424242:AAFakeTokenForTheBridgeTests_x9";
+  const made: string[] = [];
+  const own = async (label: string): Promise<string> => {
+    const h = join(TMP, `telegram-${made.length}-${label}`);
+    await mkdir(h, { recursive: true });
+    made.push(h);
+    return h;
+  };
+  /** A Bot API that holds every request open until it is aborted, noting how many buses the conversation had let go of by then. */
+  const botApi = (letGo: () => number) => {
+    const state = { asked: [] as string[], abortedAfter: [] as number[] };
+    const fetchStub = (async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      const url = String(input);
+      state.asked.push(url.slice(url.lastIndexOf("/") + 1));
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => { state.abortedAfter.push(letGo()); reject(init.signal?.reason); }, { once: true });
+      });
+    }) as typeof fetch;
+    return { state, fetch: fetchStub };
+  };
+  const telegramOf = async (rec: ReturnType<typeof recorder>): Promise<unknown> =>
+    (JSON.parse(await rec.call("/data/desk/status")) as { body: DeskStatus }).body.telegram;
+  const watch = () => { const timer = fakeTimer(); return { setInterval: timer.setInterval, clearInterval: timer.clearInterval }; };
+  const conversationDeps = (fake: ReturnType<typeof conversationRoot>, label: string) =>
+    ({ root: join(TMP, `repo-telegram-${label}`), route: { provider: "stub", model: "echo" }, sessionCtx: fake.ctx, installModelSelection: () => () => {} });
+  try {
+    const plainRec = recorder();
+    const plain = installDesk(plainRec, { home: await own("plain"), enabled: true, watch: watch(), ...conversationDeps(conversationRoot(() => ""), "plain") });
+    assert.deepEqual(await telegramOf(plainRec), { configured: false, polling: false, dropped: 0, queued: 0 }, "no Telegram: the status says so");
+    await plain.dispose(0);
+
+    for (const [label, enabled, withConversation] of [["off", false, true], ["no conversation", true, false]] as const) {
+      const quiet = botApi(() => 0);
+      const rec = recorder();
+      const desk = installDesk(rec, {
+        home: await own(label), enabled, watch: watch(), telegram: { token, operatorId: 42, apiBase: "https://telegram.test", fetch: quiet.fetch },
+        ...(withConversation ? conversationDeps(conversationRoot(() => ""), label) : {}),
+      });
+      await new Promise((done) => setTimeout(done, 50));
+      assert.deepEqual(quiet.state.asked, [], `no bridge, no request (${label})`);
+      assert.deepEqual(await telegramOf(rec), { configured: true, polling: false, dropped: 0, queued: 0 }, `configured, not polling (${label})`);
+      await desk.dispose(0);
+    }
+
+    const fake = conversationRoot(() => "");
+    const live = botApi(() => fake.letGo.length);
+    const rec = recorder();
+    const desk = installDesk(rec, {
+      home: await own("live"), enabled: true, watch: watch(), telegram: { token, operatorId: 42, apiBase: "https://telegram.test", fetch: live.fetch },
+      ...conversationDeps(fake, "live"),
+    });
+    await until("the bridge's first poll, which installDesk does not await", () => live.state.asked.includes("getUpdates"));
+    assert.deepEqual(await telegramOf(rec), { configured: true, polling: true, dropped: 0, queued: 0 }, "the status is the bridge's own");
+    await until("the conversation's start", () => fake.listeners.size === 1);
+    await desk.dispose(0);
+    assert.deepEqual(live.state.abortedAfter, [0], "the poll was aborted before the conversation let go of the bus");
+    assert.equal(fake.letGo.length, 1, "and the conversation was disposed after it");
+    assert.deepEqual(await telegramOf(rec), { configured: true, polling: false, dropped: 0, queued: 0 });
+  } finally {
+    await Promise.all(made.map((h) => rm(h, { recursive: true, force: true })));
   }
 });

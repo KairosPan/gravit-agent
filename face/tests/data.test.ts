@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { WebRoute } from "@deepseek-ai/dsh-host-webserver";
 import {
-  isJsonBody, isLoopbackHost, isTrustedDataRequest, registerDataRoutes, SPAWN_TIMEOUT_MS, TTL_MS, type Spawner,
+  defaultSpawner, isJsonBody, isLoopbackHost, isTrustedDataRequest, registerDataRoutes, SPAWN_TIMEOUT_MS, TTL_MS, type Spawner,
 } from "../src/data.ts";
 import type { QuoteHub } from "../src/quotes.ts";
 import type { QuoteIdentity, QuotePayload } from "../src/quote-types.ts";
@@ -390,4 +390,24 @@ test("registerDataRoutes hands its hub to the quote routes", async () => {
   assert.equal(closed, false);
   dispose();
   assert.equal(closed, true, "the routes' disposer closes the hub they were given");
+});
+
+/* The face holds the desk's Telegram bot token in its own environment; a producer has no use for it. The
+ * real spawner, run on node itself rather than python: what the child sees is what a producer would. */
+test("defaultSpawner runs a producer without the Telegram bot's token, and with the rest of the face's environment", async () => {
+  const saved = { token: process.env.TELEGRAM_BOT_TOKEN, key: process.env.APCA_API_KEY_ID };
+  process.env.TELEGRAM_BOT_TOKEN = "424242:fake";
+  process.env.APCA_API_KEY_ID = "fake-key-id";
+  try {
+    const probe = "process.stdout.write(JSON.stringify({ token: process.env.TELEGRAM_BOT_TOKEN ?? null, key: process.env.APCA_API_KEY_ID ?? null }))";
+    const { stdout, code } = await defaultSpawner(process.execPath)(["-e", probe], 10_000);
+    assert.equal(code, 0);
+    assert.deepEqual(JSON.parse(stdout), { token: null, key: "fake-key-id" }, "the token is scrubbed; the producers' own keys pass");
+    assert.equal(process.env.TELEGRAM_BOT_TOKEN, "424242:fake", "the face's own environment is untouched");
+  } finally {
+    for (const [name, value] of [["TELEGRAM_BOT_TOKEN", saved.token], ["APCA_API_KEY_ID", saved.key]] as const) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
 });
