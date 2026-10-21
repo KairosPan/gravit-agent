@@ -160,7 +160,9 @@ test("arm refuses a taken id, a bad --at, a past --expires, a non-.py script, a 
   await symlink(join(r.root, "desk", "STANDING.md"), join(r.root, "strategies", "linked", "STANDING.md"));
   await writeFile(join(r.root, "outside.py"), "print('outside')\n");
   await symlink(join(r.root, "outside.py"), join(r.root, "scripts", "out.py"));
-  await writeFile(join(r.root, "scripts", "locked.py"), "print('locked')\n", { mode: 0o000 });
+  /* root reads a 0000 file all the same, so the unreadable-script row runs only for another user */
+  const asRoot = process.getuid?.() === 0;
+  if (!asRoot) await writeFile(join(r.root, "scripts", "locked.py"), "print('locked')\n", { mode: 0o000 });
   const x = (...more: string[]): string[] => ["desk", "--id", "x", "--at", "close-30m", "--expires", "2026-11-30", ...more];
   const refusals: [args: string[], line: string][] = [
     [["desk", "--id", "preclose", "--at", "close-30m", "--expires", "2026-11-30"],
@@ -174,7 +176,7 @@ test("arm refuses a taken id, a bad --at, a past --expires, a non-.py script, a 
     [x("--producer", "scripts/gone.py"), "cannot arm x: scripts/gone.py is missing"],
     [x("--producer", "scripts/out.py"), "cannot arm x: scripts/out.py leaves scripts/"],
     /* hashed as a firing reads it: a script that cannot be read is missing to both, in the firing's words */
-    [x("--producer", "scripts/locked.py"), "cannot arm x: scripts/locked.py is missing"],
+    ...(asRoot ? [] : [[x("--producer", "scripts/locked.py"), "cannot arm x: scripts/locked.py is missing"] as [string[], string]]),
     [["desk", "--id", "x", "--at", "close-10m", "--producer", "builtin:brief", "--expires", "2026-11-30"],
       "cannot arm x: close-10m leaves 10 min before the close; its producer (5 min), its turn (10 min) and the 5-minute grace need 20 min"],
     [x("--turn-deadline", "45m"), "cannot arm x: --turn-deadline 45m must be <n>s or <n>m, from 1 min to 30 min"],
@@ -327,12 +329,12 @@ test("rearm --expires extends an order, an expired one too, and checks the date 
   assert.equal(await runDesk("rearm", ["preclose", "--expires", "2026-12-31"], later), 0);
   assert.deepEqual(r.take(), ["preclose: nothing changed since arming"]);
 
-  const edited = "# Pre-close\nBrief me ten minutes earlier.\n";
-  await writeFile(join(r.root, "desk", "STANDING.md"), edited);
-  assert.equal(await runDesk("rearm", ["--expires", "2027-01-15", "preclose"], later), 0, "the flag before the id");
-  assert.deepEqual(r.take(), [`re-armed preclose: desk/STANDING.md sha256 ${sha256Hex(edited).slice(0, 12)}…, expires 2027-01-15`]);
-  const [both] = await ordersIn(r);
-  assert.deepEqual([both.sha256, both.expires], [sha256Hex(edited), "2027-01-15"], "a changed text and a new date together");
+  /* a text edited since arming: --expires never pins it with the new date */
+  const extended = await readFile(r.standing);
+  await writeFile(join(r.root, "desk", "STANDING.md"), "# Pre-close\nBrief me ten minutes earlier.\n");
+  assert.equal(await runDesk("rearm", ["--expires", "2027-01-15", "preclose"], later), 1, "the flag before the id; refused, not the usage line");
+  assert.deepEqual(r.take(), ["cannot re-arm preclose: desk/STANDING.md changed since arming; review it, then: npm run desk -- rearm preclose"]);
+  assert.deepEqual(await readFile(r.standing), extended, "nothing written: the edit not pinned, the date not moved");
 
   const before = await readFile(r.standing);
   const refusals: [string[], string][] = [
@@ -353,9 +355,44 @@ test("rearm --expires extends an order, an expired one too, and checks the date 
   assert.deepEqual(await readFile(r.standing), before);
 });
 
+test("an edit made while an order was expired is reviewed and re-pinned before it is extended: rearm, then rearm --expires", async () => {
+  const r = await rig();
+  assert.equal(await runDesk("arm", ["desk", "--id", "cap", "--at", "close-30m", "--producer", "scripts/p.py", "--expires", "2026-10-20"], r.deps), 0);
+  r.take();
+  const armed = await readFile(r.standing, "utf8");
+  /** Two weeks on: the order expired after 2026-10-20, and its files were edited meanwhile. */
+  const later = { ...r.deps, now: () => Date.parse("2026-11-03T18:00:00Z") };
+  const script = "print('changed while it was expired')\n";
+  const text = "# Pre-close\nEdited while it was expired.\n";
+
+  await writeFile(join(r.root, "scripts", "p.py"), script);
+  assert.equal(await runDesk("rearm", ["cap", "--expires", "2026-12-31"], later), 1);
+  assert.deepEqual(r.take(), ["cannot re-arm cap: scripts/p.py changed since arming; review it, then: npm run desk -- rearm cap"]);
+  assert.equal(await readFile(r.standing, "utf8"), armed, "nothing written");
+  await writeFile(join(r.root, "desk", "STANDING.md"), text);
+  assert.equal(await runDesk("rearm", ["cap", "--expires", "2026-12-31"], later), 1);
+  assert.deepEqual(r.take(), ["cannot re-arm cap: desk/STANDING.md changed since arming; review it, then: npm run desk -- rearm cap"],
+    "both changed: the text is named first");
+  assert.equal(await readFile(r.standing, "utf8"), armed, "nothing written");
+
+  /* step one, after the review: the plain rearm re-pins both files, the date untouched */
+  const sha = sha256Hex(text);
+  const psha = sha256Hex(script);
+  assert.equal(await runDesk("rearm", ["cap"], later), 0);
+  assert.deepEqual(r.take(), [`re-armed cap: desk/STANDING.md sha256 ${sha.slice(0, 12)}…, scripts/p.py sha256 ${psha.slice(0, 12)}…`]);
+  const [pinned] = await ordersIn(r);
+  assert.deepEqual([pinned.sha256, pinned.producerSha256, pinned.expires], [sha, psha, "2026-10-20"]);
+
+  /* step two: the extension */
+  assert.equal(await runDesk("rearm", ["cap", "--expires", "2026-12-31"], later), 0);
+  assert.deepEqual(r.take(), [`re-armed cap: desk/STANDING.md sha256 ${sha.slice(0, 12)}…, scripts/p.py sha256 ${psha.slice(0, 12)}…, expires 2026-12-31`]);
+  const [extended] = await ordersIn(r);
+  assert.deepEqual(extended, { ...pinned, expires: "2026-12-31" }, "only the date moved");
+});
+
 test("arm and rearm write only over the file they read: an edit made in between is refused and kept", async () => {
-  /* arm asks the market clock after it has read standing.yml and built its edit, so a clock that edits the file stands
-   * in for the operator's editor saving while arm runs */
+  /* arm asks the market clock after it has read standing.yml and before it builds its edit (appendOrder runs after
+   * the calendar), so a clock that edits the file stands in for the operator's editor saving while arm runs */
   let meddle = true;
   const edit = "# edited by hand while arm ran\norders: []\n";
   const r = await rig((calls, standing) => async (from, days) => {

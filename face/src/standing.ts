@@ -245,7 +245,7 @@ export function isOrderId(value: unknown): value is string {
 
 /**
  * Whether `dir` is an order's directory: `desk`, or `strategies/<name>` with `<name>` a channel's name as
- * channels.ts makes one (its `NAME_RE`, in NFC) and never `_template` (P2-4).
+ * channels.ts makes one - channel-name.ts's `NAME_RE`, in NFC - and never `_template` (P2-4).
  * @param dir - the directory as written, repo-relative.
  */
 export function isOrderDir(dir: unknown): dir is string {
@@ -358,10 +358,15 @@ function parseBudget(raw: unknown, errors: string[]): { dailyTokens: number } | 
   return { dailyTokens: tokens };
 }
 
-/** producer.ts's refusal as an order's, opening with the key: `producer must be …` as it is, `unknown builtin
- * "x"` as `producer names an unknown builtin "x"`. */
+/** parseProducer's refusal of a well-formed builtin name it does not know: `unknown builtin "<name>"`. */
+const UNKNOWN_BUILTIN_RE = /^unknown builtin "/;
+
+/** parseProducer's refusal as an order's, opening with the key. Its two texts: `producer must be scripts/<file>.py
+ * or builtin:<name>`, kept as it is, and `unknown builtin "<name>"`, read `producer names an unknown builtin
+ * "<name>"`; any other text it may come to give is carried as `producer is refused: <text>`. */
 function producerFault(error: string): string {
-  return error.startsWith("producer ") ? error : `producer names an ${error}`;
+  if (UNKNOWN_BUILTIN_RE.test(error)) return `producer names an ${error}`;
+  return error.startsWith("producer ") ? error : `producer is refused: ${error}`;
 }
 
 /** One order, read; its faults land in `errors`, each opening `orders[<i>] (<id>): `. */

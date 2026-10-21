@@ -1,6 +1,6 @@
 /** The tested half of the create box: the pure whitespace fold.
  *
- * THE BUG THIS CLOSES. `NAME_RE` (src/channels.ts) refuses a space, so an
+ * THE BUG THIS CLOSES. `NAME_RE` (src/channel-name.ts) refuses a space, so an
  * operator typing "Bloom Energy营收预期分析" — or anything with a space in it —
  * got a 400 and no way forward but retyping by hand. It had already happened
  * once: the channel on disk is `市场情绪`, its space collapsed by hand.

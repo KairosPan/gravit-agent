@@ -12,7 +12,8 @@
  *                                  arm a standing order: pin its text's hash (and its script's), add it to standing.yml
  *   npm run desk -- rearm preclose take a changed text's (or script's) new hash, after reviewing the change
  *   npm run desk -- rearm preclose --expires 2026-12-31
- *                                  ...and extend its last day, an expired order's too
+ *                                  extend its last day, an expired order's too - refused while a pinned file has
+ *                                  changed: review it and rearm first
  *
  * It acts on the harness home this shell resolves - `$DSH_HOME`, else ~/.dsh - as `npm start` and
  * `npm run service -- install` do, and pins files in the repository this script sits in. No face need be
@@ -79,8 +80,8 @@ function reasonOf(err: unknown): string {
  *   is the usage line.
  * - `arm <desk | strategies/NAME> --id ID --at ANCHOR --expires YYYY-MM-DD [--producer …] [--model …]
  *   [--turn-deadline …] [--producer-deadline …] [--no-wake]`: arms a standing order (see {@link arm}).
- * - `rearm ID [--expires YYYY-MM-DD]`: takes the new hashes of an armed order's changed files, and extends its
- *   last day when asked (see {@link rearm}).
+ * - `rearm ID [--expires YYYY-MM-DD]`: takes the new hashes of an armed order's changed files; with `--expires`,
+ *   extends its last day instead, refused while a pinned file has changed (see {@link rearm}).
  *
  * A switch it cannot write or remove is one line naming the file and the error's code.
  * @param cmd - the command.
@@ -410,17 +411,22 @@ function parseRearmArgs(args: string[]): { id: string; expires?: string } | unde
 }
 
 /**
- * `rearm ID [--expires YYYY-MM-DD]`: after the operator has reviewed a change to an armed order's text - or its
- * script - take the new hashes; with `--expires`, also move its last day, which is how an expired order fires
- * again. The order is found first; then the new date is checked as `arm` checks one (a real date, not before
- * today in New York - the clock is read there, after `standing.yml`); then the order's `<dir>/<file>` (and a
- * script producer's bytes) are hashed as `arm` hashes them. When nothing would change it prints `<id>: nothing
- * changed since arming`, exit 0; else only that order's hash lines - and its `expires:` line - are rewritten
- * (`rehashOrder`; `armedAt` and everything else stay), the file written only if it has not changed since it was
- * read, and it prints `re-armed <id>: <dir>/<file> sha256 <12 hex>…[, <script> sha256 <12 hex>…][, expires
- * <date>]`, exit 0. A refusal is one line, `cannot re-arm <id>: <reason>` - `no such order in standing.yml`
- * among them - exit 1, and nothing written. Other arguments are the usage line, exit 2. The market clock is not
- * asked.
+ * `rearm ID [--expires YYYY-MM-DD]`. Plain, after the operator has reviewed a change to an armed order's text -
+ * or its script - it takes the new hashes. With `--expires` it moves the order's last day, which is how an
+ * expired order fires again - and only that: a pinned file that changed since arming is refused, `<dir>/<file>
+ * changed since arming; review it, then: npm run desk -- rearm <id>` (its text first, then its script), since an
+ * expired order is never fired and so no firing has refused that edit; the plain rearm re-pins it after review,
+ * and `--expires` follows.
+ *
+ * The order is found first; then the new date is checked as `arm` checks one (a real date, not before today in
+ * New York - the clock is read there, after `standing.yml`); then the order's `<dir>/<file>` (and a script
+ * producer's bytes) are hashed as `arm` hashes them. When nothing would change it prints `<id>: nothing changed
+ * since arming`, exit 0; else only that order's hash lines - or, with `--expires`, its `expires:` line, the hash
+ * lines written again as they were - are rewritten (`rehashOrder`; `armedAt` and everything else stay), the file
+ * written only if it has not changed since it was read, and it prints `re-armed <id>: <dir>/<file> sha256 <12
+ * hex>…[, <script> sha256 <12 hex>…][, expires <date>]`, exit 0. A refusal is one line, `cannot re-arm <id>:
+ * <reason>` - `no such order in standing.yml` among them - exit 1, and nothing written. Other arguments are the
+ * usage line, exit 2. The market clock is not asked.
  */
 async function rearm(args: string[], deps: DeskDeps, now: () => number): Promise<number> {
   const parsed = parseRearmArgs(args);
@@ -456,6 +462,12 @@ async function rearm(args: string[], deps: DeskDeps, now: () => number): Promise
     const hashed = await hashScript(m, root, script);
     if ("error" in hashed) return refuse(hashed.error);
     scriptSha = hashed.sha256;
+  }
+  /* --expires extends what was reviewed and pinned, never an edit made since: an expired order is never fired,
+   * so no firing refused that edit - re-pinning it is a plain rearm's, after the operator has read it. */
+  if (expires !== undefined) {
+    const changed = text.sha256 !== order.sha256 ? `${order.dir}/${order.file}` : scriptSha !== order.producerSha256 ? script : undefined;
+    if (changed !== undefined) return refuse(`${changed} changed since arming; review it, then: npm run desk -- rearm ${id}`);
   }
   if (text.sha256 === order.sha256 && scriptSha === order.producerSha256 && (expires === undefined || expires === order.expires)) {
     deps.out(`${id}: nothing changed since arming`);
