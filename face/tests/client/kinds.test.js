@@ -42,7 +42,10 @@ test('seatLine words a seat write from its arguments', () => {
   assert.equal(seatLine('mcp__account__portfolio_live_move', { kind: 'send', from: 'wallet', asset: 'USDC', amount: 5, to: '0xabc' }), 'move 5 USDC · send from wallet to 0xabc');
   assert.equal(seatLine('mcp__account__portfolio_live_earn', { venue: 'okx', kind: 'supply', product: 'simple', asset: 'USDC', amount: 100 }), 'earn supply 100 USDC · okx');
   assert.equal(seatLine('mcp__account__portfolio_pay', { url: 'https://api.example.com/v1/x', maxAmount: 2, from: 'agent-1' }), 'pay up to $2 · api.example.com');
-  assert.equal(seatLine('mcp__account__portfolio_live_batch', { legs: [{}, {}, {}] }), 'batch · 3 legs');
+  assert.equal(seatLine('mcp__account__portfolio_live_batch', { legs: [{ venue: 'paper-1', symbol: 'BTC/USD', side: 'buy', usd: 10 }, { venue: 'paper-1', symbol: 'ETH/USD', side: 'buy', usd: 10, orderType: 'limit', limitPrice: 2400 }, { venue: 'okx', symbol: 'SOL/USDT', side: 'sell', qty: 500 }] }),
+    'batch · 3 legs: buy $10 of BTC/USD · market; buy $10 of ETH/USD · limit 2400; sell 500 SOL/USDT · market');
+  assert.equal(seatLine('mcp__account__portfolio_live_batch', { legs: [] }), 'batch · 0 legs');
+  assert.equal(seatLine('mcp__account__portfolio_live_batch', { legs: 'x' }), 'batch · 0 legs');
   assert.equal(seatLine('mcp__account__portfolio_order', { base: 'BTC', side: 'buy', qty: 1 }), 'buy 1 BTC');
   assert.equal(seatLine('mcp__account__portfolio_transfer', { from: 'okx', to: 'kraken', amount: 50, token: 'USDC' }), 'transfer 50 USDC · okx to kraken');
   assert.equal(seatLine('mcp__account__portfolio_execute', { account: 'acc-1', intent: { kind: 'trade' } }), 'execute at acc-1');
@@ -65,6 +68,30 @@ test('a seat order approval is the orange card with the seat line and the venue 
   assert.equal(card.data.venue, 'paper-1'); assert.match(card.data.line, /^Account seat - /);
   assert.equal(card.data.toolName, 'mcp__account__portfolio_live_order'); assert.equal(card.data.callId, 'c10');
   assert.deepEqual(card.data.args, { venue: 'paper-1', symbol: 'AAPL', side: 'buy', usd: 100, orderType: 'market' });
+});
+
+test("a batch's card lists its legs and its venues", () => {
+  const c = new Map();
+  rememberCall(c, seatCallAs('c16', 'mcp__account__portfolio_live_batch', { legs: [{ venue: 'paper-1', symbol: 'BTC/USD', side: 'buy', usd: 10 }, { venue: 'okx', symbol: 'SOL/USDT', side: 'sell', qty: 500 }, { venue: 'paper-1', symbol: 'ETH/USD', side: 'buy', usd: 5 }] }));
+  const [card] = toMessages(mapFrame({ ...seatGate, eventId: 'ev-16', request: { ...seatGate.request, toolName: 'mcp__account__portfolio_live_batch', callId: 'c16', reason: 'Account seat - mcp__account__portfolio_live_batch: legs=[…]' } }), c, NOW);
+  assert.equal(card.kind, 'card');
+  assert.equal(card.text, 'Your call: batch · 3 legs: buy $10 of BTC/USD · market; sell 500 SOL/USDT · market; buy $5 of ETH/USD · market');
+  assert.equal(card.data.venue, 'paper-1, okx');
+});
+
+// the final review's Important 6: call ids are a session's own, so a call is joined by session AND id, and by the tool's name
+test("a gate joins only its own session's call of the same tool; another session's or another tool's call of the same id is not it", () => {
+  const c = new Map();
+  rememberCall(c, seatCall);   // session s1, c10: buy $100 of AAPL at paper-1
+  const other = toMessages(mapFrame({ ...seatGate, eventId: 'ev-20', agentId: 's2', request: { ...seatGate.request, reason: 'Account seat - mcp__account__portfolio_live_order: side=buy usd=900 symbol=TSLA venue=okx' } }), c, NOW);
+  assert.equal(other[0].kind, 'card'); assert.equal(other[0].text, 'Your call: mcp__account__portfolio_live_order', "another session's call is not joined");
+  assert.equal(other[0].data.venue, 'Account seat');
+  const renamed = toMessages(mapFrame({ ...seatGate, eventId: 'ev-21', request: { ...seatGate.request, toolName: 'mcp__account__portfolio_live_close' } }), c, NOW);
+  assert.equal(renamed[0].text, 'Your call: mcp__account__portfolio_live_close', "a call of another tool is not joined");
+  const own = toMessages(mapFrame(seatGate), c, NOW);
+  assert.equal(own[0].text, 'Your call: buy $100 of AAPL · market · paper-1');
+  const result = toMessages(mapFrame({ ...seatResult(JSON.stringify({ ok: true, order: { id: 'ord-9' } }), false), sessionId: 's2' }), c, NOW);
+  assert.equal(result.length, 1, "another session's result does not lift on s1's call");
 });
 
 test('a seat tool without a venue, or one the face never classified, is a card at the Account seat', () => {
@@ -97,8 +124,15 @@ test("a seat write's result lifts a card-raised line, a placed or canceled order
   assert.equal(bare[1].kind, 'refusal'); assert.equal(bare[1].text, 'the user rejected tool "mcp__account__portfolio_live_order"');
   const b = new Map();
   rememberCall(b, seatCallAs('c13', 'mcp__account__portfolio_live_batch', { legs: [{}, {}, {}] }));
-  const batch = toMessages(mapFrame(seatResult(JSON.stringify({ ok: true, legs: [{ leg: 1, ok: true, order: { id: 'ord-1' } }, { leg: 2, ok: false, code: 'E_X' }, { leg: 3, ok: true, order: { id: 'ord-2' } }] }), false, 'c13')), b, NOW);
-  assert.equal(batch[1].kind, 'receipt'); assert.equal(batch[1].text, 'Batch · 2 of 3 legs placed');
+  const batch = toMessages(mapFrame(seatResult(JSON.stringify({ ok: true, legs: [{ leg: 1, ok: true, order: { id: 'ord-1' } }, { leg: 2, ok: false, code: 'E_X', message: 'no' }, { leg: 3, ok: true, order: { id: 'ord-2' } }] }), false, 'c13')), b, NOW);
+  assert.equal(batch[1].kind, 'receipt'); assert.equal(batch[1].text, 'Batch · 2 of 3 legs placed · 1 refused');
+  // in Guard the Account answers every leg with a card of its own and places nothing: the receipt says so (the final review's Important 2)
+  const guard = toMessages(mapFrame(seatResult(JSON.stringify({ ok: true, legs: [{ leg: 1, ok: true, pending: true, card: { id: 'card-1' } }, { leg: 2, ok: true, pending: true, card: { id: 'card-2' } }, { leg: 3, ok: false, code: 'E_X', message: 'no' }] }), false, 'c13')), b, NOW);
+  assert.equal(guard[1].kind, 'receipt'); assert.equal(guard[1].text, 'Batch · 2 cards raised on the Account page · 1 refused');
+  const mixed = toMessages(mapFrame(seatResult(JSON.stringify({ ok: true, legs: [{ leg: 1, ok: true, order: { id: 'ord-1' } }, { leg: 2, ok: true, pending: true, card: { id: 'card-2' } }] }), false, 'c13')), b, NOW);
+  assert.equal(mixed[1].text, 'Batch · 1 of 2 legs placed · 1 card raised on the Account page');
+  const none = toMessages(mapFrame(seatResult(JSON.stringify({ ok: false, legs: [{ leg: 1, ok: false, code: 'E_MANDATE_RECIPIENT', message: 'okx is not in your limit' }, { leg: 2, ok: false, code: 'E_MANDATE_RECIPIENT', message: 'okx is not in your limit' }] }), true, 'c13')), b, NOW);
+  assert.equal(none[1].kind, 'refusal'); assert.equal(none[1].text, 'Batch · 2 of 2 legs refused · E_MANDATE_RECIPIENT · okx is not in your limit');
   const r = new Map();
   rememberCall(r, seatCallAs('c14', 'mcp__account__portfolio_account', {}));
   assert.equal(toMessages(mapFrame(seatResult(JSON.stringify({ ok: true, seat: { name: 'Gravit' } }), false, 'c14')), r, NOW).length, 1, 'a read lifts nothing');
@@ -232,7 +266,8 @@ test('an accepted order result is the tool row plus a green receipt; a failed on
 test("a result row carries the call's name and arguments", () => {
   const known = new Map();
   rememberCall(known, { type: 'session/event', sessionId: 's1', event: { type: 'tool/call', seq: 50, time: 1, data: { turn: 1, step: 1, callId: 'c50', name: 'mcp__alpaca-kit__screen', arguments: JSON.stringify({ kind: 'gainers' }) } } });
-  const view = { kind: 'card', seq: 51, time: 2, card: { callId: 'c50', phase: 'result', text: '{"ok":true,"rows":[]}', isError: false } };
+  // a mapped view always carries its frame's session (mapper.js `base`): a call is joined by session and id
+  const view = { kind: 'card', seq: 51, time: 2, sessionId: 's1', card: { callId: 'c50', phase: 'result', text: '{"ok":true,"rows":[]}', isError: false } };
   const [row] = toMessages(view, known, NOW);
   assert.equal(row.kind, 'tool');
   assert.equal(row.data.name, 'mcp__alpaca-kit__screen');

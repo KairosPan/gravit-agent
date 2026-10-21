@@ -27,6 +27,7 @@ test('seatWords: nothing read, not reachable, and every standing in its words', 
   assert.equal(standing('absent'), 'Gravit · not on the account');
   assert.equal(standing('expired'), 'Gravit · expired');
   assert.equal(standing('revoked'), 'Gravit · revoked');
+  assert.equal(standing('unknown'), 'Gravit · on the account · standing unknown');
   assert.equal(seatWords(seatView({ cards: [{ id: 'c', usd: 1 }] })).cards, '1 card waiting');
   assert.equal(seatWords(seatView({ cards: [] })).cards, '');
   assert.equal(seatWords(seatView({ mode: 'open' })).mode, 'Beast');

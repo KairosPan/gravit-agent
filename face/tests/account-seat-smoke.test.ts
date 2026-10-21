@@ -175,14 +175,27 @@ test("account seat smoke: the seat mounts, its writes are gated, a read answers,
     assert.match(String(answered.card?.id), /^card-/);
     assert.equal(seen.length, 2);
 
+    /* 7b. A batch: the card describes every leg (the final review's
+     * Critical 1), and in Guard the stand-in answers each leg with a card. */
+    /* two legs above the exchange's smallest order ($5 is refused there, not carded) */
+    const batch = await run("seat-batch", `${SEAT_TOOL_PREFIX}portfolio_live_batch`, { legs: [order, { ...order, usd: 12 }] });
+    assert.equal(batch.isError, false, textOf(batch));
+    assert.match(String(seen[2]?.reason), /^Account seat - mcp__account__portfolio_live_batch: legs=\[1: side=buy usd=10 symbol=.* venue=ex; 2: side=buy usd=12 symbol=.* venue=ex\]$/);
+    const legs = (JSON.parse(textOf(batch)) as { legs?: { pending?: boolean; card?: { id?: string } }[] }).legs ?? [];
+    assert.equal(legs.length, 2, textOf(batch).slice(0, 400));
+    assert.ok(legs.every((leg) => leg.pending === true && typeof leg.card?.id === "string"), `each leg waits on a card of its own in Guard: ${textOf(batch).slice(0, 600)}`);
+
     /* 8. The route reads the stand-in as the face would: the seat admitted
-     * under its seeded name, the paper venue marked, the card just raised. */
+     * under its seeded name until a day the Account names, the paper venue
+     * marked, the cards just raised. */
     registerSeatRoute(ctx.webServer, { url: standin.url, seatName: SEEDED_AGENT_NAME });
     const read = await fetch(`${base}/data/seat.json?fresh=1`);
     assert.equal(read.status, 200);
     const view = await read.json() as SeatView;
     assert.equal(view.reachable, true, JSON.stringify(view));
     assert.equal(view.seat?.status, "admitted", JSON.stringify(view.seat));
+    assert.ok(typeof view.seat?.validUntil === "number" && view.seat.validUntil > Date.now(), `the Account's ISO expiry reaches the box as milliseconds: ${JSON.stringify(view.seat)}`);
+    assert.ok(view.seat?.limits.some((l) => typeof l.validUntil === "number"), "a limit's expiry too");
     assert.ok(view.venues?.some((v) => v.id === "paper-momentum" && v.paper === true), JSON.stringify(view.venues));
     assert.ok((view.cards?.length ?? 0) >= 1, `the card the seat raised waits on the Account page: ${JSON.stringify(view.cards)}`);
     assert.ok(view.cards?.some((c) => c.id === answered.card?.id), "and it is that card");

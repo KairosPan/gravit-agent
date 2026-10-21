@@ -155,7 +155,8 @@ export function seatWords(data) {
     : s.status === 'knocking' ? `${name} · knocking — admit it on the Account page`
       : s.status === 'expired' ? `${name} · expired`
         : s.status === 'revoked' ? `${name} · revoked`
-          : `${name} · not on the account`;
+          : s.status === 'unknown' ? `${name} · on the account · standing unknown`
+            : `${name} · not on the account`;
   const limits = (Array.isArray(s.limits) ? s.limits : []).map(l => [
     l.scope,
     (Array.isArray(l.allow) ? l.allow : []).join(', '),

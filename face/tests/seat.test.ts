@@ -10,23 +10,26 @@ import { SEAT_TIMEOUT_MS, SEAT_TTL_MS, registerSeatRoute, seatView, type SeatVie
 const URL_ = "http://127.0.0.1:4820";
 const NOW = 1_760_000_000_000;
 
+/** The Account's times are ISO strings (`exchange.ts:1488` at 133b9a7), never numbers. */
+const UNTIL = "2026-11-19T00:00:00.000Z";
+
 /** An `/api/account` body as the Account answers it at 133b9a7, with the seat admitted. */
 function account(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     ok: true, real: true, mode: "guard",
-    keys: [{ address: "0xab12", name: "Gravit", code: "GRV", validUntil: 1_800_000_000_000, approvedAt: "2026-10-20T10:00:00Z", status: "ok" }],
+    keys: [{ address: "0xab12", name: "Gravit", code: "GRV", validUntil: UNTIL, approvedAt: "2026-10-20T10:00:00Z", status: "ok" }],
     requests: [],
     spend: [
-      { id: "lim-1", agent: "0xab12", agentName: "Gravit", scope: "trade", allow: ["paper-1"], perPaymentUsd: 100, budgetUsd: 1000, spentUsd: 100, reservedUsd: 50, windowHours: 0, validUntil: 1_800_000_000_000, expired: false },
-      { id: "lim-2", agent: "0xcd34", agentName: "Desk", scope: "trade", allow: ["ex"], perPaymentUsd: 150, budgetUsd: 600, spentUsd: 0, reservedUsd: 0, windowHours: 0, validUntil: 1_800_000_000_000, expired: false },
+      { id: "lim-1", agent: "0xab12", agentName: "Gravit", scope: "trade", allow: ["paper-1"], perPaymentUsd: 100, budgetUsd: 1000, spentUsd: 100, reservedUsd: 50, windowHours: 0, validUntil: UNTIL, expired: false },
+      { id: "lim-2", agent: "0xcd34", agentName: "Desk", scope: "trade", allow: ["ex"], perPaymentUsd: 150, budgetUsd: 600, spentUsd: 0, reservedUsd: 0, windowHours: 0, validUntil: UNTIL, expired: false },
     ],
     venues: [
       { id: "paper-1", name: "Paper account · paper", connector: "live:paper", paper: true, usd: 10_000, frontLine: "$10,000 of paper money" },
       { id: "okx", name: "OKX", connector: "live:okx", usd: 0, stale: true, notServed: { said: "OKX does not serve this location" } },
     ],
     cards: [
-      { id: "card-7", flight: "GRV-0007", usd: 56, reason: "Gravit asks to PAPER · buy 1 AAPL at paper-1", agentName: "Gravit", expiresAt: "2026-10-20T11:00:00Z" },
-      { id: "card-8", flight: "DSK-0003", usd: 20, reason: "Desk asks …", agentName: "Desk" },
+      { id: "card-7", flight: "GRV-0007", usd: 56, reason: "Gravit asks to PAPER · buy 1 AAPL at paper-1", agent: "0xab12", agentName: "Gravit", expiresAt: "2026-10-20T11:00:00Z" },
+      { id: "card-8", flight: "DSK-0003", usd: 20, reason: "Desk asks …", agent: "0xcd34", agentName: "Desk" },
     ],
     connectLive: { writes: { on: true, capUsd: 100 } },
     modeRules: { rows: [], cardMinutes: 30 },
@@ -39,9 +42,11 @@ test("seatView: admitted — the key by name, its limit with what is left, the p
   assert.equal(v.ok, true); assert.equal(v.reachable, true); assert.equal(v.url, URL_);
   assert.equal(v.asOf, new Date(NOW).toISOString());
   assert.equal(v.mode, "guard"); assert.deepEqual(v.writes, { on: true, capUsd: 100 }); assert.equal(v.cardMinutes, 30);
-  assert.equal(v.seat?.status, "admitted"); assert.equal(v.seat?.name, "Gravit"); assert.equal(v.seat?.address, "0xab12"); assert.equal(v.seat?.validUntil, 1_800_000_000_000);
+  assert.equal(v.seat?.status, "admitted"); assert.equal(v.seat?.name, "Gravit"); assert.equal(v.seat?.address, "0xab12");
+  assert.equal(v.seat?.validUntil, Date.parse(UNTIL), "the Account's ISO time becomes the box's milliseconds");
   assert.equal(v.seat?.limits.length, 1, "the Desk's limit is not the seat's");
-  assert.deepEqual(v.seat?.limits[0], { scope: "trade", allow: ["paper-1"], perOrderUsd: 100, budgetUsd: 1000, spentUsd: 100, reservedUsd: 50, leftUsd: 850, validUntil: 1_800_000_000_000, expired: false });
+  assert.deepEqual(v.seat?.limits[0], { scope: "trade", allow: ["paper-1"], perOrderUsd: 100, budgetUsd: 1000, spentUsd: 100, reservedUsd: 50, leftUsd: 850, validUntil: Date.parse(UNTIL), expired: false });
+  assert.equal(seatView(account({ keys: [{ address: "0xab12", name: "Gravit", status: "ok", validUntil: 1_800_000_000_000 }] }), "Gravit", URL_, NOW).seat?.validUntil, 1_800_000_000_000, "a number is taken as it is");
   assert.deepEqual(v.venues?.map((x) => [x.id, x.paper, x.usd]), [["paper-1", true, 10_000], ["okx", false, 0]]);
   assert.equal(v.venues?.[0].frontLine, "$10,000 of paper money");
   assert.equal(v.venues?.[1].stale, true); assert.equal(v.venues?.[1].notServed, "OKX does not serve this location");
@@ -54,9 +59,37 @@ test("seatView: knocking, expired, revoked, and a seat admitted under another na
   assert.equal(knocking.seat?.status, "knocking"); assert.equal(knocking.seat?.address, undefined);
   assert.equal(seatView(account({ keys: [{ address: "0x1", name: "gravit", status: "expired" }] }), "Gravit", URL_, NOW).seat?.status, "expired");
   assert.equal(seatView(account({ keys: [{ address: "0x1", name: "GRAVIT", status: "revoked" }] }), "Gravit", URL_, NOW).seat?.status, "revoked");
-  assert.equal(seatView(account({ keys: [{ address: "0x1", name: "Gravit", status: "unknown" }] }), "Gravit", URL_, NOW).seat?.status, "admitted", "the owner let it in; `unknown` is the Account's word for a key it has not seen act");
   const other = seatView(account({ keys: [{ address: "0x1", name: "gravit-2", status: "ok" }], cards: [], spend: [] }), "Gravit", URL_, NOW);
   assert.equal(other.seat?.status, "absent"); assert.deepEqual(other.seat?.limits, []); assert.deepEqual(other.cards, []);
+});
+
+/* The final review's Important 4 and 5: the Account keeps retired keys in `keys[]` and appends the new one when a key is
+ * re-admitted under the same name, so the standing is the best of the name's keys — ok, then knocking, then expired, then
+ * revoked — and the limits and cards are that key's, by address; a status the face does not know is `unknown`, never
+ * admitted. */
+test("seatView: a re-admitted seat is admitted on its new key, its limits and cards by that key's address; the best of a name's keys wins", () => {
+  const keys = [
+    { address: "0xold", name: "Gravit", status: "revoked", validUntil: UNTIL },
+    { address: "0xnew", name: "Gravit", status: "ok", validUntil: UNTIL },
+  ];
+  const spend = [
+    { id: "lim-old", agent: "0xold", agentName: "Gravit", scope: "trade", allow: ["ex"], perPaymentUsd: 1, budgetUsd: 1, spentUsd: 0, reservedUsd: 0, validUntil: UNTIL, expired: false },
+    { id: "lim-new", agent: "0xnew", agentName: "Gravit", scope: "trade", allow: ["paper-1"], perPaymentUsd: 25, budgetUsd: 100, spentUsd: 0, reservedUsd: 0, validUntil: UNTIL, expired: false },
+  ];
+  const cards = [{ id: "card-old", agent: "0xold", agentName: "Gravit", usd: 1 }, { id: "card-new", agent: "0xnew", agentName: "Gravit", usd: 9 }, { id: "card-desk", agent: "0xcd34", agentName: "Desk", usd: 2 }];
+  const v = seatView(account({ keys, spend, cards }), "Gravit", URL_, NOW);
+  assert.equal(v.seat?.status, "admitted"); assert.equal(v.seat?.address, "0xnew");
+  assert.deepEqual(v.seat?.limits.map((l) => l.allow), [["paper-1"]], "the retired key's limit is not the seat's");
+  assert.deepEqual(v.cards?.map((c) => c.id), ["card-new"]); assert.equal(v.others, 2);
+  const knocking = seatView(account({ keys: [keys[0]], requests: [{ address: "0xnew", name: "Gravit", at: "2026-10-20T10:00:00Z" }], spend: [], cards: [] }), "Gravit", URL_, NOW);
+  assert.equal(knocking.seat?.status, "knocking", "a new key knocking beside a revoked one is knocking");
+  assert.equal(seatView(account({ keys: [keys[0], { address: "0xmid", name: "Gravit", status: "expired" }], spend: [], cards: [] }), "Gravit", URL_, NOW).seat?.status, "expired");
+  assert.equal(seatView(account({ keys: [keys[0]], spend: [], cards: [] }), "Gravit", URL_, NOW).seat?.status, "revoked");
+  for (const status of ["suspended", undefined, 7, "unknown"]) {
+    const odd = seatView(account({ keys: [{ address: "0x9", name: "Gravit", status }], spend: [], cards: [] }), "Gravit", URL_, NOW);
+    assert.equal(odd.seat?.status, "unknown", `status ${String(status)} is not admitted`);
+    assert.equal(odd.seat?.address, "0x9");
+  }
 });
 
 test("seatView: an odd shape never throws — empty lists, absent, no mode", () => {
@@ -67,7 +100,7 @@ test("seatView: an odd shape never throws — empty lists, absent, no mode", () 
     assert.deepEqual(v.venues, []); assert.deepEqual(v.cards, []); assert.equal(v.others, 0);
     assert.equal(v.mode, undefined); assert.deepEqual(v.writes, { on: false, capUsd: null }); assert.equal(v.cardMinutes, undefined);
   }
-  const partial = seatView({ venues: [{ id: "p", paper: true }, { name: "no id" }], spend: [{ agentName: "Gravit", scope: "trade", allow: "paper-1,ex", budgetUsd: "nope" }] }, "Gravit", URL_, NOW);
+  const partial = seatView({ keys: [{ address: "0xp", name: "Gravit", status: "ok" }], venues: [{ id: "p", paper: true }, { name: "no id" }], spend: [{ agent: "0xP", agentName: "Gravit", scope: "trade", allow: "paper-1,ex", budgetUsd: "nope" }] }, "Gravit", URL_, NOW);
   assert.deepEqual(partial.venues?.map((x) => [x.id, x.name, x.paper, x.usd]), [["p", "p", true, null], ["", "no id", false, null]]);
   assert.deepEqual(partial.seat?.limits[0].allow, ["paper-1", "ex"], "a comma-joined allow reads as a list");
   assert.equal(partial.seat?.limits[0].leftUsd, null, "no budget, nothing left to compute");

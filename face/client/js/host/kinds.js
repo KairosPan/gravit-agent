@@ -53,14 +53,21 @@ function typeWord(a) {
 }
 // a seat write in words (spec 2026-10-20 §6.1): "buy $100 of AAPL · market · paper-1", "cancel ord-0001 · paper-1",
 // "move 50 USDC · withdraw from okx", "pay up to $2 · api.example.com"; a tool the face never classified is its raw name
+// one order in words, without its venue: "buy $100 of AAPL · market", "sell 10 AAPL · limit 187.4"
+function orderWords(a) {
+  const size = has(a.usd) ? `${money(a.usd)} of ${has(a.symbol) ? a.symbol : '?'}` : words(a.qty, a.symbol);
+  return `${has(a.side) ? a.side : 'order'} ${size} · ${typeWord(a)}`;
+}
 export function seatLine(name, a = {}) {
   const raw = rawOf(name);
   switch (raw) {
-    case 'portfolio_live_order': {
-      const size = has(a.usd) ? `${money(a.usd)} of ${has(a.symbol) ? a.symbol : '?'}` : words(a.qty, a.symbol);
-      return at(`${has(a.side) ? a.side : 'order'} ${size} · ${typeWord(a)}`, a.venue);
+    case 'portfolio_live_order': return at(orderWords(a), a.venue);
+    // a batch is several orders: every leg in words (the host's card carries each leg's venue in its own line)
+    case 'portfolio_live_batch': {
+      const legs = Array.isArray(a.legs) ? a.legs.filter(l => l && typeof l === 'object') : [];
+      const head = `batch · ${legs.length} leg${legs.length === 1 ? '' : 's'}`;
+      return legs.length ? `${head}: ${legs.map(orderWords).join('; ')}` : head;
     }
-    case 'portfolio_live_batch': { const n = Array.isArray(a.legs) ? a.legs.length : 0; return `batch · ${n} leg${n === 1 ? '' : 's'}`; }
     case 'portfolio_live_amend': return at(`amend ${has(a.order) ? a.order : '?'}`, a.venue);
     case 'portfolio_live_cancel': return at(`cancel ${has(a.order) ? a.order : '?'}`, a.venue);
     case 'portfolio_live_close': return at(`close ${words(a.qty, a.symbol) || '?'}`, a.venue);
@@ -81,10 +88,14 @@ export function seatLine(name, a = {}) {
 
 // a seat write's answer, lifted under its tool row (spec 2026-10-20 §6.2): the card the Account raised, the order it placed or
 // canceled, its refusal in its own words, a batch's count; anything else lifts nothing. `seat: true` routes the reload.
+const refusalWords = (v, text) => (typeof v.code === 'string' && typeof v.message === 'string' ? `${v.code} · ${v.message}` : typeof v.message === 'string' ? v.message : text);
 export function seatLift(name, args, text, isError, callId) {
   const v = parseArgs(text);
+  const legs = Array.isArray(v.legs) ? v.legs.filter(l => l && typeof l === 'object') : null;
   if (isError || v.ok === false) {
-    const line = typeof v.code === 'string' && typeof v.message === 'string' ? `${v.code} · ${v.message}` : typeof v.message === 'string' ? v.message : text;
+    // a batch whose every leg was refused: the count, and the first refusal in the Account's words
+    const first = legs?.find(l => l.ok === false);
+    const line = legs && first ? `Batch · ${legs.filter(l => l.ok === false).length} of ${legs.length} legs refused · ${refusalWords(first, text)}` : refusalWords(v, text);
     return { kind: 'refusal', text: line, data: { seat: true, toolName: name, callId } };
   }
   if (v.pending === true && typeof v.card?.id === 'string') {
@@ -94,21 +105,40 @@ export function seatLift(name, args, text, isError, callId) {
     const word = v.order.status === 'canceled' ? 'Order canceled' : 'Order placed';
     return { kind: 'receipt', text: `${word} · ${seatLine(name, args)} · ${v.order.id}${v.order.paper === true ? ' · paper' : ''}`, data: { seat: true, orderId: v.order.id, callId } };
   }
-  if (Array.isArray(v.legs)) {
-    const placed = v.legs.filter(l => l && typeof l === 'object' && (l.ok === true || (l.order && typeof l.order === 'object'))).length;
-    return { kind: 'receipt', text: `Batch · ${placed} of ${v.legs.length} legs placed`, data: { seat: true, callId } };
+  if (legs) {
+    // in Guard the Account answers a leg with a card of its own and places nothing: a card is not a fill
+    const placed = legs.filter(l => l.order && typeof l.order === 'object').length;
+    const cards = legs.filter(l => l.pending === true && typeof l.card?.id === 'string').length;
+    const refused = legs.filter(l => l.ok === false).length;
+    const parts = [];
+    if (placed > 0 || (cards === 0 && refused === 0)) parts.push(`${placed} of ${legs.length} legs placed`);
+    if (cards > 0) parts.push(`${cards} card${cards === 1 ? '' : 's'} raised on the Account page`);
+    if (refused > 0) parts.push(`${refused} refused`);
+    return { kind: 'receipt', text: `Batch · ${parts.join(' · ')}`, data: { seat: true, callId } };
   }
   return null;
 }
 
-// the live layer calls this on every raw frame before mapping it: a tool/call's arguments are kept by callId
+// a call id is a session's own (the host's guard treats them as non-unique too), so a call is kept by session AND id
+const callKey = (sessionId, callId) => `${typeof sessionId === 'string' ? sessionId : ''}:${callId}`;
+// the live layer calls this on every raw frame before mapping it: a tool/call's arguments are kept by session and callId
 export function rememberCall(calls, frame) {
   const event = frame?.event;
   if (!event || event.type !== 'tool/call') return;
   const d = event.data ?? {};
   if (typeof d.callId !== 'string') return;
-  calls.set(d.callId, { name: typeof d.name === 'string' ? d.name : '', args: parseArgs(d.arguments) });
+  calls.set(callKey(frame.sessionId, d.callId), { name: typeof d.name === 'string' ? d.name : '', args: parseArgs(d.arguments) });
 }
+// the call a view names, in the view's own session; `toolName` given, only a call of that tool
+function callOf(calls, view, callId, toolName) {
+  if (typeof callId !== 'string') return undefined;
+  const known = calls.get(callKey(view?.sessionId, callId));
+  if (!known) return undefined;
+  if (typeof toolName === 'string' && known.name !== toolName) return undefined;
+  return known;
+}
+// the venues a batch's legs name, each once, in order
+const venuesOf = legs => (Array.isArray(legs) ? [...new Set(legs.map(l => l?.venue).filter(v => typeof v === 'string' && v !== ''))].join(', ') : '');
 
 const replaceOf = view => (view.surfaceOp && typeof view.surfaceOp === 'object' && view.surfaceOp.op === 'replace'
   ? { replace: { start: view.surfaceOp.start, end: view.surfaceOp.end } } : {});
@@ -139,7 +169,7 @@ function toolMessages(view, calls) {
   const c = view.card ?? {};
   const callId = c.callId;
   if (typeof callId !== 'string') return [];
-  const known = calls.get(callId);
+  const known = callOf(calls, view, callId);
   if (c.phase === 'call') {
     return [{ ...base(view), id: `t${callId}`, from: 'gravit', kind: 'tool', text: c.title ?? c.name ?? '', data: { callId, name: c.name, title: c.title, args: known?.args ?? {} } }];
   }
@@ -161,10 +191,11 @@ function gate(view, calls, now) {
   const data = { eventId: view.id, sessionId: view.sessionId, toolName: view.toolName, callId: view.callId, reason: view.reason, displayReason: view.displayReason };
   const line = view.displayReason ?? view.reason ?? '';
   if (!isOrderTool(view.toolName) && !isSeatGate(view.toolName)) return { id: view.id, at: now, from: 'gravit', kind: 'approval', text: line, data };
-  const known = typeof view.callId === 'string' ? calls.get(view.callId) : undefined;
-  // a seat card: the seat line, and the argument's venue as the chip (or the seat itself when the tool names none)
+  // the gate's own session's call of the same tool, or nothing: a headline must never come from another session's call
+  const known = callOf(calls, view, view.callId, view.toolName);
+  // a seat card: the seat line, and the argument's venue as the chip — a batch's venues, or the seat itself when the tool names none
   if (isSeatGate(view.toolName)) {
-    const venue = typeof known?.args?.venue === 'string' && known.args.venue !== '' ? known.args.venue : 'Account seat';
+    const venue = typeof known?.args?.venue === 'string' && known.args.venue !== '' ? known.args.venue : (venuesOf(known?.args?.legs) || 'Account seat');
     return {
       id: view.id, at: now, from: 'gravit', kind: 'card',
       text: `Your call: ${known ? seatLine(view.toolName, known.args) : view.toolName}`,

@@ -241,23 +241,51 @@ function urlShown(value: unknown): { shown: string } | { why: string } {
   return { shown: u.href };
 }
 
-/** The first key field the card could not show WHOLE — too long, or a URL
- * that is not http(s), carries userinfo or does not parse — so the gate denies
- * the call instead of raising a card with a cut that could hide what matters;
- * `undefined` when every key field can be shown. */
-function unshowableKeyField(args: unknown): { key: string; why: string } | undefined {
-  if (args === null || typeof args !== "object" || Array.isArray(args)) return undefined;
-  const row = args as Record<string, unknown>;
+/** The most legs a card shows: the Account takes at most ten in one batch. */
+const MAX_LEGS = 10;
+
+/** The first key field in `row` the card could not show WHOLE, its name
+ * prefixed by `path` (`legs[2].`, `intent.`). */
+function unshowableIn(row: Record<string, unknown>, path: string): { key: string; why: string } | undefined {
   for (const key of [...WHOLE_KEYS, "url"]) {
     const value = row[key];
     if (value === undefined || value === null || typeof value === "object") continue;
     if (key === "url") {
       const u = urlShown(value);
-      if ("why" in u) return { key, why: u.why };
+      if ("why" in u) return { key: `${path}${key}`, why: u.why };
       continue;
     }
     const text = String(value);
-    if (text.length > MAX_KEY_FIELD) return { key, why: `is ${text.length} characters, too long to show whole on a card` };
+    if (text.length > MAX_KEY_FIELD) return { key: `${path}${key}`, why: `is ${text.length} characters, too long to show whole on a card` };
+  }
+  return undefined;
+}
+
+/** The first key field the card could not show WHOLE — too long, or a URL
+ * that is not http(s), carries userinfo or does not parse — at the top level,
+ * inside a nested object (`intent.to`) or inside each entry of a list
+ * (`legs[2].symbol`; a batch is several orders, and each is described as
+ * one), or a list longer than a card shows — so the gate denies the call
+ * instead of raising a card with a cut that could hide what matters;
+ * `undefined` when every key field can be shown. */
+function unshowableKeyField(args: unknown): { key: string; why: string } | undefined {
+  if (args === null || typeof args !== "object" || Array.isArray(args)) return undefined;
+  const row = args as Record<string, unknown>;
+  const top = unshowableIn(row, "");
+  if (top !== undefined) return top;
+  for (const [key, value] of Object.entries(row)) {
+    if (value === null || typeof value !== "object") continue;
+    if (Array.isArray(value)) {
+      if (value.length > MAX_LEGS) return { key, why: `has ${value.length} entries, more than the ten a card shows` };
+      for (const [i, entry] of value.entries()) {
+        if (entry === null || typeof entry !== "object" || Array.isArray(entry)) continue;
+        const bad = unshowableIn(entry as Record<string, unknown>, `${key}[${i + 1}].`);
+        if (bad !== undefined) return bad;
+      }
+      continue;
+    }
+    const bad = unshowableIn(value as Record<string, unknown>, `${key}.`);
+    if (bad !== undefined) return bad;
   }
   return undefined;
 }
@@ -282,50 +310,77 @@ function unshowableKeyField(args: unknown): { key: string; why: string } | undef
  */
 export function describeOrder(name: string, args: unknown): string {
   if (args === null || typeof args !== "object" || Array.isArray(args)) return name;
-  const row = args as Record<string, unknown>;
-  const scalar = (key: string): string | undefined => {
+  const summary = pairsOf(args as Record<string, unknown>, 0);
+  return summary === "" ? name : `${name}: ${summary}`;
+}
+
+/* place_order(symbol, qty, side, order_type, limit_price) and
+ * cancel_order(order_id) - alpaca_kit/mcp/tools.py:298-307 - and the Account
+ * seat's keys (portfolio_live_order's venue, symbol, side, orderType, qty or
+ * usd, limitPrice, stopPrice; amend and cancel's order; move's kind, from,
+ * asset, amount; leverage; pay's url and maxAmount) in a readable order:
+ * side, size, symbol, type, then the venue. The same order inside a batch's
+ * legs and a nested object. Unknown keys are appended rather than dropped, so
+ * a tool that grows a field still shows it (charter Rule 5: what is never
+ * surfaced is never governed). */
+const KNOWN_KEYS = [
+  "side", "qty", "usd", "symbol", "order_type", "orderType", "limit_price", "limitPrice", "stopPrice", "order_id", "order",
+  "venue", "kind", "from", "asset", "amount", "leverage", "url", "maxAmount",
+];
+
+/** One scalar on the card. Model-controlled text on the operator's only line
+ * of information: bound it so a crafted field cannot push a plausible
+ * sentence past the real one — but never cut what the operator decides on: a
+ * payee's URL, an address, an id, a venue or a symbol is shown WHOLE up to
+ * MAX_KEY_FIELD, and a call whose key field cannot be shown whole is denied
+ * before any card ({@link unshowableKeyField}); the cuts below those keys
+ * never reach a card and only keep this function total. */
+function scalarWord(key: string, value: unknown): string {
+  if (key === "url") {
+    const u = urlShown(value);
+    return "shown" in u ? u.shown : "?";
+  }
+  const text = String(value);
+  if (WHOLE_KEYS.includes(key)) return text.length > MAX_KEY_FIELD ? `${text.slice(0, MAX_KEY_FIELD)}…` : text;
+  return text.length > 40 ? `${text.slice(0, 40)}…` : text;
+}
+
+/** A nested value on the card: a list as `[1: …; 2: …]` (a batch's legs, each
+ * described as an order), an object as `{k=v …}`; one level only — deeper is
+ * `?`, and the gate denies what a card cannot show whole anyway. */
+function nestedWord(value: object): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((entry, i) => {
+      const word = entry === null || entry === undefined ? "?"
+        : typeof entry === "object" ? (Array.isArray(entry) ? "?" : pairsOf(entry as Record<string, unknown>, 1))
+          : scalarWord("", entry);
+      return `${i + 1}: ${word}`;
+    }).join("; ")}]`;
+  }
+  return `{${pairsOf(value as Record<string, unknown>, 1)}}`;
+}
+
+/** `key=value` pairs of one object, the known keys first in their readable
+ * order, then the rest; a nested object or list one level deep at the top
+ * (`depth` 0), `?` below that. */
+function pairsOf(row: Record<string, unknown>, depth: number): string {
+  const word = (key: string): string | undefined => {
     const value = row[key];
     if (value === undefined || value === null) return undefined;
-    if (typeof value === "object") return undefined;
-    /* Model-controlled text on the operator's only line of information: bound it
-     * so a crafted field cannot push a plausible sentence past the real one —
-     * but never cut what the operator decides on: a payee's URL, an address, an
-     * id, a venue or a symbol is shown WHOLE up to MAX_KEY_FIELD, and a call
-     * whose key field cannot be shown whole is denied before any card
-     * ({@link unshowableKeyField}); the cuts below those keys never reach a
-     * card and only keep this function total. */
-    if (key === "url") {
-      const u = urlShown(value);
-      return "shown" in u ? u.shown : "?";
-    }
-    const text = String(value);
-    if (WHOLE_KEYS.includes(key)) return text.length > MAX_KEY_FIELD ? `${text.slice(0, MAX_KEY_FIELD)}…` : text;
-    return text.length > 40 ? `${text.slice(0, 40)}…` : text;
+    if (typeof value === "object") return depth === 0 ? nestedWord(value) : "?";
+    return scalarWord(key, value);
   };
-  /* place_order(symbol, qty, side, order_type, limit_price) and
-   * cancel_order(order_id) - alpaca_kit/mcp/tools.py:298-307 - and the Account
-   * seat's keys (portfolio_live_order's venue, symbol, side, orderType, qty or
-   * usd, limitPrice, stopPrice; amend and cancel's order; move's kind, from,
-   * asset, amount; leverage; pay's url and maxAmount) in a readable order:
-   * side, size, symbol, type, then the venue. Unknown keys are appended
-   * rather than dropped, so a tool that grows a field still shows it (charter
-   * Rule 5: what is never surfaced is never governed). */
-  const known = [
-    "side", "qty", "usd", "symbol", "order_type", "orderType", "limit_price", "limitPrice", "stopPrice", "order_id", "order",
-    "venue", "kind", "from", "asset", "amount", "leverage", "url", "maxAmount",
-  ];
-  const parts = known.map((key) => {
-    const value = scalar(key);
+  const parts = KNOWN_KEYS.map((key) => {
+    const value = word(key);
     return value === undefined ? undefined : `${key}=${value}`;
   }).filter((part): part is string => part !== undefined);
   const extra = Object.keys(row)
-    .filter((key) => !known.includes(key))
+    .filter((key) => !KNOWN_KEYS.includes(key))
     .map((key) => {
-      const value = scalar(key);
+      const value = word(key);
       return value === undefined ? `${key}=?` : `${key}=${value}`;
     });
-  const summary = [...parts, ...extra].join(" ");
-  return summary === "" ? name : `${name}: ${summary}`;
+  return [...parts, ...extra].join(" ");
 }
 
 /** One session event, structurally - only the fields the grant check reads. */

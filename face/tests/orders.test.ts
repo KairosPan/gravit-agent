@@ -190,12 +190,16 @@ test("describeOrder: an unknown field is shown, not dropped", () => {
   assert.match(describeOrder("t", { symbol: "X", time_in_force: "gtc" }), /time_in_force=gtc/);
 });
 
+test("describeOrder: a nested object is shown one level deep, as a batch's legs are", () => {
+  assert.equal(describeOrder("t", { nested: { a: 1 } }), "t: nested={a=1}");
+});
+
 test("describeOrder: odd arguments degrade to the tool name, never throw", () => {
   for (const args of [undefined, null, "text", 42, []]) {
     assert.equal(describeOrder("mcp__x__place_order", args), "mcp__x__place_order");
   }
   assert.equal(describeOrder("t", {}), "t");
-  assert.equal(describeOrder("t", { nested: { a: 1 } }), "t: nested=?");
+  assert.equal(describeOrder("t", { nested: { a: 1 } }), "t: nested={a=1}");
 });
 
 test("orderApprovalDecision: the ask reason carries the order, so the card is decidable", () => {
@@ -286,6 +290,40 @@ test("orderApprovalDecision: a key field the card cannot show whole is denied, n
   assert.equal(deny({ url: "https://api.example.com/x", maxAmount: 1, body: "b".repeat(500) }), "ask", "a long field that is not a key field is cut, not denied");
   const move = orderApprovalDecision("mcp__account__portfolio_live_move", "ask", { kind: "send", from: "wallet", asset: "USDC", amount: 5, to: `0x${"f".repeat(40)}` });
   assert.equal(move?.kind, "ask", "a 42-character address is shown whole and asked about");
+});
+
+/* A batch is several orders: the card describes every leg with the same words and the same whole-or-deny key fields (the
+ * final review's Critical 1 — a card reading `legs=?` approved up to ten orders blind). A nested object is shown one level
+ * deep; the Account takes at most ten legs, and a card shows no more. */
+test("describeOrder: a batch's legs are each described on the card; a nested object is shown one level deep", () => {
+  const legs = [
+    { venue: "paper-1", symbol: "BTC/USD", side: "buy", usd: 10 },
+    { venue: "paper-1", symbol: "ETH/USD", side: "buy", usd: 10, orderType: "limit", limitPrice: 2400 },
+    { venue: "okx", symbol: "SOL/USDT", side: "sell", qty: 500 },
+  ];
+  assert.equal(describeOrder("mcp__account__portfolio_live_batch", { legs }),
+    "mcp__account__portfolio_live_batch: legs=[1: side=buy usd=10 symbol=BTC/USD venue=paper-1; 2: side=buy usd=10 symbol=ETH/USD orderType=limit limitPrice=2400 venue=paper-1; 3: side=sell qty=500 symbol=SOL/USDT venue=okx]");
+  assert.equal(describeOrder("mcp__account__portfolio_live_batch", { legs: "x" }), "mcp__account__portfolio_live_batch: legs=x");
+  assert.equal(describeOrder("mcp__account__portfolio_live_batch", { legs: [] }), "mcp__account__portfolio_live_batch: legs=[]");
+  assert.equal(describeOrder("mcp__account__portfolio_execute", { account: "acc-1", intent: { kind: "trade", symbol: "AAPL", side: "buy", qty: 1 } }),
+    "mcp__account__portfolio_execute: account=acc-1 intent={side=buy qty=1 symbol=AAPL kind=trade}");
+  assert.equal(describeOrder("t", { deep: { a: { b: 1 } }, list: [1, "two", null] }), "t: deep={a=?} list=[1: 1; 2: two; 3: ?]");
+});
+
+test("orderApprovalDecision: a batch leg's key field is whole or the call is denied, and more than ten legs is denied", () => {
+  const legs = [{ venue: "paper-1", symbol: "BTC/USD", side: "buy", usd: 10 }, { venue: "okx", symbol: "S".repeat(130), side: "sell", qty: 1 }];
+  const d = orderApprovalDecision("mcp__account__portfolio_live_batch", "ask", { legs });
+  assert.equal(d?.kind, "deny");
+  assert.match(d?.kind === "deny" ? d.reason : "", /its legs\[2\]\.symbol is 130 characters, too long to show whole on a card, so nothing was asked/);
+  const many = orderApprovalDecision("mcp__account__portfolio_live_batch", "ask", { legs: Array.from({ length: 11 }, () => ({ venue: "paper-1", symbol: "BTC/USD", side: "buy", usd: 1 })) });
+  assert.equal(many?.kind, "deny");
+  assert.match(many?.kind === "deny" ? many.reason : "", /its legs has 11 entries, more than the ten a card shows/);
+  const nested = orderApprovalDecision("mcp__account__portfolio_execute", "ask", { account: "acc-1", intent: { kind: "move", asset: "USDC", amount: 5, to: `0x${"e".repeat(200)}` } });
+  assert.equal(nested?.kind, "deny");
+  assert.match(nested?.kind === "deny" ? nested.reason : "", /its intent\.to is 202 characters/);
+  const ok = orderApprovalDecision("mcp__account__portfolio_live_batch", "ask", { legs: [legs[0], { venue: "okx", symbol: "SOL/USDT", side: "sell", qty: 500 }] });
+  assert.equal(ok?.kind, "ask");
+  assert.match(ok?.kind === "ask" ? ok.reason ?? "" : "", /^Account seat - mcp__account__portfolio_live_batch: legs=\[1: side=buy usd=10 symbol=BTC\/USD venue=paper-1; 2: side=sell qty=500 symbol=SOL\/USDT venue=okx\]$/);
 });
 
 test("orderGuardReason: everything else passes untouched", () => {

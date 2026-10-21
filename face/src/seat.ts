@@ -56,7 +56,8 @@ export interface SeatCard {
   expiresAt?: string;
 }
 
-export type SeatStatus = "absent" | "knocking" | "admitted" | "expired" | "revoked";
+/** `unknown`: a listed key whose status the face does not know — never read as admitted. */
+export type SeatStatus = "absent" | "knocking" | "admitted" | "expired" | "revoked" | "unknown";
 
 export interface SeatStanding {
   name: string;
@@ -95,6 +96,15 @@ const isRecord = (v: unknown): v is Record<string, unknown> => v !== null && typ
 const rows = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? v.filter(isRecord) : []);
 const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+/** A time as the Account sends it — an ISO string (`exchange.ts:1488` at 133b9a7) — or a number, in milliseconds. */
+const ms = (v: unknown): number | null => {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") {
+    const t = Date.parse(v);
+    return Number.isFinite(t) ? t : null;
+  }
+  return null;
+};
 const sameName = (v: unknown, name: string): boolean => typeof v === "string" && v.trim().toLowerCase() === name.trim().toLowerCase();
 
 /** A limit's `allow`: the Account's list, or a comma-joined string as the owner typed it. */
@@ -114,21 +124,29 @@ export function seatView(account: unknown, seatName: string, url: string, nowMs:
   const cards = rows(a.cards);
   const venues = rows(a.venues);
 
-  const key = keys.find((k) => sameName(k.name, seatName));
-  let status: SeatStatus = "absent";
+  /* The Account keeps retired keys in `keys[]` and appends a new one when a
+   * seat is re-admitted under the same name (`state.ts:360-366` at 133b9a7),
+   * so the standing is the best of the name's keys: an `ok` key, else a
+   * request knocking (a new key beside an old one), else an expired one, else
+   * a revoked one, else a listed key whose status the face does not know —
+   * never read as admitted. The limits and the cards are that key's, by
+   * address: a retired key's are not the seat's. */
+  const named = keys.filter((k) => sameName(k.name, seatName));
+  const knocking = requests.some((r) => sameName(r.name, seatName));
+  const key = named.find((k) => k.status === "ok")
+    ?? (knocking ? undefined : named.find((k) => k.status === "expired") ?? named.find((k) => k.status === "revoked") ?? named[0]);
+  let status: SeatStatus = knocking && key === undefined ? "knocking" : "absent";
   let address: string | undefined;
   let validUntil: number | undefined;
   if (key !== undefined) {
-    /* `ok | unknown | expired | revoked` are the Account's words for a key the
-     * owner let in; `unknown` is one it has not yet seen act, still admitted. */
-    status = key.status === "expired" ? "expired" : key.status === "revoked" ? "revoked" : "admitted";
+    status = key.status === "ok" ? "admitted" : key.status === "expired" ? "expired" : key.status === "revoked" ? "revoked" : "unknown";
     address = str(key.address);
-    validUntil = num(key.validUntil) ?? undefined;
-  } else if (requests.some((r) => sameName(r.name, seatName))) {
-    status = "knocking";
+    validUntil = ms(key.validUntil) ?? undefined;
   }
+  const own = (row: Record<string, unknown>): boolean =>
+    address !== undefined && typeof row.agent === "string" && row.agent.toLowerCase() === address.toLowerCase();
 
-  const limits: SeatLimit[] = spend.filter((l) => sameName(l.agentName, seatName)).map((l) => {
+  const limits: SeatLimit[] = spend.filter(own).map((l) => {
     const budget = num(l.budgetUsd);
     const spent = num(l.spentUsd) ?? 0;
     const reserved = num(l.reservedUsd) ?? 0;
@@ -140,12 +158,12 @@ export function seatView(account: unknown, seatName: string, url: string, nowMs:
       spentUsd: spent,
       reservedUsd: reserved,
       leftUsd: budget === null ? null : Math.max(0, budget - spent - reserved),
-      validUntil: num(l.validUntil),
+      validUntil: ms(l.validUntil),
       expired: l.expired === true,
     };
   });
 
-  const mine = cards.filter((c) => sameName(c.agentName, seatName));
+  const mine = cards.filter(own);
   const seatCards: SeatCard[] = mine.map((c) => {
     const card: SeatCard = { id: str(c.id) ?? "", usd: num(c.usd) };
     const reason = str(c.reason);
