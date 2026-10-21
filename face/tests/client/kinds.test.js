@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { mapFrame } from '../../client/js/wire/mapper.js';
-import { ORDER_TOOLS, SEAT_TOOLS, isOrderTool, isSeatWriteTool, parseArgs, orderLine, seatLine, rememberCall, toMessages } from '../../client/js/host/kinds.js';
+import { ORDER_TOOLS, SEAT_TOOLS, isOrderTool, isSeatWriteTool, parseArgs, orderLine, seatLine, rememberCall, toMessages, seatLift } from '../../client/js/host/kinds.js';
 
 // the Account seat's twelve write tools (spec 2026-10-20 §6.1), spelled here as the gate's test spells them
 const SEAT = ['portfolio_live_order', 'portfolio_live_batch', 'portfolio_live_amend', 'portfolio_live_cancel', 'portfolio_live_close',
@@ -281,4 +281,17 @@ test("a member's answer carries its member session and turn", () => {
   assert.equal(m.data.memberSessionId, 'm1'); assert.equal(m.data.memberTurn, 3);
   const [plain] = toMessages({ kind: 'bubble', role: 'bot', bot: 'buffett', name: 'Buffett', text: 'Hold', seq: 9, time: 1 }, new Map(), NOW);
   assert.equal('memberSessionId' in plain.data, false);
+});
+
+// the drill of 2026-10-21: dsh hands a failed MCP call's text to the thread as `Error: <the server's text>`, so the
+// Account's JSON refusal arrived with that prefix and the red line read the raw JSON instead of `code · message`
+test("a seat refusal prefixed \"Error: \" by dsh still lifts as the Account's code and message", () => {
+  const text = 'Error: {"ok":false,"code":"E_MANDATE_RECIPIENT","message":"the trading limit does not cover \\"ex\\" (it covers paper-momentum)","detail":{"approval":"spend-0007","allow":["paper-momentum"],"target":"ex"}}';
+  const lift = seatLift('mcp__account__portfolio_live_order', { venue: 'ex', symbol: 'BTC/USDT', side: 'sell', usd: 10 }, text, true, 'c1');
+  assert.equal(lift.kind, 'refusal');
+  assert.equal(lift.text, 'E_MANDATE_RECIPIENT · the trading limit does not cover "ex" (it covers paper-momentum)');
+  const batch = seatLift('mcp__account__portfolio_live_batch', { legs: [{ venue: 'ex' }, { venue: 'ex' }] }, 'Error: {"ok":false,"legs":[{"leg":1,"ok":false,"code":"E_MANDATE_RECIPIENT","message":"ex is not in your limit"},{"leg":2,"ok":false,"code":"E_MANDATE_RECIPIENT","message":"ex is not in your limit"}]}', true, 'c2');
+  assert.equal(batch.text, 'Batch · 2 of 2 legs refused · E_MANDATE_RECIPIENT · ex is not in your limit');
+  const plain = seatLift('mcp__account__portfolio_live_order', {}, 'Error: the user rejected tool "mcp__account__portfolio_live_order"', true, 'c3');
+  assert.equal(plain.text, 'the user rejected tool "mcp__account__portfolio_live_order"', "dsh's own refusal keeps its words without the prefix");
 });

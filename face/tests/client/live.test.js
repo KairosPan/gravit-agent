@@ -356,3 +356,27 @@ test('the subagentCatalog projection reaches the conversation, and the list carr
   await r.live.refresh();
   assert.deepEqual(p().subagentCatalog, catalog, 'a list refresh keeps it');
 });
+
+// the drill of 2026-10-21: the approval waterfall and the session's follow stream are two streams on one socket, and
+// the card reached the page before its tool/call did, so it read the tool name with no arguments and stayed so
+test("a seat gate drawn before its tool/call arrives is drawn again with the call's arguments once the call lands, in place", async () => {
+  const r = rig({ rows: [row('s1', { agentAvailable: true })] });
+  await r.ready();
+  r.live.open('s1'); await settle();
+  const f = r.last('session/follow');
+  f.cbs.onItem({ type: 'snapshot', header: { createdAt: 7 }, cursor: 2, records: [fixture(0), fixture(1)] });
+  const gate = { ...frames[6], eventId: 'ev-seat', agentId: 's1', request: { toolName: 'mcp__account__portfolio_live_order', callId: 'c10', reason: 'Account seat - mcp__account__portfolio_live_order: side=buy usd=100 symbol=AAPL orderType=market venue=paper-1' } };
+  r.opts().onGate(gate);
+  const conv = () => r.store.get().conversations.find(c => c.id === 's1');
+  const card = () => conv().messages.find(m => m.id === 'ev-seat');
+  assert.equal(card().text, 'Your call: mcp__account__portfolio_live_order', 'before the call lands, the card knows only the tool');
+  const seq = card().seq;
+  f.cbs.onItem({ type: 'event', event: { type: 'tool/call', seq: 60, time: NOW, data: { turn: 5, step: 1, callId: 'c10', name: 'mcp__account__portfolio_live_order', arguments: JSON.stringify({ venue: 'paper-1', symbol: 'AAPL', side: 'buy', usd: 100, orderType: 'market' }) } } });
+  assert.equal(card().text, 'Your call: buy $100 of AAPL · market · paper-1');
+  assert.equal(card().data.venue, 'paper-1');
+  assert.equal(card().seq, seq, 'the card keeps its place in the thread');
+  assert.equal(conv().messages.filter(m => m.id === 'ev-seat').length, 1);
+  // another call of the same tool, under another id, never redresses this card
+  f.cbs.onItem({ type: 'event', event: { type: 'tool/call', seq: 61, time: NOW, data: { turn: 5, step: 2, callId: 'c11', name: 'mcp__account__portfolio_live_order', arguments: JSON.stringify({ venue: 'okx', symbol: 'BTC/USDT', side: 'sell', usd: 500 }) } } });
+  assert.equal(card().text, 'Your call: buy $100 of AAPL · market · paper-1');
+});

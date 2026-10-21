@@ -89,7 +89,10 @@ export function seatLine(name, a = {}) {
 // a seat write's answer, lifted under its tool row (spec 2026-10-20 §6.2): the card the Account raised, the order it placed or
 // canceled, its refusal in its own words, a batch's count; anything else lifts nothing. `seat: true` routes the reload.
 const refusalWords = (v, text) => (typeof v.code === 'string' && typeof v.message === 'string' ? `${v.code} · ${v.message}` : typeof v.message === 'string' ? v.message : text);
+// dsh hands a failed call's text to the thread as `Error: <the server's words>`; the lift reads the words
+const unprefixed = text => (typeof text === 'string' ? text.replace(/^Error:\s*/, '') : '');
 export function seatLift(name, args, text, isError, callId) {
+  text = unprefixed(text);
   const v = parseArgs(text);
   const legs = Array.isArray(v.legs) ? v.legs.filter(l => l && typeof l === 'object') : null;
   if (isError || v.ok === false) {
@@ -182,7 +185,7 @@ function toolMessages(view, calls) {
   }
   if (!isOrderTool(known.name)) return [row];
   const lift = c.isError === true
-    ? { ...base(view), id: `r${callId}`, from: 'gravit', kind: 'refusal', text: c.text ?? '', data: { toolName: known.name, callId } }
+    ? { ...base(view), id: `r${callId}`, from: 'gravit', kind: 'refusal', text: unprefixed(c.text), data: { toolName: known.name, callId } }
     : { ...base(view), id: `r${callId}`, from: 'gravit', kind: 'receipt', text: `Order accepted · ${orderLine(known.args)} · ${orderIdOf(c.text)}`, data: { orderId: orderIdOf(c.text), callId } };
   return [row, lift];
 }

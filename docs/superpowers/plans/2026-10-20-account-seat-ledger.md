@@ -275,3 +275,52 @@ skipped), the seat smoke re-run against the stand-in (1/1), typecheck clean:
 
 The spec's §6.1 and §6.2 were amended in the same pass (the batch card lists every leg; the batch
 receipt counts cards raised and refusals).
+
+## The drill (2026-10-21, the stand-in with a model)
+
+On the operator's "本地有 deepseek 的 key，你可以调用": the account-seat drill run against the
+Account's stand-in (buyer-agent-demo @ 133b9a7, `ui-standin --no-desk` on 4821, a fresh temp home)
+with the face on 3097 from the scratch home of the look, `DEEPSEEK_API_KEY` sourced in the
+operator's terminal, `deepseek-flash` — not the real service, which stays the operator's.
+
+Observed, in the README's order: the Venues box `127.0.0.1:4821 · reachable · Guard · Trading on ·
+$250 a move · Gravit · not on the account`; the read question answered by `portfolio_account`,
+`portfolio_venues`, `portfolio_desk` — no card — naming the seat as not authorised and the two paper
+venues; the box `knocking — admit it on the Account page`; the seat let in on the stand-in's page
+(30 days) and signed a `trade` limit (paper-momentum only, $25 an order, $100 in all); the box
+`admitted until Nov 20`; the order previewed by the model, then the face's card and its dim line,
+✓, `accepted · Card raised on the Account page · card-0002 · answer it there`; the stand-in's card
+`Gravit asks to PAPER · buy 0.00015 BTC at Momentum · paper · market · about $9.35` signed; the
+model's `portfolio_wait` had already returned (its turn ended before the signature) and on the next
+question it read the outcome through `portfolio_approval` and `portfolio_account`: ord-0014, filled
+at 62,457.8, paper, `$90.63 left of $100`; the box afterwards `trade · paper-momentum · $25 an
+order · $90.63 of $100 left`, no cards; the `ex` sell: the model previewed, read `wouldBe: refused`
+and placed nothing; told to place without previewing, the face's card, ✓, the Account's
+`E_MANDATE_RECIPIENT · the trading limit does not cover "ex" (it covers paper-momentum)`; the
+decline: `Declined`, the tool answer `the user rejected tool "mcp__account__portfolio_live_order"`,
+no new card on the stand-in; the model then raised an `ask_user_question` (deliberate, accidental,
+change something), answered deliberate.
+
+Two client defects the drill found, fixed under failing tests:
+
+- The seat card read `Your call: mcp__account__portfolio_live_order` with the chip `Account seat`:
+  the approval waterfall reached the page before the session stream's `tool/call` (the session log
+  has the call one millisecond before the ask, but they ride two logical streams on one socket), and
+  the card, built once, never learnt the arguments. `live.js` now keeps a pending gate's view and,
+  when a `tool/call` of that session and call id lands, builds the card again and dispatches it in
+  place (`hostGate` keeps the seq and the answer) — `live`: "a seat gate drawn before its tool/call
+  arrives is drawn again with the call's arguments once the call lands, in place" RED→GREEN;
+  verified in the browser after a reload: `Your call: buy $10 of ETH/USD · market · paper-momentum`,
+  chip `paper-momentum`.
+- The red refusal line read the raw JSON: dsh hands a failed MCP call's text to the thread as
+  `Error: <the server's text>`, which `seatLift` could not parse. The prefix is stripped before the
+  lift (the Alpaca refusal too) — `kinds`: "a seat refusal prefixed \"Error: \" by dsh still lifts
+  as the Account's code and message" RED→GREEN; verified after the reload.
+
+For the record: the seeded Claude Code card on the stand-in (buy 0.0479 ETH at Stand-in Exchange,
+$117.63 of made-up money) was approved by a mis-click of mine on the first "Approve: one signature"
+button while reaching for Gravit's — harmless on the stand-in, and the reason the README tells the
+operator to read each card's name before signing. The model once reported an ask it had not filed
+(no `portfolio_ask` row in the thread), and on its next turn read `myAsks: []`, said so, and filed
+it (ask-0003): the thread's tool rows are the fact, the prose is not. Suite after the fixes: 1077
+tests, 1060 pass, 17 skipped; typecheck clean.

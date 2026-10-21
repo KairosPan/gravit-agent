@@ -2719,14 +2719,19 @@ limit on it ("The Account seat" above), the face started with keys, a channel se
    card `Your call: buy $10 of AAPL · market · paper-1` with the dim line `paper-1 · Account seat
    - mcp__account__portfolio_live_order: side=buy usd=10 symbol=AAPL …`; press ✓; the tool row's
    answer and the receipt `Card raised on the Account page · card-NNNN · answer it there`; the
-   Venues box counting `1 card waiting`.
+   Venues box counting `1 card waiting`. A model left to itself previews first
+   (`portfolio_live_markets`, `portfolio_live_preview`: reads, no card), and the card's title is the
+   seat line once its `tool/call` has reached the page — the approval can arrive a moment before
+   it, and the card is drawn again then.
 4. **The Account's card.** On the Account page (Portfolio › Waiting for you) the card `Gravit asks
    to PAPER · buy … AAPL at paper-1 …`; approve and sign. Gravit's `portfolio_wait` returns
    `done`; the Account's statement shows the fill marked paper; on Refresh the Venues box drops
    back to no cards and the limit's `left` falls by the order's worth.
-5. **The refusal.** Ask: "Sell $10 of AAPL on okx." Expect the face's card (the venue `okx`) and,
-   on ✓, the Account's refusal `E_MANDATE_RECIPIENT · …` as a red refusal line — no card on the
-   Account page, nothing placed.
+5. **The refusal.** Ask: "Sell $10 of AAPL on okx, market — place it, no preview." (Left to
+   itself a model previews, reads the door's `wouldBe: refused` and places nothing — no card either
+   way.) Expect the face's card (the venue `okx`) and, on ✓, the Account's refusal
+   `E_MANDATE_RECIPIENT · the trading limit does not cover "okx" (…)` as a red refusal line — no
+   card on the Account page, nothing placed.
 6. **Decline.** Ask for another paper order and press ✗: the tool answer is dsh's `the user
    rejected tool "mcp__account__portfolio_live_order"`, nothing reaches the seat (the Account's
    page shows no new card).
@@ -2744,6 +2749,19 @@ limit on it ("The Account seat" above), the face started with keys, a channel se
 **PASS criteria are observations.** Record the run in `DEVELOPMENT.md` §7.4 with the date and
 the checkout's pin (`git -C ~/buyer-agent-demo rev-parse --short HEAD`).
 
-**Not yet run live.** The automated half passes (`account-seat-smoke` under `FACE_SMOKE=1` with
-`FACE_ACCOUNT_SEAT_DIR`, against the Account's stand-in at 133b9a7); steps 1–6 are the
-operator's.
+**Run 2026-10-21 on the stand-in, not the real service** (buyer-agent-demo @ 133b9a7, its
+`ui-standin --no-desk` on 4821, the face on 3097 from a scratch home with `DEEPSEEK_API_KEY`,
+`deepseek-flash`): steps 1–6 observed — the box `not on the account` → `knocking` after the first
+read → `admitted until Nov 20` with `trade · paper-momentum · $25 an order · $90.63 of $100 left`
+after the fill; the read answered by three seat reads and no card; the order previewed by the
+model, then the face's card, ✓, `Card raised on the Account page · card-0002`, the Account's card
+signed on its page, the fill read back through `portfolio_approval` (ord-0014, 0.00015 BTC at
+62,457.8, paper); the `ex` order refused by the model at its own preview and, placed on request,
+refused by the Account `E_MANDATE_RECIPIENT · the trading limit does not cover "ex" (it covers
+paper-momentum)`; a decline answered `the user rejected tool "mcp__account__portfolio_live_order"`
+with nothing on the Account page. Two client defects found that day and fixed (the card drawn
+before its `tool/call` arrived, dsh's `Error: ` prefix on a refusal), and one model fact for the
+record: the model once reported an ask it had not filed, and corrected itself on its next read.
+The automated half passes (`account-seat-smoke` under `FACE_SMOKE=1` with `FACE_ACCOUNT_SEAT_DIR`);
+the keyed run against the real service with a real paper venue is the operator's, before the
+branch lands.
