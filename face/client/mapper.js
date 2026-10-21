@@ -64,20 +64,30 @@
  * One frame's whole meaning to the UI. A closed `kind` vocabulary with optional
  * payload fields: a renderer switches on `kind` and reads only its own fields.
  * @typedef {object} FrameView
- * @property {"bubble"|"card"|"approval"|"question"|"gate-resolved"|"pulse"|"projection"|"room-line"|"subagent-message"|"turn"|"ignore"} kind
+ * @property {"bubble"|"card"|"approval"|"question"|"gate-resolved"|"pulse"|"projection"|"room-line"|"desk-line"|"subagent-message"|"turn"|"ignore"} kind
  * @property {number} [seq] - the session event's seq; the renderer's dedupe key across backfill and stream.
  * @property {string} [sessionId] - which session this belongs to (absent when the frame names none).
  *   Gates: the waterfall's `agentId`, which IS the session id (NEW packages/core/agent/src/index.ts:258-270).
  * @property {SurfaceOpView} [surfaceOp] - on every rendered session event: `append`, or a
  *   replace instruction the renderer MUST honour by dropping the shadowed range.
  * @property {"operator"|"gravit"|"bot"} [role] - bubble side; `bot` is a room member speaking in its own voice.
- * @property {string} [text] - bubble text.
+ * @property {string} [text] - bubble text; a room or desk line's whole message, as the session got it.
  * @property {boolean} [interrupted] - bubbles: the turn was cancelled mid-stream and this is
  *   only the prefix that had arrived. Never render a partial answer as a complete one.
  * @property {string} [source] - who produced the message: `user`, `model`, `tool`, `room`,
+ *   `telegram` (the operator, from the phone; the desk's `schedule` and `alert` are desk lines),
  *   a first-party producer kind (`compact-checkpoint`, `runtime-context`,
  *   `agent-instructions`, …), a migrated `plugin:<name>`, `agent-message` or
  *   `subagent-report` (child-authored), or `subagent-settled` (runtime-authored).
+ *   {@link isInjectedSource} says which of them render as a context row.
+ * @property {number} [from] - telegram bubbles: the sender's Telegram user id.
+ * @property {number} [chat] - telegram bubbles: the Telegram chat the message came in.
+ * @property {number} [messageId] - telegram bubbles: the message's id in that chat.
+ * @property {string} [order] - desk-line `schedule`: the standing order that fired.
+ * @property {string} [firing] - desk-line `schedule`: the firing's key.
+ * @property {string} [date] - desk-line `schedule`: the trading date it fired for.
+ * @property {string} [alert] - desk-line `alert`: the alert's id.
+ * @property {string} [symbol] - desk-line `alert`: the symbol it is about.
  * @property {string} [thinking] - gravit bubbles: the message's reasoning blocks, joined.
  *   Thinking is never chat text; a renderer shows it apart from the bubble or not at all.
  * @property {string} [mode] - pulses: which block kind just opened live — `reasoning`, `text`, `tool-call`.
@@ -109,7 +119,8 @@
  * @property {string} [form] - the wire `source.form`, when present; subagent messages retain
  *   `relay` (report) or `notice` (settlement), distinct from their rendered `line`.
  * @property {string[]} [mention] - operator bubbles: the roster ids the operator's `@` addressed.
- * @property {string} [line] - room-line: `round-end`; subagent-message: `report` or `settled`.
+ * @property {string} [line] - room-line: `round-end`; desk-line: `schedule` or `alert`;
+ *   subagent-message: `report` or `settled`.
  * @property {string} [childSessionId] - subagent-message: the source's explicit senderSessionId,
  *   never inferred from text or replaced by this parent session's id.
  * @property {string} [summary] - subagent-message: the runtime's settlement summary, if recorded.
@@ -119,6 +130,28 @@
  * @property {"start"|"end"} [phase] - turn: which boundary this is.
  * @property {number} [turn] - turn: the turn number opening or closing.
  */
+
+/** The desk's own message kinds (src/desk-session.ts `DeskMessageSource`): the
+ * operator's phone, and the face's clock and watch. Each is drawn in its own
+ * shape - a phone message as the operator's bubble, a firing or an alert as a
+ * desk line - never as an injected context row. */
+const DESK_KINDS = new Set(["telegram", "schedule", "alert"]);
+
+/**
+ * Whether a user-role message's source kind is an INJECTION: words the
+ * operator did not write and no turn's opener - instructions, a file-change
+ * notice, skill content, the runtime's context, a room member's delta, the
+ * desk's state - drawn as one collapsed context row (chat.js `bubbleNode` and
+ * `accept`, member-traces.js). That is every kind but the operator's own
+ * `user` and the desk's three; a kind nobody knows yet is one too, so an
+ * unknown producer's words never pass for the operator's. No kind at all is
+ * none (the mapper reports none, and the bubble stays the operator's).
+ * @param {unknown} kind - a view's `source`.
+ * @returns {boolean}
+ */
+export function isInjectedSource(kind) {
+  return typeof kind === "string" && kind !== "user" && !DESK_KINDS.has(kind);
+}
 
 /** @param {unknown} value @returns {boolean} true for a non-null, non-array object. */
 function isObject(value) {
@@ -263,6 +296,15 @@ function bubble(role, message, base, interrupted) {
       };
     }
   }
+  /* The desk's sources (src/desk-session.ts `DeskMessageSource`). A firing of
+   * the face's clock (`schedule`) or an alert of its watch (`alert`) is the
+   * face's words, no operator's: a desk LINE, as a round's end is a room line,
+   * carrying its own fields. A phone message (`telegram`) is the operator's own
+   * words: the generic operator bubble below, plus who sent it from where.
+   * Every field is kept only in the shape the face writes it, never guessed. */
+  if (role === "operator" && (kind === "schedule" || kind === "alert")) {
+    return { ...base, kind: "desk-line", line: kind, text, ...pick(src, DESK_LINE_FIELDS[kind], isId) };
+  }
   const mention = kind === "user" && Array.isArray(src.mention) ? src.mention.filter((m) => typeof m === "string") : undefined;
   return {
     ...base,
@@ -273,8 +315,25 @@ function bubble(role, message, base, interrupted) {
     source: kind,
     form,
     ...(mention !== undefined && mention.length > 0 ? { mention } : {}),
+    ...(role === "operator" && kind === "telegram" ? pick(src, PHONE_FIELDS, Number.isSafeInteger) : {}),
     thinking: thinking === "" ? undefined : thinking,
   };
+}
+
+/** A phone message's fields: the Telegram sender, the chat and the message's
+ * id there - integers, as the bridge writes them (src/telegram.ts). */
+const PHONE_FIELDS = ["from", "chat", "messageId"];
+
+/** A desk line's fields by its kind: a firing's standing order, its key and
+ * the trading date it fires for; an alert's id and its symbol - strings. */
+const DESK_LINE_FIELDS = { schedule: ["order", "firing", "date"], alert: ["alert", "symbol"] };
+
+/** The named fields of `src` that `keep` accepts, and only those - a field
+ * missing or malformed is left out, never `undefined`.
+ * @param {Record<string, unknown>} src @param {string[]} names
+ * @param {(value: unknown) => boolean} keep @returns {Record<string, unknown>} */
+function pick(src, names, keep) {
+  return Object.fromEntries(names.filter((name) => keep(src[name])).map((name) => [name, src[name]]));
 }
 
 /**

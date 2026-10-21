@@ -1,8 +1,9 @@
 /** The same primary navigation on chat, market and account. */
-const PANELS = ["strategy", "agent", "memory", "plugin"];
+const PANELS = ["desk", "strategy", "agent", "memory", "plugin"];
 const marketIcon = '<svg class="rail-glyph" viewBox="0 0 18 18" width="16" height="16" aria-hidden="true"><polyline points="2,13 6.5,8 10,10.5 16,3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><polyline points="12,3.5 16,3.5 16,7.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const accountIcon = '<svg class="rail-glyph" viewBox="0 0 18 18" width="16" height="16" aria-hidden="true"><rect x="2" y="4.5" width="14" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M11.5 9.5h4.5" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="11.8" cy="9.5" r="1" fill="currentColor"/></svg>';
 const ITEMS = [
+  { id: "desk", href: "/#desk", glyph: "◷", title: "Desk — the always-on desk: status, pause, desk conversations" },
   { id: "market", href: "/market", icon: marketIcon, title: "Market" },
   { id: "strategy", href: "/#strategy", glyph: "❖", title: "Strategy — workspaces and sessions" },
   { id: "agent", href: "/#agent", glyph: "◎", title: "Agent — model, host, keys, session usage" },
@@ -11,7 +12,7 @@ const ITEMS = [
   { id: "account", href: "/account", icon: accountIcon, title: "Account" },
 ];
 
-/** Only the four known chat panels can be addressed by a fragment. */
+/** Only the known chat panels can be addressed by a fragment; anything else is the strategy list. */
 export function panelFromHash(hash) {
   const name = hash.replace(/^#/, "");
   return PANELS.includes(name) ? name : "strategy";

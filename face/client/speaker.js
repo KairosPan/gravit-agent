@@ -41,11 +41,23 @@ export function isHostPreset(id) {
   return typeof id === "string" && HOST_PRESETS.includes(id);
 }
 
+/** The desk's preset: Gravit on the desk, informing from the phone and the
+ *  clock (src/desk-names.ts spells the same id, and src/bots.ts reserves it, so
+ *  no bot can take it). It speaks as Gravit, but it is NOT a host preset: the
+ *  host-only controls - delegating a subtask (chat.js) - are no desk session's. */
+export const DESK_PRESET = "gravit-desk";
+
+/** Whether a preset id is the desk's.
+ * @param {unknown} id @returns {boolean} */
+export function isDeskPreset(id) {
+  return id === DESK_PRESET;
+}
+
 /**
  * The voice a session speaks with: a bot's display name when `agentPreset`
- * names one (never a host id, and never a blank string — a header
+ * names one (never a host id, never the desk's, and never a blank string — a header
  * field present but empty is no preset at all), the bot's id when the roster
- * has no name for it, else Gravit.
+ * has no name for it, else Gravit - the host's sessions and the desk's.
  * @param {{agentPreset?: unknown}|null|undefined} summary - the session
  *   summary from `session/list` (normalized by summaries.js) or `session/create`,
  *   or `null` for no session.
@@ -54,7 +66,7 @@ export function isHostPreset(id) {
  */
 export function speakerFor(summary, bots) {
   const id = summary?.agentPreset;
-  if (typeof id !== "string" || id.trim() === "" || isHostPreset(id)) return HOST_NAME;
+  if (typeof id !== "string" || id.trim() === "" || isHostPreset(id) || isDeskPreset(id)) return HOST_NAME;
   const bot = (Array.isArray(bots) ? bots : []).find((b) => b?.id === id);
   const name = typeof bot?.name === "string" ? bot.name.trim() : "";
   return name === "" ? id : name;

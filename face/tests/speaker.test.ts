@@ -21,7 +21,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 // speaker.js is plain ESM JS (it ships to the browser); tsconfig `allowJs`
 // lets this test import it, the same way botId.test.ts imports botId.js.
-import { HOST_NAME, HOST_PRESETS, isHostPreset, speakerFor } from "../client/speaker.js";
+import { DESK_PRESET, HOST_NAME, HOST_PRESETS, isDeskPreset, isHostPreset, speakerFor } from "../client/speaker.js";
 
 /** A roster in the shape `/data/bots.json` returns. */
 const bots = [
@@ -102,4 +102,19 @@ test("isHostPreset: exactly gravit and its pre-rename id kairos", () => {
 test("a session recorded under the pre-rename id speaks as the host", () => {
   assert.equal(speakerFor({ agentPreset: "kairos" }, bots), HOST_NAME);
   assert.equal(speakerFor({ agentPreset: "kairos" }, [{ id: "kairos", name: "Impostor" }]), HOST_NAME);
+});
+
+test("the desk's sessions speak as Gravit, though the desk is not the host's preset", () => {
+  // src/desk-names.ts spells the same id; the face reserves it, so no bot can take it (src/bots.ts RESERVED_IDS).
+  assert.equal(DESK_PRESET, "gravit-desk");
+  assert.equal(isDeskPreset("gravit-desk"), true);
+  for (const id of ["gravit", "kairos", "gravit-desk-2", "Gravit-desk", " gravit-desk", "", null, undefined, 42, {}]) {
+    assert.equal(isDeskPreset(id), false, JSON.stringify(id));
+  }
+  // Not a host id: the host-only controls (delegating a subtask) are no desk session's.
+  assert.equal(isHostPreset("gravit-desk"), false);
+  assert.deepEqual([...HOST_PRESETS], ["gravit", "kairos"]);
+  assert.equal(speakerFor({ agentPreset: "gravit-desk" }, bots), HOST_NAME);
+  assert.equal(speakerFor({ agentPreset: "gravit-desk" }, []), HOST_NAME, "not its id, as an unknown preset's would be");
+  assert.equal(speakerFor({ agentPreset: "gravit-desk" }, [{ id: "gravit-desk", name: "Impostor" }]), HOST_NAME, "no roster row renames the desk");
 });

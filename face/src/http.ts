@@ -1,5 +1,6 @@
 /** The HTTP primitives every `/data/*` route family shares: one error shape,
- * one body reader, one refusal body, one JSON answer and one fenced GET shell.
+ * one body reader, one refusal body, one JSON answer, and the fenced GET and
+ * POST shells.
  *
  * These lived in strategies.ts because that was the first route family; they
  * were never about strategies. sessions.ts, panels.ts and channels.ts all
@@ -71,6 +72,62 @@ export function fencedGet(
     if (!isTrusted(req)) return send(res, 403, FORBIDDEN);
     try {
       return send(res, 200, { ok: true, ...(await read()) });
+    } catch (err) {
+      if (err instanceof HttpError) return send(res, err.status, { ok: false, error: err.message });
+      return send(res, 500, { ok: false, error: "request failed" });
+    }
+  };
+}
+
+/** Whether a request declares a JSON body - data.ts's `isJsonBody`, restated for the reason
+ * {@link fencedGet} takes its fence as a parameter: importing data.ts here would close a cycle. */
+function declaresJson(req: IncomingMessage): boolean {
+  return (req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json");
+}
+
+/** What a POST body that is no JSON object is answered with. */
+const NOT_AN_OBJECT = "body must be a JSON object";
+
+/** The request's body as the JSON object it must be: {@link readBody}'s `413` past its limit, and a
+ * `400` for a body that does not parse, or parses as anything but an object - `null`, an array, a
+ * number, a string, a boolean. */
+async function readObject(req: IncomingMessage): Promise<Record<string, unknown>> {
+  const text = await readBody(req);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new HttpError(400, NOT_AN_OBJECT);
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) throw new HttpError(400, NOT_AN_OBJECT);
+  return parsed as Record<string, unknown>;
+}
+
+/**
+ * The fenced POST shell: a route handler that answers `{ ok: true, ...act(body) }`.
+ *
+ * Refusals come in order, each before the body is read: the fence, `403` with the fixed
+ * {@link FORBIDDEN} body; a method other than `POST`, `405`; a body not declared
+ * `application/json`, `415` - a cross-site "simple" POST can carry only text/plain or form media
+ * types without a preflight the face never answers, so the media type is the fence's other half,
+ * as it is on every POST route the face has (channels.ts `guardPost`, room.ts, sessions.ts). Then
+ * the body: past {@link readBody}'s limit, `413`; not a JSON object, `400`. `act` runs on the
+ * parsed object only after all of that; an {@link HttpError} it throws answers its status and
+ * message, anything else a `500` with a fixed message, so no error text reaches a body.
+ * @param isTrusted - the fence: true when the request may be served.
+ * @param act - what the route does with the body, sync or async; its answer's fields follow `ok`.
+ * @returns the `(req, res)` handler a route registers.
+ */
+export function fencedPost(
+  isTrusted: (req: IncomingMessage) => boolean,
+  act: (body: Record<string, unknown>) => Promise<object> | object,
+): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
+  return async (req, res) => {
+    if (!isTrusted(req)) return send(res, 403, FORBIDDEN);
+    if (req.method !== "POST") return send(res, 405, { ok: false, error: "POST only" });
+    if (!declaresJson(req)) return send(res, 415, { ok: false, error: "application/json only" });
+    try {
+      return send(res, 200, { ok: true, ...(await act(await readObject(req))) });
     } catch (err) {
       if (err instanceof HttpError) return send(res, err.status, { ok: false, error: err.message });
       return send(res, 500, { ok: false, error: "request failed" });

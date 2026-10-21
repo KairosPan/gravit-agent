@@ -9,7 +9,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 // grouping.js is plain ESM JS (it ships to the browser); tsconfig `allowJs`
 // lets this test import it and read its JSDoc-declared types.
-import { ARCHIVED_KEY, BOT_KEY_PREFIX, bucketFor, isBotKey, UNGROUPED_KEY } from "../client/grouping.js";
+import { ARCHIVED_KEY, BOT_KEY_PREFIX, bucketFor, DESK_KEY, isBotKey, UNGROUPED_KEY } from "../client/grouping.js";
 
 test("two channels renamed to the SAME title still get DIFFERENT bucket keys", () => {
   const a = bucketFor({ workspaceId: "ws-a", title: "sentiment" }, false, null);
@@ -53,4 +53,18 @@ test("a bot session buckets under its bot, after archived and before channel mem
   assert.equal(isBotKey(`${BOT_KEY_PREFIX}buffett`), true);
   assert.equal(isBotKey("bot:Bad Id"), false);
   assert.equal(isBotKey(UNGROUPED_KEY), false);
+});
+
+test("a desk session files under the desk's own bucket - in a channel's directory too - and a bot session keeps its bot's", () => {
+  const desk = { key: DESK_KEY, label: "desk", channel: null };
+  assert.deepEqual(bucketFor(null, false, null, false, true), desk, "the desk conversation, whose journal is in no channel");
+  assert.deepEqual(bucketFor({ workspaceId: "ws-1", title: "alpha" }, false, null, false, true), desk, "a desk firing run in a strategy's directory is still the desk's");
+  const bot = { id: "buffett", label: "巴菲特型" };
+  assert.deepEqual(bucketFor(null, false, bot, false, false), { key: "bot:buffett", label: "巴菲特型", channel: null });
+  assert.deepEqual(bucketFor(null, false, bot), { key: "bot:buffett", label: "巴菲特型", channel: null }, "no desk flag is no desk session");
+  assert.equal(bucketFor(null, true, null, false, true).key, ARCHIVED_KEY, "archived still beats everything");
+  assert.equal(DESK_KEY, "__desk");
+  assert.equal(isBotKey(DESK_KEY), false, "never a bot's key: the strategy list skips it, and nothing files it among the bots");
+  assert.notEqual(DESK_KEY, ARCHIVED_KEY);
+  assert.notEqual(DESK_KEY, UNGROUPED_KEY);
 });

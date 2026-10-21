@@ -19,7 +19,10 @@
  *   3. `source`. A `user/message` is not automatically the operator's: plugins
  *      inject file-change notices, skill content and cron wake-ups through the
  *      same event. Anything whose source is not `user` renders as a quiet
- *      centred note, never as an operator bubble.
+ *      centred note, never as an operator bubble - but for the desk's own three
+ *      (mapper.js `isInjectedSource`): the operator's phone (`telegram`), an
+ *      operator bubble under a phone glyph, and the face's clock and watch
+ *      (`schedule`, `alert`), a desk line.
  *   4. Ordering and duplication. A live session on screen is FOLLOWED: its
  *      `session/follow` stream opens with one snapshot (the tail window) and
  *      then delivers every later event gap-free (NEW packages/api/
@@ -50,17 +53,18 @@
 import { call, openMux, randomUuid } from "./api.js";
 import { summaryOf } from "./summaries.js";
 import { panelFromHash, setNavigationActive } from "./navigation.js";
-import { mapFrame } from "./mapper.js";
+import { isInjectedSource, mapFrame } from "./mapper.js";
 import { createAnswerTraces, createTraceDisclosure } from "./answer-traces.js";
 import { loadMemberTrace } from "./member-traces.js";
 import { renderResult } from "./render.js";
 import { renderMarkdown } from "./markdown.js";
 import { renderChannelPage } from "./channels.js";
-import { ARCHIVED_KEY, bucketFor, isBotKey, UNGROUPED_KEY } from "./grouping.js";
+import { ARCHIVED_KEY, bucketFor, DESK_KEY, isBotKey, UNGROUPED_KEY } from "./grouping.js";
 import { proposeBotId } from "./botId.js";
 import { botModelChoices, botSettingsPayload, botToolLabel, draftBotSoul, normalizeBotModel } from "./botSettings.js";
 import { foldChannelName } from "./channelName.js";
-import { HOST_NAME, isHostPreset, speakerFor } from "./speaker.js";
+import { HOST_NAME, isDeskPreset, isHostPreset, speakerFor } from "./speaker.js";
+import { createDeskPanel, DESK_GLYPHS, deskLineText, deskTitle } from "./desk-panel.js";
 import { composeSubagentCatalog, isSubagentRow, normalizeSubagentCatalog, subagentAddress, subagentControls, subagentResult } from "./subagents.js";
 import { avatarGlyph, foldMembers, gateSpeaker, isMemberSession, isMentionText, normalizeRoomDiscussion, roomAnswerDisplay, roundEndLine, stripChips } from "./room.js";
 
@@ -714,14 +718,23 @@ function bubbleNode(view) {
     return wrap;
   }
   const operator = view.role === "operator";
-  const injected = operator && typeof view.source === "string" && view.source !== "user";
-  if (injected) return contextRow(view);
+  if (operator && isInjectedSource(view.source)) return contextRow(view);
   const lane = operator ? "op" : "k";
 
   const wrap = el("div", `msg ${lane}`);
   const hasText = typeof view.text === "string" && view.text !== "";
   if (hasText) {
     if (lane === "k") wrap.append(el("div", "who", speaker));
+    /* The operator's words from the phone (the desk's Telegram bridge): their
+     * own lane, under a phone glyph - the same who-line a bot's avatar uses. */
+    else if (view.source === "telegram") {
+      const who = el("div", "who phone-who");
+      who.title = "sent from your phone, through the desk's Telegram bridge";
+      const glyph = el("span", "phone-glyph", DESK_GLYPHS.telegram);
+      glyph.setAttribute("aria-hidden", "true");
+      who.append(glyph, el("span", "who-name", "phone"));
+      wrap.append(who);
+    }
     /* Gravit writes markdown; the operator's own words render exactly as
      * typed. A markdown answer with document structure (headings, tables)
      * widens its lane — a chat-sized reply keeps the bubble. */
@@ -949,6 +962,18 @@ function roomDiscussionNode(discussion, turns) {
     missing.append(list);
     node.append(missing);
   }
+  return node;
+}
+
+/** A firing of the desk's clock or an alert of its watch: the face's words, no
+ * operator's, as one quiet line like a room's - the order or the symbol under
+ * its glyph, the message the desk was sent on hover. @param {Record<string, any>} view */
+function deskLineNode(view) {
+  const node = el("div", "room-line desk-line");
+  const glyph = el("span", "desk-glyph", DESK_GLYPHS[view.line] ?? "");
+  glyph.setAttribute("aria-hidden", "true");
+  node.append(glyph, el("span", "room-line-text", deskLineText(view)));
+  node.title = dash(view.text);
   return node;
 }
 
@@ -1568,8 +1593,7 @@ function accept(view) {
   hideThinkLive();
   honourSurfaceOp(view);
   if (view.kind === "bubble") {
-    const injected = view.role === "operator" && typeof view.source === "string" && view.source !== "user";
-    if (injected) place(view, contextRow(view), true);
+    if (view.role === "operator" && isInjectedSource(view.source)) place(view, contextRow(view), true);
     else if (view.role === "gravit") {
       const hasText = typeof view.text === "string" && view.text !== "";
       if (typeof view.thinking === "string" && view.thinking !== "") {
@@ -1619,6 +1643,10 @@ function accept(view) {
   else if (view.kind === "room-line") {
     answerTraces.boundary();
     place(view, roomLineNode(view));
+  }
+  else if (view.kind === "desk-line") {
+    answerTraces.boundary(); // a firing opens the turn its answer belongs to, as a prompt does
+    place(view, deskLineNode(view));
   }
 }
 
@@ -1762,6 +1790,7 @@ function when(at) {
  * @param {Record<string, any>} summary @returns {string}
  */
 function titleOf(summary) {
+  if (isDeskPreset(summary?.agentPreset)) return deskTitle(summary); // `Desk · <date>` when it has none
   const title = summary?.projections?.values?.title;
   return typeof title === "string" && title !== "" ? title : "untitled";
 }
@@ -1891,6 +1920,7 @@ function markActive() {
   }
   /** @type {HTMLButtonElement} */ ($("#stop")).disabled = activeSession === null;
   renderAgentSession(); // the usage card follows the session on screen
+  deskPanel.mark(activeSession); // and so does the Desk panel's row
   syncSubagentComposer();
 }
 
@@ -1967,7 +1997,8 @@ async function refreshSessions() {
     seedProjections(id, summary.projections, true);
     if (fold.members.has(id)) continue; // shown through its room's answers
     const archived = archivedSet.has(id) || hostArchived.has(id);
-    const { key, label, channel } = bucketFor(channelOf(id), archived, isSubagentRow(summary) ? null : botOf(summary), false);
+    const { key, label, channel } = bucketFor(channelOf(id), archived, isSubagentRow(summary) ? null : botOf(summary), false, isDeskPreset(summary.agentPreset));
+    if (key === DESK_KEY) continue; // the Desk panel lists the desk's sessions
     let bucket = buckets.get(key);
     if (bucket === undefined) {
       bucket = { channel, label, items: [] };
@@ -1997,6 +2028,7 @@ async function refreshSessions() {
   reconcileActiveView(); // a paged session on screen may be live now
   renderStrip(); // the member fold and `running` may both have moved
   syncPickerFolders(); // a picker already on screen learns the folders the list just revealed
+  if (activePanel === "desk") deskPanel.syncSessions(); // the desk's sessions are this list's too
   void loadSubagentInfo();
 }
 
@@ -2364,6 +2396,7 @@ function knownFolders() {
     const cwd = summary.cwd;
     if (typeof cwd !== "string" || cwd === "" || dirs.has(cwd)) continue;
     if (channelIndex.root && cwd.startsWith(`${channelIndex.root}/bots/`)) continue; // a bot's home, not a folder
+    if (channelIndex.root && cwd.startsWith(`${channelIndex.root}/desk/`)) continue; // the desk's journal, not a folder
     const name = cwd.split("/").filter((part) => part !== "").pop();
     if (name !== undefined && !out.has(cwd)) out.set(cwd, name);
   }
@@ -2412,10 +2445,11 @@ async function loadBotIndex() {
 /** The bot a session belongs to: its row's `agentPreset` - restored by
  * {@link summaryOf} from the preset projection or the persisted header, since
  * the 0.2 summary carries neither itself - names one and it is not the default.
- * `null` for Gravit and for a preset-less session. */
+ * `null` for Gravit, for the desk (no bot: its sessions are the Desk panel's)
+ * and for a preset-less session. */
 function botOf(summary) {
   const id = summary?.agentPreset;
-  if (typeof id !== "string" || isHostPreset(id)) return null;
+  if (typeof id !== "string" || isHostPreset(id) || isDeskPreset(id)) return null;
   const bot = botIndex.find((b) => b.id === id);
   return { id, label: bot?.name ?? id };
 }
@@ -2886,20 +2920,23 @@ async function stopTurn() {
   }
 }
 
-/* ---------- the master rail: strategy · agent · memory · plugin ----------
-   One sidebar, four faces, one pattern (operator direction 2026-09-01): the
+/* ---------- the master rail: desk · strategy · agent · memory · plugin ----------
+   One sidebar, five faces, one pattern (operator direction 2026-09-01): the
    sidebar is always an INDEX — rows, never content — and clicking a row opens
-   that item's content in the RIGHT pane, in place of the chat. `strategy`
+   that item's content in the RIGHT pane, in place of the chat. `desk` shows
+   the always-on desk's status, its Pause and its sessions, which open in the
+   chat (desk-panel.js); `strategy`
    indexes sessions and its content is the chat itself; `agent` indexes the
    main agent (Gravit), the local coding CLIs, and the A2A placeholder;
    `memory` indexes the skill packs; `plugin` indexes MCP servers and the
    composed row tree. Picking a session (or "+ new") always brings the chat
-   back. Data: `agent` over the Remotes the client already reaches
+   back. Data: `desk` over `/data/desk/status`; `agent` over the Remotes the client already reaches
    (`session/modelCatalog`, `credentials/describe`), the face's `/data/host.json`
    and the projection store; `memory`/`plugin` over the face's own /data panel
-   routes (in-process reads of the booted tree — see src/panels.ts). Read-only. */
+   routes (in-process reads of the booted tree — see src/panels.ts). The desk's
+   Pause posts `/data/desk/pause`. */
 
-/** The sidebar face on screen. @type {"strategy"|"agent"|"memory"|"plugin"} */
+/** The sidebar face on screen. @type {"desk"|"strategy"|"agent"|"memory"|"plugin"} */
 let activePanel = "strategy";
 
 /** Whether the right pane is showing a detail view instead of the chat. */
@@ -3159,8 +3196,9 @@ function setPanel(name) {
   setNavigationActive(name);
   $(".sidebar").dataset.panel = name;
   $("#conv-list").hidden = name !== "strategy";
-  for (const panel of ["agent", "memory", "plugin"]) $(`#panel-${panel}`).hidden = panel !== name;
-  if (name === "agent") void refreshAgentPanel();
+  for (const panel of ["desk", "agent", "memory", "plugin"]) $(`#panel-${panel}`).hidden = panel !== name;
+  if (name === "desk") void refreshDeskPanel();
+  else if (name === "agent") void refreshAgentPanel();
   else if (name === "memory") void refreshMemoryPanel();
   else if (name === "plugin") void refreshPluginPanel();
 }
@@ -3223,6 +3261,26 @@ const LOGIN_HINTS = {
   codex: "codex login",
   hermes: "hermes setup",
 };
+
+/* -- desk -- */
+
+/** The Desk panel (desk-panel.js): the desk's status as named sections, its
+ * Pause, and the desk's sessions, which open in place. Everything the panel is
+ * lives in its module; this hands it the page's reads and calls it at three
+ * moments - the panel opens ({@link setPanel}), the session list moves
+ * ({@link refreshSessions}), the session on screen changes ({@link markActive}). */
+const deskPanel = createDeskPanel({
+  panel: () => document.querySelector("#panel-desk"),
+  data: panelData,
+  sessions: () => lastSessions,
+  activeSession: () => activeSession,
+  open: (id) => { void openSession(id); },
+});
+
+/** Read the desk's status and draw the Desk panel. @returns {Promise<void>} */
+function refreshDeskPanel() {
+  return deskPanel.refresh();
+}
 
 /* -- agent -- */
 

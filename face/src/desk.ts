@@ -6,9 +6,10 @@
  * the face kept running by launchd as a user service (§5.2), and, in the later plans, the clock,
  * the watch and the phone bridge that work in it. Of what §8 gives this module - the ledger, the
  * budget, the `OFF` switch, the two desk tools, the `/desk` page and `/data/desk/*` - P0 holds the
- * ledger, the sleep watch and `GET /data/desk/status`, and P1 adds the `OFF` switch, mounts the
- * two desk tools and the desk's write guard, which src/desk-tools.ts defines, and runs the Telegram
- * bridge, src/telegram.ts.
+ * ledger, the sleep watch and `GET /data/desk/status`, and P1 adds the `OFF` switch and the Desk
+ * panel's `POST /data/desk/pause` (the panel itself is client/desk-panel.js, in the chat page rather
+ * than a `/desk` page), mounts the two desk tools and the desk's write guard, which src/desk-tools.ts
+ * defines, and runs the Telegram bridge, src/telegram.ts.
  * Of the ledger's files (§5.7) this module keeps `events.jsonl` and `OFF`; {@link appendRecord} is
  * the append path for the others, the bridge's `telegram.jsonl` among them. `events.jsonl`
  * has eight kinds of event: P0's `boot`, clean `shutdown` and `asleep` gap in the face's timers,
@@ -46,13 +47,13 @@
  *
  * {@link installDesk} mounts it all on a booted face. The status route ({@link deskStatus}:
  * pid, version, uptime, this run's gaps, the ledger's runs, the pause in force, the desk
- * conversation, today's desk turns and their tokens, and the Telegram bridge) is mounted always,
- * and so are the desk tools and the write guard, so a face with the desk off - a second face beside
- * the service, §5.2 - still answers, with `desk.enabled: false`, and an old desk conversation it
- * opens keeps its tools and its guard; the `boot` event, the watch, the desk conversation's owner
- * (src/desk-conversation.ts), the bridge and the `shutdown` event only when the desk is on. An
- * unreadable ledger is named in the status, never a 500. {@link deskStatusLines} is the status as the
- * terminal and the phone read it.
+ * conversation, today's desk turns and their tokens, and the Telegram bridge) and the pause route
+ * are mounted always, and so are the desk tools and the write guard, so a face with the desk off -
+ * a second face beside the service, §5.2 - still answers, with `desk.enabled: false`, and an old
+ * desk conversation it opens keeps its tools and its guard; the `boot` event, the watch, the desk
+ * conversation's owner (src/desk-conversation.ts), the bridge and the `shutdown` event only when
+ * the desk is on. An unreadable ledger is named in the status, never a 500. {@link deskStatusLines}
+ * is the status as the terminal and the phone read it.
  * @module
  */
 import { appendFile, lstat, mkdir, open, readFile, rename, stat, unlink } from "node:fs/promises";
@@ -64,7 +65,7 @@ import { createDeskConversation, type DeskConversation, type DeskConversationCtx
 import type { DeskClock, DeskSessionDeps } from "./desk-session.ts";
 import { deskToolDefinitions, installDeskTools, installDeskWriteGuard, type DeskWriteGuardCtxLike } from "./desk-tools.ts";
 import { etDate, etDayStart, etTime } from "./et.ts";
-import { fencedGet } from "./http.ts";
+import { fencedGet, fencedPost, HttpError } from "./http.ts";
 import type { QuoteHub } from "./quotes.ts";
 import type { RouteRegistrar } from "./static.ts";
 import type { BridgeHandle, TelegramConfig } from "./telegram.ts";
@@ -760,25 +761,57 @@ export function deskStatusLines(status: DeskStatus, now: Date): string[] {
   return lines;
 }
 
+/** What the pause route answers an `until` that {@link parseDuration} does not read. */
+const UNTIL_REFUSED = "until must look like 30m, 2h or 1d";
+
 /**
- * Mount `GET /data/desk/status`, which answers {@link deskStatus} through http.ts's
- * {@link fencedGet}: the browser fence first, refused with the fixed `FORBIDDEN` body; then `200`
- * with the status; anything that throws, a `500` with a fixed message. An unreadable ledger is
- * not a failure here: {@link deskStatus} names it inside a `200`.
+ * Pause the desk from the Desk panel: `writeOff` set by `page`, for `until` - a duration as
+ * {@link parseDuration} reads it, `30m`, `2h`, `1d` - after `now()`, or until a resume when the body
+ * has no `until`. Any other `until`, a non-string included, is an `HttpError` 400 before anything is
+ * written. Answers `{ off }`, the pause in force afterwards: a page pause never shortens one in force
+ * ({@link writeOff}), so it may be a longer pause that stood rather than the one asked for, and the
+ * panel shows what is true.
+ * @param body - the request's JSON object.
+ * @param home - the harness home.
+ * @param now - the clock, read once for `setAt` and the end.
+ */
+async function pauseFromPage(body: Record<string, unknown>, home: string, now: () => number): Promise<{ off: OffState }> {
+  const { until } = body;
+  const ms = typeof until === "string" ? parseDuration(until) : undefined;
+  if (until !== undefined && ms === undefined) throw new HttpError(400, UNTIL_REFUSED);
+  const at = now();
+  return { off: await writeOff(home, { by: "page", ...(ms === undefined ? {} : { until: at + ms }) }, () => at) };
+}
+
+/**
+ * Mount the desk's two routes, behind the browser fence: `GET /data/desk/status`, which answers
+ * {@link deskStatus} through http.ts's {@link fencedGet}, and `POST /data/desk/pause`, the Desk
+ * panel's Pause, through {@link fencedPost} - `{ until?: "<duration>" }` in, `{ off }`, the pause in
+ * force, out (`pauseFromPage`). The fence refuses first, with the fixed `FORBIDDEN` body; anything that
+ * throws is a `500` with a fixed message, so a pause that could not be written is never reported as
+ * one. An unreadable ledger is not a failure of the status: {@link deskStatus} names it inside a `200`.
+ * There is no resume route: the page, like the phone, only ever pauses, and a terminal resumes (spec
+ * §5.8).
  * @param webServer - the host webserver service, or a test recorder.
- * @param deps - {@link deskStatus}'s, read on every request, and `isTrusted`, the fence (default
- *   {@link isTrustedDataRequest}).
- * @throws when the path is already registered - a duplicate route is a composition error the
+ * @param deps - {@link deskStatus}'s, read on every request - `home` and `now` serve the pause too -
+ *   and `isTrusted`, the fence (default {@link isTrustedDataRequest}).
+ * @throws when a path is already registered - a duplicate route is a composition error the
  *   webserver refuses on purpose.
  */
 export function registerDeskRoutes(
   webServer: RouteRegistrar,
   deps: Parameters<typeof deskStatus>[0] & { isTrusted?: (req: IncomingMessage) => boolean },
 ): void {
+  const isTrusted = deps.isTrusted ?? isTrustedDataRequest;
   webServer.register({
     kind: "exact",
     path: "/data/desk/status",
-    handler: fencedGet(deps.isTrusted ?? isTrustedDataRequest, () => deskStatus(deps)),
+    handler: fencedGet(isTrusted, () => deskStatus(deps)),
+  });
+  webServer.register({
+    kind: "exact",
+    path: "/data/desk/pause",
+    handler: fencedPost(isTrusted, (body) => pauseFromPage(body, deps.home, deps.now ?? Date.now)),
   });
 }
 
@@ -797,8 +830,9 @@ export interface DeskHandle {
 /**
  * Mount the desk's rows on a booted face.
  *
- * The status route is mounted whatever `enabled` says, and so, given both `ctx` and `hub`, are the
- * two desk tools (src/desk-tools.ts): every `gravit-desk` agent, those already live included, gets
+ * The status and pause routes ({@link registerDeskRoutes}) are mounted whatever `enabled` says -
+ * the switch is the home's, not this face's - and so, given both `ctx` and `hub`, are the two desk
+ * tools (src/desk-tools.ts): every `gravit-desk` agent, those already live included, gets
  * `desk_quotes` over `hub` and `desk_state` over {@link deskStatus} with the status route's own
  * deps, so the tool and the route agree - but for `runs`, which the tool cuts to the last ten and
  * counts in `runsInLedger` - and a face with the desk off still opens an old desk conversation
@@ -839,7 +873,7 @@ export interface DeskHandle {
  *   is unset; `deskDeadlineMs`, every desk turn's deadline, handed to the conversation as its
  *   `deadlineMs` (its own five minutes when absent) - a test seam, which tests/telegram-smoke.test.ts
  *   sets to 1,500 so a parked card is cut in a second and a half; main.ts never passes it.
- * @throws when the status path is already registered, before anything is written or started.
+ * @throws when a desk route's path is already registered, before anything is written or started.
  */
 export function installDesk(
   webServer: RouteRegistrar,

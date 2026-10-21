@@ -14,8 +14,8 @@
  * "ungrouped" collided with the two synthetic buckets the same way.
  *
  * The fix: bucket by `workspaceId` — durable, unique, never renamed — with
- * sentinel keys for the two synthetic buckets that can never collide with a
- * real one (workspace ids are UUIDs; `__archived`/`__ungrouped` are not).
+ * sentinel keys for the synthetic buckets that can never collide with a
+ * real one (workspace ids are UUIDs; `__archived`/`__ungrouped`/`__desk` are not).
  * @module
  */
 
@@ -23,6 +23,11 @@
 export const ARCHIVED_KEY = "__archived";
 /** Sentinel bucket key for sessions no channel claims — never a real `workspaceId`. */
 export const UNGROUPED_KEY = "__ungrouped";
+
+/** Sentinel bucket key for the desk's sessions — never a real `workspaceId`,
+ * and no `bot:` key. The strategy list does not show this bucket: the Desk
+ * panel (desk-panel.js) lists the desk's sessions instead. */
+export const DESK_KEY = "__desk";
 
 /** Sentinel PREFIX for a bot's home sessions: `bot:<id>` — never a real `workspaceId`. */
 export const BOT_KEY_PREFIX = "bot:";
@@ -34,7 +39,9 @@ export function isBotKey(key) {
 /**
  * Which sidebar bucket one session belongs in, and what to show for it.
  * Archived takes priority over everything (an archived session's channel or
- * bot, if any, is not what the sidebar groups it by), and a bot takes
+ * bot, if any, is not what the sidebar groups it by); the desk comes next, so
+ * a desk session is the desk's wherever it runs - its journal, or a strategy's
+ * directory for a desk firing about that strategy; and a bot takes
  * priority over channel membership: a bot's home session lives in its
  * journal, which is inside no channel, but the precedence is written down
  * rather than relied on so a bot prompted from a channel directory still
@@ -49,13 +56,17 @@ export function isBotKey(key) {
  *   room); a room member is reached through its room (folded under it); it
  *   never files under the bot's home bucket, even though its header names
  *   the bot.
+ * @param {boolean} [desk] - the session runs the desk's preset (speaker.js
+ *   `isDeskPreset`): it files under {@link DESK_KEY}, which the strategy list
+ *   skips.
  * @returns {{key: string, label: string, channel: {workspaceId: string, title: string}|null}}
  *   `key` is the durable bucket identity to group and persist collapse state
  *   by; `label` is the display text; `channel` is `null` for the synthetic
  *   buckets and for a bot (there is nothing to open by clicking their header).
  */
-export function bucketFor(channel, archived, bot, member = false) {
+export function bucketFor(channel, archived, bot, member = false, desk = false) {
   if (archived) return { key: ARCHIVED_KEY, label: "archived", channel: null };
+  if (desk) return { key: DESK_KEY, label: "desk", channel: null };
   if (member) bot = null;
   if (bot !== null && bot !== undefined) return { key: BOT_KEY_PREFIX + bot.id, label: bot.label, channel: null };
   if (channel !== null) return { key: channel.workspaceId, label: channel.title, channel };

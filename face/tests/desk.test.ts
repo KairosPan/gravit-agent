@@ -176,7 +176,7 @@ test("deskStatus: pid, version, uptime, the gaps since boot and the runs", async
 test("GET /data/desk/status is fenced and reports desk.enabled", async () => {
   const h = await home(); const rec = recorder();
   registerDeskRoutes(rec, { home: h, bootedAt: Date.now(), enabled: false });
-  assert.deepEqual(rec.paths(), ["/data/desk/status"]);
+  assert.deepEqual(rec.paths(), ["/data/desk/status", "/data/desk/pause"]);
   const ok = JSON.parse(await rec.call("/data/desk/status")) as { status: number; body: { ok: boolean; desk: { enabled: boolean } } };
   assert.equal(ok.status, 200); assert.equal(ok.body.ok, true); assert.equal(ok.body.desk.enabled, false);
   const forged = JSON.parse(await rec.call("/data/desk/status", { host: "evil.example.com" })) as { status: number; body: { ok: boolean; error: string } };
@@ -196,7 +196,7 @@ test("installDesk: enabled writes boot and shutdown; disabled writes nothing and
   const quiet = installDesk(rec, { home: off, enabled: false });
   await quiet.ready; await quiet.dispose(0);
   assert.deepEqual(await readEvents(off), { events: [], skipped: 0 });
-  assert.deepEqual(rec.paths(), ["/data/desk/status"]);
+  assert.deepEqual(rec.paths(), ["/data/desk/status", "/data/desk/pause"], "both routes whatever enabled says: the switch is the home's, not this face's");
 });
 
 test("an unreadable ledger still answers 200: no gaps, no runs, and ledgerError names the code", async () => {
@@ -442,6 +442,55 @@ test("a link to nothing at OFF still reads as paused, at the link's own time, an
   assert.equal(await clearOff(h, "terminal"), true);
   await assert.rejects(lstat(link), { code: "ENOENT" });
   await assert.rejects(stat(join(h, "nowhere")), { code: "ENOENT" }, "nothing was made where it pointed");
+});
+
+/* The Desk panel's Pause: `POST /data/desk/pause`, which pauses from the page and never resumes. */
+
+/** Play one request at `path` and hand back `{ status, body }`. */
+const play = async (rec: ReturnType<typeof recorder>, path: string, options: Parameters<ReturnType<typeof recorder>["call"]>[1] = {}) =>
+  JSON.parse(await rec.call(path, options)) as { status: number; body: Record<string, any> };
+
+test("POST /data/desk/pause writes OFF by page, for a duration or until a resume, and answers the pause in force", async () => {
+  const h = await home(); const rec = recorder();
+  let clock = AT;
+  registerDeskRoutes(rec, { home: h, bootedAt: AT, enabled: true, now: () => clock });
+  const timed = await play(rec, "/data/desk/pause", { method: "POST", json: { until: "2h" } });
+  assert.deepEqual(timed, { status: 200, body: { ok: true, off: { setAt: "2026-10-20T18:00:00.000Z", by: "page", until: "2026-10-20T20:00:00.000Z" } } });
+  assert.deepEqual(JSON.parse(await offText(h)), timed.body.off, "OFF holds what the route answered");
+  assert.deepEqual((await readEvents(h)).events, [{ t: "2026-10-20T18:00:00.000Z", kind: "off-set", by: "page", until: "2026-10-20T20:00:00.000Z" }]);
+
+  clock = AT + 60_000;
+  const shorter = await play(rec, "/data/desk/pause", { method: "POST", json: { until: "30m" } });
+  assert.deepEqual(shorter, { status: 200, body: { ok: true, off: timed.body.off } }, "a shorter page pause stands down: the answer is the pause that stands");
+  assert.equal((await readEvents(h)).events.length, 1, "and nothing is recorded for it");
+
+  const open = await play(rec, "/data/desk/pause", { method: "POST", json: {} });
+  assert.deepEqual(open, { status: 200, body: { ok: true, off: { setAt: "2026-10-20T18:01:00.000Z", by: "page" } } }, "no until is a pause until a resume, which outlasts any timed one");
+  const status = await play(rec, "/data/desk/status");
+  assert.deepEqual(status.body.off, open.body.off, "the status route reads the same switch");
+});
+
+test("POST /data/desk/pause is fenced, POST-only and JSON-only, refuses an until that is no duration, and has no resume beside it", async () => {
+  const h = await home(); const rec = recorder();
+  registerDeskRoutes(rec, { home: h, bootedAt: AT, enabled: true, now: after(0) });
+  assert.deepEqual(rec.paths(), ["/data/desk/status", "/data/desk/pause"], "a pause route and no resume route: only a terminal resumes");
+  assert.deepEqual(await play(rec, "/data/desk/pause", { method: "POST", json: { until: "2h" }, host: "evil.example.com" }), { status: 403, body: { ok: false, error: "forbidden" } });
+  assert.deepEqual(await play(rec, "/data/desk/pause", { method: "POST", json: {}, headers: { origin: "http://evil.example.com" } }), { status: 403, body: { ok: false, error: "forbidden" } }, "a cross-site page posting to loopback");
+  assert.equal((await play(rec, "/data/desk/pause", { method: "GET" })).status, 405);
+  assert.equal((await play(rec, "/data/desk/pause", { method: "POST", body: '{"until":"2h"}', headers: { "content-type": "text/plain" } })).status, 415);
+  for (const until of ["soon", "", "0m", "2 h", "1.5h", "2H", 30, null, false, ["2h"], { h: 2 }]) {
+    assert.deepEqual(await play(rec, "/data/desk/pause", { method: "POST", json: { until } }),
+      { status: 400, body: { ok: false, error: "until must look like 30m, 2h or 1d" } }, JSON.stringify(until));
+  }
+  assert.deepEqual(await readOffState(h), { expired: false }, "nothing refused wrote OFF");
+  assert.deepEqual(await readEvents(h), { events: [], skipped: 0 }, "nor recorded a pause");
+});
+
+test("a pause the face cannot write is a 500 with a fixed message - never a pause reported", async () => {
+  const h = await home(); const rec = recorder();
+  await writeFile(join(h, "face"), "a file where the desk's directory should be");
+  registerDeskRoutes(rec, { home: h, bootedAt: AT, enabled: true, now: after(0) });
+  assert.deepEqual(await play(rec, "/data/desk/pause", { method: "POST", json: { until: "30m" } }), { status: 500, body: { ok: false, error: "request failed" } });
 });
 
 test("parseDuration", () => {

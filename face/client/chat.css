@@ -1638,3 +1638,29 @@ body {
 .strip-chip[data-state="answered"] .strip-state { color: var(--green); }
 .strip-chip[data-state="failed"] .strip-state, .strip-chip[data-state="timed-out"] .strip-state { color: var(--red); }
 .strip-chip[data-state="left"], .strip-chip.broken { opacity: 0.6; }
+
+/* ---------- the desk: phone bubbles, desk lines, the Desk panel ---------- (2026-10-21)
+   A message from the operator's phone is the operator's own words: their lane,
+   under a phone glyph, as a bot's answer sits under its avatar. A firing of the
+   desk's clock or an alert of its watch is the face's: a quiet line like a
+   room's, under its glyph. The Desk panel's cards are the sidebar's .sp-card
+   furniture; only the pause row, the pause line and the session rows are its
+   own (client/desk-panel.js). */
+.msg.op .phone-who {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 4px 3px 0;
+  text-transform: none;
+  letter-spacing: 0.04em;
+}
+.phone-glyph { font-size: 11px; color: var(--accent); }
+.desk-line .desk-glyph { margin-right: 6px; color: var(--accent); }
+
+.desk-pause-line { font-size: 12px; padding: 4px 0 2px; overflow-wrap: anywhere; }
+.desk-pause-line.paused { color: var(--danger); }
+.desk-pause { display: flex; gap: 6px; margin-top: 6px; }
+.desk-pause .picker-input { padding: 4px 8px; font-size: 12px; }
+.desk-pause .picker-btn { padding: 4px 12px; }
+.sp-v.bad { color: var(--red); }
+.desk-row-sub { display: flex; gap: 6px; margin-top: 3px; }

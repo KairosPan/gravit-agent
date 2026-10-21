@@ -17,7 +17,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 // mapper.js is plain ESM JS (it ships to the browser); tsconfig `allowJs`
 // lets this test import it and read its JSDoc-declared view-model type.
-import { mapFrame } from "../client/mapper.js";
+import { isInjectedSource, mapFrame } from "../client/mapper.js";
 
 const frames: unknown[] = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), "fixtures", "events.jsonl"),
@@ -559,4 +559,75 @@ test("summary-only settlement is visible, while empty reports and unrelated pros
     assert.equal(view.childSessionId, undefined);
     assert.equal(view.text, "Background subagent child-7 reported:");
   }
+});
+
+/* The desk's three sources (src/desk-session.ts `DeskMessageSource`): the operator's phone, and the
+ * face's own clock and watch. Spike 4 measured each written, replayed and read cold as these shapes. */
+
+/** A message the face sent the desk, as the follow delivers it; `live: false` maps the follow's raw record. */
+const deskMessage = (seq: number, text: string, source: Record<string, unknown>, live = true) => {
+  const event = { type: "user/message", seq, time: 1, surfaceOp: "append", data: {
+    id: `m-${seq}`, role: "user", content: [{ type: "text", text }], source,
+  } };
+  return mapFrame(live ? { type: "session/event", sessionId: "desk", event } : { type: "event", sessionId: "desk", event });
+};
+
+test("a phone message is the operator's own bubble, carrying the sender, the chat and the message id", () => {
+  const text = "[telegram · operator · 14:03 ET]\nNVDA now?";
+  const v = deskMessage(38, text, { kind: "telegram", from: 424242, chat: 424242, messageId: 7 });
+  assert.equal(v.kind, "bubble");
+  assert.equal(v.role, "operator", "the operator's words, in the operator's lane");
+  assert.equal(v.source, "telegram");
+  assert.equal(v.text, text, "the text as the model got it, provenance line and all");
+  assert.equal(v.interrupted, false);
+  assert.equal(v.from, 424242);
+  assert.equal(v.chat, 424242);
+  assert.equal(v.messageId, 7);
+  assert.equal(v.seq, 38);
+  assert.equal(v.sessionId, "desk");
+  assert.equal(v.surfaceOp, "append");
+  assert.deepEqual(v, deskMessage(38, text, { kind: "telegram", from: 424242, chat: 424242, messageId: 7 }, false), "the live event and the follow record map the same");
+  assert.equal(isInjectedSource(v.source), false, "never a context row");
+
+  const odd = deskMessage(39, "hi", { kind: "telegram", from: "424242", chat: null, messageId: 7.5 });
+  assert.equal(odd.kind, "bubble");
+  assert.equal(odd.source, "telegram");
+  for (const field of ["from", "chat", "messageId"] as const) assert.equal(Object.hasOwn(odd, field), false, `a malformed ${field} is dropped, never guessed`);
+});
+
+test("a firing of the desk's clock or watch is a desk line with its fields, as a round's end is a room line", () => {
+  const scheduleText = "[schedule · preclose · 2026-10-20]\nCheck the book before the close.";
+  const schedule = deskMessage(40, scheduleText, { kind: "schedule", order: "preclose", firing: "preclose:2026-10-20", date: "2026-10-20" });
+  assert.deepEqual(schedule, {
+    kind: "desk-line", line: "schedule", seq: 40, sessionId: "desk", surfaceOp: "append", text: scheduleText,
+    order: "preclose", firing: "preclose:2026-10-20", date: "2026-10-20",
+  });
+  const alertText = "[alert · NVDA · above 180]\nNVDA crossed 180.";
+  const alert = deskMessage(41, alertText, { kind: "alert", alert: "a-0001", symbol: "NVDA" });
+  assert.deepEqual(alert, {
+    kind: "desk-line", line: "alert", seq: 41, sessionId: "desk", surfaceOp: "append", text: alertText,
+    alert: "a-0001", symbol: "NVDA",
+  });
+  assert.deepEqual(alert, deskMessage(41, alertText, { kind: "alert", alert: "a-0001", symbol: "NVDA" }, false), "live and recorded alike");
+  assert.equal(alert.role, undefined, "the face's words: neither the operator's lane nor Gravit's");
+
+  const bare = deskMessage(42, "[schedule · ? · ?]", { kind: "schedule", order: 7, date: null });
+  assert.equal(bare.kind, "desk-line");
+  assert.equal(bare.line, "schedule");
+  for (const field of ["order", "firing", "date"] as const) assert.equal(Object.hasOwn(bare, field), false, `a malformed ${field} is dropped`);
+  assert.equal(deskMessage(43, "", { kind: "alert", alert: "a-1", symbol: "NVDA" }).kind, "ignore", "a textless message is nothing to draw, as every bubble's is");
+});
+
+test("every other kind is still an injected context row - the desk's own state injection and kinds not yet known included", () => {
+  for (const kind of ["desk", "runtime-context", "plugin:fs-observation", "room", "no-such-kind-yet"]) {
+    const v = deskMessage(44, "DESK STATE: NVDA 181.50", { kind, form: "state" });
+    assert.equal(v.kind, "bubble", kind);
+    assert.equal(v.role, "operator", kind);
+    assert.equal(v.source, kind);
+    assert.equal(isInjectedSource(v.source), true, `${kind} renders as a context row`);
+  }
+  for (const kind of ["user", "telegram", "schedule", "alert"]) assert.equal(isInjectedSource(kind), false, kind);
+  assert.equal(isInjectedSource(""), true, "a kind that is no known one is still a context row, never the operator's bubble");
+  // No kind at all is the rule as it stood: the mapper reports none, and the bubble is the operator's.
+  for (const kind of [undefined, null, 42, {}]) assert.equal(isInjectedSource(kind), false, JSON.stringify(kind));
 });

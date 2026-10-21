@@ -1,4 +1,4 @@
-import { mapFrame } from "./mapper.js";
+import { isInjectedSource, mapFrame } from "./mapper.js";
 
 /** Read one room answer's process from its member session, without opening,
  * prompting or ACTIVATING that session.
@@ -61,7 +61,7 @@ function traceOf(entries, sessionId, turn) {
     // live follow event becomes, so a trace maps exactly like the transcript.
     const view = mapFrame({ type: "session/event", sessionId, event });
     if (view.kind === "card") views.push(view);
-    else if (view.kind === "bubble" && view.role === "operator" && typeof view.source === "string" && view.source !== "user") views.push(view);
+    else if (view.kind === "bubble" && view.role === "operator" && isInjectedSource(view.source)) views.push(view);
     else if (view.kind === "bubble" && view.role === "gravit" && view.thinking) views.push({ ...view, text: "" });
   }
   // The fold is already applied. Never pass member replacement instructions

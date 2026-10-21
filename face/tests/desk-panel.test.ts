@@ -1,0 +1,451 @@
+/** The Desk panel (client/desk-panel.js): the status sections, the Pause control and the desk
+ * sessions, drawn into a fake DOM the way tests/answer-traces.test.ts draws the trace disclosure -
+ * only the operations the module uses, a node moved on append, text read back through `textContent`.
+ * The panel's data is a fake of chat.js's `panelData`: every call is recorded, and each answer is the
+ * test's to give.
+ */
+import assert from "node:assert/strict";
+import test from "node:test";
+// desk-panel.js is plain ESM JS (it ships to the browser); tsconfig `allowJs` lets this test import it.
+import {
+  DESK_GLYPHS, PAUSE_CHOICES, RESUME_LINE, createDeskPanel, deskLineText, deskSessionsOf, deskTime, deskTitle,
+} from "../client/desk-panel.js";
+
+/** The DOM operations the panel uses, and nothing else. */
+class Element {
+  readonly tagName: string;
+  children: Element[] = [];
+  parent: Element | null = null;
+  className = "";
+  title = "";
+  hidden = false;
+  disabled = false;
+  value = "";
+  selected = false;
+  type = "";
+  tabIndex = -1;
+  dataset: Record<string, string> = {};
+  private own = "";
+  private attributes = new Map<string, string>();
+  private listeners = new Map<string, ((event: unknown) => void)[]>();
+  constructor(tag: string) { this.tagName = tag.toLowerCase(); }
+  get textContent(): string { return this.own + this.children.map((child) => child.textContent).join(""); }
+  set textContent(text: string) { this.replaceChildren(); this.own = String(text); }
+  classList = {
+    add: (...names: string[]) => { for (const name of names) if (!this.hasClass(name)) this.className = `${this.className} ${name}`.trim(); },
+    remove: (...names: string[]) => { this.className = this.className.split(/\s+/).filter((c) => c !== "" && !names.includes(c)).join(" "); },
+    toggle: (name: string, force?: boolean) => {
+      const on = force ?? !this.hasClass(name);
+      if (on) this.classList.add(name); else this.classList.remove(name);
+      return on;
+    },
+    contains: (name: string) => this.hasClass(name),
+  };
+  hasClass(name: string): boolean { return this.className.split(/\s+/).includes(name); }
+  setAttribute(name: string, value: string) { this.attributes.set(name, String(value)); }
+  getAttribute(name: string): string | null { return this.attributes.get(name) ?? null; }
+  append(...nodes: Element[]) {
+    for (const node of nodes) { node.remove(); node.parent = this; this.children.push(node); }
+  }
+  replaceChildren(...nodes: Element[]) {
+    for (const child of this.children) child.parent = null;
+    this.children = [];
+    this.own = "";
+    this.append(...nodes);
+  }
+  remove() {
+    if (this.parent) this.parent.children.splice(this.parent.children.indexOf(this), 1);
+    this.parent = null;
+  }
+  addEventListener(type: string, listener: (event: unknown) => void) {
+    this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
+  }
+  /** Fire `type` at this node's own listeners; `prevented` says whether one called `preventDefault`. */
+  fire(type: string, fields: Record<string, unknown> = {}): { prevented: boolean } {
+    const out = { prevented: false };
+    for (const listener of this.listeners.get(type) ?? []) listener({ ...fields, target: this, preventDefault: () => { out.prevented = true; } });
+    return out;
+  }
+}
+
+/** Every node under `root`, `root` first, that `match` accepts. */
+function all(root: Element, match: (node: Element) => boolean): Element[] {
+  const out: Element[] = [];
+  const walk = (node: Element) => { if (match(node)) out.push(node); for (const child of node.children) walk(child); };
+  walk(root);
+  return out;
+}
+const byClass = (root: Element, name: string): Element[] => all(root, (node) => node.hasClass(name));
+const one = (root: Element, match: (node: Element) => boolean, what: string): Element => {
+  const found = all(root, match);
+  assert.equal(found.length, 1, `exactly one ${what}`);
+  return found[0];
+};
+
+/** The section cards, in order, by their `data-section`. */
+const sectionIds = (panel: Element): string[] => panel.children.map((card) => card.dataset.section ?? `<${card.className}>`);
+const section = (panel: Element, id: string): Element => one(panel, (node) => node.dataset.section === id, `section ${id}`);
+/** The value of a card's `label → value` row, or `undefined` when the card has no such row. */
+const kvValue = (card: Element, label: string): string | undefined =>
+  byClass(card, "sp-kv").find((row) => row.children[0]?.textContent === label)?.children[1]?.textContent;
+/** The pause line in the desk section. */
+const pauseLine = (panel: Element): string => one(section(panel, "desk"), (node) => node.hasClass("desk-pause-line"), "pause line").textContent;
+
+/** Run `body` with `document` faked; the panel's element is handed in. */
+async function withDOM(body: (panel: Element) => Promise<void> | void): Promise<void> {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", { configurable: true, value: { createElement: (tag: string) => new Element(tag) } });
+  try {
+    await body(new Element("div"));
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "document", previous);
+    else Reflect.deleteProperty(globalThis, "document");
+  }
+}
+
+/** A promise and the hands that settle it. */
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void; reject: (err: unknown) => void } {
+  let resolve!: (value: T) => void; let reject!: (err: unknown) => void;
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+
+/** Let every queued continuation run. */
+const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+/** 14:00 ET on 2026-10-20. */
+const AT = Date.parse("2026-10-20T18:00:00Z");
+
+/** What GET /data/desk/status answers (src/desk.ts `DeskStatus`): up 3 h 12 m, not paused. */
+const status = (fields: Record<string, unknown> = {}): Record<string, any> => ({
+  ok: true, pid: 11, version: "0.2.0-rc.2", bootedAt: "2026-10-20T14:48:00.000Z", uptimeMs: 3 * 3_600_000 + 12 * 60_000,
+  desk: { enabled: true, dir: "/home/.dsh/face/desk" }, asleep: [], runs: [],
+  deskSession: "session-desk-1",
+  turnsToday: { count: 3, usage: { uncachedInputTokens: 8123, outputTokens: 2411, cacheReadTokens: 51200, cacheWriteTokens: 900 } },
+  telegram: { configured: true, polling: true, lastPollAt: "2026-10-20T17:59:30.000Z", dropped: 2, lastDroppedFrom: 999, queued: 1 },
+  ...fields,
+});
+
+/** The sidebar's list (chat.js `lastSessions`, normalized by summaries.js): two desk sessions among others. */
+const SESSIONS = [
+  { sessionId: "session-desk-1", agentPreset: "gravit-desk", cwd: "/repo/desk/journal", updatedAt: AT, running: true, projections: { values: {} } },
+  { sessionId: "session-strategy", agentPreset: "gravit", cwd: "/repo/strategies/alpha", updatedAt: AT, projections: { values: { title: "alpha work" } } },
+  { sessionId: "session-desk-0", agentPreset: "gravit-desk", cwd: "/repo/desk/journal", updatedAt: Date.parse("2026-10-19T15:00:00Z"), projections: { values: { title: "Monday's desk" } } },
+  { sessionId: "session-bot", agentPreset: "buffett", cwd: "/repo/bots/buffett/journal", updatedAt: AT },
+];
+
+/** A panel over `panel`, with every data call recorded and answered by `answer`, every open recorded. */
+function harness(panel: Element, answer: (path: string, body?: Record<string, unknown>) => Promise<Record<string, any>>, opts: { sessions?: unknown[]; active?: string | null } = {}) {
+  const calls: [string, Record<string, unknown> | undefined][] = [];
+  const opened: string[] = [];
+  let sessions = opts.sessions ?? SESSIONS;
+  const desk = createDeskPanel({
+    panel: () => panel as any,
+    data: (path: string, body?: Record<string, unknown>) => { calls.push([path, body]); return answer(path, body); },
+    sessions: () => sessions as any[],
+    activeSession: () => opts.active ?? null,
+    open: (id: string) => { opened.push(id); },
+    now: () => AT,
+  });
+  return { desk, calls, opened, setSessions: (next: unknown[]) => { sessions = next; } };
+}
+
+/** The Pause control's select and button. */
+const pauseControl = (panel: Element) => ({
+  select: one(panel, (node) => node.tagName === "select", "pause select"),
+  button: one(panel, (node) => node.tagName === "button" && node.hasClass("desk-pause-btn"), "Pause button"),
+});
+
+test("deskSessionsOf keeps the desk's sessions in list order; deskTitle is the title, else Desk and the session's New York date", () => {
+  assert.deepEqual(deskSessionsOf(SESSIONS).map((s: any) => s.sessionId), ["session-desk-1", "session-desk-0"]);
+  assert.deepEqual(deskSessionsOf(undefined as any), []);
+  assert.deepEqual(deskSessionsOf([null, {}, { agentPreset: "gravit" }] as any), []);
+  assert.equal(deskTitle(SESSIONS[0]), "Desk · 2026-10-20");
+  assert.equal(deskTitle(SESSIONS[2]), "Monday's desk", "a title the session has wins");
+  assert.equal(deskTitle({ updatedAt: Date.parse("2026-10-21T02:30:00Z") }), "Desk · 2026-10-20", "still the 20th in New York");
+  assert.equal(deskTitle({ updatedAt: AT, projections: { values: { title: "" } } }), "Desk · 2026-10-20", "a blank title is none");
+  assert.equal(deskTitle({}), "Desk");
+  assert.equal(deskTitle({ updatedAt: 1e20 }), "Desk", "a time no Date holds names no day");
+});
+
+test("deskTime writes New York's wall clock, dated only on another New York date than now's", () => {
+  const now = new Date(AT);
+  assert.equal(deskTime(new Date("2026-10-20T18:03:00Z"), now), "14:03 ET");
+  assert.equal(deskTime(new Date("2026-10-20T04:00:00Z"), now), "00:00 ET", "midnight is 00, never 24");
+  assert.equal(deskTime(new Date("2026-10-21T13:05:00Z"), now), "2026-10-21 09:05 ET");
+  assert.equal(deskTime(new Date("2026-10-21T02:30:00Z"), now), "22:30 ET", "the 21st in UTC, the 20th in New York");
+  assert.equal(deskTime(new Date("not a time"), now), "—");
+});
+
+test("deskLineText names a firing's order and date, or an alert's symbol and id; the three glyphs are distinct", () => {
+  assert.equal(deskLineText({ kind: "desk-line", line: "schedule", order: "preclose", firing: "preclose:2026-10-20", date: "2026-10-20" }), "schedule · preclose · 2026-10-20");
+  assert.equal(deskLineText({ kind: "desk-line", line: "alert", alert: "a-0001", symbol: "NVDA" }), "alert · NVDA · a-0001");
+  assert.equal(deskLineText({ kind: "desk-line", line: "schedule" }), "schedule", "a field the source lacked is left out");
+  assert.deepEqual(Object.keys(DESK_GLYPHS).sort(), ["alert", "schedule", "telegram"]);
+  assert.equal(new Set(Object.values(DESK_GLYPHS)).size, 3);
+  assert.deepEqual(PAUSE_CHOICES.map((c: any) => c.until), ["30m", "2h", "1d", ""], "30m, 2h, 1d and open-ended, which sends no until");
+});
+
+test("the panel loads the status and draws its named sections in order: desk, telegram, desk conversation, turns today, desk sessions", () => withDOM(async (panel) => {
+  const answer = deferred<Record<string, any>>();
+  const { desk, calls } = harness(panel, () => answer.promise);
+  const loading = desk.refresh();
+  assert.match(panel.textContent, /loading/, "loading until the status lands");
+  answer.resolve(status());
+  await loading;
+  assert.deepEqual(calls, [["/data/desk/status", undefined]]);
+  assert.deepEqual(sectionIds(panel), ["desk", "telegram", "conversation", "turns", "sessions"]);
+
+  const head = section(panel, "desk");
+  assert.equal(kvValue(head, "desk"), "on");
+  assert.equal(kvValue(head, "up"), "3h 12m");
+  assert.equal(pauseLine(panel), "not paused");
+  assert.equal(head.textContent.includes(RESUME_LINE), false, "no resume line while nothing is paused");
+
+  const telegram = section(panel, "telegram");
+  assert.equal(kvValue(telegram, "bridge"), "polling");
+  assert.equal(kvValue(telegram, "last poll"), "13:59 ET");
+  assert.equal(kvValue(telegram, "dropped"), "2 · last from 999");
+  assert.equal(kvValue(telegram, "queued"), "1");
+  assert.equal(kvValue(telegram, "send"), undefined, "no blocked row while sends go through");
+  assert.equal(kvValue(telegram, "conflict"), undefined);
+
+  assert.equal(kvValue(section(panel, "conversation"), "session"), "Desk · 2026-10-20", "the ledger's desk session, by its row's title");
+
+  const turns = section(panel, "turns");
+  assert.deepEqual(["turns", "input", "output", "cache read", "cache write"].map((label) => kvValue(turns, label)), ["3", "8.1k", "2.4k", "51.2k", "900"]);
+
+  const rows = byClass(section(panel, "sessions"), "desk-row");
+  assert.deepEqual(rows.map((row) => row.dataset.sessionId), ["session-desk-1", "session-desk-0"], "the desk's sessions only, in list order");
+  assert.match(rows[0].textContent, /^Desk · 2026-10-20/);
+  assert.match(rows[0].textContent, /current/, "the conversation the phone talks to");
+  assert.match(rows[0].textContent, /running/);
+  assert.match(rows[1].textContent, /^Monday's desk/);
+  assert.doesNotMatch(rows[1].textContent, /current|running/);
+}));
+
+test("while paused the panel says since when, by whom and until when, and that a terminal resumes; it offers no resume", () => withDOM(async (panel) => {
+  let next = status({ off: { setAt: "2026-10-20T17:00:00.000Z", by: "telegram", until: "2026-10-20T19:00:00.000Z" } });
+  const { desk } = harness(panel, async () => next);
+  await desk.refresh();
+  assert.equal(pauseLine(panel), "paused since 13:00 ET by telegram until 15:00 ET");
+  assert.ok(section(panel, "desk").textContent.includes(RESUME_LINE), "the one line saying how it lifts");
+  assert.equal(RESUME_LINE, "a terminal resumes it: npm run desk -- resume");
+  assert.deepEqual(all(panel, (node) => node.tagName === "button" && /resume/i.test(node.textContent)), [], "no resume control on the page");
+
+  next = status({ off: { setAt: "2026-10-19T16:00:00.000Z", by: "terminal" } });
+  await desk.refresh();
+  assert.equal(pauseLine(panel), "paused since 2026-10-19 12:00 ET by terminal", "a pause set another day is dated; an open-ended one has no until");
+  assert.ok(section(panel, "desk").textContent.includes(RESUME_LINE));
+}));
+
+test("Pause posts the chosen length, or none for open-ended, and shows the pause the face answered with", () => withDOM(async (panel) => {
+  const posted = deferred<Record<string, any>>();
+  let answerPause: () => Promise<Record<string, any>> = () => posted.promise;
+  const { desk, calls } = harness(panel, async (path) => (path === "/data/desk/status" ? status() : answerPause()));
+  await desk.refresh();
+  let { select, button } = pauseControl(panel);
+  assert.equal(select.value, "30m", "30 minutes unless the operator picks another");
+  assert.deepEqual(select.children.map((option) => option.value), ["30m", "2h", "1d", ""]);
+  assert.equal(button.textContent, "Pause");
+
+  button.fire("click");
+  assert.deepEqual(calls.at(-1), ["/data/desk/pause", { until: "30m" }]);
+  ({ button } = pauseControl(panel));
+  assert.equal(button.disabled, true, "one pause at a time");
+  button.fire("click");
+  assert.equal(calls.length, 2, "a second click while one is in flight posts nothing");
+  // The face answers with the pause in force: a terminal's open-ended pause, which a 30 m one never shortens.
+  posted.resolve({ ok: true, off: { setAt: "2026-10-19T16:00:00.000Z", by: "terminal" } });
+  await settle();
+  assert.equal(pauseLine(panel), "paused since 2026-10-19 12:00 ET by terminal", "the answered state, not the one asked for");
+  assert.ok(section(panel, "desk").textContent.includes(RESUME_LINE));
+  ({ select, button } = pauseControl(panel));
+  assert.equal(button.disabled, false);
+
+  answerPause = async () => ({ ok: true, off: { setAt: "2026-10-20T18:00:00.000Z", by: "page" } });
+  select.value = "";
+  select.fire("change");
+  button.fire("click");
+  await settle();
+  assert.deepEqual(calls.at(-1), ["/data/desk/pause", {}], "open-ended sends no until");
+
+  ({ select, button } = pauseControl(panel));
+  assert.equal(select.value, "", "the choice survives the redraw");
+  select.value = "5y";
+  select.fire("change");
+  select.value = "2h";
+  select.fire("change");
+  button.fire("click");
+  await settle();
+  assert.deepEqual(calls.at(-1), ["/data/desk/pause", { until: "2h" }]);
+  ({ select } = pauseControl(panel));
+  select.value = "5y";
+  select.fire("change");
+  ({ button } = pauseControl(panel));
+  button.fire("click");
+  await settle();
+  assert.deepEqual(calls.at(-1), ["/data/desk/pause", { until: "2h" }], "a value that is no choice changes nothing");
+}));
+
+test("a pause the face refuses is said in the panel, and the button comes back", () => withDOM(async (panel) => {
+  const { desk } = harness(panel, async (path) => {
+    if (path === "/data/desk/status") return status();
+    throw new Error("until must look like 30m, 2h or 1d");
+  });
+  await desk.refresh();
+  pauseControl(panel).button.fire("click");
+  await settle();
+  const text = section(panel, "desk").textContent;
+  assert.ok(text.includes("pause: until must look like 30m, 2h or 1d"), text);
+  assert.equal(pauseLine(panel), "not paused", "the state on screen is still the last one read");
+  const { button } = pauseControl(panel);
+  assert.equal(button.disabled, false);
+  assert.equal(button.textContent, "Pause");
+}));
+
+test("an answer with no pause in it is a failure, never a pause shown", () => withDOM(async (panel) => {
+  const { desk } = harness(panel, async (path) => (path === "/data/desk/status" ? status() : { ok: true }));
+  await desk.refresh();
+  pauseControl(panel).button.fire("click");
+  await settle();
+  assert.match(section(panel, "desk").textContent, /pause: the face answered without the pause in force/);
+  assert.equal(pauseLine(panel), "not paused");
+}));
+
+test("a status that cannot be read is said; the Pause control and the desk sessions stay, and a pause then reads the status again", () => withDOM(async (panel) => {
+  let statusAnswer: () => Promise<Record<string, any>> = async () => { throw new Error("HTTP 500"); };
+  const { desk, calls } = harness(panel, async (path) => (path === "/data/desk/status" ? statusAnswer() : { ok: true, off: { setAt: "2026-10-20T18:00:00.000Z", by: "page", until: "2026-10-20T18:30:00.000Z" } }));
+  await desk.refresh();
+  assert.deepEqual(sectionIds(panel), ["desk", "sessions"], "nothing drawn from a status there is none of");
+  const text = section(panel, "desk").textContent;
+  assert.ok(text.includes("desk status: HTTP 500"), text);
+  assert.deepEqual(byClass(section(panel, "desk"), "desk-pause-line"), [], "an unread switch is not reported either way");
+  pauseControl(panel);
+  assert.equal(byClass(section(panel, "sessions"), "desk-row").length, 2);
+
+  statusAnswer = async () => status({ off: { setAt: "2026-10-20T18:00:00.000Z", by: "page", until: "2026-10-20T18:30:00.000Z" } });
+  pauseControl(panel).button.fire("click");
+  await settle();
+  await settle();
+  assert.deepEqual(calls.map(([path]) => path), ["/data/desk/status", "/data/desk/pause", "/data/desk/status"]);
+  assert.deepEqual(sectionIds(panel), ["desk", "telegram", "conversation", "turns", "sessions"]);
+  assert.equal(pauseLine(panel), "paused since 14:00 ET by page until 14:30 ET");
+}));
+
+test("a newer status wins: an answer that lands after a later one is dropped, and so is one a pause overtook", () => withDOM(async (panel) => {
+  const answers = [deferred<Record<string, any>>(), deferred<Record<string, any>>(), deferred<Record<string, any>>()];
+  let n = 0;
+  const { desk } = harness(panel, async (path) => (path === "/data/desk/status" ? answers[n++].promise : { ok: true, off: { setAt: "2026-10-20T18:00:00.000Z", by: "page" } }));
+  const first = desk.refresh();
+  const second = desk.refresh();
+  answers[1].resolve(status({ turnsToday: { count: 7, usage: { uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 } } }));
+  await second;
+  answers[0].resolve(status({ turnsToday: { count: 1, usage: { uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 } } }));
+  await first;
+  assert.equal(kvValue(section(panel, "turns"), "turns"), "7", "the later read stands");
+
+  const stale = desk.refresh(); // started before the pause, lands after it
+  pauseControl(panel).button.fire("click");
+  await settle();
+  assert.equal(pauseLine(panel), "paused since 14:00 ET by page");
+  answers[2].resolve(status());
+  await stale;
+  assert.equal(pauseLine(panel), "paused since 14:00 ET by page", "the status read before the pause does not undo it on screen");
+}));
+
+test("a desk session row opens in place, by click or by key, and the session on screen is marked", () => withDOM(async (panel) => {
+  const { desk, opened } = harness(panel, async () => status(), { active: "session-desk-0" });
+  await desk.refresh();
+  const rows = () => byClass(section(panel, "sessions"), "desk-row");
+  assert.deepEqual(rows().map((row) => row.hasClass("sel")), [false, true], "the session on screen when drawn");
+  const [current, older] = rows();
+  assert.equal(current.getAttribute("role"), "button");
+  assert.equal(current.tabIndex, 0);
+  assert.ok(current.title.includes("/repo/desk/journal") && current.title.includes("session-desk-1"), current.title);
+
+  current.fire("click");
+  assert.deepEqual(opened, ["session-desk-1"]);
+  assert.deepEqual(rows().map((row) => row.hasClass("sel")), [true, false]);
+  assert.equal(older.fire("keydown", { key: "Enter" }).prevented, true);
+  assert.equal(older.fire("keydown", { key: " " }).prevented, true);
+  older.fire("keydown", { key: "a" });
+  assert.deepEqual(opened, ["session-desk-1", "session-desk-0", "session-desk-0"]);
+
+  desk.mark("session-desk-1");
+  assert.deepEqual(rows().map((row) => row.hasClass("sel")), [true, false]);
+  desk.mark(null);
+  assert.deepEqual(rows().map((row) => row.hasClass("sel")), [false, false], "a session elsewhere marks none");
+}));
+
+test("syncSessions redraws the conversation and the sessions only: the Pause control on screen stays the same element", () => withDOM(async (panel) => {
+  const { desk, calls, setSessions } = harness(panel, async () => status());
+  await desk.refresh();
+  const { select } = pauseControl(panel);
+  select.value = "1d";
+  select.fire("change");
+  setSessions([{ sessionId: "session-desk-2", agentPreset: "gravit-desk", cwd: "/repo/desk/journal", updatedAt: AT + 3_600_000 }, ...SESSIONS]);
+  desk.syncSessions();
+  assert.equal(pauseControl(panel).select, select, "not rebuilt under the operator's hand");
+  assert.deepEqual(byClass(section(panel, "sessions"), "desk-row").map((row) => row.dataset.sessionId), ["session-desk-2", "session-desk-1", "session-desk-0"]);
+  assert.equal(calls.length, 1, "no status read for a list that moved");
+  await desk.refresh();
+  assert.notEqual(pauseControl(panel).select, select);
+  assert.equal(pauseControl(panel).select.value, "1d", "a full redraw keeps the operator's choice");
+}));
+
+test("the quiet cases: no desk session yet, no Telegram, the desk off, an unreadable ledger, a blocked bot", () => withDOM(async (panel) => {
+  let next = status({ deskSession: undefined, telegram: { configured: false, polling: false, dropped: 0, queued: 0 }, desk: { enabled: false, dir: "/d" }, ledgerError: "EISDIR" });
+  const { desk } = harness(panel, async () => next, { sessions: [] });
+  await desk.refresh();
+  assert.equal(kvValue(section(panel, "desk"), "desk"), "off (FACE_DESK=0)");
+  assert.match(section(panel, "desk").textContent, /ledger unreadable: EISDIR/);
+  assert.equal(section(panel, "telegram").textContent.includes("not configured (TELEGRAM_BOT_TOKEN and TELEGRAM_OPERATOR_ID in $DSH_HOME/.env)"), true);
+  assert.match(section(panel, "conversation").textContent, /none yet/);
+  assert.deepEqual(all(section(panel, "conversation"), (node) => node.tagName === "button"), [], "nothing to open");
+  assert.match(section(panel, "sessions").textContent, /no desk sessions yet/);
+
+  next = status({ deskSession: "session-gone", telegram: { configured: true, polling: false, dropped: 0, queued: 3, blocked: true, conflictAt: "2026-10-20T17:00:00.000Z" } });
+  await desk.refresh();
+  const telegram = section(panel, "telegram");
+  assert.equal(kvValue(telegram, "send"), "blocked (403)");
+  assert.equal(kvValue(telegram, "bridge"), "not polling");
+  assert.equal(kvValue(telegram, "last poll"), "none yet");
+  assert.equal(kvValue(telegram, "dropped"), "0");
+  assert.equal(kvValue(telegram, "conflict"), "13:00 ET");
+  assert.equal(kvValue(section(panel, "conversation"), "session"), "session-gone", "a session the list does not carry is named by its id");
+}));
+
+test("the desk conversation opens from its own card", () => withDOM(async (panel) => {
+  const { desk, opened } = harness(panel, async () => status());
+  await desk.refresh();
+  one(section(panel, "conversation"), (node) => node.tagName === "button", "open button").fire("click");
+  assert.deepEqual(opened, ["session-desk-1"]);
+}));
+
+test("the desk card's ↻ reads the status again", () => withDOM(async (panel) => {
+  let count = 3;
+  const { desk, calls } = harness(panel, async () => status({ turnsToday: { count: count++, usage: {} } }));
+  await desk.refresh();
+  assert.equal(kvValue(section(panel, "turns"), "turns"), "3");
+  const again = one(section(panel, "desk"), (node) => node.hasClass("desk-refresh"), "refresh button");
+  assert.equal(again.getAttribute("aria-label"), "refresh the desk's status");
+  again.fire("click");
+  await settle();
+  assert.deepEqual(calls.map(([path]) => path), ["/data/desk/status", "/data/desk/status"]);
+  assert.equal(kvValue(section(panel, "turns"), "turns"), "4");
+  assert.equal(kvValue(section(panel, "turns"), "input"), "—", "a usage the status lacks is a dash, never a zero");
+}));
+
+test("no panel element is no drawing, and no failure", () => withDOM(async () => {
+  const desk = createDeskPanel({
+    panel: () => null,
+    data: async () => status(),
+    sessions: () => [],
+    activeSession: () => null,
+    open: () => {},
+  });
+  await desk.refresh();
+  desk.syncSessions();
+  desk.mark("session-desk-1");
+}));
