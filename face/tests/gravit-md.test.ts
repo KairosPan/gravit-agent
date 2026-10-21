@@ -22,6 +22,14 @@ test("GRAVIT.md's bed table is docs/backtest-rules.md's, row for row", () => {
   assert.deepEqual(rows(GRAVIT_MD), expected, "a bed window changed in one file and not the other");
 });
 
+test("GRAVIT.md names the Account seat and its rule (spec 2026-10-20 §7)", () => {
+  const text = readFileSync(GRAVIT_MD, "utf8");
+  assert.match(text, /mcp__account__/);
+  assert.match(text, /paper venues only/);
+  assert.match(text, /portfolio_wait/);
+  assert.match(text, /account-seat-guide/);
+});
+
 test("GRAVIT.md states facts, not identity: it never tells the reader who it is", () => {
   const text = readFileSync(GRAVIT_MD, "utf8");
   assert.equal(/^You are /m.test(text), false);

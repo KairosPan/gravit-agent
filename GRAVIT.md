@@ -23,8 +23,9 @@ Three layers. MARKET and ACCOUNT are the `alpaca_kit` package: import it for bac
 
 Every dated market read goes through `replay_days` (backtests) or the alpaca-kit MCP tools
 (interactive). A bare `make_source()` returns a RAW source with no lookahead guard: wrap it in
-`GuardedSource` with an `AsOfGuard` for the day, or do not read it. The AKShare tools
-(`mcp__akshare__*`) are public A-share queries with NO guard — never backtest evidence.
+`GuardedSource` with an `AsOfGuard` for the day, or do not read it. The AKShare
+(`mcp__akshare__*`) and Account seat (`mcp__account__*`) tools are public, unguarded queries — never
+backtest evidence.
 `akshare_discover` finds a method and its category tool; `stock_zh_a_spot_tx` is the verified
 Tencent A-share snapshot method, while Eastmoney and Xueqiu endpoints may fail or require a
 login. Check every result's errors, timestamps and `truncated` (the default limit is 500 rows;
@@ -60,12 +61,16 @@ the commit to the operator. git log is the audit trail.
 
 A channel whose roster has bots is a room; Gravit organizes it with `dispatch`. Caps per
 operator message: 3 rounds, 10 bot messages, 2 peer continuations per round. The operator's
-`@<bot>` reaches a voice directly. An `@` naming nobody on the roster reaches Gravit as an
-ordinary prompt; no voice answers it, so the answer is Gravit's own.
+`@<bot>` reaches a voice directly; an `@` naming nobody on the roster is an ordinary prompt to Gravit.
+
+## The Account seat
+
+`mcp__account__*`: Gravit's seat at the operator's Account — paper venues only; a write stops for a
+card here, then one there; after a `card` answer, `portfolio_wait`; see `account-seat-guide`.
 
 ## Tests
 
-`python -m pytest` at the repo root: offline, no keys. Keep it green.
+`python -m pytest` at the repo root: offline, no keys.
 
 ## Never edit
 
