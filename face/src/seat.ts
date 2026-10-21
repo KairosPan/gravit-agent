@@ -10,12 +10,15 @@
  *
  * Failure is a state, not an error: an unreachable, refusing, hanging or
  * unreadable service answers `reachable: false` with the failure's CODE
- * (`ECONNREFUSED`, `timeout`, `http 403`, `unreadable`), never its text, and
- * nothing is served stale — the service's absence is the fact to show. Every
- * answer is cached for {@link SEAT_TTL_MS} (the unreachable one too, so a
- * hanging service costs one timeout a half-minute); `?fresh=1` skips the
- * cache, as the account route's Refresh does; concurrent reads share one
- * fetch. */
+ * (`ECONNREFUSED`, `timeout` — the headers or the body past the abort —,
+ * `http 403`, `unreadable`), never its text, and nothing is served stale — the
+ * service's absence is the fact to show; a seat row the operator disabled
+ * answers `disabled` and asks nothing. Every answer is cached for
+ * {@link SEAT_TTL_MS} (the unreachable one too, so a hanging service costs one
+ * timeout a half-minute); `?fresh=1` skips the cache, as the account route's
+ * Refresh does, and never joins a plain read already in flight — it asks again
+ * once that one settles, so the read after a receipt sees the card the receipt
+ * announced; plain reads share one fetch, fresh reads share one fetch. */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { ACCOUNT_SEAT_NAME, seatUrl } from "./account-seat.ts";
 import { isTrustedDataRequest } from "./data.ts";
@@ -90,6 +93,8 @@ export interface SeatDeps {
   fetch?: typeof fetch;
   now?: () => number;
   timeoutMs?: number;
+  /** The composed `mcp-account` row is disabled: the route answers `disabled` and never asks the Account. */
+  disabled?: boolean;
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
@@ -178,7 +183,8 @@ export function seatView(account: unknown, seatName: string, url: string, nowMs:
     const row: SeatVenue = { id, name: str(v.name) ?? id, paper: v.paper === true, usd: num(v.usd) };
     const frontLine = str(v.frontLine);
     if (frontLine !== undefined) row.frontLine = frontLine;
-    if (v.stale === true) row.stale = true;
+    /* The Account's `stale` is its words for why (`exchange.ts:1661` at 133b9a7: `stale?: string`), `true` on a holdings row. */
+    if (v.stale === true || (typeof v.stale === "string" && v.stale.trim() !== "")) row.stale = true;
     const said = isRecord(v.notServed) ? str(v.notServed.said) : undefined;
     if (said !== undefined) row.notServed = said;
     return row;
@@ -219,7 +225,10 @@ export function registerSeatRoute(webServer: RouteRegistrar, deps: SeatDeps = {}
   const now = deps.now ?? Date.now;
   const timeoutMs = deps.timeoutMs ?? SEAT_TIMEOUT_MS;
   let cache: { body: string; at: number } | undefined;
-  let flight: Promise<string> | undefined;
+  /** The read in flight, and whether it is a fresh one: a plain read joins any
+   * flight, a fresh read joins only a fresh one and otherwise asks again after
+   * the plain one settles (`read` never rejects). */
+  let flight: { body: Promise<string>; fresh: boolean } | undefined;
 
   const unreachable = (error: string): string => JSON.stringify({ ok: true, url, reachable: false, error } satisfies SeatView);
 
@@ -236,7 +245,7 @@ export function registerSeatRoute(webServer: RouteRegistrar, deps: SeatDeps = {}
           json = await r.json();
           body = JSON.stringify(seatView(json, seatName, url, now()));
         } catch {
-          body = unreachable("unreadable");
+          body = unreachable(controller.signal.aborted ? "timeout" : "unreadable");
         }
       }
     } catch (err) {
@@ -246,6 +255,15 @@ export function registerSeatRoute(webServer: RouteRegistrar, deps: SeatDeps = {}
     }
     cache = { body, at: now() };
     return body;
+  };
+
+  const fly = (fresh: boolean): Promise<string> => {
+    if (flight !== undefined && (!fresh || flight.fresh)) return flight.body;
+    const after = flight?.body;
+    const own: { body: Promise<string>; fresh: boolean } = { body: after === undefined ? read() : after.then(read), fresh };
+    flight = own;
+    void own.body.finally(() => { if (flight === own) flight = undefined; });
+    return own.body;
   };
 
   const send = (res: ServerResponse, status: number, body: string): void => {
@@ -258,10 +276,10 @@ export function registerSeatRoute(webServer: RouteRegistrar, deps: SeatDeps = {}
     path: "/data/seat.json",
     handler: async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
       if (!isTrustedDataRequest(req)) return send(res, 403, FORBIDDEN);
+      if (deps.disabled === true) return send(res, 200, unreachable("disabled"));
       const fresh = /[?&]fresh=1(?:&|$)/.test(req.url ?? "");
       if (!fresh && cache !== undefined && now() - cache.at < SEAT_TTL_MS) return send(res, 200, cache.body);
-      if (flight === undefined) flight = read().finally(() => { flight = undefined; });
-      return send(res, 200, await flight);
+      return send(res, 200, await fly(fresh));
     },
   });
 }

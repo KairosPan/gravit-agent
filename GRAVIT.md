@@ -24,8 +24,8 @@ Three layers. MARKET and ACCOUNT are the `alpaca_kit` package: import it for bac
 Every dated market read goes through `replay_days` (backtests) or the alpaca-kit MCP tools
 (interactive). A bare `make_source()` returns a RAW source with no lookahead guard: wrap it in
 `GuardedSource` with an `AsOfGuard` for the day, or do not read it. The AKShare
-(`mcp__akshare__*`) and Account seat (`mcp__account__*`) tools are public, unguarded queries — never
-backtest evidence.
+(`mcp__akshare__*`) tools and the Account seat's market reads (`mcp__account__*`) are unguarded —
+never backtest evidence.
 `akshare_discover` finds a method and its category tool; `stock_zh_a_spot_tx` is the verified
 Tencent A-share snapshot method, while Eastmoney and Xueqiu endpoints may fail or require a
 login. Check every result's errors, timestamps and `truncated` (the default limit is 500 rows;

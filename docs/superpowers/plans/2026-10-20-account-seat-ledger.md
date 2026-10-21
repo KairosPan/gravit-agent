@@ -240,18 +240,38 @@ has no timeout, dsh waits for the first connection); a pre-existing seat key wit
 reviewer (the executor's runs stand); and the spec's §6.1 naming `batch · 3 legs` as the card — a
 spec defect, recorded here, the spec to be amended in the next docs pass.
 
-### Deferred minors (final review)
+### Deferred minors (final review) — fixed 2026-10-21 on the operator's word
 
-- A venue's `stale` is a string reason at the Account; `seatView` marks stale only on `true`.
-- The earn `product` and pay `body` fields are cut at 40 characters on the card (no such limit is
-  granted this round).
-- A body stalling past the abort after the headers arrive reads `unreadable`, not `timeout`.
-- A `?fresh=1` read joins an in-flight plain read; the read right after a receipt can return a view
-  from before the card existed, cached 30 s.
-- `GRAVIT.md` calls every seat tool a public unguarded query; only its market reads are.
-- No unit pin that `orderGuardReason` refuses a seat write without a grant and admits it with one.
-- R34/D17 lack the seat's R1: a shell turn can read the seat's key file and sign at the Account's
-  door with no Gate 2.
-- The box ignores a patched row (it reads the env and the constant name, not the composed config).
-- A README line to check for an agent already named Gravit before the first boot; a drill for a
-  service that hangs at boot; the seat's startup GET without a timeout.
+Each under a failing test first, the whole face suite green after (1075 tests, 1058 pass, 17
+skipped), the seat smoke re-run against the stand-in (1/1), typecheck clean:
+
+- A venue's `stale` is a string reason at the Account; `seatView` marked stale only on `true` —
+  any words mark it stale now (`seat`: "a venue's stale is the Account's words").
+- The earn `product` and pay `body` fields were cut at 40 characters on the card — both are key
+  fields now, whole up to 120 or the call denied (`orders`: "an earn product and a pay body are key
+  fields"); the pre-existing non-key example moved to `contentType`.
+- A body stalling past the abort read `unreadable` — `timeout` now (`seat`: "a body that stalls past
+  the timeout").
+- A `?fresh=1` read joined an in-flight plain read — it asks again after that one settles, so the
+  read after a receipt sees the card; plain reads share one flight, fresh reads share one (`seat`:
+  "a fresh read never joins a plain read in flight").
+- `GRAVIT.md` called every seat tool a public unguarded query — only the seat's market reads are,
+  4,496 bytes (`gravit-md`: a `doesNotMatch` pin).
+- No unit pin on `orderGuardReason` for a seat write — pinned: denied without a grant, admitted with
+  one for this call, a grant for the Alpaca tool does not open the seat's, a seat read needs none,
+  through `orderGuardReasonForSession` too (`orders`; a pin, green at once).
+- R34/D17 lacked the seat's R1 — both carry it: a shell turn can read the seat's key file and sign
+  at the Account's door with no Gate 2 card; the Account's Guard and limits bound it.
+- The box ignored a patched row — `composedSeatRow` reads the `mcp-account` row AS COMPOSED off the
+  Loader's entries (a patched URL or seat name, a disabled row, a throwing `disabled`), `main.ts`
+  hands it to the route, a disabled row answers `error: "disabled"` without a read and the box says
+  `seat disabled` (`account-seat`, `seat`, `account-view`; the smoke asserts the composed row is its
+  own patch).
+- The README's pre-boot check (an agent already named Gravit), the hang drill (step 7) and the
+  seat's startup GET: the hang measured — a listener that accepts and never answers stalls
+  `bootFace` 123 s (dsh-mcp-client's probe and serving processes each wait the MCP SDK's 60 s
+  `initialize`), then the row is active with no tools and `/data/seat.json` says `timeout` in 7 s;
+  the GET's own timeout is Linqi's one-line change, recorded in the README and DEVELOPMENT §3.1.
+
+The spec's §6.1 and §6.2 were amended in the same pass (the batch card lists every leg; the batch
+receipt counts cards raised and refusals).

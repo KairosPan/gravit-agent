@@ -60,6 +60,43 @@ export function seatUrl(): string {
   return process.env.FACE_ACCOUNT_URL || DEFAULT_SEAT_URL;
 }
 
+/** One Loader entry as the seat box reads it (structural; the Loader's own
+ * `Entry` is `@deepseek-ai/cordis-plugin-loader`'s, which the face does not
+ * declare): the row's id and its COMPOSED config, and `disabled`, a getter that
+ * evaluates `!!js` expressions and so can throw. */
+export interface SeatEntryLike {
+  options: { id: string; config?: unknown };
+  readonly disabled?: boolean;
+}
+
+/** The `mcp-account` row as it booted: disabled by an operator patch, or its
+ * service URL and seat name (the row's `env`, patched or the face's own). */
+export type SeatRowStanding = { disabled: true } | { disabled: false; url: string; seatName: string };
+
+/** The seat row the tree actually composed — an operator patch may have
+ * replaced its config (another service, another seat name) or disabled it —
+ * so the box and `/data/seat.json` follow the row, not the environment this
+ * module read at boot. A `disabled` getter that throws is read as disabled:
+ * the row audit refuses such a boot anyway. `undefined`: no such row. */
+export function composedSeatRow(entries: Iterable<SeatEntryLike>): SeatRowStanding | undefined {
+  for (const entry of entries) {
+    if (entry.options.id !== ACCOUNT_SEAT_ROW_ID) continue;
+    try {
+      if (entry.disabled === true) return { disabled: true };
+    } catch {
+      return { disabled: true };
+    }
+    const config = entry.options.config;
+    const env = config !== null && typeof config === "object" && "env" in config && config.env !== null && typeof config.env === "object"
+      ? (config.env as Record<string, unknown>)
+      : {};
+    const url = typeof env.PORTFOLIO_URL === "string" && env.PORTFOLIO_URL !== "" ? env.PORTFOLIO_URL : DEFAULT_SEAT_URL;
+    const seatName = typeof env.PORTFOLIO_AGENT === "string" && env.PORTFOLIO_AGENT !== "" ? env.PORTFOLIO_AGENT : ACCOUNT_SEAT_NAME;
+    return { disabled: false, url, seatName };
+  }
+  return undefined;
+}
+
 /** The row. Startup never installs anything: an unavailable seat is logged by
  * dsh and does not take down the chat host. */
 export function accountSeatPatches(dir = seatDir(), url = seatUrl()): FacePatchList {

@@ -287,7 +287,7 @@ test("orderApprovalDecision: a key field the card cannot show whole is denied, n
   assert.match(deny({ url: "https://u:p@api.example.com/x", maxAmount: 1 }), /its url carries userinfo/);
   assert.match(deny({ url: "not a url", maxAmount: 1 }), /its url does not parse/);
   assert.equal(deny({ url: "https://api.example.com/x", maxAmount: 1 }), "ask");
-  assert.equal(deny({ url: "https://api.example.com/x", maxAmount: 1, body: "b".repeat(500) }), "ask", "a long field that is not a key field is cut, not denied");
+  assert.equal(deny({ url: "https://api.example.com/x", maxAmount: 1, contentType: "c".repeat(500) }), "ask", "a long field that is not a key field is cut, not denied");
   const move = orderApprovalDecision("mcp__account__portfolio_live_move", "ask", { kind: "send", from: "wallet", asset: "USDC", amount: 5, to: `0x${"f".repeat(40)}` });
   assert.equal(move?.kind, "ask", "a 42-character address is shown whole and asked about");
 });
@@ -502,4 +502,32 @@ test("isOrderTool: an unknown tool at the seat is carded until it is classified;
   assert.equal(isOrderTool("mcp__other__portfolio_sweep"), false);
   const d = orderApprovalDecision("mcp__account__portfolio_sweep", "ask", { venue: "paper-1", all: true });
   assert.match(d?.kind === "ask" ? d.reason ?? "" : "", /^Account seat - mcp__account__portfolio_sweep: venue=paper-1 all=true$/);
+});
+
+/* --- the deferred minors of the final review, fixed 2026-10-21 ---------------- */
+
+test("orderApprovalDecision: an earn product and a pay body are key fields - whole on the card, or the call denied", () => {
+  const reasonOf = (d: ReturnType<typeof orderApprovalDecision>): string => (d?.kind === "ask" || d?.kind === "deny" ? d.reason ?? "" : String(d?.kind));
+  const product = `okx-flexible-${"u".repeat(60)}`;
+  const earn = orderApprovalDecision("mcp__account__portfolio_live_earn", "ask", { venue: "paper-1", kind: "supply", product, asset: "USDT", amount: 5 });
+  assert.equal(earn?.kind, "ask");
+  assert.ok(reasonOf(earn).includes(`product=${product}`), `the product id is shown whole: ${reasonOf(earn)}`);
+  const body = JSON.stringify({ prompt: "x".repeat(80) });
+  const pay = orderApprovalDecision("mcp__account__portfolio_pay", "ask", { url: "https://api.example.com/x", maxAmount: 1, from: "float-1", method: "POST", body });
+  assert.equal(pay?.kind, "ask");
+  assert.ok(reasonOf(pay).includes(`body=${body}`), `a short body is shown whole: ${reasonOf(pay)}`);
+  const long = orderApprovalDecision("mcp__account__portfolio_pay", "ask", { url: "https://api.example.com/x", maxAmount: 1, from: "float-1", method: "POST", body: "x".repeat(121) });
+  assert.equal(long?.kind, "deny");
+  assert.match(reasonOf(long), /its body is 121 characters, too long to show whole on a card/);
+});
+
+test("orderGuardReason: a seat write with no grant is denied, with a logged allowed-once for this call it passes, a seat read needs none", () => {
+  const write = "mcp__account__portfolio_live_order";
+  assert.match(orderGuardReason(write, undefined, [], "c1") ?? "", /without a logged allowed-once/);
+  const seatGrant = [asked("s1", "c1", write), decided("s1", "allowed-once")];
+  assert.equal(orderGuardReason(write, undefined, seatGrant, "c1"), undefined);
+  assert.notEqual(orderGuardReason(write, undefined, granted, "c1"), undefined, "a grant for the Alpaca tool does not open the seat's");
+  assert.equal(orderGuardReason("mcp__account__portfolio_account", undefined, [], "c1"), undefined);
+  assert.equal(orderGuardReasonForSession(write, undefined, { snapshotEvents: () => seatGrant }, "c1"), undefined);
+  assert.match(orderGuardReasonForSession(write, undefined, { snapshotEvents: () => [] }, "c1") ?? "", /without a logged allowed-once/);
 });

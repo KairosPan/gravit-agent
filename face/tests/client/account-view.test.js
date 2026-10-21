@@ -122,3 +122,8 @@ test('the statement keeps every fill: a partly filled order canceled later, or s
   ] };
   assert.deepEqual(statementOf(data).map(r => [r.symbol, r.qty, r.amount]), [['KO', 3, 180], ['AAPL', 4, 600]]);
 });
+
+test('seatWords: a disabled seat row says so, and nothing else', () => {
+  const off = seatWords({ ok: true, url: 'http://127.0.0.1:4820', reachable: false, error: 'disabled' });
+  assert.equal(off.service, '127.0.0.1:4820 · seat disabled'); assert.equal(off.seat, ''); assert.deepEqual(off.venues, []); assert.equal(off.url, 'http://127.0.0.1:4820');
+});

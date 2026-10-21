@@ -21,6 +21,7 @@ import { installBotRuntime, registerBotRuntimeRoutes } from "./bot-runtime.ts";
 import { readBotJournal } from "./bot-journal.ts";
 import { BOTS_ROOT } from "./overlay.ts";
 import { registerDataRoutes } from "./data.ts";
+import { composedSeatRow, type SeatEntryLike } from "./account-seat.ts";
 import { registerSeatRoute } from "./seat.ts";
 import { registerStatic, type IndexAuth } from "./static.ts";
 import { registerSessionRoutes } from "./sessions.ts";
@@ -168,9 +169,13 @@ registerStatic(booted.ctx.webServer, clientDir, connection);
  * seam belongs on the entry point — `spawn`/`now` exist for the tests. */
 disposeData = registerDataRoutes(booted.ctx.webServer);
 /* The Account seat's standing for the screen (src/seat.ts): a loopback read of
- * the Account's own /api/account, its defaults from src/account-seat.ts; it
- * touches no key and no home. */
-registerSeatRoute(booted.ctx.webServer);
+ * the Account's own /api/account at the URL and under the seat name of the
+ * `mcp-account` row AS COMPOSED — an operator patch may have pointed it
+ * elsewhere, renamed the seat or disabled the row — so the box never reports a
+ * seat the face did not mount; it touches no key and no home. */
+const seatLoader = booted.ctx.get("loader") as { entries(): Iterable<SeatEntryLike> } | undefined;
+const seatRow = seatLoader === undefined ? undefined : composedSeatRow(seatLoader.entries());
+registerSeatRoute(booted.ctx.webServer, seatRow === undefined ? {} : seatRow.disabled ? { disabled: true } : { url: seatRow.url, seatName: seatRow.seatName });
 /* The channel picker's data (sidebar + landing page) and the new-channel copy
  * action. `process.cwd()` is the workbench repo root — the chdir above put it
  * there. `dshHome` is resolved the same way every other route family here

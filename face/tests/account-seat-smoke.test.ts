@@ -21,7 +21,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setupFaceProfile } from "../src/setup.ts";
 import { bootFace, type FacePatchList } from "../src/boot.ts";
-import { ACCOUNT_SEAT_ROW_ID, ACCOUNT_SEAT_SERVER, SEAT_TOOL_PREFIX } from "../src/account-seat.ts";
+import { ACCOUNT_SEAT_ROW_ID, ACCOUNT_SEAT_SERVER, SEAT_TOOL_PREFIX, composedSeatRow, type SeatEntryLike } from "../src/account-seat.ts";
 import { auditOrderTools, SEAT_WRITE_RAW_NAMES } from "../src/orders.ts";
 import { registerSeatRoute, type SeatView } from "../src/seat.ts";
 import { mountClient, remote, signIn } from "./remote.ts";
@@ -188,6 +188,8 @@ test("account seat smoke: the seat mounts, its writes are gated, a read answers,
     /* 8. The route reads the stand-in as the face would: the seat admitted
      * under its seeded name until a day the Account names, the paper venue
      * marked, the cards just raised. */
+    const loader = ctx.get("loader") as { entries(): Iterable<SeatEntryLike> };
+    assert.deepEqual(composedSeatRow(loader.entries()), { disabled: false, url: standin.url, seatName: SEEDED_AGENT_ID }, "the box reads the row as composed, this test's patch included");
     registerSeatRoute(ctx.webServer, { url: standin.url, seatName: SEEDED_AGENT_NAME });
     const read = await fetch(`${base}/data/seat.json?fresh=1`);
     assert.equal(read.status, 200);

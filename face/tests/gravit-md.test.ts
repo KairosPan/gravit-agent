@@ -28,6 +28,7 @@ test("GRAVIT.md names the Account seat and its rule (spec 2026-10-20 §7)", () =
   assert.match(text, /paper venues only/);
   assert.match(text, /portfolio_wait/);
   assert.match(text, /account-seat-guide/);
+  assert.doesNotMatch(text, /Account seat \(`mcp__account__\*`\) tools are public/, "only the seat's market reads are unguarded queries; its writes are gated");
 });
 
 test("GRAVIT.md states facts, not identity: it never tells the reader who it is", () => {

@@ -335,19 +335,27 @@ on an order Gravit places there is two cards: the face's `Your call` card in the
 then the Account's Guard card on its Portfolio page (thirty minutes), signed with your device
 key; Gravit waits on it with `portfolio_wait`.
 
+Before the first boot, look at the Account page's Agents list: a seat already named **Gravit** there
+— an earlier install's, or one renamed to it — is the one the Venues box reads and the one a new
+grant lands on; rename or revoke it first, or the new seat knocks beside it and the box shows the
+old one's standing.
+
 | Env | Default | What |
 |---|---|---|
 | `FACE_ACCOUNT_SEAT_DIR` | `~/buyer-agent-demo` | the installed checkout the seat process runs from |
-| `FACE_ACCOUNT_URL` | `http://127.0.0.1:4820` | the running service (the seat's `PORTFOLIO_URL`; `/data/seat.json` reads the same) |
+| `FACE_ACCOUNT_URL` | `http://127.0.0.1:4820` | the running service (the seat's `PORTFOLIO_URL`; `/data/seat.json` reads the row as composed, a patch's URL and seat name included) |
 
 The checks: after a boot, `/data/plugins.json` lists `server: "account"` with 35 tools and the
 boot line reads `order gate armed for mcp__account__portfolio_live_order, …`; Account › Venues
 shows the **Account seat** box — the service reachable, the seat admitted until when with its
 limit, the paper venue marked, the cards waiting, and **Open the Account page**. A missing
 checkout or a stopped service is a logged spawn failure and a `not reachable` box, never a
-failed boot. The seat's key is the Account's, `~/.buyer-agent-demo/seats/gravit.json` (0600),
+failed boot; a service that accepts the connection and never answers stalls the boot about two
+minutes and the row then comes up without tools (the drill's step 7). The seat's key is the Account's, `~/.buyer-agent-demo/seats/gravit.json` (0600),
 made on the seat's first call; the face never reads it. An operator patch can disable the row
-(`- { id: mcp-account, disabled: true }`) or replace its config whole.
+(`- { id: mcp-account, disabled: true }`) or replace its config whole; the box and `/data/seat.json`
+follow the row as composed — a disabled row reads `seat disabled`, a patched `PORTFOLIO_URL` or
+`PORTFOLIO_AGENT` is where and whom they read.
 
 What the service does on its own, with no venue connected (read at 133b9a7,
 `src/portfolio/live/reach.ts`, `location.ts`): every thirty minutes a keyless probe of each
@@ -2722,6 +2730,16 @@ limit on it ("The Account seat" above), the face started with keys, a channel se
 6. **Decline.** Ask for another paper order and press ✗: the tool answer is dsh's `the user
    rejected tool "mcp__account__portfolio_live_order"`, nothing reaches the seat (the Account's
    page shows no new card).
+7. **The hang.** Stop the service and in its place start a listener that accepts and never answers
+   (`node -e "require('net').createServer(()=>{}).listen(4820,'127.0.0.1')"`), then start the face:
+   the boot stalls about two minutes — the seat's startup GET of `/api/account` has no timeout of
+   its own (`src/portfolio/mcp.ts:71` at 133b9a7), so its MCP `initialize` never comes and dsh waits
+   out the MCP SDK's 60 s request timeout twice, once for its probe process and once for the serving
+   one (measured: 123 s) — then comes up with the `mcp-account` row active and no seat tools: the
+   boot line has no `order gate armed for mcp__account__…`, Discover's MCP shelf lists `account`
+   with 0 tools, and Account › Venues reads `not reachable` within seven seconds (`timeout`). Stop
+   the listener, start the service, restart the face. Bounding that GET is a one-line change on
+   Linqi's side (`AbortSignal.timeout` in `call()`); the face cannot bound a child's first request.
 
 **PASS criteria are observations.** Record the run in `DEVELOPMENT.md` §7.4 with the date and
 the checkout's pin (`git -C ~/buyer-agent-demo rev-parse --short HEAD`).

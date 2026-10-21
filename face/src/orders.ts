@@ -218,10 +218,10 @@ export function orderApprovalDecision(
 /** The argument keys the operator decides on — where a cut could hide what
  * matters (an address's tail, an id's tail, a venue, a symbol); a URL is its
  * own case ({@link urlWord}). */
-const WHOLE_KEYS = ["venue", "from", "to", "symbol", "order", "asset", "account", "base", "order_id"];
+const WHOLE_KEYS = ["venue", "from", "to", "symbol", "order", "asset", "account", "base", "order_id", "product", "body"];
 
 /** Most characters a key field may have and still be shown whole on a card;
- * past it the call is denied rather than carded with a cut ({@link overlongKeyField}). */
+ * past it the call is denied rather than carded with a cut ({@link unshowableKeyField}). */
 const MAX_KEY_FIELD = 120;
 
 /** A payee's URL as the card may show it: whole, when it is http or https,
@@ -341,7 +341,7 @@ export function describeOrder(name: string, args: unknown): string {
  * surfaced is never governed). */
 const KNOWN_KEYS = [
   "side", "qty", "usd", "symbol", "order_type", "orderType", "limit_price", "limitPrice", "stopPrice", "order_id", "order",
-  "venue", "kind", "from", "asset", "amount", "leverage", "url", "maxAmount",
+  "venue", "kind", "from", "asset", "product", "amount", "leverage", "url", "maxAmount", "method", "body",
 ];
 
 /** One scalar on the card. Model-controlled text on the operator's only line

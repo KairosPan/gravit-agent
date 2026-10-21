@@ -212,3 +212,50 @@ test("the route: a 403 or a 500 says http <status>; unparsable JSON says unreada
   await call(routeWith(spy, () => NOW).route);
   assert.equal(seen?.redirect, "error");
 });
+
+/* --- the deferred minors of the final review, fixed 2026-10-21 ---------------- */
+
+test("seatView: a venue's stale is the Account's words; any words mark it stale, none do not", () => {
+  const v = seatView(account({ venues: [{ id: "okx", name: "OKX", stale: "the venue did not answer this time" }, { id: "paper-1", paper: true, stale: "" }, { id: "ex", name: "ex" }] }), "Gravit", URL_, NOW);
+  assert.deepEqual(v.venues?.map((x) => [x.id, x.stale]), [["okx", true], ["paper-1", undefined], ["ex", undefined]]);
+});
+
+test("the route: a body that stalls past the timeout says timeout, not unreadable", async () => {
+  const stalling: FakeFetch = async (_url, init) => ({ ok: true, status: 200, json: () => new Promise((_resolve, reject) => {
+    init.signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })));
+  }) });
+  const { route } = routeWith(stalling, () => NOW, 20);
+  assert.deepEqual((await call(route)).json, { ok: true, url: URL_, reachable: false, error: "timeout" });
+});
+
+test("the route: a fresh read never joins a plain read in flight - it asks again after it, and the later answer is the cache", async () => {
+  type Answer = { ok: boolean; status: number; json(): Promise<unknown> };
+  const gates: Array<(v: Answer) => void> = [];
+  const { route, fetched } = routeWith(() => new Promise<Answer>((r) => { gates.push(r); }), () => NOW);
+  const plain = fakeRes(); const fresh = fakeRes();
+  const p1 = route.handler(req(), plain.res);
+  const p2 = route.handler(req("/data/seat.json?fresh=1"), fresh.res);
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(fetched.length, 1, "the fresh read waits for the plain one to settle");
+  gates[0]({ ok: true, status: 200, json: async () => account({ cards: [] }) });
+  await p1;
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(fetched.length, 2, "then asks the Account again");
+  gates[1]({ ok: true, status: 200, json: async () => account() });
+  await p2;
+  assert.equal((JSON.parse(plain.out.body) as SeatView).cards?.length, 0, "the plain read's answer is the one it asked for");
+  assert.equal((JSON.parse(fresh.out.body) as SeatView).cards?.length, 1, "the fresh read's answer is from after the receipt");
+  const again = await call(route);
+  assert.equal(fetched.length, 2, "a plain read within the TTL is served the fresh answer");
+  assert.equal(again.json.cards?.length, 1);
+});
+
+test("the route: a disabled seat row answers disabled without asking the Account", async () => {
+  const routes: WebRoute[] = [];
+  const fetched: string[] = [];
+  const spy: FakeFetch = async (url) => { fetched.push(url); return { ok: true, status: 200, json: async () => account() }; };
+  registerSeatRoute({ register: (route) => routes.push(route) }, { url: URL_, seatName: "Gravit", disabled: true, fetch: spy as unknown as typeof fetch, now: () => NOW });
+  const a = await call(routes[0]);
+  assert.deepEqual(a.json, { ok: true, url: URL_, reachable: false, error: "disabled" });
+  assert.equal(fetched.length, 0);
+});

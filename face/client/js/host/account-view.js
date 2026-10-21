@@ -145,7 +145,7 @@ export function seatWords(data) {
   const url = typeof data.url === 'string' ? data.url : '';
   let host = url;
   try { host = new URL(url).host; } catch { /* a bare address stays as it is */ }
-  if (data.reachable !== true) return { ...EMPTY_SEAT, service: `${host} · not reachable`, url };
+  if (data.reachable !== true) return { ...EMPTY_SEAT, service: `${host} · ${data.error === 'disabled' ? 'seat disabled' : 'not reachable'}`, url };
   const mode = data.mode === 'guard' ? 'Guard' : data.mode === 'open' ? 'Beast' : '';
   const w = data.writes;
   const writes = w && typeof w === 'object' ? (w.on === true ? `Trading on${isNum(w.capUsd) ? ` · ${dollars(w.capUsd)} a move` : ''}` : 'Read-only') : '';
