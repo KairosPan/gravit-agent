@@ -79,7 +79,9 @@ function seatBox(state, now) {
     const rows = [row(w.service, [[w.mode, w.writes].filter(Boolean).join(' · ')])];
     if (w.seat) rows.push(row(w.seat, w.limits));
     for (const v of w.venues) rows.push(row(v.name, [[v.usd, v.note].filter(Boolean).join(' · ')], v.paper ? 'Paper' : ''));
-    const stamp = `As of ${when(s.data.asOf ?? s.at, now) || 'earlier'}${s.status === 'error' ? ' · stale' : ''}`;
+    // the view's own time (the face's read, served by the route), else the read's — an unreachable answer carries none
+    const read = typeof s.at === 'number' ? new Date(s.at).toISOString() : undefined;
+    const stamp = `As of ${when(s.data.asOf ?? read, now) || 'earlier'}${s.status === 'error' ? ' · stale' : ''}`;
     body = `<div class="venues">${rows.join('')}</div>${note([w.cards, stamp].filter(Boolean).join(' · '))}`;
   }
   const keys = `<div class="btn-row">${w.url ? `<a class="btn-sm" href="${esc(w.url)}" target="_blank" rel="noopener">Open the Account page</a>` : ''}` +

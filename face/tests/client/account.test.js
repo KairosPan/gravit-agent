@@ -142,6 +142,7 @@ test('Venues: the Account seat box — nothing read, not reachable, knocking, ad
   const off = screen({ tab: 'venues', data: keyed(), seat: { ok: true, url: 'http://127.0.0.1:4820', reachable: false, error: 'ECONNREFUSED' } }).html;
   assert.match(off, /<div class="venues"><div class="venue"><span><b>127\.0\.0\.1:4820 · not reachable<\/b><\/span><\/div><\/div>/);
   assert.doesNotMatch(off, /Gravit ·/);
+  assert.match(off, /<p class="acct-note">As of 14:40<\/p>/, 'an unreachable answer is stamped with the read\'s own time');
   assert.match(off, /<div class="btn-row"><a class="btn-sm" href="http:\/\/127\.0\.0\.1:4820" target="_blank" rel="noopener">Open the Account page<\/a><button type="button" class="btn-sm" data-action="refreshAccount">Refresh<\/button><\/div>/);
   const knocking = screen({ tab: 'venues', data: keyed(), seat: seatView({ seat: { name: 'Gravit', status: 'knocking', limits: [] }, cards: [], venues: [] }) }).html;
   assert.match(knocking, /<div class="venue"><span><b>Gravit · knocking — admit it on the Account page<\/b><\/span><\/div>/);
