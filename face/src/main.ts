@@ -21,6 +21,7 @@ import { installBotRuntime, registerBotRuntimeRoutes } from "./bot-runtime.ts";
 import { readBotJournal } from "./bot-journal.ts";
 import { BOTS_ROOT } from "./overlay.ts";
 import { registerDataRoutes } from "./data.ts";
+import { registerSeatRoute } from "./seat.ts";
 import { registerStatic, type IndexAuth } from "./static.ts";
 import { registerSessionRoutes } from "./sessions.ts";
 import { listSessionHeads, registerChannelRoutes, type RegistryLike } from "./channels.ts";
@@ -166,6 +167,10 @@ registerStatic(booted.ctx.webServer, clientDir, connection);
  * `python3`) from the repo root this process just chdir'd to, and no injection
  * seam belongs on the entry point — `spawn`/`now` exist for the tests. */
 disposeData = registerDataRoutes(booted.ctx.webServer);
+/* The Account seat's standing for the screen (src/seat.ts): a loopback read of
+ * the Account's own /api/account, its defaults from src/account-seat.ts; it
+ * touches no key and no home. */
+registerSeatRoute(booted.ctx.webServer);
 /* The channel picker's data (sidebar + landing page) and the new-channel copy
  * action. `process.cwd()` is the workbench repo root — the chdir above put it
  * there. `dshHome` is resolved the same way every other route family here
