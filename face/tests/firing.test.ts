@@ -21,7 +21,7 @@ import {
 } from "../src/desk.ts";
 import type { DeskSessionCtxLike, DeskTurnRecord } from "../src/desk-session.ts";
 import {
-  checkFiring, cutoffOf, diffFiles, FILES_RECORD_MAX, FILES_WALK_MAX, FIRING_SLACK_MS, firingKey, isFiringRecord, LINES, outcomeOf,
+  checkFiring, cutoffOf, diffFiles, FILES_RECORD_MAX, FILES_WALK_MAX, FIRING_DISPOSE_MS, FIRING_SLACK_MS, firingKey, isFiringRecord, LINES, outcomeOf,
   resolveFiringRoute, runFiring, snapshotFiles, wakeMessage,
   type FinishedRecord, type FiringDeps, type FiringItem, type FiringRecord, type Verified,
 } from "../src/firing.ts";
@@ -80,6 +80,9 @@ async function waitFor(what: string, ok: () => boolean | Promise<boolean>, ms = 
     await new Promise((done) => setTimeout(done, 2));
   }
 }
+
+/** A real pause for a check that something did NOT happen: long enough for a ledger append started before it to land. */
+const quietly = (ms = 50): Promise<void> => new Promise((done) => { setTimeout(done, ms); });
 
 /* ---------- the order, its session, its firing ---------- */
 
@@ -276,7 +279,14 @@ test("checkFiring refuses in order: OFF, the budget, a changed or missing text, 
   assert.deepEqual(await checkFiring(deps, order), { refuse: { reason: "budget", state: SPENT } });
 
   budget = UNSPENT;
-  assert.deepEqual(await checkFiring(deps, order), { refuse: { reason: "hash", detail: sha256Hex(edited) } }, "the detail is the sha found");
+  const p = join(fx.root, "scripts", "p.py");
+  const gravit = join(fx.root, "desk", "GRAVIT.md");
+  await writeFile(p, printing("Q"));
+  await writeFile(gravit, "steer\n");
+  assert.deepEqual(await checkFiring(deps, order), { refuse: { reason: "hash", detail: sha256Hex(edited) } }, "the text before the script and the fence; the detail is the sha found");
+  await writeFile(p, script);
+  await rm(gravit);
+  assert.deepEqual(await checkFiring(deps, order), { refuse: { reason: "hash", detail: sha256Hex(edited) } });
   await rm(text);
   assert.deepEqual(await checkFiring(deps, order), { refuse: { reason: "hash", detail: "missing" } });
   await writeFile(join(fx.root, "copy.md"), STANDING);
@@ -285,16 +295,18 @@ test("checkFiring refuses in order: OFF, the budget, a changed or missing text, 
   await rm(text);
   await writeFile(text, STANDING);
 
-  const p = join(fx.root, "scripts", "p.py");
   await writeFile(p, printing("Q"));
+  await writeFile(gravit, "steer\n");
+  assert.deepEqual(await checkFiring(deps, order), { refuse: { reason: "producer-hash", detail: sha256Hex(printing("Q")) } }, "the script before the fence");
+  await rm(gravit);
   assert.deepEqual(await checkFiring(deps, order), { refuse: { reason: "producer-hash", detail: sha256Hex(printing("Q")) } });
   await rm(p);
   assert.deepEqual(await checkFiring(deps, order), { refuse: { reason: "producer-hash", detail: "missing" } });
   await writeFile(p, script);
 
-  await writeFile(join(fx.root, "desk", "GRAVIT.md"), "steer\n");
+  await writeFile(gravit, "steer\n");
   assert.deepEqual(await checkFiring(deps, order), { refuse: { reason: "fence", detail: "desk/GRAVIT.md" } });
-  await rm(join(fx.root, "desk", "GRAVIT.md"));
+  await rm(gravit);
 
   const go = await checkFiring(deps, order);
   assert.deepEqual(go, { go: { cwd: fx.cwd, standingText: STANDING, standingSha: sha256Hex(STANDING), producerSha: sha256Hex(script) } });
@@ -654,10 +666,12 @@ test("deadline, refusal at turn start, the watchdog, a failed session: one line 
     assert.equal(outcomeOf(finished as FinishedRecord), "never started");
     assert.deepEqual(await deskEvents(fx.home), [], "no turn ended: nothing to record");
     assert.equal(agent.disposed, 1);
-    /* the supervisor's report of the cancelled turn, should it come late, changes nothing */
+    assert.deepEqual(r.sup.disposed, [1]);
+    /* once the supervision has ended no report can come (the real supervisor is gone); one that did changes nothing */
     r.sup.calls[0].onTurnEnd(turnEnd({ outcome: "cancelled", cancel: "desk deadline", finalText: "LATE" }));
-    await r.clock.flush();
+    await quietly();
     assert.equal(r.out.texts.length, 1);
+    assert.deepEqual(await deskEvents(fx.home), []);
   }
   /* a turn that started and never ended: the watchdog reads it timed out */
   {
@@ -883,8 +897,10 @@ test("an aborted firing stops recording and delivering", async () => {
     assert.deepEqual(agent.cancels, [[{ kind: "hook", reason: "shutdown" }]]);
     assert.equal(agent.disposed, 1);
     assert.deepEqual(r.sup.disposed, [1]);
+    /* once the supervision has ended no report can come (the real supervisor is gone); one that did changes nothing */
     r.sup.calls[0].onTurnEnd(turnEnd({ outcome: "cancelled", cancel: "shutdown", finalText: "LATE" }));
     await r.clock.advance(3_600_000);
+    await quietly();
     assert.deepEqual(r.out.texts, []);
     assert.deepEqual((await firings(fx.home)).map((f) => f.kind), ["producer", "woke"], "no finished: the next boot reads it as interrupted");
     assert.deepEqual(await deskEvents(fx.home), []);
@@ -925,6 +941,236 @@ test("an aborted firing stops recording and delivering", async () => {
     assert.deepEqual(r.inputs, []);
     assert.deepEqual(await firings(fx.home), []);
   }
+  /* while its session is being made: the firing ends at once, and the session that comes later is let go */
+  {
+    const fx = await fixture();
+    const late = fakeAgents();
+    let make: (() => void) | undefined;
+    const r = rig(fx, {
+      over: {
+        createAgent: (o) => new Promise((done) => {
+          make = () => { done(late.createAgent(o)); };
+        }),
+      },
+    });
+    const controller = new AbortController();
+    const running = runFiring(r.deps, ITEM, verifiedFor(fx), controller.signal);
+    await waitFor("the create", () => make !== undefined);
+    controller.abort();
+    assert.equal(await running, undefined);
+    make?.();
+    await waitFor("the late session's dispose", () => late.agents[0]?.disposed === 1);
+    assert.deepEqual(late.agents[0].followups, [], "never woken");
+    assert.deepEqual((await firings(fx.home)).map((f) => f.kind), ["producer"], "no woke, no finished");
+    assert.deepEqual(r.out.texts, []);
+  }
+  /* during its delivery: no finished, nothing more sent - the turn it ran is still counted */
+  {
+    const fx = await fixture();
+    const texts: string[] = [];
+    let unblock: (() => void) | undefined;
+    const r = rig(fx, {
+      over: {
+        deliver: (text) => {
+          texts.push(text);
+          return new Promise<DeliverResult>((done) => {
+            unblock = () => { done({ sent: [1] }); };
+          });
+        },
+      },
+    });
+    const controller = new AbortController();
+    const running = runFiring(r.deps, ITEM, verifiedFor(fx), controller.signal);
+    await waitFor("the wake", woken(r));
+    await writeFile(join(fx.cwd, "GRAVIT.md"), "steer\n"); // a violation: a left-behind line would follow the text
+    r.sup.calls[0].onTurnEnd(turnEnd({ finalText: "BRIEF TEXT" }));
+    await waitFor("the delivery", () => unblock !== undefined);
+    controller.abort();
+    assert.equal(await running, undefined);
+    unblock?.();
+    await r.clock.flush();
+    assert.deepEqual(texts, ["BRIEF TEXT"], "no left-behind line");
+    assert.deepEqual((await firings(fx.home)).map((f) => f.kind), ["producer", "woke"], "no finished: the next boot reads it as interrupted");
+    assert.deepEqual((await deskEvents(fx.home)).map((e) => e.kind), ["desk-turn"]);
+    assert.equal(r.agents.agents[0].disposed, 1);
+  }
+  /* while its finished record is written: the record stays, and the left-behind line is not sent */
+  {
+    const fx = await fixture();
+    const controller = new AbortController();
+    const texts: string[] = [];
+    const r = rig(fx, {
+      over: {
+        deliver: async (text) => {
+          texts.push(text);
+          setImmediate(() => { controller.abort(); }); // after this delivery's answer, while finished goes to the ledger
+          return { sent: [texts.length] };
+        },
+      },
+    });
+    const running = runFiring(r.deps, ITEM, verifiedFor(fx), controller.signal);
+    await waitFor("the wake", woken(r));
+    await writeFile(join(fx.cwd, "GRAVIT.md"), "steer\n");
+    r.sup.calls[0].onTurnEnd(turnEnd({ finalText: "BRIEF TEXT" }));
+    assert.equal(await running, undefined);
+    assert.deepEqual(texts, ["BRIEF TEXT"], "no left-behind line once aborted");
+    const last = (await firings(fx.home)).at(-1);
+    assert.equal(last?.kind, "finished", "the record written as the abort came stays");
+  }
+  /* during the left-behind line: the firing ends at once */
+  {
+    const fx = await fixture();
+    const controller = new AbortController();
+    const texts: string[] = [];
+    let unblock: (() => void) | undefined;
+    const r = rig(fx, {
+      over: {
+        deliver: (text) => {
+          texts.push(text);
+          if (texts.length === 1) return Promise.resolve({ sent: [1] });
+          return new Promise<DeliverResult>((done) => { unblock = () => { done({ sent: [2] }); }; });
+        },
+      },
+    });
+    const running = runFiring(r.deps, ITEM, verifiedFor(fx), controller.signal);
+    await waitFor("the wake", woken(r));
+    await writeFile(join(fx.cwd, "GRAVIT.md"), "steer\n");
+    r.sup.calls[0].onTurnEnd(turnEnd({ finalText: "BRIEF TEXT" }));
+    await waitFor("the left-behind line", () => unblock !== undefined);
+    controller.abort();
+    assert.equal(await running, undefined);
+    unblock?.();
+    assert.equal(texts.length, 2);
+    assert.equal(r.agents.agents[0].disposed, 1);
+  }
+  /* a turn whose end comes in the same tick as the abort: counted, and nothing more */
+  {
+    const fx = await fixture();
+    const r = rig(fx);
+    const controller = new AbortController();
+    const running = runFiring(r.deps, ITEM, verifiedFor(fx), controller.signal);
+    await waitFor("the wake", woken(r));
+    r.sup.calls[0].onTurnEnd(turnEnd({ finalText: "BRIEF TEXT" }));
+    controller.abort();
+    assert.equal(await running, undefined);
+    assert.deepEqual(r.out.texts, []);
+    assert.deepEqual((await firings(fx.home)).map((f) => f.kind), ["producer", "woke"]);
+    assert.deepEqual((await deskEvents(fx.home)).map((e) => e.kind === "desk-turn" && [e.turn, e.outcome, e.usage]), [[1, "ended", RECORDED]]);
+  }
+});
+
+test("a firing counts every turn it outlives - after the watchdog, an abort or its own turn - in events.jsonl alone", async () => {
+  /* after the watchdog: the hung turn ends while its session is let go, the supervision still installed */
+  {
+    const fx = await fixture();
+    const r = rig(fx);
+    let supervisedAtDispose: number[] | undefined;
+    r.agents.onDispose = () => {
+      supervisedAtDispose = [...r.sup.disposed];
+      r.sup.calls[0].onTurnEnd(turnEnd({ outcome: "timed-out", wallMs: 660_500 }));
+    };
+    const running = runFiring(r.deps, ITEM, verifiedFor(fx), signal());
+    await waitFor("the wake", woken(r));
+    r.bus.emit("session-fake-1", "turn/start", { turn: 1 });
+    await r.clock.advance(600_000 + FIRING_SLACK_MS);
+    const finished = await running;
+    assert.deepEqual(finished?.turn, { sessionId: "session-fake-1", outcome: "timed-out", deadlineMs: 600_000 });
+    assert.deepEqual(r.out.texts, ["preclose · 2026-11-27 timed out after 10 min; a card or a long tool was pending"], "no line for the late report");
+    assert.deepEqual((await firings(fx.home)).map((f) => f.kind), ["producer", "woke", "finished"], "no second finished");
+    assert.deepEqual(await deskEvents(fx.home), [
+      { t: "2026-11-27T17:41:04.000Z", kind: "desk-turn", sessionId: "session-fake-1", source: "schedule", turn: 1, outcome: "timed-out", wallMs: 660_500, usage: RECORDED },
+    ], "its tokens reach the budget");
+    assert.deepEqual(supervisedAtDispose, [0], "the supervision outlasts the dispose");
+    assert.deepEqual(r.sup.disposed, [1]);
+    assert.deepEqual(r.lines, ["gravit-face: desk: firing preclose:2026-11-27 saw no end to its turn in 11 min; the watchdog cancels it"]);
+  }
+  /* after an abort: the cut turn's record comes while the session is let go */
+  {
+    const fx = await fixture();
+    const r = rig(fx);
+    r.agents.onDispose = () => {
+      r.sup.calls[0].onTurnEnd(turnEnd({ outcome: "cancelled", cancel: "shutdown", finalText: "SPY -0.4%" }));
+    };
+    const controller = new AbortController();
+    const running = runFiring(r.deps, ITEM, verifiedFor(fx), controller.signal);
+    await waitFor("the wake", woken(r));
+    controller.abort();
+    assert.equal(await running, undefined);
+    assert.deepEqual(r.out.texts, [], "nothing sent");
+    assert.deepEqual((await firings(fx.home)).map((f) => f.kind), ["producer", "woke"], "still interrupted for the next boot");
+    assert.deepEqual(await deskEvents(fx.home), [
+      { t: "2026-11-27T17:30:04.000Z", kind: "desk-turn", sessionId: "session-fake-1", source: "schedule", turn: 1, outcome: "cancelled", wallMs: 355_000, usage: RECORDED, cancel: "shutdown" },
+    ]);
+  }
+  /* after its own turn: a browser post on its session answered while the firing's text is delivered; a refused one too */
+  {
+    const fx = await fixture();
+    const texts: string[] = [];
+    const r: Rig = rig(fx, {
+      over: {
+        deliver: async (text) => {
+          texts.push(text);
+          r.sup.calls[0].onTurnEnd(turnEnd({ turn: 2, source: "user", finalText: "a browser answer", wallMs: 2_000 }));
+          r.sup.calls[0].onTurnEnd(turnEnd({ turn: 3, source: "user", outcome: "refused", violation: "desk/journal/.git" }));
+          return { sent: [1] };
+        },
+      },
+    });
+    const running = runFiring(r.deps, ITEM, verifiedFor(fx), signal());
+    await waitFor("the wake", woken(r));
+    r.sup.calls[0].onTurnEnd(turnEnd({ finalText: "BRIEF TEXT" }));
+    const finished = await running;
+    assert.equal(finished?.turn?.outcome, "ended");
+    assert.deepEqual(texts, ["BRIEF TEXT"], "the browser's answers are its own");
+    assert.deepEqual((await deskEvents(fx.home)).map((e) => (e.kind === "desk-turn" ? [e.kind, e.turn, e.source] : [e.kind])), [
+      ["desk-turn", 1, "schedule"], ["desk-turn", 2, "user"], ["desk-refused"],
+    ], "in turn order");
+    assert.equal((await firings(fx.home)).filter((f) => f.kind === "finished").length, 1);
+  }
+});
+
+test("a session whose dispose hangs holds the firing FIRING_DISPOSE_MS, then it ends with one line", async () => {
+  const fx = await fixture();
+  const r = rig(fx);
+  let release: (() => void) | undefined;
+  r.agents.onDispose = () => new Promise<void>((done) => { release = done; });
+  let settled = false;
+  const running = runFiring(r.deps, ITEM, verifiedFor(fx), signal()).finally(() => { settled = true; });
+  await waitFor("the wake", woken(r));
+  r.sup.calls[0].onTurnEnd(turnEnd({ finalText: "BRIEF TEXT" }));
+  await waitFor("the dispose", () => r.agents.agents[0].disposed === 1);
+  assert.equal(r.clock.pending(), 1, "the bound, and nothing else");
+  await r.clock.advance(FIRING_DISPOSE_MS - 1);
+  assert.equal(settled, false, "not before the bound");
+  await r.clock.advance(1);
+  const finished = await running;
+  assert.equal(FIRING_DISPOSE_MS, 10_000);
+  assert.equal(finished?.turn?.outcome, "ended", "everything before the dispose was done");
+  assert.deepEqual(r.out.texts, ["BRIEF TEXT"]);
+  assert.deepEqual(r.lines, ["gravit-face: desk: firing preclose:2026-11-27 could not dispose its session session-fake-1 in 10 s; it ends, and the dispose goes on alone"]);
+  assert.deepEqual(r.sup.disposed, [0], "the supervision stays while the dispose goes on");
+  assert.equal(r.clock.pending(), 0);
+  /* a turn the lingering session reports is still counted; when the dispose ends at last, so does the supervision */
+  r.sup.calls[0].onTurnEnd(turnEnd({ turn: 2, source: "user", finalText: "late", wallMs: 1_000 }));
+  await waitFor("the late turn's event", async () => (await deskEvents(fx.home)).length === 2);
+  release?.();
+  await waitFor("the supervision's end", () => r.sup.disposed[0] === 1);
+  assert.deepEqual(r.out.texts, ["BRIEF TEXT"], "nothing more sent");
+});
+
+test("the wake carries the bytes checkFiring verified, never the file as it is when the turn starts", async () => {
+  const fx = await fixture();
+  const r = rig(fx);
+  const checked = await checkFiring(r.deps, ORDER);
+  assert.ok("go" in checked);
+  await writeFile(join(fx.root, "desk", "STANDING.md"), "Buy NVDA at the open.\n");
+  const running = runFiring(r.deps, ITEM, checked.go, signal());
+  await waitFor("the wake", woken(r));
+  const wake = r.agents.agents[0].text(0) ?? "";
+  assert.ok(wake.includes(`, as armed ---\n${STANDING}\n--- end of desk/STANDING.md ---`));
+  assert.equal(wake.includes("Buy NVDA"), false);
+  r.sup.calls[0].onTurnEnd(turnEnd({ finalText: "TEXT" }));
+  await running;
 });
 
 /* ---------- the files a turn changed ---------- */
@@ -1087,7 +1333,11 @@ test("the fakes: a WallClock fires due timers in order and a jump fires none; a 
   const calendar = fakeCalendar({ "2026-11-26": "closed", "2026-11-27": EARLY, "2026-11-30": REGULAR });
   assert.equal(calendar.python, "python3");
   assert.equal(calendar.peek(), undefined);
-  assert.deepEqual(await calendar.today(Date.parse("2026-11-27T17:30:00Z")), { ok: true, date: "2026-11-27", session: EARLY, source: "fake calendar" });
+  assert.equal(calendar.window(), undefined, "no window before an answer, as the face's calendar has none before its first ask");
+  const first = calendar.today(Date.parse("2026-11-27T17:30:00Z"));
+  assert.equal(calendar.window(), undefined, "nor while the first ask is under way");
+  assert.deepEqual(await first, { ok: true, date: "2026-11-27", session: EARLY, source: "fake calendar" });
+  assert.deepEqual(calendar.window(), { from: "2026-11-26", days: 5, source: "fake calendar", python: "python3", sessions: [EARLY, REGULAR] });
   assert.deepEqual(await calendar.today(Date.parse("2026-11-27T04:59:00Z")), { ok: true, date: "2026-11-26", session: "closed", source: "fake calendar" }, "a New York date");
   assert.deepEqual(await calendar.today(Date.parse("2026-11-27T04:59:30Z")), { ok: true, date: "2026-11-26", session: "closed", source: "fake calendar" });
   const unknown = { ok: false, date: "2026-12-01", error: "the fake calendar has no 2026-12-01" };
@@ -1095,10 +1345,47 @@ test("the fakes: a WallClock fires due timers in order and a jump fires none; a 
   assert.deepEqual(calendar.asked, ["2026-11-27", "2026-11-26", "2026-12-01"], "a date once each time it changes");
   assert.deepEqual(calendar.peek(), unknown, "the latest date's answer");
   assert.deepEqual(calendar.window(), { from: "2026-11-26", days: 5, source: "fake calendar", python: "python3", sessions: [EARLY, REGULAR] });
-  assert.equal(fakeCalendar({}, "/x/python").window(), undefined);
+  const empty = fakeCalendar({}, "/x/python");
+  assert.deepEqual(await empty.today(Date.parse("2026-11-27T17:30:00Z")), { ok: false, date: "2026-11-27", error: "the fake calendar has no 2026-11-27" });
+  assert.equal(empty.window(), undefined, "no days, no window");
 
   const out = recordingDeliver((text, n) => (n === 1 ? { queued: true } : { undelivered: `no ${text}` }));
   assert.deepEqual(await out.deliver("one"), { queued: true });
   assert.deepEqual(await out.deliver("two"), { undelivered: "no two" });
   assert.deepEqual(out.texts, ["one", "two"]);
+});
+
+test("a WallClock waits for a timer's own work: a tick that re-arms after real I/O fires on every interval", async () => {
+  const fx = await fixture();
+  /* the contract's first form: the callback returns its promise, which the advance awaits before the next timer */
+  const clock = new WallClock(FIRED);
+  const ticks: string[] = [];
+  const tick = async (): Promise<void> => {
+    ticks.push(new Date(clock.now()).toISOString());
+    for (let i = 0; i < 20; i++) await stat(fx.root); // more turns of the event loop than the drain gives
+    clock.setTimeout(tick, 30_000);
+  };
+  clock.setTimeout(tick, 30_000);
+  await clock.advance(120_000);
+  assert.deepEqual(ticks, ["2026-11-27T17:30:34.000Z", "2026-11-27T17:31:04.000Z", "2026-11-27T17:31:34.000Z", "2026-11-27T17:32:04.000Z"]);
+  assert.equal(clock.pending(), 1, "re-armed for the next");
+
+  /* its second form: the callback re-arms before its first await, and its work runs on alone */
+  const other = new WallClock(FIRED);
+  let tocks = 0;
+  const tock = (): void => {
+    tocks += 1;
+    other.setTimeout(tock, 30_000);
+    void (async () => {
+      for (let i = 0; i < 20; i++) await stat(fx.root);
+    })();
+  };
+  other.setTimeout(tock, 30_000);
+  await other.advance(120_000);
+  assert.equal(tocks, 4);
+
+  /* a callback's rejection is the advance's own */
+  const failing = new WallClock(FIRED);
+  failing.setTimeout(async () => { throw new Error("the tick broke"); }, 1_000);
+  await assert.rejects(failing.advance(1_000), /the tick broke/);
 });

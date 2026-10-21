@@ -25,8 +25,7 @@
  *   supervised with the order's own deadline and the chain fence, and woken once ({@link wakeMessage}) with the
  *   schedule's source.
  * - the watchdog: a turn the supervisor never reports - none started, or one hung past its cancel - is cancelled
- *   {@link FIRING_SLACK_MS} after the deadline, and the firing ends without it: no `desk-turn` is recorded for it, as
- *   only the supervisor's record carries a turn's tokens.
+ *   {@link FIRING_SLACK_MS} after the deadline, and the firing ends without it.
  * - the turn's end: recorded in `events.jsonl` exactly as the desk conversation records a phone turn, so a firing's
  *   tokens count toward the day's turns and its budget, a cancelled turn's included; then what the turn changed in its
  *   cwd ({@link snapshotFiles}, {@link diffFiles}) and the fence again.
@@ -34,11 +33,20 @@
  *   after the market moment it was about ({@link cutoffOf}, P2-20) - or the one line that says why there is none;
  *   then one line for a violation the turn left behind. Every line is a {@link LINES} builder: the plan's phone-line
  *   table.
+ * - letting go: the session's dispose, then the supervision's end, so a turn the dispose drains is still reported;
+ *   the dispose is awaited at most {@link FIRING_DISPOSE_MS}, and past it the firing ends with one line, the dispose
+ *   and then the supervision's end going on alone.
  * Each step is a line in `firings.jsonl` ({@link FiringRecord}); the clock row writes the other kinds.
  *
- * AN ABORT - the clock row's shutdown - cancels the turn under way as `shutdown`, records and sends nothing more, lets
- * the session go and resolves `undefined`: a `started` with no `finished` reads as interrupted at the next boot, and
- * is never run again.
+ * EVERY TURN IT OUTLIVES IS COUNTED. A turn the supervisor reports once the firing has stopped waiting for its own - the
+ * hung turn after the watchdog, the cut one after an abort, a browser's post on its session - gets its `desk-turn` (or
+ * `desk-refused`) in `events.jsonl` all the same, so its tokens reach the budget; it adds nothing to `firings.jsonl`
+ * and sends nothing.
+ *
+ * AN ABORT - the clock row's shutdown - cancels the turn under way as `shutdown`, records nothing more in
+ * `firings.jsonl`, sends nothing more, lets the session go and resolves `undefined`: a `started` with no `finished`
+ * reads as interrupted at the next boot, and is never run again. One that lands while `finished` is written leaves that
+ * record, and still resolves `undefined`.
  *
  * MODULE WEIGHT. It brings src/desk-session.ts - the desk preset, the role library, js-yaml, dsh-agent - and dsh-llm:
  * only the clock row loads it, itself loaded on first use, so the pause switch never does.
@@ -588,6 +596,9 @@ export function wakeMessage(input: {
  * ruling 10): then the watchdog cancels it and the firing ends without it. */
 export const FIRING_SLACK_MS = 60_000;
 
+/** The longest a firing waits for its session's dispose before it ends without it, the dispose going on alone. */
+export const FIRING_DISPOSE_MS = 10_000;
+
 /**
  * The market moment a firing's final text must beat (P2-20, P2-25): its session's close for a `close-Nm` anchor, its
  * open for an `open-Nm` one - an order anchored before its moment - else `undefined`: `close`, `close+Nm`, `open`,
@@ -750,8 +761,13 @@ async function send(run: Run, text: string): Promise<DeliverResult> {
 }
 
 /** The firing's `finished` record, appended: its wall time, its producer, and `rest` - each key only when it has a
- * value, so the record reads back as it was written. */
-async function finish(run: Run, quoted: Quoted | undefined, rest: Omit<FinishedRecord, "t" | "kind" | "key" | "order" | "date" | "wallMs" | "producer">): Promise<FinishedRecord> {
+ * value, so the record reads back as it was written. Resolves `undefined` when the abort came while it was appended:
+ * the record stays, and nothing more is sent. */
+async function finish(
+  run: Run,
+  quoted: Quoted | undefined,
+  rest: Omit<FinishedRecord, "t" | "kind" | "key" | "order" | "date" | "wallMs" | "producer">,
+): Promise<FinishedRecord | undefined> {
   const { deps, item } = run;
   const output = quoted?.output;
   const record: FinishedRecord = {
@@ -762,7 +778,20 @@ async function finish(run: Run, quoted: Quoted | undefined, rest: Omit<FinishedR
     ...rest,
   };
   await appendRecord(deps.home, FIRINGS_FILE, record, { log: run.log });
-  return record;
+  return run.signal.aborted ? undefined : record;
+}
+
+/** Whether `p` settles - fulfilled or rejected - within `ms` on `clock`: `false` when the bound comes first, `p` then
+ * left to settle alone. Never rejects. */
+function settlesWithin(clock: DeskClock, ms: number, p: Promise<unknown>): Promise<boolean> {
+  return new Promise((done) => {
+    const timer = clock.setTimeout(() => { done(false); }, ms);
+    const settled = (): void => {
+      clock.clearTimeout(timer);
+      done(true);
+    };
+    p.then(settled, settled);
+  });
 }
 
 /** A session that could not be made: one face line, the could-not-run line to the phone, and `finished`. */
@@ -870,10 +899,15 @@ function whatToSay(item: FiringItem, turn: FiringTurn, record: DeskTurnRecord | 
  * 6. the turn's end, recorded as the conversation records a phone turn (`desk-turn`, `desk-refused` for a refused
  *    turn); then the files the turn changed and the fence again;
  * 7. the delivery: the text or the line ({@link LINES}), then `finished` with what `deliver` answered, then the
- *    left-behind line for a violation the turn did not start over, then the agent and the supervision let go.
- * A session that cannot be made or woken - a route, a create or a wake that throws - is outcome `error` with the
- * could-not-run line. An abort cancels the turn under way as `shutdown` - when it was woken - records and sends nothing
- * more, lets the session go and resolves `undefined`. Never rejects: an unexpected failure is one line and `undefined`.
+ *    left-behind line for a violation the turn did not start over, then the session's dispose - awaited at most
+ *    {@link FIRING_DISPOSE_MS}, past which one line and the dispose goes on alone - and only after it the supervision's
+ *    end.
+ * Any turn the supervisor reports once the firing has stopped waiting for its own is recorded in `events.jsonl` alone
+ * (the module header's EVERY TURN IT OUTLIVES IS COUNTED). A session that cannot be made or woken - a route, a create
+ * or a wake that throws - is outcome `error` with the could-not-run line. An abort cancels the turn under way as
+ * `shutdown` - when it was woken - records nothing more in `firings.jsonl`, sends nothing more, lets the session go and
+ * resolves `undefined`; a session made after it is disposed when it comes. Never rejects: an unexpected failure is one
+ * line and `undefined`.
  * @param deps - see {@link FiringDeps}.
  * @param item - the firing.
  * @param verified - what {@link checkFiring} let through for it.
@@ -947,6 +981,33 @@ async function wake(run: Run, quoted: Quoted | undefined): Promise<FinishedRecor
     return couldNotRun(run, quoted, errText(err));
   }
 
+  /* Every turn the supervisor reports is recorded in events.jsonl, in the order reported: the firing's own, then any
+   * it outlives - one that ends after an abort or after the watchdog, or a browser's post on its session - so its
+   * tokens reach the budget. A turn outlived gets only that event: no firings.jsonl record, no line. */
+  let counted: Promise<void> = Promise.resolve();
+  const count = (record: DeskTurnRecord): Promise<void> => {
+    counted = counted.then(() => appendEvent(deps.home, turnEvent(record, stamp(deps), cwdRel), { log }));
+    return counted;
+  };
+  /* The wait for the firing's turn, which its record, the watchdog or a failed wake ends - and an abort, after which
+   * a record is a turn outlived. `closed` once the supervision has ended: no record comes after it. */
+  let waiting = true;
+  let closed = false;
+  let endedWith: TurnEnd | undefined;
+  let settle: (end: TurnEnd) => void = () => {};
+  const ended = new Promise<TurnEnd>((done) => { settle = done; });
+  const end = (e: TurnEnd): void => {
+    if (!waiting) return;
+    waiting = false;
+    endedWith = e;
+    settle(e);
+  };
+  const onTurnEnd = (record: DeskTurnRecord): void => {
+    if (closed) return;
+    if (waiting) end({ kind: "turn", record });
+    else void count(record);
+  };
+
   let unwatch: (() => void) | undefined;
   let offBus: (() => void) | undefined;
   let watchdog: unknown;
@@ -954,15 +1015,7 @@ async function wake(run: Run, quoted: Quoted | undefined): Promise<FinishedRecor
     await appendRecord(deps.home, FIRINGS_FILE, { t: stamp(deps), kind: "woke", key, sessionId: session.sessionId, route: `${route.provider}/${route.model}` } satisfies WokeRecord, { log });
     if (signal.aborted) return undefined;
 
-    /* 4. the wake, and 5. its watchdog: the first of the turn's end, the watchdog and a failed wake ends the wait */
-    let settle: (end: TurnEnd) => void = () => {};
-    const ended = new Promise<TurnEnd>((done) => { settle = done; });
-    let over = false;
-    const end = (e: TurnEnd): void => {
-      if (over) return;
-      over = true;
-      settle(e);
-    };
+    /* 4. the wake, and 5. its watchdog */
     let started = false;
     let woken = false;
     try {
@@ -977,7 +1030,7 @@ async function wake(run: Run, quoted: Quoted | undefined): Promise<FinishedRecor
         clock,
         log,
         fence: () => findChainViolation(deps.root, cwd),
-        onTurnEnd: (record) => { end({ kind: "turn", record }); },
+        onTurnEnd,
       });
       const text = wakeMessage({ item, firedAt: clock.now(), verified, ...(quoted === undefined ? {} : { producer: quoted }) });
       const message = createUserMessage({ content: [{ type: "text", text }], source: { kind: "schedule", order: order.id, firing: key, date } });
@@ -998,6 +1051,9 @@ async function wake(run: Run, quoted: Quoted | undefined): Promise<FinishedRecor
       watchdog = undefined;
     }
     if (ending === ABORTED) {
+      /* a turn whose end came with the abort is counted, and nothing more is done for it; what the cancel ends is
+       * reported in a microtask, once the finally below has stopped the wait */
+      if (endedWith?.kind === "turn") void count(endedWith.record);
       if (woken) cancelTurn(run, session.agent, "shutdown");
       return undefined;
     }
@@ -1014,7 +1070,7 @@ async function wake(run: Run, quoted: Quoted | undefined): Promise<FinishedRecor
     } else {
       record = ending.record;
       turn = turnOf(record, session.sessionId);
-      await appendEvent(deps.home, turnEvent(record, stamp(deps), cwdRel), { log });
+      await count(record);
     }
     let left: Pick<FinishedRecord, "files" | "filesTruncated" | "violation"> = {};
     if (ending.kind !== "error") {
@@ -1046,24 +1102,42 @@ async function wake(run: Run, quoted: Quoted | undefined): Promise<FinishedRecor
       delivery,
       ...(said.chars === undefined ? {} : { chars: said.chars }),
     });
+    if (finished === undefined) return undefined;
     const violation = left.violation;
     /* a turn the fence refused started over this violation: its line said so already */
     if (violation !== undefined && !(turn.outcome === "refused" && record?.violation === violation)) {
-      await send(run, LINES.leftBehind(order.id, date, violation));
+      const sent = await unlessAborted(send(run, LINES.leftBehind(order.id, date, violation)), signal);
+      if (sent === ABORTED) return undefined;
     }
     return finished;
   } finally {
     if (watchdog !== undefined) clock.clearTimeout(watchdog);
+    waiting = false;
     offBus?.();
-    try {
-      await session.dispose();
-    } catch (err) {
-      log(`${BIN}: desk: the session of firing ${key}, ${session.sessionId}, could not be disposed: ${errText(err)}`);
-    }
-    try {
-      unwatch?.();
-    } catch (err) {
-      log(`${BIN}: desk: the supervision of firing ${key} could not be ended: ${errText(err)}`);
+    /* The session first, then the supervision - so a turn the dispose drains is still reported, and counted - the
+     * dispose awaited at most FIRING_DISPOSE_MS: past that the firing ends, and the supervision ends with the dispose,
+     * whenever that comes. */
+    const disposing = (async (): Promise<void> => {
+      try {
+        await session.dispose();
+      } catch (err) {
+        log(`${BIN}: desk: the session of firing ${key}, ${session.sessionId}, could not be disposed: ${errText(err)}`);
+      }
+    })();
+    const endSupervision = (): void => {
+      try {
+        unwatch?.();
+      } catch (err) {
+        log(`${BIN}: desk: the supervision of firing ${key} could not be ended: ${errText(err)}`);
+      }
+      closed = true;
+    };
+    if (await settlesWithin(clock, FIRING_DISPOSE_MS, disposing)) {
+      endSupervision();
+      await counted;
+    } else {
+      log(`${BIN}: desk: firing ${key} could not dispose its session ${session.sessionId} in ${formatDuration(FIRING_DISPOSE_MS)}; it ends, and the dispose goes on alone`);
+      void disposing.then(endSupervision);
     }
   }
 }

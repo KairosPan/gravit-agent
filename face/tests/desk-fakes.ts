@@ -2,8 +2,8 @@
 /** Fakes for the desk's clock row, shared by its offline tests - tests/firing.test.ts (one firing), and the clock
  * row's own tests and smoke (P2 Tasks 8 and 10):
  * - {@link WallClock}, a `DeskClock` on real UTC instants that moves only when told: `advance` fires the timers that
- *   fall due on the way, in order, as a running face would; `jump` and `set` move time and fire nothing, as a Mac
- *   that slept through the timers does;
+ *   fall due on the way, in order, each one's own work awaited when it returns its promise, as a running face would;
+ *   `jump` and `set` move time and fire nothing, as a Mac that slept through the timers does;
  * - {@link fakeBus}, the root bus every session's events go through;
  * - {@link fakeAgents}, a desk agent factory shaped as src/desk-session.ts `createDeskAgent`'s result;
  * - {@link fakeSupervise}, a supervisor that hands its deps to the test, which plays the turn's end itself;
@@ -19,16 +19,26 @@ import type { EventLike, MessageLike } from "../src/room-rules.ts";
 
 /* ---------- the clock ---------- */
 
+/** Whether a timer callback's return is work to await: anything with a `then`. */
+const isThenable = (value: unknown): value is PromiseLike<unknown> =>
+  typeof value === "object" && value !== null && typeof (value as { then?: unknown }).then === "function";
+
 /**
  * A `DeskClock` that reads a real instant - `new WallClock("2026-11-27T17:30:04Z")` - and moves only when told.
  * `advance(ms)` is time passing in a running face: every timer that falls due on the way fires, in the order it falls
- * due (ties in the order they were set), each at its own instant, with pending promise continuations flushed before,
- * between and after. `jump(ms)` and `set(iso)` move time and fire nothing: the timers stay pending, overdue, until the
- * next `advance` - `advance(0)` fires them - as a Mac's timers wait out its sleep.
+ * due (ties in the order they were set), each at its own instant. A callback that returns a promise has it awaited
+ * before the next due timer is looked for - its rejection is the advance's own - and pending promise continuations
+ * are flushed before, between and after (twenty turns of the event loop). `jump(ms)` and `set(iso)` move time and fire
+ * nothing: the timers stay pending, overdue, until the next `advance` - `advance(0)` fires them - as a Mac's timers
+ * wait out its sleep.
+ *
+ * THE CONTRACT for a callback that starts async work - a tick that reads the disk, then re-arms itself: it returns
+ * that work's promise, or it re-arms before its first await. Work it leaves running gets only the flush, which real
+ * I/O outlasts: a re-arm made after it lands once the advance has moved on, and that interval is lost.
  */
 export class WallClock implements DeskClock {
   private t: number;
-  private timers: { at: number; fn: () => void; id: number }[] = [];
+  private timers: { at: number; fn: () => unknown; id: number }[] = [];
   private nextId = 1;
 
   constructor(startIso: string) {
@@ -66,7 +76,8 @@ export class WallClock implements DeskClock {
     for (let i = 0; i < 20; i++) await new Promise<void>((done) => { setImmediate(done); });
   }
 
-  /** Move `ms` forward, firing each timer due on the way at its own instant (see the class doc). */
+  /** Move `ms` forward, firing each timer due on the way at its own instant and awaiting the promise a callback returns
+   * (see the class doc). */
   async advance(ms: number): Promise<void> {
     const until = this.t + ms;
     await this.flush();
@@ -75,7 +86,8 @@ export class WallClock implements DeskClock {
       if (due === undefined) break;
       this.timers = this.timers.filter((timer) => timer.id !== due.id);
       this.t = Math.max(this.t, due.at);
-      due.fn();
+      const work = due.fn();
+      if (isThenable(work)) await work;
       await this.flush();
     }
     this.t = Math.max(this.t, until);
@@ -163,6 +175,9 @@ export interface FakeAgents {
   failCreate: string | undefined;
   /** When set, every agent made from now on throws it from `followup`. */
   failFollowup: string | undefined;
+  /** When set, a handle's `dispose` runs it and settles with it - after counting the call: a test drains a turn's end
+   * during the dispose, or holds the dispose open with a promise that never settles. */
+  onDispose: ((agent: FakeDeskAgent) => void | Promise<void>) | undefined;
 }
 
 export function fakeAgents(): FakeAgents {
@@ -172,13 +187,21 @@ export function fakeAgents(): FakeAgents {
     agents: [],
     failCreate: undefined,
     failFollowup: undefined,
+    onDispose: undefined,
     async createAgent(opts) {
       fakes.created.push({ cwd: opts.cwd, route: { provider: opts.route.provider, model: opts.route.model } });
       if (fakes.failCreate !== undefined) throw new Error(fakes.failCreate);
       const agent = new FakeDeskAgent(`session-fake-${++made}`, opts.cwd);
       agent.failFollowup = fakes.failFollowup;
       fakes.agents.push(agent);
-      return { agent, sessionId: agent.id, dispose: async () => { agent.disposed += 1; } };
+      return {
+        agent,
+        sessionId: agent.id,
+        dispose: async () => {
+          agent.disposed += 1;
+          await fakes.onDispose?.(agent);
+        },
+      };
     },
   };
   return fakes;
@@ -234,8 +257,9 @@ export function recordingDeliver(result?: DeliverResult | ((text: string, n: num
 /**
  * A market calendar over fixed days: each New York date `days` names is its session or `"closed"`; any other date is
  * `{ ok: false }`, as a calendar whose window does not hold it answers. `asked` lists the dates `today` was asked
- * about, a date once each time it changes, as the face's calendar asks its clock; `window()` is the days as one
- * window, from the first named to the last, `undefined` for none.
+ * about, a date once each time it changes, as the face's calendar asks its clock. `window()` is the days as one
+ * window, from the first named to the last - `undefined` for none, and, as the face's calendar has no window before
+ * its first ask returns, `undefined` until the first `today()` has settled; `peek()` likewise.
  * @param days - New York date → its session (its `date` the same) or `"closed"`.
  * @param python - the interpreter the calendar names.
  */
@@ -257,6 +281,7 @@ export function fakeCalendar(days: Record<string, MarketSession | "closed">, pyt
       }),
     };
   }
+  let answered = false;
   let latest: DayAnswer | undefined;
   return {
     python,
@@ -264,14 +289,16 @@ export function fakeCalendar(days: Record<string, MarketSession | "closed">, pyt
     async today(now) {
       const date = etDate(new Date(now));
       if (asked.at(-1) !== date) asked.push(date);
+      await Promise.resolve(); // an ask settles after the call, as the face's calendar's does
       const day = Object.hasOwn(days, date) ? days[date] : undefined;
       const answer: DayAnswer = day === undefined
         ? { ok: false, date, error: `the fake calendar has no ${date}` }
         : { ok: true, date, session: day, source: "fake calendar" };
       if (latest === undefined || date >= latest.date) latest = answer;
+      answered = true;
       return answer;
     },
     peek: () => latest,
-    window: () => window,
+    window: () => (answered ? window : undefined),
   };
 }
