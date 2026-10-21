@@ -57,6 +57,7 @@ Values the spec and the rulings leave open, chosen here; each line ends with the
   |---|---|
   | a firing turn timed out with no text | `<id> · <date> timed out after <n> min; a card or a long tool was pending` (`<n> s` when not whole minutes) |
   | a firing turn ended with no text | `<id> · <date> ended with no text` |
+  | a firing turn failed with no text (the model call failed: `outcome: "failed"`) | `<id> · <date> could not answer: <error>; nothing was done` |
   | the fence refused a firing, before it or at its turn's start | `<id> · <date> refused: <path> exists; it would steer every desk turn. Remove it.` |
   | the watchdog found no turn | `<id> · <date> never started a turn; nothing ran` |
   | the session could not be made or woken | `<id> · <date> could not run: <reason>` |
@@ -584,7 +585,7 @@ git commit -m "feat(face): the desk's daily budget, deliver and the budget line,
     - `{ kind: "started"; key; order; date; dir; cwd /* repo-relative */; at; anchor /* ISO */; standingSha; producer?: string; producerSha?: string; wake: boolean; deadlineMs: number }` (written by Task 8);
     - `{ kind: "producer"; key; producer: string; ok: boolean; error?: string; code?: number | null; timedOut?: true; wallMs: number; chars: number }`;
     - `{ kind: "woke"; key; sessionId: string; route: string /* provider/model */ }`;
-    - `FinishedRecord = { kind: "finished"; key; order; date; wallMs; producer?: { spec; ok; error? }; turn?: { sessionId?; outcome: "ended" | "timed-out" | "refused" | "no-turn" | "error"; deadlineMs; wallMs?; usage?: TurnUsage; error? }; files?: FileChange[]; filesTruncated?: true; violation?: string; withheld?: "after the close" | "after the open"; delivery?: DeliverResult; chars?: number }`;
+    - `FinishedRecord = { kind: "finished"; key; order; date; wallMs; producer?: { spec; ok; error? }; turn?: { sessionId?; outcome: "ended" | "timed-out" | "failed" | "refused" | "no-turn" | "error"; deadlineMs; wallMs?; usage?: TurnUsage; error? }; files?: FileChange[]; filesTruncated?: true; violation?: string; withheld?: "after the close" | "after the open"; delivery?: DeliverResult; chars?: number }`;
     - `{ kind: "refused"; key; order; date; reason: Refusal["reason"]; detail?: string; reported: boolean }`;
     - `{ kind: "missed"; key; order; date; anchor: string; why: "asleep" | "down" | "late"; asleep?: { from: string; to: string }; foundAt: string }`;
     - `{ kind: "interrupted"; key; order; date; startedAt: string }`;
@@ -606,8 +607,8 @@ git commit -m "feat(face): the desk's daily budget, deliver and the budget line,
     3. **Session:** `resolveRoute(order.model)`, `snapshotFiles(cwd)`, `createAgent({ cwd, route })`. Append `woke`.
     4. **Wake:** `supervise` (`order.turnDeadlineMs`, the chain fence), then one `followup` of `wakeMessage` with the schedule source.
     5. **Watchdog:** no `onTurnEnd` by `turnDeadlineMs + FIRING_SLACK_MS` → cancel `{ kind: "hook", reason: "desk deadline" }`, outcome `no-turn` (no `turn/start` seen) or `timed-out`.
-    6. **Turn end:** `ended`/`timed-out` append a `desk-turn` event (`source: "schedule"`); then `diffFiles` (≤ 200, `filesTruncated`) and the fence again (`violation`).
-    7. **Deliver:** a non-empty final text goes unless `clock.now() ≥ cutoffOf(item)`, in which case it is `withheld` and the after-close or after-open line goes instead. An empty one sends `LINES.timedOut`, `LINES.noText`, `LINES.fence` or `LINES.noTurn`; a `createAgent` or `followup` failure is outcome `error` with `LINES.couldNotRun`. Then `finished` with `delivery`, `LINES.leftBehind` for a violation, and both disposers. `onTurnEnd` never rejects.
+    6. **Turn end:** `ended`/`timed-out`/`failed` append a `desk-turn` event (a `failed` one carries `error`) (`source: "schedule"`); then `diffFiles` (≤ 200, `filesTruncated`) and the fence again (`violation`).
+    7. **Deliver:** a non-empty final text goes unless `clock.now() ≥ cutoffOf(item)`, in which case it is `withheld` and the after-close or after-open line goes instead. An empty one sends `LINES.timedOut`, `LINES.failed` (for `outcome: "failed"`, since P1 Task 6's fix 5bd7691), `LINES.noText`, `LINES.fence` or `LINES.noTurn`; a `createAgent` or `followup` failure is outcome `error` with `LINES.couldNotRun`. Then `finished` with `delivery`, `LINES.leftBehind` for a violation, and both disposers. `onTurnEnd` never rejects.
     8. **Abort:** cancel the running turn `{ kind: "hook", reason: "shutdown" }`; record and send nothing more; resolve `undefined` (the next boot reads it as interrupted).
 - Produces (`face/tests/desk-fakes.ts`, for Tasks 7, 8 and 10): `class WallClock implements DeskClock { constructor(startIso: string); now(); setTimeout; clearTimeout; advance(ms): Promise<void> /* fires due timers in order */; jump(ms): void /* moves time, fires nothing */; set(iso): void }`; `fakeBus()`; `fakeAgents()`; `fakeSupervise()` (captures its deps, so a test calls `onTurnEnd`); `recordingDeliver(result?)`; `fakeCalendar(days: Record<string, MarketSession | "closed">, python = "python3")`.
 
@@ -651,6 +652,7 @@ test("deadline, refusal at turn start, the watchdog, a failed session: one line 
   // refused, violation "desk/journal/.git" → "preclose · 2026-11-27 refused: desk/journal/.git exists; it would steer every desk turn. Remove it."
   // no onTurnEnd: advance(660_000) → cancel { kind: "hook", reason: "desk deadline" } and "preclose · 2026-11-27 never started a turn; nothing ran"
   // createAgent rejects "boom" → turn.outcome "error", "preclose · 2026-11-27 could not run: boom"; ended with no text → "preclose · 2026-11-27 ended with no text"
+  // a failed turn (turn/end reason error, "429 rate limit") with no text → finished turn.outcome "failed", a desk-turn event with error, and "preclose · 2026-11-27 could not answer: 429 rate limit; nothing was done"
 });
 test("OFF set during the turn holds the text back and records why", async () => { /* the real conversation deliver → finished.delivery { undelivered: "paused" }; send not called */ });
 test("a turn that leaves a fence violation is reported once", async () => { /* GRAVIT.md written in the journal → violation "desk/journal/GRAVIT.md" and the left-behind line after the text */ });
