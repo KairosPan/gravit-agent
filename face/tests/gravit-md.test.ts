@@ -5,8 +5,9 @@ import { fileURLToPath } from "node:url";
 
 const GRAVIT_MD = fileURLToPath(new URL("../../GRAVIT.md", import.meta.url));
 const RULES_MD = fileURLToPath(new URL("../../docs/backtest-rules.md", import.meta.url));
-/** Spec §4.2: the budget of the one file every dsh agent in the tree reads on its first request. */
-const BUDGET_BYTES = 4500;
+/** Spec §4.2: the budget of the one file every dsh agent in the tree reads on its first request -
+ * raised once, from 4,500, for the desk's paragraph (docs/superpowers/specs/2026-10-19-always-on-gravit-design.md §10). */
+const BUDGET_BYTES = 4800;
 
 test("GRAVIT.md fits its budget and contains no template group", () => {
   const text = readFileSync(GRAVIT_MD, "utf8");

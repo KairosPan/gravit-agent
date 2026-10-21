@@ -63,6 +63,14 @@ operator message: 3 rounds, 10 bot messages, 2 peer continuations per round. The
 `@<bot>` reaches a voice directly. An `@` naming nobody on the roster reaches Gravit as an
 ordinary prompt; no voice answers it, so the answer is Gravit's own.
 
+## The desk
+
+`desk/` is the operator's; Gravit writes only `desk/journal/`. A desk turn informs; it never
+orders, asks, opens a goal or commits. `desk_quotes` is the price now, never evidence. No
+shell: an unattended turn on untrusted text must not read key files and reach the network.
+The face refuses desk turns while a `GRAVIT.md`, `GRAVIT.local.md`, `.git`, `.dsh` or
+`.agents` is under `desk/journal/`.
+
 ## Tests
 
 `python -m pytest` at the repo root: offline, no keys. Keep it green.
@@ -71,4 +79,5 @@ ordinary prompt; no voice answers it, so the answer is Gravit's own.
 
 `data/pit/` contents; `dsh/profile/` and the installed dsh profile copies under the harness
 home; anything under `bots/` (a bot may write its own `journal/`) or `roles/` (propose in
-conversation — the operator authors them); `docs/research/`.
+conversation — the operator authors them); `docs/research/`; `STANDING.md`,
+`levels.yml`, `rules.yml`, `holdings.yml` anywhere.
