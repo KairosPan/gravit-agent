@@ -4,14 +4,14 @@
  * runs, the run directory's end) over a fake runner and end to end, the text cap and the duration
  * words. Offline. The fixtures sit INSIDE the repository, under tests/tmp/producer-<pid>/, and are
  * removed afterwards; the runner's interpreter is node itself (process.execPath), so the fixture
- * programs are JavaScript and no Python is needed. A script producer's private copy lives where the
- * module puts it, under the system's temporary directory, and every test checks it is gone. */
+ * programs are JavaScript and no Python is needed. There, repo/ stands in for the repository root and
+ * home/run for a firing's run base, <desk dir>/run: a script producer's private copy is made in it, and
+ * every test checks the copy's run directory is gone. */
 import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { chmod, mkdir, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -22,8 +22,12 @@ import {
 
 /* ---------- fixtures, inside the repository ---------- */
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "tmp", `producer-${process.pid}`);
+const TEST_DIR = join(dirname(fileURLToPath(import.meta.url)), "tmp", `producer-${process.pid}`);
+/** The repository root a producer is given: GRAVIT_ROOT and its cwd. */
+const ROOT = join(TEST_DIR, "repo");
 const SCRIPTS = join(ROOT, "scripts");
+/** The run base, outside the repository like <desk dir>/run; its parent exists, and the first run makes it. */
+const RUN_BASE = join(TEST_DIR, "home", "run");
 
 /** Reads stdin to its end, then reports it, its argv, a variable the parent holds, its cwd; "TRACE" to stderr. */
 const ECHO = `let stdin = "";
@@ -36,9 +40,9 @@ process.stdin.on("end", () => {
 `;
 
 /** A script producer for the end-to-end test: JavaScript under a .py name, which node runs as CommonJS from
- * its private copy (no package.json lies above the temporary directory). It reports its input, the NAMES
- * of the key-shaped variables it can see (never a value), GRAVIT_ROOT, its cwd and its own path, and
- * writes two lines to stderr. */
+ * its private copy (the fixture directory's package.json says so). It reports its input, the NAMES of the
+ * key-shaped variables it can see (never a value), GRAVIT_ROOT, its cwd and its own path, and writes two
+ * lines to stderr. */
 const E2E = `let stdin = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => { stdin += chunk; });
@@ -74,11 +78,13 @@ const FIXTURES: Record<string, string> = {
 };
 
 before(async () => {
-  await rm(ROOT, { recursive: true, force: true });
+  await rm(TEST_DIR, { recursive: true, force: true });
   await mkdir(SCRIPTS, { recursive: true });
-  /* CommonJS here too, so the .py fixtures would run in place as well: a runner that ran the file in
-   * scripts/ instead of its verified copy would run the swapped bytes, and the markers would show it. */
-  await writeFile(join(ROOT, "package.json"), '{ "type": "commonjs" }\n');
+  await mkdir(dirname(RUN_BASE));
+  /* CommonJS for the .py fixtures, above both the run base and scripts/: they run from their copies, and
+   * would run in place as well - a runner that ran the file in scripts/ instead of its verified copy would
+   * run the swapped bytes, and the markers would show it. */
+  await writeFile(join(TEST_DIR, "package.json"), '{ "type": "commonjs" }\n');
   for (const [name, text] of Object.entries(FIXTURES)) await writeFile(join(SCRIPTS, name), text);
   /* resolveScript's cases beside p.py: a link that stays inside, a directory, a link out, a dangling link */
   await symlink("p.py", join(SCRIPTS, "alias.py"));
@@ -87,7 +93,7 @@ before(async () => {
   await symlink(join("..", "outside.py"), join(SCRIPTS, "out.py"));
   await symlink("nowhere.py", join(SCRIPTS, "dangling.py"));
 });
-after(() => rm(ROOT, { recursive: true, force: true }));
+after(() => rm(TEST_DIR, { recursive: true, force: true }));
 
 const INPUT: ProducerInput = {
   order: "preclose", firing: "preclose:2026-10-21", date: "2026-10-21", dir: "desk",
@@ -218,7 +224,6 @@ test("defaultProducerRunner never rejects: SIGKILL at the deadline, no interpret
 
 test("runScriptProducer runs a private copy of the verified bytes, passes its input, keeps stderr out of the output and logs it once", async () => {
   const pinned = await shaOf(join(SCRIPTS, "p.py"));
-  const tmp = await realpath(tmpdir());
   const calls: Array<{ argv: string[]; opts: Parameters<ProducerRunner>[1]; bytes: string; dirMode: number; fileMode: number }> = [];
   const fake = (result: Partial<RunResult>): ProducerRunner => async (argv, opts) => {
     calls.push({ argv, opts, bytes: await readFile(argv[0], "utf8"),
@@ -229,7 +234,7 @@ test("runScriptProducer runs a private copy of the verified bytes, passes its in
   const log = (line: string): void => { logs.push(line); };
   const ticks = [1_000, 1_250];
 
-  const r = await runScriptProducer({ root: ROOT, script: "scripts/p.py", sha256: pinned, input: INPUT, timeoutMs: 300_000, log,
+  const r = await runScriptProducer({ root: ROOT, script: "scripts/p.py", sha256: pinned, runBase: RUN_BASE, input: INPUT, timeoutMs: 300_000, log,
     now: () => ticks.shift() ?? 0, run: fake({ stdout: '{"n":1}', stderr: "APCA_API_SECRET_KEY=s3cr3t\nTraceback" }) });
   assert.deepEqual(r, { output: { ok: true, text: '{"n":1}' }, code: 0, timedOut: false, wallMs: 250, chars: 7 });
   assert.deepEqual(logs, ["gravit-face: desk: producer scripts/p.py wrote to stderr: APCA_API_SECRET_KEY=s3cr3t⏎Traceback"]);
@@ -240,15 +245,16 @@ test("runScriptProducer runs a private copy of the verified bytes, passes its in
   assert.equal(call.argv.length, 1);
   assert.equal(basename(copy), "p.py", "the copy keeps the script's name");
   assert.ok(basename(dirname(copy)).startsWith("gravit-producer-"), copy);
-  assert.equal(await realpath(dirname(dirname(copy))), tmp, "the run directory sits in the system's temporary directory");
+  assert.equal(dirname(dirname(copy)), RUN_BASE, "the run directory is made in the run base, never the system's temporary directory");
   assert.equal(call.bytes, "print('p')\n", "the copy holds the verified bytes");
   assert.equal(call.dirMode, 0o700);
   assert.equal(call.fileMode, 0o400);
   assert.deepEqual(call.opts, { cwd: ROOT, env: { ...producerEnv(process.env), GRAVIT_ROOT: ROOT }, timeoutMs: 300_000, stdin: JSON.stringify(INPUT) });
   assert.equal(existsSync(dirname(copy)), false, "the run directory is gone");
+  assert.equal(existsSync(RUN_BASE), true, "the run base stays");
 
   const outputOf = async (result: Partial<RunResult>, timeoutMs = 300_000) =>
-    (await runScriptProducer({ root: ROOT, script: "scripts/p.py", sha256: pinned, input: INPUT, timeoutMs, log, run: fake(result) })).output;
+    (await runScriptProducer({ root: ROOT, script: "scripts/p.py", sha256: pinned, runBase: RUN_BASE, input: INPUT, timeoutMs, log, run: fake(result) })).output;
   assert.deepEqual(await outputOf({ code: 3, stdout: '{"ok":false,"error":"no keys"}' }), { ok: false, error: "exit 3", text: '{"ok":false,"error":"no keys"}' });
   assert.deepEqual(await outputOf({ code: null, timedOut: true, stdout: "partial" }), { ok: false, error: "timed out after 5 min" });
   assert.deepEqual(await outputOf({ code: null, timedOut: true }, 90_000), { ok: false, error: "timed out after 90 s" });
@@ -259,7 +265,7 @@ test("runScriptProducer runs a private copy of the verified bytes, passes its in
   assert.ok(calls.every((c) => !existsSync(dirname(c.argv[0]))), "every run directory is gone");
 
   const before = calls.length;
-  assert.deepEqual(await runScriptProducer({ root: ROOT, script: "../outside.py", sha256: pinned, input: INPUT, timeoutMs: 300_000, log, run: fake({}) }),
+  assert.deepEqual(await runScriptProducer({ root: ROOT, script: "../outside.py", sha256: pinned, runBase: RUN_BASE, input: INPUT, timeoutMs: 300_000, log, run: fake({}) }),
     { output: { ok: false, error: GRAMMAR }, code: null, timedOut: false, wallMs: 0, chars: 0 });
   assert.equal(calls.length, before, "a script outside the grammar never runs");
 });
@@ -273,7 +279,7 @@ test("a script changed after its hash was taken is refused, and never runs", asy
   const runs: string[][] = [];
   const run: ProducerRunner = (argv, opts) => { runs.push(argv); return real(argv, opts); };
   const logs: string[] = [];
-  const at = (sha256: string) => runScriptProducer({ root: ROOT, script: "scripts/swap.py", sha256, run, input: INPUT, timeoutMs: 10_000,
+  const at = (sha256: string) => runScriptProducer({ root: ROOT, script: "scripts/swap.py", sha256, runBase: RUN_BASE, run, input: INPUT, timeoutMs: 10_000,
     log: (line) => { logs.push(line); }, now: () => 0 });
 
   assert.deepEqual(await at(pinned),
@@ -298,7 +304,7 @@ test("the bytes run are the ones verified, even when the file changes between th
     await writeFile(path, marking("ran-rewritten", "REWRITTEN"));
     return real(argv, opts);
   };
-  const r = await runScriptProducer({ root: ROOT, script: "scripts/race.py", sha256: pinned, run, input: INPUT, timeoutMs: 10_000, log: () => {} });
+  const r = await runScriptProducer({ root: ROOT, script: "scripts/race.py", sha256: pinned, runBase: RUN_BASE, run, input: INPUT, timeoutMs: 10_000, log: () => {} });
   assert.deepEqual(r.output, { ok: true, text: "VERIFIED" });
   assert.equal(r.refused, undefined);
   assert.equal(existsSync(join(ROOT, "ran-verified")), true);
@@ -316,32 +322,72 @@ test("the run directory is gone afterwards: after an exit 0, a non-zero exit and
   for (const [script, timeoutMs, output] of cases) {
     const copies: string[] = [];
     const run: ProducerRunner = (argv, opts) => { copies.push(argv[0]); return real(argv, opts); };
-    const r = await runScriptProducer({ root: ROOT, script, sha256: await shaOf(join(ROOT, script)), run, input: INPUT, timeoutMs, log: () => {} });
+    const r = await runScriptProducer({ root: ROOT, script, sha256: await shaOf(join(ROOT, script)), runBase: RUN_BASE, run, input: INPUT, timeoutMs,
+      log: () => {} });
     assert.deepEqual(r.output, output, script);
     assert.equal(copies.length, 1, script);
     assert.ok(basename(dirname(copies[0])).startsWith("gravit-producer-"), copies[0]);
+    assert.equal(dirname(dirname(copies[0])), RUN_BASE, copies[0]);
     assert.equal(existsSync(dirname(copies[0])), false, `${script}: the run directory is gone`);
   }
 });
 
-test("a missing, linked-out or non-regular script is refused as a hash failure; a copy that cannot be made is a start failure", async () => {
+test("a script that is missing, linked out, not a regular file or unreadable is refused as missing; a wrong pin as a hash; nothing runs", async () => {
   const runs: string[][] = [];
   const run: ProducerRunner = async (argv) => { runs.push(argv); return { code: 0, stdout: "", stderr: "", timedOut: false }; };
   const at = (script: string, sha256: string) =>
-    runScriptProducer({ root: ROOT, script, sha256, run, input: INPUT, timeoutMs: 10_000, log: () => {}, now: () => 0 });
-  const refusal = (error: string) => ({ output: { ok: false, error }, code: null, timedOut: false, wallMs: 0, chars: 0, refused: "hash" });
+    runScriptProducer({ root: ROOT, script, sha256, runBase: RUN_BASE, run, input: INPUT, timeoutMs: 10_000, log: () => {}, now: () => 0 });
+  const refusal = (refused: "hash" | "missing", error: string) =>
+    ({ output: { ok: false, error }, code: null, timedOut: false, wallMs: 0, chars: 0, refused });
   const p = await shaOf(join(SCRIPTS, "p.py"));
-  assert.deepEqual(await at("scripts/nope.py", p), refusal("scripts/nope.py is missing"));
-  assert.deepEqual(await at("scripts/dangling.py", p), refusal("scripts/dangling.py is missing"));
-  assert.deepEqual(await at("scripts/out.py", await shaOf(join(ROOT, "outside.py"))), refusal("scripts/out.py leaves scripts/"),
+  assert.deepEqual(await at("scripts/nope.py", p), refusal("missing", "scripts/nope.py is missing"));
+  assert.deepEqual(await at("scripts/dangling.py", p), refusal("missing", "scripts/dangling.py is missing"));
+  assert.deepEqual(await at("scripts/out.py", await shaOf(join(ROOT, "outside.py"))), refusal("missing", "scripts/out.py leaves scripts/"),
     "a link out of scripts/ is refused even when its target's bytes are the pinned ones");
-  assert.deepEqual(await at("scripts/dir.py", p), refusal("scripts/dir.py is not a regular file"));
-  assert.deepEqual(await at("scripts/p.py", "0".repeat(64)), refusal("scripts/p.py changed since arming"));
-  assert.deepEqual(runs, []);
-  await withEnv({ TMPDIR: join(ROOT, "no-such-tmp") }, async () => {
-    assert.deepEqual(await at("scripts/p.py", p), { output: { ok: false, error: "could not start: ENOENT" }, code: null, timedOut: false, wallMs: 0, chars: 0 });
-  });
-  assert.deepEqual(runs, [], "nothing runs without its copy");
+  assert.deepEqual(await at("scripts/dir.py", p), refusal("missing", "scripts/dir.py is not a regular file"));
+  const locked = join(SCRIPTS, "locked.py");
+  await writeFile(locked, "print('locked')\n");
+  const lockedSha = await shaOf(locked);
+  await chmod(locked, 0o000);
+  try {
+    assert.deepEqual(await at("scripts/locked.py", lockedSha), refusal("missing", "scripts/locked.py is missing"),
+      "a script that cannot be read cannot be verified: refused as missing, though its pin is right");
+  } finally {
+    await chmod(locked, 0o600);
+  }
+  assert.deepEqual(await at("scripts/p.py", "0".repeat(64)), refusal("hash", "scripts/p.py changed since arming"));
+  assert.deepEqual(runs, [], "nothing reached the runner");
+});
+
+test("the run base: made 0700 when missing, refused when it is a symlink, a start failure when it cannot be made", async () => {
+  const runs: string[][] = [];
+  const run: ProducerRunner = async (argv) => { runs.push(argv); return { code: 0, stdout: "OK", stderr: "", timedOut: false }; };
+  const p = await shaOf(join(SCRIPTS, "p.py"));
+  const at = (runBase: string) =>
+    runScriptProducer({ root: ROOT, script: "scripts/p.py", sha256: p, runBase, run, input: INPUT, timeoutMs: 10_000, log: () => {}, now: () => 0 });
+  const startFailure = (error: string) => ({ output: { ok: false, error }, code: null, timedOut: false, wallMs: 0, chars: 0 });
+
+  const fresh = join(TEST_DIR, "fresh", "run");
+  await mkdir(dirname(fresh));
+  assert.deepEqual((await at(fresh)).output, { ok: true, text: "OK" });
+  assert.equal((await stat(fresh)).mode & 0o777, 0o700, "a missing run base is made 0700");
+  assert.equal(dirname(dirname(runs[0][0])), fresh);
+
+  const target = join(TEST_DIR, "elsewhere");
+  await mkdir(target);
+  const linked = join(TEST_DIR, "linked-run");
+  await symlink(target, linked);
+  assert.deepEqual(await at(linked), startFailure(`could not start: ${linked} is a symlink`));
+  const dangling = join(TEST_DIR, "dangling-run");
+  await symlink(join(TEST_DIR, "nowhere"), dangling);
+  assert.deepEqual(await at(dangling), startFailure(`could not start: ${dangling} is a symlink`), "a dangling link is refused, not followed and made");
+  assert.equal(existsSync(join(TEST_DIR, "nowhere")), false);
+
+  assert.deepEqual(await at(join(TEST_DIR, "no-such-home", "run")), startFailure("could not start: ENOENT"), "no parents are made");
+  const file = join(TEST_DIR, "a-file");
+  await writeFile(file, "");
+  assert.deepEqual(await at(file), startFailure("could not start: ENOTDIR"));
+  assert.equal(runs.length, 1, "only the usable run base ran anything");
 });
 
 test("a run directory that cannot be removed is one log line, and the output stands", async () => {
@@ -354,8 +400,8 @@ test("a run directory that cannot be removed is one log line, and the output sta
     return { code: 0, stdout: "OK", stderr: "", timedOut: false };
   };
   try {
-    const r = await runScriptProducer({ root: ROOT, script: "scripts/p.py", sha256: await shaOf(join(SCRIPTS, "p.py")), input: INPUT, timeoutMs: 60_000,
-      log: (line) => { logs.push(line); }, run });
+    const r = await runScriptProducer({ root: ROOT, script: "scripts/p.py", sha256: await shaOf(join(SCRIPTS, "p.py")), runBase: RUN_BASE, input: INPUT,
+      timeoutMs: 60_000, log: (line) => { logs.push(line); }, run });
     assert.deepEqual(r.output, { ok: true, text: "OK" });
     assert.deepEqual(logs, [`gravit-face: desk: producer scripts/p.py left its run directory ${runDir} behind: EACCES`]);
   } finally {
@@ -369,7 +415,7 @@ test("a run directory that cannot be removed is one log line, and the output sta
 test("a producer's stderr is one log line, cut at 2,000 characters", async () => {
   const logs: string[] = [];
   const run: ProducerRunner = async () => ({ code: 0, stdout: "ok", stderr: `a\r\nb\rc${"d".repeat(2_500)}`, timedOut: false });
-  await runScriptProducer({ root: ROOT, script: "scripts/p.py", sha256: await shaOf(join(SCRIPTS, "p.py")), input: INPUT, timeoutMs: 60_000,
+  await runScriptProducer({ root: ROOT, script: "scripts/p.py", sha256: await shaOf(join(SCRIPTS, "p.py")), runBase: RUN_BASE, input: INPUT, timeoutMs: 60_000,
     log: (line) => { logs.push(line); }, run });
   assert.deepEqual(logs, [`gravit-face: desk: producer scripts/p.py wrote to stderr: a⏎b⏎c${"d".repeat(1_994)}⏎…[cut: 506 more characters]`]);
   assert.equal(STDERR_LOG_MAX, 2_000);
@@ -378,7 +424,7 @@ test("a producer's stderr is one log line, cut at 2,000 characters", async () =>
 test("a script producer end to end: the real runner, the allow-listed environment and GRAVIT_ROOT, stdin JSON, stderr only in the log", async () => {
   await withEnv({ DEEPSEEK_API_KEY: "fake-deepseek", TELEGRAM_BOT_TOKEN: "fake-telegram", APCA_API_KEY_ID: "fake-apca" }, async () => {
     const logs: string[] = [];
-    const r = await runScriptProducer({ root: ROOT, script: "scripts/e2e.py", sha256: await shaOf(join(SCRIPTS, "e2e.py")),
+    const r = await runScriptProducer({ root: ROOT, script: "scripts/e2e.py", sha256: await shaOf(join(SCRIPTS, "e2e.py")), runBase: RUN_BASE,
       run: defaultProducerRunner(process.execPath), input: INPUT, timeoutMs: 10_000, log: (line) => { logs.push(line); } });
     if (!r.output.ok) throw new Error(`the producer failed: ${r.output.error}`);
     const seen = JSON.parse(r.output.text) as { input: unknown; names: string[]; root: string | null; cwd: string; script: string };
@@ -389,6 +435,7 @@ test("a script producer end to end: the real runner, the allow-listed environmen
     assert.equal(seen.cwd, await realpath(ROOT));
     assert.equal(basename(seen.script), "e2e.py");
     assert.ok(basename(dirname(seen.script)).startsWith("gravit-producer-"), `it ran from its private copy: ${seen.script}`);
+    assert.equal(dirname(dirname(seen.script)), await realpath(RUN_BASE), "in the run base");
     assert.equal(existsSync(dirname(seen.script)), false, "and the copy is gone");
     assert.equal(r.code, 0);
     assert.equal(r.chars, r.output.text.length);

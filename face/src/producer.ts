@@ -14,7 +14,11 @@
  * The runner executes exactly the bytes it verified ({@link runScriptProducer}): it reads the script
  * once, checks those bytes against the hash pinned at arming, and runs a private copy of them, never
  * the file in `scripts/`, which another process could swap between the check and the exec. The copy
- * lives outside the repository, so a producer finds the repository through `GRAVIT_ROOT`, set in its
+ * lives in a run base the caller names - a firing's is `<desk dir>/run`, under `$DSH_HOME/face/desk/`,
+ * which neither the desk's sandbox nor a sandboxed workbench session can write (both can write under
+ * `$TMPDIR`, so the copy never lives there). The residual: an unsandboxed process running as the
+ * operator can still race the copy - and such a process can read the keys anyway. The copy lives
+ * outside the repository, so a producer finds the repository through `GRAVIT_ROOT`, set in its
  * environment, and opens with:
  *
  *     sys.path.insert(0, os.environ.get("GRAVIT_ROOT") or str(Path(__file__).resolve().parents[1]))
@@ -25,8 +29,8 @@
  */
 import { execFile, type ExecFileException } from "node:child_process";
 import { createHash } from "node:crypto";
-import { constants as fsConstants, mkdtemp, open, realpath, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
-import { constants, tmpdir } from "node:os";
+import { constants as fsConstants, lstat, mkdir, mkdtemp, open, realpath, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
+import { constants } from "node:os";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 const BIN = "gravit-face";
@@ -315,18 +319,19 @@ function outputOf(result: RunResult, timeoutMs: number): ProducerOutput {
   return { ok: false, error: `exit ${result.code}`, text: result.stdout };
 }
 
-/** A script producer's run as the firing reads it. `refused: "hash"` means nothing ran: the runner could
- * not verify the armed bytes, and the firing takes its refused-hash path. */
-export interface ScriptRun {
+/** A script producer's run as the firing reads it. `refused` means nothing ran, for want of the armed
+ * bytes: `"missing"` when the script cannot be found or read as a regular file under `scripts/`, `"hash"`
+ * when its bytes are not the ones pinned at arming. */
+export interface RunScriptResult {
   output: ProducerOutput;
   code: number | null;
   timedOut: boolean;
   wallMs: number;
   chars: number;
-  refused?: "hash";
+  refused?: "hash" | "missing";
 }
 
-/** A run's private directory under the system's temporary directory: this prefix and mkdtemp's six. */
+/** A run's private directory in the run base: this prefix and mkdtemp's six. */
 const RUN_DIR_PREFIX = "gravit-producer-";
 
 /** The hex SHA-256 of `bytes`, as `arm` pins a script. */
@@ -339,31 +344,55 @@ function sha256Hex(bytes: Uint8Array): string {
  * follows no link swapped in for it (`O_NOFOLLOW`; the path is a real path, so a link there is a swap) and
  * never waits on a FIFO (`O_NONBLOCK`), and the type is checked on the descriptor that is read.
  * @param path - the script's real path, from {@link resolveScript}.
- * @returns the bytes, or `undefined` when the path no longer opens as a regular file.
+ * @returns the bytes; `"irregular"` when the path now holds a link, a FIFO or anything but a regular file;
+ *   `"missing"` when it cannot be opened or read at all (gone, or no longer readable).
  */
-async function readScriptBytes(path: string): Promise<Buffer | undefined> {
+async function readScriptBytes(path: string): Promise<Buffer | "irregular" | "missing"> {
   let handle: FileHandle | undefined;
   try {
     handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
-    if (!(await handle.stat()).isFile()) return undefined;
+    if (!(await handle.stat()).isFile()) return "irregular";
     return await handle.readFile();
-  } catch {
-    return undefined;
+  } catch (error) {
+    return codeOf(error) === "ELOOP" ? "irregular" : "missing";
   } finally {
     await handle?.close().catch(() => {});
   }
 }
 
 /**
- * Run a script producer once, on exactly the bytes armed. The script is found by {@link resolveScript},
- * its bytes read ONCE and hashed; a script that cannot be found or read, or whose bytes do not hash to
- * `sha256`, is refused with nothing run - `refused: "hash"`, `code` null, `chars` 0, the error
- * `<script> is missing`, `<script> leaves scripts/`, `<script> is not a regular file` or `<script> changed
- * since arming`. Verified bytes are written to a private copy - a fresh `gravit-producer-*` directory
- * (0700) under the system's temporary directory, holding the script's file name (0400) - and `[<copy>]`
- * runs under `opts.run`: cwd `root`, the environment {@link producerEnv} of the face's plus `GRAVIT_ROOT`
- * (the absolute `root`), stdin `JSON.stringify(input)`. The directory is removed afterwards whatever
- * happened; one that cannot be is one `log` line.
+ * Make sure the run base is a directory of the face's own before a run directory is made in it: created
+ * (0700, no parents) when missing, refused when it is a symlink - it could point the copy anywhere.
+ * @param runBase - the run base the caller named.
+ * @returns why the run base cannot be used - `<runBase> is a symlink`, or the code of a failed `mkdir` or
+ *   `lstat` - or `undefined` when it can.
+ */
+async function runBaseProblem(runBase: string): Promise<string | undefined> {
+  try {
+    await mkdir(runBase, { mode: 0o700 });
+  } catch (error) {
+    if (codeOf(error) !== "EEXIST") return codeOf(error);
+  }
+  try {
+    return (await lstat(runBase)).isSymbolicLink() ? `${runBase} is a symlink` : undefined;
+  } catch (error) {
+    return codeOf(error);
+  }
+}
+
+/**
+ * Run a script producer once, on exactly the bytes armed. The script is found by {@link resolveScript}
+ * and its bytes read ONCE and hashed. Nothing runs - `code` null, `chars` 0 - when:
+ * - the script cannot be found or read as a regular file under `scripts/`: `refused: "missing"`, the error
+ *   `<script> is missing`, `<script> leaves scripts/` or `<script> is not a regular file`;
+ * - its bytes do not hash to `sha256`: `refused: "hash"`, the error `<script> changed since arming`;
+ * - the run base cannot be used: `could not start: <runBase> is a symlink`, or the code of the failure.
+ *
+ * Verified bytes are written to a private copy - a fresh `gravit-producer-*` directory (0700) in
+ * `runBase`, holding the script's file name (0400) - and `[<copy>]` runs under `opts.run`: cwd `root`,
+ * the environment {@link producerEnv} of the face's plus `GRAVIT_ROOT` (the absolute `root`), stdin
+ * `JSON.stringify(input)`. The run directory is removed afterwards whatever happened, and one that cannot
+ * be is one `log` line; `runBase` itself stays.
  *
  * Exit 0 is `{ ok: true, text: stdout }`. Another exit is `{ ok: false, error: "exit <code>", text: stdout }`,
  * as a producer's own failure report is worth quoting. A kill at the deadline is `timed out after
@@ -374,36 +403,44 @@ async function readScriptBytes(path: string): Promise<Buffer | undefined> {
  * whole: capping it is the firing's step. A `script` outside the producer grammar is refused at once,
  * without `refused` (no parsed spec can name one).
  * @param opts - `root` the repository root; `script` the spec's `scripts/<file>.py`; `sha256` the hex hash
- *   pinned at arming; `run` the runner; `input` what the producer is told; `timeoutMs` its deadline; `log`
- *   the face's log; `now` the clock for `wallMs` (`Date.now` by default).
+ *   pinned at arming; `runBase` the directory a run's private directory is made in - a firing's is
+ *   `<desk dir>/run` - made 0700 (no parents) when missing and refused when it is a symlink; `run` the
+ *   runner; `input` what the producer is told; `timeoutMs` its deadline; `log` the face's log; `now` the
+ *   clock for `wallMs` (`Date.now` by default).
  * @returns the output; the exit `code` and `timedOut` as the runner gave them; `wallMs`, the step's wall
- *   time, the check and the copy included; `chars`, the length of everything it wrote to stdout;
+ *   time, the checks and the copy included; `chars`, the length of everything it wrote to stdout;
  *   `refused` when nothing ran for want of the armed bytes.
  */
 export async function runScriptProducer(opts: {
   root: string;
   script: string;
   sha256: string;
+  runBase: string;
   run: ProducerRunner;
   input: ProducerInput;
   timeoutMs: number;
   log: (line: string) => void;
   now?: () => number;
-}): Promise<ScriptRun> {
+}): Promise<RunScriptResult> {
   if (!SCRIPT_RE.test(opts.script)) return { output: { ok: false, error: GRAMMAR }, code: null, timedOut: false, wallMs: 0, chars: 0 };
   const now = opts.now ?? Date.now;
   const started = now();
-  const refuse = (error: string): ScriptRun =>
-    ({ output: { ok: false, error }, code: null, timedOut: false, wallMs: now() - started, chars: 0, refused: "hash" });
+  const notRun = (error: string, refused?: "hash" | "missing"): RunScriptResult => ({
+    output: { ok: false, error }, code: null, timedOut: false, wallMs: now() - started, chars: 0, ...(refused === undefined ? {} : { refused }),
+  });
   const found = await resolveScript(opts.root, opts.script);
-  if ("error" in found) return refuse(found.error);
+  if ("error" in found) return notRun(found.error, "missing");
   const bytes = await readScriptBytes(found.path);
-  if (bytes === undefined || sha256Hex(bytes) !== opts.sha256) return refuse(`${opts.script} changed since arming`);
+  if (bytes === "missing") return notRun(`${opts.script} is missing`, "missing");
+  if (bytes === "irregular") return notRun(`${opts.script} is not a regular file`, "missing");
+  if (sha256Hex(bytes) !== opts.sha256) return notRun(`${opts.script} changed since arming`, "hash");
+  const baseProblem = await runBaseProblem(opts.runBase);
+  if (baseProblem !== undefined) return notRun(`could not start: ${baseProblem}`);
 
   let dir: string | undefined;
   let result: RunResult;
   try {
-    dir = await mkdtemp(join(tmpdir(), RUN_DIR_PREFIX));
+    dir = await mkdtemp(join(opts.runBase, RUN_DIR_PREFIX));
     const copy = join(dir, basename(opts.script));
     await writeFile(copy, bytes, { mode: 0o400, flag: "wx" });
     result = await opts.run([copy], {
@@ -413,8 +450,8 @@ export async function runScriptProducer(opts: {
       stdin: JSON.stringify(opts.input),
     });
   } catch (error) {
-    /* The copy could not be made (no temporary directory, a full disk), or a runner broke its
-     * never-reject contract: nothing ran that could be reported. */
+    /* The copy could not be made (a run base that is not a directory, a full disk), or a runner broke
+     * its never-reject contract: nothing ran that could be reported. */
     result = { code: null, stdout: "", stderr: "", timedOut: false, error: codeOf(error) };
   } finally {
     if (dir !== undefined) {
