@@ -7,11 +7,15 @@
  * tests/tmp/<pid>/, as src/desk-session.ts's own tests keep theirs, and are removed afterwards. */
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readEvents, readOffState, writeOff, type DeskEvent } from "../src/desk.ts";
-import { createDeskConversation, type DeskConversation, type DeskConversationDeps, type DeskOutlet } from "../src/desk-conversation.ts";
+import { withFileLock } from "@deepseek-ai/dsh-atomic-write";
+import { DESK_PATH, readDesk } from "../src/cycle.ts";
+import { OFF_FILE, deskDir, readEvents, readOffState, writeOff, type DeskEvent } from "../src/desk.ts";
+import {
+  createDeskConversation, type DeskConversation, type DeskConversationDeps, type DeskOutlet, type PostResult,
+} from "../src/desk-conversation.ts";
 import type { CreateDeskAgentOptions, DeskClock, DeskSessionCtxLike, SessionEventsOn } from "../src/desk-session.ts";
 import type { AgentCtxLike, AgentLike, ModelSelectionRefLike, ResumeMemberOptions, SessionLike } from "../src/room.ts";
 import type { EventLike, MessageLike } from "../src/room-rules.ts";
@@ -52,9 +56,12 @@ async function waitFor(what: string, ok: () => boolean | Promise<boolean>, ms = 
 /* ---------- the fakes ---------- */
 
 /** A desk agent as the conversation drives it: what it was sent, how it was cancelled, and a status the
- * test sets. `whenIdle` is dsh-agent's: it resolves once the agent's driver retires ({@link settle}). */
+ * test sets. `whenIdle` is dsh-agent's: it resolves once the agent's driver retires ({@link settle}).
+ * `maintaining` is dsh's maintenance with a followup latched behind it: the status reads `idle`, but
+ * `whenIdle` waits. */
 class FakeDeskAgent implements AgentLike {
   status: "idle" | "running" = "idle";
+  maintaining = false;
   readonly followups: MessageLike[] = [];
   readonly cancels: unknown[][] = [];
   failFollowup: string | undefined;
@@ -69,12 +76,13 @@ class FakeDeskAgent implements AgentLike {
   }
   cancel(...args: unknown[]): void { this.cancels.push(args); }
   whenIdle(): Promise<void> {
-    if (this.status !== "running") return Promise.resolve();
+    if (this.status !== "running" && !this.maintaining) return Promise.resolve();
     return new Promise((done) => { this.idle.push(done); });
   }
   /** The driver retires: idle, and every `whenIdle` waiter released. */
   settle(): void {
     this.status = "idle";
+    this.maintaining = false;
     for (const done of this.idle.splice(0)) done();
   }
   /** The text of the `n`th message the conversation sent. */
@@ -169,8 +177,9 @@ function deskClock(): { clock: DeskClock; fake: FakeClock } {
   return { fake, clock: { now: () => base + fake.now(), setTimeout: (fn, ms) => fake.setTimeout(fn, ms), clearTimeout: (h) => fake.clearTimeout(h) } };
 }
 
-/** An outlet that records what it was asked to send; `fail` makes every send reject, `throws` throw. */
-function recordingOutlet(mode: "ok" | "fail" | "throws" = "ok"): DeskOutlet & { sent: string[] } {
+/** An outlet that records what it was asked to send; `fail` makes every send reject, `throws` throw, and
+ * `never` never settle. */
+function recordingOutlet(mode: "ok" | "fail" | "throws" | "never" = "ok"): DeskOutlet & { sent: string[] } {
   const sent: string[] = [];
   return {
     sent,
@@ -178,6 +187,7 @@ function recordingOutlet(mode: "ok" | "fail" | "throws" = "ok"): DeskOutlet & { 
       sent.push(text);
       if (mode === "throws") throw new Error("the bridge fell over");
       if (mode === "fail") return Promise.reject(new Error("telegram is down"));
+      if (mode === "never") return new Promise(() => {});
       return Promise.resolve({ sent: [sent.length] });
     },
   };
@@ -195,9 +205,9 @@ interface Harness {
   desk: DeskConversation;
 }
 
-async function harness(over: Partial<DeskConversationDeps> = {}): Promise<Harness> {
+async function harness(over: Partial<DeskConversationDeps> = {}, opts: { home?: string } = {}): Promise<Harness> {
   const root = await fixture("repo");
-  const home = await fixture("home");
+  const home = opts.home ?? (await fixture("home"));
   const tree = new FakeDeskTree();
   const bus = fakeBus();
   const time = deskClock();
@@ -323,6 +333,53 @@ test("an expired pause clears itself and the post opens a turn", async () => {
     { t: iso(AT), kind: "desk-session", sessionId: agent.id, reason: "created" },
   ]);
   assert.deepEqual(await readOffState(h.home, () => AT), { expired: false }, "the switch is gone");
+});
+
+/** chmod cannot shut root out, so the unwritable cases are skipped when the suite runs as root. */
+const AS_ROOT = process.getuid?.() === 0 ? "root writes past a mode of 500" : false;
+
+test("a switch that cannot be read refuses with the error line: it never reads as no switch", async () => {
+  const unreadable = join(await fixture("long"), "x".repeat(300)); // a name past NAME_MAX: every read under it fails
+  const h = await harness({}, { home: unreadable });
+  const result = await post(h, "hi");
+  assert.equal((result as { refused?: string }).refused, "error");
+  assert.match((result as { line: string }).line, /^the desk could not open a turn: ENAMETOOLONG: .*lstat '.*\/face\/desk\/OFF'$/, "the switch's own read");
+  assert.deepEqual(h.lines, [`gravit-face: desk: ${(result as { line: string }).line}`]);
+  await assert.rejects(stat(join(h.root, "desk", "journal")), { code: "ENOENT" }, "it stopped at the switch: no ensure made the journal");
+  assert.equal(h.tree.created.length, 0, "no session ensured, no turn");
+});
+
+test("a pause set while an expired one is being lifted stands: the post reads the switch again and refuses", async () => {
+  await post(await harness(), "warm"); // load the conversation's machinery, so the next post reaches the lift at once
+  const h = await harness();
+  await writeOff(h.home, { by: "page", until: AT - 1 }, () => AT - 3_600_000);
+  const off = join(deskDir(h.home), OFF_FILE);
+  let result: Promise<PostResult> | undefined;
+  await withFileLock(off, async () => {
+    result = post(h, "hi"); // reads the expired pause, then its lift waits here for the switch's lock
+    await new Promise((done) => setTimeout(done, 150));
+    // a pause written as writeOff writes one, under the lock the lift is waiting for
+    await writeFile(off, `${JSON.stringify({ setAt: iso(AT), by: "telegram", until: iso(AT + 3_600_000) })}\n`);
+  });
+  assert.deepEqual(await result, {
+    refused: "paused", line: "paused since 14:03 ET by telegram until 15:03 ET; a terminal resumes it: npm run desk -- resume",
+  });
+  assert.deepEqual(await kinds(h), ["off-set"], "the lift found the new pause and lifted nothing");
+  assert.equal(h.tree.created.length, 0);
+});
+
+test("an expired pause that cannot be lifted is one line, and the desk goes on", { skip: AS_ROOT }, async () => {
+  const h = await harness();
+  await writeOff(h.home, { by: "page", until: AT - 1 }, () => AT - 3_600_000);
+  await chmod(deskDir(h.home), 0o500); // the switch's lock cannot be made beside it
+  try {
+    const result = await post(h, "back?");
+    assert.deepEqual(result, { opened: true, sessionId: h.tree.agents[0].id }, "past its until, the pause is not in force");
+    assert.match(h.lines[0], /^gravit-face: desk: the expired pause could not be lifted \(EACCES: .*\); the desk goes on$/);
+    assert.equal(h.lines.filter((line) => line.includes("could not be lifted")).length, 1);
+  } finally {
+    await chmod(deskDir(h.home), 0o755);
+  }
 });
 
 test("a fence violation refuses with the repo-relative line and a desk-refused event", async () => {
@@ -486,6 +543,74 @@ test("a send that rejects or throws is one line each, never an unhandled rejecti
   } finally {
     process.off("unhandledRejection", onUnhandled);
   }
+});
+
+test("a failed turn is recorded with its error and answered with the failed line - or with its text, when it said something", async () => {
+  const h = await harness();
+  const outlet = recordingOutlet();
+  h.desk.setOutlet(outlet);
+  const { sessionId } = (await post(h, "hi")) as { sessionId: string };
+
+  startTurn(h, sessionId, 1, PHONE);
+  endTurn(h, sessionId, 1, { kind: "error", error: { message: "DeepSeek is down\n    at fetch (deepseek.js:1)", code: "UNAVAILABLE" } });
+  startTurn(h, sessionId, 2, ALERT);
+  answer(h, sessionId, 2, "NVDA 181.50 (IEX 15:21:03 ET); the plan's buy zone is 180-182.");
+  endTurn(h, sessionId, 2, { kind: "error", error: { message: "the stream was reset", code: "UNKNOWN" } });
+  startTurn(h, sessionId, 3, JOB);
+  endTurn(h, sessionId, 3, { kind: "blocked" });
+  startTurn(h, sessionId, 4, BROWSER);
+  endTurn(h, sessionId, 4, { kind: "error", error: { message: "DeepSeek is down", code: "UNAVAILABLE" } });
+  turn(h, sessionId, 5, PHONE, "back up");
+  await waitFor("four replies", () => outlet.sent.length === 4);
+  assert.deepEqual(outlet.sent, [
+    "the desk could not answer: DeepSeek is down; nothing was done - send it again later",
+    "NVDA 181.50 (IEX 15:21:03 ET); the plan's buy zone is 180-182.",
+    "the desk could not answer: blocked; nothing was done - send it again later",
+    "back up",
+  ], "the browser turn's failure stays in its transcript");
+  assert.deepEqual((await turnsOf(h)).map((e) => [e.turn, e.source, e.outcome, e.error]), [
+    [1, "telegram", "failed", "DeepSeek is down"],
+    [2, "alert", "failed", "the stream was reset"],
+    [3, "wake", "failed", "blocked"],
+    [4, "user", "failed", "DeepSeek is down"],
+    [5, "telegram", "ended", undefined],
+  ]);
+  assert.equal(Object.hasOwn((await turnsOf(h))[4], "error"), false, "no error key on a turn that did not fail");
+});
+
+test("a send that never settles is given a minute, then one line, and the next reply goes ahead", async () => {
+  const h = await harness();
+  const { sessionId } = (await post(h, "hi")) as { sessionId: string };
+  const stuck = recordingOutlet("never");
+  h.desk.setOutlet(stuck);
+  turn(h, sessionId, 1, PHONE, "into the void");
+  await waitFor("the first send", () => stuck.sent.length === 1);
+  turn(h, sessionId, 2, PHONE, "the next one");
+  await waitFor("turn 2's record", async () => (await turnsOf(h)).length === 2);
+  await h.time.fake.advance(59_999);
+  assert.deepEqual(stuck.sent, ["into the void"], "the next reply waits behind the one under way");
+  await h.time.fake.advance(1);
+  await waitFor("the next reply", () => stuck.sent.length === 2);
+  assert.deepEqual(stuck.sent, ["into the void", "the next one"]);
+  assert.deepEqual(h.lines, [
+    `gravit-face: desk: the reply to turn 1 on desk session ${sessionId} could not be sent: the outlet did not answer in 60 s; the next reply goes ahead`,
+  ]);
+});
+
+test("the conversation imports nothing but types: desk.ts, desk-session.ts and dsh-llm load on first use", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(join(dirname(fileURLToPath(import.meta.url)), "..", "src", "desk-conversation.ts"), "utf8");
+  const imports = source.match(/^import\b.*$/gm) ?? [];
+  assert.ok(imports.some((line) => line.includes('"./desk.ts"')), "it does name desk.ts");
+  for (const line of imports) assert.match(line, /^import type /, `a value edge: ${line}`);
+});
+
+test("the desk contract says where each answer goes, as the delivery does", () => {
+  const contract = readDesk(DESK_PATH);
+  assert.ok(contract.includes(
+    "Your final text goes to the operator's phone, as plain text. A message with no bracketed line is the operator at the browser, "
+      + "where your answer stays; a background job's notice is answered to the phone.",
+  ));
 });
 
 /* ---------- serialization ---------- */
@@ -662,6 +787,8 @@ test("dispose cancels a running turn with the shutdown reason, once", async () =
   const first = h.desk.dispose();
   const second = h.desk.dispose();
   assert.equal(second, first, "a second call settles with the first");
+  await waitFor("the shutdown cancel", () => agent.cancels.length === 1);
+  agent.settle(); // the cut turn's driver retires
   await first;
   await h.desk.dispose();
   assert.deepEqual(agent.cancels, [[{ kind: "hook", reason: "shutdown" }]]);
@@ -674,6 +801,41 @@ test("dispose cancels a running turn with the shutdown reason, once", async () =
   assert.equal(await h.desk.stop("stopped from the phone"), false);
 });
 
+test("a turn cut at shutdown is recorded before dispose resolves", async () => {
+  const h = await harness();
+  const { sessionId } = (await post(h, "hi")) as { sessionId: string };
+  const agent = h.tree.agent(sessionId);
+  agent.status = "running";
+  startTurn(h, sessionId, 1, PHONE);
+  let resolved = false;
+  const disposing = h.desk.dispose().then(() => { resolved = true; });
+  await waitFor("the shutdown cancel", () => agent.cancels.length === 1);
+  await h.time.fake.advance(1_000);
+  assert.equal(resolved, false, "it waits for the agent it cut");
+  endTurn(h, sessionId, 1, ABORTED("shutdown")); // the loop ends the turn after the cancel
+  agent.settle();
+  await disposing;
+  assert.deepEqual((await turnsOf(h)).map((e) => [e.sessionId, e.turn, e.source, e.wallMs]), [[sessionId, 1, "telegram", 1_000]]);
+  assert.equal(h.bus.listeners.size, 0);
+});
+
+test("dispose waits two seconds at most for an agent it cut", async () => {
+  const h = await harness();
+  const { sessionId } = (await post(h, "hi")) as { sessionId: string };
+  const agent = h.tree.agent(sessionId);
+  agent.status = "running";
+  startTurn(h, sessionId, 1, PHONE);
+  let resolved = false;
+  const disposing = h.desk.dispose().then(() => { resolved = true; });
+  await waitFor("the shutdown cancel", () => agent.cancels.length === 1);
+  await h.time.fake.advance(1_999);
+  assert.equal(resolved, false);
+  await h.time.fake.advance(1);
+  await disposing;
+  assert.equal(h.bus.listeners.size, 0, "the supervision ends all the same");
+  assert.deepEqual(await turnsOf(h), [], "no turn/end came: nothing to record");
+});
+
 test("dispose during a retiring turn cancels it once", async () => {
   const h = await harness();
   const { sessionId: old } = (await post(h, "hi")) as { sessionId: string };
@@ -682,13 +844,48 @@ test("dispose during a retiring turn cancels it once", async () => {
   startTurn(h, old, 1, PHONE);
   const { sessionId: fresh } = await h.desk.renew();
   assert.equal(h.bus.listeners.size, 2);
-  await Promise.all([h.desk.dispose(), h.desk.dispose()]);
+  const disposing = Promise.all([h.desk.dispose(), h.desk.dispose()]);
+  await waitFor("the shutdown cancel", () => oldAgent.cancels.length === 1);
+  endTurn(h, old, 1, ABORTED("shutdown"));
+  oldAgent.settle();
+  await disposing;
   assert.deepEqual(oldAgent.cancels, [[{ kind: "hook", reason: "shutdown" }]]);
   assert.deepEqual(h.tree.agent(fresh).cancels, [], "the idle new conversation has nothing to cancel");
   assert.equal(h.bus.listeners.size, 0, "every supervision is gone, the retiring one included");
+  assert.deepEqual((await turnsOf(h)).map((e) => [e.sessionId, e.turn]), [[old, 1]], "and the retiring turn it cut is recorded");
+});
+
+test("work the status does not show - maintenance with a followup latched - is work under way to stop, retire and dispose", async () => {
+  const h = await harness();
+  const { sessionId: old } = (await post(h, "hi")) as { sessionId: string };
+  const oldAgent = h.tree.agent(old);
+  oldAgent.maintaining = true; // dsh reads idle here, while whenIdle waits
+  assert.deepEqual(h.desk.current(), { sessionId: old, running: false }, "the status says idle");
+  assert.equal(await h.desk.stop("stopped from the phone"), true, "stop goes by whenIdle");
+  assert.deepEqual(oldAgent.cancels, [[{ kind: "hook", reason: "stopped from the phone" }]]);
+  const { sessionId: fresh } = await h.desk.renew();
+  assert.equal(h.bus.listeners.size, 2, "retired, not ended: whenIdle still waits");
+  const disposing = h.desk.dispose();
+  await waitFor("the shutdown cancel", () => oldAgent.cancels.length === 2);
+  assert.deepEqual(oldAgent.cancels[1], [{ kind: "hook", reason: "shutdown" }]);
   oldAgent.settle();
-  await new Promise((done) => setTimeout(done, 20));
+  await disposing;
   assert.equal(h.bus.listeners.size, 0);
+  assert.deepEqual(h.tree.agent(fresh).cancels, []);
+});
+
+test("a renew that a dispose lands on while it ensures resolves nothing and supervises nothing", async () => {
+  const h = await harness();
+  await post(h, "hi");
+  let open: () => void = () => {};
+  h.tree.gate = new Promise((done) => { open = done; });
+  const renewing = h.desk.renew();
+  await waitFor("the fresh create under way", () => h.tree.created.length === 2);
+  const disposing = h.desk.dispose();
+  open();
+  await assert.rejects(renewing, /the desk is shut down/);
+  await disposing;
+  assert.equal(h.bus.listeners.size, 0, "the new conversation is not supervised");
 });
 
 test("a supervision that cannot be ended is one line, never an unhandled rejection, even from the idle wait", async () => {
@@ -720,17 +917,39 @@ test("a supervision that cannot be ended is one line, never an unhandled rejecti
   }
 });
 
-test("a dispose that lands while a post is ensuring leaves the turn unopened and the session unsupervised", async () => {
+test("a dispose that lands while a post is ensuring waits for it, and the turn stays unopened and the session unsupervised", async () => {
   const h = await harness();
   let open: () => void = () => {};
   h.tree.gate = new Promise((done) => { open = done; });
   const pending = post(h, "hi");
   await waitFor("the create under way", () => h.tree.created.length === 1);
-  await h.desk.dispose(); // never waits for the post
+  let resolved = false;
+  const disposing = h.desk.dispose().then(() => { resolved = true; });
+  await new Promise((done) => setTimeout(done, 20));
+  assert.equal(resolved, false, "dispose waits for the post under way");
   open();
+  await disposing;
   assert.deepEqual(await pending, { refused: "error", line: "the desk could not open a turn: the desk is shut down" });
+  assert.deepEqual(await kinds(h), ["desk-session"], "the ensure's record landed before dispose resolved");
   assert.equal(h.tree.agents.length, 1, "the ensure itself finished");
   assert.deepEqual(h.tree.agents[0].followups, [], "but nothing was sent");
   assert.equal(h.bus.listeners.size, 0, "and nothing is supervised");
   assert.deepEqual(h.lines, []);
+});
+
+test("dispose waits five seconds at most for a start, post or renew under way", async () => {
+  const h = await harness();
+  let open: () => void = () => {};
+  h.tree.gate = new Promise((done) => { open = done; });
+  const starting = h.desk.start();
+  await waitFor("the create under way", () => h.tree.created.length === 1);
+  let resolved = false;
+  const disposing = h.desk.dispose().then(() => { resolved = true; });
+  await h.time.fake.advance(4_999);
+  assert.equal(resolved, false);
+  await h.time.fake.advance(1);
+  await disposing;
+  open();
+  await starting;
+  assert.equal(h.bus.listeners.size, 0, "a start that finishes after dispose supervises nothing");
 });

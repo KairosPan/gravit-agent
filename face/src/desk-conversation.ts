@@ -17,29 +17,40 @@
  * EVERY TURN on the session, whoever opened it, is supervised (src/desk-session.ts `superviseDeskTurns`): its
  * deadline and its fence check run from its `turn/start`. At its end it is one ledger event - a `desk-turn`,
  * or a `desk-refused` when its fence check cut it - and then, for a turn opened by the phone, an alert or a
- * wake, one delivery to the outlet: its final text, the fence's refusal line, or the timed-out line when the
- * deadline cut it before it said anything. A browser turn's answer stays in its transcript. Records keep turn
- * order and so do deliveries, each delivery after its own record; nothing at a turn's end can reject - a send
- * that fails is one line.
+ * wake, one delivery to the outlet: the fence's refusal line for a refused turn; else its final text, or,
+ * when it said nothing, the timed-out line for a turn the deadline cut and the failed line for one that ended
+ * on an error. A browser turn's answer stays in its transcript. Records keep turn order and so do deliveries,
+ * each delivery after its own record and none waiting on an outlet more than a minute; nothing at a turn's
+ * end can reject - a send that fails is one line.
  *
  * ONE AT A TIME. `start`, `post` and `renew` run in the order they were called, each once the one before has
  * settled: two ensures at once would both find no conversation in the ledger and open two. `stop`,
  * `setOutlet`, `current` and `dispose` act at once.
  *
+ * WORK UNDER WAY is dsh-agent's `whenIdle` wherever the agent has it, not its status: the status reads
+ * `idle` while maintenance runs with a followup latched behind it, and `whenIdle` waits for both.
+ *
  * THE SWITCH. When an ensure answers another session, or another agent object, than the one supervised, the
  * supervision moves to it. Another agent object for the same session means the old one is gone, and its
  * supervision goes at once. Another session - a renew, the phone's `/new` - retires the old one: its
- * supervision stays until that agent is idle (dsh-agent `whenIdle`: the turn running at the switch and any
- * its inbox already held), so a turn under way keeps its deadline, its record and its delivery.
+ * supervision stays until that agent is idle (`whenIdle`: the turn running at the switch and any its inbox
+ * already held), so a turn under way keeps its deadline, its record and its delivery.
+ *
+ * SHUTDOWN ({@link DeskConversation.dispose}). Every turn under way, on the conversation and on any it
+ * retired, is cancelled as `shutdown`, and its agent gets two seconds to go idle, so the cut turn is
+ * recorded; then every supervision ends, a start, post or renew under way gets five seconds to settle, and
+ * the records under way are waited for - so nothing the conversation writes lands after the ledger's
+ * `shutdown`, which src/desk.ts appends once this has settled.
  *
  * MODULE WEIGHT. src/desk.ts imports this module, and `npm run desk` and scripts/service.ts import src/desk.ts.
  * src/desk-session.ts brings src/desk-preset.ts (src/roles.ts, src/bots.ts, js-yaml) and dsh-agent with it,
- * and dsh-llm brings cordis, so this module loads both on a conversation's first use ({@link loadMachinery}),
- * never with itself: the pause switch stays as light as src/desk-names.ts made it.
+ * and dsh-llm brings cordis. So this module imports nothing but types: src/desk.ts, src/desk-session.ts and
+ * dsh-llm load on a conversation's first use ({@link loadMachinery}). The pause switch loads no more than it
+ * did, and the cycle with src/desk.ts has no value edge.
  * @module
  */
 import type { MessageSource } from "@deepseek-ai/dsh-llm";
-import { appendEvent, clearOff, deskTime, readOffState, type OffState } from "./desk.ts";
+import type { OffState } from "./desk.ts";
 import type { DeskClock, DeskSessionCtxLike, DeskSessionDeps, DeskSource, DeskTurnRecord, SessionEventsOn } from "./desk-session.ts";
 import type { AgentLike } from "./room.ts";
 import type { EventLike, MessageLike } from "./room-rules.ts";
@@ -57,6 +68,12 @@ const defaultClock: DeskClock = {
 
 /** Every desk turn's deadline unless the owner says otherwise: five minutes (the plan's Global Constraints). */
 const DESK_DEADLINE_MS = 300_000;
+/** The longest a delivery waits on the outlet before the next one goes ahead. */
+const DELIVERY_MS = 60_000;
+/** How long {@link DeskConversation.dispose} gives an agent it cancelled to go idle, so the cut turn is recorded. */
+const SHUTDOWN_IDLE_MS = 2_000;
+/** How long {@link DeskConversation.dispose} gives a start, post or renew under way to settle. */
+const SHUTDOWN_QUEUE_MS = 5_000;
 
 /** The sources whose answers go to the outlet: the phone, an alert, a wake. A `user` turn is the operator at the
  * browser, answered in its own transcript. */
@@ -108,25 +125,26 @@ export interface DeskConversation {
    * reason it was not, as {@link PostResult}. Never rejects. */
   post(input: { text: string; source: DeskSource; message: { kind: string } & Record<string, unknown> }): Promise<PostResult>;
   /** Open another desk conversation (the phone's `/new`), recorded as `new`, and supervise it; resolves its id.
-   * Rejects when the ensure does, and once disposed. */
+   * Rejects when the ensure does, and when the conversation is disposed before or while it runs. */
   renew(): Promise<{ sessionId: string }>;
-  /** Cancel every supervised turn that runs - the current conversation's and a retiring one's - with
-   * `{ kind: "hook", reason }`; `true` when there was one, `false` when nothing ran. */
+  /** Cancel the work under way - on the current conversation and on any it retired - with `{ kind: "hook",
+   * reason }`; `true` when there was some, `false` when nothing was under way. */
   stop(reason: string): Promise<boolean>;
   /** Where answers go from now on: read at each delivery, so `undefined` stops them while records go on. */
   setOutlet(outlet: DeskOutlet | undefined): void;
-  /** The conversation supervised now, and whether a desk turn runs - exactly when {@link stop} has one to cancel. */
+  /** The conversation supervised now, and whether a supervised agent's status reads `running` - a snapshot:
+   * maintenance with a followup latched behind it reads idle here, which {@link stop} does not go by. */
   current(): { sessionId?: string; running: boolean };
-  /** Cancel every running turn with `{ kind: "hook", reason: "shutdown" }`, end every supervision and wait for
-   * the records already under way. Once: a second call settles with the first. Afterwards a post refuses and a
-   * renew rejects. Never rejects. */
+  /** Shut the conversation down (see the module header's SHUTDOWN). Once: a second call settles with the
+   * first. Afterwards a post refuses and a renew rejects. Never rejects. */
   dispose(): Promise<void>;
 }
 
 /* ---------- what a conversation loads on first use ---------- */
 
-/** src/desk-session.ts and dsh-llm's `createUserMessage`, as a conversation uses them. */
+/** src/desk.ts, src/desk-session.ts and dsh-llm's `createUserMessage`, as a conversation uses them. */
 interface Machinery {
+  desk: typeof import("./desk.ts");
   session: typeof import("./desk-session.ts");
   createUserMessage: (typeof import("@deepseek-ai/dsh-llm"))["createUserMessage"];
 }
@@ -135,15 +153,15 @@ let machinery: Promise<Machinery> | undefined;
 
 /** The machinery, imported on the first call and shared after it (see the module header's MODULE WEIGHT). */
 function loadMachinery(): Promise<Machinery> {
-  machinery ??= Promise.all([import("./desk-session.ts"), import("@deepseek-ai/dsh-llm")])
-    .then(([session, llm]) => ({ session, createUserMessage: llm.createUserMessage }));
+  machinery ??= Promise.all([import("./desk.ts"), import("./desk-session.ts"), import("@deepseek-ai/dsh-llm")])
+    .then(([desk, session, llm]) => ({ desk, session, createUserMessage: llm.createUserMessage }));
   return machinery;
 }
 
 /* ---------- the lines ---------- */
 
 /** The phone's line for a post the pause refused, each time as the desk shows one (src/desk.ts `deskTime`). */
-function pausedLine(state: OffState, now: Date): string {
+function pausedLine(state: OffState, now: Date, deskTime: Machinery["desk"]["deskTime"]): string {
   const until = state.until === undefined ? "" : ` until ${deskTime(new Date(state.until), now)}`;
   return `paused since ${deskTime(new Date(state.setAt), now)} by ${state.by}${until}; a terminal resumes it: npm run desk -- resume`;
 }
@@ -155,9 +173,55 @@ function timedOutLine(deadlineMs: number): string {
   return `timed out after ${after}; a card or a long tool was pending`;
 }
 
+/** The phone's line for a turn that ended on an error before it said anything. */
+const notAnsweredLine = (error: string): string => `the desk could not answer: ${error}; nothing was done - send it again later`;
+
 /** What a post refuses as once the conversation is disposed. */
 const SHUT_DOWN = "the desk is shut down";
-const failedLine = (reason: string): string => `the desk could not open a turn: ${reason}`;
+const notOpenedLine = (reason: string): string => `the desk could not open a turn: ${reason}`;
+
+/** What a turn's end sends: the refusal line for a refused turn; else its final text; else why it said
+ * nothing - cut by its deadline, or failed - and `""`, nothing to send, for one that just ended on a tool. */
+function replyOf(r: DeskTurnRecord, m: Machinery): string {
+  if (r.outcome === "refused") return m.session.fenceRefusalLine(r.violation ?? JOURNAL);
+  if (r.finalText !== "") return r.finalText;
+  if (r.outcome === "timed-out") return timedOutLine(r.deadlineMs);
+  if (r.outcome === "failed") return notAnsweredLine(r.error ?? "error");
+  return "";
+}
+
+/* ---------- agents at rest ---------- */
+
+/** dsh-agent's `Agent.whenIdle`, which the structural {@link AgentLike} leaves out: it resolves once the
+ * agent's driver has retired - after the turn it was running, every turn its inbox held, and any maintenance
+ * with the followup latched behind it. */
+type IdleAware = { whenIdle?: () => Promise<void> };
+
+/** `agent`'s `whenIdle`, bound and never throwing - a synchronous throw becomes a rejection - or `undefined`
+ * when the agent has none. */
+function idleWaitOf(agent: AgentLike): (() => Promise<void>) | undefined {
+  const whenIdle = (agent as AgentLike & IdleAware).whenIdle;
+  if (typeof whenIdle !== "function") return undefined;
+  return () => {
+    try {
+      return Promise.resolve(whenIdle.call(agent));
+    } catch (err) {
+      return Promise.reject(err);
+    }
+  };
+}
+
+/** Whether `agent` has work under way. With `whenIdle`, an idle agent's settles within microtasks, so one
+ * still pending after a turn of the event loop is work under way; a `whenIdle` that rejects counts as idle.
+ * Without it, the status. */
+async function busy(agent: AgentLike): Promise<boolean> {
+  const wait = idleWaitOf(agent);
+  if (wait === undefined) return agent.status === "running";
+  let idle = false;
+  wait().then(() => { idle = true; }, () => { idle = true; });
+  await new Promise<void>((done) => { setImmediate(done); });
+  return !idle;
+}
 
 /* ---------- the conversation ---------- */
 
@@ -168,9 +232,8 @@ interface Watch {
   readonly unwatch: () => void;
 }
 
-/** dsh-agent's `Agent.whenIdle`, which the structural {@link AgentLike} leaves out: it resolves once the
- * agent's driver has retired - after the turn it was running and every turn its inbox held. */
-type IdleAware = { whenIdle?: () => Promise<void> };
+/** How a promise settled within a bound: `ok`, `failed` with its error, or `late` - left to settle alone. */
+type Within = { kind: "ok" } | { kind: "failed"; error: unknown } | { kind: "late" };
 
 /**
  * The desk session's one owner. Nothing runs until a member is called: src/desk.ts `installDesk` calls
@@ -193,6 +256,16 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
   let disposing: Promise<void> | undefined;
   const watches = (): Watch[] => [...(current === undefined ? [] : [current]), ...retiring];
 
+  /** How `p` settled within `ms` on the clock. Never rejects; a `p` left late is still handled when it
+   * rejects, so it cannot become an unhandled rejection. */
+  const within = (ms: number, p: Promise<unknown>): Promise<Within> => new Promise((done) => {
+    const timer = clock.setTimeout(() => done({ kind: "late" }), ms);
+    p.then(
+      () => { clock.clearTimeout(timer); done({ kind: "ok" }); },
+      (error: unknown) => { clock.clearTimeout(timer); done({ kind: "failed", error }); },
+    );
+  });
+
   /* start, post and renew, one at a time; the chain itself never rejects */
   let queue: Promise<unknown> = Promise.resolve();
   const serially = <T>(task: () => Promise<T>): Promise<T> => {
@@ -205,37 +278,42 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
   let recording: Promise<void> = Promise.resolve();
   let delivering: Promise<void> = Promise.resolve();
 
-  const record = async (r: DeskTurnRecord): Promise<void> => {
+  const record = async (r: DeskTurnRecord, m: Machinery): Promise<void> => {
     const t = stamp();
     if (r.outcome === "refused") {
-      await appendEvent(home, { t, kind: "desk-refused", reason: "fence", path: r.violation ?? JOURNAL }, { log });
+      await m.desk.appendEvent(home, { t, kind: "desk-refused", reason: "fence", path: r.violation ?? JOURNAL }, { log });
       return;
     }
-    await appendEvent(home, {
+    await m.desk.appendEvent(home, {
       t, kind: "desk-turn", sessionId: r.sessionId, source: r.source, turn: r.turn, outcome: r.outcome, wallMs: r.wallMs,
       ...(r.usage === undefined ? {} : { usage: r.usage }),
+      ...(r.error === undefined ? {} : { error: r.error }),
     }, { log });
   };
 
   const deliver = async (r: DeskTurnRecord, m: Machinery): Promise<void> => {
     const to = outlet;
     if (to === undefined || !DELIVERED.has(r.source)) return;
-    const text = r.outcome === "refused"
-      ? m.session.fenceRefusalLine(r.violation ?? JOURNAL)
-      : r.outcome === "timed-out" && r.finalText === "" ? timedOutLine(r.deadlineMs) : r.finalText;
+    const text = replyOf(r, m);
     if (text === "") return; // it ended on a tool: there is nothing to say
+    const unsent = `${BIN}: desk: the reply to turn ${r.turn} on desk session ${r.sessionId} could not be sent`;
+    let sending: Promise<unknown>;
     try {
-      await to.send(text);
+      sending = Promise.resolve(to.send(text));
     } catch (err) {
-      log(`${BIN}: desk: the reply to turn ${r.turn} on desk session ${r.sessionId} could not be sent: ${errText(err)}`);
+      log(`${unsent}: ${errText(err)}`);
+      return;
     }
+    const sent = await within(DELIVERY_MS, sending);
+    if (sent.kind === "failed") log(`${unsent}: ${errText(sent.error)}`);
+    else if (sent.kind === "late") log(`${unsent}: the outlet did not answer in ${DELIVERY_MS / 1000} s; the next reply goes ahead`);
   };
 
   /** The supervisor's hand at a turn's end. Synchronous, and nothing it starts can reject: an unhandled
    * rejection is a process exit in the face (main.ts `installFailLoud`). */
   const turnEnded = (r: DeskTurnRecord, m: Machinery): void => {
     const where = `turn ${r.turn} on desk session ${r.sessionId}`;
-    const recorded = recording.then(() => record(r)).catch((err: unknown) => {
+    const recorded = recording.then(() => record(r, m)).catch((err: unknown) => {
       log(`${BIN}: desk: ${where} could not be recorded: ${errText(err)}`);
     });
     recording = recorded;
@@ -264,10 +342,11 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
     }
   };
 
-  /** Keep `w` supervised until its agent is idle, or end it now when the agent is idle already. */
+  /** Keep `w` supervised until its agent is idle by `whenIdle` - at once when it is - or, for an agent without
+   * one, end it now. */
   const retire = (w: Watch): void => {
-    const whenIdle = (w.agent as AgentLike & IdleAware).whenIdle;
-    if (w.agent.status !== "running" || typeof whenIdle !== "function") {
+    const wait = idleWaitOf(w.agent);
+    if (wait === undefined) {
       end(w);
       return;
     }
@@ -275,11 +354,7 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
     const release = (): void => {
       if (retiring.delete(w)) end(w);
     };
-    try {
-      Promise.resolve(whenIdle.call(w.agent)).then(release, release);
-    } catch {
-      release();
-    }
+    wait().then(release, release);
   };
 
   /** Supervise `sessionId` as `agent` unless it already is (see the module header's THE SWITCH). */
@@ -300,7 +375,7 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
     return { agent, sessionId };
   };
 
-  /** Cancel `w`'s running turn with `cause`; whether the cancel went through. */
+  /** Cancel `w`'s work under way with `cause`; whether the cancel went through. */
   const cancel = (w: Watch, cause: { kind: "hook"; reason: string }): boolean => {
     try {
       w.agent.cancel(cause);
@@ -313,22 +388,23 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
 
   /** A post that could not open its turn: one line, and the phone's. */
   const failed = (err: unknown): PostResult => {
-    const line = failedLine(errText(err));
+    const line = notOpenedLine(errText(err));
     log(`${BIN}: desk: ${line}`);
     return { refused: "error", line };
   };
+  const shutDown = (): PostResult => ({ refused: "error", line: notOpenedLine(SHUT_DOWN) });
 
   /** The pause as a post reads it: lifted when past its `until`, then read again - a pause set since stands. */
-  const pause = async (): Promise<OffState | undefined> => {
+  const pause = async (m: Machinery): Promise<OffState | undefined> => {
     const now = (): number => clock.now();
-    let off = await readOffState(home, now);
+    let off = await m.desk.readOffState(home, now);
     if (off.state !== undefined && off.expired) {
       try {
-        await clearOff(home, "expiry", now);
+        await m.desk.clearOff(home, "expiry", now);
       } catch (err) {
         log(`${BIN}: desk: the expired pause could not be lifted (${errText(err)}); the desk goes on`);
       }
-      off = await readOffState(home, now);
+      off = await m.desk.readOffState(home, now);
     }
     return off.state !== undefined && !off.expired ? off.state : undefined;
   };
@@ -347,19 +423,19 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
 
     post(input) {
       return serially(async (): Promise<PostResult> => {
-        if (disposed) return { refused: "error", line: failedLine(SHUT_DOWN) };
+        if (disposed) return shutDown();
         try {
-          const paused = await pause();
-          if (paused !== undefined) return { refused: "paused", line: pausedLine(paused, new Date(clock.now())) };
           const m = await loadMachinery();
+          const paused = await pause(m);
+          if (paused !== undefined) return { refused: "paused", line: pausedLine(paused, new Date(clock.now()), m.desk.deskTime) };
           const path = await m.session.findDeskFenceViolation(root);
           if (path !== undefined) {
-            await appendEvent(home, { t: stamp(), kind: "desk-refused", reason: "fence", path }, { log });
+            await m.desk.appendEvent(home, { t: stamp(), kind: "desk-refused", reason: "fence", path }, { log });
             return { refused: "fence", path, line: m.session.fenceRefusalLine(path) };
           }
-          if (disposed) return { refused: "error", line: failedLine(SHUT_DOWN) };
+          if (disposed) return shutDown();
           const { agent, sessionId } = await ensure(false);
-          if (disposed) return { refused: "error", line: failedLine(SHUT_DOWN) };
+          if (disposed) return shutDown();
           const text = `${m.session.provenanceLine(input.source, new Date(clock.now()))}\n${input.text}`;
           const message = m.createUserMessage({ content: [{ type: "text", text }], source: input.message as MessageSource });
           agent.followup(message as unknown as MessageLike);
@@ -374,16 +450,14 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
       return serially(async () => {
         if (disposed) throw new Error(SHUT_DOWN);
         const { sessionId } = await ensure(true);
+        if (disposed) throw new Error(SHUT_DOWN); // opened, but by now nobody supervises it: no id to hand out
         return { sessionId };
       });
     },
 
     async stop(reason) {
-      let stopped = false;
-      for (const w of watches()) {
-        if (w.agent.status === "running" && cancel(w, { kind: "hook", reason })) stopped = true;
-      }
-      return stopped;
+      const stopped = await Promise.all(watches().map(async (w) => (await busy(w.agent)) && cancel(w, { kind: "hook", reason })));
+      return stopped.includes(true);
     },
 
     setOutlet(next) {
@@ -403,10 +477,13 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
         const all = watches();
         current = undefined;
         retiring.clear();
-        for (const w of all) {
-          if (w.agent.status === "running") cancel(w, { kind: "hook", reason: "shutdown" });
+        await Promise.all(all.map(async (w) => {
+          if ((await busy(w.agent)) && cancel(w, { kind: "hook", reason: "shutdown" })) {
+            await within(SHUTDOWN_IDLE_MS, idleWaitOf(w.agent)?.() ?? Promise.resolve());
+          }
           end(w);
-        }
+        }));
+        await within(SHUTDOWN_QUEUE_MS, queue);
         await recording;
       })();
       return disposing;

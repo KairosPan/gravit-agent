@@ -757,13 +757,16 @@ export interface DeskHandle {
  * too, the desk conversation's owner (src/desk-conversation.ts) is created on the same `now` and
  * started without being awaited - its `start` never rejects - so the desk session is ensured and
  * supervised before any phone message, and a turn the operator opens from the browser is timed,
- * fenced and recorded like a phone turn. `dispose(code)` disposes that owner first, cancelling a
- * running desk turn as `shutdown`, then removes the tools' listener, stops the watch, lets the
- * `boot` append settle (two appends started together take the file lock in either order, and a
- * `shutdown` written before its `boot` reads as a lost run), then appends the `shutdown` with
- * `code`. It is idempotent: a second call writes nothing and settles with the first. With the desk
- * off, `ready` is already resolved, there is no conversation, and `dispose` only removes the
- * listener. Nothing here rejects on the ledger, so a caller need not await `ready`.
+ * fenced and recorded like a phone turn. `dispose(code)` disposes that owner first - it cancels the
+ * desk turns under way as `shutdown`, gives each cut agent two seconds to go idle so the cut turn
+ * is recorded, and gives a start, post or renew under way five seconds to settle, so nothing the
+ * conversation writes lands after the `shutdown` - then removes the tools' listener, stops the
+ * watch, lets the `boot` append settle (two appends started together take the file lock in either
+ * order, and a `shutdown` written before its `boot` reads as a lost run), then appends the
+ * `shutdown` with `code`. It is idempotent: a second call writes nothing and settles with the
+ * first. With the desk off, `ready` is already resolved, there is no conversation, and `dispose`
+ * only removes the listener. Nothing here rejects on the ledger, so a caller need not await
+ * `ready`.
  * @param webServer - the host webserver service, or a test recorder.
  * @param deps - `home`, the harness home; `enabled`, whether to mount the desk's rows; `now`
  *   (default `Date.now`) and `version` (default {@link DSH_PIN}), for the events and the status;

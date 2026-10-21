@@ -525,16 +525,19 @@ class FakeAgent implements AgentLike {
 }
 
 /** A booted root as the desk conversation reads it. Its bus's disposer notes what the ledger held when the
- * conversation let go of it. */
+ * conversation let go of it; `gate`, when set, holds every create until it opens. */
 function conversationRoot(ledger: () => string) {
   const agents: FakeAgent[] = [];
   const stored = new Map<string, string>();
   const listeners = new Set<unknown>();
   const letGo: string[] = [];
+  const state: { gate?: Promise<void>; creates: number } = { creates: 0 };
   const ctx: DeskConversationCtxLike = {
     agents: {
       get: (id) => agents.find((agent) => agent.id === id),
       create: async (options) => {
+        state.creates += 1;
+        await state.gate;
         const agent = new FakeAgent(options.sessionId);
         await options.setup({}, agent);
         agents.push(agent);
@@ -553,7 +556,7 @@ function conversationRoot(ledger: () => string) {
       };
     },
   };
-  return { ctx, agents, listeners, letGo };
+  return { ctx, agents, listeners, letGo, state };
 }
 
 async function until(what: string, ok: () => boolean): Promise<void> {
@@ -565,47 +568,80 @@ async function until(what: string, ok: () => boolean): Promise<void> {
 }
 
 test("installDesk creates the desk conversation only when enabled with root, route, sessionCtx and installModelSelection, and disposes it before the shutdown", async () => {
-  let ledger = "";
-  const fake = conversationRoot(() => ledger);
-  const full = {
-    root: join(TMP, "repo"),
-    route: { provider: "stub", model: "echo" },
-    sessionCtx: fake.ctx,
-    installModelSelection: () => () => {},
+  const made: string[] = [];
+  const own = async (): Promise<string> => {
+    const h = await home();
+    made.push(h);
+    return h;
   };
-  const quiet = installDesk(recorder(), { home: await home(), enabled: false, ...full });
-  assert.equal(quiet.conversation, undefined, "a disabled desk creates none");
-  await quiet.dispose(0);
-  for (const [left, partial] of [
-    ["root", { ...full, root: undefined }],
-    ["route", { ...full, route: undefined }],
-    ["sessionCtx", { ...full, sessionCtx: undefined }],
-    ["installModelSelection", { ...full, installModelSelection: undefined }],
-  ] as const) {
+  try {
+    let ledger = "";
+    const fake = conversationRoot(() => ledger);
+    const full = {
+      root: join(TMP, "repo"),
+      route: { provider: "stub", model: "echo" },
+      sessionCtx: fake.ctx,
+      installModelSelection: () => () => {},
+    };
+    const quiet = installDesk(recorder(), { home: await own(), enabled: false, ...full });
+    assert.equal(quiet.conversation, undefined, "a disabled desk creates none");
+    await quiet.dispose(0);
+    for (const [left, partial] of [
+      ["root", { ...full, root: undefined }],
+      ["route", { ...full, route: undefined }],
+      ["sessionCtx", { ...full, sessionCtx: undefined }],
+      ["installModelSelection", { ...full, installModelSelection: undefined }],
+    ] as const) {
+      const timer = fakeTimer();
+      const desk = installDesk(recorder(), { home: await own(), enabled: true, watch: { setInterval: timer.setInterval, clearInterval: timer.clearInterval }, ...partial });
+      assert.equal(desk.conversation, undefined, `none without ${left}`);
+      await desk.dispose(0);
+    }
+    assert.equal(fake.agents.length, 0);
+
+    const h = await own();
+    ledger = join(deskDir(h), "events.jsonl");
     const timer = fakeTimer();
-    const desk = installDesk(recorder(), { home: await home(), enabled: true, watch: { setInterval: timer.setInterval, clearInterval: timer.clearInterval }, ...partial });
-    assert.equal(desk.conversation, undefined, `none without ${left}`);
+    const desk = installDesk(recorder(), { home: h, enabled: true, watch: { setInterval: timer.setInterval, clearInterval: timer.clearInterval }, ...full });
+    assert.notEqual(desk.conversation, undefined);
+    await until("the conversation's start, which installDesk does not await", () => fake.listeners.size === 1);
+    assert.equal(fake.agents.length, 1);
+    const agent = fake.agents[0];
+    assert.deepEqual(desk.conversation?.current(), { sessionId: agent.id, running: false });
+
+    agent.status = "running";
     await desk.dispose(0);
+    await desk.dispose(0);
+    assert.deepEqual(agent.cancels, [[{ kind: "hook", reason: "shutdown" }]], "the running desk turn is cancelled once");
+    assert.equal(fake.listeners.size, 0);
+    assert.equal(fake.letGo.length, 1);
+    assert.doesNotMatch(fake.letGo[0], /"kind":"shutdown"/, "the conversation was let go before the shutdown was written");
+    const kinds = (await readEvents(h)).events.map((e) => e.kind);
+    assert.deepEqual([kinds.slice(0, 2).sort(), kinds.slice(2)], [["boot", "desk-session"], ["shutdown"]]);
+  } finally {
+    await Promise.all(made.map((h) => rm(h, { recursive: true, force: true })));
   }
-  assert.equal(fake.agents.length, 0);
+});
 
+test("installDesk's dispose lets a start still ensuring finish first, so its desk-session lands before the shutdown", async () => {
   const h = await home();
-  ledger = join(deskDir(h), "events.jsonl");
-  const timer = fakeTimer();
-  const desk = installDesk(recorder(), { home: h, enabled: true, watch: { setInterval: timer.setInterval, clearInterval: timer.clearInterval }, ...full });
-  assert.notEqual(desk.conversation, undefined);
-  await until("the conversation's start, which installDesk does not await", () => fake.listeners.size === 1);
-  assert.equal(fake.agents.length, 1);
-  const agent = fake.agents[0];
-  assert.deepEqual(desk.conversation?.current(), { sessionId: agent.id, running: false });
-
-  agent.status = "running";
-  await desk.dispose(0);
-  await desk.dispose(0);
-  assert.deepEqual(agent.cancels, [[{ kind: "hook", reason: "shutdown" }]], "the running desk turn is cancelled once");
-  assert.equal(fake.listeners.size, 0);
-  assert.equal(fake.letGo.length, 1);
-  assert.doesNotMatch(fake.letGo[0], /"kind":"shutdown"/, "the conversation was let go before the shutdown was written");
-  const kinds = (await readEvents(h)).events.map((e) => e.kind);
-  assert.deepEqual([kinds.slice(0, 2).sort(), kinds.slice(2)], [["boot", "desk-session"], ["shutdown"]]);
+  try {
+    const fake = conversationRoot(() => join(deskDir(h), "events.jsonl"));
+    let open: () => void = () => {};
+    fake.state.gate = new Promise((done) => { open = done; });
+    const timer = fakeTimer();
+    const desk = installDesk(recorder(), {
+      home: h, enabled: true, watch: { setInterval: timer.setInterval, clearInterval: timer.clearInterval },
+      root: join(TMP, "repo-race"), route: { provider: "stub", model: "echo" }, sessionCtx: fake.ctx, installModelSelection: () => () => {},
+    });
+    await until("the start's create under way", () => fake.state.creates === 1);
+    const disposing = desk.dispose(0);
+    await new Promise((done) => setTimeout(done, 50));
+    open();
+    await disposing;
+    assert.deepEqual((await readEvents(h)).events.map((e) => e.kind), ["boot", "desk-session", "shutdown"]);
+    assert.equal(fake.listeners.size, 0, "a start that finished after dispose began supervises nothing");
+  } finally {
+    await rm(h, { recursive: true, force: true });
+  }
 });
