@@ -6,14 +6,16 @@
  * repository is public (B4) - and `desk/holdings.example.yml` and `desk/levels.example.yml` are the tracked
  * examples. Only the face parses them, with js-yaml's CORE_SCHEMA (standing.ts's {@link readDeskYaml}): an
  * unquoted date stays the text `2026-11-30`, a boolean is CORE's (`true`/`false`, `True`/`TRUE`), so `yes` is
- * text, and duplicate keys are refused. An empty file, or one of comments only, holds no entries. The face
- * never takes a price from them: prices come from the quote hub.
+ * text, and duplicate keys are refused. An empty file, or one of comments only, holds no entries, and an
+ * optional key left empty (or `~`) is as if it were not there. The face never takes a price from them: prices
+ * come from the quote hub.
  *
  * A HOLDING. `symbol`, a ticker ({@link SYMBOL_RE}); `qty`, a number other than 0 (below 0 is a short);
  * `avg_cost`, a number above 0; and, if wanted, `opened`, a date (YYYY-MM-DD), and `broker`, one line of at most
  * 40 characters. A symbol is held once: a second entry for a symbol is refused `<SYMBOL> is held twice; the
- * first entry stands` - a verdict on places in the file, so it holds even when the first entry is refused for
- * a fault of its own, and the book never picks between two entries. At most {@link HOLDINGS_MAX}.
+ * first entry stands`, or `<SYMBOL> is held twice; neither entry loads` when the first was refused for a fault
+ * of its own - a verdict on places in the file, so the book never picks between two entries. At most
+ * {@link HOLDINGS_MAX}.
  *
  * A LEVEL. `symbol`; `kind`, buy_zone, stop, target or watch; `price`, above 0, with `when: cross_up` or
  * `cross_down`, or `range: [low, high]`, 0 < low < high, with `when: enter`; `plan`, required: what to do when
@@ -23,8 +25,11 @@
  * 1440, 30m by default. At most {@link LEVELS_PER_FILE} per file.
  *
  * TEXT. A plan, a source and a broker are one line each, with no line break of any kind, and are kept with
- * their ends trimmed: a folded block's final newline makes no second line, and a blank source or broker is
- * left out. Their limits count characters (code points), not UTF-16 units.
+ * their ends trimmed: a folded block's final newline makes no second line, and an empty or blank source or
+ * broker is left out. None may hold a control character other than a tab (C0, DEL, C1) or a direction
+ * embedding, override or isolate (U+202A to U+202E, U+2066 to U+2069) - `<key> holds a control or direction
+ * character` - since a plan goes to the phone verbatim. Their limits count characters (code points), not
+ * UTF-16 units.
  *
  * REFUSALS ARE DATA. Where standing.yml is refused whole for any fault (fail closed), a book file loads
  * without the entries it refuses: each is one {@link LoadRefusal} with its 0-based index, its symbol when that
@@ -32,19 +37,26 @@
  * entries past a cap are one refusal, `entries <a>-<b> are past the cap of …`, numbered from 1, and a refused
  * entry inside the cap still takes its place. A fault of the file itself is the result's `error`, with no
  * entries: over 65,536 bytes, not a regular file, unreadable (its code), not UTF-8, not YAML (the parser's
- * first line) or not a list. A missing file is `missing`, which is no fault.
+ * first line) or not a list. A missing file is `missing`, which is no fault. What a refusal echoes - a value,
+ * a key, the parser's line - is cut at 60 characters, the last a `…`, with each control, line-separator and
+ * direction character written as its escape (`\u202e`), so every reason is one plain line for the phone.
  *
- * THE READ. The file is opened without waiting on a FIFO (O_NONBLOCK), its type checked on the descriptor
- * that is read, and at most 65,537 bytes read; a symbolic link is followed. `sha256` and `mtime` describe the
- * bytes read, so a result has them whenever the whole file was read: loaded, or refused as not UTF-8, not YAML
- * or not a list.
+ * THE READ. A book file is a regular file with one name. A symbolic link, a FIFO, a device, a directory, or a
+ * file with a second name (a hard link: a link count other than 1) is `<file> is not a regular file`, found by
+ * `lstat` and never opened: a sandboxed session can plant a link to a file it cannot read, and the face reads
+ * unsandboxed, so a followed link could echo another file's text in a refusal. The open then follows no link
+ * swapped in since (`O_NOFOLLOW`; ELOOP reads the same), never waits on a FIFO (`O_NONBLOCK`), and checks the
+ * type and the link count again on the descriptor that is read; at most 65,537 bytes are read. Only the file's
+ * own name is checked: a directory above it that is a link is followed (channels.ts's `listChannelDirs` lists
+ * no strategy that is one). `sha256` and `mtime` describe the bytes read, so a result has them whenever the
+ * whole file was read: loaded, or refused as not UTF-8, not YAML or not a list.
  *
- * MODULE WEIGHT. It imports standing.ts, and js-yaml with it, so the pause switch (scripts/desk.ts) must never
- * import it.
+ * MODULE WEIGHT. It imports standing.ts, and js-yaml with it, so the pause switch (scripts/desk.ts) never
+ * imports it eagerly: a command that needs it, as P4's `arm` will, loads it on first use.
  * @module
  */
-import { constants as fsConstants } from "node:fs";
-import { open, type FileHandle } from "node:fs/promises";
+import { constants as fsConstants, type Stats } from "node:fs";
+import { lstat, open, type FileHandle } from "node:fs/promises";
 import { isEtDate, readDeskYaml, sha256Hex } from "./standing.ts";
 
 /* ---------- the limits ---------- */
@@ -71,7 +83,12 @@ const COOLDOWN_MIN_MINUTES = 1;
 const COOLDOWN_MAX_MINUTES = 1_440;
 /** What ends a line: a text field that holds one is more than one line. */
 const LINE_BREAK_RE = /[\n\r\v\f\u0085\u2028\u2029]/;
-/** The most characters of a value a refusal quotes. */
+/** What a one-line text field may not hold: a control character other than a tab (C0, DEL, C1), or a
+ * direction embedding, override or isolate (U+202A to U+202E, U+2066 to U+2069). */
+const UNSAFE_TEXT_RE = /[\x00-\x08\x0a-\x1f\x7f-\x9f\u{202a}-\u{202e}\u{2066}-\u{2069}]/u;
+/** What an echo writes as its escape: the same, and the line and paragraph separators. */
+const UNSAFE_ECHO_RE = /[\x00-\x08\x0a-\x1f\x7f-\x9f\u{2028}\u{2029}\u{202a}-\u{202e}\u{2066}-\u{2069}]/gu;
+/** The most characters of a value a refusal quotes, and of the parser's line. */
 const SHOWN_MAX = 60;
 
 /* ---------- the shapes ---------- */
@@ -149,13 +166,22 @@ function isNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
-/** A value as a refusal quotes it: a string in JSON quotes (cut at {@link SHOWN_MAX} characters), a list of at
- * most four plain values written out, else its kind. */
+/** `text` cut to {@link SHOWN_MAX} characters (code points), the last a `…` when it is cut. */
+function cut(text: string): string {
+  const chars = [...text];
+  return chars.length <= SHOWN_MAX ? text : `${chars.slice(0, SHOWN_MAX - 1).join("")}…`;
+}
+
+/** `text` with each control, line-separator and direction character ({@link UNSAFE_ECHO_RE}) written as its
+ * `\uXXXX` escape: the only form in which a refusal echoes one. */
+function escaped(text: string): string {
+  return text.replace(UNSAFE_ECHO_RE, (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`);
+}
+
+/** A value as a refusal quotes it: a string in JSON quotes, {@link cut} and {@link escaped}; a list of at most
+ * four plain values written out; else its kind. */
 function shown(value: unknown): string {
-  if (typeof value === "string") {
-    const chars = [...value];
-    return JSON.stringify(chars.length <= SHOWN_MAX ? value : `${chars.slice(0, SHOWN_MAX - 1).join("")}…`);
-  }
+  if (typeof value === "string") return escaped(JSON.stringify(cut(value)));
   if (value === null || value === undefined) return "nothing";
   if (Array.isArray(value)) {
     const plain = value.length <= 4 && value.every((item) => item === null || typeof item !== "object");
@@ -192,6 +218,7 @@ function oneLine(key: string, value: unknown, max: number): { text: string } | {
   if (typeof value !== "string") return { reason: `${key} must be one line of text, at most ${max} characters (got ${shown(value)})` };
   const text = value.trim();
   if (LINE_BREAK_RE.test(text)) return { reason: `${key} must be one line` };
+  if (UNSAFE_TEXT_RE.test(text)) return { reason: `${key} holds a control or direction character` };
   const chars = [...text].length;
   if (chars > max) return { reason: `${key} is ${chars.toLocaleString("en-US")} characters; the limit is ${max}` };
   return { text };
@@ -213,26 +240,36 @@ function cooldownMs(value: unknown): number | undefined {
 /** One entry, judged: what it loads as, or why it is refused. */
 type Verdict<T> = { entry: T } | { reason: string };
 
-/** One holding, judged. `seen` holds the tickers the entries before it named, and takes this one's. */
-function judgeHolding(raw: unknown, seen: Set<string>): Verdict<Holding> {
+/** One holding, judged. `seen` maps each ticker an earlier entry named to whether that first entry loaded, and
+ * takes this entry's ticker when it is the first to name it - whatever its verdict. */
+function judgeHolding(raw: unknown, seen: Map<string, boolean>): Verdict<Holding> {
   const ticker = tickerOf(raw);
-  const repeated = ticker !== undefined && seen.has(ticker);
-  if (ticker !== undefined) seen.add(ticker);
+  const first = ticker === undefined ? undefined : seen.get(ticker);
+  const verdict = holdingVerdict(raw, first);
+  if (ticker !== undefined && first === undefined) seen.set(ticker, "entry" in verdict);
+  return verdict;
+}
+
+/** One holding's verdict. `first` is whether the first entry for its ticker loaded; `undefined` when it is that
+ * first entry. */
+function holdingVerdict(raw: unknown, first: boolean | undefined): Verdict<Holding> {
   if (!isRecord(raw)) return { reason: "a holding must be a mapping: symbol, qty, avg_cost, opened, broker" };
   const unknown = unknownKey(raw, HOLDING_KEYS);
   if (unknown !== undefined) return { reason: unknown };
+  const ticker = tickerOf(raw);
   const badSymbol = symbolFault(raw.symbol);
   if (badSymbol !== undefined || ticker === undefined) return { reason: badSymbol ?? BAD_SYMBOL };
-  if (repeated) return { reason: `${ticker} is held twice; the first entry stands` };
+  if (first !== undefined) return { reason: `${ticker} is held twice; ${first ? "the first entry stands" : "neither entry loads"}` };
 
   const { qty, avg_cost: avgCost, opened, broker } = raw;
   if (qty === undefined) return { reason: "qty is missing" };
   if (!isNumber(qty) || qty === 0) return { reason: `qty must be a number other than 0 (got ${shown(qty)})` };
   if (avgCost === undefined) return { reason: "avg_cost is missing" };
   if (!isNumber(avgCost) || avgCost <= 0) return { reason: `avg_cost must be a number above 0 (got ${shown(avgCost)})` };
-  if (opened !== undefined && !isEtDate(opened)) return { reason: `opened must be a date, YYYY-MM-DD (got ${shown(opened)})` };
+  const hasOpened = opened !== undefined && opened !== null;
+  if (hasOpened && !isEtDate(opened)) return { reason: `opened must be a date, YYYY-MM-DD (got ${shown(opened)})` };
   let brokerText = "";
-  if (broker !== undefined) {
+  if (!isBlank(broker)) {
     const line = oneLine("broker", broker, BROKER_MAX_CHARS);
     if ("reason" in line) return line;
     brokerText = line.text;
@@ -242,7 +279,7 @@ function judgeHolding(raw: unknown, seen: Set<string>): Verdict<Holding> {
       symbol: ticker,
       qty,
       avgCost,
-      ...(opened === undefined ? {} : { opened: opened as string }),
+      ...(hasOpened ? { opened: opened as string } : {}),
       ...(brokerText === "" ? {} : { broker: brokerText }),
     },
   };
@@ -287,7 +324,7 @@ function judgeLevel(raw: unknown, index: number, file: string, today: string): V
   if ("reason" in plan) return plan;
 
   let source = "";
-  if (raw.source !== undefined) {
+  if (!isBlank(raw.source)) {
     const line = oneLine("source", raw.source, SOURCE_MAX_CHARS);
     if ("reason" in line) return line;
     source = line.text;
@@ -298,10 +335,10 @@ function judgeLevel(raw: unknown, index: number, file: string, today: string): V
   if (!isEtDate(expires)) return { reason: `expires must be a date, YYYY-MM-DD (got ${shown(expires)})` };
   if (expires < today) return { reason: `expired ${expires}` };
 
-  const annotate = raw.annotate === undefined ? true : raw.annotate;
+  const annotate = raw.annotate === undefined || raw.annotate === null ? true : raw.annotate;
   if (typeof annotate !== "boolean") return { reason: `annotate must be true or false (got ${shown(raw.annotate)})` };
 
-  const cooldown = raw.cooldown === undefined ? DEFAULT_LEVEL_COOLDOWN_MS : cooldownMs(raw.cooldown);
+  const cooldown = raw.cooldown === undefined || raw.cooldown === null ? DEFAULT_LEVEL_COOLDOWN_MS : cooldownMs(raw.cooldown);
   if (cooldown === undefined) {
     return { reason: `cooldown must be <n>m, from ${COOLDOWN_MIN_MINUTES}m to ${COOLDOWN_MAX_MINUTES}m (got ${shown(raw.cooldown)})` };
   }
@@ -343,18 +380,32 @@ function oversized(file: string, bytes: number): string {
   return `${file} is ${bytes.toLocaleString("en-US")} bytes; the limit is ${DESK_FILE_MAX_BYTES.toLocaleString("en-US")}`;
 }
 
+/** Whether a file's stats are a book file's own: a regular file with one name. */
+function isPlainFile(stats: Stats): boolean {
+  return stats.isFile() && stats.nlink === 1;
+}
+
 /**
- * Read a book file (see the module header): ENOENT is missing; a non-regular file, a failed open or read, over
- * 65,536 bytes, or bytes that are not UTF-8 are refused whole.
+ * Read a book file (see the module header): ENOENT is missing; a link, a FIFO, a device, a directory, a file with
+ * a second name, a failed open or read, over 65,536 bytes, or bytes that are not UTF-8 are refused whole.
  * @param path - where it is.
  * @param file - its repo-relative label, for the refusals.
  */
 async function readBook(path: string, file: string): Promise<BookRead> {
+  const irregular = { error: `${file} is not a regular file` };
+  try {
+    /* Judged before any open: a link is never followed, and nothing but a plain file is opened. */
+    if (!isPlainFile(await lstat(path))) return irregular;
+  } catch (error) {
+    const code = codeOf(error);
+    return code === "ENOENT" ? { missing: true } : { error: `${file} cannot be read (${code})` };
+  }
   let handle: FileHandle | undefined;
   try {
-    handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NONBLOCK);
+    /* A link swapped in since the lstat is ELOOP, and the descriptor is judged again. */
+    handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | fsConstants.O_NOFOLLOW);
     const stats = await handle.stat();
-    if (!stats.isFile()) return { error: `${file} is not a regular file` };
+    if (!isPlainFile(stats)) return irregular;
     if (stats.size > DESK_FILE_MAX_BYTES) return { error: oversized(file, stats.size) };
     /* One byte past the limit tells a file that grew since the stat, with no read of the rest. */
     const buffer = Buffer.alloc(DESK_FILE_MAX_BYTES + 1);
@@ -374,6 +425,7 @@ async function readBook(path: string, file: string): Promise<BookRead> {
     }
   } catch (error) {
     const code = codeOf(error);
+    if (code === "ELOOP") return irregular;
     return code === "ENOENT" ? { missing: true } : { error: `${file} cannot be read (${code})` };
   } finally {
     await handle?.close().catch(() => {});
@@ -400,7 +452,9 @@ function parseBook<T>(text: string, file: string, rules: BookRules<T>, pin: { sh
   try {
     doc = readDeskYaml(text);
   } catch (error) {
-    return refused(`${file} is not YAML: ${(error as Error).message}`);
+    /* readDeskYaml gives the parser's first line, never its snippet; a tag's or an alias's name can still make it
+     * long, or put a direction character in it. */
+    return refused(`${file} is not YAML: ${escaped(cut((error as Error).message))}`);
   }
   if (doc === undefined || doc === null) return { file, entries: [], refusals: [], ...pin };
   if (!Array.isArray(doc)) return refused(`${file} must be a list of entries`);
@@ -438,7 +492,7 @@ async function loadBook<T>(path: string, file: string, rules: BookRules<T>): Pro
  * @returns the holdings that load, in file order, with every refusal.
  */
 export async function loadHoldings(path: string, file: string): Promise<LoadResult<Holding>> {
-  const seen = new Set<string>();
+  const seen = new Map<string, boolean>();
   return loadBook(path, file, { max: HOLDINGS_MAX, capNoun: "holdings", judge: (raw) => judgeHolding(raw, seen) });
 }
 

@@ -2,12 +2,15 @@
 /** The desk's book (src/desk-book.ts): `holdings.yml` and `levels.yml` read under CORE_SCHEMA. Each bad entry
  * is refused by its index with one reason and the rest load; past a cap, one refusal names the entries; a
  * missing file is `missing`, and an oversized, irregular, unreadable, non-UTF-8, non-YAML or non-list file is
- * an `error` with no entries. The tracked examples load with no refusal. Offline; the fixtures sit under
- * tests/tmp/desk-book-<pid>/ and are removed afterwards. */
+ * an `error` with no entries. A link - symbolic or hard - is refused unopened, so nothing of another file is
+ * ever echoed; what a refusal does echo is one line, bounded, with no raw control or direction character, and a
+ * plan, a source or a broker holding one is refused. The tracked examples load with no refusal. Offline; the
+ * fixtures sit under tests/tmp/desk-book-<pid>/ and are removed afterwards. */
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import fsPromises, { link, lstat, mkdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -284,7 +287,7 @@ test("holdings: a duplicate, a lowercase symbol, a zero qty, a string avg_cost a
   qty: 100
   avg_cost: 120.50
   opened: 2026-09-15
-  broker: IBKR
+  broker: example-broker
 - symbol: NVDA
   qty: 50
   avg_cost: 130
@@ -317,7 +320,7 @@ test("holdings: a duplicate, a lowercase symbol, a zero qty, a string avg_cost a
     { file: HOLDINGS, index: 5, symbol: "TSLA", reason: 'unknown key "cost"' },
   ]);
   const want: Holding[] = [
-    { symbol: "NVDA", qty: 100, avgCost: 120.5, opened: "2026-09-15", broker: "IBKR" },
+    { symbol: "NVDA", qty: 100, avgCost: 120.5, opened: "2026-09-15", broker: "example-broker" },
     { symbol: "SPY", qty: -20, avgCost: 560 },
     { symbol: "BRK.B", qty: 0.5, avgCost: 480.25 },
   ];
@@ -326,7 +329,7 @@ test("holdings: a duplicate, a lowercase symbol, a zero qty, a string avg_cost a
   /* A second entry for a symbol is refused even when the first is refused too: the book never guesses which. */
   const twice = await loadHoldings(await fixture("- symbol: NVDA\n  qty: 0\n  avg_cost: 120\n- symbol: NVDA\n  qty: 100\n  avg_cost: 125\n"), HOLDINGS);
   assert.deepEqual(twice.entries, []);
-  assert.deepEqual(twice.refusals.map((r) => [r.index, r.reason]), [[0, "qty must be a number other than 0 (got 0)"], [1, "NVDA is held twice; the first entry stands"]]);
+  assert.deepEqual(twice.refusals.map((r) => [r.index, r.reason]), [[0, "qty must be a number other than 0 (got 0)"], [1, "NVDA is held twice; neither entry loads"]]);
 });
 
 test("the other faults of a holding, one refusal each", async () => {
@@ -419,6 +422,128 @@ test("a FIFO is refused at once, never waited on", async (t) => {
     return;
   }
   assert.deepEqual(await loadHoldings(fifo, HOLDINGS), { file: HOLDINGS, entries: [], refusals: [], error: "desk/holdings.yml is not a regular file" });
+});
+
+test("a link - symbolic or hard - is refused unopened, and nothing of its target is echoed", async () => {
+  /* A fake key file a followed link would echo: js-yaml names an unidentified alias in its first line. */
+  const keys = await fixture("FAKE_PASS: *FakeProbeAlias43\nFAKE_API_KEY=FakeProbeKey41\n");
+  const book = await fixture(goodLevel("ZZLINK", 170));
+  const toKeys = join(TEST_DIR, "to-keys.yml");
+  const toBook = join(TEST_DIR, "to-book.yml");
+  const dangling = join(TEST_DIR, "dangling.yml");
+  await symlink(keys, toKeys);
+  await symlink(book, toBook);
+  await symlink(join(TEST_DIR, "nowhere.yml"), dangling);
+  const irregular = (file: string): object => ({ file, entries: [], refusals: [], error: `${file} is not a regular file` });
+  const results: object[] = [];
+  for (const path of [toKeys, toBook, dangling]) {
+    const l = await loadLevels(path, LEVELS, TODAY);
+    const h = await loadHoldings(path, HOLDINGS);
+    assert.deepEqual(l, irregular(LEVELS), path);
+    assert.deepEqual(h, irregular(HOLDINGS), path);
+    results.push(l, h);
+  }
+  /* A second name for the book is a hard link: the link is refused, and so is the first name, now one of two. */
+  const hard = join(TEST_DIR, "hard.yml");
+  await link(book, hard);
+  for (const path of [hard, book]) {
+    const l = await loadLevels(path, LEVELS, TODAY);
+    assert.deepEqual(l, irregular(LEVELS), path);
+    results.push(l);
+  }
+  for (const result of results) assert.ok(!/FakeProbe|FAKE_|ZZLINK|read the news/.test(JSON.stringify(result)), JSON.stringify(result));
+});
+
+test("a swap after the lstat is still refused: the open follows no link, waits on no FIFO, and judges the descriptor again", async (t) => {
+  const plain = await lstat(await fixture(goodLevel("ZZPLAIN", 170)));
+  /* A link to a plain file with one name: only the open's O_NOFOLLOW refuses it. */
+  const toPlain = join(TEST_DIR, "swap-link.yml");
+  await symlink(await fixture(goodLevel("ZZSWAP", 171)), toPlain);
+  /* A file with a second name: only the descriptor's link count refuses it. */
+  const second = join(TEST_DIR, "swap-hard.yml");
+  await link(await fixture(goodLevel("ZZHARD", 172)), second);
+  const refused = [toPlain, second];
+  try {
+    const fifo = join(TEST_DIR, "swap-fifo.yml");
+    execFileSync("mkfifo", [fifo]);
+    refused.push(fifo);
+  } catch {
+    /* no mkfifo here: the link and the hard link still run */
+  }
+  const removed = join(TEST_DIR, "swap-removed.yml");
+  /* The lstat sees a plain file with one name at each path, as it would have just before a swap. */
+  const seen = t.mock.method(fsPromises, "lstat", async () => plain);
+  syncBuiltinESMExports();
+  try {
+    for (const path of refused) {
+      assert.deepEqual(await loadLevels(path, LEVELS, TODAY), { file: LEVELS, entries: [], refusals: [], error: "desk/levels.yml is not a regular file" }, path);
+    }
+    assert.deepEqual(await loadLevels(removed, LEVELS, TODAY), { file: LEVELS, entries: [], refusals: [], missing: true });
+    assert.equal(seen.mock.callCount(), refused.length + 1, "the loader's lstat is the stand-in");
+  } finally {
+    seen.mock.restore();
+    syncBuiltinESMExports();
+  }
+});
+
+test("the parser's reason is its first line, cut at 60 characters and cleaned: no snippet, no long name, no raw control", async () => {
+  /* The offending line holds a fake secret, which js-yaml shows only in the snippet below its first line. */
+  const snippet = (await loadLevels(await fixture("- symbol: NVDA\n  plan: FakeSnippetSecret77: more\n"), LEVELS, TODAY)).error ?? "";
+  assert.equal(snippet, "desk/levels.yml is not YAML: bad indentation of a mapping entry (2:28)");
+  assert.ok(!snippet.includes("\n") && !snippet.includes("FakeSnippetSecret77"), snippet);
+  /* A tag or an alias name of 5,000 characters is cut to 60, the last the marker. */
+  const tag = (await loadHoldings(await fixture(`- !${"T".repeat(5_000)}\n`), HOLDINGS)).error ?? "";
+  assert.equal(tag, `desk/holdings.yml is not YAML: unknown tag !<!${"T".repeat(44)}…`);
+  const alias = (await loadLevels(await fixture(`- *${"A".repeat(5_000)}\n`), LEVELS, TODAY)).error ?? "";
+  assert.equal(alias, `desk/levels.yml is not YAML: unidentified alias "${"A".repeat(39)}…`);
+  /* A direction override in an alias's name is echoed as an escape, never raw. */
+  const rlo = (await loadLevels(await fixture(`- *a${String.fromCodePoint(0x202e)}b\n`), LEVELS, TODAY)).error ?? "";
+  assert.equal(rlo, 'desk/levels.yml is not YAML: unidentified alias "a\\u202eb" (1:7)');
+});
+
+test("a plan, a source or a broker holding a control or direction character is refused; a tab is not", async () => {
+  /* YAML's double-quoted escapes put each character in: a C0 control, DEL, a C1 control, an override, an isolate. */
+  const level = (plan: string, source = "s"): string =>
+    `- symbol: A\n  kind: watch\n  price: 1\n  when: cross_up\n  plan: ${plan}\n  source: ${source}\n  expires: 2026-12-31\n`;
+  const l = await loadLevels(await fixture([
+    level('"a\\x01b"'), level('"a\\x7fb"'), level('"a\\x9bb"'), level('"a\\u202Eb"'), level("p", '"s\\u2066x"'), level('"a\\tb"'),
+  ].join("")), LEVELS, TODAY);
+  assert.deepEqual(l.refusals.map((r) => [r.index, r.reason]), [
+    [0, "plan holds a control or direction character"],
+    [1, "plan holds a control or direction character"],
+    [2, "plan holds a control or direction character"],
+    [3, "plan holds a control or direction character"],
+    [4, "source holds a control or direction character"],
+  ]);
+  assert.deepEqual(l.entries.map((e) => [e.index, e.plan]), [[5, "a\tb"]]);
+  const h = await loadHoldings(await fixture('- symbol: A\n  qty: 1\n  avg_cost: 1\n  broker: "b\\u202Dx"\n'), HOLDINGS);
+  assert.deepEqual(h.refusals.map((r) => r.reason), ["broker holds a control or direction character"]);
+});
+
+test("a value a refusal echoes carries no raw control, separator or direction character", async () => {
+  const l = await loadLevels(await fixture([
+    '- symbol: A\n  kind: "\\u202Ewatch\\x85\\u2028"\n  price: 1\n  when: cross_up\n  plan: p\n  expires: 2026-12-31\n',
+    '- symbol: A\n  "\\u2066k": 1\n',
+  ].join("")), LEVELS, TODAY);
+  assert.deepEqual(l.refusals.map((r) => r.reason), [
+    'kind must be buy_zone, stop, target or watch (got "\\u202ewatch\\u0085\\u2028")',
+    'unknown key "\\u2066k"',
+  ]);
+});
+
+test("a blank optional key is absent: one left empty, and an empty source or broker", async () => {
+  const l = await loadLevels(await fixture(
+    "- symbol: A\n  kind: watch\n  price: 1\n  when: cross_up\n  plan: p\n  source:\n  expires: 2026-12-31\n  annotate:\n  cooldown:\n"
+    + '- symbol: B\n  kind: watch\n  price: 2\n  when: cross_up\n  plan: p\n  source: ""\n  expires: 2026-12-31\n',
+  ), LEVELS, TODAY);
+  assert.deepEqual(l.refusals, []);
+  assert.deepEqual(l.entries, [
+    { file: LEVELS, index: 0, symbol: "A", kind: "watch", price: 1, when: "cross_up", plan: "p", expires: "2026-12-31", annotate: true, cooldownMs: 1_800_000 },
+    { file: LEVELS, index: 1, symbol: "B", kind: "watch", price: 2, when: "cross_up", plan: "p", expires: "2026-12-31", annotate: true, cooldownMs: 1_800_000 },
+  ]);
+  const h = await loadHoldings(await fixture('- symbol: A\n  qty: 1\n  avg_cost: 1\n  opened:\n  broker:\n- symbol: B\n  qty: 2\n  avg_cost: 2\n  broker: ""\n'), HOLDINGS);
+  assert.deepEqual(h.refusals, []);
+  assert.deepEqual(h.entries, [{ symbol: "A", qty: 1, avgCost: 1 }, { symbol: "B", qty: 2, avgCost: 2 }]);
 });
 
 test("a loaded file carries its bytes' sha256 and its mtime; an empty one holds no entries", async () => {
