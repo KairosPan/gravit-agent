@@ -1,9 +1,9 @@
-// The charts (spec 2026-10-19 §7 Stage 2, spec 2026-10-22 §6.2): a Market page's daily closes from /data/bars, and the
-// Account's net-worth curve from its history read — each an area and a line, the demo chart's geometry, with a label that
-// says what it shows.
+// The charts (spec 2026-10-19 §6 and §7 Stage 2, spec 2026-10-22 §6.1–§6.2): a daily_bars tool result's closes in the thread, a
+// market's closes from the Account's candles read, and the Account's net-worth curve from its history read — each an area and
+// a line, the demo chart's geometry, with a label that says what it shows.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chartSvg, curveSvg } from '../../client/js/render/chart.js';
+import { chartSvg, candlesSvg, curveSvg } from '../../client/js/render/chart.js';
 import { fmtClock, fmtDate } from '../../client/js/time.js';
 
 const rows = closes => closes.map((close, i) => ({ date: `2026-10-${String(i + 1).padStart(2, '0')}`, open: close, high: close, low: close, close, volume: 1 }));
@@ -40,6 +40,28 @@ test('null closes are skipped', () => {
   assert.match(svg, /from 2026-10-02 to 2026-10-04/);
   const flat = chartSvg(rows([5, 5]), { currency: 'USD' });
   assert.doesNotMatch(flat, /NaN/, 'a flat series still draws');
+});
+
+test("candlesSvg: a market's closes in the same box, the axis at its first and last bars' times; cents for an event; fewer than two closes draw nothing", () => {
+  // the Account's bars ({ t, o, h, l, c }, t a bar's start in ms), a minute apart from Oct 21 09:30 on the operator's clock
+  const t0 = new Date(2026, 9, 21, 9, 30).getTime();
+  const bars = closes => closes.map((c, i) => ({ t: t0 + i * 60_000, o: c, h: c, l: c, c }));
+  const barWord = i => `${fmtDate(t0 + i * 60_000)} ${fmtClock(t0 + i * 60_000)}`;
+  const svg = candlesSvg(bars([10, 12, 8, 11]), { unit: 'usd', range: '1D' });
+  assert.match(svg, /^<svg class="mk-chart" viewBox="0 0 400 140" preserveAspectRatio="none" role="img"/);
+  assert.equal(lineOf(svg), lineOf(chartSvg(rows([10, 12, 8, 11]), { currency: 'USD' })), "the closes chart's geometry");
+  assert.ok(svg.includes('aria-label="Closes over 1D: from $10.00 to $11.00, low $8.00, high $12.00"'), svg);
+  assert.ok(svg.endsWith(`<div class="mk-axis"><span>${barWord(0)}</span><span>Low $8.00 · High $12.00</span><span>${barWord(3)}</span></div>`));
+  // an event contract's closes are dollars a contract: in cents
+  assert.ok(candlesSvg(bars([0.62, 0.645, 0.6]), { unit: 'cents', range: 'MAX' }).includes('aria-label="Closes over MAX: from 62¢ to 60¢, low 60¢, high 64.5¢"'));
+  // a bar without a close or a time is left out; fewer than two closes draw nothing
+  assert.equal(candlesSvg([], { unit: 'usd', range: '1D' }), '');
+  assert.equal(candlesSvg(undefined), '');
+  assert.equal(candlesSvg(bars([5]), { unit: 'usd', range: '1D' }), '');
+  const gaps = candlesSvg([{ t: t0, c: null }, ...bars([10, 20]), { c: 30 }, { t: 'n/a', c: 40 }], { unit: 'usd', range: '5D' });
+  assert.ok(gaps.includes('aria-label="Closes over 5D: from $10.00 to $20.00, low $10.00, high $20.00"'), gaps);
+  assert.equal(lineOf(gaps).split(/[ML]/).filter(Boolean).length, 2);
+  assert.doesNotMatch(candlesSvg(bars([5, 5]), { unit: 'usd', range: '1D' }), /NaN/, 'a flat history still draws');
 });
 
 test('curveSvg: the net worth in the same box, labelled by its points\' times; fewer than two points draw nothing', () => {

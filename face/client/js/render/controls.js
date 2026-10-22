@@ -3,11 +3,12 @@ import { esc, attrs, cls } from '../html.js';
 import { icon } from '../icons.js';
 
 // each item a label, or a [label, value] pair when the action takes a value other than the words: the item whose value is
-// `pressed` is pressed, and each hands its value as data-value
-export function seg(items, pressed, action) {
+// `pressed` is pressed, and each hands its value as data-value — and every item the same further data when it is given (a
+// market page's ranges name the page)
+export function seg(items, pressed, action, data = {}) {
   return `<div class="seg">${items.map(it => {
     const [label, value] = Array.isArray(it) ? it : [it, it];
-    return `<button type="button"${attrs({ class: cls('seg-item', value === pressed && 'pressed'), 'aria-pressed': value === pressed ? 'true' : 'false', 'data-action': action, 'data-value': value })}>${esc(label)}</button>`;
+    return `<button type="button"${attrs({ class: cls('seg-item', value === pressed && 'pressed'), 'aria-pressed': value === pressed ? 'true' : 'false', 'data-action': action, 'data-value': value, ...data })}>${esc(label)}</button>`;
   }).join('')}</div>`;
 }
 

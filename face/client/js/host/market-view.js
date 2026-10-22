@@ -2,22 +2,19 @@
 // reads — All's, and a tab's own — as the table's rows: the tabs, the prices by kind (an event in cents, Kalshi's volume in
 // contracts, a pre-IPO perpetual's implied valuation), where each price is from in the Account's own words with its age, the
 // lines across venues with the best marked — beside the face's own A-share (cn:) rows, and a market's page with what is held,
-// working and stated for it. No image URL the Account names (`icon`) is in anything returned here: the face's page never loads
-// a third party's image. And the face's own ids, rows, tabs and sorts (spec 2026-10-19 §7 Stage 2), every word in English from
-// the wire's enums. The wire's own text (a quote's message, a provider's message, a search note, a source name) is Chinese and
-// never reaches a word here. The face's list views over its own us:/crypto: quotes stay until their callers go. No DOM.
+// working and stated for it; what Hand to Gravit says of a market. No image URL the Account names (`icon`) is in anything
+// returned here: the face's page never loads a third party's image. And the face's own ids and words for the A shares (spec
+// 2026-10-19 §7 Stage 2), every word in English from the wire's enums. The wire's own text (a quote's message, a provider's
+// message, a search note, a source name) is Chinese and never reaches a word here. No DOM.
 import { normalizeAsset, number } from '../wire/market-model.js';
 import { MIN, HOUR, DAY } from '../time.js';
 import { assetsOf, positionsOf, openOrdersOf, statementLinesOf, worthOf } from './account-view.js';
 
-export const MARKET_TABS = [{ id: 'all', label: 'All' }, { id: 'crypto', label: 'Crypto' }, { id: 'stocks', label: 'Stocks' }];
-export const MARKET_SORTS = [{ id: 'volume', label: 'Most traded' }, { id: 'movers', label: 'Biggest moves' }];
-
-// the Account's tabs, in the order the table draws them, and the sorts its rows take
+// the Account's tabs, in the order the table draws them, the sorts its rows take, and the ranges a market's history is read for
 export const ACCOUNT_TABS = [['all', 'All'], ['crypto', 'Crypto'], ['stocks', 'Stocks'], ['rwas', 'RWAs'], ['perps', 'Perps'], ['preipo', 'Pre-IPO'], ['predictions', 'Predictions']];
 export const ACCOUNT_SORTS = [{ id: 'volume', label: 'Most traded' }, { id: 'movers', label: 'Biggest moves' }, { id: 'closing', label: 'Closing soonest' }];
+export const CANDLE_RANGES = ['1D', '5D', '1M', '3M', '6M', 'YTD', '1Y', '5Y', 'MAX'];
 
-const TAB_MARKETS = { all: null, crypto: ['crypto'], stocks: ['us', 'cn'] };
 const PROVIDERS = { alpaca: 'Alpaca', coinbase: 'Coinbase', ifind: 'iFinD' };
 const MARKET_PROVIDER = { us: 'Alpaca', crypto: 'Coinbase', cn: 'iFinD' };
 const PROVIDER_STATUS = { connecting: 'Connecting', connected: 'Connected', unconfigured: 'Not configured', error: 'Error', limited: 'Limited' };
@@ -31,83 +28,7 @@ export function canonicalId(raw) {
   return normalizeAsset({ id: typeof raw === 'string' ? raw : '' })?.id ?? null;
 }
 
-const CRYPTO_POSITION = /^([A-Z0-9]{1,15})\/?USD$/;
-
-/** A position's face id: a stock by its symbol, a coin (BTCUSD or BTC/USD) as its USD pair, anything else null. */
-export function positionId(position) {
-  const symbol = typeof position?.symbol === 'string' ? position.symbol.trim().toUpperCase() : '';
-  if (position?.asset_class === 'us_equity') return canonicalId(`us:${symbol}`);
-  if (position?.asset_class === 'crypto') {
-    const base = CRYPTO_POSITION.exec(symbol)?.[1];
-    return base ? canonicalId(`crypto:${base}/USD`) : null;
-  }
-  return null;
-}
-
-/** The account's positions as face assets: stocks by symbol, coins as their USD pair; anything else is dropped. */
-export function holdingAssets(accountData) {
-  const positions = accountData?.available && Array.isArray(accountData.positions) ? accountData.positions : [];
-  const seen = new Set();
-  const out = [];
-  for (const position of positions) {
-    const id = positionId(position);
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
-    const asset = normalizeAsset({ id, exchange: position.asset_class === 'us_equity' ? position.exchange : '' });
-    if (asset) out.push(asset);
-  }
-  return out;
-}
-
 const blank = q => typeof q !== 'string' || !q.trim();
-
-/** The list the screen shows: the watchlist then the holdings not on it, or, while there is a query, the search's hits. */
-export function listAssets(markets, accountData) {
-  if (!blank(markets?.q)) return Array.isArray(markets?.search?.assets) ? markets.search.assets : [];
-  const watchlist = Array.isArray(markets?.watchlist) ? markets.watchlist : [];
-  const ids = new Set(watchlist.map(a => a.id));
-  return [...watchlist, ...holdingAssets(accountData).filter(a => !ids.has(a.id))];
-}
-
-// Most traded ranks by dollar volume (price × volume), so a coin's units and a stock's shares compare; Biggest moves by
-// the size of the move
-function sortKey(sort, quote) {
-  if (sort === 'movers') { const c = number(quote?.change_pct); return c === null ? null : Math.abs(c); }
-  const price = number(quote?.price);
-  const volume = number(quote?.volume);
-  return price === null || volume === null ? null : price * volume;
-}
-
-/** The rows: the list on the current tab, each with its quote, sorted with nulls last and list order on ties. */
-export function marketRows(markets, accountData) {
-  const searching = !blank(markets?.q);
-  const quotes = markets?.quotes ?? {};
-  const hits = markets?.hitQuotes ?? {};
-  const watched = new Set((markets?.watchlist ?? []).map(a => a.id));
-  const held = new Set(holdingAssets(accountData).map(a => a.id));
-  const only = TAB_MARKETS[markets?.tab] ?? null;
-  const rows = listAssets(markets, accountData)
-    .filter(asset => !only || only.includes(asset.market))
-    .map(asset => ({
-      asset,
-      // A watched hit already streams; any other hit has the one REST read the search made.
-      quote: quotes[asset.id] ?? (searching ? hits[asset.id] : undefined),
-      watched: watched.has(asset.id),
-      held: held.has(asset.id),
-    }));
-  const keyed = rows.map((row, index) => ({ row, index, key: sortKey(markets?.sort, row.quote) }));
-  keyed.sort((a, b) => (a.key === null) - (b.key === null) || (b.key ?? 0) - (a.key ?? 0) || a.index - b.index);
-  return keyed.map(k => k.row);
-}
-
-/** The asset for a page: the one the screen already knows (watchlist, holdings, hits), else one built from the id. */
-export function assetFor(markets, accountData, id) {
-  const canonical = canonicalId(id);
-  if (!canonical) return null;
-  const known = [...(markets?.watchlist ?? []), ...holdingAssets(accountData), ...(markets?.search?.assets ?? [])]
-    .find(a => a?.id === canonical);
-  return known ?? normalizeAsset({ id: canonical });
-}
 
 /** The quote's state in a word or two: Live, Delayed, Stale or No quote, and Closed when the market is; with no price
  * from a market whose provider is not configured (no Alpaca keys, no iFinD token), Not configured. */
@@ -168,16 +89,6 @@ export function searchWord(search) {
 
 export function watchWord(error) {
   return WATCH[error] ?? '';
-}
-
-/** The chart's source line: live Alpaca bars by feed, or the PIT bed with its as-of day; stale when served from cache after a failure. */
-export function barsWord(payload) {
-  if (!payload || typeof payload !== 'object') return '';
-  let word;
-  if (payload.source === 'alpaca') word = `Daily · Alpaca${FEEDS[payload.feed] ? ` ${FEEDS[payload.feed]}` : ''}`;
-  else if (payload.source === 'bed') word = `Daily · PIT bed${typeof payload.as_of === 'string' ? ` · as of ${payload.as_of}` : ''}`;
-  else return '';
-  return payload.stale ? `${word} · stale` : word;
 }
 
 const escapeRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -358,7 +269,7 @@ function accountRow(item, quotes, watched, now) {
   const quote = pair ? own(quotes, pair) : undefined;
   const live = isRecord(quote) ? noIcon(quote) : null;
   return {
-    id: str(item.key), source: 'account', kind: str(item.kind), name: str(item.name), sub: subOf(item, legs),
+    id: str(item.key), source: 'account', kind: str(item.kind), name: str(item.name), base: str(item.base), sub: subOf(item, legs),
     priced: priceOf(item), live, sourceWord: wordOf(item, live, now),
     closeTime: str(item.closeTime) || null, pastEnd: item.pastEnd === true, watched, legs,
     tabs: Array.isArray(item.tabs) ? item.tabs.filter(t => typeof t === 'string') : [],
@@ -419,15 +330,16 @@ function sorted(rows, sort) {
 }
 
 /** The table's rows for the slice's tab, query and sort, on the renderer's clock (`now`, for the ages beside the source words).
- *  The Account's rows are `source: 'account'`, each with its figures by kind, the latest quote at its most traded connected
- *  venue (`live`, which leads the item's price where there is one), where its price is from and its lines: a tab's rows are its
- *  own explore read's (`explore[tab]`) once that has answered, else All's (`explore.all`), of the tab's kind; while there is a
- *  query, the search's (`results`) once it has answered. Beside them the face's: the cn watchlist (starred by being on it), or
- *  while searching the cn hits alone; and an old us:/crypto: star — one not asked of the Account yet draws nothing, one it found
- *  stars the Account's row, one it could not find is listed once, Not listed at the Account. All is every row, a kind's tab the
- *  rows whose tabs name it, All results (`results`) the search's own. Watching is every star, found in any list of its tab's
- *  read or All's (items, movers, closing, most traded), else a placeholder that can still be un-starred; a query typed on
- *  Watching searches every market, as the Account's page does. Sorted Most traded, Biggest moves or Closing soonest. */
+ *  The Account's rows are `source: 'account'`, each with its base (the letters of its tile), its figures by kind, the latest
+ *  quote at its most traded connected venue (`live`, which leads the item's price where there is one), where its price is from
+ *  and its lines: a tab's rows are its own explore read's (`explore[tab]`) once that has answered, else All's (`explore.all`),
+ *  of the tab's kind; while there is a query, the search's (`results`) once it has answered. Beside them the face's: the cn
+ *  watchlist (starred by being on it), or while searching the cn hits alone; and an old us:/crypto: star — one not asked of the
+ *  Account yet draws nothing, one it found stars the Account's row, one it could not find is listed once, Not listed at the
+ *  Account. All is every row, a kind's tab the rows whose tabs name it, All results (`results`) the search's own. Watching is
+ *  every star, found in any list of its tab's read or All's (items, movers, closing, most traded), else a placeholder that can
+ *  still be un-starred; a query typed on Watching searches every market, as the Account's page does. Sorted Most traded,
+ *  Biggest moves or Closing soonest. */
 export function rowsOf(markets, now = Date.now()) {
   const m = isRecord(markets) ? markets : {};
   const searching = !blank(m.q);
@@ -521,4 +433,27 @@ export function pageOf(markets, account, id, now = Date.now()) {
     orders: openOrdersOf(a.data).filter(atPlace),
     lines: statementLinesOf(a.statement?.data).filter(l => names(l.description, base) || symbols.some(s => names(l.description, s))),
   };
+}
+
+/** The asset a face id names (`cn:600519`, an old `us:`/`crypto:` star), canonicalised: the one the watchlist or the search
+ *  carries — its name and exchange with it — else the id's own; null for anything that is not a face id. */
+export function faceAssetOf(markets, id) {
+  const canonical = canonicalId(id);
+  if (!canonical) return null;
+  const m = isRecord(markets) ? markets : {};
+  return [...records(m.watchlist), ...records(m.search?.assets)].map(a => normalizeAsset(a)).find(a => a?.id === canonical)
+    ?? normalizeAsset({ id: canonical });
+}
+
+/** What Hand to Gravit names a market by, `{ symbol, name }`: an Account key by its page's item — its base, else its name, and its
+ *  name — a face id by its asset's symbol and name; null for a key no read lists, or an id that is neither. */
+export function handWordsOf(markets, account, id, now = Date.now()) {
+  if (isAccountKey(id)) {
+    const item = pageOf(markets, account, id, now)?.item;
+    const name = str(item?.name);
+    const symbol = str(item?.base) || name;
+    return symbol ? { symbol, name } : null;
+  }
+  const asset = faceAssetOf(markets, id);
+  return asset ? { symbol: asset.symbol, name: asset.name } : null;
 }

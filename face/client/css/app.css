@@ -446,7 +446,7 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .mk-av-lg { width: 44px; height: 44px; font-size: 12px; }
 .flat { color: var(--dim); }
 .mk-empty { margin: 0; padding: 12px 0 4px; color: var(--dim); font-size: 14px; }
-/* the muted one-liners: the quotes' connection, the search's state, the watchlist's; and a row's quote state */
+/* the muted one-liners: the Account's own sentence, the face's quotes' connection, the watchlist's; and where a row's price is from */
 .mk-note { margin: 0 0 -14px; color: var(--dim); font-size: 13px; }
 .mk-t .mk-c-st { padding-left: 4px; }
 .mk-st { color: var(--dim); font-size: 12px; white-space: nowrap; }
@@ -457,6 +457,9 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .mk-d-px { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .mk-big { font-size: 28px; font-weight: 800; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
 .mk-basis { color: var(--dim); font-size: 13px; }
+/* an event's outcomes under its price, a chip each: Yes 62¢ · No 38¢ */
+.mk-outs { display: flex; gap: 8px; flex-wrap: wrap; }
+.mk-out { padding: 4px 12px; border-radius: var(--radius-pill); background: var(--surface-2); font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .mk-asof { margin: 0; color: var(--dim); font-size: 13px; font-variant-numeric: tabular-nums; }
 .mk-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; margin: 0; padding: 14px 16px; border-radius: var(--radius-m); background: var(--bg); }
 .mk-facts div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }

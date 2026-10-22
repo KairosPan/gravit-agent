@@ -1,7 +1,7 @@
 // face/client/js/router.js — hash routes: #/messages/<id> · #/markets[/<id>] · #/account/<tab> ·
-// #/discover[/<shelf>] · #/plugin/<id> · #/channel/<workspaceId>. A market id is the face's (us:AAPL, crypto:BTC/USD,
-// cn:600519): everything after #/markets/, so a coin keeps its slash, written back raw; a plugin's and a channel's id
-// read the same way.
+// #/discover[/<shelf>] · #/plugin/<id> · #/channel/<workspaceId>. A market id is the Account's key (coin:BTC,
+// event:predict:…) or the face's (us:AAPL, crypto:BTC/USD, cn:600519): everything after #/markets/, so a coin keeps its
+// slash, written back raw; a plugin's and a channel's id read the same way.
 const TABS = ['portfolio', 'venues', 'agents', 'cards'];
 
 function restOf(path) {

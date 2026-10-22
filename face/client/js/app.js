@@ -26,7 +26,7 @@ import { startTraces } from './host/traces.js';
 import { loadMemberTrace } from './wire/member-traces.js';
 import { isHostPreset } from './wire/speaker.js';
 import { statementLinesOf, statementCsvOf } from './host/account-view.js';
-import { canonicalId, assetFor } from './host/market-view.js';
+import { canonicalId, handWordsOf } from './host/market-view.js';
 import { createLiveQuotes } from './wire/market-quotes.js';
 import { firstOpen } from './host/sessions.js';
 import { createSymbolSearch } from './wire/market-search.js';
@@ -536,7 +536,7 @@ export function boot(win, host = {}) {
     // a new message in the root channel with the market named in the composer: the operator says what to look for
     handToGravit: el => {
       const s = store.get();
-      const asset = assetFor(s.markets, s.account?.data, el.dataset.id);
+      const asset = handWordsOf(s.markets, s.account, el.dataset.id, now());
       if (!asset) return;
       store.dispatch('startDraft', { now: now() });
       composerText = `Look at ${asset.symbol}${asset.name && asset.name !== asset.symbol ? ` (${asset.name})` : ''}`;

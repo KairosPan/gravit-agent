@@ -97,8 +97,8 @@ function positionsBox(lens) {
   return rows.length ? box(`${title('Positions')}${table(['Position', 'Value', 'Entry', 'Mark', 'P&L'], rows)}`, 'Positions') : '';
 }
 
-// an order in a line: `Stand-in Exchange · Buy 0.5 SOL/USDT · limit 142.44 · open · You`
-function orderWords(o) {
+// an order in a line: `Stand-in Exchange · Buy 0.5 SOL/USDT · limit 142.44 · open · You` (a market's page lists its own so)
+export function orderWords(o) {
   const type = o.type.replace(/_/g, ' ');
   const size = [capital(o.side), o.qty === null ? '' : numWord(o.qty), o.symbol].filter(Boolean).join(' ');
   return [o.venueName || o.venue, size, type && o.limitPrice !== null ? `${type} ${numWord(o.limitPrice)}` : type, o.status, o.who].filter(Boolean).join(' · ');

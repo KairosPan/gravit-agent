@@ -41,26 +41,38 @@ const KINDS = [
 
 const asset = (id, over = {}) => ({ id, market: id.slice(0, id.indexOf(':')), symbol: id.slice(id.indexOf(':') + 1), name: id.slice(id.indexOf(':') + 1), exchange: 'NASDAQ', currency: id.startsWith('cn:') ? 'CNY' : 'USD', ...over });
 const quote = (id, over = {}) => ({ id, market: id.slice(0, id.indexOf(':')), symbol: id.slice(id.indexOf(':') + 1), price: 10, prev_close: 9, change: 1, change_pct: 1.5, volume: 1000, as_of: '2026-10-19T14:30:00Z', received_at: null, volume_as_of: null, source: 'Alpaca', feed: 'iex', basis: 'previous_close', quote_status: 'live', market_status: 'closed', message: '', ...over });
-// a page's daily bars as the old page's renderer reads them: no host reads /data/bars any more, so the state is built by hand
-const withBars = (s, id, bar) => ({ ...s, markets: { ...s.markets, bars: { ...s.markets.bars, [id]: bar } } });
-// Markets: the list empty, with rows (one held, one with no quote), searching, a failed search, polling, a full watchlist
+// Markets over the stand-in's answers (tests/fixtures/account/): before a read; the Account's rows with an A share, a star the
+// Account could not find, a quote in view and events (one past its end); a kind's tab; Watching with a placeholder; Closing
+// soonest; searching (its hits, on its way, refused); the face's wire polling; a full watchlist; a market's page with its history,
+// its venues, what is held, working and stated, and a conversation naming it; an event's page with its outcomes; a page reading
+// its history; an A share's page; a key no read lists
 function marketStates() {
+  const fx = name => JSON.parse(readFileSync(new URL(`../fixtures/account/${name}.json`, import.meta.url), 'utf8'));
   const on = R.nav(emptyState(), { screen: 'markets', id: null });
-  const rows = R.quotesUpdated(R.accountLoaded(R.watchlistLoaded(on, { items: [asset('us:AAPL'), asset('cn:600519'), asset('crypto:BTC/USD')], error: null }), { data: { ok: true, available: true, host: 'paper-api.alpaca.markets', account: {}, positions: [{ symbol: 'AAPL', asset_class: 'us_equity' }], orders: [] }, at: NOW }),
-    { quotes: { 'us:AAPL': quote('us:AAPL', { change_pct: -1 }), 'cn:600519': quote('cn:600519', { volume: null, change_pct: 0 }) }, providers: [], status: 'streaming' });
-  const searching = q => R.setMarketsQuery(rows, q);
+  const all = fx('explore-all');
+  all.items.push(fx('explore-predictions').items[0], {
+    key: 'pm:0xab', kind: 'event', name: 'Will it rain in Paris on Sunday?', price: 0.12, change24h: -0.01, volumeUsd24h: 18000, category: 'Climate',
+    closeTime: '2026-10-20T00:00:00.000Z', pastEnd: true, tabs: ['all', 'predictions'], at: [],
+  });
+  let read = R.exploreLoaded(on, { tab: 'all', data: all, at: NOW });
+  read = R.watchlistLoaded(read, { items: [asset('cn:600519', { name: 'Kweichow Moutai', exchange: 'SH' }), asset('us:ZZZZ', { name: 'Zed Corp' })], error: null });
+  read = R.askedOfAccount(read, { faceId: 'us:ZZZZ', key: null });
+  read = R.quotesUpdated(read, { quotes: { 'cn:600519': quote('cn:600519', { change_pct: -1 }) }, providers: [], status: 'streaming' });
+  read = R.accountQuotesLoaded(read, { quotes: [{ venue: 'broker', symbol: 'NVDA', market: { price: 183.1, quoteAt: '2026-10-19T14:00:00Z', quoteFrom: 'Stand-in Broker · real time' } }] });
+  const starred = R.accountWatchLoaded(read, { items: ['coin:BTC', 'kalshi:KXGONE'], error: null });
+  const withAccount = s => R.statementLoaded(R.holdingsLoaded(R.accountLoaded(s, { data: fx('account'), at: NOW }), { data: fx('holdings'), at: NOW }), { data: fx('statement'), at: NOW });
+  const page = (id, s = read) => R.nav(withAccount(s), { screen: 'markets', id });
+  const searching = q => R.setMarketsQuery(read, q);
   return [
-    on, rows, R.setMarketsTab(rows, 'stocks'),
-    R.searchUpdated(searching('nv'), { query: 'nv', status: 'loading', assets: [], partial: false }),
-    R.searchUpdated(searching('nv'), { query: 'nv', status: 'success', assets: [asset('us:NVDA'), asset('us:NVDL')], partial: true }),
-    R.searchUpdated(searching('zz'), { query: 'zz', status: 'error', assets: [], partial: false }),
-    R.quotesUpdated(rows, { quotes: {}, providers: [], status: 'polling' }),
-    R.watchlistLoaded(rows, { items: rows.markets.watchlist, error: 'full' }),
-    // a us page with its chart, a holding, a statement row and a conversation naming it; a crypto page; a page with no quote
-    withBars({ ...R.accountLoaded(R.nav(rows, { screen: 'markets', id: 'us:AAPL' }), { data: { ok: true, available: true, host: 'paper-api.alpaca.markets', account: { equity: '1' }, positions: [{ symbol: 'AAPL', asset_class: 'us_equity', qty: '5', market_value: '600', change_today: '0.01' }], orders: [{ id: 'o1', symbol: 'AAPL', side: 'buy', qty: '1', filled_qty: '1', filled_avg_price: '10', type: 'market', status: 'filled', submitted_at: '2026-10-18T14:00:00Z', filled_at: '2026-10-18T14:00:00Z' }] }, at: NOW }), conversations: [conv('s7', { title: 'Is AAPL cheap?' })] },
-      'us:AAPL', { status: 'ready', payload: { ok: true, source: 'bed', feed: null, as_of: '2026-07-09', rows: [{ date: '2026-07-08', close: 10 }, { date: '2026-07-09', close: 11 }] } }),
-    R.nav(rows, { screen: 'markets', id: 'crypto:BTC/USD' }),
-    R.nav(on, { screen: 'markets', id: 'us:MSFT' }),
+    on, read, R.setMarketsTab(read, 'stocks'), R.setMarketsTab(starred, 'watching'), R.setMarketsSort(read, 'closing'),
+    R.resultsLoaded(searching('fed'), { data: fx('explore-predictions'), at: NOW }), searching('zz'),
+    R.resultsFailed(searching('zz'), { at: NOW, message: 'The account is busy' }),
+    R.quotesUpdated(R.setMarketsTab(read, 'stocks'), { quotes: {}, providers: [], status: 'polling' }),
+    R.watchlistLoaded(read, { items: read.markets.watchlist, error: 'full' }),
+    { ...R.candlesLoaded(page('coin:BTC', starred), { id: 'coin:BTC', range: '1D', data: fx('candles'), at: NOW }), conversations: [conv('s7', { title: 'Is BTC cheap?' })] },
+    page('event:predict:SI-FEDCUT-DEC'),
+    R.candlesLoading(page('stock:NVDA'), { id: 'stock:NVDA', range: '5D' }),
+    page('cn:600519'), page('coin:GONE'),
   ];
 }
 
@@ -135,7 +147,7 @@ test('every class the screens emit has a rule in app.css, and app.css names no c
   assert.doesNotMatch(css, /#[0-9a-fA-F]{3,6}\b/, 'colours come from tokens.css');
   setMarkdown(null);
   const html = everyState().map(st => renderRail(st, NOW) + screenOf(st, NOW) + (st.settingsOpen ? renderSettings(st) : '')).join('');
-  for (const c of ['mkts', 'mk-tab', 'mk-star', 'mk-name', 'mk-tag', 'mk-q', 'mk-clear', 'mk-note', 'mk-empty', 'mk-st', 'page-back', 'mk-chart', 'mk-axis', 'mk-facts', 'mk-big', 'mk-basis', 'mk-asof', 'mk-d-acts', 'mk-line', 'mk-on', 'acct', 'networth', 'acct-figures', 'acct-second', 'acct-t', 'acct-shown', 'order-row', 'acct-note', 'activity-row', 'venue', 'account-line']) assert.match(html, new RegExp(`class="[^"]*\\b${c}\\b`), `Markets emits ${c}`);
+  for (const c of ['mkts', 'mk-tab', 'mk-star', 'mk-name', 'mk-tag', 'mk-q', 'mk-clear', 'mk-note', 'mk-empty', 'mk-st', 'page-back', 'mk-chart', 'mk-axis', 'mk-facts', 'mk-big', 'mk-basis', 'mk-asof', 'mk-d-acts', 'mk-line', 'mk-on', 'mk-outs', 'mk-out', 'acct', 'networth', 'acct-figures', 'acct-second', 'acct-t', 'acct-shown', 'order-row', 'acct-note', 'activity-row', 'venue', 'account-line']) assert.match(html, new RegExp(`class="[^"]*\\b${c}\\b`), `Markets emits ${c}`);
   const classes = new Set(html.match(/class="([^"]+)"/g).flatMap(x => x.slice(7, -1).split(/\s+/)));
   const missing = [...classes].filter(c => c && !new RegExp(`\\.${c.replace(/[-]/g, '\\-')}(?![\\w-])`).test(css));
   assert.deepEqual(missing, [], 'classes without a rule');

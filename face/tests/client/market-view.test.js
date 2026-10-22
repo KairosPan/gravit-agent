@@ -1,14 +1,14 @@
 // The Markets view: the Account's explore items as the table's rows — tabs, prices by kind, the source word, the legs across
 // venues — beside the face's A-share (cn:) rows, and a market's page with what is held, working and stated for it (spec
-// 2026-10-22 §6.1), over the stand-in's answers (tests/fixtures/account/). And the face's own ids and English words from the cn
-// wire's enums, with the list views over the face's quotes kept until their callers go (spec 2026-10-19 §7 Stage 2).
+// 2026-10-22 §6.1), over the stand-in's answers (tests/fixtures/account/); what Hand to Gravit says of a market. And the face's
+// own ids and English words from the cn wire's enums (spec 2026-10-19 §7 Stage 2).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  MARKET_TABS, MARKET_SORTS, canonicalId, holdingAssets, listAssets, marketRows, assetFor,
-  quoteWord, connectionWord, providerWord, basisWord, sourceWord, volumeWord, searchWord, watchWord, barsWord, mentionsOf,
-  ACCOUNT_TABS, ACCOUNT_SORTS, isAccountKey, tabsOf, priceOf, sourceWordOf, legsOf, rowsOf, matchKey, pairsOf, pageOf,
+  canonicalId, quoteWord, connectionWord, providerWord, basisWord, sourceWord, volumeWord, searchWord, watchWord, mentionsOf,
+  ACCOUNT_TABS, ACCOUNT_SORTS, CANDLE_RANGES, isAccountKey, tabsOf, priceOf, sourceWordOf, legsOf, rowsOf, matchKey, pairsOf, pageOf,
+  faceAssetOf, handWordsOf,
 } from '../../client/js/host/market-view.js';
 
 const CJK = /[㐀-鿿]/;
@@ -33,7 +33,7 @@ const quote = (id, over = {}) => ({
 // tab: `all` is explore?limit=200, a kind's own explore?tab=<kind>&limit=200
 const markets = (over = {}) => ({
   tab: 'all', sort: 'volume', q: '', watchlist: [], watchError: null, quotes: {}, providers: [], connection: 'idle',
-  search: { query: '', status: 'idle', assets: [], partial: false }, hitQuotes: {}, bars: {},
+  search: { query: '', status: 'idle', assets: [], partial: false }, hitQuotes: {},
   explore: {}, results: { status: 'idle', data: null, at: null },
   accountQuotes: {}, candles: {}, compare: {}, watch: [], asked: {}, ...over,
 });
@@ -42,7 +42,6 @@ const accountSlice = (over = {}) => ({
   status: 'ready', data: fx('account'), at: 1, message: null,
   holdings: read(fx('holdings')), paper: read(fx('holdings-paper')), statement: read(fx('statement')), ...over,
 });
-const account = positions => ({ ok: true, available: true, host: 'paper-api.alpaca.markets', account: {}, positions, orders: [] });
 const UNPRICED = { price: null, unit: 'usd', changePct: null, change24h: null, volume: null, volumeUnit: 'usd', implied: null };
 
 // ── The Account's markets ──
@@ -210,7 +209,7 @@ test('rowsOf: the fixture rows and two cn rows side by side; source words; the t
     'coin:LINK', 'perp:DOGE', 'cn:600519', 'cn:000001',
   ], "Most traded: the Account's rows by their dollars, then the cn rows, whose volume is shares; a row without one last");
   assert.deepEqual(rows.find(r => r.id === 'perp:BTC'), {
-    id: 'perp:BTC', source: 'account', kind: 'perp', name: 'BTC perpetual', sub: 'BTC · Perpetual',
+    id: 'perp:BTC', source: 'account', kind: 'perp', name: 'BTC perpetual', base: 'BTC', sub: 'BTC · Perpetual',
     priced: { price: 62498.8, unit: 'usd', changePct: 2.3, change24h: 1404.9, volume: 4121786065, volumeUnit: 'usd', implied: null },
     live: null, sourceWord: 'Stand-in Exchange', closeTime: null, pastEnd: false, watched: false,
     legs: [{ venue: 'ex', venueName: 'Stand-in Exchange', symbol: 'BTC/USDT:USDT', connected: true, paper: false, canTrade: true, public: false, connectTo: '', connector: '', price: 62498.8, bid: 62495.6, ask: 62501.9, best: true }],
@@ -533,61 +532,45 @@ test('no icon URL survives any view (an item given an https icon by hand)', () =
   assert.deepEqual([btc.icon, btc.at[0].icon, avax.icon, fed.icon, fed.outcomes[0].icon, quoteBtc.icon, compare.rows[0].icon, candles.icon, candles.candles[0].icon], Array(9).fill(ICON));
 });
 
-// ── The face's own ids, words and list views ──
+// ── What Hand to Gravit says of a market ──
 
-test('holdings become face ids; the list is the watchlist then the holdings, deduped; a query lists the hits', () => {
-  const data = account([
-    { symbol: 'AAPL', asset_class: 'us_equity', exchange: 'NASDAQ', qty: '5' },
-    { symbol: 'BTCUSD', asset_class: 'crypto', exchange: 'CRYPTO', qty: '0.1' },
-    { symbol: 'ETH/USD', asset_class: 'crypto', qty: '1' },
-    { symbol: 'X', asset_class: 'us_option', qty: '1' },
-  ]);
-  assert.deepEqual(holdingAssets(data).map(a => a.id), ['us:AAPL', 'crypto:BTC/USD', 'crypto:ETH/USD']);
-  assert.equal(holdingAssets(data)[0].exchange, 'NASDAQ');
-  assert.deepEqual(holdingAssets(null), []);
-  assert.deepEqual(holdingAssets({ ok: true, available: false, reason: 'no APCA keys in the environment' }), []);
-  const m = markets({ watchlist: [asset('crypto:BTC/USD'), asset('cn:600519')] });
-  assert.deepEqual(listAssets(m, data).map(a => a.id), ['crypto:BTC/USD', 'cn:600519', 'us:AAPL', 'crypto:ETH/USD']);
-  const searching = markets({ ...m, q: 'nvd', search: { query: 'nvd', status: 'success', assets: [asset('us:NVDA', { name: 'NVIDIA' })], partial: false } });
-  assert.deepEqual(listAssets(searching, data).map(a => a.id), ['us:NVDA']);
-  const rows = marketRows({ ...searching, hitQuotes: { 'us:NVDA': quote('us:NVDA', { price: 123 }) } }, data);
-  assert.equal(rows[0].quote.price, 123, 'a hit takes its REST quote');
-});
-
-test('tabs: Stocks holds us and cn, Crypto the crypto; the labels', () => {
-  assert.deepEqual(MARKET_TABS.map(t => t.label), ['All', 'Crypto', 'Stocks']);
-  assert.deepEqual(MARKET_SORTS.map(s => s.label), ['Most traded', 'Biggest moves']);
-  const m = markets({ watchlist: [asset('us:AAPL'), asset('cn:600519'), asset('crypto:BTC/USD')] });
-  assert.deepEqual(marketRows({ ...m, tab: 'stocks' }, null).map(r => r.asset.id), ['us:AAPL', 'cn:600519']);
-  assert.deepEqual(marketRows({ ...m, tab: 'crypto' }, null).map(r => r.asset.id), ['crypto:BTC/USD']);
-});
-
-test('sorts put nulls last both ways and keep list order on ties', () => {
+test('handWordsOf: an Account key by its base and name; a face id by its watchlist or search asset, else its own; anything else null', () => {
   const m = markets({
-    watchlist: [asset('cn:600519'), asset('us:AAPL'), asset('us:MSFT'), asset('us:ZZZZ'), asset('us:KO')],
-    quotes: {
-      'cn:600519': quote('cn:600519', { volume: null, change_pct: -3 }),
-      'us:AAPL': quote('us:AAPL', { volume: 500, change_pct: 1 }),
-      'us:MSFT': quote('us:MSFT', { volume: 900, change_pct: -0.5 }),
-      'us:ZZZZ': quote('us:ZZZZ', { price: null, volume: null, change_pct: null, quote_status: 'unavailable' }),
-      'us:KO': quote('us:KO', { volume: 500, change_pct: 1 }),
-    },
+    explore: { all: read(fx('explore-all')), predictions: read(fx('explore-predictions')) },
+    watchlist: [asset('cn:600519', { name: 'Kweichow Moutai', exchange: 'SH' }), asset('us:AAPL', { name: 'Apple' })],
+    search: { query: '0000', status: 'success', assets: [asset('cn:000001', { name: 'Ping An Bank', exchange: 'SZ' })], partial: false },
   });
-  assert.deepEqual(marketRows(m, null).map(r => r.asset.id), ['us:MSFT', 'us:AAPL', 'us:KO', 'cn:600519', 'us:ZZZZ']);
-  assert.deepEqual(marketRows({ ...m, sort: 'movers' }, null).map(r => r.asset.id), ['cn:600519', 'us:AAPL', 'us:KO', 'us:MSFT', 'us:ZZZZ']);
-  const row = marketRows(m, account([{ symbol: 'AAPL', asset_class: 'us_equity' }])).find(r => r.asset.id === 'us:AAPL');
-  assert.equal(row.watched, true); assert.equal(row.held, true); assert.equal(row.quote.volume, 500);
+  const acct = accountSlice();
+  // the Account's, from its page's item: its base and its name; an event has no base, so its name is both
+  assert.deepEqual(handWordsOf(m, acct, 'stock:NVDA', NOW), { symbol: 'NVDA', name: 'NVIDIA Corporation common stock' });
+  assert.deepEqual(handWordsOf(m, acct, 'coin:BTC', NOW), { symbol: 'BTC', name: 'BTC' });
+  const fed = 'Will the Fed cut rates at its December meeting?';
+  assert.deepEqual(handWordsOf({ ...m, tab: 'predictions' }, acct, 'event:predict:SI-FEDCUT-DEC', NOW), { symbol: fed, name: fed });
+  assert.deepEqual(handWordsOf(m, undefined, 'perp:ETH'), { symbol: 'ETH', name: 'ETH perpetual' }, 'the account not read changes nothing');
+  // a market no read lists: nothing to hand
+  assert.equal(handWordsOf(m, acct, 'coin:GONE', NOW), null);
+  // the face's: the watchlist's asset, else the search's, else the id's own — the id canonicalised
+  assert.deepEqual(handWordsOf(m, acct, 'cn:600519', NOW), { symbol: '600519', name: 'Kweichow Moutai' });
+  assert.deepEqual(handWordsOf(m, acct, 'us:aapl', NOW), { symbol: 'AAPL', name: 'Apple' });
+  assert.deepEqual(handWordsOf(m, acct, 'cn:000001', NOW), { symbol: '000001', name: 'Ping An Bank' });
+  assert.deepEqual(handWordsOf(m, acct, 'crypto:eth-usd', NOW), { symbol: 'ETH/USD', name: 'ETH/USD' });
+  for (const id of ['garbage', '', null, undefined]) assert.equal(handWordsOf(m, acct, id, NOW), null, String(id));
+  // faceAssetOf: the asset a face id names, its exchange and currency with it; nothing for an Account key
+  assert.deepEqual(faceAssetOf(m, 'cn:600519'), { id: 'cn:600519', market: 'cn', symbol: '600519', name: 'Kweichow Moutai', exchange: 'SH', currency: 'CNY' });
+  assert.deepEqual(faceAssetOf(markets(), 'us:MSFT'), { id: 'us:MSFT', market: 'us', symbol: 'MSFT', name: 'MSFT', exchange: '', currency: 'USD' });
+  assert.equal(faceAssetOf(m, 'coin:BTC'), null);
+  assert.equal(faceAssetOf(undefined, 'cn:600519').symbol, '600519');
+  // the Account's candle ranges, in its order
+  assert.deepEqual(CANDLE_RANGES, ['1D', '5D', '1M', '3M', '6M', 'YTD', '1Y', '5Y', 'MAX']);
 });
 
-test('canonicalId: us:aapl → us:AAPL, crypto:btc-usd → crypto:BTC/USD, BTC → null; assetFor', () => {
+// ── The face's own ids and words ──
+
+test('canonicalId: us:aapl → us:AAPL, crypto:btc-usd → crypto:BTC/USD; BTC, or an Account key, → null', () => {
   assert.equal(canonicalId('us:aapl'), 'us:AAPL');
   assert.equal(canonicalId('crypto:btc-usd'), 'crypto:BTC/USD');
   assert.equal(canonicalId('cn:600519'), 'cn:600519');
-  for (const bad of ['BTC', '', 'us:', 'fx:EURUSD', null, undefined]) assert.equal(canonicalId(bad), null, String(bad));
-  const known = asset('us:AAPL', { name: 'Apple', exchange: 'NASDAQ' });
-  assert.equal(assetFor(markets({ watchlist: [known] }), null, 'us:aapl').name, 'Apple');
-  assert.deepEqual(assetFor(markets(), null, 'us:MSFT'), { id: 'us:MSFT', market: 'us', symbol: 'MSFT', name: 'MSFT', exchange: '', currency: 'USD' });
-  assert.equal(assetFor(markets(), null, 'garbage'), null);
+  for (const bad of ['BTC', '', 'us:', 'fx:EURUSD', 'coin:BTC', null, undefined]) assert.equal(canonicalId(bad), null, String(bad));
 });
 
 test('every word is English, and each enum reads as it should', () => {
@@ -604,7 +587,6 @@ test('every word is English, and each enum reads as it should', () => {
   words.push(sourceWord(quote('cn:600519', { source: '同花顺', feed: 'realtime' })));
   for (const status of ['idle', 'loading', 'success', 'error']) words.push(searchWord({ query: 'zz', status, assets: [], partial: false, note: '搜索服务暂时不可用，请稍后重试。' }));
   for (const error of [null, 'read', 'unsaved', 'full']) words.push(watchWord(error));
-  words.push(barsWord({ ok: true, source: 'alpaca', feed: 'iex', as_of: '2026-10-17', rows: [] }), barsWord({ ok: true, source: 'bed', feed: null, as_of: '2026-07-09', rows: [], stale: true }));
   for (const word of words) assert.doesNotMatch(word, CJK, word);
 
   assert.equal(quoteWord(quote('us:AAPL')), 'Live');
@@ -626,9 +608,6 @@ test('every word is English, and each enum reads as it should', () => {
   assert.equal(searchWord({ query: 'zz', status: 'success', assets: [asset('us:ZZ')], partial: false }), '');
   assert.equal(searchWord({ query: '', status: 'idle', assets: [], partial: false }), '');
   assert.deepEqual([null, 'read', 'unsaved', 'full'].map(watchWord), ['', "Couldn't read the saved watchlist", "Couldn't save the watchlist", 'The watchlist is full']);
-  assert.equal(barsWord({ source: 'alpaca', feed: 'iex', as_of: '2026-10-17' }), 'Daily · Alpaca IEX');
-  assert.equal(barsWord({ source: 'bed', feed: null, as_of: '2026-07-09', stale: true }), 'Daily · PIT bed · as of 2026-07-09 · stale');
-  assert.equal(barsWord(undefined), '');
 });
 
 test("mentionsOf matches whole words in titles: AAPL in 'Is AAPL cheap?', not in 'AAPLX'; a crypto pair by its base", () => {
@@ -651,20 +630,6 @@ test('volumeWord: shares for a stock, the base for a coin, — for null', () => 
   assert.equal(volumeWord(asset('crypto:BTC/USD'), quote('crypto:BTC/USD', { volume: 0.5 })), '0.5 BTC');
   assert.equal(volumeWord(asset('cn:600519'), quote('cn:600519', { volume: null })), '—');
   assert.equal(volumeWord(asset('us:AAPL'), undefined), '—');
-});
-
-test('Most traded ranks by dollar volume, price × volume, so a coin and a stock compare', () => {
-  const m = markets({
-    watchlist: [asset('crypto:DOGE/USD'), asset('crypto:ETH/USD'), asset('crypto:BTC/USD'), asset('us:BTCS')],
-    quotes: {
-      'crypto:DOGE/USD': quote('crypto:DOGE/USD', { price: 0.12, volume: 910_000_000 }),
-      'crypto:ETH/USD': quote('crypto:ETH/USD', { price: 2630, volume: 98_000 }),
-      'crypto:BTC/USD': quote('crypto:BTC/USD', { price: 82_710, volume: 5_200 }),
-      'us:BTCS': quote('us:BTCS', { price: 3.1, volume: 840_000 }),
-    },
-  });
-  assert.deepEqual(marketRows(m, null).map(r => r.asset.id), ['crypto:BTC/USD', 'crypto:ETH/USD', 'crypto:DOGE/USD', 'us:BTCS']);
-  assert.equal(volumeWord(asset('crypto:BTC/USD'), m.quotes['crypto:BTC/USD']), '5.2k BTC', 'the volume still reads in units');
 });
 
 test('a market whose provider is not configured says so instead of No quote', () => {

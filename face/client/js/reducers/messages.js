@@ -1,6 +1,6 @@
 // face/client/js/reducers/messages.js — the conversation side on the host (spec 2026-10-19 §5, §7): routes, the draft, Details.
 // What the host says about a conversation lives in reducers/host.js; what the operator does with the page lives here.
-import { canonicalId } from '../host/market-view.js';
+import { canonicalId, isAccountKey } from '../host/market-view.js';
 import { firstOpen } from '../host/sessions.js';
 import { ARCHIVED_KEY } from '../wire/grouping.js';
 
@@ -20,8 +20,9 @@ export const reducers = {
     if (route.screen === 'messages' && !(route.id === 'new' && state.draft) && !state.conversations.some(c => c.id === route.id)) {
       route = { screen: 'messages', id: firstOpen(state.conversations)?.id ?? null };
     }
-    // a market id is the face's (us:AAPL, crypto:BTC/USD, cn:600519), canonicalised; one that is not opens Markets
-    if (route.screen === 'markets' && route.id) route = { screen: 'markets', id: canonicalId(route.id) };
+    // a market id is the Account's key as it is (coin:BTC, event:predict:…), or the face's (us:AAPL, crypto:BTC/USD, cn:600519)
+    // canonicalised; one that is neither opens Markets
+    if (route.screen === 'markets' && route.id) route = { screen: 'markets', id: isAccountKey(route.id) ? route.id : canonicalId(route.id) };
     let s = { ...state, route, detailsOpen: false, settingsOpen: false, edit: null, confirm: null };
     // the first level's Messages key returns to the conversation you last had open
     if (route.screen === 'messages' && route.id && route.id !== 'new') s.lastConv = route.id;

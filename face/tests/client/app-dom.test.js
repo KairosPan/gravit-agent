@@ -372,7 +372,8 @@ test("typing in the search box searches; a star watches and writes the face's ke
   const store = bootMarkets(f, h, mk);
   await h.ready();
   assert.match(f.html(), /<main class="main mkts">/);
-  assert.match(f.html(), /Nothing watched yet/);
+  // what the fake host answers to the Account's explore is not an explore answer: nothing to list, and the screen says so
+  assert.match(f.html(), /<p class="mk-empty">Markets unavailable<\/p>/);
   mq.value = '600';
   f.fire('root', 'input', { target: mq });
   assert.deepEqual(mk.search.queries.at(-1), ['600', 'cn']);
@@ -383,7 +384,7 @@ test("typing in the search box searches; a star watches and writes the face's ke
   assert.match(f.html(), /<tr data-id="cn:600519">/);
   f.click({ tagName: 'BUTTON', dataset: { action: 'toggleWatch', id: 'cn:600519' } });
   assert.deepEqual(JSON.parse(storage.getItem('gravit.market.watchlist.v1')).items.map(a => [a.id, a.name]), [['cn:600519', 'Kweichow Moutai']]);
-  assert.match(f.html(), /aria-pressed="true" aria-label="Stop watching 600519"/);
+  assert.match(f.html(), /data-id="cn:600519" aria-pressed="true" aria-label="Stop watching Kweichow Moutai"/);
   f.click({ tagName: 'BUTTON', dataset: { action: 'toggleWatch', id: 'cn:600519' } });
   assert.deepEqual(JSON.parse(storage.getItem('gravit.market.watchlist.v1')).items, [], 'a second press stops watching');
   f.click({ tagName: 'BUTTON', dataset: { action: 'mkClear' } });
@@ -447,9 +448,10 @@ test('#/markets/garbage opens Markets; a lower-case id is written canonical', as
   store.timers.clear();
 });
 
-// the face's daily bars are read by no screen: Markets on screen reads the Account's explore instead
+// the face's daily bars are read by no screen: Markets on screen reads the Account's explore instead; an A share's page is the
+// face's own, drawn with no read at all
 test('a market page reads no /data/bars, whatever its id; Markets on screen reads the Account', async () => {
-  const f = fakeWindow({ hash: '#/markets/us:AAPL', storage: memoryStorage() });
+  const f = fakeWindow({ hash: '#/markets/cn:600519', storage: memoryStorage() });
   const h = host();
   const reads = [];
   const getJson = async path => { reads.push(path); return h.getJson(path); };
@@ -487,13 +489,8 @@ test('Hand to Gravit opens New message with the words in the composer', async ()
 });
 
 // Account through host: /data/account and the seat, recorded. The page the host takes (pageOk: venues, cards, orders,
-// signers, connectLive) and the Account screen and the rail draw (its totalUsd) also carries the Alpaca-shaped fields the
-// Markets page still draws, until Task 11 rewrites it
-const KEYED = { ok: true, available: true, host: 'paper-api.alpaca.markets', account: { equity: '123346.11', last_equity: '122011.09', cash: '50000', currency: 'USD' },
-  positions: [{ symbol: 'AAPL', asset_class: 'us_equity', qty: '5', market_value: '600', change_today: '0.01' }],
-  orders: [{ id: 'o2', symbol: 'AAPL', side: 'buy', qty: '3', filled_qty: '3', filled_avg_price: '189.5', type: 'market', status: 'filled', submitted_at: '2026-10-18T14:00:00Z', filled_at: '2026-10-18T14:00:05Z' }],
-  generated_at: '2026-10-19T14:00:00Z', totalUsd: 123346.11,
-  venues: [], cards: [], signers: { owners: [], threshold: 1, pendingDevices: [] }, connectLive: { writes: { on: false } } };
+// signers, connectLive), whose totalUsd the Account screen and the rail draw
+const KEYED = { ok: true, totalUsd: 123346.11, venues: [], cards: [], orders: [], signers: { owners: [], threshold: 1, pendingDevices: [] }, connectLive: { writes: { on: false } } };
 const isPage = path => path.split('?')[0] === '/data/account';
 function accountHost(opts = {}) {
   const h = host(opts);
@@ -617,10 +614,13 @@ test('entering Venues reads /data/seat.json; Refresh there reads it fresh; a sea
 });
 
 test('Open the Statement on a Market page lands on Account with the Statement open', async () => {
-  const f = fakeWindow({ hash: '#/markets/us:AAPL', storage: memoryStorage() });
+  // a market's page is the Account's, so the host answers its explore with the stand-in's
+  const f = fakeWindow({ hash: '#/markets/coin:BTC', storage: memoryStorage() });
   const h = accountHost({ rows: [row('s1')] });
-  const store = bootAccount(f, h);
+  const explore = JSON.parse(readFileSync(new URL('../fixtures/account/explore-all.json', import.meta.url), 'utf8'));
+  const store = bootAccount(f, { ...h, getJson: async path => (path.startsWith('/data/account/explore') ? explore : h.getJson(path)) });
   await h.ready();
+  assert.equal(store.get().route.id, 'coin:BTC');
   assert.match(f.html(), /class="link mk-link" data-action="openStatement">Open the Statement →</);
   f.click({ tagName: 'BUTTON', dataset: { action: 'openStatement' } });
   await settle();
@@ -642,6 +642,8 @@ test('a press holds renders until it ends, so a streaming quote cannot swallow t
   await h.ready();
   const quote = price => ({ id: 'crypto:BTC/USD', market: 'crypto', symbol: 'BTC/USD', price, prev_close: 1, change: 1, change_pct: 1, volume: 1, as_of: '2026-10-20T14:00:00Z', received_at: null, volume_as_of: null, source: 'Coinbase', feed: 'exchange', basis: '24h', quote_status: 'live', market_status: 'open', message: '' });
   const tick = price => mk.live.onUpdate({ quotes: { 'crypto:BTC/USD': quote(price) }, providers: [], status: 'streaming', refreshing: false, generatedAt: 'x', note: '', limited: 0 });
+  // the old star is a star: Watching is among the tabs until it goes
+  assert.match(f.html(), /data-action="mkTab" data-value="watching"/);
   const before = f.writes;
   f.fire('root', 'pointerdown', { button: 0 });
   tick(82_000);
@@ -651,7 +653,7 @@ test('a press holds renders until it ends, so a streaming quote cannot swallow t
   f.click({ tagName: 'BUTTON', dataset: { action: 'toggleWatch', id: 'crypto:BTC/USD' } });
   assert.deepEqual(store.get().markets.watchlist, [], 'the click ran');
   await settle();
-  assert.match(f.html(), /Nothing watched yet/, 'the held render landed');
+  assert.doesNotMatch(f.html(), /data-value="watching"/, 'the held render landed');
   const held = f.writes;
   f.fire('root', 'pointerdown', { button: 0 });
   tick(82_002);
