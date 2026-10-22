@@ -1,8 +1,8 @@
 // face/client/js/host/account.js — the Account screen's impure half (spec 2026-10-22 §6.2): the Account's reads through the
 // face's proxy into the store's account slice — the page (/data/account), holdings?cost=1 and its paper lens, the leading
 // history curve, the statement and the agents — each kind one flight at a time; the page at the Account's own cadence (every
-// 20 s on screen, 80 s while the stream is open); and the stream's account events as the reads they name. The views over
-// what lands are account-view.js's.
+// 20 s on screen, 80 s while the stream is open); and the stream's account events as the reads they name, past the face's
+// cache. The views over what lands are account-view.js's.
 import { pageOk, worthOf } from './account-view.js';
 
 export const ACCOUNT_POLL_MS = 20_000, ACCOUNT_POLL_STREAM_MS = 80_000;
@@ -13,26 +13,35 @@ const MOVES = new Set(['order', 'fill', 'paper', 'balance', 'position']);
 // the Account's sentence when it refuses (`refusal.message`), else its error words — only when they are text
 const words = v => (typeof v === 'string' && v.trim() !== '' ? v : null);
 const messageOf = body => words(body?.refusal?.message) ?? words(body?.error);
+// a page that names a paper venue, whose lens (holdings?cost=1&paper=1) is worth reading
+const hasPaper = page => Array.isArray(page?.venues) && page.venues.some(v => v?.paper === true);
+// a read past the face's cache: the face's own flag, never forwarded
+const freshOf = path => `${path}${path.includes('?') ? '&' : '?'}fresh=1`;
+const nothing = () => {};
 
 export function startAccount({ store, getJson, now = Date.now, schedule, cancelTimer, streamOpen = () => false }) {
   let closed = false;
   let timer = null;
+  let holdingsDue = 0;       // loadAll calls whose holdings read is still to come: a page landing leaves the paper lens to them
   const kinds = new Map();   // a kind of read → the flight in the air: { flight, path, fresh, seq }
 
-  // One flight per kind: an ask joins the flight in the air when that flight reads the same path, and a plain ask joins a
-  // fresh one too (fresh: past the face's cache, `?fresh=1`); only the latest-started read of a kind lands — a fresh one
-  // must not be overwritten by an older plain one — and nothing lands after close(). `land(body, refused)` takes the
+  // One flight per kind, the face's proxy's own rule: a plain ask joins the flight in the air when it is the same read, and a
+  // fresh ask (past the face's cache) joins only a fresh one; otherwise a fresh ask behind a plain read of the same path runs
+  // once that one settles — one trailing read, never a pile. Only the latest-started read of a kind lands, so the answer to a
+  // read a fresh ask overtook is never drawn, and nothing is read or lands after close(). `land(body, refused)` takes the
   // answer, or for a rejection the body the app's getJson carries on it (`error.body`, when it does).
   function fly(kind, path, { fresh = false, loading, land }) {
     if (closed) return Promise.resolve();
     let k = kinds.get(kind);
     if (!k) { k = { flight: null, path: null, fresh: false, seq: 0 }; kinds.set(kind, k); }
-    if (k.flight && (k.path === path || (k.fresh && !fresh))) return k.flight;
+    const same = k.flight !== null && k.path === path;
+    if (same && (!fresh || k.fresh)) return k.flight;
     const mine = ++k.seq;
     store.dispatch(loading);
-    // the read starts on the next microtask, so the flight is set before anything can settle it
-    const current = Promise.resolve()
-      .then(() => getJson(path))
+    // the read starts on a later microtask, so the flight is set before anything can settle it
+    const ahead = same ? k.flight.then(nothing, nothing) : Promise.resolve();
+    const current = ahead
+      .then(() => (closed ? undefined : getJson(fresh ? freshOf(path) : path)))
       .then(body => { if (!closed && mine === k.seq) land(body, false); },
         error => { if (!closed && mine === k.seq) land(error?.body, true); })
       .finally(() => { if (k.flight === current) { k.flight = null; k.path = null; k.fresh = false; } });
@@ -49,25 +58,29 @@ export function startAccount({ store, getJson, now = Date.now, schedule, cancelT
   };
 
   /** The page, `?fresh=1` past the face's cache. A body that is not the page — a refusal, an `ok: false` on a 200, an API the
-   *  face does not recognise — is a failure carrying the Account's sentence when it gave one; the last page stays. */
+   *  face does not recognise — is a failure carrying the Account's sentence when it gave one; the last page stays. A page
+   *  naming a paper venue whose lens was never read reads the holdings at once, unless a loadAll is about to. */
   function load({ fresh = false } = {}) {
-    return fly('page', fresh ? '/data/account?fresh=1' : '/data/account', {
+    return fly('page', '/data/account', {
       fresh,
       loading: 'accountLoading',
       land: (body, refused) => {
-        if (!refused && pageOk(body)) store.dispatch('accountLoaded', { data: body, at: now() });
-        else store.dispatch('accountFailed', { at: now(), message: messageOf(body) });
+        if (!refused && pageOk(body)) {
+          store.dispatch('accountLoaded', { data: body, at: now() });
+          if (holdingsDue === 0 && hasPaper(body) && store.get().account.paper.data === null) void loadHoldings();
+        } else store.dispatch('accountFailed', { at: now(), message: messageOf(body) });
       },
     });
   }
 
-  /** holdings?cost=1 and, while the page names a paper venue, its paper lens beside it, in parallel. */
-  function loadHoldings() {
-    const venues = store.get().account.data?.venues;
-    const paper = Array.isArray(venues) && venues.some(v => v?.paper === true);
+  /** holdings?cost=1 and, while the page names a paper venue, its paper lens beside it, in parallel; `fresh` past the
+   *  face's cache (`&fresh=1`), as the stream's events ask. */
+  function loadHoldings({ fresh = false } = {}) {
     return Promise.all([
-      fly('holdings', '/data/account/holdings?cost=1', { loading: 'holdingsLoading', land: landing('holdingsLoaded', 'holdingsFailed') }),
-      paper ? fly('paper', '/data/account/holdings?cost=1&paper=1', { loading: 'paperLoading', land: landing('paperLoaded', 'paperFailed') }) : null,
+      fly('holdings', '/data/account/holdings?cost=1', { fresh, loading: 'holdingsLoading', land: landing('holdingsLoaded', 'holdingsFailed') }),
+      hasPaper(store.get().account.data)
+        ? fly('paper', '/data/account/holdings?cost=1&paper=1', { fresh, loading: 'paperLoading', land: landing('paperLoaded', 'paperFailed') })
+        : null,
     ]);
   }
 
@@ -87,15 +100,20 @@ export function startAccount({ store, getJson, now = Date.now, schedule, cancelT
     });
   }
 
-  const loadStatement = () => fly('statement', '/data/account/statement', { loading: 'statementLoading', land: landing('statementLoaded', 'statementFailed') });
+  /** The statement; `fresh` past the face's cache, as the stream's statement event asks. */
+  const loadStatement = ({ fresh = false } = {}) =>
+    fly('statement', '/data/account/statement', { fresh, loading: 'statementLoading', land: landing('statementLoaded', 'statementFailed') });
   const loadAgents = () => fly('agents', '/data/account/agents', { loading: 'agentsLoading', land: landing('agentsLoaded', 'agentsFailed') });
 
-  /** Every read again (the stream's snapshot). The paper lens is chosen from the page and the leading curve from the paper
-   *  total, so the holdings follow the page and the history follows the holdings; the statement and the agents go at once. */
+  /** Every read again (the stream's snapshot), the page, the holdings and the statement past the face's cache. The paper
+   *  lens is chosen from the page and the leading curve from the paper total, so the holdings follow the page and the
+   *  history follows the holdings; the statement and the agents go at once. */
   function loadAll() {
+    holdingsDue += 1;
+    const holdings = () => { holdingsDue -= 1; return loadHoldings({ fresh: true }); };
     return Promise.all([
-      load({ fresh: true }).then(() => loadHoldings()).then(() => loadHistory()),
-      loadStatement(),
+      load({ fresh: true }).then(holdings, holdings).then(() => loadHistory()),
+      loadStatement({ fresh: true }),
       loadAgents(),
     ]);
   }
@@ -113,11 +131,12 @@ export function startAccount({ store, getJson, now = Date.now, schedule, cancelT
     if (timer !== null) { cancelTimer(timer); timer = null; }
   }
 
-  /** A stream event ({ type, id, data }) as the reads it names; a burst joins the reads in the air. */
+  /** A stream event ({ type, id, data }) as the reads it names, past the face's cache: a plain read in the air never
+   *  answers it, and a burst joins the fresh reads in the air. */
   function onStreamEvent(ev) {
     const type = ev?.type;
-    if (MOVES.has(type)) { void loadHoldings(); void load({ fresh: true }); }
-    else if (type === 'statement') void loadStatement();
+    if (MOVES.has(type)) { void loadHoldings({ fresh: true }); void load({ fresh: true }); }
+    else if (type === 'statement') void loadStatement({ fresh: true });
     else if (type === 'card') void load({ fresh: true });
     else if (type === 'snapshot') void loadAll();
   }

@@ -15,20 +15,23 @@ const settle = async () => { for (let i = 0; i < 6; i++) await tick(); };
 const fx = name => JSON.parse(readFileSync(new URL(`../fixtures/account/${name}.json`, import.meta.url), 'utf8'));
 // the stand-in's page: real money $29,138.10 (totalUsd) beside two paper venues
 const page = (over = {}) => ({ ...fx('account'), ...over });
+// the same page without its paper venues: no paper lens to follow
+const noPaper = (over = {}) => page({ venues: fx('account').venues.filter(v => v.paper !== true), ...over });
 // the app's getJson on a status that is not OK: an Error with the status and, where the app attaches it, the parsed body
 const rejected = (path, status, body) => Object.assign(new Error(`${path}: HTTP ${status}`), { status }, body === undefined ? {} : { body });
 // answers handed out one a read, in order
 const inTurn = answers => () => { const next = answers.shift(); return next instanceof Error ? Promise.reject(next) : Promise.resolve(next); };
 
-// the host over a recording getJson — `json` answers a path by its exact text, else by the path without its query: a body,
-// an Error it rejects with, or a function of the path returning a promise — and recorded timers ({ fn, ms, handle }, kept
-// until run or cancelled); streamOpen answers r.streamIsOpen
+// the host over a recording getJson — `json` answers a path by its exact text, else by the path without its fresh=1, else by
+// the path without its query: a body, an Error it rejects with, or a function of the path returning a promise — and recorded
+// timers ({ fn, ms, handle }, kept until run or cancelled); streamOpen answers r.streamIsOpen
 function rig({ json = {} } = {}) {
   const store = createStore({ initial: emptyState(), reducers });
   const reads = [];
   const getJson = path => {
     reads.push(path);
-    const answer = Object.hasOwn(json, path) ? json[path] : json[path.split('?')[0]];
+    const key = [path, path.replace(/[?&]fresh=1$/, ''), path.split('?')[0]].find(k => Object.hasOwn(json, k));
+    const answer = key === undefined ? undefined : json[key];
     if (typeof answer === 'function') return answer(path);
     return answer instanceof Error ? Promise.reject(answer) : Promise.resolve(answer);
   };
@@ -68,16 +71,19 @@ test('load reads /data/account once for two callers; fresh reads ?fresh=1 and do
   assert.equal(r.account.load({ fresh: true }), fresh, 'a second fresh ask shares the fresh flight');
   assert.equal(r.account.load(), fresh, 'and so does a plain one');
   await tick();
-  assert.deepEqual(r.reads, ['/data/account', '/data/account?fresh=1']);
-  release['/data/account?fresh=1'](page({ totalUsd: 200 }));
+  assert.deepEqual(r.reads, ['/data/account'], 'the fresh read waits for the plain one in the air');
+  release['/data/account'](noPaper({ totalUsd: 100 }));
+  await plain;
+  await tick();
+  assert.equal(r.a().data, null, 'the plain answer a fresh ask overtook is never drawn');
+  assert.equal(r.a().status, 'loading');
+  assert.deepEqual(r.reads, ['/data/account', '/data/account?fresh=1'], 'then the fresh one, once it settled');
+  release['/data/account?fresh=1'](noPaper({ totalUsd: 200 }));
   await fresh;
   assert.equal(r.a().status, 'ready');
   assert.equal(r.a().data.totalUsd, 200);
   assert.equal(typeof r.a().at, 'number');
   assert.equal(r.a().message, null);
-  release['/data/account'](page({ totalUsd: 100 }));
-  await plain;
-  assert.equal(r.a().data.totalUsd, 200, 'the older plain answer is dropped');
   void r.account.load();
   await tick();
   assert.deepEqual(r.reads, ['/data/account', '/data/account?fresh=1', '/data/account'], 'a load after the flights landed reads again');
@@ -87,12 +93,12 @@ test('a 409 refusal keeps the last data and carries the Account message; an unre
   const r = rig({
     json: {
       '/data/account': inTurn([
-        page(),
+        noPaper(),
         rejected('/data/account', 409, { ok: false, refusal: { code: 'E_ACCOUNT_LOCKED', message: 'The Account is locked until its owner signs in.' } }),
-        page(),
+        noPaper(),
         { ok: false, error: 'venues are still settling' },
         { ok: false, error: { code: 'E_ODD' } },
-        { ...page(), connectLive: undefined },
+        { ...noPaper(), connectLive: undefined },
         rejected('/data/account', 503, { ok: false, unreachable: 'ECONNREFUSED' }),
         rejected('/data/account', 502),
       ]),
@@ -130,7 +136,6 @@ test('a 409 refusal keeps the last data and carries the Account message; an unre
 test('loadHoldings reads cost=1, and cost=1&paper=1 only when a paper venue is connected', async () => {
   const r = rig({
     json: {
-      '/data/account': page(),
       '/data/account/holdings?cost=1': fx('holdings'),
       '/data/account/holdings?cost=1&paper=1': inTurn([fx('holdings-paper'), rejected('/data/account/holdings', 503, { ok: false, unreachable: 'timeout' })]),
     },
@@ -143,7 +148,7 @@ test('loadHoldings reads cost=1, and cost=1&paper=1 only when a paper venue is c
   assert.equal(typeof r.a().holdings.at, 'number');
   assert.equal(r.a().paper.status, 'idle');
   // the stand-in's page names two paper venues: both reads in parallel, each once for two callers
-  await r.account.load();
+  r.store.dispatch('accountLoaded', { data: page(), at: 1 });
   r.reads.length = 0;
   const one = r.account.loadHoldings();
   const two = r.account.loadHoldings();
@@ -159,7 +164,7 @@ test('loadHoldings reads cost=1, and cost=1&paper=1 only when a paper venue is c
   assert.equal(r.a().paper.data.totalUsd, 25400, 'the last paper lens stays');
   assert.equal(r.a().holdings.status, 'ready');
   // a page with no paper venue: the lens is not read
-  r.store.dispatch('accountLoaded', { data: page({ venues: page().venues.filter(v => v.paper !== true) }), at: 1 });
+  r.store.dispatch('accountLoaded', { data: noPaper(), at: 1 });
   r.reads.length = 0;
   await r.account.loadHoldings();
   assert.deepEqual(r.reads, ['/data/account/holdings?cost=1']);
@@ -237,20 +242,21 @@ test('stream events: order and fill reload holdings and the page fresh; statemen
       '/data/account/agents': fx('agents'),
     },
   });
-  await r.account.load();   // the page names its paper venues
+  r.store.dispatch('accountLoaded', { data: page(), at: 1 });   // the page names its paper venues
   const after = async (...events) => {
     r.reads.length = 0;
     for (const ev of events) r.account.onStreamEvent(ev);
     await settle();
     return [...r.reads].sort();
   };
-  const moved = ['/data/account/holdings?cost=1', '/data/account/holdings?cost=1&paper=1', '/data/account?fresh=1'].sort();
+  // every read an event names goes past the face's cache
+  const moved = ['/data/account/holdings?cost=1&fresh=1', '/data/account/holdings?cost=1&paper=1&fresh=1', '/data/account?fresh=1'].sort();
   for (const type of ['order', 'fill', 'paper', 'balance', 'position']) {
     assert.deepEqual(await after({ type, id: '4dababf8.2', data: {} }), moved, type);
   }
   assert.equal(r.a().holdings.status, 'ready');
   assert.equal(r.a().paper.status, 'ready');
-  assert.deepEqual(await after({ type: 'statement', id: '4dababf8.3', data: { venue: 'ex' } }), ['/data/account/statement']);
+  assert.deepEqual(await after({ type: 'statement', id: '4dababf8.3', data: { venue: 'ex' } }), ['/data/account/statement?fresh=1']);
   assert.equal(r.a().statement.status, 'ready');
   assert.deepEqual(await after({ type: 'card', id: '4dababf8.4', data: {} }), ['/data/account?fresh=1']);
   for (const type of ['desk', 'quote', 'trades', 'book', 'hb']) assert.deepEqual(await after({ type, id: undefined, data: {} }), [], type);
@@ -258,15 +264,16 @@ test('stream events: order and fill reload holdings and the page fresh; statemen
   // a burst in one tick: the reads in the air are joined, one a kind
   const burst = Array.from({ length: 10 }, (_, i) => ({ type: i % 2 ? 'fill' : 'order', id: `4dababf8.${10 + i}`, data: {} }));
   assert.deepEqual(await after(...burst), moved, 'ten events in a tick: one read of each');
-  // a snapshot: every account read again
+  // a snapshot: every account read again, the holdings and the statement past the cache
   assert.equal(r.a().agents.status, 'idle');
   assert.deepEqual(await after({ type: 'snapshot', id: '4dababf8.0', data: {} }),
-    [...moved, '/data/account/history?range=1d', '/data/account/statement', '/data/account/agents'].sort());
+    [...moved, '/data/account/history?range=1d', '/data/account/statement?fresh=1', '/data/account/agents'].sort());
   assert.equal(r.a().agents.status, 'ready');
   assert.equal(r.a().history.status, 'ready');
   assert.equal(r.a().status, 'ready');
   // the stream's first frame is a snapshot, often before anything is read: the holdings follow the page (the paper venue
-  // is known from it) and the history follows the holdings (Paper leads only with its total)
+  // is known from it) and the history follows the holdings (Paper leads only with its total); the page's landing leaves
+  // the paper lens to the snapshot's own fresh read, so the holdings are read once each
   const cold = rig({
     json: {
       '/data/account': page({ totalUsd: 0 }),
@@ -279,8 +286,59 @@ test('stream events: order and fill reload holdings and the page fresh; statemen
   });
   cold.account.onStreamEvent({ type: 'snapshot', id: '4dababf8.0', data: {} });
   await settle();
-  assert.deepEqual([...cold.reads].sort(), [...moved, '/data/account/history?range=1d&paper=1', '/data/account/statement', '/data/account/agents'].sort());
+  assert.deepEqual([...cold.reads].sort(),
+    [...moved, '/data/account/history?range=1d&paper=1', '/data/account/statement?fresh=1', '/data/account/agents'].sort());
   assert.equal(cold.a().history.data.paper, true);
+});
+
+test('a money event while a plain holdings read is in the air: one fresh read once it settles, its answer the one kept', async () => {
+  const release = [];
+  const r = rig({ json: { '/data/account': noPaper(), '/data/account/holdings': () => new Promise(res => release.push(res)) } });
+  const holdingsReads = () => r.reads.filter(path => path.startsWith('/data/account/holdings'));
+  r.store.dispatch('accountLoaded', { data: noPaper(), at: 1 });
+  const plain = r.account.loadHoldings();
+  await tick();
+  assert.deepEqual(holdingsReads(), ['/data/account/holdings?cost=1']);
+  // a fill, then another and an order in the same tick: past the cache, but only once the read in the air settles
+  r.account.onStreamEvent({ type: 'fill', id: '4dababf8.5', data: {} });
+  r.account.onStreamEvent({ type: 'fill', id: '4dababf8.6', data: {} });
+  r.account.onStreamEvent({ type: 'order', id: '4dababf8.7', data: {} });
+  await tick();
+  assert.deepEqual(holdingsReads(), ['/data/account/holdings?cost=1'], 'nothing more while the plain read is in the air');
+  release.shift()({ ...fx('holdings'), totalUsd: 100 });   // the book from before the fill
+  await plain;
+  await tick();
+  assert.deepEqual(holdingsReads(), ['/data/account/holdings?cost=1', '/data/account/holdings?cost=1&fresh=1'], 'then one trailing fresh read');
+  assert.equal(r.a().holdings.data, null, 'the answer that began before the fill is never drawn');
+  assert.equal(r.a().holdings.status, 'loading');
+  release.shift()({ ...fx('holdings'), totalUsd: 200 });
+  await settle();
+  assert.equal(r.a().holdings.status, 'ready');
+  assert.equal(r.a().holdings.data.totalUsd, 200, "the fresh read's answer is the one kept");
+  assert.equal(holdingsReads().length, 2, 'two reads in all');
+});
+
+test('a page that names a paper venue whose lens was never read reads the holdings at once', async () => {
+  const r = rig({
+    json: {
+      '/data/account': inTurn([noPaper(), page(), page()]),
+      '/data/account/holdings?cost=1': fx('holdings'),
+      '/data/account/holdings?cost=1&paper=1': fx('holdings-paper'),
+    },
+  });
+  await r.account.load();
+  await settle();
+  assert.deepEqual(r.reads, ['/data/account'], 'no paper venue: no lens to read');
+  // a paper venue appears outside a snapshot: its lens follows without waiting for a money event
+  await r.account.load();
+  await settle();
+  assert.deepEqual(r.reads, ['/data/account', '/data/account', '/data/account/holdings?cost=1', '/data/account/holdings?cost=1&paper=1']);
+  assert.equal(r.a().paper.status, 'ready');
+  assert.equal(r.a().paper.data.totalUsd, 25400);
+  // once the lens is read, a page landing leaves it to its own reads
+  await r.account.load();
+  await settle();
+  assert.equal(r.reads.length, 5);
 });
 
 test('poll schedules every 20 s, 80 s while the stream is open; poll(false) cancels', async () => {
@@ -296,7 +354,7 @@ test('poll schedules every 20 s, 80 s while the stream is open; poll(false) canc
   await tick();
   assert.deepEqual(r.reads, ['/data/account'], 'a tick reads the page, plain');
   assert.deepEqual(r.pending().map(timer => timer.ms), [ACCOUNT_POLL_MS], 'and schedules the next');
-  release.shift()(page());
+  release.shift()(noPaper());
   await settle();
   assert.equal(r.a().status, 'ready');
   // the stream open: the next interval is 80 s, decided as each one is scheduled
@@ -314,14 +372,16 @@ test('poll schedules every 20 s, 80 s while the stream is open; poll(false) canc
   r.account.poll(false);
   assert.deepEqual(r.pending(), []);
   assert.deepEqual(r.cancelled, [timer.handle]);
-  // close(): the timer cancelled, the read still in the air lands nothing, and nothing is read or scheduled after
+  // close(): the timer cancelled, the read still in the air lands nothing, the fresh one queued behind it never starts, and
+  // nothing is read or scheduled after
   r.account.poll(true);
   const [again] = r.pending();
+  void r.account.load({ fresh: true });
   const before = r.store.get();
   r.account.close();
   assert.deepEqual(r.pending(), []);
   assert.deepEqual(r.cancelled, [timer.handle, again.handle]);
-  release.shift()(page({ totalUsd: 1 }));
+  release.shift()(noPaper({ totalUsd: 1 }));
   await settle();
   assert.equal(r.store.get(), before, 'a read landing after close() dispatches nothing');
   r.account.poll(true);
