@@ -34,7 +34,7 @@ export function emptyState() {
       search: { query: '', status: 'idle', assets: [], partial: false }, hitQuotes: {}, bars: {},
     },
     // the Account (host/account.js): its page with the sentence of its last refusal, its other reads, the history curve's
-    // range, and the Statement drawer
+    // range, the Statement drawer, and the venue whose Details drawer is open (its id)
     account: {
       status: 'idle', data: null, at: null, message: null,
       holdings: { status: 'idle', data: null, at: null },
@@ -43,6 +43,7 @@ export function emptyState() {
       statement: { status: 'idle', data: null, at: null },
       agents: { status: 'idle', data: null, at: null },
       statementOpen: false,
+      detailsVenue: null,
     },
     // the Account seat's standing (host/seat.js): /data/seat.json as read
     seat: { status: 'idle', data: null, at: null },

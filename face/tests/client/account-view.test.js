@@ -1,13 +1,13 @@
 // The Account screen's pure views (spec 2026-10-22 §6.2) over the Account's own payloads as the face proxies them — the page
 // (/data/account), holdings?cost=1 and its paper lens, history, statement and agents, read from the stand-in's fixtures
 // (tests/fixtures/account/) — and the seat box's words over /data/seat.json (spec 2026-10-20 §6.3). And, until their last
-// callers go, the Alpaca-shaped views (spec 2026-10-19 §7 Stage 2): /data/account.json's payload — Alpaca's own decimal
-// strings — as the portfolio, the orders by bucket, the statement and its CSV, and the venue's facts.
+// caller goes, the Alpaca-shaped views (spec 2026-10-19 §7 Stage 2): /data/account.json's payload — Alpaca's own decimal
+// strings — as the portfolio, the orders by bucket, and the statement.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  portfolioOf, orderLine, statementOf, csvOf, venueOf, seatWords,
+  portfolioOf, statementOf, seatWords,
   pageOk, headOf, worthOf, changeOf, assetsOf, positionsOf, openOrdersOf, missingWords, statementLinesOf, statementCsvOf,
   venuesOf, agentsOf, cardsOf, asksOf, requestsOf,
 } from '../../client/js/host/account-view.js';
@@ -92,37 +92,12 @@ test('the keyless payload is unavailable with its reason; unparseable amounts ar
   assert.equal(portfolioOf({ ok: false, error: 'GET /v2/orders -> HTTP 401' }).available, false);
 });
 
-test('orderLine reads like the order', () => {
-  const o = keyed().orders;
-  assert.equal(orderLine(o[0]), 'Buy 2 AAPL · limit 150 · 0 of 2 filled');
-  assert.equal(orderLine(o[1]), 'Buy 3 AAPL · market · 3 of 3 filled');
-  assert.equal(orderLine(o[2]), 'Sell 1 MSFT · market · 0 of 1 filled');
-  assert.equal(orderLine(o[4]), 'Buy $500 NVDA · market · 2.5 filled');
-  assert.equal(orderLine({ side: 'sell', qty: '1', filled_qty: '0', symbol: 'TSLA', type: 'trailing_stop' }), 'Sell 1 TSLA · trailing stop · 0 of 1 filled');
-});
-
-test('statement rows are the filled orders, newest first, and csvOf quotes commas and quotes', () => {
+test('statement rows are the filled orders, newest first', () => {
   const rows = statementOf(keyed());
   assert.deepEqual(rows.map(r => r.symbol), ['NVDA', 'AAPL']);
   assert.deepEqual(rows[1], { at: '2026-10-18T14:00:05Z', side: 'buy', qty: 3, symbol: 'AAPL', price: 189.5, amount: 568.5 });
   assert.equal(rows[0].qty, 2.5); assert.equal(rows[0].amount, 500);
-  assert.equal(csvOf([{ at: '2026-10-18T14:00:05Z', side: 'buy', qty: 3, symbol: 'BRK,B "x"', price: 189.5, amount: 568.5 }]),
-    'date,side,qty,symbol,price,amount\r\n2026-10-18T14:00:05Z,buy,3,"BRK,B ""x""",189.5,568.5\r\n');
-  assert.equal(csvOf([]), 'date,side,qty,symbol,price,amount\r\n');
-  assert.equal(csvOf([{ at: null, side: 'buy', qty: null, symbol: 'X', price: null, amount: null }]), 'date,side,qty,symbol,price,amount\r\n,buy,,X,,\r\n');
   assert.deepEqual(statementOf({ ok: true, available: false }), []);
-});
-
-test('venueOf: keys and order tools, each unknown until read', () => {
-  assert.deepEqual(venueOf(keyed(), null, null), { host: 'paper-api.alpaca.markets', mode: 'Paper', keys: 'unknown', orders: 'unknown' });
-  const creds = { APCA_API_KEY_ID: { configured: true, source: 'env', writable: false }, APCA_API_SECRET_KEY: { configured: true, source: 'env', writable: false } };
-  assert.equal(venueOf(keyed(), creds, []).keys, 'env');
-  assert.equal(venueOf(keyed(), { ...creds, APCA_API_SECRET_KEY: { configured: false, writable: true } }, []).keys, 'none');
-  assert.equal(venueOf(keyed(), { APCA_API_KEY_ID: { configured: true, source: 'file' }, APCA_API_SECRET_KEY: { configured: true, source: 'file' } }, []).keys, 'file');
-  assert.equal(venueOf(keyed(), creds, ['mcp__alpaca-kit__account', 'mcp__alpaca-kit__place_order']).orders, 'on');
-  assert.equal(venueOf(keyed(), creds, ['mcp__alpaca-kit__account', 'mcp__alpaca-kit__orders']).orders, 'off');
-  assert.equal(venueOf({ ...keyed(), host: 'api.alpaca.markets' }, creds, []).mode, 'Live');
-  assert.deepEqual(venueOf({ ok: true, available: false }, null, null), { host: null, mode: '', keys: 'unknown', orders: 'unknown' });
 });
 
 test('the statement keeps every fill: a partly filled order canceled later, or still working, is on it; an unfilled one is not', () => {

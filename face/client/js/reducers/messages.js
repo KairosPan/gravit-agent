@@ -7,7 +7,7 @@ import { ARCHIVED_KEY } from '../wire/grouping.js';
 // one drawer at a time: an opener first closes whatever else was open, with any editor or confirm in it
 export const closeOverlays = s => ({
   ...s, detailsOpen: false, settingsOpen: false, edit: null, confirm: null,
-  account: { ...s.account, statementOpen: false },
+  account: { ...s.account, statementOpen: false, detailsVenue: null },
 });
 const upd = (state, id, fn) => ({ ...state, conversations: state.conversations.map(c => (c.id === id ? fn(c) : c)) });
 
@@ -25,8 +25,8 @@ export const reducers = {
     let s = { ...state, route, detailsOpen: false, settingsOpen: false, edit: null, confirm: null };
     // the first level's Messages key returns to the conversation you last had open
     if (route.screen === 'messages' && route.id && route.id !== 'new') s.lastConv = route.id;
-    // the Statement belongs to Account
-    if (route.screen !== 'account' && s.account.statementOpen) s.account = { ...s.account, statementOpen: false };
+    // the Statement and a venue's Details belong to Account
+    if (route.screen !== 'account' && (s.account.statementOpen || s.account.detailsVenue)) s.account = { ...s.account, statementOpen: false, detailsVenue: null };
     // a plugin page goes back to the Discover view it was opened from; opened from outside Discover, to Discover itself
     if (route.screen === 'discover') s.lastDiscover = route;
     else if (route.screen === 'plugin' && state.route.screen !== 'discover' && state.route.screen !== 'plugin') s.lastDiscover = { screen: 'discover', id: null };

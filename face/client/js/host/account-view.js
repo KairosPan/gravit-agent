@@ -1,15 +1,15 @@
 // face/client/js/host/account-view.js — the Account screen's pure views (spec 2026-10-22 §6.2) over the Account's own payloads
 // as the face proxies them — the page (/data/account), holdings?cost=1 and its paper lens, history, statement and agents — each
 // taking the route's body as the store keeps it and answering its empty shape for a body it does not recognise; the seat box's
-// words over /data/seat.json (spec 2026-10-20 §6.3); and, until their last callers go, the Alpaca-shaped views over
+// words over /data/seat.json (spec 2026-10-20 §6.3); and, until their last caller goes, the Alpaca-shaped views over
 // /data/account.json (spec 2026-10-19 §7 Stage 2). An amount that does not parse is null, never NaN and never 0; a time stays
 // the Account's ISO string, its words the renderer's. No DOM.
 import { number, orderMatches } from '../wire/account-model.js';
 import { fmtDate } from '../time.js';
 import { positionId } from './market-view.js';
 
-// ── The Alpaca-shaped views: Alpaca's own decimal strings become the portfolio, the orders by bucket, the statement and its
-// CSV, and the venue's facts. Kept for render/rail.js, render/markets.js, render/account.js and app.js until they move. ──
+// ── The Alpaca-shaped views: Alpaca's own decimal strings become the portfolio and its orders by bucket, and the
+// statement. Kept for render/markets.js until its market page moves to the Account. ──
 
 const CLASSES = { us_equity: ['equity', 'Stocks'], crypto: ['crypto', 'Crypto'] };
 const OTHER = ['stable', 'Other'];
@@ -69,25 +69,6 @@ export function portfolioOf(data) {
   };
 }
 
-const amount = value => { const n = number(value); return n === null ? null : String(n); };
-const capital = s => (typeof s === 'string' && s ? s[0].toUpperCase() + s.slice(1) : '');
-
-/** One order in a line: `Buy 2 AAPL · limit 150 · 0 of 2 filled`; a notional order reads `Buy $500 AAPL · market`. */
-export function orderLine(order) {
-  const symbol = typeof order?.symbol === 'string' ? order.symbol : '';
-  const type = typeof order?.type === 'string' ? order.type.replace(/_/g, ' ') : '';
-  const limit = (order?.type === 'limit' || order?.type === 'stop_limit') ? amount(order.limit_price) : null;
-  const qty = amount(order?.qty);
-  const filled = amount(order?.filled_qty);
-  const notional = qty === null ? amount(order?.notional) : null;
-  const size = notional !== null ? `$${notional}` : (qty ?? '');
-  const parts = [[capital(order?.side), size, symbol].filter(Boolean).join(' ')];
-  if (type) parts.push(limit !== null ? `${type} ${limit}` : type);
-  if (qty !== null) parts.push(`${filled ?? 0} of ${qty} filled`);
-  else if (filled !== null && Number(filled) > 0) parts.push(`${filled} filled`);
-  return parts.join(' · ');
-}
-
 const time = at => { const t = Date.parse(at); return Number.isNaN(t) ? -Infinity : t; };
 
 /** The statement: every order with a fill — filled, partly filled and still working, or partly filled and then
@@ -109,34 +90,6 @@ export function statementOf(data) {
       };
     })
     .sort((a, b) => time(b.at) - time(a.at));
-}
-
-// one CSV field, RFC 4180 (csvOf's and statementCsvOf's: it stays when csvOf goes)
-function field(value) {
-  if (value === null || value === undefined) return '';
-  const text = String(value);
-  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-}
-
-/** The statement as RFC 4180 CSV, CRLF line ends. */
-export function csvOf(rows) {
-  const lines = ['date,side,qty,symbol,price,amount'];
-  for (const row of rows ?? []) lines.push([row.at, row.side, row.qty, row.symbol, row.price, row.amount].map(field).join(','));
-  return lines.map(line => `${line}\r\n`).join('');
-}
-
-/** The Venues tab's facts: the host and its mode, where the keys come from, whether order tools are registered. */
-export function venueOf(data, creds, toolNames) {
-  const host = data?.ok && data.available && typeof data.host === 'string' ? data.host : null;
-  const mode = host === null ? '' : /^paper-api\./.test(host) ? 'Paper' : 'Live';
-  let keys = 'unknown';
-  if (creds && typeof creds === 'object') {
-    const id = creds.APCA_API_KEY_ID;
-    const secret = creds.APCA_API_SECRET_KEY;
-    keys = id?.configured && secret?.configured ? (typeof id.source === 'string' && id.source ? id.source : 'unknown') : 'none';
-  }
-  const orders = Array.isArray(toolNames) ? (toolNames.some(name => typeof name === 'string' && name.endsWith('__place_order')) ? 'on' : 'off') : 'unknown';
-  return { host, mode, keys, orders };
 }
 
 // ── The seat box, and the Account's words it shares with the views below ──
@@ -300,6 +253,13 @@ export function statementLinesOf(statementBody) {
     key: str(l.key), at: str(l.at), type: str(l.type), kind: str(l.kind), description: str(l.description),
     amountUsd: number(l.amountUsd), feeUsd: number(l.feeUsd), status: str(l.status), by: str(l.by), paper: l.paper === true,
   })).sort(newestFirst);
+}
+
+// one CSV field, RFC 4180
+function field(value) {
+  if (value === null || value === undefined) return '';
+  const text = String(value);
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
 // a text cell a spreadsheet would run as a formula — led by =, +, -, @, a tab or a carriage return — is led by an apostrophe;

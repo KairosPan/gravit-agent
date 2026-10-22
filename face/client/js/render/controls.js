@@ -2,8 +2,13 @@
 import { esc, attrs, cls } from '../html.js';
 import { icon } from '../icons.js';
 
+// each item a label, or a [label, value] pair when the action takes a value other than the words: the item whose value is
+// `pressed` is pressed, and each hands its value as data-value
 export function seg(items, pressed, action) {
-  return `<div class="seg">${items.map(it => `<button type="button"${attrs({ class: cls('seg-item', it === pressed && 'pressed'), 'aria-pressed': it === pressed ? 'true' : 'false', 'data-action': action, 'data-value': it })}>${esc(it)}</button>`).join('')}</div>`;
+  return `<div class="seg">${items.map(it => {
+    const [label, value] = Array.isArray(it) ? it : [it, it];
+    return `<button type="button"${attrs({ class: cls('seg-item', value === pressed && 'pressed'), 'aria-pressed': value === pressed ? 'true' : 'false', 'data-action': action, 'data-value': value })}>${esc(label)}</button>`;
+  }).join('')}</div>`;
 }
 
 export function segLinks(items, current) {

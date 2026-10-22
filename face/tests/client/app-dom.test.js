@@ -480,11 +480,12 @@ test('Hand to Gravit opens New message with the words in the composer', async ()
 });
 
 // Account through host: /data/account and the seat, recorded. The page the host takes (pageOk: venues, cards, orders,
-// signers, connectLive) also carries the Alpaca-shaped fields today's renderers draw, until Tasks 8 and 11 rewrite them
+// signers, connectLive) and the Account screen and the rail draw (its totalUsd) also carries the Alpaca-shaped fields the
+// Markets page still draws, until Task 11 rewrites it
 const KEYED = { ok: true, available: true, host: 'paper-api.alpaca.markets', account: { equity: '123346.11', last_equity: '122011.09', cash: '50000', currency: 'USD' },
   positions: [{ symbol: 'AAPL', asset_class: 'us_equity', qty: '5', market_value: '600', change_today: '0.01' }],
   orders: [{ id: 'o2', symbol: 'AAPL', side: 'buy', qty: '3', filled_qty: '3', filled_avg_price: '189.5', type: 'market', status: 'filled', submitted_at: '2026-10-18T14:00:00Z', filled_at: '2026-10-18T14:00:05Z' }],
-  generated_at: '2026-10-19T14:00:00Z',
+  generated_at: '2026-10-19T14:00:00Z', totalUsd: 123346.11,
   venues: [], cards: [], signers: { owners: [], threshold: 1, pendingDevices: [] }, connectLive: { writes: { on: false } } };
 const isPage = path => path.split('?')[0] === '/data/account';
 function accountHost(opts = {}) {
@@ -545,14 +546,17 @@ test('Export CSV hands the browser a blob with the statement and revokes it', as
   const h = accountHost({ rows: [row('s1')] });
   const store = bootAccount(f, h);
   await h.ready();
+  // the Account's statement as its read lands it (the screen's reads of it are wired with the stream)
+  store.dispatch('statementLoaded', { data: { ok: true, lines: [{ key: 'order:o2', at: '2026-10-18T14:00:05Z', type: 'trade', kind: 'buy', description: 'Buy 3 AAPL · market · at 189.5', amountUsd: -568.5, status: 'filled', by: 'You' }] }, at: 1 });
   f.click({ tagName: 'BUTTON', dataset: { action: 'openStatement' } });
   await settle();
   assert.match(f.html(), /aria-label="Statement"/);
+  assert.match(f.html(), /Buy 3 AAPL · market · at 189\.5/);
   f.click({ tagName: 'BUTTON', dataset: { action: 'exportStatement' } });
   await settle();
   assert.equal(blobs.length, 1);
   assert.equal(blobs[0].type, 'text/csv');
-  assert.equal(blobs[0].parts.join(''), 'date,side,qty,symbol,price,amount\r\n2026-10-18T14:00:05Z,buy,3,AAPL,189.5,568.5\r\n');
+  assert.equal(blobs[0].parts.join(''), 'date,type,kind,description,amount,fee,status,by\r\n2026-10-18T14:00:05Z,trade,buy,Buy 3 AAPL · market · at 189.5,-568.5,,filled,You\r\n');
   assert.equal(anchors.at(-1).download, 'statement.csv');
   assert.equal(anchors.at(-1).href, 'blob:fake');
   assert.equal(anchors.at(-1).clicks, 1);

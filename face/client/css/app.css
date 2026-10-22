@@ -17,7 +17,6 @@ h1, h2 { margin: 0; font-weight: 700; letter-spacing: -0.01em; }
 .link { color: var(--alloc-equity); font-size: 13px; font-weight: 600; }
 button.link { border: 0; background: none; padding: 0; min-height: 32px; cursor: pointer; }
 button.link:disabled { color: var(--dim); cursor: default; }
-.ticker { display: inline-flex; align-items: center; gap: 2px; color: var(--alloc-equity); font-weight: 700; }
 
 /* ---- the app frame: the first level, the second level on Messages, the main column ---- */
 :root { --nav: 220px; --nav-mini: 68px; --list: 300px; }
@@ -380,14 +379,21 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .cardbox { display: flex; flex-direction: column; gap: 12px; background: var(--surface); border: 1px solid var(--card-border); border-radius: var(--radius-m); padding: 18px 20px; box-shadow: var(--shadow-card); min-width: 0; }
 .cardbox-title { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
 .networth { font-size: 52px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.05; font-variant-numeric: tabular-nums; }
+/* the Portfolio's two figures side by side, the second the smaller */
+.acct-figures { display: flex; align-items: flex-end; gap: 12px 28px; flex-wrap: wrap; }
+.acct-second { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .delta { display: flex; align-items: center; gap: 8px; font-size: 13px; }
-.alloc-bar { display: flex; height: 8px; border-radius: var(--radius-pill); overflow: hidden; }
-.alloc-seg { display: block; }
-.alloc-cash { background: var(--alloc-cash); } .alloc-stable { background: var(--alloc-stable); } .alloc-crypto { background: var(--alloc-crypto); } .alloc-equity { background: var(--alloc-equity); }
-.alloc-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--dim); }
-.holdings { display: flex; flex-direction: column; border-top: 1px solid var(--border); }
-.holding > .up, .holding > .down { font-weight: 400; }
-.holding { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+/* Assets and Positions: an asset (or a position) and its lines, then the figures; a narrow box scrolls the table, not the page */
+.acct-wrap { overflow-x: auto; min-width: 0; }
+.acct-t { width: 100%; border-collapse: collapse; font-size: 14px; }
+.acct-t th { text-align: left; font-weight: 600; font-size: 12px; color: var(--dim); padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.acct-t td { text-align: left; padding: 10px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; vertical-align: top; }
+.acct-t tr:last-child td { border-bottom: 0; }
+.acct-t .r { text-align: right; white-space: nowrap; }
+.acct-t .up, .acct-t .down { font-weight: 400; }
+/* a card's What it asks: every field the owner signs, folded under the card */
+.acct-shown { margin-top: 6px; }
+.acct-shown > summary { color: var(--dim); cursor: pointer; font-size: 13px; font-weight: 600; }
 .venues { display: flex; flex-direction: column; gap: 10px; }
 .venue { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-s); }
 /* the face's own words where the numbers would be: keyless, unavailable, loading, stale, no orders */

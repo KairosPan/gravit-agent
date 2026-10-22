@@ -5,7 +5,7 @@ import { icon } from '../icons.js';
 import { rowTime } from '../time.js';
 import { needsAnswer } from '../messages.js';
 import { unreadOf, firstOpen } from '../host/sessions.js';
-import { portfolioOf } from '../host/account-view.js';
+import { worthOf } from '../host/account-view.js';
 import { money } from '../wire/account-model.js';
 import { avatar, groupMark } from './avatars.js';
 import { groupsOf } from '../host/list-view.js';
@@ -55,11 +55,13 @@ function navItem(href, name, label, current, mini, badge = 0) {
     `<span class="nav-label">${esc(label)}</span>${badge ? `<span class="nav-badge">${badge}</span>` : ''}</a>`;
 }
 
-// the first level: Messages (its badge counts the conversations with a card waiting on you), Markets, Account with the
-// net worth once the account has answered, and the collapse key; it collapses to a strip of icons
+// the first level: Messages (its badge counts the conversations with a card waiting on you), Markets, Account with its
+// leading figure once the Account's page has answered — the paper book's, named so, when it leads — and the collapse key;
+// it collapses to a strip of icons
 function worthLine(state) {
-  const p = portfolioOf(state.account?.data);
-  return p.available && p.netWorth !== null ? `<span class="account-line">${esc(money(p.netWorth, p.currency))}</span>` : '';
+  const a = state.account;
+  const { lead, paperLeads } = worthOf(a?.data, a?.holdings?.data, a?.paper?.data);
+  return lead.usd === null ? '' : `<span class="account-line">${esc(money(lead.usd))}${paperLeads ? ' · Paper' : ''}</span>`;
 }
 
 export function renderNav(state) {

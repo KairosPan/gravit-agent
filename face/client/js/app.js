@@ -25,7 +25,7 @@ import { itemById } from './host/discover-view.js';
 import { startTraces } from './host/traces.js';
 import { loadMemberTrace } from './wire/member-traces.js';
 import { isHostPreset } from './wire/speaker.js';
-import { statementOf, csvOf } from './host/account-view.js';
+import { statementLinesOf, statementCsvOf } from './host/account-view.js';
 import { canonicalId, assetFor } from './host/market-view.js';
 import { createLiveQuotes } from './wire/market-quotes.js';
 import { firstOpen } from './host/sessions.js';
@@ -506,7 +506,7 @@ export function boot(win, host = {}) {
     },
     closeStatement: () => store.dispatch('closeStatement'),
     exportStatement: () => {
-      const csv = csvOf(statementOf(store.get().account.data));
+      const csv = statementCsvOf(statementLinesOf(store.get().account.statement.data));
       const url = win.URL.createObjectURL(new win.Blob([csv], { type: 'text/csv' }));
       const a = doc.createElement('a');
       a.href = url;

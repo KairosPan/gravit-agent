@@ -2,6 +2,7 @@
 // as links to the old pages, no Discover, Trade, phone or mail in stage 1; rows from the conversations the list gave.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { avatar, cluster, groupMark } from '../../client/js/render/avatars.js';
 import { renderRail, renderNav, renderList, previewOf, senderName } from '../../client/js/render/rail.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
@@ -10,6 +11,8 @@ import { MIN } from '../../client/js/time.js';
 
 const NOW = new Date(2026, 9, 19, 14, 7).getTime();
 const count = (h, re) => (h.match(re) ?? []).length;
+// the stand-in Account's answers (tests/fixtures/account/), parsed afresh for every call
+const fx = name => JSON.parse(readFileSync(new URL(`../fixtures/account/${name}.json`, import.meta.url), 'utf8'));
 const conv = (id, over = {}) => ({ id, title: 'T ' + id, kind: 'gravit', members: ['gravit'], memberSessions: [], channel: null, preset: 'gravit', running: false, live: false, updatedAt: NOW - 5 * MIN, created: null, messages: [], loaded: false, preview: null, usage: null, thinking: null, lastSeen: 0, ...over });
 const gate = { id: 'ev-1', seq: 1.5, at: NOW, from: 'gravit', kind: 'card', text: 'Your call', data: { eventId: 'ev-1', sessionId: 'a' } };
 const bots = [{ id: 'buffett', name: 'Buffett Type' }];
@@ -122,11 +125,26 @@ test('Account links #/account/portfolio, is current on Account, and carries the 
   const on = R.nav(listed([conv('a')]), { screen: 'account', tab: 'venues' });
   assert.match(renderNav(on), /class="account current" aria-current="page" href="#\/account\/portfolio"/);
   assert.doesNotMatch(renderNav(on), /account-line/, 'no number before the account answers');
-  const read = R.accountLoaded(on, { data: { ok: true, available: true, host: 'paper-api.alpaca.markets', account: { equity: '123346.11', currency: 'USD' }, positions: [], orders: [] }, at: NOW });
-  assert.match(renderNav(read), /<span class="account-title">Account<\/span><span class="account-line">\$123,346\.11<\/span>/);
-  const keyless = R.accountLoaded(on, { data: { ok: true, available: false, reason: 'no APCA keys in the environment' }, at: NOW });
-  assert.doesNotMatch(renderNav(keyless), /account-line/);
+  const read = R.accountLoaded(on, { data: fx('account'), at: NOW });
+  assert.match(renderNav(read), /<span class="account-title">Account<\/span><span class="account-line">\$29,138\.10<\/span>/);
+  const unrecognised = R.accountLoaded(on, { data: { ok: true, available: false, reason: 'no APCA keys in the environment' }, at: NOW });
+  assert.doesNotMatch(renderNav(unrecognised), /account-line/);
   assert.doesNotMatch(renderNav(R.nav(read, { screen: 'markets', id: null })), /class="account current"/);
+});
+
+test('rail: the worth line is the lead figure with Paper when paper leads', () => {
+  const on = R.nav(listed([conv('a')]), { screen: 'markets', id: null });
+  const page = fx('account');
+  // real money leads while there is any: the page's total, the paper book beside it on the screen, not here
+  const real = R.paperLoaded(R.accountLoaded(on, { data: page, at: NOW }), { data: fx('holdings-paper'), at: NOW });
+  assert.match(renderNav(real), /<span class="account-line">\$29,138\.10<\/span>/);
+  // no real money and a paper book with money in it: the paper total, named so
+  const paper = R.paperLoaded(R.accountLoaded(on, { data: { ...page, totalUsd: 0 }, at: NOW }), { data: fx('holdings-paper'), at: NOW });
+  assert.match(renderNav(paper), /<span class="account-title">Account<\/span><span class="account-line">\$25,400\.00 · Paper<\/span>/);
+  // a total on a body that is not the page is never drawn
+  assert.doesNotMatch(renderNav(R.accountLoaded(on, { data: { ok: true, totalUsd: 5 }, at: NOW })), /account-line/);
+  // a refusal after a good read keeps the last figure, as the screen does
+  assert.match(renderNav(R.accountFailed(paper, { at: NOW, message: 'locked' })), /\$25,400\.00 · Paper/);
 });
 
 test('the Messages key never points at an archived conversation', () => {

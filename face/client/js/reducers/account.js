@@ -1,5 +1,5 @@
 // face/client/js/reducers/account.js — Account on the face: what host/account.js and host/seat.js bring in, the Statement
-// drawer, the Settings drawer
+// drawer, a venue's Details drawer, the Settings drawer
 import { closeOverlays } from './messages.js';
 
 const acc = (s, patch) => ({ ...s, account: { ...s.account, ...patch } });
@@ -41,6 +41,13 @@ export const reducers = {
   // the Statement is a drawer: one at a time, as Settings and Details are
   openStatement: s => { const c = closeOverlays(s); return { ...c, account: { ...c.account, statementOpen: true } }; },
   closeStatement: s => (s.account.statementOpen ? acc(s, { statementOpen: false }) : s),
+  // a venue's Details (the Venues tab) is a drawer too, naming its venue by id; one the page does not list draws nothing
+  openVenueDetails: (s, id) => {
+    if (typeof id !== 'string' || id === '') return s;
+    const c = closeOverlays(s);
+    return { ...c, account: { ...c.account, detailsVenue: id } };
+  },
+  closeVenueDetails: s => (s.account.detailsVenue ? acc(s, { detailsVenue: null }) : s),
 
   openSettings: s => ({ ...closeOverlays(s), settingsOpen: true }),
   closeSettings: s => ({ ...s, settingsOpen: false, edit: null, confirm: null }),
