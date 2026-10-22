@@ -1,0 +1,1572 @@
+{
+  "ok": true,
+  "asOf": "2026-10-22T07:19:22.571Z",
+  "tabs": [
+    {
+      "id": "all",
+      "label": "All",
+      "count": 30
+    },
+    {
+      "id": "crypto",
+      "label": "Crypto",
+      "count": 6
+    },
+    {
+      "id": "stocks",
+      "label": "Stocks",
+      "count": 4
+    },
+    {
+      "id": "rwas",
+      "label": "RWAs",
+      "count": 4
+    },
+    {
+      "id": "perps",
+      "label": "Perps",
+      "count": 6
+    },
+    {
+      "id": "preipo",
+      "label": "Pre-IPO",
+      "count": 1
+    },
+    {
+      "id": "predictions",
+      "label": "Predictions",
+      "count": 9
+    }
+  ],
+  "items": [
+    {
+      "key": "event:predict:SI-FEDCUT-DEC",
+      "kind": "event",
+      "name": "Will the Fed cut rates at its December meeting?",
+      "price": 0.62,
+      "change24h": 0.04,
+      "changeFrom": {
+        "venue": "predict",
+        "venueName": "Stand-in Predictions"
+      },
+      "volumeUsd24h": 1840000,
+      "category": "Economics",
+      "closeTime": "2026-10-31T10:19:22.447Z",
+      "outcomes": [
+        {
+          "label": "Yes",
+          "at": [
+            {
+              "venue": "predict",
+              "symbol": "SI-FEDCUT-DEC:YES"
+            }
+          ],
+          "price": 0.62,
+          "bid": 0.61,
+          "ask": 0.63,
+          "change24h": 0.04
+        },
+        {
+          "label": "No",
+          "at": [
+            {
+              "venue": "predict",
+              "symbol": "SI-FEDCUT-DEC:NO"
+            }
+          ],
+          "price": 0.38,
+          "bid": 0.37,
+          "ask": 0.39,
+          "change24h": -0.04
+        }
+      ],
+      "tabs": [
+        "all",
+        "predictions"
+      ],
+      "at": [
+        {
+          "venue": "predict",
+          "venueName": "Stand-in Predictions",
+          "symbol": "SI-FEDCUT-DEC:YES",
+          "connected": true,
+          "canTrade": true,
+          "public": false,
+          "price": 0.62,
+          "bid": 0.61,
+          "ask": 0.63,
+          "open": true
+        }
+      ]
+    },
+    {
+      "key": "event:paper-momentum:SX-JOBS-NEXT",
+      "kind": "event",
+      "name": "Will the unemployment rate be 4.5% or higher in the next jobs report?",
+      "price": 0.27,
+      "change24h": 0.02,
+      "changeFrom": {
+        "venue": "paper-momentum",
+        "venueName": "Momentum · paper"
+      },
+      "volumeUsd24h": 530000,
+      "category": "Economics",
+      "closeTime": "2026-10-28T09:19:22.447Z",
+      "outcomes": [
+        {
+          "label": "Yes",
+          "at": [
+            {
+              "venue": "paper-momentum",
+              "symbol": "SX-JOBS-NEXT:YES"
+            }
+          ],
+          "price": 0.27,
+          "bid": 0.26,
+          "ask": 0.28,
+          "change24h": 0.02
+        },
+        {
+          "label": "No",
+          "at": [
+            {
+              "venue": "paper-momentum",
+              "symbol": "SX-JOBS-NEXT:NO"
+            }
+          ],
+          "price": 0.73,
+          "bid": 0.72,
+          "ask": 0.74,
+          "change24h": -0.02
+        }
+      ],
+      "tabs": [
+        "all",
+        "predictions"
+      ],
+      "at": [
+        {
+          "venue": "paper-momentum",
+          "venueName": "Momentum · paper",
+          "symbol": "SX-JOBS-NEXT:YES",
+          "connected": true,
+          "paper": true,
+          "canTrade": true,
+          "public": false,
+          "price": 0.27,
+          "bid": 0.26,
+          "ask": 0.28,
+          "quoteFrom": "Stand-in Event Exchange",
+          "open": true
+        }
+      ]
+    },
+    {
+      "key": "event:standin-pubevents-public:SX-JOBS-NEXT",
+      "kind": "event",
+      "name": "Will the unemployment rate be 4.5% or higher in the next jobs report?",
+      "price": 0.27,
+      "change24h": 0.02,
+      "changeFrom": {
+        "venue": "standin-pubevents-public",
+        "venueName": "Stand-in Event Exchange"
+      },
+      "volumeUsd24h": 530000,
+      "category": "Economics",
+      "closeTime": "2026-10-28T09:19:22.447Z",
+      "event": {
+        "id": "SX-JOBS-NEXT",
+        "title": "Unemployment in the next jobs report?",
+        "market": "4.5% or higher"
+      },
+      "outcomes": [
+        {
+          "label": "Yes",
+          "at": [
+            {
+              "venue": "standin-pubevents-public",
+              "symbol": "SX-JOBS-NEXT:YES"
+            }
+          ],
+          "price": 0.27,
+          "bid": 0.26,
+          "ask": 0.28,
+          "change24h": 0.02
+        },
+        {
+          "label": "No",
+          "at": [
+            {
+              "venue": "standin-pubevents-public",
+              "symbol": "SX-JOBS-NEXT:NO"
+            }
+          ],
+          "price": 0.73,
+          "bid": 0.72,
+          "ask": 0.74,
+          "change24h": -0.02
+        }
+      ],
+      "tabs": [
+        "all",
+        "predictions"
+      ],
+      "at": [
+        {
+          "venue": "standin-pubevents-public",
+          "venueName": "Stand-in Event Exchange",
+          "symbol": "SX-JOBS-NEXT:YES",
+          "connected": false,
+          "canTrade": false,
+          "public": true,
+          "price": 0.27,
+          "bid": 0.26,
+          "ask": 0.28,
+          "open": true,
+          "connectTo": "standin-pubevents",
+          "connector": "live:standin-pubevents"
+        }
+      ]
+    },
+    {
+      "key": "event:predict:SI-CPI-NEXT",
+      "kind": "event",
+      "name": "Will US inflation come in above 3.0% in the next CPI report?",
+      "price": 0.41,
+      "change24h": -0.03,
+      "changeFrom": {
+        "venue": "predict",
+        "venueName": "Stand-in Predictions"
+      },
+      "volumeUsd24h": 620000,
+      "category": "Economics",
+      "closeTime": "2026-10-24T12:19:22.447Z",
+      "outcomes": [
+        {
+          "label": "Yes",
+          "at": [
+            {
+              "venue": "predict",
+              "symbol": "SI-CPI-NEXT:YES"
+            }
+          ],
+          "price": 0.41,
+          "bid": 0.4,
+          "ask": 0.42,
+          "change24h": -0.03
+        },
+        {
+          "label": "No",
+          "at": [
+            {
+              "venue": "predict",
+              "symbol": "SI-CPI-NEXT:NO"
+            }
+          ],
+          "price": 0.59,
+          "bid": 0.58,
+          "ask": 0.6,
+          "change24h": 0.03
+        }
+      ],
+      "tabs": [
+        "all",
+        "predictions"
+      ],
+      "at": [
+        {
+          "venue": "predict",
+          "venueName": "Stand-in Predictions",
+          "symbol": "SI-CPI-NEXT:YES",
+          "connected": true,
+          "canTrade": true,
+          "public": false,
+          "price": 0.41,
+          "bid": 0.4,
+          "ask": 0.42,
+          "open": true
+        }
+      ]
+    },
+    {
+      "key": "event:paper-momentum:SX-YIELD-FRI",
+      "kind": "event",
+      "name": "Will the 10-year Treasury yield close above 4.25% on Friday?",
+      "price": 0.47,
+      "change24h": 0.03,
+      "changeFrom": {
+        "venue": "paper-momentum",
+        "venueName": "Momentum · paper"
+      },
+      "volumeUsd24h": 380000,
+      "category": "Financials",
+      "closeTime": "2026-10-24T09:19:22.447Z",
+      "outcomes": [
+        {
+          "label": "Yes",
+          "at": [
+            {
+              "venue": "paper-momentum",
+              "symbol": "SX-YIELD-FRI:YES"
+            }
+          ],
+          "price": 0.47,
+          "bid": 0.46,
+          "ask": 0.48,
+          "change24h": 0.03
+        },
+        {
+          "label": "No",
+          "at": [
+            {
+              "venue": "paper-momentum",
+              "symbol": "SX-YIELD-FRI:NO"
+            }
+          ],
+          "price": 0.53,
+          "bid": 0.52,
+          "ask": 0.54,
+          "change24h": -0.03
+        }
+      ],
+      "tabs": [
+        "all",
+        "predictions"
+      ],
+      "at": [
+        {
+          "venue": "paper-momentum",
+          "venueName": "Momentum · paper",
+          "symbol": "SX-YIELD-FRI:YES",
+          "connected": true,
+          "paper": true,
+          "canTrade": true,
+          "public": false,
+          "price": 0.47,
+          "bid": 0.46,
+          "ask": 0.48,
+          "quoteFrom": "Stand-in Event Exchange",
+          "open": true
+        }
+      ]
+    },
+    {
+      "key": "event:standin-pubevents-public:SX-YIELD-FRI",
+      "kind": "event",
+      "name": "Will the 10-year Treasury yield close above 4.25% on Friday?",
+      "price": 0.47,
+      "change24h": 0.03,
+      "changeFrom": {
+        "venue": "standin-pubevents-public",
+        "venueName": "Stand-in Event Exchange"
+      },
+      "volumeUsd24h": 380000,
+      "category": "Financials",
+      "closeTime": "2026-10-24T09:19:22.447Z",
+      "event": {
+        "id": "SX-YIELD-FRI",
+        "title": "10-year Treasury yield on Friday?",
+        "market": "Above 4.25%"
+      },
+      "outcomes": [
+        {
+          "label": "Yes",
+          "at": [
+            {
+              "venue": "standin-pubevents-public",
+              "symbol": "SX-YIELD-FRI:YES"
+            }
+          ],
+          "price": 0.47,
+          "bid": 0.46,
+          "ask": 0.48,
+          "change24h": 0.03
+        },
+        {
+          "label": "No",
+          "at": [
+            {
+              "venue": "standin-pubevents-public",
+              "symbol": "SX-YIELD-FRI:NO"
+            }
+          ],
+          "price": 0.53,
+          "bid": 0.52,
+          "ask": 0.54,
+          "change24h": -0.03
+        }
+      ],
+      "tabs": [
+        "all",
+        "predictions"
+      ],
+      "at": [
+        {
+          "venue": "standin-pubevents-public",
+          "venueName": "Stand-in Event Exchange",
+          "symbol": "SX-YIELD-FRI:YES",
+          "connected": false,
+          "canTrade": false,
+          "public": true,
+          "price": 0.47,
+          "bid": 0.46,
+          "ask": 0.48,
+          "open": true,
+          "connectTo": "standin-pubevents",
+          "connector": "live:standin-pubevents"
+        }
+      ]
+    },
+    {
+      "key": "event:predict:SI-ETH-WEEK",
+      "kind": "event",
+      "name": "Will ETH close the week above $2,500?",
+      "price": 0.38,
+      "change24h": 0.06,
+      "changeFrom": {
+        "venue": "predict",
+        "venueName": "Stand-in Predictions"
+      },
+      "volumeUsd24h": 410000,
+      "category": "Crypto",
+      "closeTime": "2026-10-26T14:19:22.447Z",
+      "outcomes": [
+        {
+          "label": "Yes",
+          "at": [
+            {
+              "venue": "predict",
+              "symbol": "SI-ETH-WEEK:YES"
+            }
+          ],
+          "price": 0.38,
+          "bid": 0.37,
+          "ask": 0.39,
+          "change24h": 0.06
+        },
+        {
+          "label": "No",
+          "at": [
+            {
+              "venue": "predict",
+              "symbol": "SI-ETH-WEEK:NO"
+            }
+          ],
+          "price": 0.62,
+          "bid": 0.61,
+          "ask": 0.63,
+          "change24h": -0.06
+        }
+      ],
+      "tabs": [
+        "all",
+        "predictions"
+      ],
+      "at": [
+        {
+          "venue": "predict",
+          "venueName": "Stand-in Predictions",
+          "symbol": "SI-ETH-WEEK:YES",
+          "connected": true,
+          "canTrade": true,
+          "public": false,
+          "price": 0.38,
+          "bid": 0.37,
+          "ask": 0.39,
+          "open": true
+        }
+      ]
+    },
+    {
+      "key": "event:predict:SI-BTC15-2610220715",
+      "kind": "event",
+      "name": "Bitcoin up or down · 3:15 AM–3:30 AM ET",
+      "price": 0.85,
+      "change24h": 0,
+      "changeFrom": {
+        "venue": "predict",
+        "venueName": "Stand-in Predictions"
+      },
+      "volumeUsd24h": 41798,
+      "category": "Crypto",
+      "closeTime": "2026-10-22T07:30:00.000Z",
+      "outcomes": [
+        {
+          "label": "UP",
+          "at": [
+            {
+              "venue": "predict",
+              "symbol": "SI-BTC15-2610220715:UP"
+            }
+          ],
+          "price": 0.85,
+          "bid": 0.84,
+          "ask": 0.86,
+          "change24h": 0
+        },
+        {
+          "label": "DOWN",
+          "at": [
+            {
+              "venue": "predict",
+              "symbol": "SI-BTC15-2610220715:DOWN"
+            }
+          ],
+          "price": 0.15,
+          "bid": 0.14,
+          "ask": 0.16,
+          "change24h": 0
+        }
+      ],
+      "tabs": [
+        "all",
+        "predictions"
+      ],
+      "at": [
+        {
+          "venue": "predict",
+          "venueName": "Stand-in Predictions",
+          "symbol": "SI-BTC15-2610220715:UP",
+          "connected": true,
+          "canTrade": true,
+          "public": false,
+          "price": 0.85,
+          "bid": 0.84,
+          "ask": 0.86,
+          "open": true
+        }
+      ]
+    },
+    {
+      "key": "event:predict:SI-IPO-ANTHROPIC",
+      "kind": "event",
+      "name": "Will Anthropic IPO before January 1, 2027?",
+      "price": 0.64,
+      "change24h": 0.03,
+      "changeFrom": {
+        "venue": "predict",
+        "venueName": "Stand-in Predictions"
+      },
+      "volumeUsd24h": 215000,
+      "category": "IPO",
+      "closeTime": "2027-01-16T12:19:22.447Z",
+      "outcomes": [
+        {
+          "label": "Yes",
+          "at": [
+            {
+              "venue": "predict",
+              "symbol": "SI-IPO-ANTHROPIC:YES"
+            }
+          ],
+          "price": 0.64,
+          "bid": 0.63,
+          "ask": 0.65,
+          "change24h": 0.03
+        },
+        {
+          "label": "No",
+          "at": [
+            {
+              "venue": "predict",
+              "symbol": "SI-IPO-ANTHROPIC:NO"
+            }
+          ],
+          "price": 0.36,
+          "bid": 0.35,
+          "ask": 0.37,
+          "change24h": -0.03
+        }
+      ],
+      "tabs": [
+        "all",
+        "predictions"
+      ],
+      "at": [
+        {
+          "venue": "predict",
+          "venueName": "Stand-in Predictions",
+          "symbol": "SI-IPO-ANTHROPIC:YES",
+          "connected": true,
+          "canTrade": true,
+          "public": false,
+          "price": 0.64,
+          "bid": 0.63,
+          "ask": 0.65,
+          "open": true
+        }
+      ]
+    }
+  ],
+  "movers": [
+    {
+      "key": "coin:DOGE",
+      "kind": "coin",
+      "name": "DOGE",
+      "base": "DOGE",
+      "price": 0.1214,
+      "changePct24h": 12.4,
+      "change24h": 0.01339,
+      "changeFrom": {
+        "venue": "standin-pubex-public",
+        "venueName": "Stand-in Public Exchange"
+      },
+      "volumeUsd24h": 787716336,
+      "tabs": [
+        "all",
+        "crypto"
+      ],
+      "at": [
+        {
+          "venue": "standin-pubex-public",
+          "venueName": "Stand-in Public Exchange",
+          "symbol": "DOGE/USD",
+          "connected": false,
+          "canTrade": false,
+          "public": true,
+          "price": 0.1214,
+          "bid": 0.12137,
+          "ask": 0.12143,
+          "open": true,
+          "connectTo": "standin-pubex",
+          "connector": "live:standin-pubex"
+        },
+        {
+          "venue": "paper-momentum",
+          "venueName": "Momentum · paper",
+          "symbol": "DOGE/USD",
+          "connected": true,
+          "paper": true,
+          "canTrade": true,
+          "public": false,
+          "price": 0.1214,
+          "bid": 0.12137,
+          "ask": 0.12143,
+          "quoteFrom": "Stand-in Public Exchange",
+          "open": true
+        }
+      ]
+    },
+    {
+      "key": "coin:AVAX",
+      "kind": "coin",
+      "name": "AVAX",
+      "base": "AVAX",
+      "price": 24.37,
+      "changePct24h": -8.2,
+      "change24h": -2.177,
+      "changeFrom": {
+        "venue": "standin-pubex-public",
+        "venueName": "Stand-in Public Exchange"
+      },
+      "volumeUsd24h": 217975522,
+      "tabs": [
+        "all",
+        "crypto"
+      ],
+      "at": [
+        {
+          "venue": "standin-pubex-public",
+          "venueName": "Stand-in Public Exchange",
+          "symbol": "AVAX/USD",
+          "connected": false,
+          "canTrade": false,
+          "public": true,
+          "price": 24.37,
+          "bid": 24.364,
+          "ask": 24.375,
+          "open": true,
+          "connectTo": "standin-pubex",
+          "connector": "live:standin-pubex"
+        },
+        {
+          "venue": "paper-momentum",
+          "venueName": "Momentum · paper",
+          "symbol": "AVAX/USD",
+          "connected": true,
+          "paper": true,
+          "canTrade": true,
+          "public": false,
+          "price": 24.37,
+          "bid": 24.364,
+          "ask": 24.375,
+          "quoteFrom": "Stand-in Public Exchange",
+          "open": true
+        }
+      ]
+    },
+    {
+      "key": "coin:LINK",
+      "kind": "coin",
+      "name": "LINK",
+      "base": "LINK",
+      "price": 13.92,
+      "changePct24h": 4.9,
+      "change24h": 0.65,
+      "changeFrom": {
+        "venue": "standin-pubex-public",
+        "venueName": "Stand-in Public Exchange"
+      },
+      "volumeUsd24h": 338507822,
+      "tabs": [
+        "all",
+        "crypto"
+      ],
+      "at": [
+        {
+          "venue": "standin-pubex-public",
+          "venueName": "Stand-in Public Exchange",
+          "symbol": "LINK/USD",
+          "connected": false,
+          "canTrade": false,
+          "public": true,
+          "price": 13.92,
+          "bid": 13.917,
+          "ask": 13.923,
+          "open": true,
+          "connectTo": "standin-pubex",
+          "connector": "live:standin-pubex"
+        },
+        {
+          "venue": "paper-momentum",
+          "venueName": "Momentum · paper",
+          "symbol": "LINK/USD",
+          "connected": true,
+          "paper": true,
+          "canTrade": true,
+          "public": false,
+          "price": 13.92,
+          "bid": 13.917,
+          "ask": 13.923,
+          "quoteFrom": "Stand-in Public Exchange",
+          "open": true
+        }
+      ]
+    },
+    {
+      "key": "coin:ETH",
+      "kind": "coin",
+      "name": "ETH",
+      "base": "ETH",
+      "price": 2455.6,
+      "changePct24h": 3.8,
+      "change24h": 89.89,
+      "changeFrom": {
+        "venue": "ex",
+        "venueName": "Stand-in Exchange"
+      },
+      "volumeUsd24h": 1186656190,
+      "tabs": [
+        "all",
+        "crypto"
+      ],
+      "at": [
+        {
+          "venue": "ex",
+          "venueName": "Stand-in Exchange",
+          "symbol": "ETH/USDT",
+          "connected": true,
+          "canTrade": true,
+          "public": false,
+          "price": 2455.6,
+          "bid": 2455.45,
+          "ask": 2455.75,
+          "open": true
+        },
+        {
+          "venue": "standin-pubex-public",
+          "venueName": "Stand-in Public Exchange",
+          "symbol": "ETH/USD",
+          "connected": false,
+          "canTrade": false,
+          "public": true,
+          "price": 2455.6,
+          "bid": 2455.35,
+          "ask": 2455.85,
+          "open": true,
+          "connectTo": "standin-pubex",
+          "connector": "live:standin-pubex"
+        },
+        {
+          "venue": "wallet",
+          "venueName": "Stand-in Wallet",
+          "symbol": "WETH/USDC@Base",
+          "connected": true,
+          "canTrade": true,
+          "public": false,
+          "price": 2454.87,
+          "bid": 2451.18,
+          "ask": 2458.55,
+          "open": true
+        },
+        {
+          "venue": "paper-momentum",
+          "venueName": "Momentum · paper",
+          "symbol": "ETH/USD",
+          "connected": true,
+          "paper": true,
+          "canTrade": true,
+          "public": false,
+          "price": 2455.6,
+          "bid": 2455.35,
+          "ask": 2455.85,
+          "quoteFrom": "Stand-in Public Exchange",
+          "open": true
+        }
+      ]
+    },
+    {
+      "key": "rwa:TSLA",
+      "kind": "rwa",
+      "name": "Tesla stock token",
+      "base": "TSLA",
+      "price": 251.3,
+      "changePct24h": -2.7,
+      "changeFrom": {
+        "venue": "standin-stock-tokens",
+        "venueName": "Stand-in Stock Tokens"
+      },
+      "volumeUsd24h": 9100000,
+      "tabs": [
+        "all",
+        "rwas"
+      ],
+      "at": [
+        {
+          "venue": "standin-stock-tokens",
+          "venueName": "Stand-in Stock Tokens",
+          "symbol": "TSLA",
+          "connected": false,
+          "canTrade": false,
+          "public": true,
+          "price": 251.3,
+          "bid": 251.04,
+          "ask": 251.56,
+          "open": true,
+          "connectTo": "standin-stock-tokens",
+          "connector": "live:standin-stock-tokens",
+          "note": "these stock tokens are only read here: no connection on this account trades them"
+        }
+      ]
+    },
+    {
+      "key": "coin:BTC",
+      "kind": "coin",
+      "name": "BTC",
+      "base": "BTC",
+      "price": 62480,
+      "changePct24h": 2.3,
+      "change24h": 1404.9,
+      "changeFrom": {
+        "venue": "ex",
+        "venueName": "Stand-in Exchange"
+      },
+      "volumeUsd24h": 2512605681,
+      "tabs": [
+        "all",
+        "crypto"
+      ],
+      "at": [
+        {
+          "venue": "ex",
+          "venueName": "Stand-in Exchange",
+          "symbol": "BTC/USDT",
+          "connected": true,
+          "canTrade": true,
+          "public": false,
+          "price": 62480,
+          "bid": 62476.8,
+          "ask": 62483.1,
+          "open": true
+        },
+        {
+          "venue": "standin-pubex-public",
+          "venueName": "Stand-in Public Exchange",
+          "symbol": "BTC/USD",
+          "connected": false,
+          "canTrade": false,
+          "public": true,
+          "price": 62480,
+          "bid": 62475.2,
+          "ask": 62484.7,
+          "open": true,
+          "connectTo": "standin-pubex",
+          "connector": "live:standin-pubex"
+        },
+        {
+          "venue": "wallet",
+          "venueName": "Stand-in Wallet",
+          "symbol": "cbBTC/USDC@Base",
+          "connected": true,
+          "canTrade": true,
+          "public": false,
+          "price": 62448.71,
+          "bid": 62355.04,
+          "ask": 62542.39,
+          "open": true
+        },
+        {
+          "venue": "paper-momentum",
+          "venueName": "Momentum · paper",
+          "symbol": "BTC/USD",
+          "connected": true,
+          "paper": true,
+          "canTrade": true,
+          "public": false,
+          "price": 62480,
+          "bid": 62475.2,
+          "ask": 62484.7,
+          "quoteFrom": "Stand-in Public Exchange",
+          "open": true
+        }
+      ]
+    },
+    {
+      "key": "stock:NVDA",
+      "kind": "stock",
+      "name": "NVIDIA Corporation common stock",
+      "base": "NVDA",
+      "price": 182.4,
+      "changePct24h": 1.9,
+      "change24h": 3.4,
+      "changeFrom": {
+        "venue": "broker",
+        "venueName": "Stand-in Broker"
+      },
+      "volumeUsd24h": 31658349604,
+      "session": {
+        "open": false,
+        "opensAt": "2026-10-22T13:30:00.000Z"
+      },
+      "tabs": [
+        "all",
+        "stocks"
+      ],
+      "at": [
+        {
+          "venue": "broker",
+          "venueName": "Stand-in Broker",
+          "symbol": "NVDA",
+          "connected": true,
+          "canTrade": true,
+          "public": false,
+          "price": 182.4,
+          "bid": 182.38,
+          "ask": 182.42,
+          "open": true,
+          "session": {
+            "open": false,
+            "opensAt": "2026-10-22T13:30:00.000Z"
+          },
+          "note": "the US stock market is closed: Stand-in Broker holds an order and sends it when the market opens (2026-10-22 09:30 New York time). Until then no market order is placed here: it would fill at the opening price, which can be well away from this one. A limit, stop or stop-limit order waits for the open with its limit"
+        },
+        {
+          "venue": "standin-stocks-public",
+          "venueName": "Stand-in · 15 min delayed",
+          "symbol": "NVDA",
+          "connected": false,
+          "canTrade": false,
+          "public": true,
+          "price": 182.4,
+          "bid": 182.3,
+          "ask": 182.5,
+          "open": true,
+          "session": {
+            "open": false,
+            "opensAt": "2026-10-22T13:30:00.000Z"
+          },
+          "note": "a stand-in's delayed quotes, 15 minutes behind the market: a US stock trades at the connected broker, or in a paper account"
+        },
+        {
+          "venue": "paper-momentum",
+          "venueName": "Momentum · paper",
+          "symbol": "NVDA",
+          "connected": true,
+          "paper": true,
+          "canTrade": true,
+          "public": false,
+          "price": 182.4,
+          "bid": 182.3,
+          "ask": 182.5,
+          "quoteFrom": "Stand-in · 15 min delayed",
+          "open": true,
+          "session": {
+            "open": false,
+            "opensAt": "2026-10-22T13:30:00.000Z"
+          },
+          "note": "the US stock market is closed; the quote is from the close (a stand-in) · the regular session is not on now: a market order waits for it (queued for the open), a limit order rests"
+        }
+      ]
+    },
+    {
+      "key": "rwa:NVDA",
+      "kind": "rwa",
+      "name": "NVIDIA stock token",
+      "base": "NVDA",
+      "price": 182.4,
+      "changePct24h": 1.9,
+      "changeFrom": {
+        "venue": "standin-stock-tokens",
+        "venueName": "Stand-in Stock Tokens"
+      },
+      "volumeUsd24h": 12400000,
+      "tabs": [
+        "all",
+        "rwas"
+      ],
+      "at": [
+        {
+          "venue": "standin-stock-tokens",
+          "venueName": "Stand-in Stock Tokens",
+          "symbol": "NVDA",
+          "connected": false,
+          "canTrade": false,
+          "public": true,
+          "price": 182.4,
+          "bid": 182.21,
+          "ask": 182.59,
+          "open": true,
+          "connectTo": "standin-stock-tokens",
+          "connector": "live:standin-stock-tokens",
+          "note": "these stock tokens are only read here: no connection on this account trades them"
+        }
+      ]
+    }
+  ],
+  "closing": [
+    {
+      "key": "event:predict:SI-BTC15-2610220715",
+      "kind": "event",
+      "name": "Bitcoin up or down · 3:15 AM–3:30 AM ET",
+      "price": 0.85,
+      "change24h": 0,
+      "changeFrom": {
+        "venue": "predict",
+        "venueName": "Stand-in Predictions"
+      },
+      "volumeUsd24h": 41798,
+      "category": "Crypto",
+      "closeTime": "2026-10-22T07:30:00.000Z",
+      "outcomes": [
+        {
+          "label": "UP",
+          "at": [
+            {
+              "venue": "predict",
+              "symbol": "SI-BTC15-2610220715:UP"
+            }
+          ],
+          "price": 0.85,
+          "bid": 0.84,
+          "ask": 0.86,
+          "change24h": 0
+        },
+        {
+          "label": "DOWN",
+          "at": [
+            {
+              "venue": "predict",
+              "symbol": "SI-BTC15-2610220715:DOWN"
+            }
+          ],
+          "price": 0.15,
+          "bid": 0.14,
+          "ask": 0.16,
+          "change24h": 0
+        }
+      ],
+      "tabs": [
+        "all",
+        "predictions"
+      ],
+      "at": [
+        {
+          "venue": "predict",
+          "venueName": "Stand-in Predictions",
+          "symbol": "SI-BTC15-2610220715:UP",
+          "connected": true,
+          "canTrade": true,
+          "public": false,
+          "price": 0.85,
+          "bid": 0.84,
+          "ask": 0.86,
+          "open": true
+        }
+      ]
+    }
+  ],
+  "mostTraded": [
+    {
+      "key": "stock:NVDA",
+      "kind": "stock",
+      "name": "NVIDIA Corporation common stock",
+      "base": "NVDA",
+      "price": 182.4,
+      "changePct24h": 1.9,
+      "change24h": 3.4,
+      "changeFrom": {
+        "venue": "broker",
+        "venueName": "Stand-in Broker"
+      },
+      "volumeUsd24h": 31658349604,
+      "session": {
+        "open": false,
+        "opensAt": "2026-10-22T13:30:00.000Z"
+      },
+      "tabs": [
+        "all",
+        "stocks"
+      ],
+      "at": [
+        {
+          "venue": "broker",
+          "venueName": "Stand-in Broker",
+          "symbol": "NVDA",
+          "connected": true,
+          "canTrade": true,
+          "public": false,
+          "price": 182.4,
+          "bid": 182.38,
+          "ask": 182.42,
+          "open": true,
+          "session": {
+            "open": false,
+            "opensAt": "2026-10-22T13:30:00.000Z"
+          },
+          "note": "the US stock market is closed: Stand-in Broker holds an order and sends it when the market opens (2026-10-22 09:30 New York time). Until then no market order is placed here: it would fill at the opening price, which can be well away from this one. A limit, stop or stop-limit order waits for the open with its limit"
+        },
+        {
+          "venue": "standin-stocks-public",
+          "venueName": "Stand-in · 15 min delayed",
+          "symbol": "NVDA",
+          "connected": false,
+          "canTrade": false,
+          "public": true,
+          "price": 182.4,
+          "bid": 182.3,
+          "ask": 182.5,
+          "open": true,
+          "session": {
+            "open": false,
+            "opensAt": "2026-10-22T13:30:00.000Z"
+          },
+          "note": "a stand-in's delayed quotes, 15 minutes behind the market: a US stock trades at the connected broker, or in a paper account"
+        },
+        {
+          "venue": "paper-momentum",
+          "venueName": "Momentum · paper",
+          "symbol": "NVDA",
+          "connected": true,
+          "paper": true,
+          "canTrade": true,
+          "public": false,
+          "price": 182.4,
+          "bid": 182.3,
+          "ask": 182.5,
+          "quoteFrom": "Stand-in · 15 min delayed",
+          "open": true,
+          "session": {
+            "open": false,
+            "opensAt": "2026-10-22T13:30:00.000Z"
+          },
+          "note": "the US stock market is closed; the quote is from the close (a stand-in) · the regular session is not on now: a market order waits for it (queued for the open), a limit order rests"
+        }
+      ]
+    },
+    {
+      "key": "stock:SPY",
+      "kind": "stock",
+      "name": "SPDR S&P 500 ETF Trust",
+      "base": "SPY",
+      "price": 662.1,
+      "changePct24h": 0.4,
+      "change24h": 2.64,
+      "changeFrom": {
+        "venue": "broker",
+        "venueName": "Stand-in Broker"
+      },
+      "volumeUsd24h": 27942386483,
+      "session": {
+        "open": false,
+        "opensAt": "2026-10-22T13:30:00.000Z"
+      },
+      "tabs": [
+        "all",
+        "stocks"
+      ],
+      "at": [
+        {
+          "venue": "broker",
+          "venueName": "Stand-in Broker",
+          "symbol": "SPY",
+          "connected": true,
+          "canTrade": true,
+          "public": false,
+          "price": 662.1,
+          "bid": 662.06,
+          "ask": 662.14,
+          "open": true,
+          "session": {
+            "open": false,
+            "opensAt": "2026-10-22T13:30:00.000Z"
+          },
+          "note": "the US stock market is closed: Stand-in Broker holds an order and sends it when the market opens (2026-10-22 09:30 New York time). Until then no market order is placed here: it would fill at the opening price, which can be well away from this one. A limit, stop or stop-limit order waits for the open with its limit"
+        },
+        {
+          "venue": "standin-stocks-public",
+          "venueName": "Stand-in · 15 min delayed",
+          "symbol": "SPY",
+          "connected": false,
+          "canTrade": false,
+          "public": true,
+          "price": 662.1,
+          "bid": 661.76,
+          "ask": 662.44,
+          "open": true,
+          "session": {
+            "open": false,
+            "opensAt": "2026-10-22T13:30:00.000Z"
+          },
+          "note": "a stand-in's delayed quotes, 15 minutes behind the market: a US stock trades at the connected broker, or in a paper account"
+        },
+        {
+          "venue": "paper-momentum",
+          "venueName": "Momentum · paper",
+          "symbol": "SPY",
+          "connected": true,
+          "paper": true,
+          "canTrade": true,
+          "public": false,
+          "price": 662.1,
+          "bid": 661.76,
+          "ask": 662.44,
+          "quoteFrom": "Stand-in · 15 min delayed",
+          "open": true,
+          "session": {
+            "open": false,
+            "opensAt": "2026-10-22T13:30:00.000Z"
+          },
+          "note": "the US stock market is closed; the quote is from the close (a stand-in) · the regular session is not on now: a market order waits for it (queued for the open), a limit order rests"
+        }
+      ]
+    },
+    {
+      "key": "stock:AAPL",
+      "kind": "stock",
+      "name": "Apple Inc. common stock",
+      "base": "AAPL",
+      "price": 228.4,
+      "changePct24h": 0.8,
+      "change24h": 1.81,
+      "changeFrom": {
+        "venue": "broker",
+        "venueName": "Stand-in Broker"
+      },
+      "volumeUsd24h": 11150845891,
+      "session": {
+        "open": false,
+        "opensAt": "2026-10-22T13:30:00.000Z"
+      },
+      "tabs": [
+        "all",
+        "stocks"
+      ],
+      "at": [
+        {
+          "venue": "broker",
+          "venueName": "Stand-in Broker",
+          "symbol": "AAPL",
+          "connected": true,
+          "canTrade": true,
+          "public": false,
+          "price": 228.4,
+          "bid": 228.37,
+          "ask": 228.43,
+          "open": true,
+          "session": {
+            "open": false,
+            "opensAt": "2026-10-22T13:30:00.000Z"
+          },
+          "note": "the US stock market is closed: Stand-in Broker holds an order and sends it when the market opens (2026-10-22 09:30 New York time). Until then no market order is placed here: it would fill at the opening price, which can be well away from this one. A limit, stop or stop-limit order waits for the open with its limit"
+        }
+      ]
+    },
+    {
+      "key": "perp:BTC",
+      "kind": "perp",
+      "name": "BTC perpetual",
+      "base": "BTC",
+      "price": 62498.7,
+      "changePct24h": 2.3,
+      "change24h": 1405.3,
+      "changeFrom": {
+        "venue": "ex",
+        "venueName": "Stand-in Exchange"
+      },
+      "volumeUsd24h": 4135642997,
+      "fundingRate": 0.0001,
+      "nextFundingAt": "2026-10-22T08:00:00.000Z",
+      "tabs": [
+        "all",
+        "perps"
+      ],
+      "at": [
+        {
+          "venue": "ex",
+          "venueName": "Stand-in Exchange",
+          "symbol": "BTC/USDT:USDT",
+          "connected": true,
+          "canTrade": true,
+          "public": false,
+          "price": 62498.7,
+          "bid": 62495.5,
+          "ask": 62501.9,
+          "open": true
+        }
+      ]
+    },
+    {
+      "key": "coin:BTC",
+      "kind": "coin",
+      "name": "BTC",
+      "base": "BTC",
+      "price": 62480,
+      "changePct24h": 2.3,
+      "change24h": 1404.9,
+      "changeFrom": {
+        "venue": "ex",
+        "venueName": "Stand-in Exchange"
+      },
+      "volumeUsd24h": 2512605681,
+      "tabs": [
+        "all",
+        "crypto"
+      ],
+      "at": [
+        {
+          "venue": "ex",
+          "venueName": "Stand-in Exchange",
+          "symbol": "BTC/USDT",
+          "connected": true,
+          "canTrade": true,
+          "public": false,
+          "price": 62480,
+          "bid": 62476.8,
+          "ask": 62483.1,
+          "open": true
+        },
+        {
+          "venue": "standin-pubex-public",
+          "venueName": "Stand-in Public Exchange",
+          "symbol": "BTC/USD",
+          "connected": false,
+          "canTrade": false,
+          "public": true,
+          "price": 62480,
+          "bid": 62475.2,
+          "ask": 62484.7,
+          "open": true,
+          "connectTo": "standin-pubex",
+          "connector": "live:standin-pubex"
+        },
+        {
+          "venue": "wallet",
+          "venueName": "Stand-in Wallet",
+          "symbol": "cbBTC/USDC@Base",
+          "connected": true,
+          "canTrade": true,
+          "public": false,
+          "price": 62448.71,
+          "bid": 62355.04,
+          "ask": 62542.39,
+          "open": true
+        },
+        {
+          "venue": "paper-momentum",
+          "venueName": "Momentum · paper",
+          "symbol": "BTC/USD",
+          "connected": true,
+          "paper": true,
+          "canTrade": true,
+          "public": false,
+          "price": 62480,
+          "bid": 62475.2,
+          "ask": 62484.7,
+          "quoteFrom": "Stand-in Public Exchange",
+          "open": true
+        }
+      ]
+    },
+    {
+      "key": "perp:ETH",
+      "kind": "perp",
+      "name": "ETH perpetual",
+      "base": "ETH",
+      "price": 2456.58,
+      "changePct24h": 3.8,
+      "change24h": 89.93,
+      "changeFrom": {
+        "venue": "ex",
+        "venueName": "Stand-in Exchange"
+      },
+      "volumeUsd24h": 1592977990,
+      "fundingRate": 0.00008,
+      "nextFundingAt": "2026-10-22T08:00:00.000Z",
+      "tabs": [
+        "all",
+        "perps"
+      ],
+      "at": [
+        {
+          "venue": "ex",
+          "venueName": "Stand-in Exchange",
+          "symbol": "ETH/USDT:USDT",
+          "connected": true,
+          "canTrade": true,
+          "public": false,
+          "price": 2456.58,
+          "bid": 2456.43,
+          "ask": 2456.74,
+          "open": true
+        }
+      ]
+    },
+    {
+      "key": "coin:ETH",
+      "kind": "coin",
+      "name": "ETH",
+      "base": "ETH",
+      "price": 2455.6,
+      "changePct24h": 3.8,
+      "change24h": 89.89,
+      "changeFrom": {
+        "venue": "ex",
+        "venueName": "Stand-in Exchange"
+      },
+      "volumeUsd24h": 1186656190,
+      "tabs": [
+        "all",
+        "crypto"
+      ],
+      "at": [
+        {
+          "venue": "ex",
+          "venueName": "Stand-in Exchange",
+          "symbol": "ETH/USDT",
+          "connected": true,
+          "canTrade": true,
+          "public": false,
+          "price": 2455.6,
+          "bid": 2455.45,
+          "ask": 2455.75,
+          "open": true
+        },
+        {
+          "venue": "standin-pubex-public",
+          "venueName": "Stand-in Public Exchange",
+          "symbol": "ETH/USD",
+          "connected": false,
+          "canTrade": false,
+          "public": true,
+          "price": 2455.6,
+          "bid": 2455.35,
+          "ask": 2455.85,
+          "open": true,
+          "connectTo": "standin-pubex",
+          "connector": "live:standin-pubex"
+        },
+        {
+          "venue": "wallet",
+          "venueName": "Stand-in Wallet",
+          "symbol": "WETH/USDC@Base",
+          "connected": true,
+          "canTrade": true,
+          "public": false,
+          "price": 2454.87,
+          "bid": 2451.18,
+          "ask": 2458.55,
+          "open": true
+        },
+        {
+          "venue": "paper-momentum",
+          "venueName": "Momentum · paper",
+          "symbol": "ETH/USD",
+          "connected": true,
+          "paper": true,
+          "canTrade": true,
+          "public": false,
+          "price": 2455.6,
+          "bid": 2455.35,
+          "ask": 2455.85,
+          "quoteFrom": "Stand-in Public Exchange",
+          "open": true
+        }
+      ]
+    },
+    {
+      "key": "coin:DOGE",
+      "kind": "coin",
+      "name": "DOGE",
+      "base": "DOGE",
+      "price": 0.1214,
+      "changePct24h": 12.4,
+      "change24h": 0.01339,
+      "changeFrom": {
+        "venue": "standin-pubex-public",
+        "venueName": "Stand-in Public Exchange"
+      },
+      "volumeUsd24h": 787716336,
+      "tabs": [
+        "all",
+        "crypto"
+      ],
+      "at": [
+        {
+          "venue": "standin-pubex-public",
+          "venueName": "Stand-in Public Exchange",
+          "symbol": "DOGE/USD",
+          "connected": false,
+          "canTrade": false,
+          "public": true,
+          "price": 0.1214,
+          "bid": 0.12137,
+          "ask": 0.12143,
+          "open": true,
+          "connectTo": "standin-pubex",
+          "connector": "live:standin-pubex"
+        },
+        {
+          "venue": "paper-momentum",
+          "venueName": "Momentum · paper",
+          "symbol": "DOGE/USD",
+          "connected": true,
+          "paper": true,
+          "canTrade": true,
+          "public": false,
+          "price": 0.1214,
+          "bid": 0.12137,
+          "ask": 0.12143,
+          "quoteFrom": "Stand-in Public Exchange",
+          "open": true
+        }
+      ]
+    }
+  ],
+  "missing": [
+    {
+      "venue": "standin-geo",
+      "venueName": "Stand-in Geo Exchange",
+      "why": "Stand-in Geo Exchange does not serve this location: that is its own rule, and the account does not look for a way around it",
+      "connected": false,
+      "code": "E_VENUE_GEOBLOCKED",
+      "said": "Service unavailable from a restricted location (stand-in)."
+    }
+  ],
+  "notes": [
+    "Stand-in Event Exchange: its busiest events, without sports (a stand-in: nothing here is real).",
+    "Stand-in Delayed Quotes: US stocks fifteen minutes behind the market (a stand-in: nothing here is real).",
+    "Predictions: at most 12 rows, each venue's busiest in turn, without sports, weather and entertainment; a search reaches everything the venues' listings loaded.",
+    "Predictions: and the IPO questions at Kalshi and Polymarket, beside the busiest few.",
+    "Pre-IPO perpetuals are contracts on a venue's estimate of a private company's valuation, not shares; each venue says who may trade them once a key connects."
+  ]
+}

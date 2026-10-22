@@ -1,0 +1,93 @@
+{
+  "ok": true,
+  "asOf": "2026-10-22T07:19:22.579Z",
+  "totalUsd": 25400,
+  "rows": [
+    {
+      "key": "cash:USD",
+      "asset": "USD",
+      "class": "cash",
+      "amount": 25000,
+      "usd": 25000,
+      "venues": [
+        {
+          "venue": "paper-momentum",
+          "venueName": "Momentum · paper",
+          "amount": 25000,
+          "usd": 25000,
+          "note": "paper money"
+        }
+      ],
+      "price": 1
+    },
+    {
+      "key": "stable:USDC",
+      "asset": "USDC",
+      "class": "stable",
+      "amount": 400,
+      "usd": 400,
+      "venues": [
+        {
+          "venue": "paper",
+          "venueName": "Stand-in Paper",
+          "amount": 400,
+          "usd": 400,
+          "note": "futures"
+        }
+      ],
+      "price": 1
+    }
+  ],
+  "money": {
+    "cashUsd": 25000,
+    "stableUsd": 400,
+    "inTransitUsd": 0,
+    "readyUsd": 25400,
+    "tradesHereUsd": 25400,
+    "canMoveUsd": 0,
+    "staysUsd": 25400,
+    "venues": [
+      {
+        "venue": "paper-momentum",
+        "venueName": "Momentum · paper",
+        "usd": 25000,
+        "lines": [
+          {
+            "asset": "USD",
+            "note": "paper money",
+            "usd": 25000
+          }
+        ],
+        "tradesHere": true,
+        "movesOut": false,
+        "why": "moves only at the venue"
+      },
+      {
+        "venue": "paper",
+        "venueName": "Stand-in Paper",
+        "usd": 400,
+        "lines": [
+          {
+            "asset": "USDC",
+            "note": "futures",
+            "usd": 400
+          }
+        ],
+        "tradesHere": true,
+        "movesOut": false,
+        "why": "moves only at the venue"
+      }
+    ]
+  },
+  "change24h": {
+    "usd": 0,
+    "pct": 0,
+    "coveredUsd": 25400,
+    "ofUsd": 25400,
+    "missing": []
+  },
+  "missing": [],
+  "paper": true,
+  "positions": [],
+  "cost": []
+}

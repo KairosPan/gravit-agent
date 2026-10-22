@@ -1,0 +1,51 @@
+{
+  "ok": true,
+  "positions": [
+    {
+      "symbol": "BTC/USDT:USDT",
+      "name": "BTC perpetual",
+      "kind": "perp",
+      "side": "long",
+      "qty": 0.01,
+      "entryPrice": 60520,
+      "markPrice": 62498.7,
+      "usd": 624.99,
+      "unrealizedUsd": 19.79,
+      "leverage": 3,
+      "marginMode": "cross",
+      "liquidationPrice": 40649.3,
+      "venue": "ex",
+      "venueName": "Stand-in Exchange"
+    },
+    {
+      "symbol": "ETH/USDT:USDT",
+      "name": "ETH perpetual",
+      "kind": "perp",
+      "side": "long",
+      "qty": 0.05,
+      "entryPrice": 2456.74,
+      "markPrice": 2456.58,
+      "usd": 122.83,
+      "unrealizedUsd": -0.01,
+      "leverage": 5,
+      "marginMode": "cross",
+      "liquidationPrice": 1977.68,
+      "venue": "ex",
+      "venueName": "Stand-in Exchange"
+    },
+    {
+      "symbol": "SI-FEDCUT-DEC:YES",
+      "name": "Will the Fed cut rates at its December meeting? · Yes",
+      "kind": "event",
+      "side": "long",
+      "qty": 50,
+      "entryPrice": 0.63,
+      "markPrice": 0.62,
+      "usd": 31,
+      "unrealizedUsd": -0.5,
+      "venue": "predict",
+      "venueName": "Stand-in Predictions"
+    }
+  ],
+  "missing": []
+}

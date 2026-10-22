@@ -1,0 +1,610 @@
+{
+  "ok": true,
+  "asOf": "2026-10-22T07:19:22.573Z",
+  "totalUsd": 29138.1,
+  "rows": [
+    {
+      "key": "crypto:BTC",
+      "asset": "BTC",
+      "class": "crypto",
+      "amount": 0.124,
+      "usd": 7747.4,
+      "venues": [
+        {
+          "venue": "ex",
+          "venueName": "Stand-in Exchange",
+          "amount": 0.12,
+          "usd": 7497.6,
+          "note": "spot"
+        },
+        {
+          "venue": "wallet",
+          "venueName": "Stand-in Wallet",
+          "amount": 0.004,
+          "usd": 249.8,
+          "note": "Base"
+        }
+      ],
+      "price": 62479.03226,
+      "changePct24h": 2.3,
+      "changeFrom": {
+        "venue": "ex",
+        "venueName": "Stand-in Exchange"
+      }
+    },
+    {
+      "key": "stable:USDT",
+      "asset": "USDT",
+      "class": "stable",
+      "amount": 5700,
+      "usd": 5700,
+      "venues": [
+        {
+          "venue": "ex",
+          "venueName": "Stand-in Exchange",
+          "amount": 4200,
+          "usd": 4200,
+          "note": "spot"
+        },
+        {
+          "venue": "ex",
+          "venueName": "Stand-in Exchange",
+          "amount": 1500,
+          "usd": 1500,
+          "note": "futures"
+        }
+      ],
+      "price": 1
+    },
+    {
+      "key": "crypto:ETH",
+      "asset": "ETH",
+      "class": "crypto",
+      "amount": 2.153,
+      "usd": 5286.65,
+      "venues": [
+        {
+          "venue": "ex",
+          "venueName": "Stand-in Exchange",
+          "amount": 1.8,
+          "usd": 4420.08,
+          "note": "spot"
+        },
+        {
+          "venue": "wallet",
+          "venueName": "Stand-in Wallet",
+          "amount": 0.35,
+          "usd": 859.2,
+          "note": "Base"
+        },
+        {
+          "venue": "agent-claude-code",
+          "venueName": "Agent wallet · Claude Code",
+          "amount": 0.003,
+          "usd": 7.37,
+          "note": "Base"
+        }
+      ],
+      "price": 2455.480725,
+      "changePct24h": 3.8,
+      "changeFrom": {
+        "venue": "ex",
+        "venueName": "Stand-in Exchange"
+      }
+    },
+    {
+      "key": "crypto:SOL",
+      "asset": "SOL",
+      "class": "crypto",
+      "amount": 25,
+      "usd": 3571.25,
+      "venues": [
+        {
+          "venue": "ex",
+          "venueName": "Stand-in Exchange",
+          "amount": 25,
+          "usd": 3571.25,
+          "note": "spot"
+        }
+      ],
+      "price": 142.85,
+      "changePct24h": -1.6,
+      "changeFrom": {
+        "venue": "ex",
+        "venueName": "Stand-in Exchange"
+      }
+    },
+    {
+      "key": "cash:USD",
+      "asset": "USD",
+      "class": "cash",
+      "amount": 2640,
+      "usd": 2640,
+      "venues": [
+        {
+          "venue": "broker",
+          "venueName": "Stand-in Broker",
+          "amount": 2000,
+          "usd": 2000,
+          "note": "cash"
+        },
+        {
+          "venue": "predict",
+          "venueName": "Stand-in Predictions",
+          "amount": 640,
+          "usd": 640
+        }
+      ],
+      "price": 1
+    },
+    {
+      "key": "rwa:USDY",
+      "asset": "USDY",
+      "class": "rwa",
+      "amount": 1500,
+      "usd": 1657.8,
+      "venues": [
+        {
+          "venue": "wallet",
+          "venueName": "Stand-in Wallet",
+          "amount": 1500,
+          "usd": 1657.8,
+          "note": "Ethereum"
+        }
+      ],
+      "price": 1.1052
+    },
+    {
+      "key": "stable:USDC",
+      "asset": "USDC",
+      "class": "stable",
+      "amount": 1310,
+      "usd": 1310,
+      "venues": [
+        {
+          "venue": "wallet",
+          "venueName": "Stand-in Wallet",
+          "amount": 820,
+          "usd": 820,
+          "note": "Base"
+        },
+        {
+          "venue": "ex",
+          "venueName": "Stand-in Exchange",
+          "amount": 300,
+          "usd": 300,
+          "note": "spot"
+        },
+        {
+          "venue": "wallet",
+          "venueName": "Stand-in Wallet",
+          "amount": 150,
+          "usd": 150,
+          "note": "Ethereum"
+        },
+        {
+          "venue": "agent-claude-code",
+          "venueName": "Agent wallet · Claude Code",
+          "amount": 40,
+          "usd": 40,
+          "note": "Base"
+        }
+      ],
+      "price": 1
+    },
+    {
+      "key": "equity:AAPL",
+      "asset": "AAPL",
+      "class": "equity",
+      "amount": 3,
+      "usd": 685.2,
+      "venues": [
+        {
+          "venue": "broker",
+          "venueName": "Stand-in Broker",
+          "amount": 3,
+          "usd": 685.2,
+          "note": "stocks"
+        }
+      ],
+      "price": 228.4,
+      "changePct24h": 0.8,
+      "changeFrom": {
+        "venue": "broker",
+        "venueName": "Stand-in Broker"
+      }
+    },
+    {
+      "key": "equity:NVDA",
+      "asset": "NVDA",
+      "class": "equity",
+      "amount": 2,
+      "usd": 364.8,
+      "venues": [
+        {
+          "venue": "broker",
+          "venueName": "Stand-in Broker",
+          "amount": 2,
+          "usd": 364.8,
+          "note": "stocks"
+        }
+      ],
+      "price": 182.4,
+      "changePct24h": 1.9,
+      "changeFrom": {
+        "venue": "broker",
+        "venueName": "Stand-in Broker"
+      }
+    },
+    {
+      "key": "earn:ex:flex:USDT",
+      "asset": "USDT",
+      "class": "earn",
+      "amount": 150,
+      "usd": 150,
+      "venues": [
+        {
+          "venue": "ex",
+          "venueName": "Stand-in Exchange",
+          "amount": 150,
+          "usd": 150,
+          "note": "earning 4.6% at Stand-in Exchange · USDT · Flexible (stand-in)"
+        }
+      ],
+      "earn": {
+        "venue": "ex",
+        "venueName": "Stand-in Exchange",
+        "product": "flex:USDT",
+        "asset": "USDT",
+        "name": "USDT · Flexible (stand-in)",
+        "apy": 0.046
+      },
+      "price": 1
+    }
+  ],
+  "money": {
+    "cashUsd": 2640,
+    "stableUsd": 7010,
+    "inTransitUsd": 0,
+    "readyUsd": 9650,
+    "tradesHereUsd": 9610,
+    "canMoveUsd": 6040,
+    "staysUsd": 3610,
+    "venues": [
+      {
+        "venue": "ex",
+        "venueName": "Stand-in Exchange",
+        "usd": 6000,
+        "lines": [
+          {
+            "asset": "USDT",
+            "note": "spot",
+            "usd": 4200
+          },
+          {
+            "asset": "USDT",
+            "note": "futures",
+            "usd": 1500
+          },
+          {
+            "asset": "USDC",
+            "note": "spot",
+            "usd": 300
+          }
+        ],
+        "tradesHere": true,
+        "movesOut": true
+      },
+      {
+        "venue": "broker",
+        "venueName": "Stand-in Broker",
+        "usd": 2000,
+        "lines": [
+          {
+            "asset": "USD",
+            "note": "cash",
+            "usd": 2000
+          }
+        ],
+        "tradesHere": true,
+        "movesOut": false,
+        "why": "moves only at the venue"
+      },
+      {
+        "venue": "wallet",
+        "venueName": "Stand-in Wallet",
+        "usd": 970,
+        "lines": [
+          {
+            "asset": "USDC",
+            "note": "Base",
+            "usd": 820
+          },
+          {
+            "asset": "USDC",
+            "note": "Ethereum",
+            "usd": 150
+          }
+        ],
+        "tradesHere": true,
+        "movesOut": false,
+        "why": "moves only at the venue"
+      },
+      {
+        "venue": "predict",
+        "venueName": "Stand-in Predictions",
+        "usd": 640,
+        "lines": [
+          {
+            "asset": "USD",
+            "usd": 640
+          }
+        ],
+        "tradesHere": true,
+        "movesOut": false,
+        "why": "moves only at the venue"
+      },
+      {
+        "venue": "agent-claude-code",
+        "venueName": "Agent wallet · Claude Code",
+        "usd": 40,
+        "lines": [
+          {
+            "asset": "USDC",
+            "note": "Base",
+            "usd": 40
+          }
+        ],
+        "tradesHere": false,
+        "movesOut": true
+      }
+    ]
+  },
+  "change24h": {
+    "usd": 321.89,
+    "pct": 1.19,
+    "coveredUsd": 27455.3,
+    "ofUsd": 29113.1,
+    "missing": [
+      "rwa:USDY"
+    ]
+  },
+  "missing": [],
+  "positions": [
+    {
+      "symbol": "BTC/USDT:USDT",
+      "name": "BTC perpetual",
+      "kind": "perp",
+      "side": "long",
+      "qty": 0.01,
+      "entryPrice": 60520,
+      "markPrice": 62498.7,
+      "usd": 624.99,
+      "unrealizedUsd": 19.79,
+      "leverage": 3,
+      "marginMode": "cross",
+      "liquidationPrice": 40649.3,
+      "venue": "ex",
+      "venueName": "Stand-in Exchange"
+    },
+    {
+      "symbol": "ETH/USDT:USDT",
+      "name": "ETH perpetual",
+      "kind": "perp",
+      "side": "long",
+      "qty": 0.05,
+      "entryPrice": 2456.74,
+      "markPrice": 2456.58,
+      "usd": 122.83,
+      "unrealizedUsd": -0.01,
+      "leverage": 5,
+      "marginMode": "cross",
+      "liquidationPrice": 1977.68,
+      "venue": "ex",
+      "venueName": "Stand-in Exchange"
+    },
+    {
+      "symbol": "SI-FEDCUT-DEC:YES",
+      "name": "Will the Fed cut rates at its December meeting? · Yes",
+      "kind": "event",
+      "side": "long",
+      "qty": 50,
+      "entryPrice": 0.63,
+      "markPrice": 0.62,
+      "usd": 31,
+      "unrealizedUsd": -0.5,
+      "venue": "predict",
+      "venueName": "Stand-in Predictions"
+    }
+  ],
+  "cost": [
+    {
+      "key": "crypto:BTC",
+      "asset": "BTC",
+      "class": "crypto",
+      "coveredQty": 0,
+      "ofQty": 0.124,
+      "realizedUsd": 0,
+      "source": "none",
+      "words": "cost known for 0 of 0.124 BTC",
+      "parts": [],
+      "markets": [],
+      "orders": 0
+    },
+    {
+      "key": "crypto:ETH",
+      "asset": "ETH",
+      "class": "crypto",
+      "avgCostUsd": 2460.123333,
+      "costUsd": 147.61,
+      "coveredQty": 0.06,
+      "ofQty": 2.153,
+      "unrealizedUsd": -0.28,
+      "realizedUsd": 0,
+      "source": "account orders",
+      "words": "cost known for 0.06 of 2.153 ETH",
+      "parts": [
+        {
+          "source": "account orders",
+          "qty": 0.06,
+          "costUsd": 147.61
+        }
+      ],
+      "markets": [
+        {
+          "venue": "wallet",
+          "symbol": "WETH/USDC@Base"
+        },
+        {
+          "venue": "ex",
+          "symbol": "ETH/USDT"
+        }
+      ],
+      "lastFillAt": "2026-10-22T07:19:22.481Z",
+      "orders": 2
+    },
+    {
+      "key": "crypto:SOL",
+      "asset": "SOL",
+      "class": "crypto",
+      "coveredQty": 0,
+      "ofQty": 25,
+      "realizedUsd": 0,
+      "source": "none",
+      "words": "cost known for 0 of 25 SOL",
+      "parts": [],
+      "markets": [],
+      "orders": 0
+    },
+    {
+      "key": "rwa:USDY",
+      "asset": "USDY",
+      "class": "rwa",
+      "coveredQty": 0,
+      "ofQty": 1500,
+      "realizedUsd": 0,
+      "source": "none",
+      "words": "cost known for 0 of 1,500 USDY",
+      "parts": [],
+      "markets": [],
+      "orders": 0
+    },
+    {
+      "key": "equity:AAPL",
+      "asset": "AAPL",
+      "class": "equity",
+      "coveredQty": 0,
+      "ofQty": 3,
+      "realizedUsd": 0,
+      "source": "none",
+      "words": "cost known for 0 of 3 AAPL",
+      "parts": [],
+      "markets": [],
+      "orders": 0
+    },
+    {
+      "key": "equity:NVDA",
+      "asset": "NVDA",
+      "class": "equity",
+      "coveredQty": 0,
+      "ofQty": 2,
+      "realizedUsd": 0,
+      "source": "none",
+      "words": "cost known for 0 of 2 NVDA",
+      "parts": [],
+      "markets": [],
+      "orders": 0
+    },
+    {
+      "key": "event:SI-FEDCUT-DEC:YES",
+      "asset": "SI-FEDCUT-DEC:YES",
+      "class": "event",
+      "avgCostUsd": 0.63,
+      "costUsd": 31.5,
+      "coveredQty": 50,
+      "ofQty": 50,
+      "unrealizedUsd": -0.5,
+      "realizedUsd": 0,
+      "source": "venue",
+      "words": "cost known for 50 of 50 SI-FEDCUT-DEC:YES",
+      "parts": [
+        {
+          "source": "venue",
+          "venue": "predict",
+          "venueName": "Stand-in Predictions",
+          "qty": 50,
+          "costUsd": 31.5
+        }
+      ],
+      "markets": [
+        {
+          "venue": "predict",
+          "symbol": "SI-FEDCUT-DEC:YES"
+        }
+      ],
+      "lastFillAt": "2026-10-22T07:19:22.480Z",
+      "orders": 1
+    },
+    {
+      "key": "position:ex:ETH/USDT:USDT",
+      "asset": "ETH perpetual",
+      "class": "position",
+      "symbol": "ETH/USDT:USDT",
+      "side": "long",
+      "avgCostUsd": 2456.74,
+      "costUsd": 122.84,
+      "coveredQty": 0.05,
+      "ofQty": 0.05,
+      "unrealizedUsd": -0.01,
+      "source": "venue",
+      "words": "cost known for 0.05 of 0.05 contracts",
+      "parts": [
+        {
+          "source": "venue",
+          "venue": "ex",
+          "venueName": "Stand-in Exchange",
+          "qty": 0.05,
+          "costUsd": 122.84
+        }
+      ],
+      "realizedUsd": 0,
+      "markets": [
+        {
+          "venue": "ex",
+          "symbol": "ETH/USDT:USDT"
+        }
+      ],
+      "lastFillAt": "2026-10-22T07:19:22.478Z",
+      "orders": 1
+    },
+    {
+      "key": "position:ex:BTC/USDT:USDT",
+      "asset": "BTC perpetual",
+      "class": "position",
+      "symbol": "BTC/USDT:USDT",
+      "side": "long",
+      "avgCostUsd": 60520,
+      "coveredQty": 0.01,
+      "ofQty": 0.01,
+      "unrealizedUsd": 19.79,
+      "source": "venue",
+      "words": "cost known for 0.01 of 0.01 contracts",
+      "parts": [
+        {
+          "source": "venue",
+          "venue": "ex",
+          "venueName": "Stand-in Exchange",
+          "qty": 0.01
+        }
+      ],
+      "realizedUsd": 0,
+      "markets": [
+        {
+          "venue": "ex",
+          "symbol": "BTC/USDT:USDT"
+        }
+      ],
+      "orders": 0
+    }
+  ]
+}

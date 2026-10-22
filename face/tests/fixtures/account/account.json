@@ -1,0 +1,1292 @@
+{
+  "ok": true,
+  "now": "2026-10-22T07:19:22.554Z",
+  "type": "Separate",
+  "totalUsd": 29138.1,
+  "inFlightUsd": 25,
+  "heldUsd": 0,
+  "venues": [
+    {
+      "id": "broker",
+      "name": "Stand-in Broker",
+      "connector": "live:standin-broker",
+      "frontLine": "Stocks",
+      "usd": 3050,
+      "cashUsd": 2000,
+      "holdings": [
+        {
+          "asset": "USD",
+          "amount": 2000,
+          "usd": 2000,
+          "class": "cash",
+          "note": "cash",
+          "inTransit": false
+        },
+        {
+          "asset": "AAPL",
+          "amount": 3,
+          "usd": 685.2,
+          "class": "equity",
+          "note": "stocks",
+          "inTransit": false
+        },
+        {
+          "asset": "NVDA",
+          "amount": 2,
+          "usd": 364.8,
+          "class": "equity",
+          "note": "stocks",
+          "inTransit": false
+        }
+      ],
+      "plugged": true,
+      "via": "Stand-in Broker · a stand-in in the test harness: no network, no real money, every number made up · live · the venue says this credential can: read, trade",
+      "live": true,
+      "watchOnly": "Live · read-only",
+      "asOf": "2026-10-22T07:19:22.458Z",
+      "trade": {
+        "can": true,
+        "what": "US stocks and ETFs",
+        "kinds": [
+          "stock"
+        ],
+        "positions": false,
+        "amend": false,
+        "leverage": false,
+        "close": false
+      },
+      "readOnlyBecause": "Stand-in Broker is a stand-in: it gives no deposit address and makes no withdrawal, so no money is sent to it or from it here (a broker's cash moves by ACH, at the broker)"
+    },
+    {
+      "id": "ex",
+      "name": "Stand-in Exchange",
+      "connector": "live:standin-exchange",
+      "frontLine": "Exchange",
+      "usd": 21638.93,
+      "cashUsd": 6000,
+      "holdings": [
+        {
+          "asset": "BTC",
+          "amount": 0.12,
+          "usd": 7497.6,
+          "class": "crypto",
+          "note": "spot",
+          "inTransit": false
+        },
+        {
+          "asset": "ETH",
+          "amount": 1.8,
+          "usd": 4420.08,
+          "class": "crypto",
+          "note": "spot",
+          "inTransit": false
+        },
+        {
+          "asset": "USDT",
+          "amount": 4200,
+          "usd": 4200,
+          "class": "stable",
+          "note": "spot",
+          "inTransit": false
+        },
+        {
+          "asset": "SOL",
+          "amount": 25,
+          "usd": 3571.25,
+          "class": "crypto",
+          "note": "spot",
+          "inTransit": false
+        },
+        {
+          "asset": "USDT",
+          "amount": 1500,
+          "usd": 1500,
+          "class": "stable",
+          "note": "futures",
+          "inTransit": false
+        },
+        {
+          "asset": "USDC",
+          "amount": 300,
+          "usd": 300,
+          "class": "stable",
+          "note": "spot",
+          "inTransit": false
+        },
+        {
+          "asset": "USDT",
+          "amount": 150,
+          "usd": 150,
+          "class": "earn",
+          "note": "earning 4.6% at Stand-in Exchange · USDT · Flexible (stand-in)",
+          "inTransit": false,
+          "earn": {
+            "product": "flex:USDT",
+            "asset": "USDT",
+            "name": "USDT · Flexible (stand-in)",
+            "apy": 0.046
+          }
+        }
+      ],
+      "plugged": true,
+      "via": "Stand-in Exchange · a stand-in in the test harness: no network, no real money, every number made up · live · the venue says this credential can: read, trade, transfer, withdraw, earn",
+      "live": true,
+      "watchOnly": "Live · read-only",
+      "asOf": "2026-10-22T07:19:22.455Z",
+      "liveCan": {
+        "withdraw": true,
+        "ledgers": [
+          "spot",
+          "futures"
+        ],
+        "transfer": true,
+        "swap": true,
+        "receive": false,
+        "send": false
+      },
+      "trade": {
+        "can": true,
+        "what": "spot and perpetuals",
+        "kinds": [
+          "spot",
+          "perp"
+        ],
+        "positions": true,
+        "amend": true,
+        "leverage": true,
+        "close": false
+      },
+      "earn": {
+        "can": true,
+        "what": "stand-in earn: a flexible USDT product and a bonded ETH one"
+      }
+    },
+    {
+      "id": "paper",
+      "name": "Stand-in Paper",
+      "connector": "live:standin-paper",
+      "frontLine": "Exchange",
+      "usd": 400,
+      "cashUsd": 400,
+      "holdings": [
+        {
+          "asset": "USDC",
+          "amount": 400,
+          "usd": 400,
+          "class": "stable",
+          "note": "futures",
+          "inTransit": false
+        }
+      ],
+      "plugged": true,
+      "via": "Stand-in Perp Exchange · a stand-in in the test harness: no network, no real money, every number made up · live · the venue says this credential can: read, trade",
+      "live": true,
+      "watchOnly": "Live · read-only",
+      "paper": true,
+      "asOf": "2026-10-22T07:19:22.459Z",
+      "trade": {
+        "can": true,
+        "what": "perpetuals",
+        "kinds": [
+          "spot",
+          "perp"
+        ],
+        "positions": true,
+        "amend": true,
+        "leverage": true,
+        "close": false
+      },
+      "readOnlyBecause": "a paper account: its balance is not money, so nothing of it moves from here"
+    },
+    {
+      "id": "paper-momentum",
+      "name": "Momentum · paper",
+      "connector": "live:paper",
+      "frontLine": "Exchange",
+      "usd": 25000,
+      "cashUsd": 25000,
+      "holdings": [
+        {
+          "asset": "USD",
+          "amount": 25000,
+          "usd": 25000,
+          "class": "cash",
+          "note": "paper money",
+          "inTransit": false
+        }
+      ],
+      "plugged": true,
+      "via": "Paper account · the account's own book, priced at the public quotes Markets reads without a key · live · the venue says this credential can: read, trade",
+      "live": true,
+      "watchOnly": "Live · read-only",
+      "paper": true,
+      "paperStartUsd": 25000,
+      "asOf": "2026-10-22T07:19:22.462Z",
+      "trade": {
+        "can": true,
+        "what": "paper trading in the public markets: US stocks, coins, perpetuals with leverage, tokenised shares, event contracts",
+        "kinds": [
+          "spot",
+          "perp",
+          "event",
+          "token",
+          "stock"
+        ],
+        "positions": true,
+        "amend": true,
+        "leverage": true,
+        "close": true
+      },
+      "readOnlyBecause": "paper money: nothing real moves in or out of a paper account (its owner adds paper money, or starts it again, from its own row)"
+    },
+    {
+      "id": "agent-claude-code",
+      "name": "Agent wallet · Claude Code",
+      "connector": "live:agent-wallet",
+      "frontLine": "On-chain",
+      "usd": 47.37,
+      "cashUsd": 40,
+      "holdings": [
+        {
+          "asset": "USDC",
+          "amount": 40,
+          "usd": 40,
+          "class": "stable",
+          "note": "Base",
+          "inTransit": false
+        },
+        {
+          "asset": "ETH",
+          "amount": 0.003,
+          "usd": 7.37,
+          "class": "crypto",
+          "note": "Base",
+          "inTransit": false
+        }
+      ],
+      "plugged": true,
+      "via": "a wallet this account holds the key of · read from the chains · live · the venue says this credential can: pay, send",
+      "live": true,
+      "watchOnly": "Live · read-only",
+      "asOf": "2026-10-22T07:19:22.495Z",
+      "proven": "this account holds its key",
+      "liveCan": {
+        "withdraw": false,
+        "ledgers": [],
+        "transfer": false,
+        "swap": false,
+        "receive": true,
+        "send": "account"
+      },
+      "noTradeBecause": "An agent wallet pays for things; agents trade at the venues it funds.",
+      "address": "0x50dc2F1Ea38d8Ba8827b62B13199d9aA5E5E0df4"
+    },
+    {
+      "id": "wallet",
+      "name": "Stand-in Wallet",
+      "connector": "live:standin-wallet",
+      "frontLine": "On-chain",
+      "usd": 3736.8,
+      "cashUsd": 970,
+      "holdings": [
+        {
+          "asset": "USDY",
+          "amount": 1500,
+          "usd": 1657.8,
+          "class": "rwa",
+          "note": "Ethereum",
+          "inTransit": false
+        },
+        {
+          "asset": "WETH",
+          "amount": 0.35,
+          "usd": 859.2,
+          "class": "crypto",
+          "note": "Base",
+          "inTransit": false
+        },
+        {
+          "asset": "USDC",
+          "amount": 820,
+          "usd": 820,
+          "class": "stable",
+          "note": "Base",
+          "inTransit": false
+        },
+        {
+          "asset": "cbBTC",
+          "amount": 0.004,
+          "usd": 249.8,
+          "class": "crypto",
+          "note": "Base",
+          "inTransit": false
+        },
+        {
+          "asset": "USDC",
+          "amount": 150,
+          "usd": 150,
+          "class": "stable",
+          "note": "Ethereum",
+          "inTransit": false
+        }
+      ],
+      "plugged": true,
+      "via": "Stand-in Wallet · a stand-in in the test harness: no network, no real money, every number made up · live · the venue says this credential can: read, swap",
+      "live": true,
+      "watchOnly": "Live · read-only",
+      "asOf": "2026-10-22T07:19:22.457Z",
+      "trade": {
+        "can": true,
+        "what": "tokens, swapped from this wallet",
+        "kinds": [
+          "token"
+        ],
+        "positions": false,
+        "amend": false,
+        "leverage": false,
+        "close": false
+      },
+      "readOnlyBecause": "a stand-in: no money is sent to it or from it here"
+    },
+    {
+      "id": "predict",
+      "name": "Stand-in Predictions",
+      "connector": "live:standin-events",
+      "frontLine": "Prediction",
+      "usd": 640,
+      "cashUsd": 640,
+      "holdings": [
+        {
+          "asset": "USD",
+          "amount": 640,
+          "usd": 640,
+          "class": "cash",
+          "inTransit": false
+        }
+      ],
+      "plugged": true,
+      "via": "Stand-in Predictions · a stand-in in the test harness: no network, no real money, every number made up · live · the venue says this credential can: read, trade",
+      "live": true,
+      "watchOnly": "Live · read-only",
+      "asOf": "2026-10-22T07:19:22.457Z",
+      "trade": {
+        "can": true,
+        "what": "event contracts",
+        "kinds": [
+          "event"
+        ],
+        "positions": true,
+        "amend": true,
+        "leverage": false,
+        "close": false
+      },
+      "readOnlyBecause": "a stand-in: no money is sent to it or from it here"
+    }
+  ],
+  "payments": [
+    {
+      "id": "pay-0003",
+      "kind": "withdraw",
+      "at": "2026-10-22T07:19:22.497Z",
+      "from": "ex",
+      "to": "agent-claude-code",
+      "sourceToken": "USDC",
+      "token": "USDC",
+      "amountUsd": 25,
+      "feeUsd": 1,
+      "receiveUsd": 24,
+      "legs": [
+        {
+          "step": "out",
+          "venue": "ex",
+          "rail": "withdraw",
+          "protocol": "Stand-in Exchange · a stand-in in the test harness: no network, no real money, every number made up withdrawal",
+          "token": "USDC",
+          "chain": "Base",
+          "feeUsd": 1,
+          "etaSec": 300,
+          "access": "owner",
+          "final": true,
+          "status": "pending",
+          "startedAt": "2026-10-22T07:19:22.497Z",
+          "ref": "sx-wd-3"
+        }
+      ],
+      "status": "pending",
+      "settlesAt": "2026-10-22T07:19:22.497Z",
+      "signer": "device:a5048199a8081854",
+      "authority": "owner",
+      "action": "0x7e9c7c78e56c262a73dda91b4185187725001b75e05f0e273b852e70ea8bb6f5",
+      "live": {
+        "kind": "withdraw",
+        "toAddress": "0x50dc2F1Ea38d8Ba8827b62B13199d9aA5E5E0df4",
+        "network": "Base"
+      },
+      "note": "Stand-in Exchange took it; waiting for it to land"
+    },
+    {
+      "id": "pay-0002",
+      "kind": "swap",
+      "at": "2026-10-22T07:19:22.489Z",
+      "from": "ex",
+      "to": "ex",
+      "sourceToken": "USDC",
+      "token": "USDT",
+      "amountUsd": 50,
+      "feeUsd": 0,
+      "receiveUsd": 49.995,
+      "legs": [
+        {
+          "step": "swap",
+          "venue": "ex",
+          "rail": "swap",
+          "protocol": "Stand-in Exchange · a stand-in in the test harness: no network, no real money, every number made up market order",
+          "token": "USDT",
+          "feeUsd": 0,
+          "etaSec": 0,
+          "access": "owner",
+          "final": true,
+          "status": "settled",
+          "startedAt": "2026-10-22T07:19:22.489Z",
+          "ref": "sx-sw-2"
+        }
+      ],
+      "status": "settled",
+      "settlesAt": "2026-10-22T07:19:22.489Z",
+      "settledAt": "2026-10-22T07:19:22.489Z",
+      "signer": "device:a5048199a8081854",
+      "authority": "owner",
+      "action": "0x394dccf0e469f2cb14c69b3ab2bb0cc24ee231f5824b6336a1e8d75a0af88cfd",
+      "live": {
+        "kind": "swap"
+      },
+      "note": "done at Stand-in Exchange"
+    },
+    {
+      "id": "pay-0001",
+      "kind": "transfer",
+      "at": "2026-10-22T07:19:22.488Z",
+      "from": "ex",
+      "to": "ex",
+      "sourceToken": "USDT",
+      "token": "USDT",
+      "amountUsd": 200,
+      "feeUsd": 0,
+      "receiveUsd": 200,
+      "legs": [
+        {
+          "step": "shift",
+          "venue": "ex",
+          "rail": "transfer",
+          "protocol": "Stand-in Exchange · a stand-in in the test harness: no network, no real money, every number made up transfer",
+          "token": "USDT",
+          "fromLedger": "spot",
+          "toLedger": "futures",
+          "feeUsd": 0,
+          "etaSec": 0,
+          "access": "owner",
+          "final": true,
+          "status": "settled",
+          "startedAt": "2026-10-22T07:19:22.488Z",
+          "ref": "sx-tr-1"
+        }
+      ],
+      "status": "settled",
+      "settlesAt": "2026-10-22T07:19:22.488Z",
+      "settledAt": "2026-10-22T07:19:22.488Z",
+      "signer": "device:a5048199a8081854",
+      "authority": "owner",
+      "action": "0x6aac3e64d1fe4440575ff7f19b33d03fe3599724e7e84e568fdc6f3ff6e90c19",
+      "live": {
+        "kind": "transfer"
+      },
+      "note": "done at Stand-in Exchange"
+    }
+  ],
+  "orders": [
+    {
+      "id": "ord-0010",
+      "clientId": "91b3e039bf87b01cc07d6934cebcf40f",
+      "at": "2026-10-22T07:19:22.504Z",
+      "venue": "ex",
+      "venueName": "Stand-in Exchange",
+      "symbol": "SOL/USDT",
+      "name": "SOL / USDT",
+      "kind": "spot",
+      "base": "SOL",
+      "side": "buy",
+      "type": "limit",
+      "qty": 0.707,
+      "limitPrice": 141.44,
+      "price": 141.44,
+      "usd": 99.99808,
+      "status": "open",
+      "filledQty": 0,
+      "ref": "sx-00007",
+      "signer": "0x3a087530887bd175ccc38828ee3776e5b6ea1ac6",
+      "authority": "agent",
+      "agent": "0x3a087530887bd175ccc38828ee3776e5b6ea1ac6",
+      "approval": "spend-0001",
+      "action": "0x0d2ed363d1a0b2683e55568ab05d72252a4363aa27a629d31fb97e1eab2a2f8c",
+      "note": "on Stand-in Exchange's book at 141.44",
+      "updatedAt": "2026-10-22T07:19:22.504Z"
+    },
+    {
+      "id": "ord-0009",
+      "clientId": "4a26a39bdd5c0bbac7d353ed7b613812",
+      "at": "2026-10-22T07:19:22.486Z",
+      "venue": "broker",
+      "venueName": "Stand-in Broker",
+      "symbol": "SPY",
+      "name": "SPDR S&P 500 ETF Trust",
+      "kind": "stock",
+      "base": "SPY",
+      "side": "buy",
+      "type": "limit",
+      "qty": 0.25,
+      "limitPrice": 660.07,
+      "price": 660.07,
+      "usd": 165.0175,
+      "status": "pending",
+      "filledQty": 0,
+      "ref": "sb-00001",
+      "signer": "device:a5048199a8081854",
+      "authority": "owner",
+      "action": "0x0901f51a62c98fa5d6fbc8ac6a0fd34de556ddd65ddf2aa2d78f2d731281283a",
+      "note": "Stand-in Broker took it",
+      "updatedAt": "2026-10-22T07:19:22.486Z"
+    },
+    {
+      "id": "ord-0008",
+      "clientId": "97e65571f4ca3001e5aa21fbe5a7d3f5",
+      "at": "2026-10-22T07:19:22.483Z",
+      "venue": "ex",
+      "venueName": "Stand-in Exchange",
+      "symbol": "BTC/USDT",
+      "name": "BTC / USDT",
+      "kind": "spot",
+      "base": "BTC",
+      "side": "buy",
+      "type": "limit",
+      "qty": 0.001,
+      "limitPrice": 59352.9,
+      "price": 59352.9,
+      "usd": 59.3529,
+      "status": "canceled",
+      "filledQty": 0,
+      "ref": "sx-00006",
+      "signer": "device:a5048199a8081854",
+      "authority": "owner",
+      "action": "0x247cd275c43e39a87207ba8d2ad521474ea75855c5c53ef6ca001a1713c2beea",
+      "note": "canceled · nothing filled",
+      "updatedAt": "2026-10-22T07:19:22.484Z"
+    },
+    {
+      "id": "ord-0007",
+      "clientId": "42b0a47fd861609ab5fad6d30cf90d01",
+      "at": "2026-10-22T07:19:22.481Z",
+      "venue": "wallet",
+      "venueName": "Stand-in Wallet",
+      "symbol": "WETH/USDC@Base",
+      "name": "Wrapped Ether on Base",
+      "kind": "token",
+      "base": "WETH",
+      "side": "buy",
+      "type": "market",
+      "qty": 0.02,
+      "worstPrice": 2507.72,
+      "price": 2458.55,
+      "usd": 50.1544,
+      "status": "filled",
+      "filledQty": 0.02,
+      "avgPrice": 2458.55,
+      "feeUsd": 0.1475,
+      "ref": "sw-00001",
+      "signer": "device:a5048199a8081854",
+      "authority": "owner",
+      "action": "0x8652bee496e25e69972c13078c6cd4f533f36ef5daf064efde77796d2c201415",
+      "note": "filled at 2,458.55 · fee $0.15",
+      "updatedAt": "2026-10-22T07:19:22.481Z"
+    },
+    {
+      "id": "ord-0006",
+      "clientId": "cb455e3189a2a1a5cfbdb814960e56da",
+      "at": "2026-10-22T07:19:22.480Z",
+      "venue": "predict",
+      "venueName": "Stand-in Predictions",
+      "symbol": "SI-FEDCUT-DEC:YES",
+      "name": "Will the Fed cut rates at its December meeting? · Yes",
+      "kind": "event",
+      "base": "SI-FEDCUT-DEC:YES",
+      "side": "buy",
+      "type": "market",
+      "qty": 50,
+      "worstPrice": 0.64,
+      "price": 0.63,
+      "usd": 32,
+      "status": "filled",
+      "filledQty": 50,
+      "avgPrice": 0.63,
+      "feeUsd": 0.2205,
+      "ref": "se-00001",
+      "signer": "device:a5048199a8081854",
+      "authority": "owner",
+      "action": "0x8cf62d8ed9e8b8acd615c260d6f9b35e2465eea9142df2d0d8813471f2d712ab",
+      "note": "filled at 0.63 · fee $0.22",
+      "updatedAt": "2026-10-22T07:19:22.480Z"
+    },
+    {
+      "id": "ord-0005",
+      "clientId": "f6993709ba43573915949039117c2c8b",
+      "at": "2026-10-22T07:19:22.478Z",
+      "venue": "ex",
+      "venueName": "Stand-in Exchange",
+      "symbol": "ETH/USDT:USDT",
+      "name": "ETH perpetual",
+      "kind": "perp",
+      "base": "ETH",
+      "side": "buy",
+      "type": "market",
+      "qty": 0.05,
+      "worstPrice": 2505.87,
+      "price": 2456.74,
+      "usd": 125.2935,
+      "status": "filled",
+      "filledQty": 0.05,
+      "avgPrice": 2456.74,
+      "feeUsd": 0.0737,
+      "ref": "sx-00005",
+      "signer": "device:a5048199a8081854",
+      "authority": "owner",
+      "action": "0xd150023e159169890d609a768988c7d6ee4c2af829348bcc3ff7966788db898b",
+      "note": "filled at 2,456.74 · fee $0.07",
+      "updatedAt": "2026-10-22T07:19:22.478Z"
+    },
+    {
+      "id": "ord-0004",
+      "clientId": "0c3a704d6b0219871f175a03e35b5f96",
+      "at": "2026-10-22T07:19:22.475Z",
+      "venue": "ex",
+      "venueName": "Stand-in Exchange",
+      "symbol": "SOL/USDT",
+      "name": "SOL / USDT",
+      "kind": "spot",
+      "base": "SOL",
+      "side": "sell",
+      "type": "stop",
+      "qty": 0.6,
+      "worstPrice": 135.08,
+      "stopPrice": 137.83,
+      "price": 137.83,
+      "usd": 82.698,
+      "status": "open",
+      "filledQty": 0,
+      "ref": "sx-00004",
+      "signer": "device:a5048199a8081854",
+      "authority": "owner",
+      "action": "0x0ec2236f1452425da4f9b6f45e1b95ed6e932768a03e54b368d4b9d454091c4f",
+      "note": "waiting at Stand-in Exchange for the price to reach 137.83",
+      "updatedAt": "2026-10-22T07:19:22.475Z"
+    },
+    {
+      "id": "ord-0003",
+      "clientId": "ddb40a76befeda0fc7c5d78c83d32f44",
+      "at": "2026-10-22T07:19:22.473Z",
+      "venue": "ex",
+      "venueName": "Stand-in Exchange",
+      "symbol": "BTC/USDT",
+      "name": "BTC / USDT",
+      "kind": "spot",
+      "base": "BTC",
+      "side": "sell",
+      "type": "limit",
+      "qty": 0.002,
+      "limitPrice": 63226.6,
+      "price": 63226.6,
+      "usd": 126.4532,
+      "status": "open",
+      "filledQty": 0,
+      "ref": "sx-00003",
+      "signer": "device:a5048199a8081854",
+      "authority": "owner",
+      "action": "0x53708f25a50d62e2fe36ff397268caa7210dce672cc1e43449ac664815d28249",
+      "note": "on Stand-in Exchange's book at 63,226.6",
+      "updatedAt": "2026-10-22T07:19:22.473Z"
+    },
+    {
+      "id": "ord-0002",
+      "clientId": "4e685eec459b386e167e04680d5fe28e",
+      "at": "2026-10-22T07:19:22.471Z",
+      "venue": "ex",
+      "venueName": "Stand-in Exchange",
+      "symbol": "SOL/USDT",
+      "name": "SOL / USDT",
+      "kind": "spot",
+      "base": "SOL",
+      "side": "buy",
+      "type": "limit",
+      "qty": 0.5,
+      "limitPrice": 142.44,
+      "price": 142.44,
+      "usd": 71.22,
+      "status": "open",
+      "filledQty": 0,
+      "ref": "sx-00002",
+      "signer": "device:a5048199a8081854",
+      "authority": "owner",
+      "action": "0xa001d1c6f220c9fd8010348e7b045c4bbd2791c09bf66a71eab9e308cdf8dcdb",
+      "note": "on Stand-in Exchange's book at 142.44",
+      "updatedAt": "2026-10-22T07:19:22.471Z"
+    },
+    {
+      "id": "ord-0001",
+      "clientId": "c23c90d68be21c5a867a3a992ee85f09",
+      "at": "2026-10-22T07:19:22.469Z",
+      "venue": "ex",
+      "venueName": "Stand-in Exchange",
+      "symbol": "ETH/USDT",
+      "name": "ETH / USDT",
+      "kind": "spot",
+      "base": "ETH",
+      "side": "buy",
+      "type": "market",
+      "qty": 0.04,
+      "worstPrice": 2504.86,
+      "price": 2455.75,
+      "usd": 100.1944,
+      "status": "filled",
+      "filledQty": 0.04,
+      "avgPrice": 2455.75,
+      "feeUsd": 0.0589,
+      "ref": "sx-00001",
+      "signer": "device:a5048199a8081854",
+      "authority": "owner",
+      "action": "0x91d0ec5a65fd90829fb719844f25d3ffa8463f30ee38e8d1e334c84852726509",
+      "note": "filled at 2,455.75 · fee $0.06",
+      "updatedAt": "2026-10-22T07:19:22.469Z"
+    }
+  ],
+  "earns": [
+    {
+      "id": "earn-0001",
+      "clientId": "b00a714446962391ba151c3dd16d5f59",
+      "at": "2026-10-22T07:19:22.499Z",
+      "updatedAt": "2026-10-22T07:19:22.499Z",
+      "venue": "ex",
+      "venueName": "Stand-in Exchange",
+      "kind": "supply",
+      "product": "flex:USDT",
+      "productName": "USDT · Flexible (stand-in)",
+      "asset": "USDT",
+      "amount": 150,
+      "usd": 150,
+      "apy": 0.046,
+      "rateKind": "apy",
+      "lockDays": 0,
+      "lands": "your Stand-in Exchange spot balance",
+      "status": "pending",
+      "ref": "sx-earn-1",
+      "signer": "device:a5048199a8081854",
+      "authority": "owner",
+      "note": "Stand-in Exchange took it and has not finished it yet"
+    }
+  ],
+  "keys": [
+    {
+      "address": "0x3a087530887bd175ccc38828ee3776e5b6ea1ac6",
+      "name": "Claude Code",
+      "code": "CC",
+      "validUntil": "2026-11-21T07:19:22.452Z",
+      "approvedAt": "2026-10-22T07:19:22.489Z",
+      "status": "ok"
+    }
+  ],
+  "requests": [],
+  "spend": [
+    {
+      "id": "spend-0001",
+      "agent": "0x3a087530887bd175ccc38828ee3776e5b6ea1ac6",
+      "agentName": "Claude Code",
+      "scope": "trade",
+      "allow": [
+        "ex",
+        "predict",
+        "wallet"
+      ],
+      "perPaymentUsd": 150,
+      "budgetUsd": 600,
+      "spentUsd": 99.99808,
+      "reservedUsd": 119.99,
+      "windowHours": 0,
+      "validUntil": "2026-10-29T07:19:22.452Z",
+      "expired": false,
+      "payTo": {}
+    },
+    {
+      "id": "spend-0003",
+      "agent": "0x3a087530887bd175ccc38828ee3776e5b6ea1ac6",
+      "agentName": "Claude Code",
+      "scope": "venues",
+      "allow": [
+        "ex",
+        "agent-claude-code"
+      ],
+      "perPaymentUsd": 50,
+      "budgetUsd": 200,
+      "spentUsd": 0,
+      "reservedUsd": 0,
+      "windowHours": 24,
+      "validUntil": "2026-10-29T07:19:22.452Z",
+      "expired": false,
+      "payTo": {}
+    },
+    {
+      "id": "spend-0004",
+      "agent": "0x3a087530887bd175ccc38828ee3776e5b6ea1ac6",
+      "agentName": "Claude Code",
+      "scope": "payees",
+      "allow": [
+        "api.example.com"
+      ],
+      "perPaymentUsd": 2,
+      "budgetUsd": 20,
+      "spentUsd": 0,
+      "reservedUsd": 0,
+      "windowHours": 0,
+      "validUntil": "2026-10-29T07:19:22.452Z",
+      "expired": false,
+      "payTo": {}
+    }
+  ],
+  "fees": [],
+  "cards": [
+    {
+      "id": "card-0001",
+      "flight": "CC-0002",
+      "usd": 119.99,
+      "reason": "Claude Code asks to buy 0.0479 ETH at Stand-in Exchange · market · about $117.63",
+      "hash": "0xbfddb7eee37759cf760cb4937dbbc7b3ea86841bfb9dee67613404c1f1172b8e",
+      "kind": "agentLiveOrder",
+      "agent": "0x3a087530887bd175ccc38828ee3776e5b6ea1ac6",
+      "agentName": "Claude Code",
+      "expiresAt": "2026-10-22T07:49:22.508Z",
+      "shown": [
+        {
+          "name": "payee",
+          "value": "Stand-in Exchange"
+        },
+        {
+          "name": "payTo",
+          "value": "ETH/USDT"
+        },
+        {
+          "name": "amount",
+          "value": "buy 0.0479 ETH"
+        },
+        {
+          "name": "protocol",
+          "value": "real order · market near 2455.75"
+        },
+        {
+          "name": "network",
+          "value": "costs at most $119.99"
+        },
+        {
+          "name": "venue",
+          "value": "ex"
+        },
+        {
+          "name": "symbol",
+          "value": "ETH/USDT"
+        },
+        {
+          "name": "side",
+          "value": "buy"
+        },
+        {
+          "name": "orderType",
+          "value": "market"
+        },
+        {
+          "name": "qty",
+          "value": ""
+        },
+        {
+          "name": "usd",
+          "value": "120"
+        },
+        {
+          "name": "limitPrice",
+          "value": ""
+        }
+      ]
+    }
+  ],
+  "pay": {
+    "payees": [],
+    "sessions": []
+  },
+  "connectable": [],
+  "liveUsd": 29113.1,
+  "connectLive": {
+    "home": "/var/folders/kq/w_lw73j15_372jzqj3kw5zf00000gn/T/ui-standin-EwRB37",
+    "options": [
+      {
+        "connector": "live:paper",
+        "label": "Paper account · paper money, the public markets (US stocks, coins, perpetuals, tokenised shares, event contracts), the account's own book",
+        "needs": "none",
+        "example": "Nothing to connect: the account opens a paper account of its own — $10,000 of paper money unless another sum in dollars is given — trading every market the public sources list (US stocks at real-time public quotes in every session they cover — pre-market, regular, after-hours, overnight — coins, perpetuals with leverage, tokenised shares, Kalshi and Polymarket event contracts) with market, limit, stop, trailing-stop and bracket orders, filled at the public quote by the account's own rule and settled when their venues settle. No real money anywhere. Several can be open at once, each with its own name.",
+        "venues": [],
+        "kind": "paper"
+      },
+      {
+        "connector": "live:exchange",
+        "label": "Exchange account · API key",
+        "needs": "key-file",
+        "example": "{\"apiKey\": \"…\", \"secret\": \"…\"} (OKX, KuCoin and Bitget also need \"password\": the API passphrase)",
+        "defaultRef": "credentials/<venue>/api-key.json",
+        "venues": [
+          "binance",
+          "okx",
+          "bybit",
+          "kraken"
+        ],
+        "kind": "exchange"
+      },
+      {
+        "connector": "live:alpaca",
+        "label": "Alpaca · brokerage account, API key",
+        "needs": "key-file",
+        "example": "{\"keyId\": \"…\", \"secret\": \"…\"} (add \"paper\": \"true\" for a paper-trading account)",
+        "defaultRef": "credentials/<venue>/api-key.json",
+        "venues": [
+          "alpaca"
+        ],
+        "kind": "alpaca"
+      },
+      {
+        "connector": "live:alpaca-paper",
+        "label": "Alpaca · paper trading on its paper account, API key (no real money)",
+        "needs": "key-file",
+        "example": "{\"keyId\": \"…\", \"secret\": \"…\"} (the keys of your Alpaca PAPER account: in the dashboard switch to Paper, then Generate New Keys)",
+        "defaultRef": "credentials/<venue>/api-key.json",
+        "venues": [],
+        "kind": "alpaca-paper"
+      },
+      {
+        "connector": "live:robinhood",
+        "label": "Robinhood · investing accounts, through Robinhood's own sign-in",
+        "needs": "sign-in",
+        "example": "Robinhood's own page opens: you sign in there and approve this account. It reads every Robinhood account through Robinhood's MCP server, and trades only in your Agentic account, only on your signature or inside a limit you give an agent.",
+        "venues": [],
+        "kind": "robinhood"
+      },
+      {
+        "connector": "live:robinhood-crypto",
+        "label": "Robinhood Crypto · API key",
+        "needs": "key-file",
+        "example": "{\"apiKey\": \"rh-api-…\", \"privateKey\": \"…\"} (the base64 private key you made; Robinhood was given its public half when the credential was created)",
+        "defaultRef": "credentials/<venue>/api-key.json",
+        "venues": [],
+        "kind": "robinhood-crypto"
+      },
+      {
+        "connector": "live:kalshi",
+        "label": "Kalshi · prediction-market account, API key",
+        "needs": "key-file",
+        "example": "{\"keyId\": \"…\", \"privateKeyFile\": \"credentials/kalshi/private-key.pem\"} (the .pem is the file Kalshi gives you when the key is made; a key made with write access places orders, a read-only one only reads)",
+        "defaultRef": "credentials/<venue>/api-key.json",
+        "venues": [
+          "kalshi"
+        ],
+        "kind": "kalshi"
+      },
+      {
+        "connector": "live:polymarket-us",
+        "label": "Polymarket US · prediction-market account, API key",
+        "needs": "key-file",
+        "example": "{\"keyId\": \"…\", \"secretKey\": \"…\"} — the Key ID and the Secret Key polymarket.us/developer gives when the key is made (the Secret Key is shown once)",
+        "defaultRef": "credentials/<venue>/api-key.json",
+        "venues": [],
+        "kind": "polymarket-us"
+      },
+      {
+        "connector": "live:metamask",
+        "label": "MetaMask Agent Wallet · the mm command line on this machine",
+        "needs": "cli",
+        "example": "Reads through MetaMask's own mm command line, signed in on this machine: nothing to paste. Check that mm wallet show works in a terminal first.",
+        "venues": [
+          "metamask"
+        ],
+        "kind": "metamask"
+      },
+      {
+        "connector": "live:wallet",
+        "label": "Wallet · any EVM wallet, by its address",
+        "needs": "address",
+        "example": "Connect a browser wallet (OKX Wallet, Binance Wallet, MetaMask …) and it signs one sentence to show the address is yours; or paste an address to watch it — a Robinhood Wallet's too: its Stock Tokens on Robinhood Chain are read with the rest.",
+        "venues": [
+          "metamask",
+          "okx-wallet"
+        ],
+        "kind": "wallet"
+      },
+      {
+        "connector": "live:hyperliquid",
+        "label": "Hyperliquid · by the account's address",
+        "needs": "address",
+        "example": "The address of the Hyperliquid account itself (the master account, not an API wallet).",
+        "venues": [
+          "hyperliquid"
+        ],
+        "kind": "hyperliquid"
+      },
+      {
+        "connector": "live:hyperliquid-trade",
+        "label": "Hyperliquid · trading, with an API wallet that cannot withdraw",
+        "needs": "key-file",
+        "example": "{\"walletAddress\": \"0x… (the Hyperliquid account's own address)\", \"privateKey\": \"0x… (the private key of an API wallet that account approved: More → API → Generate → Authorize API Wallet)\"}",
+        "defaultRef": "credentials/<venue>/api-key.json",
+        "venues": [
+          "hyperliquid"
+        ],
+        "kind": "hyperliquid-trade"
+      }
+    ],
+    "writes": {
+      "on": true,
+      "capUsd": 250,
+      "turnOn": "npm run account"
+    },
+    "waiting": []
+  },
+  "subAccounts": [
+    {
+      "id": "sub-0002",
+      "name": "Claude Code",
+      "agent": "0x3a087530887bd175ccc38828ee3776e5b6ea1ac6",
+      "agentName": "Claude Code",
+      "address": "0x50dc2f1ea38d8ba8827b62b13199d9aa5e5e0df4",
+      "capUsd": 100,
+      "balanceUsd": 47.37
+    }
+  ],
+  "signers": {
+    "owners": [
+      {
+        "id": "device:a5048199a8081854",
+        "kind": "device",
+        "label": "Stand-in seed key"
+      }
+    ],
+    "threshold": 1,
+    "pendingDevices": []
+  },
+  "activeKeys": 1,
+  "watch": [
+    {
+      "venue": "ex",
+      "symbol": "BTC/USDT",
+      "at": "2026-10-22T07:19:22.517Z"
+    },
+    {
+      "venue": "predict",
+      "symbol": "SI-FEDCUT-DEC:YES",
+      "at": "2026-10-22T07:19:22.518Z"
+    },
+    {
+      "venue": "standin-pubex",
+      "symbol": "DOGE/USD",
+      "at": "2026-10-22T07:19:22.518Z"
+    }
+  ],
+  "intents": [
+    {
+      "id": "intent-0005",
+      "agent": "0x3a087530887bd175ccc38828ee3776e5b6ea1ac6",
+      "agentName": "Claude Code",
+      "venue": "ex",
+      "symbol": "SOL/USDT",
+      "side": "buy",
+      "usd": "300",
+      "text": "Build a SOL position under $140, a little at a time",
+      "validUntil": "2026-10-25T07:19:22.452Z",
+      "at": "2026-10-22T07:19:22.509Z",
+      "reports": 1,
+      "report": {
+        "status": "taking",
+        "note": "Placed a $100 limit 1% under the market (ord-0010); I will add on dips under $140.",
+        "refs": [
+          "ord-0010"
+        ],
+        "by": "0x3a087530887bd175ccc38828ee3776e5b6ea1ac6",
+        "at": "2026-10-22T07:19:22.512Z",
+        "n": 1,
+        "byName": "Claude Code"
+      },
+      "byAgent": [
+        {
+          "status": "taking",
+          "note": "Placed a $100 limit 1% under the market (ord-0010); I will add on dips under $140.",
+          "refs": [
+            "ord-0010"
+          ],
+          "by": "0x3a087530887bd175ccc38828ee3776e5b6ea1ac6",
+          "at": "2026-10-22T07:19:22.512Z",
+          "n": 1,
+          "byName": "Claude Code"
+        }
+      ]
+    },
+    {
+      "id": "intent-0006",
+      "agent": "*",
+      "agentName": "every agent",
+      "venue": "",
+      "symbol": "BTC/USDT",
+      "side": "",
+      "usd": "",
+      "text": "Tell me if BTC moves more than 5% in a day",
+      "validUntil": "2026-10-29T07:19:22.452Z",
+      "at": "2026-10-22T07:19:22.509Z",
+      "reports": 0,
+      "byAgent": []
+    }
+  ],
+  "asks": [
+    {
+      "id": "ask-0001",
+      "agent": "0x3a087530887bd175ccc38828ee3776e5b6ea1ac6",
+      "agentName": "Claude Code",
+      "kind": "limit",
+      "venue": "ex",
+      "usd": "1000",
+      "text": "Raise my trading budget to $1,000 so I can finish the SOL position you asked for",
+      "at": "2026-10-22T07:19:22.515Z",
+      "expiresAt": "2026-10-23T07:19:22.515Z"
+    },
+    {
+      "id": "ask-0002",
+      "agent": "0x3a087530887bd175ccc38828ee3776e5b6ea1ac6",
+      "agentName": "Claude Code",
+      "kind": "venue",
+      "venue": "standin-pubex",
+      "usd": "",
+      "text": "Connect Stand-in Public Exchange: DOGE trades only there",
+      "at": "2026-10-22T07:19:22.517Z",
+      "expiresAt": "2026-10-23T07:19:22.517Z"
+    }
+  ],
+  "declinedAsks": [],
+  "modeRules": {
+    "rows": [
+      {
+        "door": "Place or enlarge an order",
+        "guard": "Waits on a card",
+        "beast": "At once"
+      },
+      {
+        "door": "Close a spot, stock or contract holding",
+        "guard": "Waits on a card",
+        "beast": "At once; counts against its trading limit, like a sell"
+      },
+      {
+        "door": "Close a derivative position",
+        "guard": "Waits on a card",
+        "beast": "At once inside its per-order line; a card above it"
+      },
+      {
+        "door": "Change leverage with a position open",
+        "guard": "Waits on a card",
+        "beast": "At once if the position is inside its per-order line; else a card"
+      },
+      {
+        "door": "Move money between your accounts",
+        "guard": "Waits on a card",
+        "beast": "At once"
+      },
+      {
+        "door": "Put money into earn",
+        "guard": "Waits on a card",
+        "beast": "At once"
+      },
+      {
+        "door": "Take money out of earn",
+        "guard": "Waits on a card",
+        "beast": "At once inside its per-supply line; a card above it"
+      },
+      {
+        "door": "Pay from its agent wallet",
+        "guard": "Waits on a card",
+        "beast": "At once for a payee it paid before; the first payment to a payee still waits on a card, unless its limit says any payee"
+      },
+      {
+        "door": "Cancel its own order",
+        "guard": "At once, never a card",
+        "beast": "At once, never a card"
+      },
+      {
+        "door": "Set leverage with no position open",
+        "guard": "At once",
+        "beast": "At once"
+      },
+      {
+        "door": "The desk's own seats at its paper account",
+        "guard": "At once inside each seat's trading limit once you sign the desk's autonomy on paper; until then, waits on a card",
+        "beast": "At once"
+      }
+    ],
+    "cardMinutes": 30
+  },
+  "real": true,
+  "dollars": [
+    "USD",
+    "USDC",
+    "USDC.E",
+    "USDT",
+    "USDT0",
+    "USD₮0",
+    "USD₮",
+    "FDUSD",
+    "PYUSD",
+    "DAI",
+    "TUSD",
+    "USDP"
+  ],
+  "networks": [
+    "Ethereum",
+    "Optimism",
+    "BNB Chain",
+    "Polygon",
+    "Base",
+    "Arbitrum"
+  ],
+  "bridgeChains": [
+    "Ethereum",
+    "Optimism",
+    "BNB Chain",
+    "Polygon",
+    "Base",
+    "Arbitrum",
+    "Robinhood Chain"
+  ],
+  "mode": "guard",
+  "live": false,
+  "dial": {
+    "sessionExpiresAt": "2026-11-21T07:19:22.447Z",
+    "sessionEnded": false,
+    "revoked": [],
+    "maxLeverage": 5
+  },
+  "health": {
+    "ex": {
+      "lastOkAt": "2026-10-22T07:19:22.528Z",
+      "ms": 0
+    }
+  },
+  "memoryAsks": [],
+  "agentSetup": {
+    "command": "claude mcp add portfolio -e PORTFOLIO_URL=http://127.0.0.1:49210 -- npx tsx /Users/pan/buyer-agent-demo/src/portfolio/mcp.ts",
+    "url": "http://127.0.0.1:49210"
+  }
+}
