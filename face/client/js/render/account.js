@@ -65,27 +65,32 @@ function tabs(state, tab) {
 
 // ── Portfolio ──
 
-// the change for the range: the curve's own range word (a read for a range the screen has since left says so), partial
-// when the Account says it is, and since when for All
-function changeLine(a) {
+// the change for the range in one run: the change (— when the Account gave none), the curve's own range word (a read for a
+// range the screen has since left says so), partial when the Account says it is, since when for All; and on the paper curve,
+// what the paper book made since its start and whether the Account rebuilt it from the book
+function changeLine(a, paperLeads) {
   const c = changeOf(a.history.data);
-  if (c.usd === null) return '';
   const range = RANGES.find(([id]) => id === a.history.data?.range) ?? RANGES.find(([id]) => id === a.history.range);
   const since = range?.[0] === 'all' && c.first ? dateWord(c.first) : '';
-  const words = [range?.[1], c.partial ? 'partial' : '', since ? `since ${since}` : ''].filter(Boolean).join(' · ');
-  return `<div class="delta"><span class="${tone(c.usd)}">${esc(signedMoney(c.usd))} · ${esc(pctWord(c.pct))}</span>${words ? `<span class="dim">${esc(words)}</span>` : ''}</div>`;
+  const words = [
+    c.usd === null ? '—' : `${signedMoney(c.usd)} · ${pctWord(c.pct)}`, range?.[1], c.partial ? 'partial' : '', since ? `since ${since}` : '',
+    paperLeads && c.sinceStartUsd !== null ? `since start ${signedMoney(c.sinceStartUsd)}` : '', paperLeads && c.rebuilt ? 'rebuilt' : '',
+  ].filter(Boolean).join(' · ');
+  return `<div class="delta"><span class="${tone(c.usd)}">${esc(words)}</span></div>`;
 }
 
-function assetsBox(a) {
-  const rows = assetsOf(a.holdings.data).map(r => [
+// Assets and Positions are the leading lens's read: the paper book's (holdings?cost=1&paper=1) while Paper leads, else real
+// money's (holdings?cost=1)
+function assetsBox(lens) {
+  const rows = assetsOf(lens.data).map(r => [
     lines(r.asset, r.venues.map(v => [v.venueName || v.venue, numWord(v.amount), v.stale ? 'stale' : ''].filter(Boolean).join(' · '))),
     esc(numWord(r.amount)), esc(price(r.price)), `<span class="${tone(r.changePct24h)}">${esc(pctWord(r.changePct24h))}</span>`, esc(money(r.usd)),
   ]);
-  return box(`${title('Assets')}${rows.length ? table(['Asset', 'Amount', 'Price', '24h', 'Value'], rows) : readNote(a.holdings, 'Holdings unavailable', 'No assets')}`, 'Assets');
+  return box(`${title('Assets')}${rows.length ? table(['Asset', 'Amount', 'Price', '24h', 'Value'], rows) : readNote(lens, 'Holdings unavailable', 'No assets')}`, 'Assets');
 }
 
-function positionsBox(a) {
-  const rows = positionsOf(a.holdings.data).map(p => [
+function positionsBox(lens) {
+  const rows = positionsOf(lens.data).map(p => [
     lines(p.symbol, [[p.venueName || p.venue, p.side, numWord(p.qty)].filter(Boolean).join(' · ')], p.paper ? 'Paper' : ''),
     esc(money(p.usd)), esc(price(p.entryPrice)), esc(price(p.markPrice)), `<span class="${tone(p.unrealizedUsd)}">${esc(signedMoney(p.unrealizedUsd))}</span>`,
   ]);
@@ -116,10 +121,11 @@ function portfolio(state, now) {
   // a page the Account says is stale, or a read that failed after a good one: the last good figures, stamped with the page's time
   const failed = a.status === 'error';
   const stale = failed || a.data.stale === true ? note(`As of ${when(a.data.now, now) || 'earlier'} · stale`) : '';
-  const worth = box(`${figures}${changeLine(a)}${seg(RANGES.map(([id, word]) => [word, id]), a.history.range, 'setHistoryRange')}` +
-    `${curveSvg(a.history.data?.points, { currency: 'USD' })}${gone.length ? note(gone.join(' · ')) : ''}${stale}` +
+  const worth = box(`${figures}${changeLine(a, w.paperLeads)}${seg(RANGES.map(([id, word]) => [word, id]), a.history.range, 'setHistoryRange')}` +
+    `${curveSvg(a.history.data?.points, { currency: 'USD', label: w.lead.label })}${gone.length ? note(gone.join(' · ')) : ''}${stale}` +
     `<div class="btn-row">${failed ? retry : ''}<button type="button" class="btn-sm" data-action="openStatement">Statement</button></div>`, 'Portfolio');
-  return `<div class="cards">${worth}${assetsBox(a)}${positionsBox(a)}${ordersBox(a)}</div>`;
+  const lens = w.paperLeads ? a.paper : a.holdings;
+  return `<div class="cards">${worth}${assetsBox(lens)}${positionsBox(lens)}${ordersBox(a)}</div>`;
 }
 
 // ── Venues ──
@@ -217,11 +223,15 @@ function cardsTab(state, now) {
 
 // ── the drawers ──
 
-// the Statement: the Account's lines newest first, each with who it was by, and their CSV
+// the Statement: the Account's lines newest first, each with who it was by, its status in the Account's word and its fee
+// when it had one, and their CSV
 export function renderStatement(state, now) {
   const st = state.account.statement;
-  const rows = statementLinesOf(st.data).map(l => `<div class="activity-row"><span class="dim">${esc(when(l.at, now))}</span>` +
-    `<span class="activity-text">${esc(l.description)}${l.by ? `<br><span class="dim">${esc(l.by)}</span>` : ''}</span><span class="num">${esc(money(l.amountUsd))}</span></div>`).join('');
+  const rows = statementLinesOf(st.data).map(l => {
+    const facts = [l.by, l.status, l.feeUsd === null ? '' : `fee ${money(l.feeUsd)}`].filter(Boolean).join(' · ');
+    return `<div class="activity-row"><span class="dim">${esc(when(l.at, now))}</span>` +
+      `<span class="activity-text">${esc(l.description)}${facts ? `<br><span class="dim">${esc(facts)}</span>` : ''}</span><span class="num">${esc(money(l.amountUsd))}</span></div>`;
+  }).join('');
   const body = rows ? `<div class="activity">${rows}</div><div class="btn-row"><button type="button" class="btn-sm" data-action="exportStatement">Export CSV</button></div>`
     : readNote(st, 'Statement unavailable', 'No statement lines yet');
   return `<aside class="drawer" aria-label="Statement"><div class="drawer-head"><h2>Statement</h2><button type="button" class="close-key" data-action="closeStatement" aria-label="Close">×</button></div>` +

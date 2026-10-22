@@ -147,6 +147,22 @@ test('rail: the worth line is the lead figure with Paper when paper leads', () =
   assert.match(renderNav(R.accountFailed(paper, { at: NOW, message: 'locked' })), /\$25,400\.00 · Paper/);
 });
 
+test('rail: the Account key carries the count of the cards waiting, as Messages carries its gates; none when none wait', () => {
+  const on = R.nav(listed([conv('a')]), { screen: 'markets', id: null });
+  const page = fx('account');   // one card waiting, Claude Code's
+  assert.match(renderNav(R.accountLoaded(on, { data: page, at: NOW })),
+    /<span class="account-body"><span class="account-title">Account<\/span><span class="account-line">\$29,138\.10<\/span><\/span><span class="nav-badge">1<\/span><\/a>/);
+  const two = { ...page, cards: [page.cards[0], { ...page.cards[0], id: 'card-0002', agent: '0xb0b', agentName: 'Scout' }] };
+  assert.match(renderNav(R.accountLoaded(on, { data: two, at: NOW })), /<span class="nav-badge">2<\/span><\/a>/, 'every card of every agent');
+  assert.equal(count(renderNav(R.accountLoaded(on, { data: two, at: NOW })), /class="nav-badge"/g), 1, 'the Messages key has no gate waiting');
+  for (const none of [{ ...page, cards: [] }, { ok: true, cards: page.cards }]) {
+    assert.doesNotMatch(renderNav(R.accountLoaded(on, { data: none, at: NOW })), /nav-badge/, 'nothing waiting, or a page the face does not recognise');
+  }
+  assert.doesNotMatch(renderNav(on), /nav-badge/, 'nothing read');
+  // collapsed, the badge stays on the key
+  assert.match(renderNav(R.toggleRail(R.accountLoaded(on, { data: page, at: NOW }))), /class="account"[^>]*title="Account">[\s\S]*<span class="nav-badge">1<\/span><\/a>/);
+});
+
 test('the Messages key never points at an archived conversation', () => {
   const s = R.nav(listed([conv('z', { archived: 'face', updatedAt: NOW }), conv('a')], 'a'), { screen: 'markets', id: null });
   const h = renderNav({ ...s, lastConv: null });

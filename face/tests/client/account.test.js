@@ -77,28 +77,49 @@ test('the head: Guard and Trading on chips; Refresh and Settings; four tabs with
 });
 
 test('Portfolio on the stand-in: Paper leads with its label; the change line; the curve; assets and positions rows; open orders with who', () => {
-  // the operator's Account: no real money, a paper book with money in it — Paper leads, with its own curve; real money second
-  const paper = draw(state({ page: { ...fx('account'), totalUsd: 0 }, history: fx('history-paper') }));
+  // the operator's Account: no real money, a paper book with money in it — Paper leads, with its own curve, its own change
+  // line and its own rows; real money second
+  const zero = { ...fx('account'), totalUsd: 0 };
+  const paper = draw(state({ page: zero, history: fx('history-paper') }));
   has(paper, '<div class="acct-figures"><div><div class="label">Paper</div><div class="networth">$25,400.00</div></div>' +
     '<div><div class="label">Net worth</div><div class="acct-second">$0.00</div></div></div>');
-  has(paper, '<div class="delta"><span class="flat">$0.00 · 0.00 %</span><span class="dim">1W</span></div>', 'a flat change is 0, drawn flat');
-  has(paper, 'from $25,000.00 to $25,400.00, low $25,000.00, high $25,400.00"', 'the paper curve');
+  // the paper curve's change in one run: the change, the range, what the book made since its start, and that it was rebuilt
+  has(paper, '<div class="delta"><span class="flat">$0.00 · 0.00 % · 1W · rebuilt</span></div>', 'a flat change is 0, drawn flat');
+  has(draw(state({ page: zero, history: { ...fx('history-paper'), startUsd: 25000, sinceStartUsd: 400 } })),
+    '<div class="delta"><span class="flat">$0.00 · 0.00 % · 1W · since start +$400.00 · rebuilt</span></div>');
+  has(draw(state({ page: zero, history: { ...fx('history-paper'), changeUsd: null } })),
+    '<div class="delta"><span class="flat">— · 1W · rebuilt</span></div>', 'no change given: the range and the paper words, never nothing');
+  // the curve named by the figure it draws
+  const paperPoints = fx('history-paper').points;
+  has(paper, `aria-label="${esc(`Paper from ${stamp(paperPoints[0].at)} to ${stamp(paperPoints.at(-1).at)}: from $25,000.00 to $25,400.00, low $25,000.00, high $25,400.00`)}"`);
+  // the leading lens's rows: the paper book's assets and positions, not real money's
+  const paperAssets = paper.match(/<section class="cardbox" aria-label="Assets">[\s\S]*?<\/section>/)?.[0] ?? '';
+  assert.deepEqual([...paperAssets.matchAll(/<tr><td><b>([^<]+)<\/b>/g)].map(m => m[1]), ['USD', 'USDC'], "holdings-paper's rows");
+  has(paperAssets, '<tr><td><b>USD</b><br><span class="dim">Momentum · paper · 25,000</span></td><td class="r">25,000</td><td class="r">$1.00</td><td class="r"><span class="flat">—</span></td><td class="r">$25,000.00</td></tr>');
+  lacks(paper, 'aria-label="Positions"', 'the paper book holds no position');
+  const paperHeld = { ...fx('holdings-paper'), positions: [{ venue: 'paper-momentum', venueName: 'Momentum · paper', symbol: 'ETH/USD:USD', side: 'long', qty: 1, usd: 2450, paper: true }] };
+  const paperBox = draw(state({ page: zero, paper: paperHeld })).match(/<section class="cardbox" aria-label="Positions">[\s\S]*?<\/section>/)?.[0] ?? '';
+  has(paperBox, '<b>ETH/USD:USD</b> <span class="chip grey">Paper</span><br><span class="dim">Momentum · paper · long · 1</span>');
+  lacks(paperBox, 'BTC/USDT:USDT', "real money's positions stay with real money");
 
-  // the stand-in as captured: real money leads, Paper second
+  // the stand-in as captured (its page's totalUsd is 29,138.10): real money leads, with its own rows, Paper second
   const html = draw(state());
   has(html, '<div class="acct-figures"><div><div class="label">Net worth</div><div class="networth">$29,138.10</div></div>' +
     '<div><div class="label">Paper</div><div class="acct-second">$25,400.00</div></div></div>');
   assert.match(draw(state({ paper: null })), /<div class="networth">\$29,138\.10<\/div><\/div><\/div>/, 'no paper lens read: one figure');
-  // the change for the range: the Account's percent drawn as a percent (0.72 is 0.72 %, never 72 %), the range the curve was read for
-  has(html, '<div class="delta"><span class="up">+$208.78 · +0.72 %</span><span class="dim">1W</span></div>');
+  // the change for the range in one run: the Account's percent drawn as a percent (0.72 is 0.72 %, never 72 %), the range the
+  // curve was read for
+  has(html, '<div class="delta"><span class="up">+$208.78 · +0.72 % · 1W</span></div>');
   lacks(html, '72.00');
+  has(draw(state({ history: { ...fx('history'), sinceStartUsd: 5, rebuilt: true } })), '<div class="delta"><span class="up">+$208.78 · +0.72 % · 1W</span></div>',
+    "the paper words are the paper curve's alone");
   has(draw(state({ history: { ...fx('history'), changeUsd: -12.5, changePct: -0.04, partial: true } })),
-    '<div class="delta"><span class="down">-$12.50 · -0.04 %</span><span class="dim">1W · partial</span></div>');
+    '<div class="delta"><span class="down">-$12.50 · -0.04 % · 1W · partial</span></div>');
   has(draw(state({ range: 'all', history: { ...fx('history'), range: 'all', changePct: null } })),
-    `<div class="delta"><span class="up">+$208.78 · —</span><span class="dim">All · since ${fmtDate(Date.parse('2026-10-15T07:35:46.850Z'))}</span></div>`);
+    `<div class="delta"><span class="up">+$208.78 · — · All · since ${fmtDate(Date.parse('2026-10-15T07:35:46.850Z'))}</span></div>`);
   // a read for a range the screen has since left is labelled as what it is, not as the range pressed
-  has(draw(R.setHistoryRange(state(), '1m')), '<span class="dim">1W</span>');
-  lacks(draw(state({ history: null })), 'class="delta"', 'no history read: no change line');
+  has(draw(R.setHistoryRange(state(), '1m')), '<span class="up">+$208.78 · +0.72 % · 1W</span>');
+  has(draw(state({ history: null })), '<div class="delta"><span class="flat">— · 1W</span></div>', 'no history read: the range alone, never nothing');
   // the ranges, the pressed one the slice's; each key hands the Account's own range name
   has(html, '<div class="seg"><button type="button" class="seg-item" aria-pressed="false" data-action="setHistoryRange" data-value="1d">1D</button>' +
     '<button type="button" class="seg-item pressed" aria-pressed="true" data-action="setHistoryRange" data-value="1w">1W</button>' +
@@ -310,8 +331,11 @@ test('the Statement drawer: the lines newest first with by; Export CSV', () => {
   const lines = fx('statement').lines;
   const rows = [...drawer.matchAll(/<div class="activity-row">([\s\S]*?)<\/span><\/div>/g)];
   assert.equal(rows.length, lines.length);
-  has(drawer, `<div class="activity-row"><span class="dim">${hhmm(lines[0].at)}</span><span class="activity-text">Buy 0.707 SOL · SOL / USDT · limit 141.44<br><span class="dim">Claude Code, inside its limit</span></span><span class="num">$0.00</span></div>`);
-  has(drawer, '<span class="activity-text">Buy 0.02 WETH · Wrapped Ether on Base · market · at 2,458.55<br><span class="dim">You</span></span><span class="num">-$49.17</span>');
+  // each line's who, its status in the Account's word, and its fee when it had one
+  has(drawer, `<div class="activity-row"><span class="dim">${hhmm(lines[0].at)}</span><span class="activity-text">Buy 0.707 SOL · SOL / USDT · limit 141.44<br><span class="dim">Claude Code, inside its limit · open</span></span><span class="num">$0.00</span></div>`);
+  has(drawer, '<span class="activity-text">Buy 0.02 WETH · Wrapped Ether on Base · market · at 2,458.55<br><span class="dim">You · filled · fee $0.15</span></span><span class="num">-$49.17</span>');
+  has(drawer, 'Swap 50 USDC → USDT<br><span class="dim">You · settled</span>');
+  has(drawer, 'Supply 150 USDT · USDT · Flexible (stand-in) · 4.6% APY<br><span class="dim">You · pending</span>');
   assert.ok(drawer.indexOf('Buy 0.707 SOL') < drawer.indexOf('Sell 0.002 BTC'), 'newest first');
   const reversed = renderStatement(R.statementLoaded(s, { data: { ok: true, lines: [...lines].reverse() }, at: NOW }), NOW);
   assert.ok(reversed.indexOf('Buy 0.707 SOL') < reversed.indexOf('Sell 0.002 BTC'), 'whatever order the lines come in');

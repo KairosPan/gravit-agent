@@ -30,17 +30,18 @@ export function chartSvg(rows, { currency } = {}) {
   return drawn(points.map(p => p.close), { label: `Daily closes from ${first} to ${last}`, first, last, f: v => price(v, currency) });
 }
 
-// a point's time as the axis says it, on the operator's clock (Oct 15 09:30); one that does not parse says nothing
+// a point's time as the axis says it, on the operator's clock (Oct 15 09:30); one that does not parse is no time
 const timeWord = at => { const t = Date.parse(at); return Number.isNaN(t) ? '' : `${fmtDate(t)} ${fmtClock(t)}`; };
 
-/** The Account's net worth over the curve's range: its history points ({ at, usd }, oldest first, as the Account sends them),
- *  a point without a number left out, in the closes chart's box; fewer than two points draw nothing. */
-export function curveSvg(points, { currency } = {}) {
+/** A figure of the Account's over the curve's range — Net worth, or Paper as the renderer names the figure the curve draws:
+ *  its history points ({ at, usd }, oldest first, as the Account sends them), a point without a number or a time left out,
+ *  in the closes chart's box; fewer than two points draw nothing. */
+export function curveSvg(points, { currency, label = 'Net worth' } = {}) {
   const kept = (Array.isArray(points) ? points : [])
     .map(p => ({ at: timeWord(p?.at), usd: number(p?.usd) }))
-    .filter(p => p.usd !== null);
+    .filter(p => p.usd !== null && p.at !== '');
   if (kept.length < 2) return '';
   const first = kept[0].at;
   const last = kept.at(-1).at;
-  return drawn(kept.map(p => p.usd), { label: `Net worth from ${first} to ${last}`, first, last, f: v => price(v, currency) });
+  return drawn(kept.map(p => p.usd), { label: `${label} from ${first} to ${last}`, first, last, f: v => price(v, currency) });
 }

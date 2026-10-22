@@ -58,5 +58,9 @@ test('curveSvg: the net worth in the same box, labelled by its points\' times; f
   assert.equal(lineOf(gaps).split(/[ML]/).filter(Boolean).length, 2);
   assert.ok(gaps.includes(`Net worth from ${word(1)} to ${word(3)}: from $28,929.32 to $28,591.76`));
   assert.doesNotMatch(curveSvg(points([25400, 25400]), { currency: 'USD' }), /NaN/, 'a flat book still draws');
-  assert.doesNotMatch(curveSvg([{ at: 'not a time', usd: 1 }, { usd: 2 }], { currency: 'USD' }), /NaN|undefined|null/, 'a time that does not parse says nothing');
+  // the curve says whose figure it draws, Net worth unless told
+  assert.ok(curveSvg(points([25000, 25400]), { currency: 'USD', label: 'Paper' }).includes(`aria-label="Paper from ${word(0)} to ${word(1)}: from $25,000.00 to $25,400.00`));
+  // a point whose time does not parse is left out, as one without a number is
+  const timeless = curveSvg([{ at: 'not a time', usd: 99 }, ...points([10, 20]), { usd: 5 }], { currency: 'USD' });
+  assert.ok(timeless.includes(`aria-label="Net worth from ${word(0)} to ${word(1)}: from $10.00 to $20.00, low $10.00, high $20.00"`), timeless);
 });

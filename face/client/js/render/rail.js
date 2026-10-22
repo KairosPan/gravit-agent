@@ -5,7 +5,7 @@ import { icon } from '../icons.js';
 import { rowTime } from '../time.js';
 import { needsAnswer } from '../messages.js';
 import { unreadOf, firstOpen } from '../host/sessions.js';
-import { worthOf } from '../host/account-view.js';
+import { worthOf, cardsOf } from '../host/account-view.js';
 import { money } from '../wire/account-model.js';
 import { avatar, groupMark } from './avatars.js';
 import { groupsOf } from '../host/list-view.js';
@@ -56,13 +56,14 @@ function navItem(href, name, label, current, mini, badge = 0) {
 }
 
 // the first level: Messages (its badge counts the conversations with a card waiting on you), Markets, Account with its
-// leading figure once the Account's page has answered — the paper book's, named so, when it leads — and the collapse key;
-// it collapses to a strip of icons
+// leading figure once the Account's page has answered — the paper book's, named so, when it leads — and its badge counting
+// the cards waiting for you on the Account, and the collapse key; it collapses to a strip of icons
 function worthLine(state) {
   const a = state.account;
   const { lead, paperLeads } = worthOf(a?.data, a?.holdings?.data, a?.paper?.data);
   return lead.usd === null ? '' : `<span class="account-line">${esc(money(lead.usd))}${paperLeads ? ' · Paper' : ''}</span>`;
 }
+const cardsWaiting = state => cardsOf(state.account?.data).reduce((n, g) => n + g.cards.length, 0);
 
 export function renderNav(state) {
   const { screen } = state.route;
@@ -71,6 +72,7 @@ export function renderNav(state) {
   // the last one open, unless it has since been archived; else the first open one
   const last = state.lastConv && !state.conversations.some(c => c.id === state.lastConv && c.archived) ? state.lastConv : null;
   const messagesHref = `#/messages/${screen === 'messages' && state.route.id && state.route.id !== 'new' ? state.route.id : last ?? firstOpen(state.conversations)?.id ?? ''}`;
+  const cards = cardsWaiting(state);
   return `<nav class="${cls('rail', mini && 'mini')}" aria-label="Gravit">
   <div class="brand">${avatar('gravit', 28)}<span class="brand-name">Gravit</span>` +
     `<button type="button" class="rail-toggle" data-action="toggleRail" aria-expanded="${mini ? 'false' : 'true'}" aria-label="${mini ? 'Expand navigation' : 'Collapse navigation'}">${icon(mini ? 'chevRight' : 'chevLeft', 16, 2.2)}</button></div>
@@ -81,7 +83,7 @@ export function renderNav(state) {
   </div>
   <div class="rail-foot">
     <div class="rail-lines"><button type="button" class="line-key" data-action="openSettings" aria-label="Settings" title="Settings">${icon('bars', 20, 2)}</button></div>
-    <a${attrs({ class: cls('account', screen === 'account' && 'current'), 'aria-current': screen === 'account' ? 'page' : null, href: '#/account/portfolio', title: mini ? 'Account' : null })}>${icon('wallet', 22, 2)}<span class="account-body"><span class="account-title">Account</span>${worthLine(state)}</span></a>
+    <a${attrs({ class: cls('account', screen === 'account' && 'current'), 'aria-current': screen === 'account' ? 'page' : null, href: '#/account/portfolio', title: mini ? 'Account' : null })}>${icon('wallet', 22, 2)}<span class="account-body"><span class="account-title">Account</span>${worthLine(state)}</span>${cards ? `<span class="nav-badge">${cards}</span>` : ''}</a>
   </div>
 </nav>`;
 }
