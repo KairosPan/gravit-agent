@@ -328,8 +328,9 @@ const named = l => str(l.venue) !== '' && str(l.symbol) !== '';
 const pairAt = l => (l ? `${l.venue}|${l.symbol}` : null);
 // the market /quotes names a row by: its most traded connected line (the first), `venue|symbol`; null with none
 const pairOf = legs => pairAt(legs.find(l => l.connected && named(l)));
-// the market a page follows on the Account's stream (host/markets.js): that line, else its first public listing
-const followOf = legs => pairAt(legs.find(l => l.connected && named(l)) ?? legs.find(l => l.public && named(l)));
+/** The line a market's page follows on the Account's stream (host/markets.js): its first connected line, else its first public
+ *  listing — a legsOf line, or null. */
+export const followOf = item => { const legs = legsOf(item); return legs.find(l => l.connected && named(l)) ?? legs.find(l => l.public && named(l)) ?? null; };
 const unpriced = () => ({ price: null, unit: 'usd', changePct: null, change24h: null, volume: null, volumeUnit: 'usd', implied: null });
 const KIND_TABS = new Set(ACCOUNT_TABS.map(([id]) => id).filter(id => id !== 'all'));
 // a contract on a venue's estimate of a private company's valuation: its implied valuation, or its tab, says so
@@ -496,7 +497,7 @@ export function pageOf(markets, account, id, now = Date.now()) {
   if (!found) return null;
   const item = noIcon(found);
   const legs = legsOf(item);
-  const pair = followOf(legs);
+  const pair = pairAt(followOf(item));
   const quote = pair ? own(m.accountQuotes, pair) : undefined;
   const live = isRecord(quote) ? noIcon(quote) : null;
   const chart = own(m.candles, id);

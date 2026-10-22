@@ -149,13 +149,16 @@ const barRows = closes => closes.map((close, i) => ({ date: `2026-10-${String(10
 const account = (positions, orders = []) => ({ ok: true, available: true, host: 'paper-api.alpaca.markets', account: { equity: '1000', last_equity: '990', cash: '400', currency: 'USD' }, positions, orders, generated_at: 'g' });
 const filled = (id, symbol, side, qty, price, at) => ({ id, symbol, side, qty: String(qty), filled_qty: String(qty), filled_avg_price: String(price), type: 'market', status: 'filled', submitted_at: at, filled_at: at });
 
+// a page's daily bars as this renderer reads them: no host reads /data/bars any more, so the state is built by hand
+const withBars = (s, id, bar) => ({ ...s, markets: { ...s.markets, bars: { ...s.markets.bars, [id]: bar } } });
+
 function page(id, { watch = [], quotes = [], bars = null, data = null, conversations = [] } = {}) {
   let s = R.nav(emptyState(), { screen: 'markets', id });
   s = R.watchlistLoaded(s, { items: watch, error: null });
   s = R.quotesUpdated(s, { quotes: Object.fromEntries(quotes.map(x => [x.id, x])), providers: [], status: 'streaming' });
-  if (bars === 'failed') s = R.barsFailed(s, { id });
-  else if (bars === 'loading') s = R.barsLoading(s, { id });
-  else if (bars) s = R.barsLoaded(s, { id, payload: bars });
+  if (bars === 'failed') s = withBars(s, id, { status: 'failed' });
+  else if (bars === 'loading') s = withBars(s, id, { status: 'loading' });
+  else if (bars) s = withBars(s, id, { status: 'ready', payload: bars });
   if (data) s = R.accountLoaded(s, { data, at: NOW });
   if (conversations.length) s = { ...s, conversations };
   return renderMarketsScreen(s, NOW);

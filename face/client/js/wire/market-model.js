@@ -1,4 +1,4 @@
-/** Pure view and persistence helpers for a market-qualified personal watchlist. */
+/** Pure view and persistence helpers for a market-qualified personal watchlist, and the Account's market keys starred beside it. */
 
 export const STORAGE_KEY = "gravit.market.watchlist.v1";
 /** Where a browser kept its list before the 2026-10-08 rename: read while the new
@@ -119,6 +119,72 @@ export function saveWatchlist(storage, items) {
     return null;
   } catch {
     return "无法保存到本机；刷新页面后，本次修改可能丢失。";
+  }
+}
+
+/** Where this browser keeps the Account's markets it stars: their row keys (`coin:BTC`, `stock:AAPL`, `event:<venue>:<market>`),
+ *  the Account's grammar and not the face's, so under a key of their own (spec 2026-10-22 §6.1). */
+export const ACCOUNT_WATCH_KEY = "gravit.account.watch.v1";
+const ACCOUNT_WATCH_LIMIT = 100;
+/** An Account row key, shaped as host/market-view.js's isAccountKey reads one. */
+const ACCOUNT_KEY = /^(coin|stock|perp|rwa|event|preipo|kalshi|pm|pmus):/;
+/** @param {unknown} value @returns {value is string} */
+const isAccountWatchKey = (value) => typeof value === "string" && ACCOUNT_KEY.test(value);
+
+/** The Account keys this browser starred: the valid ones, once each, the first hundred; the stored value is left as it is,
+ * and an entry that is not an Account key is said in `error`, the rest restored.
+ * @param {{getItem: (key: string) => string | null} | null | undefined} storage
+ * @returns {{items: string[], error: string | null}}
+ */
+export function readAccountWatch(storage) {
+  let raw;
+  try {
+    if (!storage) throw new Error("Storage unavailable");
+    raw = storage.getItem(ACCOUNT_WATCH_KEY);
+  } catch {
+    return { items: [], error: "The saved Account stars could not be read." };
+  }
+  if (raw === null) return { items: [], error: null };
+  let saved;
+  try {
+    saved = JSON.parse(raw);
+  } catch {
+    return { items: [], error: "The saved Account stars are damaged; they are kept as they were." };
+  }
+  if (!saved || saved.version !== 1 || !Array.isArray(saved.items)) {
+    return { items: [], error: "The saved Account stars are in a shape this page does not read; they are kept as they were." };
+  }
+  const items = [];
+  const seen = new Set();
+  let invalid = 0;
+  for (const entry of saved.items) {
+    if (!isAccountWatchKey(entry)) { invalid += 1; continue; }
+    if (!seen.has(entry) && items.length < ACCOUNT_WATCH_LIMIT) { items.push(entry); seen.add(entry); }
+  }
+  return { items, error: invalid ? `${invalid} saved Account stars could not be read; the rest are restored.` : null };
+}
+
+/** Write the Account keys starred, once each; a list with anything else, or past a hundred, is not written. A failed write
+ * leaves the last persisted list intact; callers must surface it.
+ * @param {{setItem: (key: string, value: string) => void} | null | undefined} storage
+ * @param {unknown} keys
+ * @returns {string | null}
+ */
+export function saveAccountWatch(storage, keys) {
+  if (!Array.isArray(keys)) return "The Account stars are not a list; nothing was saved.";
+  const items = [];
+  const seen = new Set();
+  for (const key of keys) {
+    if (!isAccountWatchKey(key)) return "The Account stars hold something that is not an Account market; nothing was saved.";
+    if (!seen.has(key)) { items.push(key); seen.add(key); }
+  }
+  if (items.length > ACCOUNT_WATCH_LIMIT) return "More than a hundred Account stars; nothing was saved.";
+  try {
+    if (!storage) throw new Error("Storage unavailable");
+    storage.setItem(ACCOUNT_WATCH_KEY, JSON.stringify({ version: 1, items }));
+    return null;
+  } catch {
+    return "The Account stars could not be saved in this browser; this change may be lost on reload.";
   }
 }
 

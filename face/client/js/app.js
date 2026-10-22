@@ -63,6 +63,10 @@ export class Timers {
     this.pending.add(id);
     return id;
   }
+  cancel(id) {
+    clearTimeout(id);
+    this.pending.delete(id);
+  }
   clear() {
     for (const id of this.pending) clearTimeout(id);
     this.pending.clear();
@@ -163,7 +167,8 @@ export function boot(win, host = {}) {
   const live = startLive({ store, openMux: host.openMux ?? wireOpenMux, call, mapFrame, getJson, timers, now, onReceipt: m => { if (m?.data?.seat) void seat.load({ fresh: true }); else void account.load({ fresh: true }); } });
   // answers go through the live layer, which settles the gate it delivered once the answer wins
   const actions = makeActions({ store, call, answerGate: (eventId, value) => live.answer(eventId, value), postJson });
-  // Markets: the face's live quotes and symbol search (a test hands in its own), the watchlist in this browser's storage
+  // Markets: the Account's reads on the app's timers; the face's live quotes and symbol search for the A shares (a test hands in
+  // its own); the stars in this browser's storage
   const markets = startMarkets({
     store,
     createLiveQuotes: host.createLiveQuotes ?? (onUpdate => createLiveQuotes(onUpdate, {
@@ -171,7 +176,8 @@ export function boot(win, host = {}) {
       createEventSource: typeof win.EventSource === 'function' ? url => new win.EventSource(url) : null,
     })),
     createSymbolSearch: host.createSymbolSearch ?? (onUpdate => createSymbolSearch(onUpdate, { fetcher: (...a) => win.fetch(...a) })),
-    storage, getJson, win,
+    storage, getJson, win, now,
+    schedule: (fn, ms) => timers.after(ms, fn), cancelTimer: id => timers.cancel(id),
   });
   // a channel's page: its overview read on entering it
   const channels = startChannels({ store, postJson, getJson, refresh: () => live.refresh(), now });
@@ -187,7 +193,6 @@ export function boot(win, host = {}) {
   let pressed = false;   // a primary press is down: a render now would replace the element the click is aimed at
   let pending = false;
   let openedId = null;   // the conversation the live layer was told to open
-  let barsFor = null;    // the market page whose daily bars were last asked for
   let was = null;        // the route follow() last settled: entering Account reads it, entering Venues reads the seat
   let wanted = null;     // a deep link the list has not answered yet
   let last = { overlay: null, opener: null, screen: null, drawer: null, thread: null, editor: null, confirm: null };
@@ -308,8 +313,6 @@ export function boot(win, host = {}) {
     if (fixed) win.history.replaceState(null, '', fixed);
     const r = store.get().route;
     showMarkets();
-    // a market page reads its daily bars once per opening (crypto and cn have none to read)
-    if (r.screen === 'markets' && r.id) { if (r.id !== barsFor) { barsFor = r.id; void markets.bars(r.id); } } else barsFor = null;
     if (r.screen === 'account' && was?.screen !== 'account') void account.load();
     if (r.screen === 'account' && r.tab === 'venues' && !(was?.screen === 'account' && was.tab === 'venues')) void seat.load();
     if (r.screen === 'channel' && !(was?.screen === 'channel' && was.id === r.id)) void channels.overview(r.id);

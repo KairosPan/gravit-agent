@@ -41,6 +41,8 @@ const KINDS = [
 
 const asset = (id, over = {}) => ({ id, market: id.slice(0, id.indexOf(':')), symbol: id.slice(id.indexOf(':') + 1), name: id.slice(id.indexOf(':') + 1), exchange: 'NASDAQ', currency: id.startsWith('cn:') ? 'CNY' : 'USD', ...over });
 const quote = (id, over = {}) => ({ id, market: id.slice(0, id.indexOf(':')), symbol: id.slice(id.indexOf(':') + 1), price: 10, prev_close: 9, change: 1, change_pct: 1.5, volume: 1000, as_of: '2026-10-19T14:30:00Z', received_at: null, volume_as_of: null, source: 'Alpaca', feed: 'iex', basis: 'previous_close', quote_status: 'live', market_status: 'closed', message: '', ...over });
+// a page's daily bars as the old page's renderer reads them: no host reads /data/bars any more, so the state is built by hand
+const withBars = (s, id, bar) => ({ ...s, markets: { ...s.markets, bars: { ...s.markets.bars, [id]: bar } } });
 // Markets: the list empty, with rows (one held, one with no quote), searching, a failed search, polling, a full watchlist
 function marketStates() {
   const on = R.nav(emptyState(), { screen: 'markets', id: null });
@@ -55,8 +57,8 @@ function marketStates() {
     R.quotesUpdated(rows, { quotes: {}, providers: [], status: 'polling' }),
     R.watchlistLoaded(rows, { items: rows.markets.watchlist, error: 'full' }),
     // a us page with its chart, a holding, a statement row and a conversation naming it; a crypto page; a page with no quote
-    R.barsLoaded({ ...R.accountLoaded(R.nav(rows, { screen: 'markets', id: 'us:AAPL' }), { data: { ok: true, available: true, host: 'paper-api.alpaca.markets', account: { equity: '1' }, positions: [{ symbol: 'AAPL', asset_class: 'us_equity', qty: '5', market_value: '600', change_today: '0.01' }], orders: [{ id: 'o1', symbol: 'AAPL', side: 'buy', qty: '1', filled_qty: '1', filled_avg_price: '10', type: 'market', status: 'filled', submitted_at: '2026-10-18T14:00:00Z', filled_at: '2026-10-18T14:00:00Z' }] }, at: NOW }), conversations: [conv('s7', { title: 'Is AAPL cheap?' })] },
-      { id: 'us:AAPL', payload: { ok: true, source: 'bed', feed: null, as_of: '2026-07-09', rows: [{ date: '2026-07-08', close: 10 }, { date: '2026-07-09', close: 11 }] } }),
+    withBars({ ...R.accountLoaded(R.nav(rows, { screen: 'markets', id: 'us:AAPL' }), { data: { ok: true, available: true, host: 'paper-api.alpaca.markets', account: { equity: '1' }, positions: [{ symbol: 'AAPL', asset_class: 'us_equity', qty: '5', market_value: '600', change_today: '0.01' }], orders: [{ id: 'o1', symbol: 'AAPL', side: 'buy', qty: '1', filled_qty: '1', filled_avg_price: '10', type: 'market', status: 'filled', submitted_at: '2026-10-18T14:00:00Z', filled_at: '2026-10-18T14:00:00Z' }] }, at: NOW }), conversations: [conv('s7', { title: 'Is AAPL cheap?' })] },
+      'us:AAPL', { status: 'ready', payload: { ok: true, source: 'bed', feed: null, as_of: '2026-07-09', rows: [{ date: '2026-07-08', close: 10 }, { date: '2026-07-09', close: 11 }] } }),
     R.nav(rows, { screen: 'markets', id: 'crypto:BTC/USD' }),
     R.nav(on, { screen: 'markets', id: 'us:MSFT' }),
   ];

@@ -27,10 +27,16 @@ export function emptyState() {
       shelves: Object.fromEntries(['plugins', 'bots', 'agents', 'memory'].map(k => [k, { status: 'idle', data: null, at: null }])),
       gravit: { host: null, model: null, keys: null }, skills: {}, status: null, models: null,
     },
-    // the host's markets (host/markets.js) and the screen's own tab, sort and query
+    // the host's markets (host/markets.js) and the screen's own tab, sort and query: the Account's explore reads by tab (`all`,
+    // a kind's own) and the search's, the quotes by 'venue|symbol', a page's candles by its key and compare rows by base, the
+    // Account keys starred and what each old us:/crypto: star was found as; then the face's own wire for the A shares as today
+    // (`bars` stays until the old page's renderer goes)
     markets: {
       tab: 'all', sort: 'volume', q: '',
-      watchlist: [], watchError: null, quotes: {}, providers: [], connection: 'idle',
+      explore: {}, results: { status: 'idle', data: null, at: null },
+      accountQuotes: {}, candles: {}, compare: {},
+      watch: [], watchError: null, asked: {},
+      watchlist: [], quotes: {}, providers: [], connection: 'idle',
       search: { query: '', status: 'idle', assets: [], partial: false }, hitQuotes: {}, bars: {},
     },
     // the Account (host/account.js): its page with the sentence of its last refusal, its other reads, the history curve's

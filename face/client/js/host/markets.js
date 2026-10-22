@@ -1,19 +1,55 @@
-// face/client/js/host/markets.js — the Markets screen's impure half (spec 2026-10-19 §7 Stage 2): the face's live quotes
-// (wire/market-quotes.js over /data/quotes/stream, its polling fallback included), symbol search, the watchlist in this
-// browser's storage under the face's key, and each page's daily bars, all into the store. Nothing here touches the DOM.
-import { readWatchlist, saveWatchlist, STORAGE_KEY } from '../wire/market-model.js';
+// face/client/js/host/markets.js — the Markets screen's impure half (spec 2026-10-22 §6.1): the Account's markets through the
+// face's proxy into the store — explore for the tab on screen at once and every 20 s, the quotes of the rows in view every 5 s
+// (twelve a call), a market page's candles for its range and its base's compare rows, and the page's market followed on the
+// Account's stream; the stars in this browser's two stores (the Account's keys under their own key, the A shares under the
+// face's); each old us:/crypto: star asked of the Account once; and the face's own wire (spec 2026-10-19 §7 Stage 2) for the A
+// shares alone — the live quotes of the cn list and a cn page, the cn search and its hits' one quote read. The views over what
+// lands are market-view.js's. Nothing here touches the DOM.
+import {
+  readWatchlist, saveWatchlist, STORAGE_KEY, readAccountWatch, saveAccountWatch, ACCOUNT_WATCH_KEY, normalizeAsset,
+} from '../wire/market-model.js';
 import { parsePayload } from '../wire/market-quotes.js';
-import { canonicalId, holdingAssets, assetFor } from './market-view.js';
+import { ACCOUNT_TABS, canonicalId, isAccountKey, rowsOf, matchKey, pairsOf, pageOf, followOf } from './market-view.js';
 
-export const WATCH_LIMIT = 100;   // the quote wire's own subscription limit
-export const HIT_QUOTES = 30;     // the hits one search reads a quote for
-export const BARS_DAYS = 120;     // calendar days of daily bars a page charts
+export const EXPLORE_MS = 20_000, QUOTES_MS = 5_000, QUOTE_PAIRS = 12;
+export const WATCH_LIMIT = 100;   // either list's: the quote wire's own subscription limit, the Account keys' cap
+export const HIT_QUOTES = 30;     // the cn hits one search reads a quote for
 
-export function startMarkets({ store, createLiveQuotes, createSymbolSearch, storage, getJson, win }) {
+const EXPLORE = '/data/account/explore';
+const ROWS = 200;                 // the explore rows a tab's read and a search ask for
+const ASKED_ROWS = 12;            // the rows an old star's ask reads
+const KINDS = new Set(ACCOUNT_TABS.map(([id]) => id).filter(id => id !== 'all'));
+// the kinds the Account compares across venues: not an event, not an RWA
+const COMPARED = new Set(['coin', 'perp', 'stock']);
+
+const named = v => typeof v === 'string' && v !== '';
+const blank = q => typeof q !== 'string' || !q.trim();
+// the Account's sentence when it refuses (`refusal.message`), else its error words — only when they are text
+const words = v => (typeof v === 'string' && v.trim() !== '' ? v : null);
+const messageOf = body => words(body?.refusal?.message) ?? words(body?.error);
+// an answer (`ok: true`) carrying the list the views read: a body of any other shape is never data
+const answered = (body, list) => body?.ok === true && Array.isArray(body[list]);
+
+// the explore read the tab on screen takes: All, Watching, and All results with no query read All's; a kind's tab its own; All
+// results while searching is the search's read, not this
+function exploreOf(m) {
+  if (KINDS.has(m.tab)) return { tab: m.tab, path: `${EXPLORE}?tab=${m.tab}&limit=${ROWS}` };
+  if (m.tab === 'all' || m.tab === 'watching' || (m.tab === 'results' && blank(m.q))) return { tab: 'all', path: `${EXPLORE}?limit=${ROWS}` };
+  return null;
+}
+
+export function startMarkets({ store, getJson, createLiveQuotes, createSymbolSearch, storage, win, stream, schedule, cancelTimer, now = Date.now }) {
   let closed = false;
-  let subscribed = null;   // the ids last handed to the live quotes, in order
-  let hitSeq = 0;          // a hit read that answers after a newer search is dropped
-  const barsSeq = new Map();
+  let shown = false;
+  let exploreTimer = null;
+  let quotesTimer = null;
+  let readTab = null;        // the tab the explore poll reads for while shown
+  let inView = null;         // the row ids rowsInView last named; null: every row
+  let waiting = null;        // a page asked for whose market no read lists yet: its reads wait for the read that does
+  let followed = false;      // the stream follows a page's market
+  let subscribed = null;     // the ids last handed to the live quotes, in order
+  let hitSeq = 0;            // a hit read that answers after a newer search is dropped
+  const kinds = new Map();   // a kind of read → { flight, path, seq }
 
   const quotes = createLiveQuotes(state => { if (!closed) store.dispatch('quotesUpdated', state); });
   const searcher = createSymbolSearch(state => {
@@ -25,20 +61,127 @@ export function startMarkets({ store, createLiveQuotes, createSymbolSearch, stor
   // paused until Markets is on screen: a subscription made meanwhile costs no connection
   quotes.setVisible(false);
 
-  // the page's own asset first (the wire keeps the first hundred), then the watchlist, then the holdings
+  // One flight per kind of read: an ask for the path in the air joins it; another path starts a read whose answer alone lands —
+  // the one it overtook is dropped — and nothing lands after close(). `land(body, refused)` takes the answer, or for a rejection
+  // the body the app's getJson carries on it (`error.body`, when it does).
+  function fly(kind, path, land, loading = null) {
+    if (closed) return;
+    let k = kinds.get(kind);
+    if (!k) { k = { flight: null, path: null, seq: 0 }; kinds.set(kind, k); }
+    if (k.flight !== null && k.path === path) return;
+    const mine = ++k.seq;
+    let asked;
+    try { asked = Promise.resolve(getJson(path)); } catch (error) { asked = Promise.reject(error); }
+    const flight = asked
+      .then(body => { if (!closed && mine === k.seq) land(body, false); }, error => { if (!closed && mine === k.seq) land(error?.body, true); })
+      .finally(() => { if (k.flight === flight) { k.flight = null; k.path = null; } });
+    k.flight = flight;
+    k.path = path;
+    if (loading) store.dispatch(...loading);
+  }
+  const inAir = kind => (kinds.get(kind)?.flight ?? null) !== null;
+  // a kind's flight dropped: its answer, when it comes, lands nowhere, and the next ask reads again
+  function drop(kind) { const k = kinds.get(kind); if (k) { k.seq += 1; k.flight = null; k.path = null; } }
+
+  // the explore read for the tab on screen
+  function readExplore() {
+    const read = exploreOf(store.get().markets);
+    if (!read) return;
+    const { tab, path } = read;
+    fly(`explore:${tab}`, path, (body, refused) => {
+      if (!refused && answered(body, 'items')) store.dispatch('exploreLoaded', { tab, data: body, at: now() });
+      else store.dispatch('exploreFailed', { tab, at: now(), message: messageOf(body) });
+    }, ['exploreLoading', { tab }]);
+  }
+
+  // the quotes of the rows in view — the table's rows, those rowsInView last named — at their most traded connected lines,
+  // twelve a call; none while one is out, so a slow Account is never asked again before it answers
+  function readQuotes() {
+    if (inAir('quotes')) return;
+    const rows = rowsOf(store.get().markets, now()).filter(r => inView === null || inView.has(r.id));
+    const pairs = [...new Set(pairsOf(rows, QUOTE_PAIRS))];
+    if (!pairs.length) return;
+    fly('quotes', `/data/account/quotes?pairs=${encodeURIComponent(pairs.join(','))}`, (body, refused) => {
+      if (!refused && answered(body, 'quotes')) store.dispatch('accountQuotesLoaded', { quotes: body.quotes });
+    });
+  }
+
+  // while Markets is on screen: explore every EXPLORE_MS for the tab on screen, the quotes every QUOTES_MS
+  function armExplore() {
+    exploreTimer = schedule(() => { exploreTimer = null; if (closed || !shown) return; armExplore(); readExplore(); }, EXPLORE_MS);
+  }
+  function armQuotes() {
+    quotesTimer = schedule(() => { quotesTimer = null; if (closed || !shown) return; armQuotes(); readQuotes(); }, QUOTES_MS);
+  }
+  function stopPolls() {
+    if (exploreTimer !== null) { cancelTimer(exploreTimer); exploreTimer = null; }
+    if (quotesTimer !== null) { cancelTimer(quotesTimer); quotesTimer = null; }
+  }
+  // the tab on screen changed while shown: its read at once, and its poll over from now
+  function retab() {
+    readTab = store.get().markets.tab;
+    if (exploreTimer !== null) { cancelTimer(exploreTimer); exploreTimer = null; }
+    armExplore();
+    readExplore();
+  }
+
+  // the range a page's chart is drawn at: the one kept for it, 1D until one is chosen
+  function rangeOf(id) {
+    const candles = store.get().markets.candles;
+    const range = Object.hasOwn(candles, id) ? candles[id]?.range : undefined;
+    return named(range) ? range : '1D';
+  }
+  // a page's candles at its line for the range; an answer for a range the page has left since lands nowhere
+  function readCandles(id, leg, range) {
+    const path = `/data/account/candles?venue=${encodeURIComponent(leg.venue)}&symbol=${encodeURIComponent(leg.symbol)}&range=${encodeURIComponent(range)}`;
+    fly(`candles:${id}`, path, (body, refused) => {
+      if (rangeOf(id) !== range) return;
+      if (!refused && answered(body, 'candles')) store.dispatch('candlesLoaded', { id, range, data: body, at: now() });
+      else store.dispatch('candlesFailed', { id, range, at: now() });
+    }, ['candlesLoading', { id, range }]);
+  }
+  function readCompare(base) {
+    fly(`compare:${base}`, `/data/account/compare?base=${encodeURIComponent(base)}&side=buy`, (body, refused) => {
+      if (!refused && answered(body, 'rows')) store.dispatch('compareLoaded', { base, data: body, at: now() });
+      else store.dispatch('compareFailed', { base, at: now() });
+    }, ['compareLoading', { base }]);
+  }
+  function unfollow() {
+    followed = false;
+    stream.follow([]);
+  }
+  // A market's page: the candles at its line — its first connected line, else its first public listing — for its kept range, the
+  // compare rows for its base (a coin, a perpetual, a stock) and that line followed on the Account's stream. A page whose market
+  // no read lists yet (a deep link before explore answers) waits for the read that lists it; meanwhile it follows nothing.
+  function open(id) {
+    const s = store.get();
+    const view = pageOf(s.markets, s.account, id, now());
+    if (!view) {
+      waiting = id;
+      if (followed) unfollow();
+      return;
+    }
+    waiting = null;
+    const leg = followOf(view.item);
+    if (leg) readCandles(id, leg, rangeOf(id));
+    if (COMPARED.has(view.item.kind) && named(view.item.base)) readCompare(view.item.base);
+    if (leg) { followed = true; stream.follow([`${leg.venue}:${leg.symbol}`]); } else if (followed) unfollow();
+  }
+
+  // the face's wire takes the A shares alone: a cn page's own first (the wire keeps the first hundred), then the cn list's — an
+  // old us:/crypto: star on the list is the Account's to quote, or no one's
   function wanted() {
     const s = store.get();
-    const data = s.account?.data;
     const page = s.route?.screen === 'markets' ? canonicalId(s.route.id) : null;
     const seen = new Set();
     const out = [];
-    for (const asset of [page ? assetFor(s.markets, data, page) : null, ...s.markets.watchlist, ...holdingAssets(data)]) {
-      if (asset && !seen.has(asset.id)) { seen.add(asset.id); out.push(asset); }
+    for (const entry of [page ? { id: page } : null, ...s.markets.watchlist]) {
+      const asset = normalizeAsset(entry);
+      if (asset?.market === 'cn' && !seen.has(asset.id)) { seen.add(asset.id); out.push(asset); }
     }
     return out;
   }
   function sync() {
-    if (closed) return;
     const assets = wanted();
     const key = assets.map(a => a.id).join(',');
     if (key === subscribed) return;
@@ -46,13 +189,50 @@ export function startMarkets({ store, createLiveQuotes, createSymbolSearch, stor
     quotes.setAssets(assets);
   }
 
+  // the two stores as this browser keeps them; either one unreadable is said, as `read`
   function load() {
-    const { items, error } = readWatchlist(storage);
-    store.dispatch('watchlistLoaded', { items, error: error ? 'read' : null });
+    const cn = readWatchlist(storage);
+    const keys = readAccountWatch(storage);
+    store.dispatch('watchlistLoaded', { items: cn.items, error: cn.error ? 'read' : null });
+    store.dispatch('accountWatchLoaded', { items: keys.items, error: keys.error || cn.error ? 'read' : null });
   }
-  function save(items) {
+  function saveList(items) {
     const error = saveWatchlist(storage, items);
     store.dispatch('watchlistLoaded', { items, error: error ? 'unsaved' : null });
+  }
+  function saveKeys(items) {
+    const error = saveAccountWatch(storage, items);
+    store.dispatch('accountWatchLoaded', { items, error: error ? 'unsaved' : null });
+  }
+
+  // Each old us:/crypto: star asked of the Account once, one at a time (explore?q=<its symbol, a coin's base>&limit=12): a row of
+  // its kind whose base is that, in any case, is the star found — it moves to the Account's key (where the Account's list has
+  // room; else it stays on the cn list, starred as that key); none is a star the Account does not list, which stays, said so. A
+  // read that fails asks nothing, for the next boot to ask again; a star taken off while it is asked is left as it is.
+  async function askOld() {
+    for (const entry of store.get().markets.watchlist) {   // the cn list as it booted
+      if (closed) return;
+      const match = matchKey(entry?.id);
+      if (!match || Object.hasOwn(store.get().markets.asked, entry.id)) continue;
+      let body;
+      try {
+        body = await getJson(`${EXPLORE}?q=${encodeURIComponent(match.q)}&limit=${ASKED_ROWS}`);
+      } catch {
+        continue;
+      }
+      if (closed) return;
+      if (!answered(body, 'items') || !store.get().markets.watchlist.some(a => a.id === entry.id)) continue;
+      const base = match.q.toUpperCase();
+      const hit = body.items.find(i => i?.kind === match.kind && typeof i.base === 'string' && i.base.toUpperCase() === base && isAccountKey(i.key));
+      store.dispatch('askedOfAccount', { faceId: entry.id, key: hit ? hit.key : null });
+      if (!hit) continue;
+      const keys = store.get().markets.watch;
+      if (!keys.includes(hit.key)) {
+        if (keys.length >= WATCH_LIMIT) continue;
+        saveKeys([...keys, hit.key]);
+      }
+      saveList(store.get().markets.watchlist.filter(a => a.id !== entry.id));
+    }
   }
 
   async function readHits(assets, seq) {
@@ -63,47 +243,115 @@ export function startMarkets({ store, createLiveQuotes, createSymbolSearch, stor
     } catch { /* the hits stay without a quote: No quote */ }
   }
 
-  const onStorage = event => { if (!closed && (event?.key === STORAGE_KEY || event?.key === null)) load(); };
-  const unsubscribe = store.subscribe(() => sync());
+  function onStore() {
+    if (closed) return;
+    sync();
+    if (shown && store.get().markets.tab !== readTab) retab();
+    if (waiting !== null) open(waiting);
+  }
+  const onStorage = event => { if (!closed && (event?.key === STORAGE_KEY || event?.key === ACCOUNT_WATCH_KEY || event?.key === null)) load(); };
+  const unsubscribe = store.subscribe(onStore);
   win?.addEventListener?.('storage', onStorage);
   load();
   sync();
+  void askOld();
 
   return {
-    show(on) { if (!closed) quotes.setVisible(Boolean(on)); },
-    search(q) { if (!closed) searcher.search(typeof q === 'string' ? q : '', 'all'); },
+    /** Markets on screen in a visible tab, or not: the reads and the face's wire run only while it is. */
+    show(on) {
+      if (closed) return;
+      const next = Boolean(on);
+      quotes.setVisible(next);
+      if (next === shown) return;
+      shown = next;
+      if (!shown) { stopPolls(); return; }
+      readTab = store.get().markets.tab;
+      armExplore();
+      armQuotes();
+      readExplore();
+    },
+    /** The query typed: the Account's search (explore?q=, the latest one lands) into results, and the face's for the A shares. */
+    search(raw) {
+      if (closed) return;
+      const q = typeof raw === 'string' ? raw : '';
+      store.dispatch('setMarketsQuery', q);
+      if (blank(q)) {
+        drop('results');
+        searcher.cancel();
+        return;
+      }
+      fly('results', `${EXPLORE}?q=${encodeURIComponent(q.trim())}&limit=${ROWS}`, (body, refused) => {
+        if (!refused && answered(body, 'items')) store.dispatch('resultsLoaded', { data: body, at: now() });
+        else store.dispatch('resultsFailed', { at: now(), message: messageOf(body) });
+      }, ['resultsLoading']);
+      searcher.search(q, 'cn');
+    },
+    /** A star: an Account key to the Account's store, a cn id to the cn list; anything else is no one's to star. */
     watch(raw) {
-      const s = store.get();
+      if (closed) return;
+      if (isAccountKey(raw)) {
+        const keys = store.get().markets.watch;
+        if (keys.includes(raw)) return;
+        if (keys.length >= WATCH_LIMIT) { store.dispatch('accountWatchLoaded', { items: keys, error: 'full' }); return; }
+        saveKeys([...keys, raw]);
+        return;
+      }
       const id = canonicalId(raw);
-      if (closed || !id || s.markets.watchlist.some(a => a.id === id)) return;
-      if (s.markets.watchlist.length >= WATCH_LIMIT) { store.dispatch('watchlistLoaded', { items: s.markets.watchlist, error: 'full' }); return; }
-      save([...s.markets.watchlist, assetFor(s.markets, s.account?.data, id)]);
+      if (!id?.startsWith('cn:')) return;
+      const m = store.get().markets;
+      if (m.watchlist.some(a => a.id === id)) return;
+      if (m.watchlist.length >= WATCH_LIMIT) { store.dispatch('watchlistLoaded', { items: m.watchlist, error: 'full' }); return; }
+      saveList([...m.watchlist, m.search.assets.find(a => a?.id === id) ?? normalizeAsset({ id })]);
     },
+    /** A star taken off: an Account key from the Account's store, with any old star still listed as it; a face id from the cn
+     *  list, an old us:/crypto: one forgotten as asked. */
     unwatch(raw) {
+      if (closed) return;
+      const m = store.get().markets;
+      if (isAccountKey(raw)) {
+        if (m.watch.includes(raw)) saveKeys(m.watch.filter(k => k !== raw));
+        const old = new Set(m.watchlist.filter(a => Object.hasOwn(m.asked, a.id) && m.asked[a.id] === raw).map(a => a.id));
+        if (old.size) {
+          saveList(store.get().markets.watchlist.filter(a => !old.has(a.id)));
+          for (const id of old) store.dispatch('forgetAsked', id);
+        }
+        return;
+      }
       const id = canonicalId(raw);
-      const list = store.get().markets.watchlist;
-      if (closed || !id || !list.some(a => a.id === id)) return;
-      save(list.filter(a => a.id !== id));
+      if (!id || !m.watchlist.some(a => a.id === id)) return;
+      saveList(m.watchlist.filter(a => a.id !== id));
+      if (!id.startsWith('cn:')) store.dispatch('forgetAsked', id);
     },
-    async bars(raw) {
-      const id = canonicalId(raw);
-      if (closed || !id?.startsWith('us:')) return;   // crypto and cn have no bar source yet: their pages draw no chart
-      const seq = (barsSeq.get(id) ?? 0) + 1;
-      barsSeq.set(id, seq);
-      store.dispatch('barsLoading', { id });
-      let payload = null;
-      try { payload = await getJson(`/data/bars?id=${encodeURIComponent(id)}&days=${BARS_DAYS}`); } catch { payload = null; }
-      if (closed || barsSeq.get(id) !== seq) return;
-      if (payload?.ok === true && Array.isArray(payload.rows)) store.dispatch('barsLoaded', { id, payload });
-      else store.dispatch('barsFailed', { id });
+    /** The market page on screen (an Account key: its reads and its follow; a cn id: the face's wire's), or null on leaving. */
+    page(id) {
+      if (closed) return;
+      waiting = null;
+      if (isAccountKey(id)) { open(id); return; }
+      if (id == null || followed) unfollow();
+    },
+    /** A page's chart range, one of the Account's: kept for the page, and its candles read again for it. */
+    range(id, value) {
+      if (closed || !isAccountKey(id)) return;
+      store.dispatch('setRange', { id, range: value });
+      if (rangeOf(id) !== value) return;
+      const s = store.get();
+      const view = pageOf(s.markets, s.account, id, now());
+      const leg = view ? followOf(view.item) : null;
+      if (leg) readCandles(id, leg, value);
+    },
+    /** The table's rows on screen, by id: the quotes poll asks for theirs alone. */
+    rowsInView(ids) {
+      inView = Array.isArray(ids) ? new Set(ids) : null;
     },
     close() {
       if (closed) return;
       closed = true;
+      stopPolls();
       unsubscribe();
       win?.removeEventListener?.('storage', onStorage);
       quotes.close();
       searcher.cancel();
+      unfollow();
     },
   };
 }

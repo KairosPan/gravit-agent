@@ -43,7 +43,7 @@ test('initialState is the empty state plus the viewer\'s prefs; garbage prefs ar
   assert.equal(s.theme, 'black'); assert.equal(s.railCollapsed, true); assert.equal(s.lastConv, 's9');
   assert.deepEqual(s.lastSeen, { s9: 40 });
   assert.deepEqual(s.collapsed, { w1: true, __archived: false });
-  assert.equal('watch' in s.markets, false, 'the watchlist lives under the face key, never in the prefs');
+  assert.deepEqual(s.markets.watch, [], 'the stars live under their own keys, never in the prefs');
   assert.deepEqual(s.markets.watchlist, []);
   assert.deepEqual(s.conversations, []);
   storage.setItem(PREFS_KEY, '{"theme":"neon","lastSeen":[1],"collapsed":["w1"],"watch":"x"}');

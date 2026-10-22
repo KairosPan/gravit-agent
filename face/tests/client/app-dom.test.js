@@ -1,9 +1,14 @@
 // boot() against a fake window and a fake host: what the person sees after the list lands, opening, sending, answering.
-import { test } from 'node:test';
+import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { boot } from '../../client/js/app.js';
+import { boot as bootApp } from '../../client/js/app.js';
 import { fakeWindow } from './helpers/fake-dom.js';
+
+// every app booted here has its timers stopped after its test, so one that fails half-way never leaves Markets' polls running
+const booted = new Set();
+const boot = (...args) => { const store = bootApp(...args); booted.add(store); return store; };
+afterEach(() => { for (const store of booted) store.timers.clear(); booted.clear(); });
 
 const frames = readFileSync(new URL('../fixtures/events.jsonl', import.meta.url), 'utf8').trim().split('\n').map(l => JSON.parse(l));
 const tick = () => new Promise(r => setTimeout(r, 0));
@@ -340,20 +345,24 @@ test('the theme comes from the prefs before the host answers, and a change is wr
 // Markets through host: fake live quotes and search, the browser's storage a memory
 function fakeMarkets() {
   const live = { assets: [], visible: [], onUpdate: null };
-  const search = { queries: [], onUpdate: null };
+  const search = { queries: [], onUpdate: null, cancelled: 0 };
   return {
     live, search,
     createLiveQuotes: onUpdate => { live.onUpdate = onUpdate; return { setAssets(a) { live.assets.push(a.map(x => x.id)); }, setVisible(v) { live.visible.push(v); }, refresh() {}, close() {} }; },
     createSymbolSearch: onUpdate => {
       search.onUpdate = onUpdate;
-      return { search(q, market) { search.queries.push([q, market]); onUpdate({ query: q.trim(), market, status: q.trim() ? 'loading' : 'idle', assets: [], partial: false, truncated: false, note: '' }); }, cancel() {} };
+      return {
+        search(q, market) { search.queries.push([q, market]); onUpdate({ query: q.trim(), market, status: q.trim() ? 'loading' : 'idle', assets: [], partial: false, truncated: false, note: '' }); },
+        cancel() { search.cancelled++; onUpdate({ query: '', market: 'cn', status: 'idle', assets: [], partial: false, truncated: false, note: '' }); },
+      };
     },
   };
 }
 const memoryStorage = () => { const m = new Map(); return { getItem: k => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k), m }; };
 const bootMarkets = (f, h, mk) => boot(f.win, { openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, createLiveQuotes: mk.createLiveQuotes, createSymbolSearch: mk.createSymbolSearch });
-const NVDA = { id: 'us:NVDA', market: 'us', symbol: 'NVDA', name: 'NVIDIA', exchange: 'NASDAQ', currency: 'USD' };
+const MOUTAI = { id: 'cn:600519', market: 'cn', symbol: '600519', name: 'Kweichow Moutai', exchange: 'SH', currency: 'CNY' };
 
+// the face's own wire searches and stars the A shares alone: a us: or crypto: market is the Account's
 test("typing in the search box searches; a star watches and writes the face's key; a row opens its page", async () => {
   const storage = memoryStorage();
   const f = fakeWindow({ hash: '#/markets', storage });
@@ -364,26 +373,26 @@ test("typing in the search box searches; a star watches and writes the face's ke
   await h.ready();
   assert.match(f.html(), /<main class="main mkts">/);
   assert.match(f.html(), /Nothing watched yet/);
-  mq.value = 'nvd';
+  mq.value = '600';
   f.fire('root', 'input', { target: mq });
-  assert.deepEqual(mk.search.queries.at(-1), ['nvd', 'all']);
-  assert.equal(store.get().markets.q, 'nvd');
+  assert.deepEqual(mk.search.queries.at(-1), ['600', 'cn']);
+  assert.equal(store.get().markets.q, '600');
   assert.match(f.html(), /Searching…/);
-  mk.search.onUpdate({ query: 'nvd', market: 'all', status: 'success', assets: [NVDA], partial: false, truncated: false, note: '' });
+  mk.search.onUpdate({ query: '600', market: 'cn', status: 'success', assets: [MOUTAI], partial: false, truncated: false, note: '' });
   await settle();
-  assert.match(f.html(), /<tr data-id="us:NVDA">/);
-  f.click({ tagName: 'BUTTON', dataset: { action: 'toggleWatch', id: 'us:NVDA' } });
-  assert.deepEqual(JSON.parse(storage.getItem('gravit.market.watchlist.v1')).items.map(a => [a.id, a.name]), [['us:NVDA', 'NVIDIA']]);
-  assert.match(f.html(), /aria-pressed="true" aria-label="Stop watching NVDA"/);
-  f.click({ tagName: 'BUTTON', dataset: { action: 'toggleWatch', id: 'us:NVDA' } });
+  assert.match(f.html(), /<tr data-id="cn:600519">/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'toggleWatch', id: 'cn:600519' } });
+  assert.deepEqual(JSON.parse(storage.getItem('gravit.market.watchlist.v1')).items.map(a => [a.id, a.name]), [['cn:600519', 'Kweichow Moutai']]);
+  assert.match(f.html(), /aria-pressed="true" aria-label="Stop watching 600519"/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'toggleWatch', id: 'cn:600519' } });
   assert.deepEqual(JSON.parse(storage.getItem('gravit.market.watchlist.v1')).items, [], 'a second press stops watching');
   f.click({ tagName: 'BUTTON', dataset: { action: 'mkClear' } });
   assert.equal(store.get().markets.q, '');
-  assert.deepEqual(mk.search.queries.at(-1), ['', 'all']);
-  f.click({ tagName: 'BUTTON', dataset: { action: 'openMarket', id: 'us:NVDA' } });
+  assert.equal(mk.search.cancelled, 1, 'Clear cancels the search');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openMarket', id: 'cn:600519' } });
   await settle();
-  assert.equal(f.win.location.hash, '#/markets/us:NVDA');
-  assert.deepEqual(store.get().route, { screen: 'markets', id: 'us:NVDA' });
+  assert.equal(f.win.location.hash, '#/markets/cn:600519');
+  assert.deepEqual(store.get().route, { screen: 'markets', id: 'cn:600519' });
   store.timers.clear();
 });
 
@@ -438,27 +447,25 @@ test('#/markets/garbage opens Markets; a lower-case id is written canonical', as
   store.timers.clear();
 });
 
-test('opening a us page reads /data/bars once; a crypto page reads none', async () => {
+// the face's daily bars are read by no screen: Markets on screen reads the Account's explore instead
+test('a market page reads no /data/bars, whatever its id; Markets on screen reads the Account', async () => {
   const f = fakeWindow({ hash: '#/markets/us:AAPL', storage: memoryStorage() });
   const h = host();
   const reads = [];
-  const bars = { ok: true, id: 'us:AAPL', source: 'alpaca', feed: 'iex', as_of: '2026-10-17', rows: [{ date: '2026-10-16', close: 10 }, { date: '2026-10-17', close: 11 }] };
-  const getJson = async path => { reads.push(path); return path.startsWith('/data/bars') ? bars : h.getJson(path); };
+  const getJson = async path => { reads.push(path); return h.getJson(path); };
   const mk = fakeMarkets();
   const store = boot(f.win, { openMux: h.openMux, call: h.call, getJson, postJson: h.postJson, markdown: h.markdown, createLiveQuotes: mk.createLiveQuotes, createSymbolSearch: mk.createSymbolSearch });
   await h.ready();
-  const barReads = () => reads.filter(p => p.startsWith('/data/bars'));
-  assert.deepEqual(barReads(), ['/data/bars?id=us%3AAAPL&days=120']);
-  assert.match(f.html(), /<svg class="mk-chart"/);
+  assert.match(f.html(), /<main class="main mkts mk-page">/);
+  assert.ok(reads.includes('/data/account/explore?limit=200'), "Markets on screen reads the Account's explore");
   mk.live.onUpdate({ quotes: {}, providers: [], status: 'streaming', refreshing: false, generatedAt: null, note: '', limited: 0 });
   await settle();
-  assert.equal(barReads().length, 1, 'a re-render reads nothing');
-  f.win.location.hash = '#/markets/crypto:BTC/USD';
-  await settle();
-  assert.equal(barReads().length, 1, 'a crypto page has no bar source');
-  f.win.location.hash = '#/markets/us:AAPL';
-  await settle();
-  assert.equal(barReads().length, 2, 'opening the page again reads again');
+  for (const hash of ['#/markets/crypto:BTC/USD', '#/markets/cn:600519', '#/markets/us:AAPL']) {
+    f.win.location.hash = hash;
+    await settle();
+  }
+  assert.deepEqual(reads.filter(p => p.startsWith('/data/bars')), []);
+  assert.doesNotMatch(f.html(), /<svg class="mk-chart"/, 'no bars, no daily chart');
   store.timers.clear();
 });
 
