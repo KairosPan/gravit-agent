@@ -1,0 +1,295 @@
+/** `/data/account` and `/data/account/<route>`: the Account's reads, proxied
+ * (spec 2026-10-22 §5.1). The Account (Linqi's buyer-agent-demo, an external
+ * program on 127.0.0.1:4820) answers only bare loopback requests — its fence
+ * refuses any page at another origin — so the face's page never asks it: the
+ * page asks the face, and the face asks the Account with the plain loopback
+ * fetch `seat.ts` makes (no Origin, no Sec-Fetch-Site, no cookie, the URL's
+ * own Host, `redirect: "error"`). Eleven reads, each an `exact` route, never a
+ * prefix: the route table is the allow-list, and nothing else of the Account's
+ * surface is reachable through the face. {@link createAccountReader} is the
+ * `account` route's read without a route, for `seat.ts`.
+ *
+ * The rules, the seat route's generalised:
+ * - The fence first (`isTrustedDataRequest`, 403 with the fixed body), then 405
+ *   for anything but GET, then the query, rebuilt from the route's names in
+ *   {@link ACCOUNT_QUERY} ({@link rebuildQuery}); anything else is 400
+ *   `invalid account request` and the Account is never asked. The raw query
+ *   never reaches it, and `fresh` is the face's own flag, never forwarded. A
+ *   disabled seat row disables the proxy: every route then answers 503
+ *   `disabled` and asks nothing.
+ * - The Account's status and body pass through as they are, never parsed: its
+ *   `{ok:false, refusal}` is the page's to draw, in its words. Every answer is
+ *   `application/json` and `no-store`, as the Account's own reads are.
+ * - A failure of the fetch itself — refused, hanging past the route's abort on
+ *   the headers or the body, a body that cannot be read — is a state, not an
+ *   error: 503 `{"ok":false,"unreachable":"<CODE>"}` with the failure's code,
+ *   never its text; a query with a kept answer is re-served that answer
+ *   flagged `stale: true` instead, as `data.ts` does. The reader never
+ *   re-serves stale: the seat box shows the service's absence.
+ * - Only a 2xx answer is kept: per route by rebuilt query for the route's
+ *   {@link ACCOUNT_TTL_MS}, at most {@link ACCOUNT_CACHE_KEYS} queries, the
+ *   least recently used out first; a refusal is never kept and never
+ *   re-served. Reads of one query share one fetch; `?fresh=1` skips the TTL
+ *   and never joins a plain read in flight — it asks again once that one
+ *   settles (the seat route's rule).
+ * - Nothing of a body or a query is logged here.
+ * @module
+ */
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { seatUrl } from "./account-seat.ts";
+import { isTrustedDataRequest } from "./data.ts";
+import { FORBIDDEN, markStale } from "./http.ts";
+import type { RouteRegistrar } from "./static.ts";
+
+/** The Account's reads the face proxies: `account` is its `GET /api/account`, the rest `GET /api/account/<route>`. */
+export type ReadRoute = "account" | "explore" | "market" | "quotes" | "compare" | "candles" | "holdings" | "positions" | "statement" | "history" | "agents";
+
+/** How long one answer is served without asking again, per route: the Account's own page's cadence (spec §5.1). */
+export const ACCOUNT_TTL_MS: Readonly<Record<ReadRoute, number>> = {
+  account: 15_000, explore: 20_000, market: 3_000, quotes: 3_000, compare: 15_000, candles: 30_000,
+  holdings: 8_000, positions: 10_000, statement: 10_000, history: 60_000, agents: 15_000,
+};
+
+/** How long the Account may take, headers and body, per route: the reads that settle venue polls take
+ * seconds, and a first candles view waits for a source. */
+export const ACCOUNT_ABORT_MS: Readonly<Record<ReadRoute, number>> = {
+  account: 7_000, explore: 10_000, market: 7_000, quotes: 7_000, compare: 7_000, candles: 25_000,
+  holdings: 12_000, positions: 7_000, statement: 7_000, history: 12_000, agents: 7_000,
+};
+
+/** Most queries kept per route; the least recently used leaves first. */
+export const ACCOUNT_CACHE_KEYS = 64;
+
+/** The whitelist: route → allowed query names; a value is at most 240 characters, each name at most once. */
+export const ACCOUNT_QUERY: Readonly<Record<ReadRoute, readonly string[]>> = {
+  account: ["fresh"],
+  explore: ["tab", "q", "key", "limit"],
+  market: ["venue", "symbol"],
+  quotes: ["pairs"],
+  compare: ["base", "side", "usd", "asset"],
+  candles: ["venue", "symbol", "interval", "range", "before", "limit"],
+  holdings: ["cost", "paper", "fresh"],
+  positions: ["venue"],
+  statement: ["fresh"],
+  history: ["range", "paper", "venue"],
+  agents: ["fresh"],
+};
+
+/** The Account's answer — its status and its body as text — or the code of a fetch that failed. */
+export type AccountAnswer = { status: number; body: string } | { unreachable: string };
+
+/** `GET /api/account` through the `account` route's cache: what `seat.ts` reads. */
+export interface AccountReader { read(fresh?: boolean): Promise<AccountAnswer> }
+
+export interface AccountProxyDeps {
+  /** The Account service; default `FACE_ACCOUNT_URL` or `http://127.0.0.1:4820`. */
+  url?: string;
+  fetch?: typeof fetch;
+  now?: () => number;
+  /** The composed `mcp-account` row is disabled: every route answers `disabled` and never asks the Account. */
+  disabled?: boolean;
+  /** Per-route aborts in place of {@link ACCOUNT_ABORT_MS}, for the tests. */
+  abortMs?: Partial<Record<ReadRoute, number>>;
+}
+
+const READ_ROUTES = Object.keys(ACCOUNT_QUERY) as ReadRoute[];
+/** Longest value one query name may carry, in characters, decoded. */
+const VALUE_MAX = 240;
+/** Longest request target a read may arrive with. */
+const RAW_URL_MAX = 8_192;
+const INVALID = '{"ok":false,"error":"invalid account request"}';
+const METHOD_NOT_ALLOWED = '{"ok":false,"error":"method not allowed"}';
+const unreachable = (code: string): string => JSON.stringify({ ok: false, unreachable: code });
+
+const facePath = (route: ReadRoute): string => (route === "account" ? "/data/account" : `/data/account/${route}`);
+const accountUrl = (base: string, route: ReadRoute, query: string): string =>
+  `${base}/api/account${route === "account" ? "" : `/${route}`}${query === "" ? "" : `?${query}`}`;
+
+/** The query a read may pass on, rebuilt from the route's whitelisted names in the order they came, each
+ * at most once, each value at most 240 characters, re-encoded; `fresh=1` sets `fresh` and is never part
+ * of the query. `null`: an unknown or repeated name, an over-long value, an over-long or unparsable URL. */
+export function rebuildQuery(route: ReadRoute, rawUrl: string): { query: string; fresh: boolean } | null {
+  if (rawUrl.length > RAW_URL_MAX) return null;
+  let asked: URLSearchParams;
+  try {
+    asked = new URL(rawUrl, "http://localhost").searchParams;
+  } catch {
+    return null;
+  }
+  const allowed = ACCOUNT_QUERY[route];
+  const seen = new Set<string>();
+  const rebuilt = new URLSearchParams();
+  let fresh = false;
+  for (const [name, value] of asked) {
+    if (!allowed.includes(name) || seen.has(name) || value.length > VALUE_MAX) return null;
+    seen.add(name);
+    if (name === "fresh") fresh = value === "1";
+    else rebuilt.append(name, value);
+  }
+  return { query: rebuilt.toString(), fresh };
+}
+
+/** A failure's code, bounded to a code's shape so no error text ever reaches the page. */
+function codeOf(err: unknown): string {
+  const e = err as { cause?: { code?: unknown }; code?: unknown } | null;
+  const code = e?.cause?.code ?? e?.code;
+  return typeof code === "string" && /^[A-Z][A-Z0-9_]{1,31}$/.test(code) ? code : "unreachable";
+}
+
+/** One GET of the Account, cut at `abortMs` on the headers and the body: its status and body, or the
+ * failure's code. Never rejects. */
+async function askAccount(doFetch: typeof fetch, url: string, abortMs: number): Promise<AccountAnswer> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), abortMs);
+  try {
+    const r = await doFetch(url, { signal: controller.signal, redirect: "error" });
+    try {
+      return { status: r.status, body: await r.text() };
+    } catch {
+      return { unreachable: controller.signal.aborted ? "timeout" : "unreadable" };
+    }
+  } catch (err) {
+    return { unreachable: controller.signal.aborted ? "timeout" : codeOf(err) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+interface Settings {
+  url: string;
+  doFetch: typeof fetch;
+  now: () => number;
+  disabled: boolean;
+  abortMs: Partial<Record<ReadRoute, number>>;
+}
+
+const settingsOf = (deps: AccountProxyDeps): Settings => ({
+  url: (deps.url ?? seatUrl()).replace(/\/+$/, ""),
+  doFetch: deps.fetch ?? fetch,
+  now: deps.now ?? Date.now,
+  disabled: deps.disabled === true,
+  abortMs: deps.abortMs ?? {},
+});
+
+/** One 2xx answer of the Account's, and when it came. */
+interface Kept { status: number; body: string; at: number }
+
+/** One route's reads of the Account. */
+interface Reads {
+  /** Within the TTL the kept answer, else the Account's: one fetch per query in flight. */
+  read(query: string, fresh: boolean): Promise<AccountAnswer>;
+  /** The last 2xx kept for a query, however old: what a failure re-serves as stale. */
+  kept(query: string): Kept | undefined;
+  clear(): void;
+}
+
+function routeReads(route: ReadRoute, s: Settings): Reads {
+  const ttlMs = ACCOUNT_TTL_MS[route];
+  const abortMs = s.abortMs[route] ?? ACCOUNT_ABORT_MS[route];
+  /* A Map iterates in insertion order: re-inserting a query on every use keeps the least recently used first. */
+  const answers = new Map<string, Kept>();
+  /** The read in flight per query, and whether it is a fresh one: a plain read joins any flight, a fresh
+   * read joins only a fresh one and otherwise asks again after the plain one settles. */
+  const flights = new Map<string, { answer: Promise<AccountAnswer>; fresh: boolean }>();
+
+  const remember = (query: string, entry: Kept): void => {
+    answers.delete(query);
+    answers.set(query, entry);
+    while (answers.size > ACCOUNT_CACHE_KEYS) answers.delete(answers.keys().next().value!);
+  };
+
+  const ask = async (query: string): Promise<AccountAnswer> => {
+    const answer = await askAccount(s.doFetch, accountUrl(s.url, route, query), abortMs);
+    if ("status" in answer && answer.status >= 200 && answer.status < 300) remember(query, { ...answer, at: s.now() });
+    return answer;
+  };
+
+  const fly = (query: string, fresh: boolean): Promise<AccountAnswer> => {
+    const flight = flights.get(query);
+    if (flight !== undefined && (!fresh || flight.fresh)) return flight.answer;
+    const run = (): Promise<AccountAnswer> => ask(query);
+    const own = { answer: flight === undefined ? run() : flight.answer.then(run, run), fresh };
+    flights.set(query, own);
+    /* `then(clear, clear)`, as data.ts does: a `finally` would derive an unawaited rejection. */
+    const clear = (): void => { if (flights.get(query) === own) flights.delete(query); };
+    void own.answer.then(clear, clear);
+    return own.answer;
+  };
+
+  return {
+    read: async (query, fresh) => {
+      if (s.disabled) return { unreachable: "disabled" };
+      const hit = answers.get(query);
+      if (!fresh && hit !== undefined && s.now() - hit.at < ttlMs) {
+        remember(query, hit);
+        return { status: hit.status, body: hit.body };
+      }
+      return fly(query, fresh);
+    },
+    kept: (query) => answers.get(query),
+    clear: () => answers.clear(),
+  };
+}
+
+/** The `account` route's reads behind each reader {@link createAccountReader} made, so a reader handed to
+ * {@link registerAccountProxy} serves `/data/account` from its own cache. */
+const readsOf = new WeakMap<AccountReader, Reads>();
+
+/** The `account` route's reader, with no route registered: `GET /api/account` through its cache. */
+export function createAccountReader(deps: AccountProxyDeps = {}): AccountReader {
+  const reads = routeReads("account", settingsOf(deps));
+  const reader: AccountReader = { read: (fresh = false) => reads.read("", fresh) };
+  readsOf.set(reader, reads);
+  return reader;
+}
+
+/** A reader this module did not make: `/data/account` reads through it, with nothing kept to re-serve
+ * stale; a rejection is a failure's code, as the fetch's is. */
+const through = (reader: AccountReader): Reads => ({
+  read: async (_query, fresh) => {
+    try {
+      return await reader.read(fresh);
+    } catch (err) {
+      return { unreachable: codeOf(err) };
+    }
+  },
+  kept: () => undefined,
+  clear: () => undefined,
+});
+
+function send(res: ServerResponse, status: number, body: string): void {
+  res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+  res.end(body);
+}
+
+/** One route's handler: the fence, GET only, the rebuilt query, then the Account through the route's reads. */
+const handler = (route: ReadRoute, reads: Reads, disabled: boolean) => async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+  /* FIRST: a refused request reaches neither the parser nor the cache nor the Account. */
+  if (!isTrustedDataRequest(req)) return send(res, 403, FORBIDDEN);
+  if (req.method !== "GET") return send(res, 405, METHOD_NOT_ALLOWED);
+  const asked = rebuildQuery(route, req.url ?? "");
+  if (asked === null) return send(res, 400, INVALID);
+  if (disabled) return send(res, 503, unreachable("disabled"));
+  const answer = await reads.read(asked.query, asked.fresh);
+  if ("status" in answer) return send(res, answer.status, answer.body);
+  const kept = reads.kept(asked.query);
+  return kept === undefined ? send(res, 503, unreachable(answer.unreachable)) : send(res, 200, markStale(kept.body));
+};
+
+/** Mount the eleven read routes on the host webserver. `deps.reader` (one {@link createAccountReader}
+ * made) serves `/data/account`, else the proxy makes its own; either way that route and the returned
+ * reader read through one cache. `dispose` forgets every kept answer. */
+export function registerAccountProxy(
+  webServer: RouteRegistrar,
+  deps: AccountProxyDeps & { reader?: AccountReader } = {},
+): { reader: AccountReader; dispose(): void } {
+  const s = settingsOf(deps);
+  const reader = deps.reader ?? createAccountReader(deps);
+  const all: Reads[] = [];
+  for (const route of READ_ROUTES) {
+    const reads = route === "account" ? readsOf.get(reader) ?? through(reader) : routeReads(route, s);
+    all.push(reads);
+    webServer.register({ kind: "exact", path: facePath(route), handler: handler(route, reads, s.disabled) });
+  }
+  return { reader, dispose: () => { for (const reads of all) reads.clear(); } };
+}
