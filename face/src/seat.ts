@@ -8,26 +8,35 @@
  * admitting it (`face/src/account-seat.ts` ACCOUNT_SEAT_NAME): the face never
  * reads the seat's key file, and this route touches no key and no home.
  *
+ * The read is the proxy's (spec 2026-10-22 §5.2): the route reads through an
+ * {@link AccountReader} — the one `registerAccountProxy` returns, which
+ * `main.ts` hands it, so this route and `/data/account` share one upstream
+ * read — and keeps no cache and no flight of its own. A 2xx answer is served
+ * for {@link SEAT_TTL_MS}, the proxy's `account` route's TTL; `?fresh=1` — the
+ * flag `/data/account` takes too — skips it and never joins a plain read
+ * already in flight: it asks again once that one settles, so the read after a
+ * receipt sees the card the receipt announced; plain reads share one fetch,
+ * fresh reads share one fetch.
+ *
  * Failure is a state, not an error: an unreachable, refusing, hanging or
  * unreadable service answers `reachable: false` with the failure's CODE
  * (`ECONNREFUSED`, `timeout` — the headers or the body past the abort —,
  * `http 403`, `unreadable`), never its text, and nothing is served stale — the
- * service's absence is the fact to show; a seat row the operator disabled
- * answers `disabled` and asks nothing. Every answer is cached for
- * {@link SEAT_TTL_MS} (the unreachable one too, so a hanging service costs one
- * timeout a half-minute); `?fresh=1` skips the cache, as the account route's
- * Refresh does, and never joins a plain read already in flight — it asks again
- * once that one settles, so the read after a receipt sees the card the receipt
- * announced; plain reads share one fetch, fresh reads share one fetch. */
+ * service's absence is the fact to show; a failure is never kept, so the next
+ * read asks again. A seat row the operator disabled answers `disabled` and
+ * asks nothing. */
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { ACCOUNT_TTL_MS, codeOf, createAccountReader, type AccountAnswer, type AccountReader } from "./account-proxy.ts";
 import { ACCOUNT_SEAT_NAME, seatUrl } from "./account-seat.ts";
 import { isTrustedDataRequest } from "./data.ts";
 import { FORBIDDEN } from "./http.ts";
 import type { RouteRegistrar } from "./static.ts";
 
-/** How long one answer is served without asking the Account again. */
-export const SEAT_TTL_MS = 30_000;
-/** How long the Account may take to answer: its `/api/account` settles venue polls for up to 3 s. */
+/** How long one answer is served without asking the Account again: the proxy's `account` route's, whose
+ * cache this route reads through. */
+export const SEAT_TTL_MS = ACCOUNT_TTL_MS.account;
+/** How long the Account may take to answer the reader this route makes when it is handed none: its
+ * `/api/account` settles venue polls for up to 3 s. */
 export const SEAT_TIMEOUT_MS = 7_000;
 
 export interface SeatLimit {
@@ -90,8 +99,13 @@ export interface SeatDeps {
   url?: string;
   /** The seat's name on the Account page; default `Gravit`. */
   seatName?: string;
+  /** The Account's `GET /api/account` through the proxy's cache: `main.ts` hands the one
+   * `registerAccountProxy` returns. None: the route makes its own from `url`, `fetch`, `now` and `timeoutMs`. */
+  reader?: AccountReader;
+  /** The fetch of the reader the route makes when it is handed none. */
   fetch?: typeof fetch;
   now?: () => number;
+  /** The abort of the reader the route makes when it is handed none; default {@link SEAT_TIMEOUT_MS}. */
   timeoutMs?: number;
   /** The composed `mcp-account` row is disabled: the route answers `disabled` and never asks the Account. */
   disabled?: boolean;
@@ -210,60 +224,32 @@ export function seatView(account: unknown, seatName: string, url: string, nowMs:
   return view;
 }
 
-/** A failure's code, bounded to a code's shape so no error text ever reaches the page. */
-function codeOf(err: unknown): string {
-  const e = err as { cause?: { code?: unknown }; code?: unknown; name?: unknown } | null;
-  const code = e?.cause?.code ?? e?.code;
-  return typeof code === "string" && /^[A-Z][A-Z0-9_]{1,31}$/.test(code) ? code : "unreachable";
-}
-
 /** Mount `GET /data/seat.json` on the host webserver. */
 export function registerSeatRoute(webServer: RouteRegistrar, deps: SeatDeps = {}): void {
   const url = (deps.url ?? seatUrl()).replace(/\/+$/, "");
   const seatName = deps.seatName ?? ACCOUNT_SEAT_NAME;
-  const doFetch = deps.fetch ?? fetch;
   const now = deps.now ?? Date.now;
-  const timeoutMs = deps.timeoutMs ?? SEAT_TIMEOUT_MS;
-  let cache: { body: string; at: number } | undefined;
-  /** The read in flight, and whether it is a fresh one: a plain read joins any
-   * flight, a fresh read joins only a fresh one and otherwise asks again after
-   * the plain one settles (`read` never rejects). */
-  let flight: { body: Promise<string>; fresh: boolean } | undefined;
+  const reader = deps.reader ?? createAccountReader({ url, fetch: deps.fetch, now, abortMs: { account: deps.timeoutMs ?? SEAT_TIMEOUT_MS } });
 
   const unreachable = (error: string): string => JSON.stringify({ ok: true, url, reachable: false, error } satisfies SeatView);
 
-  const read = async (): Promise<string> => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    let body: string;
+  /** The reader's answer reduced to the box's view. Never rejects: a reader that does is its failure's code. */
+  const read = async (fresh: boolean): Promise<string> => {
+    let answer: AccountAnswer;
     try {
-      const r = await doFetch(`${url}/api/account`, { signal: controller.signal, redirect: "error" });
-      if (!r.ok) body = unreachable(`http ${r.status}`);
-      else {
-        let json: unknown;
-        try {
-          json = await r.json();
-          body = JSON.stringify(seatView(json, seatName, url, now()));
-        } catch {
-          body = unreachable(controller.signal.aborted ? "timeout" : "unreadable");
-        }
-      }
+      answer = await reader.read(fresh);
     } catch (err) {
-      body = unreachable(controller.signal.aborted ? "timeout" : codeOf(err));
-    } finally {
-      clearTimeout(timer);
+      return unreachable(codeOf(err));
     }
-    cache = { body, at: now() };
-    return body;
-  };
-
-  const fly = (fresh: boolean): Promise<string> => {
-    if (flight !== undefined && (!fresh || flight.fresh)) return flight.body;
-    const after = flight?.body;
-    const own: { body: Promise<string>; fresh: boolean } = { body: after === undefined ? read() : after.then(read), fresh };
-    flight = own;
-    void own.body.finally(() => { if (flight === own) flight = undefined; });
-    return own.body;
+    if ("unreachable" in answer) return unreachable(answer.unreachable);
+    if (answer.status !== 200) return unreachable(`http ${answer.status}`);
+    let account: unknown;
+    try {
+      account = JSON.parse(answer.body);
+    } catch {
+      return unreachable("unreadable");
+    }
+    return JSON.stringify(seatView(account, seatName, url, now()));
   };
 
   const send = (res: ServerResponse, status: number, body: string): void => {
@@ -278,8 +264,7 @@ export function registerSeatRoute(webServer: RouteRegistrar, deps: SeatDeps = {}
       if (!isTrustedDataRequest(req)) return send(res, 403, FORBIDDEN);
       if (deps.disabled === true) return send(res, 200, unreachable("disabled"));
       const fresh = /[?&]fresh=1(?:&|$)/.test(req.url ?? "");
-      if (!fresh && cache !== undefined && now() - cache.at < SEAT_TTL_MS) return send(res, 200, cache.body);
-      return send(res, 200, await fly(fresh));
+      return send(res, 200, await read(fresh));
     },
   });
 }

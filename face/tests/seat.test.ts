@@ -1,10 +1,12 @@
 /** `/data/seat.json` (spec 2026-10-20 §5.4): the Account's `GET /api/account`
  * reduced to the seat's standing for the screen — the pure view and the
- * route (the fence, the cache, `?fresh=1`, the abort, the failure words). */
+ * route (the fence, the reader it reads through — its cache, `?fresh=1`, the
+ * abort —, the failure words). */
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { WebRoute } from "@deepseek-ai/dsh-host-webserver";
+import type { AccountReader } from "../src/account-proxy.ts";
 import { SEAT_TIMEOUT_MS, SEAT_TTL_MS, registerSeatRoute, seatView, type SeatView } from "../src/seat.ts";
 
 const URL_ = "http://127.0.0.1:4820";
@@ -120,7 +122,7 @@ function fakeRes(): { out: { status: number; body: string; headers: Record<strin
 const req = (url = "/data/seat.json", headers: Record<string, string> = { host: "127.0.0.1:3090" }): IncomingMessage =>
   ({ url, headers } as unknown as IncomingMessage);
 
-type FakeFetch = (url: string, init: { signal: AbortSignal; redirect: string }) => Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>;
+type FakeFetch = (url: string, init: { signal: AbortSignal; redirect: string }) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
 
 /** Register with a fake fetch and clock; return the one route. */
 function routeWith(doFetch: FakeFetch, now: () => number, timeoutMs?: number): { route: WebRoute; fetched: string[] } {
@@ -141,7 +143,7 @@ async function call(route: WebRoute, r: IncomingMessage = req()): Promise<{ stat
   return { ...out, json };
 }
 
-const answering = (body: unknown, status = 200): FakeFetch => async () => ({ ok: status >= 200 && status < 300, status, json: async () => body });
+const answering = (body: unknown, status = 200): FakeFetch => async () => ({ ok: status >= 200 && status < 300, status, text: async () => JSON.stringify(body) });
 
 test("the route: a good read is the view with the content type; the fence refuses a foreign Origin with the fixed body", async () => {
   const { route, fetched } = routeWith(answering(account()), () => NOW);
@@ -157,6 +159,7 @@ test("the route: a good read is the view with the content type; the fence refuse
 });
 
 test("the route: two reads within the TTL fetch once; ?fresh=1 fetches again; the TTL expires", async () => {
+  assert.equal(SEAT_TTL_MS, 15_000, "the proxy's account route's TTL, whose reader the route reads through");
   let clock = NOW;
   const { route, fetched } = routeWith(answering(account()), () => clock);
   await call(route); await call(route);
@@ -169,12 +172,12 @@ test("the route: two reads within the TTL fetch once; ?fresh=1 fetches again; th
 });
 
 test("the route: concurrent reads share one fetch", async () => {
-  let release!: (v: { ok: boolean; status: number; json(): Promise<unknown> }) => void;
-  const gate = new Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>((r) => { release = r; });
+  let release!: (v: { ok: boolean; status: number; text(): Promise<string> }) => void;
+  const gate = new Promise<{ ok: boolean; status: number; text(): Promise<string> }>((r) => { release = r; });
   const { route, fetched } = routeWith(() => gate, () => NOW);
   const a = fakeRes(); const b = fakeRes();
   const p = Promise.all([route.handler(req(), a.res), route.handler(req(), b.res)]);
-  release({ ok: true, status: 200, json: async () => account() });
+  release({ ok: true, status: 200, text: async () => JSON.stringify(account()) });
   await p;
   assert.equal(fetched.length, 1);
   assert.equal((JSON.parse(a.out.body) as SeatView).seat?.status, "admitted");
@@ -205,10 +208,12 @@ test("the route: a hanging service is cut at the timeout", async () => {
 test("the route: a 403 or a 500 says http <status>; unparsable JSON says unreadable; a redirect is an error", async () => {
   assert.equal((await call(routeWith(answering({}, 403), () => NOW).route)).json.error, "http 403");
   assert.equal((await call(routeWith(answering({}, 500), () => NOW).route)).json.error, "http 500");
-  const bad: FakeFetch = async () => ({ ok: true, status: 200, json: async () => { throw new SyntaxError("Unexpected token"); } });
+  const bad: FakeFetch = async () => ({ ok: true, status: 200, text: async () => "<html>not json</html>" });
   assert.equal((await call(routeWith(bad, () => NOW).route)).json.error, "unreadable");
+  const broken: FakeFetch = async () => ({ ok: true, status: 200, text: async () => { throw new TypeError("terminated"); } });
+  assert.equal((await call(routeWith(broken, () => NOW).route)).json.error, "unreadable", "a body that cannot be read at all");
   let seen: { redirect: string } | undefined;
-  const spy: FakeFetch = async (_url, init) => { seen = init; return { ok: true, status: 200, json: async () => account() }; };
+  const spy: FakeFetch = async (_url, init) => { seen = init; return { ok: true, status: 200, text: async () => JSON.stringify(account()) }; };
   await call(routeWith(spy, () => NOW).route);
   assert.equal(seen?.redirect, "error");
 });
@@ -221,7 +226,7 @@ test("seatView: a venue's stale is the Account's words; any words mark it stale,
 });
 
 test("the route: a body that stalls past the timeout says timeout, not unreadable", async () => {
-  const stalling: FakeFetch = async (_url, init) => ({ ok: true, status: 200, json: () => new Promise((_resolve, reject) => {
+  const stalling: FakeFetch = async (_url, init) => ({ ok: true, status: 200, text: () => new Promise((_resolve, reject) => {
     init.signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })));
   }) });
   const { route } = routeWith(stalling, () => NOW, 20);
@@ -229,7 +234,7 @@ test("the route: a body that stalls past the timeout says timeout, not unreadabl
 });
 
 test("the route: a fresh read never joins a plain read in flight - it asks again after it, and the later answer is the cache", async () => {
-  type Answer = { ok: boolean; status: number; json(): Promise<unknown> };
+  type Answer = { ok: boolean; status: number; text(): Promise<string> };
   const gates: Array<(v: Answer) => void> = [];
   const { route, fetched } = routeWith(() => new Promise<Answer>((r) => { gates.push(r); }), () => NOW);
   const plain = fakeRes(); const fresh = fakeRes();
@@ -237,11 +242,11 @@ test("the route: a fresh read never joins a plain read in flight - it asks again
   const p2 = route.handler(req("/data/seat.json?fresh=1"), fresh.res);
   await new Promise((r) => setTimeout(r, 0));
   assert.equal(fetched.length, 1, "the fresh read waits for the plain one to settle");
-  gates[0]({ ok: true, status: 200, json: async () => account({ cards: [] }) });
+  gates[0]({ ok: true, status: 200, text: async () => JSON.stringify(account({ cards: [] })) });
   await p1;
   await new Promise((r) => setTimeout(r, 0));
   assert.equal(fetched.length, 2, "then asks the Account again");
-  gates[1]({ ok: true, status: 200, json: async () => account() });
+  gates[1]({ ok: true, status: 200, text: async () => JSON.stringify(account()) });
   await p2;
   assert.equal((JSON.parse(plain.out.body) as SeatView).cards?.length, 0, "the plain read's answer is the one it asked for");
   assert.equal((JSON.parse(fresh.out.body) as SeatView).cards?.length, 1, "the fresh read's answer is from after the receipt");
@@ -253,9 +258,33 @@ test("the route: a fresh read never joins a plain read in flight - it asks again
 test("the route: a disabled seat row answers disabled without asking the Account", async () => {
   const routes: WebRoute[] = [];
   const fetched: string[] = [];
-  const spy: FakeFetch = async (url) => { fetched.push(url); return { ok: true, status: 200, json: async () => account() }; };
+  const spy: FakeFetch = async (url) => { fetched.push(url); return { ok: true, status: 200, text: async () => JSON.stringify(account()) }; };
   registerSeatRoute({ register: (route) => routes.push(route) }, { url: URL_, seatName: "Gravit", disabled: true, fetch: spy as unknown as typeof fetch, now: () => NOW });
   const a = await call(routes[0]);
   assert.deepEqual(a.json, { ok: true, url: URL_, reachable: false, error: "disabled" });
   assert.equal(fetched.length, 0);
+});
+
+/* --- the shared reader (spec 2026-10-22 §5.2) --------------------------------- */
+
+test("the route: with a reader given, the seat route never fetches on its own — every read is the reader's, fresh as asked", async () => {
+  const fetched: string[] = [];
+  const spy: FakeFetch = async (url) => { fetched.push(url); return { ok: true, status: 200, text: async () => JSON.stringify(account()) }; };
+  const asked: boolean[] = [];
+  const reader: AccountReader = { read: async (fresh = false) => { asked.push(fresh); return { status: 200, body: JSON.stringify(account()) }; } };
+  const routes: WebRoute[] = [];
+  registerSeatRoute({ register: (route) => routes.push(route) }, { url: URL_, seatName: "Gravit", reader, fetch: spy as unknown as typeof fetch, now: () => NOW });
+  const a = await call(routes[0]);
+  assert.equal(a.json.reachable, true); assert.equal(a.json.seat?.status, "admitted");
+  await call(routes[0]);
+  await call(routes[0], req("/data/seat.json?fresh=1"));
+  assert.deepEqual(asked, [false, false, true], "no cache of the route's own: each read asks the reader, ?fresh=1 as read(true)");
+
+  const failing: AccountReader = { read: async () => { throw Object.assign(new Error("private words"), { code: "ECONNRESET" }); } };
+  const broken: WebRoute[] = [];
+  registerSeatRoute({ register: (route) => broken.push(route) }, { url: URL_, seatName: "Gravit", reader: failing, fetch: spy as unknown as typeof fetch, now: () => NOW });
+  const b = await call(broken[0]);
+  assert.deepEqual(b.json, { ok: true, url: URL_, reachable: false, error: "ECONNRESET" }, "a reader's rejection is its code");
+  assert.doesNotMatch(b.body, /private/);
+  assert.equal(fetched.length, 0, "the fetch is the reader's to make, never the route's");
 });

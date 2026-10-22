@@ -21,6 +21,7 @@ import { installBotRuntime, registerBotRuntimeRoutes } from "./bot-runtime.ts";
 import { readBotJournal } from "./bot-journal.ts";
 import { BOTS_ROOT } from "./overlay.ts";
 import { registerDataRoutes } from "./data.ts";
+import { registerAccountProxy } from "./account-proxy.ts";
 import { composedSeatRow, type SeatEntryLike } from "./account-seat.ts";
 import { registerSeatRoute } from "./seat.ts";
 import { registerStatic, type IndexAuth } from "./static.ts";
@@ -168,14 +169,24 @@ registerStatic(booted.ctx.webServer, clientDir, connection);
  * `python3`) from the repo root this process just chdir'd to, and no injection
  * seam belongs on the entry point — `spawn`/`now` exist for the tests. */
 disposeData = registerDataRoutes(booted.ctx.webServer);
-/* The Account seat's standing for the screen (src/seat.ts): a loopback read of
- * the Account's own /api/account at the URL and under the seat name of the
- * `mcp-account` row AS COMPOSED — an operator patch may have pointed it
- * elsewhere, renamed the seat or disabled the row — so the box never reports a
- * seat the face did not mount; it touches no key and no home. */
+/* The Account's reads for the screens (src/account-proxy.ts) and the seat's
+ * standing for its box (src/seat.ts): loopback reads of the Account at the URL
+ * of the `mcp-account` row AS COMPOSED — an operator patch may have pointed it
+ * elsewhere, renamed the seat or disabled the row — so neither reports an
+ * Account or a seat the face did not mount; the proxy follows the same row as
+ * the box, and a disabled row disables both. The box finds the seat under the
+ * row's seat name and reads through the proxy's own `account` reader, so
+ * /data/seat.json and /data/account share one upstream read. Neither touches a
+ * key or a home. */
 const seatLoader = booted.ctx.get("loader") as { entries(): Iterable<SeatEntryLike> } | undefined;
 const seatRow = seatLoader === undefined ? undefined : composedSeatRow(seatLoader.entries());
-registerSeatRoute(booted.ctx.webServer, seatRow === undefined ? {} : seatRow.disabled ? { disabled: true } : { url: seatRow.url, seatName: seatRow.seatName });
+const proxy = registerAccountProxy(booted.ctx.webServer, seatRow === undefined ? {} : seatRow.disabled ? { disabled: true } : { url: seatRow.url });
+registerSeatRoute(
+  booted.ctx.webServer,
+  seatRow === undefined
+    ? { reader: proxy.reader }
+    : seatRow.disabled ? { disabled: true } : { url: seatRow.url, seatName: seatRow.seatName, reader: proxy.reader },
+);
 /* The channel picker's data (sidebar + landing page) and the new-channel copy
  * action. `process.cwd()` is the workbench repo root — the chdir above put it
  * there. `dshHome` is resolved the same way every other route family here

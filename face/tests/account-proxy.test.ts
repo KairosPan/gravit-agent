@@ -22,8 +22,8 @@ import {
   rebuildQuery,
   registerAccountProxy,
   type AccountProxyDeps,
-  type AccountReader,
 } from "../src/account-proxy.ts";
+import { registerSeatRoute, type SeatView } from "../src/seat.ts";
 
 const URL_ = "http://127.0.0.1:4820";
 const NOW = 1_760_000_000_000;
@@ -113,7 +113,7 @@ const answering = (body: string, status = 200): FakeFetch => async () => ok(body
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
 /** Register the proxy with a fake fetch and clock; every URL and init the fake saw is kept. */
-function proxyWith(doFetch: FakeFetch, now: () => number = () => NOW, more: AccountProxyDeps & { reader?: AccountReader } = {}) {
+function proxyWith(doFetch: FakeFetch, now: () => number = () => NOW, more: AccountProxyDeps = {}) {
   const routes: WebRoute[] = [];
   const fetched: string[] = [];
   const inits: FakeInit[] = [];
@@ -439,27 +439,49 @@ test("createAccountReader: read() is the account route's cache; read(true) asks 
   clock += ACCOUNT_TTL_MS.account + 1;
   assert.deepEqual(await reader.read(), { status: 200, body: '{"ok":true,"n":3}' }, "the TTL expires");
 
-  const routes: WebRoute[] = [];
-  const proxy = registerAccountProxy({ register: (route) => routes.push(route) }, { ...deps, reader });
-  assert.equal(proxy.reader, reader, "the reader handed in is the one handed back");
-  assert.equal((await call(routes, "/data/account")).body, '{"ok":true,"n":3}');
-  assert.equal(fetched.length, 3, "/data/account is served from the reader's cache");
-  assert.equal((await call(routes, "/data/account?fresh=1")).body, '{"ok":true,"n":4}');
-  assert.deepEqual(await reader.read(), { status: 200, body: '{"ok":true,"n":4}' }, "the route's fresh answer is the reader's too");
-  assert.equal(fetched.length, 4);
-
-  const own = proxyWith(answering(OK_BODY));
-  await call(own.routes, "/data/account");
-  assert.deepEqual(await own.proxy.reader.read(), { status: 200, body: OK_BODY });
+  let m = 0;
+  const own = proxyWith(async () => { m += 1; return ok(`{"ok":true,"m":${m}}`); });
+  assert.equal((await call(own.routes, "/data/account")).body, '{"ok":true,"m":1}');
+  assert.deepEqual(await own.proxy.reader.read(), { status: 200, body: '{"ok":true,"m":1}' });
   assert.equal(own.fetched.length, 1, "the proxy's own reader and /data/account share one read");
+  assert.equal((await call(own.routes, "/data/account?fresh=1")).body, '{"ok":true,"m":2}');
+  assert.deepEqual(await own.proxy.reader.read(), { status: 200, body: '{"ok":true,"m":2}' }, "the route's fresh answer is the reader's too");
+  assert.equal(own.fetched.length, 2);
+});
 
-  const foreign: AccountReader = { read: async (fresh) => ({ status: 200, body: JSON.stringify({ ok: true, fresh: fresh === true }) }) };
-  const through = proxyWith(answering(OK_BODY), () => NOW, { reader: foreign });
-  assert.equal((await call(through.routes, "/data/account?fresh=1")).body, '{"ok":true,"fresh":true}', "a reader made elsewhere is read through");
-  assert.equal(through.fetched.length, 0);
-  const failing: AccountReader = { read: async () => { throw Object.assign(new Error("private words"), { code: "ECONNRESET" }); } };
-  const broken = await call(proxyWith(answering(OK_BODY), () => NOW, { reader: failing }).routes, "/data/account");
-  assert.equal(broken.status, 503); assert.equal(broken.body, '{"ok":false,"unreachable":"ECONNRESET"}', "its rejection is a code, never its text");
+test("the seat route and /data/account share one upstream read within the TTL", async () => {
+  const page = JSON.stringify({
+    ok: true,
+    keys: [{ address: "0xab12", name: "Gravit", status: "ok" }],
+    spend: [{ agent: "0xab12", scope: "trade", allow: ["paper-1"], perPaymentUsd: 25, budgetUsd: 100, spentUsd: 0, reservedUsd: 0 }],
+    venues: [{ id: "paper-1", name: "Paper account · paper", paper: true, usd: 10_000 }],
+    cards: [],
+  });
+  /* The answer reads as JSON too: a seat route that asked the Account on its own would read it, and the count alone would say so. */
+  const fetched: string[] = [];
+  const counting: FakeFetch = async (url) => {
+    fetched.push(url);
+    return Object.assign(ok(page), { json: async (): Promise<unknown> => JSON.parse(page) });
+  };
+  const routes: WebRoute[] = [];
+  const register = (route: WebRoute): void => { routes.push(route); };
+  const proxy = registerAccountProxy({ register }, { url: URL_, fetch: counting as unknown as typeof fetch, now: () => NOW });
+  registerSeatRoute({ register }, { url: URL_, seatName: "Gravit", reader: proxy.reader, fetch: counting as unknown as typeof fetch, now: () => NOW });
+
+  const proxied = await call(routes, "/data/account");
+  assert.equal(proxied.status, 200); assert.equal(proxied.body, page);
+  const seat = await call(routes, "/data/seat.json");
+  assert.equal(seat.status, 200);
+  const view = JSON.parse(seat.body) as SeatView;
+  assert.equal(view.reachable, true); assert.equal(view.seat?.status, "admitted");
+  assert.deepEqual(view.venues?.map((v) => [v.id, v.paper]), [["paper-1", true]]);
+  assert.deepEqual(fetched, [`${URL_}/api/account`], "one upstream read serves both routes");
+
+  const fresh = await call(routes, "/data/seat.json?fresh=1");
+  assert.equal((JSON.parse(fresh.body) as SeatView).seat?.status, "admitted");
+  assert.equal(fetched.length, 2, "the seat's ?fresh=1 asks the Account again");
+  await call(routes, "/data/account");
+  assert.equal(fetched.length, 2, "and /data/account is served that answer: one cache, read from either route");
 });
 
 test("the stream: a bad client id is 400; a good one opens upstream with accept text/event-stream, since and markets as sent; frames pass through byte for byte", async () => {

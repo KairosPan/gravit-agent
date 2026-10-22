@@ -2,14 +2,16 @@
  * (spec 2026-10-22 §5.1). The Account (Linqi's buyer-agent-demo, an external
  * program on 127.0.0.1:4820) answers only bare loopback requests — its fence
  * refuses any page at another origin — so the face's page never asks it: the
- * page asks the face, and the face asks the Account with the plain loopback
- * fetch `seat.ts` makes (no Origin, no Sec-Fetch-Site, no cookie, the URL's
- * own Host, `redirect: "error"`). Eleven reads and the Account's push channel
+ * page asks the face, and the face asks the Account with a plain loopback
+ * fetch (no Origin, no Sec-Fetch-Site, no cookie, the URL's own Host,
+ * `redirect: "error"`). Eleven reads and the Account's push channel
  * — `stream`, and `stream/markets`, the markets it follows — each an `exact`
  * route, never a prefix: the route table is the allow-list, and nothing else
  * of the Account's surface is reachable through the face.
- * {@link createAccountReader} is the `account` route's read without a route,
- * for `seat.ts`.
+ * {@link registerAccountProxy} returns the `account` route's reader, which
+ * `main.ts` hands to `seat.ts`: `/data/seat.json` and `/data/account` share
+ * one upstream read. {@link createAccountReader} is that read without a
+ * route, for a seat route handed none.
  *
  * The rules, the seat route's generalised:
  * - The fence first (`isTrustedDataRequest`, 403 with the fixed body), then 405
@@ -20,7 +22,8 @@
  *   the face's own flag, never forwarded. A disabled seat row disables the
  *   proxy: every valid read then answers 503 `disabled` and asks nothing (a
  *   malformed query or a wrong method is refused before the row's state is
- *   consulted).
+ *   consulted, and so, on `stream/markets`, are a body not declared JSON, 415,
+ *   and a body past its limit, 413).
  * - The Account's status and body pass through as they are, never parsed: its
  *   `{ok:false, refusal}` is the page's to draw, in its words. Every JSON
  *   answer is `application/json` and `no-store`, as the Account's own reads
@@ -200,7 +203,7 @@ function rebuildStreamQuery(rawUrl: string, lastEventId: string | string[] | und
 const queryless = (rawUrl: string): boolean => searchOf(rawUrl)?.size === 0;
 
 /** A failure's code, bounded to a code's shape so no error text ever reaches the page. */
-function codeOf(err: unknown): string {
+export function codeOf(err: unknown): string {
   const e = err as { cause?: { code?: unknown }; code?: unknown } | null;
   const code = e?.cause?.code ?? e?.code;
   return typeof code === "string" && /^[A-Z][A-Z0-9_]{1,31}$/.test(code) ? code : "unreachable";
@@ -301,31 +304,13 @@ function routeReads(route: ReadRoute, s: Settings): Reads {
   };
 }
 
-/** The `account` route's reads behind each reader {@link createAccountReader} made, so a reader handed to
- * {@link registerAccountProxy} serves `/data/account` from its own cache. */
-const readsOf = new WeakMap<AccountReader, Reads>();
+/** The `account` route's reads as a reader: `GET /api/account` through that route's cache. */
+const readerOf = (reads: Reads): AccountReader => ({ read: (fresh = false) => reads.read("", fresh) });
 
-/** The `account` route's reader, with no route registered: `GET /api/account` through its cache. */
+/** The `account` route's reader, with no route registered: `GET /api/account` through its own cache. */
 export function createAccountReader(deps: AccountProxyDeps = {}): AccountReader {
-  const reads = routeReads("account", settingsOf(deps));
-  const reader: AccountReader = { read: (fresh = false) => reads.read("", fresh) };
-  readsOf.set(reader, reads);
-  return reader;
+  return readerOf(routeReads("account", settingsOf(deps)));
 }
-
-/** A reader this module did not make: `/data/account` reads through it, with nothing kept to re-serve
- * stale; a rejection is a failure's code, as the fetch's is. */
-const through = (reader: AccountReader): Reads => ({
-  read: async (_query, fresh) => {
-    try {
-      return await reader.read(fresh);
-    } catch (err) {
-      return { unreachable: codeOf(err) };
-    }
-  },
-  kept: () => undefined,
-  clear: () => undefined,
-});
 
 function send(res: ServerResponse, status: number, body: string): void {
   res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
@@ -425,19 +410,16 @@ const followHandler = (s: Settings) => async (req: IncomingMessage, res: ServerR
   return "status" in answer ? send(res, answer.status, answer.body) : send(res, 503, unreachable(answer.unreachable));
 };
 
-/** Mount the eleven read routes and the two stream routes on the host webserver. `deps.reader` (one
- * {@link createAccountReader} made) serves `/data/account`, else the proxy makes its own; either way that
- * route and the returned reader read through one cache. `dispose` forgets every kept answer and aborts
- * every open stream's upstream. */
-export function registerAccountProxy(
-  webServer: RouteRegistrar,
-  deps: AccountProxyDeps & { reader?: AccountReader } = {},
-): { reader: AccountReader; dispose(): void } {
+/** Mount the eleven read routes and the two stream routes on the host webserver. The reader returned is
+ * the `account` route's own: it and `/data/account` read through one cache, so the seat route `main.ts`
+ * hands it to shares that route's upstream read. `dispose` forgets every kept answer and aborts every open
+ * stream's upstream. */
+export function registerAccountProxy(webServer: RouteRegistrar, deps: AccountProxyDeps = {}): { reader: AccountReader; dispose(): void } {
   const s = settingsOf(deps);
-  const reader = deps.reader ?? createAccountReader(deps);
+  const accountReads = routeReads("account", s);
   const all: Reads[] = [];
   for (const route of READ_ROUTES) {
-    const reads = route === "account" ? readsOf.get(reader) ?? through(reader) : routeReads(route, s);
+    const reads = route === "account" ? accountReads : routeReads(route, s);
     all.push(reads);
     webServer.register({ kind: "exact", path: facePath(route), handler: handler(route, reads, s.disabled) });
   }
@@ -446,7 +428,7 @@ export function registerAccountProxy(
   webServer.register({ kind: "exact", path: "/data/account/stream", handler: streamHandler(s, open) });
   webServer.register({ kind: "exact", path: "/data/account/stream/markets", handler: followHandler(s) });
   return {
-    reader,
+    reader: readerOf(accountReads),
     dispose: () => {
       for (const reads of all) reads.clear();
       for (const stream of open) stream.abort();
