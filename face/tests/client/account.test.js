@@ -26,21 +26,12 @@ const keyed = (over = {}) => ({
   generated_at: new Date(2026, 9, 19, 14, 32).toISOString(), ...over,
 });
 const keyless = { ok: true, available: false, reason: 'no APCA keys in the environment', orders_gate: {}, generated_at: 'g' };
-const creds = source => ({ APCA_API_KEY_ID: { configured: true, source, writable: false }, APCA_API_SECRET_KEY: { configured: true, source, writable: false } });
-const providers = [
-  { id: 'alpaca', market: 'us', status: 'connected', source: 'Alpaca', feed: 'iex', transport: 'stream', message: '美股实时行情已连接' },
-  { id: 'coinbase', market: 'crypto', status: 'connected', source: 'Coinbase', feed: 'exchange', transport: 'stream', message: '' },
-  { id: 'ifind', market: 'cn', status: 'unconfigured', source: 'iFinD', feed: '', transport: 'poll', message: 'A 股行情待配置 iFinD' },
-];
 
-function screen({ tab = 'portfolio', data, failed = false, loading = false, keys = null, tools = null, probe = [], statement = false, seat, seatFailed = false } = {}) {
+function screen({ tab = 'portfolio', data, failed = false, loading = false, statement = false, seat, seatFailed = false } = {}) {
   let s = R.nav(emptyState(), { screen: 'account', tab });
   if (data !== undefined) s = R.accountLoaded(s, { data, at: NOW });
   if (failed) s = R.accountFailed(s, { at: NOW });
   if (loading) s = R.accountLoading(s);
-  if (keys) s = R.credentialsLoaded(s, keys);
-  if (tools) s = R.toolsLoaded(s, tools);
-  if (probe.length) s = R.probeLoaded(s, probe);
   if (statement) s = R.openStatement(s);
   if (seat !== undefined) s = R.seatLoaded(s, { data: seat, at: NOW });
   if (seatFailed) s = R.seatFailed(s, { at: NOW });
@@ -114,22 +105,19 @@ test('the Statement drawer: its rows, the 50-orders line and Export CSV', () => 
   assert.doesNotMatch(none, /exportStatement/, 'nothing to export');
 });
 
-test('Venues: keys and order tools, each unknown until read, then the providers', () => {
+test('Venues: the Alpaca row with its host, the keys and order tools unknown, no quote providers', () => {
   const unread = screen({ tab: 'venues', data: keyed() }).html;
   assert.match(unread, /class="seg-item pressed" aria-current="page" href="#\/account\/venues">Venues</);
   assert.match(unread, /<div class="venue"><span><b>Alpaca paper<\/b><br><span class="dim">paper-api\.alpaca\.markets · Keys unknown · Order tools unknown<\/span><\/span><\/div>/);
   assert.doesNotMatch(unread, /Quotes/);
-  const read = screen({ tab: 'venues', data: keyed(), keys: creds('env'), tools: ['mcp__alpaca-kit__account', 'mcp__alpaca-kit__place_order'], probe: providers }).html;
-  assert.match(read, /paper-api\.alpaca\.markets · Keys · env · Order tools on/);
-  assert.match(read, /<div class="cardbox-title">Quotes<\/div><div class="venues"><div class="venue"><span>Alpaca · Connected<\/span><\/div><div class="venue"><span>Coinbase · Connected<\/span><\/div><div class="venue"><span>iFinD · Not configured<\/span><\/div><\/div>/);
-  const off = screen({ tab: 'venues', data: keyless, keys: { APCA_API_KEY_ID: { configured: false, writable: true }, APCA_API_SECRET_KEY: { configured: false, writable: true } }, tools: ['mcp__alpaca-kit__account'] }).html;
-  assert.match(off, /<b>Alpaca<\/b><br><span class="dim">No keys · Order tools off<\/span>/);
+  const off = screen({ tab: 'venues', data: keyless }).html;
+  assert.match(off, /<b>Alpaca<\/b><br><span class="dim">Keys unknown · Order tools unknown<\/span>/);
 });
 
 test('no Chinese ever reaches the HTML', () => {
   const states = [
     screen({ data: { ok: false, error: '账户读取失败：HTTP 401' }, failed: true }),
-    screen({ tab: 'venues', data: keyed(), probe: providers }),
+    screen({ tab: 'venues', data: keyed() }),
     screen({ data: keyless }),
     screen({ data: keyed({ stale: true }), statement: true }),
   ];

@@ -62,7 +62,7 @@ function marketStates() {
   ];
 }
 
-// Account: Portfolio keyed (stale), keyless, failed with nothing loaded, loading, the Statement open, Venues read and unread
+// Account: Portfolio keyed (stale), keyless, failed with nothing loaded, loading, the Statement open, Venues
 function accountStates() {
   const on = R.nav(emptyState(), { screen: 'account', tab: 'portfolio' });
   const data = { ok: true, available: true, host: 'paper-api.alpaca.markets', account: { equity: '1000', last_equity: '990', cash: '400', currency: 'USD' },
@@ -74,8 +74,6 @@ function accountStates() {
   return [
     keyed, R.accountLoaded(on, { data: { ok: true, available: false, reason: 'no APCA keys in the environment' }, at: NOW }), R.accountFailed(on, { at: NOW }), R.accountLoading(on),
     R.openStatement(keyed), R.openSettings(keyed), venues,
-    R.probeLoaded(R.toolsLoaded(R.credentialsLoaded(venues, { APCA_API_KEY_ID: { configured: true, source: 'env' }, APCA_API_SECRET_KEY: { configured: true, source: 'env' } }), ['mcp__alpaca-kit__place_order']),
-      [{ id: 'alpaca', market: 'us', status: 'connected', source: 'Alpaca', feed: 'iex', transport: 'stream', message: '' }]),
   ];
 }
 

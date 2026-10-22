@@ -33,8 +33,17 @@ export function emptyState() {
       watchlist: [], watchError: null, quotes: {}, providers: [], connection: 'idle',
       search: { query: '', status: 'idle', assets: [], partial: false }, hitQuotes: {}, bars: {},
     },
-    // the host's account (host/account.js) and the Statement drawer
-    account: { status: 'idle', data: null, at: null, creds: null, tools: null, probe: [], statementOpen: false },
+    // the Account (host/account.js): its page with the sentence of its last refusal, its other reads, the history curve's
+    // range, and the Statement drawer
+    account: {
+      status: 'idle', data: null, at: null, message: null,
+      holdings: { status: 'idle', data: null, at: null },
+      paper: { status: 'idle', data: null, at: null },
+      history: { status: 'idle', data: null, at: null, range: '1d' },
+      statement: { status: 'idle', data: null, at: null },
+      agents: { status: 'idle', data: null, at: null },
+      statementOpen: false,
+    },
     // the Account seat's standing (host/seat.js): /data/seat.json as read
     seat: { status: 'idle', data: null, at: null },
     edit: null,

@@ -1,117 +1,334 @@
-// The account host layer (spec 2026-10-19 §7 Stage 2): /data/account.json, credentials/describe, the plugin registry and the
-// quote providers into the store, against a recording getJson and call.
+// The Account host layer (spec 2026-10-22 §6.2): the Account's reads through the face's proxy — the page (/data/account),
+// holdings?cost=1 and its paper lens, the leading history curve, the statement and the agents — their cadence and the
+// stream's account events, into the store against a recording getJson, recorded timers and the stand-in's fixtures.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { createStore } from '../../client/js/store.js';
 import { reducers } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
-import { startAccount, KEY_REFS, PROBE_IDS } from '../../client/js/host/account.js';
+import { startAccount, ACCOUNT_POLL_MS, ACCOUNT_POLL_STREAM_MS } from '../../client/js/host/account.js';
 
 const tick = () => new Promise(r => setTimeout(r, 0));
 const settle = async () => { for (let i = 0; i < 6; i++) await tick(); };
-const keyed = (over = {}) => ({ ok: true, available: true, host: 'paper-api.alpaca.markets', account: { equity: '100' }, positions: [], orders: [], generated_at: 'g', ...over });
+// a fixture of the stand-in's answers, parsed afresh for every call so no test sees another's copy
+const fx = name => JSON.parse(readFileSync(new URL(`../fixtures/account/${name}.json`, import.meta.url), 'utf8'));
+// the stand-in's page: real money $29,138.10 (totalUsd) beside two paper venues
+const page = (over = {}) => ({ ...fx('account'), ...over });
+// the app's getJson on a status that is not OK: an Error with the status and, where the app attaches it, the parsed body
+const rejected = (path, status, body) => Object.assign(new Error(`${path}: HTTP ${status}`), { status }, body === undefined ? {} : { body });
+// answers handed out one a read, in order
+const inTurn = answers => () => { const next = answers.shift(); return next instanceof Error ? Promise.reject(next) : Promise.resolve(next); };
 
-function rig({ json = {}, describe = async () => ({}) } = {}) {
+// the host over a recording getJson — `json` answers a path by its exact text, else by the path without its query: a body,
+// an Error it rejects with, or a function of the path returning a promise — and recorded timers ({ fn, ms, handle }, kept
+// until run or cancelled); streamOpen answers r.streamIsOpen
+function rig({ json = {} } = {}) {
   const store = createStore({ initial: emptyState(), reducers });
   const reads = [];
-  const calls = [];
   const getJson = path => {
     reads.push(path);
-    const answer = Object.entries(json).find(([prefix]) => path.startsWith(prefix))?.[1];
+    const answer = Object.hasOwn(json, path) ? json[path] : json[path.split('?')[0]];
     if (typeof answer === 'function') return answer(path);
     return answer instanceof Error ? Promise.reject(answer) : Promise.resolve(answer);
   };
-  const call = (endpoint, args) => { calls.push([endpoint, args]); return describe(endpoint, args); };
+  const timers = new Map();
+  let serial = 0;
   let t = 100;
-  const account = startAccount({ store, getJson, call, now: () => ++t });
-  return { store, account, reads, calls, a: () => store.get().account };
+  const r = {
+    store, reads, cancelled: [], streamIsOpen: false,
+    a: () => store.get().account,
+    pending: () => [...timers.values()],
+    run(timer) {
+      assert.ok(timer && timers.has(timer.handle), 'the timer is pending');
+      timers.delete(timer.handle);
+      timer.fn();
+    },
+  };
+  r.account = startAccount({
+    store, getJson, now: () => ++t,
+    schedule: (fn, ms) => { const timer = { fn, ms, handle: ++serial }; timers.set(timer.handle, timer); return timer.handle; },
+    cancelTimer: handle => { r.cancelled.push(handle); timers.delete(handle); },
+    streamOpen: () => r.streamIsOpen,
+  });
+  return r;
 }
 
-test('load reads /data/account.json once even when asked twice', async () => {
-  let release;
-  const r = rig({ json: { '/data/account.json': () => new Promise(res => { release = res; }) } });
+test('load reads /data/account once for two callers; fresh reads ?fresh=1 and does not join a plain flight', async () => {
+  const release = {};
+  const r = rig({ json: { '/data/account': path => new Promise(res => { release[path] = res; }) } });
   assert.equal(r.a().status, 'idle');
-  const first = r.account.load();
-  const second = r.account.load();
+  const plain = r.account.load();
+  assert.equal(r.account.load(), plain, 'a second caller joins the flight');
   assert.equal(r.a().status, 'loading');
   await tick();
-  assert.equal(r.reads.length, 1);
-  release(keyed());
-  await Promise.all([first, second]);
-  assert.equal(r.a().status, 'ready');
-  assert.equal(r.a().data.account.equity, '100');
-  assert.equal(typeof r.a().at, 'number');
-  r.account.load();
-  await tick();
-  assert.equal(r.reads.length, 2, 'a load after the flight landed reads again');
-});
-
-test('a stale body stays stale; a 503 keeps the last good data and reads error; the keyless answer is ready', async () => {
-  const answers = [keyed(), keyed({ stale: true }), Object.assign(new Error('/data/account.json: HTTP 503'), { status: 503 }), { ok: false, error: 'GET /v2/account -> HTTP 401' }, { ok: true, available: false, reason: 'no APCA keys in the environment' }];
-  const r = rig({ json: { '/data/account.json': () => { const next = answers.shift(); return next instanceof Error ? Promise.reject(next) : Promise.resolve(next); } } });
-  await r.account.load();
-  await r.account.load();
-  assert.equal(r.a().status, 'ready');
-  assert.equal(r.a().data.stale, true);
-  await r.account.load();
-  assert.equal(r.a().status, 'error');
-  assert.equal(r.a().data.stale, true, 'the last data stays');
-  await r.account.load();
-  assert.equal(r.a().status, 'error', 'an ok:false body is a failure');
-  assert.equal(r.a().data.available, true);
-  await r.account.load();
-  assert.equal(r.a().status, 'ready');
-  assert.equal(r.a().data.available, false);
-});
-
-test('describe makes three reads, and one failing leaves the others', async () => {
-  const creds = { APCA_API_KEY_ID: { configured: true, source: 'env', writable: false }, APCA_API_SECRET_KEY: { configured: true, source: 'env', writable: false } };
-  const providers = [{ id: 'alpaca', market: 'us', status: 'connected', source: 'Alpaca', feed: 'iex', transport: 'stream', message: '' }];
-  const r = rig({
-    json: {
-      '/data/plugins.json': Promise.resolve({ mcp: [{ server: 'alpaca-kit', phase: 'active', tools: [{ name: 'mcp__alpaca-kit__account', description: '' }, { name: 'mcp__alpaca-kit__place_order', description: '' }] }], agentTools: [], rows: [] }),
-      '/data/quotes': Promise.resolve({ ok: true, generated_at: '2026-10-19T14:30:01Z', quotes: [], providers }),
-    },
-    describe: async () => creds,
-  });
-  await r.account.describe();
-  assert.deepEqual(r.calls, [['credentials/describe', { refs: KEY_REFS }]]);
-  assert.deepEqual(KEY_REFS, ['APCA_API_KEY_ID', 'APCA_API_SECRET_KEY']);
-  assert.deepEqual(r.reads.sort(), ['/data/plugins.json', `/data/quotes?ids=${encodeURIComponent(PROBE_IDS.join(','))}`].sort());
-  assert.deepEqual(PROBE_IDS, ['us:SPY', 'crypto:BTC/USD', 'cn:600519']);
-  assert.deepEqual(r.a().creds, creds);
-  assert.deepEqual(r.a().tools, ['mcp__alpaca-kit__account', 'mcp__alpaca-kit__place_order']);
-  assert.deepEqual(r.a().probe, providers);
-
-  const broken = rig({
-    json: { '/data/plugins.json': new Error('/data/plugins.json: HTTP 500'), '/data/quotes': Promise.resolve({ ok: true, generated_at: '2026-10-19T14:30:01Z', quotes: [], providers }) },
-    describe: async () => { throw Object.assign(new Error('credentials service is absent'), { code: 'gateway/internal' }); },
-  });
-  await broken.account.describe();
-  await settle();
-  assert.equal(broken.a().creds, null, 'unknown, not absent');
-  assert.equal(broken.a().tools, null);
-  assert.deepEqual(broken.a().probe, providers);
-  const garbled = rig({ json: { '/data/plugins.json': Promise.resolve({ mcp: 'x' }), '/data/quotes': Promise.resolve({ ok: false }) }, describe: async () => creds });
-  await garbled.account.describe();
-  assert.equal(garbled.a().tools, null);
-  assert.deepEqual(garbled.a().probe, []);
-  assert.deepEqual(garbled.a().creds, creds);
-});
-
-test('a fresh load reads ?fresh=1, and its answer wins over a plain read it overlapped', async () => {
-  const pending = {};
-  const r = rig({ json: { '/data/account.json': path => new Promise(res => { pending[path] = res; }) } });
-  const plain = r.account.load();
+  assert.deepEqual(r.reads, ['/data/account']);
   const fresh = r.account.load({ fresh: true });
-  await tick();
-  assert.deepEqual(r.reads, ['/data/account.json', '/data/account.json?fresh=1']);
+  assert.notEqual(fresh, plain, 'a fresh ask does not join a plain flight');
   assert.equal(r.account.load({ fresh: true }), fresh, 'a second fresh ask shares the fresh flight');
   assert.equal(r.account.load(), fresh, 'and so does a plain one');
-  pending['/data/account.json?fresh=1'](keyed({ account: { equity: '200' } }));
+  await tick();
+  assert.deepEqual(r.reads, ['/data/account', '/data/account?fresh=1']);
+  release['/data/account?fresh=1'](page({ totalUsd: 200 }));
   await fresh;
-  pending['/data/account.json'](keyed({ account: { equity: '100' } }));
-  await plain;
-  assert.equal(r.a().data.account.equity, '200', 'the older plain answer is dropped');
   assert.equal(r.a().status, 'ready');
+  assert.equal(r.a().data.totalUsd, 200);
+  assert.equal(typeof r.a().at, 'number');
+  assert.equal(r.a().message, null);
+  release['/data/account'](page({ totalUsd: 100 }));
+  await plain;
+  assert.equal(r.a().data.totalUsd, 200, 'the older plain answer is dropped');
+  void r.account.load();
+  await tick();
+  assert.deepEqual(r.reads, ['/data/account', '/data/account?fresh=1', '/data/account'], 'a load after the flights landed reads again');
+});
+
+test('a 409 refusal keeps the last data and carries the Account message; an unrecognised page is a failure', async () => {
+  const r = rig({
+    json: {
+      '/data/account': inTurn([
+        page(),
+        rejected('/data/account', 409, { ok: false, refusal: { code: 'E_ACCOUNT_LOCKED', message: 'The Account is locked until its owner signs in.' } }),
+        page(),
+        { ok: false, error: 'venues are still settling' },
+        { ok: false, error: { code: 'E_ODD' } },
+        { ...page(), connectLive: undefined },
+        rejected('/data/account', 503, { ok: false, unreachable: 'ECONNREFUSED' }),
+        rejected('/data/account', 502),
+      ]),
+    },
+  });
+  await r.account.load();
+  assert.equal(r.a().status, 'ready');
+  const kept = r.a().data;
+  await r.account.load();
+  assert.equal(r.a().status, 'error');
+  assert.equal(r.a().message, 'The Account is locked until its owner signs in.', "the refusal's sentence, from the rejection's body");
+  assert.equal(r.a().data, kept, 'the last page stays');
+  await r.account.load();
+  assert.equal(r.a().status, 'ready');
+  assert.equal(r.a().message, null, 'a page clears the sentence');
+  await r.account.load();
+  assert.equal(r.a().status, 'error', 'an ok:false body on a 200 is a failure');
+  assert.equal(r.a().message, 'venues are still settling');
+  assert.equal(r.a().data.ok, true, 'never the refusal as data');
+  await r.account.load();
+  assert.equal(r.a().message, null, 'words only when they are text');
+  await r.account.load();
+  assert.equal(r.a().status, 'error', 'a page the face does not recognise is a failure');
+  assert.equal(r.a().message, null);
+  assert.ok(r.a().data.connectLive, 'the last recognised page stays');
+  await r.account.load();
+  assert.equal(r.a().status, 'error');
+  assert.equal(r.a().message, null, 'unreachable carries no sentence');
+  await r.account.load();
+  assert.equal(r.a().status, 'error');
+  assert.equal(r.a().message, null, 'a rejection without a body carries none');
+  assert.ok(r.a().data.connectLive);
+});
+
+test('loadHoldings reads cost=1, and cost=1&paper=1 only when a paper venue is connected', async () => {
+  const r = rig({
+    json: {
+      '/data/account': page(),
+      '/data/account/holdings?cost=1': fx('holdings'),
+      '/data/account/holdings?cost=1&paper=1': inTurn([fx('holdings-paper'), rejected('/data/account/holdings', 503, { ok: false, unreachable: 'timeout' })]),
+    },
+  });
+  // no page read yet: no paper venue known, real money's read alone
+  await r.account.loadHoldings();
+  assert.deepEqual(r.reads, ['/data/account/holdings?cost=1']);
+  assert.equal(r.a().holdings.status, 'ready');
+  assert.equal(r.a().holdings.data.totalUsd, 29138.1);
+  assert.equal(typeof r.a().holdings.at, 'number');
+  assert.equal(r.a().paper.status, 'idle');
+  // the stand-in's page names two paper venues: both reads in parallel, each once for two callers
+  await r.account.load();
+  r.reads.length = 0;
+  const one = r.account.loadHoldings();
+  const two = r.account.loadHoldings();
+  assert.equal(r.a().holdings.status, 'loading');
+  assert.equal(r.a().paper.status, 'loading');
+  await Promise.all([one, two]);
+  assert.deepEqual(r.reads, ['/data/account/holdings?cost=1', '/data/account/holdings?cost=1&paper=1']);
+  assert.equal(r.a().paper.status, 'ready');
+  assert.equal(r.a().paper.data.totalUsd, 25400);
+  // the paper lens unreachable: an error, its last data kept
+  await r.account.loadHoldings();
+  assert.equal(r.a().paper.status, 'error');
+  assert.equal(r.a().paper.data.totalUsd, 25400, 'the last paper lens stays');
+  assert.equal(r.a().holdings.status, 'ready');
+  // a page with no paper venue: the lens is not read
+  r.store.dispatch('accountLoaded', { data: page({ venues: page().venues.filter(v => v.paper !== true) }), at: 1 });
+  r.reads.length = 0;
+  await r.account.loadHoldings();
+  assert.deepEqual(r.reads, ['/data/account/holdings?cost=1']);
+});
+
+test('loadHistory reads the leading curve: paper=1 when paper leads', async () => {
+  let hold = false;
+  const held = [];
+  const r = rig({
+    json: {
+      '/data/account/history': path => (hold ? new Promise(res => held.push(res))
+        : Promise.resolve(path.includes('&paper=1') ? fx('history-paper') : fx('history'))),
+    },
+  });
+  assert.equal(r.a().history.range, '1d');
+  // nothing read yet: real money's curve for the slice's range
+  await r.account.loadHistory();
+  assert.deepEqual(r.reads, ['/data/account/history?range=1d']);
+  assert.equal(r.a().history.status, 'ready');
+  assert.equal(r.a().history.data.changeUsd, 208.78);
+  // the stand-in: real money leads, the paper lens beside it — real money's curve, for the range asked
+  r.store.dispatch('accountLoaded', { data: page(), at: 1 });
+  r.store.dispatch('holdingsLoaded', { data: fx('holdings'), at: 1 });
+  r.store.dispatch('paperLoaded', { data: fx('holdings-paper'), at: 1 });
+  await r.account.loadHistory('1w');
+  assert.equal(r.a().history.range, '1w');
+  assert.equal(r.reads.at(-1), '/data/account/history?range=1w');
+  // real money at zero, a paper venue and the paper total: Paper leads, and one read, its curve
+  r.store.dispatch('accountLoaded', { data: page({ totalUsd: 0 }), at: 2 });
+  r.reads.length = 0;
+  await r.account.loadHistory();
+  assert.deepEqual(r.reads, ['/data/account/history?range=1w&paper=1']);
+  assert.equal(r.a().history.data.paper, true);
+  assert.equal(r.a().history.data.rebuilt, true);
+  // a range the slice does not know leaves its own
+  r.reads.length = 0;
+  await r.account.loadHistory('5y');
+  assert.equal(r.a().history.range, '1w');
+  assert.deepEqual(r.reads, ['/data/account/history?range=1w&paper=1']);
+  // one read a range for two callers; a read for a range the screen has left when it lands is dropped
+  hold = true;
+  r.reads.length = 0;
+  const month = r.account.loadHistory('1m');
+  assert.equal(r.account.loadHistory('1m'), month);
+  assert.equal(r.a().history.status, 'loading');
+  r.store.dispatch('setHistoryRange', 'all');
+  await tick();
+  held.shift()({ ...fx('history-paper'), range: '1m', changeUsd: 12 });
+  await month;
+  assert.deepEqual(r.reads, ['/data/account/history?range=1m&paper=1']);
+  assert.equal(r.a().history.data.range, '1w', "the month's curve never lands under All");
+  const all = r.account.loadHistory();
+  await tick();
+  held.shift()({ ...fx('history-paper'), range: 'all' });
+  await all;
+  assert.equal(r.reads.at(-1), '/data/account/history?range=all&paper=1');
+  assert.equal(r.a().history.status, 'ready');
+  assert.equal(r.a().history.data.range, 'all');
+  // a history read that fails keeps its last curve
+  const failed = rig({ json: { '/data/account/history': inTurn([fx('history'), { ok: false, error: 'no source answered' }]) } });
+  await failed.account.loadHistory();
+  await failed.account.loadHistory();
+  assert.equal(failed.a().history.status, 'error');
+  assert.equal(failed.a().history.data.changeUsd, 208.78);
+});
+
+test('stream events: order and fill reload holdings and the page fresh; statement reloads the statement; a snapshot reloads everything', async () => {
+  const r = rig({
+    json: {
+      '/data/account': page(),
+      '/data/account/holdings?cost=1': fx('holdings'),
+      '/data/account/holdings?cost=1&paper=1': fx('holdings-paper'),
+      '/data/account/history': fx('history'),
+      '/data/account/statement': fx('statement'),
+      '/data/account/agents': fx('agents'),
+    },
+  });
+  await r.account.load();   // the page names its paper venues
+  const after = async (...events) => {
+    r.reads.length = 0;
+    for (const ev of events) r.account.onStreamEvent(ev);
+    await settle();
+    return [...r.reads].sort();
+  };
+  const moved = ['/data/account/holdings?cost=1', '/data/account/holdings?cost=1&paper=1', '/data/account?fresh=1'].sort();
+  for (const type of ['order', 'fill', 'paper', 'balance', 'position']) {
+    assert.deepEqual(await after({ type, id: '4dababf8.2', data: {} }), moved, type);
+  }
+  assert.equal(r.a().holdings.status, 'ready');
+  assert.equal(r.a().paper.status, 'ready');
+  assert.deepEqual(await after({ type: 'statement', id: '4dababf8.3', data: { venue: 'ex' } }), ['/data/account/statement']);
+  assert.equal(r.a().statement.status, 'ready');
+  assert.deepEqual(await after({ type: 'card', id: '4dababf8.4', data: {} }), ['/data/account?fresh=1']);
+  for (const type of ['desk', 'quote', 'trades', 'book', 'hb']) assert.deepEqual(await after({ type, id: undefined, data: {} }), [], type);
+  assert.deepEqual(await after(null, {}), [], 'what is not an event is ignored');
+  // a burst in one tick: the reads in the air are joined, one a kind
+  const burst = Array.from({ length: 10 }, (_, i) => ({ type: i % 2 ? 'fill' : 'order', id: `4dababf8.${10 + i}`, data: {} }));
+  assert.deepEqual(await after(...burst), moved, 'ten events in a tick: one read of each');
+  // a snapshot: every account read again
+  assert.equal(r.a().agents.status, 'idle');
+  assert.deepEqual(await after({ type: 'snapshot', id: '4dababf8.0', data: {} }),
+    [...moved, '/data/account/history?range=1d', '/data/account/statement', '/data/account/agents'].sort());
+  assert.equal(r.a().agents.status, 'ready');
+  assert.equal(r.a().history.status, 'ready');
+  assert.equal(r.a().status, 'ready');
+  // the stream's first frame is a snapshot, often before anything is read: the holdings follow the page (the paper venue
+  // is known from it) and the history follows the holdings (Paper leads only with its total)
+  const cold = rig({
+    json: {
+      '/data/account': page({ totalUsd: 0 }),
+      '/data/account/holdings?cost=1': fx('holdings'),
+      '/data/account/holdings?cost=1&paper=1': fx('holdings-paper'),
+      '/data/account/history': fx('history-paper'),
+      '/data/account/statement': fx('statement'),
+      '/data/account/agents': fx('agents'),
+    },
+  });
+  cold.account.onStreamEvent({ type: 'snapshot', id: '4dababf8.0', data: {} });
+  await settle();
+  assert.deepEqual([...cold.reads].sort(), [...moved, '/data/account/history?range=1d&paper=1', '/data/account/statement', '/data/account/agents'].sort());
+  assert.equal(cold.a().history.data.paper, true);
+});
+
+test('poll schedules every 20 s, 80 s while the stream is open; poll(false) cancels', async () => {
+  assert.equal(ACCOUNT_POLL_MS, 20_000);
+  assert.equal(ACCOUNT_POLL_STREAM_MS, 80_000);
+  const release = [];
+  const r = rig({ json: { '/data/account': () => new Promise(res => release.push(res)) } });
+  r.account.poll(true);
+  r.account.poll(true);
+  assert.deepEqual(r.pending().map(timer => timer.ms), [ACCOUNT_POLL_MS], 'one timer however often poll(true) is called');
+  assert.deepEqual(r.reads, [], 'the first read waits an interval');
+  r.run(r.pending()[0]);
+  await tick();
+  assert.deepEqual(r.reads, ['/data/account'], 'a tick reads the page, plain');
+  assert.deepEqual(r.pending().map(timer => timer.ms), [ACCOUNT_POLL_MS], 'and schedules the next');
+  release.shift()(page());
+  await settle();
+  assert.equal(r.a().status, 'ready');
+  // the stream open: the next interval is 80 s, decided as each one is scheduled
+  r.streamIsOpen = true;
+  r.run(r.pending()[0]);
+  assert.deepEqual(r.pending().map(timer => timer.ms), [ACCOUNT_POLL_STREAM_MS]);
+  r.streamIsOpen = false;
+  r.run(r.pending()[0]);
+  assert.deepEqual(r.pending().map(timer => timer.ms), [ACCOUNT_POLL_MS], 'back to 20 s when the stream is not open');
+  await tick();
+  assert.equal(r.reads.length, 2, 'a tick while a read is in the air joins it');
+  // poll(false) cancels the timer, once
+  const [timer] = r.pending();
+  r.account.poll(false);
+  r.account.poll(false);
+  assert.deepEqual(r.pending(), []);
+  assert.deepEqual(r.cancelled, [timer.handle]);
+  // close(): the timer cancelled, the read still in the air lands nothing, and nothing is read or scheduled after
+  r.account.poll(true);
+  const [again] = r.pending();
+  const before = r.store.get();
+  r.account.close();
+  assert.deepEqual(r.pending(), []);
+  assert.deepEqual(r.cancelled, [timer.handle, again.handle]);
+  release.shift()(page({ totalUsd: 1 }));
+  await settle();
+  assert.equal(r.store.get(), before, 'a read landing after close() dispatches nothing');
+  r.account.poll(true);
+  void r.account.load({ fresh: true });
+  r.account.onStreamEvent({ type: 'snapshot', id: '4dababf8.0', data: {} });
+  await settle();
+  assert.deepEqual(r.pending(), [], 'a closed host schedules nothing');
+  assert.equal(r.reads.length, 2, 'and reads nothing');
+  assert.equal(r.store.get(), before);
 });

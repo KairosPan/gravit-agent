@@ -479,24 +479,24 @@ test('Hand to Gravit opens New message with the words in the composer', async ()
   store.timers.clear();
 });
 
-// Account through host: /data/account.json and the Venues reads, recorded
+// Account through host: /data/account and the seat, recorded. The page the host takes (pageOk: venues, cards, orders,
+// signers, connectLive) also carries the Alpaca-shaped fields today's renderers draw, until Tasks 8 and 11 rewrite them
 const KEYED = { ok: true, available: true, host: 'paper-api.alpaca.markets', account: { equity: '123346.11', last_equity: '122011.09', cash: '50000', currency: 'USD' },
   positions: [{ symbol: 'AAPL', asset_class: 'us_equity', qty: '5', market_value: '600', change_today: '0.01' }],
   orders: [{ id: 'o2', symbol: 'AAPL', side: 'buy', qty: '3', filled_qty: '3', filled_avg_price: '189.5', type: 'market', status: 'filled', submitted_at: '2026-10-18T14:00:00Z', filled_at: '2026-10-18T14:00:05Z' }],
-  generated_at: '2026-10-19T14:00:00Z' };
+  generated_at: '2026-10-19T14:00:00Z',
+  venues: [], cards: [], signers: { owners: [], threshold: 1, pendingDevices: [] }, connectLive: { writes: { on: false } } };
+const isPage = path => path.split('?')[0] === '/data/account';
 function accountHost(opts = {}) {
   const h = host(opts);
   const reads = [];
   const getJson = async path => {
     reads.push(path);
-    if (path.startsWith('/data/account.json')) return KEYED;
+    if (isPage(path)) return KEYED;
     if (path.startsWith('/data/seat.json')) return { ok: true, url: 'http://127.0.0.1:4820', reachable: true, asOf: '2026-10-19T18:40:00.000Z', mode: 'guard', writes: { on: true, capUsd: 100 }, seat: { name: 'Gravit', status: 'admitted', limits: [] }, venues: [], cards: [], others: 0 };
-    if (path === '/data/plugins.json') return { mcp: [{ server: 'alpaca-kit', phase: 'active', tools: [{ name: 'mcp__alpaca-kit__place_order', description: '' }] }], agentTools: [], rows: [] };
-    if (path.startsWith('/data/quotes')) return { ok: true, generated_at: '2026-10-19T14:30:01Z', quotes: [], providers: [{ id: 'alpaca', market: 'us', status: 'connected', source: 'Alpaca', feed: 'iex', transport: 'stream', message: '' }] };
     return h.getJson(path);
   };
-  const call = async (endpoint, args) => (endpoint === 'credentials/describe' ? (h.calls.push([endpoint, args]), { APCA_API_KEY_ID: { configured: true, source: 'env' }, APCA_API_SECRET_KEY: { configured: true, source: 'env' } }) : h.call(endpoint, args));
-  return { ...h, getJson, call, reads, accountReads: () => reads.filter(p => p.startsWith('/data/account.json')).length };
+  return { ...h, getJson, reads, accountReads: () => reads.filter(isPage).length };
 }
 const bootAccount = (f, h, mk = fakeMarkets()) => boot(f.win, { openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, createLiveQuotes: mk.createLiveQuotes, createSymbolSearch: mk.createSymbolSearch });
 
@@ -511,7 +511,7 @@ test('the account loads at boot and the rail shows the net worth', async () => {
   store.timers.clear();
 });
 
-test('Refresh reloads fresh; entering Account reads again; entering Venues describes, and Refresh there describes again', async () => {
+test('Refresh reloads fresh; entering Account reads again', async () => {
   const f = fakeWindow({ hash: '#/account/portfolio', storage: memoryStorage() });
   const h = accountHost({ rows: [row('s1')] });
   const store = bootAccount(f, h);
@@ -521,18 +521,12 @@ test('Refresh reloads fresh; entering Account reads again; entering Venues descr
   f.click({ tagName: 'BUTTON', dataset: { action: 'refreshAccount' } });
   await settle();
   assert.equal(h.accountReads(), 2);
-  assert.equal(h.reads.filter(p => p.startsWith('/data/account.json')).at(-1), '/data/account.json?fresh=1', 'Refresh skips the 60 s cache');
-  const describes = () => h.calls.filter(c => c[0] === 'credentials/describe').length;
-  assert.equal(describes(), 0);
+  assert.equal(h.reads.filter(isPage).at(-1), '/data/account?fresh=1', "Refresh skips the face's cache");
   f.win.location.hash = '#/account/venues';
   await settle();
-  assert.equal(describes(), 1);
-  assert.equal(h.reads.filter(p => p === '/data/plugins.json').length, 1);
-  assert.match(f.html(), /Keys · env · Order tools on/);
-  assert.match(f.html(), /Alpaca · Connected/);
   f.click({ tagName: 'BUTTON', dataset: { action: 'refreshAccount' } });
   await settle();
-  assert.equal(describes(), 2, 'a refresh on Venues reads the venue facts again too');
+  assert.equal(h.accountReads(), 3, 'a refresh on Venues reads the page again too');
   f.win.location.hash = '#/messages/s1';
   await settle();
   f.win.location.hash = '#/account/portfolio';
@@ -580,7 +574,7 @@ test('a receipt in a conversation reloads the account', async () => {
   follow.cbs.onItem({ type: 'event', event: { type: 'tool/result', seq: 41, time: 1756512201000, surfaceOp: 'append', data: { turn: 4, step: 1, message: { id: 'm-41', role: 'tool', source: { kind: 'tool', callId: 'c9' }, toolCallId: 'c9', content: [{ type: 'text', text: JSON.stringify({ ok: true, id: 'ord-1' }) }], isError: false } } } });
   await settle();
   assert.equal(h.accountReads(), before + 1);
-  assert.equal(h.reads.filter(p => p.startsWith('/data/account.json')).at(-1), '/data/account.json?fresh=1', 'a fill is read past the cache');
+  assert.equal(h.reads.filter(isPage).at(-1), '/data/account?fresh=1', 'a fill is read past the cache');
   store.timers.clear();
 });
 
@@ -607,7 +601,7 @@ test('entering Venues reads /data/seat.json; Refresh there reads it fresh; a sea
   await settle();
   assert.equal(seatReads().length, seatBefore + 1, 'a seat receipt reloads the seat');
   assert.equal(seatReads().at(-1), '/data/seat.json?fresh=1');
-  assert.equal(h.accountReads(), accountBefore, 'and not the Alpaca account');
+  assert.equal(h.accountReads(), accountBefore, "and not the Account's page");
   store.timers.clear();
 });
 

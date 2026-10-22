@@ -188,7 +188,7 @@ export function boot(win, host = {}) {
   let pending = false;
   let openedId = null;   // the conversation the live layer was told to open
   let barsFor = null;    // the market page whose daily bars were last asked for
-  let was = null;        // the route follow() last settled: entering Account reads it, entering Venues describes
+  let was = null;        // the route follow() last settled: entering Account reads it, entering Venues reads the seat
   let wanted = null;     // a deep link the list has not answered yet
   let last = { overlay: null, opener: null, screen: null, drawer: null, thread: null, editor: null, confirm: null };
   let confirmFrom = null;
@@ -311,7 +311,7 @@ export function boot(win, host = {}) {
     // a market page reads its daily bars once per opening (crypto and cn have none to read)
     if (r.screen === 'markets' && r.id) { if (r.id !== barsFor) { barsFor = r.id; void markets.bars(r.id); } } else barsFor = null;
     if (r.screen === 'account' && was?.screen !== 'account') void account.load();
-    if (r.screen === 'account' && r.tab === 'venues' && !(was?.screen === 'account' && was.tab === 'venues')) { void account.describe(); void seat.load(); }
+    if (r.screen === 'account' && r.tab === 'venues' && !(was?.screen === 'account' && was.tab === 'venues')) void seat.load();
     if (r.screen === 'channel' && !(was?.screen === 'channel' && was.id === r.id)) void channels.overview(r.id);
     const inDiscover = route => route?.screen === 'discover' || route?.screen === 'plugin';
     if (inDiscover(r) && !inDiscover(was)) void discover.load();
@@ -498,7 +498,7 @@ export function boot(win, host = {}) {
     refreshAccount: () => {
       void account.load({ fresh: true });
       const r = store.get().route;
-      if (r.screen === 'account' && r.tab === 'venues') { void account.describe(); void seat.load({ fresh: true }); }
+      if (r.screen === 'account' && r.tab === 'venues') void seat.load({ fresh: true });
     },
     openStatement: () => {
       if (store.get().route.screen !== 'account') go({ screen: 'account', tab: 'portfolio' });
