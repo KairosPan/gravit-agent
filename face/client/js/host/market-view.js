@@ -277,6 +277,15 @@ function starredOf(m) {
   return [...new Set([...(Array.isArray(m.watch) ? m.watch : []), ...old.map(a => own(m.asked, a.id))].filter(k => typeof k === 'string' && k !== ''))];
 }
 
+/** Whether a market is starred, as its star is drawn — what a press on it takes off or puts on: an Account key the operator's
+ *  own or an old us:/crypto: star's find while that star is listed; a face id, canonicalised, on the cn list. */
+export function watchedOf(markets, id) {
+  const m = isRecord(markets) ? markets : {};
+  if (isAccountKey(id)) return starredOf(m).includes(id);
+  const canonical = canonicalId(id);
+  return canonical !== null && records(m.watchlist).some(a => a.id === canonical);
+}
+
 // a row's second line: a pre-IPO perpetual's kind, another perpetual's base, an event's category, a coin's base, a stock's or an
 // RWA's venue — the first the owner connected, else the first public listing
 function subOf(item, legs) {
@@ -528,9 +537,9 @@ export function pageOf(markets, account, id, now = Date.now()) {
     lines: statementLinesOf(a.statement?.data).filter(l => names(l.description, base) || symbols.some(s => names(l.description, s))),
     reads: {
       held: partRead(a.holdings?.data != null && (!paperNamed || a.paper?.data != null),
-        a.holdings?.status === 'error' || (paperNamed && a.paper?.status === 'error'), null),
+        a.holdings?.status === 'error' || (paperNamed && a.paper?.status === 'error'), a.holdings?.message),
       orders: partRead(pageOk(a.data), a.status === 'error', a.message),
-      lines: partRead(a.statement?.data != null, a.statement?.status === 'error', null),
+      lines: partRead(a.statement?.data != null, a.statement?.status === 'error', a.statement?.message),
     },
   };
 }

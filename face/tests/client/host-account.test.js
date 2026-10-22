@@ -318,27 +318,51 @@ test('a money event while a plain holdings read is in the air: one fresh read on
   assert.equal(holdingsReads().length, 2, 'two reads in all');
 });
 
-test('a page that names a paper venue whose lens was never read reads the holdings at once', async () => {
+test('a page that names a paper venue whose lens was never read reads the holdings at once, then the leading curve', async () => {
   const r = rig({
     json: {
-      '/data/account': inTurn([noPaper(), page(), page()]),
+      '/data/account': inTurn([noPaper(), page({ totalUsd: 0 }), page({ totalUsd: 0 })]),
       '/data/account/holdings?cost=1': fx('holdings'),
       '/data/account/holdings?cost=1&paper=1': fx('holdings-paper'),
+      '/data/account/history': path => Promise.resolve(path.includes('&paper=1') ? fx('history-paper') : fx('history')),
     },
   });
   await r.account.load();
   await settle();
   assert.deepEqual(r.reads, ['/data/account'], 'no paper venue: no lens to read');
-  // a paper venue appears outside a snapshot: its lens follows without waiting for a money event
+  // a paper venue appears outside a snapshot: its lens follows without waiting for a money event, and the curve after the lens
+  // — Paper's, which leads now that the lens has a total and real money is zero
   await r.account.load();
   await settle();
-  assert.deepEqual(r.reads, ['/data/account', '/data/account', '/data/account/holdings?cost=1', '/data/account/holdings?cost=1&paper=1']);
+  assert.deepEqual(r.reads, ['/data/account', '/data/account', '/data/account/holdings?cost=1', '/data/account/holdings?cost=1&paper=1', '/data/account/history?range=1d&paper=1']);
   assert.equal(r.a().paper.status, 'ready');
   assert.equal(r.a().paper.data.totalUsd, 25400);
+  assert.equal(r.a().history.data.paper, true, "the paper book's curve");
   // once the lens is read, a page landing leaves it to its own reads
   await r.account.load();
   await settle();
-  assert.equal(r.reads.length, 5);
+  assert.equal(r.reads.length, 6);
+});
+
+// the holdings and the statement keep the Account's sentence when they refuse (as the page does), from an ok:false body or the
+// body a rejection carries
+test("a refused holdings or statement read carries the Account's sentence; unreachable carries none", async () => {
+  const r = rig({
+    json: {
+      '/data/account/holdings?cost=1': inTurn([fx('holdings'), rejected('/data/account/holdings', 409, { ok: false, refusal: { code: 'E_ACCOUNT_SETTLING', message: 'Venues are still settling.' } })]),
+      '/data/account/statement': inTurn([{ ok: false, error: 'the statement is being rebuilt' }, rejected('/data/account/statement', 503, { ok: false, unreachable: 'timeout' })]),
+    },
+  });
+  await r.account.loadHoldings();
+  await r.account.loadHoldings();
+  assert.equal(r.a().holdings.status, 'error');
+  assert.equal(r.a().holdings.message, 'Venues are still settling.', "the refusal's sentence, from the rejection's body");
+  assert.equal(r.a().holdings.data.totalUsd, 29138.1, 'the last holdings stay');
+  await r.account.loadStatement();
+  assert.equal(r.a().statement.status, 'error');
+  assert.equal(r.a().statement.message, 'the statement is being rebuilt', 'an ok:false body on a 200');
+  await r.account.loadStatement();
+  assert.equal(r.a().statement.message, null, 'unreachable carries no sentence');
 });
 
 test('poll schedules every 20 s, 80 s while the stream is open; poll(false) cancels', async () => {

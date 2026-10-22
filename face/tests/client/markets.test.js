@@ -475,6 +475,13 @@ test("each part of a market's page stands on its own read: Loading… until it a
   assert.match(section(draw(R.paperFailed(holdings, { at: NOW })), 'You hold'), /<p class="mk-empty">Holdings unavailable<\/p>/);
   const refused = draw(R.accountFailed(bare, { at: NOW, message: 'The account is restarting' }));
   assert.match(section(refused, 'Open orders'), /<p class="mk-note">The account is restarting<\/p><p class="mk-empty">Account unavailable<\/p>/);
+  // the holdings and the statement keep their own sentences too
+  assert.match(section(draw(R.holdingsFailed(paged, { at: NOW, message: 'Venues are still settling.' })), 'You hold'),
+    /<p class="mk-note">Venues are still settling\.<\/p><p class="mk-empty">Holdings unavailable<\/p>/);
+  assert.match(section(draw(R.statementFailed(lensed, { at: NOW, message: 'The statement is being rebuilt.' })), 'On the statement'),
+    /<p class="mk-note">The statement is being rebuilt\.<\/p><p class="mk-empty">Statement unavailable<\/p>/);
+  assert.match(section(draw(R.statementFailed(stated, { at: NOW, message: 'The statement is being rebuilt.' })), 'On the statement'),
+    /<p class="mk-note">The statement is being rebuilt\.<\/p><div class="mk-feed">/, 'over the lines kept');
   // a failure after an answer keeps what was read, with the sentence over it
   const kept = draw(R.accountFailed(stated, { at: NOW, message: 'The account is restarting' }));
   assert.match(section(kept, 'Open orders'), /<p class="mk-note">The account is restarting<\/p><div class="mk-feed">[\s\S]*Sell 0\.002 BTC\/USDT/);

@@ -12,7 +12,8 @@
 //   first at the first frame;
 // - the follow set (deduplicated, the first FOLLOW_LIMIT) is told on every open and on every change while open, each
 //   POST with a rising n, and once more a second later when the face did not take it;
-// - close() drops the source and every timer and forgets nothing: the next open() resumes and tells the set again.
+// - close() drops the source and every timer and forgets nothing: the next open() resumes and tells the set again;
+// - each change of status() is told to onStatus once, as it happens (the host's cadence follows the stream).
 // No DOM, no store, no visibility handling and nothing logged: those are the host's.
 
 export const STALE_MS = 20_000, DEAD_MS = 45_000, RETRY_MS = [1000, 2000, 5000, 10000, 30000], FOLLOW_LIMIT = 16;
@@ -40,12 +41,13 @@ export function mintClientId(random) {
 
 /** The Account's push channel for one tab, over the face's proxy. The host owns on and off (`open`, `close`), the
  * follow set (`follow`) and what an event means (`onEvent`); this owns the connection, the resume point and the
- * follow POSTs. `open()` is a no-op while the stream is on (connecting, open, stale or waiting to reopen). `now` is
- * taken with the host's other deps and not read: the clocks are the injected timers.
- * @param {{createEventSource: (url: string) => AccountEvents, fetcher: (path: string, init: {method: string, headers: Record<string, string>, body: string}) => Promise<{status: number}>, schedule: (callback: () => void, delay: number) => any, cancelTimer: (timer: any) => void, now?: () => number, random: (length: number) => Uint8Array}} deps
+ * follow POSTs, and tells `onStatus` each new status. `open()` is a no-op while the stream is on (connecting, open,
+ * stale or waiting to reopen). `now` is taken with the host's other deps and not read: the clocks are the injected
+ * timers.
+ * @param {{createEventSource: (url: string) => AccountEvents, fetcher: (path: string, init: {method: string, headers: Record<string, string>, body: string}) => Promise<{status: number}>, schedule: (callback: () => void, delay: number) => any, cancelTimer: (timer: any) => void, now?: () => number, random: (length: number) => Uint8Array, onStatus?: (status: 'idle'|'connecting'|'open'|'stale'|'closed') => void}} deps
  * @param {(event: AccountEvent) => void} onEvent
  */
-export function createAccountStream({ createEventSource, fetcher, schedule, cancelTimer, random }, onEvent) {
+export function createAccountStream({ createEventSource, fetcher, schedule, cancelTimer, random, onStatus = () => {} }, onEvent) {
   const clientId = mintClientId(random);
   let phase = "idle";      // 'idle' until the first open(), 'on' from open() to close(), 'off' after close()
   /** @type {AccountEvents|null} */
@@ -58,8 +60,23 @@ export function createAccountStream({ createEventSource, fetcher, schedule, canc
   /** @type {string[]} */
   let markets = [];        // the follow set
   let told = 0;            // the n of the newest follow POST
+  let said = "idle";       // the status onStatus was last told
   let staleTimer = null, deadTimer = null, reopenTimer = null, retellTimer = null;
 
+  /** @returns {'idle'|'connecting'|'open'|'stale'|'closed'} */
+  function status() {
+    if (phase === "idle") return "idle";
+    if (phase === "off" || source === null) return "closed";
+    if (!connected) return "connecting";
+    return quiet ? "stale" : "open";
+  }
+  /** Tell onStatus when status() answers otherwise than when it was last told: the end of every way in. */
+  function notify() {
+    const next = status();
+    if (next === said) return;
+    said = next;
+    onStatus(next);
+  }
   /** Cancel a timer if one is pending; the null to keep in its place. */
   function clear(timer) {
     if (timer !== null) cancelTimer(timer);
@@ -70,8 +87,8 @@ export function createAccountStream({ createEventSource, fetcher, schedule, canc
     staleTimer = clear(staleTimer);
     deadTimer = clear(deadTimer);
     quiet = false;
-    staleTimer = schedule(() => { staleTimer = null; quiet = true; }, STALE_MS);
-    deadTimer = schedule(() => { deadTimer = null; backOff(); }, DEAD_MS);
+    staleTimer = schedule(() => { staleTimer = null; quiet = true; notify(); }, STALE_MS);
+    deadTimer = schedule(() => { deadTimer = null; backOff(); notify(); }, DEAD_MS);
   }
   /** Drop the current source with its clocks and any retell; the last id and the follow set stay. */
   function drop() {
@@ -85,7 +102,7 @@ export function createAccountStream({ createEventSource, fetcher, schedule, canc
     drop();
     const delay = RETRY_MS[Math.min(failures, RETRY_MS.length - 1)];
     failures += 1;
-    reopenTimer = schedule(() => { reopenTimer = null; connect(); }, delay);
+    reopenTimer = schedule(() => { reopenTimer = null; connect(); notify(); }, delay);
   }
   function connect() {
     const since = last === null ? "" : `&since=${encodeURIComponent(last)}`;
@@ -103,11 +120,13 @@ export function createAccountStream({ createEventSource, fetcher, schedule, canc
       connected = true;
       armClocks();
       void tell(false);
+      notify();
     };
     es.onerror = () => {
       if (es !== source) return;
       if (es.readyState === CLOSED) backOff();
       else if (es.readyState === CONNECTING) connected = false;
+      notify();
     };
     for (const type of EVENT_TYPES) es.addEventListener(type, (event) => frame(es, type, event));
     armClocks();
@@ -117,6 +136,7 @@ export function createAccountStream({ createEventSource, fetcher, schedule, canc
     if (es !== source) return;
     failures = 0;
     armClocks();
+    notify();
     const id = event.lastEventId || undefined;
     if (id !== undefined) last = id;
     let data;
@@ -152,11 +172,13 @@ export function createAccountStream({ createEventSource, fetcher, schedule, canc
       if (phase === "on") return;
       phase = "on";
       connect();
+      notify();
     },
     close() {
       phase = "off";
       drop();
       reopenTimer = clear(reopenTimer);
+      notify();
     },
     /** @param {Iterable<string>} keys */
     follow(keys) {
@@ -165,13 +187,7 @@ export function createAccountStream({ createEventSource, fetcher, schedule, canc
       markets = next;
       if (!same && connected) void tell(false);
     },
-    /** @returns {'idle'|'connecting'|'open'|'stale'|'closed'} */
-    status() {
-      if (phase === "idle") return "idle";
-      if (phase === "off" || source === null) return "closed";
-      if (!connected) return "connecting";
-      return quiet ? "stale" : "open";
-    },
+    status,
     lastId: () => last,
   };
 }

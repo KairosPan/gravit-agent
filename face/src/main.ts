@@ -89,6 +89,9 @@ let dispose: (() => Promise<void>) | undefined;
  * deadline that outlives the process's stop can still cancel a member. */
 let disposeRoom: (() => void) | undefined;
 let disposeData: (() => void) | undefined;
+/** The Account proxy's own unwind (src/account-proxy.ts): its kept answers and every open stream's upstream. Run AFTER the
+ * tree's dispose, once the web server has stopped and no browser can open another stream through it; idempotent. */
+let disposeProxy: (() => void) | undefined;
 
 /** Tear the tree down, then leave with `code`. A dispose that rejects still
  * exits, and says why: a signal the process has already acknowledged must not
@@ -100,6 +103,7 @@ async function shutdown(code: number): Promise<void> {
     disposeRoom?.();
     disposeData?.();
     await dispose?.();
+    disposeProxy?.();
   } catch (err) {
     console.error(`${BIN}: dispose failed during shutdown:`, err);
     code ||= 1;
@@ -128,6 +132,7 @@ installFailLoud(BIN, process, async () => {
   disposeRoom?.();
   disposeData?.();
   await dispose?.();
+  disposeProxy?.();
 });
 
 /* A `StartupError` is dsh's own grouped diagnostic for a required entry that
@@ -181,6 +186,7 @@ disposeData = registerDataRoutes(booted.ctx.webServer);
 const seatLoader = booted.ctx.get("loader") as { entries(): Iterable<SeatEntryLike> } | undefined;
 const seatRow = seatLoader === undefined ? undefined : composedSeatRow(seatLoader.entries());
 const proxy = registerAccountProxy(booted.ctx.webServer, seatRow === undefined ? {} : seatRow.disabled ? { disabled: true } : { url: seatRow.url });
+disposeProxy = proxy.dispose;
 registerSeatRoute(
   booted.ctx.webServer,
   seatRow === undefined

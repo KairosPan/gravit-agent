@@ -52,13 +52,14 @@ function framesOf(text) {
 }
 
 // the stream over the fakes: a timer is { fn, ms, handle }, kept until run or cancelled; the fetcher records each POST
-// and answers r.reply (an answer, a promise of one, or an Error it throws); r.refuse() makes the next source throw
+// and answers r.reply (an answer, a promise of one, or an Error it throws); r.refuse() makes the next source throw; each
+// status onStatus is told is recorded
 function rig({ reply = { status: 200 } } = {}) {
   const timers = new Map();
   let serial = 0;
   let refusals = 0;
   const r = {
-    sources: [], posts: [], events: [], cancelled: [], asked: [], reply,
+    sources: [], posts: [], events: [], cancelled: [], asked: [], statuses: [], reply,
     refuse() { refusals += 1; },
     source: () => r.sources.at(-1),
     pending: ms => [...timers.values()].filter(timer => ms === undefined || timer.ms === ms),
@@ -85,6 +86,7 @@ function rig({ reply = { status: 200 } } = {}) {
     cancelTimer: handle => { r.cancelled.push(handle); timers.delete(handle); },
     now: () => 0,
     random: length => { r.asked.push(length); return Uint8Array.from({ length }, (_, i) => i * 17); },
+    onStatus: status => { assert.equal(status, r.stream.status(), 'told as status() answers'); r.statuses.push(status); },
   }, event => r.events.push(event));
   return r;
 }
@@ -229,6 +231,44 @@ test('silence for STALE_MS is stale; for DEAD_MS the source is closed and reopen
     r.source().error(2);
   }
   assert.deepEqual(delays, [...RETRY_MS, RETRY_MS.at(-1)]);
+});
+
+// the host's cadence follows the stream (the Account's page every 80 s while it is open, 20 s otherwise): each change of
+// status() is told once, as it happens, and nothing else is
+test('onStatus hears each change of status once: connecting, open, stale and open again, closed when dead, the reopen, close', () => {
+  const r = rig();
+  r.stream.follow(['okx:BTC-USDT']);
+  assert.deepEqual(r.statuses, [], 'a follow before open changes nothing');
+  r.stream.open();
+  r.stream.open();
+  assert.deepEqual(r.statuses, ['connecting'], 'a second open is no change');
+  r.source().open();
+  r.source().fire('hb', { at: 1 });
+  assert.deepEqual(r.statuses, ['connecting', 'open'], 'a frame on an open stream is no change');
+  r.run(r.pending(STALE_MS)[0]);
+  r.source().fire('hb', { at: 2 });
+  assert.deepEqual(r.statuses.slice(2), ['stale', 'open'], 'quiet, then a frame');
+  r.run(r.pending(STALE_MS)[0]);
+  r.run(r.pending(DEAD_MS)[0]);
+  assert.deepEqual(r.statuses.slice(4), ['stale', 'closed'], 'dead: closed while the reopen waits');
+  r.run(r.pending(RETRY_MS[0])[0]);
+  assert.deepEqual(r.statuses.slice(6), ['connecting']);
+  // the browser's own reconnect, then the face refusing the stream
+  r.source().open();
+  r.source().error(0);
+  r.source().open();
+  assert.deepEqual(r.statuses.slice(7), ['open', 'connecting', 'open']);
+  r.source().error(2);
+  r.refuse();
+  r.run(r.pending()[0]);
+  assert.deepEqual(r.statuses.slice(10), ['closed'], 'a source that cannot be made leaves it closed: no news');
+  r.run(r.pending()[0]);
+  assert.deepEqual(r.statuses.slice(11), ['connecting']);
+  r.stream.close();
+  r.stream.close();
+  assert.deepEqual(r.statuses.slice(12), ['closed'], 'a second close is no change');
+  r.stream.open();
+  assert.deepEqual(r.statuses.slice(13), ['connecting'], 'and an open after it is');
 });
 
 test('follow posts the set with a rising n on open and on change, drops past 16, and retells once after a failed post', async () => {

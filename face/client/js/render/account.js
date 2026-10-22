@@ -224,7 +224,7 @@ function cardsTab(state, now) {
 // ── the drawers ──
 
 // the Statement: the Account's lines newest first, each with who it was by, its status in the Account's word and its fee
-// when it had one, and their CSV
+// when it had one, and their CSV; the Account's sentence over them when its last read refused
 export function renderStatement(state, now) {
   const st = state.account.statement;
   const rows = statementLinesOf(st.data).map(l => {
@@ -232,10 +232,11 @@ export function renderStatement(state, now) {
     return `<div class="activity-row"><span class="dim">${esc(when(l.at, now))}</span>` +
       `<span class="activity-text">${esc(l.description)}${facts ? `<br><span class="dim">${esc(facts)}</span>` : ''}</span><span class="num">${esc(money(l.amountUsd))}</span></div>`;
   }).join('');
+  const said = st.status === 'error' && st.message ? note(st.message) : '';
   const body = rows ? `<div class="activity">${rows}</div><div class="btn-row"><button type="button" class="btn-sm" data-action="exportStatement">Export CSV</button></div>`
     : readNote(st, 'Statement unavailable', 'No statement lines yet');
   return `<aside class="drawer" aria-label="Statement"><div class="drawer-head"><h2>Statement</h2><button type="button" class="close-key" data-action="closeStatement" aria-label="Close">×</button></div>` +
-    `<div class="drawer-body">${body}</div></aside>`;
+    `<div class="drawer-body">${said}${body}</div></aside>`;
 }
 
 export function renderSettings(state) {

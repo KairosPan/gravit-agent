@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseHash, toHash } from '../../client/js/router.js';
-import { Timers, routeOf, settle, initialState, prefsOf, makeStore, answersFrom, gravitMarkdown, PREFS_KEY } from '../../client/js/app.js';
+import { Timers, routeOf, settle, initialState, prefsOf, makeStore, answersFrom, gravitMarkdown, getJsonVia, PREFS_KEY } from '../../client/js/app.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { withMiniDocument } from './helpers/mini-dom.js';
 
@@ -90,6 +90,28 @@ test('Timers tracks pending timers and clear() cancels them', async () => {
   await new Promise(r => setTimeout(r, 5));
   assert.equal(ran, 1);
   assert.equal(t.pending.size, 0);
+});
+
+// the app's /data reads: the hosts read the Account's refusal sentence from the body a rejection carries
+test('getJsonVia: an answer is its JSON; any other status rejects with the status and, when it parses, the body the face sent', async () => {
+  const answer = (status, text) => ({ ok: status >= 200 && status < 300, status, json: async () => JSON.parse(text) });
+  const asked = [];
+  const getJson = getJsonVia(async path => {
+    asked.push(path);
+    if (path === '/data/account') return answer(200, '{"ok":true,"venues":[]}');
+    if (path === '/data/account/holdings?cost=1') return answer(409, '{"ok":false,"refusal":{"code":"E_ACCOUNT_SETTLING","message":"Venues are still settling."}}');
+    return answer(502, '<html>Bad gateway</html>');
+  });
+  assert.deepEqual(await getJson('/data/account'), { ok: true, venues: [] });
+  const refused = await getJson('/data/account/holdings?cost=1').then(() => null, error => error);
+  assert.ok(refused instanceof Error);
+  assert.equal(refused.message, '/data/account/holdings?cost=1: HTTP 409');
+  assert.equal(refused.status, 409);
+  assert.deepEqual(refused.body, { ok: false, refusal: { code: 'E_ACCOUNT_SETTLING', message: 'Venues are still settling.' } });
+  const bare = await getJson('/data/quotes').then(() => null, error => error);
+  assert.equal(bare.status, 502);
+  assert.equal(Object.hasOwn(bare, 'body'), false, 'a body that is not JSON is none');
+  assert.deepEqual(asked, ['/data/account', '/data/account/holdings?cost=1', '/data/quotes']);
 });
 
 // a card as the browser hands it to answersFrom: its own inputs, nothing from any other card

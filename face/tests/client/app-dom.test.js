@@ -2,7 +2,8 @@
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { boot as bootApp } from '../../client/js/app.js';
+import { boot as bootApp, Timers } from '../../client/js/app.js';
+import { rowsOf, pairsOf } from '../../client/js/host/market-view.js';
 import { fakeWindow } from './helpers/fake-dom.js';
 
 // every app booted here has its timers stopped after its test, so one that fails half-way never leaves Markets' polls running
@@ -359,7 +360,7 @@ function fakeMarkets() {
   };
 }
 const memoryStorage = () => { const m = new Map(); return { getItem: k => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k), m }; };
-const bootMarkets = (f, h, mk) => boot(f.win, { openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, createLiveQuotes: mk.createLiveQuotes, createSymbolSearch: mk.createSymbolSearch });
+const bootMarkets = (f, h, mk, more = {}) => boot(f.win, { openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, createLiveQuotes: mk.createLiveQuotes, createSymbolSearch: mk.createSymbolSearch, ...more });
 const MOUTAI = { id: 'cn:600519', market: 'cn', symbol: '600519', name: 'Kweichow Moutai', exchange: 'SH', currency: 'CNY' };
 
 // the face's own wire searches and stars the A shares alone: a us: or crypto: market is the Account's
@@ -369,16 +370,20 @@ test("typing in the search box searches; a star watches and writes the face's ke
   const mq = f.withId('mq', { tagName: 'INPUT', type: 'search', dataset: { action: 'mkQuery' } });
   const h = host();
   const mk = fakeMarkets();
-  const store = bootMarkets(f, h, mk);
+  // the search waits for a quiet moment in the box: that wait is held here, and run
+  const timers = new HeldTimers(ms => ms === 300);
+  const store = bootMarkets(f, h, mk, { timers });
   await h.ready();
   assert.match(f.html(), /<main class="main mkts">/);
   // what the fake host answers to the Account's explore is not an explore answer: nothing to list, and the screen says so
   assert.match(f.html(), /<p class="mk-empty">Markets unavailable<\/p>/);
   mq.value = '600';
   f.fire('root', 'input', { target: mq });
-  assert.deepEqual(mk.search.queries.at(-1), ['600', 'cn']);
   assert.equal(store.get().markets.q, '600');
   assert.match(f.html(), /Searching…/);
+  assert.deepEqual(mk.search.queries, []);
+  timers.run(300);
+  assert.deepEqual(mk.search.queries.at(-1), ['600', 'cn']);
   mk.search.onUpdate({ query: '600', market: 'cn', status: 'success', assets: [MOUTAI], partial: false, truncated: false, note: '' });
   await settle();
   assert.match(f.html(), /<tr data-id="cn:600519">/);
@@ -488,55 +493,121 @@ test('Hand to Gravit opens New message with the words in the composer', async ()
   store.timers.clear();
 });
 
-// Account through host: /data/account and the seat, recorded. The page the host takes (pageOk: venues, cards, orders,
-// signers, connectLive), whose totalUsd the Account screen and the rail draw
-const KEYED = { ok: true, totalUsd: 123346.11, venues: [], cards: [], orders: [], signers: { owners: [], threshold: 1, pendingDevices: [] }, connectLive: { writes: { on: false } } };
+// Account through host: the Account's reads answered as the stand-in answered them (tests/fixtures/account/) — the page (its
+// real money $29,138.10 beside two paper venues), holdings and the paper lens, the curve, the statement, the agents, explore,
+// a market's candles and compare rows — and the seat; every read recorded. `answers` replaces a route's answer by its path
+// without the query: a body, or a function of the path returning one (or a promise of one)
+const fx = name => JSON.parse(readFileSync(new URL(`../fixtures/account/${name}.json`, import.meta.url), 'utf8'));
 const isPage = path => path.split('?')[0] === '/data/account';
-function accountHost(opts = {}) {
+const SEAT = { ok: true, url: 'http://127.0.0.1:4820', reachable: true, asOf: '2026-10-19T18:40:00.000Z', mode: 'guard', writes: { on: true, capUsd: 100 }, seat: { name: 'Gravit', status: 'admitted', limits: [] }, venues: [], cards: [], others: 0 };
+function standinAnswer(path) {
+  const [route, query = ''] = path.split('?');
+  const q = new URLSearchParams(query);
+  const paper = q.get('paper') === '1';
+  switch (route) {
+    case '/data/account': return fx('account');
+    case '/data/account/holdings': return fx(paper ? 'holdings-paper' : 'holdings');
+    case '/data/account/history': return { ...fx(paper ? 'history-paper' : 'history'), range: q.get('range') };
+    case '/data/account/statement': return fx('statement');
+    case '/data/account/agents': return fx('agents');
+    case '/data/account/explore': return fx('explore-all');
+    case '/data/account/candles': return { ...fx('candles'), venue: q.get('venue'), symbol: q.get('symbol'), range: q.get('range') };
+    case '/data/account/compare': return { ...fx('compare'), base: q.get('base') };
+    case '/data/account/quotes': return { ok: true, quotes: [] };
+    case '/data/seat.json': return SEAT;
+    default: return undefined;
+  }
+}
+function accountHost(opts = {}, { answers = {} } = {}) {
   const h = host(opts);
   const reads = [];
   const getJson = async path => {
     reads.push(path);
-    if (isPage(path)) return KEYED;
-    if (path.startsWith('/data/seat.json')) return { ok: true, url: 'http://127.0.0.1:4820', reachable: true, asOf: '2026-10-19T18:40:00.000Z', mode: 'guard', writes: { on: true, capUsd: 100 }, seat: { name: 'Gravit', status: 'admitted', limits: [] }, venues: [], cards: [], others: 0 };
-    return h.getJson(path);
+    const route = path.split('?')[0];
+    if (Object.hasOwn(answers, route)) return typeof answers[route] === 'function' ? answers[route](path) : answers[route];
+    return standinAnswer(path) ?? h.getJson(path);
   };
   return { ...h, getJson, reads, accountReads: () => reads.filter(isPage).length };
 }
-const bootAccount = (f, h, mk = fakeMarkets()) => boot(f.win, { openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, createLiveQuotes: mk.createLiveQuotes, createSymbolSearch: mk.createSymbolSearch });
+const bootAccount = (f, h, mk = fakeMarkets(), more = {}) => boot(f.win, { openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, createLiveQuotes: mk.createLiveQuotes, createSymbolSearch: mk.createSymbolSearch, ...more });
 
-test('the account loads at boot and the rail shows the net worth', async () => {
+// the Account's push channel as the app is handed it: its opens, closes and follows recorded, its status the test's to set; the
+// app's two callbacks kept, so a test delivers an event or a change of status as the stream would
+function fakeStream() {
+  const st = { opened: 0, closed: 0, follows: [], status: 'idle', onEvent: null, onStatus: null };
+  st.create = (onEvent, onStatus) => {
+    st.onEvent = onEvent;
+    st.onStatus = onStatus;
+    return {
+      clientId: 'face-000102030405060708090a0b',
+      open() { st.opened += 1; st.set('connecting'); },
+      close() { st.closed += 1; st.set('closed'); },
+      follow(keys) { st.follows.push([...keys]); },
+      status: () => st.status,
+    };
+  };
+  st.set = status => { if (status === st.status) return; st.status = status; st.onStatus(status); };
+  st.event = (type, data, id) => st.onEvent({ type, id, data });
+  return st;
+}
+
+// the app's timers, the polls among them held: a timer the test holds (5 s and longer by default) runs only when the test runs
+// it; any other runs as the browser's would
+class HeldTimers extends Timers {
+  constructor(holds = ms => ms >= 5_000) { super(); this.holds = holds; this.held = new Map(); this.serial = 0; }
+  after(ms, fn) {
+    if (!this.holds(ms)) return super.after(ms, fn);
+    const id = `held-${++this.serial}`;
+    this.held.set(id, { ms, fn });
+    return id;
+  }
+  cancel(id) { if (!this.held.delete(id)) super.cancel(id); }
+  clear() { this.held.clear(); super.clear(); }
+  delays() { return [...this.held.values()].map(t => t.ms).sort((a, b) => a - b); }
+  ids() { return [...this.held.keys()]; }
+  run(ms) {
+    const found = [...this.held].find(([, t]) => t.ms === ms);
+    assert.ok(found, `a ${ms} ms timer is held`);
+    this.held.delete(found[0]);
+    found[1].fn();
+  }
+}
+
+test('the account loads at boot and the rail shows its net worth', async () => {
   const f = fakeWindow({ hash: '', storage: memoryStorage() });
   const h = accountHost({ rows: [row('s1')] });
   const store = bootAccount(f, h);
   await h.ready();
   assert.equal(h.accountReads(), 1);
   assert.equal(store.get().account.status, 'ready');
-  assert.match(f.html(), /<span class="account-line">\$123,346\.11<\/span>/);
+  assert.match(f.html(), /<span class="account-line">\$29,138\.10<\/span>/, "the stand-in's real money leads");
   store.timers.clear();
 });
 
-test('Refresh reloads fresh; entering Account reads again', async () => {
+test('Refresh reads the page and the seat past the cache, and the holdings; entering Account reads again', async () => {
   const f = fakeWindow({ hash: '#/account/portfolio', storage: memoryStorage() });
   const h = accountHost({ rows: [row('s1')] });
   const store = bootAccount(f, h);
   await h.ready();
   assert.equal(h.accountReads(), 1, 'boot and entering Account share one flight');
-  assert.match(f.html(), /class="networth">\$123,346\.11</);
+  assert.match(f.html(), /class="networth">\$29,138\.10</);
+  h.reads.length = 0;
   f.click({ tagName: 'BUTTON', dataset: { action: 'refreshAccount' } });
   await settle();
-  assert.equal(h.accountReads(), 2);
+  assert.equal(h.accountReads(), 1);
   assert.equal(h.reads.filter(isPage).at(-1), '/data/account?fresh=1', "Refresh skips the face's cache");
+  assert.deepEqual(h.reads.filter(p => !isPage(p)).sort(), ['/data/account/holdings?cost=1', '/data/account/holdings?cost=1&paper=1', '/data/seat.json?fresh=1'],
+    'the holdings with their paper lens, and the seat past its cache');
   f.win.location.hash = '#/account/venues';
   await settle();
   f.click({ tagName: 'BUTTON', dataset: { action: 'refreshAccount' } });
   await settle();
-  assert.equal(h.accountReads(), 3, 'a refresh on Venues reads the page again too');
+  assert.equal(h.accountReads(), 2, 'a refresh on Venues reads the page again too');
   f.win.location.hash = '#/messages/s1';
   await settle();
   f.win.location.hash = '#/account/portfolio';
   await settle();
-  assert.equal(h.accountReads(), 4, 'entering Account again reads it again');
+  assert.equal(h.accountReads(), 3, 'entering Account again reads it again');
   store.timers.clear();
 });
 
@@ -547,13 +618,15 @@ test('Export CSV hands the browser a blob with the statement and revokes it', as
   f.win.Blob = class extends Blob { constructor(parts, opts) { super(parts, opts); blobs.push(this); } };
   const anchors = [];
   f.doc.createElement = () => { const a = f.element({ tagName: 'A' }); anchors.push(a); return a; };
-  const h = accountHost({ rows: [row('s1')] });
+  // the Account's statement, one line of it, as the drawer reads it on opening
+  const statement = { ok: true, lines: [{ key: 'order:o2', at: '2026-10-18T14:00:05Z', type: 'trade', kind: 'buy', description: 'Buy 3 AAPL · market · at 189.5', amountUsd: -568.5, status: 'filled', by: 'You' }] };
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account/statement': statement } });
   const store = bootAccount(f, h);
   await h.ready();
-  // the Account's statement as its read lands it (the screen's reads of it are wired with the stream)
-  store.dispatch('statementLoaded', { data: { ok: true, lines: [{ key: 'order:o2', at: '2026-10-18T14:00:05Z', type: 'trade', kind: 'buy', description: 'Buy 3 AAPL · market · at 189.5', amountUsd: -568.5, status: 'filled', by: 'You' }] }, at: 1 });
+  h.reads.length = 0;
   f.click({ tagName: 'BUTTON', dataset: { action: 'openStatement' } });
   await settle();
+  assert.deepEqual(h.reads, ['/data/account/statement'], 'the drawer reads the statement on opening');
   assert.match(f.html(), /aria-label="Statement"/);
   assert.match(f.html(), /Buy 3 AAPL · market · at 189\.5/);
   f.click({ tagName: 'BUTTON', dataset: { action: 'exportStatement' } });
@@ -614,19 +687,309 @@ test('entering Venues reads /data/seat.json; Refresh there reads it fresh; a sea
 });
 
 test('Open the Statement on a Market page lands on Account with the Statement open', async () => {
-  // a market's page is the Account's, so the host answers its explore with the stand-in's
+  // a market's page is the Account's: the host answers its explore with the stand-in's
   const f = fakeWindow({ hash: '#/markets/coin:BTC', storage: memoryStorage() });
   const h = accountHost({ rows: [row('s1')] });
-  const explore = JSON.parse(readFileSync(new URL('../fixtures/account/explore-all.json', import.meta.url), 'utf8'));
-  const store = bootAccount(f, { ...h, getJson: async path => (path.startsWith('/data/account/explore') ? explore : h.getJson(path)) });
+  const store = bootAccount(f, h);
   await h.ready();
   assert.equal(store.get().route.id, 'coin:BTC');
+  // the deep link read what is held before the page named its paper venues: the paper lens followed once it did, so You hold
+  // and On the statement are drawn from their reads, not Loading…
+  assert.deepEqual(h.reads.filter(p => p.startsWith('/data/account/holdings')), ['/data/account/holdings?cost=1', '/data/account/holdings?cost=1&paper=1']);
+  assert.match(f.html(), /0\.124 BTC · \$7,747\.40/);
+  assert.ok(h.reads.includes('/data/account/statement'));
+  assert.doesNotMatch(f.html(), /Loading…/);
   assert.match(f.html(), /class="link mk-link" data-action="openStatement">Open the Statement →</);
   f.click({ tagName: 'BUTTON', dataset: { action: 'openStatement' } });
   await settle();
   assert.equal(f.win.location.hash, '#/account/portfolio');
   assert.equal(store.get().account.statementOpen, true);
   assert.match(f.html(), /aria-label="Statement"/);
+  store.timers.clear();
+});
+
+// the wiring of the Account graft (spec 2026-10-22 §6.1–6.2): the stream, the polls, the tabs' reads, a market's page
+
+test("the Account's stream opens at boot, closes while the tab is hidden and opens again; its events are the reads they name", async () => {
+  const f = fakeWindow({ hash: '#/messages/s1', storage: memoryStorage() });
+  const h = accountHost({ rows: [row('s1')] });
+  const st = fakeStream();
+  const store = bootAccount(f, h, fakeMarkets(), { createAccountStream: st.create });
+  await h.ready();
+  assert.deepEqual([st.opened, st.closed], [1, 0], 'opened at boot');
+  f.doc.hidden = true;
+  f.fire('doc', 'visibilitychange');
+  assert.deepEqual([st.opened, st.closed], [1, 1], 'a hidden tab closes its stream');
+  f.doc.hidden = false;
+  f.fire('doc', 'visibilitychange');
+  assert.deepEqual([st.opened, st.closed], [2, 1], 'and opens it again on its return');
+  // a fill: the holdings and the page past the face's cache
+  h.reads.length = 0;
+  st.event('fill', { id: 'fill-1', venue: 'ex' }, 'r.1');
+  await settle();
+  assert.deepEqual([...h.reads].sort(), ['/data/account/holdings?cost=1&fresh=1', '/data/account/holdings?cost=1&paper=1&fresh=1', '/data/account?fresh=1']);
+  // a quote: the price of the market a page follows
+  st.event('quote', { venue: 'ex', symbol: 'BTC/USDT', last: 63000.5, priceAt: '2026-10-22T08:00:00.000Z', from: 'Stand-in Exchange · live', live: true }, 'r.2');
+  assert.equal(store.get().markets.accountQuotes['ex|BTC/USDT'].price, 63000.5);
+  assert.equal(store.get().markets.accountQuotes['ex|BTC/USDT'].quoteFrom, 'Stand-in Exchange · live');
+  // a card raised or answered: the page and the seat box, both past their caches; something else waiting on the owner: the page
+  h.reads.length = 0;
+  st.event('card', { id: 'card-0002', venue: 'ex', outcome: 'approved', at: '2026-10-22T08:00:01.000Z' }, 'r.3');
+  await settle();
+  assert.deepEqual([...h.reads].sort(), ['/data/account?fresh=1', '/data/seat.json?fresh=1']);
+  h.reads.length = 0;
+  st.event('card', { waits: 'letIn', venue: 'ex', at: '2026-10-22T08:00:02.000Z' }, 'r.4');
+  await settle();
+  assert.deepEqual(h.reads, ['/data/account?fresh=1'], 'no seat read for what waits that is not a card');
+  store.timers.clear();
+});
+
+test('the Account page is read every 20 s while Account is on screen in a visible tab, 80 s while the stream is open, and never otherwise', async () => {
+  const f = fakeWindow({ hash: '#/account/venues', storage: memoryStorage() });
+  const h = accountHost({ rows: [row('s1')] });
+  const st = fakeStream();
+  const timers = new HeldTimers();
+  const store = bootAccount(f, h, fakeMarkets(), { createAccountStream: st.create, timers });
+  await h.ready();
+  assert.deepEqual(timers.delays(), [20_000], 'on screen, the stream connecting: every 20 s');
+  st.set('open');
+  assert.deepEqual(timers.delays(), [80_000], 'the stream open: the interval armed again, at 80 s');
+  st.set('stale');
+  assert.deepEqual(timers.delays(), [20_000], 'quiet: 20 s again');
+  const armed = timers.ids();
+  st.set('connecting');
+  st.set('closed');
+  assert.deepEqual(timers.ids(), armed, 'a change that is not to or from open leaves the interval running');
+  h.reads.length = 0;
+  timers.run(20_000);
+  await settle();
+  assert.deepEqual(h.reads.filter(isPage), ['/data/account'], 'a beat reads the page, plain');
+  assert.deepEqual(timers.delays(), [20_000], 'and arms the next');
+  // a hidden tab reads nothing; a stream that changes meanwhile arms nothing
+  f.doc.hidden = true;
+  f.fire('doc', 'visibilitychange');
+  assert.deepEqual(timers.delays(), []);
+  st.set('open');
+  st.set('closed');
+  assert.deepEqual(timers.delays(), []);
+  f.doc.hidden = false;
+  f.fire('doc', 'visibilitychange');
+  assert.deepEqual(timers.delays(), [20_000]);
+  // off screen, never
+  f.win.location.hash = '#/messages/s1';
+  await settle();
+  assert.deepEqual(timers.delays(), []);
+  st.set('open');
+  assert.deepEqual(timers.delays(), [], 'a stream that opens off screen arms nothing');
+  f.win.location.hash = '#/account/portfolio';
+  await settle();
+  assert.deepEqual(timers.delays(), [80_000], 'back on screen with the stream open: 80 s');
+  store.timers.clear();
+});
+
+test('each Account tab reads what it draws on entering it: Portfolio the holdings, then the curve; Agents the agents and the seat; Cards the page past the cache', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1', storage: memoryStorage() });
+  let release = null;
+  const h = accountHost({ rows: [row('s1')] }, {
+    answers: { '/data/account/holdings': path => (release === null ? standinAnswer(path) : new Promise(res => { const was = release; release = () => { was(); res(standinAnswer(path)); }; })) },
+  });
+  const store = bootAccount(f, h);
+  await h.ready();
+  // Portfolio: the page, the holdings with their paper lens — and the curve only once they have landed
+  h.reads.length = 0;
+  release = () => {};
+  f.win.location.hash = '#/account/portfolio';
+  await settle();
+  assert.deepEqual(h.reads, ['/data/account', '/data/account/holdings?cost=1', '/data/account/holdings?cost=1&paper=1'], 'no curve before the holdings');
+  release();
+  release = null;
+  await settle();
+  assert.deepEqual(h.reads.slice(3), ['/data/account/history?range=1d'], 'the leading curve, after them');
+  assert.equal(store.get().account.history.status, 'ready');
+  // Agents: the Account's agents and the seat, whose row leads
+  h.reads.length = 0;
+  f.win.location.hash = '#/account/agents';
+  await settle();
+  assert.deepEqual([...h.reads].sort(), ['/data/account/agents', '/data/seat.json']);
+  // Cards: the page past the face's cache, what waits being the page's
+  h.reads.length = 0;
+  f.win.location.hash = '#/account/cards';
+  await settle();
+  assert.deepEqual(h.reads, ['/data/account?fresh=1']);
+  // Venues: the seat box, nothing more
+  h.reads.length = 0;
+  f.win.location.hash = '#/account/venues';
+  await settle();
+  assert.deepEqual(h.reads, ['/data/seat.json']);
+  // entering Account on Cards reads the page once, past the cache
+  f.win.location.hash = '#/messages/s1';
+  await settle();
+  h.reads.length = 0;
+  f.win.location.hash = '#/account/cards';
+  await settle();
+  assert.deepEqual(h.reads, ['/data/account?fresh=1']);
+  store.timers.clear();
+});
+
+test("a range reads its curve; a venue's Details opens a drawer that takes focus, and Escape closes it back to its opener", async () => {
+  const f = fakeWindow({ hash: '#/account/portfolio', storage: memoryStorage() });
+  const opener = f.withSelector('[data-action="openVenueDetails"][data-id="ex"]', { tagName: 'BUTTON', dataset: { action: 'openVenueDetails', id: 'ex' } });
+  const close = f.withSelector('.drawer .close-key', { tagName: 'BUTTON', presentIf: /aria-label="Venue details"/ });
+  const h = accountHost({ rows: [row('s1')] });
+  const store = bootAccount(f, h);
+  await h.ready();
+  h.reads.length = 0;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'setHistoryRange', value: '1w' } });
+  await settle();
+  assert.deepEqual(h.reads, ['/data/account/history?range=1w']);
+  assert.equal(store.get().account.history.range, '1w');
+  assert.equal(store.get().account.history.status, 'ready');
+  assert.match(f.html(), /aria-pressed="true" data-action="setHistoryRange" data-value="1w"/);
+  f.win.location.hash = '#/account/venues';
+  await settle();
+  opener.focus();
+  f.click(opener);
+  assert.equal(store.get().account.detailsVenue, 'ex');
+  assert.match(f.html(), /<aside class="drawer" aria-label="Venue details"><div class="drawer-head"><h2>Stand-in Exchange<\/h2>/);
+  assert.equal(f.doc.activeElement, close, 'the drawer takes focus');
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  assert.equal(store.get().account.detailsVenue, null, 'Escape closes it');
+  assert.doesNotMatch(f.html(), /aria-label="Venue details"/);
+  assert.equal(f.doc.activeElement, opener, 'focus returns to its opener');
+  f.click(opener);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'closeVenueDetails' } });
+  assert.equal(store.get().account.detailsVenue, null, '× closes it too');
+  store.timers.clear();
+});
+
+test("a market's page follows its market on the stream and reads what is held of it and the statement; a range reads candles; leaving lets the follow go", async () => {
+  const f = fakeWindow({ hash: '#/markets', storage: memoryStorage() });
+  const h = accountHost({ rows: [row('s1')] });
+  const st = fakeStream();
+  const store = bootAccount(f, h, fakeMarkets(), { createAccountStream: st.create });
+  await h.ready();
+  h.reads.length = 0;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openMarket', id: 'coin:BTC' } });
+  await settle();
+  assert.deepEqual(store.get().route, { screen: 'markets', id: 'coin:BTC' });
+  assert.deepEqual(st.follows.at(-1), ['ex:BTC/USDT'], 'its first connected line');
+  for (const read of ['/data/account/holdings?cost=1', '/data/account/holdings?cost=1&paper=1', '/data/account/statement', '/data/account/candles?venue=ex&symbol=BTC%2FUSDT&range=1D', '/data/account/compare?base=BTC&side=buy']) {
+    assert.ok(h.reads.includes(read), read);
+  }
+  // what is held of it and the statement's lines about it, from their own reads
+  assert.match(f.html(), /0\.124 BTC · \$7,747\.40/);
+  assert.doesNotMatch(f.html(), /Loading…/);
+  // a range: its candles
+  h.reads.length = 0;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'setRange', id: 'coin:BTC', value: '1M' } });
+  await settle();
+  assert.deepEqual(h.reads, ['/data/account/candles?venue=ex&symbol=BTC%2FUSDT&range=1M']);
+  assert.equal(store.get().markets.candles['coin:BTC'].range, '1M');
+  // leaving the page lets its market go
+  f.win.location.hash = '#/markets';
+  await settle();
+  assert.deepEqual(st.follows.at(-1), []);
+  const follows = st.follows.length;
+  f.win.location.hash = '#/messages/s1';
+  await settle();
+  assert.equal(st.follows.length, follows, 'nothing more to let go');
+  store.timers.clear();
+});
+
+test("a star on an Account market goes to the Account's own store and comes off in one press, an old star's find too; Remove forgets an old star not listed", async () => {
+  // an old us: star the Account lists (its explore answers stock:NVDA for NVDA) and one it does not; the Account's store full, so
+  // the found star stays on the cn list, starred as its key
+  const storage = memoryStorage();
+  const full = Array.from({ length: 100 }, (_, i) => `coin:C${i}`);
+  storage.setItem('gravit.market.watchlist.v1', JSON.stringify({ version: 1, items: [{ id: 'us:NVDA', market: 'us', symbol: 'NVDA', name: 'NVIDIA', exchange: '', currency: 'USD' }, { id: 'us:ZZZZ', market: 'us', symbol: 'ZZZZ', name: 'Zed', exchange: '', currency: 'USD' }] }));
+  storage.setItem('gravit.account.watch.v1', JSON.stringify({ version: 1, items: full }));
+  const f = fakeWindow({ hash: '#/markets', storage });
+  const h = accountHost({ rows: [row('s1')] });
+  const store = bootAccount(f, h);
+  await h.ready();
+  const m = () => store.get().markets;
+  assert.equal(m().asked['us:NVDA'], 'stock:NVDA', 'found at the Account');
+  assert.equal(m().asked['us:ZZZZ'], null, 'not listed there');
+  assert.ok(m().watchlist.some(a => a.id === 'us:NVDA'), "the Account's store full: the found star stays on the cn list");
+  // one press takes it off: the old star with it
+  f.click({ tagName: 'BUTTON', dataset: { action: 'toggleWatch', id: 'stock:NVDA' } });
+  assert.equal(m().watchlist.some(a => a.id === 'us:NVDA'), false);
+  assert.equal(m().watch.includes('stock:NVDA'), false);
+  // Remove on the star the Account does not list: it goes, and what it was asked as with it
+  f.click({ tagName: 'BUTTON', dataset: { action: 'removeAsked', id: 'us:ZZZZ' } });
+  assert.deepEqual(m().watchlist, []);
+  assert.equal(Object.hasOwn(m().asked, 'us:ZZZZ'), false);
+  // a star on an Account key with room: on, then off
+  f.click({ tagName: 'BUTTON', dataset: { action: 'toggleWatch', id: 'coin:C0' } });
+  assert.equal(m().watch.includes('coin:C0'), false, 'a starred key comes off');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'toggleWatch', id: 'coin:BTC' } });
+  assert.equal(m().watch.at(-1), 'coin:BTC', 'and an unstarred one goes on, into the room made');
+  assert.deepEqual(JSON.parse(storage.getItem('gravit.account.watch.v1')).items.at(-1), 'coin:BTC', "written to the Account's own store");
+  store.timers.clear();
+});
+
+test("the quotes poll asks for the table's rows drawn, none on a market's page", async () => {
+  const f = fakeWindow({ hash: '#/markets', storage: memoryStorage() });
+  for (const id of ['coin:BTC', 'stock:NVDA']) f.withSelector('tr[data-id]', { tagName: 'TR', dataset: { id }, presentIf: /<table class="mk-t">/ });
+  const h = accountHost({ rows: [row('s1')] });
+  const timers = new HeldTimers();
+  const store = bootAccount(f, h, fakeMarkets(), { timers });
+  await h.ready();
+  const m = store.get().markets;
+  const quoted = () => h.reads.filter(p => p.startsWith('/data/account/quotes?')).map(p => new URLSearchParams(p.split('?')[1]).get('pairs').split(',').sort());
+  const drawn = rowsOf(m, Date.now()).filter(r => r.id === 'coin:BTC' || r.id === 'stock:NVDA');
+  timers.run(5_000);
+  await settle();
+  assert.deepEqual(quoted(), [[...new Set(pairsOf(drawn, 12))].sort()], 'the two rows drawn, their pairs alone');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openMarket', id: 'coin:BTC' } });
+  await settle();
+  h.reads.length = 0;
+  timers.run(5_000);
+  await settle();
+  assert.deepEqual(quoted(), [], "a market's page draws no rows: nothing to quote");
+  store.timers.clear();
+});
+
+test('the search box moves the query at once and searches after 300 ms of quiet: a keystroke restarts the wait; Clear searches blank at once', async () => {
+  const f = fakeWindow({ hash: '#/markets', storage: memoryStorage() });
+  const mq = f.withId('mq', { tagName: 'INPUT', type: 'search', dataset: { action: 'mkQuery' } });
+  const h = accountHost({ rows: [row('s1')] });
+  const mk = fakeMarkets();
+  const timers = new HeldTimers(ms => ms >= 5_000 || ms === 300);
+  const store = bootAccount(f, h, mk, { timers });
+  await h.ready();
+  const searched = () => h.reads.filter(p => p.startsWith('/data/account/explore?q='));
+  mq.value = 'BT';
+  f.fire('root', 'input', { target: mq });
+  assert.equal(store.get().markets.q, 'BT', 'the query moves at once');
+  assert.equal(store.get().markets.tab, 'results');
+  assert.deepEqual([searched(), mk.search.queries], [[], []], 'nothing searched yet');
+  const first = timers.ids().filter(id => timers.held.get(id).ms === 300);
+  mq.value = 'BTC';
+  f.fire('root', 'input', { target: mq });
+  const second = timers.ids().filter(id => timers.held.get(id).ms === 300);
+  assert.equal(second.length, 1, 'one wait at a time');
+  assert.notDeepEqual(second, first, 'a keystroke restarts it');
+  timers.run(300);
+  await settle();
+  assert.deepEqual(searched(), ['/data/account/explore?q=BTC&limit=200'], "the Account's search, once, for what was typed last");
+  assert.deepEqual(mk.search.queries, [['BTC', 'cn']], 'and the A-share search');
+  // a wait cut short by Clear: the search goes blank at once, and the wait never searches
+  mq.value = 'ETH';
+  f.fire('root', 'input', { target: mq });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'mkClear' } });
+  assert.equal(store.get().markets.q, '');
+  assert.equal(mq.value, '');
+  assert.equal(timers.delays().includes(300), false, 'the wait is cancelled');
+  assert.equal(mk.search.cancelled, 1, 'the A-share search cancelled');
+  assert.equal(searched().length, 1, 'ETH never searched');
+  // a box emptied by hand searches blank at once too
+  mq.value = 'SOL';
+  f.fire('root', 'input', { target: mq });
+  mq.value = '';
+  f.fire('root', 'input', { target: mq });
+  assert.equal(timers.delays().includes(300), false);
+  assert.equal(mk.search.cancelled, 2);
   store.timers.clear();
 });
 

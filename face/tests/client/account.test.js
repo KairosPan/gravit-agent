@@ -347,6 +347,14 @@ test('the Statement drawer: the lines newest first with by; Export CSV', () => {
   has(empty, '<p class="acct-note">No statement lines yet</p>');
   lacks(empty, 'exportStatement', 'nothing to export');
   has(renderStatement(R.statementFailed(blank, { at: NOW }), NOW), '<p class="acct-note">Statement unavailable</p>');
+  // the Account's sentence when it refused: over Statement unavailable before any answer, over the lines kept after one
+  has(renderStatement(R.statementFailed(blank, { at: NOW, message: 'The statement is being rebuilt.' }), NOW),
+    '<div class="drawer-body"><p class="acct-note">The statement is being rebuilt.</p><p class="acct-note">Statement unavailable</p></div>');
+  const keptLines = renderStatement(R.statementFailed(s, { at: NOW, message: 'The statement is being rebuilt.' }), NOW);
+  has(keptLines, '<div class="drawer-body"><p class="acct-note">The statement is being rebuilt.</p><div class="activity">');
+  assert.equal([...keptLines.matchAll(/<div class="activity-row">/g)].length, lines.length, 'the lines kept');
+  lacks(renderStatement(R.statementLoaded(R.statementFailed(s, { at: NOW, message: 'The statement is being rebuilt.' }), { data: fx('statement'), at: NOW }), NOW),
+    'being rebuilt', 'an answer clears it');
   // open over Settings, Settings wins the space; the Statement stays when moving inside Account
   lacks(draw(R.openSettings(s)), 'aria-label="Statement"');
   has(draw(R.nav(s, { screen: 'account', tab: 'cards' })), 'aria-label="Statement"');

@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import {
   canonicalId, quoteWord, connectionWord, providerWord, basisWord, sourceWord, volumeWord, volumeWordOf, searchWord, watchWord, mentionsOf,
   ACCOUNT_TABS, ACCOUNT_SORTS, CANDLE_RANGES, isAccountKey, tabsOf, priceOf, sourceWordOf, legsOf, rowsOf, tableOf, sortsOf, matchKey, pairsOf,
-  pageOf, faceAssetOf, handWordsOf,
+  pageOf, faceAssetOf, handWordsOf, watchedOf,
 } from '../../client/js/host/market-view.js';
 
 const CJK = /[㐀-鿿]/;
@@ -560,6 +560,30 @@ test("pageOf: the price shown, the page's words, its history's state and the rea
   assert.deepEqual(pageOf(m, refused, 'coin:BTC', NOW).reads, {
     held: no, orders: { answered: false, failed: true, message: 'The account is restarting' }, lines: { answered: false, failed: true, message: null },
   });
+  // the holdings' and the statement's own sentences when they refused (their reads keep them): You hold and On the statement say them
+  const said = { ...accountSlice(), holdings: { status: 'error', data: null, message: 'Venues are still settling.' }, statement: { status: 'error', data: fx('statement'), message: 'The statement is being rebuilt.' } };
+  assert.deepEqual(pageOf(m, said, 'coin:BTC', NOW).reads, {
+    held: { answered: false, failed: true, message: 'Venues are still settling.' },
+    orders: { answered: true, failed: false, message: null },
+    lines: { answered: true, failed: true, message: 'The statement is being rebuilt.' },
+  });
+});
+
+// what a star press acts on: whether the market is starred as its star is drawn (rowsOf's and pageOf's `watched`)
+test('watchedOf: an Account key starred by the operator or found for an old star still listed; a face id on the cn list; nothing else', () => {
+  const m = markets({ watch: ['coin:BTC'], watchlist: [asset('cn:600519'), asset('us:AAPL')], asked: { 'us:AAPL': 'stock:AAPL' } });
+  assert.equal(watchedOf(m, 'coin:BTC'), true, "the operator's own");
+  assert.equal(watchedOf(m, 'stock:AAPL'), true, 'an old star found at the Account and still on the cn list');
+  assert.equal(watchedOf(m, 'coin:ETH'), false);
+  assert.equal(watchedOf(m, 'cn:600519'), true);
+  assert.equal(watchedOf(m, 'us:aapl'), true, 'a face id, canonicalised');
+  assert.equal(watchedOf(m, 'cn:000001'), false);
+  assert.equal(watchedOf({ ...m, watchlist: [asset('cn:600519')] }, 'stock:AAPL'), false, 'a find whose old star has gone stars nothing by itself');
+  for (const id of ['garbage', '', null, undefined]) assert.equal(watchedOf(m, id), false, String(id));
+  assert.equal(watchedOf(undefined, 'coin:BTC'), false);
+  // the same as the page draws it
+  const btc = markets({ explore: { all: read(fx('explore-all')) }, watch: ['coin:BTC'] });
+  assert.equal(watchedOf(btc, 'coin:BTC'), pageOf(btc, accountSlice(), 'coin:BTC', NOW).watched);
 });
 
 test('no icon URL survives any view (an item given an https icon by hand)', () => {

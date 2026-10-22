@@ -26,18 +26,33 @@ import { startTraces } from './host/traces.js';
 import { loadMemberTrace } from './wire/member-traces.js';
 import { isHostPreset } from './wire/speaker.js';
 import { statementLinesOf, statementCsvOf } from './host/account-view.js';
-import { canonicalId, handWordsOf } from './host/market-view.js';
+import { isAccountKey, handWordsOf, watchedOf } from './host/market-view.js';
 import { createLiveQuotes } from './wire/market-quotes.js';
 import { firstOpen } from './host/sessions.js';
 import { createSymbolSearch } from './wire/market-search.js';
+import { createAccountStream } from './wire/account-stream.js';
 
 export const PREFS_KEY = 'gravit-ui.prefs';
 // how long a press may hold renders: a click lands well inside it, and a release that never arrives cannot freeze the page
 export const POINTER_HOLD_MS = 1000;
+// how long the Markets search box must be quiet before its reads go: one read for a word typed, not one a keystroke
+export const SEARCH_QUIET_MS = 300;
 
 // Gravit's words as the thread draws them: DOM-built markdown (wire/markdown.js returns {node, doc}), serialized for
 // the string renderers
 export const gravitMarkdown = text => renderMarkdown(text).node.outerHTML;
+
+// a /data read: an answer is its JSON; any other status rejects with the status and, when it parses, the body the face sent —
+// the Account's refusal rides on it (`error.body`), for the hosts to read its sentence from
+export function getJsonVia(fetch) {
+  return async path => {
+    const r = await fetch(path);
+    if (r.ok) return r.json();
+    let body;
+    try { body = await r.json(); } catch { /* not JSON: the status speaks */ }
+    throw Object.assign(new Error(`${path}: HTTP ${r.status}`), { status: r.status }, body === undefined ? {} : { body });
+  };
+}
 
 // a /data POST as the old page's panelData read it: a failed status or the route's own {ok:false, error} rejects,
 // the route's words riding as the code the status line reads; only {ok:true, …} resolves
@@ -140,8 +155,9 @@ function focusKey(el) {
   const sel = `[data-action="${data.action}"]` + Object.entries(data).filter(([k]) => k !== 'action').map(([k, v]) => `[data-${k.replace(/[A-Z]/g, c => '-' + c.toLowerCase())}="${v}"]`).join('');
   return { sel };
 }
-const overlayOf = s => (s.detailsOpen || s.settingsOpen || s.account.statementOpen ? 'drawer' : null);
-const drawerOf = s => (s.detailsOpen ? 'details' : s.settingsOpen ? 'settings' : s.account.statementOpen ? 'statement' : null);
+const overlayOf = s => (s.detailsOpen || s.settingsOpen || s.account.statementOpen || s.account.detailsVenue ? 'drawer' : null);
+const drawerOf = s => (s.detailsOpen ? 'details' : s.settingsOpen ? 'settings' : s.account.statementOpen ? 'statement'
+  : s.account.detailsVenue ? `venue:${s.account.detailsVenue}` : null);
 const editorOf = e => (e ? [e.kind, e.convId, e.id].join('|') : null);
 const screenOf = s => `${s.route.screen}/${s.route.id ?? ''}`;
 
@@ -149,26 +165,52 @@ export function boot(win, host = {}) {
   const doc = win.document;
   const storage = (() => { try { return win.localStorage; } catch { return null; } })();
   const store = makeStore(storage);
-  const timers = new Timers();
+  const timers = host.timers ?? new Timers();
   const root = doc.getElementById('app');
   const now = () => Date.now();
   const call = host.call ?? wireCall;
-  const getJson = host.getJson ?? (path => win.fetch(path).then(r => (r.ok ? r.json() : Promise.reject(Object.assign(new Error(`${path}: HTTP ${r.status}`), { status: r.status })))));
+  const getJson = host.getJson ?? getJsonVia(path => win.fetch(path));
   const postJson = host.postJson ?? postJsonVia((path, init) => win.fetch(path, init));
+  const schedule = (fn, ms) => timers.after(ms, fn);
+  const cancelTimer = id => timers.cancel(id);
   // Gravit's markdown is DOM-built (wire/markdown.js); a test hands in its own or none
   if (host.markdown !== undefined) setMarkdown(host.markdown);
   else if (typeof document !== 'undefined') setMarkdown(gravitMarkdown);
-  // the paper account: read at boot, on entering Account, on Refresh, and right after a fill
-  const account = startAccount({ store, getJson, call, now });
+  // the Account's page is polled only while Account is on screen in a visible tab
+  const accountShown = () => store.get().route.screen === 'account' && !doc.hidden;
+  const showAccount = () => account.poll(accountShown());
+  // the Account's push channel, one for this tab (wire/account-stream.js), open while the tab is visible: an event is the reads
+  // it names, a quote the price of the market a page follows, a card raised or answered the seat box's cards; the stream
+  // opening, or no longer open, arms the page's interval again (a test hands in its own)
+  let streamWasOpen = false;
+  const stream = (host.createAccountStream ?? ((onEvent, onStatus) => createAccountStream({
+    createEventSource: url => new win.EventSource(url),
+    fetcher: (path, init) => win.fetch(path, init),
+    schedule, cancelTimer, now,
+    random: n => win.crypto.getRandomValues(new Uint8Array(n)),
+    onStatus,
+  }, onEvent)))(ev => {
+    account.onStreamEvent(ev);
+    if (ev.type === 'quote') store.dispatch('streamQuote', { data: ev.data });
+    if (ev.type === 'card' && ev.data?.waits === undefined) void seat.load({ fresh: true });
+  }, status => {
+    if ((status === 'open') === streamWasOpen) return;
+    streamWasOpen = status === 'open';
+    if (accountShown()) { account.poll(false); account.poll(true); }
+  });
+  // the Account's page: read at boot, on entering Account, on Refresh, right after a receipt and on the stream's events; every
+  // 20 s while Account is on screen in a visible tab, 80 s while the stream is open
+  const account = startAccount({ store, getJson, now, schedule, cancelTimer, streamOpen: () => stream.status() === 'open' });
   void account.load();
-  // the Account seat's standing (spec 2026-10-20 §6.3): read on entering Venues, on Refresh there, and right after a seat receipt
+  // the Account seat's standing (spec 2026-10-20 §6.3): read on entering Venues or Agents, on Refresh, right after a seat receipt
+  // and on a card's event
   const seat = startSeat({ store, getJson, now });
   // a receipt from the Account seat reloads the seat's standing; an Alpaca fill reloads the account
   const live = startLive({ store, openMux: host.openMux ?? wireOpenMux, call, mapFrame, getJson, timers, now, onReceipt: m => { if (m?.data?.seat) void seat.load({ fresh: true }); else void account.load({ fresh: true }); } });
   // answers go through the live layer, which settles the gate it delivered once the answer wins
   const actions = makeActions({ store, call, answerGate: (eventId, value) => live.answer(eventId, value), postJson });
-  // Markets: the Account's reads on the app's timers; the face's live quotes and symbol search for the A shares (a test hands in
-  // its own); the stars in this browser's storage
+  // Markets: the Account's reads on the app's timers, a market's page followed on the stream; the face's live quotes and symbol
+  // search for the A shares (a test hands in its own); the stars in this browser's storage
   const markets = startMarkets({
     store,
     createLiveQuotes: host.createLiveQuotes ?? (onUpdate => createLiveQuotes(onUpdate, {
@@ -176,8 +218,7 @@ export function boot(win, host = {}) {
       createEventSource: typeof win.EventSource === 'function' ? url => new win.EventSource(url) : null,
     })),
     createSymbolSearch: host.createSymbolSearch ?? (onUpdate => createSymbolSearch(onUpdate, { fetcher: (...a) => win.fetch(...a) })),
-    storage, getJson, win, now,
-    schedule: (fn, ms) => timers.after(ms, fn), cancelTimer: id => timers.cancel(id),
+    storage, getJson, win, now, stream, schedule, cancelTimer,
   });
   // a channel's page: its overview read on entering it
   const channels = startChannels({ store, postJson, getJson, refresh: () => live.refresh(), now });
@@ -193,8 +234,9 @@ export function boot(win, host = {}) {
   let pressed = false;   // a primary press is down: a render now would replace the element the click is aimed at
   let pending = false;
   let openedId = null;   // the conversation the live layer was told to open
-  let was = null;        // the route follow() last settled: entering Account reads it, entering Venues reads the seat
+  let was = null;        // the route follow() last settled: entering a screen, a tab or a market's page reads what it draws
   let wanted = null;     // a deep link the list has not answered yet
+  let searchTimer = null;   // the Markets search waiting for the box to be quiet
   let last = { overlay: null, opener: null, screen: null, drawer: null, thread: null, editor: null, confirm: null };
   let confirmFrom = null;
 
@@ -224,6 +266,8 @@ export function boot(win, host = {}) {
       : s.route.screen === 'channel' ? renderChannelScreen(s, now()) : s.route.screen === 'discover' ? renderDiscover(s)
       : s.route.screen === 'plugin' ? renderPlugin(s) : renderMessagesScreen(s, now());
     root.innerHTML = renderRail(s, now()) + (s.settingsOpen ? screen.replace(/<\/main>$/, renderSettings(s) + '</main>') : screen);
+    // the quotes poll asks for the rows the table drew, by id — none on a market's page
+    if (s.route.screen === 'markets') markets.rowsInView([...root.querySelectorAll('tr[data-id]')].map(el => el.dataset.id));
 
     const sameEditor = editorOf(s.edit) === last.editor;
     for (const [id, value] of typed) {
@@ -313,8 +357,24 @@ export function boot(win, host = {}) {
     if (fixed) win.history.replaceState(null, '', fixed);
     const r = store.get().route;
     showMarkets();
-    if (r.screen === 'account' && was?.screen !== 'account') void account.load();
-    if (r.screen === 'account' && r.tab === 'venues' && !(was?.screen === 'account' && was.tab === 'venues')) void seat.load();
+    showAccount();
+    // Account: its page on entering it — past the face's cache when it opens on Cards, whose cards are the page's — and each tab
+    // what it draws on entering it: Portfolio the holdings, then the curve they lead to; Venues the seat box; Agents the
+    // Account's agents beside Gravit's seat; Cards the page past the cache
+    const tabIn = (route, tab) => route?.screen === 'account' && route.tab === tab;
+    const entered = tab => tabIn(r, tab) && !tabIn(was, tab);
+    if (r.screen === 'account' && was?.screen !== 'account') void account.load({ fresh: r.tab === 'cards' });
+    else if (entered('cards')) void account.load({ fresh: true });
+    if (entered('portfolio')) void account.loadHoldings().then(() => account.loadHistory());
+    if (entered('venues') || entered('agents')) void seat.load();
+    if (entered('agents')) void account.loadAgents();
+    // a market's page (an Account key): its market followed on the stream with its candles and compare rows, and what is held of
+    // it and the statement's lines about it read; leaving it lets the market go
+    const pageId = route => (route?.screen === 'markets' && isAccountKey(route.id) ? route.id : null);
+    if (pageId(r) !== pageId(was)) {
+      markets.page(pageId(r));
+      if (pageId(r) !== null) { void account.loadHoldings(); void account.loadStatement(); }
+    }
     if (r.screen === 'channel' && !(was?.screen === 'channel' && was.id === r.id)) void channels.overview(r.id);
     const inDiscover = route => route?.screen === 'discover' || route?.screen === 'plugin';
     if (inDiscover(r) && !inDiscover(was)) void discover.load();
@@ -428,6 +488,18 @@ export function boot(win, host = {}) {
     if (c.action === 'stopChild') void actions.stopChild(c.parent, c.id, c.label);
   }
 
+  // the Markets search: the query moves with each keystroke (setMarketsQuery), its reads once the box has been quiet for
+  // SEARCH_QUIET_MS; a blank box searches at once — nothing to read, and what was read goes
+  function searchNow(q) {
+    if (searchTimer !== null) { timers.cancel(searchTimer); searchTimer = null; }
+    markets.search(q);
+  }
+  function searchSoon(q) {
+    if (!String(q).trim()) { searchNow(q); return; }
+    if (searchTimer !== null) timers.cancel(searchTimer);
+    searchTimer = timers.after(SEARCH_QUIET_MS, () => { searchTimer = null; markets.search(q); });
+  }
+
   async function sendNow() {
     const text = composerText.trim();
     if (!text) return;
@@ -497,15 +569,20 @@ export function boot(win, host = {}) {
     openSettings: () => store.dispatch('openSettings'),
     closeSettings: () => store.dispatch('closeSettings'),
     setTheme: el => { const t = el.dataset.value.toLowerCase(); store.dispatch('setTheme', t); applyTheme(t); },
-    // Account: Refresh (and Retry), the Statement, its CSV
+    // Account: Refresh (and Retry) — the page and the seat past the face's cache, the holdings —, the curve's range, a venue's
+    // Details, the Statement (its lines read on opening it), its CSV
     refreshAccount: () => {
       void account.load({ fresh: true });
-      const r = store.get().route;
-      if (r.screen === 'account' && r.tab === 'venues') void seat.load({ fresh: true });
+      void account.loadHoldings();
+      void seat.load({ fresh: true });
     },
+    setHistoryRange: el => { void account.loadHistory(el.dataset.value); },
+    openVenueDetails: el => store.dispatch('openVenueDetails', el.dataset.id),
+    closeVenueDetails: () => store.dispatch('closeVenueDetails'),
     openStatement: () => {
       if (store.get().route.screen !== 'account') go({ screen: 'account', tab: 'portfolio' });
       store.dispatch('openStatement');
+      void account.loadStatement();
     },
     closeStatement: () => store.dispatch('closeStatement'),
     exportStatement: () => {
@@ -517,22 +594,26 @@ export function boot(win, host = {}) {
       a.click();
       timers.after(0, () => win.URL.revokeObjectURL(url));
     },
-    // Markets: the tabs, the sort, Clear, the star, a row's page
+    // Markets: the tabs, the sort, Clear, the star, Remove, a row's page, a page's range
     mkTab: el => store.dispatch('setMarketsTab', el.dataset.value),
     mkSort: el => store.dispatch('setMarketsSort', el.dataset.value),
-    // the render keeps what an input holds, so Clear empties the box before the query
+    // the render keeps what an input holds, so Clear empties the box before the query; a search still waiting goes with it
     mkClear: () => {
       const box = doc.getElementById('mq');
       if (box) box.value = '';
       store.dispatch('setMarketsQuery', '');
-      markets.search('');
+      searchNow('');
       doc.getElementById('mq')?.focus?.();
     },
+    // the star, on or off as it is drawn: an Account key in the Account's own store, a cn id on the face's list
     toggleWatch: el => {
-      const id = canonicalId(el.dataset.id);
-      if (store.get().markets.watchlist.some(a => a.id === id)) markets.unwatch(id); else markets.watch(id);
+      const id = el.dataset.id;
+      if (watchedOf(store.get().markets, id)) markets.unwatch(id); else markets.watch(id);
     },
+    // an old star the Account does not list, taken off
+    removeAsked: el => markets.unwatch(el.dataset.id),
     openMarket: el => go({ screen: 'markets', id: el.dataset.id }),
+    setRange: el => markets.range(el.dataset.id, el.dataset.value),
     // a new message in the root channel with the market named in the composer: the operator says what to look for
     handToGravit: el => {
       const s = store.get();
@@ -576,7 +657,7 @@ export function boot(win, host = {}) {
   function typed(el) {
     if (el.id === 'say') composerText = el.value;
     else if (el.dataset?.action === 'draftTitle') store.dispatch('setDraftTitle', el.value);
-    else if (el.dataset?.action === 'mkQuery') { store.dispatch('setMarketsQuery', el.value); markets.search(el.value); }
+    else if (el.dataset?.action === 'mkQuery') { store.dispatch('setMarketsQuery', el.value); searchSoon(el.value); }
     else if (el.dataset?.action === 'dq') store.dispatch('setDiscoverQuery', el.value);
   }
   root.addEventListener('input', ev => { if (!ev.isComposing && !composing) typed(ev.target); });
@@ -614,14 +695,21 @@ export function boot(win, host = {}) {
       if (s.detailsOpen) store.dispatch('toggleDetails');
       else if (s.settingsOpen) store.dispatch('closeSettings');
       else if (s.account.statementOpen) store.dispatch('closeStatement');
+      else if (s.account.detailsVenue) store.dispatch('closeVenueDetails');
       return;
     }
     const a = doc.activeElement;
     if (ev.key === 'Enter' && !ev.isComposing && ev.keyCode !== 229 && store.get().edit && a?.closest?.('.inline-edit') && a.tagName !== 'BUTTON') { ev.preventDefault(); commitEdit(); }
   });
 
+  // a hidden tab stops everything — the Markets polls and the face's wire, the Account's page, and its stream with the market a
+  // page follows — and a visible one starts again what its screen reads
   win.addEventListener('hashchange', follow);
-  doc.addEventListener('visibilitychange', showMarkets);
+  doc.addEventListener('visibilitychange', () => {
+    showMarkets();
+    showAccount();
+    if (doc.hidden) stream.close(); else stream.open();
+  });
   store.subscribe((s, type) => {
     requestRender();
     if (type !== 'hostList') return;
@@ -633,6 +721,7 @@ export function boot(win, host = {}) {
   });
   applyTheme(store.get().theme);
   if (!win.location.hash) win.history.replaceState(null, '', toHash(store.get().route));
+  if (!doc.hidden) stream.open();
   follow();
   render();
   return Object.assign(store, { timers, live, actions, markets, channels, discover });

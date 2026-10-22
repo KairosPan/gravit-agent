@@ -658,6 +658,8 @@ test("closing the browser response aborts the upstream fetch", async () => {
   await four.done;
   assert.equal(live.inits[3].signal.aborted, true, "dispose aborts every open upstream");
   assert.equal(four.out.ended, true, "and ends the browser's response");
+  /* main.ts disposes once the web server has stopped, from its shutdown or from installFailLoud's release: twice is harmless. */
+  assert.doesNotThrow(() => live.proxy.dispose());
 });
 
 test("stream/markets: the body passes as bytes with application/json; 413 past 4096; GET is 405", async () => {

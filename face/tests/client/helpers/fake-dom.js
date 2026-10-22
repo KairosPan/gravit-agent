@@ -50,7 +50,7 @@ export function fakeWindow({ hash = '#/messages/c-1', storage = null, prompt = (
     },
     // the typed-text query: inputs and textareas by id, minus the :not([type=…]) kinds the selector names
     querySelectorAll(sel) {
-      if (bySelector.has(sel)) return bySelector.get(sel).filter(e => !sel.includes('[open]') || e.open === true);
+      if (bySelector.has(sel)) return bySelector.get(sel).filter(e => present(e) && (!sel.includes('[open]') || e.open === true));
       if (!sel.includes('input[id]')) return [];
       const skip = [...sel.matchAll(/:not\(\[type=(\w+)\]\)/g)].map(m => m[1]);
       return [...byId.values()].filter(e => (e.tagName === 'INPUT' && !skip.includes(e.type)) || e.tagName === 'TEXTAREA' || (e.tagName === 'SELECT' && sel.includes('select[id]')));
@@ -78,6 +78,8 @@ export function fakeWindow({ hash = '#/messages/c-1', storage = null, prompt = (
     history: { replaceState(_s, _t, h) { currentHash = h; } },
     addEventListener(type, fn) { (listeners.win[type] ??= []).push(fn); },
     prompt, confirm,
+    // the browser's own random bytes (the Account stream's client id); no EventSource and no fetch: a test hands the app its own
+    crypto: globalThis.crypto,
     Blob: class { constructor(parts, opts) { this.parts = parts; this.type = opts?.type; } },
     URL: { createObjectURL: () => 'blob:fake', revokeObjectURL: url => revoked.push(url) },
     FormData: class { constructor(form) { this.form = form; } get(k) { return this.form.fields?.[k] ?? null; } },

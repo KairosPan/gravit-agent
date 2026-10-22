@@ -55,6 +55,28 @@ test("a quotes poll answer older than the pair's kept quote leaves it; one with 
   assert.equal(nvda(t).quoteAt, null);
 });
 
+// a read beside the Account's page keeps the Account's sentence when it refuses, as the page read does: You hold, On the
+// statement and the Statement drawer draw it
+test("holdingsFailed keeps the Account's sentence over the holdings kept; the next answer clears it", () => {
+  const rows = { ok: true, rows: [{ key: 'BTC', asset: 'BTC' }] };
+  let s = R.holdingsLoaded(emptyState(), { data: rows, at: 1 });
+  s = R.holdingsFailed(s, { at: 2, message: 'Venues are still settling.' });
+  assert.deepEqual(s.account.holdings, { status: 'error', data: rows, at: 2, message: 'Venues are still settling.' });
+  s = R.holdingsLoaded(s, { data: rows, at: 3 });
+  assert.equal(s.account.holdings.message, null, 'an answer clears it');
+  assert.equal(R.holdingsFailed(s, { at: 4 }).account.holdings.message, null, 'a failure without words carries none');
+});
+
+test("statementFailed keeps the Account's sentence over the lines kept; the next answer clears it", () => {
+  const lines = { ok: true, lines: [{ key: 'order:o1', description: 'Buy 1 AAPL' }] };
+  let s = R.statementLoaded(emptyState(), { data: lines, at: 1 });
+  s = R.statementFailed(s, { at: 2, message: 'The statement is being rebuilt.' });
+  assert.deepEqual(s.account.statement, { status: 'error', data: lines, at: 2, message: 'The statement is being rebuilt.' });
+  s = R.statementLoaded(s, { data: lines, at: 3 });
+  assert.equal(s.account.statement.message, null, 'an answer clears it');
+  assert.equal(R.statementFailed(s, { at: 4 }).account.statement.message, null, 'a failure without words carries none');
+});
+
 test('the empty state carries no demo slice', () => {
   const s = emptyState();
   for (const gone of ['plugins', 'memory', 'mail', 'banner', 'call', 'compose']) assert.equal(gone in s, false, gone);

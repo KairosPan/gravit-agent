@@ -51,15 +51,17 @@ export function startAccount({ store, getJson, now = Date.now, schedule, cancelT
     return current;
   }
 
-  // a read beside the page: an answer (`ok: true`) lands as its data; anything else is a failure that keeps the last data
+  // a read beside the page: an answer (`ok: true`) lands as its data; anything else is a failure that keeps the last data,
+  // carrying the Account's sentence when it gave one
   const landing = (loaded, failed) => (body, refused) => {
     if (!refused && body?.ok === true) store.dispatch(loaded, { data: body, at: now() });
-    else store.dispatch(failed, { at: now() });
+    else store.dispatch(failed, { at: now(), message: messageOf(body) });
   };
 
   /** The page, `?fresh=1` past the face's cache. A body that is not the page — a refusal, an `ok: false` on a 200, an API the
    *  face does not recognise — is a failure carrying the Account's sentence when it gave one; the last page stays. A page
-   *  naming a paper venue whose lens was never read reads the holdings at once, unless a loadAll is about to. */
+   *  naming a paper venue whose lens was never read reads the holdings at once, unless a loadAll is about to, and the leading
+   *  curve after them (the lens may have made Paper the lead). */
   function load({ fresh = false } = {}) {
     return fly('page', '/data/account', {
       fresh,
@@ -67,7 +69,7 @@ export function startAccount({ store, getJson, now = Date.now, schedule, cancelT
       land: (body, refused) => {
         if (!refused && pageOk(body)) {
           store.dispatch('accountLoaded', { data: body, at: now() });
-          if (holdingsDue === 0 && hasPaper(body) && store.get().account.paper.data === null) void loadHoldings();
+          if (holdingsDue === 0 && hasPaper(body) && store.get().account.paper.data === null) void loadHoldings().then(() => loadHistory());
         } else store.dispatch('accountFailed', { at: now(), message: messageOf(body) });
       },
     });
