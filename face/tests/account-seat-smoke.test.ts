@@ -13,10 +13,8 @@
  * list here, not offline. */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setupFaceProfile } from "../src/setup.ts";
@@ -26,14 +24,9 @@ import { auditOrderTools, SEAT_WRITE_RAW_NAMES } from "../src/orders.ts";
 import { registerSeatRoute, type SeatView } from "../src/seat.ts";
 import { mountClient, remote, signIn } from "./remote.ts";
 import { makeBotsRoot } from "./bots-fixture.ts";
+import { STANDIN_CLI as CLI, STANDIN_DIR as DIR, freePort, standinSkip, startStandin, stopStandin } from "./helpers/standin.ts";
 
-const DIR = process.env.FACE_ACCOUNT_SEAT_DIR ?? "";
-const CLI = join(DIR, "node_modules", "tsx", "dist", "cli.mjs");
-const STANDIN = join(DIR, "test", "standin", "ui-standin.ts");
-const skip = process.env.FACE_SMOKE !== "1" ? "set FACE_SMOKE=1"
-  : DIR === "" ? "set FACE_ACCOUNT_SEAT_DIR to an installed checkout of linqizhe07/buyer-agent-demo"
-    : !existsSync(CLI) ? `${CLI} is missing: run npm ci in the checkout`
-      : !existsSync(STANDIN) ? `${STANDIN} is missing: not the Account's checkout` : false;
+const skip = standinSkip();
 
 /** The stand-in's seeded agent: `PORTFOLIO_SEAT_KEYS=sim` derives the key from this id, so the seat IS that agent. */
 const SEEDED_AGENT_ID = "ui-standin-claude-code";
@@ -43,34 +36,7 @@ const SEEDED_AGENT_NAME = "Claude Code";
 const REAL_WRITES = SEAT_WRITE_RAW_NAMES.filter((raw) => !["portfolio_order", "portfolio_execute", "portfolio_transfer"].includes(raw));
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
-const freePort = (): Promise<number> => new Promise((resolve, reject) => {
-  const server = createServer();
-  server.listen(0, "127.0.0.1", () => {
-    const address = server.address();
-    server.close(() => (typeof address === "object" && address !== null ? resolve(address.port) : reject(new Error("no port"))));
-  });
-});
 const textOf = (result: { content?: { text?: string }[] }): string => result.content?.[0]?.text ?? "";
-
-interface Standin { url: string; home: string; child: ChildProcess; log: () => string }
-
-/** Start the Account's stand-in on `port` and wait for its page and home lines. */
-function startStandin(port: number): Promise<Standin> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [CLI, STANDIN, "--port", String(port), "--no-desk"], { cwd: DIR, stdio: ["ignore", "pipe", "pipe"] });
-    let out = "";
-    const log = (): string => out;
-    const timer = setTimeout(() => { child.kill("SIGINT"); reject(new Error(`the stand-in printed no page line in 90 s:\n${out}`)); }, 90_000);
-    const look = (): void => {
-      const url = /^\s*page\s+(\S+)/m.exec(out)?.[1];
-      const home = /^\s*home\s+(\S+)/m.exec(out)?.[1];
-      if (url !== undefined && home !== undefined) { clearTimeout(timer); resolve({ url, home, child, log }); }
-    };
-    child.stdout.on("data", (chunk: Buffer) => { out += chunk.toString(); look(); });
-    child.stderr.on("data", (chunk: Buffer) => { out += chunk.toString(); });
-    child.on("exit", (code) => { clearTimeout(timer); reject(new Error(`the stand-in exited with ${code}:\n${out}`)); });
-  });
-}
 
 test("account seat smoke: the seat mounts, its writes are gated, a read answers, an order without a grant is refused and with one becomes the Account's card", {
   skip, timeout: 300_000,
@@ -204,11 +170,8 @@ test("account seat smoke: the seat mounts, its writes are gated, a read answers,
   } finally {
     for (const off of cleanups) off();
     if (dispose) await dispose();
-    const exited = new Promise<void>((resolve) => { standin.child.once("exit", () => resolve()); setTimeout(resolve, 10_000); });
-    standin.child.kill("SIGINT");
-    await exited;
+    await stopStandin(standin);
     await rm(home, { recursive: true, force: true });
     await rm(seatHome, { recursive: true, force: true });
-    if (standin.home.startsWith(tmpdir())) await rm(standin.home, { recursive: true, force: true });
   }
 });
