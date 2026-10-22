@@ -182,12 +182,14 @@ test('worthOf: real money leads when totalUsd > 0; with totalUsd 0 and a paper v
 });
 
 test('changeOf: usd, pct, partial, first; nulls when the history is missing', () => {
-  assert.deepEqual(changeOf(fx('history')), { usd: 208.78, pct: 0.72, partial: false, first: '2026-10-15T07:35:46.850Z' });
-  assert.deepEqual(changeOf(fx('history-paper')), { usd: 0, pct: 0, partial: false, first: '2026-10-22T07:35:46.786Z' }, 'a flat curve is 0, not nothing');
+  assert.deepEqual(changeOf(fx('history')), { usd: 208.78, pct: 0.72, partial: false, first: '2026-10-15T07:35:46.850Z', sinceStartUsd: null, rebuilt: false });
+  assert.deepEqual(changeOf(fx('history-paper')), { usd: 0, pct: 0, partial: false, first: '2026-10-22T07:35:46.786Z', sinceStartUsd: null, rebuilt: true },
+    'a flat curve is 0, not nothing; the paper curve says it was rebuilt from the book');
   assert.equal(changeOf({ ...fx('history'), partial: true }).partial, true);
-  const none = { usd: null, pct: null, partial: false, first: null };
+  assert.equal(changeOf({ ...fx('history-paper'), startUsd: 25000, sinceStartUsd: 400 }).sinceStartUsd, 400);
+  const none = { usd: null, pct: null, partial: false, first: null, sinceStartUsd: null, rebuilt: false };
   assert.deepEqual(changeOf(null), none); assert.deepEqual(changeOf(undefined), none); assert.deepEqual(changeOf('history'), none);
-  assert.deepEqual(changeOf({ ok: true, changeUsd: 'n/a', changePct: Infinity, partial: 'yes', first: 7 }), none);
+  assert.deepEqual(changeOf({ ok: true, changeUsd: 'n/a', changePct: Infinity, partial: 'yes', first: 7, sinceStartUsd: 'n/a', rebuilt: 'yes' }), none);
 });
 
 test('assetsOf and positionsOf: the fixture rows in order, amounts numeric, a row without usd is null', () => {
@@ -233,16 +235,24 @@ test('openOrdersOf: only open, partial and pending; who is You or the agent name
   const page = fx('account');
   const open = openOrdersOf(page);
   assert.deepEqual(open.map(o => [o.id, o.status, o.who]), [
-    ['ord-0010', 'open', 'An agent'], ['ord-0009', 'pending', 'You'], ['ord-0004', 'open', 'You'], ['ord-0003', 'open', 'You'], ['ord-0002', 'open', 'You'],
-  ]);
+    ['ord-0010', 'open', 'Agent · Claude Code'], ['ord-0009', 'pending', 'You'], ['ord-0004', 'open', 'You'], ['ord-0003', 'open', 'You'], ['ord-0002', 'open', 'You'],
+  ], "an agent's order is named through the page's keys by its agent address");
   assert.deepEqual(open[1], { id: 'ord-0009', venue: 'broker', venueName: 'Stand-in Broker', symbol: 'SPY', side: 'buy', type: 'limit', qty: 0.25, filledQty: 0, limitPrice: 660.07, status: 'pending', who: 'You', paper: false });
   assert.equal(open[2].type, 'stop'); assert.equal(open[2].limitPrice, null, 'a stop carries no limit price');
-  const hand = openOrdersOf({ ...page, orders: [
-    { id: 'p1', status: 'partial', authority: 'agent', agentName: 'Gravit', venue: 'paper-1', qty: 2, filledQty: '0.5', paper: true },
-    { id: 'p2', status: 'open', authority: 'agent', agentName: '' },
-    ...['filled', 'canceled', 'rejected', 'expired', 'waiting for wallet', undefined].map((status, i) => ({ id: `x${i}`, status, authority: 'owner' })),
-  ] });
-  assert.deepEqual(hand.map(o => [o.id, o.who, o.paper, o.filledQty]), [['p1', 'Gravit', true, 0.5], ['p2', 'An agent', false, null]]);
+  const hand = openOrdersOf({ ...page,
+    keys: [...page.keys, { address: '0xAB12', name: 'Gravit', status: 'ok' }, { address: '0xc0de', name: '', status: 'ok' }],
+    orders: [
+      { id: 'p1', status: 'partial', authority: 'agent', agent: '0xab12', venue: 'paper-1', qty: 2, filledQty: '0.5', paper: true },
+      { id: 'p2', status: 'open', authority: 'agent', agent: '0xdead', agentName: 'Claude Code' },
+      { id: 'p3', status: 'pending', authority: 'agent', agent: '0xC0DE' },
+      { id: 'p4', status: 'open', authority: 'owner', agent: '0xab12' },
+      { id: 'p5', status: 'open' },
+      ...['filled', 'canceled', 'rejected', 'expired', 'waiting for wallet', undefined].map((status, i) => ({ id: `x${i}`, status, authority: 'owner' })),
+    ] });
+  // the key at the order's address in any case names it; no key, or a nameless one, is An agent (an order's own agentName is not taken)
+  assert.deepEqual(hand.map(o => [o.id, o.who, o.paper, o.filledQty]), [
+    ['p1', 'Agent · Gravit', true, 0.5], ['p2', 'An agent', false, null], ['p3', 'An agent', false, null], ['p4', 'You', false, null], ['p5', 'An agent', false, null],
+  ]);
 });
 
 test('statementLinesOf and statementCsvOf: newest first; the CSV header and a quoted description', () => {
@@ -268,6 +278,14 @@ test('statementLinesOf and statementCsvOf: newest first; the CSV header and a qu
   assert.equal(statementCsvOf([{ at: '2026-10-22T07:00:00.000Z', type: 'trade', kind: 'buy', description: 'Buy 1 "BRK.B"', amountUsd: -500, feeUsd: null, status: 'filled', by: 'You' }]),
     `${header}2026-10-22T07:00:00.000Z,trade,buy,"Buy 1 ""BRK.B""",-500,,filled,You\r\n`);
   assert.equal(statementCsvOf([]), header);
+
+  // a text cell a spreadsheet would run as a formula is led by an apostrophe, then quoted as any other; the amounts stay numbers
+  assert.equal(statementCsvOf([{ at: '2026-10-22T07:00:00.000Z', type: 'transfer', kind: 'pay', description: '-5 USDC withheld · fee', amountUsd: -49.17, feeUsd: 0.5, status: 'settled',
+    by: '=HYPERLINK("https://example.com","Claude Code"), inside its limit' }]),
+  `${header}2026-10-22T07:00:00.000Z,transfer,pay,'-5 USDC withheld · fee,-49.17,0.5,settled,"'=HYPERLINK(""https://example.com"",""Claude Code""), inside its limit"\r\n`);
+  for (const [text, cell] of [['+1', "'+1"], ['@SUM(A1)', "'@SUM(A1)"], ['\tx', "'\tx"], ['\rx', `"'\rx"`], ['a-b', 'a-b']]) {
+    assert.equal(statementCsvOf([{ status: text }]), `${header},,,,,,${cell},\r\n`, JSON.stringify(text));
+  }
 });
 
 test('venuesOf: health from lastOkAt/lastFailAt; does words; the paper flag; details without a key value', () => {
@@ -278,16 +296,15 @@ test('venuesOf: health from lastOkAt/lastFailAt; does words; the paper flag; det
     ['agent-claude-code', 'not-read', false], ['wallet', 'not-read', false], ['predict', 'not-read', false],
   ]);
   const { details, ...ex } = venues[1];
-  assert.deepEqual(ex, { id: 'ex', name: 'Stand-in Exchange', usd: 21638.93, frontLine: 'Exchange', health: 'answers', healthWords: 'Answers', since: null, does: ['Trades', 'Moves money', 'Earns', 'Watched'], paper: false, asOf: '2026-10-22T07:35:46.781Z', stale: false });
+  assert.deepEqual(ex, { id: 'ex', name: 'Stand-in Exchange', usd: 21638.93, frontLine: 'Exchange', health: 'answers', healthWords: 'Answers', since: null, does: ['Trades', 'Moves money', 'Earns'], what: 'spot and perpetuals', paper: false, asOf: '2026-10-22T07:35:46.781Z', stale: false });
   assert.equal(details.holdings.length, 7);
   assert.deepEqual(details.holdings[0], { asset: 'BTC', amount: 0.12, usd: 7497.6 });
   assert.deepEqual({ ...details, holdings: [] }, { holdings: [], noTradeBecause: '', restricted: '', notServed: '', closeOnly: '', watchOnly: 'Live · read-only', keyFile: '' });
   assert.equal(venues[0].healthWords, 'Not read yet');
-  // the stand-in's live venues all carry watchOnly ("Live · read-only"), so each reads Watched beside what it does
-  assert.deepEqual(venues.map(v => v.does), [
-    ['Trades', 'Watched'], ['Trades', 'Moves money', 'Earns', 'Watched'], ['Trades', 'Watched'], ['Trades', 'Watched'],
-    ['Receives', 'Watched'], ['Trades', 'Watched'], ['Trades', 'Watched'],
-  ]);
+  // what each does, and what it trades; watchOnly — "Live · read-only", on every live connection — is a Details fact, not a thing it does
+  assert.deepEqual(venues.map(v => v.does), [['Trades'], ['Trades', 'Moves money', 'Earns'], ['Trades'], ['Trades'], ['Receives'], ['Trades'], ['Trades']]);
+  assert.deepEqual(venues.map(v => v.what), ['US stocks and ETFs', 'spot and perpetuals', 'perpetuals',
+    'paper trading in the public markets: US stocks, coins, perpetuals with leverage, tokenised shares, event contracts', '', 'tokens, swapped from this wallet', 'event contracts']);
   assert.equal(venues[4].details.noTradeBecause, 'An agent wallet pays for things; agents trade at the venues it funds.');
 
   // health: the newer of the last good read and the last failure
@@ -314,31 +331,50 @@ test('venuesOf: health from lastOkAt/lastFailAt; does words; the paper flag; det
 
 test('agentsOf: Gravit first from the seat view, then the Account agents with their limit words', () => {
   const agents = fx('agents');
-  const gravit = { gravit: true, name: 'Gravit', standing: 'Gravit · admitted until Nov 19', limits: ['trade · paper-1 · $100 an order · $850 of $1,000 left'], cards: '2 cards waiting', orders: 0 };
+  // Gravit's row: the seat view's standing and limits; the counts are the Account's for the seat's agent — null while its agents are not read
+  const gravit = (cards, orders) => ({ gravit: true, name: 'Gravit', standing: 'Gravit · admitted until Nov 19', limits: ['trade · paper-1 · $100 an order · $850 of $1,000 left'], cards, orders });
   const claude = { gravit: false, name: 'Claude Code', status: 'ok', validUntil: '2026-11-21T07:35:46.778Z', limits: [
     'trade · ex, predict, wallet · $150 an order · $380.01 of $600 left',
     'venues · ex, agent-claude-code · $50 an order · $200 of $200 left',
     'payees · api.example.com · $2 an order · $20 of $20 left',
   ], cards: 1, orders: 1 };
-  assert.deepEqual(agentsOf(agents, seatView()), [gravit, claude]);
+  assert.deepEqual(agentsOf(agents, seatView()), [gravit(0, 0), claude], 'the stand-in lists no agent at the seat address');
 
-  // while Gravit's row stands, the Account's own row for the seat — the agent of the seat's name, in any case — is left out
-  const more = { ...agents, agents: [...agents.agents,
-    { name: ' gravit ', status: 'expired', limits: [], cards: [], orders: [] },
-    { name: 'Gravitas', status: 'ok', validUntil: '2026-11-01T00:00:00.000Z', limits: [{ scope: 'trade', allow: ['ex'], perPaymentUsd: 100, budgetUsd: 1000, leftUsd: 1000, expired: true }], cards: [], orders: [] },
+  // the Account's own row for the seat is the agent at the seat view's address, in any case: left out, its cards and its open orders
+  // counted on Gravit's row; while the seat view carries an address, a name alone hides nothing
+  const seatAgent = { address: '0xAB12', name: 'Gravit', status: 'ok', limits: [], cards: [{ id: 'card-7' }, { id: 'card-9' }],
+    orders: ['open', 'filled', 'partial', 'canceled', 'pending'].map((status, i) => ({ id: `g${i}`, status })) };
+  const more = { ...agents, agents: [...agents.agents, seatAgent,
+    { address: '0x01d', name: ' gravit ', status: 'expired', limits: [], cards: [], orders: [{ id: 'old', status: 'open' }] },
+    { address: '0x9a5', name: 'Gravitas', status: 'ok', validUntil: '2026-11-01T00:00:00.000Z', limits: [{ scope: 'trade', allow: ['ex'], perPaymentUsd: 100, budgetUsd: 1000, leftUsd: 1000, expired: true }], cards: [], orders: [] },
   ] };
   const listed = agentsOf(more, seatView());
-  assert.deepEqual(listed.map(a => [a.name, a.gravit]), [['Gravit', true], ['Claude Code', false], ['Gravitas', false]]);
-  assert.deepEqual(listed[2].limits, ['trade · ex · $100 an order · $1,000 of $1,000 left · expired']);
+  assert.deepEqual(listed.map(a => [a.name, a.gravit, a.cards, a.orders]), [['Gravit', true, 2, 3], ['Claude Code', false, 1, 1], [' gravit ', false, 0, 1], ['Gravitas', false, 0, 0]]);
+  assert.deepEqual(listed[3].limits, ['trade · ex · $100 an order · $1,000 of $1,000 left · expired']);
+  // with no address on the seat view (knocking: no key yet), the seat's agents are found by name, in any case, and all counted
+  const knocking = agentsOf(more, seatView({ seat: { name: 'Gravit', status: 'knocking', limits: [] } }));
+  assert.deepEqual(knocking.map(a => [a.name, a.gravit, a.cards, a.orders]), [['Gravit', true, 2, 4], ['Claude Code', false, 1, 1], ['Gravitas', false, 0, 0]]);
+  assert.equal(knocking[0].standing, 'Gravit · knocking — admit it on the Account page');
   // the seat's name is the seat view's
   const scout = agentsOf({ ...agents, agents: [{ name: 'SCOUT', status: 'ok' }, { name: 'Gravit', status: 'ok' }] }, seatView({ seat: { name: 'Scout', status: 'admitted', limits: [] } }));
   assert.deepEqual(scout.map(a => [a.name, a.gravit, a.standing ?? a.status]), [['Scout', true, 'Scout · admitted'], ['Gravit', false, 'ok']]);
 
-  // no seat view to stand on: the Account's list is the whole answer; no agents read: Gravit's row alone
+  // a limit: an amount that is not there is no clause, never $0; a scope or an allowed id that is not a string is no word
+  const probe = agentsOf({ ok: true, agents: [{ name: 'Probe', status: 'ok', limits: [
+    { scope: 'trade', allow: ['ex'], perPaymentUsd: 100, budgetUsd: 1000 },
+    { scope: 'trade', allow: ['ex'], perPaymentUsd: 100, budgetUsd: '1000', leftUsd: '250.5' },
+    { scope: 5, allow: ['ex', 7, null, 'wallet'], perPaymentUsd: 10, budgetUsd: 20, leftUsd: 20 },
+  ] }] }, null);
+  assert.deepEqual(probe[0].limits, ['trade · ex · $100 an order', 'trade · ex · $100 an order · $250.5 of $1,000 left', 'ex, wallet · $10 an order · $20 of $20 left']);
+  const seatLimit = { scope: 'trade', allow: ['paper-1'], perOrderUsd: 100, budgetUsd: 1000, spentUsd: 0, reservedUsd: 0, leftUsd: null, validUntil: null, expired: false };
+  assert.deepEqual(agentsOf({ ok: true, agents: [] }, seatView({ seat: { name: 'Gravit', status: 'admitted', address: '0xab12', limits: [seatLimit] } }))[0].limits,
+    ['trade · paper-1 · $100 an order'], 'the seat box words its limits the same way');
+
+  // no seat view to stand on: the Account's list is the whole answer; no agents read: Gravit's row alone, its counts unknown
   const unreachable = { ok: true, url: 'http://127.0.0.1:4820', reachable: false, error: 'ECONNREFUSED' };
-  assert.deepEqual(agentsOf(more, unreachable).map(a => [a.name, a.gravit]), [['Claude Code', false], [' gravit ', false], ['Gravitas', false]]);
+  assert.deepEqual(agentsOf(more, unreachable).map(a => [a.name, a.gravit]), [['Claude Code', false], ['Gravit', false], [' gravit ', false], ['Gravitas', false]]);
   assert.deepEqual(agentsOf(agents, null), [claude]);
-  assert.deepEqual(agentsOf({ ok: true }, seatView()), [gravit]);
+  assert.deepEqual(agentsOf({ ok: true }, seatView()), [gravit(null, null)]);
   assert.deepEqual(agentsOf({ ok: false, error: 'no' }, null), []);
 });
 
@@ -351,11 +387,17 @@ test('cardsOf, asksOf, requestsOf: grouped by agent; shown verbatim', () => {
   assert.equal(group.cards[0].shown.length, 12);
   assert.deepEqual(group.cards[0].shown[9], { name: 'qty', value: '' }, 'an empty field stays, empty');
 
-  const card = (id, agentName, shown = []) => ({ id, flight: 'F-1', usd: 1, reason: `card ${id}`, hash: '0x00', kind: 'agentLiveOrder', ...(agentName === undefined ? {} : { agentName }), expiresAt: '2026-10-22T08:00:00.000Z', shown });
+  // cards without an agent address group by name, as they are named
+  const card = (id, agentName, more = {}) => ({ id, flight: 'F-1', usd: 1, reason: `card ${id}`, hash: '0x00', kind: 'agentLiveOrder', ...(agentName === undefined ? {} : { agentName }), expiresAt: '2026-10-22T08:00:00.000Z', shown: [], ...more });
   const groups = cardsOf({ ...page, cards: [card('a1', 'A'), card('b1', 'B'), card('a2', 'A'), card('x1', undefined), card('x2', ''),
-    card('n1', 'N', [{ name: 'qty', value: 5 }, { name: 'reduceOnly', value: false }, { name: 'legs', value: '[{"side":"buy"}]' }])] });
+    card('n1', 'N', { shown: [{ name: 'qty', value: 5 }, { name: 'reduceOnly', value: false }, { name: 7, value: null }, { name: 'leg', value: { side: 'buy' } }, { name: 'legs', value: '[{"side":"buy"}]' }] })] });
   assert.deepEqual(groups.map(g => [g.agentName, g.cards.map(c => c.id)]), [['A', ['a1', 'a2']], ['B', ['b1']], ['An agent', ['x1', 'x2']], ['N', ['n1']]]);
-  assert.deepEqual(groups[3].cards[0].shown, [{ name: 'qty', value: '5' }, { name: 'reduceOnly', value: 'false' }, { name: 'legs', value: '[{"side":"buy"}]' }]);
+  // a field that is not a string draws nothing, never undefined, null or [object Object], on a card the owner signs
+  assert.deepEqual(groups[3].cards[0].shown, [{ name: 'qty', value: '' }, { name: 'reduceOnly', value: '' }, { name: '', value: '' }, { name: 'leg', value: '' }, { name: 'legs', value: '[{"side":"buy"}]' }]);
+  // cards with an agent address group by it, in any case, under the group's first name: one display name can be two agents
+  const byAgent = cardsOf({ ...page, cards: [card('c1', undefined, { agent: '0xCCC' }), card('a1', 'Claude Code', { agent: '0xAAA' }), card('c2', 'Scout', { agent: '0xccc' }),
+    card('a2', 'Claude Code (renamed)', { agent: '0xaaa' }), card('d1', 'Claude Code', { agent: '0xddd' }), card('x1', 'Claude Code')] });
+  assert.deepEqual(byAgent.map(g => [g.agentName, g.cards.map(c => c.id)]), [['Scout', ['c1', 'c2']], ['Claude Code', ['a1', 'a2']], ['Claude Code', ['d1']], ['Claude Code', ['x1']]]);
 
   assert.deepEqual(asksOf(page), [
     { id: 'ask-0001', agentName: 'Claude Code', kind: 'limit', text: 'Raise my trading budget to $1,000 so I can finish the SOL position you asked for', expiresAt: '2026-10-23T07:35:46.836Z' },
@@ -372,7 +414,7 @@ test('an unrecognised page is unreadable, never a number: every function answers
   assert.deepEqual(headOf(bare), { mode: '', writes: '' });
   assert.deepEqual(worthOf(bare), noWorth);
   assert.deepEqual(worthOf({ ok: true, totalUsd: 29138.1, mode: 'guard' }, fx('holdings'), fx('holdings-paper')), noWorth, 'a total on a body that is not a page is not drawn');
-  assert.deepEqual(changeOf(bare), { usd: null, pct: null, partial: false, first: null });
+  assert.deepEqual(changeOf(bare), { usd: null, pct: null, partial: false, first: null, sinceStartUsd: null, rebuilt: false });
   for (const view of [assetsOf, positionsOf, openOrdersOf, missingWords, statementLinesOf, venuesOf, agentsOf, cardsOf, asksOf, requestsOf]) assert.deepEqual(view(bare), [], view.name);
   assert.equal(statementCsvOf(statementLinesOf(bare)), 'date,type,kind,description,amount,fee,status,by\r\n');
   // the page with ok false, or a read that is not an answer, is no page either
