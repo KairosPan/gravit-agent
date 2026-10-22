@@ -510,21 +510,25 @@ test("the stream: a bad client id is 400; a good one opens upstream with accept 
   assert.equal(fetched.length, 2);
 });
 
-test("Last-Event-ID becomes since when the query has none; a since in the query wins", async () => {
+test("Last-Event-ID becomes since and wins over a since in the query, as the Account reads it", async () => {
   const { routes, fetched, inits } = proxyWith(streaming([encode("retry: 1000\n\n")]));
   const resuming = (id: string): Record<string, string> => ({ host: "127.0.0.1:3090", "last-event-id": id });
   await call(routes, `${STREAM}?client=${CLIENT}`, resuming("1a2b3c4d.42"));
   assert.equal(fetched[0], `${URL_}/api/account/stream?client=${CLIENT}&since=1a2b3c4d.42`);
   assert.deepEqual(inits[0].headers, { accept: "text/event-stream" }, "the id travels as since, never as a header");
   await call(routes, `${STREAM}?since=1a2b3c4d.40&client=${CLIENT}`, resuming("1a2b3c4d.42"));
-  assert.equal(fetched[1], `${URL_}/api/account/stream?since=1a2b3c4d.40&client=${CLIENT}`, "the query's since wins");
+  assert.equal(fetched[1], `${URL_}/api/account/stream?since=1a2b3c4d.42&client=${CLIENT}`, "the header's id wins, in the query's place: an EventSource reconnecting to the URL it opened resumes from its newest id");
+  await call(routes, `${STREAM}?since=1a2b3c4d.40&client=${CLIENT}`);
+  assert.equal(fetched[2], `${URL_}/api/account/stream?since=1a2b3c4d.40&client=${CLIENT}`, "without the header, the query's since");
+  await call(routes, `${STREAM}?since=1a2b3c4d.40&client=${CLIENT}`, resuming(""));
+  assert.equal(fetched[3], `${URL_}/api/account/stream?since=1a2b3c4d.40&client=${CLIENT}`, "an empty header is no id");
   await call(routes, `${STREAM}?client=${CLIENT}`);
-  assert.equal(fetched[2], `${URL_}/api/account/stream?client=${CLIENT}`, "neither: no since");
+  assert.equal(fetched[4], `${URL_}/api/account/stream?client=${CLIENT}`, "neither: no since");
   await call(routes, `${STREAM}?client=${CLIENT}`, resuming("x&client=someone-else-1"));
-  assert.equal(fetched[3], `${URL_}/api/account/stream?client=${CLIENT}&since=x%26client%3Dsomeone-else-1`, "the header is one value: it names no parameter of its own");
-  const long = await call(routes, `${STREAM}?client=${CLIENT}`, resuming("1".repeat(241)));
+  assert.equal(fetched[5], `${URL_}/api/account/stream?client=${CLIENT}&since=x%26client%3Dsomeone-else-1`, "the header is one value: it names no parameter of its own");
+  const long = await call(routes, `${STREAM}?since=1a2b3c4d.40&client=${CLIENT}`, resuming("1".repeat(241)));
   assert.equal(long.status, 400, "an id longer than a since may be is refused as that since is"); assert.equal(long.body, INVALID);
-  assert.equal(fetched.length, 4);
+  assert.equal(fetched.length, 6);
 });
 
 test("the Account's 503 passes through as 503 with its body; an unreachable upstream is 503 unreachable", async () => {
@@ -639,19 +643,37 @@ test("stream/markets: the body passes as bytes with application/json; 413 past 4
   const halfRead = fakeRes();
   await routes.find((r) => r.path === FOLLOW)!.handler(cutOff as unknown as IncomingMessage, halfRead.res);
   assert.equal(halfRead.out.status, 400, "a body that breaks off is refused, never a rejection"); assert.equal(halfRead.out.body, INVALID);
-  await call(routes, `${FOLLOW}?client=${CLIENT}&force=1`, JSON_POST, "POST", body);
-  assert.equal(fetched.at(-1), `${URL_}/api/account/stream/markets`, "a query on the POST never reaches the Account");
-  assert.equal(fetched.length, 4);
+  const queried = await call(routes, `${FOLLOW}?client=${CLIENT}&force=1`, JSON_POST, "POST", body);
+  assert.equal(queried.status, 400, "the POST takes no query name"); assert.equal(queried.body, INVALID);
+  assert.equal(queried.headers["content-type"], JSON_TYPE); assert.equal(queried.headers["cache-control"], "no-store");
+  assert.equal((await call(routes, `${FOLLOW}?n=1`, JSON_POST, "POST", "x".repeat(STREAM_BODY_LIMIT + 1))).status, 400, "a query is refused before the body is read");
+  assert.equal(fetched.length, 3, "a query on the POST reaches nothing");
 
   for (const method of ["GET", "PUT", "DELETE"]) {
     const m = await call(routes, FOLLOW, JSON_POST, method);
     assert.equal(m.status, 405, method); assert.equal(m.body, '{"ok":false,"error":"method not allowed"}');
   }
   assert.equal((await call(routes, FOLLOW, { ...JSON_POST, origin: "https://evil.example" }, "POST", body)).status, 403, "the fence comes first");
-  assert.equal(fetched.length, 4);
+  assert.equal(fetched.length, 3);
 
   const refused = proxyWith(async () => { throw Object.assign(new TypeError("fetch failed secret-host-name"), { cause: { code: "ECONNREFUSED" } }); });
   const u = await call(refused.routes, FOLLOW, JSON_POST, "POST", body);
   assert.equal(u.status, 503); assert.equal(u.body, '{"ok":false,"unreachable":"ECONNREFUSED"}');
   assert.doesNotMatch(u.body, /secret/);
+});
+
+test("stream/markets: text/plain or no content type is 415 before the body is read, and nothing is fetched", async () => {
+  const { routes, fetched } = proxyWith(answering('{"ok":true,"following":[]}'));
+  const body = `{"client":"${CLIENT}","markets":[]}`;
+  const notJson: Array<Record<string, string>> = [{ host: "127.0.0.1:3090", "content-type": "text/plain" }, { host: "127.0.0.1:3090" }];
+  for (const headers of notJson) {
+    const a = await call(routes, FOLLOW, headers, "POST", body);
+    assert.equal(a.status, 415, headers["content-type"] ?? "no content type"); assert.equal(a.body, '{"ok":false,"error":"application/json only"}');
+    assert.equal(a.headers["content-type"], JSON_TYPE); assert.equal(a.headers["cache-control"], "no-store");
+  }
+  assert.equal((await call(routes, FOLLOW, notJson[0], "POST", "x".repeat(STREAM_BODY_LIMIT + 1))).status, 415, "refused before the body is read: never a 413");
+  assert.equal(fetched.length, 0, "nothing reaches the Account");
+  const charset = await call(routes, FOLLOW, { host: "127.0.0.1:3090", "content-type": "application/json; charset=utf-8" }, "POST", body);
+  assert.equal(charset.status, 200, "application/json with a charset passes");
+  assert.equal(fetched.length, 1);
 });

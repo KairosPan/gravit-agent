@@ -38,26 +38,29 @@
  *   and never joins a plain read in flight — it asks again once that one
  *   settles (the seat route's rule).
  * - `stream` is piped, one upstream request per browser connection, never
- *   kept: `client` required ({@link STREAM_CLIENT}), `since` from the query or
- *   else the browser's `Last-Event-ID`, `markets` at most 4 000 characters,
- *   each name once. The Account's 200 is written through chunk by chunk as it
- *   comes — ids, `retry:`, its heartbeat — never buffered, re-framed or read,
- *   and the response ends when the Account ends the stream. The upstream is
+ *   kept: `client` required ({@link STREAM_CLIENT}), `since` the browser's
+ *   `Last-Event-ID` when it sends one, else the query's (the Account's own
+ *   order), `markets` at most 4 000 characters, each name once. The
+ *   Account's 200 is written through chunk by chunk as it comes — ids,
+ *   `retry:`, its heartbeat — never buffered, re-framed or read, and the
+ *   response ends when the Account ends the stream. The upstream is
  *   aborted when the browser's response closes or errors, when the browser
  *   falls 256 KiB behind (the response then destroyed, as `quotes.ts` does)
  *   and on `dispose`. Any other answer is the Account's status and body — its
  *   refusal past 32 streams among them.
- * - `stream/markets` forwards a POST's body as posted — at most
- *   {@link STREAM_BODY_LIMIT} bytes, else 413 — with `content-type:
- *   application/json`, never parsed, kept or echoed; a disabled row answers
- *   `disabled` once the body is read. The Account's status and body come back
- *   as they are, never stale.
+ * - `stream/markets` takes a POST whose body is declared `application/json`
+ *   (else 415, as the face's other POST routes answer) and whose target names
+ *   no query parameter (else 400), both refused before the body is read. The
+ *   body — at most {@link STREAM_BODY_LIMIT} bytes, else 413 — is forwarded as
+ *   posted with `content-type: application/json`, never parsed, kept or
+ *   echoed; a disabled row answers `disabled` once the body is read. The
+ *   Account's status and body come back as they are, never stale.
  * - Nothing of a body, a query or a frame is logged here.
  * @module
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { seatUrl } from "./account-seat.ts";
-import { isTrustedDataRequest } from "./data.ts";
+import { isJsonBody, isTrustedDataRequest } from "./data.ts";
 import { FORBIDDEN, HttpError, markStale, readBody } from "./http.ts";
 import type { RouteRegistrar } from "./static.ts";
 
@@ -135,6 +138,7 @@ const SSE_HEADERS = {
 } as const;
 const INVALID = '{"ok":false,"error":"invalid account request"}';
 const METHOD_NOT_ALLOWED = '{"ok":false,"error":"method not allowed"}';
+const JSON_ONLY = '{"ok":false,"error":"application/json only"}';
 const unreachable = (code: string): string => JSON.stringify({ ok: false, unreachable: code });
 
 const facePath = (route: ReadRoute): string => (route === "account" ? "/data/account" : `/data/account/${route}`);
@@ -171,9 +175,10 @@ function searchOf(rawUrl: string): URLSearchParams | null {
 }
 
 /** The query a stream passes on: `since`, `client` and `markets` in the order they came, each at most once
- * and within its {@link STREAM_QUERY} bound, re-encoded, `client` shaped as {@link STREAM_CLIENT}; with no
- * `since` in the query, the browser's `Last-Event-ID` is `since`, within the same bound. `null`: anything
- * else, as {@link rebuildQuery} refuses it. */
+ * and within its {@link STREAM_QUERY} bound, re-encoded, `client` shaped as {@link STREAM_CLIENT}. The
+ * browser's `Last-Event-ID`, when it sends one, is `since` — in place of a `since` in the query, within the
+ * same bound — as the Account itself reads it: an EventSource reconnects to the URL it opened, its newest id
+ * in the header. `null`: anything else, as {@link rebuildQuery} refuses it. */
 function rebuildStreamQuery(rawUrl: string, lastEventId: string | string[] | undefined): string | null {
   const asked = searchOf(rawUrl);
   if (asked === null) return null;
@@ -184,12 +189,15 @@ function rebuildStreamQuery(rawUrl: string, lastEventId: string | string[] | und
     rebuilt.append(name, value);
   }
   if (!STREAM_CLIENT.test(rebuilt.get("client") ?? "")) return null;
-  if (!rebuilt.has("since") && typeof lastEventId === "string" && lastEventId !== "") {
+  if (typeof lastEventId === "string" && lastEventId !== "") {
     if (lastEventId.length > VALUE_MAX) return null;
-    rebuilt.append("since", lastEventId);
+    rebuilt.set("since", lastEventId);
   }
   return rebuilt.toString();
 }
+
+/** Whether a request target names no query parameter: a route whose row allows none refuses any. */
+const queryless = (rawUrl: string): boolean => searchOf(rawUrl)?.size === 0;
 
 /** A failure's code, bounded to a code's shape so no error text ever reaches the page. */
 function codeOf(err: unknown): string {
@@ -397,11 +405,13 @@ const streamHandler = (s: Settings, open: Set<AbortController>) => async (req: I
   }
 };
 
-/** `stream/markets`: the fence, POST only, the body read under its limit, then the Account; its status and
- * body come back as they are, never kept. */
+/** `stream/markets`: the fence, POST only, a body declared `application/json`, no query name, then the body
+ * read under its limit and the Account; its status and body come back as they are, never kept. */
 const followHandler = (s: Settings) => async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
   if (!isTrustedDataRequest(req)) return send(res, 403, FORBIDDEN);
   if (req.method !== "POST") return send(res, 405, METHOD_NOT_ALLOWED);
+  if (!isJsonBody(req)) return send(res, 415, JSON_ONLY);
+  if (!queryless(req.url ?? "")) return send(res, 400, INVALID);
   let body: string;
   try {
     body = await readBody(req, STREAM_BODY_LIMIT);
