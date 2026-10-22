@@ -17,6 +17,9 @@ const fx = name => JSON.parse(readFileSync(new URL(`../fixtures/account/${name}.
 const itemOf = (body, key) => body.items.find(i => i.key === key);
 // a read as the store keeps it
 const read = data => ({ status: 'ready', data, at: 1 });
+// the renderer's clock, months from the machine's so a view reading Date.now() instead would show, and a stamp that long before it
+const NOW = Date.parse('2026-01-15T12:00:00.000Z');
+const ago = ms => new Date(NOW - ms).toISOString();
 const asset = (id, over = {}) => {
   const [market, symbol] = [id.slice(0, id.indexOf(':')), id.slice(id.indexOf(':') + 1)];
   return { id, market, symbol, name: symbol, exchange: '', currency: market === 'cn' ? 'CNY' : 'USD', ...over };
@@ -26,11 +29,12 @@ const quote = (id, over = {}) => ({
   change_pct: 11.11, volume: 1000, as_of: '2026-10-19T14:30:00Z', received_at: null, volume_as_of: null, source: 'Alpaca', feed: 'iex',
   basis: 'previous_close', quote_status: 'live', market_status: 'open', message: '', ...over,
 });
-// the markets slice: the face's own fields as today, and the Account's reads beside them (Task 10 builds it so)
+// the markets slice: the face's own fields as today, and the Account's reads beside them (Task 10 builds it so) — `explore` by
+// tab: `all` is explore?limit=200, a kind's own explore?tab=<kind>&limit=200
 const markets = (over = {}) => ({
   tab: 'all', sort: 'volume', q: '', watchlist: [], watchError: null, quotes: {}, providers: [], connection: 'idle',
   search: { query: '', status: 'idle', assets: [], partial: false }, hitQuotes: {}, bars: {},
-  explore: { status: 'idle', data: null, at: null }, results: { status: 'idle', data: null, at: null },
+  explore: {}, results: { status: 'idle', data: null, at: null },
   accountQuotes: {}, candles: {}, compare: {}, watch: [], asked: {}, ...over,
 });
 // the account slice as host/account.js keeps it, over the stand-in's page, holdings, paper lens and statement
@@ -39,6 +43,7 @@ const accountSlice = (over = {}) => ({
   holdings: read(fx('holdings')), paper: read(fx('holdings-paper')), statement: read(fx('statement')), ...over,
 });
 const account = positions => ({ ok: true, available: true, host: 'paper-api.alpaca.markets', account: {}, positions, orders: [] });
+const UNPRICED = { price: null, unit: 'usd', changePct: null, change24h: null, volume: null, volumeUnit: 'usd', implied: null };
 
 // ── The Account's markets ──
 
@@ -66,10 +71,15 @@ test('tabsOf: the fixture tabs in order, All first; Stocks raised by cn rows; Wa
   // nothing read yet, or a refusal: All alone, and Stocks for the cn rows
   assert.deepEqual(tabsOf(null, 0), [{ id: 'all', label: 'All', count: 0 }]);
   assert.deepEqual(tabsOf({ ok: false, refusal: { message: 'The account is busy' } }, 3), [{ id: 'all', label: 'All', count: 3 }, { id: 'stocks', label: 'Stocks', count: 3 }]);
-  // Watching and All results are the renderer's to add, from the slice's stars and query, never tabsOf's ...
-  assert.equal(tabsOf(explore, 2).some(t => t.id === 'watching' || t.id === 'results'), false);
-  // ... and when they are due, rowsOf answers them: the stars under Watching, the search's own rows under Results
-  const m = markets({ explore: read(explore), watch: ['coin:ETH', 'stock:AAPL'], watchlist: [asset('cn:600519')] });
+  // Watching and All results when due, in the Account's order: All results first while searching, Watching last once anything is starred
+  const RESULTS = { id: 'results', label: 'All results', count: null };
+  const WATCHING = { id: 'watching', label: 'Watching', count: null };
+  assert.deepEqual(tabsOf(explore, 0, { searching: true, watching: true }), [RESULTS, ...tabsOf(explore, 0), WATCHING]);
+  assert.deepEqual(tabsOf(explore, 0, { watching: true }).map(t => t.id), ['all', 'crypto', 'stocks', 'rwas', 'perps', 'preipo', 'predictions', 'watching']);
+  assert.deepEqual(tabsOf(null, 1, { searching: true }), [RESULTS, { id: 'all', label: 'All', count: 1 }, { id: 'stocks', label: 'Stocks', count: 1 }]);
+  assert.deepEqual(tabsOf(explore, 2, { searching: false, watching: false }), tabsOf(explore, 2));
+  // ... and rowsOf answers them: the stars under Watching, the search's own rows under All results
+  const m = markets({ explore: { all: read(explore) }, watch: ['coin:ETH', 'stock:AAPL'], watchlist: [asset('cn:600519')] });
   assert.deepEqual(rowsOf({ ...m, tab: 'watching' }).map(r => r.id), ['stock:AAPL', 'coin:ETH', 'cn:600519']);
   const sol = fx('explore-all');
   sol.items = sol.items.filter(i => i.base === 'SOL');
@@ -78,6 +88,8 @@ test('tabsOf: the fixture tabs in order, All first; Stocks raised by cn rows; Wa
     search: { query: 'sol', status: 'success', assets: [asset('crypto:SOL/USD'), asset('cn:601012', { name: 'LONGi' })], partial: false },
   };
   assert.deepEqual(rowsOf(searching).map(r => r.id), ['perp:SOL', 'coin:SOL', 'cn:601012'], "the Account's hits and the cn hits; never a crypto hit of the face's");
+  assert.deepEqual(rowsOf({ ...searching, tab: 'all' }).map(r => r.id), ['perp:SOL', 'coin:SOL', 'cn:601012'], 'while searching, All is the search too');
+  assert.deepEqual(rowsOf({ ...searching, tab: 'watching' }).map(r => r.id), ['perp:SOL', 'coin:SOL', 'cn:601012'], 'a search typed on Watching searches every market: the watchlist is not searched');
   assert.deepEqual(rowsOf({ ...searching, q: '' }), [], 'no query, no results');
 });
 
@@ -106,35 +118,38 @@ test('priceOf: a coin in dollars; an event in cents with change in cents; Kalshi
     { price: null, unit: 'usd', changePct: null, change24h: null, volume: 1500000, volumeUnit: 'usd', implied: null });
   assert.deepEqual(priceOf({ key: 'kalshi:X', kind: 'event', price: '', change24h: 'up' }),
     { price: null, unit: 'cents', changePct: null, change24h: null, volume: null, volumeUnit: 'contracts', implied: null });
-  assert.deepEqual(priceOf(null), { price: null, unit: 'usd', changePct: null, change24h: null, volume: null, volumeUnit: 'usd', implied: null });
+  assert.deepEqual(priceOf(null), UNPRICED);
 });
 
 test('sourceWordOf: the Account quoteFrom verbatim, with the age past 5 s', () => {
-  const now = Date.parse('2026-10-22T14:00:00.000Z');
-  const ago = ms => new Date(now - ms).toISOString();
   const hood = quoteAt => ({ key: 'stock:HOOD', kind: 'stock', name: 'Robinhood Markets', base: 'HOOD', price: 41.2, quoteFrom: 'Robinhood · real time', quoteAt, tabs: ['all', 'stocks'], at: [] });
-  assert.equal(sourceWordOf(hood(ago(2_000)), now), 'Robinhood · real time');
-  assert.equal(sourceWordOf(hood(ago(5_000)), now), 'Robinhood · real time', 'five seconds old is still fresh');
-  assert.equal(sourceWordOf(hood(ago(12_000)), now), 'Robinhood · real time · 12 s ago');
-  assert.equal(sourceWordOf(hood(ago(3 * 60_000 + 5_000)), now), 'Robinhood · real time · 3 min ago');
-  assert.equal(sourceWordOf(hood(ago(2 * 3_600_000 + 60_000)), now), 'Robinhood · real time · 2 h ago');
-  assert.equal(sourceWordOf(hood(ago(30 * 3_600_000)), now), 'Robinhood · real time · yesterday');
-  assert.equal(sourceWordOf(hood(ago(3 * 86_400_000)), now), 'Robinhood · real time · 3 days ago');
-  assert.equal(sourceWordOf(hood('not a time'), now), 'Robinhood · real time', 'a stamp that does not parse ages nothing');
-  assert.equal(sourceWordOf(hood(ago(-60_000)), now), 'Robinhood · real time', 'a stamp ahead of the clock ages nothing');
-  assert.equal(sourceWordOf(hood(undefined), now), 'Robinhood · real time');
-  // no word on the row: its most traded line's (the first: the Account orders them by volume), with that line's stamp
-  const cboe = {
-    ...hood(undefined), quoteFrom: undefined,
-    at: [{ venue: 'cboe-public', venueName: 'Cboe', symbol: 'HOOD', connected: false, canTrade: false, public: true, price: 41.2, quoteFrom: 'Cboe · 15 min delayed', quoteAt: ago(15 * 60_000) }],
-  };
-  assert.equal(sourceWordOf(cboe, now), 'Cboe · 15 min delayed · 15 min ago');
-  assert.equal(sourceWordOf(itemOf(fx('explore-predictions'), 'event:paper-momentum:SX-JOBS-NEXT'), now), 'Stand-in Event Exchange');
-  // no line says one either: the first venue the owner connected that lists it; nothing at all: no word
-  assert.equal(sourceWordOf(itemOf(fx('explore-all'), 'stock:NVDA'), now), 'Stand-in Broker');
-  assert.equal(sourceWordOf(itemOf(fx('explore-all'), 'coin:DOGE'), now), 'Momentum · paper', 'its public line says no source; its one connected venue is the paper account');
-  assert.equal(sourceWordOf({ key: 'coin:Y', kind: 'coin', at: [{ venue: 'p', venueName: 'Public X', symbol: 'Y/USD', connected: false, public: true }] }, now), '');
-  assert.equal(sourceWordOf(null, now), '');
+  assert.equal(sourceWordOf(hood(ago(2_000)), NOW), 'Robinhood · real time');
+  assert.equal(sourceWordOf(hood(ago(5_000)), NOW), 'Robinhood · real time', 'five seconds old is still fresh');
+  assert.equal(sourceWordOf(hood(ago(12_000)), NOW), 'Robinhood · real time · 12 s ago');
+  assert.equal(sourceWordOf(hood(ago(3 * 60_000 + 5_000)), NOW), 'Robinhood · real time · 3 min ago');
+  assert.equal(sourceWordOf(hood(ago(2 * 3_600_000 + 60_000)), NOW), 'Robinhood · real time · 2 h ago');
+  assert.equal(sourceWordOf(hood(ago(30 * 3_600_000)), NOW), 'Robinhood · real time · yesterday');
+  assert.equal(sourceWordOf(hood(ago(3 * 86_400_000)), NOW), 'Robinhood · real time · 3 days ago');
+  assert.equal(sourceWordOf(hood('not a time'), NOW), 'Robinhood · real time', 'a stamp that does not parse ages nothing');
+  assert.equal(sourceWordOf(hood(ago(-60_000)), NOW), 'Robinhood · real time', 'a stamp ahead of the clock ages nothing');
+  assert.equal(sourceWordOf(hood(undefined), NOW), 'Robinhood · real time');
+  // no word on the row: the venue its 24h change is from
+  assert.equal(sourceWordOf({ ...hood(ago(3 * 60_000)), quoteFrom: undefined, changeFrom: { venue: 'coinbase', venueName: 'Coinbase' } }, NOW), 'Coinbase · 3 min ago');
+  // nor that: the first venue the owner connected that lists it — its line's word, else its name — with that line's stamp
+  const cboe = { venue: 'cboe-public', venueName: 'Cboe', symbol: 'HOOD', connected: false, canTrade: false, public: true, price: 41.2, quoteFrom: 'Cboe · 15 min delayed', quoteAt: ago(15 * 60_000) };
+  const broker = { ...cboe, venue: 'broker', venueName: 'Stand-in Broker', connected: true, canTrade: true, public: false };
+  const lines = at => ({ ...hood(undefined), quoteFrom: undefined, at });
+  assert.equal(sourceWordOf(lines([cboe, broker]), NOW), 'Cboe · 15 min delayed · 15 min ago');
+  assert.equal(sourceWordOf(lines([cboe, { ...broker, quoteFrom: undefined }]), NOW), 'Stand-in Broker · 15 min ago');
+  assert.equal(sourceWordOf(lines([cboe]), NOW), '', 'a public line alone names no source: never the first line for itself');
+  // the fixtures: each row's change is its venue's; a public-led row is the public exchange's, not the paper account's
+  const explore = fx('explore-all');
+  assert.equal(sourceWordOf(itemOf(explore, 'stock:NVDA'), NOW), 'Stand-in Broker');
+  assert.equal(sourceWordOf(itemOf(explore, 'coin:DOGE'), NOW), 'Stand-in Public Exchange');
+  assert.equal(sourceWordOf({ ...itemOf(explore, 'coin:DOGE'), changeFrom: undefined }, NOW), 'Stand-in Public Exchange', 'the paper line says where its price is from');
+  assert.equal(sourceWordOf(itemOf(fx('explore-predictions'), 'event:paper-momentum:SX-JOBS-NEXT'), NOW), 'Momentum · paper', 'a market only the paper account lists');
+  assert.equal(sourceWordOf({ key: 'coin:Y', kind: 'coin', at: [{ venue: 'p', venueName: 'Public X', symbol: 'Y/USD', connected: false, public: true }] }, NOW), '');
+  assert.equal(sourceWordOf(null, NOW), '');
 });
 
 test('legsOf: connected first, best marked, public legs with connectTo', () => {
@@ -153,15 +168,28 @@ test('legsOf: connected first, best marked, public legs with connectTo', () => {
   });
   // two paper accounts at one ask: one best, the first
   assert.deepEqual(legsOf(itemOf(explore, 'perp:DOGE')).map(l => [l.venue, l.best]), [['paper', true], ['paper-momentum', false], ['standin-pubperps-public', false]]);
-  // no ask among the connected: the lowest price; a public line is never best; a canTrade the Account does not know stays unknown
+  // no ask among the lines that can take an order: the lowest price; a public line is never best; a canTrade the Account does
+  // not know stays unknown, and is never best
   const hand = {
     key: 'coin:X', kind: 'coin', at: [
       { venue: 'c', venueName: 'C', symbol: 'X/USD', connected: false, canTrade: false, public: true, price: 9, ask: 9.1 },
-      { venue: 'a', venueName: 'A', symbol: 'X/USD', connected: true, canTrade: 'unknown', public: false, price: 10 },
+      { venue: 'a', venueName: 'A', symbol: 'X/USD', connected: true, canTrade: true, public: false, price: 10 },
       { venue: 'b', venueName: 'B', symbol: 'X/USD', connected: true, canTrade: true, public: false, price: 9.5, ask: 'n/a' },
+      { venue: 'd', venueName: 'D', symbol: 'X/USD', connected: true, canTrade: 'unknown', public: false, price: 9 },
     ],
   };
-  assert.deepEqual(legsOf(hand).map(l => [l.venue, l.best, l.canTrade, l.ask]), [['a', false, 'unknown', null], ['b', true, true, null], ['c', false, false, 9.1]]);
+  assert.deepEqual(legsOf(hand).map(l => [l.venue, l.best, l.canTrade, l.ask]), [['a', false, true, null], ['b', true, true, null], ['d', false, 'unknown', null], ['c', false, false, 9.1]]);
+  // only a line that takes an order now can be best: a closed market, a key that cannot trade, never; none that can: no best
+  const shut = {
+    key: 'coin:W', kind: 'coin', at: [
+      { venue: 'closed', venueName: 'Closed', symbol: 'W/USD', connected: true, canTrade: true, public: false, open: false, price: 9, ask: 9 },
+      { venue: 'watch', venueName: 'Watch only', symbol: 'W/USD', connected: true, canTrade: false, public: false, price: 9.1, ask: 9.1 },
+      { venue: 'maybe', venueName: 'Unknown', symbol: 'W/USD', connected: true, canTrade: 'unknown', public: false, price: 9.2, ask: 9.2 },
+      { venue: 'open', venueName: 'Open', symbol: 'W/USD', connected: true, canTrade: true, public: false, open: true, price: 9.5, ask: 9.6 },
+    ],
+  };
+  assert.deepEqual(legsOf(shut).map(l => [l.venue, l.best]), [['closed', false], ['watch', false], ['maybe', false], ['open', true]]);
+  assert.deepEqual(legsOf({ ...shut, at: shut.at.slice(0, 3) }).map(l => l.best), [false, false, false]);
   assert.deepEqual(legsOf({ key: 'coin:Y', at: [{ venue: 'p', symbol: 'Y/USD', connected: false, public: true, ask: 1 }] }).map(l => l.best), [false]);
   assert.deepEqual(legsOf({ key: 'coin:Z', kind: 'coin' }), []);
   assert.deepEqual(legsOf(null), []);
@@ -170,7 +198,7 @@ test('legsOf: connected first, best marked, public legs with connectTo', () => {
 test('rowsOf: the fixture rows and two cn rows side by side; source words; the three sorts; nulls last; a cn row only under All and Stocks', () => {
   const moutai = quote('cn:600519', { price: 1450, change_pct: -3, volume: 900_000_000, source: '同花顺', feed: 'realtime', message: '行情连接已断开，保留上次报价。' });
   const m = markets({
-    explore: read(fx('explore-all')),
+    explore: { all: read(fx('explore-all')) },
     watchlist: [asset('cn:600519', { name: '贵州茅台', exchange: 'SSE' }), asset('cn:000001', { name: '平安银行', exchange: 'SZSE' })],
     quotes: { 'cn:600519': moutai },
     accountQuotes: { 'broker|NVDA': fx('market').market },
@@ -178,9 +206,9 @@ test('rowsOf: the fixture rows and two cn rows side by side; source words; the t
   });
   const rows = rowsOf(m);
   assert.deepEqual(rows.map(r => r.id), [
-    'stock:NVDA', 'stock:SPY', 'stock:AAPL', 'perp:BTC', 'coin:BTC', 'perp:ETH', 'coin:ETH', 'cn:600519', 'coin:DOGE', 'perp:SOL',
-    'coin:SOL', 'coin:LINK', 'perp:DOGE', 'cn:000001',
-  ], "Most traded: the Account's dollars and the cn row's volume side by side, a row without one last");
+    'stock:NVDA', 'stock:SPY', 'stock:AAPL', 'perp:BTC', 'coin:BTC', 'perp:ETH', 'coin:ETH', 'coin:DOGE', 'perp:SOL', 'coin:SOL',
+    'coin:LINK', 'perp:DOGE', 'cn:600519', 'cn:000001',
+  ], "Most traded: the Account's rows by their dollars, then the cn rows, whose volume is shares; a row without one last");
   assert.deepEqual(rows.find(r => r.id === 'perp:BTC'), {
     id: 'perp:BTC', source: 'account', kind: 'perp', name: 'BTC perpetual', sub: 'BTC · Perpetual',
     priced: { price: 62498.8, unit: 'usd', changePct: 2.3, change24h: 1404.9, volume: 4121786065, volumeUnit: 'usd', implied: null },
@@ -190,7 +218,7 @@ test('rowsOf: the fixture rows and two cn rows side by side; source words; the t
   });
   assert.deepEqual(rows.find(r => r.id === 'cn:600519'), {
     id: 'cn:600519', source: 'face', asset: asset('cn:600519', { name: '贵州茅台', exchange: 'SSE' }), quote: moutai, kind: 'stock', name: '贵州茅台', sub: 'SSE',
-    priced: { price: 1450, unit: 'usd', changePct: -3, change24h: null, volume: 900000000, volumeUnit: 'usd', implied: null },
+    priced: { price: 1450, unit: 'cny', changePct: -3, change24h: null, volume: 900000000, volumeUnit: 'shares', implied: null },
     live: null, sourceWord: 'iFinD', closeTime: null, pastEnd: false, watched: true, legs: [], tabs: ['all', 'stocks'],
   });
   const byId = Object.fromEntries(rows.map(r => [r.id, r]));
@@ -200,11 +228,22 @@ test('rowsOf: the fixture rows and two cn rows side by side; source words; the t
   assert.equal(byId['coin:BTC'].live, null);
   assert.deepEqual(rows.filter(r => r.watched).map(r => r.id), ['coin:BTC', 'cn:600519', 'cn:000001']);
   // the Account's own words for where each price is from, the face's provider for the cn rows; the second line of each
-  assert.deepEqual(['stock:NVDA', 'coin:BTC', 'coin:LINK', 'cn:000001'].map(id => byId[id].sourceWord), ['Stand-in Broker', 'Stand-in Exchange', 'Momentum · paper', 'iFinD']);
+  assert.deepEqual(['stock:NVDA', 'coin:BTC', 'coin:LINK', 'cn:000001'].map(id => byId[id].sourceWord), ['Stand-in Broker', 'Stand-in Exchange', 'Stand-in Public Exchange', 'iFinD']);
   assert.deepEqual(['stock:NVDA', 'coin:BTC', 'perp:ETH', 'cn:000001'].map(id => byId[id].sub), ['Stand-in Broker', 'BTC', 'ETH · Perpetual', 'SZSE']);
   for (const r of rows) for (const word of [r.sub, r.sourceWord]) assert.doesNotMatch(word, CJK, word);
-  assert.deepEqual(byId['cn:000001'].priced, { price: null, unit: 'usd', changePct: null, change24h: null, volume: null, volumeUnit: 'usd', implied: null });
+  assert.deepEqual(byId['cn:000001'].priced, { price: null, unit: 'cny', changePct: null, change24h: null, volume: null, volumeUnit: 'shares', implied: null });
   assert.equal(byId['cn:000001'].quote, null);
+  // the live quote's own source and stamp say where the price is from and how old it is, on the renderer's clock
+  const nasdaq = { ...fx('market').market, quoteFrom: 'Nasdaq · real time', quoteAt: ago(2 * 60_000) };
+  assert.equal(rowsOf({ ...m, accountQuotes: { 'broker|NVDA': nasdaq } }, NOW).find(r => r.id === 'stock:NVDA').sourceWord, 'Nasdaq · real time · 2 min ago');
+
+  // the cn rows under Most traded: after every Account row, among themselves by price × volume (turnover), not shares alone
+  const turnover = rowsOf(markets({
+    explore: { all: read(fx('explore-all')) }, watchlist: [asset('cn:000001'), asset('cn:601318'), asset('cn:600519')],
+    quotes: { 'cn:000001': quote('cn:000001', { price: 11.2, volume: 3e8 }), 'cn:601318': quote('cn:601318', { price: 52.1, volume: 9e7 }), 'cn:600519': quote('cn:600519', { price: 1450, volume: 2e6 }) },
+  }));
+  assert.equal(turnover.slice(0, 12).every(r => r.source === 'account'), true);
+  assert.deepEqual(turnover.slice(12).map(r => r.id), ['cn:601318', 'cn:000001', 'cn:600519']);
 
   // Biggest moves: the size of the 24h move, a tie in the list's order, a row without one last
   assert.deepEqual(rowsOf({ ...m, sort: 'movers' }).map(r => r.id), [
@@ -212,7 +251,7 @@ test('rowsOf: the fixture rows and two cn rows side by side; source words; the t
     'coin:SOL', 'stock:AAPL', 'stock:SPY', 'cn:000001',
   ]);
   // Closing soonest: the events by their close, the soonest first, the rows that never close last
-  const events = { ...m, explore: read(fx('explore-predictions')), sort: 'closing' };
+  const events = { ...m, explore: { all: read(fx('explore-predictions')) }, sort: 'closing' };
   assert.deepEqual(rowsOf(events).map(r => r.id), [
     'event:predict:SI-BTC15-2610220730', 'event:paper-momentum:SX-YIELD-FRI', 'event:standin-pubevents-public:SX-YIELD-FRI',
     'event:predict:SI-CPI-NEXT', 'event:predict:SI-ETH-WEEK', 'event:paper-momentum:SX-JOBS-NEXT', 'event:standin-pubevents-public:SX-JOBS-NEXT',
@@ -226,14 +265,30 @@ test('rowsOf: the fixture rows and two cn rows side by side; source words; the t
   assert.deepEqual(rowsOf({ ...m, tab: 'perps' }).map(r => r.id), ['perp:BTC', 'perp:ETH', 'perp:SOL', 'perp:DOGE']);
   for (const tab of ['rwas', 'preipo', 'predictions']) assert.deepEqual(rowsOf({ ...m, tab }), [], tab);
   assert.equal(rowsOf({ ...m, tab: 'somewhere' }).length, 14, 'a tab the view does not know is All');
-  // while searching, the Account's rows are its search's; the cn watchlist stays, the cn hits join it once
+
+  // a tab's own read once it lands: its rows, which may lie past All's cut; until then All's rows of that kind
+  const all = fx('explore-all');
+  const rwas = { ...fx('explore-all'), items: fx('explore-all').movers.filter(i => i.kind === 'rwa') };
+  assert.deepEqual(rowsOf({ ...m, tab: 'rwas', explore: { all: read(all), rwas: read(rwas) } }).map(r => [r.id, r.sub]), [['rwa:NVDA', 'Stand-in Stock Tokens'], ['rwa:TSLA', 'Stand-in Stock Tokens']]);
+  assert.deepEqual(rowsOf({ ...m, tab: 'rwas', explore: { all: read(all), rwas: { status: 'loading', data: null, at: null } } }), []);
+  const solOnly = { ...fx('explore-all'), items: [itemOf(fx('explore-all'), 'coin:SOL')] };
+  assert.deepEqual(rowsOf({ ...m, tab: 'crypto', explore: { all: read(all), crypto: read(solOnly) } }).map(r => r.id), ['coin:SOL']);
+  // a pre-IPO perpetual's second line says what it is (its implied valuation, or its tab); any other perpetual's names its base
+  const anthropic = { key: 'preipo:anthropic', kind: 'perp', name: 'Anthropic', base: 'ANTHROPIC', price: 182.5, implied: { usd: 183e9, unit: 'valuation' }, category: 'Pre-IPO', tabs: ['all', 'preipo'], at: [] };
+  const openai = { ...anthropic, key: 'preipo:openai', name: 'OpenAI', base: 'OPENAI', implied: undefined };
+  const pre = rowsOf(markets({ explore: { all: read({ ...fx('explore-all'), items: [anthropic, openai, itemOf(fx('explore-all'), 'perp:BTC')] }) } }));
+  assert.deepEqual(pre.map(r => [r.id, r.sub]), [['perp:BTC', 'BTC · Perpetual'], ['preipo:anthropic', 'Pre-IPO · Perpetual'], ['preipo:openai', 'Pre-IPO · Perpetual']]);
+
+  // while searching, the Account's rows are its search's and the cn rows its hits alone, never the whole cn watchlist
   const searching = {
     ...m, q: 'ping', results: read({ ...fx('explore-all'), items: [] }),
     search: { query: 'ping', status: 'success', assets: [asset('cn:000001', { name: '平安银行', exchange: 'SZSE' }), asset('cn:601318', { name: '中国平安', exchange: 'SSE' })], partial: false },
     hitQuotes: { 'cn:601318': quote('cn:601318', { price: 52.1, change_pct: 0.4, volume: 5e7 }) },
   };
-  assert.deepEqual(rowsOf(searching).map(r => [r.id, r.watched]), [['cn:600519', true], ['cn:601318', false], ['cn:000001', true]]);
+  assert.deepEqual(rowsOf(searching).map(r => [r.id, r.watched]), [['cn:601318', false], ['cn:000001', true]], 'a hit on the watchlist is starred');
   assert.equal(rowsOf(searching).find(r => r.id === 'cn:601318').priced.price, 52.1, 'a hit takes the quote its search read');
+  assert.deepEqual(rowsOf({ ...searching, tab: 'stocks' }).map(r => r.id), ['cn:601318', 'cn:000001']);
+  assert.deepEqual(rowsOf({ ...searching, tab: 'crypto' }), []);
   // a search not answered yet leaves the explore rows in place
   assert.equal(rowsOf({ ...searching, results: { status: 'loading', data: null, at: null } }).filter(r => r.source === 'account').length, 12);
   // nothing read at all: the cn rows alone
@@ -260,7 +315,7 @@ test('unpriced, past-end and contract-volume rows: dashes, Closed, contracts', (
     },
     itemOf(fx('explore-predictions'), 'event:predict:SI-FEDCUT-DEC'),
   ];
-  const m = markets({ explore: read(body), watchlist: [asset('us:ZZZZ', { name: 'Zed Corp' }), asset('crypto:QQQ/USD')], asked: { 'us:ZZZZ': null, 'crypto:QQQ/USD': null } });
+  const m = markets({ explore: { all: read(body) }, watchlist: [asset('us:ZZZZ', { name: 'Zed Corp' }), asset('crypto:QQQ/USD')], asked: { 'us:ZZZZ': null, 'crypto:QQQ/USD': null } });
   const pm = body.items[1].key;
   // a contract volume sorts as its number; an unpriced row, and the Not listed lines, after every figure
   assert.deepEqual(rowsOf(m).map(r => r.id), ['event:predict:SI-FEDCUT-DEC', 'kalshi:KXFED-DEC', pm, 'coin:NEWT', 'us:ZZZZ', 'crypto:QQQ/USD']);
@@ -268,7 +323,7 @@ test('unpriced, past-end and contract-volume rows: dashes, Closed, contracts', (
   assert.deepEqual(rowsOf({ ...m, sort: 'closing' }).map(r => r.id), [pm, 'event:predict:SI-FEDCUT-DEC', 'kalshi:KXFED-DEC', 'coin:NEWT', 'us:ZZZZ', 'crypto:QQQ/USD']);
   const byId = Object.fromEntries(rowsOf(m).map(r => [r.id, r]));
   // unpriced: every figure null, for the renderer's dashes; no venue to quote it, no source to name
-  assert.deepEqual(byId['coin:NEWT'].priced, { price: null, unit: 'usd', changePct: null, change24h: null, volume: null, volumeUnit: 'usd', implied: null });
+  assert.deepEqual(byId['coin:NEWT'].priced, UNPRICED);
   assert.deepEqual([byId['coin:NEWT'].live, byId['coin:NEWT'].sourceWord, byId['coin:NEWT'].sub], [null, '', 'NEWT']);
   // past its end: the flag and the close time, for Closed; still priced in cents
   assert.deepEqual([byId[pm].pastEnd, byId[pm].closeTime, byId[pm].priced.price, byId[pm].priced.change24h, byId[pm].sub], [true, '2026-10-20T00:00:00.000Z', 12, -1, 'Climate']);
@@ -279,8 +334,7 @@ test('unpriced, past-end and contract-volume rows: dashes, Closed, contracts', (
   // an old star the Account could not find: once, Not listed at the Account, every figure null
   assert.deepEqual(byId['us:ZZZZ'], {
     id: 'us:ZZZZ', source: 'face', notListed: true, kind: 'stock', name: 'Zed Corp', sub: 'Not listed at the Account',
-    priced: { price: null, unit: 'usd', changePct: null, change24h: null, volume: null, volumeUnit: 'usd', implied: null },
-    live: null, sourceWord: '', closeTime: null, pastEnd: false, watched: true, legs: [], tabs: ['all', 'stocks'],
+    priced: UNPRICED, live: null, sourceWord: '', closeTime: null, pastEnd: false, watched: true, legs: [], tabs: ['all', 'stocks'],
   });
   assert.deepEqual([byId['crypto:QQQ/USD'].kind, byId['crypto:QQQ/USD'].name, byId['crypto:QQQ/USD'].tabs], ['coin', 'QQQ/USD', ['all', 'crypto']]);
   assert.deepEqual(rowsOf({ ...m, tab: 'stocks' }).map(r => r.id), ['us:ZZZZ']);
@@ -294,27 +348,39 @@ test('matchKey and pairsOf', () => {
   assert.deepEqual(matchKey('crypto:BTC/USD'), { q: 'BTC', kind: 'coin' });
   assert.deepEqual(matchKey('crypto:eth-usd'), { q: 'ETH', kind: 'coin' });
   for (const id of ['cn:600519', 'coin:BTC', 'stock:AAPL', 'BTC', '', null, undefined]) assert.equal(matchKey(id), null, String(id));
-  // the Account's row keys, never the face's ids
-  for (const key of ['coin:BTC', 'stock:AAPL', 'perp:ETH', 'rwa:NVDA', 'kalshi:KXFED-DEC', `pm:0x${'ab'.repeat(32)}`, 'pmus:fed-dec']) assert.equal(isAccountKey(key), true, key);
-  for (const id of ['cn:600519', 'us:AAPL', 'crypto:BTC/USD', 'coinBTC', 'BTC', '', null, undefined]) assert.equal(isAccountKey(id), false, String(id));
+  // the Account's row keys — every one the stand-in sends, an event at another venue's and a pre-IPO perpetual's among them —
+  // and never the face's ids
+  for (const key of ['coin:BTC', 'stock:AAPL', 'perp:ETH', 'rwa:NVDA', 'kalshi:KXFED-DEC', `pm:0x${'ab'.repeat(32)}`, 'pmus:fed-dec', 'event:predict:SI-FEDCUT-DEC', 'preipo:anthropic']) assert.equal(isAccountKey(key), true, key);
+  for (const body of [fx('explore-all'), fx('explore-predictions')]) for (const item of [...body.items, ...body.movers, ...body.closing, ...body.mostTraded]) assert.equal(isAccountKey(item.key), true, item.key);
+  for (const id of ['cn:600519', 'us:AAPL', 'crypto:BTC/USD', 'coinBTC', 'BTC', 'events:x', '', null, undefined]) assert.equal(isAccountKey(id), false, String(id));
 
-  // an old us:/crypto: star: nothing until it is asked; found, it stars the Account's row; not found, the Not listed line
+  // an old us:/crypto: star: nothing until it is asked; found, it stars the Account's row; not found, the Not listed line; found
+  // but in no read, a placeholder that can still be un-starred
   const explore = fx('explore-all');
   const old = [asset('us:AAPL', { name: 'Apple' }), asset('crypto:SOL/USD'), asset('us:ZZZZ'), asset('us:TSLA')];
-  assert.deepEqual(rowsOf(markets({ explore: read(explore), watchlist: old, tab: 'watching' })), []);
+  assert.deepEqual(rowsOf(markets({ explore: { all: read(explore) }, watchlist: old, tab: 'watching' })), []);
   const asked = { 'us:AAPL': 'stock:AAPL', 'crypto:SOL/USD': 'coin:SOL', 'us:ZZZZ': null, 'us:TSLA': 'stock:TSLA' };
-  assert.deepEqual(rowsOf(markets({ explore: read(explore), watchlist: old, asked, tab: 'watching' })).map(r => [r.id, r.source]),
-    [['stock:AAPL', 'account'], ['coin:SOL', 'account'], ['us:ZZZZ', 'face']], 'TSLA was found, but no read lists it: nothing to draw');
-  assert.equal(rowsOf(markets({ explore: read(explore), watchlist: old, asked })).some(r => r.id.startsWith('us:AAPL') || r.id.startsWith('crypto:')), false, 'the old id never draws itself');
+  const after = rowsOf(markets({ explore: { all: read(explore) }, watchlist: old, asked, tab: 'watching' }));
+  assert.deepEqual(after.map(r => [r.id, r.source]), [['stock:AAPL', 'account'], ['coin:SOL', 'account'], ['stock:TSLA', 'account'], ['us:ZZZZ', 'face']]);
+  assert.deepEqual(after.find(r => r.id === 'stock:TSLA'), {
+    id: 'stock:TSLA', source: 'account', placeholder: true, kind: 'stock', name: 'TSLA', sub: 'Not in this read',
+    priced: UNPRICED, live: null, sourceWord: '', closeTime: null, pastEnd: false, watched: true, legs: [], tabs: ['all', 'watching'],
+  });
+  assert.equal(rowsOf(markets({ explore: { all: read(explore) }, watchlist: old, asked })).some(r => r.id.startsWith('us:AAPL') || r.id.startsWith('crypto:')), false, 'a star found at the Account draws as its row, never as its old id');
+  // a star past the read's items: found among its movers, closing or most traded lists; found nowhere, a placeholder
+  const outside = rowsOf(markets({ explore: { all: read(explore) }, tab: 'watching', watch: ['kalshi:KXGONE-26', 'rwa:TSLA', 'event:predict:SI-BTC15-2610220730'] }));
+  assert.deepEqual(outside.map(r => [r.id, r.placeholder === true]), [['rwa:TSLA', false], ['event:predict:SI-BTC15-2610220730', false], ['kalshi:KXGONE-26', true]]);
+  assert.deepEqual([outside[0].sub, outside[0].priced.price, outside[1].priced.price], ['Stand-in Stock Tokens', 251.3, 14]);
+  assert.deepEqual([outside[2].kind, outside[2].name, outside[2].sub], ['kalshi', 'KXGONE-26', 'Not in this read']);
 
   // pairsOf: the first `limit` rows' most traded connected venue as venue|symbol; a row with none is skipped
-  const rows = rowsOf(markets({ explore: read(explore), watchlist: [asset('cn:600519')], quotes: { 'cn:600519': quote('cn:600519', { volume: 3e9 }) } }));
-  assert.deepEqual(rows.slice(0, 6).map(r => r.id), ['stock:NVDA', 'stock:SPY', 'stock:AAPL', 'perp:BTC', 'cn:600519', 'coin:BTC']);
-  assert.deepEqual(pairsOf(rows, 5), ['broker|NVDA', 'broker|SPY', 'broker|AAPL', 'ex|BTC/USDT:USDT']);
+  const rows = rowsOf(markets({ explore: { all: read(explore) }, sort: 'movers', watchlist: [asset('cn:600519')], quotes: { 'cn:600519': quote('cn:600519', { change_pct: -3, volume: 3e9 }) } }));
+  assert.deepEqual(rows.slice(0, 7).map(r => r.id), ['coin:DOGE', 'perp:DOGE', 'coin:LINK', 'perp:ETH', 'coin:ETH', 'cn:600519', 'perp:BTC']);
+  assert.deepEqual(pairsOf(rows, 6), ['paper-momentum|DOGE/USD', 'paper|DOGE/USDC:USDC', 'paper-momentum|LINK/USD', 'ex|ETH/USDT:USDT', 'ex|ETH/USDT']);
   assert.deepEqual(pairsOf(rows), [
-    'broker|NVDA', 'broker|SPY', 'broker|AAPL', 'ex|BTC/USDT:USDT', 'ex|BTC/USDT', 'ex|ETH/USDT:USDT', 'ex|ETH/USDT',
-    'paper-momentum|DOGE/USD', 'ex|SOL/USDT:USDT', 'ex|SOL/USDT', 'paper-momentum|LINK/USD',
-  ], 'twelve rows by default, the cn row among them skipped: the thirteenth row (perp:DOGE) is not asked');
+    'paper-momentum|DOGE/USD', 'paper|DOGE/USDC:USDC', 'paper-momentum|LINK/USD', 'ex|ETH/USDT:USDT', 'ex|ETH/USDT', 'ex|BTC/USDT:USDT',
+    'ex|BTC/USDT', 'broker|NVDA', 'ex|SOL/USDT:USDT', 'ex|SOL/USDT', 'broker|AAPL',
+  ], 'twelve rows by default, the cn row among them skipped: the thirteenth (SPY) is not asked');
   assert.deepEqual(pairsOf([{ id: 'coin:Y', legs: legsOf({ at: [{ venue: 'p', symbol: 'Y/USD', connected: false, public: true }] }) }]), []);
   assert.deepEqual(pairsOf([]), []);
   assert.deepEqual(pairsOf(null), []);
@@ -322,7 +388,7 @@ test('matchKey and pairsOf', () => {
 
 test('pageOf: the item, its legs, candles for the range, compare rows, held, orders and lines for the market', () => {
   const m = markets({
-    explore: read(fx('explore-all')),
+    explore: { all: read(fx('explore-all')) },
     accountQuotes: { 'broker|NVDA': fx('market').market },
     candles: { 'stock:NVDA': { status: 'ready', data: fx('candles'), at: 1, range: '1D' } },
     compare: { ETH: read(fx('compare')) },
@@ -341,6 +407,9 @@ test('pageOf: the item, its legs, candles for the range, compare rows, held, ord
   assert.deepEqual(nvda.held.assets.map(a => [a.key, a.amount, a.usd]), [['equity:NVDA', 2, 364.8]]);
   assert.deepEqual([nvda.held.positions, nvda.orders, nvda.lines], [[], [], []]);
   assert.equal(pageOf({ ...m, candles: { 'stock:NVDA': { status: 'ready', data: fx('candles'), at: 1, range: '5D' } } }, acct, 'stock:NVDA').range, '5D');
+  // a chart read that answered a refusal is no chart; the range chosen stays
+  const refused = pageOf({ ...m, candles: { 'stock:NVDA': { status: 'error', data: { ok: false, refusal: { message: 'The venue did not answer' } }, at: 1, range: '5D' } } }, acct, 'stock:NVDA');
+  assert.deepEqual([refused.candles, refused.range], [null, '5D']);
 
   // coin:ETH: the compare rows for its base; no chart read yet, so 1D; the statement's lines that name ETH as a word
   const eth = pageOf(m, acct, 'coin:ETH');
@@ -358,12 +427,40 @@ test('pageOf: the item, its legs, candles for the range, compare rows, held, ord
   // perp:BTC: the position at its own leg
   assert.deepEqual(pageOf(m, acct, 'perp:BTC').held.positions.map(p => [p.venue, p.symbol, p.side, p.qty, p.paper]), [['ex', 'BTC/USDT:USDT', 'long', 0.01, false]]);
 
-  // an event: no base to hold as an asset; its leg's symbol names its position and its line; its price in cents
-  const fed = pageOf(markets({ explore: read(fx('explore-predictions')) }), acct, 'event:predict:SI-FEDCUT-DEC');
+  // rwa:TSLA, past the read's items (among its movers), only public listings carry: the quote at its first public line, the one
+  // the page follows, with that quote's own source and age on the renderer's clock; a row asks /quotes at a connected venue only
+  const tokens = { price: 251.4, bid: 251.2, ask: 251.6, quoteFrom: 'Stand-in Stock Tokens · live', quoteAt: ago(90_000) };
+  const tsla = pageOf({ ...m, accountQuotes: { 'standin-stock-tokens|TSLA': tokens } }, acct, 'rwa:TSLA', NOW);
+  assert.equal(tsla.item.name, 'Tesla stock token');
+  assert.deepEqual(tsla.live, tokens);
+  assert.equal(tsla.sourceWord, 'Stand-in Stock Tokens · live · 1 min ago');
+  const rwas = { ...fx('explore-all'), items: fx('explore-all').movers.filter(i => i.kind === 'rwa') };
+  assert.equal(rowsOf({ ...m, tab: 'rwas', explore: { all: read(fx('explore-all')), rwas: read(rwas) }, accountQuotes: { 'standin-stock-tokens|TSLA': tokens } }).find(r => r.id === 'rwa:TSLA').live, null);
+  // a market only the current tab's own read lists
+  const pepe = { key: 'coin:PEPE', kind: 'coin', name: 'PEPE', base: 'PEPE', price: 0.0000091, tabs: ['all', 'crypto'], at: [] };
+  assert.equal(pageOf({ ...m, tab: 'crypto', explore: { all: read(fx('explore-all')), crypto: read({ ...fx('explore-all'), items: [pepe] }) } }, acct, 'coin:PEPE').item.name, 'PEPE');
+
+  // an event: no base to hold as an asset; every outcome's lines — its YES and its NO — name its positions, orders and lines;
+  // its own lines stay the lead outcome's; its price in cents
+  const fed = pageOf(markets({ explore: { all: read(fx('explore-predictions')) } }), acct, 'event:predict:SI-FEDCUT-DEC');
   assert.deepEqual(fed.held.assets, []);
   assert.deepEqual(fed.held.positions.map(p => [p.venue, p.symbol, p.qty]), [['predict', 'SI-FEDCUT-DEC:YES', 50]]);
   assert.deepEqual(fed.lines.map(l => l.key), ['order:49864860e7f081d0fb8212efe0705c4f']);
   assert.deepEqual([fed.priced.price, fed.priced.unit, fed.compare], [62, 'cents', []]);
+  const holdingsNo = fx('holdings');
+  holdingsNo.positions.push({ venue: 'predict', venueName: 'Stand-in Predictions', symbol: 'SI-FEDCUT-DEC:NO', name: 'Will the Fed cut rates at its December meeting? · No', kind: 'event', side: 'long', qty: 20, entryPrice: 0.39, markPrice: 0.38, usd: 7.6 });
+  const pageNo = fx('account');
+  pageNo.orders.unshift({ id: 'ord-0011', venue: 'predict', venueName: 'Stand-in Predictions', symbol: 'SI-FEDCUT-DEC:NO', side: 'buy', type: 'limit', qty: 10, filledQty: 0, limitPrice: 0.35, status: 'open', authority: 'owner' });
+  const statementNo = fx('statement');
+  statementNo.lines.unshift({
+    key: 'order:no-side', id: 'ord-0011', at: '2026-10-22T07:40:00.000Z', updatedAt: '2026-10-22T07:40:00.000Z', type: 'trade', kind: 'buy', account: 'predict',
+    accountName: 'Stand-in Predictions', description: 'Buy 10 SI-FEDCUT-DEC:NO · Will the Fed cut rates at its December meeting? · No · limit 0.35', amountUsd: 0, status: 'open', by: 'You',
+  });
+  const both = pageOf(markets({ explore: { all: read(fx('explore-predictions')) } }), accountSlice({ data: pageNo, holdings: read(holdingsNo), statement: read(statementNo) }), 'event:predict:SI-FEDCUT-DEC');
+  assert.deepEqual(both.held.positions.map(p => p.symbol), ['SI-FEDCUT-DEC:YES', 'SI-FEDCUT-DEC:NO']);
+  assert.deepEqual(both.orders.map(o => [o.id, o.symbol]), [['ord-0011', 'SI-FEDCUT-DEC:NO']]);
+  assert.deepEqual(both.lines.map(l => l.key), ['order:no-side', 'order:49864860e7f081d0fb8212efe0705c4f']);
+  assert.deepEqual(both.legs.map(l => l.symbol), ['SI-FEDCUT-DEC:YES']);
 
   // the leading lens: real money leads here; with none and a paper venue connected, the paper account's rows are what is held
   const paper = fx('holdings-paper');
@@ -372,7 +469,7 @@ test('pageOf: the item, its legs, candles for the range, compare rows, held, ord
   assert.deepEqual(pageOf(m, accountSlice({ data: { ...fx('account'), totalUsd: 0 }, paper: read(paper) }), 'coin:BTC').held.assets.map(a => a.amount), [0.05]);
 
   // a market the search found; one no read lists, or a face id, is no page
-  const searched = markets({ explore: read(fx('explore-all')), q: 'cpi', results: read(fx('explore-predictions')) });
+  const searched = markets({ explore: { all: read(fx('explore-all')) }, q: 'cpi', results: read(fx('explore-predictions')) });
   assert.equal(pageOf(searched, acct, 'event:predict:SI-CPI-NEXT').item.name, 'Will US inflation come in above 3.0% in the next CPI report?');
   for (const id of ['stock:TSLA', 'cn:600519', '', undefined]) assert.equal(pageOf(m, acct, id), null, String(id));
   assert.equal(pageOf(markets(), acct, 'coin:BTC'), null);
@@ -390,28 +487,50 @@ test('no icon URL survives any view (an item given an https icon by hand)', () =
   const btc = itemOf(explore, 'coin:BTC');
   btc.icon = ICON;
   btc.at[0].icon = ICON;
+  const avax = explore.movers.find(i => i.key === 'coin:AVAX');
+  avax.icon = ICON;
   const predictions = fx('explore-predictions');
   const fed = itemOf(predictions, 'event:predict:SI-FEDCUT-DEC');
   fed.icon = ICON;
   fed.outcomes[0].icon = ICON;
-  const m = markets({ explore: read(explore), results: read(predictions), q: 'fed', watch: ['coin:BTC', fed.key], watchlist: [asset('cn:600519')] });
+  // and on what the views pass through: a quote, a compare row, a chart
+  const quoteBtc = { price: 62481, quoteFrom: 'Stand-in Exchange', icon: ICON };
+  const compare = fx('compare');
+  compare.rows[0].icon = ICON;
+  const candles = fx('candles');
+  candles.icon = ICON;
+  candles.candles[0].icon = ICON;
+  const m = markets({
+    explore: { all: read(explore) }, results: read(predictions), q: 'fed', watch: ['coin:BTC', 'coin:AVAX', fed.key, 'stock:GONE'],
+    watchlist: [asset('cn:600519')], accountQuotes: { 'ex|BTC/USDT': quoteBtc }, compare: { ETH: read(compare) },
+    candles: { 'stock:NVDA': { status: 'ready', data: candles, at: 1, range: '1D' } },
+  });
   const acct = accountSlice();
   const outputs = [
-    tabsOf(explore, 1), priceOf(btc), sourceWordOf(btc, Date.now()), legsOf(btc), priceOf(fed), sourceWordOf(fed, Date.now()), legsOf(fed),
-    matchKey('crypto:BTC/USD'), pageOf(m, acct, 'coin:BTC'), pageOf(m, acct, fed.key),
+    tabsOf(explore, 1, { searching: true, watching: true }), priceOf(btc), sourceWordOf(btc, NOW), legsOf(btc), priceOf(fed), sourceWordOf(fed, NOW), legsOf(fed),
+    matchKey('crypto:BTC/USD'),
   ];
-  for (const q of ['', 'fed']) for (const tab of ['all', 'crypto', 'predictions', 'watching', 'results']) for (const { id: sort } of ACCOUNT_SORTS) {
-    const rows = rowsOf({ ...m, q, tab, sort });
-    outputs.push(rows, pairsOf(rows));
+  for (const q of ['', 'fed']) {
+    for (const id of ['coin:BTC', 'coin:AVAX', 'coin:ETH', 'stock:NVDA', fed.key]) outputs.push(pageOf({ ...m, q }, acct, id, NOW));
+    for (const tab of ['all', 'crypto', 'predictions', 'watching', 'results']) for (const { id: sort } of ACCOUNT_SORTS) {
+      const rows = rowsOf({ ...m, q, tab, sort }, NOW);
+      outputs.push(rows, pairsOf(rows));
+    }
   }
-  assert.ok(pageOf(m, acct, 'coin:BTC').item.at.length > 0, 'the page has the item, and its legs, to look through');
+  // the views had each of them to look through: the item and its lines, the quote, the compare rows, the chart, a placeholder
+  const calm = { ...m, q: '' };
+  assert.equal(pageOf(calm, acct, 'coin:BTC', NOW).live.price, 62481);
+  assert.equal(pageOf(calm, acct, 'coin:ETH', NOW).compare.length, 2);
+  assert.equal(pageOf(calm, acct, 'stock:NVDA', NOW).candles.candles.length, 12);
+  assert.equal(rowsOf({ ...calm, tab: 'watching' }, NOW).find(r => r.id === 'coin:BTC').live.price, 62481);
+  assert.equal(rowsOf({ ...calm, tab: 'watching' }, NOW).some(r => r.placeholder === true), true);
   for (const out of outputs) {
     const text = JSON.stringify(out) ?? '';
     assert.ok(!text.includes('example-cdn'), text.slice(0, 160));
     assert.ok(!text.includes('"icon"'), text.slice(0, 160));
   }
-  // the views copy what they leave out: the store's own items keep their icons
-  assert.deepEqual([btc.icon, btc.at[0].icon, fed.icon, fed.outcomes[0].icon], [ICON, ICON, ICON, ICON]);
+  // the views copy what they leave out: the store's own values keep their icons
+  assert.deepEqual([btc.icon, btc.at[0].icon, avax.icon, fed.icon, fed.outcomes[0].icon, quoteBtc.icon, compare.rows[0].icon, candles.icon, candles.candles[0].icon], Array(9).fill(ICON));
 });
 
 // ── The face's own ids, words and list views ──
