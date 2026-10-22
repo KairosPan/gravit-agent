@@ -229,6 +229,34 @@ test("a repeated or unknown name, an over-long value: 400 invalid account reques
   assert.deepEqual(fetched, [`${URL_}/api/account/explore?q=${"x".repeat(240)}`]);
 });
 
+/** Twelve markets as the Markets screen asks them, `venue|symbol` each: perpetuals, Kalshi contracts, Polymarket slugs. */
+const TWELVE_PAIRS = [
+  "hyperliquid|BTC/USDC:USDC", "hyperliquid|ETH/USDC:USDC", "hyperliquid|SOL/USDC:USDC", "coinbase|BTC-USD",
+  "kalshi|KXFED-25DEC-T4.00:YES", "kalshi|KXFED-25DEC-T4.25:NO", "kalshi|KXCPIYOY-25NOV-T3.0:YES", "kalshi|KXBTCD-25DEC3117-T99999.99:YES",
+  "polymarket|will-the-federal-reserve-cut-interest-rates-by-fifty-basis-points-or-more-at-the-december-2026-fomc-meeting-in-washington-per-the-official-statement:YES",
+  "polymarket|will-the-us-unemployment-rate-for-november-2026-as-reported-by-the-bureau-of-labor-statistics-be-above-four-point-five-percent-seasonally-adjusted:NO",
+  "polymarket|will-bitcoin-close-above-one-hundred-and-fifty-thousand-dollars-on-the-last-trading-day-of-december-2026-on-coinbase-at-midnight-utc-per-its-daily-candle:YES",
+  "polymarket|which-party-will-win-the-majority-of-seats-in-the-united-states-house-of-representatives-in-the-november-2026-midterm-elections-as-called-by-the-ap:DEM",
+];
+
+test("quotes: twelve markets in one pairs value pass through whole; pairs has its own 2 000, every other name keeps 240", async () => {
+  const value = TWELVE_PAIRS.join(",");
+  assert.equal(TWELVE_PAIRS.length, 12);
+  assert.ok(value.length > 800 && value.length < 1_000, `about 900 characters, past the 240 of any other name: ${value.length}`);
+  const { routes, fetched } = proxyWith(answering(OK_BODY));
+  const twelve = await call(routes, `/data/account/quotes?pairs=${encodeURIComponent(value)}`);
+  assert.equal(twelve.status, 200);
+  assert.deepEqual(fetched, [`${URL_}/api/account/quotes?${new URLSearchParams({ pairs: value })}`], "the whole value, re-encoded");
+  assert.equal((await call(routes, `/data/account/quotes?pairs=${"x".repeat(2_000)}`)).status, 200, "2 000 characters pass");
+  const over = await call(routes, `/data/account/quotes?pairs=${"x".repeat(2_001)}`);
+  assert.equal(over.status, 400); assert.equal(over.body, INVALID);
+  assert.equal(rebuildQuery("market", `/data/account/market?symbol=${"x".repeat(241)}`), null, "another name keeps 240");
+  assert.equal(rebuildQuery("candles", `/data/account/candles?symbol=${"x".repeat(241)}`), null);
+  // 1 000 characters decoded, nine bytes each on the wire: a request target past 8 192 is refused whatever it decodes to
+  assert.equal(rebuildQuery("quotes", `/data/account/quotes?pairs=${"%E4%B8%80".repeat(1_000)}`), null);
+  assert.equal(fetched.length, 2, "a refused value never reaches the Account");
+});
+
 test("the upstream request carries no Origin, no Sec-Fetch-Site, no cookie, redirect error, and the rebuilt query only", async () => {
   const { routes, fetched, inits } = proxyWith(answering(OK_BODY));
   const browser = {

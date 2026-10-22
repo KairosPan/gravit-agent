@@ -86,7 +86,7 @@ export const ACCOUNT_ABORT_MS: Readonly<Record<ReadRoute, number>> = {
 /** Most queries kept per route; the least recently used leaves first. */
 export const ACCOUNT_CACHE_KEYS = 64;
 
-/** The whitelist: route → allowed query names; a value is at most 240 characters, each name at most once. */
+/** The whitelist: route → allowed query names; a value is at most 240 characters (`quotes`' `pairs` 2 000), each name at most once. */
 export const ACCOUNT_QUERY: Readonly<Record<ReadRoute, readonly string[]>> = {
   account: ["fresh"],
   explore: ["tab", "q", "key", "limit"],
@@ -127,6 +127,10 @@ export interface AccountProxyDeps {
 const READ_ROUTES = Object.keys(ACCOUNT_QUERY) as ReadRoute[];
 /** Longest value one query name may carry, in characters, decoded. */
 const VALUE_MAX = 240;
+/** The names whose value runs longer, by route, with theirs: `pairs` carries twelve `venue|symbol` markets, and one
+ * market's symbol alone (a Polymarket slug) can run past a hundred characters — so its bound is its own, as the
+ * stream's `markets` is. */
+const LONG_VALUES: Readonly<Partial<Record<ReadRoute, ReadonlyMap<string, number>>>> = { quotes: new Map([["pairs", 2_000]]) };
 /** Longest request target a read may arrive with. */
 const RAW_URL_MAX = 8_192;
 /** The stream's query names, each with the longest value it may carry, in characters, decoded: `markets` to
@@ -149,17 +153,19 @@ const accountUrl = (base: string, route: ReadRoute, query: string): string =>
   `${base}/api/account${route === "account" ? "" : `/${route}`}${query === "" ? "" : `?${query}`}`;
 
 /** The query a read may pass on, rebuilt from the route's whitelisted names in the order they came, each
- * at most once, each value at most 240 characters, re-encoded; `fresh=1` sets `fresh` and is never part
- * of the query. `null`: an unknown or repeated name, an over-long value, an over-long or unparsable URL. */
+ * at most once, each value at most 240 characters ({@link LONG_VALUES} names the longer ones), re-encoded;
+ * `fresh=1` sets `fresh` and is never part of the query. `null`: an unknown or repeated name, an over-long
+ * value, an over-long or unparsable URL. */
 export function rebuildQuery(route: ReadRoute, rawUrl: string): { query: string; fresh: boolean } | null {
   const asked = searchOf(rawUrl);
   if (asked === null) return null;
   const allowed = ACCOUNT_QUERY[route];
+  const longer = LONG_VALUES[route];
   const seen = new Set<string>();
   const rebuilt = new URLSearchParams();
   let fresh = false;
   for (const [name, value] of asked) {
-    if (!allowed.includes(name) || seen.has(name) || value.length > VALUE_MAX) return null;
+    if (!allowed.includes(name) || seen.has(name) || value.length > (longer?.get(name) ?? VALUE_MAX)) return null;
     seen.add(name);
     if (name === "fresh") fresh = value === "1";
     else rebuilt.append(name, value);

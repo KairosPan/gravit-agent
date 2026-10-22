@@ -47,13 +47,14 @@ const quoted = (pairs, refuse = []) => ({
 });
 const NVDA_QUOTE = { price: 182.4, bid: 182.38, ask: 182.42, quoteAt: '2026-10-22T07:59:58.000Z', quoteFrom: 'Stand-in Broker · real time', changePct24h: 1.9, volumeUsd24h: 31688394070 };
 
-function memoryStorage(seed = {}, { failWrites = false } = {}) {
+// a browser's storage in memory; `failWrites` refuses every write, `failKeys` the writes under those keys alone
+function memoryStorage(seed = {}, { failWrites = false, failKeys = [] } = {}) {
   const map = new Map(Object.entries(seed));
   const writes = [];
   return {
     map, writes,
     getItem(key) { return map.has(key) ? map.get(key) : null; },
-    setItem(key, value) { if (failWrites) throw new Error('quota'); writes.push(key); map.set(key, String(value)); },
+    setItem(key, value) { if (failWrites || failKeys.includes(key)) throw new Error('quota'); writes.push(key); map.set(key, String(value)); },
     removeItem(key) { map.delete(key); },
   };
 }
@@ -657,6 +658,19 @@ test('old us: and crypto: stars are asked of the Account once; a hit moves the s
   assert.deepEqual(gone.m().watch, []);
   assert.deepEqual(gone.storage.writes, []);
   for (const x of [r, full]) x.markets.close();
+});
+
+test("an old star whose key the Account's store could not take stays on the cn list, said unsaved", async () => {
+  const all = fx('explore-all');
+  const storage = memoryStorage({ [STORAGE_KEY]: saved([asset('us:AAPL', { name: 'Apple' }), asset('cn:600519')]) }, { failKeys: [ACCOUNT_WATCH_KEY] });
+  const r = rig({ storage, answer: path => (query(path).q === 'AAPL' ? { ...all, items: [itemOf(all, 'stock:AAPL')] } : undefined) });
+  await settle();
+  assert.equal(r.m().asked['us:AAPL'], 'stock:AAPL', 'found');
+  assert.equal(r.m().watchError, 'unsaved', "the Account store's failure is said, and no cn write clears it");
+  assert.deepEqual(r.m().watchlist.map(a => a.id), ['us:AAPL', 'cn:600519'], 'the star stays where a reload finds it');
+  assert.deepEqual(JSON.parse(storage.map.get(STORAGE_KEY)).items.map(a => a.id), ['us:AAPL', 'cn:600519']);
+  assert.deepEqual(storage.writes, [], 'nothing was written');
+  r.markets.close();
 });
 
 test('a stream quote updates the followed market', async () => {

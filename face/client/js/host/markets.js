@@ -200,15 +200,18 @@ export function startMarkets({ store, getJson, createLiveQuotes, createSymbolSea
     const error = saveWatchlist(storage, items);
     store.dispatch('watchlistLoaded', { items, error: error ? 'unsaved' : null });
   }
+  // the Account keys starred, stored; the storage's error, or null
   function saveKeys(items) {
     const error = saveAccountWatch(storage, items);
     store.dispatch('accountWatchLoaded', { items, error: error ? 'unsaved' : null });
+    return error;
   }
 
   // Each old us:/crypto: star asked of the Account once, one at a time (explore?q=<its symbol, a coin's base>&limit=12): a row of
   // its kind whose base is that, in any case, is the star found — it moves to the Account's key (where the Account's list has
-  // room; else it stays on the cn list, starred as that key); none is a star the Account does not list, which stays, said so. A
-  // read that fails asks nothing, for the next boot to ask again; a star taken off while it is asked is left as it is.
+  // room and its write holds; else it stays on the cn list, starred as that key, for a reload to find); none is a star the
+  // Account does not list, which stays, said so. A read that fails asks nothing, for the next boot to ask again; a star taken off
+  // while it is asked is left as it is.
   async function askOld() {
     for (const entry of store.get().markets.watchlist) {   // the cn list as it booted
       if (closed) return;
@@ -229,7 +232,7 @@ export function startMarkets({ store, getJson, createLiveQuotes, createSymbolSea
       const keys = store.get().markets.watch;
       if (!keys.includes(hit.key)) {
         if (keys.length >= WATCH_LIMIT) continue;
-        saveKeys([...keys, hit.key]);
+        if (saveKeys([...keys, hit.key])) continue;   // unsaved: the cn list keeps it, and the error stands
       }
       saveList(store.get().markets.watchlist.filter(a => a.id !== entry.id));
     }

@@ -35,6 +35,26 @@ test('nav folds #/mail to Messages', () => {
   assert.deepEqual(R.nav(s, parseHash('#/mail')).route, { screen: 'messages', id: 'a' });
 });
 
+// the Account's quotes: the poll's answer and the stream's frames write the same pair, and the fresher price stays
+test("a quotes poll answer older than the pair's kept quote leaves it; one with no stamp replaces one with none", () => {
+  const pair = s => s.markets.accountQuotes['ex|ETH/USDT'];
+  const poll = market => ({ quotes: [{ venue: 'ex', symbol: 'ETH/USDT', market }] });
+  let s = R.streamQuote(emptyState(), { data: { venue: 'ex', symbol: 'ETH/USDT', last: 2455.6, priceAt: '2026-10-22T07:59:58.500Z', from: 'okx · live', live: true } });
+  s = R.accountQuotesLoaded(s, poll({ price: 2450, quoteAt: '2026-10-22T07:59:55.000Z', quoteFrom: 'OKX · 3 s' }));
+  assert.equal(pair(s).price, 2455.6, "the stream's fresher frame wins");
+  assert.equal(pair(s).quoteFrom, 'okx · live');
+  s = R.accountQuotesLoaded(s, poll({ price: 2457, quoteAt: '2026-10-22T07:59:59.000Z', quoteFrom: 'OKX' }));
+  assert.equal(pair(s).price, 2457, 'a newer answer replaces it');
+  s = R.accountQuotesLoaded(s, poll({ price: 2458, quoteAt: '2026-10-22T07:59:59.000Z' }));
+  assert.equal(pair(s).price, 2458, 'as does one of the same moment');
+  // without stamps the poll cannot be older: its answer replaces the pair's
+  const nvda = s => s.markets.accountQuotes['broker|NVDA'];
+  let t = R.accountQuotesLoaded(emptyState(), { quotes: [{ venue: 'broker', symbol: 'NVDA', market: { price: 182.4 } }] });
+  t = R.accountQuotesLoaded(t, { quotes: [{ venue: 'broker', symbol: 'NVDA', market: { price: 183 } }] });
+  assert.equal(nvda(t).price, 183);
+  assert.equal(nvda(t).quoteAt, null);
+});
+
 test('the empty state carries no demo slice', () => {
   const s = emptyState();
   for (const gone of ['plugins', 'memory', 'mail', 'banner', 'call', 'compose']) assert.equal(gone in s, false, gone);

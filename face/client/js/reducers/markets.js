@@ -21,6 +21,8 @@ const RANGES = ['1D', '5D', '1M', '3M', '6M', 'YTD', '1Y', '5Y', 'MAX'];
 const charted = (id, range) => isAccountKey(id) && RANGES.includes(range);
 const named = v => typeof v === 'string' && v !== '';
 const text = v => (typeof v === 'string' ? v : null);
+// a price's stamp as a time, or null when it has none that parses
+const timeOf = v => { const t = typeof v === 'string' ? Date.parse(v) : NaN; return Number.isFinite(t) ? t : null; };
 const blank = q => !String(q ?? '').trim();
 // a tab starts from Most traded, as Linqi's does
 const onTab = tab => ({ tab, sort: 'volume' });
@@ -43,15 +45,19 @@ export const reducers = {
   resultsFailed: (s, { at, message = null } = {}) => read(s, { status: 'error', at, message }),
 
   // the quotes?pairs= answer's rows, by 'venue|symbol': a row with its market sets the pair's figures; a refused one leaves the
-  // pair as it was
+  // pair as it was, and so does one whose price is stamped before the price kept (the stream's fresher frame stays)
   accountQuotesLoaded(s, { quotes } = {}) {
     if (!Array.isArray(quotes)) return s;
     let next = null;
     for (const q of quotes) {
       if (!isRecord(q) || !named(q.venue) || !named(q.symbol) || q.refusal !== undefined || !isRecord(q.market)) continue;
       const m = q.market;
+      const key = `${q.venue}|${q.symbol}`;
+      const stamped = timeOf(m.quoteAt);
+      const kept = timeOf(own(next ?? s.markets.accountQuotes, key)?.quoteAt);
+      if (stamped !== null && kept !== null && stamped < kept) continue;
       next ??= { ...s.markets.accountQuotes };
-      next[`${q.venue}|${q.symbol}`] = {
+      next[key] = {
         price: number(m.price), bid: number(m.bid), ask: number(m.ask), quoteAt: text(m.quoteAt), quoteFrom: text(m.quoteFrom),
         changePct24h: number(m.changePct24h), volumeUsd24h: number(m.volumeUsd24h),
       };
