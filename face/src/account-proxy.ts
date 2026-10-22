@@ -4,22 +4,27 @@
  * refuses any page at another origin — so the face's page never asks it: the
  * page asks the face, and the face asks the Account with the plain loopback
  * fetch `seat.ts` makes (no Origin, no Sec-Fetch-Site, no cookie, the URL's
- * own Host, `redirect: "error"`). Eleven reads, each an `exact` route, never a
- * prefix: the route table is the allow-list, and nothing else of the Account's
- * surface is reachable through the face. {@link createAccountReader} is the
- * `account` route's read without a route, for `seat.ts`.
+ * own Host, `redirect: "error"`). Eleven reads and the Account's push channel
+ * — `stream`, and `stream/markets`, the markets it follows — each an `exact`
+ * route, never a prefix: the route table is the allow-list, and nothing else
+ * of the Account's surface is reachable through the face.
+ * {@link createAccountReader} is the `account` route's read without a route,
+ * for `seat.ts`.
  *
  * The rules, the seat route's generalised:
  * - The fence first (`isTrustedDataRequest`, 403 with the fixed body), then 405
- *   for anything but GET, then the query, rebuilt from the route's names in
- *   {@link ACCOUNT_QUERY} ({@link rebuildQuery}); anything else is 400
- *   `invalid account request` and the Account is never asked. The raw query
- *   never reaches it, and `fresh` is the face's own flag, never forwarded. A
- *   disabled seat row disables the proxy: every route then answers 503
- *   `disabled` and asks nothing.
+ *   for any method but the route's (GET; POST for `stream/markets`), then the
+ *   query, rebuilt from the route's names in {@link ACCOUNT_QUERY}
+ *   ({@link rebuildQuery}); anything else is 400 `invalid account request` and
+ *   the Account is never asked. The raw query never reaches it, and `fresh` is
+ *   the face's own flag, never forwarded. A disabled seat row disables the
+ *   proxy: every valid read then answers 503 `disabled` and asks nothing (a
+ *   malformed query or a wrong method is refused before the row's state is
+ *   consulted).
  * - The Account's status and body pass through as they are, never parsed: its
- *   `{ok:false, refusal}` is the page's to draw, in its words. Every answer is
- *   `application/json` and `no-store`, as the Account's own reads are.
+ *   `{ok:false, refusal}` is the page's to draw, in its words. Every JSON
+ *   answer is `application/json` and `no-store`, as the Account's own reads
+ *   are.
  * - A failure of the fetch itself — refused, hanging past the route's abort on
  *   the headers or the body, a body that cannot be read — is a state, not an
  *   error: 503 `{"ok":false,"unreachable":"<CODE>"}` with the failure's code,
@@ -32,13 +37,28 @@
  *   re-served. Reads of one query share one fetch; `?fresh=1` skips the TTL
  *   and never joins a plain read in flight — it asks again once that one
  *   settles (the seat route's rule).
- * - Nothing of a body or a query is logged here.
+ * - `stream` is piped, one upstream request per browser connection, never
+ *   kept: `client` required ({@link STREAM_CLIENT}), `since` from the query or
+ *   else the browser's `Last-Event-ID`, `markets` at most 4 000 characters,
+ *   each name once. The Account's 200 is written through chunk by chunk as it
+ *   comes — ids, `retry:`, its heartbeat — never buffered, re-framed or read,
+ *   and the response ends when the Account ends the stream. The upstream is
+ *   aborted when the browser's response closes or errors, when the browser
+ *   falls 256 KiB behind (the response then destroyed, as `quotes.ts` does)
+ *   and on `dispose`. Any other answer is the Account's status and body — its
+ *   refusal past 32 streams among them.
+ * - `stream/markets` forwards a POST's body as posted — at most
+ *   {@link STREAM_BODY_LIMIT} bytes, else 413 — with `content-type:
+ *   application/json`, never parsed, kept or echoed; a disabled row answers
+ *   `disabled` once the body is read. The Account's status and body come back
+ *   as they are, never stale.
+ * - Nothing of a body, a query or a frame is logged here.
  * @module
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { seatUrl } from "./account-seat.ts";
 import { isTrustedDataRequest } from "./data.ts";
-import { FORBIDDEN, markStale } from "./http.ts";
+import { FORBIDDEN, HttpError, markStale, readBody } from "./http.ts";
 import type { RouteRegistrar } from "./static.ts";
 
 /** The Account's reads the face proxies: `account` is its `GET /api/account`, the rest `GET /api/account/<route>`. */
@@ -75,6 +95,12 @@ export const ACCOUNT_QUERY: Readonly<Record<ReadRoute, readonly string[]>> = {
   agents: ["fresh"],
 };
 
+/** The name a tab gives its stream, in the Account's grammar; the face's page mints `face-<24 hex>`. */
+export const STREAM_CLIENT = /^[A-Za-z0-9_-]{8,48}$/;
+
+/** Most bytes a `stream/markets` body may carry. */
+export const STREAM_BODY_LIMIT = 4096;
+
 /** The Account's answer — its status and its body as text — or the code of a fetch that failed. */
 export type AccountAnswer = { status: number; body: string } | { unreachable: string };
 
@@ -86,7 +112,7 @@ export interface AccountProxyDeps {
   url?: string;
   fetch?: typeof fetch;
   now?: () => number;
-  /** The composed `mcp-account` row is disabled: every route answers `disabled` and never asks the Account. */
+  /** The composed `mcp-account` row is disabled: every valid read answers `disabled` and never asks the Account. */
   disabled?: boolean;
   /** Per-route aborts in place of {@link ACCOUNT_ABORT_MS}, for the tests. */
   abortMs?: Partial<Record<ReadRoute, number>>;
@@ -97,6 +123,16 @@ const READ_ROUTES = Object.keys(ACCOUNT_QUERY) as ReadRoute[];
 const VALUE_MAX = 240;
 /** Longest request target a read may arrive with. */
 const RAW_URL_MAX = 8_192;
+/** The stream's query names, each with the longest value it may carry, in characters, decoded: `markets` to
+ * the Account's own cut; `client` is held to {@link STREAM_CLIENT} besides. */
+const STREAM_QUERY: ReadonlyMap<string, number> = new Map([["since", VALUE_MAX], ["client", VALUE_MAX], ["markets", 4_000]]);
+/** How long the Account may take on a `stream/markets` POST, headers and body. */
+const FOLLOW_ABORT_MS = 7_000;
+/** Most bytes a browser may leave unread on its stream; past it the face drops the response, as `quotes.ts` does. */
+const STREAM_UNREAD_MAX = 256 * 1024;
+const SSE_HEADERS = {
+  "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache, no-transform", connection: "keep-alive", "x-accel-buffering": "no",
+} as const;
 const INVALID = '{"ok":false,"error":"invalid account request"}';
 const METHOD_NOT_ALLOWED = '{"ok":false,"error":"method not allowed"}';
 const unreachable = (code: string): string => JSON.stringify({ ok: false, unreachable: code });
@@ -109,13 +145,8 @@ const accountUrl = (base: string, route: ReadRoute, query: string): string =>
  * at most once, each value at most 240 characters, re-encoded; `fresh=1` sets `fresh` and is never part
  * of the query. `null`: an unknown or repeated name, an over-long value, an over-long or unparsable URL. */
 export function rebuildQuery(route: ReadRoute, rawUrl: string): { query: string; fresh: boolean } | null {
-  if (rawUrl.length > RAW_URL_MAX) return null;
-  let asked: URLSearchParams;
-  try {
-    asked = new URL(rawUrl, "http://localhost").searchParams;
-  } catch {
-    return null;
-  }
+  const asked = searchOf(rawUrl);
+  if (asked === null) return null;
   const allowed = ACCOUNT_QUERY[route];
   const seen = new Set<string>();
   const rebuilt = new URLSearchParams();
@@ -129,6 +160,37 @@ export function rebuildQuery(route: ReadRoute, rawUrl: string): { query: string;
   return { query: rebuilt.toString(), fresh };
 }
 
+/** A request target's query; `null` when the target is over-long or unparsable. */
+function searchOf(rawUrl: string): URLSearchParams | null {
+  if (rawUrl.length > RAW_URL_MAX) return null;
+  try {
+    return new URL(rawUrl, "http://localhost").searchParams;
+  } catch {
+    return null;
+  }
+}
+
+/** The query a stream passes on: `since`, `client` and `markets` in the order they came, each at most once
+ * and within its {@link STREAM_QUERY} bound, re-encoded, `client` shaped as {@link STREAM_CLIENT}; with no
+ * `since` in the query, the browser's `Last-Event-ID` is `since`, within the same bound. `null`: anything
+ * else, as {@link rebuildQuery} refuses it. */
+function rebuildStreamQuery(rawUrl: string, lastEventId: string | string[] | undefined): string | null {
+  const asked = searchOf(rawUrl);
+  if (asked === null) return null;
+  const rebuilt = new URLSearchParams();
+  for (const [name, value] of asked) {
+    const max = STREAM_QUERY.get(name);
+    if (max === undefined || rebuilt.has(name) || value.length > max) return null;
+    rebuilt.append(name, value);
+  }
+  if (!STREAM_CLIENT.test(rebuilt.get("client") ?? "")) return null;
+  if (!rebuilt.has("since") && typeof lastEventId === "string" && lastEventId !== "") {
+    if (lastEventId.length > VALUE_MAX) return null;
+    rebuilt.append("since", lastEventId);
+  }
+  return rebuilt.toString();
+}
+
 /** A failure's code, bounded to a code's shape so no error text ever reaches the page. */
 function codeOf(err: unknown): string {
   const e = err as { cause?: { code?: unknown }; code?: unknown } | null;
@@ -136,13 +198,13 @@ function codeOf(err: unknown): string {
   return typeof code === "string" && /^[A-Z][A-Z0-9_]{1,31}$/.test(code) ? code : "unreachable";
 }
 
-/** One GET of the Account, cut at `abortMs` on the headers and the body: its status and body, or the
- * failure's code. Never rejects. */
-async function askAccount(doFetch: typeof fetch, url: string, abortMs: number): Promise<AccountAnswer> {
+/** One request to the Account — a GET, or what `init` asks — cut at `abortMs` on the headers and the body:
+ * its status and body, or the failure's code. Never rejects. */
+async function askAccount(doFetch: typeof fetch, url: string, abortMs: number, init: RequestInit = {}): Promise<AccountAnswer> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), abortMs);
   try {
-    const r = await doFetch(url, { signal: controller.signal, redirect: "error" });
+    const r = await doFetch(url, { ...init, signal: controller.signal, redirect: "error" });
     try {
       return { status: r.status, body: await r.text() };
     } catch {
@@ -276,9 +338,87 @@ const handler = (route: ReadRoute, reads: Reads, disabled: boolean) => async (re
   return kept === undefined ? send(res, 503, unreachable(answer.unreachable)) : send(res, 200, markStale(kept.body));
 };
 
-/** Mount the eleven read routes on the host webserver. `deps.reader` (one {@link createAccountReader}
- * made) serves `/data/account`, else the proxy makes its own; either way that route and the returned
- * reader read through one cache. `dispose` forgets every kept answer. */
+/** One browser connection's stream: the Account's 200 written through chunk by chunk as it comes, unchanged,
+ * and ended when the Account ends it; a browser {@link STREAM_UNREAD_MAX} bytes behind is dropped; any other
+ * answer is the Account's status and body, a failure 503 with its code. A response the browser has closed
+ * is written nothing. Never rejects. */
+async function pipeStream(doFetch: typeof fetch, url: string, signal: AbortSignal, res: ServerResponse): Promise<void> {
+  const answer = (status: number, body: string): void => { if (!res.destroyed) send(res, status, body); };
+  let r: Response;
+  try {
+    r = await doFetch(url, { headers: { accept: "text/event-stream" }, redirect: "error", signal });
+  } catch (err) {
+    return answer(503, unreachable(codeOf(err)));
+  }
+  if (r.status !== 200) {
+    let body: string;
+    try {
+      body = await r.text();
+    } catch {
+      return answer(503, unreachable("unreadable"));
+    }
+    return answer(r.status, body);
+  }
+  res.writeHead(200, SSE_HEADERS);
+  try {
+    for await (const chunk of r.body ?? []) {
+      if (res.destroyed) break;
+      if (res.writableLength > STREAM_UNREAD_MAX) {
+        res.destroy();
+        break;
+      }
+      res.write(chunk);
+    }
+  } catch {
+    /* The Account broke off, or the request was aborted: a stream already open has nothing more to say. */
+  }
+  if (!res.destroyed) res.end();
+}
+
+/** `stream`: the fence, GET only, the rebuilt query, then one upstream stream for this browser connection,
+ * aborted when its response closes or errors, or on `dispose` (through `open`). */
+const streamHandler = (s: Settings, open: Set<AbortController>) => async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+  if (!isTrustedDataRequest(req)) return send(res, 403, FORBIDDEN);
+  if (req.method !== "GET") return send(res, 405, METHOD_NOT_ALLOWED);
+  const query = rebuildStreamQuery(req.url ?? "", req.headers["last-event-id"]);
+  if (query === null) return send(res, 400, INVALID);
+  if (s.disabled) return send(res, 503, unreachable("disabled"));
+  const controller = new AbortController();
+  const abort = (): void => controller.abort();
+  /* Wired before the fetch: a browser that leaves while the Account is still to answer cancels the request. */
+  res.once("close", abort);
+  res.on("error", abort);
+  if (res.destroyed) abort();
+  open.add(controller);
+  try {
+    await pipeStream(s.doFetch, `${s.url}/api/account/stream?${query}`, controller.signal, res);
+  } finally {
+    open.delete(controller);
+  }
+};
+
+/** `stream/markets`: the fence, POST only, the body read under its limit, then the Account; its status and
+ * body come back as they are, never kept. */
+const followHandler = (s: Settings) => async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+  if (!isTrustedDataRequest(req)) return send(res, 403, FORBIDDEN);
+  if (req.method !== "POST") return send(res, 405, METHOD_NOT_ALLOWED);
+  let body: string;
+  try {
+    body = await readBody(req, STREAM_BODY_LIMIT);
+  } catch (err) {
+    return err instanceof HttpError ? send(res, err.status, JSON.stringify({ ok: false, error: err.message })) : send(res, 400, INVALID);
+  }
+  if (s.disabled) return send(res, 503, unreachable("disabled"));
+  const answer = await askAccount(s.doFetch, `${s.url}/api/account/stream/markets`, FOLLOW_ABORT_MS, {
+    method: "POST", headers: { "content-type": "application/json" }, body,
+  });
+  return "status" in answer ? send(res, answer.status, answer.body) : send(res, 503, unreachable(answer.unreachable));
+};
+
+/** Mount the eleven read routes and the two stream routes on the host webserver. `deps.reader` (one
+ * {@link createAccountReader} made) serves `/data/account`, else the proxy makes its own; either way that
+ * route and the returned reader read through one cache. `dispose` forgets every kept answer and aborts
+ * every open stream's upstream. */
 export function registerAccountProxy(
   webServer: RouteRegistrar,
   deps: AccountProxyDeps & { reader?: AccountReader } = {},
@@ -291,5 +431,15 @@ export function registerAccountProxy(
     all.push(reads);
     webServer.register({ kind: "exact", path: facePath(route), handler: handler(route, reads, s.disabled) });
   }
-  return { reader, dispose: () => { for (const reads of all) reads.clear(); } };
+  /* The upstream streams open now, one per browser connection. */
+  const open = new Set<AbortController>();
+  webServer.register({ kind: "exact", path: "/data/account/stream", handler: streamHandler(s, open) });
+  webServer.register({ kind: "exact", path: "/data/account/stream/markets", handler: followHandler(s) });
+  return {
+    reader,
+    dispose: () => {
+      for (const reads of all) reads.clear();
+      for (const stream of open) stream.abort();
+    },
+  };
 }

@@ -1,10 +1,14 @@
 /** `/data/account` and `/data/account/<route>` (spec 2026-10-22 §5.1): the
  * Account's reads through the face — the whitelist, the fence, the bodies
  * passed through, the per-route caches and their flights, the failure codes,
- * the disabled row, and the shared `account` reader `seat.ts` reads. */
+ * the disabled row, and the shared `account` reader `seat.ts` reads — and its
+ * push channel: `stream` piped per browser connection, `stream/markets`
+ * forwarded. */
 import test from "node:test";
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { Readable } from "node:stream";
 import type { WebRoute } from "@deepseek-ai/dsh-host-webserver";
 import { seatUrl } from "../src/account-seat.ts";
 import {
@@ -12,6 +16,8 @@ import {
   ACCOUNT_CACHE_KEYS,
   ACCOUNT_QUERY,
   ACCOUNT_TTL_MS,
+  STREAM_BODY_LIMIT,
+  STREAM_CLIENT,
   createAccountReader,
   rebuildQuery,
   registerAccountProxy,
@@ -41,22 +47,66 @@ const ROUTES: ReadonlyArray<readonly [face: string, account: string]> = [
   ["/data/account/history", "/api/account/history"],
   ["/data/account/agents", "/api/account/agents"],
 ];
+const STREAM = "/data/account/stream";
+const FOLLOW = "/data/account/stream/markets";
+/** A tab's stream name as the face's page mints it: `face-` and 24 hex. */
+const CLIENT = "face-0123456789abcdef01234567";
+const JSON_POST = { host: "127.0.0.1:3090", "content-type": "application/json" };
+const SSE_HEADERS = { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache, no-transform", connection: "keep-alive", "x-accel-buffering": "no" };
 
-function fakeRes(): { out: { status: number; body: string; headers: Record<string, string> }; res: ServerResponse } {
-  const out = { status: 0, body: "", headers: {} as Record<string, string> };
-  const res = {
-    writeHead(status: number, headers?: Record<string, string>) { out.status = status; Object.assign(out.headers, headers ?? {}); return res; },
-    end(body?: string | Buffer) { out.body = String(body ?? ""); return res; },
-  };
-  return { out, res: res as unknown as ServerResponse };
+/** The response a handler answers into: its status, headers and the body `end` carried; for a stream, every
+ * chunk written and how it closed. `hangUp` is the browser leaving; a test sets `writableLength`. */
+class FakeRes extends EventEmitter {
+  status = 0;
+  headers: Record<string, string> = {};
+  body = "";
+  writes: Uint8Array[] = [];
+  ended = false;
+  destroyed = false;
+  /** The face destroyed the response, as opposed to the browser leaving. */
+  dropped = false;
+  writableLength = 0;
+  writeHead(status: number, headers?: Record<string, string>): this { this.status = status; Object.assign(this.headers, headers ?? {}); return this; }
+  write(chunk: Uint8Array): boolean { this.writes.push(chunk); return true; }
+  end(body?: string | Buffer): this { this.body = String(body ?? ""); this.ended = true; return this; }
+  destroy(): this { this.dropped = true; this.hangUp(); return this; }
+  hangUp(): void { if (!this.destroyed) { this.destroyed = true; this.emit("close"); } }
 }
 
-const req = (url: string, headers: Record<string, string> = { host: "127.0.0.1:3090" }, method = "GET"): IncomingMessage =>
-  ({ url, headers, method } as unknown as IncomingMessage);
+function fakeRes(): { out: FakeRes; res: ServerResponse } {
+  const out = new FakeRes();
+  return { out, res: out as unknown as ServerResponse };
+}
 
-type FakeAnswer = { ok: boolean; status: number; text(): Promise<string> };
-type FakeInit = { signal: AbortSignal; redirect: string; headers?: unknown; method?: string };
+/** A request; with a `body`, one the handler can read, as the face's `readBody` reads it. */
+const req = (url: string, headers: Record<string, string> = { host: "127.0.0.1:3090" }, method = "GET", body?: string): IncomingMessage =>
+  (body === undefined ? { url, headers, method } : Object.assign(Readable.from([Buffer.from(body)]), { url, headers, method })) as unknown as IncomingMessage;
+
+type FakeAnswer = { ok: boolean; status: number; text(): Promise<string>; headers?: Headers; body?: ReadableStream<Uint8Array> | null };
+type FakeInit = { signal: AbortSignal; redirect: string; headers?: unknown; method?: string; body?: unknown };
 type FakeFetch = (url: string, init: FakeInit) => Promise<FakeAnswer>;
+
+const encode = (text: string): Uint8Array => new TextEncoder().encode(text);
+const aborted = (): DOMException => new DOMException("This operation was aborted", "AbortError");
+const sseAnswer = (body: ReadableStream<Uint8Array>): FakeAnswer =>
+  ({ ok: true, status: 200, headers: new Headers({ "content-type": "text/event-stream" }), text: async () => "", body });
+
+/** The Account's stream: its body emits `chunks`, then ends. */
+const streaming = (chunks: readonly Uint8Array[]): FakeFetch => async () =>
+  sseAnswer(new ReadableStream<Uint8Array>({ start(c) { for (const chunk of chunks) c.enqueue(chunk); c.close(); } }));
+
+/** An Account whose every stream stays open: `push(i, chunk)` sends a chunk on the i-th one opened; aborting a
+ * request errors its body, as undici's does. */
+function holdingAccount() {
+  const pushers: Array<(chunk: Uint8Array) => void> = [];
+  const doFetch: FakeFetch = async (_url, init) => sseAnswer(new ReadableStream<Uint8Array>({
+    start(c) {
+      pushers.push((chunk) => c.enqueue(chunk));
+      init.signal.addEventListener("abort", () => c.error(aborted()));
+    },
+  }));
+  return { doFetch, push: (i: number, chunk: Uint8Array): void => pushers[i](chunk) };
+}
 
 const ok = (body: string, status = 200): FakeAnswer => ({ ok: status >= 200 && status < 300, status, text: async () => body });
 const answering = (body: string, status = 200): FakeFetch => async () => ok(body, status);
@@ -73,16 +123,16 @@ function proxyWith(doFetch: FakeFetch, now: () => number = () => NOW, more: Acco
 }
 
 /** Start one request through the route found by the URL's path; `done` settles when the handler has answered into `out`. */
-function start(routes: WebRoute[], url: string, headers?: Record<string, string>, method?: string) {
+function start(routes: WebRoute[], url: string, headers?: Record<string, string>, method?: string, body?: string) {
   const path = url.split("?", 1)[0];
   const route = routes.find((r) => r.path === path);
   assert.ok(route !== undefined, `no route at ${path}`);
   const { out, res } = fakeRes();
-  return { out, done: Promise.resolve(route.handler(req(url, headers, method), res)) };
+  return { out, done: Promise.resolve(route.handler(req(url, headers, method, body), res)) };
 }
 
-async function call(routes: WebRoute[], url: string, headers?: Record<string, string>, method?: string) {
-  const one = start(routes, url, headers, method);
+async function call(routes: WebRoute[], url: string, headers?: Record<string, string>, method?: string, body?: string) {
+  const one = start(routes, url, headers, method, body);
   await one.done;
   return one.out;
 }
@@ -96,10 +146,11 @@ test("rebuildQuery: the whitelist, once each, 240 characters, fresh stripped", (
   assert.deepEqual(rebuildQuery("account", "/data/account"), { query: "", fresh: false });
 });
 
-test("the routes: eleven exact paths; the fence refuses a foreign Origin and a missing Host before any fetch", async () => {
+test("the routes: thirteen exact paths; the fence refuses a foreign Origin and a missing Host before any fetch", async () => {
   const { routes, fetched } = proxyWith(answering(OK_BODY));
-  assert.deepEqual(routes.map((r) => `${r.kind} ${r.path}`), ROUTES.map(([face]) => `exact ${face}`));
-  for (const [face] of ROUTES) {
+  const paths = [...ROUTES.map(([face]) => face), STREAM, FOLLOW];
+  assert.deepEqual(routes.map((r) => `${r.kind} ${r.path}`), paths.map((face) => `exact ${face}`));
+  for (const face of paths) {
     const foreign = await call(routes, face, { host: "127.0.0.1:3090", origin: "https://evil.example" });
     assert.equal(foreign.status, 403, face); assert.equal(foreign.body, FORBIDDEN);
     assert.equal(foreign.headers["content-type"], JSON_TYPE);
@@ -349,6 +400,11 @@ test("a disabled row answers 503 unreachable disabled on every route without a f
     assert.equal(a.headers["content-type"], JSON_TYPE); assert.equal(a.headers["cache-control"], "no-store");
   }
   assert.equal((await call(routes, "/data/account?fresh=1")).body, DISABLED);
+  const stream = await call(routes, `${STREAM}?client=${CLIENT}`);
+  assert.equal(stream.status, 503); assert.equal(stream.body, DISABLED);
+  const follow = await call(routes, FOLLOW, JSON_POST, "POST", `{"client":"${CLIENT}","markets":[]}`);
+  assert.equal(follow.status, 503); assert.equal(follow.body, DISABLED);
+  assert.equal((await call(routes, `${STREAM}?client=short`)).status, 400, "a malformed request is refused before the row's state is consulted");
   assert.deepEqual(await proxy.reader.read(), { unreachable: "disabled" });
   assert.deepEqual(await proxy.reader.read(true), { unreachable: "disabled" });
   let asked = 0;
@@ -359,7 +415,7 @@ test("a disabled row answers 503 unreachable disabled on every route without a f
 
 test("POST on a GET route is 405", async () => {
   const { routes, fetched } = proxyWith(answering(OK_BODY));
-  for (const [face] of ROUTES) {
+  for (const face of [...ROUTES.map(([path]) => path), STREAM]) {
     const a = await call(routes, face, { host: "127.0.0.1:3090", "content-type": "application/json" }, "POST");
     assert.equal(a.status, 405, face); assert.equal(a.body, '{"ok":false,"error":"method not allowed"}');
     assert.equal(a.headers["content-type"], JSON_TYPE);
@@ -404,4 +460,198 @@ test("createAccountReader: read() is the account route's cache; read(true) asks 
   const failing: AccountReader = { read: async () => { throw Object.assign(new Error("private words"), { code: "ECONNRESET" }); } };
   const broken = await call(proxyWith(answering(OK_BODY), () => NOW, { reader: failing }).routes, "/data/account");
   assert.equal(broken.status, 503); assert.equal(broken.body, '{"ok":false,"unreachable":"ECONNRESET"}', "its rejection is a code, never its text");
+});
+
+test("the stream: a bad client id is 400; a good one opens upstream with accept text/event-stream, since and markets as sent; frames pass through byte for byte", async () => {
+  assert.equal(String(STREAM_CLIENT), "/^[A-Za-z0-9_-]{8,48}$/");
+  /* A frame cut inside a two-byte letter: a pipe that decoded and re-encoded its chunks would break it. */
+  const frame = encode('id: 1a2b3c4d.2\nevent: statement\ndata: {"venue":"Café"}\n\n');
+  const cut = frame.indexOf(0xc3) + 1;
+  const chunks = [encode("retry: 1000\n\n"), encode('id: ab.1\nevent: hb\ndata: {"at":1}\n\n'), frame.subarray(0, cut), frame.subarray(cut)];
+  const { routes, fetched, inits } = proxyWith(streaming(chunks));
+  const refused = [
+    STREAM,
+    `${STREAM}?client=`,
+    `${STREAM}?client=abcdefg`,
+    `${STREAM}?client=${"a".repeat(49)}`,
+    `${STREAM}?client=face.0123456789`,
+    `${STREAM}?client=face%200123456789`,
+    `${STREAM}?client=face-0123%2F456789`,
+    `${STREAM}?since=1a2b3c4d.7&markets=okx:BTC-USDT`,
+    `${STREAM}?client=${CLIENT}&client=${CLIENT}`,
+    `${STREAM}?client=${CLIENT}&since=a.1&since=a.2`,
+    `${STREAM}?client=${CLIENT}&force=1`,
+    `${STREAM}?client=${CLIENT}&fresh=1`,
+    `${STREAM}?client=${CLIENT}&since=${"1".repeat(241)}`,
+    `${STREAM}?client=${CLIENT}&markets=${"m".repeat(4001)}`,
+  ];
+  for (const url of refused) {
+    const a = await call(routes, url);
+    assert.equal(a.status, 400, url.slice(0, 80)); assert.equal(a.body, INVALID);
+    assert.equal(a.headers["content-type"], JSON_TYPE); assert.equal(a.headers["cache-control"], "no-store");
+  }
+  assert.equal(fetched.length, 0, "a refused stream never reaches the Account");
+
+  const browser = { host: "127.0.0.1:3090", "sec-fetch-site": "same-origin", cookie: "dsh-auth-1=secret", accept: "text/event-stream" };
+  const a = await call(routes, `${STREAM}?since=1a2b3c4d.7&client=${CLIENT}&markets=okx:BTC-USDT,~coinbase:ETH-USD`, browser);
+  assert.deepEqual(fetched, [`${URL_}/api/account/stream?since=1a2b3c4d.7&client=${CLIENT}&markets=okx%3ABTC-USDT%2C%7Ecoinbase%3AETH-USD`]);
+  assert.deepEqual([...new URL(fetched[0]).searchParams], [["since", "1a2b3c4d.7"], ["client", CLIENT], ["markets", "okx:BTC-USDT,~coinbase:ETH-USD"]], "the values as sent, in their order");
+  assert.deepEqual(inits[0].headers, { accept: "text/event-stream" }, "accept alone: no header of the browser's");
+  assert.equal(inits[0].redirect, "error"); assert.equal(inits[0].method, undefined);
+  assert.ok(inits[0].signal instanceof AbortSignal);
+  assert.equal(a.status, 200); assert.deepEqual(a.headers, SSE_HEADERS);
+  assert.deepEqual(a.writes, chunks, "each chunk written as it came: no frame re-cut, no byte re-encoded");
+  assert.equal(Buffer.concat(a.writes).toString("utf8"), 'retry: 1000\n\nid: ab.1\nevent: hb\ndata: {"at":1}\n\nid: 1a2b3c4d.2\nevent: statement\ndata: {"venue":"Café"}\n\n');
+  assert.equal(a.ended, true, "the response ends when the Account ends the stream");
+  assert.equal(a.dropped, false);
+
+  const widest = await call(routes, `${STREAM}?client=${"a".repeat(48)}&since=${"1".repeat(240)}&markets=${"m".repeat(4000)}`);
+  assert.equal(widest.status, 200, "48, 240 and 4 000 characters pass");
+  assert.equal(fetched.length, 2);
+});
+
+test("Last-Event-ID becomes since when the query has none; a since in the query wins", async () => {
+  const { routes, fetched, inits } = proxyWith(streaming([encode("retry: 1000\n\n")]));
+  const resuming = (id: string): Record<string, string> => ({ host: "127.0.0.1:3090", "last-event-id": id });
+  await call(routes, `${STREAM}?client=${CLIENT}`, resuming("1a2b3c4d.42"));
+  assert.equal(fetched[0], `${URL_}/api/account/stream?client=${CLIENT}&since=1a2b3c4d.42`);
+  assert.deepEqual(inits[0].headers, { accept: "text/event-stream" }, "the id travels as since, never as a header");
+  await call(routes, `${STREAM}?since=1a2b3c4d.40&client=${CLIENT}`, resuming("1a2b3c4d.42"));
+  assert.equal(fetched[1], `${URL_}/api/account/stream?since=1a2b3c4d.40&client=${CLIENT}`, "the query's since wins");
+  await call(routes, `${STREAM}?client=${CLIENT}`);
+  assert.equal(fetched[2], `${URL_}/api/account/stream?client=${CLIENT}`, "neither: no since");
+  await call(routes, `${STREAM}?client=${CLIENT}`, resuming("x&client=someone-else-1"));
+  assert.equal(fetched[3], `${URL_}/api/account/stream?client=${CLIENT}&since=x%26client%3Dsomeone-else-1`, "the header is one value: it names no parameter of its own");
+  const long = await call(routes, `${STREAM}?client=${CLIENT}`, resuming("1".repeat(241)));
+  assert.equal(long.status, 400, "an id longer than a since may be is refused as that since is"); assert.equal(long.body, INVALID);
+  assert.equal(fetched.length, 4);
+});
+
+test("the Account's 503 passes through as 503 with its body; an unreachable upstream is 503 unreachable", async () => {
+  const refusing = (status: number, body: string): FakeFetch => async () =>
+    ({ ok: false, status, headers: new Headers({ "content-type": "application/json; charset=utf-8" }), text: async () => body, body: null });
+  const full = '{"ok":false,"error":"this account has 32 pages listening already: close a tab of it, and this one listens again on its next try"}';
+  const a = await call(proxyWith(refusing(503, full)).routes, `${STREAM}?client=${CLIENT}`);
+  assert.equal(a.status, 503); assert.equal(a.body, full, "the Account's sentence, as it said it");
+  assert.equal(a.headers["content-type"], JSON_TYPE); assert.equal(a.headers["cache-control"], "no-store");
+  assert.deepEqual(a.writes, [], "no stream is opened on a refusal");
+  const named = '{"ok":false,"error":"a page names itself in 8 to 48 letters, digits, dashes or underscores"}';
+  const b = await call(proxyWith(refusing(400, named)).routes, `${STREAM}?client=${CLIENT}`);
+  assert.equal(b.status, 400); assert.equal(b.body, named, "any answer but a 200 is the Account's status and body");
+
+  const refused = proxyWith(async () => { throw Object.assign(new TypeError("fetch failed secret-host-name"), { cause: { code: "ECONNREFUSED" } }); });
+  const c = await call(refused.routes, `${STREAM}?client=${CLIENT}`);
+  assert.equal(c.status, 503); assert.equal(c.body, '{"ok":false,"unreachable":"ECONNREFUSED"}');
+  assert.equal(c.headers["content-type"], JSON_TYPE); assert.equal(c.headers["cache-control"], "no-store");
+  assert.doesNotMatch(c.body, /secret/);
+  const redirected = proxyWith(async () => { throw new TypeError("fetch failed: redirect to a private place"); });
+  assert.equal((await call(redirected.routes, `${STREAM}?client=${CLIENT}`)).body, '{"ok":false,"unreachable":"unreachable"}', "a failure with no code says unreachable");
+  const unreadable = proxyWith(async () => ({ ok: false, status: 503, text: async () => { throw new TypeError("terminated: private"); }, body: null }));
+  const u = await call(unreadable.routes, `${STREAM}?client=${CLIENT}`);
+  assert.equal(u.status, 503); assert.equal(u.body, '{"ok":false,"unreachable":"unreadable"}');
+});
+
+test("closing the browser response aborts the upstream fetch", async () => {
+  /* The browser leaves while the Account is still to answer. */
+  const pending = proxyWith((_url, init) => new Promise<FakeAnswer>((_resolve, reject) => init.signal.addEventListener("abort", () => reject(aborted()))));
+  const early = start(pending.routes, `${STREAM}?client=${CLIENT}`);
+  await tick();
+  assert.equal(pending.inits[0].signal.aborted, false, "the request waits on the Account");
+  early.out.hangUp();
+  await early.done;
+  assert.equal(pending.inits[0].signal.aborted, true, "a browser gone before the Account answers cancels the request");
+  assert.equal(early.out.status, 0, "and is written nothing");
+
+  /* The browser leaves mid-stream. */
+  const account = holdingAccount();
+  const live = proxyWith(account.doFetch);
+  const one = start(live.routes, `${STREAM}?client=${CLIENT}`);
+  await tick();
+  account.push(0, encode("retry: 1000\n\n"));
+  await tick();
+  assert.equal(one.out.status, 200); assert.equal(one.out.writes.length, 1);
+  assert.equal(live.inits[0].signal.aborted, false, "an open stream holds its upstream");
+  one.out.hangUp();
+  await one.done;
+  assert.equal(live.inits[0].signal.aborted, true, "a closed response closes its upstream");
+  assert.equal(one.out.ended, false, "and is not written to again");
+
+  /* The response errors. */
+  const two = start(live.routes, `${STREAM}?client=${CLIENT}`);
+  await tick();
+  two.out.emit("error", new Error("write EPIPE"));
+  await two.done;
+  assert.equal(live.inits[1].signal.aborted, true, "an errored response closes its upstream");
+
+  /* A browser that reads too slowly. */
+  const three = start(live.routes, `${STREAM}?client=${CLIENT}`);
+  await tick();
+  three.out.writableLength = 256 * 1024;
+  account.push(2, encode("retry: 1000\n\n"));
+  await tick();
+  assert.equal(three.out.writes.length, 1, "256 KiB unread is still written to");
+  three.out.writableLength = 256 * 1024 + 1;
+  account.push(2, encode(': hb 1\nevent: hb\ndata: {"at":1}\n\n'));
+  await three.done;
+  assert.equal(three.out.dropped, true, "past 256 KiB the response is destroyed, as quotes.ts destroys it");
+  assert.equal(three.out.writes.length, 1, "the chunk past the bound is not written");
+  assert.equal(live.inits[2].signal.aborted, true, "and the upstream is aborted with it");
+
+  /* The proxy disposed. */
+  const four = start(live.routes, `${STREAM}?client=${CLIENT}`);
+  await tick();
+  live.proxy.dispose();
+  await four.done;
+  assert.equal(live.inits[3].signal.aborted, true, "dispose aborts every open upstream");
+  assert.equal(four.out.ended, true, "and ends the browser's response");
+});
+
+test("stream/markets: the body passes as bytes with application/json; 413 past 4096; GET is 405", async () => {
+  assert.equal(STREAM_BODY_LIMIT, 4096);
+  const following = '{"ok":true,"following":["okx:BTC-USDT","~kalshi:KXHIGHNY-25OCT23"]}';
+  const { routes, fetched, inits } = proxyWith(answering(following));
+  const body = `{"client":"${CLIENT}", "markets":["okx:BTC-USDT","~kalshi:KXHIGHNY-25OCT23"],"n":3,"note":"café"}`;
+  const a = await call(routes, FOLLOW, JSON_POST, "POST", body);
+  assert.equal(a.status, 200); assert.equal(a.body, following, "the Account's answer, as it said it");
+  assert.equal(a.headers["content-type"], JSON_TYPE); assert.equal(a.headers["cache-control"], "no-store");
+  assert.deepEqual(fetched, [`${URL_}/api/account/stream/markets`]);
+  assert.equal(inits[0].method, "POST");
+  assert.deepEqual(inits[0].headers, { "content-type": "application/json" });
+  assert.equal(inits[0].body, body, "the body as posted: never parsed, never re-written");
+  assert.equal(inits[0].redirect, "error"); assert.ok(inits[0].signal instanceof AbortSignal);
+  await call(routes, FOLLOW, JSON_POST, "POST", body);
+  assert.equal(fetched.length, 2, "never kept: every telling reaches the Account");
+
+  const none = '{"ok":false,"error":"no stream of that page is open: it opens one at GET /api/account/stream first"}';
+  const closed = await call(proxyWith(answering(none, 404)).routes, FOLLOW, JSON_POST, "POST", body);
+  assert.equal(closed.status, 404); assert.equal(closed.body, none, "the Account's status and words");
+
+  const tooBig = [["x".repeat(STREAM_BODY_LIMIT + 1), "4 097 bytes"], ["é".repeat(STREAM_BODY_LIMIT / 2 + 1), "2 049 letters, 4 098 bytes: the limit counts bytes"]] as const;
+  for (const [over, why] of tooBig) {
+    const big = await call(routes, FOLLOW, JSON_POST, "POST", over);
+    assert.equal(big.status, 413, why); assert.equal(big.body, '{"ok":false,"error":"body too large"}');
+    assert.equal(big.headers["content-type"], JSON_TYPE); assert.equal(big.headers["cache-control"], "no-store");
+  }
+  assert.equal(fetched.length, 2, "a body past the limit never reaches the Account");
+  await call(routes, FOLLOW, JSON_POST, "POST", "x".repeat(STREAM_BODY_LIMIT));
+  assert.equal(fetched.length, 3, "4 096 bytes pass");
+  const cutOff = Object.assign(new Readable({ read() { this.destroy(new Error("aborted")); } }), { url: FOLLOW, headers: JSON_POST, method: "POST" });
+  const halfRead = fakeRes();
+  await routes.find((r) => r.path === FOLLOW)!.handler(cutOff as unknown as IncomingMessage, halfRead.res);
+  assert.equal(halfRead.out.status, 400, "a body that breaks off is refused, never a rejection"); assert.equal(halfRead.out.body, INVALID);
+  await call(routes, `${FOLLOW}?client=${CLIENT}&force=1`, JSON_POST, "POST", body);
+  assert.equal(fetched.at(-1), `${URL_}/api/account/stream/markets`, "a query on the POST never reaches the Account");
+  assert.equal(fetched.length, 4);
+
+  for (const method of ["GET", "PUT", "DELETE"]) {
+    const m = await call(routes, FOLLOW, JSON_POST, method);
+    assert.equal(m.status, 405, method); assert.equal(m.body, '{"ok":false,"error":"method not allowed"}');
+  }
+  assert.equal((await call(routes, FOLLOW, { ...JSON_POST, origin: "https://evil.example" }, "POST", body)).status, 403, "the fence comes first");
+  assert.equal(fetched.length, 4);
+
+  const refused = proxyWith(async () => { throw Object.assign(new TypeError("fetch failed secret-host-name"), { cause: { code: "ECONNREFUSED" } }); });
+  const u = await call(refused.routes, FOLLOW, JSON_POST, "POST", body);
+  assert.equal(u.status, 503); assert.equal(u.body, '{"ok":false,"unreachable":"ECONNREFUSED"}');
+  assert.doesNotMatch(u.body, /secret/);
 });
