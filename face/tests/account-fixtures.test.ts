@@ -1,7 +1,7 @@
 // face/tests/account-fixtures.test.ts
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 const fx = (name: string): any => JSON.parse(readFileSync(new URL(`./fixtures/account/${name}.json`, import.meta.url), "utf8"));
 
 test("the Account fixtures carry what the views read", () => {
@@ -19,4 +19,21 @@ test("the Account fixtures carry what the views read", () => {
   assert.ok(Array.isArray(fx("candles").candles)); assert.ok(fx("market").market?.symbol);
   const frames = readFileSync(new URL("./fixtures/account/stream-frames.txt", import.meta.url), "utf8");
   assert.match(frames, /^retry: 1000\n\n/); assert.match(frames, /\nevent: (snapshot|hb)\n/);
+});
+
+/** Where `value` carries a `native` or `icon` key, at any depth, and an array past `keep` entries. */
+const offences = (value: unknown, at: string, keep = Infinity): string[] => {
+  if (Array.isArray(value)) return [...(value.length > keep ? [`${at}: ${value.length} entries`] : []), ...value.flatMap((inner, i) => offences(inner, `${at}[${i}]`, keep))];
+  if (typeof value !== "object" || value === null) return [];
+  return Object.entries(value).flatMap(([key, inner]) => [...(key === "native" || key === "icon" ? [`${at}.${key}`] : []), ...offences(inner, `${at}.${key}`, keep)]);
+};
+
+test("no native or icon key at any depth, no array past 12 entries, the stream payloads stripped too", () => {
+  const dir = new URL("./fixtures/account/", import.meta.url);
+  const names = readdirSync(dir).filter((name) => name.endsWith(".json"));
+  assert.ok(names.length > 0, "the JSON fixtures are there");
+  for (const name of names) assert.deepEqual(offences(JSON.parse(readFileSync(new URL(name, dir), "utf8")), name, 12), []);
+  const data = readFileSync(new URL("stream-frames.txt", dir), "utf8").split("\n").filter((line) => line.startsWith("data:"));
+  assert.ok(data.length > 0, "the stream fixture has data lines");
+  assert.deepEqual(data.flatMap((line, i) => offences(JSON.parse(line.slice("data:".length)), `stream data line ${i + 1}`)), []);
 });

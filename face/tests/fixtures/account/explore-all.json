@@ -1,6 +1,6 @@
 {
   "ok": true,
-  "asOf": "2026-10-22T07:19:22.566Z",
+  "asOf": "2026-10-22T07:35:46.886Z",
   "tabs": [
     {
       "id": "all",
@@ -51,7 +51,7 @@
         "venue": "broker",
         "venueName": "Stand-in Broker"
       },
-      "volumeUsd24h": 31658349604,
+      "volumeUsd24h": 31688393074,
       "session": {
         "open": false,
         "opensAt": "2026-10-22T13:30:00.000Z"
@@ -128,7 +128,7 @@
         "venue": "broker",
         "venueName": "Stand-in Broker"
       },
-      "volumeUsd24h": 27942386483,
+      "volumeUsd24h": 27876797090,
       "session": {
         "open": false,
         "opensAt": "2026-10-22T13:30:00.000Z"
@@ -205,7 +205,7 @@
         "venue": "broker",
         "venueName": "Stand-in Broker"
       },
-      "volumeUsd24h": 11150845891,
+      "volumeUsd24h": 11110521526,
       "session": {
         "open": false,
         "opensAt": "2026-10-22T13:30:00.000Z"
@@ -239,14 +239,14 @@
       "kind": "perp",
       "name": "BTC perpetual",
       "base": "BTC",
-      "price": 62498.7,
+      "price": 62498.8,
       "changePct24h": 2.3,
-      "change24h": 1405.3,
+      "change24h": 1404.9,
       "changeFrom": {
         "venue": "ex",
         "venueName": "Stand-in Exchange"
       },
-      "volumeUsd24h": 4135642997,
+      "volumeUsd24h": 4121786065,
       "fundingRate": 0.0001,
       "nextFundingAt": "2026-10-22T08:00:00.000Z",
       "tabs": [
@@ -261,8 +261,8 @@
           "connected": true,
           "canTrade": true,
           "public": false,
-          "price": 62498.7,
-          "bid": 62495.5,
+          "price": 62498.8,
+          "bid": 62495.6,
           "ask": 62501.9,
           "open": true
         }
@@ -275,12 +275,12 @@
       "base": "BTC",
       "price": 62480,
       "changePct24h": 2.3,
-      "change24h": 1404.9,
+      "change24h": 1404.5,
       "changeFrom": {
         "venue": "ex",
         "venueName": "Stand-in Exchange"
       },
-      "volumeUsd24h": 2512605681,
+      "volumeUsd24h": 2511381622,
       "tabs": [
         "all",
         "crypto"
@@ -295,7 +295,7 @@
           "public": false,
           "price": 62480,
           "bid": 62476.8,
-          "ask": 62483.1,
+          "ask": 62483.2,
           "open": true
         },
         {
@@ -306,7 +306,7 @@
           "canTrade": false,
           "public": true,
           "price": 62480,
-          "bid": 62475.2,
+          "bid": 62475.3,
           "ask": 62484.7,
           "open": true,
           "connectTo": "standin-pubex",
@@ -319,9 +319,9 @@
           "connected": true,
           "canTrade": true,
           "public": false,
-          "price": 62448.71,
-          "bid": 62355.04,
-          "ask": 62542.39,
+          "price": 62448.77,
+          "bid": 62355.09,
+          "ask": 62542.45,
           "open": true
         },
         {
@@ -333,7 +333,7 @@
           "canTrade": true,
           "public": false,
           "price": 62480,
-          "bid": 62475.2,
+          "bid": 62475.3,
           "ask": 62484.7,
           "quoteFrom": "Stand-in Public Exchange",
           "open": true
@@ -347,12 +347,12 @@
       "base": "ETH",
       "price": 2456.58,
       "changePct24h": 3.8,
-      "change24h": 89.93,
+      "change24h": 89.94,
       "changeFrom": {
         "venue": "ex",
         "venueName": "Stand-in Exchange"
       },
-      "volumeUsd24h": 1592977990,
+      "volumeUsd24h": 1587217367,
       "fundingRate": 0.00008,
       "nextFundingAt": "2026-10-22T08:00:00.000Z",
       "tabs": [
@@ -369,7 +369,7 @@
           "public": false,
           "price": 2456.58,
           "bid": 2456.43,
-          "ask": 2456.74,
+          "ask": 2456.73,
           "open": true
         }
       ]
@@ -381,12 +381,12 @@
       "base": "ETH",
       "price": 2455.6,
       "changePct24h": 3.8,
-      "change24h": 89.89,
+      "change24h": 89.9,
       "changeFrom": {
         "venue": "ex",
         "venueName": "Stand-in Exchange"
       },
-      "volumeUsd24h": 1186656190,
+      "volumeUsd24h": 1185208857,
       "tabs": [
         "all",
         "crypto"
@@ -425,8 +425,8 @@
           "connected": true,
           "canTrade": true,
           "public": false,
-          "price": 2454.87,
-          "bid": 2451.18,
+          "price": 2454.86,
+          "bid": 2451.17,
           "ask": 2458.55,
           "open": true
         },
@@ -458,7 +458,7 @@
         "venue": "standin-pubex-public",
         "venueName": "Stand-in Public Exchange"
       },
-      "volumeUsd24h": 787716336,
+      "volumeUsd24h": 787322717,
       "tabs": [
         "all",
         "crypto"
@@ -506,7 +506,7 @@
         "venue": "ex",
         "venueName": "Stand-in Exchange"
       },
-      "volumeUsd24h": 536163875,
+      "volumeUsd24h": 534905333,
       "fundingRate": -0.00005,
       "nextFundingAt": "2026-10-22T08:00:00.000Z",
       "tabs": [
@@ -540,7 +540,7 @@
         "venue": "ex",
         "venueName": "Stand-in Exchange"
       },
-      "volumeUsd24h": 416356457,
+      "volumeUsd24h": 416319779,
       "tabs": [
         "all",
         "crypto"
@@ -600,7 +600,7 @@
         "venue": "standin-pubex-public",
         "venueName": "Stand-in Public Exchange"
       },
-      "volumeUsd24h": 338507822,
+      "volumeUsd24h": 337283688,
       "tabs": [
         "all",
         "crypto"
@@ -643,12 +643,12 @@
       "base": "DOGE",
       "price": 0.12142,
       "changePct24h": 12.4,
-      "change24h": 0.01339,
+      "change24h": 0.0134,
       "changeFrom": {
         "venue": "standin-pubperps-public",
         "venueName": "Stand-in Perp Exchange"
       },
-      "volumeUsd24h": 269874456,
+      "volumeUsd24h": 270130564,
       "fundingRate": 0.0000125,
       "nextFundingAt": "2026-10-22T08:00:00.000Z",
       "tabs": [
@@ -664,7 +664,7 @@
           "canTrade": false,
           "public": true,
           "price": 0.12142,
-          "bid": 0.12139,
+          "bid": 0.1214,
           "ask": 0.12145,
           "open": true,
           "connectTo": "standin-pubperps",
@@ -679,7 +679,7 @@
           "canTrade": true,
           "public": false,
           "price": 0.12142,
-          "bid": 0.12139,
+          "bid": 0.1214,
           "ask": 0.12145,
           "open": true
         },
@@ -692,7 +692,7 @@
           "canTrade": true,
           "public": false,
           "price": 0.12142,
-          "bid": 0.12139,
+          "bid": 0.1214,
           "ask": 0.12145,
           "quoteFrom": "Stand-in Perp Exchange",
           "open": true
@@ -713,7 +713,7 @@
         "venue": "standin-pubex-public",
         "venueName": "Stand-in Public Exchange"
       },
-      "volumeUsd24h": 787716336,
+      "volumeUsd24h": 787322717,
       "tabs": [
         "all",
         "crypto"
@@ -761,7 +761,7 @@
         "venue": "standin-pubex-public",
         "venueName": "Stand-in Public Exchange"
       },
-      "volumeUsd24h": 217975522,
+      "volumeUsd24h": 218182379,
       "tabs": [
         "all",
         "crypto"
@@ -809,7 +809,7 @@
         "venue": "standin-pubex-public",
         "venueName": "Stand-in Public Exchange"
       },
-      "volumeUsd24h": 338507822,
+      "volumeUsd24h": 337283688,
       "tabs": [
         "all",
         "crypto"
@@ -852,12 +852,12 @@
       "base": "ETH",
       "price": 2455.6,
       "changePct24h": 3.8,
-      "change24h": 89.89,
+      "change24h": 89.9,
       "changeFrom": {
         "venue": "ex",
         "venueName": "Stand-in Exchange"
       },
-      "volumeUsd24h": 1186656190,
+      "volumeUsd24h": 1185208857,
       "tabs": [
         "all",
         "crypto"
@@ -896,8 +896,8 @@
           "connected": true,
           "canTrade": true,
           "public": false,
-          "price": 2454.87,
-          "bid": 2451.18,
+          "price": 2454.86,
+          "bid": 2451.17,
           "ask": 2458.55,
           "open": true
         },
@@ -958,12 +958,12 @@
       "base": "BTC",
       "price": 62480,
       "changePct24h": 2.3,
-      "change24h": 1404.9,
+      "change24h": 1404.5,
       "changeFrom": {
         "venue": "ex",
         "venueName": "Stand-in Exchange"
       },
-      "volumeUsd24h": 2512605681,
+      "volumeUsd24h": 2511381622,
       "tabs": [
         "all",
         "crypto"
@@ -978,7 +978,7 @@
           "public": false,
           "price": 62480,
           "bid": 62476.8,
-          "ask": 62483.1,
+          "ask": 62483.2,
           "open": true
         },
         {
@@ -989,7 +989,7 @@
           "canTrade": false,
           "public": true,
           "price": 62480,
-          "bid": 62475.2,
+          "bid": 62475.3,
           "ask": 62484.7,
           "open": true,
           "connectTo": "standin-pubex",
@@ -1002,9 +1002,9 @@
           "connected": true,
           "canTrade": true,
           "public": false,
-          "price": 62448.71,
-          "bid": 62355.04,
-          "ask": 62542.39,
+          "price": 62448.77,
+          "bid": 62355.09,
+          "ask": 62542.45,
           "open": true
         },
         {
@@ -1016,7 +1016,7 @@
           "canTrade": true,
           "public": false,
           "price": 62480,
-          "bid": 62475.2,
+          "bid": 62475.3,
           "ask": 62484.7,
           "quoteFrom": "Stand-in Public Exchange",
           "open": true
@@ -1035,7 +1035,7 @@
         "venue": "broker",
         "venueName": "Stand-in Broker"
       },
-      "volumeUsd24h": 31658349604,
+      "volumeUsd24h": 31688393074,
       "session": {
         "open": false,
         "opensAt": "2026-10-22T13:30:00.000Z"
@@ -1137,30 +1137,30 @@
   ],
   "closing": [
     {
-      "key": "event:predict:SI-BTC15-2610220715",
+      "key": "event:predict:SI-BTC15-2610220730",
       "kind": "event",
-      "name": "Bitcoin up or down · 3:15 AM–3:30 AM ET",
-      "price": 0.85,
+      "name": "Bitcoin up or down · 3:30 AM–3:45 AM ET",
+      "price": 0.14,
       "change24h": 0,
       "changeFrom": {
         "venue": "predict",
         "venueName": "Stand-in Predictions"
       },
-      "volumeUsd24h": 41798,
+      "volumeUsd24h": 49761,
       "category": "Crypto",
-      "closeTime": "2026-10-22T07:30:00.000Z",
+      "closeTime": "2026-10-22T07:45:00.000Z",
       "outcomes": [
         {
           "label": "UP",
           "at": [
             {
               "venue": "predict",
-              "symbol": "SI-BTC15-2610220715:UP"
+              "symbol": "SI-BTC15-2610220730:UP"
             }
           ],
-          "price": 0.85,
-          "bid": 0.84,
-          "ask": 0.86,
+          "price": 0.14,
+          "bid": 0.13,
+          "ask": 0.15,
           "change24h": 0
         },
         {
@@ -1168,12 +1168,12 @@
           "at": [
             {
               "venue": "predict",
-              "symbol": "SI-BTC15-2610220715:DOWN"
+              "symbol": "SI-BTC15-2610220730:DOWN"
             }
           ],
-          "price": 0.15,
-          "bid": 0.14,
-          "ask": 0.16,
+          "price": 0.86,
+          "bid": 0.85,
+          "ask": 0.87,
           "change24h": 0
         }
       ],
@@ -1185,13 +1185,13 @@
         {
           "venue": "predict",
           "venueName": "Stand-in Predictions",
-          "symbol": "SI-BTC15-2610220715:UP",
+          "symbol": "SI-BTC15-2610220730:UP",
           "connected": true,
           "canTrade": true,
           "public": false,
-          "price": 0.85,
-          "bid": 0.84,
-          "ask": 0.86,
+          "price": 0.14,
+          "bid": 0.13,
+          "ask": 0.15,
           "open": true
         }
       ]
@@ -1210,7 +1210,7 @@
         "venue": "broker",
         "venueName": "Stand-in Broker"
       },
-      "volumeUsd24h": 31658349604,
+      "volumeUsd24h": 31688393074,
       "session": {
         "open": false,
         "opensAt": "2026-10-22T13:30:00.000Z"
@@ -1287,7 +1287,7 @@
         "venue": "broker",
         "venueName": "Stand-in Broker"
       },
-      "volumeUsd24h": 27942386483,
+      "volumeUsd24h": 27876797090,
       "session": {
         "open": false,
         "opensAt": "2026-10-22T13:30:00.000Z"
@@ -1364,7 +1364,7 @@
         "venue": "broker",
         "venueName": "Stand-in Broker"
       },
-      "volumeUsd24h": 11150845891,
+      "volumeUsd24h": 11110521526,
       "session": {
         "open": false,
         "opensAt": "2026-10-22T13:30:00.000Z"
@@ -1398,14 +1398,14 @@
       "kind": "perp",
       "name": "BTC perpetual",
       "base": "BTC",
-      "price": 62498.7,
+      "price": 62498.8,
       "changePct24h": 2.3,
-      "change24h": 1405.3,
+      "change24h": 1404.9,
       "changeFrom": {
         "venue": "ex",
         "venueName": "Stand-in Exchange"
       },
-      "volumeUsd24h": 4135642997,
+      "volumeUsd24h": 4121786065,
       "fundingRate": 0.0001,
       "nextFundingAt": "2026-10-22T08:00:00.000Z",
       "tabs": [
@@ -1420,8 +1420,8 @@
           "connected": true,
           "canTrade": true,
           "public": false,
-          "price": 62498.7,
-          "bid": 62495.5,
+          "price": 62498.8,
+          "bid": 62495.6,
           "ask": 62501.9,
           "open": true
         }
@@ -1434,12 +1434,12 @@
       "base": "BTC",
       "price": 62480,
       "changePct24h": 2.3,
-      "change24h": 1404.9,
+      "change24h": 1404.5,
       "changeFrom": {
         "venue": "ex",
         "venueName": "Stand-in Exchange"
       },
-      "volumeUsd24h": 2512605681,
+      "volumeUsd24h": 2511381622,
       "tabs": [
         "all",
         "crypto"
@@ -1454,7 +1454,7 @@
           "public": false,
           "price": 62480,
           "bid": 62476.8,
-          "ask": 62483.1,
+          "ask": 62483.2,
           "open": true
         },
         {
@@ -1465,7 +1465,7 @@
           "canTrade": false,
           "public": true,
           "price": 62480,
-          "bid": 62475.2,
+          "bid": 62475.3,
           "ask": 62484.7,
           "open": true,
           "connectTo": "standin-pubex",
@@ -1478,9 +1478,9 @@
           "connected": true,
           "canTrade": true,
           "public": false,
-          "price": 62448.71,
-          "bid": 62355.04,
-          "ask": 62542.39,
+          "price": 62448.77,
+          "bid": 62355.09,
+          "ask": 62542.45,
           "open": true
         },
         {
@@ -1492,7 +1492,7 @@
           "canTrade": true,
           "public": false,
           "price": 62480,
-          "bid": 62475.2,
+          "bid": 62475.3,
           "ask": 62484.7,
           "quoteFrom": "Stand-in Public Exchange",
           "open": true
@@ -1506,12 +1506,12 @@
       "base": "ETH",
       "price": 2456.58,
       "changePct24h": 3.8,
-      "change24h": 89.93,
+      "change24h": 89.94,
       "changeFrom": {
         "venue": "ex",
         "venueName": "Stand-in Exchange"
       },
-      "volumeUsd24h": 1592977990,
+      "volumeUsd24h": 1587217367,
       "fundingRate": 0.00008,
       "nextFundingAt": "2026-10-22T08:00:00.000Z",
       "tabs": [
@@ -1528,7 +1528,7 @@
           "public": false,
           "price": 2456.58,
           "bid": 2456.43,
-          "ask": 2456.74,
+          "ask": 2456.73,
           "open": true
         }
       ]
@@ -1540,12 +1540,12 @@
       "base": "ETH",
       "price": 2455.6,
       "changePct24h": 3.8,
-      "change24h": 89.89,
+      "change24h": 89.9,
       "changeFrom": {
         "venue": "ex",
         "venueName": "Stand-in Exchange"
       },
-      "volumeUsd24h": 1186656190,
+      "volumeUsd24h": 1185208857,
       "tabs": [
         "all",
         "crypto"
@@ -1584,8 +1584,8 @@
           "connected": true,
           "canTrade": true,
           "public": false,
-          "price": 2454.87,
-          "bid": 2451.18,
+          "price": 2454.86,
+          "bid": 2451.17,
           "ask": 2458.55,
           "open": true
         },
@@ -1617,7 +1617,7 @@
         "venue": "standin-pubex-public",
         "venueName": "Stand-in Public Exchange"
       },
-      "volumeUsd24h": 787716336,
+      "volumeUsd24h": 787322717,
       "tabs": [
         "all",
         "crypto"

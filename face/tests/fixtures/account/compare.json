@@ -11,11 +11,11 @@
       "kind": "spot",
       "base": "ETH",
       "quote": "USDT",
-      "price": 2455.76,
+      "price": 2455.75,
       "priceIs": "ask",
       "bid": 2455.45,
-      "ask": 2455.76,
-      "spreadPct": 0.0126,
+      "ask": 2455.75,
+      "spreadPct": 0.0122,
       "open": true,
       "canTrade": true,
       "ready": true,
@@ -31,14 +31,14 @@
       "quote": "USDC",
       "price": 2458.55,
       "priceIs": "ask",
-      "bid": 2451.18,
+      "bid": 2451.17,
       "ask": 2458.55,
-      "spreadPct": 0.3002,
+      "spreadPct": 0.3006,
       "open": true,
       "canTrade": true,
       "ready": true,
       "note": "swapped by the stand-in wallet itself: nothing for a browser wallet to send",
-      "worse": 0.1136
+      "worse": 0.114
     }
   ],
   "missing": [

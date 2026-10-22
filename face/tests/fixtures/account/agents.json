@@ -1,6 +1,6 @@
 {
   "ok": true,
-  "asOf": "2026-10-22T07:19:22.589Z",
+  "asOf": "2026-10-22T07:35:46.913Z",
   "mode": "guard",
   "agents": [
     {
@@ -8,8 +8,8 @@
       "name": "Claude Code",
       "code": "CC",
       "status": "ok",
-      "validUntil": "2026-11-21T07:19:22.452Z",
-      "approvedAt": "2026-10-22T07:19:22.489Z",
+      "validUntil": "2026-11-21T07:35:46.778Z",
+      "approvedAt": "2026-10-22T07:35:46.812Z",
       "limits": [
         {
           "id": "spend-0001",
@@ -25,7 +25,7 @@
           "reservedUsd": 119.99,
           "leftUsd": 380.01192,
           "windowHours": 0,
-          "validUntil": "2026-10-29T07:19:22.452Z",
+          "validUntil": "2026-10-29T07:35:46.778Z",
           "expired": false
         },
         {
@@ -41,7 +41,7 @@
           "reservedUsd": 0,
           "leftUsd": 200,
           "windowHours": 24,
-          "validUntil": "2026-10-29T07:19:22.452Z",
+          "validUntil": "2026-10-29T07:35:46.778Z",
           "expired": false
         },
         {
@@ -56,7 +56,7 @@
           "reservedUsd": 0,
           "leftUsd": 20,
           "windowHours": 0,
-          "validUntil": "2026-10-29T07:19:22.452Z",
+          "validUntil": "2026-10-29T07:35:46.778Z",
           "expired": false
         }
       ],
@@ -66,11 +66,11 @@
           "flight": "CC-0002",
           "usd": 119.99,
           "reason": "Claude Code asks to buy 0.0479 ETH at Stand-in Exchange · market · about $117.63",
-          "hash": "0xbfddb7eee37759cf760cb4937dbbc7b3ea86841bfb9dee67613404c1f1172b8e",
+          "hash": "0xa20b26adc1422adf86d72b98ed4c100345421896b7a3cefe085a618a396f8c9c",
           "kind": "agentLiveOrder",
           "agent": "0x3a087530887bd175ccc38828ee3776e5b6ea1ac6",
           "agentName": "Claude Code",
-          "expiresAt": "2026-10-22T07:49:22.508Z",
+          "expiresAt": "2026-10-22T08:05:46.830Z",
           "shown": [
             {
               "name": "payee",
@@ -126,8 +126,8 @@
       "orders": [
         {
           "id": "ord-0010",
-          "clientId": "91b3e039bf87b01cc07d6934cebcf40f",
-          "at": "2026-10-22T07:19:22.504Z",
+          "clientId": "d22725bed586b5e46850da6bd3208923",
+          "at": "2026-10-22T07:35:46.827Z",
           "venue": "ex",
           "venueName": "Stand-in Exchange",
           "symbol": "SOL/USDT",
@@ -147,9 +147,9 @@
           "authority": "agent",
           "agent": "0x3a087530887bd175ccc38828ee3776e5b6ea1ac6",
           "approval": "spend-0001",
-          "action": "0x0d2ed363d1a0b2683e55568ab05d72252a4363aa27a629d31fb97e1eab2a2f8c",
+          "action": "0x36f5a7356e6a1db6b43177e4091a1b1249a8e57b187d5ae5529cc1f9a8923a80",
           "note": "on Stand-in Exchange's book at 141.44",
-          "updatedAt": "2026-10-22T07:19:22.504Z"
+          "updatedAt": "2026-10-22T07:35:46.827Z"
         }
       ],
       "payments": [],
@@ -160,7 +160,7 @@
           "name": "Claude Code",
           "agent": "0x3a087530887bd175ccc38828ee3776e5b6ea1ac6",
           "agentName": "Claude Code",
-          "address": "0x50dc2f1ea38d8ba8827b62b13199d9aa5e5e0df4",
+          "address": "0x7f89224d3ad6cacd933242ba0c07e1187e3467c2",
           "capUsd": 100,
           "balanceUsd": 47.37,
           "venue": "agent-claude-code",
@@ -177,8 +177,8 @@
           "side": "buy",
           "usd": "300",
           "text": "Build a SOL position under $140, a little at a time",
-          "validUntil": "2026-10-25T07:19:22.452Z",
-          "at": "2026-10-22T07:19:22.509Z",
+          "validUntil": "2026-10-25T07:35:46.778Z",
+          "at": "2026-10-22T07:35:46.831Z",
           "reports": 1,
           "report": {
             "status": "taking",
@@ -187,7 +187,7 @@
               "ord-0010"
             ],
             "by": "0x3a087530887bd175ccc38828ee3776e5b6ea1ac6",
-            "at": "2026-10-22T07:19:22.512Z",
+            "at": "2026-10-22T07:35:46.834Z",
             "n": 1,
             "byName": "Claude Code"
           },
@@ -199,7 +199,7 @@
                 "ord-0010"
               ],
               "by": "0x3a087530887bd175ccc38828ee3776e5b6ea1ac6",
-              "at": "2026-10-22T07:19:22.512Z",
+              "at": "2026-10-22T07:35:46.834Z",
               "n": 1,
               "byName": "Claude Code"
             }
@@ -214,8 +214,8 @@
           "side": "",
           "usd": "",
           "text": "Tell me if BTC moves more than 5% in a day",
-          "validUntil": "2026-10-29T07:19:22.452Z",
-          "at": "2026-10-22T07:19:22.509Z",
+          "validUntil": "2026-10-29T07:35:46.778Z",
+          "at": "2026-10-22T07:35:46.832Z",
           "reports": 0,
           "byAgent": []
         }
@@ -229,8 +229,8 @@
           "venue": "ex",
           "usd": "1000",
           "text": "Raise my trading budget to $1,000 so I can finish the SOL position you asked for",
-          "at": "2026-10-22T07:19:22.515Z",
-          "expiresAt": "2026-10-23T07:19:22.515Z"
+          "at": "2026-10-22T07:35:46.836Z",
+          "expiresAt": "2026-10-23T07:35:46.836Z"
         },
         {
           "id": "ask-0002",
@@ -240,8 +240,8 @@
           "venue": "standin-pubex",
           "usd": "",
           "text": "Connect Stand-in Public Exchange: DOGE trades only there",
-          "at": "2026-10-22T07:19:22.517Z",
-          "expiresAt": "2026-10-23T07:19:22.517Z"
+          "at": "2026-10-22T07:35:46.838Z",
+          "expiresAt": "2026-10-23T07:35:46.838Z"
         }
       ],
       "declinedAsks": [],
@@ -252,7 +252,7 @@
       "flights": [
         {
           "no": "CC-0002",
-          "at": "2026-10-22T07:19:22.508Z",
+          "at": "2026-10-22T07:35:46.830Z",
           "request": "buy 0.0479 ETH at Stand-in Exchange · market · about $117.63 · real money",
           "legs": [
             "▣ BUY 0.0479 ETH/ (ETH/USDT): real money, needs your signature every time"
@@ -260,7 +260,7 @@
         },
         {
           "no": "CC-0001",
-          "at": "2026-10-22T07:19:22.504Z",
+          "at": "2026-10-22T07:35:46.826Z",
           "request": "buy 0.707 SOL at Stand-in Exchange · limit 141.44 · about $100.00 · real money",
           "legs": [
             "✓ Claude Code buy 0.707 SOL at Stand-in Exchange · limit 141.44 · about $100.00: inside its limit, so it went without a card (Beast)"

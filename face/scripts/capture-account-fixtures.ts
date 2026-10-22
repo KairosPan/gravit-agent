@@ -4,8 +4,9 @@
  * money, a fresh temporary home — as `tests/account-seat-smoke.test.ts` starts it, reads each route
  * with a bare loopback `fetch` (the Account's fence answers a request that carries no Origin),
  * drops every `native` and `icon` key, cuts every array to its first 12 entries, writes each answer
- * as pretty JSON, keeps the push channel's first ten frames (or the whole ones heard in 20 s)
- * verbatim in `stream-frames.txt`, and stops the stand-in.
+ * as pretty JSON, keeps the push channel's first ten frames (or the whole ones heard in 20 s) in
+ * `stream-frames.txt` — verbatim but for the same two keys dropped from each frame's `data:` (its
+ * arrays whole) — and stops the stand-in.
  *
  *     cd face && FACE_ACCOUNT_SEAT_DIR=~/buyer-agent-demo npx tsx scripts/capture-account-fixtures.ts
  *
@@ -27,7 +28,7 @@ const DIR = seatDir();
 const CLI = join(DIR, "node_modules", "tsx", "dist", "cli.mjs");
 const STANDIN = join(DIR, "test", "standin", "ui-standin.ts");
 const OUT = fileURLToPath(new URL("../tests/fixtures/account/", import.meta.url));
-/** How many entries of every array a fixture keeps. */
+/** How many entries of every array a JSON fixture keeps (a frame's arrays stay whole). */
 const KEEP = 12;
 /** Keys no fixture carries: a venue's raw answer, a logo's URL. */
 const STRIPPED = new Set(["native", "icon"]);
@@ -92,7 +93,7 @@ async function stopStandin(standin: Standin): Promise<void> {
     await exited;
     clearTimeout(timer);
   }
-  if (standin.home.startsWith(tmpdir())) await rm(standin.home, { recursive: true, force: true });
+  if (standin.home.startsWith(join(tmpdir(), "ui-standin-"))) await rm(standin.home, { recursive: true, force: true });
 }
 
 /** One read, its body as the Account answered it; anything but `ok: true` stops the capture. */
@@ -113,11 +114,19 @@ function connectedLeg(explore: unknown): ExploreLeg {
   return leg;
 }
 
-/** An answer as a fixture keeps it: every `native` and `icon` key dropped and every array cut to its first {@link KEEP}, all the way down. */
-function trimmed(value: unknown): unknown {
-  if (Array.isArray(value)) return value.slice(0, KEEP).map(trimmed);
+/** `value` as a fixture keeps it: every `native` and `icon` key dropped and every array cut to its first `keep` entries (whole by default), all the way down. */
+function stripped(value: unknown, keep = Infinity): unknown {
+  if (Array.isArray(value)) return value.slice(0, keep).map((inner) => stripped(inner, keep));
   if (typeof value !== "object" || value === null) return value;
-  return Object.fromEntries(Object.entries(value).filter(([key]) => !STRIPPED.has(key)).map(([key, inner]) => [key, trimmed(inner)]));
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !STRIPPED.has(key)).map(([key, inner]) => [key, stripped(inner, keep)]));
+}
+
+/** The frames with each `data: <json>` line {@link stripped} (its arrays whole); every other line, and a `data:` line that is not JSON, as heard. */
+function strippedFrames(frames: string): string {
+  return frames.split("\n").map((line) => {
+    if (!line.startsWith("data: ")) return line;
+    try { return `data: ${JSON.stringify(stripped(JSON.parse(line.slice("data: ".length))))}`; } catch { return line; }
+  }).join("\n");
 }
 
 /** The first `n` whole frames of `text`, each ending at a blank line; a frame cut off at the end is left out. */
@@ -176,9 +185,9 @@ const { answers, frames } = await capture(standin.url).finally(() => stopStandin
 mkdirSync(OUT, { recursive: true });
 for (const [name, body] of answers) {
   const file = join(OUT, `${name}.json`);
-  writeFileSync(file, `${JSON.stringify(trimmed(body), null, 2)}\n`);
+  writeFileSync(file, `${JSON.stringify(stripped(body, KEEP), null, 2)}\n`);
   console.log(file);
 }
 const streamFile = join(OUT, "stream-frames.txt");
-writeFileSync(streamFile, frames);
+writeFileSync(streamFile, strippedFrames(frames));
 console.log(streamFile);

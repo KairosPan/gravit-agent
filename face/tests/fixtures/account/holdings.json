@@ -1,6 +1,6 @@
 {
   "ok": true,
-  "asOf": "2026-10-22T07:19:22.573Z",
+  "asOf": "2026-10-22T07:35:46.893Z",
   "totalUsd": 29138.1,
   "rows": [
     {
@@ -378,7 +378,7 @@
       "side": "long",
       "qty": 0.01,
       "entryPrice": 60520,
-      "markPrice": 62498.7,
+      "markPrice": 62498.8,
       "usd": 624.99,
       "unrealizedUsd": 19.79,
       "leverage": 3,
@@ -393,13 +393,13 @@
       "kind": "perp",
       "side": "long",
       "qty": 0.05,
-      "entryPrice": 2456.74,
+      "entryPrice": 2456.73,
       "markPrice": 2456.58,
       "usd": 122.83,
       "unrealizedUsd": -0.01,
       "leverage": 5,
       "marginMode": "cross",
-      "liquidationPrice": 1977.68,
+      "liquidationPrice": 1977.67,
       "venue": "ex",
       "venueName": "Stand-in Exchange"
     },
@@ -460,7 +460,7 @@
           "symbol": "ETH/USDT"
         }
       ],
-      "lastFillAt": "2026-10-22T07:19:22.481Z",
+      "lastFillAt": "2026-10-22T07:35:46.805Z",
       "orders": 2
     },
     {
@@ -542,7 +542,7 @@
           "symbol": "SI-FEDCUT-DEC:YES"
         }
       ],
-      "lastFillAt": "2026-10-22T07:19:22.480Z",
+      "lastFillAt": "2026-10-22T07:35:46.803Z",
       "orders": 1
     },
     {
@@ -551,7 +551,7 @@
       "class": "position",
       "symbol": "ETH/USDT:USDT",
       "side": "long",
-      "avgCostUsd": 2456.74,
+      "avgCostUsd": 2456.73,
       "costUsd": 122.84,
       "coveredQty": 0.05,
       "ofQty": 0.05,
@@ -574,7 +574,7 @@
           "symbol": "ETH/USDT:USDT"
         }
       ],
-      "lastFillAt": "2026-10-22T07:19:22.478Z",
+      "lastFillAt": "2026-10-22T07:35:46.802Z",
       "orders": 1
     },
     {
