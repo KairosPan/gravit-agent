@@ -556,6 +556,11 @@ test('page: candles for the range, compare for a coin, the stream follow; leavin
   assert.equal(r.m().candles['coin:ETH'].range, '1Y');
   assert.equal(r.m().candles['coin:ETH'].data.range, '3M');
   assert.equal(r.m().candles['coin:ETH'].at, NOW);
+  assert.equal(r.m().candles['coin:ETH'].message, 'No history at this range.', "the Account's sentence kept with it");
+  // the next answer clears it
+  r.markets.range('coin:ETH', '3M');
+  await settle();
+  assert.deepEqual([r.m().candles['coin:ETH'].status, r.m().candles['coin:ETH'].message], ['ready', null]);
   // a page whose market no read lists: nothing is read, and the page it left lets its follow go
   const unlisted = r.reads.length;
   r.markets.page('coin:NOPE');

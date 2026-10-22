@@ -131,13 +131,14 @@ export function startMarkets({ store, getJson, createLiveQuotes, createSymbolSea
     const range = Object.hasOwn(candles, id) ? candles[id]?.range : undefined;
     return named(range) ? range : '1D';
   }
-  // a page's candles at its line for the range; an answer for a range the page has left since lands nowhere
+  // a page's candles at its line for the range — a refusal lands with the Account's sentence; an answer for a range the page has
+  // left since lands nowhere
   function readCandles(id, leg, range) {
     const path = `/data/account/candles?venue=${encodeURIComponent(leg.venue)}&symbol=${encodeURIComponent(leg.symbol)}&range=${encodeURIComponent(range)}`;
     fly(`candles:${id}`, path, (body, refused) => {
       if (rangeOf(id) !== range) return;
       if (!refused && answered(body, 'candles')) store.dispatch('candlesLoaded', { id, range, data: body, at: now() });
-      else store.dispatch('candlesFailed', { id, range, at: now() });
+      else store.dispatch('candlesFailed', { id, range, at: now(), message: messageOf(body) });
     }, ['candlesLoading', { id, range }]);
   }
   function readCompare(base) {

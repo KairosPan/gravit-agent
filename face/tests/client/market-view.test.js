@@ -6,9 +6,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  canonicalId, quoteWord, connectionWord, providerWord, basisWord, sourceWord, volumeWord, searchWord, watchWord, mentionsOf,
-  ACCOUNT_TABS, ACCOUNT_SORTS, CANDLE_RANGES, isAccountKey, tabsOf, priceOf, sourceWordOf, legsOf, rowsOf, matchKey, pairsOf, pageOf,
-  faceAssetOf, handWordsOf,
+  canonicalId, quoteWord, connectionWord, providerWord, basisWord, sourceWord, volumeWord, volumeWordOf, searchWord, watchWord, mentionsOf,
+  ACCOUNT_TABS, ACCOUNT_SORTS, CANDLE_RANGES, isAccountKey, tabsOf, priceOf, sourceWordOf, legsOf, rowsOf, tableOf, sortsOf, matchKey, pairsOf,
+  pageOf, faceAssetOf, handWordsOf,
 } from '../../client/js/host/market-view.js';
 
 const CJK = /[㐀-鿿]/;
@@ -209,16 +209,16 @@ test('rowsOf: the fixture rows and two cn rows side by side; source words; the t
     'coin:LINK', 'perp:DOGE', 'cn:600519', 'cn:000001',
   ], "Most traded: the Account's rows by their dollars, then the cn rows, whose volume is shares; a row without one last");
   assert.deepEqual(rows.find(r => r.id === 'perp:BTC'), {
-    id: 'perp:BTC', source: 'account', kind: 'perp', name: 'BTC perpetual', base: 'BTC', sub: 'BTC · Perpetual',
-    priced: { price: 62498.8, unit: 'usd', changePct: 2.3, change24h: 1404.9, volume: 4121786065, volumeUnit: 'usd', implied: null },
-    live: null, sourceWord: 'Stand-in Exchange', closeTime: null, pastEnd: false, watched: false,
+    id: 'perp:BTC', source: 'account', kind: 'perp', name: 'BTC perpetual', tile: 'BTC', sub: 'BTC · Perpetual',
+    priced: { price: 62498.8, unit: 'usd', changePct: 2.3, change24h: 1404.9, volume: 4121786065, volumeUnit: 'usd', implied: null }, price: 62498.8,
+    live: null, sourceWord: 'Stand-in Exchange', closeTime: null, pastEnd: false, paper: false, watched: false,
     legs: [{ venue: 'ex', venueName: 'Stand-in Exchange', symbol: 'BTC/USDT:USDT', connected: true, paper: false, canTrade: true, public: false, connectTo: '', connector: '', price: 62498.8, bid: 62495.6, ask: 62501.9, best: true }],
     tabs: ['all', 'perps'],
   });
   assert.deepEqual(rows.find(r => r.id === 'cn:600519'), {
-    id: 'cn:600519', source: 'face', asset: asset('cn:600519', { name: '贵州茅台', exchange: 'SSE' }), quote: moutai, kind: 'stock', name: '贵州茅台', sub: 'SSE',
-    priced: { price: 1450, unit: 'cny', changePct: -3, change24h: null, volume: 900000000, volumeUnit: 'shares', implied: null },
-    live: null, sourceWord: 'iFinD', closeTime: null, pastEnd: false, watched: true, legs: [], tabs: ['all', 'stocks'],
+    id: 'cn:600519', source: 'face', asset: asset('cn:600519', { name: '贵州茅台', exchange: 'SSE' }), quote: moutai, kind: 'stock', name: '贵州茅台', tile: '600519', sub: 'SSE',
+    priced: { price: 1450, unit: 'cny', changePct: -3, change24h: null, volume: 900000000, volumeUnit: 'shares', implied: null }, price: 1450,
+    live: null, sourceWord: 'iFinD', closeTime: null, pastEnd: false, paper: false, watched: true, legs: [], tabs: ['all', 'stocks'],
   });
   const byId = Object.fromEntries(rows.map(r => [r.id, r]));
   // the latest quote at the row's most traded connected venue rides beside the item's price; the star is the operator's
@@ -332,8 +332,8 @@ test('unpriced, past-end and contract-volume rows: dashes, Closed, contracts', (
   assert.deepEqual([byId['event:predict:SI-FEDCUT-DEC'].priced.volume, byId['event:predict:SI-FEDCUT-DEC'].priced.volumeUnit], [1840000, 'usd']);
   // an old star the Account could not find: once, Not listed at the Account, every figure null
   assert.deepEqual(byId['us:ZZZZ'], {
-    id: 'us:ZZZZ', source: 'face', notListed: true, kind: 'stock', name: 'Zed Corp', sub: 'Not listed at the Account',
-    priced: UNPRICED, live: null, sourceWord: '', closeTime: null, pastEnd: false, watched: true, legs: [], tabs: ['all', 'stocks'],
+    id: 'us:ZZZZ', source: 'face', notListed: true, kind: 'stock', name: 'Zed Corp', tile: 'Zed Corp', sub: 'Not listed at the Account',
+    priced: UNPRICED, price: null, live: null, sourceWord: '', closeTime: null, pastEnd: false, paper: false, watched: true, legs: [], tabs: ['all', 'stocks'],
   });
   assert.deepEqual([byId['crypto:QQQ/USD'].kind, byId['crypto:QQQ/USD'].name, byId['crypto:QQQ/USD'].tabs], ['coin', 'QQQ/USD', ['all', 'crypto']]);
   assert.deepEqual(rowsOf({ ...m, tab: 'stocks' }).map(r => r.id), ['us:ZZZZ']);
@@ -362,8 +362,8 @@ test('matchKey and pairsOf', () => {
   const after = rowsOf(markets({ explore: { all: read(explore) }, watchlist: old, asked, tab: 'watching' }));
   assert.deepEqual(after.map(r => [r.id, r.source]), [['stock:AAPL', 'account'], ['coin:SOL', 'account'], ['stock:TSLA', 'account'], ['us:ZZZZ', 'face']]);
   assert.deepEqual(after.find(r => r.id === 'stock:TSLA'), {
-    id: 'stock:TSLA', source: 'account', placeholder: true, kind: 'stock', name: 'TSLA', sub: 'Not in this read',
-    priced: UNPRICED, live: null, sourceWord: '', closeTime: null, pastEnd: false, watched: true, legs: [], tabs: ['all', 'watching'],
+    id: 'stock:TSLA', source: 'account', placeholder: true, kind: 'stock', name: 'TSLA', tile: 'TSLA', sub: 'Not in this read',
+    priced: UNPRICED, price: null, live: null, sourceWord: '', closeTime: null, pastEnd: false, paper: false, watched: true, legs: [], tabs: ['all', 'watching'],
   });
   assert.equal(rowsOf(markets({ explore: { all: read(explore) }, watchlist: old, asked })).some(r => r.id.startsWith('us:AAPL') || r.id.startsWith('crypto:')), false, 'a star found at the Account draws as its row, never as its old id');
   // a star past the read's items: found among its movers, closing or most traded lists; found nowhere, a placeholder
@@ -478,6 +478,88 @@ test('pageOf: the item, its legs, candles for the range, compare rows, held, ord
     const bare = pageOf(m, a, 'coin:BTC');
     assert.deepEqual([bare.held.assets, bare.held.positions, bare.orders, bare.lines], [[], [], [], []]);
   }
+});
+
+test('tableOf: the tabs counted once All answers, the sort in effect, the read the rows are from', () => {
+  // before All's read: All alone, with no count it never read; the read on its way
+  const unread = tableOf(markets({ explore: { all: { status: 'loading', data: null, at: null } } }), NOW);
+  assert.deepEqual([unread.rows, unread.tabs, unread.read], [[], [{ id: 'all', label: 'All', count: null }], { status: 'loading', answered: false, message: null }]);
+  // All answered: the Account's counts, the A shares among them; Watching once anything is starred
+  const m = markets({ explore: { all: read(fx('explore-all')) }, watchlist: [asset('cn:600519')] });
+  const t = tableOf(m, NOW);
+  assert.deepEqual(t.tabs.map(x => [x.id, x.count]), [['all', 31], ['crypto', 6], ['stocks', 5], ['rwas', 4], ['perps', 6], ['preipo', 1], ['predictions', 9], ['watching', null]]);
+  assert.deepEqual(t.read, { status: 'ready', answered: true, message: null });
+  assert.deepEqual(t.rows, rowsOf(m, NOW));
+  // the sort in effect: the kept one when the rows offer it, else Most traded
+  assert.deepEqual([t.sorts.map(s => s.id), t.sort], [['volume', 'movers'], 'volume']);
+  assert.deepEqual(tableOf({ ...m, sort: 'movers' }, NOW).sort, 'movers');
+  const closing = tableOf({ ...m, sort: 'closing' }, NOW);
+  assert.deepEqual([closing.sort, closing.rows.map(r => r.id)], ['volume', t.rows.map(r => r.id)]);
+  const events = tableOf({ ...m, explore: { all: read(fx('explore-predictions')) }, sort: 'closing' }, NOW);
+  assert.deepEqual([events.sorts.map(s => s.id), events.sort, events.rows[0].id], [['volume', 'movers', 'closing'], 'closing', 'event:predict:SI-BTC15-2610220730']);
+  assert.deepEqual(sortsOf([], 'closing'), { sorts: ACCOUNT_SORTS.slice(0, 2), sort: 'volume' });
+  // the read the rows are from: a kind's own once it has answered, else All's, its sentence with it; while searching, the search's
+  const refused = { ...read(fx('explore-all')), status: 'error', message: 'All refused' };
+  assert.deepEqual(tableOf({ ...m, tab: 'crypto', explore: { all: refused, crypto: { status: 'loading', data: null, at: null } } }, NOW).read, { status: 'error', answered: true, message: 'All refused' });
+  assert.deepEqual(tableOf({ ...m, tab: 'crypto', explore: { all: refused, crypto: read(fx('explore-all')) } }, NOW).read, { status: 'ready', answered: true, message: null });
+  assert.deepEqual(tableOf({ ...m, q: 'fed', tab: 'results', results: { status: 'error', data: null, at: 1, message: 'Too many searches' } }, NOW).read, { status: 'error', answered: false, message: 'Too many searches' });
+  // each row says the price it shows and the word its tile is lettered from
+  const live = tableOf({ ...m, accountQuotes: { 'broker|NVDA': { price: 183.1 } } }, NOW).rows.find(r => r.id === 'stock:NVDA');
+  assert.deepEqual([live.price, live.priced.price, live.tile, live.paper], [183.1, 182.4, 'NVDA', false]);
+  const doge = t.rows.find(r => r.id === 'coin:DOGE');
+  assert.deepEqual([doge.tile, doge.paper], ['DOGE', true], 'a coin only a paper account trades first');
+  const fedRow = tableOf(markets({ explore: { all: read(fx('explore-predictions')) }, accountQuotes: { 'predict|SI-FEDCUT-DEC:YES': { price: 0.64 } } }), NOW).rows.find(r => r.id === 'event:predict:SI-FEDCUT-DEC');
+  assert.deepEqual([fedRow.price, fedRow.priced.price, fedRow.tile], [64, 62, 'Economics'], "an event's quote in cents");
+});
+
+test("pageOf: the price shown, the page's words, its history's state and the read each part stands on", () => {
+  const m = markets({
+    explore: { all: read(fx('explore-all')) }, watch: ['coin:BTC'],
+    accountQuotes: { 'ex|BTC/USDT': { price: 62510.5, quoteFrom: 'Stand-in Exchange · live', quoteAt: ago(90_000) } },
+    candles: { 'coin:BTC': { status: 'error', data: null, at: 1, range: '5D', message: 'No history at this range.' } },
+  });
+  const btc = pageOf(m, accountSlice(), 'coin:BTC', NOW);
+  assert.deepEqual([btc.price, btc.name, btc.tile, btc.sub, btc.closesAt, btc.outcomes, btc.preipo, btc.watched], [62510.5, 'BTC', 'BTC', ['Crypto', 'BTC/USDT'], null, [], false, true]);
+  assert.deepEqual(btc.about, { symbol: 'BTC', name: 'BTC' });
+  assert.deepEqual(btc.history, { status: 'error', message: 'No history at this range.', current: false });
+  assert.deepEqual(btc.reads, { held: { answered: true, failed: false, message: null }, orders: { answered: true, failed: false, message: null }, lines: { answered: true, failed: false, message: null } });
+  // starred as an old star found at the Account; not starred at all
+  assert.equal(pageOf({ ...m, watch: [], watchlist: [asset('crypto:BTC/USD')], asked: { 'crypto:BTC/USD': 'coin:BTC' } }, accountSlice(), 'coin:BTC', NOW).watched, true);
+  assert.equal(pageOf({ ...m, watch: [] }, accountSlice(), 'coin:BTC', NOW).watched, false);
+  // the candles kept are the range's own while it is read again; a stock's sub names its broker's symbol
+  const nvda = pageOf({ ...m, candles: { 'stock:NVDA': { status: 'loading', data: fx('candles'), at: 1, range: '1D' } } }, accountSlice(), 'stock:NVDA', NOW);
+  assert.deepEqual([nvda.history, nvda.sub, nvda.price], [{ status: 'loading', message: null, current: true }, ['Stock', 'NVDA'], 182.4]);
+  assert.equal(pageOf({ ...m, candles: { 'stock:NVDA': { status: 'ready', data: fx('candles'), at: 1, range: '5D' } } }, accountSlice(), 'stock:NVDA', NOW).history.current, false, "the 1D closes are not 5D's");
+  // an event: its category and close, its outcomes in cents, its lines' prices in cents, found by its name
+  const fed = pageOf(markets({ explore: { all: read(fx('explore-predictions')) }, accountQuotes: { 'predict|SI-FEDCUT-DEC:YES': { price: 0.64 } } }), accountSlice(), 'event:predict:SI-FEDCUT-DEC', NOW);
+  assert.deepEqual([fed.price, fed.tile, fed.sub, fed.closesAt], [64, 'Economics', ['Economics'], '2026-10-31T10:35:46.773Z']);
+  assert.deepEqual(fed.outcomes, [{ label: 'Yes', cents: 62 }, { label: 'No', cents: 38 }]);
+  assert.deepEqual(fed.legs.map(l => [l.price, l.bid, l.ask]), [[62, 61, 63]]);
+  assert.deepEqual(fed.about, { name: 'Will the Fed cut rates at its December meeting?' });
+  // a pre-IPO perpetual says so; an outcome named as a person says it
+  const preipo = {
+    key: 'preipo:anthropic', kind: 'perp', name: 'Anthropic perpetual', base: 'ANTH', implied: { usd: 2.1e11, unit: 'valuation' }, tabs: ['all', 'preipo'],
+    at: [{ venue: 'hl-public', venueName: 'Hyperliquid', symbol: 'ANTH-PERP', connected: false, canTrade: false, public: true, price: 210 }],
+  };
+  const up = { key: 'event:predict:UPDOWN', kind: 'event', name: 'Up or down', category: '', tabs: ['all', 'predictions'], outcomes: [{ label: 'UP', price: 0.14 }, { label: 'DOWN', price: 0.86 }], at: [] };
+  const odd = markets({ explore: { all: read({ ...fx('explore-all'), items: [preipo, up] }) } });
+  const anth = pageOf(odd, undefined, 'preipo:anthropic', NOW);
+  assert.deepEqual([anth.preipo, anth.sub, anth.tile], [true, ['Pre-IPO', 'ANTH-PERP'], 'ANTH']);
+  const updown = pageOf(odd, undefined, 'event:predict:UPDOWN', NOW);
+  assert.deepEqual([updown.outcomes, updown.tile, updown.sub], [[{ label: 'Up', cents: 14 }, { label: 'Down', cents: 86 }], 'Event', []]);
+  // what each part stands on: nothing read; the page alone, which names paper venues, so what is held waits for its lens too; a
+  // read that failed, the page's with its sentence
+  const idle = { status: 'idle', data: null, at: null, message: null, holdings: { status: 'idle', data: null }, paper: { status: 'idle', data: null }, statement: { status: 'idle', data: null } };
+  const no = { answered: false, failed: false, message: null };
+  assert.deepEqual(pageOf(m, idle, 'coin:BTC', NOW).reads, { held: no, orders: no, lines: no });
+  assert.deepEqual(pageOf(m, undefined, 'coin:BTC', NOW).reads, { held: no, orders: no, lines: no });
+  const paged = { ...idle, status: 'ready', data: fx('account'), holdings: read(fx('holdings')) };
+  assert.deepEqual(pageOf(m, paged, 'coin:BTC', NOW).reads.held, no, 'the paper lens not read yet');
+  assert.deepEqual(pageOf(m, { ...paged, paper: read(fx('holdings-paper')) }, 'coin:BTC', NOW).reads.held, { answered: true, failed: false, message: null });
+  const refused = { ...idle, status: 'error', message: 'The account is restarting', statement: { status: 'error', data: null } };
+  assert.deepEqual(pageOf(m, refused, 'coin:BTC', NOW).reads, {
+    held: no, orders: { answered: false, failed: true, message: 'The account is restarting' }, lines: { answered: false, failed: true, message: null },
+  });
 });
 
 test('no icon URL survives any view (an item given an https icon by hand)', () => {
@@ -620,6 +702,12 @@ test("mentionsOf matches whole words in titles: AAPL in 'Is AAPL cheap?', not in
   assert.deepEqual(mentionsOf(convs, asset('us:BRK.B')).map(c => c.id), ['s6']);
   assert.deepEqual(mentionsOf(convs, asset('cn:600519')), []);
   assert.deepEqual(mentionsOf(undefined, asset('us:AAPL')), []);
+  // a market with no symbol — an event — by its name, whole
+  const fed = 'Will the Fed cut rates at its December meeting?';
+  const asked = [{ id: 'e1', title: `${fed} Odds` }, { id: 'e2', title: 'Fed cut odds' }, { id: 'e3', title: 'SI-FEDCUT-DEC sizing' }];
+  assert.deepEqual(mentionsOf(asked, { name: fed }).map(c => c.id), ['e1']);
+  assert.deepEqual(mentionsOf(asked, { symbol: '', name: '' }), []);
+  assert.deepEqual(mentionsOf(asked, { symbol: 'SI-FEDCUT-DEC', name: fed }).map(c => c.id), ['e3'], 'a symbol, where there is one, is what is looked for');
 });
 
 test('volumeWord: shares for a stock, the base for a coin, — for null', () => {
@@ -630,6 +718,11 @@ test('volumeWord: shares for a stock, the base for a coin, — for null', () => 
   assert.equal(volumeWord(asset('crypto:BTC/USD'), quote('crypto:BTC/USD', { volume: 0.5 })), '0.5 BTC');
   assert.equal(volumeWord(asset('cn:600519'), quote('cn:600519', { volume: null })), '—');
   assert.equal(volumeWord(asset('us:AAPL'), undefined), '—');
+  // a row's or a page's volume in the same compact word: dollars, contracts, an A share's shares
+  const priced = (volume, volumeUnit) => ({ ...UNPRICED, volume, volumeUnit });
+  assert.deepEqual([priced(31688393074, 'usd'), priced(787322717, 'usd'), priced(412000, 'contracts'), priced(123456789, 'shares'), priced(999960, 'usd'), priced(950, 'usd'), priced(null, 'usd')].map(volumeWordOf),
+    ['$31.7B', '$787.3M', '412k contracts', '123.5M shares', '$1M', '$950', '—']);
+  assert.equal(volumeWordOf(undefined), '—');
 });
 
 test('a market whose provider is not configured says so instead of No quote', () => {

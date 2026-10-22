@@ -1,14 +1,16 @@
 // face/client/js/host/market-view.js — the Markets screen's pure view. The Account's markets (spec 2026-10-22 §6.1): its explore
-// reads — All's, and a tab's own — as the table's rows: the tabs, the prices by kind (an event in cents, Kalshi's volume in
-// contracts, a pre-IPO perpetual's implied valuation), where each price is from in the Account's own words with its age, the
-// lines across venues with the best marked — beside the face's own A-share (cn:) rows, and a market's page with what is held,
-// working and stated for it; what Hand to Gravit says of a market. No image URL the Account names (`icon`) is in anything
-// returned here: the face's page never loads a third party's image. And the face's own ids and words for the A shares (spec
-// 2026-10-19 §7 Stage 2), every word in English from the wire's enums. The wire's own text (a quote's message, a provider's
-// message, a search note, a source name) is Chinese and never reaches a word here. No DOM.
+// reads — All's, and a tab's own — as the table: its tabs, its sorts and the one in effect, the read its rows are from, and the
+// rows, each with its figures by kind (an event in cents, Kalshi's volume in contracts, a pre-IPO perpetual's implied valuation),
+// the price it shows, where that price is from in the Account's own words with its age, its lines across venues with the best
+// marked — beside the face's own A-share (cn:) rows; a market's page with its words, its history's state, what is held, working
+// and stated for it, and the read each of those stands on; one compact word for a volume; what Hand to Gravit says of a market.
+// No image URL the Account names (`icon`) is in anything returned here: the face's page never loads a third party's image. And
+// the face's own ids and words for the A shares (spec 2026-10-19 §7 Stage 2), every word in English from the wire's enums. The
+// wire's own text (a quote's message, a provider's message, a search note, a source name) is Chinese and never reaches a word
+// here. No DOM.
 import { normalizeAsset, number } from '../wire/market-model.js';
 import { MIN, HOUR, DAY } from '../time.js';
-import { assetsOf, positionsOf, openOrdersOf, statementLinesOf, worthOf } from './account-view.js';
+import { pageOk, assetsOf, positionsOf, openOrdersOf, statementLinesOf, worthOf } from './account-view.js';
 
 // the Account's tabs, in the order the table draws them, the sorts its rows take, and the ranges a market's history is read for
 export const ACCOUNT_TABS = [['all', 'All'], ['crypto', 'Crypto'], ['stocks', 'Stocks'], ['rwas', 'RWAs'], ['perps', 'Perps'], ['preipo', 'Pre-IPO'], ['predictions', 'Predictions']];
@@ -78,6 +80,16 @@ export function volumeWord(asset, quote) {
   return `${compact(volume)} ${unit}`;
 }
 
+/** A row's or a page's day volume (its `priced`) in the same compact word, in its unit: dollars ($1.9B), contracts (412k
+ *  contracts), an A share's shares (2M shares); none given is —. */
+export function volumeWordOf(priced) {
+  const volume = number(priced?.volume);
+  if (volume === null) return '—';
+  if (priced.volumeUnit === 'contracts') return `${compact(volume)} contracts`;
+  if (priced.volumeUnit === 'shares') return `${compact(volume)} shares`;
+  return `$${compact(volume)}`;
+}
+
 export function searchWord(search) {
   if (!search || blank(search.query)) return '';
   if (search.status === 'loading') return 'Searching…';
@@ -93,10 +105,12 @@ export function watchWord(error) {
 
 const escapeRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-/** Conversations whose title names the asset (a coin by its base) as a whole word, case-sensitive, in list order. */
+/** Conversations whose title names the market as a whole word, case-sensitive, in list order: by its symbol (a coin by its
+ *  base), or — a market with none, an event — by its name. */
 export function mentionsOf(conversations, asset) {
-  if (!Array.isArray(conversations) || !asset?.symbol) return [];
-  const token = asset.market === 'crypto' ? String(asset.symbol).split('/')[0] : String(asset.symbol);
+  const symbol = typeof asset?.symbol === 'string' || typeof asset?.symbol === 'number' ? String(asset.symbol) : '';
+  const token = symbol ? (asset.market === 'crypto' ? symbol.split('/')[0] : symbol) : typeof asset?.name === 'string' ? asset.name.trim() : '';
+  if (!Array.isArray(conversations) || !token) return [];
   const word = new RegExp(`(?<![A-Za-z0-9])${escapeRe(token)}(?![A-Za-z0-9])`);
   return conversations.filter(c => typeof c?.title === 'string' && word.test(c.title));
 }
@@ -246,6 +260,22 @@ const unpriced = () => ({ price: null, unit: 'usd', changePct: null, change24h: 
 const KIND_TABS = new Set(ACCOUNT_TABS.map(([id]) => id).filter(id => id !== 'all'));
 // a contract on a venue's estimate of a private company's valuation: its implied valuation, or its tab, says so
 const isPreipo = item => isRecord(item.implied) || (Array.isArray(item.tabs) && item.tabs.includes('preipo'));
+// what a market is, in a word, as the Account's page says it
+const KIND_WORDS = { coin: 'Crypto', stock: 'Stock', perp: 'Perpetual', rwa: 'Tokenized asset', event: 'Prediction' };
+// an outcome as a person says it: YES → Yes, UP → Up; a named outcome as its venue writes it
+const OUTCOMES = { YES: 'Yes', NO: 'No', UP: 'Up', DOWN: 'Down' };
+const outcomeWord = label => { const s = str(label); return Object.hasOwn(OUTCOMES, s) ? OUTCOMES[s] : s; };
+// a price the Account gives in dollars — a quote's, a line's, an outcome's — in the market's unit: an event's in cents
+const inUnit = (v, unit) => (unit === 'cents' ? cents(v) : number(v));
+// the price a row or a page shows: the latest quote at its line where that says one, else the explore read's
+const shownPrice = (live, priced) => inUnit(live?.price, priced.unit) ?? priced.price;
+// the word a market's tile takes its letters from, as the Account's page draws it: an event's category, else its base or name
+const tileOf = item => (item.kind === 'event' ? str(item.category) || 'Event' : str(item.base) || str(item.name));
+// the Account's keys starred: the operator's own, then each an old us:/crypto: star was found as
+function starredOf(m) {
+  const old = records(m.watchlist).map(a => normalizeAsset(a)).filter(a => a && a.market !== 'cn');
+  return [...new Set([...(Array.isArray(m.watch) ? m.watch : []), ...old.map(a => own(m.asked, a.id))].filter(k => typeof k === 'string' && k !== ''))];
+}
 
 // a row's second line: a pre-IPO perpetual's kind, another perpetual's base, an event's category, a coin's base, a stock's or an
 // RWA's venue — the first the owner connected, else the first public listing
@@ -268,10 +298,11 @@ function accountRow(item, quotes, watched, now) {
   const pair = pairOf(legs);
   const quote = pair ? own(quotes, pair) : undefined;
   const live = isRecord(quote) ? noIcon(quote) : null;
+  const priced = priceOf(item);
   return {
-    id: str(item.key), source: 'account', kind: str(item.kind), name: str(item.name), base: str(item.base), sub: subOf(item, legs),
-    priced: priceOf(item), live, sourceWord: wordOf(item, live, now),
-    closeTime: str(item.closeTime) || null, pastEnd: item.pastEnd === true, watched, legs,
+    id: str(item.key), source: 'account', kind: str(item.kind), name: str(item.name), tile: tileOf(item), sub: subOf(item, legs),
+    priced, price: shownPrice(live, priced), live, sourceWord: wordOf(item, live, now),
+    closeTime: str(item.closeTime) || null, pastEnd: item.pastEnd === true, paper: legs.find(l => l.connected)?.paper === true, watched, legs,
     tabs: Array.isArray(item.tabs) ? item.tabs.filter(t => typeof t === 'string') : [],
   };
 }
@@ -279,34 +310,37 @@ function accountRow(item, quotes, watched, now) {
 // a starred market no read lists (a quiet one, or one its venue no longer lists): enough of a row to see its star and take it off
 function placeholderRow(key) {
   const head = key.indexOf(':');
+  const name = key.slice(key.lastIndexOf(':') + 1);
   return {
-    id: key, source: 'account', placeholder: true, kind: head > 0 ? key.slice(0, head) : '', name: key.slice(key.lastIndexOf(':') + 1),
-    sub: 'Not in this read', priced: unpriced(), live: null, sourceWord: '', closeTime: null, pastEnd: false, watched: true, legs: [],
-    tabs: ['all', 'watching'],
+    id: key, source: 'account', placeholder: true, kind: head > 0 ? key.slice(0, head) : '', name, tile: name,
+    sub: 'Not in this read', priced: unpriced(), price: null, live: null, sourceWord: '', closeTime: null, pastEnd: false, paper: false,
+    watched: true, legs: [], tabs: ['all', 'watching'],
   };
 }
 
 // a cn row, quoted by the face's own wire (the iFinD provider): its stream's quote, else the one its search read; its price in its
-// currency, its volume in shares
+// currency, its volume in shares; its tile its code
 function cnRow(asset, markets, watched) {
   const quote = own(markets.quotes, asset.id) ?? own(markets.hitQuotes, asset.id) ?? null;
+  const priced = {
+    price: number(quote?.price), unit: asset.currency === 'CNY' ? 'cny' : 'usd', changePct: number(quote?.change_pct), change24h: null,
+    volume: number(quote?.volume), volumeUnit: 'shares', implied: null,
+  };
   return {
-    id: asset.id, source: 'face', asset, quote, kind: 'stock', name: asset.name || asset.symbol, sub: asset.exchange || '',
-    priced: {
-      price: number(quote?.price), unit: asset.currency === 'CNY' ? 'cny' : 'usd', changePct: number(quote?.change_pct), change24h: null,
-      volume: number(quote?.volume), volumeUnit: 'shares', implied: null,
-    },
-    live: null, sourceWord: sourceWord(quote ?? { market: 'cn' }), closeTime: null, pastEnd: false, watched, legs: [], tabs: ['all', 'stocks'],
+    id: asset.id, source: 'face', asset, quote, kind: 'stock', name: asset.name || asset.symbol, tile: asset.symbol, sub: asset.exchange || '',
+    priced, price: priced.price, live: null, sourceWord: sourceWord(quote ?? { market: 'cn' }), closeTime: null, pastEnd: false, paper: false,
+    watched, legs: [], tabs: ['all', 'stocks'],
   };
 }
 
 // an old us:/crypto: star the Account could not find: listed once, under its own muted line
 function notListedRow(asset) {
   const coin = asset.market === 'crypto';
+  const name = asset.name || asset.symbol;
   return {
-    id: asset.id, source: 'face', notListed: true, kind: coin ? 'coin' : 'stock', name: asset.name || asset.symbol,
-    sub: 'Not listed at the Account', priced: unpriced(), live: null, sourceWord: '', closeTime: null, pastEnd: false,
-    watched: true, legs: [], tabs: ['all', coin ? 'crypto' : 'stocks'],
+    id: asset.id, source: 'face', notListed: true, kind: coin ? 'coin' : 'stock', name, tile: name,
+    sub: 'Not listed at the Account', priced: unpriced(), price: null, live: null, sourceWord: '', closeTime: null, pastEnd: false,
+    paper: false, watched: true, legs: [], tabs: ['all', coin ? 'crypto' : 'stocks'],
   };
 }
 
@@ -329,28 +363,57 @@ function sorted(rows, sort) {
     .map(x => x.row);
 }
 
-/** The table's rows for the slice's tab, query and sort, on the renderer's clock (`now`, for the ages beside the source words).
- *  The Account's rows are `source: 'account'`, each with its base (the letters of its tile), its figures by kind, the latest
- *  quote at its most traded connected venue (`live`, which leads the item's price where there is one), where its price is from
- *  and its lines: a tab's rows are its own explore read's (`explore[tab]`) once that has answered, else All's (`explore.all`),
- *  of the tab's kind; while there is a query, the search's (`results`) once it has answered. Beside them the face's: the cn
- *  watchlist (starred by being on it), or while searching the cn hits alone; and an old us:/crypto: star — one not asked of the
- *  Account yet draws nothing, one it found stars the Account's row, one it could not find is listed once, Not listed at the
- *  Account. All is every row, a kind's tab the rows whose tabs name it, All results (`results`) the search's own. Watching is
- *  every star, found in any list of its tab's read or All's (items, movers, closing, most traded), else a placeholder that can
- *  still be un-starred; a query typed on Watching searches every market, as the Account's page does. Sorted Most traded,
- *  Biggest moves or Closing soonest. */
-export function rowsOf(markets, now = Date.now()) {
+/** The sorts the table offers for its rows — Closing soonest only where a row closes — and the one in effect: the kept sort
+ *  when it is offered, else the first offered, Most traded. */
+export function sortsOf(rows, kept) {
+  const sorts = ACCOUNT_SORTS.filter(s => s.id !== 'closing' || records(rows).some(r => r.closeTime));
+  return { sorts, sort: sorts.some(s => s.id === kept) ? kept : sorts[0].id };
+}
+
+/** The table for the slice's tab, query and kept sort, on the renderer's clock (`now`, for the ages beside the source words):
+ *  its rows, sorted by the sort in effect (sortsOf's); the sorts offered and that one; its tabs — tabsOf's over All's read, the
+ *  A shares counted under All and Stocks, each count the Account's only once All's read has answered (none before), Watching
+ *  once anything is starred, All results while searching; and the read the rows are from, `{ status, answered, message }` —
+ *  while searching the search's, else the tab's own read once it has answered, else All's — `message` the Account's sentence
+ *  when that read refused. The rows: the Account's are `source: 'account'`, each with the word its tile is lettered from, its
+ *  figures by kind, the price it shows (`price`: the latest quote at its most traded connected venue, `live`, where that says
+ *  one, in the row's unit — an event's in cents — else the explore read's), where its price is from and its lines: a tab's rows
+ *  are its own explore read's (`explore[tab]`) once that has answered, else All's (`explore.all`), of the tab's kind; while
+ *  there is a query, the search's (`results`) once it has answered. Beside them the face's: the cn watchlist (starred by being
+ *  on it), or while searching the cn hits alone; and an old us:/crypto: star — one not asked of the Account yet draws nothing,
+ *  one it found stars the Account's row, one it could not find is listed once, Not listed at the Account. All is every row, a
+ *  kind's tab the rows whose tabs name it, All results (`results`) the search's own. Watching is every star, found in any list
+ *  of its tab's read or All's (items, movers, closing, most traded), else a placeholder that can still be un-starred; a query
+ *  typed on Watching searches every market, as the Account's page does. */
+export function tableOf(markets, now = Date.now()) {
   const m = isRecord(markets) ? markets : {};
   const searching = !blank(m.q);
-  const tab = searching && m.tab === 'watching' ? 'results' : m.tab;
   const reads = isRecord(m.explore) ? m.explore : {};
+  const rows = unsortedRowsOf(m, searching, reads, now);
+  const { sorts, sort } = sortsOf(rows, m.sort);
+  const watchlist = records(m.watchlist).map(a => normalizeAsset(a)).filter(Boolean);
+  const all = bodyOf(reads, 'all');
+  const counted = all !== undefined && all !== null;
+  const tabs = tabsOf(all, watchlist.filter(a => a.market === 'cn').length, { watching: starredOf(m).length > 0 || watchlist.length > 0, searching })
+    .map(t => (counted ? t : { ...t, count: null }));
+  const mine = own(reads, KIND_TABS.has(m.tab) ? m.tab : 'all');
+  const source = searching ? m.results : mine?.data ? mine : own(reads, 'all');
+  const read = { status: str(source?.status) || 'idle', answered: isRecord(source) && source.data != null, message: str(source?.message) || null };
+  return { rows: sorted(rows, sort), sorts, sort, tabs, read };
+}
+
+/** The table's rows (tableOf's), sorted by the sort in effect. */
+export function rowsOf(markets, now = Date.now()) {
+  return tableOf(markets, now).rows;
+}
+
+function unsortedRowsOf(m, searching, reads, now) {
+  const tab = searching && m.tab === 'watching' ? 'results' : m.tab;
   const all = bodyOf(reads, 'all');
   const watchlist = records(m.watchlist).map(a => normalizeAsset(a)).filter(Boolean);
   const cn = watchlist.filter(a => a.market === 'cn');
   const old = watchlist.filter(a => a.market !== 'cn');
-  // the Account's keys starred: the operator's own, then each an old star was found as
-  const starred = [...new Set([...(Array.isArray(m.watch) ? m.watch : []), ...old.map(a => own(m.asked, a.id))].filter(k => typeof k === 'string' && k !== ''))];
+  const starred = starredOf(m);
   const isStarred = new Set(starred);
   const quotes = isRecord(m.accountQuotes) ? m.accountQuotes : {};
   const row = item => accountRow(item, quotes, isStarred.has(str(item.key)), now);
@@ -370,7 +433,7 @@ export function rowsOf(markets, now = Date.now()) {
     rows = [...itemsOf(body).map(row), ...(searching ? hits : face())];
     if (KIND_TABS.has(tab)) rows = rows.filter(r => r.tabs.includes(tab));
   }
-  return sorted(rows, m.sort);
+  return rows;
 }
 
 /** What an old face star asks the Account (`explore?q=<q>`), and the kind a hit must be: `us:AAPL` a stock by its symbol,
@@ -393,14 +456,28 @@ export function pairsOf(rows, limit = 12) {
 // not in `cbBTC`; `SI-FEDCUT-DEC:YES` whole)
 const names = (text, token) => token !== '' && new RegExp(`(?<![A-Za-z0-9])${escapeRe(token)}(?![A-Za-z0-9])`).test(text);
 
+// what a part of the page stands on, from a read as the store keeps it: whether it has answered, whether its last try failed,
+// and the Account's sentence when that try refused
+const partRead = (answered, failed, message) => ({ answered, failed, message: failed ? str(message) || null : null });
+
 /** A market's page from the Account's reads, on the renderer's clock, or null for an id none lists. The item, without its icons,
- *  is looked for in every list (items, movers, closing, most traded) of the current tab's read, All's and the search's. Its
- *  lines and its figures by kind; the latest quote at the line the page follows (host/markets.js: its first connected line,
- *  else its first public listing) and where its price is from; the chart's candles for the range chosen (1D until one is),
- *  once the read answered; the compare rows for its base. What is held of it — the leading lens's assets of its base (the paper
- *  lens's when paper leads the Portfolio, else the real) and the positions, real and paper, at any of its lines (an event's:
- *  every outcome's) — its open orders there, and the statement's lines that name its base or one of those lines' symbols.
- *  Gravit's conversations on it are mentionsOf's, asked with the item's base and name. */
+ *  is looked for in every list (items, movers, closing, most traded) of the current tab's read, All's and the search's.
+ *  - Its figures by kind, and the price it shows (`price`: the latest quote at the line the page follows — host/markets.js: its
+ *    first connected line, else its first public listing — where that says one, in the market's unit, else the explore read's);
+ *    where its price is from (`sourceWord`); its lines (`legs`) with their prices in the market's unit, an event's in cents.
+ *  - Its words: its name; the one its tile is lettered from; its sub's parts (`sub`: what it is and the symbol at the line it
+ *    follows, or an event's category) and an event's close (`closesAt`, the Account's time); its outcomes (`outcomes`: each
+ *    label as a person says it, its price in cents); whether it is a pre-IPO perpetual (`preipo`) and whether it is starred
+ *    (`watched`, rowsOf's rule); what Gravit's conversations on it are found by (`about`, for mentionsOf: its base, or — an
+ *    event, which has none — its name).
+ *  - Its history: the candles for the range kept (1D until one is chosen) once a read answered, and that read's state
+ *    (`history`: its status, the Account's sentence when it refused, and whether the candles kept are the range's own).
+ *  - The compare rows for its base.
+ *  - What is held of it — the leading lens's assets of its base (the paper lens's when paper leads the Portfolio, else the real)
+ *    and the positions, real and paper, at any of its lines (an event's: every outcome's) — its open orders there, and the
+ *    statement's lines that name its base or one of those lines' symbols; with what each stands on (`reads`): what is held, the
+ *    holdings read and, while the page names a paper venue, its paper lens's; the orders, the Account's page; the lines, the
+ *    statement read. */
 export function pageOf(markets, account, id, now = Date.now()) {
   const m = isRecord(markets) ? markets : {};
   if (typeof id !== 'string' || id === '') return null;
@@ -409,22 +486,39 @@ export function pageOf(markets, account, id, now = Date.now()) {
   if (!found) return null;
   const item = noIcon(found);
   const legs = legsOf(item);
-  const pair = pairAt(followOf(item));
+  const follow = followOf(item);
+  const pair = pairAt(follow);
   const quote = pair ? own(m.accountQuotes, pair) : undefined;
   const live = isRecord(quote) ? noIcon(quote) : null;
+  const priced = priceOf(item);
+  const event = item.kind === 'event';
+  const preipo = isPreipo(item);
   const chart = own(m.candles, id);
+  const candles = isRecord(chart) && chart.data?.ok === true ? noIcon(chart.data) : null;
+  const range = isRecord(chart) && typeof chart.range === 'string' && chart.range ? chart.range : '1D';
   const base = str(item.base);
   const compare = base ? own(own(m.compare, base), 'data') : undefined;
   const a = isRecord(account) ? account : {};
   const lens = worthOf(a.data, a.holdings?.data, a.paper?.data).paperLeads ? a.paper?.data : a.holdings?.data;
+  const paperNamed = pageOk(a.data) && a.data.venues.some(v => v?.paper === true);
   // every line the market trades at: its own, and an event's every outcome's (its YES and its NO)
   const places = [...legs, ...records(item.outcomes).flatMap(o => records(o.at))].filter(named);
   const atPlace = x => places.some(p => p.venue === x.venue && p.symbol === x.symbol);
   const symbols = [...new Set(places.map(p => str(p.symbol)))];
+  const closesAt = event && typeof item.closeTime === 'string' && !Number.isNaN(Date.parse(item.closeTime)) ? item.closeTime : null;
+  const name = str(item.name);
   return {
-    item, legs, priced: priceOf(item), live, sourceWord: wordOf(item, live, now),
-    candles: isRecord(chart) && chart.data?.ok === true ? noIcon(chart.data) : null,
-    range: isRecord(chart) && typeof chart.range === 'string' && chart.range ? chart.range : '1D',
+    item, priced, price: shownPrice(live, priced), live, sourceWord: wordOf(item, live, now),
+    legs: legs.map(l => ({ ...l, price: inUnit(l.price, priced.unit), bid: inUnit(l.bid, priced.unit), ask: inUnit(l.ask, priced.unit) })),
+    name, tile: tileOf(item), preipo, watched: starredOf(m).includes(id), about: base ? { symbol: base, name } : { name },
+    sub: (event ? [str(item.category)] : [preipo ? 'Pre-IPO' : own(KIND_WORDS, item.kind) ?? '', str(follow?.symbol)]).filter(Boolean),
+    closesAt,
+    outcomes: event ? records(item.outcomes).map(o => ({ label: outcomeWord(o.label), cents: cents(o.price) })) : [],
+    candles, range,
+    history: {
+      status: str(chart?.status) || 'idle', message: chart?.status === 'error' ? str(chart.message) || null : null,
+      current: candles !== null && (typeof candles.range !== 'string' || candles.range === range),
+    },
     compare: compare?.ok === true ? noIcon(records(compare.rows)) : [],
     held: {
       assets: base ? assetsOf(lens).filter(r => r.asset === base) : [],
@@ -432,6 +526,12 @@ export function pageOf(markets, account, id, now = Date.now()) {
     },
     orders: openOrdersOf(a.data).filter(atPlace),
     lines: statementLinesOf(a.statement?.data).filter(l => names(l.description, base) || symbols.some(s => names(l.description, s))),
+    reads: {
+      held: partRead(a.holdings?.data != null && (!paperNamed || a.paper?.data != null),
+        a.holdings?.status === 'error' || (paperNamed && a.paper?.status === 'error'), null),
+      orders: partRead(pageOk(a.data), a.status === 'error', a.message),
+      lines: partRead(a.statement?.data != null, a.statement?.status === 'error', null),
+    },
   };
 }
 

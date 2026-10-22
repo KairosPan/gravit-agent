@@ -2,7 +2,7 @@
 // explore reads by tab and the search's, the quotes of the rows in view and of the market a page follows, a page's candles and
 // its base's compare rows, the Account keys starred and what each old us:/crypto: star was found as; the face's own A-share wire
 // as today — and the screen's own view of it: the tab, the sort, the query, a page's range
-import { ACCOUNT_TABS, ACCOUNT_SORTS, isAccountKey } from '../host/market-view.js';
+import { ACCOUNT_TABS, ACCOUNT_SORTS, CANDLE_RANGES, isAccountKey } from '../host/market-view.js';
 import { number } from '../wire/market-model.js';
 
 const mk = (s, patch) => ({ ...s, markets: { ...s.markets, ...patch } });
@@ -16,9 +16,8 @@ const read = (s, patch) => mk(s, { results: { ...s.markets.results, ...patch } }
 // the explore reads: All's and each kind's own; the tabs: those, Watching and All results
 const EXPLORED = new Set(ACCOUNT_TABS.map(([id]) => id));
 const TABS = new Set([...EXPLORED, 'watching', 'results']);
-// the Account's candle ranges
-const RANGES = ['1D', '5D', '1M', '3M', '6M', 'YTD', '1Y', '5Y', 'MAX'];
-const charted = (id, range) => isAccountKey(id) && RANGES.includes(range);
+// a market's history: an Account key's, at one of the Account's candle ranges
+const charted = (id, range) => isAccountKey(id) && CANDLE_RANGES.includes(range);
 const named = v => typeof v === 'string' && v !== '';
 const text = v => (typeof v === 'string' ? v : null);
 // a price's stamp as a time, or null when it has none that parses
@@ -85,10 +84,11 @@ export const reducers = {
     });
   },
 
-  // a market page's candles, by its key, each under the range it was read for; and the compare rows, by base
+  // a market page's candles, by its key, each under the range it was read for — a failed read keeps the last candles, with the
+  // Account's sentence when it refused (`message`, else null), until a read answers; and the compare rows, by base
   candlesLoading: (s, { id, range } = {}) => (charted(id, range) ? keyed(s, 'candles', id, { status: 'loading', range }) : s),
-  candlesLoaded: (s, { id, range, data, at } = {}) => (charted(id, range) ? keyed(s, 'candles', id, { status: 'ready', data, at, range }) : s),
-  candlesFailed: (s, { id, range, at } = {}) => (charted(id, range) ? keyed(s, 'candles', id, { status: 'error', at, range }) : s),
+  candlesLoaded: (s, { id, range, data, at } = {}) => (charted(id, range) ? keyed(s, 'candles', id, { status: 'ready', data, at, range, message: null }) : s),
+  candlesFailed: (s, { id, range, at, message = null } = {}) => (charted(id, range) ? keyed(s, 'candles', id, { status: 'error', at, range, message }) : s),
   // the range a page's chart is drawn at, one of the Account's: kept by the page's key, 1D until one is chosen
   setRange: (s, { id, range } = {}) => (charted(id, range) && own(s.markets.candles, id)?.range !== range ? keyed(s, 'candles', id, { range }) : s),
   compareLoading: (s, { base } = {}) => (named(base) ? keyed(s, 'compare', base, { status: 'loading' }) : s),
