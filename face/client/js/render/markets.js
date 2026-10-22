@@ -16,7 +16,7 @@ import { candlesSvg } from './chart.js';
 import { orderWords } from './account.js';
 import {
   ACCOUNT_TABS, ACCOUNT_SORTS, CANDLE_RANGES, isAccountKey, tabsOf, rowsOf, pageOf, priceOf, followOf, faceAssetOf, mentionsOf,
-  quoteWord, connectionWord, watchWord, volumeWord, basisWord, sourceWord,
+  quoteWord, connectionWord, searchWord, watchWord, volumeWord, basisWord, sourceWord,
 } from '../host/market-view.js';
 
 const EM = '—';
@@ -134,6 +134,14 @@ function emptyWord(m, tab, searching) {
   return searching ? 'Search is unavailable' : 'Markets unavailable';
 }
 
+// the face's own search for the A shares, while a query is active: its failure, or its answer when it says it is partial, in its
+// own words — never its silence; its other states are the table's (its hits drawn, Searching…, No markets)
+function cnSearchWord(m, searching) {
+  const s = m.search;
+  const said = s?.status === 'error' || (s?.status === 'success' && s.partial === true && records(s.assets).length > 0);
+  return searching && said ? searchWord(s) : '';
+}
+
 export function renderMarketsScreen(state, now) {
   const id = state.route?.screen === 'markets' ? state.route.id : null;
   if (id) {
@@ -156,12 +164,14 @@ export function renderMarketsScreen(state, now) {
     ? `<p class="mk-q">${rows.length} market${rows.length === 1 ? '' : 's'} for “${esc(q)}” <button type="button" class="mk-clear" data-action="mkClear">Clear</button></p>`
     : '<span></span>';
   const bar = `<div class="mk-bar">${left}${rows.length > 1 ? seg(sorts.map(s => [s.label, s.id]), m.sort, 'mkSort') : ''}</div>`;
-  // the muted lines: the Account's own sentence when its read refused, the face's wire's state where an A share is drawn, the
-  // watchlist's
+  // the muted lines: the Account's own sentence when its read refused, the A-share search's when it failed or answered in part
+  // (said once: not again under a table that already says it), the face's wire's state where an A share is drawn, the watchlist's
   const message = (searching ? m.results : own(m.explore, exploreTab(m.tab)))?.message;
+  const empty = rows.length ? '' : emptyWord(m, m.tab, searching);
+  const cnSearch = cnSearchWord(m, searching);
   const cnDrawn = rows.some(r => r.source === 'face' && !r.notListed);
-  const words = note(message) + (cnDrawn ? note(connectionWord(m.connection)) : '') + note(watchWord(m.watchError));
-  const body = rows.length ? table(rows) : `<p class="mk-empty">${esc(emptyWord(m, m.tab, searching))}</p>`;
+  const words = note(message) + note(cnSearch !== empty ? cnSearch : '') + (cnDrawn ? note(connectionWord(m.connection)) : '') + note(watchWord(m.watchError));
+  const body = rows.length ? table(rows) : `<p class="mk-empty">${esc(empty)}</p>`;
   return `<main class="main mkts"><div class="mk-head"><h1 class="head-title">Markets</h1>` +
     `<div class="search"><label for="mq" class="sr-only">Search markets</label>${icon('search', 18, 2)}<input id="mq" type="search" autocomplete="off" placeholder="Search markets" data-action="mkQuery"${attrs({ value: m.q })}></div></div>` +
     `<div class="mk">${tabsHtml}${bar}${words}${body}</div></main>`;
@@ -218,10 +228,11 @@ function accountPage(id, view, state, now) {
   const who = `<div class="mk-who">${mkAv(event ? category || 'Event' : base || name, 'lg')}<div><h1 class="head-title">${esc(name)}</h1>` +
     `<span class="mk-sub">${esc(sub)}${item.pastEnd === true ? ` ${tag('Closed')}` : ''}</span></div></div>`;
 
-  // the price now, its 24 hours and its volume the explore read's; where it is from, with its age; an event's outcomes under it
+  // the price now, its 24 hours and its volume the explore read's; where it is from, with its age, once, under it, as the
+  // Account's page says it; an event's outcomes under the price
   const moved = (event ? priced.change24h : priced.changePct) !== null;
   const outcomes = event ? records(item.outcomes).map(o => `<span class="mk-out">${esc(`${outcomeWord(o.label)} ${priceWord(inUnit(o.price, 'cents'), 'cents')}`)}</span>`) : [];
-  const facts = [['24h volume', volumeCell(priced)], ['Venues', String(view.legs.length)], ['Source', view.sourceWord || EM]];
+  const facts = [['24h volume', volumeCell(priced)], ['Venues', String(view.legs.length)]];
   const top = `<div class="mk-d-px"><span class="mk-big">${esc(priceWord(nowPrice(view.live, priced), unit))}</span>${moved ? `${moveHtml(priced)}<span class="mk-basis">24h</span>` : ''}</div>` +
     `${outcomes.length ? `<div class="mk-outs">${outcomes.join('')}</div>` : ''}${view.sourceWord ? `<p class="mk-asof">${esc(view.sourceWord)}</p>` : ''}` +
     `<dl class="mk-facts">${facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>`;

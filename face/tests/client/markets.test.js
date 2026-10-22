@@ -232,7 +232,8 @@ test('the page: no Buy, no Sell; the range seg; Across venues with best and Conn
   // the price now is the followed line's quote; its 24 hours and its volume the explore read's; where it is from, with its age
   assert.match(html, /<div class="mk-d-px"><span class="mk-big">\$62,510\.50<\/span><span class="up"><span aria-hidden="true">▲<\/span><span class="sr-only">up<\/span> 2\.30%<\/span><span class="mk-basis">24h<\/span><\/div>/);
   assert.match(html, /<p class="mk-asof">Stand-in Exchange · live · 1 min ago<\/p>/);
-  assert.match(html, /<dl class="mk-facts"><div><dt>24h volume<\/dt><dd>\$2\.5B<\/dd><\/div><div><dt>Venues<\/dt><dd>4<\/dd><\/div><div><dt>Source<\/dt><dd>Stand-in Exchange · live · 1 min ago<\/dd><\/div><\/dl>/);
+  assert.match(html, /<dl class="mk-facts"><div><dt>24h volume<\/dt><dd>\$2\.5B<\/dd><\/div><div><dt>Venues<\/dt><dd>4<\/dd><\/div><\/dl>/);
+  assert.equal(html.split('Stand-in Exchange · live · 1 min ago').length - 1, 1, 'where the price is from, once: under it');
   // Price history: the Account's ranges, each naming the page, the kept one pressed — 1D until one is chosen; no read, no chart
   const history = section(html, 'Price history');
   const ranges = [...history.matchAll(/<button type="button" class="seg-item(?: pressed)?" aria-pressed="(true|false)" data-action="setRange" data-value="([^"]+)" data-id="coin:BTC">([^<]+)<\/button>/g)].map(m => [m[2], m[1], m[3]]);
@@ -416,6 +417,28 @@ test('empty states: Loading… before a read, No markets for an empty answer, No
   const said = renderMarketsScreen(busy, NOW);
   assert.match(said, /<p class="mk-note">Too many searches: wait a moment<\/p>/);
   assert.match(said, /<p class="mk-empty">Search is unavailable<\/p>/);
+});
+
+test("while searching, the A-share search's own failure or partial answer is a muted line, never its silence", () => {
+  const searched = screen({ q: 'fed', results: fx('explore-predictions') }).s;
+  const draw = search => renderMarketsScreen(R.searchUpdated(searched, { query: 'fed', assets: [], partial: false, ...search }), NOW);
+  // it failed: said, the Account's hits drawn under it
+  const failed = draw({ status: 'error' });
+  assert.match(failed, /<p class="mk-note">Search is unavailable<\/p>/);
+  assert.equal(rowIds(failed).length, 9);
+  // it answered in part: said beside its hits
+  const partial = draw({ status: 'success', assets: [MOUTAI], partial: true });
+  assert.match(partial, /<p class="mk-note">Some results may be missing<\/p>/);
+  assert.ok(rowIds(partial).includes('cn:600519'));
+  // its other states are the table's: on its way, or nothing of its own beside the Account's hits
+  for (const status of ['loading', 'success']) assert.doesNotMatch(draw({ status }), /mk-note/, status);
+  // no query, no word from it
+  assert.doesNotMatch(renderMarketsScreen(R.searchUpdated(screen().s, { query: 'fed', status: 'error', assets: [], partial: false }), NOW), /Search is unavailable/);
+  // both halves failed: said once, where the rows would be
+  const both = R.searchUpdated(R.resultsFailed(screen({ q: 'zz' }).s, { at: NOW, message: null }), { query: 'zz', status: 'error', assets: [], partial: false });
+  const html = renderMarketsScreen(both, NOW);
+  assert.equal(html.split('Search is unavailable').length - 1, 1);
+  assert.match(html, /<p class="mk-empty">Search is unavailable<\/p>/);
 });
 
 test('a market route keeps an Account key whole and canonicalises a face id', () => {
