@@ -1638,8 +1638,9 @@ market's page `GET /data/account/candles?venue=&symbol=&range=` for its range an
 perpetual or a stock, `GET /data/account/compare?base=<base>&side=buy`. Account: `GET
 /data/account` at boot, on entering Account, every 20 s while it is on screen in a visible tab
 (80 s while the stream is open), on Refresh and right after a receipt that is not the seat's
-(those two `?fresh=1`); `holdings?cost=1` — and while the page names a paper venue its paper lens
-`holdings?cost=1&paper=1` beside it — on entering Portfolio, on Refresh and on a market's page;
+(those two `?fresh=1`); `holdings?cost=1` — and while the page, one the face recognises, names a
+paper venue its paper lens `holdings?cost=1&paper=1` beside it — on entering Portfolio, on Refresh
+and on a market's page;
 `history?range=<1d|1w|1m|all>` (`&paper=1` when Paper leads) after the holdings on entering
 Portfolio, after a paper lens read for the first time and in a snapshot's re-read, and on a range —
 not after Refresh's or a market page's holdings read;
@@ -1855,9 +1856,12 @@ after `close()`. `load({fresh})` reads `/data/account`: any 2xx answer that is n
 screens then draw as `Account unreadable`, never a figure from it; a refusal (an `ok: false` body,
 on a 200 or not), any other non-2xx, an empty 2xx body or a rejection (with the body `getJsonVia`
 carries on it, when it does) is `accountFailed` with the Account's sentence (`refusal.message`,
-else `error`, when they are text), the last page kept; a page naming a paper venue whose lens has
-no data reads the holdings and then the curve, unless a `loadAll` is about to. `loadHoldings({fresh})` reads `holdings?cost=1` and, while the page names
-a paper venue, its paper lens `holdings?cost=1&paper=1` beside it; `loadHistory(range)` sets the
+else `error`, when they are text), the last page kept; a recognised page naming a paper venue whose
+lens has no data reads the holdings and then the curve, unless a `loadAll` is about to — an
+unrecognised page leads no read, its venues choosing no lens (`hasPaper` is `pageOk`-gated, as
+`worthOf` is), so the recognised page after it reads the lens and the curve that lens leads to.
+`loadHoldings({fresh})` reads `holdings?cost=1` and, while the page — one the face recognises —
+names a paper venue, its paper lens `holdings?cost=1&paper=1` beside it; `loadHistory(range)` sets the
 range (`1d`, `1w`, `1m`, `all`; an unknown one leaves the slice's) and reads the leading curve —
 `history?range=<r>&paper=1` when `worthOf` says Paper leads, else `history?range=<r>` — a read
 for a range the screen has left dropped; `loadStatement({fresh})`; `loadAgents()`. `loadAll()`,
@@ -1916,7 +1920,8 @@ figures, price shown and source word, its lines in its unit, name, tile, sub, cl
 cents, whether it is a pre-IPO perpetual or starred, the candles for its range and that read's
 state, the compare rows, what is held of it — the leading lens's assets of its base, the positions
 at its lines — its open orders and statement lines, and what each part stands on, `reads.held`,
-`reads.orders`, `reads.lines`); `faceAssetOf`, `handWordsOf` (what Hand to Gravit names a market
+`reads.orders`, `reads.lines`, the first two `unreadable` under a page the face does not recognise);
+`faceAssetOf`, `handWordsOf` (what Hand to Gravit names a market
 by), `mentionsOf` (the conversations whose titles name it as a whole word, case-sensitive: its
 symbol, a coin by its base, or a market with none by its name), `volumeWordOf` (`$1.9B`, `412k
 contracts`, `2M shares`). The face's ids and the A shares' words from the wire's enums alone, as
@@ -2165,8 +2170,9 @@ line; `Open the Statement →`), each on its own read (`reads`): `Loading…` un
 empty words — `You don’t hold any.`, `Nothing on the statement about it yet.` — only after an
 answer, `Holdings unavailable`, `Account unavailable` or `Statement unavailable` under the
 Account's sentence when it failed before any answer, and the lines it read kept under a later
-refusal; Open orders read `Account unreadable` while the Account's page is one the face does not
-recognise (`reads.orders.unreadable`). The compare rows are read and not drawn. A `cn:` page is the face's own quote: the
+refusal; You hold and Open orders read `Account unreadable` while the Account's page is one the
+face does not recognise (`reads.held.unreadable`, `reads.orders.unreadable`: which lens leads, and
+what is working, are the page's to say). The compare rows are read and not drawn. A `cn:` page is the face's own quote: the
 price, the change with its basis, `as of 14:30 · Live`, the facts Previous close, Volume, Source,
 Gravit on it.
 
@@ -2187,7 +2193,8 @@ value, front line and what it trades, its health (`Not answering since 14:02`), 
 `Paper`, stale, and **Details** — a drawer (`venueDetails`: its holdings and the Account's facts
 under their labels, the key file by its path, `No details`) that takes focus and closes on
 Escape; the `A-share quotes` line from the face's iFinD provider (`markets.providers`, which the
-wire fills only once it has quoted an A share — none drawn before); the Account seat box (the
+wire fills once it has quoted an A share and empties when it is handed none — so the line stands
+only while an A share is on the cn list, once Markets has been opened); the Account seat box (the
 service with the Account's own mode and writes, the seat and its limits, the venues with `Paper`
 chips, the cards waiting, the stamp, and the link to the Account page — the only place a card is
 signed). **Agents**: Gravit's seat first (its standing and limits in the seat box's words,
@@ -2443,9 +2450,9 @@ from the member's own log without activating it (§5.4) — it follows no member
 | Command | From | Needs | Measured 2026-09-30 |
 |---|---|---|---|
 | `python -m pytest` | repo root | nothing — offline, no keys, no bed | 400 passed in a clean checkout, ~2 s (2026-10-20; the operator's tree adds the untracked `tests/strategies/`) |
-| `cd face && npm test` | `face/` | nothing — no port, no key | 1149 tests, 1131 pass, 18 skipped (2026-10-23) |
+| `cd face && npm test` | `face/` | nothing — no port, no key | 1150 tests, 1132 pass, 18 skipped (2026-10-23) |
 | `cd face && npm run typecheck` | `face/` | | clean, the dependencies' `.d.ts` included (`skipLibCheck: false`) |
-| `cd face && FACE_SMOKE=1 npm test` | `face/` | boots eighteen real trees into `mkdtemp` homes and binds ports; still no LLM or key (four of the smokes also create, and remove, a gitignored `.bots-smoke-*` bots root at the repo root) | the eighteen skipped tests; 1145/1145 (2026-10-22 at `0f9855f`, with `FACE_ACCOUNT_SEAT_DIR` naming a checkout of buyer-agent-demo @ 133b9a7 — without it the seat and graft smokes stay skipped; the four offline tests added since, by `e81eed7` and by Task 13's fix round, are not yet run under the flag) |
+| `cd face && FACE_SMOKE=1 npm test` | `face/` | boots eighteen real trees into `mkdtemp` homes and binds ports; still no LLM or key (four of the smokes also create, and remove, a gitignored `.bots-smoke-*` bots root at the repo root) | the eighteen skipped tests; 1145/1145 (2026-10-22 at `0f9855f`, with `FACE_ACCOUNT_SEAT_DIR` naming a checkout of buyer-agent-demo @ 133b9a7 — without it the seat and graft smokes stay skipped; the five offline tests added since, by `e81eed7` and by Task 13's two fix rounds, are not yet run under the flag) |
 | `cd face && npm run check:fixture` | `face/` | the installed dsh | 26 fixture lines: 23 validated, 0 rejected, 3 with no upstream validator |
 
 ### 7.2 The Python suite
@@ -2474,7 +2481,7 @@ order path.
 
 ### 7.3 The face suite
 
-1149 tests in 109 files (1131 pass, 18 skipped without `FACE_SMOKE=1`), run by `node --test`
+1150 tests in 109 files (1132 pass, 18 skipped without `FACE_SMOKE=1`), run by `node --test`
 through `tsx`:
 
 - **Composition and boot** — `boot` (the layer order ending with the overlay; the policy layer
@@ -2602,7 +2609,8 @@ through `tsx`:
   views over the stand-in's fixtures and hand-built edges: the tabs, prices by kind, the source
   words and their age, the lines and the best, the Account's rows beside the cn rows, the three
   sorts with nulls last, `tableOf`, `pageOf`'s words, history state and the read each part stands
-  on — the orders unreadable under a page the face does not recognise — `watchedOf`, `handWordsOf`,
+  on — the orders and what is held unreadable under a page the face does not recognise, never the
+  real book in its place — `watchedOf`, `handWordsOf`,
   no icon through any view, every word English from every enum;
   the page, the head, the two figures, the change, assets and positions, open orders and whose,
   the statement and its CSV, the venues' health and Details facts, Gravit's agent row first, the
@@ -2613,7 +2621,8 @@ through `tsx`:
   stores with the cn wire handed cn ids alone, the page's candles, compare and follow, a page whose
   market is no row of the tab still polling its pair, the old stars asked once, a stream quote; the
   page in one flight and its fresh read, a refusal's sentence, an unrecognised page landing and
-  reading `Account unreadable`, the holdings and the paper lens, the leading curve, the stream's
+  reading `Account unreadable` — leading no paper read, so the recognised page after it reads the
+  lens and the paper curve — the holdings and the paper lens, the leading curve, the stream's
   events as fresh reads, the poll at 20 s and 80 s), `account-stream` (the client id, the resume point and
   `since`, every named frame to `onEvent`, stale and dead with the retry steps, `onStatus` told
   each change once, the follow POSTs with a rising `n` and the one retell, `close` cancelling every

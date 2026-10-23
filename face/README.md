@@ -648,9 +648,10 @@ answer). The iFinD provider quotes them:
 | `FACE_IFIND_POLL_MS` | `30000` | iFinD refresh period while selected; minimum 15000ms. Set according to the account's data quota. |
 
 Without a token an A share's quote reads `Not configured`, and — once the face's wire has quoted an
-A share, one on the cn list or a cn page with Markets on screen — Account › Venues' `A-share quotes`
-line reads `iFinD · Not configured`; before that the line is not drawn. Event timestamps are interpreted as Beijing time; volume stays unavailable until its provider units
-can be verified with an account. Copy `market-env.example` to the repo's gitignored `.env.ifind`,
+A share on the cn list (Markets opened once) — Account › Venues' `A-share quotes` line reads
+`iFinD · Not configured`; with no A share on the cn list the line is not drawn. Event timestamps
+are interpreted as Beijing time; volume stays unavailable until its provider units can be verified
+with an account. Copy `market-env.example` to the repo's gitignored `.env.ifind`,
 enter the credentials locally, export it before starting the server, then restart. No token is
 sent to the browser or returned in errors. iFinD's adapter is covered by mocked tests, but A-share
 live validation remains pending until an account is configured. The wire's own words — a quote's
@@ -689,8 +690,8 @@ else the explore read's) with the explore read's 24 hours, an event's outcomes i
   statement about it yet.`). Each part says `Loading…` until its own read has answered, `Holdings
   unavailable`, `Account unavailable` or `Statement unavailable` — under the Account's sentence
   when it gave one — when that read failed before any answer, and keeps what it read under a later
-  refusal's sentence; Open orders say `Account unreadable` while the Account's page is one the face
-  does not recognise.
+  refusal's sentence; You hold and Open orders say `Account unreadable` while the Account's page is
+  one the face does not recognise (which book leads is the page's to say).
 
 Opening the page reads the candles for its range, the Account's compare rows for a coin's, a
 perpetual's or a stock's base (kept in the store; no screen draws them yet), the holdings and the
@@ -736,8 +737,9 @@ and a drawer:
   money`, `Receives`, `Earns`), `Paper`, stale — with **Details**, a drawer of what it holds there
   and the Account's facts (`No trading`, `Restricted`, `Not served`, `Close only`, `Watch only`,
   `Key file` by its path, never what is in it); under them, once the face's wire has quoted an A
-  share, `A-share quotes` with the iFinD provider's state; then the **Account seat** box (`/data/seat.json`, read on entering Venues or Agents, on
-  Refresh, right after a seat receipt and on a card raised or answered): the service reachable or
+  share on the cn list, `A-share quotes` with the iFinD provider's state; then the **Account seat**
+  box (`/data/seat.json`, read on entering Venues or Agents, on Refresh, right after a seat receipt
+  and on a card raised or answered): the service reachable or
   not with the Account's own mode and writes (`Guard · Trading on · $1 a move`), the seat (`Gravit
   · admitted until Nov 19`, `knocking — admit it on the Account page`, `not on the account`,
   `expired`, `revoked`) with each limit (`trade · paper-1 · $100 an order · $850 of $1,000 left`),
