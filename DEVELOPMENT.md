@@ -1639,10 +1639,11 @@ perpetual or a stock, `GET /data/account/compare?base=<base>&side=buy`. Account:
 /data/account` at boot, on entering Account, every 20 s while it is on screen in a visible tab
 (80 s while the stream is open), on Refresh and right after a receipt that is not the seat's
 (those two `?fresh=1`); `holdings?cost=1` — and while the page, one the face recognises, names a
-paper venue its paper lens `holdings?cost=1&paper=1` beside it — on entering Portfolio, on Refresh
-and on a market's page;
+paper venue its paper lens `holdings?cost=1&paper=1` beside it — on entering Portfolio, on Refresh,
+on a market's page, and when a page naming a paper venue lands with the lens never read or after a
+page the face did not recognise (then `&fresh=1`);
 `history?range=<1d|1w|1m|all>` (`&paper=1` when Paper leads) after the holdings on entering
-Portfolio, after a paper lens read for the first time and in a snapshot's re-read, and on a range —
+Portfolio, after that page landing's holdings read and in a snapshot's re-read, and on a range —
 not after Refresh's or a market page's holdings read;
 `statement` on opening the drawer and on a market's page; `agents` on entering Agents. The stream:
 one `EventSource` per tab at `/data/account/stream?client=face-<24 hex>` (`&since=<the last id>`
@@ -1856,10 +1857,14 @@ after `close()`. `load({fresh})` reads `/data/account`: any 2xx answer that is n
 screens then draw as `Account unreadable`, never a figure from it; a refusal (an `ok: false` body,
 on a 200 or not), any other non-2xx, an empty 2xx body or a rejection (with the body `getJsonVia`
 carries on it, when it does) is `accountFailed` with the Account's sentence (`refusal.message`,
-else `error`, when they are text), the last page kept; a recognised page naming a paper venue whose
-lens has no data reads the holdings and then the curve, unless a `loadAll` is about to — an
-unrecognised page leads no read, its venues choosing no lens (`hasPaper` is `pageOk`-gated, as
-`worthOf` is), so the recognised page after it reads the lens and the curve that lens leads to.
+else `error`, when they are text), the last page kept. An unrecognised page leads no read, its
+venues choosing no lens (`hasPaper` is `pageOk`-gated, as `worthOf` is). A recognised page naming a
+paper venue reads the holdings and then the leading curve, unless a `loadAll` is about to, when its
+lens has no data, or when the page before it was one `pageOk` did not recognise, whether the lens
+was read before that or not: under that page no lens was read, whatever moved the money, and any
+curve read was chosen without the page. After such a page the holdings are read past the face's
+cache (`fresh`), which keeps a holdings answer 8 s and could hand back the lens from before a money
+event.
 `loadHoldings({fresh})` reads `holdings?cost=1` and, while the page — one the face recognises —
 names a paper venue, its paper lens `holdings?cost=1&paper=1` beside it; `loadHistory(range)` sets the
 range (`1d`, `1w`, `1m`, `all`; an unknown one leaves the slice's) and reads the leading curve —
@@ -2450,9 +2455,9 @@ from the member's own log without activating it (§5.4) — it follows no member
 | Command | From | Needs | Measured 2026-09-30 |
 |---|---|---|---|
 | `python -m pytest` | repo root | nothing — offline, no keys, no bed | 400 passed in a clean checkout, ~2 s (2026-10-20; the operator's tree adds the untracked `tests/strategies/`) |
-| `cd face && npm test` | `face/` | nothing — no port, no key | 1150 tests, 1132 pass, 18 skipped (2026-10-23) |
+| `cd face && npm test` | `face/` | nothing — no port, no key | 1152 tests, 1134 pass, 18 skipped (2026-10-23) |
 | `cd face && npm run typecheck` | `face/` | | clean, the dependencies' `.d.ts` included (`skipLibCheck: false`) |
-| `cd face && FACE_SMOKE=1 npm test` | `face/` | boots eighteen real trees into `mkdtemp` homes and binds ports; still no LLM or key (four of the smokes also create, and remove, a gitignored `.bots-smoke-*` bots root at the repo root) | the eighteen skipped tests; 1145/1145 (2026-10-22 at `0f9855f`, with `FACE_ACCOUNT_SEAT_DIR` naming a checkout of buyer-agent-demo @ 133b9a7 — without it the seat and graft smokes stay skipped; the five offline tests added since, by `e81eed7` and by Task 13's two fix rounds, are not yet run under the flag) |
+| `cd face && FACE_SMOKE=1 npm test` | `face/` | boots eighteen real trees into `mkdtemp` homes and binds ports; still no LLM or key (four of the smokes also create, and remove, a gitignored `.bots-smoke-*` bots root at the repo root) | the eighteen skipped tests; 1145/1145 (2026-10-22 at `0f9855f`, with `FACE_ACCOUNT_SEAT_DIR` naming a checkout of buyer-agent-demo @ 133b9a7 — without it the seat and graft smokes stay skipped; the seven offline tests added since, by `e81eed7` and by Task 13's three fix rounds, are not yet run under the flag) |
 | `cd face && npm run check:fixture` | `face/` | the installed dsh | 26 fixture lines: 23 validated, 0 rejected, 3 with no upstream validator |
 
 ### 7.2 The Python suite
@@ -2481,7 +2486,7 @@ order path.
 
 ### 7.3 The face suite
 
-1150 tests in 109 files (1132 pass, 18 skipped without `FACE_SMOKE=1`), run by `node --test`
+1152 tests in 109 files (1134 pass, 18 skipped without `FACE_SMOKE=1`), run by `node --test`
 through `tsx`:
 
 - **Composition and boot** — `boot` (the layer order ending with the overlay; the policy layer
@@ -2622,7 +2627,8 @@ through `tsx`:
   market is no row of the tab still polling its pair, the old stars asked once, a stream quote; the
   page in one flight and its fresh read, a refusal's sentence, an unrecognised page landing and
   reading `Account unreadable` — leading no paper read, so the recognised page after it reads the
-  lens and the paper curve — the holdings and the paper lens, the leading curve, the stream's
+  lens past the cache and the paper curve, the lens read before or not, and a money event under it
+  leaves no paper total from before it — the holdings and the paper lens, the leading curve, the stream's
   events as fresh reads, the poll at 20 s and 80 s), `account-stream` (the client id, the resume point and
   `since`, every named frame to `onEvent`, stale and dead with the retry steps, `onStatus` told
   each change once, the follow POSTs with a rising `n` and the one retell, `close` cancelling every
@@ -3176,9 +3182,12 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
   spelled at 133b9a7; a write the Account renames falls out of the list — with no `(operator-gated)`
   marker on the seat's tools the boot audit cannot see it, so an unknown seat tool is carded until
   classified and `account-seat-smoke` against the installed checkout is the canary (re-run it after
-  pulling the checkout). A changed `/api/account` shape turns the Venues box into blanks, never a wrong
-  number (`seatView` is total). The seat is matched by the name the owner typed: admitted under another
-  name, it shows as knocking or absent. Since the graft's stage 1 the two screens read the Account's
+  pulling the checkout). A changed `/api/account` shape never puts a wrong number in the seat box
+  (`seatView` is total), but the box does not say unreadable either: a body that does not parse reads
+  `<host> · not reachable`, and one that parses but has moved shape falls to the view's defaults —
+  `<host> · reachable`, `Read-only`, `Gravit · not on the account` — words the Account did not say.
+  The seat is matched by the name the owner typed: admitted under another name, it shows as knocking
+  or absent. Since the graft's stage 1 the two screens read the Account's
   shapes too: a page `pageOk` does not recognise reads `Account unreadable`, every other view answers
   its empty shape, and the fixtures (`face/tests/fixtures/account/`, 133b9a7's) and
   `account-graft-smoke` are the canary — recapture and re-run after pulling the checkout

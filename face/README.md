@@ -848,7 +848,7 @@ reader, so the seat box and the Account screen share one upstream read within th
 | `explore` | the tab on screen, at once and every 20 s while Markets is on screen in a visible tab (`limit=200`, a kind's tab with its `tab`); the search once the box has been quiet for 300 ms (`q`, `limit=200`); each old `us:`/`crypto:` star once per boot (`q`, `limit=12`) |
 | `quotes` | every 5 s while Markets is on screen in a visible tab: the drawn rows' most traded connected lines, twelve a call, none while one is out; on a market's page its own market's line, from the page's own view when that market is no row of the tab |
 | `candles`, `compare` | on opening a market's page; `candles` again on a range |
-| `holdings`, `history` | on entering Portfolio (the holdings, then the leading curve), on Refresh (the holdings), on a range (the curve), on opening a market's page (the holdings); on the stream's events |
+| `holdings`, `history` | on entering Portfolio (the holdings, then the leading curve), on Refresh (the holdings), on a range (the curve), on opening a market's page (the holdings); when a page naming a paper venue lands with its lens never read, or after a page the face did not recognise (the holdings — then past the cache — and the leading curve); on the stream's events |
 | `statement` | on opening the Statement and a market's page; on the stream's events |
 | `agents` | on entering Agents; on a `snapshot` |
 | `stream` | one per tab, open while the tab is visible; `since=<the last frame id>` on a new source; no sign of life for 20 s is stale, 45 s dead; a dead or refused source opens again after 1, 2, 5, 10, then 30 s |
