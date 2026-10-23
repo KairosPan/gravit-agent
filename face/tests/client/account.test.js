@@ -321,6 +321,28 @@ test('Cards: grouped by agent with What it asks verbatim; Asks under them', () =
   assert.doesNotMatch(html, /data-action="(?:approve|reject|answerCard|answerAsk)/);
 });
 
+// the holdings' and the paper lens's refusals keep the Account's sentence: the Assets box says the leading lens's, where Holdings
+// unavailable would be before any answer (the fixed word only when there is none), and over the rows kept after one
+test("Portfolio's Assets box says the leading lens's refusal in the Account's words", () => {
+  const assets = s => draw(s).match(/<section class="cardbox" aria-label="Assets">[\s\S]*?<\/section>/)?.[0] ?? '';
+  // the stand-in: real money leads, so its holdings are the lens
+  const unread = state({ holdings: null });
+  has(assets(R.holdingsFailed(unread, { at: NOW, message: 'Venues are still settling.' })),
+    '<div class="cardbox-title">Assets</div><p class="acct-note">Venues are still settling.</p></section>');
+  has(assets(R.holdingsFailed(unread, { at: NOW })), '<div class="cardbox-title">Assets</div><p class="acct-note">Holdings unavailable</p></section>');
+  const kept = assets(R.holdingsFailed(state(), { at: NOW, message: 'Venues are still settling.' }));
+  has(kept, '<div class="cardbox-title">Assets</div><p class="acct-note">Venues are still settling.</p><div class="acct-wrap">', 'over the rows kept');
+  lacks(assets(R.holdingsLoaded(R.holdingsFailed(state(), { at: NOW, message: 'Venues are still settling.' }), { data: fx('holdings'), at: NOW })),
+    'Venues are still settling', 'an answer clears it');
+  // Paper leads (real money at zero): the paper lens's own sentence, and not real money's
+  const paperLeads = state({ page: { ...fx('account'), totalUsd: 0 } });
+  has(assets(R.paperFailed(paperLeads, { at: NOW, message: 'The paper book is being rebuilt.' })),
+    '<div class="cardbox-title">Assets</div><p class="acct-note">The paper book is being rebuilt.</p><div class="acct-wrap">');
+  lacks(assets(R.holdingsFailed(paperLeads, { at: NOW, message: 'Venues are still settling.' })), 'Venues are still settling', "real money's refusal is not the leading lens's");
+  lacks(assets(R.paperLoaded(R.paperFailed(paperLeads, { at: NOW, message: 'The paper book is being rebuilt.' }), { data: fx('holdings-paper'), at: NOW })),
+    'being rebuilt', 'an answer clears it');
+});
+
 test('the Statement drawer: the lines newest first with by; Export CSV', () => {
   const s = R.openStatement(state());
   const html = draw(s);

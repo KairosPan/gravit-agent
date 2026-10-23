@@ -468,6 +468,8 @@ const names = (text, token) => token !== '' && new RegExp(`(?<![A-Za-z0-9])${esc
 // what a part of the page stands on, from a read as the store keeps it: whether it has answered, whether its last try failed,
 // and the Account's sentence when that try refused
 const partRead = (answered, failed, message) => ({ answered, failed, message: failed ? str(message) || null : null });
+// a read's sentence while its last try is a refusal — never one it kept from an earlier refusal while it is read again
+const saidBy = read => (read?.status === 'error' ? str(read.message) || null : null);
 
 /** A market's page from the Account's reads, on the renderer's clock, or null for an id none lists. The item, without its icons,
  *  is looked for in every list (items, movers, closing, most traded) of the current tab's read, All's and the search's.
@@ -537,7 +539,7 @@ export function pageOf(markets, account, id, now = Date.now()) {
     lines: statementLinesOf(a.statement?.data).filter(l => names(l.description, base) || symbols.some(s => names(l.description, s))),
     reads: {
       held: partRead(a.holdings?.data != null && (!paperNamed || a.paper?.data != null),
-        a.holdings?.status === 'error' || (paperNamed && a.paper?.status === 'error'), a.holdings?.message),
+        a.holdings?.status === 'error' || (paperNamed && a.paper?.status === 'error'), saidBy(a.holdings) || (paperNamed ? saidBy(a.paper) : null)),
       orders: partRead(pageOk(a.data), a.status === 'error', a.message),
       lines: partRead(a.statement?.data != null, a.statement?.status === 'error', a.statement?.message),
     },

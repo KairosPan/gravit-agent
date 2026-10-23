@@ -732,6 +732,15 @@ test("the Account's stream opens at boot, closes while the tab is hidden and ope
   st.event('quote', { venue: 'ex', symbol: 'BTC/USDT', last: 63000.5, priceAt: '2026-10-22T08:00:00.000Z', from: 'Stand-in Exchange · live', live: true }, 'r.2');
   assert.equal(store.get().markets.accountQuotes['ex|BTC/USDT'].price, 63000.5);
   assert.equal(store.get().markets.accountQuotes['ex|BTC/USDT'].quoteFrom, 'Stand-in Exchange · live');
+  // a snapshot (a reconnect past the Account's ring): every account read runs again, and the prices the stream kept go — market
+  // events are never resumed, so a kept one may be dead — while the quotes poll's stay
+  store.dispatch('accountQuotesLoaded', { quotes: [{ venue: 'broker', symbol: 'NVDA', market: { price: 182.4, quoteAt: '2026-10-22T07:59:58.000Z' } }] });
+  h.reads.length = 0;
+  st.event('snapshot', { at: 'r.5', orders: [] }, 'r.5');
+  assert.equal(Object.hasOwn(store.get().markets.accountQuotes, 'ex|BTC/USDT'), false, "the stream's price is gone");
+  assert.equal(store.get().markets.accountQuotes['broker|NVDA'].price, 182.4, "the poll's stays");
+  await settle();
+  for (const read of ['/data/account?fresh=1', '/data/account/statement?fresh=1', '/data/account/agents']) assert.ok(h.reads.includes(read), read);
   // a card raised or answered: the page and the seat box, both past their caches; something else waiting on the owner: the page
   h.reads.length = 0;
   st.event('card', { id: 'card-0002', venue: 'ex', outcome: 'approved', at: '2026-10-22T08:00:01.000Z' }, 'r.3');
@@ -928,7 +937,9 @@ test("a star on an Account market goes to the Account's own store and comes off 
   store.timers.clear();
 });
 
-test("the quotes poll asks for the table's rows drawn, none on a market's page", async () => {
+// spec §6.1: a market's page follows its market on the stream and polls quotes for the rest — the page's own market rides the
+// quotes poll, beside the follow, for a market the Account does not stream or a stream that is down
+test("the quotes poll asks for the table's rows drawn, and on a market's page for its own market", async () => {
   const f = fakeWindow({ hash: '#/markets', storage: memoryStorage() });
   for (const id of ['coin:BTC', 'stock:NVDA']) f.withSelector('tr[data-id]', { tagName: 'TR', dataset: { id }, presentIf: /<table class="mk-t">/ });
   const h = accountHost({ rows: [row('s1')] });
@@ -946,7 +957,14 @@ test("the quotes poll asks for the table's rows drawn, none on a market's page",
   h.reads.length = 0;
   timers.run(5_000);
   await settle();
-  assert.deepEqual(quoted(), [], "a market's page draws no rows: nothing to quote");
+  assert.deepEqual(quoted(), [['ex|BTC/USDT']], "the page's own market, at its most traded connected line");
+  // back on the table, its rows again
+  f.win.location.hash = '#/markets';
+  await settle();
+  h.reads.length = 0;
+  timers.run(5_000);
+  await settle();
+  assert.deepEqual(quoted(), [[...new Set(pairsOf(drawn, 12))].sort()]);
   store.timers.clear();
 });
 

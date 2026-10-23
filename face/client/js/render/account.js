@@ -80,13 +80,16 @@ function changeLine(a, paperLeads) {
 }
 
 // Assets and Positions are the leading lens's read: the paper book's (holdings?cost=1&paper=1) while Paper leads, else real
-// money's (holdings?cost=1)
+// money's (holdings?cost=1). When that read refused, the Account's sentence: where Holdings unavailable would be before any
+// answer (the fixed word only when there is none), over the rows kept after one
 function assetsBox(lens) {
   const rows = assetsOf(lens.data).map(r => [
     lines(r.asset, r.venues.map(v => [v.venueName || v.venue, numWord(v.amount), v.stale ? 'stale' : ''].filter(Boolean).join(' · '))),
     esc(numWord(r.amount)), esc(price(r.price)), `<span class="${tone(r.changePct24h)}">${esc(pctWord(r.changePct24h))}</span>`, esc(money(r.usd)),
   ]);
-  return box(`${title('Assets')}${rows.length ? table(['Asset', 'Amount', 'Price', '24h', 'Value'], rows) : readNote(lens, 'Holdings unavailable', 'No assets')}`, 'Assets');
+  const said = lens.status === 'error' && lens.message ? note(lens.message) : '';
+  const body = rows.length ? table(['Asset', 'Amount', 'Price', '24h', 'Value'], rows) : said && lens.data === null ? '' : readNote(lens, 'Holdings unavailable', 'No assets');
+  return box(`${title('Assets')}${said}${body}`, 'Assets');
 }
 
 function positionsBox(lens) {

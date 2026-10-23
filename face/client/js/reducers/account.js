@@ -21,13 +21,13 @@ export const reducers = {
   // Account's own sentence when it refused, else null
   accountFailed: (s, { at, message = null }) => acc(s, { status: 'error', at, message }),
   // its other reads: holdings?cost=1, the paper lens (holdings?cost=1&paper=1), the leading history curve, the statement, the
-  // agents; the holdings and the statement keep the Account's sentence when they refused, as the page does
+  // agents; the holdings, the paper lens and the statement keep the Account's sentence when they refused, as the page does
   holdingsLoading: s => read(s, 'holdings', { status: 'loading' }),
   holdingsLoaded: (s, { data, at }) => read(s, 'holdings', { status: 'ready', data, at, message: null }),
   holdingsFailed: (s, { at, message = null }) => read(s, 'holdings', { status: 'error', at, message }),
   paperLoading: s => read(s, 'paper', { status: 'loading' }),
-  paperLoaded: (s, { data, at }) => read(s, 'paper', { status: 'ready', data, at }),
-  paperFailed: (s, { at }) => read(s, 'paper', { status: 'error', at }),
+  paperLoaded: (s, { data, at }) => read(s, 'paper', { status: 'ready', data, at, message: null }),
+  paperFailed: (s, { at, message = null }) => read(s, 'paper', { status: 'error', at, message }),
   historyLoading: s => read(s, 'history', { status: 'loading' }),
   historyLoaded: (s, { data, at }) => read(s, 'history', { status: 'ready', data, at }),
   historyFailed: (s, { at }) => read(s, 'history', { status: 'error', at }),

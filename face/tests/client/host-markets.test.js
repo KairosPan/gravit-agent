@@ -695,6 +695,7 @@ test('a stream quote updates the followed market', async () => {
   r.store.dispatch('streamQuote', frame({ bid: 2455.45, ask: 2455.75, last: 2455.6, priceAt: '2026-10-22T07:59:58.500Z' }));
   assert.deepEqual(r.m().accountQuotes['ex|ETH/USDT'], {
     price: 2455.6, bid: 2455.45, ask: 2455.75, quoteAt: '2026-10-22T07:59:58.500Z', quoteFrom: 'okx · live', changePct24h: 2.1, volumeUsd24h: 1_185_208_857,
+    streamed: true,
   });
   const view = pageOf(r.m(), r.store.get().account, 'coin:ETH', Date.parse('2026-10-22T07:59:59.000Z'));
   assert.equal(view.live.price, 2455.6);

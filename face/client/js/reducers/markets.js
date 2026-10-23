@@ -64,8 +64,9 @@ export const reducers = {
     return next ? mk(s, { accountQuotes: next }) : s;
   },
   // a quote event on the Account's stream ({ data } as the stream hands it, for a market a page follows): its last trade, else
-  // the middle of its bid and ask, stamped when that price was (`priceAt`, else the event's `at`), in its source's words; the
-  // 24h figures stay the quotes poll's. A frame that says the hub has no quote yet leaves the pair as it was.
+  // the middle of its bid and ask, stamped when that price was (`priceAt`, else the event's `at`), in its source's words, and
+  // marked the stream's (`streamed`); the 24h figures stay the quotes poll's. A frame that says the hub has no quote yet leaves
+  // the pair as it was.
   streamQuote(s, { data } = {}) {
     if (!isRecord(data) || !named(data.venue) || !named(data.symbol)) return s;
     const last = number(data.last), bid = number(data.bid), ask = number(data.ask);
@@ -78,10 +79,17 @@ export const reducers = {
         [key]: {
           price: last ?? (bid !== null && ask !== null ? (bid + ask) / 2 : null), bid, ask,
           quoteAt: text(data.priceAt) ?? text(data.at), quoteFrom: text(data.from),
-          changePct24h: was?.changePct24h ?? null, volumeUsd24h: was?.volumeUsd24h ?? null,
+          changePct24h: was?.changePct24h ?? null, volumeUsd24h: was?.volumeUsd24h ?? null, streamed: true,
         },
       },
     });
+  },
+  // the Account's snapshot on the stream (a reconnect past its ring, another run): market events are never resumed, so a price
+  // the stream kept may be dead — the pairs it priced go, the quotes poll's stay, until the next poll or frame prices them again
+  streamSnapshot(s) {
+    const quotes = s.markets.accountQuotes;
+    const kept = Object.entries(quotes).filter(([, q]) => q?.streamed !== true);
+    return kept.length === Object.keys(quotes).length ? s : mk(s, { accountQuotes: Object.fromEntries(kept) });
   },
 
   // a market page's candles, by its key, each under the range it was read for — a failed read keeps the last candles, with the

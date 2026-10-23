@@ -567,6 +567,12 @@ test("pageOf: the price shown, the page's words, its history's state and the rea
     orders: { answered: true, failed: false, message: null },
     lines: { answered: true, failed: true, message: 'The statement is being rebuilt.' },
   });
+  // what is held stands on the paper lens too: its sentence when it refused; a sentence a read kept from an earlier refusal while
+  // it is read again is not said
+  const lensSaid = { ...accountSlice(), paper: { status: 'error', data: null, message: 'The paper book is being rebuilt.' } };
+  assert.deepEqual(pageOf(m, lensSaid, 'coin:BTC', NOW).reads.held, { answered: false, failed: true, message: 'The paper book is being rebuilt.' });
+  const again = { ...lensSaid, holdings: { status: 'loading', data: fx('holdings'), message: 'Venues are still settling.' } };
+  assert.equal(pageOf(m, again, 'coin:BTC', NOW).reads.held.message, 'The paper book is being rebuilt.');
 });
 
 // what a star press acts on: whether the market is starred as its star is drawn (rowsOf's and pageOf's `watched`)

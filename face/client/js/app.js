@@ -180,8 +180,8 @@ export function boot(win, host = {}) {
   const accountShown = () => store.get().route.screen === 'account' && !doc.hidden;
   const showAccount = () => account.poll(accountShown());
   // the Account's push channel, one for this tab (wire/account-stream.js), open while the tab is visible: an event is the reads
-  // it names, a quote the price of the market a page follows, a card raised or answered the seat box's cards; the stream
-  // opening, or no longer open, arms the page's interval again (a test hands in its own)
+  // it names, a snapshot drops the prices the stream kept, a quote is the price of the market a page follows, a card raised or
+  // answered the seat box's cards; the stream opening, or no longer open, arms the page's interval again (a test hands in its own)
   let streamWasOpen = false;
   const stream = (host.createAccountStream ?? ((onEvent, onStatus) => createAccountStream({
     createEventSource: url => new win.EventSource(url),
@@ -191,6 +191,7 @@ export function boot(win, host = {}) {
     onStatus,
   }, onEvent)))(ev => {
     account.onStreamEvent(ev);
+    if (ev.type === 'snapshot') store.dispatch('streamSnapshot');
     if (ev.type === 'quote') store.dispatch('streamQuote', { data: ev.data });
     if (ev.type === 'card' && ev.data?.waits === undefined) void seat.load({ fresh: true });
   }, status => {
@@ -266,8 +267,12 @@ export function boot(win, host = {}) {
       : s.route.screen === 'channel' ? renderChannelScreen(s, now()) : s.route.screen === 'discover' ? renderDiscover(s)
       : s.route.screen === 'plugin' ? renderPlugin(s) : renderMessagesScreen(s, now());
     root.innerHTML = renderRail(s, now()) + (s.settingsOpen ? screen.replace(/<\/main>$/, renderSettings(s) + '</main>') : screen);
-    // the quotes poll asks for the rows the table drew, by id — none on a market's page
-    if (s.route.screen === 'markets') markets.rowsInView([...root.querySelectorAll('tr[data-id]')].map(el => el.dataset.id));
+    // the quotes poll asks for the rows the table drew, by id; a market's page, which draws none, for its own market (spec §6.1:
+    // the page follows it on the stream and polls quotes for what the stream does not carry)
+    if (s.route.screen === 'markets') {
+      const drawn = [...root.querySelectorAll('tr[data-id]')].map(el => el.dataset.id);
+      markets.rowsInView(drawn.length === 0 && isAccountKey(s.route.id) ? [s.route.id] : drawn);
+    }
 
     const sameEditor = editorOf(s.edit) === last.editor;
     for (const [id, value] of typed) {

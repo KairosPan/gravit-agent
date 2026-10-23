@@ -55,6 +55,25 @@ test("a quotes poll answer older than the pair's kept quote leaves it; one with 
   assert.equal(nvda(t).quoteAt, null);
 });
 
+// the Account's snapshot (a reconnect past its ring, another run): market events are never resumed, so a price the stream kept
+// may be dead — the pairs the stream priced go, the quotes poll's stay, stamped or not
+test("streamSnapshot drops the pairs the stream priced and keeps the quotes poll's", () => {
+  const poll = (venue, symbol, market) => ({ quotes: [{ venue, symbol, market }] });
+  const tick = (venue, symbol, last, at) => ({ data: { venue, symbol, last, priceAt: at, from: 'okx · live', live: true } });
+  let s = R.accountQuotesLoaded(emptyState(), poll('broker', 'NVDA', { price: 182.4, quoteAt: '2026-10-22T07:59:58.000Z', quoteFrom: 'Stand-in Broker · real time' }));
+  s = R.accountQuotesLoaded(s, poll('ex', 'BTC/USDT', { price: 63000 }));
+  s = R.streamQuote(s, tick('ex', 'BTC/USDT', 63210, '2026-10-22T07:59:59.000Z'));
+  s = R.streamQuote(s, tick('ex', 'ETH/USDT', 2455.6, '2026-10-22T07:59:58.500Z'));
+  // a stream price the poll has replaced since is the poll's
+  s = R.streamQuote(s, tick('ex', 'SOL/USDT', 141.4, '2026-10-22T07:59:57.000Z'));
+  s = R.accountQuotesLoaded(s, poll('ex', 'SOL/USDT', { price: 141.5 }));
+  const after = R.streamSnapshot(s);
+  assert.deepEqual(Object.keys(after.markets.accountQuotes).sort(), ['broker|NVDA', 'ex|SOL/USDT']);
+  assert.equal(after.markets.accountQuotes['broker|NVDA'].price, 182.4, "the poll's stamped price stays");
+  assert.equal(after.markets.accountQuotes['ex|SOL/USDT'].price, 141.5);
+  assert.equal(R.streamSnapshot(after), after, 'nothing the stream priced: the state as it was');
+});
+
 // a read beside the Account's page keeps the Account's sentence when it refuses, as the page read does: You hold, On the
 // statement and the Statement drawer draw it
 test("holdingsFailed keeps the Account's sentence over the holdings kept; the next answer clears it", () => {
