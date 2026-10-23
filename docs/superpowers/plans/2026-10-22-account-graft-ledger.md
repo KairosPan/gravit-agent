@@ -514,6 +514,7 @@ before it wrote anything, and dispatched again on fable on the operator's word, 
     price under a `real time` word; documented (README's cadence table, DEVELOPMENT §5.3);
     scroll-tracking later (an `IntersectionObserver` behind `rowsInView`).
 44. Final wave, M5's check: the Account's `stPrice` (`ui/stream.js`) also leads a perpetual with the
-    middle, then the mark, and ignores zero or negative figures, a crossed book and non-live
-    frames; ours takes the middle only where a frame carries no last trade — stage 2, with the
+    middle, then the mark, and ignores zero or negative figures and a crossed book (its `ttLiveFor`
+    drops non-live frames before that); ours takes the middle only where a frame carries no last
+    trade — stage 2, with the
     market's kind in the reducer (~5 lines), beside the trailing-read flag (26).
