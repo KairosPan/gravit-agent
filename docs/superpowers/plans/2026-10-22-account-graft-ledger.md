@@ -160,8 +160,8 @@ handed forward — DEVELOPMENT's 30 s seat cache to Task 13, and `gravit-client-
     volume), the legacy rule, which is what "relative order by price × volume" meant; no change.
     Parked with a ruling: a market only a paper venue lists names the paper venue as its source;
     to be refined so that a paper line carrying a `quoteFrom` gives that word ("a paper venue's
-    price is its source's listing") — one line in `sourceWordOf`, deferred to the final review's
-    fix wave. Cost if wrong: a misleading source word on paper-only markets.
+    price is its source's listing") — one line in `sourceWordOf`, deferred (not in the final
+    wave). Cost if wrong: a misleading source word on paper-only markets.
 32. **Task 10:** the proxy's 240-character value cap refused twelve Kalshi or Polymarket pairs
     (measured 263–311 characters for exchange pairs, far more for prediction markets) — `pairs`
     gets a bound of 2 000, the 8 192 raw-target cap still holding; **amended at review** to land in
@@ -494,7 +494,7 @@ before it wrote anything, and dispatched again on fable on the operator's word, 
     alone. *Done in Task 13's fix round (e86cad4, Ruling 44).*
 38. Task 13's review, outside its scope: `face/src/data.ts`'s comment still names Refresh and the
     read right after a fill as the account route's `?fresh=1` callers; no screen reads that route
-    now — the final wave.
+    now — deferred (not in the final wave).
 39. Task 13 (round 3): the seat box under a moved shape that parses draws defaults that read like a
     real standing (`<host> · reachable`, `Read-only`, `Gravit · not on the account`) — older than
     the graft, now documented (the note under Ruling 43, DEVELOPMENT R33); an `unreadable` word
@@ -513,3 +513,7 @@ before it wrote anything, and dispatched again on fable on the operator's word, 
     5 s quotes and the rest move with the 20 s explore read, so a row far down may show a 20-second
     price under a `real time` word; documented (README's cadence table, DEVELOPMENT §5.3);
     scroll-tracking later (an `IntersectionObserver` behind `rowsInView`).
+44. Final wave, M5's check: the Account's `stPrice` (`ui/stream.js`) also leads a perpetual with the
+    middle, then the mark, and ignores zero or negative figures, a crossed book and non-live
+    frames; ours takes the middle only where a frame carries no last trade — stage 2, with the
+    market's kind in the reducer (~5 lines), beside the trailing-read flag (26).
