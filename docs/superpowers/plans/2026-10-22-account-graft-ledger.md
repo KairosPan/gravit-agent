@@ -4,11 +4,12 @@ The record of executing `2026-10-22-account-graft-1-reads.md` (the plan, committ
 spec `../specs/2026-10-22-account-graft-design.md`, §5.1–§5.2, §6.1–§6.2, §6.5 and §10) on branch
 `feat/account-graft`, cut from main @ 0481ee2, in the worktree `.claude/worktrees/account-graft`,
 on 2026-10-22. Executed subagent-driven by the operator's choice ("Subagent-driven（opus），开始"):
-every implementer and every reviewer on the opus model, one task after another, each task's
-tests seen failing first, a task review after each task and a scoped re-review after each fix
-round. The Account is Linqi's buyer-agent-demo @ 133b9a7, installed at `~/buyer-agent-demo`;
-nothing of it is vendored. The SDD workspace's `progress.md` is the working copy this file
-records. Baseline before Task 1: face 1081 tests (1064 pass, 17 skipped).
+every implementer and every reviewer on the opus model (the final review on fable, below), one
+task after another, each task's tests seen failing first, a task review after each task and a
+scoped re-review after each fix round. The Account is Linqi's buyer-agent-demo @ 133b9a7,
+installed at `~/buyer-agent-demo`; nothing of it is vendored. The SDD workspace's `progress.md` is
+the working copy this file records. Baseline before Task 1: face 1081 tests (1064 pass, 17
+skipped).
 
 ## Pre-flight
 
@@ -220,6 +221,11 @@ handed forward — DEVELOPMENT's 30 s seat cache to Task 13, and `gravit-client-
     one more quotes pair a call. (As built: `pairsOf` over the page view's lines — its most traded
     connected line, the one `followOf` gives when there is one; a public listing alone asks
     nothing, as the Account's `quotes` refuses public venues.)
+45. **Final review:** a seat receipt reloads the seat's standing AND the Account's page, both past
+    the cache, as the plan's Task 12 says (spec §6.2: the page is read after a seat receipt);
+    carry 5's "as today" for `onReceipt` was the controller's own and is withdrawn, the plan's word
+    stands; the `app-dom` pin moves with it (8fcf47c). Cost if wrong: one extra page read per seat
+    receipt.
 
 ## Carried between tasks
 
@@ -254,6 +260,11 @@ handed forward — DEVELOPMENT's 30 s seat cache to Task 13, and `gravit-client-
   English-named cn asset (3c4e69e).
 - Task 10 → 11: an older poll row is dropped whole, so a page draws its 24 hours and volume from
   the explore read, never from the live quote (3c4e69e).
+- Task 13 → the final wave: pin (a) in `host-account.test.js` (a warm session, an unrecognised page,
+  the recognised page again) landed an empty body at its last step — its `inTurn` list had three
+  answers — so a "re-read the lens on every poll" regression passed; a fourth `page({ totalUsd: 0 })`
+  answer catches it (the round-3 re-review's M1, verified by the reviewer on HEAD; the final
+  review's M6). Done in the final wave (8fcf47c).
 
 ## Tasks
 
@@ -271,7 +282,53 @@ handed forward — DEVELOPMENT's 30 s seat cache to Task 13, and `gravit-client-
 | 10 The Markets host layer and slices | f351504; fix round 1 be1a43d | spec ✅ against the amended contract, one Important (the 240 cap on `pairs`); round 1 addressed three, re-review clean | 1133 / 1116 / 17 |
 | 11 The Markets screen and the chart | 3c4e69e; before review 90b9c54; fix round 1 310a23f | spec ✅, quality ❌ (one Important, eight Minor); round 1 addressed nine, re-review clean | 1128 / 1111 / 17 |
 | 12 The wiring, the A-share line, the smoke | a84d65b, 0f9855f; fix round 1 e81eed7 | spec ✅, quality ✅, four Minor and two cross-task gaps ruled Important; round 1 addressed three, re-review clean | 1147 / 1129 / 18; `FACE_SMOKE=1` with `FACE_ACCOUNT_SEAT_DIR` 1145 / 1145 at 0f9855f, not re-run after e81eed7 (neither the smoke nor the helper changed) |
-| 13 The documents for stage 1 | c6608eb (three tidies: the seat's 15 s comment, the stream's unread `now`, the seat stamp's comment), 08ea070 (the documents and this ledger), 8f42306 (CLAUDE.md's two other rows, Ruling 42); fix round 1 e86cad4 (code, Rulings 43–44), bef028d (documents), ab2ffe2 (this ledger); fix round 2 c54e6b1 (code), a32856f (documents), 82995c5 (this ledger); fix round 3 6c07a5a (code), 034f65d (documents), and the commit that adds these lines | spec ✅, quality ❌ — 1 Critical (an unrecognised page documented as `Account unreadable`, which the host never drew: it kept the last page as a failure), 1 Important (this ledger lacked Ruling 42 and 8f42306), 5 Minor (CLAUDE.md's `face_data.py`; the iFinD line on Venues, drawn only once the wire has quoted an A share; the curve read after some holdings reads, not all; §4.2's stream routes over `ACCOUNT_QUERY`; a page's own pair off the tab's rows, deferred minor 37); round 1 addressed the seven, the Critical and Minor 5 in code. Re-review of round 1: C1, I1, M1, M3–M5 addressed, the Open orders extension fair; M2 partial (a cn page alone does not keep the A-share line); N1, Important by effect (an unrecognised page naming paper venues read the paper lens and the real curve, and the recognised page after it never re-read: real money's change and curve under the Paper figure); N2, Minor (You hold fell back to the real book under such a page); N3, Minor (Ruling 43's as-built note named the wrong word). Round 2 fixed the four: `hasPaper` gated on `pageOk`, You hold `Account unreadable` too, the README's condition, the note. Re-review of round 2: N2, M2 addressed; N1 partial (warm: with the lens read before the unrecognised page, a snapshot or a Portfolio entry under it still left real money's change and curve under the Paper figure); N3 partial (the clause added to the note, a moved shape turning the box into blanks, false); B1, Important by effect (after c54e6b1 a money event under an unrecognised page read no lens and the recognised page after it read nothing, so Paper drew the total from before the event as current). Round 3: the recognised page after an unrecognised one reads the lens again, past the face's cache, then the curve; the note says what the box draws; re-review to come | 1152 / 1134 / 18; typecheck clean |
+| 13 The documents for stage 1 | c6608eb (three tidies: the seat's 15 s comment, the stream's unread `now`, the seat stamp's comment), 08ea070 (the documents and this ledger), 8f42306 (CLAUDE.md's two other rows, Ruling 42); fix round 1 e86cad4 (code, Rulings 43–44), bef028d (documents), ab2ffe2 (this ledger); fix round 2 c54e6b1 (code), a32856f (documents), 82995c5 (this ledger); fix round 3 6c07a5a (code), 034f65d (documents), dc90ad8 (this ledger) | spec ✅, quality ❌ — 1 Critical (an unrecognised page documented as `Account unreadable`, which the host never drew: it kept the last page as a failure), 1 Important (this ledger lacked Ruling 42 and 8f42306), 5 Minor (CLAUDE.md's `face_data.py`; the iFinD line on Venues, drawn only once the wire has quoted an A share; the curve read after some holdings reads, not all; §4.2's stream routes over `ACCOUNT_QUERY`; a page's own pair off the tab's rows, deferred minor 37); round 1 addressed the seven, the Critical and Minor 5 in code. Re-review of round 1: C1, I1, M1, M3–M5 addressed, the Open orders extension fair; M2 partial (a cn page alone does not keep the A-share line); N1, Important by effect (an unrecognised page naming paper venues read the paper lens and the real curve, and the recognised page after it never re-read: real money's change and curve under the Paper figure); N2, Minor (You hold fell back to the real book under such a page); N3, Minor (Ruling 43's as-built note named the wrong word). Round 2 fixed the four: `hasPaper` gated on `pageOk`, You hold `Account unreadable` too, the README's condition, the note. Re-review of round 2: N2, M2 addressed; N1 partial (warm: with the lens read before the unrecognised page, a snapshot or a Portfolio entry under it still left real money's change and curve under the Paper figure); N3 partial (the clause added to the note, a moved shape turning the box into blanks, false); B1, Important by effect (after c54e6b1 a money event under an unrecognised page read no lens and the recognised page after it read nothing, so Paper drew the total from before the event as current). Round 3: the recognised page after an unrecognised one reads the lens again, past the face's cache, then the curve; the note says what the box draws. Re-review of round 3: both addressed — the normal path reads the lens once, plain, a recognised page after a recognised one re-reads nothing, the refusal path unchanged; `fresh` right (a plain read in a burst takes the proxy's 8 s copy, trails a plain read in the air once, joins a fresh one in the air, never piles up); R33 fair; nothing new Critical or Important; scoped 108/108, suite 1152 / 1134 / 18, typecheck clean, `git diff --check` clean. Carried to the final wave: the round-3 pin's empty last step; three minors deferred (39–41) | 1152 / 1134 / 18; typecheck clean |
+
+## Final review
+
+HEAD dc90ad8: 42 commits over 0481ee2, 66 files, +17 919 / −1 912. Dispatched on opus, stopped
+before it wrote anything, and dispatched again on fable on the operator's word, 2026-10-23
+("用fable审核最终的").
+
+- **Verdict (fable):** ready to merge with fixes — 0 Critical, 1 Important, 8 Minor. I1: this
+  ledger lacked Task 13's round-3 verdict, three deferred minors and the final-wave carry. M1: the
+  capture script carried a third copy of the stand-in spawn, with the weaker rm guard. M2: a seat
+  receipt reloaded only the seat, an unrecorded deviation from the plan's "seat and account". M3:
+  every boot reads the Account twice over — the boot's reads, then the first-frame snapshot's
+  `loadAll`. M4: deferred minor 26, kept; the trailing-read flag in stage 2. M5: `streamQuote`
+  computes a middle price from the bid and ask — to be checked against the Account's own rule. M6:
+  the round-3 pin's empty last step (the carry above). M7: "in view" is every drawn row, the first
+  twelve priced — a documented UX limit. M8: deferred minor 36 stands. Review Focus 1–5 pinned —
+  RF4's seat-box clause not as built (deferred, the note under Ruling 43); RF5 as amended by Ruling
+  6. All forty-four rulings sound; nothing of stage 2 or 3 in the tree; suite 1152 / 1134 / 18,
+  typecheck clean.
+- **Re-graded:** I1 Important stands (the ledger is the record); M1 enters the wave (an rm guard is
+  a safety edge, and the helper exists); M2 enters the wave as the plan's text (Ruling 45); M5
+  enters the wave as a check (match the Account's own quote rule or document why not); M6 enters the
+  wave (the carried pin). Deferred: M3 (the boot's double read; stage 2 may skip a snapshot that
+  lands while the boot's reads are in flight), M7 (the first twelve drawn rows priced;
+  scroll-tracking later), M4 and M8 as they stand (deferred minors 26 and 36, below; 42 and 43 are
+  M3 and M7).
+- **The fix wave** — one, a fresh implementer on opus at BASE dc90ad8, a scoped re-review on fable
+  after it: 8fcf47c (code: M1, M2, M5, M6) and the commit that adds these lines (I1). M1: the
+  capture script imports `freePort`, `startStandin` and `stopStandin` from
+  `tests/helpers/standin.ts`, so its rm takes only a stand-in's own home (`isStandinHome`); the
+  helper gains `standinPaths(dir)` and `startStandin(port, dir)`, so the script keeps its own
+  checkout (`seatDir()`, `~/buyer-agent-demo` when `FACE_ACCOUNT_SEAT_DIR` is unset); what it
+  captures and where it writes are unchanged; tsc over the script with the face's options is clean
+  (the face's typecheck does not include `scripts/`). M2: Ruling 45, the pin seen to fail first; the
+  documents follow — README's Account paragraph and cadence table, DEVELOPMENT §5.2's reads, §5.3's
+  card-result row and §7.3's `app-dom` line now say the seat's receipt reloads the page too. M5:
+  kept as it is — the Account's page prices a pushed quote by `ui/stream.js`'s `stPrice`: its last
+  trade, else the middle of its bid and ask, for anything but a perpetual or a future, which it
+  prices at the middle, then the mark, then the last; a frame with a bid and an ask and no last is
+  drawn at the middle either way; one comment line names the rule and the perpetual's exception,
+  which the reducer does not take — a frame names no kind (the Account's page takes it from the
+  market's row or its venue's market), so a perpetual's frame with a last trade is priced at that
+  trade here. M6: the
+  fourth answer, and a line asserting the page landed; with the host re-reading the lens on
+  every landing the pin passed on three answers and fails on four, and the host was then restored
+  exactly. Suite 1152 / 1134 / 18, typecheck clean.
 
 ## Notes
 
@@ -385,7 +442,9 @@ handed forward — DEVELOPMENT's 30 s seat cache to Task 13, and `gravit-client-
     the comment says "never read" and means "has no data").
 26. Task 7 (from the ruling itself): a money event arriving after a fresh holdings read has gone
     upstream joins it and can miss its own change until the next event or snapshot — a "one
-    pending trailing read" flag would close it; the final review triages.
+    pending trailing read" flag would close it; the final review triages. *Triaged at the final
+    review (its M4): kept for stage 1 — the Account's page has the same join; stage 2 adds the flag
+    before a hand order's fill is what Portfolio must show at once.*
 27. Task 8: `render/account.js` reads `a.data.now`, `a.data.stale` and `history.data.range` off the
     raw bodies (guarded, not figures) — the "draws from the views" rule would put them in
     `headOf`/`changeOf`; `render/thread.js`'s `ticker`/`withTickers` emit a class with no rule now
@@ -427,7 +486,7 @@ handed forward — DEVELOPMENT's 30 s seat cache to Task 13, and `gravit-client-
     stopping the stand-in.
 36. Task 12: before any answer the Assets box shows the Account's sentence alone while the
     Statement drawer shows the sentence and `Statement unavailable` — one shape for both (the final
-    wave, if cheap).
+    wave, if cheap). *Stands after the final review (its M8).*
 37. Task 12: a page whose market is not a row of the current tab polls no quote — the page's key is
     looked up among the tab's rows only (`host/markets.js`, `readQuotes`): a deep link to a
     movers-only market, a coin page reached by Back while on Stocks, a market un-starred from its
@@ -436,3 +495,21 @@ handed forward — DEVELOPMENT's 30 s seat cache to Task 13, and `gravit-client-
 38. Task 13's review, outside its scope: `face/src/data.ts`'s comment still names Refresh and the
     read right after a fill as the account route's `?fresh=1` callers; no screen reads that route
     now — the final wave.
+39. Task 13 (round 3): the seat box under a moved shape that parses draws defaults that read like a
+    real standing (`<host> · reachable`, `Read-only`, `Gravit · not on the account`) — older than
+    the graft, now documented (the note under Ruling 43, DEVELOPMENT R33); an `unreadable` word
+    would be the honest one (`seat.ts`'s `seatView` and the box).
+40. Task 13 (round 3), W1: a gap of two reads before the paper curve lands after an unrecognised
+    page.
+41. Task 13 (round 3), W2 (older than the graft's rounds): a page moving real money to zero switches
+    the lead with no curve read.
+42. Final review, M3: every boot reads the Account twice over — the page at boot (and, for a page
+    naming a paper venue with the lens unread, both lenses and the curve), then the stream's first
+    frame, a `snapshot` for a source opened with no resume point, whose `loadAll` reads the page,
+    both lenses and the statement again past the proxy's caches, then the agents and the curve: the
+    final review counts seven to nine upstream reads before anything is on screen. Stage 2 may skip
+    a snapshot that lands while the boot's reads are in flight.
+43. Final review, M7: "in view" is every row the table drew — the first twelve by the sort get the
+    5 s quotes and the rest move with the 20 s explore read, so a row far down may show a 20-second
+    price under a `real time` word; documented (README's cadence table, DEVELOPMENT §5.3);
+    scroll-tracking later (an `IntersectionObserver` behind `rowsInView`).
