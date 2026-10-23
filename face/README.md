@@ -144,10 +144,12 @@ All three of its stages are built:
   cards (the order card, an approval, a question) answered through the mux, the one status
   line under the composer (not signed in, reconnecting, a host error, a command's word), and
   Settings (Cream · Black · System);
-- **host-fed since stage 2**: Markets (`#/markets`) — the watchlist, the holdings and a search
-  with the face's live quotes, and a market's page with its daily bars — and Account
-  (`#/account/portfolio`, `#/account/venues`) — the paper account's Portfolio, the Statement and
-  Venues ("Markets and Account" below). The old `/market` and `/account` pages are gone (404);
+- **host-fed since stage 2**: Markets (`#/markets`) — the Account's markets by its tabs, the
+  stars, a search, and a market's page with its candles and venues — and Account
+  (`#/account/portfolio`, `venues`, `agents`, `cards`) — the Account's Portfolio, Venues, Agents
+  and Cards and the Statement drawer — both read from Linqi's Account through the face's proxy
+  since 2026-10-22 ("Markets and Account" and "The Account in the face" below), the A shares on
+  the face's own wire. The old `/market` and `/account` pages are gone (404);
 - **host-fed since stage 3**: a channel's page (`#/channel/<id>`: its status, thesis, backtests,
   journal, files, and its agent and bot rosters with their editors), Discover (`#/discover`, the
   inventory of what Gravit runs — "Discover" below), the row actions, a tool result drawn as a
@@ -155,8 +157,9 @@ All three of its stages are built:
   ("Temporary subagents" below) and a room member's trace. There is no shop, no Mail and no
   Memory: what the demo drew with no back end left the tree.
 
-What the browser keeps is two keys: `localStorage["gravit-ui.prefs"]` — the theme, the rail's
-fold, the list groups you folded, the last conversation, what was seen — and the watchlist under
+What the browser keeps is three keys: `localStorage["gravit-ui.prefs"]` — the theme, the rail's
+fold, the list groups you folded, the last conversation, what was seen — and the stars: the
+Account's markets under `gravit.account.watch.v1`, the A shares under
 `gravit.market.watchlist.v1`. Nothing else: a reload rebuilds the page from the host. The demo's director (`d`), its scripted Gravit and its seed are gone with
 the move; `tests/client/*.test.js` keep the renderers and the host layer honest on a fake DOM
 and a fake host, and `gravit-client-smoke.test.ts` opens one real session over the real wire.
@@ -343,7 +346,7 @@ old one's standing.
 | Env | Default | What |
 |---|---|---|
 | `FACE_ACCOUNT_SEAT_DIR` | `~/buyer-agent-demo` | the installed checkout the seat process runs from |
-| `FACE_ACCOUNT_URL` | `http://127.0.0.1:4820` | the running service (the seat's `PORTFOLIO_URL`; `/data/seat.json` reads the row as composed, a patch's URL and seat name included) |
+| `FACE_ACCOUNT_URL` | `http://127.0.0.1:4820` | the running service (the seat's `PORTFOLIO_URL`; `/data/seat.json` and the proxy's `/data/account…` read the row as composed, a patch's URL and seat name included) |
 
 The checks: after a boot, `/data/plugins.json` lists `server: "account"` with 35 tools and the
 boot line reads `order gate armed for mcp__account__portfolio_live_order, …`; Account › Venues
@@ -355,7 +358,11 @@ minutes and the row then comes up without tools (the drill's step 7). The seat's
 made on the seat's first call; the face never reads it. An operator patch can disable the row
 (`- { id: mcp-account, disabled: true }`) or replace its config whole; the box and `/data/seat.json`
 follow the row as composed — a disabled row reads `seat disabled`, a patched `PORTFOLIO_URL` or
-`PORTFOLIO_AGENT` is where and whom they read.
+`PORTFOLIO_AGENT` is where and whom they read. `/data/seat.json` reads the Account's
+`GET /api/account` through the proxy's own `account` reader ("The Account in the face" below), so
+the box and the Account screen share one upstream read: a good answer is served for 15 s,
+`?fresh=1` (Refresh, a card raised or answered, the read right after a seat receipt) asks again,
+and a failure is never kept — the next read asks again, and nothing is served stale.
 
 What the service does on its own, with no venue connected (read at 133b9a7,
 `src/portfolio/live/reach.ts`, `location.ts`): every thirty minutes a keyless probe of each
@@ -563,201 +570,323 @@ these. Each has a default in the code and is the operator's to revisit:
 
 ## Markets and Account
 
-The rail opens **Markets** (`#/markets`) — the watchlist, the account's holdings and a search
-across US stocks, A shares and cryptocurrency pairs, with the face's live quotes — and
-**Account** (`#/account/portfolio`), the read-only paper account. Both are screens of the client
-at `/` since stage 2 of route A; the old `/market` and `/account` pages are gone, and their
-addresses answer 404. Neither screen places or cancels an order: Gravit orders through the MCP
-tools, behind both gates.
+The rail opens **Markets** (`#/markets`) — Linqi's Account's markets by its own tabs, beside the A
+shares the face quotes itself — and **Account** (`#/account/portfolio`, `venues`, `agents`,
+`cards`), the Account's own page. Both read the Account through the face's proxy ("The Account in
+the face" below): market data comes the Account's way — keyless, server-side at the Account, read
+by what the page is looking at, one push channel per tab — and every figure on either screen is
+the Account's but an A share's quote. Both are screens of the client at `/` since stage 2 of
+route A; the old `/market` and `/account` pages are gone, and their addresses answer 404. Neither
+screen places, cancels or signs anything — no Buy, no Sell, no Trade: Gravit orders through the
+seat's tools, behind Gate 2 and the Account's own card.
 
 ### Markets
 
-One table under the search box (`Search markets`), the tabs **All · Crypto · Stocks** (Stocks
-holds US and A shares together) and, with two or more rows, the sort **Most traded · Biggest
-moves** (by dollar volume — price × volume, so a coin's units and a stock's shares compare — or
-by the size of the move; a missing value sorts last either way, so A shares, whose volume is
-unavailable, end Most traded). A row: the star (`Watch AAPL` /
-`Stop watching AAPL`), the name with its symbol and exchange and a `Held` tag for a position,
-the price in its own currency (`$189.24`, `¥1,688.00`), the change, the volume (`52.3M shares`,
-`12.3k BTC`) and the quote's state — `Live`, `Delayed`, `Stale` or `No quote` (`Not configured`
-when the market's provider has no credentials), `· Closed` when the market is. Missing values stay em dashes. Green is a rise and red a fall in every market.
+One table under the search box (`Search markets`). Its tabs are the Account's: **All**, then
+**Crypto · Stocks · RWAs · Perps · Pre-IPO · Predictions** where the Account lists something
+(Stocks for the A shares alone too) — each with the Account's count once All's read has
+answered, All and Stocks counting the A shares too — with **All results** first while searching
+and **Watching** last once anything is starred;
+a tab starts from Most traded. With two or more rows, the sorts **Most traded · Biggest moves**,
+and **Closing soonest** where a row closes: Most traded ranks the Account's rows by their volume
+(a Kalshi row's contracts by their number), then the A shares by turnover; Biggest moves by the
+size of the 24-hour move; Closing soonest by the close; a row without the figure sorts last.
 
-With no query the rows are the watchlist, then the holdings not on it. With a query they are
-the search's hits (`N markets for “q”`, and Clear), each with one quote read for up to 30 hits.
-Three muted one-liners say what is going on and nothing else: the quotes' connection
-(`Connecting…`, `Updating every 15 s` while the stream is down, `Quotes unavailable`), or while
-searching the search's state (`Searching…`, `Nothing matches “q”`, `Search is unavailable`,
-`Some results may be missing`), and the watchlist's trouble (`Couldn't save the watchlist`,
-`The watchlist is full`, `Couldn't read the saved watchlist`). Nothing watched and no query
-reads `Nothing watched yet`. The wire's own words — a quote's or a provider's message, a search
-note — are Chinese and never reach the screen; every word is drawn from the wire's enums.
+A row: the star (`Watch BTC` / `Stop watching BTC`); the tile — the face's own letters, never an
+image the Account names — and the name over its sub (a coin's base, a stock's venue, a
+perpetual's base, an event's category, `Pre-IPO · Perpetual`), tagged `Closed` past its end and
+`Paper` where only a paper account trades it first; the price now, in its unit (`$63,226.60`, an
+event in cents `62¢`, an A share in yuan `¥1,688.00`) — the latest quote at the row's most traded
+connected line where the quotes poll or the stream has one, else the explore read's; the 24 hours
+(an arrow, `up` or `down` for a screen reader, the percent, an event's move in cents); the volume
+(`$1.9B`, `412k contracts` for Kalshi, `2M shares` for an A share); and **Source**, where the
+price is from in the Account's own words (`Robinhood · real time`, `Cboe · 15 min delayed`), with
+its age once it is more than five seconds old (`· 2 min ago`). Missing values stay em dashes.
 
-The watchlist is this browser's: at most 100 market-qualified identities (`us:AAPL`,
-`cn:600519`, `crypto:BTC/USD`) under `gravit.market.watchlist.v1` in `localStorage` — the key the
-old page wrote, so a list carries over. A browser that saved before the 2026-10-08 rename keeps
-its list too: `kairos.market.watchlist.v1` is read while the new key is absent and never written
-or deleted. Same-origin tabs stay in step through storage events. The list is independent of the
-broker account and not synchronised across devices.
+With a query the rows are the Account's search and the face's A-share hits (`N markets for “q”`,
+and Clear). With no rows the table says `Nothing watched yet` (Watching), `No markets` for an
+answer with none, `Loading…` or `Searching…` while a read is on its way, and `Markets
+unavailable` (`Search is unavailable` while searching) when the read failed before it ever
+answered. The muted lines say what is going on and nothing else: the Account's own sentence when
+the read the rows are from refused (the rows read before it stay); the A-share search's `Search
+is unavailable` or `Some results may be missing`; the face's wire's state where an A share is
+drawn (`Connecting…`, `Updating every 15 s` while its stream is down, `Quotes unavailable`); the
+watchlist's trouble (`Couldn't save the watchlist`, `The watchlist is full`, `Couldn't read the
+saved watchlist`).
 
-The quotes use `GET /data/quotes/stream?ids=us:AAPL,cn:603986,crypto:BTC/USD` for Server-Sent
-Events (SSE). Each named `quotes` event carries the selected set's whole snapshot; named
-`heartbeat` events arrive every 15 seconds. `GET /data/quotes?ids=...` serves the same JSON
-contract for a hit's one read and for the 15-second fallback while SSE is unavailable. The
-screen subscribes to a market page's own asset, the watchlist and the holdings — at most 100
-identities — and re-subscribes when that set changes; empty selections make no upstream
-request. The quotes run only while Markets is on screen in a visible tab and pause otherwise.
+The stars are this browser's, in two stores — the Account's row keys (`coin:BTC`, `stock:AAPL`,
+`event:<venue>:<market>`, …) under `gravit.account.watch.v1`, the A shares (`cn:600519`) under
+`gravit.market.watchlist.v1`, the key the old page wrote (a browser that saved before the
+2026-10-08 rename keeps its list too: `kairos.market.watchlist.v1` is read while the new key is
+absent and never written or deleted) — at most 100 each, in step across same-origin tabs through
+storage events, never synchronised across devices. An old `us:` or `crypto:` star on the face's
+list is asked of the Account once per boot (`explore?q=<symbol>`, a coin by its base): found, it
+is the Account's row, starred, and moves to the Account's store; not found, it is listed once as
+`Not listed at the Account`, with **Remove** in place of its star; a read that fails asks again on
+the next boot. A starred market no read lists is drawn `Not in this read` and can still be
+un-starred; neither opens a page.
 
-The server shares one Alpaca and one Coinbase socket across active pages,
-subscribing to their union without whole-market wildcards. A latest-value
-cache stays in RAM (at most 512 identities), with no market-directory download
-or disk quote cache. Browser events are coalesced to 500ms; identical snapshot
-reads share work and use a five-second cache. Upstream REST bodies, timeouts,
-Coinbase request starts and browser connections are bounded. Slow/disconnected
-SSE clients release their subscriptions. Provider failures preserve the last
-known quote with its original timestamp and an explicit stale status.
+While Markets is on screen in a visible tab it reads the tab on screen at once and every 20
+seconds, and every 5 seconds the quotes of the rows drawn, twelve markets a call; the search reads
+once the box has been quiet for 300 ms. Another screen or a hidden tab stops both ("The Account in
+the face" has every read).
 
-| Market | Provider and update path | Coverage and interpretation |
-|---|---|---|
-| US stocks/ETFs | Alpaca snapshots, trades and daily-bar WebSocket updates | `iex` by default, covering only IEX. Its stream subscribes to at most 30 symbols; remaining selected symbols use periodic snapshots. `sip` requires its entitlement; `delayed_sip` is labelled `SIP, delayed`. Changes use the previous session's close. |
-| A shares | iFinD `real_time_quotation`, only requested codes | Requires an iFinD access or refresh token. Without one, Venues reads `iFinD · Not configured` and the rows `Not configured`. Polling defaults to 30 seconds while selected. Event timestamps are interpreted as Beijing time. Volume stays unavailable until its provider units can be verified with an account. |
-| Cryptocurrency | Coinbase Exchange ticker/heartbeat WebSocket, per-product REST ticker/stats | Public USD pairs supported by Coinbase; a search result is not a guarantee of Coinbase coverage. Changes and volume use a rolling 24-hour window, labelled `24h`. |
-
-Snapshots initialize the display and refresh US/crypto baselines every 60
-seconds while streaming, or every 15 seconds while their socket is unavailable.
-Market state distinguishes connection status from data availability. Alpaca's
-clock describes the regular session; closed does not rule out extended-hours
-trades. Quote time always comes from a provider event, never local retrieval
-time. Old or missing data is not replaced by historical PIT prices. These
-live, interactive reads are not guarded replay/backtest evidence.
-
-`GET /data/symbols/search?q=兆易创新&market=all` queries Tencent smartbox for
-A shares and Yahoo Finance search for US stocks/ETFs and USD cryptocurrency
-pairs. `market` accepts `all`, `us`, `cn`, or `crypto` (the screen searches
-`all`). Search does not download or save a whole-market directory. The backend
-caches up to 128 successful queries in memory for 60 seconds, shares duplicate
-in-flight requests, and bounds each provider request to six seconds. The API
-uses the same browser trust checks as the other data routes and requires a
-running local backend with outbound HTTPS access to the providers. The screen
-waits 250 ms after typing stops, cancels a superseded request and ignores a
-late answer; an outage reads `Search is unavailable` or `Some results may be
-missing`, never a successful empty search. Search returns identities, not
-prices: a hit can be watched even when no provider covers it, and reads `No
-quote`.
-
-The legacy `GET /data/watchlist.json` remains available and runs the fixed, read-only
-`scripts/face_watchlist.py` producer, then merges the shared reference directory
-from `client/market-catalog.js`. The producer reads the latest captured US
-snapshot through `GuardedSource` and `AsOfGuard`. The shipped 2yr bed currently supplies 797
-US rows dated **2026-07-09**, with raw daily closes and changes relative to the
-previous close. These are historical snapshots, not live quotations, and no
-screen reads this route.
-
-#### Market credentials
+The A shares — the one kind the Account has no source for — stay on the face's own wire, for `cn:`
+ids alone: `GET /data/quotes/stream?ids=cn:600519,…` for Server-Sent Events (each named `quotes`
+event the selected set's whole snapshot, a `heartbeat` every 15 seconds) over the cn watchlist and
+a cn page's own id — at most 100, re-subscribed when that set changes, paused off Markets —
+`GET /data/quotes?ids=…` for the 15-second fallback while SSE is down and for one read of up to 30
+search hits, and `GET /data/symbols/search?q=兆易创新&market=cn` (Tencent smartbox; the wire waits
+its own 250 ms on top of the screen's 300, cancels a superseded request and ignores a late
+answer). The iFinD provider quotes them:
 
 | Environment variable | Default | Purpose |
 |---|---|---|
-| `APCA_API_KEY_ID`, `APCA_API_SECRET_KEY` | — | Existing Alpaca credentials, held only by the backend. |
-| `ALPHA_DATA_FEED` | `iex` | `iex`, `sip`, or `delayed_sip`; no silent entitlement downgrade. |
 | `IFIND_ACCESS_TOKEN` | — | iFinD token, preferred when set. |
 | `IFIND_REFRESH_TOKEN` | — | Alternative: obtain the current access token through the official token endpoint; cache it only in memory. |
 | `FACE_IFIND_POLL_MS` | `30000` | iFinD refresh period while selected; minimum 15000ms. Set according to the account's data quota. |
 
-Copy `market-env.example` to the repo's gitignored `.env.ifind`, enter the
-credentials locally, export it before starting the server, then restart.
-No token is sent to the browser or returned in errors. Coinbase public market
-data needs no credential. iFinD's adapter is covered by mocked tests, but A-share
-live validation remains pending until an account is configured.
-
-Provider references: [Alpaca streams](https://docs.alpaca.markets/us/docs/real-time-stock-pricing-data),
-[Alpaca coverage](https://docs.alpaca.markets/us/docs/about-market-data-api),
-[Coinbase channels](https://docs.cdp.coinbase.com/exchange/websocket-feed/channels),
+Without a token Venues reads `iFinD · Not configured` and an A share's quote `Not configured`.
+Event timestamps are interpreted as Beijing time; volume stays unavailable until its provider units
+can be verified with an account. Copy `market-env.example` to the repo's gitignored `.env.ifind`,
+enter the credentials locally, export it before starting the server, then restart. No token is
+sent to the browser or returned in errors. iFinD's adapter is covered by mocked tests, but A-share
+live validation remains pending until an account is configured. The wire's own words — a quote's
+or a provider's message, a search note — are Chinese and never reach the screen; every word is
+drawn from the wire's enums. Provider references:
 [iFinD manual](https://quantapi.10jqka.com.cn/gwstatic/static/ds_web/quantapi-web/help-center/manual.html),
 [iFinD quotas](https://quantapi.10jqka.com.cn/gwstatic/static/ds_web/quantapi-web/help-center/permission.html).
 
 ### A market's page
 
-`#/markets/<id>` — a row's name opens it, and a pasted link works too (`#/markets/us:aapl` is
-rewritten `#/markets/us:AAPL`; an id that is no market opens Markets). The head names the market
-(`Stock · AAPL · NASDAQ`, `A-share · 600519 · SH`, `Crypto · BTC/USD`) with **Hand to Gravit** —
-a new message in the root channel with `Look at AAPL (Apple)` in the composer — and **Watch** /
-**Watching**. Then the price, the change against the previous close (`24h` for a coin), the
-quote's time and state, and the facts Previous close, Volume and Source.
+`#/markets/<key>` — a row's name opens it, and a pasted link works too: an Account key is kept
+whole (`#/markets/coin:BTC`), a face id canonicalised (`#/markets/cn:600519`), an id that is
+neither opens Markets, and a key no read lists yet draws Markets until a read lists it. The head:
+the tile, the name, its sub (the kind and the symbol at the line the page follows, `Stock · NVDA`;
+an event's category and when it closes), `Closed` past its end; **Hand to Gravit** — a new message
+in the root channel with `Look at <base> (<name>)` in the composer — and **Watch** / **Watching**.
+Then the price now (the stream's quote for the market the page follows, else the quotes poll's,
+else the explore read's) with the explore read's 24 hours, an event's outcomes in cents under it
+(`Yes 62¢`, `No 38¢`), where the price is from with its age, and the facts **24h volume** and
+**Venues**.
 
-**Price history** charts a US market's daily closes from `GET /data/bars?id=us:AAPL&days=120`,
-read once each time the page opens. The face spawns `scripts/face_bars.py AAPL 120`: with both
-APCA keys it reads Alpaca's RAW, unadjusted daily bars under a 12-second deadline; without
-them, or when that read fails or runs out of time, it reads the PIT bed (`ALPHA_PIT_ROOT`,
-default `data/pit/2yr`) over the 120 days before the bed's last captured snapshot. Every read
-goes through `GuardedSource` + `AsOfGuard`. The chart shows once there are two closes, stamped
-`Daily · Alpaca IEX` or `Daily · PIT bed · as of 2026-07-09` (` · stale` when the route served
-its cache after a failure); without a source it is simply absent. Crypto and A-share pages have
-no chart until a bar source exists for them.
+- **Price history** — the Account's ranges **1D · 5D · 1M · 3M · 6M · YTD · 1Y · 5Y · MAX** (1D
+  until one is chosen, kept per market): the closes of the Account's candles at the line the page
+  follows, as an area and a line with the first and last bars' times on the axis, the low and the
+  high, and the Account's own words under it; `Loading…` while a range not drawn yet is read, `No
+  history` for an answer with fewer than two closes, the Account's sentence (else `History
+  unavailable`) over a failed read, the closes kept for the range while it is read again.
+- **Across venues** — the market's lines, the ones the owner connected first, each with its price;
+  `Best` on the lowest ask among the lines that take an order now, `Paper` where so; a public
+  listing with **Connect to trade**, a link to Account › Venues.
+- **You hold** — the leading lens's assets of its base and the positions, real and paper, at its
+  lines (`You don’t hold any.`); **Open orders** on it (no section once the page has answered with
+  none); **Gravit on it** — the conversations whose titles name it (its base, or an event's name),
+  as links, when there are any; **On the statement** — the statement's lines naming its base or
+  one of its symbols, `✓` on a filled or settled one, and `Open the Statement →` (`Nothing on the
+  statement about it yet.`). Each part says `Loading…` until its own read has answered, `Holdings
+  unavailable`, `Account unavailable` or `Statement unavailable` — under the Account's sentence
+  when it gave one — when that read failed before any answer, and keeps what it read under a later
+  refusal's sentence.
 
-Once the account has answered, **You hold** (the quantity in shares or the coin's base, its
-value and today's change, or `You don’t hold any.`) and **On the statement** (up to eight fills
-on the symbol, and `Open the Statement →`) follow. **Gravit on it** lists the conversations whose
-titles name the symbol, as links, when there are any.
+Opening the page reads the candles for its range, the Account's compare rows for a coin's, a
+perpetual's or a stock's base (kept in the store; no screen draws them yet), the holdings and the
+statement; follows its line on the tab's stream — its first connected line, else its first public
+listing, one `<venue>:<symbol>` told to `stream/markets` — and puts its own market in the
+5-second quotes poll. Leaving lets the market go.
+
+A `cn:` page is the face's own quote, as before: the price in yuan, the change against the previous
+close, `as of 14:30 · Live`, the facts Previous close, Volume and Source, and Gravit on it — no
+chart, no venues.
 
 ### Account
 
-`/data/account.json` is read at boot (the rail shows the net worth under Account once it is
-known), on entering Account, on **Refresh** and right after a streamed order receipt — the last
-two ask for a fresh read (`?fresh=1`), past the route's 60-second cache, so a fill shows at once. The head
-carries a `Paper` or `Live` chip from the read hostname — only `paper-api.alpaca.markets` is
-Paper.
+The Account's page (`/data/account`) is read at boot — the rail's line under Account is its
+leading figure once it answers (`· Paper` when Paper leads), beside a badge counting the cards
+waiting — on entering Account, every 20 seconds while Account is on screen in a visible tab (80
+while the tab's stream is open), on **Refresh** and right after a streamed receipt that is not the
+seat's (those two `?fresh=1`, past the proxy's 15 seconds), and on the stream's events. The head:
+`Account`, the Account's mode and writes as chips (`Guard` or `Beast`; `Trading on · $250 a move`
+or `Read-only`), read only — changing either stays on the Account's page — then Refresh and
+Settings; the Account's refusal sentence, when it gave one, as a muted line under it. Four tabs,
+and a drawer:
 
-- **Portfolio**: the net worth, today's change in money and percent, the allocation bar by asset
-  class plus cash, the holdings (each linking its market page, with quantity, value and today's
-  change), the orders under Working, Filled, Closed and Other — Alpaca's 50 most recent, all
-  statuses — and the Statement key. Without account credentials it reads `No APCA keys in the
-  environment` in place of the numbers, never a zero balance; a failed read with nothing loaded
-  reads `Account unavailable` with Retry; a failed read after a good one keeps the numbers,
-  stamped `As of 14:32 · stale`, with Retry; a payload the face served from its cache after a
-  failure carries the same stamp.
-- **The Statement** (a drawer): every order with a fill — a partly filled one too, working or
-  canceled since — newest first, with Export CSV — a
-  `statement.csv` (`date,side,qty,symbol,price,amount`) built in the browser.
-- **Venues**: the Alpaca row — the host, where the keys come from (`credentials/describe`:
-  `Keys · env`, `No keys`, `Keys unknown`) and whether order tools are registered (`Order tools
-  on` / `off`, from the tool registry) — and the quote providers' state, read on entering Venues
-  and again on Refresh there. Under them, the **Account seat** box (`/data/seat.json`, read on
-  entering Venues, on Refresh there and right after a seat receipt): the service reachable or not
-  with the Account's own mode and writes (`Guard · Trading on · $1 a move`), the seat (`Gravit ·
-  admitted until Nov 19`, `knocking — admit it on the Account page`, `not on the account`,
-  `expired`, `revoked`) with each limit (`trade · paper-1 · $100 an order · $850 of $1,000
-  left`), the venues with a `Paper` chip on the paper ones, `N cards waiting`, the stamp, and
-  **Open the Account page** — the only place a card is signed.
+- **Portfolio** (on entering it the holdings, then the curve): the leading figure with its label
+  and the second beside it, smaller — **Net worth** (the Account's `totalUsd`, real money) leads
+  unless it is zero while a paper venue is connected and the paper book has a total, when
+  **Paper** leads; the change for the range in one line — the dollars and the Account's percent,
+  the range, `partial`, since when on All, and on the paper curve what it made since its start and
+  `rebuilt`; the range seg **1D · 1W · 1M · All** and the leading figure's curve; the venues a
+  read could not reach (`<venue> did not answer`); **Assets** — each asset across its venues,
+  Asset · Amount · Price · 24h · Value — and **Positions** — Position · Value · Entry · Mark · P&L,
+  `Paper` where so — both the leading lens's; **Open orders** (open, partial, pending), each with
+  whose it is (`You`, `Agent · <name>`, `An agent`); the **Statement** key. `Loading…` before the
+  first answer, `Account unavailable` with Retry when it failed before any, `Account unreadable`
+  for an answer the face does not recognise — never a number from it; a failed read after a good
+  one keeps the figures, stamped `As of 14:32 · stale`, with Retry, and a page the Account itself
+  says is stale carries the same stamp. Where Assets would be: `Holdings unavailable`, or the
+  Account's sentence when the holdings read refused.
+- **Venues**: each venue the Account connected — its value, front line and what it trades, its
+  health (`Answers`, `Not answering since 14:02`, `Not read yet`), what it does (`Trades`, `Moves
+  money`, `Receives`, `Earns`), `Paper`, stale — with **Details**, a drawer of what it holds there
+  and the Account's facts (`No trading`, `Restricted`, `Not served`, `Close only`, `Watch only`,
+  `Key file` by its path, never what is in it); under them `A-share quotes`, the iFinD provider's
+  state; then the **Account seat** box (`/data/seat.json`, read on entering Venues or Agents, on
+  Refresh, right after a seat receipt and on a card raised or answered): the service reachable or
+  not with the Account's own mode and writes (`Guard · Trading on · $1 a move`), the seat (`Gravit
+  · admitted until Nov 19`, `knocking — admit it on the Account page`, `not on the account`,
+  `expired`, `revoked`) with each limit (`trade · paper-1 · $100 an order · $850 of $1,000 left`),
+  the venues with a `Paper` chip on the paper ones, `N cards waiting`, the stamp, and **Open the
+  Account page** — the only place a card is signed.
+- **Agents** (on entering it the Account's agents and the seat): Gravit's seat first, in the seat
+  box's words, with its limits and the counts of its cards waiting and its open orders (`—` until
+  the agents are read), then every other agent with its status, until when, its limits and counts,
+  and under **Knocking** the keys asking to be let in.
+- **Cards** (the tab counting what waits; on entering it the page past the cache): **Waiting for
+  you**, grouped by agent — each card's reason, value and the time to answer by, and **What it
+  asks**, every field the owner signs, as the Account sent it — and the agents' **Asks** under
+  them. They are answered on the Account's page.
+- **The Statement** (a drawer, its lines read on opening it): the Account's lines newest first,
+  each with who it was by, its status in the Account's word and its fee; **Export CSV** — a
+  `statement.csv` built in the browser (`date,type,kind,description,amount,fee,status,by`; a text
+  cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return is led by an apostrophe);
+  `Loading…`, `No statement lines yet`, `Statement unavailable`, the Account's sentence over the
+  lines kept after a refusal.
+
+### The face's own routes no screen reads
+
+The face's Alpaca and Coinbase quote providers (behind `/data/quotes`), the US and crypto half of
+`/data/symbols/search` (Yahoo Finance), `/data/bars` and the three producer routes stay registered
+and are read by no screen (`DEVELOPMENT.md` §9, R36). `/data/account.json`, `/data/market.json`,
+`/data/watchlist.json` and `/data/bars` keep the loopback fence and each spawn a fixed, read-only
+producer (`scripts/face_data.py account` and `market`, `scripts/face_watchlist.py`,
+`scripts/face_bars.py`); a good payload is cached in memory — account 60 seconds, market and
+watchlist 15 minutes, bars 10 minutes per (symbol, days), at most 64 — concurrent misses share one
+producer, a later failure re-serves the last good payload with `stale: true`, and with nothing to
+fall back on the route answers 503, never with the child's error text. The legacy market producer
+keeps its disk cache under `data/.face_cache` (a cold assembly walks the whole bed, ~284 seconds
+measured).
 
 | Env | Default | What |
 |---|---|---|
-| `FACE_PYTHON` | `python3` | interpreter able to import `alpaca_kit`; install the project into that environment |
-| `ALPHA_PIT_ROOT` | `data/pit/2yr` | captured bed for the chart's fallback, the legacy watchlist and the legacy market data endpoint |
-| `APCA_API_KEY_ID` / `APCA_API_SECRET_KEY` | — | account and bar credentials inherited at startup; source `../.env.alpaca` before `npm start` |
+| `FACE_PYTHON` | `python3` | the producers' interpreter, able to import `alpaca_kit` |
+| `ALPHA_PIT_ROOT` | `data/pit/2yr` | the bed the market, watchlist and bars producers read |
 
-`ALPACA_KIT_ENABLE_ORDERS` stays unset; Account reads, it never operates either gate.
+## The Account in the face (src/account-proxy.ts + client/js/wire/account-stream.js)
 
-### Data routes and caches
+Since 2026-10-22 (stage 1 of `../docs/superpowers/specs/2026-10-22-account-graft-design.md`) the
+Markets and Account screens read Linqi's Account — the service the seat sits at ("The Account
+seat" above) — through the face. The Account answers only a bare loopback request: its fence
+refuses a page at another origin, the face's included, so the page never asks it. The page asks
+the face, under `/data/account…`, and `src/account-proxy.ts` asks the Account with a plain
+loopback fetch — no `Origin`, no `Sec-Fetch-Site`, no cookie, `redirect: "error"` — at the URL of
+the `mcp-account` row as composed (`FACE_ACCOUNT_URL`, default `http://127.0.0.1:4820`, unless a
+patch moved it). A disabled seat row disables the proxy too: every valid read answers
+`503 {"ok":false,"unreachable":"disabled"}` and asks nothing. The face vendors nothing of the
+Account, holds no key, signs nothing, and logs nothing of a body, a query or a frame.
 
-All producer, bar, search and quote routes retain the loopback Host/Origin fence from
-`src/data.ts`, and need no browser cookie: dsh 0.2.0's sign-in covers `/` and `/api` only, and
-the face keeps `/data` as it was (upgrade decision D8). Request data never enters a child's
-arguments unchecked: `/data/bars` passes exactly a symbol in the face's US grammar and a day
-count of 5–730, both checked again by the producer. A successful payload is cached in memory:
-**bars 10 minutes per (symbol, days), at most 64 of them; watchlist 15 minutes, legacy market
-15 minutes, account 60 seconds**. Concurrent cache misses share one producer process. The bars,
-watchlist and account producers have a 30-second timeout; the old market producer has a
-10-minute timeout. A read respects its cache, except the account's Refresh and the read after a
-fill, which ask for `?fresh=1` and skip the 60 seconds (still one producer at a time). After a later
-read failure, the previous good payload is returned with `stale: true`; with nothing to fall
-back on the route answers 503, never with the child's error text.
+Each route is `exact` — the table is the allow-list, and nothing else of the Account's surface is
+reachable through the face:
 
-The original **`/data/market.json` remains available for compatibility**, with
-its tape, breadth, screens, warmup metadata and two assembly/serve timestamps.
-No screen reads it. A cold legacy assembly walks
-the whole bed (~284 seconds measured); later runs read its disk cache under
-`data/.face_cache`. That cache key includes the resolved bed path, producer
-source and as-of day. `scripts/face_data.py` still produces both this legacy
-payload and account data.
+| Route | What it reads at the Account | TTL | Abort | Query names |
+|---|---|---|---|---|
+| `GET /data/account` | `GET /api/account`: the page — venues, health, cards, orders, keys, signers, the mode and writes | 15 s | 7 s | `fresh` |
+| `GET /data/account/explore` | its markets, by tab, or a search | 20 s | 10 s | `tab`, `q`, `key`, `limit` |
+| `GET /data/account/market` | one market at one venue | 3 s | 7 s | `venue`, `symbol` |
+| `GET /data/account/quotes` | the latest quotes of up to twelve markets | 3 s | 7 s | `pairs` (2,000 characters) |
+| `GET /data/account/compare` | a base's prices across venues | 15 s | 7 s | `base`, `side`, `usd`, `asset` |
+| `GET /data/account/candles` | a market's price history | 30 s | 25 s | `venue`, `symbol`, `interval`, `range`, `before`, `limit` |
+| `GET /data/account/holdings` | assets and positions across venues; `paper=1` the paper book's | 8 s | 12 s | `cost`, `paper`, `fresh` |
+| `GET /data/account/positions` | positions | 10 s | 7 s | `venue` |
+| `GET /data/account/statement` | the statement's lines | 10 s | 7 s | `fresh` |
+| `GET /data/account/history` | the worth curve; `paper=1` the paper book's | 60 s | 12 s | `range`, `paper`, `venue` |
+| `GET /data/account/agents` | every agent the Account knows, with its limits | 15 s | 7 s | `fresh` |
+| `GET /data/account/stream` | the push channel (server-sent events), one upstream request per browser connection | — | — | `client` (required), `since`, `markets` (4,000 characters) |
+| `POST /data/account/stream/markets` | the markets a stream follows | — | 7 s | none |
+
+The screens read nine of the eleven reads; `market` and `positions` are proxied and read by no
+screen yet.
+
+The rules, in order. The `/data` fence first (`403 {"ok":false,"error":"forbidden"}`), then 405
+for a method the row does not name, then the query rebuilt from the row's names in the order they
+came — each name once, each value at most 240 characters decoded (`pairs` and `markets` their own
+bounds), the request target at most 8,192 — or `400 {"ok":false,"error":"invalid account
+request"}`, and the Account is never asked; the raw query never reaches it. `fresh=1` is the face's
+own flag, never forwarded: it skips the TTL and never joins a plain read in flight — it asks again
+once that one settles. Reads of one query share one fetch; only a 2xx answer is kept, by route and
+rebuilt query, at most 64 queries a route, the least recently used out first. The Account's status
+and body pass through as they are (`application/json`, `no-store`): its `{ok:false, refusal}` is
+the screen's to draw, in its words. A fetch that fails — refused, past the route's abort on the
+headers or the body, a body that cannot be read — is `503 {"ok":false,"unreachable":"<CODE>"}`
+(`ECONNREFUSED`, `timeout`, `unreadable`), never the error's text, or the query's last kept answer
+re-served with `stale: true`.
+
+The stream is piped. The client id is required (8 to 48 letters, digits, `-` or `_`; the page
+mints `face-` and 24 hex digits, once per tab); the browser's `Last-Event-ID`, when it sends one,
+is the `since` passed on, in place of the query's — an EventSource reconnects to the URL it
+opened, its newest id in the header; the Account's 200 is written through chunk by chunk as it
+comes, never buffered or re-framed, and ends when the Account ends it; any other answer is the
+Account's status and body (its refusal past 32 streams among them). The upstream is aborted when
+the tab's connection closes, when the browser falls 256 KiB behind, and at shutdown — `main.ts`
+disposes the proxy after the web server stops. `stream/markets` takes a body declared
+`application/json` (else 415) on a bare path (any query name is 400), at most 4,096 bytes (413),
+and posts it on as it came. `/data/seat.json` reads the page through the proxy's own `account`
+reader, so the seat box and the Account screen share one upstream read within the 15 seconds.
+
+**The cadence** — the Account's own page's, no faster:
+
+| Read | When |
+|---|---|
+| `/data/account` | at boot; on entering Account (past the cache when it opens on Cards) and on entering Cards (past the cache); every 20 s while Account is on screen in a visible tab, 80 s while the tab's stream is open; on Refresh and after a receipt that is not the seat's (`?fresh=1`); on the stream's events |
+| `explore` | the tab on screen, at once and every 20 s while Markets is on screen in a visible tab (`limit=200`, a kind's tab with its `tab`); the search once the box has been quiet for 300 ms (`q`, `limit=200`); each old `us:`/`crypto:` star once per boot (`q`, `limit=12`) |
+| `quotes` | every 5 s while Markets is on screen in a visible tab: the drawn rows' most traded connected lines, twelve a call, none while one is out; on a market's page its own |
+| `candles`, `compare` | on opening a market's page; `candles` again on a range |
+| `holdings`, `history` | on entering Portfolio (the holdings, then the leading curve), on Refresh (the holdings), on a range (the curve), on opening a market's page (the holdings); on the stream's events |
+| `statement` | on opening the Statement and a market's page; on the stream's events |
+| `agents` | on entering Agents; on a `snapshot` |
+| `stream` | one per tab, open while the tab is visible; `since=<the last frame id>` on a new source; no sign of life for 20 s is stale, 45 s dead; a dead or refused source opens again after 1, 2, 5, 10, then 30 s |
+| `stream/markets` | the market a page follows (sixteen at most), told on every open and every change as `{client, markets, n}` with a rising `n`, and once more a second later when the face did not take it |
+
+A stream event reads again what it names, past the cache: `order`, `fill`, `paper`, `balance` and
+`position` the holdings and the page; `statement` the statement; `card` the page, and the seat box
+for a card raised or answered; `snapshot` everything, and the prices the stream had kept are
+dropped — the Account never resumes market events. A `quote` frame is the followed market's price
+(its last trade, else the middle of its bid and ask). A hidden tab stops every poll and closes its
+stream; a visible one opens it again from the last id and tells the follow set again.
+
+**The fixtures** — `tests/fixtures/account/` holds the Account's answers at buyer-agent-demo
+@ 133b9a7, captured from its own stand-in (the real Account over simulated venues: no network, no
+money, a fresh temporary home) by `scripts/capture-account-fixtures.ts`: thirteen reads —
+`account`; `explore`, All and Predictions; `holdings` and its paper lens; `positions`;
+`statement`; `history` and its paper curve; `agents`; `compare` for ETH; `candles` and `market` at
+the first Markets row's line at a venue connected live (the Stand-in Broker's NVDA in this
+capture) — and the push channel's first frames in `stream-frames.txt` (ten, or the whole ones heard
+in 20 seconds: this capture's `retry`, a snapshot, a statement line and a heartbeat). Every `native`
+and `icon` key is dropped and every array cut to its first twelve entries (a frame's arrays stay
+whole); `tests/account-fixtures.test.ts` holds the files to what the views read and to that strip,
+and the client tests draw from them. Capture again when the Account's shapes move — the checkout is
+read, never written, and the stand-in takes a free port, never 4820:
+
+```bash
+cd face && FACE_ACCOUNT_SEAT_DIR=$HOME/buyer-agent-demo npx tsx scripts/capture-account-fixtures.ts
+```
+
+A read the Account does not answer `ok: true` stops the capture before any file is written; after a
+capture, `npm test` says which view moved.
+
+**The smoke** — `tests/account-graft-smoke.test.ts` is the canary for the Account's reads moving
+under the face, as `account-seat-smoke` is for its seat. It starts the stand-in on a free port,
+boots a face on a scratch home — AKShare and the seat row off, so no seat process starts and
+nothing lands under `~/.buyer-agent-demo` — with `FACE_ACCOUNT_URL` at it, registers the proxy and
+the seat route as `main.ts` does, and asks the face's own port: `/data/account` answers 200 with
+`ok` and its venues; `/data/account/explore` lists items; `explore?force=1` is refused 400 and never
+asked of the Account; `/data/account/stream` is `text/event-stream` with a named frame carrying JSON
+within 5 seconds; `/data/seat.json` reads the Account reachable. Skipped unless both variables are
+set; run it, and the seat smoke, after pulling the checkout:
+
+```bash
+cd face && FACE_SMOKE=1 FACE_ACCOUNT_SEAT_DIR=$HOME/buyer-agent-demo npx tsx --test tests/account-graft-smoke.test.ts
+```
 
 ## Channels (src/channels.ts + src/roster.ts + the list's groups and a channel's page)
 
@@ -1787,8 +1916,8 @@ results (its `client/js/wire/render.js`, DOM-built, deleted), ported to strings:
 market_snapshot as a table sorted by the change against the previous close with the sign always
 printed, screen/positions/orders/earnings/corp_actions as tables of their first eight columns
 (deltas signed and coloured), breadth/account as stat tiles or a key-value list (Alpaca's decimal
-strings read as numbers), daily_bars as the Market page's close chart (the old crosshair and
-volume strip are not ported), calendar as its days. Only an `mcp__alpaca-kit__<tool>` result
+strings read as numbers), daily_bars as a close chart (`chartSvg`, now drawn for this tool result
+alone; the old crosshair and volume strip are not ported), calendar as its days. Only an `mcp__alpaca-kit__<tool>` result
 whose payload parses with `ok: true` is dressed — another server's tool of the same name, an
 error result, `ok: false` or garbage keep the raw `<pre>`. What holds either way is the host's
 side: dsh spills a tool result over its inline budget into head + tail with an
@@ -1806,10 +1935,10 @@ complete text is stamped `Partial`.
 ```bash
 npm test                  # offline unit tests - no keys, no network, no port
 npm run typecheck         # strict tsc against the pinned .d.ts (skipLibCheck: false) - the contract test
-FACE_SMOKE=1 npm test     # + the 17 isolated real boots; local stubs, no external model calls
+FACE_SMOKE=1 npm test     # + the 18 isolated real boots; local stubs, no external model calls
 ```
 
-Offline, `npm test` skips the 17 real boots listed below; `FACE_SMOKE=1` runs
+Offline, `npm test` skips the 18 real boots listed below; `FACE_SMOKE=1` runs
 them too. The typecheck includes the dependencies' own `.d.ts`, so a green one
 means the face compiles against the installed dsh, not just against itself.
 
@@ -1828,6 +1957,7 @@ and `node --test` gives each file its own:
 | `order-gate-smoke.test.ts` | Gate 2's POSITIVE path: an approved stand-in order dispatches, a rejected one does not; then the same through the real `$events` channel |
 | `order-gate-midboot-smoke.test.ts` | Gate 2 armed while `boot()` is still pending: a slow fixture row holds the boot open while an order stand-in registers, and with `bootFace` unresolved and unary `/api` already serving, the order call is HELD with `approval/asked` logged and its body not run, an agentless call is denied by the listener, a marked tool the gate cannot name is denied by the guard alone; once the boot is released the held card reaches the first tab and `allowed-once` dispatches exactly once; a restart of the real `approval` row re-arms the listener once |
 | `account-seat-smoke.test.ts` | the Account seat against the Account's own stand-in (skipped unless `FACE_ACCOUNT_SEAT_DIR` names an installed checkout): the seat's 35 tools and exactly its nine real-account writes gated, a read as the admitted seat, a seat order rejected at the face's card never reaching the seat, the same order allowed once answered by the stand-in with a card, a batch answered leg by leg with cards, and `/data/seat.json` reading that standing with the Account's ISO expiry as milliseconds |
+| `account-graft-smoke.test.ts` | the Account's reads through the face's proxy against the Account's own stand-in (skipped unless `FACE_ACCOUNT_SEAT_DIR` names an installed checkout; "The Account in the face"): `/data/account` 200 with `ok` and its venues, `/data/account/explore` listing items, `explore?force=1` refused 400 without asking the Account, `/data/account/stream` an event stream whose first named frame carries JSON within 5 s, and `/data/seat.json` reading the Account reachable through the proxy's reader |
 | `gravit-client-smoke.test.ts` | the new page on a real boot: `/` with its title and script, the modules under `/client` with their types (Markets' `js/wire/market-quotes.js` and `js/host/markets.js` among them), the old `chat.js` gone and `/market` and `/account` answering 404; the host layer (`client/js/host/live.js` over the page's own wire) listing a session just created and opening it (live, so a follow) into a loaded window with a clean status line; a bare `bootFace` mounts no `/data` route, which the list tolerates |
 | `client-mux-smoke.test.ts` | the page's own `client/js/wire/api.js` and `client/js/wire/mapper.js`, unmodified, against the host: ready, calls, emits, the control baseline, a follow's snapshot and tail, an approval answered and one rejected, a second tab's `cancel` and its refused late answer, Stop withdrawing a gate, a question answered, a gate replayed to a late tab, the non-activating page and projections reads |
 | `askuser-noclient-smoke.test.ts` | with no browser connected, an agent's question BLOCKS (parked for the next client); an agentless one is refused `NO_PROVIDER` |
