@@ -516,5 +516,16 @@ before it wrote anything, and dispatched again on fable on the operator's word, 
 44. Final wave, M5's check: the Account's `stPrice` (`ui/stream.js`) also leads a perpetual with the
     middle, then the mark, and ignores zero or negative figures and a crossed book (its `ttLiveFor`
     drops non-live frames before that); ours takes the middle only where a frame carries no last
-    trade — stage 2, with the
-    market's kind in the reducer (~5 lines), beside the trailing-read flag (26).
+    trade — stage 2, with the market's kind in the reducer (~5 lines), beside the trailing-read
+    flag (26).
+
+## The final tree
+
+- HEAD `9f1885a` (46 commits over main `0481ee2`), the tree clean.
+- `cd face && npm test` 1152 tests, 1134 pass, 18 skipped; `npm run typecheck` clean.
+- `cd face && FACE_SMOKE=1 FACE_ACCOUNT_SEAT_DIR=~/buyer-agent-demo npm test` on 2026-10-23: 1152 / 1152,
+  none skipped, no stand-in home left under the OS tmpdir.
+- `python -m pytest` at the repo root: 400 passed (alpaca_kit is untouched this stage; it leaves in
+  stage 3).
+- The final whole-branch review ran on the Fable model at the operator's word; its one Important and
+  the four Minors ruled into the wave are fixed above; the rest are the deferred minors 42–44.
