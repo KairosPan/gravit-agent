@@ -659,8 +659,9 @@ test('a receipt in a conversation reloads the account', async () => {
   store.timers.clear();
 });
 
-// spec 2026-10-20 §6.3: the seat's standing is read on entering Venues, past the cache on Refresh there and after a seat receipt
-test('entering Venues reads /data/seat.json; Refresh there reads it fresh; a seat receipt reloads it fresh and not the account', async () => {
+// spec 2026-10-20 §6.3: the seat's standing is read on entering Venues, past the cache on Refresh there and after a seat receipt;
+// spec 2026-10-22 §6.2: the Account's page is read after a seat receipt too
+test("entering Venues reads /data/seat.json; Refresh there reads it fresh; a seat receipt reloads it and the Account's page fresh", async () => {
   const f = fakeWindow({ hash: '#/account/venues', storage: memoryStorage() });
   const h = accountHost({ rows: [row('s1', { agentAvailable: true })] });
   const store = bootAccount(f, h);
@@ -682,7 +683,8 @@ test('entering Venues reads /data/seat.json; Refresh there reads it fresh; a sea
   await settle();
   assert.equal(seatReads().length, seatBefore + 1, 'a seat receipt reloads the seat');
   assert.equal(seatReads().at(-1), '/data/seat.json?fresh=1');
-  assert.equal(h.accountReads(), accountBefore, "and not the Account's page");
+  assert.equal(h.accountReads(), accountBefore + 1, "and the Account's page");
+  assert.equal(h.reads.filter(isPage).at(-1), '/data/account?fresh=1', 'past the cache');
   store.timers.clear();
 });
 

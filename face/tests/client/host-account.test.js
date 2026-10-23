@@ -215,7 +215,7 @@ test('after an unrecognised page the recognised page reads the lens again, then 
   const unrecognised = { ...page({ totalUsd: 0 }), connectLive: undefined };   // its paper venues kept
   const r = rig({
     json: {
-      '/data/account': inTurn([page({ totalUsd: 0 }), unrecognised, page({ totalUsd: 0 })]),
+      '/data/account': inTurn([page({ totalUsd: 0 }), unrecognised, page({ totalUsd: 0 }), page({ totalUsd: 0 })]),
       '/data/account/holdings?cost=1': fx('holdings'),
       '/data/account/holdings?cost=1&paper=1': fx('holdings-paper'),
       '/data/account/history': path => Promise.resolve(path.includes('&paper=1') ? fx('history-paper') : fx('history')),
@@ -251,6 +251,7 @@ test('after an unrecognised page the recognised page reads the lens again, then 
   r.reads.length = 0;
   await r.account.load();
   await settle();
+  assert.equal(r.a().status, 'ready', 'a recognised page landed');
   assert.deepEqual(r.reads, ['/data/account']);
 });
 

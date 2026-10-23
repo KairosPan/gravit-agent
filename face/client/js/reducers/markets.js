@@ -77,6 +77,7 @@ export const reducers = {
       accountQuotes: {
         ...s.markets.accountQuotes,
         [key]: {
+          // its last trade, else the middle: the Account's page's own order (its ui/stream.js stPrice), but for a perpetual, middle first there
           price: last ?? (bid !== null && ask !== null ? (bid + ask) / 2 : null), bid, ask,
           quoteAt: text(data.priceAt) ?? text(data.at), quoteFrom: text(data.from),
           changePct24h: was?.changePct24h ?? null, volumeUsd24h: was?.volumeUsd24h ?? null, streamed: true,

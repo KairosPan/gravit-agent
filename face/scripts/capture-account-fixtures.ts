@@ -1,12 +1,13 @@
 /** Captures the Account's read answers once, as the fixtures the graft's client tests read
  * (`tests/fixtures/account/`, held to what the views read by `tests/account-fixtures.test.ts`):
  * starts the Account's own stand-in — the real Account over simulated venues, no network, no real
- * money, a fresh temporary home — as `tests/account-seat-smoke.test.ts` starts it, reads each route
- * with a bare loopback `fetch` (the Account's fence answers a request that carries no Origin),
- * drops every `native` and `icon` key, cuts every array to its first 12 entries, writes each answer
- * as pretty JSON, keeps the push channel's first ten frames (or the whole ones heard in 20 s) in
- * `stream-frames.txt` — verbatim but for the same two keys dropped from each frame's `data:` (its
- * arrays whole) — and stops the stand-in.
+ * money, a fresh temporary home — through the smokes' own helper (`tests/helpers/standin.ts`, which
+ * removes that home after the stop only when it is a `ui-standin-` directory directly under the
+ * tmpdir), reads each route with a bare loopback `fetch` (the Account's fence answers a request
+ * that carries no Origin), drops every `native` and `icon` key, cuts every array to its first 12
+ * entries, writes each answer as pretty JSON, keeps the push channel's first ten frames (or the
+ * whole ones heard in 20 s) in `stream-frames.txt` — verbatim but for the same two keys dropped
+ * from each frame's `data:` (its arrays whole) — and stops the stand-in.
  *
  *     cd face && FACE_ACCOUNT_SEAT_DIR=~/buyer-agent-demo npx tsx scripts/capture-account-fixtures.ts
  *
@@ -15,18 +16,14 @@
  * the real Account's 4820. Takes no arguments; prints each file it wrote. A read the Account does
  * not answer `ok: true` stops the capture before any file is written.
  */
-import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { rm } from "node:fs/promises";
-import { createServer } from "node:net";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { seatDir } from "../src/account-seat.ts";
+import { freePort, standinPaths, startStandin, stopStandin } from "../tests/helpers/standin.ts";
 
 const DIR = seatDir();
-const CLI = join(DIR, "node_modules", "tsx", "dist", "cli.mjs");
-const STANDIN = join(DIR, "test", "standin", "ui-standin.ts");
+const { cli: CLI, script: STANDIN } = standinPaths(DIR);
 const OUT = fileURLToPath(new URL("../tests/fixtures/account/", import.meta.url));
 /** How many entries of every array a JSON fixture keeps (a frame's arrays stay whole). */
 const KEEP = 12;
@@ -36,9 +33,7 @@ const STRIPPED = new Set(["native", "icon"]);
 const STREAM_CLIENT = "face-fixture00000000000000";
 const STREAM_FRAMES = 10;
 const STREAM_MS = 20_000;
-const START_MS = 90_000;
 const READ_MS = 60_000;
-const STOP_MS = 10_000;
 
 /** The fixtures, by file name, and the read each one is; `candles` and `market` follow from `explore-all`. */
 const READS: readonly (readonly [name: string, path: string])[] = [
@@ -55,46 +50,7 @@ const READS: readonly (readonly [name: string, path: string])[] = [
   ["compare", "/api/account/compare?base=ETH&side=buy"],
 ];
 
-interface Standin { url: string; home: string; child: ChildProcess }
 interface ExploreLeg { venue: string; symbol: string; connected?: boolean }
-
-const freePort = (): Promise<number> => new Promise((resolve, reject) => {
-  const server = createServer();
-  server.listen(0, "127.0.0.1", () => {
-    const address = server.address();
-    server.close(() => (typeof address === "object" && address !== null ? resolve(address.port) : reject(new Error("no port"))));
-  });
-});
-
-/** Start the Account's stand-in on `port` and wait for its page and home lines. */
-function startStandin(port: number): Promise<Standin> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [CLI, STANDIN, "--port", String(port), "--no-desk"], { cwd: DIR, stdio: ["ignore", "pipe", "pipe"] });
-    let out = "";
-    const timer = setTimeout(() => { child.kill("SIGINT"); reject(new Error(`the stand-in printed no page line in ${START_MS / 1000} s:\n${out}`)); }, START_MS);
-    const look = (): void => {
-      const url = /^\s*page\s+(\S+)/m.exec(out)?.[1];
-      const home = /^\s*home\s+(\S+)/m.exec(out)?.[1];
-      if (url !== undefined && home !== undefined) { clearTimeout(timer); resolve({ url, home, child }); }
-    };
-    child.stdout.on("data", (chunk: Buffer) => { out += chunk.toString(); look(); });
-    child.stderr.on("data", (chunk: Buffer) => { out += chunk.toString(); });
-    child.on("exit", (code) => { clearTimeout(timer); reject(new Error(`the stand-in exited with ${code}:\n${out}`)); });
-  });
-}
-
-/** Stop the stand-in as Ctrl-C does (killed if still up after {@link STOP_MS}) and remove the temporary home it kept. */
-async function stopStandin(standin: Standin): Promise<void> {
-  const { child } = standin;
-  if (child.exitCode === null && child.signalCode === null) {
-    const exited = new Promise<void>((resolve) => { child.once("exit", () => resolve()); });
-    child.kill("SIGINT");
-    const timer = setTimeout(() => child.kill("SIGKILL"), STOP_MS);
-    await exited;
-    clearTimeout(timer);
-  }
-  if (standin.home.startsWith(join(tmpdir(), "ui-standin-"))) await rm(standin.home, { recursive: true, force: true });
-}
 
 /** One read, its body as the Account answered it; anything but `ok: true` stops the capture. */
 async function read(base: string, path: string): Promise<unknown> {
@@ -180,7 +136,7 @@ async function capture(base: string): Promise<{ answers: Map<string, unknown>; f
 for (const [path, fix] of [[CLI, "run npm ci in the checkout"], [STANDIN, "not the Account's checkout"]] as const) {
   if (!existsSync(path)) throw new Error(`${path} is missing: ${fix} (FACE_ACCOUNT_SEAT_DIR names the checkout)`);
 }
-const standin = await startStandin(await freePort());
+const standin = await startStandin(await freePort(), DIR);
 const { answers, frames } = await capture(standin.url).finally(() => stopStandin(standin));
 mkdirSync(OUT, { recursive: true });
 for (const [name, body] of answers) {

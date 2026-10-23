@@ -1,7 +1,8 @@
-/** The Account's own stand-in for the smokes that run against it (`account-seat-smoke`, `account-graft-smoke`):
- * Linqi's `test/standin/ui-standin.ts` from the installed checkout `FACE_ACCOUNT_SEAT_DIR` names — the real
- * Account over simulated venues, no network, no real money — started on a free loopback port with `--no-desk`,
- * in the fresh temporary home it makes for itself (`<tmpdir>/ui-standin-XXXXXX`), and stopped as Ctrl-C stops it.
+/** The Account's own stand-in for the smokes that run against it (`account-seat-smoke`, `account-graft-smoke`) and
+ * for `scripts/capture-account-fixtures.ts`: Linqi's `test/standin/ui-standin.ts` from the installed checkout
+ * `FACE_ACCOUNT_SEAT_DIR` names (or the one a caller hands {@link startStandin}) — the real Account over simulated
+ * venues, no network, no real money — started on a free loopback port with `--no-desk`, in the fresh temporary
+ * home it makes for itself (`<tmpdir>/ui-standin-XXXXXX`), and stopped as Ctrl-C stops it.
  *
  * The checkout is read, never written: the stand-in runs from it with its own tsx, never `npx`. It never takes
  * 4820, the real Account's port (it refuses that port itself; {@link startStandin} refuses it first). Its home is
@@ -17,9 +18,13 @@ import { basename, dirname, join, resolve } from "node:path";
 
 /** The installed checkout of linqizhe07/buyer-agent-demo, as the environment names it ("" when unset). */
 export const STANDIN_DIR = process.env.FACE_ACCOUNT_SEAT_DIR ?? "";
+/** Under the checkout `dir`: its own tsx, which runs the stand-in (the Account's devDependency), and the stand-in. */
+export function standinPaths(dir: string): { cli: string; script: string } {
+  return { cli: join(dir, "node_modules", "tsx", "dist", "cli.mjs"), script: join(dir, "test", "standin", "ui-standin.ts") };
+}
 /** The checkout's own tsx, which runs the stand-in (the Account's devDependency). */
-export const STANDIN_CLI = join(STANDIN_DIR, "node_modules", "tsx", "dist", "cli.mjs");
-export const STANDIN_SCRIPT = join(STANDIN_DIR, "test", "standin", "ui-standin.ts");
+export const STANDIN_CLI = standinPaths(STANDIN_DIR).cli;
+export const STANDIN_SCRIPT = standinPaths(STANDIN_DIR).script;
 /** The real Account's port: no stand-in is ever started there. */
 export const REAL_ACCOUNT_PORT = 4820;
 const START_MS = 90_000;
@@ -46,11 +51,13 @@ export const freePort = (): Promise<number> => new Promise((resolvePort, reject)
 /** A started stand-in: its page's URL, its temporary home, the pairing code it printed, the process, and what it said. */
 export interface Standin { url: string; home: string; code: string; child: ChildProcess; log: () => string }
 
-/** Start the stand-in on `port` and wait for its page, pairing code and home lines (one write, at once). */
-export function startStandin(port: number): Promise<Standin> {
+/** Start the stand-in from the checkout `dir` (`FACE_ACCOUNT_SEAT_DIR`'s unless given) on `port` and wait for its page,
+ * pairing code and home lines (one write, at once). */
+export function startStandin(port: number, dir = STANDIN_DIR): Promise<Standin> {
   if (port === REAL_ACCOUNT_PORT) return Promise.reject(new Error(`port ${REAL_ACCOUNT_PORT} is the real Account's: no stand-in starts there`));
+  const { cli, script } = standinPaths(dir);
   return new Promise((resolveStandin, reject) => {
-    const child = spawn(process.execPath, [STANDIN_CLI, STANDIN_SCRIPT, "--port", String(port), "--no-desk"], { cwd: STANDIN_DIR, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [cli, script, "--port", String(port), "--no-desk"], { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
     let out = "";
     const log = (): string => out;
     const timer = setTimeout(() => { child.kill("SIGINT"); reject(new Error(`the stand-in printed no page line in ${START_MS / 1000} s:\n${out}`)); }, START_MS);

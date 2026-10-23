@@ -206,8 +206,9 @@ export function boot(win, host = {}) {
   // the Account seat's standing (spec 2026-10-20 §6.3): read on entering Venues or Agents, on Refresh, right after a seat receipt
   // and on a card's event
   const seat = startSeat({ store, getJson, now });
-  // a receipt from the Account seat reloads the seat's standing; an Alpaca fill reloads the account
-  const live = startLive({ store, openMux: host.openMux ?? wireOpenMux, call, mapFrame, getJson, timers, now, onReceipt: m => { if (m?.data?.seat) void seat.load({ fresh: true }); else void account.load({ fresh: true }); } });
+  // a receipt reloads the Account's page past the cache (an Alpaca fill, a seat write), and one from the Account seat the seat's
+  // standing too
+  const live = startLive({ store, openMux: host.openMux ?? wireOpenMux, call, mapFrame, getJson, timers, now, onReceipt: m => { if (m?.data?.seat) void seat.load({ fresh: true }); void account.load({ fresh: true }); } });
   // answers go through the live layer, which settles the gate it delivered once the answer wins
   const actions = makeActions({ store, call, answerGate: (eventId, value) => live.answer(eventId, value), postJson });
   // Markets: the Account's reads on the app's timers, a market's page followed on the stream; the face's live quotes and symbol

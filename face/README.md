@@ -710,8 +710,8 @@ chart, no venues.
 The Account's page (`/data/account`) is read at boot — the rail's line under Account is its
 leading figure once it answers (`· Paper` when Paper leads), beside a badge counting the cards
 waiting — on entering Account, every 20 seconds while Account is on screen in a visible tab (80
-while the tab's stream is open), on **Refresh** and right after a streamed receipt that is not the
-seat's (those two `?fresh=1`, past the proxy's 15 seconds), and on the stream's events. The head:
+while the tab's stream is open), on **Refresh** and right after a streamed receipt, the seat's
+too (those two `?fresh=1`, past the proxy's 15 seconds), and on the stream's events. The head:
 `Account`, the Account's mode and writes as chips (`Guard` or `Beast`; `Trading on · $250 a move`
 or `Read-only`), read only — changing either stays on the Account's page — then Refresh and
 Settings; the Account's refusal sentence, when it gave one, as a muted line under it. Four tabs,
@@ -844,7 +844,7 @@ reader, so the seat box and the Account screen share one upstream read within th
 
 | Read | When |
 |---|---|
-| `/data/account` | at boot; on entering Account (past the cache when it opens on Cards) and on entering Cards (past the cache); every 20 s while Account is on screen in a visible tab, 80 s while the tab's stream is open; on Refresh and after a receipt that is not the seat's (`?fresh=1`); on the stream's events |
+| `/data/account` | at boot; on entering Account (past the cache when it opens on Cards) and on entering Cards (past the cache); every 20 s while Account is on screen in a visible tab, 80 s while the tab's stream is open; on Refresh and after a receipt, the seat's too (`?fresh=1`); on the stream's events |
 | `explore` | the tab on screen, at once and every 20 s while Markets is on screen in a visible tab (`limit=200`, a kind's tab with its `tab`); the search once the box has been quiet for 300 ms (`q`, `limit=200`); each old `us:`/`crypto:` star once per boot (`q`, `limit=12`) |
 | `quotes` | every 5 s while Markets is on screen in a visible tab: the drawn rows' most traded connected lines, twelve a call, none while one is out; on a market's page its own market's line, from the page's own view when that market is no row of the tab |
 | `candles`, `compare` | on opening a market's page; `candles` again on a range |

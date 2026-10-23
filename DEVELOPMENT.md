@@ -1637,7 +1637,7 @@ box has been quiet for 300 ms; each old `us:`/`crypto:` star `GET
 market's page `GET /data/account/candles?venue=&symbol=&range=` for its range and, for a coin, a
 perpetual or a stock, `GET /data/account/compare?base=<base>&side=buy`. Account: `GET
 /data/account` at boot, on entering Account, every 20 s while it is on screen in a visible tab
-(80 s while the stream is open), on Refresh and right after a receipt that is not the seat's
+(80 s while the stream is open), on Refresh and right after a receipt, the seat's too
 (those two `?fresh=1`); `holdings?cost=1` — and while the page, one the face recognises, names a
 paper venue its paper lens `holdings?cost=1&paper=1` beside it — on entering Portfolio, on Refresh,
 on a market's page, and when a page naming a paper venue lands with the lens never read or after a
@@ -1712,7 +1712,7 @@ merge?}`, ids minted from the host's own: `e<seq>` for a record, `t<callId>` for
 | `room-line` | a system line, `roundEndLine(view)` |
 | `subagent-message` | a system line, `Report from <child>: …` (no link yet) |
 | `card` phase `call` | `kind:"tool"`, text = the mapper's title (a `bash` command) or the tool name, `data.args` from the `calls` map |
-| `card` phase `result` | the same id with `merge: true` — `data.result`, `data.isError` fill the row, and the call's `name` and `args` when its `tool/call` was seen (the renderer dresses alpaca-kit's results by name); for an order tool (`place_order`, `cancel_order`, raw or `mcp__<server>__<raw>`) a second message follows: `kind:"receipt"` (`Order accepted · <side qty symbol · type> · <order id>`) or, on error, `kind:"refusal"` with the result text; for a seat write (the twelve, raw or minted) `seatLift` follows instead: `Card raised on the Account page · card-… · answer it there` (pending), `Order placed` / `Order canceled · <seat line> · ord-… [· paper]`, `Batch · n of m legs placed · k cards raised on the Account page · j refused` (in Guard the Account answers a leg with a card of its own, which is not a fill), or `kind:"refusal"` with `<code> · <message>` in the Account's words (dsh's `Error: ` prefix on a failed call's text stripped first) — each flagged `data.seat`, which routes the app's reload to the seat; a seat read lifts nothing |
+| `card` phase `result` | the same id with `merge: true` — `data.result`, `data.isError` fill the row, and the call's `name` and `args` when its `tool/call` was seen (the renderer dresses alpaca-kit's results by name); for an order tool (`place_order`, `cancel_order`, raw or `mcp__<server>__<raw>`) a second message follows: `kind:"receipt"` (`Order accepted · <side qty symbol · type> · <order id>`) or, on error, `kind:"refusal"` with the result text; for a seat write (the twelve, raw or minted) `seatLift` follows instead: `Card raised on the Account page · card-… · answer it there` (pending), `Order placed` / `Order canceled · <seat line> · ord-… [· paper]`, `Batch · n of m legs placed · k cards raised on the Account page · j refused` (in Guard the Account answers a leg with a card of its own, which is not a fill), or `kind:"refusal"` with `<code> · <message>` in the Account's words (dsh's `Error: ` prefix on a failed call's text stripped first) — each flagged `data.seat`, which adds the seat's standing to the app's reload of the page; a seat read lifts nothing |
 | `approval` | `kind:"approval"` (tool name, `reason`, `displayReason`) — or, for an order tool, `kind:"card"`: `Your call: <order line>`, venue `Alpaca paper`; for a seat tool (the twelve under any server, or anything under the face's own `mcp__account__` prefix, which the host cards) `Your call: <seat line>` with the line's venue as the chip, or `Account seat` when the tool names none. The title is made from the host's OWN reason line and nothing else — `reasonArgs` parses Gate 2's `<prefix> - <tool>: key=value …` back pair by pair (scalars coerced, `{k=v}` and `[1: …; 2: …]` read, a JSON-quoted value read as one value), and titles nothing when the line names another tool or no pair — never from a `tool/call` frame: the approval waterfall and the session's follow stream are two streams on one socket, so the call can reach the page after the gate, and a later call under the same id must never change a card the operator may be reading (the security reviews of 2026-10-21) |
 | `question` | `kind:"question"` with the batch's questions |
 
@@ -2609,7 +2609,7 @@ through `tsx`:
   visible tab and 80 s while the stream is open, each tab's reads on entering it, Refresh, the
   stream opened at boot, closed while the tab is hidden and its events the reads they name, a
   range's curve, a venue's Details drawer and Escape back to its opener, Export CSV, a receipt
-  reloading the page and a seat receipt the seat, Open the Statement from a market's page — the
+  reloading the page and a seat receipt the seat too, Open the Statement from a market's page — the
   account host answering with the stand-in's fixtures), `market-view` and `account-view` (the pure
   views over the stand-in's fixtures and hand-built edges: the tabs, prices by kind, the source
   words and their age, the lines and the best, the Account's rows beside the cn rows, the three
