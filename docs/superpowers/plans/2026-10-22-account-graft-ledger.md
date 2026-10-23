@@ -209,8 +209,9 @@ handed forward — DEVELOPMENT's 30 s seat cache to Task 13, and `gravit-client-
     instead of an unreadable page. (As built: the screens draw `Account unreadable` where the
     figures would be; the seat box reads `/data/seat.json`, whose reduction is total — for a body
     that does not parse the route carries the code `unreadable`, which the box draws as
-    `<host> · not reachable`, and a moved shape that parses turns the box into blanks; the box
-    never draws the word itself.)
+    `<host> · not reachable`; for a reply that parses but has moved shape the reduction falls to
+    its defaults, which the box draws as `<host> · reachable`, `Read-only` and
+    `Gravit · not on the account`; the box never draws the word itself.)
 44. **Task 13 (review):** deferred minor 37 is fixed in code too (spec §6.1: a market's page polls
     quotes for a market the Account does not stream) — when the page's key is not among the tab's
     rows, the host derives its pair from the page's own view (`pageOf`'s item through
@@ -270,7 +271,7 @@ handed forward — DEVELOPMENT's 30 s seat cache to Task 13, and `gravit-client-
 | 10 The Markets host layer and slices | f351504; fix round 1 be1a43d | spec ✅ against the amended contract, one Important (the 240 cap on `pairs`); round 1 addressed three, re-review clean | 1133 / 1116 / 17 |
 | 11 The Markets screen and the chart | 3c4e69e; before review 90b9c54; fix round 1 310a23f | spec ✅, quality ❌ (one Important, eight Minor); round 1 addressed nine, re-review clean | 1128 / 1111 / 17 |
 | 12 The wiring, the A-share line, the smoke | a84d65b, 0f9855f; fix round 1 e81eed7 | spec ✅, quality ✅, four Minor and two cross-task gaps ruled Important; round 1 addressed three, re-review clean | 1147 / 1129 / 18; `FACE_SMOKE=1` with `FACE_ACCOUNT_SEAT_DIR` 1145 / 1145 at 0f9855f, not re-run after e81eed7 (neither the smoke nor the helper changed) |
-| 13 The documents for stage 1 | c6608eb (three tidies: the seat's 15 s comment, the stream's unread `now`, the seat stamp's comment), 08ea070 (the documents and this ledger), 8f42306 (CLAUDE.md's two other rows, Ruling 42); fix round 1 e86cad4 (code, Rulings 43–44), bef028d (documents), ab2ffe2 (this ledger); fix round 2 c54e6b1 (code), a32856f (documents), and the commit that adds these lines | spec ✅, quality ❌ — 1 Critical (an unrecognised page documented as `Account unreadable`, which the host never drew: it kept the last page as a failure), 1 Important (this ledger lacked Ruling 42 and 8f42306), 5 Minor (CLAUDE.md's `face_data.py`; the iFinD line on Venues, drawn only once the wire has quoted an A share; the curve read after some holdings reads, not all; §4.2's stream routes over `ACCOUNT_QUERY`; a page's own pair off the tab's rows, deferred minor 37); round 1 addressed the seven, the Critical and Minor 5 in code. Re-review of round 1: C1, I1, M1, M3–M5 addressed, the Open orders extension fair; M2 partial (a cn page alone does not keep the A-share line); N1, Important by effect (an unrecognised page naming paper venues read the paper lens and the real curve, and the recognised page after it never re-read: real money's change and curve under the Paper figure); N2, Minor (You hold fell back to the real book under such a page); N3, Minor (Ruling 43's as-built note named the wrong word). Round 2 fixed the four: `hasPaper` gated on `pageOk`, You hold `Account unreadable` too, the README's condition, the note; re-review to come | 1150 / 1132 / 18; typecheck clean |
+| 13 The documents for stage 1 | c6608eb (three tidies: the seat's 15 s comment, the stream's unread `now`, the seat stamp's comment), 08ea070 (the documents and this ledger), 8f42306 (CLAUDE.md's two other rows, Ruling 42); fix round 1 e86cad4 (code, Rulings 43–44), bef028d (documents), ab2ffe2 (this ledger); fix round 2 c54e6b1 (code), a32856f (documents), 82995c5 (this ledger); fix round 3 6c07a5a (code), 034f65d (documents), and the commit that adds these lines | spec ✅, quality ❌ — 1 Critical (an unrecognised page documented as `Account unreadable`, which the host never drew: it kept the last page as a failure), 1 Important (this ledger lacked Ruling 42 and 8f42306), 5 Minor (CLAUDE.md's `face_data.py`; the iFinD line on Venues, drawn only once the wire has quoted an A share; the curve read after some holdings reads, not all; §4.2's stream routes over `ACCOUNT_QUERY`; a page's own pair off the tab's rows, deferred minor 37); round 1 addressed the seven, the Critical and Minor 5 in code. Re-review of round 1: C1, I1, M1, M3–M5 addressed, the Open orders extension fair; M2 partial (a cn page alone does not keep the A-share line); N1, Important by effect (an unrecognised page naming paper venues read the paper lens and the real curve, and the recognised page after it never re-read: real money's change and curve under the Paper figure); N2, Minor (You hold fell back to the real book under such a page); N3, Minor (Ruling 43's as-built note named the wrong word). Round 2 fixed the four: `hasPaper` gated on `pageOk`, You hold `Account unreadable` too, the README's condition, the note. Re-review of round 2: N2, M2 addressed; N1 partial (warm: with the lens read before the unrecognised page, a snapshot or a Portfolio entry under it still left real money's change and curve under the Paper figure); N3 partial (the clause added to the note, a moved shape turning the box into blanks, false); B1, Important by effect (after c54e6b1 a money event under an unrecognised page read no lens and the recognised page after it read nothing, so Paper drew the total from before the event as current). Round 3: the recognised page after an unrecognised one reads the lens again, past the face's cache, then the curve; the note says what the box draws; re-review to come | 1152 / 1134 / 18; typecheck clean |
 
 ## Notes
 
@@ -305,8 +306,18 @@ handed forward — DEVELOPMENT's 30 s seat cache to Task 13, and `gravit-client-
   page), and the recognised page after it found the lens read and never read the curve again. The
   gate is `pageOk` now, as `worthOf`'s is; and You hold reads `Account unreadable` under such a
   page, as Open orders do, never the real book in its place (c54e6b1).
+- Task 13, round 3: the gate closed the cold path only. When the lens had been read before the
+  unrecognised page, the recognised page after it still read nothing, because its landing read the
+  lens only when the lens had no data. Two things followed: a curve chosen under the unrecognised
+  page stayed real money's, and after c54e6b1 a money event under it left the lens from before the
+  event. The landing now also reads the holdings, then the curve, when the page before it was one
+  `pageOk` refused. It reads them past the face's cache, which keeps a holdings answer 8 s and
+  inside a burst would hand back the lens from before the event; the round-2 pin's two holdings
+  reads gain `&fresh=1` with it. Each of the two new pins was seen to fail first, the second also
+  against a plain re-read (6c07a5a). The note under Ruling 43 now says what the seat box draws for
+  a moved shape that parses, and DEVELOPMENT's R33 drops the same false "blanks".
 - Task 13: FACE_SMOKE was not re-run in this task; the documents cite 1145/1145 at 0f9855f and
-  count the five offline tests added since.
+  count the seven offline tests added since.
 
 ## Deferred minors
 
