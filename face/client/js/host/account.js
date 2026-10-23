@@ -3,7 +3,7 @@
 // history curve, the statement and the agents — each kind one flight at a time; the page at the Account's own cadence (every
 // 20 s on screen, 80 s while the stream is open); and the stream's account events as the reads they name, past the face's
 // cache. The views over what lands are account-view.js's.
-import { worthOf } from './account-view.js';
+import { pageOk, worthOf } from './account-view.js';
 
 export const ACCOUNT_POLL_MS = 20_000, ACCOUNT_POLL_STREAM_MS = 80_000;
 
@@ -13,8 +13,9 @@ const MOVES = new Set(['order', 'fill', 'paper', 'balance', 'position']);
 // the Account's sentence when it refuses (`refusal.message`), else its error words — only when they are text
 const words = v => (typeof v === 'string' && v.trim() !== '' ? v : null);
 const messageOf = body => words(body?.refusal?.message) ?? words(body?.error);
-// a page that names a paper venue, whose lens (holdings?cost=1&paper=1) is worth reading
-const hasPaper = page => Array.isArray(page?.venues) && page.venues.some(v => v?.paper === true);
+// a page the face recognises that names a paper venue, whose lens (holdings?cost=1&paper=1) is worth reading: the venues of a
+// page it does not recognise lead no read, as they choose no curve (worthOf reads no such page either)
+const hasPaper = page => pageOk(page) && page.venues.some(v => v?.paper === true);
 // a read past the face's cache: the face's own flag, never forwarded
 const freshOf = path => `${path}${path.includes('?') ? '&' : '?'}fresh=1`;
 const nothing = () => {};
@@ -62,8 +63,8 @@ export function startAccount({ store, getJson, now = Date.now, schedule, cancelT
    *  recognise (`pageOk` refuses it: the Account moved its API) too, so the screen says `Account unreadable` and draws no
    *  figure from it, rather than an outage. A refusal (an `ok: false` body, on a 200 or not), any other non-2xx, an empty 2xx
    *  body or a rejection without one is a failure carrying the Account's sentence when it gave one; the last page stays. A
-   *  page naming a paper venue whose lens was never read reads the holdings at once, unless a loadAll is about to, and the
-   *  leading curve after them (the lens may have made Paper the lead). */
+   *  recognised page naming a paper venue whose lens was never read reads the holdings at once, unless a loadAll is about
+   *  to, and the leading curve after them (the lens may have made Paper the lead); an unrecognised page leads no read. */
   function load({ fresh = false } = {}) {
     return fly('page', '/data/account', {
       fresh,
@@ -77,8 +78,8 @@ export function startAccount({ store, getJson, now = Date.now, schedule, cancelT
     });
   }
 
-  /** holdings?cost=1 and, while the page names a paper venue, its paper lens beside it, in parallel; `fresh` past the
-   *  face's cache (`&fresh=1`), as the stream's events ask. */
+  /** holdings?cost=1 and, while the page — one the face recognises — names a paper venue, its paper lens beside it, in
+   *  parallel; `fresh` past the face's cache (`&fresh=1`), as the stream's events ask. */
   function loadHoldings({ fresh = false } = {}) {
     return Promise.all([
       fly('holdings', '/data/account/holdings?cost=1', { fresh, loading: 'holdingsLoading', land: landing('holdingsLoaded', 'holdingsFailed') }),

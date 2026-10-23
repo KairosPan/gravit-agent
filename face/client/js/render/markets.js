@@ -210,7 +210,7 @@ function accountPage(id, view, state, now) {
     ...view.held.positions.map(p => line('·', `${esc(`${p.venueName || p.venue} · ${[p.side, qtyWord(p.qty), p.symbol].filter(Boolean).join(' ')} · `)}` +
       `<span class="${tone(p.unrealizedUsd)}">${esc(signedMoney(p.unrealizedUsd))}</span>${p.paper ? ` ${tag('Paper')}` : ''}`)),
   ];
-  right.push(section('You hold', partBody(view.reads.held, held, 'You don’t hold any.', 'Holdings unavailable')));
+  right.push(section('You hold', partBody(view.reads.held, held, 'You don’t hold any.', view.reads.held.unreadable ? 'Account unreadable' : 'Holdings unavailable')));
   const orders = view.orders.map(o => line('·', esc(orderWords(o))));
   // nothing working once the page has answered: no section; a page the face does not recognise: unreadable, never loading
   if (orders.length || !view.reads.orders.answered || view.reads.orders.failed) {

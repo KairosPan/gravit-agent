@@ -491,6 +491,13 @@ test("each part of a market's page stands on its own read: Loading… until it a
   const moved = section(draw(R.accountLoaded(bare, { data: { ...fx('account'), venues: undefined }, at: NOW })), 'Open orders');
   assert.match(moved, /<p class="mk-empty">Account unreadable<\/p>/);
   assert.doesNotMatch(moved, /Loading…|Account unavailable/);
+  // and so is what is held, the holdings and the paper lens read or not: which lens leads is the page's to say, never the real
+  // book's in its place
+  const unread = R.accountLoaded(bare, { data: { ...fx('account'), venues: undefined }, at: NOW });
+  const heldUnder = section(draw(R.paperLoaded(R.holdingsLoaded(unread, { data: fx('holdings'), at: NOW }), { data: fx('holdings-paper'), at: NOW })), 'You hold');
+  assert.match(heldUnder, /<p class="mk-empty">Account unreadable<\/p>/);
+  assert.equal(linesOf(heldUnder).length, 0, 'no holding drawn under it');
+  assert.doesNotMatch(heldUnder, /You don’t hold any|Holdings unavailable|Loading…/);
 });
 
 test("a failed history read says so under the range seg — the Account's sentence, else History unavailable — and the closes kept for the range stay", () => {

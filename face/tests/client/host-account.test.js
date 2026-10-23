@@ -169,6 +169,41 @@ test('an unrecognised page lands and reads unreadable', async () => {
   assert.equal(r.a().data.totalUsd, 300);
 });
 
+// an unrecognised page that still names paper venues leads no read: no paper lens, and so no curve chosen without the page;
+// the recognised page after it — real money at zero, paper venues — reads the lens and the curve it leads to, Paper's, so a
+// Paper-led Portfolio never draws real money's change and curve under the Paper figure
+test('an unrecognised page naming paper venues reads no lens; the recognised page after it reads the lens and the paper curve', async () => {
+  const unrecognised = { ...page({ totalUsd: 0 }), connectLive: undefined };   // its paper venues kept
+  const r = rig({
+    json: {
+      '/data/account': inTurn([unrecognised, page({ totalUsd: 0 })]),
+      '/data/account/holdings?cost=1': fx('holdings'),
+      '/data/account/holdings?cost=1&paper=1': fx('holdings-paper'),
+      '/data/account/history': path => Promise.resolve(path.includes('&paper=1') ? fx('history-paper') : fx('history')),
+    },
+  });
+  await r.account.load();
+  await settle();
+  assert.equal(r.a().data, unrecognised, 'the unrecognised page landed');
+  assert.deepEqual(r.reads, ['/data/account'], 'no lens and no curve read for it');
+  assert.equal(r.a().paper.data, null);
+  await r.account.load();
+  await settle();
+  assert.deepEqual(r.reads, ['/data/account', '/data/account', '/data/account/holdings?cost=1', '/data/account/holdings?cost=1&paper=1', '/data/account/history?range=1d&paper=1']);
+  assert.equal(r.a().paper.status, 'ready');
+  assert.equal(r.a().history.data.paper, true, "the paper book's curve");
+  const html = renderAccountScreen({ ...r.store.get(), route: { screen: 'account', tab: 'portfolio' } }, Date.now());
+  assert.match(html, /\$25,400\.00/, 'Paper leads');
+  assert.match(html, /rebuilt/, "the paper curve's words");
+  assert.doesNotMatch(html, /\+\$208\.78/, "never real money's change under the Paper figure");
+  // a money event under an unrecognised page reads the real holdings alone, never the lens
+  const under = rig({ json: { '/data/account': unrecognised, '/data/account/holdings?cost=1': fx('holdings') } });
+  under.store.dispatch('accountLoaded', { data: unrecognised, at: 1 });
+  under.account.onStreamEvent({ type: 'fill', id: '4dababf8.8', data: {} });
+  await settle();
+  assert.deepEqual([...under.reads].sort(), ['/data/account/holdings?cost=1&fresh=1', '/data/account?fresh=1'].sort());
+});
+
 test('loadHoldings reads cost=1, and cost=1&paper=1 only when a paper venue is connected', async () => {
   const r = rig({
     json: {
