@@ -62,24 +62,32 @@ export function startAccount({ store, getJson, now = Date.now, schedule, cancelT
   /** The page, `?fresh=1` past the face's cache. Any 2xx answer that is not a refusal lands as the page — one the face does not
    *  recognise (`pageOk` refuses it: the Account moved its API) too, so the screen says `Account unreadable` and draws no
    *  figure from it, rather than an outage. A refusal (an `ok: false` body, on a 200 or not), any other non-2xx, an empty 2xx
-   *  body or a rejection without one is a failure carrying the Account's sentence when it gave one; the last page stays. A
-   *  recognised page naming a paper venue whose lens was never read reads the holdings at once, unless a loadAll is about
-   *  to, and the leading curve after them (the lens may have made Paper the lead); an unrecognised page leads no read. */
+   *  body or a rejection without one is a failure carrying the Account's sentence when it gave one; the last page stays. An
+   *  unrecognised page leads no read. A recognised page naming a paper venue reads the holdings at once — unless a loadAll is
+   *  about to — and the leading curve after them (the lens may have made Paper the lead) when the lens was never read, or
+   *  when the page before it was one the face did not recognise: under that page no lens was read, whatever moved the money,
+   *  and any curve read was chosen without the page. After such a page the holdings are read past the face's cache, which
+   *  may still keep the lens from before it. */
   function load({ fresh = false } = {}) {
     return fly('page', '/data/account', {
       fresh,
       loading: 'accountLoading',
       land: (body, refused) => {
         if (!refused && body && body.ok !== false) {
+          const held = store.get().account.data;
+          const afterUnread = held != null && !pageOk(held);
           store.dispatch('accountLoaded', { data: body, at: now() });
-          if (holdingsDue === 0 && hasPaper(body) && store.get().account.paper.data === null) void loadHoldings().then(() => loadHistory());
+          if (holdingsDue === 0 && hasPaper(body) && (afterUnread || store.get().account.paper.data === null)) {
+            void loadHoldings({ fresh: afterUnread }).then(() => loadHistory());
+          }
         } else store.dispatch('accountFailed', { at: now(), message: messageOf(body) });
       },
     });
   }
 
   /** holdings?cost=1 and, while the page — one the face recognises — names a paper venue, its paper lens beside it, in
-   *  parallel; `fresh` past the face's cache (`&fresh=1`), as the stream's events ask. */
+   *  parallel; `fresh` past the face's cache (`&fresh=1`), as the stream's events ask, and the page landing after one the
+   *  face did not recognise. */
   function loadHoldings({ fresh = false } = {}) {
     return Promise.all([
       fly('holdings', '/data/account/holdings?cost=1', { fresh, loading: 'holdingsLoading', land: landing('holdingsLoaded', 'holdingsFailed') }),

@@ -22,6 +22,8 @@ const noPaper = (over = {}) => page({ venues: fx('account').venues.filter(v => v
 const rejected = (path, status, body) => Object.assign(new Error(`${path}: HTTP ${status}`), { status }, body === undefined ? {} : { body });
 // answers handed out one a read, in order
 const inTurn = answers => () => { const next = answers.shift(); return next instanceof Error ? Promise.reject(next) : Promise.resolve(next); };
+// the Portfolio's leading figure as drawn: [its label, its amount]
+const leadOf = html => html.match(/<div class="label">([^<]*)<\/div><div class="networth">([^<]*)<\/div>/)?.slice(1) ?? null;
 
 // the host over a recording getJson — `json` answers a path by its exact text, else by the path without its fresh=1, else by
 // the path without its query: a body, an Error it rejects with, or a function of the path returning a promise — and recorded
@@ -189,7 +191,9 @@ test('an unrecognised page naming paper venues reads no lens; the recognised pag
   assert.equal(r.a().paper.data, null);
   await r.account.load();
   await settle();
-  assert.deepEqual(r.reads, ['/data/account', '/data/account', '/data/account/holdings?cost=1', '/data/account/holdings?cost=1&paper=1', '/data/account/history?range=1d&paper=1']);
+  // after a page it did not recognise, the holdings past the face's cache
+  assert.deepEqual(r.reads, ['/data/account', '/data/account', '/data/account/holdings?cost=1&fresh=1', '/data/account/holdings?cost=1&paper=1&fresh=1',
+    '/data/account/history?range=1d&paper=1']);
   assert.equal(r.a().paper.status, 'ready');
   assert.equal(r.a().history.data.paper, true, "the paper book's curve");
   const html = renderAccountScreen({ ...r.store.get(), route: { screen: 'account', tab: 'portfolio' } }, Date.now());
@@ -202,6 +206,85 @@ test('an unrecognised page naming paper venues reads no lens; the recognised pag
   under.account.onStreamEvent({ type: 'fill', id: '4dababf8.8', data: {} });
   await settle();
   assert.deepEqual([...under.reads].sort(), ['/data/account/holdings?cost=1&fresh=1', '/data/account?fresh=1'].sort());
+});
+
+// a warm session — the lens read under a recognised page — then a read under an unrecognised page that chose real money's
+// curve without the page (a snapshot: the stream's first frame, on every reconnect), then the recognised page again: it reads
+// the lens again and the paper curve after it, so Paper never keeps real money's change and curve under its figure
+test('after an unrecognised page the recognised page reads the lens again, then the paper curve', async () => {
+  const unrecognised = { ...page({ totalUsd: 0 }), connectLive: undefined };   // its paper venues kept
+  const r = rig({
+    json: {
+      '/data/account': inTurn([page({ totalUsd: 0 }), unrecognised, page({ totalUsd: 0 })]),
+      '/data/account/holdings?cost=1': fx('holdings'),
+      '/data/account/holdings?cost=1&paper=1': fx('holdings-paper'),
+      '/data/account/history': path => Promise.resolve(path.includes('&paper=1') ? fx('history-paper') : fx('history')),
+      '/data/account/statement': fx('statement'),
+      '/data/account/agents': fx('agents'),
+    },
+  });
+  const portfolio = () => renderAccountScreen({ ...r.store.get(), route: { screen: 'account', tab: 'portfolio' } }, Date.now());
+  await r.account.load();
+  await settle();
+  assert.equal(r.a().paper.data.totalUsd, 25400, 'warm: the lens read');
+  assert.equal(r.a().history.data.paper, true, "and Paper's curve");
+  // the snapshot's page answers unrecognised: its holdings read is real money's alone, and its curve real money's
+  r.reads.length = 0;
+  r.account.onStreamEvent({ type: 'snapshot', id: '4dababf8.0', data: {} });
+  await settle();
+  assert.equal(r.a().data, unrecognised);
+  assert.deepEqual([...r.reads].sort(), ['/data/account/agents', '/data/account/history?range=1d', '/data/account/holdings?cost=1&fresh=1',
+    '/data/account/statement?fresh=1', '/data/account?fresh=1']);
+  assert.equal(r.a().history.data.paper, undefined, "real money's curve, chosen without the page");
+  // the recognised page again, on the page's own beat: the lens again, past the face's cache, then the curve it leads to
+  r.reads.length = 0;
+  await r.account.load();
+  await settle();
+  assert.deepEqual(r.reads, ['/data/account', '/data/account/holdings?cost=1&fresh=1', '/data/account/holdings?cost=1&paper=1&fresh=1',
+    '/data/account/history?range=1d&paper=1']);
+  assert.equal(r.a().history.data.paper, true, "the paper book's curve again");
+  const html = portfolio();
+  assert.deepEqual(leadOf(html), ['Paper', '$25,400.00'], 'Paper leads');
+  assert.match(html, /rebuilt/, "the paper curve's words");
+  assert.doesNotMatch(html, /\+\$208\.78|\$28,948\.81/, "never real money's change or curve under the Paper figure");
+  // once read again, a recognised page landing leaves the lens to its own reads
+  r.reads.length = 0;
+  await r.account.load();
+  await settle();
+  assert.deepEqual(r.reads, ['/data/account']);
+});
+
+// a money event under an unrecognised page reads no lens; the recognised page after it — here the event's own page read, the
+// Account back on its shape — reads the lens again past the face's cache, which keeps a holdings answer 8 s (ACCOUNT_TTL_MS)
+// and so would hand back the lens from before the event; Paper draws the book after the event, never the one before as current
+test('a money event under an unrecognised page: the recognised page after it reads the lens past the cache, the total after the event', async () => {
+  const unrecognised = { ...page({ totalUsd: 0 }), connectLive: undefined };
+  const r = rig({
+    json: {
+      '/data/account': inTurn([page({ totalUsd: 0 }), unrecognised, page({ totalUsd: 0 })]),
+      '/data/account/holdings?cost=1': fx('holdings'),
+      // the face's kept copy is the book from before the event; past the cache the Account answers the book after it
+      '/data/account/holdings?cost=1&paper=1': fx('holdings-paper'),
+      '/data/account/holdings?cost=1&paper=1&fresh=1': { ...fx('holdings-paper'), totalUsd: 26000 },
+      '/data/account/history': path => Promise.resolve(path.includes('&paper=1') ? fx('history-paper') : fx('history')),
+    },
+  });
+  const portfolio = () => renderAccountScreen({ ...r.store.get(), route: { screen: 'account', tab: 'portfolio' } }, Date.now());
+  await r.account.load();
+  await settle();
+  assert.equal(r.a().paper.data.totalUsd, 25400, 'warm: the lens read');
+  await r.account.load();
+  await settle();
+  assert.equal(r.a().data, unrecognised);
+  // a paper event: the real holdings and the page past the cache, no lens under the unrecognised page; the page answers on
+  // the Account's own shape again, and its landing reads the lens past the cache, then the curve
+  r.reads.length = 0;
+  r.account.onStreamEvent({ type: 'paper', id: '4dababf8.9', data: {} });
+  await settle();
+  assert.deepEqual([...r.reads].sort(), ['/data/account/history?range=1d&paper=1', '/data/account/holdings?cost=1&fresh=1',
+    '/data/account/holdings?cost=1&paper=1&fresh=1', '/data/account?fresh=1']);
+  assert.equal(r.a().paper.data.totalUsd, 26000, 'the paper book after the event');
+  assert.deepEqual(leadOf(portfolio()), ['Paper', '$26,000.00'], 'Paper leads with the book after the event, never the one before it as current');
 });
 
 test('loadHoldings reads cost=1, and cost=1&paper=1 only when a paper venue is connected', async () => {
