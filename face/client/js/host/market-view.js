@@ -487,8 +487,8 @@ const saidBy = read => (read?.status === 'error' ? str(read.message) || null : n
  *  - What is held of it — the leading lens's assets of its base (the paper lens's when paper leads the Portfolio, else the real)
  *    and the positions, real and paper, at any of its lines (an event's: every outcome's) — its open orders there, and the
  *    statement's lines that name its base or one of those lines' symbols; with what each stands on (`reads`): what is held, the
- *    holdings read and, while the page names a paper venue, its paper lens's; the orders, the Account's page; the lines, the
- *    statement read. */
+ *    holdings read and, while the page names a paper venue, its paper lens's; the orders, the Account's page (`unreadable` when
+ *    the page that landed is one the face does not recognise); the lines, the statement read. */
 export function pageOf(markets, account, id, now = Date.now()) {
   const m = isRecord(markets) ? markets : {};
   if (typeof id !== 'string' || id === '') return null;
@@ -512,6 +512,8 @@ export function pageOf(markets, account, id, now = Date.now()) {
   const a = isRecord(account) ? account : {};
   const lens = worthOf(a.data, a.holdings?.data, a.paper?.data).paperLeads ? a.paper?.data : a.holdings?.data;
   const paperNamed = pageOk(a.data) && a.data.venues.some(v => v?.paper === true);
+  // the Account's page landed as one the face does not recognise: its orders are unreadable, never still loading
+  const unreadable = a.data != null && !pageOk(a.data);
   // every line the market trades at: its own, and an event's every outcome's (its YES and its NO)
   const places = [...legs, ...records(item.outcomes).flatMap(o => records(o.at))].filter(named);
   const atPlace = x => places.some(p => p.venue === x.venue && p.symbol === x.symbol);
@@ -540,7 +542,7 @@ export function pageOf(markets, account, id, now = Date.now()) {
     reads: {
       held: partRead(a.holdings?.data != null && (!paperNamed || a.paper?.data != null),
         a.holdings?.status === 'error' || (paperNamed && a.paper?.status === 'error'), saidBy(a.holdings) || (paperNamed ? saidBy(a.paper) : null)),
-      orders: partRead(pageOk(a.data), a.status === 'error', a.message),
+      orders: { ...partRead(pageOk(a.data), a.status === 'error' || unreadable, a.message), unreadable },
       lines: partRead(a.statement?.data != null, a.statement?.status === 'error', a.statement?.message),
     },
   };

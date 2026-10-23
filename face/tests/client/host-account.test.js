@@ -8,6 +8,7 @@ import { createStore } from '../../client/js/store.js';
 import { reducers } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { startAccount, ACCOUNT_POLL_MS, ACCOUNT_POLL_STREAM_MS } from '../../client/js/host/account.js';
+import { renderAccountScreen } from '../../client/js/render/account.js';
 
 const tick = () => new Promise(r => setTimeout(r, 0));
 const settle = async () => { for (let i = 0; i < 6; i++) await tick(); };
@@ -89,7 +90,7 @@ test('load reads /data/account once for two callers; fresh reads ?fresh=1 and do
   assert.deepEqual(r.reads, ['/data/account', '/data/account?fresh=1', '/data/account'], 'a load after the flights landed reads again');
 });
 
-test('a 409 refusal keeps the last data and carries the Account message; an unrecognised page is a failure', async () => {
+test('a 409 refusal keeps the last data and carries the Account message', async () => {
   const r = rig({
     json: {
       '/data/account': inTurn([
@@ -98,7 +99,6 @@ test('a 409 refusal keeps the last data and carries the Account message; an unre
         noPaper(),
         { ok: false, error: 'venues are still settling' },
         { ok: false, error: { code: 'E_ODD' } },
-        { ...noPaper(), connectLive: undefined },
         rejected('/data/account', 503, { ok: false, unreachable: 'ECONNREFUSED' }),
         rejected('/data/account', 502),
       ]),
@@ -121,16 +121,52 @@ test('a 409 refusal keeps the last data and carries the Account message; an unre
   await r.account.load();
   assert.equal(r.a().message, null, 'words only when they are text');
   await r.account.load();
-  assert.equal(r.a().status, 'error', 'a page the face does not recognise is a failure');
-  assert.equal(r.a().message, null);
-  assert.ok(r.a().data.connectLive, 'the last recognised page stays');
-  await r.account.load();
   assert.equal(r.a().status, 'error');
   assert.equal(r.a().message, null, 'unreachable carries no sentence');
   await r.account.load();
   assert.equal(r.a().status, 'error');
   assert.equal(r.a().message, null, 'a rejection without a body carries none');
-  assert.ok(r.a().data.connectLive);
+  assert.ok(r.a().data.connectLive, 'the last page stays');
+});
+
+// an Account that moved its API answers a 200 the face does not recognise: that answer lands as the page, so the screen says
+// Account unreadable and draws no figure from it — never an outage, never the last page's numbers passed off as current
+test('an unrecognised page lands and reads unreadable', async () => {
+  const moved = { ...noPaper(), venues: undefined };   // a 200 body without its venues
+  const r = rig({
+    json: {
+      '/data/account': inTurn([
+        noPaper(),
+        moved,
+        rejected('/data/account', 409, { ok: false, refusal: { code: 'E_ACCOUNT_LOCKED', message: 'The Account is locked until its owner signs in.' } }),
+        noPaper({ totalUsd: 300 }),
+        '',
+      ]),
+    },
+  });
+  const portfolio = () => renderAccountScreen({ ...r.store.get(), route: { screen: 'account', tab: 'portfolio' } }, Date.now());
+  await r.account.load();
+  assert.match(portfolio(), /\$29,138\.10/, 'the recognised page draws its figure');
+  await r.account.load();
+  assert.equal(r.a().status, 'ready', 'a 2xx answer that is no refusal lands, recognised or not');
+  assert.equal(r.a().data, moved, 'the page as it came');
+  assert.equal(r.a().message, null);
+  assert.deepEqual(r.reads, ['/data/account', '/data/account'], 'no paper lens is read for a page that names no venue');
+  assert.match(portfolio(), /Account unreadable/);
+  assert.doesNotMatch(portfolio(), /\$29,138\.10|Account unavailable|Loading…/, 'never a number from it, never an outage');
+  // a refusal after it: a failure with the Account's sentence, the unreadable page kept
+  await r.account.load();
+  assert.equal(r.a().status, 'error');
+  assert.equal(r.a().message, 'The Account is locked until its owner signs in.');
+  assert.equal(r.a().data, moved);
+  // the Account back on its own shape: its page again
+  await r.account.load();
+  assert.equal(r.a().status, 'ready');
+  assert.equal(r.a().data.totalUsd, 300);
+  // an empty 2xx body is nothing to draw: a failure, the last page kept
+  await r.account.load();
+  assert.equal(r.a().status, 'error');
+  assert.equal(r.a().data.totalUsd, 300);
 });
 
 test('loadHoldings reads cost=1, and cost=1&paper=1 only when a paper venue is connected', async () => {

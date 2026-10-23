@@ -3,7 +3,7 @@
 // history curve, the statement and the agents — each kind one flight at a time; the page at the Account's own cadence (every
 // 20 s on screen, 80 s while the stream is open); and the stream's account events as the reads they name, past the face's
 // cache. The views over what lands are account-view.js's.
-import { pageOk, worthOf } from './account-view.js';
+import { worthOf } from './account-view.js';
 
 export const ACCOUNT_POLL_MS = 20_000, ACCOUNT_POLL_STREAM_MS = 80_000;
 
@@ -58,16 +58,18 @@ export function startAccount({ store, getJson, now = Date.now, schedule, cancelT
     else store.dispatch(failed, { at: now(), message: messageOf(body) });
   };
 
-  /** The page, `?fresh=1` past the face's cache. A body that is not the page — a refusal, an `ok: false` on a 200, an API the
-   *  face does not recognise — is a failure carrying the Account's sentence when it gave one; the last page stays. A page
-   *  naming a paper venue whose lens was never read reads the holdings at once, unless a loadAll is about to, and the leading
-   *  curve after them (the lens may have made Paper the lead). */
+  /** The page, `?fresh=1` past the face's cache. Any 2xx answer that is not a refusal lands as the page — one the face does not
+   *  recognise (`pageOk` refuses it: the Account moved its API) too, so the screen says `Account unreadable` and draws no
+   *  figure from it, rather than an outage. A refusal (an `ok: false` body, on a 200 or not), any other non-2xx, an empty 2xx
+   *  body or a rejection without one is a failure carrying the Account's sentence when it gave one; the last page stays. A
+   *  page naming a paper venue whose lens was never read reads the holdings at once, unless a loadAll is about to, and the
+   *  leading curve after them (the lens may have made Paper the lead). */
   function load({ fresh = false } = {}) {
     return fly('page', '/data/account', {
       fresh,
       loading: 'accountLoading',
       land: (body, refused) => {
-        if (!refused && pageOk(body)) {
+        if (!refused && body && body.ok !== false) {
           store.dispatch('accountLoaded', { data: body, at: now() });
           if (holdingsDue === 0 && hasPaper(body) && store.get().account.paper.data === null) void loadHoldings().then(() => loadHistory());
         } else store.dispatch('accountFailed', { at: now(), message: messageOf(body) });

@@ -723,3 +723,42 @@ test('a stream quote updates the followed market', async () => {
   assert.equal(r.m().accountQuotes['ex|ETH/USDT'].price, 2460);
   r.markets.close();
 });
+
+// a market's page draws no table rows and names its own key (app.js's rowsInView); the market need not be a row of the tab on
+// screen, and the quotes poll asks for its pair all the same, from the page's own view (spec §6.1)
+test('a page whose market is not a row of the tab still polls its pair', async () => {
+  const all = fx('explore-all');
+  const STOCKS = '/data/account/explore?tab=stocks&limit=200';
+  const r = rig({
+    answer: path => {
+      if (path === ALL) return all;
+      if (path === STOCKS) return { ...fx('explore-all'), items: fx('explore-all').items.filter(i => i.kind === 'stock') };
+      if (path.startsWith('/data/account/quotes?')) return quoted(pairsIn(path));
+      return undefined;
+    },
+  });
+  r.markets.show(true);
+  await settle();
+  // a deep link to a market only the movers list carries (AVAX): no row of All, its page's own most traded connected line asked
+  assert.equal(rowsOf(r.m(), NOW).some(row => row.id === 'coin:AVAX'), false, 'no row of All');
+  r.markets.rowsInView(['coin:AVAX']);
+  r.fire(QUOTES_MS);
+  assert.deepEqual(pairsIn(r.reads.at(-1)), ['paper-momentum|AVAX/USD']);
+  await settle();
+  assert.equal(pageOf(r.m(), r.store.get().account, 'coin:AVAX', NOW).live.price, 182.4, 'the page prices from its answer');
+  // Back onto Stocks with a coin's page on screen: the coin is no row of that tab, and its pair is asked all the same
+  r.store.dispatch('setMarketsTab', 'stocks');
+  await settle();
+  assert.equal(r.reads.includes(STOCKS), true);
+  assert.equal(rowsOf(r.m(), NOW).some(row => row.id === 'coin:BTC'), false, 'no row of Stocks');
+  r.markets.rowsInView(['coin:BTC']);
+  r.fire(QUOTES_MS);
+  assert.deepEqual(pairsIn(r.reads.at(-1)), ['ex|BTC/USDT']);
+  await settle();
+  // a key no read lists has no page and no pair: nothing is asked
+  const asked = r.reads.length;
+  r.markets.rowsInView(['coin:NOPE']);
+  r.fire(QUOTES_MS);
+  assert.equal(r.reads.length, asked);
+  r.markets.close();
+});

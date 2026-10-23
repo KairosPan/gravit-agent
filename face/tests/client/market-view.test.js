@@ -522,7 +522,7 @@ test("pageOf: the price shown, the page's words, its history's state and the rea
   assert.deepEqual([btc.price, btc.name, btc.tile, btc.sub, btc.closesAt, btc.outcomes, btc.preipo, btc.watched], [62510.5, 'BTC', 'BTC', ['Crypto', 'BTC/USDT'], null, [], false, true]);
   assert.deepEqual(btc.about, { symbol: 'BTC', name: 'BTC' });
   assert.deepEqual(btc.history, { status: 'error', message: 'No history at this range.', current: false });
-  assert.deepEqual(btc.reads, { held: { answered: true, failed: false, message: null }, orders: { answered: true, failed: false, message: null }, lines: { answered: true, failed: false, message: null } });
+  assert.deepEqual(btc.reads, { held: { answered: true, failed: false, message: null }, orders: { answered: true, failed: false, message: null, unreadable: false }, lines: { answered: true, failed: false, message: null } });
   // starred as an old star found at the Account; not starred at all
   assert.equal(pageOf({ ...m, watch: [], watchlist: [asset('crypto:BTC/USD')], asked: { 'crypto:BTC/USD': 'coin:BTC' } }, accountSlice(), 'coin:BTC', NOW).watched, true);
   assert.equal(pageOf({ ...m, watch: [] }, accountSlice(), 'coin:BTC', NOW).watched, false);
@@ -551,20 +551,25 @@ test("pageOf: the price shown, the page's words, its history's state and the rea
   // read that failed, the page's with its sentence
   const idle = { status: 'idle', data: null, at: null, message: null, holdings: { status: 'idle', data: null }, paper: { status: 'idle', data: null }, statement: { status: 'idle', data: null } };
   const no = { answered: false, failed: false, message: null };
-  assert.deepEqual(pageOf(m, idle, 'coin:BTC', NOW).reads, { held: no, orders: no, lines: no });
-  assert.deepEqual(pageOf(m, undefined, 'coin:BTC', NOW).reads, { held: no, orders: no, lines: no });
+  const noOrders = { ...no, unreadable: false };
+  assert.deepEqual(pageOf(m, idle, 'coin:BTC', NOW).reads, { held: no, orders: noOrders, lines: no });
+  assert.deepEqual(pageOf(m, undefined, 'coin:BTC', NOW).reads, { held: no, orders: noOrders, lines: no });
   const paged = { ...idle, status: 'ready', data: fx('account'), holdings: read(fx('holdings')) };
   assert.deepEqual(pageOf(m, paged, 'coin:BTC', NOW).reads.held, no, 'the paper lens not read yet');
   assert.deepEqual(pageOf(m, { ...paged, paper: read(fx('holdings-paper')) }, 'coin:BTC', NOW).reads.held, { answered: true, failed: false, message: null });
   const refused = { ...idle, status: 'error', message: 'The account is restarting', statement: { status: 'error', data: null } };
   assert.deepEqual(pageOf(m, refused, 'coin:BTC', NOW).reads, {
-    held: no, orders: { answered: false, failed: true, message: 'The account is restarting' }, lines: { answered: false, failed: true, message: null },
+    held: no, orders: { answered: false, failed: true, message: 'The account is restarting', unreadable: false }, lines: { answered: false, failed: true, message: null },
   });
+  // a page that landed as one the face does not recognise (the Account moved its API): the orders are unreadable — failed, with
+  // no sentence — never still loading
+  const moved = { ...idle, status: 'ready', data: { ...fx('account'), venues: undefined } };
+  assert.deepEqual(pageOf(m, moved, 'coin:BTC', NOW).reads.orders, { answered: false, failed: true, message: null, unreadable: true });
   // the holdings' and the statement's own sentences when they refused (their reads keep them): You hold and On the statement say them
   const said = { ...accountSlice(), holdings: { status: 'error', data: null, message: 'Venues are still settling.' }, statement: { status: 'error', data: fx('statement'), message: 'The statement is being rebuilt.' } };
   assert.deepEqual(pageOf(m, said, 'coin:BTC', NOW).reads, {
     held: { answered: false, failed: true, message: 'Venues are still settling.' },
-    orders: { answered: true, failed: false, message: null },
+    orders: { answered: true, failed: false, message: null, unreadable: false },
     lines: { answered: true, failed: true, message: 'The statement is being rebuilt.' },
   });
   // what is held stands on the paper lens too: its sentence when it refused; a sentence a read kept from an earlier refusal while

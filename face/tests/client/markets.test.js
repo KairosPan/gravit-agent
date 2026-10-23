@@ -487,6 +487,10 @@ test("each part of a market's page stands on its own read: Loading… until it a
   assert.match(section(kept, 'Open orders'), /<p class="mk-note">The account is restarting<\/p><div class="mk-feed">[\s\S]*Sell 0\.002 BTC\/USDT/);
   // answered with nothing working on it: no Open orders at all
   assert.equal(section(draw(R.accountLoaded(bare, { data: { ...fx('account'), orders: [] }, at: NOW })), 'Open orders'), '');
+  // the Account's page landed as one the face does not recognise: Open orders are unreadable, never still loading
+  const moved = section(draw(R.accountLoaded(bare, { data: { ...fx('account'), venues: undefined }, at: NOW })), 'Open orders');
+  assert.match(moved, /<p class="mk-empty">Account unreadable<\/p>/);
+  assert.doesNotMatch(moved, /Loading…|Account unavailable/);
 });
 
 test("a failed history read says so under the range seg — the Account's sentence, else History unavailable — and the closes kept for the range stay", () => {

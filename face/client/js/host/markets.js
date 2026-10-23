@@ -1,10 +1,10 @@
 // face/client/js/host/markets.js — the Markets screen's impure half (spec 2026-10-22 §6.1): the Account's markets through the
-// face's proxy into the store — explore for the tab on screen at once and every 20 s, the quotes of the rows in view every 5 s
-// (twelve a call), a market page's candles for its range and its base's compare rows, and the page's market followed on the
-// Account's stream; the stars in this browser's two stores (the Account's keys under their own key, the A shares under the
-// face's); each old us:/crypto: star asked of the Account once; and the face's own wire (spec 2026-10-19 §7 Stage 2) for the A
-// shares alone — the live quotes of the cn list and a cn page, the cn search and its hits' one quote read. The views over what
-// lands are market-view.js's. Nothing here touches the DOM.
+// face's proxy into the store — explore for the tab on screen at once and every 20 s, the quotes of the rows in view (on a
+// market's page, its own market's) every 5 s (twelve a call), a market page's candles for its range and its base's compare
+// rows, and the page's market followed on the Account's stream; the stars in this browser's two stores (the Account's keys
+// under their own key, the A shares under the face's); each old us:/crypto: star asked of the Account once; and the face's own
+// wire (spec 2026-10-19 §7 Stage 2) for the A shares alone — the live quotes of the cn list and a cn page, the cn search and its
+// hits' one quote read. The views over what lands are market-view.js's. Nothing here touches the DOM.
 import {
   readWatchlist, saveWatchlist, STORAGE_KEY, readAccountWatch, saveAccountWatch, ACCOUNT_WATCH_KEY, normalizeAsset,
 } from '../wire/market-model.js';
@@ -95,11 +95,19 @@ export function startMarkets({ store, getJson, createLiveQuotes, createSymbolSea
   }
 
   // the quotes of the rows in view — the table's rows, those rowsInView last named — at their most traded connected lines,
-  // twelve a call; none while one is out, so a slow Account is never asked again before it answers
+  // twelve a call; none while one is out, so a slow Account is never asked again before it answers. A market's page names its
+  // own key: when its market is no row of the tab on screen (a deep link to a market only a list beside the items carries, a
+  // page reached by Back onto another tab, a market un-starred from its own page on Watching), its pair, when it has one, comes
+  // from its page's own view — its most traded connected line, the line the page follows
   function readQuotes() {
     if (inAir('quotes')) return;
-    const rows = rowsOf(store.get().markets, now()).filter(r => inView === null || inView.has(r.id));
-    const pairs = [...new Set(pairsOf(rows, QUOTE_PAIRS))];
+    const s = store.get();
+    const rows = rowsOf(s.markets, now());
+    const drawn = pairsOf(rows.filter(r => inView === null || inView.has(r.id)), QUOTE_PAIRS);
+    const pages = inView === null ? [] : [...inView]
+      .filter(id => isAccountKey(id) && !rows.some(r => r.id === id))
+      .flatMap(id => { const view = pageOf(s.markets, s.account, id, now()); return view ? pairsOf([{ legs: view.legs }], 1) : []; });
+    const pairs = [...new Set([...drawn, ...pages])].slice(0, QUOTE_PAIRS);
     if (!pairs.length) return;
     fly('quotes', `/data/account/quotes?pairs=${encodeURIComponent(pairs.join(','))}`, (body, refused) => {
       if (!refused && answered(body, 'quotes')) store.dispatch('accountQuotesLoaded', { quotes: body.quotes });

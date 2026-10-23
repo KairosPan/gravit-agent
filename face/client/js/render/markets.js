@@ -212,8 +212,10 @@ function accountPage(id, view, state, now) {
   ];
   right.push(section('You hold', partBody(view.reads.held, held, 'You don’t hold any.', 'Holdings unavailable')));
   const orders = view.orders.map(o => line('·', esc(orderWords(o))));
-  // nothing working once the page has answered: no section
-  if (orders.length || !view.reads.orders.answered || view.reads.orders.failed) right.push(section('Open orders', partBody(view.reads.orders, orders, '', 'Account unavailable')));
+  // nothing working once the page has answered: no section; a page the face does not recognise: unreadable, never loading
+  if (orders.length || !view.reads.orders.answered || view.reads.orders.failed) {
+    right.push(section('Open orders', partBody(view.reads.orders, orders, '', view.reads.orders.unreadable ? 'Account unreadable' : 'Account unavailable')));
+  }
   const about = aboutHtml(state.conversations, view.about, now);
   if (about.length) right.push(section('Gravit on it', feed(about)));
   const stated = view.lines.map(l => line(DONE.has(l.status) ? '✓' : '·', esc([when(l.at, now), l.description, money(l.amountUsd)].filter(Boolean).join(' · ')),
