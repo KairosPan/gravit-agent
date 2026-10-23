@@ -627,7 +627,8 @@ the next boot. A starred market no read lists is drawn `Not in this read` and ca
 un-starred; neither opens a page.
 
 While Markets is on screen in a visible tab it reads the tab on screen at once and every 20
-seconds, and every 5 seconds the quotes of the rows drawn, twelve markets a call; the search reads
+seconds, and every 5 seconds the quotes of the rows drawn (on a market's page, its own market's),
+twelve markets a call; the search reads
 once the box has been quiet for 300 ms. Another screen or a hidden tab stops both ("The Account in
 the face" has every read).
 
@@ -646,8 +647,9 @@ answer). The iFinD provider quotes them:
 | `IFIND_REFRESH_TOKEN` | — | Alternative: obtain the current access token through the official token endpoint; cache it only in memory. |
 | `FACE_IFIND_POLL_MS` | `30000` | iFinD refresh period while selected; minimum 15000ms. Set according to the account's data quota. |
 
-Without a token Venues reads `iFinD · Not configured` and an A share's quote `Not configured`.
-Event timestamps are interpreted as Beijing time; volume stays unavailable until its provider units
+Without a token an A share's quote reads `Not configured`, and — once the face's wire has quoted an
+A share, one on the cn list or a cn page with Markets on screen — Account › Venues' `A-share quotes`
+line reads `iFinD · Not configured`; before that the line is not drawn. Event timestamps are interpreted as Beijing time; volume stays unavailable until its provider units
 can be verified with an account. Copy `market-env.example` to the repo's gitignored `.env.ifind`,
 enter the credentials locally, export it before starting the server, then restart. No token is
 sent to the browser or returned in errors. iFinD's adapter is covered by mocked tests, but A-share
@@ -687,13 +689,16 @@ else the explore read's) with the explore read's 24 hours, an event's outcomes i
   statement about it yet.`). Each part says `Loading…` until its own read has answered, `Holdings
   unavailable`, `Account unavailable` or `Statement unavailable` — under the Account's sentence
   when it gave one — when that read failed before any answer, and keeps what it read under a later
-  refusal's sentence.
+  refusal's sentence; Open orders say `Account unreadable` while the Account's page is one the face
+  does not recognise.
 
 Opening the page reads the candles for its range, the Account's compare rows for a coin's, a
 perpetual's or a stock's base (kept in the store; no screen draws them yet), the holdings and the
 statement; follows its line on the tab's stream — its first connected line, else its first public
-listing, one `<venue>:<symbol>` told to `stream/markets` — and puts its own market in the
-5-second quotes poll. Leaving lets the market go.
+listing, one `<venue>:<symbol>` told to `stream/markets` — and puts its own market's most traded
+connected line, when it has one, in the 5-second quotes poll, taken from the page's own view when
+the market is no row of the tab on screen (a deep link, Back onto another tab). Leaving lets the
+market go.
 
 A `cn:` page is the face's own quote, as before: the price in yuan, the change against the previous
 close, `as of 14:30 · Live`, the facts Previous close, Volume and Source, and Gravit on it — no
@@ -730,8 +735,8 @@ and a drawer:
   health (`Answers`, `Not answering since 14:02`, `Not read yet`), what it does (`Trades`, `Moves
   money`, `Receives`, `Earns`), `Paper`, stale — with **Details**, a drawer of what it holds there
   and the Account's facts (`No trading`, `Restricted`, `Not served`, `Close only`, `Watch only`,
-  `Key file` by its path, never what is in it); under them `A-share quotes`, the iFinD provider's
-  state; then the **Account seat** box (`/data/seat.json`, read on entering Venues or Agents, on
+  `Key file` by its path, never what is in it); under them, once the face's wire has quoted an A
+  share, `A-share quotes` with the iFinD provider's state; then the **Account seat** box (`/data/seat.json`, read on entering Venues or Agents, on
   Refresh, right after a seat receipt and on a card raised or answered): the service reachable or
   not with the Account's own mode and writes (`Guard · Trading on · $1 a move`), the seat (`Gravit
   · admitted until Nov 19`, `knocking — admit it on the Account page`, `not on the account`,
@@ -839,7 +844,7 @@ reader, so the seat box and the Account screen share one upstream read within th
 |---|---|
 | `/data/account` | at boot; on entering Account (past the cache when it opens on Cards) and on entering Cards (past the cache); every 20 s while Account is on screen in a visible tab, 80 s while the tab's stream is open; on Refresh and after a receipt that is not the seat's (`?fresh=1`); on the stream's events |
 | `explore` | the tab on screen, at once and every 20 s while Markets is on screen in a visible tab (`limit=200`, a kind's tab with its `tab`); the search once the box has been quiet for 300 ms (`q`, `limit=200`); each old `us:`/`crypto:` star once per boot (`q`, `limit=12`) |
-| `quotes` | every 5 s while Markets is on screen in a visible tab: the drawn rows' most traded connected lines, twelve a call, none while one is out; on a market's page its own |
+| `quotes` | every 5 s while Markets is on screen in a visible tab: the drawn rows' most traded connected lines, twelve a call, none while one is out; on a market's page its own market's line, from the page's own view when that market is no row of the tab |
 | `candles`, `compare` | on opening a market's page; `candles` again on a range |
 | `holdings`, `history` | on entering Portfolio (the holdings, then the leading curve), on Refresh (the holdings), on a range (the curve), on opening a market's page (the holdings); on the stream's events |
 | `statement` | on opening the Statement and a market's page; on the stream's events |

@@ -940,7 +940,7 @@ smoke that boots without `main.ts` relies on.
 | `http.ts` | `HttpError`, `readBody` (4,096 B cap → 413), the fixed `FORBIDDEN` body |
 | `static.ts` | `/` behind `IndexAuth` (`ctx.connection.authorizeIndex`) and `/client/*` with a traversal-safe resolver — the one page since stage 2; the `RouteRegistrar` contract |
 | `data.ts` | `/data/{market,account,watchlist}.json`, read by no screen since the graft's stage 1: fixed-argv `execFile` of the producers, TTL cache, single-flight, stale-on-error; mounts the bars, search and quote routes; **the trust fence every `/data` route reuses** (`isTrustedDataRequest`, and `isJsonBody` for a POST) |
-| `account-proxy.ts` | the Account's reads and push channel for the Markets and Account screens (§4.4; spec `docs/superpowers/specs/2026-10-22-account-graft-design.md` §5.1): `registerAccountProxy(webServer, deps) → {reader, dispose}` mounts thirteen `exact` routes — the eleven reads of `ReadRoute` (`facePath`), `/data/account/stream` and `/data/account/stream/markets` — each fence first, then 405, then `rebuildQuery` / the stream's own rebuild over `ACCOUNT_QUERY` (the whitelist; a value at most 240 characters decoded, `quotes`' `pairs` 2,000, the stream's `markets` 4,000, the request target at most 8,192; `fresh` stripped) or 400; `askAccount` is the plain loopback fetch (no Origin, no `Sec-Fetch-Site`, no cookie, `redirect: "error"`, the route's `ACCOUNT_ABORT_MS` on the headers and the body) answering the Account's status and body or the failure's code (`codeOf`, bounded to `/^[A-Z][A-Z0-9_]{1,31}$/`, else `unreachable`); per route a cache of 2xx answers by rebuilt query (`ACCOUNT_TTL_MS`, `ACCOUNT_CACHE_KEYS` 64, least recently used out first), one flight per query, `?fresh=1` never joining a plain flight; `pipeStream` writes the Account's SSE through chunk by chunk and drops a browser 256 KiB behind; `STREAM_CLIENT`, `STREAM_BODY_LIMIT` (4,096 bytes); `disabled` answers 503 everywhere; `reader` is the `account` route's reads, which `main.ts` hands the seat route, and `createAccountReader` the same reads with no route; `dispose` forgets every kept answer and aborts every open stream's upstream |
+| `account-proxy.ts` | the Account's reads and push channel for the Markets and Account screens (§4.4; spec `docs/superpowers/specs/2026-10-22-account-graft-design.md` §5.1): `registerAccountProxy(webServer, deps) → {reader, dispose}` mounts thirteen `exact` routes — the eleven reads of `ReadRoute` (`facePath`), `/data/account/stream` and `/data/account/stream/markets` — each fence first, then 405; then the eleven reads' query rebuilt by `rebuildQuery` over `ACCOUNT_QUERY` (the whitelist; a value at most 240 characters decoded, `quotes`' `pairs` 2,000, the request target at most 8,192; `fresh` stripped) or 400, while the two stream routes keep rules of their own (§4.4): `stream` rebuilds `since`, `client` and `markets` under its own bounds (`STREAM_CLIENT`, `markets` 4,000, the browser's `Last-Event-ID` as `since`), and `stream/markets` answers 415 for a body not declared JSON before it refuses any query name with 400; `askAccount` is the plain loopback fetch (no Origin, no `Sec-Fetch-Site`, no cookie, `redirect: "error"`, the route's `ACCOUNT_ABORT_MS` on the headers and the body) answering the Account's status and body or the failure's code (`codeOf`, bounded to `/^[A-Z][A-Z0-9_]{1,31}$/`, else `unreachable`); per route a cache of 2xx answers by rebuilt query (`ACCOUNT_TTL_MS`, `ACCOUNT_CACHE_KEYS` 64, least recently used out first), one flight per query, `?fresh=1` never joining a plain flight; `pipeStream` writes the Account's SSE through chunk by chunk and drops a browser 256 KiB behind; `STREAM_CLIENT`, `STREAM_BODY_LIMIT` (4,096 bytes); `disabled` answers 503 everywhere; `reader` is the `account` route's reads, which `main.ts` hands the seat route, and `createAccountReader` the same reads with no route; `dispose` forgets every kept answer and aborts every open stream's upstream |
 | `seat.ts` | `/data/seat.json` (§4.4): `seatView` (the Account's `/api/account` reduced to the seat's standing, total over any shape) and `registerSeatRoute` (the fence, then every read through an `AccountReader` — the proxy's, as `main.ts` hands it, else one it makes with `createAccountReader` (`SEAT_TIMEOUT_MS`, 7 s) — keeping no cache and no flight of its own: a 2xx answer served for `SEAT_TTL_MS` (`ACCOUNT_TTL_MS.account`, 15 s), `?fresh=1` never joining a plain read in flight but asking again after it, a failure never kept; `disabled` for a row a patch disabled; the failure's code and never its text) |
 | `bars.ts` | read by no screen since the graft's stage 1 — `/data/bars?id=&days=`: the request checked (one us id, 5–730 days, default 120), a per-(symbol, days) cache (600 s, 64 keys, least recently used out), single-flight, stale-on-error, `face_bars.py` spawned with exactly `[SYMBOL, DAYS]`; `quotes.ts`'s `parseInstrumentId` is the id grammar both routes share |
 | `watchlist.ts` | joins the watchlist producer's US snapshots with the reference-only search catalog |
@@ -1627,9 +1627,11 @@ session's turn frames, and a control-stream `title` the list does not show yet.
 stage 1, §4.4; `fresh=1` is the face's own flag, past the proxy's cache) — Markets: `GET
 /data/account/explore?limit=200` (All, Watching, and All results with no query) or
 `?tab=<kind>&limit=200` (a kind's tab) on showing and every 20 s while Markets is on screen in a
-visible tab, a tab changed while shown read at once; `GET /data/account/quotes?pairs=<venue|symbol,
-…>` every 5 s for the drawn rows' most traded connected lines (twelve a call, none while one is
-out; on a market's page its own); the search `GET /data/account/explore?q=<q>&limit=200` once the
+visible tab, a tab changed while shown read at once;
+`GET /data/account/quotes?pairs=<venue|symbol,…>` every 5 s for the drawn rows' most traded
+connected lines (twelve a call, none while one is out; on a market's page its own market's line,
+from the page's own view when that market is no row of the tab on screen); the search
+`GET /data/account/explore?q=<q>&limit=200` once the
 box has been quiet for 300 ms; each old `us:`/`crypto:` star `GET
 /data/account/explore?q=<its symbol, a coin's base>&limit=12` once per boot, one at a time; a
 market's page `GET /data/account/candles?venue=&symbol=&range=` for its range and, for a coin, a
@@ -1638,7 +1640,9 @@ perpetual or a stock, `GET /data/account/compare?base=<base>&side=buy`. Account:
 (80 s while the stream is open), on Refresh and right after a receipt that is not the seat's
 (those two `?fresh=1`); `holdings?cost=1` — and while the page names a paper venue its paper lens
 `holdings?cost=1&paper=1` beside it — on entering Portfolio, on Refresh and on a market's page;
-`history?range=<1d|1w|1m|all>` (`&paper=1` when Paper leads) after those holdings and on a range;
+`history?range=<1d|1w|1m|all>` (`&paper=1` when Paper leads) after the holdings on entering
+Portfolio, after a paper lens read for the first time and in a snapshot's re-read, and on a range —
+not after Refresh's or a market page's holdings read;
 `statement` on opening the drawer and on a market's page; `agents` on entering Agents. The stream:
 one `EventSource` per tab at `/data/account/stream?client=face-<24 hex>` (`&since=<the last id>`
 on a new source), open while the tab is visible, and `POST /data/account/stream/markets`
@@ -1808,8 +1812,10 @@ visible tab) reads the explore read of the tab on screen at once and every `EXPL
 All, Watching and All results with no query read All's `explore?limit=200`, a kind's tab its own
 `explore?tab=<kind>&limit=200`, landing by tab — a tab changed while shown read at once, its poll
 over from then; and every `QUOTES_MS` (5 s) `quotes?pairs=` for the most traded connected lines
-(`pairsOf`) of the rows `rowsInView(ids)` last named, `QUOTE_PAIRS` (twelve) a call, none while
-one is out; `show(false)` cancels both and pauses the wire. Each kind of read is one flight: an
+(`pairsOf`) of the rows `rowsInView(ids)` last named — and for a market page's own key, which
+`rowsInView` names on a page, when that market is no row of the tab on screen, the line its page's
+view (`pageOf`) gives — `QUOTE_PAIRS` (twelve) a call, none while one is out; `show(false)` cancels
+both and pauses the wire. Each kind of read is one flight: an
 ask for the path in the air joins it, another path starts a read whose answer alone lands, and
 nothing lands after `close()`; a read lands as data only when the body is `ok: true` with the list
 the views read, and a refusal keeps the last rows with the Account's sentence (`message`), which
@@ -1844,12 +1850,13 @@ onStreamEvent, close}`, the Account's reads through the proxy into the `account`
 of read is one flight, the proxy's own rule: a plain ask joins the flight in the air for the same
 path, a fresh one (`fresh=1`) joins only a fresh one and otherwise runs once the plain read settles
 — one trailing read, never a pile; only the latest-started read of a kind lands, and nothing
-after `close()`. `load({fresh})` reads `/data/account`: a body `pageOk` recognises is
-`accountLoaded`; anything else — a refusal, an `ok: false` on a 200, an API the face does not
-recognise, a rejection (the body `getJsonVia` carries on it) — is `accountFailed` with the
-Account's sentence (`refusal.message`, else `error`, when they are text), the last page kept; a
-page naming a paper venue whose lens has no data reads the holdings and then the curve, unless a
-`loadAll` is about to. `loadHoldings({fresh})` reads `holdings?cost=1` and, while the page names
+after `close()`. `load({fresh})` reads `/data/account`: any 2xx answer that is not a refusal is
+`accountLoaded` — one `pageOk` does not recognise too (the Account moved its API), which the
+screens then draw as `Account unreadable`, never a figure from it; a refusal (an `ok: false` body,
+on a 200 or not), any other non-2xx, an empty 2xx body or a rejection (with the body `getJsonVia`
+carries on it, when it does) is `accountFailed` with the Account's sentence (`refusal.message`,
+else `error`, when they are text), the last page kept; a page naming a paper venue whose lens has
+no data reads the holdings and then the curve, unless a `loadAll` is about to. `loadHoldings({fresh})` reads `holdings?cost=1` and, while the page names
 a paper venue, its paper lens `holdings?cost=1&paper=1` beside it; `loadHistory(range)` sets the
 range (`1d`, `1w`, `1m`, `all`; an unknown one leaves the slice's) and reads the leading curve —
 `history?range=<r>&paper=1` when `worthOf` says Paper leads, else `history?range=<r>` — a read
@@ -2158,7 +2165,8 @@ line; `Open the Statement →`), each on its own read (`reads`): `Loading…` un
 empty words — `You don’t hold any.`, `Nothing on the statement about it yet.` — only after an
 answer, `Holdings unavailable`, `Account unavailable` or `Statement unavailable` under the
 Account's sentence when it failed before any answer, and the lines it read kept under a later
-refusal. The compare rows are read and not drawn. A `cn:` page is the face's own quote: the
+refusal; Open orders read `Account unreadable` while the Account's page is one the face does not
+recognise (`reads.orders.unreadable`). The compare rows are read and not drawn. A `cn:` page is the face's own quote: the
 price, the change with its basis, `as of 14:30 · Live`, the facts Previous close, Volume, Source,
 Gravit on it.
 
@@ -2178,7 +2186,8 @@ Retry, `Account unreadable` for a page the face does not recognise. **Venues**: 
 value, front line and what it trades, its health (`Not answering since 14:02`), what it does,
 `Paper`, stale, and **Details** — a drawer (`venueDetails`: its holdings and the Account's facts
 under their labels, the key file by its path, `No details`) that takes focus and closes on
-Escape; the `A-share quotes` line from the face's iFinD provider; the Account seat box (the
+Escape; the `A-share quotes` line from the face's iFinD provider (`markets.providers`, which the
+wire fills only once it has quoted an A share — none drawn before); the Account seat box (the
 service with the Account's own mode and writes, the seat and its limits, the venues with `Paper`
 chips, the cards waiting, the stamp, and the link to the Account page — the only place a card is
 signed). **Agents**: Gravit's seat first (its standing and limits in the seat box's words,
@@ -2342,7 +2351,8 @@ and `account.loadHoldings()` + `account.loadStatement()` → `pageOf` finds the 
 `stream.follow(['<venue>:<symbol>'])` → `POST /data/account/stream/markets {client, markets, n}`
 (the fence, POST, a JSON body on a bare path, at most 4,096 bytes) → the Account follows the market
 for this tab's client; the page draws no table rows, so `rowsInView` names its own key and the
-quotes poll asks for its pair. The Account pushes the market: a `quote` frame on the tab's
+quotes poll asks for its pair — the tab's row's, or, when the market is no row of the tab on screen
+(a deep link, Back onto another tab), the line the page's own view gives. The Account pushes the market: a `quote` frame on the tab's
 `/data/account/stream` → `streamQuote` (its last trade, else the middle of its bid and ask, marked
 `streamed`) → the page's price and source word, the 24 hours staying the explore read's; a range
 → `setRange` → the candles for it (`candlesSvg`). Back → `#/markets` → `markets.page(null)` →
@@ -2433,9 +2443,9 @@ from the member's own log without activating it (§5.4) — it follows no member
 | Command | From | Needs | Measured 2026-09-30 |
 |---|---|---|---|
 | `python -m pytest` | repo root | nothing — offline, no keys, no bed | 400 passed in a clean checkout, ~2 s (2026-10-20; the operator's tree adds the untracked `tests/strategies/`) |
-| `cd face && npm test` | `face/` | nothing — no port, no key | 1147 tests, 1129 pass, 18 skipped (2026-10-22) |
+| `cd face && npm test` | `face/` | nothing — no port, no key | 1149 tests, 1131 pass, 18 skipped (2026-10-23) |
 | `cd face && npm run typecheck` | `face/` | | clean, the dependencies' `.d.ts` included (`skipLibCheck: false`) |
-| `cd face && FACE_SMOKE=1 npm test` | `face/` | boots eighteen real trees into `mkdtemp` homes and binds ports; still no LLM or key (four of the smokes also create, and remove, a gitignored `.bots-smoke-*` bots root at the repo root) | the eighteen skipped tests; 1145/1145 (2026-10-22 at `0f9855f`, with `FACE_ACCOUNT_SEAT_DIR` naming a checkout of buyer-agent-demo @ 133b9a7 — without it the seat and graft smokes stay skipped; the two offline tests `e81eed7` added are not yet run under the flag) |
+| `cd face && FACE_SMOKE=1 npm test` | `face/` | boots eighteen real trees into `mkdtemp` homes and binds ports; still no LLM or key (four of the smokes also create, and remove, a gitignored `.bots-smoke-*` bots root at the repo root) | the eighteen skipped tests; 1145/1145 (2026-10-22 at `0f9855f`, with `FACE_ACCOUNT_SEAT_DIR` naming a checkout of buyer-agent-demo @ 133b9a7 — without it the seat and graft smokes stay skipped; the four offline tests added since, by `e81eed7` and by Task 13's fix round, are not yet run under the flag) |
 | `cd face && npm run check:fixture` | `face/` | the installed dsh | 26 fixture lines: 23 validated, 0 rejected, 3 with no upstream validator |
 
 ### 7.2 The Python suite
@@ -2464,7 +2474,7 @@ order path.
 
 ### 7.3 The face suite
 
-1147 tests in 109 files (1129 pass, 18 skipped without `FACE_SMOKE=1`), run by `node --test`
+1149 tests in 109 files (1131 pass, 18 skipped without `FACE_SMOKE=1`), run by `node --test`
 through `tsx`:
 
 - **Composition and boot** — `boot` (the layer order ending with the overlay; the policy layer
@@ -2592,17 +2602,19 @@ through `tsx`:
   views over the stand-in's fixtures and hand-built edges: the tabs, prices by kind, the source
   words and their age, the lines and the best, the Account's rows beside the cn rows, the three
   sorts with nulls last, `tableOf`, `pageOf`'s words, history state and the read each part stands
-  on, `watchedOf`, `handWordsOf`, no icon through any view, every word English from every enum;
+  on — the orders unreadable under a page the face does not recognise — `watchedOf`, `handWordsOf`,
+  no icon through any view, every word English from every enum;
   the page, the head, the two figures, the change, assets and positions, open orders and whose,
   the statement and its CSV, the venues' health and Details facts, Gravit's agent row first, the
   cards and asks, an unrecognised page answered empty, never a number), `host-markets` and
   `host-account` (the two host layers over the stand-in's fixtures with recorded timers, a fake
   stream and a recording `getJson`: explore at once and every 20 s, the quotes every 5 s twelve a
   call, a refusal keeping its rows and the Account's sentence, the search, the stars in their two
-  stores with the cn wire handed cn ids alone, the page's candles, compare and follow, the old
-  stars asked once, a stream quote; the page in one flight and its fresh read, a refusal's
-  sentence, the holdings and the paper lens, the leading curve, the stream's events as fresh
-  reads, the poll at 20 s and 80 s), `account-stream` (the client id, the resume point and
+  stores with the cn wire handed cn ids alone, the page's candles, compare and follow, a page whose
+  market is no row of the tab still polling its pair, the old stars asked once, a stream quote; the
+  page in one flight and its fresh read, a refusal's sentence, an unrecognised page landing and
+  reading `Account unreadable`, the holdings and the paper lens, the leading curve, the stream's
+  events as fresh reads, the poll at 20 s and 80 s), `account-stream` (the client id, the resume point and
   `since`, every named frame to `onEvent`, stale and dead with the retry steps, `onStatus` told
   each change once, the follow POSTs with a rising `n` and the one retell, `close` cancelling every
   timer — over a fake EventSource, recorded timers and a recording fetcher, the captured stream
