@@ -164,7 +164,7 @@ function venues(state, now) {
 
 // the Account seat's standing (spec 2026-10-20 §6.3): the service with the Account's own mode and writes, the seat and its
 // limits, the venues with the paper ones marked, the cards waiting on the Account page — and the way there, the only place a
-// card is signed. Its words are the Account's; the stamp is when the face read them.
+// card is signed. Its words are the Account's; the stamp is when the face answered.
 function seatBox(state, now) {
   const s = state.seat;
   const w = seatWords(s.data);
@@ -177,7 +177,8 @@ function seatBox(state, now) {
     const rows = [row(w.service, [[w.mode, w.writes].filter(Boolean).join(' · ')])];
     if (w.seat) rows.push(row(w.seat, w.limits));
     for (const v of w.venues) rows.push(row(v.name, [[v.usd, v.note].filter(Boolean).join(' · ')], v.paper ? 'Paper' : ''));
-    // the view's own time (the face's read, served by the route), else the read's — an unreachable answer carries none
+    // the view's own stamp — when the seat route answered, the Account's page it reduced kept up to 15 s by the proxy's reader —
+    // else, for an unreachable answer, which carries none, when this page's read landed
     const read = typeof s.at === 'number' ? new Date(s.at).toISOString() : undefined;
     const stamp = `As of ${when(s.data.asOf ?? read, now) || 'earlier'}${s.status === 'error' ? ' · stale' : ''}`;
     body = `<div class="venues">${rows.join('')}</div>${note([w.cards, stamp].filter(Boolean).join(' · '))}`;

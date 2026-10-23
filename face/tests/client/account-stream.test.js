@@ -84,7 +84,6 @@ function rig({ reply = { status: 200 } } = {}) {
     },
     schedule: (fn, ms) => { const timer = { fn, ms, handle: ++serial }; timers.set(timer.handle, timer); return timer.handle; },
     cancelTimer: handle => { r.cancelled.push(handle); timers.delete(handle); },
-    now: () => 0,
     random: length => { r.asked.push(length); return Uint8Array.from({ length }, (_, i) => i * 17); },
     onStatus: status => { assert.equal(status, r.stream.status(), 'told as status() answers'); r.statuses.push(status); },
   }, event => r.events.push(event));

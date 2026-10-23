@@ -186,7 +186,7 @@ export function boot(win, host = {}) {
   const stream = (host.createAccountStream ?? ((onEvent, onStatus) => createAccountStream({
     createEventSource: url => new win.EventSource(url),
     fetcher: (path, init) => win.fetch(path, init),
-    schedule, cancelTimer, now,
+    schedule, cancelTimer,
     random: n => win.crypto.getRandomValues(new Uint8Array(n)),
     onStatus,
   }, onEvent)))(ev => {

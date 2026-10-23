@@ -7,8 +7,8 @@ export function startSeat({ store, getJson, now = Date.now }) {
   let flightFresh = false;
   let seq = 0;   // only the latest-started read lands: a fresh one must not be overwritten by an older plain one
 
-  // fresh: past the face's 30 s cache (`?fresh=1`) — Refresh on Venues and the read right after a seat receipt; a plain
-  // read joins any flight, a fresh one joins only a fresh one
+  // fresh: past the proxy reader's 15 s cache (`?fresh=1`) — Refresh, a card raised or answered on the stream, and the read
+  // right after a seat receipt; a plain read joins any flight, a fresh one joins only a fresh one
   function load({ fresh = false } = {}) {
     if (flight && (flightFresh || !fresh)) return flight;
     const mine = ++seq;

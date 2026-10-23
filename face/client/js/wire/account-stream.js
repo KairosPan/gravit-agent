@@ -42,9 +42,8 @@ export function mintClientId(random) {
 /** The Account's push channel for one tab, over the face's proxy. The host owns on and off (`open`, `close`), the
  * follow set (`follow`) and what an event means (`onEvent`); this owns the connection, the resume point and the
  * follow POSTs, and tells `onStatus` each new status. `open()` is a no-op while the stream is on (connecting, open,
- * stale or waiting to reopen). `now` is taken with the host's other deps and not read: the clocks are the injected
- * timers.
- * @param {{createEventSource: (url: string) => AccountEvents, fetcher: (path: string, init: {method: string, headers: Record<string, string>, body: string}) => Promise<{status: number}>, schedule: (callback: () => void, delay: number) => any, cancelTimer: (timer: any) => void, now?: () => number, random: (length: number) => Uint8Array, onStatus?: (status: 'idle'|'connecting'|'open'|'stale'|'closed') => void}} deps
+ * stale or waiting to reopen). The clocks are the injected timers.
+ * @param {{createEventSource: (url: string) => AccountEvents, fetcher: (path: string, init: {method: string, headers: Record<string, string>, body: string}) => Promise<{status: number}>, schedule: (callback: () => void, delay: number) => any, cancelTimer: (timer: any) => void, random: (length: number) => Uint8Array, onStatus?: (status: 'idle'|'connecting'|'open'|'stale'|'closed') => void}} deps
  * @param {(event: AccountEvent) => void} onEvent
  */
 export function createAccountStream({ createEventSource, fetcher, schedule, cancelTimer, random, onStatus = () => {} }, onEvent) {
