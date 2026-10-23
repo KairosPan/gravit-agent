@@ -197,6 +197,26 @@ handed forward — DEVELOPMENT's 30 s seat cache to Task 13, and `gravit-client-
 41. **Task 12 (review):** the holdings' and the paper lens's refusal sentence reaches Portfolio's
     Assets box (`paperFailed` keeps `message`; the view and the renderer draw it as the holdings'
     word) — Task 11's carry in spirit, one family of honest states. Cost if wrong: two lines.
+42. **Task 13 (before review):** CLAUDE.md's two other stale rows are fixed too — row 34 "17 real
+    boots" → 18 (`account-graft-smoke` among them), row 26's `face_bars.py` no longer "a market
+    page's daily bars" but the legacy producer no screen reads — a present-tense fact file must not
+    lie. Cost if wrong: two phrases.
+43. **Task 13 (review):** the Critical is fixed in code, not reworded — the spec (§3, §11) and Review
+    Focus 4 want `Account unreadable`: an Account 2xx body the face does not recognise lands as the
+    page (so the view draws `Account unreadable`, no figure, and the seat box its own
+    `unreadable`), while a refusal or a non-2xx stays `accountFailed` keeping the last page; pinned
+    in `host-account.test.js`. Cost if wrong: a version bump of the Account reads as an outage
+    instead of an unreadable page. (As built: the screens draw `Account unreadable` where the
+    figures would be; the seat box reads `/data/seat.json`, whose reduction is total, so it says
+    `unreadable` only for a body that does not parse.)
+44. **Task 13 (review):** deferred minor 37 is fixed in code too (spec §6.1: a market's page polls
+    quotes for a market the Account does not stream) — when the page's key is not among the tab's
+    rows, the host derives its pair from the page's own view (`pageOf`'s item through
+    `followOf`/`pairsOf`), so a deep link, a Back onto another tab or an un-starred page still rides
+    the poll; pinned in `host-markets.test.js`; the documents' sentence then stands. Cost if wrong:
+    one more quotes pair a call. (As built: `pairsOf` over the page view's lines — its most traded
+    connected line, the one `followOf` gives when there is one; a public listing alone asks
+    nothing, as the Account's `quotes` refuses public venues.)
 
 ## Carried between tasks
 
@@ -248,7 +268,7 @@ handed forward — DEVELOPMENT's 30 s seat cache to Task 13, and `gravit-client-
 | 10 The Markets host layer and slices | f351504; fix round 1 be1a43d | spec ✅ against the amended contract, one Important (the 240 cap on `pairs`); round 1 addressed three, re-review clean | 1133 / 1116 / 17 |
 | 11 The Markets screen and the chart | 3c4e69e; before review 90b9c54; fix round 1 310a23f | spec ✅, quality ❌ (one Important, eight Minor); round 1 addressed nine, re-review clean | 1128 / 1111 / 17 |
 | 12 The wiring, the A-share line, the smoke | a84d65b, 0f9855f; fix round 1 e81eed7 | spec ✅, quality ✅, four Minor and two cross-task gaps ruled Important; round 1 addressed three, re-review clean | 1147 / 1129 / 18; `FACE_SMOKE=1` with `FACE_ACCOUNT_SEAT_DIR` 1145 / 1145 at 0f9855f, not re-run after e81eed7 (neither the smoke nor the helper changed) |
-| 13 The documents for stage 1 | c6608eb (three tidies: the seat's 15 s comment, the stream's unread `now`, the seat stamp's comment), and the commit that adds this file | the controller's review | 1147 / 1129 / 18; typecheck clean |
+| 13 The documents for stage 1 | c6608eb (three tidies: the seat's 15 s comment, the stream's unread `now`, the seat stamp's comment), 08ea070 (the documents and this ledger), 8f42306 (CLAUDE.md's two other rows, Ruling 42); fix round 1 e86cad4 (code, Rulings 43–44), bef028d (documents), and the commit that adds these lines | spec ✅, quality ❌ — 1 Critical (an unrecognised page documented as `Account unreadable`, which the host never drew: it kept the last page as a failure), 1 Important (this ledger lacked Ruling 42 and 8f42306), 5 Minor (CLAUDE.md's `face_data.py`; the iFinD line on Venues, drawn only once the wire has quoted an A share; the curve read after some holdings reads, not all; §4.2's stream routes over `ACCOUNT_QUERY`; a page's own pair off the tab's rows, deferred minor 37); round 1 addressed the seven, the Critical and Minor 5 in code; re-review to come | 1149 / 1131 / 18; typecheck clean |
 
 ## Notes
 
@@ -271,6 +291,14 @@ handed forward — DEVELOPMENT's 30 s seat cache to Task 13, and `gravit-client-
 - Task 12: its brief's two premises were stale — `gravit-client-smoke` never asserted
   `/data/account.json`, and `actions.js` needed no change; the stand-in takes a free port in place
   of 4821.
+- Task 13: the root of the review's Critical was a gap between Task 7 (the host turned a page
+  `pageOk` refuses into a failure) and Task 8 (the renderer drew `Account unreadable` only for a
+  page held as data) that no review caught. Fixing it had a knock-on: with an unrecognised page
+  landed, a market's page would have said `Loading…` under Open orders for a read that had
+  answered, so the orders read gains `unreadable` and says `Account unreadable` (e86cad4). An
+  empty 2xx body stays a failure — there is nothing to draw as a page.
+- Task 13: FACE_SMOKE was not re-run in this task; the documents cite 1145/1145 at 0f9855f and
+  count the four offline tests added since.
 
 ## Deferred minors
 
@@ -385,4 +413,7 @@ handed forward — DEVELOPMENT's 30 s seat cache to Task 13, and `gravit-client-
     looked up among the tab's rows only (`host/markets.js`, `readQuotes`): a deep link to a
     movers-only market, a coin page reached by Back while on Stocks, a market un-starred from its
     own page on Watching; its price then moves with the stream's follow and the explore refresh
-    alone.
+    alone. *Done in Task 13's fix round (e86cad4, Ruling 44).*
+38. Task 13's review, outside its scope: `face/src/data.ts`'s comment still names Refresh and the
+    read right after a fill as the account route's `?fresh=1` callers; no screen reads that route
+    now — the final wave.
