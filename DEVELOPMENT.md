@@ -37,7 +37,7 @@ repository, so §4.8 is where those decisions are recorded now.
 | `docs/design/prototypes/` | the face prototypes (`BRIEF.md`, rounds a/b/c and r2–r4) that §5.5 refers to; the R2 instrument grammar and the R4 palette live here |
 | `docs/research/` | frozen inputs, never edited: `2026-08-22-deepseek-harness-dsh-survey.md` is the survey the profile template cites, `2026-08-30-dsh-wiring-recon.md` the 0.1.1-era wiring recon; the rows the face composes today, and its MCP tools, are read live from `/data/plugins.json` (§4.4), whose MCP servers and their tools Discover's Data shelf draws (§5.4) |
 | `dsh/README.md` | the profile install path, the operator's two profile rows and the default-model row |
-| `face/README.md` | run and sign-in, profile and policy layer, AKShare, the Account seat, Markets and Account (the Account's markets and a market's page, the A shares on the face's wire, the Account's page), the Account in the face (the proxy's routes, the cadence, the fixtures, the smoke), channels, Discover, bots, rooms, temporary subagents, tests, upgrade order, the drills |
+| `face/README.md` | run and sign-in, profile and policy layer, AKShare, the Account seat, Markets and Account (the Account's markets and a market's page, the A shares on the face's wire, the Account's page), the Account in the face (the proxy's routes, the cadence, the fixtures, the smoke, the owner device, Trade), channels, Discover, bots, rooms, temporary subagents, tests, upgrade order, the drills |
 
 ---
 
@@ -940,7 +940,7 @@ smoke that boots without `main.ts` relies on.
 | `http.ts` | `HttpError`, `readBody` (4,096 B cap → 413), the fixed `FORBIDDEN` body |
 | `static.ts` | `/` behind `IndexAuth` (`ctx.connection.authorizeIndex`) and `/client/*` with a traversal-safe resolver — the one page since stage 2; the `RouteRegistrar` contract |
 | `data.ts` | `/data/{market,account,watchlist}.json`, read by no screen since the graft's stage 1: fixed-argv `execFile` of the producers, TTL cache, single-flight, stale-on-error; mounts the bars, search and quote routes; **the trust fence every `/data` route reuses** (`isTrustedDataRequest`, and `isJsonBody` for a POST) |
-| `account-proxy.ts` | the Account's reads, push channel and owner writes for the Markets, Trade and Account screens (§4.4; spec `docs/superpowers/specs/2026-10-22-account-graft-design.md` §5.1): `registerAccountProxy(webServer, deps) → {reader, dispose}` mounts twenty `exact` routes — the fifteen reads of `ReadRoute` (`facePath`; stage 2 added `venues`, `reach` at `/data/account/connect/reach`, `keyfile` and `books` at `/data/account/paper/books`), `/data/account/stream`, `/data/account/stream/markets` and the three writes of `WriteRoute` (`pair`, `prepare`, `exchange` → the Account's `/api/account/pair`, `/api/account/prepare`, `/api/exchange`) — each fence first, then 405; then the fifteen reads' query rebuilt by `rebuildQuery` over `ACCOUNT_QUERY` (the whitelist; a value at most 240 characters decoded, `quotes`' `pairs` 2,000, the request target at most 8,192; `fresh` stripped) or 400, while the two stream routes keep rules of their own (§4.4): `stream` rebuilds `since`, `client` and `markets` under its own bounds (`STREAM_CLIENT`, `markets` 4,000, the browser's `Last-Event-ID` as `since`), and `stream/markets` answers 415 for a body not declared JSON before it refuses any query name with 400; `askAccount` is the plain loopback fetch (no Origin, no `Sec-Fetch-Site`, no cookie, `redirect: "error"`, the route's `ACCOUNT_ABORT_MS` on the headers and the body) answering the Account's status and body or the failure's code (`codeOf`, bounded to `/^[A-Z][A-Z0-9_]{1,31}$/`, else `unreachable`); per route a cache of 2xx answers by rebuilt query (`ACCOUNT_TTL_MS`, `ACCOUNT_CACHE_KEYS` 64, least recently used out first), one flight per query, `?fresh=1` never joining a plain flight; `pipeStream` writes the Account's SSE through chunk by chunk and drops a browser 256 KiB behind; `STREAM_CLIENT`, `STREAM_BODY_LIMIT` (4,096 bytes); the POST routes share `readJsonPost` (fence, 405, 415 for a body not declared JSON, 400 for any query name, then `readBody` under the route's limit, 413 past it) and `postHandler`, which forwards the body as the UTF-8 text it read, with `content-type: application/json`, never parsed, kept, logged or echoed, cut at the route's abort, the Account's status and body back as they are, never kept and never stale — `WRITE_BODY_LIMIT` `pair` 4,096 · `prepare` 16,384 · `exchange` 65,536 bytes, `WRITE_ABORT_MS` 7,000 · 30,000 · 30,000 ms; `disabled` answers 503 everywhere; `reader` is the `account` route's reads, which `main.ts` hands the seat route, and `createAccountReader` the same reads with no route; `dispose` forgets every kept answer and aborts every open stream's upstream |
+| `account-proxy.ts` | the Account's reads, push channel and owner writes for the Markets, Trade and Account screens (§4.4; spec `docs/superpowers/specs/2026-10-22-account-graft-design.md` §5.1): `registerAccountProxy(webServer, deps) → {reader, dispose}` mounts twenty `exact` routes — the fifteen reads of `ReadRoute` (`facePath`; stage 2 added `venues`, `reach` at `/data/account/connect/reach`, `keyfile` at `/data/account/keyfile`, and `books` at `/data/account/paper/books`), `/data/account/stream`, `/data/account/stream/markets` and the three writes of `WriteRoute` (`pair`, `prepare`, `exchange` → the Account's `/api/account/pair`, `/api/account/prepare`, `/api/exchange`) — each fence first, then 405; then the fifteen reads' query rebuilt by `rebuildQuery` over `ACCOUNT_QUERY` (the whitelist; a value at most 240 characters decoded, `quotes`' `pairs` 2,000, the request target at most 8,192; `fresh` stripped) or 400, while the two stream routes keep rules of their own (§4.4): `stream` rebuilds `since`, `client` and `markets` under its own bounds (`STREAM_CLIENT`, `markets` 4,000, the browser's `Last-Event-ID` as `since`), and `stream/markets` answers 415 for a body not declared JSON before it refuses any query name with 400; `askAccount` is the plain loopback fetch (no Origin, no `Sec-Fetch-Site`, no cookie, `redirect: "error"`, the route's `ACCOUNT_ABORT_MS` on the headers and the body) answering the Account's status and body or the failure's code (`codeOf`, bounded to `/^[A-Z][A-Z0-9_]{1,31}$/`, else `unreachable`); per route a cache of 2xx answers by rebuilt query (`ACCOUNT_TTL_MS`, `ACCOUNT_CACHE_KEYS` 64, least recently used out first), one flight per query, `?fresh=1` never joining a plain flight; `pipeStream` writes the Account's SSE through chunk by chunk and drops a browser 256 KiB behind; `STREAM_CLIENT`, `STREAM_BODY_LIMIT` (4,096 bytes); the POST routes share `readJsonPost` (fence, 405, 415 for a body not declared JSON, 400 for any query name, then `readBody` under the route's limit, 413 past it) and `postHandler`, which forwards the body as the UTF-8 text it read, with `content-type: application/json`, never parsed, kept, logged or echoed, cut at the route's abort, the Account's status and body back as they are, never kept and never stale — `WRITE_BODY_LIMIT` `pair` 4,096 · `prepare` 16,384 · `exchange` 65,536 bytes, `WRITE_ABORT_MS` 7,000 · 30,000 · 30,000 ms; `disabled` answers 503 everywhere; `reader` is the `account` route's reads, which `main.ts` hands the seat route, and `createAccountReader` the same reads with no route; `dispose` forgets every kept answer and aborts every open stream's upstream |
 | `seat.ts` | `/data/seat.json` (§4.4): `seatView` (the Account's `/api/account` reduced to the seat's standing, total over any shape) and `registerSeatRoute` (the fence, then every read through an `AccountReader` — the proxy's, as `main.ts` hands it, else one it makes with `createAccountReader` (`SEAT_TIMEOUT_MS`, 7 s) — keeping no cache and no flight of its own: a 2xx answer served for `SEAT_TTL_MS` (`ACCOUNT_TTL_MS.account`, 15 s), `?fresh=1` never joining a plain read in flight but asking again after it, a failure never kept; `disabled` for a row a patch disabled; the failure's code and never its text) |
 | `bars.ts` | read by no screen since the graft's stage 1 — `/data/bars?id=&days=`: the request checked (one us id, 5–730 days, default 120), a per-(symbol, days) cache (600 s, 64 keys, least recently used out), single-flight, stale-on-error, `face_bars.py` spawned with exactly `[SYMBOL, DAYS]`; `quotes.ts`'s `parseInstrumentId` is the id grammar both routes share |
 | `watchlist.ts` | joins the watchlist producer's US snapshots with the reference-only search catalog |
@@ -2209,7 +2209,8 @@ and the held render lands after the click. Clicks are delegated by `data-action`
 `setRange`, `handToGravit`; Account's `refreshAccount` (the page and the seat past the cache, the
 holdings), `setHistoryRange`, `openVenueDetails`/`closeVenueDetails`,
 `openStatement`/`closeStatement`, `exportStatement`; the owner device's `pairDevice` (the code in
-`#pair-code`), `signIn`, `signOut` and `letDevice` (each a sheet but Sign in), `openSheet` (an
+`#pair-code`, on Pair or on the pair form's submit — Enter in the box — held while a pairing is in the
+air), `signIn`, `signOut` and `letDevice` (each a sheet but Sign in), `openSheet` (an
 owner key's sheet, its seed built from the store by `data-kind` and the key's data — the connect
 and paper sheets once their read lands), `askRevoke`/`askDisconnect` (asked in place, then their
 sheet on `confirmYes`), `grant` (`grantOf`'s sheet), the sheet's `sheetField`, `sheetSubmit`,
@@ -2405,8 +2406,9 @@ on the Account's page.
 **The owner device on screen** (`render/owner.js`; every word `owner-view.js`'s, `sheet-view.js`'s
 or the Account's) — the device line under the Account head's chips, one muted sentence by role:
 `This page signs for the account`; `Waiting to be let in — Let it sign on the Account page, under
-Devices`; `Pair with the code the Account printed in its terminal` with the pair box (`#pair-code`,
-**Pair**); `Signed out` with **Sign in**; `This browser cannot sign for the account`; nothing while
+Devices`; `Pair with the code the Account printed in its terminal` with the pair box (a form:
+`#pair-code`, **Pair**, Enter submits it); `Signed out` with **Sign in**; `This browser cannot
+sign for the account`; nothing while
 `unknown` — the Account's last refusal to the device joined on with ` · `, Pair and Sign in off
 while a pairing is in the air. **Devices** in Settings (`devicesOf`): each owner `label · id`, this
 page's own marked `this page`; each device waiting `kid · since <date>`, with **Let it sign** — and
@@ -2430,7 +2432,10 @@ leading lens's rows matched to an Account key, a prediction held opening as a se
 `Loading…`, `No markets`, `Markets unavailable`, `Searching…`, `Nothing matches “q” under Crypto.`),
 **Under way** (`underWayOf`: each working order in `orderWords`, its id, and **Cancel** — one click
 — where the Account knows what cancels it, on a page that signs; `Nothing under way.`; what was
-said on Trade, a cancel's answer or a fill, over them), and the ticket panel: `Pick a market`
+said on Trade, a cancel's answer or a fill, over them; under them **Cards waiting** when the page
+has cards — `cardsOf`, each `reason · value · answer by` in the Cards tab's words (`cardFactsOf`)
+with **Review →** to `#/account/cards`, rows only, no key that signs), and the ticket panel:
+`Pick a market`
 with none open; else the head (`Buy ETH` / `Sell ETH`, the close key), the market picked, a
 prediction's outcomes in cents, **Where** (the able lines as keys, `Best` and `Paper` marked; the
 other lines dim, a public listing with `Public` and **Connect to trade** → `#/account/venues`),
@@ -2743,7 +2748,7 @@ from the member's own log without activating it (§5.4) — it follows no member
 | Command | From | Needs | Measured 2026-09-30 |
 |---|---|---|---|
 | `python -m pytest` | repo root | nothing — offline, no keys, no bed | 400 passed in a clean checkout, ~2 s (2026-10-20; the operator's tree adds the untracked `tests/strategies/`) |
-| `cd face && npm test` | `face/` | nothing — no port, no key | 1310 tests, 1292 pass, 18 skipped (2026-10-24) |
+| `cd face && npm test` | `face/` | nothing — no port, no key | 1312 tests, 1294 pass, 18 skipped (2026-10-24) |
 | `cd face && npm run typecheck` | `face/` | | clean, the dependencies' `.d.ts` included (`skipLibCheck: false`) |
 | `cd face && FACE_SMOKE=1 npm test` | `face/` | boots eighteen real trees into `mkdtemp` homes and binds ports; still no LLM or key (four of the smokes also create, and remove, a gitignored `.bots-smoke-*` bots root at the repo root) | the eighteen skipped tests; 1310/1310, none skipped (2026-10-24 at `b45c5cc` — the graft smoke 1/1 again at `e111c27` — with `FACE_ACCOUNT_SEAT_DIR` naming a checkout of buyer-agent-demo @ 133b9a7 — without it the seat and graft smokes stay skipped) |
 | `cd face && npm run check:fixture` | `face/` | the installed dsh | 26 fixture lines: 23 validated, 0 rejected, 3 with no upstream validator |
@@ -2774,7 +2779,7 @@ order path.
 
 ### 7.3 The face suite
 
-1310 tests in 119 files (1292 pass, 18 skipped without `FACE_SMOKE=1`), run by `node --test`
+1312 tests in 119 files (1294 pass, 18 skipped without `FACE_SMOKE=1`), run by `node --test`
 through `tsx`:
 
 - **Composition and boot** — `boot` (the layer order ending with the overlay; the policy layer
@@ -2965,8 +2970,9 @@ through `tsx`:
   after close) and `trade` (the screen without a ticket, a search, the ticket's Where, side,
   amount, order type and extended hours, a ready ticket's quote, its eighteen What-you-sign lines
   and Sign and place, a refusal and done, a prediction, a page that does not sign drawing the
-  picker and Under way with its device line and no Sign or Cancel, no CJK, icon URL, `undefined`,
-  `NaN` or raw JSON); `app-dom` gains the wiring (the device at boot, every key to its sheet, Trade
+  picker and Under way with its device line and no Sign or Cancel, Under way's cards waiting and their
+  Review → (none, nothing added), no CJK, icon URL, `undefined`,
+  `NaN` or raw JSON); `app-dom` gains the wiring (the device at boot, Enter in the pair box, every key to its sheet, Trade
   on its route, the reads after an action), `markets` and `host-markets` the star that signs
   `setWatch` and the Watching union; `market-fmt`, `css`
   (every emitted class has a rule and every class the sheet styles is emitted by some state —

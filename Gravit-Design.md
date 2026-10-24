@@ -5,7 +5,7 @@ revised 2026-09-11 for bot settings, discussion evidence, journal context and te
 subagents; §4, §5 and §7.3 pointers re-read 2026-09-30 for the dsh 0.2.0-rc.2 re-host; revised
 2026-10-18..19 for the role library and the research cycle (§1, §3, §4, §5, §7.2, §8, §9; D13
 now names `GRAVIT.md`; D16 added); revised 2026-10-24 for the face's page as an owner device
-of the Account (§3, §4, §7.3, §8, §9; D18 added) ·
+of the Account (§1, §3, §4, §5, §7.3, §8, §9; D18 added) ·
 **Owner:** the operator ·
 **Authority:** this charter carries intent and principles; mechanism lives in `DEVELOPMENT.md`,
 `face/README.md` (the current face contracts and drills), and code. On a question of intent, the charter

@@ -3,8 +3,8 @@
 One Node 22 process. It boots the DeepSeek Harness — dsh `0.2.0-rc.2`, pinned in
 `src/version.ts` — from the `face` profile (bundles: `@deepseek-ai/dsh-base`
 only), composes its policy defaults below the operator's patch layer and its own
-host rows on top of it, and serves the operator's client — Messages, Markets and
-Account — at http://127.0.0.1:3090/, behind the tokenized sign-in URL it prints at
+host rows on top of it, and serves the operator's client — Messages, Markets, Trade,
+Discover and Account — at http://127.0.0.1:3090/, behind the tokenized sign-in URL it prints at
 start. No build step — `tsx` runs the
 TypeScript directly. Specs: `../docs/superpowers/specs/2026-08-30-face-chat-light-design.md`
 and `../docs/superpowers/specs/2026-08-31-face-instruments-design.md` — dated
@@ -163,7 +163,7 @@ All three of its stages are built:
 What the browser keeps is three keys: `localStorage["gravit-ui.prefs"]` — the theme, the rail's
 fold, the list groups you folded, the last conversation, what was seen — and the stars: the
 Account's markets under `gravit.account.watch.v1`, the A shares under
-`gravit.market.watchlist.v1`; and, once it has paired with the Account, its owner key in
+`gravit.market.watchlist.v1`; and, once it has paired with the Account, two more: its owner key in
 IndexedDB (`gravit-face-owner`) and `gravit.owner.signedOut.v1` after a sign-out. Nothing else: a
 reload rebuilds the page from the host. The demo's director (`d`), its scripted Gravit and its seed are gone with
 the move; `tests/client/*.test.js` keep the renderers and the host layer honest on a fake DOM
@@ -905,7 +905,7 @@ reader, so the seat box and the Account screen share one upstream read within th
 | `explore` on Trade (stage 2) | the kind's picks (`tab=<kind>&limit=12`) at once and every 20 s while Trade is on screen in a visible tab; Trade's search (`q`, `limit=12`) once its box has been quiet for 300 ms |
 | `venues`, `paper/books` (stage 2) | on pressing Connect an account and Open a paper account — the sheet opens with what was read, else once the read lands |
 | `keyfile`, `connect/reach` (stage 2) | for an open Connect an account sheet: on opening, and after the sheet's 300 ms quiet when the key file or the connector it would ask about changed |
-| `pair`, `prepare`, `exchange` (stage 2) | `pair` when the first page lands with no device yet, on Pair and on Sign in; `prepare` when a sheet's form is complete and after 300 ms without a change, at a signature's ten minutes and on a press under its last 30 seconds, and on a ticket's moved market; `exchange` on the sheet's go key, a star, a Cancel |
+| `pair`, `prepare`, `exchange` (stage 2) | `pair` on each load's first page (unless this browser signed out), when a page no longer lists this device after it signed or waited, on Pair and on Sign in; `prepare` when a sheet's form is complete and after 300 ms without a change, at a signature's ten minutes and on a press under its last 30 seconds, and on a ticket's moved market; `exchange` on the sheet's go key, a star, a Cancel |
 | after an owner action | the page, the holdings and the statement past the cache; the seat box too after Let in, a limit or Revoke |
 
 A stream event reads again what it names, past the cache: `order`, `fill`, `paper`, `balance` and
@@ -1000,7 +1000,8 @@ out the Account prints a new pairing code in its own terminal; the face cannot r
 **Every owner action is prepare → What you sign → sign**, the Account's own: the key opens a sheet
 (a drawer over the screen) whose form drafts the Account's action; a complete form is prepared at
 the Account at once and again 300 ms after a change; the sheet shows the Account's quote and **What
-you sign** — every field the signature covers, `name: value`, as the Account sent it, the nonce
+you sign**, a fold that opens on a click — every field the signature covers, `name: value`, as
+the Account sent it, the nonce
 among them — and the go key is on only while the shown preparation is the form's (a changed field
 dims it and turns the key off until the new one lands). A money action's signature is good for ten
 minutes (`Your signature is good for m:ss more.`): at zero it is prepared again, and a press under
@@ -1026,7 +1027,7 @@ account`, `Top up`, `Start over`, `Disconnect`, `Approve` / `Reject`, `Decline`,
   connector, the venue id and name, the key file's path, checked when you pause (`Key file found:
   <path>`, `Missing: …`, the venue's own words where it is not served here) — never what the file
   holds; a venue connected by sign-in, an address or a command line reads `Connect on the Account
-  page`. **Open a paper account** — a name and starting dollars (the id `paper-<name>`, `-2` past one
+  page`. **Open a paper account** — a name and starting dollars (the id `paper-<the name, slugged>`, `-2` past one
   in use), or a kept paper book continued. **Top up** and **Start over** a paper venue (its
   Details). **Disconnect…** asks in place first; the Account refuses while an order or a payment is
   open there.
@@ -1046,7 +1047,8 @@ the face); the picker — **You hold**, **Watching** and **Most traded** of the 
 every 20 seconds while Trade is on screen), or a search's results; **Under way** — the open orders,
 yours and the agents', each with **Cancel** (one press) where the Account knows what cancels it,
 and the last thing said (a cancel's answer, a fill: `Bought 0.04 ETH @ 3,120.50 · Stand-in
-Exchange`); and the ticket:
+Exchange`), and under them **Cards waiting** — each card waiting on you, `reason · value · answer
+by`, with **Review →** to Account › Cards, where it is answered (no key signs here); and the ticket:
 
 - **Where** — the market's lines at the venues you connected that trade, `Best` on the lowest ask
   among those that take an order now, `Paper` where so; a public listing reads **Connect to trade**
@@ -1056,8 +1058,9 @@ Exchange`); and the ticket:
   line offers it. Stops, time in force, post-only, reduce-only, trailing, take-profit and
   stop-loss are not drawn and travel empty.
 - The Account's quote of the order (its words, what it costs, up to what if the price moves, its
-  fee or `fee as <venue> charges it`, `Paper`), the signature's minutes, **What you sign** (the
-  seventeen fields and the nonce), and **Sign and place**. The answer is the order's line
+  fee or `fee as <venue> charges it`, `Paper`), the signature's minutes, **What you sign** (a fold
+  that opens on a click: the seventeen fields and the nonce), and **Sign and place**. The answer
+  is the order's line
   (`ord-0007 · open on the book`, `filled`) and the fill is told when the stream hears it; a
   refusal is the Account's words. The ticket follows its market on the stream and, once the price
   moved from the one the shown preparation stood at, prepares it again quietly.
@@ -3097,15 +3100,17 @@ design's §10. **Paper venues only**: connect no real venue to the Account for t
 `--live-cap 1`. Needs: the Account service on 4820 with writes on (`npm run account -- --live-cap
 1`), your browser already its owner on the Account's own page, the face started with keys and the
 seat row up (for step 7, the seat admitted as **Gravit** with a `trade` limit on a paper venue —
-"The account-seat drill"), the face opened in a browser profile that has never paired with the
-Account.
+"The account-seat drill"), the face opened at an origin that has never paired with the Account —
+your own browser profile will do: the key is per origin, and the Account's page at 4820 is another
+origin with its own key.
 
 1. **Waiting.** Open Account. The device line under the head reads `Waiting to be let in — Let it
    sign on the Account page, under Devices`; no owner key is drawn anywhere (Venues, Agents,
    Cards, Trade's ticket, a market's Buy).
 2. **Let it sign.** On the Account's own page, Settings › Devices lists a browser asking to sign
-   (`A browser asked to sign`); press Let it sign there. Back in the face, within a read (20 s, or
-   Refresh) the line reads `This page signs for the account`, and the keys appear; Settings ›
+   (`A browser asked to sign`); press Let it sign there. Back in the face, within a read (20 s, 80 s
+   while the stream is open — or press Refresh) the line reads `This page signs for the account`,
+   and the keys appear; Settings ›
    Devices in the face lists both devices, this one marked `this page`.
 3. **A watch.** On Markets, star a crypto row you are not watching: one press, no sheet. Expect
    the star on, and the same market on the Account page's watch list; star it off and it leaves
@@ -3121,8 +3126,9 @@ Account.
    asset in Portfolio under the paper book.
 6. **A cancel.** Place a limit buy well under the market on the paper venue; it rests in Under way;
    **Cancel** (one press) and see it `canceled`.
-7. **Gravit's order, two cards.** In a channel, ask Gravit to buy $10 of a stock on the paper venue.
-   Expect the face's Gate 2 card in the thread (✓), then the Account's Guard card in the face's
+7. **Gravit's order, two cards.** In a channel, ask Gravit to buy $10 of a stock on the paper venue
+   the seat's `trade` limit names. Expect the face's Gate 2 card in the thread (✓), then the
+   Account's Guard card in the face's
    Account › Cards — What it asks every field — and **✓ Approve** there (the sheet, What you sign,
    Approve). `portfolio_wait` returns done in the thread.
 8. **The statement.** Account › Statement: your order's line reads `You`, Gravit's `Gravit,
