@@ -1,8 +1,7 @@
 # GRAVIT.md — the workspace, for every agent dsh runs here
 
-Read by Gravit, its role children and the bots alike, as workspace instructions: facts and
-rules of this tree, never anyone's identity or persona. When this file and the tree disagree,
-the tree is right and this file is wrong.
+Read by Gravit, its role children and the bots alike: facts and rules of this tree, never
+anyone's identity. When this file and the tree disagree, the tree is right.
 
 Three layers. MARKET and ACCOUNT are the `alpaca_kit` package: import it for backtests
 (`alpaca_kit.replay.replay_days`), call its MCP tools for interactive reads. STRATEGY is
@@ -43,7 +42,7 @@ return EMPTY frames and say nothing: bound every replay with `start=` and `end=`
 no warmup — `screen(kind="trend_template")` returns nothing before 2025-06-05 on `2yr` and ever
 on `broad`. Offline work sets `ALPHA_PIT_ROOT=data/pit/2yr` and `ALPHA_DATA_SOURCE=snapshot`,
 both resolved against the CWD; a channel session's shell runs in `strategies/<name>/`, so use
-the absolute bed path there (`backtest.py` anchors on its own file and is immune).
+the absolute bed path there.
 
 ## A strategy directory
 
@@ -52,8 +51,8 @@ reserved until the order gate opens). Three optional headline keys the channel p
 none required: `one_line` (the current conclusion, one sentence), `next` (the next step),
 `numbers` (free figures as a mapping of scalar values). Name a strategy as the face names
 channels: a letter or digit in any script first, then letters, digits, `-` and `_`, at most 41
-code points, no spaces or dots — the name becomes a path typed into shell by hand, and `cd x y` is
-zsh's two-argument form, exit 0 in the wrong directory whenever the substituted path exists.
+code points, no spaces or dots — the name becomes a path typed into shell by hand, and zsh's
+`cd x y` exits 0 in the wrong directory when the substituted path exists.
 Commit your own iterations between cycles; a cycle commits once, with its verdict, or leaves
 the commit to the operator. git log is the audit trail.
 
@@ -67,6 +66,8 @@ operator message: 3 rounds, 10 bot messages, 2 peer continuations per round. The
 
 `mcp__account__*`: Gravit's seat at the operator's Account — paper venues only; a write stops for a
 card here, then one there; after a `card` answer, `portfolio_wait`; see `account-seat-guide`.
+The operator trades the same Account by hand from the face; a position Gravit did not open may be
+the owner's, and the statement names who.
 
 ## Tests
 

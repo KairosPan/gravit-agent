@@ -155,12 +155,17 @@ All three of its stages are built:
   inventory of what Gravit runs — "Discover" below), the row actions, a tool result drawn as a
   table, tiles or a chart with its raw text a click away, a conversation's subagent children
   ("Temporary subagents" below) and a room member's trace. There is no shop, no Mail and no
-  Memory: what the demo drew with no back end left the tree.
+  Memory: what the demo drew with no back end left the tree;
+- **since the graft's stage 2** (2026-10-24): Trade (`#/trade`) and the owner's keys on Markets
+  and Account, live while this page signs for the Account as one of its owner devices ("The
+  Account in the face" below).
 
 What the browser keeps is three keys: `localStorage["gravit-ui.prefs"]` — the theme, the rail's
 fold, the list groups you folded, the last conversation, what was seen — and the stars: the
 Account's markets under `gravit.account.watch.v1`, the A shares under
-`gravit.market.watchlist.v1`. Nothing else: a reload rebuilds the page from the host. The demo's director (`d`), its scripted Gravit and its seed are gone with
+`gravit.market.watchlist.v1`; and, once it has paired with the Account, its owner key in
+IndexedDB (`gravit-face-owner`) and `gravit.owner.signedOut.v1` after a sign-out. Nothing else: a
+reload rebuilds the page from the host. The demo's director (`d`), its scripted Gravit and its seed are gone with
 the move; `tests/client/*.test.js` keep the renderers and the host layer honest on a fake DOM
 and a fake host, and `gravit-client-smoke.test.ts` opens one real session over the real wire.
 Client assets carry no cache headers: hard-reload after any edit under `client/`.
@@ -336,7 +341,10 @@ Connect an account → Paper account: `paper-1`, $10,000), then start the face. 
 (`allow: paper-1` — never `*`, which expands to every venue connected at that moment). From then
 on an order Gravit places there is two cards: the face's `Your call` card in the conversation,
 then the Account's Guard card on its Portfolio page (thirty minutes), signed with your device
-key; Gravit waits on it with `portfolio_wait`.
+key; Gravit waits on it with `portfolio_wait`. Since 2026-10-24 the face's page can be one of
+your devices too ("The Account in the face" below): once it signs, the same owner steps — let the
+seat in as **Gravit**, give it a limit on the paper venue, answer its Guard card (Account › Cards,
+✓ Approve) — are keys in the face, each prepared and shown before you sign it.
 
 Before the first boot, look at the Account page's Agents list: a seat already named **Gravit** there
 — an earlier install's, or one renamed to it — is the one the Venues box reads and the one a new
@@ -576,9 +584,14 @@ shares the face quotes itself — and **Account** (`#/account/portfolio`, `venue
 the face" below): market data comes the Account's way — keyless, server-side at the Account, read
 by what the page is looking at, one push channel per tab — and every figure on either screen is
 the Account's but an A share's quote. Both are screens of the client at `/` since stage 2 of
-route A; the old `/market` and `/account` pages are gone, and their addresses answer 404. Neither
-screen places, cancels or signs anything — no Buy, no Sell, no Trade: Gravit orders through the
-seat's tools, behind Gate 2 and the Account's own card.
+route A; the old `/market` and `/account` pages are gone, and their addresses answer 404. Gravit
+orders through the seat's tools, behind Gate 2 and the Account's own card. Since 2026-10-24 the
+operator orders by hand too: the face's page can be one of the Account's owner devices, and while
+it signs, **Trade** (`#/trade`, the rail's item after Markets) places and cancels the operator's
+orders, a market's page carries Buy and Sell, a star on an Account market signs the Account's own
+watch list, and Account carries the owner's keys — each signed in this browser at the Account's
+door, never by the face ("The Account in the face" below). While the page does not sign, those
+keys are absent, not disabled, and the device line under the Account head says why.
 
 ### Markets
 
@@ -624,7 +637,12 @@ list is asked of the Account once per boot (`explore?q=<symbol>`, a coin by its 
 is the Account's row, starred, and moves to the Account's store; not found, it is listed once as
 `Not listed at the Account`, with **Remove** in place of its star; a read that fails asks again on
 the next boot. A starred market no read lists is drawn `Not in this read` and can still be
-un-starred; neither opens a page.
+un-starred; neither opens a page. On a page that signs for the Account, a star on an Account row
+is the Account's own watch list instead — the one Gravit's seat reads: one press signs
+`setWatch` at the market's line (no sheet, as on the Account's page), taken it reads the page again
+and the star follows it, refused the Account's sentence is the watchlist's words; un-starring signs
+the Account's entry off and takes the key off this browser's store too. **Watching** is then both
+lists at once.
 
 While Markets is on screen in a visible tab it reads the tab on screen at once and every 20
 seconds, and every 5 seconds the quotes of the rows drawn (on a market's page, its own market's),
@@ -666,8 +684,11 @@ drawn from the wire's enums. Provider references:
 whole (`#/markets/coin:BTC`), a face id canonicalised (`#/markets/cn:600519`), an id that is
 neither opens Markets, and a key no read lists yet draws Markets until a read lists it. The head:
 the tile, the name, its sub (the kind and the symbol at the line the page follows, `Stock · NVDA`;
-an event's category and when it closes), `Closed` past its end; **Hand to Gravit** — a new message
-in the root channel with `Look at <base> (<name>)` in the composer — and **Watch** / **Watching**.
+an event's category and when it closes), `Closed` past its end; on a page that signs, for a coin,
+a stock, an RWA or a prediction (never a perpetual or a pre-IPO contract), **Buy**, and **Sell**
+where something of it is held — each opens Trade on the market with the ticket on that side;
+**Hand to Gravit** — a new message in the root channel with `Look at <base> (<name>)` in the
+composer — and **Watch** / **Watching**.
 Then the price now (the stream's quote for the market the page follows, else the quotes poll's,
 else the explore read's) with the explore read's 24 hours, an event's outcomes in cents under it
 (`Yes 62¢`, `No 38¢`), where the price is from with its age, and the facts **24h volume** and
@@ -714,8 +735,9 @@ while the tab's stream is open), on **Refresh** and right after a streamed recei
 too (those two `?fresh=1`, past the proxy's 15 seconds), and on the stream's events. The head:
 `Account`, the Account's mode and writes as chips (`Guard` or `Beast`; `Trading on · $250 a move`
 or `Read-only`), read only — changing either stays on the Account's page — then Refresh and
-Settings; the Account's refusal sentence, when it gave one, as a muted line under it. Four tabs,
-and a drawer:
+Settings; under it the device line (whether this page signs for the Account, "The Account in the
+face" below); the Account's refusal sentence, when it gave one, as a muted line. Four tabs, and a
+drawer — the keys marked *(signs)* below are drawn only while this page signs:
 
 - **Portfolio** (on entering it the holdings, then the curve): the leading figure with its label
   and the second beside it, smaller — **Net worth** (the Account's `totalUsd`, real money) leads
@@ -736,29 +758,42 @@ and a drawer:
   health (`Answers`, `Not answering since 14:02`, `Not read yet`), what it does (`Trades`, `Moves
   money`, `Receives`, `Earns`), `Paper`, stale — with **Details**, a drawer of what it holds there
   and the Account's facts (`No trading`, `Restricted`, `Not served`, `Close only`, `Watch only`,
-  `Key file` by its path, never what is in it); under them, once the face's wire has quoted an A
-  share on the cn list, `A-share quotes` with the iFinD provider's state; then the **Account seat**
+  `Key file` by its path, never what is in it; a paper venue's **Top up** and **Start over**
+  *(signs)*), and **Disconnect…** *(signs;* asked in place, `Yes, disconnect`; none on an agent
+  wallet, and the Account refuses while an order or a payment is open there*)*; under the list
+  **Connect an account** and **Open a paper account** *(signs)*; under them, once the face's wire
+  has quoted an A share on the cn list, `A-share quotes` with the iFinD provider's state; then the **Account seat**
   box (`/data/seat.json`, read on entering Venues or Agents, on Refresh, right after a seat receipt
   and on a card raised or answered): the service reachable or
   not with the Account's own mode and writes (`Guard · Trading on · $1 a move`), the seat (`Gravit
   · admitted until Nov 19`, `knocking — admit it on the Account page`, `not on the account`,
   `expired`, `revoked`) with each limit (`trade · paper-1 · $100 an order · $850 of $1,000 left`),
   the venues with a `Paper` chip on the paper ones, `N cards waiting`, the stamp, and **Open the
-  Account page** — the only place a card is signed.
+  Account page**.
 - **Agents** (on entering it the Account's agents and the seat): Gravit's seat first, in the seat
   box's words, with its limits and the counts of its cards waiting and its open orders (`—` until
-  the agents are read), then every other agent with its status, until when, its limits and counts,
-  and under **Knocking** the keys asking to be let in.
+  the agents are read), then every other agent with its status, until when, its limits and counts
+  — each with **Give a limit…**, **End limit** on each trading limit standing, and **Revoke…**
+  (asked in place, `Yes, revoke`; final for that address) *(signs)* — and under **Knocking** the
+  keys asking to be let in, each with **Let in…** *(signs)*. Gravit's own row carries no keys; its
+  knocking key is under Knocking like any other — let it in under the name **Gravit**, which is how
+  the seat box finds it (its `knocking — admit it on the Account page` line is the seat's words).
 - **Cards** (the tab counting what waits; on entering it the page past the cache): **Waiting for
   you**, grouped by agent — each card's reason, value and the time to answer by, and **What it
-  asks**, every field the owner signs, as the Account sent it — and the agents' **Asks** under
-  them. They are answered on the Account's page.
+  asks**, every field the owner signs, as the Account sent it — with **✓ Approve** and **✗ Reject**
+  *(signs;* one card, one signature, no approve-all*)* — and the agents' **Asks** under them, each
+  with **Grant** where the face grants it (a bigger limit or a venue opens Give a limit, a knock Let
+  in, a top-up Top up; a session, leverage or the mode is the Account page's) and **Decline**
+  *(signs)*. On a page that does not sign they are answered on the Account's page.
 - **The Statement** (a drawer, its lines read on opening it): the Account's lines newest first,
   each with who it was by, its status in the Account's word and its fee; **Export CSV** — a
   `statement.csv` built in the browser (`date,type,kind,description,amount,fee,status,by`; a text
   cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return is led by an apostrophe);
   `Loading…`, `No statement lines yet`, `Statement unavailable`, the Account's sentence over the
   lines kept after a refusal.
+- **Settings** (a drawer on every screen): the theme, and **Devices** — the Account's owner devices
+  by label, this page's marked `this page`, the browsers waiting to be let in, with **Let it sign**
+  and this page's **Sign out** *(signs)*.
 
 ### The face's own routes no screen reads
 
@@ -790,10 +825,12 @@ loopback fetch — no `Origin`, no `Sec-Fetch-Site`, no cookie, `redirect: "erro
 the `mcp-account` row as composed (`FACE_ACCOUNT_URL`, default `http://127.0.0.1:4820`, unless a
 patch moved it). A disabled seat row disables the proxy too: every valid read answers
 `503 {"ok":false,"unreachable":"disabled"}` and asks nothing. The face vendors nothing of the
-Account, holds no key, signs nothing, and logs nothing of a body, a query or a frame.
+Account, holds no key, signs nothing, and logs nothing of a body, a query or a frame. Since
+2026-10-24 (stage 2) the proxy also carries the owner's three writes, and the page — this
+browser, not the face — can be one of the Account's owner devices ("The owner device" below).
 
 Each route is `exact` — the table is the allow-list, and nothing else of the Account's surface is
-reachable through the face:
+reachable through the face (twenty routes: fifteen reads, the push channel's two, three writes):
 
 | Route | What it reads at the Account | TTL | Abort | Query names |
 |---|---|---|---|---|
@@ -810,9 +847,21 @@ reachable through the face:
 | `GET /data/account/agents` | every agent the Account knows, with its limits | 15 s | 7 s | `fresh` |
 | `GET /data/account/stream` | the push channel (server-sent events), one upstream request per browser connection | — | — | `client` (required), `since`, `markets` (4,000 characters) |
 | `POST /data/account/stream/markets` | the markets a stream follows | — | 7 s | none |
+| `GET /data/account/venues` | every venue the Account knows, with where this account can connect it (stage 2) | 60 s | 30 s | none — never the Account's `force` |
+| `GET /data/account/connect/reach` | whether a connector answers from where the Account runs (stage 2) | 5 s | 30 s | `connector` |
+| `GET /data/account/keyfile` | whether a key file is there and which fields it has — a path and names, never a value (stage 2) | 5 s | 30 s | `kind`, `venue`, `ref`, `exchange` |
+| `GET /data/account/paper/books` | the paper books kept on the Account's disk and not connected (stage 2) | 5 s | 30 s | none |
+| `POST /data/account/pair` | `POST /api/account/pair`: this page's public key, its label and the code (stage 2) | — | 7 s | none; at most 4,096 bytes |
+| `POST /data/account/prepare` | `POST /api/account/prepare`: a draft prepared, unsigned (stage 2) | — | 30 s | none; at most 16,384 bytes |
+| `POST /data/account/exchange` | `POST /api/exchange`: the signed envelope (stage 2) | — | 30 s | none; at most 65,536 bytes |
 
-The screens read nine of the eleven reads; `market` and `positions` are proxied and read by no
-screen yet.
+The screens read thirteen of the fifteen reads; `market` and `positions` are proxied and read by
+no screen yet. The writes follow `stream/markets`' rules: a body declared `application/json`
+(else 415) on a bare path (any query name is 400), at most the row's bytes (413), forwarded as the
+text it came as with `content-type: application/json` — never parsed, kept, logged or echoed, so
+the pairing code and a signed envelope pass through the face once and leave no trace in it — and
+the Account's status and body come back as they are, never kept and never served stale (a fetch
+failure is `503` with its code; a disabled row `disabled` once the body is read).
 
 The rules, in order. The `/data` fence first (`403 {"ok":false,"error":"forbidden"}`), then 405
 for a method the row does not name, then the query rebuilt from the row's names in the order they
@@ -852,7 +901,12 @@ reader, so the seat box and the Account screen share one upstream read within th
 | `statement` | on opening the Statement and a market's page; on the stream's events |
 | `agents` | on entering Agents; on a `snapshot` |
 | `stream` | one per tab, open while the tab is visible; `since=<the last frame id>` on a new source; no sign of life for 20 s is stale, 45 s dead; a dead or refused source opens again after 1, 2, 5, 10, then 30 s |
-| `stream/markets` | the market a page follows (sixteen at most), told on every open and every change as `{client, markets, n}` with a rising `n`, and once more a second later when the face did not take it |
+| `stream/markets` | the market a page follows (sixteen at most), told on every open and every change as `{client, markets, n}` with a rising `n`, and once more a second later when the face did not take it — on Trade, the ticket's line |
+| `explore` on Trade (stage 2) | the kind's picks (`tab=<kind>&limit=12`) at once and every 20 s while Trade is on screen in a visible tab; Trade's search (`q`, `limit=12`) once its box has been quiet for 300 ms |
+| `venues`, `paper/books` (stage 2) | on pressing Connect an account and Open a paper account — the sheet opens with what was read, else once the read lands |
+| `keyfile`, `connect/reach` (stage 2) | for an open Connect an account sheet: on opening, and after the sheet's 300 ms quiet when the key file or the connector it would ask about changed |
+| `pair`, `prepare`, `exchange` (stage 2) | `pair` when the first page lands with no device yet, on Pair and on Sign in; `prepare` when a sheet's form is complete and after 300 ms without a change, at a signature's ten minutes and on a press under its last 30 seconds, and on a ticket's moved market; `exchange` on the sheet's go key, a star, a Cancel |
+| after an owner action | the page, the holdings and the statement past the cache; the seat box too after Let in, a limit or Revoke |
 
 A stream event reads again what it names, past the cache: `order`, `fill`, `paper`, `balance` and
 `position` the holdings and the page; `statement` the statement; `card` the page, and the seat box
@@ -870,8 +924,11 @@ the first Markets row's line at a venue connected live (the Stand-in Broker's NV
 capture) — and the push channel's first frames in `stream-frames.txt` (ten, or the whole ones heard
 in 20 seconds: this capture's `retry`, a snapshot, a statement line and a heartbeat). Every `native`
 and `icon` key is dropped and every array cut to its first twelve entries (a frame's arrays stay
-whole); `tests/account-fixtures.test.ts` holds the files to what the views read and to that strip,
-and the client tests draw from them. Capture again when the Account's shapes move — the checkout is
+whole); stage 2 added `venues`, `keyfile` and `paper-books`, and three preparations —
+`prepared-watch`, `prepared-order` and `prepared-card`, a `setWatch`, a `liveOrder` and an
+`approveCard` as the Account prepares them, nothing signed — `venues` and a preparation's arrays
+kept whole; `tests/account-fixtures.test.ts` holds the files to what the views read and to that
+strip, and the client tests draw from them. Capture again when the Account's shapes move — the checkout is
 read, never written, and the stand-in takes a free port, never 4820:
 
 ```bash
@@ -888,12 +945,142 @@ nothing lands under `~/.buyer-agent-demo` — with `FACE_ACCOUNT_URL` at it, reg
 the seat route as `main.ts` does, and asks the face's own port: `/data/account` answers 200 with
 `ok` and its venues; `/data/account/explore` lists items; `explore?force=1` is refused 400 and never
 asked of the Account; `/data/account/stream` is `text/event-stream` with a named frame carrying JSON
-within 5 seconds; `/data/seat.json` reads the Account reachable. Skipped unless both variables are
-set; run it, and the seat smoke, after pulling the checkout:
+within 5 seconds; `/data/seat.json` reads the Account reachable. Then the owner's half: the
+client's own `host/owner.js`, run under Node by `tests/helpers/owner-node.ts` (Node's WebCrypto, the
+key in memory, every call to the face's port — never the stand-in's), pairs with the code the
+stand-in printed in its log and signs; it watches the first `ex` market the page does not watch and
+sees it in the page's watch list, then unwatches it and sees it gone; with the stream opened first
+it buys $25 of ETH/USDT at the Stand-in Exchange at market, hears the order's `fill` within 10
+seconds and finds ETH counted in the holdings risen by what filled; it rests a limit buy of
+SOL/USDT 10 % under the ask and cancels it by its id; it approves the stand-in's seeded card
+(Claude Code's market buy of ETH) and hears the `card` frame say `approved`; an exchange posted
+from a foreign origin is refused 403; and neither the pairing code nor any of the six signatures it
+sent appears in what the face's process wrote. What the stand-in cannot drill — a second device
+waiting for an owner's Let it sign (it admits the first browser on the code) — the owner drill
+below covers. Skipped unless both variables are set; run it, and the seat smoke, after pulling the
+checkout:
 
 ```bash
 cd face && FACE_SMOKE=1 FACE_ACCOUNT_SEAT_DIR=$HOME/buyer-agent-demo npx tsx --test tests/account-graft-smoke.test.ts
 ```
+
+### The owner device (client/js/host/owner.js + client/js/wire/owner-key.js)
+
+Since 2026-10-24 (stage 2 of the design, §6.3) this browser can sign for the Account as one of its
+owner devices — the Account's own page's protocol, byte for byte
+(`../docs/research/2026-10-22-account-owner-path-map.md`), reproduced in the client. The key is a
+P-256 pair WebCrypto makes non-extractable, kept in this browser's IndexedDB (`gravit-face-owner` ›
+`keys` › `device`) at the face's origin; only its public half leaves the browser, at pairing. The
+face's process holds no key, makes no envelope and signs nothing: it carries the bytes.
+
+**The device line** under the Account head says where this page stands, in one muted sentence:
+
+| Line | What it means | Its key |
+|---|---|---|
+| `This page signs for the account` | this key is among the Account's owners: every owner key is drawn | — |
+| `Waiting to be let in — Let it sign on the Account page, under Devices` | the Account has an owner and this page asked to sign: an owner device presses Let it sign once (the Account's page under Settings › Devices, `A browser asked to sign`, or another face page that signs) | — |
+| `Pair with the code the Account printed in its terminal` | the Account has no owner yet: the code it printed makes this page the owner (five wrong tries end pairing until the Account restarts — its rule, in its words) | the code box and **Pair** |
+| `Signed out` | this page signed out; nothing is paired until you sign in | **Sign in** (a new key) |
+| `This browser cannot sign for the account` | no WebCrypto, or a key that could not be made | — |
+
+Nothing is drawn while the first page has not landed. The Account's last refusal to the device
+rides on the line after ` · `. The first page that lands pairs the device once
+(`POST /data/account/pair {jwk, label: "Gravit face"}`); every page after re-reads where it stands.
+If the Account answers a signature `E_ACCOUNT_BAD_SIGNATURE` — it restarted and lost its pending
+list, or an owner dropped this device — the page pairs again, the line says so, and no owner key is
+drawn until it signs again.
+
+**Settings › Devices**: the Account's owner devices by label, this page's own marked `this page`,
+the browsers waiting to be let in (`<kid> · since <date>`), each with **Let it sign** — which signs
+the owners list with that device added, so a second face browser, or the Account's own page, is
+admitted from here — and this page's **Sign out**, a signed `signOut` of this device: taken, the
+key is deleted and `gravit.owner.signedOut.v1` is set in this browser. When the last device signs
+out the Account prints a new pairing code in its own terminal; the face cannot read it.
+
+**Every owner action is prepare → What you sign → sign**, the Account's own: the key opens a sheet
+(a drawer over the screen) whose form drafts the Account's action; a complete form is prepared at
+the Account at once and again 300 ms after a change; the sheet shows the Account's quote and **What
+you sign** — every field the signature covers, `name: value`, as the Account sent it, the nonce
+among them — and the go key is on only while the shown preparation is the form's (a changed field
+dims it and turns the key off until the new one lands). A money action's signature is good for ten
+minutes (`Your signature is good for m:ss more.`): at zero it is prepared again, and a press under
+its last 30 seconds prepares again and signs the fresh one. A refusal is the Account's sentence and
+nothing is signed (`Prepare again` where the price moved or the time ran out). Only a star and a
+Cancel are one press (prepare, then sign at once), as on the Account's page. Each sheet's go word
+says what it signs: `Let it in`, `Give the limit`, `End the limit`, `Revoke`, `Connect`, `Open the
+account`, `Top up`, `Start over`, `Disconnect`, `Approve` / `Reject`, `Decline`, `Let it sign`,
+`Sign out`, `Sign and place`.
+
+**The owner's keys** (each drawn only while the page signs; "Markets and Account" above says where):
+- **Let in…** a knocking key — its address and name, good for 1 · 7 · 30 · 90 days (`approveAgent`).
+- **Give a limit…** an agent — the Account's venues as a pick list, paper first, `*` never offered,
+  the dollars per order and the budget, good for 1 · 7 · 30 · 90 days (`approveSpend`, scope
+  `trade`); the form starts from the agent's standing limit. **End limit** signs the same limit at
+  $0 for a day. **Revoke…** asks in place, then signs the zero address for the key's name — final
+  for that address.
+- **✓ Approve / ✗ Reject** a card — one card, one signature (`approveCard`); Approve re-runs the
+  agent's instruction at the Account, which judges its key, limit and venue again; a card past its
+  thirty minutes is refused as expired. **Grant** an ask opens the matching form; **Decline** signs
+  the decline.
+- **Connect an account** — what the Account connects by a key file (an exchange, a broker): the
+  connector, the venue id and name, the key file's path, checked when you pause (`Key file found:
+  <path>`, `Missing: …`, the venue's own words where it is not served here) — never what the file
+  holds; a venue connected by sign-in, an address or a command line reads `Connect on the Account
+  page`. **Open a paper account** — a name and starting dollars (the id `paper-<name>`, `-2` past one
+  in use), or a kept paper book continued. **Top up** and **Start over** a paper venue (its
+  Details). **Disconnect…** asks in place first; the Account refuses while an order or a payment is
+  open there.
+- **The star** on an Account market (Markets) signs the Account's watch list.
+- **Let it sign** and **Sign out** (Settings › Devices).
+
+Not here, by the design: Guard · Beast, the cap, an agent's session and leverage, Move, Receive,
+Earn, perpetuals, stops, time in force and amend, the desk, brains, Memory, agent wallets — the
+Account's page, through **Open the Account page** (Account › Venues).
+
+### Trade (client/js/host/trade.js + client/js/render/trade.js)
+
+`#/trade` — the rail's item between Markets and Discover; a market page's Buy or Sell opens
+`#/trade/<key>` with the ticket on that side. The kinds **Crypto · Stocks · RWAs · Predictions**
+(the Account's own tabs; perpetuals and pre-IPO contracts are listed on Markets, not traded from
+the face); the picker — **You hold**, **Watching** and **Most traded** of the kind (twelve, read
+every 20 seconds while Trade is on screen), or a search's results; **Under way** — the open orders,
+yours and the agents', each with **Cancel** (one press) where the Account knows what cancels it,
+and the last thing said (a cancel's answer, a fill: `Bought 0.04 ETH @ 3,120.50 · Stand-in
+Exchange`); and the ticket:
+
+- **Where** — the market's lines at the venues you connected that trade, `Best` on the lowest ask
+  among those that take an order now, `Paper` where so; a public listing reads **Connect to trade**
+  and leads to Account › Venues.
+- **Buy or Sell**, **Amount** in dollars or in the market's unit (shares, contracts, the coin),
+  **Market** or **Limit** (a prediction's limit in cents), **Extended hours** on a limit where the
+  line offers it. Stops, time in force, post-only, reduce-only, trailing, take-profit and
+  stop-loss are not drawn and travel empty.
+- The Account's quote of the order (its words, what it costs, up to what if the price moves, its
+  fee or `fee as <venue> charges it`, `Paper`), the signature's minutes, **What you sign** (the
+  seventeen fields and the nonce), and **Sign and place**. The answer is the order's line
+  (`ord-0007 · open on the book`, `filled`) and the fill is told when the stream hears it; a
+  refusal is the Account's words. The ticket follows its market on the stream and, once the price
+  moved from the one the shown preparation stood at, prepares it again quietly.
+- **Hand to Gravit instead** — the market in a new message, as on a market's page.
+
+On a page that does not sign Trade still shows the picker and Under way; the ticket shows the
+device line where the form would be — no Sign and place, no Cancel.
+
+**What holds the owner's hand** (the charter's D18): no gate of this tree's — Gate 2 is the
+agent's. The Account's live cap bounds each order (`npm run account -- --live-cap 1` caps any real
+order at a dollar), its venues' rules apply, and What you sign is drawn before every signature.
+The face cannot tell a paper venue from a real one beyond the Account's `Paper` flag: **connect
+paper venues only** until the operator decides otherwise — a real venue connected to the Account
+and an order placed on it by hand from the face is the charter's revisit trigger.
+
+**The risks, named** (the design's §11): the Account moves fast and nothing of it is pinned here —
+a changed read reads `unreadable`, a changed envelope refuses every signature and the device line
+says so; re-run the smoke after pulling the checkout. A second device needs an owner's word once.
+The browser profile is the device: clearing the face's site data loses the key, the Account keeps
+the old device's row, and the new one is let in like any other — no export, no backup. The proxied
+owner routes are as open as the Account's own door: a local process reaches them without the face's
+cookie and does nothing without an admitted key, but it could ask to sign — so refuse a waiting
+device you do not recognise. One stream per tab: three tabs are three of the Account's thirty-two.
 
 ## Channels (src/channels.ts + src/roster.ts + the list's groups and a channel's page)
 
@@ -1964,7 +2151,7 @@ and `node --test` gives each file its own:
 | `order-gate-smoke.test.ts` | Gate 2's POSITIVE path: an approved stand-in order dispatches, a rejected one does not; then the same through the real `$events` channel |
 | `order-gate-midboot-smoke.test.ts` | Gate 2 armed while `boot()` is still pending: a slow fixture row holds the boot open while an order stand-in registers, and with `bootFace` unresolved and unary `/api` already serving, the order call is HELD with `approval/asked` logged and its body not run, an agentless call is denied by the listener, a marked tool the gate cannot name is denied by the guard alone; once the boot is released the held card reaches the first tab and `allowed-once` dispatches exactly once; a restart of the real `approval` row re-arms the listener once |
 | `account-seat-smoke.test.ts` | the Account seat against the Account's own stand-in (skipped unless `FACE_ACCOUNT_SEAT_DIR` names an installed checkout): the seat's 35 tools and exactly its nine real-account writes gated, a read as the admitted seat, a seat order rejected at the face's card never reaching the seat, the same order allowed once answered by the stand-in with a card, a batch answered leg by leg with cards, and `/data/seat.json` reading that standing with the Account's ISO expiry as milliseconds |
-| `account-graft-smoke.test.ts` | the Account's reads through the face's proxy against the Account's own stand-in (skipped unless `FACE_ACCOUNT_SEAT_DIR` names an installed checkout; "The Account in the face"): `/data/account` 200 with `ok` and its venues, `/data/account/explore` listing items, `explore?force=1` refused 400 without asking the Account, `/data/account/stream` an event stream whose first named frame carries JSON within 5 s, and `/data/seat.json` reading the Account reachable through the proxy's reader |
+| `account-graft-smoke.test.ts` | the Account's reads through the face's proxy against the Account's own stand-in (skipped unless `FACE_ACCOUNT_SEAT_DIR` names an installed checkout; "The Account in the face"): `/data/account` 200 with `ok` and its venues, `/data/account/explore` listing items, `explore?force=1` refused 400 without asking the Account, `/data/account/stream` an event stream whose first named frame carries JSON within 5 s, and `/data/seat.json` reading the Account reachable through the proxy's reader; then the owner's half through the face's port — the client's own `host/owner.js` under Node paired with the stand-in's code, a watch signed on and off, a $25 ETH market buy whose `fill` the stream tells and whose ETH the holdings count, a SOL limit resting and cancelled by its id, the seeded card approved and its `card` frame `approved`, a foreign origin's exchange refused 403, and neither the code nor any signature sent in the face's output |
 | `gravit-client-smoke.test.ts` | the new page on a real boot: `/` with its title and script, the modules under `/client` with their types (Markets' `js/wire/market-quotes.js` and `js/host/markets.js` among them), the old `chat.js` gone and `/market` and `/account` answering 404; the host layer (`client/js/host/live.js` over the page's own wire) listing a session just created and opening it (live, so a follow) into a loaded window with a clean status line; a bare `bootFace` mounts no `/data` route, which the list tolerates |
 | `client-mux-smoke.test.ts` | the page's own `client/js/wire/api.js` and `client/js/wire/mapper.js`, unmodified, against the host: ready, calls, emits, the control baseline, a follow's snapshot and tail, an approval answered and one rejected, a second tab's `cancel` and its refused late answer, Stop withdrawing a gate, a question answered, a gate replayed to a late tab, the non-activating page and projections reads |
 | `askuser-noclient-smoke.test.ts` | with no browser connected, an agent's question BLOCKS (parked for the next client); an agentless one is refused `NO_PROVIDER` |
@@ -2859,7 +3046,8 @@ limit on it ("The Account seat" above), the face started with keys, a channel se
    Venues box counting `1 card waiting`. A model left to itself previews first
    (`portfolio_live_markets`, `portfolio_live_preview`: reads, no card); the card's title is made
    from the dim line, the host's own words, so it never waits on anything else.
-4. **The Account's card.** On the Account page (Portfolio › Waiting for you) the card `Gravit asks
+4. **The Account's card.** On the Account page (Portfolio › Waiting for you) — or, when the face's
+   page signs, in the face's Account › Cards (✓ Approve) — the card `Gravit asks
    to PAPER · buy … AAPL at paper-1 …`; approve and sign. Gravit's `portfolio_wait` returns
    `done`; the Account's statement shows the fill marked paper; on Refresh the Venues box drops
    back to no cards and the limit's `left` falls by the order's worth.
@@ -2901,3 +3089,51 @@ record: the model once reported an ask it had not filed, and corrected itself on
 The automated half passes (`account-seat-smoke` under `FACE_SMOKE=1` with `FACE_ACCOUNT_SEAT_DIR`);
 the keyed run against the real service with a real paper venue is the operator's, before the
 branch lands.
+
+## The owner drill (run before the branch lands, and after pulling the checkout)
+
+The face's page as an owner device of the real Account — "The Account in the face" above, the
+design's §10. **Paper venues only**: connect no real venue to the Account for this drill, and keep
+`--live-cap 1`. Needs: the Account service on 4820 with writes on (`npm run account -- --live-cap
+1`), your browser already its owner on the Account's own page, the face started with keys and the
+seat row up (for step 7, the seat admitted as **Gravit** with a `trade` limit on a paper venue —
+"The account-seat drill"), the face opened in a browser profile that has never paired with the
+Account.
+
+1. **Waiting.** Open Account. The device line under the head reads `Waiting to be let in — Let it
+   sign on the Account page, under Devices`; no owner key is drawn anywhere (Venues, Agents,
+   Cards, Trade's ticket, a market's Buy).
+2. **Let it sign.** On the Account's own page, Settings › Devices lists a browser asking to sign
+   (`A browser asked to sign`); press Let it sign there. Back in the face, within a read (20 s, or
+   Refresh) the line reads `This page signs for the account`, and the keys appear; Settings ›
+   Devices in the face lists both devices, this one marked `this page`.
+3. **A watch.** On Markets, star a crypto row you are not watching: one press, no sheet. Expect
+   the star on, and the same market on the Account page's watch list; star it off and it leaves
+   both.
+4. **A paper account.** Account › Venues › **Open a paper account**: a name, $10,000. The sheet
+   prepares and shows **What you sign** (`connectVenue`, `live:paper`, the venue id, the dollars,
+   the nonce); sign. The paper venue appears under Venues with its `Paper` chip.
+5. **A paper order.** Trade → Crypto → a coin the paper venue trades → Where: the paper line
+   (`Paper`) → Buy, `10` dollars, Market. Expect the Account's quote, the countdown `Your signature
+   is good for 9:5x more.`, What you sign (the seventeen fields and the nonce); change the amount
+   and see What you sign dim and Sign and place go off until it is prepared again; **Sign and
+   place**. Expect `ord-… · filled` (or `open on the book`), the fill told under Under way, and the
+   asset in Portfolio under the paper book.
+6. **A cancel.** Place a limit buy well under the market on the paper venue; it rests in Under way;
+   **Cancel** (one press) and see it `canceled`.
+7. **Gravit's order, two cards.** In a channel, ask Gravit to buy $10 of a stock on the paper venue.
+   Expect the face's Gate 2 card in the thread (✓), then the Account's Guard card in the face's
+   Account › Cards — What it asks every field — and **✓ Approve** there (the sheet, What you sign,
+   Approve). `portfolio_wait` returns done in the thread.
+8. **The statement.** Account › Statement: your order's line reads `You`, Gravit's `Gravit,
+   approved by you`.
+9. **Sign out.** Settings › Devices › **Sign out** (the sheet: `signOut`, this device; sign). The
+   line reads `Signed out` with **Sign in**; the owner keys are gone; the Account page's Devices no
+   longer lists this browser. (If it was the last device, the Account prints a new pairing code in
+   its terminal.)
+10. **The smokes.** Run `account-seat-smoke` and `account-graft-smoke` against the installed checkout
+    ("The Account seat", "The Account in the face").
+
+**PASS criteria are observations.** Record the run in `DEVELOPMENT.md` §7.4 and the ledger
+(`../docs/superpowers/plans/2026-10-22-account-graft-ledger.md`) with the date and the checkout's pin
+(`git -C ~/buyer-agent-demo rev-parse --short HEAD`). **Not yet run** — owed to the operator.

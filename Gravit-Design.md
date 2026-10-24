@@ -4,7 +4,8 @@
 revised 2026-09-11 for bot settings, discussion evidence, journal context and temporary
 subagents; §4, §5 and §7.3 pointers re-read 2026-09-30 for the dsh 0.2.0-rc.2 re-host; revised
 2026-10-18..19 for the role library and the research cycle (§1, §3, §4, §5, §7.2, §8, §9; D13
-now names `GRAVIT.md`; D16 added) ·
+now names `GRAVIT.md`; D16 added); revised 2026-10-24 for the face's page as an owner device
+of the Account (§3, §4, §7.3, §8, §9; D18 added) ·
 **Owner:** the operator ·
 **Authority:** this charter carries intent and principles; mechanism lives in `DEVELOPMENT.md`,
 `face/README.md` (the current face contracts and drills), and code. On a question of intent, the charter
@@ -43,7 +44,10 @@ one execution context.
   behind two gates (§4); it has never been armed in the operator's real harness home. Since
   2026-10-20 also a seat at the operator's Account — Linqi's buyer-agent-demo, an external program
   on this machine — through one MCP row, on its paper venues only: every seat write passes Gate 2
-  here and the Account's own card there (D17).
+  here and the Account's own card there (D17). Since 2026-10-24 the Account is also what the
+  face's Markets and Account screens show — read through a loopback proxy — and the face's page
+  is one of the Account's owner devices: the operator trades there by hand, each order signed
+  with the browser's device key at the Account's door, under the Account's own cap (D18).
 
 **What a working day looks like.** The operator opens the face at `127.0.0.1:3090`, picks a
 channel, and talks to Gravit. Gravit screens, backtests and reads the market through the
@@ -122,8 +126,10 @@ the design economizes it but never designs it away.
 │ Alpaca REST · EDGAR ·          │ Alpaca paper: account /         │
 │ offline PIT beds               │ positions / orders queries      │
 │                                │ (order tools double-gated)      │
-│                                │ + the Account seat: an external │
-│                                │ program's paper venues, carded  │
+│                                │ + the Account: an external      │
+│                                │ program's venues, read by the   │
+│                                │ face, traded by hand from it;   │
+│                                │ Gravit's seat there, carded     │
 └────────────────────────────────┴─────────────────────────────────┘
 ```
 
@@ -150,7 +156,8 @@ Who may change what. This table is the charter's core; everything else supports 
 | `dsh/profile/cycle.md` | operator only | the research-cycle contract Gravit runs; Gravit proposes changes in conversation and never edits it; git |
 | `data/pit/` beds | nobody — read-only captured artifacts | a `CHECKSUMS` manifest on the 2yr bed (the broad bed predates the manifest and carries none), checked by hand; recapture is the only legitimate write |
 | paper orders | nobody today | **Gate 1** (registration; enforced, test-pinned): the order tools exist in a session only when the operator's flag AND broker keys are both present. **Gate 2** (per-order approval; built 2026-09-04, in the face): every call to an order tool stops for a card the operator must answer (under a `never` policy, or with no session to ask in, it is denied outright rather than asked), and a guard admits the call only on a logged one-shot approval for that exact call and tool. Its automated drill passed and is mutation-proven for the refusing half (the card is raised, the read-only listing is not gated, an unapproved order does not dispatch); the admitting half — a real logged grant letting an approved order through the live pipeline — is automated too (2026-09-30), over the browser's own answer channel as well; its human half — a person reading the card against armed tools in a scratch home — has not been run (D3). It binds only when dsh runs inside the face (D8) |
-| orders at the Account seat (`mcp__account__*` writes) | nobody today — Gravit, under both cards, once the operator admits the seat as Gravit on the Account page and signs it a `trade` limit naming a paper venue | **Gate 2** cards every seat write before it leaves dsh (the twelve writes, and any seat tool the face has not classified), and the Account's Guard cards it again under the owner's device key; the seat's reach is exactly the limits the operator signs there — the face holds no key, signs nothing and does not model the Account's venues (D17); a limit on a real venue is the real-money trigger (§8) |
+| orders at the Account seat (`mcp__account__*` writes) | nobody today — Gravit, under both cards, once the operator admits the seat as Gravit on the Account page and signs it a `trade` limit naming a paper venue | **Gate 2** cards every seat write before it leaves dsh (the twelve writes, and any seat tool the face has not classified), and the Account's Guard cards it again under the owner's device key — answered in the face's Cards since 2026-10-24; the seat's reach is exactly the limits the operator signs — the face process holds no key and signs nothing, and draws the Account's venues as the Account reports them (D17, D18); a limit on a real venue is the real-money trigger (§8) |
+| the owner's hand orders at the Account (the face's Trade screen, since 2026-10-24) | the operator, by hand, each order signed with the browser's device key at the Account's door (`POST /api/exchange`, carried by the face's proxy) | no gate of this tree's: the Account's live cap on each order and movement, its venues' rules, and *What you sign* drawn before every signature; no card — the owner's act is not the agent's; the face process carries bytes, holds no key and signs nothing (D18). On a real venue this is the owner's own money by the owner's own hand (§8) |
 
 Three honesty notes the table depends on. First, both order gates hold the MCP tool *surface*,
 not the account: the library's order function carries no flag, the broker key file is readable
@@ -189,6 +196,7 @@ solved would be worse than carrying them.
 | D15 | Bot journal context is a bounded read of historical notes; freshness, conflicts and note selection still depend on manual maintenance | each request records what it consumed and exposes missing or truncated notes | when stale, conflicting or omitted notes materially affect a conclusion |
 | D16 | The per-cycle role-call cap (12) is a count Gravit keeps in the journal, not a threshold the harness enforces (Rule 1) | the round cap is enforced by the goal (the 24 is Gravit's argument to create_goal, as cycle.md instructs; dsh's own default is 256), every call is in the child history, and the operator reads the journal | the first overrun |
 | D17 | The Account seat's fence is the operator's grants on the Account page, not code in this tree: a limit signed on a real venue would reach real money through the same two cards, and the face cannot tell a paper venue from a real one; two cards per seat write meanwhile; the seat's key file is written by a child of the face outside the workspace, in the Account's home, and a shell turn can read it and sign at the Account's door with no card here (the seat's R1); the seat is matched by the name the owner typed | paper venues only by the operator's rule; the Account's own Guard, `--live-cap` and limits; both cards; one operator, one machine | the first limit signed on a non-paper venue, or a real venue connected to that Account with the seat granted reach — the real-money trigger (§8); a second human |
+| D18 | The face's page is an owner device of the Account (2026-10-24): the browser profile that holds the key can sign anything the owner can — hand orders up to the Account's cap on every venue the operator connected there, seats' limits, cards, venue connections. The key is the browser's (WebCrypto, non-extractable, the page's origin), lost with the profile and admitted again by another device; the pairing code and the envelopes pass through the face process unlogged; the signing client is the Account's door protocol reproduced in `face/client`, which this tree keeps in step with the Account by hand (the smoke is the canary) | held by: loopback only; the Account's own cap and *What you sign*; the proxied rows are an allow-list and the Account's fence covers everything else; a local process reaches the proxied owner routes as it reaches the Account's own and does nothing without an admitted key; one operator, one machine | a real venue connected to the Account and an order placed on it by hand from the face (the owner's money; the first real-money surface in the face); a second human or machine; a change in the Account's envelope (every signature refused until the client follows) |
 
 ## 6. Rules carried forward
 
@@ -298,9 +306,12 @@ has hands and no voice, a bot a voice and no hands. A role's report is a claim G
 - **No multi-tenant, cryptographic, or kernel-level machinery.** One operator, one machine.
   The risks are named here in one line each instead of being built against: a hosted or
   multi-user deployment invalidates this charter rather than extending it. The Account seat's key
-  and the owner's device key are the Account's — Linqi's program, its home, its page — not this
-  tree's: the face holds no key and signs nothing, and Gate 2 stays the face's only gate
-  (2026-10-20).
+  is the Account's — Linqi's program, its home — and the owner's device key is the browser's: on
+  the Account's page, and since 2026-10-24 on the face's page as a second owner device, where
+  `face/client` speaks the Account's door protocol as a client speaks it (a P-256 key the browser
+  holds, the Account's envelope and nonce) and designs none of its own. The face process holds no
+  key and signs nothing; Gate 2 stays the face's only gate for the agent; the owner's hand orders
+  pass through no gate of this tree's (D18).
 - **No memory substrate beyond what exists.** Git, strategy artifacts, bot journals and dsh's
   own session histories are the memory. A dedicated store is chosen when content demands one.
 
@@ -322,6 +333,7 @@ Few and concrete. Each names the section it reopens.
 | Stale, conflicting or truncated journal notes affect a conclusion | §7.1 · D15 · maintenance and retrieval requirements before choosing a new memory store |
 | Expanding the interface migration in §9 | §3 (the FACE row) · §7.3 "No bespoke harness" and "No hosted face" · the two pins · the row and RPC inventory against the CLI's |
 | A limit signed for the Account seat on a venue that is not a paper account, or a real venue connected to that Account with the seat granted reach there | §4 both gates · D8 · D17 · the next charter (the venue-plugins handoff's §12.1, C1–C5) |
+| A real venue connected to the Account and an order placed on it by hand from the face | D18 · the Account's cap and *What you sign* · the next charter (the handoff's §12.1 stays the agenda for the agent's path) |
 | A second human, or any hosted deployment | this charter is the wrong document; write the next one |
 
 ## 9. Forward
@@ -350,7 +362,13 @@ Remaining directions below are not completed capabilities. Further design remain
   Gravit sits at Linqi's Account through one MCP row, on paper venues only, every write carded
   twice. Open: real venues (the venue-plugins handoff's C1–C5, the next charter); one card per write
   (a per-seat paper autonomy on the Account's side); the seat's tool block (`DEVELOPMENT.md` §4.3,
-  15,727 heuristic tokens) against the mask on Gravit's preset.
+  15,727 heuristic tokens) against the mask on Gravit's preset. Since 2026-10-24 the Account's
+  content is the face's Markets and Account and the face's page is an owner device
+  (`docs/superpowers/specs/2026-10-22-account-graft-design.md`). Open: Guard · Beast and the cap
+  on the face (the operator's "先不管"); the venues that connect only on the Account's page;
+  perpetuals and leverage from the ticket; retiring the face's own producers and keyed quote
+  providers; the face's keyed sources as wallets — accounts connected with a key — offered as MCP
+  servers (the operator's direction of 2026-10-22, the next step of 借鉴 Account 完善 Gravit).
 - **Evaluate real research and make acceptance explicit** (D14, D16). Compare representative
   research tasks for evidence accuracy, useful disagreement, revision of conclusions, operator
   effort, elapsed time and usage. Develop traceability from claims to source material and from
