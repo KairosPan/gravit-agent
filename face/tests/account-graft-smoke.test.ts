@@ -3,8 +3,8 @@
  * port as the page asks them — the Account's page, its markets, a query the whitelist refuses, its push channel, and
  * the seat box through the proxy's shared reader. Then the owner's half: the face's own owner device
  * (`client/js/host/owner.js`, run under Node by `helpers/owner-node.ts`) pairs with the code the stand-in printed,
- * signs a watch, a market buy (its fill told on the stream opened before it), a resting limit buy and its cancel, and
- * the approval of the stand-in's seeded card — every call to the face's port, never the stand-in's; a foreign origin's
+ * signs a watch on a market the page does not watch and its removal, a market buy (its fill told on the stream
+ * opened before it), a resting limit buy and its cancel, and the approval of the stand-in's seeded card — every call to the face's port, never the stand-in's; a foreign origin's
  * exchange is fenced; and nothing of a body (the pairing code, a signature) is in what the face's process wrote.
  *
  * Skipped unless `FACE_SMOKE=1` and `FACE_ACCOUNT_SEAT_DIR` names an installed checkout of
@@ -203,12 +203,24 @@ test("account graft smoke: the Account's page and markets, a refused query, its 
     assert.equal(device.standing().refusal, null);
     assert.match(device.standing().kid, /^[0-9a-f]{16}$/);
 
-    /* 8. A watch, signed: taken, and the Account's page lists it. */
-    const watched = await owner.act({ type: "setWatch", venue: "ex", symbol: "BTC/USDT", on: "true" });
+    /* 8. A watch, signed, on an `ex` market the page does not watch yet (the stand-in seeds some): taken, and the
+     * Account's page lists it; signed off again, it is gone. */
+    type WatchRow = { venue?: string; symbol?: string };
+    const watchOf = async (): Promise<WatchRow[]> => ((await (await fetch(`${base}/data/account?fresh=1`)).json()) as { watch?: WatchRow[] }).watch ?? [];
+    const watching = (rows: WatchRow[], symbol: string): boolean => rows.some((w) => w.venue === "ex" && w.symbol === symbol);
+    const beforeWatch = await watchOf();
+    const coins = await (await fetch(`${base}/data/account/explore?tab=crypto`)).json() as { items?: { at?: { venue?: string; symbol?: string }[] }[] };
+    const unwatched = coins.items?.flatMap((item) => item.at ?? []).find((at) => at.venue === "ex" && typeof at.symbol === "string" && !watching(beforeWatch, at.symbol))?.symbol;
+    assert.ok(unwatched, `an ex market the page does not watch: watch ${JSON.stringify(beforeWatch)}; explore ${JSON.stringify(coins.items?.map((i) => i.at)).slice(0, 600)}`);
+    const watched = await owner.act({ type: "setWatch", venue: "ex", symbol: unwatched, on: "true" });
     assert.equal(watched.status, 200, shown(watched));
     assert.notEqual(watched.body.ok, false, shown(watched));
-    const afterWatch = await (await fetch(`${base}/data/account?fresh=1`)).json() as { watch?: { venue?: string; symbol?: string }[] };
-    assert.ok(afterWatch.watch?.some((w) => w.venue === "ex" && w.symbol === "BTC/USDT"), `the page watches BTC/USDT at ex: ${JSON.stringify(afterWatch.watch)}`);
+    const afterWatch = await watchOf();
+    assert.ok(watching(afterWatch, unwatched), `the page watches ${unwatched} at ex: ${JSON.stringify(afterWatch)}`);
+    const unwatchedAgain = await owner.act({ type: "setWatch", venue: "ex", symbol: unwatched, on: "" });
+    assert.equal(unwatchedAgain.status, 200, shown(unwatchedAgain));
+    assert.notEqual(unwatchedAgain.body.ok, false, shown(unwatchedAgain));
+    const afterUnwatch = await watchOf();    assert.ok(!watching(afterUnwatch, unwatched), `the page no longer watches ${unwatched} at ex: ${JSON.stringify(afterUnwatch)}`);
 
     /* 9. The stream opened first, then the owner's market buy of $25 of ETH: an order, and its fill on the stream. */
     const streamed = await fetch(`${base}/data/account/stream?client=${STREAM_CLIENT}`, { headers: { accept: "text/event-stream" }, signal: ownerStream.signal });
