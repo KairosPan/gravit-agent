@@ -25,7 +25,9 @@ const deadlineOf = action => {
 
 /** The form's draft as the sheet compares it, or null while it is incomplete: the draft read at the epoch, so a draft that reads
  *  the clock (a `validUntil`) is the same draft a minute on — only the form and the seed tell one apart. The renderer compares it
- *  to the sheet's `asked` to tell whether the shown preparation is still the form's. */
+ *  to the sheet's `asked` to tell whether the shown preparation is still the form's. A contract on every kind's draft: it reads
+ *  `now` only as an offset added to a time field (`validUntil = now + …`), never otherwise — no id or deadline made from the
+ *  clock — or the comparison never matches or matches what it should not (the Trade ticket's draft, Task 9, included). */
 export function askedOf(s) {
   if (!s) return null;
   const draft = draftOf(s.kind, s.fields, s.seed, 0);
@@ -127,9 +129,12 @@ export function startSheet({ store, owner, schedule, cancelTimer, now, afterActi
       if (here) { stopTick(); store.dispatch('sheetRefused', refusalOf(r)); }
       return;
     }
-    if (here) { stopTick(); store.dispatch('sheetDone', { said: saidOf(r.body) }); }
-    // taken: the Account changed, whether or not the sheet is still open
-    afterAction(s.kind, r.body);
+    // taken: the Account changed, whether or not the sheet is still open, and whatever a subscriber did at done
+    try {
+      if (here) { stopTick(); store.dispatch('sheetDone', { said: saidOf(r.body) }); }
+    } finally {
+      afterAction(s.kind, r.body);
+    }
   }
 
   /** The Prepare again key. */

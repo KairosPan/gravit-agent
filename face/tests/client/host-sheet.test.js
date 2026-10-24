@@ -182,6 +182,20 @@ test('a submit under thirty seconds prepares again before signing', async () => 
   await t.sheet.submit();
   assert.equal(t.owner.drafts.length, 1);
   assert.deepEqual(t.owner.envelopes, [shown]);
+
+  // a form changed while that press prepares again is not signed: the fresh preparation is the old form's
+  const c = rig({ deadlineMs: TEN_MINUTES });
+  c.sheet.open('topUp', SEED);
+  await settle();
+  c.clock.t = START + TEN_MINUTES - RESIGN_UNDER_MS + 1;
+  const fresh = deferred();
+  c.owner.prepareWith.push(fresh.promise);
+  const press = c.sheet.submit();
+  c.sheet.change('usd', '9');
+  fresh.resolve({ status: 200, body: watch() });
+  await press;
+  assert.equal(c.owner.envelopes.length, 0, 'nothing signed');
+  assert.equal(c.s().status, 'ready');
 });
 
 test('at zero the sheet prepares again', async () => {
@@ -247,6 +261,13 @@ test('a refusal at prepare is drawn and nothing is signed', async () => {
   assert.equal(r.owner.envelopes.length, 0, 'nothing signed');
   assert.equal(r.owner.drafts.length, 2, 'the press prepared again');
   assert.equal(r.s().status, 'refused');
+
+  // a 2xx that is not a preparation (no action, nothing shown) is refused too
+  r.owner.prepareWith.push({ status: 200, body: { ok: true } });
+  await r.sheet.again();
+  assert.equal(r.s().status, 'refused');
+  assert.equal(r.s().message, 'Refused');
+  assert.equal(r.s().prepared, null);
 });
 
 test('a refusal with again offers Prepare again', async () => {
@@ -266,6 +287,13 @@ test('a refusal with again offers Prepare again', async () => {
   assert.equal(r.s().status, 'ready');
   assert.equal(r.s().message, null);
   assert.equal(r.s().again, false);
+
+  // a result that is itself a refusal answers on a 200 (a rejected card): refused, not done
+  r.owner.submitWith.push({ status: 200, body: { ok: true, kind: 'result', result: { ok: false, code: 'E_CARD_REJECTED', message: 'no' } } });
+  await r.sheet.submit();
+  assert.equal(r.s().status, 'refused');
+  assert.equal(r.s().message, 'no');
+  assert.equal(r.done.length, 0, 'no afterAction on a refusal that came on a 200');
 });
 
 test('done calls afterAction once with the kind and the body', async () => {
@@ -283,7 +311,40 @@ test('done calls afterAction once with the kind and the body', async () => {
   assert.deepEqual(r.done, [['topUp', TAKEN.body]]);
   await r.sheet.submit();
   assert.equal(r.owner.envelopes.length, 1, 'a done sheet signs nothing more');
+  assert.equal(r.owner.drafts.length, 1, 'and prepares nothing: a second action is not one press away');
+  assert.equal(r.s().status, 'done');
   assert.equal(r.done.length, 1);
+});
+
+test('an ask in the air does not land over the sign, and a second press signs nothing', async () => {
+  const r = rig();
+  r.sheet.open('topUp', SEED);
+  await settle();
+  const shown = r.s().prepared;
+  const quiet = deferred(), sign = deferred();
+  r.owner.prepareWith.push(quiet.promise);
+  r.owner.submitWith.push(sign.promise);
+  r.sheet.prepareNow({ quiet: true });
+  const press = r.sheet.submit();
+  assert.equal(r.s().status, 'signing');
+  quiet.resolve({ status: 200, body: watch() });
+  await settle();
+  assert.equal(r.s().status, 'signing', 'the quiet answer is dropped');
+  const second = r.sheet.submit();
+  sign.resolve(TAKEN);
+  await press;
+  await second;
+  assert.deepEqual(r.owner.envelopes, [shown], 'one envelope, the shown one');
+  assert.equal(r.done.length, 1);
+});
+
+test('afterAction runs for a taken answer even when a subscriber throws at done', async () => {
+  const r = rig();
+  r.sheet.open('topUp', SEED);
+  await settle();
+  r.store.subscribe((_, type) => { if (type === 'sheetDone') throw new Error('a renderer broke'); });
+  await assert.rejects(r.sheet.submit(), /a renderer broke/);
+  assert.deepEqual(r.done, [['topUp', TAKEN.body]], 'the Account took it: the face reads again');
 });
 
 test('close cancels the timers', async () => {
@@ -312,4 +373,20 @@ test('close cancels the timers', async () => {
   r.sheet.open('topUp', { venue: 'paper-b' });
   assert.equal(r.timers.pending.size, 0, 'the old sheet’s timers cancelled');
   assert.equal(r.s().seed.venue, 'paper-b');
+
+  // a sign's answer for a closed sheet does not land on the next one opened; the Account took it, so afterAction runs once
+  const sign = deferred();
+  r.owner.submitWith.push(sign.promise);
+  r.sheet.open('topUp', SEED);
+  await settle();
+  const press = r.sheet.submit();
+  r.sheet.close();
+  r.sheet.open('topUp', { venue: 'paper-c', usd: '1' });
+  await settle();
+  assert.equal(r.s().status, 'ready');
+  sign.resolve(TAKEN);
+  await press;
+  assert.equal(r.s().status, 'ready', 'not done: that answer was the closed sheet’s');
+  assert.equal(r.s().seed.venue, 'paper-c');
+  assert.equal(r.done.length, 1);
 });
