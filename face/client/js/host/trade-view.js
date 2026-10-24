@@ -3,8 +3,9 @@
 // lens's rows matched to an Account key by matchKey, a prediction held opening as a sell of its outcome), what is starred, the
 // kind's most traded (the explore read `tab=<kind>&limit=12`), a search's results; the ticket on a market's page — its lines,
 // connected first with the ones that take the owner's order now marked `able` and the best of those marked, the public listings
-// after, a prediction's outcomes with their lines; the ticket's sheet fields and the Account's liveOrder draft from them, the
-// seventeen fields of its Trade ticket (docs/research/2026-10-22-account-owner-path-map.md §3.1), nothing added or renamed — a
+// after, a prediction's outcomes with their lines; the ticket's sheet fields and the Account's liveOrder draft from them, its
+// Trade ticket's type and fifteen fields (docs/research/2026-10-22-account-owner-path-map.md §3.1; prepare adds maxNotional and
+// deadline: the seventeen it signs), nothing added or renamed — a
 // prediction's limit typed in cents and sent in dollars; no clock in the draft (the deadline is prepare's); the quote from a
 // preparation; the orders under way with what cancels each; a fill frame as one line. Every Account string passes as it came
 // (the renderer escapes); every figure and word the Trade screen draws is computed here. No DOM, no store.
@@ -150,7 +151,7 @@ const SIDES = new Set(['buy', 'sell']);
  *  venueName, symbol, price, bid, ask, best, paper, able, public, session }` in the market's unit — `able` a connected line
  *  whose venue trades at the Account (`trade.can === true`), `best` the able line that takes an order now (a key that trades,
  *  a market not closed) with the lowest ask, else the lowest price; `session` the line's own. A prediction's `outcomes` are
- *  `{ label, cents, bid, ask, at: [{ venue, symbol }] }`. `venue` is the one the ticket was opened at, else the best able line;
+ *  `{ label, cents, bid, ask, at: [{ venue, symbol }] }`. `venue` is the one the ticket was opened at where that is an able line, else the best able line;
  *  `held` what is held of the market (the page's). */
 export function ticketOf(state, now) {
   const open = state?.trade?.ticket;
@@ -175,7 +176,8 @@ export function ticketOf(state, now) {
   if (best) best.best = true;
   const shown = legs.map(({ takes: _t, ...l }) => l);
   const event = item.kind === 'event';
-  const given = typeof open.venue === 'string' && open.venue ? open.venue : null;
+  // a venue given is kept only where the order can go: another (a holding's wallet, a public listing) opens on the best able line
+  const given = typeof open.venue === 'string' && shown.some(l => l.able && l.venue === open.venue) ? open.venue : null;
   return {
     id: open.id, item, page, legs: shown, event,
     outcomes: event ? records(item.outcomes).map(o => ({
@@ -217,11 +219,12 @@ function valueOf(fields, name) {
 const textOf = v => (typeof v === 'string' ? v.trim() : typeof v === 'number' && Number.isFinite(v) ? String(v) : '');
 const field = (fields, name) => textOf(valueOf(fields, name));
 
-/** The Account's liveOrder draft from the ticket's fields — its Trade ticket's seventeen fields in its order: `type`, `venue`,
- *  `symbol` (the line's; a prediction's, the picked outcome's at that venue), `side`, `orderType`, `qty` or `usd` by `unit`
- *  (as typed), `limitPrice` (for a limit: as typed; a prediction's typed in cents and sent in dollars), `extendedHours`
- *  (`'true'` only when ticked and the line offers it), every other field `''` — or, while something is missing, the words for
- *  it. Reads no clock: the deadline is the Account's prepare's. */
+/** The Account's liveOrder draft from the ticket's fields — its Trade ticket's type and fifteen fields in its order (prepare adds
+ *  maxNotional and deadline: the seventeen it signs): `type`, `venue`, `symbol` (the line's; a prediction's, the picked
+ *  outcome's at that venue), `side`, `orderType`, `qty` or `usd` by `unit` (as typed), `limitPrice` (for a limit: as typed; a
+ *  prediction's typed in cents and sent in dollars to six places), `extendedHours` (`'true'` only on a limit, ticked, where the
+ *  line offers it), every other field `''` — or, while something is missing, the words for it. Reads no clock: the deadline
+ *  is the Account's prepare's. */
 export function tradeDraftOf(fields, ticket) {
   if (!isRecord(ticket) || !Array.isArray(ticket.legs)) return 'Pick where';
   const venue = (v => (Array.isArray(v) ? textOf(v[0]) : textOf(v)))(valueOf(fields, 'venue'));
@@ -245,15 +248,18 @@ export function tradeDraftOf(fields, ticket) {
     if (!DECIMAL.test(typed)) return 'Type the limit price';
     if (ticket.event) {
       const c = Number(typed);
-      if (!(c > 0 && c < 100)) return 'A price in cents is between 0 and 100';
-      limitPrice = String(Number((c / 100).toPrecision(12)));
+      // the Account's tkPriceIn: dollars to six places, trailing zeros trimmed — a plain decimal, never an exponent
+      const dollars = (c / 100).toFixed(6).replace(/\.?0+$/, '');
+      if (!(c > 0 && c < 100) || dollars === '0') return 'A price in cents is between 0 and 100';
+      limitPrice = dollars;
     } else {
       if (!(Number(typed) > 0)) return 'Type the limit price';
       limitPrice = typed;
     }
   }
+  // the Account's tkOrderDraft: extended hours ride a limit order alone
   const ticked = valueOf(fields, 'extendedHours');
-  const extendedHours = (ticked === true || ticked === 'true') && leg.session?.extendedHours === true ? 'true' : '';
+  const extendedHours = orderType === 'limit' && (ticked === true || ticked === 'true') && leg.session?.extendedHours === true ? 'true' : '';
   return {
     type: 'liveOrder', venue: leg.venue, symbol, side, orderType, [unit]: amount, limitPrice, stopPrice: '', tif: '', postOnly: '',
     reduceOnly: '', extendedHours, trailPercent: '', trailPrice: '', takeProfit: '', stopLoss: '',
@@ -263,42 +269,48 @@ export function tradeDraftOf(fields, ticket) {
 // ── what the Account answers ──
 
 /** The preparation's order quote (`prepared.quote.order`): its words, its figures each a number or null (the fee the order's
- *  own, else the quote's), whether it is paper, where its price is from and when, the market's name. A preparation without an
- *  order quote: null. */
+ *  own estimate — none given is null: the venue charges it as it does), whether it is paper, where its price is from and when,
+ *  the market's name. A preparation without an order quote: null. */
 export function quoteOf(prepared) {
   const quote = isRecord(prepared?.quote) ? prepared.quote : null;
   const o = isRecord(quote?.order) ? quote.order : null;
   if (!o) return null;
   return {
     words: str(o.words), price: number(o.price), notionalUsd: number(o.notionalUsd), maxUsd: number(o.maxUsd),
-    feeUsd: number(o.feeUsd) ?? number(quote.feeUsd), capUsd: number(o.capUsd), paper: o.paper === true,
+    feeUsd: number(o.feeUsd), capUsd: number(o.capUsd), paper: o.paper === true,
     quoteFrom: str(o.quoteFrom), quoteAt: str(o.quoteAt), name: str(o.name),
   };
 }
 
 /** Under way: the page's working orders (openOrdersOf's rows, by anyone), each with what cancels it — the Account's
- *  `liveCancel` seed, `{ venue, order }`. */
+ *  `liveCancel` seed, `{ venue, order }`, or null for an order with no id or venue (one the Account knows by its client id
+ *  alone: nothing to cancel it by). */
 export function underWayOf(page) {
-  return openOrdersOf(page).map(o => ({ ...o, cancel: { venue: o.venue, order: o.id } }));
+  return openOrdersOf(page).map(o => ({ ...o, cancel: o.id && o.venue ? { venue: o.venue, order: o.id } : null }));
 }
 
 // a fill's price as the Account's toast groups it: 3,120.50, 0.12143
 const fillPrice = n => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 8 });
 
 /** A `fill` frame on the Account's stream (`{ type: 'fill', data }`, or its data alone) as one line: `Bought 0.04 ETH @
- *  3,120.50 · Stand-in Exchange` — the side, this fill's size and the market's base (a prediction's contracts of its name), its
- *  price (a prediction's in cents) where the frame says one, the venue, and `· Paper account` from a paper book. Anything else:
- *  ''. */
+ *  3,120.50 · Stand-in Exchange` — the side, this fill's size (none drawn unless it is above zero) and the market's base (a
+ *  prediction's contracts of its name), its price (a prediction's in cents) where the frame says one, with the Account's ` avg`
+ *  when that price is the order's average, the venue, and `· Paper account` from a paper book — once: not where the venue's
+ *  name already says paper. Anything else: ''. */
 export function fillWords(ev) {
   if (!isRecord(ev)) return '';
   if (typeof ev.type === 'string' && ev.type !== 'fill') return '';
   const f = isRecord(ev.data) ? ev.data : ev;
   const side = f.side === 'buy' ? 'Bought' : f.side === 'sell' ? 'Sold' : '';
+  if (!side) return '';
   const qty = number(f.qty);
-  if (!side || qty === null) return '';
+  const size = qty !== null && qty > 0 ? amountWord(qty) : '';
   const event = f.kind === 'event';
-  const what = event ? `${amountWord(qty)} contracts · ${str(f.name) || str(f.symbol)}` : `${amountWord(qty)} ${str(f.symbol).split('/')[0]}`;
+  const what = event ? [size ? `${size} contracts` : 'contracts', str(f.name) || str(f.symbol)].filter(Boolean).join(' · ')
+    : [size, str(f.symbol).split('/')[0]].filter(Boolean).join(' ');
   const p = number(f.price);
-  const at = p === null ? '' : ` @ ${event ? centsWord(cents(p)) : fillPrice(p)}`;
-  return [`${side} ${what}${at}`, str(f.venueName) || str(f.venue), f.paper === true ? 'Paper account' : ''].filter(Boolean).join(' · ');
+  const at = p === null ? '' : ` @ ${event ? centsWord(cents(p)) : fillPrice(p)}${f.avg === true ? ' avg' : ''}`;
+  const venue = str(f.venueName) || str(f.venue);
+  const paper = f.paper === true && !/\bpaper\b/i.test(venue) ? 'Paper account' : '';
+  return [[side, what].filter(Boolean).join(' ') + at, venue, paper].filter(Boolean).join(' · ');
 }

@@ -1,7 +1,8 @@
 // Trade's views (spec 2026-10-22 §6.4, plan 2 Task 9) over the stand-in's answers (tests/fixtures/account/): the picker's
 // groups by kind — what is held, what is starred, the kind's most traded, a search's results; the ticket on a market's lines,
 // the best marked, the public listings after; the Account's liveOrder draft from the ticket's fields (the owner-path map
-// §3.1 — seventeen fields, nothing added, a prediction's limit typed in cents and sent in dollars, no clock); the quote from a
+// §3.1 — its type and fifteen fields, nothing added, a prediction's limit typed in cents and sent in dollars, no clock; prepare
+// adds the two that make the seventeen it signs); the quote from a
 // preparation; the orders under way with what cancels each; a fill as words.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -134,6 +135,17 @@ test('ticketOf: a venue that does not trade is not able, and the best is the bes
   assert.deepEqual(nvda.legs[0].session, { open: false, opensAt: '2026-10-22T13:30:00.000Z' });
 });
 
+test('ticketOf: a venue given that does not take the order opens on the best able line, never on Pick where', () => {
+  const open = venue => ticketOf(stateWith({ ticket: { id: 'coin:ETH', side: 'buy', venue, outcome: 0 } }), NOW);
+  assert.equal(open('standin-pubex-public').venue, 'ex', 'a public listing');
+  assert.equal(open('nowhere').venue, 'ex', 'a venue the market has no line at');
+  assert.equal(open('wallet').venue, 'wallet', 'an able line given is kept');
+  const shut = ticketOf(stateWith({ page: venueCan(fx('account'), 'ex', false), ticket: { id: 'coin:ETH', side: 'buy', venue: 'ex', outcome: 0 } }), NOW);
+  assert.equal(shut.venue, 'paper-momentum', 'a venue that does not trade');
+  assert.equal(tradeFieldsOf(shut).find(f => f.name === 'venue').value, 'paper-momentum');
+  assert.equal(tradeFieldsOf(open('standin-pubex-public')).find(f => f.name === 'venue').value, 'ex');
+});
+
 test('ticketOf: a prediction — its lines in cents, its outcomes with their lines at each venue', () => {
   const t = ticketOf(stateWith({ kind: 'predictions', ticket: { id: 'event:predict:SI-FEDCUT-DEC', side: 'buy', venue: null, outcome: 1 } }), NOW);
   assert.equal(t.event, true);
@@ -184,20 +196,29 @@ test('tradeDraftOf: a prediction\'s limit is typed in cents and sent in dollars,
   assert.equal(d.qty, '10');
   assert.equal(tradeDraftOf(form({ venue: 'predict', outcome: '0', orderType: 'limit', limit: '62.5' }), ticket).limitPrice, '0.625');
   assert.equal(tradeDraftOf(form({ venue: 'predict', outcome: '0', orderType: 'limit', limit: '1.1' }), ticket).limitPrice, '0.011', 'no float noise');
+  // the Account's tkPriceIn: six places, trailing zeros trimmed, never an exponent
+  const limitOf = limit => tradeDraftOf(form({ venue: 'predict', orderType: 'limit', limit }), ticket);
+  assert.equal(limitOf('1').limitPrice, '0.01');
+  assert.equal(limitOf('0.5').limitPrice, '0.005');
+  assert.equal(limitOf('62.123456789').limitPrice, '0.621235');
+  assert.equal(limitOf('0.00001'), 'A price in cents is between 0 and 100', 'a price that rounds to nothing');
+  for (const c of ['1', '0.5', '62.123456789', '99.9999']) assert.match(limitOf(c).limitPrice, /^\d+\.\d+$/, c);
   assert.equal(tradeDraftOf(form({ venue: 'predict', outcome: 0 }), ticket).symbol, 'SI-FEDCUT-DEC:YES', 'an outcome as a number too');
   for (const limit of ['0', '100', '120']) {
     assert.equal(tradeDraftOf(form({ venue: 'predict', orderType: 'limit', limit }), ticket), 'A price in cents is between 0 and 100', limit);
   }
 });
 
-test('tradeDraftOf: extended hours only when ticked and the line offers it', () => {
+test('tradeDraftOf: extended hours only on a limit, ticked, where the line offers it — the Account\'s tkOrderDraft', () => {
   const all = fx('explore-all');
   const nvda = all.items.find(i => i.key === 'stock:NVDA');
   nvda.at[0].session = { ...nvda.at[0].session, extendedHours: true };
   const ticket = ticketOf(stateWith({ all, kind: 'stocks', ticket: { id: 'stock:NVDA', side: 'buy', venue: 'broker', outcome: 0 } }), NOW);
-  assert.equal(tradeDraftOf(form({ venue: 'broker', extendedHours: true }), ticket).extendedHours, 'true');
-  assert.equal(tradeDraftOf(form({ venue: 'broker', extendedHours: false }), ticket).extendedHours, '');
-  assert.equal(tradeDraftOf(form({ venue: 'paper-momentum', extendedHours: true }), ticket).extendedHours, '', 'the paper line does not offer it');
+  const limit = over => form({ venue: 'broker', orderType: 'limit', limit: '180', ...over });
+  assert.equal(tradeDraftOf(limit({ extendedHours: true }), ticket).extendedHours, 'true');
+  assert.equal(tradeDraftOf(limit({ extendedHours: false }), ticket).extendedHours, '');
+  assert.equal(tradeDraftOf(form({ venue: 'broker', extendedHours: true }), ticket).extendedHours, '', 'a market order never carries it');
+  assert.equal(tradeDraftOf(limit({ venue: 'paper-momentum', extendedHours: true }), ticket).extendedHours, '', 'the paper line does not offer it');
 });
 
 test('tradeDraftOf: the words for what is missing', () => {
@@ -257,14 +278,14 @@ test('the order sheet: fieldsOf and draftOf delegate to the ticket, and the draf
 
 test('quoteOf: the preparation\'s order quote, each figure a number', () => {
   assert.deepEqual(quoteOf(fx('prepared-order')), {
-    words: 'buy 0.0099 ETH at Stand-in Exchange · market · about $24.31', price: 2455.74, notionalUsd: 24.31, maxUsd: 24.8, feeUsd: 0, capUsd: 250,
+    words: 'buy 0.0099 ETH at Stand-in Exchange · market · about $24.31', price: 2455.74, notionalUsd: 24.31, maxUsd: 24.8, feeUsd: null, capUsd: 250,
     paper: false, quoteFrom: '', quoteAt: '', name: 'ETH / USDT',
-  });
+  }, 'no fee estimated for the order: none, never the outer quote\'s 0');
   const prepared = fx('prepared-order');
   prepared.quote.order = { ...prepared.quote.order, price: '2455.74', feeUsd: 0.02, paper: true, quoteFrom: 'Stand-in Exchange · real time', quoteAt: '2026-10-22T07:39:59.000Z', capUsd: 'lots' };
   const q = quoteOf(prepared);
   assert.equal(q.price, 2455.74);
-  assert.equal(q.feeUsd, 0.02, 'the order\'s own fee first');
+  assert.equal(q.feeUsd, 0.02, 'the order\'s own fee');
   assert.equal(q.capUsd, null, 'a figure that does not parse is none');
   assert.equal(q.paper, true);
   assert.equal(q.quoteFrom, 'Stand-in Exchange · real time');
@@ -281,6 +302,12 @@ test('underWayOf: the page\'s working orders, each with what cancels it', () => 
   assert.deepEqual(rows[1].cancel, { venue: 'broker', order: 'ord-0009' });
   assert.equal(rows[1].symbol, 'SPY', 'the open orders row as it is');
   for (const r of rows) assert.deepEqual(r.cancel, { venue: r.venue, order: r.id });
+  // an order the Account knows by its client id alone: nothing to cancel it by
+  const page = fx('account');
+  page.orders = [{ ...page.orders.find(o => o.id === 'ord-0002'), id: undefined }];
+  const [noId] = underWayOf(page);
+  assert.equal(noId.id, '');
+  assert.equal(noId.cancel, null);
   assert.deepEqual(underWayOf(null), []);
   assert.deepEqual(underWayOf({ ok: false }), []);
 });
@@ -293,7 +320,14 @@ test('fillWords: a fill frame as one line — the side, the size and base, the p
   assert.equal(fillWords({ type: 'fill', id: '4dababf8.9', data: fill }), 'Bought 0.04 ETH @ 3,120.50 · Stand-in Exchange');
   assert.equal(fillWords(fill), 'Bought 0.04 ETH @ 3,120.50 · Stand-in Exchange', 'the frame\'s data alone too');
   const paper = { ...fill, venue: 'paper-momentum', venueName: 'Momentum · paper', paper: true, side: 'sell', symbol: 'SOL/USD', qty: 1, price: 142.85 };
-  assert.equal(fillWords({ type: 'fill', data: paper }), 'Sold 1 SOL @ 142.85 · Momentum · paper · Paper account');
+  assert.equal(fillWords({ type: 'fill', data: paper }), 'Sold 1 SOL @ 142.85 · Momentum · paper', 'paper said once: the venue\'s name says it');
+  assert.equal(fillWords({ type: 'fill', data: { ...paper, venueName: 'Momentum' } }), 'Sold 1 SOL @ 142.85 · Momentum · Paper account');
+  assert.equal(fillWords({ type: 'fill', data: { ...fill, avg: true } }), 'Bought 0.04 ETH @ 3,120.50 avg · Stand-in Exchange', 'the order\'s average, said so');
+  for (const qty of [0, -1, undefined, 'lots']) {
+    const words = fillWords({ type: 'fill', data: { ...fill, qty } });
+    assert.equal(words, 'Bought ETH @ 3,120.50 · Stand-in Exchange', String(qty));
+    assert.doesNotMatch(words, /undefined|Bought 0/);
+  }
   assert.equal(fillWords({ type: 'fill', data: { ...fill, symbol: 'SPY', kind: 'stock', price: undefined, qty: 2 } }), 'Bought 2 SPY · Stand-in Exchange', 'no price, no @');
   assert.equal(fillWords({ type: 'fill', data: { ...fill, symbol: 'SI-FEDCUT-DEC:YES', kind: 'event', name: 'Will the Fed cut rates at its December meeting? · Yes', qty: 10, price: 0.62 } }),
     'Bought 10 contracts · Will the Fed cut rates at its December meeting? · Yes @ 62¢ · Stand-in Exchange');
