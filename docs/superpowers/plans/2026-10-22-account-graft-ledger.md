@@ -827,3 +827,15 @@ Dispatched on fable (the operator's word).
   the stream is open), its step 7 (the paper venue the seat's `trade` limit names), DEVELOPMENT's
   map row (the owner device, Trade) and the proxy row (`keyfile` at `/data/account/keyfile`).
   Suite 1312 / 1294 / 18, typecheck clean; `FACE_SMOKE=1` left to the controller on the final tree.
+
+### The final tree of stage 2
+
+- HEAD `4c8378b` (30 commits over the plan's `e2627fd`; main's `d227316` the merge base), the tree clean.
+- `cd face && npm test` 1312 tests, 1294 pass, 18 skipped; `npm run typecheck` clean.
+- `cd face && FACE_SMOKE=1 FACE_ACCOUNT_SEAT_DIR=~/buyer-agent-demo npm test` on 2026-10-24: 1312 / 1312,
+  none skipped, no stand-in home left under the OS tmpdir.
+- `python -m pytest` at the repo root: 400 passed (alpaca_kit untouched this stage; it leaves in stage 3).
+- The final whole-branch review and its re-review ran on the Fable model at the operator's word; the
+  one Important and the two Minors ruled into the wave are fixed above; deferred minors 45–67 stand.
+- Owed to the operator: the manual drill of the spec's §10 on the real Account at 4820 with paper
+  venues only (`face/README.md`, "The Account in the face").
