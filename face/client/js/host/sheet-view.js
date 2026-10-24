@@ -5,6 +5,7 @@
 // (host/sheet.js) prepares the draft, the renderer draws the fields; the Account judges everything else in its own words. `now` is the caller's clock in milliseconds; `validUntil`
 // values are numbers (the Account's u64 fields), the dollar amounts strings as typed. No DOM, no store.
 import { pageOk, venuesOf, keyfileWords } from './account-view.js';
+import { tradeFieldsOf, tradeDraftOf } from './trade-view.js';
 
 const DAY = 86_400_000;
 const ZERO = '0x0000000000000000000000000000000000000000';
@@ -17,7 +18,7 @@ const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const records = v => (Array.isArray(v) ? v.filter(isRecord) : []);
 const str = v => (typeof v === 'string' ? v : '');
 
-/** Every sheet kind. `order` is the Trade ticket's: its fields and draft are the trade view's (Task 9). */
+/** Every sheet kind. `order` is the Trade ticket's: its fields and draft are the trade view's, from `seed.ticket`. */
 export const SHEET_KINDS = ['letIn', 'limit', 'endLimit', 'revoke', 'connect', 'paper', 'topUp', 'resetPaper', 'disconnect',
   'approveCard', 'declineAsk', 'letDevice', 'signOut', 'order'];
 
@@ -141,7 +142,8 @@ export function fieldsOf(kind, seed) {
     ];
     case 'topUp': return [{ name: 'usd', label: 'Paper dollars to add', type: 'number', placeholder: '1000', value: str(s.usd) }];
     case 'resetPaper': return [{ name: 'usd', label: 'Start again with, in dollars', type: 'number', placeholder: '10000', value: str(s.usd) }];
-    // Task 9: the `order` sheet's fields are the Trade ticket's (host/trade-view.js)
+    // the Trade ticket's, from the ticket view the trade host seeds it with (`seed.ticket`, host/trade-view.js ticketOf)
+    case 'order': return tradeFieldsOf(s.ticket);
     default: return [];
   }
 }
@@ -262,7 +264,8 @@ export function draftOf(kind, fields, seed, now) {
     case 'signOut':
       if (!str(s.kid)) return 'This page does not sign for the account';
       return { type: 'signOut', device: `device:${s.kid}` };
-    // Task 9: case 'order' delegates to tradeDraftOf (host/trade-view.js) — the liveOrder draft from the Trade ticket
+    // the liveOrder draft from the Trade ticket (host/trade-view.js): no clock — its deadline is the Account's prepare's
+    case 'order': return tradeDraftOf(fields, s.ticket);
     default: return 'Nothing to sign here';
   }
 }

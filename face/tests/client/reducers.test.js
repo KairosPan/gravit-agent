@@ -175,6 +175,54 @@ test('the sheet slice: open, a field, incomplete, a quiet and a loud ask, prepar
   assert.equal(R.sheetClose(t).sheet, null);
 });
 
+test('the trade slice: the kind, the query, the picks by kind, the search, the ticket, what was said', () => {
+  const s = emptyState();
+  assert.deepEqual(s.trade, { kind: 'crypto', q: '', picks: {}, results: { status: 'idle', data: null, at: null }, ticket: null, said: null });
+  let t = R.tradeKind(s, 'predictions');
+  assert.equal(t.trade.kind, 'predictions');
+  assert.equal(R.tradeKind(t, 'predictions'), t, 'the same kind: the state as it was');
+  assert.equal(R.tradeKind(t, 'perps'), t, 'a kind Trade does not pick changes nothing');
+  assert.equal(R.tradeKind(t, 'all'), t);
+  t = R.tradeQuery(t, 'fed');
+  assert.equal(t.trade.q, 'fed');
+  assert.equal(R.tradeQuery(t, 42).trade.q, '', 'a query that is not text is blank');
+
+  // the picks, by kind: a failed read keeps its items, with the Account's sentence
+  const body = { ok: true, items: [{ key: 'coin:BTC' }] };
+  t = R.picksLoading(t, { kind: 'crypto' });
+  assert.deepEqual(t.trade.picks.crypto, { status: 'loading', data: null, at: null });
+  t = R.picksLoaded(t, { kind: 'crypto', data: body, at: 5 });
+  assert.deepEqual(t.trade.picks.crypto, { status: 'ready', data: body, at: 5, message: null });
+  t = R.picksFailed(t, { kind: 'crypto', at: 6, message: 'The account is busy' });
+  assert.deepEqual(t.trade.picks.crypto, { status: 'error', data: body, at: 6, message: 'The account is busy' });
+  assert.equal(R.picksLoaded(t, { kind: 'perps', data: body, at: 7 }), t, 'a kind Trade does not pick is not kept');
+  assert.equal(R.picksLoading(t, {}), t);
+
+  // the trade search's read, apart from the Markets search's
+  t = R.tradeResultsLoading(t);
+  assert.equal(t.trade.results.status, 'loading');
+  t = R.tradeResultsLoaded(t, { data: body, at: 8 });
+  assert.deepEqual(t.trade.results, { status: 'ready', data: body, at: 8, message: null });
+  t = R.tradeResultsFailed(t, { at: 9 });
+  assert.deepEqual(t.trade.results, { status: 'error', data: body, at: 9, message: null });
+  assert.deepEqual(t.markets.results, s.markets.results, 'the Markets search is untouched');
+  assert.equal(R.resultsLoaded(s, { data: body, at: 1 }).trade.results.status, 'idle', 'and the Markets search leaves Trade\'s');
+
+  // the ticket: a buy of the first outcome where the venue is not given; a word said is cleared by a new ticket
+  t = R.tradeSaid(t, 'Bought 0.04 ETH @ 3,120.50 · Stand-in Exchange');
+  assert.equal(t.trade.said, 'Bought 0.04 ETH @ 3,120.50 · Stand-in Exchange');
+  t = R.ticketOpen(t, { id: 'coin:ETH' });
+  assert.deepEqual(t.trade.ticket, { id: 'coin:ETH', side: 'buy', venue: null, outcome: 0 });
+  assert.equal(t.trade.said, null);
+  t = R.ticketOpen(t, { id: 'event:predict:SI-FEDCUT-DEC', side: 'sell', venue: 'predict', outcome: 1 });
+  assert.deepEqual(t.trade.ticket, { id: 'event:predict:SI-FEDCUT-DEC', side: 'sell', venue: 'predict', outcome: 1 });
+  assert.deepEqual(R.ticketOpen(t, { id: 'coin:ETH', side: 'short', venue: 7, outcome: -1 }).trade.ticket, { id: 'coin:ETH', side: 'buy', venue: null, outcome: 0 });
+  assert.equal(R.ticketOpen(t, { id: '' }), t, 'no market, no ticket');
+  assert.equal(R.ticketClose(t).trade.ticket, null);
+  assert.equal(R.tradeSaid(t, null).trade.said, null);
+  assert.equal(R.tradeSaid(t, 3).trade.said, null);
+});
+
 test('the empty state carries no demo slice', () => {
   const s = emptyState();
   for (const gone of ['plugins', 'memory', 'mail', 'banner', 'call', 'compose']) assert.equal(gone in s, false, gone);

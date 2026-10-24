@@ -8,5 +8,6 @@ import { reducers as host } from './host.js';
 import { reducers as channels } from './channels.js';
 import { reducers as traces } from './traces.js';
 import { reducers as owner } from './owner.js';
+import { reducers as trade } from './trade.js';
 
-export const reducers = { ...messages, ...discover, ...account, ...controls, ...markets, ...host, ...channels, ...traces, ...owner };
+export const reducers = { ...messages, ...discover, ...account, ...controls, ...markets, ...host, ...channels, ...traces, ...owner, ...trade };
