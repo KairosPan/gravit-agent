@@ -55,9 +55,15 @@ const inputOf = prepared => {
 /** owners and pending devices by kid → their JWK; `seedOwner` stands for a device already signing (the stand-in's seed key) */
 function door({ seedOwner = false } = {}) {
   const d = {
-    log: [], owners: new Map(), pending: new Map(), watch: [], canned: {},
+    log: [], owners: new Map(), pending: new Map(), watch: [], canned: {}, gates: {},
     /** answer the next call to `path` with `answer` instead of the rules */
     once(path, answer) { (d.canned[path] ??= []).push(answer); },
+    /** hold every call to `path` (logged, unanswered) until the returned release is called; the answer is the door's then */
+    hold(path) {
+      let release;
+      d.gates[path] = new Promise(r => { release = r; });
+      return () => { delete d.gates[path]; release(); };
+    },
     calls: path => d.log.filter(e => e.path === path),
   };
   if (seedOwner) d.owners.set('a5048199a8081854', null);
@@ -97,6 +103,7 @@ function door({ seedOwner = false } = {}) {
   d.post = async (path, body) => {
     const sent = JSON.parse(JSON.stringify(body));
     d.log.push({ path, body: sent });
+    if (d.gates[path]) await d.gates[path];
     const canned = d.canned[path]?.shift();
     if (canned) return canned;
     return rules[path] ? rules[path](sent) : { status: 404, body: { ok: false, error: 'not found' } };
@@ -220,6 +227,17 @@ test('a bad-signature answer re-reads the standing', async () => {
   assert.equal(r.o().refusal, 'the signature does not match the instruction', 'and the line says so');
   assert.equal(r.o().role, 'signs', 'the door still knows this key');
 
+  // an exchange the Account takes clears the line
+  assert.equal((await r.owner.act(WATCH)).status, 200);
+  assert.equal(r.o().refusal, null);
+
+  // the card's own BAD_SIGNATURE (a 409 from approveCard) is a card fact, not a key fact: no re-pair, no device line
+  const card = refusal(409, 'E_ACCOUNT_BAD_SIGNATURE', 'this approval names a different instruction than the one the card holds');
+  r.door.once('/data/account/exchange', card);
+  assert.deepEqual(await r.owner.act(WATCH), card);
+  assert.equal(r.door.calls('/data/account/pair').length, 2);
+  assert.equal(r.o().refusal, null);
+
   // a page that does not sign meets the same answer without asking the door again
   const p = rig({ d: door({ seedOwner: true }) });
   await p.owner.ready();
@@ -241,6 +259,11 @@ test('a refusal at prepare is handed back unsigned', async () => {
   const bare = { status: 200, body: { ok: true, action: { ...WATCH, nonce: NONCE } } };
   r.door.once('/data/account/prepare', bare);
   assert.deepEqual(await r.owner.act(WATCH), bare);
+  // fields to show but no action to carry: a refusal in the same shape, never a throw
+  const noAction = { status: 200, body: { ok: true, shown: [{ name: 'nonce', value: String(NONCE) }] } };
+  r.door.once('/data/account/prepare', noAction);
+  assert.deepEqual(await r.owner.act(WATCH), NOT_SIGNING);
+  assert.deepEqual(await r.owner.submit({ shown: [], action: 'setWatch' }), NOT_SIGNING);
   assert.equal(r.door.calls('/data/account/exchange').length, 0, 'exchange never called');
   assert.equal(r.o().refusal, null, "a prepare's refusal is the caller's to draw");
 });
@@ -324,10 +347,90 @@ test('a thrown post is a refusal in the same shape', async () => {
   assert.deepEqual(seen, [['/data/account/prepare', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ draft: WATCH }) }]]);
   const ok = async () => ({ status: 200, json: async () => ({ ok: true, kid: 'k', role: 'pending' }) });
   assert.deepEqual(await postVia(ok)('/data/account/pair'), { status: 200, body: { ok: true, kid: 'k', role: 'pending' } });
+  // JSON that is not an object is {}
+  for (const parsed of [null, 5, 'words', [1, 2], true]) {
+    const scalar = async () => ({ status: 200, json: async () => parsed });
+    assert.deepEqual(await postVia(scalar)('/data/account/prepare', {}), { status: 200, body: {} }, JSON.stringify(parsed));
+  }
 
   // the device over it: the refusal's words on the slice, the role as it was; an act hands the same shape back
   const r = rig({ post: thrown });
   await r.owner.ready();
   assert.deepEqual([r.o().role, r.o().refusal, r.o().busy], ['unknown', 'The account did not answer. Try again.', false]);
   assert.deepEqual(await r.owner.act(WATCH), NO_ANSWER);
+});
+
+const PAIR = '/data/account/pair', EXCHANGE = '/data/account/exchange';
+const until = async cond => { for (let i = 0; i < 50 && !cond(); i++) await tick(); assert.ok(cond(), 'reached'); };
+
+test('a page that lands during a sign-out pairs nothing, and the sign-out stands', async () => {
+  const r = await signing();
+  const pairs = r.door.calls(PAIR).length;
+  const release = r.door.hold(EXCHANGE);
+  const out = r.owner.signOut();
+  await until(() => r.door.calls(EXCHANGE).length === 1);
+  // the page already reflects the sign-out (this key in neither list), and a plain ready meanwhile
+  await r.owner.standing(pageWith([]));
+  await r.owner.ready();
+  release();
+  assert.equal((await out).status, 200);
+  await tick();
+  assert.deepEqual([r.o().role, r.o().kid, r.flag.get()], ['signed-out', '', true]);
+  assert.equal(await r.keys.get(), undefined);
+  assert.equal(r.door.calls(PAIR).length, pairs, 'no pair at the door for a key on its way out');
+  assert.equal(r.door.pending.size, 0);
+
+  // a pair already in the air when the sign-out starts: its answer is dropped
+  const s = await signing();
+  const releasePair = s.door.hold(PAIR);
+  const stale = s.owner.ready();
+  await until(() => s.door.calls(PAIR).length === 2);
+  assert.equal((await s.owner.signOut()).status, 200);
+  releasePair();
+  await stale;
+  assert.deepEqual([s.o().role, s.o().kid, s.flag.get()], ['signed-out', '', true]);
+  assert.equal(await s.keys.get(), undefined);
+});
+
+test('a pairing that threw does not wedge the next', async () => {
+  const r = rig();
+  let thrown = false;
+  r.store.subscribe((_, type) => { if (type === 'ownerBusy' && !thrown) { thrown = true; throw new Error('boom'); } });
+  const first = r.owner.ready();
+  const coded = r.owner.ready(CODE);
+  await assert.rejects(first, /boom/);
+  await coded;
+  assert.deepEqual([r.o().role, r.o().busy], ['signs', false], 'the code ran after it, busy given back');
+  assert.equal(r.door.calls(PAIR).length, 1);
+  await r.owner.ready();
+  assert.equal(r.door.calls(PAIR).length, 2, 'a plain ready runs again');
+});
+
+test('a code typed while a plain pairing is in the air pairs after it', async () => {
+  const r = rig();
+  const release = r.door.hold(PAIR);
+  const plainAsk = r.owner.ready();
+  assert.equal(r.owner.ready(), plainAsk, 'a plain ask joins the one in the air');
+  const coded = r.owner.ready(CODE);
+  await until(() => r.door.calls(PAIR).length === 1);
+  await tick();
+  assert.equal(r.door.calls(PAIR).length, 1, 'the code waits');
+  release();
+  await coded;
+  const pairs = r.door.calls(PAIR);
+  assert.deepEqual(pairs.map(p => p.body.code), [undefined, CODE]);
+  assert.equal(r.o().role, 'signs');
+});
+
+test('a first pairing refused or unanswered lets the next page ask again', async () => {
+  const d = door();
+  d.once(PAIR, { status: 503, body: { ok: false, unreachable: 'ECONNREFUSED' } });
+  const r = rig({ d });
+  await r.owner.standing(pageWith([]));
+  assert.deepEqual([r.o().role, r.o().refusal], ['unknown', ''], 'a refusal without words');
+  await r.owner.standing(pageWith([]));
+  assert.equal(r.door.calls(PAIR).length, 2);
+  assert.equal(r.o().role, 'needs-code');
+  await r.owner.standing(pageWith([]));
+  assert.equal(r.door.calls(PAIR).length, 2, 'answered: no more asks from the pages');
 });
