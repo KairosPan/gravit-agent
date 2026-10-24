@@ -7,9 +7,9 @@ import { readFileSync } from 'node:fs';
 import {
   seatWords,
   pageOk, headOf, worthOf, changeOf, assetsOf, positionsOf, openOrdersOf, missingWords, statementLinesOf, statementCsvOf,
-  venuesOf, agentsOf, cardsOf, asksOf, requestsOf,
+  venuesOf, agentsOf, cardsOf, asksOf, requestsOf, connectOptionsOf, paperBooksOf, keyfileWords,
 } from '../../client/js/host/account-view.js';
-import { grantOf } from '../../client/js/host/sheet-view.js';
+import { grantOf, fieldsOf, draftOf, keyfileAskOf, reachAskOf, connectCheckOf } from '../../client/js/host/sheet-view.js';
 
 // a fixture of the stand-in's answers, parsed afresh for every call so no test sees another's copy
 const fx = name => JSON.parse(readFileSync(new URL(`../fixtures/account/${name}.json`, import.meta.url), 'utf8'));
@@ -210,7 +210,7 @@ test('venuesOf: health from lastOkAt/lastFailAt; does words; the paper flag; det
     ['agent-claude-code', 'not-read', false], ['wallet', 'not-read', false], ['predict', 'not-read', false],
   ]);
   const { details, ...ex } = venues[1];
-  assert.deepEqual(ex, { id: 'ex', name: 'Stand-in Exchange', usd: 21638.93, frontLine: 'Exchange', health: 'answers', healthWords: 'Answers', since: null, does: ['Trades', 'Moves money', 'Earns'], what: 'spot and perpetuals', paper: false, asOf: '2026-10-22T07:35:46.781Z', stale: false });
+  assert.deepEqual(ex, { id: 'ex', name: 'Stand-in Exchange', connector: 'live:standin-exchange', usd: 21638.93, frontLine: 'Exchange', health: 'answers', healthWords: 'Answers', since: null, does: ['Trades', 'Moves money', 'Earns'], what: 'spot and perpetuals', paper: false, asOf: '2026-10-22T07:35:46.781Z', stale: false });
   assert.equal(details.holdings.length, 7);
   assert.deepEqual(details.holdings[0], { asset: 'BTC', amount: 0.12, usd: 7497.6 });
   assert.deepEqual({ ...details, holdings: [] }, { holdings: [], noTradeBecause: '', restricted: '', notServed: '', closeOnly: '', watchOnly: 'Live · read-only', keyFile: '' });
@@ -373,4 +373,121 @@ test('an unrecognised page is unreadable, never a number: every function answers
   headOf(page); worthOf(page, held, paper); changeOf(history); assetsOf(held); positionsOf(held); openOrdersOf(page); missingWords(held.missing);
   statementCsvOf(statementLinesOf(lines)); venuesOf(page); agentsOf(agents, seatView()); cardsOf(page); asksOf(page); requestsOf(page);
   assert.equal(JSON.stringify(bodies), before);
+});
+
+// ── the Venues' keys (plan 2 Task 8): what to connect, the kept paper books, the key file's check ──
+
+// a venue the stand-in never yields, built beside the fixture: Kalshi not served where the account runs, in its own words
+const KALSHI_SAID = 'Kalshi does not serve this location';
+const withNotServed = () => {
+  const body = fx('venues');
+  return { ...body, venues: body.venues.map(v => (v.connector === 'live:kalshi' ? { ...v, verdict: 'not-served', said: KALSHI_SAID } : v)) };
+};
+
+test("connectOptionsOf: connectLive's options joined with the venues' verdicts; sign-in, address and cli options are elsewhere", () => {
+  const page = fx('account');
+  const options = connectOptionsOf(page, withNotServed());
+  assert.deepEqual(options.map(o => o.connector), page.connectLive.options.map(o => o.connector), "every option, in the Account's order");
+  const by = id => options.find(o => o.connector === id);
+  assert.deepEqual(by('live:alpaca-paper'), {
+    connector: 'live:alpaca-paper', label: 'Alpaca · paper trading on its paper account, API key (no real money)', needs: 'key-file',
+    example: '{"keyId": "…", "secret": "…"} (the keys of your Alpaca PAPER account: in the dashboard switch to Paper, then Generate New Keys)',
+    defaultRef: 'credentials/<venue>/api-key.json', venues: [], kind: 'alpaca-paper', verdict: 'connectable', said: '', group: 'Brokers', elsewhere: false,
+  });
+  // a not-served venue carries the venue's own words
+  assert.deepEqual([by('live:kalshi').verdict, by('live:kalshi').said, by('live:kalshi').elsewhere], ['not-served', KALSHI_SAID, false]);
+  // connected on the Account page, not here: a sign-in, an address, a command line
+  assert.deepEqual(options.filter(o => o.elsewhere).map(o => [o.connector, o.needs]),
+    [['live:robinhood', 'sign-in'], ['live:metamask', 'cli'], ['live:wallet', 'address'], ['live:hyperliquid', 'address']]);
+  // an option the venues list does not name keeps no verdict: the bare exchange (the list names each live:exchange:<id>)
+  assert.deepEqual([by('live:exchange').verdict, by('live:exchange').said, by('live:exchange').group, by('live:exchange').venues], [null, '', '', ['binance', 'okx', 'bybit', 'kraken']]);
+  // the venues not read yet, or not an answer: every option, no verdict
+  for (const venues of [null, { ok: false, venues: withNotServed().venues }]) {
+    const bare = connectOptionsOf(page, venues);
+    assert.equal(bare.length, options.length);
+    assert.ok(bare.every(o => o.verdict === null && o.said === ''));
+    assert.equal(bare.find(o => o.connector === 'live:robinhood').elsewhere, true, 'elsewhere is the option\'s own need');
+  }
+  // a page that is not one: nothing to connect
+  assert.deepEqual(connectOptionsOf({ ok: true }, withNotServed()), []);
+  // the connect sheet takes them as its seed: the paper account is its own sheet; an elsewhere option never drafts
+  const fields = fieldsOf('connect', { options });
+  assert.ok(!fields[0].options.some(o => o.value === 'live:paper'));
+  assert.equal(draftOf('connect', { connector: 'live:robinhood', venue: 'rh', label: 'Robinhood' }, { options }, 0), 'Connect on the Account page');
+  assert.deepEqual(draftOf('connect', { connector: 'live:alpaca-paper', venue: 'alpaca', label: 'Alpaca paper' }, { options }, 0),
+    { type: 'connectVenue', venue: 'alpaca', connector: 'live:alpaca-paper', label: 'Alpaca paper', credentialRef: 'credentials/alpaca/api-key.json' });
+});
+
+test('paperBooksOf: the kept books, amounts numeric; the paper sheet seeded with them and the page venues never reuses an id', () => {
+  assert.deepEqual(paperBooksOf(fx('paper-books')), [], 'the stand-in keeps none');
+  const kept = { venue: 'paper-swing', name: 'Swing', cashUsd: 9500.5, startCashUsd: 10000, addedUsd: '0', createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-20T00:00:00.000Z', holdings: 2, positions: 1, open: 0 };
+  const books = paperBooksOf({ ok: true, books: [kept, 'junk', { name: 'No venue' }] });
+  assert.deepEqual(books, [{ venue: 'paper-swing', name: 'Swing', cashUsd: 9500.5, startCashUsd: 10000, addedUsd: 0, createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-20T00:00:00.000Z', holdings: 2, positions: 1, open: 0 }]);
+  assert.deepEqual(paperBooksOf({ ok: false, books: [kept] }), []);
+  assert.deepEqual(paperBooksOf(null), []);
+  // the page already has paper-momentum: a new Momentum book is paper-momentum-2; a kept book continues as it was
+  const seed = { books, venues: venuesOf(fx('account')) };
+  assert.equal(draftOf('paper', { book: '', label: 'Momentum', usd: '5000' }, seed, 0).venue, 'paper-momentum-2');
+  assert.equal(draftOf('paper', { book: '', label: 'Swing', usd: '5000' }, seed, 0).venue, 'paper-swing-2', 'a kept book’s id is in use too');
+  assert.deepEqual(draftOf('paper', { book: 'paper-swing', label: '', usd: '' }, seed, 0), { type: 'connectVenue', venue: 'paper-swing', connector: 'live:paper', label: 'Swing', credentialRef: '' });
+});
+
+test("keyfileWords: ready with its path, the fields missing, else the Account's sentence; never a value", () => {
+  const body = fx('keyfile');
+  assert.deepEqual(keyfileWords(body), { ready: false, path: body.path, missing: [], message: body.message });
+  assert.deepEqual(keyfileWords({ ok: true, ready: true, path: '/h/credentials/alpaca/api-key.json', fields: ['keyId', 'secret'], message: 'ready' }),
+    { ready: true, path: '/h/credentials/alpaca/api-key.json', missing: [], message: 'ready' });
+  assert.deepEqual(keyfileWords({ ...body, missing: ['secret', 7, 'keyId'] }).missing, ['secret', 'keyId']);
+  for (const not of [null, { ok: false, ready: true, path: '/x' }, 'text']) assert.deepEqual(keyfileWords(not), { ready: false, path: '', missing: [], message: '' });
+});
+
+test("the connect sheet's check: what to ask, and the words from the key file's check and the venue's reach", () => {
+  const options = connectOptionsOf(fx('account'), withNotServed());
+  const sheet = fields => ({ kind: 'connect', seed: { options }, fields: fieldsOf('connect', { options, ...fields }) });
+  const read = (data, asked, status = 'ready', message = null) => ({ status, data, at: 1, message, asked });
+  const none = { status: 'idle', data: null, at: null, message: null };
+
+  // nothing picked: nothing to ask, nothing to say
+  const blank = sheet({});
+  assert.equal(keyfileAskOf(blank), null);
+  assert.equal(reachAskOf(blank), null);
+  assert.equal(connectCheckOf(blank, none, none), '');
+  // elsewhere: the Account page, whatever was read
+  const rh = sheet({ connector: 'live:robinhood', venue: 'rh' });
+  assert.equal(keyfileAskOf(rh), null, 'a sign-in reads no key file');
+  assert.equal(connectCheckOf(rh, read(fx('keyfile'), null), none), 'Connect on the Account page');
+
+  // a key-file option: the key file asked by its kind, venue and typed path; the reach by its connector
+  const ap = sheet({ connector: 'live:alpaca-paper', venue: 'alpaca-paper' });
+  const ask = { kind: 'alpaca-paper', venue: 'alpaca-paper', ref: '', exchange: '' };
+  assert.deepEqual(keyfileAskOf(ap), ask);
+  assert.equal(reachAskOf(ap), 'live:alpaca-paper');
+  assert.equal(keyfileAskOf(sheet({ connector: 'live:alpaca-paper' })), null, 'no venue yet: nothing to check');
+  const body = fx('keyfile');
+  assert.equal(connectCheckOf(ap, read(body, ask), none), body.message, "no file there: the Account's sentence");
+  assert.equal(connectCheckOf(ap, read({ ok: true, ready: true, path: '/h/credentials/alpaca-paper/api-key.json', fields: [], message: '' }, ask), none),
+    'Key file found: /h/credentials/alpaca-paper/api-key.json');
+  assert.equal(connectCheckOf(ap, read({ ...body, missing: ['keyId', 'secret'] }, ask), none), 'Missing: keyId, secret');
+  // a check asked for another form says nothing of this one; one in the air says so; a refused one, the Account's sentence
+  assert.equal(connectCheckOf(ap, read(body, { ...ask, venue: 'other' }), none), '');
+  assert.equal(connectCheckOf(ap, read({ ok: true, ready: true, path: '/old' }, ask, 'loading'), none), 'Checking the key file…');
+  assert.equal(connectCheckOf(ap, read({ ok: true, ready: true, path: '/old' }, ask, 'error', 'kind is not a connection'), none), 'kind is not a connection');
+
+  // the reach: a venue that does not answer here, in its words (or the state's), ahead of the key file; one that answers, nothing
+  const reach = (state, said) => read({ ok: true, reach: [{ connector: 'live:alpaca-paper', state, at: '2026-10-24T15:00:00.000Z', ...(said ? { said } : {}) }] }, undefined);
+  assert.equal(connectCheckOf(ap, read(body, ask), reach('location', 'not offered in this region')), `not offered in this region · ${body.message}`);
+  assert.equal(connectCheckOf(ap, none, reach('unreachable')), 'Did not answer');
+  assert.equal(connectCheckOf(ap, none, reach('ok')), '');
+  // a not-served option says the venue's own words
+  const kalshi = sheet({ connector: 'live:kalshi', venue: 'kalshi' });
+  assert.equal(connectCheckOf(kalshi, none, none), KALSHI_SAID);
+
+  // the bare exchange: its key file asked with the exchange; its reach once the exchange is picked; the typed path as typed
+  const ex = sheet({ connector: 'live:exchange', exchange: 'okx', credentialRef: ' credentials/okx/key.json ' });
+  assert.deepEqual(keyfileAskOf(ex), { kind: 'exchange', venue: 'okx', ref: 'credentials/okx/key.json', exchange: 'okx' });
+  assert.equal(reachAskOf(ex), 'live:exchange:okx');
+  assert.equal(reachAskOf(sheet({ connector: 'live:exchange' })), null, 'no exchange picked: no venue to reach');
+  // another sheet, or none: nothing
+  assert.equal(connectCheckOf({ kind: 'paper', seed: {}, fields: [] }, read(body, ask), none), '');
+  assert.equal(connectCheckOf(null, none, none), '');
 });

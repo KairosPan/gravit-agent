@@ -1,5 +1,6 @@
 // face/client/js/host/account-view.js — the Account screen's pure views (spec 2026-10-22 §6.2) over the Account's own payloads
-// as the face proxies them — the page (/data/account), holdings?cost=1 and its paper lens, history, statement and agents — each
+// as the face proxies them — the page (/data/account), holdings?cost=1 and its paper lens, history, statement and agents, and
+// the connect sheet's reads (venues, paper/books, keyfile) — each
 // taking the route's body as the store keeps it and answering its empty shape for a body it does not recognise; and the seat
 // box's words over /data/seat.json (spec 2026-10-20 §6.3). An amount that does not parse is null, never NaN and never 0; a time
 // stays the Account's ISO string, its words the renderer's. No DOM.
@@ -209,7 +210,7 @@ function doesOf(v) {
   ].filter(Boolean);
 }
 
-/** The Venues tab from the page's `venues`: each venue's value, front line, health, what it does and what it trades
+/** The Venues tab from the page's `venues`: each venue's connector, value, front line, health, what it does and what it trades
  *  (`trade.what`), the paper flag, when it was read (`stale` the Account's words where it says them), and the Details drawer's
  *  facts — the key file's path when it has one, never what is in it. */
 export function venuesOf(page) {
@@ -218,7 +219,7 @@ export function venuesOf(page) {
   return records(page.venues).map(v => {
     const id = str(v.id);
     return {
-      id, name: str(v.name), usd: number(v.usd), frontLine: str(v.frontLine),
+      id, name: str(v.name), connector: str(v.connector), usd: number(v.usd), frontLine: str(v.frontLine),
       ...healthOf(Object.hasOwn(health, id) ? health[id] : undefined),
       does: doesOf(v), what: str(v.trade?.what), paper: v.paper === true, asOf: str(v.asOf),
       stale: typeof v.stale === 'string' ? v.stale : v.stale === true,
@@ -307,4 +308,45 @@ export function asksOf(page) {
 export function requestsOf(page) {
   if (!pageOk(page)) return [];
   return records(page.requests).map(r => ({ address: str(r.address), name: str(r.name), at: str(r.at) }));
+}
+
+// ── the connect sheet's reads (plan 2 Task 8) ──
+
+// what is connected on the Account page, not here: a venue's own sign-in, a proven address, a command line on its machine
+const ELSEWHERE = new Set(['sign-in', 'address', 'cli']);
+const strings = v => (Array.isArray(v) ? v.filter(x => typeof x === 'string' && x !== '') : []);
+
+/** What the connect sheet offers (its seed's `options`): the page's `connectLive.options`, each with where this account can
+ *  connect it — the verdict, the venue's own words when it is not connectable (`said`) and its group, from the venues read
+ *  (`/data/account/venues`, joined by connector; an option it does not name, or a venues read not landed, keeps
+ *  `verdict: null`) — and `elsewhere` for one connected on the Account page (a sign-in, an address, a command line), which
+ *  never drafts here. In the Account's order; the paper account among them (its own sheet leaves it out). */
+export function connectOptionsOf(page, venuesHere) {
+  if (!pageOk(page)) return [];
+  const here = new Map(listOf(venuesHere, 'venues').filter(v => typeof v.connector === 'string').map(v => [v.connector, v]));
+  return records(page.connectLive.options).filter(o => typeof o.connector === 'string' && o.connector !== '').map(o => {
+    const v = here.get(o.connector);
+    return {
+      connector: o.connector, label: str(o.label), needs: str(o.needs), example: str(o.example), defaultRef: str(o.defaultRef),
+      venues: strings(o.venues), kind: str(o.kind),
+      verdict: v && typeof v.verdict === 'string' ? v.verdict : null, said: str(v?.said), group: str(v?.group),
+      elsewhere: ELSEWHERE.has(o.needs),
+    };
+  });
+}
+
+/** The paper books kept on the Account's disk and not connected (`/data/account/paper/books`), each by its venue id — the
+ *  paper sheet's seed `books`: a book without one is left out. Amounts and counts numeric, null when they do not parse. */
+export function paperBooksOf(body) {
+  return listOf(body, 'books').filter(b => typeof b.venue === 'string' && b.venue !== '').map(b => ({
+    venue: b.venue, name: str(b.name), cashUsd: number(b.cashUsd), startCashUsd: number(b.startCashUsd), addedUsd: number(b.addedUsd),
+    createdAt: str(b.createdAt), updatedAt: str(b.updatedAt), holdings: number(b.holdings), positions: number(b.positions), open: number(b.open),
+  }));
+}
+
+/** A key file's check (`/data/account/keyfile`) in the words the connect sheet draws from: whether it is ready, the file's
+ *  path, the field names it lacks, the Account's sentence — names and a path only, never what the file holds. */
+export function keyfileWords(body) {
+  if (body?.ok !== true) return { ready: false, path: '', missing: [], message: '' };
+  return { ready: body.ready === true, path: str(body.path), missing: strings(body.missing), message: str(body.message) };
 }

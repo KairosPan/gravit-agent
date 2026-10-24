@@ -8,7 +8,9 @@ import { readFileSync } from 'node:fs';
 import { renderDeviceLine, renderDevices, renderSheet } from '../../client/js/render/owner.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
-import { fieldsOf } from '../../client/js/host/sheet-view.js';
+import { fieldsOf, keyfileAskOf } from '../../client/js/host/sheet-view.js';
+import { connectOptionsOf } from '../../client/js/host/account-view.js';
+import { esc } from '../../client/js/html.js';
 import { askedOf } from '../../client/js/host/sheet.js';
 import { fmtDate } from '../../client/js/time.js';
 
@@ -233,4 +235,30 @@ test('every Account string is escaped: a name with markup in the title, the fiel
   has(html, '<div class="dsec-line">agentName: Eve &lt;b&gt;bold&lt;/b&gt; &quot;q&quot;</div>');
   lacks(html, '<b>bold</b>');
   clean(html);
+});
+
+// plan 2 Task 8: the connect sheet's check, a muted line under its fields, from the key file's check and the venue's reach
+test("a connect sheet draws its check under the fields: the key file found or missing, the Account page for what connects there", () => {
+  const options = connectOptionsOf(fx('account'), fx('venues'));
+  const open = opened('connect', { options, connector: 'live:alpaca-paper', venue: 'alpaca-paper' });
+  const LINE = /<p class="sheet-hint">([^<]*)<\/p>/;
+  const line = s => renderSheet(s, NOW).match(LINE)?.[1] ?? null;
+  assert.equal(line(open), null, 'nothing checked yet: no line');
+  const checked = (s, data) => R.keyfileLoaded(R.keyfileLoading(s, keyfileAskOf(s.sheet)), { data, at: NOW });
+  const body = fx('keyfile');
+  const html = renderSheet(checked(open, body), NOW);
+  // under the fields, over the quote box
+  has(html, `data-action="sheetField"></label><p class="sheet-hint">${esc(body.message)}</p><div class="sheet-quote">`);
+  assert.equal(line(checked(open, { ok: true, ready: true, path: '/h/credentials/alpaca-paper/<api>.json', fields: ['keyId', 'secret'], message: '' })),
+    'Key file found: /h/credentials/alpaca-paper/&lt;api&gt;.json');
+  assert.equal(line(checked(open, { ...body, missing: ['keyId', 'secret'] })), 'Missing: keyId, secret');
+  // the reach: a venue that does not answer from here says so first
+  const unreached = R.reachLoaded(checked(open, body), { data: { ok: true, reach: [{ connector: 'live:alpaca-paper', state: 'location', said: 'not offered here', at: '2026-10-24T15:00:00.000Z' }] }, at: NOW });
+  assert.equal(line(unreached), `not offered here · ${esc(body.message)}`);
+  // an option that connects on the Account page
+  assert.equal(line(opened('connect', { options, connector: 'live:robinhood' })), 'Connect on the Account page');
+  // another sheet draws no check, whatever was read
+  const letIn = checked(opened('letIn', { address: ADDRESS, name: 'Claude Code' }), body);
+  assert.equal(line(letIn), null);
+  clean(renderSheet(unreached, NOW));
 });

@@ -1,10 +1,10 @@
 // face/client/js/host/sheet-view.js — every owner sheet's pure shape (spec 2026-10-22 §6.3–§6.4, plan 2 Task 4): its fields, its
 // title and go word, and its draft from the fields — the Account's own field set for its type, nothing added and nothing renamed
 // (docs/research/2026-10-22-account-owner-path-map.md §1.4–§1.5, §3.8–§3.10, §3.12, §3.14, §3.15, §3.17, §4.3) — or, while the
-// form is not complete, the words for what is missing. The sheet engine (host/sheet.js) prepares the draft, the renderer draws
-// the fields; the Account judges everything else in its own words. `now` is the caller's clock in milliseconds; `validUntil`
+// form is not complete, the words for what is missing; and the connect sheet's check (what to ask, its words). The sheet engine
+// (host/sheet.js) prepares the draft, the renderer draws the fields; the Account judges everything else in its own words. `now` is the caller's clock in milliseconds; `validUntil`
 // values are numbers (the Account's u64 fields), the dollar amounts strings as typed. No DOM, no store.
-import { pageOk, venuesOf } from './account-view.js';
+import { pageOk, venuesOf, keyfileWords } from './account-view.js';
 
 const DAY = 86_400_000;
 const ZERO = '0x0000000000000000000000000000000000000000';
@@ -284,4 +284,64 @@ export function grantOf(ask, page) {
     default:
       return null;
   }
+}
+
+// ── the connect sheet's check (plan 2 Task 8) ──
+
+// the option the open connect sheet has picked, or nothing
+const pickedOption = sheet => (isRecord(sheet) && sheet.kind === 'connect'
+  ? connectOptions(sheet.seed).find(o => o.connector === text(sheet.fields, 'connector')) ?? null : null);
+// an exchange account's exchange, when the one picked is the option's
+const exchangeOf = (sheet, option) => { const x = text(sheet.fields, 'exchange'); return listOf(option.venues).includes(x) ? x : ''; };
+// the reach's states in words, where the venue gives none of its own
+const REACH_WORDS = { location: 'Not served from here', 'close-only': 'Close only from here', setup: 'Being set up', closed: 'Closed', unreachable: 'Did not answer' };
+const sameAsk = (a, b) => isRecord(a) && isRecord(b) && ['kind', 'venue', 'ref', 'exchange'].every(k => a[k] === b[k]);
+
+/** The key file the open connect sheet would connect with, as host/account.js's `checkKeyfile` asks it: the picked option's
+ *  kind, the venue (an exchange account's is its exchange unless another is typed), the path as typed (blank: the Account's
+ *  default for the venue) and the exchange. Nothing to check — no key-file option picked, no venue yet: null. */
+export function keyfileAskOf(sheet) {
+  const option = pickedOption(sheet);
+  if (!option || option.needs !== 'key-file' || option.elsewhere === true) return null;
+  const exchange = needsExchange(option) ? exchangeOf(sheet, option) : '';
+  const venue = text(sheet.fields, 'venue') || exchange;
+  if (!venue || !str(option.kind)) return null;
+  return { kind: option.kind, venue, ref: text(sheet.fields, 'credentialRef'), exchange };
+}
+
+/** The connector whose reach the open connect sheet asks (`reach(connector)`): the picked option's; an exchange account's
+ *  `live:exchange:<exchange>` once its exchange is picked. Nothing picked: null. */
+export function reachAskOf(sheet) {
+  const option = pickedOption(sheet);
+  if (!option) return null;
+  if (!needsExchange(option)) return option.connector;
+  const exchange = exchangeOf(sheet, option);
+  return exchange ? `live:exchange:${exchange}` : null;
+}
+
+/** The connect sheet's check, one line from the Account's own words: for an option connected on the Account page, that; else
+ *  the venue's words when it is not connectable here, a reach that does not answer from here (its words, or the state's), and
+ *  the key file's check — `Key file found: <path>`, `Missing: a, b`, else the Account's sentence — only when it was asked for
+ *  the form as it stands (`keyfileAskOf`). `keyfile` and `reach` are the account slice's reads. Another sheet, or nothing
+ *  picked: ''. */
+export function connectCheckOf(sheet, keyfile, reach) {
+  const option = pickedOption(sheet);
+  if (!option) return '';
+  // as draftOf: whatever does not connect by a key file connects on the Account page
+  if (option.elsewhere === true || option.needs !== 'key-file') return 'Connect on the Account page';
+  const parts = [];
+  if (option.verdict && option.verdict !== 'connectable' && str(option.said)) parts.push(option.said);
+  const connector = reachAskOf(sheet);
+  const r = connector && reach?.data?.ok === true ? records(reach.data.reach).find(e => e.connector === connector) : null;
+  if (r && r.state !== 'ok') parts.push(str(r.said) || (Object.hasOwn(REACH_WORDS, r.state) ? REACH_WORDS[r.state] : ''));
+  const ask = keyfileAskOf(sheet);
+  if (ask && sameAsk(keyfile?.asked, ask)) {
+    if (keyfile.status === 'loading') parts.push('Checking the key file…');
+    else if (keyfile.status === 'error') parts.push(str(keyfile.message));
+    else if (keyfile.status === 'ready') {
+      const w = keyfileWords(keyfile.data);
+      parts.push(w.ready ? (w.path ? `Key file found: ${w.path}` : 'Key file found') : w.missing.length ? `Missing: ${w.missing.join(', ')}` : w.message);
+    }
+  }
+  return parts.filter(Boolean).join(' · ');
 }

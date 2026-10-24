@@ -7,7 +7,7 @@ import { esc, attrs, cls } from '../html.js';
 import { fmtDate } from '../time.js';
 import { pageOk } from '../host/account-view.js';
 import { standingWords, devicesOf, whatYouSignLines, goodForWords } from '../host/owner-view.js';
-import { titleOf, goWord } from '../host/sheet-view.js';
+import { titleOf, goWord, connectCheckOf } from '../host/sheet-view.js';
 import { askedOf } from '../host/sheet.js';
 import { seg } from './controls.js';
 
@@ -92,7 +92,7 @@ function quoteBox(s) {
   return inner ? `<div class="sheet-quote">${inner}</div>` : '';
 }
 
-/** The open sheet as a drawer: its title, its fields, the quote box, the signature's minutes, What you sign (dimmed while the form
+/** The open sheet as a drawer: its title, its fields (a connect sheet's check under them), the quote box, the signature's minutes, What you sign (dimmed while the form
  *  is not the draft the shown preparation was asked for), what the Account said, Cancel and the go key — on only while the sheet
  *  is ready and the form's draft is the one asked for. No sheet open: nothing. */
 export function renderSheet(state, now) {
@@ -108,7 +108,11 @@ export function renderSheet(state, now) {
     ? `<details${attrs({ class: cls('acct-shown', s.status === 'ready' && !current && 'stale') })}><summary>What you sign</summary>${lines.map(l => `<div class="dsec-line">${esc(l)}</div>`).join('')}</details>`
     : '';
   const said = s.status === 'done' && s.said ? note(s.said) : '';
+  // a connect sheet's check, under its fields: the key file found or missing, the venue's reach, the Account page for what
+  // connects there — the Account's words, a key file by its path, never what it holds
+  const checked = s.kind === 'connect' ? connectCheckOf(s, state.account?.keyfile, state.account?.reach) : '';
+  const check = checked ? `<p class="sheet-hint">${esc(checked)}</p>` : '';
   const keys = `<div class="btn-row">${key('sheetClose', 'Cancel')}<button${attrs({ type: 'button', class: 'btn-primary', 'data-action': 'sheetSubmit', disabled: !live })}>${esc(goWord(s.kind, s.seed))}</button></div>`;
   return `<aside${attrs({ class: 'drawer sheet', 'aria-label': title })}><div class="drawer-head"><h2>${esc(title)}</h2><button type="button" class="close-key" data-action="sheetClose" aria-label="Close">×</button></div>` +
-    `<div class="drawer-body">${fields}${quoteBox(s)}${left ? `<p class="sheet-left">${esc(left)}</p>` : ''}${signs}${said}${keys}</div></aside>`;
+    `<div class="drawer-body">${fields}${check}${quoteBox(s)}${left ? `<p class="sheet-left">${esc(left)}</p>` : ''}${signs}${said}${keys}</div></aside>`;
 }

@@ -400,6 +400,7 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .drawer.sheet .drawer-body > .btn-row { justify-content: flex-end; }
 .sheet-quote { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-s); font-size: 14px; }
 .sheet-left { margin: 0; color: var(--dim); font-size: 13px; font-variant-numeric: tabular-nums; }
+.sheet-hint { margin: 0; color: var(--dim); font-size: 13px; overflow-wrap: anywhere; }
 .sheet-check { display: flex; align-items: center; gap: 8px; font-size: 14px; }
 .pair-box { display: flex; align-items: center; gap: 8px; max-width: 360px; }
 .venues { display: flex; flex-direction: column; gap: 10px; }

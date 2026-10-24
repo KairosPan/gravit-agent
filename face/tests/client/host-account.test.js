@@ -571,3 +571,92 @@ test('poll schedules every 20 s, 80 s while the stream is open; poll(false) canc
   assert.equal(r.reads.length, 2, 'and reads nothing');
   assert.equal(r.store.get(), before);
 });
+
+// the Venues' keys (plan 2 Task 8): where this account can connect, the kept paper books, a key file's check and a venue's
+// reach — each one flight at a time into its slice, keeping the Account's sentence when it refuses
+test('loadVenuesHere, loadPaperBooks, checkKeyfile and reach land their answers in their slices', async () => {
+  const keyfilePath = '/data/account/keyfile?kind=alpaca-paper&venue=alpaca-paper&ref=credentials%2Falpaca-paper%2Fapi-key.json';
+  const reachPath = '/data/account/connect/reach?connector=live%3Aalpaca-paper';
+  const reachBody = { ok: true, reach: [{ connector: 'live:alpaca-paper', state: 'ok', at: '2026-10-24T15:00:00.000Z' }] };
+  const r = rig({ json: { '/data/account/venues': fx('venues'), '/data/account/paper/books': fx('paper-books'), [keyfilePath]: fx('keyfile'), [reachPath]: reachBody } });
+  for (const key of ['venuesHere', 'paperBooks', 'reach']) assert.deepEqual(r.a()[key], { status: 'idle', data: null, at: null, message: null }, key);
+  assert.deepEqual(r.a().keyfile, { status: 'idle', data: null, at: null, message: null, asked: null });
+
+  const venues = r.account.loadVenuesHere();
+  assert.equal(r.account.loadVenuesHere(), venues, 'a second caller joins the flight');
+  assert.equal(r.a().venuesHere.status, 'loading');
+  await venues;
+  assert.equal(r.a().venuesHere.status, 'ready');
+  assert.deepEqual(r.a().venuesHere.data, fx('venues'));
+  await r.account.loadPaperBooks();
+  assert.deepEqual([r.a().paperBooks.status, r.a().paperBooks.data], ['ready', fx('paper-books')]);
+  // the key file's check records what it asked, so the sheet draws its words only for the form it was asked for
+  const asked = { kind: 'alpaca-paper', venue: 'alpaca-paper', ref: 'credentials/alpaca-paper/api-key.json' };
+  const check = r.account.checkKeyfile(asked);
+  assert.deepEqual(r.a().keyfile.asked, { ...asked, exchange: '' }, 'asked as soon as the check starts');
+  assert.equal(r.a().keyfile.status, 'loading');
+  await check;
+  assert.deepEqual([r.a().keyfile.status, r.a().keyfile.data], ['ready', fx('keyfile')]);
+  await r.account.reach('live:alpaca-paper');
+  assert.deepEqual([r.a().reach.status, r.a().reach.data], ['ready', reachBody]);
+  assert.deepEqual(r.reads, ['/data/account/venues', '/data/account/paper/books', keyfilePath, reachPath]);
+  // none of them asks past the face's cache: venues and books carry no fresh, and the proxy refuses a name it does not list
+  assert.ok(r.reads.every(p => !p.includes('fresh')));
+});
+
+test("checkKeyfile asks only what it is given — a blank path is the Account's default — and with the exchange for an exchange account", async () => {
+  const r = rig({ json: { '/data/account/keyfile': fx('keyfile') } });
+  await r.account.checkKeyfile({ kind: 'alpaca-paper', venue: 'alpaca-paper', ref: '' });
+  await r.account.checkKeyfile({ kind: 'exchange', venue: 'okx', ref: 'credentials/okx/key.json', exchange: 'okx' });
+  await r.account.checkKeyfile({ kind: 'kalshi', venue: 7, ref: null });
+  assert.deepEqual(r.reads, [
+    '/data/account/keyfile?kind=alpaca-paper&venue=alpaca-paper',
+    '/data/account/keyfile?kind=exchange&venue=okx&ref=credentials%2Fokx%2Fkey.json&exchange=okx',
+    '/data/account/keyfile?kind=kalshi',
+  ]);
+  assert.deepEqual(r.a().keyfile.asked, { kind: 'kalshi', venue: '', ref: '', exchange: '' });
+  // a later check overtakes one in the air: only the latest lands, under what it asked
+  const release = {};
+  const slow = rig({ json: { '/data/account/keyfile': path => new Promise(res => { release[path] = res; }) } });
+  const first = slow.account.checkKeyfile({ kind: 'alpaca', venue: 'a1' });
+  const second = slow.account.checkKeyfile({ kind: 'alpaca', venue: 'a2' });
+  await tick();
+  release['/data/account/keyfile?kind=alpaca&venue=a2']({ ok: true, ready: true, path: '/h/a2.json', fields: [], message: '' });
+  await second;
+  release['/data/account/keyfile?kind=alpaca&venue=a1']({ ok: true, ready: true, path: '/h/a1.json', fields: [], message: '' });
+  await first;
+  assert.equal(slow.a().keyfile.data.path, '/h/a2.json');
+  assert.equal(slow.a().keyfile.asked.venue, 'a2');
+});
+
+test("a refused venues, books, key-file or reach read keeps its last answer and the Account's sentence", async () => {
+  const refusal = message => rejected('/data/account/x', 400, { ok: false, refusal: { code: 'E_ACCOUNT_BAD_REQUEST', message } });
+  const r = rig({
+    json: {
+      '/data/account/venues': inTurn([fx('venues'), refusal('the venues are being probed')]),
+      '/data/account/paper/books': inTurn([fx('paper-books'), { ok: false, error: 'the paper books are unreadable' }]),
+      '/data/account/keyfile': inTurn([fx('keyfile'), refusal('a robinhood connection does not read a key file')]),
+      '/data/account/connect/reach': inTurn([{ ok: true, reach: [] }, rejected('/data/account/connect/reach', 400, { ok: false, error: 'connector is a comma-separated list of 1 to 24 connections, like live:exchange:okx,live:kalshi' })]),
+    },
+  });
+  for (const [key, ask] of [['venuesHere', () => r.account.loadVenuesHere()], ['paperBooks', () => r.account.loadPaperBooks()],
+    ['keyfile', () => r.account.checkKeyfile({ kind: 'robinhood', venue: 'rh' })], ['reach', () => r.account.reach('live:robinhood')]]) {
+    await ask();
+    const data = r.a()[key].data;
+    await ask();
+    assert.equal(r.a()[key].status, 'error', key);
+    assert.equal(r.a()[key].data, data, `${key}: the last answer stays`);
+  }
+  assert.equal(r.a().venuesHere.message, 'the venues are being probed');
+  assert.equal(r.a().paperBooks.message, 'the paper books are unreadable');
+  assert.equal(r.a().keyfile.message, 'a robinhood connection does not read a key file');
+  assert.equal(r.a().reach.message, 'connector is a comma-separated list of 1 to 24 connections, like live:exchange:okx,live:kalshi');
+  // an answer clears the sentence; unreachable carries none
+  const again = rig({ json: { '/data/account/venues': inTurn([refusal('probing'), fx('venues'), rejected('/data/account/venues', 503, { ok: false, unreachable: 'timeout' })]) } });
+  await again.account.loadVenuesHere();
+  assert.equal(again.a().venuesHere.message, 'probing');
+  await again.account.loadVenuesHere();
+  assert.equal(again.a().venuesHere.message, null);
+  await again.account.loadVenuesHere();
+  assert.deepEqual([again.a().venuesHere.status, again.a().venuesHere.message], ['error', null]);
+});

@@ -1,6 +1,7 @@
 // face/client/js/host/account.js — the Account screen's impure half (spec 2026-10-22 §6.2): the Account's reads through the
 // face's proxy into the store's account slice — the page (/data/account), holdings?cost=1 and its paper lens, the leading
-// history curve, the statement and the agents — each kind one flight at a time; the page at the Account's own cadence (every
+// history curve, the statement and the agents — and the connect sheet's reads (where this account can connect, the kept paper
+// books, a key file's check, a venue's reach), each kind one flight at a time; the page at the Account's own cadence (every
 // 20 s on screen, 80 s while the stream is open); and the stream's account events as the reads they name, past the face's
 // cache. The views over what lands are account-view.js's.
 import { pageOk, worthOf } from './account-view.js';
@@ -12,6 +13,8 @@ const MOVES = new Set(['order', 'fill', 'paper', 'balance', 'position']);
 
 // the Account's sentence when it refuses (`refusal.message`), else its error words — only when they are text
 const words = v => (typeof v === 'string' && v.trim() !== '' ? v : null);
+// a query value as given, or nothing
+const str = v => (typeof v === 'string' ? v.trim() : '');
 const messageOf = body => words(body?.refusal?.message) ?? words(body?.error);
 // a page the face recognises that names a paper venue, whose lens (holdings?cost=1&paper=1) is worth reading: the venues of a
 // page it does not recognise lead no read, as they choose no curve (worthOf reads no such page either)
@@ -31,14 +34,14 @@ export function startAccount({ store, getJson, now = Date.now, schedule, cancelT
   // once that one settles — one trailing read, never a pile. Only the latest-started read of a kind lands, so the answer to a
   // read a fresh ask overtook is never drawn, and nothing is read or lands after close(). `land(body, refused)` takes the
   // answer, or for a rejection the body the app's getJson carries on it (`error.body`, when it does).
-  function fly(kind, path, { fresh = false, loading, land }) {
+  function fly(kind, path, { fresh = false, loading, asking, land }) {
     if (closed) return Promise.resolve();
     let k = kinds.get(kind);
     if (!k) { k = { flight: null, path: null, fresh: false, seq: 0 }; kinds.set(kind, k); }
     const same = k.flight !== null && k.path === path;
     if (same && (!fresh || k.fresh)) return k.flight;
     const mine = ++k.seq;
-    store.dispatch(loading);
+    store.dispatch(loading, asking);
     // the read starts on a later microtask, so the flight is set before anything can settle it
     const ahead = same ? k.flight.then(nothing, nothing) : Promise.resolve();
     const current = ahead
@@ -118,6 +121,34 @@ export function startAccount({ store, getJson, now = Date.now, schedule, cancelT
     fly('statement', '/data/account/statement', { fresh, loading: 'statementLoading', land: landing('statementLoaded', 'statementFailed') });
   const loadAgents = () => fly('agents', '/data/account/agents', { loading: 'agentsLoading', land: landing('agentsLoaded', 'agentsFailed') });
 
+  // ── the connect sheet's reads (plan 2 Task 8); none goes past the face's cache, as the proxy lists no fresh for them ──
+
+  /** Where this account can connect (`/data/account/venues`): every venue it knows with its verdict, judged from the network
+   *  the Account runs on. A cold read can take the Account ~25 s; the proxy keeps the answer a minute. */
+  const loadVenuesHere = () =>
+    fly('venuesHere', '/data/account/venues', { loading: 'venuesHereLoading', land: landing('venuesHereLoaded', 'venuesHereFailed') });
+
+  /** The paper books kept on the Account's disk and not connected (`/data/account/paper/books`). */
+  const loadPaperBooks = () =>
+    fly('paperBooks', '/data/account/paper/books', { loading: 'paperBooksLoading', land: landing('paperBooksLoaded', 'paperBooksFailed') });
+
+  /** A key file's check (`/data/account/keyfile`): whether the file for a connector kind and a venue is there and has the
+   *  fields the kind needs — field names only, never a value. Only what is given is asked (a blank path is the Account's
+   *  default for the venue; `exchange` names an exchange account's exchange); what was asked lands in the slice as the
+   *  check starts, and only the latest check lands. */
+  function checkKeyfile({ kind, venue, ref, exchange } = {}) {
+    const asked = { kind: str(kind), venue: str(venue), ref: str(ref), exchange: str(exchange) };
+    const query = new URLSearchParams(Object.entries(asked).filter(([, v]) => v !== '')).toString();
+    return fly('keyfile', `/data/account/keyfile${query ? `?${query}` : ''}`, {
+      loading: 'keyfileLoading', asking: asked, land: landing('keyfileLoaded', 'keyfileFailed'),
+    });
+  }
+
+  /** Whether a venue answers from where the Account runs (`/data/account/connect/reach?connector=`), before a key is made:
+   *  one connector, or several comma-joined. */
+  const reach = connector =>
+    fly('reach', `/data/account/connect/reach?connector=${encodeURIComponent(str(connector))}`, { loading: 'reachLoading', land: landing('reachLoaded', 'reachFailed') });
+
   /** Every read again (the stream's snapshot), the page, the holdings and the statement past the face's cache. The paper
    *  lens is chosen from the page and the leading curve from the paper total, so the holdings follow the page and the
    *  history follows the holdings; the statement and the agents go at once. */
@@ -159,5 +190,5 @@ export function startAccount({ store, getJson, now = Date.now, schedule, cancelT
     poll(false);
   }
 
-  return { load, loadHoldings, loadHistory, loadStatement, loadAgents, loadAll, poll, onStreamEvent, close };
+  return { load, loadHoldings, loadHistory, loadStatement, loadAgents, loadAll, loadVenuesHere, loadPaperBooks, checkKeyfile, reach, poll, onStreamEvent, close };
 }

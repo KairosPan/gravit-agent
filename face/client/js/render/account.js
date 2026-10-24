@@ -3,8 +3,9 @@
 // Open orders), Venues (each venue with its health and what it does, its Details drawer; the A-share quotes line; the seat
 // box), Agents (Gravit's seat first, then the Account's agents and the keys knocking), Cards (what waits for the owner, and
 // the agents' asks) — the Statement drawer, the Settings drawer with Devices; the owner device's line under
-// the head (render/owner.js), and for a page that signs the keys that open the owner's sheets on Agents and Cards (Let in,
-// Give a limit, End limit, Revoke, Approve, Reject, Grant, Decline). Every figure and word is a view's (host/account-view.js);
+// the head (render/owner.js), and for a page that signs the keys that open the owner's sheets on Venues, Agents and Cards
+// (Connect an account, Open a paper account, Disconnect, Top up, Start over; Let in, Give a limit, End limit, Revoke,
+// Approve, Reject, Grant, Decline). Every figure and word is a view's (host/account-view.js);
 // this module draws them.
 import { esc, attrs, cls } from '../html.js';
 import { fmtClock, fmtDate, sameDay } from '../time.js';
@@ -138,29 +139,42 @@ function portfolio(state, now) {
 
 // ── Venues ──
 
-function venueRow(v, now) {
+// a venue's Disconnect…, for a page that signs — asked twice, the confirm for this venue in its place. An agent wallet has
+// none: the Account never disconnects one.
+function disconnectKey(v, state) {
+  if (!signs(state) || !v.id || v.connector === 'live:agent-wallet') return '';
+  const c = state.confirm;
+  return c?.action === 'disconnect' && c.venue === v.id ? confirmPair('Yes, disconnect')
+    : `<button${attrs({ type: 'button', class: 'btn-danger', 'data-action': 'askDisconnect', 'data-venue': v.id, 'data-name': v.name })}>Disconnect…</button>`;
+}
+
+function venueRow(v, now, state) {
   const since = v.health === 'not-answering' ? when(v.since, now) : '';
   const health = since ? `${v.healthWords} since ${since}` : v.healthWords;
   const stale = v.stale === true ? 'stale' : typeof v.stale === 'string' ? v.stale : '';
   const facts = [v.usd === null ? '' : money(v.usd), v.frontLine, v.what].filter(Boolean).join(' · ');
   return `<div class="venue"><span>${lines(v.name || v.id, [facts, [health, ...v.does, stale].filter(Boolean).join(' · ')], v.paper ? 'Paper' : '')}</span>` +
-    `<button type="button" class="btn-sm" data-action="openVenueDetails"${attrs({ 'data-id': v.id })}>Details</button></div>`;
+    `<button type="button" class="btn-sm" data-action="openVenueDetails"${attrs({ 'data-id': v.id })}>Details</button>${disconnectKey(v, state)}</div>`;
 }
 
 // a venue's Details: what it holds there and the Account's facts about it, each under its label — the key file by its path,
-// never what is in it
-function venueDetails(v) {
+// never what is in it; for a page that signs, a paper venue's Top up and Start over
+function venueDetails(v, state) {
   const d = v.details;
   const held = d.holdings.map(h => [h.asset, numWord(h.amount), money(h.usd)].filter(Boolean).join(' · '));
   const body = (held.length ? sec('Holdings', held) : '') + DETAILS.filter(([key]) => d[key]).map(([key, label]) => sec(label, [d[key]])).join('');
+  const named = { 'data-venue': v.id, 'data-name': v.name };
+  const keys = signs(state) && v.paper && v.id ? `<div class="btn-row">${sheetKey('topUp', named, 'Top up')}${sheetKey('resetPaper', named, 'Start over')}</div>` : '';
   return `<aside class="drawer" aria-label="Venue details"><div class="drawer-head"><h2>${esc(v.name || v.id)}</h2><button type="button" class="close-key" data-action="closeVenueDetails" aria-label="Close">×</button></div>` +
-    `<div class="drawer-body">${body || note('No details')}</div></aside>`;
+    `<div class="drawer-body">${body || note('No details')}${keys}</div></aside>`;
 }
 
 function venues(state, now) {
   const a = state.account;
-  const rows = venuesOf(a.data).map(v => venueRow(v, now)).join('');
-  const list = pageNote(a) ?? (rows ? `<div class="venues">${rows}</div>` : note('No venues'));
+  const rows = venuesOf(a.data).map(v => venueRow(v, now, state)).join('');
+  // for a page that signs, the page's own sheets: what to connect comes from its connectLive, so an unread page has none
+  const keys = signs(state) && pageOk(a.data) ? `<div class="btn-row">${sheetKey('connect', {}, 'Connect an account')}${sheetKey('paper', {}, 'Open a paper account')}</div>` : '';
+  const list = (pageNote(a) ?? (rows ? `<div class="venues">${rows}</div>` : note('No venues'))) + keys;
   // of the face's own quote providers only the A-share one is still the screens' (the one kind the face quotes)
   const cn = (Array.isArray(state.markets?.providers) ? state.markets.providers : []).filter(p => p?.market === 'cn');
   const quotes = cn.length ? `<div class="label">A-share quotes</div><div class="venues">${cn.map(p => `<div class="venue"><span>${esc(providerWord(p))}</span></div>`).join('')}</div>` : '';
@@ -308,5 +322,5 @@ export function renderAccountScreen(state, now) {
   const venue = statement || state.settingsOpen || !a.detailsVenue ? null : venuesOf(a.data).find(v => v.id === a.detailsVenue) ?? null;
   const body = tab === 'venues' ? venues(state, now) : tab === 'agents' ? agentsTab(state, now) : tab === 'cards' ? cardsTab(state, now) : portfolio(state, now);
   return `<main class="${cls('main', 'acct', (state.settingsOpen || statement || venue) && 'with-drawer')}">${head(state)}${a.message ? note(a.message) : ''}${tabs(state, tab)}${body}` +
-    `${statement ? renderStatement(state, now) : ''}${venue ? venueDetails(venue) : ''}</main>`;
+    `${statement ? renderStatement(state, now) : ''}${venue ? venueDetails(venue, state) : ''}</main>`;
 }

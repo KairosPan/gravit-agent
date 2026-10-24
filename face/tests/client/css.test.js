@@ -96,6 +96,8 @@ function accountStates() {
     // the owner's keys on a page that signs, one Revoke asked twice
     ...['agents', 'cards'].map(tab => R.ownerStanding(at(tab), { role: 'signs', kid: 'a5048199a8081854' })),
     R.askConfirm(R.ownerStanding(at('agents'), { role: 'signs', kid: 'a5048199a8081854' }), { action: 'revoke', name: 'Claude Code', address: '0x3a087530887bd175ccc38828ee3776e5b6ea1ac6' }),
+    // the Venues' keys on a page that signs: one Disconnect asked twice, a paper venue's Details with Top up and Start over
+    R.askConfirm(R.openVenueDetails(R.ownerStanding(at('venues'), { role: 'signs', kid: 'a5048199a8081854' }), 'paper-momentum'), { action: 'disconnect', venue: 'ex', name: 'Stand-in Exchange' }),
   ];
 }
 
@@ -109,10 +111,12 @@ function ownerStates(read) {
   const card = sheet('approveCard', { card: 'card-0001', hash: '0xdf', decision: 'approve' });
   const ready = R.sheetPrepared(card, { prepared, at: NOW, asked: askedOf(card.sheet), deadline: NOW + 125_000 });
   const letIn = R.sheetPrepared(sheet('letIn', { address: '0x00000000000000000000000000000000000000ab', name: 'Claude Code' }), { prepared, at: NOW, asked: 'another draft', deadline: null });
+  // a connect sheet with its check under the fields: the option elsewhere, so the check is the Account page
+  const connect = sheet('connect', { options: [{ connector: 'live:robinhood', label: 'Robinhood', needs: 'sign-in', kind: 'robinhood', elsewhere: true }], connector: 'live:robinhood' });
   return [
     R.ownerStanding(read, { role: 'needs-code', kid: '' }), R.ownerStanding(read, { role: 'signed-out', kid: 'a5048199a8081854' }), R.openSettings(signs),
     sheet('letIn', {}), sheet('limit', { address: '0xb0b', name: 'Scout', venues: [{ id: 'paper-1', name: 'Paper', paper: true }] }), ready, letIn,
-    R.sheetRefused(card, { message: 'prepare it again', again: true }),
+    R.sheetRefused(card, { message: 'prepare it again', again: true }), connect,
   ];
 }
 

@@ -39,7 +39,8 @@ export function emptyState() {
       search: { query: '', status: 'idle', assets: [], partial: false }, hitQuotes: {},
     },
     // the Account (host/account.js): its page with the sentence of its last refusal, its other reads, the history curve's
-    // range, the Statement drawer, and the venue whose Details drawer is open (its id)
+    // range, the Statement drawer, and the venue whose Details drawer is open (its id); and the connect sheet's reads — where
+    // this account can connect, the kept paper books, the last key file's check with what it asked, a venue's reach
     account: {
       status: 'idle', data: null, at: null, message: null,
       holdings: { status: 'idle', data: null, at: null },
@@ -47,6 +48,10 @@ export function emptyState() {
       history: { status: 'idle', data: null, at: null, range: '1d' },
       statement: { status: 'idle', data: null, at: null },
       agents: { status: 'idle', data: null, at: null },
+      venuesHere: { status: 'idle', data: null, at: null, message: null },
+      paperBooks: { status: 'idle', data: null, at: null, message: null },
+      keyfile: { status: 'idle', data: null, at: null, message: null, asked: null },
+      reach: { status: 'idle', data: null, at: null, message: null },
       statementOpen: false,
       detailsVenue: null,
     },

@@ -37,6 +37,22 @@ export const reducers = {
   agentsLoading: s => read(s, 'agents', { status: 'loading' }),
   agentsLoaded: (s, { data, at }) => read(s, 'agents', { status: 'ready', data, at }),
   agentsFailed: (s, { at }) => read(s, 'agents', { status: 'error', at }),
+  // the connect sheet's reads (plan 2 Task 8): where this account can connect (/data/account/venues), the kept paper books,
+  // a key file's check and a venue's reach — each keeping the Account's sentence when it refused. The key file's check
+  // records what it asked as it starts, so its words are drawn only for the form they answer: while it is in the air the
+  // data kept is an earlier check's
+  venuesHereLoading: s => read(s, 'venuesHere', { status: 'loading' }),
+  venuesHereLoaded: (s, { data, at }) => read(s, 'venuesHere', { status: 'ready', data, at, message: null }),
+  venuesHereFailed: (s, { at, message = null }) => read(s, 'venuesHere', { status: 'error', at, message }),
+  paperBooksLoading: s => read(s, 'paperBooks', { status: 'loading' }),
+  paperBooksLoaded: (s, { data, at }) => read(s, 'paperBooks', { status: 'ready', data, at, message: null }),
+  paperBooksFailed: (s, { at, message = null }) => read(s, 'paperBooks', { status: 'error', at, message }),
+  keyfileLoading: (s, asked = null) => read(s, 'keyfile', { status: 'loading', asked }),
+  keyfileLoaded: (s, { data, at }) => read(s, 'keyfile', { status: 'ready', data, at, message: null }),
+  keyfileFailed: (s, { at, message = null }) => read(s, 'keyfile', { status: 'error', at, message }),
+  reachLoading: s => read(s, 'reach', { status: 'loading' }),
+  reachLoaded: (s, { data, at }) => read(s, 'reach', { status: 'ready', data, at, message: null }),
+  reachFailed: (s, { at, message = null }) => read(s, 'reach', { status: 'error', at, message }),
   // the curve's range; one the Account does not draw leaves the slice as it is
   setHistoryRange: (s, range) => (RANGES.includes(range) && range !== s.account.history.range ? read(s, 'history', { range }) : s),
   // the Statement is a drawer: one at a time, as Settings and Details are

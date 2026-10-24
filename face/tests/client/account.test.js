@@ -397,7 +397,10 @@ test('no CJK, no icon URL, no raw JSON in any rendered string', () => {
       state({ tab, holdings: null, paper: null, history: null, statement: null, agents: null }), state({ tab, page: { ...page, totalUsd: 0 }, history: fx('history-paper') }),
       R.ownerStanding(state({ tab, page: iconPage, holdings, seat: seatView() }), { role: 'signs', kid: 'a5048199a8081854' }));
   }
-  for (const v of page.venues) states.push(R.openVenueDetails(state({ tab: 'venues', page: iconPage }), v.id));
+  for (const v of page.venues) {
+    states.push(R.openVenueDetails(state({ tab: 'venues', page: iconPage }), v.id),
+      R.askConfirm(R.openVenueDetails(R.ownerStanding(state({ tab: 'venues', page: iconPage }), { role: 'signs', kid: 'a5048199a8081854' }), v.id), { action: 'disconnect', venue: v.id, name: v.name }));
+  }
   states.push(R.openStatement(state()), R.openStatement(state({ statement: null })), R.openSettings(state()),
     state({ tab: 'venues', seat: { ok: true, url: 'http://127.0.0.1:4820', reachable: false, error: 'ECONNREFUSED' } }),
     state({ tab: 'agents', seat: seatView({ seat: { name: 'Gravit', status: 'knocking', limits: [] } }), agents: null }));
@@ -497,6 +500,46 @@ test("the owner's keys on Agents and Cards: Let in, Give a limit, End limit, Rev
       if (line) has(out, `<p class="acct-note">${line}`, `${role}: the device line`);
     }
   }
+});
+
+// the Venues' keys (plan 2 Task 8): Connect an account and Open a paper account under the list, Disconnect… on a row — asked
+// twice —, Top up and Start over in a paper venue's Details; drawn only for a page that signs, absent otherwise
+test("the Venues' keys: Connect an account, Open a paper account, Disconnect, Top up and Start over for a page that signs", () => {
+  const KID = 'a5048199a8081854';
+  const signing = s => R.ownerStanding(s, { role: 'signs', kid: KID });
+  const venuesBox = html => html.match(/<section class="cardbox" aria-label="Venues">[\s\S]*?<\/section>/)?.[0] ?? '';
+  const sheetKey = (kind, data, word) => `<button type="button" class="btn-sm" data-action="openSheet" data-kind="${kind}"${Object.entries(data).map(([k, v]) => ` data-${k}="${v}"`).join('')}>${word}</button>`;
+  const disconnect = (venue, name) => `<button type="button" class="btn-danger" data-action="askDisconnect" data-venue="${venue}" data-name="${name}">Disconnect…</button>`;
+
+  const html = venuesBox(draw(signing(state({ tab: 'venues' }))));
+  has(html, `<div class="btn-row">${sheetKey('connect', {}, 'Connect an account')}${sheetKey('paper', {}, 'Open a paper account')}</div>`);
+  has(html, `data-id="ex">Details</button>${disconnect('ex', 'Stand-in Exchange')}</div>`);
+  has(html, `data-id="paper-momentum">Details</button>${disconnect('paper-momentum', 'Momentum · paper')}</div>`);
+  assert.equal((html.match(/data-action="askDisconnect"/g) ?? []).length, 6, 'every venue but the agent wallet, which the Account never disconnects');
+  has(html, 'data-id="agent-claude-code">Details</button></div>');
+  // Disconnect… asks twice: the confirm for this venue in its place
+  const asking = venuesBox(draw(R.askConfirm(signing(state({ tab: 'venues' })), { action: 'disconnect', venue: 'ex', name: 'Stand-in Exchange' })));
+  has(asking, 'data-id="ex">Details</button><span class="confirm"><button type="button" class="btn-danger" data-action="confirmYes">Yes, disconnect</button><button type="button" class="btn-sm" data-action="cancelConfirm">No</button></span></div>');
+  assert.equal((asking.match(/data-action="askDisconnect"/g) ?? []).length, 5, 'the other venues keep theirs');
+  assert.equal((venuesBox(draw(R.askConfirm(signing(state({ tab: 'venues' })), { action: 'revoke', name: 'ex' }))).match(/askDisconnect/g) ?? []).length, 6, "another confirm is not this one's");
+  // every seed escaped
+  const page = fx('account');
+  const odd = venuesBox(draw(signing(state({ tab: 'venues', page: { ...page, venues: [{ ...page.venues[3], id: 'p"<1>', name: 'Mo <b>"x"</b>' }] } }))));
+  has(odd, disconnect('p&quot;&lt;1&gt;', 'Mo &lt;b&gt;&quot;x&quot;&lt;/b&gt;'));
+
+  // a paper venue's Details: Top up and Start over, naming the venue; a venue that is not paper, neither
+  const paper = draw(R.openVenueDetails(signing(state({ tab: 'venues' })), 'paper-momentum'));
+  has(paper, `<div class="btn-row">${sheetKey('topUp', { venue: 'paper-momentum', name: 'Momentum · paper' }, 'Top up')}${sheetKey('resetPaper', { venue: 'paper-momentum', name: 'Momentum · paper' }, 'Start over')}</div></div></aside>`);
+  lacks(draw(R.openVenueDetails(signing(state({ tab: 'venues' })), 'ex')), 'data-kind="topUp"');
+
+  // a page that does not sign: none of these keys, the rows and Details as before
+  for (const role of ['pending', 'none', 'needs-code', 'signed-out', 'unknown']) {
+    const out = draw(R.openVenueDetails(R.ownerStanding(state({ tab: 'venues' }), { role, kid: KID }), 'paper-momentum'));
+    for (const k of ['data-action="openSheet"', 'askDisconnect', 'Connect an account', 'Open a paper account', 'Disconnect…', 'Top up', 'Start over']) lacks(out, k, `${role}: ${k}`);
+    has(out, 'data-id="ex">Details</button></div>');
+  }
+  // a page that signs but is not read, or not one the face recognises: nothing to connect from, no keys
+  for (const p of [null, { ok: true }]) lacks(draw(signing(state({ tab: 'venues', page: p }))), 'data-action="openSheet"');
 });
 
 test('router: account tabs agents and cards parse; an unknown tab is portfolio', () => {
