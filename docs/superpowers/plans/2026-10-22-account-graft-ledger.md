@@ -1,5 +1,8 @@
 # The Account grafted into the face, stage 1 (the reads) — the ledger
 
+*Stage 2 (the owner device and Trade) is recorded after stage 1, under "Stage 2" at the end of this
+file; its rulings continue the numbering at 46 and its deferred minors at 45.*
+
 The record of executing `2026-10-22-account-graft-1-reads.md` (the plan, committed at 8d019bf;
 spec `../specs/2026-10-22-account-graft-design.md`, §5.1–§5.2, §6.1–§6.2, §6.5 and §10) on branch
 `feat/account-graft`, cut from main @ 0481ee2, in the worktree `.claude/worktrees/account-graft`,
@@ -529,3 +532,235 @@ before it wrote anything, and dispatched again on fable on the operator's word, 
   stage 3).
 - The final whole-branch review ran on the Fable model at the operator's word; its one Important and
   the four Minors ruled into the wave are fixed above; the rest are the deferred minors 42–44.
+
+---
+
+## Stage 2 — the owner device and Trade
+
+The record of executing `2026-10-23-account-graft-2-owner-trade.md` (the plan, committed at
+e2627fd; spec `../specs/2026-10-22-account-graft-design.md` §5.1's stage-2 rows, §6.2–§6.4, §7,
+§8 items 1–6 and 9, §10; the owner path map `../../research/2026-10-22-account-owner-path-map.md`)
+on branch `feat/account-graft-2`, cut from main @ d227316 (stage 1 landed), in the worktree
+`.claude/worktrees/account-graft-2`, on 2026-10-23..24. Subagent-driven as stage 1: implementers
+and task reviewers on opus, the final whole-branch review on fable (the operator's word,
+2026-10-23/24). The SDD workspace's `progress.md` is the working copy this section records.
+Baseline before Task 1: face 1152 tests (1134 pass, 18 skipped).
+
+### Pre-flight
+
+Every producer–consumer pair across the fifteen tasks was checked before Task 1 (the proxy's route
+names, the key arithmetic, the owner host's calls, the sheet's hooks, the views each later task
+consumes): they agreed but for two, ruled below (Rulings 46–47); one hook was handed to Task 13
+(`startAccount` gains `onPage`, so `owner.standing(page)` runs on every page landing), and Task 15
+was told `GRAVIT.md` stood at 4,496 of its 4,500 bytes.
+
+### Rulings, in the order made
+
+46. **Pre-flight:** the `order` sheet's seed carries the ticket view — `seed = { id, ticket:
+    ticketOf(state, now) }`, set by the trade host on a pick and a venue change — so
+    `draftOf('order', fields, seed, now)` keeps its four arguments and reads `seed.ticket`. Cost if
+    wrong: a leg changed mid-sheet re-seeds only on the next open.
+47. **Pre-flight:** Task 9's Watching group is `markets.watch` alone; Task 12, which defines
+    `watchKeysOf(page)`, extends `pickerOf` to the union. Cost if wrong: one function touched twice.
+48. **Task 1:** the `prepared-*.json` and `venues.json` fixtures keep their arrays whole (a
+    twelve-entry trim would cut an order's eighteen signed lines, and Task 8 needs every venue
+    kind); the fixture test's cap exempts them. Cost if wrong: four larger fixtures.
+49. **Task 3:** the review's Important (a page landing during `signOut()` re-paired and its late
+    answer overwrote `signed-out`) and all six Minors enter round 1 — one-line correctness fixes in
+    the file every later task builds on. Cost if wrong: one larger round.
+50. **Task 4:** `whyOf` and `refusedAt` are exported from `host/owner-view.js` and `host/owner.js`
+    imports them — one source for reading the Account's refusals. Cost if wrong: one import.
+51. **Task 4:** `draftOf` has no `order` branch in Task 4; Task 9 adds it (importing
+    `tradeDraftOf`). Cost if wrong: one file touched twice.
+52. **Task 4:** the limit sheet's seed carries the venues and the agent's standing limit —
+    `grantOf(ask, page)` seeds `venues` from `venuesOf(page)` and `current` from the agent's
+    `scope: 'trade'` row in `page.spend`; `fieldsOf('limit')` starts from `current` and ticks the
+    asked venue; the `openSheet` handler (Task 13) seeds `limit`/`endLimit` the same way, through
+    the one export `limitSeedOf(page, address, name)` round 1 added. Cost if wrong: one argument.
+53. **Task 4:** round 1 takes I1 (an exchange connect signs `live:exchange:<id>`), I2 (Let it sign
+    with no owner ids would drop every owner), I3 (as Ruling 52), M1 (`standing` on a 401 only) and
+    M2 (paper ids that collide); M3 stands as the brief wrote it, M4 is the brief's, M5 accepted.
+    Cost if wrong: one round.
+54. **Task 5:** `asked` is the draft at time zero (clock-free), so a draft whose `validUntil` reads
+    the clock compares equal a minute on — the plan's literal rule would never sign `letIn`,
+    `limit` or `endLimit`. Cost if wrong: a change that only moves the clock would not re-prepare
+    (none exists).
+55. **Task 5:** round 1 takes I1 (three safety guards unpinned), m1 and m2 (pins, and a `finally`
+    around `afterAction`); m3 stands (the Account's own shape); m4 is carried to Task 9
+    (`tradeDraftOf` reads `now` additively or not at all). Cost if wrong: one round.
+56. **Task 6 (correcting the controller's own):** the go key's rule is the engine's —
+    `status === 'ready' && sheet.asked !== null && askedOf(sheet) === sheet.asked` — and What you
+    sign dims while the two differ. Cost if wrong: none; the pins show a changed field turns the
+    key off and back on.
+57. **Task 9 (the implementer's, ratified):** Trade's search reducers are
+    `tradeResultsLoading/Loaded/Failed` — `results*` are the Markets search's in the one reducer
+    table. Cost if wrong: none.
+58. **Task 9:** `extendedHours: 'true'` rides a limit order alone (the Account's `tkOrderDraft`;
+    the controller's carry had dropped the limit condition). Cost if wrong: a market order the
+    Account would refuse.
+59. **Task 9:** round 1 takes I1, I2 (a $0 fee drawn where the Account says "as <venue> charges
+    it") and M1–M5; M6 stands (`DECIMAL` refusing `.5` is safe). Cost if wrong: one round.
+60. **Task 10:** the quiet re-prepare runs only on a live quote frame for the followed leg whose
+    price differs from the shown preparation's, while the form is not mid-edit — superseded in part
+    by Ruling 62. Cost if wrong: a stale quote shown until the next frame that moves.
+61. **Task 10:** round 1 takes I1, M2–M4, M6–M10; M5 (a re-seed once a read lists an unlisted
+    pick) is deferred. Cost if wrong: one round.
+62. **Task 10 (correcting Ruling 60):** the moved test is the Account's own — a frame's side price
+    against the side price the stream pushed when the shown preparation landed (`preparedTop`;
+    none yet, the first frame sets it and asks nothing), never against `quote.order.price`, which
+    on a limit is the limit. Cost if wrong: a stale quote until the next moved frame.
+63. **Task 11:** on a page that does not sign, Trade still draws the picker and Under way, and the
+    ticket draws the device line in place of the form; Sign and place never appears without a
+    signing page; Buy and Sell on a market's page only when it signs. Cost if wrong: a picker the
+    operator cannot act on, said honestly.
+64. **Task 11:** a market is tradeable from the face only when its kind is one of `TRADE_KINDS`
+    (`tradeableOf`); Buy and Sell only for it; `ticketOf` null for any other kind; a pick on one
+    does nothing (Task 13). Cost if wrong: a perpetual ticket against the spec's word.
+65. **Task 11:** the whole quote box dims with What you sign while a quiet re-ask is in the air.
+    Cost if wrong: none.
+66. **Task 12:** `startMarkets` gains `owner` and `afterAction` — a star on an Account row on a
+    page that signs acts `setWatch` and, taken, calls `afterAction('setWatch', body)`; otherwise
+    the face's list as before. Cost if wrong: two deps.
+67. **Task 13:** a done sheet closes itself after `afterAction` (no Cancel beside a disabled go
+    word), except the `order` sheet, whose words stay on the ticket until the next pick. Cost if
+    wrong: the operator misses a sheet's done line (the Account's own sheets close on done too).
+68. **Task 13:** `owner.submit` of this page's own `signOut` ends the device — flag set, key
+    deleted, role `signed-out` — exactly as `signOut()` does; the two paths are one rule. Cost if
+    wrong: none.
+69. **Task 13:** the connect sheet's key-file and reach checks run after the sheet's 300 ms quiet,
+    not per keystroke (the proxy keeps an answer 5 s and each distinct path is a new upstream
+    read). Cost if wrong: a late check line.
+70. **Task 13:** round 1 takes I1 (the per-keystroke check, confirmed), I2 (a re-seed after a
+    Settings sheet came back as a sell at the best venue with the amount gone), M1, M3, M4, M6
+    (a 200 that is a refusal ended the device) and M7; M2 deferred (a cold `#/trade/<id>`), M5 the
+    controller's lens corrected, M8 stands (a sheet left open when the page stops signing is
+    honest). Cost if wrong: one round.
+71. **Task 14 (before review):** the smoke watches a market the page's `watch[]` does not list at
+    run time — the first unwatched `ex` market from `explore` — then signs `on: ''` and sees it
+    gone; the controller's BTC/USDT was already on the stand-in's seeded list. Cost if wrong:
+    none.
+72. **Task 14:** the review's Important (the holdings check proved nothing: the stand-in starts
+    with ETH at `ex`) and its first two Minors (the cancel's id, the leak check looking for the
+    signatures sent) enter round 1. Cost if wrong: one round.
+73. **Task 14:** ETH's cost-basis `coveredQty` rising by the fill's `filledQty` (within 1 %)
+    stands in for a venue-line delta — the Account's own immediate count of its orders' fills; the
+    venue line is a 30 s read the stand-in's seeds also move. Cost if wrong: the smoke proves the
+    order was counted, not that the venue booked it (the fill frame proves that).
+
+### Carried between tasks
+
+- Task 1 → 4, 7: the seeded card's hash differs per stand-in run, so a test joins a card and its
+  draft within one fixture, never across `account.json` and `prepared-card.json`.
+- Task 1 → 8: the stand-in yields no `not-served` venue and an empty `paper/books`; Task 8's tests
+  build those rows by hand.
+- Task 3 → 4, 6: an empty refusal needs a fallback word on the screen (`Refused`, done in Task 4).
+- Task 4 → 7, 13: `limitSeedOf` seeds `limit`/`endLimit`; an exchange connect's exchange pick; the
+  paper sheet's seed carries the page's venue ids beside `books` (`paperSeedOf`, Task 13).
+- Task 5 → 6: the renderer uses `askedOf(sheet)` for the key and dims What you sign while a quiet
+  ask is in the air. Task 5 → 9: `tradeDraftOf` reads no clock (done).
+- Task 6 → 13: the sheet mount skips `kind === 'order'`; a checkbox's field reads `checked`; a done
+  sheet closes (Ruling 67) — all done in Task 13.
+- Task 8 → 13: the connect sheet asks `checkKeyfile(keyfileAskOf(sheet))` and
+  `reach(reachAskOf(sheet))` on opening and when what they ask changes, never `reach('')` (done,
+  after the quiet of Ruling 69).
+- Task 9 → 10, 11: the reducer names of Ruling 57; `data-outcome` on a held prediction's row; the
+  extended-hours box with the limit field; a null fee drawn `as <venue> charges it`; no Cancel for
+  a null `cancel` (done).
+- Task 10 → 13: after `sheet.change('venue', id)` call `trade.venue(id)`, after
+  `sheet.change('outcome', i)` call `trade.outcome(i)`; the order of `markets.page(null)` and the
+  trade calls on a route change (done).
+- Task 11 → 13: a pick on a market `tradeableOf` refuses does nothing (done, `pickTicket`).
+- Task 12 → 13: `toggleWatch` passes the page to `watchedOf`; `startMarkets({…, owner,
+  afterAction})` (done).
+
+### Tasks
+
+| Task | Commits | Review | Face suite after (tests / pass / skipped) |
+|---|---|---|---|
+| 1 The proxy's stage-2 rows and the fixtures | af7440e | spec ✅, quality ✅, the security pass clean | 1159 / 1141 / 18 |
+| 2 The owner key module and the key store | 0b64b3a | spec ✅, quality ✅ — the bytes checked against the Account's own `sign.ts` (the kid matched, 200 signatures passed `es256Verify`) | 1169 / 1151 / 18 |
+| 3 The device host | f23731b; fix round 1 ab80886 | quality ❌ — 1 Important (a late pair answer over `signed-out`), 6 Minor; round 1 addressed seven, re-review clean | 1182 / 1164 / 18 |
+| 4 The owner views and the sheet kinds | e938476; fix round 1 43530c4 | quality ❌ — 3 Important (the exchange connector, Let it sign's owners, the limit seed), 5 Minor; round 1 addressed five, re-review clean | 1208 / 1190 / 18 |
+| 5 The sheet engine | 82fe66a; fix round 1 38ef48e | quality ❌ — 1 Important in the tests alone (three guards unpinned), 4 Minor; round 1 addressed three, re-review clean | 1221 / 1203 / 18 |
+| 6 The owner's screen pieces | 77655cd | spec ✅, quality ✅, Minor only | 1230 / 1212 / 18 |
+| 7 The Agents', Cards' and Asks' keys | 08bf00b | spec ✅, quality ✅, Minor only | 1232 / 1214 / 18 |
+| 8 The Venues' keys and the Connect reads | 28b2cff | spec ✅, quality ✅, Minor only | 1241 / 1223 / 18 |
+| 9 Trade's views and slice | ddb8ce1; fix round 1 a9fb05a | quality ❌ — 2 Important (`extendedHours` on a market order, a $0 fee), 6 Minor; round 1 addressed seven, re-review clean but one Minor deferred | 1260 / 1242 / 18 |
+| 10 Trade's host | 1e0906d; fix round 1 532d469; fix round 2 d4de487 | quality ❌ — 1 Important (re-prepare on a still market), 9 Minor; round 1 addressed nine, its re-review found the limit case (N1, Important, from the controller's wording); round 2 addressed it, re-review clean | 1271 / 1253 / 18 |
+| 11 The Trade screen, the rail, the route, Buy and Sell | 1c7182a; fix round 1 8234f19 | spec ✅ with one Important gap (Buy and Sell on a perpetual's page), quality ✅ once fixed; round 1 addressed three, re-review clean | 1284 / 1265 / 18 as the SDD ledger records it (one short of adding up; not re-run) |
+| 12 The star signs `setWatch` | 0c9fc2f | spec ✅, quality ✅ (its Important was Task 13's carry) | 1291 / 1273 / 18 |
+| 13 The wiring | bb7fe8f (the hosts' hooks), 9e460a7 (the wiring); fix round 1 1b15177 | spec ✅ with one Important, quality ❌ — 2 Important (the per-keystroke check, the re-seed after a Settings sheet), 8 Minor; round 1 addressed seven, re-review clean | 1310 / 1292 / 18 |
+| 14 The smoke's owner half | b45c5cc; before review 3f74a67; fix round 1 e111c27 | quality ❌ — 1 Important (a holdings check that proved nothing), 4 Minor; round 1 addressed three, re-review clean | 1310 / 1292 / 18; `FACE_SMOKE=1` with `FACE_ACCOUNT_SEAT_DIR` 1310 / 1310 at b45c5cc, the graft smoke 1 / 1 again at 3f74a67 and e111c27 |
+| 15 The documents and the charter | 1a08ec6 (the charter's seven amendments dated 2026-10-24, `DEVELOPMENT.md`, `face/README.md`, `CLAUDE.md`, `GRAVIT.md` at 4,496 bytes, the seat design's two superseded marks); this section in the commit after it | the task review pending | 1310 / 1292 / 18; typecheck clean |
+
+### Deferred minors
+
+45. Task 1: a write's body is decoded as UTF-8 text and re-encoded (`account-proxy.ts` via
+    `http.ts`'s `readBody`), so a body that is not valid UTF-8 would be altered — forward the Buffer;
+    the documents say "text" (Task 15, R37).
+46. Task 1: the capture script's `WHOLE` comment names the prepared files, which a separate
+    `prepared.has(name)` check keeps whole.
+47. Task 1: no pin for stale-on-error on a stage-2 read (the shared path is pinned by the stage-1
+    reads).
+48. Task 2: `key-store.js`'s `tx` resolves on the request's success, not the transaction's
+    completion (the Account's does the same); each call opens a connection never closed, with no
+    `onversionchange`; no test fires a request's `onerror`.
+49. Task 3: a 401 on the sign-out's own exchange does not re-read the standing (the refusal is said,
+    the key and the role kept).
+50. Task 5: a store subscriber throwing at `sheetSigning` leaves the sheet `signing` until closed.
+51. Task 6: a pending device with an empty kid draws an empty row; the "no raw JSON" test can never
+    match escaped output and the escaped `signers` line is untested; the checkbox field and
+    busy-disables-Sign-in are untested.
+52. Task 7: End limit is drawn again on the $0 row the Account keeps for a day after an End limit
+    (`limitOf` could carry `ended`); which limits get End limit is decided in the renderer (the
+    view could own `endAllow`); a knocking Gravit's seat box reads `knocking — admit it on the
+    Account page` while Agents › Knocking offers Let in… for the same key — said in the documents
+    (Task 15: either admits it, named Gravit), the one message still open.
+53. Task 8: Details and Disconnect are not grouped in a venue's row; a refused reach shows no
+    message and an unreachable key-file check leaves the line blank; a not-connectable verdict
+    without `said` shows nothing, and the picked exchange's own verdict is not looked up; header
+    comments overrun.
+54. Task 9: `fillWords` draws a size-less `Bought ETH @ …` for a fill frame with no or zero
+    quantity, where the Account's toast draws nothing — return `''` (the final wave).
+55. Task 10: a pick on an id no read lists is never re-seeded once a read lists it (the review's
+    M5; one with deferred minor 61's cold deep link).
+56. Task 10: the ticket's venue read and the stream can price from different sources (N2).
+57. Task 10: frames switching between a side price and `last` can trigger one bounded extra
+    re-prepare; a stale last frame becomes the top (the Account's own does the same).
+58. Task 10: the landing listener's removal in `close()` has no committed test (a scratch probe
+    confirmed it).
+59. Task 11: the ticket's form falls back to the view's side, outcome and venue where the sheet
+    lacks them (latent: the host seeds all three).
+60. Task 12: a market's page draws no watch note, so a refused `setWatch` pressed there is said
+    nowhere; on a page that does not sign, a row watched only at the Account shows an enabled Stop
+    watching that does nothing (the Account's page disables it and says why); a page watch entry no
+    read lists is left out of Watching (the Account draws a placeholder); a taken `setWatch` clears
+    any watchlist word, the boot read's error included; `watches()` is quadratic over the rows; no
+    test for a refused un-star on both lists; a 230-column comment.
+61. Task 13: a done or signing order sheet replaced by a Settings sheet comes back as a ready form
+    for the same order (the receipt gone; nothing signs without a press — N1); the close pin does
+    not test the cancel alone (N2); a cold `#/trade/<id>` opens its ticket only once a read lists
+    the market (M2); `app.js` is 978 lines — a split weighed at the final review.
+62. Task 14: two statements on one line, and a 170-column header, in the smoke.
+63. Task 15: `render/account.js`'s seat-box comment still calls the Account page "the only place a
+    card is signed" — the documents no longer do; the comment is code, left for the final wave.
+
+### The drill owed to the operator
+
+The owner drill (`face/README.md` "The owner drill", the design's §10): the real Account on 4820
+with **paper venues only** and the operator's browser already its owner — the face's head
+`Waiting to be let in`; Let it sign on the Account's page; a `setWatch` signed from the face; Open a
+paper account from the face; a paper order from Trade and its fill seen; Gravit's seat order carded
+by Gate 2 in the thread and by the Guard in the face's Cards, approved there; the statement naming
+"You" and "Gravit, approved by you"; Sign out from the face and the head's line; then
+`account-seat-smoke` and `account-graft-smoke` again. **Not yet run.** The account-seat drill's
+keyed run against the real service (the seat arc's) is still owed beside it.
+
+### The tree at Task 15
+
+- HEAD: this section's commit, over 1a08ec6 (the documents) and e111c27 (Task 14), on
+  `feat/account-graft-2` over main `d227316`.
+- `cd face && npm test` 1310 tests, 1292 pass, 18 skipped; `npm run typecheck` clean.
+- `FACE_SMOKE=1` with `FACE_ACCOUNT_SEAT_DIR`: 1310 / 1310 at b45c5cc; the graft smoke 1 / 1 at
+  e111c27; not re-run for the documents.
+- The final whole-branch review (on fable) is next; not merged, not pushed.
