@@ -28,7 +28,7 @@ const leadOf = html => html.match(/<div class="label">([^<]*)<\/div><div class="
 // the host over a recording getJson — `json` answers a path by its exact text, else by the path without its fresh=1, else by
 // the path without its query: a body, an Error it rejects with, or a function of the path returning a promise — and recorded
 // timers ({ fn, ms, handle }, kept until run or cancelled); streamOpen answers r.streamIsOpen
-function rig({ json = {} } = {}) {
+function rig({ json = {}, onPage } = {}) {
   const store = createStore({ initial: emptyState(), reducers });
   const reads = [];
   const getJson = path => {
@@ -56,6 +56,7 @@ function rig({ json = {} } = {}) {
     schedule: (fn, ms) => { const timer = { fn, ms, handle: ++serial }; timers.set(timer.handle, timer); return timer.handle; },
     cancelTimer: handle => { r.cancelled.push(handle); timers.delete(handle); },
     streamOpen: () => r.streamIsOpen,
+    ...(onPage ? { onPage } : {}),
   });
   return r;
 }
@@ -169,6 +170,30 @@ test('an unrecognised page lands and reads unreadable', async () => {
   await r.account.load();
   assert.equal(r.a().status, 'error');
   assert.equal(r.a().data.totalUsd, 300);
+});
+
+// plan 2 Task 13: the owner device reads its standing off every page that lands — the hook hears each one, recognised or not,
+// after the slice has it, and never a refusal or an empty body
+test('onPage hears every page that lands, recognised or not, never a refusal or an empty body', async () => {
+  const moved = { ...noPaper(), venues: undefined };
+  const heard = [];
+  const r = rig({
+    json: {
+      '/data/account': inTurn([
+        noPaper(),
+        moved,
+        rejected('/data/account', 409, { ok: false, refusal: { code: 'E_ACCOUNT_LOCKED', message: 'Locked.' } }),
+        { ok: false, error: 'no' },
+        '',
+      ]),
+    },
+    onPage: body => heard.push([body, r.a().data === body]),
+  });
+  for (let i = 0; i < 5; i++) await r.account.load({ fresh: i > 0 });
+  assert.equal(heard.length, 2);
+  assert.equal(heard[0][0].totalUsd, 29138.1);
+  assert.equal(heard[1][0], moved, 'an unrecognised page too');
+  assert.deepEqual(heard.map(([, landed]) => landed), [true, true], 'heard after the slice has it');
 });
 
 // an unrecognised page that still names paper venues leads no read: no paper lens, and so no curve chosen without the page;

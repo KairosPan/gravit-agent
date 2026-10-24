@@ -392,6 +392,34 @@ test('a page that lands during a sign-out pairs nothing, and the sign-out stands
   assert.equal(await s.keys.get(), undefined);
 });
 
+// plan 2 Task 13: Settings › Devices' Sign out is a sheet (prepare → What you sign → sign), signed through submit — taken, it
+// ends this device as signOut() does, and nothing pairs while it is in the air
+test("this page's sign-out signed on a sheet ends the device as signOut does; a page meanwhile pairs nothing; a refusal leaves it", async () => {
+  const r = await signing();
+  const kid = r.o().kid;
+  const prepared = async () => (await r.owner.prepare({ type: 'signOut', device: `device:${kid}` })).body;
+  // refused: the key, the role and the flag as they were
+  r.door.once(EXCHANGE, refusal(409, 'E_ACCOUNT_EXPIRED', 'signed 11 min ago'));
+  assert.equal((await r.owner.submit(await prepared())).status, 409);
+  assert.deepEqual([r.o().role, r.o().kid, r.flag.get()], ['signs', kid, false]);
+  assert.ok(await r.keys.get());
+  const pairs = r.door.calls(PAIR).length;
+  const release = r.door.hold(EXCHANGE);
+  const out = r.owner.submit(await prepared());
+  await until(() => r.door.calls(EXCHANGE).length === 2);
+  await r.owner.standing(pageWith([]));
+  release();
+  assert.equal((await out).status, 200);
+  assert.deepEqual([r.o().role, r.o().kid, r.flag.get()], ['signed-out', '', true]);
+  assert.equal(await r.keys.get(), undefined, 'the key is gone');
+  assert.equal(r.door.calls(PAIR).length, pairs, 'no pair for a key on its way out');
+  // another device's sign-out (a draft naming another key) is no sign-out of this page
+  const s = await signing();
+  const other = (await s.owner.prepare({ type: 'signOut', device: 'device:a5048199a8081854' })).body;
+  await s.owner.submit(other);
+  assert.deepEqual([s.o().role, s.flag.get()], ['signs', false]);
+});
+
 test('a pairing that threw does not wedge the next', async () => {
   const r = rig();
   let thrown = false;

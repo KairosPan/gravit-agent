@@ -23,7 +23,7 @@ const hasPaper = page => pageOk(page) && page.venues.some(v => v?.paper === true
 const freshOf = path => `${path}${path.includes('?') ? '&' : '?'}fresh=1`;
 const nothing = () => {};
 
-export function startAccount({ store, getJson, now = Date.now, schedule, cancelTimer, streamOpen = () => false }) {
+export function startAccount({ store, getJson, now = Date.now, schedule, cancelTimer, streamOpen = () => false, onPage = nothing }) {
   let closed = false;
   let timer = null;
   let holdingsDue = 0;       // loadAll calls whose holdings read is still to come: a page landing leaves the paper lens to them
@@ -70,7 +70,8 @@ export function startAccount({ store, getJson, now = Date.now, schedule, cancelT
    *  about to — and the leading curve after them (the lens may have made Paper the lead) when the lens was never read, or
    *  when the page before it was one the face did not recognise: under that page no lens was read, whatever moved the money,
    *  and any curve read was chosen without the page. After such a page the holdings are read past the face's cache, which
-   *  may still keep the lens from before it. */
+   *  may still keep the lens from before it. Every page that lands, recognised or not, is handed to `onPage` after the slice
+   *  has it (the owner device reads its standing off it). */
   function load({ fresh = false } = {}) {
     return fly('page', '/data/account', {
       fresh,
@@ -83,6 +84,7 @@ export function startAccount({ store, getJson, now = Date.now, schedule, cancelT
           if (holdingsDue === 0 && hasPaper(body) && (afterUnread || store.get().account.paper.data === null)) {
             void loadHoldings({ fresh: afterUnread }).then(() => loadHistory());
           }
+          onPage(body);
         } else store.dispatch('accountFailed', { at: now(), message: messageOf(body) });
       },
     });

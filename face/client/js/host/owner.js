@@ -127,26 +127,37 @@ export function startOwner({ store, post, subtle, keys, flag, label = 'Gravit fa
 
   /** The envelope for a preparation: exactly the action, its nonce and this key's signature over the shown fields. The
    *  door's bad signature (a 401) on a page that signs reads the standing again and keeps the Account's words; an exchange
-   *  the Account takes clears them. */
+   *  the Account takes clears them. This page's own sign-out (Settings › Devices' sheet signs it here) pairs nothing while
+   *  it is in the air and, taken, ends the device as signOut() does: the flag set, the key deleted. */
   async function submit(prepared) {
     const { role, kid } = store.get().owner;
     if (role !== 'signs' || !kid || !subtle) return refused(NOT_SIGNING);
     if (!isObject(prepared?.action) || !Array.isArray(prepared?.shown)) return refused(NOT_SIGNING);
-    let signature;
+    const leaving = prepared.action.type === 'signOut' && prepared.action.device === `device:${kid}`;
+    if (leaving) { generation += 1; signingOut = true; }
     try {
-      const pair = await keys.get();
-      if (!pair?.privateKey) return refused(NOT_SIGNING);
-      signature = await signPrepared(subtle, pair.privateKey, kid, prepared);
-    } catch {
-      return refused(NOT_SIGNING);
+      let signature;
+      try {
+        const pair = await keys.get();
+        if (!pair?.privateKey) return refused(NOT_SIGNING);
+        signature = await signPrepared(subtle, pair.privateKey, kid, prepared);
+      } catch {
+        return refused(NOT_SIGNING);
+      }
+      const r = await post(EXCHANGE, { action: prepared.action, nonce: prepared.action.nonce, signature });
+      if (closed) return r;
+      if (leaving && taken(r)) {
+        flag.set(true);
+        stand('signed-out', '');
+        try { await keys.remove(); } catch { /* the Account dropped the device: a key left behind signs for nothing */ }
+      } else if (r.status === 401 && r.body?.refusal?.code === 'E_ACCOUNT_BAD_SIGNATURE' && store.get().owner.role === 'signs') {
+        await ready();
+        say(whyOf(r));
+      } else if (taken(r) && store.get().owner.refusal !== null) say(null);
+      return r;
+    } finally {
+      if (leaving) signingOut = false;
     }
-    const r = await post(EXCHANGE, { action: prepared.action, nonce: prepared.action.nonce, signature });
-    if (closed) return r;
-    if (r.status === 401 && r.body?.refusal?.code === 'E_ACCOUNT_BAD_SIGNATURE' && store.get().owner.role === 'signs') {
-      await ready();
-      say(whyOf(r));
-    } else if (taken(r) && store.get().owner.refusal !== null) say(null);
-    return r;
   }
 
   /** Prepare, then sign only a preparation that came back with fields to show; anything else is handed back unsigned. */
