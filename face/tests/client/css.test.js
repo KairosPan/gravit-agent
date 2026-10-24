@@ -8,6 +8,8 @@ import { renderMessagesScreen } from '../../client/js/render/messages.js';
 import { renderMarketsScreen } from '../../client/js/render/markets.js';
 import { renderSettings, renderAccountScreen } from '../../client/js/render/account.js';
 import { renderSheet } from '../../client/js/render/owner.js';
+import { renderTradeScreen } from '../../client/js/render/trade.js';
+import { ticketOf } from '../../client/js/host/trade-view.js';
 import { fieldsOf } from '../../client/js/host/sheet-view.js';
 import { askedOf } from '../../client/js/host/sheet.js';
 import { renderChannelScreen } from '../../client/js/render/channel.js';
@@ -120,6 +122,38 @@ function ownerStates(read) {
   ];
 }
 
+// Trade over the stand-in's answers: the picker with what was said and no ticket; a ticket nothing typed; ready with its quote,
+// What you sign and the minutes, then changed under it; a prediction's ticket; a limit with extended hours; a refusal with
+// Prepare again; a page that does not sign; a search on its way and the Account not read yet
+function tradeStates() {
+  const fx = name => JSON.parse(readFileSync(new URL(`../fixtures/account/${name}.json`, import.meta.url), 'utf8'));
+  const all = fx('explore-all');
+  all.items.find(i => i.key === 'stock:NVDA').at[0].session.extendedHours = true;
+  const ready = d => ({ status: 'ready', data: d, at: NOW });
+  const s0 = emptyState();
+  const base = {
+    ...s0, route: { screen: 'trade', id: null },
+    markets: { ...s0.markets, explore: { all: ready(all) }, watch: ['coin:BTC'] },
+    account: { ...s0.account, status: 'ready', data: fx('account'), holdings: ready(fx('holdings')) },
+    owner: { ...s0.owner, role: 'signs', kid: 'a5048199a8081854' },
+    trade: { ...s0.trade, picks: { crypto: ready({ ...all, items: all.items.filter(i => i.tabs.includes('crypto')) }), predictions: ready(fx('explore-predictions')) } },
+  };
+  const ticket = (open, fields = {}, s = base) => {
+    const on = { ...s, trade: { ...s.trade, kind: open.kind ?? s.trade.kind, ticket: { id: open.id, side: open.side ?? 'buy', venue: open.venue ?? null, outcome: open.outcome ?? 0 } } };
+    const t = ticketOf(on, NOW);
+    return R.sheetOpen(on, { kind: 'order', seed: { id: open.id, ticket: t }, fields: { venue: t.venue, side: t.side, outcome: String(t.outcome), amount: '', unit: 'usd', orderType: 'market', limit: '', extendedHours: false, ...fields } });
+  };
+  const eth = ticket({ id: 'coin:ETH' }, { amount: '25' });
+  const prepared = R.sheetPrepared(eth, { prepared: fx('prepared-order'), at: NOW, asked: askedOf(eth.sheet), deadline: NOW + 125_000 });
+  return [
+    { ...base, trade: { ...base.trade, said: 'Bought 0.04 ETH @ 3,120.50 · Stand-in Exchange' } }, ticket({ id: 'coin:ETH' }), prepared,
+    R.sheetField(prepared, { name: 'amount', value: '30' }), ticket({ id: 'event:predict:SI-FEDCUT-DEC', kind: 'predictions', side: 'sell', venue: 'predict' }),
+    ticket({ id: 'stock:NVDA', kind: 'stocks', venue: 'broker' }, { orderType: 'limit', extendedHours: true }), R.sheetRefused(eth, { message: 'The price moved', again: true }),
+    ticket({ id: 'coin:ETH' }, {}, { ...base, owner: { ...base.owner, role: 'pending' } }),
+    { ...base, trade: { ...base.trade, q: 'zz', results: { status: 'loading', data: null, at: null } }, account: { ...s0.account, status: 'loading' } },
+  ];
+}
+
 // the channel page: loaded with every section, loading, unavailable, stale after a failed re-read, not found
 function channelStates() {
   const alpha = { workspaceId: 'w1', name: 'alpha', title: 'Alpha', dir: '/r/strategies/alpha', isRoot: false, missingDir: false, sessionIds: [] };
@@ -163,10 +197,11 @@ function everyState() {
     R.startEdit(R.startDraft(open, { now: NOW }), { kind: 'newChannel', error: 'Letters, digits, - or _' }),
     R.hostStatus(open, { line: 'Reconnecting…', bad: true }), R.toggleRail(open),
     R.traceLoaded(R.nav(base, { screen: 'messages', id: 'g' }), { convId: 'g', msgId: 'g1', messages: [m('tg1', { kind: 'tool', text: 'account', data: { callId: 'g1c', name: 'mcp__alpaca-kit__account', result: JSON.stringify({ ok: true, equity: '1' }) } }), m('tg2', { from: 'system', text: 'context' })] }),
-    R.toggleDetails(R.hostList(R.hostProjection(open, { convId: 's1', key: 'subagentCatalog', value: [{ id: 'k1', createdAt: 1, mode: 'continuable', label: 'Check' }, { id: 'k2', createdAt: 2, mode: 'unknown' }] }), { conversations: open.conversations, childRows: [{ sessionId: 'k1', parentSessionId: 's1', running: true, origin: 'subagent' }] })), ...marketStates(), ...accountStates(), ...channelStates(), ...discoverStates(),
+    R.toggleDetails(R.hostList(R.hostProjection(open, { convId: 's1', key: 'subagentCatalog', value: [{ id: 'k1', createdAt: 1, mode: 'continuable', label: 'Check' }, { id: 'k2', createdAt: 2, mode: 'unknown' }] }), { conversations: open.conversations, childRows: [{ sessionId: 'k1', parentSessionId: 's1', running: true, origin: 'subagent' }] })), ...marketStates(), ...accountStates(), ...channelStates(), ...discoverStates(), ...tradeStates(),
   ];
 }
 const screenOf = (st, now) => (st.route.screen === 'markets' ? renderMarketsScreen(st, now) : st.route.screen === 'account' ? renderAccountScreen(st, now)
+  : st.route.screen === 'trade' ? renderTradeScreen(st, now)
   : st.route.screen === 'channel' ? renderChannelScreen(st, now) : st.route.screen === 'discover' ? renderDiscover(st, now)
   : st.route.screen === 'plugin' ? renderPlugin(st, now) : renderMessagesScreen(st, now));
 
@@ -174,7 +209,7 @@ test('every class the screens emit has a rule in app.css, and app.css names no c
   assert.doesNotMatch(css, /#[0-9a-fA-F]{3,6}\b/, 'colours come from tokens.css');
   setMarkdown(null);
   const html = everyState().map(st => renderRail(st, NOW) + screenOf(st, NOW) + (st.settingsOpen ? renderSettings(st) : '') + renderSheet(st, NOW)).join('');
-  for (const c of ['mkts', 'mk-tab', 'mk-star', 'mk-name', 'mk-tag', 'mk-q', 'mk-clear', 'mk-note', 'mk-empty', 'mk-st', 'page-back', 'mk-chart', 'mk-axis', 'mk-facts', 'mk-big', 'mk-basis', 'mk-asof', 'mk-d-acts', 'mk-line', 'mk-on', 'mk-outs', 'mk-out', 'acct', 'networth', 'acct-figures', 'acct-second', 'acct-t', 'acct-shown', 'order-row', 'acct-note', 'activity-row', 'venue', 'account-line', 'pair-box', 'sheet', 'sheet-quote', 'sheet-left', 'sheet-check', 'stale']) assert.match(html, new RegExp(`class="[^"]*\\b${c}\\b`), `Markets emits ${c}`);
+  for (const c of ['mkts', 'mk-tab', 'mk-star', 'mk-name', 'mk-tag', 'mk-q', 'mk-clear', 'mk-note', 'mk-empty', 'mk-st', 'page-back', 'mk-chart', 'mk-axis', 'mk-facts', 'mk-big', 'mk-basis', 'mk-asof', 'mk-d-acts', 'mk-line', 'mk-on', 'mk-outs', 'mk-out', 'acct', 'networth', 'acct-figures', 'acct-second', 'acct-t', 'acct-shown', 'order-row', 'acct-note', 'activity-row', 'venue', 'account-line', 'pair-box', 'sheet', 'sheet-quote', 'sheet-left', 'sheet-check', 'stale', 'trade', 'tp-head', 'tk-seg', 'tk-pick', 'tk-row', 'tk-open', 'tk-said', 'tk-panel', 'tk-picked', 'tk-out', 'mk-yes', 'mk-no', 'tk-at', 'tk-side', 'tk-quote', 'tk-left', 'tk-msg', 'tk-go', 'tk-hand']) assert.match(html, new RegExp(`class="[^"]*\\b${c}\\b`), `Markets emits ${c}`);
   const classes = new Set(html.match(/class="([^"]+)"/g).flatMap(x => x.slice(7, -1).split(/\s+/)));
   const missing = [...classes].filter(c => c && !new RegExp(`\\.${c.replace(/[-]/g, '\\-')}(?![\\w-])`).test(css));
   assert.deepEqual(missing, [], 'classes without a rule');

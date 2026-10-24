@@ -25,7 +25,14 @@ test('parseHash and toHash round-trip; Messages and Markets route, every other s
   assert.equal(toHash(parseHash('#/markets/crypto:BTC/USD')), '#/markets/crypto:BTC/USD');
   assert.equal(parseHash('#/markets/crypto:BTC%2FUSD').id, 'crypto:BTC/USD', 'an encoded link reads the same');
   assert.equal(parseHash('#/markets/').id, null);
-  assert.deepEqual(parseHash('#/trade'), { screen: 'messages', id: null }, 'Trade is gone');
+  // Trade, and a market to open on it: an Account key, everything after #/trade/, decoded, written back raw
+  assert.deepEqual(parseHash('#/trade'), { screen: 'trade', id: null });
+  assert.deepEqual(parseHash('#/trade/'), { screen: 'trade', id: null });
+  assert.equal(toHash({ screen: 'trade', id: null }), '#/trade');
+  assert.deepEqual(parseHash('#/trade/coin:BTC'), { screen: 'trade', id: 'coin:BTC' });
+  assert.equal(parseHash('#/trade/event:predict:SI-FEDCUT-DEC').id, 'event:predict:SI-FEDCUT-DEC');
+  assert.equal(parseHash('#/trade/pm%3A0xab').id, 'pm:0xab', 'an encoded link reads the same');
+  assert.equal(toHash(parseHash('#/trade/stock:NVDA')), '#/trade/stock:NVDA');
   // a channel page and a plugin page take everything after the screen, decoded, as a market does
   assert.deepEqual(parseHash('#/channel/ws-1'), { screen: 'channel', id: 'ws-1' });
   assert.equal(toHash({ screen: 'channel', id: 'ws-1' }), '#/channel/ws-1');

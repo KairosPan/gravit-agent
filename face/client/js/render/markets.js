@@ -4,7 +4,8 @@
 // reads: its price and 24 hours, its facts, its price history for the range chosen, its lines across venues, what is held,
 // working and stated for it, the conversations that name it. A cn: page is the face's own quote, as before. Every figure and
 // every word about a market is a view's (host/market-view.js): this module puts a figure in its unit's words, joins the views'
-// words, and says, where rows or lines would be, how far their read has got. No Buy, no Sell, no Trade: the hand order is stage 2.
+// words, and says, where rows or lines would be, how far their read has got. On a page that signs for the Account, an Account
+// market's page carries Buy, and Sell where the market is held: each opens the Trade ticket (spec 2026-10-22 §6.4).
 import { esc, attrs, cls } from '../html.js';
 import { icon } from '../icons.js';
 import { chgHtml } from '../market-fmt.js';
@@ -38,8 +39,8 @@ export function mkAv(name, size = '') {
   return `<span class="${cls('mk-av', size && `mk-av-${size}`)}" aria-hidden="true">${esc(word)}</span>`;
 }
 
-// a price in its unit's words: an event's in cents (62¢, 62.5¢), an A share's in yuan, anything else in dollars; none is —
-function priceWord(v, unit) {
+/** A price in its unit's words: an event's in cents (62¢, 62.5¢), an A share's in yuan, anything else in dollars; none is —. */
+export function priceWord(v, unit) {
   if (v === null || v === undefined) return EM;
   return unit === 'cents' ? `${Number(v.toFixed(1))}¢` : price(v, unit === 'cny' ? 'CNY' : 'USD');
 }
@@ -143,7 +144,12 @@ const pageHtml = (who, keys, top, left, right) => {
     `<header class="mk-pg-head">${who}${keys}</header><div class="mk-pg-top">${top}</div>` +
     `${cols ? `<div class="mk-pg-cols">${cols}</div>` : ''}</div></main>`;
 };
-const keysHtml = (id, watched) => `<div class="mk-d-acts"><button type="button" class="btn" data-action="handToGravit" data-id="${esc(id)}">${icon('agent', 16, 2)}Hand to Gravit</button>` +
+// a key opening the Trade ticket on the market, at a side
+const ticketKey = (id, side, word) => `<button type="button" class="btn" data-action="openTicket" data-id="${esc(id)}" data-side="${side}">${word}</button>`;
+// the page's keys: Buy, and Sell where it is held, when `trade` is given (an Account market on a page that signs); Hand to
+// Gravit; Watch
+const keysHtml = (id, watched, trade = null) => `<div class="mk-d-acts">${trade ? ticketKey(id, 'buy', 'Buy') + (trade.held ? ticketKey(id, 'sell', 'Sell') : '') : ''}` +
+  `<button type="button" class="btn" data-action="handToGravit" data-id="${esc(id)}">${icon('agent', 16, 2)}Hand to Gravit</button>` +
   `<button type="button" class="${cls('btn', watched && 'mk-on')}" data-action="toggleWatch" data-id="${esc(id)}" aria-pressed="${watched}">${icon('star', 16, 2)}${watched ? 'Watching' : 'Watch'}</button></div>`;
 const aboutHtml = (conversations, asset, now) => mentionsOf(conversations, asset).map(c => `<a class="mk-line" href="#/messages/${esc(c.id)}" data-action="open" data-id="${esc(c.id)}"><span class="mk-mark">→</span>` +
   `<div class="mk-line-b"><div class="mk-t1">${esc(c.title)}</div>${c.updatedAt ? `<div class="mk-t2">${esc(rowTime(c.updatedAt, now))}</div>` : ''}</div></a>`);
@@ -222,7 +228,9 @@ function accountPage(id, view, state, now) {
     esc([l.status, l.by].filter(Boolean).join(' · ')), DONE.has(l.status) ? 'ok' : ''));
   right.push(section('On the statement', partBody(view.reads.lines, stated, 'Nothing on the statement about it yet.', 'Statement unavailable'),
     '<button type="button" class="link mk-link" data-action="openStatement">Open the Statement →</button>'));
-  return pageHtml(who, keysHtml(id, view.watched), top, left, right);
+  // the hand order is the owner's: Buy and Sell only on a page that signs, Sell only where something of it is held
+  const trade = state.owner?.role === 'signs' ? { held: view.held.assets.length > 0 || view.held.positions.length > 0 } : null;
+  return pageHtml(who, keysHtml(id, view.watched, trade), top, left, right);
 }
 
 // an A share's page, the face's own: its quote against the previous close, its facts, the conversations that name it

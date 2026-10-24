@@ -55,7 +55,7 @@ function navItem(href, name, label, current, mini, badge = 0) {
     `<span class="nav-label">${esc(label)}</span>${badge ? `<span class="nav-badge">${badge}</span>` : ''}</a>`;
 }
 
-// the first level: Messages (its badge counts the conversations with a card waiting on you), Markets, Account with its
+// the first level: Messages (its badge counts the conversations with a card waiting on you), Markets, Trade, Discover, Account with its
 // leading figure once the Account's page has answered — the paper book's, named so, when it leads — and its badge counting
 // the cards waiting for you on the Account, and the collapse key; it collapses to a strip of icons
 function worthLine(state) {
@@ -79,6 +79,7 @@ export function renderNav(state) {
   <div class="rail-group">
     ${navItem(messagesHref, 'chat', 'Messages', screen === 'messages' || screen === 'channel', mini, waiting)}
     ${navItem('#/markets', 'markets', 'Markets', screen === 'markets', mini)}
+    ${navItem('#/trade', 'trade', 'Trade', screen === 'trade', mini)}
     ${navItem('#/discover', 'compass', 'Discover', screen === 'discover' || screen === 'plugin', mini)}
   </div>
   <div class="rail-foot">

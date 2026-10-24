@@ -1,5 +1,5 @@
-// The two-level rail on the host's facts (spec 2026-10-19 §7 "Rail", "List"): Messages with its badge, Markets and Account
-// as links to the old pages, no Discover, Trade, phone or mail in stage 1; rows from the conversations the list gave.
+// The two-level rail on the host's facts (spec 2026-10-19 §7 "Rail", "List"): Messages with its badge, Markets, Trade (spec
+// 2026-10-22 §6.4) and Discover, Account at the foot; no phone or mail; rows from the conversations the list gave.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -22,7 +22,7 @@ const listed = (convs, open = convs[0]?.id ?? null, extra = {}) => {
   return R.nav(s, { screen: 'messages', id: open });
 };
 
-test('the first level: Messages, Markets and Account on the face; no Discover, Trade, phone or mail', () => {
+test('the first level: Messages, Markets and Account on the face; no phone or mail', () => {
   const h = renderNav(listed([conv('a')]));
   assert.match(h, /href="#\/messages\/a"[^>]*>[\s\S]*?Messages/);
   assert.match(h, /class="nav-item" href="#\/markets"[^>]*>[\s\S]*?Markets/);
@@ -31,7 +31,22 @@ test('the first level: Messages, Markets and Account on the face; no Discover, T
   assert.doesNotMatch(h, /href="\/account"/);
   assert.match(h, /account-title">Account</);
   assert.match(h, /data-action="openSettings"/, 'the theme lives behind a Settings key at the foot');
-  for (const gone of ['#/trade', 'phoneCall', '#/mail', 'nav-badge', 'Guard']) assert.doesNotMatch(h, new RegExp(gone), gone);
+  for (const gone of ['phoneCall', '#/mail', 'nav-badge', 'Guard']) assert.doesNotMatch(h, new RegExp(gone), gone);
+});
+
+test('Trade is in the first level between Markets and Discover, current on the Trade screen and on a market opened there', () => {
+  const base = listed([conv('a')]);
+  const h = renderNav(base);
+  const keys = [...h.matchAll(/class="nav-item[^"]*"(?: aria-current="page")? href="([^"]+)"/g)].map(m => m[1]);
+  assert.deepEqual(keys.slice(1), ['#/markets', '#/trade', '#/discover'], 'Messages, then Markets, Trade, Discover');
+  assert.match(h, /<a class="nav-item" href="#\/trade"><svg[^>]*>.*?<\/svg><span class="nav-label">Trade<\/span><\/a>/);
+  for (const id of [null, 'coin:BTC']) {
+    const on = renderNav(R.nav(base, { screen: 'trade', id }));
+    assert.match(on, /<a class="nav-item current" aria-current="page" href="#\/trade">/, String(id));
+    assert.doesNotMatch(on, /class="nav-item current" aria-current="page" href="#\/markets"/);
+  }
+  assert.equal(renderList(R.nav(base, { screen: 'trade', id: null }), NOW), '', 'no conversation list beside Trade');
+  assert.match(renderNav({ ...base, railCollapsed: true }), /title="Trade"/);
 });
 
 test('the Messages badge counts the conversations holding an unanswered gate', () => {

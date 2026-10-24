@@ -2,7 +2,7 @@
 // price by kind and where the price is from in the Account's own words — beside the face's A-share (cn:) rows, and a market's
 // page from the Account's reads: its price and 24 hours, its facts, its price history for a range, its lines across venues,
 // what is held, working and stated for it. A cn: page is the face's own quote. States are built with the reducers over the
-// stand-in's answers (tests/fixtures/account/). No Buy, no Sell, no Trade: the hand order is stage 2.
+// stand-in's answers (tests/fixtures/account/). Buy and Sell (the Trade ticket) only on a page that signs, Sell only where the market is held.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -57,7 +57,7 @@ const conv = (id, over = {}) => ({ id, title: 'T ' + id, kind: 'gravit', members
 function screen({
   route = { screen: 'markets', id: null }, all = fx('explore-all'), predictions = null, tab = null, sort = null, q = '', results = null,
   cn = [], quotes = {}, connection = 'streaming', providers = [], watch = [], asked = {}, live = [], candles = null, account = false,
-  conversations = [], watchError = null,
+  conversations = [], watchError = null, role = null,
 } = {}) {
   let s = R.nav(emptyState(), route);
   if (all) s = R.exploreLoaded(s, { tab: 'all', data: all, at: NOW });
@@ -79,6 +79,7 @@ function screen({
   if (results) s = R.resultsLoaded(s, { data: results, at: NOW });
   if (sort) s = R.setMarketsSort(s, sort);
   if (conversations.length) s = { ...s, conversations };
+  if (role) s = R.ownerStanding(s, { role, kid: role === 'signs' ? 'a5048199a8081854' : '' });
   return { s, html: renderMarketsScreen(s, NOW) };
 }
 const rowIds = html => [...html.matchAll(/<tr data-id="([^"]+)"/g)].map(m => m[1]);
@@ -214,7 +215,7 @@ test('a cn row beside the Account rows under Stocks; Not listed line with Remove
   assert.doesNotMatch(gone, /openMarket/, 'no read lists it: no page');
 });
 
-test('the page: no Buy, no Sell; the range seg; Across venues with best and Connect to trade; You hold and Open orders; On the statement', () => {
+test('the page: no Buy, no Sell on a page that does not sign; the range seg; Across venues with best and Connect to trade; You hold and Open orders; On the statement', () => {
   const page = (id, over = {}) => screen({ route: { screen: 'markets', id }, account: true, ...over });
   const btc = page('coin:BTC', {
     watch: ['coin:BTC'],
@@ -227,7 +228,7 @@ test('the page: no Buy, no Sell; the range seg; Across venues with best and Conn
   assert.match(html, /<div class="mk-who"><span class="mk-av mk-av-lg" aria-hidden="true">BTC<\/span><div><h1 class="head-title">BTC<\/h1><span class="mk-sub">Crypto · BTC\/USDT<\/span><\/div><\/div>/);
   assert.match(html, /<button type="button" class="btn" data-action="handToGravit" data-id="coin:BTC">[\s\S]*?Hand to Gravit<\/button>/);
   assert.match(html, /<button type="button" class="btn mk-on" data-action="toggleWatch" data-id="coin:BTC" aria-pressed="true">[\s\S]*?Watching<\/button>/);
-  // no Buy, no Sell, no Trade: the owner's hand order is the next stage
+  // no Buy, no Sell, no Trade: this page does not sign for the Account
   for (const word of [/>Buy</, />Sell</, />Trade</, /data-action="(buy|sell|trade)/i]) assert.doesNotMatch(html, word, String(word));
   // the price now is the followed line's quote; its 24 hours and its volume the explore read's; where it is from, with its age
   assert.match(html, /<div class="mk-d-px"><span class="mk-big">\$62,510\.50<\/span><span class="up"><span aria-hidden="true">▲<\/span><span class="sr-only">up<\/span> 2\.30%<\/span><span class="mk-basis">24h<\/span><\/div>/);
@@ -325,6 +326,30 @@ test('the page: no Buy, no Sell; the range seg; Across venues with best and Conn
   // a key no read lists, and an old face id, are no page: the table
   assert.match(page('coin:GONE').html, /^<main class="main mkts">/);
   assert.match(page('us:AAPL').html, /^<main class="main mkts">/);
+});
+
+test('on a page that signs, a market\'s page carries Buy, and Sell where the market is held: each opens the Trade ticket', () => {
+  const keys = html => html.match(/<div class="mk-d-acts">[\s\S]*?<\/div>/)?.[0] ?? '';
+  const page = (id, over = {}) => screen({ route: { screen: 'markets', id }, account: true, role: 'signs', ...over }).html;
+  const buy = id => `<button type="button" class="btn" data-action="openTicket" data-id="${id}" data-side="buy">Buy</button>`;
+  const sell = id => `<button type="button" class="btn" data-action="openTicket" data-id="${id}" data-side="sell">Sell</button>`;
+  // BTC is held: Buy and Sell before Hand to Gravit and Watch
+  const btc = keys(page('coin:BTC'));
+  assert.ok(btc.startsWith(`<div class="mk-d-acts">${buy('coin:BTC')}${sell('coin:BTC')}<button type="button" class="btn" data-action="handToGravit"`), btc);
+  // DOGE is not held: Buy alone
+  const doge = keys(page('coin:DOGE'));
+  assert.ok(doge.includes(buy('coin:DOGE')), doge);
+  assert.doesNotMatch(doge, /data-side="sell"/);
+  // a prediction held as a position
+  const fed = keys(page('event:predict:SI-FEDCUT-DEC', { predictions: fx('explore-predictions'), tab: 'predictions' }));
+  assert.ok(fed.includes(buy('event:predict:SI-FEDCUT-DEC')) && fed.includes(sell('event:predict:SI-FEDCUT-DEC')), fed);
+  // a page that does not sign, or does not know yet: neither
+  for (const role of [null, 'pending', 'needs-code', 'signed-out', 'none', 'unknown']) {
+    assert.doesNotMatch(page('coin:BTC', { role }), /data-action="openTicket"/, String(role));
+  }
+  // an A share is the face's own quote: no ticket at the Account
+  const cn = screen({ route: { screen: 'markets', id: 'cn:600519' }, cn: [MOUTAI], quotes: { 'cn:600519': moutaiQuote() }, account: true, role: 'signs' }).html;
+  assert.doesNotMatch(cn, /data-action="openTicket"/);
 });
 
 test('candlesSvg draws closes for a range; cents for an event', () => {
