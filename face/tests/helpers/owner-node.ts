@@ -26,19 +26,27 @@ export interface OwnerCalls {
   signIn(): Promise<void>;
   close(): void;
 }
-/** A started device: its calls, its standing as the store holds it, and `close`. */
-export interface OwnerNode { owner: OwnerCalls; standing: () => OwnerStanding; close: () => void }
+/** A started device: its calls, its standing as the store holds it, the signatures it sent, and `close`. */
+export interface OwnerNode { owner: OwnerCalls; standing: () => OwnerStanding; signatures: () => string[]; close: () => void }
 
-/** The owner device paired through the face at `faceOrigin` (`http://127.0.0.1:<port>`), labelled `label`. */
+/** The owner device paired through the face at `faceOrigin` (`http://127.0.0.1:<port>`), labelled `label`. Every
+ * `signature.es256` value it posts is kept, in this process only, for a smoke to look for in the face's output. */
 export function startOwnerNode(faceOrigin: string, label = "Gravit face smoke"): OwnerNode {
   const store = createStore({ initial: emptyState(), reducers });
   let signedOut = false;
   const flag = { get: (): boolean => signedOut, set: (on: boolean): void => { signedOut = Boolean(on); } };
-  const post = postVia(((path: string, init?: RequestInit) => fetch(`${faceOrigin}${path}`, init)) as typeof fetch);
+  const sent: string[] = [];
+  const toFace = postVia(((path: string, init?: RequestInit) => fetch(`${faceOrigin}${path}`, init)) as typeof fetch);
+  const post = (path: string, body?: { signature?: { es256?: unknown } }): Promise<OwnerAnswer> => {
+    const es256 = body?.signature?.es256;
+    if (typeof es256 === "string") sent.push(es256);
+    return toFace(path, body);
+  };
   const owner = startOwner({ store, post, subtle: globalThis.crypto.subtle, keys: memoryKeys(), flag, label }) as OwnerCalls;
   return {
     owner,
     standing: () => (store.get() as { owner: OwnerStanding }).owner,
+    signatures: () => [...sent],
     close: () => owner.close(),
   };
 }

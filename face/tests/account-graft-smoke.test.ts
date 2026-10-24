@@ -4,8 +4,9 @@
  * the seat box through the proxy's shared reader. Then the owner's half: the face's own owner device
  * (`client/js/host/owner.js`, run under Node by `helpers/owner-node.ts`) pairs with the code the stand-in printed,
  * signs a watch on a market the page does not watch and its removal, a market buy (its fill told on the stream
- * opened before it), a resting limit buy and its cancel, and the approval of the stand-in's seeded card — every call to the face's port, never the stand-in's; a foreign origin's
- * exchange is fenced; and nothing of a body (the pairing code, a signature) is in what the face's process wrote.
+ * opened before it, the ETH it bought in the Portfolio), a resting limit buy and its cancel, and the approval of the
+ * stand-in's seeded card — every call to the face's port, never the stand-in's; a foreign origin's exchange is
+ * fenced; and nothing of a body (the pairing code, a signature sent) is in what the face's process wrote.
  *
  * Skipped unless `FACE_SMOKE=1` and `FACE_ACCOUNT_SEAT_DIR` names an installed checkout of
  * linqizhe07/buyer-agent-demo (`npm ci` there), as `account-seat-smoke` is: the checkout is read, never written; the
@@ -220,12 +221,28 @@ test("account graft smoke: the Account's page and markets, a refused query, its 
     const unwatchedAgain = await owner.act({ type: "setWatch", venue: "ex", symbol: unwatched, on: "" });
     assert.equal(unwatchedAgain.status, 200, shown(unwatchedAgain));
     assert.notEqual(unwatchedAgain.body.ok, false, shown(unwatchedAgain));
-    const afterUnwatch = await watchOf();    assert.ok(!watching(afterUnwatch, unwatched), `the page no longer watches ${unwatched} at ex: ${JSON.stringify(afterUnwatch)}`);
+    const afterUnwatch = await watchOf();
+    assert.ok(!watching(afterUnwatch, unwatched), `the page no longer watches ${unwatched} at ex: ${JSON.stringify(afterUnwatch)}`);
 
     /* 9. The stream opened first, then the owner's market buy of $25 of ETH: an order, and its fill on the stream. */
     const streamed = await fetch(`${base}/data/account/stream?client=${STREAM_CLIENT}`, { headers: { accept: "text/event-stream" }, signal: ownerStream.signal });
     if (streamed.status !== 200) assert.fail(`the owner's stream answered ${streamed.status}: ${(await streamed.text()).slice(0, 400)}`);
     const frames = collectFrames(streamed);
+    /* The ETH the Portfolio counts from the account's own orders (its `crypto:ETH` cost basis, `coveredQty`), read
+     * before the buy and again after its fill; the row must also show ETH held at `ex`. The venue line's own amount
+     * is not compared: the Account keeps a venue's balance read for about thirty seconds, so it lags the fill and,
+     * just after the stand-in's seeding, the seeds' own last buy too (measured: 1.8 before, 1.8 at once after the
+     * fill, 1.8499 thirty seconds later — this fill and the seeded 0.04). */
+    type Holdings = { rows?: { asset?: string; venues?: { venue?: string }[] }[]; cost?: { key?: string; coveredQty?: number }[] };
+    const ethCounted = async (): Promise<number> => {
+      const held = await (await fetch(`${base}/data/account/holdings?cost=1&fresh=1`)).json() as Holdings;
+      const atEx = held.rows?.some((row) => row.asset === "ETH" && row.venues?.some((line) => line.venue === "ex"));
+      assert.ok(atEx, `ETH at ex: ${JSON.stringify(held.rows?.map((r) => [r.asset, r.venues?.map((v) => v.venue)]))}`);
+      const covered = held.cost?.find((c) => c.key === "crypto:ETH")?.coveredQty;
+      assert.equal(typeof covered, "number", `ETH's cost basis: ${JSON.stringify(held.cost?.map((c) => [c.key, c.coveredQty]))}`);
+      return covered as number;
+    };
+    const ethBefore = await ethCounted();
     const bought = await owner.act({ type: "liveOrder", venue: "ex", symbol: "ETH/USDT", side: "buy", orderType: "market", usd: "25", ...ORDER_BLANKS });
     assert.equal(bought.status, 200, shown(bought));
     assert.equal(bought.body.kind, "order", shown(bought));
@@ -235,9 +252,12 @@ test("account graft smoke: the Account's page and markets, a refused query, its 
     assert.ok(fill, `a fill for ${String(boughtId)} within ${ACTION_FRAME_MS / 1000} s; heard ${JSON.stringify(frames.map((f) => f.event))}`);
     assert.equal(fieldOf(fill.data, "symbol"), "ETH/USDT");
 
-    /* 10. The Portfolio holds ETH at the exchange. */
-    const holdings = await (await fetch(`${base}/data/account/holdings?cost=1&fresh=1`)).json() as { rows?: { asset?: string; venues?: { venue?: string }[] }[] };
-    assert.ok(holdings.rows?.some((row) => row.asset === "ETH" && row.venues?.some((line) => line.venue === "ex")), `ETH at ex: ${JSON.stringify(holdings.rows?.map((r) => [r.asset, r.venues?.map((v) => v.venue)]))}`);
+    /* 10. The Portfolio's ETH, as the account's orders count it, rose by what filled (to within a hundredth of it). */
+    const filledQty = fieldOf(fill.data, "filledQty");
+    assert.ok(typeof filledQty === "number" && filledQty > 0, `the fill's quantity: ${JSON.stringify(fill.data)}`);
+    const ethAfter = await ethCounted();
+    const rose = ethAfter - ethBefore;
+    assert.ok(Math.abs(rose - filledQty) <= filledQty * 0.01, `ETH counted rose by ${rose} (${ethBefore} → ${ethAfter}); ${filledQty} filled`);
 
     /* 11. A limit buy of SOL 10 % under the ask rests open; cancelled, it is canceled. */
     const market = await (await fetch(`${base}/data/account/market?venue=ex&symbol=${encodeURIComponent("SOL/USDT")}`)).json() as { market?: { ask?: number; priceStep?: number } };
@@ -250,9 +270,11 @@ test("account graft smoke: the Account's page and markets, a refused query, its 
     assert.equal(resting.body.kind, "order", shown(resting));
     assert.equal(fieldOf(resting.body.order, "status"), "open", shown(resting));
     const restingId = fieldOf(resting.body.order, "id");
+    assert.equal(typeof restingId, "string", shown(resting));
     const cancelled = await owner.act({ type: "liveCancel", venue: "ex", order: String(restingId) });
     assert.equal(cancelled.status, 200, shown(cancelled));
     assert.equal(cancelled.body.kind, "order", shown(cancelled));
+    assert.equal(fieldOf(cancelled.body.order, "id"), restingId, shown(cancelled));
     assert.equal(fieldOf(cancelled.body.order, "status"), "canceled", shown(cancelled));
 
     /* 12. The card Claude Code's market buy of ETH waits on, approved: taken, and the stream tells it approved. */
@@ -273,7 +295,10 @@ test("account graft smoke: the Account's page and markets, a refused query, its 
     /* 14. Nothing of a body in what the face said: neither the pairing code nor a signature. */
     const said14 = output.text();
     assert.ok(!said14.includes(standin.code), "the pairing code is not in the face's output");
-    assert.ok(!said14.includes("es256"), "no signature is in the face's output");
+    const signatures = device.signatures();
+    /* the watch and its removal, the buy, the limit, the cancel, the card */
+    assert.equal(signatures.length, 6, `six signatures sent; ${signatures.length} kept`);
+    assert.ok(signatures.every((signature) => !said14.includes(signature)), "no signature sent is in the face's output");
   } finally {
     output.restore();
     device?.close();
