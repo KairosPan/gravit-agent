@@ -114,6 +114,67 @@ test('the owner slice takes a known role, the refusal as words, busy as a boolea
   assert.equal(R.ownerBusy(t, false), t);
 });
 
+// the owner sheet's slice (host/sheet.js): prepare, What you sign, sign
+test('the sheet slice: open, a field, incomplete, a quiet and a loud ask, prepared, refused, signing, done, close', () => {
+  const s = emptyState();
+  assert.equal(s.sheet, null);
+  for (const type of ['sheetField', 'sheetIncomplete', 'sheetAsking', 'sheetPrepared', 'sheetRefused', 'sheetSigning', 'sheetDone', 'sheetTick', 'sheetClose']) {
+    assert.equal(R[type](s, {}), s, `${type} without a sheet changes nothing`);
+  }
+  const fields = [{ name: 'usd', label: 'Paper dollars to add', type: 'number', placeholder: '1000', value: '' }];
+  let t = R.sheetOpen(s, { kind: 'topUp', seed: { venue: 'paper-a' }, fields });
+  assert.deepEqual(t.sheet, {
+    kind: 'topUp', seed: { venue: 'paper-a' }, fields, status: 'incomplete', words: '', prepared: null, preparedAt: null,
+    asked: null, deadline: null, message: null, again: false, said: null,
+  });
+  t = R.sheetIncomplete(t, 'Type an amount');
+  assert.equal(t.sheet.words, 'Type an amount');
+  t = R.sheetField(t, { name: 'usd', value: '500' });
+  assert.equal(t.sheet.fields[0].value, '500');
+  assert.equal(fields[0].value, '', 'the fields given are not changed');
+  assert.equal(t.sheet.status, 'incomplete', 'a field leaves the status as it was');
+  assert.equal(R.sheetField(t, { name: 'nope', value: 'x' }), t, 'a field the sheet does not have changes nothing');
+  const plain = R.sheetOpen(s, { kind: 'order', seed: {}, fields: { qty: '' } });
+  assert.deepEqual(R.sheetField(plain, { name: 'qty', value: '2' }).sheet.fields, { qty: '2' }, 'a plain form takes the name');
+
+  t = R.sheetAsking(t, { quiet: true });
+  assert.equal(t.sheet.status, 'asking', 'a quiet ask with nothing shown is an ask');
+  const prepared = { ok: true, action: { type: 'topUpPaper', nonce: 1 }, shown: [] };
+  t = R.sheetPrepared(t, { prepared, at: 10, asked: '{"usd":"500"}', deadline: 600_010 });
+  assert.equal(t.sheet.status, 'ready');
+  assert.equal(t.sheet.prepared, prepared);
+  assert.equal(t.sheet.preparedAt, 10);
+  assert.equal(t.sheet.asked, '{"usd":"500"}');
+  assert.equal(t.sheet.deadline, 600_010);
+  assert.equal(t.sheet.words, '');
+  assert.equal(R.sheetAsking(t, { quiet: true }), t, 'a quiet ask keeps the shown preparation, ready');
+  const loud = R.sheetAsking(t, {});
+  assert.equal(loud.sheet.status, 'asking');
+  assert.equal(loud.sheet.prepared, null);
+  assert.equal(loud.sheet.deadline, null);
+  const tick = R.sheetTick(t);
+  assert.notEqual(tick, t, 'a tick is a new state, so the countdown draws');
+  assert.deepEqual(tick.sheet, t.sheet);
+
+  const refused = R.sheetRefused(t, { message: 'the price moved', again: true, standing: false });
+  assert.equal(refused.sheet.status, 'refused');
+  assert.equal(refused.sheet.message, 'the price moved');
+  assert.equal(refused.sheet.again, true);
+  assert.equal(refused.sheet.prepared, null, 'nothing left to sign');
+  assert.equal(refused.sheet.deadline, null);
+  assert.equal(R.sheetRefused(t, { message: 7, again: 'yes' }).sheet.message, 'Refused', 'only words; again only when true');
+  assert.equal(R.sheetRefused(t, { message: 7, again: 'yes' }).sheet.again, false);
+  assert.equal(R.sheetPrepared(refused, { prepared, at: 20, asked: 'x', deadline: null }).sheet.message, null, 'a preparation clears it');
+
+  t = R.sheetSigning(t);
+  assert.equal(t.sheet.status, 'signing');
+  t = R.sheetDone(t, { said: 'paper-a topped up by $500' });
+  assert.equal(t.sheet.status, 'done');
+  assert.equal(t.sheet.said, 'paper-a topped up by $500');
+  assert.equal(t.sheet.deadline, null, 'no countdown over a done sheet');
+  assert.equal(R.sheetClose(t).sheet, null);
+});
+
 test('the empty state carries no demo slice', () => {
   const s = emptyState();
   for (const gone of ['plugins', 'memory', 'mail', 'banner', 'call', 'compose']) assert.equal(gone in s, false, gone);
