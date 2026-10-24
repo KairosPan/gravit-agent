@@ -317,8 +317,8 @@ test('Cards: grouped by agent with What it asks verbatim; Asks under them', () =
   const none = draw(state({ tab: 'cards', page: { ...page, cards: [], asks: [] } }));
   has(none, '<div class="cardbox-title">Waiting for you</div><p class="acct-note">Nothing waiting</p>');
   lacks(none, 'aria-label="Asks"');
-  // read only: no answer key on a card
-  assert.doesNotMatch(html, /data-action="(?:approve|reject|answerCard|answerAsk)/);
+  // a page that does not sign answers nothing: no key on a card or an ask
+  assert.doesNotMatch(html, /data-action="(?:approve|reject|answerCard|answerAsk|openSheet|grant)"/);
 });
 
 // the holdings' and the paper lens's refusals keep the Account's sentence: the Assets box says the leading lens's, where Holdings
@@ -394,7 +394,8 @@ test('no CJK, no icon URL, no raw JSON in any rendered string', () => {
   for (const tab of ['portfolio', 'venues', 'agents', 'cards']) {
     states.push(state({ tab, page: iconPage, holdings, seat: seatView() }), state({ tab }), state({ tab, page: null }), state({ tab, page: { ok: true } }),
       R.accountFailed(state({ tab }), { at: NOW, message: 'The Account is locked until its owner signs in.' }), R.accountFailed(state({ tab, page: null }), { at: NOW }),
-      state({ tab, holdings: null, paper: null, history: null, statement: null, agents: null }), state({ tab, page: { ...page, totalUsd: 0 }, history: fx('history-paper') }));
+      state({ tab, holdings: null, paper: null, history: null, statement: null, agents: null }), state({ tab, page: { ...page, totalUsd: 0 }, history: fx('history-paper') }),
+      R.ownerStanding(state({ tab, page: iconPage, holdings, seat: seatView() }), { role: 'signs', kid: 'a5048199a8081854' }));
   }
   for (const v of page.venues) states.push(R.openVenueDetails(state({ tab: 'venues', page: iconPage }), v.id));
   states.push(R.openStatement(state()), R.openStatement(state({ statement: null })), R.openSettings(state()),
@@ -427,6 +428,75 @@ test('the owner device on the screen: the device line under the head chips, Devi
   lacks(renderSettings(R.ownerStanding(R.openSettings(state()), { role: 'pending', kid: '0123456789abcdef' })), 'data-action="signOut"');
   // no page read: the theme alone
   lacks(renderSettings(R.openSettings(R.nav(emptyState(), { screen: 'account', tab: 'portfolio' }))), 'Devices');
+});
+
+// the owner's keys (plan 2 Task 7): each opens its sheet with the seed the store cannot tell in data-*; drawn only for a page
+// that signs, absent (never disabled) otherwise
+test("the owner's keys on Agents and Cards: Let in, Give a limit, End limit, Revoke, Approve, Reject, Grant and Decline for a page that signs", () => {
+  const KID = 'a5048199a8081854';
+  const CC = '0x3a087530887bd175ccc38828ee3776e5b6ea1ac6';
+  const page = fx('account');
+  const knocks = { ...page, requests: [{ address: '0xab12', name: 'Scout', at: '2026-10-22T07:30:00.000Z' }] };
+  const signing = s => R.ownerStanding(s, { role: 'signs', kid: KID });
+  const box = (html, label) => html.match(new RegExp(`<section class="cardbox" aria-label="${label}">[\\s\\S]*?</section>`))?.[0] ?? '';
+  const sheetKey = (kind, data, word, cl = 'btn-sm') => `<button type="button" class="${cl}" data-action="openSheet" data-kind="${kind}"${Object.entries(data).map(([k, v]) => ` data-${k}="${v}"`).join('')}>${word}</button>`;
+
+  // Agents: a knocking key's Let in…, an agent's Give a limit…, End limit on its trade limit, Revoke…; Gravit's own row none
+  const agents = box(draw(signing(state({ tab: 'agents', seat: seatView(), page: knocks }))), 'Agents');
+  has(agents, `<span class="dim">0xab12 · ${hhmm('2026-10-22T07:30:00.000Z')}</span></span><span class="btn-row">${sheetKey('letIn', { address: '0xab12', name: 'Scout' }, 'Let in…')}</span></div>`);
+  has(agents, '<span class="dim">Cards 1 · Open orders 1</span></span><span class="btn-row">' +
+    sheetKey('limit', { address: CC, name: 'Claude Code' }, 'Give a limit…') +
+    sheetKey('endLimit', { address: CC, name: 'Claude Code', allow: 'ex,predict,wallet' }, 'End limit') +
+    `<button type="button" class="btn-danger" data-action="askRevoke" data-address="${CC}" data-name="Claude Code">Revoke…</button></span></div>`);
+  assert.equal((agents.match(/data-kind="endLimit"/g) ?? []).length, 1, 'the trade limit alone: venues and payees are not ended here');
+  has(agents, '<span class="dim">Cards 0 · Open orders 0</span></span></div>', "Gravit's row: no key — the seat is admitted on the Account page");
+  // Revoke… asks twice: the confirm for this agent stands in its place
+  const asking = box(draw(R.askConfirm(signing(state({ tab: 'agents', seat: seatView() })), { action: 'revoke', name: 'Claude Code', address: CC })), 'Agents');
+  has(asking, 'data-allow="ex,predict,wallet">End limit</button><span class="confirm"><button type="button" class="btn-danger" data-action="confirmYes">Yes, revoke</button><button type="button" class="btn-sm" data-action="cancelConfirm">No</button></span></span></div>');
+  lacks(asking, 'data-action="askRevoke"');
+  has(box(draw(R.askConfirm(signing(state({ tab: 'agents' })), { action: 'revoke', name: 'Someone else', address: '0xb0b' })), 'Agents'), 'data-action="askRevoke"', 'a confirm for another agent leaves this one');
+  // each trade limit standing gets End limit, its ids comma-joined, never *; an expired one, or one naming nothing, none
+  const agentsBody = fx('agents');
+  const more = { ...agentsBody, agents: [{ ...agentsBody.agents[0], limits: [
+    { id: 'spend-1', scope: 'trade', allow: ['ex'], perPaymentUsd: 10, budgetUsd: 20 },
+    { id: 'spend-2', scope: 'trade', allow: ['*', 'paper', 'broker'], perPaymentUsd: 10, budgetUsd: 20 },
+    { id: 'spend-3', scope: 'trade', allow: ['wallet'], expired: true },
+    { id: 'spend-4', scope: 'trade', allow: ['*'] },
+  ] }] };
+  const ends = [...draw(signing(state({ tab: 'agents', agents: more }))).matchAll(/data-kind="endLimit"[^>]*data-allow="([^"]*)"/g)].map(m => m[1]);
+  assert.deepEqual(ends, ['ex', 'paper,broker']);
+  // an agent with no address: Revoke… by its name alone; nothing that needs the address; every seed escaped
+  const odd = draw(signing(state({ tab: 'agents', agents: { ok: true, agents: [{ name: 'Bob "<b>"', status: 'ok', limits: [{ scope: 'trade', allow: ['ex'] }] }] } })));
+  has(odd, '<button type="button" class="btn-danger" data-action="askRevoke" data-address="" data-name="Bob &quot;&lt;b&gt;&quot;">Revoke…</button>');
+  lacks(odd, 'data-action="openSheet"');
+  const quoted = draw(signing(state({ tab: 'agents', page: { ...page, requests: [{ address: '0x"><i>', name: '<Scout>', at: '' }] } })));
+  has(quoted, sheetKey('letIn', { address: '0x&quot;&gt;&lt;i&gt;', name: '&lt;Scout&gt;' }, 'Let in…'));
+
+  // Cards: each card's ✓ Approve and ✗ Reject with its id and hash; each ask's Grant (when it grants here) and Decline
+  const html = draw(signing(state({ tab: 'cards' })));
+  const card = page.cards[0];
+  has(box(html, 'Cards'), `</details></div><span class="btn-row">${sheetKey('approveCard', { card: card.id, hash: card.hash, decision: 'approve' }, '✓ Approve')}` +
+    `${sheetKey('approveCard', { card: card.id, hash: card.hash, decision: 'reject' }, '✗ Reject')}</span></div>`);
+  const asks = box(html, 'Asks');
+  has(asks, '<div class="order-row"><span>Claude Code · Raise my trading budget to $1,000 so I can finish the SOL position you asked for · limit</span><span class="spacer"></span><span class="btn-row">' +
+    `<button type="button" class="btn-sm" data-action="grant" data-ask="ask-0001">Grant</button>${sheetKey('declineAsk', { ask: 'ask-0001' }, 'Decline')}</span></div>`);
+  has(asks, `<button type="button" class="btn-sm" data-action="grant" data-ask="ask-0002">Grant</button>${sheetKey('declineAsk', { ask: 'ask-0002' }, 'Decline')}`, 'a venue ask grants as a limit');
+  // an ask granted on the Account page (a session) has Decline alone; an ask with no id, no key
+  const session = draw(signing(state({ tab: 'cards', page: { ...page, asks: [{ id: 'ask-0003', agentName: 'Claude Code', kind: 'session', text: 'A session' }, { kind: 'limit', text: 'No id' }] } })));
+  has(session, `<span>Claude Code · A session · session</span><span class="spacer"></span><span class="btn-row">${sheetKey('declineAsk', { ask: 'ask-0003' }, 'Decline')}</span></div>`);
+  lacks(session, 'data-action="grant"');
+  has(session, '<div class="order-row">No id · limit</div>');
+  // a card with no hash is not answered here
+  lacks(draw(signing(state({ tab: 'cards', page: { ...page, cards: [{ ...card, hash: '' }] } }))), 'data-kind="approveCard"');
+
+  // a page that does not sign: none of these keys, and the device line says why
+  for (const [role, line] of [['pending', 'Waiting to be let in'], ['none', 'This browser cannot sign for the account'], ['needs-code', 'Pair with the code'], ['signed-out', 'Signed out'], ['unknown', '']]) {
+    for (const tab of ['agents', 'cards']) {
+      const out = draw(R.ownerStanding(state({ tab, seat: seatView(), page: knocks }), { role, kid: KID }));
+      for (const k of ['data-action="openSheet"', 'data-action="askRevoke"', 'data-action="grant"', 'Let in…', 'Give a limit…', 'End limit', 'Revoke…', 'Approve', 'Reject', 'Decline']) lacks(out, k, `${role} ${tab}: ${k}`);
+      if (line) has(out, `<p class="acct-note">${line}`, `${role}: the device line`);
+    }
+  }
 });
 
 test('router: account tabs agents and cards parse; an unknown tab is portfolio', () => {

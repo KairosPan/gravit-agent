@@ -9,6 +9,7 @@ import {
   pageOk, headOf, worthOf, changeOf, assetsOf, positionsOf, openOrdersOf, missingWords, statementLinesOf, statementCsvOf,
   venuesOf, agentsOf, cardsOf, asksOf, requestsOf,
 } from '../../client/js/host/account-view.js';
+import { grantOf } from '../../client/js/host/sheet-view.js';
 
 // a fixture of the stand-in's answers, parsed afresh for every call so no test sees another's copy
 const fx = name => JSON.parse(readFileSync(new URL(`../fixtures/account/${name}.json`, import.meta.url), 'utf8'));
@@ -245,11 +246,12 @@ test('venuesOf: health from lastOkAt/lastFailAt; does words; the paper flag; det
 test('agentsOf: Gravit first from the seat view, then the Account agents with their limit words', () => {
   const agents = fx('agents');
   // Gravit's row: the seat view's standing and limits; the counts are the Account's for the seat's agent — null while its agents are not read
-  const gravit = (cards, orders) => ({ gravit: true, name: 'Gravit', standing: 'Gravit · admitted until Nov 19', limits: ['trade · paper-1 · $100 an order · $850 of $1,000 left'], cards, orders });
-  const claude = { gravit: false, name: 'Claude Code', status: 'ok', validUntil: '2026-11-21T07:35:46.778Z', limits: [
-    'trade · ex, predict, wallet · $150 an order · $380.01 of $600 left',
-    'venues · ex, agent-claude-code · $50 an order · $200 of $200 left',
-    'payees · api.example.com · $2 an order · $20 of $20 left',
+  const gravit = (cards, orders) => ({ gravit: true, name: 'Gravit', address: '0xab12', standing: 'Gravit · admitted until Nov 19',
+    limits: [{ id: '', scope: 'trade', allow: ['paper-1'], expired: false, words: 'trade · paper-1 · $100 an order · $850 of $1,000 left' }], cards, orders });
+  const claude = { gravit: false, name: 'Claude Code', address: '0x3a087530887bd175ccc38828ee3776e5b6ea1ac6', status: 'ok', validUntil: '2026-11-21T07:35:46.778Z', limits: [
+    { id: 'spend-0001', scope: 'trade', allow: ['ex', 'predict', 'wallet'], expired: false, words: 'trade · ex, predict, wallet · $150 an order · $380.01 of $600 left' },
+    { id: 'spend-0003', scope: 'venues', allow: ['ex', 'agent-claude-code'], expired: false, words: 'venues · ex, agent-claude-code · $50 an order · $200 of $200 left' },
+    { id: 'spend-0004', scope: 'payees', allow: ['api.example.com'], expired: false, words: 'payees · api.example.com · $2 an order · $20 of $20 left' },
   ], cards: 1, orders: 1 };
   assert.deepEqual(agentsOf(agents, seatView()), [gravit(0, 0), claude], 'the stand-in lists no agent at the seat address');
 
@@ -263,7 +265,7 @@ test('agentsOf: Gravit first from the seat view, then the Account agents with th
   ] };
   const listed = agentsOf(more, seatView());
   assert.deepEqual(listed.map(a => [a.name, a.gravit, a.cards, a.orders]), [['Gravit', true, 2, 3], ['Claude Code', false, 1, 1], [' gravit ', false, 0, 1], ['Gravitas', false, 0, 0]]);
-  assert.deepEqual(listed[3].limits, ['trade · ex · $100 an order · $1,000 of $1,000 left · expired']);
+  assert.deepEqual(listed[3].limits, [{ id: '', scope: 'trade', allow: ['ex'], expired: true, words: 'trade · ex · $100 an order · $1,000 of $1,000 left · expired' }]);
   // with no address on the seat view (knocking: no key yet), the seat's agents are found by name, in any case, and all counted
   const knocking = agentsOf(more, seatView({ seat: { name: 'Gravit', status: 'knocking', limits: [] } }));
   assert.deepEqual(knocking.map(a => [a.name, a.gravit, a.cards, a.orders]), [['Gravit', true, 2, 4], ['Claude Code', false, 1, 1], ['Gravitas', false, 0, 0]]);
@@ -278,9 +280,10 @@ test('agentsOf: Gravit first from the seat view, then the Account agents with th
     { scope: 'trade', allow: ['ex'], perPaymentUsd: 100, budgetUsd: '1000', leftUsd: '250.5' },
     { scope: 5, allow: ['ex', 7, null, 'wallet'], perPaymentUsd: 10, budgetUsd: 20, leftUsd: 20 },
   ] }] }, null);
-  assert.deepEqual(probe[0].limits, ['trade · ex · $100 an order', 'trade · ex · $100 an order · $250.5 of $1,000 left', 'ex, wallet · $10 an order · $20 of $20 left']);
+  assert.deepEqual(probe[0].limits.map(l => l.words), ['trade · ex · $100 an order', 'trade · ex · $100 an order · $250.5 of $1,000 left', 'ex, wallet · $10 an order · $20 of $20 left']);
+  assert.deepEqual(probe[0].limits[2], { id: '', scope: '', allow: ['ex', 'wallet'], expired: false, words: 'ex, wallet · $10 an order · $20 of $20 left' }, 'a scope or an id that is not a string is blank');
   const seatLimit = { scope: 'trade', allow: ['paper-1'], perOrderUsd: 100, budgetUsd: 1000, spentUsd: 0, reservedUsd: 0, leftUsd: null, validUntil: null, expired: false };
-  assert.deepEqual(agentsOf({ ok: true, agents: [] }, seatView({ seat: { name: 'Gravit', status: 'admitted', address: '0xab12', limits: [seatLimit] } }))[0].limits,
+  assert.deepEqual(agentsOf({ ok: true, agents: [] }, seatView({ seat: { name: 'Gravit', status: 'admitted', address: '0xab12', limits: [seatLimit] } }))[0].limits.map(l => l.words),
     ['trade · paper-1 · $100 an order'], 'the seat box words its limits the same way');
 
   // no seat view to stand on: the Account's list is the whole answer; no agents read: Gravit's row alone, its counts unknown
@@ -296,7 +299,10 @@ test('cardsOf, asksOf, requestsOf: grouped by agent; shown verbatim', () => {
   const [group, ...others] = cardsOf(page);
   assert.deepEqual(others, []);
   assert.equal(group.agentName, 'Claude Code');
-  assert.deepEqual(group.cards, [{ id: 'card-0001', reason: 'Claude Code asks to buy 0.0479 ETH at Stand-in Exchange · market · about $117.63', usd: 119.99, expiresAt: '2026-10-22T08:05:46.830Z', shown: page.cards[0].shown }]);
+  assert.deepEqual(group.cards, [{ id: 'card-0001', hash: '0xa20b26adc1422adf86d72b98ed4c100345421896b7a3cefe085a618a396f8c9c',
+    reason: 'Claude Code asks to buy 0.0479 ETH at Stand-in Exchange · market · about $117.63', usd: 119.99, expiresAt: '2026-10-22T08:05:46.830Z', shown: page.cards[0].shown }]);
+  assert.equal(group.cards[0].hash, page.cards[0].hash, 'the hash the card is answered by, the page\'s own');
+  assert.equal(cardsOf({ ...page, cards: [{ ...page.cards[0], hash: 7 }] })[0].cards[0].hash, '', 'a hash that is not a string is blank');
   assert.equal(group.cards[0].shown.length, 12);
   assert.deepEqual(group.cards[0].shown[9], { name: 'qty', value: '' }, 'an empty field stays, empty');
 
@@ -312,12 +318,35 @@ test('cardsOf, asksOf, requestsOf: grouped by agent; shown verbatim', () => {
     card('a2', 'Claude Code (renamed)', { agent: '0xaaa' }), card('d1', 'Claude Code', { agent: '0xddd' }), card('x1', 'Claude Code')] });
   assert.deepEqual(byAgent.map(g => [g.agentName, g.cards.map(c => c.id)]), [['Scout', ['c1', 'c2']], ['Claude Code', ['a1', 'a2']], ['Claude Code', ['d1']], ['Claude Code', ['x1']]]);
 
+  // each ask with what its grant is seeded from (grantOf reads the row as it reads the page's ask): the agent, the venue, the dollars
+  const CC = '0x3a087530887bd175ccc38828ee3776e5b6ea1ac6';
   assert.deepEqual(asksOf(page), [
-    { id: 'ask-0001', agentName: 'Claude Code', kind: 'limit', text: 'Raise my trading budget to $1,000 so I can finish the SOL position you asked for', expiresAt: '2026-10-23T07:35:46.836Z' },
-    { id: 'ask-0002', agentName: 'Claude Code', kind: 'venue', text: 'Connect Stand-in Public Exchange: DOGE trades only there', expiresAt: '2026-10-23T07:35:46.838Z' },
+    { id: 'ask-0001', agent: CC, agentName: 'Claude Code', kind: 'limit', venue: 'ex', usd: '1000', text: 'Raise my trading budget to $1,000 so I can finish the SOL position you asked for', expiresAt: '2026-10-23T07:35:46.836Z' },
+    { id: 'ask-0002', agent: CC, agentName: 'Claude Code', kind: 'venue', venue: 'standin-pubex', usd: '', text: 'Connect Stand-in Public Exchange: DOGE trades only there', expiresAt: '2026-10-23T07:35:46.838Z' },
   ]);
+  assert.deepEqual(grantOf(asksOf(page)[0], page), grantOf(page.asks[0], page), 'the row grants as the page\'s own ask does');
+  assert.deepEqual(asksOf({ ...page, asks: [{ id: 'ask-9', kind: 'limit', agent: 5, venue: null, usd: 1000 }] })[0], { id: 'ask-9', agent: '', agentName: '', kind: 'limit', venue: '', usd: '', text: '', expiresAt: '' });
   assert.deepEqual(requestsOf(page), []);
   assert.deepEqual(requestsOf({ ...page, requests: [{ address: '0xab12', name: 'Gravit', at: '2026-10-22T07:00:00.000Z' }] }), [{ address: '0xab12', name: 'Gravit', at: '2026-10-22T07:00:00.000Z' }]);
+});
+
+test("the keys' fields: an agent's address, each limit's id, scope and allow beside its words, a card's hash, an ask's grant seed", () => {
+  const agents = fx('agents'), page = fx('account');
+  const [gravit, claude] = agentsOf(agents, seatView());
+  // Gravit's row stands on the seat view's address; the Account's agents on their own
+  assert.equal(gravit.address, '0xab12');
+  assert.equal(claude.address, agents.agents[0].address);
+  assert.deepEqual(claude.limits.map(({ id, scope, allow }) => ({ id, scope, allow })), agents.agents[0].limits.map(({ id, scope, allow }) => ({ id, scope, allow })));
+  // the trade limit's id and allow are the page's spend row's: End limit names what the Account holds
+  const trade = claude.limits.find(l => l.scope === 'trade');
+  const spend = page.spend.find(r => r.scope === 'trade');
+  assert.deepEqual([trade.id, trade.allow], [spend.id, spend.allow]);
+  assert.deepEqual(agentsOf({ ok: true, agents: [{ name: 'Nameless', address: 7, limits: [{ scope: 'trade', allow: 'ex', id: 3 }] }] }, null)[0],
+    { gravit: false, name: 'Nameless', address: '', status: '', validUntil: '', limits: [{ id: '', scope: 'trade', allow: [], expired: false, words: 'trade' }], cards: 0, orders: 0 });
+  // a card's hash, the one its answer signs, the page's own
+  assert.equal(cardsOf(page)[0].cards[0].hash, page.cards[0].hash);
+  // an ask carries what grantOf reads
+  for (const [i, k] of asksOf(page).entries()) assert.deepEqual([k.agent, k.venue, k.usd], [page.asks[i].agent, page.asks[i].venue, page.asks[i].usd]);
 });
 
 test('an unrecognised page is unreadable, never a number: every function answers empty on {ok:true} alone', () => {

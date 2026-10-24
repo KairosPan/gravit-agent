@@ -3,7 +3,9 @@
 // Open orders), Venues (each venue with its health and what it does, its Details drawer; the A-share quotes line; the seat
 // box), Agents (Gravit's seat first, then the Account's agents and the keys knocking), Cards (what waits for the owner, and
 // the agents' asks) — the Statement drawer, the Settings drawer with Devices; the owner device's line under
-// the head (render/owner.js). Every figure and word is a view's (host/account-view.js); this module draws them.
+// the head (render/owner.js), and for a page that signs the keys that open the owner's sheets on Agents and Cards (Let in,
+// Give a limit, End limit, Revoke, Approve, Reject, Grant, Decline). Every figure and word is a view's (host/account-view.js);
+// this module draws them.
 import { esc, attrs, cls } from '../html.js';
 import { fmtClock, fmtDate, sameDay } from '../time.js';
 import { money, signedMoney, sign } from '../wire/account-model.js';
@@ -14,7 +16,8 @@ import {
 } from '../host/account-view.js';
 import { providerWord } from '../host/market-view.js';
 import { chip } from './thread.js';
-import { seg, segLinks, sec } from './controls.js';
+import { seg, segLinks, sec, confirmPair } from './controls.js';
+import { grantOf } from '../host/sheet-view.js';
 import { curveSvg } from './chart.js';
 import { renderDeviceLine, renderDevices } from './owner.js';
 
@@ -195,13 +198,46 @@ function seatBox(state, now) {
 // the cards an agent has waiting and its open orders; a count the Account has not given (its agents not read) is —
 const countsOf = r => `Cards ${r.cards === null ? '—' : r.cards} · Open orders ${r.orders === null ? '—' : r.orders}`;
 
+// ── the owner's keys (plan 2 Task 7) ──
+// Drawn only for a page that signs (absent otherwise: the device line under the head says why). Each opens its sheet with the
+// parts of the seed the store cannot tell, every one escaped by attrs; the handler builds the rest from the store.
+const signs = state => state.owner?.role === 'signs';
+const sheetKey = (kind, data, word, klass = 'btn-sm') => `<button${attrs({ type: 'button', class: klass, 'data-action': 'openSheet', 'data-kind': kind, ...data })}>${esc(word)}</button>`;
+const rowKeys = keys => (keys.length ? `<span class="btn-row">${keys.join('')}</span>` : '');
+
+// an agent's keys: Give a limit…, End limit on each trade limit standing (its ids comma-joined, never *), Revoke… — asked twice,
+// the confirm for this agent in its place. Gravit's own row has none: its seat is admitted on the Account page.
+function agentKeys(r, state) {
+  if (r.gravit) return '';
+  const keys = [];
+  if (r.address) {
+    keys.push(sheetKey('limit', { 'data-address': r.address, 'data-name': r.name }, 'Give a limit…'));
+    for (const l of r.limits) {
+      const allow = l.allow.filter(id => id !== '*');
+      if (l.scope === 'trade' && !l.expired && allow.length) keys.push(sheetKey('endLimit', { 'data-address': r.address, 'data-name': r.name, 'data-allow': allow.join(',') }, 'End limit'));
+    }
+  }
+  if (r.name) {
+    const c = state.confirm;
+    keys.push(c?.action === 'revoke' && c.name === r.name && (c.address ?? '') === r.address ? confirmPair('Yes, revoke')
+      : `<button${attrs({ type: 'button', class: 'btn-danger', 'data-action': 'askRevoke', 'data-address': r.address, 'data-name': r.name })}>Revoke…</button>`);
+  }
+  return rowKeys(keys);
+}
+
 function agentsTab(state, now) {
   const a = state.account;
-  const rows = agentsOf(a.agents.data, state.seat.data).map(r => `<div class="venue"><span>${r.gravit
-    ? lines(r.standing, [...r.limits, countsOf(r)])
-    : lines(r.name || 'An agent', [[r.status, dateWord(r.validUntil) ? `until ${dateWord(r.validUntil)}` : ''].filter(Boolean).join(' · '), ...r.limits, countsOf(r)])}</span></div>`).join('');
+  const owner = signs(state);
+  const rows = agentsOf(a.agents.data, state.seat.data).map(r => {
+    const limits = r.limits.map(l => l.words);
+    return `<div class="venue"><span>${r.gravit
+      ? lines(r.standing, [...limits, countsOf(r)])
+      : lines(r.name || 'An agent', [[r.status, dateWord(r.validUntil) ? `until ${dateWord(r.validUntil)}` : ''].filter(Boolean).join(' · '), ...limits, countsOf(r)])}</span>` +
+      `${owner ? agentKeys(r, state) : ''}</div>`;
+  }).join('');
   const status = a.agents.data === null ? note(a.agents.status === 'error' ? 'Agents unavailable' : 'Loading…') : rows ? '' : note('No agents');
-  const knocking = requestsOf(a.data).map(q => `<div class="venue"><span>${lines(q.name || 'An agent', [[q.address, when(q.at, now)].filter(Boolean).join(' · ')])}</span></div>`).join('');
+  const knocking = requestsOf(a.data).map(q => `<div class="venue"><span>${lines(q.name || 'An agent', [[q.address, when(q.at, now)].filter(Boolean).join(' · ')])}</span>` +
+    `${owner ? rowKeys([sheetKey('letIn', { 'data-address': q.address, 'data-name': q.name }, 'Let in…')]) : ''}</div>`).join('');
   return `<div class="cards">${box(`${title('Agents')}${rows ? `<div class="venues">${rows}</div>` : ''}${status}` +
     `${knocking ? `<div class="label">Knocking</div><div class="venues">${knocking}</div>` : ''}`, 'Agents')}</div>`;
 }
@@ -209,20 +245,32 @@ function agentsTab(state, now) {
 // ── Cards ──
 
 // a card: why the agent asks, its value and the time to answer by, and What it asks — every field the owner signs, as the
-// Account sends it
-function cardRow(c, now) {
+// Account sends it; for a page that signs, ✓ Approve and ✗ Reject, each with the card's id and the hash its answer signs
+function cardRow(c, now, owner) {
   const by = when(c.expiresAt, now);
   const shown = c.shown.map(f => `<div class="dsec-line">${esc(`${f.name}: ${f.value}`)}</div>`).join('');
+  const answer = decision => ({ 'data-card': c.id, 'data-hash': c.hash, 'data-decision': decision });
+  const keys = owner && c.id && c.hash ? rowKeys([sheetKey('approveCard', answer('approve'), '✓ Approve'), sheetKey('approveCard', answer('reject'), '✗ Reject')]) : '';
   return `<div class="venue"><div>${lines(c.reason, [[c.usd === null ? '' : money(c.usd), by ? `answer by ${by}` : ''].filter(Boolean).join(' · ')])}` +
-    `${shown ? `<details${attrs({ id: `shown-${c.id}`, class: 'acct-shown' })}><summary>What it asks</summary>${shown}</details>` : ''}</div></div>`;
+    `${shown ? `<details${attrs({ id: `shown-${c.id}`, class: 'acct-shown' })}><summary>What it asks</summary>${shown}</details>` : ''}</div>${keys}</div>`;
+}
+
+// an ask in its words; for a page that signs, Grant when the face grants it (grantOf: a limit, a venue, a key, a top-up — a
+// session, leverage or the mode is granted on the Account page) and Decline
+function askRow(k, page, owner) {
+  const words = esc([k.agentName, k.text, k.kind].filter(Boolean).join(' · '));
+  if (!owner || !k.id) return `<div class="order-row">${words}</div>`;
+  const grant = grantOf(k, page) ? `<button${attrs({ type: 'button', class: 'btn-sm', 'data-action': 'grant', 'data-ask': k.id })}>Grant</button>` : '';
+  return `<div class="order-row"><span>${words}</span><span class="spacer"></span>${rowKeys([grant, sheetKey('declineAsk', { 'data-ask': k.id }, 'Decline')].filter(Boolean))}</div>`;
 }
 
 function cardsTab(state, now) {
   const a = state.account;
   const unread = pageNote(a);
   if (unread !== null) return unread;
-  const groups = cardsOf(a.data).map(g => `<div class="dsec-label">${esc(g.agentName)}</div><div class="venues">${g.cards.map(c => cardRow(c, now)).join('')}</div>`).join('');
-  const asks = asksOf(a.data).map(k => `<div class="order-row">${esc([k.agentName, k.text, k.kind].filter(Boolean).join(' · '))}</div>`).join('');
+  const owner = signs(state);
+  const groups = cardsOf(a.data).map(g => `<div class="dsec-label">${esc(g.agentName)}</div><div class="venues">${g.cards.map(c => cardRow(c, now, owner)).join('')}</div>`).join('');
+  const asks = asksOf(a.data).map(k => askRow(k, a.data, owner)).join('');
   return `<div class="cards">${box(`${title('Waiting for you')}${groups || note('Nothing waiting')}`, 'Cards')}` +
     `${asks ? box(`${title('Asks')}<div class="acct-orders">${asks}</div>`, 'Asks') : ''}</div>`;
 }

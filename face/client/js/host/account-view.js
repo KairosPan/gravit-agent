@@ -235,9 +235,15 @@ const sameName = (a, b) => typeof a === 'string' && a.trim().toLowerCase() === b
 // an agent's cards waiting, and its orders still working (open, partial, pending: the rule of openOrdersOf)
 const cardCount = a => records(a.cards).length;
 const openCount = a => records(a.orders).filter(o => OPEN.has(o.status)).length;
+// one limit as the Agents tab keys it: its id, scope and the ids it allows (End limit names them back to the Account), whether
+// it has expired, and its words in one line
+const limitOf = (l, perOrderUsd) => ({
+  id: str(l.id), scope: str(l.scope), allow: (Array.isArray(l.allow) ? l.allow : []).filter(x => typeof x === 'string' && x !== ''),
+  expired: l.expired === true, words: limitWords(l, perOrderUsd),
+});
 const agentRow = a => ({
-  gravit: false, name: str(a.name), status: str(a.status), validUntil: str(a.validUntil),
-  limits: records(a.limits).map(l => limitWords(l, l.perPaymentUsd)), cards: cardCount(a), orders: openCount(a),
+  gravit: false, name: str(a.name), address: str(a.address), status: str(a.status), validUntil: str(a.validUntil),
+  limits: records(a.limits).map(l => limitOf(l, l.perPaymentUsd)), cards: cardCount(a), orders: openCount(a),
 });
 
 /** The Agents tab. Gravit's row first whenever the seat view (/data/seat.json) has a standing to show: its standing and its
@@ -246,7 +252,8 @@ const agentRow = a => ({
  *  the same words. The seat's own agent is the one at the seat view's address (in any case), or by name, in any case, only
  *  while the seat view carries no address (knocking: no key yet); it is left out of the list while Gravit's row stands, so
  *  Gravit is listed once, and a display name alone never hides a row an address could tell. With no seat view to stand on,
- *  the Account's list is the whole answer. The knocking keys are the page's (`requestsOf`). */
+ *  the Account's list is the whole answer. The knocking keys are the page's (`requestsOf`). Every row carries its address
+ *  (Gravit's the seat view's) and each limit as `{ id, scope, allow, expired, words }` — what the owner's keys name back. */
 export function agentsOf(agentsBody, seatView) {
   const w = seatWords(seatView);
   const read = agentsBody?.ok === true && Array.isArray(agentsBody.agents);
@@ -257,7 +264,7 @@ export function agentsOf(agentsBody, seatView) {
   const isSeat = typeof s.address === 'string' && s.address ? a => sameAddress(a.address, s.address) : a => sameName(a.name, name);
   const seats = agents.filter(isSeat);
   return [
-    { gravit: true, name, standing: w.seat, limits: w.limits,
+    { gravit: true, name, address: str(s.address), standing: w.seat, limits: records(s.limits).map(l => limitOf(l, l.perOrderUsd)),
       cards: read ? seats.reduce((n, a) => n + cardCount(a), 0) : null,
       orders: read ? seats.reduce((n, a) => n + openCount(a), 0) : null },
     ...agents.filter(a => !isSeat(a)).map(agentRow),
@@ -266,8 +273,8 @@ export function agentsOf(agentsBody, seatView) {
 
 /** The Cards tab: the cards waiting for the owner (the page's `cards`), grouped by the agent that asked — by its address, in any
  *  case, when the card carries one, under the first name the group's cards give it; by the name the card gives otherwise — in
- *  the order the agents first appear; each card's reason, value and answer-by time, and What it asks — `shown`, every field
- *  the owner signs — as the Account sends it, a field that is not a string drawn as nothing. */
+ *  the order the agents first appear; each card's id and hash (what its answer signs), reason, value and answer-by time, and
+ *  What it asks — `shown`, every field the owner signs — as the Account sends it, a field that is not a string drawn as nothing. */
 export function cardsOf(page) {
   if (!pageOk(page)) return [];
   const groups = new Map();
@@ -277,7 +284,7 @@ export function cardsOf(page) {
     const group = groups.get(key) ?? { agentName: '', cards: [] };
     if (!group.agentName) group.agentName = named;
     group.cards.push({
-      id: str(c.id), reason: str(c.reason), usd: number(c.usd), expiresAt: str(c.expiresAt),
+      id: str(c.id), hash: str(c.hash), reason: str(c.reason), usd: number(c.usd), expiresAt: str(c.expiresAt),
       shown: records(c.shown).map(f => ({ name: str(f.name), value: str(f.value) })),
     });
     groups.set(key, group);
@@ -285,10 +292,15 @@ export function cardsOf(page) {
   return [...groups.values()].map(g => ({ agentName: g.agentName || 'An agent', cards: g.cards }));
 }
 
-/** The agents' asks (the page's `asks`: a bigger budget, a venue, a session), in their words. */
+/** The agents' asks (the page's `asks`: a bigger budget, a venue, a session), in their words, each with what its grant is
+ *  seeded from (`grantOf` in host/sheet-view.js reads a row as it reads the page's ask): the agent's address, the venue, the
+ *  dollars as the Account sends them. */
 export function asksOf(page) {
   if (!pageOk(page)) return [];
-  return records(page.asks).map(a => ({ id: str(a.id), agentName: str(a.agentName), kind: str(a.kind), text: str(a.text), expiresAt: str(a.expiresAt) }));
+  return records(page.asks).map(a => ({
+    id: str(a.id), agent: str(a.agent), agentName: str(a.agentName), kind: str(a.kind), venue: str(a.venue), usd: str(a.usd),
+    text: str(a.text), expiresAt: str(a.expiresAt),
+  }));
 }
 
 /** The keys knocking to be let in (the page's `requests`). */
