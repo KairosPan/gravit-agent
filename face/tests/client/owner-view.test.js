@@ -85,6 +85,9 @@ test('refusalOf: Prepare again for a requote or an expiry, the standing for a ba
     { message: 'this instruction is good for 10 minutes', again: true, standing: false });
   assert.deepEqual(refusalOf(refusal(401, 'E_ACCOUNT_BAD_SIGNATURE', 'the signature does not match the instruction')),
     { message: 'the signature does not match the instruction', again: false, standing: true });
+  // the card's 409 under the same code says nothing about the device
+  assert.deepEqual(refusalOf(refusal(409, 'E_ACCOUNT_BAD_SIGNATURE', 'this approval names a different instruction than the one the card holds')),
+    { message: 'this approval names a different instruction than the one the card holds', again: false, standing: false });
   assert.deepEqual(refusalOf({ status: 200, body: { ok: true, kind: 'result', result: { ok: false, code: 'E_CARD_REJECTED', message: 'You rejected it; nothing moved' } } }),
     { message: 'You rejected it; nothing moved', again: false, standing: false });
   assert.deepEqual(refusalOf({ status: 409, body: { ok: false } }), { message: 'Refused', again: false, standing: false });

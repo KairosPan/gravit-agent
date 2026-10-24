@@ -4,6 +4,7 @@
 // form is not complete, the words for what is missing. The sheet engine (host/sheet.js) prepares the draft, the renderer draws
 // the fields; the Account judges everything else in its own words. `now` is the caller's clock in milliseconds; `validUntil`
 // values are numbers (the Account's u64 fields), the dollar amounts strings as typed. No DOM, no store.
+import { pageOk, venuesOf } from './account-view.js';
 
 const DAY = 86_400_000;
 const ZERO = '0x0000000000000000000000000000000000000000';
@@ -73,6 +74,26 @@ function venueOptions(seed) {
 const connectOptions = seed => records(seed?.options).filter(o => str(o.connector) && o.connector !== 'live:paper' && o.kind !== 'paper');
 const paperBooks = seed => records(seed?.books).filter(b => str(b.venue));
 const listOf = v => (Array.isArray(v) ? v : typeof v === 'string' && v ? v.split(',') : []).filter(x => typeof x === 'string' && x);
+// an exchange account signs `live:exchange:<exchange id>` (the Account's connect.js): its bare option needs the exchange picked
+const needsExchange = o => o.kind === 'exchange' && !o.connector.startsWith('live:exchange:');
+const exchangesOf = seed => [...new Set(connectOptions(seed).filter(needsExchange).flatMap(o => listOf(o.venues)))];
+const sameAddress = (a, b) => typeof a === 'string' && typeof b === 'string' && a !== '' && a.toLowerCase() === b.toLowerCase();
+// a dollar figure of the Account's as the string a field holds
+const dollarsText = v => (typeof v === 'number' && Number.isFinite(v) ? String(v) : str(v));
+
+/** A limit sheet's seed for an agent, from the page: the venues it may name (`{ id, name, paper }`, paper first) and its standing
+ *  trade limit (`current: { allow, perPayment, budget }`, the page's `spend` row of `scope: 'trade'` at its address, in any case,
+ *  not expired), or null. Give a limit and a granted ask open on the same shape, so a new limit starts from the standing one —
+ *  one standing approval per agent and scope, a new one replacing it. */
+export function limitSeedOf(page, address, name) {
+  const seed = { address: str(address), name: str(name), venues: [], current: null };
+  if (!pageOk(page)) return seed;
+  const venues = venuesOf(page).map(v => ({ id: v.id, name: v.name, paper: v.paper }));
+  seed.venues = [...venues.filter(v => v.paper), ...venues.filter(v => !v.paper)];
+  const row = records(page.spend).find(r => r.scope === 'trade' && r.expired !== true && sameAddress(r.agent, address));
+  if (row) seed.current = { allow: listOf(row.allow), perPayment: dollarsText(row.perPaymentUsd), budget: dollarsText(row.budgetUsd) };
+  return seed;
+}
 
 /** The sheet's fields, each `{ name, label, type, options?, placeholder?, value }` — `options` as `{ value, label }`, a `pick`'s
  *  value a list, the rest strings — filled from the seed where it says. */
@@ -85,20 +106,29 @@ export function fieldsOf(kind, seed) {
       { name: 'days', label: 'Good for', type: 'seg', options: DAYS, value: '30' },
     ];
     case 'limit': {
+      // the standing limit's venues with the asked one ticked; its amounts, the asked budget over its own, the per-order
+      // amount never above the budget
       const options = venueOptions(s);
       const known = new Set(options.map(o => o.value));
+      const current = isRecord(s.current) ? s.current : null;
+      const allow = [...new Set([...listOf(current?.allow), ...listOf(s.asked)].filter(id => known.has(id)))];
+      const budget = str(s.budget) || str(current?.budget);
+      const standing = str(current?.perPayment);
+      const perPayment = standing && AMOUNT.test(budget) && Number(standing) > Number(budget) ? budget : standing;
       return [
-        { name: 'allow', label: 'Venues', type: 'pick', options, value: [...new Set(listOf(s.allow).filter(id => known.has(id)))] },
-        { name: 'perPayment', label: 'Per order, in dollars', type: 'number', placeholder: '100', value: str(s.perPayment) },
-        { name: 'budget', label: 'Budget, in dollars', type: 'number', placeholder: '1000', value: str(s.budget) },
+        { name: 'allow', label: 'Venues', type: 'pick', options, value: allow },
+        { name: 'perPayment', label: 'Per order, in dollars', type: 'number', placeholder: '100', value: perPayment },
+        { name: 'budget', label: 'Budget, in dollars', type: 'number', placeholder: '1000', value: budget },
         { name: 'days', label: 'Good for', type: 'seg', options: DAYS, value: '30' },
       ];
     }
     case 'connect': {
       const options = connectOptions(s);
       const picked = options.find(o => o.connector === s.connector);
+      const exchanges = exchangesOf(s);
       return [
         { name: 'connector', label: 'What to connect', type: 'select', options: options.map(o => ({ value: o.connector, label: str(o.label) || o.connector })), value: picked ? picked.connector : '' },
+        ...(exchanges.length ? [{ name: 'exchange', label: 'Exchange', type: 'select', options: exchanges.map(x => ({ value: x, label: x })), value: exchanges.includes(s.exchange) ? s.exchange : '' }] : []),
         { name: 'venue', label: 'Venue id', type: 'text', placeholder: 'okx', value: str(s.venue) },
         { name: 'label', label: 'Name', type: 'text', placeholder: 'My exchange account', value: str(s.label) },
         { name: 'credentialRef', label: 'Key file', type: 'text', placeholder: str(picked?.defaultRef) || 'credentials/<venue>/api-key.json', value: str(s.credentialRef) },
@@ -168,12 +198,19 @@ export function draftOf(kind, fields, seed, now) {
       const option = connectOptions(s).find(o => o.connector === text(fields, 'connector'));
       if (!option) return 'Pick what to connect';
       if (option.needs !== 'key-file') return 'Connect on the Account page';
-      const venue = text(fields, 'venue'), label = text(fields, 'label');
+      let connector = option.connector, exchange = '';
+      if (needsExchange(option)) {
+        exchange = text(fields, 'exchange');
+        if (!listOf(option.venues).includes(exchange)) return 'Pick the exchange';
+        connector = `live:exchange:${exchange}`;
+      }
+      // an exchange account's venue id is the exchange's unless another is typed
+      const venue = text(fields, 'venue') || exchange, label = text(fields, 'label');
       if (!venue) return 'Type a venue id';
       if (!label) return 'Type a name';
       const credentialRef = text(fields, 'credentialRef') || str(option.defaultRef).replaceAll('<venue>', venue);
       if (!credentialRef) return "Type the key file's path";
-      return { type: 'connectVenue', venue, connector: option.connector, label, credentialRef };
+      return { type: 'connectVenue', venue, connector, label, credentialRef };
     }
     case 'paper': {
       const book = text(fields, 'book'), label = text(fields, 'label');
@@ -189,7 +226,11 @@ export function draftOf(kind, fields, seed, now) {
       const usd = amount(fields, 'usd');
       const missing = amountMissing(usd, 'Type an amount');
       if (missing) return missing;
-      return { type: 'connectVenue', venue: `paper-${id}`, connector: 'live:paper', label, credentialRef: usd };
+      // never an id already in use — on the page, or a kept book (a sum there would be refused): -2, -3… as the Account does
+      const used = new Set([...paperBooks(s).map(b => b.venue), ...records(s.venues).map(v => str(v.id))]);
+      let venue = `paper-${id}`;
+      for (let n = 2; used.has(venue); n++) venue = `paper-${id}-${n}`;
+      return { type: 'connectVenue', venue, connector: 'live:paper', label, credentialRef: usd };
     }
     case 'topUp':
     case 'resetPaper': {
@@ -212,6 +253,8 @@ export function draftOf(kind, fields, seed, now) {
     case 'letDevice': {
       if (!str(s.kid)) return 'No browser to let in';
       const owners = (Array.isArray(s.owners) ? s.owners : []).map(o => (isRecord(o) ? str(o.id) : str(o))).filter(Boolean);
+      // the list REPLACES the owners: without them it would drop every device that signs, this page's own among them
+      if (owners.length === 0) return 'No owner device to sign with';
       // the Account's rule: a sorted list without repeats; every device signs alone
       const authorizedUsers = [...new Set([...owners, `device:${s.kid}`])].sort();
       return { type: 'convertToMultiSigUser', signers: JSON.stringify({ authorizedUsers, threshold: 1 }) };
@@ -224,15 +267,16 @@ export function draftOf(kind, fields, seed, now) {
   }
 }
 
-/** The sheet that grants an agent's ask (the page's `asks`), seeded from it: a bigger limit or a venue → `limit` (the venue
- *  picked, the dollars as the budget; the opener adds the page's venues), a knocking key → `letIn`, a top-up → `topUp`.
- *  A session, leverage or the mode is granted on the Account page: null. */
-export function grantOf(ask) {
+/** The sheet that grants an agent's ask (the page's `asks`), seeded from it and the page: a bigger limit or a venue → `limit`
+ *  (`limitSeedOf` — the page's venues and the agent's standing trade limit — with the asked venue ticked and the asked dollars
+ *  as the budget), a knocking key → `letIn`, a top-up → `topUp`. A session, leverage or the mode is granted on the Account
+ *  page: null. */
+export function grantOf(ask, page) {
   if (!isRecord(ask)) return null;
   switch (ask.kind) {
     case 'limit':
     case 'venue':
-      return { kind: 'limit', seed: { address: str(ask.agent), name: str(ask.agentName), allow: str(ask.venue) ? [ask.venue] : [], budget: str(ask.usd) } };
+      return { kind: 'limit', seed: { ...limitSeedOf(page, ask.agent, ask.agentName), asked: str(ask.venue), budget: str(ask.usd) } };
     case 'letIn':
       return { kind: 'letIn', seed: { address: str(ask.agent), name: str(ask.agentName) || str(ask.text) } };
     case 'topup':

@@ -58,10 +58,11 @@ export const whyOf = r => r?.body?.refusal?.message || r?.body?.error || r?.body
 const AGAIN = new Set(['E_ACCOUNT_REQUOTE', 'E_ACCOUNT_EXPIRED']);
 
 /** A refusal for the screen: the Account's sentence (`Refused` when it gave none), `again` when preparing again is the answer
- *  (the price moved, the ten minutes passed), `standing` when the signature did not match (the device may be dropped). */
+ *  (the price moved, the ten minutes passed), `standing` when the door did not take the signature (a 401: the device may be
+ *  dropped) — not a card's 409 under the same code, which names a different instruction. */
 export function refusalOf(r) {
   const code = r?.body?.refusal?.code ?? r?.body?.result?.code;
-  return { message: whyOf(r) || 'Refused', again: AGAIN.has(code), standing: code === 'E_ACCOUNT_BAD_SIGNATURE' };
+  return { message: whyOf(r) || 'Refused', again: AGAIN.has(code), standing: r?.status === 401 && code === 'E_ACCOUNT_BAD_SIGNATURE' };
 }
 
 const STATUS_WORDS = new Map([['open', 'open on the book'], ['filled', 'filled'], ['canceled', 'canceled']]);
