@@ -447,6 +447,7 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .mk-star { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 0; border-radius: var(--radius-pill); background: transparent; color: var(--dim); }
 .mk-star:hover, .mk-star[aria-pressed="true"] { color: var(--text); }
 .mk-star[aria-pressed="true"] svg, .mk-on svg { fill: currentColor; }
+.mk-at { display: block; max-width: 72px; font-size: 11px; line-height: 1.2; color: var(--dim); text-align: center; }
 .mk-name { border: 0; padding: 0; background: none; color: var(--text); text-align: left; display: flex; align-items: center; gap: 12px; min-height: 44px; }
 .mk-name:hover b { text-decoration: underline; text-underline-offset: 3px; }
 .mk-nm b, .mk-who b { display: block; font-weight: 600; }

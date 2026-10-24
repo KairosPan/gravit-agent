@@ -10,7 +10,7 @@
 // preparation; the orders under way with what cancels each; a fill frame as one line. Every Account string passes as it came
 // (the renderer escapes); every figure and word the Trade screen draws is computed here. No DOM, no store.
 import { number, price } from '../wire/market-model.js';
-import { ACCOUNT_TABS, pageOf, legsOf, matchKey, priceOf } from './market-view.js';
+import { ACCOUNT_TABS, pageOf, legsOf, matchKey, priceOf, watchKeysOf } from './market-view.js';
 import { pageOk, assetsOf, positionsOf, openOrdersOf, worthOf } from './account-view.js';
 
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -123,8 +123,8 @@ function heldRows(state, kind, rows) {
 
 /** The picker for the kind Trade is on, each group's rows `{ id, name, sub, priceWord, side?, venue?, outcome? }`: `held` —
  *  the leading lens's assets matched to an Account key by matchKey (a coin's, a stock's), and a prediction held, opening as a
- *  sell of its outcome at its venue; `watching` — the Account keys starred (`markets.watch`) of the kind, a star no read lists
- *  as a placeholder; `most` — the kind's picks read (`trade.picks[kind]`); `results` — while the query is not blank, the trade
+ *  sell of its outcome at its venue; `watching` — the Account keys starred (`markets.watch`), then those the page's own watch
+ *  list names (watchKeysOf over the reads Trade keeps), once each, of the kind, a star no read lists as a placeholder; `most` — the kind's picks read (`trade.picks[kind]`); `results` — while the query is not blank, the trade
  *  search's (`trade.results`) of the kind. `now` is the renderer's clock (no word here is aged). */
 export function pickerOf(state, now) {
   const t = isRecord(state?.trade) ? state.trade : {};
@@ -132,7 +132,8 @@ export function pickerOf(state, now) {
   const rows = rowsIn(state);
   const trading = tradingVenues(state);
   const ofKind = items => items.filter(i => kindOfItem(i) === kind).map(i => marketRow(i, trading));
-  const watch = Array.isArray(state?.markets?.watch) ? state.markets.watch : [];
+  // the face's stars, then the page's own watch list as the keys the reads list it under
+  const watch = [...(Array.isArray(state?.markets?.watch) ? state.markets.watch : []), ...watchKeysOf(state?.account?.data, rows)];
   return {
     held: heldRows(state, kind, rows),
     watching: [...new Set(watch.filter(k => typeof k === 'string' && k !== ''))].filter(k => {

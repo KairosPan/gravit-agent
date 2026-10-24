@@ -60,10 +60,12 @@ function moveHtml(p) {
 
 // ---- the table
 
-// the star; an old star the Account could not find takes Remove in its place
+// the star, and under it Watched at the Account for a market on the Account's own list alone; an old star the Account could not
+// find takes Remove in its place
 function starCell(r) {
   if (r.notListed) return `<button type="button" class="mk-clear" data-action="removeAsked" data-id="${esc(r.id)}" aria-label="Remove ${esc(r.name)}">Remove</button>`;
-  return `<button type="button" class="mk-star" data-action="toggleWatch" data-id="${esc(r.id)}" aria-pressed="${r.watched === true}" aria-label="${r.watched ? 'Stop watching' : 'Watch'} ${esc(r.name)}">${icon('star', 18, 2)}</button>`;
+  return `<button type="button" class="mk-star" data-action="toggleWatch" data-id="${esc(r.id)}" aria-pressed="${r.watched === true}" aria-label="${r.watched ? 'Stop watching' : 'Watch'} ${esc(r.name)}">${icon('star', 18, 2)}</button>` +
+    (r.watched === true && r.atAccount === true ? '<span class="mk-at">Watched at the Account</span>' : '');
 }
 
 // the tile, the name and under it the sub, Closed past its end, Paper where only a paper account trades it first; a market no
@@ -114,7 +116,7 @@ export function renderMarketsScreen(state, now) {
   const m = state.markets;
   const q = String(m.q ?? '').trim();
   const searching = q !== '';
-  const { rows, tabs, sorts, sort, read } = tableOf(m, now);
+  const { rows, tabs, sorts, sort, read } = tableOf(m, now, state.account?.data);
   const tabsHtml = `<div class="mk-tabs" role="group" aria-label="Markets">${tabs.map(t => `<button type="button" class="mk-tab" data-action="mkTab" data-value="${esc(t.id)}" aria-pressed="${t.id === m.tab}">${esc(t.count === null ? t.label : `${t.label} · ${t.count}`)}</button>`).join('')}</div>`;
   const left = searching
     ? `<p class="mk-q">${rows.length} market${rows.length === 1 ? '' : 's'} for “${esc(q)}” <button type="button" class="mk-clear" data-action="mkClear">Clear</button></p>`

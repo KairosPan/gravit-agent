@@ -59,7 +59,7 @@ function memoryStorage(seed = {}, { failWrites = false, failKeys = [] } = {}) {
   };
 }
 
-function rig({ storage = memoryStorage(), answer = () => undefined } = {}) {
+function rig({ storage = memoryStorage(), answer = () => undefined, owner, afterAction } = {}) {
   const store = createStore({ initial: emptyState(), reducers });
   const live = { assets: [], visible: [], closed: false };
   const createLiveQuotes = onUpdate => {
@@ -90,7 +90,7 @@ function rig({ storage = memoryStorage(), answer = () => undefined } = {}) {
     addEventListener(type, fn) { (listeners[type] ??= new Set()).add(fn); },
     removeEventListener(type, fn) { listeners[type]?.delete(fn); },
   };
-  const markets = startMarkets({ store, getJson, createLiveQuotes, createSymbolSearch, storage, win, stream, schedule, cancelTimer, now: () => NOW });
+  const markets = startMarkets({ store, getJson, createLiveQuotes, createSymbolSearch, storage, win, stream, schedule, cancelTimer, now: () => NOW, owner, afterAction });
   const emit = (type, event) => { for (const fn of listeners[type] ?? []) fn(event); };
   return { store, markets, live, search, reads, storage, timers, due, fire, follows, listeners, emit, m: () => store.get().markets };
 }
@@ -760,5 +760,122 @@ test('a page whose market is not a row of the tab still polls its pair', async (
   r.markets.rowsInView(['coin:NOPE']);
   r.fire(QUOTES_MS);
   assert.equal(r.reads.length, asked);
+  r.markets.close();
+});
+
+// the owner device as the Markets host meets it: every draft recorded, each answered by `reply` (a taken account answer by default)
+function fakeOwner(reply = () => ({ status: 200, body: { ok: true, kind: 'account', summary: 'Watching updated' } })) {
+  const acts = [];
+  return { acts, act(draft) { acts.push(draft); return Promise.resolve(reply(draft)); } };
+}
+const TAKEN = { status: 200, body: { ok: true, kind: 'account', summary: 'Watching updated' } };
+
+test('a star on a signing page acts setWatch for the followed line; un-starring signs the page’s entry off; the face’s list as before otherwise', async () => {
+  const owner = fakeOwner();
+  const after = [];
+  const storage = memoryStorage({ [ACCOUNT_WATCH_KEY]: saved(['coin:BTC', 'stock:AAPL']) });
+  const r = rig({ storage, owner, afterAction: (kind, body) => after.push([kind, body]), answer: path => (path === ALL ? fx('explore-all') : undefined) });
+  r.markets.show(true);
+  await settle();
+  const page = fx('account');
+  r.store.dispatch('accountLoaded', { data: page, at: NOW });
+  r.store.dispatch('ownerStanding', { role: 'signs', kid: 'a5048199a8081854' });
+  const writes = storage.writes.length;
+
+  // on: the row's followed line, exactly the four fields; the face's list untouched; the reads told
+  r.markets.watch('coin:ETH');
+  assert.deepEqual(owner.acts, [{ type: 'setWatch', venue: 'ex', symbol: 'ETH/USDT', on: 'true' }]);
+  await settle();
+  assert.deepEqual(after, [['setWatch', TAKEN.body]]);
+  assert.deepEqual(r.m().watch, ['coin:BTC', 'stock:AAPL']);
+  assert.equal(storage.writes.length, writes, 'nothing stored in this browser');
+  assert.equal(r.m().watchError, null);
+  // the page read again lists it: the row reads watched, at the Account alone
+  r.store.dispatch('accountLoaded', { data: { ...page, watch: [...page.watch, { venue: 'ex', symbol: 'ETH/USDT', at: '2026-10-22T08:00:00.000Z' }] }, at: NOW });
+  const eth = rowsOf(r.m(), NOW, r.store.get().account.data).find(x => x.id === 'coin:ETH');
+  assert.deepEqual([eth.watched, eth.atAccount], [true, true]);
+  // starred already, at either list: nothing signed
+  r.markets.watch('coin:ETH');
+  r.markets.watch('coin:BTC');
+  assert.equal(owner.acts.length, 1);
+
+  // off, on the Account's list alone: its own entry, as the page keeps it
+  r.markets.unwatch('coin:DOGE');
+  assert.deepEqual(owner.acts.at(-1), { type: 'setWatch', venue: 'standin-pubex', symbol: 'DOGE/USD', on: '' });
+  await settle();
+  assert.deepEqual(after.at(-1), ['setWatch', TAKEN.body]);
+  assert.deepEqual(r.m().watch, ['coin:BTC', 'stock:AAPL']);
+  // on both: signed off and taken off the face's list
+  r.markets.unwatch('coin:BTC');
+  assert.deepEqual(owner.acts.at(-1), { type: 'setWatch', venue: 'ex', symbol: 'BTC/USDT', on: '' });
+  assert.deepEqual(r.m().watch, ['stock:AAPL']);
+  await settle();
+  // on the face's list alone: nothing signed
+  const acts = owner.acts.length;
+  r.markets.unwatch('stock:AAPL');
+  assert.equal(owner.acts.length, acts);
+  assert.deepEqual(r.m().watch, []);
+  // a cn id is the face's list alone, whatever the page
+  r.markets.watch('cn:600519');
+  assert.equal(owner.acts.length, acts);
+  assert.deepEqual(r.m().watchlist.map(a => a.id), ['cn:600519']);
+  r.markets.unwatch('cn:600519');
+  assert.equal(owner.acts.length, acts);
+  assert.deepEqual(r.m().watchlist, []);
+
+  // a page that does not sign: the face's list, one click, no signature
+  r.store.dispatch('ownerStanding', { role: 'pending', kid: '' });
+  r.markets.watch('coin:SOL');
+  assert.equal(owner.acts.length, acts);
+  assert.deepEqual(r.m().watch, ['coin:SOL']);
+  r.markets.unwatch('coin:DOGE');
+  assert.equal(owner.acts.length, acts, 'the Account’s list is the page’s to sign');
+  r.markets.close();
+
+  // no owner given: the face's list as before
+  const plain = rig({ answer: path => (path === ALL ? fx('explore-all') : undefined) });
+  plain.store.dispatch('ownerStanding', { role: 'signs', kid: 'a5048199a8081854' });
+  plain.markets.watch('coin:ETH');
+  assert.deepEqual(plain.m().watch, ['coin:ETH']);
+  plain.markets.close();
+});
+
+test("a refused setWatch is the Account's sentence in the watchlist's words; the lists stay; one signature at a time per market", async () => {
+  const sentence = 'ETH/USDT is not listed at Stand-in Exchange.';
+  let reply = () => ({ status: 409, body: { ok: false, refusal: { code: 'E_ACCOUNT_BAD_ACTION', message: sentence } } });
+  const owner = fakeOwner(draft => reply(draft));
+  const after = [];
+  const r = rig({ owner, afterAction: (kind, body) => after.push([kind, body]), answer: path => (path === ALL ? fx('explore-all') : undefined) });
+  r.markets.show(true);
+  await settle();
+  const page = fx('account');
+  r.store.dispatch('accountLoaded', { data: page, at: NOW });
+  r.store.dispatch('ownerStanding', { role: 'signs', kid: 'a5048199a8081854' });
+  r.markets.watch('coin:ETH');
+  await settle();
+  assert.equal(r.m().watchError, sentence);
+  assert.deepEqual(r.m().watch, []);
+  assert.deepEqual(r.store.get().account.data.watch, page.watch, 'the page as it was');
+  assert.deepEqual(after, [], 'nothing to read again');
+  // a thrown act is a refusal too, in the screen's word for one without a sentence
+  reply = () => { throw new Error('boom'); };
+  r.markets.unwatch('coin:BTC');
+  await settle();
+  assert.equal(r.m().watchError, 'Refused');
+  // taken: the sentence clears
+  reply = () => TAKEN;
+  r.markets.watch('coin:ETH');
+  await settle();
+  assert.equal(r.m().watchError, null);
+  // one in the air per market: a second press waits for the first
+  const held = deferred();
+  reply = () => held.promise;
+  const before = owner.acts.length;
+  r.markets.watch('coin:SOL');
+  r.markets.watch('coin:SOL');
+  assert.equal(owner.acts.length, before + 1);
+  held.resolve(TAKEN);
+  await settle();
+  assert.deepEqual(after.at(-1), ['setWatch', TAKEN.body]);
   r.markets.close();
 });

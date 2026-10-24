@@ -108,8 +108,8 @@ test('a query: the trade search\'s results of the kind; Searching… on its way;
   assert.match(draw({ ...s, trade: { ...s.trade, results: { status: 'loading', data: null, at: null } } }), /<p class="mk-empty">Searching…<\/p>/);
   assert.match(draw({ ...s, trade: { ...s.trade, results: { status: 'error', data: null, at: 1, message: 'The account is busy' } } }), /<p class="mk-empty">The account is busy<\/p>/);
   assert.match(draw(stateWith({ q: 'zz', results: { ...all, items: [] } })), /<p class="mk-empty">Nothing matches “zz” under Crypto\.<\/p>/);
-  // a kind's picks still on their way
-  const loading = stateWith();
+  // a kind's picks still on their way, with nothing held or watched yet (the page's own watch list empty)
+  const loading = stateWith({ page: { ...fx('account'), watch: [] } });
   assert.match(draw({ ...loading, trade: { ...loading.trade, picks: {} }, account: { ...loading.account, holdings: { status: 'idle', data: null, at: null } } }), /<p class="mk-empty">Loading…<\/p>/);
 });
 

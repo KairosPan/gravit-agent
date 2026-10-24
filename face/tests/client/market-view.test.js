@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import {
   canonicalId, quoteWord, connectionWord, providerWord, basisWord, sourceWord, volumeWord, volumeWordOf, searchWord, watchWord, mentionsOf,
   ACCOUNT_TABS, ACCOUNT_SORTS, CANDLE_RANGES, isAccountKey, tabsOf, priceOf, sourceWordOf, legsOf, rowsOf, tableOf, sortsOf, matchKey, pairsOf,
-  pageOf, faceAssetOf, handWordsOf, watchedOf,
+  pageOf, faceAssetOf, handWordsOf, watchedOf, watchKeysOf, setWatchOf,
 } from '../../client/js/host/market-view.js';
 
 const CJK = /[㐀-鿿]/;
@@ -211,14 +211,14 @@ test('rowsOf: the fixture rows and two cn rows side by side; source words; the t
   assert.deepEqual(rows.find(r => r.id === 'perp:BTC'), {
     id: 'perp:BTC', source: 'account', kind: 'perp', name: 'BTC perpetual', tile: 'BTC', sub: 'BTC · Perpetual',
     priced: { price: 62498.8, unit: 'usd', changePct: 2.3, change24h: 1404.9, volume: 4121786065, volumeUnit: 'usd', implied: null }, price: 62498.8,
-    live: null, sourceWord: 'Stand-in Exchange', closeTime: null, pastEnd: false, paper: false, watched: false,
+    live: null, sourceWord: 'Stand-in Exchange', closeTime: null, pastEnd: false, paper: false, watched: false, atAccount: false,
     legs: [{ venue: 'ex', venueName: 'Stand-in Exchange', symbol: 'BTC/USDT:USDT', connected: true, paper: false, canTrade: true, public: false, connectTo: '', connector: '', price: 62498.8, bid: 62495.6, ask: 62501.9, best: true }],
     tabs: ['all', 'perps'],
   });
   assert.deepEqual(rows.find(r => r.id === 'cn:600519'), {
     id: 'cn:600519', source: 'face', asset: asset('cn:600519', { name: '贵州茅台', exchange: 'SSE' }), quote: moutai, kind: 'stock', name: '贵州茅台', tile: '600519', sub: 'SSE',
     priced: { price: 1450, unit: 'cny', changePct: -3, change24h: null, volume: 900000000, volumeUnit: 'shares', implied: null }, price: 1450,
-    live: null, sourceWord: 'iFinD', closeTime: null, pastEnd: false, paper: false, watched: true, legs: [], tabs: ['all', 'stocks'],
+    live: null, sourceWord: 'iFinD', closeTime: null, pastEnd: false, paper: false, watched: true, atAccount: false, legs: [], tabs: ['all', 'stocks'],
   });
   const byId = Object.fromEntries(rows.map(r => [r.id, r]));
   // the latest quote at the row's most traded connected venue rides beside the item's price; the star is the operator's
@@ -333,7 +333,7 @@ test('unpriced, past-end and contract-volume rows: dashes, Closed, contracts', (
   // an old star the Account could not find: once, Not listed at the Account, every figure null
   assert.deepEqual(byId['us:ZZZZ'], {
     id: 'us:ZZZZ', source: 'face', notListed: true, kind: 'stock', name: 'Zed Corp', tile: 'Zed Corp', sub: 'Not listed at the Account',
-    priced: UNPRICED, price: null, live: null, sourceWord: '', closeTime: null, pastEnd: false, paper: false, watched: true, legs: [], tabs: ['all', 'stocks'],
+    priced: UNPRICED, price: null, live: null, sourceWord: '', closeTime: null, pastEnd: false, paper: false, watched: true, atAccount: false, legs: [], tabs: ['all', 'stocks'],
   });
   assert.deepEqual([byId['crypto:QQQ/USD'].kind, byId['crypto:QQQ/USD'].name, byId['crypto:QQQ/USD'].tabs], ['coin', 'QQQ/USD', ['all', 'crypto']]);
   assert.deepEqual(rowsOf({ ...m, tab: 'stocks' }).map(r => r.id), ['us:ZZZZ']);
@@ -363,7 +363,7 @@ test('matchKey and pairsOf', () => {
   assert.deepEqual(after.map(r => [r.id, r.source]), [['stock:AAPL', 'account'], ['coin:SOL', 'account'], ['stock:TSLA', 'account'], ['us:ZZZZ', 'face']]);
   assert.deepEqual(after.find(r => r.id === 'stock:TSLA'), {
     id: 'stock:TSLA', source: 'account', placeholder: true, kind: 'stock', name: 'TSLA', tile: 'TSLA', sub: 'Not in this read',
-    priced: UNPRICED, price: null, live: null, sourceWord: '', closeTime: null, pastEnd: false, paper: false, watched: true, legs: [], tabs: ['all', 'watching'],
+    priced: UNPRICED, price: null, live: null, sourceWord: '', closeTime: null, pastEnd: false, paper: false, watched: true, atAccount: false, legs: [], tabs: ['all', 'watching'],
   });
   assert.equal(rowsOf(markets({ explore: { all: read(explore) }, watchlist: old, asked })).some(r => r.id.startsWith('us:AAPL') || r.id.startsWith('crypto:')), false, 'a star found at the Account draws as its row, never as its old id');
   // a star past the read's items: found among its movers, closing or most traded lists; found nowhere, a placeholder
@@ -525,7 +525,8 @@ test("pageOf: the price shown, the page's words, its history's state and the rea
   assert.deepEqual(btc.reads, { held: { answered: true, failed: false, message: null, unreadable: false }, orders: { answered: true, failed: false, message: null, unreadable: false }, lines: { answered: true, failed: false, message: null } });
   // starred as an old star found at the Account; not starred at all
   assert.equal(pageOf({ ...m, watch: [], watchlist: [asset('crypto:BTC/USD')], asked: { 'crypto:BTC/USD': 'coin:BTC' } }, accountSlice(), 'coin:BTC', NOW).watched, true);
-  assert.equal(pageOf({ ...m, watch: [] }, accountSlice(), 'coin:BTC', NOW).watched, false);
+  assert.equal(pageOf({ ...m, watch: [] }, accountSlice(), 'coin:BTC', NOW).watched, true, "the Account's own list watches it");
+  assert.equal(pageOf({ ...m, watch: [] }, accountSlice({ data: { ...fx('account'), watch: [] } }), 'coin:BTC', NOW).watched, false);
   // the candles kept are the range's own while it is read again; a stock's sub names its broker's symbol
   const nvda = pageOf({ ...m, candles: { 'stock:NVDA': { status: 'loading', data: fx('candles'), at: 1, range: '1D' } } }, accountSlice(), 'stock:NVDA', NOW);
   assert.deepEqual([nvda.history, nvda.sub, nvda.price], [{ status: 'loading', message: null, current: true }, ['Stock', 'NVDA'], 182.4]);
@@ -599,6 +600,84 @@ test('watchedOf: an Account key starred by the operator or found for an old star
   // the same as the page draws it
   const btc = markets({ explore: { all: read(fx('explore-all')) }, watch: ['coin:BTC'] });
   assert.equal(watchedOf(btc, 'coin:BTC'), pageOf(btc, accountSlice(), 'coin:BTC', NOW).watched);
+});
+
+// every row an explore answer carries: its items, then the lists beside them
+const everyRowOf = body => [...body.items, ...body.movers, ...body.closing, ...body.mostTraded];
+
+test("watchKeysOf: the page's own watch list as Account keys, through the lines the explore rows list; one no read lists left out", () => {
+  const page = fx('account');
+  const rows = everyRowOf(fx('explore-all'));
+  // ex BTC/USDT at its connected line; DOGE/USD at standin-pubex, the venue its public listing connects to; the Fed cut no read
+  // here lists
+  assert.deepEqual(watchKeysOf(page, rows), ['coin:BTC', 'coin:DOGE']);
+  const predictions = fx('explore-predictions');
+  assert.deepEqual(watchKeysOf(page, [...rows, ...predictions.items]), ['coin:BTC', 'event:predict:SI-FEDCUT-DEC', 'coin:DOGE']);
+  // an outcome's own line names its event; a line at a venue by its own id too
+  const at = '2026-10-22T07:35:46.839Z';
+  assert.deepEqual(watchKeysOf({ ...page, watch: [{ venue: 'predict', symbol: 'SI-FEDCUT-DEC:NO', at }] }, predictions.items), ['event:predict:SI-FEDCUT-DEC']);
+  assert.deepEqual(watchKeysOf({ ...page, watch: [{ venue: 'standin-pubex-public', symbol: 'DOGE/USD', at }] }, rows), ['coin:DOGE']);
+  // a symbol at a venue that does not list it, an entry not a market, a page not recognised, no rows: nothing
+  assert.deepEqual(watchKeysOf({ ...page, watch: [{ venue: 'broker', symbol: 'BTC/USDT', at }] }, rows), []);
+  assert.deepEqual(watchKeysOf({ ...page, watch: [null, 'ex', { venue: 'ex' }, { venue: 'ex', symbol: 42 }, { venue: '', symbol: 'BTC/USDT' }] }, rows), []);
+  assert.deepEqual(watchKeysOf({ ok: false, watch: page.watch }, rows), []);
+  for (const p of [null, undefined, {}]) assert.deepEqual(watchKeysOf(p, rows), [], String(p));
+  assert.deepEqual(watchKeysOf(page, null), []);
+});
+
+test("Watching is the Account's list and the face's together: watchedOf, the rows' watched, the tab, a market's page", () => {
+  const page = fx('account');
+  const explore = fx('explore-all');
+  const m = markets({ explore: { all: read(explore) }, watch: ['stock:AAPL', 'coin:BTC'], watchlist: [asset('cn:600519')] });
+  assert.equal(watchedOf(m, 'coin:DOGE'), false, "the face's list alone");
+  assert.equal(watchedOf(m, 'coin:DOGE', page), true, "the Account's list too");
+  assert.equal(watchedOf(m, 'coin:ETH', page), false);
+  assert.equal(watchedOf(m, 'cn:600519', page), true, 'a cn id: the face’s list');
+  // Watching: the face's stars, the page's beside them, the A shares; a row on the Account's list alone says so
+  const watching = rowsOf({ ...m, tab: 'watching' }, NOW, page);
+  assert.deepEqual(watching.map(r => [r.id, r.watched, r.atAccount === true]), [
+    ['stock:AAPL', true, false], ['coin:BTC', true, false], ['coin:DOGE', true, true], ['cn:600519', true, false],
+  ]);
+  assert.equal(watching.some(r => r.placeholder === true), false);
+  // All: the page's rows starred among the rest
+  const all = rowsOf(m, NOW, page);
+  assert.deepEqual(all.filter(r => r.watched).map(r => r.id).sort(), ['cn:600519', 'coin:BTC', 'coin:DOGE', 'stock:AAPL']);
+  assert.deepEqual(all.filter(r => r.atAccount === true).map(r => r.id), ['coin:DOGE']);
+  assert.equal(rowsOf(m, NOW).find(r => r.id === 'coin:DOGE').watched, false, 'no page: the face’s list as before');
+  // the Watching tab for the page's list alone
+  const bare = markets({ explore: { all: read(explore) } });
+  assert.equal(tableOf(bare, NOW).tabs.some(t => t.id === 'watching'), false);
+  assert.equal(tableOf(bare, NOW, page).tabs.at(-1).id, 'watching');
+  assert.deepEqual(rowsOf({ ...bare, tab: 'watching' }, NOW, page).map(r => r.id), ['coin:BTC', 'coin:DOGE']);
+  // a page-watched market only a kind's read lists is found there, never a placeholder (the rows by Most traded)
+  const both = markets({ explore: { all: read(explore), predictions: read(fx('explore-predictions')) }, tab: 'watching' });
+  assert.deepEqual(rowsOf(both, NOW, page).map(r => [r.id, r.placeholder === true]), [['coin:BTC', false], ['coin:DOGE', false], ['event:predict:SI-FEDCUT-DEC', false]]);
+  // a market's page reads it watched the same way
+  assert.equal(pageOf(bare, accountSlice(), 'coin:DOGE', NOW).watched, true);
+  assert.equal(pageOf(bare, accountSlice(), 'coin:ETH', NOW).watched, false);
+  assert.equal(watchedOf(bare, 'coin:DOGE', page), pageOf(bare, accountSlice(), 'coin:DOGE', NOW).watched);
+});
+
+test('setWatchOf: what a star signs — on, the followed line (a public listing by the venue it connects to); off, the page’s own entry', () => {
+  const page = fx('account');
+  const explore = fx('explore-all');
+  // a stock listed only at a public source that connects to nothing: no line to watch at
+  explore.items.push({
+    key: 'stock:QQQ', kind: 'stock', name: 'QQQ', base: 'QQQ', tabs: ['all', 'stocks'],
+    at: [{ venue: 'standin-stocks-public', venueName: 'Stand-in Stocks', symbol: 'QQQ', connected: false, public: true }],
+  });
+  const m = markets({ explore: { all: read(explore) } });
+  assert.deepEqual(setWatchOf(m, page, 'coin:BTC'), { on: { venue: 'ex', symbol: 'BTC/USDT' }, off: { venue: 'ex', symbol: 'BTC/USDT' } });
+  // watched at the public listing's venue, followed at its first connected line: off names the entry as the page keeps it
+  assert.deepEqual(setWatchOf(m, page, 'coin:DOGE'), { on: { venue: 'paper-momentum', symbol: 'DOGE/USD' }, off: { venue: 'standin-pubex', symbol: 'DOGE/USD' } });
+  assert.deepEqual(setWatchOf(m, page, 'coin:ETH'), { on: { venue: 'ex', symbol: 'ETH/USDT' }, off: null });
+  assert.deepEqual(setWatchOf(m, page, 'rwa:TSLA'), { on: { venue: 'standin-stock-tokens', symbol: 'TSLA' }, off: null });
+  assert.deepEqual(setWatchOf(m, page, 'stock:QQQ'), { on: null, off: null });
+  assert.deepEqual(setWatchOf(m, null, 'coin:BTC'), { on: { venue: 'ex', symbol: 'BTC/USDT' }, off: null });
+  for (const id of ['coin:GONE', 'cn:600519', '', null]) assert.deepEqual(setWatchOf(m, page, id), { on: null, off: null }, String(id));
+  // a refusal is kept as the Account's sentence, and said as it is
+  assert.equal(watchWord('ETH/USDT is not listed at Stand-in Exchange.'), 'ETH/USDT is not listed at Stand-in Exchange.');
+  for (const v of [42, {}, undefined]) assert.equal(watchWord(v), '');
 });
 
 test('no icon URL survives any view (an item given an https icon by hand)', () => {

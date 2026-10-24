@@ -57,8 +57,8 @@ test('pickerOf: Crypto — the coins held from the leading lens by matchKey, the
   assert.deepEqual(ids(p.held), ['coin:BTC', 'coin:ETH', 'coin:SOL']);
   assert.deepEqual(p.held[0], { id: 'coin:BTC', name: 'BTC', sub: '0.124 · Stand-in Exchange, Stand-in Wallet', priceWord: '$62,479.03', venue: 'ex' });
   assert.equal(p.held[0].side, undefined, 'a coin held opens as a buy');
-  // the starred of this kind: a star no read lists still drawn, to be picked or seen
-  assert.deepEqual(ids(p.watching), ['coin:BTC', 'coin:GONE']);
+  // the starred of this kind: a star no read lists still drawn, to be picked or seen; then the page's own (its DOGE)
+  assert.deepEqual(ids(p.watching), ['coin:BTC', 'coin:GONE', 'coin:DOGE']);
   assert.deepEqual(p.watching[1], { id: 'coin:GONE', name: 'GONE', sub: 'Not in this read', priceWord: '—' });
   // the picks read's items
   assert.deepEqual(ids(p.most), ['coin:BTC', 'coin:ETH', 'coin:DOGE', 'coin:SOL', 'coin:LINK']);
@@ -87,6 +87,15 @@ test('pickerOf: Stocks held by matchKey; a prediction held opens as a sell of it
   const s = stateWith({ kind: 'crypto' });
   const paperLeads = { ...s, account: { ...s.account, data: { ...s.account.data, totalUsd: 0 }, paper: read(fx('holdings-paper')) } };
   assert.deepEqual(pickerOf(paperLeads, NOW).held, [], 'the paper lens holds dollars and a stablecoin alone');
+});
+
+test("pickerOf: Watching is the face's stars and the page's own watch list together, once each, of the kind", () => {
+  // the page watches ex BTC/USDT, the Fed cut's YES at predict and DOGE/USD at standin-pubex
+  assert.deepEqual(ids(pickerOf(stateWith(), NOW).watching), ['coin:BTC', 'coin:DOGE']);
+  assert.deepEqual(ids(pickerOf(stateWith({ watch: ['coin:ETH', 'coin:BTC'] }), NOW).watching), ['coin:ETH', 'coin:BTC', 'coin:DOGE']);
+  assert.deepEqual(ids(pickerOf(stateWith({ kind: 'predictions' }), NOW).watching), ['event:predict:SI-FEDCUT-DEC'], 'found in the predictions picks');
+  assert.deepEqual(ids(pickerOf(stateWith({ kind: 'stocks' }), NOW).watching), []);
+  assert.deepEqual(ids(pickerOf(stateWith({ page: { ...fx('account'), watch: [] } }), NOW).watching), []);
 });
 
 test('pickerOf: a query\'s results of the kind, from the trade search\'s read; none while the query is blank', () => {

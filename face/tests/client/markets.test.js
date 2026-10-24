@@ -215,6 +215,32 @@ test('a cn row beside the Account rows under Stocks; Not listed line with Remove
   assert.doesNotMatch(gone, /openMarket/, 'no read lists it: no page');
 });
 
+test("Watching is the Account's list and the face's: a row watched at the Account alone reads Watched at the Account under its star", () => {
+  const AT = '<span class="mk-at">Watched at the Account</span>';
+  // the page watches ex BTC/USDT and DOGE/USD at standin-pubex; the face's list has AAPL and BTC
+  const watching = screen({ account: true, watch: ['stock:AAPL', 'coin:BTC'], cn: [MOUTAI], tab: 'watching' }).html;
+  assert.deepEqual(rowIds(watching), ['stock:AAPL', 'coin:BTC', 'coin:DOGE', 'cn:600519']);
+  const doge = cells(rowOf(watching, 'coin:DOGE'))[0];
+  assert.equal(doge, `<button type="button" class="mk-star" data-action="toggleWatch" data-id="coin:DOGE" aria-pressed="true" aria-label="Stop watching DOGE">${doge.match(/<svg[\s\S]*<\/svg>/)[0]}</button>${AT}`);
+  for (const id of ['stock:AAPL', 'coin:BTC', 'cn:600519']) assert.doesNotMatch(rowOf(watching, id), /Watched at the Account/, `${id}: on the face's list`);
+  // All: the page's rows starred, the tab drawn for the page's list alone
+  const all = screen({ account: true }).html;
+  assert.match(all, /data-value="watching" aria-pressed="false">Watching</);
+  assert.match(cells(rowOf(all, 'coin:BTC'))[0], /aria-pressed="true" aria-label="Stop watching BTC">[\s\S]*Watched at the Account/);
+  assert.match(cells(rowOf(all, 'coin:ETH'))[0], /aria-pressed="false"/);
+  assert.doesNotMatch(cells(rowOf(all, 'coin:ETH'))[0], /mk-at/);
+  // no page: no Watching tab, no star on
+  const none = screen().html;
+  assert.doesNotMatch(none, /data-value="watching"/);
+  assert.doesNotMatch(none, /mk-at|aria-pressed="true" aria-label="Stop watching/);
+  // a market's page reads it watched
+  const pageHtml = screen({ account: true, route: { screen: 'markets', id: 'coin:DOGE' } }).html;
+  assert.match(pageHtml, /data-action="toggleWatch" data-id="coin:DOGE" aria-pressed="true">[\s\S]*?Watching<\/button>/);
+  // a refusal at the Account is its own sentence under the table
+  const s = R.accountWatchLoaded(screen({ account: true }).s, { items: [], error: 'ETH/USDT is not listed at Stand-in Exchange.' });
+  assert.match(renderMarketsScreen(s, NOW), /<p class="mk-note">ETH\/USDT is not listed at Stand-in Exchange\.<\/p>/);
+});
+
 test('the page: no Buy, no Sell on a page that does not sign; the range seg; Across venues with best and Connect to trade; You hold and Open orders; On the statement', () => {
   const page = (id, over = {}) => screen({ route: { screen: 'markets', id }, account: true, ...over });
   const btc = page('coin:BTC', {

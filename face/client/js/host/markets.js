@@ -2,14 +2,16 @@
 // face's proxy into the store — explore for the tab on screen at once and every 20 s, the quotes of the rows in view (on a
 // market's page, its own market's) every 5 s (twelve a call), a market page's candles for its range and its base's compare
 // rows, and the page's market followed on the Account's stream; the stars in this browser's two stores (the Account's keys
-// under their own key, the A shares under the face's); each old us:/crypto: star asked of the Account once; and the face's own
+// under their own key, the A shares under the face's) and, on a page that signs, an Account market's star as the Account's own
+// signed setWatch (plan 2 Task 12); each old us:/crypto: star asked of the Account once; and the face's own
 // wire (spec 2026-10-19 §7 Stage 2) for the A shares alone — the live quotes of the cn list and a cn page, the cn search and its
 // hits' one quote read. The views over what lands are market-view.js's. Nothing here touches the DOM.
 import {
   readWatchlist, saveWatchlist, STORAGE_KEY, readAccountWatch, saveAccountWatch, ACCOUNT_WATCH_KEY, normalizeAsset,
 } from '../wire/market-model.js';
 import { parsePayload } from '../wire/market-quotes.js';
-import { ACCOUNT_TABS, canonicalId, isAccountKey, rowsOf, matchKey, pairsOf, pageOf, followOf } from './market-view.js';
+import { ACCOUNT_TABS, canonicalId, isAccountKey, rowsOf, matchKey, pairsOf, pageOf, followOf, watchedOf, setWatchOf } from './market-view.js';
+import { refusedAt, refusalOf } from './owner-view.js';
 
 export const EXPLORE_MS = 20_000, QUOTES_MS = 5_000, QUOTE_PAIRS = 12;
 export const WATCH_LIMIT = 100;   // either list's: the quote wire's own subscription limit, the Account keys' cap
@@ -38,7 +40,10 @@ function exploreOf(m) {
   return null;
 }
 
-export function startMarkets({ store, getJson, createLiveQuotes, createSymbolSearch, storage, win, stream, schedule, cancelTimer, now = Date.now }) {
+export function startMarkets({
+  store, getJson, createLiveQuotes, createSymbolSearch, storage, win, stream, schedule, cancelTimer, now = Date.now,
+  owner = null, afterAction = () => {},
+}) {
   let closed = false;
   let shown = false;
   let exploreTimer = null;
@@ -50,6 +55,7 @@ export function startMarkets({ store, getJson, createLiveQuotes, createSymbolSea
   let subscribed = null;     // the ids last handed to the live quotes, in order
   let hitSeq = 0;            // a hit read that answers after a newer search is dropped
   const kinds = new Map();   // a kind of read → { flight, path, seq }
+  const signing = new Set(); // the Account keys whose setWatch is in the air
 
   const quotes = createLiveQuotes(state => { if (!closed) store.dispatch('quotesUpdated', state); });
   const searcher = createSymbolSearch(state => {
@@ -102,7 +108,7 @@ export function startMarkets({ store, getJson, createLiveQuotes, createSymbolSea
   function readQuotes() {
     if (inAir('quotes')) return;
     const s = store.get();
-    const rows = rowsOf(s.markets, now());
+    const rows = rowsOf(s.markets, now(), s.account?.data);
     const drawn = pairsOf(rows.filter(r => inView === null || inView.has(r.id)), QUOTE_PAIRS);
     const pages = inView === null ? [] : [...inView]
       .filter(id => isAccountKey(id) && !rows.some(r => r.id === id))
@@ -216,6 +222,20 @@ export function startMarkets({ store, getJson, createLiveQuotes, createSymbolSea
     return error;
   }
 
+  // The Account's own watch list, while this page signs for it: one click, the Account's setWatch through the owner device —
+  // never in this browser's store — one in the air per market. Taken, the reads after an action are told (the page is read
+  // again, and the star follows it); refused, the Account's sentence is the watchlist's words and neither list changes.
+  const signs = () => owner !== null && store.get().owner?.role === 'signs';
+  async function setWatch(key, { venue, symbol }, on) {
+    if (signing.has(key)) return;
+    signing.add(key);
+    let r;
+    try { r = await owner.act({ type: 'setWatch', venue, symbol, on }); } catch { r = null; } finally { signing.delete(key); }
+    const refused = refusedAt(r);
+    if (!closed) store.dispatch('accountWatchLoaded', { items: store.get().markets.watch, error: refused ? refusalOf(r).message : null });
+    if (!refused) afterAction('setWatch', r.body);
+  }
+
   // Each old us:/crypto: star asked of the Account once, one at a time (explore?q=<its symbol, a coin's base>&limit=12): a row of
   // its kind whose base is that, in any case, is the star found — it moves to the Account's key (where the Account's list has
   // room and its write holds; else it stays on the cn list, starred as that key, for a reload to find); none is a star the
@@ -298,11 +318,19 @@ export function startMarkets({ store, getJson, createLiveQuotes, createSymbolSea
       }, ['resultsLoading']);
       searcher.search(q, 'cn');
     },
-    /** A star: an Account key to the Account's store, a cn id to the cn list; anything else is no one's to star. */
+    /** A star: an Account key, on a page that signs, to the Account's own list (setWatch at the line setWatchOf names; one
+     *  starred on either list already is starred) — else, or where no line names it, to this browser's Account store as before;
+     *  a cn id to the cn list; anything else is no one's to star. */
     watch(raw) {
       if (closed) return;
       if (isAccountKey(raw)) {
-        const keys = store.get().markets.watch;
+        const s = store.get();
+        if (signs()) {
+          if (watchedOf(s.markets, raw, s.account?.data)) return;
+          const { on } = setWatchOf(s.markets, s.account?.data, raw);
+          if (on) { void setWatch(raw, on, 'true'); return; }
+        }
+        const keys = s.markets.watch;
         if (keys.includes(raw)) return;
         if (keys.length >= WATCH_LIMIT) { store.dispatch('accountWatchLoaded', { items: keys, error: 'full' }); return; }
         saveKeys([...keys, raw]);
@@ -315,12 +343,16 @@ export function startMarkets({ store, getJson, createLiveQuotes, createSymbolSea
       if (m.watchlist.length >= WATCH_LIMIT) { store.dispatch('watchlistLoaded', { items: m.watchlist, error: 'full' }); return; }
       saveList([...m.watchlist, m.search.assets.find(a => a?.id === id) ?? normalizeAsset({ id })]);
     },
-    /** A star taken off: an Account key from the Account's store, with any old star still listed as it; a face id from the cn
+    /** A star taken off: an Account key off the Account's own list (setWatch off for the page's entry, on a page that signs)
+     *  and off this browser's Account store, with any old star still listed as it — each where it is; a face id from the cn
      *  list, an old us:/crypto: one forgotten as asked. */
     unwatch(raw) {
       if (closed) return;
-      const m = store.get().markets;
+      const s = store.get();
+      const m = s.markets;
       if (isAccountKey(raw)) {
+        const { off } = signs() ? setWatchOf(m, s.account?.data, raw) : { off: null };
+        if (off) void setWatch(raw, off, '');
         if (m.watch.includes(raw)) saveKeys(m.watch.filter(k => k !== raw));
         const old = new Set(m.watchlist.filter(a => Object.hasOwn(m.asked, a.id) && m.asked[a.id] === raw).map(a => a.id));
         if (old.size) {

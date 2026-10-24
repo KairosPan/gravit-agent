@@ -99,8 +99,11 @@ export function searchWord(search) {
   return search.partial ? 'Some results may be missing' : '';
 }
 
+/** The watchlist's words: this browser's store's (`read`, `unsaved`, `full`), else the Account's own sentence when it refused
+ *  a setWatch (host/markets.js keeps it as the error); nothing else. */
 export function watchWord(error) {
-  return WATCH[error] ?? '';
+  if (typeof error !== 'string') return '';
+  return Object.hasOwn(WATCH, error) ? WATCH[error] : error.trim();
 }
 
 const escapeRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -277,11 +280,50 @@ function starredOf(m) {
   return [...new Set([...(Array.isArray(m.watch) ? m.watch : []), ...old.map(a => own(m.asked, a.id))].filter(k => typeof k === 'string' && k !== ''))];
 }
 
-/** Whether a market is starred, as its star is drawn — what a press on it takes off or puts on: an Account key the operator's
- *  own or an old us:/crypto: star's find while that star is listed; a face id, canonicalised, on the cn list. */
-export function watchedOf(markets, id) {
+// ── the Account's own watch list (`page.watch`, `{ venue, symbol, at }`, set by the signed setWatch): the face's stars beside it ──
+
+// every row the slice's reads carry — each explore read's (All's, each kind's) and the search's, every list in each — to find a
+// market the page watches by its lines
+const exploreRowsOf = m => [...Object.values(isRecord(m.explore) ? m.explore : {}).map(r => own(r, 'data')), m.results?.data].flatMap(everyRow);
+// the page's watch entries that name a market: a venue and a symbol, as the page keeps them
+const watchEntries = page => (pageOk(page) ? records(page.watch).filter(named).map(w => ({ venue: w.venue, symbol: w.symbol })) : []);
+// an entry is one of a row's markets, as the Account's page reads it: a line of the row's own or of an outcome's at the entry's
+// symbol, at the entry's venue by its own id or — a public listing — by the venue it connects to
+function watches(item, w) {
+  const legs = legsOf(item);
+  const venueOf = v => { const l = legs.find(x => x.venue === v); return l?.public && l.connectTo ? l.connectTo : v; };
+  return [...legs, ...records(item.outcomes).flatMap(o => records(o.at))].filter(named)
+    .some(l => l.symbol === w.symbol && (l.venue === w.venue || venueOf(l.venue) === w.venue));
+}
+
+/** The page's own watch list as Account keys: each entry (`{ venue, symbol }`) as the key of every row of `rows` (explore items)
+ *  whose lines name it (legsOf's, an outcome's), in the page's order, once each; an entry no row lists is left out, and a page
+ *  the face does not recognise watches nothing. */
+export function watchKeysOf(page, rows) {
+  const items = records(rows).filter(i => isAccountKey(i.key));
+  const keys = watchEntries(page).flatMap(w => items.filter(i => watches(i, w)).map(i => i.key));
+  return [...new Set(keys)];
+}
+
+/** What a star on an Account key signs at the Account (setWatch), the market found in any read of the slice: `on`, the line it
+ *  would watch — the line the page follows (followOf) when that is connected, else a public listing by the venue it connects
+ *  to (none connecting: null); `off`, the page's own entry for the market as it keeps it, or null. Each `{ venue, symbol }`. */
+export function setWatchOf(markets, page, id) {
   const m = isRecord(markets) ? markets : {};
-  if (isAccountKey(id)) return starredOf(m).includes(id);
+  const item = isAccountKey(id) ? exploreRowsOf(m).find(i => i.key === id) : undefined;
+  if (!item) return { on: null, off: null };
+  const leg = followOf(item);
+  const pub = legsOf(item).find(l => l.public && l.connectTo && l.symbol);
+  const on = leg?.connected ? { venue: leg.venue, symbol: leg.symbol } : pub ? { venue: pub.connectTo, symbol: pub.symbol } : null;
+  return { on, off: watchEntries(page).find(w => watches(item, w)) ?? null };
+}
+
+/** Whether a market is starred, as its star is drawn — what a press on it takes off or puts on: an Account key the operator's
+ *  own, an old us:/crypto: star's find while that star is listed, or one the page (`page`, the Account's) watches at any line
+ *  a read lists; a face id, canonicalised, on the cn list. */
+export function watchedOf(markets, id, page = null) {
+  const m = isRecord(markets) ? markets : {};
+  if (isAccountKey(id)) return starredOf(m).includes(id) || watchKeysOf(page, exploreRowsOf(m)).includes(id);
   const canonical = canonicalId(id);
   return canonical !== null && records(m.watchlist).some(a => a.id === canonical);
 }
@@ -302,7 +344,8 @@ function subOf(item, legs) {
 // where a row's price is from: the live quote's own source and stamp where it names one, else the item's
 const wordOf = (item, live, now) => { const from = str(live?.quoteFrom).trim(); return from ? said(from, live.quoteAt, now) : sourceWordOf(item, now); };
 
-function accountRow(item, quotes, watched, now) {
+// `atAccount`: starred on the Account's own list alone, never the face's
+function accountRow(item, quotes, watched, now, atAccount = false) {
   const legs = legsOf(item);
   const pair = pairOf(legs);
   const quote = pair ? own(quotes, pair) : undefined;
@@ -311,7 +354,7 @@ function accountRow(item, quotes, watched, now) {
   return {
     id: str(item.key), source: 'account', kind: str(item.kind), name: str(item.name), tile: tileOf(item), sub: subOf(item, legs),
     priced, price: shownPrice(live, priced), live, sourceWord: wordOf(item, live, now),
-    closeTime: str(item.closeTime) || null, pastEnd: item.pastEnd === true, paper: legs.find(l => l.connected)?.paper === true, watched, legs,
+    closeTime: str(item.closeTime) || null, pastEnd: item.pastEnd === true, paper: legs.find(l => l.connected)?.paper === true, watched, atAccount, legs,
     tabs: Array.isArray(item.tabs) ? item.tabs.filter(t => typeof t === 'string') : [],
   };
 }
@@ -323,7 +366,7 @@ function placeholderRow(key) {
   return {
     id: key, source: 'account', placeholder: true, kind: head > 0 ? key.slice(0, head) : '', name, tile: name,
     sub: 'Not in this read', priced: unpriced(), price: null, live: null, sourceWord: '', closeTime: null, pastEnd: false, paper: false,
-    watched: true, legs: [], tabs: ['all', 'watching'],
+    watched: true, atAccount: false, legs: [], tabs: ['all', 'watching'],
   };
 }
 
@@ -338,7 +381,7 @@ function cnRow(asset, markets, watched) {
   return {
     id: asset.id, source: 'face', asset, quote, kind: 'stock', name: asset.name || asset.symbol, tile: asset.symbol, sub: asset.exchange || '',
     priced, price: priced.price, live: null, sourceWord: sourceWord(quote ?? { market: 'cn' }), closeTime: null, pastEnd: false, paper: false,
-    watched, legs: [], tabs: ['all', 'stocks'],
+    watched, atAccount: false, legs: [], tabs: ['all', 'stocks'],
   };
 }
 
@@ -349,7 +392,7 @@ function notListedRow(asset) {
   return {
     id: asset.id, source: 'face', notListed: true, kind: coin ? 'coin' : 'stock', name, tile: name,
     sub: 'Not listed at the Account', priced: unpriced(), price: null, live: null, sourceWord: '', closeTime: null, pastEnd: false,
-    paper: false, watched: true, legs: [], tabs: ['all', coin ? 'crypto' : 'stocks'],
+    paper: false, watched: true, atAccount: false, legs: [], tabs: ['all', coin ? 'crypto' : 'stocks'],
   };
 }
 
@@ -393,17 +436,21 @@ export function sortsOf(rows, kept) {
  *  one it found stars the Account's row, one it could not find is listed once, Not listed at the Account. All is every row, a
  *  kind's tab the rows whose tabs name it, All results (`results`) the search's own. Watching is every star, found in any list
  *  of its tab's read or All's (items, movers, closing, most traded), else a placeholder that can still be un-starred; a query
- *  typed on Watching searches every market, as the Account's page does. */
-export function tableOf(markets, now = Date.now()) {
+ *  typed on Watching searches every market, as the Account's page does. The stars are the face's and the page's (`page`, the
+ *  Account's own watch list: watchKeysOf over every read), one list: a row starred on the page's alone is `atAccount`; on
+ *  Watching the page's follow the face's, each found in whichever read lists it. */
+export function tableOf(markets, now = Date.now(), page = null) {
   const m = isRecord(markets) ? markets : {};
   const searching = !blank(m.q);
   const reads = isRecord(m.explore) ? m.explore : {};
-  const rows = unsortedRowsOf(m, searching, reads, now);
+  const atPage = watchKeysOf(page, exploreRowsOf(m));
+  const rows = unsortedRowsOf(m, searching, reads, now, atPage);
   const { sorts, sort } = sortsOf(rows, m.sort);
   const watchlist = records(m.watchlist).map(a => normalizeAsset(a)).filter(Boolean);
   const all = bodyOf(reads, 'all');
   const counted = all !== undefined && all !== null;
-  const tabs = tabsOf(all, watchlist.filter(a => a.market === 'cn').length, { watching: starredOf(m).length > 0 || watchlist.length > 0, searching })
+  const watching = starredOf(m).length > 0 || watchlist.length > 0 || atPage.length > 0;
+  const tabs = tabsOf(all, watchlist.filter(a => a.market === 'cn').length, { watching, searching })
     .map(t => (counted ? t : { ...t, count: null }));
   const mine = own(reads, KIND_TABS.has(m.tab) ? m.tab : 'all');
   const source = searching ? m.results : mine?.data ? mine : own(reads, 'all');
@@ -411,12 +458,12 @@ export function tableOf(markets, now = Date.now()) {
   return { rows: sorted(rows, sort), sorts, sort, tabs, read };
 }
 
-/** The table's rows (tableOf's), sorted by the sort in effect. */
-export function rowsOf(markets, now = Date.now()) {
-  return tableOf(markets, now).rows;
+/** The table's rows (tableOf's, `page` the Account's), sorted by the sort in effect. */
+export function rowsOf(markets, now = Date.now(), page = null) {
+  return tableOf(markets, now, page).rows;
 }
 
-function unsortedRowsOf(m, searching, reads, now) {
+function unsortedRowsOf(m, searching, reads, now, atPage) {
   const tab = searching && m.tab === 'watching' ? 'results' : m.tab;
   const all = bodyOf(reads, 'all');
   const watchlist = records(m.watchlist).map(a => normalizeAsset(a)).filter(Boolean);
@@ -424,8 +471,10 @@ function unsortedRowsOf(m, searching, reads, now) {
   const old = watchlist.filter(a => a.market !== 'cn');
   const starred = starredOf(m);
   const isStarred = new Set(starred);
+  const pageOnly = atPage.filter(key => !isStarred.has(key));
+  const atAccount = new Set(pageOnly);
   const quotes = isRecord(m.accountQuotes) ? m.accountQuotes : {};
-  const row = item => accountRow(item, quotes, isStarred.has(str(item.key)), now);
+  const row = item => { const key = str(item.key); return accountRow(item, quotes, isStarred.has(key) || atAccount.has(key), now, atAccount.has(key)); };
   const face = () => [...cn.map(a => cnRow(a, m, true)), ...old.filter(a => own(m.asked, a.id) === null).map(notListedRow)];
   const fromResults = searching && readable(m.results?.data);
   const listed = new Set(cn.map(a => a.id));
@@ -433,7 +482,12 @@ function unsortedRowsOf(m, searching, reads, now) {
   let rows;
   if (tab === 'watching') {
     const lists = [...everyRow(bodyOf(reads, 'watching')), ...everyRow(all)];
-    rows = [...starred.map(key => { const item = lists.find(i => i.key === key); return item ? row(item) : placeholderRow(key); }), ...face()];
+    const everywhere = exploreRowsOf(m);
+    rows = [
+      ...starred.map(key => { const item = lists.find(i => i.key === key); return item ? row(item) : placeholderRow(key); }),
+      ...pageOnly.map(key => row(everywhere.find(i => i.key === key))),
+      ...face(),
+    ];
   } else if (tab === 'results') {
     rows = searching ? [...(fromResults ? itemsOf(m.results.data).map(row) : []), ...hits] : [];
   } else {
@@ -524,7 +578,7 @@ export function pageOf(markets, account, id, now = Date.now()) {
   return {
     item, priced, price: shownPrice(live, priced), live, sourceWord: wordOf(item, live, now),
     legs: legs.map(l => ({ ...l, price: inUnit(l.price, priced.unit), bid: inUnit(l.bid, priced.unit), ask: inUnit(l.ask, priced.unit) })),
-    name, tile: tileOf(item), preipo, watched: starredOf(m).includes(id), about: base ? { symbol: base, name } : { name },
+    name, tile: tileOf(item), preipo, watched: watchedOf(m, id, a.data), about: base ? { symbol: base, name } : { name },
     sub: (event ? [str(item.category)] : [preipo ? 'Pre-IPO' : own(KIND_WORDS, item.kind) ?? '', str(follow?.symbol)]).filter(Boolean),
     closesAt,
     outcomes: event ? records(item.outcomes).map(o => ({ label: outcomeWord(o.label), cents: cents(o.price) })) : [],
