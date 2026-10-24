@@ -2,8 +2,8 @@
 // the face's proxy, in four tabs — Portfolio (the two figures, the change for the range and its curve, Assets, Positions,
 // Open orders), Venues (each venue with its health and what it does, its Details drawer; the A-share quotes line; the seat
 // box), Agents (Gravit's seat first, then the Account's agents and the keys knocking), Cards (what waits for the owner, and
-// the agents' asks) — the Statement drawer, the Settings drawer. Read only: the owner's keys are stage 2. Every figure and
-// word is a view's (host/account-view.js); this module draws them.
+// the agents' asks) — the Statement drawer, the Settings drawer with Devices; the owner device's line under
+// the head (render/owner.js). Every figure and word is a view's (host/account-view.js); this module draws them.
 import { esc, attrs, cls } from '../html.js';
 import { fmtClock, fmtDate, sameDay } from '../time.js';
 import { money, signedMoney, sign } from '../wire/account-model.js';
@@ -16,6 +16,7 @@ import { providerWord } from '../host/market-view.js';
 import { chip } from './thread.js';
 import { seg, segLinks, sec } from './controls.js';
 import { curveSvg } from './chart.js';
+import { renderDeviceLine, renderDevices } from './owner.js';
 
 const TABS = [['portfolio', 'Portfolio'], ['venues', 'Venues'], ['agents', 'Agents'], ['cards', 'Cards']];
 // the curve's ranges, the Account's own names and their words
@@ -54,7 +55,8 @@ function pageNote(a) {
 function head(state) {
   const h = headOf(state.account.data);
   return `<div class="acct-head"><h1 class="head-title">Account</h1>${h.mode ? chip(h.mode) : ''}${h.writes ? chip(h.writes) : ''}<span class="spacer"></span>` +
-    `<button type="button" class="pill" data-action="refreshAccount">Refresh</button><button type="button" class="pill" data-action="openSettings">Settings</button></div>`;
+    `<button type="button" class="pill" data-action="refreshAccount">Refresh</button><button type="button" class="pill" data-action="openSettings">Settings</button></div>` +
+    renderDeviceLine(state);
 }
 
 // the tabs, the Cards tab counting what waits
@@ -246,7 +248,7 @@ export function renderStatement(state, now) {
 export function renderSettings(state) {
   const theme = { cream: 'Cream', black: 'Black' }[state.theme] ?? 'System';
   return `<aside class="drawer" aria-label="Settings"><div class="drawer-head"><h2>Settings</h2><button type="button" class="close-key" data-action="closeSettings" aria-label="Close">×</button></div><div class="drawer-body">` +
-    `<div class="dsec"><div class="dsec-label">Theme</div>${seg(['Cream', 'Black', 'System'], theme, 'setTheme')}</div></div></aside>`;
+    `<div class="dsec"><div class="dsec-label">Theme</div>${seg(['Cream', 'Black', 'System'], theme, 'setTheme')}</div>${renderDevices(state)}</div></aside>`;
 }
 
 // the screen: the head, the Account's sentence when it refused, the tabs, the tab, and its drawer; app.js adds the Settings

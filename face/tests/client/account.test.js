@@ -409,6 +409,26 @@ test('no CJK, no icon URL, no raw JSON in any rendered string', () => {
   }
 });
 
+test('the owner device on the screen: the device line under the head chips, Devices in Settings', () => {
+  const KID = 'a5048199a8081854';
+  const HEAD_END = '<button type="button" class="pill" data-action="openSettings">Settings</button></div>';
+  // the line sits right under the head, before the tabs; a standing not known yet draws nothing there
+  const signs = draw(R.ownerStanding(state(), { role: 'signs', kid: KID }));
+  has(signs, `${HEAD_END}<p class="acct-note">This page signs for the account</p><div class="seg">`);
+  has(draw(state()), `${HEAD_END}<div class="seg">`);
+  const pair = draw(R.ownerStanding(state(), { role: 'needs-code', kid: '' }));
+  has(pair, `${HEAD_END}<p class="acct-note">Pair with the code the Account printed in its terminal</p><div class="pair-box"><input id="pair-code"`);
+  has(draw(R.ownerStanding(state(), { role: 'signed-out', kid: KID })), 'data-action="signIn">Sign in</button>');
+  // Settings: the theme, then Devices — Sign out only for a page that signs
+  const set = renderSettings(R.ownerStanding(R.openSettings(state()), { role: 'signs', kid: KID }));
+  has(set, 'data-value="System">System</button></div></div><div class="dsec"><div class="dsec-label">Devices</div>');
+  has(set, `<div class="dsec-line">Stand-in seed key · device:${KID} · this page</div>`);
+  has(set, 'data-action="signOut">Sign out</button>');
+  lacks(renderSettings(R.ownerStanding(R.openSettings(state()), { role: 'pending', kid: '0123456789abcdef' })), 'data-action="signOut"');
+  // no page read: the theme alone
+  lacks(renderSettings(R.openSettings(R.nav(emptyState(), { screen: 'account', tab: 'portfolio' }))), 'Devices');
+});
+
 test('router: account tabs agents and cards parse; an unknown tab is portfolio', () => {
   for (const tab of ['portfolio', 'venues', 'agents', 'cards']) {
     assert.deepEqual(parseHash(`#/account/${tab}`), { screen: 'account', tab });

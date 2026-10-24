@@ -394,6 +394,14 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 /* a card's What it asks: every field the owner signs, folded under the card */
 .acct-shown { margin-top: 6px; }
 .acct-shown > summary { color: var(--dim); cursor: pointer; font-size: 13px; font-weight: 600; }
+/* the owner sheet, a drawer: the quote box, the signature's minutes, a pick's boxes, its keys at the end; What you sign dimmed
+   while the form is not the draft the shown preparation was asked for. The pair box under the Account head */
+.acct-shown.stale { opacity: 0.5; }
+.drawer.sheet .drawer-body > .btn-row { justify-content: flex-end; }
+.sheet-quote { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-s); font-size: 14px; }
+.sheet-left { margin: 0; color: var(--dim); font-size: 13px; font-variant-numeric: tabular-nums; }
+.sheet-check { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.pair-box { display: flex; align-items: center; gap: 8px; max-width: 360px; }
 .venues { display: flex; flex-direction: column; gap: 10px; }
 .venue { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-s); }
 /* the face's own words where the numbers would be: keyless, unavailable, loading, stale, no orders */
