@@ -343,6 +343,16 @@ test('on a page that signs, a market\'s page carries Buy, and Sell where the mar
   // a prediction held as a position
   const fed = keys(page('event:predict:SI-FEDCUT-DEC', { predictions: fx('explore-predictions'), tab: 'predictions' }));
   assert.ok(fed.includes(buy('event:predict:SI-FEDCUT-DEC')) && fed.includes(sell('event:predict:SI-FEDCUT-DEC')), fed);
+  // a perpetual, and a pre-IPO one, are listed, not traded from the face this round: no ticket, though spot ETH is held
+  const perp = keys(page('perp:ETH'));
+  assert.ok(perp.includes('data-action="handToGravit" data-id="perp:ETH"'), perp);
+  assert.doesNotMatch(perp, /data-action="openTicket"/);
+  const all = fx('explore-all');
+  all.items.push({ key: 'preipo:SPACEX', kind: 'perp', name: 'SpaceX', price: 200, tabs: ['all', 'perps', 'preipo'], implied: { valuationUsd: 400e9 },
+    at: [{ venue: 'ex', venueName: 'Stand-in Exchange', symbol: 'SPACEX/USDT:USDT', connected: true, canTrade: true, public: false, price: 200, open: true }] });
+  const preipo = page('preipo:SPACEX', { all });
+  assert.match(preipo, /data-action="handToGravit" data-id="preipo:SPACEX"/);
+  assert.doesNotMatch(preipo, /data-action="openTicket"/);
   // a page that does not sign, or does not know yet: neither
   for (const role of [null, 'pending', 'needs-code', 'signed-out', 'none', 'unknown']) {
     assert.doesNotMatch(page('coin:BTC', { role }), /data-action="openTicket"/, String(role));

@@ -115,8 +115,9 @@ const selectBox = (id, name, label, options, value) => `<label class="field"><sp
   `${options.map(([v, l]) => `<option${attrs({ value: v, selected: v === value })}>${esc(l)}</option>`).join('')}</select></label>`;
 
 // the quote box: what is missing, asking, or the Account's quote of the shown preparation — its words, about what it costs, up
-// to what if the price moves, its fee (none given: the venue charges it as it does); a refusal is the muted line, not here
-function quoteBox(s, venueName) {
+// to what if the price moves, its fee (none given: the venue charges it as it does), dimmed with What you sign while the form is
+// not the draft it was asked for; a refusal is the muted line, not here
+function quoteBox(s, venueName, stale) {
   let inner = '';
   if (!s || s.status === 'incomplete') inner = path(str(s?.words) || 'Fill it in to see what it would be.');
   else if (s.status === 'asking') inner = path('Asking…');
@@ -128,7 +129,7 @@ function quoteBox(s, venueName) {
         path(q.feeUsd === null ? `fee as ${venueName || 'the venue'} charges it` : `fee ${money(q.feeUsd)}`);
     } else if (str(s.prepared.quote?.words)) inner = path(s.prepared.quote.words);
   }
-  return inner ? `<div class="tk-quote">${inner}</div>` : '';
+  return inner ? `<div class="${cls('tk-quote', stale && 'stale')}">${inner}</div>` : '';
 }
 
 // Where: the able lines as keys, the one the form is at pressed, the best and the paper marked; the other lines dim, a public
@@ -192,16 +193,18 @@ function ticketPanel(state, now) {
   // the go key on only while the sheet is ready and the form's draft is the one the shown preparation was asked for
   const current = Boolean(s) && s.asked !== null && askedOf(s) === s.asked;
   const live = s?.status === 'ready' && current;
+  // the shown preparation is not the form's: its quote and What you sign dimmed until the new one lands
+  const stale = s?.status === 'ready' && !current;
   const left = s && s.deadline !== null && (s.status === 'ready' || s.status === 'signing') ? goodForWords(s.deadline - now) : '';
   const lines = s?.prepared ? whatYouSignLines(s.prepared) : [];
   const signs = lines.length
-    ? `<details${attrs({ id: 'tk-signs', class: cls('acct-shown', s.status === 'ready' && !current && 'stale') })}><summary data-action="toggleSigns">What you sign</summary>${lines.map(l => `<div class="dsec-line">${esc(l)}</div>`).join('')}</details>`
+    ? `<details${attrs({ id: 'tk-signs', class: cls('acct-shown', stale && 'stale') })}><summary data-action="toggleSigns">What you sign</summary>${lines.map(l => `<div class="dsec-line">${esc(l)}</div>`).join('')}</details>`
     : '';
   const said = s?.status === 'refused' ? s.message : s?.status === 'done' ? str(s.said) : s?.status === 'signing' ? 'Placing it…' : '';
   const again = s?.status === 'refused' && s.again ? '<div class="btn-row"><button type="button" class="btn-sm" data-action="sheetAgain">Prepare again</button></div>' : '';
   const go = `<button${attrs({ type: 'submit', class: 'btn-primary tk-go', disabled: !live })}>${esc(goWord('order'))}</button>`;
   return `${head}<form class="tk-form" data-action="placeOrder" novalidate autocomplete="off">${pickedHtml}${outs}${whereHtml(t, venue)}` +
-    `<div class="tk-stack">${sideHtml}${amount}${order}${extended}${quoteBox(s, leg?.venueName || leg?.venue)}${left ? `<p class="tk-left">${esc(left)}</p>` : ''}${signs}` +
+    `<div class="tk-stack">${sideHtml}${amount}${order}${extended}${quoteBox(s, leg?.venueName || leg?.venue, stale)}${left ? `<p class="tk-left">${esc(left)}</p>` : ''}${signs}` +
     `${said ? `<p class="tk-msg" role="status">${esc(said)}</p>` : ''}${again}${go}</div>${hand}</form>`;
 }
 

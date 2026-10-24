@@ -557,6 +557,7 @@ button.tk-at:hover { border-color: var(--dim); }
 .tk-row2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
 .input.tk-input { height: 46px; background: var(--bg); font-size: 16px; font-weight: 600; }
 .tk-quote { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border: 1px solid var(--warn); border-radius: var(--radius-s); background: var(--surface); font-size: 13px; }
+.tk-quote.stale { opacity: 0.5; }
 .tk-big { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .tk-path { color: var(--dim); font-size: 12px; line-height: 1.4; }
 .tk-left { margin: 0; color: var(--dim); font-size: 12px; font-variant-numeric: tabular-nums; }

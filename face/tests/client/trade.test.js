@@ -89,6 +89,11 @@ test('the screen with no ticket: the head with the Account\'s writes chip, the k
   const p = panel(html);
   assert.match(p, /<span class="mk-tag tk-ktag">Crypto<\/span><h2 class="tk-title">Pick a market<\/h2>/);
   assert.doesNotMatch(p, /<form|Sign and place|data-action="closeTicket"/);
+  // a ticket on a perpetual (a route or a stale link) opens nothing: Pick a market
+  const perp = { ...s, trade: { ...s.trade, ticket: { id: 'perp:ETH', side: 'buy', venue: 'ex', outcome: 0 } } };
+  const pp = panel(draw(perp));
+  assert.match(pp, /<h2 class="tk-title">Pick a market<\/h2>/);
+  assert.doesNotMatch(pp, /<form|Sign and place/);
 });
 
 test('a query: the trade search\'s results of the kind; Searching… on its way; its refusal said; nothing found said', () => {
@@ -169,11 +174,22 @@ test('ready: the quote from the preparation, What you sign closed with its 18 li
   assert.equal(lines[0], 'venue: ex');
   assert.equal(lines[15], 'maxNotional: 24.80');
   assert.match(goKey(p), /^<button type="submit" class="btn-primary tk-go">Sign and place<\/button>$/);
-  // the form changed under the shown preparation: the go key off, What you sign dimmed until the new one lands
+  assert.match(p, /<div class="tk-quote">/, 'the quote is the form\'s: not dimmed');
+  // the form changed under the shown preparation: the go key off, the quote and What you sign dimmed until the new one lands
   const changed = R.sheetField(s, { name: 'amount', value: '30' });
   const q = panel(draw(changed));
   assert.match(goKey(q), /disabled/);
   assert.match(q, /<details id="tk-signs" class="acct-shown stale">/);
+  assert.match(q, /<div class="tk-quote stale"><div class="tk-big"><span>buy 0\.0099 ETH/);
+  // a preparation that landed with no draft asked for it is never signed: the go key off, even on a complete form
+  const unasked = panel(draw(R.sheetPrepared(stateWith({ ticket: ETH, fields: { amount: '25' } }), { prepared, at: NOW, asked: null, deadline: NOW + 125_000 })));
+  assert.match(goKey(unasked), /disabled/);
+  // and on a form still incomplete, whose own draft is null too: null is never taken for the draft asked
+  const incomplete = stateWith({ ticket: ETH });
+  assert.equal(askedOf(incomplete.sheet), null);
+  const nullNull = R.sheetPrepared(incomplete, { prepared, at: NOW, asked: null, deadline: NOW + 125_000 });
+  assert.equal(nullNull.sheet.status, 'ready');
+  assert.match(goKey(panel(draw(nullNull))), /disabled/);
   // signing: the go key off, the minutes still counting
   assert.match(goKey(panel(draw(R.sheetSigning(s)))), /disabled/);
   // a fee the order's quote gives is drawn, zero included; a paper order is marked

@@ -30,6 +30,10 @@ const KEY_KINDS = { coin: 'crypto', stock: 'stocks', rwa: 'rwas', event: 'predic
 const kindOfKey = key => { const head = str(key).split(':')[0]; return Object.hasOwn(KEY_KINDS, head) ? KEY_KINDS[head] : null; };
 // a market's Trade kind: its own tabs, else its key's
 const kindOfItem = item => (Array.isArray(item.tabs) ? item.tabs.find(t => KIND_IDS.has(t)) ?? null : kindOfKey(item.key));
+
+/** Whether the face's ticket trades a market: its kind is one of TRADE_KINDS, by its tabs, else its key's prefix. Perpetuals and
+ *  pre-IPO perpetuals are listed, not traded from the face this round (spec 2026-10-22 §2); anything not a market is not. */
+export const tradeableOf = item => isRecord(item) && kindOfItem(item) !== null;
 // what the quantity is counted in, as the Account's ticket says it: a stock's shares, an event's contracts, else the base
 const unitWordOf = item => (item.kind === 'stock' ? 'Shares' : item.kind === 'event' ? 'Contracts' : str(item.base) || str(item.name));
 // an outcome as a person says it (market-view's words): YES → Yes, UP → Up
@@ -146,7 +150,8 @@ export function pickerOf(state, now) {
 const TICKET_TAB = 'trade';
 const SIDES = new Set(['buy', 'sell']);
 
-/** The ticket open (`trade.ticket`) on its market's page, or null while none is open or no read lists it: `{ id, item, page,
+/** The ticket open (`trade.ticket`) on its market's page, or null while none is open, no read lists it, or it is not
+ *  tradeableOf (a perpetual, a pre-IPO one): `{ id, item, page,
  *  legs, event, outcomes, unitWord, held, side, venue, outcome }`. `legs` are the page's lines, connected first, each `{ venue,
  *  venueName, symbol, price, bid, ask, best, paper, able, public, session }` in the market's unit — `able` a connected line
  *  whose venue trades at the Account (`trade.can === true`), `best` the able line that takes an order now (a key that trades,
@@ -159,7 +164,8 @@ export function ticketOf(state, now) {
   const m = isRecord(state.markets) ? state.markets : {};
   const merged = { ok: true, items: rowsIn(state) };
   const page = pageOf({ ...m, tab: TICKET_TAB, explore: { ...(isRecord(m.explore) ? m.explore : {}), [TICKET_TAB]: { data: merged } } }, state.account, open.id, now);
-  if (!page) return null;
+  // a market the face's ticket does not trade (a perpetual, a pre-IPO one) opens none, whatever route or link asked for it
+  if (!page || !tradeableOf(page.item)) return null;
   const item = page.item;
   const trading = tradingVenues(state);
   const lines = records(item.at);

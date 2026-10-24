@@ -19,6 +19,7 @@ import {
   CANDLE_RANGES, isAccountKey, tableOf, pageOf, faceAssetOf, mentionsOf, volumeWordOf,
   quoteWord, connectionWord, searchWord, watchWord, volumeWord, basisWord, sourceWord,
 } from '../host/market-view.js';
+import { tradeableOf } from '../host/trade-view.js';
 
 const EM = '—';
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -228,8 +229,9 @@ function accountPage(id, view, state, now) {
     esc([l.status, l.by].filter(Boolean).join(' · ')), DONE.has(l.status) ? 'ok' : ''));
   right.push(section('On the statement', partBody(view.reads.lines, stated, 'Nothing on the statement about it yet.', 'Statement unavailable'),
     '<button type="button" class="link mk-link" data-action="openStatement">Open the Statement →</button>'));
-  // the hand order is the owner's: Buy and Sell only on a page that signs, Sell only where something of it is held
-  const trade = state.owner?.role === 'signs' ? { held: view.held.assets.length > 0 || view.held.positions.length > 0 } : null;
+  // the hand order is the owner's: Buy and Sell only on a page that signs, for a market of a Trade kind (a perpetual, a pre-IPO
+  // one, is listed, not traded from the face), Sell only where something of it is held
+  const trade = state.owner?.role === 'signs' && tradeableOf(view.item) ? { held: view.held.assets.length > 0 || view.held.positions.length > 0 } : null;
   return pageHtml(who, keysHtml(id, view.watched, trade), top, left, right);
 }
 

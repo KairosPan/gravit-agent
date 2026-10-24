@@ -8,7 +8,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  TRADE_KINDS, pickerOf, ticketOf, tradeFieldsOf, tradeDraftOf, quoteOf, underWayOf, fillWords,
+  TRADE_KINDS, tradeableOf, pickerOf, ticketOf, tradeFieldsOf, tradeDraftOf, quoteOf, underWayOf, fillWords,
 } from '../../client/js/host/trade-view.js';
 import { ACCOUNT_TABS } from '../../client/js/host/market-view.js';
 import { fieldsOf, draftOf } from '../../client/js/host/sheet-view.js';
@@ -144,6 +144,24 @@ test('ticketOf: a venue given that does not take the order opens on the best abl
   assert.equal(shut.venue, 'paper-momentum', 'a venue that does not trade');
   assert.equal(tradeFieldsOf(shut).find(f => f.name === 'venue').value, 'paper-momentum');
   assert.equal(tradeFieldsOf(open('standin-pubex-public')).find(f => f.name === 'venue').value, 'ex');
+});
+
+test('tradeableOf: a market of a Trade kind, by its tabs else its key; a perpetual or a pre-IPO one is listed, not traded — ticketOf is null on it', () => {
+  const all = fx('explore-all');
+  const item = key => all.items.find(i => i.key === key);
+  for (const key of ['coin:ETH', 'stock:NVDA']) assert.equal(tradeableOf(item(key)), true, key);
+  assert.equal(tradeableOf(fx('explore-predictions').items.find(i => i.key === 'event:predict:SI-FEDCUT-DEC')), true);
+  assert.equal(tradeableOf({ key: 'rwa:NVDA' }), true, 'no tabs: its key');
+  assert.equal(tradeableOf(item('perp:ETH')), false);
+  const preipo = { key: 'preipo:SPACEX', kind: 'perp', name: 'SpaceX', tabs: ['all', 'perps', 'preipo'], implied: { valuationUsd: 1 }, at: [] };
+  assert.equal(tradeableOf(preipo), false);
+  assert.equal(tradeableOf({ key: 'perp:BTC' }), false, 'no tabs: its key');
+  for (const v of [null, undefined, 'coin:BTC', [], {}]) assert.equal(tradeableOf(v), false, String(v));
+  // the ticket: a perpetual's page opens none, even at a venue that trades it, so neither a route nor a stale link opens one
+  assert.equal(ticketOf(stateWith({ ticket: { id: 'perp:ETH', side: 'buy', venue: 'ex', outcome: 0 } }), NOW), null);
+  all.items.push(preipo);
+  assert.equal(ticketOf(stateWith({ all, ticket: { id: 'preipo:SPACEX', side: 'buy', venue: null, outcome: 0 } }), NOW), null);
+  assert.equal(ticketOf(stateWith({ all, ticket: { id: 'coin:ETH', side: 'buy', venue: null, outcome: 0 } }), NOW).id, 'coin:ETH');
 });
 
 test('ticketOf: a prediction — its lines in cents, its outcomes with their lines at each venue', () => {
