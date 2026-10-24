@@ -3,11 +3,11 @@
 // one flight per kind; the trade search's own read (explore?q=); a pick opening the ticket and the order sheet (host/sheet.js)
 // on the line the view rules (the one given where it takes the order, else the best able one), that line — a prediction's,
 // the picked outcome's — followed on the Account's stream, a venue or outcome change re-seeding the sheet with its fields kept
-// and re-following; a live quote frame for the followed line preparing again, quietly, once the market moved from the price
-// the shown preparation quoted and that preparation is FRESH_MS old (the Account's own ticket, P8); a fill frame said; the
+// and re-following; a live quote frame for the followed line preparing again, quietly, once the market moved from the top the
+// shown preparation landed at (the price for the order's side) and that preparation is FRESH_MS old (the Account's own ticket, P8); a fill frame said; the
 // one-click Cancel through the owner device. The words are the views' (trade-view.js, owner-view.js); nothing here touches
 // the DOM, and nothing lands after close().
-import { ticketOf, fillWords, quoteOf } from './trade-view.js';
+import { ticketOf, fillWords } from './trade-view.js';
 import { refusedAt, refusalOf, saidOf } from './owner-view.js';
 import { FRESH_MS, askedOf } from './sheet.js';
 
@@ -37,6 +37,8 @@ const figure = v => (typeof v === 'number' && Number.isFinite(v) ? v
   : typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : null);
 // a pushed quote's price for the side: a buy's ask, a sell's bid, else its last trade, else its mark
 const pushedPrice = (d, side) => [side === 'sell' ? d.bid : d.ask, d.last, d.mark].map(figure).find(n => n !== null) ?? null;
+// the order sheet's side, as tradeDraftOf reads it: a sell, else a buy
+const sideOf = s => (isRecord(s?.fields) && s.fields.side === 'sell' ? 'sell' : 'buy');
 
 export function startTrade({ store, getJson, owner, sheet, stream, schedule, cancelTimer, now = Date.now, afterAction = () => {} }) {
   let closed = false;
@@ -45,6 +47,9 @@ export function startTrade({ store, getJson, owner, sheet, stream, schedule, can
   let followed = null;       // the ticket's line on the stream, `<venue>:<symbol>`, or null
   let gen = 0;               // the ticket's seeding: bumped by every seed and closeTicket
   let refreshing = null;     // the seeding whose quiet re-prepare for a moved quote is in the air, or null
+  let lastFrame = null;      // the followed line's last live quote frame since the seeding
+  let preparedTop = null;    // that frame's price for the order's side as it stood when the shown preparation landed, or null
+  let topFor = null;         // the preparation preparedTop belongs to (its body, by identity)
   const cancelling = new Set();   // the cancels in the air, `<venue>|<order>`
   const kinds = new Map();   // a kind of read → { flight, path, seq }
 
@@ -99,6 +104,7 @@ export function startTrade({ store, getJson, owner, sheet, stream, schedule, can
   // outcome so the seed's ticket is the form's; the line they name followed
   function seed(id, fields) {
     gen += 1;
+    forgetTop();
     const ruled = ticketOf(store.get(), now());
     const outcome = indexOf(fields.outcome);
     const able = Boolean(ruled?.legs.some(l => l.able && l.venue === fields.venue));
@@ -106,6 +112,17 @@ export function startTrade({ store, getJson, owner, sheet, stream, schedule, can
     follow(keyOf(ticket, fields.venue, outcome));
     return sheet.open('order', { id, ticket }, fields);
   }
+  // the top a preparation stands at (the Account's preparedTop): when the shown preparation lands, the last live frame's price
+  // for the order's side — none seen yet, the next frame's; a seeding starts with none
+  function forgetTop() { lastFrame = null; preparedTop = null; topFor = null; }
+  function syncTop() {
+    const s = store.get().sheet;
+    if (!s || s.kind !== 'order' || s.status !== 'ready' || !isRecord(s.prepared) || s.prepared === topFor) return;
+    topFor = s.prepared;
+    preparedTop = lastFrame ? pushedPrice(lastFrame, sideOf(s)) : null;
+  }
+  const unsubscribe = store.subscribe(() => { if (!closed) syncTop(); });
+
   // a ticket field changed: the open order sheet seeded again with its fields kept and the change; nothing while no ticket's
   // sheet is open, or while it is signing
   function reseed(patch) {
@@ -175,6 +192,7 @@ export function startTrade({ store, getJson, owner, sheet, stream, schedule, can
     closeTicket() {
       if (closed) return;
       gen += 1;
+      forgetTop();
       store.dispatch('ticketClose');
       sheet.close();
       if (followed !== null) release();
@@ -192,22 +210,26 @@ export function startTrade({ store, getJson, owner, sheet, stream, schedule, can
       if (!closed) store.dispatch('tradeSaid', refused ? refusalOf(r).message : saidOf(r.body));
       if (!refused) afterAction('cancel', r.body);
     },
-    /** A stream event: a live quote for the followed line whose price for the order's side moved from the one the shown
-     *  preparation quoted, while that preparation is ready, FRESH_MS old and still the form's (a form mid-edit is the sheet's
-     *  own debounce's), prepares again quietly — one at a time per ticket; a fill is said. */
+    /** A stream event: a live quote for the followed line whose price for the order's side moved from the top the shown
+     *  preparation landed at (the Account's own `preparedTop`: never the order's own price, a limit's being the limit), while
+     *  that preparation is ready, FRESH_MS old and still the form's (a form mid-edit is the sheet's own debounce's), prepares
+     *  again quietly — one at a time per ticket; a fill is said. */
     onStreamEvent(ev) {
       if (closed || !isRecord(ev)) return;
       if (ev.type === 'quote') {
         const d = ev.data;
         if (!isRecord(d) || d.live !== true || followed === null) return;
         const key = typeof d.key === 'string' && d.key ? d.key : `${d.venue}:${d.symbol}`;
-        if (key !== followed || refreshing === gen) return;
+        if (key !== followed) return;
+        syncTop();   // a preparation landed since the last frame: its top is that frame's
+        lastFrame = d;
         const s = store.get().sheet;
-        if (!s || s.kind !== 'order' || s.status !== 'ready' || !Number.isFinite(s.preparedAt) || now() - s.preparedAt < FRESH_MS) return;
-        if (askedOf(s) !== s.asked) return;
-        const shownPrice = quoteOf(s.prepared)?.price ?? null;
-        const pushed = pushedPrice(d, isRecord(s.fields) && s.fields.side === 'sell' ? 'sell' : 'buy');
-        if (shownPrice === null || pushed === null || pushed === shownPrice) return;
+        if (!s || s.kind !== 'order' || s.status !== 'ready' || !Number.isFinite(s.preparedAt)) return;
+        const pushed = pushedPrice(d, sideOf(s));
+        // no frame seen when the shown preparation landed: this one is the top it stands at, nothing asked
+        if (preparedTop === null) { preparedTop = pushed; return; }
+        if (pushed === null || pushed === preparedTop) return;
+        if (refreshing === gen || now() - s.preparedAt < FRESH_MS || askedOf(s) !== s.asked) return;
         const mine = gen;
         refreshing = mine;
         Promise.resolve(sheet.prepareNow({ quiet: true })).catch(() => null).finally(() => { if (refreshing === mine) refreshing = null; });
@@ -220,6 +242,7 @@ export function startTrade({ store, getJson, owner, sheet, stream, schedule, can
     close() {
       if (closed) return;
       closed = true;
+      unsubscribe();
       stopPoll();
       for (const kind of kinds.keys()) drop(kind);
       if (followed !== null) release();

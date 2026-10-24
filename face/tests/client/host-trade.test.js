@@ -11,7 +11,7 @@ import { createStore } from '../../client/js/store.js';
 import { reducers } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { startTrade, PICKS_MS, PICK_LIMIT, FRESH_MS } from '../../client/js/host/trade.js';
-import { ticketOf, quoteOf } from '../../client/js/host/trade-view.js';
+import { ticketOf } from '../../client/js/host/trade-view.js';
 import { askedOf } from '../../client/js/host/sheet.js';
 
 const tick = () => new Promise(r => setTimeout(r, 0));
@@ -262,102 +262,159 @@ test('close and closeTicket with no follow held leave the stream alone (the Mark
   assert.deepEqual(r.follows, [], 'no stream.follow call');
 });
 
-test('a live quote frame for the followed line re-prepares quietly once the market moved and the shown quote is 3 s old', async () => {
+// a live quote frame of the ticket's ETH line at the Stand-in Exchange
+const ethQuote = (extra = {}) => ({ type: 'quote', id: undefined, data: { key: 'ex:ETH/USDT', venue: 'ex', symbol: 'ETH/USDT', bid: 2455.4, ask: 2455.8, live: true, ...extra } });
+// the shown preparation landing now, for the form as it stands (the sheet's own asked), quoting `price`
+function landed(r, at, price = 2455.74) {
+  const prepared = fx('prepared-order');
+  prepared.quote.order.price = price;
+  r.store.dispatch('sheetPrepared', { prepared, at, asked: askedOf(r.store.get().sheet), deadline: null });
+}
+const preparesOf = r => r.calls.filter(c => c[0] === 'prepareNow').length;
+
+test('a market order: a live frame re-prepares quietly once the market moved from the top the shown preparation landed at, after 3 s', async () => {
   const r = rig();
-  // the stand-in's prepared order quoted ETH at 2455.74: a buy's ask at that price has not moved
-  const SHOWN = quoteOf(fx('prepared-order')).price;
-  assert.equal(SHOWN, 2455.74);
-  const quote = (key, extra = {}) => ({ type: 'quote', id: undefined, data: { key, venue: key.split(':')[0], symbol: key.slice(key.indexOf(':') + 1), bid: 2455.4, ask: 2455.8, live: true, ...extra } });
-  const ready = () => r.store.dispatch('sheetPrepared', { prepared: fx('prepared-order'), at: NOW, asked: askedOf(r.store.get().sheet), deadline: null });
-  r.trade.onStreamEvent(quote('ex:ETH/USDT'));
+  r.trade.onStreamEvent(ethQuote());
   assert.equal(r.calls.length, 0, 'no ticket: nothing to prepare');
   r.trade.pick('coin:ETH');
   r.store.dispatch('sheetField', { name: 'amount', value: '25' });
-  const prepared = n => r.calls.filter(c => c[0] === 'prepareNow').length === n;
 
-  r.trade.onStreamEvent(quote('ex:ETH/USDT'));
-  assert.ok(prepared(0), 'the sheet is not ready: nothing');
-  ready();
+  r.trade.onStreamEvent(ethQuote());
+  assert.equal(preparesOf(r), 0, 'the sheet is not ready: nothing');
+  landed(r, NOW);   // the top it landed at: that frame's ask, 2455.8
   r.setClock(NOW + FRESH_MS - 1);
-  r.trade.onStreamEvent(quote('ex:ETH/USDT'));
-  assert.ok(prepared(0), 'under 3 s: the shown quote stands');
+  r.trade.onStreamEvent(ethQuote({ ask: 2456 }));
+  assert.equal(preparesOf(r), 0, 'under 3 s: the shown quote stands');
   r.setClock(NOW + FRESH_MS);
-  r.trade.onStreamEvent(quote('wallet:WETH/USDC@Base'));
-  r.trade.onStreamEvent(quote('ex:ETH/USD'));
-  assert.ok(prepared(0), 'another line\'s quote: nothing');
-  r.trade.onStreamEvent(quote('ex:ETH/USDT', { ask: SHOWN, bid: 2455.1, last: 2455.5 }));
-  assert.ok(prepared(0), 'the market did not move from the price shown: nothing');
-  r.trade.onStreamEvent(quote('ex:ETH/USDT', { live: false }));
+  r.trade.onStreamEvent(ethQuote());
+  assert.equal(preparesOf(r), 0, 'back at the top it landed at: the market did not move');
+  r.trade.onStreamEvent({ type: 'quote', data: { key: 'wallet:WETH/USDC@Base', venue: 'wallet', symbol: 'WETH/USDC@Base', ask: 1, live: true } });
+  r.trade.onStreamEvent({ type: 'quote', data: { key: 'ex:ETH/USD', venue: 'ex', symbol: 'ETH/USD', ask: 1, live: true } });
+  assert.equal(preparesOf(r), 0, 'another line\'s quote: nothing');
+  r.trade.onStreamEvent(ethQuote({ ask: 2470, live: false }));
   r.trade.onStreamEvent({ type: 'quote', data: { key: 'ex:ETH/USDT', venue: 'ex', symbol: 'ETH/USDT', source: 'ex', live: false } });
-  assert.ok(prepared(0), 'a frame that is not live: nothing');
-  r.trade.onStreamEvent(quote('ex:ETH/USDT', { ask: undefined, last: undefined, mark: undefined }));
-  assert.ok(prepared(0), 'a frame with no price for the side: nothing');
+  assert.equal(preparesOf(r), 0, 'a frame that is not live: nothing');
+  r.trade.onStreamEvent(ethQuote({ ask: undefined }));
+  assert.equal(preparesOf(r), 0, 'a frame with no price for the side: nothing');
   // the form edited since the shown preparation: the sheet's own debounce prepares it, not a frame
   r.store.dispatch('sheetField', { name: 'amount', value: '30' });
-  r.trade.onStreamEvent(quote('ex:ETH/USDT'));
-  assert.ok(prepared(0), 'a form mid-edit: nothing');
+  r.trade.onStreamEvent(ethQuote({ ask: 2456 }));
+  assert.equal(preparesOf(r), 0, 'a form mid-edit: nothing');
   r.store.dispatch('sheetField', { name: 'amount', value: '25' });
 
   // moved: once, quietly, one in the air at a time
   const held = deferred();
   r.holdPrepare(() => held.promise);
-  r.trade.onStreamEvent(quote('ex:ETH/USDT'));
-  assert.ok(prepared(1));
+  r.trade.onStreamEvent(ethQuote({ ask: 2456 }));
+  assert.equal(preparesOf(r), 1);
   assert.deepEqual(r.calls.at(-1), ['prepareNow', { quiet: true }]);
-  r.trade.onStreamEvent(quote('ex:ETH/USDT', { ask: 2456 }));
-  assert.ok(prepared(1), 'one quiet re-prepare in the air at a time');
+  r.trade.onStreamEvent(ethQuote({ ask: 2457 }));
+  assert.equal(preparesOf(r), 1, 'one quiet re-prepare in the air at a time');
   held.resolve(null);
   await settle();
   r.holdPrepare(() => Promise.resolve(null));
-  r.trade.onStreamEvent(quote('ex:ETH/USDT'));
-  assert.ok(prepared(2), 'landed: the next moved frame may ask again');
+  r.trade.onStreamEvent(ethQuote({ ask: 2456 }));
+  assert.equal(preparesOf(r), 2, 'answered without a new preparation: the next moved frame may ask again');
   await settle();
-  // a sell compares the bid; a frame without a key matches by its venue and symbol; the last trade stands in for a missing side
+
+  // a new preparation lands: its top is the market as it stood then (the last frame, 2456)
+  landed(r, NOW + FRESH_MS);
+  r.setClock(NOW + 2 * FRESH_MS);
+  r.trade.onStreamEvent(ethQuote({ ask: 2456 }));
+  assert.equal(preparesOf(r), 2, 'the new preparation\'s top: nothing');
+  r.trade.onStreamEvent(ethQuote({ ask: 2457 }));
+  assert.equal(preparesOf(r), 3);
+  await settle();
+  // a sell compares the bid; a frame without a key matches by its venue and symbol; its last trade stands in for a missing bid
   r.store.dispatch('sheetField', { name: 'side', value: 'sell' });
-  ready();
-  r.trade.onStreamEvent({ type: 'quote', data: { venue: 'ex', symbol: 'ETH/USDT', bid: SHOWN, ask: 2470, live: true } });
-  assert.ok(prepared(2), 'a sell\'s bid at the price shown: nothing');
+  landed(r, NOW + FRESH_MS);   // the top: the last frame's bid, 2455.4
+  r.trade.onStreamEvent({ type: 'quote', data: { venue: 'ex', symbol: 'ETH/USDT', bid: 2455.4, ask: 2470, live: true } });
+  assert.equal(preparesOf(r), 3, 'a sell\'s bid where it landed: nothing');
   r.trade.onStreamEvent({ type: 'quote', data: { venue: 'ex', symbol: 'ETH/USDT', last: 2450, live: true } });
-  assert.ok(prepared(3));
+  assert.equal(preparesOf(r), 4);
   await settle();
-  // a sheet asking or signing is left alone; a frame that is no record is nothing
+  // a sheet signing is left alone; a frame that is no record is nothing
   r.store.dispatch('sheetSigning');
-  r.trade.onStreamEvent(quote('ex:ETH/USDT'));
+  r.trade.onStreamEvent(ethQuote({ bid: 2400 }));
   r.trade.onStreamEvent({ type: 'quote', data: null });
   r.trade.onStreamEvent(null);
-  assert.ok(prepared(3));
+  assert.equal(preparesOf(r), 4);
   // after the ticket closes, its line's quotes are nothing
   r.trade.closeTicket();
-  r.trade.onStreamEvent(quote('ex:ETH/USDT'));
-  assert.ok(prepared(3));
+  r.trade.onStreamEvent(ethQuote({ ask: 2500 }));
+  assert.equal(preparesOf(r), 4);
+});
+
+test('a limit order on a still market never re-prepares — the top is the market\'s, never the limit the Account quotes; a move does', async () => {
+  const r = rig();
+  r.trade.pick('coin:ETH');
+  r.store.dispatch('sheetField', { name: 'amount', value: '25' });
+  r.store.dispatch('sheetField', { name: 'orderType', value: 'limit' });
+  r.store.dispatch('sheetField', { name: 'limit', value: '2400' });
+  r.trade.onStreamEvent(ethQuote());
+  landed(r, NOW, 2400);   // the Account values a limit buy at its limit
+  for (let i = 1; i <= 5; i++) {
+    r.setClock(NOW + i * FRESH_MS);
+    r.trade.onStreamEvent(ethQuote({ bidSz: i, seenAt: `t${i}` }));
+  }
+  assert.equal(preparesOf(r), 0, 'the market did not move: never, however long the ticket stays open');
+  r.trade.onStreamEvent(ethQuote({ ask: 2455.9 }));
+  assert.equal(preparesOf(r), 1, 'the market moved: once');
+});
+
+test('with no frame seen when the preparation landed, the first frame sets its top; a re-seed starts over', async () => {
+  const r = rig();
+  r.trade.pick('coin:ETH');
+  r.store.dispatch('sheetField', { name: 'amount', value: '25' });
+  landed(r, NOW);
+  r.setClock(NOW + FRESH_MS);
+  r.trade.onStreamEvent(ethQuote());
+  r.trade.onStreamEvent(ethQuote());
+  assert.equal(preparesOf(r), 0, 'the first frame is the top; the same again did not move');
+  r.trade.onStreamEvent(ethQuote({ ask: 2456 }));
+  assert.equal(preparesOf(r), 1);
+  await settle();
+
+  // a venue change re-seeds: the wallet line's first frame after its preparation is its top, whatever came before
+  r.store.dispatch('sheetField', { name: 'venue', value: 'wallet' });
+  r.trade.venue('wallet');
+  landed(r, NOW + FRESH_MS);
+  r.setClock(NOW + 2 * FRESH_MS);
+  const wallet = ask => ({ type: 'quote', data: { key: 'wallet:WETH/USDC@Base', venue: 'wallet', symbol: 'WETH/USDC@Base', ask, live: true } });
+  r.trade.onStreamEvent(wallet(2470));
+  assert.equal(preparesOf(r), 1, 'the first frame since the re-seed sets the top');
+  r.trade.onStreamEvent(ethQuote({ ask: 9999 }));
+  assert.equal(preparesOf(r), 1, 'the old line is followed no more');
+  r.trade.onStreamEvent(wallet(2471));
+  assert.equal(preparesOf(r), 2);
 });
 
 test('a closed ticket\'s quiet re-prepare still in the air never blocks the next ticket\'s', async () => {
   const r = rig();
-  const moved = { type: 'quote', data: { key: 'ex:ETH/USDT', venue: 'ex', symbol: 'ETH/USDT', ask: 2460, live: true } };
+  const moved = ethQuote({ ask: 2460 });
   const open = () => {
     r.trade.pick('coin:ETH');
     r.store.dispatch('sheetField', { name: 'amount', value: '25' });
-    r.store.dispatch('sheetPrepared', { prepared: fx('prepared-order'), at: NOW - FRESH_MS, asked: askedOf(r.store.get().sheet), deadline: null });
+    r.trade.onStreamEvent(ethQuote());
+    landed(r, NOW - FRESH_MS);
   };
-  const prepares = () => r.calls.filter(c => c[0] === 'prepareNow').length;
   open();
   const held = deferred();
   r.holdPrepare(() => held.promise);
   r.trade.onStreamEvent(moved);
-  assert.equal(prepares(), 1);
+  assert.equal(preparesOf(r), 1);
   r.trade.closeTicket();
   open();
   const mine = deferred();
   r.holdPrepare(() => mine.promise);
   r.trade.onStreamEvent(moved);
-  assert.equal(prepares(), 2, 'the new ticket asks while the old one\'s ask is still out');
+  assert.equal(preparesOf(r), 2, 'the new ticket asks while the old one\'s ask is still out');
   r.trade.onStreamEvent(moved);
-  assert.equal(prepares(), 2, 'and its own is one at a time');
+  assert.equal(preparesOf(r), 2, 'and its own is one at a time');
   held.resolve(null);
   await settle();
   r.trade.onStreamEvent(moved);
-  assert.equal(prepares(), 2, 'the old ask landing frees nothing of the new one\'s');
+  assert.equal(preparesOf(r), 2, 'the old ask landing frees nothing of the new one\'s');
 });
 
 test('a fill frame is said in its words; a fill with no words says nothing', () => {
