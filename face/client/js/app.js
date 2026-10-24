@@ -8,6 +8,8 @@ import { renderRail } from './render/rail.js';
 import { renderMessagesScreen, currentConversation } from './render/messages.js';
 import { renderMarketsScreen } from './render/markets.js';
 import { renderSettings, renderAccountScreen } from './render/account.js';
+import { renderSheet } from './render/owner.js';
+import { renderTradeScreen } from './render/trade.js';
 import { setMarkdown } from './render/thread.js';
 import { renderMarkdown } from './wire/markdown.js';
 import { call as wireCall, openMux as wireOpenMux } from './wire/api.js';
@@ -25,8 +27,15 @@ import { itemById } from './host/discover-view.js';
 import { startTraces } from './host/traces.js';
 import { loadMemberTrace } from './wire/member-traces.js';
 import { isHostPreset } from './wire/speaker.js';
-import { statementLinesOf, statementCsvOf } from './host/account-view.js';
+import { statementLinesOf, statementCsvOf, connectOptionsOf, paperBooksOf, asksOf, venuesOf } from './host/account-view.js';
 import { isAccountKey, handWordsOf, watchedOf } from './host/market-view.js';
+import { startOwner, postVia } from './host/owner.js';
+import { devicesOf } from './host/owner-view.js';
+import { startSheet } from './host/sheet.js';
+import { limitSeedOf, grantOf, keyfileAskOf, reachAskOf } from './host/sheet-view.js';
+import { startTrade } from './host/trade.js';
+import { tradeableOf } from './host/trade-view.js';
+import { indexedDbKeys, memoryKeys, signedOutFlag } from './wire/key-store.js';
 import { createLiveQuotes } from './wire/market-quotes.js';
 import { firstOpen } from './host/sessions.js';
 import { createSymbolSearch } from './wire/market-search.js';
@@ -118,9 +127,9 @@ export function makeStore(storage, now = Date.now()) {
   return createStore({ initial: initialState(storage, now), reducers, storage, key: PREFS_KEY, accept: () => false, persist: prefsOf });
 }
 
-// Messages (with a channel's page), Markets, Discover (with an item's page) and Account are served; every other screen the
-// router knows folds to Messages
-const SCREENS = new Set(['messages', 'channel', 'markets', 'discover', 'plugin', 'account']);
+// Messages (with a channel's page), Markets, Trade, Discover (with an item's page) and Account are served; every other screen
+// the router knows folds to Messages
+const SCREENS = new Set(['messages', 'channel', 'markets', 'trade', 'discover', 'plugin', 'account']);
 export const routeOf = hash => { const r = parseHash(hash); return SCREENS.has(r.screen) ? r : { screen: 'messages', id: null }; };
 // route by the address bar; a normalised route says which hash the bar should show instead
 export function settle(store, hash) {
@@ -146,18 +155,24 @@ export function answersFrom(card, questions, gateId) {
 // a batch the host may take: every question has a pick or words of its own
 export const complete = batch => batch.answers.every(a => a.selected.length > 0 || !!a.custom);
 
-// where focus was, as something a re-render can find again: the id first, else the control's data attributes
+// where focus was, as something a re-render can find again: the id first, else the control's data attributes — and its name
+// (a sheet's fields share their action), a box's value among the boxes of one name
+const quoted = v => `"${String(v).replace(/["\\]/g, '\\$&')}"`;
 function focusKey(el) {
   if (!el || el.tagName === 'BODY') return null;
   if (el.id) return { id: el.id };
   const data = el.dataset ?? {};
   if (!data.action) return null;
-  const sel = `[data-action="${data.action}"]` + Object.entries(data).filter(([k]) => k !== 'action').map(([k, v]) => `[data-${k.replace(/[A-Z]/g, c => '-' + c.toLowerCase())}="${v}"]`).join('');
+  const named = el.name ? `[name=${quoted(el.name)}]` + (el.type === 'checkbox' || el.type === 'radio' ? `[value=${quoted(el.value)}]` : '') : '';
+  const sel = `[data-action=${quoted(data.action)}]` + named + Object.entries(data).filter(([k]) => k !== 'action').map(([k, v]) => `[data-${k.replace(/[A-Z]/g, c => '-' + c.toLowerCase())}=${quoted(v)}]`).join('');
   return { sel };
 }
-const overlayOf = s => (s.detailsOpen || s.settingsOpen || s.account.statementOpen || s.account.detailsVenue ? 'drawer' : null);
-const drawerOf = s => (s.detailsOpen ? 'details' : s.settingsOpen ? 'settings' : s.account.statementOpen ? 'statement'
+// the owner sheet is a drawer of any screen, over the one open (the order sheet is Trade's ticket, not a drawer)
+const sheetUp = s => Boolean(s.sheet) && s.sheet.kind !== 'order';
+const overlayOf = s => (sheetUp(s) ? 'sheet' : s.detailsOpen || s.settingsOpen || s.account.statementOpen || s.account.detailsVenue ? 'drawer' : null);
+const drawerOf = s => (sheetUp(s) ? `sheet:${s.sheet.kind}` : s.detailsOpen ? 'details' : s.settingsOpen ? 'settings' : s.account.statementOpen ? 'statement'
   : s.account.detailsVenue ? `venue:${s.account.detailsVenue}` : null);
+const closeKeyOf = overlay => (overlay === 'sheet' ? '.drawer.sheet .close-key' : '.drawer .close-key');
 const editorOf = e => (e ? [e.kind, e.convId, e.id].join('|') : null);
 const screenOf = s => `${s.route.screen}/${s.route.id ?? ''}`;
 
@@ -193,19 +208,56 @@ export function boot(win, host = {}) {
     account.onStreamEvent(ev);
     if (ev.type === 'snapshot') store.dispatch('streamSnapshot');
     if (ev.type === 'quote') store.dispatch('streamQuote', { data: ev.data });
+    // a quote for the ticket's line re-prepares it once the market moved; a fill is said on Trade
+    if (ev.type === 'quote' || ev.type === 'fill') trade.onStreamEvent(ev);
     if (ev.type === 'card' && ev.data?.waits === undefined) void seat.load({ fresh: true });
   }, status => {
     if ((status === 'open') === streamWasOpen) return;
     streamWasOpen = status === 'open';
     if (accountShown()) { account.poll(false); account.poll(true); }
   });
+  // this page as an owner device of the Account (spec 2026-10-22 §6.3): its key in this browser's IndexedDB (in memory where
+  // there is none), every call through the face's proxy (a test hands in its own door); the standing read off every page that
+  // lands — the first one pairs it once
+  const owner = startOwner({
+    store,
+    post: host.ownerPost ?? postVia((path, init) => win.fetch(path, init)),
+    subtle: win.crypto?.subtle ?? null,
+    keys: win.indexedDB ? indexedDbKeys(win.indexedDB) : memoryKeys(),
+    flag: signedOutFlag(storage),
+  });
   // the Account's page: read at boot, on entering Account, on Refresh, right after a receipt and on the stream's events; every
   // 20 s while Account is on screen in a visible tab, 80 s while the stream is open
-  const account = startAccount({ store, getJson, now, schedule, cancelTimer, streamOpen: () => stream.status() === 'open' });
+  const account = startAccount({ store, getJson, now, schedule, cancelTimer, streamOpen: () => stream.status() === 'open', onPage: body => { void owner.standing(body); } });
   void account.load();
   // the Account seat's standing (spec 2026-10-20 §6.3): read on entering Venues or Agents, on Refresh, right after a seat receipt
   // and on a card's event
   const seat = startSeat({ store, getJson, now });
+  // what an owner action changed, read as the Account's own page reads it after one: the page, the holdings and the statement
+  // past the face's cache, and the seat's standing after one about an agent's key or limit; a done sheet then closes itself
+  // (the order sheet's words stay on the ticket)
+  const SEAT_KINDS = new Set(['letIn', 'limit', 'endLimit', 'revoke']);
+  function afterAction(kind) {
+    void account.load({ fresh: true });
+    void account.loadHoldings({ fresh: true });
+    void account.loadStatement({ fresh: true });
+    if (SEAT_KINDS.has(kind)) void seat.load({ fresh: true });
+    const s = store.get().sheet;
+    if (kind !== 'order' && s?.kind === kind && s.status === 'done') sheet.close();
+  }
+  // the connect sheet's two checks, each asked when what it asks changed: the key file it would connect with, the venue's reach
+  let connectAsked = { keyfile: null, reach: null };
+  function checkConnect() {
+    const s = store.get().sheet;
+    if (s?.kind !== 'connect') return;
+    const file = keyfileAskOf(s);
+    const fileKey = file ? JSON.stringify(file) : null;
+    if (fileKey !== connectAsked.keyfile) { connectAsked.keyfile = fileKey; if (file) void account.checkKeyfile(file); }
+    const connector = reachAskOf(s);
+    if ((connector || null) !== connectAsked.reach) { connectAsked.reach = connector || null; if (connector) void account.reach(connector); }
+  }
+  // the owner sheet (prepare → What you sign → sign) over the owner device
+  const sheet = startSheet({ store, owner, schedule, cancelTimer, now, afterAction, onChange: kind => { if (kind === 'connect') checkConnect(); } });
   // a receipt reloads the Account's page past the cache (an Alpaca fill, a seat write), and one from the Account seat the seat's
   // standing too
   const live = startLive({ store, openMux: host.openMux ?? wireOpenMux, call, mapFrame, getJson, timers, now, onReceipt: m => { if (m?.data?.seat) void seat.load({ fresh: true }); void account.load({ fresh: true }); } });
@@ -220,16 +272,21 @@ export function boot(win, host = {}) {
       createEventSource: typeof win.EventSource === 'function' ? url => new win.EventSource(url) : null,
     })),
     createSymbolSearch: host.createSymbolSearch ?? (onUpdate => createSymbolSearch(onUpdate, { fetcher: (...a) => win.fetch(...a) })),
-    storage, getJson, win, now, stream, schedule, cancelTimer,
+    storage, getJson, win, now, stream, schedule, cancelTimer, owner, afterAction,
   });
+  // Trade: the kinds' picks on screen, a ticket's order sheet, its line on the stream, Under way's Cancel
+  const trade = startTrade({ store, getJson, owner, sheet, stream, schedule, cancelTimer, now, afterAction });
   // a channel's page: its overview read on entering it
   const channels = startChannels({ store, postJson, getJson, refresh: () => live.refresh(), now });
   // Discover: the face's inventory, read on entering it; a page's own reads (the Gravit item, a skill) on opening it
   const discover = startDiscover({ store, getJson, postJson, call, now });
   // a room member's trace, read without activating the member's session
   const traces = startTraces({ store, call, loadMemberTrace, now });
-  // the quotes run only while Markets is on screen in a visible tab
+  // the quotes run only while Markets is on screen in a visible tab; Trade's picks only while Trade is
   const showMarkets = () => markets.show(store.get().route.screen === 'markets' && !doc.hidden);
+  const showTrade = () => trade.show(store.get().route.screen === 'trade' && !doc.hidden);
+  // the owner's keys act only for a page that signs (the renderers draw them for no other)
+  const signs = () => store.get().owner.role === 'signs';
 
   let composerText = '';
   let composing = false;
@@ -239,7 +296,11 @@ export function boot(win, host = {}) {
   let was = null;        // the route follow() last settled: entering a screen, a tab or a market's page reads what it draws
   let wanted = null;     // a deep link the list has not answered yet
   let searchTimer = null;   // the Markets search waiting for the box to be quiet
-  let last = { overlay: null, opener: null, screen: null, drawer: null, thread: null, editor: null, confirm: null };
+  let tradeTimer = null;    // Trade's search, the same
+  let ticketAsked = null;   // a market page's Buy or Sell on its way to Trade: the side follow() opens the ticket with
+  let sheetOpens = 0;       // the sheets opened so far: a read a sheet waits on opens none over one opened since
+  let sheetKind = null;     // the kind of the sheet open as the store last changed: which one a close closed
+  let last = { overlay: null, opener: null, under: null, screen: null, drawer: null, thread: null, editor: null, confirm: null };
   let confirmFrom = null;
 
   function applyTheme(theme) {
@@ -247,7 +308,8 @@ export function boot(win, host = {}) {
   }
   function find(key) {
     if (!key) return null;
-    return key.id ? doc.getElementById(key.id) : root.querySelector(key.sel);
+    if (key.id) return doc.getElementById(key.id);
+    try { return root.querySelector(key.sel); } catch { return null; }   // a selector the page cannot read finds nothing
   }
 
   function render() {
@@ -255,7 +317,7 @@ export function boot(win, host = {}) {
     // what the person had: focus and caret, typed text, picked radios, and where each scrolling box stood
     const active = doc.activeElement;
     const activeKey = focusKey(active);
-    const caret = active && typeof active.selectionStart === 'number' && active.id ? [active.selectionStart, active.selectionEnd] : null;
+    const caret = active && typeof active.selectionStart === 'number' && (active.id || active.name) ? [active.selectionStart, active.selectionEnd] : null;
     const typed = new Map([...root.querySelectorAll('input[id]:not([type=radio]):not([type=checkbox]):not([type=file]), textarea[id], select[id]')].map(el => [el.id, el.value]));
     const ticked = [...root.querySelectorAll('input[id]')].filter(el => (el.type === 'radio' || el.type === 'checkbox') && el.checked).map(el => el.id);
     const thread0 = doc.getElementById('thread');
@@ -265,9 +327,12 @@ export function boot(win, host = {}) {
     const opened = [...root.querySelectorAll('details[id][open]')].map(el => el.id);
 
     const screen = s.route.screen === 'markets' ? renderMarketsScreen(s, now()) : s.route.screen === 'account' ? renderAccountScreen(s, now())
+      : s.route.screen === 'trade' ? renderTradeScreen(s, now())
       : s.route.screen === 'channel' ? renderChannelScreen(s, now()) : s.route.screen === 'discover' ? renderDiscover(s)
       : s.route.screen === 'plugin' ? renderPlugin(s) : renderMessagesScreen(s, now());
-    root.innerHTML = renderRail(s, now()) + (s.settingsOpen ? screen.replace(/<\/main>$/, renderSettings(s) + '</main>') : screen);
+    // the drawers of any screen, inside its <main>: Settings, and the owner sheet over whatever is open
+    const drawers = (s.settingsOpen ? renderSettings(s) : '') + (sheetUp(s) ? renderSheet(s, now()) : '');
+    root.innerHTML = renderRail(s, now()) + (drawers ? screen.replace(/<\/main>$/, drawers + '</main>') : screen);
     // the quotes poll asks for the rows the table drew, by id; a market's page, which draws none, for its own market (spec §6.1:
     // the page follows it on the stream and polls quotes for what the stream does not carry)
     if (s.route.screen === 'markets') {
@@ -309,13 +374,20 @@ export function boot(win, host = {}) {
     const thread = doc.getElementById('thread');
     if (thread) thread.scrollTop = threadAt && !threadAt.bottom && threadSig === last.thread ? threadAt.top : thread.scrollHeight;
 
-    // focus: back on the same control; into a drawer that just opened; back to its opener when it closes
+    // focus: back on the same control; into a drawer (or the sheet) that just opened; back to its opener when it closes — a sheet
+    // opened over a drawer keeps that drawer's opener under it, for when the drawer closes in its turn
     const overlay = overlayOf(s);
     let opener = last.opener;
+    let under = last.under;
     let target = find(activeKey);
-    if (overlay && overlay !== last.overlay) {
+    if (overlay && overlay !== last.overlay && last.overlay !== 'sheet') {
+      if (overlay === 'sheet') under = last.overlay ? opener : null;
       opener = activeKey;
-      target = root.querySelector('.drawer .close-key');
+      target = root.querySelector(closeKeyOf(overlay));
+    } else if (last.overlay === 'sheet' && overlay !== 'sheet') {
+      target = find(last.opener) ?? (overlay ? root.querySelector(closeKeyOf(overlay)) : target);
+      opener = overlay ? under : null;
+      under = null;
     } else if (!overlay && last.overlay) {
       target = find(last.opener) ?? target;
       opener = null;
@@ -328,13 +400,13 @@ export function boot(win, host = {}) {
       target = find(confirmFrom); // No: back on the key that asked
     } else if (!target && activeKey) {
       // the pressed control went away (an answered card's keys): stay inside the drawer if one is up, else the composer
-      target = overlay === 'drawer' ? root.querySelector('.drawer .close-key') : say;
+      target = overlay ? root.querySelector(closeKeyOf(overlay)) : say;
     }
     if (target) {
       target.focus();
       if (caret && target === find(activeKey) && typeof target.setSelectionRange === 'function') target.setSelectionRange(caret[0], caret[1]);
     }
-    last = { overlay, opener, screen: screenOf(s), drawer: drawerOf(s), thread: threadSig, editor: editorOf(s.edit), confirm: s.confirm };
+    last = { overlay, opener, under, screen: screenOf(s), drawer: drawerOf(s), thread: threadSig, editor: editorOf(s.edit), confirm: s.confirm };
   }
 
   // while an IME composes (pinyin), a render would replace the input and lose the composition: hold it until
@@ -374,6 +446,9 @@ export function boot(win, host = {}) {
     if (entered('portfolio')) void account.loadHoldings().then(() => account.loadHistory());
     if (entered('venues') || entered('agents')) void seat.load();
     if (entered('agents')) void account.loadAgents();
+    // Trade left: its ticket closes and lets its line go — before a market's page follows its own
+    const inTrade = route => route?.screen === 'trade';
+    if (!inTrade(r) && inTrade(was)) trade.closeTicket();
     // a market's page (an Account key): its market followed on the stream with its candles and compare rows, and what is held of
     // it and the statement's lines about it read; leaving it lets the market go
     const pageId = route => (route?.screen === 'markets' && isAccountKey(route.id) ? route.id : null);
@@ -381,6 +456,12 @@ export function boot(win, host = {}) {
       markets.page(pageId(r));
       if (pageId(r) !== null) { void account.loadHoldings(); void account.loadStatement(); }
     }
+    // Trade entered on a market (#/trade/<id>), after a page left let its market go: the ticket on it — a buy, or the side a
+    // market page's Buy or Sell asked for — unless one is open on it already
+    if (inTrade(r) && r.id && !(inTrade(was) && was.id === r.id) && store.get().trade.ticket?.id !== r.id) {
+      pickTicket(r.id, ticketAsked?.id === r.id ? { side: ticketAsked.side } : {});
+    }
+    showTrade();
     if (r.screen === 'channel' && !(was?.screen === 'channel' && was.id === r.id)) void channels.overview(r.id);
     const inDiscover = route => route?.screen === 'discover' || route?.screen === 'plugin';
     if (inDiscover(r) && !inDiscover(was)) void discover.load();
@@ -492,6 +573,9 @@ export function boot(win, host = {}) {
     if (c.action === 'stopGravit') void actions.stop(c.id);
     if (c.action === 'deleteConv') void deleteNow(c.id);
     if (c.action === 'stopChild') void actions.stopChild(c.parent, c.id, c.label);
+    // Revoke… and Disconnect…, asked twice: then their sheet, on a page that signs
+    if (c.action === 'revoke' && signs()) void sheet.open('revoke', { name: c.name, address: c.address });
+    if (c.action === 'disconnect' && signs()) void sheet.open('disconnect', { venue: c.venue, name: c.name });
   }
 
   // the Markets search: the query moves with each keystroke (setMarketsQuery), its reads once the box has been quiet for
@@ -504,6 +588,78 @@ export function boot(win, host = {}) {
     if (!String(q).trim()) { searchNow(q); return; }
     if (searchTimer !== null) timers.cancel(searchTimer);
     searchTimer = timers.after(SEARCH_QUIET_MS, () => { searchTimer = null; markets.search(q); });
+  }
+  // Trade's search, the same way: the query moves at once, its read after the quiet; a blank box at once
+  function tradeSoon(q) {
+    if (tradeTimer !== null) { timers.cancel(tradeTimer); tradeTimer = null; }
+    if (!String(q).trim()) { trade.query(q); return; }
+    tradeTimer = timers.after(SEARCH_QUIET_MS, () => { tradeTimer = null; trade.query(q); });
+  }
+
+  // a market's ticket, for a market the face's ticket trades: on a page that signs, with its order sheet; on one that does not,
+  // the ticket alone, its panel saying why there is no form
+  function pickTicket(id, opts = {}) {
+    if (typeof id !== 'string' || !tradeableOf({ key: id })) return;
+    if (signs()) void trade.pick(id, opts);
+    else store.dispatch('ticketOpen', { id, ...opts });
+  }
+  // a picker row's hand-on: its side, venue and outcome where it gives them
+  const pickOf = d => ({
+    ...(d.side ? { side: d.side } : {}), ...(d.venue ? { venue: d.venue } : {}),
+    ...(d.outcome !== undefined && d.outcome !== '' ? { outcome: Number(d.outcome) } : {}),
+  });
+
+  // a field of the open sheet (the order sheet's from the ticket's keys) changed: the sheet takes it; the order sheet's venue or
+  // outcome seeds the ticket again at the new line
+  function changeField(name, value) {
+    const kind = store.get().sheet?.kind;
+    sheet.change(name, value);
+    if (kind === 'order' && name === 'venue') void trade.venue(value);
+    if (kind === 'order' && name === 'outcome') void trade.outcome(Number(value));
+  }
+  // what a field's control holds: a box ticked or not, or — one of a pick's boxes — the pick's values ticked, in its order
+  function fieldValueOf(el) {
+    if (el.type !== 'checkbox') return el.value;
+    const fields = store.get().sheet?.fields;
+    const f = Array.isArray(fields) ? fields.find(x => x?.name === el.name) : null;
+    if (f?.type !== 'pick') return el.checked === true;
+    const on = new Set(Array.isArray(f.value) ? f.value : []);
+    if (el.checked) on.add(el.value); else on.delete(el.value);
+    return (Array.isArray(f.options) ? f.options : []).map(o => o.value).filter(v => on.has(v));
+  }
+
+  // an owner key's sheet, its seed built from the store by kind and the key's data; only on a page that signs
+  function openSheetFrom(el) {
+    if (!signs()) return;
+    const d = el.dataset;
+    const page = store.get().account.data;
+    switch (d.kind) {
+      case 'letIn': void sheet.open('letIn', { address: d.address ?? '', name: d.name ?? '' }); break;
+      case 'limit': void sheet.open('limit', limitSeedOf(page, d.address, d.name)); break;
+      case 'endLimit': void sheet.open('endLimit', { ...limitSeedOf(page, d.address, d.name), allow: d.allow ?? '' }); break;
+      case 'approveCard': void sheet.open('approveCard', { card: d.card ?? '', hash: d.hash ?? '', decision: d.decision ?? '' }); break;
+      case 'declineAsk': void sheet.open('declineAsk', { ask: d.ask ?? '' }); break;
+      case 'topUp': case 'resetPaper': void sheet.open(d.kind, { venue: d.venue ?? '', name: d.name ?? '' }); break;
+      case 'connect': case 'paper': void openOnRead(d.kind); break;
+      default: break;
+    }
+  }
+  // the connect and paper sheets are seeded from a read beside the page (where this account can connect, the kept paper
+  // books): at once with what was read, else once the read lands — when no other sheet was opened meanwhile and the page
+  // still signs
+  async function openOnRead(kind) {
+    const slice = () => store.get().account[kind === 'connect' ? 'venuesHere' : 'paperBooks'];
+    const read = kind === 'connect' ? account.loadVenuesHere() : account.loadPaperBooks();
+    if (slice().data === null) {
+      const opened = sheetOpens;
+      await read;
+      if (opened !== sheetOpens || !signs()) return;
+    }
+    const page = store.get().account.data;
+    if (kind === 'paper') { void sheet.open('paper', { books: paperBooksOf(slice().data), venues: venuesOf(page).map(v => ({ id: v.id })) }); return; }
+    connectAsked = { keyfile: null, reach: null };
+    void sheet.open('connect', { options: connectOptionsOf(page, slice().data) });
+    checkConnect();
   }
 
   async function sendNow() {
@@ -611,10 +767,12 @@ export function boot(win, host = {}) {
       searchNow('');
       doc.getElementById('mq')?.focus?.();
     },
-    // the star, on or off as it is drawn: an Account key in the Account's own store, a cn id on the face's list
+    // the star, on or off as it is drawn: an Account key in the Account's own list (signed, on a page that signs) or store, a cn
+    // id on the face's list
     toggleWatch: el => {
       const id = el.dataset.id;
-      if (watchedOf(store.get().markets, id)) markets.unwatch(id); else markets.watch(id);
+      const s = store.get();
+      if (watchedOf(s.markets, id, s.account.data)) markets.unwatch(id); else markets.watch(id);
     },
     // an old star the Account does not list, taken off
     removeAsked: el => markets.unwatch(el.dataset.id),
@@ -631,6 +789,53 @@ export function boot(win, host = {}) {
       render();
       doc.getElementById('say')?.focus();
     },
+    // the owner device: the pair box's code, Sign in, and — on a page that signs — Settings › Devices' Sign out and Let it sign
+    pairDevice: () => { void owner.ready(doc.getElementById('pair-code')?.value?.trim() || undefined); },
+    signIn: () => { void owner.signIn(); },
+    signOut: () => { if (signs()) void sheet.open('signOut', { kid: store.get().owner.kid }); },
+    // the owners the new list keeps: the page's, and this page's own device, which signs whether or not the page read names it
+    // yet (the list replaces the owners)
+    letDevice: el => {
+      if (!signs()) return;
+      const s = store.get();
+      const owners = [...new Set([...devicesOf(s.account.data, s.owner).owners.map(o => o.id), `device:${s.owner.kid}`])];
+      void sheet.open('letDevice', { owners, kid: el.dataset.kid ?? '' });
+    },
+    // the owner's keys on Account: each its sheet; Revoke… and Disconnect… ask in place first; Grant the sheet that grants the ask
+    openSheet: el => openSheetFrom(el),
+    askRevoke: el => { if (signs()) store.dispatch('askConfirm', { action: 'revoke', name: el.dataset.name ?? '', address: el.dataset.address ?? '' }); },
+    askDisconnect: el => { if (signs()) store.dispatch('askConfirm', { action: 'disconnect', venue: el.dataset.venue ?? '', name: el.dataset.name ?? '' }); },
+    grant: el => {
+      if (!signs()) return;
+      const page = store.get().account.data;
+      const g = grantOf(asksOf(page).find(k => k.id === el.dataset.ask), page);
+      if (g) void sheet.open(g.kind, g.seed);
+    },
+    // the sheet: a seg's pick, named by its field (its boxes and fields answer through input and change), Sign, Prepare again,
+    // Cancel
+    sheetField: el => changeField(el.name, el.dataset.value),
+    sheetSubmit: () => { void sheet.submit(); },
+    sheetAgain: () => { void sheet.again(); },
+    sheetClose: () => sheet.close(),
+    // Trade: a kind, a picker row, a market page's Buy or Sell (Trade on that market, the ticket on the side pressed), the
+    // ticket's keys, Under way's Cancel
+    tradeKind: el => trade.kind(el.dataset.value),
+    pickMarket: el => pickTicket(el.dataset.id, pickOf(el.dataset)),
+    openTicket: el => {
+      const id = el.dataset.id;
+      const side = el.dataset.side === 'sell' ? 'sell' : 'buy';
+      ticketAsked = { id, side };
+      try { go({ screen: 'trade', id }); } finally { ticketAsked = null; }
+      const t = store.get().trade.ticket;
+      if (t?.id !== id || t.side !== side) pickTicket(id, { side });
+    },
+    ticketVenue: el => changeField('venue', el.dataset.venue),
+    ticketSide: el => changeField('side', el.dataset.value),
+    ticketOutcome: el => changeField('outcome', el.dataset.value),
+    closeTicket: () => trade.closeTicket(),
+    // What you sign is the <details>' own: the click toggles it, and the render keeps it open by its id
+    toggleSigns: () => {},
+    cancelOrder: el => { if (signs()) void trade.cancel(el.dataset.venue, el.dataset.order); },
   };
 
   root.addEventListener('click', ev => {
@@ -657,14 +862,20 @@ export function boot(win, host = {}) {
     if (form.dataset.action === 'send') void sendNow();
     else if (form.dataset.action === 'saveBot') void saveBotNow(form.dataset.id);
     else if (form.dataset.action === 'createBot') void createBotNow();
+    else if (form.dataset.action === 'placeOrder') void sheet.submit();
   });
 
-  // typing: the composer keeps its words outside the store; the title and the Markets search go through it
+  // a sheet's or the ticket's field: its words as typed, its box or its pick as changed
+  const isField = el => el.dataset?.action === 'sheetField' || el.dataset?.action === 'ticketField';
+  const typesWords = el => el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && el.type !== 'checkbox' && el.type !== 'radio');
+  // typing: the composer keeps its words outside the store; the title, the searches and the fields go through it
   function typed(el) {
     if (el.id === 'say') composerText = el.value;
     else if (el.dataset?.action === 'draftTitle') store.dispatch('setDraftTitle', el.value);
     else if (el.dataset?.action === 'mkQuery') { store.dispatch('setMarketsQuery', el.value); searchSoon(el.value); }
+    else if (el.dataset?.action === 'tradeQuery') { store.dispatch('tradeQuery', el.value); tradeSoon(el.value); }
     else if (el.dataset?.action === 'dq') store.dispatch('setDiscoverQuery', el.value);
+    else if (isField(el) && typesWords(el)) changeField(el.name, el.value);
   }
   root.addEventListener('input', ev => { if (!ev.isComposing && !composing) typed(ev.target); });
   root.addEventListener('change', ev => {
@@ -673,6 +884,7 @@ export function boot(win, host = {}) {
       if (el.value === '__new') store.dispatch('startEdit', { kind: 'newChannel' }); else store.dispatch('setDraftWhere', el.value);
     }
     if (el.type === 'checkbox' && el.name === 'roster') store.dispatch('toggleRosterTick', { value: el.value, on: el.checked === true });
+    if (isField(el) && !typesWords(el)) changeField(el.name, fieldValueOf(el));
   });
   let pressSeq = 0;   // a press's own timeout ends only that press, never a later one
   root.addEventListener('pointerdown', ev => {
@@ -698,10 +910,13 @@ export function boot(win, host = {}) {
       const s = store.get();
       if (s.edit) { store.dispatch('cancelEdit'); return; }
       if (s.confirm) { store.dispatch('cancelConfirm'); return; }
-      if (s.detailsOpen) store.dispatch('toggleDetails');
+      // the sheet over any drawer first; Trade's ticket after every drawer
+      if (sheetUp(s)) sheet.close();
+      else if (s.detailsOpen) store.dispatch('toggleDetails');
       else if (s.settingsOpen) store.dispatch('closeSettings');
       else if (s.account.statementOpen) store.dispatch('closeStatement');
       else if (s.account.detailsVenue) store.dispatch('closeVenueDetails');
+      else if (s.route.screen === 'trade' && s.trade.ticket) trade.closeTicket();
       return;
     }
     const a = doc.activeElement;
@@ -713,11 +928,21 @@ export function boot(win, host = {}) {
   win.addEventListener('hashchange', follow);
   doc.addEventListener('visibilitychange', () => {
     showMarkets();
+    showTrade();
     showAccount();
     if (doc.hidden) stream.close(); else stream.open();
   });
   store.subscribe((s, type) => {
     requestRender();
+    if (type === 'sheetOpen') sheetOpens += 1;
+    // Trade's ticket left without its order sheet on a page that signs — a deep link that landed before the pairing, or a sheet
+    // of Settings › Devices that took the order sheet's place and closed — seeds its order sheet again
+    const otherClosed = type === 'sheetClose' && sheetKind !== 'order';
+    sheetKind = s.sheet?.kind ?? null;
+    if ((type === 'ownerStanding' || otherClosed) && s.owner.role === 'signs' && s.route.screen === 'trade' && s.trade.ticket && !s.sheet) {
+      const t = s.trade.ticket;
+      void trade.pick(t.id, { side: t.side, venue: t.venue, outcome: t.outcome });
+    }
     if (type !== 'hostList') return;
     // the list answered a deep link, or there was no conversation on screen: open one
     if (wanted && s.conversations.some(c => c.id === wanted)) { const id = wanted; wanted = null; go({ screen: 'messages', id }); }
@@ -730,7 +955,7 @@ export function boot(win, host = {}) {
   if (!doc.hidden) stream.open();
   follow();
   render();
-  return Object.assign(store, { timers, live, actions, markets, channels, discover });
+  return Object.assign(store, { timers, live, actions, markets, channels, discover, owner, sheet, trade });
 }
 
 if (typeof window !== 'undefined' && window.document) boot(window);

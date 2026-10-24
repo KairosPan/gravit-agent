@@ -33,6 +33,9 @@ test('parseHash and toHash round-trip; Messages and Markets route, every other s
   assert.equal(parseHash('#/trade/event:predict:SI-FEDCUT-DEC').id, 'event:predict:SI-FEDCUT-DEC');
   assert.equal(parseHash('#/trade/pm%3A0xab').id, 'pm:0xab', 'an encoded link reads the same');
   assert.equal(toHash(parseHash('#/trade/stock:NVDA')), '#/trade/stock:NVDA');
+  // Trade is a screen the face serves
+  assert.deepEqual(routeOf('#/trade'), { screen: 'trade', id: null });
+  assert.deepEqual(routeOf('#/trade/coin:BTC'), { screen: 'trade', id: 'coin:BTC' });
   // a channel page and a plugin page take everything after the screen, decoded, as a market does
   assert.deepEqual(parseHash('#/channel/ws-1'), { screen: 'channel', id: 'ws-1' });
   assert.equal(toHash({ screen: 'channel', id: 'ws-1' }), '#/channel/ws-1');
@@ -77,7 +80,8 @@ test('settle routes by the hash and says which hash the address bar should show'
   const store = makeStore(null);
   assert.equal(settle(store, '#/messages/zz'), '#/messages', 'a missing conversation folds to none while the list is empty');
   assert.equal(store.get().route.screen, 'messages');
-  assert.equal(settle(store, '#/trade'), '#/messages');
+  assert.equal(settle(store, '#/trade'), null, 'Trade routes as it is');
+  assert.deepEqual(store.get().route, { screen: 'trade', id: null });
   assert.equal(settle(store, '#/markets/us:aapl'), '#/markets/us:AAPL', 'a market id is written in its canonical form');
   assert.deepEqual(store.get().route, { screen: 'markets', id: 'us:AAPL' });
   assert.equal(settle(store, '#/markets/crypto:btc-usd'), '#/markets/crypto:BTC/USD');
