@@ -7,6 +7,7 @@
 // No key material, code or envelope is logged or kept beyond the call.
 import { kidOf, publicJwkOf, signPrepared, makeKey } from '../wire/owner-key.js';
 import { pageOk } from './account-view.js';
+import { whyOf, refusedAt } from './owner-view.js';
 
 const PAIR = '/data/account/pair', PREPARE = '/data/account/prepare', EXCHANGE = '/data/account/exchange';
 // the Account's pair roles under the face's names
@@ -16,12 +17,10 @@ const NO_ANSWER = 'The account did not answer. Try again.';
 const NOT_SIGNING = 'This browser does not sign for the account.';
 const ANOTHER_KEY = 'The account named another key';
 
-// the Account's `why`: its refusal's sentence, else its error, else a result's message
-const whyOf = r => r?.body?.refusal?.message || r?.body?.error || r?.body?.result?.message || '';
 const refused = error => ({ status: 0, body: { ok: false, error } });
 const isObject = v => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
-// an exchange the Account took: a 2xx that is no refusal, a result that is no refusal either (the Account's refusedAt)
-const taken = r => r.status >= 200 && r.status < 300 && r.body?.ok !== false && !(r.body?.kind === 'result' && r.body?.result?.ok === false);
+// an exchange the Account took: a 2xx that its refusedAt does not call refused (a result that is a refusal is one)
+const taken = r => r.status >= 200 && r.status < 300 && !refusedAt(r);
 
 /** A POST through the face's proxy that never throws: `{ status, body }`, the body parsed when it is an object, else `{}`;
  *  a thrown fetch as the refusal `The account did not answer. Try again.` (status 0). @param {typeof fetch} fetch */
