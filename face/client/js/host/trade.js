@@ -177,6 +177,13 @@ export function startTrade({ store, getJson, owner, sheet, stream, schedule, can
         amount: '', unit: 'usd', orderType: 'market', limit: '', extendedHours: false,
       });
     },
+    /** The open ticket's order sheet seeded again with the fields it had (another sheet took its place and closed): its side,
+     *  venue, outcome and what was typed, the line they name followed. Nothing while no ticket is open, or a sheet is signing. */
+    resume(fields) {
+      const open = store.get().trade.ticket;
+      if (closed || !open || !isRecord(fields) || store.get().sheet?.status === 'signing') return undefined;
+      return seed(open.id, { ...fields });
+    },
     /** The venue field changed (after `sheet.change('venue', id)`): the sheet seeded again with its fields kept and a ticket at
      *  that venue, the new line followed. Nothing while no ticket's sheet is open, or while it is signing. */
     venue(id) {

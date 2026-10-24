@@ -27,12 +27,11 @@ import { itemById } from './host/discover-view.js';
 import { startTraces } from './host/traces.js';
 import { loadMemberTrace } from './wire/member-traces.js';
 import { isHostPreset } from './wire/speaker.js';
-import { statementLinesOf, statementCsvOf, connectOptionsOf, paperBooksOf, asksOf, venuesOf } from './host/account-view.js';
+import { statementLinesOf, statementCsvOf, connectOptionsOf, asksOf } from './host/account-view.js';
 import { isAccountKey, handWordsOf, watchedOf } from './host/market-view.js';
 import { startOwner, postVia } from './host/owner.js';
-import { devicesOf } from './host/owner-view.js';
-import { startSheet } from './host/sheet.js';
-import { limitSeedOf, grantOf, keyfileAskOf, reachAskOf } from './host/sheet-view.js';
+import { startSheet, PREPARE_QUIET_MS } from './host/sheet.js';
+import { limitSeedOf, grantOf, keyfileAskOf, reachAskOf, letDeviceSeedOf, paperSeedOf } from './host/sheet-view.js';
 import { startTrade } from './host/trade.js';
 import { tradeableOf } from './host/trade-view.js';
 import { indexedDbKeys, memoryKeys, signedOutFlag } from './wire/key-store.js';
@@ -245,8 +244,15 @@ export function boot(win, host = {}) {
     const s = store.get().sheet;
     if (kind !== 'order' && s?.kind === kind && s.status === 'done') sheet.close();
   }
-  // the connect sheet's two checks, each asked when what it asks changed: the key file it would connect with, the venue's reach
+  // the connect sheet's two checks, each asked when what it asks changed: the key file it would connect with, the venue's reach —
+  // at once on opening, after the sheet's own quiet on a change (a newer change, or the sheet opened or closed, cancels it)
   let connectAsked = { keyfile: null, reach: null };
+  let connectTimer = null;
+  function stopConnectCheck() { if (connectTimer !== null) { cancelTimer(connectTimer); connectTimer = null; } }
+  function checkConnectSoon() {
+    stopConnectCheck();
+    connectTimer = schedule(() => { connectTimer = null; checkConnect(); }, PREPARE_QUIET_MS);
+  }
   function checkConnect() {
     const s = store.get().sheet;
     if (s?.kind !== 'connect') return;
@@ -257,7 +263,7 @@ export function boot(win, host = {}) {
     if ((connector || null) !== connectAsked.reach) { connectAsked.reach = connector || null; if (connector) void account.reach(connector); }
   }
   // the owner sheet (prepare → What you sign → sign) over the owner device
-  const sheet = startSheet({ store, owner, schedule, cancelTimer, now, afterAction, onChange: kind => { if (kind === 'connect') checkConnect(); } });
+  const sheet = startSheet({ store, owner, schedule, cancelTimer, now, afterAction, onChange: kind => { if (kind === 'connect') checkConnectSoon(); } });
   // a receipt reloads the Account's page past the cache (an Alpaca fill, a seat write), and one from the Account seat the seat's
   // standing too
   const live = startLive({ store, openMux: host.openMux ?? wireOpenMux, call, mapFrame, getJson, timers, now, onReceipt: m => { if (m?.data?.seat) void seat.load({ fresh: true }); void account.load({ fresh: true }); } });
@@ -300,6 +306,7 @@ export function boot(win, host = {}) {
   let ticketAsked = null;   // a market page's Buy or Sell on its way to Trade: the side follow() opens the ticket with
   let sheetOpens = 0;       // the sheets opened so far: a read a sheet waits on opens none over one opened since
   let sheetKind = null;     // the kind of the sheet open as the store last changed: which one a close closed
+  let orderFields = null;   // the ticket's order sheet's fields as they last stood, for when another sheet took its place
   let last = { overlay: null, opener: null, under: null, screen: null, drawer: null, thread: null, editor: null, confirm: null };
   let confirmFrom = null;
 
@@ -448,7 +455,7 @@ export function boot(win, host = {}) {
     if (entered('agents')) void account.loadAgents();
     // Trade left: its ticket closes and lets its line go — before a market's page follows its own
     const inTrade = route => route?.screen === 'trade';
-    if (!inTrade(r) && inTrade(was)) trade.closeTicket();
+    if (!inTrade(r) && inTrade(was)) { stopTradeSearch(); trade.closeTicket(); }
     // a market's page (an Account key): its market followed on the stream with its candles and compare rows, and what is held of
     // it and the statement's lines about it read; leaving it lets the market go
     const pageId = route => (route?.screen === 'markets' && isAccountKey(route.id) ? route.id : null);
@@ -589,9 +596,11 @@ export function boot(win, host = {}) {
     if (searchTimer !== null) timers.cancel(searchTimer);
     searchTimer = timers.after(SEARCH_QUIET_MS, () => { searchTimer = null; markets.search(q); });
   }
-  // Trade's search, the same way: the query moves at once, its read after the quiet; a blank box at once
+  // Trade's search, the same quiet: trade.query (the query and its read) once the box has been quiet, a blank box at once; a
+  // search still waiting goes when Trade is left
+  function stopTradeSearch() { if (tradeTimer !== null) { timers.cancel(tradeTimer); tradeTimer = null; } }
   function tradeSoon(q) {
-    if (tradeTimer !== null) { timers.cancel(tradeTimer); tradeTimer = null; }
+    stopTradeSearch();
     if (!String(q).trim()) { trade.query(q); return; }
     tradeTimer = timers.after(SEARCH_QUIET_MS, () => { tradeTimer = null; trade.query(q); });
   }
@@ -602,6 +611,15 @@ export function boot(win, host = {}) {
     if (typeof id !== 'string' || !tradeableOf({ key: id })) return;
     if (signs()) void trade.pick(id, opts);
     else store.dispatch('ticketOpen', { id, ...opts });
+  }
+  // Trade's ticket without a sheet on a page that signs: its order sheet again — with the fields it had when another sheet took
+  // its place, else opened as the ticket was
+  function resumeTicket() {
+    const s = store.get();
+    if (!signs() || s.route.screen !== 'trade' || !s.trade.ticket || s.sheet) return;
+    if (orderFields) { void trade.resume(orderFields); return; }
+    const t = s.trade.ticket;
+    void trade.pick(t.id, { side: t.side, venue: t.venue, outcome: t.outcome });
   }
   // a picker row's hand-on: its side, venue and outcome where it gives them
   const pickOf = d => ({
@@ -656,7 +674,7 @@ export function boot(win, host = {}) {
       if (opened !== sheetOpens || !signs()) return;
     }
     const page = store.get().account.data;
-    if (kind === 'paper') { void sheet.open('paper', { books: paperBooksOf(slice().data), venues: venuesOf(page).map(v => ({ id: v.id })) }); return; }
+    if (kind === 'paper') { void sheet.open('paper', paperSeedOf(page, slice().data)); return; }
     connectAsked = { keyfile: null, reach: null };
     void sheet.open('connect', { options: connectOptionsOf(page, slice().data) });
     checkConnect();
@@ -793,13 +811,10 @@ export function boot(win, host = {}) {
     pairDevice: () => { void owner.ready(doc.getElementById('pair-code')?.value?.trim() || undefined); },
     signIn: () => { void owner.signIn(); },
     signOut: () => { if (signs()) void sheet.open('signOut', { kid: store.get().owner.kid }); },
-    // the owners the new list keeps: the page's, and this page's own device, which signs whether or not the page read names it
-    // yet (the list replaces the owners)
     letDevice: el => {
       if (!signs()) return;
       const s = store.get();
-      const owners = [...new Set([...devicesOf(s.account.data, s.owner).owners.map(o => o.id), `device:${s.owner.kid}`])];
-      void sheet.open('letDevice', { owners, kid: el.dataset.kid ?? '' });
+      void sheet.open('letDevice', letDeviceSeedOf(s.account.data, s.owner, el.dataset.kid));
     },
     // the owner's keys on Account: each its sheet; Revoke… and Disconnect… ask in place first; Grant the sheet that grants the ask
     openSheet: el => openSheetFrom(el),
@@ -873,7 +888,7 @@ export function boot(win, host = {}) {
     if (el.id === 'say') composerText = el.value;
     else if (el.dataset?.action === 'draftTitle') store.dispatch('setDraftTitle', el.value);
     else if (el.dataset?.action === 'mkQuery') { store.dispatch('setMarketsQuery', el.value); searchSoon(el.value); }
-    else if (el.dataset?.action === 'tradeQuery') { store.dispatch('tradeQuery', el.value); tradeSoon(el.value); }
+    else if (el.dataset?.action === 'tradeQuery') tradeSoon(el.value);   // trade.query moves the query (the box keeps the words)
     else if (el.dataset?.action === 'dq') store.dispatch('setDiscoverQuery', el.value);
     else if (isField(el) && typesWords(el)) changeField(el.name, el.value);
   }
@@ -934,15 +949,17 @@ export function boot(win, host = {}) {
   });
   store.subscribe((s, type) => {
     requestRender();
+    if (type === 'sheetOpen' || type === 'sheetClose') stopConnectCheck();
     if (type === 'sheetOpen') sheetOpens += 1;
+    // the order sheet's fields as they stand, kept while another sheet takes its place; a ticket opened or closed forgets them
+    if (s.sheet?.kind === 'order') orderFields = s.sheet.fields;
+    if (type === 'ticketOpen' || type === 'ticketClose') orderFields = null;
     // Trade's ticket left without its order sheet on a page that signs — a deep link that landed before the pairing, or a sheet
-    // of Settings › Devices that took the order sheet's place and closed — seeds its order sheet again
+    // of Settings › Devices that took the order sheet's place and closed — seeds its order sheet again, with every field it
+    // had; a tick later, never inside the sheet engine's own close
     const otherClosed = type === 'sheetClose' && sheetKind !== 'order';
     sheetKind = s.sheet?.kind ?? null;
-    if ((type === 'ownerStanding' || otherClosed) && s.owner.role === 'signs' && s.route.screen === 'trade' && s.trade.ticket && !s.sheet) {
-      const t = s.trade.ticket;
-      void trade.pick(t.id, { side: t.side, venue: t.venue, outcome: t.outcome });
-    }
+    if (type === 'ownerStanding' || otherClosed) schedule(resumeTicket, 0);
     if (type !== 'hostList') return;
     // the list answered a deep link, or there was no conversation on screen: open one
     if (wanted && s.conversations.some(c => c.id === wanted)) { const id = wanted; wanted = null; go({ screen: 'messages', id }); }

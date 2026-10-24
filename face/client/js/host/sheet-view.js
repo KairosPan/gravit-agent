@@ -4,7 +4,7 @@
 // form is not complete, the words for what is missing; and the connect sheet's check (what to ask, its words). The sheet engine
 // (host/sheet.js) prepares the draft, the renderer draws the fields; the Account judges everything else in its own words. `now` is the caller's clock in milliseconds; `validUntil`
 // values are numbers (the Account's u64 fields), the dollar amounts strings as typed. No DOM, no store.
-import { pageOk, venuesOf, keyfileWords } from './account-view.js';
+import { pageOk, venuesOf, keyfileWords, paperBooksOf } from './account-view.js';
 import { tradeFieldsOf, tradeDraftOf } from './trade-view.js';
 
 const DAY = 86_400_000;
@@ -94,6 +94,21 @@ export function limitSeedOf(page, address, name) {
   const row = records(page.spend).find(r => r.scope === 'trade' && r.expired !== true && sameAddress(r.agent, address));
   if (row) seed.current = { allow: listOf(row.allow), perPayment: dollarsText(row.perPaymentUsd), budget: dollarsText(row.budgetUsd) };
   return seed;
+}
+
+/** Let it sign's seed: the owners the new list keeps — the page's (`signers.owners`), and this page's own `device:<kid>`, which
+ *  signs from its pairing whether or not the page read names it yet (the list REPLACES the owners) — once each, and the waiting
+ *  key's `kid`. */
+export function letDeviceSeedOf(page, owner, kid) {
+  const owners = pageOk(page) ? records(page.signers.owners).map(o => str(o.id)).filter(Boolean) : [];
+  const mine = str(owner?.kid);
+  return { owners: [...new Set([...owners, ...(mine ? [`device:${mine}`] : [])])], kid: str(kid) };
+}
+
+/** The paper sheet's seed: the kept paper books from their read (`/data/account/paper/books`, paperBooksOf) and the page's
+ *  venue ids, so a new paper account's id is never one in use. */
+export function paperSeedOf(page, books) {
+  return { books: paperBooksOf(books), venues: venuesOf(page).map(v => ({ id: v.id })) };
 }
 
 /** The sheet's fields, each `{ name, label, type, options?, placeholder?, value }` — `options` as `{ value, label }`, a `pick`'s

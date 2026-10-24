@@ -1508,6 +1508,17 @@ test('Grant opens the limit sheet on the ask, Decline its own, Revoke… asks tw
   assert.equal(store.get().sheet.seed.address, '0x3a087530887bd175ccc38828ee3776e5b6ea1ac6');
   assert.deepEqual([store.get().sheet.seed.asked, store.get().sheet.seed.budget], ['ex', '1000'], 'the asked venue and dollars');
   assert.equal(focused, 1, 'the sheet takes focus on its close key as it opens');
+  // a pick's boxes: each ticked or unticked as it is checked, the pick's values in its own order
+  const pick = () => store.get().sheet.fields.find(x => x.name === 'allow');
+  const inOrder = values => pick().options.map(o => o.value).filter(v => values.includes(v));
+  const before = pick().value;
+  assert.ok(before.includes('ex'), 'the asked venue ticked');
+  const box = (value, checked) => f.fire('root', 'change', { target: { tagName: 'INPUT', type: 'checkbox', name: 'allow', value, checked, dataset: { action: 'sheetField' } } });
+  box('paper', true);
+  assert.deepEqual(pick().value, inOrder([...before, 'paper']), "ticked, in the pick's own order");
+  assert.equal(pick().value[0], 'paper', 'paper first, as the options are');
+  box('ex', false);
+  assert.deepEqual(pick().value, inOrder([...before, 'paper'].filter(v => v !== 'ex')), 'unticked');
   f.fire('doc', 'keydown', { key: 'Escape' });
   assert.equal(store.get().sheet, null, 'Escape closes the sheet');
   f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'declineAsk', ask: 'ask-0002' } });
@@ -1561,11 +1572,14 @@ test("Settings' Let it sign seeds the owners and the waiting key; Sign out, sign
   store.timers.clear();
 });
 
-test("the connect sheet opens once where it can connect is read; a pick asks the venue's reach, a key file's venue its check", async () => {
+test("the connect sheet opens once where it can connect is read; after the quiet, a pick asks the venue's reach, a key file's venue its check — once for a word typed", async () => {
   const f = fakeWindow({ hash: '#/account/venues', storage: memoryStorage() });
+  const timers = new HeldTimers(ms => ms >= 300);
+  // the sheet's quiet spells (its own prepare's and the checks'), run together
+  const quiet = () => { while (timers.delays().includes(300)) timers.run(300); };
   const door = ownerDoor();
   const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page(), '/data/account/venues': fx('venues'), '/data/account/keyfile': fx('keyfile'), '/data/account/connect/reach': { ok: true, reach: [] } } });
-  const store = bootOwner(f, h, door);
+  const store = bootOwner(f, h, door, fakeMarkets(), { timers });
   await h.ready();
   await until(signs(store), 'the page to sign');
   h.reads.length = 0;
@@ -1577,14 +1591,29 @@ test("the connect sheet opens once where it can connect is read; a pick asks the
   const field = (name, value, tagName = 'INPUT') => ({ tagName, type: 'text', name, value, dataset: { action: 'sheetField' } });
   f.fire('root', 'change', { target: field('connector', 'live:alpaca', 'SELECT') });
   await settle();
+  assert.deepEqual(h.reads, ['/data/account/venues'], 'nothing before the quiet');
+  quiet();
+  await settle();
   assert.equal(h.reads.at(-1), '/data/account/connect/reach?connector=live%3Aalpaca');
+  // a word typed in two keystrokes: one check, for the word
+  f.fire('root', 'input', { target: field('venue', 'alp') });
   f.fire('root', 'input', { target: field('venue', 'alpaca') });
   await settle();
-  assert.equal(h.reads.at(-1), '/data/account/keyfile?kind=alpaca&venue=alpaca');
+  assert.equal(h.reads.filter(p => p.startsWith('/data/account/keyfile')).length, 0, 'none per keystroke');
+  quiet();
+  await settle();
+  assert.deepEqual(h.reads.filter(p => p.startsWith('/data/account/keyfile')), ['/data/account/keyfile?kind=alpaca&venue=alpaca']);
   const asked = h.reads.length;
   f.fire('root', 'input', { target: field('label', 'My Alpaca') });
+  quiet();
   await settle();
   assert.equal(h.reads.length, asked, 'a field neither check reads asks nothing again');
+  // a check still waiting when the sheet closes asks nothing
+  f.fire('root', 'input', { target: field('venue', 'alpaca-2') });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sheetClose' } });
+  quiet();
+  await settle();
+  assert.equal(h.reads.length, asked, 'closed: nothing asked');
   store.timers.clear();
 });
 
@@ -1635,21 +1664,115 @@ test("Buy or Sell on a market's page opens the ticket on it, once, its line foll
   const venue = store.get().sheet.fields.venue;
   assert.ok(venue);
   assert.deepEqual(st.follows.slice(-2), [[], [`${venue}:${store.get().sheet.seed.ticket.legs.find(l => l.venue === venue).symbol}`]], "the page's market let go, then the ticket's line");
-  // the ticket's keys reach the sheet: the amount typed, Buy pressed
+  // the ticket's keys reach the sheet: the amount typed, Buy pressed, the extended-hours box read as ticked
   f.fire('root', 'input', { target: { tagName: 'INPUT', type: 'text', id: 'tk-amount', name: 'amount', value: '25', dataset: { action: 'ticketField' } } });
   f.click({ tagName: 'BUTTON', dataset: { action: 'ticketSide', value: 'buy' } });
-  assert.deepEqual([store.get().sheet.fields.amount, store.get().sheet.fields.side], ['25', 'buy']);
-  // a sheet of Settings › Devices takes the order sheet's place; closed, the ticket's sheet is seeded again
+  f.fire('root', 'change', { target: { tagName: 'INPUT', type: 'checkbox', name: 'extendedHours', value: 'true', checked: true, dataset: { action: 'ticketField' } } });
+  assert.deepEqual([store.get().sheet.fields.amount, store.get().sheet.fields.side, store.get().sheet.fields.extendedHours], ['25', 'buy', true]);
+  // Where: another able line re-seeds the ticket there (trade.venue), what was typed kept, its line followed
+  f.click({ tagName: 'BUTTON', dataset: { action: 'ticketVenue', venue: 'wallet' } });
+  assert.deepEqual([store.get().sheet.seed.ticket.venue, store.get().sheet.fields.venue, store.get().sheet.fields.amount], ['wallet', 'wallet', '25']);
+  assert.deepEqual(st.follows.at(-1), ['wallet:cbBTC/USDC@Base']);
+  // a sheet of Settings › Devices takes the order sheet's place; closed, the ticket's sheet comes back as it was, a tick later
   f.click({ tagName: 'BUTTON', dataset: { action: 'signOut' } });
   assert.equal(store.get().sheet.kind, 'signOut');
   f.fire('doc', 'keydown', { key: 'Escape' });
-  assert.equal(store.get().sheet.kind, 'order', 'the ticket has its sheet again');
+  assert.equal(store.get().sheet, null, 'not inside the close');
+  await settle();
+  const back = store.get().sheet;
+  assert.equal(back.kind, 'order', 'the ticket has its sheet again');
+  assert.deepEqual([back.fields.side, back.fields.venue, back.fields.amount, back.fields.extendedHours], ['buy', 'wallet', '25', true], 'a Buy with its amount stays one');
   assert.equal(store.get().trade.ticket.id, 'coin:BTC');
+  assert.match(f.html(), /<h2 class="tk-title">Buy BTC<\/h2>/);
+  // an outcome pressed reaches trade.outcome after the sheet took it
+  const outcomes = [];
+  const outcome = store.trade.outcome;
+  store.trade.outcome = i => { outcomes.push([i, store.get().sheet.fields.outcome]); };
+  f.click({ tagName: 'BUTTON', dataset: { action: 'ticketOutcome', value: '1' } });
+  store.trade.outcome = outcome;
+  assert.deepEqual(outcomes, [[1, '1']]);
   // leaving Trade closes the ticket and its sheet
   f.win.location.hash = '#/messages/s1';
   await settle();
   assert.equal(store.get().trade.ticket, null);
   assert.equal(store.get().sheet, null);
+  store.timers.clear();
+});
+
+test('on a page that does not sign a pick opens the ticket alone; a perpetual opens nothing; the page signing then, the ticket gets its sheet', async () => {
+  const f = fakeWindow({ hash: '#/trade/perp:BTC', storage: memoryStorage() });
+  const door = ownerDoor({ role: 'pending' });
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page() } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(() => store.get().owner.role === 'pending', 'the page to wait');
+  await settle();
+  assert.equal(store.get().trade.ticket, null, '#/trade/<a perpetual> opens no ticket');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'pickMarket', id: 'coin:BTC', venue: 'ex' } });
+  assert.deepEqual(store.get().trade.ticket, { id: 'coin:BTC', side: 'buy', venue: 'ex', outcome: 0 });
+  assert.equal(store.get().sheet, null, 'no sheet on a page that does not sign');
+  assert.match(f.html(), /Waiting to be let in/, "the ticket's panel says why");
+  f.click({ tagName: 'BUTTON', dataset: { action: 'pickMarket', id: 'perp:BTC' } });
+  assert.equal(store.get().trade.ticket.id, 'coin:BTC', 'a perpetual picked changes nothing');
+  // let in: the next page names this device, it signs, and the ticket gets its order sheet at its venue
+  door.role = 'owner';
+  f.click({ tagName: 'BUTTON', dataset: { action: 'refreshAccount' } });
+  await until(signs(store), 'the page to sign');
+  await settle();
+  assert.equal(store.get().sheet?.kind, 'order');
+  assert.deepEqual([store.get().sheet.seed.id, store.get().sheet.fields.venue, store.get().sheet.fields.side], ['coin:BTC', 'ex', 'buy']);
+  store.timers.clear();
+});
+
+test("Trade's search reads after 300 ms of quiet, a blank box at once; one still waiting goes when Trade is left", async () => {
+  const f = fakeWindow({ hash: '#/trade', storage: memoryStorage() });
+  const timers = new HeldTimers(ms => ms >= 300);
+  const h = accountHost({ rows: [row('s1')] });
+  const store = bootAccount(f, h, fakeMarkets(), { timers });
+  await h.ready();
+  const box = value => f.fire('root', 'input', { target: { tagName: 'INPUT', type: 'search', id: 'tq', value, dataset: { action: 'tradeQuery' } } });
+  const searches = () => h.reads.filter(p => p.startsWith('/data/account/explore?q='));
+  box('so');
+  box('sol');
+  await settle();
+  assert.deepEqual(searches(), [], 'nothing before the quiet');
+  assert.equal(timers.delays().filter(ms => ms === 300).length, 1, 'a keystroke restarts the wait');
+  timers.run(300);
+  await settle();
+  assert.deepEqual(searches(), ['/data/account/explore?q=sol&limit=12']);
+  assert.equal(store.get().trade.q, 'sol');
+  box('');
+  assert.equal(store.get().trade.q, '', 'a blank box at once');
+  assert.equal(timers.delays().includes(300), false);
+  box('eth');
+  f.win.location.hash = '#/messages/s1';
+  await settle();
+  assert.equal(timers.delays().includes(300), false, 'left Trade: the search waiting goes');
+  assert.equal(searches().length, 1);
+  store.timers.clear();
+});
+
+test("a quote frame reaches Trade's host; a hidden tab stops Trade's poll and a visible one starts it again", async () => {
+  const f = fakeWindow({ hash: '#/trade', storage: memoryStorage() });
+  const timers = new HeldTimers();
+  const st = fakeStream();
+  const h = accountHost({ rows: [row('s1')] });
+  const store = bootAccount(f, h, fakeMarkets(), { timers, createAccountStream: st.create });
+  await h.ready();
+  const seen = [];
+  const onStreamEvent = store.trade.onStreamEvent;
+  store.trade.onStreamEvent = ev => { seen.push(ev.type); onStreamEvent(ev); };
+  st.event('quote', { venue: 'ex', symbol: 'BTC/USDT', last: 63000.5, live: true }, 'r.1');
+  st.event('order', { id: 'ord-1' }, 'r.2');
+  assert.deepEqual(seen, ['quote'], 'a quote, not an order event');
+  const polls = () => timers.delays().filter(ms => ms === 20_000).length;
+  assert.equal(polls(), 1);
+  f.doc.hidden = true;
+  f.fire('doc', 'visibilitychange');
+  assert.equal(polls(), 0, 'hidden: no poll');
+  f.doc.hidden = false;
+  f.fire('doc', 'visibilitychange');
+  assert.equal(polls(), 1, 'visible: the poll again');
   store.timers.clear();
 });
 

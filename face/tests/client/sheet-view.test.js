@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { SHEET_KINDS, fieldsOf, draftOf, titleOf, goWord, grantOf, limitSeedOf } from '../../client/js/host/sheet-view.js';
+import { SHEET_KINDS, fieldsOf, draftOf, titleOf, goWord, grantOf, limitSeedOf, letDeviceSeedOf, paperSeedOf } from '../../client/js/host/sheet-view.js';
 import { venuesOf } from '../../client/js/host/account-view.js';
 
 const fx = name => JSON.parse(readFileSync(new URL(`../fixtures/account/${name}.json`, import.meta.url), 'utf8'));
@@ -193,6 +193,30 @@ test('letDevice: the signers JSON, the owners and the new device sorted without 
   // the list replaces the owners: with none to keep it would drop every device that signs, so it is never drafted
   assert.equal(draftOf('letDevice', [], { owners: [], kid: '0123456789abcdef' }, NOW), 'No owner device to sign with');
   assert.equal(draftOf('letDevice', [], { kid: '0123456789abcdef' }, NOW), 'No owner device to sign with');
+});
+
+// plan 2 Task 13 fix round M3: the two seeds the wiring built, here beside limitSeedOf
+test("letDeviceSeedOf: the page's owners and this page's own device (signing before any page names it), once each, and the waiting key", () => {
+  const page = fx('account');
+  assert.deepEqual(letDeviceSeedOf(page, { role: 'signs', kid: 'ded8a5bf01a7a593' }, 'feedface00000001'),
+    { owners: ['device:a5048199a8081854', 'device:ded8a5bf01a7a593'], kid: 'feedface00000001' });
+  const named = { ...page, signers: { ...page.signers, owners: [...page.signers.owners, { id: 'device:ded8a5bf01a7a593', kind: 'device' }] } };
+  assert.deepEqual(letDeviceSeedOf(named, { kid: 'ded8a5bf01a7a593' }, 'feedface00000001').owners, ['device:a5048199a8081854', 'device:ded8a5bf01a7a593'], 'once');
+  assert.deepEqual(letDeviceSeedOf(null, { kid: '' }, undefined), { owners: [], kid: '' }, 'no page and no key: nothing to keep');
+  // the draft it seeds keeps every owner
+  const draft = draftOf('letDevice', [], letDeviceSeedOf(page, { kid: 'ded8a5bf01a7a593' }, 'feedface00000001'), NOW);
+  assert.deepEqual(JSON.parse(draft.signers).authorizedUsers, ['device:a5048199a8081854', 'device:ded8a5bf01a7a593', 'device:feedface00000001']);
+});
+
+test("paperSeedOf: the kept books read and the page's venue ids, so a new paper id is never one in use", () => {
+  const page = fx('account');
+  const books = { ok: true, books: [{ venue: 'paper-old', name: 'Old', cashUsd: 900 }, { name: 'no venue' }] };
+  const seed = paperSeedOf(page, books);
+  assert.deepEqual(seed.books.map(b => b.venue), ['paper-old']);
+  assert.deepEqual(seed.venues, venuesOf(page).map(v => ({ id: v.id })));
+  assert.deepEqual(paperSeedOf(null, null), { books: [], venues: [] });
+  const fields = set(fieldsOf('paper', seed), { label: 'Momentum', usd: '1000' });
+  assert.equal(draftOf('paper', fields, seed, NOW).venue, 'paper-momentum-2', "the page's paper-momentum in use");
 });
 
 test('grantOf: a limit or a venue asks for a limit, a knock to be let in, a top-up a top-up; the rest are the Account page\'s', () => {

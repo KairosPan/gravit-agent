@@ -254,6 +254,27 @@ test('pick opens the ticket and the order sheet on the best able line and follow
   assert.equal(r.follows.length, f, 'nothing held: nothing released');
 });
 
+// plan 2 Task 13 fix round: another sheet took the order sheet's place and closed — the wiring resumes the ticket with the
+// fields the order sheet had
+test('resume seeds the open ticket again with the fields it had and follows their line; no ticket, or a sheet signing, resumes nothing', () => {
+  const r = rig();
+  assert.equal(r.trade.resume({ venue: 'ex' }), undefined, 'no ticket open');
+  r.trade.pick('coin:ETH', { side: 'sell' });
+  const kept = { venue: 'wallet', side: 'buy', outcome: '0', ...FORM, amount: '25', orderType: 'limit', limit: '2400' };
+  r.store.dispatch('sheetClose');
+  r.trade.resume(kept);
+  const [, kind, seed, fields] = r.calls.at(-1);
+  assert.equal(kind, 'order');
+  assert.equal(seed.id, 'coin:ETH');
+  assert.equal(seed.ticket.venue, 'wallet', "the seed's ticket at the kept venue");
+  assert.deepEqual(fields, kept, 'every field as it was, the side and what was typed among them');
+  assert.deepEqual(r.follows.at(-1), ['wallet:WETH/USDC@Base']);
+  r.store.dispatch('sheetSigning');
+  const opens = r.calls.length;
+  assert.equal(r.trade.resume(kept), undefined, 'a sheet signing: nothing');
+  assert.equal(r.calls.length, opens);
+});
+
 test('close and closeTicket with no follow held leave the stream alone (the Markets follow untouched)', () => {
   const r = rig();
   r.trade.show(true);

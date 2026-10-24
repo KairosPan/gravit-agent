@@ -178,7 +178,8 @@ export function startOwner({ store, post, subtle, keys, flag, label = 'Gravit fa
     try {
       busy(1);
       const r = await act({ type: 'signOut', device: `device:${kid}` });
-      if (r.status === 200 && r.body?.ok !== false) {
+      // taken as submit takes it: a 200 that is a refusal leaves the device as it was
+      if (taken(r)) {
         flag.set(true);
         stand('signed-out', '');
         try { await keys.remove(); } catch { /* the Account dropped the device: a key left behind signs for nothing */ }

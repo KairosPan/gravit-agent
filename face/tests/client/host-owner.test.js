@@ -420,6 +420,21 @@ test("this page's sign-out signed on a sheet ends the device as signOut does; a 
   assert.deepEqual([s.o().role, s.flag.get()], ['signs', false]);
 });
 
+// fix round M6: one rule for both paths — a 200 that is a refusal (a result that is not ok) leaves the key, the role and the flag
+test('a sign-out answered by a 200 that is a refusal leaves the device as it was, by signOut() or by the sheet', async () => {
+  const r = await signing();
+  const kid = r.o().kid;
+  const notOk = { status: 200, body: { ok: true, kind: 'result', result: { ok: false, message: 'not now' } } };
+  r.door.once(EXCHANGE, notOk);
+  await r.owner.signOut();
+  assert.deepEqual([r.o().role, r.o().kid, r.flag.get()], ['signs', kid, false]);
+  assert.ok(await r.keys.get(), 'the key kept');
+  r.door.once(EXCHANGE, notOk);
+  await r.owner.submit((await r.owner.prepare({ type: 'signOut', device: `device:${kid}` })).body);
+  assert.deepEqual([r.o().role, r.o().kid, r.flag.get()], ['signs', kid, false]);
+  assert.ok(await r.keys.get(), 'the key kept');
+});
+
 test('a pairing that threw does not wedge the next', async () => {
   const r = rig();
   let thrown = false;
