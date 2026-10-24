@@ -691,7 +691,7 @@ was told `GRAVIT.md` stood at 4,496 of its 4,500 bytes.
 | 12 The star signs `setWatch` | 0c9fc2f | spec ✅, quality ✅ (its Important was Task 13's carry) | 1291 / 1273 / 18 |
 | 13 The wiring | bb7fe8f (the hosts' hooks), 9e460a7 (the wiring); fix round 1 1b15177 | spec ✅ with one Important, quality ❌ — 2 Important (the per-keystroke check, the re-seed after a Settings sheet), 8 Minor; round 1 addressed seven, re-review clean | 1310 / 1292 / 18 |
 | 14 The smoke's owner half | b45c5cc; before review 3f74a67; fix round 1 e111c27 | quality ❌ — 1 Important (a holdings check that proved nothing), 4 Minor; round 1 addressed three, re-review clean | 1310 / 1292 / 18; `FACE_SMOKE=1` with `FACE_ACCOUNT_SEAT_DIR` 1310 / 1310 at b45c5cc, the graft smoke 1 / 1 again at 3f74a67 and e111c27 |
-| 15 The documents and the charter | 1a08ec6 (the charter's seven amendments dated 2026-10-24, `DEVELOPMENT.md`, `face/README.md`, `CLAUDE.md`, `GRAVIT.md` at 4,496 bytes, the seat design's two superseded marks); this section in the commit after it | the task review pending | 1310 / 1292 / 18; typecheck clean |
+| 15 The documents and the charter | 1a08ec6 (the charter's seven amendments dated 2026-10-24, `DEVELOPMENT.md`, `face/README.md`, `CLAUDE.md`, `GRAVIT.md` at 4,496 bytes, the seat design's two superseded marks); this section in the commit after it (461c50a) | spec ✅ (the seven charter edits word for word), quality ✅ with 11 Minor (32 of 32 sampled claims true) — the eleven fixed in place in the final wave (a554f82) | 1310 / 1292 / 18; typecheck clean |
 
 ### Deferred minors
 
@@ -744,6 +744,26 @@ was told `GRAVIT.md` stood at 4,496 of its 4,500 bytes.
 62. Task 14: two statements on one line, and a 170-column header, in the smoke.
 63. Task 15: `render/account.js`'s seat-box comment still calls the Account page "the only place a
     card is signed" — the documents no longer do; the comment is code, left for the final wave.
+    **Closed** in the final wave (26c45b2): the comment says the cards are answered on the face's
+    Cards tab, or on the Account page.
+64. Final review M1: renderers import from an impure host module — `render/owner.js` and
+    `render/trade.js` take `askedOf` from `host/sheet.js`, `reducers/trade.js` and `data/empty.js`
+    take `TRADE_KINDS` from `host/trade-view.js`; nothing impure runs, but the pure-view /
+    impure-host / renderer shape is crossed both ways. Move `askedOf` into `sheet-view.js` and
+    `TRADE_KINDS` into a data module — `TRADE_KINDS` first, before stage 3 removes modules.
+65. Final review M4: no `storage` listener on `gravit.owner.signedOut.v1` — a second face tab
+    keeps `signs` in memory up to one page read (20 s; 80 s with the stream open) after another
+    tab signed out, and draws keys meanwhile; a signature in that window is 401 at the door and
+    re-reads the standing, which then lands `signed-out`. Honest and bounded; the fix is a
+    `storage` listener in `app.js` calling `owner.standing`, pinned by a host-owner case.
+66. Final review M5: Review Focus 3 (a rejected card on a 200) is pinned at `refusedAt` and the
+    device host, not at the sheet; `sheet.submit` calls `refusedAt` directly, so the rule holds
+    transitively — one `submitWith` case answering a 200 `kind: 'result'` with `result.ok ===
+    false`, asserting `sheetRefused` and no `afterAction`, would pin the wiring.
+67. Final review M6: `app.js` is 978 lines (980 after the final wave) — split the owner-sheet
+    wiring (`afterAction`, `checkConnect*`, `openSheetFrom`, `openOnRead`, `pickTicket`,
+    `resumeTicket`, `changeField`, `fieldValueOf` and their `act` entries) into
+    `host/owner-wiring.js` before stage 3 touches the file (deferred minor 61's `app.js` clause).
 
 ### The drill owed to the operator
 
@@ -764,3 +784,46 @@ keyed run against the real service (the seat arc's) is still owed beside it.
 - `FACE_SMOKE=1` with `FACE_ACCOUNT_SEAT_DIR`: 1310 / 1310 at b45c5cc; the graft smoke 1 / 1 at
   e111c27; not re-run for the documents.
 - The final whole-branch review (on fable) is next; not merged, not pushed.
+
+### Final review
+
+HEAD 461c50a: 27 commits over e2627fd, 65 files, +9 353 / −338; merge-base with main d227316.
+Dispatched on fable (the operator's word).
+
+- **Verdict (fable):** ready to merge with fixes — 0 Critical, 1 Important, 6 Minor. I1: this
+  ledger omitted Task 15's eleven deferred document minors, two of which touch the owner drill.
+  M1: renderers and reducers import from `host/`. M2: the pair box is not a form — Enter does
+  nothing. M3: spec §6.4's Under way → Cards clause is not built, dropped by the plan's Task 11.
+  M4: no `storage` listener on the sign-out flag. M5: Review Focus 3 has no sheet-level pin. M6:
+  `app.js` at 978 lines. Review Focus 1–5 pinned where the plan said; the 28 rulings 46–73
+  weighed, none reversed; the envelope, `refusedAt`, `tkOrderDraft` and `preparedTop` compared
+  against the Account's own source; suite 1310 / 1292 / 18, typecheck clean, the owner smoke 1 / 1.
+- **Re-graded**, as the SDD ledger records it: "Final: re-graded — I1 Important stands, fixed by
+  fixing Task 15's eleven document minors in place (not by listing them) + closing deferred 63 (the
+  stale comment); M2 enters the wave (Enter in the pair box is a first-day stumble); M3 enters the
+  wave (a spec §6.4 item the plan dropped — a link from an Under way card row to
+  `#/account/cards`); M1, M4, M5, M6 deferred (M6: split `app.js`'s owner-sheet wiring before
+  stage 3)." The four deferred are minors 64–67 above.
+- **Ruling**, as the SDD ledger records it: "Final: Ruling: M3 is built in the wave as the spec
+  says — the cards Gravit waits on, listed under Under way from `cardsOf(page)` with a link to
+  Cards — the plan's Task 11 omitted it by my oversight — cost if wrong: one list the operator also
+  sees on Cards."
+- **The fix wave** — one, a fresh implementer on opus at BASE 461c50a, a scoped re-review on fable
+  after it: 26c45b2 (code: M2, M3, deferred minor 63), a554f82 (documents: I1's eleven, and the two
+  code changes said) and the commit that adds these lines. M2: the pair box is a
+  `<form class="pair-box" data-action="pairDevice">`; Enter in its one box submits it (implicit
+  submission — the Pair key stays `type="button"`, so a click is never counted twice), routed in
+  the submit listener to the same `pairDevice`, held while a pairing is in the air as the key is;
+  the `app-dom` pin failed first on the markup, the held clause was seen to fail without its guard.
+  M3: Under way draws **Cards waiting** under the orders when the page has cards — every card of
+  `cardsOf(page)` (the stand-in's is Claude Code's, so the rows are the page's cards, Gravit's
+  among them, not Gravit's alone), each `reason · value · answer by` in the Cards tab's words
+  (`cardFactsOf`, now exported from `render/account.js` and read by both) with **Review →** to
+  `#/account/cards`, rows only; none, nothing added; the `trade` pin failed first. I1: the eleven
+  fixed where they stood — the charter header's clause (§1, §5 added), README's intro (Trade,
+  Discover), the browser's keys (three, and two more once paired), the cadence's `pair` (each
+  load's first page), *What you sign* a fold in the sheet and on the ticket, `paper-<the name,
+  slugged>`, the drill's origin (the operator's own profile will do), its read (20 s, 80 s while
+  the stream is open), its step 7 (the paper venue the seat's `trade` limit names), DEVELOPMENT's
+  map row (the owner device, Trade) and the proxy row (`keyfile` at `/data/account/keyfile`).
+  Suite 1312 / 1294 / 18, typecheck clean; `FACE_SMOKE=1` left to the controller on the final tree.
