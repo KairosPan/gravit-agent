@@ -1,7 +1,11 @@
 /** The Account grafted into the face, on a real boot (spec 2026-10-22 §10): the Account's own stand-in (no network,
  * a fresh temp home), the face booted with `FACE_ACCOUNT_URL` at it, and the screens' reads asked of the face's own
  * port as the page asks them — the Account's page, its markets, a query the whitelist refuses, its push channel, and
- * the seat box through the proxy's shared reader.
+ * the seat box through the proxy's shared reader. Then the owner's half: the face's own owner device
+ * (`client/js/host/owner.js`, run under Node by `helpers/owner-node.ts`) pairs with the code the stand-in printed,
+ * signs a watch, a market buy (its fill told on the stream opened before it), a resting limit buy and its cancel, and
+ * the approval of the stand-in's seeded card — every call to the face's port, never the stand-in's; a foreign origin's
+ * exchange is fenced; and nothing of a body (the pairing code, a signature) is in what the face's process wrote.
  *
  * Skipped unless `FACE_SMOKE=1` and `FACE_ACCOUNT_SEAT_DIR` names an installed checkout of
  * linqizhe07/buyer-agent-demo (`npm ci` there), as `account-seat-smoke` is: the checkout is read, never written; the
@@ -25,6 +29,7 @@ import { registerAccountProxy } from "../src/account-proxy.ts";
 import { registerSeatRoute, type SeatView } from "../src/seat.ts";
 import { makeBotsRoot } from "./bots-fixture.ts";
 import { freePort, standinSkip, startStandin, stopStandin, type Standin } from "./helpers/standin.ts";
+import { startOwnerNode, type OwnerAnswer, type OwnerNode } from "./helpers/owner-node.ts";
 
 const skip = standinSkip();
 
@@ -34,6 +39,73 @@ const SEEDED_AGENT_NAME = "Claude Code";
 const STREAM_CLIENT = "face-smoke0000000000000000";
 /** How long the stream has to tell its first frame. */
 const FIRST_FRAME_MS = 5_000;
+/** How long the stream has to tell a frame the owner's action caused (a fill, a card answered). */
+const ACTION_FRAME_MS = 10_000;
+/** A liveOrder draft's optional fields, every one empty, as the Trade ticket sends them (the owner-path map §3.1). */
+const ORDER_BLANKS = {
+  limitPrice: "", stopPrice: "", tif: "", postOnly: "", reduceOnly: "", extendedHours: "", trailPercent: "", trailPrice: "", takeProfit: "", stopLoss: "",
+} as const;
+
+/** Everything this process writes to stdout and stderr from now on — the face runs in it — still written through. */
+function captureOutput(): { text: () => string; restore: () => void } {
+  const heard: string[] = [];
+  const tee = (stream: NodeJS.WriteStream): (() => void) => {
+    const write = stream.write.bind(stream);
+    stream.write = ((chunk: string | Uint8Array, ...rest: unknown[]) => {
+      heard.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+      return (write as (...args: unknown[]) => boolean)(chunk, ...rest);
+    }) as typeof stream.write;
+    return () => { stream.write = write; };
+  };
+  const undo = [tee(process.stdout), tee(process.stderr)];
+  return { text: () => heard.join(""), restore: () => { for (const back of undo) back(); } };
+}
+
+/** A frame the stream told: its `event:` name and its `data:` parsed (undefined when it is not JSON). */
+interface Frame { event: string; data: unknown }
+/** Every named frame an open stream tells, collected as it comes, until the stream ends or is aborted. */
+function collectFrames(res: Response): Frame[] {
+  const frames: Frame[] = [];
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let heard = "";
+  void (async () => {
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) return;
+        heard += decoder.decode(value, { stream: true });
+        const blocks = heard.split("\n\n");
+        heard = blocks.pop() ?? "";
+        for (const block of blocks) {
+          const event = /^event: ?(.*)$/m.exec(block)?.[1];
+          if (event === undefined) continue;
+          const raw = /^data: ?(.*)$/m.exec(block)?.[1] ?? "";
+          let data: unknown;
+          try { data = JSON.parse(raw); } catch { data = undefined; }
+          frames.push({ event, data });
+        }
+      }
+    } catch {
+      /* aborted: the collection ends */
+    }
+  })();
+  return frames;
+}
+
+/** The first collected frame `matches` takes, waited for up to `ms`; undefined when none came. */
+async function frameWithin(frames: Frame[], matches: (frame: Frame) => boolean, ms: number): Promise<Frame | undefined> {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    const found = frames.find(matches);
+    if (found !== undefined || Date.now() >= deadline) return found;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
+const fieldOf = (data: unknown, name: string): unknown => (data !== null && typeof data === "object" ? (data as Record<string, unknown>)[name] : undefined);
+/** An answer as the assertion message shows it: its status and the start of its body. */
+const shown = (r: OwnerAnswer): string => `${r.status} ${JSON.stringify(r.body).slice(0, 600)}`;
 
 /** The first frame the stream names (an `event:` line, its `data:` with it) within `ms`, or what came instead. */
 async function firstFrame(res: Response, ms: number): Promise<{ event: string | undefined; data: string | undefined; heard: string }> {
@@ -56,14 +128,18 @@ async function firstFrame(res: Response, ms: number): Promise<{ event: string | 
   }
 }
 
-test("account graft smoke: the Account's page and markets, a refused query, its push channel and the seat box, through the face's own port", {
-  skip, timeout: 240_000,
+test("account graft smoke: the Account's page and markets, a refused query, its push channel and the seat box; then, as the owner's device, a pairing, a watch, two orders and a cancel, a card answered — through the face's own port", {
+  skip, timeout: 300_000,
 }, async () => {
   const standin: Standin = await startStandin(await freePort());
   const home = mkdtempSync(join(tmpdir(), "face-graft-home-"));
   const wasUrl = process.env.FACE_ACCOUNT_URL;
   let dispose: (() => Promise<void>) | undefined;
   let disposeProxy: (() => void) | undefined;
+  let device: OwnerNode | undefined;
+  const ownerStream = new AbortController();
+  /* What the face's process says, from its boot on: no pairing code and no signature may be in it. */
+  const output = captureOutput();
   try {
     /* 1. A scratch face home, AKShare and the seat row off; the face booted with the stand-in as its Account. */
     setupFaceProfile(home);
@@ -114,7 +190,82 @@ test("account graft smoke: the Account's page and markets, a refused query, its 
     assert.equal(seat.status, 200);
     const view = await seat.json() as SeatView;
     assert.equal(view.reachable, true, JSON.stringify(view));
+
+    /* THE OWNER'S HALF (spec §10): the face's own owner device — client/js/host/owner.js under Node, its key made with
+     * Node's WebCrypto and kept in memory — paired, signing and answering, every call to the face's port, never the
+     * stand-in's. */
+    device = startOwnerNode(base);
+    const { owner } = device;
+
+    /* 7. Paired with the code the stand-in printed: the stand-in lets the first browser that types it sign. */
+    await owner.ready(standin.code);
+    assert.equal(device.standing().role, "signs", `the device signs: ${JSON.stringify(device.standing())}${said}`);
+    assert.equal(device.standing().refusal, null);
+    assert.match(device.standing().kid, /^[0-9a-f]{16}$/);
+
+    /* 8. A watch, signed: taken, and the Account's page lists it. */
+    const watched = await owner.act({ type: "setWatch", venue: "ex", symbol: "BTC/USDT", on: "true" });
+    assert.equal(watched.status, 200, shown(watched));
+    assert.notEqual(watched.body.ok, false, shown(watched));
+    const afterWatch = await (await fetch(`${base}/data/account?fresh=1`)).json() as { watch?: { venue?: string; symbol?: string }[] };
+    assert.ok(afterWatch.watch?.some((w) => w.venue === "ex" && w.symbol === "BTC/USDT"), `the page watches BTC/USDT at ex: ${JSON.stringify(afterWatch.watch)}`);
+
+    /* 9. The stream opened first, then the owner's market buy of $25 of ETH: an order, and its fill on the stream. */
+    const streamed = await fetch(`${base}/data/account/stream?client=${STREAM_CLIENT}`, { headers: { accept: "text/event-stream" }, signal: ownerStream.signal });
+    if (streamed.status !== 200) assert.fail(`the owner's stream answered ${streamed.status}: ${(await streamed.text()).slice(0, 400)}`);
+    const frames = collectFrames(streamed);
+    const bought = await owner.act({ type: "liveOrder", venue: "ex", symbol: "ETH/USDT", side: "buy", orderType: "market", usd: "25", ...ORDER_BLANKS });
+    assert.equal(bought.status, 200, shown(bought));
+    assert.equal(bought.body.kind, "order", shown(bought));
+    const boughtId = fieldOf(bought.body.order, "id");
+    assert.equal(typeof boughtId, "string", shown(bought));
+    const fill = await frameWithin(frames, (f) => f.event === "fill" && fieldOf(f.data, "order") === boughtId, ACTION_FRAME_MS);
+    assert.ok(fill, `a fill for ${String(boughtId)} within ${ACTION_FRAME_MS / 1000} s; heard ${JSON.stringify(frames.map((f) => f.event))}`);
+    assert.equal(fieldOf(fill.data, "symbol"), "ETH/USDT");
+
+    /* 10. The Portfolio holds ETH at the exchange. */
+    const holdings = await (await fetch(`${base}/data/account/holdings?cost=1&fresh=1`)).json() as { rows?: { asset?: string; venues?: { venue?: string }[] }[] };
+    assert.ok(holdings.rows?.some((row) => row.asset === "ETH" && row.venues?.some((line) => line.venue === "ex")), `ETH at ex: ${JSON.stringify(holdings.rows?.map((r) => [r.asset, r.venues?.map((v) => v.venue)]))}`);
+
+    /* 11. A limit buy of SOL 10 % under the ask rests open; cancelled, it is canceled. */
+    const market = await (await fetch(`${base}/data/account/market?venue=ex&symbol=${encodeURIComponent("SOL/USDT")}`)).json() as { market?: { ask?: number; priceStep?: number } };
+    const ask = market.market?.ask;
+    assert.ok(typeof ask === "number" && ask > 0, `SOL/USDT's ask at ex: ${JSON.stringify(market).slice(0, 400)}`);
+    const step = market.market?.priceStep ?? 0.01;
+    const limitPrice = String(Number((Math.floor((ask * 0.9) / step) * step).toFixed(8)));
+    const resting = await owner.act({ type: "liveOrder", venue: "ex", symbol: "SOL/USDT", side: "buy", orderType: "limit", qty: "0.5", ...ORDER_BLANKS, limitPrice });
+    assert.equal(resting.status, 200, shown(resting));
+    assert.equal(resting.body.kind, "order", shown(resting));
+    assert.equal(fieldOf(resting.body.order, "status"), "open", shown(resting));
+    const restingId = fieldOf(resting.body.order, "id");
+    const cancelled = await owner.act({ type: "liveCancel", venue: "ex", order: String(restingId) });
+    assert.equal(cancelled.status, 200, shown(cancelled));
+    assert.equal(cancelled.body.kind, "order", shown(cancelled));
+    assert.equal(fieldOf(cancelled.body.order, "status"), "canceled", shown(cancelled));
+
+    /* 12. The card Claude Code's market buy of ETH waits on, approved: taken, and the stream tells it approved. */
+    const withCard = await (await fetch(`${base}/data/account?fresh=1`)).json() as { cards?: { id?: string; hash?: string }[] };
+    const card = withCard.cards?.[0];
+    assert.ok(card?.id && card.hash, `a card waits: ${JSON.stringify(withCard.cards)}`);
+    const answered = await owner.act({ type: "approveCard", card: card.id, action: card.hash, decision: "approve" });
+    assert.equal(answered.status, 200, shown(answered));
+    const told = await frameWithin(frames, (f) => f.event === "card" && fieldOf(f.data, "id") === card.id && fieldOf(f.data, "outcome") === "approved", ACTION_FRAME_MS);
+    assert.ok(told, `a card frame for ${card.id} approved within ${ACTION_FRAME_MS / 1000} s; heard ${JSON.stringify(frames.filter((f) => f.event === "card"))}`);
+
+    /* 13. The fence: an exchange posted from a foreign origin is refused before the Account is asked. */
+    const foreign = await fetch(`${base}/data/account/exchange`, {
+      method: "POST", headers: { "content-type": "application/json", origin: "http://evil.example" }, body: "{}",
+    });
+    assert.equal(foreign.status, 403);
+
+    /* 14. Nothing of a body in what the face said: neither the pairing code nor a signature. */
+    const said14 = output.text();
+    assert.ok(!said14.includes(standin.code), "the pairing code is not in the face's output");
+    assert.ok(!said14.includes("es256"), "no signature is in the face's output");
   } finally {
+    output.restore();
+    device?.close();
+    ownerStream.abort();
     /* The web server first, then the proxy's open pipes (main.ts's order), then the stand-in and the homes. */
     if (dispose) await dispose();
     disposeProxy?.();
