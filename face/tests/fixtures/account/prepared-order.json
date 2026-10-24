@@ -1,0 +1,126 @@
+{
+  "ok": true,
+  "action": {
+    "type": "liveOrder",
+    "venue": "ex",
+    "symbol": "ETH/USDT",
+    "side": "buy",
+    "orderType": "market",
+    "qty": "0.0099",
+    "limitPrice": "",
+    "stopPrice": "",
+    "tif": "",
+    "postOnly": "",
+    "reduceOnly": "",
+    "extendedHours": "",
+    "trailPercent": "",
+    "trailPrice": "",
+    "takeProfit": "",
+    "stopLoss": "",
+    "maxNotional": "24.80",
+    "deadline": 1792854821984,
+    "nonce": 1792854221984
+  },
+  "primaryType": "AccountTransaction:LiveOrder",
+  "domain": {
+    "name": "AgentAccountSignTransaction",
+    "version": "1",
+    "chainId": 424242
+  },
+  "accountChain": "Live · real money",
+  "shown": [
+    {
+      "name": "venue",
+      "value": "ex"
+    },
+    {
+      "name": "symbol",
+      "value": "ETH/USDT"
+    },
+    {
+      "name": "side",
+      "value": "buy"
+    },
+    {
+      "name": "orderType",
+      "value": "market"
+    },
+    {
+      "name": "qty",
+      "value": "0.0099"
+    },
+    {
+      "name": "limitPrice",
+      "value": ""
+    },
+    {
+      "name": "stopPrice",
+      "value": ""
+    },
+    {
+      "name": "tif",
+      "value": ""
+    },
+    {
+      "name": "postOnly",
+      "value": ""
+    },
+    {
+      "name": "reduceOnly",
+      "value": ""
+    },
+    {
+      "name": "extendedHours",
+      "value": ""
+    },
+    {
+      "name": "trailPercent",
+      "value": ""
+    },
+    {
+      "name": "trailPrice",
+      "value": ""
+    },
+    {
+      "name": "takeProfit",
+      "value": ""
+    },
+    {
+      "name": "stopLoss",
+      "value": ""
+    },
+    {
+      "name": "maxNotional",
+      "value": "24.80"
+    },
+    {
+      "name": "deadline",
+      "value": "1792854821984"
+    },
+    {
+      "name": "nonce",
+      "value": "1792854221984"
+    }
+  ],
+  "quote": {
+    "words": "buy 0.0099 ETH at Stand-in Exchange · market · about $24.31",
+    "feeUsd": 0,
+    "receiveUsd": 24.31,
+    "lands": "at once",
+    "access": "owner",
+    "final": true,
+    "legs": [],
+    "order": {
+      "words": "buy 0.0099 ETH at Stand-in Exchange · market · about $24.31",
+      "name": "ETH / USDT",
+      "kind": "spot",
+      "base": "ETH",
+      "quote": "USDT",
+      "price": 2455.74,
+      "notionalUsd": 24.31,
+      "maxUsd": 24.8,
+      "worstPrice": 2504.85,
+      "capUsd": 250
+    }
+  }
+}

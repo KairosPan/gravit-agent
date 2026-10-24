@@ -3,7 +3,8 @@
  * passed through, the per-route caches and their flights, the failure codes,
  * the disabled row, and the shared `account` reader `seat.ts` reads — and its
  * push channel: `stream` piped per browser connection, `stream/markets`
- * forwarded. */
+ * forwarded — and the owner's three writes, `pair`, `prepare` and `exchange`,
+ * forwarded as `stream/markets` is. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
@@ -18,6 +19,8 @@ import {
   ACCOUNT_TTL_MS,
   STREAM_BODY_LIMIT,
   STREAM_CLIENT,
+  WRITE_ABORT_MS,
+  WRITE_BODY_LIMIT,
   createAccountReader,
   rebuildQuery,
   registerAccountProxy,
@@ -33,7 +36,7 @@ const DISABLED = '{"ok":false,"unreachable":"disabled"}';
 const OK_BODY = '{"ok":true}';
 const JSON_TYPE = "application/json; charset=utf-8";
 
-/** The eleven face paths, in the order they are registered, and the Account path each one asks. */
+/** The fifteen read paths, in the order they are registered, and the Account path each one asks. */
 const ROUTES: ReadonlyArray<readonly [face: string, account: string]> = [
   ["/data/account", "/api/account"],
   ["/data/account/explore", "/api/account/explore"],
@@ -46,9 +49,19 @@ const ROUTES: ReadonlyArray<readonly [face: string, account: string]> = [
   ["/data/account/statement", "/api/account/statement"],
   ["/data/account/history", "/api/account/history"],
   ["/data/account/agents", "/api/account/agents"],
+  ["/data/account/venues", "/api/account/venues"],
+  ["/data/account/connect/reach", "/api/account/connect/reach"],
+  ["/data/account/keyfile", "/api/account/keyfile"],
+  ["/data/account/paper/books", "/api/account/paper/books"],
 ];
 const STREAM = "/data/account/stream";
 const FOLLOW = "/data/account/stream/markets";
+/** The three write paths, in the order they are registered, the Account path each one asks, and its row. */
+const WRITES: ReadonlyArray<readonly [face: string, account: string, route: "pair" | "prepare" | "exchange"]> = [
+  ["/data/account/pair", "/api/account/pair", "pair"],
+  ["/data/account/prepare", "/api/account/prepare", "prepare"],
+  ["/data/account/exchange", "/api/exchange", "exchange"],
+];
 /** A tab's stream name as the face's page mints it: `face-` and 24 hex. */
 const CLIENT = "face-0123456789abcdef01234567";
 const JSON_POST = { host: "127.0.0.1:3090", "content-type": "application/json" };
@@ -146,9 +159,9 @@ test("rebuildQuery: the whitelist, once each, 240 characters, fresh stripped", (
   assert.deepEqual(rebuildQuery("account", "/data/account"), { query: "", fresh: false });
 });
 
-test("the routes: thirteen exact paths; the fence refuses a foreign Origin and a missing Host before any fetch", async () => {
+test("the routes: twenty exact paths; the fence refuses a foreign Origin and a missing Host before any fetch", async () => {
   const { routes, fetched } = proxyWith(answering(OK_BODY));
-  const paths = [...ROUTES.map(([face]) => face), STREAM, FOLLOW];
+  const paths = [...ROUTES.map(([face]) => face), STREAM, FOLLOW, ...WRITES.map(([face]) => face)];
   assert.deepEqual(routes.map((r) => `${r.kind} ${r.path}`), paths.map((face) => `exact ${face}`));
   for (const face of paths) {
     const foreign = await call(routes, face, { host: "127.0.0.1:3090", origin: "https://evil.example" });
@@ -224,6 +237,10 @@ test("a repeated or unknown name, an over-long value: 400 invalid account reques
     statement: ["fresh"],
     history: ["range", "paper", "venue"],
     agents: ["fresh"],
+    venues: [],
+    reach: ["connector"],
+    keyfile: ["kind", "venue", "ref", "exchange"],
+    books: [],
   });
   assert.equal((await call(routes, `/data/account/explore?q=${"x".repeat(240)}`)).status, 200, "240 characters pass");
   assert.deepEqual(fetched, [`${URL_}/api/account/explore?q=${"x".repeat(240)}`]);
@@ -292,6 +309,7 @@ test("two reads within the TTL fetch once; ?fresh=1 fetches again and never join
   assert.deepEqual(ACCOUNT_TTL_MS, {
     account: 15_000, explore: 20_000, market: 3_000, quotes: 3_000, compare: 15_000, candles: 30_000,
     holdings: 8_000, positions: 10_000, statement: 10_000, history: 60_000, agents: 15_000,
+    venues: 60_000, reach: 5_000, keyfile: 5_000, books: 5_000,
   });
   let clock = NOW;
   const { routes, fetched, proxy } = proxyWith(answering(OK_BODY), () => clock);
@@ -376,6 +394,7 @@ test("an unreachable, hanging, refusing or unreadable Account: 503 with the code
   assert.deepEqual(ACCOUNT_ABORT_MS, {
     account: 7_000, explore: 10_000, market: 7_000, quotes: 7_000, compare: 7_000, candles: 25_000,
     holdings: 12_000, positions: 7_000, statement: 7_000, history: 12_000, agents: 7_000,
+    venues: 30_000, reach: 30_000, keyfile: 30_000, books: 30_000,
   });
   const refused = proxyWith(async () => { throw Object.assign(new TypeError("fetch failed secret-host-name"), { cause: { code: "ECONNREFUSED" } }); });
   const a = await call(refused.routes, "/data/account/holdings?cost=1");
@@ -432,6 +451,11 @@ test("a disabled row answers 503 unreachable disabled on every route without a f
   assert.equal(stream.status, 503); assert.equal(stream.body, DISABLED);
   const follow = await call(routes, FOLLOW, JSON_POST, "POST", `{"client":"${CLIENT}","markets":[]}`);
   assert.equal(follow.status, 503); assert.equal(follow.body, DISABLED);
+  for (const [face, , route] of WRITES) {
+    const write = await call(routes, face, JSON_POST, "POST", '{"draft":{"type":"setWatch"}}');
+    assert.equal(write.status, 503, face); assert.equal(write.body, DISABLED);
+    assert.equal((await call(routes, face, JSON_POST, "POST", "x".repeat(WRITE_BODY_LIMIT[route] + 1))).status, 413, "the body is read before the row's state is consulted");
+  }
   assert.equal((await call(routes, `${STREAM}?client=short`)).status, 400, "a malformed request is refused before the row's state is consulted");
   assert.deepEqual(await proxy.reader.read(), { unreachable: "disabled" });
   assert.deepEqual(await proxy.reader.read(true), { unreachable: "disabled" });
@@ -728,4 +752,139 @@ test("stream/markets: text/plain or no content type is 415 before the body is re
   const charset = await call(routes, FOLLOW, { host: "127.0.0.1:3090", "content-type": "application/json; charset=utf-8" }, "POST", body);
   assert.equal(charset.status, 200, "application/json with a charset passes");
   assert.equal(fetched.length, 1);
+});
+
+test("the four stage-2 reads are registered with their names and never force", async () => {
+  const { routes, fetched } = proxyWith(answering(OK_BODY));
+  const refused = [
+    "/data/account/venues?force=1",
+    "/data/account/venues?fresh=1",
+    "/data/account/connect/reach?connector=live:kalshi&force=1",
+    "/data/account/connect/reach?connector=live:kalshi&connector=live:okx",
+    "/data/account/keyfile?kind=alpaca-paper&value=1",
+    "/data/account/paper/books?venue=paper",
+  ];
+  for (const url of refused) {
+    const a = await call(routes, url);
+    assert.equal(a.status, 400, url); assert.equal(a.body, INVALID);
+  }
+  assert.equal(fetched.length, 0, "force, fresh or a name off the row never reaches the Account");
+
+  await call(routes, "/data/account/connect/reach?connector=live:kalshi");
+  assert.equal(fetched[0], `${URL_}/api/account/connect/reach?connector=live%3Akalshi`);
+  assert.deepEqual([...new URL(fetched[0]).searchParams], [["connector", "live:kalshi"]], "connector, the only name");
+  await call(routes, "/data/account/keyfile?kind=alpaca-paper&venue=alpaca-paper&ref=keys/a.json&exchange=okx");
+  assert.equal(new URL(fetched[1]).pathname, "/api/account/keyfile");
+  assert.deepEqual([...new URL(fetched[1]).searchParams], [["kind", "alpaca-paper"], ["venue", "alpaca-paper"], ["ref", "keys/a.json"], ["exchange", "okx"]]);
+  await call(routes, "/data/account/venues");
+  await call(routes, "/data/account/paper/books");
+  assert.deepEqual(fetched.slice(2), [`${URL_}/api/account/venues`, `${URL_}/api/account/paper/books`]);
+  await call(routes, "/data/account/venues");
+  await call(routes, "/data/account/paper/books");
+  await call(routes, "/data/account/connect/reach?connector=live:kalshi");
+  assert.equal(fetched.length, 4, "kept within the TTL, as the stage-1 reads are");
+});
+
+test("a write forwards its body as bytes with the Account's status", async () => {
+  const refusal = '{"ok":false,"refusal":{"code":"E_ACCOUNT_STALE_NONCE","message":"that nonce is spent: prepare again"},  "detail":{}}';
+  const { routes, fetched, inits } = proxyWith(answering(refusal, 409));
+  const browser = { ...JSON_POST, origin: "http://127.0.0.1:3090", "sec-fetch-site": "same-origin", cookie: "dsh-auth-1=secret" };
+  const body = '{"draft": {"type":"setWatch","venue":"ex","symbol":"BTC/USDT","on":"true"}, "note":"café"}';
+  for (const [face, account] of WRITES) {
+    const a = await call(routes, face, browser, "POST", body);
+    assert.equal(a.status, 409, face); assert.equal(a.body, refusal, "the Account's bytes, as it said them");
+    assert.equal(a.headers["content-type"], JSON_TYPE); assert.equal(a.headers["cache-control"], "no-store");
+    assert.equal(fetched.at(-1), `${URL_}${account}`, `${face} asks ${account}`);
+    const init = inits.at(-1)!;
+    assert.equal(init.method, "POST");
+    assert.deepEqual(init.headers, { "content-type": "application/json" }, "content-type alone: no Origin, no Sec-Fetch-Site, no cookie");
+    assert.equal(init.body, body, "the body as posted: never parsed, never re-written");
+    assert.equal(init.redirect, "error"); assert.ok(init.signal instanceof AbortSignal);
+  }
+  const accepted = '{"ok":true,"kind":"account"}';
+  const a = await call(proxyWith(answering(accepted)).routes, "/data/account/exchange", JSON_POST, "POST", body);
+  assert.equal(a.status, 200); assert.equal(a.body, accepted);
+});
+
+test("a write past its limit is 413, a non-JSON one 415, a query on it 400", async () => {
+  assert.deepEqual(WRITE_BODY_LIMIT, { pair: 4_096, prepare: 16_384, exchange: 65_536 });
+  const { routes, fetched } = proxyWith(answering(OK_BODY));
+  for (const [face, , route] of WRITES) {
+    const limit: number = WRITE_BODY_LIMIT[route];
+    const big = await call(routes, face, JSON_POST, "POST", "x".repeat(limit + 1));
+    assert.equal(big.status, 413, `${face} at ${limit + 1} bytes`); assert.equal(big.body, '{"ok":false,"error":"body too large"}');
+    assert.equal(big.headers["content-type"], JSON_TYPE); assert.equal(big.headers["cache-control"], "no-store");
+    assert.equal((await call(routes, face, JSON_POST, "POST", "é".repeat(limit / 2 + 1))).status, 413, "the limit counts bytes");
+    assert.equal((await call(routes, face, JSON_POST, "POST", "x".repeat(limit))).status, 200, `${limit} bytes pass`);
+    for (const headers of [{ host: "127.0.0.1:3090", "content-type": "text/plain" }, { host: "127.0.0.1:3090" }] as Array<Record<string, string>>) {
+      const plain = await call(routes, face, headers, "POST", "x".repeat(limit + 1));
+      assert.equal(plain.status, 415, `${face} ${headers["content-type"] ?? "no content type"}: refused before the body is read`);
+      assert.equal(plain.body, '{"ok":false,"error":"application/json only"}');
+    }
+    for (const url of [`${face}?nonce=1`, `${face}?fresh=1`]) {
+      const queried = await call(routes, url, JSON_POST, "POST", "x".repeat(limit + 1));
+      assert.equal(queried.status, 400, `${url}: refused before the body is read`); assert.equal(queried.body, INVALID);
+    }
+    for (const method of ["GET", "PUT", "DELETE"]) {
+      const m = await call(routes, face, JSON_POST, method);
+      assert.equal(m.status, 405, `${method} ${face}`); assert.equal(m.body, '{"ok":false,"error":"method not allowed"}');
+    }
+    assert.equal((await call(routes, face, { ...JSON_POST, origin: "https://evil.example" }, "POST", "{}")).status, 403, "the fence comes first");
+  }
+  assert.equal(fetched.length, 3, "only the three bodies at their limits reach the Account");
+  const cutOff = Object.assign(new Readable({ read() { this.destroy(new Error("aborted")); } }), { url: "/data/account/prepare", headers: JSON_POST, method: "POST" });
+  const halfRead = fakeRes();
+  await routes.find((r) => r.path === "/data/account/prepare")!.handler(cutOff as unknown as IncomingMessage, halfRead.res);
+  assert.equal(halfRead.out.status, 400, "a body that breaks off is refused, never a rejection"); assert.equal(halfRead.out.body, INVALID);
+  assert.equal(fetched.length, 3);
+});
+
+test("a write never serves stale and never caches", async () => {
+  let n = 0;
+  let down = false;
+  const { routes, fetched } = proxyWith(async () => {
+    if (down) throw Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } });
+    n += 1;
+    return ok(`{"ok":true,"kind":"account","n":${n}}`);
+  });
+  const body = '{"action":{"type":"setWatch","nonce":"1760000000001"},"nonce":"1760000000001","signature":"0xabc"}';
+  assert.equal((await call(routes, "/data/account/exchange", JSON_POST, "POST", body)).body, '{"ok":true,"kind":"account","n":1}');
+  assert.equal((await call(routes, "/data/account/exchange", JSON_POST, "POST", body)).body, '{"ok":true,"kind":"account","n":2}');
+  assert.deepEqual(fetched, [`${URL_}/api/exchange`, `${URL_}/api/exchange`], "two identical writes reach the Account twice");
+  down = true;
+  const after = await call(routes, "/data/account/exchange", JSON_POST, "POST", body);
+  assert.equal(after.status, 503, "a write's earlier answer is never re-served");
+  assert.equal(after.body, '{"ok":false,"unreachable":"ECONNREFUSED"}');
+  assert.doesNotMatch(after.body, /stale/);
+});
+
+test("an unreachable Account on a write is 503 with the code", async () => {
+  const refused = proxyWith(async () => { throw Object.assign(new TypeError("fetch failed secret-host-name"), { cause: { code: "ECONNREFUSED" } }); });
+  const bare = proxyWith(async () => { throw new Error("something private"); });
+  const unreadable = proxyWith(async () => ({ ok: true, status: 200, text: async () => { throw new TypeError("terminated: private"); } }));
+  for (const [face] of WRITES) {
+    const a = await call(refused.routes, face, JSON_POST, "POST", "{}");
+    assert.equal(a.status, 503, face); assert.equal(a.body, '{"ok":false,"unreachable":"ECONNREFUSED"}');
+    assert.equal(a.headers["content-type"], JSON_TYPE); assert.equal(a.headers["cache-control"], "no-store");
+    assert.doesNotMatch(a.body, /secret/);
+    assert.equal((await call(bare.routes, face, JSON_POST, "POST", "{}")).body, '{"ok":false,"unreachable":"unreachable"}', "a failure with no code says unreachable");
+    assert.equal((await call(unreadable.routes, face, JSON_POST, "POST", "{}")).body, '{"ok":false,"unreachable":"unreadable"}');
+  }
+});
+
+test("a write's abort is the row's", async (t) => {
+  assert.deepEqual(WRITE_ABORT_MS, { pair: 7_000, prepare: 30_000, exchange: 30_000 });
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  for (const [face, , route] of WRITES) {
+    const hanging = proxyWith((_url, init) => new Promise<FakeAnswer>((_resolve, reject) => init.signal.addEventListener("abort", () => reject(aborted()))));
+    const one = start(hanging.routes, face, JSON_POST, "POST", "{}");
+    for (let i = 0; i < 50 && hanging.inits.length === 0; i += 1) await new Promise<void>((r) => setImmediate(r));
+    assert.equal(hanging.inits.length, 1, `${face} asked the Account`);
+    t.mock.timers.tick(WRITE_ABORT_MS[route] - 1);
+    assert.equal(hanging.inits[0].signal.aborted, false, `${face} waits ${WRITE_ABORT_MS[route] - 1} ms`);
+    t.mock.timers.tick(1);
+    assert.equal(hanging.inits[0].signal.aborted, true, `${face} is cut at ${WRITE_ABORT_MS[route]} ms`);
+    await one.done;
+    assert.equal(one.out.status, 503); assert.equal(one.out.body, '{"ok":false,"unreachable":"timeout"}');
+  }
 });

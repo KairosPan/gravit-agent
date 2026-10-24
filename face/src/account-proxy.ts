@@ -1,13 +1,15 @@
-/** `/data/account` and `/data/account/<route>`: the Account's reads, proxied
- * (spec 2026-10-22 §5.1). The Account (Linqi's buyer-agent-demo, an external
- * program on 127.0.0.1:4820) answers only bare loopback requests — its fence
- * refuses any page at another origin — so the face's page never asks it: the
- * page asks the face, and the face asks the Account with a plain loopback
- * fetch (no Origin, no Sec-Fetch-Site, no cookie, the URL's own Host,
- * `redirect: "error"`). Eleven reads and the Account's push channel
- * — `stream`, and `stream/markets`, the markets it follows — each an `exact`
- * route, never a prefix: the route table is the allow-list, and nothing else
- * of the Account's surface is reachable through the face.
+/** `/data/account` and `/data/account/<route>`: the Account's reads and the
+ * owner's writes, proxied (spec 2026-10-22 §5.1). The Account (Linqi's
+ * buyer-agent-demo, an external program on 127.0.0.1:4820) answers only bare
+ * loopback requests — its fence refuses any page at another origin — so the
+ * face's page never asks it: the page asks the face, and the face asks the
+ * Account with a plain loopback fetch (no Origin, no Sec-Fetch-Site, no
+ * cookie, the URL's own Host, `redirect: "error"`). Twenty routes: fifteen
+ * reads, the Account's push channel — `stream`, and `stream/markets`, the
+ * markets it follows — and three writes, `pair`, `prepare` and `exchange`
+ * ({@link WriteRoute}); each an `exact` route, never a prefix: the route
+ * table is the allow-list, and nothing else of the Account's surface is
+ * reachable through the face.
  * {@link registerAccountProxy} returns the `account` route's reader, which
  * `main.ts` hands to `seat.ts`: `/data/seat.json` and `/data/account` share
  * one upstream read. {@link createAccountReader} is that read without a
@@ -15,14 +17,15 @@
  *
  * The rules, the seat route's generalised:
  * - The fence first (`isTrustedDataRequest`, 403 with the fixed body), then 405
- *   for any method but the route's (GET; POST for `stream/markets`), then the
- *   query, rebuilt from the route's names in {@link ACCOUNT_QUERY}
- *   ({@link rebuildQuery}); anything else is 400 `invalid account request` and
+ *   for any method but the route's (GET; POST for `stream/markets` and the
+ *   writes), then the query, rebuilt from the route's names in
+ *   {@link ACCOUNT_QUERY} ({@link rebuildQuery}); anything else is 400
+ *   `invalid account request` and
  *   the Account is never asked. The raw query never reaches it, and `fresh` is
  *   the face's own flag, never forwarded. A disabled seat row disables the
  *   proxy: every valid read then answers 503 `disabled` and asks nothing (a
  *   malformed query or a wrong method is refused before the row's state is
- *   consulted, and so, on `stream/markets`, are a body not declared JSON, 415,
+ *   consulted, and so, on a POST route, are a body not declared JSON, 415,
  *   and a body past its limit, 413).
  * - The Account's status and body pass through as they are, never parsed: its
  *   `{ok:false, refusal}` is the page's to draw, in its words. Every JSON
@@ -51,13 +54,17 @@
  *   falls 256 KiB behind (the response then destroyed, as `quotes.ts` does)
  *   and on `dispose`. Any other answer is the Account's status and body — its
  *   refusal past 32 streams among them.
- * - `stream/markets` takes a POST whose body is declared `application/json`
- *   (else 415, as the face's other POST routes answer) and whose target names
- *   no query parameter (else 400), both refused before the body is read. The
- *   body — at most {@link STREAM_BODY_LIMIT} bytes, else 413 — is forwarded as
- *   posted with `content-type: application/json`, never parsed, kept or
- *   echoed; a disabled row answers `disabled` once the body is read. The
- *   Account's status and body come back as they are, never stale.
+ * - The four POST routes — `stream/markets` and the writes `pair`
+ *   (`/api/account/pair`), `prepare` (`/api/account/prepare`) and `exchange`
+ *   (`/api/exchange`) — take a body declared `application/json` (else 415, as
+ *   the face's other POST routes answer) and a target that names no query
+ *   parameter (else 400), both refused before the body is read. The body — at
+ *   most the route's bytes ({@link STREAM_BODY_LIMIT}, {@link WRITE_BODY_LIMIT}),
+ *   else 413 — is forwarded as posted with `content-type: application/json`,
+ *   never parsed, kept or echoed; a disabled row answers `disabled` once the
+ *   body is read. The Account's status and body come back as they are, never
+ *   kept and never stale; the request is cut at the route's abort
+ *   ({@link WRITE_ABORT_MS}; 7 s for `stream/markets`).
  * - Nothing of a body, a query or a frame is logged here.
  * @module
  */
@@ -67,21 +74,37 @@ import { isJsonBody, isTrustedDataRequest } from "./data.ts";
 import { FORBIDDEN, HttpError, markStale, readBody } from "./http.ts";
 import type { RouteRegistrar } from "./static.ts";
 
-/** The Account's reads the face proxies: `account` is its `GET /api/account`, the rest `GET /api/account/<route>`. */
-export type ReadRoute = "account" | "explore" | "market" | "quotes" | "compare" | "candles" | "holdings" | "positions" | "statement" | "history" | "agents";
+/** The Account's reads the face proxies: `account` is its `GET /api/account`, `reach` its
+ * `GET /api/account/connect/reach`, `books` its `GET /api/account/paper/books`, the rest `GET /api/account/<route>`;
+ * the face's path is the same under `/data/account`. */
+export type ReadRoute =
+  | "account" | "explore" | "market" | "quotes" | "compare" | "candles" | "holdings" | "positions" | "statement" | "history" | "agents"
+  | "venues" | "reach" | "keyfile" | "books";
 
 /** How long one answer is served without asking again, per route: the Account's own page's cadence (spec §5.1). */
 export const ACCOUNT_TTL_MS: Readonly<Record<ReadRoute, number>> = {
   account: 15_000, explore: 20_000, market: 3_000, quotes: 3_000, compare: 15_000, candles: 30_000,
   holdings: 8_000, positions: 10_000, statement: 10_000, history: 60_000, agents: 15_000,
+  venues: 60_000, reach: 5_000, keyfile: 5_000, books: 5_000,
 };
 
 /** How long the Account may take, headers and body, per route: the reads that settle venue polls take
- * seconds, and a first candles view waits for a source. */
+ * seconds, a first candles view waits for a source, and a cold venues or reach read probes every venue. */
 export const ACCOUNT_ABORT_MS: Readonly<Record<ReadRoute, number>> = {
   account: 7_000, explore: 10_000, market: 7_000, quotes: 7_000, compare: 7_000, candles: 25_000,
   holdings: 12_000, positions: 7_000, statement: 7_000, history: 12_000, agents: 7_000,
+  venues: 30_000, reach: 30_000, keyfile: 30_000, books: 30_000,
 };
+
+/** The owner's writes the face proxies, each a POST: `pair` is the Account's `/api/account/pair`, `prepare` its
+ * `/api/account/prepare`, `exchange` its `/api/exchange`; the face's path is `/data/account/<route>`. */
+export type WriteRoute = "pair" | "prepare" | "exchange";
+
+/** Most bytes a write's body may carry, per route. */
+export const WRITE_BODY_LIMIT: Readonly<Record<WriteRoute, number>> = { pair: 4_096, prepare: 16_384, exchange: 65_536 };
+
+/** How long the Account may take on a write, headers and body, per route: a prepare asks the venue for a quote. */
+export const WRITE_ABORT_MS: Readonly<Record<WriteRoute, number>> = { pair: 7_000, prepare: 30_000, exchange: 30_000 };
 
 /** Most queries kept per route; the least recently used leaves first. */
 export const ACCOUNT_CACHE_KEYS = 64;
@@ -99,6 +122,10 @@ export const ACCOUNT_QUERY: Readonly<Record<ReadRoute, readonly string[]>> = {
   statement: ["fresh"],
   history: ["range", "paper", "venue"],
   agents: ["fresh"],
+  venues: [],
+  reach: ["connector"],
+  keyfile: ["kind", "venue", "ref", "exchange"],
+  books: [],
 };
 
 /** The name a tab gives its stream, in the Account's grammar; the face's page mints `face-<24 hex>`. */
@@ -148,9 +175,15 @@ const METHOD_NOT_ALLOWED = '{"ok":false,"error":"method not allowed"}';
 const JSON_ONLY = '{"ok":false,"error":"application/json only"}';
 const unreachable = (code: string): string => JSON.stringify({ ok: false, unreachable: code });
 
-const facePath = (route: ReadRoute): string => (route === "account" ? "/data/account" : `/data/account/${route}`);
+/** A read's path under `/api/account` and `/data/account` where it is not `/<route>`. */
+const READ_PATHS: Readonly<Partial<Record<ReadRoute, string>>> = { account: "", reach: "/connect/reach", books: "/paper/books" };
+const subPath = (route: ReadRoute): string => READ_PATHS[route] ?? `/${route}`;
+const facePath = (route: ReadRoute): string => `/data/account${subPath(route)}`;
 const accountUrl = (base: string, route: ReadRoute, query: string): string =>
-  `${base}/api/account${route === "account" ? "" : `/${route}`}${query === "" ? "" : `?${query}`}`;
+  `${base}/api/account${subPath(route)}${query === "" ? "" : `?${query}`}`;
+/** The Account's path for each write. */
+const WRITE_PATHS: Readonly<Record<WriteRoute, string>> = { pair: "/api/account/pair", prepare: "/api/account/prepare", exchange: "/api/exchange" };
+const WRITE_ROUTES = Object.keys(WRITE_PATHS) as WriteRoute[];
 
 /** The query a read may pass on, rebuilt from the route's whitelisted names in the order they came, each
  * at most once, each value at most 240 characters ({@link LONG_VALUES} names the longer ones), re-encoded;
@@ -396,30 +429,39 @@ const streamHandler = (s: Settings, open: Set<AbortController>) => async (req: I
   }
 };
 
-/** `stream/markets`: the fence, POST only, a body declared `application/json`, no query name, then the body
- * read under its limit and the Account; its status and body come back as they are, never kept. */
-const followHandler = (s: Settings) => async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-  if (!isTrustedDataRequest(req)) return send(res, 403, FORBIDDEN);
-  if (req.method !== "POST") return send(res, 405, METHOD_NOT_ALLOWED);
-  if (!isJsonBody(req)) return send(res, 415, JSON_ONLY);
-  if (!queryless(req.url ?? "")) return send(res, 400, INVALID);
-  let body: string;
+/** A POST route's request up to its body: the fence, POST only, a body declared `application/json`, no
+ * query name, then the body read under `limit` bytes. The body as posted, or `null` once the refusal is
+ * answered. The body is never parsed, kept or logged. */
+async function readJsonPost(req: IncomingMessage, res: ServerResponse, limit: number): Promise<string | null> {
+  if (!isTrustedDataRequest(req)) { send(res, 403, FORBIDDEN); return null; }
+  if (req.method !== "POST") { send(res, 405, METHOD_NOT_ALLOWED); return null; }
+  if (!isJsonBody(req)) { send(res, 415, JSON_ONLY); return null; }
+  if (!queryless(req.url ?? "")) { send(res, 400, INVALID); return null; }
   try {
-    body = await readBody(req, STREAM_BODY_LIMIT);
+    return await readBody(req, limit);
   } catch (err) {
-    return err instanceof HttpError ? send(res, err.status, JSON.stringify({ ok: false, error: err.message })) : send(res, 400, INVALID);
+    if (err instanceof HttpError) send(res, err.status, JSON.stringify({ ok: false, error: err.message }));
+    else send(res, 400, INVALID);
+    return null;
   }
+}
+
+/** A POST route — `stream/markets` or a write: {@link readJsonPost}, then the body forwarded as posted to the
+ * Account's `path`, cut at `abortMs`; its status and body come back as they are, never kept, never stale. */
+const postHandler = (s: Settings, path: string, limit: number, abortMs: number) => async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+  const body = await readJsonPost(req, res, limit);
+  if (body === null) return;
   if (s.disabled) return send(res, 503, unreachable("disabled"));
-  const answer = await askAccount(s.doFetch, `${s.url}/api/account/stream/markets`, FOLLOW_ABORT_MS, {
+  const answer = await askAccount(s.doFetch, `${s.url}${path}`, abortMs, {
     method: "POST", headers: { "content-type": "application/json" }, body,
   });
   return "status" in answer ? send(res, answer.status, answer.body) : send(res, 503, unreachable(answer.unreachable));
 };
 
-/** Mount the eleven read routes and the two stream routes on the host webserver. The reader returned is
- * the `account` route's own: it and `/data/account` read through one cache, so the seat route `main.ts`
- * hands it to shares that route's upstream read. `dispose` forgets every kept answer and aborts every open
- * stream's upstream. */
+/** Mount the fifteen read routes, the two stream routes and the three write routes on the host webserver.
+ * The reader returned is the `account` route's own: it and `/data/account` read through one cache, so the
+ * seat route `main.ts` hands it to shares that route's upstream read. `dispose` forgets every kept answer
+ * and aborts every open stream's upstream. */
 export function registerAccountProxy(webServer: RouteRegistrar, deps: AccountProxyDeps = {}): { reader: AccountReader; dispose(): void } {
   const s = settingsOf(deps);
   const accountReads = routeReads("account", s);
@@ -432,7 +474,10 @@ export function registerAccountProxy(webServer: RouteRegistrar, deps: AccountPro
   /* The upstream streams open now, one per browser connection. */
   const open = new Set<AbortController>();
   webServer.register({ kind: "exact", path: "/data/account/stream", handler: streamHandler(s, open) });
-  webServer.register({ kind: "exact", path: "/data/account/stream/markets", handler: followHandler(s) });
+  webServer.register({ kind: "exact", path: "/data/account/stream/markets", handler: postHandler(s, "/api/account/stream/markets", STREAM_BODY_LIMIT, FOLLOW_ABORT_MS) });
+  for (const route of WRITE_ROUTES) {
+    webServer.register({ kind: "exact", path: `/data/account/${route}`, handler: postHandler(s, WRITE_PATHS[route], WRITE_BODY_LIMIT[route], WRITE_ABORT_MS[route]) });
+  }
   return {
     reader: readerOf(accountReads),
     dispose: () => {

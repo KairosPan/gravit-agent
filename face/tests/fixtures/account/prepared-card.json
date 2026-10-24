@@ -1,0 +1,35 @@
+{
+  "ok": true,
+  "action": {
+    "type": "approveCard",
+    "card": "card-0001",
+    "action": "0xdf578d9e3045cac33e2dd0b4d7c595b22771305fb678ad2e09c0e0397476aaac",
+    "decision": "approve",
+    "nonce": 1792854221987
+  },
+  "primaryType": "AccountApproval:Card",
+  "domain": {
+    "name": "AgentAccountSignTransaction",
+    "version": "1",
+    "chainId": 424242
+  },
+  "accountChain": "Simulation",
+  "shown": [
+    {
+      "name": "card",
+      "value": "card-0001"
+    },
+    {
+      "name": "action",
+      "value": "0xdf578d9e3045cac33e2dd0b4d7c595b22771305fb678ad2e09c0e0397476aaac"
+    },
+    {
+      "name": "decision",
+      "value": "approve"
+    },
+    {
+      "name": "nonce",
+      "value": "1792854221987"
+    }
+  ]
+}

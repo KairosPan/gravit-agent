@@ -1,20 +1,24 @@
-/** Captures the Account's read answers once, as the fixtures the graft's client tests read
+/** Captures the Account's read and prepare answers once, as the fixtures the graft's client tests read
  * (`tests/fixtures/account/`, held to what the views read by `tests/account-fixtures.test.ts`):
  * starts the Account's own stand-in — the real Account over simulated venues, no network, no real
  * money, a fresh temporary home — through the smokes' own helper (`tests/helpers/standin.ts`, which
  * removes that home after the stop only when it is a `ui-standin-` directory directly under the
  * tmpdir), reads each route with a bare loopback `fetch` (the Account's fence answers a request
- * that carries no Origin), drops every `native` and `icon` key, cuts every array to its first 12
- * entries, writes each answer as pretty JSON, keeps the push channel's first ten frames (or the
- * whole ones heard in 20 s) in `stream-frames.txt` — verbatim but for the same two keys dropped
- * from each frame's `data:` (its arrays whole) — and stops the stand-in.
+ * that carries no Origin), posts three owner prepares as the page posts them (`{ draft }`, unsigned,
+ * so no pairing: a live order, a watch, and an answer to the page's first card), drops every
+ * `native` and `icon` key, cuts every array of a read to its first 12 entries (`venues`' arrays and
+ * a prepared action's stay whole: every connector judged, every field signed), writes each answer
+ * as pretty JSON — the stand-in's `now`, nonces and deadlines as captured — keeps the push
+ * channel's first ten frames (or the whole ones heard in 20 s) in `stream-frames.txt` — verbatim
+ * but for the same two keys dropped from each frame's `data:` (its arrays whole) — and stops the
+ * stand-in.
  *
  *     cd face && FACE_ACCOUNT_SEAT_DIR=~/buyer-agent-demo npx tsx scripts/capture-account-fixtures.ts
  *
  * `FACE_ACCOUNT_SEAT_DIR` is an installed checkout of linqizhe07/buyer-agent-demo (`npm ci` there),
  * `~/buyer-agent-demo` when unset; it is read, never written. The stand-in takes a free port, never
- * the real Account's 4820. Takes no arguments; prints each file it wrote. A read the Account does
- * not answer `ok: true` stops the capture before any file is written.
+ * the real Account's 4820. Takes no arguments; prints each file it wrote. A read or a prepare the
+ * Account does not answer `ok: true` stops the capture before any file is written.
  */
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -25,8 +29,12 @@ import { freePort, standinPaths, startStandin, stopStandin } from "../tests/help
 const DIR = seatDir();
 const { cli: CLI, script: STANDIN } = standinPaths(DIR);
 const OUT = fileURLToPath(new URL("../tests/fixtures/account/", import.meta.url));
-/** How many entries of every array a JSON fixture keeps (a frame's arrays stay whole). */
+/** How many entries of every array a read's fixture keeps (a frame's, `venues`' and a prepared action's arrays stay whole). */
 const KEEP = 12;
+/** The reads whose arrays stay whole: `venues` is every connector the Account judges, each crossed with
+ * `account.connectLive.options` — its first twelve rows are all exchanges. A prepared action's arrays stay whole
+ * too: its `shown` is every field the owner signs, and the page shows them all. */
+const WHOLE = new Set(["venues"]);
 /** Keys no fixture carries: a venue's raw answer, a logo's URL. */
 const STRIPPED = new Set(["native", "icon"]);
 /** This reader's name on the stream (the Account takes 8 to 48 letters, digits, dashes or underscores). */
@@ -48,18 +56,53 @@ const READS: readonly (readonly [name: string, path: string])[] = [
   ["history-paper", "/api/account/history?range=1w&paper=1"],
   ["agents", "/api/account/agents"],
   ["compare", "/api/account/compare?base=ETH&side=buy"],
+  ["venues", "/api/account/venues"],
+  ["paper-books", "/api/account/paper/books"],
+  ["keyfile", "/api/account/keyfile?kind=alpaca-paper&venue=alpaca-paper"],
+];
+
+/** The owner's prepares, by fixture name, and the draft each one posts; `approveCard` answers the page's first card. */
+const PREPARES: readonly (readonly [name: string, draft: (card: { id: string; hash: string }) => Record<string, string>])[] = [
+  ["prepared-order", () => ({
+    type: "liveOrder", venue: "ex", symbol: "ETH/USDT", side: "buy", orderType: "market", usd: "25", limitPrice: "", stopPrice: "", tif: "",
+    postOnly: "", reduceOnly: "", extendedHours: "", trailPercent: "", trailPrice: "", takeProfit: "", stopLoss: "",
+  })],
+  ["prepared-watch", () => ({ type: "setWatch", venue: "ex", symbol: "BTC/USDT", on: "true" })],
+  ["prepared-card", (card) => ({ type: "approveCard", card: card.id, action: card.hash, decision: "approve" })],
 ];
 
 interface ExploreLeg { venue: string; symbol: string; connected?: boolean }
 
-/** One read, its body as the Account answered it; anything but `ok: true` stops the capture. */
-async function read(base: string, path: string): Promise<unknown> {
-  const res = await fetch(`${base}${path}`, { signal: AbortSignal.timeout(READ_MS) });
+/** One answer's body; anything but a 2xx `ok: true` stops the capture. */
+async function answered(path: string, res: Response): Promise<unknown> {
   const text = await res.text();
   let body: { ok?: unknown } | undefined;
   try { body = JSON.parse(text) as { ok?: unknown }; } catch { body = undefined; }
   if (!res.ok || body?.ok !== true) throw new Error(`${path} answered ${res.status}: ${text.slice(0, 400)}`);
   return body;
+}
+
+/** One read, its body as the Account answered it. */
+async function read(base: string, path: string): Promise<unknown> {
+  return answered(path, await fetch(`${base}${path}`, { signal: AbortSignal.timeout(READ_MS) }));
+}
+
+/** One prepare, as the page posts it — `{ draft }`, unsigned, so no pairing — its body as the Account answered it. */
+async function prepare(base: string, draft: Record<string, string>): Promise<unknown> {
+  const path = "/api/account/prepare";
+  const res = await fetch(`${base}${path}`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ draft }), signal: AbortSignal.timeout(READ_MS),
+  });
+  const body = await answered(`${path} (${draft.type})`, res);
+  if (!Array.isArray((body as { shown?: unknown }).shown)) throw new Error(`${path} (${draft.type}) answered no shown list`);
+  return body;
+}
+
+/** The page's first card, which the `approveCard` prepare answers. */
+function firstCard(account: unknown): { id: string; hash: string } {
+  const card = (account as { cards?: { id?: unknown; hash?: unknown }[] }).cards?.[0];
+  if (typeof card?.id !== "string" || typeof card.hash !== "string") throw new Error("/api/account has no card to answer");
+  return { id: card.id, hash: card.hash };
 }
 
 /** The first Markets row with a venue connected live: that venue's line, which the candles and market reads ask for. */
@@ -122,26 +165,29 @@ async function streamFrames(url: string): Promise<string> {
   return frames;
 }
 
-/** Every read, then the stream: the answers by fixture name, and the frames. */
-async function capture(base: string): Promise<{ answers: Map<string, unknown>; frames: string }> {
+/** Every read, the prepares, then the stream: the answers and the prepared actions by fixture name, and the frames. */
+async function capture(base: string): Promise<{ answers: Map<string, unknown>; prepared: Map<string, unknown>; frames: string }> {
   const answers = new Map<string, unknown>();
   for (const [name, path] of READS) answers.set(name, await read(base, path));
   const { venue, symbol } = connectedLeg(answers.get("explore-all"));
   const market = new URLSearchParams({ venue, symbol }).toString();
   answers.set("candles", await read(base, `/api/account/candles?${market}&range=1D`));
   answers.set("market", await read(base, `/api/account/market?${market}`));
-  return { answers, frames: await streamFrames(`${base}/api/account/stream?client=${STREAM_CLIENT}`) };
+  const card = firstCard(answers.get("account"));
+  const prepared = new Map<string, unknown>();
+  for (const [name, draft] of PREPARES) prepared.set(name, await prepare(base, draft(card)));
+  return { answers, prepared, frames: await streamFrames(`${base}/api/account/stream?client=${STREAM_CLIENT}`) };
 }
 
 for (const [path, fix] of [[CLI, "run npm ci in the checkout"], [STANDIN, "not the Account's checkout"]] as const) {
   if (!existsSync(path)) throw new Error(`${path} is missing: ${fix} (FACE_ACCOUNT_SEAT_DIR names the checkout)`);
 }
 const standin = await startStandin(await freePort(), DIR);
-const { answers, frames } = await capture(standin.url).finally(() => stopStandin(standin));
+const { answers, prepared, frames } = await capture(standin.url).finally(() => stopStandin(standin));
 mkdirSync(OUT, { recursive: true });
-for (const [name, body] of answers) {
+for (const [name, body] of [...answers, ...prepared]) {
   const file = join(OUT, `${name}.json`);
-  writeFileSync(file, `${JSON.stringify(stripped(body, KEEP), null, 2)}\n`);
+  writeFileSync(file, `${JSON.stringify(stripped(body, prepared.has(name) || WHOLE.has(name) ? Infinity : KEEP), null, 2)}\n`);
   console.log(file);
 }
 const streamFile = join(OUT, "stream-frames.txt");
