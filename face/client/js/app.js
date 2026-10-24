@@ -878,6 +878,8 @@ export function boot(win, host = {}) {
     else if (form.dataset.action === 'saveBot') void saveBotNow(form.dataset.id);
     else if (form.dataset.action === 'createBot') void createBotNow();
     else if (form.dataset.action === 'placeOrder') void sheet.submit();
+    // Enter in the pair box: the same as Pair, and held as Pair is while a pairing is in the air
+    else if (form.dataset.action === 'pairDevice') { if (store.get().owner?.busy !== true) act.pairDevice(); }
   });
 
   // a sheet's or the ticket's field: its words as typed, its box or its pick as changed

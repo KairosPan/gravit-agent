@@ -421,7 +421,7 @@ test('the owner device on the screen: the device line under the head chips, Devi
   has(signs, `${HEAD_END}<p class="acct-note">This page signs for the account</p><div class="seg">`);
   has(draw(state()), `${HEAD_END}<div class="seg">`);
   const pair = draw(R.ownerStanding(state(), { role: 'needs-code', kid: '' }));
-  has(pair, `${HEAD_END}<p class="acct-note">Pair with the code the Account printed in its terminal</p><div class="pair-box"><input id="pair-code"`);
+  has(pair, `${HEAD_END}<p class="acct-note">Pair with the code the Account printed in its terminal</p><form class="pair-box" data-action="pairDevice" autocomplete="off"><input id="pair-code"`);
   has(draw(R.ownerStanding(state(), { role: 'signed-out', kid: KID })), 'data-action="signIn">Sign in</button>');
   // Settings: the theme, then Devices — Sign out only for a page that signs
   const set = renderSettings(R.ownerStanding(R.openSettings(state()), { role: 'signs', kid: KID }));

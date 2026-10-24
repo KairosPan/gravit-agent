@@ -1,24 +1,24 @@
 // face/client/js/render/trade.js — Trade on the face (spec 2026-10-22 §6.4, plan 2 Task 11), after gravit-ui's Trade (itself
 // after Linqi's buyer-agent-demo ui/trade.js): the head with the Account's own writes chip, the kinds (the Account's tabs), the
-// picker — what is held, starred and most traded of the kind, or a search's results — Under way with its one-click Cancel, and
-// the ticket: Where (the able lines as keys, the best marked, a public listing leading to Venues), Buy or Sell, the amount and
-// its unit, Market or Limit, extended hours on a limit where the picked line offers them, the Account's quote, the signature's
-// minutes, What you sign verbatim, what the Account said, and Sign and place — on only while the shown preparation is the
-// form's (render/owner.js's rule). A page that does not sign reads: the picker and Under way, its device line where the form
-// would be, no Sign and no Cancel. Every figure and word is a view's (host/trade-view.js, host/owner-view.js,
+// picker — what is held, starred and most traded of the kind, or a search's results — Under way with its one-click Cancel and
+// the cards waiting (Review → to Cards), and the ticket: Where (the able lines as keys, the best marked, a public listing
+// leading to Venues), Buy or Sell, the amount and its unit, Market or Limit, extended hours on a limit where the picked line
+// offers them, the Account's quote, the signature's minutes, What you sign verbatim, what the Account said, and Sign and place
+// — on only while the shown preparation is the form's (render/owner.js's rule). A page that does not sign reads: the picker
+// and Under way, its device line where the form would be, no Sign and no Cancel. Every figure and word is a view's (host/trade-view.js, host/owner-view.js,
 // host/account-view.js) or the Account's; this module puts a figure in its unit's words and draws them.
 import { esc, attrs, cls } from '../html.js';
 import { icon } from '../icons.js';
 import { fmtDate } from '../time.js';
 import { money } from '../wire/account-model.js';
-import { pageOk, headOf } from '../host/account-view.js';
+import { pageOk, headOf, cardsOf } from '../host/account-view.js';
 import { TRADE_KINDS, pickerOf, ticketOf, quoteOf, underWayOf } from '../host/trade-view.js';
 import { standingWords, whatYouSignLines, goodForWords } from '../host/owner-view.js';
 import { goWord } from '../host/sheet-view.js';
 import { askedOf } from '../host/sheet.js';
 import { chip } from './thread.js';
 import { mkAv, priceWord } from './markets.js';
-import { orderWords } from './account.js';
+import { orderWords, cardFactsOf } from './account.js';
 
 // the kinds' glyphs, Linqi's sprite
 const KIND_ICONS = { crypto: 'coin', stocks: 'stock', rwas: 'rwa', predictions: 'prediction' };
@@ -82,9 +82,19 @@ function picker(state, now) {
 
 // ── Under way ──
 
+// the cards waiting on the owner (the page's cards — Gravit's seat writes among them), each in the Cards tab's words with
+// Review → to Cards, where it is answered: rows only, no key signs here (spec 2026-10-22 §6.4); none, nothing
+function cardsWaiting(page, now) {
+  const rows = cardsOf(page).flatMap(g => g.cards).map(c => `<tr><td>${esc([c.reason, cardFactsOf(c, now)].filter(Boolean).join(' · '))}</td>` +
+    '<td class="r"><a class="btn-sm" href="#/account/cards">Review →</a></td></tr>');
+  if (!rows.length) return '';
+  return `<div class="tk-pg"><div class="tk-pg-h">Cards waiting</div><div class="mk-wrap"><table class="mk-t tk-t"><thead><tr><th scope="col">Card</th>` +
+    `<th scope="col" class="r"><span class="sr-only">Review</span></th></tr></thead><tbody>${rows.join('')}</tbody></table></div></div>`;
+}
+
 // the page's working orders, by anyone, in the Account screen's words; Cancel where the Account knows what cancels it, on a
-// page that signs; what was said on Trade (a cancel's answer, a fill) over them
-function underWay(state, signs) {
+// page that signs; what was said on Trade (a cancel's answer, a fill) over them; the cards waiting under them
+function underWay(state, signs, now) {
   const a = state.account;
   const said = str(state.trade.said) ? `<p class="tk-said" role="status">${esc(state.trade.said)}</p>` : '';
   const head = n => `<div class="tk-pick-head"><h2 class="tk-h2">Under way</h2>${n === null ? '' : `<span class="dim">${n}</span>`}</div>`;
@@ -96,7 +106,7 @@ function underWay(state, signs) {
     return `<tr><td><b>${esc(orderWords(o))}</b>${o.id ? `<span class="tk-why">${esc(o.id)}</span>` : ''}</td><td class="r">${cancel}</td></tr>`;
   });
   const table = `<div class="mk-wrap"><table class="mk-t tk-t"><thead><tr><th scope="col">Order</th><th scope="col" class="r"><span class="sr-only">Actions</span></th></tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
-  return `<section class="cardbox tk-open">${head(rows.length)}${said}${rows.length ? table : empty('Nothing under way.')}</section>`;
+  return `<section class="cardbox tk-open">${head(rows.length)}${said}${rows.length ? table : empty('Nothing under way.')}${cardsWaiting(a.data, now)}</section>`;
 }
 
 // ── the ticket ──
@@ -213,5 +223,5 @@ export function renderTradeScreen(state, now) {
   const writes = headOf(state.account?.data).writes;
   const signs = state.owner?.role === 'signs';
   return `<main class="main trade"><div class="tp"><div class="tp-cols"><div class="tp-main"><div class="tp-head"><h1 class="head-title">Trade</h1>${writes ? chip(writes) : ''}</div>` +
-    `${kindsHtml(kindOf(state.trade.kind).id)}${picker(state, now)}${underWay(state, signs)}</div><aside class="tk-panel" aria-label="Order ticket">${ticketPanel(state, now)}</aside></div></div></main>`;
+    `${kindsHtml(kindOf(state.trade.kind).id)}${picker(state, now)}${underWay(state, signs, now)}</div><aside class="tk-panel" aria-label="Order ticket">${ticketPanel(state, now)}</aside></div></div></main>`;
 }

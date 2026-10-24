@@ -17,7 +17,8 @@ const key = (action, word, data = {}) => `<button${attrs({ type: 'button', class
 // ── the device line ──
 
 /** The device line under the Account head's chips: the standing's one muted line (the Account's refusal to the device on it),
- *  and its key — the pair box for a page that needs the code, Sign in for a page signed out. A standing not known: nothing. */
+ *  and its key — the pair box for a page that needs the code, Sign in for a page signed out. A standing not known: nothing.
+ *  The pair box is a form, so Enter in its one box submits it (`pairDevice` on the form's submit) as Pair does on a click. */
 export function renderDeviceLine(state) {
   const owner = state.owner;
   const w = standingWords(owner);
@@ -25,8 +26,8 @@ export function renderDeviceLine(state) {
   const line = note([w.line, typeof owner?.refusal === 'string' ? owner.refusal : ''].filter(Boolean).join(' · '));
   const busy = owner?.busy === true;
   if (w.key === 'pair') {
-    return `${line}<div class="pair-box"><input${attrs({ id: 'pair-code', class: 'input small', type: 'text', autocomplete: 'off', 'aria-label': 'Pairing code' })}>` +
-      `${key('pairDevice', 'Pair', { disabled: busy })}</div>`;
+    return `${line}<form class="pair-box" data-action="pairDevice" autocomplete="off"><input${attrs({ id: 'pair-code', class: 'input small', type: 'text', autocomplete: 'off', 'aria-label': 'Pairing code' })}>` +
+      `${key('pairDevice', 'Pair', { disabled: busy })}</form>`;
   }
   if (w.key === 'signIn') return `${line}<div class="btn-row">${key('signIn', 'Sign in', { disabled: busy })}</div>`;
   return line;

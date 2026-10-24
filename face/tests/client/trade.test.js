@@ -14,6 +14,7 @@ import { ticketOf, underWayOf, TRADE_KINDS } from '../../client/js/host/trade-vi
 import { headOf } from '../../client/js/host/account-view.js';
 import { whatYouSignLines, standingWords } from '../../client/js/host/owner-view.js';
 import { askedOf } from '../../client/js/host/sheet.js';
+import { fmtClock } from '../../client/js/time.js';
 
 const NOW = Date.parse('2026-10-22T07:40:00.000Z');
 const CJK = /[㐀-鿿]/;
@@ -245,6 +246,24 @@ test('a page that does not sign: the picker and Under way, its device line where
   // a standing not known yet: no line, no form
   const unknown = panel(draw(stateWith({ role: 'unknown', ticket: ETH })));
   assert.doesNotMatch(unknown, /<form|Sign and place|acct-note/);
+});
+
+test('Under way lists the cards waiting on the owner, each reason · value · answer by with Review → to Cards; no key signs there', () => {
+  const card = fx('account').cards[0];
+  const by = fmtClock(Date.parse(card.expiresAt));   // the same day as NOW: the clock
+  for (const role of ['signs', 'pending']) {
+    const html = draw(stateWith({ role }));
+    const open = html.match(/<section class="cardbox tk-open">[\s\S]*?<\/section>/)?.[0] ?? '';
+    assert.match(open, /<div class="tk-pg-h">Cards waiting<\/div>/, role);
+    assert.ok(open.includes(`<tr><td>${card.reason} · $119.99 · answer by ${by}</td><td class="r"><a class="btn-sm" href="#/account/cards">Review →</a></td></tr>`), `${role}: the card's row and its link`);
+    assert.equal((open.match(/href="#\/account\/cards"/g) ?? []).length, 1, `${role}: one row, one link`);
+    assert.doesNotMatch(open, /approveCard|data-hash|data-card/, `${role}: Cards is where a card is answered`);
+  }
+  // a page with no cards: nothing added
+  const page = { ...fx('account'), cards: [] };
+  const none = draw(stateWith({ page }));
+  assert.doesNotMatch(none, /Cards waiting|#\/account\/cards/);
+  assert.match(none, /<h2 class="tk-h2">Under way<\/h2>/);
 });
 
 test('what was said on Trade — a cancel\'s answer, a fill — is a line over Under way', () => {

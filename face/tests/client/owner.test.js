@@ -52,8 +52,8 @@ test('the device line: the six standings, each its line and its one key', () => 
   // the pair box, only for a page that needs the code
   const pair = renderDeviceLine(standing('needs-code'));
   has(pair, '<p class="acct-note">Pair with the code the Account printed in its terminal</p>');
-  has(pair, '<div class="pair-box"><input id="pair-code" class="input small" type="text" autocomplete="off" aria-label="Pairing code">' +
-    '<button type="button" class="btn-sm" data-action="pairDevice">Pair</button></div>');
+  has(pair, '<form class="pair-box" data-action="pairDevice" autocomplete="off"><input id="pair-code" class="input small" type="text" autocomplete="off" aria-label="Pairing code">' +
+    '<button type="button" class="btn-sm" data-action="pairDevice">Pair</button></form>');
   lacks(pair, 'data-action="signIn"');
   // Sign in, only for a page signed out
   const out = renderDeviceLine(standing('signed-out', KID));

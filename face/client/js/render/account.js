@@ -182,8 +182,8 @@ function venues(state, now) {
 }
 
 // the Account seat's standing (spec 2026-10-20 §6.3): the service with the Account's own mode and writes, the seat and its
-// limits, the venues with the paper ones marked, the cards waiting on the Account page — and the way there, the only place a
-// card is signed. Its words are the Account's; the stamp is when the face answered.
+// limits, the venues with the paper ones marked, the cards waiting — answered on the face's Cards tab, or on the Account page —
+// and the way to the Account page. Its words are the Account's; the stamp is when the face answered.
 function seatBox(state, now) {
   const s = state.seat;
   const w = seatWords(s.data);
@@ -258,14 +258,20 @@ function agentsTab(state, now) {
 
 // ── Cards ──
 
+/** A card's value and the time to answer by (`$119.99 · answer by 08:05`), each left out when the Account gave none — the
+ *  Cards tab's words, which Trade's Under way reads too. */
+export function cardFactsOf(c, now) {
+  const by = when(c.expiresAt, now);
+  return [c.usd === null ? '' : money(c.usd), by ? `answer by ${by}` : ''].filter(Boolean).join(' · ');
+}
+
 // a card: why the agent asks, its value and the time to answer by, and What it asks — every field the owner signs, as the
 // Account sends it; for a page that signs, ✓ Approve and ✗ Reject, each with the card's id and the hash its answer signs
 function cardRow(c, now, owner) {
-  const by = when(c.expiresAt, now);
   const shown = c.shown.map(f => `<div class="dsec-line">${esc(`${f.name}: ${f.value}`)}</div>`).join('');
   const answer = decision => ({ 'data-card': c.id, 'data-hash': c.hash, 'data-decision': decision });
   const keys = owner && c.id && c.hash ? rowKeys([sheetKey('approveCard', answer('approve'), '✓ Approve'), sheetKey('approveCard', answer('reject'), '✗ Reject')]) : '';
-  return `<div class="venue"><div>${lines(c.reason, [[c.usd === null ? '' : money(c.usd), by ? `answer by ${by}` : ''].filter(Boolean).join(' · ')])}` +
+  return `<div class="venue"><div>${lines(c.reason, [cardFactsOf(c, now)])}` +
     `${shown ? `<details${attrs({ id: `shown-${c.id}`, class: 'acct-shown' })}><summary>What it asks</summary>${shown}</details>` : ''}</div>${keys}</div>`;
 }
 

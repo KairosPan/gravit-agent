@@ -1458,6 +1458,32 @@ test("the pair box's code reaches the door: a page that needs the code pairs wit
   store.timers.clear();
 });
 
+test("Enter in the pair box pairs: the box is a form, and its submit reaches the door with the code typed, once", async () => {
+  const f = fakeWindow({ hash: '#/account/portfolio', storage: memoryStorage() });
+  const box = f.withId('pair-code', { tagName: 'INPUT' });
+  const door = ownerDoor({ role: 'needs-code' });
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page() } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(() => store.get().owner.role === 'needs-code', 'the page to need the code');
+  assert.match(f.html(), /<form class="pair-box" data-action="pairDevice"[^>]*><input id="pair-code"/);
+  const before = door.sent('/data/account/pair').length;
+  box.value = ' 4F7Q-2KDA ';
+  // Enter in a form's one text box submits the form; the submit's target is the box, its form the pair form
+  const enter = () => f.fire('root', 'submit', { target: { tagName: 'INPUT', id: 'pair-code', closest: () => ({ tagName: 'FORM', dataset: { action: 'pairDevice' } }) } });
+  // while a pairing is in the air Enter is held, as the Pair key is
+  store.dispatch('ownerBusy', true);
+  enter();
+  await settle();
+  assert.equal(door.sent('/data/account/pair').length, before, 'held while busy');
+  store.dispatch('ownerBusy', false);
+  enter();
+  await until(signs(store), 'the page to sign');
+  assert.equal(door.sent('/data/account/pair').length, before + 1, 'one pairing for one Enter');
+  assert.equal(door.sent('/data/account/pair').at(-1).code, '4F7Q-2KDA');
+  store.timers.clear();
+});
+
 test('Let in… opens the sheet on the knocking key; a field change prepares again after the quiet; Sign signs it; done reads the page, the holdings, the statement and the seat fresh and closes the sheet', async () => {
   const f = fakeWindow({ hash: '#/account/agents', storage: memoryStorage() });
   const timers = new HeldTimers(ms => ms >= 300);
