@@ -96,6 +96,24 @@ test("statementFailed keeps the Account's sentence over the lines kept; the next
   assert.equal(R.statementFailed(s, { at: 4 }).account.statement.message, null, 'a failure without words carries none');
 });
 
+// the owner device's slice (host/owner.js): its standing, the Account's words when it refused, a pairing in the air
+test('the owner slice takes a known role, the refusal as words, busy as a boolean', () => {
+  const s = emptyState();
+  assert.deepEqual(s.owner, { role: 'unknown', kid: '', refusal: null, busy: false });
+  let t = R.ownerStanding(s, { role: 'signs', kid: '0123456789abcdef' });
+  assert.deepEqual(t.owner, { role: 'signs', kid: '0123456789abcdef', refusal: null, busy: false });
+  assert.equal(R.ownerStanding(t, { role: 'signs', kid: '0123456789abcdef' }), t, 'the same standing: the state as it was');
+  assert.equal(R.ownerStanding(t, { role: 'owner', kid: 'x' }), t, 'a role the device does not know changes nothing');
+  assert.equal(R.ownerStanding(t, { role: 'signed-out' }).owner.kid, '', 'no kid is the empty one');
+  t = R.ownerRefusal(t, 'that is not the pairing code this server printed in its terminal (4 tries left)');
+  assert.equal(t.owner.refusal, 'that is not the pairing code this server printed in its terminal (4 tries left)');
+  assert.equal(R.ownerRefusal(t, null).owner.refusal, null);
+  assert.equal(R.ownerRefusal(t, { message: 'x' }).owner.refusal, null, 'only words are kept');
+  assert.equal(R.ownerBusy(t, true).owner.busy, true);
+  assert.equal(R.ownerBusy(R.ownerBusy(t, true), 'yes').owner.busy, false);
+  assert.equal(R.ownerBusy(t, false), t);
+});
+
 test('the empty state carries no demo slice', () => {
   const s = emptyState();
   for (const gone of ['plugins', 'memory', 'mail', 'banner', 'call', 'compose']) assert.equal(gone in s, false, gone);

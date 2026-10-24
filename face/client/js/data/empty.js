@@ -52,6 +52,9 @@ export function emptyState() {
     },
     // the Account seat's standing (host/seat.js): /data/seat.json as read
     seat: { status: 'idle', data: null, at: null },
+    // the owner device (host/owner.js): whether this page signs for the Account, its key's id there, the Account's last
+    // refusal to it, a pairing or sign-out in the air
+    owner: { role: 'unknown', kid: '', refusal: null, busy: false },
     edit: null,
     confirm: null,
   };
