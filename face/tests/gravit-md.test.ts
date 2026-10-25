@@ -26,3 +26,11 @@ test("GRAVIT.md states facts, not identity: it never tells the reader who it is"
   const text = readFileSync(GRAVIT_MD, "utf8");
   assert.equal(/^You are /m.test(text), false);
 });
+
+/* Since 2026-10-24 the tree has no Python package, no point-in-time beds and no lookahead guard
+ * (spec 2026-10-22 account-graft §12): nothing every agent reads may point at them. */
+test("GRAVIT.md names nothing of the removed layer and states that no read is guarded", () => {
+  const text = readFileSync(GRAVIT_MD, "utf8");
+  for (const gone of ["alpaca_kit", "replay_days", "data/pit"]) assert.equal(text.includes(gone), false, gone);
+  assert.match(text, /no lookahead guard/);
+});

@@ -6,23 +6,32 @@ import { join, relative } from "node:path";
 import { CYCLE_MAX_BYTES, CYCLE_PATH, readCycle } from "../src/cycle.ts";
 import { ROLES_ROOT, readRoles } from "../src/roles.ts";
 
-test("the shipped cycle.md reads, fits its budget, and carries the six steps and the caps", () => {
+test("the shipped cycle.md reads, fits its budget, and carries the six steps and the cap", () => {
   const text = readCycle(CYCLE_PATH);
   assert.ok(Buffer.byteLength(text, "utf8") <= CYCLE_MAX_BYTES);
   for (const step of ["Step 0", "Step 1", "Steps 2 to 5", "Step 6"]) assert.ok(text.includes(step), step);
-  assert.ok(text.includes("max_goal_rounds 24") && text.includes("12 role calls"));
+  assert.ok(text.includes("max_goal_rounds 24") && text.includes("Round: n/24"));
   assert.ok(text.includes("update_goal with action resume"), "the restart path is stated");
-  assert.ok(text.includes("child-limit, bed-window, data-missing or needs-operator"), "the blocked vocabulary is stated");
+  assert.ok(text.includes("venue-window, data-missing or needs-operator"), "the blocked vocabulary is stated");
+});
+
+/* Since 2026-10-24 the cycle's evidence is the Account's own reads and a forward paper trade on the
+ * paper venue the operator granted: no role is delegated to, nothing is backtested, and the beds'
+ * vocabulary is gone (spec 2026-10-22 account-graft §12). */
+test("the mounted cycle names no role and runs on a forward paper trade", () => {
+  const text = readCycle(CYCLE_PATH);
+  assert.equal(text.includes("role_"), false, "the cycle delegates to no role");
+  assert.ok(text.includes("forward paper trade"), "the evidence is a forward paper trade");
+  assert.ok(text.includes("mcp__account__portfolio_*"), "the reads come through the seat");
+  for (const gone of ["bed-window", "child-limit", "role calls", "the bed "]) assert.equal(text.includes(gone), false, gone);
 });
 
 /* cycle.md names the roles it delegates to by tool name, and nothing else ties the two: a role
  * renamed or removed under roles/ would leave Gravit told to call a tool that does not exist.
- * The three roles cycle.md's steps 2 to 5 delegate to retired on 2026-10-24 and those steps are
- * rewritten without roles in the next change, so until then this check is a todo: it runs and
- * reports the mismatch, and does not fail the suite. */
-test("every role_* tool cycle.md names is a role the shipped library has", { todo: "cycle.md still names the three retired roles until its steps 2 to 5 are rewritten" }, () => {
+ * The text names none today, so the check holds vacuously; it fails the day cycle.md names a
+ * role that roles/ does not ship. */
+test("every role_* tool cycle.md names is a role the shipped library has", () => {
   const named = [...new Set(readCycle(CYCLE_PATH).match(/\brole_[a-z0-9_]+/g) ?? [])].sort();
-  assert.ok(named.length > 0, "cycle.md delegates to at least one role");
   const shipped = new Set(readRoles(ROLES_ROOT).map((role) => role.tool));
   assert.deepEqual(named.filter((tool) => !shipped.has(tool)), [], `cycle.md names ${named.join(", ")}; the library has ${[...shipped].sort().join(", ")}`);
 });
