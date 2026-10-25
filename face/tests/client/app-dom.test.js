@@ -644,7 +644,7 @@ test('Export CSV hands the browser a blob with the statement and revokes it', as
   store.timers.clear();
 });
 
-test('a receipt in a conversation reloads the account', async () => {
+test("an old session's place_order result in a conversation is no receipt: the account is not read again", async () => {
   const f = fakeWindow({ hash: '#/messages/s1', storage: memoryStorage() });
   const h = accountHost({ rows: [row('s1', { agentAvailable: true })] });
   const store = bootAccount(f, h);
@@ -655,8 +655,7 @@ test('a receipt in a conversation reloads the account', async () => {
   follow.cbs.onItem({ type: 'event', event: { type: 'tool/call', seq: 40, time: 1756512200000, data: { turn: 4, step: 1, callId: 'c9', name: 'mcp__alpaca-kit__place_order', arguments: JSON.stringify({ symbol: 'AAPL', qty: 1, side: 'buy', order_type: 'market' }) } } });
   follow.cbs.onItem({ type: 'event', event: { type: 'tool/result', seq: 41, time: 1756512201000, surfaceOp: 'append', data: { turn: 4, step: 1, message: { id: 'm-41', role: 'tool', source: { kind: 'tool', callId: 'c9' }, toolCallId: 'c9', content: [{ type: 'text', text: JSON.stringify({ ok: true, id: 'ord-1' }) }], isError: false } } } });
   await settle();
-  assert.equal(h.accountReads(), before + 1);
-  assert.equal(h.reads.filter(isPage).at(-1), '/data/account?fresh=1', 'a fill is read past the cache');
+  assert.equal(h.accountReads(), before, 'the alpaca half left: its result lifts no receipt (a seat receipt reloads it, below)');
   store.timers.clear();
 });
 

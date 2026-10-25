@@ -5,7 +5,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { mapFrame } from '../../client/js/wire/mapper.js';
 import { describeOrder } from '../../src/orders.ts';
-import { ORDER_TOOLS, SEAT_TOOLS, isOrderTool, isSeatWriteTool, parseArgs, orderLine, seatLine, rememberCall, toMessages, seatLift, reasonArgs } from '../../client/js/host/kinds.js';
+import * as kinds from '../../client/js/host/kinds.js';
+import { renderMessage } from '../../client/js/render/thread.js';
+import { emptyState } from '../../client/js/data/empty.js';
+
+const { SEAT_TOOLS, isSeatWriteTool, parseArgs, seatLine, rememberCall, toMessages, seatLift, reasonArgs } = kinds;
 
 // the Account seat's twelve write tools (spec 2026-10-20 §6.1), spelled here as the gate's test spells them
 const SEAT = ['portfolio_live_order', 'portfolio_live_batch', 'portfolio_live_amend', 'portfolio_live_cancel', 'portfolio_live_close',
@@ -18,13 +22,11 @@ const calls = new Map();
 const out = frames.map(frame => { rememberCall(calls, frame); return toMessages(mapFrame(frame), calls, NOW); });
 const one = i => { assert.equal(out[i].length, 1, `line ${i + 1} gives one message`); return out[i][0]; };
 
-test('the order tools match by raw name or minted name, the read-only orders listing never', () => {
-  assert.deepEqual([...ORDER_TOOLS], ['place_order', 'cancel_order', ...SEAT]);
+test("the seat's writes match by raw name or minted name; the alpaca pair is no order tool any more", () => {
   assert.deepEqual([...SEAT_TOOLS], SEAT);
-  assert.ok(isOrderTool('place_order') && isOrderTool('mcp__alpaca-kit__cancel_order'));
-  assert.ok(!isOrderTool('orders') && !isOrderTool('mcp__alpaca-kit__orders') && !isOrderTool('bash'));
-  assert.ok(isOrderTool('mcp__account__portfolio_live_order') && isSeatWriteTool('mcp__broker__portfolio_pay'));
-  assert.ok(!isOrderTool('mcp__account__portfolio_account') && !isSeatWriteTool('mcp__alpaca-kit__place_order'));
+  assert.ok(isSeatWriteTool('portfolio_live_order') && isSeatWriteTool('mcp__account__portfolio_live_order') && isSeatWriteTool('mcp__broker__portfolio_pay'));
+  assert.ok(!isSeatWriteTool('mcp__account__portfolio_account') && !isSeatWriteTool('mcp__alpaca-kit__place_order') && !isSeatWriteTool('orders'));
+  for (const gone of ['ORDER_TOOLS', 'isOrderTool', 'orderLine']) assert.equal(gone in kinds, false, `${gone} left with the alpaca half`);
 });
 
 test('seatLine words a seat write from its arguments', () => {
@@ -150,12 +152,6 @@ test('parseArgs reads JSON and tolerates anything else', () => {
   assert.deepEqual(parseArgs(undefined), {});
 });
 
-test('orderLine words an order from its arguments', () => {
-  assert.equal(orderLine({ side: 'buy', qty: 0.00008, symbol: 'BTC/USD', order_type: 'market' }), 'buy 0.00008 BTC/USD · market');
-  assert.equal(orderLine({ side: 'sell', qty: 10, symbol: 'AAPL', order_type: 'limit', limit_price: 187.4 }), 'sell 10 AAPL · limit 187.4');
-  assert.equal(orderLine({ order_id: 'ord-7' }), 'cancel ord-7');
-});
-
 test("the operator's words are a blue text message from you, dated by the event", () => {
   const m = one(0);
   assert.equal(m.kind, 'text'); assert.equal(m.from, 'you');
@@ -231,38 +227,33 @@ const orderCall = { type: 'session/event', sessionId: 's1', event: { type: 'tool
 const orderGate = { type: 'waterfall', event: 'approval/request', eventId: 'ev-9', agentId: 's1', request: { toolName: 'mcp__alpaca-kit__place_order', callId: 'c9', reason: 'PAPER order - mcp__alpaca-kit__place_order: side=buy qty=0.00008 symbol=BTC/USD order_type=market', displayReason: 'PAPER order - mcp__alpaca-kit__place_order: side=buy qty=0.00008 symbol=BTC/USD order_type=market' } };
 const orderResult = (text, isError) => ({ type: 'session/event', sessionId: 's1', event: { type: 'tool/result', seq: 41, time: 1756512201000, surfaceOp: 'append', data: { turn: 4, step: 1, message: { id: 'm-41', role: 'tool', source: { kind: 'tool', callId: 'c9' }, toolCallId: 'c9', content: [{ type: 'text', text }], isError } } } });
 
-test('an order approval is the orange card with the exact arguments joined from its tool call', () => {
+// an old session's alpaca-kit order, as the sessions written before stage 3 hold it
+test("an old session's place_order approval draws as a plain approval card: the tool's name and the host's reason, never a crash", () => {
   const c = new Map();
   rememberCall(c, orderCall);
   const [row] = toMessages(mapFrame(orderCall), c, NOW);
   assert.equal(row.kind, 'tool');
-  const [card] = toMessages(mapFrame(orderGate), c, NOW);
-  assert.equal(card.kind, 'card'); assert.equal(card.id, 'ev-9'); assert.equal(card.at, NOW);
-  assert.equal(card.text, 'Your call: buy 0.00008 BTC/USD · market');
-  assert.equal(card.data.venue, 'Alpaca paper'); assert.equal(card.data.callId, 'c9'); assert.equal(card.data.sessionId, 's1');
-  assert.equal(card.data.toolName, 'mcp__alpaca-kit__place_order');
-  assert.match(card.data.line, /^PAPER order/);
+  for (const known of [c, new Map()]) {
+    const [card] = toMessages(mapFrame(orderGate), known, NOW);
+    assert.equal(card.kind, 'approval'); assert.equal(card.id, 'ev-9'); assert.equal(card.at, NOW);
+    assert.equal(card.text, orderGate.request.displayReason);
+    assert.equal(card.data.toolName, 'mcp__alpaca-kit__place_order'); assert.equal(card.data.callId, 'c9'); assert.equal(card.data.sessionId, 's1');
+    assert.doesNotMatch(JSON.stringify(card), /Alpaca paper|Your call/);
+    const html = renderMessage(card, { id: 's1', kind: 'gravit', members: ['gravit'] }, emptyState());
+    assert.match(html, /class="card-title">mcp__alpaca-kit__place_order</);
+    assert.match(html, /PAPER order - mcp__alpaca-kit__place_order: side=buy/);
+  }
 });
 
-test("an order approval is titled from the host's line even when its call was never seen; a line without pairs falls back to the tool name", () => {
-  const [card] = toMessages(mapFrame(orderGate), new Map(), NOW);
-  assert.equal(card.kind, 'card'); assert.equal(card.text, 'Your call: buy 0.00008 BTC/USD · market');
-  const [bare] = toMessages(mapFrame({ ...orderGate, eventId: 'ev-9b', request: { ...orderGate.request, reason: 'PAPER order - mcp__alpaca-kit__place_order', displayReason: undefined } }), new Map(), NOW);
-  assert.equal(bare.text, 'Your call: mcp__alpaca-kit__place_order');
-});
-
-test('an accepted order result is the tool row plus a green receipt; a failed one the row plus a red refusal', () => {
+test("an old session's place_order result is its tool row alone: no receipt, no refusal", () => {
   const c = new Map();
   rememberCall(c, orderCall);
   const ok = toMessages(mapFrame(orderResult(JSON.stringify({ ok: true, id: 'ord-1', status: 'accepted' }), false)), c, NOW);
-  assert.equal(ok.length, 2);
-  assert.equal(ok[0].kind, 'tool'); assert.equal(ok[0].id, 'tc9');
-  assert.equal(ok[1].kind, 'receipt'); assert.equal(ok[1].id, 'rc9'); assert.equal(ok[1].from, 'gravit');
-  assert.equal(ok[1].text, 'Order accepted · buy 0.00008 BTC/USD · market · ord-1'); assert.equal(ok[1].data.orderId, 'ord-1');
-  assert.equal(ok[1].seq, 41); assert.equal(ok[1].at, 1756512201000);
+  assert.equal(ok.length, 1);
+  assert.equal(ok[0].kind, 'tool'); assert.equal(ok[0].id, 'tc9'); assert.equal(ok[0].data.name, 'mcp__alpaca-kit__place_order');
   const bad = toMessages(mapFrame(orderResult('the user rejected tool "mcp__alpaca-kit__place_order"', true)), c, NOW);
-  assert.equal(bad.length, 2);
-  assert.equal(bad[1].kind, 'refusal'); assert.equal(bad[1].id, 'rc9'); assert.equal(bad[1].text, 'the user rejected tool "mcp__alpaca-kit__place_order"');
+  assert.equal(bad.length, 1);
+  assert.equal(bad[0].kind, 'tool'); assert.equal(bad[0].data.isError, true);
 });
 
 test("a result row carries the call's name and arguments", () => {

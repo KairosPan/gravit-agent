@@ -7,14 +7,12 @@ import { roundEndLine } from '../wire/room.js';
 export const SEAT_TOOLS = Object.freeze(['portfolio_live_order', 'portfolio_live_batch', 'portfolio_live_amend', 'portfolio_live_cancel',
   'portfolio_live_close', 'portfolio_live_leverage', 'portfolio_live_move', 'portfolio_live_earn', 'portfolio_pay',
   'portfolio_order', 'portfolio_execute', 'portfolio_transfer']);
-export const ORDER_TOOLS = Object.freeze(['place_order', 'cancel_order', ...SEAT_TOOLS]);
 // the face's own seat server (face/src/account-seat.ts): the host cards every tool under it that it has not classified as a
 // read, so an approval arriving under this prefix is a seat card whatever its raw name
 const SEAT_PREFIX = 'mcp__account__';
 
 const bySuffix = (list, name) => typeof name === 'string' && list.some(raw => name === raw || name.endsWith('__' + raw));
-// the raw name or the minted `mcp__<server>__<raw>`; the read-only `orders` listing never matches
-export const isOrderTool = name => bySuffix(ORDER_TOOLS, name);
+// the raw name or the minted `mcp__<server>__<raw>`
 export const isSeatWriteTool = name => bySuffix(SEAT_TOOLS, name);
 const isSeatGate = name => isSeatWriteTool(name) || (typeof name === 'string' && name.startsWith(SEAT_PREFIX));
 const rawOf = name => { if (typeof name !== 'string') return ''; const i = name.lastIndexOf('__'); return i < 0 ? name : name.slice(i + 2); };
@@ -28,14 +26,6 @@ export function parseArgs(raw) {
   } catch {
     return {};
   }
-}
-
-// "buy 0.00008 BTC/USD · market", "sell 10 AAPL · limit 187.4", "cancel ord-7"
-export function orderLine(args = {}) {
-  if (args.order_id !== undefined && args.side === undefined) return `cancel ${args.order_id}`;
-  const head = [args.side, args.qty, args.symbol].filter(v => v !== undefined && v !== null && v !== '').join(' ');
-  const type = args.order_type === 'limit' && args.limit_price !== undefined ? `limit ${args.limit_price}` : args.order_type;
-  return type ? `${head} · ${type}` : head;
 }
 
 const has = v => v !== undefined && v !== null && v !== '';
@@ -147,7 +137,6 @@ const replaceOf = view => (view.surfaceOp && typeof view.surfaceOp === 'object' 
   ? { replace: { start: view.surfaceOp.start, end: view.surfaceOp.end } } : {});
 const base = view => ({ id: `e${view.seq}`, seq: view.seq, at: view.time, ...replaceOf(view) });
 const sys = (view, text) => ({ ...base(view), from: 'system', kind: 'text', text, data: {} });
-const orderIdOf = text => { const v = parseArgs(text); return typeof v.id === 'string' ? v.id : ''; };
 
 function bubble(view, speaker) {
   const b = base(view);
@@ -178,39 +167,26 @@ function toolMessages(view, calls) {
   }
   // the result names its call, when the call was seen: the row draws the call's name and its payload folded
   const row = { ...base(view), id: `t${callId}`, merge: true, from: 'gravit', kind: 'tool', text: '', data: { callId, result: c.text ?? '', isError: c.isError === true, ...(known ? { name: known.name, args: known.args } : {}) } };
-  if (!known) return [row];
-  if (isSeatWriteTool(known.name)) {
-    const lift = seatLift(known.name, known.args, c.text ?? '', c.isError === true, callId);
-    return lift ? [row, { ...base(view), id: `r${callId}`, from: 'gravit', ...lift }] : [row];
-  }
-  if (!isOrderTool(known.name)) return [row];
-  const lift = c.isError === true
-    ? { ...base(view), id: `r${callId}`, from: 'gravit', kind: 'refusal', text: unprefixed(c.text), data: { toolName: known.name, callId } }
-    : { ...base(view), id: `r${callId}`, from: 'gravit', kind: 'receipt', text: `Order accepted · ${orderLine(known.args)} · ${orderIdOf(c.text)}`, data: { orderId: orderIdOf(c.text), callId } };
-  return [row, lift];
+  if (!known || !isSeatWriteTool(known.name)) return [row];
+  const lift = seatLift(known.name, known.args, c.text ?? '', c.isError === true, callId);
+  return lift ? [row, { ...base(view), id: `r${callId}`, from: 'gravit', ...lift }] : [row];
 }
 
 function gate(view, now) {
   const data = { eventId: view.id, sessionId: view.sessionId, toolName: view.toolName, callId: view.callId, reason: view.reason, displayReason: view.displayReason };
   const line = view.displayReason ?? view.reason ?? '';
-  if (!isOrderTool(view.toolName) && !isSeatGate(view.toolName)) return { id: view.id, at: now, from: 'gravit', kind: 'approval', text: line, data };
+  // anything not the seat's — an old session's alpaca-kit order included — is the plain approval card: its name and reason
+  if (!isSeatGate(view.toolName)) return { id: view.id, at: now, from: 'gravit', kind: 'approval', text: line, data };
   // the title is made from the host's own reason line and nothing else (reasonArgs): never from a tool/call frame, which may
   // reach the page after the gate or come later under the same id; a line that names another tool, or no pair, titles nothing
   const read = reasonArgs(view.reason ?? view.displayReason);
   const args = read.tool === view.toolName && Object.keys(read.args).length > 0 ? read.args : null;
   // a seat card: the seat line, and the line's venue as the chip — a batch's venues, or the seat itself when the tool names none
-  if (isSeatGate(view.toolName)) {
-    const venue = args && typeof args.venue === 'string' && args.venue !== '' ? args.venue : (venuesOf(args?.legs) || 'Account seat');
-    return {
-      id: view.id, at: now, from: 'gravit', kind: 'card',
-      text: `Your call: ${args ? seatLine(view.toolName, args) : view.toolName}`,
-      data: { ...data, venue, line, args: args ?? {} },
-    };
-  }
+  const venue = args && typeof args.venue === 'string' && args.venue !== '' ? args.venue : (venuesOf(args?.legs) || 'Account seat');
   return {
     id: view.id, at: now, from: 'gravit', kind: 'card',
-    text: `Your call: ${args ? orderLine(args) : view.toolName}`,
-    data: { ...data, venue: 'Alpaca paper', line, args: args ?? {} },
+    text: `Your call: ${args ? seatLine(view.toolName, args) : view.toolName}`,
+    data: { ...data, venue, line, args: args ?? {} },
   };
 }
 

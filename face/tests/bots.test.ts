@@ -70,10 +70,17 @@ test("DEFAULT_ALLOW names read and speak tools only - never orders, delegation, 
   for (const forbidden of ["subagent", "subagent_fork", "workflow", "ralph", "create_goal", "todo_write", "mcp__*__place_order", "mcp__*__cancel_order", "mcp__*__orders"]) {
     assert.equal(DEFAULT_ALLOW.includes(forbidden), false, forbidden);
   }
-  for (const kept of ["bash", "read", "grep", "glob", "edit", "write", "web_search", "skill", "ask_user_question", "mcp__*__daily_bars"]) {
+  for (const kept of ["bash", "read", "grep", "glob", "edit", "write", "web_search", "skill", "ask_user_question"]) {
     assert.equal(DEFAULT_ALLOW.includes(kept), true, kept);
   }
   assert.equal(DEFAULT_ALLOW.some((n) => n.startsWith("agent_")), false);
+});
+
+test("DEFAULT_ALLOW names none of the alpaca-kit reads: they left with the server", () => {
+  for (const gone of ["earnings", "daily_bars", "calendar", "corp_actions", "market_snapshot", "screen", "breadth"]) {
+    assert.equal(DEFAULT_ALLOW.includes(`mcp__*__${gone}`), false, gone);
+  }
+  assert.equal(DEFAULT_ALLOW.some((n) => n.startsWith("mcp__")), false, "no MCP pattern is left in the default");
 });
 
 test("createBot copies the template, writes the three files, renders the composition, and refuses a second time", async () => {

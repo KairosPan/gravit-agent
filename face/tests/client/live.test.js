@@ -286,22 +286,35 @@ test('opening marks the conversation seen; the list keeps the open one seen when
 });
 
 // spec 2026-10-19 §6: the account is read again right after a fill
-const orderCall = { type: 'tool/call', seq: 40, time: 1756512200000, data: { turn: 4, step: 1, callId: 'c9', name: 'mcp__alpaca-kit__place_order', arguments: JSON.stringify({ symbol: 'BTC/USD', qty: 0.00008, side: 'buy', order_type: 'market' }) } };
+const orderCall = { type: 'tool/call', seq: 40, time: 1756512200000, data: { turn: 4, step: 1, callId: 'c9', name: 'mcp__account__portfolio_live_order', arguments: JSON.stringify({ venue: 'paper-1', symbol: 'BTC/USD', side: 'buy', usd: 10 }) } };
 const orderResult = (seq, text, isError) => ({ type: 'tool/result', seq, time: 1756512201000, surfaceOp: 'append', data: { turn: 4, step: 1, message: { id: `m-${seq}`, role: 'tool', source: { kind: 'tool', callId: 'c9' }, toolCallId: 'c9', content: [{ type: 'text', text }], isError } } });
 
-test('a place_order result that is a receipt calls onReceipt once; a refusal or a backfilled receipt does not', async () => {
+test('a seat order result that is a receipt calls onReceipt once; a refusal or a backfilled receipt does not', async () => {
   let receipts = 0;
   const r = rig({ rows: [row('live', { agentAvailable: true })], onReceipt: () => { receipts++; } });
   await r.ready();
   r.live.open('live'); await settle();
   const f = r.last('session/follow');
-  f.cbs.onItem({ type: 'snapshot', header: { createdAt: 7 }, cursor: 2, records: [{ type: 'event', event: orderCall }, { type: 'event', event: orderResult(41, JSON.stringify({ ok: true, id: 'ord-0' }), false) }] });
+  f.cbs.onItem({ type: 'snapshot', header: { createdAt: 7 }, cursor: 2, records: [{ type: 'event', event: orderCall }, { type: 'event', event: orderResult(41, JSON.stringify({ ok: true, order: { id: 'ord-0' } }), false) }] });
   assert.equal(receipts, 0, 'a receipt in the window is history');
   f.cbs.onItem({ type: 'event', event: { ...orderCall, seq: 42 } });
-  f.cbs.onItem({ type: 'event', event: orderResult(43, JSON.stringify({ ok: true, id: 'ord-1', status: 'accepted' }), false) });
+  f.cbs.onItem({ type: 'event', event: orderResult(43, JSON.stringify({ ok: true, order: { id: 'ord-1', status: 'accepted', paper: true } }), false) });
   assert.equal(receipts, 1);
-  f.cbs.onItem({ type: 'event', event: orderResult(44, 'the user rejected tool "mcp__alpaca-kit__place_order"', true) });
+  f.cbs.onItem({ type: 'event', event: orderResult(44, 'the user rejected tool "mcp__account__portfolio_live_order"', true) });
   assert.equal(receipts, 1, 'a refusal is no fill');
+});
+
+// an old session's alpaca-kit order: its result is a tool row and nothing more, so it is no receipt
+test("an old session's place_order result calls nothing", async () => {
+  let receipts = 0;
+  const r = rig({ rows: [row('live', { agentAvailable: true })], onReceipt: () => { receipts++; } });
+  await r.ready();
+  r.live.open('live'); await settle();
+  const f = r.last('session/follow');
+  f.cbs.onItem({ type: 'snapshot', header: { createdAt: 7 }, cursor: 2, records: [] });
+  f.cbs.onItem({ type: 'event', event: { ...orderCall, seq: 50, data: { ...orderCall.data, name: 'mcp__alpaca-kit__place_order', arguments: JSON.stringify({ symbol: 'BTC/USD', qty: 0.00008, side: 'buy', order_type: 'market' }) } } });
+  f.cbs.onItem({ type: 'event', event: orderResult(51, JSON.stringify({ ok: true, id: 'ord-1', status: 'accepted' }), false) });
+  assert.equal(receipts, 0);
 });
 
 // spec 2026-10-20 §6.2: a seat write's receipt reaches the app flagged seat, so it reloads the seat's standing, not the account

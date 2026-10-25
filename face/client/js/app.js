@@ -264,8 +264,8 @@ export function boot(win, host = {}) {
   }
   // the owner sheet (prepare → What you sign → sign) over the owner device
   const sheet = startSheet({ store, owner, schedule, cancelTimer, now, afterAction, onChange: kind => { if (kind === 'connect') checkConnectSoon(); } });
-  // a receipt reloads the Account's page past the cache (an Alpaca fill, a seat write), and one from the Account seat the seat's
-  // standing too
+  // a receipt reloads the Account's page past the cache, and one from the Account seat (every receipt the kind table
+  // lifts today) the seat's standing too
   const live = startLive({ store, openMux: host.openMux ?? wireOpenMux, call, mapFrame, getJson, timers, now, onReceipt: m => { if (m?.data?.seat) void seat.load({ fresh: true }); void account.load({ fresh: true }); } });
   // answers go through the live layer, which settles the gate it delivered once the answer wins
   const actions = makeActions({ store, call, answerGate: (eventId, value) => live.answer(eventId, value), postJson });

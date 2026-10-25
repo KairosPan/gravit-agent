@@ -9,7 +9,7 @@ const NOW = new Date(2026, 9, 19, 14, 7).getTime();
 const state = emptyState();
 const conv = (over = {}) => ({ id: 's1', title: 'T', kind: 'gravit', members: ['gravit'], memberSessions: [], channel: null, preset: 'gravit', running: false, live: true, updatedAt: 5, created: null, messages: [], loaded: true, preview: null, usage: null, thinking: null, lastSeen: 0, ...over });
 const msg = (over = {}) => ({ id: 'e1', seq: 1, at: NOW, from: 'gravit', kind: 'text', text: 'hello', data: {}, ...over });
-const gate = (kind, over = {}) => msg({ id: 'ev-1', seq: 1.5, kind, from: 'gravit', text: 'Your call: buy 0.00008 BTC/USD · market', data: { eventId: 'ev-1', sessionId: 's1', toolName: 'mcp__alpaca-kit__place_order', callId: 'c9', venue: 'Alpaca paper', line: 'PAPER order - place_order: side=buy' }, ...over });
+const gate = (kind, over = {}) => msg({ id: 'ev-1', seq: 1.5, kind, from: 'gravit', text: 'Your call: buy $10 of BTC/USD · market · paper-1', data: { eventId: 'ev-1', sessionId: 's1', toolName: 'mcp__account__portfolio_live_order', callId: 'c9', venue: 'paper-1', line: 'Account seat - mcp__account__portfolio_live_order: side=buy usd=10 symbol=BTC/USD venue=paper-1' }, ...over });
 
 test("the operator's words are a blue bubble on the right, Gravit's a grey one on the left, a system line is centred", () => {
   const you = renderMessage(msg({ from: 'you', text: 'hi there' }), conv(), state);
@@ -59,8 +59,8 @@ test('a tool row is a collapsed details titled by the call; the result fills a p
 
 test('the order card carries its title, the venue line, and Decline then Approve keys that answer rejected and allowed-once', () => {
   const html = renderMessage(gate('card'), conv(), state);
-  assert.match(html, /card orange/); assert.match(html, /card-title">Your call: buy 0.00008 BTC\/USD · market</);
-  assert.match(html, /Alpaca paper · PAPER order - place_order: side=buy/);
+  assert.match(html, /card orange/); assert.match(html, /card-title">Your call: buy \$10 of BTC\/USD · market · paper-1</);
+  assert.match(html, /paper-1 · Account seat - mcp__account__portfolio_live_order: side=buy/);
   const keys = [...html.matchAll(/data-action="answer"[^>]*data-value="([^"]+)"/g)].map(x => x[1]);
   assert.deepEqual(keys, ['rejected', 'allowed-once']);
   assert.match(html, /aria-label="Decline"/); assert.match(html, /aria-label="Approve"/);
