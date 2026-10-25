@@ -23,7 +23,7 @@ __pycache__/
 /state/
 spikes/2026-06-26-hermes-vendor-feasibility/_hermes/
 
-# Secrets / local credentials — NEVER commit (Alpaca + LLM keys)
+# Secrets / local credentials — NEVER commit (LLM keys and any provider's)
 .env
 .env.*
 *.env

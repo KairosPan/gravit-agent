@@ -1423,8 +1423,9 @@ Messages.)
   thousands of characters). The composed row tree the listing also carries (`rows` — about 110 at
   0.2.0-rc.2, ids of the form `include:<row id>`) is not drawn; it is in the JSON.
 
-Every `/data` route — Discover's, the instruments', the strategy and session
-routes — stands behind a browser-trust fence modelled on the one the harness
+Every `/data` route — Discover's, the A-share quote and search routes, the
+Account proxy's and the seat box's, the channel, bot, room and session routes —
+stands behind a browser-trust fence modelled on the one the harness
 puts in front of `/api` (`isTrustedDataRequest`): a loopback Host, no
 Fetch-Metadata `cross-site`, and a present `Origin` that matches the Host —
 and, unlike `/api`, behind nothing else: no browser cookie (D8). Every `/data` POST
@@ -1744,9 +1745,7 @@ tool; `run_code`, the reserved PTC transport, which `tools.restrict()` refuses t
 or order tool under any server name (anything under `mcp__account__`, the seat's twelve writes,
 and `account`, `positions`, `orders`, `place_order`, `cancel_order`, bare or as
 `mcp__<server>__<raw>`, matched by raw suffix as Gate 2 matches — the seat is Gravit's); any
-`mcp__akshare__` tool. The message gives the reason (the `NEVER` table; two of its reason strings
-still speak of "the two order gates" and of backtest evidence, wording older than 2026-10-24 that
-is true in effect).
+`mcp__akshare__` tool. The message gives the reason (the `NEVER` table).
 
 **The job tools are a `bash` role's own.** A child's `bash` command runs under bash-sandbox's
 60,000 ms default deadline; a call may pass `timeoutMs`, capped at 600,000. A command still

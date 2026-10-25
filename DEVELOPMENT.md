@@ -494,9 +494,7 @@ goal and todo tools (Gravit tracks them); `run_code`, the reserved PTC transport
 and order tools under any server name — the `mcp__account__` prefix, the seat's twelve writes, and
 `account`, `positions`, `orders`, `place_order`, `cancel_order`, bare or as any
 `mcp__<server>__<raw>`, matched by raw suffix as Gate 2's `isOrderTool` matches the seat's writes
-(the Account seat is Gravit's, §4.7); and the `mcp__akshare__` prefix (`NEVER`'s reason strings
-still speak of "the two order gates" and of backtest evidence — code wording older than stage 3,
-true in effect: a role holds neither).
+(the Account seat is Gravit's, §4.7); and the `mcp__akshare__` prefix.
 
 The job tools are a `bash` role's own. A child's `bash` command runs under the deadline of
 dsh-base's `bash-sandbox` row, 60,000 ms by default; a call may pass `timeoutMs`, capped at
@@ -709,7 +707,7 @@ smoke that boots without `main.ts` relies on.
 | `policy.ts` | the policy layer (§4.3): `POLICY_ID_PATCHES`, `POLICY_INSERTS`, `facePolicyPatches` — each row a PLAN decision; a missing target is reported on stderr, never skipped silently |
 | `akshare.ts` | project AKShare MCP defaults, composed below operator profile/home patches |
 | `account-seat.ts` | the Account seat row (§3.1): `ACCOUNT_SEAT_ROW_ID`, `ACCOUNT_SEAT_SERVER`, `SEAT_TOOL_PREFIX`, `ACCOUNT_SEAT_NAME`, `seatDir`/`seatUrl` (the env or the defaults), `accountSeatPatches` — this process's node, the checkout's `tsx`, the seat's env, 90 s, failing soft; composed right after AKShare — and `composedSeatRow` (the row AS COMPOSED, read off the Loader's entries: disabled by a patch, or its service URL and seat name), which `main.ts` hands the seat route so the box follows an operator's patch, never the environment alone |
-| `orders.ts` | Gate 2 decision logic, pure: `isOrderTool` (the seat's twelve writes — `SEAT_WRITE_RAW_NAMES` — and any tool under the face's own seat prefix outside `SEAT_READ_RAW_NAMES`), `isSeatWriteTool`, `RETIRED_ORDER_RAW_NAMES` and `isRetiredOrderTool` (`place_order`, `cancel_order` under any server: denied, never carded), `effectiveApprovalPolicy`, `orderApprovalDecision` (with the `displayReason` twin), `describeOrder` (the seat's keys in a readable order; a key field shown whole or the call denied), `hasApprovalGrant`, `isGatedTool`, `orderGuardReason`, `orderGuardReasonForSession` (the guard's one producer; a retired tool denied first; reads `snapshotEvents()`, a distinct denial for an unreadable log), `auditOrderTools` (`{gated, uncovered, retired}`) — depends on nothing (structural types only) |
+| `orders.ts` | Gate 2 decision logic, pure: `isOrderTool` (the seat's twelve writes — `SEAT_WRITE_RAW_NAMES` — and any tool under the face's own seat prefix outside `SEAT_READ_RAW_NAMES`), `isSeatWriteTool`, `RETIRED_ORDER_RAW_NAMES` and `isRetiredOrderTool` (`place_order`, `cancel_order` under any server: denied, never carded), `effectiveApprovalPolicy`, `orderApprovalDecision` (with the `displayReason` twin), `describeOrder` (the seat's keys in a readable order; a key field shown whole or the call denied), `hasApprovalGrant`, `orderGuardReason`, `orderGuardReasonForSession` (the guard's one producer; a retired tool denied first; reads `snapshotEvents()`, a distinct denial for an unreadable log), `auditOrderTools` (`{gated, uncovered, retired}`) — depends on nothing (structural types only) |
 | `setup.ts` | one-shot `$DSH_HOME/profiles/<name>` creation with `PATCH_HEADER`; refuses to overwrite |
 | `http.ts` | `HttpError`, `readBody` (4,096 B cap → 413), `markStale`, the fixed `FORBIDDEN` body, and **the trust fence every `/data` route reuses** — `isLoopbackHost`, `isTrustedDataRequest`, and `isJsonBody` for a POST |
 | `static.ts` | `/` behind `IndexAuth` (`ctx.connection.authorizeIndex`) and `/client/*` with a traversal-safe resolver — the one page since stage 2; the `RouteRegistrar` contract |
