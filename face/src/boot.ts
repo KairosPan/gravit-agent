@@ -806,7 +806,7 @@ async function assertOrderGateArmed(gate: OrderGateFibers | undefined): Promise<
  * @throws after disposing the tree when any enabled row did not activate, a
  * required service is missing, the `ask_user_question` tool did not register,
  * either half of Gate 2 did not arm, a mounted Account seat has no write the
- * order gate covers, the preset roster cannot supply its own default, or a declared bot is
+ * order gate covers, a retired order tool is registered, the preset roster cannot supply its own default, or a declared bot is
  * not listed; `StartupError`
  * (from `boot`) when a required dsh entry is inactive; and whatever `boot`
  * throws when the plugin tree fails to load.
@@ -914,6 +914,13 @@ export async function bootFace(opts: FaceBootOptions): Promise<BootedFace> {
         `${BIN}: the Account seat's tools are registered under ${audit.uncovered.map((p) => `${p}*`).join(", ")}` +
           ` but the order gate covers none of them - Gate 2 would cover nothing while looking healthy` +
           ` (the Account renamed its writes; add their raw names to SEAT_WRITE_RAW_NAMES in face/src/orders.ts)`,
+      );
+    }
+    if (audit.retired.length > 0) {
+      throw new Error(
+        `${BIN}: ${audit.retired.join(", ")} ${audit.retired.length === 1 ? "is a retired order tool" : "are retired order tools"}` +
+          ` - the Account seat is the only order path and Gate 2 denies them outright; remove their MCP row` +
+          ` from the profile (an alpaca-kit row left over from before stage 3)`,
       );
     }
     if (audit.gated.length > 0) {

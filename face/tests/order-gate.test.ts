@@ -128,8 +128,8 @@ test("order gate: registered on a real tree, asks for orders, leaves everything 
     /* A name that merely mentions an order must pass. This is the assertion
      * that would catch a substring match on "order" - gating a harmless query
      * is a real cost, and the kind of over-reach that gets a gate switched off
-     * wholesale. The alpaca-kit pair is nobody's any more. */
-    for (const name of ["mcp__drill__orders", "mcp__drill__portfolio_live_positions", "mcp__drill__place_order", "mcp__drill__cancel_order"]) {
+     * wholesale. */
+    for (const name of ["mcp__drill__orders", "mcp__drill__portfolio_live_positions"]) {
       assert.equal((await fire(pending(name))).kind, "allow", name);
     }
 
@@ -203,6 +203,37 @@ test("order gate: registered on a real tree, asks for orders, leaves everything 
     } finally {
       swallow();
       unregister();
+    }
+
+    /* A RETIRED order tool (the alpaca-kit pair) registered by an operator's
+     * leftover row: the seat is the only order path, so the listener raises
+     * no card for it and the guard denies it outright on its allow, under any
+     * server name, with or without a session. */
+    for (const name of ["mcp__drill__place_order", "mcp__elsewhere__cancel_order"]) {
+      let retiredRan = false;
+      const off = registry.register({
+        name,
+        description: "an alpaca-kit order tool, retired - drill stand-in, nothing behind it",
+        parameters: {},
+        output: { schema: { type: "object" }, render: () => [{ type: "text", text: "ok" }] },
+        execute: async () => {
+          retiredRan = true;
+          return {};
+        },
+      });
+      try {
+        for (const exec of [
+          { callId: `drill-retired-${name}`, name, arguments: { symbol: "AAPL", qty: 1, side: "buy" }, signal: new AbortController().signal },
+          { callId: `drill-retired-s-${name}`, name, arguments: {}, agent: { session: { ...emptySession(), snapshotEvents: () => [] } }, signal: new AbortController().signal },
+        ]) {
+          const result = await registry.execute(exec);
+          assert.equal(result.isError, true, `${name} must not dispatch`);
+          assert.match(result.content?.[0]?.text ?? "", /is a retired order tool/);
+        }
+        assert.equal(retiredRan, false, "a retired tool's body never runs");
+      } finally {
+        off();
+      }
     }
   } finally {
     await dispose();

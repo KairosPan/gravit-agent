@@ -67,6 +67,24 @@ export const SEAT_READ_RAW_NAMES = [
   "portfolio_openness",
 ] as const;
 
+/** The retired order tools: alpaca-kit's pair, which left the tree in stage 3
+ * of the Account graft. The seat is the only order path, so one of these that
+ * still registers — an operator's leftover row pointing at an install outside
+ * this tree — is never carded and never approved: the guard denies it outright
+ * under any server name, and the boot refuses a registry that carries one. */
+export const RETIRED_ORDER_RAW_NAMES = ["place_order", "cancel_order"] as const;
+
+/** Whether `name` is a retired order tool, by raw suffix under any server name. */
+export function isRetiredOrderTool(name: string): boolean {
+  return prefixBefore(name, RETIRED_ORDER_RAW_NAMES) !== undefined;
+}
+
+/** The denial for a retired order tool: nobody is asked, nothing approves it. */
+function retiredReason(name: string): string {
+  return `${name} is a retired order tool - the Account seat is the only order path, so nothing approves it;` +
+    ` remove its MCP row from the profile`;
+}
+
 /** A tool under the face's own seat prefix that is neither a known write nor a known read. */
 function isUnclassifiedSeatTool(name: string): boolean {
   return name.startsWith(SEAT_TOOL_PREFIX) && !SEAT_READ_RAW_NAMES.some((raw) => name === `${SEAT_TOOL_PREFIX}${raw}`);
@@ -472,6 +490,9 @@ export interface OrderToolAudit {
    * seat's tools while the gate covers none of them — the seat is mounted and
    * Gate 2 would cover nothing of it. Boot refuses on any of these. */
   uncovered: string[];
+  /** Registered retired order tools ({@link RETIRED_ORDER_RAW_NAMES}) under any
+   * server name — an order path that is not the seat. Boot refuses on any of these. */
+  retired: string[];
 }
 
 /**
@@ -489,13 +510,15 @@ export interface OrderToolAudit {
  * seat registers its writes with its reads, in one listing, so a seat with
  * reads and no write is never a normal state.
  * @param schemas - `ctx.tools.schemas()`, the live registry.
- * @returns the covered names and the seats the gate covers nothing of.
+ * @returns the covered names, the seats the gate covers nothing of, and the retired order tools.
  */
 export function auditOrderTools(schemas: readonly ToolSchemaLike[]): OrderToolAudit {
   const gated: string[] = [];
+  const retired: string[] = [];
   const seats = new Set<string>();
   const covered = new Set<string>();
   for (const { name } of schemas) {
+    if (isRetiredOrderTool(name)) retired.push(name);
     const seat = prefixBefore(name, [...SEAT_WRITE_RAW_NAMES, ...SEAT_READ_RAW_NAMES])
       ?? (name.startsWith(SEAT_TOOL_PREFIX) ? SEAT_TOOL_PREFIX : undefined);
     if (seat !== undefined) seats.add(seat);
@@ -503,7 +526,7 @@ export function auditOrderTools(schemas: readonly ToolSchemaLike[]): OrderToolAu
     gated.push(name);
     if (seat !== undefined) covered.add(seat);
   }
-  return { gated, uncovered: [...seats].filter((seat) => !covered.has(seat)) };
+  return { gated, uncovered: [...seats].filter((seat) => !covered.has(seat)), retired };
 }
 
 /**
@@ -514,7 +537,8 @@ export function auditOrderTools(schemas: readonly ToolSchemaLike[]): OrderToolAu
  * and the piece hardest to reach through the pipeline. Charter Rule 4 - a guard
  * that has never been drilled is presumed broken. It reads the name alone,
  * per call, so a seat write that registered AFTER boot (dsh-mcp-client
- * activates even when its first connection failed) is guarded all the same.
+ * activates even when its first connection failed) is guarded all the same,
+ * and a retired order tool is denied outright, whatever the log holds.
  * @param name - `exec.name`.
  * @param events - the session log (`snapshotEvents()`), when there is a
  *   session. `undefined` means "no session", i.e. no log that could hold a
@@ -528,6 +552,7 @@ export function orderGuardReason(
   events: readonly ApprovalEventLike[] | undefined,
   callId: unknown,
 ): string | undefined {
+  if (isRetiredOrderTool(name)) return retiredReason(name);
   if (!isOrderTool(name)) return undefined;
   if (events !== undefined && hasApprovalGrant(events, callId, name)) return undefined;
   return `${name} reached dispatch without a logged allowed-once approval for this call`;
@@ -569,7 +594,8 @@ export function unreadableSessionLogReason(name: string, why = "no snapshotEvent
  * The guard's decision given the calling SESSION rather than its events:
  * the one function `boot.ts`'s `tools.guard` calls.
  *
- * Three cases, each with its own sentence:
+ * A retired order tool is denied first, in its own sentence, whatever the
+ * session. Then three cases, each with its own sentence:
  * - no session (an agentless call): no log could hold a grant, so a gated
  *   call gets {@link orderGuardReason}'s "without a logged allowed-once";
  * - a session with no `snapshotEvents` function, or one that throws: the
@@ -592,6 +618,7 @@ export function orderGuardReasonForSession(
   session: unknown,
   callId: unknown,
 ): string | undefined {
+  if (isRetiredOrderTool(name)) return retiredReason(name);
   if (!isOrderTool(name)) return undefined;
   if (session === undefined || session === null) return orderGuardReason(name, undefined, callId);
   const read = typeof session === "object" || typeof session === "function"

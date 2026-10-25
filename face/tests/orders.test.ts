@@ -114,16 +114,20 @@ test("auditOrderTools: under the face's own seat prefix a renamed write is carde
   assert.deepEqual(audit.uncovered, []);
 });
 
-test("auditOrderTools: an empty registry is empty, not an error; the alpaca pair with its old marker is nobody's", () => {
+test("auditOrderTools: an empty registry is empty, not an error; a retired order tool is reported under any server name", () => {
   // No seat mounted is the normal case of a scratch home, and it must not trip
   // the boot assertion.
-  assert.deepEqual(auditOrderTools([]), { gated: [], uncovered: [] });
+  assert.deepEqual(auditOrderTools([]), { gated: [], uncovered: [], retired: [] });
+  // An operator's home still mounting an alpaca-kit install outside this tree:
+  // the seat is the only order path, so the boot is refused on these.
   assert.deepEqual(
     auditOrderTools([
       { name: "mcp__alpaca-kit__place_order", description: "submit a PAPER order (operator-gated)" },
+      { name: "mcp__broker__cancel_order", description: "cancel" },
       { name: "mcp__alpaca-kit__account", description: "account snapshot" },
+      { name: "mcp__alpaca-kit__orders", description: "list orders" },
     ]),
-    { gated: [], uncovered: [] },
+    { gated: [], uncovered: [], retired: ["mcp__alpaca-kit__place_order", "mcp__broker__cancel_order"] },
   );
 });
 
@@ -224,9 +228,21 @@ test("orderGuardReason: a grant for another call does not let this one through",
   assert.notEqual(orderGuardReason("mcp__x__portfolio_live_order", granted, "c2"), undefined);
 });
 
-test("orderGuardReason: the alpaca pair is nothing of the guard's any more: the name alone decides", () => {
-  for (const name of ["place_order", "mcp__alpaca-kit__place_order", "mcp__drill__cancel_order"]) {
-    assert.equal(orderGuardReason(name, [], "c1"), undefined, name);
+test("orderGuardReason: a retired order tool is denied outright under any server name - nothing approves it, not even a logged grant", () => {
+  for (const name of ["place_order", "cancel_order", "mcp__alpaca-kit__place_order", "mcp__drill__cancel_order"]) {
+    const grant = [asked("r1", "c1", name), decided("r1", "allowed-once")];
+    for (const events of [undefined, [], grant]) {
+      const reason = orderGuardReason(name, events, "c1") ?? "";
+      assert.match(reason, /is a retired order tool/, name);
+      assert.match(reason, /nothing approves it/, name);
+      assert.match(reason, /remove its MCP row/, name);
+    }
+    for (const session of [undefined, {}, { snapshotEvents: () => grant }, { snapshotEvents: () => { throw new Error("x"); } }]) {
+      assert.match(orderGuardReasonForSession(name, session, "c1") ?? "", /is a retired order tool/, `${name} with any session`);
+    }
+  }
+  for (const name of ["orders", "mcp__x__orders", "mcp__x__place_order_book"]) {
+    assert.equal(orderGuardReason(name, [], "c1"), undefined, `${name} is no retired tool`);
   }
 });
 
