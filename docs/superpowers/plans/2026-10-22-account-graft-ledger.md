@@ -1047,10 +1047,71 @@ Task 8's calls, written down for the final review:
 96. Task 8: `roles.ts`'s `NEVER` reason strings — "orders stay behind the two order gates, the
     Account seat is Gravit's…" and "the AKShare tools carry no point-in-time guard and are never
     backtest evidence" — are older than stage 3; true in effect (a role holds neither), stale in
-    wording. Code, left for the final wave or a later round.
+    wording. Code, left for the final wave or a later round. **Closed in the final wave** (0c5f688),
+    with 77 (the `.gitignore` comment, 20b87c4) and 83 (`orderApprovalDecision` skips a retired
+    name, 0c5f688).
+97. Final: `dsh/skills/mechanics/account-seat-guide/SKILL.md:37` still says "never backtest
+    evidence" — a skill Gravit reads; the clause forbids copying a report as evidence and is
+    harmless as read. Fix when the skill is next touched (Ruling 85).
+98. Final: dsh hashes a tool name longer than 64 characters or with a character outside
+    `[A-Za-z0-9_-]`; the raw-suffix deny and the boot audit would not see a retired order tool
+    under such a hashed name — unreachable for a realistic server name; recorded in the
+    `RETIRED_ORDER_RAW_NAMES` comment (0c5f688).
 
 Stage 2's deferred minors 64–67 (renderers importing from `host/`, the `storage` listener, the
 sheet-level pin, the `app.js` split) still stand.
+
+### Final review
+
+HEAD ae12b8f: 13 commits over main's 0011666 (the merge base), 116 files; dispatched on fable
+(the operator's word), the diff read in four passes, the eleven Review-Focus test files re-run
+(193 / 193), the operator's live `~/.dsh` patch row read by name and Linqi's seat source read to
+answer the two security questions from the code.
+
+- **Verdict (fable):** ready to merge with fixes — 0 Critical, 3 Important, 5 Minor. I1: the
+  loops page's `agent.cordis.yml` paragraph still listed the seven `mcp__*__…` alpaca patterns.
+  I2: the same page listed `backtests/*.json · screen.py · backtest.py` as what the model writes,
+  and its §3.1 summary said "three rows… mcp:<server>". I3: DEVELOPMENT's `orders.ts` module row
+  listed the deleted `isGatedTool`. M4: `orderApprovalDecision` did not consult
+  `isRetiredOrderTool` (minor 83). M5: the hashed-name residual unrecorded. M6: `roles.ts`'s
+  `NEVER` strings (minor 96). M7: three typos (`.gitignore:21`, `ROADMAP.md:10`,
+  `face/README.md:1426`). M8: the cycle cap 3 000 → 3 300 is harmless. Review Focus 1–5 pinned and
+  green; all eleven rulings 74–84 weighed and held; the fence in `http.ts` and Gate 2's seat half
+  verified byte for byte against stage 1.
+- **The two security questions answered from the code:** the operator's live
+  `~/.dsh/profiles/face/cordis.patch.yml` still inserts `mcp-alpaca-kit` running
+  `python3 -m alpaca_kit.mcp` from the primary checkout with no `ALPACA_KIT_ENABLE_ORDERS` in its
+  env; after the merge the package sources are gone, the server fails to start, `dsh-mcp-client`
+  (`failOnStartupError: false`) activates with no tools, `retired` is empty and the face boots
+  with a "connection failed… no tools were registered" line — no bricking; the operator should
+  still drop the row. The `uncovered` refusal cannot misfire against a read-only Account: Linqi's
+  `src/portfolio/mcp.ts` registers the writes unconditionally (`--read-only` changes the answer,
+  not the listing).
+- **The fix wave** — one, a fresh implementer on opus at BASE ae12b8f, a scoped re-review after
+  it: 0c5f688 (code: M4 with a RED→GREEN test for `mcp__account__place_order` and
+  `mcp__account__cancel_order` — `isOrderTool` true, no card under `ask` or `never`, the guard's
+  retired reason; M5's comment; M6's two strings) and 20b87c4 (documents: I1, I2 — the §3.1 row now
+  names the two operator rows, the AKShare row's unswitchable `mcp:akshare` section, the seat row
+  and the retired Alpaca row to delete; two more "three rows" lines made two; I3; M7; the notes in
+  DEVELOPMENT §3.8 and `face/README.md` that called the `NEVER` strings stale deleted with the
+  strings). The re-review: all seven addressed, no new breakage.
+- **Ruling 85**, as the SDD ledger records it: "`dsh/skills/mechanics/account-seat-guide/SKILL.md:37`
+  still says 'never backtest evidence' (Gravit reads it) — parked as deferred minor 97, not a
+  second fix wave — cost if wrong: one stale word in a skill Gravit reads."
+
+### The final tree of stage 3
+
+- HEAD `20b87c4` (15 commits over main's `0011666`, the merge base; the plan's own commit f1b165b
+  first), the tree clean.
+- `cd face && npm test` 1267 tests, 1249 pass, 18 skipped; `npm run typecheck` clean.
+- `cd face && FACE_SMOKE=1 FACE_ACCOUNT_SEAT_DIR=~/buyer-agent-demo npm test` on 2026-10-24:
+  1267 / 1267, none skipped, 12.2 s.
+- No `python -m pytest` remains: `alpaca_kit/`, `tests/`, `pyproject.toml` and `scripts/` are gone.
+- The final whole-branch review and its fix wave's re-review ran on the Fable model at the
+  operator's word; the three Importants and the four Minors ruled into the wave are fixed above;
+  deferred minors 68–75, 78–82, 84–95, 97, 98 stand (76, 87–89 closed in Task 8; 77, 83, 96 in the wave).
+- Owed to the operator, below: the two `rm` lists and the `.gitignore` lines after them, the
+  `mcp-alpaca-kit` row of the live patch, and the three drills.
 
 ### The operator's commands after the branch lands
 
