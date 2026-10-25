@@ -18,7 +18,7 @@ import { HttpError } from "../src/http.ts";
 export async function makeRoot(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "face-channels-"));
   for (const name of ["_template", "alpha", "市场情绪", ".hidden", "__pycache__"]) {
-    await mkdir(join(root, "strategies", name, "backtests"), { recursive: true });
+    await mkdir(join(root, "strategies", name), { recursive: true });
   }
   await writeFile(join(root, "strategies", "loose.txt"), "not a channel");
   await writeFile(join(root, "strategies", "alpha", "status.yaml"), "status: researching  # comment\n");
@@ -150,13 +150,26 @@ test("readChannelBody: an unparseable backtest never throws — latest is null, 
   assert.deepEqual(body.backtests.map((b) => b.file), ["2026-09-02-broken.json"]);
 });
 
+test("a strategy without backtests draws no backtests section", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "face-body-nobt-"));
+  await writeFile(join(dir, "THESIS.md"), "# alpha\n\n## Thesis\n\nBreadth leads price.\n");
+  await writeFile(join(dir, "journal.md"), "# Journal\n\n- 2026-10-24: created from _template.\n");
+  await writeFile(join(dir, "status.yaml"), "status: idea\n");
+  const body = await readChannelBody(dir);
+  assert.deepEqual(body.backtests, []);
+  assert.equal(body.latest, null);
+  assert.equal(body.thesis?.isTemplate, false);
+  assert.deepEqual(body.journal, [{ date: "2026-10-24", text: "created from _template." }]);
+  assert.deepEqual(body.files.map((f) => f.name).sort(), ["THESIS.md", "journal.md", "status.yaml"]);
+});
+
 test("readChannelBody: the file list skips __pycache__ and directories", async () => {
   const dir = await mkdtemp(join(tmpdir(), "face-body7-"));
   await mkdir(join(dir, "__pycache__"), { recursive: true });
-  await mkdir(join(dir, "backtests"), { recursive: true });
-  await writeFile(join(dir, "screen.py"), "print(1)\n");
+  await mkdir(join(dir, "notes"), { recursive: true });
+  await writeFile(join(dir, "THESIS.md"), "# alpha\n");
   const body = await readChannelBody(dir);
-  assert.deepEqual(body.files.map((f) => f.name), ["screen.py"]);
+  assert.deepEqual(body.files.map((f) => f.name), ["THESIS.md"]);
 });
 
 /** A registry standing in for ctx.workspaceRegistry: the same path
@@ -317,7 +330,7 @@ test("reconcileChannels attaches only sessions whose cwd IS the channel director
   const { registry, attaches } = fakeRegistry();
   await reconcileChannels({
     registry, root, home, connectedBins: [],
-    sessions: [{ sessionId: "session-deep", cwd: join(root, "strategies", "alpha", "backtests") }],
+    sessions: [{ sessionId: "session-deep", cwd: join(root, "strategies", "alpha", "notes") }],
   });
   assert.deepEqual(attaches, [], "a subdirectory is not the channel; the host would reject the attach anyway");
 });
@@ -649,12 +662,14 @@ test("createChannel copies the template, skips __pycache__, never overwrites", a
   const root = await makeRoot();
   const template = join(root, "strategies", "_template");
   await writeFile(join(template, "THESIS.md"), "# <strategy name>\n");
+  await mkdir(join(template, "notes"), { recursive: true });
   await mkdir(join(template, "__pycache__"), { recursive: true });
   await writeFile(join(template, "__pycache__", "x.pyc"), "junk");
 
   const made = await createChannel(root, "beta-1");
   assert.equal(made.dir, join(root, "strategies", "beta-1"));
-  await stat(join(made.dir, "backtests"));
+  await stat(join(made.dir, "THESIS.md"));
+  await stat(join(made.dir, "notes"));
   await assert.rejects(stat(join(made.dir, "__pycache__")));
   await assert.rejects(createChannel(root, "beta-1"), (err: HttpError) => err.status === 409);
   await assert.rejects(createChannel(root, "alpha"), (err: HttpError) => err.status === 409);

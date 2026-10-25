@@ -36,7 +36,7 @@ import { HttpError } from "../src/http.ts";
  * tests a second time. */
 async function makeRoot(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "face-foldname-"));
-  await mkdir(join(root, "strategies", "_template", "backtests"), { recursive: true });
+  await mkdir(join(root, "strategies", "_template"), { recursive: true });
   return root;
 }
 
