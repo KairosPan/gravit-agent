@@ -1,13 +1,15 @@
-/** The per-order approval gate: what makes `place_order` raise a card.
+/** Gate 2, the per-order approval gate: what makes a write of the Account
+ * seat raise a card.
  *
- * Gate 1 is registration — `ALPACA_KIT_ENABLE_ORDERS=1` plus both APCA keys, in
- * the operator's harness, decides whether the mutating tools exist at all
- * (`alpaca_kit/mcp/tools.py:298`). Gate 2 is this: given that they DO exist,
- * every call to one stops for a human first.
+ * Gravit's only order path is its seat at Linqi's Account (`account-seat.ts`):
+ * the seat's twelve writes — every tool that places, changes or cancels an
+ * order, moves money, pays or sets leverage — and any tool under the face's
+ * own seat prefix the face has not classified stop for a human here first,
+ * and then again on the Account's own Guard card. Nothing else is gated: the
+ * seat's reads and words, AKShare, the host's tools pass untouched.
  *
- * Until 2026-09-04 Gate 2 did not exist for orders. The approval CHANNEL was
- * real and drilled, but its only producer was a sandbox escalation, and an MCP
- * call never takes that path — so arming the flag would have let `place_order`
+ * The approval CHANNEL's only producer used to be a sandbox escalation, and an
+ * MCP call never takes that path — so without this module an order tool would
  * run with no card and no `approval/asked` event. This module is the producer.
  *
  * WHAT IT IS NOT. `tools/execute` runs AFTER the guard below, is handed the
@@ -15,26 +17,15 @@
  * — the declaration says only `exec.signal` may change, `:155-158`, but the
  * object is a plain unfrozen spread, `:1445`), and the body then re-resolves
  * the tool by its CURRENT name (`:1578`) — so a `tools/execute` wrapper can
- * rename a guard-approved call into `place_order` after the fact. Nothing here changes that, and Gravit has an unrestricted
- * shell besides. Per charter Rule 2 — enforce below the layer that runs
- * arbitrary code, or admit the gate is prose — this gates the model's ordinary
- * tool calls. It is not containment. `face/README.md` says so where an operator
- * will read it.
+ * rename a guard-approved call into a seat write after the fact. Nothing here
+ * changes that, and Gravit has an unrestricted shell besides. Per charter
+ * Rule 2 — enforce below the layer that runs arbitrary code, or admit the gate
+ * is prose — this gates the model's ordinary tool calls. It is not
+ * containment. `face/README.md` says so where an operator will read it.
  * @module
  */
 
 import { SEAT_TOOL_PREFIX } from "./account-seat.ts";
-
-/** The mutating tools, matched by their RAW names rather than by a full public
- * name. dsh mints `mcp__<serverName>__<rawName>` (NEW
- * `packages/mcp/mcp-client/src/tools.ts:81-87`, `publicToolName`)
- * and the serverName is the OPERATOR's — it lives in their cordis patch, not in
- * this repo — so a constant list of full names would quietly stop matching the
- * day they rename the row. Anchoring on the raw suffix survives that rename.
- *
- * The read-only `orders` listing (`alpaca_kit/mcp/tools.py:292`) deliberately
- * does NOT match: a substring test for "order" would gate a harmless query. */
-const ALPACA_RAW_NAMES = ["place_order", "cancel_order"] as const;
 
 /** The Account seat's write tools (src/account-seat.ts; spec 2026-10-20 §5.2):
  * everything that places, changes or cancels an order, moves money, pays or
@@ -43,9 +34,16 @@ const ALPACA_RAW_NAMES = ["place_order", "cancel_order"] as const;
  * (`portfolio_account`, `portfolio_holdings`, `portfolio_wait`, …) and its
  * signed words (`portfolio_ask`, `portfolio_report`, `portfolio_remember`,
  * `portfolio_forget`, `portfolio_desk_say`) grant nothing and move nothing, so
- * they are not here. The seat's descriptions carry no `(operator-gated)`
- * marker, so a rename on the Account's side is caught by the seat smoke
- * (`tests/account-seat-smoke.test.ts`), not by the boot audit. */
+ * they are not here.
+ *
+ * Matched by their RAW names rather than by a full public name. dsh mints
+ * `mcp__<serverName>__<rawName>` (NEW `packages/mcp/mcp-client/src/tools.ts:81-87`,
+ * `publicToolName`), and an operator may mount the seat under a server name of
+ * their own, so a constant list of full names would quietly stop matching the
+ * day they rename the row. Anchoring on the raw suffix survives that rename;
+ * a substring test for "order" would gate a harmless read. A rename on the
+ * Account's side is caught by the seat smoke (`tests/account-seat-smoke.test.ts`),
+ * and under the face's own prefix by the unclassified-tool rule below. */
 export const SEAT_WRITE_RAW_NAMES = [
   "portfolio_live_order", "portfolio_live_batch", "portfolio_live_amend", "portfolio_live_cancel", "portfolio_live_close",
   "portfolio_live_leverage", "portfolio_live_move", "portfolio_live_earn", "portfolio_pay",
@@ -69,17 +67,17 @@ export const SEAT_READ_RAW_NAMES = [
   "portfolio_openness",
 ] as const;
 
-const ORDER_RAW_NAMES = [...ALPACA_RAW_NAMES, ...SEAT_WRITE_RAW_NAMES] as const;
-
 /** A tool under the face's own seat prefix that is neither a known write nor a known read. */
 function isUnclassifiedSeatTool(name: string): boolean {
   return name.startsWith(SEAT_TOOL_PREFIX) && !SEAT_READ_RAW_NAMES.some((raw) => name === `${SEAT_TOOL_PREFIX}${raw}`);
 }
 
-/** The marker alpaca-kit stamps on both mutating tools' descriptions
- * (`alpaca_kit/mcp/tools.py:303,307`). Cross-checked against the name test in
- * {@link auditOrderTools} so a rename on either side is caught by the other. */
-export const OPERATOR_GATED_MARKER = "(operator-gated)";
+/** The `mcp__<server>__` prefix (or `""` when bare) under which `name` carries
+ * one of `raws` as its raw suffix; `undefined` when it carries none. */
+function prefixBefore(name: string, raws: readonly string[]): string | undefined {
+  const raw = raws.find((r) => name === r || name.endsWith(`__${r}`));
+  return raw === undefined ? undefined : name.slice(0, name.length - raw.length);
+}
 
 /** Every approval policy this gate distinguishes. `never` is the one that
  * matters: it auto-rejects without reaching an answerer, so no card appears. */
@@ -110,25 +108,18 @@ export interface ToolSchemaLike {
   description?: string;
 }
 
-/** Is this the name of a tool that MOVES money (or cancels something that
- * would)? Matches the raw name itself and any `mcp__<server>__<raw>` minting of
- * it, so an operator's server rename cannot slip a live order tool past. */
+/** Is this the name of a tool Gate 2 cards: one of the seat's twelve writes —
+ * the raw name itself or any `mcp__<server>__<raw>` minting of it, so an
+ * operator's server rename cannot slip a write past — or a tool under the
+ * face's own seat prefix the face has not classified. */
 export function isOrderTool(name: string): boolean {
-  return ORDER_RAW_NAMES.some((raw) => name === raw || name.endsWith(`__${raw}`)) || isUnclassifiedSeatTool(name);
+  return isSeatWriteTool(name) || isUnclassifiedSeatTool(name);
 }
 
 /** Whether `name` is one of the Account seat's twelve write tools (by the same
  * raw-suffix rule). */
 export function isSeatWriteTool(name: string): boolean {
-  return SEAT_WRITE_RAW_NAMES.some((raw) => name === raw || name.endsWith(`__${raw}`));
-}
-
-/** Whether a card for `name` is the seat's: one of the twelve under any server
- * name, or anything under the face's own seat prefix. Its card says "Account
- * seat", not "PAPER order" — the face does not know a venue's kind, and the
- * Account's own card says PAPER in its own words. */
-function isSeatTool(name: string): boolean {
-  return isSeatWriteTool(name) || name.startsWith(SEAT_TOOL_PREFIX);
+  return prefixBefore(name, SEAT_WRITE_RAW_NAMES) !== undefined;
 }
 
 /** Reconstruct the policy an ask would resolve under, from PUBLIC surface only.
@@ -203,7 +194,9 @@ export function orderApprovalDecision(
       reason: `${name}: its ${bad.key} ${bad.why}, so nothing was asked and the call does not run.`,
     };
   }
-  const reason = `${isSeatTool(name) ? "Account seat" : "PAPER order"} - ${describeOrder(name, args)}`;
+  /* Every card is the seat's, and says so: the face does not know a venue's
+   * kind, and the Account's own card says PAPER in its own words. */
+  const reason = `Account seat - ${describeOrder(name, args)}`;
   /* `displayReason` is what a localized approval UI prefers to render - the
    * upstream panel draws it INSTEAD of `reason` whenever it is present
    * (NEW packages/client/ui-approval/src/client/ApprovalPanel.tsx:17, fed by
@@ -337,11 +330,10 @@ export function describeOrder(name: string, args: unknown): string {
   return summary === "" ? name : `${name}: ${summary}`;
 }
 
-/* place_order(symbol, qty, side, order_type, limit_price) and
- * cancel_order(order_id) - alpaca_kit/mcp/tools.py:298-307 - and the Account
- * seat's keys (portfolio_live_order's venue, symbol, side, orderType, qty or
+/* The Account seat's keys (portfolio_live_order's venue, symbol, side, orderType, qty or
  * usd, limitPrice, stopPrice; amend and cancel's order; move's kind, from,
- * asset, amount; leverage; pay's url and maxAmount) in a readable order:
+ * asset, amount; leverage; pay's url and maxAmount), with the snake_case
+ * spellings an order key may also arrive in, in a readable order:
  * side, size, symbol, type, then the venue. The same order inside a batch's
  * legs and a nested object. Unknown keys are appended rather than dropped, so
  * a tool that grows a field still shows it (charter Rule 5: what is never
@@ -472,60 +464,46 @@ export function hasApprovalGrant(
   );
 }
 
-/** Is this call subject to the gate at all - by name, or by the marker on its
- * live description? The description half is what catches a tool that registered
- * AFTER boot (dsh-mcp-client activates even when its first connection failed,
- * so the boot audit can run against a registry that has not filled in yet) and
- * one whose public name took a hash suffix (dsh normalizes and hashes any name
- * over 64 chars or carrying a character outside [A-Za-z0-9_-], so the raw-name
- * suffix anchor does not always hold).
- *
- * The marker test is confined to `mcp__` names: it is a substring test on
- * operator-supplied text, and an unrelated tool that happened to carry the
- * phrase would otherwise be denied with a message blaming a rename.
- * @param name - `exec.name`.
- * @param description - the live registry's description for it, if any.
- * @returns true when the gate must have a grant before this call dispatches.
- */
-export function isGatedTool(name: string, description: string | undefined): boolean {
-  if (isOrderTool(name)) return true;
-  return name.startsWith("mcp__") && (description ?? "").includes(OPERATOR_GATED_MARKER);
-}
-
 /** What {@link auditOrderTools} found in the live registry. */
 export interface OrderToolAudit {
-  /** Registered order tools this gate covers. */
+  /** Registered tools this gate covers. */
   gated: string[];
-  /** Registered tools alpaca-kit marked operator-gated that this gate would
-   * NOT stop — a rename that opened a hole. Boot refuses on any of these. */
-  ungated: string[];
+  /** Each server prefix (`mcp__<server>__`, `""` when bare) that carries the
+   * seat's tools while the gate covers none of them — the seat is mounted and
+   * Gate 2 would cover nothing of it. Boot refuses on any of these. */
+  uncovered: string[];
 }
 
 /**
- * Cross-check the live registry against the gate, in both directions.
+ * Cross-check the live registry against the seat's lists.
  *
- * The face cannot read `ALPACA_KIT_ENABLE_ORDERS`: it is passed to the
- * alpaca-kit row's own `env:` block in the operator's cordis patch, not to this
- * process. So the flag cannot be asserted on — the REGISTRY is the only honest
- * source of whether order tools are live, and this reads it.
- *
- * The direction that matters is `ungated`: alpaca-kit stamps both mutating
- * tools `(operator-gated)`, so a tool carrying that marker whose name this gate
- * does not match means someone renamed one side and the gate now misses a live
- * order tool. That is the failure this whole module exists to prevent, and it
- * would otherwise be invisible — the face would come up healthy with the gate
- * quietly covering nothing.
+ * The REGISTRY is the only honest source of whether the seat's writes are
+ * live, and this reads it. A server carrying the seat's tools — its classified
+ * reads or writes by raw suffix, or anything under the face's own seat prefix
+ * — is a mounted seat; one of them the gate covers none of means the Account
+ * renamed its writes and they no longer match {@link SEAT_WRITE_RAW_NAMES}.
+ * That is the failure this whole module exists to prevent, and it would
+ * otherwise be invisible — the face would come up healthy with the gate quietly
+ * covering nothing. (Under the face's own prefix a renamed write is carded as
+ * unclassified, so only a seat under another server name can land here.) The
+ * seat registers its writes with its reads, in one listing, so a seat with
+ * reads and no write is never a normal state.
  * @param schemas - `ctx.tools.schemas()`, the live registry.
- * @returns the covered names and the dangerous ones.
+ * @returns the covered names and the seats the gate covers nothing of.
  */
 export function auditOrderTools(schemas: readonly ToolSchemaLike[]): OrderToolAudit {
   const gated: string[] = [];
-  const ungated: string[] = [];
-  for (const schema of schemas) {
-    if (isOrderTool(schema.name)) gated.push(schema.name);
-    else if (isGatedTool(schema.name, schema.description)) ungated.push(schema.name);
+  const seats = new Set<string>();
+  const covered = new Set<string>();
+  for (const { name } of schemas) {
+    const seat = prefixBefore(name, [...SEAT_WRITE_RAW_NAMES, ...SEAT_READ_RAW_NAMES])
+      ?? (name.startsWith(SEAT_TOOL_PREFIX) ? SEAT_TOOL_PREFIX : undefined);
+    if (seat !== undefined) seats.add(seat);
+    if (!isOrderTool(name)) continue;
+    gated.push(name);
+    if (seat !== undefined) covered.add(seat);
   }
-  return { gated, ungated };
+  return { gated, uncovered: [...seats].filter((seat) => !covered.has(seat)) };
 }
 
 /**
@@ -534,10 +512,10 @@ export function auditOrderTools(schemas: readonly ToolSchemaLike[]): OrderToolAu
  * Extracted so it can be drilled: a guard is evaluated on every allow and is the
  * only monotonic layer here, which makes it the piece that most needs testing
  * and the piece hardest to reach through the pipeline. Charter Rule 4 - a guard
- * that has never been drilled is presumed broken.
+ * that has never been drilled is presumed broken. It reads the name alone,
+ * per call, so a seat write that registered AFTER boot (dsh-mcp-client
+ * activates even when its first connection failed) is guarded all the same.
  * @param name - `exec.name`.
- * @param description - the LIVE registry description, read per call rather than
- *   snapshotted at boot: the registry fills in asynchronously.
  * @param events - the session log (`snapshotEvents()`), when there is a
  *   session. `undefined` means "no session", i.e. no log that could hold a
  *   grant; a session whose log cannot be READ is a different failure and is
@@ -547,16 +525,12 @@ export function auditOrderTools(schemas: readonly ToolSchemaLike[]): OrderToolAu
  */
 export function orderGuardReason(
   name: string,
-  description: string | undefined,
   events: readonly ApprovalEventLike[] | undefined,
   callId: unknown,
 ): string | undefined {
-  if (!isGatedTool(name, description)) return undefined;
+  if (!isOrderTool(name)) return undefined;
   if (events !== undefined && hasApprovalGrant(events, callId, name)) return undefined;
-  return isOrderTool(name)
-    ? `${name} reached dispatch without a logged allowed-once approval for this call`
-    : `${name} is marked ${OPERATOR_GATED_MARKER} but the order gate does not recognise its name,` +
-      ` so it can never be approved - add its raw name to ORDER_RAW_NAMES in face/src/orders.ts`;
+  return `${name} reached dispatch without a logged allowed-once approval for this call`;
 }
 
 /** A calling session as the guard reads it, structurally. dsh 0.2.0 removed the
@@ -606,7 +580,6 @@ export function unreadableSessionLogReason(name: string, why = "no snapshotEvent
  * Non-gated tools return `undefined` before the session is touched, so a
  * drifted Session API can never brick a tool this gate does not own.
  * @param name - `exec.name`.
- * @param description - the LIVE registry description (`tools.get(name, agent)?.description`).
  * @param session - `exec.agent?.session`. Typed `unknown` on purpose: the
  *   caller must not have to assert a shape this function exists to CHECK
  *   (a `GuardSessionLike` parameter would also reject, at compile time, the
@@ -616,12 +589,11 @@ export function unreadableSessionLogReason(name: string, why = "no snapshotEvent
  */
 export function orderGuardReasonForSession(
   name: string,
-  description: string | undefined,
   session: unknown,
   callId: unknown,
 ): string | undefined {
-  if (!isGatedTool(name, description)) return undefined;
-  if (session === undefined || session === null) return orderGuardReason(name, description, undefined, callId);
+  if (!isOrderTool(name)) return undefined;
+  if (session === undefined || session === null) return orderGuardReason(name, undefined, callId);
   const read = typeof session === "object" || typeof session === "function"
     ? (session as GuardSessionLike).snapshotEvents
     : undefined;
@@ -633,5 +605,5 @@ export function orderGuardReasonForSession(
     return unreadableSessionLogReason(name, "snapshotEvents threw");
   }
   if (!Array.isArray(events)) return unreadableSessionLogReason(name, "snapshotEvents returned no event list");
-  return orderGuardReason(name, description, events, callId);
+  return orderGuardReason(name, events, callId);
 }

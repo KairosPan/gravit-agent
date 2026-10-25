@@ -34,7 +34,9 @@ test("settings saves carry the viewed revision and explicitly clear model inheri
 });
 
 test("tool labels translate known patterns and preserve unfamiliar capabilities", () => {
-  assert.equal(botToolLabel("mcp__*__daily_bars"), "Daily prices");
   assert.equal(botToolLabel("read"), "Read files");
+  for (const gone of ["daily_bars", "earnings", "calendar", "corp_actions", "market_snapshot", "screen", "breadth"]) {
+    assert.equal(botToolLabel(`mcp__*__${gone}`), `mcp__*__${gone}`, `${gone} left with alpaca-kit: its pattern shows raw`);
+  }
   assert.equal(botToolLabel("mcp__private__unlisted"), "mcp__private__unlisted");
 });

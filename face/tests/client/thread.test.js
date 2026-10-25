@@ -145,16 +145,15 @@ test('helpers: chip, key, ticker, withTickers', () => {
   assert.match(withTickers('a & b'), /a &amp; b/);
 });
 
-test('a recognised result draws pretty with Raw nested; another draws its pre', () => {
+test('a tool result draws its name and its payload folded, whatever its server; an error is the danger row', () => {
   const result = JSON.stringify({ ok: true, rows: [{ symbol: 'AAPL', close: 101, prev_close: 100, volume: 5 }] });
-  const pretty = renderMessage(msg({ id: 'tc5', kind: 'tool', text: 'market_snapshot', data: { callId: 'c5', name: 'mcp__alpaca-kit__market_snapshot', result, isError: false } }), conv(), state);
-  assert.match(pretty, /<details id="tool-c5" class="tool">/);
-  assert.match(pretty, /<table class="viz-table">/);
-  assert.match(pretty, /<details id="raw-c5" class="raw"><summary>Raw<\/summary><pre>\{&quot;ok&quot;:true/);
+  const old = renderMessage(msg({ id: 'tc5', kind: 'tool', text: 'market_snapshot', data: { callId: 'c5', name: 'mcp__alpaca-kit__market_snapshot', result, isError: false } }), conv(), state);
+  assert.match(old, /<details id="tool-c5" class="tool"><summary><span class="tool-name">market_snapshot<\/span><\/summary><pre>\{&quot;ok&quot;:true/);
+  assert.doesNotMatch(old, /<table|viz-|class="raw"/);
   const plain = renderMessage(msg({ id: 'tc6', kind: 'tool', text: 'ls', data: { callId: 'c6', name: 'bash', result: 'a\nb', isError: false } }), conv(), state);
   assert.match(plain, /<pre>a\nb<\/pre>/); assert.doesNotMatch(plain, /viz-|class="raw"/);
   const failed = renderMessage(msg({ id: 'tc7', kind: 'tool', text: 'account', data: { callId: 'c7', name: 'mcp__alpaca-kit__account', result: JSON.stringify({ ok: true, equity: '1' }), isError: true } }), conv(), state);
-  assert.doesNotMatch(failed, /viz-tiles/, 'an error result stays raw');
+  assert.match(failed, /<details id="tool-c7" class="tool danger">/);
 });
 
 test("a member's answer offers Trace; Gravit's and the operator's do not", () => {
@@ -172,7 +171,7 @@ test('a loaded trace draws its tool rows; loading and failure say so', () => {
   const answer = msg({ id: 'e9', from: 'buffett', text: 'Hold', data: { name: 'Buffett', memberSessionId: 'm1', memberTurn: 3 } });
   const tool = msg({ id: 'tmc1', seq: 11, kind: 'tool', text: 'account', data: { callId: 'mc1', name: 'mcp__alpaca-kit__account', result: '{"ok":true,"equity":"100"}', isError: false } });
   const loaded = renderMessage(answer, room, { ...state, traces: { room: { e9: { status: 'ready', messages: [tool] } } } });
-  assert.match(loaded, /class="trace-body"[\s\S]*?<details id="tool-mc1" class="tool">[\s\S]*?viz-tile-label">equity/);
+  assert.match(loaded, /class="trace-body"[\s\S]*?<details id="tool-mc1" class="tool">[\s\S]*?<pre>\{&quot;ok&quot;:true,&quot;equity&quot;:&quot;100&quot;\}<\/pre>/);
   assert.match(renderMessage(answer, room, { ...state, traces: { room: { e9: { status: 'loading' } } } }), /trace-body[^>]*>[\s\S]*?Loading…/);
   assert.match(renderMessage(answer, room, { ...state, traces: { room: { e9: { status: 'failed', line: 'The member session does not exist.' } } } }), /The member session does not exist\./);
   assert.match(renderMessage(answer, room, { ...state, traces: { room: { e9: { status: 'ready', messages: [] } } } }), /No steps/);

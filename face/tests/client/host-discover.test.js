@@ -39,17 +39,17 @@ test('load reads the four listings once each; one failing marks only its shelf a
   assert.deepEqual(keep.d().shelves.bots.data.bots, [{ id: 'b', name: 'B' }], 'the last good listing stays');
 });
 
-test('gravit reads the host, the model catalog and the three keys, each alone', async () => {
+test('gravit reads the host, the model catalog and the key, each alone', async () => {
   const r = rig({
     json: { '/data/host.json': { ok: true, cwd: '/r', home: '/h', attachedSessions: 2, version: '0.2.0-rc.2' } },
-    calls: { 'session/modelCatalog': new Error('catalog down'), 'credentials/describe': { DEEPSEEK_API_KEY: { configured: true }, APCA_API_KEY_ID: { configured: false } } },
+    calls: { 'session/modelCatalog': new Error('catalog down'), 'credentials/describe': { DEEPSEEK_API_KEY: { configured: true } } },
   });
   await r.discover.gravit();
   const g = r.d().gravit;
   assert.equal(g.host.cwd, '/r'); assert.equal(g.model, false, 'a failed read is false');
   assert.equal(g.keys.DEEPSEEK_API_KEY.configured, true);
   assert.deepEqual(r.called.find(c => c[0] === 'credentials/describe')[1], { refs: GRAVIT_KEYS });
-  assert.deepEqual(GRAVIT_KEYS, ['DEEPSEEK_API_KEY', 'APCA_API_KEY_ID', 'APCA_API_SECRET_KEY']);
+  assert.deepEqual(GRAVIT_KEYS, ['DEEPSEEK_API_KEY'], 'the face reads no Alpaca key, so Discover lists none');
   const m = rig({ json: { '/data/host.json': new Error('x') }, calls: { 'session/modelCatalog': { default: { provider: 'deepseek', model: 'deepseek-chat', reasoningEffort: 'high' } }, 'credentials/describe': {} } });
   await m.discover.gravit();
   assert.deepEqual(m.d().gravit.model, { provider: 'deepseek', model: 'deepseek-chat', reasoningEffort: 'high' });

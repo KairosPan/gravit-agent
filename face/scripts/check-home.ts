@@ -27,7 +27,7 @@
  * 3. Boots the face's own composition on the copy with `bootFace`, as
  *    `main.ts` boots the live home except for three things: the copy is the
  *    home, `DSH_TELEMETRY_DISABLED=1`, and every MCP client row (the
- *    operator's `mcp-alpaca-kit`, the face's `mcp-akshare`, any other) is
+ *    face's `mcp-akshare` and `mcp-account`, any of the operator's) is
  *    disabled through an IN-MEMORY patch layer
  *    ({@link FaceBootOptions.extraPatches}) - never by writing the copy's
  *    patch files - so no MCP server is spawned and no key leaves the machine.
@@ -66,12 +66,9 @@ export const MARKER_FILE = "DRY-RUN-COPY";
 export const EXIT_REFUSED = 2;
 /** The boot or the scan did not complete; the report says why. */
 export const EXIT_INCOMPLETE = 1;
-/** The package every MCP server row mounts (dsh-base, the face's AKShare row
- * and the operator's alpaca-kit row alike). */
+/** The package every MCP server row mounts (dsh-base, the face's AKShare and
+ * Account seat rows and any of the operator's alike). */
 export const MCP_CLIENT_PACKAGE = "@deepseek-ai/dsh-mcp-client";
-/** The operator's alpaca-kit row id (dsh/README.md steps 3-6), disabled by id
- * as well as by package, in case a future row spells its package differently. */
-const ALPACA_KIT_ROW_ID = "mcp-alpaca-kit";
 /** The D2 row the operator adds to the face profile patch. */
 const DEFAULT_MODEL_ROW_ID = "agent-default-model";
 
@@ -470,6 +467,13 @@ export function mcpRowsIn(entries: readonly EntryLike[]): Array<{ id?: string; s
   return out;
 }
 
+/** The MCP row ids the dry run disables: every one the composition names (rows
+ * with no id are refused before this), and the face's AKShare row by id as
+ * well as by package, in case a future row spells its package differently. */
+export function mcpRowIdsToDisable(rows: ReadonlyArray<{ id?: string }>): string[] {
+  return [...new Set([...rows.flatMap((row) => (row.id === undefined ? [] : [row.id])), AKSHARE_MCP_ROW_ID])];
+}
+
 /** The last row a patch list writes for `id` (an id patch, or an inserted
  * row), or `undefined` when the list never names it. */
 export function findPatchRow(
@@ -804,7 +808,7 @@ export async function runCheckHome(args: readonly string[], env: NodeJS.ProcessE
         throw new Error(`${unaddressable.length} MCP row(s) have no id, so no patch can disable them - ` +
           "refusing to boot a dry run that would spawn them");
       }
-      const ids = [...new Set([...mcp.map((row) => row.id as string), ALPACA_KIT_ROW_ID, AKSHARE_MCP_ROW_ID])];
+      const ids = mcpRowIdsToDisable(mcp);
       report.boot.mcpRowsDisabled = ids.map((id) => ({
         id,
         ...((({ serverName }) => serverName === undefined ? {} : { serverName })(mcp.find((row) => row.id === id) ?? {})),

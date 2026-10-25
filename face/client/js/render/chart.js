@@ -1,7 +1,6 @@
 // face/client/js/render/chart.js — the charts, each an area and a line in a 400×140 box (the demo chart's geometry), the low
-// and the high touching the margins, a label that says the range: a daily_bars tool result's closes in the thread
-// (render/tool-result.js, until alpaca-kit leaves), a market's closes from the Account's candles read, and the Account's
-// net-worth curve from its history read
+// and the high touching the margins, a label that says the range: a market's closes from the Account's candles read, and the
+// Account's net-worth curve from its history read
 import { esc } from '../html.js';
 import { price, number } from '../wire/market-model.js';
 import { fmtClock, fmtDate } from '../time.js';
@@ -21,16 +20,6 @@ function drawn(values, { label, first, last, f }) {
     `<div class="mk-axis"><span>${esc(first)}</span><span>Low ${esc(f(lo))} · High ${esc(f(hi))}</span><span>${esc(last)}</span></div>`;
 }
 
-export function chartSvg(rows, { currency } = {}) {
-  const points = (Array.isArray(rows) ? rows : [])
-    .map(r => ({ date: typeof r?.date === 'string' ? r.date : '', close: number(r?.close) }))
-    .filter(p => p.close !== null);
-  if (points.length < 2) return '';
-  const first = points[0].date;
-  const last = points.at(-1).date;
-  return drawn(points.map(p => p.close), { label: `Daily closes from ${first} to ${last}`, first, last, f: v => price(v, currency) });
-}
-
 // a point's time as the axis says it, on the operator's clock (Oct 15 09:30); one that does not parse is no time
 const clockWord = t => `${fmtDate(t)} ${fmtClock(t)}`;
 const timeWord = at => { const t = Date.parse(at); return Number.isNaN(t) ? '' : clockWord(t); };
@@ -38,7 +27,7 @@ const timeWord = at => { const t = Date.parse(at); return Number.isNaN(t) ? '' :
 const msOf = v => { const t = number(v); return t !== null && !Number.isNaN(new Date(t).getTime()) ? t : null; };
 
 /** A market's price history from the Account's candles read: its bars ({ t, o, h, l, c } — `t` a bar's start in ms — oldest
- *  first, as the Account sends them) drawn as their closes over the range, in the closes chart's box, the axis at the first and
+ *  first, as the Account sends them) drawn as their closes over the range, in the charts' box, the axis at the first and
  *  last bars' times; an event contract's closes, dollars a contract, in cents when the unit says so. A bar without a close or a
  *  time is left out; fewer than two draw nothing. */
 export function candlesSvg(candles, { unit, range } = {}) {
@@ -55,7 +44,7 @@ export function candlesSvg(candles, { unit, range } = {}) {
 
 /** A figure of the Account's over the curve's range — Net worth, or Paper as the renderer names the figure the curve draws:
  *  its history points ({ at, usd }, oldest first, as the Account sends them), a point without a number or a time left out,
- *  in the closes chart's box; fewer than two points draw nothing. */
+ *  in the charts' box; fewer than two points draw nothing. */
 export function curveSvg(points, { currency, label = 'Net worth' } = {}) {
   const kept = (Array.isArray(points) ? points : [])
     .map(p => ({ at: timeWord(p?.at), usd: number(p?.usd) }))

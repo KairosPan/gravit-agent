@@ -89,11 +89,12 @@ test('an agent page: version, sign-in, Connect for a candidate and Disconnect fo
 test('the Gravit page: model, host and keys, a failed card alone', () => {
   const at = loaded({ screen: 'plugin', id: 'agent:gravit' });
   assert.match(renderPlugin(at), /Loading…/);
-  const h = renderPlugin(R.gravitLoaded(at, { host: { cwd: '/r', home: '/h', attachedSessions: 2, version: '0.2.0-rc.2' }, model: false, keys: { DEEPSEEK_API_KEY: { configured: true }, APCA_API_KEY_ID: { configured: false } } }));
+  const h = renderPlugin(R.gravitLoaded(at, { host: { cwd: '/r', home: '/h', attachedSessions: 2, version: '0.2.0-rc.2' }, model: false, keys: { DEEPSEEK_API_KEY: { configured: true } } }));
   assert.match(h, /Main agent/);
   assert.match(h, new RegExp(`>Model<[\\s\\S]*?Couldn${apos}t read`));
   assert.match(h, />Working directory<[\s\S]*?>\/r</); assert.match(h, />Home<[\s\S]*?>\/h</); assert.match(h, />Attached sessions<[\s\S]*?>2</);
-  assert.match(h, />DEEPSEEK_API_KEY<[\s\S]*?>Present</); assert.match(h, />APCA_API_KEY_ID<[\s\S]*?>Absent</); assert.match(h, />APCA_API_SECRET_KEY<[\s\S]*?>Absent</);
+  assert.match(h, />DEEPSEEK_API_KEY<[\s\S]*?>Present</); assert.doesNotMatch(h, /APCA_/, 'no key the face does not read');
+  assert.match(renderPlugin(R.gravitLoaded(at, { host: false, model: false, keys: {} })), />DEEPSEEK_API_KEY<[\s\S]*?>Absent</);
   const m = renderPlugin(R.gravitLoaded(at, { host: false, model: { provider: 'deepseek', model: 'deepseek-chat', reasoningEffort: 'high' }, keys: false }));
   assert.match(m, />Provider<[\s\S]*?>deepseek</); assert.match(m, />Effort<[\s\S]*?>high</);
   assert.match(m, new RegExp(`>Host<[\\s\\S]*?Couldn${apos}t read`));

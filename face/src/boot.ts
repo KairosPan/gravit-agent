@@ -32,7 +32,7 @@
  *    service, and the operator's default model lives in the profile patch.
  * 3. No `installProxyFromEnvironment` (D10): 0.1.1 had no proxy policy, and it
  *    is not a no-op when `HTTP(S)_PROXY` is set — it would reroute the face's
- *    own quote and Alpaca fetches too (NEW packages/util/http-proxy/src/
+ *    own A-share quote and symbol-search fetches too (NEW packages/util/http-proxy/src/
  *    install.ts:62-68, 296-303).
  * 4. No `createProcessShutdown`, no SIGINT/SIGTERM and no `installFailLoud`
  *    here: `main.ts` owns process lifetime and installs `installFailLoud`
@@ -629,10 +629,8 @@ interface GateApprovalLike {
 }
 
 /** The tool registry as the guard reads it: the guard seam itself
- * (`ToolGuard`, NEW packages/core/tools/src/index.ts:731, 1136-1142) and the
- * live lookup of a call's description. */
+ * (`ToolGuard`, NEW packages/core/tools/src/index.ts:731, 1136-1142). */
 interface GateToolsLike {
-  get(name: string, scope?: unknown): { description?: string } | undefined;
   guard(check: (exec: { name: string; callId?: unknown; agent?: { session: unknown } }) => string | undefined): () => void;
 }
 
@@ -729,8 +727,8 @@ export function armOrderGate(hostCtx: Context): OrderGateFibers {
   const guard = hostCtx.inject(["tools"], function orderGateGuard(gateCtx) {
     const tools = gateCtx.get("tools") as GateToolsLike | undefined;
     if (tools === undefined) throw new Error(`${BIN}: order gate: the tools service vanished before the guard armed`);
-    /* The backstop, evaluated per call on every allow. It reads the LIVE
-     * description rather than a boot snapshot because the registry fills in
+    /* The backstop, evaluated per call on every allow, by the call's name
+     * rather than a boot snapshot because the registry fills in
      * asynchronously: `dsh-mcp-client` defaults `failOnStartupError` to false
      * (NEW packages/mcp/mcp-client/src/index.ts:128, 138), so a server whose
      * first connection failed still activates and can register its tools after
@@ -745,14 +743,7 @@ export function armOrderGate(hostCtx: Context): OrderGateFibers {
      * since a full snapshot copies the log once per append and this runs on
      * every allow of every tool - and gives an UNREADABLE log its own denial,
      * distinct from a missing grant. */
-    tools.guard((exec) =>
-      orderGuardReasonForSession(
-        exec.name,
-        tools.get(exec.name, exec.agent)?.description,
-        exec.agent?.session,
-        exec.callId,
-      )
-    );
+    tools.guard((exec) => orderGuardReasonForSession(exec.name, exec.agent?.session, exec.callId));
   });
   return { listener, guard };
 }
@@ -814,8 +805,8 @@ async function assertOrderGateArmed(gate: OrderGateFibers | undefined): Promise<
  * declarations, and the readiness commit (already done unless deferred).
  * @throws after disposing the tree when any enabled row did not activate, a
  * required service is missing, the `ask_user_question` tool did not register,
- * either half of Gate 2 did not arm, an operator-gated tool escapes the order
- * gate, the preset roster cannot supply its own default, or a declared bot is
+ * either half of Gate 2 did not arm, a mounted Account seat has no write the
+ * order gate covers, the preset roster cannot supply its own default, or a declared bot is
  * not listed; `StartupError`
  * (from `boot`) when a required dsh entry is inactive; and whatever `boot`
  * throws when the plugin tree fails to load.
@@ -918,11 +909,11 @@ export async function bootFace(opts: FaceBootOptions): Promise<BootedFace> {
      * registry against it. */
     await assertOrderGateArmed(gate);
     const audit = auditOrderTools(tools.schemas());
-    if (audit.ungated.length > 0) {
+    if (audit.uncovered.length > 0) {
       throw new Error(
-        `${BIN}: ${audit.ungated.join(", ")} ${audit.ungated.length === 1 ? "is" : "are"} marked` +
-          ` operator-gated but would not stop at the order gate - Gate 2 would cover nothing while` +
-          ` looking healthy (a renamed tool or MCP server; see face/src/orders.ts)`,
+        `${BIN}: the Account seat's tools are registered under ${audit.uncovered.map((p) => `${p}*`).join(", ")}` +
+          ` but the order gate covers none of them - Gate 2 would cover nothing while looking healthy` +
+          ` (the Account renamed its writes; add their raw names to SEAT_WRITE_RAW_NAMES in face/src/orders.ts)`,
       );
     }
     if (audit.gated.length > 0) {

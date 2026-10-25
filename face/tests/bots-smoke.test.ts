@@ -49,11 +49,12 @@ import { mountClient, remote, remoteResult, signIn } from "./remote.ts";
 
 const gated = process.env.FACE_SMOKE !== "1";
 
-/** The order-gate drill's stand-in, verbatim: a name the pre-execute listener
- *  does NOT claim (so no card is raised - there is no client to answer one)
- *  carrying the marker alpaca-kit stamps on its mutating tools. Only the guard
- *  can refuse it, which is exactly the layer under test here. */
-const STAND_IN = "mcp__drill__submit_order";
+/** The order-gate drill's stand-in, verbatim: a seat write's raw name behind a
+ *  server name nothing real uses. Its execute below carries a callId an outer
+ *  listener ALLOWS before the gate's listener can ask (no card is raised -
+ *  there is no client to answer one), so only the guard can refuse it, which
+ *  is exactly the layer under test here. */
+const STAND_IN = "mcp__drill__portfolio_live_order";
 
 /** The opening words of the research-cycle contract (`dsh/profile/cycle.md`, the `gravit:cycle` section): enough
  *  to tell whether the section reached a prompt, without copying the contract into a test. The em dash is U+2014. */
@@ -189,11 +190,19 @@ test("bots smoke: roster, mask, persona, a default that masks nothing, the shipp
       let bodyRan = false;
       const unregister = tools.register({
         name: STAND_IN,
-        description: "submit a PAPER order (operator-gated)",
+        description: "place an order - drill stand-in, nothing behind it",
         parameters: {},
         output: { schema: { type: "object" }, render: () => [{ type: "text", text: "ok" }] },
         execute: async () => { bodyRan = true; return {}; },
       });
+      /* The outer listener that swallows the gate's ask for the guard's call
+       * alone: the override a sighting-based guard would wave through. */
+      const swallow = (ctx.on as unknown as (
+        name: "tools/pre-execute",
+        listener: (exec: { callId?: string }, next: () => Promise<{ kind: string }>) => Promise<{ kind: string }>,
+        options: { prepend: boolean },
+      ) => () => void).call(ctx, "tools/pre-execute", (exec, next) =>
+        exec.callId === "bot-guard" ? Promise.resolve({ kind: "allow" }) : next(), { prepend: true });
       try {
         await settle();
         const t = await create({ cwd: join(bots, "trader", "journal"), agentPreset: "trader" });
@@ -205,7 +214,7 @@ test("bots smoke: roster, mask, persona, a default that masks nothing, the shipp
         });
         assert.equal(refused.isError, true, "and the guard refuses it anyway");
         assert.equal(bodyRan, false, "the tool body must never run");
-        assert.match(refused.content?.[0]?.text ?? "", /ORDER_RAW_NAMES/);
+        assert.match(refused.content?.[0]?.text ?? "", /without a logged allowed-once approval/);
 
         /* The other half of the gate, fired at the waterfall rather than
          * through `execute` for the reason `order-gate.test.ts` gives: an ask
@@ -216,12 +225,13 @@ test("bots smoke: roster, mask, persona, a default that masks nothing, the shipp
         const decision = await (ctx as unknown as {
           waterfall(name: "tools/pre-execute", exec: object, next: () => Promise<{ kind: string; reason?: string }>): Promise<{ kind: string; reason?: string }>;
         }).waterfall("tools/pre-execute", {
-          name: "mcp__drill__place_order", callId: "bot-ask", arguments: { symbol: "AAPL", qty: 1, side: "buy" },
+          name: STAND_IN, callId: "bot-ask", arguments: { venue: "paper-1", symbol: "AAPL", qty: 1, side: "buy" },
           agent: trader, signal: new AbortController().signal,
         }, () => Promise.resolve({ kind: "allow" }));
         assert.equal(decision.kind, "ask", "an order from a bot raises the same card Gravit's would");
-        assert.match(decision.reason ?? "", /AAPL/);
+        assert.match(decision.reason ?? "", /^Account seat - .*AAPL/);
       } finally {
+        swallow();
         unregister();
       }
 

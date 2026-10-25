@@ -72,7 +72,7 @@ test("account seat smoke: the seat mounts, its writes are gated, a read answers,
     };
 
     /* 2. The seat mounts: its 35 real-account tools, the nine writes gated, no
-     * read gated, nothing ungated. */
+     * read gated, the seat covered. */
     const deadline = Date.now() + 120_000;
     let names: string[] = [];
     while (Date.now() < deadline) {
@@ -85,7 +85,7 @@ test("account seat smoke: the seat mounts, its writes are gated, a read answers,
     const audit = auditOrderTools(tools.schemas());
     const gatedSeat = audit.gated.filter((name) => name.startsWith(SEAT_TOOL_PREFIX)).sort();
     assert.deepEqual(gatedSeat, REAL_WRITES.map((raw) => `${SEAT_TOOL_PREFIX}${raw}`).sort(), "exactly the seat's real-account writes are gated");
-    assert.deepEqual(audit.ungated, []);
+    assert.deepEqual(audit.uncovered, [], "the seat is covered");
     for (const read of ["portfolio_account", "portfolio_holdings", "portfolio_wait", "portfolio_live_preview"]) assert.ok(seatNames.includes(`${SEAT_TOOL_PREFIX}${read}`), read);
 
     /* 3. A real session with an open turn, and the outermost answerer, as the

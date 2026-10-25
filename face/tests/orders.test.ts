@@ -1,33 +1,32 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  auditOrderTools, describeOrder, effectiveApprovalPolicy, hasApprovalGrant, isGatedTool,
+  auditOrderTools, describeOrder, effectiveApprovalPolicy, hasApprovalGrant,
   isOrderTool, isSeatWriteTool, orderApprovalDecision, orderGuardReason, orderGuardReasonForSession,
   unreadableSessionLogReason, type PreToolDecision,
 } from "../src/orders.ts";
 
 /* --- which tools the gate claims ------------------------------------------ */
 
-test("isOrderTool: the two mutating tools match, raw and as dsh mints them", () => {
+test("isOrderTool: the alpaca-kit pair is no longer an order tool, raw or as dsh minted it", () => {
   for (const raw of ["place_order", "cancel_order"]) {
-    assert.equal(isOrderTool(raw), true, raw);
-    assert.equal(isOrderTool(`mcp__alpaca-kit__${raw}`), true, `mcp__alpaca-kit__${raw}`);
+    assert.equal(isOrderTool(raw), false, raw);
+    assert.equal(isOrderTool(`mcp__alpaca-kit__${raw}`), false, `mcp__alpaca-kit__${raw}`);
   }
 });
 
-test("isOrderTool: a server rename cannot slip a live order tool past", () => {
+test("isOrderTool: a server rename cannot slip a seat write past", () => {
   // The serverName is the operator's, in their cordis patch, not this repo's.
-  assert.equal(isOrderTool("mcp__alpaca__place_order"), true);
-  assert.equal(isOrderTool("mcp__broker_prod__cancel_order"), true);
+  assert.equal(isOrderTool("mcp__broker__portfolio_live_order"), true);
+  assert.equal(isOrderTool("mcp__broker_prod__portfolio_live_cancel"), true);
 });
 
-test("isOrderTool: the read-only `orders` listing is NOT gated", () => {
-  // The trap a substring test for "order" would fall into: `orders` only reads.
+test("isOrderTool: a name that merely mentions an order is NOT gated", () => {
+  // The trap a substring test for "order" would fall into.
   assert.equal(isOrderTool("orders"), false);
-  assert.equal(isOrderTool("mcp__alpaca-kit__orders"), false);
-  // ...and neither are the other read-only tools that mention orders nowhere.
-  assert.equal(isOrderTool("mcp__alpaca-kit__account"), false);
-  assert.equal(isOrderTool("mcp__alpaca-kit__positions"), false);
+  assert.equal(isOrderTool("mcp__x__orders"), false);
+  assert.equal(isOrderTool("mcp__x__portfolio_live_order_book"), false);
+  assert.equal(isOrderTool("mcp__account__portfolio_live_positions"), false);
 });
 
 /* --- the decision --------------------------------------------------------- */
@@ -35,12 +34,13 @@ test("isOrderTool: the read-only `orders` listing is NOT gated", () => {
 test("orderApprovalDecision: anything that is not an order tool is none of our business", () => {
   // null, not allow: the caller must delegate to next(), leaving other
   // listeners' decisions intact rather than overriding them with an allow.
-  assert.equal(orderApprovalDecision("mcp__alpaca-kit__orders", "ask"), null);
+  assert.equal(orderApprovalDecision("mcp__account__portfolio_account", "ask"), null);
+  assert.equal(orderApprovalDecision("mcp__alpaca-kit__place_order", "ask"), null);
   assert.equal(orderApprovalDecision("bash", "ask"), null);
 });
 
 test("orderApprovalDecision: an order under policy `ask` raises a card", () => {
-  const decision = orderApprovalDecision("mcp__alpaca-kit__place_order", "ask");
+  const decision = orderApprovalDecision("mcp__account__portfolio_live_order", "ask");
   assert.equal(decision?.kind, "ask");
 });
 
@@ -48,7 +48,7 @@ test("orderApprovalDecision: under policy `never` it denies ITSELF, and says nob
   // Returning `ask` here would be worse than useless: ApprovalService
   // short-circuits on `never` before any answerer runs, and dsh-tools renders
   // that as `the user rejected tool "..."` - false, because nobody was asked.
-  const decision = orderApprovalDecision("mcp__alpaca-kit__place_order", "never");
+  const decision = orderApprovalDecision("mcp__account__portfolio_live_order", "never");
   assert.equal(decision?.kind, "deny");
   const reason = decision?.kind === "deny" ? decision.reason : "";
   assert.match(reason, /nobody was asked/i);
@@ -76,53 +76,60 @@ test("effectiveApprovalPolicy: a runtime switch to danger-full-access disarms th
   // The whole reason the policy is read per call rather than once at boot.
   const approval = { overrideOf: () => "never" as const, config: { policy: "ask" as const } };
   const policy = effectiveApprovalPolicy(approval, {});
-  assert.equal(orderApprovalDecision("mcp__alpaca-kit__place_order", policy)?.kind, "deny");
+  assert.equal(orderApprovalDecision("mcp__account__portfolio_live_order", policy)?.kind, "deny");
 });
 
 /* --- the registry cross-check --------------------------------------------- */
 
-test("auditOrderTools: reports the covered order tools", () => {
+test("auditOrderTools: reports the covered seat writes", () => {
   const audit = auditOrderTools([
-    { name: "mcp__alpaca-kit__place_order", description: "submit a PAPER order (operator-gated)" },
-    { name: "mcp__alpaca-kit__cancel_order", description: "cancel a paper order by id (operator-gated)" },
-    { name: "mcp__alpaca-kit__orders", description: "list orders" },
+    { name: "mcp__account__portfolio_live_order", description: "Place an order at a venue the owner connected live" },
+    { name: "mcp__account__portfolio_live_cancel", description: "Cancel an order" },
+    { name: "mcp__account__portfolio_holdings", description: "What is held" },
     { name: "bash", description: "run a command" },
   ]);
-  assert.deepEqual(audit.gated, ["mcp__alpaca-kit__place_order", "mcp__alpaca-kit__cancel_order"]);
-  assert.deepEqual(audit.ungated, []);
+  assert.deepEqual(audit.gated, ["mcp__account__portfolio_live_order", "mcp__account__portfolio_live_cancel"]);
+  assert.deepEqual(audit.uncovered, []);
 });
 
-test("auditOrderTools: a renamed operator-gated tool is reported as ungated, not silently missed", () => {
-  // The failure the boot assertion exists for: alpaca-kit still marks it, but
-  // the name no longer matches, so the gate would cover nothing while the face
-  // came up healthy.
+test("auditOrderTools: a seat whose writes the gate covers none of is reported uncovered, not silently missed", () => {
+  // The failure the boot assertion exists for: the seat is mounted under an
+  // operator's server name - its reads are there - but the Account renamed its
+  // writes, so the gate would cover nothing while the face came up healthy.
   const audit = auditOrderTools([
-    { name: "mcp__alpaca-kit__submit_order", description: "submit a PAPER order (operator-gated)" },
+    { name: "mcp__broker__portfolio_account", description: "Who this seat is" },
+    { name: "mcp__broker__portfolio_holdings", description: "What is held" },
+    { name: "mcp__broker__portfolio_place", description: "Place an order (renamed at the Account)" },
   ]);
   assert.deepEqual(audit.gated, []);
-  assert.deepEqual(audit.ungated, ["mcp__alpaca-kit__submit_order"]);
+  assert.deepEqual(audit.uncovered, ["mcp__broker__"]);
 });
 
-test("auditOrderTools: an order tool whose description lost the marker is still gated", () => {
-  // The other direction of the cross-check: the name is what enforces.
-  const audit = auditOrderTools([{ name: "mcp__alpaca-kit__place_order", description: "submit" }]);
-  assert.deepEqual(audit.gated, ["mcp__alpaca-kit__place_order"]);
-  assert.deepEqual(audit.ungated, []);
+test("auditOrderTools: under the face's own seat prefix a renamed write is carded, so the seat is covered", () => {
+  const audit = auditOrderTools([
+    { name: "mcp__account__portfolio_account", description: "Who this seat is" },
+    { name: "mcp__account__portfolio_place", description: "Place an order (renamed at the Account)" },
+  ]);
+  assert.deepEqual(audit.gated, ["mcp__account__portfolio_place"]);
+  assert.deepEqual(audit.uncovered, []);
 });
 
-test("auditOrderTools: an empty registry is empty, not an error", () => {
-  // Orders are OFF today - the flag is unset - so this is the normal case, and
-  // it must not trip the boot assertion.
-  assert.deepEqual(auditOrderTools([]), { gated: [], ungated: [] });
+test("auditOrderTools: an empty registry is empty, not an error; the alpaca pair with its old marker is nobody's", () => {
+  // No seat mounted is the normal case of a scratch home, and it must not trip
+  // the boot assertion.
+  assert.deepEqual(auditOrderTools([]), { gated: [], uncovered: [] });
   assert.deepEqual(
-    auditOrderTools([{ name: "mcp__alpaca-kit__account", description: "account snapshot" }]),
-    { gated: [], ungated: [] },
+    auditOrderTools([
+      { name: "mcp__alpaca-kit__place_order", description: "submit a PAPER order (operator-gated)" },
+      { name: "mcp__alpaca-kit__account", description: "account snapshot" },
+    ]),
+    { gated: [], uncovered: [] },
   );
 });
 
 /* --- the grant check: a sighting is not an approval ----------------------- */
 
-const asked = (id: string, callId: string, toolName = "mcp__x__place_order") =>
+const asked = (id: string, callId: string, toolName = "mcp__x__portfolio_live_order") =>
   ({ type: "approval/asked", data: { id, callId, toolName } });
 const decided = (id: string, outcome: string) => ({ type: "approval/decided", data: { id, outcome } });
 
@@ -156,31 +163,13 @@ test("hasApprovalGrant: no callId is never a grant", () => {
   assert.equal(hasApprovalGrant([asked("a1", "c1"), decided("a1", "allowed-once")], undefined), false);
 });
 
-/* --- the per-call gate test (what the guard asks) ------------------------- */
-
-test("isGatedTool: an order name is gated whatever its description says", () => {
-  assert.equal(isGatedTool("mcp__x__place_order", undefined), true);
-  assert.equal(isGatedTool("mcp__x__place_order", "harmless"), true);
-});
-
-test("isGatedTool: a renamed tool still carrying the marker is gated", () => {
-  // The late-registration and hash-suffix cases the boot audit can miss.
-  assert.equal(isGatedTool("mcp__x__submit_order", "submit a PAPER order (operator-gated)"), true);
-  assert.equal(isGatedTool("mcp__x__place_order_a1b2c3d4e5f6", "(operator-gated)"), true);
-});
-
-test("isGatedTool: the marker only counts on mcp__ tools, so one phrase cannot brick the face", () => {
-  assert.equal(isGatedTool("bash", "runs things (operator-gated)"), false);
-  assert.equal(isGatedTool("mcp__x__orders", "list orders"), false);
-});
-
 /* --- the card has to be readable ------------------------------------------ */
 
 test("describeOrder: the card names the order, not just the tool", () => {
-  const line = describeOrder("mcp__alpaca-kit__place_order", {
-    symbol: "AAPL", qty: 10, side: "buy", order_type: "limit", limit_price: 195.5,
+  const line = describeOrder("mcp__account__portfolio_live_order", {
+    venue: "paper-1", symbol: "AAPL", qty: 10, side: "buy", orderType: "limit", limitPrice: 195.5,
   });
-  for (const fragment of ["AAPL", "qty=10", "side=buy", "limit", "195.5"]) {
+  for (const fragment of ["AAPL", "qty=10", "side=buy", "limit", "195.5", "venue=paper-1"]) {
     assert.match(line, new RegExp(fragment.replace(".", "\\.")), fragment);
   }
 });
@@ -196,14 +185,14 @@ test("describeOrder: a nested object is shown one level deep, as a batch's legs 
 
 test("describeOrder: odd arguments degrade to the tool name, never throw", () => {
   for (const args of [undefined, null, "text", 42, []]) {
-    assert.equal(describeOrder("mcp__x__place_order", args), "mcp__x__place_order");
+    assert.equal(describeOrder("mcp__x__portfolio_live_order", args), "mcp__x__portfolio_live_order");
   }
   assert.equal(describeOrder("t", {}), "t");
   assert.equal(describeOrder("t", { nested: { a: 1 } }), "t: nested={a=1}");
 });
 
 test("orderApprovalDecision: the ask reason carries the order, so the card is decidable", () => {
-  const decision = orderApprovalDecision("mcp__alpaca-kit__place_order", "ask", {
+  const decision = orderApprovalDecision("mcp__account__portfolio_live_order", "ask", {
     symbol: "TSLA", qty: 3, side: "sell",
   });
   assert.equal(decision?.kind, "ask");
@@ -215,47 +204,46 @@ test("orderApprovalDecision: the ask reason carries the order, so the card is de
 const granted = [asked("g", "c1"), decided("g", "allowed-once")];
 
 test("orderGuardReason: an approved order passes", () => {
-  assert.equal(orderGuardReason("mcp__x__place_order", undefined, granted, "c1"), undefined);
+  assert.equal(orderGuardReason("mcp__x__portfolio_live_order", granted, "c1"), undefined);
 });
 
 test("orderGuardReason: an order with NO grant is denied - a sighting is not an approval", () => {
   // The override case: a listener registered outside this gate takes our `ask`
   // and returns `allow`. The old witnessed-WeakSet guard waved that through,
   // having seen the call. Only the log proves a human said yes.
-  const reason = orderGuardReason("mcp__x__place_order", undefined, [], "c1");
+  const reason = orderGuardReason("mcp__x__portfolio_live_order", [], "c1");
   assert.match(reason ?? "", /without a logged allowed-once/);
 });
 
 test("orderGuardReason: a rejected order is denied", () => {
   const events = [asked("g", "c1"), decided("g", "rejected")];
-  assert.notEqual(orderGuardReason("mcp__x__place_order", undefined, events, "c1"), undefined);
+  assert.notEqual(orderGuardReason("mcp__x__portfolio_live_order", events, "c1"), undefined);
 });
 
 test("orderGuardReason: a grant for another call does not let this one through", () => {
-  assert.notEqual(orderGuardReason("mcp__x__place_order", undefined, granted, "c2"), undefined);
+  assert.notEqual(orderGuardReason("mcp__x__portfolio_live_order", granted, "c2"), undefined);
 });
 
-test("orderGuardReason: a marked tool the gate cannot name is denied, and the message says how to fix it", () => {
-  // The late-registration / hash-suffix hole the boot audit cannot see, closed
-  // per call. It can never be approved, so the denial must name the remedy.
-  const reason = orderGuardReason("mcp__x__submit_order", "a PAPER order (operator-gated)", [], "c1");
-  assert.match(reason ?? "", /ORDER_RAW_NAMES/);
+test("orderGuardReason: the alpaca pair is nothing of the guard's any more: the name alone decides", () => {
+  for (const name of ["place_order", "mcp__alpaca-kit__place_order", "mcp__drill__cancel_order"]) {
+    assert.equal(orderGuardReason(name, [], "c1"), undefined, name);
+  }
 });
 
 test("hasApprovalGrant: a grant won for ANOTHER tool cannot be replayed onto an order", () => {
   // callId is the model's own tool-call id, so it is not by itself proof of
   // WHICH tool a human approved.
   const events = [asked("a1", "c1", "bash"), decided("a1", "allowed-once")];
-  assert.equal(hasApprovalGrant(events, "c1", "mcp__x__place_order"), false);
+  assert.equal(hasApprovalGrant(events, "c1", "mcp__x__portfolio_live_order"), false);
   assert.equal(hasApprovalGrant(events, "c1", "bash"), true);
 });
 
 test("hasApprovalGrant: an id-less asked event cannot pair with an id-less decision", () => {
   const events = [
-    { type: "approval/asked", data: { callId: "c1", toolName: "mcp__x__place_order" } },
+    { type: "approval/asked", data: { callId: "c1", toolName: "mcp__x__portfolio_live_order" } },
     { type: "approval/decided", data: { outcome: "allowed-once" } },
   ];
-  assert.equal(hasApprovalGrant(events, "c1", "mcp__x__place_order"), false);
+  assert.equal(hasApprovalGrant(events, "c1", "mcp__x__portfolio_live_order"), false);
 });
 
 test("describeOrder: a crafted field that is not a key field cannot run away with the operator's only line", () => {
@@ -345,8 +333,8 @@ test("orderApprovalDecision: a value nested deeper than a card shows is denied; 
 });
 
 test("orderGuardReason: everything else passes untouched", () => {
-  for (const [name, description] of [["bash", "run"], ["mcp__x__orders", "list orders"]]) {
-    assert.equal(orderGuardReason(name, description, [], "c1"), undefined, name);
+  for (const name of ["bash", "mcp__x__orders", "mcp__account__portfolio_holdings"]) {
+    assert.equal(orderGuardReason(name, [], "c1"), undefined, name);
   }
 });
 
@@ -366,13 +354,13 @@ test("PreToolDecision admits every NEW kind (tools/src/index.ts:607-611), so a p
 test("orderApprovalDecision: displayReason carries the same order line as reason", () => {
   // An upstream-style panel renders displayReason INSTEAD of reason when present
   // (ui-approval ApprovalPanel.tsx:17): both must name the order.
-  const decision = orderApprovalDecision("mcp__alpaca-kit__place_order", "ask", { symbol: "NVDA", qty: 2, side: "buy" });
+  const decision = orderApprovalDecision("mcp__account__portfolio_live_order", "ask", { symbol: "NVDA", qty: 2, side: "buy" });
   assert.equal(decision?.kind, "ask");
   if (decision?.kind !== "ask") return;
   assert.match(decision.reason ?? "", /NVDA/);
   assert.deepEqual(decision.displayReason, { en: decision.reason });
   // The never branch stays a plain deny - nothing to display, nobody asked.
-  const never = orderApprovalDecision("mcp__alpaca-kit__place_order", "never");
+  const never = orderApprovalDecision("mcp__account__portfolio_live_order", "never");
   assert.deepEqual(Object.keys(never ?? {}).sort(), ["kind", "reason"]);
 });
 
@@ -381,11 +369,11 @@ test("orderApprovalDecision: displayReason carries the same order line as reason
 const liveSession = (events: readonly { type: string; data?: object }[]) => ({ snapshotEvents: () => events });
 
 test("orderGuardReasonForSession: a granted order passes through snapshotEvents()", () => {
-  assert.equal(orderGuardReasonForSession("mcp__x__place_order", undefined, liveSession(granted), "c1"), undefined);
+  assert.equal(orderGuardReasonForSession("mcp__x__portfolio_live_order", liveSession(granted), "c1"), undefined);
 });
 
 test("orderGuardReasonForSession: no grant in a READABLE log is the ordinary 'no grant' denial", () => {
-  const reason = orderGuardReasonForSession("mcp__x__place_order", undefined, liveSession([]), "c1");
+  const reason = orderGuardReasonForSession("mcp__x__portfolio_live_order", liveSession([]), "c1");
   assert.match(reason ?? "", /without a logged allowed-once/);
 });
 
@@ -396,44 +384,44 @@ test("orderGuardReasonForSession: a session without snapshotEvents is denied wit
    * is the assertion that would have caught the regression: the grant is
    * there, the log is unreadable, and the denial must SAY so. */
   const oldShape = { events: granted };
-  const reason = orderGuardReasonForSession("mcp__x__place_order", undefined, oldShape, "c1");
-  assert.equal(reason, unreadableSessionLogReason("mcp__x__place_order"));
+  const reason = orderGuardReasonForSession("mcp__x__portfolio_live_order", oldShape, "c1");
+  assert.equal(reason, unreadableSessionLogReason("mcp__x__portfolio_live_order"));
   assert.match(reason ?? "", /cannot read this session's log/);
   assert.doesNotMatch(reason ?? "", /without a logged allowed-once/);
   /* The exact sentence the LIVE guard denies with: boot.ts's `tools.guard`
    * calls orderGuardReasonForSession itself, so there is one producer and
    * pinning its text here pins what the operator reads. */
   assert.equal(reason,
-    "mcp__x__place_order: cannot read this session's log to verify an allowed-once approval (dsh Session API changed: no snapshotEvents)");
+    "mcp__x__portfolio_live_order: cannot read this session's log to verify an allowed-once approval (dsh Session API changed: no snapshotEvents)");
 });
 
 test("orderGuardReasonForSession: a throwing or non-array snapshotEvents is unreadable, fail closed", () => {
   const throwing = { snapshotEvents: () => { throw new Error("log detached"); } };
-  assert.equal(orderGuardReasonForSession("mcp__x__place_order", undefined, throwing, "c1"),
-    unreadableSessionLogReason("mcp__x__place_order", "snapshotEvents threw"));
+  assert.equal(orderGuardReasonForSession("mcp__x__portfolio_live_order", throwing, "c1"),
+    unreadableSessionLogReason("mcp__x__portfolio_live_order", "snapshotEvents threw"));
   const odd = { snapshotEvents: () => undefined };
-  assert.equal(orderGuardReasonForSession("mcp__x__place_order", undefined, odd, "c1"),
-    unreadableSessionLogReason("mcp__x__place_order", "snapshotEvents returned no event list"));
+  assert.equal(orderGuardReasonForSession("mcp__x__portfolio_live_order", odd, "c1"),
+    unreadableSessionLogReason("mcp__x__portfolio_live_order", "snapshotEvents returned no event list"));
   // A non-object "session" cannot hold a log either.
-  assert.equal(orderGuardReasonForSession("mcp__x__place_order", undefined, 42, "c1"),
-    unreadableSessionLogReason("mcp__x__place_order"));
+  assert.equal(orderGuardReasonForSession("mcp__x__portfolio_live_order", 42, "c1"),
+    unreadableSessionLogReason("mcp__x__portfolio_live_order"));
 });
 
-test("orderGuardReasonForSession: a marked tool with an unreadable log is still denied", () => {
-  const reason = orderGuardReasonForSession("mcp__x__submit_order", "(operator-gated)", {}, "c1");
-  assert.equal(reason, unreadableSessionLogReason("mcp__x__submit_order"));
+test("orderGuardReasonForSession: a seat write under a renamed server with an unreadable log is still denied", () => {
+  const reason = orderGuardReasonForSession("mcp__broker__portfolio_pay", {}, "c1");
+  assert.equal(reason, unreadableSessionLogReason("mcp__broker__portfolio_pay"));
 });
 
 test("orderGuardReasonForSession: an agentless call is 'no grant', not 'unreadable'", () => {
-  const reason = orderGuardReasonForSession("mcp__x__place_order", undefined, undefined, "c1");
+  const reason = orderGuardReasonForSession("mcp__x__portfolio_live_order", undefined, "c1");
   assert.match(reason ?? "", /without a logged allowed-once/);
 });
 
 test("orderGuardReasonForSession: a drifted Session API never bricks a tool the gate does not own", () => {
-  for (const [name, description] of [["bash", "run"], ["mcp__x__orders", "list orders"]] as const) {
-    assert.equal(orderGuardReasonForSession(name, description, {}, "c1"), undefined, name);
+  for (const name of ["bash", "mcp__x__orders", "mcp__account__portfolio_holdings"]) {
+    assert.equal(orderGuardReasonForSession(name, {}, "c1"), undefined, name);
     const throwing = { snapshotEvents: () => { throw new Error("never read for an ungated tool"); } };
-    assert.equal(orderGuardReasonForSession(name, description, throwing, "c1"), undefined, name);
+    assert.equal(orderGuardReasonForSession(name, throwing, "c1"), undefined, name);
   }
 });
 
@@ -458,6 +446,30 @@ test("isOrderTool: the Account seat's twelve write tools match, raw and as dsh m
     assert.equal(isSeatWriteTool(`mcp__account__${read}`), false, read);
   }
   assert.equal(isSeatWriteTool("mcp__alpaca-kit__place_order"), false, "an Alpaca order is not a seat write");
+});
+
+/* Review Focus 3 of stage 3: the alpaca half has left Gate 2, and the seat's half is exactly as it was. */
+test("Gate 2 after the alpaca half leaves: a seat write raises Account seat, an unclassified seat tool raises a card, a seat read none", () => {
+  const write = orderApprovalDecision("mcp__account__portfolio_live_order", "ask", { venue: "paper-1", symbol: "AAPL", side: "buy", usd: 100 });
+  assert.equal(write?.kind, "ask");
+  assert.match(write?.kind === "ask" ? write.reason ?? "" : "", /^Account seat - mcp__account__portfolio_live_order: side=buy usd=100 symbol=AAPL venue=paper-1$/);
+  const unclassified = orderApprovalDecision("mcp__account__portfolio_sweep", "ask", { venue: "paper-1" });
+  assert.equal(unclassified?.kind, "ask");
+  assert.match(unclassified?.kind === "ask" ? unclassified.reason ?? "" : "", /^Account seat - mcp__account__portfolio_sweep: venue=paper-1$/);
+  assert.equal(orderApprovalDecision("mcp__account__portfolio_holdings", "ask", {}), null, "a seat read raises nothing");
+});
+
+test("no tool is a PAPER order any more", () => {
+  const args = { venue: "paper-1", symbol: "AAPL", side: "buy", qty: 1 };
+  const names = ["place_order", "cancel_order", "mcp__alpaca-kit__place_order", "mcp__drill__cancel_order",
+    ...SEAT.map((raw) => `mcp__account__${raw}`), ...SEAT.map((raw) => `mcp__broker__${raw}`), "mcp__account__portfolio_sweep"];
+  for (const name of names) {
+    const decision = orderApprovalDecision(name, "ask", args);
+    const reason = decision?.kind === "ask" ? decision.reason ?? "" : "";
+    assert.doesNotMatch(reason, /^PAPER order/, name);
+    if (decision !== null) assert.match(reason, /^Account seat - /, name);
+  }
+  assert.equal(orderApprovalDecision("mcp__alpaca-kit__place_order", "ask", args), null, "the alpaca pair raises no card at all");
 });
 
 test("describeOrder: a seat order reads side, size, symbol, type and venue in that order, then the rest", () => {
@@ -487,7 +499,7 @@ test("auditOrderTools: the seat's write tools are gated, its reads are not, an u
     { name: "mcp__account__portfolio_sweep", description: "a tool the Account grew after the pin" },
   ]);
   assert.deepEqual(audit.gated, ["mcp__account__portfolio_live_order", "mcp__account__portfolio_pay", "mcp__account__portfolio_sweep"]);
-  assert.deepEqual(audit.ungated, []);
+  assert.deepEqual(audit.uncovered, []);
 });
 
 /* The Account moves fast (26 pull requests in the twelve days before the pin). A seat tool the face
@@ -523,13 +535,13 @@ test("orderApprovalDecision: an earn product and a pay body are key fields - who
 
 test("orderGuardReason: a seat write with no grant is denied, with a logged allowed-once for this call it passes, a seat read needs none", () => {
   const write = "mcp__account__portfolio_live_order";
-  assert.match(orderGuardReason(write, undefined, [], "c1") ?? "", /without a logged allowed-once/);
+  assert.match(orderGuardReason(write, [], "c1") ?? "", /without a logged allowed-once/);
   const seatGrant = [asked("s1", "c1", write), decided("s1", "allowed-once")];
-  assert.equal(orderGuardReason(write, undefined, seatGrant, "c1"), undefined);
-  assert.notEqual(orderGuardReason(write, undefined, granted, "c1"), undefined, "a grant for the Alpaca tool does not open the seat's");
-  assert.equal(orderGuardReason("mcp__account__portfolio_account", undefined, [], "c1"), undefined);
-  assert.equal(orderGuardReasonForSession(write, undefined, { snapshotEvents: () => seatGrant }, "c1"), undefined);
-  assert.match(orderGuardReasonForSession(write, undefined, { snapshotEvents: () => [] }, "c1") ?? "", /without a logged allowed-once/);
+  assert.equal(orderGuardReason(write, seatGrant, "c1"), undefined);
+  assert.notEqual(orderGuardReason(write, granted, "c1"), undefined, "a grant for another server's tool does not open the seat's");
+  assert.equal(orderGuardReason("mcp__account__portfolio_account", [], "c1"), undefined);
+  assert.equal(orderGuardReasonForSession(write, { snapshotEvents: () => seatGrant }, "c1"), undefined);
+  assert.match(orderGuardReasonForSession(write, { snapshotEvents: () => [] }, "c1") ?? "", /without a logged allowed-once/);
 });
 
 /* The security review of 2026-10-21 (the client's card titled from this line): a value that carries whitespace, a

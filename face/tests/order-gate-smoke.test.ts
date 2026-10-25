@@ -14,11 +14,9 @@
  * answerer returns a fixed outcome, `ctx.tools.execute` runs the call, and the
  * body's side effect is the evidence. Six steps (PLAN S7):
  * 1. a scratch home with AKShare disabled, then `bootFace`;
- * 2. a stand-in `mcp__drill__place_order` whose description carries
- *    `OPERATOR_GATED_MARKER` - the raw-name suffix exercises the identical gate
- *    code path with nothing behind it (no keys, no broker; README forbids
- *    drilling with the real order tools, since arming Gate 1 to test Gate 2
- *    disarms Gate 1);
+ * 2. a stand-in `mcp__drill__portfolio_live_order` - the seat write's raw-name
+ *    suffix exercises the identical gate code path with nothing behind it (no
+ *    seat, no Account, no venue);
  * 3. a root `approval/request` listener registered with `prepend`, so it is
  *    the OUTERMOST listener and claims before the `api-remotes` forwarder
  *    (cordis waterfall runs outermost-first and a listener that does not call
@@ -61,7 +59,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setupFaceProfile } from "../src/setup.ts";
 import { bootFace } from "../src/boot.ts";
-import { OPERATOR_GATED_MARKER } from "../src/orders.ts";
 import { makeBotsRoot } from "./bots-fixture.ts";
 import { mountClient, remote, remoteResult, signIn } from "./remote.ts";
 
@@ -132,7 +129,7 @@ async function openMux(base: string, cookie: string) {
   return { ws, frames, waitFor, openEvents };
 }
 
-test("Gate 2 positive path: an approved PAPER order dispatches; a rejected one does not", {
+test("Gate 2 positive path: an approved seat order dispatches; a rejected one does not", {
   skip: gated && "set FACE_SMOKE=1",
 }, async () => {
   /* 1. Scratch home. This smoke owns a scratch profile and must not start the
@@ -153,14 +150,14 @@ test("Gate 2 positive path: an approved PAPER order dispatches; a rejected one d
     };
 
     /* 2. The stand-in order tool. Its body is the evidence: it only records. */
-    const NAME = "mcp__drill__place_order";
+    const NAME = "mcp__drill__portfolio_live_order";
     const ran: unknown[] = [];
     cleanups.push(tools.register({
       name: NAME,
-      description: `place a PAPER order - drill stand-in, nothing behind it ${OPERATOR_GATED_MARKER}`,
+      description: "place an order - drill stand-in, nothing behind it",
       parameters: {
         type: "object",
-        properties: { symbol: { type: "string" }, qty: { type: "number" }, side: { type: "string" } },
+        properties: { venue: { type: "string" }, symbol: { type: "string" }, qty: { type: "number" }, side: { type: "string" } },
       },
       output: { schema: { type: "object" }, render: () => [{ type: "text", text: "drill order recorded" }] },
       execute: async (args: unknown) => {
@@ -200,7 +197,7 @@ test("Gate 2 positive path: an approved PAPER order dispatches; a rejected one d
      * append on a detached Session (tools.spec.ts:800-803). */
     agent.session.append("turn/start", { turn: 1 });
 
-    const order = { symbol: "AAPL", qty: 1, side: "buy" };
+    const order = { venue: "paper-1", symbol: "AAPL", qty: 1, side: "buy" };
 
     /* 5. APPROVED: the body must run - the assertion 0.2.0 silently broke. */
     const approved = await tools.execute({
@@ -214,7 +211,7 @@ test("Gate 2 positive path: an approved PAPER order dispatches; a rejected one d
      * may draw (orders.ts orderApprovalDecision). */
     assert.equal(seen[0]?.toolName, NAME);
     assert.equal(seen[0]?.callId, "drill-approved");
-    assert.match(String(seen[0]?.reason), /PAPER order - .*symbol=AAPL/);
+    assert.match(String(seen[0]?.reason), /^Account seat - .*symbol=AAPL/);
     assert.equal(seen[0]?.displayReason?.en, seen[0]?.reason);
     /* And the grant the guard trusted is IN the log, paired by id. */
     const log = agent.session.snapshotEvents();
@@ -232,7 +229,7 @@ test("Gate 2 positive path: an approved PAPER order dispatches; a rejected one d
     });
     assert.equal(rejected.isError, true, "a rejected order must not dispatch");
     assert.deepEqual(ran, [order], "the body did not run a second time");
-    assert.match(rejected.content?.[0]?.text ?? "", /the user rejected tool "mcp__drill__place_order"/);
+    assert.match(rejected.content?.[0]?.text ?? "", /the user rejected tool "mcp__drill__portfolio_live_order"/);
     assert.equal(seen.length, 2);
 
     /* 7. THE REAL CHANNEL. Remove the stand-in so the only answerer left is
@@ -256,7 +253,7 @@ test("Gate 2 positive path: an approved PAPER order dispatches; a rejected one d
     assert.ok(typeof eventId === "string" && eventId.length > 0, "the card is keyed by eventId");
     const request = card.value?.request ?? {};
     assert.equal(request.toolName, NAME);
-    assert.match(String(request.reason), /PAPER order - .*symbol=AAPL/, "the card a human sees names the order");
+    assert.match(String(request.reason), /^Account seat - .*symbol=AAPL/, "the card a human sees names the order");
     assert.deepEqual(request.displayReason, { en: request.reason });
     /* The projection strips the Host-only fields (stream-protocol.ts:146-173). */
     assert.equal("agent" in request || "signal" in request, false);

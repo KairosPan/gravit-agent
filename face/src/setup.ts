@@ -39,8 +39,10 @@ const PROFILE_PKG = {
 const PATCH_HEADER = `# face profile patch layer. The face's own host rows (webserver :3090,
 # connection, the Remote controllers, the agent preset registry) are inserted
 # programmatically by gravit-face at boot - do NOT add them here. This file is
-# the operator's: mount the alpaca_kit MCP server and skill roots here per
-# dsh/README.md steps 3-6.
+# the operator's: their own rows go here (the default model, skill roots, an
+# MCP server of their own) per dsh/README.md. The face composes its AKShare
+# (mcp-akshare) and Account seat (mcp-account) rows itself, below this file:
+# a patch here reaches them, and disables one by its id.
 #
 # Face-owned rows are applied AFTER this file and win over it, silently: a
 # patch here targeting webserver, connection, api-remotes, file-upload,

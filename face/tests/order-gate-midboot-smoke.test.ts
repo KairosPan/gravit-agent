@@ -22,14 +22,14 @@
  *    re-arms exactly once when its service is replaced, reading the new one;
  *    each leaves with its service and with the host.
  * 2. FACE_SMOKE: the real tree, held mid-boot by a slow row
- *    (tests/fixtures/midboot-slow-row.js) with an operator-gated order
+ *    (tests/fixtures/midboot-slow-row.js) with a seat-write
  *    stand-in registered as soon as the registry exists
  *    (tests/fixtures/midboot-order-standin.js). While `bootFace` is provably
  *    still pending - unary `/api` serving, a session created over it, the
  *    order tool live - the reviewer's exact call is HELD for a card (logged
  *    `approval/asked`, body not run), an agentless call is DENIED by the
- *    listener, and a marked tool the gate cannot name is DENIED by the guard
- *    alone. Then the boot is released, and the normal path runs on the same
+ *    listener, and the same order with its ask swallowed by an outer listener
+ *    is DENIED by the guard alone. Then the boot is released, and the normal path runs on the same
  *    order: the held card reaches the first tab once the streams open, and
  *    `allowed-once` from it dispatches the order exactly once. Finally the
  *    real `approval` row is restarted - the listener re-arms exactly once -
@@ -50,7 +50,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { Context, Service } from "@deepseek-ai/cordis";
 import { setupFaceProfile } from "../src/setup.ts";
 import { armOrderGate, bootFace, type BootedFace } from "../src/boot.ts";
-import { OPERATOR_GATED_MARKER, type PreToolDecision } from "../src/orders.ts";
+import type { PreToolDecision } from "../src/orders.ts";
 import { makeBotsRoot } from "./bots-fixture.ts";
 import { mountClient, remote, remoteResult, signIn } from "./remote.ts";
 
@@ -61,11 +61,11 @@ const gated = process.env.FACE_SMOKE !== "1";
 const FIBER = { pending: 0, active: 2, disposed: 4 } as const;
 
 /** The stand-in's name: the raw-name suffix the gate anchors on
- * (src/orders.ts ORDER_RAW_NAMES), behind a server name nothing real uses. */
-const NAME = "mcp__drill__place_order";
+ * (src/orders.ts SEAT_WRITE_RAW_NAMES), behind a server name nothing real uses. */
+const NAME = "mcp__drill__portfolio_live_order";
 
 /** The order every call in the smoke carries. */
-const ORDER = { symbol: "AAPL", qty: 1, side: "buy" } as const;
+const ORDER = { venue: "paper-1", symbol: "AAPL", qty: 1, side: "buy" } as const;
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -233,7 +233,6 @@ interface EventLike {
 /** The live registry, as the smoke drives it. */
 interface ToolsLike {
   schemas(): { name: string }[];
-  register(definition: unknown): () => void;
   execute(exec: {
     callId: string; name: string; arguments: unknown; agent?: object; signal: AbortSignal;
   }): Promise<{ isError: boolean; content?: { type?: string; text?: string }[] }>;
@@ -303,13 +302,13 @@ test("mid-boot: while a slow row holds boot() open, a live order tool is held fo
   skip: gated && "set FACE_SMOKE=1",
 }, async () => {
   /* A scratch home: AKShare off (never the operator's data server), then the
-   * two fixture rows. The stand-in's description carries the marker, so the
-   * gate sees what the real alpaca-kit tool would show it. */
+   * two fixture rows. The stand-in carries a seat write's name, so the gate
+   * sees what the seat's real tool would show it. */
   const home = mkdtempSync(join(tmpdir(), "face-ordergate-midboot-"));
   setupFaceProfile(home);
   const patchPath = join(home, "profiles", "face", "cordis.patch.yml");
   const patch = readFileSync(patchPath, "utf8").replace(/^\[\][ \t]*$/m, "");
-  const description = `place a PAPER order - mid-boot drill stand-in, nothing behind it ${OPERATOR_GATED_MARKER}`;
+  const description = "place an order - mid-boot drill stand-in, nothing behind it";
   writeFileSync(patchPath, [
     patch,
     "- id: mcp-akshare",
@@ -420,38 +419,33 @@ test("mid-boot: while a slow row holds boot() open, a live order tool is held fo
     assert.equal(agentless.isError, true);
     assert.match(agentless.content?.[0]?.text ?? "", /needs a per-order approval card and this call has no session to ask in/);
 
-    /* M3. THE GUARD, alone: a marked tool whose name the gate does not match.
-     * The listener does not claim it, so the waterfall ends in ALLOW - the
-     * denial can only be the guard's (it runs on every allow, NEW
-     * packages/core/tools/src/index.ts:1519). Unregistered before the boot is
-     * released: the post-boot audit would rightly refuse an ungated marked tool. */
-    let renamedRan = false;
-    const unregister = tools.register({
-      name: "mcp__drill__submit_order",
-      description: `submit a PAPER order - renamed drill stand-in ${OPERATOR_GATED_MARKER}`,
-      parameters: {},
-      output: { schema: { type: "object" }, render: () => [{ type: "text", text: "ok" }] },
-      execute: async () => {
-        renamedRan = true;
-        return {};
-      },
-    });
+    /* M3. THE GUARD, alone: the same order, its ask swallowed by an outer
+     * `tools/pre-execute` listener that ALLOWS - the override a sighting-based
+     * guard would wave through. The waterfall ends in that allow, so the denial
+     * can only be the guard's (it runs on every allow, NEW
+     * packages/core/tools/src/index.ts:1519), and it asks the session log, where
+     * no grant for this call is. Removed before the boot is released. */
+    const swallow = (root.on as unknown as (
+      name: "tools/pre-execute",
+      listener: (exec: { callId?: string }, next: () => Promise<PreToolDecision>) => Promise<PreToolDecision>,
+      options: { prepend: boolean },
+    ) => () => void).call(root, "tools/pre-execute", (exec, next) =>
+      exec.callId === "midboot-swallowed" ? Promise.resolve({ kind: "allow" }) : next(), { prepend: true });
     try {
-      const renamed = await tools.execute({
-        callId: "midboot-renamed", name: "mcp__drill__submit_order", arguments: {}, agent, signal: new AbortController().signal,
+      const swallowed = await tools.execute({
+        callId: "midboot-swallowed", name: NAME, arguments: ORDER, agent, signal: new AbortController().signal,
       });
-      assert.equal(renamed.isError, true, "a marked tool the gate cannot name must not dispatch");
-      assert.equal(renamedRan, false, "its body must never run");
-      assert.match(renamed.content?.[0]?.text ?? "", /ORDER_RAW_NAMES/);
+      assert.equal(swallowed.isError, true, "an order whose ask was swallowed must not dispatch");
+      assert.match(swallowed.content?.[0]?.text ?? "", /without a logged allowed-once approval/);
     } finally {
-      unregister();
+      swallow();
     }
     assert.deepEqual(drill.ran, [], "no order body ran mid-boot");
     assertStillBooting("after the three mid-boot calls");
     const rel = (at: number | undefined): string => (at === undefined ? "never" : `+${at - t0}ms`);
     console.log(
       `midboot observed: order stand-in registered ${rel(drill.standinRegistered)}, unary /api served ${rel(firstServed)},` +
-        ` card raised and held, agentless and renamed calls denied - all before the slow row was released (+${Date.now() - t0}ms)`,
+        ` card raised and held, agentless and swallowed calls denied - all before the slow row was released (+${Date.now() - t0}ms)`,
     );
 
     /* P1. Release the slow row; the boot completes on the SAME tree. */
@@ -467,7 +461,7 @@ test("mid-boot: while a slow row holds boot() open, a live order tool is held fo
     const card = await tab.frame("the held card on the first tab", (frame) => frame.streamId === "events"
       && frame.type === "item" && frame.value?.type === "waterfall" && frame.value.event === "approval/request"
       && frame.value.request?.callId === "midboot-order");
-    assert.match(String(card.value?.request?.reason), /PAPER order - .*symbol=AAPL/, "the card names the order");
+    assert.match(String(card.value?.request?.reason), /^Account seat - .*symbol=AAPL/, "the card names the order");
     assert.deepEqual(drill.ran, [], "nothing dispatched before the answer");
     const answered = await remoteResult(base, cookie, "$events/result", {
       clientId: tab.clientId, eventId: card.value?.eventId, outcome: { kind: "result", value: "allowed-once" },

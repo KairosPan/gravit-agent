@@ -44,8 +44,6 @@ const TOOL_LABELS = {
   ask_user_question: "Ask the operator", bash: "Terminal", edit: "Edit files", glob: "Find files",
   grep: "Search file contents", read: "Read files", read_image: "Inspect images", skill: "Load skills",
   str_replace_editor: "Replace file text", web_search: "Search the web", write: "Write files",
-  earnings: "Earnings", daily_bars: "Daily prices", calendar: "Trading calendar", corp_actions: "Corporate actions",
-  market_snapshot: "Market snapshots", screen: "Stock screening", breadth: "Market breadth",
 };
 
 /** The raw pattern stays visible in the UI; labels never imply access is granted.

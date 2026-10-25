@@ -6,7 +6,7 @@ import { botSettingsPayload, botModelChoices, normalizeBotModel } from '../wire/
 import { proposeBotId } from '../wire/botId.js';
 
 export const SHELF_PATHS = Object.freeze({ plugins: '/data/plugins.json', bots: '/data/bots.json', agents: '/data/agents.json', memory: '/data/memory.json' });
-export const GRAVIT_KEYS = Object.freeze(['DEEPSEEK_API_KEY', 'APCA_API_KEY_ID', 'APCA_API_SECRET_KEY']);
+export const GRAVIT_KEYS = Object.freeze(['DEEPSEEK_API_KEY']);
 
 const VALID = {
   plugins: d => Array.isArray(d?.mcp),

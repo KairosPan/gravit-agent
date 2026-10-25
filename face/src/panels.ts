@@ -573,8 +573,8 @@ export interface PluginRow {
  * The plugin listing: the live composed rows, the MCP servers with their
  * registered tools, and the agent tools the face itself registered.
  *
- * SECURITY: a row's `options.config` is NEVER serialized — the MCP row's env
- * block carries the operator's APCA keys. The one field read out of any
+ * SECURITY: a row's `options.config` is NEVER serialized — an MCP row's env
+ * block may carry an operator's keys. The one field read out of any
  * config is the MCP row's `serverName`, a validated `[A-Za-z0-9_-]` token.
  */
 export function pluginListing(deps: PanelDeps): {

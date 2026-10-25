@@ -176,7 +176,7 @@ function toolMessages(view, calls) {
   if (c.phase === 'call') {
     return [{ ...base(view), id: `t${callId}`, from: 'gravit', kind: 'tool', text: c.title ?? c.name ?? '', data: { callId, name: c.name, title: c.title, args: known?.args ?? {} } }];
   }
-  // the result names its call (the renderer dresses alpaca-kit's results by name), when the call was seen
+  // the result names its call, when the call was seen: the row draws the call's name and its payload folded
   const row = { ...base(view), id: `t${callId}`, merge: true, from: 'gravit', kind: 'tool', text: '', data: { callId, result: c.text ?? '', isError: c.isError === true, ...(known ? { name: known.name, args: known.args } : {}) } };
   if (!known) return [row];
   if (isSeatWriteTool(known.name)) {
