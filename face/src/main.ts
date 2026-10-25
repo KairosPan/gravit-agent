@@ -20,7 +20,9 @@ import { listBots, registerBotRoutes } from "./bots.ts";
 import { installBotRuntime, registerBotRuntimeRoutes } from "./bot-runtime.ts";
 import { readBotJournal } from "./bot-journal.ts";
 import { BOTS_ROOT } from "./overlay.ts";
-import { registerDataRoutes } from "./data.ts";
+import { isTrustedDataRequest } from "./http.ts";
+import { createSymbolSearch, registerSymbolSearchRoute } from "./symbol-search.ts";
+import { registerQuoteRoutes } from "./quotes.ts";
 import { registerAccountProxy } from "./account-proxy.ts";
 import { composedSeatRow, type SeatEntryLike } from "./account-seat.ts";
 import { registerSeatRoute } from "./seat.ts";
@@ -169,11 +171,14 @@ if (connection === undefined) {
   throw new Error(`${BIN}: the connection service is missing - / could not sign the browser in`);
 }
 registerStatic(booted.ctx.webServer, clientDir, connection);
-/* The instruments' data, on the same webserver as the page that reads it. Left
- * at its defaults on purpose: the producer is spawned with `$FACE_PYTHON` (else
- * `python3`) from the repo root this process just chdir'd to, and no injection
- * seam belongs on the entry point — `spawn`/`now` exist for the tests. */
-disposeData = registerDataRoutes(booted.ctx.webServer);
+/* The face's own wire, on the same webserver as the page that reads it: the
+ * symbol search (src/symbol-search.ts) and the quotes (src/quotes.ts), both
+ * behind http.ts's `/data` fence. Left at their defaults on purpose: no
+ * injection seam belongs on the entry point — `fetch`/`now`/`hub` exist for the
+ * tests. */
+const disposeSearch = registerSymbolSearchRoute(booted.ctx.webServer, createSymbolSearch());
+const disposeQuotes = registerQuoteRoutes(booted.ctx.webServer, { isTrusted: isTrustedDataRequest });
+disposeData = () => { disposeSearch(); disposeQuotes(); };
 /* The Account's reads for the screens (src/account-proxy.ts) and the seat's
  * standing for its box (src/seat.ts): loopback reads of the Account at the URL
  * of the `mcp-account` row AS COMPOSED — an operator patch may have pointed it

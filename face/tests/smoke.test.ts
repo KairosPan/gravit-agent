@@ -27,7 +27,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
@@ -36,7 +35,7 @@ import { request } from "node:http";
 import { setupFaceProfile } from "../src/setup.ts";
 import { bootFace } from "../src/boot.ts";
 import { registerStatic, type IndexAuth } from "../src/static.ts";
-import { registerDataRoutes } from "../src/data.ts";
+import { createSymbolSearch, registerSymbolSearchRoute } from "../src/symbol-search.ts";
 import { hasApprovalGrant, type ApprovalEventLike } from "../src/orders.ts";
 import { remote, signIn } from "./remote.ts";
 
@@ -394,35 +393,34 @@ test("boot smoke: sign-in gates /api and the mux, the pages and /data answer, Gr
       await page.body?.cancel();
     }
 
-    /* 8. The data plumbing, end to end through a STUB producer: route → cache →
-     * spawn → JSON on the wire, with everything but Python real. The producer
-     * itself is exercised by the python suite; running it here would make the
-     * smoke depend on a captured bed and pay a bed walk. `/data` is unchanged
-     * by 0.2.0: still fence-only, no cookie (PLAN D8).
+    /* 8. The face's own `/data` wire, end to end: the symbol search route →
+     * the search → JSON on the wire, with everything but the provider real (a
+     * fake fetch answers Tencent's shape). `/data` is unchanged by 0.2.0:
+     * still fence-only, no cookie (PLAN D8).
      *
-     * Registered HERE and nowhere else in this file: `registerDataRoutes`
-     * throws on a duplicate (kind, path), which is the guard, so the smoke
-     * must claim the two `/data` paths exactly once. */
-    const stub = join(home, "stub.sh");
-    writeFileSync(stub, `#!/bin/sh\necho '{"ok":true,"stub":true,"generated_at":"x"}'\n`, { mode: 0o755 });
-    registerDataRoutes(ctx.webServer, {
-      // The injected seam's real shape: `argv` arrives as [script, mode] with
-      // the script path fixed by the route, so only the mode word is passed
-      // on, and `timeoutMs` is honoured rather than dropped.
-      spawn: (argv, timeoutMs) => new Promise((resolve, reject) => {
-        execFile(stub, argv.slice(1), { timeout: timeoutMs }, (err, stdout) =>
-          err ? reject(err) : resolve({ stdout: String(stdout), code: 0 }));
-      }),
-    });
-    const dataRes = await fetch(`${base}/data/market.json`);
-    assert.equal(dataRes.status, 200);
-    assert.equal(((await dataRes.json()) as { stub?: boolean }).stub, true);
+     * Registered HERE and nowhere else in this file: the webserver throws on a
+     * duplicate (kind, path), which is the guard, so the smoke must claim the
+     * path exactly once. */
+    registerSymbolSearchRoute(ctx.webServer, createSymbolSearch({
+      fetch: async () => new Response('v_hint="sh~603986~\\u5146\\u6613\\u521b\\u65b0~zycx~GP-A";'),
+    }));
+    const searchRes = await fetch(`${base}/data/symbols/search?q=603986&market=cn`);
+    assert.equal(searchRes.status, 200);
+    assert.deepEqual(((await searchRes.json()) as { assets: { id: string }[] }).assets.map((asset) => asset.id), ["cn:603986"]);
+
+    // The face's own producers and `/data/bars` left with stage 3 of the
+    // graft: their old addresses answer the ordinary 404.
+    for (const path of ["/data/account.json", "/data/market.json", "/data/watchlist.json", "/data/bars?symbol=AAPL&days=30"]) {
+      const gone = await fetch(`${base}${path}`);
+      assert.equal(gone.status, 404, path);
+      await gone.body?.cancel();
+    }
 
     // And the SAME fence over `/data`. It is a second implementation
-    // (data.ts's own `isLoopbackHost`, not dsh-client-connection's) guarding a
-    // route that carries the operator's positions and orders, so it is drilled
-    // separately rather than assumed to ride along with the `/api` one above.
-    const forgedData = await sendWithHost(port, "/data/market.json", "evil.example.com");
+    // (http.ts's own `isLoopbackHost`, not dsh-client-connection's) guarding
+    // every `/data` route, so it is drilled separately rather than assumed to
+    // ride along with the `/api` one above.
+    const forgedData = await sendWithHost(port, "/data/symbols/search?q=603986&market=cn", "evil.example.com");
     assert.equal(forgedData, 403);
   } finally {
     await dispose();

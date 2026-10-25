@@ -2,10 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { WebRoute } from "@deepseek-ai/dsh-host-webserver";
-import { isTrustedDataRequest } from "../src/data.ts";
 import { HttpError } from "../src/http.ts";
 import {
-  createSymbolSearch, parseSearchRequest, parseTencentSearch, parseYahooSearch, registerSymbolSearchRoutes,
+  createSymbolSearch, parseSearchRequest, parseTencentSearch, parseYahooSearch, registerSymbolSearchRoute,
   SEARCH_CACHE_LIMIT, SEARCH_FLIGHT_LIMIT, SEARCH_RESPONSE_LIMIT, SEARCH_TTL_MS, type SearchFetch,
 } from "../src/symbol-search.ts";
 
@@ -193,7 +192,7 @@ test("deadline covers both a hanging fetch and a hanging response body", async (
 
 function routeWith(fetch: SearchFetch): WebRoute {
   const routes: WebRoute[] = [];
-  registerSymbolSearchRoutes({ register: (route) => routes.push(route) }, { fetch, isTrusted: isTrustedDataRequest });
+  registerSymbolSearchRoute({ register: (route) => routes.push(route) }, createSymbolSearch({ fetch }));
   assert.equal(routes.length, 1);
   assert.equal(routes[0]?.path, "/data/symbols/search");
   return routes[0]!;

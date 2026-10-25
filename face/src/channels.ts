@@ -14,8 +14,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { load } from "js-yaml";
 import type { RouteRegistrar } from "./static.ts";
 import { isBotId } from "./bots.ts";
-import { isJsonBody, isTrustedDataRequest } from "./data.ts";
-import { FORBIDDEN, HttpError, readBody } from "./http.ts";
+import { FORBIDDEN, HttpError, isJsonBody, isTrustedDataRequest, readBody } from "./http.ts";
 import { botsFor, logBotsWrite, logRosterWrite, rosterFor, seedRoster, setBots, setRoster } from "./roster.ts";
 import { ROOM_CAPS } from "./room-rules.ts";
 
@@ -535,7 +534,7 @@ export interface ChannelRouteDeps {
   listBots(): Promise<{ id: string; name: string; broken?: string; listed: boolean }[]>;
 }
 
-/** Mount the four channel routes. Same trust posture as data.ts: the fence
+/** Mount the four channel routes. Same trust posture as every `/data` route: http.ts's fence
  * runs FIRST on every route, the refusal body is fixed text, and nothing
  * attacker-controlled is ever echoed. A workspace id from a body is only ever
  * COMPARED against the reconciled list - it never becomes a path. */

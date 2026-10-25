@@ -2,9 +2,9 @@
  * memory; this service never downloads or persists a market directory.
  * Provider suggestions identify instruments, and deliberately carry no quote.
  */
-import type { IncomingMessage, ServerResponse } from "node:http";
+import type { ServerResponse } from "node:http";
 import type { RouteRegistrar } from "./static.ts";
-import { FORBIDDEN, HttpError } from "./http.ts";
+import { FORBIDDEN, HttpError, isTrustedDataRequest } from "./http.ts";
 
 export type SearchMarket = "all" | "us" | "cn" | "crypto";
 export interface SearchAsset {
@@ -35,6 +35,8 @@ export const SEARCH_RESPONSE_LIMIT = 256 * 1024;
 const RESULT_LIMIT = 30;
 const YAHOO_LIMIT = 20;
 export type SearchFetch = (url: URL, options: RequestInit) => Promise<Response>;
+/** One search, as {@link createSymbolSearch} makes it: a bounded query and a market in, a result out. */
+export type SymbolSearch = (query: string, market: SearchMarket) => Promise<SearchResult>;
 
 /** Normalize only user input. Market selection controls provider filtering,
  * never a host or path. The bounded query is always URL-encoded upstream. */
@@ -137,8 +139,7 @@ async function readProvider(response: Response, encoding: string): Promise<strin
 
 /** Test seams replace network/clock/deadline; production always uses these two
  * fixed HTTPS endpoints, without redirects or user-supplied credentials. */
-export function createSymbolSearch(options: { fetch?: SearchFetch; now?: () => number; timeoutMs?: number } = {}):
-  (query: string, market: SearchMarket) => Promise<SearchResult> {
+export function createSymbolSearch(options: { fetch?: SearchFetch; now?: () => number; timeoutMs?: number } = {}): SymbolSearch {
   const fetcher = options.fetch ?? fetch;
   const now = options.now ?? Date.now;
   const cache = new Map<string, { at: number; result: SearchResult }>();
@@ -228,17 +229,19 @@ export function createSymbolSearch(options: { fetch?: SearchFetch; now?: () => n
   };
 }
 
-/** Mount behind the same browser trust predicate as the existing data routes.
- * The predicate is injected by data.ts to avoid a circular module dependency. */
-export function registerSymbolSearchRoutes(webServer: RouteRegistrar,
-  options: { isTrusted: (req: IncomingMessage) => boolean; fetch?: SearchFetch; now?: () => number }): void {
-  const search = createSymbolSearch(options);
+/** Mount `/data/symbols/search` behind the face's `/data` fence (http.ts's
+ * {@link isTrustedDataRequest}), answering from `search`.
+ * @param webServer - the host webserver service, or a test recorder.
+ * @param search - the search to answer from: {@link createSymbolSearch}'s, with its seams for tests.
+ * @returns the route's unwind: it unregisters the route when the registrar gave a disposer back.
+ */
+export function registerSymbolSearchRoute(webServer: RouteRegistrar, search: SymbolSearch): () => void {
   const send = (res: ServerResponse, status: number, body: string): void => {
     res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
     res.end(body);
   };
-  webServer.register({ kind: "exact", path: "/data/symbols/search", handler: async (req, res) => {
-    if (!options.isTrusted(req)) return send(res, 403, FORBIDDEN);
+  const unregister = webServer.register({ kind: "exact", path: "/data/symbols/search", handler: async (req, res) => {
+    if (!isTrustedDataRequest(req)) return send(res, 403, FORBIDDEN);
     if (req.method !== "GET") return send(res, 405, JSON.stringify({ ok: false, error: "method not allowed" }));
     try {
       const { query, market } = parseSearchRequest(req.url ?? "");
@@ -249,4 +252,5 @@ export function registerSymbolSearchRoutes(webServer: RouteRegistrar,
         JSON.stringify({ ok: false, error: error instanceof HttpError ? error.message : "搜索服务暂时不可用，请稍后重试。" }));
     }
   } });
+  return () => { if (typeof unregister === "function") unregister(); };
 }

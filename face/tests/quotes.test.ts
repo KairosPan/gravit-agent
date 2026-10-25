@@ -4,7 +4,7 @@ import { EventEmitter } from "node:events";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { WebRoute } from "@deepseek-ai/dsh-host-webserver";
 import { createQuoteHub, parseInstrumentId, parseQuoteRequest, registerQuoteRoutes, QUOTE_CLIENT_LIMIT } from "../src/quotes.ts";
-import { isTrustedDataRequest } from "../src/data.ts";
+import { isTrustedDataRequest } from "../src/http.ts";
 import type { ProviderState, QuoteIdentity, QuotePayload, QuoteUpdate, SnapshotResult, StreamCallbacks } from "../src/quote-types.ts";
 
 const US: QuoteIdentity = { id: "us:AAPL", market: "us", symbol: "AAPL" };

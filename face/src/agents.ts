@@ -352,10 +352,9 @@ export async function runAgentRecipe(deps: PanelDeps, req: RunRequest): Promise<
     }
     const parsed = spec.parse(out.stdout, lastMessage);
     const isError = parsed.isError || out.code !== 0 || out.timedOut || out.truncated;
-    /* Unlike data.ts (whose producer runs WITH the APCA keys, so a traceback
-     * could echo them), this child's env is scrubbed, it is the operator's
-     * own CLI, and its diagnostics are what the caller needs to see — so the
-     * stderr TAIL is returned, error runs only. */
+    /* This child's env is scrubbed, it is the operator's own CLI, and its
+     * diagnostics are what the caller needs to see — so the stderr TAIL is
+     * returned, error runs only. */
     const stderr = out.stderr.trim();
     return {
       ...parsed, bin, cwd: workdir, isError,

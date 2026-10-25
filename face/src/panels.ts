@@ -52,8 +52,7 @@ import {
   type AgentToolDefinition, type AgentToolRegistry, type RunOptions, type RunOutcome,
 } from "./agents.ts";
 import type { RegistryLike } from "./channels.ts";
-import { isJsonBody, isTrustedDataRequest } from "./data.ts";
-import { FORBIDDEN, HttpError, readBody } from "./http.ts";
+import { FORBIDDEN, HttpError, isJsonBody, isTrustedDataRequest, readBody } from "./http.ts";
 import { DSH_PIN } from "./version.ts";
 
 /* Re-exported so panels.test.ts and any other existing consumer keep working

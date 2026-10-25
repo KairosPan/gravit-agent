@@ -39,8 +39,7 @@ import { promisify } from "node:util";
 import { zstdDecompress } from "node:zlib";
 import { resolveDshHome } from "@deepseek-ai/dsh-home-paths";
 import type { RouteRegistrar } from "./static.ts";
-import { isJsonBody, isTrustedDataRequest } from "./data.ts";
-import { FORBIDDEN, HttpError, readBody } from "./http.ts";
+import { FORBIDDEN, HttpError, isJsonBody, isTrustedDataRequest, readBody } from "./http.ts";
 
 const zstdDecompressAsync = promisify(zstdDecompress);
 

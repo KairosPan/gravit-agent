@@ -28,8 +28,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { ACCOUNT_TTL_MS, codeOf, createAccountReader, type AccountAnswer, type AccountReader } from "./account-proxy.ts";
 import { ACCOUNT_SEAT_NAME, seatUrl } from "./account-seat.ts";
-import { isTrustedDataRequest } from "./data.ts";
-import { FORBIDDEN } from "./http.ts";
+import { FORBIDDEN, isTrustedDataRequest } from "./http.ts";
 import type { RouteRegistrar } from "./static.ts";
 
 /** How long one answer is served without asking the Account again: the proxy's `account` route's, whose

@@ -14,8 +14,7 @@ const CACHE_MS = 5_000;
 const PROVIDERS = { us: "alpaca", cn: "ifind", crypto: "coinbase" } as const;
 
 /** One instrument id in the face's grammar — `us:AAPL`, `cn:600519`, `crypto:BTC/USD` — or null. The one
- * check the quote routes and `/data/bars` share; a us symbol that passes it is also what reaches
- * face_bars.py's argv, so it admits no leading `-`, no `/` and nothing lower-case. */
+ * check the quote routes make; it admits no leading `-`, no `/` and nothing lower-case. */
 export function parseInstrumentId(raw: string): QuoteIdentity | null {
   const [market, symbol, extra] = raw.trim().split(":");
   if (extra !== undefined || !symbol || !(

@@ -32,8 +32,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { join, relative, resolve } from "node:path";
 import { entryListSchema } from "@deepseek-ai/cordis-plugin-include";
 import { dump, load } from "js-yaml";
-import { isJsonBody, isTrustedDataRequest } from "./data.ts";
-import { FORBIDDEN, HttpError, readBody } from "./http.ts";
+import { FORBIDDEN, HttpError, isJsonBody, isTrustedDataRequest, readBody } from "./http.ts";
 import { DEFAULT_PRESET, LEGACY_PRESET } from "./overlay.ts";
 import type { RouteRegistrar } from "./static.ts";
 

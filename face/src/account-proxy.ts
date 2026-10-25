@@ -35,7 +35,7 @@
  *   the headers or the body, a body that cannot be read — is a state, not an
  *   error: 503 `{"ok":false,"unreachable":"<CODE>"}` with the failure's code,
  *   never its text; a query with a kept answer is re-served that answer
- *   flagged `stale: true` instead, as `data.ts` does. The reader never
+ *   flagged `stale: true` instead (http.ts's `markStale`). The reader never
  *   re-serves stale: the seat box shows the service's absence.
  * - Only a 2xx answer is kept: per route by rebuilt query for the route's
  *   {@link ACCOUNT_TTL_MS}, at most {@link ACCOUNT_CACHE_KEYS} queries, the
@@ -70,8 +70,7 @@
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { seatUrl } from "./account-seat.ts";
-import { isJsonBody, isTrustedDataRequest } from "./data.ts";
-import { FORBIDDEN, HttpError, markStale, readBody } from "./http.ts";
+import { FORBIDDEN, HttpError, isJsonBody, isTrustedDataRequest, markStale, readBody } from "./http.ts";
 import type { RouteRegistrar } from "./static.ts";
 
 /** The Account's reads the face proxies: `account` is its `GET /api/account`, `reach` its
@@ -322,7 +321,7 @@ function routeReads(route: ReadRoute, s: Settings): Reads {
     const run = (): Promise<AccountAnswer> => ask(query);
     const own = { answer: flight === undefined ? run() : flight.answer.then(run, run), fresh };
     flights.set(query, own);
-    /* `then(clear, clear)`, as data.ts does: a `finally` would derive an unawaited rejection. */
+    /* `then(clear, clear)`, not `finally`: a `finally` would derive an unawaited rejection. */
     const clear = (): void => { if (flights.get(query) === own) flights.delete(query); };
     void own.answer.then(clear, clear);
     return own.answer;

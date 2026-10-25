@@ -13,8 +13,7 @@ import { PERSONA_PREFIX_SECTION, type PromptAssembly } from "@deepseek-ai/dsh-sy
 import type { LlmCallConfig } from "@deepseek-ai/dsh-llm";
 import { isBotId, type BotRow } from "./bots.ts";
 import { formatBotJournal, type BotJournalSnapshot } from "./bot-journal.ts";
-import { isTrustedDataRequest } from "./data.ts";
-import { FORBIDDEN, HttpError } from "./http.ts";
+import { FORBIDDEN, HttpError, isTrustedDataRequest } from "./http.ts";
 import type { RouteRegistrar } from "./static.ts";
 
 type Seed = { id: string; revision: string; route?: { provider: string; model: string } };
