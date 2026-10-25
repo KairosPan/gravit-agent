@@ -677,6 +677,33 @@ test("an old star whose key the Account's store could not take stays on the cn l
   r.markets.close();
 });
 
+test('an old us star is asked of the Account, never quoted by the face', async () => {
+  const all = fx('explore-all');
+  const storage = memoryStorage({ [STORAGE_KEY]: saved([asset('us:AAPL', { name: 'Apple' }), asset('cn:600519', { name: 'Kweichow Moutai' })]) });
+  const r = rig({
+    storage,
+    answer: path => {
+      if (query(path).q === 'AAPL') return { ok: true, items: [] };
+      if (path === ALL) return all;
+      if (path.startsWith('/data/quotes?')) return { ok: true, generated_at: '2026-10-22T07:59:59Z', providers: [], quotes: [] };
+      return undefined;
+    },
+  });
+  // its own page on screen, Markets shown: the old star is still never the face's to quote
+  r.store.dispatch('nav', { screen: 'markets', id: 'us:aapl' });
+  r.markets.page('us:AAPL');
+  r.markets.show(true);
+  await settle();
+  assert.deepEqual(r.reads.filter(p => query(p).limit === '12'), ['/data/account/explore?q=AAPL&limit=12'], 'asked of the Account once');
+  assert.equal(r.m().asked['us:AAPL'], null, 'not listed there');
+  assert.ok(r.live.assets.length > 0, 'the cn wire was subscribed');
+  for (const ids of r.live.assets) assert.equal(ids.includes('us:AAPL'), false, 'never handed to the live quotes: ' + ids);
+  assert.deepEqual(r.live.assets.at(-1), ['cn:600519']);
+  assert.equal(r.reads.some(p => p.startsWith('/data/quotes') && decodeURIComponent(p).includes('us:')), false, 'never read from /data/quotes');
+  assert.deepEqual(rowsOf(r.m(), NOW).filter(x => x.notListed).map(x => [x.id, x.sub]), [['us:AAPL', 'Not listed at the Account']]);
+  r.markets.close();
+});
+
 test('a stream quote updates the followed market', async () => {
   const r = rig({
     answer: path => (path === ALL ? fx('explore-all')

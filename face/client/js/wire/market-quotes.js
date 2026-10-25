@@ -7,67 +7,9 @@ import { normalizeAsset, number } from "./market-model.js";
 
 const STATUSES = new Set(["live", "delayed", "stale", "unavailable"]);
 const PROVIDER_STATUSES = new Set(["connecting", "connected", "unconfigured", "error", "limited"]);
-const MARKETS = new Set(["us", "cn", "crypto"]);
+const MARKETS = new Set(["cn"]);
+const PROVIDERS = new Set(["ifind"]);
 const timestamp = (value) => typeof value === "string" && Number.isFinite(Date.parse(value));
-
-/** Provider feed names are metadata, not product labels. Unknown enum values stay hidden.
- * @param {string} [source] @param {string} [feed]
- */
-export function quoteSource(source = "", feed = "") {
-  const labels = { iex: "IEX 单一交易所", sip: "SIP 综合行情", delayed_sip: "延迟综合行情", exchange: "现货", ticker: "现货", realtime: "定时行情" };
-  return [source, labels[feed.toLowerCase()]].filter(Boolean).join(" · ");
-}
-
-/** SSE connectivity alone says nothing about whether a market's provider is usable.
- * @param {string} status @param {ProviderState[]} providers @param {string[]} markets
- */
-export function quoteConnectionLabel(status, providers, markets) {
-  if (!markets.length || status === "idle") return "添加自选后自动连接行情";
-  if (status === "paused") return "行情连接已暂停";
-  if (status === "error") return "行情连接暂不可用";
-  const relevant = [...new Set(markets)].map((market) => providers.find((provider) => provider.market === market));
-  if (relevant.every((provider) => provider?.status === "unconfigured")) {
-    return markets.every((market) => market === "cn") ? "A 股行情待配置 iFinD" : "行情源待配置";
-  }
-  const connected = relevant.filter((provider) => provider?.status === "connected");
-  if (connected.length === 0) {
-    if (relevant.some((provider) => !provider || provider.status === "connecting")) return "正在连接行情…";
-    return relevant.some((provider) => provider?.status === "error") ? "行情源暂不可用" : "行情订阅受限";
-  }
-  if (connected.length !== relevant.length) return "部分市场行情可用";
-  if (status === "polling") return "备用行情 · 每 15 秒更新";
-  if (status === "connecting") return "正在恢复行情连接…";
-  if (connected.every((provider) => provider.transport === "poll")) return "行情定时更新";
-  return connected.some((provider) => provider.transport === "poll") ? "行情已连接 · 部分定时更新" : "行情已连接";
-}
-
-/** The regular-session clock does not imply premarket/after-hours trading has stopped.
- * @param {{market: string, symbol: string}} asset
- * @param {Partial<LiveQuote>} quote
- * @param {ProviderState[]} providers
- * @param {string} transportStatus
- */
-export function describeQuote(asset, quote, providers, transportStatus) {
-  const provider = providers.find((item) => item.market === asset.market);
-  const available = number(quote.price) !== null;
-  let status;
-  if (!available) {
-    if (asset.market === "cn" && (!provider || provider.status === "unconfigured")) status = "行情待配置 iFinD";
-    else if (provider?.status === "unconfigured") status = "行情待配置";
-    else if (provider?.status === "connecting" || transportStatus === "connecting") status = "连接中";
-    else status = "暂无报价";
-  } else {
-    status = quote.quote_status === "stale" ? "上次报价 · 待更新"
-      : quote.quote_status === "delayed" ? "延迟报价"
-      : quote.quote_status === "live" ? (quote.transport === "poll" || provider?.transport === "poll" || transportStatus === "polling" ? "定时更新" : "实时") : "上次报价";
-    if (quote.market_status === "closed") status += " · 常规交易休市";
-  }
-  return {
-    status,
-    source: quoteSource(quote.source || provider?.source || (asset.market === "cn" ? "iFinD" : "等待行情源"), quote.feed || provider?.feed || ""),
-    volumeUnit: asset.market === "crypto" ? `24h · ${asset.symbol.split("/")[0]}` : asset.market === "us" ? "股" : "",
-  };
-}
 
 /** Full payload validation prevents an error or malformed snapshot from clearing good quotes. */
 export function parsePayload(raw) {
@@ -75,7 +17,7 @@ export function parsePayload(raw) {
   const seen = new Set();
   for (const quote of raw.quotes) {
     const asset = normalizeAsset(quote);
-    if (!asset || quote.id !== asset.id || seen.has(quote.id) || !STATUSES.has(quote.quote_status)
+    if (!asset || !MARKETS.has(asset.market) || quote.id !== asset.id || seen.has(quote.id) || !STATUSES.has(quote.quote_status)
       || !["previous_close", "24h"].includes(quote.basis) || !["open", "closed", "unknown"].includes(quote.market_status)
       || typeof quote.source !== "string" || typeof quote.feed !== "string" || typeof quote.message !== "string"
       || (quote.transport !== undefined && !["stream", "poll"].includes(quote.transport))
@@ -84,7 +26,7 @@ export function parsePayload(raw) {
     seen.add(asset.id);
   }
   for (const provider of raw.providers) {
-    if (!provider || !["alpaca", "ifind", "coinbase"].includes(provider.id) || !MARKETS.has(provider.market)
+    if (!provider || !PROVIDERS.has(provider.id) || !MARKETS.has(provider.market)
       || !PROVIDER_STATUSES.has(provider.status) || !["stream", "poll"].includes(provider.transport)
       || ["source", "feed", "message"].some((key) => typeof provider[key] !== "string")) throw new Error("行情源状态无效");
   }

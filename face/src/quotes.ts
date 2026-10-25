@@ -1,28 +1,26 @@
-/** On-demand live quote hub: one shared upstream subscription per provider,
- * a bounded latest-value cache, and no market-directory or PIT reads. */
+/** On-demand A-share quote hub: one shared iFinD poll for every subscribed
+ * `cn` id, a bounded latest-value cache, and no market-directory or PIT reads. */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { HttpError, FORBIDDEN } from "./http.ts";
 import type { RouteRegistrar } from "./static.ts";
 import { createQuoteSnapshots } from "./quote-snapshots.ts";
-import { createQuoteStreams } from "./quote-streams.ts";
-import type { LiveQuote, ProviderState, QuoteIdentity, QuoteMarket, QuotePayload, QuoteStream, QuoteUpdate, SnapshotSource, StreamCallbacks } from "./quote-types.ts";
+import type { LiveQuote, ProviderState, QuoteIdentity, QuotePayload, QuoteUpdate, SnapshotSource } from "./quote-types.ts";
 
 export const QUOTE_LIMIT = 100;
 export const QUOTE_CLIENT_LIMIT = 8;
 const CACHE_LIMIT = 512;
 const CACHE_MS = 5_000;
-const PROVIDERS = { us: "alpaca", cn: "ifind", crypto: "coinbase" } as const;
+const PROVIDERS = { cn: "ifind" } as const;
+/** The ids the face quoted before the Account's graft (`us:AAPL`, `crypto:BTC/USD`): well-formed still, quoted by no
+ * one now — a request naming one is answered without it, not refused. */
+const RETIRED = /^(?:us:[A-Z][A-Z0-9.-]{0,14}|crypto:[A-Z0-9]{1,15}\/[A-Z0-9]{2,10})$/;
 
-/** One instrument id in the face's grammar — `us:AAPL`, `cn:600519`, `crypto:BTC/USD` — or null. The one
- * check the quote routes make; it admits no leading `-`, no `/` and nothing lower-case. */
+/** One instrument id in the face's grammar — `cn:600519` — or null. The one check the quote routes make; it admits
+ * six digits and nothing else. */
 export function parseInstrumentId(raw: string): QuoteIdentity | null {
   const [market, symbol, extra] = raw.trim().split(":");
-  if (extra !== undefined || !symbol || !(
-    market === "us" && /^[A-Z][A-Z0-9.-]{0,14}$/.test(symbol)
-    || market === "cn" && /^\d{6}$/.test(symbol)
-    || market === "crypto" && /^[A-Z0-9]{1,15}\/[A-Z0-9]{2,10}$/.test(symbol)
-  )) return null;
-  return { id: `${market}:${symbol}`, market: market as QuoteMarket, symbol };
+  if (extra !== undefined || market !== "cn" || !symbol || !/^\d{6}$/.test(symbol)) return null;
+  return { id: `cn:${symbol}`, market: "cn", symbol };
 }
 
 export function parseQuoteRequest(rawUrl: string): QuoteIdentity[] {
@@ -36,30 +34,25 @@ export function parseQuoteRequest(rawUrl: string): QuoteIdentity[] {
   const assets = new Map<string, QuoteIdentity>();
   for (const part of parts) {
     const identity = parseInstrumentId(part);
-    if (!identity) throw new HttpError(400, "invalid quote symbol");
-    assets.set(identity.id, identity);
+    if (identity) assets.set(identity.id, identity);
+    else if (!RETIRED.test(part.trim())) throw new HttpError(400, "invalid quote symbol");
   }
   return [...assets.values()];
 }
 
-function initialProvider(market: QuoteMarket): ProviderState {
-  return { id: PROVIDERS[market], market, status: "connecting", source: { us: "Alpaca", cn: "iFinD", crypto: "Coinbase" }[market],
-    feed: "", transport: market === "cn" ? "poll" : "stream", message: "正在连接行情…" };
+function initialProvider(): ProviderState {
+  return { id: PROVIDERS.cn, market: "cn", status: "connecting", source: "iFinD", feed: "", transport: "poll", message: "正在连接行情…" };
 }
 function initialQuote(asset: QuoteIdentity): LiveQuote {
   return { ...asset, price: null, prev_close: null, change: null, change_pct: null, volume: null,
-    as_of: null, received_at: null, volume_as_of: null, source: initialProvider(asset.market).source,
-    feed: "", basis: asset.market === "crypto" ? "24h" : "previous_close", quote_status: "unavailable",
+    as_of: null, received_at: null, volume_as_of: null, source: "iFinD",
+    feed: "", basis: "previous_close", quote_status: "unavailable",
     market_status: "unknown", message: "正在连接行情…" };
 }
 const usable = (state?: ProviderState): boolean => state?.status === "connected" || state?.status === "limited";
 const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
 const timestamp = (value: unknown): value is string => typeof value === "string" && Number.isFinite(Date.parse(value));
-const quoteDays = {
-  us: new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }),
-  cn: new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai" }),
-  crypto: new Intl.DateTimeFormat("en-CA", { timeZone: "UTC" }),
-};
+const quoteDay = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai" });
 function eventOrder(value: string): bigint {
   const fraction = /\.(\d+)(?:Z|[+-]\d{2}:\d{2})$/.exec(value)?.[1] ?? "";
   return BigInt(Date.parse(value)) * 1_000_000n + BigInt(fraction.padEnd(9, "0").slice(3, 9));
@@ -72,7 +65,6 @@ export interface QuoteHub {
 }
 export function createQuoteHub(options: {
   snapshots?: SnapshotSource;
-  streams?: (callbacks: StreamCallbacks) => QuoteStream;
   now?: () => number;
   ifindPollMs?: number;
 } = {}): QuoteHub {
@@ -80,9 +72,7 @@ export function createQuoteHub(options: {
   const snapshots = options.snapshots ?? createQuoteSnapshots();
   const cache = new Map<string, LiveQuote>();
   const attempts = new Map<string, number>();
-  const polled = new Map<QuoteMarket, ProviderState>();
-  const streamed = new Map<QuoteMarket, ProviderState>();
-  const streamRevisions = new Map<string, number>();
+  let polled: ProviderState | undefined;
   const pinned = new Map<string, number>();
   const quoteErrors = new Set<string>();
   let snapshotClients = 0;
@@ -96,35 +86,25 @@ export function createQuoteHub(options: {
   const configuredPoll = Number(process.env.FACE_IFIND_POLL_MS);
   const ifindPollMs = Math.max(15_000, options.ifindPollMs ?? (Number.isFinite(configuredPoll) && configuredPoll > 0 ? configuredPoll : 30_000));
 
-  function provider(market: QuoteMarket): ProviderState {
-    const stream = streamed.get(market), poll = polled.get(market);
-    if (usable(stream)) return stream!;
-    if (usable(poll)) return { ...poll!, message: stream?.status === "error"
-      ? `${poll!.message} 实时推送暂不可用，正在定时刷新。`.trim() : poll!.message };
-    return poll?.status === "unconfigured" ? poll : stream?.status === "error" ? stream : poll ?? stream ?? initialProvider(market);
-  }
+  const provider = (): ProviderState => polled ?? initialProvider();
+  /** Every payload names iFinD, the face's one provider, whatever was asked. */
   function payload(assets: QuoteIdentity[]): QuotePayload {
-    const usLimit = streamed.get("us")?.feed === "iex" ? 30 : 200;
-    const streamedUs = new Set([...active.values()].filter((asset) => asset.market === "us")
-      .sort((a, b) => a.symbol.localeCompare(b.symbol, "en")).slice(0, usLimit).map((asset) => asset.id));
+    const state = provider();
     return { ok: true, generated_at: new Date(now()).toISOString(),
       quotes: assets.map((asset) => {
         const quote = { ...(cache.get(asset.id) ?? initialQuote(asset)) };
-        const state = provider(asset.market);
-        quote.transport = state.transport === "stream" && usable(state) && active.has(asset.id)
-          && (asset.market !== "us" || streamedUs.has(asset.id)) ? "stream" : "poll";
+        quote.transport = "poll";
         if (quote.price === null || quote.as_of === null) {
           quote.quote_status = "unavailable";
           quote.message = quote.message && quote.message !== "正在连接行情…" ? quote.message : state.message;
         } else {
-          const delayed = quote.feed === "delayed_sip";
-          const old = quote.market_status !== "closed" && now() - Date.parse(quote.as_of) > (delayed ? 20 : 5) * 60_000;
-          quote.quote_status = !usable(state) || old || quoteErrors.has(asset.id) ? "stale" : delayed ? "delayed" : "live";
+          const old = quote.market_status !== "closed" && now() - Date.parse(quote.as_of) > 5 * 60_000;
+          quote.quote_status = !usable(state) || old || quoteErrors.has(asset.id) ? "stale" : "live";
           if (!usable(state)) quote.message = state.message || "行情连接已断开，保留上次报价。";
           else if (old && !quote.message) quote.message = "最近成交时间较早，请留意行情时间。";
         }
         return quote;
-      }), providers: [...new Set(assets.map((asset) => asset.market))].map(provider) };
+      }), providers: [state] };
   }
   function publish(): void {
     if (disposed || notifyTimer || clients.size === 0) return;
@@ -134,16 +114,16 @@ export function createQuoteHub(options: {
     }, 500);
     notifyTimer.unref();
   }
-  function merge(update: QuoteUpdate, allowSameVolume = true): void {
+  function merge(update: QuoteUpdate): void {
     const quote = cache.get(update.id);
     if (!quote) return; // A removed or never-requested symbol cannot grow the cache.
     const incomingTime = timestamp(update.as_of) ? eventOrder(update.as_of) : null;
     const previousTime = quote.as_of ? eventOrder(quote.as_of) : null;
     const recent = incomingTime !== null && (previousTime === null || incomingTime >= previousTime);
-    const day = (value: string) => quoteDays[quote.market].format(new Date(value));
+    const day = (value: string) => quoteDay.format(new Date(value));
     const validPrice = finite(update.price) && update.price > 0 && recent;
     if (validPrice) {
-      if (quote.market !== "crypto" && quote.as_of && day(quote.as_of) !== day(update.as_of!)) {
+      if (quote.as_of && day(quote.as_of) !== day(update.as_of!)) {
         quote.prev_close = null; quote.volume = null; quote.volume_as_of = null;
       }
       quote.price = update.price!;
@@ -155,38 +135,31 @@ export function createQuoteHub(options: {
       quote.message = update.message ?? "";
       quoteErrors.delete(update.id);
     } else if (update.message) { quote.message = update.message; quoteErrors.add(update.id); }
-    // Crypto's 24h baseline travels with its ticker. An older REST response
-    // cannot replace a newer stream baseline; stock prior-close is independent.
+    // The prior close belongs to the session of the trade it is reported with.
     const matchingSession = timestamp(update.as_of) && quote.as_of && day(update.as_of) === day(quote.as_of);
-    if (finite(update.prev_close) && update.prev_close > 0 && (update.basis === "24h" ? recent : matchingSession)) quote.prev_close = update.prev_close;
+    if (finite(update.prev_close) && update.prev_close > 0 && matchingSession) quote.prev_close = update.prev_close;
     else if (update.prev_close === null && recent) quote.prev_close = null;
     const incomingVolumeTime = timestamp(update.volume_as_of) ? Date.parse(update.volume_as_of) : NaN;
-    const currentVolumeSession = quote.market === "crypto" || !quote.as_of || timestamp(update.volume_as_of) && day(update.volume_as_of) === day(quote.as_of);
+    const currentVolumeSession = !quote.as_of || timestamp(update.volume_as_of) && day(update.volume_as_of) === day(quote.as_of);
     if (finite(update.volume) && update.volume >= 0 && currentVolumeSession && (
-      quote.volume === null || Number.isFinite(incomingVolumeTime) && (incomingVolumeTime > Date.parse(quote.volume_as_of ?? "1970-01-01")
-        || allowSameVolume && incomingVolumeTime === Date.parse(quote.volume_as_of ?? "1970-01-01"))
-      || allowSameVolume && quote.volume_as_of === null && (incomingTime === null || recent)
+      quote.volume === null || Number.isFinite(incomingVolumeTime) && incomingVolumeTime >= Date.parse(quote.volume_as_of ?? "1970-01-01")
+      || quote.volume_as_of === null && (incomingTime === null || recent)
     )) {
       quote.volume = update.volume;
       quote.volume_as_of = timestamp(update.volume_as_of) ? update.volume_as_of : null;
-    } else if (update.volume === null && recent && allowSameVolume) { quote.volume = null; quote.volume_as_of = null; }
+    } else if (update.volume === null && recent) { quote.volume = null; quote.volume_as_of = null; }
     if (update.market_status) quote.market_status = update.market_status;
     if (!quote.feed) { quote.source = update.source; quote.feed = update.feed; quote.basis = update.basis; }
     quote.change = quote.price !== null && quote.prev_close !== null ? quote.price - quote.prev_close : null;
     quote.change_pct = quote.change !== null && quote.prev_close !== null ? quote.change / quote.prev_close * 100 : null;
     publish();
   }
-  const streams = (options.streams ?? createQuoteStreams)({ onQuote: (update) => {
-    streamRevisions.set(update.id, (streamRevisions.get(update.id) ?? 0) + 1); merge(update);
-  }, onStatus: (state) => {
-    streamed.set(state.market, state); publish();
-  } });
 
   function reserve(assets: QuoteIdentity[]): void {
     for (const asset of assets) if (!cache.has(asset.id)) cache.set(asset.id, initialQuote(asset));
     if (cache.size > CACHE_LIMIT) for (const id of cache.keys()) {
       if (!active.has(id) && !pinned.has(id) && !assets.some((asset) => asset.id === id)) {
-        cache.delete(id); attempts.delete(id); streamRevisions.delete(id); quoteErrors.delete(id);
+        cache.delete(id); attempts.delete(id); quoteErrors.delete(id);
       }
       if (cache.size <= CACHE_LIMIT) break;
     }
@@ -200,17 +173,15 @@ export function createQuoteHub(options: {
     for (const asset of pending) attempts.set(asset.id, now());
     flightController = new AbortController();
     const controller = flightController;
-    const revisions = new Map(streamRevisions);
     const deadline = setTimeout(() => controller.abort(), 8_000);
     flight = (async () => {
       try {
         const result = await snapshots.load(pending, controller.signal);
         if (disposed) return;
-        for (const update of result.updates) merge(update, (revisions.get(update.id) ?? 0) === (streamRevisions.get(update.id) ?? 0));
-        for (const state of result.providers) polled.set(state.market, state);
+        for (const update of result.updates) merge(update);
+        for (const state of result.providers) polled = state;
       } catch {
-        for (const market of new Set(pending.map((asset) => asset.market))) polled.set(market,
-          { ...initialProvider(market), status: "error", transport: "poll", message: "行情查询失败，请稍后重试。" });
+        polled = { ...initialProvider(), status: "error", message: "行情查询失败，请稍后重试。" };
       } finally {
         clearTimeout(deadline);
         for (const asset of pending) attempts.set(asset.id, now());
@@ -222,16 +193,14 @@ export function createQuoteHub(options: {
   function sync(): void {
     active = new Map([...clients].flatMap((client) => client.assets.map((asset) => [asset.id, asset] as const)));
     reserve([...active.values()]);
-    streams.setAssets([...active.values()]);
     if (active.size && !pollTimer) {
       pollTimer = setInterval(() => {
-        const due = [...active.values()].filter((asset) => now() - (attempts.get(asset.id) ?? -Infinity)
-          >= (asset.market === "cn" ? ifindPollMs : usable(streamed.get(asset.market)) ? 60_000 : 15_000));
+        const due = [...active.values()].filter((asset) => now() - (attempts.get(asset.id) ?? -Infinity) >= ifindPollMs);
         void refresh(due);
         publish();
       }, 5_000);
       pollTimer.unref();
-    } else if (!active.size && pollTimer) { clearInterval(pollTimer); pollTimer = undefined; streamed.clear(); }
+    } else if (!active.size && pollTimer) { clearInterval(pollTimer); pollTimer = undefined; }
     void refresh([...active.values()]);
   }
   return {
@@ -257,7 +226,7 @@ export function createQuoteHub(options: {
       return () => { if (clients.delete(client)) sync(); };
     },
     close() {
-      disposed = true; clients.clear(); streams.close();
+      disposed = true; clients.clear();
       flightController?.abort();
       clearInterval(pollTimer); clearTimeout(notifyTimer);
     },

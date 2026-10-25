@@ -54,21 +54,6 @@ export function text(value) {
     ? EM : String(value);
 }
 
-/** The snapshot's read host identifies its environment. The mutation pin does not.
- * @param {unknown} data
- * @returns {{label: string, tone: "paper" | "live" | "neutral"}}
- */
-export function accountMode(data) {
-  const snapshot = data && typeof data === "object" ? data : {};
-  if (snapshot.available === false) return { label: "未连接", tone: "neutral" };
-  if (snapshot.host === "paper-api.alpaca.markets") return { label: "Paper · 模拟", tone: "paper" };
-  if (snapshot.host === "api.alpaca.markets") return { label: "Live · 实盘", tone: "live" };
-  return {
-    label: typeof snapshot.host === "string" && snapshot.host.trim() ? "自定义账户" : "账户类型未知",
-    tone: "neutral",
-  };
-}
-
 /** Never turn a partially reported set of positions into an apparent total.
  * @param {unknown} positions
  * @returns {number | null}

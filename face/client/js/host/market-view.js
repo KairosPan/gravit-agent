@@ -17,10 +17,9 @@ export const ACCOUNT_TABS = [['all', 'All'], ['crypto', 'Crypto'], ['stocks', 'S
 export const ACCOUNT_SORTS = [{ id: 'volume', label: 'Most traded' }, { id: 'movers', label: 'Biggest moves' }, { id: 'closing', label: 'Closing soonest' }];
 export const CANDLE_RANGES = ['1D', '5D', '1M', '3M', '6M', 'YTD', '1Y', '5Y', 'MAX'];
 
-const PROVIDERS = { alpaca: 'Alpaca', coinbase: 'Coinbase', ifind: 'iFinD' };
-const MARKET_PROVIDER = { us: 'Alpaca', crypto: 'Coinbase', cn: 'iFinD' };
+const PROVIDERS = { ifind: 'iFinD' };
+const MARKET_PROVIDER = { cn: 'iFinD' };
 const PROVIDER_STATUS = { connecting: 'Connecting', connected: 'Connected', unconfigured: 'Not configured', error: 'Error', limited: 'Limited' };
-const FEEDS = { iex: 'IEX', sip: 'SIP', delayed_sip: 'SIP, delayed' };
 const QUOTE_STATUS = { live: 'Live', delayed: 'Delayed', stale: 'Stale' };
 const CONNECTION = { connecting: 'Connecting…', polling: 'Updating every 15 s', paused: 'Paused', error: 'Quotes unavailable' };
 const WATCH = { read: "Couldn't read the saved watchlist", unsaved: "Couldn't save the watchlist", full: 'The watchlist is full' };
@@ -33,7 +32,7 @@ export function canonicalId(raw) {
 const blank = q => typeof q !== 'string' || !q.trim();
 
 /** The quote's state in a word or two: Live, Delayed, Stale or No quote, and Closed when the market is; with no price
- * from a market whose provider is not configured (no Alpaca keys, no iFinD token), Not configured. */
+ * from a market whose provider is not configured (no iFinD token), Not configured. */
 export function quoteWord(quote, providers = [], market = quote?.market) {
   if (!quote || number(quote.price) === null || !QUOTE_STATUS[quote.quote_status]) {
     const provider = (Array.isArray(providers) ? providers : []).find(p => p?.market === market);
@@ -56,11 +55,10 @@ export function basisWord(quote) {
   return quote?.basis === '24h' ? '24h' : 'vs previous close';
 }
 
-/** Where a quote comes from, named by its market's provider (the wire's source name is not English for every market). */
+/** Where a quote comes from, named by its market's provider (the wire's source name is not English); an old us:/crypto:
+ *  star, which no provider of the face quotes, by none. */
 export function sourceWord(quote) {
-  const provider = MARKET_PROVIDER[quote?.market] ?? 'Quotes';
-  const feed = FEEDS[quote?.feed];
-  return feed ? `${provider} · ${feed}` : provider;
+  return MARKET_PROVIDER[quote?.market] ?? 'Quotes';
 }
 
 const UNITS = [[1e9, 'B'], [1e6, 'M'], [1e3, 'k']];

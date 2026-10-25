@@ -779,11 +779,11 @@ test('every word is English, and each enum reads as it should', () => {
     words.push(quoteWord(quote('us:AAPL', { quote_status, market_status, message: '行情连接已断开，保留上次报价。' })));
   }
   for (const status of ['idle', 'connecting', 'streaming', 'polling', 'error', 'paused']) words.push(connectionWord(status));
-  for (const id of ['alpaca', 'ifind', 'coinbase']) for (const status of ['connecting', 'connected', 'unconfigured', 'error', 'limited']) {
-    words.push(providerWord({ id, market: 'us', status, source: 'Alpaca', feed: 'iex', transport: 'poll', message: '美股行情待配置 Alpaca API 凭据' }));
+  for (const id of ['ifind', 'alpaca']) for (const status of ['connecting', 'connected', 'unconfigured', 'error', 'limited']) {
+    words.push(providerWord({ id, market: 'cn', status, source: 'iFinD', feed: 'realtime', transport: 'poll', message: 'A 股实时行情待开通 iFinD 账号并配置接口凭据' }));
   }
   for (const basis of ['previous_close', '24h']) words.push(basisWord(quote('us:AAPL', { basis })));
-  for (const feed of ['iex', 'sip', 'delayed_sip', 'exchange', 'realtime', '']) words.push(sourceWord(quote('us:AAPL', { feed })));
+  for (const feed of ['realtime', 'iex', '']) words.push(sourceWord(quote('cn:600519', { feed })));
   words.push(sourceWord(quote('cn:600519', { source: '同花顺', feed: 'realtime' })));
   for (const status of ['idle', 'loading', 'success', 'error']) words.push(searchWord({ query: 'zz', status, assets: [], partial: false, note: '搜索服务暂时不可用，请稍后重试。' }));
   for (const error of [null, 'read', 'unsaved', 'full']) words.push(watchWord(error));
@@ -795,12 +795,13 @@ test('every word is English, and each enum reads as it should', () => {
   assert.equal(quoteWord(undefined), 'No quote');
   assert.deepEqual(['streaming', 'idle', 'connecting', 'polling', 'paused', 'error'].map(connectionWord), ['', '', 'Connecting…', 'Updating every 15 s', 'Paused', 'Quotes unavailable']);
   assert.equal(providerWord({ id: 'ifind', status: 'unconfigured' }), 'iFinD · Not configured');
-  assert.equal(providerWord({ id: 'alpaca', status: 'connected' }), 'Alpaca · Connected');
+  assert.equal(providerWord({ id: 'ifind', status: 'connected' }), 'iFinD · Connected');
+  assert.equal(providerWord({ id: 'alpaca', status: 'connected' }), 'Quotes · Connected', 'a provider the face no longer has is named by none of its own');
   assert.equal(basisWord(quote('crypto:BTC/USD', { basis: '24h' })), '24h');
   assert.equal(basisWord(quote('us:AAPL')), 'vs previous close');
-  assert.equal(sourceWord(quote('us:AAPL')), 'Alpaca · IEX');
-  assert.equal(sourceWord(quote('us:AAPL', { feed: 'delayed_sip' })), 'Alpaca · SIP, delayed');
-  assert.equal(sourceWord(quote('crypto:BTC/USD', { source: 'Coinbase', feed: 'exchange' })), 'Coinbase');
+  assert.equal(sourceWord(quote('cn:600519', { source: 'iFinD', feed: 'realtime' })), 'iFinD');
+  assert.equal(sourceWord({ market: 'us' }), 'Quotes', 'an old us: star has no provider of the face');
+  assert.equal(sourceWord({ market: 'crypto' }), 'Quotes');
   assert.equal(searchWord({ query: 'zz', status: 'success', assets: [], partial: false }), 'Nothing matches “zz”');
   assert.equal(searchWord({ query: 'zz', status: 'loading', assets: [], partial: false }), 'Searching…');
   assert.equal(searchWord({ query: 'zz', status: 'error', assets: [], partial: false }), 'Search is unavailable');
@@ -844,10 +845,10 @@ test('volumeWord: shares for a stock, the base for a coin, — for null', () => 
 });
 
 test('a market whose provider is not configured says so instead of No quote', () => {
-  const unconfigured = [{ id: 'alpaca', market: 'us', status: 'unconfigured', source: 'Alpaca', feed: '', transport: 'poll', message: '美股行情待配置' }];
-  assert.equal(quoteWord(undefined, unconfigured, 'us'), 'Not configured');
-  assert.equal(quoteWord(quote('us:AAPL', { price: null, quote_status: 'unavailable' }), unconfigured), 'Not configured');
-  assert.equal(quoteWord(quote('us:AAPL'), unconfigured), 'Live', 'a price is a price');
-  assert.equal(quoteWord(undefined, unconfigured, 'crypto'), 'No quote');
+  const unconfigured = [{ id: 'ifind', market: 'cn', status: 'unconfigured', source: 'iFinD', feed: '', transport: 'poll', message: 'A 股行情待配置 iFinD' }];
+  assert.equal(quoteWord(undefined, unconfigured, 'cn'), 'Not configured');
+  assert.equal(quoteWord(quote('cn:600519', { price: null, quote_status: 'unavailable' }), unconfigured), 'Not configured');
+  assert.equal(quoteWord(quote('cn:600519'), unconfigured), 'Live', 'a price is a price');
+  assert.equal(quoteWord(undefined, unconfigured, 'us'), 'No quote', 'an old us: star has no provider of the face');
   assert.equal(quoteWord(undefined), 'No quote');
 });
