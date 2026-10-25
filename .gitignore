@@ -6,22 +6,8 @@
 .claude/settings.local.json
 .mcp.json
 
-# Data / model artifacts (大文件与生成物,避免污染版本库)
-/data/
+# SDD workspaces (ledgers, briefs, review packages — scratch, never committed)
 .superpowers/
-
-# Leftovers of the previous product (Python layer, verdict runs, the Hermes spike) still on
-# the operator's disk; drop these lines once the operator removes the files.
-__pycache__/
-*.pyc
-*.egg-info/
-.pytest_cache/
-.pytest-cache/
-/verdict_pit*/
-/verdict_*.json
-/verdict_universe.txt
-/state/
-spikes/2026-06-26-hermes-vendor-feasibility/_hermes/
 
 # Secrets / local credentials — NEVER commit (LLM keys and any provider's)
 .env
