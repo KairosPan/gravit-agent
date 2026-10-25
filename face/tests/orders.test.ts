@@ -475,6 +475,16 @@ test("Gate 2 after the alpaca half leaves: a seat write raises Account seat, an 
   assert.equal(orderApprovalDecision("mcp__account__portfolio_holdings", "ask", {}), null, "a seat read raises nothing");
 });
 
+test("orderApprovalDecision: a retired order tool under the seat prefix raises no card - the guard denies it regardless", () => {
+  const args = { venue: "paper-1", symbol: "AAPL", side: "buy", qty: 1 };
+  for (const name of ["mcp__account__place_order", "mcp__account__cancel_order"]) {
+    assert.equal(isOrderTool(name), true, `${name} is unclassified under the seat prefix`);
+    assert.equal(orderApprovalDecision(name, "ask", args), null, name);
+    assert.equal(orderApprovalDecision(name, "never", args), null, name);
+    assert.match(orderGuardReason(name, [], "call-1") ?? "", /retired order tool/, name);
+  }
+});
+
 test("no tool is a PAPER order any more", () => {
   const args = { venue: "paper-1", symbol: "AAPL", side: "buy", qty: 1 };
   const names = ["place_order", "cancel_order", "mcp__alpaca-kit__place_order", "mcp__drill__cancel_order",

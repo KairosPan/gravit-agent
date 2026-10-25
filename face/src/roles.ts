@@ -97,7 +97,7 @@ const NEVER: ReadonlyArray<{ what: string; because: string; names: readonly stri
     because: "run_code is the reserved PTC mode presentation transport, which tools.restrict() refuses to name, so every delegation would fail; name the end-capability tools instead",
     names: ["run_code"], prefixes: [], rawNames: [] },
   { what: "an account or order tool",
-    because: "orders stay behind the two order gates, the Account seat is Gravit's, and a role has no reason to read the account",
+    because: "orders go through the Account seat alone, behind its one gate (the face's per-order card); the seat is Gravit's, and a role has no reason to read the account",
     names: [], prefixes: ["mcp__account__"],
     rawNames: ["account", "positions", "orders", "place_order", "cancel_order",
       /* the Account seat's twelve writes (src/orders.ts SEAT_WRITE_RAW_NAMES; spec 2026-10-20 §5.3), under any server name */
@@ -105,7 +105,7 @@ const NEVER: ReadonlyArray<{ what: string; because: string; names: readonly stri
       "portfolio_live_leverage", "portfolio_live_move", "portfolio_live_earn", "portfolio_pay",
       "portfolio_order", "portfolio_execute", "portfolio_transfer"] },
   { what: "an AKShare tool",
-    because: "the AKShare tools carry no point-in-time guard and are never backtest evidence",
+    because: "the AKShare tools carry no point-in-time guard and are never evidence; the evidence is forward paper trading at the Account",
     names: [], prefixes: ["mcp__akshare__"], rawNames: [] },
 ];
 

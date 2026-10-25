@@ -71,7 +71,11 @@ export const SEAT_READ_RAW_NAMES = [
  * of the Account graft. The seat is the only order path, so one of these that
  * still registers — an operator's leftover row pointing at an install outside
  * this tree — is never carded and never approved: the guard denies it outright
- * under any server name, and the boot refuses a registry that carries one. */
+ * under any server name, and the boot refuses a registry that carries one.
+ * Residual: dsh hashes a tool name longer than 64 characters or carrying a
+ * character outside [A-Za-z0-9_-], and neither the raw-suffix deny nor the boot
+ * audit sees a retired tool under such a hashed name (unreachable for a
+ * realistic server name). */
 export const RETIRED_ORDER_RAW_NAMES = ["place_order", "cancel_order"] as const;
 
 /** Whether `name` is a retired order tool, by raw suffix under any server name. */
@@ -169,7 +173,9 @@ export function effectiveApprovalPolicy(
  * The gate's decision for one pending call.
  *
  * Returns `null` for anything that is not an order tool — the caller delegates
- * to `next()`, leaving every other tool exactly as it was.
+ * to `next()`, leaving every other tool exactly as it was — and for a retired
+ * order tool ({@link RETIRED_ORDER_RAW_NAMES}), even one under the seat prefix:
+ * the guard denies it regardless, so no card is raised for a call that cannot run.
  *
  * Under policy `never` this DENIES rather than asking. Returning `ask` there
  * would be worse than useless: `ApprovalService.request` short-circuits on
@@ -191,7 +197,7 @@ export function orderApprovalDecision(
   policy: ApprovalPolicyLike,
   args?: unknown,
 ): PreToolDecision | null {
-  if (!isOrderTool(name)) return null;
+  if (!isOrderTool(name) || isRetiredOrderTool(name)) return null;
   if (policy === "never") {
     return {
       kind: "deny",
