@@ -5,7 +5,7 @@ STRATEGY runs on DeepSeek Harness (dsh). This directory is the repo's half of th
 | Path | What |
 |---|---|
 | `profile/cordis.yml` | profile TEMPLATE — the operator's half: the skill roots, the model, and the INTENDED approval list (see step 4); it names the rows the face composes itself |
-| `profile/persona.md`, `profile/cycle.md` | Gravit's two prompt texts, read by the face at compose time (dsh itself reads nothing here): the persona, set as the `system-prompt` row's `personaPrefix`, and the research-cycle contract, mounted as the `gravit:cycle` section of Gravit's prompt (a bot's and a role child's carry none). `cycle.md` is at most 3,000 bytes; after an edit, `cd face && npm run render:roles` regenerates the mirror that embeds it (`face/README.md` "The profile") |
+| `profile/persona.md`, `profile/cycle.md` | Gravit's two prompt texts, read by the face at compose time (dsh itself reads nothing here): the persona, set as the `system-prompt` row's `personaPrefix`, and the research-cycle contract, mounted as the `gravit:cycle` section of Gravit's prompt (a bot's and a role child's carry none). `cycle.md` is at most 3,300 bytes (`CYCLE_MAX_BYTES`); after an edit, `cd face && npm run render:roles` regenerates the mirror that embeds it (`face/README.md` "The profile") |
 | `skills/mechanics/` | neutral mechanics, always apply: `account-seat-guide` |
 | `skills/style-gravit/` | the operator's own style: `doctrine`, `signals`, `lessons` — converted from the retired `seeds_v2/` JSON packs |
 | `../roles/` (the repo root's, not this directory's) | the role library the face renders into Gravit's preset (`face/src/roles.ts`, `DEVELOPMENT.md` §3.8); only `_template`, the copy source, ships; each `role.yml` names an MCP tool as `mcp__<serverName>__<raw>`, spelling the server name the installed profile mounts |
@@ -66,7 +66,7 @@ rows (AKShare, the Account seat) on every boot, and the operator adds two rows o
    (`docs/research/2026-08-22-deepseek-harness-dsh-survey.md`), not against a live install.
    Expect one adaptation pass; the content is the deliverable, the container is not.
 
-## Installed state — the `face` profile (2026-08-31; re-checked for dsh 0.2.0-rc.2 on 2026-09-30)
+## Installed state — the `face` profile (2026-08-31; re-checked for dsh 0.2.0-rc.2 on 2026-09-30; without the Alpaca MCP row since 2026-10-24)
 
 The template above is realized, live and drilled, in the face's profile. The shapes that
 actually bound, for the next install or the next pin bump:
@@ -88,8 +88,10 @@ actually bound, for the next install or the next pin bump:
   and the default-model row (`agent-default-model`, step 2). 0.1.1 took the model from
   `$DSH_HOME/settings.yaml`; the face at 0.2.0 reads no settings file (it provides no
   `profileContext`), so the row is the only place Gravit's model is set. A home that still
-  carries an `alpaca-kit` MCP row from before 2026-10-24 refuses the boot while that server
-  registers a retired order tool: remove the row.
+  carries the Alpaca MCP row from before 2026-10-24 points at a server that no longer exists —
+  its `python -m` command names the Python package the tree removed — so remove the row. Should
+  any server still register `place_order` or `cancel_order`, the face refuses to boot until that
+  row is gone (Gate 2's retired order tools, `face/src/orders.ts`).
 - **An MCP child's env is scrubbed.** dsh drops every `KEY|PASSWORD|SECRET|TOKEN` name from a
   child's environment, a session's bash tool included; a row that needs a variable passes it
   explicitly (`!!js process.env...`).

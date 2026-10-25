@@ -1,7 +1,9 @@
 # The Account grafted into the face, stage 1 (the reads) — the ledger
 
-*Stage 2 (the owner device and Trade) is recorded after stage 1, under "Stage 2" at the end of this
-file; its rulings continue the numbering at 46 and its deferred minors at 45.*
+*Stage 2 (the owner device and Trade) is recorded after stage 1, under "Stage 2"; its rulings
+continue the numbering at 46 and its deferred minors at 45. Stage 3 (the removal of `alpaca_kit`,
+the PIT beds and backtests) follows it, under "Stage 3" at the end of this file; its rulings
+continue at 74 and its deferred minors at 68.*
 
 The record of executing `2026-10-22-account-graft-1-reads.md` (the plan, committed at 8d019bf;
 spec `../specs/2026-10-22-account-graft-design.md`, §5.1–§5.2, §6.1–§6.2, §6.5 and §10) on branch
@@ -839,3 +841,245 @@ Dispatched on fable (the operator's word).
   one Important and the two Minors ruled into the wave are fixed above; deferred minors 45–67 stand.
 - Owed to the operator: the manual drill of the spec's §10 on the real Account at 4820 with paper
   venues only (`face/README.md`, "The Account in the face").
+
+## Stage 3 — the removal of `alpaca_kit`, the PIT beds and backtests
+
+The record of executing `2026-10-24-account-graft-3-removal.md` (the plan, committed at f1b165b;
+spec `../specs/2026-10-22-account-graft-design.md` §12, §8 item 8, §9 and §11) on branch
+`feat/account-graft-3`, cut from main @ 0011666 (stage 2 landed), in the worktree
+`.claude/worktrees/account-graft-3`, on 2026-10-24. Subagent-driven as stages 1 and 2:
+implementers and task reviewers on opus, the final whole-branch review on fable (the operator's
+standing word). The SDD workspace's `progress.md` is the working copy this section records.
+Baseline before Task 1: face 1312 tests (1294 pass, 18 skipped) after `npm ci`; `python -m pytest`
+400 passed (it leaves with Task 3).
+
+### Pre-flight
+
+Every producer–consumer pair across the eight tasks was checked before Task 1 (the fence's move
+to `http.ts` and the search route registering itself, which Task 2 then trims to `cn`; the face's
+last reads of Python gone before Task 3 deletes the package; the client files Tasks 2 and 4 split
+between them; the roles Task 6 removes and the cycle text Task 7 writes; `GRAVIT.md` touched in
+Task 7 alone): they agreed, each task was self-consistent, and no pre-flight ruling was needed.
+
+### Rulings, in the order made
+
+74. **Task 2:** `/data/quotes?ids=us:AAPL` answers 200 with no quote and `providers` iFinD alone,
+    not 400 — an old client holding `us:` ids must not error; the brief said "no provider for it".
+    Cost if wrong: one status code, one line.
+75. **Task 2:** `client/js/host/discover.js`'s `GRAVIT_KEYS` still listed the two APCA key names
+    (no brief owned them) — Task 4 drops them and their tests, since the face reads no Alpaca key
+    after Task 2 and Discover must not advertise keys nothing reads. Cost if wrong: two rows on
+    Discover.
+76. **Task 3:** `gravit-md.test.ts`'s row-for-row check of the beds table against
+    `docs/backtest-rules.md` leaves with the rules file (ENOENT otherwise); Task 7 rewrites
+    `GRAVIT.md` and the test anyway. Cost if wrong: nothing — the table leaves in Task 7.
+77. **Task 3:** `setup.ts`'s `PATCH_HEADER` (the text the face writes into a new operator
+    `cordis.patch.yml`) still told the operator to mount the Python package's server — Task 4 owns
+    `setup.ts` and rewrites that text. Cost if wrong: a stale paragraph in a new patch file.
+78. **Task 3 (the review's Important, plan-level):** the plan's `.gitignore` list was wrong for the
+    primary checkout — removing the lines would expose about 230 MB of untracked leftovers there
+    after the merge (the Hermes spike 177 MB, `verdict_pit_2yr` 41 MB, `verdict_pit_broad` 10 MB,
+    `verdict_screenON/OFF.json`, `state/`, `.pytest_cache`, `alpaca_kit.egg-info`,
+    `alpaca_kit/__pycache__`, `tests/__pycache__`). The lines whose targets still exist on the
+    operator's disk are restored under one comment naming them leftovers to drop once removed
+    (`__pycache__/`, `*.pyc`, `*.egg-info/`, `.pytest_cache/`, `.pytest-cache/`, `/verdict_pit*/`,
+    `/verdict_*.json`, `/verdict_universe.txt`, `/state/`, the Hermes spike line); the PIT lines
+    (`/data/pit/`, `*.parquet`, `*.feather`, `checkpoints/`, `*.ckpt`, `*.safetensors`), `.venv/`,
+    `venv/`, `runs/`, `/runs/`, `/snap/` stay removed; `/data/` stays until the operator's `rm`.
+    The operator's `rm` list below grows to name the leftovers (their call). Cost if wrong: a few
+    ignore lines linger.
+79. **Task 4 (before review):** the client's `kinds.js` card branch for the retired pair
+    (`place_order`/`cancel_order`, "Alpaca paper", its receipts) and `bots.ts` `DEFAULT_ALLOW`'s
+    seven dead `mcp__*__<raw>` read patterns are this task's scope (spec §12.1: the alpaca half of
+    the gate and every face remnant) — the branch goes, the seven names go (they already resolved
+    to no tool, so the bots see no change); "PAPER order" strings inside test fixtures that imitate
+    old sessions stay. Cost if wrong: an old session's order card draws as a plain approval.
+80. **Task 4:** `bots/_template/agent.cordis.yml` (the generated mirror `bots.test.ts` pins to
+    `renderComposition`) is edited to match `DEFAULT_ALLOW` despite the brief's "do not touch
+    `bots/`" — the mirror follows the code by construction; `drill-bull`, `drill-bear` and
+    `news-scout` still naming the dead patterns (harmless) are swept by Task 6. Cost if wrong:
+    stale names in three fixture bots for two commits.
+81. **Task 4 (the review's Important, confirmed by the automated security review):** add the
+    backstop — the plan said the alpaca names go and the spec says the seat is the ONLY order path,
+    so a retired order tool that still appears from an operator's leftover MCP row must be refused,
+    not passed: the guard DENIES a tool whose raw name is `place_order` or `cancel_order` under any
+    server (no card; the reason tells the operator to remove the MCP row), `auditOrderTools`
+    returns `{gated, uncovered, retired}` and the boot refuses a non-empty `retired`, naming the
+    tool. Cost if wrong: six lines and two constants naming the old tools. The operator's
+    heads-up: a live harness home still mounting the Alpaca MCP row that registers those tools
+    will not boot until the row is removed (and that row's server cannot start anyway: its package
+    is gone).
+82. **Task 6:** `cycle.test.ts`'s cross-check (every `role_*` the cycle names is a shipped role)
+    marked `todo` for one commit, because `cycle.md` (operator-only, Task 7) still named the three
+    roles; Task 7 restores it with the new text (done at 04229a3, no todo). Cost if wrong: Gravit's
+    prompt named three dead tools for one commit on the branch.
+83. **Task 7:** `CYCLE_MAX_BYTES` in `face/src/cycle.ts` rises 3,000 → 3,300 — the
+    operator-approved text is 3,161 bytes, 161 over the old cap, and reflowing cannot shrink it; the
+    cap is the face's own bloat guard, not a contract with dsh. Task 8 updates `DEVELOPMENT.md`'s
+    citations (the 3,000 cap, 2,985 bytes, the 12-call caps, role delegation). Cost if wrong: 300
+    bytes more system prompt per request.
+
+### Carried between tasks
+
+- Task 1 → 2: Task 2 edits the same `registerSymbolSearchRoute` Task 1 adds and keeps its fence
+  import from `http.ts` (done).
+- Task 2 → 4: `GRAVIT_KEYS`' two APCA names (Ruling 75) and the stale comments `boot.ts:35` (the
+  face's Alpaca fetches) and `panels.ts:577` (APCA keys) — all done in Task 4.
+- Task 3 → 4: `PATCH_HEADER`'s Python-server paragraph (Ruling 77, done).
+- Task 3 → 8: the leftovers `rm` list (Ruling 78, below).
+- Task 4 → 6: sweep the seven dead `mcp__*__<raw>` patterns from `drill-bull`, `drill-bear` and
+  `news-scout` (Ruling 80, done).
+- Task 4 → 8: the operator's heads-up of Ruling 81, written into `face/README.md` ("What boot
+  refuses", "The profile") and `dsh/README.md` (the installed state).
+- Task 6 → 7: un-todo the cycle cross-check and re-render Gravit's mirror after `cycle.md` (the
+  drift test pins it) — both done.
+- Task 6 → 8: `dsh/README.md`'s unreachable refusal and its stale heading date, `face/README.md`'s
+  "steps 3-6", `DEVELOPMENT.md`'s role web-tool reason — all closed in Task 8 (deferred minors
+  87–89 below).
+- Task 7 → 8: the cycle's cap and size in the documents (Ruling 83, done).
+
+### Tasks
+
+| Task | Commits | Review | Face suite after (tests / pass / skipped) |
+|---|---|---|---|
+| 1 The producers, the bars route and the watchlist catalog leave; the fence lives in `http.ts` | 627d7a1 | spec ✅, quality ✅ — the four removed paths' 404 asserted in `smoke.test.ts` and run under `FACE_SMOKE` (1/1) | 1290 / 1272 / 18 |
+| 2 The Alpaca and Coinbase providers and the US and crypto search leave; the wire speaks A shares alone | 7f4b790 | spec ✅, quality ✅ — Review Focus 1 already held before the change (a pin) | 1267 / 1249 / 18 |
+| 3 `alpaca_kit`, its pytest suite, `pyproject.toml`, the scripts and the backtest rules leave | a21406d (92 files deleted); fix round 1 78dc70d | quality ✅ with 1 Important, plan-level (the leftovers' ignore lines, Ruling 78); round 1 addressed it, review clean | 1266 / 1248 / 18 |
+| 4 Gate 2 is the seat's alone; the thread draws plain results; the retired pair is denied | 0d6d7fb; before review fc07e7f (Ruling 79); fix round 1 29fb880 | quality ❌ — 1 Important (the retired-order backstop, Ruling 81, also flagged by the automated security review), 4 Minor; round 1 addressed it, re-review clean | 1261 / 1243 / 18; the gate smokes 5/5 and `FACE_SMOKE=1` 1261 / 1261 at 29fb880 |
+| 5 The backtest files, the AQR-era strategy and bots leave; `backtests/` is optional | 883b0f5 | spec ✅, quality ✅ — `channels.ts` already read an optional `backtests/` (the pin passed first, as planned) | 1262 / 1244 / 18; room and bots smokes 2/2 |
+| 6 The three roles, the two skills and the profile row leave; Gravit's mirror re-rendered | e77900a | spec ✅, quality ✅ | 1264 / 1245 / 18 + 1 todo (Ruling 82); `FACE_SMOKE=1` 1263 pass + 1 todo |
+| 7 The research cycle reads the Account and trades on paper; `GRAVIT.md` without the beds | 04229a3 (`cycle.md` 3,161 bytes verbatim as approved; `GRAVIT.md` 3,300 bytes) | spec ✅, quality ✅ | 1266 / 1248 / 18, no todo; roles, bots and goal smokes 3/3 |
+| 8 The documents, the charter and the ledger | the commit that adds this section (the charter's §8 item 8 dated 2026-10-24, `CLAUDE.md`, `AGENTS.md`, `DEVELOPMENT.md`, `face/README.md`, `dsh/README.md`, `ROADMAP.md`, the loops page) | — (the final review follows) | 1266 / 1248 / 18 (documents only); typecheck clean |
+
+### Notes
+
+Task 8's calls, written down for the final review:
+
+- `DEVELOPMENT.md` §2, §3.5 and §7.2 keep their numbers as one-paragraph "removed 2026-10-24"
+  markers rather than renumbering the document, so the many `§3.x`–`§10` citations in the charter,
+  `CLAUDE.md`, `face/README.md` and the code still resolve; §6.3 likewise.
+- The charter's dates are the landing's (2026-10-24) where the spec's item 8 wrote 2026-10-22; the
+  MARKET line reads "since 2026-10-24, by the operator's decision". The §6 departure line keeps the
+  literal file name the brief gave verbatim — the one hit of the stage's grep outside this ledger
+  and the dated specs and plans.
+- Beyond the spec's list, the charter's remaining descriptions of the removed layer move with it:
+  §1's role-library count and working day, P1's placement sentence, §3's operator and Gravit cells
+  and the `alpaca_kit` row replaced by an MCP-rows row, §4's engineering, mechanics and
+  `$DSH_HOME` rows; D1's trigger (paper forward-testing is every cycle's method now: due before a
+  paper record is taken as grounds for a real venue), D10's MCP-server clause, and D16 resolved
+  with the role-call cap; the seat's §8 row gains D1. The operator may want to read D1's new
+  trigger: it is the one change of intent the spec did not word.
+- `DEVELOPMENT.md` resolves R8, R29 and R36 by removal and rewrites R1, R5, R7, R9 to the seat;
+  §10 items 1 and 7 close, item 6 becomes the cycle's method; Appendix A drops the Python
+  package's variables into one closing sentence. `ROADMAP.md` items (4) and (5) close and its
+  built log gains the graft.
+- `face/README.md`'s order-approval drill is gone; its still-true Gate 2 paragraphs (the listener
+  and guard, `snapshotEvents()`, the automated and positive halves, policy `never`, the gated
+  cancel, the shell answering its own card, gate not containment) move into the Gate-2 drill as
+  "Gate 2 on the seat's writes", reworded to the seat; the human half is the account-seat drill.
+  The role drill is rewritten to wait for a role (the automated half on the fixture roles), the
+  cycle drill to the new cycle on the real Account's paper venue. "Markets and Account" had no
+  provider table left to drop (only iFinD's environment table, which stays); "The face's own
+  routes no screen reads" is gone.
+- The loops page (Chinese) is re-read where it summarised the removed layer — the eyebrow, the
+  documents table (`GRAVIT.md` 3,300, `cycle.md` 3,161 / 3,300, four skills, the rules file's row
+  gone), the AGENTS, CLAUDE and GRAVIT.md summaries, the three role rows marked retired, the
+  profile's template, cycle and insert lines, the charter's §1–§6 and §8 summaries, the
+  DEVELOPMENT §1, §2, §3, §7, §9 and §10 rows, the tool-schema and tool-execution lines, the
+  browser line and the operator's owed list; its structure is untouched and its tags balance.
+- `face/src/roles.ts`'s `NEVER` reason strings still say "orders stay behind the two order
+  gates" and "no point-in-time guard and are never backtest evidence" — code, left as it is and
+  said in the documents (deferred minor 96).
+
+### Deferred minors
+
+68. Task 1: `http.test.ts`'s "routes are gone" loop cannot fail (the recorder sees only the search
+    route); the 404 evidence is the gated smoke.
+69. Task 1: `registerSymbolSearchRoute`'s dispose is never exercised against a registrar that
+    returns a disposer.
+70. Task 1: the moved fence test's lead comment reworded `/data/account.json` → `/data/account`
+    (the assertions verbatim).
+71. Task 1: the smoke probes `/data/bars` with `?symbol=` where the old route took `id=`.
+72. Task 2: `/data/quotes` with no `cn` id reports iFinD as `connecting` forever (`initialProvider`,
+    no poll runs); external callers only.
+73. Task 2: the client's `parsePayload` still accepts `basis: 24h` and `transport: stream`, which
+    the server can no longer send.
+74. Task 2: `symbol-search.test.ts`'s "distinguishes market" title with `cn` alone; the cache keyed
+    on a constant market.
+75. Task 2: `host-markets`' Review Focus 1 test's `/data/quotes` reads assertion is vacuous (the
+    fake live quotes never fetch).
+76. Task 2: the stale comments `boot.ts:35` and `panels.ts:577` — **Closed** in Task 4.
+77. Task 3: `.gitignore`'s secrets comment still reads "(Alpaca + LLM keys)".
+78. Task 3: `agents.ts:111-113`'s comment cites "the removed Python layer" (history wording, and
+    the reason the two APCA names stay on `SCRUBBED_ENV`).
+79. Task 4: `thread.js:67-68`'s dressed-result branch is dead (the `.raw` rule removed,
+    `toolResultFor` never returns).
+80. Task 4: `orders.ts`'s `KNOWN_KEYS` keeps snake_case `order_type`/`limit_price`/`order_id`
+    with a misleading comment.
+81. Task 4: the audit's `uncovered` flags only a seat prefix with NO covered write; a partial
+    rename under a foreign server name passes the boot (the seat smoke catches it).
+82. Task 4: the swallow-listener cast copied into three smokes; a fixture helper would do.
+83. Task 4: a post-boot `mcp__account__place_order` (an unclassified seat tool) draws a card
+    before the guard denies it; one clause (`!isRetiredOrderTool` in `isOrderTool`) would skip it.
+84. Task 4: no listener-level pin that a retired tool under a non-seat prefix draws no card.
+85. Task 4: the boot refusal on `retired[]` has no test (the audit is tested; the guard denies
+    regardless).
+86. Task 5: the pin's title says "draws no backtests section" but checks `readChannelBody`'s data,
+    not the page.
+87. Task 6: `dsh/README.md`'s installed-state bullet described a refusal the leftover row cannot
+    reach (its server no longer starts) — **Closed** in Task 8 (reworded: remove the row; the
+    boot refuses only should anything still register the retired pair), with the heading's date.
+88. Task 6: `face/README.md`'s "per `../dsh/README.md` steps 3-6" — **Closed** in Task 8 (steps
+    1–5, step 2 the rows).
+89. Task 6: `DEVELOPMENT.md`'s role web-tool reason ("no as-of guard") no longer matched
+    `roles.ts` — **Closed** in Task 8 (a role works with the tree's own tools, never the open web).
+90. Task 6: `roles.test.ts`'s second RF5 test re-creates `probe` redundantly; a one-tool fixture
+    whose tool differs from `_template`'s default would pin `allow` honoured.
+91. Task 6: `roles.ts:80-82`'s parenthetical "none ships today" will go stale.
+92. Task 6: `dsh/profile/cordis.yml:4`'s header says the file names the model; the model row
+    lives in the patch file.
+93. Task 7: `GRAVIT.md:20`'s tense, "has no lookahead guard since 2026-10-24".
+94. Task 7: `face/src/cycle.ts:3`'s doc-comment line is 154 characters.
+95. Task 7: the cwd fact (a channel session's shell runs in `strategies/<name>/`) now reaches
+    Gravit only through the cycle, not the bots or a role through `GRAVIT.md`.
+96. Task 8: `roles.ts`'s `NEVER` reason strings — "orders stay behind the two order gates, the
+    Account seat is Gravit's…" and "the AKShare tools carry no point-in-time guard and are never
+    backtest evidence" — are older than stage 3; true in effect (a role holds neither), stale in
+    wording. Code, left for the final wave or a later round.
+
+Stage 2's deferred minors 64–67 (renderers importing from `host/`, the `storage` listener, the
+sheet-level pin, the `app.js` split) still stand.
+
+### The operator's commands after the branch lands
+
+In the PRIMARY checkout, in the operator's own terminal, once the branch has merged and nothing
+reads them (spec §12.3: deleted, not archived — "床和aqr都删了"):
+
+```bash
+rm -r data/pit data/.screen_cache data/.face_cache
+```
+
+Then, the previous product's leftovers the Task 3 review found on the operator's disk (Ruling 78;
+the operator's call, each is untracked and ignored today):
+
+```bash
+rm -rf spikes/2026-06-26-hermes-vendor-feasibility/_hermes verdict_pit_2yr verdict_pit_broad \
+  verdict_screenON.json verdict_screenOFF.json state .pytest_cache alpaca_kit.egg-info \
+  alpaca_kit/__pycache__ tests/__pycache__
+```
+
+and, once both are gone, drop the leftovers block (`__pycache__/` through the Hermes spike line)
+and `/data/` from `.gitignore` in a commit of their own. A harness home that still mounts the
+Alpaca MCP row of before 2026-10-24 drops it from `$DSH_HOME/profiles/face/cordis.patch.yml`
+(Ruling 81); the operator's untracked `.claude/launch.json` may drop its `../.env.alpaca` line.
+
+### The drill owed to the operator
+
+The owner drill of stage 2 (`face/README.md` "The owner drill", the design's §10) is still owed:
+the real Account on 4820 with **paper venues only** and the operator's browser already its owner —
+Let it sign, a `setWatch`, a paper account, a paper order from Trade and its fill, Gravit's seat
+order carded by Gate 2 in the thread and by the Guard in the face's Cards, the statement naming
+"You" and "Gravit, approved by you", Sign out; then `account-seat-smoke` and `account-graft-smoke`
+again. **Not yet run.** Beside it, the account-seat drill's keyed run against the real service,
+and — new with this stage — the cycle drill on the new text (`face/README.md` "The cycle drill":
+a forward paper trade through the seat, both cards answered), which no model has yet run.
