@@ -108,7 +108,9 @@ const SCRUBBED_ENV = [
   "ANTHROPIC_BASE_URL", "ANTHROPIC_CUSTOM_HEADERS", "OPENAI_BASE_URL",
   // cloud-provider billing switches
   "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY",
-  // the workbench's own secrets — no business in a coding agent's child
+  // the workbench's own secrets — no business in a coding agent's child; the
+  // APCA_* pair outlives the removed Python layer because the operator's shell
+  // may still carry those Alpaca keys
   "APCA_API_KEY_ID", "APCA_API_SECRET_KEY", "DEEPSEEK_API_KEY",
 ] as const;
 
