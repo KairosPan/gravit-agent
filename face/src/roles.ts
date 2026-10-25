@@ -74,16 +74,17 @@ export const TOOL_NAME_MAX = 64;
 /** What a role never carries, and why: for each reason, the exact `names`, the name `prefixes`,
  *  and the `rawNames` it covers - a raw MCP name refused bare and under ANY server
  *  (`entry === raw` or `entry.endsWith("__" + raw)`), the match src/orders.ts `isOrderTool`
- *  applies to the order tools, so a server the operator mounts under another name than
- *  `alpaca-kit` cannot slip an account or order tool in. {@link readMeta} refuses an `allow`
- *  entry that matches, with the reason in the message. The shipped roles obey it, and
- *  tests/roles.test.ts holds an independent copy of the names. */
+ *  applies to the order tools, so a server the operator mounts under a name of their own
+ *  cannot slip an account or order tool in. {@link readMeta} refuses an `allow` entry that
+ *  matches, with the reason in the message. Every role the repository ships obeys it (none
+ *  ships today: `roles/` holds only `_template`), and tests/roles.test.ts holds an independent
+ *  copy of the names. */
 const NEVER: ReadonlyArray<{ what: string; because: string; names: readonly string[]; prefixes: readonly string[]; rawNames: readonly string[] }> = [
   { what: "a tool that needs a human",
     because: "a delegated child has no human to ask or to review a plan (dsh refuses ask_user_question to it with DELEGATED_CALLER); a role that needs the operator says so in its report",
     names: ["ask_user_question", "exit_plan_mode"], prefixes: [], rawNames: [] },
   { what: "a web tool",
-    because: "the open web carries no as-of guard, and a role reads the market only through the PIT channels",
+    because: "a role works with the tree's own tools, never the open web",
     names: ["web_search", "web_fetch"], prefixes: [], rawNames: [] },
   { what: "a delegation tool",
     because: "Gravit alone delegates; a role is one hand, not a team",
@@ -199,7 +200,7 @@ function readMeta(file: string): Pick<RoleFile, "name" | "description" | "allow"
   const seen = new Set<string>();
   const allow = listed.map((entry: unknown, index: number): string => {
     if (typeof entry !== "string") throw refusal(file, `allow entry ${index + 1} is not a string`);
-    if (entry.includes("*")) throw refusal(file, `allow entry ${JSON.stringify(entry)}: wildcards are not accepted; name the exact tool, e.g. mcp__alpaca-kit__screen`);
+    if (entry.includes("*")) throw refusal(file, `allow entry ${JSON.stringify(entry)}: wildcards are not accepted; name the exact tool, e.g. read or mcp__<server>__<raw>`);
     if (!TOOL_NAME_RE.test(entry)) throw refusal(file, `allow entry ${JSON.stringify(entry)} is not a tool name (letters, digits, _ and - only)`);
     const never = neverCarries(entry);
     if (never !== undefined) throw refusal(file, `allow entry ${JSON.stringify(entry)}: ${never}`);

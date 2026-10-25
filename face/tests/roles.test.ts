@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, writeFile, rm, symlink } from "node:fs/promises";
+import { cp, mkdir, writeFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ROLES_ROOT, readRoles, toolNameFor } from "../src/roles.ts";
@@ -8,23 +8,54 @@ import { makeRolesRoot } from "./bots-fixture.ts";
 
 const FORBIDDEN = new Set(["ask_user_question", "web_search", "web_fetch", "subagent", "subagent_fork", "send_message", "interrupt_agent",
   "list_agents", "workflow", "ralph", "create_goal", "get_goal", "update_goal", "todo_write", "run_code",
-  "dispatch", "exit_plan_mode", "mcp__alpaca-kit__account", "mcp__alpaca-kit__positions", "mcp__alpaca-kit__orders",
-  "mcp__alpaca-kit__place_order", "mcp__alpaca-kit__cancel_order"]);
+  "dispatch", "exit_plan_mode", "mcp__venue__account", "mcp__venue__positions", "mcp__venue__orders",
+  "mcp__venue__place_order", "mcp__venue__cancel_order"]);
 /** The account and order tools under ANY server name, matched by their raw suffix as src/orders.ts
  *  `isOrderTool` matches the order tools: an independent copy of the reader's rule. */
 const ACCOUNT_OR_ORDER = /(^|__)(account|positions|orders|place_order|cancel_order|portfolio_live_order|portfolio_live_batch|portfolio_live_amend|portfolio_live_cancel|portfolio_live_close|portfolio_live_leverage|portfolio_live_move|portfolio_live_earn|portfolio_pay|portfolio_order|portfolio_execute|portfolio_transfer)$/;
 const JOB_TOOLS = ["job_output", "job_list", "job_kill"];
 
 test("toolNameFor: role_ plus the id with dashes as underscores", () => {
-  assert.equal(toolNameFor("screener"), "role_screener");
+  assert.equal(toolNameFor("probe"), "role_probe");
   assert.equal(toolNameFor("data-check"), "role_data_check");
 });
 
-test("the shipped roles: three, exact names only, skill on every list, nothing forbidden, the reviewer reads only, jobs only beside bash", () => {
+/* The repository ships `roles/_template` alone (the three alpaca-kit roles retired with the package on
+ * 2026-10-24; new roles come later), so Gravit's preset is the gravit row and nothing else - no
+ * `dsh-tool-subagent` row, no `role_*` tool, an empty summary list - and the committed mirror says so. */
+test("Gravit's preset has no role rows: the shipped library is _template alone", () => {
   const roles = readRoles(ROLES_ROOT);
-  assert.deepEqual(roles.map((r) => r.tool), ["role_backtester", "role_reviewer", "role_screener"]);
-  for (const role of roles) {
-    assert.ok(role.allow.includes("skill"), `${role.id} can load the mechanics skills`);
+  assert.deepEqual(roles, [], "roles/ holds only _template");
+  const rows = gravitRows(roles, { plugin: GRAVIT_PLUGIN_URL, cycle: readCycle(CYCLE_PATH) }) as Array<{ id: string; name: string; config: Record<string, unknown> }>;
+  assert.deepEqual(rows.map((row) => row.id), [GRAVIT_ROW_ID]);
+  assert.deepEqual(rows[0].config.roles, []);
+  const mirror = readFileSync(new URL("../../bots/gravit/agent.cordis.yml", import.meta.url), "utf8");
+  assert.equal(mirror.includes("@deepseek-ai/dsh-tool-subagent"), false, "the mirror carries no role row");
+  assert.equal(/^- id: role-/m.test(mirror), false, "and no role row id");
+  assert.match(mirror, /^ {4}roles: \[\]$/m, "and the gravit row's summary list is empty");
+});
+
+test("over a roles/ holding only _template the preset has no role_* row; the fixture role renders exactly one", async () => {
+  const root = await makeRolesRoot();
+  try {
+    const toolsOf = (rows: Array<{ config: Record<string, unknown> }>) => rows.map((row) => row.config.toolName).filter((name) => name !== undefined);
+    await rm(join(root, "probe"), { recursive: true, force: true });
+    const empty = gravitRows(readRoles(root), { plugin: GRAVIT_PLUGIN_URL }) as Array<{ id: string; config: Record<string, unknown> }>;
+    assert.deepEqual(empty.map((row) => row.id), [GRAVIT_ROW_ID]);
+    assert.deepEqual(toolsOf(empty), []);
+    await cp(join(ROLES_ROOT, "_template"), join(root, "probe"), { recursive: true });
+    await writeFile(join(root, "probe", "ROLE.md"), "You are the probe, a test role.\n");
+    await writeFile(join(root, "probe", "role.yml"), "name: Probe\ndescription: a test role\nallow: [read]\n");
+    const one = gravitRows(readRoles(root), { plugin: GRAVIT_PLUGIN_URL }) as Array<{ id: string; config: Record<string, unknown> }>;
+    assert.deepEqual(one.map((row) => row.id), [GRAVIT_ROW_ID, roleRowId("probe")]);
+    assert.deepEqual(toolsOf(one), ["role_probe"]);
+    assert.deepEqual(one[0].config.roles, [{ tool: "role_probe", summary: "a test role" }]);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+/* The rules every role the repository ships obeys - none ships today; a role the operator adds is held to them. */
+test("every shipped role: exact names only, nothing forbidden, jobs only beside bash", () => {
+  for (const role of readRoles(ROLES_ROOT)) {
     assert.ok(role.description.length <= 300 && role.description.length > 0, role.id);
     for (const name of role.allow) {
       assert.equal(name.includes("*"), false, `${role.id}: ${name} is exact`);
@@ -33,14 +64,6 @@ test("the shipped roles: three, exact names only, skill on every list, nothing f
     /* A bash command past the executor's default moves to a background job the child owns; the job tools
      * are how it reads and stops one, and they mean nothing to a role that cannot start a command. */
     if (JOB_TOOLS.some((job) => role.allow.includes(job))) assert.ok(role.allow.includes("bash"), `${role.id}: a job tool only beside bash`);
-  }
-  const reviewer = roles.find((r) => r.id === "reviewer")!;
-  for (const hand of ["bash", "write", "edit", "str_replace_editor"]) assert.equal(reviewer.allow.includes(hand), false, `the reviewer has no ${hand}`);
-  assert.ok(roles.find((r) => r.id === "screener")!.allow.includes("mcp__alpaca-kit__screen"));
-  for (const id of ["screener", "backtester"]) {
-    const role = roles.find((r) => r.id === id)!;
-    assert.ok(role.allow.includes("bash"), `${id} runs commands`);
-    for (const job of JOB_TOOLS) assert.ok(role.allow.includes(job), `${id} can read and stop its own background job: ${job}`);
   }
 });
 
@@ -51,7 +74,7 @@ test("readRoles skips _template, hidden entries and plain files, and reads a val
     await writeFile(join(root, "NOTES.md"), "not a role\n");
     const roles = readRoles(root);
     assert.deepEqual(roles.map((r) => r.id), ["probe"]);
-    assert.deepEqual(roles[0], { id: "probe", tool: "role_probe", name: "Probe", description: "a test role", persona: "You are the probe, a test role.", allow: ["read", "mcp__alpaca-kit__earnings"] });
+    assert.deepEqual(roles[0], { id: "probe", tool: "role_probe", name: "Probe", description: "a test role", persona: "You are the probe, a test role.", allow: ["read"] });
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -64,7 +87,7 @@ test("readRoles refuses, naming the file: braces, an empty persona, a wildcard, 
     assert.throws(() => readRoles(root), /ROLE\.md.*empty/);
     await writeFile(join(root, "probe", "ROLE.md"), "You are the probe.\n");
     await writeFile(join(root, "probe", "role.yml"), "name: Probe\ndescription: x\nallow: [mcp__*__screen]\n");
-    assert.throws(() => readRoles(root), /role\.yml.*wildcards are not accepted; name the exact tool, e\.g\. mcp__alpaca-kit__screen/);
+    assert.throws(() => readRoles(root), /role\.yml.*wildcards are not accepted; name the exact tool, e\.g\. read or mcp__<server>__<raw>/);
     await writeFile(join(root, "probe", "role.yml"), "name: Probe\ndescription: x\nallow: []\n");
     assert.throws(() => readRoles(root), /allow/);
     await writeFile(join(root, "probe", "role.yml"), "name: Probe\ndescription: x\nallow: [read]\nmodel: nope\n");
@@ -79,20 +102,24 @@ import { GRAVIT_PLUGIN_URL, GRAVIT_ROW_ID, gravitRows, renderGravitComposition, 
 import { GRAVIT_PLUGIN_RELATIVE } from "../src/overlay.ts";
 import { CYCLE_PATH, readCycle } from "../src/cycle.ts";
 
-test("gravitRows: the gravit row carries the summaries; one one-shot spawn row per role with persona and an exact allow list", () => {
-  const roles = readRoles(ROLES_ROOT);
-  const rows = gravitRows(roles, { plugin: GRAVIT_PLUGIN_URL }) as Array<{ id: string; name: string; config: Record<string, unknown> }>;
-  assert.equal(rows[0].id, GRAVIT_ROW_ID);
-  assert.equal(rows[0].name, GRAVIT_PLUGIN_URL);
-  assert.ok(GRAVIT_PLUGIN_URL.startsWith("file:") && GRAVIT_PLUGIN_URL.endsWith("/face/plugins/gravit.js"));
-  assert.deepEqual(rows[0].config, { roles: roles.map((r) => ({ tool: r.tool, summary: r.description })) });
-  assert.equal(rows.length, 1 + roles.length);
-  for (const role of roles) {
-    const row = rows.find((r) => r.id === roleRowId(role.id))!;
-    assert.equal(row.name, "@deepseek-ai/dsh-tool-subagent");
-    assert.deepEqual(Object.keys(row.config).sort(), ["backgroundMode", "persona", "provider", "toolFilter", "toolName"]);
-    assert.deepEqual(row.config, { provider: "spawn", toolName: role.tool, backgroundMode: "one-shot", persona: role.persona, toolFilter: { allow: role.allow } });
-  }
+test("gravitRows: the gravit row carries the summaries; one one-shot spawn row per role with persona and an exact allow list", async () => {
+  const root = await makeRolesRoot();
+  try {
+    const roles = readRoles(root);
+    assert.equal(roles.length, 1, "the fixture root holds one role");
+    const rows = gravitRows(roles, { plugin: GRAVIT_PLUGIN_URL }) as Array<{ id: string; name: string; config: Record<string, unknown> }>;
+    assert.equal(rows[0].id, GRAVIT_ROW_ID);
+    assert.equal(rows[0].name, GRAVIT_PLUGIN_URL);
+    assert.ok(GRAVIT_PLUGIN_URL.startsWith("file:") && GRAVIT_PLUGIN_URL.endsWith("/face/plugins/gravit.js"));
+    assert.deepEqual(rows[0].config, { roles: roles.map((r) => ({ tool: r.tool, summary: r.description })) });
+    assert.equal(rows.length, 1 + roles.length);
+    for (const role of roles) {
+      const row = rows.find((r) => r.id === roleRowId(role.id))!;
+      assert.equal(row.name, "@deepseek-ai/dsh-tool-subagent");
+      assert.deepEqual(Object.keys(row.config).sort(), ["backgroundMode", "persona", "provider", "toolFilter", "toolName"]);
+      assert.deepEqual(row.config, { provider: "spawn", toolName: role.tool, backgroundMode: "one-shot", persona: role.persona, toolFilter: { allow: role.allow } });
+    }
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test("gravitRows: a role.yml model becomes the row's agentOptions, provider and model split; without one the key is absent", async () => {
@@ -177,7 +204,7 @@ test("readRoles refuses every tool a role never carries, naming role.yml and why
   try {
     /* The Account seat's tools (spec 2026-10-20 §5.3): every tool under the seat's prefix — a role has no reason to read
      * the account — and its twelve writes under any server name. */
-    for (const entry of [...FORBIDDEN, ...RENAMED_SERVER, "role_screener", "agent_codex", "mcp__akshare__stock_zh_a_hist",
+    for (const entry of [...FORBIDDEN, ...RENAMED_SERVER, "role_probe", "agent_codex", "mcp__akshare__stock_zh_a_hist",
       "mcp__account__portfolio_holdings", "mcp__account__portfolio_wait", "portfolio_live_close"]) {
       await writeFile(join(root, "probe", "role.yml"), `name: Probe\ndescription: x\nallow:\n  - read\n  - ${entry}\n`);
       assert.throws(() => readRoles(root), (e: Error) =>

@@ -43,9 +43,9 @@ test("validateGravitConfig: {} is valid; cycle and roles are checked when presen
   assert.match(validateGravitConfig(null) ?? "", /object/);
   assert.match(validateGravitConfig({ cycle: "" }) ?? "", /cycle/);
   assert.equal(validateGravitConfig({ cycle: "Open one goal per cycle." }), undefined);
-  assert.match(validateGravitConfig({ roles: [{ tool: "screener", summary: "x" }] }) ?? "", /role_/);
-  assert.match(validateGravitConfig({ roles: [{ tool: "role_screener", summary: "" }] }) ?? "", /summary/);
-  assert.equal(validateGravitConfig({ roles: [{ tool: "role_screener", summary: "runs the screen" }] }), undefined);
+  assert.match(validateGravitConfig({ roles: [{ tool: "probe", summary: "x" }] }) ?? "", /role_/);
+  assert.match(validateGravitConfig({ roles: [{ tool: "role_probe", summary: "" }] }) ?? "", /summary/);
+  assert.equal(validateGravitConfig({ roles: [{ tool: "role_probe", summary: "probes the fixture" }] }), undefined);
 });
 
 test("todayText renders the LOCAL date of the zone, ISO date then weekday", () => {
@@ -111,7 +111,7 @@ test("an unusable TZ is rendered in UTC and labelled, never thrown at assembly",
  * reads them as a root. */
 test("gravit: the roles section follows dsh's subagent section and lists exactly the roles the assembling scope can call", () => {
   const tree = fakeScope();
-  const roles = [{ tool: "role_screener", summary: "runs the screen" }, { tool: "role_reviewer", summary: "audits" }];
+  const roles = [{ tool: "role_probe", summary: "probes the fixture" }, { tool: "role_auditor", summary: "audits" }];
   apply(tree.ctx, { roles });
   const section = tree.sections.find((s) => s.name === ROLES_SECTION)!;
   assert.ok(section, "registered");
@@ -119,23 +119,23 @@ test("gravit: the roles section follows dsh's subagent section and lists exactly
   assert.equal(section.interpolate, false);
   assert.equal(tree.lookups.length, 0, "nothing is looked up at mount: the gate is read at every assembly");
   const textFor = (visible: string[]) => (section.text as (c: unknown) => string)({ scope: { visible } });
-  const all = textFor(["read", "role_screener", "role_reviewer"]);
+  const all = textFor(["read", "role_probe", "role_auditor"]);
   assert.equal(all, rolesText(roles), "every role tool visible: the whole list, as Gravit and a fork child read it");
   assert.match(all, /^Roles\. /);
-  assert.ok(all.includes("- role_screener — runs the screen") && all.includes("- role_reviewer — audits"));
+  assert.ok(all.includes("- role_probe — probes the fixture") && all.includes("- role_auditor — audits"));
   assert.equal(textFor(["read", "grep"]), "", "no role tool visible (a role child's allow list removed them): nothing");
-  assert.equal(textFor(["role_reviewer"]), rolesText([roles[1]]), "one of two visible: that one only");
-  assert.equal(textFor(["role_reviewer"]).includes("role_screener"), false);
+  assert.equal(textFor(["role_auditor"]), rolesText([roles[1]]), "one of two visible: that one only");
+  assert.equal(textFor(["role_auditor"]).includes("role_probe"), false);
 });
 
 test("canCall is the registry's view of the assembling scope: tools.get(name, context.scope)", () => {
   const tree = fakeScope();
-  const scope = { visible: ["role_screener"] };
-  assert.equal(canCall(tree.ctx, { scope }, "role_screener"), true);
-  assert.equal(canCall(tree.ctx, { scope }, "role_reviewer"), false);
-  assert.deepEqual(tree.lookups.map((l) => [l.name, l.scope === scope]), [["role_screener", true], ["role_reviewer", true]], "each lookup is handed the context's own scope");
-  assert.equal(canCall(tree.ctx, {}, "role_screener"), false, "no scope is the global view, where no preset-scoped tool lives");
-  assert.equal(canCall(tree.ctx, undefined, "role_screener"), false, "total on a missing context");
+  const scope = { visible: ["role_probe"] };
+  assert.equal(canCall(tree.ctx, { scope }, "role_probe"), true);
+  assert.equal(canCall(tree.ctx, { scope }, "role_auditor"), false);
+  assert.deepEqual(tree.lookups.map((l) => [l.name, l.scope === scope]), [["role_probe", true], ["role_auditor", true]], "each lookup is handed the context's own scope");
+  assert.equal(canCall(tree.ctx, {}, "role_probe"), false, "no scope is the global view, where no preset-scoped tool lives");
+  assert.equal(canCall(tree.ctx, undefined, "role_probe"), false, "total on a missing context");
 });
 
 test("gravit: without a roles key there is no roles section; an empty list renders nothing", () => {
@@ -176,10 +176,10 @@ test("gravit: the cycle section sits just before the persona suffix, is literal,
  * scope here resolves every tool, so only the header can blank a section. */
 test("gravit: both sections are blank for a delegated child that is not a fork, and Gravit's text for a fork child and a root session", () => {
   const tree = fakeScope();
-  const roles = [{ tool: "role_screener", summary: "runs the screen" }, { tool: "role_reviewer", summary: "audits" }];
+  const roles = [{ tool: "role_probe", summary: "probes the fixture" }, { tool: "role_auditor", summary: "audits" }];
   const cycle = "# The research cycle\n\nStep 0 — ask once.";
   apply(tree.ctx, { roles, cycle });
-  const everything = { visible: ["read", "create_goal", "update_goal", "role_screener", "role_reviewer"] };
+  const everything = { visible: ["read", "create_goal", "update_goal", "role_probe", "role_auditor"] };
   const textOf = (sectionName: string, header?: object): string =>
     (tree.sections.find((s) => s.name === sectionName)!.text as (c: unknown) => string)(
       header === undefined ? { scope: everything } : { scope: everything, agent: { session: { header } } });

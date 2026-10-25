@@ -1,19 +1,21 @@
-/** Role delegation on a real tree: `role_reviewer` and `role_screener` spawn a
+/** Role delegation on a real tree: `role_auditor` and `role_worker` spawn a
  * one-shot child whose persona is the role's (shadowing Gravit's), whose tools
  * are exactly the role's allow list (ancestor-layer `role_*` tools removed,
  * `gravit:roles` and `gravit:cycle` blank), and whose result returns through
- * the tool; the reviewer's child reads the root `GRAVIT.md` in its
+ * the tool; the auditor's child reads the root `GRAVIT.md` in its
  * `agent-instructions` baseline; a `subagent_fork` child - seeded and
  * unrestricted - is assembled Gravit's system text byte for byte (the roles
  * list and the cycle contract included) and Gravit's tools, the premise of its
  * inherited prefix's cache reuse; a plain `subagent` child - unseeded and as
  * unrestricted - reads neither section although it can call `create_goal` and
  * every role tool; a role naming a tool the tree lacks fails loudly at
- * delegation. The MCP tools the roles name are stand-ins registered under the
- * exact production names. Own file, gated. */
+ * delegation. The repository ships no role, so the two roles are fixtures made
+ * from the real `roles/_template` under the test's own roles root, handed to
+ * the boot as `rolesRoot`; the MCP tools they name are stand-ins registered
+ * under a server name nothing real uses. Own file, gated. */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -24,7 +26,7 @@ import { renderPrompt } from "@deepseek-ai/dsh-system-prompt";
 import { setupFaceProfile } from "../src/setup.ts";
 import { bootFace } from "../src/boot.ts";
 import { PERSONA_PATH, readPersona } from "../src/persona.ts";
-import { ROLES_ROOT, readRoles } from "../src/roles.ts";
+import { ROLE_TEMPLATE, ROLES_ROOT, readRoles } from "../src/roles.ts";
 import { makeBotsRoot } from "./bots-fixture.ts";
 import { mountClient, remote, signIn } from "./remote.ts";
 import { StubAdapter, type StubReply } from "./stub-llm.ts";
@@ -49,8 +51,26 @@ async function waitFor(label: string, check: () => boolean, ms = 30_000) {
   while (!check()) { if (Date.now() >= until) throw new Error(`timed out: ${label}`); await new Promise((r) => setTimeout(r, 20)); }
 }
 
+/** The fixture roles: each a copy of the repository's real `roles/_template` with its own persona and
+ *  allow list. The auditor reads only; the worker runs commands, writes, and owns its background jobs. */
+const FIXTURE_ROLES: Record<string, { persona: string; allow: string[] }> = {
+  auditor: { persona: "You are the auditor, a fixture role that reads only.", allow: ["read", "glob", "grep", "skill", "mcp__fixture__lookup", "mcp__fixture__history"] },
+  worker: { persona: "You are the worker, a fixture role with hands.", allow: ["bash", "job_output", "job_list", "job_kill", "read", "write", "glob", "grep", "skill", "mcp__fixture__lookup", "mcp__fixture__fetch"] },
+};
+async function makeFixtureRolesRoot(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "face-roles-lib-"));
+  await cp(join(ROLES_ROOT, ROLE_TEMPLATE), join(root, ROLE_TEMPLATE), { recursive: true });
+  for (const [id, role] of Object.entries(FIXTURE_ROLES)) {
+    await cp(join(ROLES_ROOT, ROLE_TEMPLATE), join(root, id), { recursive: true });
+    await writeFile(join(root, id, "ROLE.md"), `${role.persona}\n`);
+    await writeFile(join(root, id, "role.yml"), `name: ${id}\ndescription: the ${id} fixture role\nallow:\n${role.allow.map((name) => `  - ${name}\n`).join("")}`);
+  }
+  return root;
+}
+
 test("roles smoke: persona, exact tools, the result, the baseline, a fork's identical prefix, a spawn's blank sections, and a loud failure for a missing tool", { skip: gated && "set FACE_SMOKE=1", timeout: 180_000 }, async () => {
   const bots = await makeBotsRoot();
+  const rolesRoot = await makeFixtureRolesRoot();
   const root = await realpath(await mkdtemp(join(tmpdir(), "face-roles-root-")));
   const home = await mkdtemp(join(tmpdir(), "face-roles-home-"));
   let dispose: (() => Promise<void>) | undefined;
@@ -61,13 +81,13 @@ test("roles smoke: persona, exact tools, the result, the baseline, a fork's iden
     const patchPath = join(home, "profiles", "face", "cordis.patch.yml");
     const patch = readFileSync(patchPath, "utf8").replace(/^\[\][ \t]*$/m, "");
     writeFileSync(patchPath, `${patch}\n- id: mcp-akshare\n  disabled: true\n- id: mcp-account\n  disabled: true\n- id: agent-default-model\n  config:\n    provider: stub\n    model: echo\n`);
-    const booted = await bootFace({ profileName: "face", port: 0, dshHome: home, botsRoot: bots });
+    const booted = await bootFace({ profileName: "face", port: 0, dshHome: home, botsRoot: bots, rolesRoot });
     dispose = booted.dispose;
     const { ctx } = booted;
     const tools = ctx.get("tools") as { register(d: unknown): () => void; schemas(scope?: object): { name: string }[] };
-    /* Stand-ins under the exact production names the shipped roles allow, plus one they do not. */
-    const mcpNames = new Set(readRoles(ROLES_ROOT).flatMap((r) => r.allow).filter((n) => n.startsWith("mcp__")));
-    mcpNames.add("mcp__alpaca-kit__account");
+    /* Stand-ins under the exact names the fixture roles allow, plus one neither does. */
+    const mcpNames = new Set(readRoles(rolesRoot).flatMap((r) => r.allow).filter((n) => n.startsWith("mcp__")));
+    mcpNames.add("mcp__fixture__private");
     const unregister = new Map<string, () => void>();
     for (const name of mcpNames) unregister.set(name, tools.register({ name, description: `stand-in ${name}`, parameters: {}, output: { schema: { type: "object" }, render: () => [{ type: "text", text: "ok" }] }, execute: async () => ({}) }));
     const requested = new Map<string, GenerateOptions[]>();
@@ -85,11 +105,11 @@ test("roles smoke: persona, exact tools, the result, the baseline, a fork's iden
       const trigger = lastHuman(request);
       const text = trigger ? textOf(trigger) : "";
       if (header?.isSeeded === true) return { kind: "text", text: "FORK_DONE" };
-      if (header?.origin === "subagent") return { kind: "text", text: text.includes("REVIEW_FIXTURE") ? "REVIEW_DONE" : text.includes("SPAWN_FIXTURE") ? "SPAWN_DONE" : "SCREEN_DONE" };
-      if (sourceKind(trigger!) === "user" && text === "RUN_REVIEWER") return { kind: "tool", name: "role_reviewer", args: { description: "Audit the fixture", prompt: "REVIEW_FIXTURE: audit the fixture strategy." } };
+      if (header?.origin === "subagent") return { kind: "text", text: text.includes("AUDIT_FIXTURE") ? "AUDIT_DONE" : text.includes("SPAWN_FIXTURE") ? "SPAWN_DONE" : "WORK_DONE" };
+      if (sourceKind(trigger!) === "user" && text === "RUN_AUDITOR") return { kind: "tool", name: "role_auditor", args: { description: "Audit the fixture", prompt: "AUDIT_FIXTURE: audit the fixture strategy." } };
       if (sourceKind(trigger!) === "user" && text === "RUN_FORK") return { kind: "tool", name: "subagent_fork", args: { description: "Fork the fixture", prompt: "FORK_FIXTURE: continue." } };
       if (sourceKind(trigger!) === "user" && text === "RUN_SUBAGENT") return { kind: "tool", name: "subagent", args: { description: "Spawn the fixture", prompt: "SPAWN_FIXTURE: check one source.", run_in_background: false } };
-      if (sourceKind(trigger!) === "user" && text === "RUN_SCREENER") return { kind: "tool", name: "role_screener", args: { description: "Screen one day", prompt: "SCREEN_FIXTURE: screen 2025-06-05." } };
+      if (sourceKind(trigger!) === "user" && text === "RUN_WORKER") return { kind: "tool", name: "role_worker", args: { description: "Work one task", prompt: "WORK_FIXTURE: one bounded task." } };
       return { kind: "text", text: "PARENT_DONE" };
     };
     ctx.llm.registerAdapter(["stub"], new StubAdapter(script));
@@ -104,7 +124,7 @@ test("roles smoke: persona, exact tools, the result, the baseline, a fork's iden
      * `{{`, as bots-smoke does (the text after it is a substituted variable); it is read from the file. */
     const rolesIntro = "Roles. One-shot delegates";
     const gravitPersona = readPersona(PERSONA_PATH).split("{{")[0];
-    assert.ok(gravitPrompt.includes("- role_reviewer — "), "Gravit reads the roles section");
+    assert.ok(gravitPrompt.includes("- role_auditor — "), "Gravit reads the roles section");
     assert.ok(gravitPrompt.includes(rolesIntro), "Gravit reads the roles intro");
     assert.ok(gravitPrompt.includes(CYCLE_HEADING), "Gravit reads the cycle contract");
     assert.ok(gravitPrompt.includes(gravitPersona), "Gravit is told who it is");
@@ -113,33 +133,33 @@ test("roles smoke: persona, exact tools, the result, the baseline, a fork's iden
       const [id, rs] = [...requested.entries()].find(([id, rs]) => isChild(id) && rs.some((r) => r.messages.some((m) => textOf(m).includes(marker))))!;
       return { id: SessionId(id), request: rs[0], header: headers.get(id)! };
     };
-    /* reviewer */
-    await prompt("RUN_REVIEWER");
-    const reviewer = await childRequestAfter("REVIEW_FIXTURE");
+    /* auditor */
+    await prompt("RUN_AUDITOR");
+    const auditor = await childRequestAfter("AUDIT_FIXTURE");
     await gravit.whenIdle();
-    const reviewerTools = reviewer.request.tools!.map((t) => t.name).sort();
-    for (const kept of ["read", "glob", "grep", "skill", "mcp__alpaca-kit__daily_bars", "mcp__alpaca-kit__calendar", "mcp__alpaca-kit__corp_actions", "mcp__alpaca-kit__market_snapshot"]) assert.ok(reviewerTools.includes(kept), `reviewer keeps ${kept}`);
-    for (const gone of ["bash", "write", "edit", "ask_user_question", "web_search", "subagent", "subagent_fork", "send_message", ...readRoles(ROLES_ROOT).map((r) => r.tool), "mcp__alpaca-kit__account", "mcp__alpaca-kit__screen"]) assert.equal(reviewerTools.includes(gone), false, `reviewer never sees ${gone}`);
+    const auditorTools = auditor.request.tools!.map((t) => t.name).sort();
+    for (const kept of ["read", "glob", "grep", "skill", "mcp__fixture__lookup", "mcp__fixture__history"]) assert.ok(auditorTools.includes(kept), `auditor keeps ${kept}`);
+    for (const gone of ["bash", "write", "edit", "ask_user_question", "web_search", "subagent", "subagent_fork", "send_message", ...readRoles(rolesRoot).map((r) => r.tool), "mcp__fixture__private", "mcp__fixture__fetch"]) assert.equal(auditorTools.includes(gone), false, `auditor never sees ${gone}`);
     /* Equality, not subsets: dsh exempts a scope's own-layer registrations from `restrict()`, so only an exact
      * comparison with the role's allow list catches a tool the child's layer adds. */
-    const role = (id: string) => readRoles(ROLES_ROOT).find((r) => r.id === id)!;
-    assert.deepEqual(reviewerTools, [...role("reviewer").allow].sort(), "the reviewer's tools are exactly its allow list");
-    const system = reviewer.request.messages[0];
+    const role = (id: string) => readRoles(rolesRoot).find((r) => r.id === id)!;
+    assert.deepEqual(auditorTools, [...role("auditor").allow].sort(), "the auditor's tools are exactly its allow list");
+    const system = auditor.request.messages[0];
     assert.equal(system.role, "system");
-    assert.ok(textOf(system).includes("You are the reviewer"), "the role persona is the child's");
+    assert.ok(textOf(system).includes("You are the auditor"), "the role persona is the child's");
     assert.equal(textOf(system).includes(gravitPersona), false, "and it shadows Gravit's");
     assert.equal(textOf(system).includes(rolesIntro), false, "the roles section is blank for a role child: its allow list removed every role tool");
     assert.equal(textOf(system).includes(CYCLE_HEADING), false, "and so is the cycle section: its allow list removed create_goal, the visibility `gravit:cycle` is gated on");
     assert.match(textOf(system), /Today is \d{4}-\d{2}-\d{2}/, "the date reaches the child");
-    assert.equal(reviewer.header.origin, "subagent");
-    assert.equal(reviewer.header.agentPreset, "gravit");
-    assert.equal(reviewer.header.cwd, root);
-    assert.ok(gravit.session.snapshotEvents().some((e) => e.type === "tool/result" && JSON.stringify(e.data).includes("REVIEW_DONE")), "the child's text returns through the tool");
+    assert.equal(auditor.header.origin, "subagent");
+    assert.equal(auditor.header.agentPreset, "gravit");
+    assert.equal(auditor.header.cwd, root);
+    assert.ok(gravit.session.snapshotEvents().some((e) => e.type === "tool/result" && JSON.stringify(e.data).includes("AUDIT_DONE")), "the child's text returns through the tool");
     /* The workspace map reaches a role child: dsh's agent-instructions row publishes a baseline on every
      * agent's first request, a spawn child's included. Gravit's own first request is the positive pair. */
     const baselineHasMark = (r: GenerateOptions) => r.messages.some((m) => sourceKind(m) === "agent-instructions" && textOf(m).includes(GRAVIT_MARK));
     assert.ok(baselineHasMark(requested.get(sessionId)![0]), "Gravit's baseline carries the root GRAVIT.md");
-    assert.ok(baselineHasMark(reviewer.request), "so does the reviewer child's first request");
+    assert.ok(baselineHasMark(auditor.request), "so does the auditor child's first request");
     /* fork: `subagent_fork` seeds its child with Gravit's completed turns and restricts nothing, so the
      * child's first request must open with Gravit's system text byte for byte and offer Gravit's tools,
      * or the inherited prefix loses its cache reuse. `gravit:roles` and `gravit:cycle` are gated on what the
@@ -170,33 +190,33 @@ test("roles smoke: persona, exact tools, the result, the baseline, a fork's iden
     assert.equal(spawn.header.origin, "subagent");
     assert.equal(spawn.header.isSeeded, false, "a subagent child is not seeded");
     const spawnTools = spawn.request.tools!.map((t) => t.name);
-    for (const visible of ["create_goal", ...readRoles(ROLES_ROOT).map((r) => r.tool)]) assert.ok(spawnTools.includes(visible), `the spawn child can call ${visible}, so only the header blanks the sections`);
+    for (const visible of ["create_goal", ...readRoles(rolesRoot).map((r) => r.tool)]) assert.ok(spawnTools.includes(visible), `the spawn child can call ${visible}, so only the header blanks the sections`);
     const spawnSystem = textOf(spawn.request.messages[0]);
     assert.equal(spawn.request.messages[0].role, "system");
     assert.equal(spawnSystem.includes(CYCLE_HEADING), false, "no cycle contract for a delegated child that is not a fork");
     assert.equal(spawnSystem.includes(rolesIntro), false, "and no roles section");
     assert.match(spawnSystem, /Today is \d{4}-\d{2}-\d{2}/, "the date still reaches it");
     assert.ok(gravit.session.snapshotEvents().some((e) => e.type === "tool/result" && JSON.stringify(e.data).includes("SPAWN_DONE")), "the spawn's text returns through the tool");
-    /* screener */
-    await prompt("RUN_SCREENER");
-    const screener = await childRequestAfter("SCREEN_FIXTURE");
+    /* worker */
+    await prompt("RUN_WORKER");
+    const worker = await childRequestAfter("WORK_FIXTURE");
     await gravit.whenIdle();
-    const screenerTools = screener.request.tools!.map((t) => t.name);
-    assert.ok(["bash", "write", "mcp__alpaca-kit__screen"].every((n) => screenerTools.includes(n)));
-    assert.equal(screenerTools.includes("edit"), false);
-    assert.deepEqual([...screenerTools].sort(), [...role("screener").allow].sort(), "the screener's tools are exactly its allow list");
+    const workerTools = worker.request.tools!.map((t) => t.name);
+    assert.ok(["bash", "write", "mcp__fixture__fetch"].every((n) => workerTools.includes(n)));
+    assert.equal(workerTools.includes("edit"), false);
+    assert.deepEqual([...workerTools].sort(), [...role("worker").allow].sort(), "the worker's tools are exactly its allow list");
     /* a tool the tree lacks: the delegation fails naming it, no child runs */
-    unregister.get("mcp__alpaca-kit__earnings")!();
+    unregister.get("mcp__fixture__fetch")!();
     const childrenBefore = [...requested.keys()].filter(isChild).length;
-    await prompt("RUN_SCREENER");
+    await prompt("RUN_WORKER");
     await gravit.whenIdle();
     const failed = gravit.session.snapshotEvents().filter((e) => e.type === "tool/result").at(-1)!;
     /* Anchored on the quoted name right after the verb: the payload is stringified, so the quotes carry a
      * backslash, and a looser pattern would also match the name inside the error's known-tools list. */
-    assert.match(JSON.stringify(failed.data), /names unknown global tools? \\"mcp__alpaca-kit__earnings\\"/);
+    assert.match(JSON.stringify(failed.data), /names unknown global tools? \\"mcp__fixture__fetch\\"/);
     assert.equal([...requested.keys()].filter(isChild).length, childrenBefore, "no child was created");
   } finally {
     await dispose?.();
-    await Promise.all([rm(bots, { recursive: true, force: true }), rm(root, { recursive: true, force: true }), rm(home, { recursive: true, force: true })]);
+    await Promise.all([rm(bots, { recursive: true, force: true }), rm(rolesRoot, { recursive: true, force: true }), rm(root, { recursive: true, force: true }), rm(home, { recursive: true, force: true })]);
   }
 });

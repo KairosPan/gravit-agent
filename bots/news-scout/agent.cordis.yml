@@ -40,13 +40,6 @@
       - str_replace_editor
       - web_search
       - write
-      - mcp__*__earnings
-      - mcp__*__daily_bars
-      - mcp__*__calendar
-      - mcp__*__corp_actions
-      - mcp__*__market_snapshot
-      - mcp__*__screen
-      - mcp__*__breadth
 - id: skills
   name: '@deepseek-ai/dsh-skill-filesystem'
   config:

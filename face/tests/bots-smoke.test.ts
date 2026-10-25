@@ -18,7 +18,8 @@
  *     (src/cycle.ts): the face's gravit plugin (the date section, the role
  *     summaries, the research-cycle contract) and one `dsh-tool-subagent` row
  *     per role, none of which masks a tool. Gravit's sessions join it: their
- *     tool set is the host's global view plus the `role_*` tools, their prompt
+ *     tool set is the host's global view plus the `role_*` tools (none here:
+ *     the repository's `roles/` holds only `_template`), their prompt
  *     carries the date and the cycle contract, and a bot's carries neither (nor
  *     does it see a role tool).
  * Also: the roster lists a broken fixture with its reason and never `_template`;
@@ -73,14 +74,14 @@ test("bots smoke: roster, mask, persona, a default that masks nothing, the shipp
      * did; `shipped` below is left exactly as `createBot` writes it, relative.
      * The face rebases both to `file:` URLs, and both are pinned. */
     await createBot(bots, { id: "probe", name: "Probe", soul: "You are Probe, a test voice." });
-    /* `role_screener` is a role tool: it lives in Gravit's preset layer, not the global set a mask is matched
+    /* `role_probe` names a role tool: one would live in Gravit's preset layer, not the global set a mask is matched
      * against, so allow ∩ tree drops it like `no_such_tool` and S2's expectation below does not move. Naming
      * it is what lets "a bot never sees a role tool" fail if a mask ever admitted one. `create_goal` is a
      * global tool, so the mask admits it and the bot CAN call it: the bot's missing cycle contract below is
      * then the preset scoping's doing, not the `create_goal` gate's, and a cycle section registered globally
      * but gated would fail it. */
     await writeFile(join(bots, "probe", "agent.cordis.yml"),
-      renderComposition({ soul: "You are Probe, a test voice.", allow: ["bash", "read", "ask_user_question", "create_goal", "role_screener", "no_such_tool"], plugin: PLUGIN_ABS }));
+      renderComposition({ soul: "You are Probe, a test voice.", allow: ["bash", "read", "ask_user_question", "create_goal", "role_probe", "no_such_tool"], plugin: PLUGIN_ABS }));
     await createBot(bots, { id: "shipped", name: "Shipped", soul: "You are Shipped, the relative-path probe." });
     /* The Gate-2 bot: its mask ADMITS the order stand-in. That is the point -
      * the guard must refuse it anyway, so the refusal cannot be credited to
@@ -134,13 +135,19 @@ test("bots smoke: roster, mask, persona, a default that masks nothing, the shipp
         renderPrompt(await ctx.systemPrompt.assemble(assembleContextFor(agent)));
       const names = (schemas: { name: string }[]) => schemas.map((s) => s.name).sort();
 
-      /* S3 - Gravit: a session naming no preset joins `gravit` and keeps the host's tools, plus the role library's. */
+      /* S3 - Gravit: a session naming no preset joins `gravit` and keeps the host's tools, plus the role library's.
+       * This boot reads the repository's own roles/, which holds only `_template` since the three alpaca-kit
+       * roles retired, so the library adds nothing: Gravit's tools are the host's exactly, and no `role_*` tool
+       * (role_screener above all) is among them. The role tools' own path is roles-smoke's, over fixture roles. */
       const k = await create({ cwd: home });
       assert.equal(k.agentPreset, "gravit");
       const gravit = agentOf(k.sessionId);
       assert.equal(gravit.session.header.agentPreset, "gravit");
+      assert.deepEqual(readRoles(ROLES_ROOT), [], "the repository ships no role");
       assert.deepEqual(names(tools.schemas(gravit)), [...names(tools.schemas()), ...readRoles(ROLES_ROOT).map((role) => role.tool)].sort(),
         "Gravit's tools are the host's plus the role library (spec §5.1)");
+      assert.ok(names(tools.schemas(gravit)).includes("bash") && names(tools.schemas(gravit)).includes("read"), "Gravit keeps the host's tools");
+      assert.equal(names(tools.schemas(gravit)).some((name) => name.startsWith("role_")), false, "and has no role tool: no role_screener");
       /* Compared up to the persona's first `{{`, not its first LINE: line 1 ends
        * `... your working directory is {{cwd}}.` and renderPrompt substitutes it
        * (measured: the rendered text carries this session's cwd). The prefix is
