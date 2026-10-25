@@ -3015,34 +3015,39 @@ stages all of them, with the transport drill, on a copy of the operator's home.
 
 ## 8. Conventions
 
-- **An offline suite, no keys.** The face suite runs with nothing configured; a test that needs
-  the network monkeypatches the seam. The real-boot tests are opt-in behind `FACE_SMOKE=1`. - **A
-  real boot speaks the browser's wire.** Each smoke owns one `bootFace` in its own file, mounts
-  the real `/` and signs in through it (`tests/remote.ts`: `mountClient`, `signIn`, `remote`)
-  before any `/api` call; `client-mux-smoke` drives the page's own `api.js` and `mapper.js`. The
-  structural `*Like` types hide most dsh drift from `tsc`, so after every pin bump the eighteen
-  real boots are the contract. - **An arc is** brainstorm → spec (`docs/superpowers/specs/`) →
-  plan → build with tests → a whole-branch review → a post-build amendments block on the spec. The
-  block is what freezes the spec; the Status line is left as written. Of the five post-reset
-  specs, chat-light, instruments and bots-and-rooms carry the block — the last for all four of its
-  plans; the skeleton and channels specs have none and still read "pending user review" (§10).
-  Three pre-reset specs say the same and are retired, not open. The dsh 0.2.0 re-host was built
-  from a plan kept outside the repository; its decisions are §4.8. - **A guard ships with its
-  drill in the same change** (charter Rule 4). A guard that has never been pulled is presumed
-  broken. - **Never edit**: the installed profile copies under `$DSH_HOME` (operator territory;
-  the face rewrites `cordis.yml`), anything under `bots/` (the operator's voices; Gravit proposes
-  one in conversation and creates none), anything under `docs/research/` (frozen inputs). - **No
-  custom session-event types.** dsh's persistence refuses to reload a log carrying an unknown
-  type; a room fact rides a known event with a room `source` — `kind: 'room'`, a native v4 message
-  source since 0.2.0 (the 0.1.1 logs that carry it are the ones the 0.2 migration refuses, §9
-  R20). - **A bot's mask is visibility, not authority.** Write sentences that say so; the
-  session's sandbox mode and Gate 2 are the fences, and neither is containment. - **Channel names
-  do not admit spaces.** They become shell paths Gravit types by hand. - **Line numbers in prose
-  go stale in days.** Cite files and symbols. - **Credentials never enter the repo**; `.env*` is
-  gitignored; error bodies never echo child stderr. - **Commit messages with code go through a
-  file** (`git commit -F`): backticks and `$()` in `-m` are shell. - **Descriptive docs.** This
-  file, `CLAUDE.md` and `face/README.md` state what is; when the code moves, the doc is fixed, not
-  defended.
+- **An offline suite, no keys.** The face suite runs with nothing configured; a test that needs the
+  network monkeypatches the seam. The real-boot tests are opt-in behind `FACE_SMOKE=1`.
+- **A real boot speaks the browser's wire.** Each smoke owns one `bootFace` in its own file,
+  mounts the real `/` and signs in through it (`tests/remote.ts`: `mountClient`, `signIn`,
+  `remote`) before any `/api` call; `client-mux-smoke` drives the page's own `api.js` and
+  `mapper.js`. The structural `*Like` types hide most dsh drift from `tsc`, so after every pin
+  bump the eighteen real boots are the contract.
+- **An arc is** brainstorm → spec (`docs/superpowers/specs/`) → plan → build with tests → a
+  whole-branch review → a post-build amendments block on the spec. The block is what freezes the
+  spec; the Status line is left as written. Of the five post-reset specs, chat-light,
+  instruments and bots-and-rooms carry the block — the last for all four of its plans; the
+  skeleton and channels specs have none and still read "pending user review" (§10). Three
+  pre-reset specs say the same and are retired, not open. The dsh 0.2.0 re-host was built from
+  a plan kept outside the repository; its decisions are §4.8.
+- **A guard ships with its drill in the same change** (charter Rule 4). A guard that has never
+  been pulled is presumed broken.
+- **Never edit**: the installed profile copies under `$DSH_HOME` (operator territory; the face rewrites `cordis.yml`), anything under
+  `bots/` (the operator's voices; Gravit proposes one in conversation and creates none), anything
+  under `docs/research/` (frozen inputs).
+- **No custom session-event types.** dsh's persistence refuses to reload a log carrying an
+  unknown type; a room fact rides a known event with a room `source` — `kind: 'room'`, a native
+  v4 message source since 0.2.0 (the 0.1.1 logs that carry it are the ones the 0.2 migration
+  refuses, §9 R20).
+- **A bot's mask is visibility, not authority.** Write sentences that say so; the session's
+  sandbox mode and Gate 2 are the fences, and neither is containment.
+- **Channel names do not admit spaces.** They become shell paths Gravit types by hand.
+- **Line numbers in prose go stale in days.** Cite files and symbols.
+- **Credentials never enter the repo**; `.env*` is gitignored; error bodies never echo child
+  stderr.
+- **Commit messages with code go through a file** (`git commit -F`): backticks and `$()` in
+  `-m` are shell.
+- **Descriptive docs.** This file, `CLAUDE.md` and `face/README.md` state what is; when the
+  code moves, the doc is fixed, not defended.
 
 ---
 
@@ -3384,8 +3389,11 @@ In order; each with what "done" is and which charter row it reopens.
    reopens D5 (spend metering) the day anything starts unattended.
 6. **Paper forward-testing** — since 2026-10-24 every cycle's evidence (`dsh/profile/cycle.md`):
    a forward paper trade on the Account's paper venue through the seat, under both cards
-   (`status: paper` while one runs). What remains is an independent evaluator (D1, D7) before a
-   paper record argues for a real venue (item 17).
+   (`status: paper` while one runs). That reached the charter's D1 trigger ("before any strategy
+   enters paper forward-testing") on 2026-10-24, by the operator's decision; D1's next trigger is
+   the operator's to set (proposed, awaiting the operator: before a strategy's paper record is
+   taken as grounds for a real venue, item 17). The independent evaluator (D1, D7) is still
+   unbuilt.
 7. **FINRA and float live endpoints, a second data vendor.** *Closed 2026-10-24:* they were the
    Python package's, and left with it; the Account's feeds and AKShare are the market.
 8. **Distinct commit identity for Gravit** (D2) on the first confusion.

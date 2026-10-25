@@ -965,10 +965,12 @@ Task 8's calls, written down for the final review:
 - Beyond the spec's list, the charter's remaining descriptions of the removed layer move with it:
   §1's role-library count and working day, P1's placement sentence, §3's operator and Gravit cells
   and the `alpaca_kit` row replaced by an MCP-rows row, §4's engineering, mechanics and
-  `$DSH_HOME` rows; D1's trigger (paper forward-testing is every cycle's method now: due before a
-  paper record is taken as grounds for a real venue), D10's MCP-server clause, and D16 resolved
-  with the role-call cap; the seat's §8 row gains D1. The operator may want to read D1's new
-  trigger: it is the one change of intent the spec did not word.
+  `$DSH_HOME` rows; D10's MCP-server clause, and D16 resolved with the role-call cap. D1 is a
+  record, not a new deadline (fix round 1, the controller's ruling on the review's Important): its
+  trigger, "before any strategy enters paper forward-testing", was reached on 2026-10-24 by the
+  operator's decision; the next trigger is the operator's to set, and the wording "before a
+  strategy's paper record is taken as grounds for a real venue" stands only as a proposal awaiting
+  the operator — in D1's row, in the seat's §8 row and in `DEVELOPMENT.md` §10 item 6.
 - `DEVELOPMENT.md` resolves R8, R29 and R36 by removal and rewrites R1, R5, R7, R9 to the seat;
   §10 items 1 and 7 close, item 6 becomes the cycle's method; Appendix A drops the Python
   package's variables into one closing sentence. `ROADMAP.md` items (4) and (5) close and its

@@ -180,7 +180,7 @@ solved would be worse than carrying them.
 
 | # | Debt | Acceptable now because | Due when |
 |---|---|---|---|
-| D1 | The measured party writes its own measurements: Gravit writes its own `journal.md`, the record of its paper trades | operator reviews diffs; the cycle contract binds method; the Account's own statement records every paper fill and names who placed it, and Gravit cannot write it | before a strategy's paper record is taken as grounds for a real venue (paper forward-testing, the earlier trigger, is every cycle's method since 2026-10-24) |
+| D1 | The measured party writes its own measurements: Gravit writes its own `journal.md`, the record of its paper trades | operator reviews diffs; the cycle contract binds method; the Account's own statement records every paper fill and names who placed it, and Gravit cannot write it | reached 2026-10-24 by the operator's decision: the trigger was "before any strategy enters paper forward-testing", and since then every cycle trades on paper; the next trigger is the operator's to set (proposed, awaiting the operator: before a strategy's paper record is taken as grounds for a real venue) |
 | D2 | Agent commits and operator commits are indistinguishable in git | single operator, low volume | cheap fix (distinct commit identity for Gravit) on first confusion |
 | D3 | *Resolved 2026-10-24: there is no Gate 1 to arm.* The order flag and its tools left with the Python package; a person reading a seat write's card is the account-seat drill's, owed with D17 | — | — |
 | D4 | Mechanics skills are prose-protected only | single user; every edit reviewed | if skills ever get a second writer, including Gravit |
@@ -334,7 +334,7 @@ Few and concrete. Each names the section it reopens.
 | Claiming better research or reducing review because rooms or delegation are available | D1 · D14 · real-task comparison and explicit result acceptance |
 | Stale, conflicting or truncated journal notes affect a conclusion | §7.1 · D15 · maintenance and retrieval requirements before choosing a new memory store |
 | Expanding the interface migration in §9 | §3 (the FACE row) · §7.3 "No bespoke harness" and "No hosted face" · the two pins · the row and RPC inventory against the CLI's |
-| A limit signed for the Account seat on a venue that is not a paper account, or a real venue connected to that Account with the seat granted reach there | §4 Gate 2 and the Account's card · D1 · D8 · D17 · the next charter (the venue-plugins handoff's §12.1, C1–C5) |
+| A limit signed for the Account seat on a venue that is not a paper account, or a real venue connected to that Account with the seat granted reach there | §4 Gate 2 and the Account's card · D8 · D17 · D1, should the operator adopt its proposed trigger · the next charter (the venue-plugins handoff's §12.1, C1–C5) |
 | A real venue connected to the Account and an order placed on it by hand from the face | D18 · the Account's cap and *What you sign* · the next charter (the handoff's §12.1 stays the agenda for the agent's path) |
 | A second human, or any hosted deployment | this charter is the wrong document; write the next one |
 
