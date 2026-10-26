@@ -1,0 +1,10 @@
+# roles/cn-stock-analyst/role.yml - the stock and expectation analyst (modules spec A8, §5.9, E4).
+name: CN stock analyst
+description: Reads one strategy run's leader or mode context, citing a sealed cn-market run, and submits that module's validated artifact through its submit tool; a mode is a daily registration, WAIT when its preconditions lack a source.
+allow:
+  - skill
+  - lunhui_read_leader_context
+  - lunhui_submit_leader
+  - lunhui_read_mode_context
+  - lunhui_submit_mode
+model: deepseek-official/deepseek-flash

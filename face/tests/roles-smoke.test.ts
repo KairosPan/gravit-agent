@@ -13,7 +13,8 @@
  * under the test's own roles root, handed to the boot as `rolesRoot`; the MCP
  * tools they name are stand-ins registered under a server name nothing real
  * uses. The second case boots the shipped cn-market-analyst (a fixture copy on
- * the stub's route) against the real Lunhui rows. Own file, gated. */
+ * the stub's route) against the real Lunhui rows, the third the shipped
+ * cn-stock-analyst the same way over a sealed market run. Own file, gated. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { cp, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
@@ -29,6 +30,7 @@ import { bootFace } from "../src/boot.ts";
 import { PERSONA_PATH, readPersona } from "../src/persona.ts";
 import { ROLE_TEMPLATE, ROLES_ROOT, readRoles } from "../src/roles.ts";
 import { LUNHUI_RUN_PATH, readProtocol } from "../src/protocols.ts";
+import { writeArtifact } from "../plugins/lunhui/lib/runs.mjs";
 import { makeBotsRoot } from "./bots-fixture.ts";
 import { mountClient, remote, signIn } from "./remote.ts";
 import { StubAdapter, type StubReply } from "./stub-llm.ts";
@@ -351,6 +353,135 @@ test("roles smoke: cn-market-analyst reads and submits as a role, Gravit's own s
     assert.ok(spawn[0].tools!.some((t) => t.name === "lunhui_read_run"), "and the run protocol's probe");
     assert.equal(textOf(spawn[0].messages[0]).includes(RUN_HEADING), false, "yet no run protocol: it is a delegated child that is not a fork");
     assert.match(toolTexts(spawn.at(-1)!)[0], /NOT_GRAVIT/, "and its call is NOT_GRAVIT");
+  } finally {
+    await dispose?.();
+    await Promise.all([bots, fixtureRoles, strategies, root, home].map((dir) => rm(dir, { recursive: true, force: true })));
+  }
+});
+
+/* The shipped cn-stock-analyst on a real boot (modules spec A8, A23, A27, §5.9), on the second case's footing: a
+ * fixture roles root with the stock analyst routed to the stub, a temp strategies root holding cn-market and a
+ * strategy, `alpha`. The runs it reads are made through the booted `lunhuiRuns` service and the runs library's own
+ * artifact writer, no freeze and no network: a cn-market run holding one evidence source of session 2026-10-23 (an
+ * empty 涨停池), sealed, then its theme and sentiment artifacts landed as accepted - what the leader requires of its
+ * cited run - and an alpha strategy run holding one frozen equity quote of the same session. The child, briefed with
+ * the strategy, the run, the market run and the artifact, reads the leader context citing that market run and submits
+ * the context's own example. What is pinned: the child's tools are exactly its allow list; its persona is its own;
+ * the context cites the market run and expects OK; its leader submit passes NOT_A_ROLE and lands in the strategy run;
+ * the same submit from Gravit's root is NOT_A_ROLE. */
+test("roles smoke: cn-stock-analyst reads the leader context citing a sealed market run and submits as a role, Gravit's own submit is NOT_A_ROLE", { skip: gated && "set FACE_SMOKE=1", timeout: 180_000 }, async () => {
+  const bots = await makeBotsRoot();
+  const fixtureRoles = await mkdtemp(join(tmpdir(), "face-roles-fixture-"));
+  const strategies = await realpath(await mkdtemp(join(tmpdir(), "face-roles-strategies-")));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "face-roles-root-")));
+  const home = await mkdtemp(join(tmpdir(), "face-roles-home-"));
+  let dispose: (() => Promise<void>) | undefined;
+  try {
+    for (const entry of readdirSync(ROLES_ROOT, { withFileTypes: true })) {
+      if (entry.isDirectory()) await cp(join(ROLES_ROOT, entry.name), join(fixtureRoles, entry.name), { recursive: true });
+    }
+    const metaPath = join(fixtureRoles, "cn-stock-analyst", "role.yml");
+    writeFileSync(metaPath, readFileSync(metaPath, "utf8").replace(/^model: .*$/m, "model: stub/flash-standin"));
+    const roles = readRoles(fixtureRoles);
+    const analyst = roles.find((r) => r.id === "cn-stock-analyst")!;
+    assert.equal(analyst.model, "stub/flash-standin", "the fixture's stock analyst is routed to the stub");
+    assert.deepEqual(roles.map((r) => [r.id, r.allow]), readRoles(ROLES_ROOT).map((r) => [r.id, r.allow]), "and the fixture holds every shipped role, its tools unchanged");
+    for (const strategy of ["cn-market", "alpha"]) {
+      await mkdir(join(strategies, strategy));
+      await writeFile(join(strategies, strategy, "THESIS.md"), `# ${strategy} fixture\n`);
+    }
+    await mkdir(join(root, ".git"));
+    setupFaceProfile(home);
+    const patchPath = join(home, "profiles", "face", "cordis.patch.yml");
+    const patch = readFileSync(patchPath, "utf8").replace(/^\[\][ \t]*$/m, "");
+    writeFileSync(patchPath, `${patch}\n- id: mcp-akshare\n  disabled: true\n- id: mcp-account\n  disabled: true\n- id: agent-default-model\n  config:\n    provider: stub\n    model: echo\n- id: lunhui-runs\n  config:\n    strategiesRoot: ${JSON.stringify(strategies)}\n`);
+    const booted = await bootFace({ profileName: "face", port: 0, dshHome: home, botsRoot: bots, rolesRoot: fixtureRoles });
+    dispose = booted.dispose;
+    const { ctx } = booted;
+    type Meta = { received_at: string; session: string; host: string; delayed: boolean; truncated: boolean };
+    const service = ctx.get("lunhuiRuns") as {
+      strategiesRoot: string;
+      openRun(s: string, k: "market" | "strategy"): Promise<{ run: string }>;
+      addEvidence(s: string, r: string, source: string, items: unknown[], meta: Meta): Promise<unknown>;
+      sealRun(s: string, r: string): Promise<unknown>;
+      readRun(s: string, r: string): Promise<{ manifest: { artifacts: string[] } }>;
+    };
+    assert.equal(service.strategiesRoot, strategies, "the rows write under the temp strategies root");
+    const meta: Meta = { received_at: "2026-10-23T07:00:00.000Z", session: "2026-10-23", host: "fixture", delayed: false, truncated: false };
+    const { run: market } = await service.openRun("cn-market", "market");
+    await service.addEvidence("cn-market", market, "limit-up", [], meta);
+    await service.sealRun("cn-market", market);
+    const marketDir = join(strategies, "cn-market", "analysis", market);
+    await writeArtifact(marketDir, "sentiment", { module: "sentiment", run: market, status: "OK", state: "REPAIR", claims: [] });
+    await writeArtifact(marketDir, "theme", { module: "theme", run: market, status: "OK", mainline_candidates: [], claims: [] });
+    const { run } = await service.openRun("alpha", "strategy");
+    await service.addEvidence("alpha", run, "quotes", [{
+      symbol: "sh600519", name: "贵州茅台", provider: "tencent", kind: "quote", instrument: "equity",
+      last: 1500, previousClose: 1490, open: 1492, high: 1505, low: 1488, change: 10, changePercent: 0.67,
+      volumeShares: 3_000_000, amountCny: 4_500_000_000, quotedAt: "2026-10-23T15:00:00+08:00", quality: "close",
+    }], meta);
+    const requested = new Map<string, GenerateOptions[]>();
+    const headers = new Map<string, Session["header"]>();
+    const script = (request: GenerateOptions): StubReply => {
+      if (request.purpose !== undefined) return { kind: "text", text: "fixture" };
+      const id = String(request.sessionId);
+      requested.set(id, [...requested.get(id) ?? [], request]);
+      const header = ctx.sessions.get(request.sessionId!)?.header;
+      if (header !== undefined && !headers.has(id)) headers.set(id, { ...header });
+      const trigger = lastHuman(request);
+      const text = trigger ? textOf(trigger) : "";
+      const results = toolTexts(request);
+      const briefed = (marker: string) => request.messages.some((m) => sourceKind(m) !== "tool" && textOf(m).includes(marker));
+      if (header?.origin === "subagent" && briefed("STOCK_FIXTURE")) {
+        /* The role child: read the leader context citing the market run, submit its example. */
+        if (results.length === 0) return { kind: "tool", name: "lunhui_read_leader_context", args: { strategy: "alpha", run, market_run: market } };
+        if (results.length === 1) {
+          const context = JSON.parse(results[0]);
+          return { kind: "tool", name: "lunhui_submit_leader", args: { strategy: "alpha", run, analysis: JSON.stringify(context.example) } };
+        }
+        return { kind: "text", text: "STOCK_DONE" };
+      }
+      if (sourceKind(trigger!) === "user" && text === "RUN_ROOT_LEADER") return { kind: "tool", name: "lunhui_submit_leader", args: { strategy: "alpha", run, analysis: "{}" } };
+      if (sourceKind(trigger!) === "user" && text === "RUN_STOCK_ANALYST") return { kind: "tool", name: "role_cn_stock_analyst", args: { description: "Write the leader artifact", prompt: `STOCK_FIXTURE: strategy alpha, run ${run}, market_run ${market}; write leader.` } };
+      return { kind: "text", text: "PARENT_DONE" };
+    };
+    ctx.llm.registerAdapter(["stub"], new StubAdapter(script));
+    const base = `http://127.0.0.1:${ctx.webServer.port}`;
+    mountClient(ctx);
+    const cookie = await signIn(ctx, base);
+    const { sessionId } = await remote<{ sessionId: string }>(base, cookie, "session/create", { request: { cwd: root } });
+    const gravit = ctx.agents.get(SessionId(sessionId))!;
+    const prompt = (value: string) => remote(base, cookie, "session/prompt", { request: { requestId: `roles-${crypto.randomUUID()}`, sessionId, mode: "queue", content: [{ type: "text", text: value }] } });
+    const lastResult = () => (gravit.session.snapshotEvents().filter((e) => e.type === "tool/result").at(-1)!.data as { message: { isError?: boolean; content: ReadonlyArray<{ text?: string }> } }).message;
+    const resultText = (message: { content: ReadonlyArray<{ text?: string }> }) => message.content.map((b) => b.text ?? "").join("\n");
+
+    /* Gravit's root: the submit is refused before the run is touched. */
+    await prompt("RUN_ROOT_LEADER");
+    await gravit.whenIdle();
+    const refused = lastResult();
+    assert.equal(refused.isError, true, "Gravit's own leader submit fails");
+    assert.match(resultText(refused), /^Error: NOT_A_ROLE: /, "as NOT_A_ROLE");
+
+    /* The role child. */
+    await prompt("RUN_STOCK_ANALYST");
+    const found = () => [...requested.entries()].find(([id, rs]) => headers.get(id)?.origin === "subagent" && rs.some((r) => r.messages.some((m) => sourceKind(m) !== "tool" && textOf(m).includes("STOCK_FIXTURE"))));
+    await waitFor("child STOCK_FIXTURE", () => found() !== undefined);
+    await gravit.whenIdle();
+    const child = found()![1];
+    assert.equal(child[0].model, "flash-standin", "the child runs on its role's route");
+    assert.deepEqual(child[0].tools!.map((t) => t.name).sort(), [...analyst.allow].sort(), "the stock analyst's tools are exactly its allow list");
+    const system = textOf(child[0].messages[0]);
+    assert.ok(system.includes("个股与预期分析员"), "the role persona is the child's");
+    assert.equal(system.includes(readPersona(PERSONA_PATH).split("{{")[0]), false, "and it shadows Gravit's");
+    const childResults = toolTexts(child.at(-1)!);
+    assert.equal(childResults.length, 2, "the read and the submit came back");
+    const context = JSON.parse(childResults[0]);
+    assert.deepEqual([context.module, context.market_run, context.status_expected], ["leader", market, "OK"], "the context cites the market run and expects OK");
+    assert.match(childResults[1], /"accepted":true/, "the child's leader submit passed NOT_A_ROLE and was accepted");
+    assert.deepEqual((await service.readRun("alpha", run)).manifest.artifacts, ["leader"], "the artifact landed in the strategy run");
+    const artifact = JSON.parse(readFileSync(join(strategies, "alpha", "analysis", run, "leader.json"), "utf8"));
+    assert.deepEqual([artifact.module, artifact.status, artifact.run, artifact.market_run], ["leader", "OK", run, market]);
+    assert.equal(resultText(lastResult()), "STOCK_DONE", "the child's report returns through the tool");
   } finally {
     await dispose?.();
     await Promise.all([bots, fixtureRoles, strategies, root, home].map((dir) => rm(dir, { recursive: true, force: true })));
