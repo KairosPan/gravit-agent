@@ -13,8 +13,8 @@
  *
  * The submit: `NOT_A_ROLE` unless the caller is a delegated role child (A23); the strategy and the
  * channel as the read's; then `submit`, which counts, refuses `ALREADY_SUBMITTED` and `READ_FIRST`,
- * and runs `validateEnvelope` against the kept digest. The service refuses a submit with no read in
- * this process before validating, so a validation with no digest is host code's bug, a `TypeError`.
+ * and runs `validateEnvelope` against the kept digest. A digest this definition lacks - a row
+ * reloaded while the service lives on - is `READ_FIRST` too, so the role reads again.
  * The reply is `{ accepted, module, run }` as JSON text. Nothing before `readContext` or `submit`
  * touches the run, so none of it counts; every error reaches the model through `asToolError`.
  */
@@ -132,7 +132,8 @@ export function defineModule({ module, channel, contract, runs }) {
         const strategy = await strategyOf(args.strategy);
         const result = await runs.submit(strategy, args.run, module, args.analysis, (text) => {
           const context = digests.get(`${strategy}/${args.run}/${module}`);
-          if (context === undefined) throw new TypeError(`lunhui: no context digest for ${module} of the run; the service let a submit through unread`);
+          // A row reload while the service lives on: the read is remembered, its digest is not.
+          if (context === undefined) throw refuse.readFirst(module);
           return validateEnvelope(text, { module, context, schema: contract.schema, owns: contract.owns, rules: contract.rules });
         });
         return JSON.stringify(result);

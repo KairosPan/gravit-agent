@@ -243,14 +243,15 @@ test("module tools: a submit before a read is READ_FIRST; an invalid artifact is
   assert.deepEqual(JSON.parse(await submit.execute({ strategy: "cn-market", run, analysis: JSON.stringify(artifactOf(text, [quoteId])) }, exec(ROLE))).accepted, true);
 });
 
-test("module tools: the digest is per definition - a read through one, a submit through another over the same service, is INTERNAL", async (t) => {
+test("module tools: the digest is per definition - a read through one, a submit through another over the same service, is READ_FIRST until it reads", async (t) => {
   const service = backbone(await strategiesRoot(t));
   const first = tools(service);
   const second = tools(service);
   const { run, quoteId } = await frozenRun(service, "cn-market");
   const text = await first.read.execute({ strategy: "cn-market", run }, exec(ROLE));
   const analysis = JSON.stringify(artifactOf(text, [quoteId]));
-  t.mock.method(process.stderr, "write", () => true);
-  await rejectsWith(second.submit.execute({ strategy: "cn-market", run, analysis }, exec(ROLE)), "INTERNAL");
-  assert.deepEqual(JSON.parse(await first.submit.execute({ strategy: "cn-market", run, analysis }, exec(ROLE))).accepted, true);
+  await rejectsWith(second.submit.execute({ strategy: "cn-market", run, analysis }, exec(ROLE)), "READ_FIRST");
+  await second.read.execute({ strategy: "cn-market", run }, exec(ROLE));
+  await rejectsWith(first.submit.execute({ strategy: "cn-market", run, analysis: "{}" }, exec(ROLE)), "INVALID_ANALYSIS");
+  assert.deepEqual(JSON.parse(await second.submit.execute({ strategy: "cn-market", run, analysis }, exec(ROLE))).accepted, true);
 });
