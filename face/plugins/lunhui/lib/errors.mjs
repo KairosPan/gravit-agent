@@ -58,11 +58,13 @@ export const refuse = {
   calendarUncovered: () =>
     new LunhuiError("CALENDAR_UNCOVERED", "交易日历未覆盖今天（中国时间）；本次未写入任何文件，请告知操作者补充日历表。"),
   internal: () => new LunhuiError("INTERNAL", "内部错误；细节只记入 face 的日志，不回传。可重试一次，仍失败请告知操作者。"),
-  /** A market freeze outside `cn-market`, or a strategy-only tool inside it (A27). */
+  /** A market freeze outside `cn-market`, a market module's tool outside it, or a strategy-only tool inside it (A27). */
   wrongChannel: (kind) =>
     kind === "strategy"
       ? new LunhuiError("WRONG_CHANNEL", "这个工具只用于策略频道，不用于市场频道 cn-market。")
-      : new LunhuiError("WRONG_CHANNEL", "这个冻结只用于市场频道 cn-market；策略频道只冻结个股行情（lunhui_freeze_quotes）。"),
+      : kind === "module"
+        ? new LunhuiError("WRONG_CHANNEL", "这个模块只用于市场频道 cn-market 的运行，不用于策略频道。")
+        : new LunhuiError("WRONG_CHANNEL", "这个冻结只用于市场频道 cn-market；策略频道只冻结个股行情（lunhui_freeze_quotes）。"),
   // The quotes freeze's symbol list, stage 0's four refusals (its `checkSymbols`).
   symbolShape: () =>
     new LunhuiError("INVALID_SYMBOL", "symbols 须为 1–8 个证券代码组成的数组，每个代码是 sh 或 sz 加六位数字。"),
