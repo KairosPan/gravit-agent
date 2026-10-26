@@ -98,7 +98,8 @@ test("sentiment: a context over a real index and limit-up freeze - OK expected, 
   // The conflict shows the format only: no measure a role could copy unobserved.
   assert.doesNotMatch(example.conflict, /[a-z]+_[a-z]+/);
   // Derived items show how many inputs they read, not the ids.
-  for (const row of context.derived) assert.ok(row.inputs === undefined && Number.isInteger(row.inputs_total), row.measure);
+  for (const row of context.derived)
+    assert.ok(Object.keys(row).every((key) => ["id", "measure", "value", "params", "partial", "inputs_total"].includes(key)), row.measure);
   assert.equal(example.claims.length, 1);
   assert.equal(example.claims[0].basis, "INSUFFICIENT");
   assert.ok(rowsOf(context).some((row) => row.id === example.claims[0].evidence_ids[0]));
@@ -271,6 +272,7 @@ test("sentiment: a full run - index, limit-up and boards frozen - fits 30 KiB; b
   const { freeze, read } = await mount(t);
   const run = await frozenRun(freeze, ["index", "limit-up", "boards"]);
   const text = await read.execute({ strategy: "cn-market", run }, exec(ROLE));
+  // Measured 2026-10-26, derived rows in the shared shape: 13,699 bytes, the nine derived rows 989.
   assert.ok(Buffer.byteLength(text, "utf8") <= MAX_CONTEXT_BYTES);
   const context = JSON.parse(text);
   assert.ok(rowsOf(context).every((row) => row.source !== "boards"));
@@ -290,6 +292,7 @@ test("sentiment: a 涨停 pool past the cap keeps its highest streaks; the rest 
   const { freeze, read } = await mount(t, enlarge);
   const run = await frozenRun(freeze, ["index", "limit-up", "boards"]);
   const text = await read.execute({ strategy: "cn-market", run }, exec(ROLE));
+  // Measured 2026-10-26: 30,488 bytes with 54 of the 150 涨停 rows shown.
   assert.ok(Buffer.byteLength(text, "utf8") <= MAX_CONTEXT_BYTES);
   const context = JSON.parse(text);
   assert.equal(context.derived.length, 9, "every derived item is shown");

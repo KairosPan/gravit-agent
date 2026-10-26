@@ -76,7 +76,7 @@ test("theme contract: Chinese hypotheses restating THESIS.md hypothesis 3 with i
   assert.equal(typeof contract.hints, "function", "the hints state the boards source's stamps from the digest");
 });
 
-test("theme: a context over a real boards and limit-up freeze - OK expected, derived first, member lists cut to 20, at most 30 KiB - whose example is accepted", async (t) => {
+test("theme: a context over a real boards and limit-up freeze - OK expected, derived first, member lists cut to 10, at most 30 KiB - whose example is accepted", async (t) => {
   const { root, freeze, read, submit } = await mount(t);
   const run = await frozenRun(freeze);
   const text = await read.execute({ strategy: "cn-market", run }, exec(ROLE));
@@ -85,7 +85,10 @@ test("theme: a context over a real boards and limit-up freeze - OK expected, der
   assert.equal(context.status_expected, "OK");
   assert.deepEqual(context.missing, []);
   assert.equal(context.hypotheses_version, hypothesesVersion(HYPOTHESES));
-  assert.deepEqual(context.derived.map((row: any) => row.source), [...Array(8).fill("boards"), ...Array(5).fill("limit-up")]);
+  assert.deepEqual(context.derived.map((row: any) => row.measure), [
+    ...Array(4).fill(["breadth", "turnover_share"]).flat(),
+    "streak_distribution", "seal_ratio", "break_ratio", "yesterday_return_median", "yesterday_negative_tail",
+  ]);
   assert.deepEqual(context.evidence.map((row: any) => row.kind ?? row.pool), [
     "board", "board", "board", "board", "members", "members", "flow", "flow", "flow", "flow", "zt", "zt", "zt", "zt", "zt", "zt",
   ]);
@@ -112,8 +115,11 @@ test("theme: a context over a real boards and limit-up freeze - OK expected, der
   for (const row of context.evidence.filter((row: any) => row.pool === "zt"))
     assert.deepEqual(Object.keys(row).sort(), ["boards", "code", "id", "industry", "name", "pool", "scope", "source"]);
   assert.deepEqual(context.truncated, [{ source: "limit-up", kind: "zb", count: 3 }, { source: "limit-up", kind: "yesterday", count: 5 }]);
-  // Derived items show how many inputs they read, not the ids.
-  for (const row of context.derived) assert.ok(row.inputs === undefined && Number.isInteger(row.inputs_total), row.measure);
+  // A derived row is the shared shape: no source, kind, scope or input ids.
+  for (const row of context.derived) {
+    assert.ok(Object.keys(row).every((key) => ["id", "measure", "value", "params", "partial", "inputs_total"].includes(key)), row.measure);
+    assert.ok(Number.isInteger(row.inputs_total));
+  }
   const example = context.example;
   assert.equal(example.status, "OK");
   assert.deepEqual([example.mainline_candidates, example.theme_stage, example.rotation], [[], "UNKNOWN", "UNKNOWN"]);
@@ -270,7 +276,7 @@ test("theme: a full run - index, limit-up and boards frozen - fits 30 KiB; the i
   assert.deepEqual(context.truncated, [{ source: "limit-up", kind: "zb", count: 3 }, { source: "limit-up", kind: "yesterday", count: 5 }]);
 });
 
-test("theme: a full run of thirty boards and ten member lists passes 30 KiB - the 涨停 rows, the flow and the tenth member list go first, the top boards' rows and member lists stay", async (t) => {
+test("theme: a full run of thirty boards and ten member lists passes 30 KiB - every member list and board row stays, the 涨停 rows and the flow go first", async (t) => {
   // Thirty boards ranked by change, a member list of 100 (of 140) for each of the first ten, thirty flow rows.
   const CODES = Array.from({ length: 30 }, (_, i) => `BK${2000 + i}`);
   const widen = async (dir: string) => {
@@ -297,14 +303,15 @@ test("theme: a full run of thirty boards and ten member lists passes 30 KiB - th
   // Every board row first, then the member lists in the freeze's order, the top boards' first.
   const kinds = context.evidence.map((row: any) => row.kind ?? row.pool);
   const lists = context.evidence.filter((row: any) => row.kind === "members");
-  assert.deepEqual(kinds, [...Array(30).fill("board"), ...Array(lists.length).fill("members")]);
-  // Measured 2026-10-26: nine of the ten lists fit (about 680 bytes each beside a 6.5 KB header, 12 KB of
-  // derived items and 5.7 KB of board rows); the tenth is about 600 bytes over. Pinned as measured.
-  assert.equal(lists.length, 9, `${lists.length} member lists shown`);
+  const flows = context.evidence.filter((row: any) => row.kind === "flow");
+  assert.deepEqual(kinds, [...Array(30).fill("board"), ...Array(10).fill("members"), ...Array(flows.length).fill("flow")]);
+  assert.equal(lists.length, 10, `${lists.length} member lists shown`);
   assert.deepEqual(lists.map((row: any) => [row.board, row.members.length]), CODES.slice(0, lists.length).map((code) => [code, 10]));
-  // What goes first: the last member list, then every flow row and every 涨停 row; zb and yesterday are never asked for.
+  // Measured 2026-10-26: 30,708 bytes with 15 of the 30 flow rows; the 65 derived rows take 8,576.
+  assert.ok(flows.length > 0 && flows.length < 30, `${flows.length} flow rows shown`);
+  // What goes first: the flow rows from some row on and every 涨停 row; zb and yesterday are never asked for.
   assert.deepEqual(context.truncated, [
-    { source: "boards", kind: "members", count: 10 - lists.length }, { source: "boards", kind: "flow", count: 30 },
+    { source: "boards", kind: "flow", count: 30 - flows.length },
     { source: "limit-up", kind: "zt", count: 6 }, { source: "limit-up", kind: "zb", count: 3 }, { source: "limit-up", kind: "yesterday", count: 5 },
   ]);
   // A candidate on the top board can still cite its board row and member list.

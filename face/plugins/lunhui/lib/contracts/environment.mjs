@@ -10,7 +10,7 @@
  * `contract` object; the shared rules are `contract-core.mjs`'s.
  */
 import { fail } from "../contract-core.mjs";
-import { exampleOf } from "./shared.mjs";
+import { DERIVED_HINT, derivedRow, exampleOf } from "./shared.mjs";
 
 /** The bars of a series a context shows: the last 20; the frozen file keeps them all. */
 const BARS_SHOWN = 20;
@@ -23,6 +23,7 @@ export const HYPOTHESES =
   "大周期位置是可修订的工作标签，下一交易日的冻结证据可以推翻它。";
 
 const HINTS = {
+  derived: DERIVED_HINT,
   index_state:
     "STRONG、NEUTRAL、WEAK 或 UNKNOWN：只按指数报价（kind 为 index）与指数日线（kind 为 bars）判断；不是 UNKNOWN 时，至少一条不为 INSUFFICIENT 的声明引用其中一条证据。",
   liquidity_state:
@@ -123,6 +124,7 @@ export const contract = {
   sources: ["index", "quotes"],
   required: ["index"],
   derivedFirst: ["index"],
+  derivedView: derivedRow,
   priority: [
     { source: "index", kind: "index" },
     { source: "index", kind: "counts" },

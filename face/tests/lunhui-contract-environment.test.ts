@@ -73,6 +73,9 @@ test("environment: a context over a real index and quotes freeze - OK expected, 
   assert.deepEqual(context.truncated, []);
   assert.equal(context.hypotheses_version, hypothesesVersion(HYPOTHESES));
   assert.deepEqual(context.derived.map((row: any) => row.measure), ["total_turnover", "advance_decline_ratio", "limit_up_count", "limit_down_count"]);
+  // A derived row is the shared shape: no source, kind, scope or input ids.
+  for (const row of context.derived)
+    assert.ok(Object.keys(row).every((key) => ["id", "measure", "value", "params", "partial", "inputs_total"].includes(key)), row.measure);
   assert.deepEqual(context.evidence.map((row: any) => row.kind), [
     "index", "index", "index", "index", "counts", "bars", "bars", "bars", "bars", "quote", "quote", "history", "history",
   ]);
@@ -180,6 +183,7 @@ test("environment: a full run - index and quotes for all eight fixture symbols -
   const symbols = ["sh000001", "sz399001", "sz399006", "sh000300", "sh600519", "sh601318", "sz000001", "sz000333"];
   const run = await frozenRun(freeze, ["index", "quotes"], symbols);
   const text = await read.execute({ strategy: "cn-market", run }, exec(ROLE));
+  // Measured 2026-10-26, derived rows in the shared shape: 30,442 bytes, five quote histories left out.
   assert.ok(Buffer.byteLength(text, "utf8") <= MAX_CONTEXT_BYTES);
   const context = JSON.parse(text);
   assert.deepEqual(context.evidence.filter((row: any) => row.source === "index").map((row: any) => row.kind), [

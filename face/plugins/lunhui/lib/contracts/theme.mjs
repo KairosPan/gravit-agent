@@ -16,7 +16,7 @@
  * shared rules are `contract-core.mjs`'s.
  */
 import { fail } from "../contract-core.mjs";
-import { exampleOf, inputsCounted, ownClaims } from "./shared.mjs";
+import { DERIVED_HINT, derivedRow, exampleOf, ownClaims } from "./shared.mjs";
 
 /** The members a context shows of a board's list: the first 10; the frozen file keeps them all. */
 const MEMBERS_SHOWN = 10;
@@ -29,6 +29,7 @@ export const HYPOTHESES =
   "题材所处阶段与轮动方向是可修订的工作标签，下一交易日的冻结证据可以推翻它。";
 
 const HINTS = {
+  derived: DERIVED_HINT,
   rows: "板块行只列代码、名称、涨跌幅、成交额与上涨、下跌家数（不列领涨股）；板块、成分股与资金流各行不列 host 与 delayed，见 served；冻结文件逐行保留。",
   mainline_candidates:
     "0–5 个主线候选，每个 { board, name, evidence_ids }：board 是本运行已冻结的板块代码（BK 加四位数字），evidence_ids 至少引用该板块的 board 证据与它的 members 证据（同一代码），可再引用它的 breadth、turnover_share；同一板块只列一次；没有把握时给空列表。",
@@ -44,7 +45,7 @@ const HINTS = {
     "CURRENT 指本运行的交易日（上下文 session），须至少引用一条 scope 为 CURRENT 的证据；更早交易日的证据一律 HISTORICAL，文字不用“当前、今日”等词；证据不足用 INSUFFICIENT，此时标题字段写 UNKNOWN。",
   members:
     `成分股只列前 ${MEMBERS_SHOWN} 只，members_total 是冻结的只数；证据编号指整条列表。成分股证据自带的 truncated 字段为 true，表示来源只给了前 100 只、冻结时已被截断；它与上下文顶层的 truncated 列表（本摘要因 30 KiB 上限未列出的行，按来源与种类计数）是两回事。` +
-    "涨停池只列代码、名称、连板数与所属行业；炸板池与昨日涨停未列出，计入顶层 truncated。派生量只列输入的条数 inputs_total，不列输入的编号。",
+    "涨停池只列代码、名称、连板数与所属行业；炸板池与昨日涨停未列出，计入顶层 truncated。boards 的派生量是 breadth 与 turnover_share（params.board 为板块代码）；其余派生量属于 limit-up。",
   status: "status_expected 为 NOT_EVALUABLE 时照 example 提交：missing_sources 照抄 missing，mainline_candidates 为空列表，其余标题字段为 UNKNOWN。",
   example:
     "example 只示格式：没有候选，标题字段为 UNKNOWN，声明为 INSUFFICIENT，不是判断。列出主线候选，须引用该板块的 board 与 members 证据；theme_stage、rotation 各需一条自己的、引用 boards 派生证据的声明。",
@@ -164,7 +165,7 @@ export const contract = {
   sources: ["boards", "limit-up"],
   required: ["boards", "limit-up"],
   derivedFirst: ["boards"],
-  derivedView: inputsCounted,
+  derivedView: derivedRow,
   priority: [
     { source: "boards", kind: "board", view: unstamped },
     // A candidate cites its board and its member list: both before the fund flow, which only adds to them.

@@ -4,7 +4,8 @@
  * digest lookup `firstId`, the built example `exampleOf` - `NOT_EVALUABLE` naming the missing
  * sources, else `OK` with UNKNOWN headlines and one INSUFFICIENT claim, a format a role cannot copy
  * as a judgment - the headline rule `ownClaims`, by which each headline value other than UNKNOWN
- * stands on a claim of its own citing its kind of evidence, and the derived view `inputsCounted`.
+ * stands on a claim of its own citing its kind of evidence, and the market modules' derived view
+ * `derivedRow` with its hint `DERIVED_HINT`.
  */
 import { fail } from "../contract-core.mjs";
 
@@ -86,7 +87,20 @@ export function ownClaims(parsed, context, demands) {
       fail(`analysis.${set[demand].field}: ${set.map(({ field }) => field).join(", ")} each need a claim of their own; one claim with an evidence reference to several stands for one of them.`);
 }
 
-/** A derived item shown with the count of its inputs, not their ids: a pool's measure cites every row. */
-export function inputsCounted({ inputs, ...item }) {
-  return { ...item, inputs_total: Array.isArray(inputs) ? inputs.length : 0 };
+/**
+ * A derived item as a market module's context shows it: `{ id, measure, value, params?, partial?,
+ * inputs_total }` - the count of its inputs, not their ids (a pool's measure cites every row), and
+ * no `source`, `kind` or `scope`, which the derived section implies; the evidence file and the
+ * digest keep every field, so validation reads them unchanged.
+ * @param {Record<string, any>} item
+ */
+export function derivedRow({ id, measure, value, params, partial, inputs }) {
+  return {
+    id, measure, value, ...(params === undefined ? {} : { params }), ...(partial === undefined ? {} : { partial }),
+    inputs_total: Array.isArray(inputs) ? inputs.length : 0,
+  };
 }
+
+/** The hint naming what a derived row shows, for the contracts that use `derivedRow`. */
+export const DERIVED_HINT =
+  "派生量只列 id、measure、value、params、partial 与输入条数 inputs_total，不列来源、种类、时效与输入编号；时效同其来源文件的各行（通常为本运行交易日 CURRENT），引用其编号即可。";

@@ -413,10 +413,12 @@ test("buildContext: a hints function gets the digest; plain hints are shown as g
   assert.equal(JSON.parse(context().text).hints, "按字段填写。");
 });
 
-test("buildContext: derivedView shapes every derived item shown; the item stays citable whole", () => {
-  const { text, digest } = context({ derivedView: ({ inputs, ...item }: Loose) => ({ ...item, inputs_total: inputs.length }) });
+test("buildContext: derivedView is the whole row of every derived item shown - no source or scope added; the item stays citable whole", () => {
+  const { text, digest } = context({ derivedView: ({ id, measure, inputs }: Loose) => ({ id, measure, inputs_total: inputs.length }) });
   const parsed = JSON.parse(text);
   const seal = parsed.derived.find((item: Loose) => item.id === sealRatio.id);
+  assert.deepEqual(Object.keys(seal), ["id", "measure", "inputs_total"]);
+  assert.equal(digest.items.get(sealRatio.id).scope, "CURRENT");
   assert.equal(seal.inputs, undefined);
   assert.equal(seal.inputs_total, 2);
   assert.equal(parsed.derived.find((item: Loose) => item.id === advance.id).inputs_total, 0);
