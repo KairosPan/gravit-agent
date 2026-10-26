@@ -103,4 +103,4 @@ export function derivedRow({ id, measure, value, params, partial, inputs }) {
 
 /** The hint naming what a derived row shows, for the contracts that use `derivedRow`. */
 export const DERIVED_HINT =
-  "派生量只列 id、measure、value、params、partial 与输入条数 inputs_total，不列来源、种类、时效与输入编号；时效同其来源文件的各行（通常为本运行交易日 CURRENT），引用其编号即可。";
+  "派生量只列 id、measure、value、params、partial 与输入条数 inputs_total，不列来源、种类、时效与输入编号；时效为本运行交易日 CURRENT，除非其所在文件的交易日早于本运行（那时为 HISTORICAL），引用其编号即可。";

@@ -65,6 +65,8 @@ test("sentiment contract: Chinese hypotheses restating THESIS.md hypothesis 2 wi
   assert.deepEqual(contract.required, ["limit-up", "index"]);
   assert.deepEqual(contract.sources, ["limit-up", "index"]);
   assert.match(JSON.stringify(contract.hints), /conflict/);
+  // A derived item is CURRENT for the run's session unless its file's session is older.
+  assert.match((contract.hints as any).derived, /CURRENT，除非其所在文件的交易日早于本运行（那时为 HISTORICAL）/);
   assert.match(JSON.stringify(contract.hints), /CURRENT/);
 });
 
