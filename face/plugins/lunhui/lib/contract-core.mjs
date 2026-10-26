@@ -345,9 +345,12 @@ function rowKind(item) {
  * each claim, the forbidden words, the scope rule, the status rule, then the module's own `rules`.
  * @param {unknown} raw the submitted artifact, JSON text or a parsed object
  * @param {{ module: string, context: ContextDigest, schema: { required?: string[], properties?: Record<string, unknown> },
- *   owns?: string[], ownedBy?: Record<string, (entry: DigestItem) => boolean>, rules?: (parsed: any, context: ContextDigest) => void }} options
+ *   owns?: string[], ownedBy?: Record<string, (entry: DigestItem) => boolean>, exemptPaths?: string[],
+ *   rules?: (parsed: any, context: ContextDigest) => void }} options
  * `ownedBy[class]` names the cited items that carry an owned class's sentence; a class without
- * an entry needs a derived item (A21).
+ * an entry needs a derived item (A21). `exemptPaths` names the strings - paths under the artifact,
+ * `[*]` for any index, as `mainline_candidates[*].name` - that skip the forbidden words and the
+ * scope rule, for names a module's own `rules` bind to frozen items; their evidence ids still bind.
  * A rejection (code `INVALID_ANALYSIS`, the module's own rules' included) carries its `category`,
  * through `classifyValidationRejection`, and that category's `repair` from `MODULE_REPAIRS`.
  * @returns {any} the artifact, parsed and copied
@@ -364,8 +367,20 @@ export function validateEnvelope(raw, options) {
   }
 }
 
+/**
+ * A test of a text entry's path against `exemptPaths`: each is a path under `analysis`, its `[*]`
+ * any index.
+ * @param {string[]} paths
+ * @returns {(path: string) => boolean}
+ */
+function exemptMatcher(paths) {
+  const patterns = paths.map((path) =>
+    new RegExp(`^analysis\\.${path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replaceAll("\\[\\*\\]", "\\[\\d+\\]")}$`, "u"));
+  return (path) => patterns.some((pattern) => pattern.test(path));
+}
+
 /** `validateEnvelope`'s rules, in order. */
-function checkEnvelope(raw, { module, context, schema, owns = [], ownedBy = {}, rules }) {
+function checkEnvelope(raw, { module, context, schema, owns = [], ownedBy = {}, exemptPaths = [], rules }) {
   const entry = MODULES.find((candidate) => candidate.name === module);
   if (!entry || !context) throw new TypeError(`lunhui: no contract context for module ${JSON.stringify(module)}`);
   let artifact = raw;
@@ -387,6 +402,7 @@ function checkEnvelope(raw, { module, context, schema, owns = [], ownedBy = {}, 
   for (const [path, text] of entries)
     for (const [id] of text.matchAll(EVIDENCE_ID))
       if (!context.evidenceIds.has(id)) fail(`${path}: Unknown evidence reference.`);
+  const exempt = exemptMatcher(exemptPaths);
 
   for (const [index, claim] of artifact.claims.entries()) {
     const path = `analysis.claims[${index}]`;
@@ -402,6 +418,7 @@ function checkEnvelope(raw, { module, context, schema, owns = [], ownedBy = {}, 
     fail("analysis: Insufficient evidence requires UNKNOWN headline values.");
 
   for (const [path, text] of entries) {
+    if (exempt(path)) continue;
     const stripped = context.labelAllow.reduce((rest, label) => rest.replaceAll(label, ""), text);
     if (FORBIDDEN_TEXT.test(stripped))
       fail(`${path}: Trading, target-price, or account content is outside the research contract.`);
@@ -415,6 +432,7 @@ function checkEnvelope(raw, { module, context, schema, owns = [], ownedBy = {}, 
     ...textEntries({ ...artifact, claims: undefined }).map(([path, text]) => [path, text, []]),
   ];
   for (const [path, text, ids] of scoped) {
+    if (exempt(path)) continue;
     const carries = (name) => {
       const accepts = ownedBy[name] ?? isDerivedEntry;
       return ids.some((id) => {

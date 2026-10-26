@@ -227,6 +227,29 @@ test("scope: a line break ends a sentence, so an exempt line does not cover the 
   assert.equal(category(() => check(artifact(digest, { limitations: ["缺少分钟数据\n题材轮动加快"] }))), "UNSUPPORTED_SCOPE");
 });
 
+test("exemptPaths: the strings at those paths skip the forbidden words and the scope rule, nothing else does; their evidence ids still bind", () => {
+  const { digest } = context();
+  const schema = {
+    ...SCHEMA,
+    properties: {
+      ...SCHEMA.properties,
+      labels: { type: "array", minItems: 0, maxItems: 3, items: { type: "object", required: ["name"], properties: { name: { type: "string", maxLength: 40 } } } },
+    },
+  };
+  const exemptPaths = ["labels[*].name"];
+  const labelled = (name: string, overrides: Loose = {}) => artifact(digest, { labels: [{ name: "丙" }, { name }], ...overrides });
+  // Without the option a name is text like any other.
+  assert.equal(category(() => check(labelled("题材主线"), { schema })), "UNSUPPORTED_SCOPE");
+  assert.equal(category(() => check(labelled("做多板块"), { schema })), "EXECUTION_CONTENT");
+  check(labelled("题材主线"), { schema, exemptPaths });
+  check(labelled("做多板块"), { schema, exemptPaths });
+  // Any other path is still judged.
+  assert.equal(category(() => check(labelled("丁", { limitations: ["题材主线"] }), { schema, exemptPaths })), "UNSUPPORTED_SCOPE");
+  assert.equal(category(() => check(labelled("丁", { claims: [{ id: "c1", text: "做多。", basis: "CURRENT", evidence_ids: [sealRatio.id] }] }), { schema, exemptPaths })), "EXECUTION_CONTENT");
+  // An evidence id written into an exempt string must still be the context's.
+  assert.equal(category(() => check(labelled(`ev_${"0".repeat(24)}`), { schema, exemptPaths })), "REFERENCE");
+});
+
 test("a rejection carries its category and the module repair, never stage 0's", () => {
   assert.deepEqual(Object.keys(MODULE_REPAIRS), Object.keys(VALIDATION_REPAIRS));
   assert.ok(Object.isFrozen(MODULE_REPAIRS));
