@@ -257,6 +257,31 @@ test("freeze: a NO_MARKET_DATA pool writes nothing and leaves the run open with 
   await tools.boards.execute({ strategy: "cn-market", run, boards: ["BK0715"] }, exec());
 });
 
+test("freeze: a refusal after a freeze opened its own run names the run id, and a retry with that run is accepted", async (t) => {
+  const root = await strategiesRoot(t);
+  const empty = await fixtures(t, (dir) => writeFile(join(dir, "zt-pool.json"), JSON.stringify({ rc: 0, data: null })));
+  const broken = mount(root, empty);
+  let message = "";
+  await assert.rejects(broken.tools["limit-up"].execute({ strategy: "cn-market" }, exec()), (error: any) => {
+    assert.ok(error instanceof LunhuiError);
+    assert.equal(error.code, "NO_MARKET_DATA");
+    message = error.message;
+    return true;
+  });
+  assert.match(message, /^NO_MARKET_DATA: 东方财富/);
+  assert.doesNotMatch(message, /\//);
+  const run = /已开启运行 (\S+)，重试时请传入 run。$/.exec(message)?.[1];
+  assert.ok(run, message);
+  assert.deepEqual(await readdir(join(root, "cn-market", "analysis")), [run]);
+  assert.deepEqual((await readJson(runDir(root, "cn-market", run), "run.json")).evidence, []);
+  const { tools } = mount(root, await fixtures(t));
+  const retry = JSON.parse(await tools["limit-up"].execute({ strategy: "cn-market", run }, exec()));
+  assert.equal(retry.run, run);
+  assert.equal((await readJson(runDir(root, "cn-market", run), "metrics.json")).freezes, 2);
+  // A refusal on a run the caller named carries no id: the caller has it.
+  await assert.rejects(tools["limit-up"].execute({ strategy: "cn-market", run }, exec()), (error: any) => error.code === "SOURCE_FROZEN" && !error.message.includes(run));
+});
+
 test("freeze: on a Saturday the limit-up pools are asked for the previous trading day's date", async (t) => {
   const root = await strategiesRoot(t);
   const { urls } = mockFetch(t, await fixtures(t));

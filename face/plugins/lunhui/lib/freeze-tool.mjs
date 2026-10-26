@@ -14,7 +14,8 @@
  * the fetch, the derived items and `addEvidence` (`SOURCE_FROZEN`, the size refusals). The count
  * comes before the sealed check so every call the run receives is in its count, as A7 has it; both
  * refusals tell the model to open a new run. A provider failure is the row's refusal and writes
- * nothing for that source. The reply is the run's summary as JSON text, never a path.
+ * nothing for that source. A refusal inside a run the call opened itself names that run's id, so
+ * the retry passes it as `run`. The reply is the run's summary as JSON text, never a path.
  */
 import { statSync } from "node:fs";
 import { isAbsolute } from "node:path";
@@ -23,7 +24,7 @@ import { coverageOf, loadCalendars } from "./calendar.mjs";
 import { asToolError, callerIsChild, refuse, upstreamError } from "./errors.mjs";
 import { createFixtureFetch } from "./fixture-fetch.mjs";
 import { getMarketSession } from "./market.mjs";
-import { evidenceId } from "./runs.mjs";
+import { LunhuiError, evidenceId } from "./runs.mjs";
 import { rowKey } from "./derive.mjs";
 
 /** The market channel: the one strategy whose runs are market runs (spec §5.8). */
@@ -105,7 +106,8 @@ export function defineFreeze({ name, description, parameters, source, kind, chec
         check?.(args);
         const date = getMarketSession(now()).date;
         if (date === null || coverageOf(date, tables) !== "covered") throw refuse.calendarUncovered();
-        const run = args.run === undefined ? (await runs.openRun(strategy, market ? "market" : "strategy")).run : args.run;
+        const opened = args.run === undefined;
+        const run = opened ? (await runs.openRun(strategy, market ? "market" : "strategy")).run : args.run;
         return await runs.withRun(strategy, run, async () => {
           await runs.countFreeze(strategy, run);
           const { manifest } = await runs.readRun(strategy, run);
@@ -130,12 +132,25 @@ export function defineFreeze({ name, description, parameters, source, kind, chec
             delayed: meta.delayed,
             truncated: meta.truncated,
           });
+        }).catch((error) => {
+          throw opened && error instanceof LunhuiError ? namingRun(error, run) : error;
         });
       } catch (error) {
         throw asToolError(error);
       }
     },
   });
+}
+
+/**
+ * A refusal of a freeze that opened its own run, again with the same code and its reason followed by
+ * the run's id - an id, never a path - so a retry adds to that run instead of opening another.
+ * @param {LunhuiError} error
+ * @param {string} run
+ */
+function namingRun(error, run) {
+  const reason = error.message.slice(`${error.code}: `.length).replace(/。$/, "");
+  return new LunhuiError(error.code, `${reason}；已开启运行 ${run}，重试时请传入 run。`);
 }
 
 /**
