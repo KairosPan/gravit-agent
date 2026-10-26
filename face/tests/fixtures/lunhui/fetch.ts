@@ -1,7 +1,7 @@
 /**
  * The Lunhui market fixtures served as `fetch`, never the network, through the one fixture
- * mapping the Lunhui server's fixture mode (`LUNHUI_FETCH_FIXTURES`) uses too,
- * `createFixtureFetch` in `plugins/lunhui/fixture-fetch.mjs`, over this directory: a URL whose host
+ * mapping a freeze row's `config.fetch` uses too (spec 2026-10-25 A15),
+ * `createFixtureFetch` in `plugins/lunhui/lib/fixture-fetch.mjs`, over this directory: a URL whose host
  * is `qt.gtimg.cn` gets `quotes.gb18030.txt` as bytes; a URL whose host is `web.ifzq.gtimg.cn` and
  * whose `param` starts with `<symbol>,` gets `kline-<symbol>.json`; any other URL, a symbol with
  * no file among them, gets a 404. `init` (signal, redirect, headers) is accepted and ignored: a

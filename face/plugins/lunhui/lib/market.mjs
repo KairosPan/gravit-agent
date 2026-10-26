@@ -29,6 +29,12 @@
  * ranges moved, unchanged, into `calendar/2026.json`, read through `loadCalendars()` once at
  * module load; `isCovered`, `holidayOn` and `isTradingDate` read those tables, the coverage field
  * and the uncovered reasons name the covered years, and `getMarketSession` is otherwise verbatim.
+ *
+ * Since plan 1 Task 5 the provider's `fetchBytes` is exported for `eastmoney.mjs` and takes a
+ * fourth argument, `{ redirect, headers, maxBytes }`, defaulting to the Tencent values it hard-coded
+ * (`maxBytes` at most `MAX_RESPONSE_BYTES`); it resolves to `{ status, headers, bytes }`, and under
+ * `redirect: "manual"` a 301, 302, 307 or 308 resolves with no body rather than failing.
+ * `fetchQuotes` and `fetchDailyBars` pass no options, so their requests and codes are unchanged.
  */
 import { coverageOf, holidayOn as tableHolidayOn, isTradingDay, isWeekend, loadCalendars } from "./calendar.mjs";
 
@@ -249,8 +255,29 @@ export function parseTencentKlines(payload, symbol) {
   };
 }
 
-async function fetchBytes(url, fetchImpl, timeoutMs) {
+// Exported and generalized in plan 1 Task 5 (see the header): the Tencent calls keep the
+// defaults, so their requests and codes are unchanged.
+const TENCENT_HEADERS = Object.freeze({
+  Accept: "*/*",
+  Referer: "https://gu.qq.com/",
+  "User-Agent": "Lunhui-Market-Dashboard/1.0",
+});
+const REDIRECT_STATUSES = new Set([301, 302, 307, 308]);
+
+export async function fetchBytes(
+  url,
+  fetchImpl,
+  timeoutMs,
+  {
+    redirect = "error",
+    headers = TENCENT_HEADERS,
+    maxBytes = MAX_RESPONSE_BYTES,
+  } = {},
+) {
   if (
+    !Number.isSafeInteger(maxBytes) ||
+    maxBytes <= 0 ||
+    maxBytes > MAX_RESPONSE_BYTES ||
     typeof fetchImpl !== "function" ||
     !Number.isSafeInteger(timeoutMs) ||
     timeoutMs <= 0 ||
@@ -275,13 +302,14 @@ async function fetchBytes(url, fetchImpl, timeoutMs) {
   const request = async () => {
     const response = await fetchImpl(url, {
       signal: controller.signal,
-      redirect: "error",
-      headers: {
-        Accept: "*/*",
-        Referer: "https://gu.qq.com/",
-        "User-Agent": "Lunhui-Market-Dashboard/1.0",
-      },
+      redirect,
+      headers: { ...headers },
     });
+    // Under `redirect: "manual"` a redirect is the caller's to judge: its status and headers, no body.
+    if (redirect === "manual" && REDIRECT_STATUSES.has(response?.status)) {
+      await response.body?.cancel?.().catch(() => {});
+      return { status: response.status, headers: response.headers, bytes: new Uint8Array(0) };
+    }
     if (!response?.ok)
       throw providerError(
         "PROVIDER_HTTP_ERROR",
@@ -291,16 +319,16 @@ async function fetchBytes(url, fetchImpl, timeoutMs) {
     if (
       declaredLength &&
       /^\d+$/.test(declaredLength) &&
-      Number(declaredLength) > MAX_RESPONSE_BYTES
+      Number(declaredLength) > maxBytes
     ) {
       await response.body?.cancel?.().catch(() => {});
       throw providerError("RESPONSE_TOO_LARGE", "腾讯行情响应超过大小限制。");
     }
     if (!response.body?.getReader) {
       const bytes = new Uint8Array(await response.arrayBuffer());
-      if (bytes.byteLength > MAX_RESPONSE_BYTES)
+      if (bytes.byteLength > maxBytes)
         throw providerError("RESPONSE_TOO_LARGE", "腾讯行情响应超过大小限制。");
-      return bytes;
+      return { status: response.status, headers: response.headers, bytes };
     }
     reader = response.body.getReader();
     const chunks = [];
@@ -311,7 +339,7 @@ async function fetchBytes(url, fetchImpl, timeoutMs) {
         const { done, value } = await reader.read();
         if (done) break;
         size += value.byteLength;
-        if (size > MAX_RESPONSE_BYTES) {
+        if (size > maxBytes) {
           await reader.cancel();
           throw providerError(
             "RESPONSE_TOO_LARGE",
@@ -331,7 +359,7 @@ async function fetchBytes(url, fetchImpl, timeoutMs) {
       bytes.set(chunk, offset);
       offset += chunk.byteLength;
     }
-    return bytes;
+    return { status: response.status, headers: response.headers, bytes };
   };
   try {
     return await Promise.race([request(), timeout]);
@@ -347,7 +375,7 @@ export async function fetchQuotes(
 ) {
   const requested = validateProviderSymbols(symbols);
   if (!requested.length) return [];
-  const bytes = await fetchBytes(
+  const { bytes } = await fetchBytes(
     `${QUOTE_URL}${requested.join(",")}`,
     fetchImpl,
     timeoutMs,
@@ -368,7 +396,7 @@ export async function fetchDailyBars(
   validateSymbol(symbol);
   const url = new URL(DAILY_URL);
   url.searchParams.set("param", `${symbol},day,,,60,qfq`);
-  const bytes = await fetchBytes(url.href, fetchImpl, timeoutMs);
+  const { bytes } = await fetchBytes(url.href, fetchImpl, timeoutMs);
   let text;
   try {
     text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);

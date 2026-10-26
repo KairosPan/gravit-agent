@@ -2,8 +2,8 @@
 
 **Synthetic.** Every price, volume, amount and time in these files is made up; nothing here was
 fetched from the network. They stand in for the two Tencent endpoints the Lunhui market module
-reads (`face/plugins/lunhui/market.mjs`), for `tests/lunhui-market.test.ts` and for the Lunhui
-server's fixture mode (`LUNHUI_FETCH_FIXTURES`). The security names are the real ones; the
+reads (`face/plugins/lunhui/lib/market.mjs`), for `tests/lunhui-market.test.ts` and for a freeze
+row given this directory as its `config.fetch` (spec 2026-10-25 A15). The security names are the real ones; the
 numbers are not those securities' prices.
 
 - `quotes.gb18030.txt` — one `qt.gtimg.cn` reply as raw bytes, GB18030-encoded, one
@@ -23,9 +23,9 @@ numbers are not those securities' prices.
   with adjustment `none`. The last bar agrees with the symbol's quote line (open, close, high,
   low, volume; the quote's previous close is the bar before).
 
-`fetch.ts` serves them through `createFixtureFetch` (`face/plugins/lunhui/fixture-fetch.mjs`), the
-one mapping the server's fixture mode uses too: a URL whose host is `qt.gtimg.cn` gets
+`fetch.ts` serves them through `createFixtureFetch` (`face/plugins/lunhui/lib/fixture-fetch.mjs`),
+the one mapping a row's `config.fetch` uses too: a URL whose host is `qt.gtimg.cn` gets
 `quotes.gb18030.txt` as bytes, a URL whose host is `web.ifzq.gtimg.cn` and whose `param` starts
 with `<symbol>,` gets `kline-<symbol>.json`, any other URL a 404. The sibling directory
-`../lunhui-empty/` holds no replies at all, so a server pointed there answers every fetch with a
+`../lunhui-empty/` holds no replies at all, so a fetch served from there answers every URL with a
 404.
