@@ -429,7 +429,7 @@ failed read, a module's third rejection ending that module only (the role goes o
 blocked module under limits, its status then `blocked`), and the four-heading report; Gravit calls it as the run
 protocol says (§4.3, "The run protocol section"). The second is `cn-stock-analyst` (§5.9, A8, E4), the
 leader and mode modules' analyst — its `allow` is `skill` and the leader and mode pairs (§3.6), its
-route the same, its Chinese `ROLE.md` (1,640 bytes) one artifact a call: the brief names the
+route the same, its Chinese `ROLE.md` (1,641 bytes) one artifact a call: the brief names the
 strategy, the run, the cited `market_run` and whether to write the leader or the mode, the context
 is read once with the three, the artifact goes only in `analysis`, and the mode is a daily
 registration — `S01` in `lunhui-s01-repair` alone, `WAIT` for `S02` while its catalyst has no
@@ -611,7 +611,7 @@ Some 11,000 lines of TypeScript across 36 files, run directly by `tsx` — no bu
 plain `.js` files outside `src/` (`face/plugins/bot.js` and `face/plugins/gravit.js`, §3.7–§3.8 —
 a composition names each by a path the loader reaches as an absolute `file:` URL, which the face
 rebases from a relative one for a bot, and each must import nothing) and the Lunhui rows' plain
-`.mjs` files under `face/plugins/lunhui/` (§4.3: eight row files and their `lib/`, which import
+`.mjs` files under `face/plugins/lunhui/` (§4.3: ten row files and their `lib/`, which import
 `@deepseek-ai/dsh-tools`, pinned exactly in `face/package.json`, and each other, never `src/`). Pins:
 `DSH_PIN = 0.2.0-rc.2` (every `@deepseek-ai/dsh-*` dependency, declared exactly and installed),
 `CORDIS_PIN = 4.0.4` (`@deepseek-ai/cordis` rides its own 4.x track; the dsh packages peer it with
@@ -938,7 +938,9 @@ mainline candidates' members and its pools; freeze their quotes on the strategy 
 which opens the strategy run; call `role_cn_stock_analyst` with the strategy, the run and
 `market_run` for the leader, then again for the mode; read the run back. A `WAIT` is a daily
 registration and a result, never a reason to re-run; on `STALE_MARKET_RUN`, freeze a new
-`cn-market` run and open a new strategy run, a sealed run's citation being fixed; and one sentence
+`cn-market` run and open a new strategy run — the protocol's wording, stricter than the code,
+which takes `market_run` on every read, so a sealed strategy run can be re-read with a newer
+market run until its leader is accepted (§10 item 19); and one sentence
 says the counterevidence step comes later with no tool today. The rules hold for both: never
 freeze after a role has read (`RUN_SEALED`), never edit `analysis/`, never submit an artifact
 (`NOT_A_ROLE`); a `NOT_EVALUABLE` artifact is a result, not a failure, journaled in a `cn-market`
