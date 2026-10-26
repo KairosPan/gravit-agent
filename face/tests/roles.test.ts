@@ -61,6 +61,7 @@ test("cn-market-analyst's ROLE.md: Chinese, within 2,000 bytes, the order, the a
   assert.ok(persona.includes("`analysis`") && persona.includes("不写进消息"), "the artifact goes only into analysis");
   assert.ok(persona.includes("NOT_EVALUABLE"), "a NOT_EVALUABLE context is submitted as such");
   assert.ok(persona.includes("读取失败") && persona.includes("第三次") && persona.includes("blocked"), "the blocked exit");
+  assert.ok(persona.includes("只停止该模块，接着做下一个模块") && persona.includes("每个受阻的模块"), "a third rejection stops that module only, each blocked module reported");
   for (const heading of ["**status**", "**what was measured**", "**paths**", "**limits**"]) assert.ok(persona.includes(heading), heading);
   assert.ok(persona.includes("analysis/<run>/<module>.json"), "the paths it reports");
 });
