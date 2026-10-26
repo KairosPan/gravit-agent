@@ -18,8 +18,8 @@
  *     (src/cycle.ts): the face's gravit plugin (the date section, the role
  *     summaries, the research-cycle contract) and one `dsh-tool-subagent` row
  *     per role, none of which masks a tool. Gravit's sessions join it: their
- *     tool set is the host's global view plus the `role_*` tools (none here:
- *     the repository's `roles/` holds only `_template`), their prompt
+ *     tool set is the host's global view plus the `role_*` tools (here
+ *     `role_cn_market_analyst`, the one role `roles/` ships), their prompt
  *     carries the date and the cycle contract, and a bot's carries neither (nor
  *     does it see a role tool).
  * Also: the roster lists a broken fixture with its reason and never `_template`;
@@ -136,18 +136,18 @@ test("bots smoke: roster, mask, persona, a default that masks nothing, the shipp
       const names = (schemas: { name: string }[]) => schemas.map((s) => s.name).sort();
 
       /* S3 - Gravit: a session naming no preset joins `gravit` and keeps the host's tools, plus the role library's.
-       * This boot reads the repository's own roles/, which holds only `_template` since the three alpaca-kit
-       * roles retired, so the library adds nothing: Gravit's tools are the host's exactly, and no `role_*` tool
-       * (role_screener above all) is among them. The role tools' own path is roles-smoke's, over fixture roles. */
+       * This boot reads the repository's own roles/, which ships cn-market-analyst alone since the three
+       * alpaca-kit roles retired, so the library adds role_cn_market_analyst and nothing else: no retired
+       * `role_*` tool (role_screener above all) comes back. The role tools' own path is roles-smoke's. */
       const k = await create({ cwd: home });
       assert.equal(k.agentPreset, "gravit");
       const gravit = agentOf(k.sessionId);
       assert.equal(gravit.session.header.agentPreset, "gravit");
-      assert.deepEqual(readRoles(ROLES_ROOT), [], "the repository ships no role");
+      assert.deepEqual(readRoles(ROLES_ROOT).map((role) => role.tool), ["role_cn_market_analyst"], "the repository ships one role");
       assert.deepEqual(names(tools.schemas(gravit)), [...names(tools.schemas()), ...readRoles(ROLES_ROOT).map((role) => role.tool)].sort(),
         "Gravit's tools are the host's plus the role library (spec §5.1)");
       assert.ok(names(tools.schemas(gravit)).includes("bash") && names(tools.schemas(gravit)).includes("read"), "Gravit keeps the host's tools");
-      assert.equal(names(tools.schemas(gravit)).some((name) => name.startsWith("role_")), false, "and has no role tool: no role_screener");
+      assert.deepEqual(names(tools.schemas(gravit)).filter((name) => name.startsWith("role_")), ["role_cn_market_analyst"], "and its one role tool: no role_screener");
       /* Compared up to the persona's first `{{`, not its first LINE: line 1 ends
        * `... your working directory is {{cwd}}.` and renderPrompt substitutes it
        * (measured: the rendered text carries this session's cwd). The prefix is

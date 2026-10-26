@@ -100,12 +100,12 @@ test("every shipped bot's plugin row lands on the real face/plugins/bot.js, and 
   const roles = readRoles(ROLES_ROOT);
   const cycle = readCycle(CYCLE_PATH);
   const gravitUrl = pathToFileURL(GRAVIT_PLUGIN_ABS).href;
-  assert.deepEqual(roles, [], "the repository ships no role: roles/ holds only _template");
-  assert.deepEqual(rowsOf(gravit).map((row) => row.id), ["gravit"], "Gravit's preset has no role rows");
-  assert.deepEqual(gravit.plugins[0], { id: "gravit", name: gravitUrl, config: { roles: [], cycle } },
+  assert.deepEqual(roles.map((role) => role.id), ["cn-market-analyst"], "the repository ships one role: cn-market-analyst");
+  assert.deepEqual(rowsOf(gravit).map((row) => row.id), ["gravit", "role-cn-market-analyst"], "Gravit's preset has its one role row");
+  assert.deepEqual(gravit.plugins[0], { id: "gravit", name: gravitUrl, config: { roles: roles.map((role) => ({ tool: role.tool, summary: role.description })), cycle } },
     "the mirror's relative plugin path rebases to the real face/plugins/gravit.js");
   assert.deepEqual(gravit.plugins, gravitRows(roles, { plugin: gravitUrl, cycle }),
-    "the shipped default composes the gravit plugin alone; it masks no host tool, so the host roster is kept");
+    "the shipped default composes the gravit plugin and the role row; it masks no host tool, so the host roster is kept");
   assert.equal(typeof gravit.name, "string");
 });
 

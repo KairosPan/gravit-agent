@@ -9,14 +9,15 @@
  * inherited prefix's cache reuse; a plain `subagent` child - unseeded and as
  * unrestricted - reads neither section although it can call `create_goal` and
  * every role tool; a role naming a tool the tree lacks fails loudly at
- * delegation. The repository ships no role, so the two roles are fixtures made
- * from the real `roles/_template` under the test's own roles root, handed to
- * the boot as `rolesRoot`; the MCP tools they name are stand-ins registered
- * under a server name nothing real uses. Own file, gated. */
+ * delegation. The two roles are fixtures made from the real `roles/_template`
+ * under the test's own roles root, handed to the boot as `rolesRoot`; the MCP
+ * tools they name are stand-ins registered under a server name nothing real
+ * uses. The second case boots the shipped cn-market-analyst (a fixture copy on
+ * the stub's route) against the real Lunhui rows. Own file, gated. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { cp, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { GenerateOptions } from "@deepseek-ai/dsh-llm";
@@ -218,5 +219,130 @@ test("roles smoke: persona, exact tools, the result, the baseline, a fork's iden
   } finally {
     await dispose?.();
     await Promise.all([rm(bots, { recursive: true, force: true }), rm(rolesRoot, { recursive: true, force: true }), rm(root, { recursive: true, force: true }), rm(home, { recursive: true, force: true })]);
+  }
+});
+
+/** The text of each tool result a request sends the model, in order. */
+const toolTexts = (request: GenerateOptions) => request.messages.filter((m) => sourceKind(m) === "tool").map(textOf);
+
+/* The shipped cn-market-analyst on a real boot (modules spec A8, A23, §5.9). Its shipped route,
+ * `deepseek-official/deepseek-flash`, would send the child to dsh-base's real DeepSeek adapter, which no smoke can
+ * answer, so the boot reads a FIXTURE roles root - every shipped role copied, the analyst's route turned to the stub -
+ * and a temp strategies root through the `lunhui-runs` row's own config (a home-patch replacement, src/lunhui.ts), so
+ * nothing is written under the repository's strategies/. The market run is opened through the booted `lunhuiRuns`
+ * service and frozen with nothing, so every context expects NOT_EVALUABLE and the child submits the context's own
+ * NOT_EVALUABLE example. What is pinned: the child's tools are exactly its allow list; its persona is its own; its
+ * submit passes NOT_A_ROLE and lands in the run; the same submit from Gravit's root is NOT_A_ROLE; a freeze is out
+ * of the role child's reach (UNKNOWN_TOOL), and a delegated child that can reach one - a plain `subagent` child,
+ * unrestricted - is NOT_GRAVIT. */
+test("roles smoke: cn-market-analyst reads and submits as a role, Gravit's own submit is NOT_A_ROLE, a delegated freeze is NOT_GRAVIT", { skip: gated && "set FACE_SMOKE=1", timeout: 180_000 }, async () => {
+  const bots = await makeBotsRoot();
+  const fixtureRoles = await mkdtemp(join(tmpdir(), "face-roles-fixture-"));
+  const strategies = await realpath(await mkdtemp(join(tmpdir(), "face-roles-strategies-")));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "face-roles-root-")));
+  const home = await mkdtemp(join(tmpdir(), "face-roles-home-"));
+  let dispose: (() => Promise<void>) | undefined;
+  try {
+    for (const entry of readdirSync(ROLES_ROOT, { withFileTypes: true })) {
+      if (entry.isDirectory()) await cp(join(ROLES_ROOT, entry.name), join(fixtureRoles, entry.name), { recursive: true });
+    }
+    const metaPath = join(fixtureRoles, "cn-market-analyst", "role.yml");
+    writeFileSync(metaPath, readFileSync(metaPath, "utf8").replace(/^model: .*$/m, "model: stub/flash-standin"));
+    const roles = readRoles(fixtureRoles);
+    const analyst = roles.find((r) => r.id === "cn-market-analyst")!;
+    assert.equal(analyst.model, "stub/flash-standin", "the fixture's analyst is routed to the stub");
+    assert.deepEqual(roles.map((r) => [r.id, r.allow]), readRoles(ROLES_ROOT).map((r) => [r.id, r.allow]), "and the fixture holds every shipped role, its tools unchanged");
+    await mkdir(join(strategies, "cn-market"));
+    await writeFile(join(strategies, "cn-market", "THESIS.md"), "# cn-market fixture\n");
+    await mkdir(join(root, ".git"));
+    setupFaceProfile(home);
+    const patchPath = join(home, "profiles", "face", "cordis.patch.yml");
+    const patch = readFileSync(patchPath, "utf8").replace(/^\[\][ \t]*$/m, "");
+    writeFileSync(patchPath, `${patch}\n- id: mcp-akshare\n  disabled: true\n- id: mcp-account\n  disabled: true\n- id: agent-default-model\n  config:\n    provider: stub\n    model: echo\n- id: lunhui-runs\n  config:\n    strategiesRoot: ${JSON.stringify(strategies)}\n`);
+    const booted = await bootFace({ profileName: "face", port: 0, dshHome: home, botsRoot: bots, rolesRoot: fixtureRoles });
+    dispose = booted.dispose;
+    const { ctx } = booted;
+    const service = ctx.get("lunhuiRuns") as { strategiesRoot: string; openRun(s: string, k: "market"): Promise<{ run: string }>; readRun(s: string, r: string): Promise<{ manifest: { artifacts: string[] } }> };
+    assert.equal(service.strategiesRoot, strategies, "the rows write under the temp strategies root");
+    const { run } = await service.openRun("cn-market", "market");
+    const requested = new Map<string, GenerateOptions[]>();
+    const headers = new Map<string, Session["header"]>();
+    const script = (request: GenerateOptions): StubReply => {
+      if (request.purpose !== undefined) return { kind: "text", text: "fixture" };
+      const id = String(request.sessionId);
+      requested.set(id, [...requested.get(id) ?? [], request]);
+      const header = ctx.sessions.get(request.sessionId!)?.header;
+      if (header !== undefined && !headers.has(id)) headers.set(id, { ...header });
+      const trigger = lastHuman(request);
+      const text = trigger ? textOf(trigger) : "";
+      const results = toolTexts(request);
+      const briefed = (marker: string) => request.messages.some((m) => sourceKind(m) !== "tool" && textOf(m).includes(marker));
+      if (header?.origin === "subagent" && briefed("MARKET_FIXTURE")) {
+        /* The role child: reach for a freeze it does not carry, read the environment context, submit its example. */
+        if (results.length === 0) return { kind: "tool", name: "lunhui_freeze_index", args: { strategy: "cn-market" } };
+        if (results.length === 1) return { kind: "tool", name: "lunhui_read_environment_context", args: { strategy: "cn-market", run } };
+        if (results.length === 2) {
+          const context = JSON.parse(results[1]);
+          return { kind: "tool", name: "lunhui_submit_environment", args: { strategy: "cn-market", run, analysis: JSON.stringify(context.example) } };
+        }
+        return { kind: "text", text: "MARKET_DONE" };
+      }
+      if (header?.origin === "subagent" && briefed("SPAWN_FREEZE")) {
+        return results.length === 0 ? { kind: "tool", name: "lunhui_freeze_index", args: { strategy: "cn-market" } } : { kind: "text", text: "SPAWN_DONE" };
+      }
+      if (sourceKind(trigger!) === "user" && text === "RUN_ROOT_SUBMIT") return { kind: "tool", name: "lunhui_submit_environment", args: { strategy: "cn-market", run, analysis: "{}" } };
+      if (sourceKind(trigger!) === "user" && text === "RUN_MARKET_ANALYST") return { kind: "tool", name: "role_cn_market_analyst", args: { description: "Read the market run", prompt: `MARKET_FIXTURE: cn-market run ${run}.` } };
+      if (sourceKind(trigger!) === "user" && text === "RUN_SPAWN_FREEZE") return { kind: "tool", name: "subagent", args: { description: "Freeze from a child", prompt: "SPAWN_FREEZE: freeze the index.", run_in_background: false } };
+      return { kind: "text", text: "PARENT_DONE" };
+    };
+    ctx.llm.registerAdapter(["stub"], new StubAdapter(script));
+    const base = `http://127.0.0.1:${ctx.webServer.port}`;
+    mountClient(ctx);
+    const cookie = await signIn(ctx, base);
+    const { sessionId } = await remote<{ sessionId: string }>(base, cookie, "session/create", { request: { cwd: root } });
+    const gravit = ctx.agents.get(SessionId(sessionId))!;
+    const prompt = (value: string) => remote(base, cookie, "session/prompt", { request: { requestId: `roles-${crypto.randomUUID()}`, sessionId, mode: "queue", content: [{ type: "text", text: value }] } });
+    const lastResult = () => (gravit.session.snapshotEvents().filter((e) => e.type === "tool/result").at(-1)!.data as { message: { isError?: boolean; content: ReadonlyArray<{ text?: string }> } }).message;
+    const resultText = (message: { content: ReadonlyArray<{ text?: string }> }) => message.content.map((b) => b.text ?? "").join("\n");
+    const childAfter = async (marker: string) => {
+      const found = () => [...requested.entries()].find(([id, rs]) => headers.get(id)?.origin === "subagent" && rs.some((r) => r.messages.some((m) => sourceKind(m) !== "tool" && textOf(m).includes(marker))));
+      await waitFor(`child ${marker}`, () => found() !== undefined);
+      await gravit.whenIdle();
+      return found()![1];
+    };
+
+    /* Gravit's root: the submit is refused before the run is touched. */
+    await prompt("RUN_ROOT_SUBMIT");
+    await gravit.whenIdle();
+    const refused = lastResult();
+    assert.equal(refused.isError, true, "Gravit's own submit fails");
+    assert.match(resultText(refused), /^Error: NOT_A_ROLE: /, "as NOT_A_ROLE");
+
+    /* The role child. */
+    await prompt("RUN_MARKET_ANALYST");
+    const child = await childAfter("MARKET_FIXTURE");
+    assert.equal(child[0].model, "flash-standin", "the child runs on its role's route");
+    assert.deepEqual(child[0].tools!.map((t) => t.name).sort(), [...analyst.allow].sort(), "the analyst's tools are exactly its allow list");
+    const system = textOf(child[0].messages[0]);
+    assert.ok(system.includes("市场与题材分析员"), "the role persona is the child's");
+    assert.equal(system.includes(readPersona(PERSONA_PATH).split("{{")[0]), false, "and it shadows Gravit's");
+    const childResults = toolTexts(child.at(-1)!);
+    assert.equal(childResults.length, 3, "the freeze, the read and the submit came back");
+    assert.match(childResults[0], /unknown tool "lunhui_freeze_index"/, "a freeze is out of the role child's reach");
+    assert.match(childResults[1], /NOT_EVALUABLE/, "the empty run's context expects NOT_EVALUABLE");
+    assert.match(childResults[2], /"accepted":true/, "the child's submit passed NOT_A_ROLE and was accepted");
+    assert.deepEqual((await service.readRun("cn-market", run)).manifest.artifacts, ["environment"], "the artifact landed in the run");
+    const artifact = JSON.parse(readFileSync(join(strategies, "cn-market", "analysis", run, "environment.json"), "utf8"));
+    assert.deepEqual([artifact.module, artifact.status, artifact.run], ["environment", "NOT_EVALUABLE", run]);
+    assert.equal(resultText(lastResult()), "MARKET_DONE", "the child's report returns through the tool");
+
+    /* A delegated child that can reach a freeze: NOT_GRAVIT. */
+    await prompt("RUN_SPAWN_FREEZE");
+    const spawn = await childAfter("SPAWN_FREEZE");
+    assert.ok(spawn[0].tools!.some((t) => t.name === "lunhui_freeze_index"), "the plain subagent child carries the freeze");
+    assert.match(toolTexts(spawn.at(-1)!)[0], /NOT_GRAVIT/, "and its call is NOT_GRAVIT");
+  } finally {
+    await dispose?.();
+    await Promise.all([bots, fixtureRoles, strategies, root, home].map((dir) => rm(dir, { recursive: true, force: true })));
   }
 });

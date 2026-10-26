@@ -76,8 +76,8 @@ export const TOOL_NAME_MAX = 64;
  *  (`entry === raw` or `entry.endsWith("__" + raw)`), the match src/orders.ts `isOrderTool`
  *  applies to the order tools, so a server the operator mounts under a name of their own
  *  cannot slip an account or order tool in. {@link readMeta} refuses an `allow` entry that
- *  matches, with the reason in the message. Every role the repository ships obeys it (none
- *  ships today: `roles/` holds only `_template`), and tests/roles.test.ts holds an independent
+ *  matches, with the reason in the message. Every role the repository ships obeys it
+ *  (`cn-market-analyst` today), and tests/roles.test.ts holds an independent
  *  copy of the names. */
 const NEVER: ReadonlyArray<{ what: string; because: string; names: readonly string[]; prefixes: readonly string[]; rawNames: readonly string[] }> = [
   { what: "a tool that needs a human",

@@ -63,8 +63,8 @@ export async function makeRepoBotsRoot(): Promise<string> {
 
 /** A throwaway roles root: the repository's own `roles/_template`, copied, and
  *  one valid role (`probe`) made from a second copy of it, with its own persona
- *  and a one-tool `allow` (`read`). The repository ships no role, so a test of
- *  the role mechanism reads this root instead; the caller breaks it, or hands it
+ *  and a one-tool `allow` (`read`). A test of the role mechanism reads this
+ *  root, not the shipped library; the caller breaks it, or hands it
  *  to `composeFace` as `rolesRoot`. The caller removes it. */
 export async function makeRolesRoot(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "face-roles-"));

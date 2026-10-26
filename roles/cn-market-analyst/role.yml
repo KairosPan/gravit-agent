@@ -1,0 +1,12 @@
+# roles/cn-market-analyst/role.yml - the market and theme analyst (modules spec A8, §5.9).
+name: CN market analyst
+description: Reads one frozen cn-market run's environment, sentiment and theme contexts, in that order, and submits each module's validated artifact through its submit tool; cites evidence ids only, freezes nothing, trades nothing, writes nothing else.
+allow:
+  - skill
+  - lunhui_read_environment_context
+  - lunhui_submit_environment
+  - lunhui_read_sentiment_context
+  - lunhui_submit_sentiment
+  - lunhui_read_theme_context
+  - lunhui_submit_theme
+model: deepseek-official/deepseek-flash
