@@ -35,6 +35,8 @@ const HINTS = {
     "CURRENT 指本运行的交易日（上下文 session），须至少引用一条 scope 为 CURRENT 的证据；日线与历史序列一律 HISTORICAL，文字不用“当前、今日”等词；证据不足用 INSUFFICIENT，此时标题字段写 UNKNOWN。",
   bars: `日线只列最近 ${BARS_SHOWN} 根，bars_total 是冻结的根数；证据编号指整条序列。`,
   status: "status_expected 为 NOT_EVALUABLE 时照 example 提交：missing_sources 照抄 missing，标题字段一律 UNKNOWN。",
+  example:
+    "example 只示格式：标题字段为 UNKNOWN，声明为 INSUFFICIENT，不是判断。写出 STRONG 或 WEAK 等指数状态，须有一条 CURRENT 或 HISTORICAL 声明引用指数报价或指数日线；写出 EXPANDING 或 CONTRACTING 等流动性状态，须有一条声明引用 total_turnover 或 advance_decline_ratio；句中出现“指数、成交额、流动性”时同一声明还须引用一条派生证据。",
 };
 
 const SCHEMA = {
@@ -86,7 +88,8 @@ function firstId(digest, test) {
 
 /**
  * The context's example, built from the digest's own ids: `NOT_EVALUABLE` naming the missing
- * sources when any is, else `OK` with one index claim and one liquidity claim.
+ * sources when any is, else `OK` with UNKNOWN headlines and one INSUFFICIENT claim citing one of
+ * the digest's ids - a format a role cannot copy as a judgment it never made.
  * @param {import("../contract-core.mjs").ContextDigest} digest
  */
 function example(digest) {
@@ -100,30 +103,15 @@ function example(digest) {
       ...envelope, status: "NOT_EVALUABLE", missing_sources: [...digest.missing], ...unknown,
       claims: [], limitations: [`缺少 ${digest.missing.join("、")} 证据，无法评估。`],
     };
-  const quote =
+  // No judgment to copy: UNKNOWN headlines and one INSUFFICIENT claim citing one id of the digest.
+  const cited =
     firstId(digest, (entry) => isIndexRow(entry) && entry.kind === "index" && entry.item.symbol === "sh000001") ??
-    firstId(digest, (entry) => isIndexRow(entry) && entry.kind === "index");
-  const turnover = firstId(digest, (entry) => isLiquidityMeasure(entry) && entry.item.measure === "total_turnover");
-  const ratio = firstId(digest, (entry) => isLiquidityMeasure(entry) && entry.item.measure === "advance_decline_ratio");
-  const headline = { ...unknown };
-  const claims = [];
-  if (quote !== undefined && turnover !== undefined) {
-    headline.index_state = "NEUTRAL";
-    claims.push({
-      id: `c${claims.length + 1}`, basis: "CURRENT", evidence_ids: [quote, turnover],
-      text: "示例：上证指数报价与两市成交额合计见所引证据，按读数改写为偏强、中性或偏弱。",
-    });
-  }
-  const liquidity = [turnover, ratio].filter((id) => id !== undefined);
-  if (liquidity.length > 0) {
-    headline.liquidity_state = "STABLE";
-    claims.push({
-      id: `c${claims.length + 1}`, basis: "CURRENT", evidence_ids: liquidity,
-      text: "示例：流动性按两市成交额合计与涨跌比改写为扩张、平稳或收缩。",
-    });
-  }
-  if (claims.length > 0) headline.cycle_anchor = "示例：背景位置按所引证据改写";
-  return { ...envelope, status: "OK", missing_sources: [], ...headline, claims, limitations: [] };
+    firstId(digest, () => true);
+  const claims = cited === undefined ? [] : [{
+    id: "c1", basis: "INSUFFICIENT", evidence_ids: [cited],
+    text: "示例：所引证据只示格式；按读数改写本声明的 basis 与文字，再填标题字段。",
+  }];
+  return { ...envelope, status: "OK", missing_sources: [], ...unknown, claims, limitations: [] };
 }
 
 /** A bars or history row cut to its last `BARS_SHOWN` bars, the frozen count beside them. */

@@ -181,9 +181,13 @@ test("environment: a context over a real index and quotes freeze - OK expected, 
     assert.equal(row.bars_total, whole.length);
     assert.deepEqual(row.bars, whole.slice(-20));
   }
+  // The example makes no judgment a role could copy: UNKNOWN headlines, one INSUFFICIENT claim citing one digest id.
   assert.equal(context.example.status, "OK");
-  assert.notEqual(context.example.index_state, "UNKNOWN");
-  assert.notEqual(context.example.liquidity_state, "UNKNOWN");
+  assert.deepEqual([context.example.index_state, context.example.liquidity_state, context.example.cycle_anchor], ["UNKNOWN", "UNKNOWN", "UNKNOWN"]);
+  assert.equal(context.example.claims.length, 1);
+  assert.equal(context.example.claims[0].basis, "INSUFFICIENT");
+  assert.equal(context.example.claims[0].evidence_ids.length, 1);
+  assert.ok(rowsOf(context).some((row) => row.id === context.example.claims[0].evidence_ids[0]));
   assert.deepEqual(JSON.parse(await submit.execute({ strategy: "cn-market", run, analysis: JSON.stringify(context.example) }, exec(ROLE))), {
     accepted: true, module: "environment", run,
   });
