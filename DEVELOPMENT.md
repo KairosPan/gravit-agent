@@ -417,9 +417,10 @@ the directory; it is never a role. A hidden entry or a plain file under `roles/`
 symbolic link, or a directory whose name is not an id, is refused (below). One role ships:
 `cn-market-analyst` (modules spec §5.9, A8), the Lunhui market modules' analyst — its `allow` is
 `skill` and the environment, sentiment and theme pairs (§3.6), its route
-`deepseek-official/deepseek-flash`, its Chinese `ROLE.md` (1,337 bytes) the order of the three
+`deepseek-official/deepseek-flash`, its Chinese `ROLE.md` (1,450 bytes) the order of the three
 modules, the artifact passed only in `analysis` and never in the message, the blocked exit after a
-failed read or a module's third rejection, and the four-heading report; Gravit calls it as the run
+failed read, a module's third rejection ending that module only (the role goes on and names each
+blocked module under limits, its status then `blocked`), and the four-heading report; Gravit calls it as the run
 protocol says (§4.3, "The run protocol section"). The three that shipped before (a screener, a
 backtester and a reviewer, their allow lists the removed package's tools) retired with their tools
 on 2026-10-24; `_template`'s `ROLE.md` keeps the report's four headings (status, what was

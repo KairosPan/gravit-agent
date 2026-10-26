@@ -460,7 +460,8 @@ names it; a run frozen but never read stays `unsealed` on it.
 **The role and the protocol.** `../roles/cn-market-analyst/` is the one role that ships: its tools
 are `skill` and the six module tools, its model `deepseek-official/deepseek-flash`, its Chinese
 persona the three modules in order — environment, sentiment, theme — each read once and submitted
-once, the artifact only in `analysis`, a stop after a failed read or a module's third rejection,
+once, the artifact only in `analysis`, a stop after a failed read, a module's third rejection
+ending that module only (the role goes on to the next and names each blocked module under limits),
 and a report under the four headings. `lunhui:run` tells Gravit, every tool's `strategy` being `cn-market`: freeze
 `index` without a run (that opens one), then `limit-up` and `boards` with its id (`quotes`
 optional); call `role_cn_market_analyst` once with the run id; read the run back with
