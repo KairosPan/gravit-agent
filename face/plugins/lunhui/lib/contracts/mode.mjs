@@ -163,7 +163,7 @@ const HINTS = {
     "S01、S02 的预期卡：frozen_version 照抄 snapshot_id；candidates 为 leader 工件的候选代码；state 照抄引用的 sentiment 工件的 state；triggers、vetoes 各 1–5 条；字符串不超过 200 字，写下一运行可对照冻结事实核对的条件，不写交易方向、价位目标或仓位；price_band 是相对锚点的观察区间（如锚点上下若干百分比），不是目标价。WAIT 写 null。",
   expectation_review:
     "previous 非空时必填：previous_run 照抄 previous.run；grade 为 符合、强于、弱于 或 NOT_EVALUABLE，除 NOT_EVALUABLE 外引用至少一条本运行冻结、scope 为 CURRENT 的证据编号（如候选的报价）。previous 为 null 时写 null。",
-  previous: "previous 是本策略交易日早于本运行的运行中最新一份 mode 工件的预期卡，本运行只评它；那份工件为 WAIT（没有卡）时 previous 为 null，不用评。falsification 是 THESIS.md 的 Falsification 一节（至多 4 KiB），写前提与卡片时对照它；null 即没有这一节，falsification_unreadable 为 true 时是 THESIS.md 读不出。",
+  previous: "previous 是本策略交易日早于本运行的运行中最新一份 mode 工件的预期卡，本运行只评它；那份工件为 WAIT（没有卡）时 previous 为 null，不用评。falsification 是 THESIS.md 的 Falsification 一节（至多 1,500 字节，falsification_truncated 为 true 时后面被截去，原文仍在文件里），写前提与卡片时对照它；null 即没有这一节，falsification_unreadable 为 true 时是 THESIS.md 读不出。",
   parameters_used: "S01、S02 列出所用参数 { name, value, note }（1–12 条），都只是研究候选；WAIT 可为空。",
   addressed:
     "S01、S02 须本运行有已接受、status 为 OK 且带 items 列表（可为空）的 counterevidence 工件，并逐项回应 { item, response, evidence_ids? }，item 照抄 x 编号；漏一项即 UNADDRESSED_COUNTEREVIDENCE；没有这样的工件时结论写 WAIT。",
@@ -399,15 +399,19 @@ function example(digest) {
   }, isQuote);
 }
 
-/** The bytes of the Falsification section a context shows at most. */
-const FALSIFICATION_BYTES = 4 * 1024;
+/**
+ * The bytes of the Falsification section a context shows at most: a fixed share of the 30 KiB
+ * context, so an operator's longer THESIS.md never pushes a mainline board out. The file keeps all
+ * of it.
+ */
+export const FALSIFICATION_BYTES = 1500;
 
 /**
  * The Falsification section of a THESIS.md text: the lines after its `## Falsification` heading up
- * to the next heading, trimmed, cut to at most 4 KiB of UTF-8 on a character; null when there is
- * no text or no such section.
+ * to the next heading, trimmed, cut to at most `FALSIFICATION_BYTES` of UTF-8 on a character, with
+ * `truncated` when the cut left some out; null when there is no text or no such section.
  * @param {string | null} thesis
- * @returns {string | null}
+ * @returns {{ text: string, truncated: boolean } | null}
  */
 export function falsificationOf(thesis) {
   if (typeof thesis !== "string") return null;
@@ -425,7 +429,7 @@ export function falsificationOf(thesis) {
     if (size > FALSIFICATION_BYTES) break;
     cut += char;
   }
-  return cut;
+  return { text: cut, truncated: cut.length < section.length };
 }
 
 /** Whether an accepted mode artifact holds a card in its shape: what the next run grades. */
@@ -443,7 +447,8 @@ function holdsCard(artifact) {
  * given market run (`MISSING_EVIDENCE` otherwise: leader and mode stand on one market run): the
  * strategy's name; its previous card - the card of the newest accepted `mode.json` of an earlier
  * session, null when that artifact holds none (a WAIT: nothing to grade); and its THESIS.md
- * Falsification section, with `falsification_unreadable` when the file cannot be read.
+ * Falsification section, cut to `FALSIFICATION_BYTES` with `falsification_truncated` when cut, and
+ * `falsification_unreadable` when the file cannot be read.
  * @param {import("../../runs-row.mjs").LunhuiRuns} runs
  * @param {{ strategy: string, run: string }} located
  * @param {{ artifacts: Record<string, Record<string, any>>, market: { run: string } | null }} read
@@ -453,11 +458,13 @@ async function extra(runs, { strategy, run }, { artifacts, market }) {
   if (leader !== undefined && leader.market_run !== market?.run) throw refuse.marketRunDiffers(typeof leader.market_run === "string" ? leader.market_run : null);
   const previous = await runs.previousArtifact(strategy, run, "mode");
   const thesis = await runs.readThesis(strategy);
+  const falsification = falsificationOf(thesis);
   return {
     strategy,
     previous: previous === null || !holdsCard(previous.artifact) ? null
       : { run: previous.run, snapshot_id: previous.snapshot_id, session: previous.session, expectation: previous.artifact.expectation },
-    falsification: falsificationOf(thesis),
+    falsification: falsification?.text ?? null,
+    ...(falsification?.truncated ? { falsification_truncated: true } : {}),
     ...(thesis === null ? { falsification_unreadable: true } : {}),
   };
 }

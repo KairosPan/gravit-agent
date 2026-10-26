@@ -34,6 +34,6 @@ id, cited by id only (`docs/research/lunhui/README.md` §8).
 
 参数约束（§2.2）：本轮不设未经验证的生产值，参数版本不完整则不可评估。原文情绪1500/3500、封单8/10/15亿、竞昨成比5/15/20%等仅为研究候选（P0094、P0130、P0203–P0204、P0455–P0457、P0802、P0874、P0888）。
 
-Not evaluable today: no A-share point-in-time bed, no minute bars, no frozen theme membership, no pre-registered expectation plans — a Lunhui read-only run (`analysis/<run>/`) is observation, not a decision of these terms.
+今天的 Lunhui 运行（`analysis/<run>/`）是每日登记与观察，从不是交易；分钟级确认与公告还没有来源。
 
 **Daily registration (E4)**：每日运行只做登记，不做决定。冻结的证据与工件可说明 `theme_gate`、`candidate_before_divergence`、`theme_not_falsified`、`negative_tail_not_widening`，各引编号；分钟级确认 `minute_confirmation` 没有来源，写作 `unmet: no source`，所以登记不等于确认。登记冻结一张预期卡，由下一个交易日的运行评为符合、强于或弱于；`parameters_used` 所列参数只是研究候选。

@@ -13,6 +13,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { copyFile, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as modeRow from "../plugins/lunhui/mode-row.mjs";
@@ -21,7 +22,7 @@ import * as environmentRow from "../plugins/lunhui/environment-row.mjs";
 import * as sentimentRow from "../plugins/lunhui/sentiment-row.mjs";
 import * as themeRow from "../plugins/lunhui/theme-row.mjs";
 import * as quotesRow from "../plugins/lunhui/freeze-quotes-row.mjs";
-import { contract, HYPOTHESES, MODE_FOR, REQUIRED_PRECONDITIONS, R_FAMILIES, falsificationOf } from "../plugins/lunhui/lib/contracts/mode.mjs";
+import { contract, FALSIFICATION_BYTES, HYPOTHESES, MODE_FOR, REQUIRED_PRECONDITIONS, R_FAMILIES, falsificationOf } from "../plugins/lunhui/lib/contracts/mode.mjs";
 import { MAX_CONTEXT_BYTES, hypothesesVersion } from "../plugins/lunhui/lib/contract-core.mjs";
 import { writeArtifact } from "../plugins/lunhui/lib/runs.mjs";
 import {
@@ -251,13 +252,18 @@ test("mode contract: Chinese hypotheses of chapters 三 and 七 and P0159, the s
   assert.deepEqual(contract.exemptPaths, ["research_only_matches[*].label", "preconditions[*].name"]);
 });
 
-test("mode: the Falsification section read from THESIS.md - to the next heading, at most 4 KiB, null when absent", () => {
-  assert.equal(falsificationOf("# t\n\n## Falsification\n不是见涨就算修复。\n\n## Next\n别的。\n"), "不是见涨就算修复。");
+test("mode: the Falsification section read from THESIS.md - to the next heading, at most 1,500 bytes and flagged when cut, null when absent", () => {
+  assert.equal(FALSIFICATION_BYTES, 1500);
+  assert.deepEqual(falsificationOf("# t\n\n## Falsification\n不是见涨就算修复。\n\n## Next\n别的。\n"), { text: "不是见涨就算修复。", truncated: false });
   assert.equal(falsificationOf("# t\n\n## Rules\n- x\n"), null);
   assert.equal(falsificationOf(null), null);
-  const long = falsificationOf(`## Falsification\n${"证".repeat(3000)}\n`) as string;
-  assert.ok(Buffer.byteLength(long, "utf8") <= 4096);
-  assert.ok(long.length >= 1365);
+  const long = falsificationOf(`## Falsification\n${"证".repeat(3000)}\n`)!;
+  assert.equal(long.truncated, true);
+  assert.equal(long.text, "证".repeat(500), "cut on a character: 500 three-byte characters, 1,500 bytes");
+  const exact = falsificationOf(`## Falsification\n${"a".repeat(1500)}\n`)!;
+  assert.deepEqual([exact.text.length, exact.truncated], [1500, false], "a section of exactly 1,500 bytes is shown whole");
+  // The shipped theses' sections are shown whole.
+  for (const name of [S01, S02]) assert.equal(falsificationOf(readFileSync(THESIS(name), "utf8"))!.truncated, false, name);
 });
 
 test("mode: a context over an S01 run's quotes citing the day's market run - OK expected, the five artifacts read, the strategy and its falsification, no previous card, at most 30 KiB - whose WAIT example is accepted", async (t) => {
@@ -274,6 +280,8 @@ test("mode: a context over an S01 run's quotes citing the day's market run - OK 
   assert.equal(context.strategy, S01);
   assert.equal(context.previous, null);
   assert.match(context.falsification, /^\*\*不是见涨就算修复\*\*/);
+  assert.match(context.falsification, /Daily registration \(E4\)/, "the shipped section whole, its E4 paragraph included");
+  assert.ok(!("falsification_truncated" in context));
   assert.doesNotMatch(context.falsification, /^## /mu);
   assert.deepEqual(context.artifacts.map((row: any) => row.module), ["environment", "sentiment", "theme", "leader"]);
   assert.match(context.hints.strategy, /S01/);
@@ -622,6 +630,11 @@ test("mode: a live-size market run - three 500-row pools, thirty boards, ten 100
   const mainline = [["BK2000", "示例板块0"], ["BK2001", "示例板块1"], ["BK2002", "示例板块2"]];
   const mounted = await setup(t, { prepare: widen, mainline, boards: null });
   const { root, read, submit, market } = mounted;
+  // An operator's Falsification section of about 6 KiB: the context shows its first 1,500 bytes, flagged.
+  const longSection = "下一个交易日的运行对照冻结的事实评级，登记从不等于确认。".repeat(75);
+  assert.ok(Buffer.byteLength(longSection, "utf8") >= 6000);
+  const thesisPath = join(root, S01, "THESIS.md");
+  await writeFile(thesisPath, (await readFile(thesisPath, "utf8")).replace("## Falsification\n", `## Falsification\n${longSection}\n\n`));
   // Twelve items of 150 characters each, the reviewer's whole allowance of items at half its text.
   const item = "候选的地位只有一个交易日的冻结证据，".repeat(9).slice(0, 150);
   const addressed = Array.from({ length: 12 }, (_, i) => ({ item: `x${i + 1}`, response: "记入限制说明，下一运行核对。" }));
@@ -642,7 +655,9 @@ test("mode: a live-size market run - three 500-row pools, thirty boards, ten 100
   assert.equal(context.previous.run, first.run);
   assert.deepEqual(context.artifacts.map((row: any) => row.module), ["environment", "sentiment", "theme", "leader", "counterevidence"]);
   assert.equal(context.artifacts[4].headline.items.length, 12);
-  assert.ok(context.falsification.length > 0);
+  assert.equal(context.falsification_truncated, true, "the long section is cut and flagged");
+  assert.ok(Buffer.byteLength(context.falsification, "utf8") <= FALSIFICATION_BYTES);
+  assert.ok(longSection.startsWith(context.falsification), "its first 1,500 bytes, on a character");
   assert.deepEqual(context.evidence.filter((row: any) => row.kind === "quote").map((row: any) => row.symbol).sort(), [...EQUITIES].sort());
   assert.deepEqual(context.evidence.filter((row: any) => row.source === "market:limit-up").map((row: any) => [row.pool, row.code]).sort(), [["yesterday", "600519"], ["zt", "600519"]]);
   assert.deepEqual(context.evidence.filter((row: any) => row.kind === "board").map((row: any) => row.code), ["BK2000", "BK2001", "BK2002"]);
