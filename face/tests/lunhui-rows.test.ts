@@ -16,6 +16,9 @@ import { MODULES } from "../plugins/lunhui/lib/modules.mjs";
 import { MODULE_BUDGET, asToolError, callerIsChild, callerIsRole, refuse, upstreamError } from "../plugins/lunhui/lib/errors.mjs";
 import { repairFor } from "../plugins/lunhui/lib/contract-core.mjs";
 import { LunhuiError, RUN_ID_RE, badRunId } from "../plugins/lunhui/lib/runs.mjs";
+import * as environmentRow from "../plugins/lunhui/environment-row.mjs";
+import * as sentimentRow from "../plugins/lunhui/sentiment-row.mjs";
+import * as themeRow from "../plugins/lunhui/theme-row.mjs";
 
 type Cleanup = { after(fn: () => Promise<unknown>): unknown };
 
@@ -609,3 +612,27 @@ test("lunhui-runs: two submits of one module at once land one artifact; the othe
   assert.equal((lost as PromiseRejectedResult).reason.code, "ALREADY_SUBMITTED");
   assert.deepEqual(JSON.parse(await readFile(join(root, "alpha", "analysis", run, "environment.json"), "utf8")), { n: won + 1 });
 });
+
+/* The three module rows (spec §5.12), composed after the freezes: each injects `tools` and the
+ * backbone's `lunhuiRuns`, registers exactly its read and submit pair, and refuses to mount without
+ * the service, naming the row it needs. */
+for (const [row, module] of [[environmentRow, "environment"], [sentimentRow, "sentiment"], [themeRow, "theme"]] as const) {
+  test(`lunhui-${module}: mounts over the backbone's service, registers exactly its pair, and refuses without lunhuiRuns`, async (t) => {
+    assert.equal(row.name, `lunhui-${module}`);
+    assert.deepEqual(row.inject, ["tools", "lunhuiRuns"]);
+    const { service } = mounted(await strategiesRoot(t));
+    const scope = fakeScope();
+    row.apply(Object.assign(scope.ctx, { lunhuiRuns: service }), {});
+    assert.deepEqual(scope.tools.map((tool) => tool.name), [`lunhui_read_${module}_context`, `lunhui_submit_${module}`]);
+    assert.equal(scope.provided.length, 0);
+    scope.unload();
+    assert.equal(scope.tools.length, 0);
+
+    const bare = fakeScope();
+    assert.throws(() => row.apply(bare.ctx, {}), (error: any) => {
+      assert.match(error.message, /lunhui-runs/);
+      return true;
+    });
+    assert.equal(bare.tools.length, 0);
+  });
+}

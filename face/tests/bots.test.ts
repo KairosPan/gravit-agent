@@ -91,6 +91,12 @@ test("DEFAULT_ALLOW names none of the alpaca-kit reads: they left with the serve
  * plugins/bot.js masks - neither the default nor any bot shipped under bots/
  * admits a `lunhui_` name. */
 test("no bot sees a lunhui_ tool: DEFAULT_ALLOW and every shipped bot's allow list admit none", async () => {
+  assert.deepEqual([...LUNHUI_TOOL_NAMES], [
+    "lunhui_read_run", "lunhui_freeze_quotes", "lunhui_freeze_limit_up", "lunhui_freeze_boards", "lunhui_freeze_index",
+    "lunhui_read_environment_context", "lunhui_submit_environment",
+    "lunhui_read_sentiment_context", "lunhui_submit_sentiment",
+    "lunhui_read_theme_context", "lunhui_submit_theme",
+  ], "the eleven tools the rows register, every one masked below");
   const known = new Set([...DEFAULT_ALLOW, "subagent", "ralph", "mcp__akshare__stock_zh_a_hist", "mcp__account__portfolio_balances", ...LUNHUI_TOOL_NAMES]);
   const isLunhui = (name: string) => name.startsWith("lunhui_");
   assert.deepEqual(expandAllow([...DEFAULT_ALLOW], known).allow.filter(isLunhui), [], "DEFAULT_ALLOW");

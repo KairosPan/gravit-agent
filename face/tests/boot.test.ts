@@ -91,8 +91,10 @@ test("composeFace stacks exactly the layers it means to", () => {
     assert.deepEqual(patches.slice(1, 1 + policy.length), policy, "the policy layer sits right above the bundle layer");
     assert.equal((patches[1 + policy.length] as InsertPatch).insert?.[0]?.id, AKSHARE_MCP_ROW_ID, "the AKShare row sits right above the policy layer");
     assert.equal((patches[2 + policy.length] as InsertPatch).insert?.[0]?.id, ACCOUNT_SEAT_ROW_ID, "the Account seat row sits right after the AKShare row");
-    assert.deepEqual((patches[3 + policy.length] as InsertPatch).insert?.map((row) => row.id), [...LUNHUI_ROW_IDS],
-      "the five Lunhui rows sit right after the Account seat row, in one insert, in order");
+    assert.deepEqual((patches[3 + policy.length] as InsertPatch).insert?.map((row) => row.id), [
+      "lunhui-runs", "lunhui-freeze-quotes", "lunhui-freeze-limit-up", "lunhui-freeze-boards", "lunhui-freeze-index",
+      "lunhui-environment", "lunhui-sentiment", "lunhui-theme",
+    ], "the eight Lunhui rows sit right after the Account seat row, in one insert: the backbone, the freezes, then the modules");
   } finally {
     if (previous === undefined) delete process.env.DSH_TELEMETRY_DISABLED;
     else process.env.DSH_TELEMETRY_DISABLED = previous;
@@ -254,9 +256,9 @@ test("the profile can disable the repo's Account seat row", () => {
 
 /* The Lunhui rows (src/lunhui.ts, spec §5.12): each names its plugin file by
  * an absolute file URL; the backbone anchors runs under THIS checkout's
- * strategies/, and a freeze row carries no config in production (`fetch` and
- * `now` are test-only keys). */
-test("composeFace mounts the five Lunhui rows by file URL, the backbone under this checkout's strategies/", () => {
+ * strategies/, and a freeze or module row carries no config in production
+ * (a freeze row's `fetch` and `now` are test-only keys). */
+test("composeFace mounts the eight Lunhui rows by file URL, the backbone under this checkout's strategies/", () => {
   const home = freshHome();
   const { patches } = composeFace({ profileName: "face", port: 3090, dshHome: home });
   const composed = composeEntries([patches]);

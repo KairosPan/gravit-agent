@@ -246,10 +246,11 @@ test("boot smoke: sign-in gates /api and the mux, the pages and /data answer, Gr
       assert.equal(toolNames.includes(withheld), false, `${withheld} must not be registered (policy D6/D7)`);
     }
     /* The Lunhui rows (src/lunhui.ts), live: composed is not registered, so
-     * the running registry must carry all five tools, and the listing
+     * the running registry must carry all eleven tools, and the listing
      * `/data/plugins.json` serves (pluginListing over the booted tree, called
      * directly: main.ts, not bootFace, mounts the panel routes) must show the
-     * five rows enabled and ACTIVE. */
+     * eight rows enabled and ACTIVE - the three module rows mount only once
+     * the backbone has provided `lunhuiRuns`. */
     for (const name of LUNHUI_TOOL_NAMES) {
       assert.ok(toolNames.includes(name), `${name} must be registered; saw ${toolNames.join(", ")}`);
     }
