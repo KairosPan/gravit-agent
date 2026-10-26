@@ -248,15 +248,44 @@ test("scope outside claims: an owned class in a limitation is UNSUPPORTED_SCOPE 
   check(artifact(digest, { limitations: ["缺少情绪周期的分钟确认。"] }));
 });
 
-test("status: NOT_EVALUABLE needs missing sources and UNKNOWN headlines; OK needs none missing, here or in the context", () => {
+test("status: NOT_EVALUABLE needs the run's missing sources and UNKNOWN headlines; OK needs none missing and a claim", () => {
   const { digest } = context();
-  const notEvaluable = { status: "NOT_EVALUABLE", missing_sources: ["index"], state: "UNKNOWN" };
-  check(artifact(digest, notEvaluable));
-  assert.equal(category(() => check(artifact(digest, { ...notEvaluable, missing_sources: [] }))), "SCHEMA");
-  assert.equal(category(() => check(artifact(digest, { ...notEvaluable, state: "EXPANSION" }))), "SCHEMA");
-  assert.equal(category(() => check(artifact(digest, { missing_sources: ["index"] }))), "SCHEMA");
   const missing = context({ manifest: { ...MANIFEST, evidence: [{ source: "limit-up" }] } }).digest;
-  assert.equal(category(() => check(artifact(missing), { context: missing })), "SCHEMA");
+  const notEvaluable = { status: "NOT_EVALUABLE", missing_sources: ["index"], state: "UNKNOWN" };
+  const at = (ctx: Loose, overrides: Loose) => () => check(artifact(ctx, overrides), { context: ctx });
+  at(missing, notEvaluable)();
+  assert.equal(category(at(missing, { ...notEvaluable, missing_sources: [] })), "SCHEMA");
+  assert.equal(category(at(missing, { ...notEvaluable, state: "EXPANSION" })), "SCHEMA");
+  // missing_sources is the run's missing set: none more, none left out.
+  assert.equal(category(at(missing, { ...notEvaluable, missing_sources: ["index", "limit-up"] })), "SCHEMA");
+  assert.equal(category(at(digest, notEvaluable)), "SCHEMA");
+  const both = context({ manifest: { ...MANIFEST, evidence: [] } }).digest;
+  at(both, { ...notEvaluable, missing_sources: ["index", "limit-up"] })();
+  assert.equal(category(at(both, notEvaluable)), "SCHEMA");
+  // OK: nothing missing in the artifact or the run, and at least one claim.
+  assert.equal(category(at(digest, { missing_sources: ["index"] })), "SCHEMA");
+  assert.equal(category(at(missing, {})), "SCHEMA");
+  assert.equal(category(at(digest, { claims: [] })), "SCHEMA");
+});
+
+test("a module whose sources froze nothing accepts a NOT_EVALUABLE artifact with no claims and refuses an OK one", () => {
+  const { text, digest } = context({ manifest: { ...MANIFEST, evidence: [] }, evidence: [] });
+  assert.equal(JSON.parse(text).status_expected, "NOT_EVALUABLE");
+  assert.equal(digest.evidenceIds.size, 0);
+  const empty = { claims: [], limitations: ["缺少涨停池与指数证据。"] };
+  check(artifact(digest, { ...empty, status: "NOT_EVALUABLE", missing_sources: ["limit-up", "index"], state: "UNKNOWN" }), { context: digest });
+  assert.equal(category(() => check(artifact(digest, { ...empty, state: "UNKNOWN" }), { context: digest })), "SCHEMA");
+  // A claim still cites at least one id.
+  const bare = { id: "c1", text: "缺少资料。", basis: "INSUFFICIENT", evidence_ids: [] };
+  assert.equal(category(() => check(artifact(digest, { ...empty, claims: [bare], status: "NOT_EVALUABLE", missing_sources: ["limit-up", "index"], state: "UNKNOWN" }), { context: digest })), "SCHEMA");
+});
+
+test("a module schema cannot redefine an envelope field", () => {
+  const { digest } = context();
+  const loose = { ...SCHEMA, properties: { ...SCHEMA.properties, claims: {}, run: {} } };
+  assert.equal(category(() => check(artifact(digest, { claims: "无" }), { context: digest, schema: loose })), "SCHEMA");
+  assert.equal(category(() => check(artifact(digest, { run: 7 }), { context: digest, schema: loose })), "SCHEMA");
+  assert.deepEqual(JSON.parse(context({ schema: loose }).text).schema.properties.claims.minItems, 0);
 });
 
 test("the module's own rules run last, with the parsed artifact and the context", () => {
@@ -333,4 +362,39 @@ test("buildContext: a priority entry's order and view shape its rows; an example
   assert.deepEqual(parsed.evidence.map((item: Loose) => [item.id, item.boards, item.code]), [[high.id, 5, undefined], [low.id, 1, undefined]]);
   assert.equal(received, digest);
   assert.deepEqual(parsed.example, { cite: sealRatio.id });
+});
+
+test("buildContext: when the truncated list itself would pass the cap, the last rows added are given back", () => {
+  const rows = Array.from({ length: 400 }, (_, i) => withId({ pool: "zt", code: String(600000 + i), name: "某股".repeat(20), boards: 1 }));
+  const kept = (extra: Loose[]) => {
+    const evidence = [{ source: "limit-up", session: SESSION, items: [...rows, ...extra, sealRatio] }, EVIDENCE[1]];
+    const { text } = context({ evidence });
+    assert.ok(Buffer.byteLength(text, "utf8") <= MAX_CONTEXT_BYTES);
+    return JSON.parse(text);
+  };
+  const plain = kept([]);
+  // Unasked rows of many kinds leave the base and the fill unchanged, but lengthen `truncated`.
+  const odd = Array.from({ length: 20 }, (_, i) => withId({ kind: `unasked_kind_${String(i).padStart(2, "0")}_${"x".repeat(40)}` }));
+  const squeezed = kept(odd);
+  const count = (parsed: Loose) => parsed.evidence.filter((item: Loose) => item.pool === "zt").length;
+  assert.ok(count(squeezed) < count(plain), `${count(squeezed)} < ${count(plain)}`);
+  assert.equal(squeezed.truncated.find((entry: Loose) => entry.kind === "zt").count, 400 - count(squeezed));
+  assert.equal(squeezed.truncated.filter((entry: Loose) => entry.kind.startsWith("unasked_kind_")).length, 20);
+});
+
+test("buildContext: derived items past the cap leave out the rest of them and every evidence row", () => {
+  const derived = Array.from({ length: 300 }, (_, i) =>
+    withId({ source: "limit-up", kind: "derived", measure: `m${i}`, value: i, inputs: [zt.id], note: "某".repeat(40) }));
+  const evidence = [{ source: "limit-up", session: SESSION, items: [zt, ...derived] }, EVIDENCE[1]];
+  const { text, digest } = context({ evidence });
+  assert.ok(Buffer.byteLength(text, "utf8") <= MAX_CONTEXT_BYTES);
+  const parsed = JSON.parse(text);
+  assert.deepEqual(parsed.evidence, []);
+  assert.ok(parsed.derived.length > 0 && parsed.derived.length < 301);
+  const cut = parsed.truncated.filter((entry: Loose) => entry.kind === "derived");
+  assert.equal(cut.reduce((sum: number, entry: Loose) => sum + entry.count, 0), 301 - parsed.derived.length);
+  assert.deepEqual(parsed.truncated.find((entry: Loose) => entry.kind === "zt"), { source: "limit-up", kind: "zt", count: 1 });
+  assert.deepEqual(parsed.truncated.find((entry: Loose) => entry.kind === "index"), { source: "index", kind: "index", count: 1 });
+  // Every derived id stays citable, shown or not.
+  assert.equal(digest.derivedIds.size, 301);
 });

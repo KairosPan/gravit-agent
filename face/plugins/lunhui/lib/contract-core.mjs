@@ -233,9 +233,10 @@ export const ENVELOPE_SCHEMA = Object.freeze({
     session: {},
     status: { enum: ["OK", "NOT_EVALUABLE"] },
     missing_sources: { type: "array", minItems: 0, maxItems: 8, uniqueItems: true, items: textSchema(40) },
+    // None only in a NOT_EVALUABLE artifact, whose sources may have frozen nothing to cite (the status rule).
     claims: {
       type: "array",
-      minItems: 1,
+      minItems: 0,
       maxItems: 12,
       items: {
         type: "object",
@@ -270,7 +271,8 @@ export function envelopeSchema(schema) {
   return {
     ...ENVELOPE_SCHEMA,
     required: [...new Set([...ENVELOPE_SCHEMA.required, ...(schema.required ?? [])])],
-    properties: { ...ENVELOPE_SCHEMA.properties, ...schema.properties },
+    // The envelope's fields last: a module schema cannot redefine them.
+    properties: { ...schema.properties, ...ENVELOPE_SCHEMA.properties },
   };
 }
 
@@ -391,7 +393,7 @@ function checkEnvelope(raw, { module, context, schema, owns = [], rules }) {
     if (claim.basis === "HISTORICAL" && CURRENT_WORDS.test(claim.text))
       fail(`${path}: Non-current evidence was described as current.`);
   }
-  if (artifact.claims.every((claim) => claim.basis === "INSUFFICIENT") && !entry.headline.every((field) => isUnknown(artifact[field])))
+  if (artifact.claims.length > 0 && artifact.claims.every((claim) => claim.basis === "INSUFFICIENT") && !entry.headline.every((field) => isUnknown(artifact[field])))
     fail("analysis: Insufficient evidence requires UNKNOWN headline values.");
 
   for (const [path, text] of entries) {
@@ -419,8 +421,15 @@ function checkEnvelope(raw, { module, context, schema, owns = [], rules }) {
 
   if (artifact.status === "NOT_EVALUABLE" && (artifact.missing_sources.length === 0 || !entry.headline.every((field) => isUnknown(artifact[field]))))
     fail("analysis.status: NOT_EVALUABLE requires missing sources and UNKNOWN headline values.");
+  // The sources named missing are the run's, none more, none left out (missing_sources is unique).
+  if (
+    artifact.status === "NOT_EVALUABLE" &&
+    (artifact.missing_sources.length !== context.missing.length || !artifact.missing_sources.every((source) => context.missing.includes(source)))
+  )
+    fail("analysis.status: NOT_EVALUABLE requires missing_sources to be the run's missing sources.");
   if (artifact.status === "OK" && (artifact.missing_sources.length > 0 || context.missing.length > 0))
     fail("analysis.status: OK requires no missing sources, in the artifact or the run.");
+  if (artifact.status === "OK" && artifact.claims.length === 0) fail("analysis.status: OK requires at least one claim.");
 
   rules?.(artifact, context);
   return JSON.parse(JSON.stringify(artifact));
