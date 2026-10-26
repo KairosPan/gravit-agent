@@ -809,3 +809,28 @@ test("buildContext: extra fields are shown before the hypotheses and kept on the
   assert.ok(!("strategy" in JSON.parse(plain.text)));
   assert.deepEqual(plain.digest.extra, {});
 });
+
+test("buildContext requiredAny: one member shown is enough; every member past the cap is missing whole - NOT_EVALUABLE - and hints built from the digest see only the views shown", () => {
+  const shownModules = (digest: Loose) => [...digest.artifactIds].map((id: string) => digest.artifacts.get(id).module);
+  const build = (hypotheses: string, artifacts: Loose) => buildContext({
+    module: "counterevidence", run: MANIFEST.run, manifest: MANIFEST, evidence: [], sources: [], priority: [],
+    hypotheses, schema: SCHEMA, hints: (digest: Loose) => ({ shown: shownModules(digest) }), example: {}, required: [],
+    requiredAny: ["sentiment", "theme"], runArtifacts: ["sentiment", "theme"], artifacts,
+  });
+  const both = { sentiment: sentimentArtifact, theme: themeArtifact };
+  const room = build(HYPOTHESES, both);
+  assert.deepEqual(room.digest.missing, []);
+  assert.deepEqual(JSON.parse(room.text).hints.shown, ["sentiment", "theme"]);
+  // None accepted: the group is missing whole.
+  assert.deepEqual(build(HYPOTHESES, {}).digest.missing, ["sentiment", "theme"]);
+  // Both accepted, neither view fits: 150 bytes left beside the context's fixed part.
+  const base = Buffer.byteLength(build(HYPOTHESES, {}).text, "utf8") - Buffer.byteLength(JSON.stringify(["sentiment", "theme"]), "utf8") + 2 - "NOT_EVALUABLE".length + "OK".length;
+  const cut = build(HYPOTHESES + "a".repeat(MAX_CONTEXT_BYTES - 150 - base), both);
+  assert.ok(Buffer.byteLength(cut.text, "utf8") <= MAX_CONTEXT_BYTES);
+  const context = JSON.parse(cut.text);
+  assert.deepEqual(context.artifacts, []);
+  assert.deepEqual(context.missing, ["sentiment", "theme"]);
+  assert.equal(context.status_expected, "NOT_EVALUABLE");
+  assert.deepEqual(context.hints.shown, []);
+  assert.equal(cut.digest.artifactIds.size, 0);
+});

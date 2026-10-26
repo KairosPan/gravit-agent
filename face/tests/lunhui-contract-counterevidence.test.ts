@@ -9,7 +9,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import * as reviewRow from "../plugins/lunhui/review-row.mjs";
 import * as leaderRow from "../plugins/lunhui/leader-row.mjs";
@@ -18,6 +18,7 @@ import * as sentimentRow from "../plugins/lunhui/sentiment-row.mjs";
 import * as themeRow from "../plugins/lunhui/theme-row.mjs";
 import { contract, HYPOTHESES, KINDS } from "../plugins/lunhui/lib/contracts/counterevidence.mjs";
 import { MAX_CONTEXT_BYTES, SCOPE_CLASSES, hypothesesVersion } from "../plugins/lunhui/lib/contract-core.mjs";
+import { writeArtifact } from "../plugins/lunhui/lib/runs.mjs";
 import {
   ROLE, type Cleanup, type ToolDef, exec, fakeScope, frozenRun, idWhere, mount, rejectsWith, rowsOf,
 } from "./lunhui-contract-harness.ts";
@@ -50,9 +51,13 @@ async function submitted(submit: ToolDef, strategy: string, run: string, analysi
 const refusal = (submit: ToolDef, strategy: string, run: string, analysis: unknown) =>
   rejectsWith(submit.execute({ strategy, run, analysis: JSON.stringify(analysis) }, exec(ROLE)), "INVALID_ANALYSIS");
 
-/** A market run of the mounted service, frozen and (unless `artifacts` is false) its three artifacts accepted. */
-async function marketRun(service: unknown, freeze: Record<string, ToolDef>, { artifacts = true }: { artifacts?: boolean } = {}) {
-  const market = await frozenRun(freeze, ["index", "limit-up", "boards"]);
+/**
+ * A market run of the mounted service, frozen and (unless `artifacts` is false) its three artifacts
+ * accepted, the theme naming `mainline`; `boards` is the boards freeze's argument (null for its own first ten).
+ */
+async function marketRun(service: unknown, freeze: Record<string, ToolDef>,
+  { artifacts = true, mainline = MAINLINE, boards }: { artifacts?: boolean; mainline?: string[][]; boards?: string[] | null } = {}) {
+  const market = await frozenRun(freeze, ["index", "limit-up", "boards"], boards === undefined ? {} : { boards });
   if (!artifacts) return market;
   for (const row of [environmentRow, sentimentRow]) {
     const [read, submit] = tools(service, row);
@@ -61,29 +66,30 @@ async function marketRun(service: unknown, freeze: Record<string, ToolDef>, { ar
   }
   const [themeRead, themeSubmit] = tools(service, themeRow);
   const themeContext = JSON.parse(await themeRead.execute({ strategy: "cn-market", run: market }, exec(ROLE)));
-  const breadth = idWhere(themeContext, (row) => row.measure === "breadth" && row.params.board === MAINLINE[0][0]);
+  const breadth = idWhere(themeContext, (row) => row.measure === "breadth" && row.params.board === mainline[0][0]);
   assert.equal((await submitted(themeSubmit, "cn-market", market, {
     ...themeContext.example,
-    mainline_candidates: MAINLINE.map(([code, name]) => ({ board: code, name, evidence_ids: [
+    mainline_candidates: mainline.map(([code, name]) => ({ board: code, name, evidence_ids: [
       idWhere(themeContext, (row) => row.kind === "board" && row.code === code),
       idWhere(themeContext, (row) => row.kind === "members" && row.board === code),
     ] })),
-    claims: [{ id: "c1", text: `${MAINLINE[0][1]}的上涨占比见所引派生证据。`, basis: "CURRENT", evidence_ids: [breadth] }],
+    claims: [{ id: "c1", text: `${mainline[0][1]}的上涨占比见所引派生证据。`, basis: "CURRENT", evidence_ids: [breadth] }],
   })).accepted, true);
   return market;
 }
 
-/** The review row mounted, with a market run whose three artifacts are accepted. */
-async function setup(t: Cleanup) {
-  const mounted = await mount(t, reviewRow, addEquities);
-  const market = await marketRun(mounted.service, mounted.freeze);
+/** The review row mounted, with a market run whose three artifacts are accepted; `prepare` rewrites the fixture copy. */
+async function setup(t: Cleanup, { prepare = addEquities, mainline, boards }: { prepare?: (dir: string) => Promise<void>; mainline?: string[][]; boards?: string[] | null } = {}) {
+  const mounted = await mount(t, reviewRow, prepare);
+  const market = await marketRun(mounted.service, mounted.freeze, { mainline, boards });
   return { ...mounted, market };
 }
 
 /** A strategy run in `alpha`: quotes, then (unless `leader` is false) a leader artifact citing `market`. */
-async function strategyRun(mounted: Awaited<ReturnType<typeof setup>>, { leader = true, market = mounted.market }: { leader?: boolean; market?: string } = {}) {
+async function strategyRun(mounted: Awaited<ReturnType<typeof setup>>,
+  { leader = true, market = mounted.market, symbols = SYMBOLS }: { leader?: boolean; market?: string; symbols?: string[] } = {}) {
   const { service, freeze } = mounted;
-  const run = JSON.parse(await freeze.quotes.execute({ strategy: "alpha", symbols: SYMBOLS }, exec())).run as string;
+  const run = JSON.parse(await freeze.quotes.execute({ strategy: "alpha", symbols }, exec())).run as string;
   if (leader) {
     const [read, submit] = tools(service, leaderRow);
     const context = JSON.parse(await read.execute({ strategy: "alpha", run, market_run: market }, exec(ROLE)));
@@ -146,7 +152,7 @@ test("counterevidence contract: the ten rulings and §5 by topic with paragraph 
   const strategy = contract.forStrategy!("alpha");
   assert.equal(strategy.marketRun, "required");
   assert.deepEqual([strategy.sources, strategy.marketSources, strategy.marketArtifacts, strategy.runArtifacts, strategy.required],
-    [["quotes"], ["index", "limit-up", "boards"], ["environment", "sentiment", "theme"], ["leader"], ["leader"]]);
+    [["quotes"], ["index", "limit-up", "boards"], ["environment", "sentiment", "theme"], ["leader"], ["leader", "market:sentiment", "market:theme"]]);
 });
 
 test("counterevidence in cn-market: the run's three artifacts shown, no market_run - an item against a shown artifact accepted, an owned-class sentence on its evidence; the refusals REFERENCE or SCHEMA", async (t) => {
@@ -259,4 +265,72 @@ test("counterevidence in a strategy run: the leader and the market run's three a
     { accepted: true, module: "counterevidence", run });
   const stored = JSON.parse(await readFile(join(root, "alpha", "analysis", run, "counterevidence.json"), "utf8"));
   assert.deepEqual([stored.market_run, stored.market_snapshot_id], [market, context.market_snapshot_id]);
+});
+
+test("counterevidence in a strategy run: the maximal pin - a live-size market run, the leader and the three market artifacts at their caps - fits 30 KiB with leader, sentiment and theme shown, OK expected", async (t) => {
+  const CODES = Array.from({ length: 30 }, (_, i) => `BK${2000 + i}`);
+  const EQUITIES = ["sh600519", "sz000333", "sh601318", "sz000001"];
+  const widen = async (dir: string) => {
+    for (const [pool, file, base] of [["zt", "zt-pool.json", 680000], ["zb", "zb-pool.json", 690000], ["yesterday", "yesterday-pool.json", 830000]] as const) {
+      const reply = JSON.parse(await readFile(join(dir, file), "utf8"));
+      const [row] = reply.data.pool;
+      reply.data.pool = Array.from({ length: 500 }, (_, k) => ({ ...row, c: String(base + k), n: `示例${pool}${k}` }));
+      if (pool === "zt") reply.data.pool[450] = { ...row, c: "600519", n: "示例600519", lbc: 4 };
+      reply.data.tc = 500;
+      await writeFile(join(dir, file), JSON.stringify(reply));
+    }
+    const boards = JSON.parse(await readFile(join(dir, "boards.json"), "utf8"));
+    const [board] = boards.data.diff;
+    boards.data.diff = CODES.map((code, i) => ({ ...board, f12: code, f14: `示例板块${i}`, f3: 9 - i * 0.3, f6: 1e10 - i * 1e8 }));
+    await writeFile(join(dir, "boards.json"), JSON.stringify(boards));
+    const flow = JSON.parse(await readFile(join(dir, "board-flow.json"), "utf8"));
+    const [row] = flow.data.diff;
+    flow.data.diff = CODES.map((code, i) => ({ ...row, f12: code, f14: `示例板块${i}`, f62: 1e9 - i * 1e8 }));
+    await writeFile(join(dir, "board-flow.json"), JSON.stringify(flow));
+    const members = JSON.parse(await readFile(join(dir, "members-BK1716.json"), "utf8"));
+    for (const [i, code] of CODES.slice(0, 10).entries()) {
+      members.data.diff = members.data.diff.map((member: any, j: number) => ({ ...member, f12: String(300000 + i * 1000 + j), f14: `示例成分${i}-${j}` }));
+      await writeFile(join(dir, `members-${code}.json`), JSON.stringify(members));
+    }
+  };
+  const mainline = [["BK2000", "示例板块0"], ["BK2001", "示例板块1"], ["BK2002", "示例板块2"]];
+  const mounted = await setup(t, { prepare: widen, mainline, boards: null });
+  const { root, read, submit, market } = mounted;
+  const run = await strategyRun(mounted, { symbols: EQUITIES });
+  const sixteen = (seed: number) => Array.from({ length: 16 }, (_, i) => `ev_${(seed * 100 + i).toString(16).padStart(24, "0")}`);
+  const claims = (seed: number) => Array.from({ length: 12 }, (_, i) => ({ id: `c${i + 1}`, text: `${i}`.padEnd(300, "证"), basis: "CURRENT", evidence_ids: sixteen(seed + i) }));
+  // The market run's three artifacts at their caps, written over the accepted ones.
+  const marketDir = await realpath(join(root, "cn-market", "analysis", market));
+  const stored = async (dir: string, module: string) => JSON.parse(await readFile(join(dir, `${module}.json`), "utf8"));
+  await writeArtifact(marketDir, "environment", { ...(await stored(marketDir, "environment")), cycle_anchor: "锚".repeat(120), claims: claims(1) });
+  await writeArtifact(marketDir, "sentiment", { ...(await stored(marketDir, "sentiment")), claims: claims(2) });
+  const theme = await stored(marketDir, "theme");
+  await writeArtifact(marketDir, "theme", {
+    ...theme, claims: claims(3),
+    mainline_candidates: [...mainline.map(([code]) => code), "BK2003", "BK2004"].map((board, i) => ({ board, name: `示例${i}`.padEnd(40, "板"), evidence_ids: sixteen(40 + i) })),
+  });
+  // The run's leader at its cap: five candidates of sixteen ids, twelve 300-character claims.
+  const runDir = await realpath(join(root, "alpha", "analysis", run));
+  const leader = await stored(runDir, "leader");
+  await writeArtifact(runDir, "leader", {
+    ...leader, claims: claims(5), top_pattern_flags: ["ACCELERATING", "DIVERGENCE", "BROKEN_STREAK", "HIGH_POSITION", "FIRST_BOARD"],
+    leader_candidates: ["sh600519", "sz000333", "sh601318", "sz000001", "sh600000"].map((symbol, i) => ({ symbol, name: `示例${i}`.padEnd(20, "股"), rank: i + 1, board: "BK2000", evidence_ids: sixteen(60 + i) })),
+  });
+  const text = await read.execute({ strategy: "alpha", run, market_run: market }, exec(ROLE));
+  const size = Buffer.byteLength(text, "utf8");
+  // Measured 2026-10-26: 30,703 bytes - leader 3,461, environment 2,593, sentiment 2,226, theme 3,565, the four quotes, 69 derived rows.
+  assert.ok(size <= MAX_CONTEXT_BYTES, `${size} bytes`);
+  const context = JSON.parse(text);
+  assert.equal(context.status_expected, "OK");
+  assert.deepEqual(context.missing, []);
+  assert.deepEqual(context.artifacts.map((row: any) => row.module), ["leader", "environment", "sentiment", "theme"]);
+  assert.match(context.hints.against, /leader、environment、sentiment、theme/u);
+  assert.deepEqual(context.evidence.filter((row: any) => row.kind === "quote").map((row: any) => row.symbol).sort(), [...EQUITIES].sort());
+  // A review standing on what it shows is accepted.
+  const quote = idWhere(context, (row) => row.kind === "quote" && row.symbol === "sh600519");
+  const leaderId = context.artifacts[0].id as string;
+  assert.deepEqual(await submitted(submit, "alpha", run, artifact(context, {
+    items: Array.from({ length: 12 }, (_, i) => ({ id: `x${i + 1}`, against: "leader", kind: "MISSING_EVIDENCE", text: "候选的地位只有一个交易日的冻结证据，".repeat(9).slice(0, 160), evidence_ids: [quote, leaderId] })),
+    claims: [{ id: "c1", text: "审查了 leader 工件与所引报价。", basis: "CURRENT", evidence_ids: [quote] }],
+  })), { accepted: true, module: "counterevidence", run });
 });

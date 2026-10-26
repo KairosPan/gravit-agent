@@ -575,7 +575,8 @@ function checkEnvelope(raw, { module, context, schema, owns = [], ownedBy = {}, 
  * and when the contract requires it, it joins `missing` too, so the status expected is
  * `NOT_EVALUABLE`. A `required` entry is a source of this run, `market:<source>` or
  * `market:<module>` of the market run, or a module of this run. `requiredAny` is a group of such
- * entries of which one present is enough; with none present every one of them is missing. An item
+ * entries of which one shown is enough; with none present, or every present one's view past the
+ * cap, every one of them is missing. An item
  * frozen in both runs keeps this run's entry.
  * @param {{ module: string, run: string, manifest: { snapshot_id?: string | null, as_of?: string | null, session?: string | null,
  *   evidence: { source: string }[] }, evidence: { source: string, session: string | null, items: Record<string, any>[] }[],
@@ -712,14 +713,23 @@ export function buildContext({
     context.truncated = [...groups.values()];
   };
   // A required artifact the cap leaves out cannot be cited, so it is missing.
+  // And a `requiredAny` group none of whose members is shown is missing whole. Only an artifact the
+  // context shows is citable; hints built from the digest are built again over the views shown.
   const hide = () => {
     let changed = false;
-    for (const entry of left)
-      if (entry.kind === "artifact" && required.includes(entry.source) && !missing.includes(entry.source)) {
-        missing.push(entry.source);
-        context.status_expected = "NOT_EVALUABLE";
-        changed = true;
-      }
+    const cut = left.filter((entry) => entry.kind === "artifact");
+    const lose = (source) => {
+      if (missing.includes(source)) return;
+      missing.push(source);
+      changed = true;
+    };
+    for (const entry of cut) if (required.includes(entry.source)) lose(entry.source);
+    const isCut = (source) => cut.some((entry) => entry.source === source);
+    if (requiredAny.length > 0 && requiredAny.every((source) => !present.has(source) || isCut(source)))
+      for (const source of requiredAny) lose(source);
+    if (changed) context.status_expected = "NOT_EVALUABLE";
+    digest.artifactIds = new Set([...read.keys()].filter((id) => !cut.some((entry) => /** @type {any} */ (entry).id === id)));
+    if (typeof hints === "function") context.hints = hints(digest);
     // The example follows the status: built again over the digest, whose `missing` is this list.
     if (changed && typeof example === "function") context.example = example(digest);
   };
@@ -734,8 +744,6 @@ export function buildContext({
     count();
     hide();
   }
-  // Only an artifact the context shows is citable.
-  for (const entry of left) if (entry.kind === "artifact") digest.artifactIds.delete(/** @type {any} */ (entry).id);
   return { text: JSON.stringify(context), digest };
 }
 

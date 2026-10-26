@@ -18,7 +18,8 @@
  * run with none of the three accepted is `NOT_EVALUABLE` naming them (`requiredAny`); in any other
  * strategy `market_run` is required, the context reads the run's quotes and accepted leader
  * artifact - required, and refused `MISSING_EVIDENCE` at the read when it cites another market run
- * (`extra`) - beside the cited run's evidence and three artifacts, and the artifact carries the
+ * (`extra`) - beside the cited run's evidence and three artifacts, its sentiment and theme required
+ * as the mode's are, so an OK review has seen what the mode stands on, and the artifact carries the
  * bound `market_run` and `market_snapshot_id`. The shared rules are `contract-core.mjs`'s.
  */
 import { CITED_ID_PATTERN, SCOPE_CLASSES, fail } from "../contract-core.mjs";
@@ -103,11 +104,12 @@ const SCHEMA = {
 const isQuote = (entry) => entry.source === "quotes" && entry.kind === "quote";
 
 /**
- * The hints, with `against`: the modules whose accepted artifacts the context reads.
+ * The hints, with `against`: the modules whose accepted artifacts the context shows.
  * @param {import("../contract-core.mjs").ContextDigest} digest
  */
 function hints(digest) {
-  const modules = [...new Set([...digest.artifacts.values()].map((entry) => entry.module))];
+  // The views the context shows (`artifactIds`, after the cap): only those an item can be against.
+  const modules = [...new Set([...digest.artifactIds].map((id) => digest.artifacts.get(id)?.module))];
   return {
     ...HINTS,
     against: modules.length ? `本上下文可作 against 的模块：${modules.join("、")}。` : "本上下文没有已接受的工件：items 只能为空。",
@@ -208,7 +210,9 @@ export const strategyContract = {
   ...SHARED,
   extra,
   sources: ["quotes"],
-  required: ["leader"],
+  // What the mode stands on (its own required list): an OK review has seen each, a view the cap
+  // leaves out or a market artifact not yet accepted makes the review NOT_EVALUABLE.
+  required: ["leader", "market:sentiment", "market:theme"],
   runArtifacts: ["leader"],
   priority: [
     { source: "quotes", kind: "quote", view: quoteRow },

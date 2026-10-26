@@ -66,26 +66,11 @@ async function submitted(submit: ToolDef, strategy: string, run: string, analysi
 }
 
 type Setup = {
-  state?: string | null; prepare?: (dir: string) => Promise<void>; mainline?: string[][]; boards?: string[] | null;
+  state?: string | null; prepare?: (dir: string) => Promise<void>; mainline?: string[][]; boards?: string[] | null; sentiment?: boolean;
 };
 
-/**
- * A mounted mode row with the two Lunhui strategies and a cn-market run whose three artifacts are
- * accepted: environment its example, sentiment hand-written at `state` (null: its UNKNOWN example),
- * theme naming `mainline` as its mainline candidates.
- */
-async function setup(t: Cleanup, { state = "EXPANSION", prepare = addEquities, mainline = MAINLINE, boards }: Setup = {}) {
-  let fixtureDir = "";
-  const mounted = await mount(t, modeRow, async (dir) => { fixtureDir = dir; await prepare(dir); });
-  const { root, service, freeze } = mounted;
-  for (const name of [S01, S02]) {
-    await mkdir(join(root, name));
-    await copyFile(THESIS(name), join(root, name, "THESIS.md"));
-  }
-  const market = await frozenRun(freeze, ["index", "limit-up", "boards"], boards === undefined ? {} : { boards });
-  const [envRead, envSubmit] = tools(service, environmentRow);
-  const envContext = JSON.parse(await envRead.execute({ strategy: "cn-market", run: market }, exec(ROLE)));
-  assert.equal((await submitted(envSubmit, "cn-market", market, envContext.example)).accepted, true);
+/** The market run's sentiment artifact accepted through the real tools: hand-written at `state` (null: its UNKNOWN example). */
+async function acceptSentiment(service: unknown, market: string, state: string | null) {
   const [sentRead, sentSubmit] = tools(service, sentimentRow);
   const sentContext = JSON.parse(await sentRead.execute({ strategy: "cn-market", run: market }, exec(ROLE)));
   const measure = (name: string) => idWhere(sentContext, (row) => row.measure === name);
@@ -97,6 +82,27 @@ async function setup(t: Cleanup, { state = "EXPANSION", prepare = addEquities, m
     ],
   };
   assert.equal((await submitted(sentSubmit, "cn-market", market, sentiment)).accepted, true);
+}
+
+/**
+ * A mounted mode row with the two Lunhui strategies and a cn-market run whose three artifacts are
+ * accepted: environment its example, sentiment hand-written at `state` (null: its UNKNOWN example),
+ * theme naming `mainline` as its mainline candidates. `sentiment: false` leaves the sentiment artifact
+ * out, for `acceptSentiment` later.
+ */
+async function setup(t: Cleanup, { state = "EXPANSION", prepare = addEquities, mainline = MAINLINE, boards, sentiment = true }: Setup = {}) {
+  let fixtureDir = "";
+  const mounted = await mount(t, modeRow, async (dir) => { fixtureDir = dir; await prepare(dir); });
+  const { root, service, freeze } = mounted;
+  for (const name of [S01, S02]) {
+    await mkdir(join(root, name));
+    await copyFile(THESIS(name), join(root, name, "THESIS.md"));
+  }
+  const market = await frozenRun(freeze, ["index", "limit-up", "boards"], boards === undefined ? {} : { boards });
+  const [envRead, envSubmit] = tools(service, environmentRow);
+  const envContext = JSON.parse(await envRead.execute({ strategy: "cn-market", run: market }, exec(ROLE)));
+  assert.equal((await submitted(envSubmit, "cn-market", market, envContext.example)).accepted, true);
+  if (sentiment) await acceptSentiment(service, market, state);
   const [themeRead, themeSubmit] = tools(service, themeRow);
   const themeContext = JSON.parse(await themeRead.execute({ strategy: "cn-market", run: market }, exec(ROLE)));
   // The claim stands on the first mainline board's breadth, or BK0715's when the theme names none.
@@ -396,6 +402,26 @@ test("mode: S01 over a counterevidence the reviewer's own submit tool wrote - it
   assert.deepEqual(await submitted(submit, S01, run, registration(context)), { accepted: true, module: "mode", run });
   const stored = JSON.parse(await readFile(join(root, S01, "analysis", run, "mode.json"), "utf8"));
   assert.deepEqual(stored.addressed.map((entry: any) => entry.item), ["x1", "x2"]);
+});
+
+test("mode: a review read before the market run's sentiment was accepted is NOT_EVALUABLE only - an OK one refused - and the S01 after the sentiment lands is UNADDRESSED_COUNTEREVIDENCE", async (t) => {
+  const mounted = await setup(t, { sentiment: false });
+  const run = await strategyRun(mounted, S01);
+  const { service, read, submit, market } = mounted;
+  const [reviewRead, reviewSubmit] = tools(service, reviewRow);
+  const review = JSON.parse(await reviewRead.execute({ strategy: S01, run, market_run: market }, exec(ROLE)));
+  assert.equal(review.status_expected, "NOT_EVALUABLE");
+  assert.deepEqual(review.missing, ["market:sentiment"]);
+  const quote = idWhere(review, (row) => row.kind === "quote" && row.symbol === "sh600519");
+  const ok = { ...review.example, status: "OK", missing_sources: [], limitations: [],
+    claims: [{ id: "c1", text: "审查了 leader 工件与所引报价。", basis: "CURRENT", evidence_ids: [quote] }] };
+  assert.match((await refusal(reviewSubmit, S01, run, ok)).message, /^INVALID_ANALYSIS: \[SCHEMA\] analysis\.status/u);
+  assert.deepEqual(await submitted(reviewSubmit, S01, run, review.example), { accepted: true, module: "counterevidence", run });
+  await acceptSentiment(service, market, "EXPANSION");
+  const context = JSON.parse(await read.execute({ strategy: S01, run, market_run: market }, exec(ROLE)));
+  assert.equal(context.status_expected, "OK");
+  const error = await refusal(submit, S01, run, registration(context, { addressed: [] }));
+  assert.match(error.message, /^INVALID_ANALYSIS: \[UNADDRESSED_COUNTEREVIDENCE\] analysis\.addressed.*status OK/u);
 });
 
 test("mode: S01's preconditions - each present, met with evidence, the minute confirmation unmet: no source - and its card bound to the run - REFERENCE or SCHEMA otherwise", async (t) => {
