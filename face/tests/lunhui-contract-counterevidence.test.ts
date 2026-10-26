@@ -9,13 +9,15 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile, realpath, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import * as reviewRow from "../plugins/lunhui/review-row.mjs";
 import * as leaderRow from "../plugins/lunhui/leader-row.mjs";
 import * as environmentRow from "../plugins/lunhui/environment-row.mjs";
 import * as sentimentRow from "../plugins/lunhui/sentiment-row.mjs";
 import * as themeRow from "../plugins/lunhui/theme-row.mjs";
+import * as modeRow from "../plugins/lunhui/mode-row.mjs";
 import { contract, HYPOTHESES, KINDS } from "../plugins/lunhui/lib/contracts/counterevidence.mjs";
 import { MAX_CONTEXT_BYTES, SCOPE_CLASSES, hypothesesVersion } from "../plugins/lunhui/lib/contract-core.mjs";
 import { writeArtifact } from "../plugins/lunhui/lib/runs.mjs";
@@ -217,6 +219,69 @@ test("counterevidence in cn-market: a market_run given - another run or its own 
   const ok = artifact(context, { claims: [{ id: "c1", text: "所引派生证据只示格式。", basis: "INSUFFICIENT", evidence_ids: [derived] }] });
   assert.match((await refusal(submit, "cn-market", bare, ok)).message, /^INVALID_ANALYSIS: \[SCHEMA\] /u);
   assert.deepEqual(await submitted(submit, "cn-market", bare, context.example), { accepted: true, module: "counterevidence", run: bare });
+});
+
+/* A review with accepted artifacts but no evidence row to cite (a sealed empty run): the channel's evidence
+ * sources join `missing`, so the example is NOT_EVALUABLE and accepted - an OK review would need a claim
+ * citing an item the context does not hold. In cn-market the run's three; in a strategy run its quotes and
+ * the market run's three. The mode over that NOT_EVALUABLE review cannot register S01: it WAITs. */
+test("counterevidence over a sealed empty run: no evidence row shown - the channel's sources missing, the NOT_EVALUABLE example accepted, in cn-market and in a strategy run; the mode over it refuses S01 and WAITs", async (t) => {
+  const { root, service, read, submit } = await mount(t, reviewRow);
+  const S01 = "lunhui-s01-repair";
+  await mkdir(join(root, S01));
+  await copyFile(fileURLToPath(new URL(`../../strategies/${S01}/THESIS.md`, import.meta.url)), join(root, S01, "THESIS.md"));
+  type Meta = { received_at: string; session: string; host: string; delayed: boolean; truncated: boolean };
+  const runs = service as {
+    openRun(s: string, k: "market" | "strategy"): Promise<{ run: string }>;
+    addEvidence(s: string, r: string, source: string, items: unknown[], meta: Meta): Promise<unknown>;
+  };
+  // A session but no item: an empty 涨停池 of the harness's Friday (a run with no evidence file has no session to cite).
+  const meta: Meta = { received_at: "2026-10-23T07:00:00.000Z", session: "2026-10-23", host: "fixture", delayed: false, truncated: false };
+  // The empty market run: sealed on the environment's read, its three artifacts accepted NOT_EVALUABLE.
+  const { run: market } = await runs.openRun("cn-market", "market");
+  await runs.addEvidence("cn-market", market, "limit-up", [], meta);
+  for (const row of [environmentRow, sentimentRow, themeRow]) {
+    const [moduleRead, moduleSubmit] = tools(service, row);
+    const context = JSON.parse(await moduleRead.execute({ strategy: "cn-market", run: market }, exec(ROLE)));
+    assert.equal(context.status_expected, "NOT_EVALUABLE");
+    assert.equal((await submitted(moduleSubmit, "cn-market", market, context.example)).accepted, true);
+  }
+  const marketContext = JSON.parse(await read.execute({ strategy: "cn-market", run: market }, exec(ROLE)));
+  assert.deepEqual(marketContext.artifacts.map((row: any) => row.module), ["environment", "sentiment", "theme"]);
+  assert.deepEqual([marketContext.evidence, marketContext.derived], [[], []]);
+  assert.equal(marketContext.status_expected, "NOT_EVALUABLE");
+  assert.deepEqual(marketContext.missing, ["index", "limit-up", "boards"]);
+  assert.deepEqual([marketContext.example.status, marketContext.example.missing_sources, marketContext.example.items], ["NOT_EVALUABLE", ["index", "limit-up", "boards"], []]);
+  assert.deepEqual(await submitted(submit, "cn-market", market, marketContext.example), { accepted: true, module: "counterevidence", run: market });
+
+  // An empty S01 strategy run citing it: the leader, the review, then the mode. The leader's own context
+  // over no row expects OK with nothing to cite (the same dead end, outside this module), so its
+  // NOT_EVALUABLE artifact is written through the runs library, bound to the market run.
+  const { run } = await runs.openRun(S01, "strategy");
+  await runs.addEvidence(S01, run, "quotes", [], meta);
+  const [leaderRead] = tools(service, leaderRow);
+  const leaderContext = JSON.parse(await leaderRead.execute({ strategy: S01, run, market_run: market }, exec(ROLE)));
+  await writeArtifact(await realpath(join(root, S01, "analysis", run)), "leader", {
+    ...leaderContext.example, status: "NOT_EVALUABLE", missing_sources: ["quotes"], claims: [],
+  });
+  const context = JSON.parse(await read.execute({ strategy: S01, run, market_run: market }, exec(ROLE)));
+  assert.deepEqual(context.artifacts.map((row: any) => row.module), ["leader", "environment", "sentiment", "theme"]);
+  assert.deepEqual([context.evidence, context.derived], [[], []]);
+  assert.equal(context.status_expected, "NOT_EVALUABLE");
+  assert.deepEqual(context.missing, ["quotes", "market:index", "market:limit-up", "market:boards"]);
+  assert.deepEqual([context.example.status, context.example.missing_sources, context.example.market_run], ["NOT_EVALUABLE", context.missing, market]);
+  assert.deepEqual(await submitted(submit, S01, run, context.example), { accepted: true, module: "counterevidence", run });
+  // The mode over that NOT_EVALUABLE review: S01 is refused - here first on the sentiment's UNKNOWN state; a
+  // NOT_EVALUABLE review meets the A22 gate in tests/lunhui-mode.test.ts - and a WAIT citing the leader's artifact accepted.
+  const [modeRead, modeSubmit] = tools(service, modeRow);
+  const modeContext = JSON.parse(await modeRead.execute({ strategy: S01, run, market_run: market }, exec(ROLE)));
+  const leaderId = modeContext.artifacts.find((row: any) => row.module === "leader").id as string;
+  const claims = [{ id: "c1", text: "本运行没有可引用的冻结行，登记为 WAIT。", basis: "INSUFFICIENT", evidence_ids: [leaderId] }];
+  const s01 = { ...modeContext.example, mode: "S01", claims: [{ ...claims[0], basis: "CURRENT", text: "S01 登记：所引工件为本运行的。" }] };
+  assert.match((await refusal(modeSubmit, S01, run, s01)).message, /^INVALID_ANALYSIS: \[INADMISSIBLE_STATE\] analysis\.mode/u);
+  assert.equal(modeContext.example.mode, "WAIT");
+  assert.deepEqual(await submitted(modeSubmit, S01, run, { ...modeContext.example, claims }), { accepted: true, module: "mode", run });
+  assert.equal(JSON.parse(await readFile(join(root, S01, "analysis", run, "mode.json"), "utf8")).mode, "WAIT");
 });
 
 test("counterevidence in a strategy run: market_run required - refused at the read, uncounted, when absent; no leader artifact expects NOT_EVALUABLE naming leader", async (t) => {

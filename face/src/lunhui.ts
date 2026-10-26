@@ -12,8 +12,8 @@
  * rows - the three market modules (environment, sentiment, theme), then the
  * leader and the mode, which read a strategy run, then `lunhui-review`, the
  * counterevidence module's row, which reads either channel - each injecting
- * the same and registering its read-context and submit pair. The tools are registered
- * tree-wide, as dsh's own are; no bot's allow list names one
+ * the same and registering its read-context and submit pair. The tools are
+ * registered tree-wide, as dsh's own are; no bot's allow list names one
  * (`tests/bots.test.ts`). A freeze or module row takes no config in
  * production: a freeze row's `fetch` and `now` keys are test-only. */
 import { dirname, join } from "node:path";

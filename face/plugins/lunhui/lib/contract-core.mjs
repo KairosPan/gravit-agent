@@ -576,7 +576,9 @@ function checkEnvelope(raw, { module, context, schema, owns = [], ownedBy = {}, 
  * `NOT_EVALUABLE`. A `required` entry is a source of this run, `market:<source>` or
  * `market:<module>` of the market run, or a module of this run. `requiredAny` is a group of such
  * entries of which one shown is enough; with none present, or every present one's view past the
- * cap, every one of them is missing. An item
+ * cap, every one of them is missing. `evidenceRequired` names sources that join `missing` when the
+ * context shows no evidence or derived row - none frozen, or every one past the cap - so a module
+ * whose OK artifact needs a claim citing one expects `NOT_EVALUABLE` instead. An item
  * frozen in both runs keeps this run's entry.
  * @param {{ module: string, run: string, manifest: { snapshot_id?: string | null, as_of?: string | null, session?: string | null,
  *   evidence: { source: string }[] }, evidence: { source: string, session: string | null, items: Record<string, any>[] }[],
@@ -588,13 +590,13 @@ function checkEnvelope(raw, { module, context, schema, owns = [], ownedBy = {}, 
  *     artifacts: Record<string, Record<string, any>> } | null,
  *   marketSources?: string[], marketArtifacts?: string[], runArtifacts?: string[], artifacts?: Record<string, Record<string, any>>,
  *   derivedFilter?: (item: any, digest: ContextDigest) => boolean, extra?: Record<string, unknown>,
- *   artifactViews?: Record<string, ArtifactViewBound>, requiredAny?: string[] }} options
+ *   artifactViews?: Record<string, ArtifactViewBound>, requiredAny?: string[], evidenceRequired?: string[] }} options
  * @returns {{ text: string, digest: ContextDigest }}
  */
 export function buildContext({
   module, run, manifest, evidence, sources, derivedFirst = [], derivedView, priority, hypotheses, schema, hints, example, required,
   marketRun, market = null, marketSources = [], marketArtifacts = [], runArtifacts = [], artifacts = {}, derivedFilter, extra = {},
-  artifactViews = {}, requiredAny = [],
+  artifactViews = {}, requiredAny = [], evidenceRequired = [],
 }) {
   const cited = marketRun !== undefined ? market : null;
   const present = new Set(manifest.evidence.map((entry) => entry.source));
@@ -727,6 +729,9 @@ export function buildContext({
     const isCut = (source) => cut.some((entry) => entry.source === source);
     if (requiredAny.length > 0 && requiredAny.every((source) => !present.has(source) || isCut(source)))
       for (const source of requiredAny) lose(source);
+    // No evidence or derived row shown: nothing a claim can cite, so the sources are missing.
+    if (context.evidence.length === 0 && context.derived.length === 0)
+      for (const source of evidenceRequired) lose(source);
     if (changed) context.status_expected = "NOT_EVALUABLE";
     digest.artifactIds = new Set([...read.keys()].filter((id) => !cut.some((entry) => /** @type {any} */ (entry).id === id)));
     if (typeof hints === "function") context.hints = hints(digest);

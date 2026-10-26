@@ -126,7 +126,7 @@ test("cn-reviewer's ROLE.md: Chinese, within 2,000 bytes, the brief's ids, one r
   assert.ok(persona.includes("读一次") && persona.includes("提交一次"), "read once, submit once");
   assert.ok(persona.includes("`analysis`") && persona.includes("不写进消息"), "the artifact goes only into analysis");
   assert.ok(persona.includes("against") && persona.includes("mode"), "each item names the module it is against, never mode");
-  assert.ok(persona.includes("evidence_ids"), "each item cites evidence of its own");
+  assert.ok(persona.includes("evidence_ids") && persona.includes("ev_") && persona.includes("不能只引工件编号"), "each item cites at least one evidence id, not only artifact ids");
   assert.ok(persona.includes("空的 items") && persona.includes("NOT_EVALUABLE") && persona.includes("结果"), "an empty list and NOT_EVALUABLE are results");
   assert.ok(persona.includes("第三次") && persona.includes("读取失败") && persona.includes("blocked"), "the blocked exits");
   for (const heading of ["**status**", "**what was measured**", "**paths**", "**limits**"]) assert.ok(persona.includes(heading), heading);

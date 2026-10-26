@@ -192,6 +192,8 @@ export const marketContract = {
   sources: ["index", "limit-up", "boards"],
   required: [],
   requiredAny: ["environment", "sentiment", "theme"],
+  // No evidence row shown (a sealed empty run): the example's claim has nothing to cite.
+  evidenceRequired: ["index", "limit-up", "boards"],
   runArtifacts: ["environment", "sentiment", "theme"],
   priority: [
     { source: "index", kind: "index" },
@@ -213,6 +215,7 @@ export const strategyContract = {
   // What the mode stands on (its own required list): an OK review has seen each, a view the cap
   // leaves out or a market artifact not yet accepted makes the review NOT_EVALUABLE.
   required: ["leader", "market:sentiment", "market:theme"],
+  evidenceRequired: ["quotes", "market:index", "market:limit-up", "market:boards"],
   runArtifacts: ["leader"],
   priority: [
     { source: "quotes", kind: "quote", view: quoteRow, first: true },

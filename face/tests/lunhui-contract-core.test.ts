@@ -834,3 +834,33 @@ test("buildContext requiredAny: one member shown is enough; every member past th
   assert.deepEqual(context.hints.shown, []);
   assert.equal(cut.digest.artifactIds.size, 0);
 });
+
+test("buildContext evidenceRequired: no evidence or derived row shown - none frozen, or every one past the cap - puts its sources in missing, NOT_EVALUABLE, the example rebuilt; one row shown is enough", () => {
+  const build = (evidence: Loose[], hypotheses = HYPOTHESES) => buildContext({
+    module: "counterevidence", run: MANIFEST.run, manifest: MANIFEST, evidence, sources: ["limit-up", "index"],
+    derivedFirst: ["limit-up"], priority: [{ source: "limit-up", kind: "zt" }, { source: "index", kind: "index" }],
+    hypotheses, schema: SCHEMA, hints: "按字段填写。", example: (digest: Loose) => ({ missing: [...digest.missing] }), required: [],
+    evidenceRequired: ["limit-up", "index"],
+  });
+  const full = build(EVIDENCE);
+  assert.deepEqual(full.digest.missing, []);
+  assert.equal(JSON.parse(full.text).status_expected, "OK");
+  const empty = JSON.parse(build([]).text);
+  assert.deepEqual([empty.status_expected, empty.missing, empty.example], ["NOT_EVALUABLE", ["limit-up", "index"], { missing: ["limit-up", "index"] }]);
+  // Every row past the cap: the hypotheses padded until no row fits (the padding where the last row
+  // would still fit beside the `truncated` list), as long as the context still builds.
+  const base = Buffer.byteLength(build([]).text, "utf8");
+  let cut: { text: string; digest: Loose } | undefined;
+  for (let pad = MAX_CONTEXT_BYTES - base - 400; pad <= MAX_CONTEXT_BYTES - base; pad += 1) {
+    try { cut = build(EVIDENCE, HYPOTHESES + "a".repeat(pad)); } catch { break; }
+    const shown = JSON.parse(cut.text);
+    if (shown.evidence.length === 0 && shown.derived.length === 0) break;
+    cut = undefined;
+  }
+  assert.ok(cut, "a padding shows no row and still builds");
+  const context = JSON.parse(cut.text);
+  assert.ok(Buffer.byteLength(cut.text, "utf8") <= MAX_CONTEXT_BYTES);
+  assert.deepEqual([context.evidence, context.derived], [[], []]);
+  assert.deepEqual([context.status_expected, context.missing], ["NOT_EVALUABLE", ["limit-up", "index"]]);
+  assert.deepEqual(cut.digest.missing, ["limit-up", "index"]);
+});

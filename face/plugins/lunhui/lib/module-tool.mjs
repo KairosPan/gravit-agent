@@ -53,7 +53,7 @@ const tables = loadCalendars();
  *   marketRun?: "required" | "optional", marketSources?: string[], marketArtifacts?: string[], runArtifacts?: string[],
  *   artifactViews?: Record<string, import("./contract-core.mjs").ArtifactViewBound>,
  *   derivedFilter?: (item: any, digest: import("./contract-core.mjs").ContextDigest) => boolean,
- *   requiredAny?: string[], scopedFields?: string[], forStrategy?: (strategy: string) => ModuleContract,
+ *   requiredAny?: string[], evidenceRequired?: string[], scopedFields?: string[], forStrategy?: (strategy: string) => ModuleContract,
  *   extra?: (runs: import("../runs-row.mjs").LunhuiRuns, located: { strategy: string, run: string },
  *     read: { manifest: any, artifacts: Record<string, Record<string, any>>, market: { run: string } | null }) => Promise<Record<string, unknown>>,
  * }} ModuleContract
@@ -62,7 +62,7 @@ const tables = loadCalendars();
  * the derived items it shows. `extra`, read inside the read's `build` - the run sealed, under its
  * mutex, so it reads other runs and the strategy without a lock - gives `buildContext`'s `extra`;
  * it is handed the run's manifest and accepted artifacts and the cited run, and may refuse.
- * `unknownHeadline` and `scopedFields` are `validateEnvelope`'s, `requiredAny` `buildContext`'s.
+ * `unknownHeadline` and `scopedFields` are `validateEnvelope`'s, `requiredAny` and `evidenceRequired` `buildContext`'s.
  *
  * `forStrategy`, on a contract of channel `any` whose `marketRun` is `"optional"` (the reviewer's),
  * picks the contract a strategy's read and submit use - its sources, artifacts, rules - by the
@@ -183,7 +183,7 @@ export function defineModule({ module, channel, contract, runs }) {
             module, run: manifest.run, manifest, evidence,
             sources: active.sources, derivedFirst: active.derivedFirst, derivedView: active.derivedView, priority: active.priority,
             hypotheses: active.hypotheses, schema: active.schema, hints: active.hints,
-            example: active.example, required: active.required, requiredAny: active.requiredAny, runArtifacts: active.runArtifacts, artifacts,
+            example: active.example, required: active.required, requiredAny: active.requiredAny, evidenceRequired: active.evidenceRequired, runArtifacts: active.runArtifacts, artifacts,
             derivedFilter: active.derivedFilter, extra, artifactViews: active.artifactViews,
             ...(active.marketRun === undefined ? {} : { marketRun: active.marketRun, market, marketSources: active.marketSources, marketArtifacts: active.marketArtifacts }),
           });

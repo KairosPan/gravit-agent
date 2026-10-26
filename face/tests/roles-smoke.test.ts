@@ -492,11 +492,12 @@ test("roles smoke: cn-stock-analyst reads the leader context citing a sealed mar
 /* The shipped cn-reviewer on a real boot (modules spec A6, A8, A22, A23, §5.9), on the third case's footing: a fixture
  * roles root with the reviewer routed to the stub, a temp strategies root holding cn-market. The market run is made
  * through the booted `lunhuiRuns` service and the runs library's own artifact writer, no freeze and no network: one
- * evidence source of session 2026-10-23 (an empty 涨停池 and its one derived item), sealed, then its environment, sentiment and theme artifacts
+ * evidence source of session 2026-10-23 (an empty 涨停池), sealed, then its environment, sentiment and theme artifacts
  * landed as accepted - what the review reads in cn-market. The child, briefed with the run alone (cn-market takes no
  * market_run), reads the counterevidence context and submits the context's own example. What is pinned: the child's
  * tools are exactly its allow list, sharing only `skill` with each analyst; its persona is its own; the context reads
- * the market run's three artifacts and expects OK; its submit passes NOT_A_ROLE and lands in the market run; the same
+ * the market run's three artifacts and, with no evidence row to cite, expects NOT_EVALUABLE naming the run's three
+ * sources; its submit passes NOT_A_ROLE and lands in the market run; the same
  * submit from Gravit's root is NOT_A_ROLE. */
 test("roles smoke: cn-reviewer reads the counterevidence context of a sealed cn-market run and submits as a role, Gravit's own submit is NOT_A_ROLE", { skip: gated && "set FACE_SMOKE=1", timeout: 180_000 }, async () => {
   const bots = await makeBotsRoot();
@@ -539,8 +540,7 @@ test("roles smoke: cn-reviewer reads the counterevidence context of a sealed cn-
     assert.equal(service.strategiesRoot, strategies, "the rows write under the temp strategies root");
     const meta: Meta = { received_at: "2026-10-23T07:00:00.000Z", session: "2026-10-23", host: "fixture", delayed: false, truncated: false };
     const { run } = await service.openRun("cn-market", "market");
-    // An empty 涨停池 and the one derived item the freeze would compute over it: what the example's claim cites.
-    await service.addEvidence("cn-market", run, "limit-up", [{ source: "limit-up", kind: "derived", measure: "seal_ratio", value: null, inputs: [] }], meta);
+    await service.addEvidence("cn-market", run, "limit-up", [], meta);
     await service.sealRun("cn-market", run);
     const runDir = join(strategies, "cn-market", "analysis", run);
     await writeArtifact(runDir, "environment", { module: "environment", run, status: "OK", index_state: "UNKNOWN", liquidity_state: "UNKNOWN", claims: [] });
@@ -602,13 +602,14 @@ test("roles smoke: cn-reviewer reads the counterevidence context of a sealed cn-
     const childResults = toolTexts(child.at(-1)!);
     assert.equal(childResults.length, 2, "the read and the submit came back");
     const context = JSON.parse(childResults[0]);
-    assert.deepEqual([context.module, context.status_expected], ["counterevidence", "OK"], "the context expects OK");
+    assert.deepEqual([context.module, context.status_expected, context.missing], ["counterevidence", "NOT_EVALUABLE", ["index", "limit-up", "boards"]],
+      "no evidence row to cite: the context expects NOT_EVALUABLE naming the run's sources");
     assert.equal(context.market_run, undefined, "cn-market cites no market run");
     assert.deepEqual(context.artifacts.map((row: { module: string }) => row.module), ["environment", "sentiment", "theme"], "the market run's three artifacts are the ones reviewed");
     assert.match(childResults[1], /"accepted":true/, "the child's counterevidence submit passed NOT_A_ROLE and was accepted");
     assert.deepEqual((await service.readRun("cn-market", run)).manifest.artifacts, ["environment", "sentiment", "theme", "counterevidence"], "the artifact landed in the market run");
     const artifact = JSON.parse(readFileSync(join(runDir, "counterevidence.json"), "utf8"));
-    assert.deepEqual([artifact.module, artifact.status, artifact.run, artifact.items], ["counterevidence", "OK", run, []]);
+    assert.deepEqual([artifact.module, artifact.status, artifact.run, artifact.items], ["counterevidence", "NOT_EVALUABLE", run, []]);
     assert.equal(resultText(lastResult()), "REVIEW_DONE", "the child's report returns through the tool");
   } finally {
     await dispose?.();
