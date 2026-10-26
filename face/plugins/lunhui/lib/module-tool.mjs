@@ -10,7 +10,7 @@
  * call, seals the run and hands the evidence to `buildContext`. The digest the build returns is kept
  * in this definition's map under `<strategy>/<run>/<module>` - the run's on-disk names the service
  * hands both sides, so a run id spelled in another letter case finds it - the latest read's
- * winning, and the context text is the reply.
+ * winning, and the context text is the reply; an accepted submit drops it.
  *
  * The submit: `NOT_A_ROLE` unless the caller is a delegated role child (A23); the strategy and the
  * channel as the read's; then `submit`, which counts, refuses `ALREADY_SUBMITTED` and `READ_FIRST`,
@@ -81,7 +81,7 @@ export function defineModule({ module, channel, contract, runs }) {
   if (!Object.hasOwn(CHANNEL_TEXT, channel)) throw new TypeError(`lunhui: a module's channel is market, strategy or any, not ${JSON.stringify(channel)}`);
   /** The latest read's digest, per `<strategy>/<run>/<module>`; in memory, one map per definition. */
   const digests = new Map();
-  const budget = `本模块每个运行至多调用 ${MODULE_BUDGET} 次（读取与提交合计，含被拒绝的调用），超过即 TOOL_BUDGET。`;
+  const budget = `本模块每个运行至多调用 ${MODULE_BUDGET} 次（读取与提交合计；找到运行之后被拒绝的调用也计入，找到运行之前的拒绝如 NOT_A_ROLE、WRONG_CHANNEL 不计），超过即 TOOL_BUDGET。`;
 
   /** The strategy's on-disk name, after the channel check. */
   const strategyOf = async (name) => {
@@ -132,14 +132,18 @@ export function defineModule({ module, channel, contract, runs }) {
       try {
         if (!callerIsRole(exec)) throw refuse.notARole();
         const strategy = await strategyOf(args.strategy);
+        let key;
         const result = await runs.submit(strategy, args.run, module, args.analysis, (text, located) => {
-          const context = digests.get(`${located.strategy}/${located.run}/${module}`);
+          key = `${located.strategy}/${located.run}/${module}`;
+          const context = digests.get(key);
           // A row reload while the service lives on: the read is remembered, its digest is not.
           if (context === undefined) throw refuse.readFirst(module);
           return validateEnvelope(text, { module, context, schema: contract.schema, owns: contract.owns, ownedBy: contract.ownedBy,
             exemptPaths: contract.exemptPaths, rules: contract.rules,
           });
         });
+        // Accepted: ALREADY_SUBMITTED keeps every later submit from the digest, so it goes.
+        digests.delete(key);
         return JSON.stringify(result);
       } catch (error) {
         throw asToolError(error);

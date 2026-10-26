@@ -138,6 +138,7 @@ test("module tools: names, parameters and Chinese descriptions stating the bound
       assert.match(property.description, /[一-鿿]/u);
     }
     assert.match(tool.description, /10 次/);
+    assert.match(tool.description, /找到运行之后被拒绝的调用也计入/);
     assert.match(tool.description, /参数是名称与编号，不是路径/);
     assert.match(tool.description, /cn-market/);
     assert.match(tool.description, /只接受一个工件/);
@@ -261,7 +262,8 @@ test("module tools: a submit naming the run in another letter case finds the dig
   const service = backbone(root);
   const { read, submit } = tools(service);
   const { run, quoteId } = await frozenRun(service, "cn-market");
-  const miscased = run.toUpperCase();
+  // The run id's "T" lower-cased: still a run id, another spelling on disk whatever its hex digits.
+  const miscased = run.replace("T", "t");
   assert.notEqual(miscased, run);
   const resolves = await stat(join(root, "cn-market", "analysis", miscased)).then(() => true, () => false);
   if (!resolves) {
@@ -271,4 +273,19 @@ test("module tools: a submit naming the run in another letter case finds the dig
   const text = await read.execute({ strategy: "cn-market", run }, exec(ROLE));
   const analysis = JSON.stringify(artifactOf(text, [quoteId]));
   assert.deepEqual(JSON.parse(await submit.execute({ strategy: "cn-market", run: miscased, analysis }, exec(ROLE))), { accepted: true, module: "environment", run });
+});
+
+test("module tools: an accepted submit drops the module's digest - a manifest that no longer names the artifact is READ_FIRST until the role reads again", async (t) => {
+  const root = await strategiesRoot(t);
+  const service = backbone(root);
+  const { read, submit } = tools(service);
+  const { run, quoteId } = await frozenRun(service, "cn-market");
+  const text = await read.execute({ strategy: "cn-market", run }, exec(ROLE));
+  const analysis = JSON.stringify(artifactOf(text, [quoteId]));
+  assert.deepEqual(JSON.parse(await submit.execute({ strategy: "cn-market", run, analysis }, exec(ROLE))).accepted, true);
+  // Past ALREADY_SUBMITTED only by hand: the manifest edited to forget the artifact.
+  const manifestPath = join(root, "cn-market", "analysis", run, "run.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  await writeFile(manifestPath, JSON.stringify({ ...manifest, artifacts: [] }));
+  await rejectsWith(submit.execute({ strategy: "cn-market", run, analysis }, exec(ROLE)), "READ_FIRST");
 });
