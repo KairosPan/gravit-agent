@@ -20,10 +20,11 @@
  * newest accepted `mode.json` of an earlier session (read by the service); a WAIT there leaves
  * nothing to grade. When it exists the context shows it - cut to `CARD_BYTES` with
  * `card_truncated` when stored larger (`previousCard`) - and `expectation_review` grades it,
- * naming its run and, unless
- * `NOT_EVALUABLE`, citing an item this run froze. The read refuses `MISSING_EVIDENCE` when the run's
- * leader artifact cites another market run than the one given. The R01–R14 families are `research_only` labels, each its
- * family's registered name; the label is carved out of the forbidden-word and scope rules
+ * naming its run and, unless `NOT_EVALUABLE`, citing an item this run froze - the leader's
+ * candidates' quotes are filled before the derived items so the role sees them. The read refuses
+ * `MISSING_EVIDENCE` when the run's leader artifact cites another market run than the one given;
+ * a sentiment or theme view the cap leaves out is missing (`required`). The R01–R14 families are
+ * `research_only` labels, each its family's registered name; the label is carved out of the forbidden-word and scope rules
  * (`exemptPaths`), as are the precondition names, both bound by `rules`. The module owns no
  * assertion class (A21): it cites artifacts and evidence. The context shows the strategy, its
  * THESIS.md Falsification section and the previous card (`extra`), and of the cited run only what a
@@ -33,7 +34,7 @@
  * counterevidence before the market run's sentiment, theme and environment (`artifactViews`): the
  * market run's headline-only, the run's own at two claims of 60 characters.
  */
-import { checkSchema, fail } from "../contract-core.mjs";
+import { bytes, checkSchema, cutText, fail } from "../contract-core.mjs";
 import { refuse } from "../errors.mjs";
 import { DERIVED_HINT, derivedRow, exampleOf, poolRow, quoteRow } from "./shared.mjs";
 
@@ -453,12 +454,10 @@ export function falsificationOf(thesis) {
   return { text: cut, truncated: cut.length < section.length };
 }
 
-/** The bytes of `value`'s compact JSON text. */
-const bytes = (value) => Buffer.byteLength(JSON.stringify(value), "utf8");
-
 /**
  * A previous card as a context shows it: the card as stored when its compact JSON is at most
- * `CARD_BYTES`; else a copy with every string but the ids (`frozen_version`, `candidates`) cut to
+ * `CARD_BYTES`; else a copy with every string but the ids (`frozen_version`, `candidates`) and the
+ * `state` enum cut to
  * `CARD_CUT_CHARS` characters - halved again until the copy fits, for a card stored before the cap -
  * and `card_truncated`. The artifact keeps the card whole.
  * @param {Record<string, any>} card
@@ -466,12 +465,12 @@ const bytes = (value) => Buffer.byteLength(JSON.stringify(value), "utf8");
  */
 export function previousCard(card) {
   if (bytes(card) <= CARD_BYTES) return { expectation: card };
-  const cut = (value, chars) => typeof value === "string" ? Array.from(value).slice(0, chars).join("")
+  const cut = (value, chars) => typeof value === "string" ? cutText(value, chars)
     : Array.isArray(value) ? value.map((entry) => cut(entry, chars))
       : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, cut(entry, chars)])) : value;
   for (let chars = CARD_CUT_CHARS; ; chars = Math.floor(chars / 2)) {
-    const { frozen_version, candidates, ...rest } = card;
-    const shown = { frozen_version, candidates, ...cut(rest, Math.max(chars, 1)) };
+    const { frozen_version, candidates, state, ...rest } = card;
+    const shown = { frozen_version, candidates, state, ...cut(rest, Math.max(chars, 1)) };
     // Keep the card's own field order.
     const ordered = Object.fromEntries(Object.keys(card).map((key) => [key, shown[key]]));
     if (bytes(ordered) <= CARD_BYTES || chars <= 1) return { expectation: ordered, card_truncated: true };
@@ -548,11 +547,14 @@ export const contract = {
   example,
   extra,
   sources: ["quotes"],
-  required: ["leader"],
+  // The cited sentiment and theme are read from their views: a view the cap leaves out makes the run NOT_EVALUABLE.
+  required: ["leader", "market:sentiment", "market:theme"],
   derivedView: derivedRow,
   derivedFilter,
   priority: [
-    { source: "quotes", kind: "quote", view: quoteRow },
+    // The leader's candidates' quotes before the derived items: what a previous card is graded on.
+    { source: "quotes", kind: "quote", view: quoteRow, filter: (item, digest) => leaderSymbols(digest).includes(item.symbol), first: true },
+    { source: "quotes", kind: "quote", view: quoteRow, filter: (item, digest) => !leaderSymbols(digest).includes(item.symbol) },
     // Only what a precondition cites: the candidates' pool rows, the mainline boards' board and list.
     { source: "market:limit-up", kind: "zt", view: poolRow, filter: ofCandidate },
     { source: "market:limit-up", kind: "zb", view: poolRow, filter: ofCandidate },
@@ -568,7 +570,8 @@ export const contract = {
   // The mode cites an artifact by its id and reads state and mainline boards from the headline: the
   // market run's headline-only, the run's own two claims of 60 characters (counterevidence items keep 120).
   artifactViews: {
-    environment: { claims: 0 }, sentiment: { claims: 0 }, theme: { claims: 0 },
+    // The environment, read by no precondition, after the candidates' quotes: the view the cap skips first.
+    environment: { claims: 0, late: true }, sentiment: { claims: 0 }, theme: { claims: 0 },
     leader: { claims: 2, claimText: 60 }, counterevidence: { claims: 2, claimText: 60 },
   },
 };

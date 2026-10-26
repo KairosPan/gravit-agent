@@ -696,6 +696,36 @@ test("buildContext with a cited run: artifactViews sets a module's claims and th
   assert.deepEqual(views.theme.claims.map((claim: Loose) => Array.from(claim.text).length), [120, 120, 120, 120]);
 });
 
+test("buildContext: a priority entry marked first is filled before the derived items - shown when the derived items would fill the cap", () => {
+  const derived = Array.from({ length: 300 }, (_, i) =>
+    withId({ source: "limit-up", kind: "derived", measure: `m${i}`, value: i, inputs: [zt.id], note: "某".repeat(40) }));
+  const evidence = [{ source: "limit-up", session: SESSION, items: [zt, ...derived] }, EVIDENCE[1]];
+  const plain = JSON.parse(context({ evidence }).text);
+  assert.deepEqual(plain.evidence, [], "behind 300 derived items the pool row is cut");
+  const first = JSON.parse(context({ evidence, priority: [{ source: "limit-up", kind: "zt", first: true }, { source: "index", kind: "index" }] }).text);
+  assert.deepEqual(first.evidence.map((row: Loose) => row.id), [zt.id]);
+  assert.ok(first.derived.length > 0);
+  assert.ok(!first.evidence.some((row: Loose) => row.kind === "index"), "the entries not marked first still latch behind the derived items");
+});
+
+test("buildContext with a cited run: a view marked late is filled after the rows marked first - at the cap it is the view skipped", () => {
+  const options = (late: boolean) => ({
+    priority: [{ source: "quotes", kind: "quote", first: true }, { source: "market:limit-up", kind: "zt" }],
+    artifactViews: { sentiment: { late } }, required: ["quotes"],
+  });
+  const build = (size: number, late: boolean) =>
+    JSON.parse(cited(marketOf(SESSION, { sentiment: { ...sentimentArtifact, money_effect: "x".repeat(size) }, theme: themeArtifact }), options(late)).text);
+  // The largest sentiment view that, filled before the rows, is still shown: then no row fits after it.
+  let size = 30 * 1024;
+  while (!build(size, false).artifacts.some((row: Loose) => row.module === "sentiment")) size -= 16;
+  const before = build(size, false);
+  assert.deepEqual(before.evidence, [], "the view filled first leaves no room for the quote");
+  const after = build(size, true);
+  assert.equal(after.evidence[0].id, quote.id, "filled before the late view, the quote is shown");
+  assert.deepEqual(after.artifacts.map((row: Loose) => row.module), ["leader", "theme"]);
+  assert.ok(after.truncated.some((row: Loose) => row.source === "market:sentiment" && row.kind === "artifact"));
+});
+
 test("buildContext with a cited run: an artifact the cap leaves out is not citable, counted in truncated, and missing when required", () => {
   const wide = { ...themeArtifact, mainline_candidates: ["x".repeat(29 * 1024)] };
   const { text, digest } = cited(marketOf(SESSION, { sentiment: sentimentArtifact, theme: wide }));

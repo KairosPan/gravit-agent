@@ -47,7 +47,7 @@ const tables = loadCalendars();
  *   unknownHeadline?: (field: string, value: unknown) => boolean,
  *   hypotheses: string, hints: unknown, example: (digest: import("./contract-core.mjs").ContextDigest) => unknown,
  *   sources: string[], required: string[], derivedFirst?: string[], derivedView?: (item: any) => Record<string, unknown>,
- *   priority: { source: string, kind: string, order?: (a: any, b: any) => number,
+ *   priority: { source: string, kind: string, first?: boolean, order?: (a: any, b: any) => number,
  *     view?: (item: any, digest: import("./contract-core.mjs").ContextDigest) => Record<string, unknown>,
  *     filter?: (item: any, digest: import("./contract-core.mjs").ContextDigest) => boolean }[],
  *   marketRun?: "required" | "optional", marketSources?: string[], marketArtifacts?: string[], runArtifacts?: string[],

@@ -274,10 +274,10 @@ test("mode contract: Chinese hypotheses of chapters 三 and 七 and P0159, the s
   assert.deepEqual(contract.marketArtifacts, ["sentiment", "theme", "environment"]);
   assert.deepEqual(contract.runArtifacts, ["leader", "counterevidence"]);
   assert.deepEqual(contract.artifactViews, {
-    environment: { claims: 0 }, sentiment: { claims: 0 }, theme: { claims: 0 },
+    environment: { claims: 0, late: true }, sentiment: { claims: 0 }, theme: { claims: 0 },
     leader: { claims: 2, claimText: 60 }, counterevidence: { claims: 2, claimText: 60 },
   });
-  assert.deepEqual(contract.required, ["leader"]);
+  assert.deepEqual(contract.required, ["leader", "market:sentiment", "market:theme"]);
   assert.deepEqual(contract.exemptPaths, ["research_only_matches[*].label", "preconditions[*].name"]);
 });
 
@@ -638,6 +638,8 @@ test("mode: the previous card is shown as stored up to 2,048 bytes; a larger sto
   assert.ok(Buffer.byteLength(JSON.stringify(shown.expectation), "utf8") <= CARD_BYTES, `${Buffer.byteLength(JSON.stringify(shown.expectation), "utf8")} bytes`);
   assert.deepEqual(Object.keys(shown.expectation), Object.keys(full));
   assert.deepEqual([shown.expectation.frozen_version, shown.expectation.candidates, shown.expectation.state], [snapshot, full.candidates, "EXPANSION"]);
+  // The state is an enum, never cut, at any cut: even the shortest.
+  assert.equal(previousCard({ ...full, state: "EXPANSION" }).expectation.state, "EXPANSION");
   assert.ok(full.anchor.startsWith(shown.expectation.anchor) && Array.from(shown.expectation.anchor).length <= 120);
   // A card over the cap whose strings at 120 characters fit is cut to exactly 120.
   const middle = { ...full, triggers: ["下一运行冻结的报价涨跌幅为正。"], vetoes: ["引用的市场状态为 UNKNOWN。"], holding_period: "一个交易日的观察。",
@@ -834,8 +836,8 @@ test("mode: the maximal pin - a 2,048-byte previous card, twelve 160-character c
   const size = Buffer.byteLength(text, "utf8");
   assert.ok(size <= MAX_CONTEXT_BYTES, `${size} bytes`);
   const context = JSON.parse(text);
-  // Measured 2026-10-26: 30,710 bytes - the five views 11,730 (leader 1,958, counterevidence 7,407, sentiment 221, theme 1,558,
-  // environment 586), the previous card 2,207, the rest of the fixed part, then rows up to the cap; none skipped.
+  // Measured 2026-10-26: 30,233 bytes - leader 1,958, counterevidence 7,407, sentiment 221, theme 1,558, the three candidate
+  // quotes, the previous card 2,207; the environment (586, filled after the quotes) skipped, derived and other rows cut.
   assert.equal(context.status_expected, "OK");
   assert.deepEqual(context.missing, []);
   const modules = context.artifacts.map((row: any) => row.module);
@@ -848,25 +850,60 @@ test("mode: the maximal pin - a 2,048-byte previous card, twelve 160-character c
   // The run's own: two claims of 60 characters; the market run's: headline-only, claims_total beside.
   for (const view of context.artifacts.slice(0, 2)) assert.deepEqual(view.claims.map((claim: any) => Array.from(claim.text).length), [60, 60]);
   for (const view of context.artifacts.slice(2)) assert.deepEqual([view.claims, view.claims_total], [[], 12]);
+  // The environment is filled after the candidates' quotes: at these inputs it may be the view skipped, never required.
+  assert.ok(modules.includes("environment") || context.truncated.some((row: any) => row.source === "market:environment" && row.kind === "artifact"));
   assert.equal(context.artifacts.find((row: any) => row.module === "sentiment").headline.state, "EXPANSION");
   assert.equal(context.artifacts.find((row: any) => row.module === "theme").headline.mainline_candidates.length, 5);
   assert.deepEqual(context.previous.expectation, card, "the 2,048-byte card is shown as stored");
   assert.ok(!("card_truncated" in context.previous));
   assert.equal(Buffer.byteLength(context.falsification, "utf8"), FALSIFICATION_BYTES);
-  // S01 on Monday, citing what this context lets it cite, grading Friday's card on a quote this run froze.
-  const id = ids(bare);
-  const theme0 = idWhere(bare, (row) => row.kind === "board" && row.code === "BK0715");
-  const s01 = registration(bare, {
+  // The leader's candidates' quotes are filled before the derived items: the frozen ones (sh600519, sz000333, sh601318) are shown.
+  const quotes = context.evidence.filter((row: any) => row.kind === "quote").map((row: any) => row.symbol).sort();
+  assert.deepEqual(quotes, ["sh600519", "sh601318", "sz000333"]);
+  // S01 on Monday built only from what this maximal context shows, grading Friday's card on a quote this run froze.
+  const view = (module: string) => context.artifacts.find((row: any) => row.module === module).id as string;
+  const quote = context.evidence.find((row: any) => row.kind === "quote" && row.symbol === "sh600519").id as string;
+  const s01 = artifact(context, {
+    mode: "S01",
     preconditions: [
-      { id: "p1", name: "theme_gate", status: "met", evidence_ids: [theme0] },
-      { id: "p2", name: "candidate_before_divergence", status: "met", evidence_ids: [context.artifacts[0].id] },
-      { id: "p3", name: "theme_not_falsified", status: "met", evidence_ids: [theme0] },
-      { id: "p4", name: "negative_tail_not_widening", status: "met", evidence_ids: [id.measure("yesterday_negative_tail")] },
+      { id: "p1", name: "theme_gate", status: "met", evidence_ids: [view("theme")] },
+      { id: "p2", name: "candidate_before_divergence", status: "met", evidence_ids: [view("leader"), quote] },
+      { id: "p3", name: "theme_not_falsified", status: "met", evidence_ids: [view("theme")] },
+      { id: "p4", name: "negative_tail_not_widening", status: "met", evidence_ids: [view("sentiment")] },
       { id: "p5", name: "minute_confirmation", status: "unmet: no source", evidence_ids: [] },
     ],
+    expectation: { ...(registration(bare).expectation as any), frozen_version: context.snapshot_id },
+    parameters_used: [{ name: "d_i", value: "未设定", note: "研究候选，没有生产值。" }],
     addressed: Array.from({ length: 12 }, (_, i) => ({ item: `x${i + 1}`, response: "记入限制说明，下一运行核对。" })),
-    expectation_review: { previous_run: friday, grade: "弱于", evidence_ids: [id.quote("sh600519")] },
-    claims: [{ id: "c1", text: "S01 登记：前提见所引证据，分钟确认缺少来源。", basis: "HISTORICAL", evidence_ids: [theme0, id.measure("yesterday_negative_tail")] }],
+    expectation_review: { previous_run: friday, grade: "弱于", evidence_ids: [quote] },
+    claims: [{ id: "c1", text: "S01 登记：前提见所引工件，分钟确认缺少来源。", basis: "HISTORICAL", evidence_ids: [view("theme"), view("sentiment")] }],
+    limitations: ["分钟确认缺少来源，只作每日登记。"],
   });
+  // Every id the registration cites is one this context shows.
+  const shownIds = new Set([...context.artifacts, ...context.derived, ...context.evidence].map((row: any) => row.id as string));
+  const citedIds = [...JSON.stringify(s01).matchAll(/ev_[a-f0-9]{24}|[a-z]+@snap_[a-f0-9]{64}/gu)].map(([cited]) => cited);
+  assert.ok(citedIds.length > 0);
+  for (const cited of citedIds) assert.ok(shownIds.has(cited), `${cited} is shown`);
   assert.deepEqual(await submitted(submit, S01, run, s01), { accepted: true, module: "mode", run });
+});
+
+test("mode: a sentiment or theme view the cap leaves out is missing - NOT_EVALUABLE expected, its example accepted, an OK artifact refused", async (t) => {
+  for (const module of ["sentiment", "theme"]) {
+    const mounted = await setup(t);
+    const { root, read, submit, market } = mounted;
+    const run = await strategyRun(mounted, S01);
+    const marketDir = await realpath(join(root, "cn-market", "analysis", market));
+    const stored = JSON.parse(await readFile(join(marketDir, `${module}.json`), "utf8"));
+    // A headline field past the cap, as a hand-written artifact can hold.
+    const wide = module === "sentiment" ? { money_effect: "x".repeat(20 * 1024) } : { rotation: "x".repeat(20 * 1024) };
+    await writeArtifact(marketDir, module, { ...stored, ...wide });
+    const context = JSON.parse(await read.execute({ strategy: S01, run, market_run: market }, exec(ROLE)));
+    assert.equal(context.status_expected, "NOT_EVALUABLE", module);
+    assert.deepEqual(context.missing, [`market:${module}`]);
+    assert.ok(!context.artifacts.some((row: any) => row.module === module));
+    assert.ok(context.truncated.some((row: any) => row.source === `market:${module}` && row.kind === "artifact"));
+    const ok = artifact(context, { claims: [{ id: "c1", text: "本运行登记为 WAIT。", basis: "CURRENT", evidence_ids: [ids(context).quote("sh600519")] }] });
+    assert.match((await refusal(submit, S01, run, ok)).message, /^INVALID_ANALYSIS: \[SCHEMA\] /u);
+    assert.equal((await submitted(submit, S01, run, context.example)).accepted, true);
+  }
 });

@@ -342,7 +342,7 @@ function isUnknown(value) {
  * The bytes of `value`'s compact JSON text.
  * @param {unknown} value
  */
-function bytes(value) {
+export function bytes(value) {
   return Buffer.byteLength(JSON.stringify(value), "utf8");
 }
 
@@ -534,9 +534,11 @@ function checkEnvelope(raw, { module, context, schema, owns = [], ownedBy = {}, 
  * `priority` asks for, entry by entry - an entry `{ source, kind, order?, view?, filter? }` takes that
  * source's rows of that kind (a pool row's kind is its `pool`) that `filter` keeps, sorted by `order`
  * and shown through `view`; `filter` and `view` get the digest beside the item, so a module may show
- * only the rows its digest makes relevant (a row filtered out is not asked for). Each row is added whole, derived items first, until the next would pass the cap; from
- * there every row is left out, as is every row no entry asks for, each counted in `truncated` as
- * `{ source, kind, count }`. Every item of the module's sources stays citable, shown or not.
+ * only the rows its digest makes relevant (a row filtered out is not asked for). An entry marked
+ * `first: true` (they lead `priority`) is filled before the derived items. Each row is added
+ * whole - the `first` rows, then derived items, then the other rows - until the next would pass
+ * the cap; from there every row is left out, as is every row no entry asks for, each counted in
+ * `truncated` as `{ source, kind, count }`. Every item of the module's sources stays citable, shown or not.
  * `derivedView`, when given, is the whole row of every derived item shown - its `id` included, no
  * `source` or `scope` added, the derived section implying them; the digest keeps every field.
  * `derivedFilter(item, digest)`, when given, keeps the derived items shown, as a priority entry's
@@ -555,15 +557,17 @@ function checkEnvelope(raw, { module, context, schema, owns = [], ownedBy = {}, 
  * before the market run's, so the cap leaves the market run's out first - as `{ id,
  * module, headline, claims: [{ id, text, evidence_ids }] }`, its id `<module>@<snapshot_id>` of its
  * run, CURRENT evidence when its run's session is this run's, else HISTORICAL; a view is bounded
- * (`artifactView`; `artifactViews[module]` sets a module's claims shown and their characters). A view past the cap is skipped - the views after it still tried, artifact
- * rows never latching as evidence and derived rows do - counted in `truncated` (kind `artifact`)
- * and not citable, and when the contract requires it, it joins `missing` too, so the status expected is
+ * (`artifactView`; `artifactViews[module]` sets a module's claims shown and their characters).
+ * A view past the cap is skipped - the views after it still tried, artifact rows never latching
+ * as evidence and derived rows do - counted in `truncated` (kind `artifact`) and not citable,
+ * and when the contract requires it, it joins `missing` too, so the status expected is
  * `NOT_EVALUABLE`. A `required` entry is a source of this run, `market:<source>` or
  * `market:<module>` of the market run, or a module of this run. An item frozen in both runs keeps
  * this run's entry.
  * @param {{ module: string, run: string, manifest: { snapshot_id?: string | null, as_of?: string | null, session?: string | null,
  *   evidence: { source: string }[] }, evidence: { source: string, session: string | null, items: Record<string, any>[] }[],
- *   sources: string[], derivedFirst?: string[], derivedView?: (item: any) => Record<string, unknown>, priority: { source: string, kind: string, order?: (a: any, b: any) => number,
+ *   sources: string[], derivedFirst?: string[], derivedView?: (item: any) => Record<string, unknown>,
+ *   priority: { source: string, kind: string, first?: boolean, order?: (a: any, b: any) => number,
  *   view?: (item: any, digest: ContextDigest) => Record<string, unknown>, filter?: (item: any, digest: ContextDigest) => boolean }[], hypotheses: string, schema: { required?: string[], properties?: Record<string, unknown> },
  *   hints: unknown, example: unknown, required: string[], marketRun?: "required" | "optional",
  *   market?: { run: string, snapshot_id: string | null, session: string | null, evidence: { source: string, session: string | null, items: Record<string, any>[] }[],
@@ -633,13 +637,16 @@ export function buildContext({
   const derivedRows = sourceOrder.flatMap((source) =>
     all.filter(([, entry]) => entry.kind === "derived" && entry.source === source && keepDerived(entry)).map(([, entry]) => ({ entry, row: derivedView ? derivedView(entry.item) : shown(entry) })));
   const asked = new Set();
-  const priorityRows = priority.flatMap(({ source, kind, order, view, filter }) => {
+  const rowsOf = (entries) => entries.flatMap(({ source, kind, order, view, filter }) => {
     const matched = all.map(([, entry]) => entry).filter((entry) => entry.source === source && entry.kind === kind && entry.kind !== "derived"
       && (filter === undefined || filter(entry.item, digest)));
     for (const entry of matched) asked.add(entry);
     const sorted = order ? [...matched].sort((a, b) => order(a.item, b.item)) : matched;
     return sorted.map((entry) => ({ entry, row: shown(entry, view) }));
   });
+  // The entries marked `first` lead the priority list and are filled before the derived items.
+  const firstRows = rowsOf(priority.filter((entry) => entry.first === true));
+  const priorityRows = rowsOf(priority.filter((entry) => entry.first !== true));
   const unasked = all.map(([, entry]) => entry).filter((entry) => (entry.kind === "derived" ? !keepDerived(entry) : !asked.has(entry)));
 
   // A module citing nothing shows plan 2's context, field for field.
@@ -659,8 +666,11 @@ export function buildContext({
   /** @type {{ entry: DigestItem, list: unknown[] }[]} */
   const added = [];
   let full = false;
-  const lists = [[derivedRows, context.derived], [priorityRows, context.evidence]];
-  if (artifactCitable) lists.unshift([artifactRows, context.artifacts]);
+  // A view marked `late` is filled after the `first` rows: at the cap it is the view skipped.
+  const late = (row) => artifactViews[row.row.module]?.late === true;
+  const lists = [[firstRows, context.evidence], [derivedRows, context.derived], [priorityRows, context.evidence]];
+  if (artifactCitable) lists.splice(0, 0, [artifactRows.filter((row) => !late(row)), context.artifacts]);
+  if (artifactCitable) lists.splice(2, 0, [artifactRows.filter(late), context.artifacts]);
   for (const [candidates, list] of lists)
     for (const { entry, row } of candidates) {
       const cost = bytes(row) + (list.length ? 1 : 0);
@@ -687,11 +697,15 @@ export function buildContext({
   };
   // A required artifact the cap leaves out cannot be cited, so it is missing.
   const hide = () => {
+    let changed = false;
     for (const entry of left)
       if (entry.kind === "artifact" && required.includes(entry.source) && !missing.includes(entry.source)) {
         missing.push(entry.source);
         context.status_expected = "NOT_EVALUABLE";
+        changed = true;
       }
+    // The example follows the status: built again over the digest, whose `missing` is this list.
+    if (changed && typeof example === "function") context.example = example(digest);
   };
   count();
   hide();
@@ -721,13 +735,15 @@ function idsView(ids) {
 }
 
 /** A string cut to `chars` characters (`VIEW_CLAIM_CHARS` by default); any other value as it is. */
-const cutText = (text, chars = VIEW_CLAIM_CHARS) => (typeof text === "string" ? Array.from(text).slice(0, chars).join("") : text);
+export const cutText = (text, chars = VIEW_CLAIM_CHARS) => (typeof text === "string" ? Array.from(text).slice(0, chars).join("") : text);
 
 /**
  * A module's artifact view bound in one contract's contexts: the claims shown (`claims`, 0 for a
  * headline-only view) and the characters of each claim's text (`claimText`); each defaults to the
  * view's own, four and 120.
- * @typedef {{ claims?: number, claimText?: number }} ArtifactViewBound
+ * `late` fills the view after the priority rows marked `first` instead of before them, so at the
+ * cap it is that view the cap skips.
+ * @typedef {{ claims?: number, claimText?: number, late?: boolean }} ArtifactViewBound
  */
 
 /**
