@@ -348,17 +348,17 @@ function citingOf(text: string, ids: string[]) {
   };
 }
 
-test("module tools with a cited run: market_run is a parameter of both tools, required for a required contract, optional for an optional one; an unknown option is a TypeError", async (t) => {
+test("module tools with a cited run: market_run is a parameter of the read alone, required for a required contract, optional for an optional one; an unknown option is a TypeError", async (t) => {
   const service = backbone(await strategiesRoot(t));
   const { read, submit } = leaderTools(service);
   assert.deepEqual(Object.keys(read.parameters.properties), ["strategy", "run", "market_run"]);
   assert.deepEqual(read.parameters.required, ["strategy", "run", "market_run"]);
-  assert.deepEqual(Object.keys(submit.parameters.properties), ["strategy", "run", "market_run", "analysis"]);
-  assert.deepEqual(submit.parameters.required, ["strategy", "run", "market_run", "analysis"]);
-  for (const tool of [read, submit]) {
-    assert.match(tool.parameters.properties.market_run.description, /cn-market/);
-    assert.match(tool.description, /STALE_MARKET_RUN/);
-  }
+  // The submit is spec §5.5's: the read's digest binds the market run.
+  assert.deepEqual(Object.keys(submit.parameters.properties), ["strategy", "run", "analysis"]);
+  assert.deepEqual(submit.parameters.required, ["strategy", "run", "analysis"]);
+  assert.match(read.parameters.properties.market_run.description, /cn-market/);
+  assert.match(read.description, /STALE_MARKET_RUN/);
+  assert.match(submit.description, /market_snapshot_id/);
   const optional = leaderTools(service, citingContract("optional"));
   assert.deepEqual(optional.read.parameters.required, ["strategy", "run"]);
   assert.ok(Object.hasOwn(optional.read.parameters.properties, "market_run"));
@@ -409,7 +409,7 @@ test("module tools with a cited run: an open market run is MISSING_EVIDENCE, a m
   assert.equal((await service.readRun("alpha", strategy.run)).metrics.calls.leader, 3);
 });
 
-test("module tools with a cited run: market items and artifacts are citable, scoped against the strategy run's session; market_run and market_snapshot_id bound; the submit names the read's market run", async (t) => {
+test("module tools with a cited run: market items and artifacts are citable, scoped against the strategy run's session; market_run and market_snapshot_id bound by the read's digest", async (t) => {
   const root = await strategiesRoot(t);
   const service = backbone(root);
   const { read, submit } = leaderTools(service);
@@ -425,17 +425,18 @@ test("module tools with a cited run: market items and artifacts are citable, sco
   assert.deepEqual(context.artifacts.map((row: any) => row.id), [`sentiment@${market.snapshot}`]);
 
   // A market item of the day before cannot carry a CURRENT claim alone.
-  const historical = await rejectsWith(submit.execute({ strategy: "alpha", run: strategy.run, market_run: market.run, analysis: JSON.stringify(citingOf(text, [market.poolId])) }, exec(ROLE)), "INVALID_ANALYSIS");
+  const historical = await rejectsWith(submit.execute({ strategy: "alpha", run: strategy.run, analysis: JSON.stringify(citingOf(text, [market.poolId])) }, exec(ROLE)), "INVALID_ANALYSIS");
   assert.match(historical.message, /\[TIME_SCOPE\]/);
   for (const field of ["market_run", "market_snapshot_id"]) {
-    const refused = await rejectsWith(submit.execute({ strategy: "alpha", run: strategy.run, market_run: market.run, analysis: JSON.stringify({ ...citingOf(text, [strategy.quoteId]), [field]: "snap_other" }) }, exec(ROLE)), "INVALID_ANALYSIS");
+    const refused = await rejectsWith(submit.execute({ strategy: "alpha", run: strategy.run, analysis: JSON.stringify({ ...citingOf(text, [strategy.quoteId]), [field]: "snap_other" }) }, exec(ROLE)), "INVALID_ANALYSIS");
     assert.match(refused.message, /\[REFERENCE\]/);
   }
-  // A submit naming another market run than the read's: read it first.
   const analysis = JSON.stringify(citingOf(text, [strategy.quoteId, `sentiment@${market.snapshot}`]));
+  // An envelope copying another market run than the read's is REFERENCE: the read's digest binds it.
   const other = await marketRun(service, root, "2026-10-23");
-  await rejectsWith(submit.execute({ strategy: "alpha", run: strategy.run, market_run: other.run, analysis }, exec(ROLE)), "READ_FIRST");
-  assert.deepEqual(JSON.parse(await submit.execute({ strategy: "alpha", run: strategy.run, market_run: market.run, analysis }, exec(ROLE))), { accepted: true, module: "leader", run: strategy.run });
+  const elsewhere = await rejectsWith(submit.execute({ strategy: "alpha", run: strategy.run, analysis: JSON.stringify({ ...JSON.parse(analysis), market_run: other.run, market_snapshot_id: other.snapshot }) }, exec(ROLE)), "INVALID_ANALYSIS");
+  assert.match(elsewhere.message, /\[REFERENCE\]/);
+  assert.deepEqual(JSON.parse(await submit.execute({ strategy: "alpha", run: strategy.run, analysis }, exec(ROLE))), { accepted: true, module: "leader", run: strategy.run });
   const stored = JSON.parse(await readFile(join(root, "alpha", "analysis", strategy.run, "leader.json"), "utf8"));
   assert.equal(stored.market_run, market.run);
   assert.equal(stored.market_snapshot_id, market.snapshot);

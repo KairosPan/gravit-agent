@@ -20,11 +20,12 @@
  * touches the run, so none of it counts; every error reaches the model through `asToolError`.
  *
  * A contract with `marketRun` (`"required"` or `"optional"`) cites a sealed `cn-market` run (A5,
- * A27): both tools take `market_run`, its shape checked before the run is touched. Inside the read's
+ * A27): the read takes `market_run`, its shape checked before the run is touched. Inside the read's
  * `build` - the strategy run sealed, its session final - the cited run is read whole by
  * `readSealedRun`, unlocked, and must be fresh by A5: its session the strategy run's or the trading
- * day before it (`STALE_MARKET_RUN`). The submit validates against the read's digest, without
- * reading the cited run again, and names the read's market run, else `READ_FIRST`.
+ * day before it (`STALE_MARKET_RUN`). The submit takes no `market_run` (§5.5): it validates against
+ * the read's digest, which binds the cited run through the envelope's `market_run` and
+ * `market_snapshot_id`, without reading the cited run again.
  */
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { buildContext, validateEnvelope } from "./contract-core.mjs";
@@ -74,7 +75,7 @@ const CHANNEL_TEXT = {
 
 const STRATEGY_PARAMETER = { type: "string", description: "策略名，即频道名（市场频道为 cn-market），不是路径。", required: true };
 const RUN_PARAMETER = { type: "string", description: "运行编号（冻结返回的 run），不是路径。", required: true };
-const MARKET_RUN_TEXT = "引用的市场运行编号：一个已封存的 cn-market 运行（读过上下文的运行），其交易日须与本运行相同或为前一个交易日；提交时须与读取时相同。不是路径。";
+const MARKET_RUN_TEXT = "引用的市场运行编号：一个已封存的 cn-market 运行（读过上下文的运行），其交易日须与本运行相同或为前一个交易日。不是路径。";
 
 const ANALYSIS_PARAMETER = {
   type: "string",
@@ -100,13 +101,14 @@ export function defineModule({ module, channel, contract, runs }) {
   if (marketRun !== undefined && marketRun !== "required" && marketRun !== "optional")
     throw new TypeError(`lunhui: a contract's marketRun is required or optional, not ${JSON.stringify(marketRun)}`);
   /**
-   * The latest read's digest, per `<strategy>/<run>/<module>`, with the `market_run` the read was
-   * given; in memory, one map per definition.
-   * @type {Map<string, { digest: import("./contract-core.mjs").ContextDigest, marketRun: string | undefined }>}
+   * The latest read's digest, per `<strategy>/<run>/<module>`; in memory, one map per definition.
+   * @type {Map<string, import("./contract-core.mjs").ContextDigest>}
    */
   const digests = new Map();
   const budget = `本模块每个运行至多调用 ${MODULE_BUDGET} 次（读取与提交合计；找到运行之后被拒绝的调用也计入，找到运行之前的拒绝如 NOT_A_ROLE、WRONG_CHANNEL 不计），超过即 TOOL_BUDGET。`;
   const marketParameters = marketRun === undefined ? {} : { market_run: { type: "string", description: MARKET_RUN_TEXT, ...(marketRun === "required" ? { required: true } : {}) } };
+  const submitMarketText = marketRun === undefined ? "" :
+    "信封的 market_run 与 market_snapshot_id 照抄读取时的上下文；引用的市场运行由读取决定，提交不再指定。";
   const marketText = marketRun === undefined ? "" :
     `${marketRun === "required" ? "须" : "可"}以 market_run 引用一个已封存的 cn-market 运行：其证据与已接受的工件一并列入上下文，工件可按 <module>@<snapshot_id> 引用，信封另须照抄 market_run 与 market_snapshot_id；` +
     "引用的运行未封存即 MISSING_EVIDENCE，不存在即 NO_SUCH_RUN，交易日既非本运行的也非前一个交易日即 STALE_MARKET_RUN。";
@@ -151,7 +153,7 @@ export function defineModule({ module, channel, contract, runs }) {
               runArtifacts: contract.runArtifacts, artifacts,
             }),
           });
-          digests.set(`${located.strategy}/${located.run}/${module}`, { digest, marketRun: asked });
+          digests.set(`${located.strategy}/${located.run}/${module}`, digest);
           return text;
         });
       } catch (error) {
@@ -165,24 +167,20 @@ export function defineModule({ module, channel, contract, runs }) {
     description:
       `提交 ${module} 模块在一个运行上的工件，经校验后存入该运行。只由委派的角色子代理调用，Gravit 的根会话或分叉会被拒绝（NOT_A_ROLE）；` +
       `提交前须在本进程读取本模块上下文（READ_FIRST）；每个模块每个运行只接受一个工件，已接受后再提交即 ALREADY_SUBMITTED。` +
-      `被拒绝（INVALID_ANALYSIS）时按“修复：”逐项修正后重交。${CHANNEL_TEXT[channel]}${marketText}${budget}` +
+      `被拒绝（INVALID_ANALYSIS）时按“修复：”逐项修正后重交。${CHANNEL_TEXT[channel]}${submitMarketText}${budget}` +
       "参数是名称与编号，不是路径；返回 accepted、module 与 run。",
-    parameters: { strategy: STRATEGY_PARAMETER, run: RUN_PARAMETER, ...marketParameters, analysis: ANALYSIS_PARAMETER },
+    parameters: { strategy: STRATEGY_PARAMETER, run: RUN_PARAMETER, analysis: ANALYSIS_PARAMETER },
     output: OUTPUT,
     async execute(args, exec) {
       try {
         if (!callerIsRole(exec)) throw refuse.notARole();
         const strategy = await strategyOf(args.strategy);
-        const asked = marketRunOf(args.market_run);
         let key;
         const result = await runs.submit(strategy, args.run, module, args.analysis, (text, located) => {
           key = `${located.strategy}/${located.run}/${module}`;
-          const kept = digests.get(key);
+          const context = digests.get(key);
           // A row reload while the service lives on: the read is remembered, its digest is not.
-          if (kept === undefined) throw refuse.readFirst(module);
-          // The digest binds the market run the read cited, under the name it was given or its on-disk one.
-          if (asked !== kept.marketRun && asked !== (kept.digest.market?.run ?? undefined)) throw refuse.readFirst(module);
-          const context = kept.digest;
+          if (context === undefined) throw refuse.readFirst(module);
           return validateEnvelope(text, { module, context, schema: contract.schema, owns: contract.owns, ownedBy: contract.ownedBy,
             exemptPaths: contract.exemptPaths, rules: contract.rules,
           });
