@@ -380,7 +380,7 @@ test("eastmoney: fetchBoardFundFlow parses the main net inflow and its share", a
 
 test("eastmoney: fetchMarketCounts sums pages, counts limit-up and limit-down rows, hashes every page, and marks a changed total partial", async () => {
   const { asked, fetchImpl } = recorded();
-  const counts = await fetchMarketCounts({ fetchImpl });
+  const counts = await fetchMarketCounts({ fetchImpl, pageSize: 3 });
   const sha = (name: string) => createHash("sha256").update(readFileSync(`${FIXTURES}${name}`)).digest("hex");
   // Page 1: 10.04, 9.9, 1.2; page 2: 0, -9.98 and a suspended "-" that counts nowhere.
   assert.deepEqual(counts, {
@@ -388,36 +388,69 @@ test("eastmoney: fetchMarketCounts sums pages, counts limit-up and limit-down ro
     pageHashes: [sha("counts-page-1.json"), sha("counts-page-2.json")],
     partial: true, host: "push2.eastmoney.com", delayed: false,
   });
-  // Sequential pages from 1, stopped once the rows read reach the first page's total.
+  // Page 1 first, then ceil(6 / 3) - 1 more pages.
   const fs = "m%3A0+t%3A6%2Cm%3A0+t%3A80%2Cm%3A1+t%3A2%2Cm%3A1+t%3A23%2Cm%3A0+t%3A81+s%3A2048";
-  assert.deepEqual(asked, [1, 2].map((pn) =>
-    `${CLIST}?pn=${pn}&pz=1000&po=1&np=1&${UT}&fltt=2&invt=2&fid=f12&fs=${fs}&fields=f3%2Cf2`));
+  const countsUrl = (pn: number, pz: number) =>
+    `${CLIST}?pn=${pn}&pz=${pz}&po=1&np=1&${UT}&fltt=2&invt=2&fid=f12&fs=${fs}&fields=f3%2Cf2`;
+  assert.deepEqual(asked, [countsUrl(1, 3), countsUrl(2, 3)]);
   assert.ok(!("rows" in counts));
+  // The default page is the clist's measured cap of 100: one page here, short of the total.
+  const capped = recorded();
+  const one = await fetchMarketCounts({ fetchImpl: capped.fetchImpl });
+  assert.deepEqual(capped.asked, [countsUrl(1, 100)]);
+  assert.equal(one.pages, 1);
+  assert.equal(one.partial, true);
+});
 
-  // Pages that agree on the total are whole; each waits for the one before.
-  const page = (pn: number, total: number, diff: unknown[]) => ({ rc: 0, dlmkts: pn === 2 ? "8" : "", data: { total, diff } });
-  let inside = 0;
-  const steady = async (url: string | URL) => {
+test("eastmoney: fetchMarketCounts reads page 1 first, then the rest together under the limiter, hashed in page order; maxPages caps the read", async () => {
+  // 10 rows of 2 a page: page n holds changes n and -n, page 2 is delayed.
+  const page = (pn: number) => ({ rc: 0, dlmkts: pn === 2 ? "8" : "", data: { total: 10, diff: [{ f3: pn * 2 }, { f3: -pn * 2 }] } });
+  const order: number[] = [];
+  let running = 0;
+  let peak = 0;
+  const releases: Array<() => void> = [];
+  const fetchImpl = async (url: string | URL) => {
     const pn = Number(new URL(String(url)).searchParams.get("pn"));
-    assert.equal(inside, 0, "one page at a time");
-    inside += 1;
-    await new Promise((resolve) => setImmediate(resolve));
-    inside -= 1;
-    return json(page(pn, 4, pn === 1 ? [{ f3: 1 }, { f3: -1 }] : [{ f3: 20 }, { f3: -20 }]));
+    order.push(pn);
+    running += 1;
+    peak = Math.max(peak, running);
+    await new Promise<void>((resolve) => releases.push(resolve));
+    running -= 1;
+    return json(page(pn));
   };
-  const whole = await fetchMarketCounts({ fetchImpl: steady, pageSize: 2 });
+  const pending = fetchMarketCounts({ fetchImpl, pageSize: 2 });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(order, [1], "page 1 alone first");
+  // Release page 1, then the others in reverse arrival order, so the hashes cannot follow arrival.
+  releases.shift()?.();
+  while (order.length < 5 || releases.length > 0) {
+    await new Promise((resolve) => setImmediate(resolve));
+    releases.pop()?.();
+  }
+  const whole = await pending;
+  assert.equal(peak, 4);
+  assert.deepEqual(order.slice(0, 5), [1, 2, 3, 4, 5]);
   assert.equal(whole.partial, false);
-  assert.equal(whole.pages, 2);
-  assert.deepEqual([whole.advancers, whole.decliners, whole.limitUp, whole.limitDown], [2, 2, 1, 1]);
+  assert.equal(whole.pages, 5);
+  assert.deepEqual([whole.advancers, whole.decliners, whole.unchanged, whole.limitUp, whole.limitDown], [5, 5, 0, 1, 1]);
+  const bytes = (pn: number) => createHash("sha256").update(JSON.stringify(page(pn))).digest("hex");
+  assert.deepEqual(whole.pageHashes, [1, 2, 3, 4, 5].map(bytes));
   assert.equal(whole.delayed, true);
 
   // maxPages reached before the total is partial.
-  const short = await fetchMarketCounts({ fetchImpl: steady, pageSize: 2, maxPages: 1 });
+  const steady = async (url: string | URL) => json(page(Number(new URL(String(url)).searchParams.get("pn"))));
+  const short = await fetchMarketCounts({ fetchImpl: steady, pageSize: 2, maxPages: 3 });
   assert.equal(short.partial, true);
-  assert.equal(short.pages, 1);
-  assert.equal(short.pageHashes.length, 1);
+  assert.equal(short.pages, 3);
+  assert.equal(short.pageHashes.length, 3);
+  // A later page that comes back empty is partial too.
+  const holed = async (url: string | URL) => {
+    const pn = Number(new URL(String(url)).searchParams.get("pn"));
+    return json(pn === 3 ? { rc: 0, data: { total: 10, diff: [] } } : page(pn));
+  };
+  assert.equal((await fetchMarketCounts({ fetchImpl: holed, pageSize: 2 })).partial, true);
 
-  // A first page with no data is no market data.
+  // A first page with no data is no market data; a bad total is an invalid reply.
   await rejectsWith(fetchMarketCounts({ fetchImpl: async () => json({ rc: 0, data: null }) }), "NO_MARKET_DATA");
   await rejectsWith(fetchMarketCounts({ fetchImpl: async () => json({ rc: 0, data: { total: "x", diff: [] } }) }), "UPSTREAM_INVALID");
 });

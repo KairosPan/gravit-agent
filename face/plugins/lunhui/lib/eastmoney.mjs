@@ -427,38 +427,42 @@ export async function fetchBoardFundFlow({ fetchImpl = fetch, top = 30, timeoutM
   return { rows: rows.slice(0, top).map(flowRow), host, delayed };
 }
 
+/** The URL of all-shares page `pn`. */
+function countsUrl(pn, pageSize) {
+  return clistUrl({
+    pn: String(pn), pz: String(pageSize), po: "1", np: "1", ut: CLIST_UT, fltt: "2", invt: "2", fid: "f12",
+    fs: ALL_SHARES_FS, fields: "f3,f2",
+  });
+}
+
 /**
  * The all-A-shares advance/decline counts: AKShare's `stock_zh_a_spot_em` query with the change
- * and price fields only, `pageSize` rows a page, pages read one after another from 1 until the rows
- * read reach the first page's `data.total`, a page comes back empty, or `maxPages` are read. No row
- * is kept: only the counts, and each page's sha256 over its response bytes as received. A row whose
- * change is "-" (suspended) counts in none of advancers, decliners and unchanged. `partial` is true
- * when a page's `total` differs from the first page's or the read stopped short of the total. A first
- * page whose `data` is null or whose list is empty refuses `NO_MARKET_DATA`.
+ * and price fields only, `pageSize` rows a page. The clist serves at most 100 rows a page whatever
+ * `pz` asks (measured 2026-10-25: `pz=1000` answered `total` 5925 with 100 rows), hence the
+ * default of 100 and 64 pages. Page 1 is read first for its `data.total`; the remaining
+ * `ceil(total / pageSize) - 1` pages, at most `maxPages` in all, are then asked together, the
+ * limiter keeping four in flight. No row is kept: only the counts, and each page's sha256 over its
+ * response bytes as received, in page order. A row whose change is "-" (suspended) counts in none
+ * of advancers, decliners and unchanged. `partial` is true when a page's `total` differs from page
+ * 1's or the rows read fall short of it. A page 1 whose `data` is null or whose list is empty
+ * refuses `NO_MARKET_DATA`; any page that fails otherwise fails the whole call.
  * @param {{ fetchImpl?: FetchLike, pageSize?: number, maxPages?: number, timeoutMs?: number }} [options]
  */
-export async function fetchMarketCounts({ fetchImpl = fetch, pageSize = 1000, maxPages = 8, timeoutMs = 7000 } = {}) {
+export async function fetchMarketCounts({ fetchImpl = fetch, pageSize = 100, maxPages = 64, timeoutMs = 7000 } = {}) {
+  const read = async (pn) => {
+    const reply = await fetchEastmoneyReply(countsUrl(pn, pageSize), { fetchImpl, timeoutMs });
+    return { ...clistRows(reply.json, null), reply };
+  };
+  const first = await read(1);
+  if (first.rows.length === 0) throw refuse.noMarketData(PROVIDER);
+  const { total } = first;
+  const pageCount = Math.min(Math.ceil(total / pageSize), maxPages);
+  const rest = await Promise.all(Array.from({ length: Math.max(pageCount - 1, 0) }, (_, i) => read(i + 2)));
+  const pages = [first, ...rest];
   const counts = { advancers: 0, decliners: 0, unchanged: 0, limitUp: 0, limitDown: 0 };
-  const pageHashes = [];
-  const hosts = new Set();
-  let total = 0;
-  let read = 0;
-  let partial = false;
-  let delayed = false;
-  for (let pn = 1; pn <= maxPages; pn += 1) {
-    const url = clistUrl({
-      pn: String(pn), pz: String(pageSize), po: "1", np: "1", ut: CLIST_UT, fltt: "2", invt: "2", fid: "f12",
-      fs: ALL_SHARES_FS, fields: "f3,f2",
-    });
-    const reply = await fetchEastmoneyReply(url, { fetchImpl, timeoutMs });
-    const page = clistRows(reply.json, null);
-    if (pn === 1) {
-      if (page.rows.length === 0) throw refuse.noMarketData(PROVIDER);
-      total = page.total;
-    } else if (page.total !== total) partial = true;
-    pageHashes.push(createHash("sha256").update(reply.bytes).digest("hex"));
-    hosts.add(reply.host);
-    delayed ||= reply.delayed;
+  let rows = 0;
+  for (const page of pages) {
+    rows += page.rows.length;
     for (const raw of page.rows) {
       const pct = num(raw.f3);
       if (pct === null) continue;
@@ -468,9 +472,14 @@ export async function fetchMarketCounts({ fetchImpl = fetch, pageSize = 1000, ma
       if (pct >= LIMIT_UP_PCT) counts.limitUp += 1;
       if (pct <= LIMIT_DOWN_PCT) counts.limitDown += 1;
     }
-    read += page.rows.length;
-    if (read >= total || page.rows.length === 0) break;
   }
-  if (read < total) partial = true;
-  return { ...counts, total, pages: pageHashes.length, pageHashes, partial, host: [...hosts].join(","), delayed };
+  return {
+    ...counts,
+    total,
+    pages: pages.length,
+    pageHashes: pages.map((page) => createHash("sha256").update(page.reply.bytes).digest("hex")),
+    partial: rows < total || pages.some((page) => page.total !== total),
+    host: [...new Set(pages.map((page) => page.reply.host))].join(","),
+    delayed: pages.some((page) => page.reply.delayed),
+  };
 }
