@@ -6,7 +6,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { apply as applyRuns } from "../plugins/lunhui/runs-row.mjs";
@@ -140,8 +140,8 @@ test("module tools: names, parameters and Chinese descriptions stating the bound
     assert.match(tool.description, /10 次/);
     assert.match(tool.description, /参数是名称与编号，不是路径/);
     assert.match(tool.description, /cn-market/);
+    assert.match(tool.description, /只接受一个工件/);
   }
-  assert.match(submit.description, /只接受一个工件/);
   assert.match(submit.description, /NOT_A_ROLE/);
   assert.match(read.description, /30 KiB/);
   assert.throws(() => defineModule({ module: "nope", channel: "market", contract: toyContract(), runs: {} } as any), TypeError);
@@ -254,4 +254,21 @@ test("module tools: the digest is per definition - a read through one, a submit 
   await second.read.execute({ strategy: "cn-market", run }, exec(ROLE));
   await rejectsWith(first.submit.execute({ strategy: "cn-market", run, analysis: "{}" }, exec(ROLE)), "INVALID_ANALYSIS");
   assert.deepEqual(JSON.parse(await second.submit.execute({ strategy: "cn-market", run, analysis }, exec(ROLE))).accepted, true);
+});
+
+test("module tools: a submit naming the run in another letter case finds the digest the read kept under the on-disk names", async (t) => {
+  const root = await strategiesRoot(t);
+  const service = backbone(root);
+  const { read, submit } = tools(service);
+  const { run, quoteId } = await frozenRun(service, "cn-market");
+  const miscased = run.toUpperCase();
+  assert.notEqual(miscased, run);
+  const resolves = await stat(join(root, "cn-market", "analysis", miscased)).then(() => true, () => false);
+  if (!resolves) {
+    t.skip("the filesystem is case-sensitive: a miscased run id names no run here");
+    return;
+  }
+  const text = await read.execute({ strategy: "cn-market", run }, exec(ROLE));
+  const analysis = JSON.stringify(artifactOf(text, [quoteId]));
+  assert.deepEqual(JSON.parse(await submit.execute({ strategy: "cn-market", run: miscased, analysis }, exec(ROLE))), { accepted: true, module: "environment", run });
 });

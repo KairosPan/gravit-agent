@@ -569,10 +569,15 @@ test("lunhui-runs: an accepted submit writes <module>.json, names it in artifact
   const root = await strategiesRoot(t);
   const { service, tool } = mounted(root);
   const { run } = await service.openRun("alpha", "market");
-  await service.readContext("alpha", run, "environment", echo);
+  // build and validate are each handed the run's on-disk names.
+  let built: unknown;
+  await service.readContext("alpha", run, "environment", (input: any, located: unknown) => { built = located; return input; });
+  assert.deepEqual(built, { strategy: "alpha", run });
   const artifact = { module: "environment", index_state: "UP", liquidity_state: "LOOSE", cycle_anchor: "2026-10-01", claims: [] };
   // The validated object is written, not the submitted text.
-  const result = await service.submit("alpha", run, "environment", "ignored", () => artifact);
+  let handed: unknown;
+  const result = await service.submit("alpha", run, "environment", "ignored", (_text: unknown, located: unknown) => { handed = located; return artifact; });
+  assert.deepEqual(handed, { strategy: "alpha", run });
   assert.deepEqual(result, { accepted: true, module: "environment", run });
   const dir = join(root, "alpha", "analysis", run);
   assert.deepEqual(JSON.parse(await readFile(join(dir, "environment.json"), "utf8")), artifact);

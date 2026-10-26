@@ -41,8 +41,8 @@ const ARTIFACT_MAX_BYTES = 24 * 1024;
  *   readRun(strategyName: unknown, run: unknown): Promise<{ manifest: import("./lib/runs.mjs").RunManifest, metrics: import("./lib/runs.mjs").RunMetrics, metricsReset: boolean }>,
  *   withRun<T>(strategyName: unknown, run: unknown, fn: (located: { strategy: string, run: string, dir: string }) => Promise<T>): Promise<T>,
  *   countFreeze(strategyName: unknown, run: unknown): Promise<number>,
- *   readContext<T>(strategyName: unknown, run: unknown, module: string, build: (input: ContextInput) => T | Promise<T>): Promise<T>,
- *   submit(strategyName: unknown, run: unknown, module: string, text: unknown, validate: (text: unknown) => unknown): Promise<{ accepted: true, module: string, run: string }>,
+ *   readContext<T>(strategyName: unknown, run: unknown, module: string, build: (input: ContextInput, located: { strategy: string, run: string }) => T | Promise<T>): Promise<T>,
+ *   submit(strategyName: unknown, run: unknown, module: string, text: unknown, validate: (text: unknown, located: { strategy: string, run: string }) => unknown): Promise<{ accepted: true, module: string, run: string }>,
  * }} LunhuiRuns
  */
 
@@ -151,8 +151,9 @@ export function createLunhuiRuns(strategiesRoot) {
      * racing the first read lands before the seal or is `RUN_SEALED`: count the call, seal the run
      * when it is open (A4; a sealed run stays as it is), hand `build` the sealed manifest and every
      * evidence file it lists (`readEvidence`), and only once `build` has returned remember the read,
-     * so an unusable evidence file or a `build` that throws leaves the submit `READ_FIRST`. What
-     * `build` returns is returned. A module outside `MODULES` is host code's bug, a `TypeError`.
+     * so an unusable evidence file or a `build` that throws leaves the submit `READ_FIRST`. `build`
+     * is also handed the run's on-disk `{ strategy, run }`, the names a module keys its digest by,
+     * whatever letter case the caller spelled them in. What `build` returns is returned. A module outside `MODULES` is host code's bug, a `TypeError`.
      */
     async readContext(strategyName, run, module, build) {
       return service.withRun(strategyName, run, async (located) => {
@@ -163,7 +164,7 @@ export function createLunhuiRuns(strategiesRoot) {
           const file = await runs.readEvidence(located.dir, entry.source);
           evidence.push({ source: entry.source, session: entry.session, items: file.items });
         }
-        const context = await build({ manifest, evidence });
+        const context = await build({ manifest, evidence }, { strategy: located.strategy, run: located.run });
         reads.add(`${located.strategy}/${located.run}/${module}`);
         return context;
       });
@@ -172,7 +173,8 @@ export function createLunhuiRuns(strategiesRoot) {
      * Take `module`'s one artifact of the run, under the run's mutex, so two submits land one after
      * the other and the second is `ALREADY_SUBMITTED` (stage 0's `SUBMIT_IN_PROGRESS` is never
      * thrown): count the call; `ALREADY_SUBMITTED` when `run.json` `artifacts[]` names the module;
-     * `READ_FIRST` unless this process read the module's context of the run; then `validate(text)`.
+     * `READ_FIRST` unless this process read the module's context of the run; then `validate(text,
+     * { strategy, run })`, the run's on-disk names as `readContext` hands `build`.
      * A rejection carrying a `category` (`validateEnvelope`'s) is recorded in
      * `metrics.rejections[module]` and thrown `INVALID_ANALYSIS` with its repair (`repairFor` its
      * category when it carries none); any other error
@@ -187,7 +189,7 @@ export function createLunhuiRuns(strategiesRoot) {
         if (!reads.has(`${located.strategy}/${located.run}/${module}`)) throw refuse.readFirst(module);
         let artifact;
         try {
-          artifact = await validate(text);
+          artifact = await validate(text, { strategy: located.strategy, run: located.run });
         } catch (error) {
           if (typeof error?.category !== "string") throw error;
           const recorded = Array.isArray(metrics.rejections[module]) ? metrics.rejections[module] : [];
