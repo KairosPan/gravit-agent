@@ -1,7 +1,7 @@
 # Lunhui modules — the manuscript's chapters as dsh rows
 
-**Status:** design, written 2026-10-25 against `main @ a89502f` and dsh `0.2.0-rc.2`, for the
-operator's approval · **Owner:** the operator · **Supersedes:** the plugin form of
+**Status:** design, written 2026-10-25 against `main @ a89502f` and dsh `0.2.0-rc.2`; **approved
+by the operator 2026-10-25** after the builder check (§11) · **Owner:** the operator · **Supersedes:** the plugin form of
 `docs/superpowers/specs/2026-10-19-lunhui-plugin-graft-design.md` (its D1, D3, D5–D9, D17–D19);
 that spec's build, `feat/lunhui-graft @ 0de97cf`, is **stage 0** of this design and its pure
 modules are reused (§5.13). What the graft spec decided about data, knowledge and language (its
@@ -119,7 +119,7 @@ exactly its tools, and no child process is spawned for it.
 
 ## 4. Decisions, as decided
 
-The operator's are E1–E3 and the carried D2, D4, D10–D16; the rest are the author's calls, each
+The operator's are E1–E4 and the carried D2, D4, D10–D16; the rest are the author's calls, each
 overturnable at review without redesign.
 
 | # | Decision | Why |
@@ -127,6 +127,7 @@ overturnable at review without redesign.
 | E1 | **dsh rows, not an MCP server.** Every Lunhui piece is a cordis row that registers its tools in-process; the stage-0 `server.mjs` and `manifest.json` retire | operator, 2026-10-25: dsh's plugin unit is the row; the MCP unit bought only runtime install, a non-goal |
 | E2 | **Five analysis modules, by the manuscript's chapters:** 环境与大周期 (一, 八), 情绪周期 (二), 题材与轮动 (the 题材 pages and 六), 龙头与个股地位 (四), 模式选择与预期 (三, 七, and 模式选择 at P0159) | operator, 2026-10-25 |
 | E3 | **A dedicated channel for the market-wide modules:** `strategies/cn-market/`, a tracked strategy directory whose thesis is the market read itself; its runs hold the environment, 情绪 and 题材 artifacts, and a strategy's run cites one of them | operator, 2026-10-25: market reads belong to no single strategy; the runs card and the write map keep their shape |
+| E4 | **An `S01` or `S02` conclusion is a daily registration with an expectation card, not a decision:** the preconditions the daily evidence can show, a frozen expectation card graded in the next run, the minute-level confirmation the theses describe named as unmet for want of a source, the parameters used listed as research candidates. **`S02` stays `WAIT`-only until an announcements source is frozen** — a fifth freeze row and a new egress host, a later plan — because a frozen board's surge is not the catalyst the thesis names. The theses' falsification sections are re-fitted to the daily frame by the builder and reviewed by the operator | operator, 2026-10-25 (builder check Q1); the alternative, a proxy catalyst from board and pool data, was declined as weaker |
 | D2′ | **The freeze rows fetch for themselves**, from the face process: Tencent for quotes and daily bars (stage 0), Eastmoney for the 涨停 pools and the boards (§5.3); the model never sees unfrozen data | carried from the graft's D2 (operator, 2026-10-19); the egress is the face's now |
 | D4′ | Every tool is anchored on a **`strategy` argument** under the strategies root the row config names, by the channel grammar and the stage-0 anchoring (`runs.mjs`: `lstat`, realpath under the root, `stillResolved`); a cited market run is anchored the same way under `cn-market` | carried from D4 |
 | D10′ | The doctrine is a **research input**: the module contexts carry each chapter's hypotheses as short statements with paragraph ids and the conflict rulings that bind the module; no style skill, no manuscript text in the tree | carried from D10 (operator) |
@@ -275,12 +276,13 @@ example. Module-specific rules the core cannot know:
   `state` to be in that strategy's admitted set (strategy-spec §3–§4: `REPAIR`/`EXPANSION` for
   both, `IGNITION`/`CHAOS` for S02 only, never `CLIMAX`/`RETREAT`/`UNKNOWN`), every precondition
   cited, an accepted counterevidence artifact in the run with every item addressed by id (A22),
-  and — pending the operator's answer to §9's first item — an `S01`/`S02` is a **daily
-  registration**: the preconditions the daily evidence can show, a frozen expectation card, the
-  minute-level confirmation the theses describe named under `preconditions` as `unmet: no source`,
-  and the card graded in the next run; the artifact lists the parameter values it used as research
-  candidates (`parameters_used`), since no production value exists. 打法 names from R01–R14 may
-  appear only under `research_only_matches`.
+  and — E4 — an `S01`/`S02` is a **daily registration**: the preconditions the daily evidence can
+  show, a frozen expectation card, the minute-level confirmation the theses describe named under
+  `preconditions` as `unmet: no source`, and the card graded in the next run; the artifact lists
+  the parameter values it used as research candidates (`parameters_used`), since no production
+  value exists. `S02` is refused until an announcements source exists in the run
+  (`preconditions.catalyst: unmet: no source`, so the conclusion is `WAIT`). 打法 names from
+  R01–R14 may appear only under `research_only_matches`.
 - the leader validator requires each `leader_candidates[]` symbol to be a member of a frozen board
   or pool of the cited market run (A27).
 - counterevidence: each item names the module it is against and cites evidence; an item with no
@@ -449,19 +451,8 @@ re-check rows and the seams inventory (dated additions).
 
 ## 9. Open items
 
-- **For the operator (asked 2026-10-25, builder check Q1):** what an `S01`/`S02` conclusion is.
-  The two theses rule both strategies out on what this design still lacks — S01's confirmation
-  is k complete minutes after a registered divergence, S02 needs a public catalyst with an
-  `available_at`, and no parameter has a production value. The author's recommendation, written
-  into §5.6 pending the answer: a mode conclusion is a **daily registration**, not a decision —
-  the preconditions the daily evidence can show, a frozen expectation card graded in the next
-  run, the minute-level confirmation named as unmet for want of a source, the parameters used
-  listed as research candidates; and `S02` stays `WAIT`-only until an announcements source is
-  frozen (a fifth freeze row and a new egress host, a later plan), because a catalyst a frozen
-  board's surge merely suggests is not the catalyst the thesis names. The theses' falsification
-  sections are then re-fitted to the daily frame by the builder, and the operator reviews them.
-  The alternative — let the mode module read a board's surge plus a limit-up cluster as a proxy
-  catalyst — makes `S02` reachable now and weaker.
+- An announcements source for `S02`'s catalyst: which feed, its egress host, and what an
+  announcement item freezes (E4 makes it the gate to `S02`).
 - A manifest or card for in-process rows in Discover, and whether a tools column for face rows
   belongs in `/data/plugins.json`.
 - Whether `cn-market` runs should be opened by the operator's hand each session or by the
@@ -489,7 +480,7 @@ document or sent to the operator:
 
 | # | Question | Pile | Where |
 |---|---|---|---|
-| 1 | What may `S01`/`S02` claim; registration or decision; thresholds; S02 without a catalyst source | the operator's | §9 first item; §5.6 carries the recommendation pending the answer |
+| 1 | What may `S01`/`S02` claim; registration or decision; thresholds; S02 without a catalyst source | the operator's — decided 2026-10-25 | E4, §5.6 |
 | 2 | What an evidence item is; who computes the market-wide measures; the scope rule refusing the modules' own sentences | the author's | A20, A21 |
 | 3 | When the reviewer runs and whether the mode waits for it | the author's | A22, §5.10 |
 | 4 | Whether the Eastmoney endpoints answer from this machine | measured | A28, §3 |
