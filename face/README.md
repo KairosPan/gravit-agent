@@ -410,15 +410,16 @@ the face process, not an MCP server: nothing to install, no child process, and t
 every boot. Like AKShare's reads they carry no lookahead guard and are never evidence of a trade.
 Gravit freezes; a role reads each module's context of the frozen run and submits that module's
 artifact — `cn-market-analyst` the market read in `cn-market`, `cn-stock-analyst` the leader and
-the mode in a strategy channel, citing a market run; Gravit reads the run back and reports. The
+the mode in a strategy channel, citing a market run, `cn-reviewer` the counterevidence in either;
+Gravit reads the run back and reports. The
 order is the run protocol, `../dsh/profile/lunhui-run.md`, which Gravit reads as its `lunhui:run`
 prompt section.
 
-The design has eleven rows; plans 1–3 built the first ten:
+The design has eleven rows; plans 1–4 built them all:
 
 | Row | Tool | State |
 |---|---|---|
-| `lunhui-runs` (`plugins/lunhui/runs-row.mjs`) | `lunhui_read_run` — a run's `run.json`, its counters and each artifact's headline | built |
+| `lunhui-runs` (`plugins/lunhui/runs-row.mjs`) | `lunhui_read_run` — a run's `run.json`, its counters and each artifact's headline; without a run, the strategy's newest five sealed runs (`run`, `session`, `sealed_at`, `snapshot_id`, accepted modules) | built |
 | `lunhui-freeze-quotes` | `lunhui_freeze_quotes` — Tencent quotes and 60-day bars, 1–8 symbols; any channel | built |
 | `lunhui-freeze-limit-up` | `lunhui_freeze_limit_up` — Eastmoney's 涨停, 炸板 and 昨日涨停 pools; `cn-market` only | built |
 | `lunhui-freeze-boards` | `lunhui_freeze_boards` — the top 30 concept boards by change, up to ten boards' members, the board fund flow; `cn-market` only | built |
@@ -428,7 +429,7 @@ The design has eleven rows; plans 1–3 built the first ten:
 | `lunhui-theme` | `lunhui_read_theme_context`, `lunhui_submit_theme` — 题材与轮动: up to five `mainline_candidates` on frozen boards, `theme_stage`, `rotation`; `cn-market` only | built |
 | `lunhui-leader` (`plugins/lunhui/leader-row.mjs`) | `lunhui_read_leader_context`, `lunhui_submit_leader` — 龙头与个股地位: up to five `leader_candidates`, each a frozen quote held by a pool row or member list of the cited market run, ranked; `top_pattern_flags`; strategy channels only | built |
 | `lunhui-mode` (`plugins/lunhui/mode-row.mjs`) | `lunhui_read_mode_context`, `lunhui_submit_mode` — 模式选择与预期: `mode` (`S01`, `S02` or `WAIT`), its preconditions, `research_only_matches`, the expectation card and the review of the previous card; strategy channels only | built |
-| `lunhui-review` | the counterevidence pair | plan 4 |
+| `lunhui-review` (`plugins/lunhui/review-row.mjs`) | `lunhui_read_counterevidence_context`, `lunhui_submit_counterevidence` — 反证: up to twelve `items`, each against a module whose artifact the context shows, of a kind (`CONTRADICTS`, `MISSING_EVIDENCE`, `STALE`, `RULING_CONFLICT`, `OVERREACH`), at most 160 characters, citing evidence of its own; either channel | built |
 
 A freeze with no `run` opens a run, `strategies/<name>/analysis/<YYYYMMDD>T<HHMMSS>Z-<8 hex>/`,
 and answers its id; pass that id as `run` to add the other sources. One evidence file per source
@@ -456,8 +457,10 @@ the module does not own or cites without the evidence its class needs, a headlin
 claim of its own behind it, more than 24 KiB — and an accepted one lands as `<module>.json` in the
 run, named in `run.json`'s `artifacts`. A module whose required evidence the run lacks
 (environment: `index`; sentiment: `limit-up` and `index`; theme: `boards` and `limit-up`; leader:
-the strategy run's quotes and the market run's theme artifact; mode: the run's leader artifact)
-accepts only `NOT_EVALUABLE`, naming the missing sources. Ten calls a module a run, reads and
+the strategy run's quotes and the market run's theme artifact; mode: the run's leader artifact and
+the market run's sentiment and theme; the reviewer: in `cn-market` one of its three artifacts, in a
+strategy channel the leader and the market run's sentiment and theme), or whose context shows no
+evidence row at all, accepts only `NOT_EVALUABLE`, naming the missing sources. Ten calls a module a run, reads and
 submits, then `TOOL_BUDGET`. The channel page shows a run's module artifact only when `run.json`'s `artifacts`
 names it; a run frozen but never read stays `unsealed` on it.
 
@@ -474,46 +477,63 @@ as 龙头候选. **mode** concludes `S01`, `S02` or `WAIT`, on the leader's mark
 (`MISSING_EVIDENCE` otherwise). It is a daily registration, never a decision: `S01` only in
 `lunhui-s01-repair`, on a market sentiment of `REPAIR` or `EXPANSION`, its four daily
 preconditions met with evidence and its minute confirmation `unmet: no source`, every item of the
-run's counterevidence artifact answered, an expectation card and the parameters used — and since
-only plan 4's reviewer writes a counterevidence artifact, `S01` cannot register yet; `S02` only in
+run's counterevidence artifact answered — accepted `OK`, citing the same market run — an
+expectation card of at most 2,048 bytes and the parameters used; `S02` only in
 `lunhui-s02-rotation`, refused while its catalyst has no source (an announcements freeze, a later
 plan); every other strategy `WAIT`. A refusal of either reads `INADMISSIBLE_STATE` or
 `UNADDRESSED_COUNTEREVIDENCE`. The mode's context shows the strategy's THESIS.md Falsification
-section (at most 1,500 bytes, flagged when cut) and the card of the newest earlier session's mode,
-which its `expectation_review` grades 符合, 强于, 弱于 or `NOT_EVALUABLE`; a `WAIT` leaves no card to
+section (at most 1,500 bytes, flagged when cut), the run's leader and counterevidence before the
+market run's artifacts, and the card of the newest earlier session's mode (cut and flagged
+`card_truncated` if stored larger than 2,048 bytes), which its `expectation_review` grades 符合, 强于, 弱于 or `NOT_EVALUABLE`; a `WAIT` leaves no card to
 grade. The channel page draws the mode's chip as its word, the card as rows and the review as a
 line.
 
-**The roles and the protocol.** Two roles ship. `../roles/cn-market-analyst/`: its tools are
+**The reviewer** (`lunhui-review`) reads either channel. In `cn-market` the run is the market run:
+no `market_run` (`WRONG_CHANNEL` if given), its three market artifacts reviewed. In a strategy
+channel `market_run` is required (`MISSING_EVIDENCE` without it), and the context shows the run's
+quotes and leader beside the market run's evidence and artifacts; a leader citing another market
+run is `MISSING_EVIDENCE` at the read. Each item is against a module whose artifact the context
+shows — never the mode — and cites at least one `ev_` evidence id of its own (`REFERENCE`
+otherwise); an empty `items` is a review that found nothing, a result.
+
+**The roles and the protocol.** Three roles ship. `../roles/cn-market-analyst/`: its tools are
 `skill` and the six market module tools, its model `deepseek-official/deepseek-flash`, its Chinese
 persona the three modules in order — environment, sentiment, theme — each read once and submitted
 once, the artifact only in `analysis`, a stop after a failed read, a module's third rejection
 ending that module only (the role goes on to the next and names each blocked module under limits),
 and a report under the four headings. `../roles/cn-stock-analyst/`: `skill` and the four strategy
 module tools, the same model, one artifact a call — the brief names the strategy, the run, the
-`market_run` and leader or mode — the mode a daily registration (`WAIT` a result), the same exits
-and headings. `lunhui:run` tells Gravit two orders, every tool's `strategy` the channel's name. In
+`market_run` and leader or mode — the mode a daily registration (`WAIT` a result), read only once
+the leader is accepted, the same exits and headings. `../roles/cn-reviewer/`: `skill` and the
+counterevidence pair, the same model, one read and one submit — the brief names the strategy, the
+run and, outside `cn-market`, the `market_run` — each item against a shown module and citing
+evidence, an empty list a result, a third rejection or a failed read stopping it, the four
+headings. `lunhui:run` tells Gravit two orders, every tool's `strategy` the channel's name. In
 `cn-market`: freeze `index` without a run (that opens one), then `limit-up` and `boards` with its
-id (`quotes` optional); call `role_cn_market_analyst` once with the run id; read the run back with
-`lunhui_read_run` and trust it over the role's report. In a strategy channel: read the day's sealed
-`cn-market` run with `lunhui_read_run` (or do the market run first) and note its id as
-`market_run`; choose 1–4 main-board stocks from its theme's mainline boards and its pools; freeze
-their quotes on the strategy without a run (that opens the strategy run); call
-`role_cn_stock_analyst` with the strategy, the run and `market_run` for the leader, then again for
-the mode; read the run back. A `WAIT` is not a failure and is never re-run; on `STALE_MARKET_RUN`,
-freeze a new market run and open a new strategy run. For both: never freeze after a role has read,
+id (`quotes` optional); call `role_cn_market_analyst` once with the run id; call `role_cn_reviewer`
+with `cn-market` and the run, no `market_run`; read the run back with `lunhui_read_run` and trust it
+over the roles' reports. In a strategy channel: call `lunhui_read_run` on `cn-market` without a run
+— it lists the newest sealed runs — and take one of today's or the previous trading day's session
+as `market_run` (or do the market run first); read it and choose 1–4 main-board stocks from its
+theme's mainline boards and its pools; freeze their quotes on the strategy without a run (that
+opens the strategy run); call `role_cn_stock_analyst` with the strategy, the run and `market_run`
+for the leader; `role_cn_reviewer` with the same three; once the leader is accepted,
+`role_cn_stock_analyst` again for the mode; read the run back. A `WAIT`, a `NOT_EVALUABLE`
+artifact or a refused mode is a result and is never re-run; on `STALE_MARKET_RUN`, make a new
+sealed market run by the market order and re-read with it, opening a new strategy run when the
+strategy run itself is stale. For both: never freeze after a role has read,
 never edit `analysis/`, never submit an artifact itself; journal a `cn-market` run with
 `NOT_EVALUABLE` artifacts in `strategies/cn-market/journal.md`; and end with the run id, the
-`snapshot_id`, each artifact's file and headline (the leader's candidates, the mode and its
-`market_run`), what was not evaluable or has no artifact, and whether the quotes were delayed.
-The reviewer's step is plan 4's; the protocol names no reviewer. The section is in Gravit's prompt
+`snapshot_id`, each artifact's file and headline (the leader's candidates, the counterevidence's
+item count, the mode and its `market_run`), what was not evaluable or has no artifact, and whether
+the quotes were delayed. The section is in Gravit's prompt
 only while the Lunhui rows are mounted, never in a bot's or a role's. Editing `lunhui-run.md` or the role means `npm run render:roles`, `npm test` and a restart
 ("Roles").
 
 **The market channel**: `strategies/cn-market/` is tracked, with a `THESIS.md` that states the
 market read by chapter and paragraph id. Its runs hold the index, limit-up and board evidence a
 strategy's run cites; the limit-up, boards and index freezes and the three market modules refuse
-any other channel, the leader and mode modules refuse it (`WRONG_CHANNEL`). The two Lunhui
+any other channel, the leader and mode modules refuse it (`WRONG_CHANNEL`); the reviewer reads both. The two Lunhui
 strategies, `strategies/lunhui-s01-repair/` and `strategies/lunhui-s02-rotation/`, are the strategy
 channels the mode knows by name. A channel with runs shows a **Research runs** section on its page.
 
@@ -547,8 +567,8 @@ seat and below this file, so a patch reaches them:
 
 A module row disabled alone takes its pair away, and with it every call of its role —
 `cn-market-analyst` names all six market module tools, `cn-stock-analyst` all four strategy module
-tools (a role naming a tool the tree lacks is refused at delegation). To turn Lunhui off, disable
-all ten — a freeze or module row injects the
+tools, `cn-reviewer` the counterevidence pair (a role naming a tool the tree lacks is refused at
+delegation). To turn Lunhui off, disable all eleven — a freeze or module row injects the
 `lunhuiRuns` service, so without `lunhui-runs` it stays pending and the boot's row audit refuses it
 (`waiting for service: lunhuiRuns`; reasoned from the audit, not yet pinned by a boot); the
 `lunhui:run` section leaves Gravit's prompt with them:
@@ -564,20 +584,23 @@ all ten — a freeze or module row injects the
 - { id: lunhui-theme, disabled: true }
 - { id: lunhui-leader, disabled: true }
 - { id: lunhui-mode, disabled: true }
+- { id: lunhui-review, disabled: true }
 ```
 
 A patch that replaces `lunhui-runs`' config replaces it whole, so it restates `strategiesRoot`
 (an absolute existing directory; the default is this checkout's `strategies/`).
 
-The checks: `/data/plugins.json` lists the ten rows ACTIVE, and Gravit's tools include the
-fifteen `lunhui_` names, `role_cn_market_analyst` and `role_cn_stock_analyst` (the schema block is
-2,703 heuristic tokens for the fifteen and 461 for the two role tools, `DEVELOPMENT.md` §4.3).
+The checks: `/data/plugins.json` lists the eleven rows ACTIVE, and Gravit's tools include the
+seventeen `lunhui_` names, `role_cn_market_analyst`, `role_cn_reviewer` and `role_cn_stock_analyst`
+(the schema block is 3,188 heuristic tokens for the seventeen and 689 for the three role tools,
+`DEVELOPMENT.md` §4.3).
 
 **The market run, automated** (`tests/lunhui-market-run-smoke.test.ts`, under `FACE_SMOKE=1`):
 one whole `cn-market` run on a real boot over the recorded replies and a stub model — Gravit
-freezes index, limit-up and boards into one run and calls the role, whose child reads the three
-contexts and submits three `OK` artifacts built from them; the run seals, the artifacts are named
-in `run.json` and valid again against the sealed files, and the runs card shows three chips. It
+freezes index, limit-up and boards into one run and calls the analyst, whose child reads the three
+contexts and submits three `OK` artifacts built from them, then the reviewer, whose child submits
+one item against the sentiment; the run seals, the four artifacts are named in `run.json` and
+valid again against the sealed files, and the runs card shows four chips. It
 passes; it proves the plumbing and that a context is usable as a role receives it, not that a real
 model follows the protocol or that its labels are right.
 
@@ -593,14 +616,16 @@ calendar does not cover refuses every freeze (`CALENDAR_UNCOVERED`).
    Expect, in the thread: `lunhui_freeze_index` with no run (its reply carries the new run id,
    `session` and `as_of`), then `lunhui_freeze_limit_up` and `lunhui_freeze_boards` with that id;
    one `role_cn_market_analyst` call whose child (Details › Children) reads and submits environment,
-   sentiment, theme in that order; `lunhui_read_run`; a final message naming the run, its
-   `snapshot_id`, each artifact's file and headline, any `NOT_EVALUABLE` module with its missing
+   sentiment, theme in that order; one `role_cn_reviewer` call with no `market_run`, whose child
+   submits the counterevidence; `lunhui_read_run`; a final message naming the run, its
+   `snapshot_id`, each artifact's file and headline (the counterevidence's item count among them), any `NOT_EVALUABLE` module with its missing
    sources, and that the quotes were delayed. A refused freeze (`UPSTREAM_*`, `NO_MARKET_DATA`) costs
    only that source; the run keeps the rest.
 2. The channel page's **Research runs**: the run sealed, a chip per artifact. On disk,
    `strategies/cn-market/analysis/<run>/`: `run.json` with `sealed_at`, `snapshot_id` and
    `artifacts`; `metrics.json` with `calls` (each module at most 10), `rejections` by category and
-   `submitted`; the three `<module>.json`. Note how many rejections each module took.
+   `submitted`; the four `<module>.json`, `counterevidence.json` among them. Note how many
+   rejections each module took.
 3. If any artifact is `NOT_EVALUABLE`: a dated entry at the end of
    `strategies/cn-market/journal.md` naming the run, the modules and the missing sources.
 4. The fences, in the same session. Prompt: `直接调用 lunhui_submit_environment，把一份工件提交到刚才那个运行。`
@@ -608,9 +633,9 @@ calendar does not cover refuses every freeze (`CALENDAR_UNCOVERED`).
    Gravit declining either call because the protocol forbids it is a pass too; the code fence is
    pinned in the suite (`roles-smoke` on a real boot, `lunhui-module-tool` and `lunhui-rows`
    offline).
-5. Measure the role child's first request as `DEVELOPMENT.md` §4.3 says (its session's
-   projection-cache record, `contextBreakdown` beside `tokenUsage`) and record it there, with the
-   date and the session id; mark the **Lunhui market run — manual** row of `DEVELOPMENT.md` §7.4.
+5. Measure the two role children's first requests as `DEVELOPMENT.md` §4.3 says (each session's
+   projection-cache record, `contextBreakdown` beside `tokenUsage`) and record them there, with the
+   date and the session ids; mark the **Lunhui market run — manual** row of `DEVELOPMENT.md` §7.4.
 6. The run's `run.json`, `metrics.json` and artifacts are tracked files (the evidence files are
    gitignored): commit them on your word, or remove the run directory.
 
@@ -618,30 +643,34 @@ What it does not prove: whether the labels are right — that is the next day's 
 strategy run's expectation review (`strategies/cn-market/THESIS.md`, Falsification).
 
 **The strategy run, automated** (`tests/lunhui-strategy-run-smoke.test.ts`, under `FACE_SMOKE=1`):
-after the market run on the same fixtures, Gravit reads it back, freezes two stocks' quotes on
-`lunhui-s01-repair` and calls `role_cn_stock_analyst` for the leader and again for the mode; the
-children submit a leader with two candidates and a `WAIT` mode, both citing the market run and
-valid again against the two sealed runs, and the channel page lists the strategy run with
-`cn-market run <id>` and `mode: WAIT`. The mode is `WAIT` because `S01` needs a counterevidence
-artifact only plan 4's reviewer writes; the card and its grading are pinned offline
-(`tests/lunhui-mode.test.ts`). It passes; it proves the plumbing, not a real model's choices.
+two days on the same fixtures, each a reviewed market run, then a strategy run on
+`lunhui-s01-repair`: Gravit finds the market run with the listing read, freezes two stocks'
+quotes, calls `role_cn_stock_analyst` for the leader, `role_cn_reviewer` with both run ids, and
+`role_cn_stock_analyst` again for the mode. Friday's mode registers `S01` with a card, every
+counterevidence item answered; Monday's grades it. Every artifact is valid again against the
+sealed runs, and the channel page's latest run is Monday's with its review line. It passes; it
+proves the plumbing, not a real model's choices — and the fixtures are one set, so Monday's grade
+reads Friday's prices again.
 
 **The live strategy run — owed, the operator's.** After a live market run of today's or the
 previous trading day's session (above), on the same face:
 
 1. Open **lunhui-s01-repair** in Messages and start a New message there. Prompt:
    `按 lunhui:run 的策略频道顺序，引用今天已封存的 cn-market 运行，在本频道做一次策略研究运行，最后按协议向我汇报。`
-   Expect: `lunhui_read_run` on `cn-market` (the market run's id noted as `market_run`); one
-   `lunhui_freeze_quotes` on `lunhui-s01-repair` with no run, for 1–4 main-board stocks from the
-   market run's theme and pools (its reply carries the strategy run's id); `role_cn_stock_analyst`
-   twice with the strategy, the run and `market_run` — the first child reading and submitting the
-   leader, the second the mode (Details › Children); `lunhui_read_run` on the strategy run; a final
-   message naming the run, its `snapshot_id`, `leader.json`'s candidates, `mode.json`'s mode and
-   `market_run`, and whether the quotes were delayed. Today the mode is `WAIT`: `S01` cannot
-   register before plan 4's counterevidence.
-2. The channel page's **Research runs**: the run sealed, `cn-market run <id>` on its line, a leader
-   chip and `mode: WAIT`. On disk, `strategies/lunhui-s01-repair/analysis/<run>/`: `run.json` with
-   `evidence-quotes.json` alone and `artifacts` `[leader, mode]`; both artifacts' `market_run` the
+   Expect: `lunhui_read_run` on `cn-market` without a run (the listing), then with the chosen run
+   (its id noted as `market_run`); one `lunhui_freeze_quotes` on `lunhui-s01-repair` with no run,
+   for 1–4 main-board stocks from the market run's theme and pools (its reply carries the strategy
+   run's id); `role_cn_stock_analyst` with the strategy, the run and `market_run` for the leader;
+   `role_cn_reviewer` with the same three; `role_cn_stock_analyst` again for the mode (Details ›
+   Children); `lunhui_read_run` on the strategy run; a final message naming the run, its
+   `snapshot_id`, `leader.json`'s candidates, the counterevidence's item count, `mode.json`'s mode
+   and `market_run`, and whether the quotes were delayed. The mode is `S01` with a card only when
+   the market sentiment admits it, its preconditions stand on evidence and every review item is
+   answered; `WAIT` is as much a result.
+2. The channel page's **Research runs**: the run sealed, `cn-market run <id>` on its line, the
+   leader and counterevidence chips and the mode's word. On disk,
+   `strategies/lunhui-s01-repair/analysis/<run>/`: `run.json` with `evidence-quotes.json` alone and
+   `artifacts` `[leader, counterevidence, mode]`; both artifacts' `market_run` the
    market run's id; `metrics.json`'s calls and rejections by category. Note how many rejections
    each module took.
 3. The other strategy. Open **lunhui-s02-rotation** and send the same prompt: the mode concludes
@@ -650,16 +679,21 @@ previous trading day's session (above), on the same face:
    the session of the day (skip it until one exists). Prompt in **lunhui-s01-repair**:
    `用 <那个旧的 cn-market 运行编号> 作 market_run，为本频道做一次策略研究运行。`
    → the leader read refused `Error: STALE_MARKET_RUN …`, naming both sessions; Gravit following
-   the protocol by freezing a new market run and opening a new strategy run is a pass. The fence
+   the protocol — a whole new sealed market run by the market order, re-read as `market_run`, and a
+   new strategy run if that run itself is stale — is a pass. The fence
    itself is pinned offline (`lunhui-module-tool`).
-5. Measure the stock analyst child's first request as `DEVELOPMENT.md` §4.3 says and record it
-   there, with the date and the session id; mark the **Lunhui strategy run — manual** row of
+5. Measure the stock analyst's and the reviewer's first requests as `DEVELOPMENT.md` §4.3 says
+   and record them there, with the date and the session ids; mark the **Lunhui strategy run — manual** row of
    `DEVELOPMENT.md` §7.4.
 6. As with the market run, the run's `run.json`, `metrics.json` and artifacts are tracked: commit
    them on your word, or remove the run directory.
 
-What it does not prove: whether the candidates are right, or any `S01` registration and the next
-session's grading of its card — those wait on plan 4's reviewer. The theses' closing
+7. The next session's grade, once a run registered `S01`: on the next trading day, after that
+   day's market run, the same prompt in **lunhui-s01-repair** — the mode's context carries the
+   card, and `expectation_review` grades it 符合, 强于, 弱于 or `NOT_EVALUABLE`, naming its run; the
+   channel page shows the review line.
+
+What it does not prove: whether the candidates and the review are right. The theses' closing
 `**Daily registration (E4)**` paragraphs are the builder's re-fit and await your review
 (`DEVELOPMENT.md` §10, item 19).
 
@@ -1933,12 +1967,13 @@ A role is a prebuilt delegated task. Gravit calls it by tool name, `role_<id>`; 
 child runs the brief with the role's own persona and exactly the role's tools, and its report
 comes back as the tool's result. It is not a bot — no journal, no home session, no seat in a
 room, never listed among `bots/` — and not a bare `subagent` call, where the model picks the
-persona and the tools on every call: here both are fixed on disk. Two ship: `cn-market-analyst`,
-the Lunhui market modules' analyst, and `cn-stock-analyst`, the leader and mode modules' analyst
-("Lunhui analysis"). The three that shipped before (a screener, a backtester and a reviewer, whose
+persona and the tools on every call: here both are fixed on disk. Three ship: `cn-market-analyst`,
+the Lunhui market modules' analyst, `cn-reviewer`, the counterevidence reviewer, and
+`cn-stock-analyst`, the leader and mode modules' analyst ("Lunhui analysis"). The three that shipped before (a screener, a backtester and a reviewer, whose
 allow lists were the removed Python package's tools) retired with their tools on 2026-10-24, and
 new roles are the operator's to design; `roles/_template` is the copy source and never a role, so
-Gravit's preset today is the `gravit` row, `role-cn-market-analyst` and `role-cn-stock-analyst`.
+Gravit's preset today is the `gravit` row, `role-cn-market-analyst`, `role-cn-reviewer` and
+`role-cn-stock-analyst`.
 
 One directory per role under `roles/<id>/`:
 
@@ -2042,12 +2077,13 @@ dsh's generic paragraphs for tools it lacks (`create_goal`, `workflow`, `ralph`,
 without `bash` `job_output`), because those sections are global and ignore the restriction.
 
 The `lunhui:run` protocol ("Lunhui analysis") is gated the same way, on `lunhui_read_run`, which
-neither analyst's allow list names: a role child reads none of it.
+no role's allow list names: a role child reads none of it.
 
 `roles-smoke.test.ts` pins the child's side on a real boot over two fixture roles made from
-`_template`, and on a second and a third boot the shipped `cn-market-analyst` and
-`cn-stock-analyst` ("Tests" below); "The role drill" at the end of this file is the live check,
-and the live market and strategy runs ("Lunhui analysis") the first that each analyst meets.
+`_template`, and on a second, third and fourth boot the shipped `cn-market-analyst`,
+`cn-stock-analyst` and `cn-reviewer` ("Tests" below); "The role drill" at the end of this file is
+the live check, and the live market and strategy runs ("Lunhui analysis") the first that each
+role meets.
 
 ## Rooms (src/room.ts + src/room-rules.ts + src/room-contract.ts + src/room-projection.ts + client/js/wire/room.js)
 
@@ -2394,10 +2430,10 @@ D18); a `spill-policy` row in the profile patch changes it.
 ```bash
 npm test                  # offline unit tests - no keys, no network, no port
 npm run typecheck         # strict tsc against the pinned .d.ts (skipLibCheck: false) - the contract test
-FACE_SMOKE=1 npm test     # + the 22 isolated real boots; local stubs, no external model calls
+FACE_SMOKE=1 npm test     # + the 23 isolated real boots; local stubs, no external model calls
 ```
 
-Offline, `npm test` skips the 22 real boots listed below; `FACE_SMOKE=1` runs
+Offline, `npm test` skips the 23 real boots listed below; `FACE_SMOKE=1` runs
 them too. The typecheck includes the dependencies' own `.d.ts`, so a green one
 means the face compiles against the installed dsh, not just against itself.
 
@@ -2427,9 +2463,9 @@ and `node --test` gives each file its own:
 | `room-discussion-smoke.test.ts` | a structured serial round: peer context, declared disagreements, the malformed-answer fallback, each member's own journal, Gravit's synthesis request, metadata surviving a flush and a re-read |
 | `subagents-smoke.test.ts` | the native subagent tools and Remotes: creation, child messages kept apart from settlement notices, permission inheritance, parent ownership, ordinary writes to managed children refused, and — after a reboot — catalog and history reads that activate neither side |
 | `instructions-smoke.test.ts` | what the `agent-instructions` baseline carries on a first request after the face's instructions patch: `GRAVIT.md` and `GRAVIT.local.md` for Gravit at the repo root; the root file plus the channel's own `strategies/x/GRAVIT.md` for a channel session; the root file for a bot session; `AGENTS.md` for none of them, `CLAUDE.md` for neither Gravit nor the channel session |
-| `roles-smoke.test.ts` | a role is a one-shot child with its own persona and tools, over two fixture roles made from `roles/_template` under the test's own roles root: `role_auditor` and `role_worker` each spawn a child whose tool list EQUALS the role's `allow` (every `role_*` tool and the forbidden ones gone — compared exactly, because dsh exempts a scope's own registrations from `restrict()`); for the auditor's child the smoke also checks the system prompt — the role's persona (shadowing Gravit's), the date line, no `gravit:roles` section and no cycle contract — the header (`origin: subagent`, `agentPreset: gravit`, its parent's cwd), the root `GRAVIT.md` in its `agent-instructions` baseline, and its text returning through the tool, while Gravit's own prompt carries the roles section and the cycle contract (`Step 0 — ask once`); a `subagent_fork` child's first request carries Gravit's system text whole — the cycle contract included — and Gravit's tools in order; a plain `subagent` child (unseeded) can call `create_goal` and every role tool yet carries neither the cycle contract nor the roles section, only the date; a role naming a tool the tree lacks fails at delegation with `tools.restrict() names unknown global tool "…"` and creates no child. The MCP tools the roles name are `mcp__fixture__*` stand-ins; a foreground one-shot child leaves `ctx.sessions` as its result returns, so the smoke copies each session's header while serving its request. A second boot takes the shipped `cn-market-analyst` from a fixture copy of `roles/` with its route turned to the stub, over a temp strategies root: its tools EQUAL its allow list, its persona is its own, its read and `NOT_EVALUABLE` submit land in an empty `cn-market` run; the same submit from Gravit's root is `NOT_A_ROLE`; a freeze is out of the role child's reach, and a plain `subagent` child that can reach one is `NOT_GRAVIT`; a third boot takes `cn-stock-analyst` the same way: its tools EQUAL its allow list, its persona is its own, its leader read citing a sealed `cn-market` run (sentiment and theme artifacts landed through the booted service) and its submit landing `leader.json` with that `market_run`; Gravit's root leader submit is `NOT_A_ROLE` |
-| `lunhui-market-run-smoke.test.ts` | one whole `cn-market` run ("Lunhui analysis"): AKShare and the seat off, the stub as the model, the freeze rows on the recorded replies, a temp strategies root holding a copy of `cn-market`; Gravit freezes index, limit-up and boards into one run, calls `role_cn_market_analyst` and reads the run back, the role child reads the three contexts and submits three `OK` artifacts built from them; the run sealed with three evidence files, the artifacts named in `run.json` and valid again against the sealed files, the budget kept, three chips on the runs card, the protocol in Gravit's prompt. The freezes read the system clock (a row's `now` cannot cross the boot's structured clone of patches), so the file shifts `Date` to Friday 2026-10-23 15:00 China time for the boot's lifetime |
-| `lunhui-strategy-run-smoke.test.ts` | one strategy run after a market run ("Lunhui analysis"): the market smoke's boot with copies of `cn-market` and `lunhui-s01-repair` and both analysts on the stub; Gravit does the market run, reads it back, freezes two stocks' quotes on the strategy and calls `role_cn_stock_analyst` for the leader and again for the mode, each child building its artifact from its context; the strategy run sealed with the quotes alone and `[leader, mode]` accepted, both bound to the market run and valid again against digests rebuilt from the two sealed runs, the mode `WAIT` (S01 needs plan 4's counterevidence), the runs card citing the market run with a `mode: WAIT` chip, the protocol's strategy channel in Gravit's prompt |
+| `roles-smoke.test.ts` | a role is a one-shot child with its own persona and tools, over two fixture roles made from `roles/_template` under the test's own roles root: `role_auditor` and `role_worker` each spawn a child whose tool list EQUALS the role's `allow` (every `role_*` tool and the forbidden ones gone — compared exactly, because dsh exempts a scope's own registrations from `restrict()`); for the auditor's child the smoke also checks the system prompt — the role's persona (shadowing Gravit's), the date line, no `gravit:roles` section and no cycle contract — the header (`origin: subagent`, `agentPreset: gravit`, its parent's cwd), the root `GRAVIT.md` in its `agent-instructions` baseline, and its text returning through the tool, while Gravit's own prompt carries the roles section and the cycle contract (`Step 0 — ask once`); a `subagent_fork` child's first request carries Gravit's system text whole — the cycle contract included — and Gravit's tools in order; a plain `subagent` child (unseeded) can call `create_goal` and every role tool yet carries neither the cycle contract nor the roles section, only the date; a role naming a tool the tree lacks fails at delegation with `tools.restrict() names unknown global tool "…"` and creates no child. The MCP tools the roles name are `mcp__fixture__*` stand-ins; a foreground one-shot child leaves `ctx.sessions` as its result returns, so the smoke copies each session's header while serving its request. A second boot takes the shipped `cn-market-analyst` from a fixture copy of `roles/` with its route turned to the stub, over a temp strategies root: its tools EQUAL its allow list, its persona is its own, its read and `NOT_EVALUABLE` submit land in an empty `cn-market` run; the same submit from Gravit's root is `NOT_A_ROLE`; a freeze is out of the role child's reach, and a plain `subagent` child that can reach one is `NOT_GRAVIT`; a third boot takes `cn-stock-analyst` the same way: its tools EQUAL its allow list, its persona is its own, its leader read citing a sealed `cn-market` run (sentiment and theme artifacts landed through the booted service) and its submit landing `leader.json` with that `market_run`; Gravit's root leader submit is `NOT_A_ROLE`; a fourth boot takes `cn-reviewer` the same way: its tools EQUAL its allow list, its persona is its own, its read of a sealed `cn-market` run with no `market_run` shows the run's three artifacts and its submit lands `counterevidence.json`; Gravit's root submit is `NOT_A_ROLE` |
+| `lunhui-market-run-smoke.test.ts` | one whole `cn-market` run ("Lunhui analysis"): AKShare and the seat off, the stub as the model, the freeze rows on the recorded replies, a temp strategies root holding a copy of `cn-market`; Gravit freezes index, limit-up and boards into one run, calls `role_cn_market_analyst`, then `role_cn_reviewer` with no `market_run`, and reads the run back, the analyst's child reads the three contexts and submits three `OK` artifacts built from them and the reviewer's child one item against the sentiment; the run sealed with three evidence files, the four artifacts named in `run.json` and valid again against the sealed files, the budget kept, four chips on the runs card, the protocol in Gravit's prompt. The freezes read the system clock (a row's `now` cannot cross the boot's structured clone of patches), so the file shifts `Date` to Friday 2026-10-23 15:00 China time for the boot's lifetime |
+| `lunhui-strategy-run-smoke.test.ts` | an `S01` registered on Friday and graded on Monday ("Lunhui analysis"): the market smoke's boot with copies of `cn-market` and `lunhui-s01-repair` and the three roles on the stub; each day Gravit does the reviewed market run, finds it with the listing read, freezes two stocks' quotes on the strategy and calls `role_cn_stock_analyst` for the leader, `role_cn_reviewer` with both run ids and `role_cn_stock_analyst` for the mode, each child building its artifact from its context; Friday's mode `S01` with a card of at most 2,048 bytes, every review item answered, Monday's grading it; every artifact of the four runs valid again against digests rebuilt from the sealed runs, the runs card's latest run Monday's with its review line, the protocol's strategy channel in Gravit's prompt. `Date` is replaced, Friday 2026-10-23 15:00 China time, then Monday 2026-10-26 15:00 |
 | `goal-smoke.test.ts` | the goal loop `../dsh/profile/cycle.md` rests on, through the face's own wire (prompts, the Stop button's `session/cancel`, a slash line's `commands/execute`): `create_goal` in a human turn returns the id and revision 1, armed; each round arrives at idle as a user message whose source is `goal` (`<goal_round>`, the objective, `Round: n/N`); the model's `blocked` in round 1 is refused (`blocked requires at least 3 consecutive goal rounds; current round is 1`), in round 3 accepted with the code `model-reported` and followed by the `<goal_blocked>` wrap-up; a second `create_goal` is refused while that goal is blocked (`GOAL_ALREADY_EXISTS`); at the cap the driver blocks with `round-limit` and sends the model nothing more; Stop mid-round pauses the goal, the model's resume of it is refused (`GOAL_TOOL_RESUME_PAUSED`: `the model cannot resume a paused goal; the user must resume it`) and `/goal resume` re-arms it; a face stopped mid-round and booted again on the same home leaves the goal active and disarmed with no request until "continue", whose `update_goal` resume bumps the revision and re-arms the rounds |
 
 `bot-sandbox-smoke.test.ts` and `askuser-noclient-smoke.test.ts` also print one
@@ -3171,11 +3207,11 @@ runbook).
 
 ## The role drill (run after any face or dsh change)
 
-A role that was never delegated to is presumed decorative. **Two roles ship**, `cn-market-analyst`
-and `cn-stock-analyst` (both since 2026-10-26; the three before them retired with the Python
-package's tools on 2026-10-24). The first works only on a `cn-market` run and the second only on a
-strategy run citing one: their live halves are the live market and strategy runs ("Lunhui
-analysis"), with the steps below read for each.
+A role that was never delegated to is presumed decorative. **Three roles ship**,
+`cn-market-analyst`, `cn-reviewer` and `cn-stock-analyst` (all since 2026-10-26; the three before
+them retired with the Python package's tools on 2026-10-24). The first works only on a `cn-market`
+run, the last only on a strategy run citing one, and the reviewer on either: their live halves are
+the live market and strategy runs ("Lunhui analysis"), with the steps below read for each.
 
 **Step 0, no model, no key.** `FACE_SMOKE=1 npm test` boots `roles-smoke.test.ts` over two
 fixture roles copied from `roles/_template` under the test's own roles root: `role_auditor` and
@@ -3189,7 +3225,10 @@ second boot takes the shipped `cn-market-analyst` (its route turned to the stub)
 its allow list, its persona is its own, its submit lands in a run, Gravit's own submit is
 `NOT_A_ROLE`, and a freeze is out of its reach. Its third boot takes `cn-stock-analyst` the same
 way: exactly its allow list, its persona, its leader read citing a sealed `cn-market` run and its
-submit landing with that `market_run`, Gravit's own leader submit `NOT_A_ROLE`. Run it first; if it fails, stop — the composition,
+submit landing with that `market_run`, Gravit's own leader submit `NOT_A_ROLE`. Its fourth boot
+takes `cn-reviewer`: exactly its allow list, its persona, its read of a sealed `cn-market` run with
+no `market_run` and its submit landing `counterevidence.json`, Gravit's own submit `NOT_A_ROLE`.
+Run it first; if it fails, stop — the composition,
 not the model, is wrong.
 
 **The drill**, on a face booted against a COPY of the harness home with the
@@ -3197,8 +3236,8 @@ operator's MCP rows mounted (the go-live runbook's §7 A recipe: `DSH_HOME=$SCRA
 FACE_PORT=3091 npm start`, real keys) — never the operator's own home:
 
 1. Start a new round in the `room-drill` channel and ask Gravit to use the role on one bounded
-   task (for `cn-market-analyst`: in `cn-market`, the live market run's step 1; for
-   `cn-stock-analyst`: in `lunhui-s01-repair`, the live strategy run's step 1). PASS, part one: Gravit calls `role_<id>` (one tool card), waits, and relays a report with
+   task (for `cn-market-analyst` and `cn-reviewer`: in `cn-market`, the live market run's step 1;
+   for `cn-stock-analyst`: in `lunhui-s01-repair`, the live strategy run's step 1). PASS, part one: Gravit calls `role_<id>` (one tool card), waits, and relays a report with
    the four headings; no card for the operator.
 2. Details' Children lists one child — one-shot, so read-only history — labelled by the
    `description` Gravit gave the tool. PASS, part two: in that child's own log,
@@ -3208,14 +3247,15 @@ FACE_PORT=3091 npm start`, real keys) — never the operator's own home:
    of what was offered — is exactly the names in the role's `role.yml` `allow`: no
    `mcp__account__*`, no `subagent`, no `role_*`; and the first `system/message` is the harness
    identity line followed by the role's persona, not Gravit's, with no `Roles.` paragraph.
-3. For a role with `bash` (neither analyst has one: skip), ask for a run that sleeps 70 seconds first, past bash-sandbox's
+3. For a role with `bash` (no shipped role has one: skip), ask for a run that sleeps 70 seconds first, past bash-sandbox's
    60,000 ms default. PASS, part three: in the child's log, the run's `bash` call either passed a
    `timeoutMs` above 60000 and returned in the foreground, or its result reads `[still running
    after 60000ms; moved to background job …]` and a `job_output` (or `job_kill`) on that job comes
    before the child's last reply — never a report written while its job still ran.
-4. For a role that names an MCP tool (neither analyst names one; disabling one of its module
-   rows, `- { id: lunhui-theme, disabled: true }` for `cn-market-analyst` or
-   `- { id: lunhui-mode, disabled: true }` for `cn-stock-analyst`, makes the same refusal): in the scratch copy's `profiles/face/cordis.patch.yml`,
+4. For a role that names an MCP tool (no shipped role names one; disabling one of its module
+   rows, `- { id: lunhui-theme, disabled: true }` for `cn-market-analyst`,
+   `- { id: lunhui-mode, disabled: true }` for `cn-stock-analyst` or
+   `- { id: lunhui-review, disabled: true }` for `cn-reviewer`, makes the same refusal): in the scratch copy's `profiles/face/cordis.patch.yml`,
    disable that server's row (`disabled: true`) and restart the face. Killing the server's process
    is not enough: `dsh-mcp-client` reconnects and keeps the tools registered through the outage.
    Ask for the role again. PASS, part four: the tool result reads `Error: tools.restrict() names
@@ -3226,16 +3266,16 @@ FACE_PORT=3091 npm start`, real keys) — never the operator's own home:
    paragraph with each role's one-line summary; the boot line `agent presets: …` shows `gravit` without a
    `(broken)` mark (a role row that fails to mount lists the default broken, and the boot
    refuses). PASS, part five.
-6. Clean up whatever the role wrote under `strategies/room-drill/` (for `cn-market-analyst`, the
-   run under `strategies/cn-market/analysis/`, for `cn-stock-analyst` the one under the strategy's
-   `analysis/`; `git status` shows it).
+6. Clean up whatever the role wrote under `strategies/room-drill/` (for `cn-market-analyst` and
+   `cn-reviewer`, the run under `strategies/cn-market/analysis/`, for `cn-stock-analyst` the one
+   under the strategy's `analysis/`; `git status` shows it).
 
 **PASS criteria are observations.** Record the run in `DEVELOPMENT.md` §7.4 with the date and the
 pin.
 
-**Not yet run live.** Step 0 passes on the fixture roles at stage 3 (2026-10-24) and with both
-analysts since 2026-10-26; steps 1, 2, 4 and 5 are owed with each, and step 3 waits for a role
-with `bash`.
+**Not yet run live.** Step 0 passes on the fixture roles at stage 3 (2026-10-24), with both
+analysts since 2026-10-26 and with the reviewer since plan 4 the same day; steps 1, 2, 4 and 5 are
+owed with each, and step 3 waits for a role with `bash`.
 
 ## The cycle drill (run after any change to cycle.md, roles/ or the dsh pins)
 

@@ -11,7 +11,7 @@
 
 ## Rules
 - Universe / screen: 沪深 A 股全市场读数：指数、涨停池（含炸板、跌停、昨日涨停）、行业与概念板块；个股报价可选。
-- Run order（spec §5.10、A22，本频道部分）：先冻结 index、limit-up、boards（quotes 可选），再由 `cn-market-analyst` 凭运行编号写出环境、情绪、题材三个产物，最后由 `cn-reviewer` 写反证。角色读取上下文之后不再补冻；`analysis/<run>/` 不手改。环境、情绪、题材三个模块行与 `cn-market-analyst` 已经存在（Gravit 按 `dsh/profile/lunhui-run.md` 的顺序执行）；`cn-reviewer` 与反证模块属于后续计划，今天还没有。
+- Run order（spec §5.10、A22，本频道部分）：先冻结 index、limit-up、boards（quotes 可选），再由 `cn-market-analyst` 凭运行编号写出环境、情绪、题材三个产物，最后由 `cn-reviewer` 写反证。角色读取上下文之后不再补冻；`analysis/<run>/` 不手改。环境、情绪、题材三个模块行与 `cn-market-analyst`、反证模块行与 `cn-reviewer` 都已经存在（Gravit 按 `dsh/profile/lunhui-run.md` 的顺序执行）。
 - Entry: 无。本频道不交易。
 - Exit / stop: 无。
 - Position notes: 无持仓。策略频道的 `mode.json` 引用本频道的某次运行；引用不等于本频道对任何标的下结论。

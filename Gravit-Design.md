@@ -7,7 +7,8 @@ subagents; §4, §5 and §7.3 pointers re-read 2026-09-30 for the dsh 0.2.0-rc.2
 now names `GRAVIT.md`; D16 added); revised 2026-10-24 for the face's page as an owner device
 of the Account (§1, §3, §4, §5, §7.3, §8, §9; D18 added), and again 2026-10-24 for the exit of
 the Python package, the PIT beds and backtests (§1, §2, §3, §4, §5 — D3 and D16 resolved, D1, D8
-and D10 rewritten — §6, §7.2, §8, §9) ·
+and D10 rewritten — §6, §7.2, §8, §9); revised 2026-10-26 for the Lunhui rows and their three
+roles (§1, §4, D10, §7.2) ·
 **Owner:** the operator ·
 **Authority:** this charter carries intent and principles; mechanism lives in `DEVELOPMENT.md`,
 `face/README.md` (the current face contracts and drills), and code. On a question of intent, the charter
@@ -28,15 +29,18 @@ principal agent**. The agent, also called Gravit, runs on DeepSeek Harness (dsh)
 operator's chat face and works three layers. Gravit organizes work, checks returned evidence and
 owns the research conclusion; the operator retains final judgment. Operator-authored bots carry
 continuing research perspectives into rooms (§7.1). Temporary subagents perform bounded
-delegated work (§7.2). The role library — one-shot roles with their own persona and tools, none
-shipped since 2026-10-24 — is the prebuilt form of that delegation (§7.2). One principal agent
+delegated work (§7.2). The role library — one-shot roles with their own persona and tools, three
+shipped since 2026-10-26, the Lunhui analysts and reviewer — is the prebuilt form of that
+delegation (§7.2). One principal agent
 does not mean only one execution context.
 
 - **MARKET** — the Account's markets through Gravit's seat — crypto, US stocks, RWAs,
   perpetuals, predictions, read keyless and server-side by the Account — and AKShare for A
   shares; no beds, no replay and no lookahead firewall since 2026-10-24, by the operator's
   decision: the Account's history is read as it is, and a strategy's evidence is forward paper
-  trading on the Account's paper venue.
+  trading on the Account's paper venue. The Lunhui rows freeze hashed Tencent and Eastmoney
+  samples into a strategy directory for read-only research (since 2026-10-25); like the AKShare
+  reads they carry no lookahead guard and are never evidence of a trade.
 - **STRATEGY** — Gravit's arena. A strategy is a directory under `strategies/`, meant to be
   git-versioned: a thesis with falsification terms, a journal of its evidence (forward paper
   trades among it), a lifecycle state. In the face, each strategy directory is a **channel**:
@@ -149,7 +153,7 @@ Who may change what. This table is the charter's core; everything else supports 
 
 | Surface | Writer | Audit / gate |
 |---|---|---|
-| `strategies/` | **Gravit**, including any role children and the bounded tasks it delegates to under inherited permissions | git history is the ledger; Gravit checks delegated results and the operator reviews diffs |
+| `strategies/` | **Gravit**, including any role children and the bounded tasks it delegates to under inherited permissions; and the Lunhui rows, writing only under `strategies/<name>/analysis/`, from the face process, outside any session sandbox, when a non-bot session holding their tools calls them — Gravit, its forks and plain subagents, or the three roles | git history is the ledger (a run's evidence files are not in it, only their hashes); Gravit checks delegated results and the operator reviews diffs; the Lunhui rows anchor every write to a strategy name and a run id, never a path, and take a module's artifact only from a role child |
 | `face/` and its tests | normal engineering (operator and coding agents, reviewed) | the offline suite, the gated smokes and the drills — this tier includes the code of the order gate |
 | `dsh/skills/mechanics/` | operator only | law, not style: tool mechanics (today the Account seat's guide); Gravit treats them as binding |
 | `dsh/skills/style-gravit/` | operator only | Gravit proposes changes in its journal or in conversation; it never edits the pack |
@@ -189,7 +193,7 @@ solved would be worse than carrying them.
 | D7 | No instrument for net-negative drift: nothing compares "now" against "never-evolved" | strategies are few; the operator still reads everything | when an independent evaluator exists (see D1) |
 | D8 | Gate 2 is prose against a shell: it holds the seat's tool surface, and the seat's key file in the Account's home can be read by a shell turn, which signs at the Account's door with no card here — the seat's R1; and Gate 2 exists only inside the face | paper venues only by the operator's rule; the Account's own Guard card and cap | real-money intent (D17's and D18's triggers), or any host other than the face running the profile with the seat mounted |
 | D9 | The channel roster is a menu, not a fence: tool schemas are tree-wide, a session in no channel is never roster-checked, and a shell turn can call a CLI directly | it reduces noise and states intent; writes are logged | if a rostered agent ever gets a capability the operator would not grant every channel |
-| D10 | The harness home and the face's own routes are reachable over loopback from inside the workspace — a fence, not authentication — and so is the approval-answer route, whose browser cookie (dsh 0.2) is signed by a secret in the harness home, so a shell turn can approve its own order card; and the MCP servers, children of the face process, write outside the sandbox (the seat its key file in the Account's home, D17) | one operator, one machine; the writes are small and visible; the seat's paper-only limits bound an answered card | a second human, a hosted deployment, real-money intent, or the first unexplained change to `$DSH_HOME/face/*` |
+| D10 | The harness home and the face's own routes are reachable over loopback from inside the workspace — a fence, not authentication — and so is the approval-answer route, whose browser cookie (dsh 0.2) is signed by a secret in the harness home, so a shell turn can approve its own order card; and the MCP servers, children of the face process, write outside the sandbox (the seat its key file in the Account's home, D17), as do the face's own rows (the Lunhui runs under `strategies/<name>/analysis/`) | one operator, one machine; the writes are small and visible; the seat's paper-only limits bound an answered card | a second human, a hosted deployment, real-money intent, or the first unexplained change to `$DSH_HOME/face/*` |
 | D11 | *Resolved 2026-09-07.* The model is told it is Gravit: `dsh/profile/persona.md` is the `system-prompt` row's `personaPrefix`, set by the face at compose time; a bot's preset shadows it for that bot's sessions | — | — |
 | D12 | Bot tool masks are visibility, not authority. dsh scopes and `tools.restrict` are "live visibility composition, not an authority boundary"; a bot with a shell writes whatever its session's sandbox mode allows and reaches whatever the network allows | held by: the `read-only` permission preset logged into every bot room session inside its creation (file effects, subject to an operator-granted escalation card), the `journal/`-scoped `cwd` of every bot home session, Gate 2 tree-wide (the account), and the room transcript naming every dispatch and every member not called. Not held by the mask, and not held for the network | if a bot's composition is ever given the account tools, or a room session is created other than read-only (§8) |
 | D13 | Gravit's sessions and delegated tasks can work at the repository root, which includes `bots/`; their prohibition on editing bot files, including journals, is carried by `GRAVIT.md` and review, not by the sandbox | single operator; every edit reviewed; git is the ledger; a bot's own home-journal writes follow §4 | the first unauthorized edit under `bots/` |
@@ -288,8 +292,11 @@ persona plus an exact tool allow-list (`roles/<id>/`) the dsh backend enforces a
 creation (a role with bash keeps the shell's reach — D12), surfaced to Gravit as a one-shot
 tool. It is never a bot (no roster, no journal, no room) and never a bot's substitute: a role
 has hands and no voice, a bot a voice and no hands. A role's report is a claim Gravit checks
-(D14). None ships since 2026-10-24, when the three roles retired with their tools; the next are
-the operator's to design (`roles/_template` is the copy source).
+(D14). Three ship since 2026-10-26, after the three earlier roles retired with their tools on
+2026-10-24: `cn-market-analyst` and `cn-stock-analyst`, which write the Lunhui market and strategy
+artifacts, and `cn-reviewer`, which writes their counterevidence and shares no module tool with
+either — the reviewer is not the writer; the next are the operator's to design (`roles/_template`
+is the copy source).
 
 ### 7.3 What this design deliberately does not build
 
