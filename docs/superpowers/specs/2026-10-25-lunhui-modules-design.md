@@ -113,7 +113,9 @@ exactly its tools, and no child process is spawned for it.
 | Nothing starts unattended (charter §1, P5) | — | no timer, no watcher; a run is one operator-started session |
 | The channel page is built from the directory's own files, every block independent, every read bounded | `face/src/channels.ts` `readChannelBody`, `readBoundedJson` (stage 0) | the runs card is one block read from `analysis/`, bounded as stage 0 bounds it |
 | `strategies/<name>` is the channel grammar's name (a letter or digit in any script first, then letters, digits, `-`, `_`; ≤ 41 code points) | `face/src/channels.ts`, `GRAVIT.md` | `cn-market` is a valid channel; a `strategy` argument is validated by the same grammar |
-| The repository is public; the manuscript stays out of git | `.gitignore` `/docs/research/lunhui/corpus/` | contexts carry paragraph ids and short hypotheses in the tree's own words, never the manuscript's text |
+| The repository is public; the manuscript stays out of git | `.gitignore` `/docs/research/lunhui/corpus/` | contexts carry paragraph ids and short hypotheses in the tree's own words, never the manuscript's text; the evidence files stay out too (A26) |
+| A tool result over `maxInlineTokens: 12500` (about 50,000 characters) is spilled to a file with a preview | dsh-base's spill policy (`cordis.patch.yml`) | a role has no file tool, so every context stays a digest under 30 KiB (A24) |
+| The Eastmoney hosts answer this location with delayed quotes through a redirect | measured 2026-10-25 (A28) | the freezes follow one redirect to `push2delay.eastmoney.com`, stamp `host` and `delayed`, and never call the numbered hosts |
 
 ## 4. Decisions, as decided
 
@@ -145,9 +147,18 @@ overturnable at review without redesign.
 | A14 | **The runs card generalizes** stage 0's: `ChannelBody.runs[]` carries `{run, asOf, snapshotId, sealed, artifacts: {<module>: {accepted, headline}}, marketRun?, bytes}`, `latestRun` the newest sealed run with any accepted artifact and its artifacts' summaries; the client's channel screen gains a "Research runs" section after "Latest backtest"; reads bounded as stage 0 | the field is the channel (graft D18) |
 | A15 | **Fixture mode is row config**, not an environment variable: a freeze row's `config.fetch` names a recorded-replies directory, used by tests only; production rows set none | stage 0's R21 trap disappears with the child process |
 | A16 | **Stage 0's pure modules are reused** under `face/plugins/lunhui/lib/`: `market.mjs` (Tencent, calendar, assessment), `runs.mjs` (anchoring, atomic writes, bounded reads), `contract.mjs` split into a shared core (wording rules, evidence binding, byte budget, repairs) and per-module contracts | the graft's reviews hold for this code |
-| A17 | **Egress from the face process:** `qt.gtimg.cn`, `web.ifzq.gtimg.cn` (stage 0), `push2ex.eastmoney.com` (the pools), `push2.eastmoney.com` (board lists, constituents, fund flow); 7-second timeout, 512 KiB per response, at most four requests in flight; documented beside the AKShare server's | the hosts AKShare itself calls for the same data |
+| A17 | **Egress from the face process:** `qt.gtimg.cn`, `web.ifzq.gtimg.cn` (stage 0), `push2ex.eastmoney.com` (the pools), `push2.eastmoney.com` (board lists, constituents, fund flow, the all-shares counts) and its redirect target `push2delay.eastmoney.com` (A28); 7-second timeout, 512 KiB per response, at most four requests in flight; documented beside the AKShare server's | the hosts AKShare itself calls for the same data |
 | A18 | **The mode set is `S01`, `S02`, `WAIT`.** The R01–R14 families are labels the module may report as `research_only` matches with the reason they cannot be selected (data, ruling, or registration) | the graft's D10 and the source's §6 registration |
 | A19 | **Versions in the artifact:** every artifact carries `module`, `contract_version`, `hypotheses_version` (the context's doctrine excerpt), `snapshot_id`, `run`, `as_of`; the runs card shows `contract_version` so a changed rule is visible in history | labels are never rewritten (system-design §4) |
+| A20 | **Evidence items and derived measures** (builder check Q2). An evidence item is one row: a pool entry (one stock), one board's summary, one board's member list (≤ 100 symbols, one item), one index quote, one daily bar series. At freeze, host code also writes **derived items**, each with its own id and the ids of its inputs: 连板高度 distribution, 封板 and 炸板 ratios by unique stock, 昨日涨停 today's returns and their negative tail, each frozen board's breadth (advancers over members) and turnover share, the exchanges' advance/decline counts. The model never computes these; a context carries derived items first, then the rows that fit | the source forbids the model re-deriving market-wide measures (`design/docs/contracts.md` §3); a 30 KiB context cannot carry 500 rows |
+| A21 | **Assertion allowances per module** (Q2). The shared core keeps stage 0's rule — no affirmative sentence on 全市场, 市场广度, 题材, 主线, 龙头 or 情绪周期 — as the default, and each module contract opens exactly the assertions it owns when they cite a derived item: sentiment may assert 情绪 and 全市场 statements; theme may name 题材 and 主线 candidates; leader may name 龙头 candidates as `leader_candidate` hypotheses; environment may assert 指数 and 流动性 states; mode opens nothing and only cites artifacts; counterevidence may deny any of them | the modules' outputs are the sentences stage 0 refused; the evidence binding is what makes them claims |
+| A22 | **The reviewer runs before the mode, in both channels** (Q3). cn-market: freezes → `cn-market-analyst` (three artifacts) → `cn-reviewer`. Strategy: freeze quotes → `cn-stock-analyst` for the leader artifact → `cn-reviewer`, whose context takes `market_run` and carries the leader artifact and the cited market artifacts → `cn-stock-analyst` again for the mode artifact. An `S01` or `S02` conclusion requires an accepted counterevidence artifact in the run and addresses each item by id (`UNADDRESSED_COUNTEREVIDENCE`); `WAIT` requires none | otherwise the reviewer's artifact never exists when the mode is validated, and G3 is empty |
+| A23 | **Caller checks in code** (Q7): a submit tool refuses a caller whose session is a root or a seeded fork (`NOT_A_ROLE`), reading `exec.agent.session.header` as `gravit.js`'s `isRootOrFork` does; a freeze tool refuses a delegated child (`NOT_GRAVIT`). Pinned on a real boot | "Gravit never submits" and "no role fetches" become code paths, not protocol sentences |
+| A24 | **Contexts are digests, capped at 30 KiB** (Q6). A context carries artifact **digests** — headline fields, every claim's id, text and evidence ids, the expectation card, the counterevidence items — never whole artifacts; derived items first, then rows by priority until the cap, with a `truncated` list naming what was left out. dsh-base's spill policy replaces a tool result over `maxInlineTokens: 12500` (about 50,000 characters) with a preview and a file path no role can read, so no context may approach it | a role that cannot read its context cannot work |
+| A25 | **Calendar tables per year, fail closed** (Q8): `lib/calendar/<year>.json` from the SSE notices, 2026 shipped; a session date outside every table refuses the freeze with `CALENDAR_UNCOVERED`, and A5's same-day rule refuses too. The 2027 table is a task of plan 1, added when the SSE notice is out (usually December) | guessing weekdays would mint CURRENT evidence on a holiday |
+| A26 | **Evidence files stay out of git** (Q9): `.gitignore` gets `strategies/*/analysis/*/evidence-*.json`; `run.json` (with every evidence file's sha256), `metrics.json` and the artifacts are tracked. A fresh clone reads the artifacts and the hashes, and cannot rebuild a context | a public repository; about 2 MiB a run, daily |
+| A27 | **A strategy run freezes quotes only** (Q5): pools and boards come from the cited market run, so one snapshot of each pool stands per day. `lunhui_read_leader_context` takes `market_run` too, so 顺位 is ranked within the market run's mainline candidates, and the leader validator requires each candidate to be a member of a frozen board or pool of the cited market run (`REFERENCE` otherwise). Gravit chooses the candidate symbols within that set | two snapshots of one pool in one decision would disagree |
+| A28 | **Eastmoney over its plain hosts, redirects followed** (Q4). Probed from the face's host on 2026-10-25: `push2ex.eastmoney.com/getTopicZTPool` answers directly (200, the 2026-10-23 pool); `push2.eastmoney.com/api/qt/clist/get` answers 302 to `push2delay.eastmoney.com`, which serves the boards (200, 516 boards) with `dlmkts` set — **delayed quotes for this location**; the numbered hosts (`17.`, `29.push2…`) redirect or time out. So the freezes call the plain hosts, follow one redirect only to `push2delay.eastmoney.com`, record the serving host and the delay flag in every item, and the exchanges' advance/decline counts come from the clist of all A shares with one field (`f3`), 1,000 a page, counts and page hashes stored, no rows — not from the Tencent snapshot's 27 pages | the data path works from here, delayed; the design stamps the delay rather than hide it |
 
 ## 5. The design
 
@@ -163,7 +174,8 @@ A run is a directory `strategies/<name>/analysis/<run>/`, `<run>` in stage 0's f
   later freeze on it is refused `RUN_SEALED`. Artifacts land only in a sealed run.
 
 `run.json`: `{ run, strategy, kind: "market" | "strategy", as_of, opened_at, sealed_at,
-snapshot_id, evidence: [{source, file, sha256, bytes, received_at}], artifacts: [<module>…] }`.
+snapshot_id, evidence: [{source, file, sha256, bytes, received_at, host, delayed}], artifacts:
+[<module>…] }`.
 `as_of` is the latest `received_at` among the evidence at seal. `metrics.json`: `{ freezes,
 calls: {<module>: n}, rejections: {<module>: [categories]}, submitted: [<module>…] }`, mirrored
 after every change as stage 0 mirrors it.
@@ -187,14 +199,18 @@ Without this row mounted, every other Lunhui row refuses to mount with a reason 
 | `lunhui-freeze-quotes` | `lunhui_freeze_quotes({strategy, run?, symbols})` | Tencent quotes and 60-day daily bars for 1–8 symbols (indices among `sh000001 sz399001 sz399006 sh000300`, main-board equities; stage 0's rule) | stage 0's |
 | `lunhui-freeze-limit-up` | `lunhui_freeze_limit_up({strategy, run?})` | Eastmoney 涨停池, 炸板池, 昨日涨停表现 for the current session: symbol, name, 连板数, 封板时间, 炸板次数, turnover, board tags | ≤ 500 rows per pool, ≤ 256 KiB per file |
 | `lunhui-freeze-boards` | `lunhui_freeze_boards({strategy, run?, boards?})` | Eastmoney concept boards ranked by turnover, the top 30 with change and turnover; constituents for the named boards or the top 10, ≤ 100 symbols each; board fund-flow rank | ≤ 256 KiB per file |
-| `lunhui-freeze-index` | `lunhui_freeze_index({strategy, run?})` | the four indices' quotes and 120-day daily bars; the two exchanges' total turnover; advance/decline counts from the Tencent snapshot | ≤ 256 KiB per file |
+| `lunhui-freeze-index` | `lunhui_freeze_index({strategy, run?})` | the four indices' quotes and 120-day daily bars (Tencent); the two exchanges' total turnover and advance/decline counts from the Eastmoney clist of all A shares, counts and page hashes only (A28) | ≤ 256 KiB per file |
 
 A freeze with `run` omitted opens a new run and returns its id; with `run` it adds to that open
-run (`RUN_SEALED` otherwise). Each source's items get evidence ids. A source that fails is a
-refusal (`UPSTREAM_TIMEOUT`, `UPSTREAM_TOO_LARGE`, `UPSTREAM_INVALID`, `NO_MARKET_DATA`) that
-writes nothing for that source; the run keeps what other sources froze. The whole run is bounded
-at 2 MiB of evidence. The Eastmoney replies are JSON; the parsers are new, with recorded fixtures
-as stage 0 records Tencent's.
+run (`RUN_SEALED` otherwise). Each source's items get evidence ids, and host code adds the
+derived items of A20 beside the rows. A source that fails is a refusal (`UPSTREAM_TIMEOUT`,
+`UPSTREAM_TOO_LARGE`, `UPSTREAM_INVALID`, `NO_MARKET_DATA`) that writes nothing for that source;
+the run keeps what other sources froze. A session date no calendar table covers refuses with
+`CALENDAR_UNCOVERED` (A25). The whole run is bounded at 2 MiB of evidence, and the evidence
+files are gitignored (A26). The Eastmoney replies are JSON; the parsers are new, with recorded
+fixtures as stage 0 records Tencent's; every Eastmoney item records the host that served it and
+whether the quote was delayed (A28). In a strategy channel only `lunhui_freeze_quotes` is used
+(A27).
 
 ### 5.4 The five modules, and the reviewer
 
@@ -203,9 +219,9 @@ as stage 0 records Tencent's.
 | environment (环境与大周期) | `lunhui-environment` | 一 (P0019–P0074), 八 (P1652–P1708) | index, quotes | `index_state`, `liquidity_state`, `cycle_anchor` |
 | sentiment (情绪周期) | `lunhui-sentiment` | 二 (P0156–P0163), P0020–P0056 | limit-up, index | `state` (one of the seven), `money_effect`, `freeze_type` |
 | theme (题材与轮动) | `lunhui-theme` | P0075–P0153, 六 (P1345–P1464) | boards, limit-up | `mainline_candidates[]`, `theme_stage`, `rotation` |
-| leader (龙头与个股地位) | `lunhui-leader` | 四, P0654–P1340 | quotes, limit-up, boards | `leader_candidates[]` with 顺位, `top_pattern_flags` |
-| mode (模式选择与预期) | `lunhui-mode` | 三 (P0164–P0452), 七 (P1610–P1650), P0159 | the strategy run's leader artifact, the cited market run's three artifacts, the previous `mode.json` | `mode` (`S01`, `S02`, `WAIT`), `preconditions`, `research_only_matches[]`, `expectation`, `expectation_review` |
-| counterevidence (反证) | `lunhui-review` | the ten rulings (strategy-spec §7) and §5 | every accepted artifact of the run | `items[]` each with `against: <module>`, `evidence_ids`, `kind` |
+| leader (龙头与个股地位) | `lunhui-leader` | 四, P0654–P1340 | the strategy run's quotes; the cited market run's limit-up and boards (A27) | `leader_candidates[]` with 顺位, `top_pattern_flags` |
+| mode (模式选择与预期) | `lunhui-mode` | 三 (P0164–P0452), 七 (P1610–P1650), P0159 | the strategy run's leader and counterevidence artifacts, the cited market run's three artifacts, the previous `mode.json` | `mode` (`S01`, `S02`, `WAIT`), `preconditions`, `research_only_matches[]`, `expectation`, `expectation_review` |
+| counterevidence (反证) | `lunhui-review` | the ten rulings (strategy-spec §7) and §5 | every accepted artifact of the run, and of the cited market run when `market_run` is given | `items[]` each with `against: <module>`, `evidence_ids`, `kind` |
 
 The environment, sentiment and theme modules accept only a run of `cn-market`
 (`WRONG_CHANNEL` otherwise); leader and mode only a run of another strategy; counterevidence
@@ -224,9 +240,16 @@ Seventeen tools, all plain names:
   run?})`, `lunhui_freeze_boards({strategy, run?, boards?})`, `lunhui_freeze_index({strategy,
   run?})`
 - modules: `lunhui_read_environment_context({strategy, run})`,
-  `lunhui_submit_environment({strategy, run, analysis})`, and the same pair for `sentiment`,
-  `theme`, `leader`, `counterevidence`; `lunhui_read_mode_context({strategy, run, market_run})`,
+  `lunhui_submit_environment({strategy, run, analysis})`, and the same pair for `sentiment` and
+  `theme`; `lunhui_read_leader_context({strategy, run, market_run})` and
+  `lunhui_submit_leader({strategy, run, analysis})`;
+  `lunhui_read_counterevidence_context({strategy, run, market_run?})` and
+  `lunhui_submit_counterevidence({strategy, run, analysis})`;
+  `lunhui_read_mode_context({strategy, run, market_run})` and
   `lunhui_submit_mode({strategy, run, analysis})`
+
+A submit refuses a root or forked caller (`NOT_A_ROLE`); a freeze refuses a delegated child
+(`NOT_GRAVIT`); both read the caller's session header (A23).
 
 `analysis` is the artifact as a JSON string, as stage 0 (its §7 item 2). Descriptions are
 Chinese and state every bound in prose; schemas use the keyword subset stage 0 settled on (R22).
@@ -251,8 +274,15 @@ example. Module-specific rules the core cannot know:
 - mode: `mode` ∈ {`S01`, `S02`, `WAIT`}; `S01`/`S02` require the cited market run's sentiment
   `state` to be in that strategy's admitted set (strategy-spec §3–§4: `REPAIR`/`EXPANSION` for
   both, `IGNITION`/`CHAOS` for S02 only, never `CLIMAX`/`RETREAT`/`UNKNOWN`), every precondition
-  cited, and every item of an accepted counterevidence artifact addressed by id; 打法 names from
-  R01–R14 may appear only under `research_only_matches`.
+  cited, an accepted counterevidence artifact in the run with every item addressed by id (A22),
+  and — pending the operator's answer to §9's first item — an `S01`/`S02` is a **daily
+  registration**: the preconditions the daily evidence can show, a frozen expectation card, the
+  minute-level confirmation the theses describe named under `preconditions` as `unmet: no source`,
+  and the card graded in the next run; the artifact lists the parameter values it used as research
+  candidates (`parameters_used`), since no production value exists. 打法 names from R01–R14 may
+  appear only under `research_only_matches`.
+- the leader validator requires each `leader_candidates[]` symbol to be a member of a frozen board
+  or pool of the cited market run (A27).
 - counterevidence: each item names the module it is against and cites evidence; an item with no
   evidence id is `REFERENCE`.
 
@@ -299,13 +329,16 @@ is regenerated by `npm run render:roles`.
 ### 5.10 The run protocol
 
 `dsh/profile/lunhui-run.md` (≤ 3,000 bytes, Chinese, no `{{`), mounted by A9. It tells Gravit
-the order: in `cn-market`, freeze index, limit-up and boards (quotes optional), then call
-`cn-market-analyst` once with the run id; in a strategy channel, freeze quotes and limit-up for
-the candidates, call `cn-stock-analyst` with the run id and the market run id, then
-`cn-reviewer`, then `lunhui_read_run` to read the headlines; a `WAIT` or a refused mode is a
-result, not a failure; a run with `NOT_EVALUABLE` artifacts is journaled as such; never freeze
-after a role has read; never edit `analysis/`; the final message to the operator cites artifact
-ids and says what was not evaluable. `GRAVIT.md` gains one line under "A strategy directory":
+the order (A22): in `cn-market`, freeze index, limit-up and boards (quotes optional), call
+`cn-market-analyst` once with the run id, then `cn-reviewer` with the run id; in a strategy
+channel, freeze quotes for the candidates (chosen from the cited market run's boards and pools),
+call `cn-stock-analyst` with the run id and the market run id for the leader artifact, then
+`cn-reviewer` with both ids, then `cn-stock-analyst` again for the mode artifact, then
+`lunhui_read_run` to read the headlines; a `WAIT` or a refused mode is a result, not a failure; a
+run with `NOT_EVALUABLE` artifacts is journaled as such; never freeze after a role has read; never
+edit `analysis/`; never submit an artifact yourself (the tool refuses it); the final message to
+the operator cites artifact ids and says what was not evaluable and whether the quotes were
+delayed. `GRAVIT.md` gains one line under "A strategy directory":
 `analysis/<run>/` holds frozen A-share research runs the Lunhui rows write; never edit them by
 hand.
 
@@ -366,6 +399,10 @@ tests that drove the server over stdio retire. The graft's ledger
 | the three roles read, their `allow` lists exactly, the mirror regenerated; on a real boot each child's first request carries exactly its tools and `GRAVIT.md` | `roles.test.ts`, `roles-smoke.test.ts` |
 | the protocol section: registered scoped, gated, blank for a role child and a bot, under the cap | `gravit-plugin.test.ts`, `bots-smoke.test.ts` |
 | the rows in a real boot: the seventeen tools in Gravit's scope, none in a bot's; `/data/plugins.json` lists the rows | `smoke.test.ts`, `bots-smoke.test.ts` |
+| the caller checks: a submit from a root or fork refused `NOT_A_ROLE`, from a role child accepted; a freeze from a child refused `NOT_GRAVIT` | `roles-smoke.test.ts` on a real boot, plus the rows test with stand-in headers |
+| the calendar: a date outside every table refuses `CALENDAR_UNCOVERED`; A5's same-day and previous-session rule over a holiday; a second year's table loads | `lunhui-runs.test.ts`, `lunhui-mode.test.ts` |
+| the Eastmoney path: one redirect followed to `push2delay.eastmoney.com` only, a second refused, `host` and `delayed` stamped, a numbered host never called | `lunhui-freeze-*.test.ts` with a fake fetch |
+| the evidence files are ignored and the artifacts tracked | a test that `git check-ignore` holds for `evidence-*.json` under a run and not for `run.json` |
 | schema sizes: the `lunhui_` group measured and recorded | `face/scripts/schema-sizes.ts` (prefix `lunhui_`) |
 
 Documentation rows: `DEVELOPMENT.md` §3.6 (the seventeen tools), §3.8 (three roles), §4.3 (the
@@ -403,13 +440,28 @@ re-check rows and the seams inventory (dated additions).
 - D10: the face's own rows now write outside the sandbox too (the Lunhui runs), beside the seat's
   key file.
 - Residuals for `DEVELOPMENT.md` §9: the writes from the face process (stage 0's R32, re-worded);
-  the 2026-only calendar (R33); the Eastmoney endpoints are unofficial and may change shape or
-  refuse, which the parsers turn into `UPSTREAM_INVALID`; point-in-time only from the first
-  freeze; a run's freshness is the freeze's, and a market run cited the next session is a day
-  old by design (A5).
+  the calendar tables by year, fail-closed outside them (R33, re-worded; A25); the Eastmoney
+  endpoints are unofficial and may change shape or refuse, which the parsers turn into
+  `UPSTREAM_INVALID`; the quotes they serve this location are delayed, stamped on every item
+  (A28); point-in-time only from the first freeze; a run's freshness is the freeze's, and a
+  market run cited the next session is a day old by design (A5); the evidence files are not in
+  git, so a clone holds the artifacts and the hashes, not the contexts (A26).
 
 ## 9. Open items
 
+- **For the operator (asked 2026-10-25, builder check Q1):** what an `S01`/`S02` conclusion is.
+  The two theses rule both strategies out on what this design still lacks — S01's confirmation
+  is k complete minutes after a registered divergence, S02 needs a public catalyst with an
+  `available_at`, and no parameter has a production value. The author's recommendation, written
+  into §5.6 pending the answer: a mode conclusion is a **daily registration**, not a decision —
+  the preconditions the daily evidence can show, a frozen expectation card graded in the next
+  run, the minute-level confirmation named as unmet for want of a source, the parameters used
+  listed as research candidates; and `S02` stays `WAIT`-only until an announcements source is
+  frozen (a fifth freeze row and a new egress host, a later plan), because a catalyst a frozen
+  board's surge merely suggests is not the catalyst the thesis names. The theses' falsification
+  sections are then re-fitted to the daily frame by the builder, and the operator reviews them.
+  The alternative — let the mode module read a board's surge plus a limit-up cluster as a proxy
+  catalyst — makes `S02` reachable now and weaker.
 - A manifest or card for in-process rows in Discover, and whether a tools column for face rows
   belongs in `/data/plugins.json`.
 - Whether `cn-market` runs should be opened by the operator's hand each session or by the
@@ -429,3 +481,20 @@ re-check rows and the seams inventory (dated additions).
 
 Each plan ends with the suites green and a reviewed branch; nothing merges without the
 operator's word.
+
+## 11. Builder check, 2026-10-25
+
+A fresh subagent read §0–§10 as a builder and returned nine questions. Each is answered in the
+document or sent to the operator:
+
+| # | Question | Pile | Where |
+|---|---|---|---|
+| 1 | What may `S01`/`S02` claim; registration or decision; thresholds; S02 without a catalyst source | the operator's | §9 first item; §5.6 carries the recommendation pending the answer |
+| 2 | What an evidence item is; who computes the market-wide measures; the scope rule refusing the modules' own sentences | the author's | A20, A21 |
+| 3 | When the reviewer runs and whether the mode waits for it | the author's | A22, §5.10 |
+| 4 | Whether the Eastmoney endpoints answer from this machine | measured | A28, §3 |
+| 5 | What the leader reads in a strategy run | the author's | A27, §5.4, §5.5 |
+| 6 | Which budget gives way in the mode and counterevidence contexts; dsh's spill cap | the author's | A24, §3 |
+| 7 | Whether "Gravit never submits" is enforced in code | the author's | A23, §5.5, §6 |
+| 8 | What happens from 2027-01-01 | the author's | A25, §8 |
+| 9 | Whether the evidence files are committed | the author's | A26, §3, §8 |
