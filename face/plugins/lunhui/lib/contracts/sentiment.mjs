@@ -37,7 +37,8 @@ const HINTS = {
     "status 为 OK 且 state 为 UNKNOWN 时必填，不超过 200 字：写出本运行里你读到的、相互矛盾的指标名（派生量的 measure 名）及其方向。此字段不引证据，所以不写“情绪、赚钱效应、冰点、全市场、涨跌家数”等词。",
   claims:
     "每条声明写一个事实并引用证据编号；含“情绪、情绪周期、赚钱效应、亏钱效应、冰点”的句子须同时引用一条派生证据（derived）；含“全市场、市场广度、涨跌家数”的句子须同时引用家数计数 counts 或一条 index 的派生量。本模块不写题材、主线、龙头、指数类断言。" +
-    "advance_decline_ratio 在文字里写作“上涨与下跌家数之比”。",
+    "advance_decline_ratio 在文字里写作“上涨与下跌家数之比”。" +
+    "引用指数证据的声明也不写“指数、大盘、成交额、流动性”：那是本模块不拥有的指数类断言，会被拒绝；total_turnover 写作“两市成交合计”，指数证据写作“所引派生证据”或“家数计数”。",
   basis:
     "CURRENT 指本运行的交易日（上下文 session），须至少引用一条 scope 为 CURRENT 的证据；更早交易日的证据一律 HISTORICAL，文字不用“当前、今日”等词；证据不足用 INSUFFICIENT，此时标题字段写 UNKNOWN。",
   rows: "涨停池按连板数从高到低、昨日涨停按涨跌幅从低到高列出；指数报价与日线不在本模块的列表里，计入 truncated，指数证据请引用 counts 或 index 的派生量。limit-up 的派生量是 streak_distribution、seal_ratio、break_ratio、yesterday_return_median、yesterday_negative_tail；index 的派生量是 total_turnover、advance_decline_ratio、limit_up_count、limit_down_count。",

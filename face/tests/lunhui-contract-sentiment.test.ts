@@ -238,6 +238,25 @@ test("sentiment: a whole-market sentence citing the all-shares counts is accepte
   assert.equal((await submitted(submit, run, analysis)).accepted, true);
 });
 
+test("sentiment: the claims hint keeps the index words out and names the wording - a claim so worded citing index evidence is accepted, the index word refused", async (t) => {
+  const { freeze, read, submit } = await mount(t);
+  const run = await frozenRun(freeze);
+  const context = JSON.parse(await read.execute({ strategy: "cn-market", run }, exec(ROLE)));
+  for (const word of ["指数", "大盘", "成交额", "流动性", "两市成交合计", "上涨与下跌家数之比"]) assert.match(context.hints.claims, new RegExp(word));
+  const turnover = measure(context, "total_turnover");
+  const ratio = measure(context, "advance_decline_ratio");
+  const counts = idWhere(context, (row) => row.kind === "counts");
+  const claims = (first: string) => [
+    { id: "c1", text: first, basis: "CURRENT", evidence_ids: [turnover] },
+    { id: "c2", text: "上涨与下跌家数之比见所引派生证据与家数计数。", basis: "CURRENT", evidence_ids: [ratio, counts] },
+  ];
+  const indexWorded = artifact(context, { claims: claims("两市成交额见所引派生证据。") });
+  const refusal = await rejectsWith(submit.execute({ strategy: "cn-market", run, analysis: JSON.stringify(indexWorded) }, exec(ROLE)), "INVALID_ANALYSIS");
+  assert.match(refusal.message, /^INVALID_ANALYSIS: \[UNSUPPORTED_SCOPE\] /u);
+  const worded = artifact(context, { claims: claims("两市成交合计见所引派生证据。") });
+  assert.deepEqual(await submitted(submit, run, worded), { accepted: true, module: "sentiment", run });
+});
+
 test("sentiment: a run without index evidence expects NOT_EVALUABLE naming index - an OK artifact refused, the example accepted", async (t) => {
   const { freeze, read, submit } = await mount(t);
   const run = await frozenRun(freeze, ["limit-up"]);
