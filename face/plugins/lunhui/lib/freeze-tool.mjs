@@ -6,8 +6,8 @@
  *
  * A freeze's `execute`, in order: `NOT_GRAVIT` for a delegated child; the strategy resolved by name;
  * `WRONG_CHANNEL` for a market freeze outside `cn-market` (or a strategy freeze inside it); the
- * row's own argument check (`INVALID_SYMBOL`); `CALENDAR_UNCOVERED` when no calendar table covers
- * today's China date. Nothing before this point touches a run, so none of it counts. Then the run:
+ * row's own check (`INVALID_SYMBOL`, or the limit-up session's `CALENDAR_UNCOVERED`);
+ * `CALENDAR_UNCOVERED` when no calendar table covers today's China date. Nothing before this point touches a run, so none of it counts. Then the run:
  * with `run` omitted a fresh one is opened (`kind` market in `cn-market`, strategy elsewhere), else
  * the named one is resolved (`BAD_RUN_ID`, `NO_SUCH_RUN`); the rest runs inside the run's mutex -
  * the freeze counted (`TOOL_BUDGET` past eight, A7: a refused call counts), then `RUN_SEALED`, then
@@ -82,7 +82,7 @@ export const SHARED_BOUNDS =
  * @param {{
  *   name: string, description: string, parameters: Record<string, unknown>, source: string,
  *   kind: "market" | "strategy" | "any",
- *   check?: (args: any) => void,
+ *   check?: (args: any, now: () => Date) => void,
  *   freeze: (fetchImpl: FetchLike, args: any, now: () => Date) => Promise<Frozen>,
  *   runs: import("../runs-row.mjs").LunhuiRuns, fetchImpl: FetchLike, now: () => Date,
  * }} spec `check` refuses bad arguments before any run is touched; `freeze` fetches and derives,
@@ -103,7 +103,7 @@ export function defineFreeze({ name, description, parameters, source, kind, chec
         const { name: strategy } = await runs.resolveStrategy(args.strategy);
         const market = strategy === MARKET_CHANNEL;
         if ((kind === "market" && !market) || (kind === "strategy" && market)) throw refuse.wrongChannel(kind);
-        check?.(args);
+        check?.(args, now);
         const date = getMarketSession(now()).date;
         if (date === null || coverageOf(date, tables) !== "covered") throw refuse.calendarUncovered();
         const opened = args.run === undefined;

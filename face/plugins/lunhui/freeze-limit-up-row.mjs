@@ -5,7 +5,8 @@
  * row tagged with its `pool` (`zt`, `zb`, `yesterday`), followed by `deriveLimitUp`'s measures. The
  * session asked for is `getMarketSession(now).expectedQuoteDate`, the latest trading day whose pool
  * can exist - on a weekend or holiday, or before 09:15, the previous session; a null date (the
- * previous session outside the calendar) is `CALENDAR_UNCOVERED`. `cn-market` only.
+ * previous session outside the calendar) is `CALENDAR_UNCOVERED`, checked before any run. Each row
+ * carries the `host` and `delayed` of the reply that served its pool (A28). `cn-market` only.
  */
 import { refuse } from "./lib/errors.mjs";
 import { deriveLimitUp } from "./lib/derive.mjs";
@@ -17,6 +18,16 @@ export const name = "lunhui-freeze-limit-up";
 export const inject = ["tools", "lunhuiRuns"];
 
 /**
+ * Before any run: a session whose latest pool date lies outside the calendar (the previous trading
+ * day uncovered) is `CALENDAR_UNCOVERED`, so the refusal opens and counts nothing.
+ * @param {unknown} _args
+ * @param {() => Date} now
+ */
+function checkSession(_args, now) {
+  if (getMarketSession(now()).expectedQuoteDate === null) throw refuse.calendarUncovered();
+}
+
+/**
  * @param {import("./lib/freeze-tool.mjs").FetchLike} fetchImpl
  * @param {unknown} _args
  * @param {() => Date} now
@@ -26,7 +37,8 @@ async function freeze(fetchImpl, _args, now) {
   const session = getMarketSession(now()).expectedQuoteDate;
   if (session === null) throw refuse.calendarUncovered();
   const pools = await fetchLimitUpPools({ date: session.replaceAll("-", ""), fetchImpl });
-  const tag = (pool) => pools[pool].map((row) => ({ pool, ...row }));
+  // Each row stamped with the reply that served its pool (A28), before its id is computed.
+  const tag = (pool) => pools[pool].map((row) => ({ pool, ...row, ...pools.served[pool] }));
   const tagged = { zt: tag("zt"), zb: tag("zb"), yesterday: tag("yesterday") };
   const items = [...tagged.zt, ...tagged.zb, ...tagged.yesterday];
   const derived = deriveLimitUp(tagged, idsOf(items, (row) => [row.pool, row.code]));
@@ -53,6 +65,7 @@ export function apply(ctx, config) {
     parameters: { ...RUN_PARAMETERS },
     source: "limit-up",
     kind: "market",
+    check: checkSession,
     freeze,
     ...deps,
   })));

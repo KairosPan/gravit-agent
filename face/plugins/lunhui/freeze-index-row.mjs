@@ -3,7 +3,8 @@
  * `lunhui-freeze-index` (modules spec §5.3, A20, A28): `lunhui_freeze_index({ strategy, run? })`
  * freezes the four indices' Tencent quotes (each item the parsed quote, `kind: "index"`) and their
  * 120-day daily bars (`kind: "bars"`), then the all-A-shares advance/decline counts from the
- * Eastmoney clist (`kind: "counts"`: counts and page hashes, no row), into a market run's
+ * Eastmoney clist (`kind: "counts"`: counts, page hashes, and the pages' `host` and `delayed`; no
+ * row), into a market run's
  * `evidence-index.json`, followed by `deriveIndex`'s and `deriveCounts`' measures; counts read
  * from pages that disagree carry `partial: true` into their derived items. Any Tencent failure
  * fails the freeze, as does a reply with no priced quote (`NO_MARKET_DATA`). `cn-market` only.
@@ -34,8 +35,9 @@ async function freeze(fetchImpl, _args, now) {
   ]);
   if (!quotes.some((quote) => Number.isFinite(quote.last) && quote.last > 0 && quote.quotedAt))
     throw refuse.noMarketData("腾讯行情");
-  const { host, delayed, ...kept } = counts;
-  const countsItem = { kind: "counts", ...kept };
+  // The counts item carries its pages' hosts and delay (A28); the Tencent items need no stamp.
+  const { host, delayed } = counts;
+  const countsItem = { kind: "counts", ...counts };
   const items = [...quotes, ...series.map((bars) => ({ kind: "bars", ...bars })), countsItem];
   const derived = [
     ...deriveIndex(quotes, idsOf(quotes, (quote) => ["quote", quote.symbol])),

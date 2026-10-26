@@ -6,8 +6,8 @@
  * each, `truncated` when the board has more), then the concept boards' fund-flow rank (`kind:
  * "flow"`), into a market run's `evidence-boards.json`, followed by `deriveBoards`' measures. The
  * constituent boards are `boards` when given (1-10 distinct codes, `BK` and four digits, else
- * `INVALID_SYMBOL`), else the first ten of the list. `host` joins the distinct hosts that served
- * the replies; `delayed` is true when any reply was, `truncated` when any member list was cut.
+ * `INVALID_SYMBOL`), else the first ten of the list. Each item carries the `host` and `delayed` of
+ * the reply that served it (A28); the file's `host` joins the distinct hosts that served the replies; `delayed` is true when any reply was, `truncated` when any member list was cut.
  * `cn-market` only.
  */
 import { refuse } from "./lib/errors.mjs";
@@ -48,9 +48,13 @@ async function freeze(fetchImpl, args, now) {
     Promise.all(codes.map((code) => fetchBoardMembers(code, { fetchImpl }))),
     fetchBoardFundFlow({ fetchImpl }),
   ]);
-  const boards = list.boards.map((board) => ({ kind: "board", ...board }));
-  const memberItems = members.map((reply, i) => ({ kind: "members", board: codes[i], truncated: reply.truncated, members: reply.members }));
-  const items = [...boards, ...memberItems, ...flow.rows.map((row) => ({ kind: "flow", ...row }))];
+  // Every item stamped with the reply that served it (A28), before its id is computed.
+  const served = ({ host, delayed }) => ({ host, delayed });
+  const boards = list.boards.map((board) => ({ kind: "board", ...board, ...served(list) }));
+  const memberItems = members.map((reply, i) => ({
+    kind: "members", board: codes[i], truncated: reply.truncated, members: reply.members, ...served(reply),
+  }));
+  const items = [...boards, ...memberItems, ...flow.rows.map((row) => ({ kind: "flow", ...row, ...served(flow) }))];
   const derived = deriveBoards(boards, memberItems, idsOf(boards, (board) => ["board", board.code]));
   const replies = [list, ...members, flow];
   return {

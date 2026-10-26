@@ -167,6 +167,7 @@ test("freeze: lunhui_freeze_limit_up opens a run in cn-market, writes evidence-l
   const evidence = await readJson(dir, "evidence-limit-up.json");
   const rows = evidence.items.filter((item: any) => item.kind !== "derived");
   assert.deepEqual(rows.map((row: any) => row.pool), [...Array(6).fill("zt"), ...Array(3).fill("zb"), ...Array(5).fill("yesterday")]);
+  for (const row of rows) assert.deepEqual([row.host, row.delayed], ["push2ex.eastmoney.com", false]);
   const derived = evidence.items.filter((item: any) => item.kind === "derived");
   assert.equal(derived.length, 5);
   // Every derived input is the id of a row in the file: zt and zb rows of one code are told apart.
@@ -360,6 +361,42 @@ test("freeze: boards cuts a long member list at 100 with truncated true, and bre
   assert.deepEqual(topEvidence.items.filter((item: any) => item.kind === "members").map((item: any) => item.board), boards.map((board: any) => board.code));
 });
 
+test("freeze: each Eastmoney item records the host that served it; a members reply redirected to push2delay is delayed alone", async (t) => {
+  const root = await strategiesRoot(t);
+  const serve = createFixtureFetch(await fixtures(t));
+  t.mock.method(globalThis, "fetch", async (url: string, init?: RequestInit) => {
+    const target = new URL(url);
+    if (target.host === "push2.eastmoney.com" && (target.searchParams.get("fs") ?? "").startsWith("b:BK0715")) {
+      target.host = "push2delay.eastmoney.com";
+      return new Response(null, { status: 302, headers: { location: target.href } });
+    }
+    if (target.host === "push2delay.eastmoney.com") target.host = "push2.eastmoney.com";
+    return serve(target.href, init);
+  });
+  const { tools } = mount(root, undefined);
+  const reply = JSON.parse(await tools.boards.execute({ strategy: "cn-market", boards: ["BK1716", "BK0715"] }, exec()));
+  assert.equal(reply.delayed, true);
+  assert.equal(reply.host, "push2.eastmoney.com,push2delay.eastmoney.com");
+  const evidence = await readJson(runDir(root, "cn-market", reply.run), "evidence-boards.json");
+  assert.equal(evidence.delayed, true);
+  const stamps: any[][] = evidence.items.filter((item: any) => item.kind !== "derived").map((item: any) => [item.kind, item.board ?? item.code, item.host, item.delayed]);
+  for (const [kind, code, host, delayed] of stamps) {
+    const redirected = kind === "members" && code === "BK0715";
+    assert.deepEqual([host, delayed], redirected ? ["push2delay.eastmoney.com", true] : ["push2.eastmoney.com", false], `${kind} ${code}`);
+  }
+  assert.equal(stamps.filter(([kind]) => kind === "members").length, 2);
+});
+
+test("freeze: limit-up refuses CALENDAR_UNCOVERED before any run when the previous session lies outside the calendar", async (t) => {
+  const root = await strategiesRoot(t);
+  const { urls } = mockFetch(t, await fixtures(t));
+  // 2026-01-01 is a covered holiday; the session before it, 2025-12-31, no table covers.
+  const { tools } = mount(root, undefined, {}, new Date("2026-01-01T04:00:00.000Z"));
+  await rejectsWith(tools["limit-up"].execute({ strategy: "cn-market" }, exec()), "CALENDAR_UNCOVERED");
+  assert.equal(urls.length, 0);
+  assert.deepEqual(await readdir(join(root, "cn-market")), ["THESIS.md"]);
+});
+
 test("freeze: index records partial counts as partial in the derived item", async (t) => {
   const root = await strategiesRoot(t);
   const { urls } = mockFetch(t, await fixtures(t));
@@ -373,6 +410,8 @@ test("freeze: index records partial counts as partial in the derived item", asyn
   assert.equal(evidence.items.filter((item: any) => item.kind === "bars").length, 4);
   const counts = evidence.items.find((item: any) => item.kind === "counts");
   assert.equal(counts.partial, true);
+  assert.deepEqual([counts.host, counts.delayed], ["push2.eastmoney.com", false]);
+  for (const item of evidence.items.filter((item: any) => item.kind === "index" || item.kind === "bars")) assert.equal(item.host, undefined);
   // Page 1 says 6 rows and holds 3: one page asked for, the counts partial.
   assert.equal(counts.pageHashes.length, 1);
   const derived = evidence.items.filter((item: any) => item.kind === "derived");

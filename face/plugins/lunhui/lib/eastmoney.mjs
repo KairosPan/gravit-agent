@@ -291,7 +291,8 @@ async function fetchPool(path, sort, parse, required, date, fetchImpl, timeoutMs
  * serving host the three share, or their distinct hosts joined with "," when they differ;
  * `delayed` and `truncated` are true when any pool's is. A 涨停池 whose `data` is null or whose pool
  * is empty refuses `NO_MARKET_DATA`; the same reply for the 炸板池 or 昨日涨停 is an empty list.
- * Any pool that fails otherwise fails the whole call.
+ * Any pool that fails otherwise fails the whole call. `served` gives each pool's own `host` and
+ * `delayed`, so a freeze stamps each row with the reply that served it (A28).
  * @param {{ date: string, fetchImpl?: FetchLike, timeoutMs?: number }} options `date` as `YYYYMMDD`
  */
 export async function fetchLimitUpPools({ date, fetchImpl = fetch, timeoutMs = 7000 }) {
@@ -301,10 +302,12 @@ export async function fetchLimitUpPools({ date, fetchImpl = fetch, timeoutMs = 7
     POOLS.map(([path, sort, parse, required]) => fetchPool(path, sort, parse, required, date, fetchImpl, timeoutMs)),
   );
   const [zt, zb, yesterday] = replies.map((reply) => reply.rows);
+  const [ztServed, zbServed, yesterdayServed] = replies.map(({ host, delayed }) => ({ host, delayed }));
   return {
     zt,
     zb,
     yesterday,
+    served: { zt: ztServed, zb: zbServed, yesterday: yesterdayServed },
     host: [...new Set(replies.map((reply) => reply.host))].join(","),
     delayed: replies.some((reply) => reply.delayed),
     truncated: replies.some((reply) => reply.truncated),
