@@ -515,10 +515,11 @@ with `cn-market` and the run, no `market_run`; read the run back with `lunhui_re
 over the roles' reports. In a strategy channel: call `lunhui_read_run` on `cn-market` without a run
 — it lists the newest sealed runs — and take one of today's or the previous trading day's session
 as `market_run` (or do the market run first); read it and choose 1–4 main-board stocks from its
-theme's mainline boards and its pools; freeze their quotes on the strategy without a run (that
+theme's mainline boards' members and its pools, which live only in the market run's
+`evidence-boards.json` and `evidence-limit-up.json` (the read returns headlines); freeze their quotes on the strategy without a run (that
 opens the strategy run); call `role_cn_stock_analyst` with the strategy, the run and `market_run`
-for the leader; `role_cn_reviewer` with the same three; once the leader is accepted,
-`role_cn_stock_analyst` again for the mode; read the run back. A `WAIT`, a `NOT_EVALUABLE`
+for the leader; once the leader is accepted, `role_cn_reviewer` with the same three (a review
+read before it is `NOT_EVALUABLE` for good) and then `role_cn_stock_analyst` again for the mode; read the run back. A `WAIT`, a `NOT_EVALUABLE`
 artifact or a refused mode is a result and is never re-run; on `STALE_MARKET_RUN`, make a new
 sealed market run by the market order and re-read with it, opening a new strategy run when the
 strategy run itself is stale. For both: never freeze after a role has read,

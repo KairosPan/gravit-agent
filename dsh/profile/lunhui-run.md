@@ -12,14 +12,14 @@
 ## 策略频道
 
 1. 找市场运行。对 cn-market 调用 lunhui_read_run，不带 run：列出最近封存的运行。取 session 为当日或前一个交易日的一个，记为 market_run；没有就先做上一节。
-2. 选股。带 run 读它，从 theme.json 的 mainline_candidates 板块成分股与涨停池里选 1–4 只主板个股（sh60xxxx、sz00xxxx）。
+2. 选股。带 run 读它，从 theme.json 的 mainline_candidates 板块成分股与涨停池里选 1–4 只主板个股（sh60xxxx、sz00xxxx）；两者只在 strategies/cn-market/analysis/<run>/ 的 evidence-boards.json、evidence-limit-up.json 里，用读文件工具读。
 3. 冻结。对本策略调用 lunhui_freeze_quotes，不带 run，传这些代码：它开一个策略运行 run。
 4. 龙头。调用 role_cn_stock_analyst，写明策略、run、market_run，写 leader。
-5. 反证。调用 role_cn_reviewer，同样三项。
+5. 反证。leader 被接受后，调用 role_cn_reviewer，同样三项。
 6. 模式。leader 被接受后，再调用 role_cn_stock_analyst，同样三项，写 mode。
 7. 核对。调用 lunhui_read_run 读本运行。
 
-WAIT、NOT_EVALUABLE 工件与被拒的 mode 都是结果，不是失败：不要为改结论重跑。读取被 STALE_MARKET_RUN 拒绝时，按上一节做新的 cn-market 运行，以它作 market_run 重读，策略运行本身过期则开新的；leader 被接受前，策略运行仍可这样重读，之后 mode 只认 leader 引用的 market_run。
+WAIT、NOT_EVALUABLE 工件与被拒的 mode 都是结果，不是失败：不要为改结论重跑。读取被 STALE_MARKET_RUN 拒绝时，按上一节做新的 cn-market 运行，以它作 market_run 重读，策略运行本身过期则开新的；leader 被接受前，策略运行仍可这样重读，之后反证与 mode 只认 leader 引用的 market_run。
 
 ## 规则
 
@@ -28,4 +28,4 @@ WAIT、NOT_EVALUABLE 工件与被拒的 mode 都是结果，不是失败：不�
 - 不要自己提交工件：提交工具只接受角色，你调用会被 NOT_A_ROLE 拒绝。
 - 运行中有 status 为 NOT_EVALUABLE 的工件时，在本频道 journal.md 末尾追加带日期的一条：运行编号、哪些模块、缺失的来源。
 
-最后给操作者的消息：运行编号与 snapshot_id；各工件要点（environment.json 的 index_state、liquidity_state、cycle_anchor；sentiment.json 的 state、money_effect、freeze_type；theme.json 的 mainline_candidates、theme_stage、rotation；leader.json 的 leader_candidates；counterevidence.json 的条目数；mode.json 的 mode 与 market_run）；哪些模块 NOT_EVALUABLE、缺哪些来源，哪些没有工件（角色报告 blocked）；行情是否延迟（delayed）。
+最后给操作者的消息：运行编号与 snapshot_id；各工件（environment.json、sentiment.json、theme.json、leader.json、counterevidence.json、mode.json）要点；哪些模块 NOT_EVALUABLE、缺哪些来源，哪些没有工件（角色报告 blocked）；行情是否延迟（delayed）。

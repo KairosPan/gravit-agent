@@ -53,6 +53,10 @@ test("lunhui-run.md states the strategy channel's order after the cn-market one"
   assert.ok(leader >= 0 && leader < reviewer && reviewer < mode && at("lunhui_read_run", mode) > mode, "leader, reviewer, mode, then the run read back");
   assert.ok(leader < at("写 leader") && at("写 leader") < reviewer && mode < at("写 mode"), "the first analyst call writes the leader, the second the mode");
   assert.ok(part.slice(reviewer, mode).includes("被接受"), "the mode waits for the leader's acceptance");
+  assert.ok(part.slice(at("写 leader"), reviewer).includes("被接受"), "the reviewer waits for the leader's acceptance too - a review read before it is NOT_EVALUABLE for good");
+  const pick = part.slice(at("mainline_candidates"), at("lunhui_freeze_quotes"));
+  assert.ok(pick.includes("evidence-boards.json") && pick.includes("evidence-limit-up.json"), "the members and pools are named where they live - lunhui_read_run returns headlines only");
+  assert.doesNotMatch(text, /先冻结新的/, "a fresh unread market run is unsealed and refused");
   for (const word of ["market_run", "1–4", "sh60", "sz00", "WAIT", "NOT_EVALUABLE", "被拒的 mode", "STALE_MARKET_RUN", "重读"]) assert.ok(part.includes(word), `carries ${word}`);
   assert.doesNotMatch(text, /不能改引/, "a sealed strategy run can be re-read with a fresh market run");
   const stale = part.slice(part.indexOf("STALE_MARKET_RUN"));
