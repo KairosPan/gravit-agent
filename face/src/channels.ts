@@ -9,7 +9,7 @@
  * @module
  */
 import { constants } from "node:fs";
-import { cp, lstat, open, readdir, readFile, stat, type FileHandle } from "node:fs/promises";
+import { cp, lstat, open, readdir, readFile, realpath, stat, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { load } from "js-yaml";
@@ -334,11 +334,30 @@ function headlineOf(json: Record<string, unknown>, fields: readonly string[]): R
   return headline;
 }
 
+/** Whether `path` is still a real directory whose realpath is exactly `expected` - the listed
+ * directory, not one swapped for a link since, nor reached through one (the idea of runs.mjs's
+ * `stillResolved`). O_NOFOLLOW guards only a path's last component, so each directory a read
+ * passes through is checked this way just before the read. Any failure is false. */
+async function stillAt(path: string, expected: string): Promise<boolean> {
+  try {
+    return (await lstat(path)).isDirectory() && (await realpath(path)) === expected;
+  } catch {
+    return false;
+  }
+}
+
 /** Every regular one-link file directly in a run directory, by its lstat size - no content read,
- * a link or a hard link counted as nothing, an entry gone since the listing skipped. */
-async function runBytes(runDir: string): Promise<number> {
+ * a link or a hard link counted as nothing, an entry gone since the listing skipped. Null when the
+ * directory itself can no longer be listed - gone or unreadable since the listing. */
+async function runBytes(runDir: string): Promise<number | null> {
+  let names: string[];
+  try {
+    names = await readdir(runDir);
+  } catch {
+    return null;
+  }
   let total = 0;
-  for (const name of await readdir(runDir)) {
+  for (const name of names) {
     try {
       const info = await lstat(join(runDir, name));
       if (info.isFile() && info.nlink === 1) total += info.size;
@@ -351,11 +370,16 @@ async function runBytes(runDir: string): Promise<number> {
  * The runs card's blocks from a channel's `analysis/` (modules spec §5.11): run directories by the
  * id form, newest first, the newest {@link ANALYSIS_RUNS_CAP} read and listed and the rest
  * counted. Only a real directory is read: an `analysis` link could point anywhere outside the
- * strategy, and what is read here reaches the page. The evidence files are never opened. Throws
- * when `analysis/` is absent or cannot be read.
+ * strategy, and what is read here reaches the page. Just before a run's reads, `analysis/` and the
+ * run directory are checked to be still where the listing found them ({@link stillAt}); a run
+ * that fails the check, or whose directory can no longer be listed, is skipped - not listed, not
+ * counted. The evidence files are never opened. Throws when the strategy directory or
+ * `analysis/` is absent or cannot be read.
  */
-async function readAnalysisRuns(analysisDir: string): Promise<AnalysisRuns> {
+async function readAnalysisRuns(strategyDir: string): Promise<AnalysisRuns> {
   const out: AnalysisRuns = { runs: [], runsOmitted: 0, latestRun: null };
+  const analysisDir = join(strategyDir, "analysis");
+  const realAnalysis = join(await realpath(strategyDir), "analysis");
   if (!(await lstat(analysisDir)).isDirectory()) return out;
   /* run directories only - a link, a file or a stray name is not a run - newest first by id,
    * which opens with the run's UTC second, so name order is time order */
@@ -367,6 +391,7 @@ async function readAnalysisRuns(analysisDir: string): Promise<AnalysisRuns> {
   out.runsOmitted = Math.max(0, runs.length - ANALYSIS_RUNS_CAP);
   for (const run of runs.slice(0, ANALYSIS_RUNS_CAP)) {
     const runDir = join(analysisDir, run);
+    if (!(await stillAt(analysisDir, realAnalysis)) || !(await stillAt(runDir, join(realAnalysis, run)))) continue;
     const read = await readBoundedJson(join(runDir, "run.json"), RUN_MANIFEST_MAX_BYTES);
     const manifest = read?.parsed === true && isRecord(read.json) ? read.json : {};
     const artifacts: RunRow["artifacts"] = {};
@@ -380,6 +405,8 @@ async function readAnalysisRuns(analysisDir: string): Promise<AnalysisRuns> {
       };
       whole[name] = { headline, json: artifact.json };
     }
+    const bytes = await runBytes(runDir);
+    if (bytes === null) continue;
     const row: RunRow = {
       run,
       asOf: stringOrNull(manifest.as_of),
@@ -388,7 +415,7 @@ async function readAnalysisRuns(analysisDir: string): Promise<AnalysisRuns> {
       kind: manifest.kind === "market" || manifest.kind === "strategy" ? manifest.kind : null,
       artifacts,
       marketRun: stringOrNull(whole.mode?.json.market_run),
-      bytes: await runBytes(runDir),
+      bytes,
     };
     out.runs.push(row);
     if (out.latestRun === null && row.sealed && Object.keys(whole).length > 0) {
@@ -453,7 +480,9 @@ export async function readChannelBody(dir: string): Promise<ChannelBody> {
     });
     body.backtests = rows.map((r) => ({ file: r.file, bytes: r.bytes }));
     const newest = rows.find((r) => r.dated !== null);
-    if (newest !== undefined) {
+    /* the directory checked again just before the read: one swapped for a link since the listing
+     * is not followed */
+    if (newest !== undefined && (await stillAt(backtestsDir, join(await realpath(dir), "backtests")))) {
       /* bounded as the run files are; anything unread still lists, only the summary is lost */
       const read = await readBoundedJson(join(backtestsDir, newest.file), BACKTEST_MAX_BYTES, BACKTEST_MAX_DISK_BYTES);
       if (read?.parsed === true) body.latest = { file: newest.file, json: read.json };
@@ -461,8 +490,8 @@ export async function readChannelBody(dir: string): Promise<ChannelBody> {
   } catch { /* no backtests/ yet, or not a directory */ }
 
   try {
-    Object.assign(body, await readAnalysisRuns(join(dir, "analysis")));
-  } catch { /* no analysis/ yet */ }
+    Object.assign(body, await readAnalysisRuns(dir));
+  } catch { /* no analysis/ yet, not a directory, or its listing failed */ }
 
   try {
     const entries = await readdir(dir, { withFileTypes: true });

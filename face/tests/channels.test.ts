@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readdir, writeFile, realpath, stat, rm, symlink, link } from "node:fs/promises";
+import fsPromises, { lstat, mkdtemp, mkdir, readdir, rename, writeFile, realpath, stat, rm, symlink, link } from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -288,11 +289,33 @@ async function makeRun(
   return { run, runDir, manifest };
 }
 
-/** Every file's size directly in a run directory - the row's `bytes`, evidence included. */
+/** Every regular one-link file's lstat size directly in a run directory - the row's `bytes`,
+ * evidence included, by the implementation's rule. */
 async function filesBytes(runDir: string): Promise<number> {
   let total = 0;
-  for (const name of await readdir(runDir)) total += (await stat(join(runDir, name))).size;
+  for (const name of await readdir(runDir)) {
+    const info = await lstat(join(runDir, name));
+    if (info.isFile() && info.nlink === 1) total += info.size;
+  }
   return total;
+}
+
+/** Hook `readdir` through the builtin's live ESM exports, so channels.ts's own named import sees
+ * it: the first listing of `listed` returns, then `swap` runs - landing between the listing and
+ * the reads that follow it. Restored after the test. */
+function swapAfterListing(t: { mock: { method: Function; restoreAll(): void }; after(fn: () => void): void }, listed: string, swap: () => Promise<void>): void {
+  const original = fsPromises.readdir;
+  let fired = false;
+  t.mock.method(fsPromises, "readdir", async (...args: unknown[]) => {
+    const names = await (original as any)(...args);
+    if (!fired && args[0] === listed) {
+      fired = true;
+      await swap();
+    }
+    return names;
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
 }
 
 const SENTIMENT = {
@@ -430,6 +453,69 @@ test("readChannelBody: a linked analysis/, a linked run file and a hard-linked o
   assert.equal(second.marketRun, null);
   assert.equal(second.bytes, ownBytes); // a link, symbolic or hard, counts as nothing
   assert.equal(body.latestRun, null); // the one with an artifact is not known sealed
+  assert.doesNotMatch(JSON.stringify(body), /OUTSIDE-ONLY/);
+});
+
+test("readChannelBody: a run directory swapped for a link after the listing is not listed, its files never read", async (t) => {
+  const dir = await strategyDir("face-runs-swap-");
+  const kept = await makeRun(dir, new Date("2026-10-22T01:00:00Z"), { artifacts: { "mode.json": MODE } });
+  const swapped = await makeRun(dir, new Date("2026-10-23T01:00:00Z"));
+  // elsewhere: a valid sealed run with an artifact the card must never forward
+  const outside = await strategyDir("face-runs-swap-outside-");
+  const foreign = await makeRun(outside, new Date("2026-10-23T01:00:00Z"), { artifacts: { "mode.json": { ...MODE, mode: "OUTSIDE-ONLY" } } });
+  swapAfterListing(t, join(dir, "analysis"), async () => {
+    await rename(swapped.runDir, `${swapped.runDir}-moved`);
+    await symlink(foreign.runDir, swapped.runDir);
+  });
+  const body = await readChannelBody(dir);
+  assert.deepEqual(body.runs.map((r) => r.run), [kept.run]);
+  assert.equal(body.latestRun?.run, kept.run);
+  assert.doesNotMatch(JSON.stringify(body), /OUTSIDE-ONLY/);
+});
+
+test("readChannelBody: an analysis/ swapped for a link after the listing lists nothing from it", async (t) => {
+  const dir = await strategyDir("face-runs-swapdir-");
+  const made = await makeRun(dir, new Date("2026-10-23T01:00:00Z"));
+  const outside = await strategyDir("face-runs-swapdir-outside-");
+  await mkdir(join(outside, "analysis", made.run), { recursive: true });
+  await writeFile(join(outside, "analysis", made.run, "run.json"), JSON.stringify({ kind: "market", as_of: "OUTSIDE-ONLY", sealed_at: "x" }));
+  swapAfterListing(t, join(dir, "analysis"), async () => {
+    await rename(join(dir, "analysis"), join(dir, "analysis-moved"));
+    await symlink(join(outside, "analysis"), join(dir, "analysis"));
+  });
+  const body = await readChannelBody(dir);
+  assert.deepEqual(body.runs, []);
+  assert.doesNotMatch(JSON.stringify(body), /OUTSIDE-ONLY/);
+});
+
+test("readChannelBody: a run directory gone between the listing and its read is skipped; the other runs still list", async (t) => {
+  const dir = await strategyDir("face-runs-gone-");
+  const kept = await makeRun(dir, new Date("2026-10-22T01:00:00Z"));
+  const gone = await makeRun(dir, new Date("2026-10-23T01:00:00Z"));
+  // removed after its own checks passed, just as its byte count lists it
+  const original = fsPromises.readdir;
+  t.mock.method(fsPromises, "readdir", async (...args: unknown[]) => {
+    if (args[0] === gone.runDir) await rm(gone.runDir, { recursive: true });
+    return (original as any)(...args);
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  const body = await readChannelBody(dir);
+  assert.deepEqual(body.runs.map((r) => r.run), [kept.run]);
+});
+
+test("readChannelBody: a backtests/ swapped for a link after its listing has its newest file never read", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "face-bt-swap-"));
+  await mkdir(join(dir, "backtests"));
+  await writeFile(join(dir, "backtests", "2026-10-01-run.json"), JSON.stringify({ n_days: 1 }));
+  const outside = await mkdtemp(join(tmpdir(), "face-bt-swap-outside-"));
+  await writeFile(join(outside, "2026-10-01-run.json"), JSON.stringify({ marker: "OUTSIDE-ONLY" }));
+  swapAfterListing(t, join(dir, "backtests"), async () => {
+    await rename(join(dir, "backtests"), join(dir, "backtests-moved"));
+    await symlink(outside, join(dir, "backtests"));
+  });
+  const body = await readChannelBody(dir);
+  assert.equal(body.latest, null);
   assert.doesNotMatch(JSON.stringify(body), /OUTSIDE-ONLY/);
 });
 
