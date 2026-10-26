@@ -286,10 +286,18 @@ test("freeze: a refusal after a freeze opened its own run names the run id, and 
 test("freeze: on a Saturday the limit-up pools are asked for the previous trading day's date", async (t) => {
   const root = await strategiesRoot(t);
   const { urls } = mockFetch(t, await fixtures(t));
-  const { tools } = mount(root, undefined, {}, new Date("2026-10-24T02:00:00.000Z"));
-  await tools["limit-up"].execute({ strategy: "cn-market" }, exec());
+  const { service, tools } = mount(root, undefined, {}, new Date("2026-10-24T02:00:00.000Z"));
+  const saturday = JSON.parse(await tools["limit-up"].execute({ strategy: "cn-market" }, exec()));
   assert.equal(urls.length, 3);
   for (const url of urls) assert.equal(url.searchParams.get("date"), "20261023");
+  // The run records the trading day the pools belong to, the previous Friday, beside the wall clock.
+  assert.equal(saturday.session, "2026-10-23");
+  assert.equal(saturday.as_of, "2026-10-24T02:00:00.000Z");
+  const dir = runDir(root, "cn-market", saturday.run);
+  assert.equal((await readJson(dir, "evidence-limit-up.json")).session, "2026-10-23");
+  assert.deepEqual((await readJson(dir, "run.json")).evidence.map((e: any) => e.session), ["2026-10-23"]);
+  const sealed = await service.sealRun("cn-market", saturday.run);
+  assert.deepEqual([sealed.session, sealed.as_of], ["2026-10-23", "2026-10-24T02:00:00.000Z"]);
   // Before 09:15 on a trading day, the previous session too: Monday 2026-10-26 08:00 in China.
   const early = mount(root, undefined, {}, new Date("2026-10-26T00:00:00.000Z"));
   urls.length = 0;
@@ -328,8 +336,8 @@ test("freeze: quotes refuses a bad symbol list with INVALID_SYMBOL before any fe
   assert.deepEqual(reply.derived, []);
   assert.equal(reply.host, "qt.gtimg.cn,web.ifzq.gtimg.cn");
   const evidence = await readJson(runDir(root, "alpha", reply.run), "evidence-quotes.json");
-  assert.deepEqual(evidence.items.map((item: any) => [item.kind, item.symbol]), [
-    ["index", "sh000001"], ["equity", "sh600519"], ["history", "sh000001"], ["history", "sh600519"],
+  assert.deepEqual(evidence.items.map((item: any) => [item.kind, item.symbol, item.instrument]), [
+    ["quote", "sh000001", "index"], ["quote", "sh600519", "equity"], ["history", "sh000001", undefined], ["history", "sh600519", undefined],
   ]);
   assert.ok(evidence.items[2].bars.length > 0);
 });
@@ -435,4 +443,42 @@ test("freeze: two freezes of different sources on one run at once both land", as
   const manifest = await readJson(dir, "run.json");
   assert.deepEqual(manifest.evidence.map((e: any) => e.source).sort(), ["boards", "limit-up"]);
   assert.equal((await readJson(dir, "metrics.json")).freezes, 2);
+});
+
+test("freeze: every row records the session its data belongs to in the evidence file, its run.json entry and the reply", async (t) => {
+  const root = await strategiesRoot(t);
+  const { tools } = mount(root, await fixtures(t));
+  const { run } = JSON.parse(await tools.index.execute({ strategy: "cn-market" }, exec()));
+  await tools["limit-up"].execute({ strategy: "cn-market", run }, exec());
+  await tools.boards.execute({ strategy: "cn-market", run, boards: ["BK0715"] }, exec());
+  const quotes = JSON.parse(await tools.quotes.execute({ strategy: "cn-market", run, symbols: ["sh000001"] }, exec()));
+  assert.equal(quotes.session, "2026-10-23");
+  const dir = runDir(root, "cn-market", run);
+  const manifest = await readJson(dir, "run.json");
+  assert.deepEqual(manifest.evidence.map((e: any) => [e.source, e.session]), [
+    ["index", "2026-10-23"], ["limit-up", "2026-10-23"], ["boards", "2026-10-23"], ["quotes", "2026-10-23"],
+  ]);
+  for (const source of ["index", "limit-up", "boards", "quotes"]) assert.equal((await readJson(dir, `evidence-${source}.json`)).session, "2026-10-23", source);
+});
+
+test("freeze: a code repeated inside one pool reply keeps its first row and counts the duplicates", async (t) => {
+  const root = await strategiesRoot(t);
+  const doubled = await fixtures(t, async (dir) => {
+    const reply = JSON.parse(await readFile(join(dir, "zt-pool.json"), "utf8"));
+    const first = reply.data.pool[0];
+    reply.data.pool.push({ ...first, n: "后来的重复行" }, { ...first, n: "又一个重复行" });
+    await writeFile(join(dir, "zt-pool.json"), JSON.stringify(reply));
+  });
+  const { tools } = mount(root, doubled);
+  const reply = JSON.parse(await tools["limit-up"].execute({ strategy: "cn-market" }, exec()));
+  assert.equal(reply.duplicates, 2);
+  assert.equal(reply.items, 6 + 3 + 5);
+  const evidence = await readJson(runDir(root, "cn-market", reply.run), "evidence-limit-up.json");
+  const zt = evidence.items.filter((item: any) => item.pool === "zt");
+  assert.equal(zt.length, 6);
+  assert.equal(new Set(zt.map((row: any) => row.code)).size, 6);
+  assert.ok(!zt.some((row: any) => /重复行/.test(row.name)), "the first occurrence is the one kept");
+  // A clean reply says so.
+  const clean = JSON.parse(await mount(root, await fixtures(t)).tools["limit-up"].execute({ strategy: "cn-market" }, exec()));
+  assert.equal(clean.duplicates, 0);
 });

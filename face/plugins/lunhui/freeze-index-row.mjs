@@ -1,7 +1,7 @@
 // face/plugins/lunhui/freeze-index-row.mjs
 /**
  * `lunhui-freeze-index` (modules spec §5.3, A20, A28): `lunhui_freeze_index({ strategy, run? })`
- * freezes the four indices' Tencent quotes (each item the parsed quote, `kind: "index"`) and their
+ * freezes the four indices' Tencent quotes (each item the parsed quote, given `kind: "index"`) and their
  * 120-day daily bars (`kind: "bars"`), then the all-A-shares advance/decline counts from the
  * Eastmoney clist (`kind: "counts"`: counts, page hashes, and the pages' `host` and `delayed`; no
  * row), into a market run's
@@ -12,7 +12,7 @@
 import { refuse } from "./lib/errors.mjs";
 import { deriveCounts, deriveIndex } from "./lib/derive.mjs";
 import { fetchMarketCounts } from "./lib/eastmoney.mjs";
-import { RUN_PARAMETERS, SHARED_BOUNDS, defineFreeze, freezeDeps, hostsOf, idsOf, tencent } from "./lib/freeze-tool.mjs";
+import { RUN_PARAMETERS, SHARED_BOUNDS, defineFreeze, freezeDeps, hostsOf, idsOf, sessionOf, tencent } from "./lib/freeze-tool.mjs";
 import { fetchDailyBars, fetchQuotes } from "./lib/market.mjs";
 
 export const name = "lunhui-freeze-index";
@@ -28,11 +28,13 @@ const BAR_DAYS = 120;
  * @returns {Promise<import("./lib/freeze-tool.mjs").Frozen>}
  */
 async function freeze(fetchImpl, _args, now) {
-  const [quotes, series, counts] = await Promise.all([
+  const [replied, series, counts] = await Promise.all([
     tencent(fetchQuotes(INDICES, { fetchImpl })),
     tencent(Promise.all(INDICES.map((symbol) => fetchDailyBars(symbol, { fetchImpl, days: BAR_DAYS })))),
     fetchMarketCounts({ fetchImpl }),
   ]);
+  // The item's kind is the freeze's to give, not the parser's instrument kind it happens to equal.
+  const quotes = replied.map((quote) => ({ ...quote, kind: "index" }));
   if (!quotes.some((quote) => Number.isFinite(quote.last) && quote.last > 0 && quote.quotedAt))
     throw refuse.noMarketData("腾讯行情");
   // The counts item carries its pages' hosts and delay (A28); the Tencent items need no stamp.
@@ -43,10 +45,11 @@ async function freeze(fetchImpl, _args, now) {
     ...deriveIndex(quotes, idsOf(quotes, (quote) => ["quote", quote.symbol])),
     ...deriveCounts(countsItem, idsOf([countsItem], () => ["counts"])),
   ];
+  const at = now();
   return {
     items,
     derived,
-    meta: { received_at: now().toISOString(), host: hostsOf(["qt.gtimg.cn", "web.ifzq.gtimg.cn", ...host.split(",")]), delayed, truncated: false },
+    meta: { received_at: at.toISOString(), session: sessionOf(at), host: hostsOf(["qt.gtimg.cn", "web.ifzq.gtimg.cn", ...host.split(",")]), delayed, truncated: false },
   };
 }
 

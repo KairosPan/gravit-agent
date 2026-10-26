@@ -6,8 +6,10 @@
  *
  * A freeze's `execute`, in order: `NOT_GRAVIT` for a delegated child; the strategy resolved by name;
  * `WRONG_CHANNEL` for a market freeze outside `cn-market` (or a strategy freeze inside it); the
- * row's own check (`INVALID_SYMBOL`, or the limit-up session's `CALENDAR_UNCOVERED`);
- * `CALENDAR_UNCOVERED` when no calendar table covers today's China date. Nothing before this point touches a run, so none of it counts. Then the run:
+ * row's own check (`INVALID_SYMBOL`); `CALENDAR_UNCOVERED` when no calendar table covers today's
+ * China date, or the latest session whose data can exist - `expectedQuoteDate`, the previous
+ * trading day on a weekend, a holiday or before 09:15 - lies outside the calendar. Nothing before
+ * this point touches a run, so none of it counts. Then the run:
  * with `run` omitted a fresh one is opened (`kind` market in `cn-market`, strategy elsewhere), else
  * the named one is resolved (`BAD_RUN_ID`, `NO_SUCH_RUN`); the rest runs inside the run's mutex -
  * the freeze counted (`TOOL_BUDGET` past eight, A7: a refused call counts), then `RUN_SEALED`, then
@@ -15,7 +17,8 @@
  * comes before the sealed check so every call the run receives is in its count, as A7 has it; both
  * refusals tell the model to open a new run. A provider failure is the row's refusal and writes
  * nothing for that source. A refusal inside a run the call opened itself names that run's id, so
- * the retry passes it as `run`. The reply is the run's summary as JSON text, never a path.
+ * the retry passes it as `run`. The reply is the run's summary as JSON text, never a path: its
+ * `as_of` the wall clock the reply came in, its `session` the trading day the data belongs to.
  */
 import { statSync } from "node:fs";
 import { isAbsolute } from "node:path";
@@ -34,11 +37,27 @@ const tables = loadCalendars();
 
 /** @typedef {(url: string, init?: RequestInit) => Promise<Response>} FetchLike */
 /**
- * What a row's `freeze` returns: the source's rows, the derived items over them, and the meta
- * `addEvidence` records.
+ * What a row's `freeze` returns: the source's rows, the derived items over them, the meta
+ * `addEvidence` records - its `session` from `sessionOf` - and any fields of the row's own for the
+ * reply's summary.
  * @typedef {{ items: Record<string, unknown>[], derived: Record<string, unknown>[],
- *   meta: { received_at: string, host: string, delayed: boolean, truncated: boolean } }} Frozen
+ *   meta: { received_at: string, session: string, host: string, delayed: boolean, truncated: boolean },
+ *   summary?: Record<string, unknown> }} Frozen
  */
+
+/**
+ * The trading day data read at `at` belongs to: `getMarketSession(at).expectedQuoteDate`, the
+ * latest session that has opened. Null - the previous session outside the calendar - is
+ * `CALENDAR_UNCOVERED`; `defineFreeze` refuses that before any run, so here it is only a clock
+ * that crossed into such a day mid-freeze.
+ * @param {Date} at
+ * @returns {string}
+ */
+export function sessionOf(at) {
+  const session = getMarketSession(at).expectedQuoteDate;
+  if (session === null) throw refuse.calendarUncovered();
+  return session;
+}
 
 /**
  * The checked mount of a freeze row: `ctx.lunhuiRuns`, the fetch (`createFixtureFetch` over
@@ -104,15 +123,15 @@ export function defineFreeze({ name, description, parameters, source, kind, chec
         const market = strategy === MARKET_CHANNEL;
         if ((kind === "market" && !market) || (kind === "strategy" && market)) throw refuse.wrongChannel(kind);
         check?.(args, now);
-        const date = getMarketSession(now()).date;
-        if (date === null || coverageOf(date, tables) !== "covered") throw refuse.calendarUncovered();
+        const { date, expectedQuoteDate } = getMarketSession(now());
+        if (date === null || coverageOf(date, tables) !== "covered" || expectedQuoteDate === null) throw refuse.calendarUncovered();
         const opened = args.run === undefined;
         const run = opened ? (await runs.openRun(strategy, market ? "market" : "strategy")).run : args.run;
         return await runs.withRun(strategy, run, async () => {
           await runs.countFreeze(strategy, run);
           const { manifest } = await runs.readRun(strategy, run);
           if (manifest.sealed_at) throw refuse.runSealed();
-          const { items, derived, meta } = await freeze(fetchImpl, args, now);
+          const { items, derived, meta, summary } = await freeze(fetchImpl, args, now);
           const { ids } = await runs.addEvidence(strategy, manifest.run, source, [...items, ...derived], meta);
           const derivedIds = ids.slice(items.length);
           return JSON.stringify({
@@ -120,7 +139,9 @@ export function defineFreeze({ name, description, parameters, source, kind, chec
             strategy,
             source,
             as_of: meta.received_at,
+            session: meta.session,
             items: items.length,
+            ...summary,
             derived: derived.map((item, i) => ({
               id: derivedIds[i],
               measure: item.measure,

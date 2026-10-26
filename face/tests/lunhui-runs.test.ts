@@ -373,7 +373,7 @@ test("a run directory or its analysis/ swapped for a link after createRun is ref
 // The run's states (spec §5.1, A4, A7, A26): open, add evidence, seal, read back.
 
 /** The meta of one source's reply, as a freeze row hands it to `addEvidence`. */
-const meta = { received_at: "2026-10-23T07:00:01Z", host: "push2ex.eastmoney.com", delayed: false, truncated: false };
+const meta = { received_at: "2026-10-23T07:00:01Z", session: "2026-10-23", host: "push2ex.eastmoney.com", delayed: false, truncated: false };
 
 /** A strategies root holding `a` and `b`, each with its THESIS.md; the two strategies' resolved directories. */
 async function twoStrategies(t: Cleanup): Promise<{ a: string, b: string }> {
@@ -391,7 +391,7 @@ test("runs: openRun writes run.json and metrics.json; addEvidence ids items and 
   assert.match(run, /^\d{8}T\d{6}Z-[0-9a-f]{8}$/);
   assert.ok(run.startsWith("20261023T070000Z-"));
   assert.deepEqual((await readRun(dir)).manifest, {
-    run, strategy: "s1", kind: "market", as_of: null, opened_at: "2026-10-23T07:00:00.000Z", sealed_at: null,
+    run, strategy: "s1", kind: "market", as_of: null, session: null, opened_at: "2026-10-23T07:00:00.000Z", sealed_at: null,
     snapshot_id: null, evidence: [], artifacts: [],
   });
   assert.deepEqual(JSON.parse(await readText(dir, "metrics.json")), { freezes: 0, calls: {}, rejections: {}, submitted: [] });
@@ -405,18 +405,19 @@ test("runs: openRun writes run.json and metrics.json; addEvidence ids items and 
   assert.equal(a.bytes, Buffer.byteLength(text));
   assert.equal(a.sha256, createHash("sha256").update(text).digest("hex"));
   assert.deepEqual(JSON.parse(text), {
-    source: "limit-up", received_at: meta.received_at, host: meta.host, delayed: false, truncated: false,
+    source: "limit-up", received_at: meta.received_at, session: "2026-10-23", host: meta.host, delayed: false, truncated: false,
     items: [{ code: "002982", id: a.ids[0] }, { code: "600519", id: a.ids[1] }],
   });
   assert.equal(await modeOf(join(dir, a.file)), 0o600);
   assert.deepEqual((await readRun(dir)).manifest.evidence, [
-    { source: "limit-up", file: a.file, sha256: a.sha256, bytes: a.bytes, received_at: meta.received_at, host: meta.host, delayed: false },
+    { source: "limit-up", file: a.file, sha256: a.sha256, bytes: a.bytes, received_at: meta.received_at, session: "2026-10-23", host: meta.host, delayed: false },
   ]);
 
   const sealed = await sealRun(dir, new Date("2026-10-23T07:00:05Z"));
   assert.match(sealed.snapshot_id ?? "", /^snap_[0-9a-f]{64}$/);
   assert.equal(sealed.snapshot_id, `snap_${createHash("sha256").update(a.sha256).digest("hex")}`);
   assert.equal(sealed.as_of, "2026-10-23T07:00:01Z");
+  assert.equal(sealed.session, "2026-10-23");
   assert.equal(sealed.sealed_at, "2026-10-23T07:00:05.000Z");
   assert.deepEqual((await readRun(dir)).manifest, sealed);
   await rejectsWith(addEvidence(dir, "boards", [{ code: "BK0715" }], meta), "RUN_SEALED");
@@ -443,6 +444,21 @@ test("runs: snapshot_id depends on the evidence bytes, not on the order the sour
   assert.notEqual((await snapshot(["quotes", "boards"], "000001")).snapshot_id, one.snapshot_id);
 });
 
+test("runs: sealRun's session is the latest evidence session, null for a run with no evidence", async (t) => {
+  const strategyDir = await oneStrategy(t);
+  const { dir } = await openRun(strategyDir, "market");
+  await addEvidence(dir, "index", [{ code: "sh000001" }], { ...meta, session: "2026-10-23" });
+  await addEvidence(dir, "quotes", [{ code: "600519" }], { ...meta, received_at: "2026-10-26T00:30:00Z", session: "2026-10-26" });
+  await addEvidence(dir, "boards", [{ code: "BK0715" }], { ...meta, session: "2026-10-22" });
+  assert.deepEqual((await readRun(dir)).manifest.evidence.map((entry) => entry.session), ["2026-10-23", "2026-10-26", "2026-10-22"]);
+  assert.equal((await readRun(dir)).manifest.session, null); // open: no session yet
+  const sealed = await sealRun(dir);
+  assert.equal(sealed.session, "2026-10-26");
+  assert.equal(sealed.as_of, "2026-10-26T00:30:00Z");
+  const empty = await openRun(strategyDir, "strategy");
+  assert.equal((await sealRun(empty.dir)).session, null);
+});
+
 test("runs: a second file for one source is SOURCE_FROZEN; a new source on the same run lands; a source name off the grammar throws a plain Error (host code's bug, never a LunhuiError)", async (t) => {
   const { dir } = await openRun(await oneStrategy(t), "strategy");
   await addEvidence(dir, "quotes", [{ code: "600519" }], meta);
@@ -457,6 +473,30 @@ test("runs: a second file for one source is SOURCE_FROZEN; a new source on the s
     await assert.rejects(addEvidence(dir, bad, [], meta), (error: unknown) => error instanceof Error && !(error instanceof LunhuiError), bad);
   }
   await addEvidence(dir, "x".repeat(31), [], meta); // the longest name the grammar takes
+});
+
+test("runs: the limit-up source holds three full stamped pools under its own 1 MiB cap, and a file over 1 MiB still refuses", async (t) => {
+  const { dir } = await openRun(await oneStrategy(t), "market");
+  // A stamped pool row as the limit-up freeze writes one: about 390 bytes with its id.
+  const row = (pool: string, i: number) => ({
+    pool, c: String(600000 + i), m: 1, n: "示例电力", p: 5120, zdp: 10.04, amount: 412345678, ltsz: 6123456789.0,
+    tshare: 6234567890.0, hs: 6.73, lbc: 3, fbt: 92500, lbt: 92500, fund: 185432100, zbc: 0, hybk: "电力",
+    zttj: { days: 3, ct: 3 }, host: "push2ex.eastmoney.com", delayed: false,
+  });
+  const rows = ["zt", "zb", "yesterday"].flatMap((pool) => Array.from({ length: 500 }, (_, i) => row(pool, i)));
+  const added = await addEvidence(dir, "limit-up", rows, meta);
+  assert.ok(added.bytes > 256 * 1024 && added.bytes <= 1024 * 1024, String(added.bytes));
+  assert.equal(JSON.parse(await readFile(join(dir, added.file), "utf8")).items.length, 1500);
+  const other = await openRun(await oneStrategy(t), "market");
+  await rejectsWith(addEvidence(other.dir, "limit-up", [{ blob: "x".repeat(1024 * 1024) }], meta), "EVIDENCE_TOO_LARGE");
+  await assert.rejects(addEvidence(other.dir, "boards", rows, meta), (error: any) => {
+    assert.equal(error.code, "EVIDENCE_TOO_LARGE");
+    assert.match(error.message, /256 KiB/);
+    assert.match(error.message, /没有写入/);
+    assert.doesNotMatch(error.message, /缩小|范围/); // the freezes take no range to narrow
+    return true;
+  });
+  assert.deepEqual((await readdir(other.dir)).sort(), ["metrics.json", "run.json"]);
 });
 
 test("runs: an evidence file over 256 KiB is EVIDENCE_TOO_LARGE; a run passing 2 MiB is RUN_TOO_LARGE; nothing is written in either case", async (t) => {
@@ -521,7 +561,8 @@ test("runs: an item that is no plain object or carries its own id, and a meta of
   }
   for (const bad of [
     { ...meta, host: "" }, { ...meta, host: undefined }, { ...meta, delayed: "no" }, { ...meta, truncated: undefined },
-    { ...meta, received_at: "soon" }, undefined,
+    { ...meta, received_at: "soon" }, { ...meta, session: undefined }, { ...meta, session: "2026-10-2" },
+    { ...meta, session: "2026-10-23T00:00:00Z" }, { ...meta, session: "2026-13-01" }, undefined,
   ]) {
     await assert.rejects(addEvidence(dir, "quotes", [{ code: "000001" }], bad as never), hostBug, JSON.stringify(bad));
   }

@@ -68,7 +68,7 @@ function fakeExec(header: Record<string, unknown> = {}) {
   return { agent: { session: { header } }, signal: new AbortController().signal };
 }
 
-const META = { received_at: "2026-10-23T07:00:00.000Z", host: "qt.gtimg.cn", delayed: false, truncated: false };
+const META = { received_at: "2026-10-23T07:00:00.000Z", session: "2026-10-23", host: "qt.gtimg.cn", delayed: false, truncated: false };
 
 /** Asserts `promise` rejects with a `LunhuiError` of `code`. */
 async function rejectsWith(promise: Promise<unknown>, code: string) {

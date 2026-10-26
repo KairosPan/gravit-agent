@@ -13,7 +13,7 @@
 import { refuse } from "./lib/errors.mjs";
 import { deriveBoards } from "./lib/derive.mjs";
 import { fetchBoardFundFlow, fetchBoardMembers, fetchBoards } from "./lib/eastmoney.mjs";
-import { RUN_PARAMETERS, SHARED_BOUNDS, defineFreeze, freezeDeps, hostsOf, idsOf } from "./lib/freeze-tool.mjs";
+import { RUN_PARAMETERS, SHARED_BOUNDS, defineFreeze, freezeDeps, hostsOf, idsOf, sessionOf } from "./lib/freeze-tool.mjs";
 
 export const name = "lunhui-freeze-boards";
 export const inject = ["tools", "lunhuiRuns"];
@@ -57,11 +57,13 @@ async function freeze(fetchImpl, args, now) {
   const items = [...boards, ...memberItems, ...flow.rows.map((row) => ({ kind: "flow", ...row, ...served(flow) }))];
   const derived = deriveBoards(boards, memberItems, idsOf(boards, (board) => ["board", board.code]));
   const replies = [list, ...members, flow];
+  const at = now();
   return {
     items,
     derived,
     meta: {
-      received_at: now().toISOString(),
+      received_at: at.toISOString(),
+      session: sessionOf(at),
       host: hostsOf(replies.map((reply) => reply.host)),
       delayed: replies.some((reply) => reply.delayed),
       truncated: members.some((reply) => reply.truncated),

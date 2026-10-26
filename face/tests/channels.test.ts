@@ -280,7 +280,7 @@ async function makeRun(
 ): Promise<{ run: string; runDir: string; manifest: { as_of: string | null; snapshot_id: string | null } | null }> {
   const { run, dir: runDir } = await openRun(dir, opts.kind ?? "strategy", now);
   await addEvidence(runDir, "quotes", [{ symbol: "sh600000", note: "EVIDENCE-ONLY" }], {
-    received_at: now.toISOString(), host: "qt.gtimg.cn", delayed: false, truncated: false,
+    received_at: now.toISOString(), session: now.toISOString().slice(0, 10), host: "qt.gtimg.cn", delayed: false, truncated: false,
   });
   const manifest = opts.open === true ? null : await sealRun(runDir, new Date(now.getTime() + 1000));
   for (const [file, value] of Object.entries(opts.artifacts ?? {})) {

@@ -390,8 +390,8 @@ export async function writeMetrics(dir, metrics) {
 
 /**
  * A run's `run.json` (spec §5.1).
- * @typedef {{ source: string, file: string, sha256: string, bytes: number, received_at: string, host: string, delayed: boolean }} EvidenceEntry
- * @typedef {{ run: string, strategy: string, kind: "market" | "strategy", as_of: string | null, opened_at: string,
+ * @typedef {{ source: string, file: string, sha256: string, bytes: number, received_at: string, session: string, host: string, delayed: boolean }} EvidenceEntry
+ * @typedef {{ run: string, strategy: string, kind: "market" | "strategy", as_of: string | null, session: string | null, opened_at: string,
  *   sealed_at: string | null, snapshot_id: string | null, evidence: EvidenceEntry[], artifacts: string[] }} RunManifest
  * @typedef {{ freezes: number, calls: Record<string, number>, rejections: Record<string, string[]>, submitted: string[] }} RunMetrics
  */
@@ -399,8 +399,23 @@ export async function writeMetrics(dir, metrics) {
 /** A source's name, as a freeze row hands it: the host's own, so a bad one is host code's bug. */
 const SOURCE_RE = /^[a-z][a-z-]{0,30}$/;
 
-/** The largest evidence file `addEvidence` writes - what `readText` reads back (spec §5.3). */
+/** The largest evidence file `addEvidence` writes for a source with no cap of its own (spec §5.3). */
 const MAX_EVIDENCE_BYTES = 256 * 1024;
+
+/**
+ * The sources with a cap of their own: `limit-up`'s three pools of up to 500 stamped rows each come
+ * to about 585 KB, so its file may reach 1 MiB (spec §12). `readText`'s 256 KiB bound does not
+ * reach such a file; nothing reads evidence back yet.
+ */
+const EVIDENCE_CAPS = new Map([["limit-up", 1024 * 1024]]);
+
+/** A trading day, `YYYY-MM-DD`. */
+const SESSION_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** A byte count as the refusals say it: whole MiB when it is one, else KiB. */
+function sizeWord(bytes) {
+  return bytes % (1024 * 1024) === 0 ? `${bytes / 1024 / 1024} MiB` : `${bytes / 1024} KiB`;
+}
 
 /** The largest a run's evidence files grow together (spec §5.3). */
 const MAX_RUN_EVIDENCE_BYTES = 2 * 1024 * 1024;
@@ -471,7 +486,7 @@ export async function openRun(strategyDir, kind, now = new Date()) {
   const run = newRunId(now);
   const dir = await createRun(strategyDir, run);
   const manifest = {
-    run, strategy: basename(strategyDir), kind, as_of: null, opened_at: now.toISOString(), sealed_at: null,
+    run, strategy: basename(strategyDir), kind, as_of: null, session: null, opened_at: now.toISOString(), sealed_at: null,
     snapshot_id: null, evidence: [], artifacts: [],
   };
   await writeNew(dir, "run.json", `${JSON.stringify(manifest, null, 2)}\n`);
@@ -481,20 +496,22 @@ export async function openRun(strategyDir, kind, now = new Date()) {
 
 /**
  * Freeze one source's reply into an open run: `evidence-<source>.json` holding `{ source,
- * received_at, host, delayed, truncated, items }`, each item given its `evidenceId` (computed
- * before the id is added), written new, then listed in `run.json` with its sha256 and size.
- * Refusals, each writing nothing: `RUN_SEALED` when the run is sealed; `SOURCE_FROZEN` when the run
- * already lists the source or a file holds its name; `EVIDENCE_TOO_LARGE` when the file would pass
- * 256 KiB; `RUN_TOO_LARGE` when the run's evidence would pass 2 MiB. A source off `SOURCE_RE`, items
- * that are not an array of plain objects without an `id` of their own, a `received_at` that is no
- * date, an empty `host` or a `delayed` or `truncated` that is not a boolean are host code's bug, a
+ * received_at, session, host, delayed, truncated, items }`, each item given its `evidenceId`
+ * (computed before the id is added), written new, then listed in `run.json` with its sha256, size
+ * and `session` - the trading day its data belongs to, `YYYY-MM-DD`. Refusals, each writing
+ * nothing: `RUN_SEALED` when the run is sealed; `SOURCE_FROZEN` when the run already lists the
+ * source or a file holds its name; `EVIDENCE_TOO_LARGE` when the file would pass the source's cap -
+ * 256 KiB, 1 MiB for `limit-up` (`EVIDENCE_CAPS`); `RUN_TOO_LARGE` when the run's evidence would
+ * pass 2 MiB. A source off `SOURCE_RE`, items that are not an array of plain objects without an
+ * `id` of their own, a `received_at` that is no date, a `session` that is no `YYYY-MM-DD` date, an
+ * empty `host` or a `delayed` or `truncated` that is not a boolean are host code's bug, a
  * `TypeError`. A
  * `run.json` write that fails removes the evidence file it followed. Not serialized here: two
  * calls on one run at once are the caller's to order (the service's run mutex).
  * @param {string} dir a run directory `openRun` or `resolveRun` returned
  * @param {string} source e.g. `limit-up`
  * @param {unknown[]} items the source's rows
- * @param {{ received_at: string, host: string, delayed: boolean, truncated: boolean }} meta
+ * @param {{ received_at: string, session: string, host: string, delayed: boolean, truncated: boolean }} meta
  * @returns {Promise<{ file: string, sha256: string, bytes: number, ids: string[] }>}
  */
 export async function addEvidence(dir, source, items, meta) {
@@ -505,17 +522,19 @@ export async function addEvidence(dir, source, items, meta) {
     // The id is addEvidence's to give, so a stored item and its id always agree.
     if (Object.hasOwn(item, "id")) throw new TypeError(`lunhui: evidence item ${i} carries an id of its own`);
   });
-  const { received_at, host, delayed, truncated } = meta ?? {};
+  const { received_at, session, host, delayed, truncated } = meta ?? {};
   if (typeof received_at !== "string" || Number.isNaN(Date.parse(received_at))) throw new TypeError(`lunhui: received_at is a date, not ${JSON.stringify(received_at)}`);
+  if (typeof session !== "string" || !SESSION_RE.test(session) || Number.isNaN(Date.parse(session))) throw new TypeError(`lunhui: session is a YYYY-MM-DD date, not ${JSON.stringify(session)}`);
   if (typeof host !== "string" || host === "") throw new TypeError(`lunhui: host is a non-empty string, not ${JSON.stringify(host)}`);
   if (typeof delayed !== "boolean" || typeof truncated !== "boolean") throw new TypeError("lunhui: delayed and truncated are booleans");
   const manifest = await readManifest(dir);
   if (manifest.sealed_at) throw new LunhuiError("RUN_SEALED", "这个运行已封存（已读过上下文），不再接受证据；不带 run 冻结即开启新运行。");
   if (manifest.evidence.some((entry) => entry?.source === source)) throw sourceFrozen();
   const ids = items.map(evidenceId);
-  const text = JSON.stringify({ source, received_at, host, delayed, truncated, items: items.map((item, i) => ({ ...item, id: ids[i] })) });
+  const text = JSON.stringify({ source, received_at, session, host, delayed, truncated, items: items.map((item, i) => ({ ...item, id: ids[i] })) });
   const bytes = Buffer.byteLength(text, "utf8");
-  if (bytes > MAX_EVIDENCE_BYTES) throw new LunhuiError("EVIDENCE_TOO_LARGE", `这一来源的证据超过 ${MAX_EVIDENCE_BYTES / 1024} KiB，未写入；请缩小冻结范围。`);
+  const cap = EVIDENCE_CAPS.get(source) ?? MAX_EVIDENCE_BYTES;
+  if (bytes > cap) throw new LunhuiError("EVIDENCE_TOO_LARGE", `这一来源冻结下来的回复超过单个证据文件的上限 ${sizeWord(cap)}，什么也没有写入。`);
   const total = manifest.evidence.reduce((sum, entry) => sum + (Number(entry?.bytes) || 0), 0);
   if (total + bytes > MAX_RUN_EVIDENCE_BYTES) throw new LunhuiError("RUN_TOO_LARGE", `这个运行的证据合计将超过 ${MAX_RUN_EVIDENCE_BYTES / 1024 / 1024} MiB，未写入；请开启新运行。`);
   const file = `evidence-${source}.json`;
@@ -527,7 +546,7 @@ export async function addEvidence(dir, source, items, meta) {
   }
   const sha256 = createHash("sha256").update(text).digest("hex");
   try {
-    await writeManifest(dir, { ...manifest, evidence: [...manifest.evidence, { source, file, sha256, bytes, received_at, host, delayed }] });
+    await writeManifest(dir, { ...manifest, evidence: [...manifest.evidence, { source, file, sha256, bytes, received_at, session, host, delayed }] });
   } catch (error) {
     // Never through a run directory since swapped for a link. A cleanup that fails is swallowed,
     // so the run.json error is the one thrown; the orphan file left behind then makes every later
@@ -556,7 +575,9 @@ function sourceFrozen() {
 
 /**
  * Seal the run (spec §5.1, A4): `sealed_at` is `now`, `as_of` the latest `received_at` among its
- * evidence (null with none), and `snapshot_id` `snap_` plus the sha256 of the evidence files'
+ * evidence (null with none), `session` the latest evidence `session` - the trading day the run's
+ * newest data belongs to, which a weekend, holiday or pre-open freeze stamps with the previous
+ * session while its `received_at` is the wall clock - (null with none), and `snapshot_id` `snap_` plus the sha256 of the evidence files'
  * sha256s, sorted and joined by newlines, so it depends on the files' bytes, not the order they
  * came in. A sealed run is returned as it stands.
  * @param {string} dir a run directory `openRun` or `resolveRun` returned
@@ -570,9 +591,14 @@ export async function sealRun(dir, now = new Date()) {
     (best, entry) => (best === null || Date.parse(entry.received_at) > Date.parse(best) ? entry.received_at : best),
     null,
   );
+  // YYYY-MM-DD sorts as it reads, so the greatest string is the latest day.
+  const session = manifest.evidence.reduce(
+    (best, entry) => (typeof entry.session === "string" && (best === null || entry.session > best) ? entry.session : best),
+    null,
+  );
   const digests = manifest.evidence.map((entry) => entry.sha256).sort().join("\n");
   const sealed = {
-    ...manifest, as_of: latest, sealed_at: now.toISOString(),
+    ...manifest, as_of: latest, session, sealed_at: now.toISOString(),
     snapshot_id: `snap_${createHash("sha256").update(digests).digest("hex")}`,
   };
   await writeManifest(dir, sealed);

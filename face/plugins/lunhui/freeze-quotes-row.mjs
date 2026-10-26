@@ -3,12 +3,13 @@
  * `lunhui-freeze-quotes` (modules spec §5.3, A27): `lunhui_freeze_quotes({ strategy, run?, symbols })`
  * freezes stage 0's sample - Tencent quotes and 60-day daily bars for 1-8 symbols, at most four of
  * the four indices and four main-board equities, through `freezeSample` - into a run's
- * `evidence-quotes.json`: one item per quote, then one per history series (`kind: "history"`). No
+ * `evidence-quotes.json`: one item per quote (`kind: "quote"`, the parsed quote's own index or equity
+ * kind kept as `instrument`), then one per history series (`kind: "history"`). No
  * derived item here; the index row derives the turnover. The one freeze a strategy channel uses,
  * and the market channel may use it too. `lib/freeze-tool.mjs` holds the shared steps.
  */
 import { refuse } from "./lib/errors.mjs";
-import { RUN_PARAMETERS, SHARED_BOUNDS, defineFreeze, freezeDeps, tencent } from "./lib/freeze-tool.mjs";
+import { RUN_PARAMETERS, SHARED_BOUNDS, defineFreeze, freezeDeps, sessionOf, tencent } from "./lib/freeze-tool.mjs";
 import { freezeSample, validateSymbols } from "./lib/market.mjs";
 
 export const name = "lunhui-freeze-quotes";
@@ -53,9 +54,12 @@ async function freeze(fetchImpl, args, now) {
   if (!snapshot.quotes.some((quote) => Number.isFinite(quote.last) && quote.last > 0 && quote.quotedAt))
     throw refuse.noMarketData("腾讯行情");
   return {
-    items: [...snapshot.quotes, ...histories.map((history) => ({ kind: "history", ...history }))],
+    items: [
+      ...snapshot.quotes.map((quote) => ({ ...quote, kind: "quote", instrument: quote.kind })),
+      ...histories.map((history) => ({ kind: "history", ...history })),
+    ],
     derived: [],
-    meta: { received_at: snapshot.receivedAt, host: "qt.gtimg.cn,web.ifzq.gtimg.cn", delayed: false, truncated: false },
+    meta: { received_at: snapshot.receivedAt, session: sessionOf(new Date(snapshot.receivedAt)), host: "qt.gtimg.cn,web.ifzq.gtimg.cn", delayed: false, truncated: false },
   };
 }
 

@@ -3,28 +3,34 @@
  * `lunhui-freeze-limit-up` (modules spec §5.3, A20, A25): `lunhui_freeze_limit_up({ strategy, run? })`
  * freezes Eastmoney's 涨停池, 炸板池 and 昨日涨停 into a market run's `evidence-limit-up.json`, each
  * row tagged with its `pool` (`zt`, `zb`, `yesterday`), followed by `deriveLimitUp`'s measures. The
- * session asked for is `getMarketSession(now).expectedQuoteDate`, the latest trading day whose pool
- * can exist - on a weekend or holiday, or before 09:15, the previous session; a null date (the
- * previous session outside the calendar) is `CALENDAR_UNCOVERED`, checked before any run. Each row
- * carries the `host` and `delayed` of the reply that served its pool (A28). `cn-market` only.
+ * session asked for is `sessionOf(now)`, the latest trading day whose pool can exist - on a weekend
+ * or holiday, or before 09:15, the previous session - and it is the session the evidence records;
+ * one outside the calendar `defineFreeze` refuses before any run. A code a pool reply repeats keeps
+ * its first row, so every row has its own key; the reply's `duplicates` counts the rows dropped.
+ * Each row carries the `host` and `delayed` of the reply that served its pool (A28). `cn-market`
+ * only.
  */
-import { refuse } from "./lib/errors.mjs";
-import { deriveLimitUp } from "./lib/derive.mjs";
+import { deriveLimitUp, rowKey } from "./lib/derive.mjs";
 import { fetchLimitUpPools } from "./lib/eastmoney.mjs";
-import { RUN_PARAMETERS, SHARED_BOUNDS, defineFreeze, freezeDeps, idsOf } from "./lib/freeze-tool.mjs";
-import { getMarketSession } from "./lib/market.mjs";
+import { RUN_PARAMETERS, SHARED_BOUNDS, defineFreeze, freezeDeps, idsOf, sessionOf } from "./lib/freeze-tool.mjs";
 
 export const name = "lunhui-freeze-limit-up";
 export const inject = ["tools", "lunhuiRuns"];
 
 /**
- * Before any run: a session whose latest pool date lies outside the calendar (the previous trading
- * day uncovered) is `CALENDAR_UNCOVERED`, so the refusal opens and counts nothing.
- * @param {unknown} _args
- * @param {() => Date} now
+ * A pool's rows with each code's first row only, and how many later rows repeated a code.
+ * @param {string} pool
+ * @param {Record<string, unknown>[]} rows
  */
-function checkSession(_args, now) {
-  if (getMarketSession(now()).expectedQuoteDate === null) throw refuse.calendarUncovered();
+function firstOfEach(pool, rows) {
+  const seen = new Set();
+  const kept = rows.filter((row) => {
+    const key = rowKey(pool, row.code);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return { kept, duplicates: rows.length - kept.length };
 }
 
 /**
@@ -34,18 +40,24 @@ function checkSession(_args, now) {
  * @returns {Promise<import("./lib/freeze-tool.mjs").Frozen>}
  */
 async function freeze(fetchImpl, _args, now) {
-  const session = getMarketSession(now()).expectedQuoteDate;
-  if (session === null) throw refuse.calendarUncovered();
+  const session = sessionOf(now());
   const pools = await fetchLimitUpPools({ date: session.replaceAll("-", ""), fetchImpl });
-  // Each row stamped with the reply that served its pool (A28), before its id is computed.
-  const tag = (pool) => pools[pool].map((row) => ({ pool, ...row, ...pools.served[pool] }));
+  let duplicates = 0;
+  // Each pool deduplicated by its key, then each row stamped with the reply that served its pool
+  // (A28), before its id is computed.
+  const tag = (pool) => {
+    const { kept, duplicates: dropped } = firstOfEach(pool, pools[pool]);
+    duplicates += dropped;
+    return kept.map((row) => ({ pool, ...row, ...pools.served[pool] }));
+  };
   const tagged = { zt: tag("zt"), zb: tag("zb"), yesterday: tag("yesterday") };
   const items = [...tagged.zt, ...tagged.zb, ...tagged.yesterday];
   const derived = deriveLimitUp(tagged, idsOf(items, (row) => [row.pool, row.code]));
   return {
     items,
     derived,
-    meta: { received_at: now().toISOString(), host: pools.host, delayed: pools.delayed, truncated: pools.truncated },
+    meta: { received_at: now().toISOString(), session, host: pools.host, delayed: pools.delayed, truncated: pools.truncated },
+    summary: { duplicates },
   };
 }
 
@@ -65,7 +77,6 @@ export function apply(ctx, config) {
     parameters: { ...RUN_PARAMETERS },
     source: "limit-up",
     kind: "market",
-    check: checkSession,
     freeze,
     ...deps,
   })));

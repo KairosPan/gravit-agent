@@ -31,7 +31,7 @@ const ARTIFACT_MAX_BYTES = 24 * 1024;
  *   strategiesRoot: string,
  *   resolveStrategy(name: unknown): Promise<{ name: string }>,
  *   openRun(strategyName: unknown, kind: "market" | "strategy"): Promise<{ strategy: string, run: string }>,
- *   addEvidence(strategyName: unknown, run: unknown, source: string, items: unknown[], meta: { received_at: string, host: string, delayed: boolean, truncated: boolean }): Promise<{ file: string, sha256: string, bytes: number, ids: string[] }>,
+ *   addEvidence(strategyName: unknown, run: unknown, source: string, items: unknown[], meta: { received_at: string, session: string, host: string, delayed: boolean, truncated: boolean }): Promise<{ file: string, sha256: string, bytes: number, ids: string[] }>,
  *   sealRun(strategyName: unknown, run: unknown): Promise<import("./lib/runs.mjs").RunManifest>,
  *   readRun(strategyName: unknown, run: unknown): Promise<{ manifest: import("./lib/runs.mjs").RunManifest, metrics: import("./lib/runs.mjs").RunMetrics, metricsReset: boolean }>,
  *   withRun<T>(strategyName: unknown, run: unknown, fn: () => Promise<T>): Promise<T>,
