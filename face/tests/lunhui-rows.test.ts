@@ -260,6 +260,7 @@ test("errors: the refusal table opens each message with its code word and names 
     symbolSet: "INVALID_SYMBOL", symbolMix: "INVALID_SYMBOL", boardShape: "INVALID_SYMBOL",
     readFirst: "READ_FIRST", alreadySubmitted: "ALREADY_SUBMITTED", moduleBudget: "TOOL_BUDGET", rejected: "INVALID_ANALYSIS",
     staleMarketRun: "STALE_MARKET_RUN", missingEvidence: "MISSING_EVIDENCE", marketRunDiffers: "MISSING_EVIDENCE",
+    marketRunMissing: "MISSING_EVIDENCE",
   };
   assert.deepEqual(Object.keys(refuse).sort(), Object.keys(codes).sort());
   // One text per code: the rows' BAD_RUN_ID is runs.mjs's own, naming the new tools.

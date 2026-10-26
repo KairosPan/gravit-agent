@@ -59,9 +59,14 @@ export const refuse = {
   calendarUncovered: () =>
     new LunhuiError("CALENDAR_UNCOVERED", "交易日历未覆盖今天（中国时间）；本次未写入任何文件，请告知操作者补充日历表。"),
   internal: () => new LunhuiError("INTERNAL", "内部错误；细节只记入 face 的日志，不回传。可重试一次，仍失败请告知操作者。"),
-  /** A market freeze outside `cn-market`, a market module's tool outside it, or a strategy-only tool inside it (A27). */
+  /**
+   * A market freeze outside `cn-market`, a market module's tool outside it, a strategy-only tool
+   * inside it (A27), or a `market_run` given to a module that reads `cn-market` without one.
+   */
   wrongChannel: (kind) =>
-    kind === "strategy"
+    kind === "marketRun"
+      ? new LunhuiError("WRONG_CHANNEL", "市场频道 cn-market 的运行本身就是市场运行，这里读取时不带 market_run；只有策略频道的运行以 market_run 引用一个市场运行。")
+      : kind === "strategy"
       ? new LunhuiError("WRONG_CHANNEL", "这个工具只用于策略频道，不用于市场频道 cn-market。")
       : kind === "module"
         ? new LunhuiError("WRONG_CHANNEL", "这个模块只用于市场频道 cn-market 的运行，不用于策略频道。")
@@ -79,12 +84,21 @@ export const refuse = {
       "MISSING_EVIDENCE",
       `${what}尚未封存（还没有模块读取过它的上下文），没有可引用的快照、证据与工件；请先完成那个运行的模块分析，或引用一个已封存的运行。`,
     ),
-  /** A mode read citing another market run than the run's accepted leader artifact cites (A5, A27): one market run per strategy run. */
-  marketRunDiffers: (leaderRun) =>
+  /**
+   * A read of `module` (the mode's by default, or the reviewer's) citing another market run than the
+   * run's accepted leader artifact cites (A5, A27): one market run per strategy run.
+   */
+  marketRunDiffers: (leaderRun, module = "mode") =>
     new LunhuiError(
       "MISSING_EVIDENCE",
       `本运行已接受的 leader 工件引用的市场运行是 ${leaderRun ?? "无"}，与这次给出的 market_run 不同；` +
-        "leader 与 mode 须引用同一个市场运行：请以 leader 引用的市场运行读取 mode，或开一个新的策略运行。",
+        `leader 与 ${module} 须引用同一个市场运行：请以 leader 引用的市场运行读取 ${module}，或开一个新的策略运行。`,
+    ),
+  /** A strategy run's read of a module whose `market_run` the schema leaves optional - the reviewer's - given none (A22). */
+  marketRunMissing: (module) =>
+    new LunhuiError(
+      "MISSING_EVIDENCE",
+      `策略频道的运行读取 ${module} 上下文须给 market_run：本运行 leader 工件引用的那个已封存 cn-market 运行；没有它就没有可审查的市场证据与工件。`,
     ),
   // The quotes freeze's symbol list, stage 0's four refusals (its `checkSymbols`).
   symbolShape: () =>

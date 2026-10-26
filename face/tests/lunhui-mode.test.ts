@@ -22,6 +22,7 @@ import * as environmentRow from "../plugins/lunhui/environment-row.mjs";
 import * as sentimentRow from "../plugins/lunhui/sentiment-row.mjs";
 import * as themeRow from "../plugins/lunhui/theme-row.mjs";
 import * as quotesRow from "../plugins/lunhui/freeze-quotes-row.mjs";
+import * as reviewRow from "../plugins/lunhui/review-row.mjs";
 import {
   CARD_BYTES, contract, FALSIFICATION_BYTES, HYPOTHESES, MODE_FOR, REQUIRED_PRECONDITIONS, R_FAMILIES, falsificationOf, previousCard,
 } from "../plugins/lunhui/lib/contracts/mode.mjs";
@@ -369,6 +370,32 @@ test("mode: S01 on EXPANSION with no accepted counterevidence artifact is UNADDR
   assert.equal(stored.mode, "S01");
   assert.deepEqual([stored.market_run, stored.expectation.frozen_version], [market, context.snapshot_id]);
   assert.deepEqual((await service.readRun(S01, run)).metrics.rejections.mode, ["UNADDRESSED_COUNTEREVIDENCE", "UNADDRESSED_COUNTEREVIDENCE", "REFERENCE"]);
+});
+
+test("mode: S01 over a counterevidence the reviewer's own submit tool wrote - its items shown by id, every one addressed, accepted", async (t) => {
+  const mounted = await setup(t);
+  const run = await strategyRun(mounted, S01);
+  const { root, service, read, submit, market } = mounted;
+  const [reviewRead, reviewSubmit] = tools(service, reviewRow);
+  const review = JSON.parse(await reviewRead.execute({ strategy: S01, run, market_run: market }, exec(ROLE)));
+  const quote = idWhere(review, (row) => row.kind === "quote" && row.symbol === "sh600519");
+  const leader = review.artifacts.find((row: any) => row.module === "leader").id as string;
+  const streak = idWhere(review, (row) => row.measure === "streak_distribution");
+  assert.deepEqual(await submitted(reviewSubmit, S01, run, {
+    ...review.example,
+    items: [
+      { id: "x1", against: "leader", kind: "MISSING_EVIDENCE", text: "龙头候选只有一个交易日的报价，地位的持续性待核验。", evidence_ids: [quote, leader] },
+      { id: "x2", against: "sentiment", kind: "RULING_CONFLICT", text: "情绪读数需要分歧之后的联合确认，单日的连板分布不足以说明修复。", evidence_ids: [streak] },
+    ],
+    claims: [{ id: "c1", text: "审查了 leader 工件与所引报价、派生证据。", basis: "CURRENT", evidence_ids: [quote, streak] }],
+  }), { accepted: true, module: "counterevidence", run });
+  const context = JSON.parse(await read.execute({ strategy: S01, run, market_run: market }, exec(ROLE)));
+  assert.deepEqual(context.artifacts[1].headline.items.map((item: any) => [item.id, item.against]), [["x1", "leader"], ["x2", "sentiment"]]);
+  const partial = await refusal(submit, S01, run, registration(context, { addressed: [{ item: "x1", response: "记入限制说明。" }] }));
+  assert.match(partial.message, /^INVALID_ANALYSIS: \[UNADDRESSED_COUNTEREVIDENCE\] analysis\.addressed.*x2/u);
+  assert.deepEqual(await submitted(submit, S01, run, registration(context)), { accepted: true, module: "mode", run });
+  const stored = JSON.parse(await readFile(join(root, S01, "analysis", run, "mode.json"), "utf8"));
+  assert.deepEqual(stored.addressed.map((entry: any) => entry.item), ["x1", "x2"]);
 });
 
 test("mode: S01's preconditions - each present, met with evidence, the minute confirmation unmet: no source - and its card bound to the run - REFERENCE or SCHEMA otherwise", async (t) => {

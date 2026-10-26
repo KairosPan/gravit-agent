@@ -286,7 +286,7 @@ const MARKET_BOUND = ["market_run", "market_snapshot_id"];
 const ARTIFACT_ID = /[a-z]+@snap_[a-f0-9]{64}(?![a-f0-9])/g;
 
 /** A claim's cited id in a module that may cite artifacts: an evidence id or an artifact id. */
-const CITED_ID_PATTERN = "^(?:ev_[a-f0-9]{24}|[a-z]+@snap_[a-f0-9]{64})$";
+export const CITED_ID_PATTERN = "^(?:ev_[a-f0-9]{24}|[a-z]+@snap_[a-f0-9]{64})$";
 
 /**
  * A module's schema merged with the envelope: the envelope's fields, the module's headline fields.
@@ -398,7 +398,7 @@ function rowKind(item) {
  * @param {unknown} raw the submitted artifact, JSON text or a parsed object
  * @param {{ module: string, context: ContextDigest, schema: { required?: string[], properties?: Record<string, unknown> },
  *   owns?: string[], ownedBy?: Record<string, (entry: DigestItem) => boolean>, exemptPaths?: string[],
- *   unknownHeadline?: (field: string, value: unknown) => boolean,
+ *   unknownHeadline?: (field: string, value: unknown) => boolean, scopedFields?: string[],
  *   rules?: (parsed: any, context: ContextDigest) => void }} options
  * `ownedBy[class]` names the cited items that carry an owned class's sentence; a class without
  * an entry needs a derived item (A21). `exemptPaths` names the strings - paths under the artifact,
@@ -406,6 +406,9 @@ function rowKind(item) {
  * scope rule, for names a module's own `rules` bind to frozen items; their evidence ids still bind.
  * `unknownHeadline(field, value)` names a module's own headline values that assert nothing beside
  * UNKNOWN, null and empty - the mode's `WAIT` - for the INSUFFICIENT and NOT_EVALUABLE rules.
+ * `scopedFields` names headline arrays whose entries carry their own `evidence_ids` - the
+ * counterevidence's `items` - each entry's strings scoped by those ids, as a claim's are by its own;
+ * an entry citing no evidence id (only artifact ids, or none) is refused before the scope rule.
  * A rejection (code `INVALID_ANALYSIS`, the module's own rules' included) carries its `category`,
  * through `classifyValidationRejection`, and that category's `repair` from `MODULE_REPAIRS`.
  * @returns {any} the artifact, parsed and copied
@@ -435,7 +438,7 @@ function exemptMatcher(paths) {
 }
 
 /** `validateEnvelope`'s rules, in order. */
-function checkEnvelope(raw, { module, context, schema, owns = [], ownedBy = {}, exemptPaths = [], unknownHeadline, rules }) {
+function checkEnvelope(raw, { module, context, schema, owns = [], ownedBy = {}, exemptPaths = [], unknownHeadline, scopedFields = [], rules }) {
   const entry = MODULES.find((candidate) => candidate.name === module);
   if (!entry || !context) throw new TypeError(`lunhui: no contract context for module ${JSON.stringify(module)}`);
   let artifact = raw;
@@ -465,6 +468,11 @@ function checkEnvelope(raw, { module, context, schema, owns = [], ownedBy = {}, 
         if (!context.artifactIds.has(id)) fail(`${path}: Unknown evidence reference.`);
   }
   const exempt = exemptMatcher(exemptPaths);
+  // An entry scoped by its own ids stands on evidence: an artifact id carries no sentence.
+  for (const field of scopedFields)
+    for (const [index, entry] of artifact[field].entries())
+      if (!entry.evidence_ids.some((id) => context.evidenceIds.has(id)))
+        fail(`analysis.${field}[${index}].evidence_ids: an entry needs an evidence reference (ev_…), not only artifact ids.`);
 
   for (const [index, claim] of artifact.claims.entries()) {
     const path = `analysis.claims[${index}]`;
@@ -486,12 +494,16 @@ function checkEnvelope(raw, { module, context, schema, owns = [], ownedBy = {}, 
       fail(`${path}: Trading, target-price, or account content is outside the research contract.`);
   }
 
-  // The scope rule: a claim's sentences with the claim's ids, every other string with none. An owned
-  // class is carried by a cited item `ownedBy[class]` accepts, a derived item by default.
+  // The scope rule: a claim's sentences with the claim's ids - and a `scopedFields` entry's with its
+  // own - every other string with none. An owned class is carried by a cited item `ownedBy[class]`
+  // accepts, a derived item by default.
+  const ownIds = (field) => artifact[field].flatMap((entry, index) =>
+    textEntries(entry, `analysis.${field}[${index}]`).map(([path, text]) => [path, text, entry.evidence_ids]));
+  const rest = { ...artifact, claims: undefined };
+  for (const field of scopedFields) rest[field] = undefined;
   const scoped = [
-    ...artifact.claims.flatMap((claim, index) =>
-      textEntries(claim, `analysis.claims[${index}]`).map(([path, text]) => [path, text, claim.evidence_ids])),
-    ...textEntries({ ...artifact, claims: undefined }).map(([path, text]) => [path, text, []]),
+    ...["claims", ...scopedFields].flatMap(ownIds),
+    ...textEntries(rest).map(([path, text]) => [path, text, []]),
   ];
   for (const [path, text, ids] of scoped) {
     if (exempt(path)) continue;
@@ -562,8 +574,9 @@ function checkEnvelope(raw, { module, context, schema, owns = [], ownedBy = {}, 
  * as evidence and derived rows do - counted in `truncated` (kind `artifact`) and not citable,
  * and when the contract requires it, it joins `missing` too, so the status expected is
  * `NOT_EVALUABLE`. A `required` entry is a source of this run, `market:<source>` or
- * `market:<module>` of the market run, or a module of this run. An item frozen in both runs keeps
- * this run's entry.
+ * `market:<module>` of the market run, or a module of this run. `requiredAny` is a group of such
+ * entries of which one present is enough; with none present every one of them is missing. An item
+ * frozen in both runs keeps this run's entry.
  * @param {{ module: string, run: string, manifest: { snapshot_id?: string | null, as_of?: string | null, session?: string | null,
  *   evidence: { source: string }[] }, evidence: { source: string, session: string | null, items: Record<string, any>[] }[],
  *   sources: string[], derivedFirst?: string[], derivedView?: (item: any) => Record<string, unknown>,
@@ -574,13 +587,13 @@ function checkEnvelope(raw, { module, context, schema, owns = [], ownedBy = {}, 
  *     artifacts: Record<string, Record<string, any>> } | null,
  *   marketSources?: string[], marketArtifacts?: string[], runArtifacts?: string[], artifacts?: Record<string, Record<string, any>>,
  *   derivedFilter?: (item: any, digest: ContextDigest) => boolean, extra?: Record<string, unknown>,
- *   artifactViews?: Record<string, ArtifactViewBound> }} options
+ *   artifactViews?: Record<string, ArtifactViewBound>, requiredAny?: string[] }} options
  * @returns {{ text: string, digest: ContextDigest }}
  */
 export function buildContext({
   module, run, manifest, evidence, sources, derivedFirst = [], derivedView, priority, hypotheses, schema, hints, example, required,
   marketRun, market = null, marketSources = [], marketArtifacts = [], runArtifacts = [], artifacts = {}, derivedFilter, extra = {},
-  artifactViews = {},
+  artifactViews = {}, requiredAny = [],
 }) {
   const cited = marketRun !== undefined ? market : null;
   const present = new Set(manifest.evidence.map((entry) => entry.source));
@@ -588,6 +601,9 @@ export function buildContext({
   for (const name of Object.keys(cited?.artifacts ?? {})) present.add(`market:${name}`);
   for (const name of Object.keys(artifacts)) present.add(name);
   const missing = required.filter((source) => !present.has(source));
+  // A group of which one is enough: none present, every one of them is missing.
+  if (requiredAny.length > 0 && !requiredAny.some((source) => present.has(source)))
+    missing.push(...requiredAny.filter((source) => !missing.includes(source)));
   const session = manifest.session ?? null;
   const files = [
     ...evidence.filter((file) => sources.includes(file.source)),

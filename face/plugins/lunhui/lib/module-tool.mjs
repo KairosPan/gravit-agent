@@ -53,6 +53,7 @@ const tables = loadCalendars();
  *   marketRun?: "required" | "optional", marketSources?: string[], marketArtifacts?: string[], runArtifacts?: string[],
  *   artifactViews?: Record<string, import("./contract-core.mjs").ArtifactViewBound>,
  *   derivedFilter?: (item: any, digest: import("./contract-core.mjs").ContextDigest) => boolean,
+ *   requiredAny?: string[], scopedFields?: string[], forStrategy?: (strategy: string) => ModuleContract,
  *   extra?: (runs: import("../runs-row.mjs").LunhuiRuns, located: { strategy: string, run: string },
  *     read: { manifest: any, artifacts: Record<string, Record<string, any>>, market: { run: string } | null }) => Promise<Record<string, unknown>>,
  * }} ModuleContract
@@ -61,7 +62,14 @@ const tables = loadCalendars();
  * the derived items it shows. `extra`, read inside the read's `build` - the run sealed, under its
  * mutex, so it reads other runs and the strategy without a lock - gives `buildContext`'s `extra`;
  * it is handed the run's manifest and accepted artifacts and the cited run, and may refuse.
- * `unknownHeadline` is `validateEnvelope`'s.
+ * `unknownHeadline` and `scopedFields` are `validateEnvelope`'s, `requiredAny` `buildContext`'s.
+ *
+ * `forStrategy`, on a contract of channel `any` whose `marketRun` is `"optional"` (the reviewer's),
+ * picks the contract a strategy's read and submit use - its sources, artifacts, rules - by the
+ * resolved strategy name: the picked one's `marketRun` `"required"` makes `market_run` required in
+ * code (refused `MISSING_EVIDENCE`, uncounted, when absent: the schema leaves it optional), and
+ * none forbids it (`WRONG_CHANNEL`, uncounted, when given). The outer contract's `marketRun`
+ * only shapes the parameter.
  */
 
 /**
@@ -120,13 +128,28 @@ export function defineModule({ module, channel, contract, runs }) {
   const marketParameters = marketRun === undefined ? {} : { market_run: { type: "string", description: MARKET_RUN_TEXT, ...(marketRun === "required" ? { required: true } : {}) } };
   const submitMarketText = marketRun === undefined ? "" :
     "信封的 market_run 与 market_snapshot_id 照抄读取时的上下文；引用的市场运行由读取决定，提交不再指定。";
-  const marketText = marketRun === undefined ? "" :
+  const marketText = marketRun === undefined ? "" : contract.forStrategy !== undefined
+    ? "市场频道 cn-market 的运行不带 market_run（给了即 WRONG_CHANNEL）；策略频道的运行须以 market_run 引用一个已封存的 cn-market 运行（缺少即 MISSING_EVIDENCE）：" +
+      "其证据与已接受的工件一并列入上下文，工件可按 <module>@<snapshot_id> 引用，信封另须照抄 market_run 与 market_snapshot_id；" +
+      "引用的运行未封存即 MISSING_EVIDENCE，不存在即 NO_SUCH_RUN，交易日既非本运行的也非前一个交易日即 STALE_MARKET_RUN。" :
     `${marketRun === "required" ? "须" : "可"}以 market_run 引用一个已封存的 cn-market 运行：其证据与已接受的工件一并列入上下文，工件可按 <module>@<snapshot_id> 引用，信封另须照抄 market_run 与 market_snapshot_id；` +
     "引用的运行未封存即 MISSING_EVIDENCE，不存在即 NO_SUCH_RUN，交易日既非本运行的也非前一个交易日即 STALE_MARKET_RUN。";
 
-  /** The `market_run` argument after its shape check, before the run is touched: a run id, or undefined when optional and absent. */
-  const marketRunOf = (value) => {
-    if (marketRun === undefined || (marketRun === "optional" && value === undefined)) return undefined;
+  /** The contract a strategy's read and submit use: `forStrategy`'s pick, else the contract itself. */
+  const activeFor = (strategy) => contract.forStrategy?.(strategy) ?? contract;
+
+  /**
+   * The `market_run` argument after its shape check, before the run is touched: a run id, or
+   * undefined when optional and absent - or, under `forStrategy`, when the picked contract cites none.
+   */
+  const marketRunOf = (active, value) => {
+    if (marketRun === undefined) return undefined;
+    if (active.marketRun === undefined) {
+      if (value !== undefined) throw refuse.wrongChannel("marketRun");
+      return undefined;
+    }
+    if (active.marketRun === "optional" && value === undefined) return undefined;
+    if (value === undefined && marketRun === "optional") throw refuse.marketRunMissing(module);
     if (typeof value !== "string" || !RUN_ID_RE.test(value)) throw refuse.badRunId();
     return value;
   };
@@ -151,17 +174,18 @@ export function defineModule({ module, channel, contract, runs }) {
     async execute(args, _exec) {
       try {
         const strategy = await strategyOf(args.strategy);
-        const asked = marketRunOf(args.market_run);
+        const active = activeFor(strategy);
+        const asked = marketRunOf(active, args.market_run);
         return await runs.readContext(strategy, args.run, module, async ({ manifest, evidence, artifacts }, located) => {
           const market = asked === undefined ? null : await citedRun(runs, asked, manifest.session ?? null);
-          const extra = contract.extra === undefined ? undefined : await contract.extra(runs, located, { manifest, artifacts, market });
+          const extra = active.extra === undefined ? undefined : await active.extra(runs, located, { manifest, artifacts, market });
           const { text, digest } = buildContext({
             module, run: manifest.run, manifest, evidence,
-            sources: contract.sources, derivedFirst: contract.derivedFirst, derivedView: contract.derivedView, priority: contract.priority,
-            hypotheses: contract.hypotheses, schema: contract.schema, hints: contract.hints,
-            example: contract.example, required: contract.required, runArtifacts: contract.runArtifacts, artifacts,
-            derivedFilter: contract.derivedFilter, extra, artifactViews: contract.artifactViews,
-            ...(marketRun === undefined ? {} : { marketRun, market, marketSources: contract.marketSources, marketArtifacts: contract.marketArtifacts }),
+            sources: active.sources, derivedFirst: active.derivedFirst, derivedView: active.derivedView, priority: active.priority,
+            hypotheses: active.hypotheses, schema: active.schema, hints: active.hints,
+            example: active.example, required: active.required, requiredAny: active.requiredAny, runArtifacts: active.runArtifacts, artifacts,
+            derivedFilter: active.derivedFilter, extra, artifactViews: active.artifactViews,
+            ...(active.marketRun === undefined ? {} : { marketRun: active.marketRun, market, marketSources: active.marketSources, marketArtifacts: active.marketArtifacts }),
           });
           digests.set(`${located.strategy}/${located.run}/${module}`, digest);
           return text;
@@ -185,14 +209,15 @@ export function defineModule({ module, channel, contract, runs }) {
       try {
         if (!callerIsRole(exec)) throw refuse.notARole();
         const strategy = await strategyOf(args.strategy);
+        const active = activeFor(strategy);
         let key;
         const result = await runs.submit(strategy, args.run, module, args.analysis, (text, located) => {
           key = `${located.strategy}/${located.run}/${module}`;
           const context = digests.get(key);
           // A row reload while the service lives on: the read is remembered, its digest is not.
           if (context === undefined) throw refuse.readFirst(module);
-          return validateEnvelope(text, { module, context, schema: contract.schema, owns: contract.owns, ownedBy: contract.ownedBy,
-            exemptPaths: contract.exemptPaths, unknownHeadline: contract.unknownHeadline, rules: contract.rules,
+          return validateEnvelope(text, { module, context, schema: active.schema, owns: active.owns, ownedBy: active.ownedBy,
+            exemptPaths: active.exemptPaths, unknownHeadline: active.unknownHeadline, scopedFields: active.scopedFields, rules: active.rules,
           });
         });
         // Accepted: ALREADY_SUBMITTED keeps every later submit from the digest, so it goes.
