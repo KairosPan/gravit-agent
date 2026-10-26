@@ -7,13 +7,14 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import fsPromises, { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { apply, inject, name } from "../plugins/lunhui/runs-row.mjs";
 import { MODULES } from "../plugins/lunhui/lib/modules.mjs";
 import { asToolError, callerIsChild, refuse, upstreamError } from "../plugins/lunhui/lib/errors.mjs";
-import { LunhuiError } from "../plugins/lunhui/lib/runs.mjs";
+import { LunhuiError, RUN_ID_RE, badRunId } from "../plugins/lunhui/lib/runs.mjs";
 
 type Cleanup = { after(fn: () => Promise<unknown>): unknown };
 
@@ -204,6 +205,15 @@ test("errors: upstreamError maps stage 0's provider codes to UPSTREAM_TIMEOUT, U
   // The uncoded fetch failure's detail goes to stderr, never into the refusal.
   assert.equal(stderr.length, 2);
   assert.match(stderr[0], /fetch failed; cause: connect ECONNREFUSED \(ECONNREFUSED\)/);
+  // normalizeQuotes' code-less no-quote errors are NO_MARKET_DATA, naming the provider, with no stderr line.
+  for (const provider of ["腾讯行情", "东方财富"] as const) {
+    for (const message of ["Invalid response", "Empty response", "No usable quotes"]) {
+      const refusal = upstreamError(new Error(message), provider)!;
+      assert.equal(refusal.code, "NO_MARKET_DATA");
+      assert.match(refusal.message, new RegExp(`^NO_MARKET_DATA: ${provider}`));
+    }
+  }
+  assert.equal(stderr.length, 2);
   // Another coded error is the host's own fault: null, which the caller rethrows as INTERNAL.
   assert.equal(upstreamError(coded("INVALID_NOW"), "腾讯行情"), null);
   // A refusal already made passes through; an unknown provider is host code's bug.
@@ -229,11 +239,16 @@ test("errors: the refusal table opens each message with its code word and names 
   const codes: Record<string, string> = {
     notAStrategy: "NOT_A_STRATEGY", badRunId: "BAD_RUN_ID", noSuchRun: "NO_SUCH_RUN", runSealed: "RUN_SEALED",
     sourceFrozen: "SOURCE_FROZEN", toolBudget: "TOOL_BUDGET", notGravit: "NOT_GRAVIT", notARole: "NOT_A_ROLE",
-    calendarUncovered: "CALENDAR_UNCOVERED", internal: "INTERNAL",
+    calendarUncovered: "CALENDAR_UNCOVERED", internal: "INTERNAL", noMarketData: "NO_MARKET_DATA",
   };
   assert.deepEqual(Object.keys(refuse).sort(), Object.keys(codes).sort());
+  // One text per code: the rows' BAD_RUN_ID is runs.mjs's own, naming the new tools.
+  assert.equal(refuse.badRunId().message, badRunId().message);
+  assert.ok(RUN_ID_RE.test("20261023T070000Z-0a1b2c3d"));
+  assert.match(refuse.badRunId().message, /lunhui_read_run/);
+  assert.doesNotMatch(refuse.badRunId().message, /freeze_market_snapshot/);
   for (const [key, code] of Object.entries(codes)) {
-    const error = (refuse as any)[key]();
+    const error = (refuse as any)[key]("腾讯行情");
     assert.ok(error instanceof LunhuiError);
     assert.equal(error.code, code);
     assert.match(error.message, new RegExp(`^${code}: \\S`));
@@ -308,4 +323,27 @@ test("lunhui_read_run: an unexpected failure is INTERNAL, its detail on stderr o
   await rejectsWith(tool.execute({ strategy: "alpha", run }, fakeExec()), "INTERNAL");
   assert.equal(stderr.length, 1);
   assert.match(stderr[0], /EACCES/);
+});
+
+test("lunhui_read_run: an artifact that is a link lists unaccepted; the run directory swapped for a link mid-read refuses NO_SUCH_RUN", async (t) => {
+  const root = await strategiesRoot(t);
+  const { service, tool } = mounted(root);
+  const { run } = await service.openRun("alpha", "strategy");
+  const dir = join(root, "alpha", "analysis", run);
+  await writeFile(join(root, "elsewhere.json"), JSON.stringify({ state: "REPAIR" }));
+  await symlink(join(root, "elsewhere.json"), join(dir, "sentiment.json"));
+  const body = JSON.parse(await tool.execute({ strategy: "alpha", run }, fakeExec()));
+  assert.deepEqual(body.artifacts, [{ module: "sentiment", accepted: false, headline: null }]);
+  // The swap lands between the listing and the read: readdir is hooked through the builtin's
+  // live ESM exports, so the row's own named import sees it.
+  const original = fsPromises.readdir;
+  t.mock.method(fsPromises, "readdir", async (...args: unknown[]) => {
+    const names = await (original as any)(...args);
+    await rename(dir, `${dir}-moved`);
+    await symlink(`${dir}-moved`, dir);
+    return names;
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  await rejectsWith(tool.execute({ strategy: "alpha", run }, fakeExec()), "NO_SUCH_RUN");
 });

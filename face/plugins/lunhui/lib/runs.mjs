@@ -95,9 +95,9 @@ const NOT_A_STRATEGY = {
   analysis: "策略目录里的 analysis/ 不是真实目录（是文件或符号链接），不能存放运行。",
 };
 
-/** @returns {LunhuiError} */
-function badRunId() {
-  return new LunhuiError("BAD_RUN_ID", "运行编号须匹配 ^[A-Za-z0-9_-]{1,64}$，即 freeze_market_snapshot 返回的 run。");
+/** A `run` argument off `RUN_ID_RE`; the rows' `refuse.badRunId` throws this one text too. @returns {LunhuiError} */
+export function badRunId() {
+  return new LunhuiError("BAD_RUN_ID", "运行编号须匹配 ^[A-Za-z0-9_-]{1,64}$，即冻结工具回复或 lunhui_read_run 里的 run。");
 }
 
 /** @returns {LunhuiError} */
@@ -107,14 +107,17 @@ function noSuchRun() {
 
 /**
  * A run file that is missing, is not a regular file the run wrote itself, or is too large to read.
+ * Its `unusableFile` names the file, so a caller can tell it from the run directory itself gone
+ * (`noSuchRun`), which shares the code.
  * @param {string} name
- * @returns {LunhuiError}
+ * @returns {LunhuiError & { unusableFile: string }}
  */
 function unusableFile(name) {
-  return new LunhuiError(
+  const error = new LunhuiError(
     "NO_SUCH_RUN",
     `运行目录里没有可用的 ${name}：须是这个运行自己写下、不超过 ${MAX_READ_BYTES / 1024} KiB 的普通文件，不是符号链接、目录或另有硬链接的文件。`,
   );
+  return Object.assign(error, { unusableFile: name });
 }
 
 /**

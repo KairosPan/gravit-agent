@@ -6,7 +6,7 @@
  * with its code word, which the model sees as `Error: <CODE> …`; none names a path. What an
  * unexpected error says goes to the face's stderr, the operator's log, and never into a result.
  */
-import { LunhuiError } from "./runs.mjs";
+import { LunhuiError, badRunId } from "./runs.mjs";
 
 /** The freeze calls a run takes (spec A7). */
 export const FREEZE_BUDGET = 8;
@@ -18,11 +18,14 @@ export const FREEZE_BUDGET = 8;
  */
 export const refuse = {
   notAStrategy: () => new LunhuiError("NOT_A_STRATEGY", "strategy 须是策略根目录下一个策略的名字（频道名），不是路径。"),
-  badRunId: () => new LunhuiError("BAD_RUN_ID", "运行编号须匹配 ^[A-Za-z0-9_-]{1,64}$，即冻结工具返回的 run。"),
+  badRunId,
   noSuchRun: () => new LunhuiError("NO_SUCH_RUN", "这个策略下没有这个运行目录（不存在、是符号链接，或不是目录）。"),
   runSealed: () =>
     new LunhuiError("RUN_SEALED", "这个运行已封存（已读过上下文），不再接受证据；不带 run 冻结即开启新运行。"),
   sourceFrozen: () => new LunhuiError("SOURCE_FROZEN", "这个运行已冻结过这一来源；每个来源每个运行只冻结一次。"),
+  /** A reply that held no usable row: a holiday, a pre-market call, an empty pool. */
+  noMarketData: (provider) =>
+    new LunhuiError("NO_MARKET_DATA", `${provider}没有返回任何可用数据（缺少正价格或行情时间，或为空）；本次未写入任何文件。`),
   /** The stop instruction rides in the text, as stage 0's did. */
   toolBudget: () =>
     new LunhuiError(
@@ -51,6 +54,9 @@ export function callerIsChild(exec) {
 /** The providers a freeze reads, by the name its refusals give them. */
 const PROVIDERS = new Set(["腾讯行情", "东方财富"]);
 
+/** `market.mjs`'s `normalizeQuotes` code-less errors, all meaning the reply held no usable quote. */
+const NO_QUOTE_MESSAGES = new Set(["Invalid response", "Empty response", "No usable quotes"]);
+
 /** `market.mjs`'s codes for a reply that failed its HTTP status, encoding, structure or provider status. */
 const INVALID_REPLY_CODES = new Set(["PROVIDER_HTTP_ERROR", "INVALID_RESPONSE", "INVALID_ENCODING", "PROVIDER_ERROR"]);
 
@@ -60,7 +66,8 @@ const INVALID_REPLY_CODES = new Set(["PROVIDER_HTTP_ERROR", "INVALID_RESPONSE", 
  * cannot be assembled (`INVALID_CONTEXT`) as `UPSTREAM_INVALID` too. A `LunhuiError` is already a
  * refusal and passes through. Any other coded error is the host's own fault - a broken clock, a
  * broken fetch - and so null, which the caller rethrows through `asToolError` as `INTERNAL`. A
- * code-less one is the fetch failing outright, which Node's `fetch` reports without a code: no
+ * code-less one is `normalizeQuotes` finding no usable quote (`NO_MARKET_DATA`) or else the fetch
+ * failing outright, which Node's `fetch` reports without a code: no
  * connection, a refused redirect, a dropped body. That one is `UPSTREAM_INVALID` to the model, a
  * fixed sentence; what failed - the message and its cause - goes to stderr.
  * @param {any} error
@@ -76,6 +83,7 @@ export function upstreamError(error, provider) {
   if (INVALID_REPLY_CODES.has(code)) return new LunhuiError("UPSTREAM_INVALID", `${provider}响应无效（${code}）；本次未写入任何文件。`);
   if (code === "INVALID_CONTEXT") return new LunhuiError("UPSTREAM_INVALID", `${provider}的响应无法组装为研究证据；本次未写入任何文件。`);
   if (code !== undefined) return null;
+  if (NO_QUOTE_MESSAGES.has(error?.message)) return refuse.noMarketData(provider);
   process.stderr.write(`lunhui: a ${provider} request did not complete: ${failureOf(error)}\n`);
   return new LunhuiError("UPSTREAM_INVALID", `${provider}请求未完成（连接失败或响应中断）；本次未写入任何文件。`);
 }

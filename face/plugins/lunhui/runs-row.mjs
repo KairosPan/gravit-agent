@@ -125,7 +125,8 @@ async function artifactsOf(dir) {
     try {
       artifact = JSON.parse(await runs.readText(dir, module.file));
     } catch (error) {
-      if (!(error instanceof SyntaxError || error instanceof runs.LunhuiError)) throw error;
+      // The file unusable lists unaccepted; the run directory itself gone or swapped refuses the call.
+      if (!(error instanceof SyntaxError || error?.unusableFile === module.file)) throw error;
     }
     const usable = artifact !== null && typeof artifact === "object" && !Array.isArray(artifact)
       && Buffer.byteLength(JSON.stringify(artifact), "utf8") <= ARTIFACT_MAX_BYTES;
