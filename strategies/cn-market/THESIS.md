@@ -11,12 +11,12 @@
 
 ## Rules
 - Universe / screen: 沪深 A 股全市场读数：指数、涨停池（含炸板、跌停、昨日涨停）、行业与概念板块；个股报价可选。
-- Run order（spec §5.10、A22，本频道部分）：先冻结 index、limit-up、boards（quotes 可选），再由 `cn-market-analyst` 凭运行编号写出环境、情绪、题材三个产物，最后由 `cn-reviewer` 写反证。冻结之后不再补冻；`analysis/<run>/` 不手改。上述角色与模块行属于后续计划，这里只记顺序，不表示它们今天已存在。
+- Run order（spec §5.10、A22，本频道部分）：先冻结 index、limit-up、boards（quotes 可选），再由 `cn-market-analyst` 凭运行编号写出环境、情绪、题材三个产物，最后由 `cn-reviewer` 写反证。角色读取上下文之后不再补冻；`analysis/<run>/` 不手改。上述角色与模块行属于后续计划，这里只记顺序，不表示它们今天已存在。
 - Entry: 无。本频道不交易。
 - Exit / stop: 无。
 - Position notes: 无持仓。策略频道的 `mode.json` 引用本频道的某次运行；引用不等于本频道对任何标的下结论。
 
 ## Falsification
-一个状态标签错了，当且仅当下一交易日的冻结证据与它矛盾。用于判断的是冻结时由宿主代码算出的派生量，不是模型的复述：`streak_distribution`、`seal_ratio`、`break_ratio`、`yesterday_return_median`、`yesterday_negative_tail`、`breadth`、`turnover_share`、`advance_decline_ratio`、`limit_up_count`、`limit_down_count`、`total_turnover`。例如标为 `EXPANSION` 而次日 `limit_up_count` 回落、`break_ratio` 上升、`yesterday_negative_tail` 扩大，则该标签被证伪；标为某题材主线而次日其 `breadth` 与 `turnover_share` 同时走弱，则该题材判断被证伪。
+一个状态标签错了，当且仅当下一交易日的冻结证据与它矛盾：要么当日支撑该标签的证据被推翻，要么次日证据不符合该标签可以转入的任何状态。状态本会轮转，次日与当日不同本身不算证伪。用于判断的是冻结时由宿主代码算出的派生量，不是模型的复述：`streak_distribution`、`seal_ratio`、`break_ratio`、`yesterday_return_median`、`yesterday_negative_tail`、`breadth`、`turnover_share`、`advance_decline_ratio`、`limit_up_count`、`limit_down_count`、`total_turnover`。例如标为 `EXPANSION` 而次日 `limit_up_count` 回落、`break_ratio` 上升、`yesterday_negative_tail` 扩大，若这组读数符合 `CLIMAX` 或 `RETREAT`，是状态转入而非证伪；若它说明当日的 `EXPANSION` 读数本身站不住（例如当日的 `streak_distribution` 与 `seal_ratio` 并不支持扩张），或次日读数不符合任何可转入的状态，则该标签被证伪；标为某题材主线而次日其 `breadth` 与 `turnover_share` 同时走弱，则该题材判断被证伪。
 
 最终的评判者是引用了本频道某次运行的策略运行的预期复盘（`expectation_review`）：复盘逐条对照当时引用的标签与后来的冻结证据，记录哪些成立、哪些不成立。未经此复盘的标签只是观察，不是已验证的读数。
