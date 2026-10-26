@@ -240,6 +240,8 @@ test("errors: the refusal table opens each message with its code word and names 
     notAStrategy: "NOT_A_STRATEGY", badRunId: "BAD_RUN_ID", noSuchRun: "NO_SUCH_RUN", runSealed: "RUN_SEALED",
     sourceFrozen: "SOURCE_FROZEN", toolBudget: "TOOL_BUDGET", notGravit: "NOT_GRAVIT", notARole: "NOT_A_ROLE",
     calendarUncovered: "CALENDAR_UNCOVERED", internal: "INTERNAL", noMarketData: "NO_MARKET_DATA",
+    wrongChannel: "WRONG_CHANNEL", symbolShape: "INVALID_SYMBOL", symbolDuplicate: "INVALID_SYMBOL",
+    symbolSet: "INVALID_SYMBOL", symbolMix: "INVALID_SYMBOL", boardShape: "INVALID_SYMBOL",
   };
   assert.deepEqual(Object.keys(refuse).sort(), Object.keys(codes).sort());
   // One text per code: the rows' BAD_RUN_ID is runs.mjs's own, naming the new tools.

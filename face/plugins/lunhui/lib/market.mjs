@@ -35,6 +35,9 @@
  * (`maxBytes` at most `MAX_RESPONSE_BYTES`); it resolves to `{ status, headers, bytes }`, and under
  * `redirect: "manual"` a 301, 302, 307 or 308 resolves with no body rather than failing.
  * `fetchQuotes` and `fetchDailyBars` pass no options, so their requests and codes are unchanged.
+ *
+ * Since plan 1 Task 8 `fetchDailyBars` takes `days`, the bar count it asks for (60 by default, as
+ * it hard-coded; a whole number 1-640, else `INVALID_OPTIONS`), so the index freeze asks for 120.
  */
 import { coverageOf, holidayOn as tableHolidayOn, isTradingDay, isWeekend, loadCalendars } from "./calendar.mjs";
 
@@ -391,11 +394,13 @@ export async function fetchQuotes(
 
 export async function fetchDailyBars(
   symbol,
-  { fetchImpl = fetch, timeoutMs = 7000 } = {},
+  { fetchImpl = fetch, timeoutMs = 7000, days = 60 } = {},
 ) {
   validateSymbol(symbol);
+  if (!Number.isSafeInteger(days) || days < 1 || days > 640)
+    throw providerError("INVALID_OPTIONS", "日K天数须为 1–640 的整数。");
   const url = new URL(DAILY_URL);
-  url.searchParams.set("param", `${symbol},day,,,60,qfq`);
+  url.searchParams.set("param", `${symbol},day,,,${days},qfq`);
   const { bytes } = await fetchBytes(url.href, fetchImpl, timeoutMs);
   let text;
   try {

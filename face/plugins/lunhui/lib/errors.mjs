@@ -39,6 +39,24 @@ export const refuse = {
   calendarUncovered: () =>
     new LunhuiError("CALENDAR_UNCOVERED", "交易日历未覆盖今天（中国时间）；本次未写入任何文件，请告知操作者补充日历表。"),
   internal: () => new LunhuiError("INTERNAL", "内部错误；细节只记入 face 的日志，不回传。可重试一次，仍失败请告知操作者。"),
+  /** A market freeze outside `cn-market`, or a strategy-only tool inside it (A27). */
+  wrongChannel: (kind) =>
+    kind === "strategy"
+      ? new LunhuiError("WRONG_CHANNEL", "这个工具只用于策略频道，不用于市场频道 cn-market。")
+      : new LunhuiError("WRONG_CHANNEL", "这个冻结只用于市场频道 cn-market；策略频道只冻结个股行情（lunhui_freeze_quotes）。"),
+  // The quotes freeze's symbol list, stage 0's four refusals (its `checkSymbols`).
+  symbolShape: () =>
+    new LunhuiError("INVALID_SYMBOL", "symbols 须为 1–8 个证券代码组成的数组，每个代码是 sh 或 sz 加六位数字。"),
+  symbolDuplicate: () => new LunhuiError("INVALID_SYMBOL", "symbols 不得含重复代码。"),
+  symbolSet: () =>
+    new LunhuiError(
+      "INVALID_SYMBOL",
+      "仅支持四个指定指数（sh000001、sz399001、sz399006、sh000300）及沪深主板个股（sh60xxxx、sz00xxxx）。",
+    ),
+  symbolMix: () => new LunhuiError("INVALID_SYMBOL", "一次至多四个指数和四只个股。"),
+  /** The boards freeze's `boards` list. */
+  boardShape: () =>
+    new LunhuiError("INVALID_SYMBOL", "boards 须为 1–10 个不重复的板块代码组成的数组，每个代码是 BK 加四位数字；省略则取涨幅前 10 的板块。"),
 };
 
 /**
