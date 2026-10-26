@@ -26,3 +26,9 @@ test("ignore: a run's evidence files are ignored; run.json, metrics.json and an 
   for (const f of ["run.json", "metrics.json", "sentiment.json"]) assert.equal(ignored(`strategies/cn-market/analysis/20261023T070000Z-0123abcd/${f}`), false);
   assert.equal(ignored("docs/research/lunhui/corpus/x.md"), true);
 });
+
+test("ignore: a run's crash leftovers - a staging *.pending.json and a *.tmp - are ignored", () => {
+  const run = "strategies/cn-market/analysis/20261023T070000Z-0123abcd";
+  for (const f of ["run.pending.json", "analysis.pending.json", "metrics.json.0a1b2c3d.tmp"]) assert.equal(ignored(`${run}/${f}`), true, f);
+  for (const f of ["run.json", "metrics.json", "mode.json"]) assert.equal(ignored(`${run}/${f}`), false, f);
+});

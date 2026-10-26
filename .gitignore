@@ -78,3 +78,6 @@ deck.png
 # the Lunhui corpus and the runs' evidence files stay out of the public repository (spec 2026-10-25 A26, D11)
 /docs/research/lunhui/corpus/
 strategies/*/analysis/*/evidence-*.json
+# and a run write's crash leftovers: its staging files (residual R39)
+strategies/*/analysis/*/*.pending.json
+strategies/*/analysis/*/*.tmp
