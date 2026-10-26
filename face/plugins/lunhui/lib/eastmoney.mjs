@@ -13,7 +13,7 @@
  * four Eastmoney requests run at once across every caller (A17); the body is read through
  * `market.mjs`'s `fetchBytes` with its 7-second timeout and 512 KiB cap, and every failure is a
  * `LunhuiError` naming 东方财富: `UPSTREAM_TIMEOUT`, `UPSTREAM_TOO_LARGE`, `UPSTREAM_INVALID`, or
- * `NO_MARKET_DATA` for a pool that is null or empty.
+ * `NO_MARKET_DATA` for a 涨停池 that is null or empty.
  */
 import { refuse, upstreamError } from "./errors.mjs";
 import { fetchBytes } from "./market.mjs";
@@ -211,11 +211,15 @@ function yesterdayRow(raw) {
   };
 }
 
-/** The three pools, in the order `zt`, `zb`, `yesterday`: endpoint path, AKShare's sort, row parser. */
+/**
+ * The three pools, in the order `zt`, `zb`, `yesterday`: endpoint path, AKShare's sort, row
+ * parser, and whether a null or empty reply refuses. Only the 涨停池 does: a day with no 炸板 is a
+ * market state, and a holiday or a pre-market date already refuses through its 涨停池.
+ */
 const POOLS = [
-  ["/getTopicZTPool", "fbt:asc", ztRow],
-  ["/getTopicZBPool", "fbt:asc", zbRow],
-  ["/getYesterdayZTPool", "zs:desc", yesterdayRow],
+  ["/getTopicZTPool", "fbt:asc", ztRow, true],
+  ["/getTopicZBPool", "fbt:asc", zbRow, false],
+  ["/getYesterdayZTPool", "zs:desc", yesterdayRow, false],
 ];
 
 /** A pool row is an object whose code is six digits; anything else makes the reply invalid. */
@@ -223,7 +227,7 @@ function isPoolRow(raw) {
   return raw !== null && typeof raw === "object" && typeof raw.c === "string" && /^\d{6}$/.test(raw.c);
 }
 
-async function fetchPool(path, sort, parse, date, fetchImpl, timeoutMs) {
+async function fetchPool(path, sort, parse, required, date, fetchImpl, timeoutMs) {
   const url = new URL(path, POOL_HOST);
   url.search = new URLSearchParams({
     ut: "7eea3edcaed734bea9cbfc24409ed989",
@@ -234,10 +238,9 @@ async function fetchPool(path, sort, parse, date, fetchImpl, timeoutMs) {
     date,
   }).toString();
   const { json, host, delayed } = await fetchEastmoneyJson(url.href, { fetchImpl, timeoutMs });
-  if (json.data === null) throw refuse.noMarketData(PROVIDER);
-  const pool = json.data?.pool;
+  const pool = json.data === null ? [] : json.data?.pool;
   if (!Array.isArray(pool)) throw invalid("INVALID_RESPONSE");
-  if (pool.length === 0) throw refuse.noMarketData(PROVIDER);
+  if (pool.length === 0 && required) throw refuse.noMarketData(PROVIDER);
   const kept = pool.slice(0, POOL_ROWS);
   if (!kept.every(isPoolRow)) throw invalid("INVALID_RESPONSE");
   return { rows: kept.map(parse), host, delayed, truncated: pool.length > POOL_ROWS };
@@ -246,14 +249,16 @@ async function fetchPool(path, sort, parse, date, fetchImpl, timeoutMs) {
 /**
  * The 涨停池, 炸板池 and 昨日涨停 of the session `date`, each at most 500 rows. `host` is the
  * serving host the three share, or their distinct hosts joined with "," when they differ;
- * `delayed` and `truncated` are true when any pool's is. Any pool that fails fails the whole call.
+ * `delayed` and `truncated` are true when any pool's is. A 涨停池 whose `data` is null or whose pool
+ * is empty refuses `NO_MARKET_DATA`; the same reply for the 炸板池 or 昨日涨停 is an empty list.
+ * Any pool that fails otherwise fails the whole call.
  * @param {{ date: string, fetchImpl?: FetchLike, timeoutMs?: number }} options `date` as `YYYYMMDD`
  */
 export async function fetchLimitUpPools({ date, fetchImpl = fetch, timeoutMs = 7000 }) {
   if (typeof date !== "string" || !DATE.test(date))
     throw new TypeError(`lunhui: a pool date is YYYYMMDD, not ${JSON.stringify(date)}`);
   const replies = await Promise.all(
-    POOLS.map(([path, sort, parse]) => fetchPool(path, sort, parse, date, fetchImpl, timeoutMs)),
+    POOLS.map(([path, sort, parse, required]) => fetchPool(path, sort, parse, required, date, fetchImpl, timeoutMs)),
   );
   const [zt, zb, yesterday] = replies.map((reply) => reply.rows);
   return {

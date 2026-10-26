@@ -52,11 +52,12 @@ function poolReply(pool: unknown[] | null) {
   return { rc: 0, rt: 4, svr: 1, lt: 1, full: 1, data: pool === null ? null : { tc: pool.length, qdate: 20261023, pool } };
 }
 
-/** A fake `fetch` serving the fixtures, with the zt pool's reply replaced by `zt`. */
-function withZtPool(zt: unknown) {
+/** A fake `fetch` serving the fixtures, with the reply at `path` replaced by `reply`. */
+function withPool(path: string, reply: unknown) {
   return async (url: string | URL, init?: RequestInit) =>
-    new URL(String(url)).pathname === "/getTopicZTPool" ? json(zt) : fixtureFetch(url, init);
+    new URL(String(url)).pathname === path ? json(reply) : fixtureFetch(url, init);
 }
+const withZtPool = (reply: unknown) => withPool("/getTopicZTPool", reply);
 
 test("eastmoney: the ZT pool parses to PoolRows with the price divided by 1000 and the streak split", async () => {
   const asked: string[] = [];
@@ -104,9 +105,18 @@ test("eastmoney: the ZT pool parses to PoolRows with the price divided by 1000 a
   assert.deepEqual(asked, []);
 });
 
-test("eastmoney: data null is NO_MARKET_DATA; an empty pool is NO_MARKET_DATA", async () => {
+test("eastmoney: a ZT pool with data null or an empty pool is NO_MARKET_DATA; the ZB and yesterday pools read them as empty lists", async () => {
   await rejectsWith(fetchLimitUpPools({ date: DATE, fetchImpl: withZtPool(poolReply(null)) }), "NO_MARKET_DATA");
   await rejectsWith(fetchLimitUpPools({ date: DATE, fetchImpl: withZtPool(poolReply([])) }), "NO_MARKET_DATA");
+  // A day with no 炸板, or no 昨日涨停 reply, is a market state beside a good 涨停池.
+  for (const path of ["/getTopicZBPool", "/getYesterdayZTPool"]) {
+    for (const reply of [poolReply(null), poolReply([])]) {
+      const pools = await fetchLimitUpPools({ date: DATE, fetchImpl: withPool(path, reply) });
+      assert.equal(pools.zt.length, 6, path);
+      assert.deepEqual(path === "/getTopicZBPool" ? pools.zb : pools.yesterday, [], path);
+      assert.equal((path === "/getTopicZBPool" ? pools.yesterday : pools.zb).length > 0, true, path);
+    }
+  }
   // A pool that is not a list is not "no data" but an invalid reply.
   await rejectsWith(
     fetchLimitUpPools({ date: DATE, fetchImpl: withZtPool({ rc: 0, data: { tc: 1, pool: {} } }) }),

@@ -1,5 +1,5 @@
 /**
- * The Lunhui market module, `plugins/lunhui/market.mjs` (spec D2, D3). Ported under their source
+ * The Lunhui market module, `plugins/lunhui/lib/market.mjs` (spec D2, D3). Ported under their source
  * names from the source branch (evolving-alpha `codex/lunhui-agent-design` @ 2ae4df0): the 16
  * cases of `frontend/test/market-provider.test.mjs`, the 9 of `frontend/test/market-calendar.test.mjs`
  * and the 4 cases of `frontend/test/market-service.test.mjs` that need no cache, those against the
