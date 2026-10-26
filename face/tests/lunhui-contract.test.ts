@@ -1,14 +1,14 @@
 /**
- * The Lunhui contract module, `plugins/lunhui/contract.mjs` (spec G2, D6, D9). Ported under their
- * source names from the source branch (evolving-alpha `codex/lunhui-agent-design` @ 2ae4df0): the
- * 13 cases of `frontend/test/analysis-contract.test.mjs` with their helpers, and of
+ * The Lunhui contract module, `plugins/lunhui/lib/contract.mjs` (spec G2, D6, D9). Ported under
+ * their source names from the source branch (evolving-alpha `codex/lunhui-agent-design` @
+ * 2ae4df0): the 13 cases of `frontend/test/analysis-contract.test.mjs` with their helpers, and of
  * `frontend/harness/runner.test.mjs` the one case that needs no harness launcher, on
  * `buildSchemaExample` and `classifyValidationRejection`, with its `fixtureSnapshot`, and the
  * fact-check assertions of its tool case (:317-357), made direct `buildFactChecks` calls on that
- * case's five-bar history (:235-257), since the tool that returned them is now the server's
- * (`lunhui-server.test.ts`); then the two hints' byte budget, and `buildAnalysisContext` on what
- * `freezeSample` freezes from the synthetic fixtures in `fixtures/lunhui/` (spec §5.1). The bodies
- * are the source's; the TypeScript adaptations are type-level only: `buildAnalysisContext`
+ * case's five-bar history (:235-257), since the tool that returned them is not ported (the freeze
+ * rows, `lunhui-freeze.test.ts`, take its place); then the two hints' byte budget, and
+ * `buildAnalysisContext` on what `freezeSample` freezes from the synthetic fixtures in
+ * `fixtures/lunhui/` (spec §5.1). The bodies are the source's; the TypeScript adaptations are type-level only: `buildAnalysisContext`
  * re-declared with the parameter and result types the untyped module cannot give it, parameter
  * types on the helpers and on one callback, loose return types on the three fixture builders
  * whose output a case extends, nulls or deletes, loose items for the fact checks a case reads by

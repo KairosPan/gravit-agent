@@ -3,7 +3,7 @@
  * The Lunhui modules (modules spec §5.4): the five chapters' modules and the reviewer's
  * counterevidence, in the order a run takes them, each with its artifact's file name in the run
  * directory and its headline fields - what `lunhui_read_run` and the runs card show of an
- * artifact. The server owns this table; the face's channel reader copies the pairs.
+ * artifact. The rows own this table; the face's channel reader copies the pairs.
  */
 
 /** @typedef {{ name: string, file: string, headline: readonly string[] }} LunhuiModule */

@@ -1,9 +1,10 @@
 // face/plugins/lunhui/lib/runs.mjs
 /**
- * The Lunhui run-directory contract (spec D4, D5, §5.1 "Anchoring"): the MCP server's only
- * file-system boundary. Every `strategy` and `run` argument a tool receives is resolved here, so a
- * model's argument names a strategy and a run, never a path. New in the graft, not a port: the
- * source plugin was handed one private run directory per process (spec D5).
+ * The Lunhui run-directory contract (spec D4, D5, §5.1 "Anchoring"): the Lunhui rows' only
+ * file-system boundary, reached through the `lunhuiRuns` service of `runs-row.mjs`. Every
+ * `strategy` and `run` argument a tool receives is resolved here, so a model's argument names a
+ * strategy and a run, never a path. New in the graft, not a port: the source plugin was handed
+ * one private run directory per process (spec D5).
  *
  * A strategy is a name in the face's channel grammar - `NAME_RE` in `face/src/channels.ts`,
  * compared in NFC as the face compares and creates channels - naming a real directory directly
@@ -28,7 +29,7 @@
  * `BAD_RUN_ID`, `NO_SUCH_RUN`, `RUN_EXISTS`, and for the run's states `RUN_SEALED`,
  * `SOURCE_FROZEN`, `EVIDENCE_TOO_LARGE`, `RUN_TOO_LARGE` - followed by a Chinese reason, like the
  * tool descriptions it reaches (spec D14), that names no path. Any other file-system failure is
- * thrown as Node raised it, absolute path included, so the server must not forward its message
+ * thrown as Node raised it, absolute path included, so a row must not forward its message
  * (spec §5.1 "Errors").
  *
  * No write goes through an existing inode, so neither a symbolic nor a hard link carries one out of
@@ -39,7 +40,7 @@
  * metrics write, so concurrent writers never share one. A link, a directory or any other non-file
  * at one of those names is `NO_SUCH_RUN`. A read opens with O_NOFOLLOW and O_NONBLOCK, as
  * `src/bot-journal.ts` does, and reads from the opened handle only if it is a regular file with
- * exactly one link and at most `MAX_READ_BYTES`, 256 KiB: every file the server reads it wrote
+ * exactly one link and at most `MAX_READ_BYTES`, 256 KiB: every file the rows read they wrote
  * itself, and what it reads goes to a remote model. Residuals: a check and the use after it are two
  * calls (Node has no `openat`), so a concurrent writer inside the strategy tree can still race them;
  * a hard-link copy of the tree (`cp -al`) cannot read its runs; a metrics write killed between its
@@ -80,7 +81,7 @@ export const STRATEGY_NAME_RE = /^[\p{L}\p{N}][\p{L}\p{N}\p{M}_-]{0,40}$/u;
 /** A run id, as `newRunId` makes one and as a tool's `run` argument must be (spec D5). */
 export const RUN_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
-/** A file of a run: one plain segment, never dot-led. The names are the server's own, never a model's. */
+/** A file of a run: one plain segment, never dot-led. The names are the rows' own, never a model's. */
 const FILE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 const READ_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
@@ -234,7 +235,7 @@ async function replaceFile(dir, name, staging, text) {
  * Resolve a tool's `strategy` argument under the strategies root (spec D4). `NOT_A_STRATEGY` when
  * the name fails the grammar, or the directory is missing, is a symbolic link, resolves outside the
  * root, or holds no readable, regular `THESIS.md`.
- * @param {string} root the strategies root, `LUNHUI_STRATEGIES_ROOT`
+ * @param {string} root the strategies root, the `lunhui-runs` row's `config.strategiesRoot`
  * @param {unknown} name the tool's `strategy` argument
  * @returns {Promise<{ name: string, dir: string }>} the on-disk name and the directory's realpath
  */

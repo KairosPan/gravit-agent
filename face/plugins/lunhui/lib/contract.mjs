@@ -11,7 +11,8 @@
  * and of `frontend/harness/plugin.mjs` the five pieces that are not the dsh plugin itself - the
  * `VALIDATION_REPAIRS` table, `classifyValidationRejection`, `buildSchemaExample`,
  * `FACT_CHECK_HINT` and `buildFactChecks`. The plugin's `name`, `inject`, `ALLOWED` and `apply`
- * are not ported: the MCP server takes the plugin's place (spec §5.1). Making one module of the
+ * are not ported: the face's Lunhui rows (`face/plugins/lunhui/*-row.mjs`) take the plugin's place
+ * (modules spec §5.2, §5.3). Making one module of the
  * two takes three edits: the calendar import is `./market.mjs`, where `getMarketSession` lives
  * now, instead of `./market-calendar.mjs`; the plugin's imports are dropped, since the one name
  * its five pieces use, `validateAnalysis`, is defined in this file; and `MAX_CONTEXT_BYTES`,

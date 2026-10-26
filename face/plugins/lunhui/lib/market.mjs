@@ -898,8 +898,8 @@ function failedHistory(symbol) {
  * service orders them; a failed quote fetch rejects.
  *
  * `now` fixes the one instant every stamp is. A Date is used as given. A function is called
- * exactly once, after the quote fetch returns, and returns it - the server passes its clock, so
- * a stamp is never taken before the fetch. Omitted, the system clock is read at that same point:
+ * exactly once, after the quote fetch returns, and returns it - the quotes freeze passes its
+ * clock, so a stamp is never taken before the fetch. Omitted, the system clock is read at that same point:
  * the source's order, because `buildAnalysisContext` counts a quote only if its provider time is
  * no later than `servedAt`, and a clock read before the fetch would mark a live quote
  * INSUFFICIENT. Anything else, an invalid Date included, rejects with `INVALID_NOW` first in the
