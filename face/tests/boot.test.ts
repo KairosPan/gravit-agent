@@ -1,14 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { composeEntries } from "@deepseek-ai/dsh-app-boot";
 import { setupFaceProfile } from "../src/setup.ts";
 import { composeFace } from "../src/boot.ts";
 import { AKSHARE_MCP_ROW_ID } from "../src/akshare.ts";
 import { ACCOUNT_SEAT_ROW_ID } from "../src/account-seat.ts";
+import { LUNHUI_ROW_IDS } from "../src/lunhui.ts";
 import { PERSONA_PATH, readPersona } from "../src/persona.ts";
 import { CYCLE_PATH, readCycle } from "../src/cycle.ts";
 import { AGENT_INSTRUCTIONS_ROW_ID, INSTRUCTIONS_CONFIG, instructionsPatch } from "../src/instructions.ts";
@@ -68,7 +70,7 @@ test("composeFace: patch order ends with the face overlay; root is rewritten emp
 /* The exact layer count, so a lost or duplicated layer is a failure rather
  * than a silent change of shape. With the telemetry switch unset the stack is:
  * dsh-base insert + the policy layer (src/policy.ts) + AKShare insert + the
- * Account seat insert + hmr disable + system-prompt persona +
+ * Account seat insert + the Lunhui rows' insert + hmr disable + system-prompt persona +
  * agent-instructions + face overlay. The
  * policy layer is pinned both by size (8 id patches + 1 insert against
  * 0.2.0-rc.2's dsh-base) and by POSITION - directly after the bundle layer,
@@ -85,10 +87,12 @@ test("composeFace stacks exactly the layers it means to", () => {
     );
     const policy = facePolicyPatches(baseRows);
     assert.equal(policy.length, 9, "8 id patches + 1 insert at dsh-base 0.2.0-rc.2");
-    assert.equal(patches.length, 7 + policy.length, patches.map((p) => p.id ?? "insert").join(","));
+    assert.equal(patches.length, 8 + policy.length, patches.map((p) => p.id ?? "insert").join(","));
     assert.deepEqual(patches.slice(1, 1 + policy.length), policy, "the policy layer sits right above the bundle layer");
     assert.equal((patches[1 + policy.length] as InsertPatch).insert?.[0]?.id, AKSHARE_MCP_ROW_ID, "the AKShare row sits right above the policy layer");
     assert.equal((patches[2 + policy.length] as InsertPatch).insert?.[0]?.id, ACCOUNT_SEAT_ROW_ID, "the Account seat row sits right after the AKShare row");
+    assert.deepEqual((patches[3 + policy.length] as InsertPatch).insert?.map((row) => row.id), [...LUNHUI_ROW_IDS],
+      "the five Lunhui rows sit right after the Account seat row, in one insert, in order");
   } finally {
     if (previous === undefined) delete process.env.DSH_TELEMETRY_DISABLED;
     else process.env.DSH_TELEMETRY_DISABLED = previous;
@@ -117,6 +121,7 @@ test("every face row lands in the composed tree exactly once", () => {
   assert.equal(counts.get("approval"), 1);
   assert.equal(counts.get(AKSHARE_MCP_ROW_ID), 1, "AKShare must be registered exactly once");
   assert.equal(counts.get(ACCOUNT_SEAT_ROW_ID), 1, "the Account seat must be registered exactly once");
+  for (const id of LUNHUI_ROW_IDS) assert.equal(counts.get(id), 1, `${id} must be registered exactly once`);
   // dsh-base's own gateway: the face must not have added a second one.
   assert.equal(counts.get("typert-gateway"), 1);
 });
@@ -245,6 +250,44 @@ test("the profile can disable the repo's Account seat row", () => {
   const rows = composeEntries([disabled.patches]).filter((r) => r.id === ACCOUNT_SEAT_ROW_ID);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].disabled, true, "the default must not re-enable an operator-disabled seat row");
+});
+
+/* The Lunhui rows (src/lunhui.ts, spec §5.12): each names its plugin file by
+ * an absolute file URL; the backbone anchors runs under THIS checkout's
+ * strategies/, and a freeze row carries no config in production (`fetch` and
+ * `now` are test-only keys). */
+test("composeFace mounts the five Lunhui rows by file URL, the backbone under this checkout's strategies/", () => {
+  const home = freshHome();
+  const { patches } = composeFace({ profileName: "face", port: 3090, dshHome: home });
+  const composed = composeEntries([patches]);
+  const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
+  for (const id of LUNHUI_ROW_IDS) {
+    const row = composed.find((r) => r.id === id);
+    assert.ok(row, id);
+    const file = `${id.replace(/^lunhui-/, "")}-row.mjs`;
+    assert.equal(row.name, pathToFileURL(join(repoRoot, "face", "plugins", "lunhui", file)).href, id);
+    assert.ok(existsSync(fileURLToPath(row.name as string)), `${id}'s plugin file exists`);
+    assert.deepEqual(row.config, id === "lunhui-runs" ? { strategiesRoot: join(repoRoot, "strategies") } : {}, id);
+  }
+});
+
+/* An operator row with a Lunhui id replaces that row's config (so a
+ * replacement restates `strategiesRoot`), and `disabled: true` keeps it off -
+ * the same reach the AKShare and seat rows give the operator's patch file. */
+test("the profile can override or disable a Lunhui row", () => {
+  const home = freshHome();
+  const profilePatch = join(home, "profiles", "face", "cordis.patch.yml");
+  writeFileSync(profilePatch, "- id: lunhui-runs\n  config:\n    strategiesRoot: /tmp/operator-strategies\n");
+  const overridden = composeFace({ profileName: "face", port: 3090, dshHome: home });
+  const rows = composeEntries([overridden.patches]).filter((r) => r.id === "lunhui-runs");
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0].config, { strategiesRoot: "/tmp/operator-strategies" });
+
+  writeFileSync(profilePatch, "- id: lunhui-freeze-boards\n  disabled: true\n");
+  const disabled = composeFace({ profileName: "face", port: 3090, dshHome: home });
+  const disabledRows = composeEntries([disabled.patches]).filter((r) => r.id === "lunhui-freeze-boards");
+  assert.equal(disabledRows.length, 1);
+  assert.equal(disabledRows[0].disabled, true, "the default must not re-enable an operator-disabled Lunhui row");
 });
 
 /* The guard is "ALWAYS rewrite", not "create if missing": the vendored Loader

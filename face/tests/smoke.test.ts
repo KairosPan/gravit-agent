@@ -37,6 +37,8 @@ import { bootFace } from "../src/boot.ts";
 import { registerStatic, type IndexAuth } from "../src/static.ts";
 import { createSymbolSearch, registerSymbolSearchRoute } from "../src/symbol-search.ts";
 import { hasApprovalGrant, type ApprovalEventLike } from "../src/orders.ts";
+import { LUNHUI_ROW_IDS, LUNHUI_TOOL_NAMES } from "../src/lunhui.ts";
+import { panelDeps, pluginListing } from "../src/panels.ts";
 import { remote, signIn } from "./remote.ts";
 
 const gated = process.env.FACE_SMOKE !== "1";
@@ -242,6 +244,22 @@ test("boot smoke: sign-in gates /api and the mux, the pages and /data answer, Gr
     }
     for (const withheld of ["web_fetch", "list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"]) {
       assert.equal(toolNames.includes(withheld), false, `${withheld} must not be registered (policy D6/D7)`);
+    }
+    /* The Lunhui rows (src/lunhui.ts), live: composed is not registered, so
+     * the running registry must carry all five tools, and the listing
+     * `/data/plugins.json` serves (pluginListing over the booted tree, called
+     * directly: main.ts, not bootFace, mounts the panel routes) must show the
+     * five rows enabled and ACTIVE. */
+    for (const name of LUNHUI_TOOL_NAMES) {
+      assert.ok(toolNames.includes(name), `${name} must be registered; saw ${toolNames.join(", ")}`);
+    }
+    const listedRows = pluginListing(panelDeps(ctx, process.cwd(), home)).rows;
+    for (const id of LUNHUI_ROW_IDS) {
+      // The listing carries the Loader's id, the row id under its include path.
+      const row = listedRows.find((r) => r.id.endsWith(`:${id}`));
+      assert.ok(row, `${id} must be listed; saw ${listedRows.map((r) => r.id).join(", ")}`);
+      assert.equal(row.phase, "active", id);
+      assert.equal(row.enabled, true, id);
     }
     /* The services the overlay's Remote rows exist to provide, by the keys the
      * rest of the face reads them under: the room engine resumes cold sessions

@@ -127,6 +127,7 @@ import { CYCLE_PATH, readCycle } from "./cycle.ts";
 import { AGENT_INSTRUCTIONS_ROW_ID, instructionsPatch } from "./instructions.ts";
 import { aksharePatches } from "./akshare.ts";
 import { accountSeatPatches } from "./account-seat.ts";
+import { lunhuiPatches } from "./lunhui.ts";
 import { facePolicyPatches } from "./policy.ts";
 import {
   auditOrderTools, effectiveApprovalPolicy, isOrderTool, orderApprovalDecision, orderGuardReasonForSession,
@@ -338,13 +339,16 @@ export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; ro
   /* The Account seat (src/account-seat.ts): the same project layer, right
    * after AKShare, below everything the operator writes. */
   const seatPatches = accountSeatPatches();
+  /* The Lunhui rows (src/lunhui.ts, modules spec §5.12): the same project
+   * layer, right after the seat, below everything the operator writes. */
+  const lunhuiRows = lunhuiPatches();
   const homePatches = loadOptionalPatches(BIN, join(home, PROFILE_PATCH_FILENAME)) ?? [];
   /* Cloned: the include's patch algorithm pushes inserted rows by reference
    * and later patches assign into them, so composing the caller's own objects
    * could rewrite them under the caller. */
   const extraPatches: FacePatchList = structuredClone(opts.extraPatches ?? []);
   const patches: FacePatchList = [
-    ...bundlePatches, ...policyPatches, ...marketPatches, ...seatPatches, ...profile.patches, ...homePatches, ...extraPatches,
+    ...bundlePatches, ...policyPatches, ...marketPatches, ...seatPatches, ...lunhuiRows, ...profile.patches, ...homePatches, ...extraPatches,
   ];
   /* Both switches below are guarded on the row actually being in the composed
    * tree. A patch that matches nothing is inert and — measured, not assumed —
@@ -355,7 +359,7 @@ export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; ro
    * never mounted the row. (With the policy layer disabling
    * `session-telemetry-otel` by default the env switch is redundant until an
    * operator re-enables the row - and then it still wins, composing after.) */
-  const below = composeEntries([bundlePatches, policyPatches, marketPatches, seatPatches, profile.patches, homePatches, extraPatches]);
+  const below = composeEntries([bundlePatches, policyPatches, marketPatches, seatPatches, lunhuiRows, profile.patches, homePatches, extraPatches]);
   const rows = new Set(below.flatMap((row) => (typeof row.id === "string" ? [row.id] : [])));
   /* app-boot exports the CLI's own resolver now (NEW packages/boot/app-boot/
    * src/profile-context.ts:52-55): ANY non-empty value disables, and a
