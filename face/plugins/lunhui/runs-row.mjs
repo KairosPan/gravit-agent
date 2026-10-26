@@ -43,7 +43,7 @@ const ARTIFACT_MAX_BYTES = 24 * 1024;
  *   sealRun(strategyName: unknown, run: unknown): Promise<import("./lib/runs.mjs").RunManifest>,
  *   readRun(strategyName: unknown, run: unknown): Promise<{ manifest: import("./lib/runs.mjs").RunManifest, metrics: import("./lib/runs.mjs").RunMetrics, metricsReset: boolean }>,
  *   readSealedRun(strategyName: unknown, run: unknown): Promise<SealedRun>,
- *   previousArtifact(strategyName: unknown, run: unknown, module: string, accept?: (artifact: Record<string, unknown>) => boolean): Promise<PreviousArtifact | null>,
+ *   previousArtifact(strategyName: unknown, run: unknown, module: string): Promise<PreviousArtifact | null>,
  *   readThesis(strategyName: unknown): Promise<string | null>,
  *   withRun<T>(strategyName: unknown, run: unknown, fn: (located: { strategy: string, run: string, dir: string }) => Promise<T>): Promise<T>,
  *   countFreeze(strategyName: unknown, run: unknown): Promise<number>,
@@ -158,20 +158,25 @@ export function createLunhuiRuns(strategiesRoot) {
       return { strategy: located.strategy, run: located.run, ...(await contentsOf(located.dir, manifest)) };
     },
     /**
-     * The strategy's newest earlier run whose accepted `module` artifact `accept` takes (A11, A12:
-     * the mode's previous card), or null. Earlier is by the run-id order, ties within one second by
-     * `opened_at`, so of the last 50 runs before `run` - the run ids no later in their second -
-     * those sealed whose `run.json` `artifacts[]` names the module are read newest first, each
-     * artifact through `readArtifact`; a run that is missing, unusable or gone is passed over. No
-     * lock is taken: an earlier sealed run's `artifacts[]` only grows, and an artifact lands whole
-     * by its rename. Nothing is counted or written.
+     * The strategy's newest earlier accepted `module` artifact of an earlier session (A11, A12: the
+     * mode's previous card), or null. Earlier is by the run-id order, ties within one second by
+     * `opened_at`; of the last 50 runs before `run` - the run ids no later in their second - the
+     * newest one that is sealed, names the module in `run.json` `artifacts[]` and whose `session` is
+     * strictly before the run's own (a run of the same session is a re-run, not the next one) is
+     * read through `readArtifact` and returned, whatever it holds - the caller judges it - or null
+     * when its file is unusable. A run that is missing, unusable or gone is passed over; a run with
+     * no session has no earlier one. No lock is taken: an earlier sealed run's `artifacts[]` only
+     * grows, and an artifact lands whole by its rename. Nothing is counted or written.
      */
-    async previousArtifact(strategyName, run, module, accept = () => true) {
+    async previousArtifact(strategyName, run, module) {
       const entry = MODULES.find((candidate) => candidate.name === module);
       if (entry === undefined) throw new TypeError(`lunhui: a module is one of MODULES, not ${JSON.stringify(module)}`);
       const strategy = await runs.resolveStrategy(strategiesRoot, strategyName);
       const current = await runs.resolveRun(strategy.dir, run);
-      const self = { run: current.run, opened_at: (await runs.readRun(current.dir)).manifest.opened_at };
+      const { manifest: own } = await runs.readRun(current.dir);
+      const self = { run: current.run, opened_at: own.opened_at };
+      const session = typeof own.session === "string" ? own.session : null;
+      if (session === null) return null;
       const second = (id) => id.slice(0, 16);
       const ids = (await runs.listRuns(strategy.dir))
         .filter((id) => id !== current.run && second(id) <= second(current.run))
@@ -185,24 +190,23 @@ export function createLunhuiRuns(strategiesRoot) {
           const { manifest } = await runs.readRun(located.dir);
           const named = Array.isArray(manifest.artifacts) && manifest.artifacts.includes(module);
           const at = { run: located.run, opened_at: manifest.opened_at };
-          if (manifest.sealed_at && named && openedBefore(at, self)) earlier.push({ at, dir: located.dir, manifest });
+          const before = typeof manifest.session === "string" && manifest.session < session;
+          if (manifest.sealed_at && named && before && openedBefore(at, self)) earlier.push({ at, dir: located.dir, manifest });
         } catch (error) {
           if (!(error instanceof runs.LunhuiError)) throw error;
         }
       }
       earlier.sort((a, b) => (openedBefore(a.at, b.at) ? 1 : -1));
-      for (const { at, dir, manifest } of earlier) {
-        let artifact;
-        try {
-          artifact = await readArtifact(dir, entry);
-        } catch (error) {
-          if (!(error instanceof runs.LunhuiError)) throw error;
-          continue;
-        }
-        if (artifact !== null && accept(artifact))
-          return { run: at.run, snapshot_id: manifest.snapshot_id ?? null, session: manifest.session ?? null, artifact };
+      if (earlier.length === 0) return null;
+      const [{ at, dir, manifest }] = earlier;
+      let artifact;
+      try {
+        artifact = await readArtifact(dir, entry);
+      } catch (error) {
+        if (!(error instanceof runs.LunhuiError)) throw error;
+        return null;
       }
-      return null;
+      return artifact === null ? null : { run: at.run, snapshot_id: manifest.snapshot_id ?? null, session: manifest.session ?? null, artifact };
     },
     /** The strategy's THESIS.md (`runs.mjs`'s `readThesis`): text, or null. `NOT_A_STRATEGY` as `resolveStrategy`. */
     async readThesis(strategyName) {

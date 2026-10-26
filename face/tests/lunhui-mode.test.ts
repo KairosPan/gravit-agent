@@ -32,6 +32,8 @@ const S01 = "lunhui-s01-repair";
 const S02 = "lunhui-s02-rotation";
 /** The tree's two Lunhui strategies, whose THESIS.md the temp root copies. */
 const THESIS = (name: string) => fileURLToPath(new URL(`../../strategies/${name}/THESIS.md`, import.meta.url));
+/** Monday 2026-10-26, 15:00 in China: the trading day after the harness's Friday. */
+const MONDAY = new Date("2026-10-26T07:00:00.000Z");
 /** Tuesday 2026-10-27, 15:00 in China: two trading days after the harness's Friday. */
 const TUESDAY = new Date("2026-10-27T07:00:00.000Z");
 const SYMBOLS = ["sh600519", "sz000333", "sh601318"];
@@ -93,25 +95,35 @@ async function setup(t: Cleanup, { state = "EXPANSION", prepare = addEquities, m
   assert.equal((await submitted(sentSubmit, "cn-market", market, sentiment)).accepted, true);
   const [themeRead, themeSubmit] = tools(service, themeRow);
   const themeContext = JSON.parse(await themeRead.execute({ strategy: "cn-market", run: market }, exec(ROLE)));
-  const breadth = idWhere(themeContext, (row) => row.measure === "breadth" && row.params.board === mainline[0][0]);
+  // The claim stands on the first mainline board's breadth, or BK0715's when the theme names none.
+  const [lead, leadName] = mainline[0] ?? MAINLINE[0];
+  const breadth = idWhere(themeContext, (row) => row.measure === "breadth" && row.params.board === lead);
   assert.equal((await submitted(themeSubmit, "cn-market", market, {
     ...themeContext.example,
     mainline_candidates: mainline.map(([code, name]) => ({ board: code, name, evidence_ids: [
       idWhere(themeContext, (row) => row.kind === "board" && row.code === code),
       idWhere(themeContext, (row) => row.kind === "members" && row.board === code),
     ] })),
-    claims: [{ id: "c1", text: `${mainline[0][1]}的上涨占比见所引派生证据。`, basis: "CURRENT", evidence_ids: [breadth] }],
+    claims: [{ id: "c1", text: `${leadName}的上涨占比见所引派生证据。`, basis: "CURRENT", evidence_ids: [breadth] }],
   })).accepted, true);
   return { ...mounted, market, fixtureDir };
 }
 
 /**
- * A strategy run: quotes for `symbols`, then (unless `leader` is false) a leader artifact naming
- * 600519 on its 涨停池 row, accepted through the real leader tools.
+ * A strategy run: quotes for `symbols` - frozen on the harness's Friday, or at `now` (Monday, the
+ * next session) - then (unless `leader` is false) a leader artifact naming 600519 on its 涨停池 row,
+ * citing `market` (the setup's market run by default), accepted through the real leader tools.
  */
-async function strategyRun(mounted: Awaited<ReturnType<typeof setup>>, strategy: string, { leader = true, symbols = SYMBOLS } = {}) {
-  const { service, freeze, market } = mounted;
-  const run = JSON.parse(await freeze.quotes.execute({ strategy, symbols }, exec())).run as string;
+async function strategyRun(mounted: Awaited<ReturnType<typeof setup>>, strategy: string,
+  { leader = true, symbols = SYMBOLS, now, market = mounted.market }: { leader?: boolean; symbols?: string[]; now?: Date; market?: string } = {}) {
+  const { service, freeze, fixtureDir } = mounted;
+  let quotes = freeze.quotes;
+  if (now !== undefined) {
+    const scope = fakeScope({ lunhuiRuns: service });
+    quotesRow.apply(scope.ctx, { fetch: fixtureDir, now: () => now });
+    quotes = scope.tools[0];
+  }
+  const run = JSON.parse(await quotes.execute({ strategy, symbols }, exec())).run as string;
   if (leader) {
     const [read, submit] = tools(service, leaderRow);
     const context = JSON.parse(await read.execute({ strategy, run, market_run: market }, exec(ROLE)));
@@ -120,14 +132,16 @@ async function strategyRun(mounted: Awaited<ReturnType<typeof setup>>, strategy:
     assert.equal((await submitted(submit, strategy, run, {
       ...context.example,
       leader_candidates: [{ symbol: "sh600519", name: quote.name, rank: 1, board: null, evidence_ids: [quote.id, zt] }],
-      claims: [{ id: "c1", text: `${quote.name}连板数见所引涨停池行。`, basis: "CURRENT", evidence_ids: [zt] }],
+      // The quote is of this run's session; the pool row may be the day before's.
+      claims: [{ id: "c1", text: `${quote.name}连板数见所引涨停池行。`, basis: "CURRENT", evidence_ids: [zt, quote.id] }],
     })).accepted, true);
   }
   return run;
 }
 
 /** A hand-made accepted counterevidence artifact in the run, plan 4's shape, through the runs library's writer. */
-async function counterevidence(root: string, strategy: string, run: string, context: any, count = 2, text = "所引报价只有一个交易日，候选地位的持续性待核验。") {
+async function counterevidence(root: string, strategy: string, run: string, context: any, count = 2, text = "所引报价只有一个交易日，候选地位的持续性待核验。",
+  fields: Record<string, unknown> = {}) {
   const quote = idWhere(context, (row) => row.kind === "quote" && row.symbol === "sh600519");
   const dir = await realpath(join(root, strategy, "analysis", run));
   await writeArtifact(dir, "counterevidence", {
@@ -136,6 +150,7 @@ async function counterevidence(root: string, strategy: string, run: string, cont
     status: "OK", missing_sources: [],
     items: Array.from({ length: count }, (_, i) => ({ id: `x${i + 1}`, against: "leader", kind: "MISSING_EVIDENCE", text, evidence_ids: [quote] })),
     claims: [], limitations: [],
+    ...fields,
   });
 }
 
@@ -168,7 +183,8 @@ function registration(context: any, fields: Record<string, unknown> = {}) {
     preconditions: [
       { id: "p1", name: "theme_gate", status: "met", evidence_ids: [id.artifact("theme")] },
       { id: "p2", name: "candidate_before_divergence", status: "met", evidence_ids: [id.artifact("leader")] },
-      { id: "p3", name: "theme_not_falsified", status: "met", evidence_ids: [id.artifact("theme"), id.measure("breadth")] },
+      // A mainline board's breadth when the context shows one (none when the theme names no board).
+      { id: "p3", name: "theme_not_falsified", status: "met", evidence_ids: [id.artifact("theme"), rowsOf(context).find((row) => row.measure === "breadth")?.id ?? id.artifact("theme")].filter((v, i, a) => a.indexOf(v) === i) },
       { id: "p4", name: "negative_tail_not_widening", status: "met", evidence_ids: [id.measure("yesterday_negative_tail")] },
       { id: "p5", name: "minute_confirmation", status: "unmet: no source", evidence_ids: [] },
     ],
@@ -180,7 +196,9 @@ function registration(context: any, fields: Record<string, unknown> = {}) {
     },
     parameters_used: [{ name: "d_i", value: "未设定", note: "研究候选，没有生产值。" }],
     addressed: [{ item: "x1", response: "记入限制说明，下一运行核对。" }, { item: "x2", response: "同上。", evidence_ids: [id.quote("sh600519")] }],
-    claims: [{ id: "c1", text: "S01 登记：前提见所引工件与派生证据，分钟确认缺少来源。", basis: "CURRENT", evidence_ids: [id.artifact("theme"), id.measure("yesterday_negative_tail")] }],
+    // The market run's artifacts and measures are CURRENT on its own session, HISTORICAL the day after.
+    claims: [{ id: "c1", text: "S01 登记：前提见所引工件与派生证据，分钟确认缺少来源。", basis: context.market.session === context.session ? "CURRENT" : "HISTORICAL",
+      evidence_ids: [id.artifact("theme"), id.measure("yesterday_negative_tail")] }],
     limitations: ["分钟确认缺少来源，只作每日登记。"],
     ...fields,
   });
@@ -333,6 +351,7 @@ test("mode: S01's preconditions - each present, met with evidence, the minute co
     [{ preconditions: pre(0, { status: "unmet", evidence_ids: [] }) }, /analysis\.preconditions\[0\]/],
     [{ preconditions: pre(0, { evidence_ids: [] }) }, /analysis\.preconditions\[0\]/],
     [{ preconditions: pre(4, { status: "met", evidence_ids: [ids(context).quote("sh600519")] }) }, /analysis\.preconditions\[4\]/],
+    [{ preconditions: pre(4, { evidence_ids: [ids(context).quote("sh600519")] }) }, /analysis\.preconditions\[4\]\.evidence_ids/],
     [{ expectation: card({ frozen_version: "snap_other" }) }, /analysis\.expectation\.frozen_version/],
     [{ expectation: card({ state: "REPAIR" }) }, /analysis\.expectation\.state/],
     [{ expectation: card({ candidates: ["sz000333"] }) }, /analysis\.expectation\.candidates/],
@@ -421,45 +440,119 @@ test("mode: WAIT carries no card - accepted with null, SCHEMA with one; a resear
   assert.deepEqual(await submitted(submit, S01, run, accepted), { accepted: true, module: "mode", run });
 });
 
-test("mode: a second run carrying the first run's card must grade it - naming that run, citing evidence of this run unless NOT_EVALUABLE", async (t) => {
+test("mode: the next session's run grades the newest earlier session's card - naming that run, citing evidence it froze unless NOT_EVALUABLE; a same-session run or a WAIT in between leaves nothing to grade", async (t) => {
   const mounted = await setup(t);
   const { root, read, submit, market } = mounted;
-  const first = await strategyRun(mounted, S01);
-  const bare = JSON.parse(await read.execute({ strategy: S01, run: first, market_run: market }, exec(ROLE)));
-  await counterevidence(root, S01, first, bare);
-  const firstContext = JSON.parse(await read.execute({ strategy: S01, run: first, market_run: market }, exec(ROLE)));
-  const card = registration(firstContext);
-  assert.equal((await submitted(submit, S01, first, card)).accepted, true);
-  // A later WAIT run (no card) is never the previous card; the card stays the first run's.
-  const second = await strategyRun(mounted, S01);
-  const context = JSON.parse(await read.execute({ strategy: S01, run: second, market_run: market }, exec(ROLE)));
-  assert.deepEqual(context.previous, { run: first, snapshot_id: firstContext.snapshot_id, session: firstContext.session, expectation: (card as any).expectation });
-  assert.deepEqual(context.example.expectation_review, { previous_run: first, grade: "NOT_EVALUABLE", evidence_ids: [] });
+  /** A run with its leader and counterevidence, read citing the Friday market run. */
+  const ready = async (strategy: string, now?: Date) => {
+    const run = await strategyRun(mounted, strategy, { now });
+    await counterevidence(root, strategy, run, JSON.parse(await read.execute({ strategy, run, market_run: market }, exec(ROLE))));
+    return { run, context: JSON.parse(await read.execute({ strategy, run, market_run: market }, exec(ROLE))) };
+  };
+  // Friday: S01 with a card.
+  const first = await ready(S01);
+  const card = registration(first.context);
+  assert.equal((await submitted(submit, S01, first.run, card)).accepted, true);
+  // Friday again: a re-run of the same session grades nothing.
+  const rerun = await ready(S01);
+  assert.equal(rerun.context.previous, null);
+  // Monday: the next session grades Friday's card.
+  const monday = await ready(S01, MONDAY);
+  const context = monday.context;
+  assert.equal(context.session, "2026-10-26");
+  assert.deepEqual(context.previous, { run: first.run, snapshot_id: first.context.snapshot_id, session: "2026-10-23", expectation: (card as any).expectation });
+  assert.deepEqual(context.example.expectation_review, { previous_run: first.run, grade: "NOT_EVALUABLE", evidence_ids: [] });
   const id = ids(context);
   const claims = [{ id: "c1", text: "上一运行的预期卡对照本运行冻结的报价评为符合。", basis: "CURRENT", evidence_ids: [id.quote("sh600519")] }];
   for (const review of [
     null,
-    { previous_run: second, grade: "符合", evidence_ids: [id.quote("sh600519")] },
-    { previous_run: first, grade: "符合", evidence_ids: [] },
-    // Evidence of the cited market run's session, not an item this run froze.
-    { previous_run: first, grade: "符合", evidence_ids: [idWhere(context, (row) => row.pool === "zt" && row.code === "600519")] },
+    { previous_run: monday.run, grade: "符合", evidence_ids: [id.quote("sh600519")] },
+    { previous_run: first.run, grade: "符合", evidence_ids: [] },
+    // Evidence of the cited market run, not an item this run froze.
+    { previous_run: first.run, grade: "符合", evidence_ids: [idWhere(context, (row) => row.pool === "zt" && row.code === "600519")] },
   ]) {
-    const error = await refusal(submit, S01, second, artifact(context, { claims, expectation_review: review }));
+    const error = await refusal(submit, S01, monday.run, artifact(context, { claims, expectation_review: review }));
     assert.match(error.message, /^INVALID_ANALYSIS: \[REFERENCE\] analysis\.expectation_review/u, JSON.stringify(review));
   }
-  assert.deepEqual(await submitted(submit, S01, second, artifact(context, { claims, expectation_review: { previous_run: first, grade: "符合", evidence_ids: [id.quote("sh600519")] } })),
-    { accepted: true, module: "mode", run: second });
-  // The second run's WAIT carries no card: a third run still grades the first run's.
-  const third = await strategyRun(mounted, S01);
-  const thirdContext = JSON.parse(await read.execute({ strategy: S01, run: third, market_run: market }, exec(ROLE)));
-  assert.equal(thirdContext.previous.run, first);
-  assert.equal((await submitted(submit, S01, third, thirdContext.example)).accepted, true);
-  // A run with no previous card refuses a review.
-  const other = await strategyRun(mounted, S02);
-  const otherContext = JSON.parse(await read.execute({ strategy: S02, run: other, market_run: market }, exec(ROLE)));
-  assert.equal(otherContext.previous, null);
-  const stray = await refusal(submit, S02, other, artifact(otherContext, { claims: [{ ...claims[0], evidence_ids: [ids(otherContext).quote("sh600519")] }], expectation_review: { previous_run: first, grade: "符合", evidence_ids: [ids(otherContext).quote("sh600519")] } }));
+  assert.deepEqual(await submitted(submit, S01, monday.run, artifact(context, { claims, expectation_review: { previous_run: first.run, grade: "符合", evidence_ids: [id.quote("sh600519")] } })),
+    { accepted: true, module: "mode", run: monday.run });
+  // The Friday re-run concludes WAIT: it is now the newest earlier session's mode, so a later Monday
+  // run has nothing to grade, and a review is refused.
+  assert.equal((await submitted(submit, S01, rerun.run, rerun.context.example)).accepted, true);
+  const after = await ready(S01, MONDAY);
+  assert.equal(after.context.previous, null);
+  assert.equal(after.context.example.expectation_review, null);
+  const stray = await refusal(submit, S01, after.run, artifact(after.context, {
+    claims: [{ ...claims[0], evidence_ids: [ids(after.context).quote("sh600519")] }],
+    expectation_review: { previous_run: first.run, grade: "符合", evidence_ids: [ids(after.context).quote("sh600519")] },
+  }));
   assert.match(stray.message, /^INVALID_ANALYSIS: \[REFERENCE\] analysis\.expectation_review/u);
+  assert.equal((await submitted(submit, S01, after.run, after.context.example)).accepted, true);
+});
+
+test("mode: leader and mode stand on one market run - a mode read citing another market run than the leader's is MISSING_EVIDENCE naming the leader's", async (t) => {
+  const mounted = await setup(t);
+  const { freeze, service, read, market } = mounted;
+  // A second sealed market run of the same Friday.
+  const other = await frozenRun(freeze, ["index", "limit-up", "boards"]);
+  await service.sealRun("cn-market", other);
+  const run = await strategyRun(mounted, S01);
+  const error = await rejectsWith(read.execute({ strategy: S01, run, market_run: other }, exec(ROLE)), "MISSING_EVIDENCE");
+  assert.match(error.message, new RegExp(market));
+  assert.doesNotMatch(error.message, /\//u);
+  // The leader's own market run reads.
+  assert.equal(JSON.parse(await read.execute({ strategy: S01, run, market_run: market }, exec(ROLE))).status_expected, "OK");
+});
+
+test("mode: each met precondition cites its own class - REFERENCE on another's evidence, and the theme artifact counts only with a mainline candidate", async (t) => {
+  const mounted = await setup(t);
+  const { root, read, submit, market } = mounted;
+  const run = await strategyRun(mounted, S01);
+  await counterevidence(root, S01, run, JSON.parse(await read.execute({ strategy: S01, run, market_run: market }, exec(ROLE))));
+  const context = JSON.parse(await read.execute({ strategy: S01, run, market_run: market }, exec(ROLE)));
+  const id = ids(context);
+  const base = registration(context) as any;
+  const cite = (i: number, evidence: string[]) => ({ preconditions: base.preconditions.map((p: any, j: number) => (j === i ? { ...p, evidence_ids: evidence } : p)) });
+  for (const [fields, index] of [
+    [cite(0, [id.measure("yesterday_negative_tail")]), 0],
+    [cite(1, [id.quote("sz000333")]), 1],
+    [cite(2, [id.artifact("leader")]), 2],
+    [cite(3, [id.artifact("theme")]), 3],
+  ] as const) {
+    const error = await refusal(submit, S01, run, { ...base, ...fields });
+    assert.match(error.message, new RegExp(`^INVALID_ANALYSIS: \\[REFERENCE\\] analysis\\.preconditions\\[${index}\\]\\.evidence_ids`, "u"));
+  }
+  // Another class member of each passes: a mainline board's members, a candidate's quote, the sentiment artifact.
+  const members = idWhere(context, (row) => row.kind === "members" && row.board === "BK0715");
+  const zt = idWhere(context, (row) => row.pool === "zt" && row.code === "600519");
+  const other = { ...base, ...cite(0, [members]) };
+  other.preconditions = other.preconditions.map((p: any, j: number) => (j === 1 ? { ...p, evidence_ids: [id.quote("sh600519"), zt] } : j === 3 ? { ...p, evidence_ids: [id.artifact("sentiment")] } : p));
+  assert.equal((await submitted(submit, S01, run, other)).accepted, true);
+  // A theme artifact naming no mainline candidate carries no theme precondition.
+  const empty = await setup(t, { mainline: [] });
+  const emptyRun = await strategyRun(empty, S01);
+  await counterevidence(empty.root, S01, emptyRun, JSON.parse(await empty.read.execute({ strategy: S01, run: emptyRun, market_run: empty.market }, exec(ROLE))));
+  const emptyContext = JSON.parse(await empty.read.execute({ strategy: S01, run: emptyRun, market_run: empty.market }, exec(ROLE)));
+  const error = await refusal(empty.submit, S01, emptyRun, registration(emptyContext, cite(0, [ids(emptyContext).artifact("theme")])));
+  assert.match(error.message, /^INVALID_ANALYSIS: \[REFERENCE\] analysis\.preconditions\[0\]\.evidence_ids/u);
+});
+
+test("mode: the A22 gate takes a counterevidence artifact accepted OK with an items array - NOT_EVALUABLE or malformed is UNADDRESSED_COUNTEREVIDENCE, an empty review is accepted", async (t) => {
+  const mounted = await setup(t);
+  const { root, read, submit, market } = mounted;
+  for (const [fields, accepted] of [
+    [{ status: "NOT_EVALUABLE", missing_sources: ["leader"], items: [] }, false],
+    [{ items: { x1: "not a list" } }, false],
+    [{ items: [{ text: "no id" }] }, false],
+    [{ items: [] }, true],
+  ] as const) {
+    const run = await strategyRun(mounted, S01);
+    await counterevidence(root, S01, run, JSON.parse(await read.execute({ strategy: S01, run, market_run: market }, exec(ROLE))), 0, "", fields);
+    const context = JSON.parse(await read.execute({ strategy: S01, run, market_run: market }, exec(ROLE)));
+    const analysis = registration(context, { addressed: [] });
+    if (accepted) assert.deepEqual(await submitted(submit, S01, run, analysis), { accepted: true, module: "mode", run });
+    else assert.match((await refusal(submit, S01, run, analysis)).message, /^INVALID_ANALYSIS: \[UNADDRESSED_COUNTEREVIDENCE\] analysis\.addressed/u, JSON.stringify(fields));
+  }
 });
 
 test("mode: a run without a leader artifact expects NOT_EVALUABLE naming leader - an OK artifact refused, the example accepted", async (t) => {
@@ -487,6 +580,13 @@ test("mode: a cn-market run is WRONG_CHANNEL; a market run two trading days befo
   const alpha = await strategyRun(mounted, "alpha");
   const context = JSON.parse(await read.execute({ strategy: "alpha", run: alpha, market_run: market }, exec(ROLE)));
   assert.equal(context.falsification, null);
+  assert.ok(!("falsification_unreadable" in context));
+  // A THESIS.md past the read's 64 KiB cap: unreadable, said so, not a refusal.
+  await mkdir(join(mounted.root, "gamma"));
+  await writeFile(join(mounted.root, "gamma", "THESIS.md"), `## Falsification\n${"证".repeat(23 * 1024)}\n`);
+  const gamma = await strategyRun(mounted, "gamma");
+  const unreadable = JSON.parse(await read.execute({ strategy: "gamma", run: gamma, market_run: market }, exec(ROLE)));
+  assert.deepEqual([unreadable.falsification, unreadable.falsification_unreadable], [null, true]);
   assert.equal(context.strategy, "alpha");
   assert.match(context.hints.strategy, /WAIT/);
 });
@@ -526,16 +626,16 @@ test("mode: a live-size market run - three 500-row pools, thirty boards, ten 100
   const item = "候选的地位只有一个交易日的冻结证据，".repeat(9).slice(0, 150);
   const addressed = Array.from({ length: 12 }, (_, i) => ({ item: `x${i + 1}`, response: "记入限制说明，下一运行核对。" }));
   /** A run of S01 with its leader and twelve counterevidence items, read citing the market run. */
-  const ready = async () => {
-    const run = await strategyRun(mounted, S01, { symbols: EQUITIES });
+  const ready = async (now?: Date) => {
+    const run = await strategyRun(mounted, S01, { symbols: EQUITIES, now });
     await counterevidence(root, S01, run, JSON.parse(await read.execute({ strategy: S01, run, market_run: market }, exec(ROLE))), 12, item);
     return { run, text: await read.execute({ strategy: S01, run, market_run: market }, exec(ROLE)) };
   };
   const first = await ready();
   assert.equal((await submitted(submit, S01, first.run, registration(JSON.parse(first.text), { addressed }))).accepted, true);
-  // The second run carries the first run's card too: the fullest context a run of S01 reads.
-  const { run, text } = await ready();
-  // Measured 2026-10-27: 29,033 bytes with the previous card, nothing the mode cites cut by the cap.
+  // Monday's run carries Friday's card too: the fullest context a run of S01 reads.
+  const { run, text } = await ready(MONDAY);
+  // Measured 2026-10-27: 29,629 bytes with the previous card, nothing the mode cites cut by the cap.
   assert.ok(Buffer.byteLength(text, "utf8") <= MAX_CONTEXT_BYTES, `${Buffer.byteLength(text, "utf8")} bytes`);
   const context = JSON.parse(text);
   assert.equal(context.status_expected, "OK");

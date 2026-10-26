@@ -79,6 +79,13 @@ export const refuse = {
       "MISSING_EVIDENCE",
       `${what}尚未封存（还没有模块读取过它的上下文），没有可引用的快照、证据与工件；请先完成那个运行的模块分析，或引用一个已封存的运行。`,
     ),
+  /** A mode read citing another market run than the run's accepted leader artifact cites (A5, A27): one market run per strategy run. */
+  marketRunDiffers: (leaderRun) =>
+    new LunhuiError(
+      "MISSING_EVIDENCE",
+      `本运行已接受的 leader 工件引用的市场运行是 ${leaderRun ?? "无"}，与这次给出的 market_run 不同；` +
+        "leader 与 mode 须引用同一个市场运行：请以 leader 引用的市场运行读取 mode，或开一个新的策略运行。",
+    ),
   // The quotes freeze's symbol list, stage 0's four refusals (its `checkSymbols`).
   symbolShape: () =>
     new LunhuiError("INVALID_SYMBOL", "symbols 须为 1–8 个证券代码组成的数组，每个代码是 sh 或 sz 加六位数字。"),

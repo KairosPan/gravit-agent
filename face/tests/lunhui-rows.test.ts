@@ -256,7 +256,7 @@ test("errors: the refusal table opens each message with its code word and names 
     wrongChannel: "WRONG_CHANNEL", symbolShape: "INVALID_SYMBOL", symbolDuplicate: "INVALID_SYMBOL",
     symbolSet: "INVALID_SYMBOL", symbolMix: "INVALID_SYMBOL", boardShape: "INVALID_SYMBOL",
     readFirst: "READ_FIRST", alreadySubmitted: "ALREADY_SUBMITTED", moduleBudget: "TOOL_BUDGET", rejected: "INVALID_ANALYSIS",
-    staleMarketRun: "STALE_MARKET_RUN", missingEvidence: "MISSING_EVIDENCE",
+    staleMarketRun: "STALE_MARKET_RUN", missingEvidence: "MISSING_EVIDENCE", marketRunDiffers: "MISSING_EVIDENCE",
   };
   assert.deepEqual(Object.keys(refuse).sort(), Object.keys(codes).sort());
   // One text per code: the rows' BAD_RUN_ID is runs.mjs's own, naming the new tools.
@@ -297,7 +297,11 @@ test("errors: STALE_MARKET_RUN names both sessions and the rule; MISSING_EVIDENC
   const missing = refuse.missingEvidence("引用的运行").message;
   assert.match(missing, /^MISSING_EVIDENCE: 引用的运行/);
   assert.match(missing, /封存/);
-  for (const message of [stale, missing]) assert.doesNotMatch(message, /\/|\\/);
+  // Leader and mode on two market runs: the leader's run named, the rule stated.
+  const differs = refuse.marketRunDiffers("20261023T070000Z-0a1b2c3d").message;
+  assert.match(differs, /^MISSING_EVIDENCE: .*20261023T070000Z-0a1b2c3d/);
+  assert.match(differs, /同一个市场运行/);
+  for (const message of [stale, missing, differs]) assert.doesNotMatch(message, /\/|\\/);
 });
 
 test("errors: callerIsRole is callerIsChild", () => {
@@ -700,39 +704,43 @@ test("lunhui-runs: readSealedRun refuses an open run MISSING_EVIDENCE, a missing
 
 // The mode's reads beside its run (modules spec A11, A12): the strategy's previous card and THESIS.md.
 
-test("lunhui-runs: previousArtifact returns the newest earlier sealed run whose named artifact accept takes - open, unnamed, refused, later and other-strategy runs passed over", async (t) => {
+test("lunhui-runs: previousArtifact returns the newest earlier run of an earlier session naming the module, whatever it holds - same-session, unnamed, open, later and other-strategy runs passed over", async (t) => {
   const root = await strategiesRoot(t);
   const { service } = mounted(root);
-  // Runs opened a few milliseconds apart: earlier is by the run id's second, then opened_at.
-  const open = async (strategy = "alpha") => {
+  /** A run opened a few milliseconds after the last, its evidence of `session`, sealed, its mode.json named. */
+  const make = async (session: string, artifact?: unknown, { strategy = "alpha", seal = true, named = true } = {}) => {
     await new Promise((resolve) => setTimeout(resolve, 3));
-    return (await service.openRun(strategy, "strategy")).run as string;
-  };
-  const mode = async (strategy: string, run: string, artifact: unknown, { seal = true, named = true } = {}) => {
+    const { run } = await service.openRun(strategy, "strategy");
+    await service.addEvidence(strategy, run, "quotes", [{ kind: "quote", symbol: "sh600519" }], { ...META, session });
     const sealed = seal ? await service.sealRun(strategy, run) : null;
-    const dir = join(root, strategy, "analysis", run);
-    if (named) await nameArtifacts(dir, ["mode"]);
-    await writeFile(join(dir, "mode.json"), JSON.stringify(artifact));
-    return sealed?.snapshot_id;
+    if (artifact !== undefined) {
+      const dir = join(root, strategy, "analysis", run);
+      if (named) await nameArtifacts(dir, ["mode"]);
+      await writeFile(join(dir, "mode.json"), JSON.stringify(artifact));
+    }
+    return { run: run as string, snapshot: sealed?.snapshot_id };
   };
-  const oldest = await open();
-  await mode("alpha", oldest, { card: 1 });
-  const older = await open();
-  const olderSnapshot = await mode("alpha", older, { card: 2 });
-  await mode("alpha", await open(), { card: null });
-  await mode("alpha", await open(), { card: 3 }, { named: false });
-  await mode("alpha", await open(), { card: 4 }, { seal: false });
-  await mode("beta", await open("beta"), { card: 5 });
-  const current = await open();
-  await mode("alpha", await open(), { card: 6 });
-  const accept = (artifact: any) => artifact.card !== null;
-  assert.deepEqual(await service.previousArtifact("alpha", current, "mode", accept), { run: older, snapshot_id: olderSnapshot, session: null, artifact: { card: 2 } });
-  assert.equal(await service.previousArtifact("alpha", oldest, "mode", accept), null);
-  // Nothing counted, nothing sealed: the run asking is only read.
-  const { manifest, metrics } = await service.readRun("alpha", current);
+  const oldest = await make("2026-10-21", { card: 1 });
+  const older = await make("2026-10-22", { card: 2 });
+  await make("2026-10-22", { card: 3 }, { named: false });
+  await make("2026-10-22", { card: 4 }, { seal: false });
+  await make("2026-10-23", { card: 5 });
+  await make("2026-10-22", { card: 6 }, { strategy: "beta" });
+  const current = await make("2026-10-23");
+  const later = await make("2026-10-22", { card: null });
+  assert.deepEqual(await service.previousArtifact("alpha", current.run, "mode"), { run: older.run, snapshot_id: older.snapshot, session: "2026-10-22", artifact: { card: 2 } });
+  assert.equal(await service.previousArtifact("alpha", oldest.run, "mode"), null);
+  // A later asker finds the later run, a card or not: the caller judges what it holds.
+  const last = await make("2026-10-23");
+  assert.deepEqual((await service.previousArtifact("alpha", last.run, "mode"))?.artifact, { card: null });
+  assert.equal((await service.previousArtifact("alpha", last.run, "mode"))?.run, later.run);
+  // An open run has no session, so no earlier one; nothing is counted or sealed.
+  const { run: open } = await service.openRun("alpha", "strategy");
+  assert.equal(await service.previousArtifact("alpha", open, "mode"), null);
+  const { manifest, metrics } = await service.readRun("alpha", open);
   assert.deepEqual([manifest.sealed_at, metrics.calls], [null, {}]);
   await rejectsWith(service.previousArtifact("alpha", "../x", "mode"), "BAD_RUN_ID");
-  await assert.rejects(service.previousArtifact("alpha", current, "nope"), TypeError);
+  await assert.rejects(service.previousArtifact("alpha", current.run, "nope"), TypeError);
 });
 
 test("lunhui-runs: readThesis returns the strategy's THESIS.md text, null past 64 KiB", async (t) => {

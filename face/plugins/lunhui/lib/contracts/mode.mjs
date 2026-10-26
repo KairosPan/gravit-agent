@@ -12,10 +12,13 @@
  * addressed by id (A6, A22), a frozen expectation card (A12) and the parameter values used, research
  * candidates only. Refusals beside the core's: `INADMISSIBLE_STATE` for a mode the strategy, the
  * state or a missing source does not admit, `UNADDRESSED_COUNTEREVIDENCE` for an item left
- * unanswered. A `WAIT` needs none of it and carries no card. When the strategy's previous card
- * exists - the newest earlier run whose accepted `mode.json` holds one, read by the service - the
- * context shows it and `expectation_review` grades it, naming its run and, unless `NOT_EVALUABLE`,
- * citing evidence of this run's session. The R01–R14 families are `research_only` labels, each its
+ * unanswered; the counterevidence must be accepted OK with an items array. Each met precondition
+ * cites its own class of evidence, and one with no source cites none. A `WAIT` needs none of it
+ * and carries no card. The previous card is the card of the strategy's newest accepted `mode.json`
+ * of an earlier session (read by the service); a WAIT there leaves nothing to grade. When it exists
+ * the context shows it and `expectation_review` grades it, naming its run and, unless
+ * `NOT_EVALUABLE`, citing an item this run froze. The read refuses `MISSING_EVIDENCE` when the run's
+ * leader artifact cites another market run than the one given. The R01–R14 families are `research_only` labels, each its
  * family's registered name; the label is carved out of the forbidden-word and scope rules
  * (`exemptPaths`), as are the precondition names, both bound by `rules`. The module owns no
  * assertion class (A21): it cites artifacts and evidence. The context shows the strategy, its
@@ -25,6 +28,7 @@
  * the shared rules are `contract-core.mjs`'s.
  */
 import { checkSchema, fail } from "../contract-core.mjs";
+import { refuse } from "../errors.mjs";
 import { DERIVED_HINT, derivedRow, exampleOf, poolRow, quoteRow } from "./shared.mjs";
 
 /** Chapters 三 and 七 and P0159 of the manuscript, in the tree's own words, paragraph ids only. */
@@ -65,14 +69,14 @@ export const R_FAMILIES = Object.freeze({
 
 /** What a precondition means, for the hints. */
 const PRECONDITION_TEXT = {
-  theme_gate: "题材此前已过主线门槛，引 theme 工件或主线板块",
-  candidate_before_divergence: "候选在分歧前已列入，引 leader 工件或候选报价",
-  theme_not_falsified: "题材未被证伪，引主线板块的派生量或成分股",
-  negative_tail_not_widening: "负尾部未扩大，引 yesterday_negative_tail",
+  theme_gate: "题材此前已过主线门槛，引有主线候选的 theme 工件、主线板块的板块行或成分股、或 boards 派生量",
+  candidate_before_divergence: "候选在分歧前已列入，引 leader 工件、候选的报价或涨停池行",
+  theme_not_falsified: "题材未被证伪，引同 theme_gate",
+  negative_tail_not_widening: "负尾部未扩大，引 yesterday_negative_tail 派生量或 sentiment 工件",
   minute_confirmation: "分钟级确认，今天没有来源",
-  old_theme_retreat: "旧线退潮已登记，引 theme 工件或板块证据",
+  old_theme_retreat: "旧线退潮已登记，引 theme 或 sentiment 工件、或 boards 派生量",
   catalyst: "公开可核验的催化，今天没有来源",
-  candidates_pooled: "候选在观察窗前已入池，引 leader 工件或候选报价",
+  candidates_pooled: "候选在观察窗前已入池，引同 candidate_before_divergence",
 };
 
 /** A cited id: an evidence id or an artifact id `<module>@<snapshot_id>`. */
@@ -152,17 +156,17 @@ const HINTS = {
   preconditions:
     "0–8 条 { id: p1…, name, status, evidence_ids }，id 与 name 各用一次：name 取 " +
     Object.entries(PRECONDITION_TEXT).map(([name, meaning]) => `${name}（${meaning}）`).join("、") +
-    "；status 为 met、unmet 或 “unmet: no source”；met 须引用至少一条证据或工件编号。",
+    "；status 为 met、unmet 或 “unmet: no source”；met 须引用至少一条括号里那一类的证据或工件编号；“unmet: no source” 不引用任何编号。",
   research_only_matches:
     `0–14 条 { family, label, reason }：label 照抄该族登记名（整名或斜杠分隔的一个），reason 为 data、ruling 或 registration；每族一次。登记名：${FAMILY_TEXT}。这些名称只写在 label 里。`,
   expectation:
-    "S01、S02 的预期卡：frozen_version 照抄 snapshot_id；candidates 为 leader 工件的候选代码；state 照抄引用的 sentiment 工件的 state；triggers、vetoes 各 1–5 条；字符串不超过 200 字，写下一运行可对照冻结事实核对的条件，不写交易方向、价位目标或仓位。WAIT 写 null。",
+    "S01、S02 的预期卡：frozen_version 照抄 snapshot_id；candidates 为 leader 工件的候选代码；state 照抄引用的 sentiment 工件的 state；triggers、vetoes 各 1–5 条；字符串不超过 200 字，写下一运行可对照冻结事实核对的条件，不写交易方向、价位目标或仓位；price_band 是相对锚点的观察区间（如锚点上下若干百分比），不是目标价。WAIT 写 null。",
   expectation_review:
     "previous 非空时必填：previous_run 照抄 previous.run；grade 为 符合、强于、弱于 或 NOT_EVALUABLE，除 NOT_EVALUABLE 外引用至少一条本运行冻结、scope 为 CURRENT 的证据编号（如候选的报价）。previous 为 null 时写 null。",
-  previous: "previous 是本策略较早运行中最新的已接受预期卡，本运行只评它；falsification 是 THESIS.md 的 Falsification 一节（至多 4 KiB），写前提与卡片时对照它。两者为 null 即没有。",
+  previous: "previous 是本策略交易日早于本运行的运行中最新一份 mode 工件的预期卡，本运行只评它；那份工件为 WAIT（没有卡）时 previous 为 null，不用评。falsification 是 THESIS.md 的 Falsification 一节（至多 4 KiB），写前提与卡片时对照它；null 即没有这一节，falsification_unreadable 为 true 时是 THESIS.md 读不出。",
   parameters_used: "S01、S02 列出所用参数 { name, value, note }（1–12 条），都只是研究候选；WAIT 可为空。",
   addressed:
-    "S01、S02 须本运行有已接受的 counterevidence 工件，并逐项回应 { item, response, evidence_ids? }，item 照抄 x 编号；漏一项即 UNADDRESSED_COUNTEREVIDENCE；没有该工件时结论写 WAIT。",
+    "S01、S02 须本运行有已接受、status 为 OK 且带 items 列表（可为空）的 counterevidence 工件，并逐项回应 { item, response, evidence_ids? }，item 照抄 x 编号；漏一项即 UNADDRESSED_COUNTEREVIDENCE；没有这样的工件时结论写 WAIT。",
   claims:
     "每条声明写一个事实并引用证据或工件编号。本模块不拥有断言类：任何字段都不写“全市场、市场广度、涨跌家数、情绪、赚钱效应、亏钱效应、冰点、题材、主线、轮动、龙头、空间板、指数、大盘、成交额、流动性”，写缺口（缺少、无法、待补充）的句子除外；需要这些读数时引用对应工件的编号。",
   basis:
@@ -205,12 +209,64 @@ function mainlineBoards(digest) {
   return Array.isArray(candidates) ? candidates.map((candidate) => candidate?.board).filter((board) => typeof board === "string") : [];
 }
 
-/** The item ids of the run's accepted counterevidence artifact, or null when there is none. */
-function counterItems(digest) {
+/**
+ * The run's accepted counterevidence artifact as the A22 gate reads it, or null when there is none:
+ * `usable` when its status is OK and its `items` an array of items with an `x` id (empty allowed - a
+ * review that found nothing), and those ids.
+ * @returns {{ usable: boolean, ids: string[] } | null}
+ */
+function counterevidence(digest) {
   const artifact = artifactOf(digest, "counterevidence");
   if (artifact === undefined) return null;
-  return Array.isArray(artifact.items) ? artifact.items.map((item) => item?.id).filter((id) => typeof id === "string") : [];
+  const items = artifact.items;
+  const usable = artifact.status === "OK" && Array.isArray(items) && items.every((item) => typeof item?.id === "string" && /^x\d{1,2}$/u.test(item.id));
+  return { usable, ids: usable ? items.map((item) => item.id) : [] };
 }
+
+/** The accepted artifact an id names, by its source, if the context shows it. */
+const artifactSource = (id, digest) => (digest.artifactIds.has(id) ? digest.artifacts.get(id)?.source : undefined);
+const isBoardsDerived = (entry) => entry?.source === "market:boards" && entry.kind === "derived";
+
+/** Whether `id` carries a theme precondition: a theme artifact with a mainline candidate, a mainline board's row or list, a boards measure. */
+function carriesTheme(id, digest) {
+  const mainline = mainlineBoards(digest);
+  if (artifactSource(id, digest) === "market:theme") return mainline.length > 0;
+  const entry = digest.items.get(id);
+  return isBoardsDerived(entry) || (entry?.source === "market:boards" && (
+    (entry.kind === "board" && mainline.includes(entry.item.code)) || (entry.kind === "members" && mainline.includes(entry.item.board))));
+}
+
+/** Whether `id` carries a candidate precondition: the leader artifact, a candidate's quote or pool row. */
+function carriesCandidate(id, digest) {
+  if (artifactSource(id, digest) === "leader") return true;
+  const entry = digest.items.get(id);
+  if (entry === undefined) return false;
+  if (entry.source === "quotes" && entry.kind === "quote") return leaderSymbols(digest).includes(entry.item.symbol);
+  return entry.source === "market:limit-up" && entry.kind !== "derived" && candidateCodes(digest).includes(entry.item.code);
+}
+
+/** Whether `id` carries the negative-tail precondition: its derived measure or the sentiment artifact. */
+function carriesTail(id, digest) {
+  if (artifactSource(id, digest) === "market:sentiment") return true;
+  const entry = digest.items.get(id);
+  return entry?.source === "market:limit-up" && entry.kind === "derived" && entry.item.measure === "yesterday_negative_tail";
+}
+
+/** Whether `id` carries the old-theme-retreat precondition: the theme or sentiment artifact, a boards measure. */
+function carriesRetreat(id, digest) {
+  const source = artifactSource(id, digest);
+  return source === "market:theme" || source === "market:sentiment" || isBoardsDerived(digest.items.get(id));
+}
+
+/** The class each precondition with a source cites when met, and the words naming it. */
+const CITES = {
+  theme_gate: [carriesTheme, "the theme artifact with a mainline candidate, a mainline board's row or member list, or a boards derived item"],
+  theme_not_falsified: [carriesTheme, "the theme artifact with a mainline candidate, a mainline board's row or member list, or a boards derived item"],
+  candidate_before_divergence: [carriesCandidate, "the leader artifact, or a candidate's quote or pool row"],
+  candidates_pooled: [carriesCandidate, "the leader artifact, or a candidate's quote or pool row"],
+  negative_tail_not_widening: [carriesTail, "the yesterday_negative_tail derived item or the sentiment artifact"],
+  old_theme_retreat: [carriesRetreat, "the theme or sentiment artifact, or a boards derived item"],
+};
 
 /** The strategy and the previous card `extra` read, from the digest. */
 const extraOf = (digest) => ({ strategy: digest.extra?.strategy ?? null, previous: digest.extra?.previous ?? null });
@@ -231,9 +287,14 @@ function rules(parsed, digest) {
 
   const preconditions = parsed.preconditions;
   if (repeats(preconditions.map((p) => p.id)) || repeats(preconditions.map((p) => p.name))) fail("analysis.preconditions: duplicate values.");
-  for (const [i, precondition] of preconditions.entries())
-    if (precondition.status === "met" && precondition.evidence_ids.length === 0)
-      fail(`analysis.preconditions[${i}]: a met precondition needs an evidence reference.`);
+  for (const [i, { name, status, evidence_ids: ids }] of preconditions.entries()) {
+    if (status === "met" && ids.length === 0) fail(`analysis.preconditions[${i}]: a met precondition needs an evidence reference.`);
+    if (status === "unmet: no source" && ids.length > 0)
+      fail(`analysis.preconditions[${i}].evidence_ids: a precondition with no source carries no evidence reference.`);
+    const cites = CITES[name];
+    if (status === "met" && cites !== undefined && !ids.some((id) => cites[0](id, digest)))
+      fail(`analysis.preconditions[${i}].evidence_ids: ${name} needs an evidence reference to ${cites[1]}.`);
+  }
 
   const matches = parsed.research_only_matches;
   if (repeats(matches.map((match) => match.family))) fail("analysis.research_only_matches: duplicate values.");
@@ -243,10 +304,10 @@ function rules(parsed, digest) {
       fail(`analysis.research_only_matches[${i}].label: a label is its family's registered name (${family}: ${name}); no such evidence reference.`);
   }
 
-  const items = counterItems(digest);
+  const reviewed = counterevidence(digest);
   if (repeats(parsed.addressed.map((answer) => answer.item))) fail("analysis.addressed: duplicate values.");
   for (const [i, answer] of parsed.addressed.entries())
-    if (items === null || !items.includes(answer.item))
+    if (reviewed === null || !reviewed.ids.includes(answer.item))
       fail(`analysis.addressed[${i}].item: not an item of the run's accepted counterevidence artifact; no such evidence reference.`);
 
   const review = parsed.expectation_review;
@@ -283,10 +344,12 @@ function rules(parsed, digest) {
     } else if (status !== "met") fail(`analysis.preconditions[${index}]: ${mode} needs ${name} met, with an evidence reference.`);
   }
 
-  if (items === null)
+  if (reviewed === null)
     fail(`analysis.addressed: Unaddressed counterevidence; ${mode} needs an accepted counterevidence artifact in the run, every item addressed by id.`);
+  if (!reviewed.usable)
+    fail(`analysis.addressed: Unaddressed counterevidence; ${mode} needs the run's counterevidence artifact accepted with status OK and an items array.`);
   const answered = new Set(parsed.addressed.map((answer) => answer.item));
-  const open = items.filter((id) => !answered.has(id));
+  const open = reviewed.ids.filter((id) => !answered.has(id));
   if (open.length > 0) fail(`analysis.addressed: Unaddressed counterevidence; the items ${open.join(", ")} are not addressed.`);
 
   const card = parsed.expectation;
@@ -376,17 +439,26 @@ function holdsCard(artifact) {
 }
 
 /**
- * What the mode reads beside the run (A11): the strategy's name, its previous card - the newest
- * earlier run whose accepted `mode.json` holds one - and its THESIS.md Falsification section.
+ * What the mode reads beside the run (A11), once the run's leader artifact is found to cite the
+ * given market run (`MISSING_EVIDENCE` otherwise: leader and mode stand on one market run): the
+ * strategy's name; its previous card - the card of the newest accepted `mode.json` of an earlier
+ * session, null when that artifact holds none (a WAIT: nothing to grade); and its THESIS.md
+ * Falsification section, with `falsification_unreadable` when the file cannot be read.
  * @param {import("../../runs-row.mjs").LunhuiRuns} runs
  * @param {{ strategy: string, run: string }} located
+ * @param {{ artifacts: Record<string, Record<string, any>>, market: { run: string } | null }} read
  */
-async function extra(runs, { strategy, run }) {
-  const previous = await runs.previousArtifact(strategy, run, "mode", holdsCard);
+async function extra(runs, { strategy, run }, { artifacts, market }) {
+  const leader = artifacts.leader;
+  if (leader !== undefined && leader.market_run !== market?.run) throw refuse.marketRunDiffers(typeof leader.market_run === "string" ? leader.market_run : null);
+  const previous = await runs.previousArtifact(strategy, run, "mode");
+  const thesis = await runs.readThesis(strategy);
   return {
     strategy,
-    previous: previous === null ? null : { run: previous.run, snapshot_id: previous.snapshot_id, session: previous.session, expectation: previous.artifact.expectation },
-    falsification: falsificationOf(await runs.readThesis(strategy)),
+    previous: previous === null || !holdsCard(previous.artifact) ? null
+      : { run: previous.run, snapshot_id: previous.snapshot_id, session: previous.session, expectation: previous.artifact.expectation },
+    falsification: falsificationOf(thesis),
+    ...(thesis === null ? { falsification_unreadable: true } : {}),
   };
 }
 

@@ -52,12 +52,14 @@ const tables = loadCalendars();
  *     filter?: (item: any, digest: import("./contract-core.mjs").ContextDigest) => boolean }[],
  *   marketRun?: "required" | "optional", marketSources?: string[], marketArtifacts?: string[], runArtifacts?: string[],
  *   derivedFilter?: (item: any, digest: import("./contract-core.mjs").ContextDigest) => boolean,
- *   extra?: (runs: import("../runs-row.mjs").LunhuiRuns, located: { strategy: string, run: string }) => Promise<Record<string, unknown>>,
+ *   extra?: (runs: import("../runs-row.mjs").LunhuiRuns, located: { strategy: string, run: string },
+ *     read: { manifest: any, artifacts: Record<string, Record<string, any>>, market: { run: string } | null }) => Promise<Record<string, unknown>>,
  * }} ModuleContract
  * `marketSources`, `marketArtifacts`, `runArtifacts` and `derivedFilter` are `buildContext`'s: the
  * cited run's sources and accepted artifacts the module reads, its own run's accepted artifacts, and
  * the derived items it shows. `extra`, read inside the read's `build` - the run sealed, under its
- * mutex, so it reads other runs and the strategy without a lock - gives `buildContext`'s `extra`.
+ * mutex, so it reads other runs and the strategy without a lock - gives `buildContext`'s `extra`;
+ * it is handed the run's manifest and accepted artifacts and the cited run, and may refuse.
  * `unknownHeadline` is `validateEnvelope`'s.
  */
 
@@ -151,7 +153,7 @@ export function defineModule({ module, channel, contract, runs }) {
         const asked = marketRunOf(args.market_run);
         return await runs.readContext(strategy, args.run, module, async ({ manifest, evidence, artifacts }, located) => {
           const market = asked === undefined ? null : await citedRun(runs, asked, manifest.session ?? null);
-          const extra = contract.extra === undefined ? undefined : await contract.extra(runs, located);
+          const extra = contract.extra === undefined ? undefined : await contract.extra(runs, located, { manifest, artifacts, market });
           const { text, digest } = buildContext({
             module, run: manifest.run, manifest, evidence,
             sources: contract.sources, derivedFirst: contract.derivedFirst, derivedView: contract.derivedView, priority: contract.priority,
