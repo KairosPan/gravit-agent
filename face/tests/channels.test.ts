@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile, realpath, stat, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, writeFile, realpath, stat, rm, symlink, link } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,11 +8,13 @@ import { Readable } from "node:stream";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { WebRoute } from "@deepseek-ai/dsh-host-webserver";
 import {
-  createChannel, listChannelDirs, listSessionHeads, mergeSessionHeads, presetHintsOf, readChannelStatus,
-  readChannelBody, reconcileChannels, registerChannelRoutes, WORKBENCH,
+  BACKTEST_MAX_BYTES, BACKTEST_MAX_DISK_BYTES, createChannel, listChannelDirs, listSessionHeads, mergeSessionHeads,
+  MODULE_HEADLINES, presetHintsOf, readChannelStatus, readChannelBody, reconcileChannels, registerChannelRoutes, WORKBENCH,
 } from "../src/channels.ts";
 import { rosterFor, setRoster } from "../src/roster.ts";
 import { HttpError } from "../src/http.ts";
+import { MODULES } from "../plugins/lunhui/lib/modules.mjs";
+import { addEvidence, openRun, sealRun } from "../plugins/lunhui/lib/runs.mjs";
 
 /** A throwaway workbench root: strategies/{_template, alpha, 市场情绪,
  * .hidden, __pycache__} plus a stray FILE that must never list. */
@@ -171,6 +173,336 @@ test("readChannelBody: the file list skips __pycache__ and directories", async (
   await writeFile(join(dir, "THESIS.md"), "# alpha\n");
   const body = await readChannelBody(dir);
   assert.deepEqual(body.files.map((f) => f.name), ["THESIS.md"]);
+});
+
+test("readChannelBody: a newest backtest over the cap or nested past 32 levels is unread - it still lists, the body serializes", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "face-bt-bounds-"));
+  await writeFile(join(dir, "THESIS.md"), "# alpha\n\n## Thesis\n\nBreadth leads price.\n");
+  await mkdir(join(dir, "backtests"));
+  const frame = Buffer.byteLength(JSON.stringify({ summary: "" }));
+  // exactly the cap, measured on the compact JSON the page is sent: parses
+  const at = JSON.stringify({ summary: "x".repeat(BACKTEST_MAX_BYTES - frame) });
+  assert.equal(Buffer.byteLength(at), BACKTEST_MAX_BYTES);
+  await writeFile(join(dir, "backtests", "2026-10-01-at.json"), at);
+  assert.equal((await readChannelBody(dir)).latest?.file, "2026-10-01-at.json");
+  // one byte past it: listed with its size, never parsed
+  const over = JSON.stringify({ summary: "x".repeat(BACKTEST_MAX_BYTES - frame + 1) });
+  await writeFile(join(dir, "backtests", "2026-10-02-over.json"), over);
+  let body = await readChannelBody(dir);
+  assert.equal(body.latest, null);
+  assert.deepEqual(body.backtests.map((b) => [b.file, b.bytes]), [
+    ["2026-10-02-over.json", Buffer.byteLength(over)], ["2026-10-01-at.json", Buffer.byteLength(at)],
+  ]);
+  // far past it, never read whole
+  await writeFile(join(dir, "backtests", "2026-10-03-huge.json"), JSON.stringify({ summary: "长".repeat(1_000_000) }));
+  assert.equal((await readChannelBody(dir)).latest, null);
+  // 10,000 levels in 20 KB: JSON.parse takes them, the overview's JSON.stringify would throw
+  await writeFile(join(dir, "backtests", "2026-10-04-deep.json"), "[".repeat(10000) + "]".repeat(10000));
+  body = await readChannelBody(dir);
+  assert.equal(body.backtests[0].file, "2026-10-04-deep.json");
+  assert.equal(body.latest, null);
+  assert.doesNotThrow(() => JSON.stringify(body));
+  assert.match(body.thesis?.markdown ?? "", /Breadth leads price/);
+
+  // the depth bound itself: 32 levels parse, 33 do not
+  const nested = (levels: number): string => `{"n":${"[".repeat(levels - 1)}${"]".repeat(levels - 1)}}`;
+  const atDepth = await mkdtemp(join(tmpdir(), "face-bt-depth32-"));
+  await mkdir(join(atDepth, "backtests"));
+  await writeFile(join(atDepth, "backtests", "2026-10-05-d.json"), nested(32));
+  assert.equal((await readChannelBody(atDepth)).latest?.file, "2026-10-05-d.json");
+  const pastDepth = await mkdtemp(join(tmpdir(), "face-bt-depth33-"));
+  await mkdir(join(pastDepth, "backtests"));
+  await writeFile(join(pastDepth, "backtests", "2026-10-05-d.json"), nested(33));
+  assert.equal((await readChannelBody(pastDepth)).latest, null);
+});
+
+test("readChannelBody: a backtest is read up to the disk ceiling - pretty-printed at the compact cap it parses, padded past the ceiling it does not", async () => {
+  // JSON.stringify(x, null, 2) spreads a series of small numbers about 3.5 times: within the
+  // compact cap, past twice it on disk
+  const pretty = await mkdtemp(join(tmpdir(), "face-bt-pretty-"));
+  await mkdir(join(pretty, "backtests"));
+  const series = { series: new Array<number>(520_000).fill(1) };
+  const onDisk = JSON.stringify(series, null, 2);
+  assert.ok(Buffer.byteLength(JSON.stringify(series)) <= BACKTEST_MAX_BYTES);
+  assert.ok(Buffer.byteLength(onDisk) > 2 * BACKTEST_MAX_BYTES && Buffer.byteLength(onDisk) <= BACKTEST_MAX_DISK_BYTES);
+  await writeFile(join(pretty, "backtests", "2026-10-06-pretty.json"), onDisk);
+  assert.equal((await readChannelBody(pretty)).latest?.file, "2026-10-06-pretty.json");
+  // tiny compact JSON padded past the ceiling: never read, however small it would parse
+  const padded = await mkdtemp(join(tmpdir(), "face-bt-padded-"));
+  await mkdir(join(padded, "backtests"));
+  const text = `{"n":1}${" ".repeat(BACKTEST_MAX_DISK_BYTES)}`;
+  await writeFile(join(padded, "backtests", "2026-10-07-padded.json"), text);
+  const body = await readChannelBody(padded);
+  assert.equal(body.latest, null);
+  assert.deepEqual(body.backtests, [{ file: "2026-10-07-padded.json", bytes: Buffer.byteLength(text) }]);
+});
+
+test("readChannelBody: a linked or hard-linked backtest is never read, and a linked backtests/ is never listed", async () => {
+  // outside the strategy: content the page must never carry
+  const outside = await mkdtemp(join(tmpdir(), "face-bt-outside-"));
+  await writeFile(join(outside, "2026-10-09-secret.json"), JSON.stringify({ marker: "OUTSIDE-ONLY" }));
+  const dir = await mkdtemp(join(tmpdir(), "face-bt-links-"));
+  await mkdir(join(dir, "backtests"));
+  await writeFile(join(dir, "backtests", "2026-10-01-run.json"), JSON.stringify({ n_days: 1 }));
+  // a symbolic link to it: not listed, not read - the newest regular file is the evidence
+  await symlink(join(outside, "2026-10-09-secret.json"), join(dir, "backtests", "2026-10-09-link.json"));
+  let body = await readChannelBody(dir);
+  assert.deepEqual(body.backtests.map((b) => b.file), ["2026-10-01-run.json"]);
+  assert.deepEqual(body.latest, { file: "2026-10-01-run.json", json: { n_days: 1 } });
+  // a hard link to it: listed by name and size, never read
+  await link(join(outside, "2026-10-09-secret.json"), join(dir, "backtests", "2026-10-10-hard.json"));
+  body = await readChannelBody(dir);
+  assert.equal(body.backtests[0].file, "2026-10-10-hard.json");
+  assert.equal(body.latest, null);
+  assert.doesNotMatch(JSON.stringify(body), /OUTSIDE-ONLY/);
+  // a backtests/ that is itself a link, wherever it points: nothing listed, nothing read
+  const linked = await mkdtemp(join(tmpdir(), "face-bt-linkdir-"));
+  await symlink(outside, join(linked, "backtests"));
+  body = await readChannelBody(linked);
+  assert.deepEqual(body.backtests, []);
+  assert.equal(body.latest, null);
+  assert.doesNotMatch(JSON.stringify(body), /OUTSIDE-ONLY/);
+});
+
+/* ---------- the runs card: analysis/<run>/ (Lunhui modules spec A14, §5.11) ---------- */
+
+/** A strategy directory as `resolveStrategy` returns one: a realpath. */
+async function strategyDir(prefix: string): Promise<string> {
+  return realpath(await mkdtemp(join(tmpdir(), prefix)));
+}
+
+/** One run as the server makes it: `openRun` at `now`, one quotes freeze carrying a marker the card
+ * must never forward, sealed a second later unless `open`, then the artifacts hand-written,
+ * pretty-printed as a module row would. */
+async function makeRun(
+  dir: string, now: Date, opts: { kind?: "market" | "strategy"; open?: boolean; artifacts?: Record<string, unknown> } = {},
+): Promise<{ run: string; runDir: string; manifest: { as_of: string | null; snapshot_id: string | null } | null }> {
+  const { run, dir: runDir } = await openRun(dir, opts.kind ?? "strategy", now);
+  await addEvidence(runDir, "quotes", [{ symbol: "sh600000", note: "EVIDENCE-ONLY" }], {
+    received_at: now.toISOString(), host: "qt.gtimg.cn", delayed: false, truncated: false,
+  });
+  const manifest = opts.open === true ? null : await sealRun(runDir, new Date(now.getTime() + 1000));
+  for (const [file, value] of Object.entries(opts.artifacts ?? {})) {
+    await writeFile(join(runDir, file), typeof value === "string" ? value : `${JSON.stringify(value, null, 2)}\n`);
+  }
+  return { run, runDir, manifest };
+}
+
+/** Every file's size directly in a run directory - the row's `bytes`, evidence included. */
+async function filesBytes(runDir: string): Promise<number> {
+  let total = 0;
+  for (const name of await readdir(runDir)) total += (await stat(join(runDir, name))).size;
+  return total;
+}
+
+const SENTIMENT = {
+  module: "sentiment", contract_version: "sentiment-v1", status: "ACCEPTED", run: "r", as_of: "a",
+  state: "冰点", money_effect: "weak", freeze_type: "pool", reasoning: "not a headline field",
+};
+const MODE = {
+  module: "mode", contract_version: "mode-v1", mode: "WAIT", preconditions: ["环境未转好"], research_only_matches: [],
+  expectation: { trigger: "放量", horizon: "T+1" }, expectation_review: null, market_run: "20261023T010000Z-0000abcd",
+};
+const ENVIRONMENT_NOT_EVALUABLE = {
+  module: "environment", contract_version: "environment-v1", status: "NOT_EVALUABLE",
+  index_state: null, liquidity_state: null, missing: ["index"],
+};
+
+test("readChannelBody: runs list newest first with sealed, snapshotId and the artifacts' headlines; an open run has snapshotId null", async () => {
+  const dir = await strategyDir("face-runs-list-");
+  const older = await makeRun(dir, new Date("2026-10-23T01:00:00Z"), { artifacts: { "sentiment.json": SENTIMENT, "mode.json": MODE } });
+  const newer = await makeRun(dir, new Date("2026-10-24T01:00:00Z"), { kind: "market", open: true });
+  const body = await readChannelBody(dir);
+  assert.deepEqual(body.runs, [
+    {
+      run: newer.run, asOf: null, snapshotId: null, sealed: false, kind: "market", artifacts: {}, marketRun: null,
+      bytes: await filesBytes(newer.runDir),
+    },
+    {
+      run: older.run, asOf: older.manifest!.as_of, snapshotId: older.manifest!.snapshot_id, sealed: true, kind: "strategy",
+      artifacts: {
+        sentiment: { accepted: true, status: "ACCEPTED", contractVersion: "sentiment-v1", headline: { state: "冰点", money_effect: "weak", freeze_type: "pool" } },
+        mode: {
+          accepted: true, status: null, contractVersion: "mode-v1",
+          headline: { mode: "WAIT", preconditions: ["环境未转好"], research_only_matches: [], expectation: MODE.expectation, expectation_review: null },
+        },
+      },
+      marketRun: "20261023T010000Z-0000abcd",
+      bytes: await filesBytes(older.runDir),
+    },
+  ]);
+  assert.equal(body.runsOmitted, 0);
+  assert.match(older.manifest!.snapshot_id ?? "", /^snap_[0-9a-f]{64}$/);
+  // bytes counts the evidence file by its size; its content never reaches the page
+  assert.ok(body.runs[0].bytes > (await stat(join(newer.runDir, "run.json"))).size);
+  assert.doesNotMatch(JSON.stringify(body), /EVIDENCE-ONLY/);
+});
+
+test("readChannelBody: latestRun is the newest sealed run with an artifact; runs with none are listed but not latest", async () => {
+  const dir = await strategyDir("face-runs-latest-");
+  const withArtifacts = await makeRun(dir, new Date("2026-10-21T01:00:00Z"), {
+    artifacts: { "environment.json": ENVIRONMENT_NOT_EVALUABLE, "mode.json": MODE },
+  });
+  const sealedBare = await makeRun(dir, new Date("2026-10-22T01:00:00Z"));
+  const openWithArtifact = await makeRun(dir, new Date("2026-10-23T01:00:00Z"), { open: true, artifacts: { "sentiment.json": SENTIMENT } });
+  const body = await readChannelBody(dir);
+  assert.deepEqual(body.runs.map((r) => r.run), [openWithArtifact.run, sealedBare.run, withArtifacts.run]);
+  assert.deepEqual(Object.keys(body.runs[0].artifacts), ["sentiment"]);
+  assert.deepEqual(body.runs[1].artifacts, {});
+  assert.equal(body.runs[2].artifacts.environment?.status, "NOT_EVALUABLE");
+  assert.deepEqual(body.latestRun, {
+    run: withArtifacts.run, asOf: withArtifacts.manifest!.as_of, snapshotId: withArtifacts.manifest!.snapshot_id,
+    artifacts: {
+      environment: { headline: { index_state: null, liquidity_state: null }, json: ENVIRONMENT_NOT_EVALUABLE },
+      mode: {
+        headline: { mode: "WAIT", preconditions: ["环境未转好"], research_only_matches: [], expectation: MODE.expectation, expectation_review: null },
+        json: MODE,
+      },
+    },
+    marketRun: "20261023T010000Z-0000abcd",
+  });
+
+  // no sealed run with an artifact at all: listed, never latest
+  const none = await strategyDir("face-runs-latest-none-");
+  await makeRun(none, new Date("2026-10-21T01:00:00Z"));
+  await makeRun(none, new Date("2026-10-22T01:00:00Z"), { open: true, artifacts: { "mode.json": MODE } });
+  const bare = await readChannelBody(none);
+  assert.equal(bare.runs.length, 2);
+  assert.equal(bare.latestRun, null);
+});
+
+test("readChannelBody: the listing stops at 50 and counts the rest in runsOmitted", async () => {
+  const dir = await strategyDir("face-runs-cap-");
+  // 51 runs a second apart, only the OLDEST sealed with an artifact, beside names that are not runs
+  const made: string[] = [];
+  for (let i = 0; i < 51; i += 1) {
+    const now = new Date(Date.UTC(2026, 9, 23, 1, 0, i));
+    made.push(i === 0
+      ? (await makeRun(dir, now, { artifacts: { "mode.json": MODE } })).run
+      : (await openRun(dir, "strategy", now)).run);
+  }
+  await mkdir(join(dir, "analysis", "notes"));
+  await mkdir(join(dir, "analysis", "20261023T010000Z-AAAAAAAA"));
+  await writeFile(join(dir, "analysis", "20261024T000000Z-cccccccc"), "{}");
+  const body = await readChannelBody(dir);
+  assert.equal(body.runs.length, 50);
+  assert.deepEqual(body.runs.map((r) => r.run), made.slice(1).reverse());
+  assert.equal(body.runsOmitted, 1); // run directories only: the stray names and the file are not counted
+  assert.equal(body.latestRun, null); // the only sealed run with an artifact is past the cap
+
+  // exactly 50: every one listed, none left out
+  await rm(join(dir, "analysis", made[0]), { recursive: true });
+  const full = await readChannelBody(dir);
+  assert.equal(full.runs.length, 50);
+  assert.equal(full.runsOmitted, 0);
+});
+
+test("readChannelBody: a linked analysis/, a linked run file and a hard-linked one are never read", async () => {
+  // outside the strategy: a sealed run with an artifact the card must neither list nor forward
+  const outside = await strategyDir("face-runs-outside-");
+  const foreign = await makeRun(outside, new Date("2026-10-23T01:00:00Z"), { artifacts: { "mode.json": { ...MODE, mode: "OUTSIDE-ONLY" } } });
+  const linkedAnalysis = await strategyDir("face-runs-linkdir-");
+  await symlink(join(outside, "analysis"), join(linkedAnalysis, "analysis"));
+  const none = await readChannelBody(linkedAnalysis);
+  assert.deepEqual(none.runs, []);
+  assert.equal(none.runsOmitted, 0);
+  assert.equal(none.latestRun, null);
+
+  const dir = await strategyDir("face-runs-links-");
+  // a run directory that is a link: not a run
+  await mkdir(join(dir, "analysis"));
+  await symlink(foreign.runDir, join(dir, "analysis", "20261025T000000Z-dddddddd"));
+  // a run whose run.json is a symbolic link to the foreign one: listed with nulls
+  const linkedManifest = await makeRun(dir, new Date("2026-10-22T01:00:00Z"), { artifacts: { "sentiment.json": SENTIMENT } });
+  await rm(join(linkedManifest.runDir, "run.json"));
+  await symlink(join(foreign.runDir, "run.json"), join(linkedManifest.runDir, "run.json"));
+  // a sealed run whose artifacts are a symbolic and a hard link to the foreign mode.json: neither read
+  const linkedArtifacts = await makeRun(dir, new Date("2026-10-21T01:00:00Z"));
+  const ownBytes = await filesBytes(linkedArtifacts.runDir);
+  await symlink(join(foreign.runDir, "mode.json"), join(linkedArtifacts.runDir, "mode.json"));
+  await link(join(foreign.runDir, "mode.json"), join(linkedArtifacts.runDir, "theme.json"));
+  const body = await readChannelBody(dir);
+  assert.deepEqual(body.runs.map((r) => r.run), [linkedManifest.run, linkedArtifacts.run]);
+  const [first, second] = body.runs;
+  assert.deepEqual([first.asOf, first.snapshotId, first.sealed, first.kind], [null, null, false, null]);
+  assert.deepEqual(Object.keys(first.artifacts), ["sentiment"]); // a run.json lost leaves the artifacts
+  assert.deepEqual(second.artifacts, {});
+  assert.equal(second.marketRun, null);
+  assert.equal(second.bytes, ownBytes); // a link, symbolic or hard, counts as nothing
+  assert.equal(body.latestRun, null); // the one with an artifact is not known sealed
+  assert.doesNotMatch(JSON.stringify(body), /OUTSIDE-ONLY/);
+});
+
+test("readChannelBody: an artifact over 24 KiB compact or nested past 32 is listed without a headline", async () => {
+  const cap = 24 * 1024;
+  const frame = Buffer.byteLength(JSON.stringify({ ...SENTIMENT, reasoning: "" }));
+  const atCap = { ...SENTIMENT, reasoning: "x".repeat(cap - frame) };
+  assert.equal(Buffer.byteLength(JSON.stringify(atCap)), cap);
+  const overCap = { ...SENTIMENT, reasoning: "x".repeat(cap - frame + 1) };
+  const nested = (levels: number): string => JSON.stringify({ ...MODE, deep: "@" }).replace('"@"', `${"[".repeat(levels - 1)}${"]".repeat(levels - 1)}`);
+
+  // at the cap compact, pretty-printed larger on disk, and 32 levels deep: both accepted
+  const dir = await strategyDir("face-runs-art-at-");
+  const at = await makeRun(dir, new Date("2026-10-23T01:00:00Z"), { artifacts: { "sentiment.json": atCap, "mode.json": nested(32) } });
+  let body = await readChannelBody(dir);
+  assert.ok((await stat(join(at.runDir, "sentiment.json"))).size > cap);
+  assert.deepEqual(Object.keys(body.runs[0].artifacts), ["sentiment", "mode"]);
+  assert.equal(body.latestRun?.run, at.run);
+
+  // one byte past the cap, 33 levels, far past the disk ceiling, and no JSON: none accepted, the run still listed
+  const past = await strategyDir("face-runs-art-past-");
+  const over = await makeRun(past, new Date("2026-10-23T01:00:00Z"), {
+    artifacts: {
+      "sentiment.json": overCap, "mode.json": nested(33), "theme.json": JSON.stringify({ items: "长".repeat(100_000) }),
+      "leader.json": "{not json", "environment.json": "[".repeat(10000) + "]".repeat(10000),
+    },
+  });
+  body = await readChannelBody(past);
+  assert.deepEqual(body.runs.map((r) => [r.run, r.sealed, r.artifacts, r.marketRun]), [[over.run, true, {}, null]]);
+  assert.equal(body.runs[0].bytes, await filesBytes(over.runDir)); // every unread file still counted
+  assert.equal(body.latestRun, null);
+  assert.doesNotThrow(() => JSON.stringify(body));
+
+  // an artifact that parses but is not an object is no artifact either
+  const odd = await strategyDir("face-runs-art-odd-");
+  await makeRun(odd, new Date("2026-10-23T01:00:00Z"), { artifacts: { "mode.json": "[1,2]", "sentiment.json": "\"冰点\"" } });
+  assert.deepEqual((await readChannelBody(odd)).runs[0].artifacts, {});
+});
+
+test("readChannelBody: run.json that does not parse lists the run with nulls and bytes still counted", async () => {
+  const dir = await strategyDir("face-runs-manifest-");
+  const broken = await makeRun(dir, new Date("2026-10-23T01:00:00Z"), { artifacts: { "mode.json": MODE } });
+  await writeFile(join(broken.runDir, "run.json"), "{not json");
+  const body = await readChannelBody(dir);
+  assert.deepEqual(body.runs, [{
+    run: broken.run, asOf: null, snapshotId: null, sealed: false, kind: null,
+    artifacts: {
+      mode: {
+        accepted: true, status: null, contractVersion: "mode-v1",
+        headline: { mode: "WAIT", preconditions: ["环境未转好"], research_only_matches: [], expectation: MODE.expectation, expectation_review: null },
+      },
+    },
+    marketRun: "20261023T010000Z-0000abcd",
+    bytes: await filesBytes(broken.runDir),
+  }]);
+  assert.equal(body.latestRun, null); // not known sealed
+
+  // over its 8 KiB cap, or off the manifest's types: the same nulls
+  const big = await makeRun(await strategyDir("face-runs-manifest-big-"), new Date("2026-10-23T01:00:00Z"));
+  await writeFile(join(big.runDir, "run.json"), JSON.stringify({ run: big.run, kind: "strategy", sealed_at: "x", pad: "x".repeat(8 * 1024) }));
+  const odd = await makeRun(await strategyDir("face-runs-manifest-odd-"), new Date("2026-10-23T01:00:00Z"));
+  await writeFile(join(odd.runDir, "run.json"), JSON.stringify({ kind: "other", as_of: 20261023, snapshot_id: 7, sealed_at: true }));
+  for (const runDir of [big.runDir, odd.runDir]) {
+    const [row] = (await readChannelBody(join(runDir, "..", ".."))).runs;
+    assert.deepEqual([row.asOf, row.snapshotId, row.sealed, row.kind], [null, null, false, null]);
+  }
+});
+
+test("MODULE_HEADLINES equals the plugins' MODULES table, name for name and field for field", () => {
+  assert.deepEqual(
+    MODULE_HEADLINES.map((m) => ({ name: m.name, file: m.file, headline: [...m.headline] })),
+    MODULES.map((m) => ({ name: m.name, file: m.file, headline: [...m.headline] })),
+  );
 });
 
 /** A registry standing in for ctx.workspaceRegistry: the same path
@@ -591,6 +923,51 @@ test("routes: overview answers by workspace id, and a body value never becomes a
     await routes.get("/data/channels/overview")!.handler(postReq(JSON.stringify(bad)), out.res);
     assert.equal(out.out.status, 404, JSON.stringify(bad));
   }
+});
+
+test("routes: the overview carries the runs card inside body, on the same path", async () => {
+  const root = await realpath(await makeRoot());
+  const made = await makeRun(join(root, "strategies", "alpha"), new Date("2026-10-23T01:00:00Z"), { artifacts: { "mode.json": MODE } });
+  const routes = await routesFor(root, await mkdtemp(join(tmpdir(), "face-rt-runs-")));
+  const alpha = await channelNamed(routes, "alpha");
+  const out = fakeRes();
+  await routes.get("/data/channels/overview")!.handler(postReq(JSON.stringify({ workspaceId: alpha.workspaceId })), out.res);
+  assert.equal(out.out.status, 200);
+  const { body } = JSON.parse(out.out.body) as {
+    body: { runs: { run: string; sealed: boolean }[]; runsOmitted: number; latestRun: { run: string; marketRun: string | null } | null };
+  };
+  assert.deepEqual(body.runs.map((r) => [r.run, r.sealed]), [[made.run, true]]);
+  assert.equal(body.runsOmitted, 0);
+  assert.deepEqual([body.latestRun?.run, body.latestRun?.marketRun], [made.run, MODE.market_run]);
+});
+
+test("routes: a body that cannot be serialized answers one clean 500 with fixed text, never a head and then a throw", async () => {
+  const root = await makeRoot();
+  const { registry } = fakeRegistry();
+  const routes: WebRoute[] = [];
+  registerChannelRoutes({ register: (route) => routes.push(route) }, {
+    registry, root, home: await mkdtemp(join(tmpdir(), "face-rt-ser-")),
+    listSessions: async () => [],
+    connectedBins: async () => ["codex"],
+    // a value JSON.stringify refuses, standing in for anything a block might one day carry
+    listBots: async () => [{ id: "b", name: "b", listed: true, size: 1n }] as never,
+  });
+  const byPath = new Map(routes.map((r) => [r.path, r]));
+  const ws = await channelNamed(byPath, "alpha");
+  // a response that refuses a second head, as Node's does once the first is written
+  const heads: number[] = [];
+  let sent = "";
+  const res = {
+    writeHead(status: number) {
+      if (heads.length > 0) throw Object.assign(new Error("Cannot write headers after they are sent"), { code: "ERR_HTTP_HEADERS_SENT" });
+      heads.push(status);
+      return res;
+    },
+    end(chunk?: string) { sent = String(chunk ?? ""); return res; },
+  };
+  await byPath.get("/data/channels/overview")!.handler(postReq(JSON.stringify({ workspaceId: ws.workspaceId })), res as unknown as ServerResponse);
+  assert.deepEqual(heads, [500]);
+  assert.deepEqual(JSON.parse(sent), { ok: false, error: "response could not be serialized" });
 });
 
 test("routes: the roster write replaces the set and refuses an unknown channel", async () => {
