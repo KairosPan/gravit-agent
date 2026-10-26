@@ -607,3 +607,56 @@ test("validateEnvelope with a cited run: market_run and market_snapshot_id requi
   assert.equal(category(() => checkCiting(citing(older, cite([`sentiment@${MARKET_SNAP}`])), older)), "TIME_SCOPE");
   checkCiting(citing(older, { claims: [{ id: "c1", text: "前一交易日的读数为修复。", basis: "HISTORICAL", evidence_ids: [`sentiment@${MARKET_SNAP}`, marketZt.id] }] }), older);
 });
+
+test("buildContext with a cited run: an artifact view is bounded - six claims, each text cut to 120 characters, ids whole, claims_total when cut", () => {
+  const long = "封".repeat(300);
+  const claims = Array.from({ length: 10 }, (_, i) => ({ id: `c${i + 1}`, text: long, basis: "CURRENT", evidence_ids: [marketSeal.id, marketZt.id] }));
+  const big = { ...sentimentArtifact, claims };
+  const { text, digest } = cited(marketOf(SESSION, { sentiment: big, theme: themeArtifact }));
+  const view = JSON.parse(text).artifacts[0];
+  assert.equal(view.id, `sentiment@${MARKET_SNAP}`);
+  assert.equal(view.claims.length, 6);
+  assert.equal(view.claims_total, 10);
+  for (const claim of view.claims) {
+    assert.equal(Array.from(claim.text).length, 120);
+    assert.deepEqual(claim.evidence_ids, [marketSeal.id, marketZt.id]);
+  }
+  // The digest keeps the artifact whole; a view within the bound has no claims_total.
+  assert.equal(digest.artifacts.get(`sentiment@${MARKET_SNAP}`).artifact.claims.length, 10);
+  assert.equal(Object.hasOwn(JSON.parse(cited().text).artifacts[0], "claims_total"), false);
+});
+
+test("buildContext with a cited run: an artifact the cap leaves out is not citable, counted in truncated, and missing when required", () => {
+  const wide = { ...themeArtifact, mainline_candidates: ["x".repeat(29 * 1024)] };
+  const { text, digest } = cited(marketOf(SESSION, { sentiment: sentimentArtifact, theme: wide }));
+  const context = JSON.parse(text);
+  assert.ok(Buffer.byteLength(text, "utf8") <= MAX_CONTEXT_BYTES);
+  assert.deepEqual(context.artifacts.map((row: Loose) => row.id), [`sentiment@${MARKET_SNAP}`]);
+  assert.deepEqual([...digest.artifactIds], [`sentiment@${MARKET_SNAP}`]);
+  assert.ok(context.truncated.some((group: Loose) => group.source === "market:theme" && group.kind === "artifact" && group.count === 1));
+  // The run's leader comes after the theme, so the latching cap leaves it out too.
+  assert.deepEqual(digest.missing, ["market:theme", "leader"]);
+  assert.deepEqual(context.missing, ["market:theme", "leader"]);
+  assert.equal(context.status_expected, "NOT_EVALUABLE");
+  assert.equal(category(() => checkCiting(citing(digest, { claims: [{ id: "c1", text: "读数待核。", basis: "CURRENT", evidence_ids: [quote.id, `theme@${MARKET_SNAP}`] }] }), digest)), "REFERENCE");
+  // A left-out artifact the contract does not require is not missing.
+  const optional = cited(marketOf(SESSION, { sentiment: sentimentArtifact, theme: wide }), { required: ["quotes"] });
+  assert.deepEqual(optional.digest.missing, []);
+  assert.equal(JSON.parse(optional.text).status_expected, "OK");
+});
+
+test("buildContext with a cited run: an item frozen in both runs keeps the strategy run's entry", () => {
+  const market = marketOf();
+  const both = { ...market, evidence: market.evidence.map((file: Loose) => (file.source === "limit-up" ? { ...file, session: "2026-10-22", items: [...file.items, quote] } : file)) };
+  const { digest } = cited(both);
+  assert.deepEqual(digest.items.get(quote.id), { source: "quotes", kind: "quote", scope: "CURRENT", item: quote });
+  assert.equal(digest.items.get(marketZt.id).source, "market:limit-up");
+});
+
+test("validateEnvelope with a cited run: an artifact id in free text is read whole - a longer hex run is not one", () => {
+  const { digest } = cited();
+  checkCiting(citing(digest, { limitations: [`sentiment@${MARKET_SNAP}。`] }), digest);
+  assert.equal(category(() => checkCiting(citing(digest, { limitations: [`theme@snap_${"c".repeat(64)}，待核。`] }), digest)), "REFERENCE");
+  // 65 hex digits name no snapshot, so the scan takes no id from them, the known one's prefix included.
+  checkCiting(citing(digest, { limitations: [`sentiment@${MARKET_SNAP}0 不是工件编号。`] }), digest);
+});

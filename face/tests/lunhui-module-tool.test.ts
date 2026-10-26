@@ -456,3 +456,22 @@ test("module tools with an optional cited run: without market_run the read and s
   const analysis = JSON.stringify(citingOf(text, [strategy.quoteId]));
   assert.deepEqual(JSON.parse(await submit.execute({ strategy: "alpha", run: strategy.run, analysis }, exec(ROLE))).accepted, true);
 });
+
+test("module tools: a contract naming runArtifacts without marketRun shows the run's own accepted artifacts, citable by the run's snapshot", async (t) => {
+  const root = await strategiesRoot(t);
+  const service = backbone(root);
+  const { read, submit } = tools(service, "market", { ...toyContract(), runArtifacts: ["sentiment"] } as any);
+  const { run, quoteId } = await frozenRun(service, "cn-market");
+  const manifest = await service.sealRun("cn-market", run);
+  const dir = join(root, "cn-market", "analysis", run);
+  await writeFile(join(dir, "sentiment.json"), JSON.stringify({ module: "sentiment", state: "REPAIR", claims: [] }));
+  await writeFile(join(dir, "run.json"), JSON.stringify({ ...manifest, artifacts: ["sentiment"] }));
+  const text = await read.execute({ strategy: "cn-market", run }, exec(ROLE));
+  const context = JSON.parse(text);
+  const id = `sentiment@${manifest.snapshot_id}`;
+  assert.deepEqual(context.artifacts.map((row: any) => row.id), [id]);
+  assert.equal(Object.hasOwn(context, "market_run"), false);
+  assert.deepEqual(read.parameters.required, ["strategy", "run"]);
+  const analysis = JSON.stringify(artifactOf(text, [quoteId, id]));
+  assert.deepEqual(JSON.parse(await submit.execute({ strategy: "cn-market", run, analysis }, exec(ROLE))).accepted, true);
+});

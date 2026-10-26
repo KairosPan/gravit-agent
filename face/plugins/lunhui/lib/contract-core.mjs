@@ -274,7 +274,7 @@ const ENVELOPE_BOUND = ["module", "snapshot_id", "run", "as_of", "session", "con
 const MARKET_BOUND = ["market_run", "market_snapshot_id"];
 
 /** A cited artifact, anywhere in an artifact's text: `<module>@<snapshot_id>` (§5.1). */
-const ARTIFACT_ID = /[a-z]+@snap_[a-f0-9]{64}/g;
+const ARTIFACT_ID = /[a-z]+@snap_[a-f0-9]{64}(?![a-f0-9])/g;
 
 /** A claim's cited id in a module that may cite artifacts: an evidence id or an artifact id. */
 const CITED_ID_PATTERN = "^(?:ev_[a-f0-9]{24}|[a-z]+@snap_[a-f0-9]{64})$";
@@ -533,9 +533,12 @@ function checkEnvelope(raw, { module, context, schema, owns = [], ownedBy = {}, 
  * `marketArtifacts` names the market run's accepted artifacts the module reads and `runArtifacts`
  * this run's own, from `artifacts`; each is shown first, before the derived items, as `{ id,
  * module, headline, claims: [{ id, text, evidence_ids }] }`, its id `<module>@<snapshot_id>` of its
- * run, CURRENT evidence when its run's session is this run's, else HISTORICAL; one past the cap is
- * counted in `truncated` (kind `artifact`) and is not citable. A `required` entry is a source of
- * this run, `market:<source>` or `market:<module>` of the market run, or a module of this run.
+ * run, CURRENT evidence when its run's session is this run's, else HISTORICAL; a view is bounded
+ * (`artifactView`). One past the cap is counted in `truncated` (kind `artifact`) and is not
+ * citable, and when the contract requires it, it joins `missing` too, so the status expected is
+ * `NOT_EVALUABLE`. A `required` entry is a source of this run, `market:<source>` or
+ * `market:<module>` of the market run, or a module of this run. An item frozen in both runs keeps
+ * this run's entry.
  * @param {{ module: string, run: string, manifest: { snapshot_id?: string | null, as_of?: string | null, session?: string | null,
  *   evidence: { source: string }[] }, evidence: { source: string, session: string | null, items: Record<string, any>[] }[],
  *   sources: string[], derivedFirst?: string[], derivedView?: (item: any) => Record<string, unknown>, priority: { source: string, kind: string, order?: (a: any, b: any) => number,
@@ -564,8 +567,11 @@ export function buildContext({
   /** @type {Map<string, DigestItem>} */
   const items = new Map();
   for (const file of files)
-    for (const item of file.items)
+    for (const item of file.items) {
+      // An item frozen in both runs keeps this run's own entry: the market run's comes after it.
+      if (file.source.startsWith("market:") && items.has(item.id)) continue;
       items.set(item.id, { source: file.source, kind: rowKind(item), scope: timeScope(item, file.session ?? null, session), item });
+    }
   const all = [...items.entries()];
   const derivedIds = new Set(all.filter(([, entry]) => entry.kind === "derived").map(([id]) => id));
   const scopeOf = (runSession) => (runSession !== null && runSession === session ? "CURRENT" : "HISTORICAL");
@@ -650,7 +656,16 @@ export function buildContext({
     }
     context.truncated = [...groups.values()];
   };
+  // A required artifact the cap leaves out cannot be cited, so it is missing.
+  const hide = () => {
+    for (const entry of left)
+      if (entry.kind === "artifact" && required.includes(entry.source) && !missing.includes(entry.source)) {
+        missing.push(entry.source);
+        context.status_expected = "NOT_EVALUABLE";
+      }
+  };
   count();
+  hide();
   // The `truncated` list adds bytes of its own: give back the last rows added until the text fits.
   while (bytes(context) > MAX_CONTEXT_BYTES) {
     const last = added.pop();
@@ -658,24 +673,32 @@ export function buildContext({
     last.list.pop();
     left.unshift(last.entry);
     count();
+    hide();
   }
   // Only an artifact the context shows is citable.
   for (const entry of left) if (entry.kind === "artifact") digest.artifactIds.delete(/** @type {any} */ (entry).id);
   return { text: JSON.stringify(context), digest };
 }
 
+/** The claims an artifact view shows, and the characters of each claim's text it keeps. */
+const VIEW_CLAIMS = 6;
+const VIEW_CLAIM_CHARS = 120;
+
 /**
- * An accepted artifact as a context shows it: its id, its module, its headline fields (`MODULES`)
- * and its claims' ids, texts and cited ids.
+ * An accepted artifact as a context shows it, bounded: its id, its module, its headline fields
+ * (`MODULES`) and its first six claims' ids, texts cut to 120 characters, and cited ids whole;
+ * `claims_total` when claims were left out. The digest keeps the artifact whole.
  * @param {string} id
  * @param {DigestArtifact} entry
  */
 function artifactView(id, { module, artifact }) {
   const headline = MODULES.find((candidate) => candidate.name === module)?.headline ?? [];
   const claims = Array.isArray(artifact.claims) ? artifact.claims : [];
+  const cut = (text) => (typeof text === "string" ? Array.from(text).slice(0, VIEW_CLAIM_CHARS).join("") : text);
   return {
     id, module,
     headline: Object.fromEntries(headline.filter((field) => Object.hasOwn(artifact, field)).map((field) => [field, artifact[field]])),
-    claims: claims.map((claim) => ({ id: claim?.id, text: claim?.text, evidence_ids: claim?.evidence_ids })),
+    claims: claims.slice(0, VIEW_CLAIMS).map((claim) => ({ id: claim?.id, text: cut(claim?.text), evidence_ids: claim?.evidence_ids })),
+    ...(claims.length > VIEW_CLAIMS ? { claims_total: claims.length } : {}),
   };
 }

@@ -147,11 +147,8 @@ export function defineModule({ module, channel, contract, runs }) {
             module, run: manifest.run, manifest, evidence,
             sources: contract.sources, derivedFirst: contract.derivedFirst, derivedView: contract.derivedView, priority: contract.priority,
             hypotheses: contract.hypotheses, schema: contract.schema, hints: contract.hints,
-            example: contract.example, required: contract.required,
-            ...(marketRun === undefined ? {} : {
-              marketRun, market, marketSources: contract.marketSources, marketArtifacts: contract.marketArtifacts,
-              runArtifacts: contract.runArtifacts, artifacts,
-            }),
+            example: contract.example, required: contract.required, runArtifacts: contract.runArtifacts, artifacts,
+            ...(marketRun === undefined ? {} : { marketRun, market, marketSources: contract.marketSources, marketArtifacts: contract.marketArtifacts }),
           });
           digests.set(`${located.strategy}/${located.run}/${module}`, digest);
           return text;
