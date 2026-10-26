@@ -510,3 +510,34 @@ test("runs: readRun reads back both files; a missing or corrupt metrics.json rea
   await rejectsWith(readRun(dir), "NO_SUCH_RUN");
   await rejectsWith(sealRun(dir), "NO_SUCH_RUN");
 });
+
+test("runs: an item that is no plain object or carries its own id, and a meta off its shape, throw a plain Error and write nothing", async (t) => {
+  const { dir } = await openRun(await oneStrategy(t), "market");
+  const before = await readText(dir, "run.json");
+  const hostBug = (error: unknown) => error instanceof TypeError && !(error instanceof LunhuiError);
+  class Row { code = "600519"; }
+  for (const item of [[1], null, "600519", 7, new Row(), { code: "600519", id: "ev_mine" }]) {
+    await assert.rejects(addEvidence(dir, "quotes", [{ code: "000001" }, item], meta), hostBug, JSON.stringify(item));
+  }
+  for (const bad of [
+    { ...meta, host: "" }, { ...meta, host: undefined }, { ...meta, delayed: "no" }, { ...meta, truncated: undefined },
+    { ...meta, received_at: "soon" }, undefined,
+  ]) {
+    await assert.rejects(addEvidence(dir, "quotes", [{ code: "000001" }], bad as never), hostBug, JSON.stringify(bad));
+  }
+  assert.equal(await readText(dir, "run.json"), before);
+  assert.deepEqual((await readdir(dir)).sort(), ["metrics.json", "run.json"]);
+  await addEvidence(dir, "quotes", [Object.assign(Object.create(null), { code: "000001" })], meta); // a null-prototype object is plain
+});
+
+test("runs: a run.json write that fails after the evidence file landed removes the file, and the run reads as before", async (t) => {
+  const { dir } = await openRun(await oneStrategy(t), "market");
+  const before = await readRun(dir);
+  await mkdir(join(dir, "run.pending.json")); // replaceFile refuses a directory at its staging name
+  await rejectsWith(addEvidence(dir, "quotes", [{ code: "600519" }], meta), "NO_SUCH_RUN");
+  assert.deepEqual((await readdir(dir)).sort(), ["metrics.json", "run.json", "run.pending.json"]);
+  assert.deepEqual(await readRun(dir), before);
+  await rm(join(dir, "run.pending.json"), { recursive: true });
+  await addEvidence(dir, "quotes", [{ code: "600519" }], meta); // the source is not frozen by the failed try
+  assert.equal((await readRun(dir)).manifest.evidence.length, 1);
+});

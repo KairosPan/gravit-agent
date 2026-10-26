@@ -483,7 +483,9 @@ export async function openRun(strategyDir, kind, now = new Date()) {
  * Refusals, each writing nothing: `RUN_SEALED` when the run is sealed; `SOURCE_FROZEN` when the run
  * already lists the source or a file holds its name; `EVIDENCE_TOO_LARGE` when the file would pass
  * 256 KiB; `RUN_TOO_LARGE` when the run's evidence would pass 2 MiB. A source off `SOURCE_RE`, items
- * that are not an array or a `received_at` that is no date are host code's bug, a `TypeError`. A
+ * that are not an array of plain objects without an `id` of their own, a `received_at` that is no
+ * date, an empty `host` or a `delayed` or `truncated` that is not a boolean are host code's bug, a
+ * `TypeError`. A
  * `run.json` write that fails removes the evidence file it followed. Not serialized here: two
  * calls on one run at once are the caller's to order (the service's run mutex).
  * @param {string} dir a run directory `openRun` or `resolveRun` returned
@@ -495,8 +497,15 @@ export async function openRun(strategyDir, kind, now = new Date()) {
 export async function addEvidence(dir, source, items, meta) {
   if (typeof source !== "string" || !SOURCE_RE.test(source)) throw new TypeError(`lunhui: an evidence source matches ${SOURCE_RE}, not ${JSON.stringify(source)}`);
   if (!Array.isArray(items)) throw new TypeError("lunhui: evidence items are an array");
+  items.forEach((item, i) => {
+    if (!plainObject(item)) throw new TypeError(`lunhui: evidence item ${i} is a plain object, not ${JSON.stringify(item)}`);
+    // The id is addEvidence's to give, so a stored item and its id always agree.
+    if (Object.hasOwn(item, "id")) throw new TypeError(`lunhui: evidence item ${i} carries an id of its own`);
+  });
   const { received_at, host, delayed, truncated } = meta ?? {};
   if (typeof received_at !== "string" || Number.isNaN(Date.parse(received_at))) throw new TypeError(`lunhui: received_at is a date, not ${JSON.stringify(received_at)}`);
+  if (typeof host !== "string" || host === "") throw new TypeError(`lunhui: host is a non-empty string, not ${JSON.stringify(host)}`);
+  if (typeof delayed !== "boolean" || typeof truncated !== "boolean") throw new TypeError("lunhui: delayed and truncated are booleans");
   const manifest = await readManifest(dir);
   if (manifest.sealed_at) throw new LunhuiError("RUN_SEALED", "这个运行已封存（已读过上下文），不再接受证据；不带 run 冻结即开启新运行。");
   if (manifest.evidence.some((entry) => entry?.source === source)) throw sourceFrozen();
@@ -517,11 +526,24 @@ export async function addEvidence(dir, source, items, meta) {
   try {
     await writeManifest(dir, { ...manifest, evidence: [...manifest.evidence, { source, file, sha256, bytes, received_at, host, delayed }] });
   } catch (error) {
-    // Never through a run directory since swapped for a link.
+    // Never through a run directory since swapped for a link. A cleanup that fails is swallowed,
+    // so the run.json error is the one thrown; the orphan file left behind then makes every later
+    // freeze of this source on this run refuse SOURCE_FROZEN, while the run reads as before.
     if (await stillResolved(dir).catch(() => false)) await rm(join(dir, file), { force: true }).catch(() => {});
     throw error;
   }
   return { file, sha256, bytes, ids };
+}
+
+/**
+ * Whether `value` is a plain object: made by a literal or `Object.create(null)`, not an array, a
+ * class instance or a primitive.
+ * @param {unknown} value
+ */
+function plainObject(value) {
+  if (value === null || typeof value !== "object") return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
 }
 
 /** @returns {LunhuiError} */
