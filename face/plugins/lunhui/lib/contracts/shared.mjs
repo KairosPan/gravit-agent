@@ -24,7 +24,8 @@ export function firstId(digest, test) {
 }
 
 /**
- * A context's example, built from the digest's own ids: `NOT_EVALUABLE` with the missing sources,
+ * A context's example, built from the digest's own ids, its envelope the digest's (with
+ * `market_run` and `market_snapshot_id` when the module cites a market run): `NOT_EVALUABLE` with the missing sources,
  * `unknown` headlines and no claim when any source is missing; else `OK` with `unknown` headlines,
  * `extra` fields, and one INSUFFICIENT claim citing the first id `pickCited` accepts (else the
  * digest's first id).
@@ -37,6 +38,8 @@ export function exampleOf(digest, unknown, pickCited, extra = {}) {
   const envelope = {
     module: digest.module, contract_version: digest.contract_version, hypotheses_version: digest.hypotheses_version,
     snapshot_id: digest.snapshot_id, run: digest.run, as_of: digest.as_of, session: digest.session,
+    // A module citing a market run carries its two bound fields too.
+    ...(Object.hasOwn(digest, "market_run") ? { market_run: digest.market_run, market_snapshot_id: digest.market_snapshot_id } : {}),
   };
   if (digest.missing.length > 0)
     return {
