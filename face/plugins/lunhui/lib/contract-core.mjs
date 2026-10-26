@@ -475,7 +475,7 @@ function checkEnvelope(raw, { module, context, schema, owns = [], ownedBy = {}, 
  * there every row is left out, as is every row no entry asks for, each counted in `truncated` as
  * `{ source, kind, count }`. Every item of the module's sources stays citable, shown or not.
  * `derivedView`, when given, shapes every derived item shown, as a priority entry's `view` its rows.
- * `example` is the built example, or a function of the digest that builds it.
+ * `hints` and `example` are each the built value, or a function of the digest that builds it.
  * @param {{ module: string, run: string, manifest: { snapshot_id?: string | null, as_of?: string | null, session?: string | null,
  *   evidence: { source: string }[] }, evidence: { source: string, session: string | null, items: Record<string, any>[] }[],
  *   sources: string[], derivedFirst?: string[], derivedView?: (item: any) => Record<string, unknown>, priority: { source: string, kind: string, order?: (a: any, b: any) => number,
@@ -518,7 +518,7 @@ export function buildContext({ module, run, manifest, evidence, sources, derived
   const context = {
     module, contract_version: CONTRACT_VERSION, hypotheses_version: digest.hypotheses_version, run,
     snapshot_id: digest.snapshot_id, as_of: digest.as_of, session, status_expected: missing.length ? "NOT_EVALUABLE" : "OK",
-    missing, hypotheses, schema: envelopeSchema(schema), hints,
+    missing, hypotheses, schema: envelopeSchema(schema), hints: typeof hints === "function" ? hints(digest) : hints,
     example: typeof example === "function" ? example(digest) : example,
     evidence: [], derived: [], truncated: [],
   };

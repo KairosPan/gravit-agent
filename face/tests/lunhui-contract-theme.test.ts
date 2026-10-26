@@ -73,9 +73,7 @@ test("theme contract: Chinese hypotheses restating THESIS.md hypothesis 3 with i
   assert.deepEqual(contract.required, ["boards", "limit-up"]);
   assert.deepEqual(contract.sources, ["boards", "limit-up"]);
   assert.deepEqual(contract.exemptPaths, ["mainline_candidates[*].name"]);
-  assert.match(JSON.stringify(contract.hints), /members_total/);
-  // The members item's own truncated (the source's cut at 100) is named apart from the context's list.
-  assert.match((contract.hints as any).members, /成分股证据自带的 truncated.*100.*顶层的 truncated/);
+  assert.equal(typeof contract.hints, "function", "the hints state the boards source's stamps from the digest");
 });
 
 test("theme: a context over a real boards and limit-up freeze - OK expected, derived first, member lists cut to 20, at most 30 KiB - whose example is accepted", async (t) => {
@@ -91,15 +89,24 @@ test("theme: a context over a real boards and limit-up freeze - OK expected, der
   assert.deepEqual(context.evidence.map((row: any) => row.kind ?? row.pool), [
     "board", "board", "board", "board", "members", "members", "flow", "flow", "flow", "flow", "zt", "zt", "zt", "zt", "zt", "zt",
   ]);
-  // A member list shows its first 20 members, members_total the frozen count.
   const file = JSON.parse(await readFile(join(root, "cn-market", "analysis", run, "evidence-boards.json"), "utf8"));
+  // The hints: members_total, the members item's own truncated (the source's cut at 100) named apart
+  // from the context's list, and the boards source's host and delay stated once.
+  assert.match(context.hints.members, /members_total/);
+  assert.match(context.hints.members, /成分股证据自带的 truncated.*100.*顶层的 truncated/);
+  assert.equal(context.hints.served, "boards 各行来自 push2.eastmoney.com；均非延时行情（delayed 为 false）。");
+  // Board, member-list and flow rows carry no per-item stamp, a board no leader; the file keeps them.
+  for (const row of context.evidence.filter((row: any) => row.source === "boards"))
+    assert.ok(!("host" in row) && !("delayed" in row) && !("leader" in row), `${row.kind} ${row.code ?? row.board}`);
+  assert.ok(file.items.every((item: any) => item.kind === "derived" || typeof item.host === "string"));
+  // A member list shows its first 10 members, members_total the frozen count.
   for (const row of context.evidence.filter((row: any) => row.kind === "members")) {
     const whole = file.items.find((item: any) => item.kind === "members" && item.board === row.board).members;
     assert.equal(row.members_total, whole.length);
-    assert.deepEqual(row.members, whole.slice(0, 20));
+    assert.deepEqual(row.members, whole.slice(0, 10));
   }
   assert.deepEqual(context.evidence.filter((row: any) => row.kind === "members").map((row: any) => [row.board, row.members.length, row.members_total]), [
-    ["BK0715", 4, 4], ["BK1716", 20, 100],
+    ["BK0715", 4, 4], ["BK1716", 10, 100],
   ]);
   // A zt row shows its industry, not its trading fields.
   for (const row of context.evidence.filter((row: any) => row.pool === "zt"))
@@ -263,7 +270,7 @@ test("theme: a full run - index, limit-up and boards frozen - fits 30 KiB; the i
   assert.deepEqual(context.truncated, [{ source: "limit-up", kind: "zb", count: 3 }, { source: "limit-up", kind: "yesterday", count: 5 }]);
 });
 
-test("theme: a full run of thirty boards and ten member lists passes 30 KiB - the 涨停 rows, the flow and the later member lists go first, the top boards' rows and member lists stay", async (t) => {
+test("theme: a full run of thirty boards and ten member lists passes 30 KiB - the 涨停 rows, the flow and the tenth member list go first, the top boards' rows and member lists stay", async (t) => {
   // Thirty boards ranked by change, a member list of 100 (of 140) for each of the first ten, thirty flow rows.
   const CODES = Array.from({ length: 30 }, (_, i) => `BK${2000 + i}`);
   const widen = async (dir: string) => {
@@ -291,9 +298,11 @@ test("theme: a full run of thirty boards and ten member lists passes 30 KiB - th
   const kinds = context.evidence.map((row: any) => row.kind ?? row.pool);
   const lists = context.evidence.filter((row: any) => row.kind === "members");
   assert.deepEqual(kinds, [...Array(30).fill("board"), ...Array(lists.length).fill("members")]);
-  assert.ok(lists.length >= 1 && lists.length < 10, `${lists.length} member lists shown`);
-  assert.deepEqual(lists.map((row: any) => [row.board, row.members.length]), CODES.slice(0, lists.length).map((code) => [code, 20]));
-  // What goes first: the later member lists, then every flow row and every 涨停 row; zb and yesterday are never asked for.
+  // Measured 2026-10-26: nine of the ten lists fit (about 680 bytes each beside a 6.5 KB header, 12 KB of
+  // derived items and 5.7 KB of board rows); the tenth is about 600 bytes over. Pinned as measured.
+  assert.equal(lists.length, 9, `${lists.length} member lists shown`);
+  assert.deepEqual(lists.map((row: any) => [row.board, row.members.length]), CODES.slice(0, lists.length).map((code) => [code, 10]));
+  // What goes first: the last member list, then every flow row and every 涨停 row; zb and yesterday are never asked for.
   assert.deepEqual(context.truncated, [
     { source: "boards", kind: "members", count: 10 - lists.length }, { source: "boards", kind: "flow", count: 30 },
     { source: "limit-up", kind: "zt", count: 6 }, { source: "limit-up", kind: "zb", count: 3 }, { source: "limit-up", kind: "yesterday", count: 5 },

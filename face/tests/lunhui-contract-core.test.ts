@@ -405,6 +405,14 @@ test("buildContext: a priority entry's order and view shape its rows; an example
   assert.deepEqual(parsed.example, { cite: sealRatio.id });
 });
 
+test("buildContext: a hints function gets the digest; plain hints are shown as given", () => {
+  let received: Loose | undefined;
+  const { text, digest } = context({ hints: (d: Loose) => ((received = d), { count: d.items.size }) });
+  assert.equal(received, digest);
+  assert.deepEqual(JSON.parse(text).hints, { count: digest.items.size });
+  assert.equal(JSON.parse(context().text).hints, "按字段填写。");
+});
+
 test("buildContext: derivedView shapes every derived item shown; the item stays citable whole", () => {
   const { text, digest } = context({ derivedView: ({ inputs, ...item }: Loose) => ({ ...item, inputs_total: inputs.length }) });
   const parsed = JSON.parse(text);

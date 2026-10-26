@@ -31,7 +31,7 @@ import { MODULE_NAMES } from "./modules.mjs";
  *   schema: { required?: string[], properties?: Record<string, unknown> }, owns: string[],
  *   ownedBy?: Record<string, (entry: import("./contract-core.mjs").DigestItem) => boolean>, exemptPaths?: string[],
  *   rules?: (parsed: any, context: import("./contract-core.mjs").ContextDigest) => void,
- *   hypotheses: string, hints: string, example: (digest: import("./contract-core.mjs").ContextDigest) => unknown,
+ *   hypotheses: string, hints: unknown, example: (digest: import("./contract-core.mjs").ContextDigest) => unknown,
  *   sources: string[], required: string[], derivedFirst?: string[], derivedView?: (item: any) => Record<string, unknown>,
  *   priority: { source: string, kind: string, order?: (a: any, b: any) => number, view?: (item: any) => Record<string, unknown> }[],
  * }} ModuleContract

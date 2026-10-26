@@ -9,14 +9,17 @@
  * freeze is `REFERENCE`. A `theme_stage` or `rotation` other than `UNKNOWN` stands on a claim of its
  * own citing a boards derived item. The module owns the theme assertion class (题材, 主线, 轮动),
  * carried by a derived item of the boards source. Derived items are shown with their inputs
- * counted, not listed: each `turnover_share` cites every fetched board. `lib/module-tool.mjs` consumes the `contract` object; the
+ * counted, not listed: each `turnover_share` cites every fetched board. Board, member-list and flow
+ * rows are shown without their per-item `host` and `delayed` (and a board without its `leader`), so
+ * every one of the ten member lists a freeze reads fits; the hints state the boards source's hosts
+ * and delay once, from the digest, and the evidence file keeps every stamp. `lib/module-tool.mjs` consumes the `contract` object; the
  * shared rules are `contract-core.mjs`'s.
  */
 import { fail } from "../contract-core.mjs";
 import { exampleOf, inputsCounted, ownClaims } from "./shared.mjs";
 
-/** The members a context shows of a board's list: the first 20; the frozen file keeps them all. */
-const MEMBERS_SHOWN = 20;
+/** The members a context shows of a board's list: the first 10; the frozen file keeps them all. */
+const MEMBERS_SHOWN = 10;
 
 /** Hypothesis 3 of strategies/cn-market/THESIS.md, in the tree's own words, paragraph ids only. */
 export const HYPOTHESES =
@@ -26,6 +29,7 @@ export const HYPOTHESES =
   "题材所处阶段与轮动方向是可修订的工作标签，下一交易日的冻结证据可以推翻它。";
 
 const HINTS = {
+  rows: "板块行只列代码、名称、涨跌幅、成交额与上涨、下跌家数（不列领涨股）；板块、成分股与资金流各行不列 host 与 delayed，见 served；冻结文件逐行保留。",
   mainline_candidates:
     "0–5 个主线候选，每个 { board, name, evidence_ids }：board 是本运行已冻结的板块代码（BK 加四位数字），evidence_ids 至少引用该板块的 board 证据与它的 members 证据（同一代码），可再引用它的 breadth、turnover_share；同一板块只列一次；没有把握时给空列表。",
   name: "name 照抄该板块 board 证据的 name，一字不改；它是冻结的数据，不受用词检查，所以只写板块名，不写判断。",
@@ -70,6 +74,19 @@ const SCHEMA = {
     rotation: { enum: ["NONE", "HIGH_LOW_SWITCH", "NEW_DIRECTION", "ROTATING", "UNKNOWN"] },
   },
 };
+
+/**
+ * The hints, with `served`: the boards source's hosts and delay, stated once from the digest's rows
+ * (each row's own stamp is left out of the context).
+ * @param {import("../contract-core.mjs").ContextDigest} digest
+ */
+function hints(digest) {
+  const rows = [...digest.items.values()].filter((entry) => entry.source === "boards" && entry.kind !== "derived").map((entry) => entry.item);
+  if (rows.length === 0) return HINTS;
+  const hosts = [...new Set(rows.map((row) => row.host).filter((host) => typeof host === "string"))].join("、") || "未记录";
+  const delayed = rows.some((row) => row.delayed === true);
+  return { ...HINTS, served: `boards 各行来自 ${hosts}；${delayed ? "其中有延时行情（delayed 为 true）" : "均非延时行情（delayed 为 false）"}。` };
+}
 
 /** The items that carry the theme class's sentences (A21): a derived item of the boards source. */
 const carriesTheme = (entry) => entry.source === "boards" && entry.kind === "derived";
@@ -121,7 +138,12 @@ function example(digest) {
 
 /** A member list cut to its first `MEMBERS_SHOWN` members, the frozen count beside them. */
 function firstMembers(item) {
-  return { ...item, members: item.members.slice(0, MEMBERS_SHOWN), members_total: item.members.length };
+  return { ...unstamped(item), members: item.members.slice(0, MEMBERS_SHOWN), members_total: item.members.length };
+}
+
+/** A board, member-list or flow row without its per-item stamps; a board without its leader. */
+function unstamped({ host, delayed, leader, ...item }) {
+  return item;
 }
 
 /** A zt row as the theme reads it: who, how many boards, which industry. */
@@ -137,17 +159,17 @@ export const contract = {
   exemptPaths: ["mainline_candidates[*].name"],
   rules,
   hypotheses: HYPOTHESES,
-  hints: HINTS,
+  hints,
   example,
   sources: ["boards", "limit-up"],
   required: ["boards", "limit-up"],
   derivedFirst: ["boards"],
   derivedView: inputsCounted,
   priority: [
-    { source: "boards", kind: "board" },
+    { source: "boards", kind: "board", view: unstamped },
     // A candidate cites its board and its member list: both before the fund flow, which only adds to them.
     { source: "boards", kind: "members", view: firstMembers },
-    { source: "boards", kind: "flow" },
+    { source: "boards", kind: "flow", view: unstamped },
     { source: "limit-up", kind: "zt", view: ztIndustry },
   ],
 };
