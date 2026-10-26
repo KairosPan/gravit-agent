@@ -35,6 +35,7 @@ most 41 code points, no spaces or dots — the name becomes a path typed into sh
 zsh's `cd x y` exits 0 in the wrong directory when the substituted path exists.
 Commit your own iterations between cycles; a cycle commits once, with its verdict, or leaves
 the commit to the operator. git log is the audit trail.
+`analysis/<run>/` holds frozen A-share research runs the Lunhui rows write; never edit them by hand, and `strategies/cn-market/` is the market read's channel.
 
 ## Rooms
 

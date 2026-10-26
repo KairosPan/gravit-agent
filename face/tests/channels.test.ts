@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, realpath, stat, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { WebRoute } from "@deepseek-ai/dsh-host-webserver";
@@ -739,4 +740,14 @@ test("the overview carries the bot roster and every preset the roster reports; P
   const nowhere = fakeRes();
   await routes.get("/data/channels/bots")!.handler(postReq(JSON.stringify({ workspaceId: "ws-none", bots: [] })), nowhere.res);
   assert.equal(nowhere.out.status, 404);
+});
+
+test("the repository's strategies/cn-market lists as a channel, the market read's own directory", async () => {
+  const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
+  const dirs = await listChannelDirs(repoRoot);
+  const market = dirs.find((d) => d.name === "cn-market");
+  assert.ok(market, "cn-market is a channel");
+  assert.equal(market.isRoot, false);
+  assert.equal(market.dir, join(repoRoot, "strategies", "cn-market"));
+  assert.equal((await readChannelStatus(market.dir)).status, "idea");
 });
