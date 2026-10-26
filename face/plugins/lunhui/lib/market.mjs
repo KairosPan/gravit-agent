@@ -22,9 +22,15 @@
  * `DEFAULT_SYMBOLS`, exported by the service, is `validateSymbols`'s default and stays private.
  *
  * The response cap is the provider's `MAX_RESPONSE_BYTES` (512 KiB) and the request timeout
- * `fetchQuotes`' and `fetchDailyBars`' `timeoutMs` (7,000 ms by default). This file imports
- * nothing: `fetch`, `TextDecoder`, `AbortController`, `URL` and `Intl` are Node 22 globals.
+ * `fetchQuotes`' and `fetchDailyBars`' `timeoutMs` (7,000 ms by default). This file imports only
+ * `./calendar.mjs`: `fetch`, `TextDecoder`, `AbortController`, `URL` and `Intl` are Node 22 globals.
+ *
+ * Since plan 1 Task 2 the calendar section no longer hard-codes 2026: its constants and holiday
+ * ranges moved, unchanged, into `calendar/2026.json`, read through `loadCalendars()` once at
+ * module load; `isCovered`, `holidayOn` and `isTradingDate` read those tables, the coverage field
+ * and the uncovered reasons name the covered years, and `getMarketSession` is otherwise verbatim.
  */
+import { coverageOf, holidayOn as tableHolidayOn, isTradingDay, isWeekend, loadCalendars } from "./calendar.mjs";
 
 // -------------------------------------------------------------------------------------------------
 // frontend/market-provider.mjs (verbatim; three private names renamed, see the header)
@@ -377,60 +383,16 @@ export async function fetchDailyBars(
 // -------------------------------------------------------------------------------------------------
 
 // Read-only quote freshness metadata, not an order-admission calendar.
-// Coverage is deliberately limited to the verified 2026 SSE notices below.
-const CALENDAR_YEAR = "2026";
-const FIRST_DATE = "2026-01-01";
-const LAST_DATE = "2026-12-31";
+// Coverage is deliberately limited to the verified SSE notices in the per-year tables
+// (`calendar/<year>.json`); a year without a table is uncovered, never guessed.
+const tables = loadCalendars();
+const CALENDAR_YEAR = [...tables.keys()].join(",");
 const DAY_MS = 86_400_000;
-const ANNUAL_SOURCE =
-  "https://www.sse.com.cn/disclosure/announcement/general/c/c_20251222_10802507.shtml";
-const AUTUMN_SOURCE =
-  "https://www.sse.com.cn/disclosure/announcement/general/c/c_20260915_10832273.shtml";
-
-const holidays = [
-  {
-    start: "2026-01-01",
-    end: "2026-01-03",
-    name: "元旦",
-    source: ANNUAL_SOURCE,
-  },
-  {
-    start: "2026-02-15",
-    end: "2026-02-23",
-    name: "春节",
-    source: ANNUAL_SOURCE,
-  },
-  {
-    start: "2026-04-04",
-    end: "2026-04-06",
-    name: "清明节",
-    source: ANNUAL_SOURCE,
-  },
-  {
-    start: "2026-05-01",
-    end: "2026-05-05",
-    name: "劳动节",
-    source: ANNUAL_SOURCE,
-  },
-  {
-    start: "2026-06-19",
-    end: "2026-06-21",
-    name: "端午节",
-    source: ANNUAL_SOURCE,
-  },
-  {
-    start: "2026-09-25",
-    end: "2026-09-27",
-    name: "中秋节",
-    source: AUTUMN_SOURCE,
-  },
-  {
-    start: "2026-10-01",
-    end: "2026-10-07",
-    name: "国庆节",
-    source: AUTUMN_SOURCE,
-  },
-];
+const latestTable = [...tables.values()].at(-1);
+const ANNUAL_SOURCE = latestTable?.source ?? "";
+/** The annual notice of the date's own year when covered, else the latest table's. */
+const annualSourceOf = (date) =>
+  tables.get(String(date).slice(0, 4))?.source ?? ANNUAL_SOURCE;
 
 const chinaClock = new Intl.DateTimeFormat("en-CA", {
   timeZone: "Asia/Shanghai",
@@ -445,13 +407,10 @@ const chinaClock = new Intl.DateTimeFormat("en-CA", {
   hourCycle: "h23",
 });
 
-const isCovered = (date) => date >= FIRST_DATE && date <= LAST_DATE;
-const holidayOn = (date) =>
-  holidays.find((holiday) => date >= holiday.start && date <= holiday.end);
+const isCovered = (date) => coverageOf(date, tables) === "covered";
+const holidayOn = (date) => tableHolidayOn(date, tables);
 const utcDay = (date) => Date.parse(`${date}T00:00:00Z`);
-const isWeekend = (date) => [0, 6].includes(new Date(utcDay(date)).getUTCDay());
-const isTradingDate = (date) =>
-  isCovered(date) && !isWeekend(date) && !holidayOn(date);
+const isTradingDate = (date) => isTradingDay(date, tables);
 
 function adjacentTradingDate(date, direction) {
   let day = utcDay(date);
@@ -477,7 +436,8 @@ function adjacentTradingDate(date, direction) {
  * @param {Date} [now]
  * @returns {{date: string|null, status: string, label: string,
  * expectedQuoteDate: string|null, isOpen: boolean, nextTradingDate: string|null,
- * calendarCoverage: '2026', reason: string, source: string}}
+ * calendarCoverage: string, reason: string, source: string}} - `calendarCoverage` is the covered
+ * years joined by `,` ('2026' today)
  */
 export function getMarketSession(now = new Date()) {
   const result = {
@@ -499,16 +459,17 @@ export function getMarketSession(now = new Date()) {
   const date = `${parts.year}-${parts.month}-${parts.day}`;
   result.date = date;
   if (!isCovered(date)) {
-    result.reason = "只核实了 2026 年交易日历；当前中国日期不在覆盖范围内。";
+    result.reason = `只核实了 ${CALENDAR_YEAR} 年交易日历；当前中国日期不在覆盖范围内。`;
     return result;
   }
+  result.source = annualSourceOf(date);
 
   result.nextTradingDate = adjacentTradingDate(date, 1);
   const holiday = holidayOn(date);
   if (holiday || isWeekend(date)) {
     result.status = holiday ? "holiday" : "weekend";
     result.label = holiday ? `${holiday.name}休市` : "周末休市";
-    result.source = holiday?.source ?? ANNUAL_SOURCE;
+    result.source = holiday?.source ?? annualSourceOf(date);
     result.expectedQuoteDate = adjacentTradingDate(date, -1);
     result.reason = holiday
       ? `${holiday.name}休市，报价日期应取最近已知交易日。`
@@ -559,7 +520,7 @@ export function getMarketSession(now = new Date()) {
       "常规竞价观察时段已结束，保留当日报价日期；不判断盘后其他交易服务。";
   }
   if (result.expectedQuoteDate === null) {
-    result.reason += " 上一交易日超出已核实的 2026 年日历，未推测其日期。";
+    result.reason += ` 上一交易日超出已核实的 ${CALENDAR_YEAR} 年日历，未推测其日期。`;
   }
   return result;
 }
