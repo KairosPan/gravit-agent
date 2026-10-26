@@ -21,6 +21,7 @@ import * as sentimentRow from "../plugins/lunhui/sentiment-row.mjs";
 import * as themeRow from "../plugins/lunhui/theme-row.mjs";
 import * as leaderRow from "../plugins/lunhui/leader-row.mjs";
 import * as modeRow from "../plugins/lunhui/mode-row.mjs";
+import * as reviewRow from "../plugins/lunhui/review-row.mjs";
 import { LUNHUI_ROW_IDS, LUNHUI_TOOL_NAMES } from "../src/lunhui.ts";
 
 type Cleanup = { after(fn: () => Promise<unknown>): unknown };
@@ -635,19 +636,24 @@ test("lunhui-runs: two submits of one module at once land one artifact; the othe
   assert.deepEqual(JSON.parse(await readFile(join(root, "alpha", "analysis", run, "environment.json"), "utf8")), { n: won + 1 });
 });
 
-/* The five module rows (spec §5.12), composed after the freezes - the three market modules, then
- * the leader and the mode: each injects `tools` and the backbone's `lunhuiRuns`, registers exactly
- * its read and submit pair, and refuses to mount without the service, naming the row it needs. */
-const MODULE_ROWS = [[environmentRow, "environment"], [sentimentRow, "sentiment"], [themeRow, "theme"], [leaderRow, "leader"], [modeRow, "mode"]] as const;
+/* The six module rows (spec §5.12), composed after the freezes - the three market modules, then
+ * the leader, the mode and the review (the counterevidence module's row, `lunhui-review`): each
+ * injects `tools` and the backbone's `lunhuiRuns`, registers exactly its read and submit pair, and
+ * refuses to mount without the service, naming the row it needs. */
+const MODULE_ROWS = [
+  [environmentRow, "environment", "lunhui-environment"], [sentimentRow, "sentiment", "lunhui-sentiment"], [themeRow, "theme", "lunhui-theme"],
+  [leaderRow, "leader", "lunhui-leader"], [modeRow, "mode", "lunhui-mode"], [reviewRow, "counterevidence", "lunhui-review"],
+] as const;
 
-test("the composed module rows are the five, in order, and their pairs close LUNHUI_TOOL_NAMES", () => {
+test("the composed module rows are the six, in order, and their pairs close LUNHUI_TOOL_NAMES", () => {
+  assert.deepEqual(LUNHUI_ROW_IDS.slice(5), MODULE_ROWS.map(([, , id]) => id));
   assert.deepEqual(LUNHUI_ROW_IDS.slice(5), MODULE_ROWS.map(([row]) => row.name));
   assert.deepEqual(LUNHUI_TOOL_NAMES.slice(5), MODULE_ROWS.flatMap(([, module]) => [`lunhui_read_${module}_context`, `lunhui_submit_${module}`]));
 });
 
-for (const [row, module] of MODULE_ROWS) {
-  test(`lunhui-${module}: mounts over the backbone's service, registers exactly its pair, and refuses without lunhuiRuns`, async (t) => {
-    assert.equal(row.name, `lunhui-${module}`);
+for (const [row, module, id] of MODULE_ROWS) {
+  test(`${id}: mounts over the backbone's service, registers exactly its pair, and refuses without lunhuiRuns`, async (t) => {
+    assert.equal(row.name, id);
     assert.deepEqual(row.inject, ["tools", "lunhuiRuns"]);
     const { service } = mounted(await strategiesRoot(t));
     const scope = fakeScope();

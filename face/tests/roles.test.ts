@@ -20,21 +20,27 @@ test("toolNameFor: role_ plus the id with dashes as underscores", () => {
   assert.equal(toolNameFor("data-check"), "role_data_check");
 });
 
-/* The repository ships two roles (modules spec A8, §5.9): `cn-market-analyst`, the three market module
- * pairs plus `skill`, and `cn-stock-analyst`, the leader and mode pairs plus `skill`, both on
- * deepseek-flash, and no freeze, file or AKShare tool. Gravit's preset is the gravit row, whose summary
- * list names both, then one one-shot row each - and the committed mirror says so. */
+/* The repository ships three roles (modules spec A8, §5.9): `cn-market-analyst`, the three market module
+ * pairs plus `skill`; `cn-reviewer`, the counterevidence pair plus `skill`; and `cn-stock-analyst`, the
+ * leader and mode pairs plus `skill` - all on deepseek-flash, and no freeze, file or AKShare tool. The
+ * reviewer shares only `skill` with each analyst (A23: the reviewer is not the writer). Gravit's preset is
+ * the gravit row, whose summary list names all three, then one one-shot row each - and the committed
+ * mirror says so. */
 const MARKET_ANALYST_ALLOW = ["skill", "lunhui_read_environment_context", "lunhui_submit_environment",
   "lunhui_read_sentiment_context", "lunhui_submit_sentiment", "lunhui_read_theme_context", "lunhui_submit_theme"];
 const STOCK_ANALYST_ALLOW = ["skill", "lunhui_read_leader_context", "lunhui_submit_leader", "lunhui_read_mode_context", "lunhui_submit_mode"];
+const REVIEWER_ALLOW = ["skill", "lunhui_read_counterevidence_context", "lunhui_submit_counterevidence"];
 
-test("Gravit's preset has two role rows: the shipped library is cn-market-analyst and cn-stock-analyst", () => {
+test("Gravit's preset has three role rows: the shipped library is cn-market-analyst, cn-reviewer and cn-stock-analyst", () => {
   const roles = readRoles(ROLES_ROOT);
-  assert.deepEqual(roles.map((role) => role.id), ["cn-market-analyst", "cn-stock-analyst"], "roles/ holds _template and the two analysts");
-  const [market, stock] = roles;
+  assert.deepEqual(roles.map((role) => role.id), ["cn-market-analyst", "cn-reviewer", "cn-stock-analyst"], "roles/ holds _template, the two analysts and the reviewer");
+  const [market, reviewer, stock] = roles;
   assert.equal(market.tool, "role_cn_market_analyst");
   assert.equal(market.name, "CN market analyst");
   assert.deepEqual(market.allow, MARKET_ANALYST_ALLOW, "skill and the environment, sentiment and theme pairs, in module order");
+  assert.equal(reviewer.tool, "role_cn_reviewer");
+  assert.equal(reviewer.name, "CN reviewer");
+  assert.deepEqual(reviewer.allow, REVIEWER_ALLOW, "skill and the counterevidence pair");
   assert.equal(stock.tool, "role_cn_stock_analyst");
   assert.equal(stock.name, "CN stock analyst");
   assert.deepEqual(stock.allow, STOCK_ANALYST_ALLOW, "skill and the leader and mode pairs, in module order");
@@ -42,16 +48,20 @@ test("Gravit's preset has two role rows: the shipped library is cn-market-analys
     assert.equal(role.model, "deepseek-official/deepseek-flash", role.id);
     assert.ok(!role.allow.some((name) => name.startsWith("lunhui_freeze_")), `${role.id} carries no freeze`);
   }
-  assert.deepEqual(market.allow.filter((name) => stock.allow.includes(name)), ["skill"], "the two share no module tool");
+  assert.deepEqual(market.allow.filter((name) => stock.allow.includes(name)), ["skill"], "the two analysts share no module tool");
+  for (const analyst of [market, stock]) {
+    assert.deepEqual(reviewer.allow.filter((name) => analyst.allow.includes(name)), ["skill"], `the reviewer shares only skill with ${analyst.id}`);
+  }
   const rows = gravitRows(roles, { plugin: GRAVIT_PLUGIN_URL, cycle: readCycle(CYCLE_PATH) }) as Array<{ id: string; name: string; config: Record<string, unknown> }>;
-  assert.deepEqual(rows.map((row) => row.id), [GRAVIT_ROW_ID, roleRowId("cn-market-analyst"), roleRowId("cn-stock-analyst")]);
+  assert.deepEqual(rows.map((row) => row.id), [GRAVIT_ROW_ID, roleRowId("cn-market-analyst"), roleRowId("cn-reviewer"), roleRowId("cn-stock-analyst")]);
   assert.deepEqual(rows[0].config.roles, roles.map((role) => ({ tool: role.tool, summary: role.description })));
   for (const row of rows.slice(1)) assert.deepEqual(row.config.agentOptions, { provider: "deepseek-official", model: "deepseek-flash" });
   const mirror = readFileSync(new URL("../../bots/gravit/agent.cordis.yml", import.meta.url), "utf8");
-  assert.equal(mirror.match(/^- id: role-/gm)?.length, 2, "the mirror carries two role rows");
+  assert.equal(mirror.match(/^- id: role-/gm)?.length, 3, "the mirror carries three role rows");
   assert.match(mirror, /^ {4}toolName: role_cn_market_analyst$/m);
+  assert.match(mirror, /^ {4}toolName: role_cn_reviewer$/m);
   assert.match(mirror, /^ {4}toolName: role_cn_stock_analyst$/m);
-  assert.equal(mirror.match(/^ {6}model: deepseek-flash$/gm)?.length, 2, "each on its role's route");
+  assert.equal(mirror.match(/^ {6}model: deepseek-flash$/gm)?.length, 3, "each on its role's route");
 });
 
 /* The persona is the tree's own Chinese (D14′): the job, the module order, the artifact only in
@@ -99,6 +109,30 @@ test("cn-stock-analyst's ROLE.md: Chinese, within 2,000 bytes, the brief's ids, 
   assert.ok(persona.includes("analysis/<run>/<module>.json"), "the paths it reports");
 });
 
+/* The reviewer's persona, the tree's own Chinese (D14′, spec §5.9, A23): the brief names the strategy, the
+ * run and - outside cn-market - the market run; one read, one submit through the submit tool, the artifact
+ * only in `analysis`; each item names the module it is against (a shown module, never mode) and cites
+ * evidence of its own; an empty item list and NOT_EVALUABLE are results; a third rejection stops the role
+ * (it has one module), a failed read stops it; the four headings. */
+test("cn-reviewer's ROLE.md: Chinese, within 2,000 bytes, the brief's ids, one read and one submit, items against shown modules, empty is a result, the blocked exits, the four headings", () => {
+  const file = new URL("../../roles/cn-reviewer/ROLE.md", import.meta.url);
+  assert.ok(readFileSync(file).length <= 2000, "ROLE.md is at most 2,000 bytes");
+  const persona = readRoles(ROLES_ROOT).find((role) => role.id === "cn-reviewer")!.persona;
+  assert.ok(persona.includes("反证审查员"), "the role's name");
+  assert.ok(!persona.includes("{{"), "no template braces");
+  for (const word of ["strategy", "run", "market_run"]) assert.ok(persona.includes(word), `the brief names ${word}`);
+  assert.ok(persona.includes("cn-market") && persona.includes("不传 market_run"), "no market_run in cn-market");
+  for (const name of REVIEWER_ALLOW.slice(1)) assert.ok(persona.includes(name), `names ${name}`);
+  assert.ok(persona.includes("读一次") && persona.includes("提交一次"), "read once, submit once");
+  assert.ok(persona.includes("`analysis`") && persona.includes("不写进消息"), "the artifact goes only into analysis");
+  assert.ok(persona.includes("against") && persona.includes("mode"), "each item names the module it is against, never mode");
+  assert.ok(persona.includes("evidence_ids"), "each item cites evidence of its own");
+  assert.ok(persona.includes("空的 items") && persona.includes("NOT_EVALUABLE") && persona.includes("结果"), "an empty list and NOT_EVALUABLE are results");
+  assert.ok(persona.includes("第三次") && persona.includes("读取失败") && persona.includes("blocked"), "the blocked exits");
+  for (const heading of ["**status**", "**what was measured**", "**paths**", "**limits**"]) assert.ok(persona.includes(heading), heading);
+  assert.ok(persona.includes("analysis/<run>/counterevidence.json"), "the path it reports");
+});
+
 test("over a roles/ holding only _template the preset has no role_* row; the fixture role renders exactly one", async () => {
   const root = await makeRolesRoot();
   try {
@@ -117,7 +151,7 @@ test("over a roles/ holding only _template the preset has no role_* row; the fix
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-/* The rules every role the repository ships obeys (the two analysts today); a role the operator adds is held to them. */
+/* The rules every role the repository ships obeys (the two analysts and the reviewer today); a role the operator adds is held to them. */
 test("every shipped role: exact names only, nothing forbidden, jobs only beside bash", () => {
   for (const role of readRoles(ROLES_ROOT)) {
     assert.ok(role.description.length <= 300 && role.description.length > 0, role.id);

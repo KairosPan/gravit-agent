@@ -14,7 +14,8 @@
  * tools they name are stand-ins registered under a server name nothing real
  * uses. The second case boots the shipped cn-market-analyst (a fixture copy on
  * the stub's route) against the real Lunhui rows, the third the shipped
- * cn-stock-analyst the same way over a sealed market run. Own file, gated. */
+ * cn-stock-analyst the same way over a sealed market run, the fourth the shipped
+ * cn-reviewer on a sealed cn-market run. Own file, gated. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { cp, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
@@ -482,6 +483,133 @@ test("roles smoke: cn-stock-analyst reads the leader context citing a sealed mar
     const artifact = JSON.parse(readFileSync(join(strategies, "alpha", "analysis", run, "leader.json"), "utf8"));
     assert.deepEqual([artifact.module, artifact.status, artifact.run, artifact.market_run], ["leader", "OK", run, market]);
     assert.equal(resultText(lastResult()), "STOCK_DONE", "the child's report returns through the tool");
+  } finally {
+    await dispose?.();
+    await Promise.all([bots, fixtureRoles, strategies, root, home].map((dir) => rm(dir, { recursive: true, force: true })));
+  }
+});
+
+/* The shipped cn-reviewer on a real boot (modules spec A6, A8, A22, A23, §5.9), on the third case's footing: a fixture
+ * roles root with the reviewer routed to the stub, a temp strategies root holding cn-market. The market run is made
+ * through the booted `lunhuiRuns` service and the runs library's own artifact writer, no freeze and no network: one
+ * evidence source of session 2026-10-23 (an empty 涨停池 and its one derived item), sealed, then its environment, sentiment and theme artifacts
+ * landed as accepted - what the review reads in cn-market. The child, briefed with the run alone (cn-market takes no
+ * market_run), reads the counterevidence context and submits the context's own example. What is pinned: the child's
+ * tools are exactly its allow list, sharing only `skill` with each analyst; its persona is its own; the context reads
+ * the market run's three artifacts and expects OK; its submit passes NOT_A_ROLE and lands in the market run; the same
+ * submit from Gravit's root is NOT_A_ROLE. */
+test("roles smoke: cn-reviewer reads the counterevidence context of a sealed cn-market run and submits as a role, Gravit's own submit is NOT_A_ROLE", { skip: gated && "set FACE_SMOKE=1", timeout: 180_000 }, async () => {
+  const bots = await makeBotsRoot();
+  const fixtureRoles = await mkdtemp(join(tmpdir(), "face-roles-fixture-"));
+  const strategies = await realpath(await mkdtemp(join(tmpdir(), "face-roles-strategies-")));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "face-roles-root-")));
+  const home = await mkdtemp(join(tmpdir(), "face-roles-home-"));
+  let dispose: (() => Promise<void>) | undefined;
+  try {
+    for (const entry of readdirSync(ROLES_ROOT, { withFileTypes: true })) {
+      if (entry.isDirectory()) await cp(join(ROLES_ROOT, entry.name), join(fixtureRoles, entry.name), { recursive: true });
+    }
+    const metaPath = join(fixtureRoles, "cn-reviewer", "role.yml");
+    writeFileSync(metaPath, readFileSync(metaPath, "utf8").replace(/^model: .*$/m, "model: stub/flash-standin"));
+    const roles = readRoles(fixtureRoles);
+    const reviewer = roles.find((r) => r.id === "cn-reviewer")!;
+    assert.equal(reviewer.model, "stub/flash-standin", "the fixture's reviewer is routed to the stub");
+    assert.deepEqual(roles.map((r) => [r.id, r.allow]), readRoles(ROLES_ROOT).map((r) => [r.id, r.allow]), "and the fixture holds every shipped role, its tools unchanged");
+    for (const analyst of roles.filter((r) => r.id !== "cn-reviewer")) {
+      assert.deepEqual(reviewer.allow.filter((name) => analyst.allow.includes(name)), ["skill"], `the reviewer shares only skill with ${analyst.id}`);
+    }
+    await mkdir(join(strategies, "cn-market"));
+    await writeFile(join(strategies, "cn-market", "THESIS.md"), "# cn-market fixture\n");
+    await mkdir(join(root, ".git"));
+    setupFaceProfile(home);
+    const patchPath = join(home, "profiles", "face", "cordis.patch.yml");
+    const patch = readFileSync(patchPath, "utf8").replace(/^\[\][ \t]*$/m, "");
+    writeFileSync(patchPath, `${patch}\n- id: mcp-akshare\n  disabled: true\n- id: mcp-account\n  disabled: true\n- id: agent-default-model\n  config:\n    provider: stub\n    model: echo\n- id: lunhui-runs\n  config:\n    strategiesRoot: ${JSON.stringify(strategies)}\n`);
+    const booted = await bootFace({ profileName: "face", port: 0, dshHome: home, botsRoot: bots, rolesRoot: fixtureRoles });
+    dispose = booted.dispose;
+    const { ctx } = booted;
+    type Meta = { received_at: string; session: string; host: string; delayed: boolean; truncated: boolean };
+    const service = ctx.get("lunhuiRuns") as {
+      strategiesRoot: string;
+      openRun(s: string, k: "market"): Promise<{ run: string }>;
+      addEvidence(s: string, r: string, source: string, items: unknown[], meta: Meta): Promise<unknown>;
+      sealRun(s: string, r: string): Promise<unknown>;
+      readRun(s: string, r: string): Promise<{ manifest: { artifacts: string[] } }>;
+    };
+    assert.equal(service.strategiesRoot, strategies, "the rows write under the temp strategies root");
+    const meta: Meta = { received_at: "2026-10-23T07:00:00.000Z", session: "2026-10-23", host: "fixture", delayed: false, truncated: false };
+    const { run } = await service.openRun("cn-market", "market");
+    // An empty 涨停池 and the one derived item the freeze would compute over it: what the example's claim cites.
+    await service.addEvidence("cn-market", run, "limit-up", [{ source: "limit-up", kind: "derived", measure: "seal_ratio", value: null, inputs: [] }], meta);
+    await service.sealRun("cn-market", run);
+    const runDir = join(strategies, "cn-market", "analysis", run);
+    await writeArtifact(runDir, "environment", { module: "environment", run, status: "OK", index_state: "UNKNOWN", liquidity_state: "UNKNOWN", claims: [] });
+    await writeArtifact(runDir, "sentiment", { module: "sentiment", run, status: "OK", state: "REPAIR", claims: [] });
+    await writeArtifact(runDir, "theme", { module: "theme", run, status: "OK", mainline_candidates: [], claims: [] });
+    const requested = new Map<string, GenerateOptions[]>();
+    const headers = new Map<string, Session["header"]>();
+    const script = (request: GenerateOptions): StubReply => {
+      if (request.purpose !== undefined) return { kind: "text", text: "fixture" };
+      const id = String(request.sessionId);
+      requested.set(id, [...requested.get(id) ?? [], request]);
+      const header = ctx.sessions.get(request.sessionId!)?.header;
+      if (header !== undefined && !headers.has(id)) headers.set(id, { ...header });
+      const trigger = lastHuman(request);
+      const text = trigger ? textOf(trigger) : "";
+      const results = toolTexts(request);
+      const briefed = (marker: string) => request.messages.some((m) => sourceKind(m) !== "tool" && textOf(m).includes(marker));
+      if (header?.origin === "subagent" && briefed("REVIEW_FIXTURE")) {
+        /* The role child: read the counterevidence context of the cn-market run, no market_run, submit its example. */
+        if (results.length === 0) return { kind: "tool", name: "lunhui_read_counterevidence_context", args: { strategy: "cn-market", run } };
+        if (results.length === 1) {
+          const context = JSON.parse(results[0]);
+          return { kind: "tool", name: "lunhui_submit_counterevidence", args: { strategy: "cn-market", run, analysis: JSON.stringify(context.example) } };
+        }
+        return { kind: "text", text: "REVIEW_DONE" };
+      }
+      if (sourceKind(trigger!) === "user" && text === "RUN_ROOT_REVIEW") return { kind: "tool", name: "lunhui_submit_counterevidence", args: { strategy: "cn-market", run, analysis: "{}" } };
+      if (sourceKind(trigger!) === "user" && text === "RUN_REVIEWER") return { kind: "tool", name: "role_cn_reviewer", args: { description: "Write the counterevidence artifact", prompt: `REVIEW_FIXTURE: strategy cn-market, run ${run}; write counterevidence.` } };
+      return { kind: "text", text: "PARENT_DONE" };
+    };
+    ctx.llm.registerAdapter(["stub"], new StubAdapter(script));
+    const base = `http://127.0.0.1:${ctx.webServer.port}`;
+    mountClient(ctx);
+    const cookie = await signIn(ctx, base);
+    const { sessionId } = await remote<{ sessionId: string }>(base, cookie, "session/create", { request: { cwd: root } });
+    const gravit = ctx.agents.get(SessionId(sessionId))!;
+    const prompt = (value: string) => remote(base, cookie, "session/prompt", { request: { requestId: `roles-${crypto.randomUUID()}`, sessionId, mode: "queue", content: [{ type: "text", text: value }] } });
+    const lastResult = () => (gravit.session.snapshotEvents().filter((e) => e.type === "tool/result").at(-1)!.data as { message: { isError?: boolean; content: ReadonlyArray<{ text?: string }> } }).message;
+    const resultText = (message: { content: ReadonlyArray<{ text?: string }> }) => message.content.map((b) => b.text ?? "").join("\n");
+
+    /* Gravit's root: the submit is refused before the run is touched. */
+    await prompt("RUN_ROOT_REVIEW");
+    await gravit.whenIdle();
+    const refused = lastResult();
+    assert.equal(refused.isError, true, "Gravit's own counterevidence submit fails");
+    assert.match(resultText(refused), /^Error: NOT_A_ROLE: /, "as NOT_A_ROLE");
+
+    /* The role child. */
+    await prompt("RUN_REVIEWER");
+    const found = () => [...requested.entries()].find(([id, rs]) => headers.get(id)?.origin === "subagent" && rs.some((r) => r.messages.some((m) => sourceKind(m) !== "tool" && textOf(m).includes("REVIEW_FIXTURE"))));
+    await waitFor("child REVIEW_FIXTURE", () => found() !== undefined);
+    await gravit.whenIdle();
+    const child = found()![1];
+    assert.equal(child[0].model, "flash-standin", "the child runs on its role's route");
+    assert.deepEqual(child[0].tools!.map((t) => t.name).sort(), [...reviewer.allow].sort(), "the reviewer's tools are exactly its allow list");
+    const system = textOf(child[0].messages[0]);
+    assert.ok(system.includes("反证审查员"), "the role persona is the child's");
+    assert.equal(system.includes(readPersona(PERSONA_PATH).split("{{")[0]), false, "and it shadows Gravit's");
+    const childResults = toolTexts(child.at(-1)!);
+    assert.equal(childResults.length, 2, "the read and the submit came back");
+    const context = JSON.parse(childResults[0]);
+    assert.deepEqual([context.module, context.status_expected], ["counterevidence", "OK"], "the context expects OK");
+    assert.equal(context.market_run, undefined, "cn-market cites no market run");
+    assert.deepEqual(context.artifacts.map((row: { module: string }) => row.module), ["environment", "sentiment", "theme"], "the market run's three artifacts are the ones reviewed");
+    assert.match(childResults[1], /"accepted":true/, "the child's counterevidence submit passed NOT_A_ROLE and was accepted");
+    assert.deepEqual((await service.readRun("cn-market", run)).manifest.artifacts, ["environment", "sentiment", "theme", "counterevidence"], "the artifact landed in the market run");
+    const artifact = JSON.parse(readFileSync(join(runDir, "counterevidence.json"), "utf8"));
+    assert.deepEqual([artifact.module, artifact.status, artifact.run, artifact.items], ["counterevidence", "OK", run, []]);
+    assert.equal(resultText(lastResult()), "REVIEW_DONE", "the child's report returns through the tool");
   } finally {
     await dispose?.();
     await Promise.all([bots, fixtureRoles, strategies, root, home].map((dir) => rm(dir, { recursive: true, force: true })));

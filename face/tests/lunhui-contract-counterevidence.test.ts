@@ -318,7 +318,7 @@ test("counterevidence in a strategy run: the maximal pin - a live-size market ru
   });
   const text = await read.execute({ strategy: "alpha", run, market_run: market }, exec(ROLE));
   const size = Buffer.byteLength(text, "utf8");
-  // Measured 2026-10-26: 30,703 bytes - leader 3,461, environment 2,593, sentiment 2,226, theme 3,565, the four quotes, 69 derived rows.
+  // Measured 2026-10-26: 30,703 bytes - leader 3,461, environment 2,593, sentiment 2,226, theme 3,565, the four quotes (a `first` entry, filled before the derived items), 69 derived rows.
   assert.ok(size <= MAX_CONTEXT_BYTES, `${size} bytes`);
   const context = JSON.parse(text);
   assert.equal(context.status_expected, "OK");

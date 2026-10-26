@@ -1,0 +1,8 @@
+# roles/cn-reviewer/role.yml - the counterevidence reviewer (modules spec A6, A8, A22, A23, §5.9).
+name: CN reviewer
+description: Reads one run's counterevidence context, a cn-market run or a strategy run citing a sealed cn-market run, and submits the counterevidence artifact through its submit tool - items against the accepted artifacts the context shows, each citing evidence; an empty list is a result.
+allow:
+  - skill
+  - lunhui_read_counterevidence_context
+  - lunhui_submit_counterevidence
+model: deepseek-official/deepseek-flash

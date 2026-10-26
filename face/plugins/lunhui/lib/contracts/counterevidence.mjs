@@ -215,7 +215,7 @@ export const strategyContract = {
   required: ["leader", "market:sentiment", "market:theme"],
   runArtifacts: ["leader"],
   priority: [
-    { source: "quotes", kind: "quote", view: quoteRow },
+    { source: "quotes", kind: "quote", view: quoteRow, first: true },
     { source: "market:index", kind: "counts" },
     { source: "market:limit-up", kind: "zt", view: poolRow, filter: ofQuote },
     { source: "market:limit-up", kind: "zb", view: poolRow, filter: ofQuote },

@@ -79,7 +79,7 @@ export const TOOL_NAME_MAX = 64;
  *  applies to the order tools, so a server the operator mounts under a name of their own
  *  cannot slip an account or order tool in. {@link readMeta} refuses an `allow` entry that
  *  matches, with the reason in the message. Every role the repository ships obeys it
- *  (`cn-market-analyst` and `cn-stock-analyst` today), and tests/roles.test.ts holds an independent
+ *  (`cn-market-analyst`, `cn-reviewer` and `cn-stock-analyst` today), and tests/roles.test.ts holds an independent
  *  copy of the names. */
 const NEVER: ReadonlyArray<{ what: string; because: string; names: readonly string[]; prefixes: readonly string[]; rawNames: readonly string[] }> = [
   { what: "a tool that needs a human",
