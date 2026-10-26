@@ -1,10 +1,18 @@
 # Lunhui Modules, Plan 1: the backbone, the freezes, the market channel, the runs card
 
-> **DRAFT, 2026-10-25.** Written right after the spec was approved and committed before the
-> writing-plans self-review ran, because the operator asked to stop at the design document and
-> run the build in another session. The executing session reads the spec first, runs the
-> writing-plans self-review on this file (spec coverage, step scan, type consistency, Review
-> Focus, proportion), fixes what it finds, and only then executes.
+> **Self-reviewed 2026-10-25** by the executing session against the spec and stage 0's code at
+> `0de97cf` (spec coverage, step scan, type consistency, Review Focus, proportion). The fixes:
+> the calendar table keeps stage 0's named holidays and their two sources (Task 2); a missing or
+> corrupt `metrics.json` resets the counts as A7 says, not `NO_SUCH_RUN` (Task 3); stage 0's
+> provider-to-`UPSTREAM_*` mapping, which lived in the retired `server.mjs`, moves into
+> `errors.mjs` (Task 4); `@deepseek-ai/dsh-tools` is declared at the pin the tree already
+> installs (Task 4); stage 0's `fetchBytes` is generalized instead of reused as is, since it
+> refuses redirects and sends Tencent's headers (Task 5); A17's four-in-flight limit gets an
+> owner (Task 5); the redirect case uses a fake fetch, not a fixture directory (Task 5); the
+> limit-up pools are read for the expected quote date (Task 8); the graft spec and ledger land as
+> history and the ignore rule gets its `git check-ignore` test (Task 1); the runs card reads a
+> `status` beside the headline and pins its table to `MODULES` (Tasks 11–12); the 2027 calendar
+> table is recorded as a forward item (Task 13).
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -34,7 +42,7 @@ plan is its §10 item 1. Stage 0, reused by copy, is the worktree
 ## Global Constraints
 
 - dsh stays `0.2.0-rc.2`; no dsh package is edited, forked or re-pinned (spec §3).
-- No new dependency in `face/package.json`: `defineTool` comes from `@deepseek-ai/dsh-tools`, already installed.
+- No new package installed: `defineTool` comes from `@deepseek-ai/dsh-tools`, today only a transitive dependency of `dsh-tool-subagent` at `0.2.0-rc.2`; Task 4 declares it in `face/package.json` at that exact pin so the plugin files do not lean on hoisting, and `npm ls @deepseek-ai/dsh-tools` shows one copy.
 - Tool names are plain, `lunhui_…`, no dots (a dotted name is hashed); this plan's five: `lunhui_read_run`, `lunhui_freeze_quotes`, `lunhui_freeze_limit_up`, `lunhui_freeze_boards`, `lunhui_freeze_index` (spec §5.5).
 - Tool descriptions and refusal texts are Chinese; code, tests and docs are English (D14′).
 - Every refusal is a thrown `LunhuiError` whose message opens with its code word; no refusal names a path (spec §5.7).
@@ -42,7 +50,7 @@ plan is its §10 item 1. Stage 0, reused by copy, is the worktree
 - Egress from the face process is exactly: `qt.gtimg.cn`, `web.ifzq.gtimg.cn`, `push2ex.eastmoney.com`, `push2.eastmoney.com` and its one redirect target `push2delay.eastmoney.com`; 7-second timeout, 512 KiB per response, at most four requests in flight (A17, A28).
 - An evidence file is ≤ 256 KiB and a run's evidence ≤ 2 MiB (spec §5.3); evidence files are gitignored, `run.json`, `metrics.json` and artifacts tracked (A26).
 - Eight freeze calls per run; past that `TOOL_BUDGET` (A7).
-- A freeze refuses a delegated child caller with `NOT_GRAVIT`: `exec.agent.session.header.origin === "subagent"` and not `isSeeded` (A23).
+- A freeze refuses a delegated child caller with `NOT_GRAVIT`: `exec.agent?.session?.header?.origin === "subagent"` and not `isSeeded` (A23; the mirror of `gravit.js`'s `isRootOrFork`, and `exec.agent` is how `src/agents.ts` and `src/room.ts` already read the caller).
 - `GRAVIT.md` ≤ 4,500 bytes (`face/tests/gravit-md.test.ts`); `cycle.md` untouched.
 - Never touch `dsh/profile/`, `bots/` (save the generated mirror, untouched by this plan), `roles/` (plan 2), or the live `~/.dsh`.
 - Commit after every task with `git commit -m` and a message free of backticks, `$` and parentheses; one commit per task, never push. This worktree's Bash sandbox refuses command text that names git in a non-plain form: run git as plain one-line commands from the worktree root, and edit files through the file tools.
@@ -63,8 +71,9 @@ plan is its §10 item 1. Stage 0, reused by copy, is the worktree
 
 **Files:**
 - Create (copied from the graft worktree, imports re-pointed): `face/plugins/lunhui/lib/market.mjs`, `face/plugins/lunhui/lib/contract.mjs`, `face/plugins/lunhui/lib/runs.mjs`, `face/plugins/lunhui/lib/fixture-fetch.mjs`
-- Create (copied as they are): `face/tests/fixtures/lunhui/` (every file), `face/tests/fixtures/lunhui-empty/README.md`, `face/tests/lunhui-market.test.ts`, `face/tests/lunhui-runs.test.ts`, `face/tests/lunhui-contract.test.ts`, `docs/research/lunhui/README.md`, `docs/research/lunhui/manifest.json`, `docs/research/lunhui/design/` (every file), `strategies/lunhui-s01-repair/` and `strategies/lunhui-s02-rotation/` (every tracked file)
-- Modify: `.gitignore` (two lines), `face/tests/fixtures/lunhui/fetch.ts` (one import)
+- Create (copied as they are): `face/tests/fixtures/lunhui/` (every file), `face/tests/fixtures/lunhui-empty/README.md`, `face/tests/lunhui-market.test.ts`, `face/tests/lunhui-runs.test.ts`, `face/tests/lunhui-contract.test.ts`, `docs/research/lunhui/README.md`, `docs/research/lunhui/manifest.json`, `docs/research/lunhui/design/` (every file), `strategies/lunhui-s01-repair/` and `strategies/lunhui-s02-rotation/` (every tracked file), and as history (spec §5.13) `docs/superpowers/specs/2026-10-19-lunhui-plugin-graft-design.md` and `docs/superpowers/plans/2026-10-19-lunhui-plugin-graft-ledger.md`
+- Modify: `.gitignore` (two lines), `face/tests/fixtures/lunhui/fetch.ts` (one import), `face/plugins/lunhui/lib/fixture-fetch.mjs` (its header comment: the fixture directory is a row's `config.fetch` now, A15; the `LUNHUI_FETCH_FIXTURES` sentence goes)
+- Test: `face/tests/lunhui-ignore.test.ts`
 
 **Interfaces:**
 - Produces: `lib/runs.mjs` exports `LunhuiError`, `STRATEGY_NAME_RE`, `RUN_ID_RE`, `resolveStrategy(root, name)`, `newRunId(now)`, `resolveRun(strategyDir, run)`, `createRun(strategyDir, run)`, `writeNew(dir, name, text)`, `readText(dir, name)`, `writeAnalysis(dir, analysis)`, `writeMetrics(dir, metrics)` — unchanged from stage 0. `lib/market.mjs` exports `freezeSample`, `fetchQuotes`, `fetchDailyBars`, `getMarketSession`, `validateSymbols`, the parsers and assessments — unchanged. `lib/contract.mjs` exports `buildAnalysisContext`, `validateAnalysis`, the hints, `MAX_CONTEXT_BYTES`, `MAX_ANALYSIS_BYTES` and the module-private `hash(value)` (made exported in Task 3). `lib/fixture-fetch.mjs` exports `createFixtureFetch(dir)`.
@@ -86,10 +95,20 @@ With the file tool, append to `.gitignore` under a new comment `# the Lunhui cor
 strategies/*/analysis/*/evidence-*.json
 ```
 
+Then the ignore test (spec §6), `face/tests/lunhui-ignore.test.ts`, running `git check-ignore -q` from the repository root through `execFileSync` (exit 0 ignored, 1 not):
+
+```ts
+test("ignore: a run's evidence files are ignored; run.json, metrics.json and an artifact are not; the corpus is", () => {
+  assert.equal(ignored("strategies/cn-market/analysis/20261023T070000Z-0123abcd/evidence-limit-up.json"), true);
+  for (const f of ["run.json", "metrics.json", "sentiment.json"]) assert.equal(ignored(`strategies/cn-market/analysis/20261023T070000Z-0123abcd/${f}`), false);
+  assert.equal(ignored("docs/research/lunhui/corpus/x.md"), true);
+});
+```
+
 - [ ] **Step 3: Run the moved tests**
 
-Run: `cd face && npx tsx --test tests/lunhui-market.test.ts tests/lunhui-runs.test.ts tests/lunhui-contract.test.ts`
-Expected: every test passes (stage 0 had 36, 12 and 17).
+Run: `cd face && npx tsx --test tests/lunhui-market.test.ts tests/lunhui-runs.test.ts tests/lunhui-contract.test.ts tests/lunhui-ignore.test.ts`
+Expected: every test passes (stage 0's three files had 36, 12 and 17, give or take a nested case; the ignore test 1).
 
 - [ ] **Step 4: Run the whole suite and the type check**
 
@@ -99,7 +118,7 @@ Expected: pass; the count grows by the three files' tests.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add .gitignore face/plugins/lunhui/lib face/tests/fixtures/lunhui face/tests/fixtures/lunhui-empty face/tests/lunhui-market.test.ts face/tests/lunhui-runs.test.ts face/tests/lunhui-contract.test.ts docs/research/lunhui strategies/lunhui-s01-repair strategies/lunhui-s02-rotation
+git add .gitignore face/plugins/lunhui/lib face/tests/fixtures/lunhui face/tests/fixtures/lunhui-empty face/tests/lunhui-market.test.ts face/tests/lunhui-runs.test.ts face/tests/lunhui-contract.test.ts face/tests/lunhui-ignore.test.ts docs/research/lunhui strategies/lunhui-s01-repair strategies/lunhui-s02-rotation docs/superpowers/specs/2026-10-19-lunhui-plugin-graft-design.md docs/superpowers/plans/2026-10-19-lunhui-plugin-graft-ledger.md
 git commit -m "feat: the Lunhui stage 0 library, fixtures, research input and the two theses land on main"
 ```
 
@@ -113,7 +132,7 @@ git commit -m "feat: the Lunhui stage 0 library, fixtures, research input and th
 - Test: `face/tests/lunhui-calendar.test.ts`
 
 **Interfaces:**
-- Produces: `calendar.mjs` exports `loadCalendars(dir = <lib/calendar>)` → `Map<string, CalendarTable>` keyed by year; `coverageOf(date: "YYYY-MM-DD", tables)` → `"covered" | "uncovered"`; `isTradingDay(date, tables)` → boolean, defined only for a covered date; `CalendarTable = { year, source, closed: string[] }` (every weekday the exchange was closed, from the SSE notice). `market.mjs` keeps exporting `getMarketSession(now)`, now reading the 2026 table through `loadCalendars()`; its `calendarCoverage` field names the covered years joined by `,` (`"2026"` today).
+- Produces: `calendar.mjs` exports `loadCalendars(dir = <lib/calendar>)` → `Map<string, CalendarTable>` keyed by year; `coverageOf(date: "YYYY-MM-DD", tables)` → `"covered" | "uncovered"`; `isTradingDay(date, tables)` → boolean, defined only for a covered date (not a weekend, not inside a holiday); `holidayOn(date, tables)` → the holiday or `undefined`; `CalendarTable = { year, source, holidays: [{ start, end, name, source }] }` — stage 0's holiday ranges as they are, each with its own notice URL (2026 has two: the annual notice and the autumn one), `source` the annual one. `market.mjs` keeps exporting `getMarketSession(now)` with the same labels and per-holiday `source`, now reading the tables through `loadCalendars()` at module load; its `calendarCoverage` field names the covered years joined by `,` (`"2026"` today), and the uncovered reason names them instead of the literal 2026.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -129,12 +148,12 @@ test("calendar: the 2026 table loads, a 2026 holiday is closed, a 2027 date is u
 test("calendar: a second table in the directory covers its year", async () => {
   const dir = await mkdtemp(join(tmpdir(), "lunhui-cal-"));
   await copyFile(<lib/calendar/2026.json>, join(dir, "2026.json"));
-  await writeFile(join(dir, "2099.json"), JSON.stringify({ year: "2099", source: "synthetic", closed: ["2099-01-01"] }));
+  await writeFile(join(dir, "2099.json"), JSON.stringify({ year: "2099", source: "synthetic", holidays: [{ start: "2099-01-01", end: "2099-01-01", name: "元旦", source: "synthetic" }] }));
   const tables = loadCalendars(dir);
   assert.equal(coverageOf("2099-06-01", tables), "covered");
   assert.equal(isTradingDay("2099-01-01", tables), false);
 });
-test("calendar: a malformed table is refused with its file named", async () => { /* a table whose year is not four digits, or closed holds a non-date, throws an Error naming the file */ });
+test("calendar: a malformed table is refused with its file named", async () => { /* a table whose year is not four digits or differs from its file name, or a holiday whose start or end is not a date of that year or ends before it starts, throws an Error naming the file */ });
 ```
 
 - [ ] **Step 2: Run it to see it fail**
@@ -144,7 +163,7 @@ Expected: FAIL, the module does not exist.
 
 - [ ] **Step 3: Extract the table and write the loader**
 
-Move the 2026 closures market.mjs hard-codes (its `CALENDAR_YEAR`, `ANNUAL_SOURCE` and the closed-day set behind `isCovered`) into `lib/calendar/2026.json` as `{ year, source, closed }`; write `calendar.mjs`; make `market.mjs` build its session table from `loadCalendars()` at module load, keeping every existing `getMarketSession` test green.
+Move what `market.mjs` hard-codes (`CALENDAR_YEAR`, `FIRST_DATE`, `LAST_DATE`, `ANNUAL_SOURCE`, `AUTUMN_SOURCE` and the `holidays` array) into `lib/calendar/2026.json` as `{ year, source, holidays }`; write `calendar.mjs` (read with `readFileSync` from `new URL("./calendar/", import.meta.url)`); make `market.mjs`'s `isCovered`, `holidayOn` and `isTradingDate` read the loaded tables, keeping every existing `getMarketSession` test green.
 
 - [ ] **Step 4: Run the calendar and market tests**
 
@@ -172,7 +191,7 @@ git commit -m "feat: the Lunhui calendar is a table per year, 2026 shipped, an u
   - `openRun(strategyDir, kind, now = new Date())` → `Promise<{ run, dir }>`: `createRun` plus `run.json` `{ run, strategy, kind, as_of: null, opened_at, sealed_at: null, snapshot_id: null, evidence: [], artifacts: [] }` and `metrics.json` `{ freezes: 0, calls: {}, rejections: {}, submitted: [] }`; `kind` is `"market"` or `"strategy"`.
   - `addEvidence(dir, source, items, meta)` → `Promise<{ file, sha256, bytes, ids }>`: writes `evidence-<source>.json` (`writeNew`, so a second file for the same source throws `SOURCE_FROZEN`) holding `{ source, received_at, host, delayed, truncated, items }`, each item given `id = "ev_" + hash(item).slice(0, 24)` before writing; refuses `RUN_SEALED` when `run.json` has `sealed_at`; refuses `EVIDENCE_TOO_LARGE` over 256 KiB and `RUN_TOO_LARGE` when the run's evidence would pass 2 MiB; appends `{ source, file, sha256, bytes, received_at, host, delayed }` to `run.json`'s `evidence` through `replaceFile`. `source` matches `^[a-z][a-z-]{0,30}$`.
   - `sealRun(dir, now = new Date())` → `Promise<RunManifest>`: sets `sealed_at`, `as_of` (the latest `received_at`), `snapshot_id = "snap_" + sha256(sorted evidence sha256s joined by "\n")`; idempotent on a sealed run.
-  - `readRun(dir)` → `Promise<{ manifest: RunManifest, metrics }>`, both through `readText`.
+  - `readRun(dir)` → `Promise<{ manifest: RunManifest, metrics, metricsReset: boolean }>`, both through `readText`; a missing or unparseable `run.json` is `NO_SUCH_RUN`, but a missing or corrupt `metrics.json` yields zeroed metrics with `metricsReset: true` (A7's fail-open, pinned) and the next write mirrors them back.
   - `evidenceId(item)` → the id above (exported for the freeze rows' tests).
 - `contract.mjs` exports its existing `hash(value)`.
 
@@ -192,12 +211,12 @@ test("runs: openRun writes run.json and metrics.json; addEvidence ids items and 
   assert.deepEqual(await sealRun(dir), sealed); // idempotent
 });
 test("runs: snapshot_id depends on the evidence bytes, not on the order the sources were added", ...);
-test("runs: a second file for one source is SOURCE_FROZEN; a bad source name is INTERNAL-free, SOURCE_FROZEN is not thrown for a new source", ...);
+test("runs: a second file for one source is SOURCE_FROZEN; a new source on the same run lands; a source name off the grammar throws a plain Error (host code's bug, never a LunhuiError)", ...);
 test("runs: an evidence file over 256 KiB is EVIDENCE_TOO_LARGE; a run passing 2 MiB is RUN_TOO_LARGE; nothing is written in either case", ...);
 test("runs: a run id of another strategy resolves to NO_SUCH_RUN under this one", async () => {
   // open a run under strategy A, resolveRun(strategyDirB, runA) rejects NO_SUCH_RUN
 });
-test("runs: readRun reads back both files; a missing metrics.json is NO_SUCH_RUN", ...);
+test("runs: readRun reads back both files; a missing or corrupt metrics.json reads as zeroed counts with metricsReset true; a missing run.json is NO_SUCH_RUN", ...);
 ```
 
 - [ ] **Step 2: Run them to see them fail**
@@ -207,7 +226,7 @@ Expected: the new tests FAIL (`openRun is not a function`); stage 0's pass.
 
 - [ ] **Step 3: Implement**
 
-Add the functions to `runs.mjs` with the signatures above, reusing `createRun`, `writeNew`, `readText`, `replaceFile` (make it the module's own helper for `run.json` as `writeAnalysis` uses it), `stillResolved`; add the three new `LunhuiError` codes with Chinese reasons naming no path. Export `hash` from `contract.mjs`.
+Add the functions to `runs.mjs` with the signatures above, reusing `createRun`, `writeNew`, `readText`, `replaceFile` (make it the module's own helper for `run.json` as `writeAnalysis` uses it), `stillResolved`; add the four new `LunhuiError` codes (`RUN_SEALED`, `SOURCE_FROZEN`, `EVIDENCE_TOO_LARGE`, `RUN_TOO_LARGE`) with Chinese reasons naming no path. `SOURCE_FROZEN` is this plan's addition to spec §5.7's list (one snapshot per source per run, A27's rule); record it in the ledger. Export `hash` from `contract.mjs`.
 
 - [ ] **Step 4: Run the tests**
 
@@ -227,6 +246,7 @@ git commit -m "feat: a Lunhui run opens, takes evidence files with ids, and seal
 
 **Files:**
 - Create: `face/plugins/lunhui/runs-row.mjs`, `face/plugins/lunhui/lib/modules.mjs`, `face/plugins/lunhui/lib/errors.mjs` (the caller gate and the refusal helpers shared by rows)
+- Modify: `face/package.json` and `face/package-lock.json` (`"@deepseek-ai/dsh-tools": "0.2.0-rc.2"` in `dependencies`, then `npm install` — no new package lands; `npm ls @deepseek-ai/dsh-tools` shows the one deduped copy)
 - Test: `face/tests/lunhui-rows.test.ts`
 
 **Interfaces:**
@@ -235,7 +255,7 @@ git commit -m "feat: a Lunhui run opens, takes evidence files with ids, and seal
   - `runs-row.mjs` exports `name = "lunhui-runs"`, `inject = ["tools"]`, `apply(ctx, config)`. `config = { strategiesRoot: string }`; `apply` throws `Error("lunhui-runs: strategiesRoot must be an absolute path to an existing directory")` otherwise. It calls `ctx.provide("lunhuiRuns", service)` and registers `lunhui_read_run` through `ctx.tools.register(defineTool({...}))`, both inside `ctx.effect` so a reload disposes them (as `gravit.js` does).
   - The service (`/** @typedef LunhuiRuns */`): `strategiesRoot`; `resolveStrategy(name)`; `openRun(strategyName, kind)`; `addEvidence(strategyName, run, source, items, meta)`; `sealRun(strategyName, run)`; `readRun(strategyName, run)`; `withRun(strategyName, run, fn)` — one in-process mutex per `<strategy>/<run>` key, `fn` runs alone; `countFreeze(strategyName, run)` — increments `metrics.freezes`, throws `TOOL_BUDGET` past 8, persists; every method anchors through `runs.mjs`.
   - `modules.mjs` exports `MODULES`: the six module names in order (`environment`, `sentiment`, `theme`, `leader`, `mode`, `counterevidence`), each with `file` (`<name>.json`) and `headline` (the field names of spec §5.4: environment `index_state, liquidity_state, cycle_anchor`; sentiment `state, money_effect, freeze_type`; theme `mainline_candidates, theme_stage, rotation`; leader `leader_candidates, top_pattern_flags`; mode `mode, preconditions, research_only_matches, expectation, expectation_review`; counterevidence `items`).
-  - `errors.mjs` exports `refuse` (the stage-0 refusal table rebuilt for rows: `notAStrategy`, `badRunId`, `noSuchRun`, `runSealed`, `sourceFrozen`, `toolBudget`, `notGravit`, `notARole` (plan 2), `calendarUncovered`, `internal`), `callerIsChild(exec)` → `exec?.agent?.session?.header?.origin === "subagent" && exec.agent.session.header.isSeeded !== true`, and `asToolError(error)` → a `LunhuiError` passes through, anything else becomes `INTERNAL` after its detail is written to `process.stderr`.
+  - `errors.mjs` exports `refuse` (the stage-0 refusal table rebuilt for rows: `notAStrategy`, `badRunId`, `noSuchRun`, `runSealed`, `sourceFrozen`, `toolBudget`, `notGravit`, `notARole` (plan 2), `calendarUncovered`, `internal`), `callerIsChild(exec)` → `exec?.agent?.session?.header?.origin === "subagent" && exec.agent.session.header.isSeeded !== true`, `upstreamError(error, provider)` → stage 0's provider-to-refusal mapping moved out of the retired `server.mjs` (its `refuse.timeout`/`tooLarge`/`invalidReply`/`unassembled` and the `INVALID_REPLY_CODES` rule: `PROVIDER_TIMEOUT` → `UPSTREAM_TIMEOUT`, the size code → `UPSTREAM_TOO_LARGE`, the reply codes and an uncoded fetch failure → `UPSTREAM_INVALID`), its Chinese texts naming the provider (`腾讯行情` or `东方财富`), and `asToolError(error)` → a `LunhuiError` passes through, anything else becomes `INTERNAL` after its detail is written to `process.stderr`.
   - `lunhui_read_run({ strategy, run })` returns one JSON text: `run.json`'s manifest, `metrics`, and `artifacts: [{ module, accepted, headline }]` for each file of `MODULES` present in the run (none in this plan) — the headline read as the runs card reads it (Task 11's bounded reader is server-side; here `readText` with a 24 KiB cap). Description, Chinese: 读取一次研究运行的清单、计数与各模块工件的要点；参数是策略名与运行编号，不是路径。
 
 - [ ] **Step 1: Write the failing tests**
@@ -247,7 +267,8 @@ test("lunhui-runs: name and inject; apply refuses a bad strategiesRoot with its 
 test("lunhui-runs: apply provides lunhuiRuns once and registers exactly lunhui_read_run; unload disposes both", ...);
 test("lunhui-runs: the service opens, adds, seals and reads a run under the root, and refuses a strategy outside it", ...);
 test("lunhui-runs: withRun serializes two callers on one run", async () => { /* two concurrent fn's; the second starts after the first resolves (record order) */ });
-test("lunhui-runs: countFreeze throws TOOL_BUDGET on the ninth call and persists the count", ...);
+test("lunhui-runs: countFreeze throws TOOL_BUDGET on the ninth call and persists the count; a deleted metrics.json restarts the count at zero", ...);
+test("errors: upstreamError maps stage 0's provider codes to UPSTREAM_TIMEOUT, UPSTREAM_TOO_LARGE and UPSTREAM_INVALID, names the provider, and never a path", ...);
 test("lunhui_read_run: returns the manifest, the metrics and an empty artifacts list; a bad run id is BAD_RUN_ID; a path-like strategy is NOT_A_STRATEGY", async () => {
   const text = await tool.execute({ strategy: "alpha", run }, fakeExec());
   const body = JSON.parse(text);
@@ -272,7 +293,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add face/plugins/lunhui/runs-row.mjs face/plugins/lunhui/lib/modules.mjs face/plugins/lunhui/lib/errors.mjs face/tests/lunhui-rows.test.ts
+git add face/package.json face/package-lock.json face/plugins/lunhui/runs-row.mjs face/plugins/lunhui/lib/modules.mjs face/plugins/lunhui/lib/errors.mjs face/tests/lunhui-rows.test.ts
 git commit -m "feat: the lunhui-runs row provides the runs service and registers lunhui_read_run"
 ```
 
@@ -282,15 +303,17 @@ git commit -m "feat: the lunhui-runs row provides the runs service and registers
 
 **Files:**
 - Create: `face/plugins/lunhui/lib/eastmoney.mjs`, `face/tests/fixtures/lunhui-eastmoney/` (`zt-pool.json`, `zb-pool.json`, `yesterday-pool.json`, `README.md`)
-- Modify: `face/plugins/lunhui/lib/fixture-fetch.mjs` (the Eastmoney URL → file mapping)
+- Modify: `face/plugins/lunhui/lib/fixture-fetch.mjs` (the Eastmoney URL → file mapping), `face/plugins/lunhui/lib/market.mjs` (`fetchBytes` exported and generalized)
 - Test: `face/tests/lunhui-eastmoney.test.ts`
 
 **Interfaces:**
+- Produces, in `market.mjs`: `fetchBytes(url, fetchImpl, timeoutMs, { redirect = "error", headers = <stage 0's Tencent headers>, maxBytes = MAX_RESPONSE_BYTES } = {})` → `Promise<{ status, headers, bytes }>`, exported; every existing Tencent call keeps the defaults, so its behaviour and its `PROVIDER_*` codes are unchanged (the market tests pin it).
 - Produces, in `eastmoney.mjs`:
-  - `fetchEastmoneyJson(url, { fetchImpl = fetch, timeoutMs = 7000, maxBytes = 512 * 1024 })` → `Promise<{ json, host, delayed }>`: GET with `redirect: "manual"`; a 301/302/307/308 is followed once and only when the `location` host is `push2delay.eastmoney.com` and its path and query equal the request's (else `UPSTREAM_INVALID`); a second redirect is `UPSTREAM_INVALID`; `host` is the serving host; `delayed` is `host === "push2delay.eastmoney.com" || typeof json.dlmkts === "string" && json.dlmkts !== ""`; the body is read as stage 0's `fetchBytes` reads Tencent (timeout → `UPSTREAM_TIMEOUT`, over `maxBytes` → `UPSTREAM_TOO_LARGE`, not JSON → `UPSTREAM_INVALID`).
+  - `inFlight(fn)` — one module-level limiter, at most four Eastmoney requests running at once across every caller (A17); the others queue in arrival order. Every request below goes through it.
+  - `fetchEastmoneyJson(url, { fetchImpl = fetch, timeoutMs = 7000, maxBytes = 512 * 1024 })` → `Promise<{ json, host, delayed }>`: GET with `redirect: "manual"`; a 301/302/307/308 is followed once and only when the `location` host is `push2delay.eastmoney.com` and its path and query equal the request's (else `UPSTREAM_INVALID`); a second redirect is `UPSTREAM_INVALID`; `host` is the serving host; `delayed` is `host === "push2delay.eastmoney.com" || typeof json.dlmkts === "string" && json.dlmkts !== ""`; the body is read through `fetchBytes` with `redirect: "manual"`, Eastmoney's headers (`Accept: application/json`, `Referer: https://quote.eastmoney.com/`) and the cap, its codes mapped by Task 4's `upstreamError(_, "东方财富")` (timeout → `UPSTREAM_TIMEOUT`, over `maxBytes` → `UPSTREAM_TOO_LARGE`, not JSON or a non-2xx → `UPSTREAM_INVALID`).
   - `fetchLimitUpPools({ date, fetchImpl, timeoutMs })` → `Promise<{ zt: PoolRow[], zb: PoolRow[], yesterday: PoolRow[], host, delayed, truncated }>`; `date` is `YYYYMMDD`; the three endpoints are `https://push2ex.eastmoney.com/getTopicZTPool`, `getTopicZBPool`, `getYesterdayZTPool`, each with the query AKShare sends (`ut=7eea3edcaed734bea9cbfc24409ed989`, `dpt=wz.ztzt`, `Pageindex=0`, `pagesize=500`, `sort=fbt:asc` for the first, the others as `stock_zt_pool_zbgc_em` and `stock_zt_pool_previous_em` send in the installed `akshare/stock_feature/stock_ztb_em.py`); a reply whose `data` is `null` or whose pool is empty is `NO_MARKET_DATA`; more than 500 rows sets `truncated: true` and keeps the first 500.
   - `PoolRow` for `zt`: `{ code, name, pct, price, amount, floatCap, totalCap, turnoverRate, boards: lbc, firstSealAt: fbt, lastSealAt: lbt, sealFunds: fund, breakCount: zbc, industry: hybk, streak: { days, count } }` with the reply's keys `c n zdp p amount ltsz tshare hs lbc fbt lbt fund zbc hybk zttj`; `price` divided by 1000 as AKShare divides it; `zb` and `yesterday` rows carry the fields their replies carry, named in the same English, the raw key named in a comment beside each.
-- `fixture-fetch.mjs`: a URL whose host is `push2ex.eastmoney.com` maps by path to `zt-pool.json`, `zb-pool.json`, `yesterday-pool.json`; a URL whose host is `push2.eastmoney.com` and path `/api/qt/clist/get` maps by its `fs` query: `m:90+t:3` with `fid0` → `board-flow.json`, `m:90+t:3` → `boards.json`, `b:<code>…` → `members-<code>.json`, the all-shares `fs` → `counts-page-<pn>.json`; a `redirect` directory (tests) answers the first call with a 302 to `push2delay.eastmoney.com` and the second from the file; anything else 404.
+- `fixture-fetch.mjs`: a URL whose host is `push2ex.eastmoney.com` maps by path to `zt-pool.json`, `zb-pool.json`, `yesterday-pool.json`; a URL whose host is `push2.eastmoney.com` and path `/api/qt/clist/get` maps by its `fs` query: `m:90+t:3` with `fid0` → `board-flow.json`, `m:90+t:3` → `boards.json`, `b:<code>…` → `members-<code>.json`, the all-shares `fs` → `counts-page-<pn>.json`; anything else 404. The redirect cases are not fixtures: the tests hand `fetchEastmoneyJson` a small fake `fetchImpl` that answers 302 with a `location` and records every URL it was asked for (spec §6).
 
 - [ ] **Step 1: Write the fixtures**
 
@@ -302,7 +325,8 @@ Synthetic, shaped exactly like the live replies (the keys above; `rc`, `rt`, `sv
 test("eastmoney: the ZT pool parses to PoolRows with the price divided by 1000 and the streak split", ...);
 test("eastmoney: data null is NO_MARKET_DATA; an empty pool is NO_MARKET_DATA", ...);
 test("eastmoney: 501 rows are cut to 500 with truncated true", ...);
-test("eastmoney: one redirect to push2delay is followed with delayed true; a redirect elsewhere is UPSTREAM_INVALID; a second redirect is UPSTREAM_INVALID", ...);
+test("eastmoney: one redirect to push2delay is followed with delayed true; a redirect elsewhere is UPSTREAM_INVALID; a second redirect is UPSTREAM_INVALID; no numbered host is ever asked", ...);
+test("eastmoney: ten concurrent requests never have more than four in flight", ...);
 test("eastmoney: a reply with dlmkts set is delayed even from the plain host", ...);
 test("eastmoney: not JSON is UPSTREAM_INVALID, over 512 KiB is UPSTREAM_TOO_LARGE, a hung body is UPSTREAM_TIMEOUT", ...);
 test("eastmoney: the fixture fetch answers the three pool paths and 404s an unknown path", ...);
@@ -315,7 +339,7 @@ Expected: FAIL.
 
 - [ ] **Step 4: Implement**
 
-Reuse stage 0's byte reader (`fetchBytes` in `market.mjs`, exported) for the body, timeout and cap.
+Generalize `fetchBytes` as the Interfaces block says, then build `eastmoney.mjs` on it.
 
 - [ ] **Step 5: Run the tests**
 
@@ -413,10 +437,10 @@ git commit -m "feat: the Lunhui derived measures, computed by host code with the
 **Interfaces:**
 - Consumes: Task 4's service and `errors.mjs`; Tasks 5–7; Task 2's `coverageOf`; stage 0's `freezeSample`, `fetchQuotes`, `fetchDailyBars`.
 - Produces:
-  - `freeze-tool.mjs` exports `defineFreeze({ name, description, parameters, source, kind, freeze })` → the `defineTool` definition: `execute(args, exec)` refuses `NOT_GRAVIT` when `callerIsChild(exec)`; resolves the strategy; refuses `WRONG_CHANNEL` when `kind` is `"market"` and the strategy is not `cn-market`, or `"strategy"` and it is (quotes accepts both); checks `coverageOf(today in China)` → `CALENDAR_UNCOVERED`; `withRun`: opens a run when `args.run` is absent, else resolves it and refuses `RUN_SEALED`; `countFreeze` (budget); calls `freeze(fetchImpl, args)` → `{ items, derived, meta }`; `addEvidence(source, [...items, ...derived], meta)`; returns JSON text `{ run, strategy, source, as_of: meta.received_at, items: items.length, derived: measures, host, delayed, truncated }`. The row's `config.fetch`, when set, is a directory handed to `createFixtureFetch`; else the global `fetch`.
+  - `freeze-tool.mjs` exports `defineFreeze({ name, description, parameters, source, kind, freeze })` → the `defineTool` definition: `execute(args, exec)` refuses `NOT_GRAVIT` when `callerIsChild(exec)`; resolves the strategy; refuses `WRONG_CHANNEL` when `kind` is `"market"` and the strategy is not `cn-market`, or `"strategy"` and it is (quotes accepts both); checks `coverageOf(today in China)` → `CALENDAR_UNCOVERED`; `withRun`: opens a run when `args.run` is absent, else resolves it and refuses `RUN_SEALED`; `countFreeze` (budget); calls `freeze(fetchImpl, args)` → `{ items, derived, meta }`, a provider error passed through Task 4's `upstreamError` (nothing written for that source); `addEvidence(source, [...items, ...derived], meta)`; returns JSON text `{ run, strategy, source, as_of: meta.received_at, items: items.length, derived: measures, host, delayed, truncated }`. The row's `config.fetch`, when set, is a directory handed to `createFixtureFetch`; else the global `fetch`.
   - Each row exports `name`, `inject = ["tools", "lunhuiRuns"]`, `apply(ctx, config)` registering one tool:
     - `lunhui-freeze-quotes` → `lunhui_freeze_quotes({ strategy, run?, symbols })`, `kind: "any"`, source `quotes`: stage 0's `freezeSample` (1–8 symbols, its grammar); items are the quotes and the histories; derived: none here (`deriveIndex` belongs to the index row).
-    - `lunhui-freeze-limit-up` → `lunhui_freeze_limit_up({ strategy, run? })`, `kind: "market"`, source `limit-up`: `fetchLimitUpPools` for the current China session date (`getMarketSession`'s date), items are the three pools' rows tagged `pool: "zt" | "zb" | "yesterday"`, derived `deriveLimitUp`.
+    - `lunhui-freeze-limit-up` → `lunhui_freeze_limit_up({ strategy, run? })`, `kind: "market"`, source `limit-up`: `fetchLimitUpPools` for `getMarketSession(now).expectedQuoteDate` as `YYYYMMDD` (the latest trading day whose pool can exist: on a weekend or holiday the previous session, before 09:15 the previous session; a null date is `CALENDAR_UNCOVERED`), items are the three pools' rows tagged `pool: "zt" | "zb" | "yesterday"`, derived `deriveLimitUp`.
     - `lunhui-freeze-boards` → `lunhui_freeze_boards({ strategy, run?, boards? })`, `kind: "market"`, source `boards`: `fetchBoards`, then members for `args.boards` (each `^BK\d{4}$`, at most 10) or the top 10 by turnover, `fetchBoardFundFlow`; items are boards, one member-list item per board, flow rows; derived `deriveBoards`.
     - `lunhui-freeze-index` → `lunhui_freeze_index({ strategy, run? })`, `kind: "market"`, source `index`: Tencent quotes and 120-day bars for the four indices (`fetchDailyBars` with the day count made a parameter), `fetchMarketCounts`; items are the index quotes, the bar series, the counts; derived `deriveIndex` and `deriveCounts`.
   - Descriptions in Chinese state every bound (symbols 1–8, boards ≤ 10, eight freezes per run, Gravit only, market channel only where it holds).
@@ -437,6 +461,8 @@ test("freeze: a delegated child caller is NOT_GRAVIT; a fork and a root pass", a
 test("freeze: the ninth freeze on one run is TOOL_BUDGET", ...);
 test("freeze: a date no table covers is CALENDAR_UNCOVERED before any fetch", ...);
 test("freeze: a NO_MARKET_DATA pool writes nothing and leaves the run open with its other evidence", ...);
+test("freeze: on a Saturday the limit-up pools are asked for the previous trading day's date", ...);
+test("freeze: a Tencent timeout on the quotes freeze is UPSTREAM_TIMEOUT and writes nothing", ...);
 test("freeze: boards cuts a long member list at 100 with truncated true, and breadth comes from the board's own counts", ...);
 test("freeze: index records partial counts as partial in the derived item", ...);
 test("freeze: two freezes of different sources on one run at once both land", ...);
@@ -528,7 +554,7 @@ git commit -m "feat: the cn-market channel, the market read's own strategy direc
 **Interfaces:**
 - Consumes: Task 4's `MODULES` (its names and headline fields, copied into channels.ts as a constant `MODULE_HEADLINES` — the server owns the table; the client renders the pairs it receives); stage 0's `channels.ts` at the graft worktree for the code to port.
 - Produces: `ChannelBody` gains `runs: RunRow[]`, `runsOmitted: number`, `latestRun: LatestRun | null`;
-  `RunRow = { run, asOf: string | null, snapshotId: string | null, sealed: boolean, kind: "market" | "strategy" | null, artifacts: { [module]: { accepted: true, headline: Record<string, unknown> } }, marketRun: string | null, bytes: number }`;
+  `RunRow = { run, asOf: string | null, snapshotId: string | null, sealed: boolean, kind: "market" | "strategy" | null, artifacts: { [module]: { accepted: true, status: string | null, contractVersion: string | null, headline: Record<string, unknown> } }, marketRun: string | null, bytes: number }` — `status` is the artifact's top-level `status` (`"NOT_EVALUABLE"` for a module whose evidence was missing, spec §5.4; plan 2 writes it), `contractVersion` its `contract_version` (A19);
   `LatestRun = { run, asOf, snapshotId, artifacts: { [module]: { headline, json } }, marketRun }` — the newest sealed run with at least one artifact, or null. Also ported as they are: `readBoundedJson(path, cap, diskCap)`, `nestsWithin`, `JSON_FILE_MAX_DEPTH = 32`, `BACKTEST_MAX_BYTES`, `BACKTEST_MAX_DISK_BYTES`, the bounded latest-evidence block, and `send()` serializing before `writeHead`. New caps: `run.json` and `metrics.json` 8 KiB, an artifact 24 KiB on the compact JSON, read bound twice the cap.
 
 - [ ] **Step 1: Port stage 0's bounds tests, then write the runs tests**
@@ -542,6 +568,7 @@ test("readChannelBody: the listing stops at 50 and counts the rest in runsOmitte
 test("readChannelBody: a linked analysis/, a linked run file and a hard-linked one are never read", ...);
 test("readChannelBody: an artifact over 24 KiB compact or nested past 32 is listed without a headline", ...);
 test("readChannelBody: run.json that does not parse lists the run with nulls and bytes still counted", ...);
+test("MODULE_HEADLINES equals the plugins' MODULES table, name for name and field for field", ...);
 ```
 
 The run fixtures are made with Task 3's `openRun`, `addEvidence`, `sealRun` and a hand-written `mode.json` so the shapes are the server's own.
@@ -569,7 +596,7 @@ git commit -m "feat: the channel overview lists Lunhui runs with their artifacts
 
 **Interfaces:**
 - Consumes: Task 11's `runs`, `runsOmitted`, `latestRun`.
-- Produces: `runs-view.js` exports `runsView(body)` → `{ latest: { run, asOf, snapshotId, marketRun, chips: [{ module, text }], expectation: [[key, value]] | null } | null, rows: [{ run, asOf, sealed, artifacts: string[], bytes }], omitted: number, empty: "no runs yet" | "no sealed run with an artifact yet" | null }` — pure, every string from the wire passed through as data; `chips` one per module present, text `<module>: <headline fields joined>` or `<module>: not evaluable` when the headline says so. `channel.js` renders a `sec('Research runs', …)` after `latest(body)`: the latest run's line, its chips, the expectation as `kv`, then one dim row per run (`run · as of · N artifacts · bytes`), then `older runs not listed: N` when `omitted > 0`; every value through `esc`.
+- Produces: `runs-view.js` exports `runsView(body)` → `{ latest: { run, asOf, snapshotId, marketRun, chips: [{ module, text }], expectation: [[key, value]] | null } | null, rows: [{ run, asOf, sealed, artifacts: string[], bytes }], omitted: number, empty: "no runs yet" | "no sealed run with an artifact yet" | null }` — pure, every string from the wire passed through as data; `chips` one per module present, text `<module>: <headline fields joined>`, or `<module>: not evaluable` when the artifact's `status` is `"NOT_EVALUABLE"`. `channel.js` renders a `sec('Research runs', …)` after `latest(body)`: the latest run's line, its chips, the expectation as `kv`, then one dim row per run (`run · as of · N artifacts · bytes`), then `older runs not listed: N` when `omitted > 0`; every value through `esc`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -599,7 +626,7 @@ git commit -m "feat: the channel page shows the research runs, the latest run's 
 ### Task 13: Documentation and the measured sizes
 
 **Files:**
-- Modify: `DEVELOPMENT.md` (§3.6 one row for the five tools; §4.2 `lunhui.ts` row; §4.3 the five rows after the seat, the layer list; §4.4 the overview row; §4.6 the fixture config is row config, no environment variable; §5.1 the two client files; §5.2 the runs card wire; §7.3 the new test files; §9: R32 re-worded for the face process, R33 the calendar tables, new residuals for the delayed Eastmoney quotes and the evidence files out of git; §10: plans 2–4 as forward items), `face/README.md` (a "Lunhui analysis" section rewritten for rows: the eleven planned rows and the five built, the egress hosts and the redirect, the fixture config, the disable lines, `strategies/cn-market/`, the two commands of a first market freeze), `CLAUDE.md` (the `face/` row names `face/plugins/lunhui/` as rows; the `strategies/` row names `cn-market`), `ROADMAP.md` (built log entry naming the spec and this plan)
+- Modify: `DEVELOPMENT.md` (§3.6 one row for the five tools; §4.2 `lunhui.ts` row; §4.3 the five rows after the seat, the layer list; §4.4 the overview row; §4.6 the fixture config is row config, no environment variable; §5.1 the two client files; §5.2 the runs card wire; §7.3 the new test files; §9: R32 re-worded for the face process, R33 the calendar tables, new residuals for the delayed Eastmoney quotes and the evidence files out of git; §10: plans 2–4 as forward items, and the 2027 calendar table — `lib/calendar/2027.json` from the SSE notice, due when the notice is out, usually December; until then a 2027 session date refuses `CALENDAR_UNCOVERED` (A25)), `face/README.md` (a "Lunhui analysis" section rewritten for rows: the eleven planned rows and the five built, the egress hosts and the redirect, the fixture config, the disable lines, `strategies/cn-market/`, the two commands of a first market freeze), `CLAUDE.md` (the `face/` row names `face/plugins/lunhui/` as rows; the `strategies/` row names `cn-market`), `ROADMAP.md` (built log entry naming the spec and this plan)
 
 - [ ] **Step 1: Measure the schema sizes**
 
