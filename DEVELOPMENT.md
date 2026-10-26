@@ -3008,7 +3008,7 @@ from the member's own log without activating it (§5.4) — it follows no member
 
 | Command | From | Needs | Measured 2026-09-30 |
 |---|---|---|---|
-| `cd face && npm test` | `face/` | nothing — no port, no key | 1613 tests, 1591 pass, 22 skipped (2026-10-26, plan 3 of the Lunhui modules; the repo's only suite since the Python one left on 2026-10-24) |
+| `cd face && npm test` | `face/` | nothing — no port, no key | 1642 tests, 1619 pass, 23 skipped (2026-10-26, plan 4 of the Lunhui modules; the repo's only suite since the Python one left on 2026-10-24) |
 | `cd face && npm run typecheck` | `face/` | | clean, the dependencies' `.d.ts` included (`skipLibCheck: false`) |
 | `cd face && FACE_SMOKE=1 npm test` | `face/` | boots twenty-three real trees into `mkdtemp` homes and binds ports; still no LLM or key (four of the smokes also create, and remove, a gitignored `.bots-smoke-*` bots root at the repo root) | the twenty-three skipped tests; 1640 of 1642 on 2026-10-26 (plan 4's docs pass over `d77bcd3`), 1611 of 1613 the same day (plan 3's docs pass over `8020a5e`) and 1546 of 1548 at plan 2's `91307f2`, the seat and graft smokes skipped without `FACE_ACCOUNT_SEAT_DIR`; 1263/1263 with one todo at stage 3's Task 6 (2026-10-24, `e77900a`), 1310/1310 at stage 2's `b45c5cc`, each with `FACE_ACCOUNT_SEAT_DIR` naming a checkout of buyer-agent-demo @ 133b9a7 — without it the seat and graft smokes stay skipped |
 | `cd face && npm run check:fixture` | `face/` | the installed dsh | 26 fixture lines: 23 validated, 0 rejected, 3 with no upstream validator |
@@ -3020,7 +3020,7 @@ The 400 offline pytest cases left with the Python package, `pyproject.toml` and 
 
 ### 7.3 The face suite
 
-1613 tests in 136 files (1591 pass, 22 skipped without `FACE_SMOKE=1`), run by `node --test`
+1642 tests in 137 files (1619 pass, 23 skipped without `FACE_SMOKE=1`), run by `node --test`
 through `tsx`:
 
 - **Composition and boot** — `boot` (the layer order ending with the overlay; the policy layer
