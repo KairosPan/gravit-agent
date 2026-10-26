@@ -14,7 +14,10 @@ route; their operational depth is `face/README.md`'s, and they have had no full 
 server and Gate 1, the PIT beds, the backtests, the three roles and the face's producers and
 keyed quote providers left the tree; §2, §3.5 and §7.2 keep their numbers as one-line markers so
 the section citations elsewhere still resolve; the face suite is the repo's only suite (1266
-tests, 1248 pass + 18 skipped without `FACE_SMOKE`).
+tests, 1248 pass + 18 skipped without `FACE_SMOKE`). **Amended 2026-10-25** for plan 1 of the
+Lunhui modules (spec `docs/superpowers/specs/2026-10-25-lunhui-modules-design.md`): the five
+Lunhui rows and their tools, the runs card, the market channel, R39–R43 and §10 items 18–21, each
+read against the code on `feat/lunhui-modules` @ `1a41fd8` (1435 tests, 1417 pass + 18 skipped).
 
 **Authority.** `Gravit-Design.md` (the charter) outranks this document on intent. This document
 describes mechanism *as built*: where it disagrees with the code, the code is the fact and this
@@ -42,7 +45,7 @@ repository, so §4.8 is where those decisions are recorded now.
 | `docs/design/prototypes/` | the face prototypes (`BRIEF.md`, rounds a/b/c and r2–r4) that §5.5 refers to; the R2 instrument grammar and the R4 palette live here |
 | `docs/research/` | frozen inputs, never edited: `2026-08-22-deepseek-harness-dsh-survey.md` is the survey the profile template cites, `2026-08-30-dsh-wiring-recon.md` the 0.1.1-era wiring recon; the rows the face composes today, and its MCP tools, are read live from `/data/plugins.json` (§4.4), whose MCP servers and their tools Discover's Data shelf draws (§5.4) |
 | `dsh/README.md` | the profile install path, the operator's two profile rows and the default-model row |
-| `face/README.md` | run and sign-in, profile and policy layer, AKShare, the Account seat, Markets and Account (the Account's markets and a market's page, the A shares on the face's wire, the Account's page), the Account in the face (the proxy's routes, the cadence, the fixtures, the smoke, the owner device, Trade), channels, Discover, bots, rooms, temporary subagents, tests, upgrade order, the drills |
+| `face/README.md` | run and sign-in, profile and policy layer, AKShare, the Account seat, Lunhui analysis, Markets and Account (the Account's markets and a market's page, the A shares on the face's wire, the Account's page), the Account in the face (the proxy's routes, the cadence, the fixtures, the smoke, the owner device, Trade), channels, Discover, bots, rooms, temporary subagents, tests, upgrade order, the drills |
 
 ---
 
@@ -51,8 +54,8 @@ repository, so §4.8 is where those decisions are recorded now.
 One long-lived process (the face) with three kinds of child, one browser tab, and one external
 service of its own (the LLM) — plus Linqi's Account on loopback, whose markets and page
 the Markets, Trade and Account screens read through the face's proxy (§4.4), at whose door the
-page signs as one of its owner devices (§5.3), and whose own egress `face/README.md` lists, the A shares' quote and search providers (iFinD, Tencent) and AKShare's
-upstreams.
+page signs as one of its owner devices (§5.3), and whose own egress `face/README.md` lists, the A shares' quote and search providers (iFinD, Tencent), AKShare's
+upstreams, and the Lunhui rows' Tencent and Eastmoney hosts (`face/README.md` "Lunhui analysis").
 
 ```
  browser (operator) ── http://127.0.0.1:3090/?token=… once, then a 30-day cookie ──────┐
@@ -62,6 +65,8 @@ upstreams.
  │  ├─ dsh-base bundle: LLM (deepseek), sessions, storage + projection cache, tools       │
  │  │   (§3.6), sandbox, approvals, skills, the `/api` gateway (`typert-gateway`)         │
  │  ├─ face policy layer (§4.3): the 0.1.1 tool roster, egress and telemetry restored     │
+ │  ├─ Lunhui rows (§4.3): lunhui-runs + four freeze rows, in-process; they write         │
+ │  │   strategies/<name>/analysis/ and fetch Tencent and Eastmoney themselves            │
  │  ├─ face overlay rows (13, §4.3): webserver · connection (sign-in) · api-remotes ·     │
  │  │   file-upload · workspace · three Remote controllers · directory-picker ·           │
  │  │   ask-user · agent-preset-registry · preset-gravit · preset-kairos                  │
@@ -85,7 +90,7 @@ Three homes on disk:
 
 | Home | What lives there | Who writes |
 |---|---|---|
-| the repo root | `face/`, `strategies/`, `bots/`, `roles/`, `dsh/` (the profile *template* and skill packs), `docs/`; also the session project directory and the sandbox workspace root | operator, coding agents, Gravit (in `strategies/`) |
+| the repo root | `face/`, `strategies/`, `bots/`, `roles/`, `dsh/` (the profile *template* and skill packs), `docs/`; also the session project directory and the sandbox workspace root | operator, coding agents, Gravit (in `strategies/`); the Lunhui rows, from the face process and outside any sandbox, under `strategies/<name>/analysis/` only (§9, R39) |
 | `$DSH_HOME` (default `~/.dsh`) | `profiles/face/` (the installed profile; its `cordis.patch.yml` holds the operator's rows — and, once the operator adds it, `agent-default-model`: the provider, model id and reasoning effort Gravit runs with, §3.1, PLAN D2), `sessions/` (per session a 0.1.1 `session.jsonl.zstd` and/or, once 0.2.0 has write-opened it, `session.v4.jsonl.zstd` + `session.lock`), `storages/` (workspace registry; the projection cache, one record per session), `face/` (`archived.json`, `channels.json`, `roster.log`, `agents.json`), `.env`, `.credentials.yaml` (dsh's own key store, mode 0600; since 0.2.0 also the browser-session signing secret), `.anonymous-user-id`; `settings.yaml` is 0.1.1's settings file, which the face no longer reads (PLAN D1) | the operator (the patch file, keys) and the face — including the dsh plugins it hosts (`credentials-local`, `connection`, the session persistence and the storage chain) — for everything else |
 | `~/.buyer-agent-demo` (`BUYER_HOME`) | the Account's own home: its store, the seat's key (`seats/gravit.json`) | the Account and its seat; never this tree |
 
@@ -275,8 +280,8 @@ producers and the style-pack converter. The face's own scripts are `face/scripts
 ### 3.6 What Gravit can call
 
 Everything below is registered tree-wide except the `role_<id>` tools, which belong to Gravit's
-preset alone (§3.8); only the MCP rows, `agent_<bin>`, `dispatch` and the role tools are
-operator- or face-specific. The host roster is dsh-base's plus the face's policy layer (§4.3),
+preset alone (§3.8); only the MCP rows, the Lunhui rows, `agent_<bin>`, `dispatch` and the role
+tools are operator- or face-specific. The host roster is dsh-base's plus the face's policy layer (§4.3),
 and on the pinned tree it equals the 0.1.1 face's name for name: 26 tools before any MCP server,
 local agent or room (measured 2026-09-30 against a boot of the 0.1.1 composition); Gravit's own
 sessions see that roster plus the role tools. dsh-base 0.2.0 alone would differ — `web_fetch` and
@@ -304,6 +309,7 @@ default broken, and the boot refuses).
 | `ask_user_question` | `tool-ask-user` (face overlay; the blocking `legacy` mode) | §4.3; the answer is model-visible, so not a gate |
 | `mcp__akshare__*` | project `mcp-akshare` row | public A-share/other market queries, unguarded; check source errors and truncation |
 | `mcp__account__*` | project `mcp-account` row (§3.1) | the Account seat: Linqi's Account at `127.0.0.1:4820`, an external program; 35 real-account tools (42 against a simulated service); the twelve writes carded by Gate 2 (§4.7), the reads public, seconds old and unguarded — read as they are, with no lookahead guard; `portfolio_wait` polls a card or an order for 55 s at most |
+| `lunhui_read_run`, `lunhui_freeze_quotes`, `lunhui_freeze_limit_up`, `lunhui_freeze_boards`, `lunhui_freeze_index` | the project Lunhui rows (`src/lunhui.ts`, §4.3): `lunhui-runs` registers the first, one freeze row each of the other four | frozen A-share research runs (spec `docs/superpowers/specs/2026-10-25-lunhui-modules-design.md`, plan 1 of four): every tool takes a strategy name — the channel's — and a run id, never a path, anchored under the `lunhui-runs` row's `strategiesRoot` by `face/plugins/lunhui/lib/runs.mjs`; a freeze with `run` omitted opens a run in `strategies/<name>/analysis/<run>/` (`run.json`, `metrics.json`) and answers its id, with `run` it adds to that open run, and each writes one `evidence-<source>.json` (`quotes`, `limit-up`, `boards`, `index`) of hashed items and the derived items over them — a second freeze of one source in one run is `SOURCE_FROZEN`; `lunhui_freeze_quotes` (Tencent quotes and 60-day bars, 1–8 symbols, stage 0's rule) in any channel, the other three in `cn-market` only (`WRONG_CHANNEL`): the 涨停, 炸板 and 昨日涨停 pools (≤ 500 rows each), the top 30 concept boards by change with up to ten boards' members (≤ 100 each) and the board fund-flow rank, the four indices with 120-day bars and the all-A-shares advance/decline counts — the Eastmoney items stamped with the host that served them and `delayed`; eight freezes a run, a refused one counted, then `TOOL_BUDGET`; a delegated child is refused `NOT_GRAVIT`; a China date no calendar table covers is `CALENDAR_UNCOVERED`; an evidence file is at most 256 KiB and a run's evidence 2 MiB; every refusal is a thrown `LunhuiError`, `Error: <CODE> …` to the model, naming no path; `lunhui_read_run` answers `run.json`, the counters and each module artifact's headline (none exists before plan 2: nothing seals a run yet); unguarded and never evidence of a trade, like AKShare's; named by no bot's allow list (`tests/bots.test.ts`) |
 | `agent_<bin>` | face `agents.ts` | roster-gated per channel (§6.5) |
 | `dispatch` | face `room.ts` (`installRoom`) | Gravit's own: refused in any session whose header or `agentPreset` projection names a bot (§6.8) |
 | `role_<id>` (one per `roles/<id>/`; none today, `roles/` ships only `_template`) | one `dsh-tool-subagent` row per role inside Gravit's preset, rendered by `src/roles.ts` (§3.8) | scoped: a bot never sees one, and a role child removes them through its own allow list (a `subagent_fork` child, restricted by nothing, keeps them, and so does a plain `subagent` child, though neither its roles section nor the cycle contract reaches it, §3.8); a one-shot `spawn` child with the role's persona and exactly the role's tools; the arguments are `description` (its label in Details' Children, §5.4) and `prompt`, and the call waits unless `run_in_background` is set |
@@ -560,10 +566,12 @@ which waits for a role to exist.
 
 ## 4. Frontend: the face server (`face/src`)
 
-Some 11,500 lines of TypeScript across 38 files, run directly by `tsx` — no build step, plus two
+Some 11,000 lines of TypeScript across 35 files, run directly by `tsx` — no build step, plus two
 plain `.js` files outside `src/` (`face/plugins/bot.js` and `face/plugins/gravit.js`, §3.7–§3.8 —
 a composition names each by a path the loader reaches as an absolute `file:` URL, which the face
-rebases from a relative one for a bot, and each must import nothing). Pins:
+rebases from a relative one for a bot, and each must import nothing) and the Lunhui rows' plain
+`.mjs` files under `face/plugins/lunhui/` (§4.3: five row files and their `lib/`, which import
+`@deepseek-ai/dsh-tools`, pinned exactly in `face/package.json`, and each other, never `src/`). Pins:
 `DSH_PIN = 0.2.0-rc.2` (every `@deepseek-ai/dsh-*` dependency, declared exactly and installed),
 `CORDIS_PIN = 4.0.4` (`@deepseek-ai/cordis` rides its own 4.x track; the dsh packages peer it with
 a tilde range) and `CORDIS_INCLUDE_PIN = 1.0.9` (the one cordis plugin the face imports itself);
@@ -620,7 +628,8 @@ row audit; and the policy layer.
    skipped, not thrown — the face refuses the compose), **rewrite `<profile>/cordis.yml` to
    `[]`** (the loader's write-back would otherwise bake composed rows in and double every
    bundle insert next boot), stack the patches — bundle layers (`dsh-base`) → the face policy
-   layer (§4.3) → project AKShare → the profile's `cordis.patch.yml` → the home's
+   layer (§4.3) → project AKShare → the Account seat → the Lunhui rows (§4.3) → the profile's
+   `cordis.patch.yml` → the home's
    `cordis.patch.yml` → a caller's in-memory `extraPatches` (`main.ts` passes none;
    `scripts/check-home.ts` disables a home copy's MCP rows with it) — apply the guarded
    switches (`session-telemetry-otel` disabled when `DSH_TELEMETRY_DISABLED` is non-empty and
@@ -707,6 +716,7 @@ smoke that boots without `main.ts` relies on.
 | `policy.ts` | the policy layer (§4.3): `POLICY_ID_PATCHES`, `POLICY_INSERTS`, `facePolicyPatches` — each row a PLAN decision; a missing target is reported on stderr, never skipped silently |
 | `akshare.ts` | project AKShare MCP defaults, composed below operator profile/home patches |
 | `account-seat.ts` | the Account seat row (§3.1): `ACCOUNT_SEAT_ROW_ID`, `ACCOUNT_SEAT_SERVER`, `SEAT_TOOL_PREFIX`, `ACCOUNT_SEAT_NAME`, `seatDir`/`seatUrl` (the env or the defaults), `accountSeatPatches` — this process's node, the checkout's `tsx`, the seat's env, 90 s, failing soft; composed right after AKShare — and `composedSeatRow` (the row AS COMPOSED, read off the Loader's entries: disabled by a patch, or its service URL and seat name), which `main.ts` hands the seat route so the box follows an operator's patch, never the environment alone |
+| `lunhui.ts` | the Lunhui rows (§4.3; modules spec §5.12): `LUNHUI_ROW_IDS`, `LUNHUI_TOOL_NAMES`, `lunhuiPatches(repoRoot?)` — one insert of five file-plugin rows under `face/plugins/lunhui/`, each `name` the absolute `file:` URL of its file (`lunhui-runs` → `runs-row.mjs`, `lunhui-freeze-quotes` → `freeze-quotes-row.mjs`, …), `lunhui-runs`' config `{strategiesRoot}` (this checkout's `strategies/`) and the four freeze rows' `{}`; composed right after the seat; plain data, nothing mounted |
 | `orders.ts` | Gate 2 decision logic, pure: `isOrderTool` (the seat's twelve writes — `SEAT_WRITE_RAW_NAMES` — and any tool under the face's own seat prefix outside `SEAT_READ_RAW_NAMES`), `isSeatWriteTool`, `RETIRED_ORDER_RAW_NAMES` and `isRetiredOrderTool` (`place_order`, `cancel_order` under any server: denied, never carded), `effectiveApprovalPolicy`, `orderApprovalDecision` (with the `displayReason` twin), `describeOrder` (the seat's keys in a readable order; a key field shown whole or the call denied), `hasApprovalGrant`, `orderGuardReason`, `orderGuardReasonForSession` (the guard's one producer; a retired tool denied first; reads `snapshotEvents()`, a distinct denial for an unreadable log), `auditOrderTools` (`{gated, uncovered, retired}`) — depends on nothing (structural types only) |
 | `setup.ts` | one-shot `$DSH_HOME/profiles/<name>` creation with `PATCH_HEADER`; refuses to overwrite |
 | `http.ts` | `HttpError`, `readBody` (4,096 B cap → 413), `markStale`, the fixed `FORBIDDEN` body, and **the trust fence every `/data` route reuses** — `isLoopbackHost`, `isTrustedDataRequest`, and `isJsonBody` for a POST |
@@ -717,7 +727,7 @@ smoke that boots without `main.ts` relies on.
 | `symbol-search.ts` | `/data/symbols/search`, which `registerSymbolSearchRoute` mounts itself (fence, 405, then the search): on-demand A-share search from Tencent (`market` absent, `all` or `cn`; any other — `us` among them — 400), a per-query memory cache, no market directory kept |
 | `sessions.ts` | session delete (on disk, cwd-fenced to the repo; the header read from the highest canonical log generation, `pickGenerationLog`) and the reversible archive set with tombstones in `$DSH_HOME/face/archived.json` |
 | `roster.ts` | `$DSH_HOME/face/channels.json`, the per-channel agent AND bot rosters: locked, atomic, fail-closed; `roster.log` append, one line kind per roster |
-| `channels.ts` | channel = `strategies/<dir>` + workspace-registry identity; reconcile dirs ↔ registry ↔ sessions (durable and live heads, `{header}` snapshots at 0.2); `status.yaml` / `THESIS.md` / `journal.md` readers, and an optional `backtests/` one (an old strategy's; none is written now); create-from-template; five routes — the overview answers `bots` (this channel's roster) and `allBots` (every preset dsh reports) beside the agent roster, and the listing's `presets` maps each session to its header's `agentPreset` (`presetHintsOf`) |
+| `channels.ts` | channel = `strategies/<dir>` + workspace-registry identity; reconcile dirs ↔ registry ↔ sessions (durable and live heads, `{header}` snapshots at 0.2); `status.yaml` / `THESIS.md` / `journal.md` readers, an optional `backtests/` one (an old strategy's; none is written now) and the Lunhui runs card's, `readAnalysisRuns` (§5.2: `RunRow`, `RunArtifact`, `LatestRun`, `MODULE_HEADLINES` — a copy of `face/plugins/lunhui/lib/modules.mjs`'s `MODULES` that `tests/channels.test.ts` holds equal to it), every file through `readBoundedJson` (`O_NOFOLLOW`, one link, a compact-JSON cap, depth 32) and every directory re-checked by `stillAt` just before its reads; create-from-template; five routes — the overview answers `bots` (this channel's roster) and `allBots` (every preset dsh reports) beside the agent roster, and the listing's `presets` maps each session to its header's `agentPreset` (`presetHintsOf`) |
 | `agents.ts` | exec recipes for `claude` and `codex` (fixed argv, prompt on stdin, scrubbed env, `--restricted` / `--sandbox read-only`), the spawn runner, the `agent_<bin>` tool with the roster check on execute, tool sync |
 | `bots.ts` | bots = `bots/<id>/` directories: `isBotId`, `renderComposition` (the persona text written into the composition), `createBot`, `updateBotSettings`, `updateSoul`, `listBots` (dsh's roster and the face's declaration failures merged in, `broken`/`listed`); four routes, each save calling `onBotChanged` → `redeclare` |
 | `bot-presets.ts` | bots as face-declared presets (§3.7): `definitionFor` (the rebased `PresetDefinition`; its rows come from the composition file, or are handed in — the default's, rendered from `roles/`, whose file is then not read), `declareBots` (after boot; `redeclare` serialized per id, `errors`, `ids`) |
@@ -885,6 +895,43 @@ plus re-enabling `web-fetch-http` and restating `web` with `fetchProvider: http`
 after the operator layers. Outside the layer, and undecided (PLAN D18): dsh-base's spill budget
 moved from `maxInlineBytes: 50000` to `maxInlineTokens: 12500` (§9, R27).
 
+**The project layer** is three members, in this order, each composed above the policy layer and
+below the profile and the home, so an operator row with one of their ids replaces that row's config
+and `disabled: true` removes it: AKShare's `mcp-akshare` (`src/akshare.ts`), the Account seat's
+`mcp-account` (`src/account-seat.ts`), and the Lunhui rows (`src/lunhui.ts`, modules spec §5.12) —
+one insert of five cordis file-plugin rows, in-process, no child process:
+
+| Row | File (`face/plugins/lunhui/`) | Config | Provides · injects · registers |
+|---|---|---|---|
+| `lunhui-runs` | `runs-row.mjs` | `{strategiesRoot}` — this checkout's `strategies/`, an absolute existing directory or the row refuses to mount | provides `lunhuiRuns` (`createLunhuiRuns`: strategy and run resolution, `openRun`, `addEvidence`, `sealRun`, `readRun`, the per-run mutex `withRun`, `countFreeze`); injects `tools`; registers `lunhui_read_run` |
+| `lunhui-freeze-quotes` | `freeze-quotes-row.mjs` | `{}` | injects `tools` and `lunhuiRuns`; registers `lunhui_freeze_quotes` |
+| `lunhui-freeze-limit-up` | `freeze-limit-up-row.mjs` | `{}` | the same; `lunhui_freeze_limit_up` |
+| `lunhui-freeze-boards` | `freeze-boards-row.mjs` | `{}` | the same; `lunhui_freeze_boards` |
+| `lunhui-freeze-index` | `freeze-index-row.mjs` | `{}` | the same; `lunhui_freeze_index` |
+
+A freeze row reads the strategies root through the service, never its own config: one source of
+truth, so a patch that moves the root restates `strategiesRoot` on `lunhui-runs` alone. Without the
+backbone a freeze row cannot mount — it injects `lunhuiRuns`, and `freezeDeps` refuses a mount
+without it (`lunhuiRuns is missing; mount the lunhui-runs row first`) — and the strict row audit
+(§4.1, step 6) refuses a tree with an enabled row that is not ACTIVE, so disabling `lunhui-runs`
+means disabling the four freeze rows with it; a freeze row disabled alone takes only its tool. A freeze row's two other config keys are the tests': `fetch`, an absolute directory of
+recorded replies that `lib/fixture-fetch.mjs` serves in place of the network, and `now`, a clock;
+production rows set neither, and no environment variable switches the fixtures (A15). The library
+under `lib/`: `runs.mjs` (anchoring, the run's states, bounded reads, atomic writes; stage 0's,
+extended), `market.mjs` (Tencent quotes and bars, the session; stage 0's), `calendar.mjs` with
+`calendar/2026.json` (the SSE calendar tables by year), `eastmoney.mjs` (the Eastmoney fetch core —
+the plain hosts, one redirect to `push2delay.eastmoney.com` only, at most four requests in flight
+across every caller — and the pool, board, member, fund-flow and count parsers), `derive.mjs` (the
+derived items of A20: 连板 distribution, 封板 and 炸板 ratios, 昨日涨停 returns and their negative
+tail, board breadth as advancers / (advancers + decliners) and turnover share, the exchanges'
+counts, the two composites' turnover), `freeze-tool.mjs` (`freezeDeps`, `defineFreeze`: the one order of a
+freeze's checks, §3.6), `errors.mjs` (`refuse`, `upstreamError`, `callerIsChild`, `FREEZE_BUDGET`),
+`modules.mjs` (`MODULES`, the six artifacts' files and headline fields), `contract.mjs` (stage 0's
+validator core, whose `hash` `runs.mjs` uses and whose validator waits for plan 2) and
+`fixture-fetch.mjs`. `/data/plugins.json` lists the five
+rows by id as it lists every composed row (`smoke.test.ts` pins all five ACTIVE and the five tools
+registered); Discover draws no tools column for them (spec §9).
+
 **The first request, measured.** The instrument is the projection cache: after a session's first
 request, `$DSH_HOME/storages/session_projcache/sessions/<id>.json` holds its `contextBreakdown`
 row in heuristic tokens and, beside it, `tokenUsage`, the provider's own usage samples (the billed
@@ -927,10 +974,8 @@ the face's own `mcp-akshare` (`akshare-mcp` 0.1.0 by `uv tool list` — the git 
 started: 13 tools covering 1,090 functions, plus `akshare_discover`) and the operator's row for
 the Alpaca server of the time, keyless, whose seven keyless read tools registered. Both that
 server and the three roles left the tree on 2026-10-24; their two rows below are the record of
-what they cost, and the block today is the host's 26, AKShare's 14 and the seat's 35 — 75 tools,
-≈ 46,010 chars/4 (5,857 + 24,426 + 15,727), summed from the runs below, not re-measured together.
-The host, AKShare and `role_` group totals equal the first run's to the byte (at `5a7e69d`,
-without the Alpaca row):
+what they cost. The host, AKShare and `role_` group totals equal the first run's to the byte (at
+`5a7e69d`, without the Alpaca row):
 
 | Group | Tools | Bytes | bytes/4 | chars/4 |
 |---|---|---|---|---|
@@ -941,6 +986,24 @@ without the Alpaca row):
 | the retired Alpaca server, keyless: `screen`, `market_snapshot`, `corp_actions`, `daily_bars`, `earnings`, `calendar`, `breadth` | 7 | 2,613 | 654 | 654 |
 | `agent_` | 0 | 0 | 0 | 0 (no CLI agent is rostered in a scratch home) |
 | measured total | 50 | 163,283 | 40,821 | 31,620 |
+
+**The live block**, measured 2026-10-25 at `1a41fd8` (`feat/lunhui-modules`) on a copy of the
+operator's home made without its `.credentials.yaml` and `sessions/` (the command below), the
+Account service running on `127.0.0.1:4820` and the seat row as the live patch composes it: the
+host's 26, AKShare's 14, the seat's 35 and the five Lunhui tools — 80 tools, the groups each equal
+to their own runs above to the byte:
+
+| Group | Tools | Bytes | bytes/4 | chars/4 |
+|---|---|---|---|---|
+| `mcp__akshare__` | 14 | 134,452 | 33,613 | 24,426 |
+| `mcp__account__` | 35 | 63,221 | 15,806 | 15,727 |
+| `lunhui_` | 5 | 6,133 | 1,534 | 804 |
+| `agent_`, `role_` | 0 | 0 | 0 | 0 |
+| the host's own | 26 | 23,468 | 5,867 | 5,857 |
+| total | 80 | 227,274 | 56,819 | 46,812 |
+
+The Lunhui group is 2% of the heuristic block; its descriptions are Chinese, so it reads almost
+twice as much in bytes/4 (1,534) as in chars/4 (804).
 
 The five largest tools are all AKShare's (bytes · bytes/4 · chars/4): `akshare_stock_a`
 25,727 · 6,432 · 4,435; `akshare_macro` 23,081 · 5,771 · 3,886; `akshare_futures` 15,641 · 3,911 ·
@@ -962,8 +1025,8 @@ second-largest group the prompt can carry. Its six largest (bytes · bytes/4 · 
 `portfolio_live_preview` 5,347 · 1,337 · 1,332; `portfolio_live_order` 4,987 · 1,247 · 1,244;
 `portfolio_explore` 4,106 · 1,027 · 1,019; `portfolio_live_move` 3,432 · 858 · 854; `portfolio_account`
 3,374 · 844 · 838; `portfolio_live_batch` 3,194 · 799 · 797 — four of them larger than `workflow`.
-With AKShare and the seat mounted and nothing else, the heuristic block reads about 46,010
-chars/4 (R35).
+With AKShare and the seat mounted, the heuristic block read about 46,010 chars/4 summed from the
+two runs; the live run with the Lunhui rows reads 46,812 (R35).
 
 The two units part by 9,187 tokens on the AKShare group alone: its JSON holds 18,375 non-ASCII
 characters (18,211 of them CJK ideographs) among some 97,700, and the heuristic prices every UTF-16
@@ -971,23 +1034,22 @@ unit at a quarter of a token. On 2026-10-10 DeepSeek billed 55,635 input tokens 
 heuristic put at 37,665 (1,622 + 4,040 + 32,003), 48% more; how much of that gap is this group is
 not measured, and one request with the row disabled, read in billed tokens, would say.
 
-The live composition — AKShare and the seat together, the seat against the real service, and
-`agent_` if a CLI agent is rostered — is the operator's run, in the shell the face starts from, and
-sends no prompt. The guard knows
-only the default `~/.dsh`: if your live home is elsewhere (a `DSH_HOME` your shell exports, which
-the command line below overrides), nothing refuses it, so copy THAT home and point `DSH_HOME` at
-the copy. A copy holds `.credentials.yaml` and every session log, hence the last line:
+A re-run — after a row's tools change, or with `agent_` once a CLI agent is rostered — is run in
+the shell the face starts from, and sends no prompt. The guard knows only the default `~/.dsh`: if
+your live home is elsewhere (a `DSH_HOME` your shell exports, which the command line below
+overrides), nothing refuses it, so copy THAT home and point `DSH_HOME` at the copy. The copy
+leaves out the key store and the session logs, which the measurement does not need, and is
+deleted after:
 
 ```bash
 SCRATCH=$(mktemp -d)
-cp -a ~/.dsh "$SCRATCH/dsh-sizes"
-cd face && DSH_HOME="$SCRATCH/dsh-sizes" npx tsx scripts/schema-sizes.ts | tail -8
+rsync -a --exclude .credentials.yaml --exclude sessions ~/.dsh/ "$SCRATCH/dsh-sizes/"
+cd face && DSH_HOME="$SCRATCH/dsh-sizes" npx tsx scripts/schema-sizes.ts | tail -9
 rm -rf "$SCRATCH/dsh-sizes"
 ```
 
-`tail -8` is the group lines, the total and the smallest tool; a group that reads 0 tools means
-its row did not connect (stderr says why). Done when the table carries one live run of the two
-groups together, with a date (§10, item 15).
+`tail -9` is the group lines, the total and the smallest tool; a group that reads 0 tools means
+its row did not connect (stderr says why).
 
 ### 4.4 Route table
 
@@ -1026,7 +1088,7 @@ with no `Origin` passes on `Host` alone — `curl` works, which is residual R3 i
 | `GET /data/symbols/search?q=&market=` | `symbol-search.ts` | A-share search from Tencent's smartbox, cached per query in memory: fence (403), GET only (405), `q` once (at most 80 characters, 240 bytes), `market` absent, `all` or `cn` — any other, `us` and `crypto` among them, is 400 `invalid market` |
 | `GET /data/quotes?ids=`, `/data/quotes/stream?ids=` | `quotes.ts` | the selected `cn:` ids' live quotes from iFinD (at most 100), as JSON or as server-sent events; empty selections reach no upstream; a well-formed `us:` or `crypto:` id from before the graft is answered without a quote (200, `providers` iFinD alone), any other id 400 |
 | `GET /data/channels.json` | `channels.ts` | **reconciles on every GET**: registry `create` per directory, `attachSession`, `seedRoster`; returns `{root, channels, ungrouped, archived, presets}` — `presets` maps a session id to its header's `agentPreset`, the client's fallback where a 0.2 list row names none |
-| `POST /data/channels/overview` `{workspaceId}` | `channels.ts` | reconcile + `status.yaml`, thesis, the whole journal newest-first (the channel page draws the newest 20), an old strategy's `backtests/` newest-first with the newest dated one parsed as `latest` (empty when the directory is absent, as it is for every strategy since 2026-10-24), file list, roster |
+| `POST /data/channels/overview` `{workspaceId}` | `channels.ts` | reconcile + `status.yaml`, thesis, the whole journal newest-first (the channel page draws the newest 20), an old strategy's `backtests/` newest-first with the newest dated one parsed as `latest` when it is a regular one-link file within `BACKTEST_MAX_BYTES` (1 MiB compact, 4 MiB on disk) and depth 32 (empty when the directory is absent, as it is for every strategy since 2026-10-24), the Lunhui runs card's `runs`, `runsOmitted` and `latestRun` from a real `analysis/` (§5.2; empty for a channel without one), file list, roster; every channel route's `send` serializes before it writes the head, so a body that cannot serialize answers one 500 with fixed text |
 | `POST /data/channels/agents` `{workspaceId, agents[]}` | `channels.ts` | `setRoster` → `channels.json` (409 on a corrupt file), then a dated line to `roster.log` and stdout |
 | `POST /data/channels/bots` `{workspaceId, bots[]}` | `channels.ts` | `setBots` → `channels.json` (`bots[]` beside `agents[]`; 400 an id outside the bot grammar or more than `ROOM_CAPS.maxMembers` ids, 404 no such channel, 409 a corrupt file), then a dated `bots` line to `roster.log`. The overview answers `bots` (the roster) and `allBots` (every preset dsh reports, `broken` reasons included) |
 | `POST /data/channels` `{name}` | `channels.ts` | `NAME_RE` + NFC; copies `_template` (409 if exists); a reconcile failure after the copy is a warning, not a 500 — the directory exists and a 500 would make the retry 409 |
@@ -1059,6 +1121,7 @@ with no `Origin` passes on `Host` alone — `curl` works, which is residual R3 i
 | `$DSH_HOME/face/agents.json` | `panels.ts` | `{connected:[{bin,label}]}` |
 | `$DSH_HOME/sessions/<slug>/<id>/` | `deleteSession` | removed with every generation, the lock and the temps, cwd-fenced |
 | `strategies/<name>/` | `createChannel` | copied from `_template`, never overwritten |
+| `strategies/<name>/analysis/<run>/` | the Lunhui rows (`face/plugins/lunhui/lib/runs.mjs`), in the face process | `analysis/` made on a strategy's first freeze and each run directory exclusively, both mode 0o700; `run.json` and `metrics.json` at the run's opening, one `evidence-<source>.json` per source, new files `wx` at 0o600, `run.json` and `metrics.json` replaced by a fresh file renamed over the old after each change; outside any session's sandbox (§9, R39); the evidence files gitignored, the rest tracked (R42); the face's channel routes only read it, for the runs card (§5.2) |
 | `bots/<id>/` | `createBot`, `updateBotSettings`, `updateSoul` | copied from `_template`; `preset.yml`, `SOUL.md` and the composition's persona row rewritten together, staged then renamed; never overwritten by create |
 | `bots/<id>/journal/` | a bot's HOME session | workspace-write, cwd = the journal; the only directory a bot writes (the write to `../SOUL.md` is refused, proven in `room-smoke`) |
 | `roles/<id>/` (`ROLE.md`, `role.yml`) | the operator | not written by the face — read once per boot by `composeFace` (`readRoles`) and rendered into Gravit's preset (§3.8); a missing roles directory or a malformed role refuses the boot |
@@ -1090,6 +1153,12 @@ face's `WorkspaceLike`). Recorded, not fixed.
 | `DSH_PERMISSION_MODE` | dsh, not the face | `workspace-write` | `danger-full-access` sets approval policy `never`: it disarms the sandbox-escalation card but **not** Gate 2, which then denies in its own words |
 | `FACE_SMOKE` | tests | unset | `=1` enables the eighteen real-boot tests; the seat and graft smokes also need `FACE_ACCOUNT_SEAT_DIR` |
 | `DEEPSEEK_API_KEY` | dsh's credential seam | — | not auto-loaded from the repo's `.env.*` files |
+
+The Lunhui rows read no environment variable. Their fixture mode is row config (modules spec A15):
+a freeze row's `fetch` names a directory of recorded replies and `now` a clock, set by the tests
+alone (`tests/lunhui-rows.test.ts`, `tests/lunhui-freeze.test.ts`); stage 0's
+`LUNHUI_FETCH_FIXTURES` and `LUNHUI_STRATEGIES_ROOT` are read nowhere, and the strategies root is
+`lunhui-runs`' `strategiesRoot`, this checkout's `strategies/` unless a patch restates it.
 
 Every child the face spawns for a local agent run or probe has these scrubbed — an enumerated list
 (`SCRUBBED_ENV` in `agents.ts`), not a prefix glob: `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
@@ -1272,6 +1341,7 @@ sentence drawn as its words, the Account's and a channel's stale stamps, a tool 
 | `js/host/live.js` | the impure half: the mux, the follow-or-page policy, the list and its previews, gates, projections, host facts — all into the store, nothing into the DOM |
 | `js/host/actions.js` | a `data-action` → the Remote or face route the old client sent: `send`, `newConversation`, `answer`, `stop`, `rename`, `command`; the row actions `fork`, `archive`, `remove`; `talkTo` (a bot's home conversation), `stopChild` |
 | `js/host/list-view.js`, `discover-view.js`, `children-view.js` | stage 3's pure views (§5.3): `groupsOf` (the list's groups); `SHELVES`, `SOURCE`, `itemsOf`, `searchItems`, `itemById` (Discover's items under namespaced ids); `childrenOf` (a conversation's subagent children and their states) |
+| `js/host/runs-view.js` | the Lunhui runs card's pure view (§5.2; modules spec §5.11): `runsView` (the overview's `runs`, `runsOmitted` and `latestRun` → the latest run's line, a chip per module, the expectation card's rows, each artifact's compact JSON for its collapsed details, a dim row per run, the omitted count), `valueWord` (a headline value as a word), `countWord` (a count with its noun, singular for one) |
 | `js/host/channels.js`, `discover.js`, `traces.js` | stage 3's impure halves: `startChannels` (a channel's overview, a new channel, the two roster writes; `MAX_BOTS`), `startDiscover` (the four listings, the Gravit item's three reads, a skill's content, the CLI agents' writes, the model routes, a bot's save and create; `SHELF_PATHS`, `GRAVIT_KEYS`), `startTraces` (a room member's trace, read once per answer) |
 | `js/host/market-view.js`, `account-view.js` | the pure views (§5.3): the Account's markets (`ACCOUNT_TABS`, `ACCOUNT_SORTS`, `CANDLE_RANGES`, `isAccountKey`, `tabsOf`, `priceOf`, `sourceWordOf`, `legsOf`, `followOf`, `sortsOf`, `tableOf`, `rowsOf`, `watchedOf`, `watchKeysOf`, `setWatchOf`, `matchKey`, `pairsOf`, `pageOf`, `handWordsOf`, `volumeWordOf`), the face's ids and the A shares' words (`canonicalId`, `faceAssetOf`, `mentionsOf`, `quoteWord`, `connectionWord`, `providerWord`, `basisWord`, `sourceWord`, `volumeWord`, `searchWord`, `watchWord`); the Account's page (`pageOk`, `headOf`, `worthOf`, `changeOf`, `assetsOf`, `positionsOf`, `openOrdersOf`, `missingWords`, `statementLinesOf`, `statementCsvOf`, `venuesOf`, `agentsOf`, `cardsOf`, `asksOf`, `requestsOf`, and for the connect and paper sheets `connectOptionsOf`, `paperBooksOf`, `keyfileWords`) and `seatWords` (the seat's standing in the Venues box's words) |
 | `js/host/markets.js`, `account.js`, `seat.js` | the impure halves: `startMarkets` (the Account's explore, quotes, candles and compare through the face's proxy, a market page's follow on the stream, the stars in this browser's two stores — an Account market's, on a page that signs, the Account's own signed `setWatch` —, each old `us:`/`crypto:` star asked once; the face's wire for the A shares), `startAccount` (the Account's page, holdings and paper lens, history, statement and agents, and the connect and paper sheets' four reads, each one flight; the page polled and handed to `onPage`; the stream's events as reads) and `startSeat` (`/data/seat.json` in one flight, fresh on Refresh, a card raised or answered and after a seat receipt) |
@@ -1287,7 +1357,7 @@ sentence drawn as its words, the Account's and a channel's stale stamps, a tool 
 | `js/render/rail.js`, `messages.js`, `thread.js`, `avatars.js`, `controls.js` | the two-level rail (Discover in the first level) and the list's groups; the Messages screen (head, Details with the row actions and Children, composer, status line, new message with New channel…, empty state); the thread's kinds, a tool row's dressed result and its Raw, a member's Trace; avatars and clusters (a bot's letter from the host's bot names); the segs, the key-value rows, the inline editor and confirm pair |
 | `js/render/markets.js`, `chart.js`, `account.js`, `js/market-fmt.js` | stage 2's screens (§5.4), on the Account's reads since the graft's stage 1: Markets — the Account's rows by tab beside the A shares — and a market's page (`renderMarketsScreen`, `marketPage`, `mkAv`, the face's own letter tile); the charts, one drawing in one box — `candlesSvg` (a market's closes from the Account's candles, the page's chart), `curveSvg` (the Portfolio's curve from its history); Account (`renderAccountScreen` — Portfolio, Venues with a venue's Details drawer and the Account seat box, Agents, Cards — the Statement drawer `renderStatement`, `orderWords`) and the Settings drawer (`renderSettings`); `chgHtml`, a change with its arrow (the A-share page's) |
 | `js/render/owner.js`, `trade.js` | stage 2 of the graft (§5.4): the device line under the Account head (`renderDeviceLine`), Settings › Devices (`renderDevices`), the owner sheet's drawer (`renderSheet`); the Trade screen (`renderTradeScreen`: the kinds, the picker, Under way, the ticket) |
-| `js/render/channel.js`, `discover.js`, `tool-result.js` | stage 3's screens (§5.4): a channel's page (`renderChannelScreen`, `bytesWord`); Discover, a shelf's grid, the Create page and an item's page (`renderDiscover`, `renderPlugin`); a tool row's result seam (`toolResultHtml`, `toolResultFor` — `null` for every call since 2026-10-24, so every result draws plain) |
+| `js/render/channel.js`, `discover.js`, `tool-result.js` | stage 3's screens (§5.4): a channel's page (`renderChannelScreen`, `bytesWord`; its Research runs section from `runsView`); Discover, a shelf's grid, the Create page and an item's page (`renderDiscover`, `renderPlugin`); a tool row's result seam (`toolResultHtml`, `toolResultFor` — `null` for every call since 2026-10-24, so every result draws plain) |
 | `js/html.js`, `icons.js`, `time.js`, `router.js`, `messages.js` | `esc`/`attrs`/`cls`; the inline SVG icon set; `rowTime`/`divider`/`fmtDate`/`fmtClock`; `parseHash`/`toHash`; `LEVELS` — the host's kinds alone: text and tool grey, card, approval and question orange, refusal red, receipt green — `levelOf`/`needsAnswer` |
 | `css/tokens.css`, `css/app.css` | the tokens (Linqi's Cream and Black values, demo @ 0ef5131) and the one sheet |
 
@@ -1443,7 +1513,7 @@ replace good quotes; the search `GET /data/symbols/search?q=&market=cn` after th
 250 ms pause, then one `GET /data/quotes?ids=` for up to 30 of its hits.
 
 **Stage 3's `/data` reads and writes** — a channel's page: `POST /data/channels/overview
-{workspaceId}` on entering it and on Retry; its editors: `GET /data/agents.json` for the agent
+{workspaceId}` on entering it and on Retry (its runs card below); its editors: `GET /data/agents.json` for the agent
 choices, then `POST /data/channels/agents {workspaceId, agents}` or `POST /data/channels/bots
 {workspaceId, bots}` (at most six, refused before the post), each followed by the overview again;
 New channel…: `POST /data/channels {name}` (the name folded by `foldChannelName` and checked
@@ -1458,6 +1528,22 @@ stale revision is a 409 `changed since this view was loaded`; a 500 `bots/<id> w
 kept the files), each followed by `/data/bots.json` again. The row actions: `POST
 /data/sessions/archive {sessionId, archived}` (an explicit boolean both ways; the host's own
 archive cannot be undone there — a 409) and `POST /data/sessions/delete {sessionId}`.
+
+**The runs card's wire** (modules spec A14, §5.11) — three fields of the overview's body, read by
+`readAnalysisRuns` in `channels.ts` from a real `strategies/<name>/analysis/` (a link there reads
+as no runs): `runs`, the run directories in the run-id form (`ANALYSIS_RUN_RE`, `<YYYYMMDD>T<HHMMSS>Z-<8 hex>`)
+newest first, at most 50 (`ANALYSIS_RUNS_CAP`), each `{run, asOf, snapshotId, sealed, kind,
+artifacts, marketRun, bytes}` — the first four from `run.json` (8 KiB compact, null and `sealed:
+false` when it is absent or unusable), `artifacts` one `{accepted: true, status, contractVersion,
+headline}` per module file present and parsing as an object within 24 KiB compact (an unreadable
+one left out), `headline` its fields by `MODULE_HEADLINES`, `marketRun` the accepted `mode.json`'s
+`market_run`, `bytes` every regular one-link file in the run directory by its size, the evidence
+included and never opened; `runsOmitted`, the run directories past the cap; and `latestRun`, the
+newest listed run that is sealed and holds an accepted artifact, `{run, asOf, snapshotId,
+artifacts: {<module>: {headline, json}}, marketRun}`, or null. `metrics.json` is not read. A run
+whose directory fails the `stillAt` re-check just before its reads, or can no longer be listed, is
+skipped — not listed, not counted. Before plan 2 no run is sealed and none holds an artifact, so a
+channel with runs shows them as unsealed rows under `no sealed run with an artifact yet`.
 
 ### 5.3 The host layer
 
@@ -2225,7 +2311,12 @@ stays beside it. The head (the channel by its title, its status chip, `New round
 with Where on the channel); the one-line headline, `Next: …` and the numbers as rows; **Thesis**
 through the markdown hook (`No thesis yet` for the template or none); **Latest backtest** — its
 file and up to twelve of its scalar fields — and **Backtests** (file and size), both only for an
-old strategy that carries a `backtests/` directory (none is written since 2026-10-24); **Journal** (the newest
+old strategy that carries a `backtests/` directory (none is written since 2026-10-24); **Research
+runs** after Latest backtest, only for a channel whose overview lists a run (`runsView`, §5.2) — the
+latest sealed run's line (run, as of, snapshot, the `cn-market` run it cites), a chip per module
+(its headline values, `not evaluable`, or the counterevidence's item count), the expectation card
+as key-value rows, each artifact whole in a collapsed details, then a dim line per run (as of, its
+artifacts, its size, `unsealed`) and `older runs not listed: N`; **Journal** (the newest
 twenty, date before text), **Files** (name, size, date); **Agents** and **Bots** — the rostered
 names, each with `Edit`: a box per choice (the connected CLI agents; every bot but the host's own
 composition), ticked as rostered, a seventh bot box shut while six are ticked, ✓ and ×. `Loading…`,
@@ -2513,7 +2604,7 @@ The 400 offline pytest cases left with the Python package, `pyproject.toml` and 
 
 ### 7.3 The face suite
 
-1266 tests in 116 files (1248 pass, 18 skipped without `FACE_SMOKE=1`), run by `node --test`
+1435 tests in 126 files (1417 pass, 18 skipped without `FACE_SMOKE=1`), run by `node --test`
 through `tsx`:
 
 - **Composition and boot** — `boot` (the layer order ending with the overlay; the policy layer
@@ -2754,6 +2845,33 @@ through `tsx`:
   them; no `native` or `icon` key at any depth, no array past twelve but in `venues` and a prepared
   action, the stream's data lines stripped too), `standin-helper` (the stand-in's home guard takes a `ui-standin-` directory
   directly under `tmpdir()` and nothing else; no stand-in on 4820), and the room suites below.
+- **The Lunhui rows** (`face/plugins/lunhui/`, offline: recorded replies under
+  `tests/fixtures/lunhui/` (Tencent) and `tests/fixtures/lunhui-eastmoney/` (Eastmoney, synthetic)
+  or a fake `fetch`, never the network) — `lunhui-rows` (the backbone on a stand-in scope: its
+  config refusals, the service, `lunhui_read_run`, the shared refusal helpers, `NOT_GRAVIT` from a
+  stand-in child header), `lunhui-freeze` (the four freeze rows beside a real service over a temp
+  root: items, ids, derived items and caps, `WRONG_CHANNEL`, `SOURCE_FROZEN`, `RUN_SEALED`,
+  `TOOL_BUDGET` past eight with the refused call counted, `CALENDAR_UNCOVERED` before any run, a
+  null 涨停 pool refusing `NO_MARKET_DATA` and writing nothing, two freezes of different sources
+  on one run at once both landing, a refusal in a run the call opened naming that run), `lunhui-eastmoney` (the
+  parsers on the fixtures and on malformed replies, one redirect followed to
+  `push2delay.eastmoney.com` only and a second refused, `host` and `delayed` stamped, the
+  four-request limiter, count pages disagreeing on `total` marked `partial`, a member list cut at
+  100 with `truncated`), `lunhui-derive` (each derived measure from hand-computed rows, breadth from
+  the board's own counts and never the cut list), `lunhui-runs` (stage 0's anchoring cases, then
+  open, add, seal, `snapshot_id`, `SOURCE_FROZEN`, the 256 KiB and 2 MiB caps, `metrics.json`
+  fail-open), `lunhui-calendar` (a year's table, a date outside every table uncovered),
+  `lunhui-market` and `lunhui-contract` (stage 0's ports), `lunhui-ignore` (`git check-ignore`
+  holds for a run's `evidence-*.json` and the corpus, not for `run.json`, `metrics.json` or an
+  artifact); `boot` (the five rows in one insert right after the seat, by file URL, the backbone
+  under this checkout's `strategies/`, an operator's override and disable kept), `bots` (no
+  `lunhui_` tool admitted by `DEFAULT_ALLOW` or any shipped bot, expanded against a tree that has
+  them), `channels` (the runs card: shapes, the 50-run cap, headlines, `latestRun`, a linked or
+  hard-linked file unread, an unparseable `run.json` listed with nulls, a vanished or swapped run
+  directory skipped, `MODULE_HEADLINES` equal to `MODULES`; the newest backtest over its cap or
+  past 32 levels unread), `client/runs-view` and `client/channel` (the view and the section, drawn only for a
+  channel with runs), and `smoke` (the five tools registered and the five rows ACTIVE in
+  `/data/plugins.json`'s listing).
 - **The eighteen `FACE_SMOKE` boots**, below.
 
 The room suites are `room-rules` (the caps block verbatim, `GRAVIT.md`'s caps sentence pinned to
@@ -3000,6 +3118,8 @@ the re-host added (§10, item 14).
 | **Role** — manual (`face/README.md`, five steps and a clean-up) | on a scratch copy of the operator's home, once a role ships: Gravit calls it; the child's log shows exactly the role's tools and its persona, not Gravit's; a `bash` role's run past bash-sandbox's 60 s default either passes `timeoutMs` or reads its moved job before reporting; a role naming an unmounted server's tool fails the delegation with `tools.restrict()` naming it and creates no child; Gravit's own log shows the role tool and the roles paragraph | a real model's judgement over several delegations | **not yet run** — and not runnable until the operator writes a role (none ships since 2026-10-24) |
 | **Cycle** — automated (`cycle`, `gravit-plugin`, `boot`, `roles`; `bots-smoke`, `roles-smoke`, `goal-smoke`) | the shipped `cycle.md` reads, fits its 3,300 bytes and carries the steps, the 24-round cap, the resume path and the blocked vocabulary, names no role and runs on a forward paper trade; the reader's refusals, path first; the `gravit:cycle` section's order, literalness and gate; the mirror carrying the text; on a real tree Gravit's prompt carries `Step 0 — ask once`, a probe bot's (which can call `create_goal`), a role child's and a plain `subagent` child's do not, a `subagent_fork` child's does and equals Gravit's; the goal loop itself (`goal-smoke`): `create_goal` in a human turn, the round message at idle, blocked refused in round 1 and accepted in round 3 with the `<goal_blocked>` wrap-up, a second goal refused, the silent `round-limit` cap, Stop pausing the goal with the model's resume refused and `/goal resume` re-arming it, a restart disarming it until "continue" | that a real model asks once, opens the goal, runs rounds by itself, trades on paper through the seat, is resumed by "continue" after a restart and ends in a verdict; a cycle's rounds, wall time and usage | passes 2026-10-19 (`goal-smoke` since `fae4f61`); the text checks on the new cycle 2026-10-24 |
 | **Cycle** — manual (`face/README.md` "The cycle drill", five steps) | on the operator's face with a real model and a channel from `_template`: one batched `ask_user_question` naming the paper venue and the window, and no file before it; `create_goal`, then rounds with no question (no commit inside the rounds) that read the Account through the seat and AKShare, place a forward paper trade — Gate 2's card and the Account's Guard card, each answered — and journal dated entries with the Account's figures and order ids; a verdict in `status.yaml` and the journal's last entry with the usage line to fill, the goal complete on `validated` or `retired` and blocked on `researching`, on a named code; a restart that continues only on "continue"; the rounds, wall time, usage and first-request figures recorded in §4.3 | whether the verdict is better research (charter D14); a model's handling of a paused goal (R30) beyond what the run happens to meet — the mechanism itself is `goal-smoke`'s | **not yet run** — the operator's, on the real face |
+| **Lunhui rows** — automated (`lunhui-rows`, `lunhui-freeze`, `lunhui-eastmoney`, `lunhui-derive`, `lunhui-runs`, `lunhui-calendar`, `lunhui-ignore`, `channels`, the client's `runs-view` and `channel`; `smoke`) | on recorded replies and fake fetches: every freeze's items, ids, derived items, caps and refusals, the one redirect, the limiter, the run's states and budget, the ignore lines, the runs card and its view; on a real boot, the five rows ACTIVE and their tools registered | the live hosts' current reply shapes; a model calling the tools | passing |
+| **Lunhui market freeze** — manual (`face/README.md` "Lunhui analysis") | on the operator's face, in `strategies/cn-market`: index, limit-up and boards frozen into one run from the live hosts, the run on the channel page | whether the frozen sample is enough for a module (plan 2) | **owed with plan 2** — no tool here calls a freeze without a model |
 
 Owed besides, from the re-host, never yet run in a browser: the Gate-2 drill's new card endings
 — a second tab's `closed`, a lost race's `closed · settled elsewhere`, a stale card's `closed ·
@@ -3353,6 +3473,64 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
   ticket's venue read and the stream can price from different sources. In the proxy: no pin for
   stale-on-error on a stage-2 read (the shared path is pinned by the stage-1 reads). And `app.js` is
   978 lines — a split weighed at the final review.
+- **R39 — The Lunhui rows write from the face process, outside any session sandbox, bounded to
+  `strategies/<name>/analysis/`.** Stage 0's R32, re-worded for in-process rows; the class of R5
+  and of the seat's key file (charter D10). The rows run in the face process, so their writes never
+  pass `ctx.sandboxPolicy` and raise no card: a freeze makes `analysis/` and `analysis/<run>/`,
+  writes `run.json`, `metrics.json` and its `evidence-<source>.json`, and rewrites `metrics.json`
+  on every call it counts and `run.json` on every evidence file it adds. The caller's session header is read only to refuse a
+  delegated child (`NOT_GRAVIT`); the strategy a call names is its only anchor, so a session in one
+  channel, or at the root, can freeze quotes into another channel's directory (the other three
+  freezes into `cn-market` alone). The bound is `runs.mjs`'s anchoring: a strategy name in the
+  channel grammar naming a real directory directly under `strategiesRoot` that holds a regular
+  `THESIS.md`, a run id under that strategy's own real `analysis/`, every entry `lstat`ed and never
+  followed, containment compared by `realpath`, every directory re-checked (`stillResolved`) before
+  each use, a new file opened `wx`, a replaced one written fresh and renamed over the old. A check
+  and the use after it are still two calls (Node has no `openat`): a concurrent writer inside the
+  strategy tree can race them. A metrics write killed before its rename leaves a
+  `metrics.json.<hex>.tmp` (0o600, read by nothing, never swept — a sweep would race a concurrent
+  writer's staging file); an `openRun` killed between its two writes leaves a run with `run.json`
+  and no `metrics.json`, which reads fail-open as zero counts. And runs are not bounded: eight
+  freezes bound one run, never how many runs a session opens, each a new directory and a new round
+  of Tencent and Eastmoney requests. Recorded, nothing built.
+- **R40 — The Lunhui calendar is one table a year, and only 2026 ships.** Stage 0's R33, re-worded
+  (modules spec A25). `lib/calendar.mjs` loads `lib/calendar/<year>.json`, each from that year's
+  SSE notice, at import; a China date outside every table refuses every freeze with
+  `CALENDAR_UNCOVERED` before any run is touched (the limit-up freeze also when the previous
+  session it would ask for lies outside), so nothing is frozen on a guessed weekday. Live from
+  2027-01-01 until `2027.json` lands (§10, item 20). The tables are hand-entered: a holiday range
+  is not checked for order or overlap, an empty calendar directory reads as no coverage — every
+  freeze refused — rather than failing the mount, and `getMarketSession` across two years is
+  untested until a second table exists.
+- **R41 — The Eastmoney endpoints are unofficial, and from this machine their quotes are
+  delayed.** No contract stands behind `push2ex.eastmoney.com` or `push2.eastmoney.com`: a changed
+  reply shape is the parsers' `UPSTREAM_INVALID`, a refusal that writes nothing for that source.
+  Measured 2026-10-25: the clist answers 302 to `push2delay.eastmoney.com` with `dlmkts` set, so
+  the boards, members, fund flow and counts are delayed quotes; every Eastmoney item carries the
+  host that served it and `delayed`, and the file's meta joins them (A28). The clist caps a page at
+  100 rows whatever the query asks (5,925 A shares that day), so the counts take about sixty
+  requests a freeze through the four-slot limiter, page 1 first for the total; pages that disagree
+  on the total mark the counts `partial`. A request's 7-second timeout is per hop, so a followed
+  redirect can take 14 s. A request already in flight runs to completion after a sibling of the
+  same freeze fails. Only the 涨停 pool's null or empty reply refuses `NO_MARKET_DATA`; an empty
+  炸板 or 昨日涨停 pool is an empty list, so a day on which Eastmoney served the one and failed the
+  others empty would freeze as a quiet day. And the evidence is point-in-time only from the first
+  freeze: every source answers what it holds now, nothing rebuilds a past session, and a run's
+  `as_of` is when it was frozen.
+- **R42 — A run's evidence files are not in git.** `.gitignore` holds
+  `strategies/*/analysis/*/evidence-*.json` (A26; `tests/lunhui-ignore.test.ts`): `run.json`, with
+  every evidence file's sha256 and size, `metrics.json` and, from plan 2, the artifacts are
+  tracked. A clone, or the machine after the files are deleted, holds the hashes and cannot rebuild
+  a context or re-check an artifact's citations; the evidence lives only on the machine that froze
+  it, about 2 MiB a run at most.
+- **R43 — The runs card reads a tree Gravit's sessions can write.** `readAnalysisRuns` re-checks
+  `analysis/` and each run directory (`stillAt`) just before its reads and opens every file
+  `O_NOFOLLOW` with one link, but the check and the read are still two calls, so a writer inside
+  the strategy tree can race them, as in R39; a run skipped mid-read leaves no mark on the card.
+  `accepted` means the module file is present, readable and an object within its cap, not
+  cross-checked against `run.json`'s `artifacts[]` (plan 2's submit writes a file only after its
+  validator accepts it); an unreadable artifact is left out with no hint; `latestRun` is chosen
+  among the 50 listed runs.
 
 ---
 
@@ -3418,12 +3596,12 @@ In order; each with what "done" is and which charter row it reopens.
    add the D2 row; decide PLAN D11, D12, D13, D17 and D18; rehearse the drills §7.4 owes on a
    second copy; then boot on the home. Done when those drills pass on the real home.
 15. **Take the redesign's owed measurements and drills**, on the real face, in one sitting: the
-   first-request totals of §4.3 (plan 1's one-word session, the cycle's first request), one live
-   run of its tool-schema table with AKShare and the seat together (`face/scripts/schema-sizes.ts`
-   on a copy of the home; no prompt is sent) and the cycle drill (`face/README.md`; the real face,
+   first-request totals of §4.3 (plan 1's one-word session, the cycle's first request) and the cycle drill (`face/README.md`; the real face,
    the real Account with a paper venue, and keys — a cycle's usage is real); the role drill once a
-   role ships. Done when the "not yet measured" rows of §4.3, its live row and the manual **Cycle**
-   row of §7.4 carry their date (and the session id where a session was involved). This is where
+   role ships. Done when the "not yet measured" rows of §4.3 and the manual **Cycle** row of §7.4
+   carry their date (and the session id where a session was involved). The live run of the
+   tool-schema table — AKShare, the seat and the Lunhui rows together — was taken 2026-10-25
+   (§4.3). This is where
    the 24-round cap, a forward paper trade and the restart path (R30) first meet a model.
 16. **The next round: persona, memory, the teaching channel.** Deferred by the operator on
    2026-10-15 (charter §9): the persona's mechanics paragraphs move to the tool descriptions,
@@ -3439,6 +3617,29 @@ In order; each with what "done" is and which charter row it reopens.
    the seat granted reach, or signing it a limit on one, is the charter's real-money trigger (§8) and
    the venue-plugins handoff's agenda (§12.1, C1–C5 for real money): the next charter, before any such
    grant. One card per write (R32) and the tool block (R35) wait on the same round.
+18. **Lunhui plan 2: sentiment and theme** (modules spec §10). The environment, sentiment and theme
+   module rows with their context and submit pairs, the `cn-market-analyst` role, the run protocol
+   section `lunhui:run` (`dsh/profile/lunhui-run.md`, mounted by `plugins/gravit.js`), the context
+   read that seals a run; then the first market run on a real boot in `strategies/cn-market/` — the
+   first time the freezes meet the live hosts through a model, and the market freeze drill
+   (`face/README.md` "Lunhui analysis"). Done when a `cn-market` run seals with accepted artifacts
+   and the runs card shows them.
+19. **Lunhui plans 3 and 4: leader and mode, then counterevidence**, with `cn-stock-analyst` and
+   `cn-reviewer`; the expectation card and its review in the next run; then the docs pass the spec
+   names in its §6 and §8 — the charter's MARKET bullet, its `strategies/` writer clause and D10
+   re-fitted for the rows, the loops page, the upgrade guide's re-check rows and the seams
+   inventory. Done when a strategy run's `mode.json` cites a sealed `cn-market` run and the charter
+   carries the rows.
+20. **The 2027 calendar table.** `face/plugins/lunhui/lib/calendar/2027.json` from the SSE's 2027
+   holiday notice, due when the notice is out (usually December); until then a 2027 session date
+   refuses every freeze with `CALENDAR_UNCOVERED` (A25, R40). With it, a test of
+   `getMarketSession` across the year boundary. Done when a freeze on 2027-01-04 is accepted.
+21. **Lunhui choices the build made that the operator may reverse** (spec §12): concept boards
+   ranked by change rather than turnover (the turnover ranking led with membership boards), board
+   breadth over advancers and decliners rather than members, and an empty 炸板 or 昨日涨停 pool read
+   as a quiet day (R41) — each a line of code to change. And `S02`'s announcements source (spec
+   §9): its feed, its egress host and what an announcement item freezes, before `S02` can be more
+   than `WAIT`.
 
 ---
 

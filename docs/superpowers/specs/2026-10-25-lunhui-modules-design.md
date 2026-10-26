@@ -489,3 +489,21 @@ document or sent to the operator:
 | 7 | Whether "Gravit never submits" is enforced in code | the author's | A23, §5.5, §6 |
 | 8 | What happens from 2027-01-01 | the author's | A25, §8 |
 | 9 | Whether the evidence files are committed | the author's | A26, §3, §8 |
+
+## 12. Build notes, plan 1 (2026-10-25)
+
+Where plan 1's build measured or ruled against this document's text. The clauses above stand as
+approved; the tree does what this table says, and the operator may fold any line back into its
+clause or reverse it (`DEVELOPMENT.md` §10 item 21). The rulings are in the plan's SDD ledger.
+
+| Clause | The text | What the tree does | Why |
+|---|---|---|---|
+| A28 | the all-shares counts read "1,000 a page" | 100 rows a page, at most 64 pages, page 1 first for the total and the rest concurrently under the four-slot limiter | measured 2026-10-25: the live clist answers a `pz=1000` request, through its 302 to `push2delay`, with 100 rows of 5,925 — the page cap is the host's |
+| §5.3 | concept boards "ranked by turnover" | the top 30 ranked by change (`fid=f3`), each row keeping turnover (`f6`) so turnover share is still derived; the default constituents are the first 10 of that list | measured 2026-10-25: the turnover ranking leads with 融资融券, 昨日高振幅, 深股通, 基金增仓, 富时罗素 — membership and screen boards, not 题材 |
+| §5.12 | every row `config: { strategiesRoot }` | only `lunhui-runs` carries `strategiesRoot`; the four freeze rows' config is `{}` and they reach the root through the `lunhuiRuns` service | one source of truth: a patch that moves the root restates it on one row |
+| §5.7 | the refusal codes | `SOURCE_FROZEN` joins them: a second freeze of one source in one run is refused | one snapshot per source per run — two snapshots of one pool would disagree (A27's rule) |
+| A20 | board breadth "advancers over members" | advancers / (advancers + decliners), from the board's own counts, never from the cut member list | an unchanged member (suspended or flat) carries no direction, and the board's reply gives no member total |
+| §5.3 | a null or empty pool refuses `NO_MARKET_DATA` | only the 涨停 pool's null or empty reply refuses; an empty 炸板 or 昨日涨停 pool is an empty list | a day with no 炸板 is a market state; a holiday or pre-market date already refuses through the same date's 涨停 pool |
+| A28, §5.3 | "every Eastmoney item records the host that served it" | every Eastmoney item — pool rows, boards, member lists, flow rows, the counts item — carries its own reply's `host` and `delayed`; the file's meta joins the distinct hosts and is `delayed` when any reply was | the review found the stamp at file level only; per item is the clause |
+| §5.3 | a freeze with `run` omitted opens a run and returns its id | when such a freeze then fails, its refusal names the run it opened | the retry passes that id instead of opening a second empty run (an id, never a path) |
+| §5.11 | the runs card's "Research runs" section | drawn only for a channel whose overview lists a run; "no sealed run with an artifact yet" shows inside a channel that has runs | otherwise every channel — the workbench root, `room-drill`, the bots' — would carry an empty section |

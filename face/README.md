@@ -401,6 +401,88 @@ cd face && FACE_SMOKE=1 FACE_ACCOUNT_SEAT_DIR=~/buyer-agent-demo npx tsx --test 
 It starts the Account's own stand-in (no network, no money), mounts the seat against it and
 proves the chain up to the Account's card (`DEVELOPMENT.md` §7.3).
 
+## Lunhui analysis — frozen A-share research runs (src/lunhui.ts + plugins/lunhui/)
+
+The Lunhui rows freeze hashed samples of the A-share market into a strategy's directory, so a
+later analysis reads a fixed set of evidence instead of live data
+(`../docs/superpowers/specs/2026-10-25-lunhui-modules-design.md`). They are cordis rows inside
+the face process, not an MCP server: nothing to install, no child process, and they come up with
+every boot. Like AKShare's reads they carry no lookahead guard and are never evidence of a trade.
+
+The design has eleven rows; plan 1 built the first five:
+
+| Row | Tool | State |
+|---|---|---|
+| `lunhui-runs` (`plugins/lunhui/runs-row.mjs`) | `lunhui_read_run` — a run's `run.json`, its counters and each artifact's headline | built |
+| `lunhui-freeze-quotes` | `lunhui_freeze_quotes` — Tencent quotes and 60-day bars, 1–8 symbols; any channel | built |
+| `lunhui-freeze-limit-up` | `lunhui_freeze_limit_up` — Eastmoney's 涨停, 炸板 and 昨日涨停 pools; `cn-market` only | built |
+| `lunhui-freeze-boards` | `lunhui_freeze_boards` — the top 30 concept boards by change, up to ten boards' members, the board fund flow; `cn-market` only | built |
+| `lunhui-freeze-index` | `lunhui_freeze_index` — the four indices with 120-day bars, the all-A-shares advance/decline counts; `cn-market` only | built |
+| `lunhui-environment`, `lunhui-sentiment`, `lunhui-theme` | a context and a submit tool each | plan 2 |
+| `lunhui-leader`, `lunhui-mode` | the same | plan 3 |
+| `lunhui-review` | the counterevidence pair | plan 4 |
+
+A freeze with no `run` opens a run, `strategies/<name>/analysis/<YYYYMMDD>T<HHMMSS>Z-<8 hex>/`,
+and answers its id; pass that id as `run` to add the other sources. One evidence file per source
+per run (`evidence-<source>.json`, at most 256 KiB, a run's evidence at most 2 MiB), eight
+freezes a run, and every refusal reads `Error: <CODE> …`. Gravit calls them; a delegated child is
+refused, and no bot's allow list names one. Until plan 2 nothing reads a run's contexts, so a run
+stays open and the channel page lists it as `unsealed`.
+
+**The market channel**: `strategies/cn-market/` is tracked, with a `THESIS.md` that states the
+market read by chapter and paragraph id. Its runs hold the index, limit-up and board evidence a
+strategy's run will cite; the limit-up, boards and index freezes refuse any other channel
+(`WRONG_CHANNEL`). A channel with runs shows a **Research runs** section on its page.
+
+**Egress**, from the face process — the hosts AKShare itself calls for the same data:
+
+| Host | What |
+|---|---|
+| `qt.gtimg.cn`, `web.ifzq.gtimg.cn` | Tencent quotes and daily bars |
+| `push2ex.eastmoney.com` | the three limit-up pools (it answers directly) |
+| `push2.eastmoney.com` | the concept boards, a board's members, the board fund flow and the all-shares counts |
+| `push2delay.eastmoney.com` | `push2`'s one redirect, the only one followed: from this machine `push2` answers 302 here, with **delayed** quotes |
+
+Each request has a 7-second timeout (per hop, so a redirect can take 14 s) and a 512 KiB cap, at
+most four Eastmoney requests run at once, and no numbered host (`17.push2…`) is ever called.
+Every Eastmoney item records the host that served it and whether it was delayed. The clist caps
+a page at 100 rows whatever the query asks, so one index freeze reads the counts in about sixty
+requests, page 1 first. The endpoints are unofficial: a changed reply is `UPSTREAM_INVALID`, and
+a day outside the calendar table (`plugins/lunhui/lib/calendar/2026.json`, only 2026 ships) is
+`CALENDAR_UNCOVERED` (`DEVELOPMENT.md` §9, R40–R41).
+
+**Fixtures** are row config, used by the tests alone: a freeze row's `config.fetch` names a
+directory of recorded replies (`tests/fixtures/lunhui/`, `tests/fixtures/lunhui-eastmoney/`) and
+`config.now` a clock. The rows read no environment variable; production rows set neither key.
+
+**The patch lines** (`$DSH_HOME/profiles/face/cordis.patch.yml`). The rows compose right after the
+seat and below this file, so a patch reaches them:
+
+```yaml
+- { id: lunhui-freeze-boards, disabled: true }   # one source off: its tool goes, the rest stay
+```
+
+To turn Lunhui off, disable all five — a freeze row cannot mount without `lunhui-runs`, and the
+boot refuses a row that did not mount:
+
+```yaml
+- { id: lunhui-runs, disabled: true }
+- { id: lunhui-freeze-quotes, disabled: true }
+- { id: lunhui-freeze-limit-up, disabled: true }
+- { id: lunhui-freeze-boards, disabled: true }
+- { id: lunhui-freeze-index, disabled: true }
+```
+
+A patch that replaces `lunhui-runs`' config replaces it whole, so it restates `strategiesRoot`
+(an absolute existing directory; the default is this checkout's `strategies/`).
+
+The checks: `/data/plugins.json` lists the five rows ACTIVE, and Gravit's tools include the five
+`lunhui_` names (the schema block is 804 heuristic tokens for them, `DEVELOPMENT.md` §4.3).
+**The first market freeze drill is owed with plan 2**: no command in the tree calls a freeze
+without a model, and plan 2's first market run — index, limit-up and boards frozen into one
+`cn-market` run on the real face, then the run on the channel page — is where the rows first meet
+the live hosts.
+
 ## The profile
 
 `npm run setup` writes THREE files into `$DSH_HOME/profiles/<name>/`, and
