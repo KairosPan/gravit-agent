@@ -168,7 +168,7 @@ export const MODULE_REPAIRS = Object.freeze({
   TIME_SCOPE:
     "按证据时效修正 basis：CURRENT 须至少引用一条本运行交易日的证据；HISTORICAL 只引用更早的证据（日线、历史序列或更早交易日），文字不用“当前、实时、现价、今日、今天、盘中”；所有声明均为 INSUFFICIENT 时标题字段一律 UNKNOWN。",
   UNSUPPORTED_SCOPE:
-    "全市场、情绪、题材、龙头、指数类断言只在本模块拥有该类时写入声明，并引用至少一条派生证据编号；其他此类句子改写为“缺少”“无法”或“待补充”，限制说明里也一样。",
+    "全市场、情绪、题材、龙头、指数类断言只在本模块拥有该类时写入声明，并引用至少一条该类认可的证据编号（默认是派生证据，见提示）；其他此类句子改写为“缺少”“无法”或“待补充”，限制说明里也一样。",
   EXECUTION_CONTENT:
     "删除交易方向、价位目标、仓位、账户或下单内容及对应术语，免责声明里也不复述；只保留证据事实、资料缺口和核验步骤。",
   BYTE_LIMIT:
@@ -208,6 +208,9 @@ export const SCOPE_EXEMPT =
 
 /** The sentence boundaries the scope rule splits on, a line break among them as stage 0's. */
 const SENTENCE_SPLIT = /[。；;.!?！？\n]/u;
+
+/** The default carrier of an owned class (A21): a derived item. */
+const isDerivedEntry = (entry) => entry.kind === "derived";
 
 /** An evidence id, anywhere in an artifact's text. */
 const EVIDENCE_ID = /ev_[a-f0-9]{24}/g;
@@ -342,7 +345,9 @@ function rowKind(item) {
  * each claim, the forbidden words, the scope rule, the status rule, then the module's own `rules`.
  * @param {unknown} raw the submitted artifact, JSON text or a parsed object
  * @param {{ module: string, context: ContextDigest, schema: { required?: string[], properties?: Record<string, unknown> },
- *   owns?: string[], rules?: (parsed: any, context: ContextDigest) => void }} options
+ *   owns?: string[], ownedBy?: Record<string, (entry: DigestItem) => boolean>, rules?: (parsed: any, context: ContextDigest) => void }} options
+ * `ownedBy[class]` names the cited items that carry an owned class's sentence; a class without
+ * an entry needs a derived item (A21).
  * A rejection (code `INVALID_ANALYSIS`, the module's own rules' included) carries its `category`,
  * through `classifyValidationRejection`, and that category's `repair` from `MODULE_REPAIRS`.
  * @returns {any} the artifact, parsed and copied
@@ -360,7 +365,7 @@ export function validateEnvelope(raw, options) {
 }
 
 /** `validateEnvelope`'s rules, in order. */
-function checkEnvelope(raw, { module, context, schema, owns = [], rules }) {
+function checkEnvelope(raw, { module, context, schema, owns = [], ownedBy = {}, rules }) {
   const entry = MODULES.find((candidate) => candidate.name === module);
   if (!entry || !context) throw new TypeError(`lunhui: no contract context for module ${JSON.stringify(module)}`);
   let artifact = raw;
@@ -402,17 +407,24 @@ function checkEnvelope(raw, { module, context, schema, owns = [], rules }) {
       fail(`${path}: Trading, target-price, or account content is outside the research contract.`);
   }
 
-  // The scope rule: a claim's sentences with the claim's ids, every other string with none.
+  // The scope rule: a claim's sentences with the claim's ids, every other string with none. An owned
+  // class is carried by a cited item `ownedBy[class]` accepts, a derived item by default.
   const scoped = [
     ...artifact.claims.flatMap((claim, index) =>
       textEntries(claim, `analysis.claims[${index}]`).map(([path, text]) => [path, text, claim.evidence_ids])),
     ...textEntries({ ...artifact, claims: undefined }).map(([path, text]) => [path, text, []]),
   ];
   for (const [path, text, ids] of scoped) {
-    const derived = ids.some((id) => context.derivedIds.has(id));
+    const carries = (name) => {
+      const accepts = ownedBy[name] ?? isDerivedEntry;
+      return ids.some((id) => {
+        const entry = context.items.get(id);
+        return entry !== undefined && accepts(entry);
+      });
+    };
     for (const sentence of text.split(SENTENCE_SPLIT)) {
       const refused = Object.entries(SCOPE_CLASSES).some(
-        ([name, pattern]) => pattern.test(sentence) && !(owns.includes(name) && derived),
+        ([name, pattern]) => pattern.test(sentence) && !(owns.includes(name) && carries(name)),
       );
       if (refused && !SCOPE_EXEMPT.test(sentence))
         fail(`${path}: Unsupported whole-market, theme, or leadership assertion.`);

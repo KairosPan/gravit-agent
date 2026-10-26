@@ -204,6 +204,24 @@ test("scope: an owned class cited with a derived id is accepted; a row id alone 
   check(one("缺少题材资料；情绪进入扩张", [sealRatio.id]));
 });
 
+test("scope: ownedBy names the items that carry an owned class, per class; the default stays a derived item", () => {
+  const { digest } = context();
+  const one = (text: string, ids: string[]) => artifact(digest, { claims: [{ id: "c1", text, basis: "CURRENT", evidence_ids: ids }] });
+  const index = (entry: Loose) => entry.kind === "index" || entry.kind === "bars" || entry.kind === "derived";
+  const owned = { owns: ["index", "sentiment"], ownedBy: { index } };
+  // An index sentence citing only an index quote: refused by the default, accepted through ownedBy.
+  assert.equal(category(() => check(one("指数偏强", [indexQuote.id]), { owns: ["index", "sentiment"] })), "UNSUPPORTED_SCOPE");
+  check(one("指数偏强", [indexQuote.id]), owned);
+  check(one("指数偏强", [advance.id]), owned);
+  // ownedBy[class] that does not hold for any cited id refuses.
+  assert.equal(category(() => check(one("指数偏强", [zt.id]), owned)), "UNSUPPORTED_SCOPE");
+  // A class without its own ownedBy entry keeps the default: a row id alone is not enough.
+  assert.equal(category(() => check(one("情绪进入扩张", [indexQuote.id]), owned)), "UNSUPPORTED_SCOPE");
+  check(one("情绪进入扩张", [sealRatio.id]), owned);
+  // ownedBy opens nothing the module does not own.
+  assert.equal(category(() => check(one("指数偏强", [indexQuote.id]), { owns: ["sentiment"], ownedBy: { index } })), "UNSUPPORTED_SCOPE");
+});
+
 test("scope: a line break ends a sentence, so an exempt line does not cover the next", () => {
   const { digest } = context();
   assert.equal(category(() => check(artifact(digest, { limitations: ["缺少分钟数据\n题材轮动加快"] }))), "UNSUPPORTED_SCOPE");

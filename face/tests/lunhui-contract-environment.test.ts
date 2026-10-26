@@ -95,10 +95,10 @@ async function rejectsWith(promise: Promise<unknown>, code: string): Promise<Lun
 }
 
 /** A cn-market run frozen through the real rows: index, then quotes unless `index` alone is asked for. */
-async function frozenRun(freeze: Record<string, ToolDef>, sources: Array<"index" | "quotes"> = ["index", "quotes"]) {
+async function frozenRun(freeze: Record<string, ToolDef>, sources: Array<"index" | "quotes"> = ["index", "quotes"], symbols = ["sh000001", "sh600519"]) {
   let run: string | undefined;
   for (const source of sources) {
-    const args = { strategy: "cn-market", ...(run === undefined ? {} : { run }), ...(source === "quotes" ? { symbols: ["sh000001", "sh600519"] } : {}) };
+    const args = { strategy: "cn-market", ...(run === undefined ? {} : { run }), ...(source === "quotes" ? { symbols } : {}) };
     run = JSON.parse(await freeze[source].execute(args, exec())).run;
   }
   return run as string;
@@ -220,6 +220,7 @@ test("environment: each rule refuses with its category - an index state without 
   const quote = idWhere(context, (row) => row.kind === "index" && row.symbol === "sh000001");
   const ratio = idWhere(context, (row) => row.measure === "advance_decline_ratio");
   const limitUp = idWhere(context, (row) => row.measure === "limit_up_count");
+  const turnover = idWhere(context, (row) => row.measure === "total_turnover");
   const equity = idWhere(context, (row) => row.kind === "quote" && row.symbol === "sh600519");
 
   const cases: Array<[Record<string, unknown>, RegExp]> = [
@@ -229,6 +230,19 @@ test("environment: each rule refuses with its category - an index state without 
     [{ index_state: "NEUTRAL", claims: [{ id: "c1", text: "sh600519 报价见所引证据。", basis: "CURRENT", evidence_ids: [equity] }] }, /index_state/],
     // A liquidity state citing an index quote and the limit-up count, neither turnover nor the ratio.
     [{ liquidity_state: "EXPANDING", claims: [{ id: "c1", text: "sh000001 报价与涨停计数见所引证据。", basis: "CURRENT", evidence_ids: [quote, limitUp] }] }, /liquidity_state/],
+    // One claim citing both an index quote and turnover stands for one state, not both.
+    [{ index_state: "WEAK", liquidity_state: "CONTRACTING", claims: [
+      { id: "c1", text: "上证指数报价与两市成交额合计见所引证据，均读为偏弱。", basis: "CURRENT", evidence_ids: [quote, turnover] },
+    ] }, /each need a claim of their own/],
+    // An INSUFFICIENT claim stands for no state: the index's here, the liquidity's next.
+    [{ index_state: "STRONG", claims: [
+      { id: "c1", text: "sh000001 报价见所引证据。", basis: "INSUFFICIENT", evidence_ids: [quote] },
+      { id: "c2", text: "sh600519 报价见所引证据。", basis: "CURRENT", evidence_ids: [equity] },
+    ] }, /index_state/],
+    [{ liquidity_state: "EXPANDING", claims: [
+      { id: "c1", text: "上涨与下跌家数之比见所引派生证据。", basis: "INSUFFICIENT", evidence_ids: [ratio] },
+      { id: "c2", text: "sh600519 报价见所引证据。", basis: "CURRENT", evidence_ids: [equity] },
+    ] }, /liquidity_state/],
   ];
   for (const [fields, field] of cases) {
     const refusal = await rejectsWith(submit.execute({ strategy: "cn-market", run, analysis: JSON.stringify(artifact(context, fields)) }, exec(ROLE)), "INVALID_ANALYSIS");
@@ -236,10 +250,38 @@ test("environment: each rule refuses with its category - an index state without 
     assert.match(refusal.message, field);
     assert.match(refusal.message, /\n修复：/u);
   }
-  assert.deepEqual((await service.readRun("cn-market", run)).metrics.rejections.environment, ["REFERENCE", "REFERENCE", "REFERENCE"]);
+  assert.deepEqual((await service.readRun("cn-market", run)).metrics.rejections.environment, Array(6).fill("REFERENCE"));
   // UNKNOWN headlines need neither.
   const unknown = artifact(context, { claims: [{ id: "c1", text: "sh600519 报价见所引证据。", basis: "CURRENT", evidence_ids: [equity] }] });
   assert.equal(JSON.parse(await submit.execute({ strategy: "cn-market", run, analysis: JSON.stringify(unknown) }, exec(ROLE))).accepted, true);
+});
+
+test("environment: an index sentence citing only an index quote is accepted - the index class rests on index evidence, not on a liquidity measure", async (t) => {
+  const { freeze, read, submit } = await mount(t);
+  const run = await frozenRun(freeze);
+  const context = JSON.parse(await read.execute({ strategy: "cn-market", run }, exec(ROLE)));
+  const quote = idWhere(context, (row) => row.kind === "index" && row.symbol === "sh000001");
+  const analysis = artifact(context, {
+    index_state: "STRONG",
+    claims: [{ id: "c1", text: "上证指数本运行交易日的报价见所引证据，读为偏强。", basis: "CURRENT", evidence_ids: [quote] }],
+  });
+  assert.equal(JSON.parse(await submit.execute({ strategy: "cn-market", run, analysis: JSON.stringify(analysis) }, exec(ROLE))).accepted, true);
+});
+
+test("environment: a full run - index and quotes for all eight fixture symbols - fits 30 KiB; the index rows are never left out, quote histories go first", async (t) => {
+  const { freeze, read } = await mount(t);
+  const symbols = ["sh000001", "sz399001", "sz399006", "sh000300", "sh600519", "sh601318", "sz000001", "sz000333"];
+  const run = await frozenRun(freeze, ["index", "quotes"], symbols);
+  const text = await read.execute({ strategy: "cn-market", run }, exec(ROLE));
+  assert.ok(Buffer.byteLength(text, "utf8") <= MAX_CONTEXT_BYTES);
+  const context = JSON.parse(text);
+  assert.deepEqual(context.evidence.filter((row: any) => row.source === "index").map((row: any) => row.kind), [
+    "index", "index", "index", "index", "counts", "bars", "bars", "bars", "bars",
+  ]);
+  assert.equal(context.derived.length, 4);
+  assert.ok(context.truncated.length > 0, "eight quote histories do not all fit");
+  assert.ok(context.truncated.every((entry: any) => entry.source === "quotes"));
+  assert.deepEqual([context.truncated[0].source, context.truncated[0].kind], ["quotes", "history"]);
 });
 
 test("environment: a run without index evidence expects NOT_EVALUABLE - an OK artifact refused, NOT_EVALUABLE naming index accepted", async (t) => {

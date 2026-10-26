@@ -29,6 +29,7 @@ import { MODULE_NAMES } from "./modules.mjs";
  * A module's contract, as `lib/contracts/<module>.mjs` exports it.
  * @typedef {{
  *   schema: { required?: string[], properties?: Record<string, unknown> }, owns: string[],
+ *   ownedBy?: Record<string, (entry: import("./contract-core.mjs").DigestItem) => boolean>,
  *   rules?: (parsed: any, context: import("./contract-core.mjs").ContextDigest) => void,
  *   hypotheses: string, hints: string, example: (digest: import("./contract-core.mjs").ContextDigest) => unknown,
  *   sources: string[], required: string[], derivedFirst?: string[],
@@ -135,7 +136,7 @@ export function defineModule({ module, channel, contract, runs }) {
           const context = digests.get(`${located.strategy}/${located.run}/${module}`);
           // A row reload while the service lives on: the read is remembered, its digest is not.
           if (context === undefined) throw refuse.readFirst(module);
-          return validateEnvelope(text, { module, context, schema: contract.schema, owns: contract.owns, rules: contract.rules });
+          return validateEnvelope(text, { module, context, schema: contract.schema, owns: contract.owns, ownedBy: contract.ownedBy, rules: contract.rules });
         });
         return JSON.stringify(result);
       } catch (error) {
