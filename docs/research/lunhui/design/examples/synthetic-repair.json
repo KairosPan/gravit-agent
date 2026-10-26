@@ -1,0 +1,188 @@
+{
+  "fixture_only": true,
+  "expectation_plan": {
+    "plan_id": "plan-fixture-01",
+    "frozen_at": "2026-09-30T09:10:00+08:00",
+    "revision": 1,
+    "observing_from": "2026-09-30T09:30:00+08:00",
+    "expected": "主线核心在确认窗口内修复，题材广度同步改善；否则仅观察。",
+    "invalidate_if": [
+      "主线核心进一步破位",
+      "题材广度恶化",
+      "账户或证券规则无法确认"
+    ],
+    "note": "合成研究计划，不含经过回测校准的阈值。"
+  },
+  "snapshot": {
+    "schema_version": "0.1.0",
+    "snapshot_id": "snapshot-fixture-01",
+    "as_of": "2026-09-30T10:02:00+08:00",
+    "clock": "REPLAY",
+    "universe_version": "synthetic-mainboard-v1",
+    "market_rules_version": "unverified-synthetic",
+    "data_quality": {
+      "status": "PARTIAL",
+      "missing": [
+        "verified_market_rules",
+        "account_snapshot",
+        "calibrated_strategy_predicates"
+      ],
+      "warnings": [
+        "仅有合成证据，不可用于交易或收益估计"
+      ]
+    },
+    "evidence": [
+      {
+        "evidence_id": "e-plan",
+        "kind": "PLAN",
+        "source_ref": "fixture://e-plan",
+        "event_time": "2026-09-30T09:10:00+08:00",
+        "available_at": "2026-09-30T09:10:00+08:00",
+        "ingested_at": "2026-09-30T09:10:00+08:00",
+        "revision_id": "fixture-v1",
+        "content_hash": "862de14b8f34b5ae64f13f31abccfc8ec8f5096ea678f887eaecc4f01c9553f3",
+        "payload": {
+          "plan_id": "plan-fixture-01",
+          "frozen_at": "2026-09-30T09:10:00+08:00",
+          "revision": 1,
+          "observing_from": "2026-09-30T09:30:00+08:00",
+          "expected": "主线核心在确认窗口内修复，题材广度同步改善；否则仅观察。",
+          "invalidate_if": [
+            "主线核心进一步破位",
+            "题材广度恶化",
+            "账户或证券规则无法确认"
+          ],
+          "note": "合成研究计划，不含经过回测校准的阈值。"
+        },
+        "published_at": null,
+        "received_at": "2026-09-30T09:10:00+08:00",
+        "historical_available_at": null,
+        "availability_basis": "SYNTHETIC",
+        "availability_proof_ref": "fixture://generated"
+      },
+      {
+        "evidence_id": "e-market",
+        "kind": "MARKET",
+        "source_ref": "fixture://e-market",
+        "event_time": "2026-09-30T10:02:00+08:00",
+        "available_at": "2026-09-30T10:02:00+08:00",
+        "ingested_at": "2026-09-30T10:02:00+08:00",
+        "revision_id": "fixture-v1",
+        "content_hash": "76939ab0cf02f7b66622d4e7661feac4cccf78b1afa05cb8cc4a4ebd515ca092",
+        "payload": {
+          "symbol": "SYNTHETIC-01",
+          "last_price": "10.20",
+          "relative_strength_direction": "IMPROVING",
+          "recovery_observations": 3,
+          "synthetic": true
+        },
+        "published_at": null,
+        "received_at": "2026-09-30T10:02:00+08:00",
+        "historical_available_at": null,
+        "availability_basis": "SYNTHETIC",
+        "availability_proof_ref": "fixture://generated"
+      },
+      {
+        "evidence_id": "e-theme",
+        "kind": "THEME",
+        "source_ref": "fixture://e-theme",
+        "event_time": "2026-09-30T10:01:59+08:00",
+        "available_at": "2026-09-30T10:01:59+08:00",
+        "ingested_at": "2026-09-30T10:01:59+08:00",
+        "revision_id": "fixture-v1",
+        "content_hash": "6aa07ce1747355fd66a05a7a365c08b6251eafec0c9621746826f39b9bff2064",
+        "payload": {
+          "theme_id": "SYNTHETIC-THEME",
+          "breadth_direction": "IMPROVING",
+          "members_known_at_observation": 12,
+          "synthetic": true
+        },
+        "published_at": null,
+        "received_at": "2026-09-30T10:01:59+08:00",
+        "historical_available_at": null,
+        "availability_basis": "SYNTHETIC",
+        "availability_proof_ref": "fixture://generated"
+      }
+    ],
+    "snapshot_hash": "57d988195f8acd61f5b52be6e4a461878c8fe579e93d24accc2b46ed3d6185ef"
+  },
+  "decision": {
+    "schema_version": "0.1.0",
+    "decision_id": "decision-fixture-01",
+    "run_id": "run-fixture-01",
+    "snapshot_id": "snapshot-fixture-01",
+    "as_of": "2026-09-30T10:02:00.200+08:00",
+    "valid_until": "2026-09-30T10:02:05.200+08:00",
+    "mode": "replay",
+    "strategy_id": "S01",
+    "strategy_version": "research-draft-0.1",
+    "plan_id": "plan-fixture-01",
+    "action": "PROPOSE",
+    "summary": "合成的分歧修复研究提案；缺少校准谓词、规则和账户数据，不能进入执行。",
+    "evidence_ids": [
+      "e-plan",
+      "e-market",
+      "e-theme"
+    ],
+    "claims": [
+      "观察方向与盘前修复假设相符，需确定性门槛验证。"
+    ],
+    "counterevidence": [
+      "三次修复观测不证明修复成立。",
+      "账户、证券规则与参数缺失。"
+    ],
+    "invalidate_if": [
+      "题材改善逆转",
+      "超过提案有效期",
+      "无法满足确定性策略条件"
+    ],
+    "intent": {
+      "intent_id": "intent-fixture-01",
+      "account_ref": "paper-account-fixture",
+      "symbol": "SYNTHETIC-01",
+      "side": "BUY",
+      "order_type": "LIMIT",
+      "quantity_hint": 100,
+      "limit_price_min": "10.15",
+      "limit_price_max": "10.25",
+      "exit_policy_id": "exit-s01-draft",
+      "idempotency_key": "paper-account-fixture:snapshot-fixture-01:S01:SYNTHETIC-01:1"
+    },
+    "plan_revision": 1,
+    "plan_hash": "862de14b8f34b5ae64f13f31abccfc8ec8f5096ea678f887eaecc4f01c9553f3",
+    "task_revision": 1,
+    "exit_policy_version": "research-draft-0.1",
+    "exit_policy_hash": "3632e8e3c6c8cb0ed043c1681c88575cb4e2644cf0a93210fb9c711e0c96e125"
+  },
+  "risk_decision": {
+    "schema_version": "0.1.0",
+    "risk_decision_id": "risk-fixture-01",
+    "decision_id": "decision-fixture-01",
+    "intent_id": "intent-fixture-01",
+    "checked_at": "2026-09-30T10:02:00.250+08:00",
+    "policy_version": "paper-draft-0.1",
+    "verdict": "DEFERRED",
+    "reasons": [
+      {
+        "code": "STRATEGY_UNVERIFIED",
+        "detail": "尚无冻结且校准的确定性策略谓词。"
+      },
+      {
+        "code": "ACCOUNT_OR_RULES_MISSING",
+        "detail": "无法重验可用资金和证券规则，禁止预占与提交。"
+      }
+    ],
+    "permit": null
+  },
+  "expected_order_count": 0,
+  "exit_policy": {
+    "exit_policy_id": "exit-s01-draft",
+    "version": "research-draft-0.1",
+    "status": "UNVALIDATED",
+    "conditions": [
+      "theme_breakdown",
+      "pre_registered_risk_gate"
+    ],
+    "same_day_buy": "EXIT_BLOCKED_UNTIL_SELLABLE"
+  }
+}

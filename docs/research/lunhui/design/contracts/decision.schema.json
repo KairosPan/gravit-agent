@@ -1,0 +1,382 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lunhui.invalid/contracts/decision.schema.json",
+  "title": "decision",
+  "description": "Proposed design contract; not an implemented trading interface.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "0.1.0"
+    },
+    "decision_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "snapshot_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "as_of": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "valid_until": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "mode": {
+      "enum": [
+        "replay",
+        "paper"
+      ]
+    },
+    "strategy_id": {
+      "enum": [
+        "S01",
+        "S02",
+        "NONE"
+      ]
+    },
+    "strategy_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "plan_id": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "action": {
+      "enum": [
+        "WAIT",
+        "WATCH",
+        "PROPOSE",
+        "REDUCE",
+        "EXIT"
+      ]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "evidence_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
+    },
+    "counterevidence": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
+    },
+    "invalidate_if": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
+    },
+    "intent": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "intent_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "account_ref": {
+              "type": "string",
+              "minLength": 1
+            },
+            "symbol": {
+              "type": "string",
+              "minLength": 1
+            },
+            "side": {
+              "enum": [
+                "BUY",
+                "SELL"
+              ]
+            },
+            "order_type": {
+              "const": "LIMIT"
+            },
+            "quantity_hint": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "limit_price_min": {
+              "type": "string",
+              "pattern": "^(?:0\\.(?:0[1-9]|[1-9][0-9])|[1-9][0-9]*\\.[0-9]{2})$"
+            },
+            "limit_price_max": {
+              "type": "string",
+              "pattern": "^(?:0\\.(?:0[1-9]|[1-9][0-9])|[1-9][0-9]*\\.[0-9]{2})$"
+            },
+            "exit_policy_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "idempotency_key": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "intent_id",
+            "account_ref",
+            "symbol",
+            "side",
+            "order_type",
+            "quantity_hint",
+            "limit_price_min",
+            "limit_price_max",
+            "exit_policy_id",
+            "idempotency_key"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "plan_revision": {
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "plan_hash": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "task_revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "exit_policy_version": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "exit_policy_hash": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "decision_id",
+    "run_id",
+    "snapshot_id",
+    "as_of",
+    "valid_until",
+    "mode",
+    "strategy_id",
+    "strategy_version",
+    "plan_id",
+    "action",
+    "summary",
+    "evidence_ids",
+    "claims",
+    "counterevidence",
+    "invalidate_if",
+    "intent",
+    "plan_revision",
+    "plan_hash",
+    "task_revision",
+    "exit_policy_version",
+    "exit_policy_hash"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "enum": [
+              "WAIT",
+              "WATCH"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "intent": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "PROPOSE"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "intent": {
+            "type": "object",
+            "properties": {
+              "side": {
+                "const": "BUY"
+              }
+            }
+          },
+          "plan_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "strategy_id": {
+            "enum": [
+              "S01",
+              "S02"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "enum": [
+              "REDUCE",
+              "EXIT"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "intent": {
+            "type": "object",
+            "properties": {
+              "side": {
+                "const": "SELL"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "plan_id": {
+            "type": "null"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "plan_revision": {
+            "type": "null"
+          },
+          "plan_hash": {
+            "type": "null"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "plan_revision": {
+            "type": "integer"
+          },
+          "plan_hash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "intent": {
+            "type": "null"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "exit_policy_version": {
+            "type": "null"
+          },
+          "exit_policy_hash": {
+            "type": "null"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "exit_policy_version": {
+            "type": "string",
+            "minLength": 1
+          },
+          "exit_policy_hash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    }
+  ]
+}
