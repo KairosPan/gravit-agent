@@ -28,6 +28,7 @@ import { setupFaceProfile } from "../src/setup.ts";
 import { bootFace } from "../src/boot.ts";
 import { PERSONA_PATH, readPersona } from "../src/persona.ts";
 import { ROLE_TEMPLATE, ROLES_ROOT, readRoles } from "../src/roles.ts";
+import { LUNHUI_RUN_PATH, readProtocol } from "../src/protocols.ts";
 import { makeBotsRoot } from "./bots-fixture.ts";
 import { mountClient, remote, signIn } from "./remote.ts";
 import { StubAdapter, type StubReply } from "./stub-llm.ts";
@@ -38,6 +39,8 @@ const GRAVIT_MARK = "GRAVIT-ROOT-MARK-7f3a";
 /** The opening words of the research-cycle contract (`dsh/profile/cycle.md`, the `gravit:cycle` section): enough
  *  to tell whether the section reached a prompt, without copying the contract into a test. The em dash is U+2014. */
 const CYCLE_HEADING = "Step 0 — ask once";
+/** The run protocol's first line (`dsh/profile/lunhui-run.md`, the `lunhui:run` section), read from the file. */
+const RUN_HEADING = readProtocol(LUNHUI_RUN_PATH).split("\n")[0];
 const sourceKind = (m: { source?: unknown }) => ((m.source ?? {}) as { kind?: string }).kind;
 const textOf = (m: GenerateOptions["messages"][number]) => m.content.map((b) => "text" in b ? b.text : "").join("\n");
 const lastHuman = (r: GenerateOptions) => [...r.messages].reverse().find((m) => ["user", "tool"].includes(String(sourceKind(m))));
@@ -311,6 +314,10 @@ test("roles smoke: cn-market-analyst reads and submits as a role, Gravit's own s
       return found()![1];
     };
 
+    /* The run protocol: Gravit's prompt carries it (lunhui_read_run is registered), the role child's and the
+     * spawn child's below do not. */
+    assert.ok(renderPrompt(await ctx.systemPrompt.assemble(assembleContextFor(gravit))).includes(RUN_HEADING), "Gravit reads the run protocol");
+
     /* Gravit's root: the submit is refused before the run is touched. */
     await prompt("RUN_ROOT_SUBMIT");
     await gravit.whenIdle();
@@ -326,6 +333,7 @@ test("roles smoke: cn-market-analyst reads and submits as a role, Gravit's own s
     const system = textOf(child[0].messages[0]);
     assert.ok(system.includes("市场与题材分析员"), "the role persona is the child's");
     assert.equal(system.includes(readPersona(PERSONA_PATH).split("{{")[0]), false, "and it shadows Gravit's");
+    assert.equal(system.includes(RUN_HEADING), false, "no run protocol for a role child: its allow list carries no lunhui_read_run, and it is no fork");
     const childResults = toolTexts(child.at(-1)!);
     assert.equal(childResults.length, 3, "the freeze, the read and the submit came back");
     assert.match(childResults[0], /unknown tool "lunhui_freeze_index"/, "a freeze is out of the role child's reach");
@@ -340,6 +348,8 @@ test("roles smoke: cn-market-analyst reads and submits as a role, Gravit's own s
     await prompt("RUN_SPAWN_FREEZE");
     const spawn = await childAfter("SPAWN_FREEZE");
     assert.ok(spawn[0].tools!.some((t) => t.name === "lunhui_freeze_index"), "the plain subagent child carries the freeze");
+    assert.ok(spawn[0].tools!.some((t) => t.name === "lunhui_read_run"), "and the run protocol's probe");
+    assert.equal(textOf(spawn[0].messages[0]).includes(RUN_HEADING), false, "yet no run protocol: it is a delegated child that is not a fork");
     assert.match(toolTexts(spawn.at(-1)!)[0], /NOT_GRAVIT/, "and its call is NOT_GRAVIT");
   } finally {
     await dispose?.();

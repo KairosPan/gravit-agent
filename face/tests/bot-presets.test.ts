@@ -22,6 +22,7 @@ import { declareBots, definitionFor } from "../src/bot-presets.ts";
 import { BOT_PLUGIN_RELATIVE, DEFAULT_ALLOW, createBot, isBotId, renderComposition, updateSoul } from "../src/bots.ts";
 import { GRAVIT_PLUGIN_URL, ROLES_ROOT, gravitRows, readRoles } from "../src/roles.ts";
 import { CYCLE_PATH, readCycle } from "../src/cycle.ts";
+import { readProtocols } from "../src/protocols.ts";
 import { GRAVIT_PLUGIN_ABS, makeBotsRoot, PLUGIN_ABS, REPO } from "./bots-fixture.ts";
 
 const SKILLS_PLUGIN = "@deepseek-ai/dsh-skill-filesystem";
@@ -99,12 +100,13 @@ test("every shipped bot's plugin row lands on the real face/plugins/bot.js, and 
   const gravit = definitionFor(botsRoot, "gravit");
   const roles = readRoles(ROLES_ROOT);
   const cycle = readCycle(CYCLE_PATH);
+  const protocols = readProtocols();
   const gravitUrl = pathToFileURL(GRAVIT_PLUGIN_ABS).href;
   assert.deepEqual(roles.map((role) => role.id), ["cn-market-analyst"], "the repository ships one role: cn-market-analyst");
   assert.deepEqual(rowsOf(gravit).map((row) => row.id), ["gravit", "role-cn-market-analyst"], "Gravit's preset has its one role row");
-  assert.deepEqual(gravit.plugins[0], { id: "gravit", name: gravitUrl, config: { roles: roles.map((role) => ({ tool: role.tool, summary: role.description })), cycle } },
+  assert.deepEqual(gravit.plugins[0], { id: "gravit", name: gravitUrl, config: { roles: roles.map((role) => ({ tool: role.tool, summary: role.description })), cycle, protocols } },
     "the mirror's relative plugin path rebases to the real face/plugins/gravit.js");
-  assert.deepEqual(gravit.plugins, gravitRows(roles, { plugin: gravitUrl, cycle }),
+  assert.deepEqual(gravit.plugins, gravitRows(roles, { plugin: gravitUrl, cycle, protocols }),
     "the shipped default composes the gravit plugin and the role row; it masks no host tool, so the host roster is kept");
   assert.equal(typeof gravit.name, "string");
 });

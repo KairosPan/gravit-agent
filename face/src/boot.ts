@@ -124,6 +124,7 @@ import { declareBots, definitionFor, type BotPresets } from "./bot-presets.ts";
 import { GRAVIT_PLUGIN_URL, ROLES_ROOT, gravitRows, readRoles } from "./roles.ts";
 import { PERSONA_PATH, readPersona } from "./persona.ts";
 import { CYCLE_PATH, readCycle } from "./cycle.ts";
+import { readProtocols } from "./protocols.ts";
 import { AGENT_INSTRUCTIONS_ROW_ID, instructionsPatch } from "./instructions.ts";
 import { aksharePatches } from "./akshare.ts";
 import { accountSeatPatches } from "./account-seat.ts";
@@ -224,6 +225,11 @@ export interface FaceBootOptions {
    * oversized file refuses the compose with that path: a face that ships `roles/` ships the
    * contract they are called under. */
   cyclePath?: string;
+  /** The directory the run protocols are read from (`dsh/profile/`, src/protocols.ts); tests point
+   * it at a fixture. Defaults to the repository's. {@link composeFace} reads them beside the cycle
+   * and hands them to Gravit's default preset as the `gravit` row's `protocols`, refusing the
+   * compose the same way, path-first. */
+  protocolsDir?: string;
   /** Leave the gateway's readiness uncommitted: the caller commits it with
    * {@link BootedFace.commitReady} once its OWN routes are mounted. `main.ts`
    * sets it, because it registers `/`, the `/data` routes, the room engine and
@@ -283,7 +289,8 @@ function composedRowIds(layers: readonly FacePatchList[]): Set<string> {
  * {@link FaceBootOptions.extraPatches} (usually none), the telemetry switch,
  * the hmr switch, Gravit's persona, the instructions patch (src/instructions.ts),
  * then the face's host rows last - among them the default preset, rendered
- * here from `roles/` (src/roles.ts) and `dsh/profile/cycle.md` (src/cycle.ts)
+ * here from `roles/` (src/roles.ts), `dsh/profile/cycle.md` (src/cycle.ts) and the
+ * run protocols (src/protocols.ts)
  * rather than read from `bots/gravit`.
  *
  * Pure with respect to the environment — the home is threaded explicitly into
@@ -296,7 +303,8 @@ function composedRowIds(layers: readonly FacePatchList[]): Set<string> {
  * and the loaded profile (the runtime resolution needs it).
  * @throws when the profile does not exist, a bundle was skipped, a
  * patch file cannot load, the roles directory is missing, a role under
- * `roles/` is malformed, or the cycle file is empty, oversized or unreadable
+ * `roles/` is malformed, or the cycle file or a protocol file is missing, empty,
+ * oversized or unreadable
  * (the message opens with the absolute path of the directory or file at fault).
  */
 export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; rootConfig: string; profile: Profile } {
@@ -415,8 +423,9 @@ export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; ro
   }
   /* The static `preset-gravit` row is RENDERED from `roles/` here, in memory
    * (src/roles.ts `gravitRows`): the face's `gravit.js` row - the date section,
-   * the role summaries and the research-cycle contract (`readCycle`, read beside
-   * the roles and refusing the compose the same way), named by an absolute
+   * the role summaries, the research-cycle contract (`readCycle`, read beside
+   * the roles and refusing the compose the same way) and the run protocols
+   * (`readProtocols`, read and refused the same way), named by an absolute
    * `file:` URL - then one `@deepseek-ai/dsh-tool-subagent` row per role, each
    * registering a `role_<id>` tool. None of them masks a host tool, so Gravit's
    * roster is the host's plus the role tools; no persona is shadowed. `bots/gravit`
@@ -434,7 +443,8 @@ export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; ro
    * packages/preset/agent-preset-registry/src/definition.ts:5-11). */
   const roles = readRoles(opts.rolesRoot ?? ROLES_ROOT);
   const cycle = readCycle(opts.cyclePath ?? CYCLE_PATH);
-  const gravit = definitionFor(opts.botsRoot ?? BOTS_ROOT, DEFAULT_PRESET, gravitRows(roles, { plugin: GRAVIT_PLUGIN_URL, cycle }));
+  const protocols = readProtocols(opts.protocolsDir);
+  const gravit = definitionFor(opts.botsRoot ?? BOTS_ROOT, DEFAULT_PRESET, gravitRows(roles, { plugin: GRAVIT_PLUGIN_URL, cycle, protocols }));
   patches.push(...faceOverlay(opts.port, gravit));
   return { patches, rootConfig, profile };
 }

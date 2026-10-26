@@ -7,7 +7,9 @@
  * the list of its roles (`gravit:roles`, from the `roles` config key, which
  * `gravitRows` fills from `roles/`) and the research-cycle contract
  * (`gravit:cycle`, from the `cycle` config key, which `composeFace` fills from
- * `dsh/profile/cycle.md` through src/cycle.ts).
+ * `dsh/profile/cycle.md` through src/cycle.ts), and the run protocols (one
+ * section per entry of the `protocols` config key, which `composeFace` fills
+ * from `dsh/profile/` through src/protocols.ts: today `lunhui:run`).
  *
  * WHY A DATE. The 2026-10-10 prompt trace found no date anywhere in the
  * assembled prompt, so Gravit could not tell a fresh bar from a stale one or
@@ -82,7 +84,17 @@
  * the assembling scope; this plugin never registers or restricts a tool: the
  * `role_<id>` tools come from the sibling rows (bots-smoke S3 pins the roster).
  *
- * `interpolate: false` on all three sections because their text is prose, not a
+ * THE PROTOCOLS. Each entry of `protocols` - `{ name, probe, text }` - is a
+ * section named `name` at `DEPLOYMENT_PERSONA_SUFFIX - 60`, just before the
+ * cycle, gated as the cycle is but on its own probe: `isRootOrFork(context) &&
+ * canCall(ctx, context, probe)`. The shipped one is `lunhui:run`
+ * (`dsh/profile/lunhui-run.md`, modules spec A9, §5.10), probed on
+ * `lunhui_read_run`. The Lunhui tools are registered tree-wide, so the probe
+ * only says the Lunhui rows mounted: the preset scope keeps the section from a
+ * bot, the header from a spawn child, and the allow list (no `lunhui_read_run`)
+ * with the header from a role child.
+ *
+ * `interpolate: false` on every section because their text is prose, not a
  * template: the dsh system prompt is a strict `{{...}}` template with no
  * escape. The date's order is the persona slot's + 1, so the date follows
  * identity - harness identity, the persona prefix, then the date - and
@@ -102,6 +114,16 @@ export const ROLES_SECTION = "gravit:roles";
  *  own name, like the date's. */
 export const CYCLE_SECTION = "gravit:cycle";
 
+/** The run protocol's section name (src/protocols.ts `LUNHUI_RUN_SECTION` hands it in the config;
+ *  named here for the tests and the readers). */
+export const LUNHUI_RUN_SECTION = "lunhui:run";
+
+/** A protocol's section name: a namespace, a colon, a dashed name. */
+const PROTOCOL_NAME = /^[a-z]+:[a-z-]+$/;
+
+/** A probe: a tool name as dsh registers one. */
+const TOOL_NAME = /^[a-z][a-z0-9_]*$/;
+
 /** What a role is, said once above the list. The list's lines follow it. */
 const ROLES_INTRO = "Roles. One-shot delegates on your team, each with its own persona and tools; call one by its tool name with a self-contained brief, and treat its report as a claim to check, never a result to copy. Every report carries four headings: status, what was measured, paths, limits.";
 
@@ -110,13 +132,13 @@ const ROLES_INTRO = "Roles. One-shot delegates on your team, each with its own p
 const ROLE_TOOL = /^role_[a-z0-9_]+$/;
 
 /** What would fail at mount or render, as a reason; `undefined` when the config
- *  is valid. `{}` is valid (no roles, no cycle); the shipped row carries
- *  `roles` and `cycle`. Both are optional keys, checked here when present so a
+ *  is valid. `{}` is valid (no roles, no cycle, no protocols); the shipped row
+ *  carries all three. Each is an optional key, checked here when present so a
  *  malformed value refuses the mount, loudly, instead of loading a silently
  *  dead config. */
 export function validateGravitConfig(config) {
   if (config === null || typeof config !== "object" || Array.isArray(config)) return "config must be an object";
-  const { cycle, roles } = config;
+  const { cycle, roles, protocols } = config;
   if (cycle !== undefined && (typeof cycle !== "string" || cycle.trim() === "")) return "cycle must be a non-empty string";
   if (roles !== undefined) {
     if (!Array.isArray(roles)) return "roles must be an array of { tool, summary }";
@@ -124,6 +146,18 @@ export function validateGravitConfig(config) {
       if (role === null || typeof role !== "object" || Array.isArray(role)) return `roles[${index}] must be an object with tool and summary`;
       if (typeof role.tool !== "string" || !ROLE_TOOL.test(role.tool)) return `roles[${index}].tool must match ${ROLE_TOOL}`;
       if (typeof role.summary !== "string" || role.summary.trim() === "") return `roles[${index}].summary must be a non-empty string`;
+    }
+  }
+  if (protocols !== undefined) {
+    if (!Array.isArray(protocols)) return "protocols must be an array of { name, probe, text }";
+    const seen = new Set();
+    for (const [index, protocol] of protocols.entries()) {
+      if (protocol === null || typeof protocol !== "object" || Array.isArray(protocol)) return `protocols[${index}] must be an object with name, probe and text`;
+      if (typeof protocol.name !== "string" || !PROTOCOL_NAME.test(protocol.name)) return `protocols[${index}].name must match ${PROTOCOL_NAME}`;
+      if (seen.has(protocol.name)) return `protocols[${index}].name ${protocol.name} is given twice`;
+      seen.add(protocol.name);
+      if (typeof protocol.probe !== "string" || !TOOL_NAME.test(protocol.probe)) return `protocols[${index}].probe must be a tool name matching ${TOOL_NAME}`;
+      if (typeof protocol.text !== "string" || protocol.text.trim() === "") return `protocols[${index}].text must be a non-empty string`;
     }
   }
   return undefined;
@@ -216,6 +250,16 @@ export function apply(ctx, config) {
       order: ctx.systemPrompt.getSectionOrder("DEPLOYMENT_PERSONA_SUFFIX") - 50,
       interpolate: false,
       text: (context) => isRootOrFork(context) && canCall(ctx, context, "create_goal") ? config.cycle : "",
+    }));
+  }
+  /* Ten before the cycle, each on its own probe: the run protocol reads only where the Lunhui
+   * rows mounted, for Gravit and a fork child (the same text, the same cached prefix). */
+  for (const protocol of config.protocols ?? []) {
+    ctx.effect(() => ctx.systemPrompt.section({
+      name: protocol.name,
+      order: ctx.systemPrompt.getSectionOrder("DEPLOYMENT_PERSONA_SUFFIX") - 60,
+      interpolate: false,
+      text: (context) => isRootOrFork(context) && canCall(ctx, context, protocol.probe) ? protocol.text : "",
     }));
   }
 }

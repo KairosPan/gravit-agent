@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import SystemPrompt from "@deepseek-ai/dsh-system-prompt";
-import { CYCLE_SECTION, ROLES_SECTION, TODAY_SECTION, apply, canCall, inject, isRootOrFork, name, resolveZone, rolesText, todayText, validateGravitConfig } from "../plugins/gravit.js";
+import { CYCLE_SECTION, LUNHUI_RUN_SECTION, ROLES_SECTION, TODAY_SECTION, apply, canCall, inject, isRootOrFork, name, resolveZone, rolesText, todayText, validateGravitConfig } from "../plugins/gravit.js";
 
 const dshSectionOrder = (slot: "DEPLOYMENT_PERSONA_PREFIX" | "DEPLOYMENT_PERSONA_SUFFIX" | "TOOL_SUBAGENT"): number => SystemPrompt.prototype.getSectionOrder(slot);
 
@@ -197,4 +197,57 @@ test("gravit: both sections are blank for a delegated child that is not a fork, 
   }
   assert.equal(isRootOrFork(undefined), true, "total on a missing context");
   tree.unload();
+});
+
+const PROTOCOL = { name: "lunhui:run", probe: "lunhui_read_run", text: "# 市场研究运行\n\n先冻结 {run}。" };
+
+test("validateGravitConfig: protocols are checked when present - an array of { name, probe, text }, names unique", () => {
+  assert.equal(LUNHUI_RUN_SECTION, "lunhui:run");
+  assert.equal(validateGravitConfig({ protocols: [] }), undefined);
+  assert.equal(validateGravitConfig({ protocols: [PROTOCOL] }), undefined);
+  assert.match(validateGravitConfig({ protocols: PROTOCOL }) ?? "", /protocols must be an array/);
+  assert.match(validateGravitConfig({ protocols: [null] }) ?? "", /protocols\[0\] must be an object/);
+  assert.match(validateGravitConfig({ protocols: [{ ...PROTOCOL, name: "lunhui-run" }] }) ?? "", /protocols\[0\]\.name/);
+  assert.match(validateGravitConfig({ protocols: [{ ...PROTOCOL, name: "Lunhui:run" }] }) ?? "", /protocols\[0\]\.name/);
+  assert.match(validateGravitConfig({ protocols: [{ ...PROTOCOL, probe: "" }] }) ?? "", /protocols\[0\]\.probe/);
+  assert.match(validateGravitConfig({ protocols: [{ ...PROTOCOL, probe: "lunhui read run" }] }) ?? "", /protocols\[0\]\.probe/);
+  assert.match(validateGravitConfig({ protocols: [{ ...PROTOCOL, text: " " }] }) ?? "", /protocols\[0\]\.text/);
+  assert.match(validateGravitConfig({ protocols: [PROTOCOL, PROTOCOL] }) ?? "", /protocols\[1\]\.name .*twice/);
+  assert.throws(() => apply(fakeScope().ctx, { protocols: [{ ...PROTOCOL, text: "" }] }), /gravit: .*protocols/);
+});
+
+/* A protocol is gated as the cycle is - on the header and on what the assembling scope can call -
+ * with its own probe: `lunhui:run` reads `lunhui_read_run`, so it is there only when the Lunhui rows
+ * mounted. It sits ten below the cycle, so the run protocol reads just before the cycle contract. A
+ * role child fails both halves (its allow list carries no lunhui_read_run, and it is no fork); a
+ * plain spawn child sees the probe (the Lunhui tools are tree-wide) and only the header blanks it. */
+test("gravit: a protocol section sits just before the cycle, is literal, and reads only for a root or fork that can call its probe", () => {
+  const tree = fakeScope();
+  apply(tree.ctx, { cycle: "# The research cycle", protocols: [PROTOCOL] });
+  const section = tree.sections.find((s) => s.name === LUNHUI_RUN_SECTION)!;
+  assert.ok(section, "registered under the protocol's own name");
+  assert.equal(section.order, dshSectionOrder("DEPLOYMENT_PERSONA_SUFFIX") - 60);
+  assert.ok(section.order < tree.sections.find((s) => s.name === CYCLE_SECTION)!.order, "before the cycle contract");
+  assert.equal(section.interpolate, false);
+  assert.equal(tree.lookups.length, 0, "nothing is looked up at mount: the gate is read at every assembly");
+  const textFor = (visible: string[], header?: object) =>
+    (section.text as (c: unknown) => string)(header === undefined ? { scope: { visible } } : { scope: { visible }, agent: { session: { header } } });
+  const withProbe = ["read", "create_goal", "lunhui_read_run", "lunhui_freeze_index"];
+  assert.equal(textFor(withProbe, { id: "root", isSeeded: false }), PROTOCOL.text, "a root session that can call the probe: the text, verbatim");
+  assert.equal(textFor(withProbe, { id: "fork", origin: "subagent", isSeeded: true }), PROTOCOL.text, "a fork child: the same text");
+  assert.equal(textFor(withProbe, { id: "spawn", origin: "subagent", isSeeded: false }), "", "a spawn child that can call the probe: nothing");
+  assert.equal(textFor(["skill", "lunhui_read_environment_context", "lunhui_submit_environment"], { id: "role", origin: "subagent", isSeeded: false }), "", "a role child: nothing");
+  assert.equal(textFor(["read", "create_goal"], { id: "root", isSeeded: false }), "", "the probe hidden (the Lunhui rows did not mount): nothing, even for a root");
+  assert.deepEqual([...new Set(tree.lookups.map((l) => l.name))], ["lunhui_read_run"], "the probe is the protocol's own");
+  tree.unload();
+  assert.equal(tree.sections.length, 0, "unloading the preset revision takes the protocol out with the rest");
+});
+
+test("gravit: without a protocols key, or with an empty list, no protocol section is registered", () => {
+  for (const config of [{}, { protocols: [] }]) {
+    const tree = fakeScope();
+    apply(tree.ctx, config);
+    assert.equal(tree.sections.some((s) => s.name === LUNHUI_RUN_SECTION), false);
+    tree.unload();
+  }
 });

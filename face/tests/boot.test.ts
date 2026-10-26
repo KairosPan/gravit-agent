@@ -13,6 +13,7 @@ import { ACCOUNT_SEAT_ROW_ID } from "../src/account-seat.ts";
 import { LUNHUI_ROW_IDS } from "../src/lunhui.ts";
 import { PERSONA_PATH, readPersona } from "../src/persona.ts";
 import { CYCLE_PATH, readCycle } from "../src/cycle.ts";
+import { readProtocols } from "../src/protocols.ts";
 import { AGENT_INSTRUCTIONS_ROW_ID, INSTRUCTIONS_CONFIG, instructionsPatch } from "../src/instructions.ts";
 import { facePolicyPatches } from "../src/policy.ts";
 import { definitionFor } from "../src/bot-presets.ts";
@@ -474,12 +475,13 @@ test("composeFace builds preset-gravit from roles/ in memory: the gravit row by 
   try {
     const { patches } = composeFace({ profileName: "face", port: 3090, dshHome: home, botsRoot: bots, rolesRoot });
     const row = composeEntries([patches]).find((entry) => entry.id === "preset-gravit");
-    const expected = definitionFor(bots, "gravit", gravitRows(readRoles(rolesRoot), { plugin: GRAVIT_PLUGIN_URL, cycle: readCycle(CYCLE_PATH) }));
+    const expected = definitionFor(bots, "gravit", gravitRows(readRoles(rolesRoot), { plugin: GRAVIT_PLUGIN_URL, cycle: readCycle(CYCLE_PATH), protocols: readProtocols() }));
     assert.deepEqual(row?.config, expected);
     const plugins = (row?.config as unknown as { plugins: Array<{ id: string; name: string; config: unknown }> }).plugins;
     assert.deepEqual(plugins.map((p) => p.id), ["gravit", "role-probe"]);
     assert.equal(plugins[0].name, GRAVIT_PLUGIN_URL);
     assert.equal((plugins[0].config as { cycle: string }).cycle, readCycle(CYCLE_PATH));
+    assert.deepEqual((plugins[0].config as { protocols: unknown }).protocols, readProtocols(), "the run protocol rides beside the cycle");
 
     const legacy = composeEntries([patches]).find((entry) => entry.id === "preset-kairos");
     assert.deepEqual(legacy?.config, { ...expected, id: "kairos", description: LEGACY_PRESET_DESCRIPTION });
@@ -629,4 +631,25 @@ test("a composition without an agent-instructions row gets no instructions patch
   }
   assert.ok(printed.length > 0, "the stderr hook is live: the policy layer warns about each of its missing targets");
   assert.deepEqual(printed.filter((line) => line.includes(AGENT_INSTRUCTIONS_ROW_ID) || line.includes("GRAVIT")), []);
+});
+
+/* The run protocols are read where the cycle is and refused the same way: a protocols directory
+ * without lunhui-run.md refuses the compose, its message opening with the file, so Gravit never
+ * boots the Lunhui rows without the order they are driven in. `protocolsDir` points the read at a
+ * fixture directory. */
+test("composeFace refuses a protocols directory with no lunhui-run.md, its message opening with the path", async () => {
+  const home = freshHome();
+  const rolesRoot = await makeRolesRoot();
+  const protocolsDir = mkdtempSync(join(tmpdir(), "face-protocols-"));
+  try {
+    assert.throws(() => composeFace({ profileName: "face", port: 3090, dshHome: home, rolesRoot, protocolsDir }),
+      (e: Error) => e.message === `${join(protocolsDir, "lunhui-run.md")}: the protocol file is missing`);
+    await writeFile(join(protocolsDir, "lunhui-run.md"), "# 运行\n\n先冻结。\n");
+    const { patches } = composeFace({ profileName: "face", port: 3090, dshHome: home, rolesRoot, protocolsDir });
+    const plugins = (composeEntries([patches]).find((entry) => entry.id === "preset-gravit")?.config as unknown as { plugins: Array<{ config: { protocols: unknown } }> }).plugins;
+    assert.deepEqual(plugins[0].config.protocols, [{ name: "lunhui:run", probe: "lunhui_read_run", text: "# 运行\n\n先冻结。" }], "the fixture's text is the one composed");
+  } finally {
+    await rm(rolesRoot, { recursive: true, force: true });
+    await rm(protocolsDir, { recursive: true, force: true });
+  }
 });

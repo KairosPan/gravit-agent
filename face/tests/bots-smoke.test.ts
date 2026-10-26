@@ -16,12 +16,12 @@
  *     the declaration is admitted when the allow list names it.
  * S3: `gravit` is rendered from `roles/` (src/roles.ts) and `dsh/profile/cycle.md`
  *     (src/cycle.ts): the face's gravit plugin (the date section, the role
- *     summaries, the research-cycle contract) and one `dsh-tool-subagent` row
- *     per role, none of which masks a tool. Gravit's sessions join it: their
- *     tool set is the host's global view plus the `role_*` tools (here
- *     `role_cn_market_analyst`, the one role `roles/` ships), their prompt
- *     carries the date and the cycle contract, and a bot's carries neither (nor
- *     does it see a role tool).
+ *     summaries, the research-cycle contract, the run protocol) and one
+ *     `dsh-tool-subagent` row per role, none of which masks a tool. Gravit's
+ *     sessions join it: their tool set is the host's global view plus the
+ *     `role_*` tools (here `role_cn_market_analyst`, the one role `roles/`
+ *     ships), their prompt carries the date, the cycle contract and the run
+ *     protocol, and a bot's carries none of them (nor does it see a role tool).
  * Also: the roster lists a broken fixture with its reason and never `_template`;
  * a session created through the session controller with `agentPreset` carries
  * it on its header; and Gate 2 is tree-wide, refusing an order tool the bot's
@@ -44,6 +44,7 @@ import { bootFace } from "../src/boot.ts";
 import { BOT_PLUGIN_RELATIVE, DEFAULT_ALLOW, createBot, renderComposition } from "../src/bots.ts";
 import { PERSONA_PATH, readPersona } from "../src/persona.ts";
 import { ROLES_ROOT, readRoles } from "../src/roles.ts";
+import { LUNHUI_RUN_PATH, readProtocol } from "../src/protocols.ts";
 import { expandAllow } from "../plugins/bot.js";
 import { makeRepoBotsRoot, PLUGIN_ABS } from "./bots-fixture.ts";
 import { mountClient, remote, remoteResult, signIn } from "./remote.ts";
@@ -60,6 +61,9 @@ const STAND_IN = "mcp__drill__portfolio_live_order";
 /** The opening words of the research-cycle contract (`dsh/profile/cycle.md`, the `gravit:cycle` section): enough
  *  to tell whether the section reached a prompt, without copying the contract into a test. The em dash is U+2014. */
 const CYCLE_HEADING = "Step 0 — ask once";
+
+/** The run protocol's first line (`dsh/profile/lunhui-run.md`, the `lunhui:run` section), read from the file. */
+const RUN_HEADING = readProtocol(LUNHUI_RUN_PATH).split("\n")[0];
 
 /** Past plugins/bot.js's coalesced re-expansion, which runs one timer turn
  *  after a burst of `tools/change`. */
@@ -155,6 +159,7 @@ test("bots smoke: roster, mask, persona, a default that masks nothing, the shipp
       assert.ok((await promptOf(gravit)).includes(readPersona(PERSONA_PATH).split("{{")[0]), "D11 closed: Gravit is told who it is");
       assert.match(await promptOf(gravit), /\nToday is \d{4}-\d{2}-\d{2}, [A-Z][a-z]+ \(.+\)\.\n/, "the date section is in Gravit's prompt (plan 1)");
       assert.ok((await promptOf(gravit)).includes(CYCLE_HEADING), "the cycle contract is in Gravit's prompt (plan 3): `gravit:cycle` is registered in Gravit's preset layer and reads create_goal, which Gravit can call");
+      assert.ok((await promptOf(gravit)).includes(RUN_HEADING), "the run protocol is in Gravit's prompt: `lunhui:run` is registered in Gravit's preset layer and reads lunhui_read_run, which the Lunhui rows registered");
 
       /* S1 + S2 - a bot: the session controller mounts the preset; the mask and the persona hold. */
       const p = await create({ cwd: join(bots, "probe", "journal"), agentPreset: "probe" });
@@ -169,6 +174,7 @@ test("bots smoke: roster, mask, persona, a default that masks nothing, the shipp
         "and Gravit's text is gone from the bot's prompt: bot.js's `deployment:persona-prefix` shadows the global prefix");
       assert.equal(probePrompt.includes("Today is "), false, "the section is scoped to Gravit's preset: a bot never sees it");
       assert.equal(probePrompt.includes(CYCLE_HEADING), false, "nor the cycle contract, though the bot can call create_goal: `gravit:cycle` is scoped to Gravit's preset too, so a bot never has it");
+      assert.equal(probePrompt.includes(RUN_HEADING), false, "nor the run protocol: `lunhui:run` is scoped to Gravit's preset");
 
       /* S1, the SHIPPED form. `shipped`'s composition is untouched since
        * `createBot` wrote it, so its plugin row is the relative path every real
