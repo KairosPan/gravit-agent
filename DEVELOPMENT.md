@@ -309,7 +309,7 @@ default broken, and the boot refuses).
 | `ask_user_question` | `tool-ask-user` (face overlay; the blocking `legacy` mode) | §4.3; the answer is model-visible, so not a gate |
 | `mcp__akshare__*` | project `mcp-akshare` row | public A-share/other market queries, unguarded; check source errors and truncation |
 | `mcp__account__*` | project `mcp-account` row (§3.1) | the Account seat: Linqi's Account at `127.0.0.1:4820`, an external program; 35 real-account tools (42 against a simulated service); the twelve writes carded by Gate 2 (§4.7), the reads public, seconds old and unguarded — read as they are, with no lookahead guard; `portfolio_wait` polls a card or an order for 55 s at most |
-| `lunhui_read_run`, `lunhui_freeze_quotes`, `lunhui_freeze_limit_up`, `lunhui_freeze_boards`, `lunhui_freeze_index` | the project Lunhui rows (`src/lunhui.ts`, §4.3): `lunhui-runs` registers the first, one freeze row each of the other four | frozen A-share research runs (spec `docs/superpowers/specs/2026-10-25-lunhui-modules-design.md`, plan 1 of four): every tool takes a strategy name — the channel's — and a run id, never a path, anchored under the `lunhui-runs` row's `strategiesRoot` by `face/plugins/lunhui/lib/runs.mjs`; a freeze with `run` omitted opens a run in `strategies/<name>/analysis/<run>/` (`run.json`, `metrics.json`) and answers its id, with `run` it adds to that open run, and each writes one `evidence-<source>.json` (`quotes`, `limit-up`, `boards`, `index`) of hashed items and the derived items over them — a second freeze of one source in one run is `SOURCE_FROZEN`; `lunhui_freeze_quotes` (Tencent quotes and 60-day bars, 1–8 symbols, stage 0's rule) in any channel, the other three in `cn-market` only (`WRONG_CHANNEL`): the 涨停, 炸板 and 昨日涨停 pools (≤ 500 rows each), the top 30 concept boards by change with up to ten boards' members (≤ 100 each) and the board fund-flow rank, the four indices with 120-day bars and the all-A-shares advance/decline counts — the Eastmoney items stamped with the host that served them and `delayed`; eight freezes a run, a refused one counted, then `TOOL_BUDGET`; a delegated child is refused `NOT_GRAVIT`; a China date no calendar table covers is `CALENDAR_UNCOVERED`; an evidence file is at most 256 KiB and a run's evidence 2 MiB; every refusal is a thrown `LunhuiError`, `Error: <CODE> …` to the model, naming no path; `lunhui_read_run` answers `run.json`, the counters and each module artifact's headline (none exists before plan 2: nothing seals a run yet); unguarded and never evidence of a trade, like AKShare's; named by no bot's allow list (`tests/bots.test.ts`) |
+| `lunhui_read_run`, `lunhui_freeze_quotes`, `lunhui_freeze_limit_up`, `lunhui_freeze_boards`, `lunhui_freeze_index` | the project Lunhui rows (`src/lunhui.ts`, §4.3): `lunhui-runs` registers the first, one freeze row each of the other four | frozen A-share research runs (spec `docs/superpowers/specs/2026-10-25-lunhui-modules-design.md`, plan 1 of four): every tool takes a strategy name — the channel's — and a run id, never a path, anchored under the `lunhui-runs` row's `strategiesRoot` by `face/plugins/lunhui/lib/runs.mjs`; a freeze with `run` omitted opens a run in `strategies/<name>/analysis/<run>/` (`run.json`, `metrics.json`) and answers its id, with `run` it adds to that open run, and each writes one `evidence-<source>.json` (`quotes`, `limit-up`, `boards`, `index`) of hashed items and the derived items over them — a second freeze of one source in one run is `SOURCE_FROZEN`; `lunhui_freeze_quotes` (Tencent quotes and 60-day bars, 1–8 symbols, stage 0's rule) in any channel, the other three in `cn-market` only (`WRONG_CHANNEL`): the 涨停, 炸板 and 昨日涨停 pools (≤ 500 rows each), the top 30 concept boards by change with up to ten boards' members (≤ 100 each) and the board fund-flow rank, the four indices with 120-day bars and the all-A-shares advance/decline counts — the Eastmoney items stamped with the host that served them and `delayed`; eight freezes a run, a refused one counted, then `TOOL_BUDGET`; a delegated child is refused `NOT_GRAVIT`; a China date no calendar table covers, or one whose latest opened session lies outside the calendar, is `CALENDAR_UNCOVERED`; each evidence file and its `run.json` entry record `session`, the trading day the data belongs to (`getMarketSession(now).expectedQuoteDate`, the previous session on a weekend, a holiday or before 09:15), beside `received_at`, the wall clock, and the reply carries both as `session` and `as_of`; an evidence file is at most 256 KiB — `limit-up`'s 1 MiB, three full pools — and a run's evidence 2 MiB; a code a pool reply repeats keeps its first row, the reply's `duplicates` counting the rest; a quotes freeze's quote items are `kind: "quote"` (the parsed index or equity kind kept as `instrument`), the index freeze's `kind: "index"`; every refusal is a thrown `LunhuiError`, `Error: <CODE> …` to the model, naming no path; `lunhui_read_run` answers `run.json`, the counters and each module artifact's headline (none exists before plan 2: nothing seals a run yet); unguarded and never evidence of a trade, like AKShare's; named by no bot's allow list (`tests/bots.test.ts`) |
 | `agent_<bin>` | face `agents.ts` | roster-gated per channel (§6.5) |
 | `dispatch` | face `room.ts` (`installRoom`) | Gravit's own: refused in any session whose header or `agentPreset` projection names a bot (§6.8) |
 | `role_<id>` (one per `roles/<id>/`; none today, `roles/` ships only `_template`) | one `dsh-tool-subagent` row per role inside Gravit's preset, rendered by `src/roles.ts` (§3.8) | scoped: a bot never sees one, and a role child removes them through its own allow list (a `subagent_fork` child, restricted by nothing, keeps them, and so does a plain `subagent` child, though neither its roles section nor the cycle contract reaches it, §3.8); a one-shot `spawn` child with the role's persona and exactly the role's tools; the arguments are `description` (its label in Details' Children, §5.4) and `prompt`, and the call waits unless `run_in_background` is set |
@@ -911,10 +911,13 @@ one insert of five cordis file-plugin rows, in-process, no child process:
 
 A freeze row reads the strategies root through the service, never its own config: one source of
 truth, so a patch that moves the root restates `strategiesRoot` on `lunhui-runs` alone. Without the
-backbone a freeze row cannot mount — it injects `lunhuiRuns`, and `freezeDeps` refuses a mount
-without it (`lunhuiRuns is missing; mount the lunhui-runs row first`) — and the strict row audit
-(§4.1, step 6) refuses a tree with an enabled row that is not ACTIVE, so disabling `lunhui-runs`
-means disabling the four freeze rows with it; a freeze row disabled alone takes only its tool. A freeze row's two other config keys are the tests': `fetch`, an absolute directory of
+backbone a freeze row cannot mount: it injects `lunhuiRuns` as a required service, so with no
+`lunhui-runs` to provide it the row's fiber stays pending and never reaches `apply`, and the strict
+row audit (§4.1, step 6) refuses the boot over an enabled row that is not ACTIVE — `pending
+(waiting for service: lunhuiRuns)`. `freezeDeps`' own refusal (`lunhuiRuns is missing; mount the
+lunhui-runs row first`) guards only a direct `apply`, as the tests call it. That boot refusal is
+reasoned from the audit's code, not yet pinned by a boot. So disabling `lunhui-runs` means
+disabling the four freeze rows with it; a freeze row disabled alone takes only its tool. A freeze row's two other config keys are the tests': `fetch`, an absolute directory of
 recorded replies that `lib/fixture-fetch.mjs` serves in place of the network, and `now`, a clock;
 production rows set neither, and no environment variable switches the fixtures (A15). The library
 under `lib/`: `runs.mjs` (anchoring, the run's states, bounded reads, atomic writes; stage 0's,
@@ -1121,7 +1124,7 @@ with no `Origin` passes on `Host` alone — `curl` works, which is residual R3 i
 | `$DSH_HOME/face/agents.json` | `panels.ts` | `{connected:[{bin,label}]}` |
 | `$DSH_HOME/sessions/<slug>/<id>/` | `deleteSession` | removed with every generation, the lock and the temps, cwd-fenced |
 | `strategies/<name>/` | `createChannel` | copied from `_template`, never overwritten |
-| `strategies/<name>/analysis/<run>/` | the Lunhui rows (`face/plugins/lunhui/lib/runs.mjs`), in the face process | `analysis/` made on a strategy's first freeze and each run directory exclusively, both mode 0o700; `run.json` and `metrics.json` at the run's opening, one `evidence-<source>.json` per source, new files `wx` at 0o600, `run.json` and `metrics.json` replaced by a fresh file renamed over the old after each change; outside any session's sandbox (§9, R39); the evidence files gitignored, the rest tracked (R42); the face's channel routes only read it, for the runs card (§5.2) |
+| `strategies/<name>/analysis/<run>/` | the Lunhui rows (`face/plugins/lunhui/lib/runs.mjs`), in the face process | `analysis/` made on a strategy's first freeze and each run directory exclusively, both mode 0o700; `run.json` (`{run, strategy, kind, as_of, session, opened_at, sealed_at, snapshot_id, evidence: [{source, file, sha256, bytes, received_at, session, host, delayed}], artifacts}` — `as_of` the newest `received_at` and `session` the newest evidence session at seal, both null until then) and `metrics.json` at the run's opening, one `evidence-<source>.json` per source (at most 256 KiB, `limit-up`'s 1 MiB), new files `wx` at 0o600, `run.json` and `metrics.json` replaced by a fresh file renamed over the old after each change; outside any session's sandbox (§9, R39); the evidence files and a write's crash leftovers (`*.pending.json`, `*.tmp`) gitignored, the rest tracked (R42); the face's channel routes only read it, for the runs card (§5.2) |
 | `bots/<id>/` | `createBot`, `updateBotSettings`, `updateSoul` | copied from `_template`; `preset.yml`, `SOUL.md` and the composition's persona row rewritten together, staged then renamed; never overwritten by create |
 | `bots/<id>/journal/` | a bot's HOME session | workspace-write, cwd = the journal; the only directory a bot writes (the write to `../SOUL.md` is refused, proven in `room-smoke`) |
 | `roles/<id>/` (`ROLE.md`, `role.yml`) | the operator | not written by the face — read once per boot by `composeFace` (`readRoles`) and rendered into Gravit's preset (§3.8); a missing roles directory or a malformed role refuses the boot |
@@ -1532,15 +1535,18 @@ archive cannot be undone there — a 409) and `POST /data/sessions/delete {sessi
 **The runs card's wire** (modules spec A14, §5.11) — three fields of the overview's body, read by
 `readAnalysisRuns` in `channels.ts` from a real `strategies/<name>/analysis/` (a link there reads
 as no runs): `runs`, the run directories in the run-id form (`ANALYSIS_RUN_RE`, `<YYYYMMDD>T<HHMMSS>Z-<8 hex>`)
-newest first, at most 50 (`ANALYSIS_RUNS_CAP`), each `{run, asOf, snapshotId, sealed, kind,
-artifacts, marketRun, bytes}` — the first four from `run.json` (8 KiB compact, null and `sealed:
-false` when it is absent or unusable), `artifacts` one `{accepted: true, status, contractVersion,
-headline}` per module file present and parsing as an object within 24 KiB compact (an unreadable
-one left out), `headline` its fields by `MODULE_HEADLINES`, `marketRun` the accepted `mode.json`'s
+newest first, at most 50 (`ANALYSIS_RUNS_CAP`), each `{run, asOf, session, snapshotId, sealed, kind,
+artifacts, marketRun, bytes}` — the first five from `run.json` (8 KiB compact, null and `sealed:
+false` when it is absent or unusable; `asOf` the wall clock of the newest evidence, `session` its
+trading day), `artifacts` one `{accepted: true, status, contractVersion, headline}` per module
+that `run.json`'s `artifacts[]` names (A10: what a submit landed) whose file parses as an object
+within 24 KiB compact (an unnamed or unreadable one left out, so a run whose `run.json` cannot be
+read accepts none), `headline` its fields by `MODULE_HEADLINES`, `marketRun` the accepted `mode.json`'s
 `market_run`, `bytes` every regular one-link file in the run directory by its size, the evidence
 included and never opened; `runsOmitted`, the run directories past the cap; and `latestRun`, the
-newest listed run that is sealed and holds an accepted artifact, `{run, asOf, snapshotId,
-artifacts: {<module>: {headline, json}}, marketRun}`, or null. `metrics.json` is not read. A run
+newest listed run that is sealed and holds an accepted artifact, `{run, asOf, session, snapshotId,
+artifacts: {<module>: {headline, json}}, marketRun}`, or null; the section's latest line reads
+`as of <asOf> · session <session>`. `metrics.json` is not read. A run
 whose directory fails the `stillAt` re-check just before its reads, or can no longer be listed, is
 skipped — not listed, not counted. Before plan 2 no run is sealed and none holds an artifact, so a
 channel with runs shows them as unsealed rows under `no sealed run with an artifact yet`.
@@ -2859,15 +2865,16 @@ through `tsx`:
   four-request limiter, count pages disagreeing on `total` marked `partial`, a member list cut at
   100 with `truncated`), `lunhui-derive` (each derived measure from hand-computed rows, breadth from
   the board's own counts and never the cut list), `lunhui-runs` (stage 0's anchoring cases, then
-  open, add, seal, `snapshot_id`, `SOURCE_FROZEN`, the 256 KiB and 2 MiB caps, `metrics.json`
-  fail-open), `lunhui-calendar` (a year's table, a date outside every table uncovered),
+  open, add, seal, `snapshot_id`, `session`, `SOURCE_FROZEN`, the 256 KiB, `limit-up`'s 1 MiB
+  and the 2 MiB caps, `metrics.json` fail-open), `lunhui-calendar` (a year's table, a date outside every table uncovered),
   `lunhui-market` and `lunhui-contract` (stage 0's ports), `lunhui-ignore` (`git check-ignore`
-  holds for a run's `evidence-*.json` and the corpus, not for `run.json`, `metrics.json` or an
-  artifact); `boot` (the five rows in one insert right after the seat, by file URL, the backbone
+  holds for a run's `evidence-*.json`, its `*.pending.json` and `*.tmp` leftovers and the corpus,
+  not for `run.json`, `metrics.json` or an artifact); `boot` (the five rows in one insert right after the seat, by file URL, the backbone
   under this checkout's `strategies/`, an operator's override and disable kept), `bots` (no
   `lunhui_` tool admitted by `DEFAULT_ALLOW` or any shipped bot, expanded against a tree that has
   them), `channels` (the runs card: shapes, the 50-run cap, headlines, `latestRun`, a linked or
-  hard-linked file unread, an unparseable `run.json` listed with nulls, a vanished or swapped run
+  hard-linked file unread, an artifact accepted only when `run.json` names it, an unparseable
+  `run.json` listed with nulls and no artifact, a vanished or swapped run
   directory skipped, `MODULE_HEADLINES` equal to `MODULES`; the newest backtest over its cap or
   past 32 levels unread), `client/runs-view` and `client/channel` (the view and the section, drawn only for a
   channel with runs), and `smoke` (the five tools registered and the five rows ACTIVE in
@@ -3474,7 +3481,9 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
   stale-on-error on a stage-2 read (the shared path is pinned by the stage-1 reads). And `app.js` is
   978 lines — a split weighed at the final review.
 - **R39 — The Lunhui rows write from the face process, outside any session sandbox, bounded to
-  `strategies/<name>/analysis/`.** Stage 0's R32, re-worded for in-process rows; the class of R5
+  `strategies/<name>/analysis/`.** Stage 0's R32 — the graft ledger's
+  (`docs/superpowers/plans/2026-10-19-lunhui-plugin-graft-ledger.md`), not this document's —
+  re-worded for in-process rows; the class of R5
   and of the seat's key file (charter D10). The rows run in the face process, so their writes never
   pass `ctx.sandboxPolicy` and raise no card: a freeze makes `analysis/` and `analysis/<run>/`,
   writes `run.json`, `metrics.json` and its `evidence-<source>.json`, and rewrites `metrics.json`
@@ -3493,11 +3502,12 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
   and no `metrics.json`, which reads fail-open as zero counts. And runs are not bounded: eight
   freezes bound one run, never how many runs a session opens, each a new directory and a new round
   of Tencent and Eastmoney requests. Recorded, nothing built.
-- **R40 — The Lunhui calendar is one table a year, and only 2026 ships.** Stage 0's R33, re-worded
-  (modules spec A25). `lib/calendar.mjs` loads `lib/calendar/<year>.json`, each from that year's
+- **R40 — The Lunhui calendar is one table a year, and only 2026 ships.** Stage 0's R33 — the
+  graft ledger's (`docs/superpowers/plans/2026-10-19-lunhui-plugin-graft-ledger.md`), not this
+  document's — re-worded (modules spec A25). `lib/calendar.mjs` loads `lib/calendar/<year>.json`, each from that year's
   SSE notice, at import; a China date outside every table refuses every freeze with
-  `CALENDAR_UNCOVERED` before any run is touched (the limit-up freeze also when the previous
-  session it would ask for lies outside), so nothing is frozen on a guessed weekday. Live from
+  `CALENDAR_UNCOVERED` before any run is touched (every freeze also when the latest opened
+  session, the one its evidence would record, lies outside), so nothing is frozen on a guessed weekday. Live from
   2027-01-01 until `2027.json` lands (§10, item 20). The tables are hand-entered: a holiday range
   is not checked for order or overlap, an empty calendar directory reads as no coverage — every
   freeze refused — rather than failing the mount, and `getMarketSession` across two years is
@@ -3516,9 +3526,11 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
   炸板 or 昨日涨停 pool is an empty list, so a day on which Eastmoney served the one and failed the
   others empty would freeze as a quiet day. And the evidence is point-in-time only from the first
   freeze: every source answers what it holds now, nothing rebuilds a past session, and a run's
-  `as_of` is when it was frozen.
+  `as_of` is when it was frozen; its `session` is the trading day that data belongs to, so a
+  Saturday's freeze reads Friday's session, not Saturday's clock.
 - **R42 — A run's evidence files are not in git.** `.gitignore` holds
-  `strategies/*/analysis/*/evidence-*.json` (A26; `tests/lunhui-ignore.test.ts`): `run.json`, with
+  `strategies/*/analysis/*/evidence-*.json` (A26; `tests/lunhui-ignore.test.ts`), and a write's
+  crash leftovers, `*.pending.json` and `*.tmp` under a run (R39): `run.json`, with
   every evidence file's sha256 and size, `metrics.json` and, from plan 2, the artifacts are
   tracked. A clone, or the machine after the files are deleted, holds the hashes and cannot rebuild
   a context or re-check an artifact's citations; the evidence lives only on the machine that froze
@@ -3527,9 +3539,10 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
   `analysis/` and each run directory (`stillAt`) just before its reads and opens every file
   `O_NOFOLLOW` with one link, but the check and the read are still two calls, so a writer inside
   the strategy tree can race them, as in R39; a run skipped mid-read leaves no mark on the card.
-  `accepted` means the module file is present, readable and an object within its cap, not
-  cross-checked against `run.json`'s `artifacts[]` (plan 2's submit writes a file only after its
-  validator accepts it); an unreadable artifact is left out with no hint; `latestRun` is chosen
+  `accepted` means `run.json`'s `artifacts[]` names the module and its file is present, readable
+  and an object within its cap (plan 2's submit must append to `artifacts[]`, or nothing it lands
+  shows); `lunhui_read_run`'s own `accepted` still reads the file alone; an unnamed or unreadable
+  artifact is left out with no hint; `latestRun` is chosen
   among the 50 listed runs.
 
 ---

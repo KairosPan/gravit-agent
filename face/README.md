@@ -424,8 +424,12 @@ The design has eleven rows; plan 1 built the first five:
 
 A freeze with no `run` opens a run, `strategies/<name>/analysis/<YYYYMMDD>T<HHMMSS>Z-<8 hex>/`,
 and answers its id; pass that id as `run` to add the other sources. One evidence file per source
-per run (`evidence-<source>.json`, at most 256 KiB, a run's evidence at most 2 MiB), eight
-freezes a run, and every refusal reads `Error: <CODE> …`. Gravit calls them; a delegated child is
+per run (`evidence-<source>.json`, at most 256 KiB — `limit-up`'s 1 MiB, three full pools — a
+run's evidence at most 2 MiB), eight freezes a run, and every refusal reads `Error: <CODE> …`.
+Each evidence file and its `run.json` entry record `session`, the trading day the data belongs
+to — on a weekend, a holiday or before 09:15 the previous session — beside `received_at`, the wall
+clock; a sealed run's `session` is its newest. The channel page shows a run's module artifact only
+when `run.json`'s `artifacts` names it. Gravit calls them; a delegated child is
 refused, and no bot's allow list names one. Until plan 2 nothing reads a run's contexts, so a run
 stays open and the channel page lists it as `unsealed`.
 
@@ -462,8 +466,9 @@ seat and below this file, so a patch reaches them:
 - { id: lunhui-freeze-boards, disabled: true }   # one source off: its tool goes, the rest stay
 ```
 
-To turn Lunhui off, disable all five — a freeze row cannot mount without `lunhui-runs`, and the
-boot refuses a row that did not mount:
+To turn Lunhui off, disable all five — a freeze row injects the `lunhuiRuns` service, so without
+`lunhui-runs` it stays pending and the boot's row audit refuses it (`waiting for service:
+lunhuiRuns`; reasoned from the audit, not yet pinned by a boot):
 
 ```yaml
 - { id: lunhui-runs, disabled: true }
