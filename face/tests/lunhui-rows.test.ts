@@ -596,8 +596,11 @@ test("lunhui-runs: two submits of one module at once land one artifact; the othe
     service.submit("alpha", run, "environment", "{\"n\":1}", accept),
     service.submit("alpha", run, "environment", "{\"n\":2}", accept),
   ]);
-  assert.equal(results[0].status, "fulfilled");
-  assert.equal(results[1].status, "rejected");
-  assert.equal((results[1] as PromiseRejectedResult).reason.code, "ALREADY_SUBMITTED");
-  assert.deepEqual(JSON.parse(await readFile(join(root, "alpha", "analysis", run, "environment.json"), "utf8")), { n: 1 });
+  // Each call resolves the run before it queues on the mutex, so either may win; exactly one does.
+  const won = results.findIndex((result) => result.status === "fulfilled");
+  assert.notEqual(won, -1);
+  const lost = results[1 - won];
+  assert.equal(lost.status, "rejected");
+  assert.equal((lost as PromiseRejectedResult).reason.code, "ALREADY_SUBMITTED");
+  assert.deepEqual(JSON.parse(await readFile(join(root, "alpha", "analysis", run, "environment.json"), "utf8")), { n: won + 1 });
 });
