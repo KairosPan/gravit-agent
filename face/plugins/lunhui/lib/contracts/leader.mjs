@@ -7,11 +7,15 @@
  * the strategy run froze whose six-digit code a pool row or a member list of the cited run holds; it
  * cites the quote and that row or list, its `name` is the quote's frozen name - carved out of the
  * forbidden-word and scope rules (`exemptPaths`), as theme's board names are - and its `board`, when
- * given, is one the cited run's theme artifact names among its mainline candidates; anything else is
+ * given, is one the cited run's theme artifact names among its mainline candidates whose frozen member
+ * list holds the candidate's code; anything else is
  * `REFERENCE`. The ranks run 1 to n. Flags other than `NONE` stand on a claim of their own citing a
  * pool row. The module owns the leader class (龙头, 空间板), carried by a quote, a pool row or a
  * member list; a 龙头 is written only as 龙头候选 of a listed candidate. The theme artifact is
- * required (`market:theme`). `lib/module-tool.mjs` consumes the `contract` object; the shared rules
+ * required (`market:theme`). The context shows of the cited run only what a candidate can stand on:
+ * the pool rows of the strategy run's equities and the mainline boards' member lists, each its first
+ * ten codes and any frozen equity further down; the digest keeps every item citable.
+ * `lib/module-tool.mjs` consumes the `contract` object; the shared rules
  * are `contract-core.mjs`'s.
  */
 import { fail } from "../contract-core.mjs";
@@ -26,18 +30,22 @@ export const HYPOTHESES =
 
 const BOARD_RE = /^BK\d{4}$/;
 
+/** The members a context shows of a mainline board's list: the first 10, then any frozen equity. */
+const MEMBERS_SHOWN = 10;
+
 const FLAGS = ["ACCELERATING", "DIVERGENCE", "BROKEN_STREAK", "HIGH_POSITION", "FIRST_BOARD", "NONE"];
 
 const HINTS = {
   derived: DERIVED_HINT,
   rows:
-    "evidence 先列本运行冻结的个股报价（source 为 quotes），再列引用的市场运行的涨停池行（market:limit-up：zt 涨停、zb 炸板、yesterday 昨日涨停）与板块成分股（market:boards，members 只列代码）；各行不列 host、delayed 与报价的 validity，冻结文件逐行保留。",
+    "evidence 先列本运行冻结的个股报价（source 为 quotes），再列引用的市场运行中候选可依据的行：本运行冻结个股的涨停池行（market:limit-up：zt 涨停、zb 炸板、yesterday 昨日涨停），与 theme 工件主线候选板块的成分股（market:boards，members 只列代码：前 " + MEMBERS_SHOWN + " 只，再加其中本运行冻结的个股；members_total 是冻结的只数）；" +
+    "其余行未列出，计入 truncated；各行不列 host、delayed 与报价的 validity，冻结文件逐行保留。",
   leader_candidates:
     "0–5 个候选，每个 { symbol, name, rank, board, evidence_ids }：symbol 是本运行冻结的个股报价（sh 或 sz 加六位数字，不是指数）；它的六位代码须出现在引用的市场运行的一条涨停池行或一条成分股列表里；" +
     "evidence_ids 至少引用它的报价，和含它代码的那条涨停池行或成分股列表；同一 symbol 只列一次；没有把握时给空列表。",
   name: "name 照抄该报价证据的 name，一字不改；它是冻结的数据，不受用词检查，所以只写证券名，不写判断。",
   rank: "rank 是顺位：在引用的市场运行的主线候选之内排列，1 为首位；n 个候选的 rank 恰为 1 到 n，各用一次。",
-  board: "board 是候选所在的主线候选板块代码，只能是 theme 工件 mainline_candidates 里的板块；不确定时写 null。",
+  board: "board 是候选所在的主线候选板块代码，只能是 theme 工件 mainline_candidates 里的板块，且该板块冻结的成分股含候选的代码；不确定时写 null。",
   top_pattern_flags:
     "0–5 个形态标记，只描述冻结行的样子：ACCELERATING 加速（连板中封板更早）、DIVERGENCE 分歧（炸板或回封）、BROKEN_STREAK 断板（昨日涨停今日未封）、HIGH_POSITION 高位（连板数高）、FIRST_BOARD 首板；没有就给空列表或只写 NONE。" +
     "除 NONE 外的标记须有一条不为 INSUFFICIENT 的声明引用一条市场涨停池行（market:limit-up）。",
@@ -89,6 +97,21 @@ const isMembers = (entry) => entry.source === "market:boards" && entry.kind === 
 
 /** The items that carry the leader class's sentences (A21): a quote, a pool row or a member list. */
 const carriesLeader = (entry) => isQuote(entry) || isPoolRow(entry) || isMembers(entry);
+
+/** The six-digit codes of the strategy run's frozen equities, once per digest. */
+const codesOf = new WeakMap();
+/**
+ * @param {import("../contract-core.mjs").ContextDigest} digest
+ * @returns {Set<string>}
+ */
+function equityCodes(digest) {
+  let codes = codesOf.get(digest);
+  if (codes === undefined) {
+    codes = new Set([...digest.items.values()].filter(isQuote).map((entry) => String(entry.item.symbol).slice(-6)));
+    codesOf.set(digest, codes);
+  }
+  return codes;
+}
 
 /** Whether a pool row or a member list of the cited run holds the six-digit `code`. */
 function holds(entry, code) {
@@ -143,6 +166,8 @@ function rules(parsed, context) {
       fail(`${path}.name: a candidate's name must be the name of the quote evidence reference it cites, unchanged.`);
     if (candidate.board !== null && !boards.includes(candidate.board))
       fail(`${path}.board: a candidate's board must be a mainline candidate of the cited theme artifact; no such evidence reference.`);
+    if (candidate.board !== null && !items.some(([, entry]) => isMembers(entry) && entry.item.board === candidate.board && holds(entry, code)))
+      fail(`${path}.board: a candidate's board needs a member list of the cited market run holding its code; no such evidence reference.`);
     if (seen.has(candidate.symbol)) fail(`${path}.symbol: one candidate per symbol; this quote evidence reference is named twice.`);
     seen.add(candidate.symbol);
   }
@@ -179,9 +204,23 @@ function poolRow(item) {
   return Object.fromEntries(keep.filter((key) => item[key] !== undefined).map((key) => [key, item[key]]));
 }
 
-/** A member list as its codes, every one the freeze kept. */
-function memberCodes({ kind, board, truncated, members }) {
-  return { kind, board, truncated, members: Array.isArray(members) ? members.map((member) => member?.code) : [] };
+/** A pool row of a code the strategy run froze as an equity: the rows a candidate can stand on. */
+const ofEquity = (item, digest) => equityCodes(digest).has(item.code);
+
+/** A member list of a board the cited theme artifact names among its mainline candidates. */
+const ofMainline = (item, digest) => themeBoards(digest).includes(item.board);
+
+/**
+ * A member list as codes: its first `MEMBERS_SHOWN`, then every frozen equity further down, the
+ * frozen count beside them.
+ */
+function memberCodes({ kind, board, truncated, members }, digest) {
+  const codes = Array.isArray(members) ? members.map((member) => member?.code) : [];
+  const equities = equityCodes(digest);
+  return {
+    kind, board, truncated,
+    members: codes.filter((code, index) => index < MEMBERS_SHOWN || equities.has(code)), members_total: codes.length,
+  };
 }
 
 /** @type {import("../module-tool.mjs").ModuleContract} */
@@ -199,10 +238,11 @@ export const contract = {
   derivedView: derivedRow,
   priority: [
     { source: "quotes", kind: "quote", view: quoteRow },
-    { source: "market:limit-up", kind: "zt", view: poolRow },
-    { source: "market:limit-up", kind: "zb", view: poolRow },
-    { source: "market:limit-up", kind: "yesterday", view: poolRow },
-    { source: "market:boards", kind: "members", view: memberCodes },
+    // Only what a candidate can stand on: the pool rows of the run's equities, the mainline boards' lists.
+    { source: "market:limit-up", kind: "zt", view: poolRow, filter: ofEquity },
+    { source: "market:limit-up", kind: "zb", view: poolRow, filter: ofEquity },
+    { source: "market:limit-up", kind: "yesterday", view: poolRow, filter: ofEquity },
+    { source: "market:boards", kind: "members", view: memberCodes, filter: ofMainline },
   ],
   marketRun: "required",
   marketSources: ["limit-up", "boards"],

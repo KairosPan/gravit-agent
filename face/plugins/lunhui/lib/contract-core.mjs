@@ -517,9 +517,10 @@ function checkEnvelope(raw, { module, context, schema, owns = [], ownedBy = {}, 
  * Build a module's context (A24): a digest of the run as UTF-8 JSON text of at most 30 KiB, and the
  * validator's context. Only the files whose source is in `sources` enter. `derived` holds their
  * derived items, by source in `derivedFirst` order and then `sources` order; `evidence` the rows
- * `priority` asks for, entry by entry - an entry `{ source, kind, order?, view? }` takes that
- * source's rows of that kind (a pool row's kind is its `pool`), sorted by `order` and shown through
- * `view`. Each row is added whole, derived items first, until the next would pass the cap; from
+ * `priority` asks for, entry by entry - an entry `{ source, kind, order?, view?, filter? }` takes that
+ * source's rows of that kind (a pool row's kind is its `pool`) that `filter` keeps, sorted by `order`
+ * and shown through `view`; `filter` and `view` get the digest beside the item, so a module may show
+ * only the rows its digest makes relevant (a row filtered out is not asked for). Each row is added whole, derived items first, until the next would pass the cap; from
  * there every row is left out, as is every row no entry asks for, each counted in `truncated` as
  * `{ source, kind, count }`. Every item of the module's sources stays citable, shown or not.
  * `derivedView`, when given, is the whole row of every derived item shown - its `id` included, no
@@ -542,7 +543,7 @@ function checkEnvelope(raw, { module, context, schema, owns = [], ownedBy = {}, 
  * @param {{ module: string, run: string, manifest: { snapshot_id?: string | null, as_of?: string | null, session?: string | null,
  *   evidence: { source: string }[] }, evidence: { source: string, session: string | null, items: Record<string, any>[] }[],
  *   sources: string[], derivedFirst?: string[], derivedView?: (item: any) => Record<string, unknown>, priority: { source: string, kind: string, order?: (a: any, b: any) => number,
- *   view?: (item: any) => Record<string, unknown> }[], hypotheses: string, schema: { required?: string[], properties?: Record<string, unknown> },
+ *   view?: (item: any, digest: ContextDigest) => Record<string, unknown>, filter?: (item: any, digest: ContextDigest) => boolean }[], hypotheses: string, schema: { required?: string[], properties?: Record<string, unknown> },
  *   hints: unknown, example: unknown, required: string[], marketRun?: "required" | "optional",
  *   market?: { run: string, snapshot_id: string | null, session: string | null, evidence: { source: string, session: string | null, items: Record<string, any>[] }[],
  *     artifacts: Record<string, Record<string, any>> } | null,
@@ -598,7 +599,7 @@ export function buildContext({
 
   // A market row says so, whatever source field the item carries itself.
   const shown = (entry, view) => ({
-    id: entry.item.id, source: entry.source, scope: entry.scope, ...(view ? view(entry.item) : entry.item),
+    id: entry.item.id, source: entry.source, scope: entry.scope, ...(view ? view(entry.item, digest) : entry.item),
     ...(entry.source.startsWith("market:") ? { source: entry.source } : {}),
   });
   const artifactRows = [...read.entries()].map(([id, entry]) => ({ entry: { source: entry.source, kind: "artifact", id }, row: artifactView(id, entry) }));
@@ -606,8 +607,9 @@ export function buildContext({
   const derivedRows = sourceOrder.flatMap((source) =>
     all.filter(([, entry]) => entry.kind === "derived" && entry.source === source).map(([, entry]) => ({ entry, row: derivedView ? derivedView(entry.item) : shown(entry) })));
   const asked = new Set();
-  const priorityRows = priority.flatMap(({ source, kind, order, view }) => {
-    const matched = all.map(([, entry]) => entry).filter((entry) => entry.source === source && entry.kind === kind && entry.kind !== "derived");
+  const priorityRows = priority.flatMap(({ source, kind, order, view, filter }) => {
+    const matched = all.map(([, entry]) => entry).filter((entry) => entry.source === source && entry.kind === kind && entry.kind !== "derived"
+      && (filter === undefined || filter(entry.item, digest)));
     for (const entry of matched) asked.add(entry);
     const sorted = order ? [...matched].sort((a, b) => order(a.item, b.item)) : matched;
     return sorted.map((entry) => ({ entry, row: shown(entry, view) }));

@@ -46,7 +46,9 @@ const tables = loadCalendars();
  *   rules?: (parsed: any, context: import("./contract-core.mjs").ContextDigest) => void,
  *   hypotheses: string, hints: unknown, example: (digest: import("./contract-core.mjs").ContextDigest) => unknown,
  *   sources: string[], required: string[], derivedFirst?: string[], derivedView?: (item: any) => Record<string, unknown>,
- *   priority: { source: string, kind: string, order?: (a: any, b: any) => number, view?: (item: any) => Record<string, unknown> }[],
+ *   priority: { source: string, kind: string, order?: (a: any, b: any) => number,
+ *     view?: (item: any, digest: import("./contract-core.mjs").ContextDigest) => Record<string, unknown>,
+ *     filter?: (item: any, digest: import("./contract-core.mjs").ContextDigest) => boolean }[],
  *   marketRun?: "required" | "optional", marketSources?: string[], marketArtifacts?: string[], runArtifacts?: string[],
  * }} ModuleContract
  * `marketSources`, `marketArtifacts` and `runArtifacts` are `buildContext`'s: the cited run's sources

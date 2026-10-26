@@ -52,16 +52,23 @@ async function submitted(submit: ToolDef, strategy: string, run: string, analysi
   return JSON.parse(await submit.execute({ strategy, run, analysis: JSON.stringify(analysis) }, exec(ROLE)));
 }
 
+/** The theme's mainline candidates by default: BK0715 and BK1716 under their frozen names. */
+const MAINLINE = [["BK0715", "示例电网"], ["BK1716", "示例算力"]];
+
 /**
  * A cn-market run frozen and its artifacts accepted through the real module tools: environment and
- * sentiment their examples, theme a hand-written one naming BK0715 as its one mainline candidate
- * (`theme: false` leaves the theme artifact out); then a strategy run in `alpha` freezing `SYMBOLS`.
+ * sentiment their examples, theme a hand-written one naming `mainline` as its mainline candidates
+ * (`theme: false` leaves the theme artifact out); then a strategy run in `alpha` freezing `symbols`.
+ * `prepare` rewrites the fixture copy (the two equities added by default); `boards` is the boards
+ * freeze's argument (null for the freeze's own first ten).
  */
-async function setup(t: Cleanup, { theme = true }: { theme?: boolean } = {}) {
+async function setup(t: Cleanup, {
+  theme = true, prepare = addEquities, mainline = MAINLINE, symbols = SYMBOLS, boards,
+}: { theme?: boolean; prepare?: (dir: string) => Promise<void>; mainline?: string[][]; symbols?: string[]; boards?: string[] | null } = {}) {
   let fixtureDir = "";
-  const mounted = await mount(t, leaderRow, async (dir) => { fixtureDir = dir; await addEquities(dir); });
+  const mounted = await mount(t, leaderRow, async (dir) => { fixtureDir = dir; await prepare(dir); });
   const { service, freeze } = mounted;
-  const market = await frozenRun(freeze, ["index", "limit-up", "boards"]);
+  const market = await frozenRun(freeze, ["index", "limit-up", "boards"], boards === undefined ? {} : { boards });
   for (const row of [environmentRow, sentimentRow]) {
     const [read, submit] = tools(service, row);
     const context = JSON.parse(await read.execute({ strategy: "cn-market", run: market }, exec(ROLE)));
@@ -70,17 +77,18 @@ async function setup(t: Cleanup, { theme = true }: { theme?: boolean } = {}) {
   const [themeRead, themeSubmit] = tools(service, themeRow);
   const themeContext = JSON.parse(await themeRead.execute({ strategy: "cn-market", run: market }, exec(ROLE)));
   if (theme) {
-    const board = idWhere(themeContext, (row) => row.kind === "board" && row.code === "BK0715");
-    const members = idWhere(themeContext, (row) => row.kind === "members" && row.board === "BK0715");
-    const breadth = idWhere(themeContext, (row) => row.measure === "breadth" && row.params.board === "BK0715");
+    const breadth = idWhere(themeContext, (row) => row.measure === "breadth" && row.params.board === mainline[0][0]);
     const analysis = {
       ...themeContext.example,
-      mainline_candidates: [{ board: "BK0715", name: "示例电网", evidence_ids: [board, members] }],
-      claims: [{ id: "c1", text: "示例电网的上涨占比见所引派生证据。", basis: "CURRENT", evidence_ids: [breadth] }],
+      mainline_candidates: mainline.map(([code, name]) => ({ board: code, name, evidence_ids: [
+        idWhere(themeContext, (row) => row.kind === "board" && row.code === code),
+        idWhere(themeContext, (row) => row.kind === "members" && row.board === code),
+      ] })),
+      claims: [{ id: "c1", text: `${mainline[0][1]}的上涨占比见所引派生证据。`, basis: "CURRENT", evidence_ids: [breadth] }],
     };
     assert.equal((await submitted(themeSubmit, "cn-market", market, analysis)).accepted, true);
   }
-  const strategy = JSON.parse(await freeze.quotes.execute({ strategy: "alpha", symbols: SYMBOLS }, exec())).run as string;
+  const strategy = JSON.parse(await freeze.quotes.execute({ strategy: "alpha", symbols }, exec())).run as string;
   return { ...mounted, market, strategy, fixtureDir };
 }
 
@@ -94,6 +102,17 @@ function artifact(context: any, fields: Record<string, unknown>) {
     claims: [], limitations: [],
     ...fields,
   };
+}
+
+/**
+ * The id of a market-run item the context need not show, read from the frozen evidence file: the
+ * digest keeps every item citable.
+ */
+async function frozenId(root: string, market: string, source: string, test: (item: any) => boolean): Promise<string> {
+  const file = JSON.parse(await readFile(join(root, "cn-market", "analysis", market, `evidence-${source}.json`), "utf8"));
+  const item = file.items.find(test);
+  assert.ok(item, "the market run froze the item the test cites");
+  return item.id;
 }
 
 /** The ids a candidate cites: its quote, its 涨停池 row, its board's member list; the theme artifact. */
@@ -154,16 +173,22 @@ test("leader: a context over a strategy run's quotes citing the day's market run
   assert.equal(context.market_run, market);
   assert.equal(context.hypotheses_version, hypothesesVersion(HYPOTHESES));
   assert.deepEqual(context.artifacts.map((row: any) => row.module), ["theme", "sentiment"]);
-  assert.match(context.hints.boards, /BK0715/);
-  // The rows: the run's equity quotes, then the market's pools and member lists.
-  assert.deepEqual(context.evidence.map((row: any) => [row.source, row.kind ?? row.pool]), [
-    ...SYMBOLS.map(() => ["quotes", "quote"]),
-    ...Array(7).fill(["market:limit-up", "zt"]), ...Array(3).fill(["market:limit-up", "zb"]), ...Array(5).fill(["market:limit-up", "yesterday"]),
-    ["market:boards", "members"], ["market:boards", "members"],
+  assert.match(context.hints.boards, /BK0715、BK1716/);
+  // The rows: the run's equity quotes, then only what a candidate can stand on - the pool rows of the
+  // run's equities (600519's 涨停 row) and the mainline boards' member lists.
+  assert.deepEqual(context.evidence.map((row: any) => [row.source, row.kind ?? row.pool, row.code ?? row.board ?? row.symbol]), [
+    ...["sh600519", "sh601318", "sz000333"].map((symbol) => ["quotes", "quote", symbol]),
+    ["market:limit-up", "zt", "600519"], ["market:boards", "members", "BK0715"], ["market:boards", "members", "BK1716"],
   ]);
-  // A member list shows its codes, every one the freeze kept; no stamps, no validity block.
-  const grid = context.evidence.find((row: any) => row.kind === "members" && row.board === "BK0715");
-  assert.deepEqual(grid.members, ["600101", "000102", "603103", "002104", "600519", "000333"]);
+  assert.deepEqual(context.truncated.filter((row: any) => row.source.startsWith("market:")), [
+    { source: "market:limit-up", kind: "zt", count: 6 }, { source: "market:limit-up", kind: "zb", count: 3 },
+    { source: "market:limit-up", kind: "yesterday", count: 5 }, { source: "market:boards", kind: "board", count: 4 },
+    { source: "market:boards", kind: "flow", count: 4 },
+  ]);
+  // A member list shows its first ten codes and any frozen equity further down; members_total the frozen count.
+  const lists = context.evidence.filter((row: any) => row.kind === "members");
+  assert.deepEqual(lists.map((row: any) => [row.board, row.members.length, row.members_total]), [["BK0715", 6, 6], ["BK1716", 10, 100]]);
+  assert.deepEqual(lists[0].members, ["600101", "000102", "603103", "002104", "600519", "000333"]);
   for (const row of context.evidence) assert.ok(!("host" in row) && !("delayed" in row) && !("validity" in row), `${row.source} ${row.kind ?? row.pool}`);
   const example = context.example;
   assert.equal(example.status, "OK");
@@ -197,13 +222,15 @@ test("leader: a hand-written artifact with two candidates - one on its 涨停池
 });
 
 test("leader: a candidate must be a frozen quote whose code the cited market run froze in a pool or a member list - REFERENCE otherwise, both ways", async (t) => {
-  const { service, read, submit, market, strategy } = await setup(t);
+  const { root, service, read, submit, market, strategy } = await setup(t);
   const context = JSON.parse(await read.execute({ strategy: "alpha", run: strategy, market_run: market }, exec(ROLE)));
   const id = ids(context);
   const claims = [{ id: "c1", text: "贵州茅台连板数见所引涨停池行。", basis: "CURRENT", evidence_ids: [id.zt("600519")] }];
+  // 600101's 涨停 row is not shown - no equity of the run holds its code - but it stays citable.
+  const unfrozen = await frozenId(root, market, "limit-up", (item) => item.pool === "zt" && item.code === "600101");
   const cases: Array<[unknown, RegExp]> = [
     // In the pools and the members, but the strategy run froze no quote of it.
-    [{ symbol: "sh600101", name: "示例电力", rank: 1, board: null, evidence_ids: [id.zt("600101"), id.members("BK0715")] }, /leader_candidates\[0\]\.symbol/],
+    [{ symbol: "sh600101", name: "示例电力", rank: 1, board: null, evidence_ids: [unfrozen, id.members("BK0715")] }, /leader_candidates\[0\]\.symbol/],
     // A frozen quote whose code no pool row or member list of the market run holds.
     [{ symbol: "sh601318", name: "中国平安", rank: 1, board: null, evidence_ids: [id.quote("sh601318"), id.members("BK0715")] }, /leader_candidates\[0\]\.symbol/],
     // Its quote only.
@@ -215,6 +242,8 @@ test("leader: a candidate must be a frozen quote whose code the cited market run
     // A name that is not the quote's.
     [{ symbol: "sh600519", name: "示例电力", rank: 1, board: null, evidence_ids: [id.quote("sh600519"), id.zt("600519")] }, /leader_candidates\[0\]\.name/],
     // A board the market run's theme artifact does not name among its mainline candidates.
+    [{ symbol: "sh600519", name: "贵州茅台", rank: 1, board: "BK0493", evidence_ids: [id.quote("sh600519"), id.zt("600519")] }, /leader_candidates\[0\]\.board/],
+    // A mainline board whose frozen member list does not hold the candidate's code.
     [{ symbol: "sh600519", name: "贵州茅台", rank: 1, board: "BK1716", evidence_ids: [id.quote("sh600519"), id.zt("600519")] }, /leader_candidates\[0\]\.board/],
   ];
   for (const [candidate, path] of cases) {
@@ -229,7 +258,7 @@ test("leader: a candidate must be a frozen quote whose code the cited market run
     leader_candidates: [{ ...twice, rank: 1 }, { ...twice, rank: 2 }], claims,
   })) }, exec(ROLE)), "INVALID_ANALYSIS");
   assert.match(refusal.message, /^INVALID_ANALYSIS: \[REFERENCE\] analysis\.leader_candidates\[1\]\.symbol/u);
-  assert.deepEqual((await service.readRun("alpha", strategy)).metrics.rejections.leader, Array(8).fill("REFERENCE"));
+  assert.deepEqual((await service.readRun("alpha", strategy)).metrics.rejections.leader, Array(9).fill("REFERENCE"));
 });
 
 test("leader: ranks run 1 to n without gaps; a board is BK and four digits or null - SCHEMA otherwise", async (t) => {
@@ -293,4 +322,60 @@ test("leader: a cn-market run is WRONG_CHANNEL; a market run two trading days be
   quotesRow.apply(scope.ctx, { fetch: fixtureDir, now: () => TUESDAY });
   const tuesday = JSON.parse(await scope.tools[0].execute({ strategy: "alpha", symbols: SYMBOLS }, exec())).run;
   await rejectsWith(read.execute({ strategy: "alpha", run: tuesday, market_run: market }, exec(ROLE)), "STALE_MARKET_RUN");
+});
+
+test("leader: a live-size market run - three 500-row pools, thirty boards, ten 100-member lists - and four equities fit 30 KiB, every quote, every pool row of the equities and every mainline member list shown", async (t) => {
+  const CODES = Array.from({ length: 30 }, (_, i) => `BK${2000 + i}`);
+  const EQUITIES = ["sh600519", "sz000333", "sh601318", "sz000001"];
+  /** Where the copy puts each equity's code: pool and row index, board list and member index. */
+  const IN_POOLS: Array<[string, number, string]> = [["zt", 450, "600519"], ["zt", 499, "000001"], ["zb", 300, "000333"], ["yesterday", 200, "601318"], ["yesterday", 10, "600519"]];
+  const IN_LISTS: Array<[string, number, string]> = [["BK2000", 50, "600519"], ["BK2000", 60, "000333"], ["BK2001", 99, "601318"], ["BK2002", 5, "000001"]];
+  const widen = async (dir: string) => {
+    for (const [pool, file, base] of [["zt", "zt-pool.json", 680000], ["zb", "zb-pool.json", 690000], ["yesterday", "yesterday-pool.json", 830000]] as const) {
+      const reply = JSON.parse(await readFile(join(dir, file), "utf8"));
+      const [row] = reply.data.pool;
+      reply.data.pool = Array.from({ length: 500 }, (_, k) => ({ ...row, c: String(base + k), n: `示例${pool}${k}` }));
+      for (const [where, k, code] of IN_POOLS) if (where === pool) reply.data.pool[k] = { ...row, c: code, n: `示例${code}` };
+      reply.data.tc = 500;
+      await writeFile(join(dir, file), JSON.stringify(reply));
+    }
+    const boards = JSON.parse(await readFile(join(dir, "boards.json"), "utf8"));
+    const [board] = boards.data.diff;
+    boards.data.diff = CODES.map((code, i) => ({ ...board, f12: code, f14: `示例板块${i}`, f3: 9 - i * 0.3, f6: 1e10 - i * 1e8 }));
+    await writeFile(join(dir, "boards.json"), JSON.stringify(boards));
+    const flow = JSON.parse(await readFile(join(dir, "board-flow.json"), "utf8"));
+    const [row] = flow.data.diff;
+    flow.data.diff = CODES.map((code, i) => ({ ...row, f12: code, f14: `示例板块${i}`, f62: 1e9 - i * 1e8 }));
+    await writeFile(join(dir, "board-flow.json"), JSON.stringify(flow));
+    const members = JSON.parse(await readFile(join(dir, "members-BK1716.json"), "utf8"));
+    for (const [i, code] of CODES.slice(0, 10).entries()) {
+      members.data.diff = members.data.diff.map((member: any, j: number) => ({ ...member, f12: String(300000 + i * 1000 + j), f14: `示例成分${i}-${j}` }));
+      for (const [list, j, equity] of IN_LISTS) if (list === code) members.data.diff[j] = { ...members.data.diff[j], f12: equity, f14: `示例${equity}` };
+      await writeFile(join(dir, `members-${code}.json`), JSON.stringify(members));
+    }
+  };
+  const mainline = [["BK2000", "示例板块0"], ["BK2001", "示例板块1"], ["BK2002", "示例板块2"]];
+  const { read, submit, market, strategy } = await setup(t, { prepare: widen, mainline, symbols: EQUITIES, boards: null });
+  const text = await read.execute({ strategy: "alpha", run: strategy, market_run: market }, exec(ROLE));
+  // Measured 2026-10-27: 21,307 bytes, nothing cut by the cap - every row left out is filtered out.
+  assert.ok(Buffer.byteLength(text, "utf8") <= MAX_CONTEXT_BYTES, `${Buffer.byteLength(text, "utf8")} bytes`);
+  const context = JSON.parse(text);
+  assert.equal(context.status_expected, "OK");
+  assert.deepEqual(context.artifacts.map((row: any) => row.module), ["theme", "sentiment"]);
+  assert.deepEqual(context.evidence.filter((row: any) => row.kind === "quote").map((row: any) => row.symbol).sort(), [...EQUITIES].sort());
+  assert.deepEqual(context.evidence.filter((row: any) => row.source === "market:limit-up").map((row: any) => [row.pool, row.code]).sort(),
+    IN_POOLS.map(([pool, , code]) => [pool, code]).sort());
+  const lists = context.evidence.filter((row: any) => row.kind === "members");
+  assert.deepEqual(lists.map((row: any) => [row.board, row.members.length, row.members_total]), [["BK2000", 12, 100], ["BK2001", 11, 100], ["BK2002", 10, 100]]);
+  assert.deepEqual(lists[0].members.slice(10), ["600519", "000333"]);
+  assert.deepEqual(context.truncated.filter((row: any) => row.source === "market:limit-up"), [
+    { source: "market:limit-up", kind: "zt", count: 498 }, { source: "market:limit-up", kind: "zb", count: 499 }, { source: "market:limit-up", kind: "yesterday", count: 498 },
+  ]);
+  // A candidate on a far-down member stands on the list the context shows.
+  const id = ids(context);
+  const analysis = artifact(context, {
+    leader_candidates: [{ symbol: "sh601318", name: "中国平安", rank: 1, board: "BK2001", evidence_ids: [id.quote("sh601318"), id.members("BK2001")] }],
+    claims: [{ id: "c1", text: "中国平安是 BK2001 的成分股，列为龙头候选。", basis: "CURRENT", evidence_ids: [id.members("BK2001"), id.quote("sh601318")] }],
+  });
+  assert.equal((await submitted(submit, "alpha", strategy, analysis)).accepted, true);
 });

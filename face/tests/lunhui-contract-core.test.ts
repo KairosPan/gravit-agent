@@ -405,6 +405,26 @@ test("buildContext: a priority entry's order and view shape its rows; an example
   assert.deepEqual(parsed.example, { cite: sealRatio.id });
 });
 
+test("buildContext: a priority entry's filter and view get the digest; a row filtered out is not shown, is counted in truncated, and stays citable", () => {
+  const low = withId({ pool: "zt", code: "600010", boards: 1 });
+  const high = withId({ pool: "zt", code: "600011", boards: 5 });
+  const evidence = [{ source: "limit-up", session: SESSION, items: [low, high, sealRatio] }, EVIDENCE[1]];
+  const seen: Loose[] = [];
+  const { text, digest } = context({
+    evidence,
+    priority: [{
+      source: "limit-up", kind: "zt",
+      filter: (item: Loose, d: Loose) => (seen.push(d), item.code === "600011"),
+      view: ({ code }: Loose, d: Loose) => ({ code, of: d.items.size }),
+    }],
+  });
+  const parsed = JSON.parse(text);
+  assert.deepEqual(parsed.evidence, [{ id: high.id, source: "limit-up", scope: "CURRENT", code: "600011", of: digest.items.size }]);
+  assert.ok(seen.length > 0 && seen.every((d) => d === digest));
+  assert.deepEqual(parsed.truncated.find((entry: Loose) => entry.kind === "zt"), { source: "limit-up", kind: "zt", count: 1 });
+  assert.ok(digest.evidenceIds.has(low.id));
+});
+
 test("buildContext: a hints function gets the digest; plain hints are shown as given", () => {
   let received: Loose | undefined;
   const { text, digest } = context({ hints: (d: Loose) => ((received = d), { count: d.items.size }) });
