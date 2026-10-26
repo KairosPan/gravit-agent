@@ -258,6 +258,8 @@ export const contract = {
   example,
   sources: ["quotes"],
   required: ["quotes", "market:theme"],
+  // No evidence row shown (an empty quotes file, an empty market run): nothing a claim can cite.
+  evidenceRequired: ["quotes", "market:limit-up", "market:boards"],
   derivedView: derivedRow,
   priority: [
     { source: "quotes", kind: "quote", view: quoteRow },

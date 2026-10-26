@@ -549,6 +549,8 @@ export const contract = {
   sources: ["quotes"],
   // The cited sentiment and theme are read from their views: a view the cap leaves out makes the run NOT_EVALUABLE.
   required: ["leader", "market:sentiment", "market:theme"],
+  // No evidence row shown (an empty quotes file, an empty market run): nothing a claim can cite.
+  evidenceRequired: ["quotes", "market:index", "market:limit-up", "market:boards"],
   derivedView: derivedRow,
   derivedFilter,
   priority: [
