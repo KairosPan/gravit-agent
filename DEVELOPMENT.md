@@ -18,6 +18,10 @@ tests, 1248 pass + 18 skipped without `FACE_SMOKE`). **Amended 2026-10-25** for 
 Lunhui modules (spec `docs/superpowers/specs/2026-10-25-lunhui-modules-design.md`): the five
 Lunhui rows and their tools, the runs card, the market channel, R39–R43 and §10 items 18–21, each
 read against the code on `feat/lunhui-modules` @ `1a41fd8` (1435 tests, 1417 pass + 18 skipped).
+**Amended 2026-10-26** for plan 2 of the Lunhui modules: the contract core, the three market
+module rows and their six tools, the `cn-market-analyst` role, the run protocol section
+`lunhui:run`, the market-run smoke, R39 and R42–R45 and §10 items 15, 18, 19 and 21, each read against the code
+on `feat/lunhui-modules-2` @ `91307f2` (1548 tests, 1528 pass + 20 skipped).
 
 **Authority.** `Gravit-Design.md` (the charter) outranks this document on intent. This document
 describes mechanism *as built*: where it disagrees with the code, the code is the fact and this
@@ -65,7 +69,7 @@ upstreams, and the Lunhui rows' Tencent and Eastmoney hosts (`face/README.md` "L
  │  ├─ dsh-base bundle: LLM (deepseek), sessions, storage + projection cache, tools       │
  │  │   (§3.6), sandbox, approvals, skills, the `/api` gateway (`typert-gateway`)         │
  │  ├─ face policy layer (§4.3): the 0.1.1 tool roster, egress and telemetry restored     │
- │  ├─ Lunhui rows (§4.3): lunhui-runs + four freeze rows, in-process; they write         │
+ │  ├─ Lunhui rows (§4.3): lunhui-runs, four freezes, three modules, in-process; write    │
  │  │   strategies/<name>/analysis/ and fetch Tencent and Eastmoney themselves            │
  │  ├─ face overlay rows (13, §4.3): webserver · connection (sign-in) · api-remotes ·     │
  │  │   file-upload · workspace · three Remote controllers · directory-picker ·           │
@@ -309,10 +313,11 @@ default broken, and the boot refuses).
 | `ask_user_question` | `tool-ask-user` (face overlay; the blocking `legacy` mode) | §4.3; the answer is model-visible, so not a gate |
 | `mcp__akshare__*` | project `mcp-akshare` row | public A-share/other market queries, unguarded; check source errors and truncation |
 | `mcp__account__*` | project `mcp-account` row (§3.1) | the Account seat: Linqi's Account at `127.0.0.1:4820`, an external program; 35 real-account tools (42 against a simulated service); the twelve writes carded by Gate 2 (§4.7), the reads public, seconds old and unguarded — read as they are, with no lookahead guard; `portfolio_wait` polls a card or an order for 55 s at most |
-| `lunhui_read_run`, `lunhui_freeze_quotes`, `lunhui_freeze_limit_up`, `lunhui_freeze_boards`, `lunhui_freeze_index` | the project Lunhui rows (`src/lunhui.ts`, §4.3): `lunhui-runs` registers the first, one freeze row each of the other four | frozen A-share research runs (spec `docs/superpowers/specs/2026-10-25-lunhui-modules-design.md`, plan 1 of four): every tool takes a strategy name — the channel's — and a run id, never a path, anchored under the `lunhui-runs` row's `strategiesRoot` by `face/plugins/lunhui/lib/runs.mjs`; a freeze with `run` omitted opens a run in `strategies/<name>/analysis/<run>/` (`run.json`, `metrics.json`) and answers its id, with `run` it adds to that open run, and each writes one `evidence-<source>.json` (`quotes`, `limit-up`, `boards`, `index`) of hashed items and the derived items over them — a second freeze of one source in one run is `SOURCE_FROZEN`; `lunhui_freeze_quotes` (Tencent quotes and 60-day bars, 1–8 symbols, stage 0's rule) in any channel, the other three in `cn-market` only (`WRONG_CHANNEL`): the 涨停, 炸板 and 昨日涨停 pools (≤ 500 rows each), the top 30 concept boards by change with up to ten boards' members (≤ 100 each) and the board fund-flow rank, the four indices with 120-day bars and the all-A-shares advance/decline counts — the Eastmoney items stamped with the host that served them and `delayed`; eight freezes a run, a refused one counted, then `TOOL_BUDGET`; a delegated child is refused `NOT_GRAVIT`; a China date no calendar table covers, or one whose latest opened session lies outside the calendar, is `CALENDAR_UNCOVERED`; each evidence file and its `run.json` entry record `session`, the trading day the data belongs to (`getMarketSession(now).expectedQuoteDate`, the previous session on a weekend, a holiday or before 09:15), beside `received_at`, the wall clock, and the reply carries both as `session` and `as_of`; an evidence file is at most 256 KiB — `limit-up`'s 1 MiB, three full pools — and a run's evidence 2 MiB; a code a pool reply repeats keeps its first row, the reply's `duplicates` counting the rest; a quotes freeze's quote items are `kind: "quote"` (the parsed index or equity kind kept as `instrument`), the index freeze's `kind: "index"`; every refusal is a thrown `LunhuiError`, `Error: <CODE> …` to the model, naming no path; `lunhui_read_run` answers `run.json`, the counters and each module artifact's headline (none exists before plan 2: nothing seals a run yet); unguarded and never evidence of a trade, like AKShare's; named by no bot's allow list (`tests/bots.test.ts`) |
+| `lunhui_read_run`, `lunhui_freeze_quotes`, `lunhui_freeze_limit_up`, `lunhui_freeze_boards`, `lunhui_freeze_index` | the project Lunhui rows (`src/lunhui.ts`, §4.3): `lunhui-runs` registers the first, one freeze row each of the other four | frozen A-share research runs (spec `docs/superpowers/specs/2026-10-25-lunhui-modules-design.md`, plan 1 of four): every tool takes a strategy name — the channel's — and a run id, never a path, anchored under the `lunhui-runs` row's `strategiesRoot` by `face/plugins/lunhui/lib/runs.mjs`; a freeze with `run` omitted opens a run in `strategies/<name>/analysis/<run>/` (`run.json`, `metrics.json`) and answers its id, with `run` it adds to that open run, and each writes one `evidence-<source>.json` (`quotes`, `limit-up`, `boards`, `index`) of hashed items and the derived items over them — a second freeze of one source in one run is `SOURCE_FROZEN`; `lunhui_freeze_quotes` (Tencent quotes and 60-day bars, 1–8 symbols, stage 0's rule) in any channel, the other three in `cn-market` only (`WRONG_CHANNEL`): the 涨停, 炸板 and 昨日涨停 pools (≤ 500 rows each), the top 30 concept boards by change with up to ten boards' members (≤ 100 each) and the board fund-flow rank, the four indices with 120-day bars and the all-A-shares advance/decline counts — the Eastmoney items stamped with the host that served them and `delayed`; eight freezes a run, a refused one counted, then `TOOL_BUDGET`; a delegated child is refused `NOT_GRAVIT`; a China date no calendar table covers, or one whose latest opened session lies outside the calendar, is `CALENDAR_UNCOVERED`; each evidence file and its `run.json` entry record `session`, the trading day the data belongs to (`getMarketSession(now).expectedQuoteDate`, the previous session on a weekend, a holiday or before 09:15), beside `received_at`, the wall clock, and the reply carries both as `session` and `as_of`; an evidence file is at most 256 KiB — `limit-up`'s 1 MiB, three full pools — and a run's evidence 2 MiB; a code a pool reply repeats keeps its first row, the reply's `duplicates` counting the rest; a quotes freeze's quote items are `kind: "quote"` (the parsed index or equity kind kept as `instrument`), the index freeze's `kind: "index"`; every refusal is a thrown `LunhuiError`, `Error: <CODE> …` to the model, naming no path; a run seals on the first module context read (next row), after which a freeze is `RUN_SEALED`; `lunhui_read_run` answers `run.json`, the counters (`metrics.json`) and each module artifact file present, by `MODULES` order, with its headline when `run.json` `artifacts[]` names the module and the file is an object within 24 KiB compact — any other file listed unaccepted with no headline; unguarded and never evidence of a trade, like AKShare's; named by no bot's allow list (`tests/bots.test.ts`) |
+| `lunhui_read_environment_context`, `lunhui_submit_environment`, `lunhui_read_sentiment_context`, `lunhui_submit_sentiment`, `lunhui_read_theme_context`, `lunhui_submit_theme` | the project Lunhui module rows (`src/lunhui.ts`, §4.3): `lunhui-environment`, `lunhui-sentiment`, `lunhui-theme`, one pair each, built by `defineModule` (`face/plugins/lunhui/lib/module-tool.mjs`) over the module's contract (`lib/contracts/<module>.mjs`) | the three market modules (spec §5.4–§5.7, plan 2 of four), `cn-market` runs only (`WRONG_CHANNEL` otherwise), every argument a strategy name and a run id: a read, open to any caller, counts the call, seals the run when it is open (A4: `snapshot_id` and `session` fixed, no evidence lands after) and answers the module's context — a digest of at most 30 KiB of UTF-8 JSON (A24) with the envelope fields to copy, the module's hypotheses, schema, hints and an example built from the digest, its sources' derived items first, then rows by the module's priority, the rest named in `truncated` — and says `NOT_EVALUABLE` when a required source is missing (environment needs `index`; sentiment `limit-up` and `index`; theme `boards` and `limit-up`); a submit takes `analysis`, the artifact as JSON text, from a delegated role child only (`NOT_A_ROLE` for a root session or a seeded fork, A23), after that module's read in this process (`READ_FIRST`), once a module a run (`ALREADY_SUBMITTED`), validated fail-closed by `validateEnvelope` (`[<category>] <reason>\n修复：<repair>`, code `INVALID_ANALYSIS`) and landed as `<module>.json`, named in `run.json` `artifacts[]`; ten calls a module a run, reads and submits together, the refusals inside a resolved run counted, then `TOOL_BUDGET`; the headlines are environment's `index_state`, `liquidity_state`, `cycle_anchor`, sentiment's `state` (one of the seven), `money_effect`, `freeze_type` (and, in an `OK` artifact, a `conflict` beside an `UNKNOWN` state), theme's `mainline_candidates`, `theme_stage`, `rotation`; the role `cn-market-analyst` is the only allow list that names them (§3.8), and no bot's does |
 | `agent_<bin>` | face `agents.ts` | roster-gated per channel (§6.5) |
 | `dispatch` | face `room.ts` (`installRoom`) | Gravit's own: refused in any session whose header or `agentPreset` projection names a bot (§6.8) |
-| `role_<id>` (one per `roles/<id>/`; none today, `roles/` ships only `_template`) | one `dsh-tool-subagent` row per role inside Gravit's preset, rendered by `src/roles.ts` (§3.8) | scoped: a bot never sees one, and a role child removes them through its own allow list (a `subagent_fork` child, restricted by nothing, keeps them, and so does a plain `subagent` child, though neither its roles section nor the cycle contract reaches it, §3.8); a one-shot `spawn` child with the role's persona and exactly the role's tools; the arguments are `description` (its label in Details' Children, §5.4) and `prompt`, and the call waits unless `run_in_background` is set |
+| `role_<id>` (one per `roles/<id>/`; today `role_cn_market_analyst`, the one role `roles/` ships beside `_template`) | one `dsh-tool-subagent` row per role inside Gravit's preset, rendered by `src/roles.ts` (§3.8) | scoped: a bot never sees one, and a role child removes them through its own allow list (a `subagent_fork` child, restricted by nothing, keeps them, and so does a plain `subagent` child, though neither its roles section nor the cycle contract reaches it, §3.8); a one-shot `spawn` child with the role's persona and exactly the role's tools; the arguments are `description` (its label in Details' Children, §5.4) and `prompt`, and the call waits unless `run_in_background` is set |
 
 Not tools, but in the same prompt: a connected MCP server's `instructions` (the `mcp:akshare`
 section, §3.1). The MCP resource tools and their prompt section are off by policy (PLAN D7).
@@ -409,11 +414,16 @@ characters; `allow`, a non-empty list of exact tool names; an optional `model:
 <provider>/<model>` in `MODEL_ROUTE_RE`'s grammar; keys it does not know are ignored).
 `roles/_template/` is the copy source and carries a `README.md`, the contract for whoever opens
 the directory; it is never a role. A hidden entry or a plain file under `roles/` is skipped; a
-symbolic link, or a directory whose name is not an id, is refused (below). No role ships since
-2026-10-24: the three that did (a screener, a backtester and a reviewer, their allow lists the
-removed package's tools) retired with their tools, and the next are the operator's to design;
-`_template`'s `ROLE.md` keeps the report's four headings (status, what was measured, paths,
-limits). The operator is
+symbolic link, or a directory whose name is not an id, is refused (below). One role ships:
+`cn-market-analyst` (modules spec §5.9, A8), the Lunhui market modules' analyst — its `allow` is
+`skill` and the environment, sentiment and theme pairs (§3.6), its route
+`deepseek-official/deepseek-flash`, its Chinese `ROLE.md` (1,337 bytes) the order of the three
+modules, the artifact passed only in `analysis` and never in the message, the blocked exit after a
+failed read or a module's third rejection, and the four-heading report; Gravit calls it as the run
+protocol says (§4.3, "The run protocol section"). The three that shipped before (a screener, a
+backtester and a reviewer, their allow lists the removed package's tools) retired with their tools
+on 2026-10-24; `_template`'s `ROLE.md` keeps the report's four headings (status, what was
+measured, paths, limits). The operator is
 the only writer, by file edit; Gravit proposes a role in conversation and never creates or edits
 one (charter §4), and nothing in the face writes under `roles/`, so, unlike a bot, a role has no
 save and no re-declaration: `composeFace` reads the directory once per boot, and an edit reaches
@@ -445,7 +455,9 @@ summary}]` the plugin turns into the `gravit:roles` section (order `TOOL_SUBAGEN
 on what a role is and why its report is a claim to check, then `- role_<id> — <description>` per
 role: `dsh-tool-subagent` has no description key, which is why the summaries ride on this row) and
 whose `cycle` — the text of `dsh/profile/cycle.md`, which `composeFace` reads right after the roles
-(`readCycle`, `src/cycle.ts`) — it turns into the `gravit:cycle` section (§4.3); then one
+(`readCycle`, `src/cycle.ts`) — it turns into the `gravit:cycle` section (§4.3), and whose
+`protocols` — the run protocols `composeFace` reads right after the cycle (`readProtocols`,
+`src/protocols.ts`) — it turns into one section each, today `lunhui:run` (§4.3); then one
 `@deepseek-ai/dsh-tool-subagent` row per role, id `role-<id>`, `config` =
 `provider: spawn`, `toolName: role_<id>`, `backgroundMode: one-shot`, `persona` (the `ROLE.md`
 text), `toolFilter: {allow: […]}`, and `agentOptions: {provider, model}` only when `role.yml` names
@@ -465,9 +477,10 @@ saying so, and `cd face && npm run render:roles` (`scripts/render-roles.ts`, out
 include like the other scripts) writes it. Nothing reads it at boot; its job is to show whoever
 opens `bots/gravit` what the preset is. `tests/roles.test.ts` renders the repository's `roles/`
 and byte-compares it with the committed file, and fails while they differ, so an edit under
-`roles/` that skipped the script cannot land. The header names `dsh/profile/cycle.md` too: the
-mirror embeds the cycle text as the `gravit` row's `cycle` (a YAML block scalar), so an edit to
-that file needs the script run as well, or the same test fails.
+`roles/` that skipped the script cannot land. The header names `dsh/profile/cycle.md` and
+`dsh/profile/lunhui-run.md` too: the mirror embeds the cycle text as the `gravit` row's `cycle`
+and the run protocol as its `protocols` (YAML block scalars), so an edit to either file needs the
+script run as well, or the same test fails.
 
 `allow` entries are EXACT: a host tool name (`read`, `grep`) or `mcp__<server>__<raw>`, letters,
 digits, `_` and `-` only (a `*` is refused where the file is read), under the server name the
@@ -549,28 +562,34 @@ ignore the restriction: a small model may be told of a tool it cannot call
 (`docs/dsh-upgrade-guide.md` §7.3 watches for a dsh that scopes them to the child's view).
 
 Pinned by `tests/roles.test.ts` (the reader, the render, the mirror — the shipped library is
-`_template` alone and the mirror has no role row; a fixture role `probe`, copied from `_template`,
-renders exactly one), `tests/gravit-plugin.test.ts` (the section, listing exactly the roles the
-assembling scope can call, and nothing for a delegated child that is not a fork),
-`tests/boot.test.ts` and `tests/bot-presets.test.ts` (the default rendered in memory and never
-read from the file — `["gravit"]` with `roles: []`; a missing roles directory refusing the
-compose), `tests/bots-smoke.test.ts` (over the repository's `roles/`, Gravit's roster is the
-host's and no `role_*` tool; a bot sees none) and `tests/roles-smoke.test.ts` (a real boot over
-two fixture roles made from `_template` under the test's own roles root, `auditor` and `worker`,
-with `mcp__fixture__*` stand-ins: persona, exact tools, the result, the auditor child's
-`GRAVIT.md` baseline, a fork child's system text and tools equal to Gravit's, a spawn child's
-blank sections, the loud failure); the live check is the role drill (`face/README.md`, §7.4),
-which waits for a role to exist.
+`cn-market-analyst` and the mirror has its one role row; a fixture role `probe`, copied from
+`_template`, renders exactly one; `cn-market-analyst`'s `ROLE.md` Chinese, within 2,000 bytes,
+carrying the order, the analysis-only artifact, the blocked exit and the four headings),
+`tests/gravit-plugin.test.ts` (the section, listing exactly the roles the assembling scope can
+call, and nothing for a delegated child that is not a fork), `tests/boot.test.ts` and
+`tests/bot-presets.test.ts` (the default rendered in memory and never read from the file —
+`["gravit", "role-cn-market-analyst"]`, the `gravit` row carrying the role's summary, the cycle
+and the protocols; a missing roles directory refusing the compose), `tests/bots-smoke.test.ts`
+(over the repository's `roles/`, Gravit's roster is the host's plus `role_cn_market_analyst`; a
+bot sees no role tool) and `tests/roles-smoke.test.ts` (a real boot over two fixture roles made
+from `_template` under the test's own roles root, `auditor` and `worker`, with `mcp__fixture__*`
+stand-ins: persona, exact tools, the result, the auditor child's `GRAVIT.md` baseline, a fork
+child's system text and tools equal to Gravit's, a spawn child's blank sections, the loud
+failure; then, on a second boot, the shipped `cn-market-analyst` routed to the stub: its tools
+exactly its allow list, its persona, a submit landing in a run, the same submit from Gravit's root
+`NOT_A_ROLE`, a freeze out of its reach and `NOT_GRAVIT` for a plain `subagent` child). The live
+check is the role drill (`face/README.md`, §7.4), which the live market run covers for
+`cn-market-analyst`.
 
 ---
 
 ## 4. Frontend: the face server (`face/src`)
 
-Some 11,000 lines of TypeScript across 35 files, run directly by `tsx` — no build step, plus two
+Some 11,000 lines of TypeScript across 36 files, run directly by `tsx` — no build step, plus two
 plain `.js` files outside `src/` (`face/plugins/bot.js` and `face/plugins/gravit.js`, §3.7–§3.8 —
 a composition names each by a path the loader reaches as an absolute `file:` URL, which the face
 rebases from a relative one for a bot, and each must import nothing) and the Lunhui rows' plain
-`.mjs` files under `face/plugins/lunhui/` (§4.3: five row files and their `lib/`, which import
+`.mjs` files under `face/plugins/lunhui/` (§4.3: eight row files and their `lib/`, which import
 `@deepseek-ai/dsh-tools`, pinned exactly in `face/package.json`, and each other, never `src/`). Pins:
 `DSH_PIN = 0.2.0-rc.2` (every `@deepseek-ai/dsh-*` dependency, declared exactly and installed),
 `CORDIS_PIN = 4.0.4` (`@deepseek-ai/cordis` rides its own 4.x track; the dsh packages peer it with
@@ -636,11 +655,12 @@ row audit; and the policy layer.
    the row is composed; `hmr` disabled whenever composed), patch Gravit's persona into
    `system-prompt` (`personaPrefix` only, §4.3), set the `agent-instructions` row's two
    candidate lists after it (`instructionsPatch`, §4.3), then push **the face overlay last** — its
-   default preset rendered here, in memory, from `roles/` and `dsh/profile/cycle.md` (`readRoles`
-   and then `readCycle` run as the very last steps before the push; a missing roles directory, a
-   role the reader refuses, or a cycle file that is missing, unreadable, empty or over 3,300
-   bytes ends the compose with that path, and a face that ships `bots/` ships `roles/` beside it,
-   §3.8). This
+   default preset rendered here, in memory, from `roles/`, `dsh/profile/cycle.md` and
+   `dsh/profile/lunhui-run.md` (`readRoles`, `readCycle` and then `readProtocols` run as the very
+   last steps before the push; a missing roles directory, a role the reader refuses, a cycle file
+   that is missing, unreadable, empty or over 3,300 bytes, or a protocol file that is missing,
+   unreadable, empty, over 3,000 bytes or carries `{{` ends the compose with that path, and a face
+   that ships `bots/` ships `roles/` beside it, §3.8). This
    inverts the CLI's layering deliberately: loopback-only binding must survive an operator
    patch, so face rows win silently; the policy layer is the other way round and yields to an
    operator row with the same id.
@@ -702,8 +722,8 @@ row audit; and the policy layer.
     explaining it, and the room caps.
 
 One `bootFace` per process: given a `dshHome` (as the tests do; `main.ts` passes none) it sets
-`process.env.DSH_HOME` permanently, which is why the eighteen real-boot tests live in separate
-files. Without `deferReady` it commits `appReady` itself as its last step, which is what every
+`process.env.DSH_HOME` permanently, which is why the twenty real-boot tests live in files of their own
+(`roles-smoke.test.ts`'s two boot one after the other, each into a fresh home). Without `deferReady` it commits `appReady` itself as its last step, which is what every
 smoke that boots without `main.ts` relies on.
 
 ### 4.2 Module table
@@ -711,12 +731,13 @@ smoke that boots without `main.ts` relies on.
 | File | Responsibility |
 |---|---|
 | `main.ts` | entry: chdir, signal handlers and `installFailLoud`, boot with `deferReady`, the sign-in route and every route family (the room engine, the bot runtime and the Account proxy included — the proxy's `dispose` runs after the tree's at shutdown, once the web server has stopped), `commitReady`, the tokenized URL |
-| `boot.ts` | the mirror of the dsh CLI's `runProfile` (§4.1): `composeFace` (its last step renders the default preset from `roles/` and `dsh/profile/cycle.md`), the runtime resolution, the strict row audit, the required-service and answerer checks, `ask_user_question` in the live registry, Gate 2 registration, the preset-roster checks, `declareBots`, `commitReady` |
+| `boot.ts` | the mirror of the dsh CLI's `runProfile` (§4.1): `composeFace` (its last step renders the default preset from `roles/`, `dsh/profile/cycle.md` and the run protocols; `FaceBootOptions.protocolsDir` points a test at a fixture), the runtime resolution, the strict row audit, the required-service and answerer checks, `ask_user_question` in the live registry, Gate 2 registration, the preset-roster checks, `declareBots`, `commitReady` |
 | `overlay.ts` | the thirteen host rows `dsh-base` does not mount (§4.3), `satisfies`-checked against each plugin's own config type; `BOTS_ROOT`, `DEFAULT_PRESET`, `GRAVIT_PLUGIN_RELATIVE`, `presetRowId` |
 | `policy.ts` | the policy layer (§4.3): `POLICY_ID_PATCHES`, `POLICY_INSERTS`, `facePolicyPatches` — each row a PLAN decision; a missing target is reported on stderr, never skipped silently |
 | `akshare.ts` | project AKShare MCP defaults, composed below operator profile/home patches |
 | `account-seat.ts` | the Account seat row (§3.1): `ACCOUNT_SEAT_ROW_ID`, `ACCOUNT_SEAT_SERVER`, `SEAT_TOOL_PREFIX`, `ACCOUNT_SEAT_NAME`, `seatDir`/`seatUrl` (the env or the defaults), `accountSeatPatches` — this process's node, the checkout's `tsx`, the seat's env, 90 s, failing soft; composed right after AKShare — and `composedSeatRow` (the row AS COMPOSED, read off the Loader's entries: disabled by a patch, or its service URL and seat name), which `main.ts` hands the seat route so the box follows an operator's patch, never the environment alone |
-| `lunhui.ts` | the Lunhui rows (§4.3; modules spec §5.12): `LUNHUI_ROW_IDS`, `LUNHUI_TOOL_NAMES`, `lunhuiPatches(repoRoot?)` — one insert of five file-plugin rows under `face/plugins/lunhui/`, each `name` the absolute `file:` URL of its file (`lunhui-runs` → `runs-row.mjs`, `lunhui-freeze-quotes` → `freeze-quotes-row.mjs`, …), `lunhui-runs`' config `{strategiesRoot}` (this checkout's `strategies/`) and the four freeze rows' `{}`; composed right after the seat; plain data, nothing mounted |
+| `lunhui.ts` | the Lunhui rows (§4.3; modules spec §5.12): `LUNHUI_ROW_IDS`, `LUNHUI_TOOL_NAMES`, `lunhuiPatches(repoRoot?)` — one insert of eight file-plugin rows under `face/plugins/lunhui/`, each `name` the absolute `file:` URL of its file (`lunhui-runs` → `runs-row.mjs`, `lunhui-freeze-quotes` → `freeze-quotes-row.mjs`, …, `lunhui-theme` → `theme-row.mjs`), `lunhui-runs`' config `{strategiesRoot}` (this checkout's `strategies/`) and the four freeze and three module rows' `{}`; `LUNHUI_TOOL_NAMES` the eleven tools in row order; composed right after the seat; plain data, nothing mounted |
+| `protocols.ts` | Gravit's run protocols (§4.3): `readProtocol` reads one prose file — trimmed, refused with its absolute path first when missing, unreadable, empty, over `PROTOCOL_MAX_BYTES` (3,000 raw bytes, inclusive) or carrying `{{` — and `readProtocols(dir?)` returns every shipped one as `{name, probe, text}`, today `lunhui:run` (`LUNHUI_RUN_SECTION`) from `lunhui-run.md` (`LUNHUI_RUN_FILE`, `LUNHUI_RUN_PATH`) under `PROTOCOLS_DIR` (`dsh/profile/`, resolved from the module), gated on `lunhui_read_run`; dependency-free |
 | `orders.ts` | Gate 2 decision logic, pure: `isOrderTool` (the seat's twelve writes — `SEAT_WRITE_RAW_NAMES` — and any tool under the face's own seat prefix outside `SEAT_READ_RAW_NAMES`), `isSeatWriteTool`, `RETIRED_ORDER_RAW_NAMES` and `isRetiredOrderTool` (`place_order`, `cancel_order` under any server: denied, never carded), `effectiveApprovalPolicy`, `orderApprovalDecision` (with the `displayReason` twin), `describeOrder` (the seat's keys in a readable order; a key field shown whole or the call denied), `hasApprovalGrant`, `orderGuardReason`, `orderGuardReasonForSession` (the guard's one producer; a retired tool denied first; reads `snapshotEvents()`, a distinct denial for an unreadable log), `auditOrderTools` (`{gated, uncovered, retired}`) — depends on nothing (structural types only) |
 | `setup.ts` | one-shot `$DSH_HOME/profiles/<name>` creation with `PATCH_HEADER`; refuses to overwrite |
 | `http.ts` | `HttpError`, `readBody` (4,096 B cap → 413), `markStale`, the fixed `FORBIDDEN` body, and **the trust fence every `/data` route reuses** — `isLoopbackHost`, `isTrustedDataRequest`, and `isJsonBody` for a POST |
@@ -731,7 +752,7 @@ smoke that boots without `main.ts` relies on.
 | `agents.ts` | exec recipes for `claude` and `codex` (fixed argv, prompt on stdin, scrubbed env, `--restricted` / `--sandbox read-only`), the spawn runner, the `agent_<bin>` tool with the roster check on execute, tool sync |
 | `bots.ts` | bots = `bots/<id>/` directories: `isBotId`, `renderComposition` (the persona text written into the composition), `createBot`, `updateBotSettings`, `updateSoul`, `listBots` (dsh's roster and the face's declaration failures merged in, `broken`/`listed`); four routes, each save calling `onBotChanged` → `redeclare` |
 | `bot-presets.ts` | bots as face-declared presets (§3.7): `definitionFor` (the rebased `PresetDefinition`; its rows come from the composition file, or are handed in — the default's, rendered from `roles/`, whose file is then not read), `declareBots` (after boot; `redeclare` serialized per id, `errors`, `ids`) |
-| `roles.ts` | the role library (§3.8): `readRoles` (the grammar, the exact-name rule and the never-list, every refusal opening with an absolute path), `toolNameFor`, `gravitRows` (the `gravit` plugin row, then one `dsh-tool-subagent` row per role), `renderGravitComposition` (the mirror's text), `GRAVIT_PLUGIN_URL`, `ROLES_ROOT`; plain data in, plain rows out, nothing mounted |
+| `roles.ts` | the role library (§3.8): `readRoles` (the grammar, the exact-name rule and the never-list, every refusal opening with an absolute path), `toolNameFor`, `gravitRows` (the `gravit` plugin row — the summaries and, when given, the cycle and the protocols — then one `dsh-tool-subagent` row per role), `renderGravitComposition` (the mirror's text), `GRAVIT_PLUGIN_URL`, `ROLES_ROOT`; plain data in, plain rows out, nothing mounted |
 | `bot-runtime.ts` | a bot HOME session's saved model route on its first request, the journal as a runtime-context snapshot on every request, and `/data/bots/runtime` (a live bot session's mounted persona, model and tools, or its last request's; never resumes one); reads the preset a session RUNS from the `agentPreset` projection (`sessionPresetReader`) |
 | `bot-journal.ts` | a bounded, fresh read of one bot's own `journal/notes.md` (12 KiB); never writes |
 | `room-rules.ts` | the room's pure rules: `ROOM_CAPS`, `resolveMentions` (by id, by one-token name), `finalTextOf` + `isPass`, `validateDispatch` (names the roster), `dispatchResultText` (names who was not called), `roomLinesOf` + `formatDelta` + `memberPrompt` (the attributed delta and the four standing rules), `roundEndText`, `parseModelRoute`; the `room` message-source vocabulary |
@@ -742,7 +763,7 @@ smoke that boots without `main.ts` relies on.
 | `cycle.ts` | Gravit's research-cycle contract (§4.3): `readCycle` reads `dsh/profile/cycle.md` (`CYCLE_PATH`, resolved from the module) — trimmed, braces literal because the section does not interpolate, refused with its absolute path first when missing, unreadable, empty or over `CYCLE_MAX_BYTES` (3,300 raw bytes since 2026-10-24, the limit inclusive); dependency-free |
 | `instructions.ts` | the instructions patch (§4.3): `AGENT_INSTRUCTIONS_ROW_ID`, `INSTRUCTION_FILE` and `LOCAL_INSTRUCTION_FILE` (`GRAVIT.md`, `GRAVIT.local.md`), `INSTRUCTIONS_CONFIG` (`satisfies` the package's own `Config`) and `instructionsPatch(inherited?)`, which spreads the inherited row config and applies the two lists last, a fresh object on every call; imports the package's type only |
 | `plugins/bot.js` | the `gravit-bot` composition plugin: a scoped `deployment:persona-prefix` section (shadows Gravit's prefix; no suffix) + an allow-list `tools.restrict`, re-expanded after each burst of `tools/change` — coalesced to one timer turn, so a tool that registers after the declaration is admitted when the allow list names it (`expandAllow` resolves `mcp__*__<raw>` against the live tree); dependency-free |
-| `plugins/gravit.js` | the `gravit` composition plugin, the first row of the default preset's rendered composition (`gravitRows` in `src/roles.ts`; `bots/gravit/agent.cordis.yml` is its generated mirror): a scoped `deployment:today` section (`Today is YYYY-MM-DD, Weekday (Zone).`), its text a function re-evaluated at every assembly, in the process's own zone — `resolveZone()` falls back to `UTC`, labelled `(UTC)`, when `TZ` is empty or not a zone Intl can format in, so an unusable `TZ` cannot throw at assembly — ordered right after the persona prefix, `interpolate: false`; and, only when its `roles` config is present, a scoped `gravit:roles` section at `getSectionOrder("TOOL_SUBAGENT") + 1` (the role intro and one `- role_<id> — <summary>` line per role, `interpolate: false`, listing only the roles whose tool the assembling scope resolves — `canCall`, `ctx.tools.get(name, context.scope)`, so a role child reads none and a `subagent_fork` child Gravit's whole list, §3.8); only when its `cycle` config is present, a scoped `gravit:cycle` section at `getSectionOrder("DEPLOYMENT_PERSONA_SUFFIX") - 50` (`interpolate: false`; the contract's text when the assembling scope can call `create_goal`, `''` otherwise, §4.3); both sections also `''` for a delegated child that is not a fork (`isRootOrFork`, read from `context.agent.session.header`: no `origin`, or `isSeeded`); `inject` is `systemPrompt` and `tools`, the registry only read, so it masks no tool; `validateGravitConfig` accepts `{}` and checks `cycle` and `roles` when present; dependency-free |
+| `plugins/gravit.js` | the `gravit` composition plugin, the first row of the default preset's rendered composition (`gravitRows` in `src/roles.ts`; `bots/gravit/agent.cordis.yml` is its generated mirror): a scoped `deployment:today` section (`Today is YYYY-MM-DD, Weekday (Zone).`), its text a function re-evaluated at every assembly, in the process's own zone — `resolveZone()` falls back to `UTC`, labelled `(UTC)`, when `TZ` is empty or not a zone Intl can format in, so an unusable `TZ` cannot throw at assembly — ordered right after the persona prefix, `interpolate: false`; and, only when its `roles` config is present, a scoped `gravit:roles` section at `getSectionOrder("TOOL_SUBAGENT") + 1` (the role intro and one `- role_<id> — <summary>` line per role, `interpolate: false`, listing only the roles whose tool the assembling scope resolves — `canCall`, `ctx.tools.get(name, context.scope)`, so a role child reads none and a `subagent_fork` child Gravit's whole list, §3.8); only when its `cycle` config is present, a scoped `gravit:cycle` section at `getSectionOrder("DEPLOYMENT_PERSONA_SUFFIX") - 50` (`interpolate: false`; the contract's text when the assembling scope can call `create_goal`, `''` otherwise, §4.3); only when its `protocols` config is present, one scoped section per entry `{name, probe, text}` at `getSectionOrder("DEPLOYMENT_PERSONA_SUFFIX") - 60`, just before the cycle (`interpolate: false`; the text when the assembling scope can call the entry's `probe`, `''` otherwise — today `lunhui:run`, `LUNHUI_RUN_SECTION`, probed on `lunhui_read_run`, §4.3); every section but the date also `''` for a delegated child that is not a fork (`isRootOrFork`, read from `context.agent.session.header`: no `origin`, or `isSeeded`); `inject` is `systemPrompt` and `tools`, the registry only read, so it masks no tool; `validateGravitConfig` accepts `{}` and checks `cycle`, `roles` and `protocols` when present (a protocol's name `namespace:dashed-name`, never one of the plugin's own three sections, unique; its probe a tool name); dependency-free |
 | `panels.ts` | Discover's feeds (§5.3): host facts (`/data/host.json`), the local-agent roster (probe, auth, connect, disconnect), memory (skills), plugins (loader rows + tool schemas); builds `PanelDeps` (it requires `skills`, `tools`, `loader`, `workspaceRegistry` and `agents`), whose `channelFor` answers `{workspaceId, name, dir}` — the `dir` is what the room engine gives a member as its `cwd` |
 | `version.ts` | the three pins |
 
@@ -753,8 +774,8 @@ the real `/` (a bare `bootFace` mounts no page), `signIn` trades the launch toke
 ### 4.3 The overlay rows and the policy layer
 
 Thirteen rows, composed last, winning silently over the operator's patch and the home layer —
-`faceOverlay(port, definitionFor(bots, "gravit", rows))`, with `rows` rendered from `roles/` and
-`dsh/profile/cycle.md` by `composeFace` (§3.8), in this order:
+`faceOverlay(port, definitionFor(bots, "gravit", rows))`, with `rows` rendered from `roles/`,
+`dsh/profile/cycle.md` and `dsh/profile/lunhui-run.md` by `composeFace` (§3.8), in this order:
 
 | Row | Package | Why the face mounts it |
 |---|---|---|
@@ -769,7 +790,7 @@ Thirteen rows, composed last, winning silently over the operator's patch and the
 | `directory-picker` | `dsh-host-directory-picker-auto` | the native folder dialog; since 0.2.0 it fails the row when either of its two runtime entries cannot load, hence the four picker packages in `package.json` |
 | `tool-ask-user` | `dsh-tool-ask-user` | the model-facing half of `userQuestions`, in no upstream bundle; configless = the blocking `legacy` mode |
 | `agent-preset-registry` | `dsh-agent-preset-registry` | `{default: gravit}`. The registry scans no directory and serves only `list`, `read` and `select` Remotes, so 0.1.1's `trust: system` posture — no authoring RPCs over a git-tracked directory — holds with nothing to configure |
-| `preset-gravit` | `dsh-agent-preset` | the default preset, static so it exists before the first `session/create`: `definitionFor` over the rows `composeFace` renders from `roles/` and `dsh/profile/cycle.md` (§3.8) — the face's `gravit.js` row (the `deployment:today`, `gravit:roles` and `gravit:cycle` sections) by an absolute `file:` URL (`GRAVIT_PLUGIN_URL`), then one `dsh-tool-subagent` row per role; `bots/gravit` supplies only the display metadata, its `agent.cordis.yml` being a generated mirror that is not read (`GRAVIT_PLUGIN_RELATIVE` is how the mirror spells the plugin); it masks no host tool, so Gravit's roster is the host's plus the `role_<id>` tools |
+| `preset-gravit` | `dsh-agent-preset` | the default preset, static so it exists before the first `session/create`: `definitionFor` over the rows `composeFace` renders from `roles/`, `dsh/profile/cycle.md` and `dsh/profile/lunhui-run.md` (§3.8) — the face's `gravit.js` row (the `deployment:today`, `gravit:roles`, `gravit:cycle` and `lunhui:run` sections) by an absolute `file:` URL (`GRAVIT_PLUGIN_URL`), then one `dsh-tool-subagent` row per role; `bots/gravit` supplies only the display metadata, its `agent.cordis.yml` being a generated mirror that is not read (`GRAVIT_PLUGIN_RELATIVE` is how the mirror spells the plugin); it masks no host tool, so Gravit's roster is the host's plus the `role_<id>` tools |
 | `preset-kairos` | `dsh-agent-preset` | the legacy alias: the default's definition under `kairos`, Gravit's id before 2026-10-08, so archived sessions resolve; `bootFace` refuses a boot where it is absent or broken; every host test goes through `isHostPreset` (`src/overlay.ts`, `client/speaker.js`) |
 
 Gone from the overlay since 0.1.1: `storage`, `storage-json`, `storage-domain` and
@@ -870,6 +891,40 @@ dashes included), `gravit-plugin.test.ts`
 (order, literalness, the gate on both halves, unload), `boot.test.ts`, `roles.test.ts` (the mirror
 carries the text) and, on real boots, `bots-smoke`, `roles-smoke` and `goal-smoke` (§7.3).
 
+**The run protocol section** (modules spec A9, §5.10) is the `gravit` row's `protocols` key, read
+the way the cycle is: `composeFace` calls `readProtocols` (`src/protocols.ts`) right after
+`readCycle` and hands `gravitRows` one entry, `{name: "lunhui:run", probe: "lunhui_read_run",
+text}`, the text of `dsh/profile/lunhui-run.md` (2,240 bytes against its 3,000, Chinese, about
+290 heuristic tokens); `FaceBootOptions.protocolsDir` points a test at a fixture directory, and a
+missing, unreadable, empty, oversized or templated file ends the compose with its absolute path
+first. `plugins/gravit.js` mounts each entry as a section of its own at
+`getSectionOrder("DEPLOYMENT_PERSONA_SUFFIX") - 60`, just before the cycle, `interpolate: false`,
+gated as the cycle is but on its own probe: the text when the session is a root or a fork and the
+assembling scope can call `lunhui_read_run`, `''` otherwise. The Lunhui tools are registered
+tree-wide, so the probe says only that the Lunhui rows mounted — disable them and the section goes
+with them, silently; the preset scope keeps it from a bot, the header from a plain `subagent`
+child, and the role child's allow list (no `lunhui_read_run`) with the header from
+`cn-market-analyst`; a `subagent_fork` child reads the same text, so the cached prefix holds. The
+text is the order of one `cn-market` run: freeze `index` first with no `run` (it opens the run),
+then `limit-up` and `boards` into that run (`quotes` optional), a refused first freeze's run id
+reused rather than a second run opened; call `role_cn_market_analyst` once with the run id; read
+the run back with `lunhui_read_run`, the role's report being a claim to check against it; never
+freeze after the role has read (`RUN_SEALED`), never edit `analysis/`, never submit an artifact
+(`NOT_A_ROLE`); a `NOT_EVALUABLE` artifact is a result, not a failure, journaled as a dated entry
+in `strategies/cn-market/journal.md` naming the run, the modules and the missing sources; and a
+final message to the operator naming the run and its `snapshot_id`, each artifact's file and
+headline, the modules `NOT_EVALUABLE` or with no artifact at all, and whether the quotes were
+delayed. It names neither the reviewer nor a strategy channel's steps: they are plans 3–4's, and
+the text says the counterevidence and leader-and-mode steps come later with no tool today. Pinned by
+`tests/protocols.test.ts` (the shipped file reads, fits its budget and states the order; every
+`lunhui_*` and `role_*` name it carries is a registered Lunhui tool or a shipped role; the section
+name equal in `src/protocols.ts` and `plugins/gravit.js`; the reader's refusals, path first, the
+cap inclusive on raw bytes), `gravit-plugin.test.ts` (order, literalness, the gate on both halves,
+no section without the key; a protocol's name may not take one of the plugin's own),
+`boot.test.ts` (the entry composed; a protocols directory without the file refusing the compose,
+path first), `roles.test.ts` (the mirror carries the text) and, on real boots, `bots-smoke`
+(Gravit's prompt carries it, a bot's does not) and `lunhui-market-run-smoke` (§7.3).
+
 **The policy layer** (`src/policy.ts`) composes directly above the bundle layer and BELOW
 AKShare, the profile and the home, so an operator row with the same id wins — the opposite of
 the overlay, on purpose: these are defaults, not the face's contract. Each row restores a 0.1.1
@@ -899,25 +954,31 @@ moved from `maxInlineBytes: 50000` to `maxInlineTokens: 12500` (§9, R27).
 below the profile and the home, so an operator row with one of their ids replaces that row's config
 and `disabled: true` removes it: AKShare's `mcp-akshare` (`src/akshare.ts`), the Account seat's
 `mcp-account` (`src/account-seat.ts`), and the Lunhui rows (`src/lunhui.ts`, modules spec §5.12) —
-one insert of five cordis file-plugin rows, in-process, no child process:
+one insert of eight cordis file-plugin rows, in-process, no child process:
 
 | Row | File (`face/plugins/lunhui/`) | Config | Provides · injects · registers |
 |---|---|---|---|
-| `lunhui-runs` | `runs-row.mjs` | `{strategiesRoot}` — this checkout's `strategies/`, an absolute existing directory or the row refuses to mount | provides `lunhuiRuns` (`createLunhuiRuns`: strategy and run resolution, `openRun`, `addEvidence`, `sealRun`, `readRun`, the per-run mutex `withRun`, `countFreeze`); injects `tools`; registers `lunhui_read_run` |
+| `lunhui-runs` | `runs-row.mjs` | `{strategiesRoot}` — this checkout's `strategies/`, an absolute existing directory or the row refuses to mount | provides `lunhuiRuns` (`createLunhuiRuns`: strategy and run resolution, `openRun`, `addEvidence`, `sealRun`, `readRun`, the per-run mutex `withRun`, `countFreeze`, and for the modules `readContext` and `submit`); injects `tools`; registers `lunhui_read_run` |
 | `lunhui-freeze-quotes` | `freeze-quotes-row.mjs` | `{}` | injects `tools` and `lunhuiRuns`; registers `lunhui_freeze_quotes` |
 | `lunhui-freeze-limit-up` | `freeze-limit-up-row.mjs` | `{}` | the same; `lunhui_freeze_limit_up` |
 | `lunhui-freeze-boards` | `freeze-boards-row.mjs` | `{}` | the same; `lunhui_freeze_boards` |
 | `lunhui-freeze-index` | `freeze-index-row.mjs` | `{}` | the same; `lunhui_freeze_index` |
+| `lunhui-environment` | `environment-row.mjs` | `{}` | injects `tools` and `lunhuiRuns`; registers `lunhui_read_environment_context` and `lunhui_submit_environment` over `lib/contracts/environment.mjs` |
+| `lunhui-sentiment` | `sentiment-row.mjs` | `{}` | the same; `lunhui_read_sentiment_context`, `lunhui_submit_sentiment`, over `lib/contracts/sentiment.mjs` |
+| `lunhui-theme` | `theme-row.mjs` | `{}` | the same; `lunhui_read_theme_context`, `lunhui_submit_theme`, over `lib/contracts/theme.mjs` |
 
-A freeze row reads the strategies root through the service, never its own config: one source of
-truth, so a patch that moves the root restates `strategiesRoot` on `lunhui-runs` alone. Without the
-backbone a freeze row cannot mount: it injects `lunhuiRuns` as a required service, so with no
+A freeze or module row reads the strategies root through the service, never its own config: one
+source of truth, so a patch that moves the root restates `strategiesRoot` on `lunhui-runs` alone.
+Without the backbone neither can mount: each injects `lunhuiRuns` as a required service, so with no
 `lunhui-runs` to provide it the row's fiber stays pending and never reaches `apply`, and the strict
 row audit (§4.1, step 6) refuses the boot over an enabled row that is not ACTIVE — `pending
-(waiting for service: lunhuiRuns)`. `freezeDeps`' own refusal (`lunhuiRuns is missing; mount the
-lunhui-runs row first`) guards only a direct `apply`, as the tests call it. That boot refusal is
-reasoned from the audit's code, not yet pinned by a boot. So disabling `lunhui-runs` means
-disabling the four freeze rows with it; a freeze row disabled alone takes only its tool. A freeze row's two other config keys are the tests': `fetch`, an absolute directory of
+(waiting for service: lunhuiRuns)`. `freezeDeps`' and `moduleDeps`' own refusals (`lunhuiRuns is
+missing; mount the lunhui-runs row first`) guard only a direct `apply`, as the tests call it. That
+boot refusal is reasoned from the audit's code, not yet pinned by a boot. So disabling
+`lunhui-runs` means disabling the seven other rows with it; a freeze or module row disabled alone
+takes only its tools — but `cn-market-analyst`'s allow list names all six module tools, and an
+allow entry the tree lacks fails the delegation with no child (§3.8), so a module row disabled
+alone stops every call of the role until its `role.yml` drops that pair. A freeze row's two other config keys are the tests': `fetch`, an absolute directory of
 recorded replies that `lib/fixture-fetch.mjs` serves in place of the network, and `now`, a clock;
 production rows set neither, and no environment variable switches the fixtures (A15). The library
 under `lib/`: `runs.mjs` (anchoring, the run's states, bounded reads, atomic writes; stage 0's,
@@ -928,12 +989,98 @@ across every caller — and the pool, board, member, fund-flow and count parsers
 derived items of A20: 连板 distribution, 封板 and 炸板 ratios, 昨日涨停 returns and their negative
 tail, board breadth as advancers / (advancers + decliners) and turnover share, the exchanges'
 counts, the two composites' turnover), `freeze-tool.mjs` (`freezeDeps`, `defineFreeze`: the one order of a
-freeze's checks, §3.6), `errors.mjs` (`refuse`, `upstreamError`, `callerIsChild`, `FREEZE_BUDGET`),
-`modules.mjs` (`MODULES`, the six artifacts' files and headline fields), `contract.mjs` (stage 0's
-validator core, whose `hash` `runs.mjs` uses and whose validator waits for plan 2) and
-`fixture-fetch.mjs`. `/data/plugins.json` lists the five
-rows by id as it lists every composed row (`smoke.test.ts` pins all five ACTIVE and the five tools
-registered); Discover draws no tools column for them (spec §9).
+freeze's checks, §3.6), `module-tool.mjs` (`moduleDeps`, `defineModule`: a module's read and
+submit pair, §3.6), `contract-core.mjs` (the rules every module shares, below), `contracts/`
+(`environment.mjs`, `sentiment.mjs`, `theme.mjs` — each module's `contract`: its `HYPOTHESES`, the
+schema of its headline fields, `owns` and `ownedBy`, its own `rules`, hints, example, sources,
+required sources, priority and views — and `shared.mjs`: `firstId`, `exampleOf`, `ownClaims`,
+`derivedRow`, `DERIVED_HINT`), `errors.mjs` (`refuse`, `upstreamError`, `callerIsChild`,
+`callerIsRole`, `FREEZE_BUDGET`, `MODULE_BUDGET`), `modules.mjs` (`MODULES`, the six artifacts'
+files and headline fields, and `MODULE_NAMES`), `contract.mjs` (stage 0's context builder and
+validator, `validateAnalysis`, kept as ported for `tests/lunhui-contract.test.ts`; it imports the
+shared helpers from the core and re-exports them, `hash` among them, which `runs.mjs` uses) and
+`fixture-fetch.mjs`. `/data/plugins.json` lists the eight rows by id as it lists every composed
+row (`smoke.test.ts` pins all eight ACTIVE and the eleven tools registered); Discover draws no
+tools column for them (spec §9).
+
+**The module rows** (spec §5.4–§5.7, A3, A4, A7, A19–A24). `defineModule` gives each module a
+read and a submit over the backbone. The read resolves the strategy, refuses a market module
+outside `cn-market` (`WRONG_CHANNEL`), and calls `readContext`, which under the run's mutex — the
+freezes' own, so a freeze racing the first read lands before the seal or is `RUN_SEALED` — counts
+the call in `metrics.json` `calls[<module>]` (past `MODULE_BUDGET`, ten, `TOOL_BUDGET` with the stop
+instruction, the refused call counted), seals the run when it is open (`sealRun`: `snapshot_id`
+over the evidence hashes, `as_of`, `session`), reads back every evidence file `run.json` lists
+(`readEvidence`, under the cap each was written under) and hands them to the contract's
+`buildContext`; only once that returns is the read remembered, in the service's in-process set of
+`<strategy>/<run>/<module>`, and the digest kept in the definition's map under the run's on-disk
+names (so a run id spelled in another letter case finds it). The submit refuses any caller but a
+delegated role child (`callerIsRole`, the same predicate as `callerIsChild`: no seeded fork, no
+root — `NOT_A_ROLE`), then calls `submit`, which under the same mutex counts the call, refuses
+`ALREADY_SUBMITTED` when `run.json` `artifacts[]` names the module and `READ_FIRST` when this
+process has no read of it (a restart forgets the reads and keeps the counts; a definition with no
+digest, a row reloaded while the service lives, is `READ_FIRST` too), runs `validateEnvelope`
+against the digest, records a rejection's category in `metrics.json` `rejections[<module>]` and
+throws it `INVALID_ANALYSIS` with its `MODULE_REPAIRS` repair, and lands an accepted artifact with
+`writeArtifact` — `<module>.pending.json` written `wx`, renamed to `<module>.json`, then the module
+appended to `run.json` `artifacts[]` and `metrics.json` `submitted`. Submits of one run serialize, so
+a second concurrent submit is `ALREADY_SUBMITTED` and stage 0's `SUBMIT_IN_PROGRESS` is never
+thrown. The gates before the run resolves (`NOT_A_ROLE`, `WRONG_CHANNEL`, `NOT_A_STRATEGY`,
+`BAD_RUN_ID`) count nothing.
+
+`contract-core.mjs` is stage 0's shared rules moved (`fail`, `canonical`, `hash`, `checkSchema`,
+the forbidden trading and account words, the current-time words, the byte budgets, the classifier)
+plus what the modules add. `ENVELOPE_SCHEMA` (A19) is merged under each module's schema
+(`envelopeSchema`, the envelope's fields last so a module cannot redefine them): `module`,
+`contract_version` (`CONTRACT_VERSION`, `"1"`), `hypotheses_version` (`h_` and 12 hex of the
+sha256 over the module's `HYPOTHESES`), `snapshot_id`, `run`, `as_of`, `session`, `status` (`OK` or
+`NOT_EVALUABLE`), `missing_sources`, the headline fields, `claims` (up to 12, each an id, a
+sentence, a basis and up to 16 evidence ids) and `limitations`. `validateEnvelope` fails closed in
+a fixed order: the text's bytes (24 KiB), its JSON, the object's compact bytes, the merged schema,
+the envelope bound to the context, every cited id one the context holds (a derived item of a
+source the module does not read is `REFERENCE`), each claim's time scope (CURRENT needs an item of
+the run's session; bars and history series are HISTORICAL), the forbidden words, the scope rule,
+the status rule, then the contract's own `rules`. The scope rule splits every text into sentences
+(a line break ends one) and matches the five `SCOPE_CLASSES` — `market`, `sentiment`, `theme`,
+`leader`, `index`; a sentence of a class the module does not own, or of an owned class citing no
+item the class's `ownedBy` accepts (by default a derived item), is `UNSUPPORTED_SCOPE` unless it
+states a gap (`SCOPE_EXEMPT`); headline strings and limitations cite nothing, so an owned word
+there is refused too; strings at a contract's `exemptPaths` skip the words and the scope rule but
+not the id binding. The status rule: `OK` needs nothing missing and at least one claim; claims all
+`INSUFFICIENT` force every headline to `UNKNOWN` or empty; `NOT_EVALUABLE` needs `missing_sources`
+equal to the context's `missing` and every headline `UNKNOWN`, and may carry no claim at all. A
+rejection carries its category — `SCHEMA`, `REFERENCE`, `TIME_SCOPE`, `UNSUPPORTED_SCOPE`,
+`EXECUTION_CONTENT`, `BYTE_LIMIT`, `OTHER` — and that category's module-neutral repair
+(`MODULE_REPAIRS`, `repairFor`); stage 0's `VALIDATION_REPAIRS` stays with `validateAnalysis`.
+`buildContext` returns the context text and its digest: only the module's sources, derived items
+first (`derivedFirst`), then rows by the contract's `priority`, whole, until the UTF-8 JSON text
+would pass 30 KiB, the rest counted in `truncated`; a required source absent from `run.json` puts it
+in `missing` and the expected status at `NOT_EVALUABLE`.
+
+The three contracts (spec §5.4, §5.6; `docs/superpowers/specs/2026-10-25-lunhui-modules-design.md`
+§12 lists where they depart from the text): **environment** reads `index` (required) and `quotes`,
+owns the `index` class, carried by an index quote, a bars item or a derived item, and stands
+`index_state` on an index quote or bars and `liquidity_state` on `total_turnover` or
+`advance_decline_ratio`, each on a claim of its own — index and liquidity apart; its view shows an
+index series' last 20 bars with `bars_total`. **sentiment** reads `limit-up` and `index` (both
+required), owns `sentiment` (a derived item) and `market` (the all-shares counts or an index derived
+item), and needs, across its claims that are not `INSUFFICIENT`, two limit-up ids and one index id
+for a `state` other than `UNKNOWN`, a limit-up derived item on a claim of its own for `money_effect`
+and for `freeze_type`, and a `conflict` naming the indicators that disagree when an `OK` artifact's
+`state` is `UNKNOWN`; its rows are the all-shares counts, then the 涨停 pool by streak, the 炸板
+and the 昨日涨停 pools — its context leaves the index quotes and bars out. **theme** reads `boards` and
+`limit-up` (both required), owns `theme`, carried by a boards derived item, and binds each of at
+most five `mainline_candidates` to a board the run froze — its board item and members item cited,
+its `name` the frozen name, no board twice — with `theme_stage` and `rotation` each on a claim of
+its own citing a boards derived item; its view shows ten members a list with `members_total` and
+the board, member-list and flow rows without their per-item `host`, `delayed` (and a board's
+`leader`), which the hints state once for the source. Every market context shows a derived item as
+`derivedRow`'s `{id, measure, value, params?, partial?, inputs_total}`; the evidence file and the
+digest keep the full input lists. Each contract's `example` is built from the digest:
+`NOT_EVALUABLE` naming the missing sources, else `OK` with `UNKNOWN` headlines and one
+`INSUFFICIENT` claim citing a real id — a valid artifact that judges nothing. The contract tests
+(`tests/lunhui-contract-*.test.ts`) pin each module's full-size context under the cap — the
+theme's, over thirty boards and ten member lists, is 30,708 of 30,720 bytes, with flow and 涨停 rows
+the first left out; longer board or member names on a live day could put a member list there too.
 
 **The first request, measured.** The instrument is the projection cache: after a session's first
 request, `$DSH_HOME/storages/session_projcache/sessions/<id>.json` holds its `contextBreakdown`
@@ -943,9 +1090,11 @@ count, which differs). `<id>` is the session's `session-<uuid>`, the name of its
 drill's step 5 finds it. Sizes recorded now, from the shipped files at stage 3 of the Account graft
 (2026-10-24): `dsh/profile/cycle.md` is 3,161 bytes, ≈ 790 heuristic tokens at four bytes a token
 (at `fae4f61` it was 2,985 bytes, ≈ 747, against the 1.5 KB the design spec estimated in its §7);
-the `gravit:roles` section is empty, since no role ships (for the three that did it was 992
-characters, about 250 tokens; each role adds its tool name and a summary of at most 300
-characters); `GRAVIT.md` is 3,300 bytes (budget 4,500; 4,283 at `fae4f61`). The first-request totals
+the `gravit:roles` section is 463 characters, about 116 tokens, for its one role,
+`cn-market-analyst` (for the three retired roles it was 992 characters, about 250 tokens; each role
+adds its tool name and a summary of at most 300 characters); the `lunhui:run` section is 1,143
+characters, about 290 tokens (2,240 bytes on disk); `GRAVIT.md` is 3,459 bytes (budget 4,500;
+4,283 at `fae4f61`). The first-request totals
 are the operator's to take, in one sitting — plan 1's, plan 3's and a role child's — on the real
 face with its keys:
 
@@ -953,8 +1102,8 @@ face with its keys:
 |---|---|---|
 | Gravit's, 2026-10-10 (the go-live smoke session, before the redesign) | — | 1,622 · 4,040 (3,443 of it the `AGENTS.md` + `CLAUDE.md` baseline) · 32,003; DeepSeek billed 55,635 input tokens |
 | Gravit's, a one-word session in the repo root: plan 1's measurement, taken once the branch has merged (`<id>`: the newest `session-<uuid>` directory under `$DSH_HOME/sessions/<project-slug>/` after the one word, as the cycle drill finds its own) | messages well under 4,040 (`GRAVIT.md` ≈ 1,070 tokens for the 3,443 baseline). Plan 1's own system and tools clauses (the date line only; unchanged) were written before plans 2 and 3 and no longer hold: read them against the next row | not yet measured |
-| Gravit's, the first request of the cycle drill (`face/README.md`, step 5): the composition after stage 3 | ≈ 2,420 · ≈ 1,650 · ≈ 46,000 (system: the 2026-10-10 1,622 plus the cycle ≈ 790 and the date line ≈ 12, no roles list; messages: spec §7's ≈ 1,900 less the smaller `GRAVIT.md`; tools: the host's, AKShare's and the seat's groups priced below, no role tool) | not yet measured |
-| one role child's | — | none ships; taken when the operator writes one |
+| Gravit's, the first request of the cycle drill (`face/README.md`, step 5): the composition after plan 2 of the Lunhui modules | ≈ 2,830 · ≈ 1,690 · ≈ 48,000 (system: the 2026-10-10 1,622 plus the cycle ≈ 790, the date line ≈ 12, the roles list ≈ 116 and the run protocol ≈ 290; messages: spec §7's ≈ 1,900 less the smaller `GRAVIT.md`; tools: the live block priced below, 47,997, the role tool and the eleven Lunhui tools in it) | not yet measured |
+| one role child's: `cn-market-analyst`'s, in the live market run (`face/README.md` "Lunhui analysis") | system: the persona (`ROLE.md`, 718 characters, ≈ 180) in place of Gravit's, the date, no roles list, cycle or run protocol; tools: the `skill` tool and the six module tools only | not yet measured |
 
 Plan 1 specified its one-word session for after the branch merges, so with plans 2 and 3 landed
 first the two Gravit rows are the same composition seen from two sessions.
@@ -990,23 +1139,27 @@ what they cost. The host, AKShare and `role_` group totals equal the first run's
 | `agent_` | 0 | 0 | 0 | 0 (no CLI agent is rostered in a scratch home) |
 | measured total | 50 | 163,283 | 40,821 | 31,620 |
 
-**The live block**, measured 2026-10-25 at `1a41fd8` (`feat/lunhui-modules`) on a copy of the
+**The live block**, measured 2026-10-26 at `91307f2` (`feat/lunhui-modules-2`) on a copy of the
 operator's home made without its `.credentials.yaml` and `sessions/` (the command below), the
-Account service running on `127.0.0.1:4820` and the seat row as the live patch composes it: the
-host's 26, AKShare's 14, the seat's 35 and the five Lunhui tools — 80 tools, the groups each equal
-to their own runs above to the byte:
+Account service answering on `127.0.0.1:4820` and the seat row as the live patch composes it: the
+host's 26, AKShare's 14, the seat's 35, the eleven Lunhui tools and `role_cn_market_analyst` — 87
+tools, the AKShare, seat and host groups each equal to their own runs above to the byte:
 
 | Group | Tools | Bytes | bytes/4 | chars/4 |
 |---|---|---|---|---|
 | `mcp__akshare__` | 14 | 134,452 | 33,613 | 24,426 |
 | `mcp__account__` | 35 | 63,221 | 15,806 | 15,727 |
-| `lunhui_` | 5 | 6,133 | 1,534 | 804 |
-| `agent_`, `role_` | 0 | 0 | 0 | 0 |
+| `lunhui_` | 11 | 13,016 | 3,254 | 1,758 |
+| `role_` | 1 | 925 | 232 | 231 |
+| `agent_` | 0 | 0 | 0 | 0 |
 | the host's own | 26 | 23,468 | 5,867 | 5,857 |
-| total | 80 | 227,274 | 56,819 | 46,812 |
+| total | 87 | 235,082 | 58,771 | 47,997 |
 
-The Lunhui group is 2% of the heuristic block; its descriptions are Chinese, so it reads almost
-twice as much in bytes/4 (1,534) as in chars/4 (804).
+The Lunhui group is 4% of the heuristic block; its descriptions are Chinese, so it reads almost
+twice as much in bytes/4 (3,254) as in chars/4 (1,758). Its largest tool is `lunhui_freeze_boards`
+(1,584 · 396 · 202); each submit is about 1,250 bytes and each context read about 1,040; the six
+module tools together are 6,883 bytes, 958 chars/4. On 2026-10-25, at `1a41fd8`, the five tools of
+plan 1 read 6,133 · 1,534 · 804 in an 80-tool block of 46,812.
 
 The five largest tools are all AKShare's (bytes · bytes/4 · chars/4): `akshare_stock_a`
 25,727 · 6,432 · 4,435; `akshare_macro` 23,081 · 5,771 · 3,886; `akshare_futures` 15,641 · 3,911 ·
@@ -1029,7 +1182,8 @@ second-largest group the prompt can carry. Its six largest (bytes · bytes/4 · 
 `portfolio_explore` 4,106 · 1,027 · 1,019; `portfolio_live_move` 3,432 · 858 · 854; `portfolio_account`
 3,374 · 844 · 838; `portfolio_live_batch` 3,194 · 799 · 797 — four of them larger than `workflow`.
 With AKShare and the seat mounted, the heuristic block read about 46,010 chars/4 summed from the
-two runs; the live run with the Lunhui rows reads 46,812 (R35).
+two runs; the live run with the Lunhui rows and the role read 46,812 on 2026-10-25 and 47,997 on
+2026-10-26 (R35).
 
 The two units part by 9,187 tokens on the AKShare group alone: its JSON holds 18,375 non-ASCII
 characters (18,211 of them CJK ideographs) among some 97,700, and the heuristic prices every UTF-16
@@ -1124,7 +1278,7 @@ with no `Origin` passes on `Host` alone — `curl` works, which is residual R3 i
 | `$DSH_HOME/face/agents.json` | `panels.ts` | `{connected:[{bin,label}]}` |
 | `$DSH_HOME/sessions/<slug>/<id>/` | `deleteSession` | removed with every generation, the lock and the temps, cwd-fenced |
 | `strategies/<name>/` | `createChannel` | copied from `_template`, never overwritten |
-| `strategies/<name>/analysis/<run>/` | the Lunhui rows (`face/plugins/lunhui/lib/runs.mjs`), in the face process | `analysis/` made on a strategy's first freeze and each run directory exclusively, both mode 0o700; `run.json` (`{run, strategy, kind, as_of, session, opened_at, sealed_at, snapshot_id, evidence: [{source, file, sha256, bytes, received_at, session, host, delayed}], artifacts}` — `as_of` the newest `received_at` and `session` the newest evidence session at seal, both null until then) and `metrics.json` at the run's opening, one `evidence-<source>.json` per source (at most 256 KiB, `limit-up`'s 1 MiB), new files `wx` at 0o600, `run.json` and `metrics.json` replaced by a fresh file renamed over the old after each change; outside any session's sandbox (§9, R39); the evidence files and a write's crash leftovers (`*.pending.json`, `*.tmp`) gitignored, the rest tracked (R42); the face's channel routes only read it, for the runs card (§5.2) |
+| `strategies/<name>/analysis/<run>/` | the Lunhui rows (`face/plugins/lunhui/lib/runs.mjs`), in the face process | `analysis/` made on a strategy's first freeze and each run directory exclusively, both mode 0o700; `run.json` (`{run, strategy, kind, as_of, session, opened_at, sealed_at, snapshot_id, evidence: [{source, file, sha256, bytes, received_at, session, host, delayed}], artifacts}` — `as_of` the newest `received_at` and `session` the newest evidence session at seal, both null until then) and `metrics.json` (`{freezes, calls: {<module>: n}, rejections: {<module>: [category…]}, submitted: [module…]}`) at the run's opening, one `evidence-<source>.json` per source (at most 256 KiB, `limit-up`'s 1 MiB), then, from the module rows, `run.json` sealed on the first context read and one `<module>.json` artifact per module (`environment.json`, `sentiment.json`, `theme.json`; written as `<module>.pending.json` and renamed, then named in `run.json` `artifacts`), new files `wx` at 0o600, `run.json` and `metrics.json` replaced by a fresh file renamed over the old after each change; outside any session's sandbox (§9, R39); the evidence files and a write's crash leftovers (`*.pending.json`, `*.tmp`) gitignored, the rest tracked (R42); the face's channel routes only read it, for the runs card (§5.2) |
 | `bots/<id>/` | `createBot`, `updateBotSettings`, `updateSoul` | copied from `_template`; `preset.yml`, `SOUL.md` and the composition's persona row rewritten together, staged then renamed; never overwritten by create |
 | `bots/<id>/journal/` | a bot's HOME session | workspace-write, cwd = the journal; the only directory a bot writes (the write to `../SOUL.md` is refused, proven in `room-smoke`) |
 | `roles/<id>/` (`ROLE.md`, `role.yml`) | the operator | not written by the face — read once per boot by `composeFace` (`readRoles`) and rendered into Gravit's preset (§3.8); a missing roles directory or a malformed role refuses the boot |
@@ -1154,14 +1308,17 @@ face's `WorkspaceLike`). Recorded, not fixed.
 | `DSH_HOME` | `main.ts`, `boot.ts`, `sessions.ts`, `panels.ts` and dsh itself via `resolveDshHome`; `setup.ts` reads it raw (`?? ~/.dsh`) | `~/.dsh` | written by `bootFace` when a test passes an override; `resolveDshHome` treats an empty or whitespace value as unset and expands `~`, `setup.ts` does neither, so such a value sends `setup` and `start` to different homes |
 | `DSH_TELEMETRY_DISABLED` | `boot.ts` | unset | any non-empty value (`0`, `false` included) disables the telemetry row, and its patch composes after the operator layers, so it wins over an operator's re-enable; the policy layer disables the row by default anyway |
 | `DSH_PERMISSION_MODE` | dsh, not the face | `workspace-write` | `danger-full-access` sets approval policy `never`: it disarms the sandbox-escalation card but **not** Gate 2, which then denies in its own words |
-| `FACE_SMOKE` | tests | unset | `=1` enables the eighteen real-boot tests; the seat and graft smokes also need `FACE_ACCOUNT_SEAT_DIR` |
+| `FACE_SMOKE` | tests | unset | `=1` enables the twenty real-boot tests; the seat and graft smokes also need `FACE_ACCOUNT_SEAT_DIR` |
 | `DEEPSEEK_API_KEY` | dsh's credential seam | — | not auto-loaded from the repo's `.env.*` files |
 
 The Lunhui rows read no environment variable. Their fixture mode is row config (modules spec A15):
 a freeze row's `fetch` names a directory of recorded replies and `now` a clock, set by the tests
 alone (`tests/lunhui-rows.test.ts`, `tests/lunhui-freeze.test.ts`); stage 0's
 `LUNHUI_FETCH_FIXTURES` and `LUNHUI_STRATEGIES_ROOT` are read nowhere, and the strategies root is
-`lunhui-runs`' `strategiesRoot`, this checkout's `strategies/` unless a patch restates it.
+`lunhui-runs`' `strategiesRoot`, this checkout's `strategies/` unless a patch restates it. The
+module rows take no config. A `now` clock is a function, and `bootFace` structured-clones every
+patch, so no patch can carry one into a booted row: on a real boot the freezes read the system
+clock, and `tests/lunhui-market-run-smoke.test.ts` shifts `globalThis.Date` for its boot instead.
 
 Every child the face spawns for a local agent run or probe has these scrubbed — an enumerated list
 (`SCRUBBED_ENV` in `agents.ts`), not a prefix glob: `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
@@ -1548,8 +1705,9 @@ newest listed run that is sealed and holds an accepted artifact, `{run, asOf, se
 artifacts: {<module>: {headline, json}}, marketRun}`, or null; the section's latest line reads
 `as of <asOf> · session <session>`. `metrics.json` is not read. A run
 whose directory fails the `stillAt` re-check just before its reads, or can no longer be listed, is
-skipped — not listed, not counted. Before plan 2 no run is sealed and none holds an artifact, so a
-channel with runs shows them as unsealed rows under `no sealed run with an artifact yet`.
+skipped — not listed, not counted. A run seals on its first module context read and gains an
+artifact only through a role's accepted submit (§4.3), so a channel whose runs were frozen but
+never analysed shows them as unsealed rows under `no sealed run with an artifact yet`.
 
 ### 5.3 The host layer
 
@@ -2563,7 +2721,7 @@ against the gateway's `stream-protocol`, `api-remotes`' event list, the session 
 check:fixture` validates every line it can against the installed dsh's own acceptance code —
 the session controller's `assertSessionWireEvent`, the gateway's frame parser and `$events` id
 predicates; on 2026-09-30, 23 of 26 lines validated, 0 rejected, and the 3 with no upstream
-validator named) → `FACE_SMOKE=1 npm test` — the eighteen real boots, `order-gate-smoke` and
+validator named) → `FACE_SMOKE=1 npm test` — the twenty real boots, `order-gate-smoke` and
 `client-mux-smoke` above all, are the contract the structural `*Like` types cannot be → the
 drills. `cordis-plugin-include` is pinned; `loader` and `group` arrive as app-boot peers and
 `timer` through dsh-base, held by the lockfile alone; `cordis-plugin-hmr` is gone.
@@ -2598,9 +2756,9 @@ from the member's own log without activating it (§5.4) — it follows no member
 
 | Command | From | Needs | Measured 2026-09-30 |
 |---|---|---|---|
-| `cd face && npm test` | `face/` | nothing — no port, no key | 1266 tests, 1248 pass, 18 skipped (2026-10-24, stage 3 of the graft; the repo's only suite since the Python one left) |
+| `cd face && npm test` | `face/` | nothing — no port, no key | 1548 tests, 1528 pass, 20 skipped (2026-10-26, plan 2 of the Lunhui modules; the repo's only suite since the Python one left on 2026-10-24) |
 | `cd face && npm run typecheck` | `face/` | | clean, the dependencies' `.d.ts` included (`skipLibCheck: false`) |
-| `cd face && FACE_SMOKE=1 npm test` | `face/` | boots eighteen real trees into `mkdtemp` homes and binds ports; still no LLM or key (four of the smokes also create, and remove, a gitignored `.bots-smoke-*` bots root at the repo root) | the eighteen skipped tests; 1263/1263 with one todo at stage 3's Task 6 (2026-10-24, `e77900a`), 1310/1310 at stage 2's `b45c5cc`, each with `FACE_ACCOUNT_SEAT_DIR` naming a checkout of buyer-agent-demo @ 133b9a7 — without it the seat and graft smokes stay skipped |
+| `cd face && FACE_SMOKE=1 npm test` | `face/` | boots twenty real trees into `mkdtemp` homes and binds ports; still no LLM or key (four of the smokes also create, and remove, a gitignored `.bots-smoke-*` bots root at the repo root) | the twenty skipped tests; 1546 of 1548 on 2026-10-26 (plan 2's docs pass over `91307f2`), the seat and graft smokes skipped without `FACE_ACCOUNT_SEAT_DIR`; 1263/1263 with one todo at stage 3's Task 6 (2026-10-24, `e77900a`), 1310/1310 at stage 2's `b45c5cc`, each with `FACE_ACCOUNT_SEAT_DIR` naming a checkout of buyer-agent-demo @ 133b9a7 — without it the seat and graft smokes stay skipped |
 | `cd face && npm run check:fixture` | `face/` | the installed dsh | 26 fixture lines: 23 validated, 0 rejected, 3 with no upstream validator |
 
 ### 7.2 The Python suite (removed 2026-10-24)
@@ -2610,7 +2768,7 @@ The 400 offline pytest cases left with the Python package, `pyproject.toml` and 
 
 ### 7.3 The face suite
 
-1435 tests in 126 files (1417 pass, 18 skipped without `FACE_SMOKE=1`), run by `node --test`
+1548 tests in 133 files (1528 pass, 20 skipped without `FACE_SMOKE=1`), run by `node --test`
 through `tsx`:
 
 - **Composition and boot** — `boot` (the layer order ending with the overlay; the policy layer
@@ -2622,11 +2780,12 @@ through `tsx`:
   persona patch and before only the overlay, keeping an operator's other keys on the row and its
   `disabled`, cloning what it is given, and absent from a composition that has no such row; a
   skipped bundle refused; the static `preset-gravit` row rendered from `roles/` in memory — the
-  `gravit` row by absolute URL, carrying the text of `dsh/profile/cycle.md`, one `spawn` row per
-  role (none for the shipped library) — and never read from the mirror, the `preset-kairos` alias equal to it under the legacy
+  `gravit` row by absolute URL, carrying the text of `dsh/profile/cycle.md` and the run protocol,
+  one `spawn` row per role (`role-cn-market-analyst` for the shipped library) — and never read
+  from the mirror, the `preset-kairos` alias equal to it under the legacy
   id, a roles root with a bad role refusing the compose with the file's path, a missing roles
-  directory refusing it with the directory's, and an empty or missing cycle file refusing it with
-  the file's), `overlay` (exactly the thirteen rows, in order;
+  directory refusing it with the directory's, an empty or missing cycle file refusing it with
+  the file's, and a protocols directory without `lunhui-run.md` refusing it with that file's), `overlay` (exactly the thirteen rows, in order;
   loopback config; the rows dsh-base owns now and the retired ones never inserted), `policy`
   (every target a row the installed dsh-base composes; the composed posture; an operator row
   overriding a default; `DSH_TELEMETRY_DISABLED` winning over an operator re-enable), `setup`,
@@ -2642,7 +2801,8 @@ through `tsx`:
   Account seat and its rule named; none of the removed layer's names, and the sentence that no
   read is guarded; no line that tells the reader who it is),
   `gravit-plugin` (`name` and `inject`; `validateGravitConfig` accepting `{}` and checking
-  `cycle` and `roles` when present; `todayText` rendering the zone's local date, ISO then
+  `cycle`, `roles` and `protocols` when present — a protocol an array entry of name, probe and
+  text, its name unique and none of the plugin's own; `todayText` rendering the zone's local date, ISO then
   weekday; `apply` registering one scoped, uninterpolated section right after the persona slot
   — whose order must be finite, so a missing slot cannot pass as `NaN` — which unload removes; a
   bad config refused with its reason; an empty or non-zone `TZ` rendered in UTC and labelled,
@@ -2654,16 +2814,24 @@ through `tsx`:
   contract for a scope that can call `create_goal` and `''` for one that cannot, gone on
   unload; both sections Gravit's text for a root session, a `subagent_fork` child and an
   operator-forked session, `''` for a delegated child that is not a fork although its scope
-  resolves every tool — `isRootOrFork`), `roles` (the reader: the shipped library `_template` alone,
-  so Gravit's preset and its mirror carry no role row, while a fixture role copied from `_template`
-  renders exactly one; every shipped role — none today — with exact names and nothing forbidden, the
+  resolves every tool — `isRootOrFork`; a protocol section 60 before the persona suffix, literal,
+  read only by a root or a fork that can call its probe, and none without the key or with an
+  empty list), `protocols` (the shipped `lunhui-run.md` reads, fits its 3,000 bytes and states the
+  `cn-market` order; every `lunhui_*` name it carries is a tool the Lunhui rows register and every
+  `role_*` name a shipped role; the section name equal in `src/protocols.ts` and
+  `plugins/gravit.js`; the reader trimming, refusing a missing, unreadable, empty, oversized or
+  templated file path first, the limit inclusive on raw bytes), `roles` (the reader: the shipped
+  library `cn-market-analyst`, so Gravit's preset and its mirror carry its one role row, while a
+  fixture role copied from `_template` renders exactly one; `cn-market-analyst`'s `ROLE.md` Chinese,
+  within 2,000 bytes, with the order, the analysis-only artifact, the blocked exit and the four
+  headings; every shipped role with exact names and nothing forbidden, the
   job tools only beside `bash`; `_template`, hidden entries and plain files skipped; every refusal — a missing root or file, a symbolic
   link or a misnamed directory, an oversize persona, bad YAML, a wildcard, an entry listed
   twice, a blank or two-line description, a never-list entry checked against an independent
   copy of the names (the account and order names under a renamed server too), a 65-character
   tool name — opening with an absolute path, the limits inclusive at 2,000 bytes / 300
   characters / 64; `gravitRows`, whose `agentOptions` appear only with a model; the committed
-  mirror byte-equal to the render, the cycle text included, so drift fails), `check-home` (the
+  mirror byte-equal to the render, the cycle and protocol texts included, so drift fails), `check-home` (the
   go-live dry run's pieces, offline: the live-home refusal by device and inode — through a
   symlink, in another letter case, inside or above the home — and the marker; the refusal classes;
   the multi-frame log reader; the inventory diff; the MCP row walk; the `extraPatches` seam
@@ -2854,8 +3022,36 @@ through `tsx`:
 - **The Lunhui rows** (`face/plugins/lunhui/`, offline: recorded replies under
   `tests/fixtures/lunhui/` (Tencent) and `tests/fixtures/lunhui-eastmoney/` (Eastmoney, synthetic)
   or a fake `fetch`, never the network) — `lunhui-rows` (the backbone on a stand-in scope: its
-  config refusals, the service, `lunhui_read_run`, the shared refusal helpers, `NOT_GRAVIT` from a
-  stand-in child header), `lunhui-freeze` (the four freeze rows beside a real service over a temp
+  config refusals, the service, `lunhui_read_run` (a module file `run.json` does not name listed
+  unaccepted), the shared refusal helpers, `NOT_GRAVIT` from a stand-in child header, the module
+  refusals naming the module and the module budget ten, `callerIsRole` equal to `callerIsChild`;
+  then the service's module half: the first `readContext` sealing the run and handing the build the
+  manifest and every evidence file, a freeze after it `RUN_SEALED`, two reads at once sealing once;
+  a module's eleventh call `TOOL_BUDGET`, counted and persisted, another module unaffected; a submit
+  before its read `READ_FIRST`, counted, a restart keeping the counts and forgetting the reads, a
+  throwing build or an unusable evidence file leaving it `READ_FIRST`; a rejection recorded by
+  category and thrown `INVALID_ANALYSIS` with its repair, a validator's own bug rethrown as is; an
+  accepted submit writing `<module>.json`, naming it in `artifacts` and `submitted`, a second
+  `ALREADY_SUBMITTED`, two at once landing one; a `run.json` write failing after the artifact
+  landed leaving it unaccepted and a retry accepted), `lunhui-contract-core` (the moved helpers
+  re-exported unchanged; the five scope classes; `validateEnvelope` rule by rule in its order —
+  byte limits before parsing, the merged schema, the envelope bound to the context, ids known and
+  of the module's sources, time scope, the forbidden words, the scope rule with `ownedBy`, a line
+  break and `exemptPaths`, an owned word in a limitation, the status rule with a claim-less
+  `NOT_EVALUABLE`, a schema unable to redefine the envelope, the module's rules last — each
+  rejection with its category and module repair; `buildContext`'s sources, order, priority, views,
+  `derivedView`, `missing`, the 30 KiB cut, and a `truncated` list that would itself pass the cap),
+  `lunhui-contract-environment`, `lunhui-contract-sentiment` and `lunhui-contract-theme` (one shared
+  harness, `tests/lunhui-contract-harness.ts`: each row's name, inject and pair; the Chinese
+  hypotheses restating `strategies/cn-market/THESIS.md`'s hypothesis with its paragraph ids; a
+  context over a real freeze of the fixtures whose example is accepted; a hand-written artifact
+  accepted; each module rule refused with its category; a run without a required source expecting
+  `NOT_EVALUABLE`, its example accepted and an `OK` refused; a full-size context under 30 KiB with
+  what goes first pinned; a strategy run `WRONG_CHANNEL`), `lunhui-module-tool` (`moduleDeps`; the
+  names, parameters and Chinese descriptions; a read's context, sealing the run; `WRONG_CHANNEL`
+  before counting; `NOT_A_ROLE` for a root or a seeded fork, uncounted; `READ_FIRST` and
+  `INVALID_ANALYSIS`; a digest per definition; a run id in another letter case finding the read's
+  digest), `lunhui-freeze` (the four freeze rows beside a real service over a temp
   root: items, ids, derived items and caps, `WRONG_CHANNEL`, `SOURCE_FROZEN`, `RUN_SEALED`,
   `TOOL_BUDGET` past eight with the refused call counted, `CALENDAR_UNCOVERED` before any run, a
   null 涨停 pool refusing `NO_MARKET_DATA` and writing nothing, two freezes of different sources
@@ -2866,10 +3062,11 @@ through `tsx`:
   100 with `truncated`), `lunhui-derive` (each derived measure from hand-computed rows, breadth from
   the board's own counts and never the cut list), `lunhui-runs` (stage 0's anchoring cases, then
   open, add, seal, `snapshot_id`, `session`, `SOURCE_FROZEN`, the 256 KiB, `limit-up`'s 1 MiB
-  and the 2 MiB caps, `metrics.json` fail-open), `lunhui-calendar` (a year's table, a date outside every table uncovered),
+  and the 2 MiB caps, `metrics.json` fail-open, `readEvidence` under each source's own cap and
+  never through a link, `writeArtifact` landing by rename and naming the module), `lunhui-calendar` (a year's table, a date outside every table uncovered),
   `lunhui-market` and `lunhui-contract` (stage 0's ports), `lunhui-ignore` (`git check-ignore`
   holds for a run's `evidence-*.json`, its `*.pending.json` and `*.tmp` leftovers and the corpus,
-  not for `run.json`, `metrics.json` or an artifact); `boot` (the five rows in one insert right after the seat, by file URL, the backbone
+  not for `run.json`, `metrics.json` or an artifact); `boot` (the eight rows in one insert right after the seat, by file URL, the backbone
   under this checkout's `strategies/`, an operator's override and disable kept), `bots` (no
   `lunhui_` tool admitted by `DEFAULT_ALLOW` or any shipped bot, expanded against a tree that has
   them), `channels` (the runs card: shapes, the 50-run cap, headlines, `latestRun`, a linked or
@@ -2877,9 +3074,10 @@ through `tsx`:
   `run.json` listed with nulls and no artifact, a vanished or swapped run
   directory skipped, `MODULE_HEADLINES` equal to `MODULES`; the newest backtest over its cap or
   past 32 levels unread), `client/runs-view` and `client/channel` (the view and the section, drawn only for a
-  channel with runs), and `smoke` (the five tools registered and the five rows ACTIVE in
-  `/data/plugins.json`'s listing).
-- **The eighteen `FACE_SMOKE` boots**, below.
+  channel with runs), and, on real boots, `smoke` (the eleven tools registered and the eight rows
+  ACTIVE in `/data/plugins.json`'s listing), `roles-smoke` (the role's half, §3.8) and
+  `lunhui-market-run-smoke` (below).
+- **The twenty `FACE_SMOKE` boots**, below.
 
 The room suites are `room-rules` (the caps block verbatim, `GRAVIT.md`'s caps sentence pinned to
 `ROOM_CAPS`, mention resolution, `isPass`, `finalTextOf`, dispatch validation and its two result
@@ -2901,7 +3099,7 @@ routes under the fence — and `room-client` (the header fold, the strip and its
 precedence, the glyph, the mention anchor, the round-end line, the gate speaker, against
 `js/wire/room.js` and `js/wire/grouping.js`).
 
-The eighteen boots each own a file, because `bootFace` sets `process.env.DSH_HOME` for good, and
+The twenty boots each own a file but for `roles-smoke.test.ts`'s two, because `bootFace` sets `process.env.DSH_HOME` for good, and
 each speaks the browser's wire through `tests/remote.ts` (`mountClient`, `signIn`, `remote`):
 
 - `smoke.test.ts` — the sign-in (`/` 401 without the cookie, the token's 303 and `dsh-auth-*`
@@ -3002,10 +3200,10 @@ each speaks the browser's wire through `tests/remote.ts` (`mountClient`, `signIn
 - `bots-smoke.test.ts` — roster listing with a broken fixture and never `_template`; the
   header's `agentPreset`; mask = allow ∩ tree, and a tool registered after the declaration
   admitted by the re-expansion; the persona shadow; over the repository's `roles/` the default's
-  tool set equal to the host's, with no `role_*` tool (the gravit plugin masks nothing; no bot sees
-  one either) and its
-  prompt carrying the date and the cycle contract (`Step 0 — ask once`), neither of which a
-  bot's does — the probe bot's mask admits `create_goal`, so its missing contract is the
+  tool set equal to the host's plus `role_cn_market_analyst` and no other `role_*` tool (the gravit
+  plugin masks nothing; no bot sees one) and its
+  prompt carrying the date, the cycle contract (`Step 0 — ask once`) and the run protocol, none
+  of which a bot's does — the probe bot's mask admits `create_goal`, so its missing contract is the
   preset's scoping and not the `create_goal` gate; the SHIPPED relative plugin path rebased
   onto the real `face/plugins/bot.js` — its bots root is `mkdtemp`'d inside the repository as
   `.bots-smoke-*`, gitignored and removed in `finally` — beside an absolute one; **Gate 2 from
@@ -3041,7 +3239,7 @@ each speaks the browser's wire through `tests/remote.ts` (`mountClient`, `signIn
   the channel's own, a bot session reads the root file (the row is host-plane); `AGENTS.md`
   reaches none of the three, `CLAUDE.md` neither Gravit nor the channel session.
 - `roles-smoke.test.ts` — role delegation on a real tree over two fixture roles made from
-  `roles/_template` under the test's own roles root (no role ships): `role_auditor` (reads only)
+  `roles/_template` under the test's own roles root: `role_auditor` (reads only)
   and `role_worker` (bash, its jobs, write) each spawn a one-shot child whose tool list EQUALS the
   role's `allow` (every `role_*` tool and the forbidden tools gone — an exact comparison, because
   dsh exempts a scope's own registrations from `restrict()`). For the auditor's child it also
@@ -3062,7 +3260,29 @@ each speaks the browser's wire through `tests/remote.ts` (`mountClient`, `signIn
   unknown global tool "…"` (anchored on the quoted name) and no child is created. The MCP tools
   the roles name are `mcp__fixture__*` stand-ins; a foreground one-shot child leaves
   `ctx.sessions` as its result returns, so the smoke copies each session's header while serving
-  its request.
+  its request. Its second boot reads a fixture copy of the shipped roles with `cn-market-analyst`
+  routed to the stub, and the `lunhui-runs` row pointed at a temp strategies root by a home patch:
+  a `cn-market` run opened through the booted service with nothing frozen, the role child's tools
+  EQUAL to its allow list and its persona its own, its read and its submit of the context's
+  `NOT_EVALUABLE` example landing in the run; the same submit from Gravit's root `NOT_A_ROLE`; a
+  freeze out of the role child's reach (dsh's unknown tool), and `NOT_GRAVIT` for a plain
+  `subagent` child, which can reach one.
+- `lunhui-market-run-smoke.test.ts` — one whole `cn-market` run on a real boot (modules spec §10
+  item 2, A22, §5.10): AKShare and the seat off, the stub as the default model, `lunhui-runs` over
+  a temp strategies root holding a copy of the shipped `cn-market`, the four freeze rows' `fetch`
+  one directory holding both fixture sets, a fixture roles root with `cn-market-analyst` routed to
+  the stub. Gravit, played by the stub, freezes the index (opening the run), the limit-up pools and
+  the boards into that run, calls `role_cn_market_analyst` and reads the run back; the role child
+  reads each market context and submits an `OK` artifact it builds from that context's own text —
+  ids from its derived and evidence lists, the envelope copied — so the contexts are proved usable
+  as a role receives them. Pinned: the run sealed with three evidence files; `environment.json`,
+  `sentiment.json` and `theme.json` each named in `artifacts[]` and passing its contract again
+  against a digest rebuilt from the sealed files; `metrics.json`'s calls within budget and
+  `submitted` listing the three; the runs card listing the run with three chips; Gravit's prompt
+  carrying the run protocol. A freeze row's `now` cannot cross the boot's structured clone of
+  patches, so the file replaces `globalThis.Date` for the boot's lifetime with one starting at
+  Friday 2026-10-23 15:00 China time, the fixtures' session, restored in `finally` — dsh's own
+  timestamps see the shift too.
 - `goal-smoke.test.ts` — the goal loop `dsh/profile/cycle.md` rests on (the guide's C21),
   through the face's own wire on a stub model, in four sessions and two boots of one home.
   `create_goal` in a human turn returns the id and revision 1, `active` and `armed`; each round
@@ -3116,17 +3336,18 @@ the re-host added (§10, item 14).
 | **The Account in the face** — manual (`face/README.md` "The owner drill", run before the branch lands and after pulling the checkout) | the operator's run on the real Account at 4820 with paper venues only and the operator's browser already its owner: the face's head *waiting to be let in*, Let it sign on the Account's page, a `setWatch` signed from the face, Open a paper account from the face, a paper order from Trade and its fill, Gravit's seat order carded by Gate 2 in the thread and by the Guard in the face's Cards and approved there, the statement naming "You" and "Gravit, approved by you", Sign out and the head's line; then both smokes again | a real (non-paper) venue — the charter's D18 trigger | **not yet run** — owed to the operator |
 | **Client transport** — automated (`client-mux-smoke`) | the page's own `api.js` + `mapper.js` against a real host: gates, replays, withdrawals, follows, the non-activating reads | the DOM: the page's rendering and its view modes run on a fake DOM (`tests/client/app-dom`, `live`), and `gravit-client-smoke` opens one real session through the host layer, not a browser | passes 2026-09-30; `gravit-client-smoke` 2026-10-19 |
 | **Transport** — manual (`face/README.md`) | the browser half of the wire: the tokenized sign-in and the per-authority cookie; a cold session opened page-only, gaining no `session.v4.jsonl.zstd` or `session.lock` until it is prompted; a reconnect redrawing the window once; a new session's reply streaming without a click; `/compact` answered by `commands/execute`; the agent panel; the subagent dock; rename, fork, the directory picker, a channel rename (on the gravit-ui client Discover's Gravit item stands for the agent panel, Details' Children for the dock and Details' Fork for fork; the directory picker and a channel rename are not on it) | the approval card's endings, which are the Gate-2 drill's | **not yet run** on 0.2.0 against the real home — a headless load of the page on a scratch home reached `connected` with no console errors; the stage-1 page was walked 2026-10-19 on a scratch home without keys (the ledger): sign-in, a New message in `workbench` created, named and prompted, the missing-key error on the status line, a restart then a reload opening the cold session paged |
-| **Bots** — automated (`bots-smoke`, `bot-runtime-smoke`, `bot-sandbox-smoke`, `askuser-noclient-smoke`) | roster listing incl. broken; header `agentPreset`; mask = allow ∩ tree, following late tools; persona shadow; the default's roster equal to the host's (no role ships, so no role tool; never a bot's), its date section and its cycle contract (`Step 0 — ask once`) scoped to Gravit (never a bot, though the probe bot can call `create_goal`); the shipped relative plugin path, rebased; a save re-declaring; Gate 2 refusing an order tool the bot's own mask admits; the S4/S7 observations | that the approval CARD renders (no client) — a bot in a room and a home session's write to `../SOUL.md` were this row's two gaps until `room-smoke` closed both | passes 2026-09-30; re-run 2026-10-19 with the role tools in the default's roster and the cycle contract in its prompt; 2026-10-24 with none |
+| **Bots** — automated (`bots-smoke`, `bot-runtime-smoke`, `bot-sandbox-smoke`, `askuser-noclient-smoke`) | roster listing incl. broken; header `agentPreset`; mask = allow ∩ tree, following late tools; persona shadow; the default's roster equal to the host's plus `role_cn_market_analyst` (never a bot's), its date section, its cycle contract (`Step 0 — ask once`) and its run protocol scoped to Gravit (never a bot, though the probe bot can call `create_goal`); the shipped relative plugin path, rebased; a save re-declaring; Gate 2 refusing an order tool the bot's own mask admits; the S4/S7 observations | that the approval CARD renders (no client) — a bot in a room and a home session's write to `../SOUL.md` were this row's two gaps until `room-smoke` closed both | passes 2026-09-30; re-run 2026-10-19 with the role tools in the default's roster and the cycle contract in its prompt; 2026-10-24 with none; 2026-10-26 with `role_cn_market_analyst` and the run protocol |
 | **Bots** — manual (`face/README.md`) | create → home → persona → tools named and not named → `{{` refused; the sidebar buckets the home session under the bot; a restart's boot line lists the id; the transcript names the speaker on all four surfaces (second run) | no automated test pins the four naming surfaces or the reconnect path; per-message attribution in a room is the Room rows below | passed 2026-09-07; re-run 2026-09-08 on `main` with the R12 fix in, passed; owed on 0.2.0 |
 | **Room** — automated (`room-smoke`, `room-discussion-smoke`) | a real round on a stub model: dispatch → three members (answered / passed / failed) → answers on the log before one wake → synthesis in one turn; members parented, preset-joined, `read-only` first, `GRAVIT.md` chain, no `dispatch`; the projection on the row and in the cache; the `@` route with a member's write refused in content; a home refused on `../SOUL.md`; the structured brief and views; the journal | that a human can read the strip; a real model's behaviour on the four standing rules | passes 2026-09-30 |
 | **Room** — manual (`face/README.md`, eight parts) | check-in → dispatch line → attributed bubbles and the strip → the fold → `@` → an inline member question with the needs-you mark → a member's write refused → `left` and re-check → a restart keeps states and titles | per-message attribution across a reconnect; convergence of four voices on one model (spec §12, R3); the peer-`@` continuation, which the operator's next `@` superseded before it ran (by design) — that path stands on the engine tests | **Drilled and PASSED 2026-09-09** on the operator's own face (`feat/rooms` @ `31b2e68`, two fresh template bots, DeepSeek as the model); one client finding (F1, the strip missing on a session's first round) fixed the same day and re-verified; owed on 0.2.0, whose 0.1.1 room sessions no longer open (§9, R20) |
 | **Ask-user** — `ask_user_question` offered, called, answered, cancelled | the seam | that it is a gate (the answer is model-visible); the instruction half (README step 6 — on a thin brief that does not name the tool, Gravit asks before it builds, per Step 0 of `dsh/profile/cycle.md`), left to the operator and not run | passed 2026-09-03 with a real model, 26 tools offered; re-run 2026-09-08 on `main`, passed (34 tools offered; answered, then Stop → `closed · cancelled`); owed on 0.2.0 |
-| **Role** — automated (`roles-smoke`; `roles`, `gravit-plugin`, `boot`, `bot-presets`) | on a real tree over two fixture roles made from `_template` (no role ships), `role_auditor` and `role_worker` each spawn a one-shot child with exactly the role's tools (compared as sets, not as a subset); the auditor's child carries the role's persona shadowing Gravit's, the date, no roles section, no cycle contract (`Step 0 — ask once`) and the root `GRAVIT.md` in its baseline, its text coming back through the tool; a `subagent_fork` child gets Gravit's system text — the cycle contract included — and tools unchanged, a plain `subagent` child neither section though it can call every role tool; a role naming a tool the tree lacks failing at delegation, naming it, with no child; the gate on the roles section, visibility and header; the reader's refusals, the render and the mirror's drift | that a real model chooses and calls a role sensibly; what the child's log shows on a live home; a `bash` run long enough to be moved to a job; the generic tool paragraphs the child's prompt still carries | passes 2026-10-19; on the fixture roles since 2026-10-24 |
-| **Role** — manual (`face/README.md`, five steps and a clean-up) | on a scratch copy of the operator's home, once a role ships: Gravit calls it; the child's log shows exactly the role's tools and its persona, not Gravit's; a `bash` role's run past bash-sandbox's 60 s default either passes `timeoutMs` or reads its moved job before reporting; a role naming an unmounted server's tool fails the delegation with `tools.restrict()` naming it and creates no child; Gravit's own log shows the role tool and the roles paragraph | a real model's judgement over several delegations | **not yet run** — and not runnable until the operator writes a role (none ships since 2026-10-24) |
+| **Role** — automated (`roles-smoke`; `roles`, `gravit-plugin`, `boot`, `bot-presets`) | on a real tree over two fixture roles made from `_template`, `role_auditor` and `role_worker` each spawn a one-shot child with exactly the role's tools (compared as sets, not as a subset); the auditor's child carries the role's persona shadowing Gravit's, the date, no roles section, no cycle contract (`Step 0 — ask once`) and the root `GRAVIT.md` in its baseline, its text coming back through the tool; a `subagent_fork` child gets Gravit's system text — the cycle contract included — and tools unchanged, a plain `subagent` child neither section though it can call every role tool; a role naming a tool the tree lacks failing at delegation, naming it, with no child; the gate on the roles section, visibility and header; the reader's refusals, the render and the mirror's drift; and, on a second boot, the shipped `cn-market-analyst` routed to the stub — exactly its allow list, its persona, its submit landing, Gravit's own submit `NOT_A_ROLE`, a freeze out of its reach | that a real model chooses and calls a role sensibly; what the child's log shows on a live home; a `bash` run long enough to be moved to a job; the generic tool paragraphs the child's prompt still carries | passes 2026-10-19; on the fixture roles since 2026-10-24; with `cn-market-analyst` since 2026-10-26 |
+| **Role** — manual (`face/README.md`, five steps and a clean-up) | on a scratch copy of the operator's home, with the shipped `cn-market-analyst` (no role carries `bash`, so the job step waits for one that does): Gravit calls it; the child's log shows exactly the role's tools and its persona, not Gravit's; a `bash` role's run past bash-sandbox's 60 s default either passes `timeoutMs` or reads its moved job before reporting; a role naming an unmounted server's tool fails the delegation with `tools.restrict()` naming it and creates no child; Gravit's own log shows the role tool and the roles paragraph | a real model's judgement over several delegations | **not yet run** — runnable since 2026-10-26 with `cn-market-analyst`; the live market run (below) covers its first two steps |
 | **Cycle** — automated (`cycle`, `gravit-plugin`, `boot`, `roles`; `bots-smoke`, `roles-smoke`, `goal-smoke`) | the shipped `cycle.md` reads, fits its 3,300 bytes and carries the steps, the 24-round cap, the resume path and the blocked vocabulary, names no role and runs on a forward paper trade; the reader's refusals, path first; the `gravit:cycle` section's order, literalness and gate; the mirror carrying the text; on a real tree Gravit's prompt carries `Step 0 — ask once`, a probe bot's (which can call `create_goal`), a role child's and a plain `subagent` child's do not, a `subagent_fork` child's does and equals Gravit's; the goal loop itself (`goal-smoke`): `create_goal` in a human turn, the round message at idle, blocked refused in round 1 and accepted in round 3 with the `<goal_blocked>` wrap-up, a second goal refused, the silent `round-limit` cap, Stop pausing the goal with the model's resume refused and `/goal resume` re-arming it, a restart disarming it until "continue" | that a real model asks once, opens the goal, runs rounds by itself, trades on paper through the seat, is resumed by "continue" after a restart and ends in a verdict; a cycle's rounds, wall time and usage | passes 2026-10-19 (`goal-smoke` since `fae4f61`); the text checks on the new cycle 2026-10-24 |
 | **Cycle** — manual (`face/README.md` "The cycle drill", five steps) | on the operator's face with a real model and a channel from `_template`: one batched `ask_user_question` naming the paper venue and the window, and no file before it; `create_goal`, then rounds with no question (no commit inside the rounds) that read the Account through the seat and AKShare, place a forward paper trade — Gate 2's card and the Account's Guard card, each answered — and journal dated entries with the Account's figures and order ids; a verdict in `status.yaml` and the journal's last entry with the usage line to fill, the goal complete on `validated` or `retired` and blocked on `researching`, on a named code; a restart that continues only on "continue"; the rounds, wall time, usage and first-request figures recorded in §4.3 | whether the verdict is better research (charter D14); a model's handling of a paused goal (R30) beyond what the run happens to meet — the mechanism itself is `goal-smoke`'s | **not yet run** — the operator's, on the real face |
-| **Lunhui rows** — automated (`lunhui-rows`, `lunhui-freeze`, `lunhui-eastmoney`, `lunhui-derive`, `lunhui-runs`, `lunhui-calendar`, `lunhui-ignore`, `channels`, the client's `runs-view` and `channel`; `smoke`) | on recorded replies and fake fetches: every freeze's items, ids, derived items, caps and refusals, the one redirect, the limiter, the run's states and budget, the ignore lines, the runs card and its view; on a real boot, the five rows ACTIVE and their tools registered | the live hosts' current reply shapes; a model calling the tools | passing |
-| **Lunhui market freeze** — manual (`face/README.md` "Lunhui analysis") | on the operator's face, in `strategies/cn-market`: index, limit-up and boards frozen into one run from the live hosts, the run on the channel page | whether the frozen sample is enough for a module (plan 2) | **owed with plan 2** — no tool here calls a freeze without a model |
+| **Lunhui rows** — automated (`lunhui-rows`, `lunhui-freeze`, `lunhui-eastmoney`, `lunhui-derive`, `lunhui-runs`, `lunhui-calendar`, `lunhui-ignore`, `lunhui-contract-core`, `lunhui-contract-environment`, `lunhui-contract-sentiment`, `lunhui-contract-theme`, `lunhui-module-tool`, `protocols`, `channels`, the client's `runs-view` and `channel`; `smoke`, `roles-smoke`) | on recorded replies and fake fetches: every freeze's items, ids, derived items, caps and refusals, the one redirect, the limiter, the run's states and budgets, the seal on the first read, the in-process read set, every validator rule and category, each module's context within 30 KiB and its example accepted, the ignore lines, the runs card and its view, the protocol's text and names; on a real boot, the eight rows ACTIVE and their eleven tools registered, the role's tools, persona and submit, Gravit's submit `NOT_A_ROLE` | the live hosts' current reply shapes; a real model calling the tools | passing |
+| **Lunhui market run** — automated (`lunhui-market-run-smoke`) | one whole `cn-market` run on a real boot over the fixtures and a stub model: Gravit freezes index, limit-up and boards into one run, delegates to `role_cn_market_analyst`, whose child reads the three contexts and submits three `OK` artifacts built from them; the run sealed, the three artifacts named in `artifacts[]` and valid again against a rebuilt digest, the budget kept, the runs card's three chips, the protocol in Gravit's prompt | the live hosts; a real model following the protocol and writing judgements the validator accepts; how many rejections a real role needs | passes 2026-10-26 (`91307f2`) |
+| **Lunhui market run** — manual (`face/README.md` "Lunhui analysis", the live market run) | on the operator's face with keys, in a `cn-market` session: the first freezes from the live Tencent and Eastmoney hosts (delayed quotes from this machine), the protocol followed by a real model, `cn-market-analyst` on `deepseek-flash` writing three artifacts the validator accepts or `NOT_EVALUABLE` ones naming the missing sources, Gravit's final message, a `NOT_EVALUABLE` run journaled, the run on the channel page with its chips; the role child's first request measured (§4.3) | whether the labels are right (the expectation review of plans 3–4 and the next day's freeze, `strategies/cn-market/THESIS.md`'s falsification) | **owed** — the operator's, on the real face |
 
 Owed besides, from the re-host, never yet run in a browser: the Gate-2 drill's new card endings
 — a second tab's `closed`, a lost race's `closed · settled elsewhere`, a stale card's `closed ·
@@ -3146,7 +3367,7 @@ stages all of them, with the transport drill, on a copy of the operator's home.
   mounts the real `/` and signs in through it (`tests/remote.ts`: `mountClient`, `signIn`,
   `remote`) before any `/api` call; `client-mux-smoke` drives the page's own `api.js` and
   `mapper.js`. The structural `*Like` types hide most dsh drift from `tsc`, so after every pin
-  bump the eighteen real boots are the contract.
+  bump the twenty real boots are the contract.
 - **An arc is** brainstorm → spec (`docs/superpowers/specs/`) → plan → build with tests → a
   whole-branch review → a post-build amendments block on the spec. The block is what freezes the
   spec; the Status line is left as written. Of the five post-reset specs, chat-light,
@@ -3487,8 +3708,10 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
   and of the seat's key file (charter D10). The rows run in the face process, so their writes never
   pass `ctx.sandboxPolicy` and raise no card: a freeze makes `analysis/` and `analysis/<run>/`,
   writes `run.json`, `metrics.json` and its `evidence-<source>.json`, and rewrites `metrics.json`
-  on every call it counts and `run.json` on every evidence file it adds. The caller's session header is read only to refuse a
-  delegated child (`NOT_GRAVIT`); the strategy a call names is its only anchor, so a session in one
+  on every call it counts and `run.json` on every evidence file it adds; a module read rewrites
+  `metrics.json` on every call and `run.json` at the seal, and an accepted submit lands
+  `<module>.json` and rewrites both. A freeze's caller's session header is read only to refuse a
+  delegated child (`NOT_GRAVIT`), a submit's only to refuse anything else (`NOT_A_ROLE`); the strategy a call names is its only anchor, so a session in one
   channel, or at the root, can freeze quotes into another channel's directory (the other three
   freezes into `cn-market` alone). The bound is `runs.mjs`'s anchoring: a strategy name in the
   channel grammar naming a real directory directly under `strategiesRoot` that holds a regular
@@ -3531,7 +3754,7 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
 - **R42 — A run's evidence files are not in git.** `.gitignore` holds
   `strategies/*/analysis/*/evidence-*.json` (A26; `tests/lunhui-ignore.test.ts`), and a write's
   crash leftovers, `*.pending.json` and `*.tmp` under a run (R39): `run.json`, with
-  every evidence file's sha256 and size, `metrics.json` and, from plan 2, the artifacts are
+  every evidence file's sha256 and size, `metrics.json` and the module artifacts are
   tracked. A clone, or the machine after the files are deleted, holds the hashes and cannot rebuild
   a context or re-check an artifact's citations; the evidence lives only on the machine that froze
   it, about 2 MiB a run at most.
@@ -3540,10 +3763,35 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
   `O_NOFOLLOW` with one link, but the check and the read are still two calls, so a writer inside
   the strategy tree can race them, as in R39; a run skipped mid-read leaves no mark on the card.
   `accepted` means `run.json`'s `artifacts[]` names the module and its file is present, readable
-  and an object within its cap (plan 2's submit must append to `artifacts[]`, or nothing it lands
-  shows); `lunhui_read_run`'s own `accepted` still reads the file alone; an unnamed or unreadable
-  artifact is left out with no hint; `latestRun` is chosen
-  among the 50 listed runs.
+  and an object within its cap — the record a module submit appends after its rename
+  (`writeArtifact`), so a crash between the two leaves a file no reader takes, and a retry is
+  accepted; `lunhui_read_run` marks `accepted` by the same record; an unnamed or unreadable
+  artifact is left out of the card with no hint (`lunhui_read_run` lists it unaccepted);
+  `latestRun` is chosen among the 50 listed runs.
+- **R44 — A context read seals the run, and the reads a submit needs live in one process.** Any
+  caller may read a module's context (A23 fences only the submit), and the first read seals the
+  run: a Gravit session that reads a context before its last freeze, or a read the operator
+  prompts by hand, ends that run's evidence (`RUN_SEALED` after it), and the protocol's order is
+  the only guard. Each read counts against its module's ten calls whether its build succeeds or
+  not. `READ_FIRST` rests on two in-memory records — the service's set of
+  `<strategy>/<run>/<module>` reads and each module definition's map of digests — neither pruned
+  for the process's life (a key a read; a digest holding every evidence item of the module's
+  sources), neither
+  persisted: a face restart, or a module row reloaded while the backbone lives, makes the next
+  submit `READ_FIRST`, and the re-read costs one more call; a run whose budget is spent then
+  cannot take that module at all. The digest a submit is checked against is the latest read's, and
+  the evidence files under it are read again at each read, so a hand edit of a sealed run's
+  evidence between two reads (R39's class) changes what the second validates against while
+  `snapshot_id` stays the seal's. Recorded, nothing built.
+- **R45 — A module's hypotheses are the tree's paraphrase, held in code.** Each contract's
+  `HYPOTHESES` (`lib/contracts/<module>.mjs`) restates one of `strategies/cn-market/THESIS.md`'s
+  three hypotheses in the tree's own Chinese words with the manuscript's paragraph ids, never its
+  text (D10′, the corpus stays out of git); the artifact's `hypotheses_version` hashes that string.
+  The two are copies, not one source: an edit of `THESIS.md` reaches no context until the contract
+  is edited to match, and the contract tests check the paragraph ids and the seven states, not the
+  wording. A paraphrase can drift from the manuscript it cites, and nothing in the tree can check it
+  against the corpus. The hints and repair texts are the tree's own as well. Recorded, nothing
+  built.
 
 ---
 
@@ -3610,11 +3858,11 @@ In order; each with what "done" is and which charter row it reopens.
    second copy; then boot on the home. Done when those drills pass on the real home.
 15. **Take the redesign's owed measurements and drills**, on the real face, in one sitting: the
    first-request totals of §4.3 (plan 1's one-word session, the cycle's first request) and the cycle drill (`face/README.md`; the real face,
-   the real Account with a paper venue, and keys — a cycle's usage is real); the role drill once a
-   role ships. Done when the "not yet measured" rows of §4.3 and the manual **Cycle** row of §7.4
+   the real Account with a paper venue, and keys — a cycle's usage is real); the role drill, with
+   `cn-market-analyst` (the role child's first request is item 18's live run). Done when the "not yet measured" rows of §4.3 and the manual **Cycle** row of §7.4
    carry their date (and the session id where a session was involved). The live run of the
-   tool-schema table — AKShare, the seat and the Lunhui rows together — was taken 2026-10-25
-   (§4.3). This is where
+   tool-schema table — AKShare, the seat and the Lunhui rows together — was taken 2026-10-25 and
+   again 2026-10-26 with the module tools and the role (§4.3). This is where
    the 24-round cap, a forward paper trade and the restart path (R30) first meet a model.
 16. **The next round: persona, memory, the teaching channel.** Deferred by the operator on
    2026-10-15 (charter §9): the persona's mechanics paragraphs move to the tool descriptions,
@@ -3630,15 +3878,19 @@ In order; each with what "done" is and which charter row it reopens.
    the seat granted reach, or signing it a limit on one, is the charter's real-money trigger (§8) and
    the venue-plugins handoff's agenda (§12.1, C1–C5 for real money): the next charter, before any such
    grant. One card per write (R32) and the tool block (R35) wait on the same round.
-18. **Lunhui plan 2: sentiment and theme** (modules spec §10). The environment, sentiment and theme
-   module rows with their context and submit pairs, the `cn-market-analyst` role, the run protocol
-   section `lunhui:run` (`dsh/profile/lunhui-run.md`, mounted by `plugins/gravit.js`), the context
-   read that seals a run; then the first market run on a real boot in `strategies/cn-market/` — the
-   first time the freezes meet the live hosts through a model, and the market freeze drill
-   (`face/README.md` "Lunhui analysis"). Done when a `cn-market` run seals with accepted artifacts
-   and the runs card shows them.
+18. **Lunhui plan 2: the live market run.** *Built 2026-10-26* (modules spec §10, plan 2, on
+   `feat/lunhui-modules-2`): the environment, sentiment and theme module rows with their context
+   and submit pairs, the contract core, the `cn-market-analyst` role, the run protocol section
+   `lunhui:run`, the context read that seals a run, and one whole `cn-market` run pinned on a real
+   boot over fixtures and a stub model (`lunhui-market-run-smoke`, §7.3). Left: the first market run
+   on the operator's face (`face/README.md` "Lunhui analysis", §7.4) — the first time the freezes
+   meet the live hosts and a real model follows the protocol and writes artifacts the validator
+   takes. Done when a live `cn-market` run seals with accepted artifacts, the runs card shows them,
+   and the role child's first request is in §4.3.
 19. **Lunhui plans 3 and 4: leader and mode, then counterevidence**, with `cn-stock-analyst` and
-   `cn-reviewer`; the expectation card and its review in the next run; then the docs pass the spec
+   `cn-reviewer`, on the contract core plan 2 built (a strategy channel's modules take the
+   `channel: "strategy"` branch `defineModule` already has); the run protocol gains the reviewer's
+   step and a strategy channel's order; the expectation card and its review in the next run; then the docs pass the spec
    names in its §6 and §8 — the charter's MARKET bullet, its `strategies/` writer clause and D10
    re-fitted for the rows, the loops page, the upgrade guide's re-check rows and the seams
    inventory. Done when a strategy run's `mode.json` cites a sealed `cn-market` run and the charter
@@ -3652,7 +3904,13 @@ In order; each with what "done" is and which charter row it reopens.
    breadth over advancers and decliners rather than members, and an empty 炸板 or 昨日涨停 pool read
    as a quiet day (R41) — each a line of code to change. And `S02`'s announcements source (spec
    §9): its feed, its egress host and what an announcement item freezes, before `S02` can be more
-   than `WAIT`.
+   than `WAIT`. Plan 2 added its own (spec §12, plan 2's table): an owned class carried by the
+   evidence a contract names (`ownedBy`) rather than always a derived item; `NOT_EVALUABLE` with no
+   claim; view cuts carried on the row (`bars_total`, `members_total`) rather than in `truncated`;
+   the theme view's ten members a list and unstamped rows; derived items shown with
+   `inputs_total`; environment requiring `index` alone; each headline value on a claim of its own;
+   the A7 count covering only refusals inside a resolved run; and the protocol journaling a
+   `NOT_EVALUABLE` run.
 
 ---
 
@@ -3668,7 +3926,7 @@ In order; each with what "done" is and which charter row it reopens.
 | `FACE_PORT`, `FACE_PROFILE` | face | port, profile name |
 | `FACE_AKSHARE_MCP_COMMAND` | face (`akshare.ts`) | the AKShare MCP executable, default `~/.local/bin/akshare-mcp` |
 | `FACE_IFIND_POLL_MS`, `IFIND_ACCESS_TOKEN`, `IFIND_REFRESH_TOKEN` | face (quote routes) | the A-share quote provider's refresh period and credentials |
-| `FACE_SMOKE` | face tests | enables the eighteen real boots |
+| `FACE_SMOKE` | face tests | enables the twenty real boots |
 | `FASTMCP_LOG_LEVEL` | an MCP row (AKShare's server is FastMCP) | `WARNING` silences FastMCP's INFO noise |
 
 The Python package's variables — the two APCA keys and `APCA_API_BASE_URL`, `ALPHA_DATA_SOURCE`,

@@ -6,7 +6,7 @@
   config:
     roles:
       - tool: role_cn_market_analyst
-        summary: Reads one frozen cn-market run's environment, sentiment and theme contexts, in that order, and submits each module's validated artifact through its submit tool; cites evidence ids only, freezes nothing, trades nothing, writes nothing else.
+        summary: Reads one frozen cn-market run's environment, sentiment and theme contexts, in that order, and submits each module's validated artifact through its submit tool.
     cycle: |-
       # The research cycle
 
