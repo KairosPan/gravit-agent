@@ -301,6 +301,59 @@ test("leader: a 龙头 sentence cites a quote, a pool row or a member list - the
   }
 });
 
+test("leader: a 龙头 sentence must cite a listed candidate's quote - REFERENCE on another stock's pool row - and 龙头 is only 龙头候选 - UNSUPPORTED_SCOPE on a conclusion, even on its own quote", async (t) => {
+  const { root, read, submit, market, strategy } = await setup(t);
+  const context = JSON.parse(await read.execute({ strategy: "alpha", run: strategy, market_run: market }, exec(ROLE)));
+  const id = ids(context);
+  const listed = { symbol: "sh600519", name: "贵州茅台", rank: 1, board: null, evidence_ids: [id.quote("sh600519"), id.zt("600519")] };
+  const other = await frozenId(root, market, "limit-up", (item) => item.pool === "zt" && item.code === "600101");
+  const reference: Array<Record<string, unknown>> = [
+    // Another stock's pool row, not a frozen quote of the run.
+    { leader_candidates: [listed], claims: [{ id: "c1", text: "示例电力连板数最高，列为龙头候选。", basis: "CURRENT", evidence_ids: [other] }] },
+    // A 空间板 sentence on the pool row of a listed candidate, without its quote.
+    { leader_candidates: [listed], claims: [{ id: "c1", text: "贵州茅台是空间板。", basis: "CURRENT", evidence_ids: [id.zt("600519")] }] },
+    // A frozen quote that is not a listed candidate.
+    { leader_candidates: [listed], claims: [{ id: "c1", text: "美的集团列为龙头候选。", basis: "CURRENT", evidence_ids: [id.quote("sz000333"), id.members("BK0715")] }] },
+  ];
+  for (const fields of reference) {
+    const refusal = await rejectsWith(submit.execute({ strategy: "alpha", run: strategy, analysis: JSON.stringify(artifact(context, fields)) }, exec(ROLE)), "INVALID_ANALYSIS");
+    assert.match(refusal.message, /^INVALID_ANALYSIS: \[REFERENCE\] analysis\.claims\[0\]/u);
+  }
+  const conclusions: Array<Record<string, unknown>> = [
+    { leader_candidates: [listed], claims: [{ id: "c1", text: "贵州茅台是龙头。", basis: "CURRENT", evidence_ids: [id.quote("sh600519"), id.zt("600519")] }] },
+    { leader_candidates: [listed], claims: [{ id: "c1", text: "贵州茅台是总龙头候选。", basis: "CURRENT", evidence_ids: [id.quote("sh600519")] }] },
+    { leader_candidates: [listed], claims: [{ id: "c1", text: "贵州茅台连板数见所引涨停池行。", basis: "CURRENT", evidence_ids: [id.zt("600519")] }], limitations: ["缺少分时数据，龙头地位待补充。"] },
+  ];
+  for (const fields of conclusions) {
+    const refusal = await rejectsWith(submit.execute({ strategy: "alpha", run: strategy, analysis: JSON.stringify(artifact(context, fields)) }, exec(ROLE)), "INVALID_ANALYSIS");
+    assert.match(refusal.message, /^INVALID_ANALYSIS: \[UNSUPPORTED_SCOPE\] /u);
+  }
+  // 空间板 as a listed candidate's descriptor, on its quote and its pool row, passes.
+  const descriptor = artifact(context, { leader_candidates: [listed], claims: [{ id: "c1", text: "贵州茅台连板数 4，是本运行的空间板，列为龙头候选。", basis: "CURRENT", evidence_ids: [id.quote("sh600519"), id.zt("600519")] }] });
+  assert.equal((await submitted(submit, "alpha", strategy, descriptor)).accepted, true);
+});
+
+test("leader: a candidate whose quote has no last price is REFERENCE", async (t) => {
+  // sz000333's last price emptied in the copy: the quote is frozen, unpriced.
+  const unprice = async (dir: string) => {
+    await addEquities(dir);
+    const file = join(dir, "quotes.gb18030.txt");
+    const text = (await readFile(file)).toString("latin1");
+    assert.ok(text.includes("~000333~73.40~"));
+    await writeFile(file, Buffer.from(text.replace("~000333~73.40~", "~000333~~"), "latin1"));
+  };
+  const { read, submit, market, strategy } = await setup(t, { prepare: unprice });
+  const context = JSON.parse(await read.execute({ strategy: "alpha", run: strategy, market_run: market }, exec(ROLE)));
+  const id = ids(context);
+  assert.equal(rowsOf(context).find((row) => row.kind === "quote" && row.symbol === "sz000333").last, null);
+  const analysis = artifact(context, {
+    leader_candidates: [{ symbol: "sz000333", name: "美的集团", rank: 1, board: null, evidence_ids: [id.quote("sz000333"), id.members("BK0715")] }],
+    claims: [{ id: "c1", text: "美的集团是 BK0715 的成分股。", basis: "CURRENT", evidence_ids: [id.members("BK0715")] }],
+  });
+  const refusal = await rejectsWith(submit.execute({ strategy: "alpha", run: strategy, analysis: JSON.stringify(analysis) }, exec(ROLE)), "INVALID_ANALYSIS");
+  assert.match(refusal.message, /^INVALID_ANALYSIS: \[REFERENCE\] analysis\.leader_candidates\[0\]\.symbol/u);
+});
+
 test("leader: a market run without a theme artifact expects NOT_EVALUABLE naming market:theme - an OK artifact refused, the example accepted", async (t) => {
   const { read, submit, market, strategy } = await setup(t, { theme: false });
   const context = JSON.parse(await read.execute({ strategy: "alpha", run: strategy, market_run: market }, exec(ROLE)));

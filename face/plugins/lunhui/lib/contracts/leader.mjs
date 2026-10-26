@@ -11,14 +11,15 @@
  * list holds the candidate's code; anything else is
  * `REFERENCE`. The ranks run 1 to n. Flags other than `NONE` stand on a claim of their own citing a
  * pool row. The module owns the leader class (龙头, 空间板), carried by a quote, a pool row or a
- * member list; a 龙头 is written only as 龙头候选 of a listed candidate. The theme artifact is
+ * member list - and, by the module's own rule, a claim's leader sentence cites a listed candidate's
+ * quote, a 龙头 written only as 龙头候选 (never 总龙头); a candidate's quote is priced. The theme artifact is
  * required (`market:theme`). The context shows of the cited run only what a candidate can stand on:
  * the pool rows of the strategy run's equities and the mainline boards' member lists, each its first
  * ten codes and any frozen equity further down; the digest keeps every item citable.
  * `lib/module-tool.mjs` consumes the `contract` object; the shared rules
  * are `contract-core.mjs`'s.
  */
-import { fail } from "../contract-core.mjs";
+import { SCOPE_CLASSES, SCOPE_EXEMPT, fail, textEntries } from "../contract-core.mjs";
 import { DERIVED_HINT, derivedRow, exampleOf, ownClaims } from "./shared.mjs";
 
 /** Chapter 四 of the manuscript, in the tree's own words, paragraph ids only. */
@@ -29,6 +30,15 @@ export const HYPOTHESES =
   "形态标记只描述冻结行的样子，不是打法名称。";
 
 const BOARD_RE = /^BK\d{4}$/;
+
+/** 龙头 as a conclusion: any 龙头 but 龙头候选, and 总龙头. */
+const LEADER_CONCLUSION = /总龙头|龙头(?!候选)/u;
+
+/** The sentence boundaries the core's scope rule splits on. */
+const SENTENCE_SPLIT = /[。；;.!?！？\n]/u;
+
+/** The one string of the artifact the wording rule skips: a candidate's frozen name. */
+const NAME_PATH = /^analysis\.leader_candidates\[\d+\]\.name$/u;
 
 /** The members a context shows of a mainline board's list: the first 10, then any frozen equity. */
 const MEMBERS_SHOWN = 10;
@@ -50,7 +60,7 @@ const HINTS = {
     "0–5 个形态标记，只描述冻结行的样子：ACCELERATING 加速（连板中封板更早）、DIVERGENCE 分歧（炸板或回封）、BROKEN_STREAK 断板（昨日涨停今日未封）、HIGH_POSITION 高位（连板数高）、FIRST_BOARD 首板；没有就给空列表或只写 NONE。" +
     "除 NONE 外的标记须有一条不为 INSUFFICIENT 的声明引用一条市场涨停池行（market:limit-up）。",
   claims:
-    "每条声明写一个事实并引用证据编号；含“龙头、空间板”的句子须同时引用一条报价、涨停池行或成分股列表，且“龙头”只写作已列出候选的“龙头候选”，不写成结论。" +
+    "每条声明写一个事实并引用证据编号；含“龙头候选、空间板”的句子须引用一个已列出候选的报价；“龙头”只写作“龙头候选”，不写“总龙头”，也不写成结论（任何字段都一样）；空间板只用来描述已列出候选的连板高度。" +
     "本模块不写题材、主线、轮动、情绪、全市场、指数类断言：板块写代码或名称，主线候选的依据引用 theme 工件编号即可，句中不用这些词。",
   artifacts:
     "artifacts 列引用的市场运行已接受的 theme 与 sentiment 工件（标题字段与至多 6 条声明），按 id（<module>@<snapshot_id>）引用；引用的市场运行与本运行同一交易日时它们是 CURRENT 证据，否则是 HISTORICAL。",
@@ -156,6 +166,8 @@ function rules(parsed, context) {
       fail(`${path}.board: invalid string.`);
     const quote = items.find(([, entry]) => isQuote(entry) && entry.item.symbol === candidate.symbol);
     if (!quote) fail(`${path}.symbol: a candidate needs an equity quote this run froze; no such evidence reference.`);
+    if (!Number.isFinite(quote[1].item.last))
+      fail(`${path}.symbol: a candidate needs a priced quote; this quote evidence reference has no last price.`);
     const code = candidate.symbol.slice(-6);
     const homes = items.filter(([, entry]) => holds(entry, code)).map(([id]) => id);
     if (homes.length === 0)
@@ -171,6 +183,7 @@ function rules(parsed, context) {
     if (seen.has(candidate.symbol)) fail(`${path}.symbol: one candidate per symbol; this quote evidence reference is named twice.`);
     seen.add(candidate.symbol);
   }
+  leaderSentences(parsed, items);
   const count = parsed.leader_candidates.length;
   const ranks = new Set(parsed.leader_candidates.map((candidate) => candidate.rank));
   if (ranks.size !== count || [...ranks].some((rank) => rank > count))
@@ -182,6 +195,27 @@ function rules(parsed, context) {
   ownClaims({ claims: parsed.claims, top_pattern_flags: flagged ? flags : "UNKNOWN" }, context, [
     { field: "top_pattern_flags", test: isPoolRow, needs: "a limit-up pool row of the cited market run" },
   ]);
+}
+
+/**
+ * The leader class's own wording and evidence (§5.6: no 龙头 outside the frozen quotes): 龙头 is
+ * written only as 龙头候选, never 总龙头, anywhere but a candidate's frozen name
+ * (UNSUPPORTED_SCOPE); and a claim's sentence of the leader class (龙头候选, 空间板 - a candidate's
+ * descriptor) that states no gap cites the quote of a listed candidate (REFERENCE).
+ * @param {any} parsed
+ * @param {[string, import("../contract-core.mjs").DigestItem][]} items
+ */
+function leaderSentences(parsed, items) {
+  for (const [path, text] of textEntries(parsed))
+    if (!NAME_PATH.test(path) && text.split(SENTENCE_SPLIT).some((sentence) => LEADER_CONCLUSION.test(sentence)))
+      fail(`${path}: Unsupported whole-market, theme, or leadership assertion; 龙头 is written only as 龙头候选 of a listed candidate.`);
+  const symbols = new Set(parsed.leader_candidates.map((candidate) => candidate.symbol));
+  const quotes = new Set(items.filter(([, entry]) => isQuote(entry) && symbols.has(entry.item.symbol)).map(([id]) => id));
+  for (const [index, claim] of parsed.claims.entries()) {
+    const asserts = claim.text.split(SENTENCE_SPLIT).some((sentence) => SCOPE_CLASSES.leader.test(sentence) && !SCOPE_EXEMPT.test(sentence));
+    if (asserts && !claim.evidence_ids.some((id) => quotes.has(id)))
+      fail(`analysis.claims[${index}]: a 龙头候选 or 空间板 sentence needs an evidence reference to the quote of a listed candidate.`);
+  }
 }
 
 /**
