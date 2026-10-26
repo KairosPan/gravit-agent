@@ -13,7 +13,11 @@
  * its rules in a fixed order, the module's own last - and `buildContext`, the digest a module's
  * context read returns (A24): only the module's sources, derived items first, then rows by the
  * module's priority, whole, until the UTF-8 JSON text would pass 30 KiB, the rest named in
- * `truncated`. Its `digest` is the validator's context.
+ * `truncated`. Its `digest` is the validator's context. A module citing a sealed `cn-market` run
+ * (A5, A27) gets that run's evidence of the sources it names as `market:<source>` items, the
+ * accepted artifacts it names - the market run's and its own run's - shown as digests citable as
+ * `<module>@<snapshot_id>` (§5.1), and two more bound envelope fields, `market_run` and
+ * `market_snapshot_id`.
  */
 import { createHash } from "node:crypto";
 import { MODULES } from "./modules.mjs";
@@ -266,16 +270,43 @@ export const ENVELOPE_SCHEMA = Object.freeze({
 /** The envelope fields an artifact must carry exactly as its context does. */
 const ENVELOPE_BOUND = ["module", "snapshot_id", "run", "as_of", "session", "contract_version", "hypotheses_version"];
 
+/** The envelope fields an artifact of a module citing a market run carries too, bound the same way (A5). */
+const MARKET_BOUND = ["market_run", "market_snapshot_id"];
+
+/** A cited artifact, anywhere in an artifact's text: `<module>@<snapshot_id>` (§5.1). */
+const ARTIFACT_ID = /[a-z]+@snap_[a-f0-9]{64}/g;
+
+/** A claim's cited id in a module that may cite artifacts: an evidence id or an artifact id. */
+const CITED_ID_PATTERN = "^(?:ev_[a-f0-9]{24}|[a-z]+@snap_[a-f0-9]{64})$";
+
 /**
  * A module's schema merged with the envelope: the envelope's fields, the module's headline fields.
+ * A module citing a market run (`market`) adds the two bound fields `market_run` and
+ * `market_snapshot_id`, each the context's value, a string or null; one that may cite artifacts
+ * (`artifacts`) lets a claim's `evidence_ids` name `<module>@<snapshot_id>` beside `ev_` ids.
  * @param {{ required?: string[], properties?: Record<string, unknown> }} schema
+ * @param {{ market?: boolean, artifacts?: boolean }} [cites]
  */
-export function envelopeSchema(schema) {
+export function envelopeSchema(schema, { market = false, artifacts = false } = {}) {
+  let envelope = /** @type {any} */ (ENVELOPE_SCHEMA);
+  if (market)
+    envelope = { ...envelope, required: [...envelope.required, ...MARKET_BOUND], properties: { ...envelope.properties, market_run: {}, market_snapshot_id: {} } };
+  if (artifacts) {
+    const claim = envelope.properties.claims.items;
+    const ids = claim.properties.evidence_ids;
+    envelope = {
+      ...envelope,
+      properties: {
+        ...envelope.properties,
+        claims: { ...envelope.properties.claims, items: { ...claim, properties: { ...claim.properties, evidence_ids: { ...ids, items: { ...ids.items, pattern: CITED_ID_PATTERN } } } } },
+      },
+    };
+  }
   return {
-    ...ENVELOPE_SCHEMA,
-    required: [...new Set([...ENVELOPE_SCHEMA.required, ...(schema.required ?? [])])],
+    ...envelope,
+    required: [...new Set([...envelope.required, ...(schema.required ?? [])])],
     // The envelope's fields last: a module schema cannot redefine them.
-    properties: { ...schema.properties, ...ENVELOPE_SCHEMA.properties },
+    properties: { ...schema.properties, ...envelope.properties },
   };
 }
 
@@ -330,18 +361,29 @@ function rowKind(item) {
 }
 
 /**
- * The context's digest, the validator's `context` argument.
+ * The context's digest, the validator's `context` argument. An item of the cited market run has
+ * `source` `market:<source>`; its scope is read against this run's session. `artifacts` holds every
+ * accepted artifact the module reads, by its id `<module>@<snapshot_id>` - `source` `market:<module>`
+ * for the market run's, `<module>` for this run's own - and `artifactIds` the ids of those the
+ * context shows, the citable ones. `market_run` and `market_snapshot_id` are own fields only of a
+ * module citing a market run (`marketRun`), null when an optional one was not given; `market` is
+ * the cited run's names, or null. `artifactCitable` says a claim may cite an artifact id.
  * @typedef {{ source: string, kind: string, scope: "CURRENT" | "HISTORICAL", item: Record<string, unknown> }} DigestItem
+ * @typedef {{ module: string, source: string, scope: "CURRENT" | "HISTORICAL", artifact: Record<string, any> }} DigestArtifact
  * @typedef {{ module: string, contract_version: string, hypotheses_version: string, run: string,
  *   snapshot_id: string | null, as_of: string | null, session: string | null, missing: string[],
  *   evidenceIds: Set<string>, derivedIds: Set<string>, items: Map<string, DigestItem>,
- *   labelAllow: string[] }} ContextDigest
+ *   labelAllow: string[], market: { run: string, snapshot_id: string | null, session: string | null } | null,
+ *   market_run?: string | null, market_snapshot_id?: string | null, artifactCitable: boolean,
+ *   artifacts: Map<string, DigestArtifact>, artifactIds: Set<string> }} ContextDigest
  */
 
 /**
  * Validate a module's artifact against its context (spec §5.6, A19, A21), failing closed through
  * `fail` in this order: the string's bytes, its JSON, the object's compact bytes, the merged
- * schema, the envelope's binding to the context, every cited evidence id known, the time scope of
+ * schema, the envelope's binding to the context (`market_run` and `market_snapshot_id` too for a
+ * module citing a market run), every cited evidence id known - and every cited artifact id shown,
+ * for a module that may cite one - the time scope of
  * each claim, the forbidden words, the scope rule, the status rule, then the module's own `rules`.
  * @param {unknown} raw the submitted artifact, JSON text or a parsed object
  * @param {{ module: string, context: ContextDigest, schema: { required?: string[], properties?: Record<string, unknown> },
@@ -393,20 +435,26 @@ function checkEnvelope(raw, { module, context, schema, owns = [], ownedBy = {}, 
     }
   }
   if (bytes(artifact) > MAX_ANALYSIS_BYTES) fail("Analysis exceeds its byte budget.");
-  checkSchema(artifact, envelopeSchema(schema));
+  const market = Object.hasOwn(context, "market_run");
+  const citable = context.artifactCitable === true;
+  checkSchema(artifact, envelopeSchema(schema, { market, artifacts: citable }));
 
-  for (const field of ENVELOPE_BOUND)
+  for (const field of market ? [...ENVELOPE_BOUND, ...MARKET_BOUND] : ENVELOPE_BOUND)
     if (artifact[field] !== context[field]) fail(`analysis.${field}: Snapshot or envelope mismatch.`);
 
   const entries = textEntries(artifact);
-  for (const [path, text] of entries)
+  for (const [path, text] of entries) {
     for (const [id] of text.matchAll(EVIDENCE_ID))
       if (!context.evidenceIds.has(id)) fail(`${path}: Unknown evidence reference.`);
+    if (citable)
+      for (const [id] of text.matchAll(ARTIFACT_ID))
+        if (!context.artifactIds.has(id)) fail(`${path}: Unknown evidence reference.`);
+  }
   const exempt = exemptMatcher(exemptPaths);
 
   for (const [index, claim] of artifact.claims.entries()) {
     const path = `analysis.claims[${index}]`;
-    const scopes = claim.evidence_ids.map((id) => context.items.get(id)?.scope);
+    const scopes = claim.evidence_ids.map((id) => context.items.get(id)?.scope ?? context.artifacts?.get(id)?.scope);
     if (claim.basis === "CURRENT" && !scopes.includes("CURRENT"))
       fail(`${path}.basis: Historical or missing evidence cannot support a CURRENT claim.`);
     if (claim.basis === "HISTORICAL" && scopes.some((scope) => scope !== "HISTORICAL"))
@@ -477,18 +525,42 @@ function checkEnvelope(raw, { module, context, schema, owns = [], ownedBy = {}, 
  * `derivedView`, when given, is the whole row of every derived item shown - its `id` included, no
  * `source` or `scope` added, the derived section implying them; the digest keeps every field.
  * `hints` and `example` are each the built value, or a function of the digest that builds it.
+ *
+ * A module citing a market run (`marketRun`, `"required"` or `"optional"`) hands the cited run as
+ * `market`, or null when an optional one was not given: the items of its files whose source is in
+ * `marketSources` join the digest as `market:<source>`, shown and ordered as the module's own (a
+ * priority entry or `derivedFirst` names them so), their scope read against this run's session.
+ * `marketArtifacts` names the market run's accepted artifacts the module reads and `runArtifacts`
+ * this run's own, from `artifacts`; each is shown first, before the derived items, as `{ id,
+ * module, headline, claims: [{ id, text, evidence_ids }] }`, its id `<module>@<snapshot_id>` of its
+ * run, CURRENT evidence when its run's session is this run's, else HISTORICAL; one past the cap is
+ * counted in `truncated` (kind `artifact`) and is not citable. A `required` entry is a source of
+ * this run, `market:<source>` or `market:<module>` of the market run, or a module of this run.
  * @param {{ module: string, run: string, manifest: { snapshot_id?: string | null, as_of?: string | null, session?: string | null,
  *   evidence: { source: string }[] }, evidence: { source: string, session: string | null, items: Record<string, any>[] }[],
  *   sources: string[], derivedFirst?: string[], derivedView?: (item: any) => Record<string, unknown>, priority: { source: string, kind: string, order?: (a: any, b: any) => number,
  *   view?: (item: any) => Record<string, unknown> }[], hypotheses: string, schema: { required?: string[], properties?: Record<string, unknown> },
- *   hints: unknown, example: unknown, required: string[] }} options
+ *   hints: unknown, example: unknown, required: string[], marketRun?: "required" | "optional",
+ *   market?: { run: string, snapshot_id: string | null, session: string | null, evidence: { source: string, session: string | null, items: Record<string, any>[] }[],
+ *     artifacts: Record<string, Record<string, any>> } | null,
+ *   marketSources?: string[], marketArtifacts?: string[], runArtifacts?: string[], artifacts?: Record<string, Record<string, any>> }} options
  * @returns {{ text: string, digest: ContextDigest }}
  */
-export function buildContext({ module, run, manifest, evidence, sources, derivedFirst = [], derivedView, priority, hypotheses, schema, hints, example, required }) {
-  const frozen = new Set(manifest.evidence.map((entry) => entry.source));
-  const missing = required.filter((source) => !frozen.has(source));
+export function buildContext({
+  module, run, manifest, evidence, sources, derivedFirst = [], derivedView, priority, hypotheses, schema, hints, example, required,
+  marketRun, market = null, marketSources = [], marketArtifacts = [], runArtifacts = [], artifacts = {},
+}) {
+  const cited = marketRun !== undefined ? market : null;
+  const present = new Set(manifest.evidence.map((entry) => entry.source));
+  for (const file of cited?.evidence ?? []) present.add(`market:${file.source}`);
+  for (const name of Object.keys(cited?.artifacts ?? {})) present.add(`market:${name}`);
+  for (const name of Object.keys(artifacts)) present.add(name);
+  const missing = required.filter((source) => !present.has(source));
   const session = manifest.session ?? null;
-  const files = evidence.filter((file) => sources.includes(file.source));
+  const files = [
+    ...evidence.filter((file) => sources.includes(file.source)),
+    ...(cited?.evidence ?? []).filter((file) => marketSources.includes(file.source)).map((file) => ({ ...file, source: `market:${file.source}` })),
+  ];
   /** @type {Map<string, DigestItem>} */
   const items = new Map();
   for (const file of files)
@@ -496,15 +568,35 @@ export function buildContext({ module, run, manifest, evidence, sources, derived
       items.set(item.id, { source: file.source, kind: rowKind(item), scope: timeScope(item, file.session ?? null, session), item });
   const all = [...items.entries()];
   const derivedIds = new Set(all.filter(([, entry]) => entry.kind === "derived").map(([id]) => id));
+  const scopeOf = (runSession) => (runSession !== null && runSession === session ? "CURRENT" : "HISTORICAL");
+  /** @type {Map<string, DigestArtifact>} */
+  const read = new Map();
+  for (const name of marketArtifacts) {
+    const artifact = cited?.artifacts?.[name];
+    if (artifact) read.set(`${name}@${cited.snapshot_id}`, { module: name, source: `market:${name}`, scope: scopeOf(cited.session ?? null), artifact });
+  }
+  for (const name of runArtifacts) {
+    const artifact = artifacts[name];
+    if (artifact) read.set(`${name}@${manifest.snapshot_id ?? null}`, { module: name, source: name, scope: scopeOf(session), artifact });
+  }
+  const artifactCitable = marketRun !== undefined || runArtifacts.length > 0;
   /** @type {ContextDigest} */
   const digest = {
     module, contract_version: CONTRACT_VERSION, hypotheses_version: hypothesesVersion(hypotheses), run,
     snapshot_id: manifest.snapshot_id ?? null, as_of: manifest.as_of ?? null, session, missing,
     evidenceIds: new Set(items.keys()), derivedIds, items, labelAllow: [],
+    market: cited ? { run: cited.run, snapshot_id: cited.snapshot_id ?? null, session: cited.session ?? null } : null,
+    ...(marketRun !== undefined ? { market_run: cited?.run ?? null, market_snapshot_id: cited?.snapshot_id ?? null } : {}),
+    artifactCitable, artifacts: read, artifactIds: new Set(read.keys()),
   };
 
-  const shown = (entry, view) => ({ id: entry.item.id, source: entry.source, scope: entry.scope, ...(view ? view(entry.item) : entry.item) });
-  const sourceOrder = [...new Set([...derivedFirst, ...sources])];
+  // A market row says so, whatever source field the item carries itself.
+  const shown = (entry, view) => ({
+    id: entry.item.id, source: entry.source, scope: entry.scope, ...(view ? view(entry.item) : entry.item),
+    ...(entry.source.startsWith("market:") ? { source: entry.source } : {}),
+  });
+  const artifactRows = [...read.entries()].map(([id, entry]) => ({ entry: { source: entry.source, kind: "artifact", id }, row: artifactView(id, entry) }));
+  const sourceOrder = [...new Set([...derivedFirst, ...sources, ...marketSources.map((source) => `market:${source}`)])];
   const derivedRows = sourceOrder.flatMap((source) =>
     all.filter(([, entry]) => entry.kind === "derived" && entry.source === source).map(([, entry]) => ({ entry, row: derivedView ? derivedView(entry.item) : shown(entry) })));
   const asked = new Set();
@@ -516,12 +608,15 @@ export function buildContext({ module, run, manifest, evidence, sources, derived
   });
   const unasked = all.map(([, entry]) => entry).filter((entry) => entry.kind !== "derived" && !asked.has(entry));
 
+  // A module citing nothing shows plan 2's context, field for field.
+  const marketFields = marketRun !== undefined ? { market_run: digest.market_run, market_snapshot_id: digest.market_snapshot_id } : {};
   const context = {
     module, contract_version: CONTRACT_VERSION, hypotheses_version: digest.hypotheses_version, run,
-    snapshot_id: digest.snapshot_id, as_of: digest.as_of, session, status_expected: missing.length ? "NOT_EVALUABLE" : "OK",
-    missing, hypotheses, schema: envelopeSchema(schema), hints: typeof hints === "function" ? hints(digest) : hints,
+    snapshot_id: digest.snapshot_id, as_of: digest.as_of, session, ...marketFields, status_expected: missing.length ? "NOT_EVALUABLE" : "OK",
+    missing, ...(marketRun !== undefined ? { market: digest.market } : {}), hypotheses,
+    schema: envelopeSchema(schema, { market: marketRun !== undefined, artifacts: artifactCitable }), hints: typeof hints === "function" ? hints(digest) : hints,
     example: typeof example === "function" ? example(digest) : example,
-    evidence: [], derived: [], truncated: [],
+    ...(artifactCitable ? { artifacts: [] } : {}), evidence: [], derived: [], truncated: [],
   };
   let size = bytes(context);
   if (size > MAX_CONTEXT_BYTES) fail("Context exceeds its byte budget.", "INVALID_CONTEXT");
@@ -530,7 +625,9 @@ export function buildContext({ module, run, manifest, evidence, sources, derived
   /** @type {{ entry: DigestItem, list: unknown[] }[]} */
   const added = [];
   let full = false;
-  for (const [candidates, list] of [[derivedRows, context.derived], [priorityRows, context.evidence]])
+  const lists = [[derivedRows, context.derived], [priorityRows, context.evidence]];
+  if (artifactCitable) lists.unshift([artifactRows, context.artifacts]);
+  for (const [candidates, list] of lists)
     for (const { entry, row } of candidates) {
       const cost = bytes(row) + (list.length ? 1 : 0);
       if (full || size + cost > MAX_CONTEXT_BYTES) {
@@ -562,5 +659,23 @@ export function buildContext({ module, run, manifest, evidence, sources, derived
     left.unshift(last.entry);
     count();
   }
+  // Only an artifact the context shows is citable.
+  for (const entry of left) if (entry.kind === "artifact") digest.artifactIds.delete(/** @type {any} */ (entry).id);
   return { text: JSON.stringify(context), digest };
+}
+
+/**
+ * An accepted artifact as a context shows it: its id, its module, its headline fields (`MODULES`)
+ * and its claims' ids, texts and cited ids.
+ * @param {string} id
+ * @param {DigestArtifact} entry
+ */
+function artifactView(id, { module, artifact }) {
+  const headline = MODULES.find((candidate) => candidate.name === module)?.headline ?? [];
+  const claims = Array.isArray(artifact.claims) ? artifact.claims : [];
+  return {
+    id, module,
+    headline: Object.fromEntries(headline.filter((field) => Object.hasOwn(artifact, field)).map((field) => [field, artifact[field]])),
+    claims: claims.map((claim) => ({ id: claim?.id, text: claim?.text, evidence_ids: claim?.evidence_ids })),
+  };
 }

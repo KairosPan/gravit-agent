@@ -108,3 +108,22 @@ export const isWeekend = (date) =>
 export function isTradingDay(date, tables) {
   return coverageOf(date, tables) === "covered" && !isWeekend(date) && !holidayOn(date, tables);
 }
+
+/**
+ * The latest trading day strictly before `date` (A5's previous session): one day back at a time,
+ * over weekends and holidays, while the days stay covered; null when the walk leaves every table,
+ * or `date` is not a real date.
+ * @param {string} date `YYYY-MM-DD`
+ * @param {Map<string, CalendarTable>} tables
+ * @returns {string | null}
+ */
+export function previousTradingDay(date, tables) {
+  if (dateYear(date) === null) return null;
+  let ms = Date.parse(`${date}T00:00:00Z`);
+  for (;;) {
+    ms -= 24 * 60 * 60 * 1000;
+    const day = new Date(ms).toISOString().slice(0, 10);
+    if (coverageOf(day, tables) === "uncovered") return null;
+    if (isTradingDay(day, tables)) return day;
+  }
+}

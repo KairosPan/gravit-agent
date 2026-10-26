@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  coverageOf, holidayOn, isTradingDay, loadCalendars,
+  coverageOf, holidayOn, isTradingDay, loadCalendars, previousTradingDay,
 } from "../plugins/lunhui/lib/calendar.mjs";
 
 const TABLE_2026 = fileURLToPath(new URL("../plugins/lunhui/lib/calendar/2026.json", import.meta.url));
@@ -95,4 +95,17 @@ test("calendar: a malformed table is refused with its file named", async () => {
       return true;
     }, JSON.stringify(body));
   }
+});
+
+test("calendar: previousTradingDay steps back over a weekend and the October holiday, null off coverage", () => {
+  const tables = loadCalendars();
+  assert.equal(previousTradingDay("2026-10-23", tables), "2026-10-22"); // a Friday
+  assert.equal(previousTradingDay("2026-10-12", tables), "2026-10-09"); // a Monday, over the weekend
+  assert.equal(previousTradingDay("2026-10-11", tables), "2026-10-09"); // a Sunday: strictly before it
+  assert.equal(previousTradingDay("2026-10-08", tables), "2026-09-30"); // over 国庆节 and its weekends
+  assert.equal(previousTradingDay("2026-09-28", tables), "2026-09-24"); // over 中秋节
+  assert.equal(previousTradingDay("2026-01-05", tables), null); // 2025 has no table
+  assert.equal(previousTradingDay("2027-01-04", tables), null); // the date itself uncovered
+  assert.equal(previousTradingDay("not-a-date", tables), null);
+  assert.equal(previousTradingDay("2026-02-30", tables), null);
 });

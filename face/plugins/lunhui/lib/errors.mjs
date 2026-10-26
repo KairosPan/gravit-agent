@@ -17,7 +17,8 @@ export const MODULE_BUDGET = 10;
 /**
  * The refusal table, one maker per refusal a row throws itself. `runs.mjs` throws its own
  * `NOT_A_STRATEGY`, `BAD_RUN_ID`, `NO_SUCH_RUN`, `RUN_SEALED` and `SOURCE_FROZEN` under the same
- * codes; these are for the rows' own checks.
+ * codes; these are for the rows' own checks. The two refusals of a cited run (A5) read sessions and
+ * a phrase the caller passes, never a path.
  */
 export const refuse = {
   notAStrategy: () => new LunhuiError("NOT_A_STRATEGY", "strategy 须是策略根目录下一个策略的名字（频道名），不是路径。"),
@@ -65,6 +66,19 @@ export const refuse = {
       : kind === "module"
         ? new LunhuiError("WRONG_CHANNEL", "这个模块只用于市场频道 cn-market 的运行，不用于策略频道。")
         : new LunhuiError("WRONG_CHANNEL", "这个冻结只用于市场频道 cn-market；策略频道只冻结个股行情（lunhui_freeze_quotes）。"),
+  /** A cited cn-market run whose session is neither the strategy run's nor the trading day before it (A5). */
+  staleMarketRun: (strategySession, marketSession) =>
+    new LunhuiError(
+      "STALE_MARKET_RUN",
+      `引用的市场运行交易日为 ${marketSession ?? "无"}，本运行交易日为 ${strategySession ?? "无"}；` +
+        "只能引用同一交易日或前一个交易日的已封存 cn-market 运行。请引用更新的市场运行，或先完成一次新的市场运行。",
+    ),
+  /** A cited run not yet sealed: it has no snapshot to cite (A5, A27). */
+  missingEvidence: (what) =>
+    new LunhuiError(
+      "MISSING_EVIDENCE",
+      `${what}尚未封存（还没有模块读取过它的上下文），没有可引用的快照、证据与工件；请先完成那个运行的模块分析，或引用一个已封存的运行。`,
+    ),
   // The quotes freeze's symbol list, stage 0's four refusals (its `checkSymbols`).
   symbolShape: () =>
     new LunhuiError("INVALID_SYMBOL", "symbols 须为 1–8 个证券代码组成的数组，每个代码是 sh 或 sz 加六位数字。"),

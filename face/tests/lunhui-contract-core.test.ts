@@ -461,3 +461,149 @@ test("buildContext: derived items past the cap leave out the rest of them and ev
   // Every derived id stays citable, shown or not.
   assert.equal(digest.derivedIds.size, 301);
 });
+
+// -------------------------------------------------------------------------------------------------
+// The cited run (A5, A27, §5.1): a module reading a sealed cn-market run beside its own run.
+// -------------------------------------------------------------------------------------------------
+
+const MARKET_SNAP = `snap_${"b".repeat(64)}`;
+const marketZt = withId({ pool: "zt", code: "600519", name: "丁", boards: 3 });
+const marketSeal = withId({ source: "limit-up", kind: "derived", measure: "seal_ratio", value: 0.8, inputs: [marketZt.id] });
+const marketBoard = withId({ kind: "board", code: "BK0002", name: "戊" });
+const marketBars = withId({ kind: "bars", symbol: "sh000001", bars: [["2026-10-22", 3290]] });
+const quote = withId({ kind: "quote", symbol: "sh600519", name: "丁", last: 1500 });
+const sentimentArtifact = {
+  module: "sentiment", snapshot_id: MARKET_SNAP, state: "REPAIR", money_effect: "WEAK", freeze_type: "UNKNOWN",
+  claims: [{ id: "c1", text: "封板率回升。", basis: "CURRENT", evidence_ids: [marketSeal.id] }], limitations: [],
+};
+const themeArtifact = { module: "theme", mainline_candidates: [], theme_stage: "UNKNOWN", rotation: "UNKNOWN", claims: [], limitations: [] };
+const leaderArtifact = { module: "leader", leader_candidates: [], top_pattern_flags: [], claims: [{ id: "c1", text: "丁在册。", basis: "CURRENT", evidence_ids: [quote.id] }] };
+
+/** A sealed cn-market run, its files from `session` (the strategy run's own session by default). */
+function marketOf(session = SESSION, artifacts: Loose = { sentiment: sentimentArtifact, theme: themeArtifact }): Loose {
+  return {
+    run: "m20261023", snapshot_id: MARKET_SNAP, session,
+    evidence: [
+      { source: "limit-up", session, items: [marketZt, marketSeal] },
+      { source: "index", session, items: [marketBars] },
+      { source: "boards", session, items: [marketBoard] },
+    ],
+    artifacts,
+  };
+}
+
+/** A strategy run's context citing `market`: its quotes, the market's limit-up and boards, the market's sentiment and theme, the run's leader. */
+function cited(market: Loose | null = marketOf(), overrides: Loose = {}) {
+  return buildContext({
+    module: "mode", run: "s20261023", manifest: { run: "s20261023", snapshot_id: MANIFEST.snapshot_id, as_of: MANIFEST.as_of, session: SESSION, evidence: [{ source: "quotes" }] },
+    evidence: [{ source: "quotes", session: SESSION, items: [quote] }], sources: ["quotes"], priority: [{ source: "quotes", kind: "quote" }, { source: "market:limit-up", kind: "zt" }, { source: "market:boards", kind: "board" }],
+    hypotheses: HYPOTHESES, schema: { type: "object", required: ["mode"], properties: { mode: { enum: ["WAIT", "UNKNOWN"] } } }, hints: "按字段填写。", example: {},
+    required: ["quotes", "market:limit-up", "market:theme", "leader"],
+    marketRun: "required", market, marketSources: ["limit-up", "boards"], marketArtifacts: ["sentiment", "theme"],
+    runArtifacts: ["leader"], artifacts: { leader: leaderArtifact, counterevidence: { module: "counterevidence" } },
+    ...overrides,
+  });
+}
+
+/** A valid artifact of the citing context `digest`. */
+function citing(digest: Loose, overrides: Loose = {}): Loose {
+  return {
+    module: digest.module, contract_version: digest.contract_version, hypotheses_version: digest.hypotheses_version,
+    snapshot_id: digest.snapshot_id, run: digest.run, as_of: digest.as_of, session: digest.session,
+    market_run: digest.market_run, market_snapshot_id: digest.market_snapshot_id,
+    status: "OK", missing_sources: [], mode: "WAIT",
+    claims: [{ id: "c1", text: "丁的报价在本运行交易日冻结。", basis: "CURRENT", evidence_ids: [quote.id, `sentiment@${MARKET_SNAP}`] }],
+    limitations: [],
+    ...overrides,
+  };
+}
+
+const checkCiting = (raw: unknown, digest: Loose) =>
+  validateEnvelope(raw, { module: "mode", context: digest, schema: { type: "object", required: ["mode"], properties: { mode: { enum: ["WAIT", "UNKNOWN"] } } }, owns: [] });
+
+test("buildContext with a cited run: market items join the digest as market:<source>, scoped against the strategy run's session", () => {
+  const { digest, text } = cited();
+  assert.deepEqual(digest.market, { run: "m20261023", snapshot_id: MARKET_SNAP, session: SESSION });
+  assert.equal(digest.market_run, "m20261023");
+  assert.equal(digest.market_snapshot_id, MARKET_SNAP);
+  assert.deepEqual(digest.items.get(marketZt.id), { source: "market:limit-up", kind: "zt", scope: "CURRENT", item: marketZt });
+  assert.equal(digest.items.get(marketBoard.id).source, "market:boards");
+  // Only the market sources the module reads.
+  assert.equal(digest.items.has(marketBars.id), false);
+  assert.ok(digest.evidenceIds.has(marketSeal.id) && digest.derivedIds.has(marketSeal.id));
+  assert.equal(digest.items.get(quote.id).source, "quotes");
+  const context = JSON.parse(text);
+  assert.equal(context.market_run, "m20261023");
+  assert.equal(context.market_snapshot_id, MARKET_SNAP);
+  assert.deepEqual(context.market, digest.market);
+  assert.deepEqual(context.derived.map((row: Loose) => [row.id, row.source]), [[marketSeal.id, "market:limit-up"]]);
+  assert.deepEqual(context.evidence.map((row: Loose) => row.id), [quote.id, marketZt.id, marketBoard.id]);
+  assert.ok(context.schema.required.includes("market_run") && context.schema.required.includes("market_snapshot_id"));
+
+  // The market run of the previous session: its items are HISTORICAL for this run.
+  const older = cited(marketOf("2026-10-22")).digest;
+  assert.equal(older.items.get(marketZt.id).scope, "HISTORICAL");
+  assert.equal(older.items.get(quote.id).scope, "CURRENT");
+});
+
+test("buildContext with a cited run: the named market and run artifacts are shown as digests and citable as <module>@<snapshot_id>", () => {
+  const { digest, text } = cited();
+  const context = JSON.parse(text);
+  assert.deepEqual(context.artifacts, [
+    {
+      id: `sentiment@${MARKET_SNAP}`, module: "sentiment", headline: { state: "REPAIR", money_effect: "WEAK", freeze_type: "UNKNOWN" },
+      claims: [{ id: "c1", text: "封板率回升。", evidence_ids: [marketSeal.id] }],
+    },
+    { id: `theme@${MARKET_SNAP}`, module: "theme", headline: { mainline_candidates: [], theme_stage: "UNKNOWN", rotation: "UNKNOWN" }, claims: [] },
+    { id: `leader@${MANIFEST.snapshot_id}`, module: "leader", headline: { leader_candidates: [], top_pattern_flags: [] }, claims: [{ id: "c1", text: "丁在册。", evidence_ids: [quote.id] }] },
+  ]);
+  assert.deepEqual([...digest.artifactIds], [`sentiment@${MARKET_SNAP}`, `theme@${MARKET_SNAP}`, `leader@${MANIFEST.snapshot_id}`]);
+  // The parsed artifacts stay in the digest for a contract's rules, by id.
+  assert.deepEqual(digest.artifacts.get(`sentiment@${MARKET_SNAP}`), { module: "sentiment", source: "market:sentiment", scope: "CURRENT", artifact: sentimentArtifact });
+  assert.equal(digest.artifacts.get(`leader@${MANIFEST.snapshot_id}`).source, "leader");
+  assert.deepEqual(digest.missing, []);
+});
+
+test("buildContext with a cited run: missing names market:<source>, market:<module> and a run artifact; no market run leaves every market entry missing", () => {
+  const thin = cited({ ...marketOf(), evidence: marketOf().evidence.filter((file: Loose) => file.source !== "limit-up"), artifacts: { sentiment: sentimentArtifact } }, { artifacts: {} }).digest;
+  assert.deepEqual(thin.missing, ["market:limit-up", "market:theme", "leader"]);
+  const none = cited(null, { marketRun: "optional" });
+  assert.deepEqual(none.digest.missing, ["market:limit-up", "market:theme"]);
+  assert.equal(none.digest.market, null);
+  assert.equal(none.digest.market_run, null);
+  assert.equal(none.digest.market_snapshot_id, null);
+  assert.deepEqual(JSON.parse(none.text).market, null);
+});
+
+test("buildContext without a cited run: the context text and envelope are plan 2's, no market or artifact fields", () => {
+  const { text, digest } = context();
+  const shown = JSON.parse(text);
+  for (const field of ["market", "market_run", "market_snapshot_id", "artifacts"]) assert.equal(Object.hasOwn(shown, field), false, field);
+  assert.equal(Object.hasOwn(digest, "market_run"), false);
+  assert.equal(shown.schema.required.includes("market_run"), false);
+  assert.equal(shown.schema.properties.claims.items.properties.evidence_ids.items.pattern, "^ev_[a-f0-9]{24}$");
+  // An artifact id cited by a module that cites no run is SCHEMA, as before.
+  assert.equal(category(() => check(artifact(digest, { claims: [{ id: "c1", text: "情绪进入扩张。", basis: "CURRENT", evidence_ids: [indexQuote.id, `theme@${MARKET_SNAP}`] }] }))), "SCHEMA");
+});
+
+test("validateEnvelope with a cited run: market_run and market_snapshot_id required and bound; an artifact id is citable, an unknown one REFERENCE", () => {
+  const { digest } = cited();
+  checkCiting(citing(digest), digest);
+  checkCiting(JSON.stringify(citing(digest)), digest);
+  for (const field of ["market_run", "market_snapshot_id"]) {
+    assert.equal(category(() => checkCiting(citing(digest, { [field]: "other" }), digest)), "REFERENCE", field);
+    const { [field]: _dropped, ...without } = citing(digest);
+    assert.equal(category(() => checkCiting(without, digest)), "SCHEMA", field);
+  }
+  const cite = (ids: string[], basis = "CURRENT") => ({ claims: [{ id: "c1", text: "丁的报价已冻结。", basis, evidence_ids: ids }] });
+  // The run's own leader artifact is citable by the strategy run's snapshot.
+  checkCiting(citing(digest, cite([`leader@${MANIFEST.snapshot_id}`])), digest);
+  // Not shown, so not citable: a run artifact the contract does not list, a market artifact of another snapshot.
+  assert.equal(category(() => checkCiting(citing(digest, cite([`counterevidence@${MANIFEST.snapshot_id}`])), digest)), "REFERENCE");
+  assert.equal(category(() => checkCiting(citing(digest, cite([`theme@snap_${"c".repeat(64)}`])), digest)), "REFERENCE");
+  assert.equal(category(() => checkCiting(citing(digest, { limitations: [`缺少 theme@snap_${"c".repeat(64)} 的核验。`] }), digest)), "REFERENCE");
+  // A previous session's artifact is HISTORICAL evidence for a strategy run of today.
+  const older = cited(marketOf("2026-10-22")).digest;
+  assert.equal(category(() => checkCiting(citing(older, cite([`sentiment@${MARKET_SNAP}`])), older)), "TIME_SCOPE");
+  checkCiting(citing(older, { claims: [{ id: "c1", text: "前一交易日的读数为修复。", basis: "HISTORICAL", evidence_ids: [`sentiment@${MARKET_SNAP}`, marketZt.id] }] }), older);
+});

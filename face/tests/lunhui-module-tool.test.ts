@@ -289,3 +289,169 @@ test("module tools: an accepted submit drops the module's digest - a manifest th
   await writeFile(manifestPath, JSON.stringify({ ...manifest, artifacts: [] }));
   await rejectsWith(submit.execute({ strategy: "cn-market", run, analysis }, exec(ROLE)), "READ_FIRST");
 });
+
+// -------------------------------------------------------------------------------------------------
+// The cited run (A5, A27, §5.1, §5.5): a contract with marketRun reads a sealed cn-market run.
+// -------------------------------------------------------------------------------------------------
+
+/** The toy contract citing a market run: the leader module's slot, a strategy run's quotes, the market's limit-up and sentiment. */
+function citingContract(marketRun: "required" | "optional" = "required") {
+  return {
+    schema: { required: ["top_pattern_flags"], properties: { top_pattern_flags: { type: "array", minItems: 0, maxItems: 1, items: { enum: ["NONE"] } } } },
+    owns: [],
+    hypotheses: HYPOTHESES,
+    hints: "玩具提示。",
+    example: (digest: any) => ({ module: digest.module, market_run: digest.market_run }),
+    sources: ["quotes"],
+    required: ["quotes"],
+    priority: [{ source: "quotes", kind: "quote" }, { source: "market:limit-up", kind: "zt" }],
+    marketRun,
+    marketSources: ["limit-up"],
+    marketArtifacts: ["sentiment"],
+  };
+}
+
+function leaderTools(service: any, contract: any = citingContract()) {
+  const { runs } = moduleDeps("lunhui-leader", { lunhuiRuns: service });
+  const [read, submit] = defineModule({ module: "leader", channel: "strategy", contract, runs }) as unknown as ToolDef[];
+  return { read, submit };
+}
+
+/** A sealed cn-market run of `session` with a limit-up pool row and an accepted sentiment artifact. */
+async function marketRun(service: any, root: string, session: string) {
+  const { run } = await service.openRun("cn-market", "market");
+  const limitUp = await service.addEvidence("cn-market", run, "limit-up", [{ pool: "zt", code: "600000", name: "甲" }], { ...META, session });
+  const manifest = await service.sealRun("cn-market", run);
+  const dir = join(root, "cn-market", "analysis", run);
+  await writeFile(join(dir, "sentiment.json"), JSON.stringify({ module: "sentiment", state: "REPAIR", claims: [] }));
+  await writeFile(join(dir, "run.json"), JSON.stringify({ ...manifest, artifacts: ["sentiment"] }));
+  return { run, snapshot: manifest.snapshot_id as string, poolId: limitUp.ids[0] as string };
+}
+
+/** A strategy run of `alpha` with one quote of `session`. */
+async function strategyRun(service: any, session = "2026-10-23") {
+  const { run } = await service.openRun("alpha", "strategy");
+  const quotes = await service.addEvidence("alpha", run, "quotes", [{ kind: "quote", symbol: "sh600000", last: 10 }], { ...META, session });
+  return { run, quoteId: quotes.ids[0] as string };
+}
+
+/** A valid citing artifact over the context `text`. */
+function citingOf(text: string, ids: string[]) {
+  const context = JSON.parse(text);
+  return {
+    module: context.module, contract_version: context.contract_version, hypotheses_version: context.hypotheses_version,
+    snapshot_id: context.snapshot_id, run: context.run, as_of: context.as_of, session: context.session,
+    market_run: context.market_run, market_snapshot_id: context.market_snapshot_id,
+    status: "OK", missing_sources: [], top_pattern_flags: [],
+    claims: [{ id: "c1", text: "sh600000 报价已冻结。", basis: "CURRENT", evidence_ids: ids }],
+    limitations: [],
+  };
+}
+
+test("module tools with a cited run: market_run is a parameter of both tools, required for a required contract, optional for an optional one; an unknown option is a TypeError", async (t) => {
+  const service = backbone(await strategiesRoot(t));
+  const { read, submit } = leaderTools(service);
+  assert.deepEqual(Object.keys(read.parameters.properties), ["strategy", "run", "market_run"]);
+  assert.deepEqual(read.parameters.required, ["strategy", "run", "market_run"]);
+  assert.deepEqual(Object.keys(submit.parameters.properties), ["strategy", "run", "market_run", "analysis"]);
+  assert.deepEqual(submit.parameters.required, ["strategy", "run", "market_run", "analysis"]);
+  for (const tool of [read, submit]) {
+    assert.match(tool.parameters.properties.market_run.description, /cn-market/);
+    assert.match(tool.description, /STALE_MARKET_RUN/);
+  }
+  const optional = leaderTools(service, citingContract("optional"));
+  assert.deepEqual(optional.read.parameters.required, ["strategy", "run"]);
+  assert.ok(Object.hasOwn(optional.read.parameters.properties, "market_run"));
+  assert.throws(() => leaderTools(service, { ...citingContract(), marketRun: "sometimes" }), TypeError);
+  // Without the option the tools are plan 2's.
+  assert.deepEqual(Object.keys(tools(service).read.parameters.properties), ["strategy", "run"]);
+});
+
+test("module tools with a cited run: a market run two trading days back is STALE_MARKET_RUN, counted; the previous session is accepted, over a weekend too", async (t) => {
+  const root = await strategiesRoot(t);
+  const service = backbone(root);
+  const { read } = leaderTools(service);
+  const strategy = await strategyRun(service, "2026-10-23");
+  const stale = await marketRun(service, root, "2026-10-21");
+  const refusal = await rejectsWith(read.execute({ strategy: "alpha", run: strategy.run, market_run: stale.run }, exec(ROLE)), "STALE_MARKET_RUN");
+  assert.match(refusal.message, /2026-10-21/);
+  assert.equal((await service.readRun("alpha", strategy.run)).metrics.calls.leader, 1);
+  const previous = await marketRun(service, root, "2026-10-22");
+  assert.equal(JSON.parse(await read.execute({ strategy: "alpha", run: strategy.run, market_run: previous.run }, exec(ROLE))).market_run, previous.run);
+  const same = await marketRun(service, root, "2026-10-23");
+  assert.equal(JSON.parse(await read.execute({ strategy: "alpha", run: strategy.run, market_run: same.run }, exec(ROLE))).market_run, same.run);
+  // A newer market run is not the same day or the day before either.
+  const monday = await strategyRun(service, "2026-10-12");
+  const friday = await marketRun(service, root, "2026-10-09");
+  assert.equal(JSON.parse(await read.execute({ strategy: "alpha", run: monday.run, market_run: friday.run }, exec(ROLE))).market_run, friday.run);
+  await rejectsWith(read.execute({ strategy: "alpha", run: monday.run, market_run: same.run }, exec(ROLE)), "STALE_MARKET_RUN");
+});
+
+test("module tools with a cited run: an open market run is MISSING_EVIDENCE, a missing one NO_SUCH_RUN, a strategy run named as the market run NO_SUCH_RUN; an absent or bad market_run refused before counting", async (t) => {
+  const root = await strategiesRoot(t);
+  const service = backbone(root);
+  const { read } = leaderTools(service);
+  const strategy = await strategyRun(service);
+  const open = await service.openRun("cn-market", "market");
+  await service.addEvidence("cn-market", open.run, "limit-up", [{ pool: "zt", code: "600000" }], META);
+  await rejectsWith(read.execute({ strategy: "alpha", run: strategy.run, market_run: open.run }, exec(ROLE)), "MISSING_EVIDENCE");
+  // The cited run is only read: it stays open.
+  assert.equal((await service.readRun("cn-market", open.run)).manifest.sealed_at, null);
+  await rejectsWith(read.execute({ strategy: "alpha", run: strategy.run, market_run: "20261023T070000Z-00000000" }, exec(ROLE)), "NO_SUCH_RUN");
+  const other = await strategyRun(service);
+  await service.sealRun("alpha", other.run);
+  await rejectsWith(read.execute({ strategy: "alpha", run: strategy.run, market_run: other.run }, exec(ROLE)), "NO_SUCH_RUN");
+  assert.equal((await service.readRun("alpha", strategy.run)).metrics.calls.leader, 3);
+  await rejectsWith(read.execute({ strategy: "alpha", run: strategy.run, market_run: "../x" }, exec(ROLE)), "BAD_RUN_ID");
+  // defineTool validates the arguments' presence and type before execute.
+  for (const market_run of [undefined, 7])
+    await assert.rejects(read.execute({ strategy: "alpha", run: strategy.run, market_run }, exec(ROLE)));
+  assert.equal((await service.readRun("alpha", strategy.run)).metrics.calls.leader, 3);
+});
+
+test("module tools with a cited run: market items and artifacts are citable, scoped against the strategy run's session; market_run and market_snapshot_id bound; the submit names the read's market run", async (t) => {
+  const root = await strategiesRoot(t);
+  const service = backbone(root);
+  const { read, submit } = leaderTools(service);
+  const strategy = await strategyRun(service, "2026-10-23");
+  const market = await marketRun(service, root, "2026-10-22");
+  const text = await read.execute({ strategy: "alpha", run: strategy.run, market_run: market.run }, exec(ROLE));
+  const context = JSON.parse(text);
+  assert.equal(context.market_snapshot_id, market.snapshot);
+  assert.deepEqual(context.market, { run: market.run, snapshot_id: market.snapshot, session: "2026-10-22" });
+  assert.deepEqual(context.example, { module: "leader", market_run: market.run });
+  const pool = context.evidence.find((row: any) => row.id === market.poolId);
+  assert.deepEqual([pool.source, pool.scope], ["market:limit-up", "HISTORICAL"]);
+  assert.deepEqual(context.artifacts.map((row: any) => row.id), [`sentiment@${market.snapshot}`]);
+
+  // A market item of the day before cannot carry a CURRENT claim alone.
+  const historical = await rejectsWith(submit.execute({ strategy: "alpha", run: strategy.run, market_run: market.run, analysis: JSON.stringify(citingOf(text, [market.poolId])) }, exec(ROLE)), "INVALID_ANALYSIS");
+  assert.match(historical.message, /\[TIME_SCOPE\]/);
+  for (const field of ["market_run", "market_snapshot_id"]) {
+    const refused = await rejectsWith(submit.execute({ strategy: "alpha", run: strategy.run, market_run: market.run, analysis: JSON.stringify({ ...citingOf(text, [strategy.quoteId]), [field]: "snap_other" }) }, exec(ROLE)), "INVALID_ANALYSIS");
+    assert.match(refused.message, /\[REFERENCE\]/);
+  }
+  // A submit naming another market run than the read's: read it first.
+  const analysis = JSON.stringify(citingOf(text, [strategy.quoteId, `sentiment@${market.snapshot}`]));
+  const other = await marketRun(service, root, "2026-10-23");
+  await rejectsWith(submit.execute({ strategy: "alpha", run: strategy.run, market_run: other.run, analysis }, exec(ROLE)), "READ_FIRST");
+  assert.deepEqual(JSON.parse(await submit.execute({ strategy: "alpha", run: strategy.run, market_run: market.run, analysis }, exec(ROLE))), { accepted: true, module: "leader", run: strategy.run });
+  const stored = JSON.parse(await readFile(join(root, "alpha", "analysis", strategy.run, "leader.json"), "utf8"));
+  assert.equal(stored.market_run, market.run);
+  assert.equal(stored.market_snapshot_id, market.snapshot);
+  assert.deepEqual(stored.claims[0].evidence_ids, [strategy.quoteId, `sentiment@${market.snapshot}`]);
+});
+
+test("module tools with an optional cited run: without market_run the read and submit go on, market_run and market_snapshot_id null", async (t) => {
+  const root = await strategiesRoot(t);
+  const service = backbone(root);
+  const { read, submit } = leaderTools(service, citingContract("optional"));
+  const strategy = await strategyRun(service);
+  const text = await read.execute({ strategy: "alpha", run: strategy.run }, exec(ROLE));
+  const context = JSON.parse(text);
+  assert.equal(context.market_run, null);
+  assert.equal(context.market, null);
+  assert.deepEqual(context.artifacts, []);
+  const analysis = JSON.stringify(citingOf(text, [strategy.quoteId]));
+  assert.deepEqual(JSON.parse(await submit.execute({ strategy: "alpha", run: strategy.run, analysis }, exec(ROLE))).accepted, true);
+});

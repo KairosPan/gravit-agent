@@ -256,6 +256,7 @@ test("errors: the refusal table opens each message with its code word and names 
     wrongChannel: "WRONG_CHANNEL", symbolShape: "INVALID_SYMBOL", symbolDuplicate: "INVALID_SYMBOL",
     symbolSet: "INVALID_SYMBOL", symbolMix: "INVALID_SYMBOL", boardShape: "INVALID_SYMBOL",
     readFirst: "READ_FIRST", alreadySubmitted: "ALREADY_SUBMITTED", moduleBudget: "TOOL_BUDGET", rejected: "INVALID_ANALYSIS",
+    staleMarketRun: "STALE_MARKET_RUN", missingEvidence: "MISSING_EVIDENCE",
   };
   assert.deepEqual(Object.keys(refuse).sort(), Object.keys(codes).sort());
   // One text per code: the rows' BAD_RUN_ID is runs.mjs's own, naming the new tools.
@@ -284,6 +285,19 @@ test("errors: the module refusals name the module; a rejection carries its categ
   const rejected = refuse.rejected("SCHEMA", "analysis.status must be one of OK, NOT_EVALUABLE", "按 schema 修正。");
   assert.equal(rejected.code, "INVALID_ANALYSIS");
   assert.equal(rejected.message, "INVALID_ANALYSIS: [SCHEMA] analysis.status must be one of OK, NOT_EVALUABLE\n修复：按 schema 修正。");
+});
+
+test("errors: STALE_MARKET_RUN names both sessions and the rule; MISSING_EVIDENCE names what is unsealed; neither names a path", () => {
+  const stale = refuse.staleMarketRun("2026-10-23", "2026-10-21").message;
+  assert.match(stale, /^STALE_MARKET_RUN: /);
+  assert.match(stale, /2026-10-23/);
+  assert.match(stale, /2026-10-21/);
+  assert.match(stale, /前一个交易日/);
+  assert.match(refuse.staleMarketRun(null, null).message, /^STALE_MARKET_RUN: .*无/);
+  const missing = refuse.missingEvidence("引用的运行").message;
+  assert.match(missing, /^MISSING_EVIDENCE: 引用的运行/);
+  assert.match(missing, /封存/);
+  for (const message of [stale, missing]) assert.doesNotMatch(message, /\/|\\/);
 });
 
 test("errors: callerIsRole is callerIsChild", () => {
@@ -636,3 +650,63 @@ for (const [row, module] of [[environmentRow, "environment"], [sentimentRow, "se
     assert.equal(bare.tools.length, 0);
   });
 }
+
+// -------------------------------------------------------------------------------------------------
+// The cited run (modules spec A5, A27, §5.1): readSealedRun reads another run whole, unlocked.
+// -------------------------------------------------------------------------------------------------
+
+test("lunhui-runs: readSealedRun returns a sealed run's manifest, evidence and only the artifacts run.json names, each bounded and parsed", async (t) => {
+  const root = await strategiesRoot(t);
+  const { service } = mounted(root);
+  const { run } = await service.openRun("alpha", "market");
+  const limitUp = await service.addEvidence("alpha", run, "limit-up", [{ pool: "zt", code: "600001" }], META);
+  await service.addEvidence("alpha", run, "index", [{ kind: "index", symbol: "sh000001" }], { ...META, session: "2026-10-22" });
+  const sealed = await service.sealRun("alpha", run);
+  const dir = join(root, "alpha", "analysis", run);
+  await nameArtifacts(dir, ["sentiment", "theme", "environment"]);
+  await writeFile(join(dir, "sentiment.json"), JSON.stringify({ module: "sentiment", state: "REPAIR", claims: [] }));
+  await writeFile(join(dir, "theme.json"), "{ not json");
+  await writeFile(join(dir, "environment.json"), JSON.stringify({ module: "environment", filler: "x".repeat(25 * 1024) }));
+  // Present but not named: never read as an artifact.
+  await writeFile(join(dir, "leader.json"), JSON.stringify({ module: "leader" }));
+  const read = await service.readSealedRun("alpha", run);
+  assert.equal(read.strategy, "alpha");
+  assert.equal(read.run, run);
+  assert.equal(read.manifest.snapshot_id, sealed.snapshot_id);
+  assert.deepEqual(read.evidence, [
+    { source: "limit-up", session: "2026-10-23", items: [{ pool: "zt", code: "600001", id: limitUp.ids[0] }] },
+    { source: "index", session: "2026-10-22", items: [read.evidence[1].items[0]] },
+  ]);
+  assert.deepEqual(read.artifacts, { sentiment: { module: "sentiment", state: "REPAIR", claims: [] } });
+  // Nothing counted, nothing written: the cited run is only read.
+  assert.deepEqual((await service.readRun("alpha", run)).metrics.calls, {});
+});
+
+test("lunhui-runs: readSealedRun refuses an open run MISSING_EVIDENCE, a missing run NO_SUCH_RUN, a bad id BAD_RUN_ID, and takes no lock", async (t) => {
+  const root = await strategiesRoot(t);
+  const { service } = mounted(root);
+  const { run } = await service.openRun("alpha", "market");
+  await service.addEvidence("alpha", run, "index", [{ kind: "index", symbol: "sh000001" }], META);
+  const refusal = await rejectsWith(service.readSealedRun("alpha", run), "MISSING_EVIDENCE");
+  assert.doesNotMatch(refusal.message, /\//);
+  assert.equal((await service.readRun("alpha", run)).manifest.sealed_at, null);
+  await rejectsWith(service.readSealedRun("beta", run), "NO_SUCH_RUN");
+  await rejectsWith(service.readSealedRun("alpha", "../x"), "BAD_RUN_ID");
+  await service.sealRun("alpha", run);
+  // Read from inside the run's own mutex: no lock taken, so no deadlock.
+  const inside = await service.withRun("alpha", run, () => service.readSealedRun("alpha", run));
+  assert.equal(inside.run, run);
+});
+
+test("lunhui-runs: readContext hands build the run's accepted artifacts, only those run.json names", async (t) => {
+  const root = await strategiesRoot(t);
+  const { service } = mounted(root);
+  const { run } = await service.openRun("alpha", "strategy");
+  await service.sealRun("alpha", run);
+  const dir = join(root, "alpha", "analysis", run);
+  await nameArtifacts(dir, ["leader"]);
+  await writeFile(join(dir, "leader.json"), JSON.stringify({ module: "leader", leader_candidates: [] }));
+  await writeFile(join(dir, "mode.json"), JSON.stringify({ module: "mode" }));
+  const seen = await service.readContext("alpha", run, "mode", echo);
+  assert.deepEqual(seen.artifacts, { leader: { module: "leader", leader_candidates: [] } });
+});
