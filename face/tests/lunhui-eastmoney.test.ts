@@ -296,9 +296,9 @@ test("eastmoney: fetchBoards returns the top boards with advancers and decliners
   });
   assert.equal(reply.host, "push2.eastmoney.com");
   assert.equal(reply.delayed, false);
-  // AKShare's concept-board query, sorted by turnover and cut to the top.
+  // AKShare's concept-board query, sorted by change, descending, and cut to the top.
   assert.deepEqual(asked, [
-    `${CLIST}?pn=1&pz=30&po=1&np=1&${UT}&fltt=2&invt=2&fid=f6&fs=m%3A90+t%3A3+f%3A%2150` +
+    `${CLIST}?pn=1&pz=30&po=1&np=1&${UT}&fltt=2&invt=2&fid=f3&fs=m%3A90+t%3A3+f%3A%2150` +
       "&fields=f12%2Cf14%2Cf3%2Cf6%2Cf104%2Cf105%2Cf128",
   ]);
   const top = recorded();
@@ -453,6 +453,36 @@ test("eastmoney: fetchMarketCounts reads page 1 first, then the rest together un
   // A first page with no data is no market data; a bad total is an invalid reply.
   await rejectsWith(fetchMarketCounts({ fetchImpl: async () => json({ rc: 0, data: null }) }), "NO_MARKET_DATA");
   await rejectsWith(fetchMarketCounts({ fetchImpl: async () => json({ rc: 0, data: { total: "x", diff: [] } }) }), "UPSTREAM_INVALID");
+});
+
+test("eastmoney: a later counts page that fails rejects the whole read, and the pages still queued are never sent", async () => {
+  // 20 rows of 2 a page: pages 2 to 5 take the four slots, page 3 answers HTML.
+  const asked: number[] = [];
+  const releases = new Map<number, () => void>();
+  const fetchImpl = async (url: string | URL) => {
+    const pn = Number(new URL(String(url)).searchParams.get("pn"));
+    asked.push(pn);
+    if (pn > 1) await new Promise<void>((resolve) => releases.set(pn, resolve));
+    if (pn === 3) return new Response("<html>busy</html>");
+    return json({ rc: 0, data: { total: 20, diff: [{ f3: 1 }, { f3: -1 }] } });
+  };
+  // The read rejects as soon as page 3 fails, so its refusal is awaited from the start.
+  const refused = rejectsWith(fetchMarketCounts({ fetchImpl, pageSize: 2 }), "UPSTREAM_INVALID");
+  const tick = () => new Promise((resolve) => setImmediate(resolve));
+  while (releases.size < 4) await tick();
+  assert.deepEqual(asked, [1, 2, 3, 4, 5]);
+  releases.get(3)?.();
+  await tick();
+  // The running pages finish; the slots they free go to pages that are skipped unsent.
+  for (const pn of [2, 4, 5]) {
+    releases.get(pn)?.();
+    await tick();
+  }
+  const error = await refused;
+  assert.match(error.message, /INVALID_RESPONSE/);
+  assert.deepEqual(asked, [1, 2, 3, 4, 5], "pages 6 to 10 never requested");
+  // The limiter is free again.
+  assert.equal(await inFlight(async () => "free"), "free");
 });
 
 test("eastmoney: the fixture fetch answers the boards, members, fund-flow and count-page files by fs", async () => {

@@ -108,32 +108,52 @@ export async function fetchEastmoneyJson(url, options = {}) {
 }
 
 /**
- * `fetchEastmoneyJson` with the body's bytes as received beside the parsed reply, for a page hash.
+ * A shared stop for a batch of requests: once one fails, `error` holds its refusal, and every
+ * request of the batch still waiting for a slot rejects with it without being sent.
+ * @typedef {{ error: unknown }} Abort
+ */
+
+/**
+ * `fetchEastmoneyJson` with the body's bytes as received beside the parsed reply, for a page hash,
+ * and an optional `abort` shared by a batch: a request that gets its slot after `abort.error` is set
+ * rejects with that error unsent, and a request that fails sets it. A request already running
+ * finishes.
  * @param {string} url
- * @param {{ fetchImpl?: FetchLike, timeoutMs?: number, maxBytes?: number }} [options]
+ * @param {{ fetchImpl?: FetchLike, timeoutMs?: number, maxBytes?: number, abort?: Abort }} [options]
  * @returns {Promise<{ json: Record<string, any>, host: string, delayed: boolean, bytes: Uint8Array }>}
  */
-function fetchEastmoneyReply(url, { fetchImpl = fetch, timeoutMs = 7000, maxBytes = 512 * 1024 } = {}) {
+function fetchEastmoneyReply(url, { fetchImpl = fetch, timeoutMs = 7000, maxBytes = 512 * 1024, abort } = {}) {
   return inFlight(async () => {
-    const asked = new URL(url);
-    let host = asked.host;
-    let reply = await get(asked.href, fetchImpl, timeoutMs, maxBytes);
-    if (REDIRECT_STATUSES.has(reply.status)) {
-      const target = delayTarget(asked, reply.headers.get("location"));
-      host = target.host;
-      reply = await get(target.href, fetchImpl, timeoutMs, maxBytes);
-      if (REDIRECT_STATUSES.has(reply.status)) throw invalid("REDIRECT_REFUSED");
-    }
-    let json;
+    if (abort?.error) throw abort.error;
     try {
-      json = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(reply.bytes));
-    } catch {
-      throw invalid("INVALID_RESPONSE");
+      return await request(url, fetchImpl, timeoutMs, maxBytes);
+    } catch (error) {
+      if (abort) abort.error ??= error;
+      throw error;
     }
-    if (json === null || typeof json !== "object" || Array.isArray(json)) throw invalid("INVALID_RESPONSE");
-    const delayed = host === DELAY_HOST || (typeof json.dlmkts === "string" && json.dlmkts !== "");
-    return { json, host, delayed, bytes: reply.bytes };
   });
+}
+
+/** One request and its one redirect, the body parsed as a JSON object; the caller holds a slot. */
+async function request(url, fetchImpl, timeoutMs, maxBytes) {
+  const asked = new URL(url);
+  let host = asked.host;
+  let reply = await get(asked.href, fetchImpl, timeoutMs, maxBytes);
+  if (REDIRECT_STATUSES.has(reply.status)) {
+    const target = delayTarget(asked, reply.headers.get("location"));
+    host = target.host;
+    reply = await get(target.href, fetchImpl, timeoutMs, maxBytes);
+    if (REDIRECT_STATUSES.has(reply.status)) throw invalid("REDIRECT_REFUSED");
+  }
+  let json;
+  try {
+    json = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(reply.bytes));
+  } catch {
+    throw invalid("INVALID_RESPONSE");
+  }
+  if (json === null || typeof json !== "object" || Array.isArray(json)) throw invalid("INVALID_RESPONSE");
+  const delayed = host === DELAY_HOST || (typeof json.dlmkts === "string" && json.dlmkts !== "");
+  return { json, host, delayed, bytes: reply.bytes };
 }
 
 // ---- the limit-up pools ----
@@ -352,14 +372,17 @@ function boardRow(raw) {
 }
 
 /**
- * The concept boards by turnover, the top `top`: AKShare's `stock_board_concept_name_em` query
- * sorted by 成交额 (`fid=f6`) instead of by code, its fields cut to the seven kept. A reply whose
+ * The concept boards by change, the top `top`: AKShare's `stock_board_concept_name_em` query
+ * sorted by 涨跌幅 (`fid=f3`, descending) instead of by code, its fields cut to the seven kept. Not
+ * by 成交额: ranked by turnover the list leads with membership and screen boards (融资融券,
+ * 昨日高振幅, 深股通, 基金增仓, 富时罗素 on a live check 2026-10-25), not 题材. `amount` stays in
+ * every row, so a board's turnover share is still derivable. A reply whose
  * `data` is null or whose list is empty refuses `NO_MARKET_DATA`.
  * @param {{ fetchImpl?: FetchLike, top?: number, timeoutMs?: number }} [options]
  */
 export async function fetchBoards({ fetchImpl = fetch, top = 30, timeoutMs = 7000 } = {}) {
   const url = clistUrl({
-    pn: "1", pz: String(top), po: "1", np: "1", ut: CLIST_UT, fltt: "2", invt: "2", fid: "f6",
+    pn: "1", pz: String(top), po: "1", np: "1", ut: CLIST_UT, fltt: "2", invt: "2", fid: "f3",
     fs: "m:90 t:3 f:!50", fields: "f12,f14,f3,f6,f104,f105,f128",
   });
   const { json, host, delayed } = await fetchEastmoneyJson(url, { fetchImpl, timeoutMs });
@@ -445,19 +468,33 @@ function countsUrl(pn, pageSize) {
  * response bytes as received, in page order. A row whose change is "-" (suspended) counts in none
  * of advancers, decliners and unchanged. `partial` is true when a page's `total` differs from page
  * 1's or the rows read fall short of it. A page 1 whose `data` is null or whose list is empty
- * refuses `NO_MARKET_DATA`; any page that fails otherwise fails the whole call.
+ * refuses `NO_MARKET_DATA`; any page that fails otherwise fails the whole call with that page's
+ * refusal, and the pages still waiting for a slot are never sent, so a failed read does not hold
+ * the shared limiter for its remaining pages.
  * @param {{ fetchImpl?: FetchLike, pageSize?: number, maxPages?: number, timeoutMs?: number }} [options]
  */
 export async function fetchMarketCounts({ fetchImpl = fetch, pageSize = 100, maxPages = 64, timeoutMs = 7000 } = {}) {
+  /** @type {Abort} */
+  const abort = { error: null };
   const read = async (pn) => {
-    const reply = await fetchEastmoneyReply(countsUrl(pn, pageSize), { fetchImpl, timeoutMs });
-    return { ...clistRows(reply.json, null), reply };
+    const reply = await fetchEastmoneyReply(countsUrl(pn, pageSize), { fetchImpl, timeoutMs, abort });
+    try {
+      return { ...clistRows(reply.json, null), reply };
+    } catch (error) {
+      abort.error ??= error;
+      throw error;
+    }
   };
   const first = await read(1);
   if (first.rows.length === 0) throw refuse.noMarketData(PROVIDER);
   const { total } = first;
   const pageCount = Math.min(Math.ceil(total / pageSize), maxPages);
-  const rest = await Promise.all(Array.from({ length: Math.max(pageCount - 1, 0) }, (_, i) => read(i + 2)));
+  let rest;
+  try {
+    rest = await Promise.all(Array.from({ length: Math.max(pageCount - 1, 0) }, (_, i) => read(i + 2)));
+  } catch (error) {
+    throw abort.error ?? error;
+  }
   const pages = [first, ...rest];
   const counts = { advancers: 0, decliners: 0, unchanged: 0, limitUp: 0, limitDown: 0 };
   let rows = 0;
