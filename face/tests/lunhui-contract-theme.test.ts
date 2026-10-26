@@ -7,117 +7,19 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { apply as applyRuns } from "../plugins/lunhui/runs-row.mjs";
-import * as indexRow from "../plugins/lunhui/freeze-index-row.mjs";
-import * as limitUpRow from "../plugins/lunhui/freeze-limit-up-row.mjs";
-import * as boardsRow from "../plugins/lunhui/freeze-boards-row.mjs";
 import * as themeRow from "../plugins/lunhui/theme-row.mjs";
 import { contract, HYPOTHESES } from "../plugins/lunhui/lib/contracts/theme.mjs";
 import { MAX_CONTEXT_BYTES, hypothesesVersion } from "../plugins/lunhui/lib/contract-core.mjs";
-import { LunhuiError } from "../plugins/lunhui/lib/runs.mjs";
+import {
+  ROLE, type Cleanup, type Source, type ToolDef, exec, fakeScope, frozenRun as freezeRun, idWhere, mount as mountRow, rejectsWith, rowsOf,
+} from "./lunhui-contract-harness.ts";
 
-type Cleanup = { after(fn: () => unknown): unknown };
-type ToolDef = { name: string; description: string; parameters: any; execute(args: unknown, exec: unknown): Promise<string> };
-type Source = "index" | "limit-up" | "boards";
-
-const TENCENT = fileURLToPath(new URL("./fixtures/lunhui/", import.meta.url));
-const EASTMONEY = fileURLToPath(new URL("./fixtures/lunhui-eastmoney/", import.meta.url));
-/** Friday 2026-10-23, 15:00 in China: after the close of a covered trading day. */
-const FRIDAY = new Date("2026-10-23T07:00:00.000Z");
-const ROLE = { origin: "subagent" };
-/** The boards the fixtures hold member lists for. */
-const BOARDS = ["BK0715", "BK1716"];
-
-async function strategiesRoot(t: Cleanup): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "lunhui-theme-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  for (const strategy of ["cn-market", "alpha"]) {
-    await mkdir(join(root, strategy));
-    await writeFile(join(root, strategy, "THESIS.md"), `# ${strategy}\n`);
-  }
-  return root;
-}
-
-/** One directory holding both fixture sets. */
-async function fixtures(t: Cleanup): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "lunhui-theme-fixtures-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  await cp(TENCENT, dir, { recursive: true });
-  await cp(EASTMONEY, dir, { recursive: true });
-  return dir;
-}
-
-function fakeScope(extra: Record<string, unknown> = {}) {
-  const provided: Array<[string, any]> = [];
-  const tools: ToolDef[] = [];
-  const ctx: any = {
-    ...extra,
-    effect(fn: () => unknown) { const d = fn(); assert.equal(typeof d, "function"); return d; },
-    provide(key: string, value: unknown) { provided.push([key, value]); return () => {}; },
-    tools: { register(def: ToolDef) { tools.push(def); return () => { tools.splice(tools.indexOf(def), 1); }; } },
-  };
-  return { ctx, provided, tools };
-}
-
-/** The backbone, the three market freezes over the fixtures, and the theme row's two tools. */
-async function mount(t: Cleanup, prepare?: (dir: string) => Promise<void>) {
-  const root = await strategiesRoot(t);
-  const dir = await fixtures(t);
-  await prepare?.(dir);
-  const backbone = fakeScope();
-  applyRuns(backbone.ctx, { strategiesRoot: root });
-  const service = backbone.provided[0][1];
-  const freeze: Record<string, ToolDef> = {};
-  for (const [source, row] of [["index", indexRow], ["limit-up", limitUpRow], ["boards", boardsRow]] as const) {
-    const scope = fakeScope({ lunhuiRuns: service });
-    row.apply(scope.ctx, { fetch: dir, now: () => FRIDAY });
-    freeze[source] = scope.tools[0];
-  }
-  const scope = fakeScope({ lunhuiRuns: service });
-  themeRow.apply(scope.ctx, {});
-  const [read, submit] = scope.tools;
-  return { root, service, freeze, read, submit };
-}
-
-function exec(header: Record<string, unknown> = {}) {
-  return { agent: { session: { header } }, signal: new AbortController().signal };
-}
-
-async function rejectsWith(promise: Promise<unknown>, code: string): Promise<LunhuiError> {
-  let refusal: any;
-  await assert.rejects(promise, (error: any) => {
-    assert.ok(error instanceof LunhuiError, `a LunhuiError, not ${error?.stack ?? error}`);
-    assert.equal(error.code, code);
-    assert.match(error.message, new RegExp(`^${code}: `));
-    refusal = error;
-    return true;
-  });
-  return refusal;
-}
-
+const mount = (t: Cleanup, prepare?: (dir: string) => Promise<void>) => mountRow(t, themeRow, prepare);
 /** A cn-market run frozen through the real rows, the sources in order. */
-async function frozenRun(freeze: Record<string, ToolDef>, sources: Source[] = ["boards", "limit-up"]) {
-  let run: string | undefined;
-  for (const source of sources) {
-    const args = { strategy: "cn-market", ...(run === undefined ? {} : { run }), ...(source === "boards" ? { boards: BOARDS } : {}) };
-    run = JSON.parse(await freeze[source].execute(args, exec())).run;
-  }
-  return run as string;
-}
-
-/** The context's rows by id, derived and evidence alike. */
-function rowsOf(context: any): any[] {
-  return [...context.derived, ...context.evidence];
-}
-const idWhere = (context: any, test: (row: any) => boolean) => {
-  const row = rowsOf(context).find(test);
-  assert.ok(row, "the context carries the row the test cites");
-  return row.id as string;
-};
+const frozenRun = (freeze: Record<string, ToolDef>, sources: Source[] = ["boards", "limit-up"], boards?: string[] | null) =>
+  freezeRun(freeze, sources, { boards });
 
 /** An artifact over `context` with the envelope copied and `fields` over an OK default. */
 function artifact(context: any, fields: Record<string, unknown>) {
@@ -172,6 +74,8 @@ test("theme contract: Chinese hypotheses restating THESIS.md hypothesis 3 with i
   assert.deepEqual(contract.sources, ["boards", "limit-up"]);
   assert.deepEqual(contract.exemptPaths, ["mainline_candidates[*].name"]);
   assert.match(JSON.stringify(contract.hints), /members_total/);
+  // The members item's own truncated (the source's cut at 100) is named apart from the context's list.
+  assert.match((contract.hints as any).members, /成分股证据自带的 truncated.*100.*顶层的 truncated/);
 });
 
 test("theme: a context over a real boards and limit-up freeze - OK expected, derived first, member lists cut to 20, at most 30 KiB - whose example is accepted", async (t) => {
@@ -185,7 +89,7 @@ test("theme: a context over a real boards and limit-up freeze - OK expected, der
   assert.equal(context.hypotheses_version, hypothesesVersion(HYPOTHESES));
   assert.deepEqual(context.derived.map((row: any) => row.source), [...Array(8).fill("boards"), ...Array(5).fill("limit-up")]);
   assert.deepEqual(context.evidence.map((row: any) => row.kind ?? row.pool), [
-    "board", "board", "board", "board", "flow", "flow", "flow", "flow", "members", "members", "zt", "zt", "zt", "zt", "zt", "zt",
+    "board", "board", "board", "board", "members", "members", "flow", "flow", "flow", "flow", "zt", "zt", "zt", "zt", "zt", "zt",
   ]);
   // A member list shows its first 20 members, members_total the frozen count.
   const file = JSON.parse(await readFile(join(root, "cn-market", "analysis", run, "evidence-boards.json"), "utf8"));
@@ -201,6 +105,8 @@ test("theme: a context over a real boards and limit-up freeze - OK expected, der
   for (const row of context.evidence.filter((row: any) => row.pool === "zt"))
     assert.deepEqual(Object.keys(row).sort(), ["boards", "code", "id", "industry", "name", "pool", "scope", "source"]);
   assert.deepEqual(context.truncated, [{ source: "limit-up", kind: "zb", count: 3 }, { source: "limit-up", kind: "yesterday", count: 5 }]);
+  // Derived items show how many inputs they read, not the ids.
+  for (const row of context.derived) assert.ok(row.inputs === undefined && Number.isInteger(row.inputs_total), row.measure);
   const example = context.example;
   assert.equal(example.status, "OK");
   assert.deepEqual([example.mainline_candidates, example.theme_stage, example.rotation], [[], "UNKNOWN", "UNKNOWN"]);
@@ -262,6 +168,34 @@ test("theme: a candidate must cite its frozen board and its members, under the b
   const refusal = await rejectsWith(submit.execute({ strategy: "cn-market", run, analysis: JSON.stringify(artifact(context, { mainline_candidates: [twice, twice], claims })) }, exec(ROLE)), "INVALID_ANALYSIS");
   assert.match(refusal.message, /^INVALID_ANALYSIS: \[REFERENCE\] analysis\.mainline_candidates\[1\]/u);
   assert.deepEqual((await service.readRun("cn-market", run)).metrics.rejections.theme, Array(6).fill("REFERENCE"));
+});
+
+test("theme: a stage and a rotation other than UNKNOWN each stand on a claim of their own citing a boards measure - REFERENCE otherwise", async (t) => {
+  const { freeze, read, submit } = await mount(t);
+  const run = await frozenRun(freeze);
+  const context = JSON.parse(await read.execute({ strategy: "cn-market", run }, exec(ROLE)));
+  const grid = boardIds(context, "BK0715");
+  const seal = idWhere(context, (row) => row.measure === "seal_ratio");
+  const cases: Array<[Record<string, unknown>, RegExp]> = [
+    // A board row is not a measure.
+    [{ theme_stage: "START", claims: [{ id: "c1", text: "示例电网的涨跌幅见所引证据。", basis: "CURRENT", evidence_ids: [grid.board] }] }, /theme_stage/],
+    // A limit-up measure is not a boards one.
+    [{ rotation: "ROTATING", claims: [{ id: "c1", text: "封板率见所引派生证据。", basis: "CURRENT", evidence_ids: [seal] }] }, /rotation/],
+    // An INSUFFICIENT claim stands for nothing.
+    [{ rotation: "NONE", claims: [
+      { id: "c1", text: "板块上涨占比见所引派生证据。", basis: "INSUFFICIENT", evidence_ids: [grid.breadth] },
+      { id: "c2", text: "示例电网的涨跌幅见所引证据。", basis: "CURRENT", evidence_ids: [grid.board] },
+    ] }, /rotation/],
+    // One claim cannot stand for both.
+    [{ theme_stage: "DIVERGE", rotation: "HIGH_LOW_SWITCH", claims: [
+      { id: "c1", text: "板块上涨占比与成交占比见所引派生证据。", basis: "CURRENT", evidence_ids: [grid.breadth, grid.share] },
+    ] }, /each need a claim of their own/],
+  ];
+  for (const [fields, field] of cases) {
+    const refusal = await rejectsWith(submit.execute({ strategy: "cn-market", run, analysis: JSON.stringify(artifact(context, fields)) }, exec(ROLE)), "INVALID_ANALYSIS");
+    assert.match(refusal.message, /^INVALID_ANALYSIS: \[REFERENCE\] /u);
+    assert.match(refusal.message, field);
+  }
 });
 
 test("theme: a 题材 sentence needs a derived item of the boards source - a board row or a limit-up measure alone is UNSUPPORTED_SCOPE", async (t) => {
@@ -327,6 +261,50 @@ test("theme: a full run - index, limit-up and boards frozen - fits 30 KiB; the i
   assert.equal(context.derived.length, 13);
   assert.equal(context.evidence.length, 16);
   assert.deepEqual(context.truncated, [{ source: "limit-up", kind: "zb", count: 3 }, { source: "limit-up", kind: "yesterday", count: 5 }]);
+});
+
+test("theme: a full run of thirty boards and ten member lists passes 30 KiB - the 涨停 rows, the flow and the later member lists go first, the top boards' rows and member lists stay", async (t) => {
+  // Thirty boards ranked by change, a member list of 100 (of 140) for each of the first ten, thirty flow rows.
+  const CODES = Array.from({ length: 30 }, (_, i) => `BK${2000 + i}`);
+  const widen = async (dir: string) => {
+    const boards = JSON.parse(await readFile(join(dir, "boards.json"), "utf8"));
+    const [board] = boards.data.diff;
+    boards.data.diff = CODES.map((code, i) => ({ ...board, f12: code, f14: `示例板块${i}`, f3: 9 - i * 0.3, f6: 1e10 - i * 1e8 }));
+    await writeFile(join(dir, "boards.json"), JSON.stringify(boards));
+    const flow = JSON.parse(await readFile(join(dir, "board-flow.json"), "utf8"));
+    const [row] = flow.data.diff;
+    flow.data.diff = CODES.map((code, i) => ({ ...row, f12: code, f14: `示例板块${i}`, f62: 1e9 - i * 1e8 }));
+    await writeFile(join(dir, "board-flow.json"), JSON.stringify(flow));
+    const members = JSON.parse(await readFile(join(dir, "members-BK1716.json"), "utf8"));
+    for (const [i, code] of CODES.slice(0, 10).entries()) {
+      members.data.diff = members.data.diff.map((member: any, j: number) => ({ ...member, f12: String(300000 + i * 1000 + j), f14: `示例成分${i}-${j}` }));
+      await writeFile(join(dir, `members-${code}.json`), JSON.stringify(members));
+    }
+  };
+  const { freeze, read, submit } = await mount(t, widen);
+  const run = await frozenRun(freeze, ["index", "limit-up", "boards"], null);
+  const text = await read.execute({ strategy: "cn-market", run }, exec(ROLE));
+  assert.ok(Buffer.byteLength(text, "utf8") <= MAX_CONTEXT_BYTES);
+  const context = JSON.parse(text);
+  assert.equal(context.derived.length, 65, "every derived item is shown");
+  // Every board row first, then the member lists in the freeze's order, the top boards' first.
+  const kinds = context.evidence.map((row: any) => row.kind ?? row.pool);
+  const lists = context.evidence.filter((row: any) => row.kind === "members");
+  assert.deepEqual(kinds, [...Array(30).fill("board"), ...Array(lists.length).fill("members")]);
+  assert.ok(lists.length >= 1 && lists.length < 10, `${lists.length} member lists shown`);
+  assert.deepEqual(lists.map((row: any) => [row.board, row.members.length]), CODES.slice(0, lists.length).map((code) => [code, 20]));
+  // What goes first: the later member lists, then every flow row and every 涨停 row; zb and yesterday are never asked for.
+  assert.deepEqual(context.truncated, [
+    { source: "boards", kind: "members", count: 10 - lists.length }, { source: "boards", kind: "flow", count: 30 },
+    { source: "limit-up", kind: "zt", count: 6 }, { source: "limit-up", kind: "zb", count: 3 }, { source: "limit-up", kind: "yesterday", count: 5 },
+  ]);
+  // A candidate on the top board can still cite its board row and member list.
+  const top = boardIds(context, "BK2000");
+  const analysis = artifact(context, {
+    mainline_candidates: [{ board: "BK2000", name: "示例板块0", evidence_ids: [top.board, top.members] }],
+    claims: [{ id: "c1", text: "示例板块0 的上涨占比见所引派生证据。", basis: "CURRENT", evidence_ids: [top.breadth] }],
+  });
+  assert.equal((await submitted(submit, run, analysis)).accepted, true);
 });
 
 test("theme: a strategy run is WRONG_CHANNEL", async (t) => {

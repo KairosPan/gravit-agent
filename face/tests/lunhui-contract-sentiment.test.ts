@@ -7,117 +7,18 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { apply as applyRuns } from "../plugins/lunhui/runs-row.mjs";
-import * as indexRow from "../plugins/lunhui/freeze-index-row.mjs";
-import * as limitUpRow from "../plugins/lunhui/freeze-limit-up-row.mjs";
-import * as boardsRow from "../plugins/lunhui/freeze-boards-row.mjs";
 import * as sentimentRow from "../plugins/lunhui/sentiment-row.mjs";
 import { contract, HYPOTHESES } from "../plugins/lunhui/lib/contracts/sentiment.mjs";
 import { MAX_CONTEXT_BYTES, hypothesesVersion } from "../plugins/lunhui/lib/contract-core.mjs";
-import { LunhuiError } from "../plugins/lunhui/lib/runs.mjs";
+import {
+  ROLE, type Cleanup, type Source, type ToolDef, exec, fakeScope, frozenRun as freezeRun, idWhere, mount as mountRow, rejectsWith, rowsOf,
+} from "./lunhui-contract-harness.ts";
 
-type Cleanup = { after(fn: () => unknown): unknown };
-type ToolDef = { name: string; description: string; parameters: any; execute(args: unknown, exec: unknown): Promise<string> };
-type Source = "index" | "limit-up" | "boards";
-
-const TENCENT = fileURLToPath(new URL("./fixtures/lunhui/", import.meta.url));
-const EASTMONEY = fileURLToPath(new URL("./fixtures/lunhui-eastmoney/", import.meta.url));
-/** Friday 2026-10-23, 15:00 in China: after the close of a covered trading day. */
-const FRIDAY = new Date("2026-10-23T07:00:00.000Z");
-const ROLE = { origin: "subagent" };
-/** The boards the fixtures hold member lists for. */
-const BOARDS = ["BK0715", "BK1716"];
-
-async function strategiesRoot(t: Cleanup): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "lunhui-sentiment-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  for (const strategy of ["cn-market", "alpha"]) {
-    await mkdir(join(root, strategy));
-    await writeFile(join(root, strategy, "THESIS.md"), `# ${strategy}\n`);
-  }
-  return root;
-}
-
-/** One directory holding both fixture sets. */
-async function fixtures(t: Cleanup): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "lunhui-sentiment-fixtures-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  await cp(TENCENT, dir, { recursive: true });
-  await cp(EASTMONEY, dir, { recursive: true });
-  return dir;
-}
-
-function fakeScope(extra: Record<string, unknown> = {}) {
-  const provided: Array<[string, any]> = [];
-  const tools: ToolDef[] = [];
-  const ctx: any = {
-    ...extra,
-    effect(fn: () => unknown) { const d = fn(); assert.equal(typeof d, "function"); return d; },
-    provide(key: string, value: unknown) { provided.push([key, value]); return () => {}; },
-    tools: { register(def: ToolDef) { tools.push(def); return () => { tools.splice(tools.indexOf(def), 1); }; } },
-  };
-  return { ctx, provided, tools };
-}
-
-/** The backbone, the three market freezes over the fixtures, and the sentiment row's two tools. */
-async function mount(t: Cleanup, prepare?: (dir: string) => Promise<void>) {
-  const root = await strategiesRoot(t);
-  const dir = await fixtures(t);
-  await prepare?.(dir);
-  const backbone = fakeScope();
-  applyRuns(backbone.ctx, { strategiesRoot: root });
-  const service = backbone.provided[0][1];
-  const freeze: Record<string, ToolDef> = {};
-  for (const [source, row] of [["index", indexRow], ["limit-up", limitUpRow], ["boards", boardsRow]] as const) {
-    const scope = fakeScope({ lunhuiRuns: service });
-    row.apply(scope.ctx, { fetch: dir, now: () => FRIDAY });
-    freeze[source] = scope.tools[0];
-  }
-  const scope = fakeScope({ lunhuiRuns: service });
-  sentimentRow.apply(scope.ctx, {});
-  const [read, submit] = scope.tools;
-  return { root, service, freeze, read, submit };
-}
-
-function exec(header: Record<string, unknown> = {}) {
-  return { agent: { session: { header } }, signal: new AbortController().signal };
-}
-
-async function rejectsWith(promise: Promise<unknown>, code: string): Promise<LunhuiError> {
-  let refusal: any;
-  await assert.rejects(promise, (error: any) => {
-    assert.ok(error instanceof LunhuiError, `a LunhuiError, not ${error?.stack ?? error}`);
-    assert.equal(error.code, code);
-    assert.match(error.message, new RegExp(`^${code}: `));
-    refusal = error;
-    return true;
-  });
-  return refusal;
-}
-
+const mount = (t: Cleanup, prepare?: (dir: string) => Promise<void>) => mountRow(t, sentimentRow, prepare);
 /** A cn-market run frozen through the real rows, the sources in order. */
-async function frozenRun(freeze: Record<string, ToolDef>, sources: Source[] = ["index", "limit-up"]) {
-  let run: string | undefined;
-  for (const source of sources) {
-    const args = { strategy: "cn-market", ...(run === undefined ? {} : { run }), ...(source === "boards" ? { boards: BOARDS } : {}) };
-    run = JSON.parse(await freeze[source].execute(args, exec())).run;
-  }
-  return run as string;
-}
-
-/** The context's rows by id, derived and evidence alike. */
-function rowsOf(context: any): any[] {
-  return [...context.derived, ...context.evidence];
-}
-const idWhere = (context: any, test: (row: any) => boolean) => {
-  const row = rowsOf(context).find(test);
-  assert.ok(row, "the context carries the row the test cites");
-  return row.id as string;
-};
+const frozenRun = (freeze: Record<string, ToolDef>, sources: Source[] = ["index", "limit-up"]) => freezeRun(freeze, sources);
 const measure = (context: any, name: string) => idWhere(context, (row) => row.measure === name);
 
 /** An artifact over `context` with the envelope copied and `fields` over an OK default. */
@@ -159,7 +60,8 @@ test("sentiment contract: Chinese hypotheses restating THESIS.md hypothesis 2 wi
   assert.equal(properties.conflict.maxLength, 200);
   assert.deepEqual(contract.schema.required, ["state", "money_effect", "freeze_type"]);
   assert.deepEqual(contract.owns, ["sentiment", "market"]);
-  assert.equal(contract.ownedBy, undefined, "the default carrier: a derived item");
+  // 情绪 keeps the default carrier, a derived item; 全市场 rests on the counts or an index measure.
+  assert.deepEqual(Object.keys(contract.ownedBy as object), ["market"]);
   assert.deepEqual(contract.required, ["limit-up", "index"]);
   assert.deepEqual(contract.sources, ["limit-up", "index"]);
   assert.match(JSON.stringify(contract.hints), /conflict/);
@@ -193,6 +95,10 @@ test("sentiment: a context over a real index and limit-up freeze - OK expected, 
   assert.equal(example.status, "OK");
   assert.deepEqual([example.state, example.money_effect, example.freeze_type], ["UNKNOWN", "UNKNOWN", "UNKNOWN"]);
   assert.equal(typeof example.conflict, "string");
+  // The conflict shows the format only: no measure a role could copy unobserved.
+  assert.doesNotMatch(example.conflict, /[a-z]+_[a-z]+/);
+  // Derived items show how many inputs they read, not the ids.
+  for (const row of context.derived) assert.ok(row.inputs === undefined && Number.isInteger(row.inputs_total), row.measure);
   assert.equal(example.claims.length, 1);
   assert.equal(example.claims[0].basis, "INSUFFICIENT");
   assert.ok(rowsOf(context).some((row) => row.id === example.claims[0].evidence_ids[0]));
@@ -255,6 +161,41 @@ test("sentiment: a state other than UNKNOWN needs two limit-up ids and one index
   assert.equal((await submitted(submit, run, rows)).accepted, true);
 });
 
+test("sentiment: a money effect and a freeze reading other than UNKNOWN each stand on a claim of their own citing a limit-up measure - REFERENCE otherwise", async (t) => {
+  const { freeze, read, submit } = await mount(t);
+  const run = await frozenRun(freeze);
+  const context = JSON.parse(await read.execute({ strategy: "cn-market", run }, exec(ROLE)));
+  const median = measure(context, "yesterday_return_median");
+  const seal = measure(context, "seal_ratio");
+  const ratio = measure(context, "advance_decline_ratio");
+  const zt = idWhere(context, (row) => row.pool === "zt");
+  const cases: Array<[Record<string, unknown>, RegExp]> = [
+    // An index measure is not a limit-up one.
+    [{ money_effect: "POSITIVE", claims: [{ id: "c1", text: "上涨与下跌家数之比见所引派生证据。", basis: "CURRENT", evidence_ids: [ratio] }] }, /money_effect/],
+    // A pool row is not a measure.
+    [{ freeze_type: "NONE", claims: [{ id: "c1", text: "涨停池首行见所引证据。", basis: "CURRENT", evidence_ids: [zt] }] }, /freeze_type/],
+    // An INSUFFICIENT claim stands for nothing.
+    [{ freeze_type: "ICE_POINT", claims: [
+      { id: "c1", text: "封板率见所引派生证据。", basis: "INSUFFICIENT", evidence_ids: [seal] },
+      { id: "c2", text: "涨停池首行见所引证据。", basis: "CURRENT", evidence_ids: [zt] },
+    ] }, /freeze_type/],
+    // One claim cannot stand for both.
+    [{ money_effect: "NEGATIVE", freeze_type: "POST_ICE", claims: [
+      { id: "c1", text: "封板率与昨日涨停股收益中位数见所引派生证据。", basis: "CURRENT", evidence_ids: [seal, median] },
+    ] }, /each need a claim of their own/],
+  ];
+  for (const [fields, field] of cases) {
+    const refusal = await rejectsWith(submit.execute({ strategy: "cn-market", run, analysis: JSON.stringify(artifact(context, fields)) }, exec(ROLE)), "INVALID_ANALYSIS");
+    assert.match(refusal.message, /^INVALID_ANALYSIS: \[REFERENCE\] /u);
+    assert.match(refusal.message, field);
+  }
+  const apart = artifact(context, { money_effect: "NEGATIVE", freeze_type: "POST_ICE", claims: [
+    { id: "c1", text: "昨日涨停股收益中位数见所引派生证据。", basis: "CURRENT", evidence_ids: [median] },
+    { id: "c2", text: "封板率见所引派生证据。", basis: "CURRENT", evidence_ids: [seal] },
+  ] });
+  assert.equal((await submitted(submit, run, apart)).accepted, true);
+});
+
 test("sentiment: UNKNOWN in an OK artifact needs a conflict naming the indicators - SCHEMA without one", async (t) => {
   const { freeze, read, submit } = await mount(t);
   const run = await frozenRun(freeze);
@@ -277,12 +218,37 @@ test("sentiment: owned sentences need a derived id - 情绪 citing pool rows alo
     { claims: [{ id: "c1", text: "情绪进入扩张。", basis: "CURRENT", evidence_ids: zt.slice(0, 2) }] },
     { claims: [{ id: "c1", text: "题材集中在少数板块。", basis: "CURRENT", evidence_ids: [seal] }] },
     { conflict: "情绪读数相互矛盾。" },
+    // A whole-market sentence rests on the counts or an index measure, not on a pool's measure.
+    { claims: [{ id: "c1", text: "全市场上涨与下跌家数之比偏高。", basis: "CURRENT", evidence_ids: [seal] }] },
   ];
   for (const fields of cases) {
     const analysis = artifact(context, { claims: [{ id: "c1", text: "封板率见所引派生证据。", basis: "CURRENT", evidence_ids: [seal] }], ...fields });
     const refusal = await rejectsWith(submit.execute({ strategy: "cn-market", run, analysis: JSON.stringify(analysis) }, exec(ROLE)), "INVALID_ANALYSIS");
     assert.match(refusal.message, /^INVALID_ANALYSIS: \[UNSUPPORTED_SCOPE\] /u);
   }
+});
+
+test("sentiment: a whole-market sentence citing the all-shares counts is accepted", async (t) => {
+  const { freeze, read, submit } = await mount(t);
+  const run = await frozenRun(freeze);
+  const context = JSON.parse(await read.execute({ strategy: "cn-market", run }, exec(ROLE)));
+  const counts = idWhere(context, (row) => row.kind === "counts");
+  const analysis = artifact(context, { claims: [{ id: "c1", text: "全市场上涨与下跌的家数见所引计数。", basis: "CURRENT", evidence_ids: [counts] }] });
+  assert.equal((await submitted(submit, run, analysis)).accepted, true);
+});
+
+test("sentiment: a run without index evidence expects NOT_EVALUABLE naming index - an OK artifact refused, the example accepted", async (t) => {
+  const { freeze, read, submit } = await mount(t);
+  const run = await frozenRun(freeze, ["limit-up"]);
+  const context = JSON.parse(await read.execute({ strategy: "cn-market", run }, exec(ROLE)));
+  assert.equal(context.status_expected, "NOT_EVALUABLE");
+  assert.deepEqual(context.missing, ["index"]);
+  assert.deepEqual(context.example.missing_sources, ["index"]);
+  const seal = measure(context, "seal_ratio");
+  const ok = artifact(context, { claims: [{ id: "c1", text: "封板率见所引派生证据。", basis: "CURRENT", evidence_ids: [seal] }] });
+  const refusal = await rejectsWith(submit.execute({ strategy: "cn-market", run, analysis: JSON.stringify(ok) }, exec(ROLE)), "INVALID_ANALYSIS");
+  assert.match(refusal.message, /^INVALID_ANALYSIS: \[SCHEMA\] /u);
+  assert.equal((await submitted(submit, run, context.example)).accepted, true);
 });
 
 test("sentiment: a run without limit-up evidence expects NOT_EVALUABLE - an OK artifact refused, the example accepted", async (t) => {

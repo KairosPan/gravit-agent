@@ -1,118 +1,25 @@
 /**
  * The Lunhui environment module (modules spec §5.4, §5.6, A20, A21): its contract
- * (`lib/contracts/environment.mjs`) and its row (`environment-row.mjs`), mounted on the stand-in
- * scope of tests/lunhui-rows.test.ts beside a real `lunhui-runs` service and the real index and
+ * (`lib/contracts/environment.mjs`) and its row (`environment-row.mjs`), mounted through
+ * tests/lunhui-contract-harness.ts beside a real `lunhui-runs` service and the real index and
  * quotes freeze rows over a temp copy of the Tencent and Eastmoney fixtures, so every evidence item
  * the context carries is the shape a freeze writes. Nothing reaches the network.
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { apply as applyRuns } from "../plugins/lunhui/runs-row.mjs";
-import * as indexRow from "../plugins/lunhui/freeze-index-row.mjs";
-import * as quotesRow from "../plugins/lunhui/freeze-quotes-row.mjs";
 import * as environmentRow from "../plugins/lunhui/environment-row.mjs";
 import { contract, HYPOTHESES } from "../plugins/lunhui/lib/contracts/environment.mjs";
 import { MAX_CONTEXT_BYTES, hypothesesVersion } from "../plugins/lunhui/lib/contract-core.mjs";
-import { LunhuiError } from "../plugins/lunhui/lib/runs.mjs";
+import {
+  ROLE, type Cleanup, type Source, type ToolDef, exec, fakeScope, frozenRun as freezeRun, idWhere, mount as mountRow, rejectsWith, rowsOf,
+} from "./lunhui-contract-harness.ts";
 
-type Cleanup = { after(fn: () => unknown): unknown };
-type ToolDef = { name: string; description: string; parameters: any; execute(args: unknown, exec: unknown): Promise<string> };
-
-const TENCENT = fileURLToPath(new URL("./fixtures/lunhui/", import.meta.url));
-const EASTMONEY = fileURLToPath(new URL("./fixtures/lunhui-eastmoney/", import.meta.url));
-/** Friday 2026-10-23, 15:00 in China: after the close of a covered trading day. */
-const FRIDAY = new Date("2026-10-23T07:00:00.000Z");
-const ROLE = { origin: "subagent" };
-
-async function strategiesRoot(t: Cleanup): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "lunhui-environment-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  for (const strategy of ["cn-market", "alpha"]) {
-    await mkdir(join(root, strategy));
-    await writeFile(join(root, strategy, "THESIS.md"), `# ${strategy}\n`);
-  }
-  return root;
-}
-
-/** One directory holding both fixture sets. */
-async function fixtures(t: Cleanup): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "lunhui-environment-fixtures-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  await cp(TENCENT, dir, { recursive: true });
-  await cp(EASTMONEY, dir, { recursive: true });
-  return dir;
-}
-
-function fakeScope(extra: Record<string, unknown> = {}) {
-  const provided: Array<[string, any]> = [];
-  const tools: ToolDef[] = [];
-  const ctx: any = {
-    ...extra,
-    effect(fn: () => unknown) { const d = fn(); assert.equal(typeof d, "function"); return d; },
-    provide(key: string, value: unknown) { provided.push([key, value]); return () => {}; },
-    tools: { register(def: ToolDef) { tools.push(def); return () => { tools.splice(tools.indexOf(def), 1); }; } },
-  };
-  return { ctx, provided, tools };
-}
-
-/** The backbone, the index and quotes freezes over the fixtures, and the environment row's two tools. */
-async function mount(t: Cleanup) {
-  const root = await strategiesRoot(t);
-  const dir = await fixtures(t);
-  const backbone = fakeScope();
-  applyRuns(backbone.ctx, { strategiesRoot: root });
-  const service = backbone.provided[0][1];
-  const freeze: Record<string, ToolDef> = {};
-  for (const [source, row] of [["index", indexRow], ["quotes", quotesRow]] as const) {
-    const scope = fakeScope({ lunhuiRuns: service });
-    row.apply(scope.ctx, { fetch: dir, now: () => FRIDAY });
-    freeze[source] = scope.tools[0];
-  }
-  const scope = fakeScope({ lunhuiRuns: service });
-  environmentRow.apply(scope.ctx, {});
-  const [read, submit] = scope.tools;
-  return { root, service, freeze, read, submit };
-}
-
-function exec(header: Record<string, unknown> = {}) {
-  return { agent: { session: { header } }, signal: new AbortController().signal };
-}
-
-async function rejectsWith(promise: Promise<unknown>, code: string): Promise<LunhuiError> {
-  let refusal: any;
-  await assert.rejects(promise, (error: any) => {
-    assert.ok(error instanceof LunhuiError, `a LunhuiError, not ${error?.stack ?? error}`);
-    assert.equal(error.code, code);
-    assert.match(error.message, new RegExp(`^${code}: `));
-    refusal = error;
-    return true;
-  });
-  return refusal;
-}
-
+const mount = (t: Cleanup) => mountRow(t, environmentRow);
 /** A cn-market run frozen through the real rows: index, then quotes unless `index` alone is asked for. */
-async function frozenRun(freeze: Record<string, ToolDef>, sources: Array<"index" | "quotes"> = ["index", "quotes"], symbols = ["sh000001", "sh600519"]) {
-  let run: string | undefined;
-  for (const source of sources) {
-    const args = { strategy: "cn-market", ...(run === undefined ? {} : { run }), ...(source === "quotes" ? { symbols } : {}) };
-    run = JSON.parse(await freeze[source].execute(args, exec())).run;
-  }
-  return run as string;
-}
-
-/** The context's rows by id, derived and evidence alike. */
-function rowsOf(context: any): any[] {
-  return [...context.derived, ...context.evidence];
-}
-const idWhere = (context: any, test: (row: any) => boolean) => {
-  const row = rowsOf(context).find(test);
-  assert.ok(row, "the context carries the row the test cites");
-  return row.id as string;
-};
+const frozenRun = (freeze: Record<string, ToolDef>, sources: Source[] = ["index", "quotes"], symbols?: string[]) =>
+  freezeRun(freeze, sources, { symbols });
 
 /** An artifact over `context` with the envelope copied and `fields` over an OK default. */
 function artifact(context: any, fields: Record<string, unknown>) {

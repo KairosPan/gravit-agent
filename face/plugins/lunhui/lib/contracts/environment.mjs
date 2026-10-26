@@ -10,6 +10,7 @@
  * `contract` object; the shared rules are `contract-core.mjs`'s.
  */
 import { fail } from "../contract-core.mjs";
+import { exampleOf } from "./shared.mjs";
 
 /** The bars of a series a context shows: the last 20; the frozen file keeps them all. */
 const BARS_SHOWN = 20;
@@ -92,41 +93,16 @@ function rules(parsed, context) {
 }
 
 /**
- * The first id in the digest whose entry `test` accepts, or undefined.
- * @param {import("../contract-core.mjs").ContextDigest} digest
- * @param {(entry: import("../contract-core.mjs").DigestItem) => boolean} test
- */
-function firstId(digest, test) {
-  for (const [id, entry] of digest.items) if (test(entry)) return id;
-  return undefined;
-}
-
-/**
- * The context's example, built from the digest's own ids: `NOT_EVALUABLE` naming the missing
- * sources when any is, else `OK` with UNKNOWN headlines and one INSUFFICIENT claim citing one of
- * the digest's ids - a format a role cannot copy as a judgment it never made.
+ * The context's example (`exampleOf`): UNKNOWN headlines and, in an OK run, one INSUFFICIENT claim
+ * citing the sh000001 index quote when frozen - a format a role cannot copy as a judgment.
  * @param {import("../contract-core.mjs").ContextDigest} digest
  */
 function example(digest) {
-  const envelope = {
-    module: digest.module, contract_version: digest.contract_version, hypotheses_version: digest.hypotheses_version,
-    snapshot_id: digest.snapshot_id, run: digest.run, as_of: digest.as_of, session: digest.session,
-  };
-  const unknown = { index_state: "UNKNOWN", liquidity_state: "UNKNOWN", cycle_anchor: "UNKNOWN" };
-  if (digest.missing.length > 0)
-    return {
-      ...envelope, status: "NOT_EVALUABLE", missing_sources: [...digest.missing], ...unknown,
-      claims: [], limitations: [`缺少 ${digest.missing.join("、")} 证据，无法评估。`],
-    };
-  // No judgment to copy: UNKNOWN headlines and one INSUFFICIENT claim citing one id of the digest.
-  const cited =
-    firstId(digest, (entry) => isIndexRow(entry) && entry.kind === "index" && entry.item.symbol === "sh000001") ??
-    firstId(digest, () => true);
-  const claims = cited === undefined ? [] : [{
-    id: "c1", basis: "INSUFFICIENT", evidence_ids: [cited],
-    text: "示例：所引证据只示格式；按读数改写本声明的 basis 与文字，再填标题字段。",
-  }];
-  return { ...envelope, status: "OK", missing_sources: [], ...unknown, claims, limitations: [] };
+  return exampleOf(
+    digest,
+    { index_state: "UNKNOWN", liquidity_state: "UNKNOWN", cycle_anchor: "UNKNOWN" },
+    (entry) => isIndexRow(entry) && entry.kind === "index" && entry.item.symbol === "sh000001",
+  );
 }
 
 /** A bars or history row cut to its last `BARS_SHOWN` bars, the frozen count beside them. */

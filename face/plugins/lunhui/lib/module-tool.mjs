@@ -32,7 +32,7 @@ import { MODULE_NAMES } from "./modules.mjs";
  *   ownedBy?: Record<string, (entry: import("./contract-core.mjs").DigestItem) => boolean>, exemptPaths?: string[],
  *   rules?: (parsed: any, context: import("./contract-core.mjs").ContextDigest) => void,
  *   hypotheses: string, hints: string, example: (digest: import("./contract-core.mjs").ContextDigest) => unknown,
- *   sources: string[], required: string[], derivedFirst?: string[],
+ *   sources: string[], required: string[], derivedFirst?: string[], derivedView?: (item: any) => Record<string, unknown>,
  *   priority: { source: string, kind: string, order?: (a: any, b: any) => number, view?: (item: any) => Record<string, unknown> }[],
  * }} ModuleContract
  */
@@ -106,7 +106,7 @@ export function defineModule({ module, channel, contract, runs }) {
         return await runs.readContext(strategy, args.run, module, ({ manifest, evidence }, located) => {
           const { text, digest } = buildContext({
             module, run: manifest.run, manifest, evidence,
-            sources: contract.sources, derivedFirst: contract.derivedFirst, priority: contract.priority,
+            sources: contract.sources, derivedFirst: contract.derivedFirst, derivedView: contract.derivedView, priority: contract.priority,
             hypotheses: contract.hypotheses, schema: contract.schema, hints: contract.hints,
             example: contract.example, required: contract.required,
           });

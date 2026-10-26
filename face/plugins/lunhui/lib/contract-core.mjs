@@ -474,15 +474,16 @@ function checkEnvelope(raw, { module, context, schema, owns = [], ownedBy = {}, 
  * `view`. Each row is added whole, derived items first, until the next would pass the cap; from
  * there every row is left out, as is every row no entry asks for, each counted in `truncated` as
  * `{ source, kind, count }`. Every item of the module's sources stays citable, shown or not.
+ * `derivedView`, when given, shapes every derived item shown, as a priority entry's `view` its rows.
  * `example` is the built example, or a function of the digest that builds it.
  * @param {{ module: string, run: string, manifest: { snapshot_id?: string | null, as_of?: string | null, session?: string | null,
  *   evidence: { source: string }[] }, evidence: { source: string, session: string | null, items: Record<string, any>[] }[],
- *   sources: string[], derivedFirst?: string[], priority: { source: string, kind: string, order?: (a: any, b: any) => number,
+ *   sources: string[], derivedFirst?: string[], derivedView?: (item: any) => Record<string, unknown>, priority: { source: string, kind: string, order?: (a: any, b: any) => number,
  *   view?: (item: any) => Record<string, unknown> }[], hypotheses: string, schema: { required?: string[], properties?: Record<string, unknown> },
  *   hints: unknown, example: unknown, required: string[] }} options
  * @returns {{ text: string, digest: ContextDigest }}
  */
-export function buildContext({ module, run, manifest, evidence, sources, derivedFirst = [], priority, hypotheses, schema, hints, example, required }) {
+export function buildContext({ module, run, manifest, evidence, sources, derivedFirst = [], derivedView, priority, hypotheses, schema, hints, example, required }) {
   const frozen = new Set(manifest.evidence.map((entry) => entry.source));
   const missing = required.filter((source) => !frozen.has(source));
   const session = manifest.session ?? null;
@@ -504,7 +505,7 @@ export function buildContext({ module, run, manifest, evidence, sources, derived
   const shown = (entry, view) => ({ id: entry.item.id, source: entry.source, scope: entry.scope, ...(view ? view(entry.item) : entry.item) });
   const sourceOrder = [...new Set([...derivedFirst, ...sources])];
   const derivedRows = sourceOrder.flatMap((source) =>
-    all.filter(([, entry]) => entry.kind === "derived" && entry.source === source).map(([, entry]) => ({ entry, row: shown(entry) })));
+    all.filter(([, entry]) => entry.kind === "derived" && entry.source === source).map(([, entry]) => ({ entry, row: shown(entry, derivedView) })));
   const asked = new Set();
   const priorityRows = priority.flatMap(({ source, kind, order, view }) => {
     const matched = all.map(([, entry]) => entry).filter((entry) => entry.source === source && entry.kind === kind && entry.kind !== "derived");

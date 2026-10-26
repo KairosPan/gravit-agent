@@ -6,11 +6,14 @@
  * `rotation`. Each candidate stands on a frozen board: it cites that board's `board` item and its
  * `members` item, and its `name` is the board's frozen name - so the name, data of the freeze, is
  * carved out of the forbidden-word and scope rules (`exemptPaths`), and a code the run did not
- * freeze is `REFERENCE`. The module owns the theme assertion class (题材, 主线, 轮动), carried by a
- * derived item of the boards source. `lib/module-tool.mjs` consumes the `contract` object; the
+ * freeze is `REFERENCE`. A `theme_stage` or `rotation` other than `UNKNOWN` stands on a claim of its
+ * own citing a boards derived item. The module owns the theme assertion class (题材, 主线, 轮动),
+ * carried by a derived item of the boards source. Derived items are shown with their inputs
+ * counted, not listed: each `turnover_share` cites every fetched board. `lib/module-tool.mjs` consumes the `contract` object; the
  * shared rules are `contract-core.mjs`'s.
  */
 import { fail } from "../contract-core.mjs";
+import { exampleOf, inputsCounted, ownClaims } from "./shared.mjs";
 
 /** The members a context shows of a board's list: the first 20; the frozen file keeps them all. */
 const MEMBERS_SHOWN = 20;
@@ -26,17 +29,21 @@ const HINTS = {
   mainline_candidates:
     "0–5 个主线候选，每个 { board, name, evidence_ids }：board 是本运行已冻结的板块代码（BK 加四位数字），evidence_ids 至少引用该板块的 board 证据与它的 members 证据（同一代码），可再引用它的 breadth、turnover_share；同一板块只列一次；没有把握时给空列表。",
   name: "name 照抄该板块 board 证据的 name，一字不改；它是冻结的数据，不受用词检查，所以只写板块名，不写判断。",
-  theme_stage: "START、FERMENT、DIVERGE、CLIMAX、FADE、CHAOS 或 UNKNOWN：题材所处阶段（启动、发酵、分歧、高潮、退潮、混沌）。",
-  rotation: "NONE、HIGH_LOW_SWITCH、NEW_DIRECTION、ROTATING 或 UNKNOWN：轮动方向（无、高低切换、新方向、轮转）。",
+  theme_stage:
+    "START、FERMENT、DIVERGE、CLIMAX、FADE、CHAOS 或 UNKNOWN：题材所处阶段（启动、发酵、分歧、高潮、退潮、混沌）；不是 UNKNOWN 时，须有一条不为 INSUFFICIENT 的声明引用一条 boards 的派生量，且不是支撑 rotation 的那一条。",
+  rotation:
+    "NONE、HIGH_LOW_SWITCH、NEW_DIRECTION、ROTATING 或 UNKNOWN：轮动方向（无、高低切换、新方向、轮转）；不是 UNKNOWN 时，须有一条不为 INSUFFICIENT 的声明引用一条 boards 的派生量，且不是支撑 theme_stage 的那一条。",
   claims:
     "每条声明写一个事实并引用证据编号；含“题材、主线、板块轮动、轮动”的句子须同时引用一条 boards 的派生证据（breadth 或 turnover_share）。本模块不写情绪、全市场、龙头、指数类断言。" +
     "turnover_share 在文字里写作“成交占比”，不写“成交额”：那是本模块不拥有的指数类断言，会被拒绝。",
   basis:
     "CURRENT 指本运行的交易日（上下文 session），须至少引用一条 scope 为 CURRENT 的证据；更早交易日的证据一律 HISTORICAL，文字不用“当前、今日”等词；证据不足用 INSUFFICIENT，此时标题字段写 UNKNOWN。",
-  members: `成分股只列前 ${MEMBERS_SHOWN} 只，members_total 是冻结的只数（truncated 为 true 时上游已截到 100 只）；证据编号指整条列表。涨停池只列代码、名称、连板数与所属行业；炸板池与昨日涨停未列出，计入 truncated。`,
+  members:
+    `成分股只列前 ${MEMBERS_SHOWN} 只，members_total 是冻结的只数；证据编号指整条列表。成分股证据自带的 truncated 字段为 true，表示来源只给了前 100 只、冻结时已被截断；它与上下文顶层的 truncated 列表（本摘要因 30 KiB 上限未列出的行，按来源与种类计数）是两回事。` +
+    "涨停池只列代码、名称、连板数与所属行业；炸板池与昨日涨停未列出，计入顶层 truncated。派生量只列输入的条数 inputs_total，不列输入的编号。",
   status: "status_expected 为 NOT_EVALUABLE 时照 example 提交：missing_sources 照抄 missing，mainline_candidates 为空列表，其余标题字段为 UNKNOWN。",
   example:
-    "example 只示格式：没有候选，标题字段为 UNKNOWN，声明为 INSUFFICIENT，不是判断。列出主线候选，须引用该板块的 board 与 members 证据，并有引用 boards 派生证据的声明。",
+    "example 只示格式：没有候选，标题字段为 UNKNOWN，声明为 INSUFFICIENT，不是判断。列出主线候选，须引用该板块的 board 与 members 证据；theme_stage、rotation 各需一条自己的、引用 boards 派生证据的声明。",
 };
 
 const SCHEMA = {
@@ -79,7 +86,8 @@ function boardsItem(context, kind, field, code) {
 
 /**
  * The module's own rules, after the shared ones: each candidate names a board the run froze, with
- * its member list, cites both items, carries the board's own name, and no board twice.
+ * its member list, cites both items, carries the board's own name, and no board twice; a stage or a
+ * rotation other than UNKNOWN each on a claim of its own citing a boards derived item.
  */
 function rules(parsed, context) {
   const seen = new Set();
@@ -96,41 +104,19 @@ function rules(parsed, context) {
     if (seen.has(candidate.board)) fail(`${path}.board: one candidate per board; this board evidence reference is named twice.`);
     seen.add(candidate.board);
   }
+  ownClaims(parsed, context, [
+    { field: "theme_stage", test: carriesTheme, needs: "a boards derived item" },
+    { field: "rotation", test: carriesTheme, needs: "a boards derived item" },
+  ]);
 }
 
 /**
- * The first id in the digest whose entry `test` accepts, or undefined.
- * @param {import("../contract-core.mjs").ContextDigest} digest
- * @param {(entry: import("../contract-core.mjs").DigestItem) => boolean} test
- */
-function firstId(digest, test) {
-  for (const [id, entry] of digest.items) if (test(entry)) return id;
-  return undefined;
-}
-
-/**
- * The context's example, built from the digest's own ids: `NOT_EVALUABLE` naming the missing
- * sources when any is, else `OK` with no candidate, UNKNOWN headlines and one INSUFFICIENT claim
- * citing one of the digest's ids.
+ * The context's example (`exampleOf`): no candidate, UNKNOWN headlines and, in an OK run, one
+ * INSUFFICIENT claim citing a boards derived item.
  * @param {import("../contract-core.mjs").ContextDigest} digest
  */
 function example(digest) {
-  const envelope = {
-    module: digest.module, contract_version: digest.contract_version, hypotheses_version: digest.hypotheses_version,
-    snapshot_id: digest.snapshot_id, run: digest.run, as_of: digest.as_of, session: digest.session,
-  };
-  const unknown = { mainline_candidates: [], theme_stage: "UNKNOWN", rotation: "UNKNOWN" };
-  if (digest.missing.length > 0)
-    return {
-      ...envelope, status: "NOT_EVALUABLE", missing_sources: [...digest.missing], ...unknown,
-      claims: [], limitations: [`缺少 ${digest.missing.join("、")} 证据，无法评估。`],
-    };
-  const cited = firstId(digest, carriesTheme) ?? firstId(digest, () => true);
-  const claims = cited === undefined ? [] : [{
-    id: "c1", basis: "INSUFFICIENT", evidence_ids: [cited],
-    text: "示例：所引证据只示格式；按读数改写本声明的 basis 与文字，再填标题字段。",
-  }];
-  return { ...envelope, status: "OK", missing_sources: [], ...unknown, claims, limitations: [] };
+  return exampleOf(digest, { mainline_candidates: [], theme_stage: "UNKNOWN", rotation: "UNKNOWN" }, carriesTheme);
 }
 
 /** A member list cut to its first `MEMBERS_SHOWN` members, the frozen count beside them. */
@@ -156,10 +142,12 @@ export const contract = {
   sources: ["boards", "limit-up"],
   required: ["boards", "limit-up"],
   derivedFirst: ["boards"],
+  derivedView: inputsCounted,
   priority: [
     { source: "boards", kind: "board" },
-    { source: "boards", kind: "flow" },
+    // A candidate cites its board and its member list: both before the fund flow, which only adds to them.
     { source: "boards", kind: "members", view: firstMembers },
+    { source: "boards", kind: "flow" },
     { source: "limit-up", kind: "zt", view: ztIndustry },
   ],
 };

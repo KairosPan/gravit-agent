@@ -405,6 +405,18 @@ test("buildContext: a priority entry's order and view shape its rows; an example
   assert.deepEqual(parsed.example, { cite: sealRatio.id });
 });
 
+test("buildContext: derivedView shapes every derived item shown; the item stays citable whole", () => {
+  const { text, digest } = context({ derivedView: ({ inputs, ...item }: Loose) => ({ ...item, inputs_total: inputs.length }) });
+  const parsed = JSON.parse(text);
+  const seal = parsed.derived.find((item: Loose) => item.id === sealRatio.id);
+  assert.equal(seal.inputs, undefined);
+  assert.equal(seal.inputs_total, 2);
+  assert.equal(parsed.derived.find((item: Loose) => item.id === advance.id).inputs_total, 0);
+  assert.deepEqual(digest.items.get(sealRatio.id).item.inputs, sealRatio.inputs);
+  // Without it a derived item is shown as frozen.
+  assert.deepEqual(JSON.parse(context().text).derived.find((item: Loose) => item.id === sealRatio.id).inputs, sealRatio.inputs);
+});
+
 test("buildContext: when the truncated list itself would pass the cap, the last rows added are given back", () => {
   const rows = Array.from({ length: 400 }, (_, i) => withId({ pool: "zt", code: String(600000 + i), name: "某股".repeat(20), boards: 1 }));
   const kept = (extra: Loose[]) => {
