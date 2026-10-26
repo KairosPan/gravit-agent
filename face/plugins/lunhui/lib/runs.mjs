@@ -24,7 +24,8 @@
  * source into an open run and lists it in `run.json`, `sealRun` fixes the run's `as_of` and
  * `snapshot_id`, after which no evidence lands, and `readRun` reads both files back, `metrics.json`
  * fail-open (A7). For the modules, `readEvidence` reads one source's file back under its own cap,
- * and `writeArtifact` lands a module's artifact and names it in `run.json` (A10).
+ * and `writeArtifact` lands a module's artifact and names it in `run.json` (A10); for the mode,
+ * `listRuns` names a strategy's runs and `readThesis` reads its THESIS.md (A11).
  *
  * A refusal is a `LunhuiError` whose message opens with its stable code - `NOT_A_STRATEGY`,
  * `BAD_RUN_ID`, `NO_SUCH_RUN`, `RUN_EXISTS`, and for the run's states `RUN_SEALED`,
@@ -53,7 +54,7 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import { constants } from "node:fs";
-import { access, lstat, mkdir, open, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { access, lstat, mkdir, open, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { basename, join, resolve, sep } from "node:path";
 import { hash } from "./contract.mjs";
 import { MODULE_NAMES } from "./modules.mjs";
@@ -250,6 +251,42 @@ export async function resolveStrategy(root, name) {
   if (!dir) throw new LunhuiError("NOT_A_STRATEGY", NOT_A_STRATEGY.directory);
   if (!(await readableFile(join(dir, "THESIS.md")))) throw new LunhuiError("NOT_A_STRATEGY", NOT_A_STRATEGY.thesis);
   return { name: basename(dir), dir };
+}
+
+/**
+ * The run ids under the strategy's `analysis/`, unsorted, for a module reading the strategy's
+ * earlier runs (A11, A12: the mode's previous card): each entry's name in `RUN_ID_RE`, unchecked -
+ * `resolveRun` checks the one a caller reads. None when `analysis/` is missing, a link or not a
+ * directory. `NO_SUCH_RUN` when the strategy directory is no longer the real directory
+ * `resolveStrategy` returned.
+ * @param {string} strategyDir the directory `resolveStrategy` returned
+ * @returns {Promise<string[]>}
+ */
+export async function listRuns(strategyDir) {
+  if (!(await stillResolved(strategyDir))) throw noSuchRun();
+  const analysis = await directoryInside(join(strategyDir, "analysis"), strategyDir);
+  if (!analysis) return [];
+  return (await readdir(analysis)).filter((name) => RUN_ID_RE.test(name));
+}
+
+/** The largest THESIS.md `readThesis` reads. */
+const MAX_THESIS_BYTES = 64 * 1024;
+
+/**
+ * The strategy's THESIS.md as UTF-8 text (A11: the mode reads its falsification terms), through
+ * `readText`'s checks on the strategy directory - still itself, O_NOFOLLOW, a regular file with one
+ * link - at most 64 KiB; null when the file is missing, unusable or larger, or the directory is no
+ * longer the one `resolveStrategy` returned: a module shows no terms rather than refusing.
+ * @param {string} strategyDir the directory `resolveStrategy` returned
+ * @returns {Promise<string | null>}
+ */
+export async function readThesis(strategyDir) {
+  try {
+    return await readBounded(strategyDir, "THESIS.md", MAX_THESIS_BYTES);
+  } catch (error) {
+    if (error instanceof LunhuiError) return null;
+    throw error;
+  }
 }
 
 /**

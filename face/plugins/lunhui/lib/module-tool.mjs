@@ -44,15 +44,21 @@ const tables = loadCalendars();
  *   schema: { required?: string[], properties?: Record<string, unknown> }, owns: string[],
  *   ownedBy?: Record<string, (entry: import("./contract-core.mjs").DigestItem) => boolean>, exemptPaths?: string[],
  *   rules?: (parsed: any, context: import("./contract-core.mjs").ContextDigest) => void,
+ *   unknownHeadline?: (field: string, value: unknown) => boolean,
  *   hypotheses: string, hints: unknown, example: (digest: import("./contract-core.mjs").ContextDigest) => unknown,
  *   sources: string[], required: string[], derivedFirst?: string[], derivedView?: (item: any) => Record<string, unknown>,
  *   priority: { source: string, kind: string, order?: (a: any, b: any) => number,
  *     view?: (item: any, digest: import("./contract-core.mjs").ContextDigest) => Record<string, unknown>,
  *     filter?: (item: any, digest: import("./contract-core.mjs").ContextDigest) => boolean }[],
  *   marketRun?: "required" | "optional", marketSources?: string[], marketArtifacts?: string[], runArtifacts?: string[],
+ *   derivedFilter?: (item: any, digest: import("./contract-core.mjs").ContextDigest) => boolean,
+ *   extra?: (runs: import("../runs-row.mjs").LunhuiRuns, located: { strategy: string, run: string }) => Promise<Record<string, unknown>>,
  * }} ModuleContract
- * `marketSources`, `marketArtifacts` and `runArtifacts` are `buildContext`'s: the cited run's sources
- * and accepted artifacts the module reads, and its own run's accepted artifacts.
+ * `marketSources`, `marketArtifacts`, `runArtifacts` and `derivedFilter` are `buildContext`'s: the
+ * cited run's sources and accepted artifacts the module reads, its own run's accepted artifacts, and
+ * the derived items it shows. `extra`, read inside the read's `build` - the run sealed, under its
+ * mutex, so it reads other runs and the strategy without a lock - gives `buildContext`'s `extra`.
+ * `unknownHeadline` is `validateEnvelope`'s.
  */
 
 /**
@@ -145,11 +151,13 @@ export function defineModule({ module, channel, contract, runs }) {
         const asked = marketRunOf(args.market_run);
         return await runs.readContext(strategy, args.run, module, async ({ manifest, evidence, artifacts }, located) => {
           const market = asked === undefined ? null : await citedRun(runs, asked, manifest.session ?? null);
+          const extra = contract.extra === undefined ? undefined : await contract.extra(runs, located);
           const { text, digest } = buildContext({
             module, run: manifest.run, manifest, evidence,
             sources: contract.sources, derivedFirst: contract.derivedFirst, derivedView: contract.derivedView, priority: contract.priority,
             hypotheses: contract.hypotheses, schema: contract.schema, hints: contract.hints,
             example: contract.example, required: contract.required, runArtifacts: contract.runArtifacts, artifacts,
+            derivedFilter: contract.derivedFilter, extra,
             ...(marketRun === undefined ? {} : { marketRun, market, marketSources: contract.marketSources, marketArtifacts: contract.marketArtifacts }),
           });
           digests.set(`${located.strategy}/${located.run}/${module}`, digest);
@@ -181,7 +189,7 @@ export function defineModule({ module, channel, contract, runs }) {
           // A row reload while the service lives on: the read is remembered, its digest is not.
           if (context === undefined) throw refuse.readFirst(module);
           return validateEnvelope(text, { module, context, schema: contract.schema, owns: contract.owns, ownedBy: contract.ownedBy,
-            exemptPaths: contract.exemptPaths, rules: contract.rules,
+            exemptPaths: contract.exemptPaths, unknownHeadline: contract.unknownHeadline, rules: contract.rules,
           });
         });
         // Accepted: ALREADY_SUBMITTED keeps every later submit from the digest, so it goes.

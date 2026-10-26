@@ -698,6 +698,52 @@ test("lunhui-runs: readSealedRun refuses an open run MISSING_EVIDENCE, a missing
   assert.equal(inside.run, run);
 });
 
+// The mode's reads beside its run (modules spec A11, A12): the strategy's previous card and THESIS.md.
+
+test("lunhui-runs: previousArtifact returns the newest earlier sealed run whose named artifact accept takes - open, unnamed, refused, later and other-strategy runs passed over", async (t) => {
+  const root = await strategiesRoot(t);
+  const { service } = mounted(root);
+  // Runs opened a few milliseconds apart: earlier is by the run id's second, then opened_at.
+  const open = async (strategy = "alpha") => {
+    await new Promise((resolve) => setTimeout(resolve, 3));
+    return (await service.openRun(strategy, "strategy")).run as string;
+  };
+  const mode = async (strategy: string, run: string, artifact: unknown, { seal = true, named = true } = {}) => {
+    const sealed = seal ? await service.sealRun(strategy, run) : null;
+    const dir = join(root, strategy, "analysis", run);
+    if (named) await nameArtifacts(dir, ["mode"]);
+    await writeFile(join(dir, "mode.json"), JSON.stringify(artifact));
+    return sealed?.snapshot_id;
+  };
+  const oldest = await open();
+  await mode("alpha", oldest, { card: 1 });
+  const older = await open();
+  const olderSnapshot = await mode("alpha", older, { card: 2 });
+  await mode("alpha", await open(), { card: null });
+  await mode("alpha", await open(), { card: 3 }, { named: false });
+  await mode("alpha", await open(), { card: 4 }, { seal: false });
+  await mode("beta", await open("beta"), { card: 5 });
+  const current = await open();
+  await mode("alpha", await open(), { card: 6 });
+  const accept = (artifact: any) => artifact.card !== null;
+  assert.deepEqual(await service.previousArtifact("alpha", current, "mode", accept), { run: older, snapshot_id: olderSnapshot, session: null, artifact: { card: 2 } });
+  assert.equal(await service.previousArtifact("alpha", oldest, "mode", accept), null);
+  // Nothing counted, nothing sealed: the run asking is only read.
+  const { manifest, metrics } = await service.readRun("alpha", current);
+  assert.deepEqual([manifest.sealed_at, metrics.calls], [null, {}]);
+  await rejectsWith(service.previousArtifact("alpha", "../x", "mode"), "BAD_RUN_ID");
+  await assert.rejects(service.previousArtifact("alpha", current, "nope"), TypeError);
+});
+
+test("lunhui-runs: readThesis returns the strategy's THESIS.md text, null past 64 KiB", async (t) => {
+  const root = await strategiesRoot(t);
+  const { service } = mounted(root);
+  assert.equal(await service.readThesis("alpha"), "# alpha\n");
+  await writeFile(join(root, "beta", "THESIS.md"), "x".repeat(64 * 1024 + 1));
+  assert.equal(await service.readThesis("beta"), null);
+  await rejectsWith(service.readThesis("gamma"), "NOT_A_STRATEGY");
+});
+
 test("lunhui-runs: readContext hands build the run's accepted artifacts, only those run.json names", async (t) => {
   const root = await strategiesRoot(t);
   const { service } = mounted(root);

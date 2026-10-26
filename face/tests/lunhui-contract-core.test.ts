@@ -251,13 +251,20 @@ test("exemptPaths: the strings at those paths skip the forbidden words and the s
 });
 
 test("a rejection carries its category and the module repair, never stage 0's", () => {
-  assert.deepEqual(Object.keys(MODULE_REPAIRS), Object.keys(VALIDATION_REPAIRS));
+  // Stage 0's seven, then the mode module's two, OTHER last.
+  const shared = Object.keys(VALIDATION_REPAIRS).filter((key) => key !== "OTHER");
+  assert.deepEqual(Object.keys(MODULE_REPAIRS), [...shared, "INADMISSIBLE_STATE", "UNADDRESSED_COUNTEREVIDENCE", "OTHER"]);
   assert.ok(Object.isFrozen(MODULE_REPAIRS));
   for (const [key, text] of Object.entries(MODULE_REPAIRS)) {
     assert.notEqual(text, (VALIDATION_REPAIRS as Loose)[key], key);
-    assert.doesNotMatch(text, /universe|WAIT/, key);
+    // WAIT is the mode's no-conclusion: only its two repairs name it.
+    assert.doesNotMatch(text, shared.includes(key) || key === "OTHER" ? /universe|WAIT/ : /universe/, key);
+    assert.match(text, /[\u4e00-\u9fff]/u, key);
     assert.equal(repairFor(key), text);
   }
+  // The mode's two categories, by their messages' tokens, before REFERENCE's wording.
+  assert.equal(classifyValidationRejection(new Error("analysis.mode: Inadmissible state; S01 admits REPAIR, not CLIMAX.")), "INADMISSIBLE_STATE");
+  assert.equal(classifyValidationRejection(new Error("analysis.addressed: Unaddressed counterevidence; x2, no evidence reference.")), "UNADDRESSED_COUNTEREVIDENCE");
   assert.equal(repairFor("NO_SUCH_CATEGORY"), MODULE_REPAIRS.OTHER);
   const { digest } = context();
   for (const [overrides, expected] of [
@@ -679,4 +686,44 @@ test("validateEnvelope with a cited run: an artifact id in free text is read who
   assert.equal(category(() => checkCiting(citing(digest, { limitations: [`theme@snap_${"c".repeat(64)}，待核。`] }), digest)), "REFERENCE");
   // 65 hex digits name no snapshot, so the scan takes no id from them, the known one's prefix included.
   checkCiting(citing(digest, { limitations: [`sentiment@${MARKET_SNAP}0 不是工件编号。`] }), digest);
+});
+
+test("validateEnvelope: unknownHeadline names a module's own no-conclusion values for the INSUFFICIENT and NOT_EVALUABLE rules", () => {
+  const schema = { type: "object", required: ["state"], properties: { state: { enum: ["UNKNOWN", "EXPANSION", "WAIT"] } } };
+  const insufficient = { state: "WAIT", claims: [{ id: "c1", text: "示例。", basis: "INSUFFICIENT", evidence_ids: [sealRatio.id] }] };
+  assert.equal(category(() => check(artifact(context().digest, insufficient), { schema })), "TIME_SCOPE");
+  const unknownHeadline = (field: string, value: unknown) => field === "state" && value === "WAIT";
+  check(artifact(context().digest, insufficient), { schema, unknownHeadline });
+  const { digest } = context({ required: ["limit-up", "index", "quotes"] });
+  const notEvaluable = { status: "NOT_EVALUABLE", missing_sources: ["quotes"], state: "WAIT", claims: [] };
+  assert.equal(category(() => check(artifact(digest, notEvaluable), { schema, context: digest })), "SCHEMA");
+  check(artifact(digest, notEvaluable), { schema, context: digest, unknownHeadline });
+  // Any other value still asserts.
+  assert.equal(category(() => check(artifact(digest, { ...notEvaluable, state: "EXPANSION" }), { schema, context: digest, unknownHeadline })), "SCHEMA");
+});
+
+test("buildContext: derivedFilter keeps the derived items shown - one it drops is counted in truncated and stays citable", () => {
+  const { text, digest } = context({ sources: ["limit-up", "index", "boards"], derivedFilter: (item: Loose, seen: Loose) => {
+    assert.equal(seen.module, "sentiment");
+    return item.source !== "boards";
+  } });
+  const shown = JSON.parse(text);
+  assert.deepEqual(shown.derived.map((row: Loose) => row.id), [sealRatio.id, advance.id]);
+  assert.ok(shown.truncated.some((row: Loose) => row.source === "boards" && row.kind === "derived" && row.count === 1));
+  assert.ok(digest.evidenceIds.has(boardBreadth.id));
+});
+
+test("buildContext: extra fields are shown before the hypotheses and kept on the digest for hints and example", () => {
+  const extra = { strategy: "alpha", previous: null, falsification: "不是见涨就算修复。" };
+  const { text, digest } = context({ extra, hints: (seen: Loose) => ({ strategy: seen.extra.strategy }), example: (seen: Loose) => ({ previous: seen.extra.previous }) });
+  const shown = JSON.parse(text);
+  const keys = Object.keys(shown);
+  assert.deepEqual(keys.slice(keys.indexOf("missing") + 1, keys.indexOf("hypotheses")), ["strategy", "previous", "falsification"]);
+  assert.deepEqual([shown.strategy, shown.previous, shown.falsification], ["alpha", null, "不是见涨就算修复。"]);
+  assert.deepEqual([shown.hints, shown.example], [{ strategy: "alpha" }, { previous: null }]);
+  assert.equal(digest.extra, extra);
+  // Without extra, the context is as before and the digest's extra empty.
+  const plain = context();
+  assert.ok(!("strategy" in JSON.parse(plain.text)));
+  assert.deepEqual(plain.digest.extra, {});
 });

@@ -9,7 +9,9 @@
  * For the module rows it reads a module's context - sealing the run on the first read (A4) - and
  * takes a module's one artifact (A10), each call counted against the module's budget (A7), and
  * remembers in this process which module read which run, the submit's `READ_FIRST` (§5.7). And it
- * reads a sealed run whole for a module citing it (A5, A27), `readSealedRun`, taking no lock.
+ * reads a sealed run whole for a module citing it (A5, A27), `readSealedRun`, taking no lock; and,
+ * for the mode (A11, A12), the strategy's newest earlier accepted artifact of a module,
+ * `previousArtifact`, and its THESIS.md, `readThesis`, both lockless.
  *
  * The service takes strategy names and run ids, never paths, and returns none: every method
  * resolves its arguments under `config.strategiesRoot` through `runs.mjs` (D4′), whose refusals it
@@ -41,6 +43,8 @@ const ARTIFACT_MAX_BYTES = 24 * 1024;
  *   sealRun(strategyName: unknown, run: unknown): Promise<import("./lib/runs.mjs").RunManifest>,
  *   readRun(strategyName: unknown, run: unknown): Promise<{ manifest: import("./lib/runs.mjs").RunManifest, metrics: import("./lib/runs.mjs").RunMetrics, metricsReset: boolean }>,
  *   readSealedRun(strategyName: unknown, run: unknown): Promise<SealedRun>,
+ *   previousArtifact(strategyName: unknown, run: unknown, module: string, accept?: (artifact: Record<string, unknown>) => boolean): Promise<PreviousArtifact | null>,
+ *   readThesis(strategyName: unknown): Promise<string | null>,
  *   withRun<T>(strategyName: unknown, run: unknown, fn: (located: { strategy: string, run: string, dir: string }) => Promise<T>): Promise<T>,
  *   countFreeze(strategyName: unknown, run: unknown): Promise<number>,
  *   readContext<T>(strategyName: unknown, run: unknown, module: string, build: (input: ContextInput, located: { strategy: string, run: string }) => T | Promise<T>): Promise<T>,
@@ -60,6 +64,26 @@ const ARTIFACT_MAX_BYTES = 24 * 1024;
  * and its accepted artifacts, as `readContext` hands a `build` its own run's.
  * @typedef {{ strategy: string, run: string } & ContextInput} SealedRun
  */
+
+/**
+ * What `previousArtifact` returns: the earlier run's on-disk id, its snapshot id and session, and
+ * the artifact.
+ * @typedef {{ run: string, snapshot_id: string | null, session: string | null, artifact: Record<string, unknown> }} PreviousArtifact
+ */
+
+/** The earlier runs `previousArtifact` reads at most: the last 50 before the run. */
+const PREVIOUS_RUNS = 50;
+
+/**
+ * Whether run `a` opened before run `b`: by `opened_at` - run ids order by the second, two runs of
+ * one second by the random hex - then by run id.
+ * @param {{ run: string, opened_at?: unknown }} a
+ * @param {{ run: string, opened_at?: unknown }} b
+ */
+function openedBefore(a, b) {
+  const [x, y] = [String(a.opened_at ?? ""), String(b.opened_at ?? "")];
+  return x < y || (x === y && a.run < b.run);
+}
 
 /**
  * The service over one strategies root.
@@ -132,6 +156,57 @@ export function createLunhuiRuns(strategiesRoot) {
       const { manifest } = await runs.readRun(located.dir);
       if (!manifest.sealed_at) throw refuse.missingEvidence("引用的运行");
       return { strategy: located.strategy, run: located.run, ...(await contentsOf(located.dir, manifest)) };
+    },
+    /**
+     * The strategy's newest earlier run whose accepted `module` artifact `accept` takes (A11, A12:
+     * the mode's previous card), or null. Earlier is by the run-id order, ties within one second by
+     * `opened_at`, so of the last 50 runs before `run` - the run ids no later in their second -
+     * those sealed whose `run.json` `artifacts[]` names the module are read newest first, each
+     * artifact through `readArtifact`; a run that is missing, unusable or gone is passed over. No
+     * lock is taken: an earlier sealed run's `artifacts[]` only grows, and an artifact lands whole
+     * by its rename. Nothing is counted or written.
+     */
+    async previousArtifact(strategyName, run, module, accept = () => true) {
+      const entry = MODULES.find((candidate) => candidate.name === module);
+      if (entry === undefined) throw new TypeError(`lunhui: a module is one of MODULES, not ${JSON.stringify(module)}`);
+      const strategy = await runs.resolveStrategy(strategiesRoot, strategyName);
+      const current = await runs.resolveRun(strategy.dir, run);
+      const self = { run: current.run, opened_at: (await runs.readRun(current.dir)).manifest.opened_at };
+      const second = (id) => id.slice(0, 16);
+      const ids = (await runs.listRuns(strategy.dir))
+        .filter((id) => id !== current.run && second(id) <= second(current.run))
+        .sort()
+        .reverse()
+        .slice(0, PREVIOUS_RUNS);
+      const earlier = [];
+      for (const id of ids) {
+        try {
+          const located = await runs.resolveRun(strategy.dir, id);
+          const { manifest } = await runs.readRun(located.dir);
+          const named = Array.isArray(manifest.artifacts) && manifest.artifacts.includes(module);
+          const at = { run: located.run, opened_at: manifest.opened_at };
+          if (manifest.sealed_at && named && openedBefore(at, self)) earlier.push({ at, dir: located.dir, manifest });
+        } catch (error) {
+          if (!(error instanceof runs.LunhuiError)) throw error;
+        }
+      }
+      earlier.sort((a, b) => (openedBefore(a.at, b.at) ? 1 : -1));
+      for (const { at, dir, manifest } of earlier) {
+        let artifact;
+        try {
+          artifact = await readArtifact(dir, entry);
+        } catch (error) {
+          if (!(error instanceof runs.LunhuiError)) throw error;
+          continue;
+        }
+        if (artifact !== null && accept(artifact))
+          return { run: at.run, snapshot_id: manifest.snapshot_id ?? null, session: manifest.session ?? null, artifact };
+      }
+      return null;
+    },
+    /** The strategy's THESIS.md (`runs.mjs`'s `readThesis`): text, or null. `NOT_A_STRATEGY` as `resolveStrategy`. */
+    async readThesis(strategyName) {
+      return runs.readThesis((await runs.resolveStrategy(strategiesRoot, strategyName)).dir);
     },
     /**
      * Run `fn` alone on the run: one in-process mutex per `<strategy>/<run>`, keyed by the on-disk

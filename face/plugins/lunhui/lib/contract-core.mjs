@@ -134,6 +134,10 @@ export function classifyValidationRejection(error) {
     return "EXECUTION_CONTENT";
   if (/Unsupported whole-market, theme, or leadership assertion/i.test(message))
     return "UNSUPPORTED_SCOPE";
+  // The mode module's two (spec §5.6, A6, A22): a conclusion its cited state does not admit, and an
+  // accepted counterevidence artifact it leaves unanswered.
+  if (/Inadmissible state/i.test(message)) return "INADMISSIBLE_STATE";
+  if (/Unaddressed counterevidence/i.test(message)) return "UNADDRESSED_COUNTEREVIDENCE";
   if (
     /historical|non-current|CURRENT claim|Insufficient evidence requires WAIT|Insufficient evidence requires UNKNOWN|WATCH requires usable|WATCH conclusion/i.test(
       message,
@@ -162,7 +166,8 @@ export function classifyValidationRejection(error) {
 /**
  * The repair hints a module's rejection carries, by the classifier's categories: module-neutral,
  * naming the envelope, the evidence ids, the time scope, the owned assertion classes, the status and
- * the byte budget. Stage 0's `VALIDATION_REPAIRS` stays with `validateAnalysis`.
+ * the byte budget; and the mode module's two, an inadmissible conclusion and an unaddressed
+ * counterevidence item. Stage 0's `VALIDATION_REPAIRS` stays with `validateAnalysis`.
  */
 export const MODULE_REPAIRS = Object.freeze({
   SCHEMA:
@@ -177,6 +182,10 @@ export const MODULE_REPAIRS = Object.freeze({
     "删除交易方向、价位目标、仓位、账户或下单内容及对应术语，免责声明里也不复述；只保留证据事实、资料缺口和核验步骤。",
   BYTE_LIMIT:
     "压缩到 24 KiB 以内：缩短声明与限制说明，只保留必要事实和证据编号。",
+  INADMISSIBLE_STATE:
+    "S01、S02 只能在本策略可登记的模式、引用的市场运行情绪状态在该模式的准入集合内、且所需来源都已冻结时登记；否则结论写 WAIT，expectation 写 null。",
+  UNADDRESSED_COUNTEREVIDENCE:
+    "S01、S02 须本运行已有被接受的反证工件，并在 addressed 里按编号逐条回应它的每一项（item 照抄 x 编号）；没有反证工件时结论写 WAIT。",
   OTHER:
     "按被指出的字段逐项修正，不添加无依据的内容；资料不足时标题字段用 UNKNOWN。",
 });
@@ -367,7 +376,8 @@ function rowKind(item) {
  * for the market run's, `<module>` for this run's own - and `artifactIds` the ids of those the
  * context shows, the citable ones. `market_run` and `market_snapshot_id` are own fields only of a
  * module citing a market run (`marketRun`), null when an optional one was not given; `market` is
- * the cited run's names, or null. `artifactCitable` says a claim may cite an artifact id.
+ * the cited run's names, or null. `artifactCitable` says a claim may cite an artifact id. `extra`
+ * holds a module's own fields read beside the run (`buildContext`'s `extra`).
  * @typedef {{ source: string, kind: string, scope: "CURRENT" | "HISTORICAL", item: Record<string, unknown> }} DigestItem
  * @typedef {{ module: string, source: string, scope: "CURRENT" | "HISTORICAL", artifact: Record<string, any> }} DigestArtifact
  * @typedef {{ module: string, contract_version: string, hypotheses_version: string, run: string,
@@ -375,7 +385,7 @@ function rowKind(item) {
  *   evidenceIds: Set<string>, derivedIds: Set<string>, items: Map<string, DigestItem>,
  *   labelAllow: string[], market: { run: string, snapshot_id: string | null, session: string | null } | null,
  *   market_run?: string | null, market_snapshot_id?: string | null, artifactCitable: boolean,
- *   artifacts: Map<string, DigestArtifact>, artifactIds: Set<string> }} ContextDigest
+ *   artifacts: Map<string, DigestArtifact>, artifactIds: Set<string>, extra?: Record<string, any> }} ContextDigest
  */
 
 /**
@@ -388,11 +398,14 @@ function rowKind(item) {
  * @param {unknown} raw the submitted artifact, JSON text or a parsed object
  * @param {{ module: string, context: ContextDigest, schema: { required?: string[], properties?: Record<string, unknown> },
  *   owns?: string[], ownedBy?: Record<string, (entry: DigestItem) => boolean>, exemptPaths?: string[],
+ *   unknownHeadline?: (field: string, value: unknown) => boolean,
  *   rules?: (parsed: any, context: ContextDigest) => void }} options
  * `ownedBy[class]` names the cited items that carry an owned class's sentence; a class without
  * an entry needs a derived item (A21). `exemptPaths` names the strings - paths under the artifact,
  * `[*]` for any index, as `mainline_candidates[*].name` - that skip the forbidden words and the
  * scope rule, for names a module's own `rules` bind to frozen items; their evidence ids still bind.
+ * `unknownHeadline(field, value)` names a module's own headline values that assert nothing beside
+ * UNKNOWN, null and empty - the mode's `WAIT` - for the INSUFFICIENT and NOT_EVALUABLE rules.
  * A rejection (code `INVALID_ANALYSIS`, the module's own rules' included) carries its `category`,
  * through `classifyValidationRejection`, and that category's `repair` from `MODULE_REPAIRS`.
  * @returns {any} the artifact, parsed and copied
@@ -422,7 +435,7 @@ function exemptMatcher(paths) {
 }
 
 /** `validateEnvelope`'s rules, in order. */
-function checkEnvelope(raw, { module, context, schema, owns = [], ownedBy = {}, exemptPaths = [], rules }) {
+function checkEnvelope(raw, { module, context, schema, owns = [], ownedBy = {}, exemptPaths = [], unknownHeadline, rules }) {
   const entry = MODULES.find((candidate) => candidate.name === module);
   if (!entry || !context) throw new TypeError(`lunhui: no contract context for module ${JSON.stringify(module)}`);
   let artifact = raw;
@@ -437,6 +450,7 @@ function checkEnvelope(raw, { module, context, schema, owns = [], ownedBy = {}, 
   if (bytes(artifact) > MAX_ANALYSIS_BYTES) fail("Analysis exceeds its byte budget.");
   const market = Object.hasOwn(context, "market_run");
   const citable = context.artifactCitable === true;
+  const blank = (field) => isUnknown(artifact[field]) || unknownHeadline?.(field, artifact[field]) === true;
   checkSchema(artifact, envelopeSchema(schema, { market, artifacts: citable }));
 
   for (const field of market ? [...ENVELOPE_BOUND, ...MARKET_BOUND] : ENVELOPE_BOUND)
@@ -462,7 +476,7 @@ function checkEnvelope(raw, { module, context, schema, owns = [], ownedBy = {}, 
     if (claim.basis === "HISTORICAL" && CURRENT_WORDS.test(claim.text))
       fail(`${path}: Non-current evidence was described as current.`);
   }
-  if (artifact.claims.length > 0 && artifact.claims.every((claim) => claim.basis === "INSUFFICIENT") && !entry.headline.every((field) => isUnknown(artifact[field])))
+  if (artifact.claims.length > 0 && artifact.claims.every((claim) => claim.basis === "INSUFFICIENT") && !entry.headline.every(blank))
     fail("analysis: Insufficient evidence requires UNKNOWN headline values.");
 
   for (const [path, text] of entries) {
@@ -497,7 +511,7 @@ function checkEnvelope(raw, { module, context, schema, owns = [], ownedBy = {}, 
     }
   }
 
-  if (artifact.status === "NOT_EVALUABLE" && (artifact.missing_sources.length === 0 || !entry.headline.every((field) => isUnknown(artifact[field]))))
+  if (artifact.status === "NOT_EVALUABLE" && (artifact.missing_sources.length === 0 || !entry.headline.every(blank)))
     fail("analysis.status: NOT_EVALUABLE requires missing sources and UNKNOWN headline values.");
   // The sources named missing are the run's, none more, none left out (missing_sources is unique).
   if (
@@ -525,6 +539,11 @@ function checkEnvelope(raw, { module, context, schema, owns = [], ownedBy = {}, 
  * `{ source, kind, count }`. Every item of the module's sources stays citable, shown or not.
  * `derivedView`, when given, is the whole row of every derived item shown - its `id` included, no
  * `source` or `scope` added, the derived section implying them; the digest keeps every field.
+ * `derivedFilter(item, digest)`, when given, keeps the derived items shown, as a priority entry's
+ * `filter` keeps rows: one it drops is counted in `truncated` and stays citable.
+ * `extra`, a module's own fields read beside the run (the mode's strategy, falsification terms and
+ * previous card), is shown as top-level context fields before `hypotheses` and kept as the
+ * digest's `extra`, for its hints, example and rules.
  * `hints` and `example` are each the built value, or a function of the digest that builds it.
  *
  * A module citing a market run (`marketRun`, `"required"` or `"optional"`) hands the cited run as
@@ -547,12 +566,13 @@ function checkEnvelope(raw, { module, context, schema, owns = [], ownedBy = {}, 
  *   hints: unknown, example: unknown, required: string[], marketRun?: "required" | "optional",
  *   market?: { run: string, snapshot_id: string | null, session: string | null, evidence: { source: string, session: string | null, items: Record<string, any>[] }[],
  *     artifacts: Record<string, Record<string, any>> } | null,
- *   marketSources?: string[], marketArtifacts?: string[], runArtifacts?: string[], artifacts?: Record<string, Record<string, any>> }} options
+ *   marketSources?: string[], marketArtifacts?: string[], runArtifacts?: string[], artifacts?: Record<string, Record<string, any>>,
+ *   derivedFilter?: (item: any, digest: ContextDigest) => boolean, extra?: Record<string, unknown> }} options
  * @returns {{ text: string, digest: ContextDigest }}
  */
 export function buildContext({
   module, run, manifest, evidence, sources, derivedFirst = [], derivedView, priority, hypotheses, schema, hints, example, required,
-  marketRun, market = null, marketSources = [], marketArtifacts = [], runArtifacts = [], artifacts = {},
+  marketRun, market = null, marketSources = [], marketArtifacts = [], runArtifacts = [], artifacts = {}, derivedFilter, extra = {},
 }) {
   const cited = marketRun !== undefined ? market : null;
   const present = new Set(manifest.evidence.map((entry) => entry.source));
@@ -594,7 +614,7 @@ export function buildContext({
     evidenceIds: new Set(items.keys()), derivedIds, items, labelAllow: [],
     market: cited ? { run: cited.run, snapshot_id: cited.snapshot_id ?? null, session: cited.session ?? null } : null,
     ...(marketRun !== undefined ? { market_run: cited?.run ?? null, market_snapshot_id: cited?.snapshot_id ?? null } : {}),
-    artifactCitable, artifacts: read, artifactIds: new Set(read.keys()),
+    artifactCitable, artifacts: read, artifactIds: new Set(read.keys()), extra,
   };
 
   // A market row says so, whatever source field the item carries itself.
@@ -604,8 +624,9 @@ export function buildContext({
   });
   const artifactRows = [...read.entries()].map(([id, entry]) => ({ entry: { source: entry.source, kind: "artifact", id }, row: artifactView(id, entry) }));
   const sourceOrder = [...new Set([...derivedFirst, ...sources, ...marketSources.map((source) => `market:${source}`)])];
+  const keepDerived = (entry) => derivedFilter === undefined || derivedFilter(entry.item, digest);
   const derivedRows = sourceOrder.flatMap((source) =>
-    all.filter(([, entry]) => entry.kind === "derived" && entry.source === source).map(([, entry]) => ({ entry, row: derivedView ? derivedView(entry.item) : shown(entry) })));
+    all.filter(([, entry]) => entry.kind === "derived" && entry.source === source && keepDerived(entry)).map(([, entry]) => ({ entry, row: derivedView ? derivedView(entry.item) : shown(entry) })));
   const asked = new Set();
   const priorityRows = priority.flatMap(({ source, kind, order, view, filter }) => {
     const matched = all.map(([, entry]) => entry).filter((entry) => entry.source === source && entry.kind === kind && entry.kind !== "derived"
@@ -614,14 +635,14 @@ export function buildContext({
     const sorted = order ? [...matched].sort((a, b) => order(a.item, b.item)) : matched;
     return sorted.map((entry) => ({ entry, row: shown(entry, view) }));
   });
-  const unasked = all.map(([, entry]) => entry).filter((entry) => entry.kind !== "derived" && !asked.has(entry));
+  const unasked = all.map(([, entry]) => entry).filter((entry) => (entry.kind === "derived" ? !keepDerived(entry) : !asked.has(entry)));
 
   // A module citing nothing shows plan 2's context, field for field.
   const marketFields = marketRun !== undefined ? { market_run: digest.market_run, market_snapshot_id: digest.market_snapshot_id } : {};
   const context = {
     module, contract_version: CONTRACT_VERSION, hypotheses_version: digest.hypotheses_version, run,
     snapshot_id: digest.snapshot_id, as_of: digest.as_of, session, ...marketFields, status_expected: missing.length ? "NOT_EVALUABLE" : "OK",
-    missing, ...(marketRun !== undefined ? { market: digest.market } : {}), hypotheses,
+    missing, ...(marketRun !== undefined ? { market: digest.market } : {}), ...extra, hypotheses,
     schema: envelopeSchema(schema, { market: marketRun !== undefined, artifacts: artifactCitable }), hints: typeof hints === "function" ? hints(digest) : hints,
     example: typeof example === "function" ? example(digest) : example,
     ...(artifactCitable ? { artifacts: [] } : {}), evidence: [], derived: [], truncated: [],

@@ -20,7 +20,7 @@
  * are `contract-core.mjs`'s.
  */
 import { SCOPE_CLASSES, SCOPE_EXEMPT, fail, textEntries } from "../contract-core.mjs";
-import { DERIVED_HINT, derivedRow, exampleOf, ownClaims } from "./shared.mjs";
+import { DERIVED_HINT, derivedRow, exampleOf, ownClaims, poolRow, quoteRow } from "./shared.mjs";
 
 /** Chapter 四 of the manuscript, in the tree's own words, paragraph ids only. */
 export const HYPOTHESES =
@@ -225,17 +225,6 @@ function leaderSentences(parsed, items) {
  */
 function example(digest) {
   return exampleOf(digest, { leader_candidates: [], top_pattern_flags: [] }, isQuote);
-}
-
-/** A quote without its validity block and provider: the file keeps them. */
-function quoteRow({ validity, provider, ...item }) {
-  return item;
-}
-
-/** A pool row as the leader reads it: who, how high, when sealed, how often broken. */
-function poolRow(item) {
-  const keep = ["pool", "code", "name", "pct", "boards", "firstSealAt", "lastSealAt", "breakCount", "yesterdayBoards", "yesterdaySealAt", "streak", "industry"];
-  return Object.fromEntries(keep.filter((key) => item[key] !== undefined).map((key) => [key, item[key]]));
 }
 
 /** A pool row of a code the strategy run froze as an equity: the rows a candidate can stand on. */

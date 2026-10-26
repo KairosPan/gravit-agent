@@ -4,8 +4,9 @@
  * digest lookup `firstId`, the built example `exampleOf` - `NOT_EVALUABLE` naming the missing
  * sources, else `OK` with UNKNOWN headlines and one INSUFFICIENT claim, a format a role cannot copy
  * as a judgment - the headline rule `ownClaims`, by which each headline value other than UNKNOWN
- * stands on a claim of its own citing its kind of evidence, and the market modules' derived view
- * `derivedRow` with its hint `DERIVED_HINT`.
+ * stands on a claim of its own citing its kind of evidence, the market modules' derived view
+ * `derivedRow` with its hint `DERIVED_HINT`, and the strategy modules' (leader, mode) views of a
+ * quote and a pool row, `quoteRow` and `poolRow`.
  */
 import { fail } from "../contract-core.mjs";
 
@@ -107,3 +108,14 @@ export function derivedRow({ id, measure, value, params, partial, inputs }) {
 /** The hint naming what a derived row shows, for the contracts that use `derivedRow`. */
 export const DERIVED_HINT =
   "派生量只列 id、measure、value、params、partial 与输入条数 inputs_total，不列来源、种类、时效与输入编号；时效为本运行交易日 CURRENT，除非其所在文件的交易日早于本运行（那时为 HISTORICAL），引用其编号即可。";
+
+/** A quote without its validity block and provider: the file keeps them. */
+export function quoteRow({ validity, provider, ...item }) {
+  return item;
+}
+
+/** A pool row as a strategy module reads it: who, how high, when sealed, how often broken. */
+export function poolRow(item) {
+  const keep = ["pool", "code", "name", "pct", "boards", "firstSealAt", "lastSealAt", "breakCount", "yesterdayBoards", "yesterdaySealAt", "streak", "industry"];
+  return Object.fromEntries(keep.filter((key) => item[key] !== undefined).map((key) => [key, item[key]]));
+}
