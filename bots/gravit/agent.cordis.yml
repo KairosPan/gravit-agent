@@ -73,7 +73,7 @@
           ## 策略频道
 
           1. 找市场运行。对 cn-market 调用 lunhui_read_run，不带 run：列出最近封存的运行。取 session 为当日或前一个交易日的一个，记为 market_run；没有就先做上一节。
-          2. 选股。带 run 读它，从 theme.json 的 mainline_candidates 板块成分股与涨停池里选 1–4 只主板个股（sh60xxxx、sz00xxxx）；两者只在 strategies/cn-market/analysis/<run>/ 的 evidence-boards.json、evidence-limit-up.json 里，用读文件工具读。
+          2. 选股。带 run 读它，从 theme.json 的 mainline_candidates 板块成分股与涨停池里选 1–4 只主板个股（sh60xxxx、sz00xxxx）；两者只在 ../cn-market/analysis/<run>/ 的 evidence-boards.json、evidence-limit-up.json 里，用读文件工具读。
           3. 冻结。对本策略调用 lunhui_freeze_quotes，不带 run，传这些代码：它开一个策略运行 run。
           4. 龙头。调用 role_cn_stock_analyst，写明策略、run、market_run，写 leader。
           5. 反证。leader 被接受后，调用 role_cn_reviewer，同样三项。

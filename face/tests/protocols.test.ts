@@ -31,9 +31,10 @@ test("the shipped lunhui-run.md reads, fits its budget, and states the cn-market
 
 /* The strategy channel (spec §5.10, A5, A22, A27): find the market run by lunhui_read_run on cn-market
  * without a run - the day's or the previous trading day's sealed run - choose candidates from its
- * theme's members and pools, freeze their quotes on the strategy, the stock analyst for the leader
- * with both run ids, the reviewer with both, the analyst again for the mode once the leader is
- * accepted, then lunhui_read_run. A WAIT, a NOT_EVALUABLE artifact and a refused mode are results; a
+ * theme's members and pools (read from the market run's evidence files, ../cn-market/analysis/<run>/,
+ * since the read returns headlines only), freeze their quotes on the strategy, the stock analyst for
+ * the leader with both run ids, then - once the leader is accepted - the reviewer with both and the
+ * analyst again for the mode, then lunhui_read_run. A WAIT, a NOT_EVALUABLE artifact and a refused mode are results; a
  * stale market run means a fresh market run and a re-read with it, which a sealed strategy run allows
  * until its leader is accepted - so no "a sealed run cannot be re-anchored" reason. */
 test("lunhui-run.md states the strategy channel's order after the cn-market one", () => {

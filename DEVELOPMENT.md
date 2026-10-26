@@ -939,8 +939,8 @@ carries the text) and, on real boots, `bots-smoke`, `roles-smoke` and `goal-smok
 **The run protocol section** (modules spec A9, §5.10) is the `gravit` row's `protocols` key, read
 the way the cycle is: `composeFace` calls `readProtocols` (`src/protocols.ts`) right after
 `readCycle` and hands `gravitRows` one entry, `{name: "lunhui:run", probe: "lunhui_read_run",
-text}`, the text of `dsh/profile/lunhui-run.md` (2,964 bytes against its 3,000, Chinese, 1,642
-characters, about 411 heuristic tokens); `FaceBootOptions.protocolsDir` points a test at a fixture directory, and a
+text}`, the text of `dsh/profile/lunhui-run.md` (2,956 bytes against its 3,000, Chinese, 1,634
+characters, about 408 heuristic tokens); `FaceBootOptions.protocolsDir` points a test at a fixture directory, and a
 missing, unreadable, empty, oversized or templated file ends the compose with its absolute path
 first. `plugins/gravit.js` mounts each entry as a section of its own at
 `getSectionOrder("DEPLOYMENT_PERSONA_SUFFIX") - 60`, just before the cycle, `interpolate: false`,
@@ -960,7 +960,8 @@ reports being claims to check against it. In a strategy channel: call `lunhui_re
 day's or the previous trading day's as `market_run` (or do the market order first); read it with
 its run id and choose 1–4 main-board equities (`sh60…`, `sz00…`) from its `theme.json` mainline
 candidates' members and its pools, which live only in the market run's `evidence-boards.json` and
-`evidence-limit-up.json` (the read returns headlines), read with Gravit's file tools; freeze their quotes on the strategy with no `run`, which opens
+`evidence-limit-up.json` (the read returns headlines), read with Gravit's file tools at
+`../cn-market/analysis/<run>/` from the strategy channel's working directory; freeze their quotes on the strategy with no `run`, which opens
 the strategy run; call `role_cn_stock_analyst` with the strategy, the run and `market_run` for the
 leader; once the leader is accepted, call `role_cn_reviewer` with the same three (a review read
 before it is `NOT_EVALUABLE` for good, its module then `ALREADY_SUBMITTED`) and then
@@ -1323,7 +1324,7 @@ the `gravit:roles` section is 1,013 characters, about 253 tokens, for its three 
 `cn-market-analyst` (463 characters, about 116 tokens, when it was the one role), `cn-reviewer` and
 `cn-stock-analyst` (714 characters, about 179 tokens, for the two analysts; for the three retired
 roles it was 992 characters, about 250 tokens; each role adds its tool name and a summary of at
-most 300 characters); the `lunhui:run` section is 1,642 characters, about 411 tokens (2,964 bytes
+most 300 characters); the `lunhui:run` section is 1,634 characters, about 408 tokens (2,956 bytes
 on disk; 1,556 characters and 2,873 bytes before the reviewer's steps, 1,143 and 2,240 before the
 strategy channel); `GRAVIT.md` is 3,459 bytes (budget 4,500;
 4,283 at `fae4f61`). The first-request totals
@@ -4311,7 +4312,7 @@ In order; each with what "done" is and which charter row it reopens.
    bytes, the run's own artifacts first, the market run's headline-only, the environment filled
    late), the `lunhui-review` row and its pair, the `cn-reviewer` role in both channels, the A22 gate
    bound to the mode's market run, `lunhui_read_run`'s listing of a strategy's newest sealed runs,
-   the protocol's whole order within its 3,000 bytes (2,964), and an `S01` registered on Friday and
+   the protocol's whole order within its 3,000 bytes (2,956), and an `S01` registered on Friday and
    graded on Monday on a real boot (§7.3); the tool-schema table again with the seventeen tools
    (§4.3); the charter's MARKET bullet, `strategies/` writer clause, D10 and §7.2 re-fitted for the
    rows; the loops page, the upgrade guide and the seams inventory. Left, in order:
