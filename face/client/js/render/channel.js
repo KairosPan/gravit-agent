@@ -40,7 +40,7 @@ function latest(body) {
 }
 
 // the Lunhui research runs (modules spec §5.11): the latest sealed run with an artifact — its line, a chip per module,
-// the expectation card, each artifact whole in a collapsed details — then a dim line per run and the omitted count;
+// the expectation card, the previous card's review, each artifact whole in a collapsed details — then a dim line per run and the omitted count;
 // drawn only for a channel whose overview lists a run
 function researchRuns(body) {
   if (!Array.isArray(body?.runs) || body.runs.length === 0) return '';
@@ -49,6 +49,7 @@ function researchRuns(body) {
   const head = l ? `<div class="chan-row"><span class="chan-row-name mono">${esc([l.run, `as of ${l.asOf ?? '—'}`, l.session && `session ${l.session}`, l.snapshotId && `snapshot ${l.snapshotId}`, l.marketRun && `cn-market run ${l.marketRun}`].filter(Boolean).join(' · '))}</span></div>` +
     (l.chips.length ? `<div class="btn-row">${l.chips.map(c => chip(c.text)).join('')}</div>` : '') +
     (l.expectation ? kv(l.expectation.map(([k, w]) => [k, esc(w)])) : '') +
+    (l.review ? `<div class="dsec-line">${esc(l.review)}</div>` : '') +
     l.details.map(d => `<details class="acct-shown"><summary>${esc(d.module)}</summary><div class="dsec-line mono">${esc(d.json)}</div></details>`).join('') : '';
   const runLines = v.rows.map(r => {
     const arts = `${countWord(r.artifacts.length, 'artifact')}${r.artifacts.length ? `: ${r.artifacts.join(', ')}` : ''}`;

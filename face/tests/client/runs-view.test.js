@@ -26,8 +26,11 @@ const runsBody = () => ({
       sentiment: { headline: { state: 'ice', money_effect: 'weak', freeze_type: 0.123456 }, json: { state: 'ice', money_effect: 'weak' } },
       theme: { headline: {}, json: { status: 'NOT_EVALUABLE' } },
       mode: {
-        headline: { mode: 'WAIT', preconditions: ['a', 'b'], expectation: { direction: 'up', horizon: 3, watch: ['x', 'y', 'z', 'w'] } },
-        json: { mode: 'WAIT' },
+        headline: {
+          mode: 'S01', preconditions: ['a', 'b'], expectation: { direction: 'up', horizon: 3, watch: ['x', 'y', 'z', 'w'] },
+          expectation_review: { previous_run: R2, grade: '符合', evidence_ids: ['q1'] },
+        },
+        json: { mode: 'S01' },
       },
       counterevidence: { headline: { items: [{ a: 1 }, { a: 2 }, { a: 3 }] }, json: { items: [] } },
     },
@@ -47,14 +50,15 @@ test('runsView: shapes the latest run, its chips and the rows; omitted carries t
   assert.equal(v.empty, null);
   assert.equal(v.omitted, 2);
   assert.deepEqual({ ...v.latest, chips: undefined, expectation: undefined, details: undefined },
-    { run: R1, asOf: '2026-10-24', session: '2026-10-23', snapshotId: 's-1', marketRun: '2026-10-24-0900-ef56', chips: undefined, expectation: undefined, details: undefined });
+    { run: R1, asOf: '2026-10-24', session: '2026-10-23', snapshotId: 's-1', marketRun: '2026-10-24-0900-ef56', chips: undefined, expectation: undefined, review: `review: 符合 of ${R2}`, details: undefined });
   assert.deepEqual(v.latest.chips, [
     { module: 'sentiment', text: 'sentiment: ice · weak · 0.1235' },
     { module: 'theme', text: 'theme: not evaluable' },
-    { module: 'mode', text: 'mode: WAIT · a, b · 3 fields' },
+    { module: 'mode', text: 'mode: S01' },
     { module: 'counterevidence', text: 'counterevidence: 3 items' },
   ]);
   assert.deepEqual(v.latest.expectation, [['direction', 'up'], ['horizon', '3'], ['watch', '4 items']]);
+  assert.equal(v.latest.review, `review: 符合 of ${R2}`);
   assert.deepEqual(v.latest.details.map(d => d.module), ['sentiment', 'theme', 'mode', 'counterevidence']);
   assert.equal(v.latest.details[0].json, '{"state":"ice","money_effect":"weak"}');
   assert.deepEqual(v.rows, [
@@ -91,4 +95,21 @@ test('runsView: malformed wire rows are dropped, a bad omitted count reads 0', (
   const v = runsView({ runs: [null, 'x', { run: 7 }, { run: R1 }], runsOmitted: -1, latestRun: { run: 9 } });
   assert.deepEqual(v.rows, [{ run: R1, asOf: null, sealed: false, artifacts: [], bytes: null }]);
   assert.equal(v.omitted, 0); assert.equal(v.latest, null);
+});
+
+test('runsView: the mode chip is the mode word alone; no word reads the module; a review with no previous run or grade, or none, is null', () => {
+  const b = runsBody();
+  b.latestRun.artifacts.mode.headline = { mode: 'WAIT', preconditions: [], research_only_matches: [{ family: 'R08' }], expectation: null, expectation_review: null };
+  let v = runsView(b);
+  assert.equal(v.latest.chips[2].text, 'mode: WAIT');
+  assert.equal(v.latest.expectation, null);
+  assert.equal(v.latest.review, null);
+  b.latestRun.artifacts.mode.headline = { mode: 7, expectation_review: { previous_run: R2 } };
+  v = runsView(b);
+  assert.equal(v.latest.chips[2].text, 'mode');
+  assert.equal(v.latest.review, null);
+  b.latestRun.artifacts.mode.headline = { mode: 'WAIT', expectation_review: { previous_run: R2, grade: 'NOT_EVALUABLE', evidence_ids: [] } };
+  assert.equal(runsView(b).latest.review, `review: NOT_EVALUABLE of ${R2}`);
+  delete b.latestRun.artifacts.mode;
+  assert.equal(runsView(b).latest.review, null);
 });

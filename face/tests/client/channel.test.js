@@ -127,7 +127,7 @@ test('the channel page draws the research runs after the latest backtest, every 
       artifacts: {
         sentiment: { headline: { state: bad }, json: { state: bad } },
         theme: { headline: {}, json: { status: 'NOT_EVALUABLE' } },
-        mode: { headline: { mode: 'WAIT', expectation: { [bad]: bad, horizon: 3 } }, json: { mode: bad } },
+        mode: { headline: { mode: 'WAIT', expectation: { [bad]: bad, horizon: 3 }, expectation_review: { previous_run: bad, grade: '弱于', evidence_ids: [] } }, json: { mode: bad } },
       },
     },
   };
@@ -137,6 +137,8 @@ test('the channel page draws the research runs after the latest backtest, every 
   assert.match(h, /class="chip grey">sentiment: &lt;script&gt;/);
   assert.match(h, /class="chip grey">theme: not evaluable</);
   assert.match(h, />horizon<[\s\S]*?>3</);
+  assert.match(h, /class="chip grey">mode: WAIT</);
+  assert.match(h, />3<[\s\S]*?<div class="dsec-line">review: 弱于 of &lt;script&gt;alert\(1\)&lt;\/script&gt;<\/div>/, 'the review line after the card');
   assert.match(h, /<details class="acct-shown"><summary>mode<\/summary>[\s\S]*?\{&quot;mode&quot;:&quot;&lt;script&gt;/);
   assert.match(h, /as of 2026-10-24 · 2 artifacts: sentiment, theme · 2\.0 KB/);
   assert.match(h, /as of — · 1 artifact: mode · 10 B · unsealed/);

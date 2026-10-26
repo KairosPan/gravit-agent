@@ -25,6 +25,27 @@ test("the shipped lunhui-run.md reads, fits its budget, and states the cn-market
   for (const word of ["cn-market", "RUN_SEALED", "analysis/", "NOT_A_ROLE", "NOT_EVALUABLE", "delayed", "journal.md", "environment.json", "sentiment.json", "theme.json", "blocked"]) assert.ok(text.includes(word), `carries ${word}`);
 });
 
+/* The strategy channel (spec §5.10, A22, A27), as far as plan 3 builds it: read the day's cn-market
+ * run, choose candidates from its theme's members and pools, freeze their quotes on the strategy,
+ * the stock analyst for the leader with both run ids, again for the mode, then lunhui_read_run; a
+ * WAIT is a result; a stale market run means a fresh market run and a new strategy run. The reviewer
+ * is plan 4's, so no cn_reviewer role is named. */
+test("lunhui-run.md states the strategy channel's order after the cn-market one", () => {
+  const text = readProtocol(LUNHUI_RUN_PATH);
+  const strategy = text.indexOf("## 策略频道");
+  assert.ok(strategy > text.indexOf("role_cn_market_analyst"), "the strategy channel follows the market one");
+  const part = text.slice(strategy);
+  const at = (word: string, from = 0) => part.indexOf(word, from);
+  const leader = at("role_cn_stock_analyst");
+  const mode = at("role_cn_stock_analyst", leader + 1);
+  assert.ok(at("lunhui_read_run") >= 0 && at("lunhui_read_run") < at("mainline_candidates"), "the market run read first");
+  assert.ok(at("mainline_candidates") < at("lunhui_freeze_quotes") && at("lunhui_freeze_quotes") < leader, "candidates, then their quotes, then the leader");
+  assert.ok(leader >= 0 && mode > leader && at("lunhui_read_run", mode) > mode, "the analyst twice, then the run read back");
+  assert.ok(leader < at("写 leader") && at("写 leader") < mode && mode < at("写 mode"), "the first call writes the leader, the second the mode");
+  for (const word of ["market_run", "1–4", "sh60", "sz00", "WAIT", "STALE_MARKET_RUN", "leader.json", "mode.json", "反证"]) assert.ok(part.includes(word), `carries ${word}`);
+  assert.doesNotMatch(text, /cn_reviewer|cn-reviewer/, "the reviewer lands with plan 4");
+});
+
 /* Every lunhui_* tool the protocol names is one the composed rows register (src/lunhui.ts), so a
  * later plan's tool cannot be described before it exists, nor a tool renamed under the protocol. */
 test("every lunhui_* tool lunhui-run.md names is a tool the Lunhui rows register", () => {
