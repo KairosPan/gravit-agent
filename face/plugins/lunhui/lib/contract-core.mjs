@@ -181,7 +181,7 @@ export const MODULE_REPAIRS = Object.freeze({
   EXECUTION_CONTENT:
     "删除交易方向、价位目标、仓位、账户或下单内容及对应术语，免责声明里也不复述；只保留证据事实、资料缺口和核验步骤。",
   BYTE_LIMIT:
-    "压缩到 24 KiB 以内：缩短声明与限制说明，只保留必要事实和证据编号。",
+    "压缩到 24 KiB 以内（mode 的预期卡不超过 2,048 字节）：缩短声明、限制说明与卡片字段，只保留必要事实和证据编号。",
   INADMISSIBLE_STATE:
     "S01、S02 只能在本策略可登记的模式、引用的市场运行情绪状态在该模式的准入集合内、且所需来源都已冻结时登记；否则结论写 WAIT，expectation 写 null。",
   UNADDRESSED_COUNTEREVIDENCE:
@@ -551,11 +551,13 @@ function checkEnvelope(raw, { module, context, schema, owns = [], ownedBy = {}, 
  * `marketSources` join the digest as `market:<source>`, shown and ordered as the module's own (a
  * priority entry or `derivedFirst` names them so), their scope read against this run's session.
  * `marketArtifacts` names the market run's accepted artifacts the module reads and `runArtifacts`
- * this run's own, from `artifacts`; each is shown first, before the derived items, as `{ id,
+ * this run's own, from `artifacts`; each is shown first, before the derived items - this run's own
+ * before the market run's, so the cap leaves the market run's out first - as `{ id,
  * module, headline, claims: [{ id, text, evidence_ids }] }`, its id `<module>@<snapshot_id>` of its
  * run, CURRENT evidence when its run's session is this run's, else HISTORICAL; a view is bounded
- * (`artifactView`). One past the cap is counted in `truncated` (kind `artifact`) and is not
- * citable, and when the contract requires it, it joins `missing` too, so the status expected is
+ * (`artifactView`; `artifactViews[module]` sets a module's claims shown and their characters). A view past the cap is skipped - the views after it still tried, artifact
+ * rows never latching as evidence and derived rows do - counted in `truncated` (kind `artifact`)
+ * and not citable, and when the contract requires it, it joins `missing` too, so the status expected is
  * `NOT_EVALUABLE`. A `required` entry is a source of this run, `market:<source>` or
  * `market:<module>` of the market run, or a module of this run. An item frozen in both runs keeps
  * this run's entry.
@@ -567,12 +569,14 @@ function checkEnvelope(raw, { module, context, schema, owns = [], ownedBy = {}, 
  *   market?: { run: string, snapshot_id: string | null, session: string | null, evidence: { source: string, session: string | null, items: Record<string, any>[] }[],
  *     artifacts: Record<string, Record<string, any>> } | null,
  *   marketSources?: string[], marketArtifacts?: string[], runArtifacts?: string[], artifacts?: Record<string, Record<string, any>>,
- *   derivedFilter?: (item: any, digest: ContextDigest) => boolean, extra?: Record<string, unknown> }} options
+ *   derivedFilter?: (item: any, digest: ContextDigest) => boolean, extra?: Record<string, unknown>,
+ *   artifactViews?: Record<string, ArtifactViewBound> }} options
  * @returns {{ text: string, digest: ContextDigest }}
  */
 export function buildContext({
   module, run, manifest, evidence, sources, derivedFirst = [], derivedView, priority, hypotheses, schema, hints, example, required,
   marketRun, market = null, marketSources = [], marketArtifacts = [], runArtifacts = [], artifacts = {}, derivedFilter, extra = {},
+  artifactViews = {},
 }) {
   const cited = marketRun !== undefined ? market : null;
   const present = new Set(manifest.evidence.map((entry) => entry.source));
@@ -598,13 +602,14 @@ export function buildContext({
   const scopeOf = (runSession) => (runSession !== null && runSession === session ? "CURRENT" : "HISTORICAL");
   /** @type {Map<string, DigestArtifact>} */
   const read = new Map();
-  for (const name of marketArtifacts) {
-    const artifact = cited?.artifacts?.[name];
-    if (artifact) read.set(`${name}@${cited.snapshot_id}`, { module: name, source: `market:${name}`, scope: scopeOf(cited.session ?? null), artifact });
-  }
+  // The run's own artifacts first, then the market run's: the cap cuts the market run's first.
   for (const name of runArtifacts) {
     const artifact = artifacts[name];
     if (artifact) read.set(`${name}@${manifest.snapshot_id ?? null}`, { module: name, source: name, scope: scopeOf(session), artifact });
+  }
+  for (const name of marketArtifacts) {
+    const artifact = cited?.artifacts?.[name];
+    if (artifact) read.set(`${name}@${cited.snapshot_id}`, { module: name, source: `market:${name}`, scope: scopeOf(cited.session ?? null), artifact });
   }
   const artifactCitable = marketRun !== undefined || runArtifacts.length > 0;
   /** @type {ContextDigest} */
@@ -622,7 +627,7 @@ export function buildContext({
     id: entry.item.id, source: entry.source, scope: entry.scope, ...(view ? view(entry.item, digest) : entry.item),
     ...(entry.source.startsWith("market:") ? { source: entry.source } : {}),
   });
-  const artifactRows = [...read.entries()].map(([id, entry]) => ({ entry: { source: entry.source, kind: "artifact", id }, row: artifactView(id, entry) }));
+  const artifactRows = [...read.entries()].map(([id, entry]) => ({ entry: { source: entry.source, kind: "artifact", id }, row: artifactView(id, entry, artifactViews[entry.module]) }));
   const sourceOrder = [...new Set([...derivedFirst, ...sources, ...marketSources.map((source) => `market:${source}`)])];
   const keepDerived = (entry) => derivedFilter === undefined || derivedFilter(entry.item, digest);
   const derivedRows = sourceOrder.flatMap((source) =>
@@ -660,7 +665,8 @@ export function buildContext({
     for (const { entry, row } of candidates) {
       const cost = bytes(row) + (list.length ? 1 : 0);
       if (full || size + cost > MAX_CONTEXT_BYTES) {
-        full = true;
+        // An artifact view that does not fit is skipped, the smaller ones after it still tried; rows latch.
+        if (entry.kind !== "artifact") full = true;
         left.push(entry);
         continue;
       }
@@ -703,25 +709,64 @@ export function buildContext({
   return { text: JSON.stringify(context), digest };
 }
 
-/** The claims an artifact view shows, and the characters of each claim's text it keeps. */
-const VIEW_CLAIMS = 6;
+/** The claims an artifact view shows, the characters of each claim's text and the evidence ids of each list it keeps. */
+const VIEW_CLAIMS = 4;
 const VIEW_CLAIM_CHARS = 120;
+const VIEW_IDS = 3;
+
+/** An evidence-id list as a view shows it: its first `VIEW_IDS`, `ids_total` beside them when longer. */
+function idsView(ids) {
+  if (!Array.isArray(ids) || ids.length <= VIEW_IDS) return { evidence_ids: ids };
+  return { evidence_ids: ids.slice(0, VIEW_IDS), ids_total: ids.length };
+}
+
+/** A string cut to `chars` characters (`VIEW_CLAIM_CHARS` by default); any other value as it is. */
+const cutText = (text, chars = VIEW_CLAIM_CHARS) => (typeof text === "string" ? Array.from(text).slice(0, chars).join("") : text);
+
+/**
+ * A module's artifact view bound in one contract's contexts: the claims shown (`claims`, 0 for a
+ * headline-only view) and the characters of each claim's text (`claimText`); each defaults to the
+ * view's own, four and 120.
+ * @typedef {{ claims?: number, claimText?: number }} ArtifactViewBound
+ */
+
+/**
+ * A headline field as a view shows it: in an array of objects, each object's `evidence_ids` is
+ * shown as its first three ids with `ids_total` when longer (`idsView`), and when every object
+ * carries a `text` string (the counterevidence's `items`) each `text` is cut as a claim's is; every
+ * other field, and any other value, whole.
+ * @param {unknown} value
+ */
+function headlineView(value) {
+  if (!Array.isArray(value)) return value;
+  const texts = value.every((entry) => entry !== null && typeof entry === "object" && typeof entry.text === "string");
+  return value.map((entry) => {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return entry;
+    const shown = texts ? { ...entry, text: cutText(entry.text) } : { ...entry };
+    return Object.hasOwn(entry, "evidence_ids") ? { ...shown, ...idsView(entry.evidence_ids) } : shown;
+  });
+}
 
 /**
  * An accepted artifact as a context shows it, bounded: its id, its module, its headline fields
- * (`MODULES`) and its first six claims' ids, texts cut to 120 characters, and cited ids whole;
- * `claims_total` when claims were left out. The digest keeps the artifact whole.
+ * (`MODULES`, through `headlineView`) and its first four claims' ids, texts cut to 120 characters
+ * and first three cited ids (`ids_total` when more); `claims_total` when claims were left out. The
+ * digest keeps the artifact whole, and a module cites the artifact id or an item id, never an
+ * artifact's inner evidence through its view.
+ * A contract's `bound` for the module (`buildContext`'s `artifactViews`) sets its claims and their
+ * characters; a headline item's text keeps 120.
  * @param {string} id
  * @param {DigestArtifact} entry
+ * @param {ArtifactViewBound} [bound]
  */
-function artifactView(id, { module, artifact }) {
+function artifactView(id, { module, artifact }, { claims: shownClaims = VIEW_CLAIMS, claimText = VIEW_CLAIM_CHARS } = {}) {
   const headline = MODULES.find((candidate) => candidate.name === module)?.headline ?? [];
   const claims = Array.isArray(artifact.claims) ? artifact.claims : [];
-  const cut = (text) => (typeof text === "string" ? Array.from(text).slice(0, VIEW_CLAIM_CHARS).join("") : text);
+  const cut = (text) => cutText(text, claimText);
   return {
     id, module,
-    headline: Object.fromEntries(headline.filter((field) => Object.hasOwn(artifact, field)).map((field) => [field, artifact[field]])),
-    claims: claims.slice(0, VIEW_CLAIMS).map((claim) => ({ id: claim?.id, text: cut(claim?.text), evidence_ids: claim?.evidence_ids })),
-    ...(claims.length > VIEW_CLAIMS ? { claims_total: claims.length } : {}),
+    headline: Object.fromEntries(headline.filter((field) => Object.hasOwn(artifact, field)).map((field) => [field, headlineView(artifact[field])])),
+    claims: claims.slice(0, shownClaims).map((claim) => ({ id: claim?.id, text: cut(claim?.text), ...idsView(claim?.evidence_ids) })),
+    ...(claims.length > shownClaims ? { claims_total: claims.length } : {}),
   };
 }

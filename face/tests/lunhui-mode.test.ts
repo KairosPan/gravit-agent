@@ -22,7 +22,9 @@ import * as environmentRow from "../plugins/lunhui/environment-row.mjs";
 import * as sentimentRow from "../plugins/lunhui/sentiment-row.mjs";
 import * as themeRow from "../plugins/lunhui/theme-row.mjs";
 import * as quotesRow from "../plugins/lunhui/freeze-quotes-row.mjs";
-import { contract, FALSIFICATION_BYTES, HYPOTHESES, MODE_FOR, REQUIRED_PRECONDITIONS, R_FAMILIES, falsificationOf } from "../plugins/lunhui/lib/contracts/mode.mjs";
+import {
+  CARD_BYTES, contract, FALSIFICATION_BYTES, HYPOTHESES, MODE_FOR, REQUIRED_PRECONDITIONS, R_FAMILIES, falsificationOf, previousCard,
+} from "../plugins/lunhui/lib/contracts/mode.mjs";
 import { MAX_CONTEXT_BYTES, hypothesesVersion } from "../plugins/lunhui/lib/contract-core.mjs";
 import { writeArtifact } from "../plugins/lunhui/lib/runs.mjs";
 import {
@@ -205,6 +207,29 @@ function registration(context: any, fields: Record<string, unknown> = {}) {
   });
 }
 
+/** A card frozen at `snapshot` whose compact JSON is exactly `size` bytes: the S01 card's fields, its triggers and vetoes filled. */
+function cardOf(snapshot: string, size: number) {
+  const card: any = {
+    frozen_version: snapshot, candidates: ["sh600519"], anchor: "本运行冻结报价的最新价，不事后换锚。", state: "EXPANSION",
+    triggers: Array.from({ length: 5 }, (_, i) => `第${i + 1}条：下一运行冻结的报价涨跌幅为正，且仍在涨停池中，连板数不减。`),
+    vetoes: Array.from({ length: 5 }, (_, i) => `第${i + 1}条：下一运行引用的市场状态为 CLIMAX、RETREAT 或 UNKNOWN。`),
+    window: "下一个交易日。", price_band: "以锚点上下百分之五为观察区间。", holding_period: "一个交易日的观察。",
+    branches: { 符合: "仍在涨停池且涨跌幅为正。", 强于: "连板数加一。", 弱于: "跌出涨停池或涨跌幅为负。" },
+  };
+  const fields = ["anchor", "window", "price_band", "holding_period"];
+  for (const field of fields) {
+    const deficit = size - Buffer.byteLength(JSON.stringify(card), "utf8");
+    const room = 200 - Array.from(card[field]).length;
+    const add = Math.min(Math.floor(deficit / 3), room);
+    card[field] += "观".repeat(Math.max(add, 0));
+  }
+  const rest = size - Buffer.byteLength(JSON.stringify(card), "utf8");
+  assert.ok(rest >= 0 && rest < 200 - Array.from(card.holding_period).length, `${rest} bytes left`);
+  card.holding_period += "0".repeat(rest);
+  assert.equal(Buffer.byteLength(JSON.stringify(card), "utf8"), size);
+  return card;
+}
+
 const refusal = (submit: ToolDef, strategy: string, run: string, analysis: unknown) =>
   rejectsWith(submit.execute({ strategy, run, analysis: JSON.stringify(analysis) }, exec(ROLE)), "INVALID_ANALYSIS");
 
@@ -246,8 +271,12 @@ test("mode contract: Chinese hypotheses of chapters 三 and 七 and P0159, the s
   assert.equal(contract.marketRun, "required");
   assert.deepEqual(contract.sources, ["quotes"]);
   assert.deepEqual(contract.marketSources, ["index", "limit-up", "boards"]);
-  assert.deepEqual(contract.marketArtifacts, ["environment", "sentiment", "theme"]);
+  assert.deepEqual(contract.marketArtifacts, ["sentiment", "theme", "environment"]);
   assert.deepEqual(contract.runArtifacts, ["leader", "counterevidence"]);
+  assert.deepEqual(contract.artifactViews, {
+    environment: { claims: 0 }, sentiment: { claims: 0 }, theme: { claims: 0 },
+    leader: { claims: 2, claimText: 60 }, counterevidence: { claims: 2, claimText: 60 },
+  });
   assert.deepEqual(contract.required, ["leader"]);
   assert.deepEqual(contract.exemptPaths, ["research_only_matches[*].label", "preconditions[*].name"]);
 });
@@ -283,7 +312,8 @@ test("mode: a context over an S01 run's quotes citing the day's market run - OK 
   assert.match(context.falsification, /Daily registration \(E4\)/, "the shipped section whole, its E4 paragraph included");
   assert.ok(!("falsification_truncated" in context));
   assert.doesNotMatch(context.falsification, /^## /mu);
-  assert.deepEqual(context.artifacts.map((row: any) => row.module), ["environment", "sentiment", "theme", "leader"]);
+  // The run's own artifacts first, then the market run's: the cap cuts the market run's first.
+  assert.deepEqual(context.artifacts.map((row: any) => row.module), ["leader", "sentiment", "theme", "environment"]);
   assert.match(context.hints.strategy, /S01/);
   assert.match(context.hints.strategy, /REPAIR、EXPANSION/);
   assert.match(context.hints.strategy, /minute_confirmation/);
@@ -328,8 +358,8 @@ test("mode: S01 on EXPANSION with no accepted counterevidence artifact is UNADDR
   assert.match(none.message, /^INVALID_ANALYSIS: \[UNADDRESSED_COUNTEREVIDENCE\] /u);
   await counterevidence(root, S01, run, bare);
   const context = JSON.parse(await read.execute({ strategy: S01, run, market_run: market }, exec(ROLE)));
-  assert.deepEqual(context.artifacts.map((row: any) => row.module), ["environment", "sentiment", "theme", "leader", "counterevidence"]);
-  assert.deepEqual(context.artifacts[4].headline.items.map((item: any) => item.id), ["x1", "x2"]);
+  assert.deepEqual(context.artifacts.map((row: any) => row.module), ["leader", "counterevidence", "sentiment", "theme", "environment"]);
+  assert.deepEqual(context.artifacts[1].headline.items.map((item: any) => item.id), ["x1", "x2"]);
   const partial = await refusal(submit, S01, run, registration(context, { addressed: [{ item: "x1", response: "记入限制说明。" }] }));
   assert.match(partial.message, /^INVALID_ANALYSIS: \[UNADDRESSED_COUNTEREVIDENCE\] analysis\.addressed.*x2/u);
   const unknown = await refusal(submit, S01, run, registration(context, { addressed: [{ item: "x1", response: "a" }, { item: "x2", response: "b" }, { item: "x9", response: "c" }] }));
@@ -552,6 +582,9 @@ test("mode: the A22 gate takes a counterevidence artifact accepted OK with an it
     [{ status: "NOT_EVALUABLE", missing_sources: ["leader"], items: [] }, false],
     [{ items: { x1: "not a list" } }, false],
     [{ items: [{ text: "no id" }] }, false],
+    // Bound to the mode's market run (A22): another run's, or none, is no review of this one.
+    [{ market_run: "m_other_run" }, false],
+    [{ market_run: undefined }, false],
     [{ items: [] }, true],
   ] as const) {
     const run = await strategyRun(mounted, S01);
@@ -559,8 +592,82 @@ test("mode: the A22 gate takes a counterevidence artifact accepted OK with an it
     const context = JSON.parse(await read.execute({ strategy: S01, run, market_run: market }, exec(ROLE)));
     const analysis = registration(context, { addressed: [] });
     if (accepted) assert.deepEqual(await submitted(submit, S01, run, analysis), { accepted: true, module: "mode", run });
-    else assert.match((await refusal(submit, S01, run, analysis)).message, /^INVALID_ANALYSIS: \[UNADDRESSED_COUNTEREVIDENCE\] analysis\.addressed/u, JSON.stringify(fields));
+    else {
+      assert.match((await refusal(submit, S01, run, analysis)).message, /^INVALID_ANALYSIS: \[UNADDRESSED_COUNTEREVIDENCE\] analysis\.addressed/u, JSON.stringify(fields));
+      // The gate speaks before an answer is checked: an answer to an item of no usable review is not REFERENCE.
+      const answered = registration(context, { addressed: [{ item: "x1", response: "记入限制说明。" }] });
+      assert.match((await refusal(submit, S01, run, answered)).message, /^INVALID_ANALYSIS: \[UNADDRESSED_COUNTEREVIDENCE\] analysis\.addressed[^[]/u, JSON.stringify(fields));
+    }
   }
+  const run = await strategyRun(mounted, S01);
+  await counterevidence(root, S01, run, JSON.parse(await read.execute({ strategy: S01, run, market_run: market }, exec(ROLE))), 2, undefined, { market_run: "m_other_run" });
+  const context = JSON.parse(await read.execute({ strategy: S01, run, market_run: market }, exec(ROLE)));
+  assert.match((await refusal(submit, S01, run, registration(context))).message, new RegExp(`^INVALID_ANALYSIS: \\[UNADDRESSED_COUNTEREVIDENCE\\] .*market run ${market}`, "u"));
+  assert.match(context.hints.addressed, /market_run/);
+});
+
+test("mode: a card is at most 2,048 bytes of compact JSON - one byte more is BYTE_LIMIT; the expectation hint names no 目标价", async (t) => {
+  assert.equal(CARD_BYTES, 2048);
+  const mounted = await setup(t);
+  const { root, read, submit, market } = mounted;
+  const run = await strategyRun(mounted, S01);
+  await counterevidence(root, S01, run, JSON.parse(await read.execute({ strategy: S01, run, market_run: market }, exec(ROLE))));
+  const context = JSON.parse(await read.execute({ strategy: S01, run, market_run: market }, exec(ROLE)));
+  assert.doesNotMatch(context.hints.expectation, /目标价/u);
+  assert.match(context.hints.expectation, /2,048/u);
+  const over = registration(context, { expectation: cardOf(context.snapshot_id, CARD_BYTES + 1) });
+  const error = await refusal(submit, S01, run, over);
+  assert.match(error.message, /^INVALID_ANALYSIS: \[BYTE_LIMIT\] analysis\.expectation/u);
+  assert.match(error.message, /2,048/u);
+  assert.deepEqual(await submitted(submit, S01, run, registration(context, { expectation: cardOf(context.snapshot_id, CARD_BYTES) })), { accepted: true, module: "mode", run });
+});
+
+test("mode: the previous card is shown as stored up to 2,048 bytes; a larger stored card is shown cut - strings to 120 characters, ids whole, card_truncated - within 2,048 bytes", () => {
+  const snapshot = `snap_${"a".repeat(64)}`;
+  const exact = cardOf(snapshot, CARD_BYTES);
+  assert.deepEqual(previousCard(exact), { expectation: exact });
+  // A card stored before the cap, at its schema's fullest: seventeen 200-character strings.
+  const long = (n: number) => `${n}`.padEnd(200, "观");
+  const full = {
+    frozen_version: snapshot, candidates: ["sh600519", "sz000333", "sh601318", "sz000001", "sh600000"], anchor: long(1), state: "EXPANSION",
+    triggers: [2, 3, 4, 5, 6].map(long), vetoes: [7, 8, 9, 10, 11].map(long), window: long(12), price_band: long(13), holding_period: long(14),
+    branches: { 符合: long(15), 强于: long(16), 弱于: long(17) },
+  };
+  const shown = previousCard(full);
+  assert.equal(shown.card_truncated, true);
+  assert.ok(Buffer.byteLength(JSON.stringify(shown.expectation), "utf8") <= CARD_BYTES, `${Buffer.byteLength(JSON.stringify(shown.expectation), "utf8")} bytes`);
+  assert.deepEqual(Object.keys(shown.expectation), Object.keys(full));
+  assert.deepEqual([shown.expectation.frozen_version, shown.expectation.candidates, shown.expectation.state], [snapshot, full.candidates, "EXPANSION"]);
+  assert.ok(full.anchor.startsWith(shown.expectation.anchor) && Array.from(shown.expectation.anchor).length <= 120);
+  // A card over the cap whose strings at 120 characters fit is cut to exactly 120.
+  const middle = { ...full, triggers: ["下一运行冻结的报价涨跌幅为正。"], vetoes: ["引用的市场状态为 UNKNOWN。"], holding_period: "一个交易日的观察。",
+    branches: { 符合: "仍在涨停池。", 强于: "连板数加一。", 弱于: "跌出涨停池。" } };
+  assert.ok(Buffer.byteLength(JSON.stringify(middle), "utf8") > CARD_BYTES);
+  const cut = previousCard(middle);
+  assert.equal(cut.card_truncated, true);
+  assert.equal(Array.from(cut.expectation.anchor).length, 120);
+  assert.equal(cut.expectation.state, middle.state);
+});
+
+test("mode: theme_gate and theme_not_falsified accept a boards derived item only of a mainline board", async (t) => {
+  const mounted = await setup(t, { mainline: [MAINLINE[0]] });
+  const { root, service, read, submit, market } = mounted;
+  const [themeRead] = tools(service, themeRow);
+  const themeContext = JSON.parse(await themeRead.execute({ strategy: "cn-market", run: market }, exec(ROLE)));
+  const outside = idWhere(themeContext, (row) => row.measure === "breadth" && row.params?.board === "BK1716");
+  const inside = idWhere(themeContext, (row) => row.measure === "breadth" && row.params?.board === "BK0715");
+  const run = await strategyRun(mounted, S01);
+  await counterevidence(root, S01, run, JSON.parse(await read.execute({ strategy: S01, run, market_run: market }, exec(ROLE))));
+  const context = JSON.parse(await read.execute({ strategy: S01, run, market_run: market }, exec(ROLE)));
+  const base = registration(context) as any;
+  const cite = (i: number, evidence: string[]) => ({ ...base, preconditions: base.preconditions.map((p: any, j: number) => (j === i ? { ...p, evidence_ids: evidence } : p)) });
+  for (const index of [0, 2]) {
+    const error = await refusal(submit, S01, run, cite(index, [outside]));
+    assert.match(error.message, new RegExp(`^INVALID_ANALYSIS: \\[REFERENCE\\] analysis\\.preconditions\\[${index}\\]\\.evidence_ids`, "u"));
+  }
+  const both = cite(0, [inside]);
+  both.preconditions[2] = { ...both.preconditions[2], evidence_ids: [inside] };
+  assert.deepEqual(await submitted(submit, S01, run, both), { accepted: true, module: "mode", run });
 });
 
 test("mode: a run without a leader artifact expects NOT_EVALUABLE naming leader - an OK artifact refused, the example accepted", async (t) => {
@@ -635,8 +742,8 @@ test("mode: a live-size market run - three 500-row pools, thirty boards, ten 100
   assert.ok(Buffer.byteLength(longSection, "utf8") >= 6000);
   const thesisPath = join(root, S01, "THESIS.md");
   await writeFile(thesisPath, (await readFile(thesisPath, "utf8")).replace("## Falsification\n", `## Falsification\n${longSection}\n\n`));
-  // Twelve items of 150 characters each, the reviewer's whole allowance of items at half its text.
-  const item = "候选的地位只有一个交易日的冻结证据，".repeat(9).slice(0, 150);
+  // Twelve items of 160 characters each, the reviewer's whole allowance of items and text.
+  const item = "候选的地位只有一个交易日的冻结证据，".repeat(9).slice(0, 160);
   const addressed = Array.from({ length: 12 }, (_, i) => ({ item: `x${i + 1}`, response: "记入限制说明，下一运行核对。" }));
   /** A run of S01 with its leader and twelve counterevidence items, read citing the market run. */
   const ready = async (now?: Date) => {
@@ -648,13 +755,13 @@ test("mode: a live-size market run - three 500-row pools, thirty boards, ten 100
   assert.equal((await submitted(submit, S01, first.run, registration(JSON.parse(first.text), { addressed }))).accepted, true);
   // Monday's run carries Friday's card too: the fullest context a run of S01 reads.
   const { run, text } = await ready(MONDAY);
-  // Measured 2026-10-27: 29,629 bytes with the previous card, nothing the mode cites cut by the cap.
+  // Measured 2026-10-26: 29,293 bytes with the previous card and twelve 160-character items, nothing the mode cites cut by the cap.
   assert.ok(Buffer.byteLength(text, "utf8") <= MAX_CONTEXT_BYTES, `${Buffer.byteLength(text, "utf8")} bytes`);
   const context = JSON.parse(text);
   assert.equal(context.status_expected, "OK");
   assert.equal(context.previous.run, first.run);
-  assert.deepEqual(context.artifacts.map((row: any) => row.module), ["environment", "sentiment", "theme", "leader", "counterevidence"]);
-  assert.equal(context.artifacts[4].headline.items.length, 12);
+  assert.deepEqual(context.artifacts.map((row: any) => row.module), ["leader", "counterevidence", "sentiment", "theme", "environment"]);
+  assert.equal(context.artifacts[1].headline.items.length, 12);
   assert.equal(context.falsification_truncated, true, "the long section is cut and flagged");
   assert.ok(Buffer.byteLength(context.falsification, "utf8") <= FALSIFICATION_BYTES);
   assert.ok(longSection.startsWith(context.falsification), "its first 1,500 bytes, on a character");
@@ -673,4 +780,93 @@ test("mode: a live-size market run - three 500-row pools, thirty boards, ten 100
     addressed, expectation_review: { previous_run: first.run, grade: "弱于", evidence_ids: [id.quote("sh600519")] },
   });
   assert.deepEqual(await submitted(submit, S01, run, graded), { accepted: true, module: "mode", run });
+});
+
+test("mode: the maximal pin - a 2,048-byte previous card, twelve 160-character counterevidence items of sixteen ids, the five artifact views at their caps, a 1,500-byte falsification - fits 30 KiB with leader, counterevidence, sentiment and theme shown, OK expected, an S01 accepted", async (t) => {
+  const mounted = await setup(t);
+  const { root, read, submit, market } = mounted;
+  const longSection = "下一个交易日的运行对照冻结的事实评级，登记从不等于确认。".repeat(75);
+  const thesisPath = join(root, S01, "THESIS.md");
+  await writeFile(thesisPath, (await readFile(thesisPath, "utf8")).replace("## Falsification\n", `## Falsification\n${longSection}\n\n`));
+  /** Sixteen distinct evidence ids of the id's own shape, for the views' citations. */
+  const sixteen = (seed: number) => Array.from({ length: 16 }, (_, i) => `ev_${(seed * 100 + i).toString(16).padStart(24, "0")}`);
+  const longText = (n: number) => `${n}`.padEnd(300, "证");
+  /** Twelve claims of 300 characters, sixteen ids each: a view shows six, cut to 120 characters. */
+  const claims = (seed: number) => Array.from({ length: 12 }, (_, i) => ({ id: `c${i + 1}`, text: longText(i), basis: "CURRENT", evidence_ids: sixteen(seed + i) }));
+  // Friday: S01 registers a card of exactly 2,048 bytes.
+  const friday = await strategyRun(mounted, S01);
+  await counterevidence(root, S01, friday, JSON.parse(await read.execute({ strategy: S01, run: friday, market_run: market }, exec(ROLE))));
+  const fridayContext = JSON.parse(await read.execute({ strategy: S01, run: friday, market_run: market }, exec(ROLE)));
+  const card = cardOf(fridayContext.snapshot_id, CARD_BYTES);
+  assert.equal((await submitted(submit, S01, friday, registration(fridayContext, { expectation: card }))).accepted, true);
+  // Monday: the strategy run with its leader, read before anything is widened: the ids a registration cites.
+  const run = await strategyRun(mounted, S01, { now: MONDAY });
+  const bare = JSON.parse(await read.execute({ strategy: S01, run, market_run: market }, exec(ROLE)));
+  // The market run's three artifacts at their caps, written over the accepted ones (the reader takes them as accepted).
+  const marketDir = await realpath(join(root, "cn-market", "analysis", market));
+  const stored = async (module: string) => JSON.parse(await readFile(join(marketDir, `${module}.json`), "utf8"));
+  await writeArtifact(marketDir, "environment", { ...(await stored("environment")), cycle_anchor: "锚".repeat(120), claims: claims(1) });
+  await writeArtifact(marketDir, "sentiment", { ...(await stored("sentiment")), claims: claims(2) });
+  const theme = await stored("theme");
+  const boards = [...MAINLINE.map(([code]) => code), "BK0001", "BK0002", "BK0003"];
+  await writeArtifact(marketDir, "theme", {
+    ...theme, claims: claims(3),
+    mainline_candidates: boards.map((board, i) => ({ board, name: `示例${i}`.padEnd(40, "板"), evidence_ids: [...theme.mainline_candidates[0].evidence_ids, ...sixteen(40 + i)].slice(0, 16) })),
+  });
+  // Then the run's leader and counterevidence at their caps.
+  const runDir = await realpath(join(root, S01, "analysis", run));
+  const leader = JSON.parse(await readFile(join(runDir, "leader.json"), "utf8"));
+  const [own] = leader.leader_candidates;
+  await writeArtifact(runDir, "leader", {
+    ...leader, claims: claims(5), top_pattern_flags: leader.top_pattern_flags,
+    leader_candidates: [own, ...["sz000333", "sh601318", "sz000001", "sh600000"].map((symbol, i) => ({ symbol, name: `示例${i}`.padEnd(20, "股"), rank: i + 2, board: null, evidence_ids: sixteen(60 + i) }))]
+      .map((candidate) => ({ ...candidate, evidence_ids: [...candidate.evidence_ids, ...sixteen(70)].slice(0, 16) })),
+  });
+  const cited = rowsOf(bare).map((row) => row.id).slice(0, 16);
+  assert.equal(cited.length, 16);
+  const item = "候选的地位只有一个交易日的冻结证据，".repeat(9).slice(0, 160);
+  await counterevidence(root, S01, run, bare, 12, item);
+  const review = JSON.parse(await readFile(join(runDir, "counterevidence.json"), "utf8"));
+  // A real counterevidence artifact carries claims too: four at their cap.
+  await writeArtifact(runDir, "counterevidence", { ...review, claims: claims(80).slice(0, 4), items: review.items.map((entry: any) => ({ ...entry, evidence_ids: cited })) });
+
+  const text = await read.execute({ strategy: S01, run, market_run: market }, exec(ROLE));
+  const size = Buffer.byteLength(text, "utf8");
+  assert.ok(size <= MAX_CONTEXT_BYTES, `${size} bytes`);
+  const context = JSON.parse(text);
+  // Measured 2026-10-26: 30,710 bytes - the five views 11,730 (leader 1,958, counterevidence 7,407, sentiment 221, theme 1,558,
+  // environment 586), the previous card 2,207, the rest of the fixed part, then rows up to the cap; none skipped.
+  assert.equal(context.status_expected, "OK");
+  assert.deepEqual(context.missing, []);
+  const modules = context.artifacts.map((row: any) => row.module);
+  for (const module of ["leader", "counterevidence", "sentiment", "theme"]) assert.ok(modules.includes(module), `${module} shown: ${modules}`);
+  assert.deepEqual(modules.slice(0, 2), ["leader", "counterevidence"]);
+  const shown = context.artifacts[1].headline.items;
+  assert.equal(shown.length, 12);
+  for (const entry of shown) assert.deepEqual([Array.from(entry.text).length, entry.evidence_ids.length, entry.ids_total], [120, 3, 16]);
+  assert.equal(context.artifacts[0].headline.leader_candidates.length, 5);
+  // The run's own: two claims of 60 characters; the market run's: headline-only, claims_total beside.
+  for (const view of context.artifacts.slice(0, 2)) assert.deepEqual(view.claims.map((claim: any) => Array.from(claim.text).length), [60, 60]);
+  for (const view of context.artifacts.slice(2)) assert.deepEqual([view.claims, view.claims_total], [[], 12]);
+  assert.equal(context.artifacts.find((row: any) => row.module === "sentiment").headline.state, "EXPANSION");
+  assert.equal(context.artifacts.find((row: any) => row.module === "theme").headline.mainline_candidates.length, 5);
+  assert.deepEqual(context.previous.expectation, card, "the 2,048-byte card is shown as stored");
+  assert.ok(!("card_truncated" in context.previous));
+  assert.equal(Buffer.byteLength(context.falsification, "utf8"), FALSIFICATION_BYTES);
+  // S01 on Monday, citing what this context lets it cite, grading Friday's card on a quote this run froze.
+  const id = ids(bare);
+  const theme0 = idWhere(bare, (row) => row.kind === "board" && row.code === "BK0715");
+  const s01 = registration(bare, {
+    preconditions: [
+      { id: "p1", name: "theme_gate", status: "met", evidence_ids: [theme0] },
+      { id: "p2", name: "candidate_before_divergence", status: "met", evidence_ids: [context.artifacts[0].id] },
+      { id: "p3", name: "theme_not_falsified", status: "met", evidence_ids: [theme0] },
+      { id: "p4", name: "negative_tail_not_widening", status: "met", evidence_ids: [id.measure("yesterday_negative_tail")] },
+      { id: "p5", name: "minute_confirmation", status: "unmet: no source", evidence_ids: [] },
+    ],
+    addressed: Array.from({ length: 12 }, (_, i) => ({ item: `x${i + 1}`, response: "记入限制说明，下一运行核对。" })),
+    expectation_review: { previous_run: friday, grade: "弱于", evidence_ids: [id.quote("sh600519")] },
+    claims: [{ id: "c1", text: "S01 登记：前提见所引证据，分钟确认缺少来源。", basis: "HISTORICAL", evidence_ids: [theme0, id.measure("yesterday_negative_tail")] }],
+  });
+  assert.deepEqual(await submitted(submit, S01, run, s01), { accepted: true, module: "mode", run });
 });

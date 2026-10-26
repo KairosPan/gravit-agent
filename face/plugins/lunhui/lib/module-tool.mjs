@@ -51,11 +51,12 @@ const tables = loadCalendars();
  *     view?: (item: any, digest: import("./contract-core.mjs").ContextDigest) => Record<string, unknown>,
  *     filter?: (item: any, digest: import("./contract-core.mjs").ContextDigest) => boolean }[],
  *   marketRun?: "required" | "optional", marketSources?: string[], marketArtifacts?: string[], runArtifacts?: string[],
+ *   artifactViews?: Record<string, import("./contract-core.mjs").ArtifactViewBound>,
  *   derivedFilter?: (item: any, digest: import("./contract-core.mjs").ContextDigest) => boolean,
  *   extra?: (runs: import("../runs-row.mjs").LunhuiRuns, located: { strategy: string, run: string },
  *     read: { manifest: any, artifacts: Record<string, Record<string, any>>, market: { run: string } | null }) => Promise<Record<string, unknown>>,
  * }} ModuleContract
- * `marketSources`, `marketArtifacts`, `runArtifacts` and `derivedFilter` are `buildContext`'s: the
+ * `marketSources`, `marketArtifacts`, `runArtifacts`, `artifactViews` and `derivedFilter` are `buildContext`'s: the
  * cited run's sources and accepted artifacts the module reads, its own run's accepted artifacts, and
  * the derived items it shows. `extra`, read inside the read's `build` - the run sealed, under its
  * mutex, so it reads other runs and the strategy without a lock - gives `buildContext`'s `extra`;
@@ -159,7 +160,7 @@ export function defineModule({ module, channel, contract, runs }) {
             sources: contract.sources, derivedFirst: contract.derivedFirst, derivedView: contract.derivedView, priority: contract.priority,
             hypotheses: contract.hypotheses, schema: contract.schema, hints: contract.hints,
             example: contract.example, required: contract.required, runArtifacts: contract.runArtifacts, artifacts,
-            derivedFilter: contract.derivedFilter, extra,
+            derivedFilter: contract.derivedFilter, extra, artifactViews: contract.artifactViews,
             ...(marketRun === undefined ? {} : { marketRun, market, marketSources: contract.marketSources, marketArtifacts: contract.marketArtifacts }),
           });
           digests.set(`${located.strategy}/${located.run}/${module}`, digest);

@@ -576,15 +576,16 @@ test("buildContext with a cited run: market items join the digest as market:<sou
 test("buildContext with a cited run: the named market and run artifacts are shown as digests and citable as <module>@<snapshot_id>", () => {
   const { digest, text } = cited();
   const context = JSON.parse(text);
+  // The run's own artifacts first, then the market run's.
   assert.deepEqual(context.artifacts, [
+    { id: `leader@${MANIFEST.snapshot_id}`, module: "leader", headline: { leader_candidates: [], top_pattern_flags: [] }, claims: [{ id: "c1", text: "丁在册。", evidence_ids: [quote.id] }] },
     {
       id: `sentiment@${MARKET_SNAP}`, module: "sentiment", headline: { state: "REPAIR", money_effect: "WEAK", freeze_type: "UNKNOWN" },
       claims: [{ id: "c1", text: "封板率回升。", evidence_ids: [marketSeal.id] }],
     },
     { id: `theme@${MARKET_SNAP}`, module: "theme", headline: { mainline_candidates: [], theme_stage: "UNKNOWN", rotation: "UNKNOWN" }, claims: [] },
-    { id: `leader@${MANIFEST.snapshot_id}`, module: "leader", headline: { leader_candidates: [], top_pattern_flags: [] }, claims: [{ id: "c1", text: "丁在册。", evidence_ids: [quote.id] }] },
   ]);
-  assert.deepEqual([...digest.artifactIds], [`sentiment@${MARKET_SNAP}`, `theme@${MARKET_SNAP}`, `leader@${MANIFEST.snapshot_id}`]);
+  assert.deepEqual([...digest.artifactIds], [`leader@${MANIFEST.snapshot_id}`, `sentiment@${MARKET_SNAP}`, `theme@${MARKET_SNAP}`]);
   // The parsed artifacts stay in the digest for a contract's rules, by id.
   assert.deepEqual(digest.artifacts.get(`sentiment@${MARKET_SNAP}`), { module: "sentiment", source: "market:sentiment", scope: "CURRENT", artifact: sentimentArtifact });
   assert.equal(digest.artifacts.get(`leader@${MANIFEST.snapshot_id}`).source, "leader");
@@ -635,22 +636,64 @@ test("validateEnvelope with a cited run: market_run and market_snapshot_id requi
   checkCiting(citing(older, { claims: [{ id: "c1", text: "前一交易日的读数为修复。", basis: "HISTORICAL", evidence_ids: [`sentiment@${MARKET_SNAP}`, marketZt.id] }] }), older);
 });
 
-test("buildContext with a cited run: an artifact view is bounded - six claims, each text cut to 120 characters, ids whole, claims_total when cut", () => {
+test("buildContext with a cited run: an artifact view is bounded - four claims, each text cut to 120 characters, three ids with ids_total when more, claims_total when cut", () => {
   const long = "封".repeat(300);
   const claims = Array.from({ length: 10 }, (_, i) => ({ id: `c${i + 1}`, text: long, basis: "CURRENT", evidence_ids: [marketSeal.id, marketZt.id] }));
   const big = { ...sentimentArtifact, claims };
   const { text, digest } = cited(marketOf(SESSION, { sentiment: big, theme: themeArtifact }));
-  const view = JSON.parse(text).artifacts[0];
+  const view = JSON.parse(text).artifacts.find((row: Loose) => row.module === "sentiment");
   assert.equal(view.id, `sentiment@${MARKET_SNAP}`);
-  assert.equal(view.claims.length, 6);
+  assert.equal(view.claims.length, 4);
   assert.equal(view.claims_total, 10);
   for (const claim of view.claims) {
     assert.equal(Array.from(claim.text).length, 120);
+    // Three ids or fewer are shown whole, no ids_total.
     assert.deepEqual(claim.evidence_ids, [marketSeal.id, marketZt.id]);
+    assert.equal(Object.hasOwn(claim, "ids_total"), false);
   }
+  const many = Array.from({ length: 16 }, (_, i) => `ev_${String(i).padStart(24, "0")}`);
+  const wide = { ...sentimentArtifact, claims: [{ id: "c1", text: "封板率回升。", basis: "CURRENT", evidence_ids: many }] };
+  const trimmed = JSON.parse(cited(marketOf(SESSION, { sentiment: wide, theme: themeArtifact })).text).artifacts.find((row: Loose) => row.module === "sentiment");
+  assert.deepEqual(trimmed.claims[0], { id: "c1", text: "封板率回升。", evidence_ids: many.slice(0, 3), ids_total: 16 });
   // The digest keeps the artifact whole; a view within the bound has no claims_total.
   assert.equal(digest.artifacts.get(`sentiment@${MARKET_SNAP}`).artifact.claims.length, 10);
-  assert.equal(Object.hasOwn(JSON.parse(cited().text).artifacts[0], "claims_total"), false);
+  assert.equal(Object.hasOwn(JSON.parse(cited().text).artifacts.find((row: Loose) => row.module === "sentiment"), "claims_total"), false);
+});
+
+test("buildContext with a cited run: a headline array of objects shows each evidence_ids as three ids with ids_total, and each text cut to 120 characters when every object has one; every other field whole", () => {
+  const ids = Array.from({ length: 16 }, (_, i) => `ev_${String(i).padStart(24, "0")}`);
+  const items = Array.from({ length: 12 }, (_, i) => ({ id: `x${i + 1}`, against: "leader", kind: "MISSING_EVIDENCE", text: "证".repeat(160), evidence_ids: ids }));
+  const review = { module: "counterevidence", status: "OK", items, claims: [] };
+  const named = { board: "BK0002", name: "戊".repeat(40), evidence_ids: [marketBoard.id] };
+  const theme = { ...themeArtifact, mainline_candidates: [named] };
+  const { text, digest } = cited(marketOf(SESSION, { sentiment: sentimentArtifact, theme }), {
+    runArtifacts: ["leader", "counterevidence"], artifacts: { leader: leaderArtifact, counterevidence: review },
+  });
+  const context = JSON.parse(text);
+  const shown = context.artifacts.find((row: Loose) => row.module === "counterevidence");
+  assert.equal(shown.headline.items.length, 12);
+  for (const [i, item] of shown.headline.items.entries()) {
+    assert.deepEqual(Object.keys(item), ["id", "against", "kind", "text", "evidence_ids", "ids_total"]);
+    assert.deepEqual([item.id, item.against, item.kind], [`x${i + 1}`, "leader", "MISSING_EVIDENCE"]);
+    assert.equal(item.text, "证".repeat(120));
+    assert.deepEqual([item.evidence_ids, item.ids_total], [ids.slice(0, 3), 16]);
+  }
+  // A headline array whose objects carry no text field keeps its names whole: the theme's (one id, shown whole).
+  assert.deepEqual(context.artifacts.find((row: Loose) => row.module === "theme").headline.mainline_candidates, [named]);
+  // The digest keeps the items whole.
+  assert.equal(digest.artifacts.get(`counterevidence@${MANIFEST.snapshot_id}`).artifact.items[0].text, "证".repeat(160));
+  assert.equal(digest.artifacts.get(`counterevidence@${MANIFEST.snapshot_id}`).artifact.items[0].evidence_ids.length, 16);
+});
+
+test("buildContext with a cited run: artifactViews sets a module's claims and their characters - 0 is headline-only with claims_total; other modules keep four of 120", () => {
+  const claims = Array.from({ length: 5 }, (_, i) => ({ id: `c${i + 1}`, text: "封".repeat(200), basis: "CURRENT", evidence_ids: [marketSeal.id] }));
+  const market = marketOf(SESSION, { sentiment: { ...sentimentArtifact, claims }, theme: { ...themeArtifact, claims } });
+  const { text } = cited(market, { artifacts: { leader: { ...leaderArtifact, claims } }, artifactViews: { sentiment: { claims: 0 }, leader: { claims: 2, claimText: 60 } } });
+  const views = Object.fromEntries(JSON.parse(text).artifacts.map((row: Loose) => [row.module, row]));
+  assert.deepEqual([views.sentiment.claims, views.sentiment.claims_total, views.sentiment.headline.state], [[], 5, "REPAIR"]);
+  assert.deepEqual(views.leader.claims.map((claim: Loose) => Array.from(claim.text).length), [60, 60]);
+  assert.equal(views.leader.claims_total, 5);
+  assert.deepEqual(views.theme.claims.map((claim: Loose) => Array.from(claim.text).length), [120, 120, 120, 120]);
 });
 
 test("buildContext with a cited run: an artifact the cap leaves out is not citable, counted in truncated, and missing when required", () => {
@@ -658,14 +701,23 @@ test("buildContext with a cited run: an artifact the cap leaves out is not citab
   const { text, digest } = cited(marketOf(SESSION, { sentiment: sentimentArtifact, theme: wide }));
   const context = JSON.parse(text);
   assert.ok(Buffer.byteLength(text, "utf8") <= MAX_CONTEXT_BYTES);
-  assert.deepEqual(context.artifacts.map((row: Loose) => row.id), [`sentiment@${MARKET_SNAP}`]);
-  assert.deepEqual([...digest.artifactIds], [`sentiment@${MARKET_SNAP}`]);
+  // The run's own leader comes first, so the cap leaves out the market run's theme, not it.
+  assert.deepEqual(context.artifacts.map((row: Loose) => row.id), [`leader@${MANIFEST.snapshot_id}`, `sentiment@${MARKET_SNAP}`]);
+  assert.deepEqual([...digest.artifactIds], [`leader@${MANIFEST.snapshot_id}`, `sentiment@${MARKET_SNAP}`]);
   assert.ok(context.truncated.some((group: Loose) => group.source === "market:theme" && group.kind === "artifact" && group.count === 1));
-  // The run's leader comes after the theme, so the latching cap leaves it out too.
-  assert.deepEqual(digest.missing, ["market:theme", "leader"]);
-  assert.deepEqual(context.missing, ["market:theme", "leader"]);
+  assert.deepEqual(digest.missing, ["market:theme"]);
+  assert.deepEqual(context.missing, ["market:theme"]);
   assert.equal(context.status_expected, "NOT_EVALUABLE");
   assert.equal(category(() => checkCiting(citing(digest, { claims: [{ id: "c1", text: "读数待核。", basis: "CURRENT", evidence_ids: [quote.id, `theme@${MARKET_SNAP}`] }] }), digest)), "REFERENCE");
+  // Artifact views do not latch: a view past the cap is skipped, the smaller ones after it and the rows still shown.
+  const skipped = cited(marketOf(SESSION, { sentiment: { ...sentimentArtifact, money_effect: "x".repeat(29 * 1024) }, theme: themeArtifact }));
+  const after = JSON.parse(skipped.text);
+  assert.ok(Buffer.byteLength(skipped.text, "utf8") <= MAX_CONTEXT_BYTES);
+  assert.deepEqual(after.artifacts.map((row: Loose) => row.module), ["leader", "theme"]);
+  assert.deepEqual(skipped.digest.missing, []);
+  assert.ok(after.truncated.some((group: Loose) => group.source === "market:sentiment" && group.kind === "artifact" && group.count === 1));
+  assert.deepEqual(after.evidence.map((row: Loose) => row.id), [quote.id, marketZt.id, marketBoard.id]);
+  assert.deepEqual(after.derived.map((row: Loose) => row.id), [marketSeal.id]);
   // A left-out artifact the contract does not require is not missing.
   const optional = cited(marketOf(SESSION, { sentiment: sentimentArtifact, theme: wide }), { required: ["quotes"] });
   assert.deepEqual(optional.digest.missing, []);

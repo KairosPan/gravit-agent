@@ -378,7 +378,7 @@ test("strategy run smoke: after the market run, Gravit freezes two equities' quo
         module, run: own.manifest.run, manifest: own.manifest, evidence: own.evidence,
         sources: contract.sources, derivedFirst: contract.derivedFirst, derivedView: contract.derivedView, priority: contract.priority,
         hypotheses: contract.hypotheses, schema: contract.schema, hints: contract.hints, example: contract.example, required: contract.required,
-        runArtifacts: contract.runArtifacts, artifacts: own.artifacts, derivedFilter: contract.derivedFilter, extra,
+        runArtifacts: contract.runArtifacts, artifacts: own.artifacts, derivedFilter: contract.derivedFilter, extra, artifactViews: contract.artifactViews,
         marketRun: contract.marketRun, market: citedRun, marketSources: contract.marketSources, marketArtifacts: contract.marketArtifacts,
       });
       assert.deepEqual(validateEnvelope(text, { module, context: digest, schema: contract.schema, owns: contract.owns, ownedBy: contract.ownedBy,
