@@ -1,5 +1,6 @@
 // face/client/js/render/channel.js — a channel's page (spec 2026-10-19 §7 Stage 3 "Channels"): the status headline,
-// the thesis, the latest backtest, the backtests, the journal, the files and the rosters, from /data/channels/overview.
+// the thesis, the latest backtest, the research runs, the backtests, the journal, the files and the rosters, from
+// /data/channels/overview.
 // Everything here was written by Gravit or the operator into the channel's directory: text through esc, the thesis
 // through the thread's DOM-built markdown.
 import { esc, cls, attrs } from '../html.js';
@@ -7,6 +8,7 @@ import { icon } from '../icons.js';
 import { fmtClock, fmtDate } from '../time.js';
 import { chip, markdownHtml } from './thread.js';
 import { kv } from './controls.js';
+import { runsView } from '../host/runs-view.js';
 
 const JOURNAL_ROWS = 20;
 const LATEST_FIELDS = 12;
@@ -35,6 +37,22 @@ function latest(body) {
   const json = l.json && typeof l.json === 'object' && !Array.isArray(l.json) ? l.json : {};
   const rows = Object.entries(json).filter(([, v]) => scalar(v)).slice(0, LATEST_FIELDS).map(([k, v]) => [k, esc(fieldWord(v))]);
   return sec('Latest backtest', `<div class="chan-row"><span class="chan-row-name mono">${esc(l.file)}</span></div>${rows.length ? kv(rows) : ''}`);
+}
+
+// the Lunhui research runs (modules spec §5.11): the latest sealed run with an artifact — its line, a chip per module,
+// the expectation card, each artifact whole in a collapsed details — then a dim line per run and the omitted count
+function researchRuns(body) {
+  const v = runsView(body);
+  const l = v.latest;
+  const head = l ? `<div class="chan-row"><span class="chan-row-name mono">${esc([l.run, `as of ${l.asOf ?? '—'}`, l.snapshotId && `snapshot ${l.snapshotId}`, l.marketRun && `cn-market run ${l.marketRun}`].filter(Boolean).join(' · '))}</span></div>` +
+    (l.chips.length ? `<div class="btn-row">${l.chips.map(c => chip(c.text)).join('')}</div>` : '') +
+    (l.expectation ? kv(l.expectation.map(([k, w]) => [k, esc(w)])) : '') +
+    l.details.map(d => `<details class="acct-shown"><summary>${esc(d.module)}</summary><div class="dsec-line mono">${esc(d.json)}</div></details>`).join('') : '';
+  const runLines = v.rows.map(r => {
+    const arts = `${r.artifacts.length} artifacts${r.artifacts.length ? `: ${r.artifacts.join(', ')}` : ''}`;
+    return `<div class="chan-row dim"><span class="chan-row-name mono">${esc(r.run)}</span><span class="chan-row-meta">${esc([`as of ${r.asOf ?? '—'}`, arts, bytesWord(r.bytes), !r.sealed && 'unsealed'].filter(Boolean).join(' · '))}</span></div>`;
+  }).join('');
+  return sec('Research runs', head + (v.empty ? none(v.empty) : '') + runLines + (v.omitted > 0 ? none(`older runs not listed: ${v.omitted}`) : ''));
 }
 
 function rows(label, list, toLine) {
@@ -95,7 +113,7 @@ export function renderChannelScreen(state, now) {
   const stale = c.status === 'failed' ? `<div class="${cls('chan-stale', 'dim')}">As of ${esc(fmtClock(c.at ?? now))} · stale ${retry(id)}</div>` : '';
   const body = data.body && typeof data.body === 'object' ? data.body : {};
   return shell(
-    stale + headline(status) + thesis(body) + latest(body) +
+    stale + headline(status) + thesis(body) + latest(body) + researchRuns(body) +
     rows('Backtests', body.backtests, b => line(b.file, bytesWord(b.bytes))) +
     rows('Journal', (body.journal ?? []).slice(0, JOURNAL_ROWS), j => `<div class="chan-row"><span class="chan-row-meta">${esc(j.date)}</span><span class="chan-row-name">${esc(j.text)}</span></div>`) +
     rows('Files', body.files, f => line(f.name, [bytesWord(f.bytes), Number.isFinite(Date.parse(f.mtime)) ? fmtDate(Date.parse(f.mtime)) : ''].filter(Boolean).join(' · '))) +
