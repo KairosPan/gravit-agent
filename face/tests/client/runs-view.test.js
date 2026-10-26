@@ -2,7 +2,7 @@
 // row per listed run, the omitted count, and the two empty words — shaped from the overview, pure.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runsView, valueWord } from '../../client/js/host/runs-view.js';
+import { runsView, valueWord, countWord } from '../../client/js/host/runs-view.js';
 
 const R1 = '2026-10-24-0930-ab12';
 const R2 = '2026-10-23-0930-cd34';
@@ -38,7 +38,8 @@ test('valueWord: scalars as themselves, a short scalar list joined, longer or ne
   assert.equal(valueWord('ice'), 'ice'); assert.equal(valueWord(3), '3'); assert.equal(valueWord(0.123456), '0.1235');
   assert.equal(valueWord(null), 'null'); assert.equal(valueWord(true), 'true');
   assert.equal(valueWord(['a', 'b', 'c']), 'a, b, c'); assert.equal(valueWord(['a', 'b', 'c', 'd']), '4 items');
-  assert.equal(valueWord([{ x: 1 }]), '1 items'); assert.equal(valueWord({ a: 1, b: 2 }), '2 fields');
+  assert.equal(valueWord([{ x: 1 }]), '1 item'); assert.equal(valueWord([{ x: 1 }, { x: 2 }]), '2 items');
+  assert.equal(valueWord({ a: 1, b: 2 }), '2 fields'); assert.equal(valueWord({ a: 1 }), '1 field');
 });
 
 test('runsView: shapes the latest run, its chips and the rows; omitted carries through', () => {
@@ -60,6 +61,12 @@ test('runsView: shapes the latest run, its chips and the rows; omitted carries t
     { run: R1, asOf: '2026-10-24', sealed: true, artifacts: ['sentiment', 'theme', 'mode', 'counterevidence'], bytes: 3072 },
     { run: R2, asOf: null, sealed: false, artifacts: [], bytes: 0 },
   ]);
+});
+
+test('countWord: singular for one, plural otherwise; one counterevidence item reads 1 item', () => {
+  assert.equal(countWord(0, 'item'), '0 items'); assert.equal(countWord(1, 'item'), '1 item'); assert.equal(countWord(2, 'artifact'), '2 artifacts');
+  const b = runsBody(); b.latestRun.artifacts.counterevidence.headline.items = [{ a: 1 }];
+  assert.equal(runsView(b).latest.chips[3].text, 'counterevidence: 1 item');
 });
 
 test('runsView: a not-evaluable status read from the row when the whole artifact lacks it; no expectation is null', () => {

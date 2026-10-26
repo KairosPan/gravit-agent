@@ -119,7 +119,7 @@ test('the channel page draws the research runs after the latest backtest, every 
     runs: [
       { run, asOf: '2026-10-24', snapshotId: bad, sealed: true, kind: 'market', marketRun: null, bytes: 2048,
         artifacts: { sentiment: { accepted: true, status: null, contractVersion: '1', headline: { state: bad } }, theme: { accepted: true, status: 'NOT_EVALUABLE', contractVersion: '1', headline: {} } } },
-      { run: bad, asOf: null, snapshotId: null, sealed: false, kind: null, artifacts: {}, marketRun: null, bytes: 10 },
+      { run: bad, asOf: null, snapshotId: null, sealed: false, kind: null, artifacts: { mode: { accepted: true, status: null, contractVersion: '1', headline: {} } }, marketRun: null, bytes: 10 },
     ],
     runsOmitted: 2,
     latestRun: {
@@ -139,17 +139,19 @@ test('the channel page draws the research runs after the latest backtest, every 
   assert.match(h, />horizon<[\s\S]*?>3</);
   assert.match(h, /<details class="acct-shown"><summary>mode<\/summary>[\s\S]*?\{&quot;mode&quot;:&quot;&lt;script&gt;/);
   assert.match(h, /as of 2026-10-24 · 2 artifacts: sentiment, theme · 2\.0 KB/);
-  assert.match(h, /as of — · 0 artifacts · 10 B · unsealed/);
+  assert.match(h, /as of — · 1 artifact: mode · 10 B · unsealed/);
   assert.match(h, /older runs not listed: 2/);
   assert.doesNotMatch(h, /<script>/);
 });
 
-test('a channel with no runs says so; runs without an artifact say the other word', () => {
+test('a channel with no runs draws no research runs; runs without an artifact say so', () => {
   setMarkdown(null);
-  assert.match(renderChannelScreen(on(overview()), NOW), />Research runs<[\s\S]*?no runs yet/);
+  assert.doesNotMatch(renderChannelScreen(on(overview()), NOW), /Research runs/, 'no runs on the wire');
+  const empty = overview(); empty.body = { ...empty.body, runs: [], runsOmitted: 0, latestRun: null };
+  assert.doesNotMatch(renderChannelScreen(on(empty), NOW), /Research runs/, 'an empty runs list');
   const t = overview();
   t.body = { ...t.body, runs: [{ run: 'r1', asOf: null, snapshotId: null, sealed: true, kind: 'market', artifacts: {}, marketRun: null, bytes: 0 }], runsOmitted: 0, latestRun: null };
   const h = renderChannelScreen(on(t), NOW);
-  assert.match(h, /no sealed run with an artifact yet/); assert.match(h, /r1/);
+  assert.match(h, />Research runs<[\s\S]*?no sealed run with an artifact yet/); assert.match(h, /r1/); assert.match(h, /0 artifacts/);
   assert.doesNotMatch(h, /older runs not listed/);
 });

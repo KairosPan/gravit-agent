@@ -7,13 +7,16 @@ const plain = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const str = v => (typeof v === 'string' ? v : null);
 const ARRAY_SHOWN = 3;
 
+// a count with its noun, singular for one: 1 item, 2 items
+export const countWord = (n, noun) => `${n} ${noun}${n === 1 ? '' : 's'}`;
+
 // one headline value as a word: a scalar as itself (a fraction to four places), a short list of scalars joined, any
 // other list by its length, an object by its field count
 export function valueWord(v) {
   if (typeof v === 'number') return Number.isInteger(v) ? String(v) : String(Math.round(v * 1e4) / 1e4);
   if (scalar(v)) return String(v);
-  if (Array.isArray(v)) return v.length <= ARRAY_SHOWN && v.every(scalar) ? v.map(valueWord).join(', ') : `${v.length} items`;
-  if (plain(v)) return `${Object.keys(v).length} fields`;
+  if (Array.isArray(v)) return v.length <= ARRAY_SHOWN && v.every(scalar) ? v.map(valueWord).join(', ') : countWord(v.length, 'item');
+  if (plain(v)) return countWord(Object.keys(v).length, 'field');
   return '';
 }
 
@@ -22,7 +25,7 @@ export function valueWord(v) {
 function chipText(module, art, status) {
   if (status === 'NOT_EVALUABLE') return `${module}: not evaluable`;
   const h = plain(art.headline) ? art.headline : {};
-  if (module === 'counterevidence') return `${module}: ${Array.isArray(h.items) ? h.items.length : 0} items`;
+  if (module === 'counterevidence') return `${module}: ${countWord(Array.isArray(h.items) ? h.items.length : 0, 'item')}`;
   const words = Object.values(h).filter(v => v !== undefined).map(valueWord).filter(w => w !== '');
   return words.length ? `${module}: ${words.join(' · ')}` : module;
 }
