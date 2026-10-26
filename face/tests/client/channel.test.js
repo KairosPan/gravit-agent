@@ -123,7 +123,7 @@ test('the channel page draws the research runs after the latest backtest, every 
     ],
     runsOmitted: 2,
     latestRun: {
-      run, asOf: '2026-10-24', snapshotId: bad, marketRun: 'cn-run-1',
+      run, asOf: '2026-10-24', session: '2026-10-23', snapshotId: bad, marketRun: 'cn-run-1',
       artifacts: {
         sentiment: { headline: { state: bad }, json: { state: bad } },
         theme: { headline: {}, json: { status: 'NOT_EVALUABLE' } },
@@ -133,7 +133,7 @@ test('the channel page draws the research runs after the latest backtest, every 
   };
   const h = renderChannelScreen(on(t), NOW);
   assert.match(h, />Latest backtest<[\s\S]*>Research runs</, 'after the latest backtest');
-  assert.match(h, /Research runs<[\s\S]*?2026-10-24-0930-ab12 · as of 2026-10-24 · snapshot &lt;script&gt;[\s\S]*?cn-market run cn-run-1/);
+  assert.match(h, /Research runs<[\s\S]*?2026-10-24-0930-ab12 · as of 2026-10-24 · session 2026-10-23 · snapshot &lt;script&gt;[\s\S]*?cn-market run cn-run-1/);
   assert.match(h, /class="chip grey">sentiment: &lt;script&gt;/);
   assert.match(h, /class="chip grey">theme: not evaluable</);
   assert.match(h, />horizon<[\s\S]*?>3</);

@@ -45,13 +45,13 @@ function latestOf(l, rows) {
   });
   const exp = plain(arts.mode) && plain(arts.mode.headline) ? arts.mode.headline.expectation : undefined;
   return {
-    run: l.run, asOf: str(l.asOf), snapshotId: str(l.snapshotId), marketRun: str(l.marketRun), chips,
+    run: l.run, asOf: str(l.asOf), session: str(l.session), snapshotId: str(l.snapshotId), marketRun: str(l.marketRun), chips,
     expectation: plain(exp) ? Object.entries(exp).map(([k, v]) => [k, valueWord(v)]) : null,
     details: modules.map(([module, a]) => ({ module, json: compact(a.json ?? null) })),
   };
 }
 
-// {latest: {run, asOf, snapshotId, marketRun, chips: [{module, text}], expectation: [[key, value]] | null,
+// {latest: {run, asOf, session, snapshotId, marketRun, chips: [{module, text}], expectation: [[key, value]] | null,
 //   details: [{module, json}]} | null, rows: [{run, asOf, sealed, artifacts: string[], bytes}], omitted, empty}
 export function runsView(body) {
   const wire = Array.isArray(body?.runs) ? body.runs.filter(r => plain(r) && typeof r.run === 'string') : [];

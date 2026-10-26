@@ -208,16 +208,19 @@ export interface RunArtifact {
   headline: Record<string, unknown>;
 }
 
-/** One Lunhui research run under `analysis/` (modules spec A14). `asOf`, `snapshotId`, `sealed`
- * and `kind` come from `run.json`, null (`sealed` false) when it is absent, not a regular one-link
- * file, unparseable, over its cap, nested too deep, or the field is off its type. `artifacts`
- * holds each module file present that is a regular one-link file and parses within its cap and
- * depth as an object; any other is left out. `marketRun` is the accepted `mode.json`'s
- * `market_run`, else null. `bytes` is every regular one-link file directly in the run directory,
- * by its size - evidence included, its content never read. */
+/** One Lunhui research run under `analysis/` (modules spec A14). `asOf`, `session`, `snapshotId`,
+ * `sealed` and `kind` come from `run.json`, null (`sealed` false) when it is absent, not a regular
+ * one-link file, unparseable, over its cap, nested too deep, or the field is off its type; `asOf`
+ * is the wall clock the newest evidence came in, `session` the trading day it belongs to.
+ * `artifacts` holds each module that `run.json`'s `artifacts` names (A10: what a submit landed)
+ * whose file is a regular one-link file and parses within its cap and depth as an object; any
+ * other is left out, so a run.json that cannot be read accepts none. `marketRun` is the accepted
+ * `mode.json`'s `market_run`, else null. `bytes` is every regular one-link file directly in the
+ * run directory, by its size - evidence included, its content never read. */
 export interface RunRow {
   run: string;
   asOf: string | null;
+  session: string | null;
   snapshotId: string | null;
   sealed: boolean;
   kind: "market" | "strategy" | null;
@@ -231,6 +234,7 @@ export interface RunRow {
 export interface LatestRun {
   run: string;
   asOf: string | null;
+  session: string | null;
   snapshotId: string | null;
   artifacts: { [module: string]: { headline: Record<string, unknown>; json: Record<string, unknown> } };
   marketRun: string | null;
@@ -394,9 +398,11 @@ async function readAnalysisRuns(strategyDir: string): Promise<AnalysisRuns> {
     if (!(await stillAt(analysisDir, realAnalysis)) || !(await stillAt(runDir, join(realAnalysis, run)))) continue;
     const read = await readBoundedJson(join(runDir, "run.json"), RUN_MANIFEST_MAX_BYTES);
     const manifest = read?.parsed === true && isRecord(read.json) ? read.json : {};
+    const named = Array.isArray(manifest.artifacts) ? manifest.artifacts : [];
     const artifacts: RunRow["artifacts"] = {};
     const whole: LatestRun["artifacts"] = {};
     for (const { name, file, headline: fields } of MODULE_HEADLINES) {
+      if (!named.includes(name)) continue;
       const artifact = await readBoundedJson(join(runDir, file), RUN_ARTIFACT_MAX_BYTES);
       if (artifact?.parsed !== true || !isRecord(artifact.json)) continue;
       const headline = headlineOf(artifact.json, fields);
@@ -410,6 +416,7 @@ async function readAnalysisRuns(strategyDir: string): Promise<AnalysisRuns> {
     const row: RunRow = {
       run,
       asOf: stringOrNull(manifest.as_of),
+      session: stringOrNull(manifest.session),
       snapshotId: stringOrNull(manifest.snapshot_id),
       sealed: typeof manifest.sealed_at === "string" && manifest.sealed_at !== "",
       kind: manifest.kind === "market" || manifest.kind === "strategy" ? manifest.kind : null,
@@ -419,7 +426,7 @@ async function readAnalysisRuns(strategyDir: string): Promise<AnalysisRuns> {
     };
     out.runs.push(row);
     if (out.latestRun === null && row.sealed && Object.keys(whole).length > 0) {
-      out.latestRun = { run, asOf: row.asOf, snapshotId: row.snapshotId, artifacts: whole, marketRun: row.marketRun };
+      out.latestRun = { run, asOf: row.asOf, session: row.session, snapshotId: row.snapshotId, artifacts: whole, marketRun: row.marketRun };
     }
   }
   return out;

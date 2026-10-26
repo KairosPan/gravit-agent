@@ -21,7 +21,7 @@ const runsBody = () => ({
   ],
   runsOmitted: 2,
   latestRun: {
-    run: R1, asOf: '2026-10-24', snapshotId: 's-1', marketRun: '2026-10-24-0900-ef56',
+    run: R1, asOf: '2026-10-24', session: '2026-10-23', snapshotId: 's-1', marketRun: '2026-10-24-0900-ef56',
     artifacts: {
       sentiment: { headline: { state: 'ice', money_effect: 'weak', freeze_type: 0.123456 }, json: { state: 'ice', money_effect: 'weak' } },
       theme: { headline: {}, json: { status: 'NOT_EVALUABLE' } },
@@ -47,7 +47,7 @@ test('runsView: shapes the latest run, its chips and the rows; omitted carries t
   assert.equal(v.empty, null);
   assert.equal(v.omitted, 2);
   assert.deepEqual({ ...v.latest, chips: undefined, expectation: undefined, details: undefined },
-    { run: R1, asOf: '2026-10-24', snapshotId: 's-1', marketRun: '2026-10-24-0900-ef56', chips: undefined, expectation: undefined, details: undefined });
+    { run: R1, asOf: '2026-10-24', session: '2026-10-23', snapshotId: 's-1', marketRun: '2026-10-24-0900-ef56', chips: undefined, expectation: undefined, details: undefined });
   assert.deepEqual(v.latest.chips, [
     { module: 'sentiment', text: 'sentiment: ice · weak · 0.1235' },
     { module: 'theme', text: 'theme: not evaluable' },

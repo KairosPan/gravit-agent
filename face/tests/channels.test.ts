@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fsPromises, { lstat, mkdtemp, mkdir, readdir, rename, writeFile, realpath, stat, rm, symlink, link } from "node:fs/promises";
+import fsPromises, { lstat, mkdtemp, mkdir, readdir, readFile, rename, writeFile, realpath, stat, rm, symlink, link } from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -272,12 +272,19 @@ async function strategyDir(prefix: string): Promise<string> {
   return realpath(await mkdtemp(join(tmpdir(), prefix)));
 }
 
+/** Name `modules` in a run's `run.json` `artifacts[]`, as a module row's submit records what it
+ * landed (spec A10). */
+async function nameArtifacts(runDir: string, modules: string[]): Promise<void> {
+  const manifest = JSON.parse(await readFile(join(runDir, "run.json"), "utf8"));
+  await writeFile(join(runDir, "run.json"), `${JSON.stringify({ ...manifest, artifacts: modules }, null, 2)}\n`);
+}
+
 /** One run as the server makes it: `openRun` at `now`, one quotes freeze carrying a marker the card
  * must never forward, sealed a second later unless `open`, then the artifacts hand-written,
- * pretty-printed as a module row would. */
+ * pretty-printed as a module row would, and named in `run.json` unless `unnamed`. */
 async function makeRun(
-  dir: string, now: Date, opts: { kind?: "market" | "strategy"; open?: boolean; artifacts?: Record<string, unknown> } = {},
-): Promise<{ run: string; runDir: string; manifest: { as_of: string | null; snapshot_id: string | null } | null }> {
+  dir: string, now: Date, opts: { kind?: "market" | "strategy"; open?: boolean; unnamed?: boolean; artifacts?: Record<string, unknown> } = {},
+): Promise<{ run: string; runDir: string; manifest: { as_of: string | null; session: string | null; snapshot_id: string | null } | null }> {
   const { run, dir: runDir } = await openRun(dir, opts.kind ?? "strategy", now);
   await addEvidence(runDir, "quotes", [{ symbol: "sh600000", note: "EVIDENCE-ONLY" }], {
     received_at: now.toISOString(), session: now.toISOString().slice(0, 10), host: "qt.gtimg.cn", delayed: false, truncated: false,
@@ -286,6 +293,8 @@ async function makeRun(
   for (const [file, value] of Object.entries(opts.artifacts ?? {})) {
     await writeFile(join(runDir, file), typeof value === "string" ? value : `${JSON.stringify(value, null, 2)}\n`);
   }
+  const files = Object.keys(opts.artifacts ?? {});
+  if (files.length > 0 && opts.unnamed !== true) await nameArtifacts(runDir, files.map((file) => file.replace(/\.json$/, "")));
   return { run, runDir, manifest };
 }
 
@@ -338,11 +347,11 @@ test("readChannelBody: runs list newest first with sealed, snapshotId and the ar
   const body = await readChannelBody(dir);
   assert.deepEqual(body.runs, [
     {
-      run: newer.run, asOf: null, snapshotId: null, sealed: false, kind: "market", artifacts: {}, marketRun: null,
+      run: newer.run, asOf: null, session: null, snapshotId: null, sealed: false, kind: "market", artifacts: {}, marketRun: null,
       bytes: await filesBytes(newer.runDir),
     },
     {
-      run: older.run, asOf: older.manifest!.as_of, snapshotId: older.manifest!.snapshot_id, sealed: true, kind: "strategy",
+      run: older.run, asOf: older.manifest!.as_of, session: "2026-10-23", snapshotId: older.manifest!.snapshot_id, sealed: true, kind: "strategy",
       artifacts: {
         sentiment: { accepted: true, status: "ACCEPTED", contractVersion: "sentiment-v1", headline: { state: "冰点", money_effect: "weak", freeze_type: "pool" } },
         mode: {
@@ -361,6 +370,22 @@ test("readChannelBody: runs list newest first with sealed, snapshotId and the ar
   assert.doesNotMatch(JSON.stringify(body), /EVIDENCE-ONLY/);
 });
 
+test("readChannelBody: a module file counts as accepted only when run.json's artifacts names its module", async () => {
+  const dir = await strategyDir("face-runs-named-");
+  const made = await makeRun(dir, new Date("2026-10-23T01:00:00Z"), { unnamed: true, artifacts: { "sentiment.json": SENTIMENT, "mode.json": MODE } });
+  let body = await readChannelBody(dir);
+  assert.deepEqual(body.runs[0].artifacts, {});
+  assert.equal(body.runs[0].marketRun, null);
+  assert.equal(body.latestRun, null);
+  await nameArtifacts(made.runDir, ["sentiment"]);
+  body = await readChannelBody(dir);
+  assert.deepEqual(Object.keys(body.runs[0].artifacts), ["sentiment"]);
+  assert.deepEqual(Object.keys(body.latestRun?.artifacts ?? {}), ["sentiment"]);
+  // a name off the table or a non-string in artifacts[] accepts nothing more
+  await nameArtifacts(made.runDir, ["sentiment", "mode.json", 7 as never, "other"]);
+  assert.deepEqual(Object.keys((await readChannelBody(dir)).runs[0].artifacts), ["sentiment"]);
+});
+
 test("readChannelBody: latestRun is the newest sealed run with an artifact; runs with none are listed but not latest", async () => {
   const dir = await strategyDir("face-runs-latest-");
   const withArtifacts = await makeRun(dir, new Date("2026-10-21T01:00:00Z"), {
@@ -374,7 +399,7 @@ test("readChannelBody: latestRun is the newest sealed run with an artifact; runs
   assert.deepEqual(body.runs[1].artifacts, {});
   assert.equal(body.runs[2].artifacts.environment?.status, "NOT_EVALUABLE");
   assert.deepEqual(body.latestRun, {
-    run: withArtifacts.run, asOf: withArtifacts.manifest!.as_of, snapshotId: withArtifacts.manifest!.snapshot_id,
+    run: withArtifacts.run, asOf: withArtifacts.manifest!.as_of, session: "2026-10-21", snapshotId: withArtifacts.manifest!.snapshot_id,
     artifacts: {
       environment: { headline: { index_state: null, liquidity_state: null }, json: ENVIRONMENT_NOT_EVALUABLE },
       mode: {
@@ -441,6 +466,7 @@ test("readChannelBody: a linked analysis/, a linked run file and a hard-linked o
   await symlink(join(foreign.runDir, "run.json"), join(linkedManifest.runDir, "run.json"));
   // a sealed run whose artifacts are a symbolic and a hard link to the foreign mode.json: neither read
   const linkedArtifacts = await makeRun(dir, new Date("2026-10-21T01:00:00Z"));
+  await nameArtifacts(linkedArtifacts.runDir, ["mode", "theme"]); // named, so only the links keep them out
   const ownBytes = await filesBytes(linkedArtifacts.runDir);
   await symlink(join(foreign.runDir, "mode.json"), join(linkedArtifacts.runDir, "mode.json"));
   await link(join(foreign.runDir, "mode.json"), join(linkedArtifacts.runDir, "theme.json"));
@@ -448,7 +474,7 @@ test("readChannelBody: a linked analysis/, a linked run file and a hard-linked o
   assert.deepEqual(body.runs.map((r) => r.run), [linkedManifest.run, linkedArtifacts.run]);
   const [first, second] = body.runs;
   assert.deepEqual([first.asOf, first.snapshotId, first.sealed, first.kind], [null, null, false, null]);
-  assert.deepEqual(Object.keys(first.artifacts), ["sentiment"]); // a run.json lost leaves the artifacts
+  assert.deepEqual(first.artifacts, {}); // a run.json lost names no artifact, so none is accepted
   assert.deepEqual(second.artifacts, {});
   assert.equal(second.marketRun, null);
   assert.equal(second.bytes, ownBytes); // a link, symbolic or hard, counts as nothing
@@ -560,15 +586,9 @@ test("readChannelBody: run.json that does not parse lists the run with nulls and
   const broken = await makeRun(dir, new Date("2026-10-23T01:00:00Z"), { artifacts: { "mode.json": MODE } });
   await writeFile(join(broken.runDir, "run.json"), "{not json");
   const body = await readChannelBody(dir);
+  // a manifest that does not parse names no artifact, so the mode.json beside it is not accepted
   assert.deepEqual(body.runs, [{
-    run: broken.run, asOf: null, snapshotId: null, sealed: false, kind: null,
-    artifacts: {
-      mode: {
-        accepted: true, status: null, contractVersion: "mode-v1",
-        headline: { mode: "WAIT", preconditions: ["环境未转好"], research_only_matches: [], expectation: MODE.expectation, expectation_review: null },
-      },
-    },
-    marketRun: "20261023T010000Z-0000abcd",
+    run: broken.run, asOf: null, session: null, snapshotId: null, sealed: false, kind: null, artifacts: {}, marketRun: null,
     bytes: await filesBytes(broken.runDir),
   }]);
   assert.equal(body.latestRun, null); // not known sealed

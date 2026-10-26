@@ -46,7 +46,7 @@ function researchRuns(body) {
   if (!Array.isArray(body?.runs) || body.runs.length === 0) return '';
   const v = runsView(body);
   const l = v.latest;
-  const head = l ? `<div class="chan-row"><span class="chan-row-name mono">${esc([l.run, `as of ${l.asOf ?? '—'}`, l.snapshotId && `snapshot ${l.snapshotId}`, l.marketRun && `cn-market run ${l.marketRun}`].filter(Boolean).join(' · '))}</span></div>` +
+  const head = l ? `<div class="chan-row"><span class="chan-row-name mono">${esc([l.run, `as of ${l.asOf ?? '—'}`, l.session && `session ${l.session}`, l.snapshotId && `snapshot ${l.snapshotId}`, l.marketRun && `cn-market run ${l.marketRun}`].filter(Boolean).join(' · '))}</span></div>` +
     (l.chips.length ? `<div class="btn-row">${l.chips.map(c => chip(c.text)).join('')}</div>` : '') +
     (l.expectation ? kv(l.expectation.map(([k, w]) => [k, esc(w)])) : '') +
     l.details.map(d => `<details class="acct-shown"><summary>${esc(d.module)}</summary><div class="dsec-line mono">${esc(d.json)}</div></details>`).join('') : '';
