@@ -395,12 +395,14 @@ test("freeze: each Eastmoney item records the host that served it; a members rep
   assert.equal(stamps.filter(([kind]) => kind === "members").length, 2);
 });
 
-test("freeze: limit-up refuses CALENDAR_UNCOVERED before any run when the previous session lies outside the calendar", async (t) => {
+test("freeze: every row refuses CALENDAR_UNCOVERED before any run when the previous session lies outside the calendar", async (t) => {
   const root = await strategiesRoot(t);
   const { urls } = mockFetch(t, await fixtures(t));
   // 2026-01-01 is a covered holiday; the session before it, 2025-12-31, no table covers.
   const { tools } = mount(root, undefined, {}, new Date("2026-01-01T04:00:00.000Z"));
-  await rejectsWith(tools["limit-up"].execute({ strategy: "cn-market" }, exec()), "CALENDAR_UNCOVERED");
+  for (const tool of Object.values(tools)) {
+    await rejectsWith(tool.execute({ strategy: "cn-market", symbols: ["sh000001"] }, exec()), "CALENDAR_UNCOVERED");
+  }
   assert.equal(urls.length, 0);
   assert.deepEqual(await readdir(join(root, "cn-market")), ["THESIS.md"]);
 });
