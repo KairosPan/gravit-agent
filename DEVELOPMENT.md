@@ -1038,15 +1038,16 @@ sentence, a basis and up to 16 evidence ids) and `limitations`. `validateEnvelop
 a fixed order: the text's bytes (24 KiB), its JSON, the object's compact bytes, the merged schema,
 the envelope bound to the context, every cited id one the context holds (a derived item of a
 source the module does not read is `REFERENCE`), each claim's time scope (CURRENT needs an item of
-the run's session; bars and history series are HISTORICAL), the forbidden words, the scope rule,
+the run's session; bars and history series are HISTORICAL; claims all `INSUFFICIENT` force every
+headline to `UNKNOWN` or empty, a `TIME_SCOPE` rejection), the forbidden words, the scope rule,
 the status rule, then the contract's own `rules`. The scope rule splits every text into sentences
 (a line break ends one) and matches the five `SCOPE_CLASSES` — `market`, `sentiment`, `theme`,
 `leader`, `index`; a sentence of a class the module does not own, or of an owned class citing no
 item the class's `ownedBy` accepts (by default a derived item), is `UNSUPPORTED_SCOPE` unless it
 states a gap (`SCOPE_EXEMPT`); headline strings and limitations cite nothing, so an owned word
 there is refused too; strings at a contract's `exemptPaths` skip the words and the scope rule but
-not the id binding. The status rule: `OK` needs nothing missing and at least one claim; claims all
-`INSUFFICIENT` force every headline to `UNKNOWN` or empty; `NOT_EVALUABLE` needs `missing_sources`
+not the id binding. The status rule: `OK` needs nothing missing and at least one claim;
+`NOT_EVALUABLE` needs `missing_sources`
 equal to the context's `missing` and every headline `UNKNOWN`, and may carry no claim at all. A
 rejection carries its category — `SCHEMA`, `REFERENCE`, `TIME_SCOPE`, `UNSUPPORTED_SCOPE`,
 `EXECUTION_CONTENT`, `BYTE_LIMIT`, `OTHER` — and that category's module-neutral repair
@@ -1057,7 +1058,7 @@ would pass 30 KiB, the rest counted in `truncated`; a required source absent fro
 in `missing` and the expected status at `NOT_EVALUABLE`.
 
 The three contracts (spec §5.4, §5.6; `docs/superpowers/specs/2026-10-25-lunhui-modules-design.md`
-§12 lists where they depart from the text): **environment** reads `index` (required) and `quotes`,
+§13 lists where they depart from the text): **environment** reads `index` (required) and `quotes`,
 owns the `index` class, carried by an index quote, a bars item or a derived item, and stands
 `index_state` on an index quote or bars and `liquidity_state` on `total_turnover` or
 `advance_decline_ratio`, each on a claim of its own — index and liquidity apart; its view shows an
@@ -3769,16 +3770,17 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
   artifact is left out of the card with no hint (`lunhui_read_run` lists it unaccepted);
   `latestRun` is chosen among the 50 listed runs.
 - **R44 — A context read seals the run, and the reads a submit needs live in one process.** Any
-  caller may read a module's context (A23 fences only the submit), and the first read seals the
-  run: a Gravit session that reads a context before its last freeze, or a read the operator
+  caller may read a module's context (A23 fences only the submit), and A23's `NOT_A_ROLE` gate
+  admits any unseeded child — a plain spawn child included, since dsh's session header cannot tell
+  a role child from one — so "Gravit never submits" holds for its root and its forks only. The
+  first read seals the run: a Gravit session that reads a context before its last freeze, or a read the operator
   prompts by hand, ends that run's evidence (`RUN_SEALED` after it), and the protocol's order is
   the only guard. Each read counts against its module's ten calls whether its build succeeds or
   not. `READ_FIRST` rests on two in-memory records — the service's set of
-  `<strategy>/<run>/<module>` reads and each module definition's map of digests — neither pruned
-  for the process's life (a key a read; a digest holding every evidence item of the module's
-  sources), neither
-  persisted: a face restart, or a module row reloaded while the backbone lives, makes the next
-  submit `READ_FIRST`, and the re-read costs one more call; a run whose budget is spent then
+  `<strategy>/<run>/<module>` reads and each module definition's map of digests — the set never
+  pruned for the process's life (a key a read), the map dropping a module's digest (every evidence
+  item of the module's sources) only at its accepted submit, neither persisted: a face restart,
+  or a module row reloaded while the backbone lives, makes the next submit `READ_FIRST`, and the re-read costs one more call; a run whose budget is spent then
   cannot take that module at all. The digest a submit is checked against is the latest read's, and
   the evidence files under it are read again at each read, so a hand edit of a sealed run's
   evidence between two reads (R39's class) changes what the second validates against while
@@ -3904,7 +3906,7 @@ In order; each with what "done" is and which charter row it reopens.
    breadth over advancers and decliners rather than members, and an empty 炸板 or 昨日涨停 pool read
    as a quiet day (R41) — each a line of code to change. And `S02`'s announcements source (spec
    §9): its feed, its egress host and what an announcement item freezes, before `S02` can be more
-   than `WAIT`. Plan 2 added its own (spec §12, plan 2's table): an owned class carried by the
+   than `WAIT`. Plan 2 added its own (spec §13): an owned class carried by the
    evidence a contract names (`ownedBy`) rather than always a derived item; `NOT_EVALUABLE` with no
    claim; view cuts carried on the row (`bars_total`, `members_total`) rather than in `truncated`;
    the theme view's ten members a list and unstamped rows; derived items shown with

@@ -444,7 +444,8 @@ its schema, hints, an example built from the run, and the envelope fields to cop
 read seals the run**: its `snapshot_id` is fixed and any later freeze is `RUN_SEALED`, so every
 module of a run reads the same evidence. A module's submit (`lunhui_submit_<module>`) takes the
 artifact as JSON text in `analysis`, only from a delegated role child (`NOT_A_ROLE` for Gravit
-itself or a fork), only after that module's read in the same face process (`READ_FIRST`; a
+itself or a fork; the gate admits any unseeded child, a plain spawn child included, since dsh's
+session header cannot tell the two apart), only after that module's read in the same face process (`READ_FIRST`; a
 restart forgets the reads), once a module a run (`ALREADY_SUBMITTED`); the validator refuses it
 `INVALID_ANALYSIS` with a category and a repair line (`修复：…`) — an unknown evidence id, a CURRENT
 claim on old evidence, trading or account words, a market-wide, sentiment, theme or index sentence

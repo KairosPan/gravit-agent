@@ -512,7 +512,7 @@ clause or reverse it (`DEVELOPMENT.md` §10 item 21). The rulings are in the pla
 | A10, A14 | the card's `accepted` | a module file counts as an accepted artifact only when `run.json`'s `artifacts[]` names its module; any other file is left out as an unreadable one is | `artifacts[]` is A10's record of what a submit landed; plan 2's submit must append to it |
 | A17 | at most four requests in flight | the four-slot limiter is Eastmoney's; the index freeze's Tencent quote request and its four bar reads run beside it unthrottled, so one index freeze can hold up to nine requests at once | the Tencent reads are five fixed requests to two hosts stage 0 already called; the limiter guards Eastmoney's paged counts |
 
-## 12. Build notes, plan 2 (2026-10-26)
+## 13. Build notes, plan 2 (2026-10-26)
 
 Where plan 2's build ruled against this document's text. As with plan 1's table, the clauses above
 stand as approved, the tree does what this table says, and the operator may fold any line back
