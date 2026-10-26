@@ -213,6 +213,9 @@ test("validateGravitConfig: protocols are checked when present - an array of { n
   assert.match(validateGravitConfig({ protocols: [{ ...PROTOCOL, probe: "lunhui read run" }] }) ?? "", /protocols\[0\]\.probe/);
   assert.match(validateGravitConfig({ protocols: [{ ...PROTOCOL, text: " " }] }) ?? "", /protocols\[0\]\.text/);
   assert.match(validateGravitConfig({ protocols: [PROTOCOL, PROTOCOL] }) ?? "", /protocols\[1\]\.name .*twice/);
+  for (const own of [TODAY_SECTION, ROLES_SECTION, CYCLE_SECTION]) {
+    assert.match(validateGravitConfig({ protocols: [{ ...PROTOCOL, name: own }] }) ?? "", /protocols\[0\]\.name .*this plugin's own sections/, `${own} is reserved`);
+  }
   assert.throws(() => apply(fakeScope().ctx, { protocols: [{ ...PROTOCOL, text: "" }] }), /gravit: .*protocols/);
 });
 

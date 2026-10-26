@@ -114,8 +114,9 @@ export const ROLES_SECTION = "gravit:roles";
  *  own name, like the date's. */
 export const CYCLE_SECTION = "gravit:cycle";
 
-/** The run protocol's section name (src/protocols.ts `LUNHUI_RUN_SECTION` hands it in the config;
- *  named here for the tests and the readers). */
+/** The run protocol's section name. src/protocols.ts `LUNHUI_RUN_SECTION` hands it in the config;
+ *  this file imports nothing, so it is spelled here too, and tests/protocols.test.ts pins the two
+ *  equal. */
 export const LUNHUI_RUN_SECTION = "lunhui:run";
 
 /** A protocol's section name: a namespace, a colon, a dashed name. */
@@ -154,6 +155,7 @@ export function validateGravitConfig(config) {
     for (const [index, protocol] of protocols.entries()) {
       if (protocol === null || typeof protocol !== "object" || Array.isArray(protocol)) return `protocols[${index}] must be an object with name, probe and text`;
       if (typeof protocol.name !== "string" || !PROTOCOL_NAME.test(protocol.name)) return `protocols[${index}].name must match ${PROTOCOL_NAME}`;
+      if ([TODAY_SECTION, ROLES_SECTION, CYCLE_SECTION].includes(protocol.name)) return `protocols[${index}].name ${protocol.name} is one of this plugin's own sections`;
       if (seen.has(protocol.name)) return `protocols[${index}].name ${protocol.name} is given twice`;
       seen.add(protocol.name);
       if (typeof protocol.probe !== "string" || !TOOL_NAME.test(protocol.probe)) return `protocols[${index}].probe must be a tool name matching ${TOOL_NAME}`;

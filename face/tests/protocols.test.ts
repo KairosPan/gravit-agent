@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { LUNHUI_RUN_PATH, LUNHUI_RUN_SECTION, PROTOCOLS_DIR, PROTOCOL_MAX_BYTES, readProtocol, readProtocols } from "../src/protocols.ts";
 import { ROLES_ROOT, readRoles } from "../src/roles.ts";
+import { LUNHUI_TOOL_NAMES } from "../src/lunhui.ts";
+import { LUNHUI_RUN_SECTION as PLUGIN_RUN_SECTION } from "../plugins/gravit.js";
 
 /* The shipped run protocol (modules spec A9, §5.10): Chinese, within its budget, no `{{`, and the
  * cn-market order this plan builds - the index freeze opens the run, limit-up and boards join it,
@@ -20,10 +22,20 @@ test("the shipped lunhui-run.md reads, fits its budget, and states the cn-market
   assert.ok(at("lunhui_freeze_index") < at("lunhui_freeze_limit_up") && at("lunhui_freeze_limit_up") < at("role_cn_market_analyst")
     && at("lunhui_freeze_boards") < at("role_cn_market_analyst") && at("role_cn_market_analyst") < at("lunhui_read_run"), "freezes, then the analyst, then the read");
   assert.ok(text.includes("可选"), "quotes are optional");
-  for (const word of ["cn-market", "RUN_SEALED", "analysis/", "NOT_A_ROLE", "NOT_EVALUABLE", "delayed"]) assert.ok(text.includes(word), `carries ${word}`);
-  for (const later of ["role_cn_reviewer", "role_cn_stock_analyst", "lunhui_read_leader_context", "lunhui_read_mode_context", "lunhui_read_counterevidence_context"]) {
-    assert.equal(text.includes(later), false, `${later} lands with a later plan and is not described as available`);
-  }
+  for (const word of ["cn-market", "RUN_SEALED", "analysis/", "NOT_A_ROLE", "NOT_EVALUABLE", "delayed", "journal.md", "environment.json", "sentiment.json", "theme.json", "blocked"]) assert.ok(text.includes(word), `carries ${word}`);
+});
+
+/* Every lunhui_* tool the protocol names is one the composed rows register (src/lunhui.ts), so a
+ * later plan's tool cannot be described before it exists, nor a tool renamed under the protocol. */
+test("every lunhui_* tool lunhui-run.md names is a tool the Lunhui rows register", () => {
+  const named = [...new Set(readProtocol(LUNHUI_RUN_PATH).match(/\blunhui_[a-z_]+/g) ?? [])].sort();
+  const registered = new Set<string>(LUNHUI_TOOL_NAMES);
+  assert.ok(named.length > 0);
+  assert.deepEqual(named.filter((tool) => !registered.has(tool)), [], `lunhui-run.md names ${named.join(", ")}`);
+});
+
+test("the section name is the same in src/protocols.ts and plugins/gravit.js", () => {
+  assert.equal(LUNHUI_RUN_SECTION, PLUGIN_RUN_SECTION);
 });
 
 /* The protocol names the role it delegates to by tool name, and nothing else ties the two. */
