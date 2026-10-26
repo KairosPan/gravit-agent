@@ -57,8 +57,13 @@ const PROVIDERS = new Set(["腾讯行情", "东方财富"]);
 /** `market.mjs`'s `normalizeQuotes` code-less errors, all meaning the reply held no usable quote. */
 const NO_QUOTE_MESSAGES = new Set(["Invalid response", "Empty response", "No usable quotes"]);
 
-/** `market.mjs`'s codes for a reply that failed its HTTP status, encoding, structure or provider status. */
-const INVALID_REPLY_CODES = new Set(["PROVIDER_HTTP_ERROR", "INVALID_RESPONSE", "INVALID_ENCODING", "PROVIDER_ERROR"]);
+/**
+ * `market.mjs`'s codes for a reply that failed its HTTP status, encoding, structure or provider
+ * status, and `eastmoney.mjs`'s `REDIRECT_REFUSED` for a redirect it would not follow.
+ */
+const INVALID_REPLY_CODES = new Set([
+  "PROVIDER_HTTP_ERROR", "INVALID_RESPONSE", "INVALID_ENCODING", "PROVIDER_ERROR", "REDIRECT_REFUSED",
+]);
 
 /**
  * The refusal for an error a provider request rejected with (stage 0's `upstreamRefusal`): the

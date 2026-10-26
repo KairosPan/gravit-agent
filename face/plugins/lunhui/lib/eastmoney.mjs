@@ -81,11 +81,11 @@ function delayTarget(asked, location) {
   try {
     target = new URL(location ?? "", asked);
   } catch {
-    throw invalid("PROVIDER_HTTP_ERROR");
+    throw invalid("REDIRECT_REFUSED");
   }
   const same = target.pathname === asked.pathname && target.search === asked.search;
   if (location === null || target.protocol !== "https:" || target.host !== DELAY_HOST || !same)
-    throw invalid("PROVIDER_HTTP_ERROR");
+    throw invalid("REDIRECT_REFUSED");
   return target;
 }
 
@@ -105,7 +105,7 @@ export function fetchEastmoneyJson(url, { fetchImpl = fetch, timeoutMs = 7000, m
       const target = delayTarget(asked, reply.headers.get("location"));
       host = target.host;
       reply = await get(target.href, fetchImpl, timeoutMs, maxBytes);
-      if (REDIRECT_STATUSES.has(reply.status)) throw invalid("PROVIDER_HTTP_ERROR");
+      if (REDIRECT_STATUSES.has(reply.status)) throw invalid("REDIRECT_REFUSED");
     }
     let json;
     try {
@@ -243,7 +243,10 @@ async function fetchPool(path, sort, parse, required, date, fetchImpl, timeoutMs
   if (pool.length === 0 && required) throw refuse.noMarketData(PROVIDER);
   const kept = pool.slice(0, POOL_ROWS);
   if (!kept.every(isPoolRow)) throw invalid("INVALID_RESPONSE");
-  return { rows: kept.map(parse), host, delayed, truncated: pool.length > POOL_ROWS };
+  // With `pagesize` at the bound the server sends at most 500 rows; its total `tc` tells a cut pool.
+  const total = json.data?.tc;
+  const truncated = pool.length > POOL_ROWS || (Number.isInteger(total) && total > kept.length);
+  return { rows: kept.map(parse), host, delayed, truncated };
 }
 
 /**

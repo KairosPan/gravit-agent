@@ -18,13 +18,16 @@ const DATE = "20261023";
 const PLAIN = "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=30&fs=m%3A90+t%3A3";
 
 /** `promise` rejects with a `LunhuiError` carrying `code`, and the message opens with the code. */
-async function rejectsWith(promise: Promise<unknown>, code: string): Promise<void> {
+async function rejectsWith(promise: Promise<unknown>, code: string): Promise<LunhuiError> {
+  let refusal: unknown;
   await assert.rejects(promise, (error: unknown) => {
     assert.ok(error instanceof LunhuiError, `a LunhuiError, not ${String(error)}`);
     assert.equal(error.code, code);
     assert.ok(error.message.startsWith(`${code}: `), error.message);
+    refusal = error;
     return true;
   });
+  return refusal as LunhuiError;
 }
 
 function json(body: unknown, status = 200): Response {
@@ -139,6 +142,11 @@ test("eastmoney: 501 rows are cut to 500 with truncated true", async () => {
   });
   assert.equal(exact.zt.length, 500);
   assert.equal(exact.truncated, false);
+  // The live server sends at most `pagesize` rows; its total `tc` above them marks the cut.
+  const cut = { rc: 0, data: { tc: 600, qdate: 20261023, pool: Array.from({ length: 500 }, (_, i) => row(i)) } };
+  const live = await fetchLimitUpPools({ date: DATE, fetchImpl: withZtPool(cut) });
+  assert.equal(live.zt.length, 500);
+  assert.equal(live.truncated, true);
 });
 
 test("eastmoney: one redirect to push2delay is followed with delayed true; a redirect elsewhere is UPSTREAM_INVALID; a second redirect is UPSTREAM_INVALID; no numbered host is ever asked", async () => {
@@ -167,7 +175,8 @@ test("eastmoney: one redirect to push2delay is followed with delayed true; a red
   ];
   for (const location of elsewhere) {
     const refused = scripted(() => redirect(location));
-    await rejectsWith(fetchEastmoneyJson(PLAIN, { fetchImpl: refused.fetchImpl }), "UPSTREAM_INVALID");
+    const error = await rejectsWith(fetchEastmoneyJson(PLAIN, { fetchImpl: refused.fetchImpl }), "UPSTREAM_INVALID");
+    assert.equal(error.message, "UPSTREAM_INVALID: 东方财富响应无效（REDIRECT_REFUSED）；本次未写入任何文件。");
     assert.deepEqual(refused.asked.map((a) => a.url), [PLAIN], location);
   }
   const missing = scripted(() => new Response(null, { status: 302 }));
