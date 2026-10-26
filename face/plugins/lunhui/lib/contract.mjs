@@ -15,13 +15,14 @@
  * two takes three edits: the calendar import is `./market.mjs`, where `getMarketSession` lives
  * now, instead of `./market-calendar.mjs`; the plugin's imports are dropped, since the one name
  * its five pieces use, `validateAnalysis`, is defined in this file; and `MAX_CONTEXT_BYTES`,
- * `MAX_ANALYSIS_BYTES` and `VALIDATION_REPAIRS`, module-private in the source, are exported.
+ * `MAX_ANALYSIS_BYTES`, `VALIDATION_REPAIRS` and `hash`, module-private in the source, are
+ * exported - `hash` for `runs.mjs`'s evidence ids.
  * Inside `buildFactChecks` its own `chinaDate` (an ISO string to a China date) shadows the
  * contract's (epoch milliseconds to a China date); both are kept as written.
  */
 
 // -------------------------------------------------------------------------------------------------
-// frontend/analysis-contract.mjs (verbatim; the calendar import and two exports, see the header)
+// frontend/analysis-contract.mjs (verbatim; the calendar import and three exports, see the header)
 // -------------------------------------------------------------------------------------------------
 
 import { createHash } from "node:crypto";
@@ -61,7 +62,7 @@ function canonical(value) {
       .join(",")}}`;
   return JSON.stringify(value);
 }
-function hash(value) {
+export function hash(value) {
   return createHash("sha256").update(canonical(value)).digest("hex");
 }
 function bytes(value) {

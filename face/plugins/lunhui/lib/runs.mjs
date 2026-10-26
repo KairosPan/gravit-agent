@@ -18,33 +18,42 @@
  * real directory - its own realpath, not since swapped for a link, itself or above - before anything
  * is made, found, read or written under it.
  *
+ * On top of the anchoring sit the run's states (modules spec §5.1, A4): `openRun` makes the run
+ * with its `run.json` and `metrics.json`, `addEvidence` freezes one `evidence-<source>.json` per
+ * source into an open run and lists it in `run.json`, `sealRun` fixes the run's `as_of` and
+ * `snapshot_id`, after which no evidence lands, and `readRun` reads both files back, `metrics.json`
+ * fail-open (A7).
+ *
  * A refusal is a `LunhuiError` whose message opens with its stable code - `NOT_A_STRATEGY`,
- * `BAD_RUN_ID`, `NO_SUCH_RUN`, `RUN_EXISTS` - followed by a Chinese reason, like the tool
- * descriptions it reaches (spec D14), that names no path. Any other file-system failure is thrown
- * as Node raised it, absolute path included, so the server must not forward its message (spec
- * §5.1 "Errors").
+ * `BAD_RUN_ID`, `NO_SUCH_RUN`, `RUN_EXISTS`, and for the run's states `RUN_SEALED`,
+ * `SOURCE_FROZEN`, `EVIDENCE_TOO_LARGE`, `RUN_TOO_LARGE` - followed by a Chinese reason, like the
+ * tool descriptions it reaches (spec D14), that names no path. Any other file-system failure is
+ * thrown as Node raised it, absolute path included, so the server must not forward its message
+ * (spec §5.1 "Errors").
  *
  * No write goes through an existing inode, so neither a symbolic nor a hard link carries one out of
  * the run. A new file is opened `wx` (O_EXCL, which no link survives). A replaced file -
- * `analysis.json`, `metrics.json` - is written fresh, `wx` and 0o600, under a staging name, then
- * renamed over the old one: `analysis.pending.json` for the analysis, as spec §5.1 names it, and a
- * unique `metrics.json.<hex>.tmp` for each metrics write, so concurrent writers never share one. A
- * link, a directory or any other non-file at one of those names is `NO_SUCH_RUN`. A read opens with
- * O_NOFOLLOW and O_NONBLOCK, as `src/bot-journal.ts` does, and reads from the opened handle only if
- * it is a regular file with exactly one link and at most `MAX_READ_BYTES`, 256 KiB: every file the
- * server reads it wrote itself, and what it reads goes to a remote model. Residuals: a check and the
- * use after it are two calls (Node has no `openat`), so a concurrent writer inside the strategy tree
- * can still race them; a hard-link copy of the tree (`cp -al`) cannot read its runs; a metrics
- * write killed between its staging write and its rename leaves its `metrics.json.<hex>.tmp`
- * behind - inside the run, mode 0o600, read by nothing - and it is not swept, since a sweep would
- * race a concurrent writer's staging file; and the order of two writes to one run - which metrics
- * write lands last, two submits at once - is the caller's.
+ * `analysis.json`, `run.json`, `metrics.json` - is written fresh, `wx` and 0o600, under a staging
+ * name, then renamed over the old one: `analysis.pending.json` for the analysis, as spec §5.1 names
+ * it, `run.pending.json` for the run's manifest, and a unique `metrics.json.<hex>.tmp` for each
+ * metrics write, so concurrent writers never share one. A link, a directory or any other non-file
+ * at one of those names is `NO_SUCH_RUN`. A read opens with O_NOFOLLOW and O_NONBLOCK, as
+ * `src/bot-journal.ts` does, and reads from the opened handle only if it is a regular file with
+ * exactly one link and at most `MAX_READ_BYTES`, 256 KiB: every file the server reads it wrote
+ * itself, and what it reads goes to a remote model. Residuals: a check and the use after it are two
+ * calls (Node has no `openat`), so a concurrent writer inside the strategy tree can still race them;
+ * a hard-link copy of the tree (`cp -al`) cannot read its runs; a metrics write killed between its
+ * staging write and its rename leaves its `metrics.json.<hex>.tmp` behind - inside the run, mode
+ * 0o600, read by nothing - and it is not swept, since a sweep would race a concurrent writer's
+ * staging file; and the order of two writes to one run - which metrics write lands last, two
+ * submits at once, two evidence files at once - is the caller's.
  */
 
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { constants } from "node:fs";
 import { access, lstat, mkdir, open, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { basename, join, resolve, sep } from "node:path";
+import { hash } from "./contract.mjs";
 
 /** A refusal with a stable code word; the message is `<code>: <reason>`. */
 export class LunhuiError extends Error {
@@ -364,10 +373,204 @@ export async function writeAnalysis(dir, analysis) {
  * run, never written through, and concurrent writers never tear it. `NO_SUCH_RUN` when `dir` is no
  * longer the run directory it was, or a link or a directory holds the name.
  * @param {string} dir a run directory `createRun` or `resolveRun` returned
- * @param {unknown} metrics `{ toolCalls, reads, submitted, validationRejections }` (spec §5.1)
+ * @param {unknown} metrics `{ freezes, calls, rejections, submitted }` (modules spec §5.1)
  * @returns {Promise<void>}
  */
 export async function writeMetrics(dir, metrics) {
   const staging = `metrics.json.${randomBytes(4).toString("hex")}.tmp`;
   await replaceFile(dir, "metrics.json", staging, JSON.stringify(metrics));
+}
+
+// -------------------------------------------------------------------------------------------------
+// The run's states (modules spec §5.1, A4, A7, A26): open, evidence added, sealed.
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * A run's `run.json` (spec §5.1).
+ * @typedef {{ source: string, file: string, sha256: string, bytes: number, received_at: string, host: string, delayed: boolean }} EvidenceEntry
+ * @typedef {{ run: string, strategy: string, kind: "market" | "strategy", as_of: string | null, opened_at: string,
+ *   sealed_at: string | null, snapshot_id: string | null, evidence: EvidenceEntry[], artifacts: string[] }} RunManifest
+ * @typedef {{ freezes: number, calls: Record<string, number>, rejections: Record<string, string[]>, submitted: string[] }} RunMetrics
+ */
+
+/** A source's name, as a freeze row hands it: the host's own, so a bad one is host code's bug. */
+const SOURCE_RE = /^[a-z][a-z-]{0,30}$/;
+
+/** The largest evidence file `addEvidence` writes - what `readText` reads back (spec §5.3). */
+const MAX_EVIDENCE_BYTES = 256 * 1024;
+
+/** The largest a run's evidence files grow together (spec §5.3). */
+const MAX_RUN_EVIDENCE_BYTES = 2 * 1024 * 1024;
+
+/** @returns {RunMetrics} a run's metrics before any call */
+function zeroMetrics() {
+  return { freezes: 0, calls: {}, rejections: {}, submitted: [] };
+}
+
+/**
+ * Whether `value` has `metrics.json`'s shape: a whole `freezes` count, `calls` and `rejections`
+ * objects, a `submitted` array.
+ * @param {unknown} value
+ */
+function metricsShaped(value) {
+  const isObject = (field) => field !== null && typeof field === "object" && !Array.isArray(field);
+  return isObject(value) && Number.isInteger(value.freezes) && value.freezes >= 0 && isObject(value.calls)
+    && isObject(value.rejections) && Array.isArray(value.submitted);
+}
+
+/**
+ * Replace the run's `run.json` through `replaceFile`, staged at `run.pending.json`.
+ * @param {string} dir
+ * @param {unknown} manifest
+ */
+async function writeManifest(dir, manifest) {
+  await replaceFile(dir, "run.json", "run.pending.json", `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+/**
+ * The run's `run.json`, parsed. `NO_SUCH_RUN` when it is missing, unusable (`readText`), not JSON
+ * or not an object with an `evidence` array.
+ * @param {string} dir
+ * @returns {Promise<RunManifest>}
+ */
+async function readManifest(dir) {
+  let manifest;
+  try {
+    manifest = JSON.parse(await readText(dir, "run.json"));
+  } catch (error) {
+    if (error instanceof SyntaxError) throw noSuchRun();
+    throw error;
+  }
+  if (manifest === null || typeof manifest !== "object" || !Array.isArray(manifest.evidence)) throw noSuchRun();
+  return manifest;
+}
+
+/**
+ * An evidence item's id: stage 0's `ev_<sha256-24>` over the canonical item (contract.mjs `hash`).
+ * @param {unknown} item
+ * @returns {string}
+ */
+export function evidenceId(item) {
+  return `ev_${hash(item).slice(0, 24)}`;
+}
+
+/**
+ * Open a new run of the strategy (spec §5.1): `createRun` under a fresh `newRunId(now)`, then
+ * `run.json` - open, no evidence - and zeroed `metrics.json`, both written new. `kind` is the host's
+ * own; anything but `"market"` or `"strategy"` is host code's bug, a `TypeError`.
+ * @param {string} strategyDir the directory `resolveStrategy` returned
+ * @param {"market" | "strategy"} kind
+ * @param {Date} [now]
+ * @returns {Promise<{ run: string, dir: string }>}
+ */
+export async function openRun(strategyDir, kind, now = new Date()) {
+  if (kind !== "market" && kind !== "strategy") throw new TypeError(`lunhui: a run's kind is market or strategy, not ${JSON.stringify(kind)}`);
+  const run = newRunId(now);
+  const dir = await createRun(strategyDir, run);
+  const manifest = {
+    run, strategy: basename(strategyDir), kind, as_of: null, opened_at: now.toISOString(), sealed_at: null,
+    snapshot_id: null, evidence: [], artifacts: [],
+  };
+  await writeNew(dir, "run.json", `${JSON.stringify(manifest, null, 2)}\n`);
+  await writeNew(dir, "metrics.json", JSON.stringify(zeroMetrics()));
+  return { run, dir };
+}
+
+/**
+ * Freeze one source's reply into an open run: `evidence-<source>.json` holding `{ source,
+ * received_at, host, delayed, truncated, items }`, each item given its `evidenceId` (computed
+ * before the id is added), written new, then listed in `run.json` with its sha256 and size.
+ * Refusals, each writing nothing: `RUN_SEALED` when the run is sealed; `SOURCE_FROZEN` when the run
+ * already lists the source or a file holds its name; `EVIDENCE_TOO_LARGE` when the file would pass
+ * 256 KiB; `RUN_TOO_LARGE` when the run's evidence would pass 2 MiB. A source off `SOURCE_RE`, items
+ * that are not an array or a `received_at` that is no date are host code's bug, a `TypeError`. A
+ * `run.json` write that fails removes the evidence file it followed. Not serialized here: two
+ * calls on one run at once are the caller's to order (the service's run mutex).
+ * @param {string} dir a run directory `openRun` or `resolveRun` returned
+ * @param {string} source e.g. `limit-up`
+ * @param {unknown[]} items the source's rows
+ * @param {{ received_at: string, host: string, delayed: boolean, truncated: boolean }} meta
+ * @returns {Promise<{ file: string, sha256: string, bytes: number, ids: string[] }>}
+ */
+export async function addEvidence(dir, source, items, meta) {
+  if (typeof source !== "string" || !SOURCE_RE.test(source)) throw new TypeError(`lunhui: an evidence source matches ${SOURCE_RE}, not ${JSON.stringify(source)}`);
+  if (!Array.isArray(items)) throw new TypeError("lunhui: evidence items are an array");
+  const { received_at, host, delayed, truncated } = meta ?? {};
+  if (typeof received_at !== "string" || Number.isNaN(Date.parse(received_at))) throw new TypeError(`lunhui: received_at is a date, not ${JSON.stringify(received_at)}`);
+  const manifest = await readManifest(dir);
+  if (manifest.sealed_at) throw new LunhuiError("RUN_SEALED", "这个运行已封存（已读过上下文），不再接受证据；不带 run 冻结即开启新运行。");
+  if (manifest.evidence.some((entry) => entry?.source === source)) throw sourceFrozen();
+  const ids = items.map(evidenceId);
+  const text = JSON.stringify({ source, received_at, host, delayed, truncated, items: items.map((item, i) => ({ ...item, id: ids[i] })) });
+  const bytes = Buffer.byteLength(text, "utf8");
+  if (bytes > MAX_EVIDENCE_BYTES) throw new LunhuiError("EVIDENCE_TOO_LARGE", `这一来源的证据超过 ${MAX_EVIDENCE_BYTES / 1024} KiB，未写入；请缩小冻结范围。`);
+  const total = manifest.evidence.reduce((sum, entry) => sum + (Number(entry?.bytes) || 0), 0);
+  if (total + bytes > MAX_RUN_EVIDENCE_BYTES) throw new LunhuiError("RUN_TOO_LARGE", `这个运行的证据合计将超过 ${MAX_RUN_EVIDENCE_BYTES / 1024 / 1024} MiB，未写入；请开启新运行。`);
+  const file = `evidence-${source}.json`;
+  try {
+    await writeNew(dir, file, text);
+  } catch (error) {
+    if (error?.code === "EEXIST") throw sourceFrozen();
+    throw error;
+  }
+  const sha256 = createHash("sha256").update(text).digest("hex");
+  try {
+    await writeManifest(dir, { ...manifest, evidence: [...manifest.evidence, { source, file, sha256, bytes, received_at, host, delayed }] });
+  } catch (error) {
+    // Never through a run directory since swapped for a link.
+    if (await stillResolved(dir).catch(() => false)) await rm(join(dir, file), { force: true }).catch(() => {});
+    throw error;
+  }
+  return { file, sha256, bytes, ids };
+}
+
+/** @returns {LunhuiError} */
+function sourceFrozen() {
+  return new LunhuiError("SOURCE_FROZEN", "这个运行已冻结过这一来源；每个来源每个运行只冻结一次。");
+}
+
+/**
+ * Seal the run (spec §5.1, A4): `sealed_at` is `now`, `as_of` the latest `received_at` among its
+ * evidence (null with none), and `snapshot_id` `snap_` plus the sha256 of the evidence files'
+ * sha256s, sorted and joined by newlines, so it depends on the files' bytes, not the order they
+ * came in. A sealed run is returned as it stands.
+ * @param {string} dir a run directory `openRun` or `resolveRun` returned
+ * @param {Date} [now]
+ * @returns {Promise<RunManifest>} the sealed `run.json`
+ */
+export async function sealRun(dir, now = new Date()) {
+  const manifest = await readManifest(dir);
+  if (manifest.sealed_at) return manifest;
+  const latest = manifest.evidence.reduce(
+    (best, entry) => (best === null || Date.parse(entry.received_at) > Date.parse(best) ? entry.received_at : best),
+    null,
+  );
+  const digests = manifest.evidence.map((entry) => entry.sha256).sort().join("\n");
+  const sealed = {
+    ...manifest, as_of: latest, sealed_at: now.toISOString(),
+    snapshot_id: `snap_${createHash("sha256").update(digests).digest("hex")}`,
+  };
+  await writeManifest(dir, sealed);
+  return sealed;
+}
+
+/**
+ * Read a run back: `run.json` and `metrics.json`, both through `readText`. `NO_SUCH_RUN` when
+ * `run.json` is missing or unusable; a `metrics.json` missing, unreadable or not in its shape reads
+ * as zeroed counts with `metricsReset: true` - A7's fail-open - and the caller's next `writeMetrics`
+ * mirrors them back.
+ * @param {string} dir a run directory `openRun` or `resolveRun` returned
+ * @returns {Promise<{ manifest: RunManifest, metrics: RunMetrics, metricsReset: boolean }>}
+ */
+export async function readRun(dir) {
+  const manifest = await readManifest(dir);
+  let metrics;
+  try {
+    metrics = JSON.parse(await readText(dir, "metrics.json"));
+  } catch (error) {
+    if (!(error instanceof SyntaxError || error instanceof LunhuiError)) throw error;
+  }
+  return metricsShaped(metrics)
+    ? { manifest, metrics, metricsReset: false }
+    : { manifest, metrics: zeroMetrics(), metricsReset: true };
 }

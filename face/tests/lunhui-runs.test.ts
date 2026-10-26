@@ -1,15 +1,18 @@
 /**
- * The Lunhui run-directory contract, `plugins/lunhui/runs.mjs` (spec D4, D5, §5.1 "Anchoring"): the
- * plan's six cases - the strategy grammar is the face's channel grammar; a strategy is refused
- * without a readable THESIS.md, as a symbolic link and as an escape; `analysis/` is made once and a
- * run is created once; a run is refused by a bad id, as unknown and as a link; a new file is never
- * overwritten and the analysis lands by rename; the run id has its documented form - then six on
- * the same rule, that a link, symbolic or hard, is refused and never followed: an `analysis/` that
- * is a link or a file; `readText` on a link or a socket; `writeMetrics` over a link; `writeAnalysis`
- * with a link or a directory at its names; a strategy directory swapped for a link after
- * `resolveStrategy`; a run directory swapped for a link after `createRun` - and `readText`'s
- * 256 KiB cap. Every case builds its own tree under `mkdtemp`, with real `symlink`, `link` and
- * socket calls, and removes it when the case ends.
+ * The Lunhui run-directory contract, `plugins/lunhui/lib/runs.mjs` (graft spec D4, D5, §5.1
+ * "Anchoring"): stage 0's six cases - the strategy grammar is the face's channel grammar; a
+ * strategy is refused without a readable THESIS.md, as a symbolic link and as an escape;
+ * `analysis/` is made once and a run is created once; a run is refused by a bad id, as unknown and
+ * as a link; a new file is never overwritten and the analysis lands by rename; the run id has its
+ * documented form - then six on the same rule, that a link, symbolic or hard, is refused and never
+ * followed: an `analysis/` that is a link or a file; `readText` on a link or a socket;
+ * `writeMetrics` over a link; `writeAnalysis` with a link or a directory at its names; a strategy
+ * directory swapped for a link after `resolveStrategy`; a run directory swapped for a link after
+ * `createRun` - and `readText`'s 256 KiB cap. Then the run's states (modules spec §5.1, A4, A7,
+ * A26): open, add evidence, seal; `snapshot_id` over the evidence bytes; one file per source; the
+ * 256 KiB and 2 MiB bounds; another strategy's run; `readRun`'s fail-open metrics. Every case
+ * builds its own tree under `mkdtemp`, with real `symlink`, `link` and socket calls, and removes
+ * it when the case ends.
  */
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -18,9 +21,10 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 import {
-  LunhuiError, RUN_ID_RE, STRATEGY_NAME_RE, createRun, newRunId, readText, resolveRun, resolveStrategy, writeAnalysis,
-  writeMetrics, writeNew,
+  LunhuiError, RUN_ID_RE, STRATEGY_NAME_RE, addEvidence, createRun, evidenceId, newRunId, openRun, readRun, readText,
+  resolveRun, resolveStrategy, sealRun, writeAnalysis, writeMetrics, writeNew,
 } from "../plugins/lunhui/lib/runs.mjs";
 
 /** The case context, as far as these helpers use it. */
@@ -364,4 +368,145 @@ test("a run directory or its analysis/ swapped for a link after createRun is ref
   await rejectsWith(writeAnalysis(mirrored, { conclusion: "WAIT" }), "NO_SUCH_RUN");
   await rejectsWith(writeMetrics(mirrored, { toolCalls: 1 }), "NO_SUCH_RUN");
   assert.deepEqual(await readdir(join(mirror, run)), ["snapshot.json"]);
+});
+
+// The run's states (spec §5.1, A4, A7, A26): open, add evidence, seal, read back.
+
+/** The meta of one source's reply, as a freeze row hands it to `addEvidence`. */
+const meta = { received_at: "2026-10-23T07:00:01Z", host: "push2ex.eastmoney.com", delayed: false, truncated: false };
+
+/** A strategies root holding `a` and `b`, each with its THESIS.md; the two strategies' resolved directories. */
+async function twoStrategies(t: Cleanup): Promise<{ a: string, b: string }> {
+  const root = await tempDir(t);
+  for (const name of ["a", "b"]) {
+    await mkdir(join(root, name));
+    await writeFile(join(root, name, "THESIS.md"), `# ${name}\n`);
+  }
+  return { a: (await resolveStrategy(root, "a")).dir, b: (await resolveStrategy(root, "b")).dir };
+}
+
+test("runs: openRun writes run.json and metrics.json; addEvidence ids items and lists the file; sealRun fixes snapshot_id", async (t) => {
+  const strategyDir = await oneStrategy(t);
+  const { run, dir } = await openRun(strategyDir, "market", new Date("2026-10-23T07:00:00Z"));
+  assert.match(run, /^\d{8}T\d{6}Z-[0-9a-f]{8}$/);
+  assert.ok(run.startsWith("20261023T070000Z-"));
+  assert.deepEqual((await readRun(dir)).manifest, {
+    run, strategy: "s1", kind: "market", as_of: null, opened_at: "2026-10-23T07:00:00.000Z", sealed_at: null,
+    snapshot_id: null, evidence: [], artifacts: [],
+  });
+  assert.deepEqual(JSON.parse(await readText(dir, "metrics.json")), { freezes: 0, calls: {}, rejections: {}, submitted: [] });
+
+  const a = await addEvidence(dir, "limit-up", [{ code: "002982" }, { code: "600519" }], meta);
+  assert.equal(a.ids.length, 2);
+  assert.equal(a.ids[0], evidenceId({ code: "002982" }));
+  assert.match(a.ids[1], /^ev_[0-9a-f]{24}$/);
+  assert.equal(a.file, "evidence-limit-up.json");
+  const text = await readText(dir, a.file);
+  assert.equal(a.bytes, Buffer.byteLength(text));
+  assert.equal(a.sha256, createHash("sha256").update(text).digest("hex"));
+  assert.deepEqual(JSON.parse(text), {
+    source: "limit-up", received_at: meta.received_at, host: meta.host, delayed: false, truncated: false,
+    items: [{ code: "002982", id: a.ids[0] }, { code: "600519", id: a.ids[1] }],
+  });
+  assert.equal(await modeOf(join(dir, a.file)), 0o600);
+  assert.deepEqual((await readRun(dir)).manifest.evidence, [
+    { source: "limit-up", file: a.file, sha256: a.sha256, bytes: a.bytes, received_at: meta.received_at, host: meta.host, delayed: false },
+  ]);
+
+  const sealed = await sealRun(dir, new Date("2026-10-23T07:00:05Z"));
+  assert.match(sealed.snapshot_id ?? "", /^snap_[0-9a-f]{64}$/);
+  assert.equal(sealed.snapshot_id, `snap_${createHash("sha256").update(a.sha256).digest("hex")}`);
+  assert.equal(sealed.as_of, "2026-10-23T07:00:01Z");
+  assert.equal(sealed.sealed_at, "2026-10-23T07:00:05.000Z");
+  assert.deepEqual((await readRun(dir)).manifest, sealed);
+  await rejectsWith(addEvidence(dir, "boards", [{ code: "BK0715" }], meta), "RUN_SEALED");
+  assert.deepEqual(await sealRun(dir), sealed); // idempotent
+  assert.deepEqual((await readdir(dir)).sort(), ["evidence-limit-up.json", "metrics.json", "run.json"]);
+  await assert.rejects(openRun(strategyDir, "both" as never), (error: unknown) => !(error instanceof LunhuiError));
+});
+
+test("runs: snapshot_id depends on the evidence bytes, not on the order the sources were added", async (t) => {
+  const strategyDir = await oneStrategy(t);
+  const later = { ...meta, received_at: "2026-10-23T07:00:03Z" };
+  const snapshot = async (order: string[], quote = "600519") => {
+    const { dir } = await openRun(strategyDir, "market");
+    for (const source of order) {
+      await addEvidence(dir, source, source === "quotes" ? [{ code: quote }] : [{ code: "BK0715" }], source === "quotes" ? later : meta);
+    }
+    return sealRun(dir);
+  };
+  const one = await snapshot(["quotes", "boards"]);
+  const two = await snapshot(["boards", "quotes"]);
+  assert.equal(one.snapshot_id, two.snapshot_id);
+  assert.equal(one.as_of, "2026-10-23T07:00:03Z"); // the latest received_at, whichever source came first
+  assert.equal(two.as_of, "2026-10-23T07:00:03Z");
+  assert.notEqual((await snapshot(["quotes", "boards"], "000001")).snapshot_id, one.snapshot_id);
+});
+
+test("runs: a second file for one source is SOURCE_FROZEN; a new source on the same run lands; a source name off the grammar throws a plain Error (host code's bug, never a LunhuiError)", async (t) => {
+  const { dir } = await openRun(await oneStrategy(t), "strategy");
+  await addEvidence(dir, "quotes", [{ code: "600519" }], meta);
+  await rejectsWith(addEvidence(dir, "quotes", [{ code: "000001" }], meta), "SOURCE_FROZEN");
+  // A stray file at the source's name, not listed in run.json, is refused the same way and left alone.
+  await writeFile(join(dir, "evidence-index.json"), "{}");
+  await rejectsWith(addEvidence(dir, "index", [{ code: "sh000001" }], meta), "SOURCE_FROZEN");
+  await addEvidence(dir, "boards", [{ code: "BK0715" }], meta);
+  assert.deepEqual((await readRun(dir)).manifest.evidence.map((entry) => entry.source), ["quotes", "boards"]);
+  assert.equal(await readText(dir, "evidence-index.json"), "{}");
+  for (const bad of ["Quotes", "1x", "a_b", "", "x".repeat(32), "../x", "a.b"]) {
+    await assert.rejects(addEvidence(dir, bad, [], meta), (error: unknown) => error instanceof Error && !(error instanceof LunhuiError), bad);
+  }
+  await addEvidence(dir, "x".repeat(31), [], meta); // the longest name the grammar takes
+});
+
+test("runs: an evidence file over 256 KiB is EVIDENCE_TOO_LARGE; a run passing 2 MiB is RUN_TOO_LARGE; nothing is written in either case", async (t) => {
+  const { dir } = await openRun(await oneStrategy(t), "market");
+  const before = await readText(dir, "run.json");
+  await rejectsWith(addEvidence(dir, "big", [{ blob: "x".repeat(256 * 1024) }], meta), "EVIDENCE_TOO_LARGE");
+  assert.equal(await readText(dir, "run.json"), before);
+  assert.deepEqual((await readdir(dir)).sort(), ["metrics.json", "run.json"]);
+  // Eight files just under 256 KiB each pass 2 MiB at the ninth.
+  const nearly = [{ blob: "x".repeat(255 * 1024) }];
+  const sources = ["aa", "ab", "ac", "ad", "ae", "af", "ag", "ah"];
+  for (const source of sources) await addEvidence(dir, source, nearly, meta);
+  const full = await readText(dir, "run.json");
+  const total = (await readRun(dir)).manifest.evidence.reduce((sum, entry) => sum + entry.bytes, 0);
+  assert.ok(total <= 2 * 1024 * 1024 && total + 255 * 1024 > 2 * 1024 * 1024, String(total));
+  await rejectsWith(addEvidence(dir, "ai", nearly, meta), "RUN_TOO_LARGE");
+  assert.equal(await readText(dir, "run.json"), full);
+  assert.equal((await readdir(dir)).filter((name) => name.startsWith("evidence-")).length, sources.length);
+  await addEvidence(dir, "aj", [{ code: "600519" }], meta); // a small file still fits under the bound
+});
+
+test("runs: a run id of another strategy resolves to NO_SUCH_RUN under this one", async (t) => {
+  const { a, b } = await twoStrategies(t);
+  const { run } = await openRun(a, "strategy");
+  await openRun(b, "strategy"); // b has an analysis/ of its own
+  await rejectsWith(resolveRun(b, run), "NO_SUCH_RUN");
+  assert.equal((await resolveRun(a, run)).run, run);
+});
+
+test("runs: readRun reads back both files; a missing or corrupt metrics.json reads as zeroed counts with metricsReset true; a missing run.json is NO_SUCH_RUN", async (t) => {
+  const { dir } = await openRun(await oneStrategy(t), "market");
+  const zero = { freezes: 0, calls: {}, rejections: {}, submitted: [] };
+  const counted = { freezes: 2, calls: { emotion: 1 }, rejections: { emotion: ["SCHEMA"] }, submitted: ["emotion"] };
+  await writeMetrics(dir, counted);
+  assert.deepEqual(await readRun(dir), { manifest: (await readRun(dir)).manifest, metrics: counted, metricsReset: false });
+  for (const corrupt of ["{", "[]", '{"freezes":"two"}', '{"freezes":1,"calls":{},"rejections":{}}']) {
+    await writeFile(join(dir, "metrics.json"), corrupt);
+    const read = await readRun(dir);
+    assert.deepEqual(read.metrics, zero, corrupt);
+    assert.equal(read.metricsReset, true);
+  }
+  await rm(join(dir, "metrics.json"));
+  const reset = await readRun(dir);
+  assert.deepEqual([reset.metrics, reset.metricsReset], [zero, true]);
+  await writeMetrics(dir, reset.metrics); // the next write mirrors the zeroed counts back
+  assert.deepEqual([(await readRun(dir)).metrics, (await readRun(dir)).metricsReset], [zero, false]);
+  await writeFile(join(dir, "run.json"), "{");
+  await rejectsWith(readRun(dir), "NO_SUCH_RUN");
+  await rejectsWith(addEvidence(dir, "quotes", [], meta), "NO_SUCH_RUN");
+  await rm(join(dir, "run.json"));
+  await rejectsWith(readRun(dir), "NO_SUCH_RUN");
+  await rejectsWith(sealRun(dir), "NO_SUCH_RUN");
 });
