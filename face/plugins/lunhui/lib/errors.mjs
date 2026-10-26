@@ -11,6 +11,9 @@ import { LunhuiError, badRunId } from "./runs.mjs";
 /** The freeze calls a run takes (spec A7). */
 export const FREEZE_BUDGET = 8;
 
+/** The calls one module takes on one run, reads and submits, the refused ones counted (spec A7). */
+export const MODULE_BUDGET = 10;
+
 /**
  * The refusal table, one maker per refusal a row throws itself. `runs.mjs` throws its own
  * `NOT_A_STRATEGY`, `BAD_RUN_ID`, `NO_SUCH_RUN`, `RUN_SEALED` and `SOURCE_FROZEN` under the same
@@ -36,6 +39,22 @@ export const refuse = {
     new LunhuiError("NOT_GRAVIT", "冻结工具只由 Gravit 调用（根会话或其分叉）；委派的子代理不能冻结证据，请把需要的来源告诉 Gravit。"),
   notARole: () =>
     new LunhuiError("NOT_A_ROLE", "模块工件只由委派的角色子代理提交；Gravit 的根会话或分叉不能提交，请委派对应的角色。"),
+  /** A submit with no context read of its module in this process (spec §5.7). */
+  readFirst: (module) =>
+    new LunhuiError(
+      "READ_FIRST",
+      `提交 ${module} 工件前须先在本进程读取它的上下文（lunhui_read_${module}_context）；face 重启后须重新读取，再按新上下文提交。`,
+    ),
+  alreadySubmitted: (module) =>
+    new LunhuiError("ALREADY_SUBMITTED", `这个运行已接受过 ${module} 模块的工件；每个模块每个运行只提交一次，不要再提交。`),
+  /** A module's budget on a run; the stop instruction rides in the text, as `toolBudget`'s does. */
+  moduleBudget: (module) =>
+    new LunhuiError(
+      "TOOL_BUDGET",
+      `这个运行的 ${module} 模块调用已达上限（读取与提交合计 ${MODULE_BUDGET} 次）；停止调用本模块的工具，向 Gravit 报告受阻（blocked）并说明缺什么。`,
+    ),
+  /** A validation rejection, as stage 0 worded one: its category, the validator's reason, the category's repair. */
+  rejected: (category, reason, repair) => new LunhuiError("INVALID_ANALYSIS", `[${category}] ${reason}\n修复：${repair}`),
   calendarUncovered: () =>
     new LunhuiError("CALENDAR_UNCOVERED", "交易日历未覆盖今天（中国时间）；本次未写入任何文件，请告知操作者补充日历表。"),
   internal: () => new LunhuiError("INTERNAL", "内部错误；细节只记入 face 的日志，不回传。可重试一次，仍失败请告知操作者。"),
@@ -67,6 +86,15 @@ export const refuse = {
  */
 export function callerIsChild(exec) {
   return exec?.agent?.session?.header?.origin === "subagent" && exec.agent.session.header.isSeeded !== true;
+}
+
+/**
+ * Whether the caller may submit a module's artifact: a delegated role child, exactly
+ * `callerIsChild`; a root session or a seeded fork is refused `NOT_A_ROLE` (A23).
+ * @param {any} exec the tool's execution context
+ */
+export function callerIsRole(exec) {
+  return callerIsChild(exec);
 }
 
 /** The providers a freeze reads, by the name its refusals give them. */

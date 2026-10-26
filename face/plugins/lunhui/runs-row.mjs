@@ -6,6 +6,10 @@
  * Gravit-facing view of a run: its `run.json`, its counts and each artifact's headline, so Gravit
  * coordinates without reading files.
  *
+ * For the module rows it reads a module's context - sealing the run on the first read (A4) - and
+ * takes a module's one artifact (A10), each call counted against the module's budget (A7), and
+ * remembers in this process which module read which run, the submit's `READ_FIRST` (§5.7).
+ *
  * The service takes strategy names and run ids, never paths, and returns none: every method
  * resolves its arguments under `config.strategiesRoot` through `runs.mjs` (D4′), whose refusals it
  * throws as they are. Both the service and the tool are registered inside `ctx.effect`, so a
@@ -15,7 +19,7 @@ import { statSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { defineTool } from "@deepseek-ai/dsh-tools";
-import { FREEZE_BUDGET, asToolError, refuse } from "./lib/errors.mjs";
+import { FREEZE_BUDGET, MODULE_BUDGET, asToolError, refuse } from "./lib/errors.mjs";
 import { MODULES } from "./lib/modules.mjs";
 import * as runs from "./lib/runs.mjs";
 
@@ -34,10 +38,21 @@ const ARTIFACT_MAX_BYTES = 24 * 1024;
  *   addEvidence(strategyName: unknown, run: unknown, source: string, items: unknown[], meta: { received_at: string, session: string, host: string, delayed: boolean, truncated: boolean }): Promise<{ file: string, sha256: string, bytes: number, ids: string[] }>,
  *   sealRun(strategyName: unknown, run: unknown): Promise<import("./lib/runs.mjs").RunManifest>,
  *   readRun(strategyName: unknown, run: unknown): Promise<{ manifest: import("./lib/runs.mjs").RunManifest, metrics: import("./lib/runs.mjs").RunMetrics, metricsReset: boolean }>,
- *   withRun<T>(strategyName: unknown, run: unknown, fn: () => Promise<T>): Promise<T>,
+ *   withRun<T>(strategyName: unknown, run: unknown, fn: (located: { strategy: string, run: string, dir: string }) => Promise<T>): Promise<T>,
  *   countFreeze(strategyName: unknown, run: unknown): Promise<number>,
+ *   readContext<T>(strategyName: unknown, run: unknown, module: string, build: (input: ContextInput) => T | Promise<T>): Promise<T>,
+ *   submit(strategyName: unknown, run: unknown, module: string, text: unknown, validate: (text: unknown) => unknown): Promise<{ accepted: true, module: string, run: string }>,
  * }} LunhuiRuns
  */
+
+/**
+ * What `readContext` hands a module's `build`: the sealed `run.json` and, in its order, each
+ * evidence file it lists.
+ * @typedef {{ manifest: import("./lib/runs.mjs").RunManifest, evidence: Array<{ source: string, session: string, items: any[] }> }} ContextInput
+ */
+
+/** The module names the service counts and reads for (`modules.mjs`). */
+const MODULE_NAMES = new Set(MODULES.map((module) => module.name));
 
 /**
  * The service over one strategies root.
@@ -53,8 +68,32 @@ export function createLunhuiRuns(strategiesRoot) {
   };
   /** Per `<strategy>/<run>`, the promise the next caller of `withRun` waits on. */
   const tails = new Map();
+  /**
+   * Each `<strategy>/<run>/<module>` whose context this process read: in memory only, so a restart
+   * forgets the reads and keeps the counts (§5.7). One set per service.
+   */
+  const reads = new Set();
 
-  return {
+  /**
+   * Count one call of `module` on the run (A7): `calls[module]` plus one, written back through
+   * `writeMetrics`, then `TOOL_BUDGET` past `MODULE_BUDGET`, the refused call counted. Called
+   * inside `withRun`, before anything else the call does.
+   * @param {string} dir
+   * @param {string} module
+   * @returns {Promise<import("./lib/runs.mjs").RunMetrics>} the metrics as written
+   */
+  const countCall = async (dir, module) => {
+    if (!MODULE_NAMES.has(module)) throw new TypeError(`lunhui: a module is one of MODULES, not ${JSON.stringify(module)}`);
+    const { metrics } = await runs.readRun(dir);
+    const count = (Number.isInteger(metrics.calls[module]) ? metrics.calls[module] : 0) + 1;
+    const counted = { ...metrics, calls: { ...metrics.calls, [module]: count } };
+    await runs.writeMetrics(dir, counted);
+    if (count > MODULE_BUDGET) throw refuse.moduleBudget(module);
+    return counted;
+  };
+
+  /** @type {LunhuiRuns} */
+  const service = {
     strategiesRoot,
     async resolveStrategy(strategyName) {
       return { name: (await runs.resolveStrategy(strategiesRoot, strategyName)).name };
@@ -76,8 +115,9 @@ export function createLunhuiRuns(strategiesRoot) {
     },
     /**
      * Run `fn` alone on the run: one in-process mutex per `<strategy>/<run>`, keyed by the on-disk
-     * names, so two freezes of one run land one after the other. The run must exist. Not
-     * reentrant: `fn` calling `withRun` on the same run waits forever.
+     * names, so two freezes of one run land one after the other. The run must exist; `fn` is handed
+     * its on-disk names and directory. Not reentrant: `fn` calling `withRun` on the same run waits
+     * forever.
      */
     async withRun(strategyName, run, fn) {
       const located = await locate(strategyName, run);
@@ -88,7 +128,7 @@ export function createLunhuiRuns(strategiesRoot) {
       tails.set(key, tail);
       await previous;
       try {
-        return await fn();
+        return await fn(located);
       } finally {
         release();
         if (tails.get(key) === tail) tails.delete(key);
@@ -108,20 +148,78 @@ export function createLunhuiRuns(strategiesRoot) {
       if (freezes > FREEZE_BUDGET) throw refuse.toolBudget();
       return freezes;
     },
+    /**
+     * Read `module`'s context of the run, under the run's mutex - the freezes' own - so a freeze
+     * racing the first read lands before the seal or is `RUN_SEALED`: count the call, seal the run
+     * when it is open (A4; a sealed run stays as it is), remember the read, then hand `build` the
+     * sealed manifest and every evidence file it lists (`readEvidence`). What `build` returns is
+     * returned. A module outside `MODULES` is host code's bug, a `TypeError`.
+     */
+    async readContext(strategyName, run, module, build) {
+      return service.withRun(strategyName, run, async (located) => {
+        await countCall(located.dir, module);
+        const manifest = await runs.sealRun(located.dir);
+        reads.add(`${located.strategy}/${located.run}/${module}`);
+        const evidence = [];
+        for (const entry of manifest.evidence) {
+          const file = await runs.readEvidence(located.dir, entry.source);
+          evidence.push({ source: entry.source, session: entry.session, items: file.items });
+        }
+        return build({ manifest, evidence });
+      });
+    },
+    /**
+     * Take `module`'s one artifact of the run, under the run's mutex, so two submits land one after
+     * the other and the second is `ALREADY_SUBMITTED` (stage 0's `SUBMIT_IN_PROGRESS` is never
+     * thrown): count the call; `ALREADY_SUBMITTED` when `run.json` `artifacts[]` names the module;
+     * `READ_FIRST` unless this process read the module's context of the run; then `validate(text)`.
+     * A rejection carrying a `category` (`validateEnvelope`'s) is recorded in
+     * `metrics.rejections[module]` and thrown `INVALID_ANALYSIS` with its repair; any other error
+     * the validator throws is thrown as it is. An accepted artifact - the validator's return - is
+     * written by `writeArtifact` and the module pushed to `metrics.submitted`.
+     */
+    async submit(strategyName, run, module, text, validate) {
+      return service.withRun(strategyName, run, async (located) => {
+        const metrics = await countCall(located.dir, module);
+        const { manifest } = await runs.readRun(located.dir);
+        if (Array.isArray(manifest.artifacts) && manifest.artifacts.includes(module)) throw refuse.alreadySubmitted(module);
+        if (!reads.has(`${located.strategy}/${located.run}/${module}`)) throw refuse.readFirst(module);
+        let artifact;
+        try {
+          artifact = await validate(text);
+        } catch (error) {
+          if (typeof error?.category !== "string") throw error;
+          const recorded = Array.isArray(metrics.rejections[module]) ? metrics.rejections[module] : [];
+          await runs.writeMetrics(located.dir, { ...metrics, rejections: { ...metrics.rejections, [module]: [...recorded, error.category] } });
+          throw refuse.rejected(error.category, error.message, error.repair);
+        }
+        await runs.writeArtifact(located.dir, module, artifact);
+        await runs.writeMetrics(located.dir, { ...metrics, submitted: [...metrics.submitted, module] });
+        return { accepted: true, module, run: located.run };
+      });
+    },
   };
+  return service;
 }
 
 /**
- * Each artifact present in the run, by `MODULES` order: its headline fields when the file parses
- * to an object of at most 24 KiB compact, else listed unaccepted with no headline.
+ * Each artifact present in the run, by `MODULES` order: its headline fields when `run.json`
+ * `artifacts[]` names its module - the record a submit lands (A10, plan 1's §12 row) - and the file
+ * parses to an object of at most 24 KiB compact, else listed unaccepted with no headline.
  * @param {string} dir the run directory
+ * @param {unknown} named the manifest's `artifacts`
  */
-async function artifactsOf(dir) {
+async function artifactsOf(dir, named) {
+  const accepted = new Set(Array.isArray(named) ? named : []);
   const present = new Set(await readdir(dir));
   const artifacts = [];
   for (const module of MODULES) {
     if (!present.has(module.file)) continue;
     let artifact;
+    if (!accepted.has(module.name)) {
+      artifacts.push({ module: module.name, accepted: false, headline: null });
+      continue;
+    }
     try {
       artifact = JSON.parse(await runs.readText(dir, module.file));
     } catch (error) {
@@ -164,7 +262,7 @@ export function apply(ctx, config) {
         const { manifest, metrics } = await service.readRun(args.strategy, args.run);
         const strategy = await runs.resolveStrategy(strategiesRoot, args.strategy);
         const { dir } = await runs.resolveRun(strategy.dir, args.run);
-        return JSON.stringify({ manifest, metrics, artifacts: await artifactsOf(dir) });
+        return JSON.stringify({ manifest, metrics, artifacts: await artifactsOf(dir, manifest.artifacts) });
       } catch (error) {
         throw asToolError(error);
       }

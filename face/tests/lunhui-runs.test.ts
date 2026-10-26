@@ -23,8 +23,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import {
-  LunhuiError, RUN_ID_RE, STRATEGY_NAME_RE, addEvidence, createRun, evidenceId, newRunId, openRun, readRun, readText,
-  resolveRun, resolveStrategy, sealRun, writeAnalysis, writeMetrics, writeNew,
+  LunhuiError, RUN_ID_RE, STRATEGY_NAME_RE, addEvidence, createRun, evidenceId, newRunId, openRun, readEvidence, readRun, readText,
+  resolveRun, resolveStrategy, sealRun, writeAnalysis, writeArtifact, writeMetrics, writeNew,
 } from "../plugins/lunhui/lib/runs.mjs";
 
 /** The case context, as far as these helpers use it. */
@@ -581,4 +581,39 @@ test("runs: a run.json write that fails after the evidence file landed removes t
   await rm(join(dir, "run.pending.json"), { recursive: true });
   await addEvidence(dir, "quotes", [{ code: "600519" }], meta); // the source is not frozen by the failed try
   assert.equal((await readRun(dir)).manifest.evidence.length, 1);
+});
+
+test("runs: readEvidence reads a 600 KiB limit-up file under its own cap, refuses one over 256 KiB of another source, and never reads through a link", async (t) => {
+  const { dir } = await openRun(await oneStrategy(t), "market");
+  const limitUp = { source: "limit-up", session: "2026-10-23", items: [{ blob: "x".repeat(600 * 1024), id: "ev_0" }] };
+  await writeNew(dir, "evidence-limit-up.json", JSON.stringify(limitUp));
+  assert.deepEqual(await readEvidence(dir, "limit-up"), limitUp);
+  await writeNew(dir, "evidence-boards.json", JSON.stringify({ source: "boards", items: [{ blob: "x".repeat(257 * 1024) }] }));
+  const refusal = await rejectsWith(readEvidence(dir, "boards"), "NO_SUCH_RUN");
+  assert.match(refusal.message, /256 KiB/);
+  await rm(join(dir, "evidence-limit-up.json"));
+  await writeNew(dir, "evidence-limit-up.json", JSON.stringify({ blob: "x".repeat(1024 * 1024) }));
+  assert.match((await rejectsWith(readEvidence(dir, "limit-up"), "NO_SUCH_RUN")).message, /1 MiB/);
+  // A symbolic and a hard link at the evidence name are refused, the outside file never read.
+  const secret = join(await tempDir(t), "secret.json");
+  await writeFile(secret, JSON.stringify({ items: ["outside secret"] }));
+  await symlink(secret, join(dir, "evidence-index.json"));
+  await rejectsWith(readEvidence(dir, "index"), "NO_SUCH_RUN");
+  await link(secret, join(dir, "evidence-quotes.json"));
+  assert.equal((await rejectsWith(readEvidence(dir, "quotes"), "NO_SUCH_RUN")).message.includes("outside secret"), false);
+  await writeNew(dir, "evidence-news.json", "{ not json");
+  await rejectsWith(readEvidence(dir, "news"), "NO_SUCH_RUN");
+  await assert.rejects(readEvidence(dir, "../x"), (error: unknown) => error instanceof TypeError);
+});
+
+test("runs: writeArtifact lands <module>.json by rename and names the module in run.json artifacts", async (t) => {
+  const { dir } = await openRun(await oneStrategy(t), "market");
+  await writeArtifact(dir, "environment", { module: "environment", status: "OK" });
+  assert.deepEqual(JSON.parse(await readFile(join(dir, "environment.json"), "utf8")), { module: "environment", status: "OK" });
+  assert.equal(await modeOf(join(dir, "environment.json")), 0o600);
+  assert.deepEqual((await readRun(dir)).manifest.artifacts, ["environment"]);
+  await writeArtifact(dir, "sentiment", { module: "sentiment" });
+  assert.deepEqual((await readRun(dir)).manifest.artifacts, ["environment", "sentiment"]);
+  assert.deepEqual((await readdir(dir)).sort(), ["environment.json", "metrics.json", "run.json", "sentiment.json"]);
+  await assert.rejects(writeArtifact(dir, "nope", {}), (error: unknown) => error instanceof TypeError);
 });

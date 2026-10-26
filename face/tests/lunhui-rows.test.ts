@@ -11,9 +11,10 @@ import fsPromises, { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } 
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { apply, inject, name } from "../plugins/lunhui/runs-row.mjs";
+import { apply, createLunhuiRuns, inject, name } from "../plugins/lunhui/runs-row.mjs";
 import { MODULES } from "../plugins/lunhui/lib/modules.mjs";
-import { asToolError, callerIsChild, refuse, upstreamError } from "../plugins/lunhui/lib/errors.mjs";
+import { MODULE_BUDGET, asToolError, callerIsChild, callerIsRole, refuse, upstreamError } from "../plugins/lunhui/lib/errors.mjs";
+import { repairFor } from "../plugins/lunhui/lib/contract-core.mjs";
 import { LunhuiError, RUN_ID_RE, badRunId } from "../plugins/lunhui/lib/runs.mjs";
 
 type Cleanup = { after(fn: () => Promise<unknown>): unknown };
@@ -70,14 +71,23 @@ function fakeExec(header: Record<string, unknown> = {}) {
 
 const META = { received_at: "2026-10-23T07:00:00.000Z", session: "2026-10-23", host: "qt.gtimg.cn", delayed: false, truncated: false };
 
-/** Asserts `promise` rejects with a `LunhuiError` of `code`. */
-async function rejectsWith(promise: Promise<unknown>, code: string) {
+/** Asserts `promise` rejects with a `LunhuiError` of `code`; returns the refusal. */
+async function rejectsWith(promise: Promise<unknown>, code: string): Promise<LunhuiError> {
+  let refusal: any;
   await assert.rejects(promise, (error: any) => {
     assert.ok(error instanceof LunhuiError, `a LunhuiError, not ${error}`);
     assert.equal(error.code, code);
     assert.match(error.message, new RegExp(`^${code}: `));
+    refusal = error;
     return true;
   });
+  return refusal;
+}
+
+/** Name `modules` in the run's `run.json` `artifacts[]`, as a submit would. */
+async function nameArtifacts(dir: string, modules: string[]) {
+  const manifest = JSON.parse(await readFile(join(dir, "run.json"), "utf8"));
+  await writeFile(join(dir, "run.json"), JSON.stringify({ ...manifest, artifacts: modules }));
 }
 
 test("lunhui-runs: name and inject; apply refuses a bad strategiesRoot with its reason", async (t) => {
@@ -242,6 +252,7 @@ test("errors: the refusal table opens each message with its code word and names 
     calendarUncovered: "CALENDAR_UNCOVERED", internal: "INTERNAL", noMarketData: "NO_MARKET_DATA",
     wrongChannel: "WRONG_CHANNEL", symbolShape: "INVALID_SYMBOL", symbolDuplicate: "INVALID_SYMBOL",
     symbolSet: "INVALID_SYMBOL", symbolMix: "INVALID_SYMBOL", boardShape: "INVALID_SYMBOL",
+    readFirst: "READ_FIRST", alreadySubmitted: "ALREADY_SUBMITTED", moduleBudget: "TOOL_BUDGET", rejected: "INVALID_ANALYSIS",
   };
   assert.deepEqual(Object.keys(refuse).sort(), Object.keys(codes).sort());
   // One text per code: the rows' BAD_RUN_ID is runs.mjs's own, naming the new tools.
@@ -256,6 +267,28 @@ test("errors: the refusal table opens each message with its code word and names 
     assert.match(error.message, new RegExp(`^${code}: \\S`));
     assert.doesNotMatch(error.message, /\//);
   }
+});
+
+test("errors: the module refusals name the module; a rejection carries its category and repair; the module budget is ten", () => {
+  assert.equal(MODULE_BUDGET, 10);
+  assert.match(refuse.readFirst("environment").message, /^READ_FIRST: .*environment.*lunhui_read_environment_context/);
+  assert.match(refuse.alreadySubmitted("theme").message, /^ALREADY_SUBMITTED: .*theme/);
+  const budget = refuse.moduleBudget("sentiment").message;
+  assert.match(budget, /^TOOL_BUDGET: .*sentiment/);
+  assert.match(budget, /10/);
+  assert.match(budget, /停止/);
+  assert.match(budget, /blocked/);
+  const rejected = refuse.rejected("SCHEMA", "analysis.status must be one of OK, NOT_EVALUABLE", "按 schema 修正。");
+  assert.equal(rejected.code, "INVALID_ANALYSIS");
+  assert.equal(rejected.message, "INVALID_ANALYSIS: [SCHEMA] analysis.status must be one of OK, NOT_EVALUABLE\n修复：按 schema 修正。");
+});
+
+test("errors: callerIsRole is callerIsChild", () => {
+  for (const header of [{}, { origin: "subagent", isSeeded: true }, { origin: "subagent" }]) {
+    assert.equal(callerIsRole(fakeExec(header)), callerIsChild(fakeExec(header)));
+  }
+  assert.equal(callerIsRole(fakeExec({ origin: "subagent" })), true);
+  assert.equal(callerIsRole(fakeExec()), false);
 });
 
 test("errors: callerIsChild is true for a delegated child alone, never for a root or a seeded fork", () => {
@@ -304,6 +337,7 @@ test("lunhui_read_run: an artifact present lists its headline; one that does not
   const { service, tool } = mounted(root);
   const { run } = await service.openRun("alpha", "strategy");
   const dir = join(root, "alpha", "analysis", run);
+  await nameArtifacts(dir, ["sentiment", "theme", "leader"]);
   await writeFile(join(dir, "sentiment.json"), JSON.stringify({ state: "REPAIR", money_effect: "weak", freeze_type: null, claims: [] }));
   await writeFile(join(dir, "theme.json"), "{ not json");
   await writeFile(join(dir, "leader.json"), JSON.stringify({ leader_candidates: [], filler: "x".repeat(25 * 1024) }));
@@ -312,6 +346,21 @@ test("lunhui_read_run: an artifact present lists its headline; one that does not
     { module: "sentiment", accepted: true, headline: { state: "REPAIR", money_effect: "weak", freeze_type: null } },
     { module: "theme", accepted: false, headline: null },
     { module: "leader", accepted: false, headline: null },
+  ]);
+});
+
+test("lunhui_read_run: a module file run.json does not name in artifacts lists unaccepted, whatever it holds", async (t) => {
+  const root = await strategiesRoot(t);
+  const { service, tool } = mounted(root);
+  const { run } = await service.openRun("alpha", "strategy");
+  const dir = join(root, "alpha", "analysis", run);
+  await nameArtifacts(dir, ["sentiment"]);
+  await writeFile(join(dir, "environment.json"), JSON.stringify({ index_state: "UP", liquidity_state: "LOOSE", cycle_anchor: null }));
+  await writeFile(join(dir, "sentiment.json"), JSON.stringify({ state: "REPAIR" }));
+  const body = JSON.parse(await tool.execute({ strategy: "alpha", run }, fakeExec()));
+  assert.deepEqual(body.artifacts, [
+    { module: "environment", accepted: false, headline: null },
+    { module: "sentiment", accepted: true, headline: { state: "REPAIR" } },
   ]);
 });
 
@@ -332,6 +381,7 @@ test("lunhui_read_run: an artifact that is a link lists unaccepted; the run dire
   const { service, tool } = mounted(root);
   const { run } = await service.openRun("alpha", "strategy");
   const dir = join(root, "alpha", "analysis", run);
+  await nameArtifacts(dir, ["sentiment"]);
   await writeFile(join(root, "elsewhere.json"), JSON.stringify({ state: "REPAIR" }));
   await symlink(join(root, "elsewhere.json"), join(dir, "sentiment.json"));
   const body = JSON.parse(await tool.execute({ strategy: "alpha", run }, fakeExec()));
@@ -348,4 +398,156 @@ test("lunhui_read_run: an artifact that is a link lists unaccepted; the run dire
   syncBuiltinESMExports();
   t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
   await rejectsWith(tool.execute({ strategy: "alpha", run }, fakeExec()), "NO_SUCH_RUN");
+});
+
+// -------------------------------------------------------------------------------------------------
+// The module plumbing (modules spec §5.1, §5.2, §5.7, A4, A7, A10): readContext seals and reads,
+// submit takes one validated artifact per module, ten calls per module per run.
+// -------------------------------------------------------------------------------------------------
+
+/** A `build` that hands back what readContext gave it. */
+const echo = (input: any) => input;
+
+/** A validator accepting `text` as JSON. */
+const accept = (text: unknown) => JSON.parse(String(text));
+
+/** A validator rejecting as `validateEnvelope` does: a coded TypeError with its category and repair. */
+const rejectAs = (category: string) => () => {
+  throw Object.assign(new TypeError("analysis.status must be one of OK, NOT_EVALUABLE"), { code: "INVALID_ANALYSIS", category, repair: repairFor(category) });
+};
+
+/** The run's metrics.json as on disk. */
+async function metricsOf(root: string, run: string) {
+  return JSON.parse(await readFile(join(root, "alpha", "analysis", run, "metrics.json"), "utf8"));
+}
+
+test("lunhui-runs: the first readContext seals the run and hands build the manifest and every evidence file; a freeze after it is RUN_SEALED", async (t) => {
+  const root = await strategiesRoot(t);
+  const { service } = mounted(root);
+  const { run } = await service.openRun("alpha", "market");
+  const quotes = await service.addEvidence("alpha", run, "quotes", [{ symbol: "sh600000", price: 10 }], META);
+  await service.addEvidence("alpha", run, "index", [{ symbol: "sh000001", price: 3000 }], { ...META, session: "2026-10-22" });
+  const seen = await service.readContext("alpha", run, "environment", echo);
+  assert.ok(seen.manifest.sealed_at);
+  assert.match(seen.manifest.snapshot_id, /^snap_[0-9a-f]{64}$/);
+  assert.deepEqual(seen.evidence, [
+    { source: "quotes", session: "2026-10-23", items: [{ symbol: "sh600000", price: 10, id: quotes.ids[0] }] },
+    { source: "index", session: "2026-10-22", items: [{ symbol: "sh000001", price: 3000, id: seen.evidence[1].items[0].id }] },
+  ]);
+  assert.deepEqual((await service.readRun("alpha", run)).manifest, seen.manifest);
+  await rejectsWith(service.addEvidence("alpha", run, "boards", [{ code: "BK0715" }], META), "RUN_SEALED");
+  // A later read keeps the seal.
+  const again = await service.readContext("alpha", run, "sentiment", echo);
+  assert.equal(again.manifest.sealed_at, seen.manifest.sealed_at);
+  assert.deepEqual((await metricsOf(root, run)).calls, { environment: 1, sentiment: 1 });
+});
+
+test("lunhui-runs: two readContext calls at once on an open run seal it once and agree on snapshot_id", async (t) => {
+  const root = await strategiesRoot(t);
+  const { service } = mounted(root);
+  const { run } = await service.openRun("alpha", "market");
+  await service.addEvidence("alpha", run, "quotes", [{ symbol: "sh600000", price: 10 }], META);
+  const [a, b] = await Promise.all([
+    service.readContext("alpha", run, "environment", echo),
+    service.readContext("alpha", run, "sentiment", echo),
+  ]);
+  assert.equal(a.manifest.snapshot_id, b.manifest.snapshot_id);
+  assert.equal(a.manifest.sealed_at, b.manifest.sealed_at);
+  assert.deepEqual((await metricsOf(root, run)).calls, { environment: 1, sentiment: 1 });
+});
+
+test("lunhui-runs: a module's eleventh call is TOOL_BUDGET, counted and persisted; another module is unaffected", async (t) => {
+  const root = await strategiesRoot(t);
+  const { service } = mounted(root);
+  const { run } = await service.openRun("alpha", "market");
+  for (let i = 0; i < 9; i++) await service.readContext("alpha", run, "environment", echo);
+  await rejectsWith(service.submit("alpha", run, "environment", "{}", rejectAs("SCHEMA")), "INVALID_ANALYSIS"); // the tenth
+  let built = false;
+  const refusal = await rejectsWith(service.readContext("alpha", run, "environment", () => { built = true; }), "TOOL_BUDGET");
+  assert.match(refusal.message, /environment/);
+  assert.equal(built, false);
+  await rejectsWith(service.submit("alpha", run, "environment", "{}", accept), "TOOL_BUDGET");
+  assert.equal((await metricsOf(root, run)).calls.environment, 12);
+  assert.equal((await service.readRun("alpha", run)).manifest.artifacts.length, 0);
+  await service.readContext("alpha", run, "sentiment", echo);
+  assert.deepEqual(await service.submit("alpha", run, "sentiment", "{\"module\":\"sentiment\"}", accept), { accepted: true, module: "sentiment", run });
+  assert.deepEqual((await metricsOf(root, run)).calls, { environment: 12, sentiment: 2 });
+});
+
+test("lunhui-runs: submit before the module's context read is READ_FIRST, counted; a restart keeps the counts and forgets the reads", async (t) => {
+  const root = await strategiesRoot(t);
+  const { service } = mounted(root);
+  const { run } = await service.openRun("alpha", "market");
+  let validated = false;
+  const refusal = await rejectsWith(service.submit("alpha", run, "environment", "{}", () => { validated = true; return {}; }), "READ_FIRST");
+  assert.match(refusal.message, /environment/);
+  assert.equal(validated, false);
+  // Another module's read does not open this one's submit.
+  await service.readContext("alpha", run, "sentiment", echo);
+  await rejectsWith(service.submit("alpha", run, "environment", "{}", accept), "READ_FIRST");
+  await service.readContext("alpha", run, "environment", echo);
+  // A second service over the same root is a restart: the counts are on disk, the reads were in the process.
+  const restarted = createLunhuiRuns(root);
+  await rejectsWith(restarted.submit("alpha", run, "environment", "{}", accept), "READ_FIRST");
+  assert.deepEqual((await metricsOf(root, run)).calls, { environment: 4, sentiment: 1 });
+  await restarted.readContext("alpha", run, "environment", echo);
+  assert.equal((await restarted.submit("alpha", run, "environment", "{}", accept)).accepted, true);
+});
+
+test("lunhui-runs: a validator rejection is recorded by category and thrown INVALID_ANALYSIS with its repair; a validator's own bug is rethrown as is", async (t) => {
+  const root = await strategiesRoot(t);
+  const { service } = mounted(root);
+  const { run } = await service.openRun("alpha", "market");
+  await service.readContext("alpha", run, "environment", echo);
+  await assert.rejects(service.submit("alpha", run, "environment", "{}", rejectAs("SCHEMA")), (error: any) => {
+    assert.ok(error instanceof LunhuiError);
+    assert.equal(error.code, "INVALID_ANALYSIS");
+    assert.equal(error.message, `INVALID_ANALYSIS: [SCHEMA] analysis.status must be one of OK, NOT_EVALUABLE\n修复：${repairFor("SCHEMA")}`);
+    return true;
+  });
+  await rejectsWith(service.submit("alpha", run, "environment", "{}", rejectAs("TIME_SCOPE")), "INVALID_ANALYSIS");
+  const bug = new TypeError("Cannot read properties of undefined");
+  await assert.rejects(service.submit("alpha", run, "environment", "{}", () => { throw bug; }), (error) => error === bug);
+  const metrics = await metricsOf(root, run);
+  assert.deepEqual(metrics.rejections, { environment: ["SCHEMA", "TIME_SCOPE"] });
+  assert.equal(metrics.calls.environment, 4);
+  assert.deepEqual(metrics.submitted, []);
+  assert.deepEqual((await service.readRun("alpha", run)).manifest.artifacts, []);
+});
+
+test("lunhui-runs: an accepted submit writes <module>.json, names it in artifacts and submitted, and lunhui_read_run lists it; a second is ALREADY_SUBMITTED", async (t) => {
+  const root = await strategiesRoot(t);
+  const { service, tool } = mounted(root);
+  const { run } = await service.openRun("alpha", "market");
+  await service.readContext("alpha", run, "environment", echo);
+  const artifact = { module: "environment", index_state: "UP", liquidity_state: "LOOSE", cycle_anchor: "2026-10-01", claims: [] };
+  // The validated object is written, not the submitted text.
+  const result = await service.submit("alpha", run, "environment", "ignored", () => artifact);
+  assert.deepEqual(result, { accepted: true, module: "environment", run });
+  const dir = join(root, "alpha", "analysis", run);
+  assert.deepEqual(JSON.parse(await readFile(join(dir, "environment.json"), "utf8")), artifact);
+  assert.deepEqual((await service.readRun("alpha", run)).manifest.artifacts, ["environment"]);
+  assert.deepEqual((await metricsOf(root, run)).submitted, ["environment"]);
+  const body = JSON.parse(await tool.execute({ strategy: "alpha", run }, fakeExec()));
+  assert.deepEqual(body.artifacts, [{ module: "environment", accepted: true, headline: { index_state: "UP", liquidity_state: "LOOSE", cycle_anchor: "2026-10-01" } }]);
+  let validated = false;
+  await rejectsWith(service.submit("alpha", run, "environment", "{}", () => { validated = true; return {}; }), "ALREADY_SUBMITTED");
+  assert.equal(validated, false);
+  assert.equal((await metricsOf(root, run)).calls.environment, 3);
+  assert.deepEqual(JSON.parse(await readFile(join(dir, "environment.json"), "utf8")), artifact);
+});
+
+test("lunhui-runs: two submits of one module at once land one artifact; the other is ALREADY_SUBMITTED", async (t) => {
+  const root = await strategiesRoot(t);
+  const { service } = mounted(root);
+  const { run } = await service.openRun("alpha", "market");
+  await service.readContext("alpha", run, "environment", echo);
+  const results = await Promise.allSettled([
+    service.submit("alpha", run, "environment", "{\"n\":1}", accept),
+    service.submit("alpha", run, "environment", "{\"n\":2}", accept),
+  ]);
+  assert.equal(results[0].status, "fulfilled");
+  assert.equal(results[1].status, "rejected");
+  assert.equal((results[1] as PromiseRejectedResult).reason.code, "ALREADY_SUBMITTED");
+  assert.deepEqual(JSON.parse(await readFile(join(root, "alpha", "analysis", run, "environment.json"), "utf8")), { n: 1 });
 });

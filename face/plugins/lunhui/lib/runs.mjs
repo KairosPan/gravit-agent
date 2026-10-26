@@ -23,7 +23,8 @@
  * with its `run.json` and `metrics.json`, `addEvidence` freezes one `evidence-<source>.json` per
  * source into an open run and lists it in `run.json`, `sealRun` fixes the run's `as_of` and
  * `snapshot_id`, after which no evidence lands, and `readRun` reads both files back, `metrics.json`
- * fail-open (A7).
+ * fail-open (A7). For the modules, `readEvidence` reads one source's file back under its own cap,
+ * and `writeArtifact` lands a module's artifact and names it in `run.json` (A10).
  *
  * A refusal is a `LunhuiError` whose message opens with its stable code - `NOT_A_STRATEGY`,
  * `BAD_RUN_ID`, `NO_SUCH_RUN`, `RUN_EXISTS`, and for the run's states `RUN_SEALED`,
@@ -55,6 +56,7 @@ import { constants } from "node:fs";
 import { access, lstat, mkdir, open, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { basename, join, resolve, sep } from "node:path";
 import { hash } from "./contract.mjs";
+import { MODULES } from "./modules.mjs";
 
 /** A refusal with a stable code word; the message is `<code>: <reason>`. */
 export class LunhuiError extends Error {
@@ -111,12 +113,13 @@ function noSuchRun() {
  * Its `unusableFile` names the file, so a caller can tell it from the run directory itself gone
  * (`noSuchRun`), which shares the code.
  * @param {string} name
+ * @param {number} [maxBytes] the read's cap, which the reason states
  * @returns {LunhuiError & { unusableFile: string }}
  */
-function unusableFile(name) {
+function unusableFile(name, maxBytes = MAX_READ_BYTES) {
   const error = new LunhuiError(
     "NO_SUCH_RUN",
-    `运行目录里没有可用的 ${name}：须是这个运行自己写下、不超过 ${MAX_READ_BYTES / 1024} KiB 的普通文件，不是符号链接、目录或另有硬链接的文件。`,
+    `运行目录里没有可用的 ${name}：须是这个运行自己写下、不超过 ${sizeWord(maxBytes)} 的普通文件，不是符号链接、目录或另有硬链接的文件。`,
   );
   return Object.assign(error, { unusableFile: name });
 }
@@ -337,20 +340,32 @@ export async function writeNew(dir, name, text) {
  * @returns {Promise<string>}
  */
 export async function readText(dir, name) {
+  return readBounded(dir, name, MAX_READ_BYTES);
+}
+
+/**
+ * `readText` under a cap of the caller's: `readText`'s 256 KiB, or an evidence source's own
+ * (`readEvidence`).
+ * @param {string} dir
+ * @param {string} name
+ * @param {number} maxBytes
+ * @returns {Promise<string>}
+ */
+async function readBounded(dir, name, maxBytes) {
   const file = fileIn(dir, name);
   if (!(await stillResolved(dir))) throw noSuchRun();
-  if ((await entryKind(file)) !== "file") throw unusableFile(name);
+  if ((await entryKind(file)) !== "file") throw unusableFile(name, maxBytes);
   let handle;
   try {
     handle = await open(file, READ_FLAGS);
   } catch (error) {
     // removed, or swapped for a link, since the lstat
-    if (error?.code === "ENOENT" || error?.code === "ELOOP") throw unusableFile(name);
+    if (error?.code === "ENOENT" || error?.code === "ELOOP") throw unusableFile(name, maxBytes);
     throw error;
   }
   try {
     const opened = await handle.stat();
-    if (!opened.isFile() || opened.nlink !== 1 || opened.size > MAX_READ_BYTES) throw unusableFile(name);
+    if (!opened.isFile() || opened.nlink !== 1 || opened.size > maxBytes) throw unusableFile(name, maxBytes);
     return await handle.readFile({ encoding: "utf8" });
   } finally {
     await handle.close();
@@ -406,7 +421,7 @@ const MAX_EVIDENCE_BYTES = 256 * 1024;
 /**
  * The sources with a cap of their own: `limit-up`'s three pools of up to 500 stamped rows each come
  * to about 585 KB, so its file may reach 1 MiB (spec §12). `readText`'s 256 KiB bound does not
- * reach such a file; nothing reads evidence back yet.
+ * reach such a file; `readEvidence` reads each source back under the cap it was written under.
  */
 const EVIDENCE_CAPS = new Map([["limit-up", 1024 * 1024]]);
 
@@ -625,4 +640,48 @@ export async function readRun(dir) {
   return metricsShaped(metrics)
     ? { manifest, metrics, metricsReset: false }
     : { manifest, metrics: zeroMetrics(), metricsReset: true };
+}
+
+/**
+ * Read one source's evidence file back, `evidence-<source>.json`, parsed: through `readText`'s
+ * checks - the run directory still itself, O_NOFOLLOW, a regular file with one link - under the
+ * cap the file was written under (`EVIDENCE_CAPS`, else 256 KiB). `NO_SUCH_RUN` when the file is
+ * missing, unusable, over its cap or not JSON. A source off `SOURCE_RE` is host code's bug, a
+ * `TypeError`.
+ * @param {string} dir a run directory `openRun` or `resolveRun` returned
+ * @param {string} source e.g. `limit-up`
+ * @returns {Promise<any>} `{ source, received_at, session, host, delayed, truncated, items }` as `addEvidence` wrote it
+ */
+export async function readEvidence(dir, source) {
+  if (typeof source !== "string" || !SOURCE_RE.test(source)) throw new TypeError(`lunhui: an evidence source matches ${SOURCE_RE}, not ${JSON.stringify(source)}`);
+  const file = `evidence-${source}.json`;
+  const cap = EVIDENCE_CAPS.get(source) ?? MAX_EVIDENCE_BYTES;
+  try {
+    return JSON.parse(await readBounded(dir, file, cap));
+  } catch (error) {
+    if (error instanceof SyntaxError) throw unusableFile(file, cap);
+    throw error;
+  }
+}
+
+/** The module names an artifact may be written under (`modules.mjs`). */
+const MODULE_NAMES = new Set(MODULES.map((module) => module.name));
+
+/**
+ * Land a module's accepted artifact (spec A10): written fresh as `<module>.pending.json` (`wx`,
+ * 0o600), renamed to `<module>.json`, then the module appended to `run.json` `artifacts[]` - the
+ * record that makes the file an accepted artifact, so a file without it never reads as one. One
+ * artifact per module per run is the caller's rule (the service's `ALREADY_SUBMITTED`, under its
+ * run mutex). A module outside `MODULES` is host code's bug, a `TypeError`.
+ * @param {string} dir a run directory `resolveRun` returned
+ * @param {string} module e.g. `environment`
+ * @param {unknown} artifact the artifact the module's validator returned
+ * @returns {Promise<void>}
+ */
+export async function writeArtifact(dir, module, artifact) {
+  if (!MODULE_NAMES.has(module)) throw new TypeError(`lunhui: an artifact's module is one of MODULES, not ${JSON.stringify(module)}`);
+  await replaceFile(dir, `${module}.json`, `${module}.pending.json`, `${JSON.stringify(artifact, null, 2)}\n`);
+  const manifest = await readManifest(dir);
+  const artifacts = Array.isArray(manifest.artifacts) ? manifest.artifacts : [];
+  if (!artifacts.includes(module)) await writeManifest(dir, { ...manifest, artifacts: [...artifacts, module] });
 }
