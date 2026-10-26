@@ -10,7 +10,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   CONTRACT_VERSION, MAX_ANALYSIS_BYTES, MAX_CONTEXT_BYTES, SCOPE_CLASSES, SCOPE_EXEMPT, buildContext as untypedBuildContext,
-  classifyValidationRejection, hash, hypothesesVersion, validateEnvelope as untypedValidateEnvelope,
+  MODULE_REPAIRS, VALIDATION_REPAIRS, classifyValidationRejection, hash, hypothesesVersion, repairFor,
+  validateEnvelope as untypedValidateEnvelope,
 } from "../plugins/lunhui/lib/contract-core.mjs";
 import * as stage0 from "../plugins/lunhui/lib/contract.mjs";
 import * as core from "../plugins/lunhui/lib/contract-core.mjs";
@@ -201,6 +202,44 @@ test("scope: an owned class cited with a derived id is accepted; a row id alone 
   // Sentences are judged apart: an exempt one does not cover the next.
   assert.equal(category(() => check(one("缺少题材资料。题材轮动加快", [sealRatio.id]))), "UNSUPPORTED_SCOPE");
   check(one("缺少题材资料；情绪进入扩张", [sealRatio.id]));
+});
+
+test("scope: a line break ends a sentence, so an exempt line does not cover the next", () => {
+  const { digest } = context();
+  assert.equal(category(() => check(artifact(digest, { limitations: ["缺少分钟数据\n题材轮动加快"] }))), "UNSUPPORTED_SCOPE");
+});
+
+test("a rejection carries its category and the module repair, never stage 0's", () => {
+  assert.deepEqual(Object.keys(MODULE_REPAIRS), Object.keys(VALIDATION_REPAIRS));
+  assert.ok(Object.isFrozen(MODULE_REPAIRS));
+  for (const [key, text] of Object.entries(MODULE_REPAIRS)) {
+    assert.notEqual(text, (VALIDATION_REPAIRS as Loose)[key], key);
+    assert.doesNotMatch(text, /universe|WAIT/, key);
+    assert.equal(repairFor(key), text);
+  }
+  assert.equal(repairFor("NO_SUCH_CATEGORY"), MODULE_REPAIRS.OTHER);
+  const { digest } = context();
+  for (const [overrides, expected] of [
+    [{ extra: 1 }, "SCHEMA"], [{ run: "r2" }, "REFERENCE"], [{ limitations: ["情绪偏强。"] }, "UNSUPPORTED_SCOPE"],
+  ] as const) {
+    try {
+      check(artifact(digest, overrides), { context: digest });
+      assert.fail("expected a rejection");
+    } catch (error) {
+      assert.equal((error as Loose).category, expected);
+      assert.equal((error as Loose).repair, MODULE_REPAIRS[expected]);
+    }
+  }
+  // A module rule's rejection is classified the same way; a host bug passes through bare.
+  const ruled = (() => {
+    try {
+      check(artifact(digest), { context: digest, rules: () => core.fail("analysis.state: invalid enum.") });
+    } catch (error) {
+      return error as Loose;
+    }
+  })();
+  assert.equal(ruled?.repair, MODULE_REPAIRS.SCHEMA);
+  assert.throws(() => check(artifact(digest), { module: "nope", context: digest }), (error: Loose) => error.repair === undefined);
 });
 
 test("scope outside claims: an owned class in a limitation is UNSUPPORTED_SCOPE unless exempt", () => {

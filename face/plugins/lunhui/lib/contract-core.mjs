@@ -155,6 +155,37 @@ export function classifyValidationRejection(error) {
 // The modules' envelope, scope classes, validator and context (A19, A21, A24)
 // -------------------------------------------------------------------------------------------------
 
+/**
+ * The repair hints a module's rejection carries, by the classifier's categories: module-neutral,
+ * naming the envelope, the evidence ids, the time scope, the owned assertion classes, the status and
+ * the byte budget. Stage 0's `VALIDATION_REPAIRS` stays with `validateAnalysis`.
+ */
+export const MODULE_REPAIRS = Object.freeze({
+  SCHEMA:
+    "按上下文的 schema 与 example 核对字段、类型、枚举和数组长度；只交一个 JSON 对象，不包裹 Markdown，不增加字段。status 为 NOT_EVALUABLE 时 missing_sources 非空且标题字段均为 UNKNOWN 或空；为 OK 时 missing_sources 为空，且上下文 missing 须为空。",
+  REFERENCE:
+    "信封字段 module、contract_version、hypotheses_version、snapshot_id、run、as_of、session 原样照抄上下文；只引用上下文中真实的证据编号（ev_…），不引用本模块来源以外的编号。",
+  TIME_SCOPE:
+    "按证据时效修正 basis：CURRENT 须至少引用一条本运行交易日的证据；HISTORICAL 只引用更早的证据（日线、历史序列或更早交易日），文字不用“当前、实时、现价、今日、今天、盘中”；所有声明均为 INSUFFICIENT 时标题字段一律 UNKNOWN。",
+  UNSUPPORTED_SCOPE:
+    "全市场、情绪、题材、龙头、指数类断言只在本模块拥有该类时写入声明，并引用至少一条派生证据编号；其他此类句子改写为“缺少”“无法”或“待补充”，限制说明里也一样。",
+  EXECUTION_CONTENT:
+    "删除交易方向、价位目标、仓位、账户或下单内容及对应术语，免责声明里也不复述；只保留证据事实、资料缺口和核验步骤。",
+  BYTE_LIMIT:
+    "压缩到 24 KiB 以内：缩短声明与限制说明，只保留必要事实和证据编号。",
+  OTHER:
+    "按被指出的字段逐项修正，不添加无依据的内容；资料不足时标题字段用 UNKNOWN。",
+});
+
+/**
+ * The module repair hint for a rejection's category; an unknown category gets `OTHER`'s.
+ * @param {string} category
+ * @returns {string}
+ */
+export function repairFor(category) {
+  return MODULE_REPAIRS[category] ?? MODULE_REPAIRS.OTHER;
+}
+
 /** The version of the shared rules an artifact was validated under (A19). */
 export const CONTRACT_VERSION = "1";
 
@@ -175,8 +206,8 @@ export const SCOPE_CLASSES = Object.freeze({
 export const SCOPE_EXEMPT =
   /缺少|缺失|不足|不具备|不能|不可|无法|未知|未提供|未验证|未确认|尚未|待核验|待补充|不代表|不支持|需要|需补|仅凭/u;
 
-/** The sentence boundaries the scope rule splits on. */
-const SENTENCE_SPLIT = /[。；;.!?！？]/u;
+/** The sentence boundaries the scope rule splits on, a line break among them as stage 0's. */
+const SENTENCE_SPLIT = /[。；;.!?！？\n]/u;
 
 /** An evidence id, anywhere in an artifact's text. */
 const EVIDENCE_ID = /ev_[a-f0-9]{24}/g;
@@ -310,9 +341,24 @@ function rowKind(item) {
  * @param {unknown} raw the submitted artifact, JSON text or a parsed object
  * @param {{ module: string, context: ContextDigest, schema: { required?: string[], properties?: Record<string, unknown> },
  *   owns?: string[], rules?: (parsed: any, context: ContextDigest) => void }} options
+ * A rejection (code `INVALID_ANALYSIS`, the module's own rules' included) carries its `category`,
+ * through `classifyValidationRejection`, and that category's `repair` from `MODULE_REPAIRS`.
  * @returns {any} the artifact, parsed and copied
  */
-export function validateEnvelope(raw, { module, context, schema, owns = [], rules }) {
+export function validateEnvelope(raw, options) {
+  try {
+    return checkEnvelope(raw, options);
+  } catch (error) {
+    if (error?.code === "INVALID_ANALYSIS") {
+      error.category = classifyValidationRejection(error);
+      error.repair = repairFor(error.category);
+    }
+    throw error;
+  }
+}
+
+/** `validateEnvelope`'s rules, in order. */
+function checkEnvelope(raw, { module, context, schema, owns = [], rules }) {
   const entry = MODULES.find((candidate) => candidate.name === module);
   if (!entry || !context) throw new TypeError(`lunhui: no contract context for module ${JSON.stringify(module)}`);
   let artifact = raw;
