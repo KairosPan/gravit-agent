@@ -117,8 +117,9 @@ test("lunhui-runs: apply provides lunhuiRuns once and registers exactly lunhui_r
   assert.equal(scope.provided[0][1].strategiesRoot, root);
   assert.deepEqual(scope.tools.map((tool) => tool.name), ["lunhui_read_run"]);
   const [tool] = scope.tools;
-  assert.equal(tool.description, "读取一次研究运行的清单、计数与各模块工件的要点；参数是策略名与运行编号，不是路径。");
-  assert.deepEqual((tool.parameters as any).required?.slice().sort(), ["run", "strategy"]);
+  assert.equal(tool.description, READ_RUN_DESCRIPTION);
+  assert.deepEqual((tool.parameters as any).required, ["strategy"], "run is optional");
+  assert.deepEqual(Object.keys((tool.parameters as any).properties), ["strategy", "run"]);
   scope.unload();
   assert.equal(scope.provided.length, 0);
   assert.equal(scope.tools.length, 0);
@@ -355,7 +356,7 @@ test("lunhui_read_run: returns the manifest, the metrics and an empty artifacts 
   await rejectsWith(tool.execute({ strategy: "../alpha", run }, fakeExec()), "NOT_A_STRATEGY");
   await rejectsWith(tool.execute({ strategy: "beta", run }, fakeExec()), "NO_SUCH_RUN");
   // defineTool validates the arguments before execute.
-  await assert.rejects(tool.execute({ strategy: "alpha" }, fakeExec()));
+  await assert.rejects(tool.execute({ run }, fakeExec()));
 });
 
 test("lunhui_read_run: an artifact present lists its headline; one that does not parse or is over 24 KiB lists unaccepted", async (t) => {
@@ -400,6 +401,73 @@ test("lunhui_read_run: an unexpected failure is INTERNAL, its detail on stderr o
   await rejectsWith(tool.execute({ strategy: "alpha", run }, fakeExec()), "INTERNAL");
   assert.equal(stderr.length, 1);
   assert.match(stderr[0], /EACCES/);
+});
+
+const READ_RUN_DESCRIPTION = "读取研究运行，参数是策略名与运行编号，不是路径。带 run：返回该运行的清单、计数与各模块工件的要点。不带 run：列出该策略最近至多 5 个已封存的运行（运行编号、session、sealed_at、snapshot_id、已接受的工件），新的在前，用来找当日或前一个交易日的 cn-market 运行。";
+
+/** Seal `run` of `strategy` with one evidence entry of `session`, naming `artifacts` accepted. */
+async function sealedRun(root: string, service: any, strategy: string, session: string, artifacts: string[] = []) {
+  const { run } = await service.openRun(strategy, "market");
+  await service.addEvidence(strategy, run, "index", [{ code: "000001" }], { ...META, session });
+  await service.sealRun(strategy, run);
+  if (artifacts.length > 0) await nameArtifacts(join(root, strategy, "analysis", run), artifacts);
+  return run as string;
+}
+
+test("lunhui_read_run without run: the newest five sealed runs by run id, newest first; open and unusable runs passed over", async (t) => {
+  const root = await strategiesRoot(t);
+  const { service, tool } = mounted(root);
+  assert.deepEqual(JSON.parse(await tool.execute({ strategy: "alpha" }, fakeExec())), { strategy: "alpha", runs: [] }, "no analysis/ yet");
+  const sealed: string[] = [];
+  for (let day = 20; day <= 26; day += 1) sealed.push(await sealedRun(root, service, "alpha", `2026-10-${day}`));
+  // Runs of one second order by their random hex, so the newest by run id is found, not assumed.
+  const newest = [...sealed].sort().reverse().slice(0, 5);
+  await nameArtifacts(join(root, "alpha", "analysis", newest[0]), ["environment", "theme"]);
+  const { run: open } = await service.openRun("alpha", "market");
+  // A directory whose name passes the run-id grammar but holds no run.json, sorting after every real id.
+  await mkdir(join(root, "alpha", "analysis", "zzzz-not-a-run"));
+  const text = await tool.execute({ strategy: "alpha" }, fakeExec());
+  assert.doesNotMatch(text, new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  const body = JSON.parse(text);
+  assert.equal(body.strategy, "alpha");
+  assert.deepEqual(body.runs.map((row: any) => row.run), newest);
+  assert.equal(body.runs.some((row: any) => row.run === open), false, "an open run is not listed");
+  for (const row of body.runs) {
+    assert.deepEqual(Object.keys(row), ["run", "session", "sealed_at", "snapshot_id", "artifacts"]);
+    const manifest = JSON.parse(await readFile(join(root, "alpha", "analysis", row.run, "run.json"), "utf8"));
+    assert.equal(row.session, manifest.session);
+    assert.equal(row.sealed_at, manifest.sealed_at);
+    assert.match(row.snapshot_id, /^snap_[0-9a-f]{64}$/);
+  }
+  assert.deepEqual(body.runs[0].artifacts, ["environment", "theme"]);
+  assert.deepEqual(body.runs.slice(1).map((row: any) => row.artifacts), [[], [], [], []]);
+  // Another strategy's runs are its own; a path-like strategy is NOT_A_STRATEGY, as with a run.
+  assert.deepEqual(JSON.parse(await tool.execute({ strategy: "beta" }, fakeExec())).runs, []);
+  await rejectsWith(tool.execute({ strategy: "../alpha" }, fakeExec()), "NOT_A_STRATEGY");
+  await rejectsWith(tool.execute({ strategy: "alpha/analysis" }, fakeExec()), "NOT_A_STRATEGY");
+  await rejectsWith(tool.execute({ strategy: "gamma" }, fakeExec()), "NOT_A_STRATEGY");
+});
+
+test("lunhui_read_run without run: a run directory that is a link, or whose run.json is unusable, is passed over", async (t) => {
+  const root = await strategiesRoot(t);
+  const { service, tool } = mounted(root);
+  const kept = await sealedRun(root, service, "alpha", "2026-10-23");
+  const broken = await sealedRun(root, service, "alpha", "2026-10-24");
+  await writeFile(join(root, "alpha", "analysis", broken, "run.json"), "{ not json");
+  const elsewhere = await sealedRun(root, service, "beta", "2026-10-26");
+  await symlink(join(root, "beta", "analysis", elsewhere), join(root, "alpha", "analysis", "99999999T999999Z-ffffffff"));
+  assert.deepEqual(JSON.parse(await tool.execute({ strategy: "alpha" }, fakeExec())).runs.map((row: any) => row.run), [kept]);
+});
+
+test("lunhui_read_run without run: of a long history only the newest 50 run ids are read", async (t) => {
+  const root = await strategiesRoot(t);
+  const { service, tool } = mounted(root);
+  const old = await sealedRun(root, service, "alpha", "2026-10-01");
+  // Fifty open runs whose ids sort after the sealed one: the listing reads no further back.
+  for (let i = 0; i < 50; i += 1) await mkdir(join(root, "alpha", "analysis", `99999999T9999${String(i).padStart(2, "0")}Z-00000000`));
+  assert.deepEqual(JSON.parse(await tool.execute({ strategy: "alpha" }, fakeExec())).runs, []);
+  await rm(join(root, "alpha", "analysis", "99999999T999900Z-00000000"), { recursive: true });
+  assert.deepEqual(JSON.parse(await tool.execute({ strategy: "alpha" }, fakeExec())).runs.map((row: any) => row.run), [old]);
 });
 
 test("lunhui_read_run: an artifact that is a link lists unaccepted; the run directory swapped for a link mid-read refuses NO_SUCH_RUN", async (t) => {

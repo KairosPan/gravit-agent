@@ -100,6 +100,7 @@ test("cn-stock-analyst's ROLE.md: Chinese, within 2,000 bytes, the brief's ids, 
   assert.ok(persona.includes("cn-market"), "the market run is a cn-market run");
   for (const name of STOCK_ANALYST_ALLOW.slice(1)) assert.ok(persona.includes(name), `names ${name}`);
   assert.ok(persona.includes("`analysis`") && persona.includes("不写进消息"), "the artifact goes only into analysis");
+  assert.ok(/leader 被接受后[^。]*mode/.test(persona), "the mode is read only once the leader is accepted");
   assert.ok(persona.includes("每日登记"), "a mode conclusion is a daily registration");
   assert.ok(persona.includes("lunhui-s01-repair") && persona.includes("S01"), "S01 only for lunhui-s01-repair");
   assert.ok(persona.includes("S02") && persona.includes("催化"), "S02 refused while its catalyst has no source");

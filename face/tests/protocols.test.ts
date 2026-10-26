@@ -9,41 +9,53 @@ import { ROLES_ROOT, readRoles } from "../src/roles.ts";
 import { LUNHUI_TOOL_NAMES } from "../src/lunhui.ts";
 import { LUNHUI_RUN_SECTION as PLUGIN_RUN_SECTION } from "../plugins/gravit.js";
 
-/* The shipped run protocol (modules spec A9, §5.10): Chinese, within its budget, no `{{`, and the
- * cn-market order this plan builds - the index freeze opens the run, limit-up and boards join it,
- * quotes are optional, the market analyst is called once with the run id, then lunhui_read_run. */
+/* The shipped run protocol (modules spec A9, §5.10, A22): Chinese, within its budget, no `{{`, and the
+ * cn-market order - the index freeze opens the run, limit-up and boards join it, quotes are optional,
+ * the market analyst is called once with the run id, then the reviewer without a market run, then
+ * lunhui_read_run. */
 test("the shipped lunhui-run.md reads, fits its budget, and states the cn-market order", () => {
   assert.ok(readFileSync(LUNHUI_RUN_PATH).length <= PROTOCOL_MAX_BYTES, "lunhui-run.md is at most 3,000 bytes");
   const text = readProtocol(LUNHUI_RUN_PATH);
   assert.equal(text.includes("{{"), false);
   assert.ok(/[一-鿿]/.test(text), "the protocol is Chinese");
-  const at = (name: string) => text.indexOf(name);
-  for (const name of ["lunhui_freeze_index", "lunhui_freeze_limit_up", "lunhui_freeze_boards", "lunhui_freeze_quotes", "role_cn_market_analyst", "lunhui_read_run"]) assert.ok(at(name) >= 0, `names ${name}`);
+  const market = text.slice(0, text.indexOf("## 策略频道"));
+  const at = (name: string) => market.indexOf(name);
+  for (const name of ["lunhui_freeze_index", "lunhui_freeze_limit_up", "lunhui_freeze_boards", "lunhui_freeze_quotes", "role_cn_market_analyst", "role_cn_reviewer", "lunhui_read_run"]) assert.ok(at(name) >= 0, `names ${name}`);
   assert.ok(at("lunhui_freeze_index") < at("lunhui_freeze_limit_up") && at("lunhui_freeze_limit_up") < at("role_cn_market_analyst")
-    && at("lunhui_freeze_boards") < at("role_cn_market_analyst") && at("role_cn_market_analyst") < at("lunhui_read_run"), "freezes, then the analyst, then the read");
-  assert.ok(text.includes("可选"), "quotes are optional");
-  for (const word of ["cn-market", "RUN_SEALED", "analysis/", "NOT_A_ROLE", "NOT_EVALUABLE", "delayed", "journal.md", "environment.json", "sentiment.json", "theme.json", "blocked"]) assert.ok(text.includes(word), `carries ${word}`);
+    && at("lunhui_freeze_boards") < at("role_cn_market_analyst"), "the freezes, then the analyst");
+  assert.ok(at("role_cn_market_analyst") < at("role_cn_reviewer") && at("role_cn_reviewer") < at("lunhui_read_run"), "the analyst, then the reviewer, then the read");
+  assert.ok(market.slice(at("role_cn_reviewer")).includes("不传 market_run"), "the market reviewer takes no market run");
+  assert.ok(market.includes("可选"), "quotes are optional");
+  for (const word of ["cn-market", "RUN_SEALED", "analysis/", "NOT_A_ROLE", "NOT_EVALUABLE", "delayed", "journal.md", "environment.json", "sentiment.json", "theme.json", "counterevidence.json", "blocked"]) assert.ok(text.includes(word), `carries ${word}`);
 });
 
-/* The strategy channel (spec §5.10, A22, A27), as far as plan 3 builds it: read the day's cn-market
- * run, choose candidates from its theme's members and pools, freeze their quotes on the strategy,
- * the stock analyst for the leader with both run ids, again for the mode, then lunhui_read_run; a
- * WAIT is a result; a stale market run means a fresh market run and a new strategy run. The reviewer
- * is plan 4's, so no cn_reviewer role is named. */
+/* The strategy channel (spec §5.10, A5, A22, A27): find the market run by lunhui_read_run on cn-market
+ * without a run - the day's or the previous trading day's sealed run - choose candidates from its
+ * theme's members and pools, freeze their quotes on the strategy, the stock analyst for the leader
+ * with both run ids, the reviewer with both, the analyst again for the mode once the leader is
+ * accepted, then lunhui_read_run. A WAIT, a NOT_EVALUABLE artifact and a refused mode are results; a
+ * stale market run means a fresh market run and a re-read with it, which a sealed strategy run allows
+ * until its leader is accepted - so no "a sealed run cannot be re-anchored" reason. */
 test("lunhui-run.md states the strategy channel's order after the cn-market one", () => {
   const text = readProtocol(LUNHUI_RUN_PATH);
   const strategy = text.indexOf("## 策略频道");
-  assert.ok(strategy > text.indexOf("role_cn_market_analyst"), "the strategy channel follows the market one");
-  const part = text.slice(strategy);
+  assert.ok(strategy > text.indexOf("role_cn_reviewer"), "the strategy channel follows the market one");
+  const part = text.slice(strategy, text.indexOf("## 规则"));
   const at = (word: string, from = 0) => part.indexOf(word, from);
+  const find = at("lunhui_read_run");
+  assert.ok(find >= 0 && part.slice(find, at("mainline_candidates")).includes("不带 run"), "the market run found without a run");
+  assert.ok(part.slice(0, at("mainline_candidates")).includes("cn-market"), "on cn-market");
+  assert.ok(part.includes("前一个交易日") && part.includes("当日"), "the day's or the previous trading day's (A5)");
   const leader = at("role_cn_stock_analyst");
+  const reviewer = at("role_cn_reviewer");
   const mode = at("role_cn_stock_analyst", leader + 1);
-  assert.ok(at("lunhui_read_run") >= 0 && at("lunhui_read_run") < at("mainline_candidates"), "the market run read first");
-  assert.ok(at("mainline_candidates") < at("lunhui_freeze_quotes") && at("lunhui_freeze_quotes") < leader, "candidates, then their quotes, then the leader");
-  assert.ok(leader >= 0 && mode > leader && at("lunhui_read_run", mode) > mode, "the analyst twice, then the run read back");
-  assert.ok(leader < at("写 leader") && at("写 leader") < mode && mode < at("写 mode"), "the first call writes the leader, the second the mode");
-  for (const word of ["market_run", "1–4", "sh60", "sz00", "WAIT", "STALE_MARKET_RUN", "leader.json", "mode.json", "反证"]) assert.ok(part.includes(word), `carries ${word}`);
-  assert.doesNotMatch(text, /cn_reviewer|cn-reviewer/, "the reviewer lands with plan 4");
+  assert.ok(find < at("mainline_candidates") && at("mainline_candidates") < at("lunhui_freeze_quotes") && at("lunhui_freeze_quotes") < leader, "the market run, candidates, their quotes, then the leader");
+  assert.ok(leader >= 0 && leader < reviewer && reviewer < mode && at("lunhui_read_run", mode) > mode, "leader, reviewer, mode, then the run read back");
+  assert.ok(leader < at("写 leader") && at("写 leader") < reviewer && mode < at("写 mode"), "the first analyst call writes the leader, the second the mode");
+  assert.ok(part.slice(reviewer, mode).includes("被接受"), "the mode waits for the leader's acceptance");
+  for (const word of ["market_run", "1–4", "sh60", "sz00", "WAIT", "NOT_EVALUABLE", "被拒的 mode", "STALE_MARKET_RUN", "重读"]) assert.ok(part.includes(word), `carries ${word}`);
+  assert.doesNotMatch(text, /不能改引/, "a sealed strategy run can be re-read with a fresh market run");
+  assert.doesNotMatch(text, /以后加入|现在没有/, "the reviewer is no longer to come");
 });
 
 /* Every lunhui_* tool the protocol names is one the composed rows register (src/lunhui.ts), so a

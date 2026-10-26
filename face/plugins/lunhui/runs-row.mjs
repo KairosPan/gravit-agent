@@ -4,7 +4,8 @@
  * service every other Lunhui row injects - strategy and run anchoring, the run's states, the
  * per-run write mutex and the freeze budget - and registers one tool, `lunhui_read_run`, the
  * Gravit-facing view of a run: its `run.json`, its counts and each artifact's headline, so Gravit
- * coordinates without reading files.
+ * coordinates without reading files; without a run, the strategy's newest sealed runs, so Gravit
+ * finds the market run a strategy run cites.
  *
  * For the module rows it reads a module's context - sealing the run on the first read (A4) - and
  * takes a module's one artifact (A10), each call counted against the module's budget (A7), and
@@ -380,6 +381,42 @@ async function artifactsOf(dir, named) {
   return artifacts;
 }
 
+/** The sealed runs `lunhui_read_run` lists without a run: the newest five. */
+const RECENT_RUNS = 5;
+
+/**
+ * `lunhui_read_run` without a run (A5: Gravit finds the day's, or the previous trading day's,
+ * cn-market run from a strategy channel): the strategy's newest sealed runs, at most
+ * `RECENT_RUNS`, newest first by run id, each `{ run, session, sealed_at, snapshot_id, artifacts }`
+ * - `artifacts` the modules `run.json` names accepted. Of the last `PREVIOUS_RUNS` run ids only,
+ * each resolved and read as one run is (`resolveRun`, `readRun`); a run that is missing, a link or
+ * unusable, or still open, is passed over. No lock is taken - a sealed run's `run.json` changes only
+ * by an artifact landing whole - and nothing is counted or written. `NOT_A_STRATEGY` as
+ * `resolveStrategy`.
+ * @param {string} strategiesRoot
+ * @param {unknown} strategyName
+ */
+async function recentSealedRuns(strategiesRoot, strategyName) {
+  const strategy = await runs.resolveStrategy(strategiesRoot, strategyName);
+  const ids = (await runs.listRuns(strategy.dir)).sort().reverse().slice(0, PREVIOUS_RUNS);
+  const listed = [];
+  for (const id of ids) {
+    if (listed.length === RECENT_RUNS) break;
+    try {
+      const located = await runs.resolveRun(strategy.dir, id);
+      const { manifest } = await runs.readRun(located.dir);
+      if (!manifest.sealed_at) continue;
+      listed.push({
+        run: located.run, session: manifest.session ?? null, sealed_at: manifest.sealed_at, snapshot_id: manifest.snapshot_id ?? null,
+        artifacts: Array.isArray(manifest.artifacts) ? manifest.artifacts.filter((module) => MODULE_NAMES.has(module)) : [],
+      });
+    } catch (error) {
+      if (!(error instanceof runs.LunhuiError)) throw error;
+    }
+  }
+  return { strategy: strategy.name, runs: listed };
+}
+
 /**
  * @param {any} ctx the row's context, injecting `tools`
  * @param {{ strategiesRoot?: unknown }} config
@@ -393,10 +430,10 @@ export function apply(ctx, config) {
   ctx.effect(() => ctx.provide("lunhuiRuns", service));
   ctx.effect(() => ctx.tools.register(defineTool({
     name: "lunhui_read_run",
-    description: "读取一次研究运行的清单、计数与各模块工件的要点；参数是策略名与运行编号，不是路径。",
+    description: "读取研究运行，参数是策略名与运行编号，不是路径。带 run：返回该运行的清单、计数与各模块工件的要点。不带 run：列出该策略最近至多 5 个已封存的运行（运行编号、session、sealed_at、snapshot_id、已接受的工件），新的在前，用来找当日或前一个交易日的 cn-market 运行。",
     parameters: {
       strategy: { type: "string", description: "策略名，即频道名（如 cn-market），不是路径。", required: true },
-      run: { type: "string", description: "运行编号，即冻结工具返回的 run。", required: true },
+      run: { type: "string", description: "可选：运行编号，即冻结工具返回的 run；省略则列出最近已封存的运行。" },
     },
     output: {
       schema: { type: "string" },
@@ -404,6 +441,7 @@ export function apply(ctx, config) {
     },
     async execute(args, _exec) {
       try {
+        if (args.run === undefined) return JSON.stringify(await recentSealedRuns(strategiesRoot, args.strategy));
         const { manifest, metrics } = await service.readRun(args.strategy, args.run);
         const strategy = await runs.resolveStrategy(strategiesRoot, args.strategy);
         const { dir } = await runs.resolveRun(strategy.dir, args.run);
