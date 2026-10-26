@@ -55,6 +55,8 @@ test("lunhui-run.md states the strategy channel's order after the cn-market one"
   assert.ok(part.slice(reviewer, mode).includes("被接受"), "the mode waits for the leader's acceptance");
   for (const word of ["market_run", "1–4", "sh60", "sz00", "WAIT", "NOT_EVALUABLE", "被拒的 mode", "STALE_MARKET_RUN", "重读"]) assert.ok(part.includes(word), `carries ${word}`);
   assert.doesNotMatch(text, /不能改引/, "a sealed strategy run can be re-read with a fresh market run");
+  const stale = part.slice(part.indexOf("STALE_MARKET_RUN"));
+  assert.ok(stale.slice(0, stale.indexOf("。")).includes("上一节") && stale.includes("开新的"), "a stale read is cured by a whole sealed market run, or a new strategy run when that run itself is stale");
   assert.doesNotMatch(text, /以后加入|现在没有/, "the reviewer is no longer to come");
 });
 
