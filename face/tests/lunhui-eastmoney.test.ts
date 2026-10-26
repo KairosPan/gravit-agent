@@ -1,6 +1,7 @@
 /**
- * The Lunhui Eastmoney fetch core and the limit-up pools, `plugins/lunhui/lib/eastmoney.mjs`
- * (modules spec §5.3, A17, A28): the pools parsed from the synthetic fixtures in
+ * The Lunhui Eastmoney fetch core, the limit-up pools, the boards, their members, the board fund
+ * flow and the all-shares counts, `plugins/lunhui/lib/eastmoney.mjs` (modules spec §5.3, A17, A20,
+ * A28): the replies parsed from the synthetic fixtures in
  * `fixtures/lunhui-eastmoney/`, the one redirect to the delay host, the four-request limiter and
  * the provider failures as refusals. The redirect and failure cases hand the fetch core a small
  * fake `fetch`; nothing reaches the network.
@@ -8,7 +9,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
-import { fetchEastmoneyJson, fetchLimitUpPools, inFlight } from "../plugins/lunhui/lib/eastmoney.mjs";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import {
+  fetchBoardFundFlow, fetchBoardMembers, fetchBoards, fetchEastmoneyJson, fetchLimitUpPools, fetchMarketCounts, inFlight,
+} from "../plugins/lunhui/lib/eastmoney.mjs";
 import { createFixtureFetch } from "../plugins/lunhui/lib/fixture-fetch.mjs";
 import { LunhuiError } from "../plugins/lunhui/lib/runs.mjs";
 
@@ -261,6 +266,176 @@ test("eastmoney: the fixture fetch answers the three pool paths and 404s an unkn
     "https://push2.eastmoney.com/api/qt/ulist/get?fs=m%3A90+t%3A3",
     "not a url",
   ]) {
+    assert.equal((await fixtureFetch(url)).status, 404, url);
+  }
+});
+
+/** A fake `fetch` serving the fixtures, recording every URL it was asked. */
+function recorded() {
+  const asked: string[] = [];
+  const fetchImpl = async (url: string | URL, init?: RequestInit) => {
+    asked.push(String(url));
+    return fixtureFetch(url, init);
+  };
+  return { asked, fetchImpl };
+}
+
+const CLIST = "https://push2.eastmoney.com/api/qt/clist/get";
+const UT = "ut=bd1d9ddb04089700cf9c27f6f7426281";
+
+test("eastmoney: fetchBoards returns the top boards with advancers and decliners", async () => {
+  const { asked, fetchImpl } = recorded();
+  const reply = await fetchBoards({ fetchImpl });
+  assert.equal(reply.boards.length, 4);
+  assert.deepEqual(reply.boards[0], {
+    code: "BK0715", name: "示例电网", pct: 4.12, amount: 98765432100, advancers: 42, decliners: 3, leader: "示例电力",
+  });
+  // "-" is no number and no name.
+  assert.deepEqual(reply.boards[3], {
+    code: "BK1099", name: "示例停牌板块", pct: null, amount: 1234567800, advancers: 0, decliners: 0, leader: null,
+  });
+  assert.equal(reply.host, "push2.eastmoney.com");
+  assert.equal(reply.delayed, false);
+  // AKShare's concept-board query, sorted by turnover and cut to the top.
+  assert.deepEqual(asked, [
+    `${CLIST}?pn=1&pz=30&po=1&np=1&${UT}&fltt=2&invt=2&fid=f6&fs=m%3A90+t%3A3+f%3A%2150` +
+      "&fields=f12%2Cf14%2Cf3%2Cf6%2Cf104%2Cf105%2Cf128",
+  ]);
+  const top = recorded();
+  assert.equal((await fetchBoards({ fetchImpl: top.fetchImpl, top: 2 })).boards.length, 2);
+  assert.equal(new URL(top.asked[0]).searchParams.get("pz"), "2");
+
+  // Null data or an empty list is no market data; a row off the BK grammar is an invalid reply.
+  const clist = (data: unknown) => async () => json({ rc: 0, data });
+  await rejectsWith(fetchBoards({ fetchImpl: clist(null) }), "NO_MARKET_DATA");
+  await rejectsWith(fetchBoards({ fetchImpl: clist({ total: 0, diff: [] }) }), "NO_MARKET_DATA");
+  await rejectsWith(fetchBoards({ fetchImpl: clist({ total: 1, diff: [{ f12: "../x", f14: "x" }] }) }), "UPSTREAM_INVALID");
+  await rejectsWith(fetchBoards({ fetchImpl: clist({ total: 1, diff: {} }) }), "UPSTREAM_INVALID");
+});
+
+test("eastmoney: fetchBoardMembers refuses a code off the BK grammar before fetching, and cuts a 140-member board to 100 with truncated true", async () => {
+  const { asked, fetchImpl } = recorded();
+  for (const code of ["BK071", "BK07150", "bk0715", "../BK0715", "BK0715 f:!50", 715, undefined]) {
+    const error = await rejectsWith(fetchBoardMembers(code as string, { fetchImpl }), "UPSTREAM_INVALID");
+    assert.ok(!error.message.includes("/"), error.message);
+  }
+  assert.deepEqual(asked, []);
+
+  const small = await fetchBoardMembers("BK0715", { fetchImpl });
+  assert.deepEqual(small.members, [
+    { code: "600101", name: "示例电力", pct: 10.04 },
+    { code: "000102", name: "示例电网", pct: 6.21 },
+    { code: "603103", name: "示例电气", pct: -0.85 },
+    { code: "002104", name: "示例停牌", pct: null },
+  ]);
+  assert.equal(small.truncated, false);
+  assert.equal(small.host, "push2.eastmoney.com");
+  assert.equal(small.delayed, false);
+  assert.deepEqual(asked, [
+    `${CLIST}?pn=1&pz=100&po=1&np=1&${UT}&fltt=2&invt=2&fid=f12&fs=b%3ABK0715+f%3A%2150&fields=f12%2Cf14%2Cf3`,
+  ]);
+
+  const large = await fetchBoardMembers("BK1716", { fetchImpl });
+  assert.equal(large.members.length, 100);
+  assert.deepEqual(large.members[99], { code: "300299", name: "示例算力99", pct: -4.9 });
+  assert.equal(large.truncated, true);
+  // A smaller bound cuts the rows the server sent.
+  const cut = await fetchBoardMembers("BK0715", { fetchImpl, max: 2 });
+  assert.deepEqual(cut.members.map((m) => m.code), ["600101", "000102"]);
+  assert.equal(cut.truncated, true);
+
+  // An empty member list is an empty list, not a refusal.
+  for (const data of [null, { total: 0, diff: [] }]) {
+    const empty = await fetchBoardMembers("BK0715", { fetchImpl: async () => json({ rc: 0, data }) });
+    assert.deepEqual(empty.members, []);
+    assert.equal(empty.truncated, false);
+  }
+  await rejectsWith(
+    fetchBoardMembers("BK0715", { fetchImpl: async () => json({ rc: 0, data: { total: 1, diff: [{ f12: "60010" }] } }) }),
+    "UPSTREAM_INVALID",
+  );
+});
+
+test("eastmoney: fetchBoardFundFlow parses the main net inflow and its share", async () => {
+  const { asked, fetchImpl } = recorded();
+  const reply = await fetchBoardFundFlow({ fetchImpl });
+  assert.deepEqual(reply.rows, [
+    { code: "BK0715", name: "示例电网", pct: 4.12, mainNet: 3456789012, mainShare: 7.85 },
+    { code: "BK1716", name: "示例算力", pct: 2.87, mainNet: 1234567890, mainShare: 1.61 },
+    { code: "BK0493", name: "示例新能源车", pct: -1.35, mainNet: -2345678901, mainShare: -4.32 },
+    { code: "BK1099", name: "示例停牌板块", pct: null, mainNet: null, mainShare: null },
+  ]);
+  assert.equal(reply.host, "push2.eastmoney.com");
+  assert.equal(reply.delayed, false);
+  // stock_sector_fund_flow_rank("今日", "概念资金流"), its page cut to the top.
+  assert.deepEqual(asked, [
+    `${CLIST}?pn=1&pz=30&po=1&np=1&ut=b2884a393a59ad64002292a3e90d46a5&fltt=2&invt=2&fid0=f62` +
+      "&fs=m%3A90+t%3A3&stat=1&fields=f12%2Cf14%2Cf2%2Cf3%2Cf62%2Cf184%2Cf66%2Cf69%2Cf72%2Cf75%2Cf78%2Cf81" +
+      "%2Cf84%2Cf87%2Cf204%2Cf205%2Cf124&rt=52975239",
+  ]);
+  const top = await fetchBoardFundFlow({ fetchImpl, top: 1 });
+  assert.deepEqual(top.rows.map((row) => row.code), ["BK0715"]);
+  await rejectsWith(fetchBoardFundFlow({ fetchImpl: async () => json({ rc: 0, data: null }) }), "NO_MARKET_DATA");
+});
+
+test("eastmoney: fetchMarketCounts sums pages, counts limit-up and limit-down rows, hashes every page, and marks a changed total partial", async () => {
+  const { asked, fetchImpl } = recorded();
+  const counts = await fetchMarketCounts({ fetchImpl });
+  const sha = (name: string) => createHash("sha256").update(readFileSync(`${FIXTURES}${name}`)).digest("hex");
+  // Page 1: 10.04, 9.9, 1.2; page 2: 0, -9.98 and a suspended "-" that counts nowhere.
+  assert.deepEqual(counts, {
+    advancers: 3, decliners: 1, unchanged: 1, limitUp: 2, limitDown: 1, total: 6, pages: 2,
+    pageHashes: [sha("counts-page-1.json"), sha("counts-page-2.json")],
+    partial: true, host: "push2.eastmoney.com", delayed: false,
+  });
+  // Sequential pages from 1, stopped once the rows read reach the first page's total.
+  const fs = "m%3A0+t%3A6%2Cm%3A0+t%3A80%2Cm%3A1+t%3A2%2Cm%3A1+t%3A23%2Cm%3A0+t%3A81+s%3A2048";
+  assert.deepEqual(asked, [1, 2].map((pn) =>
+    `${CLIST}?pn=${pn}&pz=1000&po=1&np=1&${UT}&fltt=2&invt=2&fid=f12&fs=${fs}&fields=f3%2Cf2`));
+  assert.ok(!("rows" in counts));
+
+  // Pages that agree on the total are whole; each waits for the one before.
+  const page = (pn: number, total: number, diff: unknown[]) => ({ rc: 0, dlmkts: pn === 2 ? "8" : "", data: { total, diff } });
+  let inside = 0;
+  const steady = async (url: string | URL) => {
+    const pn = Number(new URL(String(url)).searchParams.get("pn"));
+    assert.equal(inside, 0, "one page at a time");
+    inside += 1;
+    await new Promise((resolve) => setImmediate(resolve));
+    inside -= 1;
+    return json(page(pn, 4, pn === 1 ? [{ f3: 1 }, { f3: -1 }] : [{ f3: 20 }, { f3: -20 }]));
+  };
+  const whole = await fetchMarketCounts({ fetchImpl: steady, pageSize: 2 });
+  assert.equal(whole.partial, false);
+  assert.equal(whole.pages, 2);
+  assert.deepEqual([whole.advancers, whole.decliners, whole.limitUp, whole.limitDown], [2, 2, 1, 1]);
+  assert.equal(whole.delayed, true);
+
+  // maxPages reached before the total is partial.
+  const short = await fetchMarketCounts({ fetchImpl: steady, pageSize: 2, maxPages: 1 });
+  assert.equal(short.partial, true);
+  assert.equal(short.pages, 1);
+  assert.equal(short.pageHashes.length, 1);
+
+  // A first page with no data is no market data.
+  await rejectsWith(fetchMarketCounts({ fetchImpl: async () => json({ rc: 0, data: null }) }), "NO_MARKET_DATA");
+  await rejectsWith(fetchMarketCounts({ fetchImpl: async () => json({ rc: 0, data: { total: "x", diff: [] } }) }), "UPSTREAM_INVALID");
+});
+
+test("eastmoney: the fixture fetch answers the boards, members, fund-flow and count-page files by fs", async () => {
+  const q = (params: Record<string, string>) => `${CLIST}?${new URLSearchParams(params)}`;
+  for (const [url, name] of [
+    [q({ fs: "m:90 t:3 f:!50" }), "boards.json"],
+    [q({ fs: "m:90 t:3", fid0: "f62" }), "board-flow.json"],
+    [q({ fs: "b:BK0715 f:!50" }), "members-BK0715.json"],
+    [q({ fs: "b:BK1716 f:!50" }), "members-BK1716.json"],
+    [q({ fs: "m:0 t:6,m:0 t:80,m:1 t:2,m:1 t:23,m:0 t:81 s:2048", pn: "2" }), "counts-page-2.json"],
+  ]) {
+    const response = await fixtureFetch(url);
+    assert.equal(response.status, 200, url);
+    assert.deepEqual(await response.json(), JSON.parse(readFileSync(`${FIXTURES}${name}`, "utf8")), url);
+  }
+  for (const url of [q({ fs: "b:BK9999 f:!50" }), q({ fs: "m:0 t:6,m:0 t:80,m:1 t:2,m:1 t:23,m:0 t:81 s:2048", pn: "3" })]) {
     assert.equal((await fixtureFetch(url)).status, 404, url);
   }
 });
