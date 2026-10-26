@@ -494,6 +494,56 @@ test("lunhui-runs: submit before the module's context read is READ_FIRST, counte
   assert.equal((await restarted.submit("alpha", run, "environment", "{}", accept)).accepted, true);
 });
 
+test("lunhui-runs: a build that throws or an unusable evidence file does not count as a read: the submit stays READ_FIRST", async (t) => {
+  const root = await strategiesRoot(t);
+  const { service } = mounted(root);
+  const { run } = await service.openRun("alpha", "market");
+  await service.addEvidence("alpha", run, "quotes", [{ symbol: "sh600000", price: 10 }], META);
+  const failed = Object.assign(new Error("INVALID_CONTEXT"), { code: "INVALID_CONTEXT" });
+  await assert.rejects(service.readContext("alpha", run, "environment", () => { throw failed; }), (error) => error === failed);
+  await rejectsWith(service.submit("alpha", run, "environment", "{}", accept), "READ_FIRST");
+  // The seal and the count stand.
+  assert.ok((await service.readRun("alpha", run)).manifest.sealed_at);
+  assert.equal((await metricsOf(root, run)).calls.environment, 2);
+  // An evidence file swapped for garbage refuses the read, and the submit stays READ_FIRST.
+  const file = join(root, "alpha", "analysis", run, "evidence-quotes.json");
+  await rm(file);
+  await writeFile(file, "{ not json");
+  await rejectsWith(service.readContext("alpha", run, "sentiment", echo), "NO_SUCH_RUN");
+  await rejectsWith(service.submit("alpha", run, "sentiment", "{}", accept), "READ_FIRST");
+});
+
+test("lunhui-runs: a rejection carrying no repair gets its category's repair", async (t) => {
+  const root = await strategiesRoot(t);
+  const { service } = mounted(root);
+  const { run } = await service.openRun("alpha", "market");
+  await service.readContext("alpha", run, "environment", echo);
+  const bare = () => { throw Object.assign(new TypeError("too long"), { code: "INVALID_ANALYSIS", category: "BYTE_LIMIT" }); };
+  const refusal = await rejectsWith(service.submit("alpha", run, "environment", "{}", bare), "INVALID_ANALYSIS");
+  assert.equal(refusal.message, `INVALID_ANALYSIS: [BYTE_LIMIT] too long\n修复：${repairFor("BYTE_LIMIT")}`);
+  assert.doesNotMatch(refusal.message, /undefined/);
+});
+
+test("lunhui-runs: a submit whose run.json write fails after the artifact landed lists the module unaccepted, and a retry is accepted", async (t) => {
+  const root = await strategiesRoot(t);
+  const { service, tool } = mounted(root);
+  const { run } = await service.openRun("alpha", "market");
+  await service.readContext("alpha", run, "environment", echo);
+  const dir = join(root, "alpha", "analysis", run);
+  await mkdir(join(dir, "run.pending.json")); // replaceFile refuses a directory at its staging name
+  await rejectsWith(service.submit("alpha", run, "environment", "{\"n\":1}", accept), "NO_SUCH_RUN");
+  await rm(join(dir, "run.pending.json"), { recursive: true });
+  let body = JSON.parse(await tool.execute({ strategy: "alpha", run }, fakeExec()));
+  assert.deepEqual(body.artifacts, [{ module: "environment", accepted: false, headline: null }]);
+  assert.deepEqual(body.manifest.artifacts, []);
+  assert.deepEqual(body.metrics.submitted, []);
+  assert.deepEqual(await service.submit("alpha", run, "environment", "{\"n\":2}", accept), { accepted: true, module: "environment", run });
+  body = JSON.parse(await tool.execute({ strategy: "alpha", run }, fakeExec()));
+  assert.deepEqual(body.artifacts, [{ module: "environment", accepted: true, headline: {} }]);
+  assert.deepEqual(JSON.parse(await readFile(join(dir, "environment.json"), "utf8")), { n: 2 });
+  assert.deepEqual(body.metrics.submitted, ["environment"]);
+});
+
 test("lunhui-runs: a validator rejection is recorded by category and thrown INVALID_ANALYSIS with its repair; a validator's own bug is rethrown as is", async (t) => {
   const root = await strategiesRoot(t);
   const { service } = mounted(root);

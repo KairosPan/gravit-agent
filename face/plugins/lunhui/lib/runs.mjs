@@ -56,7 +56,7 @@ import { constants } from "node:fs";
 import { access, lstat, mkdir, open, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { basename, join, resolve, sep } from "node:path";
 import { hash } from "./contract.mjs";
-import { MODULES } from "./modules.mjs";
+import { MODULE_NAMES } from "./modules.mjs";
 
 /** A refusal with a stable code word; the message is `<code>: <reason>`. */
 export class LunhuiError extends Error {
@@ -663,9 +663,6 @@ export async function readEvidence(dir, source) {
     throw error;
   }
 }
-
-/** The module names an artifact may be written under (`modules.mjs`). */
-const MODULE_NAMES = new Set(MODULES.map((module) => module.name));
 
 /**
  * Land a module's accepted artifact (spec A10): written fresh as `<module>.pending.json` (`wx`,

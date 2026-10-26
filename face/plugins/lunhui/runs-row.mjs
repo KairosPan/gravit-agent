@@ -20,7 +20,8 @@ import { readdir } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { FREEZE_BUDGET, MODULE_BUDGET, asToolError, refuse } from "./lib/errors.mjs";
-import { MODULES } from "./lib/modules.mjs";
+import { MODULES, MODULE_NAMES } from "./lib/modules.mjs";
+import { repairFor } from "./lib/contract-core.mjs";
 import * as runs from "./lib/runs.mjs";
 
 export const name = "lunhui-runs";
@@ -50,9 +51,6 @@ const ARTIFACT_MAX_BYTES = 24 * 1024;
  * evidence file it lists.
  * @typedef {{ manifest: import("./lib/runs.mjs").RunManifest, evidence: Array<{ source: string, session: string, items: any[] }> }} ContextInput
  */
-
-/** The module names the service counts and reads for (`modules.mjs`). */
-const MODULE_NAMES = new Set(MODULES.map((module) => module.name));
 
 /**
  * The service over one strategies root.
@@ -151,21 +149,23 @@ export function createLunhuiRuns(strategiesRoot) {
     /**
      * Read `module`'s context of the run, under the run's mutex - the freezes' own - so a freeze
      * racing the first read lands before the seal or is `RUN_SEALED`: count the call, seal the run
-     * when it is open (A4; a sealed run stays as it is), remember the read, then hand `build` the
-     * sealed manifest and every evidence file it lists (`readEvidence`). What `build` returns is
-     * returned. A module outside `MODULES` is host code's bug, a `TypeError`.
+     * when it is open (A4; a sealed run stays as it is), hand `build` the sealed manifest and every
+     * evidence file it lists (`readEvidence`), and only once `build` has returned remember the read,
+     * so an unusable evidence file or a `build` that throws leaves the submit `READ_FIRST`. What
+     * `build` returns is returned. A module outside `MODULES` is host code's bug, a `TypeError`.
      */
     async readContext(strategyName, run, module, build) {
       return service.withRun(strategyName, run, async (located) => {
         await countCall(located.dir, module);
         const manifest = await runs.sealRun(located.dir);
-        reads.add(`${located.strategy}/${located.run}/${module}`);
         const evidence = [];
         for (const entry of manifest.evidence) {
           const file = await runs.readEvidence(located.dir, entry.source);
           evidence.push({ source: entry.source, session: entry.session, items: file.items });
         }
-        return build({ manifest, evidence });
+        const context = await build({ manifest, evidence });
+        reads.add(`${located.strategy}/${located.run}/${module}`);
+        return context;
       });
     },
     /**
@@ -174,7 +174,8 @@ export function createLunhuiRuns(strategiesRoot) {
      * thrown): count the call; `ALREADY_SUBMITTED` when `run.json` `artifacts[]` names the module;
      * `READ_FIRST` unless this process read the module's context of the run; then `validate(text)`.
      * A rejection carrying a `category` (`validateEnvelope`'s) is recorded in
-     * `metrics.rejections[module]` and thrown `INVALID_ANALYSIS` with its repair; any other error
+     * `metrics.rejections[module]` and thrown `INVALID_ANALYSIS` with its repair (`repairFor` its
+     * category when it carries none); any other error
      * the validator throws is thrown as it is. An accepted artifact - the validator's return - is
      * written by `writeArtifact` and the module pushed to `metrics.submitted`.
      */
@@ -191,7 +192,7 @@ export function createLunhuiRuns(strategiesRoot) {
           if (typeof error?.category !== "string") throw error;
           const recorded = Array.isArray(metrics.rejections[module]) ? metrics.rejections[module] : [];
           await runs.writeMetrics(located.dir, { ...metrics, rejections: { ...metrics.rejections, [module]: [...recorded, error.category] } });
-          throw refuse.rejected(error.category, error.message, error.repair);
+          throw refuse.rejected(error.category, error.message, error.repair ?? repairFor(error.category));
         }
         await runs.writeArtifact(located.dir, module, artifact);
         await runs.writeMetrics(located.dir, { ...metrics, submitted: [...metrics.submitted, module] });

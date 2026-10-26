@@ -20,3 +20,6 @@ export const MODULES = Object.freeze([
   lunhuiModule("mode", ["mode", "preconditions", "research_only_matches", "expectation", "expectation_review"]),
   lunhuiModule("counterevidence", ["items"]),
 ]);
+
+/** The modules' names, for a host check that a module argument is one of `MODULES`; read, never added to. */
+export const MODULE_NAMES = new Set(MODULES.map((module) => module.name));
