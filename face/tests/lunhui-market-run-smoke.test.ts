@@ -1,12 +1,14 @@
 /** One whole cn-market run on a real boot (modules spec §10 item 2, A22, §5.10, §5.11): Gravit, played by
  * the stub, freezes the index (opening the run), the limit-up pools and the boards into that run, delegates to
- * role_cn_market_analyst, and reads the run back; the role child, played by the stub too, reads each market
- * module's context and submits an artifact it builds from that context's own text - ids from its derived and
- * evidence lists, envelope fields copied - so the run proves the contexts are usable as a role receives them.
- * Pinned: the run sealed with three evidence files; environment.json, sentiment.json and theme.json each an
- * OK artifact named in artifacts[] that passes its contract again when re-read against a digest rebuilt from
- * the sealed run's files; metrics.json's calls within budget and submitted listing the three; the channel's
- * runs card listing the run with three chips; Gravit's prompt carrying the run protocol.
+ * role_cn_market_analyst, then to role_cn_reviewer (no market_run: the run is the market run), and reads the run
+ * back; each role child, played by the stub too, reads its module's context and submits an artifact it builds
+ * from that context's own text - ids from its derived and evidence lists, envelope fields copied - so the run
+ * proves the contexts are usable as a role receives them. Pinned: the run sealed with three evidence files;
+ * environment.json, sentiment.json and theme.json each an OK artifact, and the reviewer's counterevidence.json
+ * one item against the sentiment, all named in artifacts[] and each passing its contract again when re-read
+ * against a digest rebuilt from the sealed run's files; metrics.json's calls within budget and submitted
+ * listing the four; the channel's runs card listing the run with four chips; Gravit's prompt carrying the run
+ * protocol.
  *
  * The boot: a temp DSH_HOME, port 0, AKShare and the seat off, the default model the stub, `lunhui-runs`
  * over a temp strategies root holding a copy of the shipped cn-market, the four freeze rows' `fetch` one
@@ -34,6 +36,7 @@ import { buildContext, validateEnvelope } from "../plugins/lunhui/lib/contract-c
 import { contract as environmentContract } from "../plugins/lunhui/lib/contracts/environment.mjs";
 import { contract as sentimentContract } from "../plugins/lunhui/lib/contracts/sentiment.mjs";
 import { contract as themeContract } from "../plugins/lunhui/lib/contracts/theme.mjs";
+import { marketContract as reviewContract } from "../plugins/lunhui/lib/contracts/counterevidence.mjs";
 import { MODULES as MODULE_TABLE } from "../plugins/lunhui/lib/modules.mjs";
 import { makeBotsRoot } from "./bots-fixture.ts";
 import { mountClient, remote, signIn } from "./remote.ts";
@@ -49,7 +52,9 @@ const FRIDAY = Date.parse("2026-10-23T07:00:00.000Z");
 const FREEZE_ROWS = ["lunhui-freeze-quotes", "lunhui-freeze-limit-up", "lunhui-freeze-boards", "lunhui-freeze-index"];
 const MODULES = ["environment", "sentiment", "theme"] as const;
 type Module = (typeof MODULES)[number];
-const CONTRACTS: Record<Module, any> = { environment: environmentContract, sentiment: sentimentContract, theme: themeContract };
+/** The run's four artifacts: the analyst's three, then the reviewer's. */
+const ARTIFACTS = [...MODULES, "counterevidence"] as const;
+const CONTRACTS: Record<(typeof ARTIFACTS)[number], any> = { environment: environmentContract, sentiment: sentimentContract, theme: themeContract, counterevidence: reviewContract };
 /** The run protocol's first line (`dsh/profile/lunhui-run.md`, the `lunhui:run` section), read from the file. */
 const RUN_HEADING = readProtocol(LUNHUI_RUN_PATH).split("\n")[0];
 
@@ -164,7 +169,19 @@ function themeArtifact(context: Context) {
 }
 const BUILD: Record<Module, (context: Context) => unknown> = { environment: environmentArtifact, sentiment: sentimentArtifact, theme: themeArtifact };
 
-test("market run smoke: Gravit freezes three sources into one run, the analyst submits three OK artifacts built from its contexts, the run reads back sealed and on the runs card", { skip: gated && "set FACE_SMOKE=1", timeout: 180_000 }, async () => {
+/** The reviewer's: one item against the sentiment artifact - its seal ratio a single session's reading - and a claim on that measure. */
+function reviewArtifact(context: Context) {
+  const sentiment = need(context.artifacts?.find((a: { module: string }) => a.module === "sentiment"), "the sentiment artifact");
+  const seal = derivedOf(context, "seal_ratio");
+  return {
+    ...envelopeOf(context),
+    items: [{ id: "x1", against: "sentiment", kind: "MISSING_EVIDENCE", text: "封板率只有一个交易日的读数，缺少前一交易日的对照。", evidence_ids: [seal.id, sentiment.id] }],
+    claims: [{ id: "c1", basis: "CURRENT", evidence_ids: [seal.id], text: "所引封板率是本运行冻结的单日读数。" }],
+    limitations: [],
+  };
+}
+
+test("market run smoke: Gravit freezes three sources into one run, the analyst submits three OK artifacts built from its contexts, the reviewer its counterevidence, the run reads back sealed and on the runs card", { skip: gated && "set FACE_SMOKE=1", timeout: 180_000 }, async () => {
   const RealDate = Date;
   const bots = await makeBotsRoot();
   const fixtureRoles = await mkdtemp(join(tmpdir(), "face-market-run-roles-"));
@@ -178,9 +195,11 @@ test("market run smoke: Gravit freezes three sources into one run, the analyst s
     for (const entry of readdirSync(ROLES_ROOT, { withFileTypes: true })) {
       if (entry.isDirectory()) await cp(join(ROLES_ROOT, entry.name), join(fixtureRoles, entry.name), { recursive: true });
     }
-    const metaPath = join(fixtureRoles, "cn-market-analyst", "role.yml");
-    writeFileSync(metaPath, readFileSync(metaPath, "utf8").replace(/^model: .*$/m, "model: stub/flash-standin"));
-    assert.equal(readRoles(fixtureRoles).find((r) => r.id === "cn-market-analyst")!.model, "stub/flash-standin", "the fixture's analyst is routed to the stub");
+    for (const role of ["cn-market-analyst", "cn-reviewer"]) {
+      const metaPath = join(fixtureRoles, role, "role.yml");
+      writeFileSync(metaPath, readFileSync(metaPath, "utf8").replace(/^model: .*$/m, "model: stub/flash-standin"));
+      assert.equal(readRoles(fixtureRoles).find((r) => r.id === role)!.model, "stub/flash-standin", `the fixture's ${role} is routed to the stub`);
+    }
     await cp(CN_MARKET, join(strategies, "cn-market"), { recursive: true });
     await mkdir(join(root, ".git"));
     setupFaceProfile(home);
@@ -194,6 +213,8 @@ test("market run smoke: Gravit freezes three sources into one run, the analyst s
 
     const requested = new Map<string, GenerateOptions[]>();
     const headers = new Map<string, Session["header"]>();
+    /** Each child's brief, by its session id: the analyst's or the reviewer's. */
+    const briefs = new Map<string, string>();
     /** The child's run id, read from its brief; Gravit's, from the index freeze's reply. */
     const runFrom = (text: string) => need(/"run":"([^"]+)"/.exec(text)?.[1] ?? /run (\S+?)[。.]?$/m.exec(text)?.[1], "a run id");
     const script = (request: GenerateOptions): StubReply => {
@@ -204,9 +225,17 @@ test("market run smoke: Gravit freezes three sources into one run, the analyst s
       if (header !== undefined && !headers.has(id)) headers.set(id, { ...header });
       const results = toolTexts(request);
       if (header?.origin === "subagent") {
-        /* The role child: read, then submit what it built from that read, module by module; then report. */
-        const brief = request.messages.find((m) => sourceKind(m) !== "tool" && textOf(m).includes("MARKET_RUN"));
+        const brief = request.messages.find((m) => sourceKind(m) !== "tool" && /MARKET_RUN|REVIEW_RUN/.test(textOf(m)));
         if (brief === undefined) return { kind: "text", text: "UNEXPECTED_CHILD" };
+        briefs.set(id, textOf(brief));
+        const review = /REVIEW_RUN cn-market run=(\S+)/.exec(textOf(brief));
+        if (review !== null) {
+          /* The reviewer: read without market_run, submit what it built from that read, report. */
+          if (results.length === 0) return { kind: "tool", name: "lunhui_read_counterevidence_context", args: { strategy: "cn-market", run: review[1] } };
+          if (results.length === 1) return { kind: "tool", name: "lunhui_submit_counterevidence", args: { strategy: "cn-market", run: review[1], analysis: JSON.stringify(reviewArtifact(JSON.parse(results[0]) as Context)) } };
+          return { kind: "text", text: "REVIEW_REPORT: counterevidence submitted." };
+        }
+        /* The analyst: read, then submit what it built from that read, module by module; then report. */
         const run = runFrom(textOf(brief));
         const step = results.length;
         if (step >= MODULES.length * 2) return { kind: "text", text: "MARKET_REPORT: three artifacts submitted." };
@@ -215,7 +244,7 @@ test("market run smoke: Gravit freezes three sources into one run, the analyst s
         const context = JSON.parse(results[step - 1]) as Context;
         return { kind: "tool", name: `lunhui_submit_${module}`, args: { strategy: "cn-market", run, analysis: JSON.stringify(BUILD[module](context)) } };
       }
-      /* Gravit: the protocol's three steps, one tool per request. */
+      /* Gravit: the protocol's four steps, one tool per request. */
       const trigger = lastHuman(request);
       if (results.length === 0) return trigger && textOf(trigger) === "RUN_MARKET" ? { kind: "tool", name: "lunhui_freeze_index", args: { strategy: "cn-market" } } : { kind: "text", text: "PARENT_DONE" };
       const run = runFrom(results[0]);
@@ -223,7 +252,8 @@ test("market run smoke: Gravit freezes three sources into one run, the analyst s
         case 1: return { kind: "tool", name: "lunhui_freeze_limit_up", args: { strategy: "cn-market", run } };
         case 2: return { kind: "tool", name: "lunhui_freeze_boards", args: { strategy: "cn-market", run } };
         case 3: return { kind: "tool", name: "role_cn_market_analyst", args: { description: "Analyse the market run", prompt: `MARKET_RUN: cn-market run ${run}` } };
-        case 4: return { kind: "tool", name: "lunhui_read_run", args: { strategy: "cn-market", run } };
+        case 4: return { kind: "tool", name: "role_cn_reviewer", args: { description: "Review the market run", prompt: `REVIEW_RUN cn-market run=${run}` } };
+        case 5: return { kind: "tool", name: "lunhui_read_run", args: { strategy: "cn-market", run } };
         default: return { kind: "text", text: "RUN_DONE" };
       }
     };
@@ -235,21 +265,25 @@ test("market run smoke: Gravit freezes three sources into one run, the analyst s
     const gravit = ctx.agents.get(SessionId(sessionId))!;
     await remote(base, cookie, "session/prompt", { request: { requestId: `market-run-${crypto.randomUUID()}`, sessionId, mode: "queue", content: [{ type: "text", text: "RUN_MARKET" }] } });
     const gravitRequests = () => requested.get(sessionId) ?? [];
-    await waitFor("Gravit's last request", () => gravitRequests().some((r) => toolTexts(r).length >= 5));
+    await waitFor("Gravit's last request", () => gravitRequests().some((r) => toolTexts(r).length >= 6));
     await gravit.whenIdle();
 
     /* Gravit's side: the protocol in its prompt, every tool result a success, the run read back last. */
     const gravitResults = toolTexts(gravitRequests().at(-1)!);
     assert.ok(textOf(gravitRequests()[0].messages[0]).includes(RUN_HEADING), "Gravit's prompt carried the lunhui:run protocol");
-    assert.equal(gravitResults.length, 5, `five tool results came back to Gravit: ${gravitResults.map((t) => t.slice(0, 120)).join(" | ")}`);
+    assert.equal(gravitResults.length, 6, `six tool results came back to Gravit: ${gravitResults.map((t) => t.slice(0, 120)).join(" | ")}`);
     for (const text of gravitResults) assert.doesNotMatch(text, /^Error:/, `no tool call failed: ${text.slice(0, 300)}`);
     const run = runFrom(gravitResults[0]);
     assert.deepEqual(gravitResults.slice(0, 3).map((t) => [JSON.parse(t).run, JSON.parse(t).source, JSON.parse(t).session]),
       [[run, "index", "2026-10-23"], [run, "limit-up", "2026-10-23"], [run, "boards", "2026-10-23"]], "the three freezes landed in one run, on the fixtures' session");
     assert.match(gravitResults[3], /MARKET_REPORT/, "the analyst's report returned through the role tool");
+    assert.match(gravitResults[4], /REVIEW_REPORT/, "the reviewer's report returned through its role tool");
+    const readBack = JSON.parse(gravitResults[5]);
+    assert.deepEqual([readBack.manifest.run, readBack.artifacts.map((a: { module: string }) => a.module).sort()], [run, [...ARTIFACTS].sort()], "the run read back with its four artifacts");
 
-    /* The child's side: three reads, three accepted submits. */
-    const childId = [...headers.entries()].find(([, h]) => h.origin === "subagent")![0];
+    /* The analyst's side: three reads, three accepted submits. */
+    const childOf = (tag: string) => need([...headers.entries()].find(([id, h]) => h.origin === "subagent" && briefs.get(id)?.includes(tag))?.[0], `the ${tag} child`);
+    const childId = childOf("MARKET_RUN");
     const childResults = toolTexts(requested.get(childId)!.at(-1)!);
     assert.equal(childResults.length, 6, "three reads and three submits came back to the child");
     for (const [i, module] of MODULES.entries()) {
@@ -258,6 +292,15 @@ test("market run smoke: Gravit freezes three sources into one run, the analyst s
       assert.equal(childResults[i * 2 + 1], JSON.stringify({ accepted: true, module, run }), `the ${module} artifact was accepted: ${childResults[i * 2 + 1].slice(0, 400)}`);
     }
 
+    /* The reviewer's side: one read without market_run, expecting OK over the three accepted artifacts; one accepted submit. */
+    const reviewResults = toolTexts(requested.get(childOf("REVIEW_RUN"))!.at(-1)!);
+    assert.equal(reviewResults.length, 2, "the reviewer read once and submitted once");
+    const reviewContext = JSON.parse(reviewResults[0]) as Context;
+    assert.equal(reviewContext.status_expected, "OK", "the review context expects OK");
+    assert.equal(Object.hasOwn(reviewContext, "market_run"), false, "a cn-market review cites no market run");
+    assert.deepEqual(reviewContext.artifacts!.map((a: { module: string }) => a.module).sort(), [...MODULES].sort(), "the review sees the three market artifacts");
+    assert.equal(reviewResults[1], JSON.stringify({ accepted: true, module: "counterevidence", run }), `the counterevidence artifact was accepted: ${reviewResults[1].slice(0, 400)}`);
+
     /* The run on disk: sealed, three evidence files, three artifacts named and valid on a re-read. */
     const runDir = join(strategies, "cn-market", "analysis", run);
     const manifest = JSON.parse(await readFile(join(runDir, "run.json"), "utf8"));
@@ -265,37 +308,47 @@ test("market run smoke: Gravit freezes three sources into one run, the analyst s
     assert.deepEqual(manifest.evidence.map((e: { source: string }) => e.source).sort(), ["boards", "index", "limit-up"]);
     const files = await readdir(runDir);
     assert.deepEqual(files.filter((f) => f.startsWith("evidence-")).sort(), ["evidence-boards.json", "evidence-index.json", "evidence-limit-up.json"]);
-    assert.deepEqual([...manifest.artifacts].sort(), [...MODULES].sort(), "artifacts[] names the three modules");
+    assert.deepEqual([...manifest.artifacts].sort(), [...ARTIFACTS].sort(), "artifacts[] names the three modules and the review");
     const evidence = await Promise.all(manifest.evidence.map(async (entry: { source: string; session: string }) => ({
       source: entry.source, session: entry.session, items: JSON.parse(await readFile(join(runDir, `evidence-${entry.source}.json`), "utf8")).items,
     })));
-    for (const module of MODULES) {
+    const accepted: Record<string, any> = {};
+    for (const module of ARTIFACTS) {
       const text = await readFile(join(runDir, `${module}.json`), "utf8");
       const artifact = JSON.parse(text);
       assert.deepEqual([artifact.module, artifact.status, artifact.run, artifact.snapshot_id], [module, "OK", run, manifest.snapshot_id]);
       const contract = CONTRACTS[module];
+      /* The digest as the read built it (lib/module-tool.mjs): the review reads the run's accepted market artifacts as they stood. */
       const { digest } = buildContext({
         module, run: manifest.run, manifest, evidence,
         sources: contract.sources, derivedFirst: contract.derivedFirst, derivedView: contract.derivedView, priority: contract.priority,
         hypotheses: contract.hypotheses, schema: contract.schema, hints: contract.hints, example: contract.example, required: contract.required,
+        requiredAny: contract.requiredAny, evidenceRequired: contract.evidenceRequired, runArtifacts: contract.runArtifacts,
+        artifacts: contract.runArtifacts === undefined ? undefined : Object.fromEntries(contract.runArtifacts.map((name: string) => [name, accepted[name]])),
       });
-      assert.deepEqual(validateEnvelope(text, { module, context: digest, schema: contract.schema, owns: contract.owns, ownedBy: contract.ownedBy, exemptPaths: contract.exemptPaths, rules: contract.rules }),
-        artifact, `${module}.json passes its contract again against the sealed run`);
+      assert.deepEqual(validateEnvelope(text, { module, context: digest, schema: contract.schema, owns: contract.owns, ownedBy: contract.ownedBy,
+        exemptPaths: contract.exemptPaths, scopedFields: contract.scopedFields, rules: contract.rules }),
+      artifact, `${module}.json passes its contract again against the sealed run`);
+      accepted[module] = artifact;
+      if (module === "counterevidence") {
+        assert.deepEqual(artifact.items.map((item: { id: string; against: string }) => [item.id, item.against]), [["x1", "sentiment"]], "one item, against the sentiment artifact");
+        continue;
+      }
       const headline = MODULE_TABLE.find((entry) => entry.name === module)!.headline;
       assert.ok(headline.some((field) => !["UNKNOWN", undefined].includes(artifact[field]) && !(Array.isArray(artifact[field]) && artifact[field].length === 0)), `${module}.json states a reading, not only UNKNOWN`);
     }
     const metrics = JSON.parse(await readFile(join(runDir, "metrics.json"), "utf8"));
     assert.equal(metrics.freezes, 3, "three freezes counted");
-    for (const module of MODULES) assert.ok(metrics.calls[module] >= 1 && metrics.calls[module] <= 10, `${module} within its ten calls (${metrics.calls[module]})`);
-    assert.deepEqual([...metrics.submitted].sort(), [...MODULES].sort(), "submitted lists the three");
+    for (const module of ARTIFACTS) assert.ok(metrics.calls[module] >= 1 && metrics.calls[module] <= 10, `${module} within its ten calls (${metrics.calls[module]})`);
+    assert.deepEqual([...metrics.submitted].sort(), [...ARTIFACTS].sort(), "submitted lists the four");
 
     /* The runs card: the run listed, sealed, with a chip per artifact. */
     const body = await readChannelBody(join(strategies, "cn-market"));
     const row = body.runs.find((r) => r.run === run)!;
     assert.ok(row, "the runs card lists the run");
     assert.equal(row.sealed, true);
-    assert.deepEqual(Object.keys(row.artifacts).sort(), [...MODULES].sort(), "three chips");
-    for (const module of MODULES) assert.equal(row.artifacts[module].status, "OK");
+    assert.deepEqual(Object.keys(row.artifacts).sort(), [...ARTIFACTS].sort(), "four chips");
+    for (const module of ARTIFACTS) assert.equal(row.artifacts[module].status, "OK");
     assert.equal(body.latestRun?.run, run, "and it is the latest run");
   } finally {
     globalThis.Date = RealDate;

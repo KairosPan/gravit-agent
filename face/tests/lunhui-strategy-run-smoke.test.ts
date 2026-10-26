@@ -1,22 +1,26 @@
-/** One strategy run on a real boot, citing the day's market run (modules spec §5.10, A22, A27, §5.11): Gravit,
- * played by the stub, does the cn-market run as plan 2's market smoke does - the index, limit-up and boards
- * freezes, role_cn_market_analyst submitting three artifacts, lunhui_read_run - then the strategy channel the run
- * protocol now states for lunhui-s01-repair: the market run read, the quotes of two equities its theme's mainline
- * board holds frozen on the strategy (opening the strategy run), role_cn_stock_analyst for the leader with both
- * run ids, again for the mode, and the strategy run read back. Each role child, played by the stub too, builds its
- * artifact from the context it received. S01 needs an accepted counterevidence artifact, the reviewer's (plan 4),
- * so the mode concludes WAIT with a null card; the card's grading is pinned by tests/lunhui-mode.test.ts.
- * Pinned: leader.json and mode.json accepted and each passing its contract again against a digest rebuilt from the
- * sealed runs; the mode WAIT, its card and review null, its market_run the market run; the channel's runs card
- * listing the strategy run with that market run cited and a mode chip of the mode word; Gravit's prompt carrying
- * the run protocol with its strategy channel.
+/** An S01 registered on Friday and graded on Monday on a real boot, the reviewer in both channels (modules spec
+ * §5.10, A5, A6, A12, A22, A27, §5.11). Each day Gravit, played by the stub, follows the run protocol: the cn-market
+ * run - the index, limit-up and boards freezes, role_cn_market_analyst submitting three artifacts, role_cn_reviewer
+ * without market_run, lunhui_read_run - then the strategy channel for lunhui-s01-repair: lunhui_read_run on cn-market
+ * without a run (the listing) to find the day's market run, the same with that run, the quotes of two equities its
+ * theme's mainline board holds frozen on the strategy (opening the strategy run), role_cn_stock_analyst for the
+ * leader, role_cn_reviewer with both run ids, role_cn_stock_analyst for the mode, and the strategy run read back.
+ * Each role child, played by the stub too, builds its artifact from the ids the context it received shows. Friday's
+ * mode registers S01 with a card (preconditions met by class, the minute confirmation `unmet: no source`, every
+ * counterevidence item addressed, the parameters used); Monday's grades it (`expectation_review.previous_run`
+ * Friday's run). Pinned: every artifact of both days' four runs accepted and passing its contract again against a
+ * digest rebuilt from the sealed runs as the read built it; the card at most 2,048 bytes; the runs card's latest run
+ * Monday's, with its review line; Gravit's prompt carrying the run protocol with its strategy channel.
  *
  * The boot is the market smoke's: a temp DSH_HOME, port 0, AKShare and the seat off, the stub the default model,
  * `lunhui-runs` over a temp strategies root holding copies of the shipped cn-market and lunhui-s01-repair, the
- * freeze rows' `fetch` one directory holding both fixture sets, a fixture roles root whose two analysts are routed
- * to the stub, and `Date` shifted to Friday 2026-10-23 15:00 China time for the boot's lifetime (a patch cannot
- * carry `config.now` into a booted row). The fixture copy is the leader tests': 600519 sealed in the 涨停池, 600519
- * and 000333 members of BK0715, so a candidate can stand. Own file, gated. */
+ * freeze rows' `fetch` one directory holding both fixture sets, and a fixture roles root whose three roles are
+ * routed to the stub. The clock: a patch cannot carry `config.now` into a booted row, so `Date` is replaced - its
+ * "now" Friday 2026-10-23 15:00 China time for Friday's prompt, then Monday 2026-10-26 15:00, the next trading day,
+ * for Monday's - each advancing in real time; the freezes stamp each day's session from it, so Monday's market run
+ * is fresh for Monday's strategy run (A5) and Friday's is an earlier session. The fixtures are one set for both
+ * days. The fixture copy is the leader tests': 600519 sealed in the 涨停池, 600519 and 000333 members of BK0715,
+ * so a candidate can stand. Own file, gated. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
@@ -34,7 +38,11 @@ import { readChannelBody } from "../src/channels.ts";
 import { buildContext, validateEnvelope } from "../plugins/lunhui/lib/contract-core.mjs";
 import { createLunhuiRuns } from "../plugins/lunhui/runs-row.mjs";
 import { contract as leaderContract } from "../plugins/lunhui/lib/contracts/leader.mjs";
-import { contract as modeContract } from "../plugins/lunhui/lib/contracts/mode.mjs";
+import { CARD_BYTES, contract as modeContract } from "../plugins/lunhui/lib/contracts/mode.mjs";
+import { contract as environmentContract } from "../plugins/lunhui/lib/contracts/environment.mjs";
+import { contract as sentimentContract } from "../plugins/lunhui/lib/contracts/sentiment.mjs";
+import { contract as themeContract } from "../plugins/lunhui/lib/contracts/theme.mjs";
+import { contract as reviewContract } from "../plugins/lunhui/lib/contracts/counterevidence.mjs";
 import { runsView } from "../client/js/host/runs-view.js";
 import { makeBotsRoot } from "./bots-fixture.ts";
 import { mountClient, remote, signIn } from "./remote.ts";
@@ -48,12 +56,20 @@ const STRATEGIES = join(TESTS, "..", "..", "strategies");
 const S01 = "lunhui-s01-repair";
 /** Friday 2026-10-23, 15:00 in China: after the close of the session the Eastmoney fixtures carry. */
 const FRIDAY = Date.parse("2026-10-23T07:00:00.000Z");
+/** Monday 2026-10-26, 15:00 in China: the next trading day's close. */
+const MONDAY = Date.parse("2026-10-26T07:00:00.000Z");
+/** The real `Date`, captured before any shift, so each day's shift is from the real clock. */
+const REAL_DATE = Date;
 const FREEZE_ROWS = ["lunhui-freeze-quotes", "lunhui-freeze-limit-up", "lunhui-freeze-boards", "lunhui-freeze-index"];
 const MARKET_MODULES = ["environment", "sentiment", "theme"] as const;
 type MarketModule = (typeof MARKET_MODULES)[number];
 const STOCK_MODULES = ["leader", "mode"] as const;
 type StockModule = (typeof STOCK_MODULES)[number];
-const STOCK_CONTRACTS: Record<StockModule, any> = { leader: leaderContract, mode: modeContract };
+/** Every module's contract, by name; the reviewer's picks its channel's (`forStrategy`). */
+const CONTRACTS: Record<string, any> = { environment: environmentContract, sentiment: sentimentContract, theme: themeContract, leader: leaderContract, mode: modeContract, counterevidence: reviewContract };
+/** A market run's four artifacts and a strategy run's three, as each lands. */
+const MARKET_ARTIFACTS = [...MARKET_MODULES, "counterevidence"];
+const STRATEGY_ARTIFACTS = ["leader", "counterevidence", "mode"];
 /** The equities Gravit chooses from BK0715's members, which the fixture copy makes hold them. */
 const SYMBOLS = ["sh600519", "sz000333"];
 /** The run protocol (`dsh/profile/lunhui-run.md`, the `lunhui:run` section), read from the file: its first line and its strategy channel. */
@@ -73,7 +89,7 @@ async function waitFor(label: string, check: () => boolean, ms = 90_000) {
 
 /** `Date` with its "now" moved to `at`, advancing in real time; a date built from arguments is unchanged. */
 function shiftedDate(at: number): DateConstructor {
-  const Real = Date;
+  const Real = REAL_DATE;
   const offset = at - Real.now();
   const now = () => Real.now() + offset;
   return new Proxy(Real, {
@@ -210,20 +226,76 @@ function leaderArtifact(context: Context) {
   };
 }
 
-/** The mode: WAIT - S01 waits for the reviewer's counterevidence - the minute confirmation unmet for want of a source. */
+/** The run's artifact view of `module`, as the context shows it. */
+const viewOf = (context: Context, module: string) => need(context.artifacts?.find((a: { module: string }) => a.module === module), `the ${module} artifact`);
+
+/**
+ * The mode: S01 - the strategy's own mode - built from the ids the context shows: the theme artifact for the
+ * theme preconditions, the leader for the candidate, the sentiment for the negative tail, the minute
+ * confirmation unmet for want of a source; every counterevidence item answered by its id; a card on the
+ * leader's first candidate at the cited sentiment's state; and, when the context shows a previous card,
+ * its grade on that candidate's quote this run froze.
+ */
 function modeArtifact(context: Context) {
-  const quote = need(context.evidence.find((e) => e.kind === "quote"), "a quote");
+  const theme = viewOf(context, "theme");
+  const leader = viewOf(context, "leader");
+  const sentiment = viewOf(context, "sentiment");
+  const review = viewOf(context, "counterevidence");
+  const symbol = need(leader.headline.leader_candidates?.[0]?.symbol, "the leader's first candidate");
+  const quote = need(context.evidence.find((e) => e.kind === "quote" && e.symbol === symbol), `the quote of ${symbol}`);
   return {
-    ...context.example,
-    mode: "WAIT",
-    preconditions: [{ id: "p1", name: "minute_confirmation", status: "unmet: no source", evidence_ids: [] }],
-    claims: [{ id: "c1", basis: "CURRENT", evidence_ids: [quote.id], text: "本运行登记为 WAIT：分钟确认缺少来源。" }],
+    ...envelopeOf(context), market_run: context.market_run, market_snapshot_id: context.market_snapshot_id,
+    mode: "S01",
+    preconditions: [
+      { id: "p1", name: "theme_gate", status: "met", evidence_ids: [theme.id] },
+      { id: "p2", name: "candidate_before_divergence", status: "met", evidence_ids: [leader.id] },
+      { id: "p3", name: "theme_not_falsified", status: "met", evidence_ids: [theme.id] },
+      { id: "p4", name: "negative_tail_not_widening", status: "met", evidence_ids: [sentiment.id] },
+      { id: "p5", name: "minute_confirmation", status: "unmet: no source", evidence_ids: [] },
+    ],
+    research_only_matches: [],
+    expectation: {
+      frozen_version: context.snapshot_id, candidates: [symbol], anchor: "本运行冻结报价的最新价，不事后换锚。", state: sentiment.headline.state,
+      triggers: ["下一运行冻结的报价涨跌幅为正，且仍在涨停池中。"], vetoes: ["下一运行引用的市场状态为 CLIMAX、RETREAT 或 UNKNOWN。"],
+      window: "下一个交易日。", price_band: "以锚点上下百分之五为观察区间。", holding_period: "一个交易日的观察。",
+      branches: { 符合: "仍在涨停池且涨跌幅为正。", 强于: "连板数加一。", 弱于: "跌出涨停池或涨跌幅为负。" },
+    },
+    expectation_review: context.previous === null ? null : { previous_run: context.previous.run, grade: "符合", evidence_ids: [quote.id] },
+    parameters_used: [{ name: "d_i", value: "未设定", note: "研究候选，没有生产值。" }],
+    addressed: review.headline.items.map((item: { id: string }) => ({ item: item.id, response: "记入限制说明，下一运行核对。" })),
+    claims: [{ id: "c1", basis: "CURRENT", evidence_ids: [quote.id], text: "S01 登记：前提见所引工件，分钟确认缺少来源。" }],
+    limitations: ["分钟确认缺少来源，只作每日登记。"],
+  };
+}
+
+/**
+ * The reviewer's, in either channel: one item and a claim on a frozen item. In cn-market (no market_run in the
+ * context) against the sentiment artifact on its seal ratio; in the strategy channel against the leader
+ * artifact on its first candidate's quote, the envelope's market_run and market_snapshot_id copied.
+ */
+function reviewArtifact(context: Context) {
+  if (!Object.hasOwn(context, "market_run")) {
+    const sentiment = viewOf(context, "sentiment");
+    const seal = derivedOf(context, "seal_ratio");
+    return {
+      ...envelopeOf(context),
+      items: [{ id: "x1", against: "sentiment", kind: "MISSING_EVIDENCE", text: "封板率只有一个交易日的读数，缺少前一交易日的对照。", evidence_ids: [seal.id, sentiment.id] }],
+      claims: [{ id: "c1", basis: "CURRENT", evidence_ids: [seal.id], text: "所引封板率是本运行冻结的单日读数。" }],
+      limitations: [],
+    };
+  }
+  const leader = viewOf(context, "leader");
+  const quote = need(context.evidence.find((e) => e.kind === "quote" && e.symbol === leader.headline.leader_candidates?.[0]?.symbol), "the leader's first candidate's quote");
+  return {
+    ...envelopeOf(context), market_run: context.market_run, market_snapshot_id: context.market_snapshot_id,
+    items: [{ id: "x1", against: "leader", kind: "MISSING_EVIDENCE", text: "候选的排序只按单日冻结的连板数读出，缺少前后交易日的对照。", evidence_ids: [quote.id, leader.id] }],
+    claims: [{ id: "c1", basis: "CURRENT", evidence_ids: [quote.id], text: "所引报价是本运行冻结的单日读数。" }],
+    limitations: [],
   };
 }
 const STOCK_BUILD: Record<StockModule, (context: Context) => unknown> = { leader: leaderArtifact, mode: modeArtifact };
 
-test("strategy run smoke: after the market run, Gravit freezes two equities' quotes on lunhui-s01-repair, the stock analyst submits a leader and a WAIT mode citing the market run, both re-validate, the runs card cites the market run", { skip: gated && "set FACE_SMOKE=1", timeout: 240_000 }, async () => {
-  const RealDate = Date;
+test("strategy run smoke: an S01 registered on Friday and graded on Monday - each day a cn-market run reviewed, the listing finding it, a strategy run with leader, review and mode citing it - every artifact re-validates, the runs card shows the review line", { skip: gated && "set FACE_SMOKE=1", timeout: 300_000 }, async () => {
   const bots = await makeBotsRoot();
   const fixtureRoles = await mkdtemp(join(tmpdir(), "face-strategy-run-roles-"));
   const strategies = await realpath(await mkdtemp(join(tmpdir(), "face-strategy-run-strategies-")));
@@ -236,7 +308,7 @@ test("strategy run smoke: after the market run, Gravit freezes two equities' quo
     for (const entry of readdirSync(ROLES_ROOT, { withFileTypes: true })) {
       if (entry.isDirectory()) await cp(join(ROLES_ROOT, entry.name), join(fixtureRoles, entry.name), { recursive: true });
     }
-    for (const role of ["cn-market-analyst", "cn-stock-analyst"]) {
+    for (const role of ["cn-market-analyst", "cn-stock-analyst", "cn-reviewer"]) {
       const metaPath = join(fixtureRoles, role, "role.yml");
       writeFileSync(metaPath, readFileSync(metaPath, "utf8").replace(/^model: .*$/m, "model: stub/flash-standin"));
       assert.equal(readRoles(fixtureRoles).find((r) => r.id === role)!.model, "stub/flash-standin", `the fixture's ${role} is routed to the stub`);
@@ -254,10 +326,13 @@ test("strategy run smoke: after the market run, Gravit freezes two equities' quo
 
     const requested = new Map<string, GenerateOptions[]>();
     const headers = new Map<string, Session["header"]>();
-    /** Each child's brief, by its session id: the market analyst's or the stock analyst's. */
+    /** Each child's brief, by its session id: the market analyst's, the stock analyst's or the reviewer's. */
     const briefs = new Map<string, string>();
     /** The market run id, from the index freeze's reply or the market analyst's brief. */
     const runFrom = (text: string) => need(/"run":"([^"]+)"/.exec(text)?.[1] ?? /run (\S+?)[。.]?$/m.exec(text)?.[1], "a run id");
+    /** The market run the listing gives for the day's session: the newest sealed run of that session. */
+    const listedFor = (listing: string, session: string) =>
+      need((JSON.parse(listing).runs as { run: string; session: string }[]).find((r) => r.session === session)?.run, `a sealed cn-market run of ${session} in the listing`);
     const script = (request: GenerateOptions): StubReply => {
       if (request.purpose !== undefined) return { kind: "text", text: "fixture" };
       const id = String(request.sessionId);
@@ -266,9 +341,17 @@ test("strategy run smoke: after the market run, Gravit freezes two equities' quo
       if (header !== undefined && !headers.has(id)) headers.set(id, { ...header });
       const results = toolTexts(request);
       if (header?.origin === "subagent") {
-        const brief = request.messages.find((m) => sourceKind(m) !== "tool" && /MARKET_RUN|STOCK_RUN/.test(textOf(m)));
+        const brief = request.messages.find((m) => sourceKind(m) !== "tool" && /MARKET_RUN|STOCK_RUN|REVIEW_RUN/.test(textOf(m)));
         if (brief === undefined) return { kind: "text", text: "UNEXPECTED_CHILD" };
         briefs.set(id, textOf(brief));
+        const review = /REVIEW_RUN (\S+) run=(\S+)(?: market_run=(\S+))?/.exec(textOf(brief));
+        if (review !== null) {
+          /* The reviewer: read (with market_run outside cn-market), submit what it built from that read, report. */
+          const [, strategy, run, market_run] = review;
+          if (results.length === 0) return { kind: "tool", name: "lunhui_read_counterevidence_context", args: { strategy, run, ...(market_run === undefined ? {} : { market_run }) } };
+          if (results.length === 1) return { kind: "tool", name: "lunhui_submit_counterevidence", args: { strategy, run, analysis: JSON.stringify(reviewArtifact(JSON.parse(results[0]) as Context)) } };
+          return { kind: "text", text: `REVIEW_REPORT: counterevidence submitted on ${strategy}.` };
+        }
         const stock = /STOCK_RUN (leader|mode) (\S+) run=(\S+) market_run=(\S+)/.exec(textOf(brief));
         if (stock !== null) {
           /* The stock analyst: one module - read with both run ids, submit what it built from that read, report. */
@@ -289,122 +372,170 @@ test("strategy run smoke: after the market run, Gravit freezes two equities' quo
       /* Gravit: the protocol's market channel, then its strategy channel, one tool per request. */
       const trigger = lastHuman(request);
       if (results.length === 0) return trigger && textOf(trigger) === "RUN_S01" ? { kind: "tool", name: "lunhui_freeze_index", args: { strategy: "cn-market" } } : { kind: "text", text: "PARENT_DONE" };
-      const market = runFrom(results[0]);
-      const run = results.length > 6 ? JSON.parse(results[6]).run as string : "";
+      const frozen = runFrom(results[0]);
+      const session = JSON.parse(results[0]).session as string;
+      // From the listing on, the market run is the one the listing gives for the day's session.
+      const market = results.length > 6 ? listedFor(results[6], session) : frozen;
+      const run = results.length > 8 ? JSON.parse(results[8]).run as string : "";
       const stock = (module: StockModule) => ({ kind: "tool" as const, name: "role_cn_stock_analyst", args: { description: `Write the ${module} artifact`, prompt: `STOCK_RUN ${module} ${S01} run=${run} market_run=${market}` } });
       switch (results.length) {
-        case 1: return { kind: "tool", name: "lunhui_freeze_limit_up", args: { strategy: "cn-market", run: market } };
-        case 2: return { kind: "tool", name: "lunhui_freeze_boards", args: { strategy: "cn-market", run: market } };
-        case 3: return { kind: "tool", name: "role_cn_market_analyst", args: { description: "Analyse the market run", prompt: `MARKET_RUN: cn-market run ${market}` } };
-        case 4: return { kind: "tool", name: "lunhui_read_run", args: { strategy: "cn-market", run: market } };
-        case 5: return { kind: "tool", name: "lunhui_read_run", args: { strategy: "cn-market", run: market } };
-        case 6: return { kind: "tool", name: "lunhui_freeze_quotes", args: { strategy: S01, symbols: SYMBOLS } };
-        case 7: return stock("leader");
-        case 8: return stock("mode");
-        case 9: return { kind: "tool", name: "lunhui_read_run", args: { strategy: S01, run } };
+        case 1: return { kind: "tool", name: "lunhui_freeze_limit_up", args: { strategy: "cn-market", run: frozen } };
+        case 2: return { kind: "tool", name: "lunhui_freeze_boards", args: { strategy: "cn-market", run: frozen } };
+        case 3: return { kind: "tool", name: "role_cn_market_analyst", args: { description: "Analyse the market run", prompt: `MARKET_RUN: cn-market run ${frozen}` } };
+        case 4: return { kind: "tool", name: "role_cn_reviewer", args: { description: "Review the market run", prompt: `REVIEW_RUN cn-market run=${frozen}` } };
+        case 5: return { kind: "tool", name: "lunhui_read_run", args: { strategy: "cn-market", run: frozen } };
+        case 6: return { kind: "tool", name: "lunhui_read_run", args: { strategy: "cn-market" } };
+        case 7: return { kind: "tool", name: "lunhui_read_run", args: { strategy: "cn-market", run: market } };
+        case 8: return { kind: "tool", name: "lunhui_freeze_quotes", args: { strategy: S01, symbols: SYMBOLS } };
+        case 9: return stock("leader");
+        case 10: return { kind: "tool", name: "role_cn_reviewer", args: { description: "Review the strategy run", prompt: `REVIEW_RUN ${S01} run=${run} market_run=${market}` } };
+        case 11: return stock("mode");
+        case 12: return { kind: "tool", name: "lunhui_read_run", args: { strategy: S01, run } };
         default: return { kind: "text", text: "RUN_DONE" };
       }
     };
     ctx.llm.registerAdapter(["stub"], new StubAdapter(script));
     const base = `http://127.0.0.1:${ctx.webServer.port}`;
     mountClient(ctx);
-    const cookie = await signIn(ctx, base);
-    const { sessionId } = await remote<{ sessionId: string }>(base, cookie, "session/create", { request: { cwd: root } });
-    const gravit = ctx.agents.get(SessionId(sessionId))!;
-    await remote(base, cookie, "session/prompt", { request: { requestId: `strategy-run-${crypto.randomUUID()}`, sessionId, mode: "queue", content: [{ type: "text", text: "RUN_S01" }] } });
-    const gravitRequests = () => requested.get(sessionId) ?? [];
-    await waitFor("Gravit's last request", () => gravitRequests().some((r) => toolTexts(r).length >= 10));
-    await gravit.whenIdle();
-
-    /* Gravit's side: the protocol, with its strategy channel, in its prompt; every tool result a success. */
-    const prompt = textOf(gravitRequests()[0].messages[0]);
-    assert.ok(STRATEGY_CHANNEL !== null && STRATEGY_CHANNEL.includes("role_cn_stock_analyst"), "the run protocol has a strategy channel naming the stock analyst");
-    assert.ok(prompt.includes(RUN_HEADING) && prompt.includes(STRATEGY_CHANNEL), "Gravit's prompt carried the lunhui:run protocol with its strategy channel");
-    const gravitResults = toolTexts(gravitRequests().at(-1)!);
-    assert.equal(gravitResults.length, 10, `ten tool results came back to Gravit: ${gravitResults.map((t) => t.slice(0, 120)).join(" | ")}`);
-    for (const text of gravitResults) assert.doesNotMatch(text, /^Error:/, `no tool call failed: ${text.slice(0, 300)}`);
-    const market = runFrom(gravitResults[0]);
-    assert.match(gravitResults[3], /MARKET_REPORT/, "the market analyst's report returned through its role tool");
-    const quotes = JSON.parse(gravitResults[6]);
-    const run = quotes.run as string;
-    assert.deepEqual([quotes.source, quotes.session], ["quotes", "2026-10-23"], "the strategy run's quotes are of the market run's session");
-    assert.notEqual(run, market);
-    assert.match(gravitResults[7], /STOCK_REPORT: leader submitted/);
-    assert.match(gravitResults[8], /STOCK_REPORT: mode submitted/);
-    const readBack = JSON.parse(gravitResults[9]);
-    assert.deepEqual([readBack.manifest.run, readBack.artifacts.map((a: { module: string }) => a.module).sort()], [run, ["leader", "mode"]], "the strategy run read back with its two artifacts");
-
-    /* The market run: its three artifacts accepted, BK0715 the theme's mainline candidate. */
-    const marketDir = join(strategies, "cn-market", "analysis", market);
-    const marketManifest = JSON.parse(await readFile(join(marketDir, "run.json"), "utf8"));
-    assert.equal(typeof marketManifest.sealed_at, "string");
-    assert.deepEqual([...marketManifest.artifacts].sort(), [...MARKET_MODULES].sort());
-    assert.deepEqual(JSON.parse(await readFile(join(marketDir, "theme.json"), "utf8")).mainline_candidates.map((c: { board: string }) => c.board), ["BK0715"]);
-
-    /* The stock analyst's two children: one read, one accepted submit each, every context OK. */
-    const children = [...headers.entries()].filter(([, h]) => h.origin === "subagent").map(([id]) => id).filter((id) => briefs.get(id)?.includes("STOCK_RUN"));
-    assert.equal(children.length, 2, "the stock analyst was called twice, each a child of its own");
-    for (const module of STOCK_MODULES) {
-      const child = need(children.find((id) => briefs.get(id)!.includes(`STOCK_RUN ${module} `)), `the ${module} child`);
-      const childResults = toolTexts(requested.get(child)!.at(-1)!);
-      assert.equal(childResults.length, 2, `the ${module} child read once and submitted once`);
-      const context = JSON.parse(childResults[0]) as Context;
-      assert.deepEqual([context.status_expected, context.market_run], ["OK", market], `the ${module} context expects OK, citing the market run`);
-      assert.equal(childResults[1], JSON.stringify({ accepted: true, module, run }), `the ${module} artifact was accepted: ${childResults[1].slice(0, 400)}`);
-    }
-
-    /* The strategy run on disk: sealed, its quotes only, two artifacts named and valid on a re-read. */
-    const runDir = join(strategies, S01, "analysis", run);
-    const manifest = JSON.parse(await readFile(join(runDir, "run.json"), "utf8"));
-    assert.equal(typeof manifest.sealed_at, "string", "the strategy run is sealed");
-    assert.deepEqual(manifest.evidence.map((e: { source: string }) => e.source), ["quotes"], "a strategy run freezes quotes only (A27)");
-    assert.deepEqual((await readdir(runDir)).filter((f) => f.startsWith("evidence-")), ["evidence-quotes.json"]);
-    assert.deepEqual([...manifest.artifacts].sort(), [...STOCK_MODULES].sort(), "artifacts[] names leader and mode");
     const service = createLunhuiRuns(strategies);
-    const own = await service.readSealedRun(S01, run);
-    const cited = await service.readSealedRun("cn-market", market);
-    const citedRun = { run: cited.run, snapshot_id: cited.manifest.snapshot_id ?? null, session: cited.manifest.session ?? null, evidence: cited.evidence, artifacts: cited.artifacts };
-    const artifacts: Record<StockModule, any> = {} as Record<StockModule, any>;
-    for (const module of STOCK_MODULES) {
-      const text = await readFile(join(runDir, `${module}.json`), "utf8");
-      const artifact = artifacts[module] = JSON.parse(text);
-      assert.deepEqual([artifact.module, artifact.status, artifact.run, artifact.snapshot_id, artifact.market_run, artifact.market_snapshot_id],
-        [module, "OK", run, manifest.snapshot_id, market, marketManifest.snapshot_id], `${module}.json's envelope binds both runs`);
-      /* The digest as the read built it (lib/module-tool.mjs): the strategy run, the cited run, the contract's extra. */
-      const contract = STOCK_CONTRACTS[module];
-      const located = { strategy: S01, run };
-      const extra = contract.extra === undefined ? undefined : await contract.extra(service, located, { manifest: own.manifest, artifacts: own.artifacts, market: citedRun });
+
+    /** The digest a read built (lib/module-tool.mjs), rebuilt from the sealed runs, and the artifact validated against it again. */
+    async function revalidate(strategy: string, run: string, module: string, market: string | null) {
+      const contract = CONTRACTS[module].forStrategy?.(strategy) ?? CONTRACTS[module];
+      const own = await service.readSealedRun(strategy, run);
+      const cited = market === null ? null : await service.readSealedRun("cn-market", market);
+      const citedRun = cited === null ? null : { run: cited.run, snapshot_id: cited.manifest.snapshot_id ?? null, session: cited.manifest.session ?? null, evidence: cited.evidence, artifacts: cited.artifacts };
+      const extra = contract.extra === undefined ? undefined : await contract.extra(service, { strategy, run }, { manifest: own.manifest, artifacts: own.artifacts, market: citedRun });
       const { digest } = buildContext({
         module, run: own.manifest.run, manifest: own.manifest, evidence: own.evidence,
         sources: contract.sources, derivedFirst: contract.derivedFirst, derivedView: contract.derivedView, priority: contract.priority,
         hypotheses: contract.hypotheses, schema: contract.schema, hints: contract.hints, example: contract.example, required: contract.required,
-        runArtifacts: contract.runArtifacts, artifacts: own.artifacts, derivedFilter: contract.derivedFilter, extra, artifactViews: contract.artifactViews,
-        marketRun: contract.marketRun, market: citedRun, marketSources: contract.marketSources, marketArtifacts: contract.marketArtifacts,
+        requiredAny: contract.requiredAny, evidenceRequired: contract.evidenceRequired, runArtifacts: contract.runArtifacts, artifacts: own.artifacts,
+        derivedFilter: contract.derivedFilter, extra, artifactViews: contract.artifactViews,
+        ...(contract.marketRun === undefined ? {} : { marketRun: contract.marketRun, market: citedRun, marketSources: contract.marketSources, marketArtifacts: contract.marketArtifacts }),
       });
+      const text = await readFile(join(strategies, strategy, "analysis", run, `${module}.json`), "utf8");
+      const artifact = JSON.parse(text);
       assert.deepEqual(validateEnvelope(text, { module, context: digest, schema: contract.schema, owns: contract.owns, ownedBy: contract.ownedBy,
-        exemptPaths: contract.exemptPaths, unknownHeadline: contract.unknownHeadline, rules: contract.rules }),
-      artifact, `${module}.json passes its contract again against the sealed runs`);
+        exemptPaths: contract.exemptPaths, unknownHeadline: contract.unknownHeadline, scopedFields: contract.scopedFields, rules: contract.rules }),
+      artifact, `${strategy}/${run}/${module}.json passes its contract again against the sealed runs`);
+      return artifact;
     }
-    assert.deepEqual(artifacts.leader.leader_candidates.map((c: any) => [c.rank, c.symbol, c.board]), [[1, "sh600519", "BK0715"], [2, "sz000333", "BK0715"]],
-      "both equities stand as candidates on the market run's pools and BK0715's members");
-    assert.deepEqual([artifacts.mode.mode, artifacts.mode.expectation, artifacts.mode.expectation_review], ["WAIT", null, null],
-      "S01 without the reviewer's counterevidence registers WAIT, with no card and nothing to grade");
-    const metrics = JSON.parse(await readFile(join(runDir, "metrics.json"), "utf8"));
-    for (const module of STOCK_MODULES) assert.ok(metrics.calls[module] >= 1 && metrics.calls[module] <= 10, `${module} within its ten calls (${metrics.calls[module]})`);
-    assert.deepEqual([...metrics.submitted].sort(), [...STOCK_MODULES].sort(), "submitted lists the two");
 
-    /* The runs card of lunhui-s01-repair: the strategy run listed, sealed, the market run cited; the mode chip its word. */
+    /** One day: the clock at `at`, a new Gravit session prompted, every tool result of both channels checked; the runs and artifacts it wrote. */
+    async function day(label: string, at: number, session: string) {
+      globalThis.Date = shiftedDate(at);
+      // Signed in under the day's clock: the connection refuses a cookie whose issuedAt is after "now", and
+      // Friday's clock restarts at 15:00, before a cookie issued at boot.
+      const cookie = await signIn(ctx, base);
+      const { sessionId } = await remote<{ sessionId: string }>(base, cookie, "session/create", { request: { cwd: root } });
+      const gravit = ctx.agents.get(SessionId(sessionId))!;
+      await remote(base, cookie, "session/prompt", { request: { requestId: `strategy-run-${crypto.randomUUID()}`, sessionId, mode: "queue", content: [{ type: "text", text: "RUN_S01" }] } });
+      const gravitRequests = () => requested.get(sessionId) ?? [];
+      await waitFor(`${label}: Gravit's last request`, () => gravitRequests().some((r) => toolTexts(r).length >= 13));
+      await gravit.whenIdle();
+
+      /* Gravit's side: the protocol, with its strategy channel, in its prompt; every tool result a success. */
+      const prompt = textOf(gravitRequests()[0].messages[0]);
+      assert.ok(STRATEGY_CHANNEL !== null && STRATEGY_CHANNEL.includes("role_cn_stock_analyst") && STRATEGY_CHANNEL.includes("role_cn_reviewer"), "the run protocol has a strategy channel naming the stock analyst and the reviewer");
+      assert.ok(prompt.includes(RUN_HEADING) && prompt.includes(STRATEGY_CHANNEL), `${label}: Gravit's prompt carried the lunhui:run protocol with its strategy channel`);
+      const results = toolTexts(gravitRequests().at(-1)!);
+      assert.equal(results.length, 13, `${label}: thirteen tool results came back to Gravit: ${results.map((t) => t.slice(0, 120)).join(" | ")}`);
+      for (const text of results) assert.doesNotMatch(text, /^Error:/, `${label}: no tool call failed: ${text.slice(0, 300)}`);
+      const market = runFrom(results[0]);
+      assert.deepEqual(results.slice(0, 3).map((t) => [JSON.parse(t).run, JSON.parse(t).session]), [[market, session], [market, session], [market, session]], `${label}: the three market freezes landed in one run of ${session}`);
+      assert.match(results[3], /MARKET_REPORT/, `${label}: the market analyst's report returned through its role tool`);
+      assert.match(results[4], /REVIEW_REPORT: counterevidence submitted on cn-market/, `${label}: the market reviewer's report returned`);
+      assert.deepEqual(JSON.parse(results[5]).artifacts.map((a: { module: string }) => a.module).sort(), [...MARKET_ARTIFACTS].sort(), `${label}: the market run read back with its four artifacts`);
+      const listing = JSON.parse(results[6]);
+      assert.equal(listing.runs[0].run, market, `${label}: the listing (lunhui_read_run without a run) gives the day's market run first`);
+      assert.equal(listing.runs[0].session, session);
+      assert.deepEqual([...listing.runs[0].artifacts].sort(), [...MARKET_ARTIFACTS].sort(), `${label}: the listing names its four accepted artifacts`);
+      assert.equal(JSON.parse(results[7]).manifest.run, market, `${label}: the listed market run read back with its run id`);
+      const quotes = JSON.parse(results[8]);
+      const run = quotes.run as string;
+      assert.deepEqual([quotes.source, quotes.session], ["quotes", session], `${label}: the strategy run's quotes are of the market run's session`);
+      assert.notEqual(run, market);
+      assert.match(results[9], /STOCK_REPORT: leader submitted/);
+      assert.match(results[10], new RegExp(`REVIEW_REPORT: counterevidence submitted on ${S01}`));
+      assert.match(results[11], /STOCK_REPORT: mode submitted/);
+      const readBack = JSON.parse(results[12]);
+      assert.deepEqual([readBack.manifest.run, readBack.artifacts.map((a: { module: string }) => a.module).sort()], [run, [...STRATEGY_ARTIFACTS].sort()], `${label}: the strategy run read back with its three artifacts`);
+
+      /* The children of this day: each read once and submitted once, every context OK, every submit accepted. */
+      const children = [...headers.entries()].filter(([id, h]) => h.origin === "subagent" && briefs.get(id)?.includes(run)).map(([id]) => id);
+      assert.equal(children.length, 3, `${label}: the stock analyst twice and the reviewer once on the strategy run, each a child of its own`);
+      for (const child of children) {
+        const childResults = toolTexts(requested.get(child)!.at(-1)!);
+        const module = /STOCK_RUN (leader|mode)/.exec(briefs.get(child)!)?.[1] ?? "counterevidence";
+        assert.equal(childResults.length, 2, `${label}: the ${module} child read once and submitted once`);
+        const context = JSON.parse(childResults[0]) as Context;
+        assert.deepEqual([context.status_expected, context.market_run], ["OK", market], `${label}: the ${module} context expects OK, citing the day's market run`);
+        assert.equal(childResults[1], JSON.stringify({ accepted: true, module, run }), `${label}: the ${module} artifact was accepted: ${childResults[1].slice(0, 400)}`);
+      }
+
+      /* Both runs on disk: sealed, every artifact re-validated against the digest its read built. */
+      const marketManifest = JSON.parse(await readFile(join(strategies, "cn-market", "analysis", market, "run.json"), "utf8"));
+      assert.equal(typeof marketManifest.sealed_at, "string");
+      assert.deepEqual([...marketManifest.artifacts].sort(), [...MARKET_ARTIFACTS].sort(), `${label}: the market run's artifacts[] names the three modules and the review`);
+      const marketArtifacts: Record<string, any> = {};
+      for (const module of MARKET_ARTIFACTS) {
+        marketArtifacts[module] = await revalidate("cn-market", market, module, null);
+        assert.equal(marketArtifacts[module].status, "OK", `${label}: market ${module} OK`);
+      }
+      assert.deepEqual(marketArtifacts.theme.mainline_candidates.map((c: { board: string }) => c.board), ["BK0715"]);
+      assert.deepEqual(marketArtifacts.counterevidence.items.map((i: { against: string }) => i.against), ["sentiment"], `${label}: the market review's item is against the sentiment`);
+      const manifest = JSON.parse(await readFile(join(strategies, S01, "analysis", run, "run.json"), "utf8"));
+      assert.equal(typeof manifest.sealed_at, "string", `${label}: the strategy run is sealed`);
+      assert.deepEqual(manifest.evidence.map((e: { source: string }) => e.source), ["quotes"], "a strategy run freezes quotes only (A27)");
+      assert.deepEqual((await readdir(join(strategies, S01, "analysis", run))).filter((f) => f.startsWith("evidence-")), ["evidence-quotes.json"]);
+      assert.deepEqual([...manifest.artifacts].sort(), [...STRATEGY_ARTIFACTS].sort(), `${label}: artifacts[] names leader, counterevidence and mode`);
+      const artifacts: Record<string, any> = {};
+      for (const module of STRATEGY_ARTIFACTS) {
+        const artifact = artifacts[module] = await revalidate(S01, run, module, market);
+        assert.deepEqual([artifact.module, artifact.status, artifact.run, artifact.snapshot_id, artifact.market_run, artifact.market_snapshot_id],
+          [module, "OK", run, manifest.snapshot_id, market, marketManifest.snapshot_id], `${label}: ${module}.json's envelope binds both runs`);
+      }
+      assert.deepEqual(artifacts.leader.leader_candidates.map((c: any) => [c.rank, c.symbol, c.board]), [[1, "sh600519", "BK0715"], [2, "sz000333", "BK0715"]],
+        `${label}: both equities stand as candidates on the market run's pools and BK0715's members`);
+      assert.deepEqual(artifacts.counterevidence.items.map((i: { id: string; against: string }) => [i.id, i.against]), [["x1", "leader"]], `${label}: the strategy review's item is against the leader`);
+      const mode = artifacts.mode;
+      assert.equal(mode.mode, "S01", `${label}: lunhui-s01-repair registers S01`);
+      assert.deepEqual(mode.preconditions.map((p: any) => [p.name, p.status]), [
+        ["theme_gate", "met"], ["candidate_before_divergence", "met"], ["theme_not_falsified", "met"], ["negative_tail_not_widening", "met"], ["minute_confirmation", "unmet: no source"],
+      ], `${label}: the preconditions met by class, the minute confirmation with no source`);
+      assert.deepEqual(mode.addressed.map((a: { item: string }) => a.item), ["x1"], `${label}: every counterevidence item addressed`);
+      assert.ok(mode.parameters_used.length >= 1, `${label}: the parameters used`);
+      assert.ok(Buffer.byteLength(JSON.stringify(mode.expectation), "utf8") <= CARD_BYTES, `${label}: the card within ${CARD_BYTES} bytes`);
+      assert.deepEqual([mode.expectation.frozen_version, mode.expectation.state, mode.expectation.candidates], [manifest.snapshot_id, marketArtifacts.sentiment.state, ["sh600519"]],
+        `${label}: the card frozen at the run, on the cited sentiment's state and the leader's candidate`);
+      const metrics = JSON.parse(await readFile(join(strategies, S01, "analysis", run, "metrics.json"), "utf8"));
+      for (const module of STRATEGY_ARTIFACTS) assert.ok(metrics.calls[module] >= 1 && metrics.calls[module] <= 10, `${label}: ${module} within its ten calls (${metrics.calls[module]})`);
+      assert.deepEqual([...metrics.submitted].sort(), [...STRATEGY_ARTIFACTS].sort(), `${label}: submitted lists the three`);
+      return { market, run, mode };
+    }
+
+    const friday = await day("Friday", FRIDAY, "2026-10-23");
+    assert.equal(friday.mode.expectation_review, null, "Friday: no earlier card to grade");
+    const monday = await day("Monday", MONDAY, "2026-10-26");
+    assert.notEqual(monday.market, friday.market, "Monday: a new market run");
+    assert.notEqual(monday.run, friday.run, "Monday: a new strategy run");
+    assert.deepEqual([monday.mode.expectation_review.previous_run, monday.mode.expectation_review.grade], [friday.run, "符合"], "Monday's mode grades Friday's card");
+
+    /* The runs card of lunhui-s01-repair: both strategy runs listed, Monday's the latest, citing Monday's market run, with the review line. */
     const body = await readChannelBody(join(strategies, S01));
-    const row = need(body.runs.find((r) => r.run === run), "the strategy run on the runs card");
-    assert.deepEqual([row.sealed, row.kind, row.marketRun], [true, "strategy", market]);
-    assert.deepEqual(Object.keys(row.artifacts).sort(), [...STOCK_MODULES].sort(), "two chips");
-    assert.deepEqual([body.latestRun?.run, body.latestRun?.marketRun], [run, market], "the latest run, citing the market run");
+    for (const { run, market } of [friday, monday]) {
+      const row = need(body.runs.find((r) => r.run === run), `the strategy run ${run} on the runs card`);
+      assert.deepEqual([row.sealed, row.kind, row.marketRun], [true, "strategy", market]);
+      assert.deepEqual(Object.keys(row.artifacts).sort(), [...STRATEGY_ARTIFACTS].sort(), "three chips");
+    }
+    assert.deepEqual([body.latestRun?.run, body.latestRun?.marketRun], [monday.run, monday.market], "the latest run, Monday's, citing Monday's market run");
     const view = need(runsView(body).latest ?? undefined, "the runs card's latest run");
-    assert.equal(view.marketRun, market);
-    assert.ok(view.chips.some((c: { text: string }) => c.text === "mode: WAIT"), "the mode chip shows the mode word alone");
-    assert.equal(view.review, null);
+    assert.equal(view.marketRun, monday.market);
+    assert.ok(view.chips.some((c: { text: string }) => c.text === "mode: S01"), "the mode chip shows the mode word alone");
+    assert.equal(view.review, `review: 符合 of ${friday.run}`, "the latest run shows its review of Friday's card");
   } finally {
-    globalThis.Date = RealDate;
+    globalThis.Date = REAL_DATE;
     await dispose?.();
     await Promise.all([bots, fixtureRoles, strategies, root, home, fixtures].map((dir) => rm(dir, { recursive: true, force: true })));
   }
