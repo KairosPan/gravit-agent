@@ -449,7 +449,7 @@ test("freeze: index stores the up/down distribution as one counts item - counts,
   assert.equal(typeof derived[0].value, "number");
 });
 
-test("freeze: index refuses a distribution of another session as NO_MARKET_DATA, naming both dates, and writes nothing", async (t) => {
+test("freeze: index lands the Tencent items when the distribution cannot be used - another session's, or a failed request - with no counts item, the three measures null citing no input, and the reply naming the refusal", async (t) => {
   const root = await strategiesRoot(t);
   const stale = await fixtures(t, async (dir) => {
     const reply = JSON.parse(await readFile(join(dir, "distribution.json"), "utf8"));
@@ -457,20 +457,40 @@ test("freeze: index refuses a distribution of another session as NO_MARKET_DATA,
   });
   const { service, tools } = mount(root, stale);
   const { run } = await service.openRun("cn-market", "market");
-  let message = "";
-  await assert.rejects(tools.index.execute({ strategy: "cn-market", run }, exec()), (error: any) => {
-    assert.equal(error.code, "NO_MARKET_DATA");
-    message = error.message;
-    return true;
-  });
-  assert.match(message, /^NO_MARKET_DATA: 东方财富.*20261022.*20261023/);
+  const reply = JSON.parse(await tools.index.execute({ strategy: "cn-market", run }, exec()));
+  // The reply says what stood in for the counts: the refusal's code and reason, which claims no file unwritten.
+  assert.equal(reply.counts.frozen, false);
+  assert.equal(reply.counts.refused, "NO_MARKET_DATA");
+  assert.match(reply.counts.reason, /^东方财富返回的数据属于交易日 20261022，不是本次会话 20261023。$/);
+  assert.equal(reply.host, "qt.gtimg.cn,web.ifzq.gtimg.cn");
+  assert.equal(reply.delayed, false);
+  assert.equal(reply.items, 8);
+  assert.deepEqual(reply.derived.map((item: any) => item.value).slice(1), [null, null, null]);
   const dir = runDir(root, "cn-market", run);
-  assert.deepEqual((await readJson(dir, "run.json")).evidence, []);
-  assert.deepEqual((await readdir(dir)).filter((name) => name.startsWith("evidence-")), []);
-  // On a Saturday the session is Friday's, the fixture's: the same distribution is accepted.
+  const evidence = await readJson(dir, "evidence-index.json");
+  assert.deepEqual(evidence.items.map((item: any) => item.kind), [
+    "index", "index", "index", "index", "bars", "bars", "bars", "bars", "derived", "derived", "derived", "derived",
+  ]);
+  assert.deepEqual([evidence.host, evidence.delayed], ["qt.gtimg.cn,web.ifzq.gtimg.cn", false]);
+  const measures = evidence.items.filter((item: any) => item.kind === "derived");
+  assert.equal(typeof measures[0].value, "number");
+  assert.deepEqual(measures.slice(1).map((item: any) => [item.measure, item.value, item.inputs, item.params]), [
+    ["advance_decline_ratio", null, [], { endpoint: "getTopicZDFenBu" }],
+    ["limit_up_count", null, [], { endpoint: "getTopicZDFenBu", bucket: 11 }],
+    ["limit_down_count", null, [], { endpoint: "getTopicZDFenBu", bucket: -11 }],
+  ]);
+  assert.equal((await readJson(dir, "run.json")).evidence.length, 1);
+  // A failed request stands in the same way: no distribution file here, a 404, UPSTREAM_INVALID.
+  const missing = await fixtures(t, (dir) => rm(join(dir, "distribution.json")));
+  const failed = JSON.parse(await mount(root, missing).tools.index.execute({ strategy: "cn-market" }, exec()));
+  assert.deepEqual([failed.counts.frozen, failed.counts.refused, failed.items], [false, "UPSTREAM_INVALID", 8]);
+  assert.match(failed.counts.reason, /^东方财富响应无效（PROVIDER_HTTP_ERROR）。$/);
+  // A distribution that landed says so, on a Friday and on the Saturday after it, whose session is Friday's.
+  const landed = JSON.parse(await mount(root, await fixtures(t)).tools.index.execute({ strategy: "cn-market" }, exec()));
+  assert.deepEqual(landed.counts, { frozen: true });
   const saturday = mount(root, await fixtures(t), {}, new Date("2026-10-24T02:00:00.000Z"));
-  const landed = JSON.parse(await saturday.tools.index.execute({ strategy: "cn-market" }, exec()));
-  assert.equal(landed.session, "2026-10-23");
+  const weekend = JSON.parse(await saturday.tools.index.execute({ strategy: "cn-market" }, exec()));
+  assert.deepEqual([weekend.session, weekend.counts], ["2026-10-23", { frozen: true }]);
 });
 
 test("freeze: two freezes of different sources on one run at once both land", async (t) => {
