@@ -273,9 +273,21 @@ export function agentSetupOf(origin: string): { command: string; url: string } {
   return { command: `claude mcp add portfolio -e PORTFOLIO_URL=${quote(origin)} -- npx tsx ${quote(MCP_ENTRY)}`, url: origin };
 }
 
+/** the Host values that are this machine's own: 127.0.0.1, localhost or [::1], with or without a port */
+const LOCAL_HOST = /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i;
+
+/** PORTFOLIO_HOSTS as the fence reads it: comma-separated, each entry trimmed, empties dropped, nothing else changed */
+export function parseHosts(raw: string | undefined): string[] {
+  return (raw ?? "").split(",").map((h) => h.trim()).filter((h) => h !== "");
+}
+
 export interface PortfolioServerOptions {
   port: number;
   service: PortfolioService;
+  /** the address to listen on (PORTFOLIO_BIND): 127.0.0.1 unless said; the server's own origin stays http://127.0.0.1:<port> */
+  bind?: string | undefined;
+  /** extra Host values answered as local (PORTFOLIO_HOSTS), each compared exactly, `host:port`: none unless said */
+  hosts?: readonly string[] | undefined;
   /** how often the net worth curve gets a point (account/networth.ts), in milliseconds, on the real clock: 300000 (five minutes) unless
    * said; 0 takes none, nor the points a connection or a disconnection adds. Only with the account layer mounted */
   snapshotMs?: number | undefined;
@@ -374,6 +386,7 @@ function readSmall(req: express.Request, limit: number): Promise<Buffer | "large
 
 export async function startPortfolioServer(opts: PortfolioServerOptions): Promise<PortfolioServerHandle> {
   const svc = opts.service;
+  const hosts = opts.hosts ?? [];
   const agent = new AgentSession(svc);
   /** this server's own origin, once it listens: what an agent's seat is pointed at */
   let origin = "";
@@ -449,7 +462,8 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
   // terminal scripts send no foreign origin and use 127.0.0.1 or localhost
   app.use((req, res, next) => {
     const host = String(req.headers.host ?? "");
-    const local = /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i.test(host);
+    // a Host named in PORTFOLIO_HOSTS (a compose peer's `account:4820`) is local too, matched exactly; its origin is checked as any other
+    const local = LOCAL_HOST.test(host) || hosts.includes(host);
     const origin = req.headers.origin;
     // a browser says where a request comes from (Fetch Metadata): another site's request is refused, except a top-level navigation — a link to
     // the page, or a venue's sign-in page sending the owner back (Robinhood's OAuth callback) — and only to those: no other site navigates a
@@ -497,7 +511,7 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
     // the dial as the page needs it: the agents' session, the venues switched off for agents, the most leverage they may set
     // and how each venue connected live has answered lately (its health, for the Venues board)
     // and the command an agent's owner runs to add this account's seat (the server's own origin, the seat by its absolute path)
-    res.json({ ok: true, ...(view.real ? realPage(view) : view), mode: o.mode, live: svc.live, dial: { sessionExpiresAt: o.sessionExpiresAt, sessionEnded: Date.parse(o.sessionExpiresAt) <= Date.parse(view.now), revoked: o.revoked, maxLeverage: o.maxLeverage ?? 1 }, health: svc.venueHealth(), memoryAsks: svc.memoryAsks(), agentSetup: agentSetupOf(origin || `${req.protocol}://${req.get("host") ?? "127.0.0.1"}`) });
+    res.json({ ok: true, ...(view.real ? realPage(view) : view), mode: o.mode, live: svc.live, dial: { sessionExpiresAt: o.sessionExpiresAt, sessionEnded: Date.parse(o.sessionExpiresAt) <= Date.parse(view.now), revoked: o.revoked, maxLeverage: o.maxLeverage ?? 1 }, health: svc.venueHealth(), memoryAsks: svc.memoryAsks(), agentSetup: agentSetupOf(hosts.length > 0 ? `http://${hosts[0]}` : origin || `${req.protocol}://${req.get("host") ?? "127.0.0.1"}`) });
   }));
 
   app.post("/api/account/pair", (req, res) => {
@@ -1049,7 +1063,7 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
   app.use(unreadBody);
 
   const server: Server = await new Promise((resolve, reject) => {
-    const s = app.listen(opts.port, "127.0.0.1", () => resolve(s));
+    const s = app.listen(opts.port, opts.bind ?? "127.0.0.1", () => resolve(s));
     s.on("error", reject);
   });
   const bound = server.address();
@@ -1121,7 +1135,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   // --fresh starts it from nothing
   const fresh = args.includes("--fresh");
   const service = await PortfolioService.create({ home: at("--home") ?? defaultHome(), live, fresh, ...(liveWrites ? { liveWrites } : {}), ...(code ? { pairingCode: code } : {}), ...(classic ? {} : { venues: "frontline" as const, real: true, openness }) });
-  const srv = await startPortfolioServer({ port, service }).catch((e: NodeJS.ErrnoException) => {
+  const srv = await startPortfolioServer({ port, service, bind: process.env.PORTFOLIO_BIND || undefined, hosts: parseHosts(process.env.PORTFOLIO_HOSTS) }).catch((e: NodeJS.ErrnoException) => {
     if (e.code !== "EADDRINUSE") throw e;
     // the usual reason: this server is already running in another terminal
     console.error(`port ${port} is already in use: a portfolio server is probably running already. Open http://127.0.0.1:${port}/account, or start a second one: npm run portfolio -- --port ${port + 1} --home <another directory>`);

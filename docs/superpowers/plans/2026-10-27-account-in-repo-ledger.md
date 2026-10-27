@@ -220,3 +220,33 @@ tests/account-seat-smoke.test.ts tests/account-graft-smoke.test.ts` = 2 pass, 0 
 from the in-tree `account/`); the full `FACE_SMOKE=1 caffeinate -i npm test` = 1,652 tests, 1,652
 pass, 0 skipped, 0 fail (Task 1's two skips now run). `git status` shows nothing under
 `face/tests/fixtures/account/` modified.
+
+### Task 2 — review (controller)
+
+- Task 2: complete (commits f74c0ee..772fca1, review clean — spec ✅, quality approved).
+- Task 2: minor (deferred, carried to Task 6's sweep): `face/scripts/capture-account-fixtures.ts` ~182–183, the run-time error still says "run npm ci in the checkout" / "(FACE_ACCOUNT_SEAT_DIR names the checkout)".
+- Task 2: minor (deferred, carried to Task 6's sweep): `face/tests/boot.test.ts` ~212–217, the comment above "mounts the Account seat from FACE_ACCOUNT_SEAT_DIR" still says the checkout the operator installs.
+- Task 2: minor (deferred): `standinDir(env)` falls back to `seatDir()`, which reads `process.env`, so `standinDir({}) === seatDir()` holds under any environment and pins less than it reads (the brief's interface says `|| seatDir()`).
+- Task 2: minor (deferred): the tsx-missing line advises `npm ci in account/` even when `FACE_ACCOUNT_SEAT_DIR` names another install (brief's text verbatim; the `${dir}` prefix disambiguates).
+- Task 2: minor (deferred): `capture-account-fixtures.ts` 15–16, the new header lines are not reflowed to the block's width.
+
+### Task 3
+
+**RED:** `cd account && npx vitest run test/unit/server-guard.test.ts` — 4 tests, 2 pass, 2 fail:
+`parseHosts is not a function` (the hosts test and the parseHosts test). The bind test passed
+vacuously: before the change `bind` was ignored and the server listened on 127.0.0.1 anyway, which
+is all a port-0 test can observe (`srv.url`, a loopback request, `account:4820` refused).
+
+**GREEN:** the same command — 4 tests, 4 pass. `LOCAL_HOST` hoisted from the inline regex;
+`local = LOCAL_HOST.test(host) || hosts.includes(host)`; `app.listen(opts.port, opts.bind ??
+"127.0.0.1", …)`; `origin` unchanged; `/api/account`'s `agentSetup` uses `http://<hosts[0]>` when
+`hosts` is non-empty (asserted in both new server tests, no extra `it`); the main block passes
+`bind: process.env.PORTFOLIO_BIND || undefined, hosts: parseHosts(process.env.PORTFOLIO_HOSTS)`.
+The file's `raw` helper is hoisted to module scope as `rawOf(base)`, the `PortfolioService.create`
+call as `service()`.
+
+**Account suite:** `BUYER_HOME=$(mktemp -d) caffeinate -i npm test` = 158 files, 157 pass, 1 fail
+(`test/unit/ui-superagent.test.ts`, the known red); 2,840 tests, 2,839 pass (2,837 + the 3 new);
+142.8 s. `npm run typecheck` clean.
+
+**Face gate:** `npm test` = 1,652 tests, 1,629 pass, 23 skipped, 0 fail; typecheck clean.
