@@ -3402,6 +3402,22 @@ The automated half passes (`account-seat-smoke` under `FACE_SMOKE=1` with `FACE_
 the keyed run against the real service with a real paper venue is the operator's, before the
 branch lands.
 
+**Run 2026-10-27 on the real service, reads only** (buyer-agent-demo @ 133b9a7 serving 127.0.0.1:4820 with
+`--read-only --home ~/.openpaper`, the face at 92c5a0c on 3090 from the live home with `DEEPSEEK_API_KEY`,
+`deepseek-v4-pro`, a conversation in the workspace channel): the read half of steps 1–2 observed — the boot
+line `[agent-portfolio-manager] up (stdio) → http://127.0.0.1:4820` and the gate armed for the nine seat
+writes; `/data/seat.json` `reachable`, `writes.on` false, the seat `Gravit · absent` (a read is an unsigned
+GET and does not knock — the Account's agents list stayed empty and no key file was made), `paper-linqi` at
+$10,000, no cards; Gravit asked for a read-only AAPL quote answered with `portfolio_explore` (tab=stocks,
+q=AAPL, limit=3) and `portfolio_book` (paper-linqi, AAPL) and no card: AAPL 347.19, bid 347.2 / ask 347.23,
+`Nasdaq · real time` at 19:30:00Z, both venues (`cboe`, public, and `paper-linqi`) quoting the same; the same
+service read directly a minute later gave 347.35 `Robinhood · real time` — the quote moves with the market
+and names its source, which the stand-in's fixtures never do. `portfolio_quote` is not among the seat's
+tools on a real account (the simulated statement's router, offered only there — `src/portfolio/mcp.ts`,
+`REAL`). Steps 3–7 (the order, both cards, the refusal, the decline, the hang) are still not run: they need
+the service started with writes on and the seat admitted as **Gravit** with a `trade` limit on the paper
+venue.
+
 ## The owner drill (run before the branch lands, and after pulling the checkout)
 
 The face's page as an owner device of the real Account — "The Account in the face" above, the
