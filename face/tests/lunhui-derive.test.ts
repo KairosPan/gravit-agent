@@ -152,11 +152,11 @@ test("derive: turnover shares are null when the fetched boards' turnover sums to
 });
 
 const counts = {
-  advancers: 3000, decliners: 1500, unchanged: 200, limitUp: 80, limitDown: 12, total: 4700,
-  pages: 47, pageHashes: ["h"], partial: true, host: "push2delay.eastmoney.com", delayed: true,
+  qdate: 20261023, advancers: 3000, decliners: 1500, unchanged: 200, limitUp: 80, limitDown: 12, total: 4700,
+  buckets: [{ bucket: -11, count: 12 }, { bucket: 11, count: 80 }], hash: "h", host: "push2ex.eastmoney.com", delayed: false,
 };
 
-test("derive: deriveCounts gives the advance/decline ratio and the limit counts, partial copied through", () => {
+test("derive: deriveCounts gives the advance/decline ratio and the limit counts, citing the one counts item", () => {
   const ids = new Map([[rowKey("counts"), evidenceId(counts)]]);
   const items = deriveCounts(counts, ids);
   assert.equal(items.length, 3);
@@ -165,12 +165,11 @@ test("derive: deriveCounts gives the advance/decline ratio and the limit counts,
   assert.equal(find(items, "limit_down_count").value, 12);
   for (const item of items) {
     assert.equal(item.source, "index");
-    assert.equal(item.partial, true);
+    assert.ok(!("partial" in item), item.measure);
     assert.deepEqual(item.inputs, [evidenceId(counts)]);
   }
-  const whole = deriveCounts({ ...counts, partial: false, decliners: 0 }, new Map([[rowKey("counts"), "ev_x"]]));
-  assert.equal(find(whole, "advance_decline_ratio").value, null, "no decliners");
-  assert.equal(find(whole, "limit_up_count").partial, false);
+  const none = deriveCounts({ ...counts, decliners: 0 }, new Map([[rowKey("counts"), "ev_x"]]));
+  assert.equal(find(none, "advance_decline_ratio").value, null, "no decliners");
 });
 
 const quotes: Row[] = [

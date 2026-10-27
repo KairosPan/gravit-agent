@@ -9,6 +9,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -407,30 +408,65 @@ test("freeze: every row refuses CALENDAR_UNCOVERED before any run when the previ
   assert.deepEqual(await readdir(join(root, "cn-market")), ["THESIS.md"]);
 });
 
-test("freeze: index records partial counts as partial in the derived item", async (t) => {
+test("freeze: index stores the up/down distribution as one counts item - counts, buckets, the reply hash, no row - and derives the ratio and the limit counts from it", async (t) => {
   const root = await strategiesRoot(t);
   const { urls } = mockFetch(t, await fixtures(t));
   const { tools } = mount(root, undefined);
   const reply = JSON.parse(await tools.index.execute({ strategy: "cn-market" }, exec()));
-  assert.equal(reply.host, "qt.gtimg.cn,web.ifzq.gtimg.cn,push2.eastmoney.com");
+  assert.equal(reply.host, "qt.gtimg.cn,web.ifzq.gtimg.cn,push2ex.eastmoney.com");
   const klines = urls.filter((url) => url.host === "web.ifzq.gtimg.cn").map((url) => url.searchParams.get("param")).sort();
   assert.deepEqual(klines, ["sh000001,day,,,120,qfq", "sh000300,day,,,120,qfq", "sz399001,day,,,120,qfq", "sz399006,day,,,120,qfq"]);
+  // One Eastmoney request, the distribution; the clist is never asked.
+  assert.deepEqual(urls.filter((url) => url.host.endsWith("eastmoney.com")).map((url) => url.pathname), ["/getTopicZDFenBu"]);
   const evidence = await readJson(runDir(root, "cn-market", reply.run), "evidence-index.json");
   assert.deepEqual(evidence.items.filter((item: any) => item.kind === "index").map((item: any) => item.symbol), ["sh000001", "sz399001", "sz399006", "sh000300"]);
   assert.equal(evidence.items.filter((item: any) => item.kind === "bars").length, 4);
   const counts = evidence.items.find((item: any) => item.kind === "counts");
-  assert.equal(counts.partial, true);
-  assert.deepEqual([counts.host, counts.delayed], ["push2.eastmoney.com", false]);
+  const hash = createHash("sha256").update(await readFile(join(EASTMONEY, "distribution.json"))).digest("hex");
+  const { id, ...fields } = counts;
+  assert.match(id, /^ev_/);
+  assert.deepEqual(fields, {
+    kind: "counts", qdate: 20261023,
+    advancers: 15, decliners: 12, unchanged: 3, limitUp: 6, limitDown: 2, total: 30,
+    buckets: [
+      { bucket: -11, count: 2 }, { bucket: -10, count: 1 }, { bucket: -3, count: 4 }, { bucket: -1, count: 5 },
+      { bucket: 0, count: 3 }, { bucket: 1, count: 6 }, { bucket: 5, count: 2 }, { bucket: 10, count: 1 }, { bucket: 11, count: 6 },
+    ],
+    hash, host: "push2ex.eastmoney.com", delayed: false,
+  });
   for (const item of evidence.items.filter((item: any) => item.kind === "index" || item.kind === "bars")) assert.equal(item.host, undefined);
-  // Page 1 says 6 rows and holds 3: one page asked for, the counts partial.
-  assert.equal(counts.pageHashes.length, 1);
   const derived = evidence.items.filter((item: any) => item.kind === "derived");
   assert.deepEqual(derived.map((item: any) => item.measure), ["total_turnover", "advance_decline_ratio", "limit_up_count", "limit_down_count"]);
+  assert.deepEqual(derived.slice(1).map((item: any) => item.value), [15 / 12, 6, 2]);
   for (const item of derived.slice(1)) {
-    assert.equal(item.partial, true);
+    assert.ok(!("partial" in item), item.measure);
     assert.deepEqual(item.inputs, [counts.id]);
   }
   assert.equal(typeof derived[0].value, "number");
+});
+
+test("freeze: index refuses a distribution of another session as NO_MARKET_DATA, naming both dates, and writes nothing", async (t) => {
+  const root = await strategiesRoot(t);
+  const stale = await fixtures(t, async (dir) => {
+    const reply = JSON.parse(await readFile(join(dir, "distribution.json"), "utf8"));
+    await writeFile(join(dir, "distribution.json"), JSON.stringify({ ...reply, data: { ...reply.data, qdate: 20261022 } }));
+  });
+  const { service, tools } = mount(root, stale);
+  const { run } = await service.openRun("cn-market", "market");
+  let message = "";
+  await assert.rejects(tools.index.execute({ strategy: "cn-market", run }, exec()), (error: any) => {
+    assert.equal(error.code, "NO_MARKET_DATA");
+    message = error.message;
+    return true;
+  });
+  assert.match(message, /^NO_MARKET_DATA: 东方财富.*20261022.*20261023/);
+  const dir = runDir(root, "cn-market", run);
+  assert.deepEqual((await readJson(dir, "run.json")).evidence, []);
+  assert.deepEqual((await readdir(dir)).filter((name) => name.startsWith("evidence-")), []);
+  // On a Saturday the session is Friday's, the fixture's: the same distribution is accepted.
+  const saturday = mount(root, await fixtures(t), {}, new Date("2026-10-24T02:00:00.000Z"));
+  const landed = JSON.parse(await saturday.tools.index.execute({ strategy: "cn-market" }, exec()));
+  assert.equal(landed.session, "2026-10-23");
 });
 
 test("freeze: two freezes of different sources on one run at once both land", async (t) => {

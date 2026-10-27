@@ -231,7 +231,7 @@ test("sentiment: owned sentences need a derived id - 情绪 citing pool rows alo
   }
 });
 
-test("sentiment: a whole-market sentence citing the all-shares counts is accepted", async (t) => {
+test("sentiment: a whole-market sentence citing the market counts is accepted", async (t) => {
   const { freeze, read, submit } = await mount(t);
   const run = await frozenRun(freeze);
   const context = JSON.parse(await read.execute({ strategy: "cn-market", run }, exec(ROLE)));

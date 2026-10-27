@@ -543,15 +543,15 @@ channels the mode knows by name. A channel with runs shows a **Research runs** s
 | Host | What |
 |---|---|
 | `qt.gtimg.cn`, `web.ifzq.gtimg.cn` | Tencent quotes and daily bars |
-| `push2ex.eastmoney.com` | the three limit-up pools (it answers directly) |
-| `push2.eastmoney.com` | the concept boards, a board's members, the board fund flow and the all-shares counts |
+| `push2ex.eastmoney.com` | the three limit-up pools and the session's up/down distribution, the market counts (it answers directly) |
+| `push2.eastmoney.com` | the concept boards, a board's members and the board fund flow |
 | `push2delay.eastmoney.com` | `push2`'s one redirect, the only one followed: from this machine `push2` answers 302 here, with **delayed** quotes |
 
 Each request has a 7-second timeout (per hop, so a redirect can take 14 s) and a 512 KiB cap, at
 most four Eastmoney requests run at once, and no numbered host (`17.push2…`) is ever called.
-Every Eastmoney item records the host that served it and whether it was delayed. The clist caps
-a page at 100 rows whatever the query asks, so one index freeze reads the counts in about sixty
-requests, page 1 first. The endpoints are unofficial: a changed reply is `UPSTREAM_INVALID`, and
+Every Eastmoney item records the host that served it and whether it was delayed. One index freeze
+reads the market counts in one request, the distribution (`getTopicZDFenBu`), refused when it is
+another session's. The endpoints are unofficial: a changed reply is `UPSTREAM_INVALID`, and
 a day outside the calendar table (`plugins/lunhui/lib/calendar/2026.json`, only 2026 ships) is
 `CALENDAR_UNCOVERED` (`DEVELOPMENT.md` §9, R40–R41).
 

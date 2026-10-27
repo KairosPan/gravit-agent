@@ -16,7 +16,7 @@
  * the caller as `evidenceId(row)` over the row object exactly as it will be handed to `addEvidence`,
  * unchanged (rows carry no id field). The keys: `rowKey("zt" | "zb" | "yesterday", code)` for pool
  * rows (one code can sit in zt and zb), `rowKey("board", code)` for a board, `rowKey("counts")` for
- * the all-shares counts, `rowKey("quote", symbol)` for a Tencent quote. A row the map does not know
+ * the market counts, `rowKey("quote", symbol)` for a Tencent quote. A row the map does not know
  * is host code's bug, a `TypeError`.
  */
 
@@ -131,19 +131,18 @@ export function deriveBoards(boards, members, ids) {
 }
 
 /**
- * The all-shares counts' measures (source `index`): `advance_decline_ratio` - `advancers /
- * decliners`, `limit_up_count`, `limit_down_count` - each with the counts' `partial` copied.
- * @param {{ advancers: number, decliners: number, limitUp: number, limitDown: number, partial: boolean }} counts
+ * The market counts' measures (source `index`): `advance_decline_ratio` - `advancers /
+ * decliners` - `limit_up_count` and `limit_down_count`, all from one distribution reply (spec §16).
+ * @param {{ advancers: number, decliners: number, limitUp: number, limitDown: number }} counts
  * @param {RowIds} ids
  * @returns {DerivedItem[]}
  */
 export function deriveCounts(counts, ids) {
   const inputs = [idOf(ids, "counts")];
-  const partial = counts.partial === true;
   return [
-    item("index", "advance_decline_ratio", ratio(counts.advancers, counts.decliners), inputs, { partial }),
-    item("index", "limit_up_count", counts.limitUp ?? null, inputs, { partial }),
-    item("index", "limit_down_count", counts.limitDown ?? null, inputs, { partial }),
+    item("index", "advance_decline_ratio", ratio(counts.advancers, counts.decliners), inputs),
+    item("index", "limit_up_count", counts.limitUp ?? null, inputs),
+    item("index", "limit_down_count", counts.limitDown ?? null, inputs),
   ];
 }
 

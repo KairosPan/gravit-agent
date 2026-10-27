@@ -59,11 +59,11 @@ const SCHEMA = {
 
 /** Limit-up evidence: a pool row or a limit-up derived item. */
 const isLimitUp = (entry) => entry.source === "limit-up";
-/** Index evidence: an index quote, the all-shares counts, or an index derived item - not bars. */
+/** Index evidence: an index quote, the market counts, or an index derived item - not bars. */
 const isIndex = (entry) => entry.source === "index" && (entry.kind === "index" || entry.kind === "counts" || entry.kind === "derived");
 /** A limit-up derived item: what a money effect or a freeze reading rests on. */
 const isLimitUpMeasure = (entry) => entry.source === "limit-up" && entry.kind === "derived";
-/** The items that carry the whole-market class's sentences: the all-shares counts or an index derived item. */
+/** The items that carry the whole-market class's sentences: the market counts or an index derived item. */
 const carriesMarket = (entry) => entry.source === "index" && (entry.kind === "counts" || entry.kind === "derived");
 
 /**

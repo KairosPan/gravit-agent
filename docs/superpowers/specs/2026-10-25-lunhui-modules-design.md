@@ -1,7 +1,8 @@
 # Lunhui modules — the manuscript's chapters as dsh rows
 
 **Status:** design, written 2026-10-25 against `main @ a89502f` and dsh `0.2.0-rc.2`; **approved
-by the operator 2026-10-25** after the builder check (§11) · **Owner:** the operator · **Supersedes:** the plugin form of
+by the operator 2026-10-25** after the builder check (§11); A17, A28 and §5.3's index row revised
+on the operator's word 2026-10-27 (§16) · **Owner:** the operator · **Supersedes:** the plugin form of
 `docs/superpowers/specs/2026-10-19-lunhui-plugin-graft-design.md` (its D1, D3, D5–D9, D17–D19);
 that spec's build, `feat/lunhui-graft @ 0de97cf`, is **stage 0** of this design and its pure
 modules are reused (§5.13). What the graft spec decided about data, knowledge and language (its
@@ -148,7 +149,7 @@ overturnable at review without redesign.
 | A14 | **The runs card generalizes** stage 0's: `ChannelBody.runs[]` carries `{run, asOf, snapshotId, sealed, artifacts: {<module>: {accepted, headline}}, marketRun?, bytes}`, `latestRun` the newest sealed run with any accepted artifact and its artifacts' summaries; the client's channel screen gains a "Research runs" section after "Latest backtest"; reads bounded as stage 0 | the field is the channel (graft D18) |
 | A15 | **Fixture mode is row config**, not an environment variable: a freeze row's `config.fetch` names a recorded-replies directory, used by tests only; production rows set none | stage 0's R21 trap disappears with the child process |
 | A16 | **Stage 0's pure modules are reused** under `face/plugins/lunhui/lib/`: `market.mjs` (Tencent, calendar, assessment), `runs.mjs` (anchoring, atomic writes, bounded reads), `contract.mjs` split into a shared core (wording rules, evidence binding, byte budget, repairs) and per-module contracts | the graft's reviews hold for this code |
-| A17 | **Egress from the face process:** `qt.gtimg.cn`, `web.ifzq.gtimg.cn` (stage 0), `push2ex.eastmoney.com` (the pools), `push2.eastmoney.com` (board lists, constituents, fund flow, the all-shares counts) and its redirect target `push2delay.eastmoney.com` (A28); 7-second timeout, 512 KiB per response, at most four requests in flight; documented beside the AKShare server's | the hosts AKShare itself calls for the same data |
+| A17 | **Egress from the face process:** `qt.gtimg.cn`, `web.ifzq.gtimg.cn` (stage 0), `push2ex.eastmoney.com` (the pools and the up/down distribution, §16), `push2.eastmoney.com` (board lists, constituents, fund flow) and its redirect target `push2delay.eastmoney.com` (A28); 7-second timeout, 512 KiB per response, at most four requests in flight; documented beside the AKShare server's | the hosts AKShare itself calls for the same data |
 | A18 | **The mode set is `S01`, `S02`, `WAIT`.** The R01–R14 families are labels the module may report as `research_only` matches with the reason they cannot be selected (data, ruling, or registration) | the graft's D10 and the source's §6 registration |
 | A19 | **Versions in the artifact:** every artifact carries `module`, `contract_version`, `hypotheses_version` (the context's doctrine excerpt), `snapshot_id`, `run`, `as_of`; the runs card shows `contract_version` so a changed rule is visible in history | labels are never rewritten (system-design §4) |
 | A20 | **Evidence items and derived measures** (builder check Q2). An evidence item is one row: a pool entry (one stock), one board's summary, one board's member list (≤ 100 symbols, one item), one index quote, one daily bar series. At freeze, host code also writes **derived items**, each with its own id and the ids of its inputs: 连板高度 distribution, 封板 and 炸板 ratios by unique stock, 昨日涨停 today's returns and their negative tail, each frozen board's breadth (advancers over members) and turnover share, the exchanges' advance/decline counts. The model never computes these; a context carries derived items first, then the rows that fit | the source forbids the model re-deriving market-wide measures (`design/docs/contracts.md` §3); a 30 KiB context cannot carry 500 rows |
@@ -159,7 +160,7 @@ overturnable at review without redesign.
 | A25 | **Calendar tables per year, fail closed** (Q8): `lib/calendar/<year>.json` from the SSE notices, 2026 shipped; a session date outside every table refuses the freeze with `CALENDAR_UNCOVERED`, and A5's same-day rule refuses too. The 2027 table is a task of plan 1, added when the SSE notice is out (usually December) | guessing weekdays would mint CURRENT evidence on a holiday |
 | A26 | **Evidence files stay out of git** (Q9): `.gitignore` gets `strategies/*/analysis/*/evidence-*.json`; `run.json` (with every evidence file's sha256), `metrics.json` and the artifacts are tracked. A fresh clone reads the artifacts and the hashes, and cannot rebuild a context | a public repository; about 2 MiB a run, daily |
 | A27 | **A strategy run freezes quotes only** (Q5): pools and boards come from the cited market run, so one snapshot of each pool stands per day. `lunhui_read_leader_context` takes `market_run` too, so 顺位 is ranked within the market run's mainline candidates, and the leader validator requires each candidate to be a member of a frozen board or pool of the cited market run (`REFERENCE` otherwise). Gravit chooses the candidate symbols within that set | two snapshots of one pool in one decision would disagree |
-| A28 | **Eastmoney over its plain hosts, redirects followed** (Q4). Probed from the face's host on 2026-10-25: `push2ex.eastmoney.com/getTopicZTPool` answers directly (200, the 2026-10-23 pool); `push2.eastmoney.com/api/qt/clist/get` answers 302 to `push2delay.eastmoney.com`, which serves the boards (200, 516 boards) with `dlmkts` set — **delayed quotes for this location**; the numbered hosts (`17.`, `29.push2…`) redirect or time out. So the freezes call the plain hosts, follow one redirect only to `push2delay.eastmoney.com`, record the serving host and the delay flag in every item, and the exchanges' advance/decline counts come from the clist of all A shares with one field (`f3`), 1,000 a page, counts and page hashes stored, no rows — not from the Tencent snapshot's 27 pages | the data path works from here, delayed; the design stamps the delay rather than hide it |
+| A28 | **Eastmoney over its plain hosts, redirects followed** (Q4). Probed from the face's host on 2026-10-25: `push2ex.eastmoney.com/getTopicZTPool` answers directly (200, the 2026-10-23 pool); `push2.eastmoney.com/api/qt/clist/get` answers 302 to `push2delay.eastmoney.com`, which serves the boards (200, 516 boards) with `dlmkts` set — **delayed quotes for this location**; the numbered hosts (`17.`, `29.push2…`) redirect or time out. So the freezes call the plain hosts, follow one redirect only to `push2delay.eastmoney.com`, record the serving host and the delay flag in every item, and the market's advance/decline counts come from `push2ex`'s up/down distribution of the session, one request, counts, buckets and the reply's hash stored, no rows — not from the clist's sixty pages nor the Tencent snapshot's 27 (revised 2026-10-27, §16) | the data path works from here, delayed; the design stamps the delay rather than hide it |
 
 ## 5. The design
 
@@ -200,7 +201,7 @@ Without this row mounted, every other Lunhui row refuses to mount with a reason 
 | `lunhui-freeze-quotes` | `lunhui_freeze_quotes({strategy, run?, symbols})` | Tencent quotes and 60-day daily bars for 1–8 symbols (indices among `sh000001 sz399001 sz399006 sh000300`, main-board equities; stage 0's rule) | stage 0's |
 | `lunhui-freeze-limit-up` | `lunhui_freeze_limit_up({strategy, run?})` | Eastmoney 涨停池, 炸板池, 昨日涨停表现 for the current session: symbol, name, 连板数, 封板时间, 炸板次数, turnover, board tags | ≤ 500 rows per pool, ≤ 256 KiB per file |
 | `lunhui-freeze-boards` | `lunhui_freeze_boards({strategy, run?, boards?})` | Eastmoney concept boards ranked by turnover, the top 30 with change and turnover; constituents for the named boards or the top 10, ≤ 100 symbols each; board fund-flow rank | ≤ 256 KiB per file |
-| `lunhui-freeze-index` | `lunhui_freeze_index({strategy, run?})` | the four indices' quotes and 120-day daily bars (Tencent); the two exchanges' total turnover and advance/decline counts from the Eastmoney clist of all A shares, counts and page hashes only (A28) | ≤ 256 KiB per file |
+| `lunhui-freeze-index` | `lunhui_freeze_index({strategy, run?})` | the four indices' quotes and 120-day daily bars (Tencent); the two exchanges' total turnover (Tencent); the advance/decline and limit counts from Eastmoney's up/down distribution of the session, counts, buckets and the reply's hash only, another session's distribution refused (A28, §16) | ≤ 256 KiB per file |
 
 A freeze with `run` omitted opens a new run and returns its id; with `run` it adds to that open
 run (`RUN_SEALED` otherwise). Each source's items get evidence ids, and host code adds the
@@ -498,7 +499,7 @@ clause or reverse it (`DEVELOPMENT.md` §10 item 21). The rulings are in the pla
 
 | Clause | The text | What the tree does | Why |
 |---|---|---|---|
-| A28 | the all-shares counts read "1,000 a page" | 100 rows a page, at most 64 pages, page 1 first for the total and the rest concurrently under the four-slot limiter | measured 2026-10-25: the live clist answers a `pz=1000` request, through its 302 to `push2delay`, with 100 rows of 5,925 — the page cap is the host's |
+| A28 | the all-shares counts read "1,000 a page" | **superseded by §16 (2026-10-27):** 100 rows a page, at most 64 pages, page 1 first for the total and the rest concurrently under the four-slot limiter | measured 2026-10-25: the live clist answers a `pz=1000` request, through its 302 to `push2delay`, with 100 rows of 5,925 — the page cap is the host's |
 | §5.3 | concept boards "ranked by turnover" | the top 30 ranked by change (`fid=f3`), each row keeping turnover (`f6`) so turnover share is still derived; the default constituents are the first 10 of that list | measured 2026-10-25: the turnover ranking leads with 融资融券, 昨日高振幅, 深股通, 基金增仓, 富时罗素 — membership and screen boards, not 题材 |
 | §5.12 | every row `config: { strategiesRoot }` | only `lunhui-runs` carries `strategiesRoot`; the four freeze rows' config is `{}` and they reach the root through the `lunhuiRuns` service | one source of truth: a patch that moves the root restates it on one row |
 | §5.7 | the refusal codes | `SOURCE_FROZEN` joins them: a second freeze of one source in one run is refused | one snapshot per source per run — two snapshots of one pool would disagree (A27's rule) |
@@ -510,7 +511,7 @@ clause or reverse it (`DEVELOPMENT.md` §10 item 21). The rulings are in the pla
 | §5.1, A5 | `run.json`'s `as_of` is "the latest `received_at` among the evidence at seal" | every evidence file and its `run.json` entry also record `session` — `getMarketSession(now).expectedQuoteDate`, `YYYY-MM-DD`, the trading day the data belongs to; the quotes freeze too — and `sealRun` writes `run.json` `session`, the latest evidence session (null for a run with none, null while open), beside `as_of`; the freeze's reply and the runs card's latest line carry it | a weekend, holiday or pre-open freeze stores the previous session's data stamped only with the wall clock; A5's same-day rule and the CURRENT/HISTORICAL wording must read a trading day |
 | §5.3 | an evidence file is at most 256 KiB | `limit-up` has its own cap of 1 MiB (`EVIDENCE_CAPS` in `runs.mjs`); the other sources stay at 256 KiB and a run at 2 MiB; `EVIDENCE_TOO_LARGE` says the source's frozen reply passed the file cap and nothing was written | a stamped pool row is about 390 bytes, so three full 500-row pools come to about 585 KB; the derived ratios keep reading every row; no freeze takes a range to narrow |
 | A10, A14 | the card's `accepted` | a module file counts as an accepted artifact only when `run.json`'s `artifacts[]` names its module; any other file is left out as an unreadable one is | `artifacts[]` is A10's record of what a submit landed; plan 2's submit must append to it |
-| A17 | at most four requests in flight | the four-slot limiter is Eastmoney's; the index freeze's Tencent quote request and its four bar reads run beside it unthrottled, so one index freeze can hold up to nine requests at once | the Tencent reads are five fixed requests to two hosts stage 0 already called; the limiter guards Eastmoney's paged counts |
+| A17 | at most four requests in flight | the four-slot limiter is Eastmoney's; the index freeze's Tencent quote request and its four bar reads run beside it unthrottled, so one index freeze can hold up to nine requests at once (six since §16) | the Tencent reads are five fixed requests to two hosts stage 0 already called; the limiter guarded Eastmoney's paged counts, one request since §16 |
 
 ## 13. Build notes, plan 2 (2026-10-26)
 
@@ -589,3 +590,57 @@ rulings are in the plan's SDD ledger (`.superpowers/sdd/2026-10-26-lunhui-module
 | §5.9 | "the blocked exit after a read failure or the third rejection" (§13: a third rejection stops that module only) | `cn-reviewer` has one module, so its third rejection stops the role, as a failed read does; its persona has each item name a shown module, never the mode, and cite at least one `ev_` id; its route is `deepseek-flash`, and it shares only `skill` with each analyst | A23: the reviewer is not the writer |
 | §10 item 4 | "the schema-size measurement" | measured 2026-10-26 at `d77bcd3` on a fresh scratch home made by `npm run setup` — no copy of the operator's home — with the Account service answering: 95 tools, 247,432 bytes, 49,885 chars/4; the seventeen `lunhui_` tools 23,523 bytes, 3,188 chars/4; the three `role_` tools 2,768 bytes, 689 chars/4 (`DEVELOPMENT.md` §4.3) | the face composes its AKShare and seat rows itself, so a fresh home measures what the live one does when the operator adds no MCP row, and no key store or session log is touched |
 | §10 item 4, A12 | an `S01` registration and the next session's grading of its card on a real boot | `tests/lunhui-strategy-run-smoke.test.ts` runs two days on one boot — Friday 2026-10-23 and Monday 2026-10-26, `globalThis.Date` replaced for each day's prompt — each a reviewed market run and a strategy run; Friday registers `S01`, Monday grades it; the fixtures are one set, so Monday's grade reads Friday's quote bytes under Monday's session | a freeze row's clock cannot cross the boot's clone of patches (§13); a second fixture set for new prices is a deferred minor (`DEVELOPMENT.md` §10 item 19) |
+
+## 16. Revision, 2026-10-27: the counts from the up/down distribution
+
+On the operator's word (2026-10-27, "把 freeze-index 的涨跌家数改走 push2ex 的 getTopicZDFenBu"),
+A17, A28 and §5.3's index row now read as above, and the index freeze's counts come from one
+request instead of the clist's sixty.
+
+**Why.** From the face's host the clist failed every live drill since 2026-10-26: `push2` answers
+302 to `push2delay`, which answers 502 or times out most of the time (one in three on the evening
+of 2026-10-27), and AKShare's own `stock_zh_a_spot_em` and `stock_board_concept_name_em` fail the
+same way, so the cause is Eastmoney's side or the path, not the face. Sixty pages through four
+slots, any one failing the freeze, could not pass at that rate. `push2ex` answered every request
+on both probes of 2026-10-27, in 0.3–2.2 s.
+
+**The endpoint.** `https://push2ex.eastmoney.com/getTopicZDFenBu?ut=7eea3edcaed734bea9cbfc24409ed989&dpt=wz.ztzt`,
+the distribution the 涨停板行情 page draws. AKShare 1.18.94 has no function for it. Its reply is
+about 315 bytes, `data: { qdate, fenbu }`, `qdate` the session as an eight-digit integer and
+`fenbu` a list of one-key objects, a bucket from `-11` to `11` to a count of shares. It takes no
+date: a `date` parameter is ignored and the latest session comes back.
+
+**What is measured and what is inferred.**
+
+| Fact | Status |
+|---|---|
+| 23 buckets, `-11` to `11`, summing to 5,375 on 2026-10-27 | measured |
+| bucket `11` equal to the 涨停池's `tc` (46 at midday, 41 after the close, 2026-10-27) | measured twice, one session |
+| bucket `11` is 涨停 and `-11` 跌停 at each board's own limit; `0` is unchanged; `1`…`10` and `-1`…`-10` are the 1-point bands between | inferred, undocumented |
+| the 5,375 are the Shanghai and Shenzhen shares with a price limit, without the Beijing exchange and the shares on their first days | inferred: the clist's all-A list held 5,925 rows on 2026-10-25, and the 涨停池 held no `8`/`4`/`9` code |
+
+**What the tree does.**
+
+- `fetchMarketCounts({ date })` in `lib/eastmoney.mjs` makes the one request through the fetch
+  core (the limiter, the 7-second timeout, the 512 KiB cap, one redirect to `push2delay` only) and
+  returns `{ qdate, advancers, decliners, unchanged, limitUp, limitDown, total, buckets, hash,
+  host, delayed }`. `advancers` sums the buckets above 0 and `decliners` those below; `unchanged`
+  is bucket 0; `limitUp` bucket 11 and `limitDown` bucket -11; `total` all of them. `buckets` is
+  every bucket ascending as `{ bucket, count }`; `hash` is the sha256 of the reply's bytes.
+- `qdate` must be the freeze's session (`sessionOf(now)`, as the pools' `date` is); another
+  session's distribution refuses `NO_MARKET_DATA`, naming both dates, and the index freeze writes
+  nothing. A null `data` or an empty `fenbu` refuses `NO_MARKET_DATA`; a malformed one
+  `UPSTREAM_INVALID`.
+- The `counts` item is that object: no `pages`, `pageHashes` or `partial`, and the counts' derived
+  items (`advance_decline_ratio`, `limit_up_count`, `limit_down_count`) carry no `partial`.
+- The clist's all-shares read, its batch stop, `ALL_SHARES_FS` and the ±9.9% limit proxy
+  (`LIMIT_UP_PCT`, `LIMIT_DOWN_PCT`) are deleted, with the two count-page fixtures; the fixture
+  directory gains `distribution.json`.
+
+**What changes for a reader of the evidence.** The limit counts are Eastmoney's own (inferred: each board's
+limit, ST and 20% boards included), no longer the ±9.9% proxy, so `limit_up_count` agrees with the
+涨停池. The counts' universe is the distribution's, about 550 shares smaller than the clist's, so
+the absolute counts are smaller; the ratio is not affected beyond that. A freeze between 09:15 and
+the moment Eastmoney rolls its `qdate` over, or before 09:15 if it rolls early, is refused rather
+than stamped with the wrong session. The boards, members and fund flow still come from the clist
+and still fail while it does.

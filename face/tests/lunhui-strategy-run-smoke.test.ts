@@ -19,7 +19,8 @@
  * "now" Friday 2026-10-23 15:00 China time for Friday's prompt, then Monday 2026-10-26 15:00, the next trading day,
  * for Monday's - each advancing in real time; the freezes stamp each day's session from it, so Monday's market run
  * is fresh for Monday's strategy run (A5) and Friday's is an earlier session. The fixtures are one set for both
- * days. The fixture copy is the leader tests': 600519 sealed in the 涨停池, 600519 and 000333 members of BK0715,
+ * days but the distribution, whose `qdate` is rolled to Monday before Monday's prompt, as the live endpoint
+ * answers its latest session (spec §16). The fixture copy is the leader tests': 600519 sealed in the 涨停池, 600519 and 000333 members of BK0715,
  * so a candidate can stand. Own file, gated. */
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -158,7 +159,7 @@ function sentimentArtifact(context: Context) {
   const median = derivedOf(context, "yesterday_return_median");
   const seal = derivedOf(context, "seal_ratio");
   const streak = derivedOf(context, "streak_distribution");
-  const counts = need(context.evidence.find((e) => e.kind === "counts"), "the all-shares counts");
+  const counts = need(context.evidence.find((e) => e.kind === "counts"), "the market counts");
   const money_effect = median.value > 0 ? "POSITIVE" : median.value < 0 ? "NEGATIVE" : "MIXED";
   const freeze_type = seal.value >= 0.5 ? "NONE" : "ICE_POINT";
   const highest = Math.max(...Object.keys(streak.value).map(Number));
@@ -517,6 +518,9 @@ test("strategy run smoke: an S01 registered on Friday and graded on Monday - eac
 
     const friday = await day("Friday", FRIDAY, "2026-10-23");
     assert.equal(friday.mode.expectation_review, null, "Friday: no earlier card to grade");
+    // The distribution answers its latest session whatever is asked, so on Monday it is Monday's (spec §16).
+    const distribution = JSON.parse(await readFile(join(fixtures, "distribution.json"), "utf8"));
+    await writeFile(join(fixtures, "distribution.json"), JSON.stringify({ ...distribution, data: { ...distribution.data, qdate: 20261026 } }));
     const monday = await day("Monday", MONDAY, "2026-10-26");
     assert.notEqual(monday.market, friday.market, "Monday: a new market run");
     assert.notEqual(monday.run, friday.run, "Monday: a new strategy run");

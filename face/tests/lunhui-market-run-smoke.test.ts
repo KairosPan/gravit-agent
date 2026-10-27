@@ -127,7 +127,7 @@ function sentimentArtifact(context: Context) {
   const median = derivedOf(context, "yesterday_return_median");
   const seal = derivedOf(context, "seal_ratio");
   const streak = derivedOf(context, "streak_distribution");
-  const counts = need(context.evidence.find((e) => e.kind === "counts"), "the all-shares counts");
+  const counts = need(context.evidence.find((e) => e.kind === "counts"), "the market counts");
   const money_effect = median.value > 0 ? "POSITIVE" : median.value < 0 ? "NEGATIVE" : "MIXED";
   const freeze_type = seal.value >= 0.5 ? "NONE" : "ICE_POINT";
   const highest = Math.max(...Object.keys(streak.value).map(Number));

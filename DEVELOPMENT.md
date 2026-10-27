@@ -1061,10 +1061,10 @@ extended), `market.mjs` (Tencent quotes and bars, the session; stage 0's), `cale
 `calendar/2026.json` (the SSE calendar tables by year, `isTradingDay`, and `previousTradingDay`,
 A5's session before, null once the walk leaves every table), `eastmoney.mjs` (the Eastmoney fetch core —
 the plain hosts, one redirect to `push2delay.eastmoney.com` only, at most four requests in flight
-across every caller — and the pool, board, member, fund-flow and count parsers), `derive.mjs` (the
+across every caller — and the pool, board, member, fund-flow and up/down-distribution parsers), `derive.mjs` (the
 derived items of A20: 连板 distribution, 封板 and 炸板 ratios, 昨日涨停 returns and their negative
-tail, board breadth as advancers / (advancers + decliners) and turnover share, the exchanges'
-counts, the two composites' turnover), `freeze-tool.mjs` (`freezeDeps`, `defineFreeze`: the one order of a
+tail, board breadth as advancers / (advancers + decliners) and turnover share, the market's
+advance/decline ratio and limit counts from the distribution, the two composites' turnover), `freeze-tool.mjs` (`freezeDeps`, `defineFreeze`: the one order of a
 freeze's checks, §3.6), `module-tool.mjs` (`moduleDeps`, `defineModule`: a module's read and
 submit pair, §3.6), `contract-core.mjs` (the rules every module shares, below), `contracts/`
 (`environment.mjs`, `sentiment.mjs`, `theme.mjs`, `leader.mjs`, `mode.mjs`, `counterevidence.mjs` — each module's
@@ -1189,11 +1189,11 @@ owns the `index` class, carried by an index quote, a bars item or a derived item
 `index_state` on an index quote or bars and `liquidity_state` on `total_turnover` or
 `advance_decline_ratio`, each on a claim of its own — index and liquidity apart; its view shows an
 index series' last 20 bars with `bars_total`. **sentiment** reads `limit-up` and `index` (both
-required), owns `sentiment` (a derived item) and `market` (the all-shares counts or an index derived
+required), owns `sentiment` (a derived item) and `market` (the market counts or an index derived
 item), and needs, across its claims that are not `INSUFFICIENT`, two limit-up ids and one index id
 for a `state` other than `UNKNOWN`, a limit-up derived item on a claim of its own for `money_effect`
 and for `freeze_type`, and a `conflict` naming the indicators that disagree when an `OK` artifact's
-`state` is `UNKNOWN`; its rows are the all-shares counts, then the 涨停 pool by streak, the 炸板
+`state` is `UNKNOWN`; its rows are the market counts, then the 涨停 pool by streak, the 炸板
 and the 昨日涨停 pools — its context leaves the index quotes and bars out. **theme** reads `boards` and
 `limit-up` (both required), owns `theme`, carried by a boards derived item, and binds each of at
 most five `mainline_candidates` to a board the run froze — its board item and members item cited,
@@ -3377,7 +3377,8 @@ through `tsx`:
   on one run at once both landing, a refusal in a run the call opened naming that run), `lunhui-eastmoney` (the
   parsers on the fixtures and on malformed replies, one redirect followed to
   `push2delay.eastmoney.com` only and a second refused, `host` and `delayed` stamped, the
-  four-request limiter, count pages disagreeing on `total` marked `partial`, a member list cut at
+  four-request limiter, the up/down distribution summed by bucket with 11 and -11 the limit
+  counts and another session's `qdate` refused `NO_MARKET_DATA`, a member list cut at
   100 with `truncated`), `lunhui-derive` (each derived measure from hand-computed rows, breadth from
   the board's own counts and never the cut list), `lunhui-runs` (stage 0's anchoring cases, then
   open, add, seal, `snapshot_id`, `session`, `SOURCE_FROZEN`, the 256 KiB, `limit-up`'s 1 MiB
@@ -4093,11 +4094,14 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
   delayed.** No contract stands behind `push2ex.eastmoney.com` or `push2.eastmoney.com`: a changed
   reply shape is the parsers' `UPSTREAM_INVALID`, a refusal that writes nothing for that source.
   Measured 2026-10-25: the clist answers 302 to `push2delay.eastmoney.com` with `dlmkts` set, so
-  the boards, members, fund flow and counts are delayed quotes; every Eastmoney item carries the
-  host that served it and `delayed`, and the file's meta joins them (A28). The clist caps a page at
-  100 rows whatever the query asks (5,925 A shares that day), so the counts take about sixty
-  requests a freeze through the four-slot limiter, page 1 first for the total; pages that disagree
-  on the total mark the counts `partial`. A request's 7-second timeout is per hop, so a followed
+  the boards, members and fund flow are delayed quotes; every Eastmoney item carries the host
+  that served it and `delayed`, and the file's meta joins them (A28). Since 2026-10-26 the clist
+  has mostly answered 502 from here, so the boards freeze fails while it does. The market counts
+  come from `push2ex`'s up/down distribution instead (spec §16, 2026-10-27): one request that
+  takes no date and answers its latest session, refused when its `qdate` is not the freeze's
+  session; that bucket 11 and -11 are 涨停 and 跌停, and that its universe (5,375 shares on
+  2026-10-27) is the Shanghai and Shenzhen shares with a price limit, are inferred, not
+  documented. A request's 7-second timeout is per hop, so a followed
   redirect can take 14 s. A request already in flight runs to completion after a sibling of the
   same freeze fails. Only the 涨停 pool's null or empty reply refuses `NO_MARKET_DATA`; an empty
   炸板 or 昨日涨停 pool is an empty list, so a day on which Eastmoney served the one and failed the

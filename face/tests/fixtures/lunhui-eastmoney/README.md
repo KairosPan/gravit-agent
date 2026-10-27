@@ -21,6 +21,10 @@ are `HHMMSS` integers; `zttj` is `{ days, ct }`.
 - `yesterday-pool.json` — `getYesterdayZTPool`, 昨日涨停 today: five rows with the keys `c m n p
   ztp zdp amount ltsz tshare hs zf zs yfbt ylbc hybk zttj`; today's change (`zdp`) runs from
   -6.05 to 10.04, so the median and the negative tail are not trivial.
+- `distribution.json` — `getTopicZDFenBu`, the session's up/down distribution: `data: { qdate,
+  fenbu: [...] }`, each `fenbu` entry one bucket from -11 to 11 to a count of shares, in the live
+  reply's string order (`"-1"`, `"-10"`, `"-11"`, `"-3"`, …). Nine buckets summing to 30: 15 up, 12
+  down, 3 unchanged; bucket 11 holds 6, the 涨停池's six rows, and bucket -11 holds 2.
 
 The clist files are `push2.eastmoney.com/api/qt/clist/get` replies in the live shape: `rc`, `rt`,
 `svr`, `lt`, `full`, `dlmkts` (empty: not delayed), `dsc` and `data: { total, diff: [...] }`; a
@@ -32,13 +36,11 @@ The clist files are `push2.eastmoney.com/api/qt/clist/get` replies in the live s
 - `members-BK1716.json` — 100 members of a board whose `total` is 140, the truncation case.
 - `board-flow.json` — the concept boards' fund flow today (`fid0=f62`): four rows with AKShare's
   `今日` fields, main net inflow `f62` and its share `f184` positive, negative and `"-"`.
-- `counts-page-1.json`, `counts-page-2.json` — two pages of the all-A-shares list with `f2 f3`:
-  page 1 `total` 6, page 2 `total` 7 (the partial case); changes 10.04, 9.9, 1.2, 0, -9.98 and a
-  `"-"`, so the limit-up, limit-down and unchanged counts are not trivial.
 
 `createFixtureFetch` (`face/plugins/lunhui/lib/fixture-fetch.mjs`) serves this directory: a URL
-whose host is `push2ex.eastmoney.com` gets the pool file its path names (`/getTopicZTPool`,
-`/getTopicZBPool`, `/getYesterdayZTPool`); a `push2.eastmoney.com/api/qt/clist/get` URL gets the
-board, member, fund-flow or count-page file its `fs` names (a count page by its `pn`); any other
+whose host is `push2ex.eastmoney.com` gets the file its path names (`/getTopicZTPool`,
+`/getTopicZBPool`, `/getYesterdayZTPool`, `/getTopicZDFenBu`); a
+`push2.eastmoney.com/api/qt/clist/get` URL gets the board, member or fund-flow file its `fs`
+names; any other
 URL, or a file the directory does not hold, a 404. The redirect to `push2delay.eastmoney.com` is
 not a fixture: the tests hand `fetchEastmoneyJson` a small fake `fetch` for it.

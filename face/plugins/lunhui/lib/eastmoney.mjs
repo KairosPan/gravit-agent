@@ -1,14 +1,15 @@
 // face/plugins/lunhui/lib/eastmoney.mjs
 /**
  * The Lunhui Eastmoney layer (modules spec §5.3, A17, A20, A28): the fetch core every Eastmoney
- * request goes through, and the parsers of the replies the freezes read - the 涨停池, the 炸板池
- * and 昨日涨停 from `push2ex.eastmoney.com`; the concept boards, a board's members, the concept
- * boards' fund flow and the all-shares advance/decline counts from `push2.eastmoney.com`'s clist.
+ * request goes through, and the parsers of the replies the freezes read - the 涨停池, the 炸板池,
+ * 昨日涨停 and the market's up/down distribution from `push2ex.eastmoney.com`; the concept boards,
+ * a board's members and the concept boards' fund flow from `push2.eastmoney.com`'s clist.
  * The queries are the ones the installed AKShare sends (`akshare/stock_feature/stock_ztb_em.py`:
  * `stock_zt_pool_em`, `stock_zt_pool_zbgc_em`, `stock_zt_pool_previous_em`;
  * `akshare/stock/stock_board_concept_em.py`; `akshare/stock/stock_fund_em.py`:
- * `stock_sector_fund_flow_rank`; `akshare/stock_feature/stock_hist_em.py`: `stock_zh_a_spot_em`),
- * each page size cut to its bound; the row fields are those functions' column renames, in English.
+ * `stock_sector_fund_flow_rank`), each page size cut to its bound; the row fields are those
+ * functions' column renames, in English. The distribution (`getTopicZDFenBu`) is the one the
+ * 涨停板行情 page draws; AKShare has no function for it (spec §16).
  *
  * The fetch core calls the plain hosts and follows one redirect, only to
  * `push2delay.eastmoney.com` and only for the same path and query (A28); it never calls a numbered
@@ -16,8 +17,8 @@
  * four Eastmoney requests run at once across every caller (A17); the body is read through
  * `market.mjs`'s `fetchBytes` with its 7-second timeout and 512 KiB cap, and every failure is a
  * `LunhuiError` naming 东方财富: `UPSTREAM_TIMEOUT`, `UPSTREAM_TOO_LARGE`, `UPSTREAM_INVALID`, or
- * `NO_MARKET_DATA` for a 涨停池, a board list, a fund-flow list or a first count page that is null
- * or empty.
+ * `NO_MARKET_DATA` for a 涨停池, a board list, a fund-flow list or a distribution that is null or
+ * empty, or a distribution of another session.
  */
 import { createHash } from "node:crypto";
 import { refuse, upstreamError } from "./errors.mjs";
@@ -30,6 +31,8 @@ const REDIRECT_STATUSES = new Set([301, 302, 307, 308]);
 const HEADERS = Object.freeze({ Accept: "application/json", Referer: "https://quote.eastmoney.com/" });
 const MAX_IN_FLIGHT = 4;
 const POOL_HOST = "https://push2ex.eastmoney.com";
+/** The `ut` AKShare sends with the pool queries; the distribution takes the same. */
+const POOL_UT = "7eea3edcaed734bea9cbfc24409ed989";
 const POOL_ROWS = 500;
 const DATE = /^\d{8}$/;
 
@@ -108,30 +111,13 @@ export async function fetchEastmoneyJson(url, options = {}) {
 }
 
 /**
- * A shared stop for a batch of requests: once one fails, `error` holds its refusal, and every
- * request of the batch still waiting for a slot rejects with it without being sent.
- * @typedef {{ error: unknown }} Abort
- */
-
-/**
- * `fetchEastmoneyJson` with the body's bytes as received beside the parsed reply, for a page hash,
- * and an optional `abort` shared by a batch: a request that gets its slot after `abort.error` is set
- * rejects with that error unsent, and a request that fails sets it. A request already running
- * finishes.
+ * `fetchEastmoneyJson` with the body's bytes as received beside the parsed reply, for a reply hash.
  * @param {string} url
- * @param {{ fetchImpl?: FetchLike, timeoutMs?: number, maxBytes?: number, abort?: Abort }} [options]
+ * @param {{ fetchImpl?: FetchLike, timeoutMs?: number, maxBytes?: number }} [options]
  * @returns {Promise<{ json: Record<string, any>, host: string, delayed: boolean, bytes: Uint8Array }>}
  */
-function fetchEastmoneyReply(url, { fetchImpl = fetch, timeoutMs = 7000, maxBytes = 512 * 1024, abort } = {}) {
-  return inFlight(async () => {
-    if (abort?.error) throw abort.error;
-    try {
-      return await request(url, fetchImpl, timeoutMs, maxBytes);
-    } catch (error) {
-      if (abort) abort.error ??= error;
-      throw error;
-    }
-  });
+function fetchEastmoneyReply(url, { fetchImpl = fetch, timeoutMs = 7000, maxBytes = 512 * 1024 } = {}) {
+  return inFlight(() => request(url, fetchImpl, timeoutMs, maxBytes));
 }
 
 /** One request and its one redirect, the body parsed as a JSON object; the caller holds a slot. */
@@ -267,7 +253,7 @@ function isPoolRow(raw) {
 async function fetchPool(path, sort, parse, required, date, fetchImpl, timeoutMs) {
   const url = new URL(path, POOL_HOST);
   url.search = new URLSearchParams({
-    ut: "7eea3edcaed734bea9cbfc24409ed989",
+    ut: POOL_UT,
     dpt: "wz.ztzt",
     Pageindex: "0",
     pagesize: String(POOL_ROWS),
@@ -314,22 +300,13 @@ export async function fetchLimitUpPools({ date, fetchImpl = fetch, timeoutMs = 7
   };
 }
 
-// ---- the clist: boards, members, fund flow, the all-shares counts ----
+// ---- the clist: boards, members, fund flow ----
 
 const CLIST = "https://push2.eastmoney.com/api/qt/clist/get";
-/** The `ut` AKShare sends with the board, member and all-shares queries. */
+/** The `ut` AKShare sends with the board and member queries. */
 const CLIST_UT = "bd1d9ddb04089700cf9c27f6f7426281";
 const BOARD_CODE = /^BK\d{4}$/;
 const STOCK_CODE = /^\d{6}$/;
-/** AKShare's `stock_zh_a_spot_em` filter: the Shanghai, Shenzhen and Beijing A shares. */
-const ALL_SHARES_FS = "m:0 t:6,m:0 t:80,m:1 t:2,m:1 t:23,m:0 t:81 s:2048";
-/**
- * The change, in percent, at or past which an all-shares row counts as limit-up or limit-down:
- * the main board's 10% with room for rounding. A research candidate - a 20% or 30% board's row at
- * +9.9% is counted, a 5% ST row at its limit is not.
- */
-export const LIMIT_UP_PCT = 9.9;
-export const LIMIT_DOWN_PCT = -9.9;
 
 /** A name: a non-empty string other than Eastmoney's "-" placeholder, or null. */
 function label(value) {
@@ -453,73 +430,69 @@ export async function fetchBoardFundFlow({ fetchImpl = fetch, top = 30, timeoutM
   return { rows: rows.slice(0, top).map(flowRow), host, delayed };
 }
 
-/** The URL of all-shares page `pn`. */
-function countsUrl(pn, pageSize) {
-  return clistUrl({
-    pn: String(pn), pz: String(pageSize), po: "1", np: "1", ut: CLIST_UT, fltt: "2", invt: "2", fid: "f12",
-    fs: ALL_SHARES_FS, fields: "f3,f2",
-  });
-}
+// ---- the up/down distribution ----
+
+/** A distribution bucket: an integer from -11 to 11, as Eastmoney keys it ("-0" is not one). */
+const BUCKET = /^(?:0|-?(?:[1-9]|1[01]))$/;
+/** The buckets Eastmoney gives the limit-up and limit-down shares (inferred, spec §16). */
+const LIMIT_UP_BUCKET = 11;
+const LIMIT_DOWN_BUCKET = -11;
 
 /**
- * The all-A-shares advance/decline counts: AKShare's `stock_zh_a_spot_em` query with the change
- * and price fields only, `pageSize` rows a page. The clist serves at most 100 rows a page whatever
- * `pz` asks (measured 2026-10-25: `pz=1000` answered `total` 5925 with 100 rows), hence the
- * default of 100 and 64 pages. Page 1 is read first for its `data.total`; the remaining
- * `ceil(total / pageSize) - 1` pages, at most `maxPages` in all, are then asked together, the
- * limiter keeping four in flight. No row is kept: only the counts, and each page's sha256 over its
- * response bytes as received, in page order. A row whose change is "-" (suspended) counts in none
- * of advancers, decliners and unchanged. `partial` is true when a page's `total` differs from page
- * 1's or the rows read fall short of it. A page 1 whose `data` is null or whose list is empty
- * refuses `NO_MARKET_DATA`; any page that fails otherwise fails the whole call with that page's
- * refusal, and the pages still waiting for a slot are never sent, so a failed read does not hold
- * the shared limiter for its remaining pages.
- * @param {{ fetchImpl?: FetchLike, pageSize?: number, maxPages?: number, timeoutMs?: number }} [options]
+ * The market's advance/decline counts for the session `date`, in one request: the up/down
+ * distribution the 涨停板行情 page draws (`push2ex.eastmoney.com/getTopicZDFenBu`). Its `fenbu` is a
+ * list of one-key objects, a bucket from -11 to 11 to a count of shares; `advancers` sums the
+ * buckets above 0, `decliners` those below, `unchanged` is bucket 0, `limitUp` bucket 11 and
+ * `limitDown` bucket -11 (measured 2026-10-27: bucket 11 equal to the 涨停池's `tc` twice in one
+ * session; inferred, the endpoint is undocumented), `total` all of them. `buckets` keeps every
+ * bucket, ascending, and `hash` is the sha256 of the reply's bytes as received. No row of any share
+ * is read.
+ *
+ * The endpoint takes no date and answers its latest session, so the reply's `qdate` must be
+ * `date`: another session's distribution refuses `NO_MARKET_DATA`, naming both dates. A `data`
+ * that is null or a `fenbu` that is empty refuses `NO_MARKET_DATA`; a malformed one -
+ * `qdate` not an eight-digit integer, an entry not one bucket, a bucket out of range or given twice,
+ * a count not a non-negative integer - `UPSTREAM_INVALID`. A bad `date` is the host's bug, thrown
+ * before any request.
+ * @param {{ date: string, fetchImpl?: FetchLike, timeoutMs?: number }} options `date` as `YYYYMMDD`
  */
-export async function fetchMarketCounts({ fetchImpl = fetch, pageSize = 100, maxPages = 64, timeoutMs = 7000 } = {}) {
-  /** @type {Abort} */
-  const abort = { error: null };
-  const read = async (pn) => {
-    const reply = await fetchEastmoneyReply(countsUrl(pn, pageSize), { fetchImpl, timeoutMs, abort });
-    try {
-      return { ...clistRows(reply.json, null), reply };
-    } catch (error) {
-      abort.error ??= error;
-      throw error;
-    }
-  };
-  const first = await read(1);
-  if (first.rows.length === 0) throw refuse.noMarketData(PROVIDER);
-  const { total } = first;
-  const pageCount = Math.min(Math.ceil(total / pageSize), maxPages);
-  let rest;
-  try {
-    rest = await Promise.all(Array.from({ length: Math.max(pageCount - 1, 0) }, (_, i) => read(i + 2)));
-  } catch (error) {
-    throw abort.error ?? error;
+export async function fetchMarketCounts({ date, fetchImpl = fetch, timeoutMs = 7000 }) {
+  if (typeof date !== "string" || !DATE.test(date))
+    throw new TypeError(`lunhui: a distribution date is YYYYMMDD, not ${JSON.stringify(date)}`);
+  const url = new URL("/getTopicZDFenBu", POOL_HOST);
+  url.search = new URLSearchParams({ ut: POOL_UT, dpt: "wz.ztzt" }).toString();
+  const { json, host, delayed, bytes } = await fetchEastmoneyReply(url.href, { fetchImpl, timeoutMs });
+  if (json.data === null) throw refuse.noMarketData(PROVIDER);
+  const qdate = json.data?.qdate;
+  const fenbu = json.data?.fenbu;
+  if (!Number.isInteger(qdate) || !DATE.test(String(qdate)) || !Array.isArray(fenbu)) throw invalid("INVALID_RESPONSE");
+  if (fenbu.length === 0) throw refuse.noMarketData(PROVIDER);
+  /** @type {Map<number, number>} */
+  const byBucket = new Map();
+  for (const entry of fenbu) {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) throw invalid("INVALID_RESPONSE");
+    const keys = Object.keys(entry);
+    if (keys.length !== 1 || !BUCKET.test(keys[0])) throw invalid("INVALID_RESPONSE");
+    const bucket = Number(keys[0]);
+    const count = entry[keys[0]];
+    if (byBucket.has(bucket) || !Number.isSafeInteger(count) || count < 0) throw invalid("INVALID_RESPONSE");
+    byBucket.set(bucket, count);
   }
-  const pages = [first, ...rest];
-  const counts = { advancers: 0, decliners: 0, unchanged: 0, limitUp: 0, limitDown: 0 };
-  let rows = 0;
-  for (const page of pages) {
-    rows += page.rows.length;
-    for (const raw of page.rows) {
-      const pct = num(raw.f3);
-      if (pct === null) continue;
-      if (pct > 0) counts.advancers += 1;
-      else if (pct < 0) counts.decliners += 1;
-      else counts.unchanged += 1;
-      if (pct >= LIMIT_UP_PCT) counts.limitUp += 1;
-      if (pct <= LIMIT_DOWN_PCT) counts.limitDown += 1;
-    }
-  }
+  if (String(qdate) !== date)
+    throw new LunhuiError("NO_MARKET_DATA", `${PROVIDER}涨跌分布的日期为 ${qdate}，不是本次会话 ${date}；本次未写入任何文件。`);
+  const buckets = [...byBucket].sort(([a], [b]) => a - b).map(([bucket, count]) => ({ bucket, count }));
+  const sum = (keep) => buckets.reduce((total, { bucket, count }) => total + (keep(bucket) ? count : 0), 0);
   return {
-    ...counts,
-    total,
-    pages: pages.length,
-    pageHashes: pages.map((page) => createHash("sha256").update(page.reply.bytes).digest("hex")),
-    partial: rows < total || pages.some((page) => page.total !== total),
-    host: [...new Set(pages.map((page) => page.reply.host))].join(","),
-    delayed: pages.some((page) => page.reply.delayed),
+    qdate,
+    advancers: sum((bucket) => bucket > 0),
+    decliners: sum((bucket) => bucket < 0),
+    unchanged: byBucket.get(0) ?? 0,
+    limitUp: byBucket.get(LIMIT_UP_BUCKET) ?? 0,
+    limitDown: byBucket.get(LIMIT_DOWN_BUCKET) ?? 0,
+    total: sum(() => true),
+    buckets,
+    hash: createHash("sha256").update(bytes).digest("hex"),
+    host,
+    delayed,
   };
 }

@@ -1,6 +1,6 @@
 /**
  * The Lunhui Eastmoney fetch core, the limit-up pools, the boards, their members, the board fund
- * flow and the all-shares counts, `plugins/lunhui/lib/eastmoney.mjs` (modules spec §5.3, A17, A20,
+ * flow and the up/down distribution, `plugins/lunhui/lib/eastmoney.mjs` (modules spec §5.3, A17, A20,
  * A28): the replies parsed from the synthetic fixtures in
  * `fixtures/lunhui-eastmoney/`, the one redirect to the delay host, the four-request limiter and
  * the provider failures as refusals. The redirect and failure cases hand the fetch core a small
@@ -251,12 +251,15 @@ test("eastmoney: not JSON is UPSTREAM_INVALID, over 512 KiB is UPSTREAM_TOO_LARG
   assert.equal(cancelled, true);
 });
 
-test("eastmoney: the fixture fetch answers the three pool paths and 404s an unknown path", async () => {
+test("eastmoney: the fixture fetch answers the three pool paths and the distribution, and 404s an unknown path", async () => {
   for (const [path, tc] of [["/getTopicZTPool", 6], ["/getTopicZBPool", 3], ["/getYesterdayZTPool", 5]] as const) {
     const response = await fixtureFetch(`https://push2ex.eastmoney.com${path}?date=${DATE}`);
     assert.equal(response.status, 200, path);
     assert.equal((await response.json()).data.tc, tc, path);
   }
+  const fenbu = await fixtureFetch(ZDFENBU);
+  assert.equal(fenbu.status, 200);
+  assert.equal((await fenbu.json()).data.qdate, 20261023);
   for (const url of [
     "https://push2ex.eastmoney.com/getTopicDTPool?date=20261023",
     "https://push2ex.eastmoney.com/",
@@ -378,127 +381,72 @@ test("eastmoney: fetchBoardFundFlow parses the main net inflow and its share", a
   await rejectsWith(fetchBoardFundFlow({ fetchImpl: async () => json({ rc: 0, data: null }) }), "NO_MARKET_DATA");
 });
 
-test("eastmoney: fetchMarketCounts sums pages, counts limit-up and limit-down rows, hashes every page, and marks a changed total partial", async () => {
+const ZDFENBU = "https://push2ex.eastmoney.com/getTopicZDFenBu?ut=7eea3edcaed734bea9cbfc24409ed989&dpt=wz.ztzt";
+
+/** A distribution reply in the live shape around `data`. */
+function distribution(data: unknown) {
+  return { rc: 0, rt: 115, svr: 1, lt: 2, full: 0, data };
+}
+
+test("eastmoney: fetchMarketCounts reads the up/down distribution in one request: counts by bucket, 11 and -11 the limits, the reply hashed", async () => {
   const { asked, fetchImpl } = recorded();
-  const counts = await fetchMarketCounts({ fetchImpl, pageSize: 3 });
-  const sha = (name: string) => createHash("sha256").update(readFileSync(`${FIXTURES}${name}`)).digest("hex");
-  // Page 1: 10.04, 9.9, 1.2; page 2: 0, -9.98 and a suspended "-" that counts nowhere.
+  const counts = await fetchMarketCounts({ date: DATE, fetchImpl });
+  const hash = createHash("sha256").update(readFileSync(`${FIXTURES}distribution.json`)).digest("hex");
   assert.deepEqual(counts, {
-    advancers: 3, decliners: 1, unchanged: 1, limitUp: 2, limitDown: 1, total: 6, pages: 2,
-    pageHashes: [sha("counts-page-1.json"), sha("counts-page-2.json")],
-    partial: true, host: "push2.eastmoney.com", delayed: false,
+    qdate: 20261023,
+    advancers: 15, decliners: 12, unchanged: 3, limitUp: 6, limitDown: 2, total: 30,
+    buckets: [
+      { bucket: -11, count: 2 }, { bucket: -10, count: 1 }, { bucket: -3, count: 4 }, { bucket: -1, count: 5 },
+      { bucket: 0, count: 3 }, { bucket: 1, count: 6 }, { bucket: 5, count: 2 }, { bucket: 10, count: 1 }, { bucket: 11, count: 6 },
+    ],
+    hash, host: "push2ex.eastmoney.com", delayed: false,
   });
-  // Page 1 first, then ceil(6 / 3) - 1 more pages.
-  const fs = "m%3A0+t%3A6%2Cm%3A0+t%3A80%2Cm%3A1+t%3A2%2Cm%3A1+t%3A23%2Cm%3A0+t%3A81+s%3A2048";
-  const countsUrl = (pn: number, pz: number) =>
-    `${CLIST}?pn=${pn}&pz=${pz}&po=1&np=1&${UT}&fltt=2&invt=2&fid=f12&fs=${fs}&fields=f3%2Cf2`;
-  assert.deepEqual(asked, [countsUrl(1, 3), countsUrl(2, 3)]);
-  assert.ok(!("rows" in counts));
-  // The default page is the clist's measured cap of 100: one page here, short of the total.
-  const capped = recorded();
-  const one = await fetchMarketCounts({ fetchImpl: capped.fetchImpl });
-  assert.deepEqual(capped.asked, [countsUrl(1, 100)]);
-  assert.equal(one.pages, 1);
-  assert.equal(one.partial, true);
-});
-
-test("eastmoney: fetchMarketCounts reads page 1 first, then the rest together under the limiter, hashed in page order; maxPages caps the read", async () => {
-  // 10 rows of 2 a page: page n holds changes n and -n, page 2 is delayed.
-  const page = (pn: number) => ({ rc: 0, dlmkts: pn === 2 ? "8" : "", data: { total: 10, diff: [{ f3: pn * 2 }, { f3: -pn * 2 }] } });
-  const order: number[] = [];
-  let running = 0;
-  let peak = 0;
-  const releases: Array<() => void> = [];
-  const fetchImpl = async (url: string | URL) => {
-    const pn = Number(new URL(String(url)).searchParams.get("pn"));
-    order.push(pn);
-    running += 1;
-    peak = Math.max(peak, running);
-    await new Promise<void>((resolve) => releases.push(resolve));
-    running -= 1;
-    return json(page(pn));
-  };
-  const pending = fetchMarketCounts({ fetchImpl, pageSize: 2 });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(order, [1], "page 1 alone first");
-  // Release page 1, then the others in reverse arrival order, so the hashes cannot follow arrival.
-  releases.shift()?.();
-  while (order.length < 5 || releases.length > 0) {
-    await new Promise((resolve) => setImmediate(resolve));
-    releases.pop()?.();
+  // One request, no date in it: the endpoint answers its latest session whatever is asked.
+  assert.deepEqual(asked, [ZDFENBU]);
+  // A bad date is the host's bug, thrown before any request.
+  for (const date of ["2026-10-23", 20261023, undefined]) {
+    await assert.rejects(fetchMarketCounts({ date, fetchImpl } as any), TypeError);
   }
-  const whole = await pending;
-  assert.equal(peak, 4);
-  assert.deepEqual(order.slice(0, 5), [1, 2, 3, 4, 5]);
-  assert.equal(whole.partial, false);
-  assert.equal(whole.pages, 5);
-  assert.deepEqual([whole.advancers, whole.decliners, whole.unchanged, whole.limitUp, whole.limitDown], [5, 5, 0, 1, 1]);
-  const bytes = (pn: number) => createHash("sha256").update(JSON.stringify(page(pn))).digest("hex");
-  assert.deepEqual(whole.pageHashes, [1, 2, 3, 4, 5].map(bytes));
-  assert.equal(whole.delayed, true);
-
-  // maxPages reached before the total is partial.
-  const steady = async (url: string | URL) => json(page(Number(new URL(String(url)).searchParams.get("pn"))));
-  const short = await fetchMarketCounts({ fetchImpl: steady, pageSize: 2, maxPages: 3 });
-  assert.equal(short.partial, true);
-  assert.equal(short.pages, 3);
-  assert.equal(short.pageHashes.length, 3);
-  // A later page that comes back empty is partial too.
-  const holed = async (url: string | URL) => {
-    const pn = Number(new URL(String(url)).searchParams.get("pn"));
-    return json(pn === 3 ? { rc: 0, data: { total: 10, diff: [] } } : page(pn));
-  };
-  assert.equal((await fetchMarketCounts({ fetchImpl: holed, pageSize: 2 })).partial, true);
-
-  // A first page with no data is no market data; a bad total is an invalid reply.
-  await rejectsWith(fetchMarketCounts({ fetchImpl: async () => json({ rc: 0, data: null }) }), "NO_MARKET_DATA");
-  await rejectsWith(fetchMarketCounts({ fetchImpl: async () => json({ rc: 0, data: { total: "x", diff: [] } }) }), "UPSTREAM_INVALID");
+  assert.equal(asked.length, 1);
 });
 
-test("eastmoney: a later counts page that fails rejects the whole read, and the pages still queued are never sent", async () => {
-  // 20 rows of 2 a page: pages 2 to 5 take the four slots, page 3 answers HTML.
-  const asked: number[] = [];
-  const releases = new Map<number, () => void>();
-  const fetchImpl = async (url: string | URL) => {
-    const pn = Number(new URL(String(url)).searchParams.get("pn"));
-    asked.push(pn);
-    if (pn > 1) await new Promise<void>((resolve) => releases.set(pn, resolve));
-    if (pn === 3) return new Response("<html>busy</html>");
-    return json({ rc: 0, data: { total: 20, diff: [{ f3: 1 }, { f3: -1 }] } });
-  };
-  // The read rejects as soon as page 3 fails, so its refusal is awaited from the start.
-  const refused = rejectsWith(fetchMarketCounts({ fetchImpl, pageSize: 2 }), "UPSTREAM_INVALID");
-  const tick = () => new Promise((resolve) => setImmediate(resolve));
-  while (releases.size < 4) await tick();
-  assert.deepEqual(asked, [1, 2, 3, 4, 5]);
-  releases.get(3)?.();
-  await tick();
-  // The running pages finish; the slots they free go to pages that are skipped unsent.
-  for (const pn of [2, 4, 5]) {
-    releases.get(pn)?.();
-    await tick();
+test("eastmoney: fetchMarketCounts refuses another session's distribution, an empty one, and a malformed one", async () => {
+  const reply = (data: unknown) => async () => json(distribution(data));
+  const other = await rejectsWith(
+    fetchMarketCounts({ date: DATE, fetchImpl: reply({ qdate: 20261022, fenbu: [{ "1": 3 }] }) }), "NO_MARKET_DATA");
+  assert.match(other.message, /20261022/);
+  assert.match(other.message, /20261023/);
+  await rejectsWith(fetchMarketCounts({ date: DATE, fetchImpl: reply(null) }), "NO_MARKET_DATA");
+  await rejectsWith(fetchMarketCounts({ date: DATE, fetchImpl: reply({ qdate: 20261023, fenbu: [] }) }), "NO_MARKET_DATA");
+  for (const data of [
+    { qdate: "20261023", fenbu: [{ "1": 3 }] }, // a string date
+    { qdate: 20261023, fenbu: {} }, // not a list
+    { qdate: 20261023, fenbu: [{ "12": 3 }] }, // past the limit bucket
+    { qdate: 20261023, fenbu: [{ "-0": 3 }] },
+    { qdate: 20261023, fenbu: [{ "1": -1 }] }, // a negative count
+    { qdate: 20261023, fenbu: [{ "1": 1.5 }] },
+    { qdate: 20261023, fenbu: [{ "1": 3, "2": 4 }] }, // two buckets in one entry
+    { qdate: 20261023, fenbu: [{ "1": 3 }, { "1": 4 }] }, // a bucket twice
+    { qdate: 20261023, fenbu: [null] },
+  ]) {
+    await rejectsWith(fetchMarketCounts({ date: DATE, fetchImpl: reply(data) }), "UPSTREAM_INVALID");
   }
-  const error = await refused;
-  assert.match(error.message, /INVALID_RESPONSE/);
-  assert.deepEqual(asked, [1, 2, 3, 4, 5], "pages 6 to 10 never requested");
-  // The limiter is free again.
-  assert.equal(await inFlight(async () => "free"), "free");
+  await rejectsWith(fetchMarketCounts({ date: DATE, fetchImpl: async () => new Response("<html>502</html>", { status: 502 }) }), "UPSTREAM_INVALID");
 });
 
-test("eastmoney: the fixture fetch answers the boards, members, fund-flow and count-page files by fs", async () => {
+test("eastmoney: the fixture fetch answers the boards, members and fund-flow files by fs", async () => {
   const q = (params: Record<string, string>) => `${CLIST}?${new URLSearchParams(params)}`;
   for (const [url, name] of [
     [q({ fs: "m:90 t:3 f:!50" }), "boards.json"],
     [q({ fs: "m:90 t:3", fid0: "f62" }), "board-flow.json"],
     [q({ fs: "b:BK0715 f:!50" }), "members-BK0715.json"],
     [q({ fs: "b:BK1716 f:!50" }), "members-BK1716.json"],
-    [q({ fs: "m:0 t:6,m:0 t:80,m:1 t:2,m:1 t:23,m:0 t:81 s:2048", pn: "2" }), "counts-page-2.json"],
   ]) {
     const response = await fixtureFetch(url);
     assert.equal(response.status, 200, url);
     assert.deepEqual(await response.json(), JSON.parse(readFileSync(`${FIXTURES}${name}`, "utf8")), url);
   }
-  for (const url of [q({ fs: "b:BK9999 f:!50" }), q({ fs: "m:0 t:6,m:0 t:80,m:1 t:2,m:1 t:23,m:0 t:81 s:2048", pn: "3" })]) {
+  for (const url of [q({ fs: "b:BK9999 f:!50" }), q({ fs: "m:0 t:6,m:0 t:80,m:1 t:2,m:1 t:23,m:0 t:81 s:2048", pn: "1" })]) {
     assert.equal((await fixtureFetch(url)).status, 404, url);
   }
 });
