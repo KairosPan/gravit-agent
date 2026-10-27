@@ -2,7 +2,10 @@
  * row - a patched URL or seat name, or a disabled row - not the environment. */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ACCOUNT_SEAT_NAME, ACCOUNT_SEAT_ROW_ID, DEFAULT_SEAT_URL, accountSeatPatches, composedSeatRow, type SeatEntryLike } from "../src/account-seat.ts";
+import { homedir } from "node:os";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { ACCOUNT_SEAT_NAME, ACCOUNT_SEAT_ROW_ID, DEFAULT_SEAT_DIR, DEFAULT_SEAT_URL, accountSeatPatches, composedSeatRow, type SeatEntryLike } from "../src/account-seat.ts";
 
 const entry = (id: string, config: unknown, disabled: boolean | (() => boolean) = false): SeatEntryLike => ({
   options: { id, config },
@@ -21,4 +24,9 @@ test("composedSeatRow: the box follows the composed row - the face's own, a patc
   assert.deepEqual(composedSeatRow([entry(ACCOUNT_SEAT_ROW_ID, row.config, () => { throw new Error("!!js"); })]), { disabled: true });
   assert.equal(composedSeatRow([entry("webserver", {})]), undefined);
   assert.deepEqual(composedSeatRow([entry(ACCOUNT_SEAT_ROW_ID, { transport: "stdio", env: {} })]), { disabled: false, url: DEFAULT_SEAT_URL, seatName: ACCOUNT_SEAT_NAME }, "an env without the keys falls back to the defaults");
+});
+
+test("the seat's default directory is the repo's account/, not a home directory", () => {
+  assert.equal(DEFAULT_SEAT_DIR, resolve(fileURLToPath(new URL("../../account", import.meta.url))));
+  assert.ok(!DEFAULT_SEAT_DIR.startsWith(homedir() + "/buyer-agent-demo"));
 });

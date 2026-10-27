@@ -8,8 +8,8 @@
  * stand-in's seeded card — every call to the face's port, never the stand-in's; a foreign origin's exchange is
  * fenced; and nothing of a body (the pairing code, a signature sent) is in what the face's process wrote.
  *
- * Skipped unless `FACE_SMOKE=1` and `FACE_ACCOUNT_SEAT_DIR` names an installed checkout of
- * linqizhe07/buyer-agent-demo (`npm ci` there), as `account-seat-smoke` is: the checkout is read, never written; the
+ * Skipped unless `FACE_SMOKE=1` and the repo's `account/` is installed (`npm ci` there; `FACE_ACCOUNT_SEAT_DIR` names
+ * another install), as `account-seat-smoke` is: the install is read, never written; the
  * stand-in takes a free port, never the real Account's 4820. `bootFace` registers no `/data` route (`main.ts` does,
  * after it), so this test registers the proxy and the seat route on the booted web server itself, as `main.ts` does
  * with the composed seat row's URL. The seat row itself is disabled here: no seat process is spawned, so nothing is

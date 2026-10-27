@@ -4,9 +4,9 @@
  * it as the stand-in's seeded agent, Gate 2 holding the seat's writes, and
  * the stand-in answering an approved order with a CARD of its own.
  *
- * Skipped unless `FACE_SMOKE=1` and `FACE_ACCOUNT_SEAT_DIR` names an
- * installed checkout of linqizhe07/buyer-agent-demo (`npm ci` there): the
- * checkout is read, never written — the seat's key is the stand-in's derived
+ * Skipped unless `FACE_SMOKE=1` and the repo's `account/` is installed
+ * (`npm ci` there; `FACE_ACCOUNT_SEAT_DIR` names another install): the
+ * install is read, never written — the seat's key is the stand-in's derived
  * one (`PORTFOLIO_SEAT_KEYS=sim`), its home a scratch directory, so nothing
  * lands in the operator's `~/.buyer-agent-demo`. This is the canary for the
  * Account moving under the face: a renamed write tool falls out of the gate's

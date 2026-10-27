@@ -189,3 +189,34 @@ top-level `name`, `packages[""].name`, `packages[""].engines.node`; no resolved 
 
 **Deferred:** the code-only checks inside `env-scrub.test.ts` (three of its four `it`s scrub env
 without touching `src/runner`) are out with the file, as R2 says of the doc-reading pair.
+
+### Task 1 — review (controller)
+
+- R10 Ruling: Step 8's expected `"ok":true` does not hold for `GET /api/overview` at 133b9a7 (the route spreads the overview without `ok`; `/api/now` and `/api/account` carry it); a 200 JSON body from `/api/overview` is the boot check, and Task 5's health check keys on the HTTP status (`r.ok`), not the body — the plan misread the route — if wrong, nothing: the route answers as on the host.
+- Task 1: complete (commits f36c78c..f74c0ee, review clean — spec ✅, quality approved; byte-identity of all 341 copied files checked, lock differs only in its root name and engines).
+- Task 1: minor (deferred): `account/src/contract/env-scrub.ts` is an orphan — reached only by the left-out `test/unit/env-scrub.test.ts`; the closure without it is 277 paths and 168 files under `account/src`, not 279 and 169.
+- Task 1: minor (deferred): `account/NOTICE` line 2 says the core/agent/contract files are those `src/portfolio/` imports; most are reached only from the kept tests ("that the copied source and tests import").
+- Task 1: minor (deferred): `import-closure.mjs` names the first dropped reach in its depth-first stack order, not source order, and without a line number.
+- Task 1: minor (deferred): `import-closure.mjs` scans raw text, so commented-out imports are followed too (fails safe: a missing target exits 2); worth a comment.
+
+### Task 2
+
+**RED:** `cd face && npx tsx --test tests/account-seat.test.ts tests/standin-helper.test.ts` — 3
+tests, 1 pass, 2 fail: `DEFAULT_SEAT_DIR` was `/Users/pan/buyer-agent-demo`, not the worktree's
+`account/`; `standin-helper.test.ts` failed to load (`./helpers/standin.ts` does not provide an
+export named `standinDir`).
+
+**GREEN:** the same command — 6 tests, 6 pass. `DEFAULT_SEAT_DIR` = `join(dirname(fileURLToPath(
+import.meta.url)), "..", "..", "account")`; the helper exports `standinDir(env)` and
+`standinSkipFor(env, dir)`, and `STANDIN_DIR`/`standinSkip()` derive from them. R6's comments
+rewritten (seat and proxy headers, both smoke headers) plus the capture script's header; the
+`~/.buyer-agent-demo` mentions (the Account's home, not its install) stay.
+
+**Face gate:** `npm test` = 1,652 tests, 1,629 pass, 23 skipped, 0 fail (1,649 + the 3 new);
+typecheck clean.
+
+**Smokes:** with `FACE_ACCOUNT_SEAT_DIR` unset, `FACE_SMOKE=1 npx tsx --test
+tests/account-seat-smoke.test.ts tests/account-graft-smoke.test.ts` = 2 pass, 0 skipped (they run
+from the in-tree `account/`); the full `FACE_SMOKE=1 caffeinate -i npm test` = 1,652 tests, 1,652
+pass, 0 skipped, 0 fail (Task 1's two skips now run). `git status` shows nothing under
+`face/tests/fixtures/account/` modified.

@@ -1,10 +1,10 @@
 /** The Account's own stand-in for the smokes that run against it (`account-seat-smoke`, `account-graft-smoke`) and
- * for `scripts/capture-account-fixtures.ts`: Linqi's `test/standin/ui-standin.ts` from the installed checkout
- * `FACE_ACCOUNT_SEAT_DIR` names (or the one a caller hands {@link startStandin}) — the real Account over simulated
+ * for `scripts/capture-account-fixtures.ts`: Linqi's `test/standin/ui-standin.ts` from the repo's `account/` (`npm ci`
+ * there), or the install `FACE_ACCOUNT_SEAT_DIR` names (or the one a caller hands {@link startStandin}) — the real Account over simulated
  * venues, no network, no real money — started on a free loopback port with `--no-desk`, in the fresh temporary
  * home it makes for itself (`<tmpdir>/ui-standin-XXXXXX`), and stopped as Ctrl-C stops it.
  *
- * The checkout is read, never written: the stand-in runs from it with its own tsx, never `npx`. It never takes
+ * The install is read, never written: the stand-in runs from it with its own tsx, never `npx`. It never takes
  * 4820, the real Account's port (it refuses that port itself; {@link startStandin} refuses it first). Its home is
  * removed after the stop only when {@link isStandinHome} says the path is one: a `ui-standin-` directory directly
  * under this process's `tmpdir()` — the operator's `~/.buyer-agent-demo` or anything else a stray `home` line
@@ -15,14 +15,19 @@ import { rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { seatDir } from "../../src/account-seat.ts";
 
-/** The installed checkout of linqizhe07/buyer-agent-demo, as the environment names it ("" when unset). */
-export const STANDIN_DIR = process.env.FACE_ACCOUNT_SEAT_DIR ?? "";
-/** Under the checkout `dir`: its own tsx, which runs the stand-in (the Account's devDependency), and the stand-in. */
+/** The Account's install `env` names: `FACE_ACCOUNT_SEAT_DIR`, or the face's own default, the repo's `account/`. */
+export function standinDir(env: NodeJS.ProcessEnv): string {
+  return env.FACE_ACCOUNT_SEAT_DIR || seatDir();
+}
+/** The Account's install the smokes run from ({@link standinDir} of this process's environment). */
+export const STANDIN_DIR = standinDir(process.env);
+/** Under the install `dir`: its own tsx, which runs the stand-in (the Account's devDependency), and the stand-in. */
 export function standinPaths(dir: string): { cli: string; script: string } {
   return { cli: join(dir, "node_modules", "tsx", "dist", "cli.mjs"), script: join(dir, "test", "standin", "ui-standin.ts") };
 }
-/** The checkout's own tsx, which runs the stand-in (the Account's devDependency). */
+/** The install's own tsx, which runs the stand-in (the Account's devDependency). */
 export const STANDIN_CLI = standinPaths(STANDIN_DIR).cli;
 export const STANDIN_SCRIPT = standinPaths(STANDIN_DIR).script;
 /** The real Account's port: no stand-in is ever started there. */
@@ -30,13 +35,19 @@ export const REAL_ACCOUNT_PORT = 4820;
 const START_MS = 90_000;
 const STOP_MS = 10_000;
 
-/** Why a smoke against the stand-in is skipped, or false when it can run: `FACE_SMOKE=1` and an installed checkout. */
-export function standinSkip(): string | false {
-  if (process.env.FACE_SMOKE !== "1") return "set FACE_SMOKE=1";
-  if (STANDIN_DIR === "") return "set FACE_ACCOUNT_SEAT_DIR to an installed checkout of linqizhe07/buyer-agent-demo";
-  if (!existsSync(STANDIN_CLI)) return `${STANDIN_CLI} is missing: run npm ci in the checkout`;
-  if (!existsSync(STANDIN_SCRIPT)) return `${STANDIN_SCRIPT} is missing: not the Account's checkout`;
+/** Why a smoke against the stand-in in `dir` is skipped under `env`, or false when it can run: `FACE_SMOKE=1` and an
+ * installed Account. */
+export function standinSkipFor(env: NodeJS.ProcessEnv, dir: string): string | false {
+  if (env.FACE_SMOKE !== "1") return "set FACE_SMOKE=1";
+  const { cli, script } = standinPaths(dir);
+  if (!existsSync(cli)) return `${dir}/node_modules/tsx is missing: run npm ci in account/ (or set FACE_ACCOUNT_SEAT_DIR to another checkout)`;
+  if (!existsSync(script)) return `${script} is missing: not the Account's install`;
   return false;
+}
+
+/** {@link standinSkipFor} this process's environment and {@link STANDIN_DIR}. */
+export function standinSkip(): string | false {
+  return standinSkipFor(process.env, STANDIN_DIR);
 }
 
 /** A free loopback port, as the OS hands one out. */
@@ -51,7 +62,7 @@ export const freePort = (): Promise<number> => new Promise((resolvePort, reject)
 /** A started stand-in: its page's URL, its temporary home, the pairing code it printed, the process, and what it said. */
 export interface Standin { url: string; home: string; code: string; child: ChildProcess; log: () => string }
 
-/** Start the stand-in from the checkout `dir` (`FACE_ACCOUNT_SEAT_DIR`'s unless given) on `port` and wait for its page,
+/** Start the stand-in from the install `dir` ({@link STANDIN_DIR} unless given) on `port` and wait for its page,
  * pairing code and home lines (one write, at once). */
 export function startStandin(port: number, dir = STANDIN_DIR): Promise<Standin> {
   if (port === REAL_ACCOUNT_PORT) return Promise.reject(new Error(`port ${REAL_ACCOUNT_PORT} is the real Account's: no stand-in starts there`));

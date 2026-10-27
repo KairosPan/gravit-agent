@@ -1,10 +1,10 @@
 /** `/data/account` and `/data/account/<route>`: the Account's reads and the
- * owner's writes, proxied (spec 2026-10-22 §5.1). The Account (Linqi's
- * buyer-agent-demo, an external program on 127.0.0.1:4820) answers only bare
- * loopback requests — its fence refuses any page at another origin — so the
- * face's page never asks it: the page asks the face, and the face asks the
- * Account with a plain loopback fetch (no Origin, no Sec-Fetch-Site, no
- * cookie, the URL's own Host, `redirect: "error"`). Twenty routes: fifteen
+ * owner's writes, proxied (spec 2026-10-22 §5.1). The Account (after Linqi's
+ * buyer-agent-demo, the service in the repo's `account/`, on 127.0.0.1:4820)
+ * answers only bare loopback requests — its fence refuses any page at another
+ * origin — so the face's page never asks it: the page asks the face, and the
+ * face asks the Account with a plain loopback fetch (no Origin, no
+ * Sec-Fetch-Site, no cookie, the URL's own Host, `redirect: "error"`). Twenty routes: fifteen
  * reads, the Account's push channel — `stream`, and `stream/markets`, the
  * markets it follows — and three writes, `pair`, `prepare` and `exchange`
  * ({@link WriteRoute}); each an `exact` route, never a prefix: the route

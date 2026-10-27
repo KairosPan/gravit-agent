@@ -13,10 +13,10 @@
  * but for the same two keys dropped from each frame's `data:` (its arrays whole) — and stops the
  * stand-in.
  *
- *     cd face && FACE_ACCOUNT_SEAT_DIR=~/buyer-agent-demo npx tsx scripts/capture-account-fixtures.ts
+ *     cd face && npx tsx scripts/capture-account-fixtures.ts
  *
- * `FACE_ACCOUNT_SEAT_DIR` is an installed checkout of linqizhe07/buyer-agent-demo (`npm ci` there),
- * `~/buyer-agent-demo` when unset; it is read, never written. The stand-in takes a free port, never
+ * The stand-in runs from the repo's `account/` (`npm ci` there); `FACE_ACCOUNT_SEAT_DIR`, optional,
+ * names another install of the Account instead. Either is read, never written. The stand-in takes a free port, never
  * the real Account's 4820. Takes no arguments; prints each file it wrote. A read or a prepare the
  * Account does not answer `ok: true` stops the capture before any file is written.
  */
