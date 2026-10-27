@@ -499,7 +499,7 @@ clause or reverse it (`DEVELOPMENT.md` §10 item 21). The rulings are in the pla
 
 | Clause | The text | What the tree does | Why |
 |---|---|---|---|
-| A28 | the all-shares counts read "1,000 a page" | **superseded by §16 (2026-10-27):** 100 rows a page, at most 64 pages, page 1 first for the total and the rest concurrently under the four-slot limiter | measured 2026-10-25: the live clist answers a `pz=1000` request, through its 302 to `push2delay`, with 100 rows of 5,925 — the page cap is the host's |
+| A28 | the all-shares counts read "1,000 a page" | **superseded by §16 (2026-10-27):** the clist read is gone; the counts are one `getTopicZDFenBu` request | until 2026-10-27 the tree read 100 rows a page, at most 64 pages, page 1 first for the total and the rest under the four-slot limiter; measured 2026-10-25: the live clist answers a `pz=1000` request, through its 302 to `push2delay`, with 100 rows of 5,925 — the page cap is the host's |
 | §5.3 | concept boards "ranked by turnover" | the top 30 ranked by change (`fid=f3`), each row keeping turnover (`f6`) so turnover share is still derived; the default constituents are the first 10 of that list | measured 2026-10-25: the turnover ranking leads with 融资融券, 昨日高振幅, 深股通, 基金增仓, 富时罗素 — membership and screen boards, not 题材 |
 | §5.12 | every row `config: { strategiesRoot }` | only `lunhui-runs` carries `strategiesRoot`; the four freeze rows' config is `{}` and they reach the root through the `lunhuiRuns` service | one source of truth: a patch that moves the root restates it on one row |
 | §5.7 | the refusal codes | `SOURCE_FROZEN` joins them: a second freeze of one source in one run is refused | one snapshot per source per run — two snapshots of one pool would disagree (A27's rule) |

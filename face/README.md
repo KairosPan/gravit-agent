@@ -423,7 +423,7 @@ The design has eleven rows; plans 1–4 built them all:
 | `lunhui-freeze-quotes` | `lunhui_freeze_quotes` — Tencent quotes and 60-day bars, 1–8 symbols; any channel | built |
 | `lunhui-freeze-limit-up` | `lunhui_freeze_limit_up` — Eastmoney's 涨停, 炸板 and 昨日涨停 pools; `cn-market` only | built |
 | `lunhui-freeze-boards` | `lunhui_freeze_boards` — the top 30 concept boards by change, up to ten boards' members, the board fund flow; `cn-market` only | built |
-| `lunhui-freeze-index` | `lunhui_freeze_index` — the four indices with 120-day bars, the all-A-shares advance/decline counts; `cn-market` only | built |
+| `lunhui-freeze-index` | `lunhui_freeze_index` — the four indices with 120-day bars, the market's advance/decline counts from Eastmoney's up/down distribution; `cn-market` only | built |
 | `lunhui-environment` (`plugins/lunhui/environment-row.mjs`) | `lunhui_read_environment_context`, `lunhui_submit_environment` — 环境与大周期: `index_state`, `liquidity_state`, `cycle_anchor`; `cn-market` only | built |
 | `lunhui-sentiment` | `lunhui_read_sentiment_context`, `lunhui_submit_sentiment` — 情绪周期: `state` (one of `UNKNOWN CHAOS IGNITION EXPANSION CLIMAX RETREAT REPAIR`), `money_effect`, `freeze_type`; `cn-market` only | built |
 | `lunhui-theme` | `lunhui_read_theme_context`, `lunhui_submit_theme` — 题材与轮动: up to five `mainline_candidates` on frozen boards, `theme_stage`, `rotation`; `cn-market` only | built |
