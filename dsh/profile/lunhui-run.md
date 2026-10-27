@@ -4,7 +4,7 @@
 
 ## 市场频道 cn-market
 
-1. 冻结。先调用 lunhui_freeze_index，不带 run：它开一个新运行，回复给出 run。再带 run 调用 lunhui_freeze_limit_up 与 lunhui_freeze_boards；lunhui_freeze_quotes 可选，同样带 run。某来源被拒（UPSTREAM_*、NO_MARKET_DATA 等）只缺这个来源；第一次冻结被拒时，拒绝里也写明已开启的 run，之后带上它，不再开新运行。
+1. 冻结。先调用 lunhui_freeze_index，不带 run：它开一个新运行，回复给出 run。再带 run 调用 lunhui_freeze_limit_up 与 lunhui_freeze_boards；lunhui_freeze_quotes 可选，同样带 run。某来源被拒只缺这个来源；第一次冻结被拒时，拒绝里写明已开启的 run，之后带上它，不再开新运行。
 2. 分析。调用 role_cn_market_analyst 一次，写明 cn-market 与 run；它提交环境、情绪、题材三份工件。
 3. 反证。调用 role_cn_reviewer，写明 cn-market 与 run，不传 market_run。
 4. 核对。调用 lunhui_read_run 读运行清单、证据的 delayed 标记与工件要点。角色报告待核对，以读到的为准。
@@ -28,4 +28,4 @@ WAIT、NOT_EVALUABLE 工件与被拒的 mode 都是结果，不是失败：不�
 - 不要自己提交工件：提交工具只接受角色，你调用会被 NOT_A_ROLE 拒绝。
 - 运行中有 status 为 NOT_EVALUABLE 的工件时，在本频道 journal.md 末尾追加带日期的一条：运行编号、哪些模块、缺失的来源。
 
-最后给操作者的消息：运行编号与 snapshot_id；各工件（environment.json、sentiment.json、theme.json、leader.json、counterevidence.json、mode.json）要点；哪些模块 NOT_EVALUABLE、缺哪些来源，哪些没有工件（角色报告 blocked）；行情是否延迟（delayed）。
+最后给操作者的消息：运行编号与 snapshot_id；各工件（environment.json、sentiment.json、theme.json、leader.json、counterevidence.json、mode.json）要点；哪些模块 NOT_EVALUABLE、缺哪些来源，哪些没有工件（角色报告 blocked）；行情是否延迟（delayed）；家数计数是否缺失（索引回复 counts.frozen 为 false 时附 reason）。

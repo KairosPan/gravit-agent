@@ -31,7 +31,9 @@ const zb = withId({ pool: "zb", code: "600002", name: "乙" });
 const sealRatio = withId({ source: "limit-up", kind: "derived", measure: "seal_ratio", value: 0.7, inputs: [zt.id, zb.id] });
 const indexQuote = withId({ kind: "index", symbol: "sh000001", last: 3300 });
 const bars = withId({ kind: "bars", symbol: "sh000001", bars: [["2026-10-22", 3290]] });
-const advance = withId({ source: "index", kind: "derived", measure: "advance_decline_ratio", value: 1.4, inputs: [] });
+const advance = withId({ source: "index", kind: "derived", measure: "advance_decline_ratio", value: 1.4, inputs: [indexQuote.id] });
+/** A counts measure over no counts item (spec §17): null, citing no input. */
+const absent = withId({ source: "index", kind: "derived", measure: "limit_up_count", value: null, inputs: [] });
 const board = withId({ kind: "board", code: "BK0001", name: "丙" });
 const boardBreadth = withId({ source: "boards", kind: "derived", measure: "board_breadth", value: 0.6, inputs: [board.id] });
 
@@ -142,7 +144,7 @@ test("every envelope field must equal the context's: a mismatch is REFERENCE", (
   const { digest } = context();
   for (const [field, value] of Object.entries({
     module: "theme", snapshot_id: `snap_${"b".repeat(64)}`, run: "r2", as_of: "2026-10-23T08:00:00.000Z",
-    session: "2026-10-22", contract_version: "2", hypotheses_version: "h_000000000000",
+    session: "2026-10-22", contract_version: "9", hypotheses_version: "h_000000000000",
   })) {
     assert.throws(() => check(artifact(digest, { [field]: value })), /Snapshot or envelope mismatch\./, field);
     assert.equal(category(() => check(artifact(digest, { [field]: value }))), "REFERENCE", field);
@@ -220,6 +222,20 @@ test("scope: ownedBy names the items that carry an owned class, per class; the d
   check(one("情绪进入扩张", [sealRatio.id]), owned);
   // ownedBy opens nothing the module does not own.
   assert.equal(category(() => check(one("指数偏强", [indexQuote.id]), { owns: ["sentiment"], ownedBy: { index } })), "UNSUPPORTED_SCOPE");
+});
+
+test("a derived item with no inputs - its source not frozen - supports only an INSUFFICIENT claim, a TIME_SCOPE rejection", () => {
+  // The index file holds a counts measure over no counts item: null, citing no input (spec §17).
+  const evidence = EVIDENCE.map((file) => (file.source === "index" ? { ...file, items: [...file.items, absent] } : file));
+  const { digest } = context({ evidence });
+  const cite = (basis: string, state = "EXPANSION") =>
+    artifact(digest, { state, claims: [{ id: "c1", text: "涨停家数见所引派生证据。", basis, evidence_ids: [sealRatio.id, absent.id] }] });
+  assert.throws(() => check(cite("CURRENT"), { context: digest }), /analysis\.claims\[0\]\.basis: A derived item with no inputs/);
+  assert.equal(category(() => check(cite("CURRENT"), { context: digest })), "TIME_SCOPE");
+  assert.equal(category(() => check(cite("HISTORICAL"), { context: digest })), "TIME_SCOPE");
+  check(cite("INSUFFICIENT", "UNKNOWN"), { context: digest });
+  // A derived item with inputs is a reading, whatever its value, and is not refused by this rule.
+  check(artifact(digest, { claims: [{ id: "c1", text: "涨停家数见所引派生证据。", basis: "CURRENT", evidence_ids: [sealRatio.id, advance.id] }] }), { context: digest });
 });
 
 test("scope: a line break ends a sentence, so an exempt line does not cover the next", () => {
@@ -352,7 +368,7 @@ test("buildContext: the envelope values, the module's sources only, derived item
   const parsed = JSON.parse(text);
   assert.equal(parsed.module, "sentiment");
   assert.equal(parsed.contract_version, CONTRACT_VERSION);
-  assert.equal(CONTRACT_VERSION, "1");
+  assert.equal(CONTRACT_VERSION, "2");
   assert.equal(parsed.hypotheses_version, hypothesesVersion(HYPOTHESES));
   assert.match(parsed.hypotheses_version, /^h_[0-9a-f]{12}$/);
   assert.deepEqual([parsed.run, parsed.snapshot_id, parsed.as_of, parsed.session], [MANIFEST.run, MANIFEST.snapshot_id, MANIFEST.as_of, SESSION]);
@@ -448,7 +464,7 @@ test("buildContext: derivedView is the whole row of every derived item shown - n
   assert.equal(digest.items.get(sealRatio.id).scope, "CURRENT");
   assert.equal(seal.inputs, undefined);
   assert.equal(seal.inputs_total, 2);
-  assert.equal(parsed.derived.find((item: Loose) => item.id === advance.id).inputs_total, 0);
+  assert.equal(parsed.derived.find((item: Loose) => item.id === advance.id).inputs_total, 1);
   assert.deepEqual(digest.items.get(sealRatio.id).item.inputs, sealRatio.inputs);
   // Without it a derived item is shown as frozen.
   assert.deepEqual(JSON.parse(context().text).derived.find((item: Loose) => item.id === sealRatio.id).inputs, sealRatio.inputs);

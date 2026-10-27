@@ -939,8 +939,8 @@ carries the text) and, on real boots, `bots-smoke`, `roles-smoke` and `goal-smok
 **The run protocol section** (modules spec A9, §5.10) is the `gravit` row's `protocols` key, read
 the way the cycle is: `composeFace` calls `readProtocols` (`src/protocols.ts`) right after
 `readCycle` and hands `gravitRows` one entry, `{name: "lunhui:run", probe: "lunhui_read_run",
-text}`, the text of `dsh/profile/lunhui-run.md` (2,956 bytes against its 3,000, Chinese, 1,634
-characters, about 408 heuristic tokens); `FaceBootOptions.protocolsDir` points a test at a fixture directory, and a
+text}`, the text of `dsh/profile/lunhui-run.md` (2,999 bytes against its 3,000, Chinese, 1,651
+characters, about 413 heuristic tokens); `FaceBootOptions.protocolsDir` points a test at a fixture directory, and a
 missing, unreadable, empty, oversized or templated file ends the compose with its absolute path
 first. `plugins/gravit.js` mounts each entry as a section of its own at
 `getSectionOrder("DEPLOYMENT_PERSONA_SUFFIX") - 60`, just before the cycle, `interpolate: false`,
@@ -1113,15 +1113,17 @@ thrown. The gates before the run resolves (`NOT_A_ROLE`, `WRONG_CHANNEL`, `NOT_A
 the forbidden trading and account words, the current-time words, the byte budgets, the classifier)
 plus what the modules add. `ENVELOPE_SCHEMA` (A19) is merged under each module's schema
 (`envelopeSchema`, the envelope's fields last so a module cannot redefine them): `module`,
-`contract_version` (`CONTRACT_VERSION`, `"1"`), `hypotheses_version` (`h_` and 12 hex of the
+`contract_version` (`CONTRACT_VERSION`, `"2"` since spec §17's no-inputs rule), `hypotheses_version` (`h_` and 12 hex of the
 sha256 over the module's `HYPOTHESES`), `snapshot_id`, `run`, `as_of`, `session`, `status` (`OK` or
 `NOT_EVALUABLE`), `missing_sources`, the headline fields, `claims` (up to 12, each an id, a
 sentence, a basis and up to 16 evidence ids) and `limitations`. `validateEnvelope` fails closed in
 a fixed order: the text's bytes (24 KiB), its JSON, the object's compact bytes, the merged schema,
 the envelope bound to the context, every cited id one the context holds (a derived item of a
 source the module does not read is `REFERENCE`), each claim's time scope (CURRENT needs an item of
-the run's session; bars and history series are HISTORICAL; claims all `INSUFFICIENT` force every
-headline to `UNKNOWN` or empty, a `TIME_SCOPE` rejection), the forbidden words, the scope rule,
+the run's session; bars and history series are HISTORICAL; a claim not `INSUFFICIENT` may not cite
+a derived item with no inputs — its source refused at the freeze, the counts' measures over no
+counts item; claims all `INSUFFICIENT` force every headline to `UNKNOWN` or empty, each a
+`TIME_SCOPE` rejection), the forbidden words, the scope rule,
 the status rule, then the contract's own `rules`. The scope rule splits every text into sentences
 (a line break ends one) and matches the five `SCOPE_CLASSES` — `market`, `sentiment`, `theme`,
 `leader`, `index`; a sentence of a class the module does not own, or of an owned class citing no
@@ -1326,8 +1328,8 @@ the `gravit:roles` section is 1,013 characters, about 253 tokens, for its three 
 `cn-market-analyst` (463 characters, about 116 tokens, when it was the one role), `cn-reviewer` and
 `cn-stock-analyst` (714 characters, about 179 tokens, for the two analysts; for the three retired
 roles it was 992 characters, about 250 tokens; each role adds its tool name and a summary of at
-most 300 characters); the `lunhui:run` section is 1,634 characters, about 408 tokens (2,956 bytes
-on disk; 1,556 characters and 2,873 bytes before the reviewer's steps, 1,143 and 2,240 before the
+most 300 characters); the `lunhui:run` section is 1,651 characters, about 413 tokens (2,999 bytes
+on disk since spec §17's counts clause; 1,556 characters and 2,873 bytes before the reviewer's steps, 1,143 and 2,240 before the
 strategy channel); `GRAVIT.md` is 3,459 bytes (budget 4,500;
 4,283 at `fae4f61`). The first-request totals
 are the operator's to take, in one sitting — plan 1's, plan 4's and a role child's — on the real
@@ -4330,7 +4332,7 @@ In order; each with what "done" is and which charter row it reopens.
    bytes, the run's own artifacts first, the market run's headline-only, the environment filled
    late), the `lunhui-review` row and its pair, the `cn-reviewer` role in both channels, the A22 gate
    bound to the mode's market run, `lunhui_read_run`'s listing of a strategy's newest sealed runs,
-   the protocol's whole order within its 3,000 bytes (2,956), and an `S01` registered on Friday and
+   the protocol's whole order within its 3,000 bytes (2,999), and an `S01` registered on Friday and
    graded on Monday on a real boot (§7.3); the tool-schema table again with the seventeen tools
    (§4.3); the charter's MARKET bullet, `strategies/` writer clause, D10 and §7.2 re-fitted for the
    rows; the loops page, the upgrade guide and the seams inventory. Left, in order:

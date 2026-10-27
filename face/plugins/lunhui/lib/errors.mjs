@@ -33,6 +33,9 @@ export const refuse = {
   /** A dated reply of another session than the one asked for, both named: the distribution answers its latest session (spec §16). */
   otherSession: (provider, got, wanted) =>
     new LunhuiError("NO_MARKET_DATA", `${provider}返回的数据属于交易日 ${got}，不是本次会话 ${wanted}；本次未写入任何文件。`),
+  /** A distribution in which no share is up or down: a session with no prices yet, or one not populated (spec §17). */
+  noMarketMove: (provider) =>
+    new LunhuiError("NO_MARKET_DATA", `${provider}的涨跌分布里没有任何一只股票上涨或下跌（本会话尚无成交价，或分布未填充）；本次未写入任何文件。`),
   /** The stop instruction rides in the text, as stage 0's did. */
   toolBudget: () =>
     new LunhuiError(

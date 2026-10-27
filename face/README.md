@@ -613,8 +613,9 @@ a real model writes artifacts. Run it on your own face with its keys (`npm start
 Eastmoney's `push2` answers with **delayed** quotes here. Any hour works: on a weekend, a holiday or
 before 09:15 China time the run's `session` is the previous trading day; from 09:15 until Eastmoney
 rolls the distribution's date the index freeze lands without the market counts (its reply's
-`counts` says so, and the sentiment module's whole-market reading is then UNKNOWN); and a day the
-2026 calendar does not cover refuses every freeze (`CALENDAR_UNCOVERED`).
+`counts` says so; the contexts then show no counts row, and the three count measures are null,
+which only an `INSUFFICIENT` claim may cite); and a day the 2026 calendar does not cover refuses
+every freeze (`CALENDAR_UNCOVERED`).
 
 1. Open **cn-market** in Messages and start a New message there. Prompt:
    `按 lunhui:run 的顺序，在 cn-market 做一次 A 股市场研究运行，最后按协议向我汇报。`

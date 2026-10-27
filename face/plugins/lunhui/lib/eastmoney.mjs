@@ -25,6 +25,7 @@
  * share has moved, or a distribution of another session.
  */
 import { hash } from "./contract-core.mjs";
+import { COUNTS_ENDPOINT, LIMIT_DOWN_BUCKET, LIMIT_UP_BUCKET } from "./derive.mjs";
 import { refuse, upstreamError } from "./errors.mjs";
 import { fetchBytes } from "./market.mjs";
 import { LunhuiError } from "./runs.mjs";
@@ -425,13 +426,11 @@ export async function fetchBoardFundFlow({ fetchImpl = fetch, top = 30, timeoutM
 
 // ---- the up/down distribution ----
 
-/** The endpoint's name, which the counts' derived items carry as their definition (spec §17). */
-export const COUNTS_ENDPOINT = "getTopicZDFenBu";
-/** A distribution bucket: an integer from -11 to 11, as Eastmoney keys it ("-0" is not one). */
+/**
+ * A distribution bucket: an integer from -11 to 11, as Eastmoney keys it ("-0" is not one). The
+ * endpoint's name and the two limit buckets live in `derive.mjs`, where the measures carry them.
+ */
 const BUCKET = /^(?:0|-?(?:[1-9]|1[01]))$/;
-/** The buckets Eastmoney gives the limit-up and limit-down shares (inferred, spec §16). */
-export const LIMIT_UP_BUCKET = 11;
-export const LIMIT_DOWN_BUCKET = -11;
 
 /**
  * The market's advance/decline counts for the session `date`, in one request: the up/down
@@ -484,7 +483,7 @@ export async function fetchMarketCounts({ date, fetchImpl = fetch, timeoutMs = 7
   const advancers = sum((bucket) => bucket > 0);
   const decliners = sum((bucket) => bucket < 0);
   // No share up or down: the session has no prices yet (or the distribution is not populated).
-  if (advancers + decliners === 0) throw refuse.noMarketData(PROVIDER);
+  if (advancers + decliners === 0) throw refuse.noMarketMove(PROVIDER);
   return {
     qdate,
     advancers,

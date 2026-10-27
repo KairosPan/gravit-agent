@@ -22,10 +22,17 @@
  * is host code's bug, a `TypeError`.
  */
 
-import { COUNTS_ENDPOINT, LIMIT_DOWN_BUCKET, LIMIT_UP_BUCKET } from "./eastmoney.mjs";
-
 /** The share of 昨日涨停 at or below this pct is `yesterday_negative_tail`. */
 export const NEGATIVE_TAIL_PCT = -5;
+
+/**
+ * The definition the counts' measures carry (spec §17): Eastmoney's up/down distribution endpoint,
+ * and the buckets it gives the limit-up and limit-down shares (inferred, §16). `eastmoney.mjs` reads
+ * them too, so the request and the measures name one thing.
+ */
+export const COUNTS_ENDPOINT = "getTopicZDFenBu";
+export const LIMIT_UP_BUCKET = 11;
+export const LIMIT_DOWN_BUCKET = -11;
 
 /** The composites whose turnover sums to `total_turnover`. */
 const COMPOSITES = ["sh000001", "sz399001"];

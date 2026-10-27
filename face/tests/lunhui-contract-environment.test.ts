@@ -7,7 +7,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import * as environmentRow from "../plugins/lunhui/environment-row.mjs";
 import { contract, HYPOTHESES } from "../plugins/lunhui/lib/contracts/environment.mjs";
@@ -59,6 +59,31 @@ test("environment contract: Chinese hypotheses restating THESIS.md hypothesis 1 
   assert.deepEqual(contract.sources, ["index", "quotes"]);
   assert.match(JSON.stringify(contract.hints), /分开/);
   assert.match(JSON.stringify(contract.hints), /CURRENT/);
+});
+
+test("environment: with the distribution refused the index source still lands - OK expected, no counts row - and a null count measure with no inputs supports only an INSUFFICIENT claim", async (t) => {
+  const { freeze, read, submit } = await mountRow(t, environmentRow, (dir) => rm(join(dir, "distribution.json")));
+  const run = await frozenRun(freeze, ["index"]);
+  const context = JSON.parse(await read.execute({ strategy: "cn-market", run }, exec(ROLE)));
+  assert.deepEqual([context.status_expected, context.missing], ["OK", []]);
+  assert.ok(!context.evidence.some((row: any) => row.kind === "counts"));
+  const ratio = context.derived.find((row: any) => row.measure === "advance_decline_ratio");
+  assert.deepEqual([ratio.value, ratio.inputs_total], [null, 0]);
+  const turnover = idWhere(context, (row) => row.measure === "total_turnover");
+  const refusal = await rejectsWith(submit.execute({ strategy: "cn-market", run, analysis: JSON.stringify(artifact(context, {
+    liquidity_state: "STABLE",
+    claims: [{ id: "c1", text: "上涨与下跌家数之比见所引派生证据，流动性记为 STABLE。", basis: "CURRENT", evidence_ids: [ratio.id] }],
+  })) }, exec(ROLE)), "INVALID_ANALYSIS");
+  assert.match(refusal.message, /^INVALID_ANALYSIS: \[TIME_SCOPE\] analysis\.claims\[0\]\.basis/u);
+  // The liquidity reading stands on the turnover; the ratio is cited as INSUFFICIENT.
+  const accepted = JSON.parse(await submit.execute({ strategy: "cn-market", run, analysis: JSON.stringify(artifact(context, {
+    liquidity_state: "STABLE",
+    claims: [
+      { id: "c1", text: "两市成交合计见所引派生证据，流动性记为 STABLE。", basis: "CURRENT", evidence_ids: [turnover] },
+      { id: "c2", text: "家数计数未冻结，上涨与下跌家数之比不可得。", basis: "INSUFFICIENT", evidence_ids: [ratio.id] },
+    ],
+  })) }, exec(ROLE)));
+  assert.equal(accepted.accepted, true);
 });
 
 test("environment: a context over a real index and quotes freeze - OK expected, derived first, bars cut to the last 20, at most 30 KiB - whose example is accepted", async (t) => {

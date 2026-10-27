@@ -168,6 +168,10 @@ test("counterevidence in cn-market: the run's three artifacts shown, no market_r
   assert.equal(context.hypotheses_version, hypothesesVersion(HYPOTHESES));
   assert.deepEqual(context.artifacts.map((row: any) => row.module), ["environment", "sentiment", "theme"]);
   for (const word of ["160", "CONTRADICTS", "OVERREACH", "空列表", "mode"]) assert.match(JSON.stringify(context.hints), new RegExp(word, "u"));
+  // The run's counts row shows the six counts and their session, as the market modules' does.
+  const countsRows = context.evidence.filter((row: any) => row.kind === "counts");
+  assert.equal(countsRows.length, 1);
+  assert.deepEqual(Object.keys(countsRows[0]).sort(), ["advancers", "decliners", "id", "kind", "limitDown", "limitUp", "qdate", "scope", "source", "total", "unchanged"]);
   const breadth = idWhere(context, (row) => row.measure === "breadth" && row.params.board === "BK0715");
   const theme = artifactId(context, "theme");
   const item = { id: "x1", against: "theme", kind: "CONTRADICTS", text: "主线候选 BK0715 的上涨占比偏低，与所引派生证据相悖。", evidence_ids: [breadth, theme] };

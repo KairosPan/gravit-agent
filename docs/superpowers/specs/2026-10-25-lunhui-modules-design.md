@@ -205,7 +205,8 @@ Without this row mounted, every other Lunhui row refuses to mount with a reason 
 A freeze with `run` omitted opens a new run and returns its id; with `run` it adds to that open
 run (`RUN_SEALED` otherwise). Each source's items get evidence ids, and host code adds the
 derived items of A20 beside the rows. A source that fails is a refusal (`UPSTREAM_TIMEOUT`,
-`UPSTREAM_TOO_LARGE`, `UPSTREAM_INVALID`, `NO_MARKET_DATA`) that writes nothing for that source;
+`UPSTREAM_TOO_LARGE`, `UPSTREAM_INVALID`, `NO_MARKET_DATA`) that writes nothing for that source
+(the index source's distribution excepted: the index items land without the counts, §17);
 the run keeps what other sources froze. A session date no calendar table covers refuses with
 `CALENDAR_UNCOVERED` (A25). The whole run is bounded at 2 MiB of evidence, and the evidence
 files are gitignored (A26). The Eastmoney replies are JSON; the parsers are new, with recorded
@@ -585,10 +586,10 @@ rulings are in the plan's SDD ledger (`.superpowers/sdd/2026-10-26-lunhui-module
 | A19 | a module without its required evidence submits `NOT_EVALUABLE` | also when the context shows no evidence or derived row at all (a sealed empty run): the contract's `evidenceRequired` sources enter `missing` — the reviewer's channel sources, the leader's and the mode's quotes and market sources — and the example is rebuilt as `NOT_EVALUABLE`; the missing list then names every listed source, even one that froze rows the cap left out | an `OK` example whose one claim had nothing to cite was a context with no accepted path |
 | A5, §5.10 | Gravit finds "the day's market run" | `lunhui_read_run` without `run` lists the strategy's newest sealed runs: at most five of its last 50 run ids, newest first, each `{run, session, sealed_at, snapshot_id, artifacts}`, open or unusable runs passed over, nothing counted or written; the protocol has Gravit take one of the day's or the previous trading day's session | plan 3's protocol left the market run's id to be found by hand |
 | §5.10 | on `STALE_MARKET_RUN` "freeze a new market run and open a new strategy run" (§14) | the remedy is a whole sealed `cn-market` run made by the market section's order, re-read as `market_run`, and a new strategy run only when the strategy run itself is stale; until its leader is accepted a sealed strategy run may be re-read with a fresher market run | a fresh freeze not yet sealed is refused `MISSING_EVIDENCE`, so "freeze a new market run" sent Gravit to a second refusal |
-| §5.10, A9 | the protocol carries the reviewer in both channels | `lunhui-run.md` at 2,956 of its 3,000 bytes: `cn-market` freezes, the analyst, the reviewer with no `market_run`, the read back; a strategy channel's listing read, candidates, quotes, the leader, the reviewer, the mode once the leader is accepted, the read back; `WAIT`, `NOT_EVALUABLE` and a refused mode are results | A9's cap; the reviewer must run before the mode (A22) |
+| §5.10, A9 | the protocol carries the reviewer in both channels | `lunhui-run.md` at 2,956 of its 3,000 bytes (2,999 since §17's counts clause): `cn-market` freezes, the analyst, the reviewer with no `market_run`, the read back; a strategy channel's listing read, candidates, quotes, the leader, the reviewer, the mode once the leader is accepted, the read back; `WAIT`, `NOT_EVALUABLE` and a refused mode are results | A9's cap; the reviewer must run before the mode (A22) |
 | §5.9 | "the blocked exit after a read failure or the third rejection" (§13: a third rejection stops that module only) | `cn-reviewer` has one module, so its third rejection stops the role, as a failed read does; its persona has each item name a shown module, never the mode, and cite at least one `ev_` id; its route is `deepseek-flash`, and it shares only `skill` with each analyst | A23: the reviewer is not the writer |
 | §10 item 4 | "the schema-size measurement" | measured 2026-10-26 at `d77bcd3` on a fresh scratch home made by `npm run setup` — no copy of the operator's home — with the Account service answering: 95 tools, 247,432 bytes, 49,885 chars/4; the seventeen `lunhui_` tools 23,523 bytes, 3,188 chars/4; the three `role_` tools 2,768 bytes, 689 chars/4 (`DEVELOPMENT.md` §4.3) | the face composes its AKShare and seat rows itself, so a fresh home measures what the live one does when the operator adds no MCP row, and no key store or session log is touched |
-| §10 item 4, A12 | an `S01` registration and the next session's grading of its card on a real boot | `tests/lunhui-strategy-run-smoke.test.ts` runs two days on one boot — Friday 2026-10-23 and Monday 2026-10-26, `globalThis.Date` replaced for each day's prompt — each a reviewed market run and a strategy run; Friday registers `S01`, Monday grades it; the fixtures are one set, so Monday's grade reads Friday's quote bytes under Monday's session | a freeze row's clock cannot cross the boot's clone of patches (§13); a second fixture set for new prices is a deferred minor (`DEVELOPMENT.md` §10 item 19) |
+| §10 item 4, A12 | an `S01` registration and the next session's grading of its card on a real boot | `tests/lunhui-strategy-run-smoke.test.ts` runs two days on one boot — Friday 2026-10-23 and Monday 2026-10-26, `globalThis.Date` replaced for each day's prompt — each a reviewed market run and a strategy run; Friday registers `S01`, Monday grades it; the fixtures are one set but the distribution's `qdate`, rolled to Monday (§16), so Monday's grade reads Friday's quote bytes under Monday's session | a freeze row's clock cannot cross the boot's clone of patches (§13); a second fixture set for new prices is a deferred minor (`DEVELOPMENT.md` §10 item 19) |
 
 ## 16. Revision, 2026-10-27: the counts from the up/down distribution
 
@@ -681,7 +682,21 @@ for identical counts. `fetchEastmoneyReply` and the bytes it carried are gone.
 `limit_down_count` changed universe and limit definition under unchanged names with §16;
 `deriveCounts` now stamps `params: { endpoint: "getTopicZDFenBu" }`, with `bucket: 11` and `-11`
 on the limit counts, so an evidence file, a context and a comparison across the boundary can tell
-which definition a run used (A19). `CONTRACT_VERSION` stays `"1"`: no validation rule changed.
+which definition a run used (A19).
+
+**A null measure carries no reading — a rule, not a hint.** With the counts absorbed, environment
+and sentiment are `OK`-expected over a counts-less index file, and their one-index-id rules would
+have accepted the null `advance_decline_ratio` as evidence. `validateEnvelope` now refuses a claim
+whose basis is not `INSUFFICIENT` citing a derived item whose `inputs` is empty (`TIME_SCOPE`,
+its repair naming the rule); `CONTRACT_VERSION` is `"2"` for it, so the runs card shows the changed
+rule (A19). A measure with inputs and a null value — a ratio over no decliners — is not touched.
+The branch review of 2026-10-27 asked for this to be a rule or recorded as hint-only; it is a rule.
+
+**What Gravit reports.** `dsh/profile/lunhui-run.md`'s closing report names a missing counts item
+with the reply's `reason` (the tool's description says a new run after Eastmoney rolls the date
+carries them); step 1's list of refusal codes was trimmed to fit the 3,000-byte cap.
+`refuse.noMarketMove` names a distribution in which no share moved, so the reason the model reads
+is true (`noMarketData`'s "缺少正价格或行情时间" was not).
 
 **The counts row in a context.** Every market context listed the counts item with no view, so its
 buckets (about 590 bytes), its hash and its stamps entered the digest whole, shown first and

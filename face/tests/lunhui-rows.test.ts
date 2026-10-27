@@ -258,7 +258,7 @@ test("errors: the refusal table opens each message with its code word and names 
     notAStrategy: "NOT_A_STRATEGY", badRunId: "BAD_RUN_ID", noSuchRun: "NO_SUCH_RUN", runSealed: "RUN_SEALED",
     sourceFrozen: "SOURCE_FROZEN", toolBudget: "TOOL_BUDGET", notGravit: "NOT_GRAVIT", notARole: "NOT_A_ROLE",
     calendarUncovered: "CALENDAR_UNCOVERED", internal: "INTERNAL", noMarketData: "NO_MARKET_DATA",
-    otherSession: "NO_MARKET_DATA", wrongChannel: "WRONG_CHANNEL", symbolShape: "INVALID_SYMBOL", symbolDuplicate: "INVALID_SYMBOL",
+    otherSession: "NO_MARKET_DATA", noMarketMove: "NO_MARKET_DATA", wrongChannel: "WRONG_CHANNEL", symbolShape: "INVALID_SYMBOL", symbolDuplicate: "INVALID_SYMBOL",
     symbolSet: "INVALID_SYMBOL", symbolMix: "INVALID_SYMBOL", boardShape: "INVALID_SYMBOL",
     readFirst: "READ_FIRST", alreadySubmitted: "ALREADY_SUBMITTED", moduleBudget: "TOOL_BUDGET", rejected: "INVALID_ANALYSIS",
     staleMarketRun: "STALE_MARKET_RUN", missingEvidence: "MISSING_EVIDENCE", marketRunDiffers: "MISSING_EVIDENCE",

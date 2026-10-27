@@ -46,7 +46,10 @@ async function marketCounts(session, fetchImpl) {
   }
 }
 
-/** A refusal as the reply's `counts.reason`: its text after the code word, without the unwritten clause. */
+/**
+ * A refusal as the reply's `counts.reason`: its text after the code word (`LunhuiError` opens every
+ * message with it), without the unwritten clause - a text without that clause passes through whole.
+ */
 function reasonOf(error) {
   return error.message.slice(`${error.code}: `.length).replace(UNWRITTEN, "");
 }
@@ -83,7 +86,7 @@ async function freeze(fetchImpl, _args, now) {
     meta: {
       received_at: at.toISOString(),
       session,
-      host: hostsOf([...TENCENT_HOSTS, ...(countsItem === null ? [] : [countsItem.host])]),
+      host: hostsOf([...TENCENT_HOSTS, ...(countsItem === null ? [] : countsItem.host.split(","))]),
       delayed: countsItem?.delayed ?? false,
       truncated: false,
     },

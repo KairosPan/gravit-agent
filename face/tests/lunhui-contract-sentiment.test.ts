@@ -7,7 +7,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import * as sentimentRow from "../plugins/lunhui/sentiment-row.mjs";
 import { contract, HYPOTHESES } from "../plugins/lunhui/lib/contracts/sentiment.mjs";
@@ -234,6 +234,28 @@ test("sentiment: owned sentences need a derived id - 情绪 citing pool rows alo
     const refusal = await rejectsWith(submit.execute({ strategy: "cn-market", run, analysis: JSON.stringify(analysis) }, exec(ROLE)), "INVALID_ANALYSIS");
     assert.match(refusal.message, /^INVALID_ANALYSIS: \[UNSUPPORTED_SCOPE\] /u);
   }
+});
+
+test("sentiment: with the distribution refused the index source still lands - OK expected, no counts row - and a null count measure with no inputs supports only an INSUFFICIENT claim", async (t) => {
+  const { freeze, read, submit } = await mount(t, (dir) => rm(join(dir, "distribution.json")));
+  const run = await frozenRun(freeze);
+  const context = JSON.parse(await read.execute({ strategy: "cn-market", run }, exec(ROLE)));
+  assert.deepEqual([context.status_expected, context.missing], ["OK", []]);
+  assert.ok(!context.evidence.some((row: any) => row.kind === "counts"));
+  const ratio = context.derived.find((row: any) => row.measure === "advance_decline_ratio");
+  assert.deepEqual([ratio.value, ratio.inputs_total], [null, 0]);
+  const seal = measure(context, "seal_ratio");
+  const streak = measure(context, "streak_distribution");
+  const pools = [{ id: "c1", text: "封板率见所引派生证据。", basis: "CURRENT", evidence_ids: [seal, streak] }];
+  const refusal = await rejectsWith(submit.execute({ strategy: "cn-market", run, analysis: JSON.stringify(artifact(context, {
+    claims: [...pools, { id: "c2", text: "上涨与下跌家数之比见所引派生证据。", basis: "CURRENT", evidence_ids: [ratio.id] }],
+  })) }, exec(ROLE)), "INVALID_ANALYSIS");
+  assert.match(refusal.message, /^INVALID_ANALYSIS: \[TIME_SCOPE\] analysis\.claims\[1\]\.basis/u);
+  // Cited as INSUFFICIENT it stands.
+  const accepted = await submitted(submit, run, artifact(context, {
+    claims: [...pools, { id: "c2", text: "家数计数未冻结，上涨与下跌家数之比不可得。", basis: "INSUFFICIENT", evidence_ids: [ratio.id] }],
+  }));
+  assert.equal(accepted.accepted, true);
 });
 
 test("sentiment: a whole-market sentence citing the market counts is accepted", async (t) => {

@@ -155,7 +155,7 @@ async function counterevidence(root: string, strategy: string, run: string, cont
   const quote = idWhere(context, (row) => row.kind === "quote" && row.symbol === "sh600519");
   const dir = await realpath(join(root, strategy, "analysis", run));
   await writeArtifact(dir, "counterevidence", {
-    module: "counterevidence", contract_version: "1", hypotheses_version: "h_000000000000", snapshot_id: context.snapshot_id,
+    module: "counterevidence", contract_version: "2", hypotheses_version: "h_000000000000", snapshot_id: context.snapshot_id,
     run, as_of: context.as_of, session: context.session, market_run: context.market_run, market_snapshot_id: context.market_snapshot_id,
     status: "OK", missing_sources: [],
     items: Array.from({ length: count }, (_, i) => ({ id: `x${i + 1}`, against: "leader", kind: "MISSING_EVIDENCE", text, evidence_ids: [quote] })),

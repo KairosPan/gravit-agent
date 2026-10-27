@@ -424,8 +424,9 @@ test("eastmoney: fetchMarketCounts reads the up/down distribution in one request
 
 test("eastmoney: fetchMarketCounts refuses a distribution in which no share has moved, and reads a bucket the reply lacks as null", async () => {
   const reply = (fenbu: unknown) => async () => json(distribution({ qdate: 20261023, fenbu }));
-  // Every share in bucket 0, or every bucket at 0: a session with no prices yet is no market data.
-  await rejectsWith(fetchMarketCounts({ date: DATE, fetchImpl: reply([{ "0": 5375 }]) }), "NO_MARKET_DATA");
+  // Every share in bucket 0, or every bucket at 0: a session with no prices yet is no market data, said so.
+  const flat = await rejectsWith(fetchMarketCounts({ date: DATE, fetchImpl: reply([{ "0": 5375 }]) }), "NO_MARKET_DATA");
+  assert.match(flat.message, /^NO_MARKET_DATA: 东方财富的涨跌分布里没有任何一只股票上涨或下跌/);
   const zeros = Array.from({ length: 23 }, (_, i) => ({ [String(i - 11)]: 0 }));
   await rejectsWith(fetchMarketCounts({ date: DATE, fetchImpl: reply(zeros) }), "NO_MARKET_DATA");
   // A bucket the reply lacks is not asserted: null, never 0.

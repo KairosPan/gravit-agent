@@ -161,7 +161,7 @@ test("module tools: a read returns the built context, at most 30 KiB, with the e
   const { manifest, metrics } = await service.readRun("cn-market", run);
   assert.ok(manifest.sealed_at);
   assert.equal(context.module, "environment");
-  assert.equal(context.contract_version, "1");
+  assert.equal(context.contract_version, "2");
   assert.equal(context.hypotheses_version, hypothesesVersion(HYPOTHESES));
   assert.equal(context.run, run);
   assert.equal(context.snapshot_id, manifest.snapshot_id);
