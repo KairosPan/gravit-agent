@@ -549,9 +549,11 @@ channels the mode knows by name. A channel with runs shows a **Research runs** s
 
 Each request has a 7-second timeout (per hop, so a redirect can take 14 s) and a 512 KiB cap, at
 most four Eastmoney requests run at once, and no numbered host (`17.push2…`) is ever called.
-Every Eastmoney item records the host that served it and whether it was delayed. One index freeze
-reads the market counts in one request, the distribution (`getTopicZDFenBu`), refused when it is
-another session's. The endpoints are unofficial: a changed reply is `UPSTREAM_INVALID`, and
+Every Eastmoney item records the host that served it and whether it was delayed (a `push2ex` reply
+declares none, so its items read `delayed: false` by construction). One index freeze reads the
+market counts in one request, the distribution (`getTopicZDFenBu`); a distribution it cannot use —
+another session's, a failed request — leaves the counts out, the index items land, and the reply's
+`counts` says so (spec §17). The endpoints are unofficial: a changed reply is `UPSTREAM_INVALID`, and
 a day outside the calendar table (`plugins/lunhui/lib/calendar/2026.json`, only 2026 ships) is
 `CALENDAR_UNCOVERED` (`DEVELOPMENT.md` §9, R40–R41).
 
@@ -609,8 +611,10 @@ model follows the protocol or that its labels are right.
 a real model writes artifacts. Run it on your own face with its keys (`npm start` after
 `source ../.env.deepseek`, as in "Run"); it calls Tencent and Eastmoney from this machine, and
 Eastmoney's `push2` answers with **delayed** quotes here. Any hour works: on a weekend, a holiday or
-before 09:15 China time the run's `session` is the previous trading day, and a day the 2026
-calendar does not cover refuses every freeze (`CALENDAR_UNCOVERED`).
+before 09:15 China time the run's `session` is the previous trading day; from 09:15 until Eastmoney
+rolls the distribution's date the index freeze lands without the market counts (its reply's
+`counts` says so, and the sentiment module's whole-market reading is then UNKNOWN); and a day the
+2026 calendar does not cover refuses every freeze (`CALENDAR_UNCOVERED`).
 
 1. Open **cn-market** in Messages and start a New message there. Prompt:
    `按 lunhui:run 的顺序，在 cn-market 做一次 A 股市场研究运行，最后按协议向我汇报。`
@@ -650,8 +654,8 @@ quotes, calls `role_cn_stock_analyst` for the leader, `role_cn_reviewer` with bo
 `role_cn_stock_analyst` again for the mode. Friday's mode registers `S01` with a card, every
 counterevidence item answered; Monday's grades it. Every artifact is valid again against the
 sealed runs, and the channel page's latest run is Monday's with its review line. It passes; it
-proves the plumbing, not a real model's choices — and the fixtures are one set, so Monday's grade
-reads Friday's prices again.
+proves the plumbing, not a real model's choices — and the fixtures are one set but the
+distribution's `qdate`, rolled to Monday, so Monday's grade reads Friday's prices again.
 
 **The live strategy run — owed, the operator's.** After a live market run of today's or the
 previous trading day's session (above), on the same face:

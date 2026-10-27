@@ -1,8 +1,7 @@
 # Lunhui modules — the manuscript's chapters as dsh rows
 
 **Status:** design, written 2026-10-25 against `main @ a89502f` and dsh `0.2.0-rc.2`; **approved
-by the operator 2026-10-25** after the builder check (§11); A17, A28 and §5.3's index row revised
-on the operator's word 2026-10-27 (§16) · **Owner:** the operator · **Supersedes:** the plugin form of
+by the operator 2026-10-25** after the builder check (§11) · **Owner:** the operator · **Supersedes:** the plugin form of
 `docs/superpowers/specs/2026-10-19-lunhui-plugin-graft-design.md` (its D1, D3, D5–D9, D17–D19);
 that spec's build, `feat/lunhui-graft @ 0de97cf`, is **stage 0** of this design and its pure
 modules are reused (§5.13). What the graft spec decided about data, knowledge and language (its
@@ -152,7 +151,7 @@ overturnable at review without redesign.
 | A17 | **Egress from the face process:** `qt.gtimg.cn`, `web.ifzq.gtimg.cn` (stage 0), `push2ex.eastmoney.com` (the pools and the up/down distribution, §16), `push2.eastmoney.com` (board lists, constituents, fund flow) and its redirect target `push2delay.eastmoney.com` (A28); 7-second timeout, 512 KiB per response, at most four requests in flight; documented beside the AKShare server's | the hosts AKShare itself calls for the same data |
 | A18 | **The mode set is `S01`, `S02`, `WAIT`.** The R01–R14 families are labels the module may report as `research_only` matches with the reason they cannot be selected (data, ruling, or registration) | the graft's D10 and the source's §6 registration |
 | A19 | **Versions in the artifact:** every artifact carries `module`, `contract_version`, `hypotheses_version` (the context's doctrine excerpt), `snapshot_id`, `run`, `as_of`; the runs card shows `contract_version` so a changed rule is visible in history | labels are never rewritten (system-design §4) |
-| A20 | **Evidence items and derived measures** (builder check Q2). An evidence item is one row: a pool entry (one stock), one board's summary, one board's member list (≤ 100 symbols, one item), one index quote, one daily bar series. At freeze, host code also writes **derived items**, each with its own id and the ids of its inputs: 连板高度 distribution, 封板 and 炸板 ratios by unique stock, 昨日涨停 today's returns and their negative tail, each frozen board's breadth (advancers over members) and turnover share, the exchanges' advance/decline counts. The model never computes these; a context carries derived items first, then the rows that fit | the source forbids the model re-deriving market-wide measures (`design/docs/contracts.md` §3); a 30 KiB context cannot carry 500 rows |
+| A20 | **Evidence items and derived measures** (builder check Q2). An evidence item is one row: a pool entry (one stock), one board's summary, one board's member list (≤ 100 symbols, one item), one index quote, one daily bar series. At freeze, host code also writes **derived items**, each with its own id and the ids of its inputs: 连板高度 distribution, 封板 and 炸板 ratios by unique stock, 昨日涨停 today's returns and their negative tail, each frozen board's breadth (advancers over members) and turnover share, the market's advance/decline ratio and limit counts from Eastmoney's up/down distribution (§16, §17). The model never computes these; a context carries derived items first, then the rows that fit | the source forbids the model re-deriving market-wide measures (`design/docs/contracts.md` §3); a 30 KiB context cannot carry 500 rows |
 | A21 | **Assertion allowances per module** (Q2). The shared core keeps stage 0's rule — no affirmative sentence on 全市场, 市场广度, 题材, 主线, 龙头 or 情绪周期 — as the default, and each module contract opens exactly the assertions it owns when they cite a derived item: sentiment may assert 情绪 and 全市场 statements; theme may name 题材 and 主线 candidates; leader may name 龙头 candidates as `leader_candidate` hypotheses; environment may assert 指数 and 流动性 states; mode opens nothing and only cites artifacts; counterevidence may deny any of them | the modules' outputs are the sentences stage 0 refused; the evidence binding is what makes them claims |
 | A22 | **The reviewer runs before the mode, in both channels** (Q3). cn-market: freezes → `cn-market-analyst` (three artifacts) → `cn-reviewer`. Strategy: freeze quotes → `cn-stock-analyst` for the leader artifact → `cn-reviewer`, whose context takes `market_run` and carries the leader artifact and the cited market artifacts → `cn-stock-analyst` again for the mode artifact. An `S01` or `S02` conclusion requires an accepted counterevidence artifact in the run and addresses each item by id (`UNADDRESSED_COUNTEREVIDENCE`); `WAIT` requires none | otherwise the reviewer's artifact never exists when the mode is validated, and G3 is empty |
 | A23 | **Caller checks in code** (Q7): a submit tool refuses a caller whose session is a root or a seeded fork (`NOT_A_ROLE`), reading `exec.agent.session.header` as `gravit.js`'s `isRootOrFork` does; a freeze tool refuses a delegated child (`NOT_GRAVIT`). Pinned on a real boot | "Gravit never submits" and "no role fetches" become code paths, not protocol sentences |
@@ -160,7 +159,7 @@ overturnable at review without redesign.
 | A25 | **Calendar tables per year, fail closed** (Q8): `lib/calendar/<year>.json` from the SSE notices, 2026 shipped; a session date outside every table refuses the freeze with `CALENDAR_UNCOVERED`, and A5's same-day rule refuses too. The 2027 table is a task of plan 1, added when the SSE notice is out (usually December) | guessing weekdays would mint CURRENT evidence on a holiday |
 | A26 | **Evidence files stay out of git** (Q9): `.gitignore` gets `strategies/*/analysis/*/evidence-*.json`; `run.json` (with every evidence file's sha256), `metrics.json` and the artifacts are tracked. A fresh clone reads the artifacts and the hashes, and cannot rebuild a context | a public repository; about 2 MiB a run, daily |
 | A27 | **A strategy run freezes quotes only** (Q5): pools and boards come from the cited market run, so one snapshot of each pool stands per day. `lunhui_read_leader_context` takes `market_run` too, so 顺位 is ranked within the market run's mainline candidates, and the leader validator requires each candidate to be a member of a frozen board or pool of the cited market run (`REFERENCE` otherwise). Gravit chooses the candidate symbols within that set | two snapshots of one pool in one decision would disagree |
-| A28 | **Eastmoney over its plain hosts, redirects followed** (Q4). Probed from the face's host on 2026-10-25: `push2ex.eastmoney.com/getTopicZTPool` answers directly (200, the 2026-10-23 pool); `push2.eastmoney.com/api/qt/clist/get` answers 302 to `push2delay.eastmoney.com`, which serves the boards (200, 516 boards) with `dlmkts` set — **delayed quotes for this location**; the numbered hosts (`17.`, `29.push2…`) redirect or time out. So the freezes call the plain hosts, follow one redirect only to `push2delay.eastmoney.com`, record the serving host and the delay flag in every item, and the market's advance/decline counts come from `push2ex`'s up/down distribution of the session, one request, counts, buckets and the reply's hash stored, no rows — not from the clist's sixty pages nor the Tencent snapshot's 27 (revised 2026-10-27, §16) | the data path works from here, delayed; the design stamps the delay rather than hide it |
+| A28 | **Eastmoney over its plain hosts, redirects followed** (Q4). Probed from the face's host on 2026-10-25: `push2ex.eastmoney.com/getTopicZTPool` answers directly (200, the 2026-10-23 pool); `push2.eastmoney.com/api/qt/clist/get` answers 302 to `push2delay.eastmoney.com`, which serves the boards (200, 516 boards) with `dlmkts` set — **delayed quotes for this location**; the numbered hosts (`17.`, `29.push2…`) redirect or time out. So the freezes call the plain hosts, follow one redirect only to `push2delay.eastmoney.com`, record the serving host and the delay flag in every item, and the market's advance/decline counts come from `push2ex`'s up/down distribution of the session, one request, counts, buckets and a hash of its data stored, no rows — not from the clist's sixty pages nor the Tencent snapshot's 27 (revised 2026-10-27, §16; a distribution the freeze cannot use lands the index items without the counts, §17) | the data path works from here, delayed; the design stamps the delay rather than hide it |
 
 ## 5. The design
 
@@ -201,7 +200,7 @@ Without this row mounted, every other Lunhui row refuses to mount with a reason 
 | `lunhui-freeze-quotes` | `lunhui_freeze_quotes({strategy, run?, symbols})` | Tencent quotes and 60-day daily bars for 1–8 symbols (indices among `sh000001 sz399001 sz399006 sh000300`, main-board equities; stage 0's rule) | stage 0's |
 | `lunhui-freeze-limit-up` | `lunhui_freeze_limit_up({strategy, run?})` | Eastmoney 涨停池, 炸板池, 昨日涨停表现 for the current session: symbol, name, 连板数, 封板时间, 炸板次数, turnover, board tags | ≤ 500 rows per pool, ≤ 256 KiB per file |
 | `lunhui-freeze-boards` | `lunhui_freeze_boards({strategy, run?, boards?})` | Eastmoney concept boards ranked by turnover, the top 30 with change and turnover; constituents for the named boards or the top 10, ≤ 100 symbols each; board fund-flow rank | ≤ 256 KiB per file |
-| `lunhui-freeze-index` | `lunhui_freeze_index({strategy, run?})` | the four indices' quotes and 120-day daily bars (Tencent); the two exchanges' total turnover (Tencent); the advance/decline and limit counts from Eastmoney's up/down distribution of the session, counts, buckets and the reply's hash only, another session's distribution refused (A28, §16) | ≤ 256 KiB per file |
+| `lunhui-freeze-index` | `lunhui_freeze_index({strategy, run?})` | the four indices' quotes and 120-day daily bars (Tencent); the two exchanges' total turnover (Tencent); the advance/decline and limit counts from Eastmoney's up/down distribution of the session, counts, buckets and a hash of its data only; a distribution the freeze cannot use — another session's, a failed request — leaves the counts out and the reply says so (A28, §16, §17) | ≤ 256 KiB per file |
 
 A freeze with `run` omitted opens a new run and returns its id; with `run` it adds to that open
 run (`RUN_SEALED` otherwise). Each source's items get evidence ids, and host code adds the
@@ -524,12 +523,12 @@ ledger (`.superpowers/sdd/2026-10-26-lunhui-modules-plan-2/progress.md`).
 |---|---|---|---|
 | §5.4, A19 | a module without its required evidence submits `NOT_EVALUABLE` "with the missing sources named" | a `NOT_EVALUABLE` artifact may carry `claims: []` (and then cites nothing), and its `missing_sources` must equal the context's `missing` as a set; every headline stays `UNKNOWN` or empty | a module whose sources froze nothing has no evidence id to cite, so a one-claim minimum made the only valid submission impossible; binding the list to the context keeps a role from naming sources the run holds |
 | §5.4 | environment "requires evidence of index, quotes" | `required: ["index"]`; quotes are read when the run froze them and are optional | quotes are optional in a `cn-market` run (§5.10), so requiring them would make every run without a quotes freeze `NOT_EVALUABLE` |
-| A21 | an owned class's sentence cites "a derived item" | a contract may name, per owned class, which cited items carry it (`ownedBy` in `contract-core.mjs`; the default stays a derived item): environment's `index` class accepts an index quote, a bars item or a derived item; sentiment's `market` class the all-shares counts or an index derived item; sentiment's `sentiment` and theme's `theme` keep the derived default (theme's: a derived item of the boards source) | with the derived default every 指数 sentence had to cite turnover or breadth — the index-and-liquidity coupling system-design §4 forbids |
+| A21 | an owned class's sentence cites "a derived item" | a contract may name, per owned class, which cited items carry it (`ownedBy` in `contract-core.mjs`; the default stays a derived item): environment's `index` class accepts an index quote, a bars item or a derived item; sentiment's `market` class the market counts or an index derived item; sentiment's `sentiment` and theme's `theme` keep the derived default (theme's: a derived item of the boards source) | with the derived default every 指数 sentence had to cite turnover or breadth — the index-and-liquidity coupling system-design §4 forbids |
 | §5.6, A21 | the theme module may name 题材 and 主线 candidates | a candidate's `name` must equal its cited board's frozen name and is exempt from the forbidden-word and scope rules (`exemptPaths: ["mainline_candidates[*].name"]`); its evidence ids still bind | a board's name is data of the freeze, and a frozen name may carry an owned or forbidden word |
 | §5.6 | theme: "a 题材 named without a frozen board is `REFERENCE`" | built as the scope rule: a 题材, 主线 or 轮动 sentence that cites no boards-source derived item is `UNSUPPORTED_SCOPE`; a candidate citing a board, members item or name the run did not freeze is `REFERENCE` | the scope rule already sees every sentence; the candidate binding covers the structured names |
 | A24 | what a context leaves out is named in `truncated` | `truncated` names whole rows left out; a view's cut of a shown row is carried on the row — `bars_total` beside an index's last 20 bars, `members_total` beside a board's first 10 members | the core adds rows whole; a cut row is still citable whole by its id |
 | A24, A28 | the theme context's rows | the theme view shows ten members a list, and board, member-list and flow rows without their per-item `host`, `delayed` (and a board's `leader`); the hints state the boards source's hosts and delay once, from the digest; the evidence file keeps every stamp | all ten frozen member lists must fit 30 KiB at live size, so every candidate can cite its board's members item |
-| A20, A24 | a derived item carries "the ids of its inputs" | every market module's context shows a derived item as one row shape, `{id, measure, value, params?, partial?, inputs_total}`; the evidence file and the digest keep the full input lists | thirty `turnover_share` items listing thirty ids each filled the theme context |
+| A20, A24 | a derived item carries "the ids of its inputs" | every market module's context shows a derived item as one row shape, `{id, measure, value, params?, inputs_total}` (`partial` went with §17); the evidence file and the digest keep the full input lists | thirty `turnover_share` items listing thirty ids each filled the theme context |
 | §5.6 | sentiment's `state` needs two limit-up ids and one index id | each headline value other than `UNKNOWN` stands on a non-`INSUFFICIENT` claim of its own citing its kind of evidence (`ownClaims` in `lib/contracts/shared.mjs`): environment's `index_state` an index quote or bars, `liquidity_state` `total_turnover` or `advance_decline_ratio`; sentiment's `state` two limit-up ids and one index id across such claims, `money_effect` and `freeze_type` a limit-up derived item each; theme's `theme_stage` and `rotation` a boards derived item each | one broad claim could otherwise carry every headline at once |
 | A7 | ten calls per module per run, "the refused ones counted" | the refusals counted are those inside a resolved run — `READ_FIRST`, `ALREADY_SUBMITTED`, `INVALID_ANALYSIS`, `TOOL_BUDGET`; the gates before the run resolves (`NOT_A_ROLE`, `WRONG_CHANNEL`, `NOT_A_STRATEGY`, `BAD_RUN_ID`) count nothing | there is no run to count against, and Gravit's mistaken root submit must not spend the role's ten calls |
 | §5.7 | "a module's submit requires its own context read in this process" | a read counts toward `READ_FIRST` only once its context is built; a read whose evidence file is unusable or whose build throws still counts a call and seals, but leaves the submit `READ_FIRST`; a submit whose definition holds no digest (a row reloaded while the service lives) is `READ_FIRST` too | `READ_FIRST` must mean the role received a context |
@@ -625,14 +624,17 @@ date: a `date` parameter is ignored and the latest session comes back.
   core (the limiter, the 7-second timeout, the 512 KiB cap, one redirect to `push2delay` only) and
   returns `{ qdate, advancers, decliners, unchanged, limitUp, limitDown, total, buckets, hash,
   host, delayed }`. `advancers` sums the buckets above 0 and `decliners` those below; `unchanged`
-  is bucket 0; `limitUp` bucket 11 and `limitDown` bucket -11; `total` all of them. `buckets` is
-  every bucket ascending as `{ bucket, count }`; `hash` is the sha256 of the reply's bytes.
+  is bucket 0; `limitUp` bucket 11 and `limitDown` bucket -11 (each null when the reply lacks the
+  bucket, §17); `total` all of them. `buckets` is every bucket ascending as `{ bucket, count }`;
+  `hash` is a sha256 over the reply's canonical `data` (§17; until then over its bytes).
 - `qdate` must be the freeze's session (`sessionOf(now)`, as the pools' `date` is); another
-  session's distribution refuses `NO_MARKET_DATA`, naming both dates, and the index freeze writes
-  nothing. A null `data` or an empty `fenbu` refuses `NO_MARKET_DATA`; a malformed one
-  `UPSTREAM_INVALID`.
+  session's distribution refuses `NO_MARKET_DATA`, naming both dates — a refusal the index freeze
+  absorbs since §17, landing its Tencent items without the counts. A null `data`, an empty `fenbu`
+  or a distribution in which no share has moved refuses `NO_MARKET_DATA`; a malformed one, or a
+  reply whose `rc` is not 0, `UPSTREAM_INVALID`.
 - The `counts` item is that object: no `pages`, `pageHashes` or `partial`, and the counts' derived
-  items (`advance_decline_ratio`, `limit_up_count`, `limit_down_count`) carry no `partial`.
+  items (`advance_decline_ratio`, `limit_up_count`, `limit_down_count`) carry no `partial`; since
+  §17 each carries its definition in `params`.
 - The clist's all-shares read, its batch stop, `ALL_SHARES_FS` and the ±9.9% limit proxy
   (`LIMIT_UP_PCT`, `LIMIT_DOWN_PCT`) are deleted, with the two count-page fixtures; the fixture
   directory gains `distribution.json`.
@@ -641,6 +643,69 @@ date: a `date` parameter is ignored and the latest session comes back.
 limit, ST and 20% boards included), no longer the ±9.9% proxy, so `limit_up_count` agrees with the
 涨停池. The counts' universe is the distribution's, about 550 shares smaller than the clist's, so
 the absolute counts are smaller; the ratio is not affected beyond that. A freeze between 09:15 and
-the moment Eastmoney rolls its `qdate` over, or before 09:15 if it rolls early, is refused rather
-than stamped with the wrong session. The boards, members and fund flow still come from the clist
-and still fail while it does.
+the moment Eastmoney rolls its `qdate` over, or before 09:15 if it rolls early, lands without the
+counts rather than stamped with the wrong session (§17; until then the whole index freeze was
+refused). The boards, members and fund flow still come from the clist and still fail while it does.
+
+## 17. Revision, 2026-10-27: the review of the §16 build
+
+On the operator's word (2026-10-27, "按这 15 条发现修；第 2 条和第 12 条先按你的建议做"), after the
+whole-tree review of the §16 build reported fifteen findings; built on `feat/counts-review-fixes`.
+This block carries the revision, and the Status line above stays as approved (`DEVELOPMENT.md`
+§8). The operator decides later whether the counts become a source of their own, retryable within
+a run; until then this block is the rule.
+
+**The counts' refusal no longer fails the index freeze.** `lunhui_freeze_index` opens every market
+run (the protocol's first call), and from 09:15 China time until Eastmoney rolls the distribution's
+session the distribution is a clock matter, so a refusal cost the run its index source, one of its
+eight freezes, and the environment and sentiment modules, which both require `index`. Now any
+provider refusal of the distribution — another session's, a failed or malformed request, a market
+in which no share has moved — lands the four index quotes and four bar series without a counts
+item; the counts' three measures are `value: null` citing no input; the file's `host` is the
+Tencent hosts' and its `delayed` false; and the freeze's reply carries `counts: { frozen: false,
+refused, reason }` (`{ frozen: true }` otherwise), the reason the refusal's text without its
+"nothing written" clause. A host bug on that path is still `INTERNAL`. The run has no counts that
+day — a second index freeze is `SOURCE_FROZEN` — and a later run reads the rolled session.
+
+**The parser, stricter where a wrong reading was silent.** A distribution in which no share has
+moved — every count 0, or every share in bucket 0 — refuses `NO_MARKET_DATA`, as an empty one does.
+A bucket the reply lacks is null in `unchanged`, `limitUp` and `limitDown`, never 0, and null in the
+limit count derived from it: the replies measured held all 23 buckets, and whether Eastmoney omits
+an empty one is unmeasured, so a lacking bucket is "not asserted", not "none". A reply whose `rc`
+is not 0 is `UPSTREAM_INVALID` whatever its `data`. Another session's distribution refuses through
+`refuse.otherSession`, in the audited table. The `hash` is `contract-core.mjs`'s sha256 over the
+canonical `data` object: the live reply carries a per-request `svr`, so a hash of the bytes differed
+for identical counts. `fetchEastmoneyReply` and the bytes it carried are gone.
+
+**The definition rides on the measures.** `advance_decline_ratio`, `limit_up_count` and
+`limit_down_count` changed universe and limit definition under unchanged names with §16;
+`deriveCounts` now stamps `params: { endpoint: "getTopicZDFenBu" }`, with `bucket: 11` and `-11`
+on the limit counts, so an evidence file, a context and a comparison across the boundary can tell
+which definition a run used (A19). `CONTRACT_VERSION` stays `"1"`: no validation rule changed.
+
+**The counts row in a context.** Every market context listed the counts item with no view, so its
+buckets (about 590 bytes), its hash and its stamps entered the digest whole, shown first and
+unexplained. `countsRow` in `contracts/shared.mjs` shows `kind`, `qdate` and the six counts (about
+180 bytes), and `COUNTS_HINT` names them, says a null count is a bucket the reply lacked, and that
+no counts row means the counts were not frozen; the sentiment, environment and both reviewer
+contracts use them.
+
+**`partial` is gone end to end.** `deriveCounts` was its last producer; `derivedRow`, `DERIVED_HINT`,
+the freeze reply and the `DerivedItem` typedef drop it, and `DERIVED_HINT` says what a null measure
+with no inputs means instead: an input not frozen, grounds for an `INSUFFICIENT` claim only.
+
+**What `delayed` means on a `push2ex` item.** The pools' and the distribution's replies carry no
+`dlmkts` and are never redirected, so their `delayed` is false by construction: no delay was
+declared, which is not a measurement of the data's age (the clist's counts were measured delayed
+on 2026-10-25). Gravit's closing report reads the flag as declared.
+
+**Tests and docs.** The two run smokes copy each channel's files without its `analysis/` runs, so a
+run a drill left in the checkout no longer becomes the listing's latest (both smokes failed in the
+primary checkout on the 2026-10-26 drill's run); the clist's `total` check has a test again; the
+index tool's description names the session's distribution and says what a refusal does.
+
+| Fact | Status |
+|---|---|
+| two live replies seconds apart: byte-identical `data`, `svr` 177618783 and 177618276 | measured 2026-10-27 |
+| the moment `qdate` rolls after 09:15 | unmeasured; the window is empty only if Eastmoney rolls at exactly 09:15:00 |
+| an empty bucket omitted from `fenbu` | unmeasured; the replies measured held all 23 |
