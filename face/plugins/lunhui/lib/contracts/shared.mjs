@@ -107,7 +107,7 @@ export function derivedRow({ id, measure, value, params, inputs }) {
 
 /** The hint naming what a derived row shows, for the contracts that use `derivedRow`. */
 export const DERIVED_HINT =
-  "派生量只列 id、measure、value、params 与输入条数 inputs_total，不列来源、种类、时效与输入编号；value 为 null 且 inputs_total 为 0 的派生量表示其输入未冻结（如家数计数被拒），只能作 INSUFFICIENT 声明的依据；时效为本运行交易日 CURRENT，除非其所在文件的交易日早于本运行（那时为 HISTORICAL），引用其编号即可。";
+  "派生量只列 id、measure、value、params 与输入条数 inputs_total，不列来源、种类、时效与输入编号；inputs_total 为 0 的派生量不含读数（家数计数被拒，或池子为空），只能作 INSUFFICIENT 声明的依据；时效为本运行交易日 CURRENT，除非其所在文件的交易日早于本运行（那时为 HISTORICAL），引用其编号即可。";
 
 /**
  * The market counts as a market module's context shows them: the six counts and the session they

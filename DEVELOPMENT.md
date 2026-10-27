@@ -1121,8 +1121,8 @@ a fixed order: the text's bytes (24 KiB), its JSON, the object's compact bytes, 
 the envelope bound to the context, every cited id one the context holds (a derived item of a
 source the module does not read is `REFERENCE`), each claim's time scope (CURRENT needs an item of
 the run's session; bars and history series are HISTORICAL; a claim not `INSUFFICIENT` may not cite
-a derived item with no inputs — its source refused at the freeze, the counts' measures over no
-counts item; claims all `INSUFFICIENT` force every headline to `UNKNOWN` or empty, each a
+a derived item with no inputs — the counts' measures over no counts item, a pool measure over an
+empty pool — since it carries no reading; claims all `INSUFFICIENT` force every headline to `UNKNOWN` or empty, each a
 `TIME_SCOPE` rejection), the forbidden words, the scope rule,
 the status rule, then the contract's own `rules`. The scope rule splits every text into sentences
 (a line break ends one) and matches the five `SCOPE_CLASSES` — `market`, `sentiment`, `theme`,

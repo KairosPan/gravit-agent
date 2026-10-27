@@ -689,7 +689,10 @@ and sentiment are `OK`-expected over a counts-less index file, and their one-ind
 have accepted the null `advance_decline_ratio` as evidence. `validateEnvelope` now refuses a claim
 whose basis is not `INSUFFICIENT` citing a derived item whose `inputs` is empty (`TIME_SCOPE`,
 its repair naming the rule); `CONTRACT_VERSION` is `"2"` for it, so the runs card shows the changed
-rule (A19). A measure with inputs and a null value — a ratio over no decliners — is not touched.
+rule (A19). The rule reaches every such item, not the counts alone: on a day whose 昨日涨停 pool is
+an empty list (§12), `yesterday_return_median` and `yesterday_negative_tail` have no inputs either,
+and `money_effect` then falls to `UNKNOWN`. A measure with inputs and a null value — a ratio over no
+decliners — is not touched.
 The branch review of 2026-10-27 asked for this to be a rule or recorded as hint-only; it is a rule.
 
 **What Gravit reports.** `dsh/profile/lunhui-run.md`'s closing report names a missing counts item

@@ -258,6 +258,26 @@ test("sentiment: with the distribution refused the index source still lands - OK
   assert.equal(accepted.accepted, true);
 });
 
+test("sentiment: an empty 昨日涨停 pool leaves its two measures with no inputs, which only an INSUFFICIENT claim may cite", async (t) => {
+  const { freeze, read, submit } = await mount(t, async (dir) => {
+    const reply = JSON.parse(await readFile(join(dir, "yesterday-pool.json"), "utf8"));
+    await writeFile(join(dir, "yesterday-pool.json"), JSON.stringify({ ...reply, data: null }));
+  });
+  const run = await frozenRun(freeze);
+  const context = JSON.parse(await read.execute({ strategy: "cn-market", run }, exec(ROLE)));
+  assert.equal(context.status_expected, "OK");
+  const median = context.derived.find((row: any) => row.measure === "yesterday_return_median");
+  assert.deepEqual([median.value, median.inputs_total], [null, 0]);
+  const seal = measure(context, "seal_ratio");
+  const current = [{ id: "c1", text: "昨日涨停股本交易日涨跌幅中位数见所引派生证据。", basis: "CURRENT", evidence_ids: [seal, median.id] }];
+  const refusal = await rejectsWith(submit.execute({ strategy: "cn-market", run, analysis: JSON.stringify(artifact(context, { claims: current })) }, exec(ROLE)), "INVALID_ANALYSIS");
+  assert.match(refusal.message, /^INVALID_ANALYSIS: \[TIME_SCOPE\] analysis\.claims\[0\]\.basis: A derived item with no inputs/u);
+  const accepted = await submitted(submit, run, artifact(context, {
+    claims: [{ id: "c1", text: "昨日涨停池为空，中位数不可得。", basis: "INSUFFICIENT", evidence_ids: [median.id] }],
+  }));
+  assert.equal(accepted.accepted, true);
+});
+
 test("sentiment: a whole-market sentence citing the market counts is accepted", async (t) => {
   const { freeze, read, submit } = await mount(t);
   const run = await frozenRun(freeze);

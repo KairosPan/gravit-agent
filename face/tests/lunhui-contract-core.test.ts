@@ -225,8 +225,9 @@ test("scope: ownedBy names the items that carry an owned class, per class; the d
 });
 
 test("a derived item with no inputs - its source not frozen - supports only an INSUFFICIENT claim, a TIME_SCOPE rejection", () => {
-  // The index file holds a counts measure over no counts item: null, citing no input (spec §17).
-  const evidence = EVIDENCE.map((file) => (file.source === "index" ? { ...file, items: [...file.items, absent] } : file));
+  // The index file holds a counts measure over no counts item - null, citing no input - and a ratio with inputs and a null value (spec §17).
+  const nullRatio = withId({ source: "index", kind: "derived", measure: "advance_decline_ratio", value: null, inputs: [indexQuote.id] });
+  const evidence = EVIDENCE.map((file) => (file.source === "index" ? { ...file, items: [...file.items, absent, nullRatio] } : file));
   const { digest } = context({ evidence });
   const cite = (basis: string, state = "EXPANSION") =>
     artifact(digest, { state, claims: [{ id: "c1", text: "涨停家数见所引派生证据。", basis, evidence_ids: [sealRatio.id, absent.id] }] });
@@ -234,8 +235,8 @@ test("a derived item with no inputs - its source not frozen - supports only an I
   assert.equal(category(() => check(cite("CURRENT"), { context: digest })), "TIME_SCOPE");
   assert.equal(category(() => check(cite("HISTORICAL"), { context: digest })), "TIME_SCOPE");
   check(cite("INSUFFICIENT", "UNKNOWN"), { context: digest });
-  // A derived item with inputs is a reading, whatever its value, and is not refused by this rule.
-  check(artifact(digest, { claims: [{ id: "c1", text: "涨停家数见所引派生证据。", basis: "CURRENT", evidence_ids: [sealRatio.id, advance.id] }] }), { context: digest });
+  // A derived item with inputs is a reading, whatever its value - a null ratio over no decliners included.
+  check(artifact(digest, { claims: [{ id: "c1", text: "涨停家数见所引派生证据。", basis: "CURRENT", evidence_ids: [sealRatio.id, nullRatio.id] }] }), { context: digest });
 });
 
 test("scope: a line break ends a sentence, so an exempt line does not cover the next", () => {

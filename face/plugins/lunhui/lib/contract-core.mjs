@@ -175,7 +175,7 @@ export const MODULE_REPAIRS = Object.freeze({
   REFERENCE:
     "信封字段 module、contract_version、hypotheses_version、snapshot_id、run、as_of、session 原样照抄上下文；只引用上下文中真实的证据编号（ev_…），不引用本模块来源以外的编号。",
   TIME_SCOPE:
-    "按证据时效修正 basis：CURRENT 须至少引用一条本运行交易日的证据；HISTORICAL 只引用更早的证据（日线、历史序列或更早交易日），文字不用“当前、实时、现价、今日、今天、盘中”；value 为 null 且输入为空的派生量（其来源未冻结）只能被 INSUFFICIENT 声明引用；所有声明均为 INSUFFICIENT 时标题字段一律 UNKNOWN。",
+    "按证据时效修正 basis：CURRENT 须至少引用一条本运行交易日的证据；HISTORICAL 只引用更早的证据（日线、历史序列或更早交易日），文字不用“当前、实时、现价、今日、今天、盘中”；输入为空的派生量（来源未冻结，或池子为空）不含读数，只能被 INSUFFICIENT 声明引用；所有声明均为 INSUFFICIENT 时标题字段一律 UNKNOWN。",
   UNSUPPORTED_SCOPE:
     "全市场、情绪、题材、龙头、指数类断言只在本模块拥有该类时写入声明，并引用至少一条该类认可的证据编号（默认是派生证据，见提示）；其他此类句子改写为“缺少”“无法”或“待补充”，限制说明里也一样。",
   EXECUTION_CONTENT:
@@ -486,13 +486,14 @@ function checkEnvelope(raw, { module, context, schema, owns = [], ownedBy = {}, 
       fail(`${path}.basis: A HISTORICAL claim must cite historical evidence only.`);
     if (claim.basis === "HISTORICAL" && CURRENT_WORDS.test(claim.text))
       fail(`${path}: Non-current evidence was described as current.`);
-    // A derived item with no inputs - its source refused at the freeze, the counts' measures over no
-    // counts item - carries no reading: only an INSUFFICIENT claim may cite it (spec §17).
+    // A derived item with no inputs - the counts' measures over no counts item (the distribution
+    // refused), a pool measure over an empty pool - carries no reading: only an INSUFFICIENT claim
+    // may cite it (spec §17).
     if (claim.basis !== "INSUFFICIENT" && claim.evidence_ids.some((id) => {
       const item = context.items.get(id)?.item;
       return item?.kind === "derived" && Array.isArray(item.inputs) && item.inputs.length === 0;
     }))
-      fail(`${path}.basis: A derived item with no inputs (its source was not frozen) supports only an INSUFFICIENT claim.`);
+      fail(`${path}.basis: A derived item with no inputs carries no reading and supports only an INSUFFICIENT claim.`);
   }
   if (artifact.claims.length > 0 && artifact.claims.every((claim) => claim.basis === "INSUFFICIENT") && !entry.headline.every(blank))
     fail("analysis: Insufficient evidence requires UNKNOWN headline values.");
