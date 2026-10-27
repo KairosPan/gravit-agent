@@ -92,22 +92,35 @@ export function ownClaims(parsed, context, demands) {
 }
 
 /**
- * A derived item as a market module's context shows it: `{ id, measure, value, params?, partial?,
+ * A derived item as a market module's context shows it: `{ id, measure, value, params?,
  * inputs_total }` - the count of its inputs, not their ids (a pool's measure cites every row), and
  * no `source`, `kind` or `scope`, which the derived section implies; the evidence file and the
  * digest keep every field, so validation reads them unchanged.
  * @param {Record<string, any>} item
  */
-export function derivedRow({ id, measure, value, params, partial, inputs }) {
+export function derivedRow({ id, measure, value, params, inputs }) {
   return {
-    id, measure, value, ...(params === undefined ? {} : { params }), ...(partial === undefined ? {} : { partial }),
+    id, measure, value, ...(params === undefined ? {} : { params }),
     inputs_total: Array.isArray(inputs) ? inputs.length : 0,
   };
 }
 
 /** The hint naming what a derived row shows, for the contracts that use `derivedRow`. */
 export const DERIVED_HINT =
-  "派生量只列 id、measure、value、params、partial 与输入条数 inputs_total，不列来源、种类、时效与输入编号；时效为本运行交易日 CURRENT，除非其所在文件的交易日早于本运行（那时为 HISTORICAL），引用其编号即可。";
+  "派生量只列 id、measure、value、params 与输入条数 inputs_total，不列来源、种类、时效与输入编号；value 为 null 且 inputs_total 为 0 的派生量表示其输入未冻结（如家数计数被拒），只能作 INSUFFICIENT 声明的依据；时效为本运行交易日 CURRENT，除非其所在文件的交易日早于本运行（那时为 HISTORICAL），引用其编号即可。";
+
+/**
+ * The market counts as a market module's context shows them: the six counts and the session they
+ * belong to; the buckets, the data hash and the stamps stay in the file (spec §17).
+ * @param {Record<string, any>} item
+ */
+export function countsRow({ kind, qdate, advancers, decliners, unchanged, limitUp, limitDown, total }) {
+  return { kind, qdate, advancers, decliners, unchanged, limitUp, limitDown, total };
+}
+
+/** The hint naming what the counts row shows, for the contracts that use `countsRow`. */
+export const COUNTS_HINT =
+  "家数计数行（kind 为 counts）只列 qdate 与六个计数：上涨 advancers、下跌 decliners、平盘 unchanged、涨停 limitUp、跌停 limitDown 与合计 total，取自东方财富的涨跌分布；为 null 的计数表示分布里没有该档；各档分布与数据哈希在证据文件里。没有这一行时家数计数未冻结，index 的三个计数派生量为 null。";
 
 /** A quote without its validity block and provider: the file keeps them. */
 export function quoteRow({ validity, provider, ...item }) {

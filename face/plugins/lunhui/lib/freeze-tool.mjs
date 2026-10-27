@@ -147,7 +147,6 @@ export function defineFreeze({ name, description, parameters, source, kind, chec
               measure: item.measure,
               value: item.value,
               ...(item.params === undefined ? {} : { params: item.params }),
-              ...(item.partial === undefined ? {} : { partial: item.partial }),
             })),
             host: meta.host,
             delayed: meta.delayed,

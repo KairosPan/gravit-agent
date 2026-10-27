@@ -86,6 +86,11 @@ test("sentiment: a context over a real index and limit-up freeze - OK expected, 
   assert.deepEqual(context.evidence.map((row: any) => row.kind ?? row.pool), [
     "counts", "zt", "zt", "zt", "zt", "zt", "zt", "zb", "zb", "zb", "yesterday", "yesterday", "yesterday", "yesterday", "yesterday",
   ]);
+  // The counts row shows the six counts and their session, the hint saying so; the buckets, the hash and the stamps stay in the file.
+  assert.deepEqual(Object.keys(context.evidence[0]).sort(), ["advancers", "decliners", "id", "kind", "limitDown", "limitUp", "qdate", "scope", "source", "total", "unchanged"]);
+  assert.match(context.hints.counts, /家数计数行/);
+  // No derived row carries a partial flag any more, and the hint promises none.
+  assert.doesNotMatch(context.hints.derived, /partial/);
   const zt = context.evidence.filter((row: any) => row.pool === "zt").map((row: any) => row.boards);
   assert.deepEqual(zt, [...zt].sort((a, b) => b - a), "zt rows by boards, highest first");
   const yesterday = context.evidence.filter((row: any) => row.pool === "yesterday").map((row: any) => row.pct);
@@ -101,7 +106,7 @@ test("sentiment: a context over a real index and limit-up freeze - OK expected, 
   assert.doesNotMatch(example.conflict, /[a-z]+_[a-z]+/);
   // Derived items show how many inputs they read, not the ids.
   for (const row of context.derived)
-    assert.ok(Object.keys(row).every((key) => ["id", "measure", "value", "params", "partial", "inputs_total"].includes(key)), row.measure);
+    assert.ok(Object.keys(row).every((key) => ["id", "measure", "value", "params", "inputs_total"].includes(key)), row.measure);
   assert.equal(example.claims.length, 1);
   assert.equal(example.claims[0].basis, "INSUFFICIENT");
   assert.ok(rowsOf(context).some((row) => row.id === example.claims[0].evidence_ids[0]));

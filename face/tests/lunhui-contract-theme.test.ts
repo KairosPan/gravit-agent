@@ -117,7 +117,7 @@ test("theme: a context over a real boards and limit-up freeze - OK expected, der
   assert.deepEqual(context.truncated, [{ source: "limit-up", kind: "zb", count: 3 }, { source: "limit-up", kind: "yesterday", count: 5 }]);
   // A derived row is the shared shape: no source, kind, scope or input ids.
   for (const row of context.derived) {
-    assert.ok(Object.keys(row).every((key) => ["id", "measure", "value", "params", "partial", "inputs_total"].includes(key)), row.measure);
+    assert.ok(Object.keys(row).every((key) => ["id", "measure", "value", "params", "inputs_total"].includes(key)), row.measure);
     assert.ok(Number.isInteger(row.inputs_total));
   }
   const example = context.example;

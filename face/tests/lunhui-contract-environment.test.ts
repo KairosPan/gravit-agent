@@ -75,10 +75,13 @@ test("environment: a context over a real index and quotes freeze - OK expected, 
   assert.deepEqual(context.derived.map((row: any) => row.measure), ["total_turnover", "advance_decline_ratio", "limit_up_count", "limit_down_count"]);
   // A derived row is the shared shape: no source, kind, scope or input ids.
   for (const row of context.derived)
-    assert.ok(Object.keys(row).every((key) => ["id", "measure", "value", "params", "partial", "inputs_total"].includes(key)), row.measure);
+    assert.ok(Object.keys(row).every((key) => ["id", "measure", "value", "params", "inputs_total"].includes(key)), row.measure);
   assert.deepEqual(context.evidence.map((row: any) => row.kind), [
     "index", "index", "index", "index", "counts", "bars", "bars", "bars", "bars", "quote", "quote", "history", "history",
   ]);
+  // The counts row shows the six counts and their session; the buckets, the hash and the stamps stay in the file.
+  for (const row of context.evidence.filter((row: any) => row.kind === "counts"))
+    assert.deepEqual(Object.keys(row).sort(), ["advancers", "decliners", "id", "kind", "limitDown", "limitUp", "qdate", "scope", "source", "total", "unchanged"]);
   for (const row of context.evidence.filter((row: any) => row.kind === "bars" || row.kind === "history")) {
     assert.ok(row.bars.length > 0 && row.bars.length <= 20, `${row.symbol}: ${row.bars.length} bars`);
     assert.ok(row.bars_total >= row.bars.length);

@@ -26,7 +26,7 @@ import { CITED_ID_PATTERN, SCOPE_CLASSES, fail } from "../contract-core.mjs";
 import { refuse } from "../errors.mjs";
 import { MARKET_CHANNEL } from "../freeze-tool.mjs";
 import { MODULES } from "../modules.mjs";
-import { derivedRow, exampleOf, poolRow, quoteRow } from "./shared.mjs";
+import { COUNTS_HINT, countsRow, derivedRow, exampleOf, poolRow, quoteRow } from "./shared.mjs";
 
 /** The ten rulings (strategy-spec §7) and §5, by topic in the tree's own words, paragraph ids only. */
 export const HYPOTHESES =
@@ -56,6 +56,7 @@ const MEMBERS_SHOWN = 10;
 const HINTS = {
   order:
     "审查员在 mode 之前运行（A22）：市场频道在三个市场工件之后，策略频道在 leader 工件之后、mode 之前；mode 登记 S01、S02 时须按 x 编号逐项回应这里的每一项。",
+  counts: COUNTS_HINT,
   items:
     "items 0–12 项，每项 { id, against, kind, text, evidence_ids }：id 为 x 加一到两位数字，各项不重复；against 是上下文 artifacts 列出的工件所属的模块，不是 mode，也不是 counterevidence；" +
     "text 至多 160 字，写清相悖、缺失、过期或越界的是什么；evidence_ids 0–16 个不重复的编号，至少一个是证据编号（ev_…），可另加工件编号（<module>@<snapshot_id>）；只引用被质疑的工件本身、没有证据编号的一项即 REFERENCE。",
@@ -197,7 +198,7 @@ export const marketContract = {
   runArtifacts: ["environment", "sentiment", "theme"],
   priority: [
     { source: "index", kind: "index" },
-    { source: "index", kind: "counts" },
+    { source: "index", kind: "counts", view: countsRow },
     { source: "limit-up", kind: "zt", view: poolRow },
     { source: "limit-up", kind: "zb", view: poolRow },
     { source: "limit-up", kind: "yesterday", view: poolRow },
@@ -219,7 +220,7 @@ export const strategyContract = {
   runArtifacts: ["leader"],
   priority: [
     { source: "quotes", kind: "quote", view: quoteRow, first: true },
-    { source: "market:index", kind: "counts" },
+    { source: "market:index", kind: "counts", view: countsRow },
     { source: "market:limit-up", kind: "zt", view: poolRow, filter: ofQuote },
     { source: "market:limit-up", kind: "zb", view: poolRow, filter: ofQuote },
     { source: "market:limit-up", kind: "yesterday", view: poolRow, filter: ofQuote },

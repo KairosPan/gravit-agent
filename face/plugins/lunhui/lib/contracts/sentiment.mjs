@@ -9,12 +9,13 @@
  * the claims that are not INSUFFICIENT; a `money_effect` or `freeze_type` other than `UNKNOWN` on a
  * claim of its own citing a limit-up derived item. The module owns the sentiment assertion class,
  * carried by a derived item (the core's default), and the whole-market class, carried by the
- * all-shares counts or an index derived item. Derived items are shown with their inputs counted, not
- * listed: a pool's measure cites every row. `lib/module-tool.mjs` consumes the `contract` object;
- * the shared rules are `contract-core.mjs`'s.
+ * market counts or an index derived item. Derived items are shown with their inputs counted, not
+ * listed: a pool's measure cites every row; the counts row shows the six counts and their session
+ * (`countsRow`). `lib/module-tool.mjs` consumes the `contract` object; the shared rules are
+ * `contract-core.mjs`'s.
  */
 import { fail } from "../contract-core.mjs";
-import { DERIVED_HINT, derivedRow, exampleOf, ownClaims } from "./shared.mjs";
+import { COUNTS_HINT, DERIVED_HINT, countsRow, derivedRow, exampleOf, ownClaims } from "./shared.mjs";
 
 const STATES = ["UNKNOWN", "CHAOS", "IGNITION", "EXPANSION", "CLIMAX", "RETREAT", "REPAIR"];
 
@@ -42,6 +43,7 @@ const HINTS = {
   basis:
     "CURRENT 指本运行的交易日（上下文 session），须至少引用一条 scope 为 CURRENT 的证据；更早交易日的证据一律 HISTORICAL，文字不用“当前、今日”等词；证据不足用 INSUFFICIENT，此时标题字段写 UNKNOWN。",
   rows: "涨停池按连板数从高到低、昨日涨停按涨跌幅从低到高列出；指数报价与日线不在本模块的列表里，计入 truncated，指数证据请引用 counts 或 index 的派生量。limit-up 的派生量是 streak_distribution、seal_ratio、break_ratio、yesterday_return_median、yesterday_negative_tail；index 的派生量是 total_turnover、advance_decline_ratio、limit_up_count、limit_down_count。",
+  counts: COUNTS_HINT,
   status: "status_expected 为 NOT_EVALUABLE 时照 example 提交：missing_sources 照抄 missing，标题字段一律 UNKNOWN，不写 conflict。",
   example:
     "example 只示格式：标题字段为 UNKNOWN，声明为 INSUFFICIENT，conflict 只示写法，不是判断。写出 UNKNOWN 以外的状态，须有不为 INSUFFICIENT 的声明合计引用两条涨停证据和一条指数证据；money_effect、freeze_type 各需一条自己的声明。",
@@ -124,7 +126,7 @@ export const contract = {
   derivedFirst: ["limit-up"],
   derivedView: derivedRow,
   priority: [
-    { source: "index", kind: "counts" },
+    { source: "index", kind: "counts", view: countsRow },
     { source: "limit-up", kind: "zt", order: byNumber("boards", -1) },
     { source: "limit-up", kind: "zb" },
     { source: "limit-up", kind: "yesterday", order: byNumber("pct", 1) },

@@ -317,6 +317,11 @@ test("counterevidence in a strategy run: the leader and the market run's three a
   assert.equal(context.status_expected, "OK");
   assert.equal(context.market_run, market);
   assert.deepEqual(context.artifacts.map((row: any) => row.module), ["leader", "environment", "sentiment", "theme"]);
+  // The cited run's counts row shows the six counts and their session, as the market modules' does.
+  const countsRows = context.evidence.filter((row: any) => row.kind === "counts");
+  assert.equal(countsRows.length, 1);
+  assert.deepEqual(Object.keys(countsRows[0]).sort(), ["advancers", "decliners", "id", "kind", "limitDown", "limitUp", "qdate", "scope", "source", "total", "unchanged"]);
+  assert.equal(countsRows[0].source, "market:index");
   const quote = idWhere(context, (row) => row.kind === "quote" && row.symbol === "sh600519");
   const item = { id: "x1", against: "leader", kind: "MISSING_EVIDENCE", text: "龙头候选只有一个交易日的报价，地位的持续性待核验。", evidence_ids: [quote, artifactId(context, "leader")] };
   const claims = [{ id: "c1", text: "审查了 leader 工件与所引报价。", basis: "CURRENT", evidence_ids: [quote] }];
@@ -389,6 +394,9 @@ test("counterevidence in a strategy run: the maximal pin - a live-size market ru
   assert.deepEqual(context.artifacts.map((row: any) => row.module), ["leader", "environment", "sentiment", "theme"]);
   assert.match(context.hints.against, /leader、environment、sentiment、theme/u);
   assert.deepEqual(context.evidence.filter((row: any) => row.kind === "quote").map((row: any) => row.symbol).sort(), [...EQUITIES].sort());
+  // At the cap the cited run's counts row is among the rows left out; one shown is the slim view, as the market modules' is.
+  for (const row of context.evidence.filter((row: any) => row.kind === "counts"))
+    assert.deepEqual(Object.keys(row).sort(), ["advancers", "decliners", "id", "kind", "limitDown", "limitUp", "qdate", "scope", "source", "total", "unchanged"]);
   // A review standing on what it shows is accepted.
   const quote = idWhere(context, (row) => row.kind === "quote" && row.symbol === "sh600519");
   const leaderId = context.artifacts[0].id as string;

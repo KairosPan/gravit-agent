@@ -10,7 +10,7 @@
  * `contract` object; the shared rules are `contract-core.mjs`'s.
  */
 import { fail } from "../contract-core.mjs";
-import { DERIVED_HINT, derivedRow, exampleOf } from "./shared.mjs";
+import { COUNTS_HINT, DERIVED_HINT, countsRow, derivedRow, exampleOf } from "./shared.mjs";
 
 /** The bars of a series a context shows: the last 20; the frozen file keeps them all. */
 const BARS_SHOWN = 20;
@@ -37,6 +37,7 @@ const HINTS = {
   basis:
     "CURRENT 指本运行的交易日（上下文 session），须至少引用一条 scope 为 CURRENT 的证据；日线与历史序列一律 HISTORICAL，文字不用“当前、今日”等词；证据不足用 INSUFFICIENT，此时标题字段写 UNKNOWN。",
   bars: `日线只列最近 ${BARS_SHOWN} 根，bars_total 是冻结的根数；证据编号指整条序列。`,
+  counts: COUNTS_HINT,
   status: "status_expected 为 NOT_EVALUABLE 时照 example 提交：missing_sources 照抄 missing，标题字段一律 UNKNOWN。",
   example:
     "example 只示格式：标题字段为 UNKNOWN，声明为 INSUFFICIENT，不是判断。写出 STRONG 或 WEAK 等指数状态，须有一条 CURRENT 或 HISTORICAL 声明引用指数报价或指数日线；写出 EXPANDING 或 CONTRACTING 等流动性状态，须有另一条 CURRENT 或 HISTORICAL 声明引用 total_turnover 或 advance_decline_ratio。",
@@ -127,7 +128,7 @@ export const contract = {
   derivedView: derivedRow,
   priority: [
     { source: "index", kind: "index" },
-    { source: "index", kind: "counts" },
+    { source: "index", kind: "counts", view: countsRow },
     { source: "index", kind: "bars", view: lastBars },
     { source: "quotes", kind: "quote" },
     { source: "quotes", kind: "history", view: lastBars },
