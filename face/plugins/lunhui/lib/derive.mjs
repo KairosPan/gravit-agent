@@ -3,14 +3,16 @@
  * The Lunhui derived measures (modules spec A20): the market-wide measures host code computes at
  * freeze time, so the model never re-derives them - 连板高度 distribution, 封板 and 炸板 ratios by
  * unique stock, 昨日涨停 today's median return and negative tail, each board's breadth and turnover
- * share, the exchanges' advance/decline counts and the composites' total turnover. Pure functions
- * over the rows `eastmoney.mjs` and `market.mjs` return; each item cites the evidence ids of the
- * rows it read.
+ * share, the market's advance/decline ratio and limit counts from Eastmoney's up/down distribution,
+ * and the composites' total turnover. Pure functions over the rows `eastmoney.mjs` and `market.mjs`
+ * return; each item cites the evidence ids of the rows it read.
  *
- * A derived item is `{ source, kind: "derived", measure, value, inputs, params?, partial? }`, with
- * no `id` of its own: the freeze hands rows and derived items to `addEvidence` together, which gives
- * every item its id, `evidenceId` of exactly that object. A measure whose inputs are absent or whose
- * denominator is 0 has `value: null`, never NaN and never a missing item.
+ * A derived item is `{ source, kind: "derived", measure, value, inputs, params? }`, with no `id` of
+ * its own: the freeze hands rows and derived items to `addEvidence` together, which gives every
+ * item its id, `evidenceId` of exactly that object. A measure whose inputs are absent or whose
+ * denominator is 0 has `value: null`, never NaN and never a missing item; the counts' measures over
+ * no counts item cite no input at all. `params` names what a measure rests on beyond its inputs - a
+ * threshold, a board, or the definition of the counts (the endpoint and the limit bucket, spec §17).
  *
  * The ids contract: `ids` maps `rowKey(kind, code)` to the evidence id the row will get, built by
  * the caller as `evidenceId(row)` over the row object exactly as it will be handed to `addEvidence`,
@@ -19,6 +21,8 @@
  * the market counts, `rowKey("quote", symbol)` for a Tencent quote. A row the map does not know
  * is host code's bug, a `TypeError`.
  */
+
+import { COUNTS_ENDPOINT, LIMIT_DOWN_BUCKET, LIMIT_UP_BUCKET } from "./eastmoney.mjs";
 
 /** The share of 昨日涨停 at or below this pct is `yesterday_negative_tail`. */
 export const NEGATIVE_TAIL_PCT = -5;
@@ -29,7 +33,7 @@ const COMPOSITES = ["sh000001", "sz399001"];
 /** @typedef {Map<string, string>} RowIds */
 /**
  * @typedef {{ source: string, kind: "derived", measure: string, value: unknown, inputs: string[],
- *   params?: Record<string, unknown>, partial?: boolean }} DerivedItem
+ *   params?: Record<string, unknown> }} DerivedItem
  */
 
 /**
@@ -132,17 +136,23 @@ export function deriveBoards(boards, members, ids) {
 
 /**
  * The market counts' measures (source `index`): `advance_decline_ratio` - `advancers /
- * decliners` - `limit_up_count` and `limit_down_count`, all from one distribution reply (spec §16).
- * @param {{ advancers: number, decliners: number, limitUp: number, limitDown: number }} counts
+ * decliners` - `limit_up_count` and `limit_down_count`, all from one distribution reply (spec §16),
+ * each naming its definition in `params`: the endpoint, and the bucket a limit count reads (§17).
+ * A limit count the reply lacked is null in the counts and null here. With `counts` null - the
+ * distribution refused, the index items landed without it - the three are `value: null` citing no
+ * input.
+ * @param {{ advancers: number, decliners: number, limitUp: number | null, limitDown: number | null } | null} counts
  * @param {RowIds} ids
  * @returns {DerivedItem[]}
  */
 export function deriveCounts(counts, ids) {
-  const inputs = [idOf(ids, "counts")];
+  const inputs = counts === null ? [] : [idOf(ids, "counts")];
   return [
-    item("index", "advance_decline_ratio", ratio(counts.advancers, counts.decliners), inputs),
-    item("index", "limit_up_count", counts.limitUp ?? null, inputs),
-    item("index", "limit_down_count", counts.limitDown ?? null, inputs),
+    item("index", "advance_decline_ratio", counts === null ? null : ratio(counts.advancers, counts.decliners), inputs, {
+      params: { endpoint: COUNTS_ENDPOINT },
+    }),
+    item("index", "limit_up_count", counts?.limitUp ?? null, inputs, { params: { endpoint: COUNTS_ENDPOINT, bucket: LIMIT_UP_BUCKET } }),
+    item("index", "limit_down_count", counts?.limitDown ?? null, inputs, { params: { endpoint: COUNTS_ENDPOINT, bucket: LIMIT_DOWN_BUCKET } }),
   ];
 }
 

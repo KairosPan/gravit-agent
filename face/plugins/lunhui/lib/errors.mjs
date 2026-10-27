@@ -30,6 +30,9 @@ export const refuse = {
   /** A reply that held no usable row: a holiday, a pre-market call, an empty pool. */
   noMarketData: (provider) =>
     new LunhuiError("NO_MARKET_DATA", `${provider}没有返回任何可用数据（缺少正价格或行情时间，或为空）；本次未写入任何文件。`),
+  /** A dated reply of another session than the one asked for, both named: the distribution answers its latest session (spec §16). */
+  otherSession: (provider, got, wanted) =>
+    new LunhuiError("NO_MARKET_DATA", `${provider}返回的数据属于交易日 ${got}，不是本次会话 ${wanted}；本次未写入任何文件。`),
   /** The stop instruction rides in the text, as stage 0's did. */
   toolBudget: () =>
     new LunhuiError(

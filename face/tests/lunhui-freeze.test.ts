@@ -9,11 +9,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { apply as applyRuns } from "../plugins/lunhui/runs-row.mjs";
+import { hash } from "../plugins/lunhui/lib/contract-core.mjs";
 import * as quotesRow from "../plugins/lunhui/freeze-quotes-row.mjs";
 import * as limitUpRow from "../plugins/lunhui/freeze-limit-up-row.mjs";
 import * as boardsRow from "../plugins/lunhui/freeze-boards-row.mjs";
@@ -408,7 +408,7 @@ test("freeze: every row refuses CALENDAR_UNCOVERED before any run when the previ
   assert.deepEqual(await readdir(join(root, "cn-market")), ["THESIS.md"]);
 });
 
-test("freeze: index stores the up/down distribution as one counts item - counts, buckets, the reply hash, no row - and derives the ratio and the limit counts from it", async (t) => {
+test("freeze: index stores the up/down distribution as one counts item - counts, buckets, the data hash, no row - and derives the ratio and the limit counts from it, each naming its definition", async (t) => {
   const root = await strategiesRoot(t);
   const { urls } = mockFetch(t, await fixtures(t));
   const { tools } = mount(root, undefined);
@@ -422,7 +422,7 @@ test("freeze: index stores the up/down distribution as one counts item - counts,
   assert.deepEqual(evidence.items.filter((item: any) => item.kind === "index").map((item: any) => item.symbol), ["sh000001", "sz399001", "sz399006", "sh000300"]);
   assert.equal(evidence.items.filter((item: any) => item.kind === "bars").length, 4);
   const counts = evidence.items.find((item: any) => item.kind === "counts");
-  const hash = createHash("sha256").update(await readFile(join(EASTMONEY, "distribution.json"))).digest("hex");
+  const fixture = JSON.parse(await readFile(join(EASTMONEY, "distribution.json"), "utf8"));
   const { id, ...fields } = counts;
   assert.match(id, /^ev_/);
   assert.deepEqual(fields, {
@@ -432,12 +432,16 @@ test("freeze: index stores the up/down distribution as one counts item - counts,
       { bucket: -11, count: 2 }, { bucket: -10, count: 1 }, { bucket: -3, count: 4 }, { bucket: -1, count: 5 },
       { bucket: 0, count: 3 }, { bucket: 1, count: 6 }, { bucket: 5, count: 2 }, { bucket: 10, count: 1 }, { bucket: 11, count: 6 },
     ],
-    hash, host: "push2ex.eastmoney.com", delayed: false,
+    hash: hash(fixture.data), host: "push2ex.eastmoney.com", delayed: false,
   });
   for (const item of evidence.items.filter((item: any) => item.kind === "index" || item.kind === "bars")) assert.equal(item.host, undefined);
   const derived = evidence.items.filter((item: any) => item.kind === "derived");
   assert.deepEqual(derived.map((item: any) => item.measure), ["total_turnover", "advance_decline_ratio", "limit_up_count", "limit_down_count"]);
   assert.deepEqual(derived.slice(1).map((item: any) => item.value), [15 / 12, 6, 2]);
+  // Each counts measure names its definition and cites the one counts item (spec §17).
+  assert.deepEqual(derived.slice(1).map((item: any) => item.params), [
+    { endpoint: "getTopicZDFenBu" }, { endpoint: "getTopicZDFenBu", bucket: 11 }, { endpoint: "getTopicZDFenBu", bucket: -11 },
+  ]);
   for (const item of derived.slice(1)) {
     assert.ok(!("partial" in item), item.measure);
     assert.deepEqual(item.inputs, [counts.id]);

@@ -13,14 +13,18 @@
  *
  * The fetch core calls the plain hosts and follows one redirect, only to
  * `push2delay.eastmoney.com` and only for the same path and query (A28); it never calls a numbered
- * host. Every reply records the host that served it and whether its quotes are delayed. At most
- * four Eastmoney requests run at once across every caller (A17); the body is read through
- * `market.mjs`'s `fetchBytes` with its 7-second timeout and 512 KiB cap, and every failure is a
- * `LunhuiError` naming 东方财富: `UPSTREAM_TIMEOUT`, `UPSTREAM_TOO_LARGE`, `UPSTREAM_INVALID`, or
- * `NO_MARKET_DATA` for a 涨停池, a board list, a fund-flow list or a distribution that is null or
- * empty, or a distribution of another session.
+ * host. Every reply records the host that served it and whether its quotes are delayed - the delay
+ * host, or a non-empty `dlmkts`; a `push2ex` reply carries no `dlmkts` and is never redirected, so
+ * a pool's or the distribution's `delayed` is false by construction: no delay was declared, which is
+ * not a measurement of the data's age (spec §17). At most four Eastmoney requests run at once across
+ * every caller (A17); the body is read through `market.mjs`'s `fetchBytes` with its 7-second timeout
+ * and 512 KiB cap, and every failure is a `LunhuiError` naming 东方财富: `UPSTREAM_TIMEOUT`,
+ * `UPSTREAM_TOO_LARGE`, `UPSTREAM_INVALID` (a distribution reply whose `rc` is not 0 among them; the
+ * pools and the clist read `data` without looking at `rc`), or `NO_MARKET_DATA` for a 涨停池, a
+ * board list, a fund-flow list or a distribution that is null or empty, a distribution in which no
+ * share has moved, or a distribution of another session.
  */
-import { createHash } from "node:crypto";
+import { hash } from "./contract-core.mjs";
 import { refuse, upstreamError } from "./errors.mjs";
 import { fetchBytes } from "./market.mjs";
 import { LunhuiError } from "./runs.mjs";
@@ -105,18 +109,7 @@ function delayTarget(asked, location) {
  * @param {{ fetchImpl?: FetchLike, timeoutMs?: number, maxBytes?: number }} [options]
  * @returns {Promise<{ json: Record<string, any>, host: string, delayed: boolean }>}
  */
-export async function fetchEastmoneyJson(url, options = {}) {
-  const { json, host, delayed } = await fetchEastmoneyReply(url, options);
-  return { json, host, delayed };
-}
-
-/**
- * `fetchEastmoneyJson` with the body's bytes as received beside the parsed reply, for a reply hash.
- * @param {string} url
- * @param {{ fetchImpl?: FetchLike, timeoutMs?: number, maxBytes?: number }} [options]
- * @returns {Promise<{ json: Record<string, any>, host: string, delayed: boolean, bytes: Uint8Array }>}
- */
-function fetchEastmoneyReply(url, { fetchImpl = fetch, timeoutMs = 7000, maxBytes = 512 * 1024 } = {}) {
+export function fetchEastmoneyJson(url, { fetchImpl = fetch, timeoutMs = 7000, maxBytes = 512 * 1024 } = {}) {
   return inFlight(() => request(url, fetchImpl, timeoutMs, maxBytes));
 }
 
@@ -139,7 +132,7 @@ async function request(url, fetchImpl, timeoutMs, maxBytes) {
   }
   if (json === null || typeof json !== "object" || Array.isArray(json)) throw invalid("INVALID_RESPONSE");
   const delayed = host === DELAY_HOST || (typeof json.dlmkts === "string" && json.dlmkts !== "");
-  return { json, host, delayed, bytes: reply.bytes };
+  return { json, host, delayed };
 }
 
 // ---- the limit-up pools ----
@@ -323,17 +316,17 @@ function clistUrl(params) {
 
 /**
  * A clist reply's rows: `[]` for a `data` that is null, else `data.diff`, which must be a list of
- * objects whose `f12` matches `code` when one is given; `total` is `data.total` (0 for null data).
+ * objects whose `f12` matches `code`; `total` is `data.total` (0 for null data), a non-negative
+ * integer, else the reply is invalid.
  * @param {Record<string, any>} json
- * @param {RegExp | null} code
+ * @param {RegExp} code
  */
 function clistRows(json, code) {
   if (json.data === null) return { rows: [], total: 0 };
   const diff = json.data?.diff;
   const total = json.data?.total;
   if (!Array.isArray(diff) || !Number.isInteger(total) || total < 0) throw invalid("INVALID_RESPONSE");
-  const valid = (raw) =>
-    raw !== null && typeof raw === "object" && (code === null || (typeof raw.f12 === "string" && code.test(raw.f12)));
+  const valid = (raw) => raw !== null && typeof raw === "object" && typeof raw.f12 === "string" && code.test(raw.f12);
   if (!diff.every(valid)) throw invalid("INVALID_RESPONSE");
   return { rows: diff, total };
 }
@@ -432,36 +425,43 @@ export async function fetchBoardFundFlow({ fetchImpl = fetch, top = 30, timeoutM
 
 // ---- the up/down distribution ----
 
+/** The endpoint's name, which the counts' derived items carry as their definition (spec §17). */
+export const COUNTS_ENDPOINT = "getTopicZDFenBu";
 /** A distribution bucket: an integer from -11 to 11, as Eastmoney keys it ("-0" is not one). */
 const BUCKET = /^(?:0|-?(?:[1-9]|1[01]))$/;
 /** The buckets Eastmoney gives the limit-up and limit-down shares (inferred, spec §16). */
-const LIMIT_UP_BUCKET = 11;
-const LIMIT_DOWN_BUCKET = -11;
+export const LIMIT_UP_BUCKET = 11;
+export const LIMIT_DOWN_BUCKET = -11;
 
 /**
  * The market's advance/decline counts for the session `date`, in one request: the up/down
  * distribution the 涨停板行情 page draws (`push2ex.eastmoney.com/getTopicZDFenBu`). Its `fenbu` is a
  * list of one-key objects, a bucket from -11 to 11 to a count of shares; `advancers` sums the
- * buckets above 0, `decliners` those below, `unchanged` is bucket 0, `limitUp` bucket 11 and
+ * buckets above 0 and `decliners` those below; `unchanged` is bucket 0, `limitUp` bucket 11 and
  * `limitDown` bucket -11 (measured 2026-10-27: bucket 11 equal to the 涨停池's `tc` twice in one
- * session; inferred, the endpoint is undocumented), `total` all of them. `buckets` keeps every
- * bucket, ascending, and `hash` is the sha256 of the reply's bytes as received. No row of any share
- * is read.
+ * session; inferred, the endpoint is undocumented), each null when the reply holds no such bucket -
+ * a bucket the reply lacks is not asserted, never read as 0 (spec §17); `total` sums every bucket
+ * present. `buckets` keeps every bucket, ascending, and `hash` is `contract-core.mjs`'s sha256 over
+ * the canonical `data` object, so two replies of one distribution hash alike whatever their
+ * per-request fields (`svr`, `rt`). No row of any share is read.
  *
  * The endpoint takes no date and answers its latest session, so the reply's `qdate` must be
- * `date`: another session's distribution refuses `NO_MARKET_DATA`, naming both dates. A `data`
- * that is null or a `fenbu` that is empty refuses `NO_MARKET_DATA`; a malformed one -
- * `qdate` not an eight-digit integer, an entry not one bucket, a bucket out of range or given twice,
- * a count not a non-negative integer - `UPSTREAM_INVALID`. A bad `date` is the host's bug, thrown
- * before any request.
+ * `date`: another session's distribution refuses `NO_MARKET_DATA`, naming both dates. A reply whose
+ * `rc` is not 0 is `UPSTREAM_INVALID`, whatever its `data`. A `data` that is null, a `fenbu` that is
+ * empty, or a distribution in which no share has moved - every count 0, or every share in bucket 0,
+ * a session with no prices yet - refuses `NO_MARKET_DATA`; a malformed one - `qdate` not an
+ * eight-digit integer, an entry not one bucket, a bucket out of range or given twice, a count not a
+ * non-negative integer - `UPSTREAM_INVALID`. A bad `date` is the host's bug, thrown before any
+ * request.
  * @param {{ date: string, fetchImpl?: FetchLike, timeoutMs?: number }} options `date` as `YYYYMMDD`
  */
 export async function fetchMarketCounts({ date, fetchImpl = fetch, timeoutMs = 7000 }) {
   if (typeof date !== "string" || !DATE.test(date))
     throw new TypeError(`lunhui: a distribution date is YYYYMMDD, not ${JSON.stringify(date)}`);
-  const url = new URL("/getTopicZDFenBu", POOL_HOST);
+  const url = new URL(`/${COUNTS_ENDPOINT}`, POOL_HOST);
   url.search = new URLSearchParams({ ut: POOL_UT, dpt: "wz.ztzt" }).toString();
-  const { json, host, delayed, bytes } = await fetchEastmoneyReply(url.href, { fetchImpl, timeoutMs });
+  const { json, host, delayed } = await fetchEastmoneyJson(url.href, { fetchImpl, timeoutMs });
+  if (json.rc !== 0) throw invalid("PROVIDER_ERROR");
   if (json.data === null) throw refuse.noMarketData(PROVIDER);
   const qdate = json.data?.qdate;
   const fenbu = json.data?.fenbu;
@@ -478,20 +478,23 @@ export async function fetchMarketCounts({ date, fetchImpl = fetch, timeoutMs = 7
     if (byBucket.has(bucket) || !Number.isSafeInteger(count) || count < 0) throw invalid("INVALID_RESPONSE");
     byBucket.set(bucket, count);
   }
-  if (String(qdate) !== date)
-    throw new LunhuiError("NO_MARKET_DATA", `${PROVIDER}涨跌分布的日期为 ${qdate}，不是本次会话 ${date}；本次未写入任何文件。`);
+  if (String(qdate) !== date) throw refuse.otherSession(PROVIDER, qdate, date);
   const buckets = [...byBucket].sort(([a], [b]) => a - b).map(([bucket, count]) => ({ bucket, count }));
   const sum = (keep) => buckets.reduce((total, { bucket, count }) => total + (keep(bucket) ? count : 0), 0);
+  const advancers = sum((bucket) => bucket > 0);
+  const decliners = sum((bucket) => bucket < 0);
+  // No share up or down: the session has no prices yet (or the distribution is not populated).
+  if (advancers + decliners === 0) throw refuse.noMarketData(PROVIDER);
   return {
     qdate,
-    advancers: sum((bucket) => bucket > 0),
-    decliners: sum((bucket) => bucket < 0),
-    unchanged: byBucket.get(0) ?? 0,
-    limitUp: byBucket.get(LIMIT_UP_BUCKET) ?? 0,
-    limitDown: byBucket.get(LIMIT_DOWN_BUCKET) ?? 0,
+    advancers,
+    decliners,
+    unchanged: byBucket.get(0) ?? null,
+    limitUp: byBucket.get(LIMIT_UP_BUCKET) ?? null,
+    limitDown: byBucket.get(LIMIT_DOWN_BUCKET) ?? null,
     total: sum(() => true),
     buckets,
-    hash: createHash("sha256").update(bytes).digest("hex"),
+    hash: hash(json.data),
     host,
     delayed,
   };

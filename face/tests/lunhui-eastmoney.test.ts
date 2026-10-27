@@ -9,18 +9,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
-import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import {
   fetchBoardFundFlow, fetchBoardMembers, fetchBoards, fetchEastmoneyJson, fetchLimitUpPools, fetchMarketCounts, inFlight,
 } from "../plugins/lunhui/lib/eastmoney.mjs";
 import { createFixtureFetch } from "../plugins/lunhui/lib/fixture-fetch.mjs";
+import { hash } from "../plugins/lunhui/lib/contract-core.mjs";
 import { LunhuiError } from "../plugins/lunhui/lib/runs.mjs";
 
 const FIXTURES = fileURLToPath(new URL("./fixtures/lunhui-eastmoney/", import.meta.url));
 const fixtureFetch = createFixtureFetch(FIXTURES);
 const DATE = "20261023";
 const PLAIN = "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=30&fs=m%3A90+t%3A3";
+const ZDFENBU = "https://push2ex.eastmoney.com/getTopicZDFenBu?ut=7eea3edcaed734bea9cbfc24409ed989&dpt=wz.ztzt";
 
 /** `promise` rejects with a `LunhuiError` carrying `code`, and the message opens with the code. */
 async function rejectsWith(promise: Promise<unknown>, code: string): Promise<LunhuiError> {
@@ -381,17 +382,25 @@ test("eastmoney: fetchBoardFundFlow parses the main net inflow and its share", a
   await rejectsWith(fetchBoardFundFlow({ fetchImpl: async () => json({ rc: 0, data: null }) }), "NO_MARKET_DATA");
 });
 
-const ZDFENBU = "https://push2ex.eastmoney.com/getTopicZDFenBu?ut=7eea3edcaed734bea9cbfc24409ed989&dpt=wz.ztzt";
+test("eastmoney: a clist reply whose total is not a non-negative integer is UPSTREAM_INVALID for the boards, the members and the fund flow", async () => {
+  const members = (total: unknown) => async () => json({ rc: 0, data: { total, diff: [{ f12: "600519", f14: "示例酒", f3: 1.2 }] } });
+  for (const total of ["140", null, -1, 1.5]) await rejectsWith(fetchBoardMembers("BK0715", { fetchImpl: members(total) }), "UPSTREAM_INVALID");
+  const boards = (total: unknown) => async () => json({ rc: 0, data: { total, diff: [{ f12: "BK0715", f14: "示例电网", f3: 1 }] } });
+  await rejectsWith(fetchBoards({ fetchImpl: boards("1") }), "UPSTREAM_INVALID");
+  await rejectsWith(fetchBoardFundFlow({ fetchImpl: boards(null) }), "UPSTREAM_INVALID");
+  // An integer total stands, and a total past the rows kept tells a cut list.
+  assert.equal((await fetchBoardMembers("BK0715", { fetchImpl: members(140) })).truncated, true);
+});
 
 /** A distribution reply in the live shape around `data`. */
 function distribution(data: unknown) {
   return { rc: 0, rt: 115, svr: 1, lt: 2, full: 0, data };
 }
 
-test("eastmoney: fetchMarketCounts reads the up/down distribution in one request: counts by bucket, 11 and -11 the limits, the reply hashed", async () => {
+test("eastmoney: fetchMarketCounts reads the up/down distribution in one request: counts by bucket, 11 and -11 the limits, the data hashed", async () => {
   const { asked, fetchImpl } = recorded();
   const counts = await fetchMarketCounts({ date: DATE, fetchImpl });
-  const hash = createHash("sha256").update(readFileSync(`${FIXTURES}distribution.json`)).digest("hex");
+  const fixture = JSON.parse(readFileSync(`${FIXTURES}distribution.json`, "utf8"));
   assert.deepEqual(counts, {
     qdate: 20261023,
     advancers: 15, decliners: 12, unchanged: 3, limitUp: 6, limitDown: 2, total: 30,
@@ -399,10 +408,13 @@ test("eastmoney: fetchMarketCounts reads the up/down distribution in one request
       { bucket: -11, count: 2 }, { bucket: -10, count: 1 }, { bucket: -3, count: 4 }, { bucket: -1, count: 5 },
       { bucket: 0, count: 3 }, { bucket: 1, count: 6 }, { bucket: 5, count: 2 }, { bucket: 10, count: 1 }, { bucket: 11, count: 6 },
     ],
-    hash, host: "push2ex.eastmoney.com", delayed: false,
+    hash: hash(fixture.data), host: "push2ex.eastmoney.com", delayed: false,
   });
   // One request, no date in it: the endpoint answers its latest session whatever is asked.
   assert.deepEqual(asked, [ZDFENBU]);
+  // The hash is over the reply's data, canonical: a reply differing only in its per-request fields hashes alike.
+  const again = await fetchMarketCounts({ date: DATE, fetchImpl: async () => json({ ...fixture, svr: fixture.svr + 1, rt: 9 }) });
+  assert.equal(again.hash, counts.hash);
   // A bad date is the host's bug, thrown before any request.
   for (const date of ["2026-10-23", 20261023, undefined]) {
     await assert.rejects(fetchMarketCounts({ date, fetchImpl } as any), TypeError);
@@ -410,13 +422,32 @@ test("eastmoney: fetchMarketCounts reads the up/down distribution in one request
   assert.equal(asked.length, 1);
 });
 
-test("eastmoney: fetchMarketCounts refuses another session's distribution, an empty one, and a malformed one", async () => {
+test("eastmoney: fetchMarketCounts refuses a distribution in which no share has moved, and reads a bucket the reply lacks as null", async () => {
+  const reply = (fenbu: unknown) => async () => json(distribution({ qdate: 20261023, fenbu }));
+  // Every share in bucket 0, or every bucket at 0: a session with no prices yet is no market data.
+  await rejectsWith(fetchMarketCounts({ date: DATE, fetchImpl: reply([{ "0": 5375 }]) }), "NO_MARKET_DATA");
+  const zeros = Array.from({ length: 23 }, (_, i) => ({ [String(i - 11)]: 0 }));
+  await rejectsWith(fetchMarketCounts({ date: DATE, fetchImpl: reply(zeros) }), "NO_MARKET_DATA");
+  // A bucket the reply lacks is not asserted: null, never 0.
+  const sparse = await fetchMarketCounts({ date: DATE, fetchImpl: reply([{ "1": 3 }, { "-1": 2 }]) });
+  assert.deepEqual(
+    [sparse.advancers, sparse.decliners, sparse.unchanged, sparse.limitUp, sparse.limitDown, sparse.total],
+    [3, 2, null, null, null, 5],
+  );
+});
+
+test("eastmoney: fetchMarketCounts refuses another session's distribution, an empty one, a rejected request, and a malformed one", async () => {
   const reply = (data: unknown) => async () => json(distribution(data));
   const other = await rejectsWith(
     fetchMarketCounts({ date: DATE, fetchImpl: reply({ qdate: 20261022, fenbu: [{ "1": 3 }] }) }), "NO_MARKET_DATA");
-  assert.match(other.message, /20261022/);
-  assert.match(other.message, /20261023/);
+  assert.match(other.message, /^NO_MARKET_DATA: 东方财富返回的数据属于交易日 20261022，不是本次会话 20261023/);
   await rejectsWith(fetchMarketCounts({ date: DATE, fetchImpl: reply(null) }), "NO_MARKET_DATA");
+  // A reply Eastmoney rejected (rc not 0) is an invalid reply, whatever its data, not a market state.
+  for (const data of [null, { qdate: 20261023, fenbu: [{ "1": 3 }] }]) {
+    const rejected = await rejectsWith(
+      fetchMarketCounts({ date: DATE, fetchImpl: async () => json({ ...distribution(data), rc: -1 }) }), "UPSTREAM_INVALID");
+    assert.match(rejected.message, /PROVIDER_ERROR/);
+  }
   await rejectsWith(fetchMarketCounts({ date: DATE, fetchImpl: reply({ qdate: 20261023, fenbu: [] }) }), "NO_MARKET_DATA");
   for (const data of [
     { qdate: "20261023", fenbu: [{ "1": 3 }] }, // a string date

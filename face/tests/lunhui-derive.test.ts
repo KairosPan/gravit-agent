@@ -156,7 +156,7 @@ const counts = {
   buckets: [{ bucket: -11, count: 12 }, { bucket: 11, count: 80 }], hash: "h", host: "push2ex.eastmoney.com", delayed: false,
 };
 
-test("derive: deriveCounts gives the advance/decline ratio and the limit counts, citing the one counts item", () => {
+test("derive: deriveCounts gives the advance/decline ratio and the limit counts, citing the one counts item and naming their definition", () => {
   const ids = new Map([[rowKey("counts"), evidenceId(counts)]]);
   const items = deriveCounts(counts, ids);
   assert.equal(items.length, 3);
@@ -168,8 +168,24 @@ test("derive: deriveCounts gives the advance/decline ratio and the limit counts,
     assert.ok(!("partial" in item), item.measure);
     assert.deepEqual(item.inputs, [evidenceId(counts)]);
   }
+  // The definition rides on each item: the endpoint, and the bucket a limit count reads (spec §17).
+  assert.deepEqual(find(items, "advance_decline_ratio").params, { endpoint: "getTopicZDFenBu" });
+  assert.deepEqual(find(items, "limit_up_count").params, { endpoint: "getTopicZDFenBu", bucket: 11 });
+  assert.deepEqual(find(items, "limit_down_count").params, { endpoint: "getTopicZDFenBu", bucket: -11 });
   const none = deriveCounts({ ...counts, decliners: 0 }, new Map([[rowKey("counts"), "ev_x"]]));
   assert.equal(find(none, "advance_decline_ratio").value, null, "no decliners");
+  // A limit bucket the reply lacked is null in the counts, and null in its measure.
+  const lacking = deriveCounts({ ...counts, limitDown: null }, new Map([[rowKey("counts"), "ev_x"]]));
+  assert.equal(find(lacking, "limit_down_count").value, null, "no -11 bucket");
+});
+
+test("derive: deriveCounts over no counts item gives the three measures null with no inputs, their definition still named", () => {
+  const items = deriveCounts(null, new Map());
+  assert.deepEqual(items.map((item) => [item.measure, item.value, item.inputs]), [
+    ["advance_decline_ratio", null, []], ["limit_up_count", null, []], ["limit_down_count", null, []],
+  ]);
+  for (const item of items) assert.equal(item.source, "index");
+  assert.deepEqual(find(items, "limit_up_count").params, { endpoint: "getTopicZDFenBu", bucket: 11 });
 });
 
 const quotes: Row[] = [
