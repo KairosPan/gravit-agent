@@ -19,7 +19,7 @@ import { bootFace, type BootedFace } from "./boot.ts";
 import { listBots, registerBotRoutes } from "./bots.ts";
 import { installBotRuntime, registerBotRuntimeRoutes } from "./bot-runtime.ts";
 import { readBotJournal } from "./bot-journal.ts";
-import { BOTS_ROOT } from "./overlay.ts";
+import { BOTS_ROOT, faceBind } from "./overlay.ts";
 import { isTrustedDataRequest } from "./http.ts";
 import { createSymbolSearch, registerSymbolSearchRoute } from "./symbol-search.ts";
 import { registerQuoteRoutes } from "./quotes.ts";
@@ -342,8 +342,16 @@ booted.commitReady();
  * exact authority — `127.0.0.1:3090` and `localhost:3090` are two sign-ins
  * (browser-auth.ts:69-78, 106-108) — and its signing secret persists in the
  * credentials store, so it survives restarts for its 30 days. */
-const baseUrl = `http://${booted.ctx.webServer.host}:${booted.ctx.webServer.port}/`;
-console.log(`${BIN}: ${connection.authenticatedUrl(baseUrl)} (profile: ${profileName})`);
+/* Under FACE_BIND (the agent box) the bound host is not where a browser goes:
+ * the URL stays loopback, where the box publishes the port, and the line
+ * names the bind instead. */
+const bind = faceBind();
+const widened = bind !== "127.0.0.1";
+const baseUrl = `http://${widened ? "127.0.0.1" : booted.ctx.webServer.host}:${booted.ctx.webServer.port}/`;
+console.log(
+  `${BIN}: ${connection.authenticatedUrl(baseUrl)} (profile: ${profileName})` +
+    (widened ? ` · listening on ${bind}` : ""),
+);
 console.log(
   `${BIN}: the ?token= is a per-process secret: it mints a 30-day cookie for this host:port;` +
     ` later visits to the plain URL work`,

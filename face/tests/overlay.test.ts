@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { Config as AgentPresetConfig } from "@deepseek-ai/dsh-agent-preset";
 import {
-  AGENT_PRESET_REGISTRY_ROW_ID, DEFAULT_PRESET, LEGACY_PRESET, LEGACY_PRESET_DESCRIPTION, faceOverlay, isHostPreset, presetRowId,
+  AGENT_PRESET_REGISTRY_ROW_ID, DEFAULT_PRESET, LEGACY_PRESET, LEGACY_PRESET_DESCRIPTION, faceBind, faceOverlay, isHostPreset, presetRowId,
 } from "../src/overlay.ts";
 
 /** The default preset a composition hands the overlay: the definition `composeFace` renders from `roles/`. */
@@ -49,6 +49,14 @@ test("overlay inserts exactly the thirteen host rows, in order, each naming its 
  * face's own /data JSON - a change nobody asked for arriving through a mirror. */
 test("the webserver binds loopback on the requested port, uncompressed", () => {
   assert.deepEqual(rowsById().get("webserver")!.config, { host: "127.0.0.1", port: 3090, compression: "none" });
+});
+
+test("FACE_BIND replaces the webserver host and nothing else", () => {
+  const rows = new Map(faceOverlay(3090, GRAVIT, "0.0.0.0").flatMap(e => e.insert ?? []).map(r => [r.id, r]));
+  assert.deepEqual(rows.get("webserver")!.config, { host: "0.0.0.0", port: 3090, compression: "none" });
+  assert.equal(faceBind({}), "127.0.0.1");
+  assert.equal(faceBind({ FACE_BIND: "0.0.0.0" }), "0.0.0.0");
+  assert.equal(faceBind({ FACE_BIND: "" }), "127.0.0.1");
 });
 
 // The absences are load-bearing, so they are asserted rather than assumed.

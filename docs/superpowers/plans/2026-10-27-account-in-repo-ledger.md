@@ -250,3 +250,22 @@ call as `service()`.
 142.8 s. `npm run typecheck` clean.
 
 **Face gate:** `npm test` = 1,652 tests, 1,629 pass, 23 skipped, 0 fail; typecheck clean.
+
+### Security note on Task 3 (controller)
+
+- R11 Ruling: an automated security review flagged the `Host`-header fence as spoofable once `PORTFOLIO_BIND` is non-loopback (a peer that can reach the port can send `Host: 127.0.0.1`). The code stands as the spec §6 designs it: the `Host` rule was never authentication (it is the DNS-rebinding defence; writes are authorised by the owner's signed envelope and the seat's key at the door, unchanged), and in the compose topology the only peers that reach 0.0.0.0:4820 are the agent box on the private `gravit` network and the host's loopback (the port is published on 127.0.0.1 only). The residual is real on a misconfiguration — `PORTFOLIO_BIND=0.0.0.0` on the host Mac would admit any LAN peer that forges `Host` to every read and to the unauthenticated routes — so Task 5 says in `account/README.md` that `PORTFOLIO_BIND` is for the box only, and Task 6 records it in DEVELOPMENT §9 beside the seat's-key residual; a peer-address check or a shared token for non-loopback peers is a forward item, not built here (it would change the door's admission, which this project keeps as is) — if wrong, the hardening is one middleware condition on `req.socket.remoteAddress`, later.
+
+### Task 3 — review (controller)
+
+- Task 3: complete (commits 772fca1..46eb7d0, review clean — spec ✅, quality approved).
+- Task 3: minor (deferred): the "binds where told" test cannot fail — under port 0 nothing observable separates `0.0.0.0` from `127.0.0.1`; exposing the bound address on the handle would make it bite (the compose health check exercises the real bind).
+- Task 3: minor (deferred, carried to Task 5's README): `hosts.includes(host)` is case-sensitive while `LOCAL_HOST` is `/i` — exact per the spec; the README row says entries are exact, lowercase as compose sends them.
+- Task 3: minor (deferred, carried to Task 5's README): under an admitted extra host the host-derived URLs (`/api/account/wallet/challenge`, `/api/account/signin/start`) are built on `account:4820`; only a compose peer sends that host, never the owner's browser.
+- Task 3: minor (deferred): a programmatic `hosts: [""]` would admit a request with no `Host`; `parseHosts` drops empties, so the env path cannot.
+
+### Task 4
+
+- RED: `cd face && npx tsx --test tests/overlay.test.ts` = 1 test, 0 pass, 1 fail ("does not provide an export named 'faceBind'"). GREEN: 10 tests, 10 pass.
+- `faceBind(env)` = `env.FACE_BIND || "127.0.0.1"`; `faceOverlay(port, preset, host = faceBind())`; the webserver row's `host` is cast to the row's `"127.0.0.1" | "0.0.0.0"` union, checked by the row's schema at boot. `main.ts` keeps the URL on `127.0.0.1` and appends ` · listening on <bind>` when the bind is widened. README "The profile" sentence as the brief words it.
+- R7 boot check (scratch `DSH_HOME`, `FACE_PORT=3197`, `FACE_ACCOUNT_SEAT_DIR=/nonexistent`, `FACE_ACCOUNT_URL=http://127.0.0.1:9`): `FACE_BIND=::1` and `FACE_BIND=localhost` both fail the boot loud, `webserver (required) … $.host expected "127.0.0.1" | "0.0.0.0" but got "::1"` (resp. `"localhost"`) — the row admits only the two literals, so no loopback value other than `127.0.0.1` exists and the suffixed line was not seen live (`0.0.0.0` withheld per R7). Unset: `gravit-face: http://127.0.0.1:3197/?token=… (profile: face)`, no suffix. Every process stopped, nothing left on 3197.
+- Face gate: `npm test` = 1,653 tests, 1,630 pass, 23 skipped, 0 fail; `FACE_SMOKE=1` = 1,653/1,653 pass; typecheck clean.

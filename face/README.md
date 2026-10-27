@@ -775,12 +775,14 @@ Two things about that directory are NOT yours:
 - **The face's own host rows compose LAST and win silently.** They are applied
   after your patch layer and after the machine-local home layer — the inverse
   of the dsh CLI's layering, and deliberate: loopback-only binding surviving
-  an operator patch is the point. A patch of yours aimed at one of the
-  thirteen overlay rows — `webserver`, `connection`, `api-remotes`,
-  `file-upload`, `workspace`, `session-controller`, `workspace-controller`,
-  `settings-controller`, `directory-picker`, `tool-ask-user`,
-  `agent-preset-registry`, `preset-gravit`, `preset-kairos` — or at the `hmr`
-  switch, at `system-prompt`'s `personaPrefix`, at the `agent-instructions`
+  an operator patch is the point: the one way to widen it is the process
+  environment, `FACE_BIND` (the compose file's `0.0.0.0` for the agent box,
+  whose port is published on the host's loopback) — never a patch row. A
+  patch of yours aimed at one of the thirteen overlay rows — `webserver`,
+  `connection`, `api-remotes`, `file-upload`, `workspace`,
+  `session-controller`, `workspace-controller`, `settings-controller`,
+  `directory-picker`, `tool-ask-user`, `agent-preset-registry`,
+  `preset-gravit`, `preset-kairos` — or at the `hmr` switch, at `system-prompt`'s `personaPrefix`, at the `agent-instructions`
   row's two candidate lists, or (while `DSH_TELEMETRY_DISABLED` is set) at `session-telemetry-otel`
   is accepted, overridden, and NEVER reported. Change those in the face —
   `src/overlay.ts`, `src/boot.ts`, `src/instructions.ts`,
