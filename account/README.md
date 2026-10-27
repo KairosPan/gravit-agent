@@ -8,3 +8,12 @@ Install once: `npm ci` here.
 - Tests: `npm test` (vitest, one file at a time); `npm run typecheck`.
 
 Design: `docs/superpowers/specs/2026-10-27-account-in-repo-design.md`. The face's side: `face/README.md` "The Account seat".
+
+## In the box
+
+`docker compose up` at the repo root runs this service as the `account` box (`compose.yml`, `Dockerfile` here: the image copies `account/` and runs `npm ci` at build) beside the face's `agent` box. Stop the host service first: the box publishes 4820 on the host's loopback.
+
+- The home is the volume `account-home`, mounted at `/data` (`npm run account -- --home /data`); it starts empty. The first owner pairs with the code the box prints: `docker compose logs account`.
+- A key-file venue reads a path on the service's own filesystem, so the file goes into the volume first — `docker compose cp <file> account:/data/<name>` — and the venue is named by that path, `/data/<name>`.
+- Optional, before the first start: `docker compose cp ~/.buyer-agent-demo/. account:/data` carries the host's home (its book, devices and seats) into the box. Otherwise the paper venue is opened again in the box.
+- The box sets `PORTFOLIO_BIND=0.0.0.0` (listen on the container's interface) and `PORTFOLIO_HOSTS=account:4820` (one more `Host` admitted beside loopback, for the agent box on the compose network). **They are for the box only.** The `Host` fence is the DNS-rebinding defence, not authentication: writes are authorised by the owner's signed envelope and the seat's key at the door, but a peer that reaches the port can forge `Host` for every read. Never set `PORTFOLIO_BIND=0.0.0.0` on the host Mac — it would serve the LAN. `PORTFOLIO_HOSTS` entries (comma-separated) are matched exactly and case-sensitively, lowercase as compose sends them. Under an admitted extra host the Account's host-derived URLs (the wallet challenge, a venue's sign-in start) are built on `account:4820`; only a compose peer sends that host, never the owner's browser, which reaches the page at `127.0.0.1:4820`.

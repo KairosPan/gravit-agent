@@ -1,0 +1,60 @@
+# The isolated run: the face and the Account as two boxes (docs/superpowers/specs/
+# 2026-10-27-account-in-repo-design.md §5, §7). The host dev loop — two host processes — stays
+# the default; this file is started on purpose. Run `docker compose` at the repo root: the agent
+# box mounts the repo (`.`, this file's directory) at `${PWD}`, the shell's directory, so the
+# tree lands in the box at the repo's own host path (dsh records absolute paths). Stop the host
+# face and Account first: both boxes publish 3090 and 4820 on the host's loopback.
+#
+# The agent box mounts no docker socket and no path of the Account's: Gravit's shell sees the
+# repo and its two volumes, nothing else.
+
+services:
+  account:
+    build: ./account
+    command: ["npm", "run", "account", "--", "--home", "/data"]
+    environment:
+      # For the box only: the Host fence is the DNS-rebinding defence, not authentication.
+      PORTFOLIO_BIND: "0.0.0.0"
+      PORTFOLIO_HOSTS: "account:4820"
+    ports: ["127.0.0.1:4820:4820"]
+    volumes: ["account-home:/data"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4820/api/overview').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 10s
+      retries: 12
+    networks: [gravit]
+
+  agent:
+    build: ./face
+    working_dir: ${PWD}/face
+    volumes:
+      - .:${PWD}
+      - dsh-home:/dsh-home
+      - seat-home:/seat-home
+      # Linux node_modules over the host's macOS ones; the entrypoint runs npm ci when empty.
+      - face-modules:${PWD}/face/node_modules
+      - account-modules:${PWD}/account/node_modules
+    env_file:
+      - path: .env.deepseek
+        required: false
+    environment:
+      FACE_BIND: "0.0.0.0"
+      FACE_ACCOUNT_URL: "http://account:4820"
+      BUYER_HOME: /seat-home
+      DSH_HOME: /dsh-home
+      FACE_AKSHARE_MCP_COMMAND: /usr/local/bin/akshare-mcp
+    ports: ["127.0.0.1:3090:3090"]
+    depends_on:
+      account:
+        condition: service_healthy
+    networks: [gravit]
+
+networks:
+  gravit: {}
+
+volumes:
+  dsh-home: {}
+  seat-home: {}
+  account-home: {}
+  face-modules: {}
+  account-modules: {}

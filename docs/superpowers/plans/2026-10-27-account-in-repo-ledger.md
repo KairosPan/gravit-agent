@@ -269,3 +269,23 @@ call as `service()`.
 - `faceBind(env)` = `env.FACE_BIND || "127.0.0.1"`; `faceOverlay(port, preset, host = faceBind())`; the webserver row's `host` is cast to the row's `"127.0.0.1" | "0.0.0.0"` union, checked by the row's schema at boot. `main.ts` keeps the URL on `127.0.0.1` and appends ` · listening on <bind>` when the bind is widened. README "The profile" sentence as the brief words it.
 - R7 boot check (scratch `DSH_HOME`, `FACE_PORT=3197`, `FACE_ACCOUNT_SEAT_DIR=/nonexistent`, `FACE_ACCOUNT_URL=http://127.0.0.1:9`): `FACE_BIND=::1` and `FACE_BIND=localhost` both fail the boot loud, `webserver (required) … $.host expected "127.0.0.1" | "0.0.0.0" but got "::1"` (resp. `"localhost"`) — the row admits only the two literals, so no loopback value other than `127.0.0.1` exists and the suffixed line was not seen live (`0.0.0.0` withheld per R7). Unset: `gravit-face: http://127.0.0.1:3197/?token=… (profile: face)`, no suffix. Every process stopped, nothing left on 3197.
 - Face gate: `npm test` = 1,653 tests, 1,630 pass, 23 skipped, 0 fail; `FACE_SMOKE=1` = 1,653/1,653 pass; typecheck clean.
+
+- R12 Ruling: the webserver row's schema takes only `"127.0.0.1" | "0.0.0.0"` for `host`, so R7's loopback alternatives (`::1`, `localhost`) stop the boot and the ` · listening on 0.0.0.0` line is not seen live on this Mac; it is left to the two-box drill (the box sets `0.0.0.0`), and the unset case was seen unchanged — a `0.0.0.0` listener on the operator's Mac is not opened for a print check — if wrong, the suffix is first seen in the drill instead of here.
+- R13 Ruling: an automated review of a3bdc93 flagged the same shape on the face: with `FACE_BIND=0.0.0.0` the `/data` routes' Host-based fence (`isTrustedDataRequest`) can be forged by any peer that reaches the port. The code stands as the spec §5 designs it (`/api` still needs the token cookie; inside compose the only peer on the `gravit` network is the account box, and 3090 is published on the host's loopback only); the misconfiguration residual (`FACE_BIND=0.0.0.0` on the host Mac exposes `/data` to the LAN with a forged `Host`) goes into the README sentence Task 5 writes ("for the box only") and DEVELOPMENT §9 with R11's in Task 6; a cookie gate on `/data` when the bind is widened is a forward item — if wrong, one condition in the `/data` fence, later.
+
+### Task 4 — review (controller)
+
+- Task 4: complete (commits 46eb7d0..a3bdc93, review clean — spec ✅, quality approved).
+- Task 4: minor (deferred): `face/src/main.ts` reads `FACE_BIND` a second time through `faceBind()`; spec §5 says the overlay row is its only reader — the boot line could print `booted.ctx.webServer.host` instead (the brief asked for `faceBind()` there).
+- Task 4: minor (deferred): the boot line's suffix logic has no test (top-level script code); a pure line-builder with two asserts would cover what R12 leaves to the drill.
+- Task 4: minor (deferred): `face/README.md` ~785, a rewrapped line runs to 128 columns.
+- Task 4: minor (deferred): `faceBind` returns `string` where the schema takes two values (the brief's interface; the boot fails loudly on anything else).
+
+### Task 5
+
+- RED: `cd face && npx tsx --test tests/compose.test.ts` = 1 test, 0 pass, 1 fail (ENOENT, `compose.yml` missing). GREEN: 1 test, 1 pass.
+- Files: `compose.yml` (root), `face/Dockerfile`, `face/docker-entrypoint.sh` (mode 755, POSIX sh, `sh -n` clean), `face/.dockerignore`, `account/Dockerfile`, `account/.dockerignore`, `face/tests/compose.test.ts`; `account/README.md` "In the box"; `face/README.md` the agent box under "The profile" and "The two-box drill".
+- R8 applied: the repo mounts as `.:${PWD}`, `working_dir: ${PWD}/face`, the module volumes at `${PWD}/face/node_modules` and `${PWD}/account/node_modules`; the test asserts those raw strings in place of the brief's `endsWith(":" + repoRoot)`, every other assertion as the brief writes it.
+- `docker compose config > /dev/null` at the repo root: exit 0 (output never printed).
+- daemon off on 2026-10-27: build and drill not run (`docker info` exit 1).
+- Face gate: `npm test` = 1,654 tests, 1,631 pass, 23 skipped, 0 fail; typecheck clean; `FACE_SMOKE=1` = 1,654/1,654 pass.

@@ -730,6 +730,16 @@ register `place_order` or `cancel_order`, the face refuses to boot until that
 row is gone ("What boot refuses" above). The face boots with or without the
 operator's rows.
 
+**In the agent box** (`../compose.yml`, "The two-box drill" below) the harness
+home is the volume `dsh-home` at `/dsh-home`, and the first `docker compose up`
+writes the profile by itself: the entrypoint (`docker-entrypoint.sh`) runs
+`npm run setup` when `/dsh-home/profiles/face` does not exist, after `npm ci`
+into the two module volumes. The operator's rows go into
+`/dsh-home/profiles/face/cordis.patch.yml`, with paths inside the box, reached
+with `docker compose run agent sh`; the box's home is its own, never the host's
+`~/.dsh`. The CLI-agent tools (`claude`, `codex`) are not in the agent image,
+so Discover lists them unavailable there; the host dev loop has them.
+
 **The default model is a row here (upgrade decision D2).** dsh-base's
 `agent-default-model` row says `deepseek-official/deepseek-flash`, and with no
 `profileContext` (D1) the face reads neither `$DSH_HOME/settings.yaml` nor any
@@ -3470,3 +3480,47 @@ origin with its own key.
 **PASS criteria are observations.** Record the run in `DEVELOPMENT.md` §7.4 and the ledger
 (`../docs/superpowers/plans/2026-10-22-account-graft-ledger.md`) with the date and the checkout's pin
 (`git -C ~/buyer-agent-demo rev-parse --short HEAD`). **Not yet run** — owed to the operator.
+
+## The two-box drill (run before the branch lands, and after any change to compose.yml or a Dockerfile)
+
+The isolated run: the face and the Account as two boxes (`../compose.yml`, `Dockerfile` and
+`docker-entrypoint.sh` here, `../account/Dockerfile`; the design's §5 and §7). The host dev loop —
+two host processes — stays the default; this run is started on purpose, with Docker Desktop's
+daemon up. **Stop the host face and the host Account first**: both boxes publish 3090 and 4820 on
+the host's loopback, which the host dev loop holds. Run every `docker compose` command at the repo
+root: the agent box mounts the repo at `${PWD}`, so the tree lands at its own host path. The model
+key comes from `../.env.deepseek` (optional; absent, the face boots and Gravit cannot answer).
+Never paste `docker compose config` output anywhere — it prints the `env_file` values resolved.
+
+`agent` (the face, dsh, Gravit's shell, AKShare, the seat) mounts the repo, `dsh-home`,
+`seat-home` (the seat's `BUYER_HOME`, holding `seats/gravit.json`) and the two module volumes —
+**no docker socket and no path of the Account's**. `account` runs the in-tree service with
+`--home /data` on `account-home`. The face reaches `http://account:4820` over the `gravit`
+network; the agent waits for the account's health check (`GET /api/overview`, its HTTP status).
+The box sets `FACE_BIND=0.0.0.0` so the face listens on the container's interface. **`FACE_BIND`
+is for the box only**: the `/data` routes' `Host` fence is the DNS-rebinding defence, not
+authentication, and `FACE_BIND=0.0.0.0` on the host Mac would serve them to the LAN to any peer
+that forges `Host`. The same holds for the Account's `PORTFOLIO_BIND` (`../account/README.md`).
+
+1. **Up.** `docker compose up --build`. The first up runs `npm ci` into `face-modules` and
+   `account-modules` (Linux binaries; it needs the network) and `npm run setup` into `dsh-home`.
+   Expect the face's boot line `gravit-face: http://127.0.0.1:3090/?token=… (profile: face) ·
+   listening on 0.0.0.0` and the seat's `[agent-portfolio-manager] up (stdio) →
+   http://account:4820`.
+2. **Pair.** `docker compose logs account` prints the pairing code; pair on
+   `http://127.0.0.1:4820` and open a paper account there (the volume starts empty — or carry the
+   host's home in first, `../account/README.md` "In the box").
+3. **The standing.** Open the tokenized URL. Account › Venues: the Account seat box reads
+   `account:4820 · reachable`; Discover's MCP shelf lists `account` with its tools and `akshare`
+   with 14; the CLI agents (`claude`, `codex`) read unavailable.
+4. **The read.** Ask Gravit for a read-only AAPL quote: `portfolio_explore` (tab=stocks, q=AAPL)
+   answers with no card, as in the 2026-10-27 drill on the real service ("The account-seat
+   drill" above).
+5. **The negative.** `docker compose exec agent ls /data` fails (no such file or directory: the
+   Account's home is not mounted there), and `docker compose exec agent ls /var/run/docker.sock`
+   fails too.
+6. **Down.** `docker compose down` (the volumes stay; `down -v` drops them, the box's Account
+   home with them).
+
+**PASS criteria are observations.** Record the run in `DEVELOPMENT.md` §7.4 with the date.
+**Not yet run** — the daemon was off when the boxes were written (2026-10-27).
