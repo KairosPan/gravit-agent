@@ -1,12 +1,13 @@
 # The isolated run: the face and the Account as two boxes (docs/superpowers/specs/
 # 2026-10-27-account-in-repo-design.md §5, §7). The host dev loop — two host processes — stays
 # the default; this file is started on purpose. Run `docker compose` at the repo root: the agent
-# box mounts the repo (`.`, this file's directory) at `${PWD}`, the shell's directory, so the
-# tree lands in the box at the repo's own host path (dsh records absolute paths). Stop the host
-# face and Account first: both boxes publish 3090 and 4820 on the host's loopback.
+# box mounts an allowlist of the repo's paths (sources relative to this file's directory) under
+# `${PWD}`, the shell's directory, so the tree lands in the box at the repo's own host path (dsh
+# records absolute paths). Stop the host face and Account first: both boxes publish 3090 and
+# 4820 on the host's loopback.
 #
-# The agent box mounts no docker socket and no path of the Account's: Gravit's shell sees the
-# repo and its two volumes, nothing else.
+# The agent box mounts no docker socket and no path of the Account's home: Gravit's shell sees
+# the allowlisted paths and the box's volumes, nothing else.
 
 services:
   account:
@@ -27,13 +28,33 @@ services:
   agent:
     build: ./face
     working_dir: ${PWD}/face
+    # An allowlist of the tree, never the root: the root holds .env* files (a venue's keys among
+    # them) and GRAVIT.local.md, none of which enter this box. account/ is read-only (the
+    # Account box's build context and the seat's code); its node_modules is the volume below.
     volumes:
-      - .:${PWD}
+      - ./face:${PWD}/face
+      - ./strategies:${PWD}/strategies
+      - ./bots:${PWD}/bots
+      - ./roles:${PWD}/roles
+      - ./account:${PWD}/account:ro
+      - ./dsh:${PWD}/dsh:ro
+      - ./docs:${PWD}/docs:ro
+      - ./GRAVIT.md:${PWD}/GRAVIT.md:ro
+      - ./CLAUDE.md:${PWD}/CLAUDE.md:ro
+      - ./AGENTS.md:${PWD}/AGENTS.md:ro
+      - ./Gravit-Design.md:${PWD}/Gravit-Design.md:ro
+      - ./DEVELOPMENT.md:${PWD}/DEVELOPMENT.md:ro
+      - ./ROADMAP.md:${PWD}/ROADMAP.md:ro
       - dsh-home:/dsh-home
       - seat-home:/seat-home
       # Linux node_modules over the host's macOS ones; the entrypoint runs npm ci when empty.
       - face-modules:${PWD}/face/node_modules
       - account-modules:${PWD}/account/node_modules
+    # An empty, read-only .git at the repo's path: dsh's agent-instructions row finds the project
+    # root by a .git marker (else it takes the session's cwd), so GRAVIT.md at the root reaches
+    # every session; no history and no git config enter the box.
+    tmpfs:
+      - ${PWD}/.git:ro
     env_file:
       - path: .env.deepseek
         required: false

@@ -14,6 +14,8 @@ type Service = {
   environment: Record<string, string>;
   volumes: unknown[];
   working_dir: string;
+  env_file: unknown;
+  tmpfs: unknown;
 };
 type Compose = { services: Record<string, Service>; volumes: Record<string, unknown> };
 
@@ -30,10 +32,22 @@ test("compose.yml runs the face and the Account as two boxes, the agent box with
   assert.equal(c.services.agent.environment.FACE_ACCOUNT_URL, "http://account:4820");
   assert.equal(c.services.agent.environment.BUYER_HOME, "/seat-home");
   assert.equal(c.services.agent.environment.DSH_HOME, "/dsh-home");
+  assert.equal(c.services.agent.environment.FACE_AKSHARE_MCP_COMMAND, "/usr/local/bin/akshare-mcp");
+  assert.deepEqual(c.services.agent.env_file, [{ path: ".env.deepseek", required: false }]);
   const agentMounts = c.services.agent.volumes.map(String);
-  // The repo at its own host path: compose runs at the repo root, so the source `.` is the repo
-  // and `${PWD}` is the same directory as the shell sees it.
-  assert.ok(agentMounts.includes(".:${PWD}"));
+  // An allowlist of the tree at its own host path, never the root: compose runs at the repo
+  // root, so `./<name>` is the repo's and `${PWD}` is the same directory as the shell sees it.
+  assert.ok(agentMounts.every(v => !v.startsWith(".:") && !v.startsWith("./:")), "no mount of the repo root");
+  assert.ok(agentMounts.every(v => !v.includes(".env")), "no .env path in the box");
+  for (const name of ["face", "strategies", "bots", "roles"]) {
+    assert.ok(agentMounts.includes(`./${name}:\${PWD}/${name}`), `${name} read-write`);
+  }
+  for (const name of ["account", "dsh", "docs", "GRAVIT.md", "CLAUDE.md", "AGENTS.md", "Gravit-Design.md", "DEVELOPMENT.md", "ROADMAP.md"]) {
+    assert.ok(agentMounts.includes(`./${name}:\${PWD}/${name}:ro`), `${name} read-only`);
+  }
+  const accountBind = agentMounts.filter(v => v.startsWith("./account:"));
+  assert.deepEqual(accountBind, ["./account:${PWD}/account:ro"]);
+  assert.deepEqual(c.services.agent.tmpfs, ["${PWD}/.git:ro"]);
   assert.equal(c.services.agent.working_dir, "${PWD}/face");
   assert.ok(agentMounts.includes("face-modules:${PWD}/face/node_modules"));
   assert.ok(agentMounts.includes("account-modules:${PWD}/account/node_modules"));

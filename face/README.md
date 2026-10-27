@@ -736,8 +736,8 @@ writes the profile by itself: the entrypoint (`docker-entrypoint.sh`) runs
 `npm run setup` when `/dsh-home/profiles/face` does not exist, after `npm ci`
 into the two module volumes. The operator's rows go into
 `/dsh-home/profiles/face/cordis.patch.yml`, with paths inside the box, reached
-with `docker compose run agent sh`; the box's home is its own, never the host's
-`~/.dsh`. The CLI-agent tools (`claude`, `codex`) are not in the agent image,
+with `docker compose exec agent sh` while `up` runs (restart the box after an
+edit); the box's home is its own, never the host's `~/.dsh`. The CLI-agent tools (`claude`, `codex`) are not in the agent image,
 so Discover lists them unavailable there; the host dev loop has them.
 
 **The default model is a row here (upgrade decision D2).** dsh-base's
@@ -3488,13 +3488,24 @@ The isolated run: the face and the Account as two boxes (`../compose.yml`, `Dock
 two host processes — stays the default; this run is started on purpose, with Docker Desktop's
 daemon up. **Stop the host face and the host Account first**: both boxes publish 3090 and 4820 on
 the host's loopback, which the host dev loop holds. Run every `docker compose` command at the repo
-root: the agent box mounts the repo at `${PWD}`, so the tree lands at its own host path. The model
-key comes from `../.env.deepseek` (optional; absent, the face boots and Gravit cannot answer).
-Never paste `docker compose config` output anywhere — it prints the `env_file` values resolved.
+root: the agent box mounts an allowlist of the repo's paths under `${PWD}`, so the tree lands at
+its own host path. On macOS a repo under `~/Desktop` needs Docker Desktop's Settings › Resources ›
+File sharing (Files and Folders › Desktop access), or the binds read EPERM. The model key comes
+from `../.env.deepseek` through `env_file` into the face's process env (optional; absent, the face
+boots and Gravit cannot answer; dsh scrubs `KEY`/`SECRET`/`TOKEN` names from every child it
+spawns, so Gravit's shell never inherits it). Never paste `docker compose config` output anywhere —
+it prints the `env_file` values resolved.
 
-`agent` (the face, dsh, Gravit's shell, AKShare, the seat) mounts the repo, `dsh-home`,
-`seat-home` (the seat's `BUYER_HOME`, holding `seats/gravit.json`) and the two module volumes —
-**no docker socket and no path of the Account's**. `account` runs the in-tree service with
+`agent` (the face, dsh, Gravit's shell, AKShare, the seat) mounts an allowlist of the tree, never
+its root: read-write `face/`, `strategies/`, `bots/`, `roles/`; read-only `account/` (the account
+box's build context and the seat's code — its `node_modules` is the writable `account-modules`
+volume), `dsh/`, `docs/` and the root documents `GRAVIT.md`, `CLAUDE.md`, `AGENTS.md`,
+`Gravit-Design.md`, `DEVELOPMENT.md`, `ROADMAP.md`; an empty read-only `.git` (a tmpfs, the
+root marker dsh's instruction files climb to, so `GRAVIT.md` reaches every session — no history in
+the box). **By design the root's `.env*` files (a venue's keys among them), `GRAVIT.local.md`
+and `compose.yml` are not in the box.** Beside them: `dsh-home`, `seat-home` (the seat's
+`BUYER_HOME`, holding `seats/gravit.json`) and the two module volumes — **no docker socket and no
+path of the Account's home**. `account` runs the in-tree service with
 `--home /data` on `account-home`. The face reaches `http://account:4820` over the `gravit`
 network; the agent waits for the account's health check (`GET /api/overview`, its HTTP status).
 The box sets `FACE_BIND=0.0.0.0` so the face listens on the container's interface. **`FACE_BIND`
@@ -3511,8 +3522,10 @@ that forges `Host`. The same holds for the Account's `PORTFOLIO_BIND` (`../accou
    `http://127.0.0.1:4820` and open a paper account there (the volume starts empty — or carry the
    host's home in first, `../account/README.md` "In the box").
 3. **The standing.** Open the tokenized URL. Account › Venues: the Account seat box reads
-   `account:4820 · reachable`; Discover's MCP shelf lists `account` with its tools and `akshare`
-   with 14; the CLI agents (`claude`, `codex`) read unavailable.
+   `account:4820 · reachable` (expected, not yet observed); on an empty `seat-home` the seat
+   reads not on the account, then knocking after Gravit's first seat call, until you admit it as
+   **Gravit** on the Account page ("The Account seat" above). Discover's MCP shelf lists `account`
+   with its tools and `akshare` with 14; the CLI agents (`claude`, `codex`) read unavailable.
 4. **The read.** Ask Gravit for a read-only AAPL quote: `portfolio_explore` (tab=stocks, q=AAPL)
    answers with no card, as in the 2026-10-27 drill on the real service ("The account-seat
    drill" above).
@@ -3521,6 +3534,13 @@ that forges `Host`. The same holds for the Account's `PORTFOLIO_BIND` (`../accou
    fails too.
 6. **Down.** `docker compose down` (the volumes stay; `down -v` drops them, the box's Account
    home with them).
+
+After a pull that changes `face/package-lock.json` or `account/package-lock.json`: `docker compose
+down`, then `docker volume rm` the project's `face-modules` and `account-modules` volumes
+(`docker volume ls` names them `<project>_face-modules`, `<project>_account-modules`), so the
+entrypoint's `npm ci` reinstalls on the next `up` — it installs only into an empty volume. A
+change to `account/` itself also needs `docker compose build account`: that box copies the tree
+at build.
 
 **PASS criteria are observations.** Record the run in `DEVELOPMENT.md` §7.4 with the date.
 **Not yet run** — the daemon was off when the boxes were written (2026-10-27).

@@ -289,3 +289,20 @@ call as `service()`.
 - `docker compose config > /dev/null` at the repo root: exit 0 (output never printed).
 - daemon off on 2026-10-27: build and drill not run (`docker info` exit 1).
 - Face gate: `npm test` = 1,654 tests, 1,631 pass, 23 skipped, 0 fail; typecheck clean; `FACE_SMOKE=1` = 1,654/1,654 pass.
+
+### Security findings on Task 5 (controller)
+
+- R14 Ruling: an automated review of 565d8c3 flagged that `.:${PWD}` hands the agent box the whole working tree. Confirmed and load-bearing: the primary checkout's root holds `.env.alpaca` (a venue's keys) and `.env.deepseek`, which the spec §3 anti-goal names ("an env file with the venue keys handed to the face"), and `account/` (the Account box's build context and the seat's code) would be writable from Gravit's shell, so a later `docker compose build` could bake an agent's edit into the money box. Fixed in Task 5's fix round 1: the agent mounts an allowlist instead of the root — read-write `face/`, `strategies/`, `bots/`, `roles/`; read-only `account/` (its `node_modules` stays the writable `account-modules` volume), `dsh/`, `docs/`, and the tracked root documents (`GRAVIT.md`, `CLAUDE.md`, `AGENTS.md`, `Gravit-Design.md`, `DEVELOPMENT.md`, `ROADMAP.md`), each at `${PWD}/<name>`; nothing at the root of the box but those, so no `.env*`, no `compose.yml`; `GRAVIT.local.md` (untracked, optional) is not in the box, said in the drill. `compose.test.ts` asserts no root mount, no `.env` path, `account` read-only. The `env_file`'s `DEEPSEEK_API_KEY` stays in the face's process env: dsh's `scrubbedParentEnv` drops `KEY|PASSWORD|SECRET|TOKEN` names from every child it spawns, so the shell never inherits it — recorded, not changed. — the spec's "the repo bind-mounted" is narrowed to the paths the face and Gravit use, the anti-goal outranks it — if wrong, a path Gravit needs in the box is missing (one line to add).
+
+### Task 5 — review (controller)
+
+- Task 5: review 1 — Needs fixes: Important `.env.*` and a writable `account/` through the root bind (R14), Important the README's `docker compose cp` before any container exists; fix round 1 sent with both plus four cheap drill lines (stale module volumes after a lock change, macOS Desktop access, `exec` not `run`, the seat box on an empty `seat-home`) and two test asserts (`env_file`, `FACE_AKSHARE_MCP_COMMAND`).
+- Task 5: minor (deferred): `face/Dockerfile` pulls the latest uv installer, unpinned.
+- Task 5: minor (deferred): the agent container runs as root — Gravit's writes land root-owned on a Linux host (Docker Desktop for Mac maps them to the host user).
+- Task 5: minor (deferred): `account/Dockerfile` has no `CMD` (compose supplies it; a bare `docker run` drops into the node REPL).
+
+### Task 5 — fix round 1
+
+- R14 applied: the agent mounts the allowlist (rw `face`, `strategies`, `bots`, `roles`; ro `account`, `dsh`, `docs`, the six root documents), no root bind; `account-modules` stays over `account/node_modules`. Seat writes checked: `src/portfolio` has no `process.cwd()` and its writes (`keystore.ts`, `desk.ts`) resolve under `defaultHome()` (`BUYER_HOME` = `/seat-home`); tsx caches under the OS temp dir. Nothing at run time writes under `account/` but `node_modules`.
+- R15 Ruling: an allowlist without `.git` makes dsh's agent-instructions row (`findProjectRoot`, default marker `.git`, "the discovered project root, or `cwd` when no marker exists") take the session's cwd as root, so the root `GRAVIT.md` would not reach a session in `strategies/<name>`. The agent box gets an empty read-only tmpfs at `${PWD}/.git` as the marker — no history, no git config (a remote URL with a token) in the box; asserted in `compose.test.ts` — if wrong, `git` in the box errors on an empty `.git` (it never had a usable one).
+- Gates: `compose.test.ts` 1/1; face `npm test` 1,654 tests, 1,631 pass, 23 skipped, 0 fail; typecheck clean; `FACE_SMOKE=1` 1,654/1,654; `docker compose config -q` exit 0. Daemon still off: no build.
