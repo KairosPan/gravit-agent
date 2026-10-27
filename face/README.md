@@ -151,7 +151,7 @@ All three of its stages are built:
 - **host-fed since stage 2**: Markets (`#/markets`) — the Account's markets by its tabs, the
   stars, a search, and a market's page with its candles and venues — and Account
   (`#/account/portfolio`, `venues`, `agents`, `cards`) — the Account's Portfolio, Venues, Agents
-  and Cards and the Statement drawer — both read from Linqi's Account through the face's proxy
+  and Cards and the Statement drawer — both read from the Account through the face's proxy
   since 2026-10-22 ("Markets and Account" and "The Account in the face" below), the A shares on
   the face's own wire. The old `/market` and `/account` pages are gone (404);
 - **host-fed since stage 3**: a channel's page (`#/channel/<id>`: its status, thesis, an old
@@ -314,23 +314,22 @@ alike; no config key changed (`src/akshare.ts` records it):
   2026-09-30 probe; the real AKShare server is a live-drill item of the go-live
   runbook (`../docs/superpowers/runbooks/2026-09-30-dsh-0.2.0-rc.2-go-live.md`).
 
-## The Account seat — Gravit at Linqi's Account
+## The Account seat — Gravit at the Account
 
 Since 2026-10-20 the face composes a second project-owned MCP row beside AKShare,
-`mcp-account` (`src/account-seat.ts`): the MCP seat of Linqi's Account —
-[linqizhe07/buyer-agent-demo](https://github.com/linqizhe07/buyer-agent-demo), the program
-that puts your exchange, broker, wallet and prediction-market accounts on one page at
-`127.0.0.1:4820` and lets agents trade inside limits you sign. Gravit's tools gain
-`mcp__account__portfolio_*` (35 on a real account). The Account is yours to install and run;
-the face never starts it. **Paper venues only** in this round
+`mcp-account` (`src/account-seat.ts`): the MCP seat of the Account — the service that puts your
+exchange, broker, wallet and prediction-market accounts on one page at `127.0.0.1:4820` and lets
+agents trade inside limits you sign. Since 2026-10-27 it is this tree's `../account/`, copied
+from Linqi's [buyer-agent-demo](https://github.com/linqizhe07/buyer-agent-demo) @ 133b9a7
+(`../account/NOTICE`). Gravit's tools gain `mcp__account__portfolio_*` (35 on a real account).
+The Account is yours to run, a second process beside the face; the face never starts it. **Paper venues only** in this round
 (`../docs/superpowers/specs/2026-10-20-account-seat-design.md`; the charter's §8 names a real
 venue as the real-money trigger).
 
-Install once:
+Install once, from the repo root:
 
 ```bash
-git clone https://github.com/linqizhe07/buyer-agent-demo.git ~/buyer-agent-demo
-cd ~/buyer-agent-demo && npm ci          # tsx is a devDependency the seat needs
+cd account && npm ci          # tsx is a devDependency the seat needs
 ```
 
 Run the service in its own terminal (or as its LaunchAgent, `npm run account:service --
@@ -338,7 +337,7 @@ install`) with writes ON — `--read-only` refuses paper orders too — and conn
 `--live-cap 1` bounds any real order to a dollar should one ever be granted:
 
 ```bash
-cd ~/buyer-agent-demo && npm run account -- --live-cap 1
+cd account && npm run account -- --live-cap 1     # home: ~/.buyer-agent-demo, the code's default
 ```
 
 Pair your browser with the code it prints, open a paper account (Trade's first-run card, or
@@ -360,14 +359,14 @@ old one's standing.
 
 | Env | Default | What |
 |---|---|---|
-| `FACE_ACCOUNT_SEAT_DIR` | `~/buyer-agent-demo` | the installed checkout the seat process runs from |
+| `FACE_ACCOUNT_SEAT_DIR` | the repo's `account/` | the Account package the seat process runs from; set it only to run the seat from another copy |
 | `FACE_ACCOUNT_URL` | `http://127.0.0.1:4820` | the running service (the seat's `PORTFOLIO_URL`; `/data/seat.json` and the proxy's `/data/account…` read the row as composed, a patch's URL and seat name included) |
 
 The checks: after a boot, `/data/plugins.json` lists `server: "account"` with 35 tools and the
 boot line reads `order gate armed for mcp__account__portfolio_live_order, …`; Account › Venues
 shows the **Account seat** box — the service reachable, the seat admitted until when with its
 limit, the paper venue marked, the cards waiting, and **Open the Account page**. A missing
-checkout or a stopped service is a logged spawn failure and a `not reachable` box, never a
+`account/node_modules` (no `npm ci`) or a stopped service is a logged spawn failure and a `not reachable` box, never a
 failed boot; a service that accepts the connection and never answers stalls the boot about two
 minutes and the row then comes up without tools (the drill's step 7). The seat's key is the Account's, `~/.buyer-agent-demo/seats/gravit.json` (0600),
 made on the seat's first call; the face never reads it. An operator patch can disable the row
@@ -388,14 +387,14 @@ connector it knows — nineteen exchanges through ccxt, `api.alpaca.markets`,
 (`polymarket.com/api/geoblock`, Cloudflare's trace, `ipapi.co`); on reads, the public quotes
 (Kraken, Coinbase, OKX, Binance, Bybit tickers; Kalshi and Polymarket; `api.robinhood.com`,
 `api.nasdaq.com`, `cdn-api.cboe.com` for US shares; LI.FI for tokenised stocks). No flag turns
-the probes off. That is Linqi's program's egress, not the face's: the face talks to it over
+the probes off. That is the Account service's egress, not the face's: the face talks to it over
 loopback only.
 
-**Re-run the seat smoke after pulling the checkout** — the Account moves fast, and a renamed
-write tool would fall out of Gate 2's list unseen by any offline test:
+**Re-run the seat smoke after any change under `account/`** — a renamed write tool would fall
+out of Gate 2's list unseen by any offline test:
 
 ```bash
-cd face && FACE_SMOKE=1 FACE_ACCOUNT_SEAT_DIR=~/buyer-agent-demo npx tsx --test tests/account-seat-smoke.test.ts
+cd face && FACE_SMOKE=1 npx tsx --test tests/account-seat-smoke.test.ts
 ```
 
 It starts the Account's own stand-in (no network, no money), mounts the seat against it and
@@ -737,8 +736,9 @@ writes the profile by itself: the entrypoint (`docker-entrypoint.sh`) runs
 into the two module volumes. The operator's rows go into
 `/dsh-home/profiles/face/cordis.patch.yml`, with paths inside the box, reached
 with `docker compose exec agent sh` while `up` runs (restart the box after an
-edit); the box's home is its own, never the host's `~/.dsh`. The CLI-agent tools (`claude`, `codex`) are not in the agent image,
-so Discover lists them unavailable there; the host dev loop has them.
+edit); the box's home is its own, never the host's `~/.dsh`. The CLI-agent
+tools (`claude`, `codex`) are not in the agent image, so Discover lists them
+unavailable there; the host dev loop has them.
 
 **The default model is a row here (upgrade decision D2).** dsh-base's
 `agent-default-model` row says `deepseek-official/deepseek-flash`, and with no
@@ -792,9 +792,10 @@ Two things about that directory are NOT yours:
   `connection`, `api-remotes`, `file-upload`, `workspace`,
   `session-controller`, `workspace-controller`, `settings-controller`,
   `directory-picker`, `tool-ask-user`, `agent-preset-registry`,
-  `preset-gravit`, `preset-kairos` — or at the `hmr` switch, at `system-prompt`'s `personaPrefix`, at the `agent-instructions`
-  row's two candidate lists, or (while `DSH_TELEMETRY_DISABLED` is set) at `session-telemetry-otel`
-  is accepted, overridden, and NEVER reported. Change those in the face —
+  `preset-gravit`, `preset-kairos` — or at the `hmr` switch, at
+  `system-prompt`'s `personaPrefix`, at the `agent-instructions` row's two
+  candidate lists, or (while `DSH_TELEMETRY_DISABLED` is set) at
+  `session-telemetry-otel` is accepted, overridden, and NEVER reported. Change those in the face —
   `src/overlay.ts`, `src/boot.ts`, `src/instructions.ts`,
   `../dsh/profile/persona.md`. The same warning is in the patch
   file's own header, which is where an operator would actually look.
@@ -902,7 +903,7 @@ these. Each has a default in the code and is the operator's to revisit:
 
 ## Markets and Account
 
-The rail opens **Markets** (`#/markets`) — Linqi's Account's markets by its own tabs, beside the A
+The rail opens **Markets** (`#/markets`) — the Account's markets by its own tabs, beside the A
 shares the face quotes itself — and **Account** (`#/account/portfolio`, `venues`, `agents`,
 `cards`), the Account's own page. Both read the Account through the face's proxy ("The Account in
 the face" below): market data comes the Account's way — keyless, server-side at the Account, read
@@ -1125,7 +1126,7 @@ drawer — the keys marked *(signs)* below are drawn only while this page signs:
 ## The Account in the face (src/account-proxy.ts + client/js/wire/account-stream.js)
 
 Since 2026-10-22 (stage 1 of `../docs/superpowers/specs/2026-10-22-account-graft-design.md`) the
-Markets and Account screens read Linqi's Account — the service the seat sits at ("The Account
+Markets and Account screens read the Account — the service the seat sits at ("The Account
 seat" above) — through the face. The Account answers only a bare loopback request: its fence
 refuses a page at another origin, the face's included, so the page never asks it. The page asks
 the face, under `/data/account…`, and `src/account-proxy.ts` asks the Account with a plain
@@ -1236,11 +1237,11 @@ whole); stage 2 added `venues`, `keyfile` and `paper-books`, and three preparati
 `prepared-watch`, `prepared-order` and `prepared-card`, a `setWatch`, a `liveOrder` and an
 `approveCard` as the Account prepares them, nothing signed — `venues` and a preparation's arrays
 kept whole; `tests/account-fixtures.test.ts` holds the files to what the views read and to that
-strip, and the client tests draw from them. Capture again when the Account's shapes move — the checkout is
-read, never written, and the stand-in takes a free port, never 4820:
+strip, and the client tests draw from them. Capture again when the Account's shapes move —
+`account/` is read, never written, and the stand-in takes a free port, never 4820:
 
 ```bash
-cd face && FACE_ACCOUNT_SEAT_DIR=$HOME/buyer-agent-demo npx tsx scripts/capture-account-fixtures.ts
+cd face && npx tsx scripts/capture-account-fixtures.ts
 ```
 
 A read the Account does not answer `ok: true` stops the capture before any file is written; after a
@@ -1265,11 +1266,12 @@ SOL/USDT 10 % under the ask and cancels it by its id; it approves the stand-in's
 from a foreign origin is refused 403; and neither the pairing code nor any of the six signatures it
 sent appears in what the face's process wrote. What the stand-in cannot drill — a second device
 waiting for an owner's Let it sign (it admits the first browser on the code) — the owner drill
-below covers. Skipped unless both variables are set; run it, and the seat smoke, after pulling the
-checkout:
+below covers. It runs from the repo's `account/` (or `FACE_ACCOUNT_SEAT_DIR` when set) and is
+skipped without `FACE_SMOKE=1` or without `npm ci` there; run it, and the seat smoke, after any
+change under `account/`:
 
 ```bash
-cd face && FACE_SMOKE=1 FACE_ACCOUNT_SEAT_DIR=$HOME/buyer-agent-demo npx tsx --test tests/account-graft-smoke.test.ts
+cd face && FACE_SMOKE=1 npx tsx --test tests/account-graft-smoke.test.ts
 ```
 
 ### The owner device (client/js/host/owner.js + client/js/wire/owner-key.js)
@@ -1384,9 +1386,9 @@ The face cannot tell a paper venue from a real one beyond the Account's `Paper` 
 paper venues only** until the operator decides otherwise — a real venue connected to the Account
 and an order placed on it by hand from the face is the charter's revisit trigger.
 
-**The risks, named** (the design's §11): the Account moves fast and nothing of it is pinned here —
+**The risks, named** (the design's §11): the face spells the Account's shapes by hand —
 a changed read reads `unreadable`, a changed envelope refuses every signature and the device line
-says so; re-run the smoke after pulling the checkout. A second device needs an owner's word once.
+says so; re-run the smoke after any change under `account/`. A second device needs an owner's word once.
 The browser profile is the device: clearing the face's site data loses the key, the Account keeps
 the old device's row, and the new one is let in like any other — no export, no backup. The proxied
 owner routes are as open as the Account's own door: a local process reaches them without the face's
@@ -2469,8 +2471,8 @@ and `node --test` gives each file its own:
 | `order-gate.test.ts` (its real-tree case) | Gate 2's listener is registered: it asks for the seat-write stand-in `mcp__drill__portfolio_live_order` (the card `Account seat - …` naming `AAPL`, `side=buy` and the venue), `mcp__drill__portfolio_live_cancel` and a renamed server's `portfolio_pay`, refuses an agentless call, lets a seat read and `mcp__drill__orders` through; the guard refuses the stand-in whose ask an outer listener swallowed, and a session whose log it cannot read with its own sentence |
 | `order-gate-smoke.test.ts` | Gate 2's POSITIVE path: an approved stand-in order dispatches, a rejected one does not; then the same through the real `$events` channel |
 | `order-gate-midboot-smoke.test.ts` | Gate 2 armed while `boot()` is still pending: a slow fixture row holds the boot open while a seat-write stand-in registers, and with `bootFace` unresolved and unary `/api` already serving, the order call is HELD with `approval/asked` logged and its body not run, an agentless call is denied by the listener, the same order with its ask swallowed by an outer listener is denied by the guard alone; once the boot is released the held card reaches the first tab and `allowed-once` dispatches exactly once; a restart of the real `approval` row re-arms the listener once |
-| `account-seat-smoke.test.ts` | the Account seat against the Account's own stand-in (skipped unless `FACE_ACCOUNT_SEAT_DIR` names an installed checkout): the seat's 35 tools and exactly its nine real-account writes gated, a read as the admitted seat, a seat order rejected at the face's card never reaching the seat, the same order allowed once answered by the stand-in with a card, a batch answered leg by leg with cards, and `/data/seat.json` reading that standing with the Account's ISO expiry as milliseconds |
-| `account-graft-smoke.test.ts` | the Account's reads through the face's proxy against the Account's own stand-in (skipped unless `FACE_ACCOUNT_SEAT_DIR` names an installed checkout; "The Account in the face"): `/data/account` 200 with `ok` and its venues, `/data/account/explore` listing items, `explore?force=1` refused 400 without asking the Account, `/data/account/stream` an event stream whose first named frame carries JSON within 5 s, and `/data/seat.json` reading the Account reachable through the proxy's reader; then the owner's half through the face's port — the client's own `host/owner.js` under Node paired with the stand-in's code, a watch signed on and off, a $25 ETH market buy whose `fill` the stream tells and whose ETH the holdings count, a SOL limit resting and cancelled by its id, the seeded card approved and its `card` frame `approved`, a foreign origin's exchange refused 403, and neither the code nor any signature sent in the face's output |
+| `account-seat-smoke.test.ts` | the Account seat against the Account's own stand-in (run from the repo's `account/`, or `FACE_ACCOUNT_SEAT_DIR` when set; skipped without its `npm ci`): the seat's 35 tools and exactly its nine real-account writes gated, a read as the admitted seat, a seat order rejected at the face's card never reaching the seat, the same order allowed once answered by the stand-in with a card, a batch answered leg by leg with cards, and `/data/seat.json` reading that standing with the Account's ISO expiry as milliseconds |
+| `account-graft-smoke.test.ts` | the Account's reads through the face's proxy against the Account's own stand-in (run from the repo's `account/`, or `FACE_ACCOUNT_SEAT_DIR` when set; skipped without its `npm ci`; "The Account in the face"): `/data/account` 200 with `ok` and its venues, `/data/account/explore` listing items, `explore?force=1` refused 400 without asking the Account, `/data/account/stream` an event stream whose first named frame carries JSON within 5 s, and `/data/seat.json` reading the Account reachable through the proxy's reader; then the owner's half through the face's port — the client's own `host/owner.js` under Node paired with the stand-in's code, a watch signed on and off, a $25 ETH market buy whose `fill` the stream tells and whose ETH the holdings count, a SOL limit resting and cancelled by its id, the seeded card approved and its `card` frame `approved`, a foreign origin's exchange refused 403, and neither the code nor any signature sent in the face's output |
 | `gravit-client-smoke.test.ts` | the new page on a real boot: `/` with its title and script, the modules under `/client` with their types (Markets' `js/wire/market-quotes.js` and `js/host/markets.js` among them), the old `chat.js` gone and `/market` and `/account` answering 404; the host layer (`client/js/host/live.js` over the page's own wire) listing a session just created and opening it (live, so a follow) into a loaded window with a clean status line; a bare `bootFace` mounts no `/data` route, which the list tolerates |
 | `client-mux-smoke.test.ts` | the page's own `client/js/wire/api.js` and `client/js/wire/mapper.js`, unmodified, against the host: ready, calls, emits, the control baseline, a follow's snapshot and tail, an approval answered and one rejected, a second tab's `cancel` and its refused late answer, Stop withdrawing a gate, a question answered, a gate replayed to a late tab, the non-activating page and projections reads |
 | `askuser-noclient-smoke.test.ts` | with no browser connected, an agent's question BLOCKS (parked for the next client); an agentless one is refused `NO_PROVIDER` |
@@ -3386,16 +3388,17 @@ limit on it ("The Account seat" above), the face started with keys, a channel se
 7. **The hang.** Stop the service and in its place start a listener that accepts and never answers
    (`node -e "require('net').createServer(()=>{}).listen(4820,'127.0.0.1')"`), then start the face:
    the boot stalls about two minutes — the seat's startup GET of `/api/account` has no timeout of
-   its own (`src/portfolio/mcp.ts:71` at 133b9a7), so its MCP `initialize` never comes and dsh waits
+   its own (`account/src/portfolio/mcp.ts`, unchanged from 133b9a7), so its MCP `initialize` never comes and dsh waits
    out the MCP SDK's 60 s request timeout twice, once for its probe process and once for the serving
    one (measured: 123 s) — then comes up with the `mcp-account` row active and no seat tools: the
    boot line has no `order gate armed for mcp__account__…`, Discover's MCP shelf lists `account`
    with 0 tools, and Account › Venues reads `not reachable` within seven seconds (`timeout`). Stop
-   the listener, start the service, restart the face. Bounding that GET is a one-line change on
-   Linqi's side (`AbortSignal.timeout` in `call()`); the face cannot bound a child's first request.
+   the listener, start the service, restart the face. Bounding that GET is a one-line change in
+   `account/` (`AbortSignal.timeout` in `call()`), not made; the face cannot bound a child's first
+   request.
 
 **PASS criteria are observations.** Record the run in `DEVELOPMENT.md` §7.4 with the date and
-the checkout's pin (`git -C ~/buyer-agent-demo rev-parse --short HEAD`).
+the tree's commit (`git rev-parse --short HEAD`).
 
 **Run 2026-10-21 on the stand-in, not the real service** (buyer-agent-demo @ 133b9a7, its
 `ui-standin --no-desk` on 4821, the face on 3097 from a scratch home with `DEEPSEEK_API_KEY`,
@@ -3430,7 +3433,7 @@ tools on a real account (the simulated statement's router, offered only there �
 the service started with writes on and the seat admitted as **Gravit** with a `trade` limit on the paper
 venue.
 
-## The owner drill (run before the branch lands, and after pulling the checkout)
+## The owner drill (run before the branch lands, and after any change under account/)
 
 The face's page as an owner device of the real Account — "The Account in the face" above, the
 design's §10. **Paper venues only**: connect no real venue to the Account for this drill, and keep
@@ -3474,12 +3477,12 @@ origin with its own key.
    line reads `Signed out` with **Sign in**; the owner keys are gone; the Account page's Devices no
    longer lists this browser. (If it was the last device, the Account prints a new pairing code in
    its terminal.)
-10. **The smokes.** Run `account-seat-smoke` and `account-graft-smoke` against the installed checkout
+10. **The smokes.** Run `account-seat-smoke` and `account-graft-smoke` against the repo's `account/`
     ("The Account seat", "The Account in the face").
 
 **PASS criteria are observations.** Record the run in `DEVELOPMENT.md` §7.4 and the ledger
-(`../docs/superpowers/plans/2026-10-22-account-graft-ledger.md`) with the date and the checkout's pin
-(`git -C ~/buyer-agent-demo rev-parse --short HEAD`). **Not yet run** — owed to the operator.
+(`../docs/superpowers/plans/2026-10-22-account-graft-ledger.md`) with the date and the tree's commit
+(`git rev-parse --short HEAD`). **Not yet run** — owed to the operator.
 
 ## The two-box drill (run before the branch lands, and after any change to compose.yml or a Dockerfile)
 

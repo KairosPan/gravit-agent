@@ -209,11 +209,11 @@ test("the profile can override or disable the repo's AKShare row", () => {
   assert.equal(disabledRows[0].disabled, true, "the default must not re-enable an operator-disabled row");
 });
 
-/* The Account seat row (src/account-seat.ts): the seat process of Linqi's
- * Account, spawned from the checkout the operator installs, pointed at the
- * service the operator runs. The command is this process's own node binary
- * and the checkout's tsx, never npx (which would fetch tsx when the install
- * is missing); the env is what the seat reads (dsh spreads it over a
+/* The Account seat row (src/account-seat.ts): the seat process of the
+ * Account, spawned from the repo's account/ (FACE_ACCOUNT_SEAT_DIR overrides),
+ * pointed at the service the operator runs. The command is this process's own
+ * node binary and account/'s tsx, never npx (which would fetch tsx when the
+ * install is missing); the env is what the seat reads (dsh spreads it over a
  * scrubbed parent env). */
 test("composeFace mounts the Account seat from FACE_ACCOUNT_SEAT_DIR and FACE_ACCOUNT_URL", () => {
   const home = freshHome();

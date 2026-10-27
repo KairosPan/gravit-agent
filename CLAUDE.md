@@ -1,15 +1,15 @@
 # CLAUDE.md
 
 Descriptive, not prescriptive — present-tense facts about the tree, updated when the tree
-moves; the only CLAUDE.md in the repo. Owner: the operator. Last reviewed 2026-10-24. Depth
+moves; the only CLAUDE.md in the repo. Owner: the operator. Last reviewed 2026-10-27. Depth
 lives in `DEVELOPMENT.md`, `Gravit-Design.md`, `face/README.md`, docstrings, and `docs/`.
 
 ## What this is
 A market-strategy-account research workbench for one operator, one principal agent (Gravit) and
-operator-authored bots, reset 2026-08-29 from the previous product. MARKET + ACCOUNT are Linqi's
-Account, an external program Gravit reaches through its seat and the face shows on its screens,
-plus AKShare for A shares; the repo holds no Python since 2026-10-24. STRATEGY is `strategies/`,
-the agent's arena, run on DeepSeek Harness (dsh) inside `face/`, the chat face.
+operator-authored bots, reset 2026-08-29 from the previous product. MARKET + ACCOUNT are the
+Account, the service in `account/` that Gravit reaches through its seat and the face shows on its
+screens, plus AKShare for A shares; the repo holds no Python since 2026-10-24. STRATEGY is
+`strategies/`, the agent's arena, run on DeepSeek Harness (dsh) inside `face/`, the chat face.
 
 ## Map
 | Where | What |
@@ -24,7 +24,8 @@ the agent's arena, run on DeepSeek Harness (dsh) inside `face/`, the chat face.
 | `dsh/` | the harness config: `profile/cordis.yml` template (indicative shape, not a validated dsh config) + `profile/{persona,cycle}.md` (Gravit's persona, and the research-cycle contract the face mounts as its `gravit:cycle` section — evidence from the Account through the seat, AKShare, and a forward paper trade; no role calls) + `profile/lunhui-run.md` (the A-share research run's order, mounted as Gravit's `lunhui:run` section) + `skills/mechanics` (`account-seat-guide`) + `skills/style-gravit` (operator style). Install is `cd face && npm run setup`, then the operator's rows per `dsh/README.md` |
 | `face/` | gravit-face: Node 22, hosts dsh 0.2.0-rc.2 in-process from profile `face`, serves one page, the client, at 127.0.0.1:3090 (Messages with a page per channel, Markets, Trade, Discover and Account are its screens; `/market` and `/account` are gone); `strategies/*` are rostered channels; `face/plugins/lunhui/` are the Lunhui rows (`src/lunhui.ts`: eleven in-process dsh rows freezing, analysing and reviewing A-share research runs into `strategies/<name>/analysis/`); `src/orders.ts` is Gate 2, the per-order approval card; the face's own quote wire (`/data/quotes`, `/data/symbols/search`) speaks A shares alone (iFinD, Tencent) |
 | `face/src/akshare.ts` | project-owned AKShare MCP connection for public A-share queries; composed below operator profile/home patches; no lookahead guard; install/version and live-query limits in `face/README.md` |
-| `face/src/account-seat.ts` · `account-proxy.ts` | the Account seat: the project-owned `mcp-account` row (`@deepseek-ai/dsh-mcp-client`, stdio, composed beside AKShare) that spawns the MCP seat of Linqi's Account — [linqizhe07/buyer-agent-demo](https://github.com/linqizhe07/buyer-agent-demo), an external program the operator installs (`FACE_ACCOUNT_SEAT_DIR`, default `~/buyer-agent-demo`, `npm ci` there) and runs (`npm run account`, 127.0.0.1:4820; `FACE_ACCOUNT_URL`) — so Gravit's tools gain `mcp__account__portfolio_*`; paper venues only, by the operator's grants at the Account (its page, or the face's owner keys); every seat write passes Gate 2 here and the Account's Guard card there (answerable in the face's Cards); `face/src/account-proxy.ts` proxies the Account's reads and push channel under `/data/account…` for the Markets, Trade and Account screens, and the owner device's three writes — `pair`, `prepare`, `exchange`, their bodies passed through unparsed and unlogged (loopback, twenty exact routes, per-route TTLs; the face holds no key and signs nothing), and `face/src/seat.ts` serves `/data/seat.json` for the seat box through the proxy's reader; the seat's key is the Account's (`~/.buyer-agent-demo/seats/gravit.json`); nothing of the Account is vendored since 2026-10-20 (the `demo/` submodule is gone) |
+| `account/` | the Account service, its own package (`gravit-account`, Node 22, `npm ci` here; not a workspace of `face/`), copied from Linqi's [buyer-agent-demo](https://github.com/linqizhe07/buyer-agent-demo) @ 133b9a7 on 2026-10-27 (`NOTICE`, `LICENSE` Apache-2.0): `src/portfolio/` (the service `server.ts`, the seat `mcp.ts`, the Account's own page under `public/`) over `src/{core,agent,contract}`; scripts `account` (127.0.0.1:4820, home `~/.buyer-agent-demo`), `portfolio:mcp`, `account:demo`, `account:service`, `account:check`, `test` (vitest), `typecheck`; `PORTFOLIO_BIND` and `PORTFOLIO_HOSTS` widen its listener and its `Host` fence for the compose box only. `compose.yml` at the root runs it as the `account` box beside the face's `agent` box (`face/README.md` "The two-box drill") |
+| `face/src/account-seat.ts` · `account-proxy.ts` | the Account seat: the project-owned `mcp-account` row (`@deepseek-ai/dsh-mcp-client`, stdio, composed beside AKShare) that spawns the Account's MCP seat from the repo's `account/` (`FACE_ACCOUNT_SEAT_DIR` overrides) and talks to the service the operator runs there (`npm run account`, 127.0.0.1:4820; `FACE_ACCOUNT_URL`) — so Gravit's tools gain `mcp__account__portfolio_*`; paper venues only, by the operator's grants at the Account (its page, or the face's owner keys); every seat write passes Gate 2 here and the Account's Guard card there (answerable in the face's Cards); `face/src/account-proxy.ts` proxies the Account's reads and push channel under `/data/account…` for the Markets, Trade and Account screens, and the owner device's three writes — `pair`, `prepare`, `exchange`, their bodies passed through unparsed and unlogged (loopback, twenty exact routes, per-route TTLs; the face holds no key and signs nothing), and `face/src/seat.ts` serves `/data/seat.json` for the seat box through the proxy's reader; the seat's key is the Account's (`~/.buyer-agent-demo/seats/gravit.json`) |
 | `bots/` | one directory per bot (`_template` is the copy source, `gravit` the default, whose composition the face renders from `roles/` — its `gravit.js` row plus one `dsh-tool-subagent` row per role, today `cn-market-analyst`'s, `cn-reviewer`'s and `cn-stock-analyst`'s, `agent.cordis.yml` being the generated mirror — `drill-bull`/`drill-bear` the room drill's two voices, `news-scout` an operator bot), declared by the face as a dsh agent preset (`face/src/bot-presets.ts`, re-declared on every save) — persona + allow-list mask via `face/plugins/bot.js`; in a room (a channel session with bots rostered) `face/src/room.ts` creates one `read-only` member session per bot and Gravit calls `dispatch` |
 | `roles/` | the role library, one directory per role (`_template` is the copy source; three roles ship — `cn-market-analyst`, the Lunhui market modules' analyst, `cn-stock-analyst`, the leader and mode modules' analyst, and `cn-reviewer`, the counterevidence reviewer): `ROLE.md` (the child's persona) + `role.yml` (`name`, a one-line `description`, `allow` — exact tool names, optional `model`), operator-edited; `face/src/roles.ts` reads it at boot and renders Gravit's preset, one `role_<id>` one-shot child each — after an edit `cd face && npm run render:roles` regenerates the `bots/gravit/agent.cordis.yml` mirror (`DEVELOPMENT.md` §3.8) |
 | `docs/` | `superpowers/{specs,plans,runbooks}` (per-feature decision history; everything dated 2026-06/07, and `runbooks/p-b-p-c-activation.md`, describes the retired product; `runbooks/2026-09-30-dsh-0.2.0-rc.2-go-live.md` is the operator's go-live procedure) · `research/` (frozen inputs) · `design/prototypes` (face rounds R1–R4) |
@@ -33,10 +34,12 @@ the agent's arena, run on DeepSeek Harness (dsh) inside `face/`, the chat face.
 
 ## Commands
 ```bash
-# face/ — the repo's only build and test
+# face/
 npm run setup               # once, after npm install: writes $DSH_HOME/profiles/face, never overwrites
 npm test && npm run typecheck
 npm start                   # prints http://127.0.0.1:3090/?token=… — open that (see face/README.md)
+# account/ — its own package
+npm run account             # 127.0.0.1:4820; npm test (vitest) && npm run typecheck
 ```
 
 ## Gotchas
@@ -53,15 +56,15 @@ npm start                   # prints http://127.0.0.1:3090/?token=… — open t
   30-day cookie for the exact host:port (`localhost` is not `127.0.0.1`); `/api` 401s without it.
 - **`face/client/*` is served with no cache headers** — hard-reload the browser after any client
   edit, or you drill a stale module.
-- **The Account seat is an external install.** `face/src/account-seat.ts` spawns the MCP seat of
-  Linqi's Account from `FACE_ACCOUNT_SEAT_DIR` (default `~/buyer-agent-demo`: clone it, `npm ci`
-  there) and talks to the service you run (`npm run account`, writes on — `--read-only` refuses
-  paper orders too); paper venues only: admit the seat as **Gravit** on the Account page and sign
-  it a `trade` limit naming a paper venue, never a real one. Every seat write is two cards, Gate 2
-  here and the Account's there; re-run `account-seat-smoke` after pulling the checkout. The face's
-  page is an owner device of the Account too (charter D18): the operator's hand orders from Trade
-  pass no gate of this tree's, only the Account's cap — paper venues only in the owner drill
-  (`face/README.md`), and `account-graft-smoke` after pulling the checkout as well.
+- **The Account is a second process.** `cd account && npm ci` once; `cd account && npm run
+  account` runs it on its default home `~/.buyer-agent-demo` (writes on — `--read-only` refuses
+  paper orders too), and `face/src/account-seat.ts` spawns the seat from `account/`. Paper venues
+  only: admit the seat as **Gravit** on the Account page and sign it a `trade` limit naming a
+  paper venue, never a real one. Every seat write is two cards, Gate 2 here and the Account's
+  there. The face's page is an owner device of the Account too (charter D18): the operator's hand
+  orders from Trade pass no gate of this tree's, only the Account's cap — paper venues only in the
+  owner drill (`face/README.md`). The two boxes (`docker compose up`) are optional, the isolated
+  run; the two host processes are the daily one.
 
 Reading order for a new session: `Gravit-Design.md` §1–§2 → the `DEVELOPMENT.md` section you
 are touching → `GRAVIT.md` for what Gravit itself sees.

@@ -306,3 +306,29 @@ call as `service()`.
 - R14 applied: the agent mounts the allowlist (rw `face`, `strategies`, `bots`, `roles`; ro `account`, `dsh`, `docs`, the six root documents), no root bind; `account-modules` stays over `account/node_modules`. Seat writes checked: `src/portfolio` has no `process.cwd()` and its writes (`keystore.ts`, `desk.ts`) resolve under `defaultHome()` (`BUYER_HOME` = `/seat-home`); tsx caches under the OS temp dir. Nothing at run time writes under `account/` but `node_modules`.
 - R15 Ruling: an allowlist without `.git` makes dsh's agent-instructions row (`findProjectRoot`, default marker `.git`, "the discovered project root, or `cwd` when no marker exists") take the session's cwd as root, so the root `GRAVIT.md` would not reach a session in `strategies/<name>`. The agent box gets an empty read-only tmpfs at `${PWD}/.git` as the marker — no history, no git config (a remote URL with a token) in the box; asserted in `compose.test.ts` — if wrong, `git` in the box errors on an empty `.git` (it never had a usable one).
 - Gates: `compose.test.ts` 1/1; face `npm test` 1,654 tests, 1,631 pass, 23 skipped, 0 fail; typecheck clean; `FACE_SMOKE=1` 1,654/1,654; `docker compose config -q` exit 0. Daemon still off: no build.
+
+### Task 5 — re-review (controller)
+
+- Task 5: fix round 1/5 (2 addressed + the folded minors, 0 open; commits 565d8c3..19e5b4a; R15, the empty read-only tmpfs `.git` that keeps dsh's project-root walk at the repo root, checked against `dsh-agent-instructions`' `findProjectRoot` and found sound).
+- Task 5: complete (commits a3bdc93..19e5b4a, review clean after one fix round).
+- Task 5: minor (deferred): the six root documents are single-file binds, which pin the inode — a host `git checkout`/`pull` that rewrites one by rename leaves the running box on the old copy until `docker compose up` recreates it.
+- Task 5: minor (deferred): `npm ci` into the volume under a read-only `account/` is unobserved until the first `up` on a daemon.
+
+### Task 6
+
+- Documents: charter (Status; §1 ACCOUNT; §3's ACCOUNT box; D17 gains the two-box sentence; §7.3 "the Account service's"; §9 the 2026-10-27 line and projects 2–3); `CLAUDE.md` (What this is; the new `account/` row; the seat row names `account/`, the "nothing vendored since 2026-10-20" clause dropped; Commands gain `account/`; the Gotcha rewritten as "The Account is a second process"; 70 lines, was 67); `AGENTS.md` (the `account/` suite line); `DEVELOPMENT.md` (Status amendment; §1; §3.1; §3.6; new §3.9; §4.2; §4.3 `FACE_BIND` in the webserver row; §4.6 `FACE_ACCOUNT_SEAT_DIR`, `FACE_BIND`, `PORTFOLIO_BIND`/`PORTFOLIO_HOSTS`, `FACE_SMOKE`; §6.6; §7.1 the `account/` rows; §7.2; §7.3 counts, `account-seat`, `overlay`, `standin-helper`, `compose`, the two smokes; §7.4 the owner drill's trigger and the two-box row "not yet run (Docker Desktop's daemon off on 2026-10-27)" with the unseen ` · listening on 0.0.0.0` suffix (R12); R1, R32–R34; R50 the seat's key in the agent box; R51 the two `Host` fences, DNS-rebinding defences not authentication (R11, R13); §10 items 22–26; Appendix A); `face/README.md` ("The Account seat" install `cd account && npm ci`, no clone; the fixtures and graft-smoke commands without `FACE_ACCOUNT_SEAT_DIR`; the seat and owner drills' triggers and pins; the tests table; Linqi's-program wording; ~739 and ~794 rewrapped); the loops page (its five Account-as-external mentions, in Chinese; the two `~/.buyer-agent-demo` home mentions are the home and stay); `ROADMAP.md` (the built-log line); the spec's Status line (R9).
+- Carried minors fixed: `face/scripts/capture-account-fixtures.ts` error text names `account/`; `face/tests/boot.test.ts` comment names the repo's `account/`; README long line rewrapped.
+- Step 3 grep: every remaining line is the Account's home `~/.buyer-agent-demo` (correct: it is the code's default home) or the 133b9a7 attribution; no line presents the Account as an install outside the tree. `GRAVIT.md` unchanged (3,459 bytes).
+- Face gate: `npm test` = 1,654 tests, 1,631 pass, 23 skipped, 0 fail; typecheck clean.
+
+## Final tree
+
+- `git ls-files account | wc -l` = 352.
+- Face: `npm test` 1,654 tests, 1,631 pass, 23 skipped, 0 fail; `FACE_SMOKE=1` 1,654/1,654 pass (Task 5's run); typecheck clean.
+- Account: 158 files, 157 pass, 1 fail (`test/unit/ui-superagent.test.ts`, the origin's known red); 2,840 tests, 2,839 pass (Task 3's run); typecheck clean.
+- Deferred minors (the "minor (deferred)" lines above): Task 1 — the orphan `src/contract/env-scrub.ts`; `NOTICE` line 2's wording; `import-closure.mjs` reach order and raw-text scan. Task 2 — `standinDir({})` pins less than it reads; the tsx-missing line under an override; the capture script's header width. Task 3 — the bind test cannot fail under port 0; an empty programmatic `hosts` entry. Task 4 — `main.ts` reads `FACE_BIND` a second time; no test of the boot line's suffix; `faceBind` typed `string`. Task 5 — the unpinned uv installer; the agent container as root; no `CMD` in `account/Dockerfile`; single-file binds pin the inode; `npm ci` under a read-only `account/` unobserved. (Task 2's two carried comments and Task 4's README line were fixed in Task 6; Task 3's two README items in Task 5.)
+- Hand-over to the operator, none done by the build:
+  1. Restart the host Account on the default home: `cd account && npm run account` (no `--home`, `BUYER_HOME` unset → `~/.buyer-agent-demo`). The service now on `~/.openpaper` is not the Account.
+  2. Update `.claude/launch.json`'s `account` entry to run `npm run account` in this repo's `account/`.
+  3. Run the two-box drill (`face/README.md` "The two-box drill") when Docker Desktop is up, stopping the host face and Account first; record it in `DEVELOPMENT.md` §7.4.
+  4. The `mcp-alpaca-kit` row in the live `~/.dsh` patch — unrelated, still the operator's to drop.

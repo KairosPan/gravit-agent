@@ -179,8 +179,8 @@ async function capture(base: string): Promise<{ answers: Map<string, unknown>; p
   return { answers, prepared, frames: await streamFrames(`${base}/api/account/stream?client=${STREAM_CLIENT}`) };
 }
 
-for (const [path, fix] of [[CLI, "run npm ci in the checkout"], [STANDIN, "not the Account's checkout"]] as const) {
-  if (!existsSync(path)) throw new Error(`${path} is missing: ${fix} (FACE_ACCOUNT_SEAT_DIR names the checkout)`);
+for (const [path, fix] of [[CLI, "run npm ci in account/"], [STANDIN, "not the Account's install"]] as const) {
+  if (!existsSync(path)) throw new Error(`${path} is missing: ${fix} (or set FACE_ACCOUNT_SEAT_DIR to another copy)`);
 }
 const standin = await startStandin(await freePort(), DIR);
 const { answers, prepared, frames } = await capture(standin.url).finally(() => stopStandin(standin));

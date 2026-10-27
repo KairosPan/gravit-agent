@@ -12,5 +12,6 @@ The research agent, Gravit, does not: dsh hands it `GRAVIT.md` and nothing else.
   do not edit them unless asked.
 - Keep the suite green: `npm test && npm run typecheck` in `face/` (the repo has no Python
   suite), plus `FACE_SMOKE=1 npm test` after any change under `face/src`, `face/plugins` or to
-  the dsh pins.
+  the dsh pins; after a change under `account/`, its own `npm test && npm run typecheck` there
+  (one known red, `test/unit/ui-superagent.test.ts`) and the face's `FACE_SMOKE=1` run.
 - Commit messages go in a file and through `git commit -F`; never backticks or `$()` in `-m`.

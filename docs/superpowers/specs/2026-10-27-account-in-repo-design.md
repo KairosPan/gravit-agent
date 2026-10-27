@@ -1,8 +1,8 @@
 # The Account's service in this tree — Design (one repo, two boxes)
 
 Written 2026-10-27 against main @ 92c5a0c and Linqi's buyer-agent-demo @ 133b9a7 (the checkout
-installed at `~/buyer-agent-demo`). Project 1 of three (§2). Status: DRAFT, awaiting the operator's
-approval; nothing built.
+installed at `~/buyer-agent-demo`). Project 1 of three (§2). Status: approved by the operator on
+2026-10-27; built on `claude/account-in-repo-415034` (plan `docs/superpowers/plans/2026-10-27-account-in-repo.md`, ledger beside it).
 
 ## 1. Intent — the operator's words
 

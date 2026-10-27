@@ -34,6 +34,12 @@ the `lunhui-review` row and its two tools, the `cn-reviewer` role, the core's ne
 block re-measured, R46, R48 and R49 and §10 items 15, 18, 19 and 21, each read against the code on
 `feat/lunhui-modules-3` @ `d77bcd3` (1642 tests, 1619 pass + 23 skipped; 1640 of 1642 under
 `FACE_SMOKE=1`).
+**Amended 2026-10-27** for the Account service in this tree (spec
+`docs/superpowers/specs/2026-10-27-account-in-repo-design.md`): §1, §3.1, §3.6, the new §3.9
+(`account/` and the two boxes), §4.2, §4.3, §4.6, §6.6, §7.1–§7.4, R32–R34, R50 and R51, §10
+items 22–26 and Appendix A, each read against the code on `claude/account-in-repo-415034` @
+`19e5b4a` (1654 tests, 1631 pass + 23 skipped; 1654/1654 under `FACE_SMOKE=1`; `account/`'s
+2,840 tests, 2,839 pass, the one known red).
 
 **Authority.** `Gravit-Design.md` (the charter) outranks this document on intent. This document
 describes mechanism *as built*: where it disagrees with the code, the code is the fact and this
@@ -68,7 +74,8 @@ repository, so §4.8 is where those decisions are recorded now.
 ## 1. The system in one page
 
 One long-lived process (the face) with three kinds of child, one browser tab, and one external
-service of its own (the LLM) — plus Linqi's Account on loopback, whose markets and page
+service of its own (the LLM) — plus the Account on loopback, this tree's `account/` run as a
+second process (§3.9), whose markets and page
 the Markets, Trade and Account screens read through the face's proxy (§4.4), at whose door the
 page signs as one of its owner devices (§5.3), and whose own egress `face/README.md` lists, the A shares' quote and search providers (iFinD, Tencent), AKShare's
 upstreams, and the Lunhui rows' Tencent and Eastmoney hosts (`face/README.md` "Lunhui analysis").
@@ -97,7 +104,7 @@ upstreams, and the Lunhui rows' Tencent and Eastmoney hosts (`face/README.md` "L
  └────────────────────────────────────────────────────────────────────────────────────────┘
         │                                  │
         ▼                                  ▼
- api.deepseek.com                  127.0.0.1:4820 — Linqi's Account (the seat's service, the
+ api.deepseek.com                  127.0.0.1:4820 — the Account, `account/` (the seat's service, the
  (the LLM; also `web_search`       proxied reads, the owner's door); its venues and feeds are
   via /anthropic/v1)               its own egress
 ```
@@ -106,9 +113,9 @@ Three homes on disk:
 
 | Home | What lives there | Who writes |
 |---|---|---|
-| the repo root | `face/`, `strategies/`, `bots/`, `roles/`, `dsh/` (the profile *template* and skill packs), `docs/`; also the session project directory and the sandbox workspace root | operator, coding agents, Gravit (in `strategies/`); the Lunhui rows, from the face process and outside any sandbox, under `strategies/<name>/analysis/` only (§9, R39) |
+| the repo root | `face/`, `account/` (the Account service, §3.9), `strategies/`, `bots/`, `roles/`, `dsh/` (the profile *template* and skill packs), `docs/`; also the session project directory and the sandbox workspace root | operator, coding agents, Gravit (in `strategies/`); the Lunhui rows, from the face process and outside any sandbox, under `strategies/<name>/analysis/` only (§9, R39) |
 | `$DSH_HOME` (default `~/.dsh`) | `profiles/face/` (the installed profile; its `cordis.patch.yml` holds the operator's rows — and, once the operator adds it, `agent-default-model`: the provider, model id and reasoning effort Gravit runs with, §3.1, PLAN D2), `sessions/` (per session a 0.1.1 `session.jsonl.zstd` and/or, once 0.2.0 has write-opened it, `session.v4.jsonl.zstd` + `session.lock`), `storages/` (workspace registry; the projection cache, one record per session), `face/` (`archived.json`, `channels.json`, `roster.log`, `agents.json`), `.env`, `.credentials.yaml` (dsh's own key store, mode 0600; since 0.2.0 also the browser-session signing secret), `.anonymous-user-id`; `settings.yaml` is 0.1.1's settings file, which the face no longer reads (PLAN D1) | the operator (the patch file, keys) and the face — including the dsh plugins it hosts (`credentials-local`, `connection`, the session persistence and the storage chain) — for everything else |
-| `~/.buyer-agent-demo` (`BUYER_HOME`) | the Account's own home: its store, the seat's key (`seats/gravit.json`) | the Account and its seat; never this tree |
+| `~/.buyer-agent-demo` (`BUYER_HOME`) | the Account's own home: its store, the seat's key (`seats/gravit.json`); under compose the volumes `account-home` (the Account box) and `seat-home` (the seat, in the agent box) instead (§3.9) | the Account and its seat; never the face |
 
 Credentials: `.env.deepseek` is a gitignored file at the repo root that the operator `source`s
 before `npm start`; `$DSH_HOME/.env` is the equivalent placement-safe option (dsh's layered env
@@ -190,14 +197,14 @@ connect. Installation, source limitations and the live-roster check are in `face
 
 The Account seat is the second project-owned row, `face/src/account-seat.ts` (spec
 `docs/superpowers/specs/2026-10-20-account-seat-design.md`): a stdio `mcp-account` row composed right
-after AKShare, below the operator's patches, that spawns the MCP seat of Linqi's Account
-(`linqizhe07/buyer-agent-demo`, an external program the operator installs at `FACE_ACCOUNT_SEAT_DIR`,
-default `~/buyer-agent-demo`, and runs at `FACE_ACCOUNT_URL`, default `http://127.0.0.1:4820`) with
-this process's node and the checkout's `tsx`, never `npx`; the seat is named `Gravit`
+after AKShare, below the operator's patches, that spawns the Account's MCP seat from the repo's
+`account/` (`DEFAULT_SEAT_DIR`, resolved from the face's own location; `FACE_ACCOUNT_SEAT_DIR`
+overrides) against the service the operator runs at `FACE_ACCOUNT_URL`, default
+`http://127.0.0.1:4820` (§3.9), with this process's node and `account/`'s own `tsx`, never `npx`; the seat is named `Gravit`
 (`PORTFOLIO_AGENT`), its key the Account's (`$BUYER_HOME/seats/gravit.json`, made by the seat on its
 first tool call), the call timeout 90 s (`portfolio_wait` runs 55 s at most), startup failure logged
 and not fatal. The seat sets no `instructions`; it registers its 35 real-account tools even with no
-service to reach (§4.3 prices them). A missing checkout is a spawn failure dsh logs: the row stays
+service to reach (§4.3 prices them). A missing `account/node_modules` (no `npm ci` there) is a spawn failure dsh logs: the row stays
 ACTIVE with no tools and the Account screen's seat box says the service is not reachable. The seat's
 twelve writes are Gate 2's (§4.7); its standing reaches the screen through `/data/seat.json` (§4.4);
 a role never carries a seat tool (§3.8's never-list). The install, what the service does on its own
@@ -205,7 +212,7 @@ and the drill are in `face/README.md` "The Account seat". A service half-open at
 MCP `initialize` timeouts (measured 123 s against a listener that never answers: dsh-mcp-client's probe
 process and its serving process each wait the MCP SDK's 60 s), after which the row is active with no
 tools and `/data/seat.json` says `timeout` within 7 s; the seat's startup GET has no timeout of its own
-(`src/portfolio/mcp.ts:71` at 133b9a7), a change that is Linqi's (`face/README.md`, the drill's step 7).
+(`account/src/portfolio/mcp.ts`, the startup read, unchanged from 133b9a7), a change now this tree's to make (`face/README.md`, the drill's step 7).
 
 ### 3.2 Skill packs
 
@@ -324,7 +331,7 @@ default broken, and the boot refuses).
 | `web_search` | `tool-web` (`fetch: false`, PLAN D6) over `web-search-deepseek` | outbound to `https://api.deepseek.com/anthropic/v1` with `DEEPSEEK_API_KEY`; no page fetch |
 | `ask_user_question` | `tool-ask-user` (face overlay; the blocking `legacy` mode) | §4.3; the answer is model-visible, so not a gate |
 | `mcp__akshare__*` | project `mcp-akshare` row | public A-share/other market queries, unguarded; check source errors and truncation |
-| `mcp__account__*` | project `mcp-account` row (§3.1) | the Account seat: Linqi's Account at `127.0.0.1:4820`, an external program; 35 real-account tools (42 against a simulated service); the twelve writes carded by Gate 2 (§4.7), the reads public, seconds old and unguarded — read as they are, with no lookahead guard; `portfolio_wait` polls a card or an order for 55 s at most |
+| `mcp__account__*` | project `mcp-account` row (§3.1) | the Account seat: the Account at `127.0.0.1:4820`, `account/` (§3.9); 35 real-account tools (42 against a simulated service); the twelve writes carded by Gate 2 (§4.7), the reads public, seconds old and unguarded — read as they are, with no lookahead guard; `portfolio_wait` polls a card or an order for 55 s at most |
 | `lunhui_read_run`, `lunhui_freeze_quotes`, `lunhui_freeze_limit_up`, `lunhui_freeze_boards`, `lunhui_freeze_index` | the project Lunhui rows (`src/lunhui.ts`, §4.3): `lunhui-runs` registers the first, one freeze row each of the other four | frozen A-share research runs (spec `docs/superpowers/specs/2026-10-25-lunhui-modules-design.md`, plan 1 of four): every tool takes a strategy name — the channel's — and a run id, never a path, anchored under the `lunhui-runs` row's `strategiesRoot` by `face/plugins/lunhui/lib/runs.mjs`; a freeze with `run` omitted opens a run in `strategies/<name>/analysis/<run>/` (`run.json`, `metrics.json`) and answers its id, with `run` it adds to that open run, and each writes one `evidence-<source>.json` (`quotes`, `limit-up`, `boards`, `index`) of hashed items and the derived items over them — a second freeze of one source in one run is `SOURCE_FROZEN`; `lunhui_freeze_quotes` (Tencent quotes and 60-day bars, 1–8 symbols, stage 0's rule) in any channel, the other three in `cn-market` only (`WRONG_CHANNEL`): the 涨停, 炸板 and 昨日涨停 pools (≤ 500 rows each), the top 30 concept boards by change with up to ten boards' members (≤ 100 each) and the board fund-flow rank, the four indices with 120-day bars and the market's advance/decline counts from Eastmoney's up/down distribution (a distribution the freeze cannot use — another session's, a failed request — lands the index items without the counts, the three count measures null, the reply's `counts` naming the refusal; spec §17) — the Eastmoney items stamped with the host that served them and `delayed`; eight freezes a run, a refused one counted, then `TOOL_BUDGET`; a delegated child is refused `NOT_GRAVIT`; a China date no calendar table covers, or one whose latest opened session lies outside the calendar, is `CALENDAR_UNCOVERED`; each evidence file and its `run.json` entry record `session`, the trading day the data belongs to (`getMarketSession(now).expectedQuoteDate`, the previous session on a weekend, a holiday or before 09:15), beside `received_at`, the wall clock, and the reply carries both as `session` and `as_of`; an evidence file is at most 256 KiB — `limit-up`'s 1 MiB, three full pools — and a run's evidence 2 MiB; a code a pool reply repeats keeps its first row, the reply's `duplicates` counting the rest; a quotes freeze's quote items are `kind: "quote"` (the parsed index or equity kind kept as `instrument`), the index freeze's `kind: "index"`; every refusal is a thrown `LunhuiError`, `Error: <CODE> …` to the model, naming no path; a run seals on the first module context read (next row), after which a freeze is `RUN_SEALED`; `lunhui_read_run` answers `run.json`, the counters (`metrics.json`) and each module artifact file present, by `MODULES` order, with its headline when `run.json` `artifacts[]` names the module and the file is an object within 24 KiB compact — any other file listed unaccepted with no headline — and, with `run` omitted, lists the strategy's newest sealed runs instead: at most five of its last 50 run ids, newest first, each `{run, session, sealed_at, snapshot_id, artifacts}` (`artifacts` the modules `run.json` names accepted), an open, missing or unusable run passed over, no lock taken, nothing counted or written, so Gravit finds the day's or the previous trading day's `cn-market` run from a strategy channel; unguarded and never evidence of a trade, like AKShare's; named by no bot's allow list (`tests/bots.test.ts`) |
 | `lunhui_read_environment_context`, `lunhui_submit_environment`, `lunhui_read_sentiment_context`, `lunhui_submit_sentiment`, `lunhui_read_theme_context`, `lunhui_submit_theme` | the project Lunhui module rows (`src/lunhui.ts`, §4.3): `lunhui-environment`, `lunhui-sentiment`, `lunhui-theme`, one pair each, built by `defineModule` (`face/plugins/lunhui/lib/module-tool.mjs`) over the module's contract (`lib/contracts/<module>.mjs`) | the three market modules (spec §5.4–§5.7, plan 2 of four), `cn-market` runs only (`WRONG_CHANNEL` otherwise), every argument a strategy name and a run id: a read, open to any caller, counts the call, seals the run when it is open (A4: `snapshot_id` and `session` fixed, no evidence lands after) and answers the module's context — a digest of at most 30 KiB of UTF-8 JSON (A24) with the envelope fields to copy, the module's hypotheses, schema, hints and an example built from the digest, its sources' derived items first, then rows by the module's priority, the rest named in `truncated` — and says `NOT_EVALUABLE` when a required source is missing (environment needs `index`; sentiment `limit-up` and `index`; theme `boards` and `limit-up`); a submit takes `analysis`, the artifact as JSON text, from a delegated role child only (`NOT_A_ROLE` for a root session or a seeded fork, A23), after that module's read in this process (`READ_FIRST`), once a module a run (`ALREADY_SUBMITTED`), validated fail-closed by `validateEnvelope` (`[<category>] <reason>\n修复：<repair>`, code `INVALID_ANALYSIS`) and landed as `<module>.json`, named in `run.json` `artifacts[]`; ten calls a module a run, reads and submits together, the refusals inside a resolved run counted, then `TOOL_BUDGET`; the headlines are environment's `index_state`, `liquidity_state`, `cycle_anchor`, sentiment's `state` (one of the seven), `money_effect`, `freeze_type` (and, in an `OK` artifact, a `conflict` beside an `UNKNOWN` state), theme's `mainline_candidates`, `theme_stage`, `rotation`; the role `cn-market-analyst` is the only allow list that names them (§3.8), and no bot's does |
 | `lunhui_read_leader_context`, `lunhui_submit_leader`, `lunhui_read_mode_context`, `lunhui_submit_mode` | the project Lunhui module rows `lunhui-leader` and `lunhui-mode` (`src/lunhui.ts`, §4.3), one pair each, `defineModule` over `lib/contracts/leader.mjs` and `lib/contracts/mode.mjs` | the two strategy modules (spec §5.4–§5.6, A5, A12, A18, A22, A27, E4; plan 3 of four), a run of any strategy but `cn-market` (`WRONG_CHANNEL` there), otherwise as the market pairs — budget, `NOT_A_ROLE`, `READ_FIRST`, `ALREADY_SUBMITTED`, `INVALID_ANALYSIS`. The read takes a third argument, `market_run`: a sealed `cn-market` run (`NO_SUCH_RUN` when there is none, `MISSING_EVIDENCE` while it is open) whose `session` is the strategy run's or the trading day before it by the calendar tables (`STALE_MARKET_RUN` otherwise, and for a strategy session no table covers), shape-checked before the strategy run is touched and checked fresh after the seal; the context shows that run's evidence as `market:<source>` rows and its accepted artifacts as bounded views citable as `<module>@<snapshot_id>`, and its envelope carries `market_run` and `market_snapshot_id`. The submit takes no `market_run`: the artifact copies both from the read, and they bind as the other envelope fields do. **leader** — `leader_candidates` (at most five, each a priced equity quote the strategy run froze whose code a pool row or member list of the cited run holds, its 顺位 `rank` 1 to n, its `board` a mainline board of the cited theme artifact whose frozen members hold the code, or null) and `top_pattern_flags` — needs the cited run's accepted theme artifact (`NOT_EVALUABLE` naming `market:theme` otherwise) and writes 龙头 only as 龙头候选. **mode** — `mode` (`S01`, `S02` or `WAIT`), `preconditions`, `research_only_matches`, `expectation`, `expectation_review`, with `parameters_used` and `addressed` beside them — needs the run's accepted leader artifact and the cited run's sentiment and theme views (`NOT_EVALUABLE` naming `leader`, `market:sentiment` or `market:theme` otherwise — a view the 30 KiB cap leaves out counts as missing), the leader cited on the same market run (`MISSING_EVIDENCE` naming the leader's otherwise); an `S01` or `S02` needs the run's counterevidence accepted `OK`, with an `items` array and the mode's own `market_run`, every item answered by its `x` id; its card is at most 2,048 bytes of compact JSON (`BYTE_LIMIT`); it registers `S01` only in `lunhui-s01-repair`, `S02` only in `lunhui-s02-rotation` and never while its catalyst has no source — so today not at all — and `WAIT` anywhere, adding `INADMISSIBLE_STATE` and `UNADDRESSED_COUNTEREVIDENCE` to the core's categories; the role `cn-stock-analyst` is the only allow list that names the four (§3.8), and no bot's does |
@@ -626,6 +633,73 @@ landing `counterevidence.json` in that run, Gravit's own submit `NOT_A_ROLE`). T
 the role drill (`face/README.md`, §7.4), which the live market run covers for `cn-market-analyst`
 and `cn-reviewer`, and the live strategy run for `cn-stock-analyst` and `cn-reviewer`.
 
+### 3.9 The Account service (`account/`)
+
+`account/` is the Account — the service, its MCP seat and its own page — as this tree's own package
+(`gravit-account`, `"type": "module"`, Node `^22.19.0 || >=24`, its own `node_modules` by `npm ci`
+there; not a workspace of `face/`, whose `package.json` stays a dsh host's). It is a plain copy of
+Linqi's buyer-agent-demo @ 133b9a7, made 2026-10-27 (spec
+`docs/superpowers/specs/2026-10-27-account-in-repo-design.md`); `account/NOTICE` names the origin,
+the commit and the copied paths, `account/LICENSE` is the origin's Apache-2.0 text, and the copy
+tracks nothing upstream — a later pull is a by-hand diff against that commit.
+
+**What is there.** `src/portfolio/` whole (the service `server.ts`, the seat `mcp.ts`, the
+`account/`, `live/`, `adapters/` modules and the page under `public/`) over the closure it imports,
+`src/core`, `src/agent` and `src/contract`; `fixtures/home/portfolio/` and `manifests/`, which are
+run-time inputs (`service.ts` reads the first at every start); `test/` (unit, stand-in, attack and
+the seat's own tests); `scripts/import-closure.mjs`, the closure script the copy was made with. The
+origin's runner, control room, wallet, venue connectors, plugins, scripts and docs stayed out, and
+nothing under `account/src` reaches them. Six origin test files stayed out with them, whole, each
+reaching what stayed out: `test/unit/wallet.test.ts` (imports `src/wallet`), `test/e2e.test.ts`
+(spawns `src/runner`), `test/unit/site-numbers.test.ts` (`scripts/`, `site/`),
+`test/unit/review2-contracts.test.ts` and `test/unit/mode-rules.test.ts` (the origin's `README.md`,
+`COOKBOOK.md`, `docs/`), `test/unit/env-scrub.test.ts` (walks `src/runner`); every kept file is
+byte-identical to the origin's but `server.ts` and its guard test.
+
+**Scripts.** `account` (`tsx src/portfolio/server.ts`: 127.0.0.1:4820; `--read-only`,
+`--live-cap <usd>`, `--port <n>`, `--home <dir>`, `--fresh`), `portfolio:mcp` (the seat the face's
+`mcp-account` row spawns, §3.1), `account:demo`, `account:service`, `account:check`, `test`
+(vitest, one file at a time), `typecheck` (`tsc --noEmit`). The home is the code's default,
+`~/.buyer-agent-demo` (`BUYER_HOME` overrides; `home.ts`), for the service and the seat's key alike.
+
+**The one change to the copy: the fence's second address.** `server.ts` listens where
+`PORTFOLIO_BIND` says (default `127.0.0.1`) and admits, beside the loopback `Host` values
+(`LOCAL_HOST`), the exact `host:port` entries `PORTFOLIO_HOSTS` lists (`parseHosts`, comma-separated,
+empties dropped, case-sensitive); with an extra host admitted, the `claude mcp add` line
+`/api/account` prints (`agentSetup`) names the first entry. The `Origin` and Fetch-Metadata rules
+are unchanged. Both variables are unset on the host and set only by `compose.yml`; the `Host` fence
+is the DNS-rebinding defence, not authentication (§9, R51). `test/unit/server-guard.test.ts` covers
+the default refusing `account:4820`, the admitted host, `evil:4820` still refused, a foreign
+`Origin` still refused, and `parseHosts`.
+
+**The two boxes.** `compose.yml` at the repo root runs two services, each from its own
+`Dockerfile` on `node:22`, on one private network (`gravit`):
+
+- **`account`** — the image copies `account/` and runs `npm ci` at build; the service runs
+  `--home /data` on the volume `account-home`, with `PORTFOLIO_BIND=0.0.0.0` and
+  `PORTFOLIO_HOSTS=account:4820`; it publishes `127.0.0.1:4820`, and a health check on `GET
+  /api/overview` (the HTTP status) gates the agent's start. No bind mount, no env file.
+- **`agent`** — the face (`face/Dockerfile`, `face/docker-entrypoint.sh`), `FACE_BIND=0.0.0.0`
+  (§4.3), `FACE_ACCOUNT_URL=http://account:4820`, publishing `127.0.0.1:3090`; one `env_file` for
+  the model key. It mounts no repo root but an allowlist at the repo's own host path (`${PWD}`,
+  so `docker compose` runs at the root): read-write `face/`, `strategies/`, `bots/`, `roles/`;
+  read-only `account/` (the seat's code — so no agent edit reaches the Account box's next build),
+  `dsh/`, `docs/` and the six root documents (`GRAVIT.md`, `CLAUDE.md`, `AGENTS.md`,
+  `Gravit-Design.md`, `DEVELOPMENT.md`, `ROADMAP.md`); and an empty read-only tmpfs at `.git`,
+  the project-root marker dsh's agent-instructions row walks to (`findProjectRoot`), with no
+  history or git config behind it. The root `.env*` files, `GRAVIT.local.md` and `compose.yml`
+  are not in the box. Its homes are volumes: `dsh-home` (`$DSH_HOME`) and `seat-home`
+  (`BUYER_HOME` for the seat: `seats/gravit.json` and nothing else); `face-modules` and
+  `account-modules` lie over the two `node_modules` (Linux binaries), filled by the entrypoint's
+  `npm ci` when empty. It mounts no docker socket and nothing of the Account's home.
+
+The face reaches `http://account:4820`, and the seat (the face's child, same box) the same URL.
+What the split buys: the Account's home — the desk's seat keys, `agent-wallets`, the paper book,
+the owner-device registry — is not on any filesystem Gravit's shell can read. What it does not: the
+seat's own key stays with the seat, in the agent box (R50). The two host processes stay the daily
+run and Docker is not involved there; the boxes are the isolated run, `face/README.md` "The two-box
+drill" and `account/README.md` "In the box".
+
 ---
 
 ## 4. Frontend: the face server (`face/src`)
@@ -738,8 +812,8 @@ row audit; and the policy layer.
    seat's tools and the gate covers none of its writes (`uncovered`), or when any server
    registers a retired order tool, `place_order` or `cancel_order` (`retired`; the refusal names
    the tool and says to remove its MCP row). A third outcome is silence: `dsh-mcp-client`
-   defaults `failOnStartupError: false`, so a seat child that cannot start (no checkout at
-   `FACE_ACCOUNT_SEAT_DIR`) leaves the row ACTIVE and the tree healthy with no
+   defaults `failOnStartupError: false`, so a seat child that cannot start (no `npm ci` in
+   `account/`, or a `FACE_ACCOUNT_SEAT_DIR` naming nothing) leaves the row ACTIVE and the tree healthy with no
    `mcp__account__*` tools, no `order gate armed` line and no error from the face — only
    `mcp-client(account): connection failed … no tools were registered` on stdout; reconnect
    exhaustion unregisters the tools for the life of the process. Check the server's page on
@@ -780,7 +854,7 @@ smoke that boots without `main.ts` relies on.
 | `overlay.ts` | the thirteen host rows `dsh-base` does not mount (§4.3), `satisfies`-checked against each plugin's own config type; `BOTS_ROOT`, `DEFAULT_PRESET`, `GRAVIT_PLUGIN_RELATIVE`, `presetRowId` |
 | `policy.ts` | the policy layer (§4.3): `POLICY_ID_PATCHES`, `POLICY_INSERTS`, `facePolicyPatches` — each row a PLAN decision; a missing target is reported on stderr, never skipped silently |
 | `akshare.ts` | project AKShare MCP defaults, composed below operator profile/home patches |
-| `account-seat.ts` | the Account seat row (§3.1): `ACCOUNT_SEAT_ROW_ID`, `ACCOUNT_SEAT_SERVER`, `SEAT_TOOL_PREFIX`, `ACCOUNT_SEAT_NAME`, `seatDir`/`seatUrl` (the env or the defaults), `accountSeatPatches` — this process's node, the checkout's `tsx`, the seat's env, 90 s, failing soft; composed right after AKShare — and `composedSeatRow` (the row AS COMPOSED, read off the Loader's entries: disabled by a patch, or its service URL and seat name), which `main.ts` hands the seat route so the box follows an operator's patch, never the environment alone |
+| `account-seat.ts` | the Account seat row (§3.1): `ACCOUNT_SEAT_ROW_ID`, `ACCOUNT_SEAT_SERVER`, `SEAT_TOOL_PREFIX`, `ACCOUNT_SEAT_NAME`, `DEFAULT_SEAT_DIR` (the repo's `account/`, resolved from this file's location, never `homedir()`), `seatDir`/`seatUrl` (the env or the defaults), `accountSeatPatches` — this process's node, `account/`'s `tsx`, the seat's env, 90 s, failing soft; composed right after AKShare — and `composedSeatRow` (the row AS COMPOSED, read off the Loader's entries: disabled by a patch, or its service URL and seat name), which `main.ts` hands the seat route so the box follows an operator's patch, never the environment alone |
 | `lunhui.ts` | the Lunhui rows (§4.3; modules spec §5.12): `LUNHUI_ROW_IDS`, `LUNHUI_TOOL_NAMES`, `lunhuiPatches(repoRoot?)` — one insert of eleven file-plugin rows under `face/plugins/lunhui/`, each `name` the absolute `file:` URL of its file (`lunhui-runs` → `runs-row.mjs`, `lunhui-freeze-quotes` → `freeze-quotes-row.mjs`, …, `lunhui-mode` → `mode-row.mjs`, `lunhui-review` → `review-row.mjs`), `lunhui-runs`' config `{strategiesRoot}` (this checkout's `strategies/`) and the four freeze and six module rows' `{}`; `LUNHUI_TOOL_NAMES` the seventeen tools in row order; composed right after the seat; plain data, nothing mounted |
 | `protocols.ts` | Gravit's run protocols (§4.3): `readProtocol` reads one prose file — trimmed, refused with its absolute path first when missing, unreadable, empty, over `PROTOCOL_MAX_BYTES` (3,000 raw bytes, inclusive) or carrying `{{` — and `readProtocols(dir?)` returns every shipped one as `{name, probe, text}`, today `lunhui:run` (`LUNHUI_RUN_SECTION`) from `lunhui-run.md` (`LUNHUI_RUN_FILE`, `LUNHUI_RUN_PATH`) under `PROTOCOLS_DIR` (`dsh/profile/`, resolved from the module), gated on `lunhui_read_run`; dependency-free |
 | `orders.ts` | Gate 2 decision logic, pure: `isOrderTool` (the seat's twelve writes — `SEAT_WRITE_RAW_NAMES` — and any tool under the face's own seat prefix outside `SEAT_READ_RAW_NAMES`), `isSeatWriteTool`, `RETIRED_ORDER_RAW_NAMES` and `isRetiredOrderTool` (`place_order`, `cancel_order` under any server: denied, never carded), `effectiveApprovalPolicy`, `orderApprovalDecision` (with the `displayReason` twin), `describeOrder` (the seat's keys in a readable order; a key field shown whole or the call denied), `hasApprovalGrant`, `orderGuardReason`, `orderGuardReasonForSession` (the guard's one producer; a retired tool denied first; reads `snapshotEvents()`, a distinct denial for an unreadable log), `auditOrderTools` (`{gated, uncovered, retired}`) — depends on nothing (structural types only) |
@@ -824,7 +898,7 @@ Thirteen rows, composed last, winning silently over the operator's patch and the
 
 | Row | Package | Why the face mounts it |
 |---|---|---|
-| `webserver` | `dsh-host-webserver` | `127.0.0.1:<port>`, `compression: none` — loopback-only is the contract |
+| `webserver` | `dsh-host-webserver` | `127.0.0.1:<port>`, `compression: none` — loopback-only is the contract; the host is `faceBind()`, `FACE_BIND` from the process environment or `127.0.0.1`, a process-env switch and never a patch row, so no operator patch widens it; the row's schema takes `127.0.0.1` or `0.0.0.0` and fails the boot on anything else; only the compose agent box sets `0.0.0.0` (§3.9), and `main.ts` then appends ` · listening on <bind>` to the printed `127.0.0.1` URL |
 | `connection` | `dsh-client-connection` | `trustedHosts: []`: the `/api` Host/Origin fence and, since 0.2.0, the browser sign-in (§4.4); its first activation on a home writes the cookie's signing secret into `$DSH_HOME/.credentials.yaml` |
 | `api-remotes` | `dsh-api-remotes` | the gateway's only `$events` source: forwards `approval/request` and `user-questions/request` to every connected browser; without it every approval resolves `unavailable` — boot refuses (§4.1) |
 | `file-upload` | `dsh-client-file-upload` | provides `fileUploads`, which the session controller hard-injects |
@@ -1488,7 +1562,7 @@ with no `Origin` passes on `Host` alone — `curl` works, which is residual R3 i
 |---|---|---|
 | `GET /` | `static.ts` | the sign-in and the app page (gravit-ui, §5): `authorizeIndex` first — a valid `?token=` is answered `303 ./` with the cookie, a cookie gets `index.html`, anything else a 401, and on a refusal the face writes nothing itself |
 | `/client/*` | `static.ts` | the client's assets; public (PLAN D8), no cache headers; path containment on the resolved absolute path. `/market` and `/account` left with stage 2 (Markets and Account are screens of the client at `/`) and reach no route: 404 |
-| `GET /data/account`, `/data/account/explore`, `/market`, `/quotes`, `/compare`, `/candles`, `/holdings`, `/positions`, `/statement`, `/history`, `/agents` | `account-proxy.ts` | Linqi's Account's own reads (`GET /api/account`, `GET /api/account/<route>`) for the Markets and Account screens (§5.3), at the URL of the `mcp-account` row AS COMPOSED (`composedSeatRow`; `FACE_ACCOUNT_URL`, default `http://127.0.0.1:4820`, when no row is composed); each an `exact` route, so the table is the allow-list. Fence first (403), then 405 for any method but GET, then the query rebuilt from the route's names in `ACCOUNT_QUERY` — `account` `fresh`; `explore` `tab`, `q`, `key`, `limit`; `market` `venue`, `symbol`; `quotes` `pairs`; `compare` `base`, `side`, `usd`, `asset`; `candles` `venue`, `symbol`, `interval`, `range`, `before`, `limit`; `holdings` `cost`, `paper`, `fresh`; `positions` `venue`; `statement` `fresh`; `history` `range`, `paper`, `venue`; `agents` `fresh` — in the order they came, each once, a value at most 240 characters decoded (`pairs` 2,000), the request target at most 8,192, `fresh=1` the face's own flag and never forwarded; anything else is 400 `invalid account request` with nothing asked. A disabled row answers 503 `{"ok":false,"unreachable":"disabled"}` and asks nothing. Then the route's cache — `ACCOUNT_TTL_MS`: account 15 s, explore 20 s, market and quotes 3 s, compare 15 s, candles 30 s, holdings 8 s, positions 10 s, statement 10 s, history 60 s, agents 15 s; only a 2xx answer kept, by rebuilt query, at most 64 a route, the least recently used out first; reads of one query share one fetch, and `?fresh=1` skips the TTL and never joins a plain flight — then a plain loopback `fetch` (no Origin, no `Sec-Fetch-Site`, no cookie, `redirect: "error"`; `ACCOUNT_ABORT_MS` on the headers and the body: 7 s, explore 10 s, holdings and history 12 s, candles 25 s). The Account's status and body pass through unparsed as `application/json` with `no-store`; a fetch failure is 503 `{"ok":false,"unreachable":"<CODE>"}` (`ECONNREFUSED`, `timeout`, `unreadable`, `unreachable` for a code-less error) — never its text — or the query's last kept answer re-served flagged `stale: true`. The screens read nine of the eleven: `market` and `positions` have no reader yet |
+| `GET /data/account`, `/data/account/explore`, `/market`, `/quotes`, `/compare`, `/candles`, `/holdings`, `/positions`, `/statement`, `/history`, `/agents` | `account-proxy.ts` | the Account's own reads (`GET /api/account`, `GET /api/account/<route>`) for the Markets and Account screens (§5.3), at the URL of the `mcp-account` row AS COMPOSED (`composedSeatRow`; `FACE_ACCOUNT_URL`, default `http://127.0.0.1:4820`, when no row is composed); each an `exact` route, so the table is the allow-list. Fence first (403), then 405 for any method but GET, then the query rebuilt from the route's names in `ACCOUNT_QUERY` — `account` `fresh`; `explore` `tab`, `q`, `key`, `limit`; `market` `venue`, `symbol`; `quotes` `pairs`; `compare` `base`, `side`, `usd`, `asset`; `candles` `venue`, `symbol`, `interval`, `range`, `before`, `limit`; `holdings` `cost`, `paper`, `fresh`; `positions` `venue`; `statement` `fresh`; `history` `range`, `paper`, `venue`; `agents` `fresh` — in the order they came, each once, a value at most 240 characters decoded (`pairs` 2,000), the request target at most 8,192, `fresh=1` the face's own flag and never forwarded; anything else is 400 `invalid account request` with nothing asked. A disabled row answers 503 `{"ok":false,"unreachable":"disabled"}` and asks nothing. Then the route's cache — `ACCOUNT_TTL_MS`: account 15 s, explore 20 s, market and quotes 3 s, compare 15 s, candles 30 s, holdings 8 s, positions 10 s, statement 10 s, history 60 s, agents 15 s; only a 2xx answer kept, by rebuilt query, at most 64 a route, the least recently used out first; reads of one query share one fetch, and `?fresh=1` skips the TTL and never joins a plain flight — then a plain loopback `fetch` (no Origin, no `Sec-Fetch-Site`, no cookie, `redirect: "error"`; `ACCOUNT_ABORT_MS` on the headers and the body: 7 s, explore 10 s, holdings and history 12 s, candles 25 s). The Account's status and body pass through unparsed as `application/json` with `no-store`; a fetch failure is 503 `{"ok":false,"unreachable":"<CODE>"}` (`ECONNREFUSED`, `timeout`, `unreadable`, `unreachable` for a code-less error) — never its text — or the query's last kept answer re-served flagged `stale: true`. The screens read nine of the eleven: `market` and `positions` have no reader yet |
 | `GET /data/account/stream?client=&since=&markets=` | `account-proxy.ts` | the Account's push channel (`GET /api/account/stream`), piped: fence, GET only, the query rebuilt from `since` (≤ 240), `client` (required, `STREAM_CLIENT`: 8–48 of `[A-Za-z0-9_-]`) and `markets` (≤ 4,000), each once — the browser's `Last-Event-ID` (≤ 240), when it sends one, is the `since` passed on in place of the query's, as the Account reads it — else 400; a disabled row 503 `disabled`. One upstream request per browser connection (`accept: text/event-stream`, `redirect: "error"`): the Account's 200 written through chunk by chunk under the face's SSE headers, never buffered, re-framed or read, the response ended when the Account ends it; aborted when the browser's response closes or errors, when the browser falls 256 KiB behind (the response then destroyed, as `quotes.ts` does) and on `dispose`; any other answer is the Account's status and body (its refusal past 32 streams among them), a fetch failure 503 with its code; never kept |
 | `POST /data/account/stream/markets` | `account-proxy.ts` | the markets a tab's stream follows (`POST /api/account/stream/markets`): fence, POST only (405), 415 for a body not declared `application/json`, 400 for any query name (both before the body is read), the body read under `STREAM_BODY_LIMIT` (4,096 bytes, else 413) and posted as it came with `content-type: application/json` under a 7 s abort — never parsed, kept or echoed; a disabled row answers `disabled` once the body is read; the Account's status and body come back as they are |
 | `GET /data/account/venues`, `/data/account/connect/reach?connector=`, `/data/account/keyfile?kind=&venue=&ref=&exchange=`, `/data/account/paper/books` | `account-proxy.ts` | the stage-2 reads behind the owner's Connect an account and Open a paper account (`GET /api/account/venues`, `/connect/reach`, `/keyfile`, `/paper/books`; `ReadRoute` `venues`, `reach`, `keyfile`, `books`), under every rule of the eleven above: `venues` takes no query name (never the Account's `force`), `reach` `connector`, `keyfile` `kind`, `venue`, `ref`, `exchange`, `books` none; TTL `venues` 60 s, the other three 5 s; abort 30 s each (a cold catalog or reach probes every venue). `keyfile` answers a path and which fields are there or missing, never a value |
@@ -1554,13 +1628,15 @@ face's `WorkspaceLike`). Recorded, not fixed.
 | `FACE_PORT` | `main.ts` | `3090` | `"0"` asks the OS; `""` means default |
 | `FACE_PROFILE` | `main.ts`, `setup.ts` | `face` | honored by both `setup` and `start` |
 | `FACE_AKSHARE_MCP_COMMAND` | `akshare.ts` | `~/.local/bin/akshare-mcp` | the AKShare server's executable |
-| `FACE_ACCOUNT_SEAT_DIR` | `account-seat.ts` | `~/buyer-agent-demo` | the installed checkout of Linqi's Account (buyer-agent-demo, `npm ci` there) the seat process runs from |
+| `FACE_ACCOUNT_SEAT_DIR` | `account-seat.ts` (`seatDir`) | the repo's `account/` (`DEFAULT_SEAT_DIR`) | the Account package the seat process runs from (`npm ci` there); set it only to run the seat from another copy |
+| `FACE_BIND` | `overlay.ts` (`faceBind`), for the `webserver` row; `main.ts` for the boot line | `127.0.0.1` | the webserver's bind (§4.3): `0.0.0.0` in the compose agent box only — never on the host, where it would serve the `/data` routes to the LAN behind a forgeable `Host` fence (§9, R51) |
+| `PORTFOLIO_BIND`, `PORTFOLIO_HOSTS` | `account/src/portfolio/server.ts`, not the face | `127.0.0.1`, none | the Account's listener and the extra `host:port` values its `Host` fence admits (§3.9); set by `compose.yml` for the Account box (`0.0.0.0`, `account:4820`) and nowhere else |
 | `FACE_ACCOUNT_URL` | `account-seat.ts` (`seatUrl`), for the seat, `seat.ts` and `account-proxy.ts` | `http://127.0.0.1:4820` | the running Account service the seat, `/data/seat.json` and the proxy's `/data/account…` reads and owner writes reach, unless a patch composed the `mcp-account` row with another URL |
 | `FACE_IFIND_POLL_MS`, `IFIND_ACCESS_TOKEN`, `IFIND_REFRESH_TOKEN` | the quote routes | `30000`, —, — | the A shares' live quotes on the Markets screen (`face/README.md`, "Markets and Account") |
 | `DSH_HOME` | `main.ts`, `boot.ts`, `sessions.ts`, `panels.ts` and dsh itself via `resolveDshHome`; `setup.ts` reads it raw (`?? ~/.dsh`) | `~/.dsh` | written by `bootFace` when a test passes an override; `resolveDshHome` treats an empty or whitespace value as unset and expands `~`, `setup.ts` does neither, so such a value sends `setup` and `start` to different homes |
 | `DSH_TELEMETRY_DISABLED` | `boot.ts` | unset | any non-empty value (`0`, `false` included) disables the telemetry row, and its patch composes after the operator layers, so it wins over an operator's re-enable; the policy layer disables the row by default anyway |
 | `DSH_PERMISSION_MODE` | dsh, not the face | `workspace-write` | `danger-full-access` sets approval policy `never`: it disarms the sandbox-escalation card but **not** Gate 2, which then denies in its own words |
-| `FACE_SMOKE` | tests | unset | `=1` enables the twenty-three real-boot tests; the seat and graft smokes also need `FACE_ACCOUNT_SEAT_DIR` |
+| `FACE_SMOKE` | tests | unset | `=1` enables the twenty-three real-boot tests; the seat and graft smokes run from the repo's `account/` (its `npm ci` done), or from `FACE_ACCOUNT_SEAT_DIR` when set |
 | `DEEPSEEK_API_KEY` | dsh's credential seam | — | not auto-loaded from the repo's `.env.*` files |
 
 The Lunhui rows read no environment variable. Their fixture mode is row config (modules spec A15):
@@ -1647,8 +1723,8 @@ because neither alone suffices:
    mounting the Alpaca MCP row of before 2026-10-24 that registers the pair does not boot until the
    row is removed (that row's server cannot start anyway: its package is gone). A write the
    Account renames under the face's own prefix is carded as unclassified, and under a renamed
-   server it is the audit's `uncovered`; `tests/account-seat-smoke.test.ts` against the installed
-   checkout is the canary (§7.3). Boot
+   server it is the audit's `uncovered`; `tests/account-seat-smoke.test.ts` against the repo's
+   `account/` is the canary (§7.3). Boot
    also refuses a tree with no ACTIVE `api-remotes` entry (§4.1), without which every ask
    resolves `unavailable` and every order is denied at once, with no card anywhere.
 
@@ -2959,7 +3035,8 @@ when the picked folder is itself an adopted channel directory (the repo root —
 channel and every connected agent is callable there. The CLI logs itself in; the face never
 reads its credentials.
 
-**6.6 The loopback fence and the sign-in.** `webserver` binds `127.0.0.1`; `connection` trusts
+**6.6 The loopback fence and the sign-in.** `webserver` binds `127.0.0.1` (`0.0.0.0` only under
+`FACE_BIND` in the compose agent box, §4.3); `connection` trusts
 no extra hosts; every `/data` route and dsh's `/api` refuse a non-loopback `Host`, a cross-site
 fetch, or a mismatched `Origin` (403). `/` and `/api` then want the browser cookie (401): `/`
 mints it from the printed token, `/api` and the mux upgrade check it. `/data` and `/client/*`
@@ -3015,24 +3092,32 @@ from the member's own log without activating it (§5.4) — it follows no member
 
 | Command | From | Needs | Measured 2026-09-30 |
 |---|---|---|---|
-| `cd face && npm test` | `face/` | nothing — no port, no key | 1642 tests, 1619 pass, 23 skipped (2026-10-26, plan 4 of the Lunhui modules; the repo's only suite since the Python one left on 2026-10-24) |
+| `cd face && npm test` | `face/` | nothing — no port, no key | 1654 tests, 1631 pass, 23 skipped (2026-10-27, the Account in the tree) |
 | `cd face && npm run typecheck` | `face/` | | clean, the dependencies' `.d.ts` included (`skipLibCheck: false`) |
-| `cd face && FACE_SMOKE=1 npm test` | `face/` | boots twenty-three real trees into `mkdtemp` homes and binds ports; still no LLM or key (four of the smokes also create, and remove, a gitignored `.bots-smoke-*` bots root at the repo root) | the twenty-three skipped tests; 1640 of 1642 on 2026-10-26 (plan 4's docs pass over `d77bcd3`), 1611 of 1613 the same day (plan 3's docs pass over `8020a5e`) and 1546 of 1548 at plan 2's `91307f2`, the seat and graft smokes skipped without `FACE_ACCOUNT_SEAT_DIR`; 1263/1263 with one todo at stage 3's Task 6 (2026-10-24, `e77900a`), 1310/1310 at stage 2's `b45c5cc`, each with `FACE_ACCOUNT_SEAT_DIR` naming a checkout of buyer-agent-demo @ 133b9a7 — without it the seat and graft smokes stay skipped |
+| `cd face && FACE_SMOKE=1 npm test` | `face/` | boots twenty-three real trees into `mkdtemp` homes and binds ports; still no LLM or key (four of the smokes also create, and remove, a gitignored `.bots-smoke-*` bots root at the repo root) | the twenty-three skipped tests; 1654/1654 on 2026-10-27, the seat and graft smokes running from the repo's `account/` with no `FACE_ACCOUNT_SEAT_DIR`; before that, 1640 of 1642 on 2026-10-26 (plan 4's docs pass over `d77bcd3`), 1611 of 1613 the same day (plan 3's docs pass over `8020a5e`) and 1546 of 1548 at plan 2's `91307f2`, the seat and graft smokes skipped without `FACE_ACCOUNT_SEAT_DIR`; 1263/1263 with one todo at stage 3's Task 6 (2026-10-24, `e77900a`), 1310/1310 at stage 2's `b45c5cc`, each with `FACE_ACCOUNT_SEAT_DIR` naming a checkout of buyer-agent-demo @ 133b9a7 — without it the seat and graft smokes stay skipped |
+| `cd account && npm test` | `account/` | `npm ci` there; a scratch `BUYER_HOME` keeps the run off `~/.buyer-agent-demo`; no network, not 4820 | 158 files, 157 pass, 1 fail — the known red `test/unit/ui-superagent.test.ts`, the origin's too; 2,840 tests, 2,839 pass; about 143 s, vitest one file at a time (2026-10-27) |
+| `cd account && npm run typecheck` | `account/` | | clean |
 | `cd face && npm run check:fixture` | `face/` | the installed dsh | 26 fixture lines: 23 validated, 0 rejected, 3 with no upstream validator |
 
 ### 7.2 The Python suite (removed 2026-10-24)
 
 The 400 offline pytest cases left with the Python package, `pyproject.toml` and the scripts
-(the design's §12); the face suite below is the repo's only suite.
+(the design's §12); the face suite below was the repo's only suite until `account/` brought its
+own on 2026-10-27 (§7.1, §7.3).
 
 ### 7.3 The face suite
 
-1642 tests in 137 files (1619 pass, 23 skipped without `FACE_SMOKE=1`), run by `node --test`
-through `tsx`:
+1654 tests in 138 files (1631 pass, 23 skipped without `FACE_SMOKE=1`; 1654/1654 under
+`FACE_SMOKE=1`, 2026-10-27), run by `node --test` through `tsx`. The Account's own suite is
+`account/`'s (vitest; §7.1 has its counts): the origin's tests at 133b9a7 less the six that reach
+what the copy left out (§3.9), plus the fence's (`test/unit/server-guard.test.ts`: the default
+refusing `account:4820`, `PORTFOLIO_HOSTS` admitting it, `evil:4820` and a foreign `Origin` still
+refused, `parseHosts`). The face's:
 
 - **Composition and boot** — `boot` (the layer order ending with the overlay; the policy layer
   between bundle and AKShare, the Account seat row right after AKShare with its config from
-  `FACE_ACCOUNT_SEAT_DIR` and `FACE_ACCOUNT_URL` and an operator's disable kept; the storage chain and projection cache composed once, from
+  `FACE_ACCOUNT_SEAT_DIR` and `FACE_ACCOUNT_URL` and an operator's disable kept, and `account-seat`
+  pinning `DEFAULT_SEAT_DIR` to the repo's `account/`; the storage chain and projection cache composed once, from
   dsh-base, and reachable by an operator patch; the persona patch setting `personaPrefix` and
   keeping the operator's other `system-prompt` keys; the instructions patch setting
   `agent-instructions`' two candidate lists to `GRAVIT.md` and `GRAVIT.local.md`, after the
@@ -3046,7 +3131,8 @@ through `tsx`:
   id, a roles root with a bad role refusing the compose with the file's path, a missing roles
   directory refusing it with the directory's, an empty or missing cycle file refusing it with
   the file's, and a protocols directory without `lunhui-run.md` refusing it with that file's), `overlay` (exactly the thirteen rows, in order;
-  loopback config; the rows dsh-base owns now and the retired ones never inserted), `policy`
+  loopback config; `FACE_BIND` replacing the webserver's host and nothing else, `faceBind` falling
+  back to `127.0.0.1` when unset or empty; the rows dsh-base owns now and the retired ones never inserted), `policy`
   (every target a row the installed dsh-base composes; the composed posture; an operator row
   overriding a default; `DSH_TELEMETRY_DISABLED` winning over an operator re-enable), `setup`,
   `static` (exactly `exact /` and `prefix /client`, so `/market` and `/account` reach no route;
@@ -3282,7 +3368,15 @@ through `tsx`:
   views read, the stage-2 ones — `venues`, `keyfile`, `paper-books`, the three `prepared-*` — among
   them; no `native` or `icon` key at any depth, no array past twelve but in `venues` and a prepared
   action, the stream's data lines stripped too), `standin-helper` (the stand-in's home guard takes a `ui-standin-` directory
-  directly under `tmpdir()` and nothing else; no stand-in on 4820), and the room suites below.
+  directly under `tmpdir()` and nothing else; no stand-in on 4820; the stand-in's directory
+  falling back to the face's `seatDir()`, and the skip naming `npm ci in account/`), `compose`
+  (`compose.yml` read offline: two services; both ports on the host's loopback; the agent waiting
+  on the Account's health check on `/api/overview`; the Account's `PORTFOLIO_BIND`/`PORTFOLIO_HOSTS`,
+  the agent's `FACE_BIND`, `FACE_ACCOUNT_URL`, `BUYER_HOME`, `DSH_HOME` and AKShare command; the
+  optional `.env.deepseek`; the allowlist at `${PWD}` with no root mount and no `.env` path,
+  `account/` read-only and bound once, the read-only tmpfs `.git`, the two module volumes; no
+  docker socket and no `account-home` in the agent box; the five volumes), and the room suites
+  below.
 - **The Lunhui rows** (`face/plugins/lunhui/`, offline: recorded replies under
   `tests/fixtures/lunhui/` (Tencent) and `tests/fixtures/lunhui-eastmoney/` (Eastmoney, synthetic)
   or a fake `fetch`, never the network) — `lunhui-rows` (the backbone on a stand-in scope: its
@@ -3463,8 +3557,9 @@ each speaks the browser's wire through `tests/remote.ts` (`mountClient`, `signIn
   listener is denied by the guard alone; after the latch releases, the held card reaches the first `$events`
   tab and `allowed-once` dispatches exactly once; a restart of the real `approval` row re-arms the
   listener exactly once (outermost again); after dispose no `tools/pre-execute` record remains.
-- `account-seat-smoke.test.ts` — the Account seat end to end but for the human (skipped unless
-  `FACE_ACCOUNT_SEAT_DIR` names an installed checkout of buyer-agent-demo): the Account's own stand-in
+- `account-seat-smoke.test.ts` — the Account seat end to end but for the human (run from the
+  repo's `account/`, or `FACE_ACCOUNT_SEAT_DIR` when set; skipped when that directory has no
+  `node_modules/tsx`): the Account's own stand-in
   started on a free port (no network, a fresh temp home, writes on), the face booted on a scratch home
   with the `mcp-account` row replaced whole by an id patch — the operator's own override path — pointed
   at the stand-in as its seeded agent (a key derived from the name, `PORTFOLIO_SEAT_KEYS=sim`; a
@@ -3486,8 +3581,8 @@ each speaks the browser's wire through `tests/remote.ts` (`mountClient`, `signIn
   Refresh and a seat receipt). The stand-in's start and stop are `tests/helpers/standin.ts`'s, which
   `account-graft-smoke` shares.
 - `account-graft-smoke.test.ts` — the Account's reads through the face's proxy on a real boot
-  (skipped unless `FACE_ACCOUNT_SEAT_DIR` names an installed checkout of buyer-agent-demo): the
-  Account's own stand-in on a free port (never 4820), the face booted on a scratch home with AKShare
+  (run from the repo's `account/`, or `FACE_ACCOUNT_SEAT_DIR` when set; skipped when that
+  directory has no `node_modules/tsx`): the Account's own stand-in on a free port (never 4820), the face booted on a scratch home with AKShare
   and the `mcp-account` row disabled — no seat process, nothing written under `~/.buyer-agent-demo`
   — and `FACE_ACCOUNT_URL` at the stand-in; the proxy and the seat route registered on the booted web
   server as `main.ts` registers them (a bare `bootFace` mounts no `/data` route), and then, over the
@@ -3695,7 +3790,8 @@ the re-host added (§10, item 14).
 | **Account seat** — automated (`account-seat-smoke`; `orders`, `seat`, `roles`, the client's `kinds`, `account`, `host-seat`, `app-dom`) | on a real tree against the Account's own stand-in: the seat mounts with its 35 tools, exactly its nine real-account writes gated, a read answers as the admitted seat, a seat order rejected at the face's card never reaches the seat, the same order allowed once is signed by the seat and answered by the Account with a card of its own, and `/data/seat.json` reads that standing | that a human signs the Account's card; a real venue; the real service's own egress; the two-card flow from a conversation with a model | passes 2026-10-20 against buyer-agent-demo @ 133b9a7's stand-in (`FACE_SMOKE=1` with `FACE_ACCOUNT_SEAT_DIR`) |
 | **Account seat** — manual (`face/README.md` "The account-seat drill") | the operator's keyed run: the real service with a paper venue, the seat admitted as Gravit, a `trade` limit on that venue, Gravit asked to buy on paper → the face's card → ✓ → the Account's card → signed → `portfolio_wait` → the receipt in the conversation, the order on the Account's statement, the seat box on Venues counting the card then not | run 2026-10-21 on the Account's stand-in (133b9a7, `--no-desk`, 4821) with `deepseek-flash` through a scratch-home face on 3097: all six steps observed (`face/README.md` records them), two client defects fixed from it (§4.5: a card drawn before its `tool/call`; dsh's `Error: ` prefix on a refusal) | **the real service, reads only, 2026-10-27** (133b9a7 serving 4820 with `--read-only --home ~/.openpaper`, the face at 92c5a0c on 3090 from the live home, `deepseek-v4-pro`): the read half of steps 1–2 observed — the seat row up, `/data/seat.json` `reachable`, writes off, the seat `absent` (a read is an unsigned GET and does not knock), `paper-linqi` $10,000; Gravit's read-only AAPL quote answered by `portfolio_explore` and `portfolio_book`, no card: 347.19, bid 347.2 / ask 347.23, `Nasdaq · real time` at 19:30:00Z, the service's direct read a minute later 347.35 `Robinhood · real time`; `portfolio_quote` is not offered on a real account (the simulated statement's router); **steps 3–7 not yet run** — they need the service started with writes on and the seat admitted as Gravit with a `trade` limit on the paper venue |
 | **The Account in the face** — automated (`account-graft-smoke`; `account-proxy`, `account-fixtures`, `seat`, the client's `account-stream`, `host-account`, `host-markets`, `account-view`, `market-view`, `account`, `markets`, `chart`, `rail`, `app-dom`; since stage 2 also `owner-key`, `key-store`, `host-owner`, `owner-view`, `sheet-view`, `host-sheet`, `owner`, `trade-view`, `host-trade`, `trade`) | on a real tree against the Account's own stand-in, over the face's own port: the Account's page and its markets through the proxy, a query the whitelist refuses never asked of the Account, the push channel piped with a named frame within 5 s, the seat box through the proxy's reader; and the owner's half — the client's own `host/owner.js` paired with the code, a watch signed and unsigned, a market buy filled on the stream and counted in the holdings, a resting limit cancelled, the seeded card approved, a foreign origin fenced, no code or signature in the face's output; offline, every route rule, the stream client, the device against a door that verifies like the Account's, the sheet's re-prepare rules, the views, the host layers and the wiring over fixtures captured from that stand-in | the real service's own shapes and pace (the stand-in's simulated venues; the fixtures are 133b9a7's); a browser drawing the screens, holding its key in IndexedDB and signing with WebCrypto; the second-device admission (the stand-in admits the first browser on the code) — the manual drill's; the stream's quote frames for a followed market and its reconnects on a live page | passes 2026-10-23 against buyer-agent-demo @ 133b9a7's stand-in (`FACE_SMOKE=1` with `FACE_ACCOUNT_SEAT_DIR`, at `9f1885a`); the owner's half 2026-10-24 (the suite at `b45c5cc`, the smoke again at `e111c27`) |
-| **The Account in the face** — manual (`face/README.md` "The owner drill", run before the branch lands and after pulling the checkout) | the operator's run on the real Account at 4820 with paper venues only and the operator's browser already its owner: the face's head *waiting to be let in*, Let it sign on the Account's page, a `setWatch` signed from the face, Open a paper account from the face, a paper order from Trade and its fill, Gravit's seat order carded by Gate 2 in the thread and by the Guard in the face's Cards and approved there, the statement naming "You" and "Gravit, approved by you", Sign out and the head's line; then both smokes again | a real (non-paper) venue — the charter's D18 trigger | **not yet run** — owed to the operator |
+| **The Account in the face** — manual (`face/README.md` "The owner drill", run before the branch lands and after a change under `account/`) | the operator's run on the real Account at 4820 with paper venues only and the operator's browser already its owner: the face's head *waiting to be let in*, Let it sign on the Account's page, a `setWatch` signed from the face, Open a paper account from the face, a paper order from Trade and its fill, Gravit's seat order carded by Gate 2 in the thread and by the Guard in the face's Cards and approved there, the statement naming "You" and "Gravit, approved by you", Sign out and the head's line; then both smokes again | a real (non-paper) venue — the charter's D18 trigger | **not yet run** — owed to the operator |
+| **Two boxes** — manual (`face/README.md` "The two-box drill"; `compose.test.ts` reads the file offline) | `docker compose up` at the repo root with the host pair stopped: the face's boot line ending ` · listening on 0.0.0.0`, the seat up against `http://account:4820`, the seat box on Venues reading `account:4820 · reachable`, Gravit's read-only AAPL quote through `portfolio_explore` with no card; the negative — `docker compose exec agent ls /data` and `ls /var/run/docker.sock` both fail | that the seat's key is out of a shell's reach (it is not: R50); the CLI agents in the box (not installed there); a box on another machine | not yet run (Docker Desktop's daemon off on 2026-10-27); the ` · listening on 0.0.0.0` suffix has not been seen live (the webserver row admits only `127.0.0.1` and `0.0.0.0`, and no `0.0.0.0` listener was opened on the operator's Mac for a print check) |
 | **Client transport** — automated (`client-mux-smoke`) | the page's own `api.js` + `mapper.js` against a real host: gates, replays, withdrawals, follows, the non-activating reads | the DOM: the page's rendering and its view modes run on a fake DOM (`tests/client/app-dom`, `live`), and `gravit-client-smoke` opens one real session through the host layer, not a browser | passes 2026-09-30; `gravit-client-smoke` 2026-10-19 |
 | **Transport** — manual (`face/README.md`) | the browser half of the wire: the tokenized sign-in and the per-authority cookie; a cold session opened page-only, gaining no `session.v4.jsonl.zstd` or `session.lock` until it is prompted; a reconnect redrawing the window once; a new session's reply streaming without a click; `/compact` answered by `commands/execute`; the agent panel; the subagent dock; rename, fork, the directory picker, a channel rename (on the gravit-ui client Discover's Gravit item stands for the agent panel, Details' Children for the dock and Details' Fork for fork; the directory picker and a channel rename are not on it) | the approval card's endings, which are the Gate-2 drill's | **not yet run** on 0.2.0 against the real home — a headless load of the page on a scratch home reached `connected` with no console errors; the stage-1 page was walked 2026-10-19 on a scratch home without keys (the ledger): sign-in, a New message in `workbench` created, named and prompted, the missing-key error on the status line, a restart then a reload opening the cold session paged |
 | **Bots** — automated (`bots-smoke`, `bot-runtime-smoke`, `bot-sandbox-smoke`, `askuser-noclient-smoke`) | roster listing incl. broken; header `agentPreset`; mask = allow ∩ tree, following late tools; persona shadow; the default's roster equal to the host's plus `role_cn_market_analyst`, `role_cn_reviewer` and `role_cn_stock_analyst` (never a bot's), its date section, its cycle contract (`Step 0 — ask once`) and its run protocol scoped to Gravit (never a bot, though the probe bot can call `create_goal`); the shipped relative plugin path, rebased; a save re-declaring; Gate 2 refusing an order tool the bot's own mask admits; the S4/S7 observations | that the approval CARD renders (no client) — a bot in a room and a home session's write to `../SOUL.md` were this row's two gaps until `room-smoke` closed both | passes 2026-09-30; re-run 2026-10-19 with the role tools in the default's roster and the cycle contract in its prompt; 2026-10-24 with none; 2026-10-26 with `role_cn_market_analyst` and the run protocol, then with both analysts and the protocol's strategy channel, then with the reviewer |
@@ -3767,7 +3863,8 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
 
 - **R1 — Gate 2 holds the MCP tool surface, not the account.** The seat signs with a key file in
   the Account's home (`$BUYER_HOME/seats/gravit.json`), which a shell turn can read and use at the
-  Account's door with no Gate 2 card (R34); dsh scrubs keys from the shell's *environment*, not
+  Account's door with no Gate 2 card (R34; in the compose agent box the file is on its
+  `seat-home` volume and the same holds, R50); dsh scrubs keys from the shell's *environment*, not
   from files. The Account's own Guard card and the paper-only limits the operator signs bound the
   damage. (Until 2026-10-24 this row named the Python package's flagless order function and its
   key file at the repo root; both left with the package.)
@@ -3977,14 +4074,16 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
   signs, the face's page being one of the Account's owner devices — the key the browser's, never the
   face process's), but it is still a second card, and the Account's per-seat paper autonomy covers
   only its Desk, never an outside seat (`src/portfolio/account/desk.ts:1129-1137` at 133b9a7).
-  Accepted for the paper stage; one card per write is a request to Linqi, not a change here.
-- **R33 — The Account moves under the face, and the face pins nothing of it.** Twenty-six pull requests
-  landed in the twelve days before the pin. The gate's twelve write names and thirty read names are
+  Accepted for the paper stage; one card per write would be a change to `account/`'s desk, not built.
+- **R33 — The Account's shapes are spelled by hand on the face's side.** Twenty-six pull requests
+  landed in the twelve days before the pin; since 2026-10-27 the Account is this tree's `account/`,
+  a copy of 133b9a7 that moves only when edited here, so the drift is an edit in this tree, not a
+  pull. The gate's twelve write names and thirty read names are
   spelled at 133b9a7; a write the Account renames falls out of the list — under the face's own
   prefix it is carded as an unclassified seat tool, under another server name the boot audit
   refuses only when none of that server's seat writes is covered (`uncovered`), and
-  `account-seat-smoke` against the installed checkout is the canary (re-run it after pulling the
-  checkout). A changed `/api/account` shape never puts a wrong number in the seat box
+  `account-seat-smoke` against the repo's `account/` is the canary (re-run it after any change
+  under `account/`). A changed `/api/account` shape never puts a wrong number in the seat box
   (`seatView` is total), but the box does not say unreadable either: a body that does not parse reads
   `<host> · not reachable`, and one that parses but has moved shape falls to the view's defaults —
   `<host> · reachable`, `Read-only`, `Gravit · not on the account` — words the Account did not say.
@@ -3992,7 +4091,7 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
   or absent. Since the graft's stage 1 the two screens read the Account's
   shapes too: a page `pageOk` does not recognise reads `Account unreadable`, every other view answers
   its empty shape, and the fixtures (`face/tests/fixtures/account/`, 133b9a7's) and
-  `account-graft-smoke` are the canary — recapture and re-run after pulling the checkout
+  `account-graft-smoke` are the canary — recapture and re-run after a change under `account/`
   (`face/README.md` "The Account in the face"). Since stage 2 the face also speaks the Account's
   door protocol (the owner path map at 133b9a7: the pair answer, `canonical`, the envelope, the
   action types and their fields): a change there refuses every signature
@@ -4007,7 +4106,7 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
   venues as the Account reports them and cannot tell a paper venue from a real one beyond its flag,
   so a limit signed on a real venue would reach real money through the same two cards — the
   charter's §8 trigger and D17, not a fence in this tree. The service's own egress — venue probes every thirty minutes, the
-  location lookups, the public quotes — is Linqi's program's (`face/README.md` lists the hosts); the
+  location lookups, the public quotes — is the Account service's (`face/README.md` lists the hosts); the
   face's loopback posture is unchanged. And the seat has R1's shape: a shell turn can read
   `$BUYER_HOME/seats/gravit.json` and sign an instruction at the Account's door with no Gate 2 card —
   the Account's own Guard card and the limits the operator signed bound it (R1), and nothing in
@@ -4223,6 +4322,30 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
   imprecise. The rebuilt example could in principle cite an artifact pruned later (a `WAIT`
   example cites none). The strategy smoke's Monday grade re-reads Friday's quote bytes under
   Monday's session (one fixture set), so the next-day grade is not tested on new prices.
+- **R50 — The seat's key in the agent box.** Under `docker compose` (§3.9) the Account's home —
+  the desk's seat keys, `agent-wallets`, the paper book, the owner-device registry — is the volume
+  `account-home`, which the agent box does not mount, so Gravit's shell there cannot read it. The
+  seat's own key does not move with it: the seat is the face's child, so `seats/gravit.json` lives
+  in the agent box's `seat-home` volume, and a shell turn there can still read it and sign at the
+  Account's door with no Gate 2 card, exactly as on the host (R1, R34). The Account's own card on
+  every seat write and the limits the operator signs stand against that, as today; the split
+  narrows the charter's D17 R1 to the seat's key, it does not close it. Closing it means moving the
+  seat into the Account box behind an HTTP MCP transport instead of stdio (§10 item 25). On the
+  host dev loop nothing changed: the seat's key is in `~/.buyer-agent-demo`, readable by a shell
+  turn (R34).
+- **R51 — The two widened `Host` fences are DNS-rebinding defences, not authentication.** The
+  Account's `PORTFOLIO_HOSTS` admits `account:4820` beside loopback, and the face's `/data` fence
+  (`isTrustedDataRequest`) stays Host-based when `FACE_BIND=0.0.0.0` widens the face's listener.
+  A peer that reaches either port can send `Host: 127.0.0.1` and pass: at the Account, every read
+  and the routes the door does not authorise; at the face, every `/data` route (`/api` still wants
+  the cookie). Writes are authorised by the owner's signed envelope and the seat's key at the
+  Account's door, unchanged. In the compose topology this is fine: the only peers on the private
+  `gravit` network are the two boxes, and both ports are published on the host's loopback only.
+  Set on the host Mac, `PORTFOLIO_BIND=0.0.0.0` or `FACE_BIND=0.0.0.0` is a LAN exposure; the
+  READMEs say both are for the box only (`account/README.md` "In the box", `face/README.md` "The
+  two-box drill"). The hardening — a peer-address check on `req.socket.remoteAddress`, or a token
+  for non-loopback peers — is §10 item 26, not built (it would change the door's admission, which
+  the copy keeps as is).
   Recorded, nothing built.
 
 ---
@@ -4384,6 +4507,31 @@ In order; each with what "done" is and which charter row it reopens.
    theme required; the card at 2,048 bytes; the reviewer's contract picked by channel, sentiment
    and theme required of it too; `NOT_EVALUABLE` when no evidence row shows; the gate bound to the
    mode's market run; and the stale remedy naming a whole sealed market run.
+22. **A shares into the Account box** (project 2 of the Account-in-repo design, its §2; its own
+   design next). The Account grows an A-share market — quotes, candles, the lists the Lunhui rows
+   freeze — from Tencent, Eastmoney and AKShare; AKShare runs as a sidecar of the Account box and
+   reaches Gravit only through the seat; the Lunhui freezes fetch through the Account's HTTP API;
+   the face's own cn quote wire (`/data/quotes`, iFinD, Tencent) retires, and the agent box holds no
+   data source of its own. Done when the agent box's image carries no `akshare-mcp` and no Lunhui
+   row reaches an upstream host. Reopens the charter's §1 MARKET line and §3.
+23. **The Account's own page retired** (project 3, after 22). `account/src/portfolio/public`
+   leaves; Guard, Beast and the live cap — the owner settings still changed only on that page —
+   get controls on the face's Account screen, and the pairing of a first owner moves with them.
+   Done when 4820 is published to nobody but the agent box. Reopens D18 and the charter's §9
+   "Guard · Beast and the cap on the face".
+24. **Run the two-box drill** (§7.4, `face/README.md` "The two-box drill") with Docker Desktop's
+   daemon up and the host pair stopped: the first live sight of the boot line's
+   ` · listening on 0.0.0.0`, the seat against `http://account:4820`, the read, the negative. The
+   CLI agents (`claude`, `codex`) are not in the agent image; adding them, with a credentials
+   volume of their own, is a choice after the run.
+25. **The seat into the Account box** (R50). The seat behind an HTTP MCP transport in the Account
+   box instead of a stdio child of the face, so no seat key is in the agent box. Done when a shell
+   turn in the agent box holds no key that signs at the Account's door. Reopens D8 and D17 (R1
+   closed for the box, not for the host loop).
+26. **A peer check behind the widened `Host` fences** (R51): admit a non-loopback peer at the
+   Account only from the compose network's peer (or with a shared token), and gate the face's
+   `/data` on the cookie when `FACE_BIND` widens the bind. One middleware condition each; it changes
+   the door's admission, so it waits for its own small design.
 
 ---
 
@@ -4391,7 +4539,9 @@ In order; each with what "done" is and which charter row it reopens.
 
 | Variable | Layer | Meaning |
 |---|---|---|
-| `FACE_ACCOUNT_SEAT_DIR`, `FACE_ACCOUNT_URL` | `account-seat.ts`, `seat.ts`, `account-proxy.ts` | the Account seat's checkout and the service the seat, the seat box and the proxy read (§4.6) |
+| `FACE_ACCOUNT_SEAT_DIR`, `FACE_ACCOUNT_URL` | `account-seat.ts`, `seat.ts`, `account-proxy.ts` | the Account package the seat runs from (default the repo's `account/`) and the service the seat, the seat box and the proxy read (§4.6) |
+| `FACE_BIND` | `overlay.ts`, `main.ts` | the face webserver's bind, `0.0.0.0` in the compose agent box only (§4.3, §4.6) |
+| `PORTFOLIO_BIND`, `PORTFOLIO_HOSTS` | `account/src/portfolio/server.ts` | the Account's listener and its admitted extra `Host` values, compose's Account box only (§3.9) |
 | `DEEPSEEK_API_KEY` | dsh credential seam | the LLM and `web_search` |
 | `DSH_HOME` | dsh, face | harness home |
 | `DSH_PERMISSION_MODE` | dsh | sandbox preset; `danger-full-access` ⇒ approval policy `never` |

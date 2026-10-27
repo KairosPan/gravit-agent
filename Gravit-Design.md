@@ -8,7 +8,8 @@ now names `GRAVIT.md`; D16 added); revised 2026-10-24 for the face's page as an 
 of the Account (§1, §3, §4, §5, §7.3, §8, §9; D18 added), and again 2026-10-24 for the exit of
 the Python package, the PIT beds and backtests (§1, §2, §3, §4, §5 — D3 and D16 resolved, D1, D8
 and D10 rewritten — §6, §7.2, §8, §9); revised 2026-10-26 for the Lunhui rows and their three
-roles (§1, §4, D10, §7.2) ·
+roles (§1, §4, D10, §7.2); revised 2026-10-27 for the Account service in this tree and its two
+boxes (§1, §3, D17, §7.3, §9) ·
 **Owner:** the operator ·
 **Authority:** this charter carries intent and principles; mechanism lives in `DEVELOPMENT.md`,
 `face/README.md` (the current face contracts and drills), and code. On a question of intent, the charter
@@ -48,13 +49,14 @@ does not mean only one execution context.
   roster is a **room**: Gravit dispatches the voices, the operator argues with them, and the
   conclusion stays Gravit's. (As of 2026-09-04 only the template is committed; the three live
   strategies are untracked, so their ledger is not yet written — `DEVELOPMENT.md` §3.4.)
-- **ACCOUNT** — since 2026-10-20 a seat at the operator's Account — Linqi's buyer-agent-demo, an
-  external program on this machine — through one MCP row, on its paper venues only: every seat
-  write passes Gate 2 here and the Account's own card there (D17). Since 2026-10-24 the Account
-  is also what the face's Markets and Account screens show — read through a loopback proxy — and
-  the face's page is one of the Account's owner devices: the operator trades there by hand, each
-  order signed with the browser's device key at the Account's door, under the Account's own cap
-  (D18). The Account is the account: the operator's own Alpaca paper account, when wanted, is
+- **ACCOUNT** — since 2026-10-20 a seat at the operator's Account through one MCP row, on its
+  paper venues only. The Account is the Account service in this tree (`account/`, copied from
+  Linqi's buyer-agent-demo @ 133b9a7 on 2026-10-27), run as its own process — and, under
+  `docker compose`, as its own box. Every seat write passes Gate 2 here and the Account's own
+  card there (D17). Since 2026-10-24 the Account is also what the face's Markets and Account
+  screens show — read through a loopback proxy — and the face's page is one of the Account's
+  owner devices: the operator trades there by hand, each order signed with the browser's device
+  key at the Account's door, under the Account's own cap (D18). The Account is the account: the operator's own Alpaca paper account, when wanted, is
   one of its venues.
 
 **What a working day looks like.** The operator opens the face at `127.0.0.1:3090`, picks a
@@ -134,8 +136,8 @@ the design economizes it but never designs it away.
 │            no lookahead guard on either                          │
 ├────────────────────────────────┬─────────────────────────────────┤
 │ MARKET                         │ ACCOUNT                         │
-│ the Account's markets: crypto, │ the Account: an external        │
-│ US stocks, RWAs, perpetuals,   │ program's venues, read by the   │
+│ the Account's markets: crypto, │ the Account (account/, its own  │
+│ US stocks, RWAs, perpetuals,   │ process): venues read by the    │
 │ predictions — keyless, read    │ face, traded by hand from it;   │
 │ server-side by the Account ·   │ Gravit's seat there, carded,    │
 │ AKShare: public A shares       │ on paper venues only            │
@@ -200,7 +202,7 @@ solved would be worse than carrying them.
 | D14 | Structured room evidence, child-task results and role reports have no independent verification or result-acceptance mechanism; passing runtime drills does not establish better research | originals, request snapshots and task histories remain reviewable; Gravit checks results and the operator judges them | before claiming a research-quality gain or reducing review on the strength of these features |
 | D15 | Bot journal context is a bounded read of historical notes; freshness, conflicts and note selection still depend on manual maintenance | each request records what it consumed and exposes missing or truncated notes | when stale, conflicting or omitted notes materially affect a conclusion |
 | D16 | *Resolved 2026-10-24:* the research cycle calls no role and keeps no role-call count; the round cap stays the goal's (the 24 is Gravit's argument to create_goal, as cycle.md instructs; dsh's own default is 256) | — | — |
-| D17 | The Account seat's fence is the operator's grants on the Account page, not code in this tree: a limit signed on a real venue would reach real money through the same two cards, and the face cannot tell a paper venue from a real one; two cards per seat write meanwhile; the seat's key file is written by a child of the face outside the workspace, in the Account's home, and a shell turn can read it and sign at the Account's door with no card here (the seat's R1); the seat is matched by the name the owner typed | paper venues only by the operator's rule; the Account's own Guard, `--live-cap` and limits; both cards; one operator, one machine | the first limit signed on a non-paper venue, or a real venue connected to that Account with the seat granted reach — the real-money trigger (§8); a second human |
+| D17 | The Account seat's fence is the operator's grants on the Account page, not code in this tree: a limit signed on a real venue would reach real money through the same two cards, and the face cannot tell a paper venue from a real one; two cards per seat write meanwhile; the seat's key file is written by a child of the face outside the workspace, in the Account's home, and a shell turn can read it and sign at the Account's door with no card here (the seat's R1); under compose the Account's home is a volume the agent box does not mount; the seat's own key stays with the seat in the agent box, and the Account's card on every seat write stands against a shell that signs with it; the seat is matched by the name the owner typed | paper venues only by the operator's rule; the Account's own Guard, `--live-cap` and limits; both cards; one operator, one machine | the first limit signed on a non-paper venue, or a real venue connected to that Account with the seat granted reach — the real-money trigger (§8); a second human |
 | D18 | The face's page is an owner device of the Account (2026-10-24): the browser profile that holds the key can sign anything the owner can — hand orders up to the Account's cap on every venue the operator connected there, seats' limits, cards, venue connections. The key is the browser's (WebCrypto, non-extractable, the page's origin), lost with the profile and admitted again by another device; the pairing code and the envelopes pass through the face process unlogged; the signing client is the Account's door protocol reproduced in `face/client`, which this tree keeps in step with the Account by hand (the smoke is the canary) | held by: loopback only; the Account's own cap and *What you sign*; the proxied rows are an allow-list and the Account's fence covers everything else; a local process reaches the proxied owner routes as it reaches the Account's own and does nothing without an admitted key; one operator, one machine | a real venue connected to the Account and an order placed on it by hand from the face (the owner's money; the first real-money surface in the face); a second human or machine; a change in the Account's envelope (every signature refused until the client follows) |
 
 ## 6. Rules carried forward
@@ -317,7 +319,7 @@ is the copy source).
 - **No multi-tenant, cryptographic, or kernel-level machinery.** One operator, one machine.
   The risks are named here in one line each instead of being built against: a hosted or
   multi-user deployment invalidates this charter rather than extending it. The Account seat's key
-  is the Account's — Linqi's program, its home — and the owner's device key is the browser's: on
+  is the Account's — the service in `account/`, its home — and the owner's device key is the browser's: on
   the Account's page, and since 2026-10-24 on the face's page as a second owner device, where
   `face/client` speaks the Account's door protocol as a client speaks it (a P-256 key the browser
   holds, the Account's envelope and nonce) and designs none of its own. The face process holds no
@@ -379,7 +381,10 @@ Remaining directions below are not completed capabilities. Further design remain
   servers (the operator's direction of 2026-10-22, the next step of 借鉴 Account 完善 Gravit).
   The face's own producers and keyed quote providers retired on 2026-10-24, with the Python
   package, the PIT beds and the backtests (the design's §12); the face's own quote wire speaks A
-  shares alone.
+  shares alone. Since 2026-10-27 the Account service is this tree's `account/`, runnable as two
+  boxes under `docker compose` (`docs/superpowers/specs/2026-10-27-account-in-repo-design.md`);
+  next, A shares into the Account box, then the Account's own page retired (that design's
+  projects 2 and 3).
 - **Evaluate real research and make acceptance explicit** (D14, D16). Compare representative
   research tasks for evidence accuracy, useful disagreement, revision of conclusions, operator
   effort, elapsed time and usage. Develop traceability from claims to source material and from
