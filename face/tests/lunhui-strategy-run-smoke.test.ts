@@ -27,7 +27,7 @@ import assert from "node:assert/strict";
 import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { GenerateOptions } from "@deepseek-ai/dsh-llm";
 import { SessionId, type Session } from "@deepseek-ai/dsh-session";
@@ -314,7 +314,9 @@ test("strategy run smoke: an S01 registered on Friday and graded on Monday - eac
       writeFileSync(metaPath, readFileSync(metaPath, "utf8").replace(/^model: .*$/m, "model: stub/flash-standin"));
       assert.equal(readRoles(fixtureRoles).find((r) => r.id === role)!.model, "stub/flash-standin", `the fixture's ${role} is routed to the stub`);
     }
-    for (const name of ["cn-market", S01]) await cp(join(STRATEGIES, name), join(strategies, name), { recursive: true });
+    // Each channel's files without its analysis/ runs: a run a drill left in the checkout would be the listing's latest.
+    for (const name of ["cn-market", S01])
+      await cp(join(STRATEGIES, name), join(strategies, name), { recursive: true, filter: (source) => basename(source) !== "analysis" });
     await mkdir(join(root, ".git"));
     setupFaceProfile(home);
     const patchPath = join(home, "profiles", "face", "cordis.patch.yml");

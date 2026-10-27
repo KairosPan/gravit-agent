@@ -23,7 +23,7 @@ import assert from "node:assert/strict";
 import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm } from "node:fs/promises";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { GenerateOptions } from "@deepseek-ai/dsh-llm";
 import { SessionId, type Session } from "@deepseek-ai/dsh-session";
@@ -200,7 +200,8 @@ test("market run smoke: Gravit freezes three sources into one run, the analyst s
       writeFileSync(metaPath, readFileSync(metaPath, "utf8").replace(/^model: .*$/m, "model: stub/flash-standin"));
       assert.equal(readRoles(fixtureRoles).find((r) => r.id === role)!.model, "stub/flash-standin", `the fixture's ${role} is routed to the stub`);
     }
-    await cp(CN_MARKET, join(strategies, "cn-market"), { recursive: true });
+    // The channel's files without its analysis/ runs: a run a drill left in the checkout would be the listing's latest.
+    await cp(CN_MARKET, join(strategies, "cn-market"), { recursive: true, filter: (source) => basename(source) !== "analysis" });
     await mkdir(join(root, ".git"));
     setupFaceProfile(home);
     const patchPath = join(home, "profiles", "face", "cordis.patch.yml");
