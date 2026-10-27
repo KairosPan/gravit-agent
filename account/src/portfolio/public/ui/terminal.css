@@ -1,0 +1,315 @@
+/* The Trade terminal (ui/terminal.js) in Hyperliquid's own grammar, measured from app.hyperliquid.xyz/trade (scratchpad hl-reference.md,
+   §3 and §5), in the ocean's colours: dark glass panels (--hl-glass, radius 10, a hairline inside the edge, no shadow) six pixels apart,
+   the water showing in the gutters — the order book on the solid panel colour, its figures never over a moving blur (and its hover card,
+   a fixed box, never held inside a blurred panel); 12/15 at weight 400 almost everywhere; tabs with a 1 px line under every tab and a 1 px
+   accent under the one showing; controls 33 high with an 8 px radius; colour, fill and edge changing over .2 s ease-in-out. Every colour
+   is a token of the trading area (ui/tokens.css, :root[data-area="trade"]), never a value written here.
+
+   Laid out by the terminal's OWN width (a container, `tt`), not the window's: the rail and the page's margins take part of the window, so a
+   window rule would squeeze the chart where a terminal rule does not.
+     1080 and wider  three columns: the bar over the chart on the left, the book and the order panel beside them as tall as both, the book
+                     and the order panel always the same width (HL: 278 at 1500, 356 at 1920; here 22.5% of the terminal, 270 to 356, as
+                     the rail and the page's margins take part of the window); the order panel scrolls inside, its
+                     button kept in view at its foot. And the whole terminal fits the window as HL's does: the grid is sized from what
+                     sits outside it (the topbar and the gutters above it, which terminal.js measures into --tt-top; the tables' least
+                     height; the status strip), so at 1500 × 900 the window ends at the status strip and the page does not scroll. The
+                     tables under the panels take what is left, at least three rows, and scroll inside themselves under their heads
+     560 to 1079     the bar and the chart across, the order panel and the book side by side under it (HL's phone form-left, book-right)
+     under 560       one column: the bar on one line (its figures scroll sideways), the chart and the book in one panel behind Chart ·
+                     Order book · Trades, then the order panel; the positions as two-line rows */
+
+/* what the fit below works from: where the terminal starts in the page (the topbar and the gutters above it: terminal.js ttFit measures it,
+   and until it has, the topbar's 56 and the two 3-pixel gutters), what sits under it (the page's own gutter), the tables' least height (their
+   tab bar 35, the 4 under it, the column heads 24 and three rows of 24, 4 at the foot: HL shows three at 900), and so the room the grid and
+   the tables share in a window: the window less all that, less the status strip and the two gutters between the three */
+.tt { --tt-bar-h: 63px; --tt-top: calc(var(--hl-h-nav) + 2 * var(--hl-gap)); --tt-below: var(--hl-gap); --tt-low-min: 139px; --tt-room: calc(100dvh - var(--tt-top) - var(--tt-below) - var(--hl-h-footer) - 2 * var(--hl-gap)); --tt-grid-h: clamp(520px, calc(var(--tt-room) - var(--tt-low-min)), 760px); container: tt / inline-size; position: relative; display: flex; flex-direction: column; gap: var(--hl-gap); min-width: 0; }
+/* a window 850 tall or more keeps the tables more than three rows (HL keeps about six at 900): a position just opened from the ticket is in
+   view under the rows already there, the grid giving up the height */
+@media (min-height: 850px) {
+  .tt { --tt-low-min: 200px; }
+}
+
+/* ---- paper onboarding (ui/trade.js tkOnboard): one card over the grid while the account has no paper account — a panel like the others,
+   its words at the left, its field and buttons at the right (under them on a narrow terminal) ------------------------------------------ */
+.tt-onboard { background: var(--hl-glass); border-radius: var(--hl-r-panel); box-shadow: inset 0 0 0 1px var(--card-border); padding: 12px; min-width: 0; -webkit-backdrop-filter: var(--glass); backdrop-filter: var(--glass); }
+.tt-onboard[hidden] { display: none; }
+.tt-ob { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; font-size: 12px; line-height: 16px; color: var(--hl-text); }
+.tt-ob-t { display: flex; flex-direction: column; gap: 2px; flex: 1 1 320px; min-width: 0; }
+.tt-ob-t b { font-weight: 400; color: var(--hl-title); font-size: 14px; line-height: 18px; }
+.tt-ob-t .dim { color: var(--hl-dim); }
+.tt-ob-f { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex: 0 1 auto; min-width: 0; }
+.tt-ob-f .fld { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; column-gap: 6px; width: 190px; max-width: 100%; height: 33px; padding: 0 12px 0 10px; border: 1px solid var(--hl-inset); border-radius: var(--hl-r); color: var(--hl-dim); font: 400 12px/15px var(--font-sans); white-space: nowrap; }
+.tt-ob-f .fld input { min-height: 31px; height: 31px; width: 100%; padding: 0; border: 0; background: transparent; box-shadow: none; text-align: right; font: 400 12px/31px var(--font-sans); color: var(--hl-text); }
+.tt-ob-f .fld input:focus { outline: none; }
+.tt-ob-f .fld:focus-within { border-color: var(--hl-muted); }
+.tt-ob-f .btn { min-height: 33px; padding: 0 14px; border: 0; border-radius: var(--hl-r); background: var(--hl-inset); color: var(--hl-title); font: 400 12px/33px var(--font-sans); box-shadow: none; }
+.tt-ob-f .btn.btn-primary { background: var(--hl-accent-soft); color: var(--hl-on-accent); }
+.tt-ob-f .btn:disabled { background: var(--hl-disabled); color: var(--hl-dim); opacity: 1; }
+.tt-ob-f .link { color: var(--hl-dim); font-size: 12px; }
+.tt-ob .msg { flex: 1 1 100%; margin: 0; font-size: 12px; }
+.tt-ob .msg:empty { display: none; }
+
+/* ---- the grid and its panels ------------------------------------------------------------------------------------------------------- */
+.tt-grid { display: grid; gap: var(--hl-gap); grid-template-columns: minmax(0, 1fr); grid-template-areas: "bar" "mtabs" "view" "order"; min-width: 0; }
+.tt-bar, .tt-chart, .tt-book, .tt-order, .tt-low, .tt-mtabs { background: var(--hl-glass); border: 0; border-radius: var(--hl-r-panel); box-shadow: inset 0 0 0 1px var(--card-border); min-width: 0; -webkit-backdrop-filter: var(--glass); backdrop-filter: var(--glass); }
+.tt-book { background: var(--hl-panel); -webkit-backdrop-filter: none; backdrop-filter: none; }
+.tt-bar { grid-area: bar; overflow: hidden; }
+.tt-chart { grid-area: view; display: flex; flex-direction: column; overflow: hidden; height: 340px; padding: 0; }
+.tt-book { grid-area: view; display: flex; flex-direction: column; overflow: hidden; min-height: 0; padding: 0; }
+.tt-order { grid-area: order; padding: 10px; overflow: visible; max-height: none; box-shadow: none; }
+.tt-mtabs { grid-area: mtabs; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-radius: var(--hl-r-panel) var(--hl-r-panel) 0 0; overflow: hidden; }
+.tt-wait { margin: auto; text-align: center; padding: 24px 12px; color: var(--hl-dim); font-size: 12px; }
+
+/* a narrow terminal: the chart and the book are one panel behind its tabs (data-tt-m on the frame: terminal.js ttShowM); the one not showing
+   has no box, so it waits and asks nothing */
+.tt-mtabs + .tt-chart, .tt-mtabs ~ .tt-book { border-radius: 0 0 var(--hl-r-panel) var(--hl-r-panel); margin-top: calc(-1 * var(--hl-gap)); }
+.tt[data-tt-m="chart"] .tt-book, .tt:not([data-tt-m="chart"]) .tt-chart { display: none; }
+.tt-book { height: 520px; }
+/* the book's own tabs stand aside under the narrow tabs, which say the same */
+.tt-book .bk-head { display: none; }
+
+@container tt (min-width: 560px) {
+  .tt-grid { grid-template-columns: minmax(300px, 55fr) minmax(0, 45fr); grid-template-rows: auto 420px auto; grid-template-areas: "bar bar" "chart chart" "order book"; }
+  .tt-mtabs { display: none; }
+  .tt-chart { grid-area: chart; height: auto; }
+  .tt-book { grid-area: book; height: auto; min-height: 420px; }
+  .tt[data-tt-m] .tt-chart, .tt[data-tt-m] .tt-book { display: flex; border-radius: var(--hl-r-panel); margin-top: 0; }
+  .tt-book .bk-head { display: flex; }
+}
+@container tt (min-width: 1080px) {
+  /* the grid as tall as the window leaves it once the tables have their least height: 520 at the least (a shorter window scrolls the page,
+     as HL's does), 760 at the most (the tables take the rest of a taller one). The bar runs over the chart and the book: HL's sits over its
+     chart alone, but HL has no rail beside it — here the rail takes that room, and a bar over the chart alone was left its price and
+     nothing else at 1440 pixels (a perpetual's mark, oracle, open interest and funding all set aside) */
+  .tt-grid { --tt-side: clamp(270px, 22.5cqi, 356px); grid-template-columns: minmax(0, 1fr) var(--tt-side) var(--tt-side); grid-template-rows: var(--tt-bar-h) minmax(0, 1fr); grid-template-areas: "bar bar order" "chart book order"; height: var(--tt-grid-h); }
+  .tt-chart, .tt-book { min-height: 0; }
+  .tt-order { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--hl-scroll-thumb) transparent; }
+  /* the action button stays in view at the panel's foot while what is above it scrolls; a ring of the panel's own colour masks what passes
+     under it */
+  .tt-order .tk-stack > [data-go] { position: sticky; bottom: 0; z-index: 1; box-shadow: 0 0 0 8px var(--hl-panel); }
+  /* more of the panel below its edge (the quote, Hand to agent, the market's block at its foot): the last lines fade into the panel's own
+     colour at its edge, so a line is never simply cut there — a band held at the panel's foot while there is more under it, coming to rest
+     in its own room after the last line once the panel is scrolled to its end (so it never fades a line then). The action button, when it
+     is the one held at the foot, sits over it */
+  .tt-order::after { content: ""; position: sticky; bottom: -10px; z-index: 0; display: block; height: 28px; margin: 0 -10px -10px; background: linear-gradient(to bottom, transparent, var(--hl-panel) 85%); pointer-events: none; }
+}
+
+/* ---- the order panel holds the ticket (ui/trade.js; its look in trade.css): the market is the bar's, so the ticket's own head (its close
+   puts the panel at rest) and its picked row stand aside — its search stays, for a ticket opened on no market — and the face's block and
+   the logos' credit read at the panel's foot. Two rules: a browser without :has() drops only the first -------------------------------- */
+.tt-order .tk-picked { display: none; }
+.tt-order .tk-h:has([data-tk-close]) { display: none; }
+.tt-order .tk-form > .tk-kb { order: 98; }
+.tt-order .tk-form > .tk-credit-w { order: 99; }
+
+/* ---- the bar: the market, its tags, its figures (REF §5.3) ------------------------------------------------------------------------- */
+.tt-bar { display: flex; align-items: center; gap: 8px; height: var(--tt-bar-h); padding: 10px 12px 9px 2px; flex-wrap: nowrap; }
+.tt-mkt { display: inline-flex; align-items: center; gap: 8px; flex: none; min-height: 43px; padding: 8px 12px 8px 10px; border: 0; border-radius: var(--hl-r); background: transparent; color: var(--hl-text); font: 400 20px/27px var(--font-sans); letter-spacing: normal; cursor: pointer; max-width: 60%; transition: background-color var(--hl-ease); }
+.tt-mkt[aria-expanded="true"] { background: var(--hl-ground); }
+.tt-mkt .ico { flex: none; width: 14px; height: 14px; color: var(--hl-text); transition: transform .3s ease; }
+.tt-mkt[aria-expanded="true"] .ico { transform: rotate(180deg); }
+.tt-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.tt-av:empty { display: none; }
+.tt-av { display: inline-flex; flex: none; }
+.tt-av .av { width: 20px; height: 20px; font-size: 7px; }
+.tt-tags { display: inline-flex; align-items: center; gap: 8px; flex: none; font-size: 12px; line-height: 15px; }
+.tt-tags:empty { display: none; }
+.tt-bar .tag.tt-lev { padding: 0 4px; border: 0; border-radius: var(--hl-r-panel); background: var(--hl-badge); color: var(--hl-accent-soft); font: 400 12px/1.7 var(--font-sans); }
+.tt-where { display: inline-flex; align-items: center; gap: 6px; color: var(--hl-dim); white-space: nowrap; }
+/* the figures, as many as fit whole: terminal.js ttFitStats sets aside the least needed (bid · ask first: the book beside it says them) until
+   the rest fit the bar's width, so a figure is never cut at its edge; the price always stays. Only were the price itself too wide for the
+   room left would the strip slide sideways, its scrollbar hidden as HL hides its own */
+.tt-stats { display: flex; align-items: center; gap: 32px; flex: 1 1 auto; flex-wrap: nowrap; min-width: 0; margin-left: 24px; overflow-x: auto; scrollbar-width: none; }
+.tt-stats::-webkit-scrollbar { display: none; }
+.tt-st { display: flex; flex-direction: column; gap: 4px; flex: none; min-width: 0; }
+.tt-st[hidden] { display: none; }
+.tt-st-n { font-size: 12px; line-height: 15px; color: var(--hl-dim); text-decoration: none; white-space: nowrap; }
+/* a label with a tooltip, as HL marks one: underlined dashed */
+.tt-st-n[title] { text-decoration: underline dashed; text-underline-offset: 2.4px; text-decoration-thickness: 1px; cursor: help; }
+.tt-st-v, .tt-st-v.tt-px { font: 400 12px/15px var(--font-sans); color: var(--hl-text); white-space: nowrap; }
+.tt-st-v.up, .tt-st-v .up { color: var(--hl-up); font-weight: 400; }
+.tt-st-v.down, .tt-st-v .down { color: var(--hl-down); font-weight: 400; }
+.tt-st-v .acc { color: var(--hl-accent-soft); }
+/* the time left until funding is next paid (terminal.js ttCountdowns): in the text colour, in tabular figures so the second ticking over
+   never moves what stands beside it */
+.tt-st-v .tt-count { color: var(--hl-text); font-variant-numeric: tabular-nums; }
+/* a funding rate the quote carried, the venue's own history not having said the hour's (terminal.js ttFunding): said on hover */
+.tt-t td.tt-quoted { text-decoration: underline dotted; text-underline-offset: 2.4px; cursor: help; }
+/* how old the price is, once it is not the last few seconds' (core ageWords): the area's word for caution, small, beside the price (the
+   bar's, a position's mark) */
+.tt-st-v .tt-age, .tt-pos .tt-age { color: var(--hl-warn); font-size: 11px; margin-left: 4px; }
+/* the feed at the bar's right end (terminal.js ttFeed): a dot and a word for how the price showing comes — Live (pushed by its venue's
+   stream), Quiet (the stream is open and silent there), Polling (read every few seconds) — and how old it is, in tabular figures in a box
+   of its own width, so a second ticking over never moves what stands beside it */
+.tt-feed { flex: none; display: inline-flex; align-items: center; gap: 6px; margin-left: 16px; color: var(--hl-dim); font-size: 12px; line-height: 15px; white-space: nowrap; cursor: help; }
+.tt-feed:empty { display: none; }
+.tt-feed::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--hl-dim); }
+.tt-feed[data-st="connected"] .tt-feed-w { color: var(--hl-up); }
+.tt-feed[data-st="connected"]::before { background: var(--hl-up); }
+.tt-feed[data-st="stale"] .tt-feed-w { color: var(--hl-warn); }
+.tt-feed[data-st="stale"]::before { background: var(--hl-warn); }
+.tt-feed-a { display: inline-block; min-width: 6ch; text-align: right; color: var(--hl-text-2); font-variant-numeric: tabular-nums; }
+.tt-feed-a:empty { display: none; }
+/* a market's name kept to a line in every table under the panels — Positions, Open orders (trade.css), Trade history, Order history —
+   its whole name (an event's whole question) on hover: the columns HL lists after it keep their room, and no table is wider than its panel
+   at 1440 */
+.tt-low .tt-t .tt-c-mkt b { display: inline-block; max-width: 240px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+/* the two histories, whose rows carry more columns than the positions: the market's name a little shorter, the account beside it, the
+   status and who placed it each kept to a line (ttCut), every one whole on hover — so Order history fits its panel at 1440 */
+.tt-low .tt-t:not(.tt-pos, .tk-open-t) .tt-c-mkt b { max-width: 180px; }
+.tt-low .tt-t:not(.tt-pos, .tk-open-t) .tt-c-mkt .why { display: inline-block; max-width: 110px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+/* Positions and Open orders, whose columns HL lists after the market are many (margin, funding, TP/SL; trigger, status, who placed it):
+   the market's name and its account each kept shorter still, whole on hover — so at 1440 every column is in the panel */
+.tt-low .tt-t:is(.tt-pos, .tk-open-t) .tt-c-mkt b { max-width: 160px; }
+.tt-low .tt-t:is(.tt-pos, .tk-open-t) .tt-c-mkt .why { display: inline-block; max-width: 100px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+.tt-low .tt-t .tt-cut { display: inline-block; max-width: 120px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+/* a position's ROE beside its PNL, quieter (terminal.js ttRoeWords) */
+.tt-pos .tt-roe { margin-left: 4px; font-size: 11px; }
+
+/* ---- the picker: a popover over the panels (REF §5.20), never in the flow --------------------------------------------------------- */
+.tt-pop { position: absolute; z-index: 30; top: calc(var(--tt-bar-h) + var(--hl-gap)); left: 0; display: flex; flex-direction: column; gap: 8px; width: min(800px, 100%); max-height: min(70vh, 640px); padding: 10px; overflow-y: auto; overscroll-behavior: contain; background: var(--hl-ground); border: 1px solid var(--hl-inset); border-radius: var(--hl-r-pop); box-shadow: none; scrollbar-width: thin; scrollbar-color: var(--hl-scroll-thumb) transparent; animation: tt-drop .3s ease both; }
+.tt-pop[hidden] { display: none; }
+/* every part keeps its own height: a flex column with a scroll would squeeze the kinds' row to nothing */
+.tt-pop > * { flex: none; }
+.tt-pop > [data-tp-note]:empty { display: none; }
+@keyframes tt-drop { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: none; } }
+
+/* ---- the narrow terminal's tabs over its one panel ---------------------------------------------------------------------------------- */
+.tt-mtabs button { min-height: 44px; }
+
+/* ---- the tabs, as every tab bar in the terminal draws them (REF §5.5): the order panel's (trade.css) and the book's (book.css) share it
+   ---------------------------------------------------------------------------------------------------------------------------------------- */
+.tt-tabs button, .tt-mtabs button { flex: none; padding: 0 12px; border: 0; border-bottom: 1px solid var(--hl-tabline); border-radius: 0; margin: 0; background: transparent; color: var(--hl-dim); font: 400 12px/34px var(--font-sans); letter-spacing: normal; white-space: nowrap; cursor: pointer; transition: color var(--hl-ease); }
+.tt-tabs button[aria-selected="true"], .tt-mtabs button[aria-selected="true"] { color: var(--hl-text); box-shadow: inset 0 -1px 0 var(--hl-accent-soft); }
+/* the line under the tab showing slides to the tab pressed (book.js bkSlideUnder, HL's .3 s): one line the bar draws, at the pressed tab's
+   place and width; until it is measured the pressed tab keeps its own */
+.tt-tabs, .tt-mtabs { position: relative; }
+:is(.tt-tabs, .tt-mtabs).slide-under::after { content: ""; position: absolute; left: 0; bottom: 0; width: var(--tab-w, 0px); height: 1px; background: var(--hl-accent-soft); transform: translateX(var(--tab-x, 0px)); transition: transform .3s ease, width .3s ease; pointer-events: none; }
+:is(.tt-tabs, .tt-mtabs).slide-under button[aria-selected="true"] { box-shadow: none; }
+.tt-tabs button:focus-visible, .tt-mtabs button:focus-visible { outline: 1px solid var(--hl-muted); outline-offset: -2px; }
+@media (hover: hover) {
+  .tt-mkt:hover { background: var(--hl-ground); }
+  .tt-tabs button:hover:not([aria-selected="true"]), .tt-mtabs button:hover:not([aria-selected="true"]) { color: var(--hl-title); }
+}
+
+/* ---- the tables under the panels (REF §5.18): rows 24 high, 12/24, dim heads with no rule, the first cell flush ---------------------- */
+.tt-low { padding: 0 12px 10px; }
+/* the tab bar's line runs under its filler too */
+.tt-tabs { display: flex; gap: 0; margin: 0 -12px; padding: 0 0; border-bottom: 1px solid var(--hl-tabline); overflow-x: auto; scrollbar-width: none; }
+.tt-tabs::-webkit-scrollbar { display: none; }
+.tt-tabs button { margin-bottom: -1px; }
+.tt-n { display: inline-block; min-width: 16px; margin-left: 4px; padding: 0 4px; border-radius: var(--hl-r-panel); background: var(--hl-inset); color: var(--hl-text); font-size: 11px; line-height: 16px; text-align: center; }
+.tt-tab { padding-top: 4px; min-width: 0; }
+.tt-tab[hidden] { display: none; }
+.tt-low .t-wrap { scrollbar-width: thin; scrollbar-color: var(--hl-scroll-thumb) transparent; }
+.tt-low .t th { font: 400 12px/24px var(--font-sans); padding: 0 8px; color: var(--hl-dim); border-bottom: 0; white-space: nowrap; }
+.tt-low .t td { font-size: 12px; line-height: 24px; padding: 0 8px; border-bottom: 0; white-space: nowrap; vertical-align: middle; }
+.tt-low .t :is(th, td):first-child { padding-left: 0; }
+.tt-low .t :is(.up, .down) { font-weight: 400; }
+.tt-low .t td b { font-weight: 400; color: var(--hl-text); }
+/* where it is held, beside its name and quieter (the shell's .why is a line of its own) */
+.tt-low .t .why { display: inline; margin-left: 6px; color: var(--hl-dim); font-size: 12px; line-height: 24px; }
+.tt-low .t .tag.paper, .tt-where .tag.paper { padding: 0 4px; border: 0; border-radius: var(--hl-r-panel); background: var(--hl-badge); color: var(--hl-accent-soft); font: 400 12px/1.7 var(--font-sans); }
+.tt-low .t .tt-k { display: none; }
+/* a row's button two pixels short of its row each way, so two rows' buttons never touch */
+.tt-low .t .btn-sm { min-height: 20px; padding: 0 8px; border: 0; border-radius: var(--hl-r); background: var(--hl-inset); color: var(--hl-title); font: 400 12px/20px var(--font-sans); vertical-align: middle; transition: background-color var(--hl-ease); }
+.tt-low .t .acts { gap: 4px; flex-wrap: nowrap; }
+.tt-low .t .link { color: var(--hl-accent-soft); text-decoration: none; font-size: 12px; }
+@media (hover: hover) {
+  .tt-low .t .btn-sm:hover:not(:disabled) { background: var(--hl-inset-hover); }
+  .tt-low .t .link:hover { color: var(--hl-accent); }
+}
+/* a table being read for the first time (terminal.js ttLoadingHtml): a few grey rows where its rows will be */
+.tt-load { display: flex; flex-direction: column; gap: 8px; padding: 6px 0; }
+.tt-load .skel { display: block; height: 12px; border-radius: 3px; background: var(--hl-inset); }
+/* a history's Load more, under its rows, with how many show of how many */
+.tt-more-w { display: flex; align-items: center; gap: 10px; margin: 6px 0 2px; font-size: 12px; line-height: 20px; }
+.tt-more-w .link { color: var(--hl-accent-soft); font-size: 12px; }
+/* an order's state in Order history: what is live in the text colour, what waits in the area's amber, what is over quieter */
+.tt-low .t .tt-st-wait { color: var(--hl-warn); }
+.tt-low .t .tt-st-off { color: var(--hl-dim); }
+/* nothing in a tab: HL's one line in the title colour, no icon */
+.tt-tab .empty { padding: 0; font-size: 12px; line-height: 24px; color: var(--hl-title); }
+.tt-tab .msg { font-size: 12px; line-height: 24px; }
+/* the venues whose positions could not be read, under the table */
+.tt-miss { margin: 4px 0 0; font-size: 12px; line-height: 18px; }
+ul.tt-miss { padding-left: 18px; color: var(--hl-warn); }
+
+/* the tables at 1080 and wider: what the window leaves them under the grid (at least three rows); the tab bar stays, the table scrolls
+   inside under its heads (each table its own scroll, both ways, so its heads stay over its rows). After the tables' own rules, which they
+   change */
+@container tt (min-width: 1080px) {
+  .tt-low { display: flex; flex-direction: column; height: max(var(--tt-low-min), calc(var(--tt-room) - var(--tt-grid-h))); padding-bottom: 4px; overflow: hidden; }
+  .tt-tabs { flex: none; }
+  .tt-tab { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--hl-scroll-thumb) transparent; }
+  .tt-tab[hidden] { display: none; }
+  .tt-tab > * { flex: none; }
+  .tt-tab > .t-wrap { flex: 0 1 auto; min-height: 48px; overflow: auto; overscroll-behavior: contain; }
+  /* a tab of two tables (Open orders, and what else is under way under its own head): sharing the room would leave each a row, so the tab
+     scrolls as a whole instead, each table as tall as its rows */
+  .tt-tab:has(> .t-wrap ~ .t-wrap) > .t-wrap { flex: none; min-height: 0; overflow-y: visible; }
+  .tt-low .t thead th { position: sticky; top: 0; z-index: 1; background: var(--hl-panel); }
+  /* each row's own buttons — Close… and Sell…, Change and Cancel, Cancel all over them — kept at the panel's right edge as HL keeps them,
+     whatever the table's width: the columns scroll under them, never they off the window */
+  .tt-low .t:is(.tt-pos, .tk-open-t) :is(th, td):last-child { position: sticky; right: 0; z-index: 1; padding-left: 10px; background: var(--hl-panel); box-shadow: -10px 0 8px -8px var(--hl-ground); }
+  .tt-low .t:is(.tt-pos, .tk-open-t) thead th:last-child { z-index: 2; }
+}
+
+/* ---- the status strip at the foot (REF §5.22): which accounts trade from here; a read of the bar's market that failed, in amber ---------- */
+.tt-foot { display: flex; align-items: center; gap: 16px; min-height: var(--hl-h-footer); padding: 3px 12px 4px; background: var(--hl-ground); border-top: 1px solid var(--hl-inset); color: var(--hl-dim); font-size: 12px; line-height: 15px; min-width: 0; }
+.tt-foot .tp-state { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tt-foot .tp-state:empty, .tt-said:empty { display: none; }
+/* the account's stream, in the foot's first corner as HL keeps its "Online" there (ui/stream.js stDot): a dot and a word — live in the
+   area's green, quiet in its amber, polling dimmed; the colour is never alone (the word says it, the title says the rest) */
+.tt-live { flex: none; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.tt-live:empty { display: none; }
+.tt-live::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--hl-dim); }
+.tt-live[data-st="connected"] { color: var(--hl-up); }
+.tt-live[data-st="connected"]::before { background: var(--hl-up); }
+.tt-live[data-st="stale"] { color: var(--hl-warn); }
+.tt-live[data-st="stale"]::before { background: var(--hl-warn); }
+.tt-said { flex: 1 1 auto; margin: 0 0 0 auto; color: var(--hl-warn); text-align: right; overflow-wrap: anywhere; min-width: 0; }
+/* the screen's one clock, named once (core yourClock): every time on it — the chart's axis, the trades, the tables — is on this clock */
+.tt-clock { flex: none; white-space: nowrap; cursor: help; }
+.tt-clock:empty { display: none; }
+
+/* ---- under 560 pixels: a phone's terminal ------------------------------------------------------------------------------------------- */
+@container tt (max-width: 559px) {
+  /* (a container's own rules cannot change it: the bar's height is set on the grid, where the bar and the popover read it) */
+  .tt-grid { --tt-bar-h: 56px; }
+  /* the bar on one line: the name, then its figures sliding sideways under the finger */
+  .tt-bar { padding: 6px 10px 6px 0; }
+  .tt-mkt { font-size: 18px; line-height: 24px; padding: 6px 8px 6px 10px; max-width: 55%; }
+  .tt-where { display: none; }
+  .tt-stats { gap: 20px; margin-left: 12px; }
+  /* the feed keeps its dot and its age: its word is on hover */
+  .tt-feed { margin-left: 8px; }
+  .tt-feed-w { display: none; }
+  /* the positions as two lines each: the market and its result; its size and mark, and its button */
+  .tt-pos thead { display: none; }
+  .tt-pos tr { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "mkt mkt pnl" "size mark act"; gap: 2px 12px; padding: 8px 0; border-bottom: 1px solid var(--hl-tabline); }
+  .tt-low .tt-pos td { padding: 0; line-height: 20px; text-align: left; white-space: normal; }
+  .tt-pos .tt-c-mkt { grid-area: mkt; }
+  .tt-pos .tt-c-pnl { grid-area: pnl; text-align: right; }
+  .tt-pos .tt-c-size { grid-area: size; }
+  .tt-pos .tt-c-mark { grid-area: mark; color: var(--hl-dim); }
+  .tt-low .t.tt-pos .tt-k { display: inline; }
+  .tt-pos .tt-c-act { grid-area: act; text-align: right; }
+  .tt-pos :is(.tt-c-val, .tt-c-entry, .tt-c-liq, .tt-c-margin, .tt-c-fund, .tt-c-tpsl) { display: none; }
+  .tt-foot .tp-state { white-space: normal; }
+}
+
+/* ---- a finger, not a pointer: every target at least 44 high ------------------------------------------------------------------------ */
+@media (pointer: coarse) {
+  .tt-tabs button { line-height: 44px; }
+  .tt-low .t .btn-sm { min-height: 44px; min-width: 44px; }
+  .tt-mkt { min-height: 44px; }
+}
+
+/* ---- colour and motion on every control in the terminal (REF §7) ------------------------------------------------------------------- */
+.tt :is(button, .fld, .tk-at), .tt-order :is(.btn, button) { transition: color var(--hl-ease), background-color var(--hl-ease), border-color var(--hl-ease); }
+@media (prefers-reduced-motion: reduce) {
+  .tt-pop { animation: none; }
+  .tt-mkt .ico { transition: none; }
+  .tt :is(button, .fld, .tk-at), .tt-order :is(.btn, button), .tt-mkt, .tt-tabs button, .tt-mtabs button, :is(.tt-tabs, .tt-mtabs).slide-under::after { transition: none; }
+}

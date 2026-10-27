@@ -1,0 +1,93 @@
+/* THE BRAINS sheet (ui/brains.js): the providers as cards in three groups, the picked one's form beside them on a wide sheet (under them on
+   a narrow one, where the cards step aside while a form shows and "‹ All brains" brings them back), and the agents' short section at the
+   foot. It opens in dialog#modal, which ui/tokens.css dresses as the place it opens from — Hyperliquid's green in the trading area (the
+   Superagent), the Account's Cream or Black on the Agents pane — so every colour, radius and face here is one of the Account's names
+   (--surface, --surface-2, --text, --dim, --border, --rule, --up, --warn, --radius-m …), never a value, and the shared classes (.btn, .tag,
+   .msg, .link, dialog label) draw the rest. Nothing moves but a card's edge and fill on hover and when picked (none under reduced motion). */
+.br { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.br-lede { margin: 0; }
+.br-split { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+.br-pickers { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.br-group { display: flex; flex-direction: column; gap: 8px; }
+.br-group .label { margin: 0; }
+.br-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+
+/* a provider: its name, its kind, its standing with a dot (the dot repeats the words, never says alone) */
+.br-card { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-height: 76px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-m); background: var(--surface); color: var(--text); font: inherit; text-align: left; cursor: pointer; min-width: 0; transition: border-color 120ms ease-out, background-color 120ms ease-out; }
+.br-card:hover { background: var(--hover); }
+.br-card[aria-pressed="true"] { border-color: var(--rule); box-shadow: 0 0 0 1px var(--rule); }
+.br-card-n { font-size: 14px; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
+.br-card-k { font-size: 12px; color: var(--dim); }
+.br-st { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.br-st i { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); flex: none; }
+.br-st[data-s="ok"] { color: var(--up); }
+.br-st[data-s="ok"] i { background: var(--up); }
+.br-st[data-s="warn"] { color: var(--warn-text); }
+.br-st[data-s="warn"] i { background: var(--warn); }
+
+/* the picked provider's form */
+/* on a wide sheet the form stays in view beside the cards as they scroll (the sheet's own header is sticky above it) */
+.br-side { min-width: 0; position: sticky; top: 72px; max-height: calc(100vh - 150px); overflow: auto; overscroll-behavior: contain; padding-right: 2px; }
+.br-none { margin: 0; padding: 16px; border: 1px dashed var(--border); border-radius: var(--radius-m); }
+.br-form { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.br-back { display: none; align-self: flex-start; }
+.br-f-h { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 12px; }
+.br-f-h .h2 { margin: 0; font-size: 18px; }
+.br-f-h .h2:focus { outline: none; }
+.br-note { margin: 0; }
+.br-why { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: var(--radius-m); background: var(--warn-fill); color: var(--text); }
+.br-why p { margin: 0; overflow-wrap: anywhere; }
+.br-file summary { cursor: pointer; color: var(--dim); }
+.br-fix-r { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "l l" "c b"; gap: 4px 8px; align-items: center; margin-top: 8px; }
+.br-fix-r > span { grid-area: l; }
+.br-fix-r .br-path { grid-area: c; }
+.br-fix-r .btn { grid-area: b; }
+.br-path { display: block; min-width: 0; padding: 8px 10px; border-radius: var(--radius-s); background: var(--surface); color: var(--text); font: 400 12px/1.4 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; user-select: all; }
+.br-fields { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.br-fields p { margin: 0; }
+/* the key: its own label, one field and Save on a row. The field is type="text" drawn as dots (not a password field: a password field a fetch
+   "submits" is what a browser offers to keep in its password store, and an API key does not belong there) — supported by every browser the
+   page supports (Chrome and Safari for years, Firefox since 114); ui/brains.js brMasked makes it a password field where it is not, rather
+   than show the key */
+.br-key { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.br [data-br-key] { -webkit-text-security: disc; }
+/* a key typed into the model or the base URL: said under that field, in words (never the value) */
+.br-warn { margin: 0; overflow-wrap: anywhere; }
+.br-warn[hidden] { display: none; }
+.br-key p { margin: 0; }
+/* a masked tail never broken across lines */
+.br-nw { white-space: nowrap; }
+.br-key-row { display: flex; gap: 8px; align-items: stretch; min-width: 0; }
+.br-key-row input { flex: 1 1 auto; min-width: 0; font-family: var(--font-mono); }
+.br-key-row .btn { flex: none; align-self: center; }
+.br-acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* the yes before a key is saved (dialog#ask, over the sheet): the four fields signed, each label beside its value, a long base URL broken
+   anywhere rather than pushing the dialog wide */
+.br-sign dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 14px; margin: 12px 0; font-size: 13px; }
+.br-sign dt { color: var(--dim); }
+.br-sign dd { margin: 0; font-family: var(--font-mono); overflow-wrap: anywhere; color: var(--text); }
+
+/* the agents: who they are, in a line each */
+.br-agents { display: flex; flex-direction: column; gap: 8px; padding-top: 14px; border-top: 1px solid var(--border); }
+.br-agents .label, .br-agents p { margin: 0; }
+.br-ag { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.br-ag li { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 10px; font-size: 13px; line-height: 1.45; }
+.br-ag li span { color: var(--dim); }
+.br-ag .link { font-size: 13px; }
+
+/* a narrow sheet: one column; while a provider's form shows, the cards step aside and "‹ All brains" brings them back */
+@media (max-width: 760px) {
+  .br-split { grid-template-columns: minmax(0, 1fr); }
+  .br-side { position: static; max-height: none; overflow: visible; }
+  .br[data-picked] .br-pickers { display: none; }
+  .br[data-picked] .br-back { display: inline-flex; }
+  .br-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .br-card { min-height: 0; padding: 8px 10px; }
+  .br-ag li { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .br-key-row { flex-wrap: wrap; }
+  .br-key-row input { flex-basis: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .br-card { transition: none; }
+}

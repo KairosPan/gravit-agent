@@ -1,0 +1,427 @@
+/* The Account's two backgrounds, Light and Black, as one set of names, in the ocean look: the page's ground is a field of character cells
+   where sharks hunt schools of fish, drawn in type (ui/ocean.js, after stackedlol's ascii-sharks: Light as its video shows it, Black as its
+   source draws it), and everything else floats over it as frosted glass — a translucent fill, a hairline and a blur of what swims under
+   it. Monochrome but for the few colours that carry a meaning (up, down, waiting) and the glints on a shark's hide. account.html sets
+   html[data-theme] before the first paint ("cream" is Light's name in this browser's storage and the attribute, kept from before the ocean;
+   Light unless this browser chose Black); with no script the system's own light or dark decides. Below them, the names the page used
+   before (portfolio.css: --paper --ink --line --sage --orange …) point at these, so every earlier class still renders in either background.
+   The ocean reads its own colours here too (--oc-*): the ground, the grid, the blocks from shadow to light, the inks of their glyphs, the
+   fish, the wake, a burst, and the glints.
+   Contrast (WCAG AA, 4.5:1 for words), measured on glass at its worst — a shark's lit back under it, its blocks covering 84% of the
+   water, blurred: Light text 13.7, dim 4.9, up 5.1, down 5.3, warn-text on warn-fill 5.3, white on the accent 5.3; Black text 11.1, dim
+   4.9, up 6.3, down 4.6, warn-text on warn-fill 5.8, white on the accent 5.0. */
+/* the two faces, served from this account (fonts/, SIL Open Font License: fonts/OFL.txt): Manrope, one variable file a script (200–800:
+   its thin weights draw the large figures, as the reference draws its headline), and Geist Mono 400, 500 and 600 — the ocean's glyphs, the
+   small labels, hashes, addresses and what is signed. A script's file is fetched only when the page shows a letter of it; Manrope's latin
+   is preloaded by account.html, so the first paint is already in it */
+@font-face { font-family: "Manrope"; font-style: normal; font-weight: 200 800; font-display: swap; src: url(/fonts/manrope-v20-latin.woff2) format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Manrope"; font-style: normal; font-weight: 200 800; font-display: swap; src: url(/fonts/manrope-v20-latin-ext.woff2) format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: "Manrope"; font-style: normal; font-weight: 200 800; font-display: swap; src: url(/fonts/manrope-v20-cyrillic-ext.woff2) format("woff2"); unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F; }
+@font-face { font-family: "Manrope"; font-style: normal; font-weight: 200 800; font-display: swap; src: url(/fonts/manrope-v20-cyrillic.woff2) format("woff2"); unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+@font-face { font-family: "Manrope"; font-style: normal; font-weight: 200 800; font-display: swap; src: url(/fonts/manrope-v20-greek.woff2) format("woff2"); unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF; }
+@font-face { font-family: "Manrope"; font-style: normal; font-weight: 200 800; font-display: swap; src: url(/fonts/manrope-v20-vietnamese.woff2) format("woff2"); unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB; }
+@font-face { font-family: "Geist Mono"; font-style: normal; font-weight: 400; font-display: swap; src: url(/fonts/geist-mono-v5-latin-400.woff2) format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Geist Mono"; font-style: normal; font-weight: 400; font-display: swap; src: url(/fonts/geist-mono-v5-latin-ext-400.woff2) format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: "Geist Mono"; font-style: normal; font-weight: 500; font-display: swap; src: url(/fonts/geist-mono-v5-latin-500.woff2) format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Geist Mono"; font-style: normal; font-weight: 500; font-display: swap; src: url(/fonts/geist-mono-v5-latin-ext-500.woff2) format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: "Geist Mono"; font-style: normal; font-weight: 600; font-display: swap; src: url(/fonts/geist-mono-v5-latin-600.woff2) format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Geist Mono"; font-style: normal; font-weight: 600; font-display: swap; src: url(/fonts/geist-mono-v5-latin-ext-600.woff2) format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+
+:root,
+:root[data-theme="cream"] {
+  color-scheme: light;
+  --bg: #fcfcfb;
+  /* glass: the panes' cards, the rail, the sheets, the menus — what swims under it shows through, blurred (shell.css backdrop-filter) */
+  --surface: rgba(255, 255, 255, 0.74);
+  --surface-2: rgba(17, 17, 17, 0.055);
+  --glass: blur(20px) saturate(1.15);
+  /* the fog behind what floats on open water (the net worth): the ground's own colour, thick in the middle, gone at the edge; and the
+     halo a few words on the water keep (a hint beside the tabs), so a passing shark never takes a letter */
+  --fog: rgba(252, 252, 251, 0.8);
+  --halo: 0 0 2px var(--bg), 0 0 8px var(--bg), 0 0 14px var(--bg);
+  --text: #111111;
+  --dim: #5c5c57;
+  --border: rgba(17, 17, 17, 0.1);
+  /* a strong edge: what is picked or focused (a venue chosen in the ticket, a field being typed in) */
+  --rule: #111111;
+  --primary: #111111;
+  --on-primary: #ffffff;
+  --warn: #d97a1e;
+  --warn-text: #8a4706;
+  --warn-fill: rgba(253, 239, 224, 0.86);
+  /* the soft edge of something waiting on the owner (the approval card) */
+  --warn-edge: rgba(217, 122, 30, 0.34);
+  /* words on a warn fill (a count) */
+  --on-warn: #111111;
+  --up: #0c6631;
+  --down: #a3291d;
+  /* a Yes and a No to press: the up and down colours on a fill of their own */
+  --up-fill: rgba(30, 150, 80, 0.12);
+  --down-fill: rgba(205, 60, 44, 0.11);
+  --hover: rgba(17, 17, 17, 0.05);
+  --area: rgba(17, 17, 17, 0.05);
+  --scrim: rgba(252, 252, 251, 0.5);
+  /* a card: a hairline of its own and a shadow you barely see; the ticket lifts a little more; a sheet or a menu floats */
+  --card-border: rgba(17, 17, 17, 0.09);
+  --shadow-card: 0 1px 2px rgba(17, 17, 17, 0.04);
+  --shadow-lift: 0 12px 32px rgba(17, 17, 17, 0.08);
+  --shadow: 0 24px 64px rgba(17, 17, 17, 0.14);
+  --rail-bg: rgba(255, 255, 255, 0.6);
+  /* what the money is in (the allocation bar): never told apart by colour alone, each slice has its name beside it */
+  --alloc-cash: #d2d2cd;
+  --alloc-stable: #8c8c86;
+  --alloc-crypto: #111111;
+  --alloc-equity: #3b5cf0;
+  --alloc-event: #2c9a58;
+  --alloc-rwa: #e8912d;
+  --alloc-earn: #9b51e0;
+  /* the one colour that says yes (your own words in a conversation, the round key that approves): a shark's blue glint. Words on it are
+     white, 5.5:1 */
+  --accent: #3b5cf0;
+  --on-accent: #ffffff;
+  /* the ocean (ui/ocean.js): as the reference's video — a near-white ground and a grid you barely see, blocks from light grey in shadow
+     to a dark grey where the light falls, dark glyphs on the light blocks and pale ones on the dark, dark dashes for fish, a grey wake */
+  --oc-ground: #fcfcfb;
+  --oc-grid: rgba(17, 17, 17, 0.05);
+  --oc-shadow: #e7e7e3;
+  --oc-lit: #5d5d59;
+  --oc-ink: #1b1b1a;
+  --oc-ink-on: #f6f6f2;
+  --oc-sparkle: #000000;
+  --oc-eye: #8b8b86;
+  --oc-edge: #85857f;
+  --oc-fish: #2a2a27;
+  --oc-wake: #8a8a85;
+  --oc-spark: #e2453a;
+  --oc-glints: #e8912d #e2453a #a855f7 #2cc4c9 #3fb950 #3b5cf0 #d6b84a;
+}
+
+:root[data-theme="black"] {
+  color-scheme: dark;
+  --bg: #000000;
+  --surface: rgba(13, 14, 16, 0.76);
+  --surface-2: rgba(255, 255, 255, 0.07);
+  --glass: blur(20px) saturate(1.1);
+  --fog: rgba(0, 0, 0, 0.78);
+  --halo: 0 0 2px var(--bg), 0 0 8px var(--bg), 0 0 14px var(--bg);
+  --text: #f2f2f0;
+  --dim: #a3a39e;
+  --border: rgba(255, 255, 255, 0.1);
+  --rule: #f2f2f0;
+  --primary: #f2f2f0;
+  --on-primary: #0a0a0a;
+  --warn: #f0a040;
+  --warn-text: #f5b866;
+  --warn-fill: rgba(56, 38, 14, 0.82);
+  --warn-edge: rgba(240, 160, 64, 0.5);
+  --on-warn: #0a0a0a;
+  --up: #4cd07a;
+  --down: #ff6f62;
+  --up-fill: rgba(76, 208, 122, 0.14);
+  --down-fill: rgba(255, 111, 98, 0.13);
+  --hover: rgba(255, 255, 255, 0.06);
+  --area: rgba(110, 230, 255, 0.08);
+  --scrim: rgba(0, 0, 0, 0.55);
+  --card-border: rgba(255, 255, 255, 0.09);
+  --shadow-card: none;
+  --shadow-lift: none;
+  --shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+  --rail-bg: rgba(8, 9, 11, 0.6);
+  --alloc-cash: #4a4a46;
+  --alloc-stable: #a3a39e;
+  --alloc-crypto: #f2f2f0;
+  --alloc-equity: #6e8bff;
+  --alloc-event: #4cd07a;
+  --alloc-rwa: #f0a040;
+  --alloc-earn: #c08cff;
+  /* white words on it 5.1:1 */
+  --accent: #4560f0;
+  --on-accent: #ffffff;
+  /* the ocean as the reference's source draws it: black, the grid at a twentieth of white, grey blocks lit from the upper left with dark
+     glyphs pressed into them, pale fish and a cyan wake */
+  --oc-ground: #000000;
+  --oc-grid: rgba(255, 255, 255, 0.055);
+  --oc-shadow: #2e2e2e;
+  --oc-lit: #cecece;
+  --oc-ink: #0e0f13;
+  --oc-ink-on: #1b1d24;
+  --oc-sparkle: #ffffff;
+  --oc-eye: #9aa0ad;
+  --oc-edge: #9a9a9a;
+  --oc-fish: #e6eeff;
+  --oc-wake: #6ee6ff;
+  --oc-spark: #ff7a45;
+  --oc-glints: #e8912d #e2453a #a855f7 #2cc4c9 #3fb950 #3b5cf0 #d6b84a;
+}
+
+/* no script to read the choice: the system's own dark gets Black */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+    --bg: #000000;
+    --surface: rgba(13, 14, 16, 0.76);
+    --surface-2: rgba(255, 255, 255, 0.07);
+    --glass: blur(20px) saturate(1.1);
+    --fog: rgba(0, 0, 0, 0.78);
+    --halo: 0 0 2px var(--bg), 0 0 8px var(--bg), 0 0 14px var(--bg);
+    --text: #f2f2f0;
+    --dim: #a3a39e;
+    --border: rgba(255, 255, 255, 0.1);
+    --rule: #f2f2f0;
+    --primary: #f2f2f0;
+    --on-primary: #0a0a0a;
+    --warn: #f0a040;
+    --warn-text: #f5b866;
+    --warn-fill: rgba(56, 38, 14, 0.82);
+    --warn-edge: rgba(240, 160, 64, 0.5);
+    --on-warn: #0a0a0a;
+    --up: #4cd07a;
+    --down: #ff6f62;
+    --up-fill: rgba(76, 208, 122, 0.14);
+    --down-fill: rgba(255, 111, 98, 0.13);
+    --hover: rgba(255, 255, 255, 0.06);
+    --area: rgba(110, 230, 255, 0.08);
+    --scrim: rgba(0, 0, 0, 0.55);
+    --card-border: rgba(255, 255, 255, 0.09);
+    --shadow-card: none;
+    --shadow-lift: none;
+    --shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+    --rail-bg: rgba(8, 9, 11, 0.6);
+    --alloc-cash: #4a4a46;
+    --alloc-stable: #a3a39e;
+    --alloc-crypto: #f2f2f0;
+    --alloc-equity: #6e8bff;
+    --alloc-event: #4cd07a;
+    --alloc-rwa: #f0a040;
+    --alloc-earn: #c08cff;
+    --accent: #4560f0;
+    --on-accent: #ffffff;
+    --oc-ground: #000000;
+    --oc-grid: rgba(255, 255, 255, 0.055);
+    --oc-shadow: #2e2e2e;
+    --oc-lit: #cecece;
+    --oc-ink: #0e0f13;
+    --oc-ink-on: #1b1d24;
+    --oc-sparkle: #ffffff;
+    --oc-eye: #9aa0ad;
+    --oc-edge: #9a9a9a;
+    --oc-fish: #e6eeff;
+    --oc-wake: #6ee6ff;
+    --oc-spark: #ff7a45;
+    --oc-glints: #e8912d #e2453a #a855f7 #2cc4c9 #3fb950 #3b5cf0 #d6b84a;
+  }
+}
+
+:root {
+  /* Manrope for words, its thinnest weights for the large figures; Geist Mono for the small labels, the glyphs, hashes and what is signed */
+  --font-sans: "Manrope", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, "PingFang SC", sans-serif;
+  --font-num: var(--font-sans);
+  --font-mono: "Geist Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  /* the earlier name for the numbers' face: Manrope now, so a rule still naming it draws in the new look */
+  --font-serif: var(--font-sans);
+  /* corners: a control 8, a card 14, a sheet 18; a pill only for the small marks (a count, a tag, a chip) */
+  --radius-s: 8px;
+  --radius-m: 14px;
+  --radius-l: 18px;
+  --radius-pill: 999px;
+  --radius: var(--radius-s);
+  --radius-2: var(--radius-m);
+  --rail: 248px;
+  /* the earlier names, pointed at the ones above. --orange stays a fill: words in it use --warn-text, which reads on either background */
+  --paper: var(--bg);
+  --ink: var(--text);
+  --line: var(--border);
+  --card: var(--surface);
+  --sage: var(--up);
+  --orange: var(--warn);
+  --rust: var(--down);
+  --muted: var(--dim);
+  --gold: var(--alloc-equity);
+  --plum: var(--alloc-event);
+  --blue: var(--alloc-rwa);
+}
+
+/* THE TRADING AREA: Trade and the superagent (shell.js sets html[data-area="trade"] on #/trade… and #/superagent…; account.html's head sets
+   it before the first paint for a link straight there). A trading screen is dark, so the area is always the Black ocean, whichever
+   background the Account wears: these blocks sit under no [data-theme], so they read the same in both. It keeps the grammar it was built
+   in — Hyperliquid's trade screen: dense panels side by side, one small size, one weight, tabs with a line under the chosen one — and
+   takes the ocean's colours: the panels are dark glass with the water showing in the gutters between them, the one accent is the wake's
+   cyan (a Buy, the chosen tab, a link), up green and down red from the reference's own dots, caution the area's amber.
+   Two blocks. The COLOURS (this one) are given to the whole page while the area shows — html itself, so the rail beside the area, the
+   page's own background under it and everything the area draws take them alike, and the ocean behind it turns Black. Leaving the area
+   takes the attribute away and the Account's look comes back; the rail's colours change over 0.2 s as they go (shell.css, none under
+   reduced motion). The SHAPE AND FACE (the second block) are the area's containers' alone: the top bar, the banners, both panes, the
+   sheets, the drawer, the asking dialog, the toasts. Every shared class (.btn, .seg, .t, .fld, chg(), the ticket's quote) takes the
+   Account's own names given these values, and what is the area's own keeps the names it was built with (--hl-*).
+   The names that point at others (--paper, --ink, --line, --radius, --font-num …) are declared here again: a custom property that names
+   another is resolved where it is declared, so the :root aliases above would still carry Light's values into the area. The containers are
+   named beside html in the colour block although they would inherit the same values: each of them is a place the area's colours are
+   defined, and a rule written for one of them reads them there.
+   Words on these surfaces (WCAG AA 4.5:1), on a glass panel at its worst (a shark's lit back under it): dim 5.2:1, up 7.0, down 5.1,
+   amber 8.8, the ink on the accent 10.6; on the order book's solid panel dim 7.2, up 9.7, down 7.1.
+   Component rules live with their components, never here. */
+:root[data-area="trade"],
+:root[data-area="trade"] :is(.main, #modal, #drawer, #ask, .toast-stack) {
+  /* surfaces and lines: the panels are dark glass over the water (--hl-glass); --hl-panel is the colour that glass reads as, solid, for
+     what must hide what is under it and match the panel (a sticky head, a ring round a held button, a fade at a panel's foot, a note laid
+     over a plot); the ground an opaque near-black (a menu, a well), the inset is a control's fill and edge, the tab line runs under every
+     tab bar, the divider rules a panel inside */
+  --hl-page: #000000;
+  --hl-glass: rgba(9, 10, 12, 0.8);
+  --hl-panel: #0a0b0d;
+  --hl-ground: #070809;
+  --hl-inset: rgba(255, 255, 255, 0.08);
+  --hl-inset-hover: rgba(255, 255, 255, 0.16);
+  --hl-disabled: rgba(255, 255, 255, 0.05);
+  --hl-tabline: rgba(255, 255, 255, 0.09);
+  --hl-divider: rgba(255, 255, 255, 0.14);
+  --hl-book-hover: rgba(255, 255, 255, 0.05);
+  --hl-scrim: rgba(0, 0, 0, 0.55);
+  /* words: the text, a title, the book's sizes, labels, the input's hover edge, a placeholder, a modal's body, the chart's own chrome */
+  --hl-text: #f2f2f0;
+  --hl-title: #ffffff;
+  --hl-text-2: #d4d4d0;
+  --hl-dim: #9d9d98;
+  --hl-muted: #a8a8a3;
+  --hl-placeholder: rgba(242, 242, 240, 0.5);
+  --hl-modal-body: #d0d0cc;
+  --hl-tv-text: #d1d1cd;
+  --hl-tv-sep: #3a3a38;
+  /* the one accent, the wake's cyan: the bright one for hover and current, the soft one for fills, underlines and links; words on them in
+     the near-black */
+  --hl-accent: #8cefff;
+  --hl-accent-soft: #5ad3ec;
+  --hl-on-accent: #00161b;
+  --hl-on-buy: #00191f;
+  --hl-accent-disabled: #123d47;
+  --hl-accent-deep: #0b2c34;
+  --hl-badge: rgba(90, 211, 236, 0.13);
+  --hl-online-fill: rgba(90, 211, 236, 0.16);
+  /* up and down: words, the book's depth bars, a level's flash, a figure's first colour as it changes, the leverage warning's box */
+  --hl-up: #3fcf72;
+  --hl-down: #ff6b61;
+  --hl-up-bar: rgba(63, 207, 114, 0.15);
+  --hl-down-bar: rgba(255, 107, 97, 0.15);
+  --hl-up-flash: #1c4a31;
+  --hl-down-flash: #5a2420;
+  --hl-up-tick: #2fb862;
+  --hl-down-box: #33201f;
+  /* the Sell and Short button while it waits (an order being prepared, signed or placed): the red, dark — never faded */
+  --hl-down-disabled: #4a2421;
+  /* the chart: the same green and red, a grid as faint as the ocean's */
+  --hl-candle-up: #3fcf72;
+  --hl-candle-down: #ff5a4f;
+  --hl-grid: rgba(255, 255, 255, 0.05);
+  --hl-grid-2: rgba(255, 255, 255, 0.03);
+  /* caution and waiting: the area's own amber, so a caution never reads as a loss */
+  --hl-warn: #f5c46b;
+  --hl-warn-fill: rgba(245, 196, 107, 0.12);
+  --hl-scroll-thumb: rgba(255, 255, 255, 0.2);
+  /* sizes: the gutter (the water showing between panels), a panel's radius and a control's, a popover's, a toast's, a modal's, a
+     checkbox's, the slider's track; a control 33 high (40 in a modal), the nav 56, a table row 24, a book row 23 with 2 between, the
+     footer 30 */
+  --hl-gap: 6px;
+  --hl-r-panel: 10px;
+  --hl-r: 8px;
+  --hl-r-pop: 10px;
+  --hl-r-toast: 12px;
+  --hl-r-modal: 18px;
+  --hl-r-check: 3px;
+  --hl-r-track: 14px;
+  --hl-h-control: 33px;
+  --hl-h-control-l: 40px;
+  --hl-h-nav: 56px;
+  --hl-h-row: 24px;
+  --hl-h-bookrow: 23px;
+  --hl-bookgap: 2px;
+  --hl-h-footer: 30px;
+  /* every colour, fill and edge on a control changes over this */
+  --hl-ease: 0.2s ease-in-out;
+
+  /* the Account's names, given the area's values */
+  --bg: var(--hl-ground);
+  --surface: var(--hl-glass);
+  --surface-2: var(--hl-inset);
+  --hover: var(--hl-inset);
+  --glass: blur(20px) saturate(1.1);
+  --fog: rgba(0, 0, 0, 0.78);
+  --halo: 0 0 2px #000, 0 0 8px #000, 0 0 14px #000;
+  --area: rgba(90, 211, 236, 0.1);
+  --text: var(--hl-text);
+  --dim: var(--hl-dim);
+  --border: var(--hl-inset);
+  --card-border: rgba(255, 255, 255, 0.07);
+  --rule: var(--hl-muted);
+  --primary: var(--hl-accent-soft);
+  --on-primary: var(--hl-on-accent);
+  --accent: var(--hl-accent-soft);
+  --on-accent: var(--hl-on-accent);
+  --up: var(--hl-up);
+  --down: var(--hl-down);
+  /* the depth bars' tints, laid over a panel */
+  --up-fill: rgba(63, 207, 114, 0.14);
+  --down-fill: rgba(255, 107, 97, 0.14);
+  --scrim: var(--hl-scrim);
+  --shadow-card: none;
+  --shadow-lift: none;
+  --shadow: none;
+  --warn: var(--hl-warn);
+  --warn-text: var(--hl-warn);
+  --warn-fill: var(--hl-warn-fill);
+  --warn-edge: var(--hl-warn);
+  --on-warn: var(--hl-on-accent);
+  /* the earlier names, declared again so they resolve to the values above */
+  --paper: var(--bg);
+  --ink: var(--text);
+  --line: var(--border);
+  --card: var(--surface);
+  --sage: var(--up);
+  --orange: var(--warn);
+  --rust: var(--down);
+  --muted: var(--dim);
+  /* the rail beside the area: dark glass like the panels (its current item and its hover in the bright accent: shell.css) */
+  --rail-bg: var(--hl-glass);
+  /* the ocean behind the area: always Black */
+  --oc-ground: #000000;
+  --oc-grid: rgba(255, 255, 255, 0.055);
+  --oc-shadow: #2e2e2e;
+  --oc-lit: #cecece;
+  --oc-ink: #0e0f13;
+  --oc-ink-on: #1b1d24;
+  --oc-sparkle: #ffffff;
+  --oc-eye: #9aa0ad;
+  --oc-edge: #9a9a9a;
+  --oc-fish: #e6eeff;
+  --oc-wake: #6ee6ff;
+  --oc-spark: #ff7a45;
+  color-scheme: dark;
+}
+/* the area's shape and face: its containers only (the rail keeps the Account's) */
+:root[data-area="trade"] :is(.main, #modal, #drawer, #ask, .toast-stack) {
+  /* no pills: buttons and toggles are 8 px rectangles, panels 10, a modal 18 */
+  --radius-s: 8px;
+  --radius-m: 10px;
+  --radius-l: 18px;
+  --radius-pill: 8px;
+  --radius: 8px;
+  --radius-2: 10px;
+  /* Manrope, as the rest of the Account; figures in its tabular digits. The faces' other names declared again so they resolve here
+     (--font-mono stays Geist Mono: hashes and what is signed) */
+  --font-sans: "Manrope", system-ui, "Segoe UI", Roboto, Ubuntu, "Helvetica Neue", sans-serif;
+  --font-num: var(--font-sans);
+  --font-serif: var(--font-sans);
+
+  /* the base: one weight (400) and tabular, lining figures everywhere, no contextual ligatures, underlines a little below */
+  color-scheme: dark;
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-weight: 400;
+  letter-spacing: normal;
+  font-variant-numeric: tabular-nums lining-nums;
+  font-variant-ligatures: no-contextual;
+  text-underline-offset: 0.2em;
+}
+/* the column behind the panels is open water: the gutters between them show the ocean */
+:root[data-area="trade"] .main { background: transparent; }
+/* one small size: 12 px on a 15 px line, almost every word on the screen */
+:root[data-area="trade"] :is(.pane[data-pane="trade"], .pane[data-pane="superagent"]) { font-size: 12px; line-height: 15px; }

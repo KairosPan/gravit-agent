@@ -1,0 +1,89 @@
+{
+  "note": "Seeds for the agent portfolio manager's SIMULATED accounts. Every credential here is a reference to a file in home, never a value; the agent-facing views carry the reference only. The MetaMask account and the Polymarket account each have a sim seed AND a live mode (--mm) that reads the real `mm` CLI.",
+  "binance": {
+    "balances": {
+      "BTC": 0.3,
+      "ETH": 2,
+      "USDT": 5000
+    },
+    "permissions": [
+      "SPOT"
+    ],
+    "ipWhitelist": [
+      "203.0.113.7"
+    ],
+    "withdrawWhitelist": [
+      "wallet-main"
+    ]
+  },
+  "okx": {
+    "balances": {
+      "ETH": 1.5,
+      "USDT": 2500
+    },
+    "permissions": [
+      "read",
+      "trade"
+    ],
+    "ipBound": "203.0.113.7"
+  },
+  "metamask": {
+    "seed": "77777777777777777777777777777777777777777777777777777777777777aa",
+    "tradingMode": "guard",
+    "rolling24hUsd": 1500,
+    "allowlist": [
+      "wallet-main",
+      "0x5a1e…kyc",
+      "0x9e7a…deposit"
+    ],
+    "holdings": [
+      {
+        "asset": "USDC",
+        "amount": 1200,
+        "chain": "Base"
+      },
+      {
+        "asset": "ETH",
+        "amount": 0.15,
+        "chain": "Ethereum"
+      },
+      {
+        "asset": "ETH",
+        "amount": 1,
+        "chain": "Base"
+      }
+    ]
+  },
+  "polymarket": {
+    "depositWallet": "0x9e7a…deposit",
+    "pusd": 600,
+    "positions": [
+      {
+        "symbol": "FED-SEP-HOLD:YES",
+        "shares": 80
+      }
+    ],
+    "geoblock": {
+      "blocked": false
+    }
+  },
+  "kalshi": {
+    "usd": 500,
+    "positions": [
+      {
+        "symbol": "FED-DEC-HIKE25:YES",
+        "shares": 150
+      }
+    ],
+    "positionLimitUsd": 25000
+  },
+  "ondo": {
+    "address": "0x5a1e…kyc",
+    "ousg": 18,
+    "usdc": 3000,
+    "allowlist": [
+      "0x5a1e…kyc",
+      "wallet-main"
+    ]
+  }
+}
