@@ -1,0 +1,191 @@
+# The Account's service in this tree — ledger
+
+- Plan: `docs/superpowers/plans/2026-10-27-account-in-repo.md`
+- Spec: `docs/superpowers/specs/2026-10-27-account-in-repo-design.md` (its Status line still reads DRAFT;
+  the session that started this build reports the operator approved it on 2026-10-27, and the build
+  stands on that word)
+- Branch: `claude/account-in-repo-415034` (the app named the worktree's branch; the plan's
+  `feat/account-in-repo` is not used), from local `main` @ f36c78c, in the worktree
+  `.claude/worktrees/account-in-repo-415034`
+- Origin: `~/buyer-agent-demo` @ 133b9a7, read-only
+- Baseline (spec §8, the origin checkout, 2026-10-27): 164 files, 163 passed, 1 failed
+  (`test/unit/ui-superagent.test.ts`); 2,883 tests, 2,882 passed; 144 s wall
+- Execution: superpowers:subagent-driven-development — per task a fresh implementer and a fresh
+  reviewer on the session's model (opus); the final whole-branch review on `fable`
+
+## Pre-flight scan (controller, 2026-10-27, before Task 1)
+
+Measured on the origin before ruling: `src/portfolio` holds 157 files (54 under `public/`, every
+other file `.ts`); `src/core` 8, `src/agent` 10, `src/contract` 4; no file of the four imports a
+dropped directory (`src/{runner,control-room,venues,wallet,plugins}`); `test/` holds 169 files, 164
+of them `*.test.ts`. Run-time reach the import closure cannot see: `test/e2e.test.ts` spawns
+`src/runner/run-demo.ts`; `test/portfolio-demo.test.ts` spawns `src/portfolio/demo.ts` (no entry
+imports it); `test/account-demo.test.ts` spawns `src/portfolio/account-demo.ts`;
+`test/unit/site-numbers.test.ts` imports `scripts/site-numbers.ts` and reads `site/index.html`;
+`test/unit/review2-contracts.test.ts` reads `README.md` and `COOKBOOK.md` at module scope and
+`docs/account.md` in two tests; `test/unit/mode-rules.test.ts` reads `README.md` and `COOKBOOK.md`
+in one test. The seat's child env is the face's scrubbed parent env plus the row's own
+(`@deepseek-ai/dsh-mcp-client` `buildChildEnv`), so `BUYER_HOME` set on the agent box reaches the
+seat. On this Mac the operator's face holds 127.0.0.1:3090 and the Account 127.0.0.1:4820; the
+suite's simulator ports (4701–4705, 4800) are free; Docker Compose v5.1.4 CLI present, daemon off.
+
+### Pairs of tasks sharing a file or an interface
+
+| Tasks | Produced → consumed | Found |
+|---|---|---|
+| 1 → 2 | `account/node_modules/tsx/dist/cli.mjs`, `account/src/portfolio/mcp.ts`, `account/test/standin/ui-standin.ts` → the seat row's default and the stand-in helper | agree; `node_modules` is ignored, so the smokes need Task 1's `npm ci` in this worktree (present) |
+| 1 → 3 | the copied `server.ts`, `server-guard.test.ts`, the suite's counts → Task 3's edit and its "matches Task 1's recorded counts" gate | Task 3 adds tests, so the count cannot match literally — **R5** |
+| 1 → 5 | `account/package.json` → `account/Dockerfile`'s `COPY package.json package-lock.json` + `npm ci` | Task 1's file list has no `account/package-lock.json` — **R4** |
+| 1 → 5 | `account/README.md` (Task 1 writes, Task 5 extends "In the box") | agree |
+| 2 → 5 | `DEFAULT_SEAT_DIR` resolved from `face/src` → the box finds `account/` through the bind mount, no `FACE_ACCOUNT_SEAT_DIR` in compose | agree |
+| 3 → 5 | `PORTFOLIO_BIND`, `PORTFOLIO_HOSTS` → the `account` service's environment | agree; `agentSetupOf` prints `http://account:4820` in the box |
+| 4 → 5 | `FACE_BIND` → the `agent` service's environment | agree |
+| 4 → 5 → 6 | `face/README.md`: "The profile" sentence (4), "The two-box drill" + the compose first run (5), "The Account seat" install (6) | sequential edits of different sections; agree |
+| 3, 4 → 6 | the three variables → DEVELOPMENT §4.3/§4.6, CLAUDE.md's `account/` row | agree |
+| 1–5 → 6 | the final tree, both suites' counts → the ledger's close | agree |
+
+### Each task against itself
+
+| Task | Found |
+|---|---|
+| 1 | Step 3 expects stderr to name `test/e2e.test.ts` reaching `src/runner`, but Step 2's rules follow imports only and that test reaches `src/runner` by `spawn` — **R2**. Step 4 copies the closure plus `public/`, while the spec §4 brings all of `src/portfolio/` (157 files) and `test/portfolio-demo.test.ts` spawns `src/portfolio/demo.ts`, which no entry imports — **R1**. Step 2's dropped set lacks `scripts/`, which the spec keeps out and `test/unit/site-numbers.test.ts` imports — **R3**. Step 7's ENOENT rule covers `fixtures/` only, not the docs two kept tests read — **R2**. Step 5 runs `npm ci` with no lock file in the file list — **R4**. Step 8's `--home $(mktemp -d)` is a check, not a run line of the tree: agrees with the home constraint |
+| 2 | tests and code agree (`join(dirname(…src…), "..", "..", "account")` equals `resolve(…tests…/../../account)`); the module header of `face/src/account-seat.ts`, the header of `face/src/account-proxy.ts` and the two smokes' headers still present the Account as an install at `~/buyer-agent-demo`, which Step 3 does not name — **R6** |
+| 3 | agrees with itself; the new tests need their own `PortfolioService.create` (the existing one is inside its `it`); the plan's test binds `0.0.0.0` for one port-0 server on a scratch home — kept |
+| 4 | the test's `preset` is the file's `GRAVIT` — trivial; Step 4 starts `npm start` with `FACE_BIND=0.0.0.0` on the operator's Mac, where the operator's face holds 3090 and the live `~/.dsh` and the live Account would be the defaults — **R7** |
+| 5 | the bind target and `working_dir` as a literal absolute path make `compose.test.ts` pass in one checkout only (this worktree's path is not the primary checkout's, and the suite runs in both) — **R8**; `docker compose config` prints `env_file` values resolved — only ever `> /dev/null`; the drill publishes 3090 and 4820, which the host dev loop holds — the README says to stop the host pair first (R8) |
+| 6 | agrees with itself; the spec's Status line ("DRAFT … nothing built") is stale once built — **R9** |
+
+### Rulings
+
+- **R1** Ruling: every `src/portfolio/**/*.ts` is a closure entry beside the plan's six, so
+  `src/portfolio/` comes whole as the spec §4 table says (157 files with `public/`), the script's
+  exit-2 rule checks the spec's claim that none of it reaches a dropped directory, and
+  `test/portfolio-demo.test.ts` finds `src/portfolio/demo.ts`; Step 4's count check becomes: `find
+  account/src -type f | wc -l` = 157 + the `core`/`agent`/`contract` files the closure lists — the
+  spec is the authority over the plan's closure-only copy — if wrong, a few unreached portfolio
+  modules sit in the tree unused (removable by a later trim).
+- **R2** Ruling: a copied test file is byte-identical to the origin or left out whole, never edited
+  in Task 1; left out besides `test/unit/wallet.test.ts` (imports `src/wallet`) are the files whose
+  run reaches what the spec keeps out: `test/e2e.test.ts` (spawns `src/runner/run-demo.ts`),
+  `test/unit/site-numbers.test.ts` (imports `scripts/`, reads `site/`),
+  `test/unit/review2-contracts.test.ts` (reads `README.md`, `COOKBOOK.md`, `docs/account.md`) and
+  `test/unit/mode-rules.test.ts` (reads `README.md`, `COOKBOOK.md`); a run-time reach found by the
+  Step 7 run or a grep is handled the same way (ENOENT under `fixtures/` or `manifests/` brings the
+  file along, as the plan says; anything else leaves the test file out), each named in this ledger
+  with the path it reaches — the spec §10 leaves the test selection to the builder, and whole-file
+  selection keeps a later by-hand diff against 133b9a7 clean — if wrong, the code-only checks
+  inside the two doc-reading files (about nine in `review2-contracts`, three in `mode-rules`) are
+  missing from `account/`'s suite until those files are trimmed of their doc assertions and
+  restored.
+- **R3** Ruling: the closure script's dropped set is `src/runner`, `src/control-room`, `src/venues`,
+  `src/wallet`, `src/plugins` and the origin's top-level `scripts`, `site`, `docs`, `examples` (the
+  spec §4 keeps `scripts/` and `docs/` out and brings neither `site/` nor `examples/`) — a `src/`
+  entry reaching one is still an error, a `test/` entry reaching one is excluded — if wrong, a test
+  of a demo script is lost that nothing in the service needs.
+- **R4** Ruling: Task 1 copies the origin's `package-lock.json` to `account/package-lock.json` and
+  brings its root entry (`packages[""]`: name, version, engines) in line with the new
+  `package.json` without moving any resolved version; `npm ci` in `account/` must pass on it, and
+  it is committed with the copy (Task 5's `account/Dockerfile` copies it) — the plan's file list
+  omits a file its own Steps 5 and Task 5 need — if wrong, one regenerated lock file.
+- **R5** Ruling: Task 3's "the suite matches Task 1's recorded counts" means the same files pass and
+  the same one fails (`ui-superagent`), and the test count is Task 1's plus the tests Task 3 adds —
+  a literal match is impossible once tests are added — if wrong, nothing: it is the plan's evident
+  intent.
+- **R6** Ruling: Task 2 also rewrites the comments in `face/src/account-seat.ts` (module header),
+  `face/src/account-proxy.ts` (header) and the headers of `account-seat-smoke.test.ts` and
+  `account-graft-smoke.test.ts` that present the Account as an external install at
+  `~/buyer-agent-demo`, so they name the repo's `account/` (attribution lines such as "read at
+  buyer-agent-demo @ 133b9a7" stay) — CLAUDE.md is descriptive of the tree and these comments would
+  be false after the default moves — if wrong, a few comment lines to revert.
+- **R7** Ruling: Task 4's boot-line check runs on a scratch `DSH_HOME` (`npm run setup` into it
+  first), a free `FACE_PORT`, `FACE_ACCOUNT_SEAT_DIR=/nonexistent` and
+  `FACE_ACCOUNT_URL=http://127.0.0.1:9`, and with a loopback `FACE_BIND` other than `127.0.0.1`
+  (`::1`, or `localhost` if the webserver row refuses `::1`) instead of `0.0.0.0`; the expected
+  line ends ` · listening on <that value>` — the plan's command would collide with the operator's
+  face on 3090, rewrite the live `~/.dsh` profile's `cordis.yml`, reach the live Account and open a
+  listener to the LAN; `overlay.test.ts` still pins `0.0.0.0` in the row — if wrong, the line is
+  seen for a loopback value rather than for `0.0.0.0`.
+- **R8** Ruling: `compose.yml` mounts the repo as `.:${PWD}` (the source is the compose file's own
+  directory, so always the repo root; the target is the shell's `PWD`, the repo's own host path
+  when `docker compose` runs at the root, which `account/README.md` and the drill say to do) and
+  writes every other container path of the repo from `${PWD}` (`working_dir: ${PWD}/face`,
+  `face-modules:${PWD}/face/node_modules`, `account-modules:${PWD}/account/node_modules`), so the
+  box is consistent from any directory and the spec's same-absolute-path holds at the root;
+  `compose.test.ts` asserts those raw strings instead of `endsWith(":" + repoRoot)`; the drill
+  says to stop the host face and Account first (both ports are published on the host's loopback)
+  and never to paste `docker compose config` output (it prints `env_file` values) — a literal
+  path makes the face suite red in one of the two checkouts it runs in — if wrong, a run from
+  another directory mounts the repo at that directory's path (still consistent inside the box).
+- **R9** Ruling: Task 6 sets the spec's Status line to "approved by the operator on 2026-10-27;
+  built on `claude/account-in-repo-415034`" with the plan and this ledger named — the line would
+  otherwise say "nothing built" of a built design — if wrong, one line to revert.
+
+## Tasks
+
+### The face before any change (this worktree @ f36c78c, `npm ci` in `face/`)
+
+`npm test`: 1,649 tests, 1,626 pass, 0 fail, 23 skipped, 10.4 s. `npm run typecheck`: clean.
+`FACE_SMOKE=1 npm test`: 1,649 tests, 1,647 pass, 0 fail, 2 skipped — `account-seat-smoke` and
+`account-graft-smoke`, "set FACE_ACCOUNT_SEAT_DIR" — 18.0 s.
+
+### Task 1
+
+**Closure.** `node account/scripts/import-closure.mjs ~/buyer-agent-demo --copy account <entries>`,
+268 entries after de-duplication, in this order: the plan's six (`src/portfolio/{server,mcp,
+account-demo,account-service,account-check}.ts`, `test/standin/ui-standin.ts`), every
+`src/portfolio/**/*.ts` (103, R1), every `test/**/*.test.ts` but the four R2 hand exclusions (160),
+the five non-test helpers (`test/attack/account-runs.ts`, `test/standin/{model,ui-standin,
+venues}.ts`, `test/unit/live-public-markets-fixtures.ts` — the last one the plan's list misses).
+Exit 0; stdout 279 paths (103 `src/portfolio`, 5 `src/core`, 3 `src/agent`, 4 `src/contract`,
+164 `test/`); no `src/` entry errors; stderr, verbatim:
+
+    excluded test/unit/wallet.test.ts: test/unit/wallet.test.ts imports "../../src/wallet/catalog.ts" (src/wallet)
+
+`test/account-demo.test.ts` and `test/portfolio-demo.test.ts` reach `src/runner` by no import and
+spawn only `src/portfolio/*`, so both are kept; `test/e2e.test.ts` reaches it by `spawn` (R2).
+
+**Left out** (six of the origin's 164 test files; none edited, every kept file byte-identical):
+- `test/unit/wallet.test.ts` — imports `src/wallet/catalog.ts` (the script)
+- `test/e2e.test.ts` — spawns `src/runner/run-demo.ts` (R2)
+- `test/unit/site-numbers.test.ts` — imports `scripts/site-numbers.ts`, reads `site/index.html` (R2)
+- `test/unit/review2-contracts.test.ts` — reads `README.md`, `COOKBOOK.md`, `docs/account.md` (R2)
+- `test/unit/mode-rules.test.ts` — reads `README.md`, `COOKBOOK.md` (R2)
+- `test/unit/env-scrub.test.ts` — "the host never imports the identity resolver" walks
+  `src/agent` and `src/runner` (`readdirSync`), ENOENT `account/src/runner` in the first Step 7 run;
+  found by the run, not by the pre-flight scan
+
+A grep of the kept tests for `runner`, `control-room`, `venues`, `wallet`, `plugins`, `scripts`,
+`site`, `docs`, `examples`, `README.md`, `COOKBOOK.md` as paths finds nothing else (only venue ids).
+
+**Brought along at run time:** none (no ENOENT under `fixtures/` or `manifests/`).
+
+**Baseline after the copy** (`BUYER_HOME=$(mktemp -d) caffeinate -i npm test` in `account/`): 158
+files, 157 passed, 1 failed; 2,837 tests, 2,836 passed, 1 failed — the known red,
+`test/unit/ui-superagent.test.ts` "mounts the floor once…", the `data-sg-clock` `\d\d:\d\d:\d\d`
+match against `322:02:56`; 160.7 s vitest, 161 s wall. Against the origin's 164 / 2,883: six files
+and 46 tests left out. `npm run typecheck`: exit 0, no output — no closure miss.
+
+**Boot** (`npm run account -- --port 48201 --home $(mktemp -d) --read-only`, stopped after): the
+server prints `read-only: nothing is traded or moved…`; `GET /api/overview` 200, first 200 bytes:
+
+    {"now":"2026-10-27T23:08:26.533Z","live":false,"mode":"guard","session":{"expiresAt":"2026-11-26T23:08:26.369Z","expired":false},"portfolio":{"totalUsd":0,"byClass":[],"byAccount":[]},"liquidity":{"mo
+
+The plan's `"ok":true` is not in that route's body at 133b9a7 (`server.ts` `/api/overview` spreads
+the overview, no `ok`); `/api/now` and `/api/account` answer `{"ok":true,…` on the same boot, and the
+home gets `portfolio/ledger-….jsonl` + `networth.jsonl`.
+
+**Count:** `find account/src -type f | wc -l` = 169 = R1's 157 + the closure's 12 core/agent/contract
+files. `account/src/{runner,control-room,venues,wallet,plugins}` absent.
+
+**Lock (R4):** `diff ~/buyer-agent-demo/package-lock.json account/package-lock.json` — three lines,
+top-level `name`, `packages[""].name`, `packages[""].engines.node`; no resolved version moved
+(`version` is 0.1.0 in both). `npm ci` in `account/` passes on it.
+
+**Licence:** `account/LICENSE` fetched from the origin's `main`, 202 lines, sha256 `cfc7749b…3d30`
+(the stock Apache-2.0 text); the file's first line is blank, so `Apache License` is line 2 and
+`Version 2.0, January 2004` line 3 — the plan's "second non-blank line" reads as "second line".
+
+**Face gate** before each commit: 1,649 tests, 1,626 pass, 23 skipped; typecheck clean.
+
+**Deferred:** the code-only checks inside `env-scrub.test.ts` (three of its four `it`s scrub env
+without touching `src/runner`) are out with the file, as R2 says of the doc-reading pair.
