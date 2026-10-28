@@ -84,6 +84,7 @@ test("cn-market-analyst's ROLE.md: Chinese, within 2,000 bytes, the order, the a
   for (const heading of ["**status**", "**what was measured**", "**paths**", "**limits**"]) assert.ok(persona.includes(heading), heading);
   assert.ok(persona.includes("analysis/<run>/<module>.json"), "the paths it reports");
   assert.ok(persona.includes("点名只写") && persona.includes("只做那一个模块") && persona.includes("没有点名"), "a brief that names one module gets that module alone; an unnamed brief the three (spec 2026-10-28 F6)");
+  assert.ok(at("按顺序做三个模块") >= 0, "the order sentence is there");
   assert.ok(at("按顺序做三个模块") < at("点名只写"), "the order first, the exception after it");
   const role = readRoles(ROLES_ROOT).find((r) => r.id === "cn-market-analyst")!;
   assert.ok(role.description.includes("or the one module the brief names"), "the summary Gravit reads says so too");

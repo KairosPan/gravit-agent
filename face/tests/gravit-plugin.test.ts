@@ -260,6 +260,7 @@ test("gravit: without a protocols key, or with an empty list, no protocol sectio
     const tree = fakeScope();
     apply(tree.ctx, config);
     assert.equal(tree.sections.some((s) => s.name === LUNHUI_RUN_SECTION), false);
+    assert.equal(tree.sections.some((s) => s.name === LUNHUI_MODULE_SECTION), false);
     tree.unload();
   }
 });

@@ -534,7 +534,7 @@ exported with a cap), `80ad9a1` (`GET /data/modules.json`), `96354b1` (a non-dir
 analyst's sentence). Measured: `dsh/profile/lunhui-module.md` 1,372 bytes (budget 1,500),
 `roles/cn-market-analyst/ROLE.md` 1,675 bytes (cap 2,000). The face suite 1667 tests, 1644 pass
 and 23 skipped, typecheck clean; the four Lunhui, roles and instructions smokes 7/7 under
-`FACE_SMOKE=1`. The rulings are in the plan's SDD ledger.
+`FACE_SMOKE=1`.
 
 | Clause | The text | What the tree does | Why |
 |---|---|---|---|

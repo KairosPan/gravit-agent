@@ -1440,7 +1440,7 @@ face with its keys:
 | Gravit's, 2026-10-10 (the go-live smoke session, before the redesign) | — | 1,622 · 4,040 (3,443 of it the `AGENTS.md` + `CLAUDE.md` baseline) · 32,003; DeepSeek billed 55,635 input tokens |
 | Gravit's, a one-word session in the repo root: plan 1's measurement, taken once the branch has merged (`<id>`: the newest `session-<uuid>` directory under `$DSH_HOME/sessions/<project-slug>/` after the one word, as the cycle drill finds its own) | messages well under 4,040 (`GRAVIT.md` ≈ 1,070 tokens for the 3,443 baseline). Plan 1's own system and tools clauses (the date line only; unchanged) were written before plans 2 and 3 and no longer hold: read them against the next row | not yet measured |
 | Gravit's, the first request of the cycle drill (`face/README.md`, step 5): the composition after plan 4 of the Lunhui modules | ≈ 3,100 · ≈ 1,690 · ≈ 49,900 (system: the 2026-10-10 1,622 plus the cycle ≈ 790, the date line ≈ 12, the roles list ≈ 253 and the run protocol ≈ 423; messages: spec §7's ≈ 1,900 less the smaller `GRAVIT.md`; tools: the block priced below, 49,885, the three role tools and the seventeen Lunhui tools in it; after plan 3 it was ≈ 2,990 · ≈ 1,690 · ≈ 49,200) | not yet measured |
-| one role child's: `cn-market-analyst`'s, in the live market run (`face/README.md` "Lunhui analysis") | system: the persona (`ROLE.md`, 761 characters, ≈ 190) in place of Gravit's, the date, no roles list, cycle or run protocol; tools: the `skill` tool and the six market module tools only (≈ 1,110) | not yet measured |
+| one role child's: `cn-market-analyst`'s, in the live market run (`face/README.md` "Lunhui analysis") | system: the persona (`ROLE.md`, 842 characters, ≈ 210) in place of Gravit's, the date, no roles list, cycle or run protocol; tools: the `skill` tool and the six market module tools only (≈ 1,110) | not yet measured |
 | one role child's: `cn-stock-analyst`'s, in the live strategy run (`face/README.md` "Lunhui analysis") | system: the persona (`ROLE.md`, 887 characters, ≈ 222) in place of Gravit's, the date, no roles list, cycle or run protocol; tools: the `skill` tool and the four strategy module tools only (≈ 960) | not yet measured |
 | one role child's: `cn-reviewer`'s, in the live market or strategy run (`face/README.md` "Lunhui analysis") | system: the persona (`ROLE.md`, 845 characters, ≈ 211) in place of Gravit's, the date, no roles list, cycle or run protocol; tools: the `skill` tool and the counterevidence pair only (≈ 540) | not yet measured |
 
@@ -2055,7 +2055,9 @@ that `run.json`'s `artifacts[]` names (A10: what a submit landed) whose file par
 within 24 KiB compact (an unnamed or unreadable one left out, so a run whose `run.json` cannot be
 read accepts none), `headline` its fields by `MODULE_HEADLINES`, `marketRun` the accepted `mode.json`'s
 `market_run`, `bytes` every regular one-link file in the run directory by its size, the evidence
-included and never opened; `runsOmitted`, the run directories past the cap; and `latestRun`, the
+included and never opened (the rows `/data/modules.json` builds from it add `frozen`, which drops
+a malformed `evidence` entry one by one, and each artifact's `missingSources`, which reads as `[]`
+if any member is not a string); `runsOmitted`, the run directories past the cap; and `latestRun`, the
 newest listed run that is sealed and holds an accepted artifact, `{run, asOf, session, snapshotId,
 artifacts: {<module>: {headline, json}}, marketRun}`, or null; the section's latest line reads
 `as of <asOf> · session <session>`. In a strategy channel `marketRun` is the `cn-market` run the
