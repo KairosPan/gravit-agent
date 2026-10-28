@@ -10,7 +10,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { WebRoute } from "@deepseek-ai/dsh-host-webserver";
 import {
   BACKTEST_MAX_BYTES, BACKTEST_MAX_DISK_BYTES, createChannel, listChannelDirs, listSessionHeads, mergeSessionHeads,
-  MODULE_HEADLINES, presetHintsOf, readChannelStatus, readChannelBody, reconcileChannels, registerChannelRoutes, WORKBENCH,
+  MODULE_HEADLINES, presetHintsOf, readAnalysisRuns, readChannelStatus, readChannelBody, reconcileChannels, registerChannelRoutes, WORKBENCH,
 } from "../src/channels.ts";
 import { rosterFor, setRoster } from "../src/roster.ts";
 import { HttpError } from "../src/http.ts";
@@ -349,18 +349,24 @@ test("readChannelBody: runs list newest first with sealed, snapshotId and the ar
     {
       run: newer.run, asOf: null, session: null, snapshotId: null, sealed: false, kind: "market", artifacts: {}, marketRun: null,
       bytes: await filesBytes(newer.runDir),
+      openedAt: "2026-10-24T01:00:00.000Z", sealedAt: null, frozen: ["quotes"],
     },
     {
       run: older.run, asOf: older.manifest!.as_of, session: "2026-10-23", snapshotId: older.manifest!.snapshot_id, sealed: true, kind: "strategy",
       artifacts: {
-        sentiment: { accepted: true, status: "ACCEPTED", contractVersion: "sentiment-v1", headline: { state: "冰点", money_effect: "weak", freeze_type: "pool" } },
+        sentiment: {
+          accepted: true, status: "ACCEPTED", contractVersion: "sentiment-v1", headline: { state: "冰点", money_effect: "weak", freeze_type: "pool" },
+          missingSources: [], marketRun: null,
+        },
         mode: {
           accepted: true, status: null, contractVersion: "mode-v1",
           headline: { mode: "WAIT", preconditions: ["环境未转好"], research_only_matches: [], expectation: MODE.expectation, expectation_review: null },
+          missingSources: [], marketRun: "20261023T010000Z-0000abcd",
         },
       },
       marketRun: "20261023T010000Z-0000abcd",
       bytes: await filesBytes(older.runDir),
+      openedAt: "2026-10-23T01:00:00.000Z", sealedAt: "2026-10-23T01:00:01.000Z", frozen: ["quotes"],
     },
   ]);
   assert.equal(body.runsOmitted, 0);
@@ -589,7 +595,7 @@ test("readChannelBody: run.json that does not parse lists the run with nulls and
   // a manifest that does not parse names no artifact, so the mode.json beside it is not accepted
   assert.deepEqual(body.runs, [{
     run: broken.run, asOf: null, session: null, snapshotId: null, sealed: false, kind: null, artifacts: {}, marketRun: null,
-    bytes: await filesBytes(broken.runDir),
+    bytes: await filesBytes(broken.runDir), openedAt: null, sealedAt: null, frozen: [],
   }]);
   assert.equal(body.latestRun, null); // not known sealed
 
@@ -602,6 +608,50 @@ test("readChannelBody: run.json that does not parse lists the run with nulls and
     const [row] = (await readChannelBody(join(runDir, "..", ".."))).runs;
     assert.deepEqual([row.asOf, row.snapshotId, row.sealed, row.kind], [null, null, false, null]);
   }
+});
+
+test("readAnalysisRuns: frozen is the evidence sources, in order, strings only; openedAt and sealedAt come from the manifest", async () => {
+  const dir = await strategyDir("face-runs-frozen-");
+  const sealed = await makeRun(dir, new Date("2026-10-25T01:00:00Z"));          // one quotes freeze, sealed a second later
+  const open = await makeRun(dir, new Date("2026-10-26T01:00:00Z"), { open: true });
+  const { runs } = await readAnalysisRuns(dir);
+  assert.deepEqual(runs.map((r) => r.run), [open.run, sealed.run]);
+  assert.deepEqual(runs[1].frozen, ["quotes"]);
+  assert.equal(runs[1].openedAt, "2026-10-25T01:00:00.000Z");
+  assert.equal(runs[1].sealedAt, "2026-10-25T01:00:01.000Z");
+  assert.equal(runs[0].sealedAt, null);
+  // a manifest whose evidence is not an array, or whose entries lack a string source: frozen is empty, the run still lists
+  const manifest = JSON.parse(await readFile(join(open.runDir, "run.json"), "utf8"));
+  await writeFile(join(open.runDir, "run.json"), JSON.stringify({ ...manifest, evidence: [{ source: 7 }, "x", { file: "evidence-index.json" }] }));
+  assert.deepEqual((await readAnalysisRuns(dir)).runs[0].frozen, []);
+  await writeFile(join(open.runDir, "run.json"), JSON.stringify({ ...manifest, evidence: "none" }));
+  assert.deepEqual((await readAnalysisRuns(dir)).runs[0].frozen, []);
+});
+
+test("readAnalysisRuns: an artifact's missingSources and marketRun; malformed fields read as empty and null", async () => {
+  const dir = await strategyDir("face-runs-artifact-fields-");
+  const theme = { module: "theme", contract_version: "2", status: "NOT_EVALUABLE", missing_sources: ["boards"], mainline_candidates: [], theme_stage: "UNKNOWN", rotation: "UNKNOWN" };
+  const leader = { module: "leader", contract_version: "2", status: "OK", market_run: "20261028T020953Z-f3b89ce6", leader_candidates: [], top_pattern_flags: [] };
+  const { run } = await makeRun(dir, new Date("2026-10-28T02:15:00Z"), { artifacts: { "theme.json": theme, "leader.json": leader, "environment.json": ENVIRONMENT_NOT_EVALUABLE } });
+  const row = (await readAnalysisRuns(dir)).runs[0];
+  assert.equal(row.run, run);
+  assert.deepEqual(row.artifacts.theme.missingSources, ["boards"]);
+  assert.equal(row.artifacts.theme.marketRun, null);
+  assert.equal(row.artifacts.leader.marketRun, "20261028T020953Z-f3b89ce6");
+  assert.deepEqual(row.artifacts.environment.missingSources, [], "the old fixture's missing is not missing_sources");
+  await writeFile(join(dir, "analysis", run, "leader.json"), JSON.stringify({ ...leader, market_run: 5, missing_sources: ["a", 1] }));
+  const again = (await readAnalysisRuns(dir)).runs[0];
+  assert.equal(again.artifacts.leader.marketRun, null);
+  assert.deepEqual(again.artifacts.leader.missingSources, []);
+});
+
+test("readAnalysisRuns: the cap option limits the rows and counts the rest", async () => {
+  const dir = await strategyDir("face-runs-cap-");
+  for (const day of [21, 22, 23]) await makeRun(dir, new Date(`2026-10-${day}T01:00:00Z`));
+  const capped = await readAnalysisRuns(dir, { cap: 2 });
+  assert.equal(capped.runs.length, 2);
+  assert.equal(capped.runsOmitted, 1);
+  assert.equal((await readAnalysisRuns(dir)).runsOmitted, 0);
 });
 
 test("MODULE_HEADLINES equals the plugins' MODULES table, name for name and field for field", () => {

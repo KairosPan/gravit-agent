@@ -200,12 +200,15 @@ const JSON_FILE_MAX_DEPTH = 32;
 
 /** One accepted module artifact as a run's row carries it: its top-level `status`
  * (`"NOT_EVALUABLE"` for a module whose evidence was missing, spec §5.4), its `contract_version`
- * (A19), and its headline fields that are present, by {@link MODULE_HEADLINES}. */
+ * (A19), its headline fields that are present, by {@link MODULE_HEADLINES}, its `missing_sources`
+ * (`[]` unless an array of strings only) and its `market_run` (null unless a string). */
 export interface RunArtifact {
   accepted: true;
   status: string | null;
   contractVersion: string | null;
   headline: Record<string, unknown>;
+  missingSources: string[];
+  marketRun: string | null;
 }
 
 /** One Lunhui research run under `analysis/` (modules spec A14). `asOf`, `session`, `snapshotId`,
@@ -216,7 +219,9 @@ export interface RunArtifact {
  * whose file is a regular one-link file and parses within its cap and depth as an object; any
  * other is left out, so a run.json that cannot be read accepts none. `marketRun` is the accepted
  * `mode.json`'s `market_run`, else null. `bytes` is every regular one-link file directly in the
- * run directory, by its size - evidence included, its content never read. */
+ * run directory, by its size - evidence included, its content never read. `openedAt` and
+ * `sealedAt` are `run.json`'s `opened_at` and `sealed_at` when strings, and `frozen` the string
+ * `source` of each object in its `evidence` array, in order, `[]` when it is not an array. */
 export interface RunRow {
   run: string;
   asOf: string | null;
@@ -227,6 +232,9 @@ export interface RunRow {
   artifacts: { [module: string]: RunArtifact };
   marketRun: string | null;
   bytes: number;
+  openedAt: string | null;
+  sealedAt: string | null;
+  frozen: string[];
 }
 
 /** The newest listed run that is sealed and holds an accepted artifact, each artifact whole beside
@@ -261,7 +269,7 @@ export interface ChannelBody {
 }
 
 /** The three blocks of {@link ChannelBody} the runs card reads from `analysis/`. */
-type AnalysisRuns = Pick<ChannelBody, "runs" | "runsOmitted" | "latestRun">;
+export type AnalysisRuns = Pick<ChannelBody, "runs" | "runsOmitted" | "latestRun">;
 
 /** Whether a parsed JSON value nests at most `levels` arrays or objects deep. It stops at the
  * bound, so it never recurses past it however deep the value goes. */
@@ -331,6 +339,11 @@ function stringOrNull(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
+/** A field that is an array of strings only, copied, else `[]` - one non-string member voids it. */
+function stringsOrEmpty(value: unknown): string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string") ? [...value] : [];
+}
+
 /** The headline fields `fields` names that the artifact carries, in the table's order. */
 function headlineOf(json: Record<string, unknown>, fields: readonly string[]): Record<string, unknown> {
   const headline: Record<string, unknown> = {};
@@ -372,15 +385,16 @@ async function runBytes(runDir: string): Promise<number | null> {
 
 /**
  * The runs card's blocks from a channel's `analysis/` (modules spec §5.11): run directories by the
- * id form, newest first, the newest {@link ANALYSIS_RUNS_CAP} read and listed and the rest
- * counted. Only a real directory is read: an `analysis` link could point anywhere outside the
+ * id form, newest first, the newest `options.cap` (default {@link ANALYSIS_RUNS_CAP}) read and
+ * listed and the rest counted. Only a real directory is read: an `analysis` link could point anywhere outside the
  * strategy, and what is read here reaches the page. Just before a run's reads, `analysis/` and the
  * run directory are checked to be still where the listing found them ({@link stillAt}); a run
  * that fails the check, or whose directory can no longer be listed, is skipped - not listed, not
  * counted. The evidence files are never opened. Throws when the strategy directory or
  * `analysis/` is absent or cannot be read.
  */
-async function readAnalysisRuns(strategyDir: string): Promise<AnalysisRuns> {
+export async function readAnalysisRuns(strategyDir: string, options: { cap?: number } = {}): Promise<AnalysisRuns> {
+  const cap = options.cap ?? ANALYSIS_RUNS_CAP;
   const out: AnalysisRuns = { runs: [], runsOmitted: 0, latestRun: null };
   const analysisDir = join(strategyDir, "analysis");
   const realAnalysis = join(await realpath(strategyDir), "analysis");
@@ -392,8 +406,8 @@ async function readAnalysisRuns(strategyDir: string): Promise<AnalysisRuns> {
     .map((entry) => entry.name)
     .sort()
     .reverse();
-  out.runsOmitted = Math.max(0, runs.length - ANALYSIS_RUNS_CAP);
-  for (const run of runs.slice(0, ANALYSIS_RUNS_CAP)) {
+  out.runsOmitted = Math.max(0, runs.length - cap);
+  for (const run of runs.slice(0, cap)) {
     const runDir = join(analysisDir, run);
     if (!(await stillAt(analysisDir, realAnalysis)) || !(await stillAt(runDir, join(realAnalysis, run)))) continue;
     const read = await readBoundedJson(join(runDir, "run.json"), RUN_MANIFEST_MAX_BYTES);
@@ -408,6 +422,7 @@ async function readAnalysisRuns(strategyDir: string): Promise<AnalysisRuns> {
       const headline = headlineOf(artifact.json, fields);
       artifacts[name] = {
         accepted: true, status: stringOrNull(artifact.json.status), contractVersion: stringOrNull(artifact.json.contract_version), headline,
+        missingSources: stringsOrEmpty(artifact.json.missing_sources), marketRun: stringOrNull(artifact.json.market_run),
       };
       whole[name] = { headline, json: artifact.json };
     }
@@ -423,6 +438,11 @@ async function readAnalysisRuns(strategyDir: string): Promise<AnalysisRuns> {
       artifacts,
       marketRun: stringOrNull(whole.mode?.json.market_run),
       bytes,
+      openedAt: stringOrNull(manifest.opened_at),
+      sealedAt: stringOrNull(manifest.sealed_at),
+      frozen: Array.isArray(manifest.evidence)
+        ? manifest.evidence.filter(isRecord).map((entry) => entry.source).filter((source): source is string => typeof source === "string")
+        : [],
     };
     out.runs.push(row);
     if (out.latestRun === null && row.sealed && Object.keys(whole).length > 0) {
