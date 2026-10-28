@@ -1843,22 +1843,25 @@ sentence drawn as its words, the Account's and a channel's stale stamps, a tool 
 | File | Role |
 |---|---|
 | `index.html` | the shell: `<title>Gravit</title>`, `#app`, the two sheets, a three-line script that applies the saved theme before first paint, `js/app.js` as a module. Holds not one byte of host data. The Google Fonts link (Manrope · Noto Sans SC · IBM Plex Mono) is the browser's own fetch — offline the system stack stands in |
-| `js/app.js` | `boot(win, host)`: the store, the live layer, the actions, the markets, account, seat, channel, Discover and trace host layers, the owner device, the owner sheet and Trade (stage 2 of the graft), the tab's Account stream and the render loop (§5.4); `makeStore`, `initialState`, `prefsOf`, `routeOf`, `settle`, `answersFrom`, `complete`, `gravitMarkdown`, `getJsonVia` (a refusal rejects with its status and, when it parses, the face's body as `error.body`, where the hosts read the Account's sentence), `postJsonVia`, `Timers`, `SEARCH_QUIET_MS` (300) are exported for the tests |
+| `js/app.js` | `boot(win, host)`: the store, the live layer, the actions, the markets, account, seat, channel, Discover, module, Run sheet and trace host layers, the owner device, the owner sheet and Trade (stage 2 of the graft), the tab's Account stream and the render loop (§5.4); `makeStore`, `initialState`, `prefsOf`, `routeOf`, `settle`, `answersFrom`, `complete`, `gravitMarkdown`, `getJsonVia` (a refusal rejects with its status and, when it parses, the face's body as `error.body`, where the hosts read the Account's sentence), `postJsonVia`, `Timers`, `SEARCH_QUIET_MS` (300) are exported for the tests |
 | `js/store.js`, `js/reducers/index.js` | `createStore({initial, reducers, storage, key, accept, persist})` — `dispatch(type, payload)`, `get()`, `subscribe(fn)`; the reducer table is the merge of the per-slice modules |
 | `js/reducers/host.js` | the host reducers (§5.3): `hostStatus`, `hostList`, `hostWindow`, `hostEvent`, `hostGate`, `hostGateGone`, `hostProjection`, `hostThinking`, `hostPreview`, `markSeen` |
 | `js/reducers/messages.js`, `controls.js` | what the operator does with the page: `nav` (a market's Account key kept whole, a face id canonicalised; a missing conversation id becomes `firstOpen`'s; `lastDiscover`, the Discover view a plugin or module page goes back to), `toggleGroup`, the draft (`startDraft` — Where on the channel New round names, else the root —, `cancelDraft`, `setDraftTitle`, `setDraftWhere`), the optimistic `rename`, `toggleDetails`, `toggleRail`, `setTheme`; the inline editors (`startEdit`/`commitEdit`/`cancelEdit` — a rename, New channel…, a roster, a bot —, `editFailed`, which keeps an editor open with the refusal, `toggleRosterTick`), the two-step confirms (`askConfirm`/`cancelConfirm`) |
 | `js/reducers/markets.js`, `account.js` | the host's markets (§5.5): the Account's explore reads by tab (`exploreLoading`/`exploreLoaded`/`exploreFailed`) and the search's (`resultsLoading`/`resultsLoaded`/`resultsFailed`), each failure keeping its rows with the Account's sentence (`message`); the quotes by `venue\|symbol` — `accountQuotesLoaded` (an answer stamped before the price kept leaves the pair), `streamQuote` (a `quote` frame: the last trade, else the middle of the bid and ask, marked `streamed`, the 24-hour figures kept), `streamSnapshot` (a `snapshot` drops the pairs the stream priced); a page's candles by key under their range (`candlesLoading`/`candlesLoaded`/`candlesFailed`, `setRange`) and compare rows by base (`compareLoading`/`compareLoaded`/`compareFailed`); the stars (`accountWatchLoaded`, `askedOfAccount`, `forgetAsked`); the face's wire for the A shares (`watchlistLoaded`, `quotesUpdated`, `searchUpdated`, `hitQuotesLoaded`); and the screen's `setMarketsTab`, `setMarketsSort`, `setMarketsQuery` (a query typed from nothing opens All results, cleared there it goes back to All). The host's account: the page (`accountLoading`/`accountLoaded`/`accountFailed`, the failure keeping the last page with the Account's sentence), `holdings*`, `paper*` and `statement*` (each failure keeping the sentence), `history*`, `agents*`, the connect and paper sheets' reads — `venuesHere*`, `paperBooks*`, `keyfile*` (its `keyfileLoading` records what it asked), `reach*`, each failure keeping the sentence —, `setHistoryRange` (`1d`, `1w`, `1m`, `all`); the Account seat's (`seatLoading`/`seatLoaded`/`seatFailed`, a failure keeping the last view); the drawers' `openStatement`/`closeStatement`, `openVenueDetails`/`closeVenueDetails` (a venue's Details, one drawer at a time through `closeOverlays`) and `openSettings`/`closeSettings` |
 | `js/reducers/owner.js`, `trade.js` | stage 2 of the graft (§5.5): the owner device (`ownerStanding` — a role it does not know changes nothing —, `ownerRefusal`, `ownerBusy`) and the open sheet (`sheetOpen`, `sheetField`, `sheetIncomplete`, `sheetAsking` — a quiet ask keeps a ready sheet's preparation —, `sheetPrepared`, `sheetRefused`, `sheetSigning`, `sheetDone`, `sheetTick`, `sheetClose`); Trade (`tradeKind`, `tradeQuery`, `picksLoading`/`picksLoaded`/`picksFailed` by kind, `tradeResultsLoading`/`tradeResultsLoaded`/`tradeResultsFailed` — named apart from the Markets search's —, `ticketOpen`, `ticketClose`, `tradeSaid`) |
 | `js/reducers/channels.js`, `discover.js`, `traces.js` | the channel page's read (`channelLoading`, `channelLoaded`, `channelFailed` — a failure keeps that channel's data, a 404 reads `missing`); Discover's (`setDiscoverQuery`, `shelfLoading`/`shelfLoaded`/`shelfFailed` — a failed shelf keeps its data —, `gravitLoaded`, `skillLoading`/`skillLoaded`/`skillFailed`, `modelsLoaded`, `discoverStatus`; a module page's latest artifact, `moduleArtifactLoading`/`moduleArtifactLoaded`/`moduleArtifactFailed` — a re-read keeps what it had); a member's trace by the answer it explains, under its conversation (`traceLoading`, `traceLoaded`, `traceFailed`) |
-| `js/data/empty.js` | `emptyState()`: the state the page boots into — no conversations, `status.line = "connecting…"`, every slice at its empty shape (§5.5), the `seat` slice among them (`{status, data, at}`), and no demo slice: no `plugins`, `memory`, `mail`, `banner`, `call` or `compose` |
+| `js/reducers/run-sheet.js` | a module card's Run sheet (module cards spec §5.4, §5.7): `runSheetOpen` (the sheet over `closeOverlays`, which closes an open sheet in turn), `runSheetSet` (the slice replaced whole, nothing while none is open), `runSheetSaid`, `runSheetClose`; the Runs this page sent by module — `moduleRunStarted` (`{sessionId, title, startedAt}`), `moduleRunCleared`, `moduleRunsLoaded` (anything but a plain object reads `{}`) |
+| `js/data/empty.js` | `emptyState()`: the state the page boots into — no conversations, `status.line = "connecting…"`, every slice at its empty shape (§5.5), the `seat` slice among them (`{status, data, at}`), `runSheet: null` and `moduleRuns: {}`, and no demo slice: no `plugins`, `memory`, `mail`, `banner`, `call` or `compose` |
 | `js/host/kinds.js` | the kind table (spec §6, §5.3): a mapper view → zero, one or two messages; `SEAT_TOOLS` (the seat's twelve writes), `isSeatWriteTool`, `parseArgs`, `seatLine` (a seat write in words), `seatLift` (a seat write's answer as a receipt, a refusal or nothing), `rememberCall`, `toMessages`, `reasonArgs` |
 | `js/host/sessions.js` | `session/list` rows → conversation records: `kindOf`, `conversationOf`, `listConversations`, `unreadOf`; `childRowsOf` (the subagent rows the list leaves out, kept for their parent's Children) and `firstOpen` (the conversation every default opens, never an archived one) |
 | `js/host/live.js` | the impure half: the mux, the follow-or-page policy, the list and its previews, gates, projections, host facts — all into the store, nothing into the DOM |
 | `js/host/actions.js` | a `data-action` → the Remote or face route the old client sent: `send`, `newConversation`, `answer`, `stop`, `rename`, `command`; the row actions `fork`, `archive`, `remove`; `talkTo` (a bot's home conversation), `stopChild` |
 | `js/host/list-view.js`, `discover-view.js`, `children-view.js` | stage 3's pure views (§5.3): `groupsOf` (the list's groups); `SHELVES`, `SOURCE`, `itemsOf`, `searchItems`, `itemById` (Discover's items under namespaced ids); `childrenOf` (a conversation's subagent children and their states) |
-| `js/host/modules-view.js` | the six Lunhui modules' pure view (module cards spec §5.1, §5.3, Appendix A): `MODULES` — the one client table the cards share with the server (name, title, 副题, role and role id, route, channels and their words, file, headline fields, the two tools, `freezes` and `artifacts` as the page's Reads box words them, glyph, legend), kept in step with `face/src/channels.ts` `MODULE_HEADLINES`, `face/plugins/lunhui/lib/modules.mjs` and the roles by `tests/lunhui-modules-table.test.ts` —, `MODULE_NAMES`, `moduleOf`, `latestOf` (the newest run among the module's channels), `headlineWords`, `chipOf`, `researchItems` (the shelf's six), `runsOf` (the page's rows, at most 24) and `pageOf` (the page: the chip, the latest run, the rows, the Reads / Writes / Runs on boxes) over `/data/modules.json` |
+| `js/host/modules-view.js` | the six Lunhui modules' pure view (module cards spec §5.1, §5.3, Appendix A): `MODULES` — the one client table the cards share with the server (name, title, 副题, role and role id, route, channels and their words, file, headline fields, the two tools, `freezes` and `artifacts` as the page's Reads box words them, glyph, legend), kept in step with `face/src/channels.ts` `MODULE_HEADLINES`, `face/plugins/lunhui/lib/modules.mjs` and the roles by `tests/lunhui-modules-table.test.ts` —, `MODULE_NAMES`, `moduleOf`, `latestOf` (the newest run among the module's channels), `headlineWords`, `FRESH_MS` (60,000), `activeRuns` (the Runs this page sent that read Running: the conversation `running`, or the record under a minute old), `chipOf` (a running Run's `Running · <title>` chip, tone `live`, linking `#/messages/<id>`), `researchItems` (the shelf's six, each `running` or not), `runsOf` (the page's rows, at most 24) and `pageOf` (the page: the chip, `running`, the latest run, the rows, the Reads / Writes / Runs on boxes) over `/data/modules.json` |
+| `js/host/run-sheet-view.js` | a module card's Run sheet, pure (module cards spec §5.4, §5.5, Appendix B): `newSheet(listing, module, channel?)` (the slice's first value — `{module, where, on, run, cites, stocks, note, said}`, `run` the chosen channel's newest run at the time On was picked), `sheetOf(listing, sheet, now)` (the render model: Where, On with each option open or greyed with its reason, Cites, Stocks, Theme's source line, the Note, Runs via, Writes, `canRun` and its `blocker`), `stocksOf` (main-board codes by shape, at most four), `titleOf` (`<Title> · MM-DD`) and `messageOf` (Appendix B's Chinese line, the slots filled, the Note on a last line) |
 | `js/host/runs-view.js` | the Lunhui runs card's pure view (§5.2; modules spec §5.11): `runsView` (the overview's `runs`, `runsOmitted` and `latestRun` → the latest run's line, a chip per module — the mode's its mode word alone — the expectation card's rows, the previous card's review line (`review: <grade> of <previous_run>`, null without both), each artifact's compact JSON for its collapsed details, a dim row per run, the omitted count), `valueWord` (a headline value as a word), `countWord` (a count with its noun, singular for one) |
-| `js/host/channels.js`, `discover.js`, `traces.js`, `modules.js` | stage 3's impure halves: `startChannels` (a channel's overview, a new channel, the two roster writes; `MAX_BOTS`), `startDiscover` (the five listings, the Gravit item's three reads, a skill's content, the CLI agents' writes, the model routes, a bot's save and create; `SHELF_PATHS`, `GRAVIT_KEYS`), `startTraces` (a room member's trace, read once per answer), `startModules` (a module page's latest artifact through its channel's overview) |
+| `js/host/channels.js`, `discover.js`, `traces.js`, `modules.js` | stage 3's impure halves: `startChannels` (a channel's overview, a new channel, the two roster writes; `MAX_BOTS`), `startDiscover` (the five listings, the Gravit item's three reads, a skill's content, the CLI agents' writes, the model routes, a bot's save and create; `SHELF_PATHS`, `GRAVIT_KEYS`), `startTraces` (a room member's trace, read once per answer), `startModules` (a module page's latest artifact through its channel's overview; `trackRuns`, the Runs this page sent ending, mirrored under `RUNS_KEY` and read back by `readRuns`) |
+| `js/host/run-sheet.js` | a module card's Run sheet, impure (module cards spec §5.4, §5.5): `startRunSheet` — open, a field, close, and Run as the client's own `newConversation` |
 | `js/host/market-view.js`, `account-view.js` | the pure views (§5.3): the Account's markets (`ACCOUNT_TABS`, `ACCOUNT_SORTS`, `CANDLE_RANGES`, `isAccountKey`, `tabsOf`, `priceOf`, `sourceWordOf`, `legsOf`, `followOf`, `sortsOf`, `tableOf`, `rowsOf`, `watchedOf`, `watchKeysOf`, `setWatchOf`, `matchKey`, `pairsOf`, `pageOf`, `handWordsOf`, `volumeWordOf`), the face's ids and the A shares' words (`canonicalId`, `faceAssetOf`, `mentionsOf`, `quoteWord`, `connectionWord`, `providerWord`, `basisWord`, `sourceWord`, `volumeWord`, `searchWord`, `watchWord`); the Account's page (`pageOk`, `headOf`, `worthOf`, `changeOf`, `assetsOf`, `positionsOf`, `openOrdersOf`, `missingWords`, `statementLinesOf`, `statementCsvOf`, `venuesOf`, `agentsOf`, `cardsOf`, `asksOf`, `requestsOf`, and for the connect and paper sheets `connectOptionsOf`, `paperBooksOf`, `keyfileWords`) and `seatWords` (the seat's standing in the Venues box's words) |
 | `js/host/markets.js`, `account.js`, `seat.js` | the impure halves: `startMarkets` (the Account's explore, quotes, candles and compare through the face's proxy, a market page's follow on the stream, the stars in this browser's two stores — an Account market's, on a page that signs, the Account's own signed `setWatch` —, each old `us:`/`crypto:` star asked once; the face's wire for the A shares), `startAccount` (the Account's page, holdings and paper lens, history, statement and agents, and the connect and paper sheets' four reads, each one flight; the page polled and handed to `onPage`; the stream's events as reads) and `startSeat` (`/data/seat.json` in one flight, fresh on Refresh, a card raised or answered and after a seat receipt) |
 | `js/wire/owner-key.js`, `key-store.js` | the owner key (§5.3): `canonical`, `b64u`, `signingInput`, `kidOf`, `publicJwkOf`, `signPrepared`, `makeKey` — the Account's envelope arithmetic, `subtle` always the caller's; `indexedDbKeys` (database `gravit-face-owner`, version 1, store `keys`, record `device`), `memoryKeys` (its twin for tests and a browser without IndexedDB), `signedOutFlag` (`gravit.owner.signedOut.v1`) |
@@ -1872,8 +1875,9 @@ sentence drawn as its words, the Account's and a channel's stale stamps, a tool 
 | `js/wire/market-model.js`, `market-quotes.js`, `market-search.js`, `account-model.js` | moved from the old instrument pages in stage 2: `normalizeAsset`, `readWatchlist`/`saveWatchlist` (the face's key, the kairos key read until the first save), `readAccountWatch`/`saveAccountWatch` (the Account's keys under `ACCOUNT_WATCH_KEY`, `gravit.account.watch.v1`, a hundred at most), `price`, `number`; `createLiveQuotes` (the SSE stream with its 15 s polling fallback, handed `cn:` ids alone; `parsePayload` exported for the hit read); `createSymbolSearch` (250 ms debounce, a 10 s timeout); `money`, `signedMoney`, `pct`, `sign`, `orderMatches`. Their Chinese labels and notes stay in the wire and never reach a screen |
 | `js/render/rail.js`, `messages.js`, `thread.js`, `avatars.js`, `controls.js` | the two-level rail (Discover in the first level) and the list's groups; the Messages screen (head, Details with the row actions and Children, composer, status line, new message with New channel…, empty state); the thread's kinds, a tool row's dressed result and its Raw, a member's Trace; avatars and clusters (a bot's letter from the host's bot names); the segs, the key-value rows, the inline editor and confirm pair |
 | `js/render/markets.js`, `chart.js`, `account.js`, `js/market-fmt.js` | stage 2's screens (§5.4), on the Account's reads since the graft's stage 1: Markets — the Account's rows by tab beside the A shares — and a market's page (`renderMarketsScreen`, `marketPage`, `mkAv`, the face's own letter tile); the charts, one drawing in one box — `candlesSvg` (a market's closes from the Account's candles, the page's chart), `curveSvg` (the Portfolio's curve from its history); Account (`renderAccountScreen` — Portfolio, Venues with a venue's Details drawer and the Account seat box, Agents, Cards — the Statement drawer `renderStatement`, `orderWords`) and the Settings drawer (`renderSettings`); `chgHtml`, a change with its arrow (the A-share page's) |
+| `js/render/run-sheet.js` | a module card's Run sheet as a drawer of any screen (`renderRunSheet`, §5.4) |
 | `js/render/owner.js`, `trade.js` | stage 2 of the graft (§5.4): the device line under the Account head (`renderDeviceLine`), Settings › Devices (`renderDevices`), the owner sheet's drawer (`renderSheet`); the Trade screen (`renderTradeScreen`: the kinds, the picker, Under way, the ticket) |
-| `js/render/channel.js`, `discover.js`, `modules.js`, `tool-result.js` | stage 3's screens (§5.4): a channel's page (`renderChannelScreen`, `bytesWord`; its Research runs section from `runsView`); Discover, a shelf's grid — the Research shelf's module cards among them —, the Create page and an item's page (`renderDiscover`, `renderPlugin`); a Lunhui module's page (`renderModule`); a tool row's result seam (`toolResultHtml`, `toolResultFor` — `null` for every call since 2026-10-24, so every result draws plain) |
+| `js/render/channel.js`, `discover.js`, `modules.js`, `tool-result.js` | stage 3's screens (§5.4): a channel's page (`renderChannelScreen`, `bytesWord`; its Research runs section from `runsView`); Discover, a shelf's grid — the Research shelf's module cards among them —, the Create page and an item's page (`renderDiscover`, `renderPlugin`); a Lunhui module's page (`renderModule`, with `moduleChip` and `runKey`, the card's and the page's chip and Run); a tool row's result seam (`toolResultHtml`, `toolResultFor` — `null` for every call since 2026-10-24, so every result draws plain) |
 | `js/html.js`, `icons.js`, `time.js`, `router.js`, `messages.js` | `esc`/`attrs`/`cls`; the inline SVG icon set; `rowTime`/`divider`/`fmtDate`/`fmtClock`; `parseHash`/`toHash` (`#/module/<name>` among the routes); `LEVELS` — the host's kinds alone: text and tool grey, card, approval and question orange, refusal red, receipt green — `levelOf`/`needsAnswer` |
 | `css/tokens.css`, `css/app.css` | the tokens (Linqi's Cream and Black values, demo @ 0ef5131) and the one sheet |
 
@@ -2524,8 +2528,9 @@ letters and no id (`Give it an id: a-z, 0-9, -`) before the post, re-reads the b
 the new id (from the route's `{ok, bot}`) or `{error}`.
 
 **A module's page** (`js/host/modules.js`, module cards spec §5.3). `startModules({store,
-postJson, readListing})` returns `{latestArtifact(module)}`; `app.js` hands it `readListing` as
-Discover's `read('modules')` (joining the shelf's flight) then the listing the store holds.
+postJson, readListing, refreshListing, timers, storage, now})` returns `{latestArtifact(module),
+trackRuns()}`; `app.js` hands it `readListing` as Discover's `read('modules')` (joining the shelf's
+flight) then the listing the store holds, and `refreshListing` as `read('modules', {fresh: true})`.
 `latestArtifact` awaits the listing, takes `latestOf(listing, module)` — the newest run among the
 module's channels — and, when there is one, dispatches `moduleArtifactLoading`, posts
 `/data/channels/overview` for that run's `workspaceId` as `host/channels.js` does, and dispatches
@@ -2535,6 +2540,39 @@ overview's latest is the channel's newest sealed run with an artifact, which may
 rejected post is `moduleArtifactFailed`. No run, an unknown name or an unreadable listing posts
 nothing. One read per page entered (`app.js` calls it when the route's module changes), and only
 the latest-started read of a module lands; each module reads alone.
+
+`trackRuns()` (spec §5.7, G10; a second call does nothing) dispatches `moduleRunsLoaded` from
+`readRuns(storage)` — `localStorage["gravit-face.module-runs"]` (`RUNS_KEY`), read in try/catch and
+taken all or nothing: `{}` unless every entry names a known module with a string `sessionId` and
+`title` and a finite `startedAt` — then subscribes to the store. Each notify is one pass over
+`moduleRuns`, guarded against the notifies its own dispatches cause: a record over an hour old
+(or malformed) is cleared with no re-read; one a minute old or younger (`FRESH_MS`) is left; past
+that, a conversation `running === false` clears it, re-reads the listing at once and once more
+5 s later on the app's timers (the backstop for the file write), and a conversation the list does
+not carry — counted only once a `hostList` has landed, so a reload keeps a live record — clears it
+with one re-read and no backstop. A re-read's failure is the shelf's own line. After the pass the
+records are written to storage, in try/catch, only when the `moduleRuns` reference moved; the
+page is right without storage. `app.js` starts it right after the render subscription.
+
+**A module card's Run sheet** (`js/host/run-sheet.js`, module cards spec §4 G6, §5.4–§5.5).
+`startRunSheet({store, actions, readListing, go, now})` returns `{open, field, close, run}`.
+`open(module)` reads the listing (a failed read is `null`) and dispatches `runSheetOpen` with
+`newSheet(listing, module)`; an unknown module puts `Not a module` on Discover's line.
+`field(name, value)` re-reads the listing for `where` and `on` alone: `where` takes
+`newSheet(listing, module, value)`'s picks for the new channel, Stocks and Note kept; `on` sets the
+pick and re-stamps `run` with the channel's newest run as the listing holds it now; `cites`,
+`stocks` and `note` set that field alone against the listing last read; another name changes
+nothing; every change clears what was said. `run()` re-reads the listing and recomputes
+`sheetOf`: while it cannot run, the blocker is said and nothing is sent — `run no longer the
+latest` among them, when the channel's newest run is no longer the one On was stamped with, until
+On is picked again; else it sends `actions.newConversation({title: titleOf(…), workspaceId, text:
+messageOf(…)})`, the channel's `workspaceId` from the listing — `session/create`, `session/rename`
+and the prompt, the face starting no role and calling no Lunhui tool (spec F2). A `null` answer
+keeps the sheet with `Couldn't send — the conversation may exist untitled in the channel`;
+otherwise `moduleRunStarted {module, sessionId, title, startedAt}`, `runSheetClose`, and `go({screen:
+'messages', id})`, a failed page move caught so the record and the closed sheet stand. A second
+press while a send is in the air sends nothing. `app.js`'s `go` is a new message's: the list
+re-read, the route moved, the session promoted.
 
 **Traces** (`js/host/traces.js`). `startTraces({store, call, loadMemberTrace, now})` returns
 `{open(convId, msgId)}`: once per answer — an answer is its conversation and message id, since a
@@ -2584,8 +2622,9 @@ the sheet's 300 ms quiet, each only when what it asks changed), hands `startMark
 `afterAction`, and starts `startTrade` over the sheet and the stream; a stream event reaches the
 trade host too. One render is one string — `renderRail(state)` + the screen
 (`renderMessagesScreen`, `renderChannelScreen`, `renderMarketsScreen`, `renderTradeScreen`,
-`renderDiscover`, `renderPlugin` or `renderAccountScreen`) (+ `renderSettings` when the drawer is
-open, + `renderSheet` while a sheet other than the ticket's is open) — written to
+`renderDiscover`, `renderPlugin`, `renderModule` or `renderAccountScreen`) (+ `renderSettings` when the drawer is
+open, + `renderSheet` while a sheet other than the ticket's is open, + `renderRunSheet` while a
+module card's Run sheet is) — written to
 `#app.innerHTML`; the loop first records and then restores what the person had: focus and caret
 (by element id, else the control's data attributes), the typed value of every input with an id
 (an editor's box only while the same editor stays open; New message's Where select never — its
@@ -2630,8 +2669,10 @@ or the ticket's field (`sheetField`, `ticketField`) changes the sheet (a box by 
 boxes as the values ticked), and the ticket's venue or outcome re-seeds it at the new line; typing
 in `#tq` (`tradeQuery`) searches Trade after the same quiet; the composer's `submit` is `send`, a
 bot editor's `saveBot`, the Create page's `createBot`, the ticket's `placeOrder` the sheet's
-submit; Escape cancels an editor, a confirm, or closes the sheet first, then a drawer (Details,
-Settings, the Statement, a venue's Details), then Trade's ticket; Enter commits an inline editor.
+submit; a Run sheet's box as typed (Stocks, the Note) and its pick as changed (Where, On, Cites)
+are `runSheetField`; Escape cancels an editor, a confirm, or closes a module card's Run sheet
+first, then the owner sheet, then a drawer (Details, Settings, the Statement, a venue's Details),
+then Trade's ticket; Enter commits an inline editor.
 
 **Routes** — `#/messages/<sessionId>`, `#/messages/new`; `#/markets` and `#/markets/<id>` with
 an Account key (`coin:BTC`, `stock:NVDA`, `event:<venue>:<market>`, kept whole) or a face id
@@ -2879,9 +2920,12 @@ empty words; a search draws one grid (`N results`); `#/discover/<shelf>` the she
 `‹ Discover`. **The Research shelf** (module cards spec §5.1) is a grid, never a scrolling row, of
 the six Lunhui modules (`Lunhui · 6 modules` in its title), always six whatever the listing
 holds: each card links its glyph, name, 副题 and `MODULE` tag to `#/module/<name>`, then its role
-and channel words (`CN market analyst · cn-market`), then a foot with the chip and `Run` — drawn
-disabled until plan 3, its `runModule` action only putting `Run comes with plan 3` on Discover's
-line. The chip reads the newest run among the module's channels (`chipOf`): its headline words
+and channel words (`CN market analyst · cn-market`), then a foot with the chip and `Run`
+(`moduleChip`, `runKey`) — `runModule` opens the module's Run sheet; the key is off while the rows
+are not mounted and, `title="Running"`, while a Run of the module is running. While it runs
+(`activeRuns`: the conversation `running`, or the record under a minute old) the chip is the link
+`Running · <title> ›` (`.chip.live`) to its conversation; when it stops, the chip reads the listing
+again. Otherwise the chip reads the newest run among the module's channels (`chipOf`): its headline words
 (`ok`, or grey for the quiet ones — `no candidate`, `WAIT`, `0 items`), `not evaluable · <missing
 sources>` (`warn`), `not run` when that run lacks the module, `no run yet` with no run; a strategy
 or either module's chip leads with the run's channel, `not run` too (`lunhui-s02-rotation · not run`). When the listing says the Lunhui rows are
@@ -2889,7 +2933,8 @@ not `mounted`, the line `Lunhui rows not mounted` shows and the cards stay, dimm
 grey. **A module's page** (`render/modules.js`, `#/module/<name>`, spec §5.3) wears the plugin
 page's chrome (`main.disc.plugin-page`, `‹ Discover` back to the view it came from, Discover lit
 in the rail): the head — the glyph at 72, the name, `<role> · deepseek-flash · <channel words>`,
-`MODULE` beside the chip, the disabled `Run` —; three key-value boxes, **Reads** (Freezes,
+`MODULE` beside the chip — the live one while a Run is running, before the listing is read too —,
+`Run` as on the card —; three key-value boxes, **Reads** (Freezes,
 Artifacts, Channel), **Writes** (File, Headline, Under — `strategies/<channel>/analysis/<run>/`
 with the channel named as far as it is known) and **Runs on** (Role, Route, Budget `10 calls per
 run · one artifact per run`); **Runs**, a table across the module's channels newest first —
@@ -2904,6 +2949,24 @@ head's chip `…` (`—`); an
 unknown name reads `Loading…` while the listing is read, then `Not found`. `#/plugin/module:<name>`
 is not redirected: it draws the plugin page's minimal body for a Research item (its role and
 channel line), and nothing links there.
+**The Run sheet** (`render/run-sheet.js`, spec §5.4) is a drawer of any screen in the owner
+sheet's chrome (`div.drawer.sheet.run-sheet`, `role="dialog"`, `aria-label` `Run <Title>`, focus on
+its close key and back to the opener on close), drawn from `sheetOf` over the modules listing:
+**Where**, a select — fixed on `cn-market` for a market card, the strategies for Leader and Mode,
+both for Counterevidence; **On**, a radio per option (`label.opt.on` open, its detail under it;
+`label.opt.off` greyed, its reason under it — `theme already there`, `needs Leader, then
+Counterevidence, on this run`, `mode already registered on this run`, `run no longer the latest`):
+`Latest run · <run> · session <date>` with what it froze, and `New run` for the three market cards
+and Leader; **Cites**, a select of the two newest sealed `cn-market` runs for Leader (their frozen
+sources and theme words, the line `theme not evaluable: the pick comes from the limit-up pool
+alone` under a NOT_EVALUABLE theme, a warning when the cite lacks sentiment or theme), read-only
+for Mode and a strategy's review (the run's leader's market run); **Stocks** for Leader
+(`#run-stocks`, its hint, `not a main-board code: <code>` or `at most 4 codes`); Theme's source line
+(`boards missing in <n> of the last <m> runs`, from each listed `cn-market` run's `frozen`); **Note to
+Gravit** (`#run-note`); **Runs via** and **Writes** (the file and the conversation's title); what
+was said, red; **Cancel** and **Run**, off with the blocker as its title while it cannot run.
+The two boxes keep what was typed across a render by their ids; the selects and radios draw the
+store's value.
 **An item's page** (`#/plugin/<id>`, `‹ Discover` back to the view it came from): an MCP server's
 State (`Pending`, `Loading`, `Active`, `Failed`, `Unloading`) and its tools, each description
 clamped to two lines (a server may describe a tool with a whole method list); a bot's model
@@ -2934,7 +2997,11 @@ folded), `theme`, `lastConv`, `lastSeen`, `status`, `orphanGates`, `channels`, `
 (`id`, `status`, `data`, `at` — the page's overview); `discover` (`query`, `shelves` — `plugins`,
 `modules` (`/data/modules.json` as read), `bots`, `agents`, `memory`, each `{status, data, at}` —,
 `gravit`, `skills`, `models`, `status`, `artifacts` — a module page's latest artifact by module,
-`{status: loading | ready | failed, run, json}`);
+`{status: loading | ready | failed, run, json}`); `runSheet` (`null` while no module card's Run
+sheet is open, else `{module, where, on, run, cites, stocks, note, said}` — `run` the id of the
+chosen channel's newest run when On was picked, `said` the last refusal as words) and `moduleRuns`
+(the Runs this page sent, by module, `{sessionId, title, startedAt}`, until `trackRuns` clears
+them);
 `markets` — the screen's `tab` (an `ACCOUNT_TABS` id, `watching` or `results`), `sort`
 (`volume`, `movers`, `closing`) and `q`; the Account's `explore` reads by tab (`all`, a kind's own;
 each `{status, data, at, message}`) and the search's `results`; `accountQuotes` by `venue|symbol`
@@ -2967,7 +3034,9 @@ nothing). The stars keep two keys of their own, read and written by `host/market
 Account's keys under `gravit.account.watch.v1`, and the A shares under
 `gravit.market.watchlist.v1` — the key the old market page wrote, so a browser's list carries over
 (one that saved before the rename is read from `kairos.market.watchlist.v1` until its first save),
-its old `us:`/`crypto:` stars asked of the Account. The owner device keeps two things of its own,
+its old `us:`/`crypto:` stars asked of the Account. The module host mirrors `moduleRuns` under
+`localStorage["gravit-face.module-runs"]`, read back at boot all or nothing, every access in
+try/catch. The owner device keeps two things of its own,
 outside the store: its key pair in IndexedDB (`gravit-face-owner` › `keys` › `device`, a
 structured clone, so the private half stays non-extractable — clearing the face's site data loses
 it, and the Account keeps the old device's row) and the sign-out flag,
@@ -3186,7 +3255,7 @@ own on 2026-10-27 (§7.1, §7.3).
 
 ### 7.3 The face suite
 
-1667 tests in 139 files (1644 pass, 23 skipped without `FACE_SMOKE=1`, 2026-10-28; 1654/1654
+1725 tests in 144 files (1702 pass, 23 skipped without `FACE_SMOKE=1`, 2026-10-28; 1654/1654
 under `FACE_SMOKE=1` at 138 files, 2026-10-27), run by `node --test` through `tsx`. The Account's own suite is
 `account/`'s (vitest; §7.1 has its counts): the origin's tests at 133b9a7 less the six that reach
 what the copy left out (§3.9), plus the fence's (`test/unit/server-guard.test.ts`: the default
@@ -3312,7 +3381,8 @@ refused, `parseHosts`). The face's:
   fold, `Untitled`, the archived marks, the child rows, `firstOpen`), `host-reducers` (windows
   replace, events dedupe by id and insert by seq, a checkpoint's replace range, gates and
   orphans, the catalog kept across a list, a module page's latest artifact loading, ready and failed
-  and the `lastDiscover` it keeps), `actions` (the Remotes and routes each data-action
+  and the `lastDiscover` it keeps, the Run sheet's and `moduleRuns`' reducers, `closeOverlays`
+  closing an open sheet), `actions` (the Remotes and routes each data-action
   sends: the row actions and their refusals, Talk to, a child's Stop), `live` (follow or page,
   promote, suspend and re-decide, gates by `eventId`, previews, host facts, the last good
   channels, sessions-meta and bots), `thread` (a tool result drawn plain, a member's
@@ -3328,7 +3398,17 @@ refused, `parseHosts`). The face's:
   every state, the latest run across channels, the page's rows and its Reads, Writes and Runs on
   boxes, every Reads label true) and `host-modules` (a module page's latest artifact through its
   channel's overview: the run matched or not, a failed post, no run, the latest-started read
-  landing alone),
+  landing alone; `trackRuns` — a stopped Run cleared with a re-read now and one after 5 s, a
+  record under a minute kept, a missing session cleared only once the list has landed and with no
+  backstop, an hour-old record cleared while its session runs, the mirror written on change and
+  read back, garbage, a wrong shape and a throwing or absent storage), `modules-view`'s
+  `activeRuns` and the live chip on a card and the page, `run-sheet-view` (each card's
+  `newSheet`, Where, On with every greying and its reason, the stale latest run and its re-stamp,
+  Leader's Cites and their warning, Stocks, Theme's source line, `titleOf`, every Appendix B line
+  from `messageOf`) and `host-run-sheet` (open, each field and what it re-reads, a Run sending one
+  `newConversation` with Appendix B's text and recording it, a failed send keeping the sheet, a
+  refused Run sending nothing, the listing moving under an open sheet, a double press, a failed
+  page move),
   `tool-result` (no result dressed, an old session's Alpaca result
   included; an error never), `children-view` and `host-traces` (a conversation's children and their
   states; a member's trace read once per conversation and message, non-activating), `wire-words`
@@ -3337,7 +3417,10 @@ refused, `parseHosts`). The face's:
   the store, a press holding renders until it ends, the open disclosures kept across a render, the
   prefs' folds, fork, archive and delete moving the page, a deletion elsewhere, a channel's page
   and New round, New channel… in Where, the roster editors, Discover's reads, the Research shelf's
-  six cards with Run disabled and dimmed when not mounted, a module's page — its head, boxes, runs,
+  six cards with Run off and dimmed when not mounted, Run on a card opening its sheet — the fixed
+  Where, the greyed Latest run, Escape, Run as `session/create`, `session/rename` and the prompt
+  with Appendix B's text — and the card and page reading Running until the session stops, then the
+  listing read again at once and after 5 s, a module's page — its head, boxes, runs,
   legend and latest artifact after one overview read, back to the shelf it came from, an unknown
   name `Not found` —, Connect, Talk to, a
   bot's save and a new bot, a member's trace never followed and opened by one click, a child's
@@ -3907,6 +3990,7 @@ the re-host added (§10, item 14).
 | **Lunhui market run** — manual (`face/README.md` "Lunhui analysis", the live market run) | on the operator's face with keys, in a `cn-market` session: the first freezes from the live Tencent and Eastmoney hosts (delayed quotes from this machine), the protocol followed by a real model, `cn-market-analyst` on `deepseek-flash` writing three artifacts the validator accepts or `NOT_EVALUABLE` ones naming the missing sources, Gravit's final message, a `NOT_EVALUABLE` run journaled, the run on the channel page with its chips; the role child's first request measured (§4.3) | whether the labels are right (a strategy run's expectation review and the next day's freeze, `strategies/cn-market/THESIS.md`'s falsification) | **owed** — the operator's, on the real face |
 | **Lunhui strategy run** — automated (`lunhui-strategy-run-smoke`) | two days on a real boot over the fixtures and a stub model, each a reviewed market run then a strategy run on `lunhui-s01-repair`: Gravit finds the market run by the listing read, freezes two equities' quotes and calls `role_cn_stock_analyst` for the leader, `role_cn_reviewer` with both run ids and `role_cn_stock_analyst` for the mode; Friday's mode registers `S01` with a card, every counterevidence item addressed, and Monday's grades it; every artifact of the four runs valid again against digests rebuilt from the sealed runs, the card within 2,048 bytes, the runs card's latest run Monday's with its review line, the strategy channel in Gravit's prompt | the live hosts; a real model choosing candidates and writing artifacts the validator takes; a grade on new prices (the fixtures are one set but the distribution's `qdate`, rolled to Monday, so Monday re-reads Friday's quote bytes) | passes 2026-10-26 (`8020a5e`; Friday's `S01` and Monday's grade at `d77bcd3`) |
 | **Lunhui strategy run** — manual (`face/README.md` "Lunhui analysis", the live strategy run) | on the operator's face with keys, after a live market run of the same or the previous session, reviewed by `cn-reviewer`: a `lunhui-s01-repair` session following the protocol's strategy channel, the market run found by the listing read, `cn-stock-analyst` on `deepseek-flash` writing a leader the validator accepts, `cn-reviewer` its counterevidence, and a mode citing that market run — `S01` with a card, or `WAIT` — the run on the channel page with its chips and `cn-market run <id>`, a stale market run refused `STALE_MARKET_RUN`, a second `lunhui-s02-rotation` run concluding `WAIT`, and the next session's run grading a card; the role children's first requests measured (§4.3) | whether the candidates and the review are right; the theses' daily-frame paragraphs, which are the operator's E4 review (§10 item 19) | **owed** — the operator's, on the real face |
+| **Module cards** — manual (face/README.md "The card drill") | Run on each card sends one message, Gravit runs that module alone, the chips move from Running to the listing, the fences grey | nothing about a second browser; the Gate-free path (no Account write) | owed: the operator's keyed run after plan 3 lands |
 
 Owed besides, from the re-host, never yet run in a browser: the Gate-2 drill's new card endings
 — a second tab's `closed`, a lost race's `closed · settled elsewhere`, a stale card's `closed ·

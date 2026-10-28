@@ -715,6 +715,45 @@ What it does not prove: whether the candidates and the review are right. The the
 `**Daily registration (E4)**` paragraphs are the builder's re-fit and await your review
 (`DEVELOPMENT.md` §10, item 19).
 
+**The card drill — owed, the operator's.** Run after any change under
+`client/js/host/modules*.js`, `run-sheet*.js` or `../dsh/profile/lunhui-module.md`; keyed, the face
+from your own terminal (`npm start` after `source ../.env.deepseek`, as in "Run"), each module run
+from its Discover card (the spec's §5.4–§5.7, Appendix B):
+
+1. Discover → Research: six cards, the chips reading the latest runs (`not evaluable · boards` on
+   Theme on a day boards failed). Open Theme's page: the three boxes, the runs table, the latest
+   artifact.
+2. Theme → Run: Where `cn-market` fixed, Latest run greyed `theme already there`, New run checked,
+   the source line counting the boards failures. Run. Expected: a conversation `Theme · <MM-DD>`
+   in `cn-market` whose first message is Appendix B's new-run line; Gravit freezes index,
+   limit-up, boards (three tries if it fails), calls the CN market analyst for theme alone,
+   reports; the card reads `Running · Theme · <MM-DD> ›` meanwhile and settles on the new run's
+   chip when the session stops; on disk exactly one artifact, `theme.json`, in the new run; the
+   Environment and Sentiment cards now read `not run`.
+3. Environment → Run on that run (Latest run enabled, New run not preselected) and Sentiment
+   likewise: two more conversations; the run now holds three artifacts; the chips show them.
+4. Leader → Run: Where `lunhui-s01-repair`, New run, Cites the run from step 2 (the theme line
+   says whether the pick is from the pool alone), Stocks two codes from that run's
+   `evidence-limit-up.json`. Expected: a conversation `Leader · <MM-DD>` in the strategy channel,
+   `lunhui_freeze_quotes` for the two codes, the stock analyst for leader alone, `leader.json`
+   alone in the new strategy run; the card names the strategy.
+5. Counterevidence → Run: Where `lunhui-s01-repair`, Latest run enabled (leader there, no review),
+   the cite read-only. Expected: `counterevidence.json` lands; the card reads
+   `lunhui-s01-repair · <n> items`.
+6. Mode → Run: Latest run enabled now (leader and counterevidence there). Expected: `mode.json`
+   (WAIT in all likelihood); Run then greys `mode already registered on this run`.
+7. The fences: Mode on a run without a review → the sheet greys with `needs Leader, then
+   Counterevidence, on this run`; a second Theme Run on today's run → `theme already there`;
+   Stocks `sz300750` → the error line, Run disabled.
+8. The runs card on each channel page agrees with the cards; the journal gained a dated line for
+   any `NOT_EVALUABLE`.
+
+Record the outcome here, under the drill — the date, the run ids, what differed — and mark the
+**Module cards — manual** row of `DEVELOPMENT.md` §7.4. As with the runs above, the new runs'
+tracked files are committed on your word, or the run directories removed.
+
+**Not yet run** — owed after plan 3 of the module cards lands.
+
 ## The profile
 
 `npm run setup` writes THREE files into `$DSH_HOME/profiles/<name>/`, and
@@ -1682,7 +1721,23 @@ artifact of the module, `no run yet` when no channel it reads has a run — neve
 artifact. A strategy card's chip names its channel (`lunhui-s01-repair · WAIT`), `not run` too
 (`lunhui-s02-rotation · not run`). When the listing
 says `mounted: false` the shelf says `Lunhui rows not mounted` and its cards dim, their chips grey
-but still worded. A card opens `#/module/<name>`; its **Run** key is drawn disabled until plan 3.
+but still worded. A card opens `#/module/<name>`.
+
+**Run**, on a card or its page, opens the module's Run sheet (`client/js/host/run-sheet.js`, its
+words from `run-sheet-view.js`): **Where** (fixed on `cn-market` for a market card, a strategy for
+Leader and Mode, either for Counterevidence), **On** — `Latest run` or `New run` (the three market
+cards and Leader), a pick the run cannot take greyed with its reason (`theme already there`,
+`needs Leader, then Counterevidence, on this run`, `run no longer the latest`) —, **Cites** for
+Leader (the two newest sealed `cn-market` runs; read-only for Mode and a strategy's review),
+**Stocks** for Leader (1–4 main-board codes, empty for Gravit's pick), Theme's boards line, a
+**Note to Gravit**, and what it writes. **Run** sends Gravit one message in that channel as a new
+conversation `<Title> · MM-DD` — the composer's own `session/create`, `session/rename` and
+prompt, the text the spec's Appendix B line (`请只跑 Lunhui 的 … 模块`), read by Gravit's
+`lunhui:module` section; the face starts no role and calls no Lunhui tool — and the page moves to
+it. While it runs the card's chip reads `Running · <title> ›`, a link to the conversation, and
+Run is off; when the session stops the chip reads the listing again (re-read at once and 5 s
+later). This browser remembers the Runs it sent (`localStorage["gravit-face.module-runs"]`) only
+as a convenience.
 
 - **Gravit** (the first card on Agents) — its page is three cards over three reads:
   `session/modelCatalog`'s `default` (provider, model and reasoning effort — the selection a new

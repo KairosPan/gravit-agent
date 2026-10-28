@@ -569,6 +569,34 @@ the CLAUDE.md map line). No server, contract, row, artifact or role change.
 | §5.3 the layer | `startModules`'s signature | no `now`: nothing in the layer stamps a time |
 | final review | the fix wave | a strategy or either card's `not run` chip names its channel; the page's head chip reads `…` while the listing is first read and `—` when it failed; the latest artifact only for the latest run, a read of another run saying where older runs are; the shelf's subtitle inside its title |
 
+## 14. Build notes, plan 3 (2026-10-28)
+
+Plan 3 (Run) built on `claude/lunhui-module-cards-plan-3-0aa77a` over `1e05264`: `d39d85d` (the
+run sheet's pure view, `host/run-sheet-view.js`), `d4425d3` (the sheet opened, filled and sent as
+one new conversation, `host/run-sheet.js`, `render/run-sheet.js`, `reducers/run-sheet.js`),
+`d4893e4` (Running while the conversation runs, `activeRuns`, `trackRuns`, the live chip), and
+this commit (the card drill in `face/README.md`, the client smoke serves the three new modules,
+the map and the loops page name Run). No server, contract, row, artifact, role or protocol change.
+
+| Clause | Left open | What the tree does |
+|---|---|---|
+| §5.4 G14 | how a stale Latest run is caught | the slice carries `run`, the channel's newest run when On was picked; Latest run on a channel whose newest run has moved greys `run no longer the latest`, the same blocker, until On is picked again, which re-stamps it |
+| §5.4 Where | a changed channel's picks | `newSheet(listing, module, channel?)`: the optional channel is Where (a market card's stays `cn-market`), the rest that channel's picks, Stocks and Note kept |
+| G16 | Theme's source line | counted from each listed `cn-market` run's `frozen` lacking `boards`, not from a theme artifact's `missing_sources` |
+| §5.4 the listing | when a field reads it | `field()` re-reads only for Where and On; Cites, Stocks and Note use the listing last read; Run always re-reads |
+| §5.5 the move | a failed page move after a send | `run()` catches it; the record and the closed sheet stand |
+| §5.4 drawers | one at a time | `closeOverlays` closes the run sheet too; Escape closes it before the owner sheet |
+| G12 Leader | Latest run's cite | both Leader templates cite a market run, so Latest run needs a cite as New run does |
+| §5.5 the title | an open run's date | `titleOf` falls back to `opened_at`'s date while the run has no session |
+| §5.7 missing | a session the list lacks | counted missing only after the first `hostList`, so a reload keeps a live record; cleared with one re-read and no 5 s backstop, the brief's reading of §5.7 |
+| §5.7 the hour | a record 60 min old | cleared with no re-read |
+| G10 mirror | a stored value with a bad entry | read all or nothing: `{}` unless every entry is a known module's well-formed record |
+| §5.4 the drawer | its markup | `div.drawer.sheet.run-sheet` with `role="dialog"`; On as `label.opt.on` / `label.opt.off` radios, the detail or reason under each, the checked one's border by `:has(input:checked)`; `said` and the Stocks error in `.field-error`; Stocks and Note keep typed words by id (`run-stocks`, `run-note`) |
+| §5.7 timings | the tracker's intervals | unchanged: Running for a minute after the send whatever the list says, the 5 s backstop, the 60 min cap |
+
+Owed: the card drill (`face/README.md` "The card drill", `DEVELOPMENT.md` §7.4 **Module
+cards**), the operator's keyed run.
+
 ## Appendix A — the six cards
 
 Each card as nodded on the canvas (rows 6–11): what the shelf shows, what the page explains, and
