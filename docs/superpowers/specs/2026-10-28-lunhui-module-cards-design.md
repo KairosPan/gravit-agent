@@ -525,6 +525,27 @@ then Environment and Sentiment on that run from their cards; Run Leader with two
 conversations, the artifacts and the chips checked against each other; recorded in
 `face/README.md` and `DEVELOPMENT.md` §7.4.
 
+## 12. Build notes, plan 1 (2026-10-28)
+
+Plan 1 (backend) built on `claude/lunhui-module-cards-plan-1-b5dbd0` over `e32a4fd`: `6534f19`
+(run rows' opened and sealed times, `frozen`, `missingSources`, `marketRun`; `readAnalysisRuns`
+exported with a cap), `80ad9a1` (`GET /data/modules.json`), `96354b1` (a non-directory
+`analysis/` lists as unreadable), `c6d447d` (the `lunhui:module` section), `ca8de04` (the market
+analyst's sentence). Measured: `dsh/profile/lunhui-module.md` 1,372 bytes (budget 1,500),
+`roles/cn-market-analyst/ROLE.md` 1,675 bytes (cap 2,000). The face suite 1667 tests, 1644 pass
+and 23 skipped, typecheck clean; the four Lunhui, roles and instructions smokes 7/7 under
+`FACE_SMOKE=1`. The rulings are in the plan's SDD ledger.
+
+| Clause | The text | What the tree does | Why |
+|---|---|---|---|
+| §7 | the cap "as an option or a second function" | an option: `readAnalysisRuns(dir, { cap })` | one reader; the runs card calls it without one |
+| §5.2 | `missing_sources` "an array of strings, else `[]`" | all or nothing: an array mixing any non-string reads as `[]` | a card never shows a partial list the artifact did not state whole |
+| §5.2 | no `analysis/` has `runs: []` | an `analysis/` that is a file or a link throws `ENOTDIR`, so the listing marks the channel `unreadable`; the runs card's overview still swallows it and shows no runs | a misplaced `analysis/` is not "no runs yet" |
+| §5.2 | `mounted` from `pluginListing` | `main.ts` reads the loader as `boot.ts` does, `ctx.get("loader")` | the loader is the one source of the rows' state |
+| §6 | the protocol tests | `tests/boot.test.ts`'s fixture also writes `lunhui-module.md` | `readProtocols` reads both entries at boot |
+| §5.9 | the sentence "after the 按顺序做三个模块 paragraph" | placed after that whole paragraph, which ends 后面的模块不再做 | the plan quoted the paragraph's ending wrong; the placement is its intent |
+| Appendix C | the protocol text | retitled "the shipped text", mirroring the file byte for byte | §7 left the wording to the builder |
+
 ## Appendix A — the six cards
 
 Each card as nodded on the canvas (rows 6–11): what the shelf shows, what the page explains, and
