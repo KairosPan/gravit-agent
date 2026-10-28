@@ -56,8 +56,8 @@ does not mean only one execution context.
   card there (D17). Since 2026-10-24 the Account is also what the face's Markets and Account
   screens show — read through a loopback proxy — and the face's page is one of the Account's
   owner devices: the operator trades there by hand, each order signed with the browser's device
-  key at the Account's door, under the Account's own cap (D18). The Account is the account: the operator's own Alpaca paper account, when wanted, is
-  one of its venues.
+  key at the Account's door, under the Account's own cap (D18). The Account is the account: the
+  operator's own Alpaca paper account, when wanted, is one of its venues.
 
 **What a working day looks like.** The operator opens the face at `127.0.0.1:3090`, picks a
 channel, and talks to Gravit. Gravit reads the market through its Account seat and AKShare,
@@ -319,12 +319,12 @@ is the copy source).
 - **No multi-tenant, cryptographic, or kernel-level machinery.** One operator, one machine.
   The risks are named here in one line each instead of being built against: a hosted or
   multi-user deployment invalidates this charter rather than extending it. The Account seat's key
-  is the Account's — the service in `account/`, its home — and the owner's device key is the browser's: on
-  the Account's page, and since 2026-10-24 on the face's page as a second owner device, where
-  `face/client` speaks the Account's door protocol as a client speaks it (a P-256 key the browser
-  holds, the Account's envelope and nonce) and designs none of its own. The face process holds no
-  key and signs nothing; Gate 2 stays the face's only gate for the agent; the owner's hand orders
-  pass through no gate of this tree's (D18).
+  is the Account's — the service in `account/`, its home — and the owner's device key is the
+  browser's: on the Account's page, and since 2026-10-24 on the face's page as a second owner
+  device, where `face/client` speaks the Account's door protocol as a client speaks it (a P-256
+  key the browser holds, the Account's envelope and nonce) and designs none of its own. The face
+  process holds no key and signs nothing; Gate 2 stays the face's only gate for the agent; the
+  owner's hand orders pass through no gate of this tree's (D18).
 - **No memory substrate beyond what exists.** Git, strategy artifacts, bot journals and dsh's
   own session histories are the memory. A dedicated store is chosen when content demands one.
 

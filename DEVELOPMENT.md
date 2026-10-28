@@ -653,8 +653,9 @@ nothing under `account/src` reaches them. Six origin test files stayed out with 
 reaching what stayed out: `test/unit/wallet.test.ts` (imports `src/wallet`), `test/e2e.test.ts`
 (spawns `src/runner`), `test/unit/site-numbers.test.ts` (`scripts/`, `site/`),
 `test/unit/review2-contracts.test.ts` and `test/unit/mode-rules.test.ts` (the origin's `README.md`,
-`COOKBOOK.md`, `docs/`), `test/unit/env-scrub.test.ts` (walks `src/runner`); every kept file is
-byte-identical to the origin's but `server.ts` and its guard test.
+`COOKBOOK.md`, `docs/`), `test/unit/env-scrub.test.ts` (walks `src/runner`); every kept source and
+test file is byte-identical to the origin's but `server.ts` and its guard test (`package.json` is
+rewritten as `gravit-account`, and the lock's root entry follows it).
 
 **Scripts.** `account` (`tsx src/portfolio/server.ts`: 127.0.0.1:4820; `--read-only`,
 `--live-cap <usd>`, `--port <n>`, `--home <dir>`, `--fresh`), `portfolio:mcp` (the seat the face's

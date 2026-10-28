@@ -317,14 +317,16 @@ alike; no config key changed (`src/akshare.ts` records it):
 ## The Account seat — Gravit at the Account
 
 Since 2026-10-20 the face composes a second project-owned MCP row beside AKShare,
-`mcp-account` (`src/account-seat.ts`): the MCP seat of the Account — the service that puts your
-exchange, broker, wallet and prediction-market accounts on one page at `127.0.0.1:4820` and lets
-agents trade inside limits you sign. Since 2026-10-27 it is this tree's `../account/`, copied
-from Linqi's [buyer-agent-demo](https://github.com/linqizhe07/buyer-agent-demo) @ 133b9a7
-(`../account/NOTICE`). Gravit's tools gain `mcp__account__portfolio_*` (35 on a real account).
-The Account is yours to run, a second process beside the face; the face never starts it. **Paper venues only** in this round
-(`../docs/superpowers/specs/2026-10-20-account-seat-design.md`; the charter's §8 names a real
-venue as the real-money trigger).
+`mcp-account` (`src/account-seat.ts`): the MCP seat of the Account — the service
+that puts your exchange, broker, wallet and prediction-market accounts on one page
+at `127.0.0.1:4820` and lets agents trade inside limits you sign. Since 2026-10-27
+it is this tree's `../account/`, copied from Linqi's
+[buyer-agent-demo](https://github.com/linqizhe07/buyer-agent-demo) @ 133b9a7
+(`../account/NOTICE`). Gravit's tools gain `mcp__account__portfolio_*` (35 on a
+real account). The Account is yours to run, a second process beside the face; the
+face never starts it. **Paper venues only** in this round
+(`../docs/superpowers/specs/2026-10-20-account-seat-design.md`; the charter's §8
+names a real venue as the real-money trigger).
 
 Install once, from the repo root:
 

@@ -332,3 +332,8 @@ call as `service()`.
   2. Update `.claude/launch.json`'s `account` entry to run `npm run account` in this repo's `account/`.
   3. Run the two-box drill (`face/README.md` "The two-box drill") when Docker Desktop is up, stopping the host face and Account first; record it in `DEVELOPMENT.md` §7.4.
   4. The `mcp-alpaca-kit` row in the live `~/.dsh` patch — unrelated, still the operator's to drop.
+
+### Task 6 — review (controller)
+
+- Task 6: review 1 — Needs fixes: Important the loops page's Gotchas line (`Gravit-Docs-and-Prompt-Loops.html` ~183) still calls the Account seat an external install; fix round 1 sent with it plus four cheap minors (the page's Commands summary, CLAUDE.md back to ≤ 67 lines, DEVELOPMENT §3.9's "byte-identical" overstatement, four unwrapped lines).
+- Task 6: minor (deferred): `dsh/skills/mechanics/account-seat-guide/SKILL.md` 8–9 still reads "Linqi's buyer-agent-demo, a program the operator runs on this machine" — true, read by Gravit, left for the operator's word (outside the brief's files).
