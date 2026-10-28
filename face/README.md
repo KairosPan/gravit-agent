@@ -2003,7 +2003,8 @@ child runs the brief with the role's own persona and exactly the role's tools, a
 comes back as the tool's result. It is not a bot — no journal, no home session, no seat in a
 room, never listed among `bots/` — and not a bare `subagent` call, where the model picks the
 persona and the tools on every call: here both are fixed on disk. Three ship: `cn-market-analyst`,
-the Lunhui market modules' analyst, `cn-reviewer`, the counterevidence reviewer, and
+the Lunhui market modules' analyst, which writes the one module a brief names and all three when
+none is named (spec 2026-10-28 F6), `cn-reviewer`, the counterevidence reviewer, and
 `cn-stock-analyst`, the leader and mode modules' analyst ("Lunhui analysis"). The three that shipped before (a screener, a backtester and a reviewer, whose
 allow lists were the removed Python package's tools) retired with their tools on 2026-10-24, and
 new roles are the operator's to design; `roles/_template` is the copy source and never a role, so

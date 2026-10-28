@@ -83,6 +83,10 @@ test("cn-market-analyst's ROLE.md: Chinese, within 2,000 bytes, the order, the a
   assert.ok(persona.includes("只停止该模块，接着做下一个模块") && persona.includes("每个受阻的模块"), "a third rejection stops that module only, each blocked module reported");
   for (const heading of ["**status**", "**what was measured**", "**paths**", "**limits**"]) assert.ok(persona.includes(heading), heading);
   assert.ok(persona.includes("analysis/<run>/<module>.json"), "the paths it reports");
+  assert.ok(persona.includes("点名只写") && persona.includes("只做那一个模块") && persona.includes("没有点名"), "a brief that names one module gets that module alone; an unnamed brief the three (spec 2026-10-28 F6)");
+  assert.ok(at("按顺序做三个模块") < at("点名只写"), "the order first, the exception after it");
+  const role = readRoles(ROLES_ROOT).find((r) => r.id === "cn-market-analyst")!;
+  assert.ok(role.description.includes("or the one module the brief names"), "the summary Gravit reads says so too");
 });
 
 /* The stock analyst's persona, the tree's own Chinese (D14′, spec §5.9, E4): the brief names the strategy,
