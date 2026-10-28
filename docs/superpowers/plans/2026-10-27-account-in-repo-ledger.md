@@ -311,7 +311,7 @@ call as `service()`.
 
 - Task 5: fix round 1/5 (2 addressed + the folded minors, 0 open; commits 565d8c3..19e5b4a; R15, the empty read-only tmpfs `.git` that keeps dsh's project-root walk at the repo root, checked against `dsh-agent-instructions`' `findProjectRoot` and found sound).
 - Task 5: complete (commits a3bdc93..19e5b4a, review clean after one fix round).
-- Task 5: minor (deferred): the six root documents are single-file binds, which pin the inode — a host `git checkout`/`pull` that rewrites one by rename leaves the running box on the old copy until `docker compose up` recreates it.
+- Task 5: minor (deferred): the six root documents are single-file binds, which pin the inode — a host `git checkout`/`pull` that rewrites one by rename leaves the running box on the old copy until `docker compose up --force-recreate agent` recreates it.
 - Task 5: minor (deferred): `npm ci` into the volume under a read-only `account/` is unobserved until the first `up` on a daemon — and the volume's mount point `account/node_modules` must already exist inside the read-only bind (Docker likely cannot create it there), so `cd account && npm ci` on the host precedes the first `up` (the final review's Important 1; documented in the fix wave).
 
 ### Task 6
@@ -361,3 +361,8 @@ call as `service()`.
 - `account/NOTICE` line 2: "that the copied source and tests import".
 - The after-a-pull paragraph: recreate the box after a pull that rewrote a root document — written `docker compose up --force-recreate agent`, since a plain `up` leaves an unchanged container as it is.
 - Gates: face `npm test` 1,654 tests, 1,631 pass, 23 skipped, 0 fail; typecheck clean; `compose.test.ts` 1/1; `docker compose config -q` exit 0 (daemon off: no build). `GRAVIT.md` unchanged.
+
+### Fix wave — re-review (fable, dfcdc12..790a4fb)
+
+- All seven findings addressed (two Important, five Minor); no new breakage; ready to merge: yes. The claim that the face has no Tencent quote fallback was checked in `face/src/quote-snapshots.ts` (iFinD is its only provider; Tencent serves symbol search only).
+- Closed 2026-10-27: six tasks and the fix wave committed on `claude/account-in-repo-415034`; nothing merged, nothing pushed.
