@@ -546,6 +546,28 @@ and 23 skipped, typecheck clean; the four Lunhui, roles and instructions smokes 
 | §5.9 | the sentence "after the 按顺序做三个模块 paragraph" | placed after that whole paragraph, which ends 后面的模块不再做 | the plan quoted the paragraph's ending wrong; the placement is its intent |
 | Appendix C | the protocol text | retitled "the shipped text", mirroring the file byte for byte | §7 left the wording to the builder |
 
+## 13. Build notes, plan 2 (2026-10-28)
+
+Plan 2 (the Research shelf and the module page) built on `claude/lunhui-module-cards-plan-2-34dcd7`
+over `4f85204`: `4771ae1` (the six modules as one client table, `host/modules-view.js`, with their
+chips, latest runs and page rows), `eca7e60` (Discover's Research shelf, a fifth listing
+`/data/modules.json`), `c9955cd` (the page `#/module/<name>`, `host/modules.js` and
+`render/modules.js`), and this note's commit (the client smoke serves the three new modules,
+the CLAUDE.md map line). No server, contract, row, artifact or role change.
+
+| Clause | Left open | What the tree does |
+|---|---|---|
+| §5.1 tones | the chips' and a dim card's CSS | `.chip.ok` green, `.chip.warn` amber, quiet words grey; `.pcard.dim { opacity: .55 }`; `.btn-sm:disabled` dim colour and default cursor |
+| §5.1 Run | the key before plan 3 | drawn disabled, `title="Run comes with plan 3"`; the `runModule` action puts `Run comes with plan 3` on Discover's line |
+| §5.1 `mounted: false` | the chip, shelf and cards | the chip keeps its headline words in grey; the shelf draws the line `Lunhui rows not mounted`; the six cards dim |
+| §5.3 Reads | the box's labels | an explicit `freezes` and `artifacts` pair per module from Appendix A: environment, sentiment and theme Artifacts none; mode and counterevidence Freezes none; then Channel |
+| §5.3 Writes | the `Under` path | `strategies/cn-market/analysis/<run>/` for a market module, `strategies/<strategy>/…` for a strategy one, `strategies/<channel>/…` for either |
+| §5.3 legend | its markup | `div.kv-list.mod-legend` of `div.kv` rows, the label `kv-k mono`, the reading `kv-v`, both columns left-aligned and wrapping |
+| Appendix A | the legend copy for leader, mode, counterevidence | read from the contracts: leader flags from `leader.mjs`'s hints, mode preconditions with `mode.mjs`'s `CITES` classes, the ten rulings and five kinds from `counterevidence.mjs`'s hints, in English, paragraph ids only |
+| §6 no shop | Discover's guard `/review/i` | narrowed to `/\breviews?\b/i` in `discover.test.js`: the counterevidence card's role, CN reviewer, is no shop review |
+| §5.3 routes | `#/plugin/module:<name>` | not redirected; it draws the plugin page with the item's role and channel line; no card links there |
+| §5.3 the layer | `startModules`'s signature | no `now`: nothing in the layer stamps a time |
+
 ## Appendix A — the six cards
 
 Each card as nodded on the canvas (rows 6–11): what the shelf shows, what the page explains, and
