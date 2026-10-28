@@ -116,7 +116,8 @@ export const MODULE_NAMES = new Set(MODULES.map(m => m.name));
 
 export const moduleOf = name => MODULES.find(m => m.name === name) ?? null;
 
-// the channels a module reads: a market module cn-market, a strategy module every other channel, either all
+// the channels a module reads: a market module the channels the listing marks kind market, a strategy module those it
+// marks kind strategy, an either module all
 const accepts = (m, c) => m.channels === 'either' || c?.kind === m.channels;
 const channelsOf = listing => (Array.isArray(listing?.channels) ? listing.channels.filter(plain) : []);
 const runsIn = c => (Array.isArray(c.runs) ? c.runs.filter(r => plain(r) && typeof r.run === 'string') : []);
@@ -181,11 +182,14 @@ export function chipOf(listing, module, mounted = true) {
   const latest = latestOf(listing, module);
   let chip;
   if (!m || !latest) chip = { text: 'no run yet', tone: 'grey' };
-  else if (!latest.artifact) chip = { text: 'not run', tone: 'grey' };
   else {
-    const { words, tone } = artifactWords(module, latest.artifact);
-    const text = m.channels === 'market' ? words : `${latest.channel} · ${words}`;
-    chip = { text, tone: tone ?? (QUIET.has(words) ? 'grey' : 'ok') };
+    // a strategy or either card names the channel of its newest run, `not run` too
+    const pre = m.channels === 'market' ? '' : `${latest.channel} · `;
+    if (!latest.artifact) chip = { text: `${pre}not run`, tone: 'grey' };
+    else {
+      const { words, tone } = artifactWords(module, latest.artifact);
+      chip = { text: `${pre}${words}`, tone: tone ?? (QUIET.has(words) ? 'grey' : 'ok') };
+    }
   }
   return mounted === false ? { ...chip, tone: 'grey' } : chip;
 }

@@ -60,8 +60,8 @@ function shelf(s, items, state) {
   // Research is a grid of its six, never a scrolling row
   const research = s.id === 'research';
   const cards = !items.length ? '' : research ? `${unmounted(state)}<div class="grid">${items.map(researchCard).join('')}</div>` : `<div class="shelf-row">${items.map(i => card(i)).join('')}</div>`;
-  const sub = research ? `<span class="dim">Lunhui · ${items.length} modules</span>` : '';
-  return `<section class="shelf"><div class="shelf-head"><div class="shelf-title">${esc(s.title)}</div>${sub}${s.id === 'agents' ? rescanKey : ''}` +
+  const sub = research ? ` <span class="dim">Lunhui · ${items.length} modules</span>` : '';
+  return `<section class="shelf"><div class="shelf-head"><div class="shelf-title">${esc(s.title)}${sub}</div>${s.id === 'agents' ? rescanKey : ''}` +
     `<a class="link" href="#/discover/${s.id}">See all ›</a></div>${shelfState(s, items, state)}${cards}</section>`;
 }
 

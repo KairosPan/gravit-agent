@@ -1679,7 +1679,8 @@ fills their chips. Each card is its 副题, its role and the channel it reads (`
 strategy`, or both), and a chip reading that channel's latest run alone: the headline words, `not
 evaluable · <sources>` when the artifact is NOT_EVALUABLE, `not run` when the latest run holds no
 artifact of the module, `no run yet` when no channel it reads has a run — never an older run's
-artifact. A strategy card's chip names its channel (`lunhui-s01-repair · WAIT`). When the listing
+artifact. A strategy card's chip names its channel (`lunhui-s01-repair · WAIT`), `not run` too
+(`lunhui-s02-rotation · not run`). When the listing
 says `mounted: false` the shelf says `Lunhui rows not mounted` and its cards dim, their chips grey
 but still worded. A card opens `#/module/<name>`; its **Run** key is drawn disabled until plan 3.
 

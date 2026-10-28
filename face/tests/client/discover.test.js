@@ -3,9 +3,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { renderDiscover, renderPlugin } from '../../client/js/render/discover.js';
+import { renderModule } from '../../client/js/render/modules.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
-import { listings, buffett } from './helpers/inventory.js';
+import { listings, buffett, modulesListing, MARKET_RUN } from './helpers/inventory.js';
 
 const loadedFrom = (lists, route = { screen: 'discover', id: null }) => {
   let s = emptyState();
@@ -185,4 +186,30 @@ test("a server's tool description is drawn clamped, its whole text kept for the 
   const h = renderPlugin(loadedFrom(l, { screen: 'plugin', id: 'mcp:alpaca-kit' }));
   assert.match(h, /<span class="tool-desc">A-share stock data: quotes\./);
   assert.ok(h.includes(long.slice(-40)), 'the whole description stays on the page');
+});
+
+// a Lunhui module's page before its listing is read, and its latest artifact only for the latest run
+const modulePage = (id, listing) => R.nav(listing ? R.shelfLoaded(emptyState(), { shelf: 'modules', data: listing, at: 1 }) : emptyState(), { screen: 'module', id });
+const headChip = h => h.match(/<span class="pcard-kind">MODULE<\/span><span class="chip ?([a-z]*)">([^<]*)<\/span>/)?.slice(1);
+
+test('a module page while the listing loads: Loading…, for an unknown name too; the head chip waits for the listing', () => {
+  assert.match(renderModule(modulePage('foo')), /<div class="disc-none dim">Loading…<\/div>/);
+  assert.match(renderModule(R.shelfLoading(modulePage('foo'), { shelf: 'modules' })), /Loading…/);
+  const loading = renderModule(modulePage('sentiment'));
+  assert.deepEqual(headChip(loading), ['grey', '…']);
+  assert.doesNotMatch(loading, /no run yet/, 'the head never contradicts Runs saying Loading…');
+  const failed = renderModule(R.shelfFailed(modulePage('sentiment'), { shelf: 'modules', at: 1 }));
+  assert.deepEqual(headChip(failed), ['grey', '—']);
+  assert.match(failed, new RegExp(`Couldn${apos}t read`));
+  assert.deepEqual(headChip(renderModule(modulePage('sentiment', modulesListing()))), ['ok', 'IGNITION · POSITIVE · NONE']);
+});
+
+test("a module page's latest artifact: shown for the latest run alone, never another run labelled with its channel", () => {
+  const at = modulePage('sentiment', modulesListing());
+  const same = renderModule(R.moduleArtifactLoaded(at, { module: 'sentiment', run: MARKET_RUN, json: { state: 'IGNITION' } }));
+  assert.ok(same.includes(`<summary>${MARKET_RUN} · cn-market</summary>`));
+  const other = renderModule(R.moduleArtifactLoaded(at, { module: 'sentiment', run: '20261027T020000Z-00000000', json: { state: 'OLDER_RUN' } }));
+  assert.doesNotMatch(other, /<summary>/);
+  assert.doesNotMatch(other, /OLDER_RUN|20261027T020000Z/);
+  assert.match(other, /open the channel page to read older runs/);
 });

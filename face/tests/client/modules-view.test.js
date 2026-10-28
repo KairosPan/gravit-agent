@@ -105,7 +105,9 @@ test('latestOf: a strategy card reads the newest run across strategies, an eithe
   const ce = latestOf(l, 'counterevidence');
   assert.equal(ce.channel, 'lunhui-s02-rotation', 'the newest run across all channels');
   assert.equal(ce.artifact, null, "s02's run lacks a counterevidence artifact");
-  assert.deepEqual(chipOf(l, 'counterevidence'), { text: 'not run', tone: 'grey' });
+  assert.deepEqual(chipOf(l, 'counterevidence'), { text: 'lunhui-s02-rotation · not run', tone: 'grey' }, 'a not run chip names its channel');
+  delete channelOf(l, 'lunhui-s02-rotation').runs[0].artifacts.leader;
+  assert.deepEqual(chipOf(l, 'leader'), { text: 'lunhui-s02-rotation · not run', tone: 'grey' });
   assert.equal(runsOf(l, 'counterevidence')[0].channel, 'lunhui-s01-repair', "the page's rows skip a run without the artifact");
   assert.equal(latestOf(null, 'leader'), null);
   assert.equal(latestOf(l, 'nope'), null);

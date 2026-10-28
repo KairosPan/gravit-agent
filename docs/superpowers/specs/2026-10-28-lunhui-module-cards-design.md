@@ -567,6 +567,7 @@ the CLAUDE.md map line). No server, contract, row, artifact or role change.
 | §6 no shop | Discover's guard `/review/i` | narrowed to `/\breviews?\b/i` in `discover.test.js`: the counterevidence card's role, CN reviewer, is no shop review |
 | §5.3 routes | `#/plugin/module:<name>` | not redirected; it draws the plugin page with the item's role and channel line; no card links there |
 | §5.3 the layer | `startModules`'s signature | no `now`: nothing in the layer stamps a time |
+| final review | the fix wave | a strategy or either card's `not run` chip names its channel; the page's head chip reads `…` while the listing is first read and `—` when it failed; the latest artifact only for the latest run, a read of another run saying where older runs are; the shelf's subtitle inside its title |
 
 ## Appendix A — the six cards
 

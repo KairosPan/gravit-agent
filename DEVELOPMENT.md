@@ -2877,14 +2877,14 @@ Retry, `Channel not found`. Every channel-written string is text.
 listing saying `Couldn't read <Shelf>` with Retry beside the others, `Loading…`, or the shelf's
 empty words; a search draws one grid (`N results`); `#/discover/<shelf>` the shelf as a grid with
 `‹ Discover`. **The Research shelf** (module cards spec §5.1) is a grid, never a scrolling row, of
-the six Lunhui modules (`Lunhui · 6 modules` beside its title), always six whatever the listing
+the six Lunhui modules (`Lunhui · 6 modules` in its title), always six whatever the listing
 holds: each card links its glyph, name, 副题 and `MODULE` tag to `#/module/<name>`, then its role
 and channel words (`CN market analyst · cn-market`), then a foot with the chip and `Run` — drawn
 disabled until plan 3, its `runModule` action only putting `Run comes with plan 3` on Discover's
 line. The chip reads the newest run among the module's channels (`chipOf`): its headline words
 (`ok`, or grey for the quiet ones — `no candidate`, `WAIT`, `0 items`), `not evaluable · <missing
 sources>` (`warn`), `not run` when that run lacks the module, `no run yet` with no run; a strategy
-or either module's chip leads with the run's channel. When the listing says the Lunhui rows are
+or either module's chip leads with the run's channel, `not run` too (`lunhui-s02-rotation · not run`). When the listing says the Lunhui rows are
 not `mounted`, the line `Lunhui rows not mounted` shows and the cards stay, dimmed, their chips
 grey. **A module's page** (`render/modules.js`, `#/module/<name>`, spec §5.3) wears the plugin
 page's chrome (`main.disc.plugin-page`, `‹ Discover` back to the view it came from, Discover lit
@@ -2896,10 +2896,11 @@ run · one artifact per run`); **Runs**, a table across the module's channels ne
 Session, Channel, Run, Status (a chip: `OK` green, `NOT_EVALUABLE` amber), Headline — at most 24
 rows, or `No run yet`; **Latest artifact**, the latest run's artifact as compact JSON in a
 collapsed details once its channel's overview answers with that run, `Loading…` while it reads,
-`open the channel page to read older runs` when the overview's latest is another run, `Couldn't
-read` when the post failed; and, for Sentiment, Leader, Mode and Counterevidence, the legend of
+`open the channel page to read older runs` when the overview's latest is another run or the read
+answered for a run the listing has since moved past, `Couldn't read` when the post failed; and, for Sentiment, Leader, Mode and Counterevidence, the legend of
 Appendix A under its title — a label beside its reading, paragraph ids only. Before the modules
-listing is read, Runs and Latest artifact say `Loading…` (`Couldn't read` when it failed); an
+listing is read, Runs and Latest artifact say `Loading…` (`Couldn't read` when it failed) and the
+head's chip `…` (`—`); an
 unknown name reads `Loading…` while the listing is read, then `Not found`. `#/plugin/module:<name>`
 is not redirected: it draws the plugin page's minimal body for a Research item (its role and
 channel line), and nothing links there.

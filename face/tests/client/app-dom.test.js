@@ -1244,7 +1244,7 @@ test('Discover draws the Research shelf: six module cards with their chips, Run 
   await settle();
   const html = f.html();
   assert.equal(html.match(/class="pcard research in-grid"/g)?.length, 6);
-  assert.match(html, /Lunhui · 6 modules/);
+  assert.match(html, /<div class="shelf-title">Research <span class="dim">Lunhui · 6 modules<\/span><\/div>/, "the subtitle sits in the title, not beside See all");
   for (const chip of ['WEAK · STABLE', 'IGNITION · POSITIVE · NONE', 'not evaluable · boards', 'lunhui-s01-repair · no candidate', 'lunhui-s01-repair · WAIT', 'lunhui-s01-repair · 5 items']) assert.ok(html.includes(`>${chip}</span>`), chip);
   assert.match(html, /href="#\/module\/theme"/);
   const runs = html.match(/<button[^>]*data-action="runModule"[^>]*>/g) ?? [];
