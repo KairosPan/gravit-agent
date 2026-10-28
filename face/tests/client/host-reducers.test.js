@@ -190,3 +190,32 @@ test("a module page's latest artifact: loading, then ready with its run and json
   const fromModule = R.nav(R.nav(shelf, { screen: 'module', id: 'theme' }), { screen: 'plugin', id: 'bot:b' });
   assert.deepEqual(fromModule.lastDiscover, { screen: 'discover', id: 'research' }, 'a page opened from a module page keeps the view');
 });
+
+test("a module card's run sheet: open closes the other drawers, set replaces it whole, said, close; the runs sent per module", () => {
+  const sheet = { module: 'theme', where: 'cn-market', on: 'new', run: 'r1', cites: null, stocks: '', note: '', said: null };
+  let s = emptyState(NOW);
+  assert.equal(s.runSheet, null);
+  assert.deepEqual(s.moduleRuns, {});
+  assert.equal(R.runSheetSaid(s, { line: 'x' }), s, 'no sheet, nothing said');
+  s = R.runSheetOpen(R.openStatement(R.openSettings(s)), sheet);
+  assert.deepEqual(s.runSheet, sheet);
+  assert.equal(s.settingsOpen, false);
+  assert.equal(s.account.statementOpen, false);
+  s = R.runSheetSaid(s, { line: 'choose a run' });
+  assert.equal(s.runSheet.said, 'choose a run');
+  const next = { ...sheet, on: 'latest', note: 'n' };
+  s = R.runSheetSet(s, next);
+  assert.deepEqual(s.runSheet, next, 'replaced whole, said with it');
+  assert.equal(R.runSheetSet(R.runSheetClose(s), next).runSheet, null, 'a closed sheet is not set again');
+  s = R.runSheetClose(s);
+  assert.equal(s.runSheet, null);
+  s = R.moduleRunStarted(s, { module: 'theme', sessionId: 's1', title: 'Theme · 10-28', startedAt: NOW });
+  s = R.moduleRunStarted(s, { module: 'leader', sessionId: 's2', title: 'Leader · 10-28', startedAt: NOW + 1 });
+  assert.deepEqual(s.moduleRuns, { theme: { sessionId: 's1', title: 'Theme · 10-28', startedAt: NOW }, leader: { sessionId: 's2', title: 'Leader · 10-28', startedAt: NOW + 1 } });
+  s = R.moduleRunCleared(s, { module: 'theme' });
+  assert.deepEqual(Object.keys(s.moduleRuns), ['leader']);
+  assert.equal(R.moduleRunCleared(s, { module: 'theme' }), s, 'clearing what is not there changes nothing');
+  const runs = { mode: { sessionId: 's3', title: 'Mode · 10-28', startedAt: NOW } };
+  assert.deepEqual(R.moduleRunsLoaded(s, { runs }).moduleRuns, runs);
+  assert.deepEqual(R.moduleRunsLoaded(s, { runs: null }).moduleRuns, {});
+});

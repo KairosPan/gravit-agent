@@ -9,5 +9,6 @@ import { reducers as channels } from './channels.js';
 import { reducers as traces } from './traces.js';
 import { reducers as owner } from './owner.js';
 import { reducers as trade } from './trade.js';
+import { reducers as runSheet } from './run-sheet.js';
 
-export const reducers = { ...messages, ...discover, ...account, ...controls, ...markets, ...host, ...channels, ...traces, ...owner, ...trade };
+export const reducers = { ...messages, ...discover, ...account, ...controls, ...markets, ...host, ...channels, ...traces, ...owner, ...trade, ...runSheet };

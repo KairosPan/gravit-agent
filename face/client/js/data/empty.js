@@ -68,6 +68,9 @@ export function emptyState() {
     // Trade (host/trade.js): the kind it is on, the query, the kinds' picks reads by kind and the trade search's, the ticket
     // open (its market, side, venue, outcome), the last thing said
     trade: { kind: TRADE_KINDS[0].id, q: '', picks: {}, results: { status: 'idle', data: null, at: null }, ticket: null, said: null },
+    // a module card's Run sheet open (host/run-sheet.js), and the Runs this page sent by module: { sessionId, title, startedAt }
+    runSheet: null,
+    moduleRuns: {},
     edit: null,
     confirm: null,
   };

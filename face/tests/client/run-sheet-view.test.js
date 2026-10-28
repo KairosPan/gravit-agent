@@ -272,3 +272,11 @@ test('messageOf: Appendix B, slot by slot', () => {
   assert.equal(messageOf(l, { ...newSheet(l, 'theme'), on: 'new', note: ' boards 再失败就报 ' }), '请只跑 Lunhui 的 theme 模块：频道 cn-market，开新运行——先按 lunhui:run 第 1 步冻结整套（index、limit-up、boards），再只写 theme。\n备注：boards 再失败就报');
   assert.equal(messageOf(l, { ...newSheet(l, 'mode'), on: null }), null, 'no On, no message');
 });
+
+test('newSheet: a channel named takes the picks for that channel; a market card stays on cn-market', () => {
+  assert.deepEqual(newSheet(l, 'leader', 'lunhui-s02-rotation'), { module: 'leader', where: 'lunhui-s02-rotation', on: 'new', run: null, cites: MARKET_RUN, stocks: '', note: '', said: null });
+  assert.equal(newSheet(l, 'counterevidence', 'cn-market').where, 'cn-market');
+  assert.equal(newSheet(l, 'counterevidence', 'cn-market').run, MARKET_RUN);
+  assert.equal(newSheet(l, 'theme', 'lunhui-s01-repair').where, 'cn-market', 'Where is fixed on a market card');
+  assert.deepEqual(newSheet(l, 'mode', undefined), newSheet(l, 'mode'));
+});

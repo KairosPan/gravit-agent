@@ -29,14 +29,14 @@ function card(item, grid = false) {
 }
 
 // a Research card (module cards spec §5.1): the link to the module's page around its mark, name and 副题, its role and
-// channel, and the foot with the chip read from the latest run and Run, disabled until plan 3
+// channel, and the foot with the chip read from the latest run and Run, off while the rows are not mounted
 function researchCard(item) {
   const name = item.source.name;
   return `<div${attrs({ class: cls('pcard', 'research', 'in-grid', item.dim && 'dim') })}><a${attrs({ class: 'pcard-link', href: `#/module/${encodeURIComponent(name)}` })}>${markOf(item.mark, 44)}` +
     `<span class="pcard-body"><span class="pcard-name">${esc(item.name)}</span><span class="pcard-blurb">${esc(item.line)}</span></span>` +
     `<span class="pcard-kind">${esc(item.kind.toUpperCase())}</span></a><span class="pcard-meta">${esc(item.meta)}</span>` +
     `<span class="pcard-foot"><span${attrs({ class: cls('chip', item.chip.tone) })}>${esc(item.chip.text)}</span>` +
-    `<button type="button" class="btn-sm" data-action="runModule"${attrs({ 'data-module': name })} disabled title="Run comes with plan 3">Run</button></span></div>`;
+    `<button${attrs({ type: 'button', class: 'btn-sm', 'data-action': 'runModule', 'data-module': name, disabled: item.dim === true })}>Run</button></span></div>`;
 }
 const gridCard = i => (i.shelf === 'research' ? researchCard(i) : card(i, true));
 

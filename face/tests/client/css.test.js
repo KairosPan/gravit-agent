@@ -15,6 +15,8 @@ import { askedOf } from '../../client/js/host/sheet.js';
 import { renderChannelScreen } from '../../client/js/render/channel.js';
 import { renderDiscover, renderPlugin } from '../../client/js/render/discover.js';
 import { renderModule } from '../../client/js/render/modules.js';
+import { renderRunSheet } from '../../client/js/render/run-sheet.js';
+import { newSheet } from '../../client/js/host/run-sheet-view.js';
 import { listings, modulesListing } from './helpers/inventory.js';
 import { setMarkdown } from '../../client/js/render/thread.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
@@ -194,6 +196,18 @@ function moduleStates(all) {
     ready, R.moduleArtifactLoading(at('theme'), { module: 'theme' }), R.moduleArtifactFailed(at('counterevidence'), { module: 'counterevidence' }),
     R.shelfLoaded(at('mode'), { shelf: 'modules', data: { ok: true, mounted: true, channels: [] }, at: 2 }),
     R.nav(emptyState(), { screen: 'module', id: 'leader' }), at('nope'),
+    ...runSheetStates(all),
+  ];
+}
+
+// a module card's Run sheet: a market card with its source line, a Leader with a bad code and what was said, a strategy's
+// review with its cite read-only, a Mode that cannot run
+function runSheetStates(all) {
+  const listing = modulesListing();
+  const open = (module, over = {}) => R.runSheetOpen(R.nav(all, { screen: 'discover', id: null }), { ...newSheet(listing, module), ...over });
+  return [
+    open('theme'), open('leader', { stocks: 'sz300750', said: "Couldn't send — the conversation may exist untitled in the channel" }),
+    open('counterevidence'), open('mode'),
   ];
 }
 
@@ -218,7 +232,7 @@ const screenOf = (st, now) => (st.route.screen === 'markets' ? renderMarketsScre
 test('every class the screens emit has a rule in app.css, and app.css names no colour by hex', () => {
   assert.doesNotMatch(css, /#[0-9a-fA-F]{3,6}\b/, 'colours come from tokens.css');
   setMarkdown(null);
-  const html = everyState().map(st => renderRail(st, NOW) + screenOf(st, NOW) + (st.settingsOpen ? renderSettings(st) : '') + renderSheet(st, NOW)).join('');
+  const html = everyState().map(st => renderRail(st, NOW) + screenOf(st, NOW) + (st.settingsOpen ? renderSettings(st) : '') + renderSheet(st, NOW) + renderRunSheet(st, NOW)).join('');
   for (const c of ['mkts', 'mk-tab', 'mk-star', 'mk-name', 'mk-tag', 'mk-q', 'mk-clear', 'mk-note', 'mk-empty', 'mk-st', 'page-back', 'mk-chart', 'mk-axis', 'mk-facts', 'mk-big', 'mk-basis', 'mk-asof', 'mk-d-acts', 'mk-line', 'mk-on', 'mk-outs', 'mk-out', 'acct', 'networth', 'acct-figures', 'acct-second', 'acct-t', 'acct-shown', 'order-row', 'acct-note', 'activity-row', 'venue', 'account-line', 'pair-box', 'sheet', 'sheet-quote', 'sheet-left', 'sheet-check', 'stale', 'trade', 'tp-head', 'tk-seg', 'tk-pick', 'tk-row', 'tk-open', 'tk-said', 'tk-panel', 'tk-picked', 'tk-out', 'mk-yes', 'mk-no', 'tk-at', 'tk-side', 'tk-quote', 'tk-left', 'tk-msg', 'tk-go', 'tk-hand', 'research', 'pcard-meta', 'pcard-foot', 'pcard-link', 'mod-tags', 'mod-boxes', 'mod-runs-wrap', 'mod-runs', 'mod-legend']) assert.match(html, new RegExp(`class="[^"]*\\b${c}\\b`), `a screen emits ${c}`);
   const classes = new Set(html.match(/class="([^"]+)"/g).flatMap(x => x.slice(7, -1).split(/\s+/)));
   const missing = [...classes].filter(c => c && !new RegExp(`\\.${c.replace(/[-]/g, '\\-')}(?![\\w-])`).test(css));
@@ -239,11 +253,19 @@ test("the Research shelf's cards: a column, the meta and the foot, the chip tone
   assert.match(css, /\.pcard\.dim\s*\{\s*opacity: \.55/);
 });
 
+test("a module card's Run sheet: the drawer, the On options open and greyed", () => {
+  const html = discoverStates().map(st => renderRunSheet(st, NOW)).join('');
+  for (const c of ['drawer sheet run-sheet', 'opt on', 'opt off', 'field-error']) assert.ok(html.includes(`class="${c}"`), c);
+  assert.match(css, /\.run-sheet [^{]*\{[^}]*border-top/);
+  assert.match(css, /\.opt\s*\{[^}]*display: grid/);
+  assert.match(css, /\.opt\.off\s*\{[^}]*color: var\(--dim\)/);
+});
+
 test('every class app.css styles is emitted by some screen: no rule outlives the screen it styled', () => {
   setMarkdown(null);
   const sample = '# H1\n\n## H\n\n### H3\n\n#### H4\n\n**b** `c` [l](https://x.test)\n\n- a\n\n> q\n\n---\n\n```\nx\n```\n\n| s | c |\n|---|---|\n| A | +1% |\n| B | -1% |';
   const page = readFileSync(new URL('../../client/index.html', import.meta.url), 'utf8');
-  const html = page + everyState().map(st => renderRail(st, NOW) + screenOf(st, NOW) + (st.settingsOpen ? renderSettings(st) : '') + renderSheet(st, NOW)).join('') +
+  const html = page + everyState().map(st => renderRail(st, NOW) + screenOf(st, NOW) + (st.settingsOpen ? renderSettings(st) : '') + renderSheet(st, NOW) + renderRunSheet(st, NOW)).join('') +
     withMiniDocument(() => renderMarkdown(sample).node.outerHTML);
   const emitted = new Set(html.match(/class="([^"]+)"/g).flatMap(x => x.slice(7, -1).split(/\s+/)));
   const styled = new Set([...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/\.([a-zA-Z][\w-]*)/g)].map(m => m[1]));

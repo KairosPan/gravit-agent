@@ -1249,7 +1249,7 @@ test('Discover draws the Research shelf: six module cards with their chips, Run 
   assert.match(html, /href="#\/module\/theme"/);
   const runs = html.match(/<button[^>]*data-action="runModule"[^>]*>/g) ?? [];
   assert.equal(runs.length, 6);
-  assert.ok(runs.every(b => /\bdisabled\b/.test(b)), 'Run is disabled until plan 3');
+  assert.ok(runs.every(b => !/\bdisabled\b/.test(b) && !/\btitle=/.test(b)), 'Run is on while the rows are mounted');
   assert.doesNotMatch(html, /Lunhui rows not mounted/);
   h.inventory['/data/modules.json'] = { ...modulesListing(), mounted: false };
   f.click({ tagName: 'BUTTON', dataset: { action: 'shelfRetry', shelf: 'modules' } });
@@ -1257,6 +1257,8 @@ test('Discover draws the Research shelf: six module cards with their chips, Run 
   assert.match(f.html(), /Lunhui rows not mounted/);
   assert.equal(f.html().match(/class="pcard research in-grid dim"/g)?.length, 6);
   assert.ok(f.html().includes('>WEAK · STABLE</span>'), 'a dim card still shows its last headline');
+  const dimRuns = f.html().match(/<button[^>]*data-action="runModule"[^>]*>/g) ?? [];
+  assert.ok(dimRuns.length === 6 && dimRuns.every(b => /\bdisabled\b/.test(b)), 'rows not mounted: Run is off');
   store.timers.clear();
 });
 
@@ -1285,16 +1287,19 @@ test('the module page: head, the three boxes, the runs table, the legend, the la
   assert.ok(html.includes('P0161'));
   const run = html.match(/<button[^>]*data-action="runModule"[^>]*>/g) ?? [];
   assert.equal(run.length, 1);
-  assert.match(run[0], /\bdisabled\b/);
+  assert.doesNotMatch(run[0], /\bdisabled\b/);
   assert.match(run[0], /data-module="sentiment"/);
   assert.deepEqual(h.posted.filter(p => p[0] === '/data/channels/overview'), [['/data/channels/overview', { workspaceId: 'ws-cn-market' }]]);
   assert.match(html, /<details class="acct-shown"><summary>20261028T020953Z-f3b89ce6 · cn-market<\/summary><pre class="disc-text">\{&quot;module&quot;:&quot;sentiment&quot;,&quot;state&quot;:&quot;IGNITION&quot;\}<\/pre><\/details>/);
   assert.match(html, /class="nav-item current" aria-current="page" href="#\/discover"/);
   store.dispatch('toggleRail');
   assert.equal(h.posted.filter(p => p[0] === '/data/channels/overview').length, 1, 'a render reads nothing');
-  // Run says it comes later, and posts nothing
+  // Run opens the module's sheet over its page, and posts nothing
   f.click({ tagName: 'BUTTON', dataset: { action: 'runModule', module: 'sentiment' } });
-  assert.match(f.html(), /Run comes with plan 3/);
+  await settle();
+  assert.match(f.html(), /role="dialog" aria-label="Run Sentiment"/);
+  assert.equal(h.posted.filter(p => p[0] === '/data/channels/overview').length, 1, 'opening the sheet reads no overview');
+  f.fire('doc', 'keydown', { key: 'Escape' });
   // an unknown name: Not found, with the way back
   f.win.location.hash = '#/module/foo';
   await settle();
@@ -1930,5 +1935,57 @@ test("Cancel in Under way is the Account's liveCancel, signed, and its answer sa
   st.event('fill', { side: 'buy', qty: 0.04, symbol: 'ETH/USDT', price: 3120.5, venueName: 'Stand-in Exchange' }, 'r.9');
   assert.equal(store.get().trade.said, 'Bought 0.04 ETH @ 3,120.50 · Stand-in Exchange');
   assert.match(f.html(), /<p class="tk-said" role="status">Bought 0\.04 ETH @ 3,120\.50 · Stand-in Exchange<\/p>/);
+  store.timers.clear();
+});
+
+test('Run on a card opens the sheet; Escape closes it; Run sends the message, the page moves to the new conversation', async () => {
+  const f = fakeWindow({ hash: '' });
+  const close = f.withSelector('.drawer .close-key', { tagName: 'BUTTON', presentIf: /run-sheet/ });
+  const h = host({ rows: [row('s1')] });
+  const store = started(f, h);
+  await h.ready();
+  f.win.location.hash = '#/discover';
+  await settle();
+  const runKey = { tagName: 'BUTTON', dataset: { action: 'runModule', module: 'theme' } };
+  f.click(runKey);
+  await settle();
+  let html = f.html();
+  assert.match(html, /<div class="drawer sheet run-sheet" role="dialog" aria-label="Run Theme"><div class="drawer-head"><h2>Run Theme<\/h2>/);
+  assert.match(html, /<select class="input" name="where" data-action="runSheetField" disabled><option value="cn-market" selected>cn-market<\/option><\/select>/);
+  assert.match(html, /<label class="opt off"><input type="radio" name="on" value="latest" disabled data-action="runSheetField">[\s\S]*?theme already there/);
+  assert.match(html, /<label class="opt on"><input type="radio" name="on" value="new" checked data-action="runSheetField"><span>New run<\/span>/);
+  assert.ok(html.includes('boards missing in the last run'), "Theme's source line");
+  assert.ok(html.includes('>Runs via</span>'));
+  assert.ok(html.includes('Gravit in cn-market → CN market analyst, theme alone'));
+  assert.match(html, /<button type="button" class="btn-primary" data-action="runSheetRun">Run<\/button>/);
+  assert.equal(f.doc.activeElement, close, 'the sheet takes focus on its close key');
+  // a note typed reaches the sheet; Escape closes it and the sheet opens fresh again
+  f.fire('root', 'input', { target: { tagName: 'TEXTAREA', id: 'run-note', name: 'note', value: 'x', dataset: { action: 'runSheetField' } } });
+  await settle();
+  assert.equal(store.get().runSheet.note, 'x');
+  f.fire('root', 'change', { target: { tagName: 'INPUT', type: 'radio', name: 'on', value: 'latest', dataset: { action: 'runSheetField' } } });
+  await settle();
+  assert.equal(store.get().runSheet.on, 'latest', 'a pick reaches the sheet on change');
+  assert.match(f.html(), /data-action="runSheetRun" disabled title="theme already there">Run</);
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  assert.equal(store.get().runSheet, null);
+  assert.doesNotMatch(f.html(), /role="dialog"/);
+  f.click(runKey);
+  await settle();
+  assert.equal(store.get().runSheet.note, '');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'runSheetRun' } });
+  await settle();
+  const d = new Date();
+  const title = `Theme · ${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  assert.deepEqual(h.calls.filter(c => c[0] !== 'session/list' && c[0] !== 'session/projections' && c[0] !== 'session/page').map(c => c[0]), ['session/create', 'session/rename', 'session/prompt']);
+  assert.deepEqual(h.calls.find(c => c[0] === 'session/create')[1], { request: { workspaceId: 'ws-cn-market' } });
+  assert.equal(h.calls.find(c => c[0] === 'session/rename')[1].request.title, title);
+  assert.equal(h.calls.find(c => c[0] === 'session/prompt')[1].request.content[0].text,
+    '请只跑 Lunhui 的 theme 模块：频道 cn-market，开新运行——先按 lunhui:run 第 1 步冻结整套（index、limit-up、boards），再只写 theme。');
+  assert.deepEqual(store.get().route, { screen: 'messages', id: 's-new' });
+  assert.equal(store.get().runSheet, null);
+  assert.equal(store.get().moduleRuns.theme.sessionId, 's-new');
+  assert.equal(store.get().moduleRuns.theme.title, title);
+  assert.doesNotMatch(f.html(), /role="dialog"/);
   store.timers.clear();
 });

@@ -410,6 +410,13 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .sheet-left { margin: 0; color: var(--dim); font-size: 13px; font-variant-numeric: tabular-nums; }
 .sheet-hint { margin: 0; color: var(--dim); font-size: 13px; overflow-wrap: anywhere; }
 .sheet-check { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+/* a module card's Run sheet, in the owner sheet's drawer: each On option its radio beside its label, the detail or the
+   reason under it, a greyed one dim */
+.run-sheet .drawer-body > .kv-list { padding-top: 4px; border-top: 1px solid var(--border); }
+.opt { display: grid; grid-template-columns: auto 1fr; column-gap: 8px; row-gap: 2px; align-items: baseline; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-s); font-size: 14px; cursor: pointer; }
+.opt > .sheet-hint { grid-column: 2; }
+.opt.on:has(input:checked) { border-color: var(--text); }
+.opt.off { color: var(--dim); cursor: default; }
 .pair-box { display: flex; align-items: center; gap: 8px; max-width: 360px; }
 .venues { display: flex; flex-direction: column; gap: 10px; }
 .venue { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-s); }

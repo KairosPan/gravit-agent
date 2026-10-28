@@ -25,6 +25,8 @@ import { startDiscover } from './host/discover.js';
 import { renderDiscover, renderPlugin } from './render/discover.js';
 import { startModules } from './host/modules.js';
 import { renderModule } from './render/modules.js';
+import { startRunSheet } from './host/run-sheet.js';
+import { renderRunSheet } from './render/run-sheet.js';
 import { itemById } from './host/discover-view.js';
 import { startTraces } from './host/traces.js';
 import { loadMemberTrace } from './wire/member-traces.js';
@@ -170,8 +172,9 @@ function focusKey(el) {
 }
 // the owner sheet is a drawer of any screen, over the one open (the order sheet is Trade's ticket, not a drawer)
 const sheetUp = s => Boolean(s.sheet) && s.sheet.kind !== 'order';
-const overlayOf = s => (sheetUp(s) ? 'sheet' : s.detailsOpen || s.settingsOpen || s.account.statementOpen || s.account.detailsVenue ? 'drawer' : null);
-const drawerOf = s => (sheetUp(s) ? `sheet:${s.sheet.kind}` : s.detailsOpen ? 'details' : s.settingsOpen ? 'settings' : s.account.statementOpen ? 'statement'
+// a module card's Run sheet is a drawer of any screen too, drawn after the owner sheet
+const overlayOf = s => (sheetUp(s) ? 'sheet' : s.runSheet || s.detailsOpen || s.settingsOpen || s.account.statementOpen || s.account.detailsVenue ? 'drawer' : null);
+const drawerOf = s => (sheetUp(s) ? `sheet:${s.sheet.kind}` : s.runSheet ? `run:${s.runSheet.module}` : s.detailsOpen ? 'details' : s.settingsOpen ? 'settings' : s.account.statementOpen ? 'statement'
   : s.account.detailsVenue ? `venue:${s.account.detailsVenue}` : null);
 const closeKeyOf = overlay => (overlay === 'sheet' ? '.drawer.sheet .close-key' : '.drawer .close-key');
 const editorOf = e => (e ? [e.kind, e.convId, e.id].join('|') : null);
@@ -289,7 +292,14 @@ export function boot(win, host = {}) {
   // Discover: the face's inventory, read on entering it; a page's own reads (the Gravit item, a skill) on opening it
   const discover = startDiscover({ store, getJson, postJson, call, now });
   // a Lunhui module's page: its latest artifact, through the overview of the run's channel the modules listing names
-  const modules = startModules({ store, postJson, readListing: () => discover.read('modules').then(() => store.get().discover.shelves.modules.data) });
+  const readListing = () => discover.read('modules').then(() => store.get().discover.shelves.modules.data);
+  const modules = startModules({ store, postJson, readListing });
+  // a module card's Run sheet: Run is a new conversation in the chosen channel, opened as a new message's is — the list read
+  // again first, so the row is there when the page moves to it, then followed
+  const runSheet = startRunSheet({
+    store, actions, readListing, now,
+    go: async route => { await live.refresh(); go(route); live.promote(route.id); },
+  });
   // a room member's trace, read without activating the member's session
   const traces = startTraces({ store, call, loadMemberTrace, now });
   // the quotes run only while Markets is on screen in a visible tab; Trade's picks only while Trade is
@@ -341,8 +351,8 @@ export function boot(win, host = {}) {
       : s.route.screen === 'trade' ? renderTradeScreen(s, now())
       : s.route.screen === 'channel' ? renderChannelScreen(s, now()) : s.route.screen === 'discover' ? renderDiscover(s)
       : s.route.screen === 'plugin' ? renderPlugin(s) : s.route.screen === 'module' ? renderModule(s) : renderMessagesScreen(s, now());
-    // the drawers of any screen, inside its <main>: Settings, and the owner sheet over whatever is open
-    const drawers = (s.settingsOpen ? renderSettings(s) : '') + (sheetUp(s) ? renderSheet(s, now()) : '');
+    // the drawers of any screen, inside its <main>: Settings, the owner sheet over whatever is open, a module card's Run sheet
+    const drawers = (s.settingsOpen ? renderSettings(s) : '') + (sheetUp(s) ? renderSheet(s, now()) : '') + (s.runSheet ? renderRunSheet(s, now()) : '');
     root.innerHTML = renderRail(s, now()) + (drawers ? screen.replace(/<\/main>$/, drawers + '</main>') : screen);
     // the quotes poll asks for the rows the table drew, by id; a market's page, which draws none, for its own market (spec §6.1:
     // the page follows it on the stream and polls quotes for what the stream does not carry)
@@ -716,8 +726,11 @@ export function boot(win, host = {}) {
     connectAgent: el => { void discover.connect(el.dataset.bin); },
     disconnectAgent: el => { void discover.disconnect(el.dataset.bin); },
     rescanAgents: () => { void discover.rescan(); },
-    // a module's Run: its sheet comes with plan 3; the key is drawn disabled until then
-    runModule: () => store.dispatch('discoverStatus', { line: 'Run comes with plan 3' }),
+    // a module's Run: its sheet, its fields (a box's words as typed, a pick as changed), Cancel, and Run itself
+    runModule: el => { void runSheet.open(el.dataset.module); },
+    runSheetField: el => { void runSheet.field(el.name, el.value); },
+    runSheetCancel: () => runSheet.close(),
+    runSheetRun: () => { void runSheet.run(); },
     // a bot: Talk to opens its conversation, Edit opens its editor (the model routes read for it)
     talkTo: el => { void talkToNow(el.dataset.id); },
     editBot: el => { store.dispatch('startEdit', { kind: 'bot', id: el.dataset.id }); void discover.modelChoices(); },
@@ -900,6 +913,7 @@ export function boot(win, host = {}) {
     else if (el.dataset?.action === 'tradeQuery') tradeSoon(el.value);   // trade.query moves the query (the box keeps the words)
     else if (el.dataset?.action === 'dq') store.dispatch('setDiscoverQuery', el.value);
     else if (isField(el) && typesWords(el)) changeField(el.name, el.value);
+    else if (el.dataset?.action === 'runSheetField' && typesWords(el)) act.runSheetField(el);
   }
   root.addEventListener('input', ev => { if (!ev.isComposing && !composing) typed(ev.target); });
   root.addEventListener('change', ev => {
@@ -909,6 +923,7 @@ export function boot(win, host = {}) {
     }
     if (el.type === 'checkbox' && el.name === 'roster') store.dispatch('toggleRosterTick', { value: el.value, on: el.checked === true });
     if (isField(el) && !typesWords(el)) changeField(el.name, fieldValueOf(el));
+    if (el.dataset?.action === 'runSheetField' && !typesWords(el)) act.runSheetField(el);
   });
   let pressSeq = 0;   // a press's own timeout ends only that press, never a later one
   root.addEventListener('pointerdown', ev => {
@@ -934,8 +949,9 @@ export function boot(win, host = {}) {
       const s = store.get();
       if (s.edit) { store.dispatch('cancelEdit'); return; }
       if (s.confirm) { store.dispatch('cancelConfirm'); return; }
-      // the sheet over any drawer first; Trade's ticket after every drawer
-      if (sheetUp(s)) sheet.close();
+      // a module card's Run sheet first, then the owner sheet over any drawer; Trade's ticket after every drawer
+      if (s.runSheet) runSheet.close();
+      else if (sheetUp(s)) sheet.close();
       else if (s.detailsOpen) store.dispatch('toggleDetails');
       else if (s.settingsOpen) store.dispatch('closeSettings');
       else if (s.account.statementOpen) store.dispatch('closeStatement');

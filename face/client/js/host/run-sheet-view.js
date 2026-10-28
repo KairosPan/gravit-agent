@@ -157,13 +157,15 @@ export function stocksOf(text) {
   return { codes, error: null };
 }
 
-/** The slice's first value for a card, or null for an unknown module. */
-export function newSheet(listing, module) {
+/** The slice's first value for a card, or null for an unknown module; `channel`, when named, is Where (a market card's
+ *  stays cn-market) and the other picks are that channel's. */
+export function newSheet(listing, module, channel) {
   const m = moduleOf(module);
   if (!m) return null;
   const firstStrategy = channelsOf(listing).find(c => c.kind === 'strategy')?.channel ?? null;
   const latest = latestOf(listing, module)?.channel ?? null;
-  const where = m.channels === 'market' ? MARKET : m.channels === 'strategy' ? latest ?? firstStrategy : latest ?? MARKET;
+  const where = m.channels === 'market' ? MARKET : typeof channel === 'string' ? channel
+    : m.channels === 'strategy' ? latest ?? firstStrategy : latest ?? MARKET;
   const run = latestIn(listing, where)?.run ?? null;
   const options = onOptions(listing, m, { where, on: null, run });
   const on = options.find(o => o.id === 'latest' && o.enabled) ? 'latest' : options.find(o => o.id === 'new') ? 'new' : null;

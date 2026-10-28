@@ -1,5 +1,5 @@
 // face/client/js/render/modules.js — a Lunhui module's page, #/module/<name> (module cards spec §5.3), in the plugin
-// page's chrome: the head with the chip and Run (disabled until plan 3), the Reads / Writes / Runs on boxes from the
+// page's chrome: the head with the chip and Run (off while the rows are not mounted), the Reads / Writes / Runs on boxes from the
 // static table, the runs across the module's channels from the listing, the latest artifact through its channel's
 // overview (host/modules.js), and the module's legend from Appendix A. Every listed string is the host's, through esc;
 // the legends cite the manuscript by paragraph id only.
@@ -20,13 +20,13 @@ const box = (label, rows) => sec(label, kv(rows.map(([k, v]) => [k, esc(v)])));
 const compact = json => { try { return JSON.stringify(json); } catch { return ''; } };
 
 // the head's chip: the page's, or `…` while the listing is first read and `—` when it could not be
-function head(m, page, unread) {
+function head(m, page, unread, mounted) {
   const c = !unread ? page.chip : { text: unread === UNREAD ? '—' : '…', tone: 'grey' };
   const model = m.route.slice(m.route.lastIndexOf('/') + 1);
   return `<header class="plug-head">${mark({ type: 'glyph', icon: m.icon }, 72, '10px', '')}<div class="plug-title"><h1 class="plug-name">${esc(m.title)}</h1>` +
     `<div class="dim">${esc(`${m.role} · ${model} · ${m.channelWords}`)}</div>` +
     `<div class="mod-tags"><span class="pcard-kind">MODULE</span>${chip(c.text, c.tone)}</div></div>` +
-    `<div class="plug-key"><button type="button" class="btn-sm" data-action="runModule"${attrs({ 'data-module': m.name })} disabled title="Run comes with plan 3">Run</button></div></header>`;
+    `<div class="plug-key"><button${attrs({ type: 'button', class: 'btn-sm', 'data-action': 'runModule', 'data-module': m.name, disabled: !mounted })}>Run</button></div></header>`;
 }
 
 // the runs across the module's channels, newest first, as the listing holds them; while the listing is first read, or
@@ -62,7 +62,8 @@ export function renderModule(state) {
   const name = state.route.id ?? '';
   const back = `<a id="page-back" class="back-link page-back" href="${esc(toHash(state.lastDiscover ?? { screen: 'discover', id: null }))}">‹ Discover</a>`;
   const listing = state.discover.shelves?.modules;
-  const page = pageOf(listing?.data ?? null, name, listing?.data?.mounted !== false);
+  const mounted = listing?.data?.mounted !== false;
+  const page = pageOf(listing?.data ?? null, name, mounted);
   if (!page) {
     const status = listing?.status ?? 'idle';
     return `<main class="main disc plugin-page">${back}<div class="disc-none dim">${status === 'idle' || status === 'loading' ? 'Loading…' : 'Not found'}</div></main>`;
@@ -72,5 +73,5 @@ export function renderModule(state) {
   const unread = listing?.data ? null : listing?.status === 'failed' ? UNREAD : 'Loading…';
   const body = `<div class="mod-boxes">${box('Reads', page.kv.reads)}${box('Writes', page.kv.writes)}${box('Runs on', page.kv.runsOn)}</div>` +
     runs(page.rows, unread) + latest(page, state.discover.artifacts?.[m.name], unread) + legend(m.legend);
-  return `<main class="main disc plugin-page">${back}${head(m, page, unread)}<div class="plug-body">${body}</div>${renderStatus(state.discover.status)}</main>`;
+  return `<main class="main disc plugin-page">${back}${head(m, page, unread, mounted)}<div class="plug-body">${body}</div>${renderStatus(state.discover.status)}</main>`;
 }
