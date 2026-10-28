@@ -3109,8 +3109,8 @@ own on 2026-10-27 (§7.1, §7.3).
 
 ### 7.3 The face suite
 
-1654 tests in 138 files (1631 pass, 23 skipped without `FACE_SMOKE=1`; 1654/1654 under
-`FACE_SMOKE=1`, 2026-10-27), run by `node --test` through `tsx`. The Account's own suite is
+1665 tests in 139 files (1642 pass, 23 skipped without `FACE_SMOKE=1`, 2026-10-28; 1654/1654
+under `FACE_SMOKE=1` at 138 files, 2026-10-27), run by `node --test` through `tsx`. The Account's own suite is
 `account/`'s (vitest; §7.1 has its counts): the origin's tests at 133b9a7 less the six that reach
 what the copy left out (§3.9), plus the fence's (`test/unit/server-guard.test.ts`: the default
 refusing `account:4820`, `PORTFOLIO_HOSTS` admitting it, `evil:4820` and a foreign `Origin` still
@@ -3499,7 +3499,8 @@ refused, `parseHosts`). The face's:
   past 32 levels unread), `lunhui-modules-listing` (`/data/modules.json` and `readModulesChannels`:
   the root and a missing directory skipped, `cn-market` the market kind, each run's frozen sources,
   times and each artifact's status, missing sources, headline and market run with no evidence and
-  no `bytes`, an `ENOENT` read no runs and any other throw `unreadable`, the 12-run cap, the fence,
+  no `bytes`, an `ENOENT` read no runs and any other throw `unreadable` - a file or a link where `analysis/` was
+  among them, `ENOTDIR` -, the 12-run cap, the fence,
   `mounted` from the dep, a reconcile failure a fixed 500, `MARKET_CHANNEL` equal to the freeze
   rows'), `panels` (`lunhuiMounted`: only an enabled, ACTIVE `include:lunhui-runs`), `client/runs-view` and `client/channel` (the view and the section, drawn only for a
   channel with runs; the mode chip its mode word alone and the previous card's review line after

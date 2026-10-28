@@ -391,14 +391,17 @@ async function runBytes(runDir: string): Promise<number | null> {
  * run directory are checked to be still where the listing found them ({@link stillAt}); a run
  * that fails the check, or whose directory can no longer be listed, is skipped - not listed, not
  * counted. The evidence files are never opened. Throws when the strategy directory or
- * `analysis/` is absent or cannot be read.
+ * `analysis/` is absent (`ENOENT`) or cannot be read, and `ENOTDIR` when `analysis/` is a file or
+ * a link rather than a real directory.
  */
 export async function readAnalysisRuns(strategyDir: string, options: { cap?: number } = {}): Promise<AnalysisRuns> {
   const cap = options.cap ?? ANALYSIS_RUNS_CAP;
   const out: AnalysisRuns = { runs: [], runsOmitted: 0, latestRun: null };
   const analysisDir = join(strategyDir, "analysis");
   const realAnalysis = join(await realpath(strategyDir), "analysis");
-  if (!(await lstat(analysisDir)).isDirectory()) return out;
+  /* a file or a link where analysis/ should be is not "no runs yet" but a channel that cannot be
+   * read: ENOTDIR, which readChannelBody swallows and readModulesChannels lists unreadable */
+  if (!(await lstat(analysisDir)).isDirectory()) throw Object.assign(new Error("analysis/ is not a directory"), { code: "ENOTDIR" });
   /* run directories only - a link, a file or a stray name is not a run - newest first by id,
    * which opens with the run's UTC second, so name order is time order */
   const runs = (await readdir(analysisDir, { withFileTypes: true }))

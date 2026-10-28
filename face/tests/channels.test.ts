@@ -457,10 +457,17 @@ test("readChannelBody: a linked analysis/, a linked run file and a hard-linked o
   const foreign = await makeRun(outside, new Date("2026-10-23T01:00:00Z"), { artifacts: { "mode.json": { ...MODE, mode: "OUTSIDE-ONLY" } } });
   const linkedAnalysis = await strategyDir("face-runs-linkdir-");
   await symlink(join(outside, "analysis"), join(linkedAnalysis, "analysis"));
+  await assert.rejects(readAnalysisRuns(linkedAnalysis), (err: NodeJS.ErrnoException) => err.code === "ENOTDIR");
   const none = await readChannelBody(linkedAnalysis);
   assert.deepEqual(none.runs, []);
   assert.equal(none.runsOmitted, 0);
   assert.equal(none.latestRun, null);
+  // a file where analysis/ was: the same empty defaults as a channel with no analysis/ at all
+  const filed = await strategyDir("face-runs-filedir-");
+  await writeFile(join(filed, "analysis"), "not a directory");
+  const bare = await strategyDir("face-runs-bare-");
+  const [filedBody, bareBody] = [await readChannelBody(filed), await readChannelBody(bare)];
+  assert.deepEqual([filedBody.runs, filedBody.runsOmitted, filedBody.latestRun], [bareBody.runs, bareBody.runsOmitted, bareBody.latestRun]);
 
   const dir = await strategyDir("face-runs-links-");
   // a run directory that is a link: not a run

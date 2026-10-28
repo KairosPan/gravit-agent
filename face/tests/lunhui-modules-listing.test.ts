@@ -2,7 +2,7 @@
  * Discover module cards read (Lunhui module cards spec 2026-10-28, plan 1 Task 2). */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -172,13 +172,19 @@ test("readModulesChannels: a channel whose read throws ENOENT has no runs yet; o
   assert.equal(plain[0].unreadable, true);
 });
 
-test("readModulesChannels: a file where analysis/ should be lists no runs, since readAnalysisRuns answers it empty rather than throwing", async () => {
-  const root = await makeRoot(["filed"]);
+test("readModulesChannels: a file or a link where analysis/ should be lists the channel unreadable", async () => {
+  const root = await makeRoot(["filed", "linked"]);
   await writeFile(join(root, "strategies", "filed", "analysis"), "not a directory");
-  const [row] = await readModulesChannels([channelRow(root, "filed")]);
-  /* Task 1's readAnalysisRuns lstats analysis/ and answers a non-directory with no runs, not a
-   * throw, so the listing cannot tell it from an empty analysis/; this pins that */
-  assert.deepEqual([row.runs, row.runsOmitted, "unreadable" in row], [[], 0, false]);
+  const outside = await realpath(await mkdtemp(join(tmpdir(), "face-modules-outside-")));
+  await makeRun(outside, new Date("2026-10-27T01:00:00Z"), { artifacts: { "environment.json": { ...ENVIRONMENT, cycle_anchor: "OUTSIDE-ONLY" } } });
+  await symlink(join(outside, "analysis"), join(root, "strategies", "linked", "analysis"));
+  const out = await readModulesChannels([channelRow(root, "filed"), channelRow(root, "linked")]);
+  assert.deepEqual(out.map((c) => [c.channel, c.runs, c.runsOmitted, c.unreadable]), [
+    ["filed", [], 0, true], ["linked", [], 0, true],
+  ]);
+  assert.doesNotMatch(JSON.stringify(out), /OUTSIDE-ONLY/);
+  const { readAnalysisRuns } = await import("../src/channels.ts");
+  await assert.rejects(readAnalysisRuns(join(root, "strategies", "filed")), (err: NodeJS.ErrnoException) => err.code === "ENOTDIR");
 });
 
 test("readModulesChannels: the cap is MODULES_RUNS_CAP", async () => {
