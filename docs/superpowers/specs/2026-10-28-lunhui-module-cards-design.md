@@ -588,11 +588,18 @@ the map and the loops page name Run). No server, contract, row, artifact, role o
 | §5.4 drawers | one at a time | `closeOverlays` closes the run sheet too; Escape closes it before the owner sheet |
 | G12 Leader | Latest run's cite | both Leader templates cite a market run, so Latest run needs a cite as New run does |
 | §5.5 the title | an open run's date | `titleOf` falls back to `opened_at`'s date while the run has no session |
-| §5.7 missing | a session the list lacks | counted missing only after the first `hostList`, so a reload keeps a live record; cleared with one re-read and no 5 s backstop, the brief's reading of §5.7 |
+| §5.7 missing | a session the list lacks | counted missing only after the first `hostList`, so a reload keeps a live record; cleared with one re-read and no 5 s backstop, plan 3's reading of §5.7 |
 | §5.7 the hour | a record 60 min old | cleared with no re-read |
 | G10 mirror | a stored value with a bad entry | read all or nothing: `{}` unless every entry is a known module's well-formed record |
 | §5.4 the drawer | its markup | `div.drawer.sheet.run-sheet` with `role="dialog"`; On as `label.opt.on` / `label.opt.off` radios, the detail or reason under each, the checked one's border by `:has(input:checked)`; `said` and the Stocks error in `.field-error`; Stocks and Note keep typed words by id (`run-stocks`, `run-note`) |
 | §5.7 timings | the tracker's intervals | unchanged: Running for a minute after the send whatever the list says, the 5 s backstop, the 60 min cap |
+| §5.4 G14 recovery | a stale Latest run on Mode and Counterevidence, which have no New run | the stale option stays clickable (`stale: true`, `enabled` as the artifact rules say), drawn `label.opt.off` with its reason but neither disabled nor checked; picking it again re-stamps `run` (final-review fix wave) |
+| §5.4 G14 reasons | a stale run whose newest run also fails an artifact rule | the stale reason takes precedence: the option and the blocker read `run no longer the latest` |
+| G11 Stocks | Leader on Latest run | Stocks hidden and out of the blocker chain, since that template has no codes slot; the typed text stays in the slice for New run |
+| G16 open runs | an open run with nothing frozen yet | Theme's source line counts sealed runs alone |
+| §5.4 the listing | a listing that could not be read at all | the sheet says `the modules listing could not be read` and Run is blocked by that line |
+| §5.4 drawers | the owner sheet under the run sheet | `runSheetOpen` closes it too (`sheet: null`) |
+| §5.5 the title | a stamped run under a moved listing | `titleOf` dates from the stamped run while it is listed, else the channel's newest |
 
 Owed: the card drill (`face/README.md` "The card drill", `DEVELOPMENT.md` §7.4 **Module
 cards**), the operator's keyed run.

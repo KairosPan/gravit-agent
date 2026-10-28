@@ -1850,7 +1850,7 @@ sentence drawn as its words, the Account's and a channel's stale stamps, a tool 
 | `js/reducers/markets.js`, `account.js` | the host's markets (§5.5): the Account's explore reads by tab (`exploreLoading`/`exploreLoaded`/`exploreFailed`) and the search's (`resultsLoading`/`resultsLoaded`/`resultsFailed`), each failure keeping its rows with the Account's sentence (`message`); the quotes by `venue\|symbol` — `accountQuotesLoaded` (an answer stamped before the price kept leaves the pair), `streamQuote` (a `quote` frame: the last trade, else the middle of the bid and ask, marked `streamed`, the 24-hour figures kept), `streamSnapshot` (a `snapshot` drops the pairs the stream priced); a page's candles by key under their range (`candlesLoading`/`candlesLoaded`/`candlesFailed`, `setRange`) and compare rows by base (`compareLoading`/`compareLoaded`/`compareFailed`); the stars (`accountWatchLoaded`, `askedOfAccount`, `forgetAsked`); the face's wire for the A shares (`watchlistLoaded`, `quotesUpdated`, `searchUpdated`, `hitQuotesLoaded`); and the screen's `setMarketsTab`, `setMarketsSort`, `setMarketsQuery` (a query typed from nothing opens All results, cleared there it goes back to All). The host's account: the page (`accountLoading`/`accountLoaded`/`accountFailed`, the failure keeping the last page with the Account's sentence), `holdings*`, `paper*` and `statement*` (each failure keeping the sentence), `history*`, `agents*`, the connect and paper sheets' reads — `venuesHere*`, `paperBooks*`, `keyfile*` (its `keyfileLoading` records what it asked), `reach*`, each failure keeping the sentence —, `setHistoryRange` (`1d`, `1w`, `1m`, `all`); the Account seat's (`seatLoading`/`seatLoaded`/`seatFailed`, a failure keeping the last view); the drawers' `openStatement`/`closeStatement`, `openVenueDetails`/`closeVenueDetails` (a venue's Details, one drawer at a time through `closeOverlays`) and `openSettings`/`closeSettings` |
 | `js/reducers/owner.js`, `trade.js` | stage 2 of the graft (§5.5): the owner device (`ownerStanding` — a role it does not know changes nothing —, `ownerRefusal`, `ownerBusy`) and the open sheet (`sheetOpen`, `sheetField`, `sheetIncomplete`, `sheetAsking` — a quiet ask keeps a ready sheet's preparation —, `sheetPrepared`, `sheetRefused`, `sheetSigning`, `sheetDone`, `sheetTick`, `sheetClose`); Trade (`tradeKind`, `tradeQuery`, `picksLoading`/`picksLoaded`/`picksFailed` by kind, `tradeResultsLoading`/`tradeResultsLoaded`/`tradeResultsFailed` — named apart from the Markets search's —, `ticketOpen`, `ticketClose`, `tradeSaid`) |
 | `js/reducers/channels.js`, `discover.js`, `traces.js` | the channel page's read (`channelLoading`, `channelLoaded`, `channelFailed` — a failure keeps that channel's data, a 404 reads `missing`); Discover's (`setDiscoverQuery`, `shelfLoading`/`shelfLoaded`/`shelfFailed` — a failed shelf keeps its data —, `gravitLoaded`, `skillLoading`/`skillLoaded`/`skillFailed`, `modelsLoaded`, `discoverStatus`; a module page's latest artifact, `moduleArtifactLoading`/`moduleArtifactLoaded`/`moduleArtifactFailed` — a re-read keeps what it had); a member's trace by the answer it explains, under its conversation (`traceLoading`, `traceLoaded`, `traceFailed`) |
-| `js/reducers/run-sheet.js` | a module card's Run sheet (module cards spec §5.4, §5.7): `runSheetOpen` (the sheet over `closeOverlays`, which closes an open sheet in turn), `runSheetSet` (the slice replaced whole, nothing while none is open), `runSheetSaid`, `runSheetClose`; the Runs this page sent by module — `moduleRunStarted` (`{sessionId, title, startedAt}`), `moduleRunCleared`, `moduleRunsLoaded` (anything but a plain object reads `{}`) |
+| `js/reducers/run-sheet.js` | a module card's Run sheet (module cards spec §5.4, §5.7): `runSheetOpen` (the sheet over `closeOverlays` with the owner sheet closed too; `closeOverlays` in turn closes an open run sheet), `runSheetSet` (the slice replaced whole, nothing while none is open), `runSheetSaid`, `runSheetClose`; the Runs this page sent by module — `moduleRunStarted` (`{sessionId, title, startedAt}`), `moduleRunCleared`, `moduleRunsLoaded` (anything but a plain object reads `{}`) |
 | `js/data/empty.js` | `emptyState()`: the state the page boots into — no conversations, `status.line = "connecting…"`, every slice at its empty shape (§5.5), the `seat` slice among them (`{status, data, at}`), `runSheet: null` and `moduleRuns: {}`, and no demo slice: no `plugins`, `memory`, `mail`, `banner`, `call` or `compose` |
 | `js/host/kinds.js` | the kind table (spec §6, §5.3): a mapper view → zero, one or two messages; `SEAT_TOOLS` (the seat's twelve writes), `isSeatWriteTool`, `parseArgs`, `seatLine` (a seat write in words), `seatLift` (a seat write's answer as a receipt, a refusal or nothing), `rememberCall`, `toMessages`, `reasonArgs` |
 | `js/host/sessions.js` | `session/list` rows → conversation records: `kindOf`, `conversationOf`, `listConversations`, `unreadOf`; `childRowsOf` (the subagent rows the list leaves out, kept for their parent's Children) and `firstOpen` (the conversation every default opens, never an archived one) |
@@ -2557,15 +2557,20 @@ page is right without storage. `app.js` starts it right after the render subscri
 **A module card's Run sheet** (`js/host/run-sheet.js`, module cards spec §4 G6, §5.4–§5.5).
 `startRunSheet({store, actions, readListing, go, now})` returns `{open, field, close, run}`.
 `open(module)` reads the listing (a failed read is `null`) and dispatches `runSheetOpen` with
-`newSheet(listing, module)`; an unknown module puts `Not a module` on Discover's line.
+`newSheet(listing, module)`; an unknown module puts `Not a module` on Discover's line; a listing
+that could not be read at all opens the sheet saying `the modules listing could not be read`, Run
+blocked by the same line.
 `field(name, value)` re-reads the listing for `where` and `on` alone: `where` takes
 `newSheet(listing, module, value)`'s picks for the new channel, Stocks and Note kept; `on` sets the
 pick and re-stamps `run` with the channel's newest run as the listing holds it now; `cites`,
 `stocks` and `note` set that field alone against the listing last read; another name changes
 nothing; every change clears what was said. `run()` re-reads the listing and recomputes
-`sheetOf`: while it cannot run, the blocker is said and nothing is sent — `run no longer the
-latest` among them, when the channel's newest run is no longer the one On was stamped with, until
-On is picked again; else it sends `actions.newConversation({title: titleOf(…), workspaceId, text:
+`sheetOf`: while it cannot run, the blocker is said and nothing is sent — `the modules listing
+could not be read` first; `run no longer the latest` when the channel's newest run is no longer
+the one On was stamped with (ahead of any artifact reason), the Latest run option still pickable
+while the newest run's artifacts allow it, so picking it again re-stamps `run` and clears the
+fence; a channel the listing gives no `workspaceId` refuses with `choose where to run`; else it
+sends `actions.newConversation({title: titleOf(…), workspaceId, text:
 messageOf(…)})`, the channel's `workspaceId` from the listing — `session/create`, `session/rename`
 and the prompt, the face starting no role and calling no Lunhui tool (spec F2). A `null` answer
 keeps the sheet with `Couldn't send — the conversation may exist untitled in the channel`;
@@ -2955,14 +2960,16 @@ its close key and back to the opener on close), drawn from `sheetOf` over the mo
 **Where**, a select — fixed on `cn-market` for a market card, the strategies for Leader and Mode,
 both for Counterevidence; **On**, a radio per option (`label.opt.on` open, its detail under it;
 `label.opt.off` greyed, its reason under it — `theme already there`, `needs Leader, then
-Counterevidence, on this run`, `mode already registered on this run`, `run no longer the latest`):
+Counterevidence, on this run`, `mode already registered on this run`, `run no longer the latest`;
+the stale one neither disabled nor checked, so a click on it picks it again):
 `Latest run · <run> · session <date>` with what it froze, and `New run` for the three market cards
 and Leader; **Cites**, a select of the two newest sealed `cn-market` runs for Leader (their frozen
 sources and theme words, the line `theme not evaluable: the pick comes from the limit-up pool
 alone` under a NOT_EVALUABLE theme, a warning when the cite lacks sentiment or theme), read-only
-for Mode and a strategy's review (the run's leader's market run); **Stocks** for Leader
-(`#run-stocks`, its hint, `not a main-board code: <code>` or `at most 4 codes`); Theme's source line
-(`boards missing in <n> of the last <m> runs`, from each listed `cn-market` run's `frozen`); **Note to
+for Mode and a strategy's review (the run's leader's market run); **Stocks** for Leader's New
+run alone (`#run-stocks`, its hint, `not a main-board code: <code>` or `at most 4 codes`; hidden on
+Latest run, whose message has no codes, the typed text kept for New run); Theme's source line
+(`boards missing in <n> of the last <m> runs`, from each listed sealed `cn-market` run's `frozen`); **Note to
 Gravit** (`#run-note`); **Runs via** and **Writes** (the file and the conversation's title); what
 was said, red; **Cancel** and **Run**, off with the blocker as its title while it cannot run.
 The two boxes keep what was typed across a render by their ids; the selects and radios draw the

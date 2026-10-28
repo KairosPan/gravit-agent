@@ -744,7 +744,8 @@ from its Discover card (the spec's §5.4–§5.7, Appendix B):
    (WAIT in all likelihood); Run then greys `mode already registered on this run`.
 7. The fences: Mode on a run without a review → the sheet greys with `needs Leader, then
    Counterevidence, on this run`; a second Theme Run on today's run → `theme already there`;
-   Stocks `sz300750` → the error line, Run disabled.
+   Stocks `sz300750` → the error line, Run disabled; a Mode sheet left open while Leader opens a
+   new run reads `run no longer the latest`; re-pick Latest run.
 8. The runs card on each channel page agrees with the cards; the journal gained a dated line for
    any `NOT_EVALUABLE`.
 
@@ -1727,7 +1728,8 @@ but still worded. A card opens `#/module/<name>`.
 words from `run-sheet-view.js`): **Where** (fixed on `cn-market` for a market card, a strategy for
 Leader and Mode, either for Counterevidence), **On** — `Latest run` or `New run` (the three market
 cards and Leader), a pick the run cannot take greyed with its reason (`theme already there`,
-`needs Leader, then Counterevidence, on this run`, `run no longer the latest`) —, **Cites** for
+`needs Leader, then Counterevidence, on this run`, `mode already registered on this run`, `run no
+longer the latest` — the last picked again to take the newest run) —, **Cites** for
 Leader (the two newest sealed `cn-market` runs; read-only for Mode and a strategy's review),
 **Stocks** for Leader (1–4 main-board codes, empty for Gravit's pick), Theme's boards line, a
 **Note to Gravit**, and what it writes. **Run** sends Gravit one message in that channel as a new

@@ -5,6 +5,7 @@
 import { newSheet, sheetOf, titleOf, messageOf } from './run-sheet-view.js';
 
 const FAILED = "Couldn't send — the conversation may exist untitled in the channel";
+const UNREAD = 'the modules listing could not be read';
 const OWN_FIELDS = ['cites', 'stocks', 'note'];
 
 const channelOf = (listing, name) => (Array.isArray(listing?.channels) ? listing.channels.find(c => c?.channel === name) ?? null : null);
@@ -28,6 +29,7 @@ export function startRunSheet({ store, actions, readListing, go, now = Date.now 
     const sheet = newSheet(listing, module);
     if (!sheet) { store.dispatch('discoverStatus', { line: 'Not a module', bad: true }); return; }
     store.dispatch('runSheetOpen', sheet);
+    if (listing === null || typeof listing !== 'object') store.dispatch('runSheetSaid', { line: UNREAD }); // the view blocks Run too
   }
 
   // Where gives the new channel's picks, Stocks and Note kept; On stamps the channel's newest run — both on the listing

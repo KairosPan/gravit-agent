@@ -199,3 +199,24 @@ test('run: a page move that fails after the record is written escapes nothing; t
   await r.runSheet.run();
   assert.equal(r.sent.length, 2);
 });
+
+test('the listing could not be read: the sheet opens saying so, and Run sends nothing', async () => {
+  for (const module of ['theme', 'leader']) {
+    const r = rig({ listing: null });
+    await r.runSheet.open(module);
+    assert.equal(r.sheet().module, module);
+    assert.equal(r.sheet().said, 'the modules listing could not be read', module);
+    await r.runSheet.run();
+    assert.deepEqual(r.sent, []);
+    assert.equal(r.sheet().said, 'the modules listing could not be read', module);
+  }
+  // a listing whose channel has no workspaceId: choose where to run
+  const listing = modulesListing();
+  delete channelOf(listing, 'cn-market').workspaceId;
+  const w = rig({ listing });
+  await w.runSheet.open('theme');
+  assert.equal(w.sheet().said, null);
+  await w.runSheet.run();
+  assert.deepEqual(w.sent, []);
+  assert.equal(w.sheet().said, 'choose where to run');
+});

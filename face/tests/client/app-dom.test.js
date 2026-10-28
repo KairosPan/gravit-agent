@@ -1990,6 +1990,44 @@ test('Run on a card opens the sheet; Escape closes it; Run sends the message, th
   store.timers.clear();
 });
 
+test('a Latest run that is no longer the latest is drawn greyed but pickable; picking it again re-stamps the run and Run opens', async () => {
+  const f = fakeWindow({ hash: '' });
+  const h = host({ rows: [row('s1')] });
+  const listing = modulesListing();
+  delete listing.channels[0].runs[0].artifacts.sentiment;
+  h.inventory['/data/modules.json'] = listing;
+  const store = started(f, h);
+  await h.ready();
+  f.win.location.hash = '#/discover';
+  await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'runModule', module: 'sentiment' } });
+  await settle();
+  assert.equal(store.get().runSheet.on, 'latest');
+  const first = store.get().runSheet.run;
+  // the listing moves: a newer cn-market run lands while the sheet is open
+  const NEWER = '20261029T020000Z-aaaaaaaa';
+  const moved = modulesListing();
+  delete moved.channels[0].runs[0].artifacts.sentiment;
+  moved.channels[0].runs.unshift({ run: NEWER, session: '2026-10-29', asOf: null, openedAt: null, sealedAt: '2026-10-29T02:00:00.000Z', frozen: ['index', 'limit-up', 'boards'], artifacts: {} });
+  h.inventory['/data/modules.json'] = moved;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'runSheetRun' } });
+  await settle();
+  assert.equal(store.get().runSheet.said, 'run no longer the latest');
+  assert.equal(store.get().runSheet.run, first);
+  assert.ok(!h.calls.some(c => c[0] === 'session/create'), 'nothing sent');
+  let html = f.html();
+  assert.match(html, /<label class="opt off"><input type="radio" name="on" value="latest" data-action="runSheetField"><span>Latest run · 20261029T020000Z-aaaaaaaa · session 2026-10-29<\/span><p class="sheet-hint">run no longer the latest<\/p>/,
+    'greyed with its reason, neither disabled nor checked, so a click on it is a change');
+  assert.match(html, /data-action="runSheetRun" disabled title="run no longer the latest">Run</);
+  f.fire('root', 'change', { target: { tagName: 'INPUT', type: 'radio', name: 'on', value: 'latest', dataset: { action: 'runSheetField' } } });
+  await settle();
+  assert.equal(store.get().runSheet.run, NEWER, 're-stamped with the newest run');
+  html = f.html();
+  assert.match(html, /<label class="opt on"><input type="radio" name="on" value="latest" checked data-action="runSheetField">/);
+  assert.match(html, /<button type="button" class="btn-primary" data-action="runSheetRun">Run<\/button>/);
+  store.timers.clear();
+});
+
 test('after Run the card reads Running and links to the conversation; when the session stops the listing is re-read and the chip settles', async () => {
   const storage = memoryStorage();
   const f = fakeWindow({ hash: '', storage });

@@ -84,12 +84,41 @@ test('sheetOf: Latest run no longer the latest — greyed and blocked until On i
   assert.equal(s.run, MARKET_RUN);
   channelOf(x, 'cn-market').runs.unshift(marketRun('20261029T020000Z-aaaaaaaa'));
   const v = sheetOf(x, s, fixed);
-  assert.deepEqual(v.on.options.map(o => [o.id, o.enabled, o.reason]), [['latest', false, 'run no longer the latest'], ['new', true, null]]);
+  assert.deepEqual(v.on.options.map(o => [o.id, o.enabled, o.stale, o.reason]), [['latest', true, true, 'run no longer the latest'], ['new', true, false, null]],
+    'the stale option stays open to pick again: enabled as the artifact rules say, its reason the stale one');
   assert.equal(v.canRun, false);
   assert.equal(v.blocker, 'run no longer the latest');
   const restamped = { ...s, run: '20261029T020000Z-aaaaaaaa' };
   assert.equal(sheetOf(x, restamped, fixed).canRun, true);
+  assert.equal(sheetOf(x, restamped, fixed).on.options[0].stale, false);
   assert.equal(sheetOf(x, { ...s, on: 'new' }, fixed).on.options[0].enabled, true, 'only a chosen Latest run goes stale');
+  assert.equal(sheetOf(x, { ...s, on: 'new' }, fixed).on.options[0].stale, false);
+});
+
+test('sheetOf: a stale Latest run on Mode, which has no New run, stays pickable; its reason takes precedence over the artifact rules', () => {
+  const x = modulesListing();
+  delete runOf(x, 'lunhui-s01-repair').artifacts.mode;
+  const s = newSheet(x, 'mode');
+  assert.equal(s.on, 'latest');
+  const newer = { ...structuredClone(runOf(x, 'lunhui-s01-repair')), run: '20261029T021514Z-bbbbbbbb' };
+  channelOf(x, 'lunhui-s01-repair').runs.unshift(newer);
+  const v = sheetOf(x, s, fixed);
+  assert.deepEqual(v.on.options.map(o => [o.id, o.enabled, o.stale, o.reason]), [['latest', true, true, 'run no longer the latest']]);
+  assert.equal(v.blocker, 'run no longer the latest');
+  assert.equal(sheetOf(x, { ...s, run: newer.run }, fixed).canRun, true, 'picked again, it runs');
+  // the newest run already holds mode: still stale first, and not open to pick
+  newer.artifacts.mode = ok({ mode: 'WAIT' }, MARKET_RUN);
+  const w = sheetOf(x, s, fixed);
+  assert.deepEqual(w.on.options.map(o => [o.id, o.enabled, o.stale, o.reason]), [['latest', false, true, 'run no longer the latest']]);
+  assert.equal(w.blocker, 'run no longer the latest');
+});
+
+test('sheetOf: the listing could not be read — Run blocked with that line, on a market card and a strategy card', () => {
+  for (const module of ['theme', 'leader', 'counterevidence']) {
+    const v = sheetOf(null, newSheet(null, module), fixed);
+    assert.equal(v.canRun, false, module);
+    assert.equal(v.blocker, 'the modules listing could not be read', module);
+  }
 });
 
 test('sheetOf: Leader — Where the strategies, Cites the two newest sealed market runs with the theme line, Stocks optional', () => {
@@ -143,6 +172,19 @@ test('sheetOf: Leader Stocks — a bad code blocks the run with its error', () =
   assert.equal(v.stocks.error, 'not a main-board code: sz300750');
   assert.equal(v.canRun, false);
   assert.equal(v.blocker, 'not a main-board code: sz300750');
+});
+
+test('sheetOf: Leader on Latest run hides Stocks and does not block on it; the typed text stays in the slice for New run', () => {
+  const x = modulesListing();
+  delete runOf(x, 'lunhui-s01-repair').artifacts.leader;
+  const s = { ...newSheet(x, 'leader'), on: 'latest', stocks: 'sz300750' };
+  const v = sheetOf(x, s, fixed);
+  assert.equal(v.stocks, null, 'T_LEADER_LATEST has no codes slot');
+  assert.equal(v.canRun, true);
+  assert.equal(v.blocker, null);
+  const n = sheetOf(x, { ...s, on: 'new' }, fixed);
+  assert.equal(n.stocks.value, 'sz300750', 'back on New run the typed codes are there');
+  assert.equal(n.blocker, 'not a main-board code: sz300750');
 });
 
 test('sheetOf: a channel with no runs — Leader New run alone; Mode and Counterevidence grey with no run yet', () => {
@@ -241,6 +283,13 @@ test('sheetOf: the Theme source line — all the last runs, some of them, none',
   const z = modulesListing();
   runOf(z, 'cn-market').frozen = ['index', 'limit-up', 'boards'];
   assert.equal(sheetOf(z, newSheet(z, 'theme'), fixed).source, null);
+  // an open run with nothing frozen yet is not counted: only sealed runs
+  const o = modulesListing();
+  channelOf(o, 'cn-market').runs.unshift(marketRun('20261029T020000Z-oooooooo', { sealedAt: null, frozen: [] }));
+  assert.equal(sheetOf(o, newSheet(o, 'theme'), fixed).source, 'boards missing in the last run');
+  runOf(o, 'cn-market').sealedAt = null;
+  channelOf(o, 'cn-market').runs[1].frozen = ['index', 'limit-up', 'boards'];
+  assert.equal(sheetOf(o, newSheet(o, 'theme'), fixed).source, null);
 });
 
 test('stocksOf: normalises, folds duplicates, names the first offender, caps at four', () => {
@@ -258,6 +307,12 @@ test('titleOf: the run\'s session for a latest run, the browser\'s date for a ne
   const y = modulesListing();
   Object.assign(runOf(y, 'cn-market'), { session: null, sealedAt: null, openedAt: '2026-10-30T01:00:00.000Z' });
   assert.equal(titleOf(y, { ...newSheet(y, 'environment'), on: 'latest' }, fixed), 'Environment · 10-30', 'an open run by its opened date');
+  // the stamped run dates the title while it is listed; a run gone from the listing falls back to the newest
+  const z = modulesListing();
+  const s = { ...newSheet(z, 'sentiment'), on: 'latest' };
+  channelOf(z, 'cn-market').runs.unshift(marketRun('20261030T020000Z-aaaaaaaa'));
+  assert.equal(titleOf(z, s, fixed), 'Sentiment · 10-28', 'the stamped run, not the newest');
+  assert.equal(titleOf(z, { ...s, run: 'gone' }, fixed), 'Sentiment · 10-30');
 });
 
 test('messageOf: Appendix B, slot by slot', () => {

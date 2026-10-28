@@ -21,11 +21,15 @@ function where(v) {
   return `<label class="field">${label('Where')}${select('where', v.where.options, v.where.value, v.where.fixed)}</label>`;
 }
 
-// one radio per option: its label, and its detail while it is open or its reason while it is greyed
+// one radio per option: its label, and its detail while it is open or its reason while it is greyed; a stale option is
+// greyed but neither disabled nor checked, so a click on it is a change that picks it again
 function on(v) {
-  const opts = v.on.options.map(o => `<label${attrs({ class: cls('opt', o.enabled ? 'on' : 'off') })}><input${attrs({
-    type: 'radio', name: 'on', value: o.id, checked: o.id === v.on.value, disabled: !o.enabled, 'data-action': 'runSheetField',
-  })}><span>${esc(o.label)}</span>${hint(o.enabled ? o.detail : o.reason)}</label>`).join('');
+  const opts = v.on.options.map(o => {
+    const open = o.enabled && !o.stale;
+    return `<label${attrs({ class: cls('opt', open ? 'on' : 'off') })}><input${attrs({
+      type: 'radio', name: 'on', value: o.id, checked: open && o.id === v.on.value, disabled: !o.enabled, 'data-action': 'runSheetField',
+    })}><span>${esc(o.label)}</span>${hint(open ? o.detail : o.reason)}</label>`;
+  }).join('');
   return `<div${attrs({ class: 'field', role: 'radiogroup', 'aria-label': 'On' })}>${label('On')}${opts || hint('nothing to run on')}</div>`;
 }
 

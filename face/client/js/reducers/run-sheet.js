@@ -6,8 +6,8 @@ const sheet = (s, patch) => (s.runSheet ? { ...s, runSheet: { ...s.runSheet, ...
 const runs = s => (s.moduleRuns && typeof s.moduleRuns === 'object' ? s.moduleRuns : {});
 
 export const reducers = {
-  // the sheet over whatever is open, the other drawers closed as a new message closes them
-  runSheetOpen: (s, value) => ({ ...closeOverlays(s), runSheet: value }),
+  // the sheet over whatever is open, the other drawers closed as a new message closes them, the owner sheet with them
+  runSheetOpen: (s, value) => ({ ...closeOverlays(s), sheet: null, runSheet: value }),
   runSheetSet: (s, value) => (s.runSheet ? { ...s, runSheet: value } : s),
   runSheetSaid: (s, { line } = {}) => sheet(s, { said: typeof line === 'string' && line !== '' ? line : null }),
   runSheetClose: s => ({ ...s, runSheet: null }),

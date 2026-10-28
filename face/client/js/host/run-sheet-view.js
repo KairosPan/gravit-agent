@@ -21,6 +21,7 @@ const CODE = /^(sh60|sz00)\d{4}$/;
 const CITES_SHOWN = 2;
 const STOCKS_HINT = "optional · 1–4 main-board codes, sh60… or sz00…; empty: Gravit picks from the cited run's mainline members and pool; a code outside them is REFERENCE at the contract";
 const STALE = 'run no longer the latest';
+const UNREAD = 'the modules listing could not be read';
 
 // Appendix B, one constant per line; the slots in braces
 const T_MARKET_LATEST = '请只跑 Lunhui 的 {module} 模块：频道 cn-market，运行 {run}（已有运行，不要再冻结）。';
@@ -47,7 +48,9 @@ function whereOptions(listing, m) {
 
 const latestLabel = run => `Latest run · ${run.run} · session ${dateOf(run) ?? 'unknown'}`;
 const frozenWords = run => `frozen: ${frozenOf(run).join(' · ') || 'nothing yet'}`;
-const option = (id, label, detail, reason) => ({ id, label, detail, enabled: reason === null, reason });
+// a stale option (G15, the controller's stamp) keeps `enabled` as the artifact rules say, so it can be picked again to
+// re-stamp the run; its reason is the stale one, ahead of any artifact reason
+const option = (id, label, detail, reason, stale = false) => ({ id, label, detail, enabled: reason === null, reason: stale ? STALE : reason, stale });
 
 // two titles as one phrase: `Theme`, `Sentiment and Theme`
 const titlesWords = names => names.map(n => moduleOf(n).title).join(' and ');
@@ -87,7 +90,7 @@ function onOptions(listing, m, sheet) {
   const options = [];
   if (run) {
     const stale = sheet.on === 'latest' && sheet.run !== run.run;
-    options.push(option('latest', latestLabel(run), latestDetail(m, channel, run), stale ? STALE : latestReason(m, channel, run)));
+    options.push(option('latest', latestLabel(run), latestDetail(m, channel, run), latestReason(m, channel, run), stale));
   } else if (m.name === 'mode' || m.name === 'counterevidence') {
     options.push(option('latest', 'Latest run', null, 'no run yet'));
   }
@@ -137,10 +140,10 @@ function citesOf(listing, m, sheet) {
   return null;
 }
 
-// Theme's source line (G16): how many of cn-market's listed runs froze no boards
+// Theme's source line (G16): how many of cn-market's listed sealed runs froze no boards — an open run may not have frozen yet
 function sourceOf(listing, m) {
   if (m.name !== 'theme') return null;
-  const runs = runsIn(channelNamed(listing, MARKET));
+  const runs = runsIn(channelNamed(listing, MARKET)).filter(r => typeof r.sealedAt === 'string');
   const missing = runs.filter(r => !frozenOf(r).includes('boards')).length;
   if (runs.length === 0 || missing === 0) return null;
   if (missing < runs.length) return `boards missing in ${missing} of the last ${runs.length} runs`;
@@ -173,11 +176,13 @@ export function newSheet(listing, module, channel) {
   return { module: m.name, where, on, run, cites, stocks: '', note: '', said: null };
 }
 
-/** The conversation's title, `<Title> · MM-DD`: the run's date for a Latest run, the browser's date otherwise. */
+/** The conversation's title, `<Title> · MM-DD`: for a Latest run the stamped run's date while it is listed, else the
+ *  channel's newest; the browser's date otherwise. */
 export function titleOf(listing, sheet, now) {
   const m = moduleOf(sheet?.module);
   if (!m) return '';
-  const date = sheet.on === 'latest' ? dateOf(latestIn(listing, sheet.where)) : null;
+  const stamped = runsIn(channelNamed(listing, sheet.where)).find(r => r.run === sheet.run) ?? null;
+  const date = sheet.on === 'latest' ? dateOf(stamped ?? latestIn(listing, sheet.where)) : null;
   if (date) return `${m.title} · ${date.slice(5, 10)}`;
   const d = new Date(now);
   return `${m.title} · ${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -192,12 +197,14 @@ export function sheetOf(listing, sheet, now = Date.now()) {
   const onOpts = where ? onOptions(listing, m, sheet) : [];
   const chosen = onOpts.find(o => o.id === sheet.on) ?? null;
   const cites = where ? citesOf(listing, m, sheet) : null;
-  const stocks = m.name === 'leader' ? { value: sheet.stocks ?? '', error: stocksOf(sheet.stocks).error, hint: STOCKS_HINT } : null;
+  // Stocks on a Leader's New run alone: a Latest run's message has no codes slot; the slice keeps the text meanwhile
+  const stocks = m.name === 'leader' && sheet.on !== 'latest' ? { value: sheet.stocks ?? '', error: stocksOf(sheet.stocks).error, hint: STOCKS_HINT } : null;
 
   let blocker = null;
-  if (!where) blocker = 'choose where to run';
+  if (!plain(listing)) blocker = UNREAD;
+  else if (!where) blocker = 'choose where to run';
   else if (!chosen) blocker = 'choose a run';
-  else if (!chosen.enabled) blocker = chosen.reason;
+  else if (chosen.stale || !chosen.enabled) blocker = chosen.reason;
   else if (cites && !cites.readOnly && !cites.value) blocker = 'choose a market run to cite';
   else if (cites && cites.readOnly && !cites.value) blocker = "the run's leader names no market run";
   else if (stocks?.error) blocker = stocks.error;
