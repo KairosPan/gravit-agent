@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  MODULES, MODULE_NAMES, moduleOf, latestOf, headlineWords, chipOf, researchItems, runsOf, pageOf,
+  MODULES, MODULE_NAMES, moduleOf, latestOf, headlineWords, chipOf, researchItems, runsOf, pageOf, activeRuns,
 } from '../../client/js/host/modules-view.js';
 import { modulesListing, MARKET_RUN, S01_RUN } from './helpers/inventory.js';
 
@@ -189,4 +189,27 @@ test('runsOf: at most 24 rows, newest first by run id', () => {
   assert.equal(rows.length, 24);
   assert.equal(rows[0].run, '20261030T000000Z-00000000');
   assert.deepEqual(runsOf(null, 'environment'), []);
+});
+
+test('activeRuns: running, or younger than a minute; chipOf and researchItems read it', () => {
+  const now = 1_000_000;
+  const runs = { theme: { sessionId: 's-a', title: 'Theme · 10-28', startedAt: now - 120_000 }, leader: { sessionId: 's-b', title: 'Leader · 10-28', startedAt: now - 10_000 }, mode: { sessionId: 's-c', title: 'Mode · 10-28', startedAt: now - 120_000 } };
+  const convs = [{ id: 's-a', running: true }, { id: 's-c', running: false }];
+  assert.deepEqual(activeRuns(runs, convs, now), { theme: { sessionId: 's-a', title: 'Theme · 10-28' }, leader: { sessionId: 's-b', title: 'Leader · 10-28' } });
+  assert.deepEqual(chipOf(modulesListing(), 'theme', true, { sessionId: 's-a', title: 'Theme · 10-28' }), { text: 'Running · Theme · 10-28', tone: 'live', href: '#/messages/s-a' });
+  const items = researchItems(modulesListing(), true, activeRuns(runs, convs, now));
+  assert.equal(items.find(i => i.id === 'module:theme').running, true);
+  assert.equal(items.find(i => i.id === 'module:mode').running, false);
+  assert.deepEqual(items.find(i => i.id === 'module:leader').chip, { text: 'Running · Leader · 10-28', tone: 'live', href: '#/messages/s-b' });
+  assert.equal(items.find(i => i.id === 'module:environment').chip.tone, 'ok', 'a card with no run keeps the listing\'s chip');
+  // the page reads the same
+  const page = pageOf(modulesListing(), 'theme', true, activeRuns(runs, convs, now));
+  assert.equal(page.running, true);
+  assert.equal(page.chip.text, 'Running · Theme · 10-28');
+  assert.equal(pageOf(modulesListing(), 'mode', true, {}).running, false);
+  // malformed records and a missing argument read as nothing running
+  assert.deepEqual(activeRuns(null, convs, now), {});
+  assert.deepEqual(activeRuns({ theme: null, mode: { sessionId: 7, title: 'x', startedAt: now } }, convs, now), {});
+  assert.deepEqual(activeRuns(runs, null, now), { leader: { sessionId: 's-b', title: 'Leader · 10-28' } });
+  assert.equal(researchItems(modulesListing(), true).every(i => i.running === false), true);
 });

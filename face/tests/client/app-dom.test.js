@@ -1989,3 +1989,61 @@ test('Run on a card opens the sheet; Escape closes it; Run sends the message, th
   assert.doesNotMatch(f.html(), /role="dialog"/);
   store.timers.clear();
 });
+
+test('after Run the card reads Running and links to the conversation; when the session stops the listing is re-read and the chip settles', async () => {
+  const storage = memoryStorage();
+  const f = fakeWindow({ hash: '', storage });
+  const h = host({ rows: [row('s1')] });
+  const clock = { at: Date.now() };
+  const timers = new HeldTimers(ms => ms === 5000);
+  const store = boot(f.win, { openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, timers, now: () => clock.at });
+  await h.ready();
+  f.win.location.hash = '#/discover';
+  await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'runModule', module: 'theme' } });
+  await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'runSheetRun' } });
+  await settle();
+  assert.deepEqual(store.get().route, { screen: 'messages', id: 's-new' });
+  const d = new Date(clock.at);
+  const title = `Theme · ${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  assert.deepEqual(JSON.parse(storage.getItem('gravit-face.module-runs')), { theme: { sessionId: 's-new', title, startedAt: clock.at } }, 'mirrored to storage');
+  // back on Discover: the theme card is live and links to the conversation, its Run off; the other cards as they were
+  f.win.location.hash = '#/discover';
+  await settle();
+  const card = () => f.html().match(/<div class="pcard research in-grid"><a class="pcard-link" href="#\/module\/theme">[\s\S]*?<\/button><\/span><\/div>/)?.[0] ?? '';
+  assert.ok(card().includes(`<a class="chip live" href="#/messages/s-new">Running · ${title} ›</a>`), card());
+  assert.match(card(), /data-action="runModule" data-module="theme" disabled title="Running">Run</);
+  assert.ok(f.html().includes('>IGNITION · POSITIVE · NONE</span>'), 'sentiment keeps its chip');
+  // the module page reads the same
+  f.win.location.hash = '#/module/theme';
+  await settle();
+  assert.ok(f.html().includes(`<a class="chip live" href="#/messages/s-new">Running · ${title} ›</a>`));
+  assert.match(f.html(), /data-action="runModule" data-module="theme" disabled title="Running">Run</);
+  f.win.location.hash = '#/discover';
+  await settle();
+  // the session runs past the minute: still Running, nothing re-read
+  const listed = () => h.reads.filter(p => p === '/data/modules.json').length;
+  const before = listed();
+  h.rows.find(r => r.sessionId === 's-new').running = true;
+  await store.live.refresh();
+  clock.at += 61_000;
+  await store.live.refresh();
+  await settle();
+  assert.equal(store.get().moduleRuns.theme.sessionId, 's-new');
+  assert.equal(listed(), before);
+  // it stops: the record goes, the listing is read again now and once more 5 s later, the chip back to the listing's words
+  h.rows.find(r => r.sessionId === 's-new').running = false;
+  await store.live.refresh();
+  await settle();
+  assert.equal(store.get().moduleRuns.theme, undefined);
+  assert.equal(listed(), before + 1);
+  assert.ok(card().includes('<span class="chip warn">not evaluable · boards</span>'), card());
+  assert.doesNotMatch(card(), /disabled/);
+  assert.deepEqual(JSON.parse(storage.getItem('gravit-face.module-runs')), {});
+  assert.deepEqual(timers.delays(), [5000]);
+  timers.run(5000);
+  await settle();
+  assert.equal(listed(), before + 2);
+  store.timers.clear();
+});

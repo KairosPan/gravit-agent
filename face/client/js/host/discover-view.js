@@ -54,11 +54,12 @@ function skillItems(memory) {
   })));
 }
 
-export function itemsOf(discover) {
+// actives: the modules whose Run is running (modules-view's activeRuns), their cards live
+export function itemsOf(discover, actives = {}) {
   const sh = discover?.shelves ?? {};
   return {
     data: dataItems(sh.plugins?.data),
-    research: researchItems(sh.modules?.data ?? null, sh.modules?.data?.mounted !== false),
+    research: researchItems(sh.modules?.data ?? null, sh.modules?.data?.mounted !== false, actives),
     bots: botItems(sh.bots?.data),
     agents: agentItems(sh.agents?.data),
     skills: skillItems(sh.memory?.data),

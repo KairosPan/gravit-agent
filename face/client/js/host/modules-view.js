@@ -176,8 +176,24 @@ function artifactWords(module, a) {
   return { words: ['not evaluable', ...missing].join(' · '), tone: 'warn' };
 }
 
-// the card's chip (spec §5.1): the latest run's artifact read for the module, grey when the rows are not mounted
-export function chipOf(listing, module, mounted = true) {
+// a Run this page sent (spec §5.7) is running while its conversation says so, or while the record is younger than a
+// minute (the create just happened, the list may not carry the session yet); nothing else is
+export const FRESH_MS = 60_000;
+export function activeRuns(moduleRuns, conversations, now) {
+  const convs = Array.isArray(conversations) ? conversations : [];
+  const out = {};
+  for (const [module, r] of Object.entries(plain(moduleRuns) ? moduleRuns : {})) {
+    if (!plain(r) || typeof r.sessionId !== 'string' || typeof r.title !== 'string' || typeof r.startedAt !== 'number') continue;
+    const running = convs.some(c => c?.id === r.sessionId && c.running === true);
+    if (running || now - r.startedAt < FRESH_MS) out[module] = { sessionId: r.sessionId, title: r.title };
+  }
+  return out;
+}
+
+// the card's chip (spec §5.1): the latest run's artifact read for the module, grey when the rows are not mounted; while
+// a Run of it is running, `Running · <title>` linking to its conversation
+export function chipOf(listing, module, mounted = true, active = null) {
+  if (active) return { text: `Running · ${active.title}`, tone: 'live', href: `#/messages/${encodeURIComponent(active.sessionId)}` };
   const m = moduleOf(module);
   const latest = latestOf(listing, module);
   let chip;
@@ -195,11 +211,12 @@ export function chipOf(listing, module, mounted = true) {
 }
 
 // Discover's Research shelf: the six cards, always, the listing only filling their chips
-export function researchItems(listing, mounted) {
+export function researchItems(listing, mounted, actives = {}) {
+  const on = plain(actives) ? actives : {};
   return MODULES.map(m => ({
     id: `module:${m.name}`, shelf: 'research', kind: 'Module', name: m.title, line: m.subtitle,
     meta: `${m.role} · ${m.channelWords}`, mark: { type: 'glyph', icon: m.icon },
-    chip: chipOf(listing, m.name, mounted), dim: mounted === false, source: m,
+    chip: chipOf(listing, m.name, mounted, on[m.name] ?? null), dim: mounted === false, running: Boolean(on[m.name]), source: m,
   }));
 }
 
@@ -219,11 +236,12 @@ export function runsOf(listing, module) {
 }
 
 // the module page (spec §5.3): the chip, the latest run, the runs, and the Reads, Writes and Runs on boxes
-export function pageOf(listing, module, mounted) {
+export function pageOf(listing, module, mounted, actives = {}) {
   const m = moduleOf(module);
   if (!m) return null;
+  const active = plain(actives) ? actives[module] ?? null : null;
   return {
-    module: m, chip: chipOf(listing, module, mounted), latest: latestOf(listing, module), rows: runsOf(listing, module),
+    module: m, chip: chipOf(listing, module, mounted, active), running: Boolean(active), latest: latestOf(listing, module), rows: runsOf(listing, module),
     kv: {
       reads: [['Freezes', m.freezes], ['Artifacts', m.artifacts], ['Channel', m.channelWords]],
       writes: [['File', m.file], ['Headline', m.headline.join(' · ')], ['Under', `strategies/${DIR_CHANNEL[m.channels]}/analysis/<run>/`]],

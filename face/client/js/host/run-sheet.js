@@ -16,9 +16,11 @@ const newestRunOf = (listing, name) => {
 
 export function startRunSheet({ store, actions, readListing, go, now = Date.now }) {
   let sending = false; // a Run in the air: a second press sends nothing
+  let last = null;      // the listing as open, field or run last read it
 
   async function read() {
-    try { return await readListing(); } catch { return null; } // the shelf's own line says why
+    try { last = await readListing(); } catch { last = null; } // the shelf's own line says why
+    return last;
   }
 
   async function open(module) {
@@ -28,10 +30,10 @@ export function startRunSheet({ store, actions, readListing, go, now = Date.now 
     store.dispatch('runSheetOpen', sheet);
   }
 
-  // Where gives the new channel's picks, Stocks and Note kept; On stamps the channel's newest run; the rest set alone.
-  // What was said goes with any change
+  // Where gives the new channel's picks, Stocks and Note kept; On stamps the channel's newest run — both on the listing
+  // read again; the rest set alone, on the listing last read. What was said goes with any change
   async function field(name, value) {
-    const listing = await read();
+    const listing = name === 'where' || name === 'on' ? await read() : last;
     const cur = store.get().runSheet;
     if (!cur) return;
     let next;
@@ -66,7 +68,8 @@ export function startRunSheet({ store, actions, readListing, go, now = Date.now 
       if (!id) { store.dispatch('runSheetSaid', { line: FAILED }); return; }
       store.dispatch('moduleRunStarted', { module: sheet.module, sessionId: id, title, startedAt: at });
       store.dispatch('runSheetClose');
-      await go({ screen: 'messages', id });
+      // the record and the closed sheet stand whatever the page move does; its own line says what failed
+      try { await go({ screen: 'messages', id }); } catch { /* the conversation is in the list on the next read */ }
     } finally {
       sending = false;
     }

@@ -6,7 +6,7 @@ import { ARCHIVED_KEY } from '../wire/grouping.js';
 
 // one drawer at a time: an opener first closes whatever else was open, with any editor or confirm in it
 export const closeOverlays = s => ({
-  ...s, detailsOpen: false, settingsOpen: false, edit: null, confirm: null,
+  ...s, detailsOpen: false, settingsOpen: false, edit: null, confirm: null, runSheet: null,
   account: { ...s.account, statementOpen: false, detailsVenue: null },
 });
 const upd = (state, id, fn) => ({ ...state, conversations: state.conversations.map(c => (c.id === id ? fn(c) : c)) });

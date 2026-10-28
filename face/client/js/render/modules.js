@@ -1,11 +1,11 @@
 // face/client/js/render/modules.js — a Lunhui module's page, #/module/<name> (module cards spec §5.3), in the plugin
-// page's chrome: the head with the chip and Run (off while the rows are not mounted), the Reads / Writes / Runs on boxes from the
+// page's chrome: the head with the chip and Run (off while the rows are not mounted or a Run of it runs), the Reads / Writes / Runs on boxes from the
 // static table, the runs across the module's channels from the listing, the latest artifact through its channel's
 // overview (host/modules.js), and the module's legend from Appendix A. Every listed string is the host's, through esc;
 // the legends cite the manuscript by paragraph id only.
 import { esc, attrs, cls } from '../html.js';
 import { toHash } from '../router.js';
-import { pageOf } from '../host/modules-view.js';
+import { pageOf, activeRuns } from '../host/modules-view.js';
 import { mark } from './avatars.js';
 import { kv } from './controls.js';
 import { renderStatus } from './messages.js';
@@ -16,17 +16,25 @@ const STATUS_TONE = { OK: 'ok', NOT_EVALUABLE: 'warn' };
 const sec = (label, body) => `<div class="dsec"><div class="dsec-label">${esc(label)}</div>${body}</div>`;
 const dim = text => `<div class="dsec-line dim">${esc(text)}</div>`;
 const chip = (text, tone) => `<span${attrs({ class: cls('chip', tone) })}>${esc(text)}</span>`;
+// a module's chip: a live one is the link to the conversation its Run started
+export const moduleChip = c => (c.href
+  ? `<a${attrs({ class: cls('chip', c.tone), href: c.href })}>${esc(c.text)} ›</a>`
+  : chip(c.text, c.tone));
+// a module's Run: off while the rows are not mounted, and while a Run of it is running
+export const runKey = (name, off, running) =>
+  `<button${attrs({ type: 'button', class: 'btn-sm', 'data-action': 'runModule', 'data-module': name, disabled: off || running, title: running ? 'Running' : null })}>Run</button>`;
 const box = (label, rows) => sec(label, kv(rows.map(([k, v]) => [k, esc(v)])));
 const compact = json => { try { return JSON.stringify(json); } catch { return ''; } };
 
-// the head's chip: the page's, or `…` while the listing is first read and `—` when it could not be
+// the head's chip: the page's, or `…` while the listing is first read and `—` when it could not be; a running Run's
+// either way, since it needs no listing
 function head(m, page, unread, mounted) {
-  const c = !unread ? page.chip : { text: unread === UNREAD ? '—' : '…', tone: 'grey' };
+  const c = !unread || page.running ? page.chip : { text: unread === UNREAD ? '—' : '…', tone: 'grey' };
   const model = m.route.slice(m.route.lastIndexOf('/') + 1);
   return `<header class="plug-head">${mark({ type: 'glyph', icon: m.icon }, 72, '10px', '')}<div class="plug-title"><h1 class="plug-name">${esc(m.title)}</h1>` +
     `<div class="dim">${esc(`${m.role} · ${model} · ${m.channelWords}`)}</div>` +
-    `<div class="mod-tags"><span class="pcard-kind">MODULE</span>${chip(c.text, c.tone)}</div></div>` +
-    `<div class="plug-key"><button${attrs({ type: 'button', class: 'btn-sm', 'data-action': 'runModule', 'data-module': m.name, disabled: !mounted })}>Run</button></div></header>`;
+    `<div class="mod-tags"><span class="pcard-kind">MODULE</span>${moduleChip(c)}</div></div>` +
+    `<div class="plug-key">${runKey(m.name, !mounted, page.running)}</div></header>`;
 }
 
 // the runs across the module's channels, newest first, as the listing holds them; while the listing is first read, or
@@ -58,12 +66,12 @@ function legend(l) {
   return sec(l.title, `<div class="kv-list mod-legend">${rows}</div>`);
 }
 
-export function renderModule(state) {
+export function renderModule(state, now = Date.now()) {
   const name = state.route.id ?? '';
   const back = `<a id="page-back" class="back-link page-back" href="${esc(toHash(state.lastDiscover ?? { screen: 'discover', id: null }))}">‹ Discover</a>`;
   const listing = state.discover.shelves?.modules;
   const mounted = listing?.data?.mounted !== false;
-  const page = pageOf(listing?.data ?? null, name, mounted);
+  const page = pageOf(listing?.data ?? null, name, mounted, activeRuns(state.moduleRuns, state.conversations, now));
   if (!page) {
     const status = listing?.status ?? 'idle';
     return `<main class="main disc plugin-page">${back}<div class="disc-none dim">${status === 'idle' || status === 'loading' ? 'Loading…' : 'Not found'}</div></main>`;

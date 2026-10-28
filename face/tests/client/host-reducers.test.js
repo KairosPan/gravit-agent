@@ -209,6 +209,10 @@ test("a module card's run sheet: open closes the other drawers, set replaces it 
   assert.equal(R.runSheetSet(R.runSheetClose(s), next).runSheet, null, 'a closed sheet is not set again');
   s = R.runSheetClose(s);
   assert.equal(s.runSheet, null);
+  // another drawer opened over the sheet closes it: two drawers never stack
+  for (const over of [R.openSettings, R.openStatement, R.toggleDetails, x => R.startDraft(x)]) {
+    assert.equal(over(R.runSheetOpen(s, sheet)).runSheet, null, over.name || 'startDraft');
+  }
   s = R.moduleRunStarted(s, { module: 'theme', sessionId: 's1', title: 'Theme · 10-28', startedAt: NOW });
   s = R.moduleRunStarted(s, { module: 'leader', sessionId: 's2', title: 'Leader · 10-28', startedAt: NOW + 1 });
   assert.deepEqual(s.moduleRuns, { theme: { sessionId: 's1', title: 'Theme · 10-28', startedAt: NOW }, leader: { sessionId: 's2', title: 'Leader · 10-28', startedAt: NOW + 1 } });

@@ -143,6 +143,9 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .chip.down { background: var(--down-fill); color: var(--down); }
 .chip.ok { background: var(--up-fill); color: var(--up); }
 .chip.warn { background: var(--warn-fill); color: var(--warn-text); }
+/* a module's Run running: the chip is the link to its conversation */
+.chip.live { background: var(--surface-2); color: var(--text); text-decoration: none; }
+.chip.live:hover { background: var(--hover); }
 .bubble.green .chip.up { background: var(--surface); }
 .seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: var(--radius-pill); background: var(--surface-2); align-self: flex-start; }
 .seg-item { display: inline-flex; align-items: center; min-height: 38px; padding: 0 14px; border: 0; border-radius: var(--radius-pill); background: transparent; color: var(--dim); font-size: 13px; font-weight: 600; }

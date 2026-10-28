@@ -21,9 +21,9 @@ function rig({ listing = modulesListing(), answer = 's-run' } = {}) {
   const store = createStore({ initial: emptyState(), reducers });
   const sent = [];
   const went = [];
-  const r = { listing };
+  const r = { listing, reads: 0 };
   const actions = { newConversation: async args => { sent.push(args); return answer; } };
-  const readListing = async () => r.listing;
+  const readListing = async () => { r.reads++; return r.listing; };
   const runSheet = startRunSheet({ store, actions, readListing, go: route => { went.push(route); }, now: () => NOW });
   return Object.assign(r, { store, runSheet, sent, went, sheet: () => store.get().runSheet });
 }
@@ -131,8 +131,10 @@ test('the listing moves under an open sheet: a chosen latest run that is no long
     run: NEWER, session: '2026-10-29', asOf: null, openedAt: null, sealedAt: '2026-10-29T02:00:00.000Z', frozen: ['index', 'limit-up', 'boards'], artifacts: {},
   });
   r.listing = moved;
+  const reads = r.reads;
   await r.runSheet.field('note', 'x');
   assert.equal(r.sheet().note, 'x');
+  assert.equal(r.reads, reads, 'a note reads nothing: the sheet stands on the listing last read');
   assert.equal(r.sheet().run, MARKET_RUN, 'a note keeps the run the sheet was opened on');
   const v = sheetOf(moved, r.sheet(), NOW);
   assert.equal(v.canRun, false);
@@ -161,4 +163,39 @@ test('run: a second press while the first is in the air sends nothing more', asy
   await first;
   assert.equal(r.sent.length, 1);
   assert.equal(r.store.get().moduleRuns.theme.sessionId, 's-run');
+});
+
+test('field: where and on re-read the listing; stocks, note and cites stand on the one last read', async () => {
+  const r = rig();
+  await r.runSheet.open('leader');
+  assert.equal(r.reads, 1, 'open reads');
+  await r.runSheet.field('stocks', 'sh600000');
+  await r.runSheet.field('note', 'x');
+  await r.runSheet.field('cites', null);
+  assert.equal(r.reads, 1, 'the own fields read nothing');
+  assert.equal(r.sheet().stocks, 'sh600000');
+  assert.equal(r.sheet().note, 'x');
+  assert.equal(r.sheet().cites, null);
+  await r.runSheet.field('on', 'latest');
+  assert.equal(r.reads, 2, 'on reads');
+  await r.runSheet.field('where', 'lunhui-s02-rotation');
+  assert.equal(r.reads, 3, 'where reads');
+  await r.runSheet.run();
+  assert.equal(r.reads, 4, 'run reads');
+});
+
+test('run: a page move that fails after the record is written escapes nothing; the record and the closed sheet stand', async () => {
+  const r = rig();
+  r.runSheet = startRunSheet({
+    store: r.store, actions: { newConversation: async args => { r.sent.push(args); return 's-run'; } }, readListing: async () => r.listing, now: () => NOW,
+    go: async () => { throw new Error('list: HTTP 500'); },
+  });
+  await r.runSheet.open('theme');
+  await assert.doesNotReject(r.runSheet.run());
+  assert.equal(r.store.get().moduleRuns.theme.sessionId, 's-run');
+  assert.equal(r.sheet(), null);
+  // and the next Run is not held by the failed one
+  await r.runSheet.open('theme');
+  await r.runSheet.run();
+  assert.equal(r.sent.length, 2);
 });

@@ -186,7 +186,7 @@ export function boot(win, host = {}) {
   const store = makeStore(storage);
   const timers = host.timers ?? new Timers();
   const root = doc.getElementById('app');
-  const now = () => Date.now();
+  const now = host.now ?? (() => Date.now());
   const call = host.call ?? wireCall;
   const getJson = host.getJson ?? getJsonVia(path => win.fetch(path));
   const postJson = host.postJson ?? postJsonVia((path, init) => win.fetch(path, init));
@@ -293,7 +293,8 @@ export function boot(win, host = {}) {
   const discover = startDiscover({ store, getJson, postJson, call, now });
   // a Lunhui module's page: its latest artifact, through the overview of the run's channel the modules listing names
   const readListing = () => discover.read('modules').then(() => store.get().discover.shelves.modules.data);
-  const modules = startModules({ store, postJson, readListing });
+  // and the Runs it sent: the listing read afresh when one ends, on the live layer's timers; mirrored in this browser
+  const modules = startModules({ store, postJson, readListing, refreshListing: () => discover.read('modules', { fresh: true }), timers, storage, now });
   // a module card's Run sheet: Run is a new conversation in the chosen channel, opened as a new message's is — the list read
   // again first, so the row is there when the page moves to it, then followed
   const runSheet = startRunSheet({
@@ -349,8 +350,8 @@ export function boot(win, host = {}) {
 
     const screen = s.route.screen === 'markets' ? renderMarketsScreen(s, now()) : s.route.screen === 'account' ? renderAccountScreen(s, now())
       : s.route.screen === 'trade' ? renderTradeScreen(s, now())
-      : s.route.screen === 'channel' ? renderChannelScreen(s, now()) : s.route.screen === 'discover' ? renderDiscover(s)
-      : s.route.screen === 'plugin' ? renderPlugin(s) : s.route.screen === 'module' ? renderModule(s) : renderMessagesScreen(s, now());
+      : s.route.screen === 'channel' ? renderChannelScreen(s, now()) : s.route.screen === 'discover' ? renderDiscover(s, now())
+      : s.route.screen === 'plugin' ? renderPlugin(s) : s.route.screen === 'module' ? renderModule(s, now()) : renderMessagesScreen(s, now());
     // the drawers of any screen, inside its <main>: Settings, the owner sheet over whatever is open, a module card's Run sheet
     const drawers = (s.settingsOpen ? renderSettings(s) : '') + (sheetUp(s) ? renderSheet(s, now()) : '') + (s.runSheet ? renderRunSheet(s, now()) : '');
     root.innerHTML = renderRail(s, now()) + (drawers ? screen.replace(/<\/main>$/, drawers + '</main>') : screen);
@@ -992,6 +993,8 @@ export function boot(win, host = {}) {
     else if (s.route.screen === 'messages' && s.route.id && s.route.id !== 'new' && !s.conversations.some(c => c.id === s.route.id)) go({ screen: 'messages', id: firstOpen(s.conversations)?.id ?? null });
     else if (s.route.screen === 'messages' && s.route.id === null && firstOpen(s.conversations)) go({ screen: 'messages', id: firstOpen(s.conversations).id });
   });
+  // a module's Run reads Running while its conversation runs, and settles on the listing when it stops
+  modules.trackRuns();
   applyTheme(store.get().theme);
   if (!win.location.hash) win.history.replaceState(null, '', toHash(store.get().route));
   if (!doc.hidden) stream.open();

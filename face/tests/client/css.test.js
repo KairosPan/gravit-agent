@@ -175,6 +175,9 @@ function discoverStates() {
   const unmounted = R.shelfLoaded(at({ screen: 'discover', id: null }), { shelf: 'modules', data: { ...modulesListing(), mounted: false }, at: 2 });
   return [
     unmounted, at({ screen: 'discover', id: 'research' }),
+    // a card whose Run is running: its chip a link to the conversation
+    R.moduleRunStarted(at({ screen: 'discover', id: 'research' }), { module: 'theme', sessionId: 's-run', title: 'Theme · 10-19', startedAt: NOW }),
+    R.moduleRunStarted(at({ screen: 'module', id: 'theme' }), { module: 'theme', sessionId: 's-run', title: 'Theme · 10-19', startedAt: NOW }),
     at({ screen: 'discover', id: null }), R.shelfFailed(at({ screen: 'discover', id: null }), { shelf: 'bots', at: 1 }), R.nav(emptyState(), { screen: 'discover', id: null }),
     R.setDiscoverQuery(at({ screen: 'discover', id: null }), 'rules'), at({ screen: 'discover', id: 'agents' }),
     page('mcp:alpaca-kit'), page('bot:buffett'), page('agent:codex'), page('agent:claude'), page('agent:gravit'), page('bot:nobody'),
@@ -244,7 +247,8 @@ test('every class the screens emit has a rule in app.css, and app.css names no c
 
 test("the Research shelf's cards: a column, the meta and the foot, the chip tones, a dim card", () => {
   const html = discoverStates().map(st => screenOf(st, NOW)).join('');
-  for (const c of ['pcard research', 'pcard-meta', 'pcard-foot', 'chip ok', 'chip warn', 'chip grey']) assert.ok(html.includes(`class="${c}`), c);
+  for (const c of ['pcard research', 'pcard-meta', 'pcard-foot', 'chip ok', 'chip warn', 'chip grey', 'chip live']) assert.ok(html.includes(`class="${c}`), c);
+  assert.match(css, /\.chip\.live\s*\{[^}]*background: var\(--surface-2\)[^}]*color: var\(--text\)/);
   assert.match(css, /\.pcard\.research\s*\{[^}]*flex-direction: column[^}]*gap: 12px/);
   assert.match(css, /\.pcard-meta\s*\{[^}]*font-size: 12px/);
   assert.match(css, /\.pcard-foot\s*\{[^}]*display: flex/);
