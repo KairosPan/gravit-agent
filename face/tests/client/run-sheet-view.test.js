@@ -95,7 +95,7 @@ test('sheetOf: Latest run no longer the latest — greyed and blocked until On i
   assert.equal(sheetOf(x, { ...s, on: 'new' }, fixed).on.options[0].stale, false);
 });
 
-test('sheetOf: a stale Latest run on Mode, which has no New run, stays pickable; its reason takes precedence over the artifact rules', () => {
+test('sheetOf: a stale Latest run on Mode, which has no New run, stays pickable; when the newest run fails its own rule, the reason is that rule', () => {
   const x = modulesListing();
   delete runOf(x, 'lunhui-s01-repair').artifacts.mode;
   const s = newSheet(x, 'mode');
@@ -106,11 +106,11 @@ test('sheetOf: a stale Latest run on Mode, which has no New run, stays pickable;
   assert.deepEqual(v.on.options.map(o => [o.id, o.enabled, o.stale, o.reason]), [['latest', true, true, 'run no longer the latest']]);
   assert.equal(v.blocker, 'run no longer the latest');
   assert.equal(sheetOf(x, { ...s, run: newer.run }, fixed).canRun, true, 'picked again, it runs');
-  // the newest run already holds mode: still stale first, and not open to pick
+  // the newest run already holds mode: picking again would not help, so the artifact rule's reason shows
   newer.artifacts.mode = ok({ mode: 'WAIT' }, MARKET_RUN);
   const w = sheetOf(x, s, fixed);
-  assert.deepEqual(w.on.options.map(o => [o.id, o.enabled, o.stale, o.reason]), [['latest', false, true, 'run no longer the latest']]);
-  assert.equal(w.blocker, 'run no longer the latest');
+  assert.deepEqual(w.on.options.map(o => [o.id, o.enabled, o.stale, o.reason]), [['latest', false, true, 'mode already registered on this run']]);
+  assert.equal(w.blocker, 'mode already registered on this run');
 });
 
 test('sheetOf: the listing could not be read — Run blocked with that line, on a market card and a strategy card', () => {

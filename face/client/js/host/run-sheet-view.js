@@ -49,8 +49,8 @@ function whereOptions(listing, m) {
 const latestLabel = run => `Latest run · ${run.run} · session ${dateOf(run) ?? 'unknown'}`;
 const frozenWords = run => `frozen: ${frozenOf(run).join(' · ') || 'nothing yet'}`;
 // a stale option (G15, the controller's stamp) keeps `enabled` as the artifact rules say, so it can be picked again to
-// re-stamp the run; its reason is the stale one, ahead of any artifact reason
-const option = (id, label, detail, reason, stale = false) => ({ id, label, detail, enabled: reason === null, reason: stale ? STALE : reason, stale });
+// re-stamp the run; its reason is the stale one while the newest run would be selectable, else the artifact rule's own
+const option = (id, label, detail, reason, stale = false) => ({ id, label, detail, enabled: reason === null, reason: stale && reason === null ? STALE : reason, stale });
 
 // two titles as one phrase: `Theme`, `Sentiment and Theme`
 const titlesWords = names => names.map(n => moduleOf(n).title).join(' and ');

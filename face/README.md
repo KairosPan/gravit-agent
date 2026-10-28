@@ -1731,7 +1731,8 @@ cards and Leader), a pick the run cannot take greyed with its reason (`theme alr
 `needs Leader, then Counterevidence, on this run`, `mode already registered on this run`, `run no
 longer the latest` — the last picked again to take the newest run) —, **Cites** for
 Leader (the two newest sealed `cn-market` runs; read-only for Mode and a strategy's review),
-**Stocks** for Leader (1–4 main-board codes, empty for Gravit's pick), Theme's boards line, a
+**Stocks** for a Leader New run alone (1–4 main-board codes, empty for Gravit's pick; hidden on a
+Latest run, whose message has no slot for codes), Theme's boards line, a
 **Note to Gravit**, and what it writes. **Run** sends Gravit one message in that channel as a new
 conversation `<Title> · MM-DD` — the composer's own `session/create`, `session/rename` and
 prompt, the text the spec's Appendix B line (`请只跑 Lunhui 的 … 模块`), read by Gravit's

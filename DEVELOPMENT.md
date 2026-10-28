@@ -2567,9 +2567,9 @@ pick and re-stamps `run` with the channel's newest run as the listing holds it n
 nothing; every change clears what was said. `run()` re-reads the listing and recomputes
 `sheetOf`: while it cannot run, the blocker is said and nothing is sent — `the modules listing
 could not be read` first; `run no longer the latest` when the channel's newest run is no longer
-the one On was stamped with (ahead of any artifact reason), the Latest run option still pickable
-while the newest run's artifacts allow it, so picking it again re-stamps `run` and clears the
-fence; a channel the listing gives no `workspaceId` refuses with `choose where to run`; else it
+the one On was stamped with and the newest run's artifacts allow it, the Latest run option still
+pickable, so picking it again re-stamps `run` and clears the fence (when the newest run fails an
+artifact rule, the option is disabled and the option and the blocker read that rule's reason); a channel the listing gives no `workspaceId` refuses with `choose where to run`; else it
 sends `actions.newConversation({title: titleOf(…), workspaceId, text:
 messageOf(…)})`, the channel's `workspaceId` from the listing — `session/create`, `session/rename`
 and the prompt, the face starting no role and calling no Lunhui tool (spec F2). A `null` answer
@@ -2961,7 +2961,8 @@ its close key and back to the opener on close), drawn from `sheetOf` over the mo
 both for Counterevidence; **On**, a radio per option (`label.opt.on` open, its detail under it;
 `label.opt.off` greyed, its reason under it — `theme already there`, `needs Leader, then
 Counterevidence, on this run`, `mode already registered on this run`, `run no longer the latest`;
-the stale one neither disabled nor checked, so a click on it picks it again):
+the stale one neither disabled nor checked while the newest run would take it, so a click on it
+picks it again; disabled with the newest run's own reason when it would not):
 `Latest run · <run> · session <date>` with what it froze, and `New run` for the three market cards
 and Leader; **Cites**, a select of the two newest sealed `cn-market` runs for Leader (their frozen
 sources and theme words, the line `theme not evaluable: the pick comes from the limit-up pool
