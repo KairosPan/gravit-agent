@@ -1,10 +1,10 @@
 /** Regenerates `bots/gravit/agent.cordis.yml`, the mirror of Gravit's composition, from
- * `roles/`, `dsh/profile/cycle.md` and the run protocols (`dsh/profile/lunhui-run.md`): the one way that file is written (a hand edit fails
+ * `roles/`, `dsh/profile/cycle.md` and the run protocols (`dsh/profile/lunhui-run.md` and `lunhui-module.md`): the one way that file is written (a hand edit fails
  * tests/roles.test.ts).
  *
  *     cd face && npm run render:roles
  *
- * Run it after any edit under `roles/`, to `dsh/profile/cycle.md` or to `dsh/profile/lunhui-run.md`,
+ * Run it after any edit under `roles/`, to `dsh/profile/cycle.md`, `dsh/profile/lunhui-run.md` or `dsh/profile/lunhui-module.md`,
  * then commit both.
  * Prints the path it wrote.
  */

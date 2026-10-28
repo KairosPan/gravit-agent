@@ -4,10 +4,13 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
-import { LUNHUI_RUN_PATH, LUNHUI_RUN_SECTION, PROTOCOLS_DIR, PROTOCOL_MAX_BYTES, readProtocol, readProtocols } from "../src/protocols.ts";
+import { LUNHUI_MODULE_MAX_BYTES, LUNHUI_MODULE_PATH, LUNHUI_MODULE_SECTION, LUNHUI_RUN_PATH, LUNHUI_RUN_SECTION, PROTOCOLS_DIR, PROTOCOL_MAX_BYTES, readProtocol, readProtocols } from "../src/protocols.ts";
 import { ROLES_ROOT, readRoles } from "../src/roles.ts";
 import { LUNHUI_TOOL_NAMES } from "../src/lunhui.ts";
-import { LUNHUI_RUN_SECTION as PLUGIN_RUN_SECTION } from "../plugins/gravit.js";
+import { LUNHUI_MODULE_SECTION as PLUGIN_MODULE_SECTION, LUNHUI_RUN_SECTION as PLUGIN_RUN_SECTION } from "../plugins/gravit.js";
+
+/** Both shipped protocol files, for the checks that hold of each. */
+const SHIPPED = [LUNHUI_RUN_PATH, LUNHUI_MODULE_PATH];
 
 /* The shipped run protocol (modules spec A9, §5.10, A22): Chinese, within its budget, no `{{`, and the
  * cn-market order - the index freeze opens the run, limit-up and boards join it, quotes are optional,
@@ -65,39 +68,81 @@ test("lunhui-run.md states the strategy channel's order after the cn-market one"
   assert.doesNotMatch(text, /以后加入|现在没有/, "the reviewer is no longer to come");
 });
 
-/* Every lunhui_* tool the protocol names is one the composed rows register (src/lunhui.ts), so a
+/* Every lunhui_* tool a protocol names is one the composed rows register (src/lunhui.ts), so a
  * later plan's tool cannot be described before it exists, nor a tool renamed under the protocol. */
-test("every lunhui_* tool lunhui-run.md names is a tool the Lunhui rows register", () => {
-  const named = [...new Set(readProtocol(LUNHUI_RUN_PATH).match(/\blunhui_[a-z_]+/g) ?? [])].sort();
+test("every lunhui_* tool lunhui-run.md and lunhui-module.md name is a tool the Lunhui rows register", () => {
   const registered = new Set<string>(LUNHUI_TOOL_NAMES);
-  assert.ok(named.length > 0);
-  assert.deepEqual(named.filter((tool) => !registered.has(tool)), [], `lunhui-run.md names ${named.join(", ")}`);
+  for (const path of SHIPPED) {
+    const named = [...new Set(readProtocol(path).match(/\blunhui_[a-z_]+/g) ?? [])].sort();
+    assert.ok(named.length > 0, `${path} names a lunhui_* tool`);
+    assert.deepEqual(named.filter((tool) => !registered.has(tool)), [], `${path} names ${named.join(", ")}`);
+  }
 });
 
-test("the section name is the same in src/protocols.ts and plugins/gravit.js", () => {
+test("the section names are the same in src/protocols.ts and plugins/gravit.js", () => {
   assert.equal(LUNHUI_RUN_SECTION, PLUGIN_RUN_SECTION);
+  assert.equal(LUNHUI_MODULE_SECTION, PLUGIN_MODULE_SECTION);
 });
 
-/* The protocol names the role it delegates to by tool name, and nothing else ties the two. */
-test("every role_* tool lunhui-run.md names is a role the shipped library has", () => {
-  const named = [...new Set(readProtocol(LUNHUI_RUN_PATH).match(/\brole_[a-z0-9_]+/g) ?? [])].sort();
+/* A protocol names the role it delegates to by tool name, and nothing else ties the two. */
+test("every role_* tool lunhui-run.md and lunhui-module.md name is a role the shipped library has", () => {
   const shipped = new Set(readRoles(ROLES_ROOT).map((role) => role.tool));
-  assert.ok(named.length > 0);
-  assert.deepEqual(named.filter((tool) => !shipped.has(tool)), [], `lunhui-run.md names ${named.join(", ")}`);
+  for (const path of SHIPPED) {
+    const named = [...new Set(readProtocol(path).match(/\brole_[a-z0-9_]+/g) ?? [])].sort();
+    assert.ok(named.length > 0, `${path} names a role_* tool`);
+    assert.deepEqual(named.filter((tool) => !shipped.has(tool)), [], `${path} names ${named.join(", ")}`);
+  }
 });
 
-test("readProtocols: the run protocol, gated on lunhui_read_run, from the profile directory or a given one", async () => {
-  assert.deepEqual(readProtocols(), [{ name: LUNHUI_RUN_SECTION, probe: "lunhui_read_run", text: readProtocol(LUNHUI_RUN_PATH) }]);
+/* The single-module protocol (modules-cards spec G4, Appendix C): Chinese, within its own 1,500-byte
+ * budget under the loader's 3,000, no `{{`, and the rules a card's message needs. */
+test("the shipped lunhui-module.md reads, fits its own budget under the loader's, is Chinese, and states the single-module rules", () => {
+  const bytes = readFileSync(LUNHUI_MODULE_PATH).length;
+  assert.ok(bytes <= LUNHUI_MODULE_MAX_BYTES, `lunhui-module.md is ${bytes} bytes; its budget is ${LUNHUI_MODULE_MAX_BYTES}`);
+  assert.equal(LUNHUI_MODULE_MAX_BYTES, 1500);
+  assert.ok(LUNHUI_MODULE_MAX_BYTES < PROTOCOL_MAX_BYTES);
+  const text = readProtocol(LUNHUI_MODULE_PATH);
+  assert.ok(/[一-鿿]/.test(text) && !text.includes("{{"));
+  for (const word of ["只做这一个模块", "lunhui:run", "role_cn_market_analyst", "点名只写", "没点名", "封存", "lunhui_freeze_quotes", "role_cn_stock_analyst", "role_cn_reviewer", "反证在 mode 之前", "ALREADY_SUBMITTED", "STALE_MARKET_RUN", "MISSING_EVIDENCE", "不自行开新的市场运行", "NOT_EVALUABLE", "delayed"]) assert.ok(text.includes(word), `carries ${word}`);
+  const at = (w: string) => text.indexOf(w);
+  assert.ok(at("counterevidence 只在") < at("mode 只在"), "the reviewer's rule before the mode's");
+  assert.ok(at("开新运行（cn-market）") < at("已有运行："), "a new run's freeze rule before the existing-run rule");
+});
+
+test("the module protocol's budget is its own, under the loader's: 1,500 bytes read, 1,501 still read by the loader but failed by the budget check", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "face-module-protocol-"));
+  try {
+    const at = join(dir, "lunhui-module.md"); await writeFile(at, "运".repeat(LUNHUI_MODULE_MAX_BYTES / 3));
+    assert.equal(readProtocol(at).length, LUNHUI_MODULE_MAX_BYTES / 3);
+    const over = join(dir, "over.md"); await writeFile(over, "运".repeat(LUNHUI_MODULE_MAX_BYTES / 3) + "\n");
+    assert.equal(readProtocol(over).length, LUNHUI_MODULE_MAX_BYTES / 3, "the loader admits it (under 3,000)");
+    assert.ok(readFileSync(over).length > LUNHUI_MODULE_MAX_BYTES, "and the budget check is what refuses it");
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test("readProtocols: the run and module protocols, in that order, gated on lunhui_read_run, from the profile directory or a given one", async () => {
+  assert.deepEqual(readProtocols(), [
+    { name: LUNHUI_RUN_SECTION, probe: "lunhui_read_run", text: readProtocol(LUNHUI_RUN_PATH) },
+    { name: LUNHUI_MODULE_SECTION, probe: "lunhui_read_run", text: readProtocol(LUNHUI_MODULE_PATH) },
+  ]);
   assert.equal(LUNHUI_RUN_SECTION, "lunhui:run");
+  assert.equal(LUNHUI_MODULE_SECTION, "lunhui:module");
   assert.equal(LUNHUI_RUN_PATH, join(PROTOCOLS_DIR, "lunhui-run.md"));
+  assert.equal(LUNHUI_MODULE_PATH, join(PROTOCOLS_DIR, "lunhui-module.md"));
   const dir = await mkdtemp(join(tmpdir(), "face-protocols-"));
   try {
     await writeFile(join(dir, "lunhui-run.md"), "\n# 运行\n\n先冻结。\n");
-    assert.deepEqual(readProtocols(dir), [{ name: "lunhui:run", probe: "lunhui_read_run", text: "# 运行\n\n先冻结。" }]);
+    const onlyRun = join(dir, "lunhui-module.md");
+    assert.throws(() => readProtocols(dir), (e: Error) => e.message === `${onlyRun}: the protocol file is missing`, "the run file alone: the module file is named");
+    await writeFile(onlyRun, "# 单模块\n\n只做这一个。\n");
+    assert.deepEqual(readProtocols(dir), [
+      { name: "lunhui:run", probe: "lunhui_read_run", text: "# 运行\n\n先冻结。" },
+      { name: "lunhui:module", probe: "lunhui_read_run", text: "# 单模块\n\n只做这一个。" },
+    ]);
     const empty = await mkdtemp(join(tmpdir(), "face-protocols-"));
     try {
       const missing = join(empty, "lunhui-run.md");
-      assert.throws(() => readProtocols(empty), (e: Error) => e.message === `${missing}: the protocol file is missing`);
+      assert.throws(() => readProtocols(empty), (e: Error) => e.message === `${missing}: the protocol file is missing`, "neither file: the run file is named");
     } finally { await rm(empty, { recursive: true, force: true }); }
   } finally { await rm(dir, { recursive: true, force: true }); }
 });

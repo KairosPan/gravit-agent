@@ -414,7 +414,8 @@ artifact — `cn-market-analyst` the market read in `cn-market`, `cn-stock-analy
 the mode in a strategy channel, citing a market run, `cn-reviewer` the counterevidence in either;
 Gravit reads the run back and reports. The
 order is the run protocol, `../dsh/profile/lunhui-run.md`, which Gravit reads as its `lunhui:run`
-prompt section.
+prompt section; a single module asked for on its own follows `../dsh/profile/lunhui-module.md`,
+the `lunhui:module` section one step after it.
 
 The design has eleven rows; plans 1–4 built them all:
 
@@ -529,8 +530,18 @@ never edit `analysis/`, never submit an artifact itself; journal a `cn-market` r
 `snapshot_id`, each artifact's file and headline (the leader's candidates, the counterevidence's
 item count, the mode and its `market_run`), what was not evaluable or has no artifact, and whether
 the quotes were delayed. The section is in Gravit's prompt
-only while the Lunhui rows are mounted, never in a bot's or a role's. Editing `lunhui-run.md` or the role means `npm run render:roles`, `npm test` and a restart
-("Roles").
+only while the Lunhui rows are mounted, never in a bot's or a role's.
+
+`lunhui:module` (`../dsh/profile/lunhui-module.md`, at most 1,500 bytes — 1,372 today, a budget
+`tests/protocols.test.ts` pins under the loader's 3,000) tells Gravit how to run one module on a
+module card's message, which names the module, the channel and the run (an existing one or a new
+one), and for a strategy module the `market_run` and optional codes; everything else is as
+`lunhui:run` says. A new `cn-market` run freezes the whole set first, since the run seals at its
+first role read; an existing run is not frozen again; the market analyst is told the one module to
+write; the reviewer runs before the mode, never beside it; a refusal it cannot cure
+(`ALREADY_SUBMITTED`, `STALE_MARKET_RUN`, `MISSING_EVIDENCE`) is reported as it is and the message
+ends, with no other run opened. It is gated like `lunhui:run`, on `lunhui_read_run`. Editing
+either protocol file or a role means `npm run render:roles`, `npm test` and a restart ("Roles").
 
 **The market channel**: `strategies/cn-market/` is tracked, with a `THESIS.md` that states the
 market read by chapter and paragraph id. Its runs hold the index, limit-up and board evidence a
@@ -575,7 +586,7 @@ tools, `cn-reviewer` the counterevidence pair (a role naming a tool the tree lac
 delegation). To turn Lunhui off, disable all eleven — a freeze or module row injects the
 `lunhuiRuns` service, so without `lunhui-runs` it stays pending and the boot's row audit refuses it
 (`waiting for service: lunhuiRuns`; reasoned from the audit, not yet pinned by a boot); the
-`lunhui:run` section leaves Gravit's prompt with them:
+`lunhui:run` and `lunhui:module` sections leave Gravit's prompt with them:
 
 ```yaml
 - { id: lunhui-runs, disabled: true }
@@ -1777,7 +1788,7 @@ their only writer.
   its composition is not read from the directory: the face RENDERS it from
   `roles/` at compose time ("Roles" below) — the face's `plugins/gravit.js` row
   (the `deployment:today` section, the role list, the cycle contract and the
-  `lunhui:run` protocol, scoped to Gravit's sessions and never a bot's), then one
+  `lunhui:run` and `lunhui:module` protocols, scoped to Gravit's sessions and never a bot's), then one
   `@deepseek-ai/dsh-tool-subagent` row per role. None of them masks a host
   tool, so Gravit's own roster is the host's flat roster plus the `role_<id>`
   tools (`role_cn_market_analyst` today), and a bot's carries none (`bots-smoke.test.ts` pins both, and the
@@ -2042,8 +2053,8 @@ ships `bots/` therefore ships `roles/` beside it.
 spelled by its relative path. The face composes nothing from it (`listBots` hashes it into the
 bot row's `revision` and parses nothing); `tests/roles.test.ts` byte-compares it with a fresh
 render and fails while the two differ, so a role edit that skipped the script is caught by
-`npm test`. It embeds `dsh/profile/cycle.md` and `dsh/profile/lunhui-run.md` too, so an edit of
-either needs the script as well.
+`npm test`. It embeds `dsh/profile/cycle.md`, `dsh/profile/lunhui-run.md` and
+`dsh/profile/lunhui-module.md` too, so an edit of any of them needs the script as well.
 
 **Exact tool names.** An `allow` entry is a host tool name (`read`, `grep`, …) or
 `mcp__<server>__<raw>`; a `*` is refused where the file is read. dsh applies the list as
@@ -2100,8 +2111,8 @@ reports the limit instead. One thing is dsh's, not the face's: the child's promp
 dsh's generic paragraphs for tools it lacks (`create_goal`, `workflow`, `ralph`, and for a role
 without `bash` `job_output`), because those sections are global and ignore the restriction.
 
-The `lunhui:run` protocol ("Lunhui analysis") is gated the same way, on `lunhui_read_run`, which
-no role's allow list names: a role child reads none of it.
+The `lunhui:run` and `lunhui:module` protocols ("Lunhui analysis") are gated the same way, on
+`lunhui_read_run`, which no role's allow list names: a role child reads neither.
 
 `roles-smoke.test.ts` pins the child's side on a real boot over two fixture roles made from
 `_template`, and on a second, third and fourth boot the shipped `cn-market-analyst`,

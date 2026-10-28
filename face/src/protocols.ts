@@ -1,8 +1,10 @@
 /** Gravit's run protocols - prose files under `dsh/profile/` that tell Gravit how to drive a set of
- * tools, each mounted as a section of its own (modules spec A9, §5.10). One ships:
- * `lunhui-run.md`, the order of an A-share research run in the `cn-market` channel, mounted as
- * `lunhui:run` and gated on `lunhui_read_run`, so it is in the prompt only when the Lunhui rows
- * mounted. {@link readProtocols} reads them where `composeFace` renders Gravit's default preset
+ * tools, each mounted as a section of its own (modules spec A9, §5.10). Two ship, both gated on
+ * `lunhui_read_run`, so they are in the prompt only when the Lunhui rows mounted:
+ * `lunhui-run.md`, the order of an A-share research run, mounted as `lunhui:run`, and
+ * `lunhui-module.md`, how to run one module on a module card's message (modules-cards spec G4),
+ * mounted as `lunhui:module` one order step after it and held to its own
+ * {@link LUNHUI_MODULE_MAX_BYTES}. {@link readProtocols} reads them where `composeFace` renders Gravit's default preset
  * (src/boot.ts), beside the cycle, and hands them to `gravitRows` (src/roles.ts) as the `gravit`
  * row's `protocols` key; `plugins/gravit.js` registers each as a section a ROOT or FORK session
  * that can call the probe reads - Gravit's, and a `subagent_fork` child's. A role child, a bot or
@@ -25,6 +27,14 @@ export const PROTOCOLS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..",
 export const LUNHUI_RUN_FILE = "lunhui-run.md";
 export const LUNHUI_RUN_PATH = join(PROTOCOLS_DIR, LUNHUI_RUN_FILE);
 export const LUNHUI_RUN_SECTION = "lunhui:run";
+
+/** The single-module protocol's file and section name, and its own budget: under the loader's
+ * {@link PROTOCOL_MAX_BYTES}, pinned by tests/protocols.test.ts against the shipped file
+ * (modules-cards spec G4). A whole number of three-byte characters, like the loader's. */
+export const LUNHUI_MODULE_FILE = "lunhui-module.md";
+export const LUNHUI_MODULE_PATH = join(PROTOCOLS_DIR, LUNHUI_MODULE_FILE);
+export const LUNHUI_MODULE_SECTION = "lunhui:module";
+export const LUNHUI_MODULE_MAX_BYTES = 1500;
 
 /** The largest protocol file, in bytes as `wc -c` counts them (spec §5.10). A whole number of
  * three-byte characters, for tests/protocols.test.ts. */
@@ -64,7 +74,11 @@ export function readProtocol(path: string): string {
 }
 
 /** Every shipped protocol, read from `dir` (default {@link PROTOCOLS_DIR}; tests point it at a
- * fixture): today the run protocol alone, gated on `lunhui_read_run`. */
+ * fixture): the run protocol, then the module protocol, both gated on `lunhui_read_run`. The order
+ * is the sections' order (plugins/gravit.js). */
 export function readProtocols(dir: string = PROTOCOLS_DIR): Protocol[] {
-  return [{ name: LUNHUI_RUN_SECTION, probe: "lunhui_read_run", text: readProtocol(join(dir, LUNHUI_RUN_FILE)) }];
+  return [
+    { name: LUNHUI_RUN_SECTION, probe: "lunhui_read_run", text: readProtocol(join(dir, LUNHUI_RUN_FILE)) },
+    { name: LUNHUI_MODULE_SECTION, probe: "lunhui_read_run", text: readProtocol(join(dir, LUNHUI_MODULE_FILE)) },
+  ];
 }

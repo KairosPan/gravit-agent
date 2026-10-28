@@ -658,10 +658,12 @@ builder keeps the sentences; the words "只跑" and "开新运行 / 已有运行
   `请只跑 Lunhui 的 mode 模块：策略 {strategy}，运行 {run}（已有运行），引用 cn-market 运行 {market_run}。`
 - The Note: a final line `备注：{note}`.
 
-## Appendix C — `dsh/profile/lunhui-module.md`, the draft
+## Appendix C — `dsh/profile/lunhui-module.md`, the shipped text
 
-The text plan 1 ships, 1,372 bytes as `wc -c` counts it against the 1,500 budget; every tool and role
-name it uses exists; the builder changes it only to keep a test's pinned word.
+The text plan 1 shipped (plan 1, Task 3), byte for byte: 1,372 bytes as `wc -c` counts it, trailing
+newline included, against the 1,500 budget (`LUNHUI_MODULE_MAX_BYTES`, pinned by
+`face/tests/protocols.test.ts`); 709 characters trimmed. Every tool and role name it uses exists;
+an edit to the file is mirrored here.
 
 ```
 # 单模块请求

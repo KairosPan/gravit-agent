@@ -496,7 +496,7 @@ role: `dsh-tool-subagent` has no description key, which is why the summaries rid
 whose `cycle` — the text of `dsh/profile/cycle.md`, which `composeFace` reads right after the roles
 (`readCycle`, `src/cycle.ts`) — it turns into the `gravit:cycle` section (§4.3), and whose
 `protocols` — the run protocols `composeFace` reads right after the cycle (`readProtocols`,
-`src/protocols.ts`) — it turns into one section each, today `lunhui:run` (§4.3); then one
+`src/protocols.ts`) — it turns into one section each, `lunhui:run` and `lunhui:module` (§4.3); then one
 `@deepseek-ai/dsh-tool-subagent` row per role, id `role-<id>`, `config` =
 `provider: spawn`, `toolName: role_<id>`, `backgroundMode: one-shot`, `persona` (the `ROLE.md`
 text), `toolFilter: {allow: […]}`, and `agentOptions: {provider, model}` only when `role.yml` names
@@ -516,10 +516,10 @@ saying so, and `cd face && npm run render:roles` (`scripts/render-roles.ts`, out
 include like the other scripts) writes it. Nothing reads it at boot; its job is to show whoever
 opens `bots/gravit` what the preset is. `tests/roles.test.ts` renders the repository's `roles/`
 and byte-compares it with the committed file, and fails while they differ, so an edit under
-`roles/` that skipped the script cannot land. The header names `dsh/profile/cycle.md` and
-`dsh/profile/lunhui-run.md` too: the mirror embeds the cycle text as the `gravit` row's `cycle`
-and the run protocol as its `protocols` (YAML block scalars), so an edit to either file needs the
-script run as well, or the same test fails.
+`roles/` that skipped the script cannot land. The header names `dsh/profile/cycle.md`,
+`dsh/profile/lunhui-run.md` and `lunhui-module.md` too: the mirror embeds the cycle text as the
+`gravit` row's `cycle` and the two run protocols as its `protocols` (YAML block scalars), so an
+edit to any of those files needs the script run as well, or the same test fails.
 
 `allow` entries are EXACT: a host tool name (`read`, `grep`) or `mcp__<server>__<raw>`, letters,
 digits, `_` and `-` only (a `*` is refused where the file is read), under the server name the
@@ -775,8 +775,8 @@ row audit; and the policy layer.
    the row is composed; `hmr` disabled whenever composed), patch Gravit's persona into
    `system-prompt` (`personaPrefix` only, §4.3), set the `agent-instructions` row's two
    candidate lists after it (`instructionsPatch`, §4.3), then push **the face overlay last** — its
-   default preset rendered here, in memory, from `roles/`, `dsh/profile/cycle.md` and
-   `dsh/profile/lunhui-run.md` (`readRoles`, `readCycle` and then `readProtocols` run as the very
+   default preset rendered here, in memory, from `roles/`, `dsh/profile/cycle.md`,
+   `dsh/profile/lunhui-run.md` and `lunhui-module.md` (`readRoles`, `readCycle` and then `readProtocols` run as the very
    last steps before the push; a missing roles directory, a role the reader refuses, a cycle file
    that is missing, unreadable, empty or over 3,300 bytes, or a protocol file that is missing,
    unreadable, empty, over 3,000 bytes or carries `{{` ends the compose with that path, and a face
@@ -857,7 +857,7 @@ smoke that boots without `main.ts` relies on.
 | `akshare.ts` | project AKShare MCP defaults, composed below operator profile/home patches |
 | `account-seat.ts` | the Account seat row (§3.1): `ACCOUNT_SEAT_ROW_ID`, `ACCOUNT_SEAT_SERVER`, `SEAT_TOOL_PREFIX`, `ACCOUNT_SEAT_NAME`, `DEFAULT_SEAT_DIR` (the repo's `account/`, resolved from this file's location, never `homedir()`), `seatDir`/`seatUrl` (the env or the defaults), `accountSeatPatches` — this process's node, `account/`'s `tsx`, the seat's env, 90 s, failing soft; composed right after AKShare — and `composedSeatRow` (the row AS COMPOSED, read off the Loader's entries: disabled by a patch, or its service URL and seat name), which `main.ts` hands the seat route so the box follows an operator's patch, never the environment alone |
 | `lunhui.ts` | the Lunhui rows (§4.3; modules spec §5.12): `LUNHUI_ROW_IDS`, `LUNHUI_TOOL_NAMES`, `lunhuiPatches(repoRoot?)` — one insert of eleven file-plugin rows under `face/plugins/lunhui/`, each `name` the absolute `file:` URL of its file (`lunhui-runs` → `runs-row.mjs`, `lunhui-freeze-quotes` → `freeze-quotes-row.mjs`, …, `lunhui-mode` → `mode-row.mjs`, `lunhui-review` → `review-row.mjs`), `lunhui-runs`' config `{strategiesRoot}` (this checkout's `strategies/`) and the four freeze and six module rows' `{}`; `LUNHUI_TOOL_NAMES` the seventeen tools in row order; composed right after the seat; plain data, nothing mounted |
-| `protocols.ts` | Gravit's run protocols (§4.3): `readProtocol` reads one prose file — trimmed, refused with its absolute path first when missing, unreadable, empty, over `PROTOCOL_MAX_BYTES` (3,000 raw bytes, inclusive) or carrying `{{` — and `readProtocols(dir?)` returns every shipped one as `{name, probe, text}`, today `lunhui:run` (`LUNHUI_RUN_SECTION`) from `lunhui-run.md` (`LUNHUI_RUN_FILE`, `LUNHUI_RUN_PATH`) under `PROTOCOLS_DIR` (`dsh/profile/`, resolved from the module), gated on `lunhui_read_run`; dependency-free |
+| `protocols.ts` | Gravit's run protocols (§4.3): `readProtocol` reads one prose file — trimmed, refused with its absolute path first when missing, unreadable, empty, over `PROTOCOL_MAX_BYTES` (3,000 raw bytes, inclusive) or carrying `{{` — and `readProtocols(dir?)` returns every shipped one as `{name, probe, text}`, in section order: `lunhui:run` (`LUNHUI_RUN_SECTION`) from `lunhui-run.md` (`LUNHUI_RUN_FILE`, `LUNHUI_RUN_PATH`), then `lunhui:module` (`LUNHUI_MODULE_SECTION`) from `lunhui-module.md` (`LUNHUI_MODULE_FILE`, `LUNHUI_MODULE_PATH`), both under `PROTOCOLS_DIR` (`dsh/profile/`, resolved from the module) and gated on `lunhui_read_run`; `LUNHUI_MODULE_MAX_BYTES` (1,500) is the module file's own budget under the loader's 3,000, pinned by `tests/protocols.test.ts`, not enforced by the loader; dependency-free |
 | `orders.ts` | Gate 2 decision logic, pure: `isOrderTool` (the seat's twelve writes — `SEAT_WRITE_RAW_NAMES` — and any tool under the face's own seat prefix outside `SEAT_READ_RAW_NAMES`), `isSeatWriteTool`, `RETIRED_ORDER_RAW_NAMES` and `isRetiredOrderTool` (`place_order`, `cancel_order` under any server: denied, never carded), `effectiveApprovalPolicy`, `orderApprovalDecision` (with the `displayReason` twin), `describeOrder` (the seat's keys in a readable order; a key field shown whole or the call denied), `hasApprovalGrant`, `orderGuardReason`, `orderGuardReasonForSession` (the guard's one producer; a retired tool denied first; reads `snapshotEvents()`, a distinct denial for an unreadable log), `auditOrderTools` (`{gated, uncovered, retired}`) — depends on nothing (structural types only) |
 | `setup.ts` | one-shot `$DSH_HOME/profiles/<name>` creation with `PATCH_HEADER`; refuses to overwrite |
 | `http.ts` | `HttpError`, `readBody` (4,096 B cap → 413), `markStale`, the fixed `FORBIDDEN` body, and **the trust fence every `/data` route reuses** — `isLoopbackHost`, `isTrustedDataRequest`, and `isJsonBody` for a POST |
@@ -883,7 +883,7 @@ smoke that boots without `main.ts` relies on.
 | `cycle.ts` | Gravit's research-cycle contract (§4.3): `readCycle` reads `dsh/profile/cycle.md` (`CYCLE_PATH`, resolved from the module) — trimmed, braces literal because the section does not interpolate, refused with its absolute path first when missing, unreadable, empty or over `CYCLE_MAX_BYTES` (3,300 raw bytes since 2026-10-24, the limit inclusive); dependency-free |
 | `instructions.ts` | the instructions patch (§4.3): `AGENT_INSTRUCTIONS_ROW_ID`, `INSTRUCTION_FILE` and `LOCAL_INSTRUCTION_FILE` (`GRAVIT.md`, `GRAVIT.local.md`), `INSTRUCTIONS_CONFIG` (`satisfies` the package's own `Config`) and `instructionsPatch(inherited?)`, which spreads the inherited row config and applies the two lists last, a fresh object on every call; imports the package's type only |
 | `plugins/bot.js` | the `gravit-bot` composition plugin: a scoped `deployment:persona-prefix` section (shadows Gravit's prefix; no suffix) + an allow-list `tools.restrict`, re-expanded after each burst of `tools/change` — coalesced to one timer turn, so a tool that registers after the declaration is admitted when the allow list names it (`expandAllow` resolves `mcp__*__<raw>` against the live tree); dependency-free |
-| `plugins/gravit.js` | the `gravit` composition plugin, the first row of the default preset's rendered composition (`gravitRows` in `src/roles.ts`; `bots/gravit/agent.cordis.yml` is its generated mirror): a scoped `deployment:today` section (`Today is YYYY-MM-DD, Weekday (Zone).`), its text a function re-evaluated at every assembly, in the process's own zone — `resolveZone()` falls back to `UTC`, labelled `(UTC)`, when `TZ` is empty or not a zone Intl can format in, so an unusable `TZ` cannot throw at assembly — ordered right after the persona prefix, `interpolate: false`; and, only when its `roles` config is present, a scoped `gravit:roles` section at `getSectionOrder("TOOL_SUBAGENT") + 1` (the role intro and one `- role_<id> — <summary>` line per role, `interpolate: false`, listing only the roles whose tool the assembling scope resolves — `canCall`, `ctx.tools.get(name, context.scope)`, so a role child reads none and a `subagent_fork` child Gravit's whole list, §3.8); only when its `cycle` config is present, a scoped `gravit:cycle` section at `getSectionOrder("DEPLOYMENT_PERSONA_SUFFIX") - 50` (`interpolate: false`; the contract's text when the assembling scope can call `create_goal`, `''` otherwise, §4.3); only when its `protocols` config is present, one scoped section per entry `{name, probe, text}` at `getSectionOrder("DEPLOYMENT_PERSONA_SUFFIX") - 60`, just before the cycle (`interpolate: false`; the text when the assembling scope can call the entry's `probe`, `''` otherwise — today `lunhui:run`, `LUNHUI_RUN_SECTION`, probed on `lunhui_read_run`, §4.3); every section but the date also `''` for a delegated child that is not a fork (`isRootOrFork`, read from `context.agent.session.header`: no `origin`, or `isSeeded`); `inject` is `systemPrompt` and `tools`, the registry only read, so it masks no tool; `validateGravitConfig` accepts `{}` and checks `cycle`, `roles` and `protocols` when present (a protocol's name `namespace:dashed-name`, never one of the plugin's own three sections, unique; its probe a tool name); dependency-free |
+| `plugins/gravit.js` | the `gravit` composition plugin, the first row of the default preset's rendered composition (`gravitRows` in `src/roles.ts`; `bots/gravit/agent.cordis.yml` is its generated mirror): a scoped `deployment:today` section (`Today is YYYY-MM-DD, Weekday (Zone).`), its text a function re-evaluated at every assembly, in the process's own zone — `resolveZone()` falls back to `UTC`, labelled `(UTC)`, when `TZ` is empty or not a zone Intl can format in, so an unusable `TZ` cannot throw at assembly — ordered right after the persona prefix, `interpolate: false`; and, only when its `roles` config is present, a scoped `gravit:roles` section at `getSectionOrder("TOOL_SUBAGENT") + 1` (the role intro and one `- role_<id> — <summary>` line per role, `interpolate: false`, listing only the roles whose tool the assembling scope resolves — `canCall`, `ctx.tools.get(name, context.scope)`, so a role child reads none and a `subagent_fork` child Gravit's whole list, §3.8); only when its `cycle` config is present, a scoped `gravit:cycle` section at `getSectionOrder("DEPLOYMENT_PERSONA_SUFFIX") - 50` (`interpolate: false`; the contract's text when the assembling scope can call `create_goal`, `''` otherwise, §4.3); only when its `protocols` config is present, one scoped section per entry `{name, probe, text}` at `getSectionOrder("DEPLOYMENT_PERSONA_SUFFIX") - 60 + index`, the entry's index in the list, just before the cycle (`interpolate: false`; the text when the assembling scope can call the entry's `probe`, `''` otherwise — `lunhui:run`, `LUNHUI_RUN_SECTION`, then `lunhui:module`, `LUNHUI_MODULE_SECTION`, one step after it, both probed on `lunhui_read_run`, §4.3); every section but the date also `''` for a delegated child that is not a fork (`isRootOrFork`, read from `context.agent.session.header`: no `origin`, or `isSeeded`); `inject` is `systemPrompt` and `tools`, the registry only read, so it masks no tool; `validateGravitConfig` accepts `{}` and checks `cycle`, `roles` and `protocols` when present (a protocol's name `namespace:dashed-name`, never one of the plugin's own three sections, unique; its probe a tool name); dependency-free |
 | `panels.ts` | Discover's feeds (§5.3): host facts (`/data/host.json`), the local-agent roster (probe, auth, connect, disconnect), memory (skills), plugins (loader rows + tool schemas); builds `PanelDeps` (it requires `skills`, `tools`, `loader`, `workspaceRegistry` and `agents`), whose `channelFor` answers `{workspaceId, name, dir}` — the `dir` is what the room engine gives a member as its `cwd` |
 | `version.ts` | the three pins |
 
@@ -895,7 +895,7 @@ the real `/` (a bare `bootFace` mounts no page), `signIn` trades the launch toke
 
 Thirteen rows, composed last, winning silently over the operator's patch and the home layer —
 `faceOverlay(port, definitionFor(bots, "gravit", rows))`, with `rows` rendered from `roles/`,
-`dsh/profile/cycle.md` and `dsh/profile/lunhui-run.md` by `composeFace` (§3.8), in this order:
+`dsh/profile/cycle.md`, `lunhui-run.md` and `lunhui-module.md` by `composeFace` (§3.8), in this order:
 
 | Row | Package | Why the face mounts it |
 |---|---|---|
@@ -910,7 +910,7 @@ Thirteen rows, composed last, winning silently over the operator's patch and the
 | `directory-picker` | `dsh-host-directory-picker-auto` | the native folder dialog; since 0.2.0 it fails the row when either of its two runtime entries cannot load, hence the four picker packages in `package.json` |
 | `tool-ask-user` | `dsh-tool-ask-user` | the model-facing half of `userQuestions`, in no upstream bundle; configless = the blocking `legacy` mode |
 | `agent-preset-registry` | `dsh-agent-preset-registry` | `{default: gravit}`. The registry scans no directory and serves only `list`, `read` and `select` Remotes, so 0.1.1's `trust: system` posture — no authoring RPCs over a git-tracked directory — holds with nothing to configure |
-| `preset-gravit` | `dsh-agent-preset` | the default preset, static so it exists before the first `session/create`: `definitionFor` over the rows `composeFace` renders from `roles/`, `dsh/profile/cycle.md` and `dsh/profile/lunhui-run.md` (§3.8) — the face's `gravit.js` row (the `deployment:today`, `gravit:roles`, `gravit:cycle` and `lunhui:run` sections) by an absolute `file:` URL (`GRAVIT_PLUGIN_URL`), then one `dsh-tool-subagent` row per role; `bots/gravit` supplies only the display metadata, its `agent.cordis.yml` being a generated mirror that is not read (`GRAVIT_PLUGIN_RELATIVE` is how the mirror spells the plugin); it masks no host tool, so Gravit's roster is the host's plus the `role_<id>` tools |
+| `preset-gravit` | `dsh-agent-preset` | the default preset, static so it exists before the first `session/create`: `definitionFor` over the rows `composeFace` renders from `roles/`, `dsh/profile/cycle.md`, `lunhui-run.md` and `lunhui-module.md` (§3.8) — the face's `gravit.js` row (the `deployment:today`, `gravit:roles`, `gravit:cycle`, `lunhui:run` and `lunhui:module` sections) by an absolute `file:` URL (`GRAVIT_PLUGIN_URL`), then one `dsh-tool-subagent` row per role; `bots/gravit` supplies only the display metadata, its `agent.cordis.yml` being a generated mirror that is not read (`GRAVIT_PLUGIN_RELATIVE` is how the mirror spells the plugin); it masks no host tool, so Gravit's roster is the host's plus the `role_<id>` tools |
 | `preset-kairos` | `dsh-agent-preset` | the legacy alias: the default's definition under `kairos`, Gravit's id before 2026-10-08, so archived sessions resolve; `bootFace` refuses a boot where it is absent or broken; every host test goes through `isHostPreset` (`src/overlay.ts`, `client/speaker.js`) |
 
 Gone from the overlay since 0.1.1: `storage`, `storage-json`, `storage-domain` and
@@ -1013,12 +1013,14 @@ carries the text) and, on real boots, `bots-smoke`, `roles-smoke` and `goal-smok
 
 **The run protocol section** (modules spec A9, §5.10) is the `gravit` row's `protocols` key, read
 the way the cycle is: `composeFace` calls `readProtocols` (`src/protocols.ts`) right after
-`readCycle` and hands `gravitRows` one entry, `{name: "lunhui:run", probe: "lunhui_read_run",
+`readCycle` and hands `gravitRows` two entries, `{name: "lunhui:run", probe: "lunhui_read_run",
 text}`, the text of `dsh/profile/lunhui-run.md` (2,999 bytes against its 3,000, Chinese, 1,651
-characters, about 413 heuristic tokens); `FaceBootOptions.protocolsDir` points a test at a fixture directory, and a
+characters, about 413 heuristic tokens), then `{name: "lunhui:module", probe: "lunhui_read_run",
+text}`, the text of `dsh/profile/lunhui-module.md` (described below); `FaceBootOptions.protocolsDir` points a test at a fixture directory, and a
 missing, unreadable, empty, oversized or templated file ends the compose with its absolute path
 first. `plugins/gravit.js` mounts each entry as a section of its own at
-`getSectionOrder("DEPLOYMENT_PERSONA_SUFFIX") - 60`, just before the cycle, `interpolate: false`,
+`getSectionOrder("DEPLOYMENT_PERSONA_SUFFIX") - 60 + index`, in their listed order, so
+`lunhui:module` sits one step after `lunhui:run`, both just before the cycle, `interpolate: false`,
 gated as the cycle is but on its own probe: the text when the session is a root or a fork and the
 assembling scope can call `lunhui_read_run`, `''` otherwise. The Lunhui tools are registered
 tree-wide, so the probe says only that the Lunhui rows mounted — disable them and the section goes
@@ -1069,6 +1071,27 @@ no section without the key; a protocol's name may not take one of the plugin's o
 path first), `roles.test.ts` (the mirror carries the text) and, on real boots, `bots-smoke`
 (Gravit's prompt carries it, a bot's does not), `lunhui-market-run-smoke` and
 `lunhui-strategy-run-smoke` (§7.3).
+
+**The module protocol section** (modules-cards spec G4, Appendix C) is the second entry,
+`lunhui:module`, gated exactly as `lunhui:run` and one order step after it: `dsh/profile/lunhui-module.md`,
+1,372 bytes against its own 1,500 (`LUNHUI_MODULE_MAX_BYTES`, under the loader's 3,000), Chinese,
+709 characters, about 177 heuristic tokens. It tells Gravit how to run ONE module on a module card's
+message (the message names the module, the channel, the run — an existing one or a new one — and,
+for a strategy module, the `market_run` and optional codes), everything else as `lunhui:run` says:
+the market modules through `role_cn_market_analyst` with a brief that names the one module to
+write; a new `cn-market` run freezes the whole set first, by `lunhui:run`'s step 1, since a run
+seals at its first role read; an existing run is not frozen again; a new leader run opens with
+`lunhui_freeze_quotes`; the reviewer only on a run with an accepted leader or at least one market
+artifact, and before the mode, never in parallel; only the requested module is written, and an
+`ALREADY_SUBMITTED`, `STALE_MARKET_RUN` or `MISSING_EVIDENCE` refusal is reported as it is and the
+turn ends — no other run, no fresh market run, no changed conclusion; the final message reports
+only that module. Pinned by `tests/protocols.test.ts` (the shipped file within its budget, Chinese,
+carrying the rules and their order; a 1,500-byte file read and a 1,501-byte one still read by the
+loader but failed by the budget check; its `lunhui_*` and `role_*` names registered; the section
+name equal in both files), `gravit-plugin.test.ts` (the second protocol one step after the first,
+before the cycle, gated alike), `boot.test.ts` (a protocols directory with `lunhui-run.md` but no
+`lunhui-module.md` refusing the compose with the latter's path) and `roles.test.ts` (the mirror
+carries it).
 
 **The policy layer** (`src/policy.ts`) composes directly above the bundle layer and BELOW
 AKShare, the profile and the home, so an operator row with the same id wins — the opposite of
@@ -1403,7 +1426,8 @@ the `gravit:roles` section is 1,013 characters, about 253 tokens, for its three 
 `cn-market-analyst` (463 characters, about 116 tokens, when it was the one role), `cn-reviewer` and
 `cn-stock-analyst` (714 characters, about 179 tokens, for the two analysts; for the three retired
 roles it was 992 characters, about 250 tokens; each role adds its tool name and a summary of at
-most 300 characters); the `lunhui:run` section is 1,651 characters, about 413 tokens (2,999 bytes
+most 300 characters); the `lunhui:module` section is 709 characters, about 177 tokens (1,372 bytes
+on disk); the `lunhui:run` section is 1,651 characters, about 413 tokens (2,999 bytes
 on disk since spec §17's counts clause; 1,556 characters and 2,873 bytes before the reviewer's steps, 1,143 and 2,240 before the
 strategy channel); `GRAVIT.md` is 3,459 bytes (budget 4,500;
 4,283 at `fae4f61`). The first-request totals
@@ -3109,7 +3133,7 @@ own on 2026-10-27 (§7.1, §7.3).
 
 ### 7.3 The face suite
 
-1665 tests in 139 files (1642 pass, 23 skipped without `FACE_SMOKE=1`, 2026-10-28; 1654/1654
+1667 tests in 139 files (1644 pass, 23 skipped without `FACE_SMOKE=1`, 2026-10-28; 1654/1654
 under `FACE_SMOKE=1` at 138 files, 2026-10-27), run by `node --test` through `tsx`. The Account's own suite is
 `account/`'s (vitest; §7.1 has its counts): the origin's tests at 133b9a7 less the six that reach
 what the copy left out (§3.9), plus the fence's (`test/unit/server-guard.test.ts`: the default
@@ -3126,13 +3150,14 @@ refused, `parseHosts`). The face's:
   persona patch and before only the overlay, keeping an operator's other keys on the row and its
   `disabled`, cloning what it is given, and absent from a composition that has no such row; a
   skipped bundle refused; the static `preset-gravit` row rendered from `roles/` in memory — the
-  `gravit` row by absolute URL, carrying the text of `dsh/profile/cycle.md` and the run protocol,
+  `gravit` row by absolute URL, carrying the text of `dsh/profile/cycle.md` and the two run protocols,
   one `spawn` row per role (`role-cn-market-analyst` and `role-cn-stock-analyst` for the shipped
   library) — and never read
   from the mirror, the `preset-kairos` alias equal to it under the legacy
   id, a roles root with a bad role refusing the compose with the file's path, a missing roles
   directory refusing it with the directory's, an empty or missing cycle file refusing it with
-  the file's, and a protocols directory without `lunhui-run.md` refusing it with that file's), `overlay` (exactly the thirteen rows, in order;
+  the file's, and a protocols directory without `lunhui-run.md`, or with it but without
+  `lunhui-module.md`, refusing it with the missing file's), `overlay` (exactly the thirteen rows, in order;
   loopback config; `FACE_BIND` replacing the webserver's host and nothing else, `faceBind` falling
   back to `127.0.0.1` when unset or empty; the rows dsh-base owns now and the retired ones never inserted), `policy`
   (every target a row the installed dsh-base composes; the composed posture; an operator row
@@ -3162,14 +3187,18 @@ refused, `parseHosts`). The face's:
   contract for a scope that can call `create_goal` and `''` for one that cannot, gone on
   unload; both sections Gravit's text for a root session, a `subagent_fork` child and an
   operator-forked session, `''` for a delegated child that is not a fork although its scope
-  resolves every tool — `isRootOrFork`; a protocol section 60 before the persona suffix, literal,
-  read only by a root or a fork that can call its probe, and none without the key or with an
+  resolves every tool — `isRootOrFork`; a protocol section 60 before the persona suffix and a second one step after it,
+  both literal, read only by a root or a fork that can call their probe, and none without the key or with an
   empty list), `protocols` (the shipped `lunhui-run.md` reads, fits its 3,000 bytes and states the
   `cn-market` order, then the strategy channel's after it — the market run read, the candidates,
   their quotes, the stock analyst for the leader and again for the mode, the run read back, `WAIT`
   and `STALE_MARKET_RUN` — naming no reviewer; every `lunhui_*` name it carries is a tool the Lunhui rows register and every
-  `role_*` name a shipped role; the section name equal in `src/protocols.ts` and
-  `plugins/gravit.js`; the reader trimming, refusing a missing, unreadable, empty, oversized or
+  `role_*` name a shipped role; the shipped `lunhui-module.md` within its own 1,500 bytes, Chinese,
+  stating the single-module rules in order, and the 1,500-byte budget its own under the loader's —
+  1,500 read, 1,501 still read but failed by the budget check; both files' `lunhui_*` and `role_*`
+  names registered; both section names equal in `src/protocols.ts` and
+  `plugins/gravit.js`; `readProtocols` the two entries in order, naming `lunhui-run.md` when neither
+  file is there and `lunhui-module.md` when only the run file is; the reader trimming, refusing a missing, unreadable, empty, oversized or
   templated file path first, the limit inclusive on raw bytes), `roles` (the reader: the shipped
   library `cn-market-analyst` and `cn-stock-analyst`, so Gravit's preset and its mirror carry their
   two role rows, the two sharing no module tool, while a fixture role copied from `_template`

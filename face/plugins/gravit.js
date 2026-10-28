@@ -9,7 +9,7 @@
  * (`gravit:cycle`, from the `cycle` config key, which `composeFace` fills from
  * `dsh/profile/cycle.md` through src/cycle.ts), and the run protocols (one
  * section per entry of the `protocols` config key, which `composeFace` fills
- * from `dsh/profile/` through src/protocols.ts: today `lunhui:run`).
+ * from `dsh/profile/` through src/protocols.ts: `lunhui:run` and `lunhui:module`).
  *
  * WHY A DATE. The 2026-10-10 prompt trace found no date anywhere in the
  * assembled prompt, so Gravit could not tell a fresh bar from a stale one or
@@ -85,11 +85,12 @@
  * `role_<id>` tools come from the sibling rows (bots-smoke S3 pins the roster).
  *
  * THE PROTOCOLS. Each entry of `protocols` - `{ name, probe, text }` - is a
- * section named `name` at `DEPLOYMENT_PERSONA_SUFFIX - 60`, just before the
- * cycle, gated as the cycle is but on its own probe: `isRootOrFork(context) &&
- * canCall(ctx, context, probe)`. The shipped one is `lunhui:run`
- * (`dsh/profile/lunhui-run.md`, modules spec A9, §5.10), probed on
- * `lunhui_read_run`. The Lunhui tools are registered tree-wide, so the probe
+ * section named `name` at `DEPLOYMENT_PERSONA_SUFFIX - 60 + index` (its index
+ * in the list), just before the cycle, gated as the cycle is but on its own
+ * probe: `isRootOrFork(context) && canCall(ctx, context, probe)`. Two ship:
+ * `lunhui:run` (`dsh/profile/lunhui-run.md`, modules spec A9, §5.10) and, one
+ * step after it, `lunhui:module` (`dsh/profile/lunhui-module.md`, modules-cards
+ * spec G4), both probed on `lunhui_read_run`. The Lunhui tools are registered tree-wide, so the probe
  * only says the Lunhui rows mounted: the preset scope keeps the section from a
  * bot, the header from a spawn child, and the allow list (no `lunhui_read_run`)
  * with the header from a role child.
@@ -118,6 +119,10 @@ export const CYCLE_SECTION = "gravit:cycle";
  *  this file imports nothing, so it is spelled here too, and tests/protocols.test.ts pins the two
  *  equal. */
 export const LUNHUI_RUN_SECTION = "lunhui:run";
+
+/** The module protocol's section name, spelled here as the run protocol's is; src/protocols.ts
+ *  `LUNHUI_MODULE_SECTION` hands it in the config and tests/protocols.test.ts pins the two equal. */
+export const LUNHUI_MODULE_SECTION = "lunhui:module";
 
 /** A protocol's section name: a namespace, a colon, a dashed name. */
 const PROTOCOL_NAME = /^[a-z]+:[a-z-]+$/;
@@ -254,12 +259,13 @@ export function apply(ctx, config) {
       text: (context) => isRootOrFork(context) && canCall(ctx, context, "create_goal") ? config.cycle : "",
     }));
   }
-  /* Ten before the cycle, each on its own probe: the run protocol reads only where the Lunhui
-   * rows mounted, for Gravit and a fork child (the same text, the same cached prefix). */
-  for (const protocol of config.protocols ?? []) {
+  /* Ten before the cycle, in their listed order (the run protocol, then the module protocol, one
+   * step after), each on its own probe: they read only where the Lunhui rows mounted, for Gravit
+   * and a fork child (the same text, the same cached prefix). */
+  for (const [index, protocol] of (config.protocols ?? []).entries()) {
     ctx.effect(() => ctx.systemPrompt.section({
       name: protocol.name,
-      order: ctx.systemPrompt.getSectionOrder("DEPLOYMENT_PERSONA_SUFFIX") - 60,
+      order: ctx.systemPrompt.getSectionOrder("DEPLOYMENT_PERSONA_SUFFIX") - 60 + index,
       interpolate: false,
       text: (context) => isRootOrFork(context) && canCall(ctx, context, protocol.probe) ? protocol.text : "",
     }));

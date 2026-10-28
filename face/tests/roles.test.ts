@@ -239,7 +239,9 @@ test("the committed mirror bots/gravit/agent.cordis.yml is exactly the render of
   const mirror = readFileSync(new URL("../../bots/gravit/agent.cordis.yml", import.meta.url), "utf8");
   assert.equal(mirror, renderGravitComposition(readRoles(ROLES_ROOT), { cycle: readCycle(CYCLE_PATH), protocols: readProtocols() }), "run: cd face && npm run render:roles");
   assert.match(mirror, /^ {4}protocols:\n {6}- name: lunhui:run\n {8}probe: lunhui_read_run\n/m, "the mirror carries the run protocol");
+  assert.match(mirror, /^ {6}- name: lunhui:module\n {8}probe: lunhui_read_run\n/m, "and the module protocol");
   assert.ok(mirror.includes("lunhui-run.md"), "and its header names the file it came from");
+  assert.ok(mirror.includes("lunhui-module.md"), "and the module protocol's file");
   assert.ok(mirror.includes(`name: ${GRAVIT_PLUGIN_RELATIVE}`), "the mirror names the plugin by the shipped relative path");
   assert.equal(mirror.includes("file:"), false, "and never by a machine-specific URL");
 });
