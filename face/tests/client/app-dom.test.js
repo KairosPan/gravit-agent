@@ -46,20 +46,22 @@ function host({ rows = [], pages = {}, meta = { ok: true, archived: [], deleted:
   };
   const getJson = async path => { reads.push(path); return path === '/data/channels.json' ? { ok: true, root: '/r', channels: [...channelRows], ungrouped: [], archived: [], presets: {} } : path === '/data/sessions-meta.json' ? meta : inventory[path] ?? { ok: true, bots: [] }; };
   const posted = [];
+  // an overview's body by workspace id, for a test that reads a channel's runs
+  const overviews = {};
   const postJson = async (path, body) => {
     posted.push([path, body]);
     // the face's two session routes, as the host would apply them to the next list
     if (path === '/data/sessions/delete') { const i = rows.findIndex(r => r.sessionId === body.sessionId); if (i >= 0) rows.splice(i, 1); }
     if (path === '/data/sessions/archive') meta.archived = body.archived ? [...meta.archived, body.sessionId] : meta.archived.filter(id => id !== body.sessionId);
     if (path === '/data/channels') { const dir = `/r/strategies/${body.name}`; channelRows.push({ workspaceId: `w-${body.name}`, name: body.name, title: body.name, dir, isRoot: false, sessionIds: [] }); return { ok: true, name: body.name, dir, isRoot: false }; }
-    if (path === '/data/channels/overview') return { ok: true, channel: channelRows.find(c => c.workspaceId === body.workspaceId), status: {}, body: {}, agents: [], bots: ['buffett'], allBots: [{ id: 'gravit', name: 'Gravit' }, { id: 'kairos', name: 'Kairos' }, { id: 'buffett', name: 'Buffett' }, { id: 'drill-bear', name: 'Bear' }] };
+    if (path === '/data/channels/overview') return { ok: true, channel: channelRows.find(c => c.workspaceId === body.workspaceId), status: {}, body: overviews[body.workspaceId] ?? {}, agents: [], bots: ['buffett'], allBots: [{ id: 'gravit', name: 'Gravit' }, { id: 'kairos', name: 'Kairos' }, { id: 'buffett', name: 'Buffett' }, { id: 'drill-bear', name: 'Bear' }] };
     if (path === '/data/channels/bots') return { ok: true, bots: body.bots };
     if (path === '/data/bots/settings') { const b = inventory['/data/bots.json'].bots[0]; inventory['/data/bots.json'] = { ok: true, bots: [{ ...b, name: body.name, description: body.description, soul: body.soul, model: body.model ?? undefined, revision: 'r2' }] }; return { ok: true }; }
     if (path === '/data/bots') { inventory['/data/bots.json'] = { ok: true, bots: [...inventory['/data/bots.json'].bots, { id: body.id ?? 'macro', name: body.name, description: '', homeCwd: '/r/bots/macro/home', soul: '', revision: 'm1', isDefault: false, listed: true, skills: [], setupIssues: [] }] }; return { ok: true, bot: { id: body.id ?? 'macro', name: body.name, listed: true } }; }
     if (path === '/data/agents/connect') { const c = inventory['/data/agents.json'].candidates.find(a => a.bin === body.bin); inventory['/data/agents.json'] = { ...inventory['/data/agents.json'], local: [{ ...c, found: true, auth: { state: 'ok' } }], candidates: [] }; return { ok: true, agent: c }; }
     return { ok: true, addressed: [] };
   };
-  return { openMux: o => { opts = o; return mux; }, call, getJson, postJson, markdown: null, calls, posted, answered, streams, rows, reads, inventory, ready: async () => { opts.onReady({}); await settle(); }, opts: () => opts };
+  return { openMux: o => { opts = o; return mux; }, call, getJson, postJson, markdown: null, calls, posted, answered, streams, rows, reads, inventory, overviews, ready: async () => { opts.onReady({}); await settle(); }, opts: () => opts };
 }
 const started = (f, h) => boot(f.win, { openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown });
 const send = f => f.fire('root', 'submit', { target: { closest: () => ({ dataset: { action: 'send' } }) } });
@@ -1255,6 +1257,66 @@ test('Discover draws the Research shelf: six module cards with their chips, Run 
   assert.match(f.html(), /Lunhui rows not mounted/);
   assert.equal(f.html().match(/class="pcard research in-grid dim"/g)?.length, 6);
   assert.ok(f.html().includes('>WEAK · STABLE</span>'), 'a dim card still shows its last headline');
+  store.timers.clear();
+});
+
+test('the module page: head, the three boxes, the runs table, the legend, the latest artifact after the overview answers; an unknown name', async () => {
+  const f = fakeWindow({ hash: '' });
+  const h = host({ rows: [row('s1')] });
+  h.overviews['ws-cn-market'] = { latestRun: { run: '20261028T020953Z-f3b89ce6', artifacts: { sentiment: { headline: {}, json: { module: 'sentiment', state: 'IGNITION' } } } } };
+  const store = started(f, h);
+  await h.ready();
+  f.win.location.hash = '#/module/sentiment';
+  await settle();
+  assert.deepEqual(store.get().route, { screen: 'module', id: 'sentiment' });
+  const html = f.html();
+  assert.match(html, /<main class="main disc plugin-page"><a id="page-back" class="back-link page-back" href="#\/discover">‹ Discover<\/a>/);
+  assert.match(html, /plug-name">Sentiment</);
+  assert.ok(html.includes('CN market analyst · deepseek-flash · cn-market'));
+  assert.ok(html.includes('>MODULE</span>'));
+  assert.ok(html.includes('>IGNITION · POSITIVE · NONE</span>'));
+  for (const box of ['Reads', 'Writes', 'Runs on']) assert.ok(html.includes(`dsec-label">${box}</div>`), box);
+  assert.ok(html.includes('>sentiment.json</span>'));
+  assert.ok(html.includes('>limit-up and index</span>'));
+  assert.ok(html.includes('strategies/cn-market/analysis/&lt;run&gt;/'));
+  assert.ok(html.includes('>10 calls per run · one artifact per run</span>'));
+  assert.match(html, /<table class="mod-runs">[\s\S]*<td class="mono">20261028T020953Z-f3b89ce6<\/td>/);
+  assert.ok(html.includes('The text&#39;s stages beside the seven labels'));
+  assert.ok(html.includes('P0161'));
+  const run = html.match(/<button[^>]*data-action="runModule"[^>]*>/g) ?? [];
+  assert.equal(run.length, 1);
+  assert.match(run[0], /\bdisabled\b/);
+  assert.match(run[0], /data-module="sentiment"/);
+  assert.deepEqual(h.posted.filter(p => p[0] === '/data/channels/overview'), [['/data/channels/overview', { workspaceId: 'ws-cn-market' }]]);
+  assert.match(html, /<details class="acct-shown"><summary>20261028T020953Z-f3b89ce6 · cn-market<\/summary><pre class="disc-text">\{&quot;module&quot;:&quot;sentiment&quot;,&quot;state&quot;:&quot;IGNITION&quot;\}<\/pre><\/details>/);
+  assert.match(html, /class="nav-item current" aria-current="page" href="#\/discover"/);
+  store.dispatch('toggleRail');
+  assert.equal(h.posted.filter(p => p[0] === '/data/channels/overview').length, 1, 'a render reads nothing');
+  // Run says it comes later, and posts nothing
+  f.click({ tagName: 'BUTTON', dataset: { action: 'runModule', module: 'sentiment' } });
+  assert.match(f.html(), /Run comes with plan 3/);
+  // an unknown name: Not found, with the way back
+  f.win.location.hash = '#/module/foo';
+  await settle();
+  assert.match(f.html(), /<main class="main disc plugin-page"><a id="page-back" class="back-link page-back" href="#\/discover">‹ Discover<\/a><div class="disc-none dim">Not found<\/div>/);
+  assert.match(f.html(), /class="nav-item current" aria-current="page" href="#\/discover"/);
+  assert.equal(h.posted.filter(p => p[0] === '/data/channels/overview').length, 1, 'an unknown name reads nothing');
+  store.timers.clear();
+});
+
+test('the module page opened from the Research shelf goes back to it; a module with no overview latestRun says where older runs are', async () => {
+  const f = fakeWindow({ hash: '#/discover/research' });
+  const h = host({ rows: [row('s1')] });
+  const store = started(f, h);
+  await h.ready();
+  await settle();
+  f.win.location.hash = '#/module/theme';
+  await settle();
+  const html = f.html();
+  assert.match(html, /href="#\/discover\/research">‹ Discover</);
+  assert.ok(html.includes('>not evaluable · boards</span>'));
+  assert.match(html, /open the channel page to read older runs/);
+  assert.doesNotMatch(html, /mod-legend/, 'Theme has no legend');
   store.timers.clear();
 });
 

@@ -28,9 +28,10 @@ export const reducers = {
     if (route.screen === 'messages' && route.id && route.id !== 'new') s.lastConv = route.id;
     // the Statement and a venue's Details belong to Account
     if (route.screen !== 'account' && (s.account.statementOpen || s.account.detailsVenue)) s.account = { ...s.account, statementOpen: false, detailsVenue: null };
-    // a plugin page goes back to the Discover view it was opened from; opened from outside Discover, to Discover itself
+    // a plugin or module page goes back to the Discover view it was opened from; opened from outside Discover, to Discover itself
+    const page = r => r === 'plugin' || r === 'module';
     if (route.screen === 'discover') s.lastDiscover = route;
-    else if (route.screen === 'plugin' && state.route.screen !== 'discover' && state.route.screen !== 'plugin') s.lastDiscover = { screen: 'discover', id: null };
+    else if (page(route.screen) && state.route.screen !== 'discover' && !page(state.route.screen)) s.lastDiscover = { screen: 'discover', id: null };
     // opening a conversation reads it: the dot goes until the host moves it again
     if (route.screen === 'messages' && route.id && route.id !== 'new') {
       const c = s.conversations.find(x => x.id === route.id);

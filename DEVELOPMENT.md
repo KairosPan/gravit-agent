@@ -1846,18 +1846,19 @@ sentence drawn as its words, the Account's and a channel's stale stamps, a tool 
 | `js/app.js` | `boot(win, host)`: the store, the live layer, the actions, the markets, account, seat, channel, Discover and trace host layers, the owner device, the owner sheet and Trade (stage 2 of the graft), the tab's Account stream and the render loop (§5.4); `makeStore`, `initialState`, `prefsOf`, `routeOf`, `settle`, `answersFrom`, `complete`, `gravitMarkdown`, `getJsonVia` (a refusal rejects with its status and, when it parses, the face's body as `error.body`, where the hosts read the Account's sentence), `postJsonVia`, `Timers`, `SEARCH_QUIET_MS` (300) are exported for the tests |
 | `js/store.js`, `js/reducers/index.js` | `createStore({initial, reducers, storage, key, accept, persist})` — `dispatch(type, payload)`, `get()`, `subscribe(fn)`; the reducer table is the merge of the per-slice modules |
 | `js/reducers/host.js` | the host reducers (§5.3): `hostStatus`, `hostList`, `hostWindow`, `hostEvent`, `hostGate`, `hostGateGone`, `hostProjection`, `hostThinking`, `hostPreview`, `markSeen` |
-| `js/reducers/messages.js`, `controls.js` | what the operator does with the page: `nav` (a market's Account key kept whole, a face id canonicalised; a missing conversation id becomes `firstOpen`'s; `lastDiscover`, the Discover view a plugin page goes back to), `toggleGroup`, the draft (`startDraft` — Where on the channel New round names, else the root —, `cancelDraft`, `setDraftTitle`, `setDraftWhere`), the optimistic `rename`, `toggleDetails`, `toggleRail`, `setTheme`; the inline editors (`startEdit`/`commitEdit`/`cancelEdit` — a rename, New channel…, a roster, a bot —, `editFailed`, which keeps an editor open with the refusal, `toggleRosterTick`), the two-step confirms (`askConfirm`/`cancelConfirm`) |
+| `js/reducers/messages.js`, `controls.js` | what the operator does with the page: `nav` (a market's Account key kept whole, a face id canonicalised; a missing conversation id becomes `firstOpen`'s; `lastDiscover`, the Discover view a plugin or module page goes back to), `toggleGroup`, the draft (`startDraft` — Where on the channel New round names, else the root —, `cancelDraft`, `setDraftTitle`, `setDraftWhere`), the optimistic `rename`, `toggleDetails`, `toggleRail`, `setTheme`; the inline editors (`startEdit`/`commitEdit`/`cancelEdit` — a rename, New channel…, a roster, a bot —, `editFailed`, which keeps an editor open with the refusal, `toggleRosterTick`), the two-step confirms (`askConfirm`/`cancelConfirm`) |
 | `js/reducers/markets.js`, `account.js` | the host's markets (§5.5): the Account's explore reads by tab (`exploreLoading`/`exploreLoaded`/`exploreFailed`) and the search's (`resultsLoading`/`resultsLoaded`/`resultsFailed`), each failure keeping its rows with the Account's sentence (`message`); the quotes by `venue\|symbol` — `accountQuotesLoaded` (an answer stamped before the price kept leaves the pair), `streamQuote` (a `quote` frame: the last trade, else the middle of the bid and ask, marked `streamed`, the 24-hour figures kept), `streamSnapshot` (a `snapshot` drops the pairs the stream priced); a page's candles by key under their range (`candlesLoading`/`candlesLoaded`/`candlesFailed`, `setRange`) and compare rows by base (`compareLoading`/`compareLoaded`/`compareFailed`); the stars (`accountWatchLoaded`, `askedOfAccount`, `forgetAsked`); the face's wire for the A shares (`watchlistLoaded`, `quotesUpdated`, `searchUpdated`, `hitQuotesLoaded`); and the screen's `setMarketsTab`, `setMarketsSort`, `setMarketsQuery` (a query typed from nothing opens All results, cleared there it goes back to All). The host's account: the page (`accountLoading`/`accountLoaded`/`accountFailed`, the failure keeping the last page with the Account's sentence), `holdings*`, `paper*` and `statement*` (each failure keeping the sentence), `history*`, `agents*`, the connect and paper sheets' reads — `venuesHere*`, `paperBooks*`, `keyfile*` (its `keyfileLoading` records what it asked), `reach*`, each failure keeping the sentence —, `setHistoryRange` (`1d`, `1w`, `1m`, `all`); the Account seat's (`seatLoading`/`seatLoaded`/`seatFailed`, a failure keeping the last view); the drawers' `openStatement`/`closeStatement`, `openVenueDetails`/`closeVenueDetails` (a venue's Details, one drawer at a time through `closeOverlays`) and `openSettings`/`closeSettings` |
 | `js/reducers/owner.js`, `trade.js` | stage 2 of the graft (§5.5): the owner device (`ownerStanding` — a role it does not know changes nothing —, `ownerRefusal`, `ownerBusy`) and the open sheet (`sheetOpen`, `sheetField`, `sheetIncomplete`, `sheetAsking` — a quiet ask keeps a ready sheet's preparation —, `sheetPrepared`, `sheetRefused`, `sheetSigning`, `sheetDone`, `sheetTick`, `sheetClose`); Trade (`tradeKind`, `tradeQuery`, `picksLoading`/`picksLoaded`/`picksFailed` by kind, `tradeResultsLoading`/`tradeResultsLoaded`/`tradeResultsFailed` — named apart from the Markets search's —, `ticketOpen`, `ticketClose`, `tradeSaid`) |
-| `js/reducers/channels.js`, `discover.js`, `traces.js` | the channel page's read (`channelLoading`, `channelLoaded`, `channelFailed` — a failure keeps that channel's data, a 404 reads `missing`); Discover's (`setDiscoverQuery`, `shelfLoading`/`shelfLoaded`/`shelfFailed` — a failed shelf keeps its data —, `gravitLoaded`, `skillLoading`/`skillLoaded`/`skillFailed`, `modelsLoaded`, `discoverStatus`); a member's trace by the answer it explains, under its conversation (`traceLoading`, `traceLoaded`, `traceFailed`) |
+| `js/reducers/channels.js`, `discover.js`, `traces.js` | the channel page's read (`channelLoading`, `channelLoaded`, `channelFailed` — a failure keeps that channel's data, a 404 reads `missing`); Discover's (`setDiscoverQuery`, `shelfLoading`/`shelfLoaded`/`shelfFailed` — a failed shelf keeps its data —, `gravitLoaded`, `skillLoading`/`skillLoaded`/`skillFailed`, `modelsLoaded`, `discoverStatus`; a module page's latest artifact, `moduleArtifactLoading`/`moduleArtifactLoaded`/`moduleArtifactFailed` — a re-read keeps what it had); a member's trace by the answer it explains, under its conversation (`traceLoading`, `traceLoaded`, `traceFailed`) |
 | `js/data/empty.js` | `emptyState()`: the state the page boots into — no conversations, `status.line = "connecting…"`, every slice at its empty shape (§5.5), the `seat` slice among them (`{status, data, at}`), and no demo slice: no `plugins`, `memory`, `mail`, `banner`, `call` or `compose` |
 | `js/host/kinds.js` | the kind table (spec §6, §5.3): a mapper view → zero, one or two messages; `SEAT_TOOLS` (the seat's twelve writes), `isSeatWriteTool`, `parseArgs`, `seatLine` (a seat write in words), `seatLift` (a seat write's answer as a receipt, a refusal or nothing), `rememberCall`, `toMessages`, `reasonArgs` |
 | `js/host/sessions.js` | `session/list` rows → conversation records: `kindOf`, `conversationOf`, `listConversations`, `unreadOf`; `childRowsOf` (the subagent rows the list leaves out, kept for their parent's Children) and `firstOpen` (the conversation every default opens, never an archived one) |
 | `js/host/live.js` | the impure half: the mux, the follow-or-page policy, the list and its previews, gates, projections, host facts — all into the store, nothing into the DOM |
 | `js/host/actions.js` | a `data-action` → the Remote or face route the old client sent: `send`, `newConversation`, `answer`, `stop`, `rename`, `command`; the row actions `fork`, `archive`, `remove`; `talkTo` (a bot's home conversation), `stopChild` |
 | `js/host/list-view.js`, `discover-view.js`, `children-view.js` | stage 3's pure views (§5.3): `groupsOf` (the list's groups); `SHELVES`, `SOURCE`, `itemsOf`, `searchItems`, `itemById` (Discover's items under namespaced ids); `childrenOf` (a conversation's subagent children and their states) |
+| `js/host/modules-view.js` | the six Lunhui modules' pure view (module cards spec §5.1, §5.3, Appendix A): `MODULES` — the one client table the cards share with the server (name, title, 副题, role and role id, route, channels and their words, file, headline fields, the two tools, `freezes` and `artifacts` as the page's Reads box words them, glyph, legend), kept in step with `face/src/channels.ts` `MODULE_HEADLINES`, `face/plugins/lunhui/lib/modules.mjs` and the roles by `tests/lunhui-modules-table.test.ts` —, `MODULE_NAMES`, `moduleOf`, `latestOf` (the newest run among the module's channels), `headlineWords`, `chipOf`, `researchItems` (the shelf's six), `runsOf` (the page's rows, at most 24) and `pageOf` (the page: the chip, the latest run, the rows, the Reads / Writes / Runs on boxes) over `/data/modules.json` |
 | `js/host/runs-view.js` | the Lunhui runs card's pure view (§5.2; modules spec §5.11): `runsView` (the overview's `runs`, `runsOmitted` and `latestRun` → the latest run's line, a chip per module — the mode's its mode word alone — the expectation card's rows, the previous card's review line (`review: <grade> of <previous_run>`, null without both), each artifact's compact JSON for its collapsed details, a dim row per run, the omitted count), `valueWord` (a headline value as a word), `countWord` (a count with its noun, singular for one) |
-| `js/host/channels.js`, `discover.js`, `traces.js` | stage 3's impure halves: `startChannels` (a channel's overview, a new channel, the two roster writes; `MAX_BOTS`), `startDiscover` (the four listings, the Gravit item's three reads, a skill's content, the CLI agents' writes, the model routes, a bot's save and create; `SHELF_PATHS`, `GRAVIT_KEYS`), `startTraces` (a room member's trace, read once per answer) |
+| `js/host/channels.js`, `discover.js`, `traces.js`, `modules.js` | stage 3's impure halves: `startChannels` (a channel's overview, a new channel, the two roster writes; `MAX_BOTS`), `startDiscover` (the five listings, the Gravit item's three reads, a skill's content, the CLI agents' writes, the model routes, a bot's save and create; `SHELF_PATHS`, `GRAVIT_KEYS`), `startTraces` (a room member's trace, read once per answer), `startModules` (a module page's latest artifact through its channel's overview) |
 | `js/host/market-view.js`, `account-view.js` | the pure views (§5.3): the Account's markets (`ACCOUNT_TABS`, `ACCOUNT_SORTS`, `CANDLE_RANGES`, `isAccountKey`, `tabsOf`, `priceOf`, `sourceWordOf`, `legsOf`, `followOf`, `sortsOf`, `tableOf`, `rowsOf`, `watchedOf`, `watchKeysOf`, `setWatchOf`, `matchKey`, `pairsOf`, `pageOf`, `handWordsOf`, `volumeWordOf`), the face's ids and the A shares' words (`canonicalId`, `faceAssetOf`, `mentionsOf`, `quoteWord`, `connectionWord`, `providerWord`, `basisWord`, `sourceWord`, `volumeWord`, `searchWord`, `watchWord`); the Account's page (`pageOk`, `headOf`, `worthOf`, `changeOf`, `assetsOf`, `positionsOf`, `openOrdersOf`, `missingWords`, `statementLinesOf`, `statementCsvOf`, `venuesOf`, `agentsOf`, `cardsOf`, `asksOf`, `requestsOf`, and for the connect and paper sheets `connectOptionsOf`, `paperBooksOf`, `keyfileWords`) and `seatWords` (the seat's standing in the Venues box's words) |
 | `js/host/markets.js`, `account.js`, `seat.js` | the impure halves: `startMarkets` (the Account's explore, quotes, candles and compare through the face's proxy, a market page's follow on the stream, the stars in this browser's two stores — an Account market's, on a page that signs, the Account's own signed `setWatch` —, each old `us:`/`crypto:` star asked once; the face's wire for the A shares), `startAccount` (the Account's page, holdings and paper lens, history, statement and agents, and the connect and paper sheets' four reads, each one flight; the page polled and handed to `onPage`; the stream's events as reads) and `startSeat` (`/data/seat.json` in one flight, fresh on Refresh, a card raised or answered and after a seat receipt) |
 | `js/wire/owner-key.js`, `key-store.js` | the owner key (§5.3): `canonical`, `b64u`, `signingInput`, `kidOf`, `publicJwkOf`, `signPrepared`, `makeKey` — the Account's envelope arithmetic, `subtle` always the caller's; `indexedDbKeys` (database `gravit-face-owner`, version 1, store `keys`, record `device`), `memoryKeys` (its twin for tests and a browser without IndexedDB), `signedOutFlag` (`gravit.owner.signedOut.v1`) |
@@ -1872,8 +1873,8 @@ sentence drawn as its words, the Account's and a channel's stale stamps, a tool 
 | `js/render/rail.js`, `messages.js`, `thread.js`, `avatars.js`, `controls.js` | the two-level rail (Discover in the first level) and the list's groups; the Messages screen (head, Details with the row actions and Children, composer, status line, new message with New channel…, empty state); the thread's kinds, a tool row's dressed result and its Raw, a member's Trace; avatars and clusters (a bot's letter from the host's bot names); the segs, the key-value rows, the inline editor and confirm pair |
 | `js/render/markets.js`, `chart.js`, `account.js`, `js/market-fmt.js` | stage 2's screens (§5.4), on the Account's reads since the graft's stage 1: Markets — the Account's rows by tab beside the A shares — and a market's page (`renderMarketsScreen`, `marketPage`, `mkAv`, the face's own letter tile); the charts, one drawing in one box — `candlesSvg` (a market's closes from the Account's candles, the page's chart), `curveSvg` (the Portfolio's curve from its history); Account (`renderAccountScreen` — Portfolio, Venues with a venue's Details drawer and the Account seat box, Agents, Cards — the Statement drawer `renderStatement`, `orderWords`) and the Settings drawer (`renderSettings`); `chgHtml`, a change with its arrow (the A-share page's) |
 | `js/render/owner.js`, `trade.js` | stage 2 of the graft (§5.4): the device line under the Account head (`renderDeviceLine`), Settings › Devices (`renderDevices`), the owner sheet's drawer (`renderSheet`); the Trade screen (`renderTradeScreen`: the kinds, the picker, Under way, the ticket) |
-| `js/render/channel.js`, `discover.js`, `tool-result.js` | stage 3's screens (§5.4): a channel's page (`renderChannelScreen`, `bytesWord`; its Research runs section from `runsView`); Discover, a shelf's grid, the Create page and an item's page (`renderDiscover`, `renderPlugin`); a tool row's result seam (`toolResultHtml`, `toolResultFor` — `null` for every call since 2026-10-24, so every result draws plain) |
-| `js/html.js`, `icons.js`, `time.js`, `router.js`, `messages.js` | `esc`/`attrs`/`cls`; the inline SVG icon set; `rowTime`/`divider`/`fmtDate`/`fmtClock`; `parseHash`/`toHash`; `LEVELS` — the host's kinds alone: text and tool grey, card, approval and question orange, refusal red, receipt green — `levelOf`/`needsAnswer` |
+| `js/render/channel.js`, `discover.js`, `modules.js`, `tool-result.js` | stage 3's screens (§5.4): a channel's page (`renderChannelScreen`, `bytesWord`; its Research runs section from `runsView`); Discover, a shelf's grid — the Research shelf's module cards among them —, the Create page and an item's page (`renderDiscover`, `renderPlugin`); a Lunhui module's page (`renderModule`); a tool row's result seam (`toolResultHtml`, `toolResultFor` — `null` for every call since 2026-10-24, so every result draws plain) |
+| `js/html.js`, `icons.js`, `time.js`, `router.js`, `messages.js` | `esc`/`attrs`/`cls`; the inline SVG icon set; `rowTime`/`divider`/`fmtDate`/`fmtClock`; `parseHash`/`toHash` (`#/module/<name>` among the routes); `LEVELS` — the host's kinds alone: text and tool grey, card, approval and question orange, refusal red, receipt green — `levelOf`/`needsAnswer` |
 | `css/tokens.css`, `css/app.css` | the tokens (Linqi's Cream and Black values, demo @ 0ef5131) and the one sheet |
 
 The old `/market` and `/account` pages are gone too (stage 2): their documents, scripts
@@ -2501,8 +2502,9 @@ than `MAX_BOTS`, six, before the post) and re-read the overview: each answers `{
 
 **Discover** (`js/host/discover.js`). `startDiscover({store, getJson, postJson, call, now})`
 returns `{load, read, gravit, skill, connect, disconnect, rescan, modelChoices, saveBot,
-createBot}`. `load()` reads the four listings (`SHELF_PATHS`: plugins, bots, agents, memory), each
-alone — a plain read joins its shelf's flight, a read after a write (`read(shelf, {fresh:
+createBot}`. `load()` reads the five listings (`SHELF_PATHS`: plugins, bots, agents, memory and,
+since the module cards spec §5.1, modules — `/data/modules.json`, a listing without `channels`
+failing), each alone — a plain read joins its shelf's flight, a read after a write (`read(shelf, {fresh:
 true})`) starts a fresh one, and only the latest-started read of a shelf lands; a listing without
 its array is a failure, and `shelfFailed` keeps the last good one. `gravit()` makes the Gravit
 item's three reads, each failing alone (`gravitLoaded {host, model, keys}`, each the value, or
@@ -2520,6 +2522,19 @@ outcome but a plain failure re-reads the bots. `createBot({name, id, description
 leaves blank fields to the face, refuses a nameless bot (`Give it a name`) and a name with no ASCII
 letters and no id (`Give it an id: a-z, 0-9, -`) before the post, re-reads the bots, and answers
 the new id (from the route's `{ok, bot}`) or `{error}`.
+
+**A module's page** (`js/host/modules.js`, module cards spec §5.3). `startModules({store,
+postJson, readListing})` returns `{latestArtifact(module)}`; `app.js` hands it `readListing` as
+Discover's `read('modules')` (joining the shelf's flight) then the listing the store holds.
+`latestArtifact` awaits the listing, takes `latestOf(listing, module)` — the newest run among the
+module's channels — and, when there is one, dispatches `moduleArtifactLoading`, posts
+`/data/channels/overview` for that run's `workspaceId` as `host/channels.js` does, and dispatches
+`moduleArtifactLoaded {module, run, json}`: `json` is the overview's
+`body.latestRun.artifacts[module].json` when `body.latestRun.run` is that run, else `null` (the
+overview's latest is the channel's newest sealed run with an artifact, which may be another); a
+rejected post is `moduleArtifactFailed`. No run, an unknown name or an unreadable listing posts
+nothing. One read per page entered (`app.js` calls it when the route's module changes), and only
+the latest-started read of a module lands; each module reads alone.
 
 **Traces** (`js/host/traces.js`). `startTraces({store, call, loadMemberTrace, now})` returns
 `{open(convId, msgId)}`: once per answer — an answer is its conversation and message id, since a
@@ -2540,7 +2555,8 @@ collapsed group shows only the conversation on screen. `itemsOf(discover)` (`dis
 turns the listings into cards under namespaced ids — `mcp:<server>` with its tool count on Data,
 `bot:<id>` on Bots (never the default composition), `agent:gravit` first then the connected and
 the found CLI agents (`agent:<bin>`, `Connected`, `Not found`, `Found · <version>`) on Agents,
-`skill:<name>` with its group on Skills; `searchItems` matches name and line, `itemById` finds an
+`skill:<name>` with its group on Skills, `module:<name>` for the six Lunhui modules on Research
+(`researchItems`, always six, the listing filling their chips); `searchItems` matches name and line, `itemById` finds an
 item for its page. `childrenOf(conv, childRows)` (`children-view.js`) composes the parent's
 `subagentCatalog` with the child rows (`composeSubagentCatalog` → `normalizeSubagentCatalog` →
 `subagentControls`): `{children: [{id, label, mode, state, canStop}], unavailable}` — a malformed
@@ -2557,7 +2573,7 @@ escaped), makes the tab's Account stream (`createAccountStream` over `win.EventS
 while it is hidden), starts `startAccount` (and reads the page at once) and `startSeat`, then
 `startMarkets` (the Account's reads on the app's timers, the stream, the wire's quote and search
 factories over `win.fetch` and `win.EventSource` for the A shares, the browser's storage),
-`startChannels`, `startDiscover` and `startTraces`, and renders on every store change. Since the
+`startChannels`, `startDiscover`, `startModules` and `startTraces`, and renders on every store change. Since the
 graft's stage 2 it starts the owner device first (`startOwner` over `win.crypto.subtle`,
 `indexedDbKeys(win.indexedDB)` — `memoryKeys()` where there is none — `signedOutFlag(storage)` and
 `postVia(win.fetch)`; `startAccount`'s `onPage` hands every page to `owner.standing`, so the first
@@ -2856,10 +2872,37 @@ composition), ticked as rostered, a seventh bot box shut while six are ticked, �
 Retry, `Channel not found`. Every channel-written string is text.
 
 **Discover** (`render/discover.js`) — the head (`Discover`, the search box `#dq`, `Search`, the
-`Create a bot` key); the shelves **Data**, **Bots**, **Agents** (with `Rescan`), **Skills**, each
-with `See all` and its cards (the mark, the name, one line, the kind tag), a failed listing saying
-`Couldn't read <Shelf>` with Retry beside the others, `Loading…`, or the shelf's empty words; a
-search draws one grid (`N results`); `#/discover/<shelf>` the shelf as a grid with `‹ Discover`.
+`Create a bot` key); the shelves **Data**, **Research**, **Bots**, **Agents** (with `Rescan`),
+**Skills**, each with `See all` and its cards (the mark, the name, one line, the kind tag), a failed
+listing saying `Couldn't read <Shelf>` with Retry beside the others, `Loading…`, or the shelf's
+empty words; a search draws one grid (`N results`); `#/discover/<shelf>` the shelf as a grid with
+`‹ Discover`. **The Research shelf** (module cards spec §5.1) is a grid, never a scrolling row, of
+the six Lunhui modules (`Lunhui · 6 modules` beside its title), always six whatever the listing
+holds: each card links its glyph, name, 副题 and `MODULE` tag to `#/module/<name>`, then its role
+and channel words (`CN market analyst · cn-market`), then a foot with the chip and `Run` — drawn
+disabled until plan 3, its `runModule` action only putting `Run comes with plan 3` on Discover's
+line. The chip reads the newest run among the module's channels (`chipOf`): its headline words
+(`ok`, or grey for the quiet ones — `no candidate`, `WAIT`, `0 items`), `not evaluable · <missing
+sources>` (`warn`), `not run` when that run lacks the module, `no run yet` with no run; a strategy
+or either module's chip leads with the run's channel. When the listing says the Lunhui rows are
+not `mounted`, the line `Lunhui rows not mounted` shows and the cards stay, dimmed, their chips
+grey. **A module's page** (`render/modules.js`, `#/module/<name>`, spec §5.3) wears the plugin
+page's chrome (`main.disc.plugin-page`, `‹ Discover` back to the view it came from, Discover lit
+in the rail): the head — the glyph at 72, the name, `<role> · deepseek-flash · <channel words>`,
+`MODULE` beside the chip, the disabled `Run` —; three key-value boxes, **Reads** (Freezes,
+Artifacts, Channel), **Writes** (File, Headline, Under — `strategies/<channel>/analysis/<run>/`
+with the channel named as far as it is known) and **Runs on** (Role, Route, Budget `10 calls per
+run · one artifact per run`); **Runs**, a table across the module's channels newest first —
+Session, Channel, Run, Status (a chip: `OK` green, `NOT_EVALUABLE` amber), Headline — at most 24
+rows, or `No run yet`; **Latest artifact**, the latest run's artifact as compact JSON in a
+collapsed details once its channel's overview answers with that run, `Loading…` while it reads,
+`open the channel page to read older runs` when the overview's latest is another run, `Couldn't
+read` when the post failed; and, for Sentiment, Leader, Mode and Counterevidence, the legend of
+Appendix A under its title — a label beside its reading, paragraph ids only. Before the modules
+listing is read, Runs and Latest artifact say `Loading…` (`Couldn't read` when it failed); an
+unknown name reads `Loading…` while the listing is read, then `Not found`. `#/plugin/module:<name>`
+is not redirected: it draws the plugin page's minimal body for a Research item (its role and
+channel line), and nothing links there.
 **An item's page** (`#/plugin/<id>`, `‹ Discover` back to the view it came from): an MCP server's
 State (`Pending`, `Loading`, `Active`, `Failed`, `Unloading`) and its tools, each description
 clamped to two lines (a server may describe a tool with a whole method list); a bot's model
@@ -2888,7 +2931,9 @@ The store holds the host's facts (§5.3) and the page's own: `route`, `draft`, `
 folded), `theme`, `lastConv`, `lastSeen`, `status`, `orphanGates`, `channels`, `bots`,
 `conversations`, `childRows`, `traces` (a member's trace by the answer it explains, `traces[convId][msgId]`); `channel`
 (`id`, `status`, `data`, `at` — the page's overview); `discover` (`query`, `shelves` — `plugins`,
-`bots`, `agents`, `memory`, each `{status, data, at}` —, `gravit`, `skills`, `models`, `status`);
+`modules` (`/data/modules.json` as read), `bots`, `agents`, `memory`, each `{status, data, at}` —,
+`gravit`, `skills`, `models`, `status`, `artifacts` — a module page's latest artifact by module,
+`{status: loading | ready | failed, run, json}`);
 `markets` — the screen's `tab` (an `ACCOUNT_TABS` id, `watching` or `results`), `sort`
 (`volume`, `movers`, `closing`) and `q`; the Account's `explore` reads by tab (`all`, a kind's own;
 each `{status, data, at, message}`) and the search's `results`; `accountQuotes` by `venue|symbol`
@@ -3265,18 +3310,24 @@ refused, `parseHosts`). The face's:
   approval, a member's turn), `sessions` (rows → conversations, the
   fold, `Untitled`, the archived marks, the child rows, `firstOpen`), `host-reducers` (windows
   replace, events dedupe by id and insert by seq, a checkpoint's replace range, gates and
-  orphans, the catalog kept across a list), `actions` (the Remotes and routes each data-action
+  orphans, the catalog kept across a list, a module page's latest artifact loading, ready and failed
+  and the `lastDiscover` it keeps), `actions` (the Remotes and routes each data-action
   sends: the row actions and their refusals, Talk to, a child's Stop), `live` (follow or page,
   promote, suspend and re-decide, gates by `eventId`, previews, host facts, the last good
   channels, sessions-meta and bots), `thread` (a tool result drawn plain, a member's
-  Trace), `rail` (the groups and their heads, Discover in the first level, the Account's leading
+  Trace), `rail` (the groups and their heads, Discover in the first level and lit on a plugin or module page, the Account's leading
   figure with `Paper` when Paper leads, the cards-waiting badge), `list-view` (the
   groups' order and folds), `messages-screen` (Details' row keys, Children, Where's channels by
   their titles and New channel…), `channel` and `host-channels` (a channel's page in every state —
   markup in every field stays text — its editors, the overview's latest-wins read, New channel,
   the roster writes), `discover-view`, `host-discover` and `discover` (Discover's items under
-  namespaced ids, the four listings each alone, the Gravit item, a skill, the agent writes, a
+  namespaced ids, the five listings each alone, the Gravit item, a skill, the agent writes, a
   bot's revision-checked save and a new bot, the shelves and every kind of page, no shop words),
+  `modules-view` (the six modules' table and legends, the fixture day's six chips, a chip's
+  every state, the latest run across channels, the page's rows and its Reads, Writes and Runs on
+  boxes, every Reads label true) and `host-modules` (a module page's latest artifact through its
+  channel's overview: the run matched or not, a failed post, no run, the latest-started read
+  landing alone),
   `tool-result` (no result dressed, an old session's Alpaca result
   included; an error never), `children-view` and `host-traces` (a conversation's children and their
   states; a member's trace read once per conversation and message, non-activating), `wire-words`
@@ -3284,7 +3335,10 @@ refused, `parseHosts`). The face's:
   wire modules), `app` and `app-dom` (the boot: routes, the render loop, every data-action against
   the store, a press holding renders until it ends, the open disclosures kept across a render, the
   prefs' folds, fork, archive and delete moving the page, a deletion elsewhere, a channel's page
-  and New round, New channel… in Where, the roster editors, Discover's reads, Connect, Talk to, a
+  and New round, New channel… in Where, the roster editors, Discover's reads, the Research shelf's
+  six cards with Run disabled and dimmed when not mounted, a module's page — its head, boxes, runs,
+  legend and latest artifact after one overview read, back to the shelf it came from, an unknown
+  name `Not found` —, Connect, Talk to, a
   bot's save and a new bot, a member's trace never followed and opened by one click, a child's
   Stop; the Markets search after 300 ms of quiet and Clear at once, a star on an A share and on an
   Account market (its own store, an old star's find taken off in one press, Remove), a market's

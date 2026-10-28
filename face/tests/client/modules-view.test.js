@@ -150,13 +150,30 @@ test('runsOf and pageOf: the rows across channels newest first, the three boxes'
   assert.equal(page.module, moduleOf('theme'));
   assert.deepEqual(page.chip, { text: 'not evaluable · boards', tone: 'warn' });
   assert.equal(page.latest.run, MARKET_RUN);
-  assert.deepEqual(page.kv.reads, [['Freezes', 'boards and limit-up freezes'], ['Artifacts', 'no artifact'], ['Channel', 'cn-market']]);
+  assert.deepEqual(page.kv.reads, [['Freezes', 'boards and limit-up'], ['Artifacts', 'none'], ['Channel', 'cn-market']]);
   assert.deepEqual(page.kv.writes, [['File', 'theme.json'], ['Headline', 'mainline_candidates · theme_stage · rotation'], ['Under', 'strategies/cn-market/analysis/<run>/']]);
   assert.deepEqual(page.kv.runsOn, [['Role', 'CN market analyst'], ['Route', 'deepseek-official/deepseek-flash'], ['Budget', '10 calls per run · one artifact per run']]);
   assert.equal(page.rows.length, 1);
   assert.equal(page.rows[0].status, 'NOT_EVALUABLE');
   assert.equal(page.rows[0].words, 'not evaluable · boards');
-  assert.equal(pageOf(modulesListing(), 'leader', true).kv.writes[2][1], 'strategies/a strategy/analysis/<run>/');
+  assert.equal(pageOf(modulesListing(), 'leader', true).kv.writes[2][1], 'strategies/<strategy>/analysis/<run>/');
+  assert.equal(pageOf(modulesListing(), 'mode', true).kv.writes[2][1], 'strategies/<strategy>/analysis/<run>/');
+  assert.equal(pageOf(modulesListing(), 'counterevidence', true).kv.writes[2][1], 'strategies/<channel>/analysis/<run>/');
+  assert.equal(pageOf(modulesListing(), 'nope', true), null);
+});
+
+test('pageOf: every Reads box names its freezes and its artifacts truly, then the channel', () => {
+  const reads = name => pageOf(modulesListing(), name, true).kv.reads;
+  assert.deepEqual(MODULES.map(m => [m.name, ...reads(m.name).slice(0, 2).map(([k, v]) => `${k}: ${v}`)]), [
+    ['environment', 'Freezes: index; quotes when frozen', 'Artifacts: none'],
+    ['sentiment', 'Freezes: limit-up and index', 'Artifacts: none'],
+    ['theme', 'Freezes: boards and limit-up', 'Artifacts: none'],
+    ['leader', "Freezes: the run's quotes", "Artifacts: the cited market run's limit-up pools, mainline member lists, theme and sentiment artifacts"],
+    ['mode', 'Freezes: none', "Artifacts: the run's leader and counterevidence · the cited market run's three artifacts · the previous mode card"],
+    ['counterevidence', 'Freezes: none', "Artifacts: the run's accepted artifacts and evidence rows · a strategy: the cited market run's too"],
+  ]);
+  assert.deepEqual(reads('mode')[2], ['Channel', 'a strategy']);
+  assert.deepEqual(reads('counterevidence')[2], ['Channel', 'cn-market or a strategy']);
 });
 
 test('runsOf: at most 24 rows, newest first by run id', () => {

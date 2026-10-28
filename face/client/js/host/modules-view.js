@@ -16,6 +16,8 @@ const MARKET_ANALYST = ['CN market analyst', 'cn-market-analyst'];
 const STOCK_ANALYST = ['CN stock analyst', 'cn-stock-analyst'];
 const REVIEWER = ['CN reviewer', 'cn-reviewer'];
 const CHANNEL_WORDS = { market: 'cn-market', strategy: 'a strategy', either: 'cn-market or a strategy' };
+// the directory a module writes under: strategies/<channel>/analysis/<run>/, the channel named as far as it is known
+const DIR_CHANNEL = { market: 'cn-market', strategy: '<strategy>', either: '<channel>' };
 
 // a legend row from one of Appendix A's ` · `-separated readings, `LABEL ← text`
 const arrowRows = s => s.split(' · ').map(r => { const [label, text] = r.split(' ← '); return { label, text }; });
@@ -87,26 +89,27 @@ const COUNTEREVIDENCE_LEGEND = {
 /** @template T @param {T} o @returns {T} */
 const deepFreeze = o => { for (const v of Object.values(o)) if (v && typeof v === 'object') deepFreeze(v); return Object.freeze(o); };
 
-const entry = (name, title, subtitle, [role, roleId], channels, headline, reads, icon, legend = null) => ({
+// `freezes` and `artifacts` are what the page's Reads box says the module reads, `none` where it reads nothing of a kind
+const entry = (name, title, subtitle, [role, roleId], channels, headline, [freezes, artifacts], icon, legend = null) => ({
   name, title, subtitle, role, roleId, route: ROUTE, channels, channelWords: CHANNEL_WORDS[channels], file: `${name}.json`,
-  headline, tools: [`lunhui_read_${name}_context`, `lunhui_submit_${name}`], reads, icon, legend,
+  headline, tools: [`lunhui_read_${name}_context`, `lunhui_submit_${name}`], freezes, artifacts, icon, legend,
 });
 
 export const MODULES = deepFreeze([
   entry('environment', 'Environment', '环境与大周期 · index · liquidity · cycle anchor', MARKET_ANALYST, 'market',
-    ['index_state', 'liquidity_state', 'cycle_anchor'], 'index freeze; quotes when frozen · no artifact', 'layers'),
+    ['index_state', 'liquidity_state', 'cycle_anchor'], ['index; quotes when frozen', 'none'], 'layers'),
   entry('sentiment', 'Sentiment', '情绪周期 · state · money effect · 冰点', MARKET_ANALYST, 'market',
-    ['state', 'money_effect', 'freeze_type'], 'limit-up and index freezes · no artifact', 'pulse', SENTIMENT_LEGEND),
+    ['state', 'money_effect', 'freeze_type'], ['limit-up and index', 'none'], 'pulse', SENTIMENT_LEGEND),
   entry('theme', 'Theme', '题材与轮动 · mainline · stage · rotation', MARKET_ANALYST, 'market',
-    ['mainline_candidates', 'theme_stage', 'rotation'], 'boards and limit-up freezes · no artifact', 'flame'),
+    ['mainline_candidates', 'theme_stage', 'rotation'], ['boards and limit-up', 'none'], 'flame'),
   entry('leader', 'Leader', '龙头与个股地位 · candidates · 顺位 · pattern flags', STOCK_ANALYST, 'strategy',
     ['leader_candidates', 'top_pattern_flags'],
-    "the run's quotes · the cited market run's limit-up pools, mainline member lists, theme and sentiment artifacts", 'podium', LEADER_LEGEND),
+    ["the run's quotes", "the cited market run's limit-up pools, mainline member lists, theme and sentiment artifacts"], 'podium', LEADER_LEGEND),
   entry('mode', 'Mode', '模式选择与预期 · mode · preconditions · expectation', STOCK_ANALYST, 'strategy',
     ['mode', 'preconditions', 'research_only_matches', 'expectation', 'expectation_review'],
-    "the run's leader and counterevidence · the cited market run's three artifacts · the previous mode card", 'switch', MODE_LEGEND),
+    ['none', "the run's leader and counterevidence · the cited market run's three artifacts · the previous mode card"], 'switch', MODE_LEGEND),
   entry('counterevidence', 'Counterevidence', '反证 · items against the accepted artifacts', REVIEWER, 'either',
-    ['items'], "the run's accepted artifacts and evidence rows · a strategy: the cited market run's too", 'shield', COUNTEREVIDENCE_LEGEND),
+    ['items'], ['none', "the run's accepted artifacts and evidence rows · a strategy: the cited market run's too"], 'shield', COUNTEREVIDENCE_LEGEND),
 ]);
 
 export const MODULE_NAMES = new Set(MODULES.map(m => m.name));
@@ -215,12 +218,11 @@ export function runsOf(listing, module) {
 export function pageOf(listing, module, mounted) {
   const m = moduleOf(module);
   if (!m) return null;
-  const [freezes, ...artifacts] = m.reads.split(' · ');
   return {
     module: m, chip: chipOf(listing, module, mounted), latest: latestOf(listing, module), rows: runsOf(listing, module),
     kv: {
-      reads: [['Freezes', freezes], ['Artifacts', artifacts.join(' · ')], ['Channel', m.channelWords]],
-      writes: [['File', m.file], ['Headline', m.headline.join(' · ')], ['Under', `strategies/${m.channelWords}/analysis/<run>/`]],
+      reads: [['Freezes', m.freezes], ['Artifacts', m.artifacts], ['Channel', m.channelWords]],
+      writes: [['File', m.file], ['Headline', m.headline.join(' · ')], ['Under', `strategies/${DIR_CHANNEL[m.channels]}/analysis/<run>/`]],
       runsOn: [['Role', m.role], ['Route', m.route], ['Budget', BUDGET]],
     },
   };

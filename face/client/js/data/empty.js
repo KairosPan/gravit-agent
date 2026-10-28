@@ -23,11 +23,12 @@ export function emptyState() {
     status: { line: 'connecting…', bad: false, connected: false },
     orphanGates: {},
     lastSeen: {},
-    // Discover from the face (host/discover.js): the five listings, the Gravit item, the skills read, its own line
+    // Discover from the face (host/discover.js): the five listings, the Gravit item, the skills read, its own line; a module
+    // page's latest artifact by module (host/modules.js)
     discover: {
       query: '',
       shelves: Object.fromEntries(['plugins', 'modules', 'bots', 'agents', 'memory'].map(k => [k, { status: 'idle', data: null, at: null }])),
-      gravit: { host: null, model: null, keys: null }, skills: {}, status: null, models: null,
+      gravit: { host: null, model: null, keys: null }, skills: {}, status: null, models: null, artifacts: {},
     },
     // the host's markets (host/markets.js) and the screen's own tab, sort and query: the Account's explore reads by tab (`all`,
     // a kind's own) and the search's, the quotes by 'venue|symbol', a page's candles by its key and compare rows by base, the

@@ -16,6 +16,10 @@ test('parseHash and toHash round-trip; Messages and Markets route, every other s
   assert.deepEqual(routeOf('#/discover/agents'), { screen: 'discover', id: 'agents' });
   assert.deepEqual(routeOf('#/discover/create'), { screen: 'discover', id: 'create' });
   assert.deepEqual(routeOf('#/plugin/agent:gravit'), { screen: 'plugin', id: 'agent:gravit' });
+  // a Lunhui module's page: its name after #/module/
+  assert.deepEqual(routeOf('#/module/theme'), { screen: 'module', id: 'theme' });
+  assert.equal(parseHash('#/module/theme').id, 'theme');
+  assert.equal(toHash(parseHash('#/module/theme')), '#/module/theme');
   assert.deepEqual(routeOf('#/mail'), { screen: 'messages', id: null }, 'Mail folds to Messages');
   assert.deepEqual(routeOf('#/markets/us:AAPL'), { screen: 'markets', id: 'us:AAPL' });
   assert.deepEqual(routeOf('#/markets'), { screen: 'markets', id: null });

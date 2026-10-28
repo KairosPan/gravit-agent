@@ -23,6 +23,8 @@ import { startChannels } from './host/channels.js';
 import { renderChannelScreen } from './render/channel.js';
 import { startDiscover } from './host/discover.js';
 import { renderDiscover, renderPlugin } from './render/discover.js';
+import { startModules } from './host/modules.js';
+import { renderModule } from './render/modules.js';
 import { itemById } from './host/discover-view.js';
 import { startTraces } from './host/traces.js';
 import { loadMemberTrace } from './wire/member-traces.js';
@@ -128,7 +130,7 @@ export function makeStore(storage, now = Date.now()) {
 
 // Messages (with a channel's page), Markets, Trade, Discover (with an item's page) and Account are served; every other screen
 // the router knows folds to Messages
-const SCREENS = new Set(['messages', 'channel', 'markets', 'trade', 'discover', 'plugin', 'account']);
+const SCREENS = new Set(['messages', 'channel', 'markets', 'trade', 'discover', 'plugin', 'module', 'account']);
 export const routeOf = hash => { const r = parseHash(hash); return SCREENS.has(r.screen) ? r : { screen: 'messages', id: null }; };
 // route by the address bar; a normalised route says which hash the bar should show instead
 export function settle(store, hash) {
@@ -286,6 +288,8 @@ export function boot(win, host = {}) {
   const channels = startChannels({ store, postJson, getJson, refresh: () => live.refresh(), now });
   // Discover: the face's inventory, read on entering it; a page's own reads (the Gravit item, a skill) on opening it
   const discover = startDiscover({ store, getJson, postJson, call, now });
+  // a Lunhui module's page: its latest artifact, through the overview of the run's channel the modules listing names
+  const modules = startModules({ store, postJson, readListing: () => discover.read('modules').then(() => store.get().discover.shelves.modules.data) });
   // a room member's trace, read without activating the member's session
   const traces = startTraces({ store, call, loadMemberTrace, now });
   // the quotes run only while Markets is on screen in a visible tab; Trade's picks only while Trade is
@@ -336,7 +340,7 @@ export function boot(win, host = {}) {
     const screen = s.route.screen === 'markets' ? renderMarketsScreen(s, now()) : s.route.screen === 'account' ? renderAccountScreen(s, now())
       : s.route.screen === 'trade' ? renderTradeScreen(s, now())
       : s.route.screen === 'channel' ? renderChannelScreen(s, now()) : s.route.screen === 'discover' ? renderDiscover(s)
-      : s.route.screen === 'plugin' ? renderPlugin(s) : renderMessagesScreen(s, now());
+      : s.route.screen === 'plugin' ? renderPlugin(s) : s.route.screen === 'module' ? renderModule(s) : renderMessagesScreen(s, now());
     // the drawers of any screen, inside its <main>: Settings, and the owner sheet over whatever is open
     const drawers = (s.settingsOpen ? renderSettings(s) : '') + (sheetUp(s) ? renderSheet(s, now()) : '');
     root.innerHTML = renderRail(s, now()) + (drawers ? screen.replace(/<\/main>$/, drawers + '</main>') : screen);
@@ -470,12 +474,13 @@ export function boot(win, host = {}) {
     }
     showTrade();
     if (r.screen === 'channel' && !(was?.screen === 'channel' && was.id === r.id)) void channels.overview(r.id);
-    const inDiscover = route => route?.screen === 'discover' || route?.screen === 'plugin';
+    const inDiscover = route => route?.screen === 'discover' || route?.screen === 'plugin' || route?.screen === 'module';
     if (inDiscover(r) && !inDiscover(was)) void discover.load();
     if (r.screen === 'plugin' && !(was?.screen === 'plugin' && was.id === r.id)) {
       if (r.id === 'agent:gravit') void discover.gravit();
       else if (typeof r.id === 'string' && r.id.startsWith('skill:')) void discover.skill(r.id.slice('skill:'.length));
     }
+    if (r.screen === 'module' && !(was?.screen === 'module' && was.id === r.id)) void modules.latestArtifact(r.id);
     if (r.screen === 'discover' && r.id === 'create' && !(was?.screen === 'discover' && was.id === 'create')) void discover.modelChoices();
     was = r;
     // a deep link the list does not carry yet waits for it
@@ -711,6 +716,8 @@ export function boot(win, host = {}) {
     connectAgent: el => { void discover.connect(el.dataset.bin); },
     disconnectAgent: el => { void discover.disconnect(el.dataset.bin); },
     rescanAgents: () => { void discover.rescan(); },
+    // a module's Run: its sheet comes with plan 3; the key is drawn disabled until then
+    runModule: () => store.dispatch('discoverStatus', { line: 'Run comes with plan 3' }),
     // a bot: Talk to opens its conversation, Edit opens its editor (the model routes read for it)
     talkTo: el => { void talkToNow(el.dataset.id); },
     editBot: el => { store.dispatch('startEdit', { kind: 'bot', id: el.dataset.id }); void discover.modelChoices(); },

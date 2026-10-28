@@ -80,7 +80,7 @@ export function renderNav(state) {
     ${navItem(messagesHref, 'chat', 'Messages', screen === 'messages' || screen === 'channel', mini, waiting)}
     ${navItem('#/markets', 'markets', 'Markets', screen === 'markets', mini)}
     ${navItem('#/trade', 'trade', 'Trade', screen === 'trade', mini)}
-    ${navItem('#/discover', 'compass', 'Discover', screen === 'discover' || screen === 'plugin', mini)}
+    ${navItem('#/discover', 'compass', 'Discover', screen === 'discover' || screen === 'plugin' || screen === 'module', mini)}
   </div>
   <div class="rail-foot">
     <div class="rail-lines"><button type="button" class="line-key" data-action="openSettings" aria-label="Settings" title="Settings">${icon('bars', 20, 2)}</button></div>

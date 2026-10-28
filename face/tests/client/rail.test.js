@@ -211,10 +211,10 @@ test('on a channel page the list stays beside it, Messages is current and the ch
   assert.match(h, /<a class="grp-name current" aria-current="page" href="#\/channel\/w0">/);
 });
 
-test('Discover is in the first level, current on Discover and on a plugin page', () => {
+test('Discover is in the first level, current on Discover, on a plugin page and on a module page', () => {
   const base = listed([conv('a')]);
   assert.match(renderNav(base), /class="nav-item" href="#\/discover"[^>]*>[\s\S]*?Discover/);
-  for (const route of [{ screen: 'discover', id: null }, { screen: 'plugin', id: 'bot:buffett' }]) {
+  for (const route of [{ screen: 'discover', id: null }, { screen: 'plugin', id: 'bot:buffett' }, { screen: 'module', id: 'theme' }]) {
     assert.match(renderNav(R.nav(base, route)), /class="nav-item current" aria-current="page" href="#\/discover"/, route.screen);
   }
   assert.equal(renderList(R.nav(base, { screen: 'discover', id: null }), NOW), '', 'no conversation list beside Discover');

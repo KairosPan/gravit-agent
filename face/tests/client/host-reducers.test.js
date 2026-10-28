@@ -169,3 +169,24 @@ test("hostList keeps a conversation's subagentCatalog and stores the child rows"
   assert.deepEqual(s.childRows, childRows);
   assert.deepEqual(R.hostList(s, { conversations: [conv('p')] }).childRows, childRows, 'a list without child rows keeps the last');
 });
+
+test("a module page's latest artifact: loading, then ready with its run and json or failed, each module alone; a module page keeps lastDiscover as a plugin page", () => {
+  let s = emptyState(NOW);
+  assert.deepEqual(s.discover.artifacts, {});
+  s = R.moduleArtifactLoading(s, { module: 'theme' });
+  assert.deepEqual(s.discover.artifacts.theme, { status: 'loading', run: null, json: null });
+  s = R.moduleArtifactLoaded(s, { module: 'theme', run: 'r1', json: { module: 'theme' } });
+  assert.deepEqual(s.discover.artifacts.theme, { status: 'ready', run: 'r1', json: { module: 'theme' } });
+  s = R.moduleArtifactLoading(s, { module: 'theme' });
+  assert.deepEqual(s.discover.artifacts.theme, { status: 'loading', run: 'r1', json: { module: 'theme' } }, 'a re-read keeps what it had');
+  s = R.moduleArtifactFailed(R.moduleArtifactLoading(s, { module: 'mode' }), { module: 'mode' });
+  assert.deepEqual(s.discover.artifacts.mode, { status: 'failed', run: null, json: null });
+  assert.equal(s.discover.artifacts.theme.status, 'loading');
+  assert.equal(R.moduleArtifactLoaded(s, { module: 'mode', run: 'r2', json: undefined }).discover.artifacts.mode.json, null);
+  // a module page opened from outside Discover goes back to Discover; from a Discover view, to that view
+  const shelf = R.nav(emptyState(NOW), { screen: 'discover', id: 'research' });
+  assert.deepEqual(R.nav(shelf, { screen: 'module', id: 'theme' }).lastDiscover, { screen: 'discover', id: 'research' });
+  assert.deepEqual(R.nav(emptyState(NOW), { screen: 'module', id: 'theme' }).lastDiscover, { screen: 'discover', id: null });
+  const fromModule = R.nav(R.nav(shelf, { screen: 'module', id: 'theme' }), { screen: 'plugin', id: 'bot:b' });
+  assert.deepEqual(fromModule.lastDiscover, { screen: 'discover', id: 'research' }, 'a page opened from a module page keeps the view');
+});

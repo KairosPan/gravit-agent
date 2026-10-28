@@ -1,7 +1,7 @@
 // face/client/js/router.js — hash routes: #/messages/<id> · #/markets[/<id>] · #/trade[/<id>] · #/account/<tab> ·
-// #/discover[/<shelf>] · #/plugin/<id> · #/channel/<workspaceId>. A market id is the Account's key (coin:BTC,
+// #/discover[/<shelf>] · #/plugin/<id> · #/module/<name> · #/channel/<workspaceId>. A market id is the Account's key (coin:BTC,
 // event:predict:…) or the face's (us:AAPL, crypto:BTC/USD, cn:600519): everything after #/markets/, so a coin keeps its
-// slash, written back raw; Trade's market to open (an Account key), a plugin's and a channel's id read the same way.
+// slash, written back raw; Trade's market to open (an Account key), a plugin's id, a module's name and a channel's id read the same way.
 const TABS = ['portfolio', 'venues', 'agents', 'cards'];
 
 function restOf(path) {
@@ -17,6 +17,7 @@ export function parseHash(hash) {
   switch (screen) {
     case 'discover': return { screen: 'discover', id: a ?? null };
     case 'plugin': return { screen: 'plugin', id: restOf(path) };
+    case 'module': return { screen: 'module', id: restOf(path) };
     case 'channel': return { screen: 'channel', id: restOf(path) };
     case 'account': return { screen: 'account', tab: TABS.includes(a) ? a : 'portfolio' };
     case 'markets': return { screen: 'markets', id: restOf(path) };
