@@ -831,6 +831,79 @@ export async function createChannel(root: string, rawName: unknown): Promise<Cha
   return { name, dir: target, isRoot: false };
 }
 
+/* ---------- the module cards' listing: /data/modules.json (Lunhui module cards spec 2026-10-28) ---------- */
+
+/** How many runs per channel `/data/modules.json` lists, newest first. */
+export const MODULES_RUNS_CAP = 12;
+
+/** The market read's channel - the same string as `MARKET_CHANNEL` in
+ * `plugins/lunhui/lib/freeze-tool.mjs` (a test pins the two equal). */
+export const MARKET_CHANNEL = "cn-market";
+
+/** One run as a module card reads it: {@link RunRow} without the runs card's `bytes`, `sealed`,
+ * `snapshotId`, `kind`, `marketRun` and each artifact's `accepted` and `contractVersion`. */
+export interface ModuleRunRow {
+  run: string;
+  session: string | null;
+  asOf: string | null;
+  openedAt: string | null;
+  sealedAt: string | null;
+  frozen: string[];
+  artifacts: { [module: string]: { status: string | null; missingSources: string[]; headline: Record<string, unknown>; marketRun: string | null } };
+}
+
+/** One channel's runs for the module cards. `unreadable` is set only when its `analysis/` could not
+ * be read for a reason other than not existing yet; its runs are then empty. */
+export interface ModulesChannel {
+  channel: string;
+  workspaceId: string;
+  kind: "market" | "strategy";
+  runs: ModuleRunRow[];
+  runsOmitted: number;
+  unreadable?: true;
+}
+
+function moduleRunRow(row: RunRow): ModuleRunRow {
+  const artifacts: ModuleRunRow["artifacts"] = {};
+  for (const [name, a] of Object.entries(row.artifacts)) {
+    artifacts[name] = { status: a.status, missingSources: a.missingSources, headline: a.headline, marketRun: a.marketRun };
+  }
+  return {
+    run: row.run, session: row.session, asOf: row.asOf, openedAt: row.openedAt, sealedAt: row.sealedAt,
+    frozen: row.frozen, artifacts,
+  };
+}
+
+/**
+ * Every channel but the root and a missing directory, in the order given, with its newest
+ * {@link MODULES_RUNS_CAP} runs. `kind` is `"market"` for {@link MARKET_CHANNEL}, else
+ * `"strategy"`. A `read` that throws `ENOENT` (no `analysis/` yet) is a channel with no runs; any
+ * other throw lists the channel `unreadable`, its runs empty - nothing from the error is kept, and
+ * one channel's failure never fails the others.
+ */
+export async function readModulesChannels(
+  rows: readonly ChannelRow[],
+  read: (dir: string, options: { cap: number }) => Promise<AnalysisRuns> = readAnalysisRuns,
+): Promise<ModulesChannel[]> {
+  const out: ModulesChannel[] = [];
+  for (const row of rows) {
+    if (row.isRoot || row.missingDir) continue;
+    const channel: ModulesChannel = {
+      channel: row.name, workspaceId: row.workspaceId, kind: row.name === MARKET_CHANNEL ? "market" : "strategy",
+      runs: [], runsOmitted: 0,
+    };
+    try {
+      const { runs, runsOmitted } = await read(row.dir, { cap: MODULES_RUNS_CAP });
+      channel.runs = runs.map(moduleRunRow);
+      channel.runsOmitted = runsOmitted;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException | null)?.code !== "ENOENT") channel.unreadable = true;
+    }
+    out.push(channel);
+  }
+  return out;
+}
+
 /** What the routes need of the booted tree. Injected so the tests drive them
  * without a harness. */
 export interface ChannelRouteDeps {
@@ -847,9 +920,11 @@ export interface ChannelRouteDeps {
   connectedBins(): Promise<string[]>;
   /** Every bot directory with dsh's view merged in (`listBots` in bots.ts, narrowed). */
   listBots(): Promise<{ id: string; name: string; broken?: string; listed: boolean }[]>;
+  /** Whether the Lunhui runs row is mounted (`lunhuiMounted` in panels.ts over the loader's entries). */
+  lunhuiMounted(): boolean;
 }
 
-/** Mount the four channel routes. Same trust posture as every `/data` route: http.ts's fence
+/** Mount the channel routes and the module cards' listing. Same trust posture as every `/data` route: http.ts's fence
  * runs FIRST on every route, the refusal body is fixed text, and nothing
  * attacker-controlled is ever echoed. A workspace id from a body is only ever
  * COMPARED against the reconciled list - it never becomes a path. */
@@ -913,6 +988,23 @@ export function registerChannelRoutes(webServer: RouteRegistrar, deps: ChannelRo
           // sessionId → header preset: the client's fallback where a 0.2 list
           // row's projection block does not name one (presetHintsOf).
           presets: presetHintsOf(heads),
+        });
+      } catch {
+        /* nothing from the filesystem error reaches the body */
+        return send(res, 500, { ok: false, error: "listing failed" });
+      }
+    },
+  });
+
+  webServer.register({
+    kind: "exact",
+    path: "/data/modules.json",
+    handler: async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+      if (!isTrustedDataRequest(req)) return send(res, 403, FORBIDDEN);
+      try {
+        const { channels } = await reconcile();
+        return send(res, 200, {
+          ok: true, mounted: deps.lunhuiMounted(), root: deps.root, channels: await readModulesChannels(channels),
         });
       } catch {
         /* nothing from the filesystem error reaches the body */

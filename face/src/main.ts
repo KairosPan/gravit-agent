@@ -29,7 +29,7 @@ import { registerSeatRoute } from "./seat.ts";
 import { registerStatic, type IndexAuth } from "./static.ts";
 import { registerSessionRoutes } from "./sessions.ts";
 import { listSessionHeads, registerChannelRoutes, type RegistryLike } from "./channels.ts";
-import { hasExec, panelDeps, readAgentsMeta, registerPanelRoutes } from "./panels.ts";
+import { hasExec, lunhuiMounted, panelDeps, readAgentsMeta, registerPanelRoutes } from "./panels.ts";
 import { installRoom, registerRoomRoutes, type RoomContextLike } from "./room.ts";
 
 /** Diagnostic label, the same string boot.ts uses for `BIN`. Not imported
@@ -278,6 +278,12 @@ registerChannelRoutes(booted.ctx.webServer, {
   connectedBins: async () => (await readAgentsMeta(dshHome)).connected
     .map((row) => row.bin).filter((bin) => hasExec(bin)),
   listBots: allBots,
+  /* the same live row tree panelDeps wraps, read on each request: whether include:lunhui-runs
+   * is active now, not at boot */
+  lunhuiMounted: () => {
+    const loader = booted.ctx.get("loader") as { entries(): Parameters<typeof lunhuiMounted>[0] } | undefined;
+    return loader === undefined ? false : lunhuiMounted(loader.entries());
+  },
 });
 /* Delete + archive, which the host's own Remote surface still lacks a delete
  * for (no delete Remote in session-controller or workspace-controller at

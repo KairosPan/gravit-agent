@@ -8,7 +8,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { WebRoute } from "@deepseek-ai/dsh-host-webserver";
 import {
   agentsListing, authFromProbe, connectLocalAgent, defaultAgentProber, defaultAuthProber,
-  disconnectLocalAgent, hasExec, hostInfo, isAgentBin, memoryListing, panelDeps, parseClaudeRun, parseCodexRun, pluginListing,
+  disconnectLocalAgent, hasExec, hostInfo, isAgentBin, lunhuiMounted, memoryListing, panelDeps, parseClaudeRun, parseCodexRun, pluginListing,
   readAgentsMeta, registerPanelRoutes, scrubbedEnv, skillDetail, skillGroup,
   syncAgentTools, toolNameFor,
   type AgentToolDefinition, type AgentToolRegistry, type PanelDeps, type SkillBody, type SkillRow,
@@ -333,6 +333,18 @@ test("skillDetail: body through, bad name 400, unknown 404", async () => {
   await assert.rejects(skillDetail(deps, "../evil"), (err: { status?: number }) => err.status === 400);
   await assert.rejects(skillDetail(deps, "Not-Kebab"), (err: { status?: number }) => err.status === 400);
   await assert.rejects(skillDetail(deps, "absent-skill"), (err: { status?: number }) => err.status === 404);
+});
+
+test("lunhuiMounted: the include:lunhui-runs row, enabled and active; disabled, failed, pending or absent is not mounted", () => {
+  const row = (extra: object) => ({ id: "include:lunhui-runs", options: { name: "file:///x/runs-row.mjs" }, ...extra });
+  assert.equal(lunhuiMounted([row({ fiber: { state: 2 } })]), true);
+  assert.equal(lunhuiMounted([row({ fiber: { state: 2 }, disabled: true })]), false);
+  assert.equal(lunhuiMounted([row({ fiber: { state: 3 } })]), false);
+  assert.equal(lunhuiMounted([row({ fiber: { state: 0 } })]), false);
+  assert.equal(lunhuiMounted([row({})]), false);
+  const other = { id: "include:lunhui-environment", options: {}, fiber: { state: 2 } };
+  assert.equal(lunhuiMounted([other]), false);
+  assert.equal(lunhuiMounted([]), false);
 });
 
 test("pluginListing: rows projected, groups and root dropped, MCP paired with its tools, agent tools listed", () => {

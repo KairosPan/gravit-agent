@@ -77,6 +77,17 @@ const FIBER_PHASE: ReadonlyArray<string | null> = [
   "pending", "loading", "active", "failed", null, "unloading",
 ];
 
+/** Whether the Lunhui runs row is mounted: a loader entry `include:lunhui-runs` that is not
+ * disabled and whose fiber is ACTIVE ({@link FIBER_PHASE}'s "active"). Disabled, pending, failed,
+ * fiberless or absent is not mounted. What `/data/modules.json` answers as `mounted`. */
+export function lunhuiMounted(entries: Iterable<{ id: string; disabled?: boolean; fiber?: { state: number } }>): boolean {
+  for (const entry of entries) {
+    if (entry.id === "include:lunhui-runs" && entry.disabled !== true && entry.fiber !== undefined
+      && FIBER_PHASE[entry.fiber.state] === "active") return true;
+  }
+  return false;
+}
+
 /** What a skill summary looks like to these routes (dsh-skill's SkillSummary,
  * structurally): enough to list and to group by pack directory. */
 export interface SkillRow {

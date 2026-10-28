@@ -966,6 +966,7 @@ async function routesFor(root: string, home: string): Promise<Map<string, WebRou
     listSessions: async () => [],
     connectedBins: async () => ["codex"],
     listBots: async () => [],
+    lunhuiMounted: () => false,
   });
   return new Map(routes.map((r) => [r.path, r]));
 }
@@ -978,10 +979,11 @@ async function channelNamed(routes: Map<string, WebRoute>, name: string): Promis
   return payload.channels.find((c) => c.name === name)!;
 }
 
-test("routes: exactly five paths, and every one refuses a forged Host FIRST", async () => {
+test("routes: exactly six paths, and every one refuses a forged Host FIRST", async () => {
   const routes = await routesFor(await makeRoot(), await mkdtemp(join(tmpdir(), "face-rt-")));
   assert.deepEqual([...routes.keys()].sort(), [
     "/data/channels", "/data/channels.json", "/data/channels/agents", "/data/channels/bots", "/data/channels/overview",
+    "/data/modules.json",
   ]);
   for (const [path, route] of routes) {
     const forged = fakeRes();
@@ -1055,6 +1057,7 @@ test("routes: the listing's presets come from the same merged heads the reconcil
     ),
     connectedBins: async () => [],
     listBots: async () => [],
+    lunhuiMounted: () => false,
   });
   const out = fakeRes();
   await routes.find((r) => r.path === "/data/channels.json")!.handler(getReq("127.0.0.1:3090"), out.res);
@@ -1107,6 +1110,7 @@ test("routes: a body that cannot be serialized answers one clean 500 with fixed 
     connectedBins: async () => ["codex"],
     // a value JSON.stringify refuses, standing in for anything a block might one day carry
     listBots: async () => [{ id: "b", name: "b", listed: true, size: 1n }] as never,
+    lunhuiMounted: () => false,
   });
   const byPath = new Map(routes.map((r) => [r.path, r]));
   const ws = await channelNamed(byPath, "alpha");
@@ -1178,6 +1182,7 @@ test("routes: POST /data/channels stays 200 even when the reconcile AFTER creati
     // is about, entirely decoupled from directory creation itself.
     connectedBins: async () => { throw new Error("EACCES: permission denied"); },
     listBots: async () => [],
+    lunhuiMounted: () => false,
   });
   const create = new Map(routes.map((r) => [r.path, r])).get("/data/channels")!;
 
@@ -1242,6 +1247,7 @@ test("the overview carries the bot roster and every preset the roster reports; P
       { id: "buffett", name: "巴菲特型", listed: true },
       { id: "cracked", name: "cracked", broken: "not a list", listed: true },
     ],
+    lunhuiMounted: () => false,
   });
   const routes = new Map(built.map((r) => [r.path, r]));
   const ws = await channelNamed(routes, "alpha");
