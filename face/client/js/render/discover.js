@@ -1,5 +1,5 @@
 // face/client/js/render/discover.js — Discover as the inventory of what Gravit runs (spec 2026-10-19 §7 Stage 3
-// "Discover = My plugins"): four shelves of cards from the face's listings, a grid per shelf, a page per item. No shop:
+// "Discover = My plugins"): five shelves of cards from the face's listings, a grid per shelf, a page per item. No shop:
 // nothing here installs, buys, publishes or counts installs. Every listed string is the host's or the operator's, through
 // esc.
 import { esc, attrs, cls } from '../html.js';
@@ -28,6 +28,21 @@ function card(item, grid = false) {
     `<span class="pcard-side"><span class="pcard-kind">${esc(item.kind.toUpperCase())}</span></span></a>`;
 }
 
+// a Research card (module cards spec §5.1): the link to the module's page around its mark, name and 副题, its role and
+// channel, and the foot with the chip read from the latest run and Run, disabled until plan 3
+function researchCard(item) {
+  const name = item.source.name;
+  return `<div${attrs({ class: cls('pcard', 'research', 'in-grid', item.dim && 'dim') })}><a${attrs({ class: 'pcard-link', href: `#/module/${encodeURIComponent(name)}` })}>${markOf(item.mark, 44)}` +
+    `<span class="pcard-body"><span class="pcard-name">${esc(item.name)}</span><span class="pcard-blurb">${esc(item.line)}</span></span>` +
+    `<span class="pcard-kind">${esc(item.kind.toUpperCase())}</span></a><span class="pcard-meta">${esc(item.meta)}</span>` +
+    `<span class="pcard-foot"><span${attrs({ class: cls('chip', item.chip.tone) })}>${esc(item.chip.text)}</span>` +
+    `<button type="button" class="btn-sm" data-action="runModule"${attrs({ 'data-module': name })} disabled title="Run comes with plan 3">Run</button></span></div>`;
+}
+const gridCard = i => (i.shelf === 'research' ? researchCard(i) : card(i, true));
+
+// the Research shelf's one line when the listing says the Lunhui rows are not mounted: the cards stay, dimmed
+const unmounted = state => (state.discover.shelves?.modules?.data?.mounted === false ? '<div class="disc-none dim">Lunhui rows not mounted</div>' : '');
+
 // what a shelf says beside its cards: a failed read with Retry, the first read, or nothing there
 function shelfState(s, items, state) {
   const source = SOURCE[s.id];
@@ -42,14 +57,17 @@ function shelfState(s, items, state) {
 const rescanKey = '<button type="button" class="btn-sm" data-action="rescanAgents">Rescan</button>';
 
 function shelf(s, items, state) {
-  const cards = items.length ? `<div class="shelf-row">${items.map(i => card(i)).join('')}</div>` : '';
-  return `<section class="shelf"><div class="shelf-head"><div class="shelf-title">${esc(s.title)}</div>${s.id === 'agents' ? rescanKey : ''}` +
+  // Research is a grid of its six, never a scrolling row
+  const research = s.id === 'research';
+  const cards = !items.length ? '' : research ? `${unmounted(state)}<div class="grid">${items.map(researchCard).join('')}</div>` : `<div class="shelf-row">${items.map(i => card(i)).join('')}</div>`;
+  const sub = research ? `<span class="dim">Lunhui · ${items.length} modules</span>` : '';
+  return `<section class="shelf"><div class="shelf-head"><div class="shelf-title">${esc(s.title)}</div>${sub}${s.id === 'agents' ? rescanKey : ''}` +
     `<a class="link" href="#/discover/${s.id}">See all ›</a></div>${shelfState(s, items, state)}${cards}</section>`;
 }
 
 function grid(title, items, extra = '', back = false) {
   return `<section class="grid-sec">${back ? '<a class="back-link" href="#/discover">‹ Discover</a>' : ''}<div class="grid-title">${esc(title)}</div>${extra}` +
-    `${items.length ? `<div class="grid">${items.map(i => card(i, true)).join('')}</div>` : ''}</section>`;
+    `${items.length ? `<div class="grid">${items.map(gridCard).join('')}</div>` : ''}</section>`;
 }
 
 function header(state) {
@@ -82,7 +100,7 @@ export function renderDiscover(state) {
     body = grid(`${found.length} result${found.length === 1 ? '' : 's'}`, found);
   } else if (shelfOf(state.route.id)) {
     const s = shelfOf(state.route.id);
-    body = grid(s.title, items[s.id], (s.id === 'agents' ? rescanKey : '') + shelfState(s, items[s.id], state), true);
+    body = grid(s.title, items[s.id], (s.id === 'agents' ? rescanKey : '') + shelfState(s, items[s.id], state) + (s.id === 'research' ? unmounted(state) : ''), true);
   } else {
     body = SHELVES.map(s => shelf(s, items[s.id], state)).join('');
   }
@@ -167,11 +185,12 @@ function bodyOf(item, state) {
   if (item.shelf === 'data') return mcpPage(item.source);
   if (item.shelf === 'bots') return state.edit?.kind === 'bot' && state.edit.id === item.source.id ? botEditor(item.source, state) : botPage(item.source);
   if (item.shelf === 'agents') return agentPage(item.source);
+  if (item.shelf === 'research') return line(item.meta);
   return skillPage(item, state);
 }
 
 // the listing an id is drawn from, so an unknown id waits while that listing is read
-const ID_SOURCE = { mcp: 'plugins', bot: 'bots', agent: 'agents', skill: 'memory' };
+const ID_SOURCE = { mcp: 'plugins', bot: 'bots', agent: 'agents', skill: 'memory', module: 'modules' };
 
 export function renderPlugin(state) {
   const id = state.route.id ?? '';

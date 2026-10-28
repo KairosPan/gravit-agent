@@ -1,14 +1,18 @@
 // face/client/js/host/discover-view.js — Discover's items from the face's listings (spec 2026-10-19 §7 Stage 3
-// "Discover = My plugins"): what Gravit runs, as cards. Pure. MCP servers sit on Data, the bots on Bots (never the
-// default composition, which is Gravit), Gravit and the local CLI agents on Agents, the skills on Skills.
+// "Discover = My plugins"): what Gravit runs, as cards. Pure. MCP servers sit on Data, the six Lunhui modules on
+// Research (module cards spec §5.1), the bots on Bots (never the default composition, which is Gravit), Gravit and the
+// local CLI agents on Agents, the skills on Skills.
+import { researchItems } from './modules-view.js';
+
 export const SHELVES = Object.freeze([
   { id: 'data', title: 'Data', empty: 'No MCP servers' },
+  { id: 'research', title: 'Research', empty: 'No research modules' },
   { id: 'bots', title: 'Bots', empty: 'No bots yet' },
   { id: 'agents', title: 'Agents', empty: 'No agents' },
   { id: 'skills', title: 'Skills', empty: 'No skills' },
 ]);
 // the listing each shelf is drawn from (host/discover.js reads them)
-export const SOURCE = Object.freeze({ data: 'plugins', bots: 'bots', agents: 'agents', skills: 'memory' });
+export const SOURCE = Object.freeze({ data: 'plugins', research: 'modules', bots: 'bots', agents: 'agents', skills: 'memory' });
 
 const word = v => typeof v === 'string' && v.trim() !== '';
 const list = v => (Array.isArray(v) ? v.filter(x => x && typeof x === 'object') : []);
@@ -54,6 +58,7 @@ export function itemsOf(discover) {
   const sh = discover?.shelves ?? {};
   return {
     data: dataItems(sh.plugins?.data),
+    research: researchItems(sh.modules?.data ?? null, sh.modules?.data?.mounted !== false),
     bots: botItems(sh.bots?.data),
     agents: agentItems(sh.agents?.data),
     skills: skillItems(sh.memory?.data),

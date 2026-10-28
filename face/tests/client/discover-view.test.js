@@ -3,15 +3,30 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { itemsOf, searchItems, itemById, SHELVES } from '../../client/js/host/discover-view.js';
-import { listings } from './helpers/inventory.js';
+import { listings, modulesListing } from './helpers/inventory.js';
 
 const shelf = data => ({ status: 'ready', data, at: 1 });
 
 const discover = (over = {}) => ({ query: '', shelves: { ...listings(), ...over } });
 
-test('the four shelves, in order', () => {
-  assert.deepEqual(SHELVES.map(s => s.id), ['data', 'bots', 'agents', 'skills']);
-  assert.deepEqual(SHELVES.map(s => s.title), ['Data', 'Bots', 'Agents', 'Skills']);
+test('the five shelves, in order', () => {
+  assert.deepEqual(SHELVES.map(s => s.id), ['data', 'research', 'bots', 'agents', 'skills']);
+  assert.deepEqual(SHELVES.map(s => s.title), ['Data', 'Research', 'Bots', 'Agents', 'Skills']);
+});
+
+test('Research: six module items from the modules listing, with chips; six still when the listing never came', () => {
+  const items = itemsOf(discover({ modules: shelf(modulesListing()) })).research;
+  assert.deepEqual(items.map(i => [i.id, i.chip.text]), [['module:environment', 'WEAK · STABLE'], ['module:sentiment', 'IGNITION · POSITIVE · NONE'], ['module:theme', 'not evaluable · boards'], ['module:leader', 'lunhui-s01-repair · no candidate'], ['module:mode', 'lunhui-s01-repair · WAIT'], ['module:counterevidence', 'lunhui-s01-repair · 5 items']]);
+  assert.equal(itemsOf(discover()).research.length, 6);
+  assert.equal(itemById(discover({ modules: shelf(modulesListing()) }), 'module:theme').name, 'Theme');
+  assert.ok(searchItems(Object.values(itemsOf(discover({ modules: shelf(modulesListing()) }))).flat(), '题材').some(i => i.id === 'module:theme'));
+});
+
+test('Research with the rows not mounted: the chips keep their words, grey, and every item is dim', () => {
+  const items = itemsOf(discover({ modules: shelf({ ...modulesListing(), mounted: false }) })).research;
+  assert.equal(items[0].chip.text, 'WEAK · STABLE');
+  assert.ok(items.every(i => i.chip.tone === 'grey' && i.dim === true));
+  assert.ok(itemsOf(discover({ modules: shelf(modulesListing()) })).research.every(i => i.dim === false));
 });
 
 test('MCP servers become Data items with their tool counts; the default bot is not a Bot item', () => {

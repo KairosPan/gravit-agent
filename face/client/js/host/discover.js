@@ -1,11 +1,11 @@
 // face/client/js/host/discover.js — Discover from the face (spec 2026-10-19 §7 Stage 3 "Discover = My plugins"): the
-// four listings, each alone; the Gravit item's three reads, each alone; a skill's content; the agent writes. Impure;
-// nothing here draws. A plain read joins the shelf's flight, a read after a write starts a fresh one, and only the
-// latest-started read of a shelf lands.
+// five listings (the Lunhui modules' since the module cards spec §5.1), each alone; the Gravit item's three reads, each
+// alone; a skill's content; the agent writes. Impure; nothing here draws. A plain read joins the shelf's flight, a read
+// after a write starts a fresh one, and only the latest-started read of a shelf lands.
 import { botSettingsPayload, botModelChoices, normalizeBotModel } from '../wire/botSettings.js';
 import { proposeBotId } from '../wire/botId.js';
 
-export const SHELF_PATHS = Object.freeze({ plugins: '/data/plugins.json', bots: '/data/bots.json', agents: '/data/agents.json', memory: '/data/memory.json' });
+export const SHELF_PATHS = Object.freeze({ plugins: '/data/plugins.json', bots: '/data/bots.json', agents: '/data/agents.json', memory: '/data/memory.json', modules: '/data/modules.json' });
 export const GRAVIT_KEYS = Object.freeze(['DEEPSEEK_API_KEY']);
 
 const VALID = {
@@ -13,6 +13,7 @@ const VALID = {
   bots: d => Array.isArray(d?.bots),
   agents: d => Array.isArray(d?.local),
   memory: d => Array.isArray(d?.groups),
+  modules: d => Array.isArray(d?.channels),
 };
 const object = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const words = err => err?.code ?? err?.message ?? 'failed';

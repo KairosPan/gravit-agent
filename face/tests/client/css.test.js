@@ -14,7 +14,7 @@ import { fieldsOf } from '../../client/js/host/sheet-view.js';
 import { askedOf } from '../../client/js/host/sheet.js';
 import { renderChannelScreen } from '../../client/js/render/channel.js';
 import { renderDiscover, renderPlugin } from '../../client/js/render/discover.js';
-import { listings } from './helpers/inventory.js';
+import { listings, modulesListing } from './helpers/inventory.js';
 import { setMarkdown } from '../../client/js/render/thread.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
@@ -166,9 +166,12 @@ function channelStates() {
 function discoverStates() {
   let all = emptyState();
   for (const [shelf, v] of Object.entries(listings())) all = R.shelfLoaded(all, { shelf, data: v.data, at: 1 });
+  all = R.shelfLoaded(all, { shelf: 'modules', data: modulesListing(), at: 1 });
   const at = route => R.nav(all, route);
   const page = id => at({ screen: 'plugin', id });
+  const unmounted = R.shelfLoaded(at({ screen: 'discover', id: null }), { shelf: 'modules', data: { ...modulesListing(), mounted: false }, at: 2 });
   return [
+    unmounted, at({ screen: 'discover', id: 'research' }),
     at({ screen: 'discover', id: null }), R.shelfFailed(at({ screen: 'discover', id: null }), { shelf: 'bots', at: 1 }), R.nav(emptyState(), { screen: 'discover', id: null }),
     R.setDiscoverQuery(at({ screen: 'discover', id: null }), 'rules'), at({ screen: 'discover', id: 'agents' }),
     page('mcp:alpaca-kit'), page('bot:buffett'), page('agent:codex'), page('agent:claude'), page('agent:gravit'), page('bot:nobody'),
@@ -203,13 +206,24 @@ test('every class the screens emit has a rule in app.css, and app.css names no c
   assert.doesNotMatch(css, /#[0-9a-fA-F]{3,6}\b/, 'colours come from tokens.css');
   setMarkdown(null);
   const html = everyState().map(st => renderRail(st, NOW) + screenOf(st, NOW) + (st.settingsOpen ? renderSettings(st) : '') + renderSheet(st, NOW)).join('');
-  for (const c of ['mkts', 'mk-tab', 'mk-star', 'mk-name', 'mk-tag', 'mk-q', 'mk-clear', 'mk-note', 'mk-empty', 'mk-st', 'page-back', 'mk-chart', 'mk-axis', 'mk-facts', 'mk-big', 'mk-basis', 'mk-asof', 'mk-d-acts', 'mk-line', 'mk-on', 'mk-outs', 'mk-out', 'acct', 'networth', 'acct-figures', 'acct-second', 'acct-t', 'acct-shown', 'order-row', 'acct-note', 'activity-row', 'venue', 'account-line', 'pair-box', 'sheet', 'sheet-quote', 'sheet-left', 'sheet-check', 'stale', 'trade', 'tp-head', 'tk-seg', 'tk-pick', 'tk-row', 'tk-open', 'tk-said', 'tk-panel', 'tk-picked', 'tk-out', 'mk-yes', 'mk-no', 'tk-at', 'tk-side', 'tk-quote', 'tk-left', 'tk-msg', 'tk-go', 'tk-hand']) assert.match(html, new RegExp(`class="[^"]*\\b${c}\\b`), `Markets emits ${c}`);
+  for (const c of ['mkts', 'mk-tab', 'mk-star', 'mk-name', 'mk-tag', 'mk-q', 'mk-clear', 'mk-note', 'mk-empty', 'mk-st', 'page-back', 'mk-chart', 'mk-axis', 'mk-facts', 'mk-big', 'mk-basis', 'mk-asof', 'mk-d-acts', 'mk-line', 'mk-on', 'mk-outs', 'mk-out', 'acct', 'networth', 'acct-figures', 'acct-second', 'acct-t', 'acct-shown', 'order-row', 'acct-note', 'activity-row', 'venue', 'account-line', 'pair-box', 'sheet', 'sheet-quote', 'sheet-left', 'sheet-check', 'stale', 'trade', 'tp-head', 'tk-seg', 'tk-pick', 'tk-row', 'tk-open', 'tk-said', 'tk-panel', 'tk-picked', 'tk-out', 'mk-yes', 'mk-no', 'tk-at', 'tk-side', 'tk-quote', 'tk-left', 'tk-msg', 'tk-go', 'tk-hand', 'research', 'pcard-meta', 'pcard-foot', 'pcard-link']) assert.match(html, new RegExp(`class="[^"]*\\b${c}\\b`), `Markets emits ${c}`);
   const classes = new Set(html.match(/class="([^"]+)"/g).flatMap(x => x.slice(7, -1).split(/\s+/)));
   const missing = [...classes].filter(c => c && !new RegExp(`\\.${c.replace(/[-]/g, '\\-')}(?![\\w-])`).test(css));
   assert.deepEqual(missing, [], 'classes without a rule');
   assert.match(css, /--rail/);
   assert.match(css, /\.key\.yes[^{]*\{[^}]*color: var\(--up\)/);
   assert.match(css, /\.key\.no[^{]*\{[^}]*color: var\(--down\)/);
+});
+
+test("the Research shelf's cards: a column, the meta and the foot, the chip tones, a dim card", () => {
+  const html = discoverStates().map(st => screenOf(st, NOW)).join('');
+  for (const c of ['pcard research', 'pcard-meta', 'pcard-foot', 'chip ok', 'chip warn', 'chip grey']) assert.ok(html.includes(`class="${c}`), c);
+  assert.match(css, /\.pcard\.research\s*\{[^}]*flex-direction: column[^}]*gap: 12px/);
+  assert.match(css, /\.pcard-meta\s*\{[^}]*font-size: 12px/);
+  assert.match(css, /\.pcard-foot\s*\{[^}]*display: flex/);
+  assert.match(css, /\.chip\.ok\s*\{\s*background: var\(--up-fill\); color: var\(--up\)/);
+  assert.match(css, /\.chip\.warn\s*\{\s*background: var\(--warn-fill\); color: var\(--warn-text\)/);
+  assert.match(css, /\.pcard\.dim\s*\{\s*opacity: \.55/);
 });
 
 test('every class app.css styles is emitted by some screen: no rule outlives the screen it styled', () => {

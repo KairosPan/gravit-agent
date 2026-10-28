@@ -131,6 +131,7 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .btn { min-height: 44px; padding: 0 18px; background: var(--surface-2); color: var(--text); font-size: 15px; }
 .btn-sm, .pill { min-height: 36px; padding: 0 14px; background: var(--surface-2); color: var(--text); font-weight: 600; }
 .btn-sm.pressed, .pill.pressed { background: var(--primary); color: var(--on-primary); }
+.btn-sm:disabled { color: var(--dim); cursor: default; }
 .btn-primary { min-height: 44px; padding: 0 18px; background: var(--primary); color: var(--on-primary); font-size: 15px; font-weight: 600; }
 .btn-primary:disabled { background: var(--surface-2); color: var(--dim); cursor: default; }
 .btn-primary.small { min-height: 40px; padding: 0 16px; font-size: 14px; }
@@ -140,6 +141,8 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .chip.grey { background: var(--surface-2); color: var(--dim); }
 .chip.up { background: var(--up-fill); color: var(--up); }
 .chip.down { background: var(--down-fill); color: var(--down); }
+.chip.ok { background: var(--up-fill); color: var(--up); }
+.chip.warn { background: var(--warn-fill); color: var(--warn-text); }
 .bubble.green .chip.up { background: var(--surface); }
 .seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: var(--radius-pill); background: var(--surface-2); align-self: flex-start; }
 .seg-item { display: inline-flex; align-items: center; min-height: 38px; padding: 0 14px; border: 0; border-radius: var(--radius-pill); background: transparent; color: var(--dim); font-size: 13px; font-weight: 600; }
@@ -314,6 +317,13 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .pcard-blurb { font-size: 13px; line-height: 1.35; }
 .pcard-side { display: flex; flex-direction: column; align-items: flex-end; justify-content: space-between; gap: 10px; align-self: stretch; }
 .pcard-kind { font-size: 11px; font-weight: 700; color: var(--dim); letter-spacing: 0.04em; }
+/* a Research card: the link (mark, name, 副题, kind) over its role and channel, then the chip and Run */
+.pcard.research { display: flex; flex-direction: column; gap: 12px; cursor: default; }
+.pcard-link { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; column-gap: 12px; align-items: start; color: inherit; }
+.pcard-meta { font-size: 12px; color: var(--dim); }
+.pcard-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: auto; }
+.pcard-foot .chip { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.pcard.dim { opacity: .55; }
 .grid-sec { display: flex; flex-direction: column; gap: 10px; }
 .grid-title { font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 12px; }

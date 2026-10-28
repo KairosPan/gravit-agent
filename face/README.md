@@ -1658,8 +1658,8 @@ neighbourhood:
 ## Discover (src/panels.ts + client/js/host/discover.js + client/js/render/discover.js)
 
 **Discover** (`#/discover`, in the rail's first level) is the inventory of what Gravit runs —
-there is no shop: nothing to install, buy, publish or count. Entering it reads four face routes,
-each alone — a failed one says `Couldn't read <Shelf>` with Retry beside the others drawn:
+there is no shop: nothing to install, buy, publish or count. Entering it reads five face routes
+(the fifth, Research's, below), each alone — a failed one says `Couldn't read <Shelf>` with Retry beside the others drawn:
 **Data**, the MCP servers and their tools (`GET /data/plugins.json`); **Bots**, the operator's
 voices (`GET /data/bots.json`, never Gravit's own composition); **Agents**, Gravit first, then the
 local CLI agents (`GET /data/agents.json`); **Skills**, Gravit's standing knowledge (`GET
@@ -1669,6 +1669,19 @@ shelf as a grid, and every card opens its item's page, `#/plugin/<id>`, under a 
 go to its own status line. (The old chat page's master rail and its four sidebar faces —
 strategy, agent, memory, plugin — are gone with that page; their `/#agent`-style links open
 Messages.)
+
+**Research**, the fifth shelf, drawn second after Data, is the six Lunhui modules in the chain's
+order — Environment, Sentiment, Theme, Leader, Mode, Counterevidence — read from `GET
+/data/modules.json` (plan 1 of the module cards, a projection of the runs card's rows) and drawn
+as a grid of six, never a scrolling row, under `Lunhui · 6 modules`. The six cards are always
+there, from the client's one table (`client/js/host/modules-view.js` `MODULES`); the listing only
+fills their chips. Each card is its 副题, its role and the channel it reads (`cn-market`, `a
+strategy`, or both), and a chip reading that channel's latest run alone: the headline words, `not
+evaluable · <sources>` when the artifact is NOT_EVALUABLE, `not run` when the latest run holds no
+artifact of the module, `no run yet` when no channel it reads has a run — never an older run's
+artifact. A strategy card's chip names its channel (`lunhui-s01-repair · WAIT`). When the listing
+says `mounted: false` the shelf says `Lunhui rows not mounted` and its cards dim, their chips grey
+but still worded. A card opens `#/module/<name>`; its **Run** key is drawn disabled until plan 3.
 
 - **Gravit** (the first card on Agents) — its page is three cards over three reads:
   `session/modelCatalog`'s `default` (provider, model and reasoning effort — the selection a new

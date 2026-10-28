@@ -42,6 +42,10 @@ export const ICONS = {
   bolt: '<path d="M13 2L4 14h7l-1 8 9-12h-7z"></path>',
   // Linqi's sprite (the buyer-agent-demo's account page) for Markets and Trade; coin is his i-trade
   star: '<path d="m12 4 2.4 5 5.6.8-4 3.9.9 5.5L12 16.6 7.1 19.2l.9-5.5-4-3.9 5.6-.8z"></path>',
+  layers: '<path d="M12 3l9 5-9 5-9-5z"></path><path d="M3 13l9 5 9-5"></path>',
+  pulse: '<path d="M3 12h4l3-7 4 14 3-7h4"></path>',
+  podium: '<path d="M4 18h16L18 8l-4 4-2-6-2 6-4-4z"></path>',
+  switch: '<rect x="3" y="8" width="18" height="8" rx="4"></rect><circle cx="15" cy="12" r="2.5"></circle>',
   plug: '<path d="M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0z"></path><path d="M12 16v5"></path>',
   agent: '<rect x="4" y="7" width="16" height="12" rx="3"></rect><path d="M12 3v4M9 12h.01M15 12h.01M9 16h6"></path>',
   coin: '<path d="M7 4v16M7 4 4 7M7 4l3 3M17 20V4M17 20l-3-3M17 20l3-3"></path>',

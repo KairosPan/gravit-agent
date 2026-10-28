@@ -6,6 +6,7 @@ import { boot as bootApp, Timers } from '../../client/js/app.js';
 import { rowsOf, pairsOf } from '../../client/js/host/market-view.js';
 import { kidOf } from '../../client/js/wire/owner-key.js';
 import { fakeWindow } from './helpers/fake-dom.js';
+import { modulesListing } from './helpers/inventory.js';
 
 // every app booted here has its timers stopped after its test, so one that fails half-way never leaves Markets' polls running
 const booted = new Set();
@@ -41,6 +42,7 @@ function host({ rows = [], pages = {}, meta = { ok: true, archived: [], deleted:
     '/data/agents.json': { ok: true, main: { name: 'Gravit', runtime: 'dsh 0.2.0-rc.2' }, local: [], candidates: [{ bin: 'claude', label: 'Claude Code', version: '2.1' }] },
     '/data/memory.json': { ok: true, groups: [] },
     '/data/bots.json': { ok: true, bots: [{ id: 'buffett', name: 'Buffett Type', description: '', homeCwd: '/r/bots/buffett/home', soul: '# B', revision: 'r1', isDefault: false, listed: true, skills: [], setupIssues: [] }] },
+    '/data/modules.json': modulesListing(),
   };
   const getJson = async path => { reads.push(path); return path === '/data/channels.json' ? { ok: true, root: '/r', channels: [...channelRows], ungrouped: [], archived: [], presets: {} } : path === '/data/sessions-meta.json' ? meta : inventory[path] ?? { ok: true, bots: [] }; };
   const posted = [];
@@ -57,7 +59,7 @@ function host({ rows = [], pages = {}, meta = { ok: true, archived: [], deleted:
     if (path === '/data/agents/connect') { const c = inventory['/data/agents.json'].candidates.find(a => a.bin === body.bin); inventory['/data/agents.json'] = { ...inventory['/data/agents.json'], local: [{ ...c, found: true, auth: { state: 'ok' } }], candidates: [] }; return { ok: true, agent: c }; }
     return { ok: true, addressed: [] };
   };
-  return { openMux: o => { opts = o; return mux; }, call, getJson, postJson, markdown: null, calls, posted, answered, streams, rows, reads, ready: async () => { opts.onReady({}); await settle(); }, opts: () => opts };
+  return { openMux: o => { opts = o; return mux; }, call, getJson, postJson, markdown: null, calls, posted, answered, streams, rows, reads, inventory, ready: async () => { opts.onReady({}); await settle(); }, opts: () => opts };
 }
 const started = (f, h) => boot(f.win, { openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown });
 const send = f => f.fire('root', 'submit', { target: { closest: () => ({ dataset: { action: 'send' } }) } });
@@ -1214,7 +1216,7 @@ test('the bots editor posts the ticked ids', async () => {
   store.timers.clear();
 });
 
-test('entering Discover reads the four listings once', async () => {
+test('entering Discover reads the five listings once', async () => {
   const f = fakeWindow({ hash: '' });
   const h = host({ rows: [row('s1')] });
   const store = started(f, h);
@@ -1223,11 +1225,36 @@ test('entering Discover reads the four listings once', async () => {
   f.win.location.hash = '#/discover';
   await settle();
   assert.equal(store.get().route.screen, 'discover');
-  assert.deepEqual(h.reads.filter(p => /plugins|agents|memory|bots/.test(p)).sort(), ['/data/agents.json', '/data/bots.json', '/data/memory.json', '/data/plugins.json']);
+  assert.deepEqual(h.reads.filter(p => /plugins|agents|memory|bots|modules/.test(p)).sort(), ['/data/agents.json', '/data/bots.json', '/data/memory.json', '/data/modules.json', '/data/plugins.json']);
   assert.match(f.html(), /pcard-name">alpaca-kit</);
   f.win.location.hash = '#/discover/agents';
   await settle();
   assert.equal(h.reads.filter(p => p === '/data/plugins.json').length, 1, 'moving within Discover reads nothing again');
+  store.timers.clear();
+});
+
+test('Discover draws the Research shelf: six module cards with their chips, Run disabled; rows not mounted dims them', async () => {
+  const f = fakeWindow({ hash: '' });
+  const h = host({ rows: [row('s1')] });
+  const store = started(f, h);
+  await h.ready();
+  f.win.location.hash = '#/discover';
+  await settle();
+  const html = f.html();
+  assert.equal(html.match(/class="pcard research in-grid"/g)?.length, 6);
+  assert.match(html, /Lunhui · 6 modules/);
+  for (const chip of ['WEAK · STABLE', 'IGNITION · POSITIVE · NONE', 'not evaluable · boards', 'lunhui-s01-repair · no candidate', 'lunhui-s01-repair · WAIT', 'lunhui-s01-repair · 5 items']) assert.ok(html.includes(`>${chip}</span>`), chip);
+  assert.match(html, /href="#\/module\/theme"/);
+  const runs = html.match(/<button[^>]*data-action="runModule"[^>]*>/g) ?? [];
+  assert.equal(runs.length, 6);
+  assert.ok(runs.every(b => /\bdisabled\b/.test(b)), 'Run is disabled until plan 3');
+  assert.doesNotMatch(html, /Lunhui rows not mounted/);
+  h.inventory['/data/modules.json'] = { ...modulesListing(), mounted: false };
+  f.click({ tagName: 'BUTTON', dataset: { action: 'shelfRetry', shelf: 'modules' } });
+  await settle();
+  assert.match(f.html(), /Lunhui rows not mounted/);
+  assert.equal(f.html().match(/class="pcard research in-grid dim"/g)?.length, 6);
+  assert.ok(f.html().includes('>WEAK · STABLE</span>'), 'a dim card still shows its last headline');
   store.timers.clear();
 });
 

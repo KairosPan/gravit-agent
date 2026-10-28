@@ -1,4 +1,4 @@
-// Discover as the inventory of what Gravit runs (spec 2026-10-19 §7 Stage 3 "Discover = My plugins"): four shelves
+// Discover as the inventory of what Gravit runs (spec 2026-10-19 §7 Stage 3 "Discover = My plugins"): five shelves
 // from the face's listings, a grid per shelf, a page per item — and no shop.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -115,9 +115,10 @@ test('an unknown id: Loading… while its shelf loads, Not found after', () => {
   assert.match(page('nonsense'), /Not found/);
 });
 
+// a review is a shop's; the Research shelf's CN reviewer role is no review
 test('no Install, Uninstall, Publish, review, installs, price or shop', () => {
   const html = [renderDiscover(loaded()), ...['mcp:alpaca-kit', 'bot:buffett', 'agent:codex', 'agent:gravit', 'skill:rules'].map(page)].join('');
-  for (const w of [/Install/, /Uninstall/, /Publish/, /review/i, /installs/, /price/i, /shop/i, /What you sign/]) assert.doesNotMatch(html, w, String(w));
+  for (const w of [/Install/, /Uninstall/, /Publish/, /\breviews?\b/i, /installs/, /price/i, /shop/i, /What you sign/]) assert.doesNotMatch(html, w, String(w));
 });
 
 test('markup in a soul, a skill, a tool description and a reason stays text', () => {
