@@ -733,9 +733,11 @@ operator's rows.
 
 **In the agent box** (`../compose.yml`, "The two-box drill" below) the harness
 home is the volume `dsh-home` at `/dsh-home`, and the first `docker compose up`
-writes the profile by itself: the entrypoint (`docker-entrypoint.sh`) runs
-`npm run setup` when `/dsh-home/profiles/face` does not exist, after `npm ci`
-into the two module volumes. The operator's rows go into
+writes the profile by itself (run `cd account && npm ci` on the host before it:
+the `account-modules` mount point sits inside the read-only `account/` bind):
+the entrypoint (`docker-entrypoint.sh`) runs `npm run setup` when
+`/dsh-home/profiles/face` does not exist, after `npm ci` into the two module
+volumes. The operator's rows go into
 `/dsh-home/profiles/face/cordis.patch.yml`, with paths inside the box, reached
 with `docker compose exec agent sh` while `up` runs (restart the box after an
 edit); the box's home is its own, never the host's `~/.dsh`. The CLI-agent
@@ -3498,7 +3500,9 @@ its own host path. On macOS a repo under `~/Desktop` needs Docker Desktop's Sett
 File sharing (Files and Folders › Desktop access), or the binds read EPERM. The model key comes
 from `../.env.deepseek` through `env_file` into the face's process env (optional; absent, the face
 boots and Gravit cannot answer; dsh scrubs `KEY`/`SECRET`/`TOKEN` names from every child it
-spawns, so Gravit's shell never inherits it). Never paste `docker compose config` output anywhere —
+spawns, so Gravit's shell never inherits it). It carries the model key only: with no `IFIND_*`
+in the box the face's A-share quotes read iFinD unconfigured there (no other quote source; Tencent
+serves symbol search) until project 2. Never paste `docker compose config` output anywhere —
 it prints the `env_file` values resolved.
 
 `agent` (the face, dsh, Gravit's shell, AKShare, the seat) mounts an allowlist of the tree, never
@@ -3510,7 +3514,9 @@ root marker dsh's instruction files climb to, so `GRAVIT.md` reaches every sessi
 the box). **By design the root's `.env*` files (a venue's keys among them), `GRAVIT.local.md`
 and `compose.yml` are not in the box.** Beside them: `dsh-home`, `seat-home` (the seat's
 `BUYER_HOME`, holding `seats/gravit.json`) and the two module volumes — **no docker socket and no
-path of the Account's home**. `account` runs the in-tree service with
+path of the Account's home**. That fence is on files: on Docker Desktop `host.docker.internal`
+still reaches the Mac's loopback services from the box — no wider than the host dev loop, and no
+Account secret. `account` runs the in-tree service with
 `--home /data` on `account-home`. The face reaches `http://account:4820` over the `gravit`
 network; the agent waits for the account's health check (`GET /api/overview`, its HTTP status).
 The box sets `FACE_BIND=0.0.0.0` so the face listens on the container's interface. **`FACE_BIND`
@@ -3518,8 +3524,11 @@ is for the box only**: the `/data` routes' `Host` fence is the DNS-rebinding def
 authentication, and `FACE_BIND=0.0.0.0` on the host Mac would serve them to the LAN to any peer
 that forges `Host`. The same holds for the Account's `PORTFOLIO_BIND` (`../account/README.md`).
 
-1. **Up.** `docker compose up --build`. The first up runs `npm ci` into `face-modules` and
-   `account-modules` (Linux binaries; it needs the network) and `npm run setup` into `dsh-home`.
+1. **Up.** First `cd account && npm ci` on the host (the dev loop needs it anyway): the
+   `account-modules` volume mounts inside the read-only `account/` bind, so its mount point
+   `account/node_modules` must already exist. Then `docker compose up --build`. The first up
+   runs `npm ci` into `face-modules` and `account-modules` (Linux binaries; it needs the network)
+   and `npm run setup` into `dsh-home`.
    Expect the face's boot line `gravit-face: http://127.0.0.1:3090/?token=… (profile: face) ·
    listening on 0.0.0.0` and the seat's `[agent-portfolio-manager] up (stdio) →
    http://account:4820`.
@@ -3545,7 +3554,9 @@ down`, then `docker volume rm` the project's `face-modules` and `account-modules
 (`docker volume ls` names them `<project>_face-modules`, `<project>_account-modules`), so the
 entrypoint's `npm ci` reinstalls on the next `up` — it installs only into an empty volume. A
 change to `account/` itself also needs `docker compose build account`: that box copies the tree
-at build.
+at build. After a pull that rewrote one of the root documents (`GRAVIT.md`, `CLAUDE.md`, …),
+recreate the box (`docker compose up --force-recreate agent`): a single-file bind pins the old
+inode.
 
 **PASS criteria are observations.** Record the run in `DEVELOPMENT.md` §7.4 with the date.
 **Not yet run** — the daemon was off when the boxes were written (2026-10-27).

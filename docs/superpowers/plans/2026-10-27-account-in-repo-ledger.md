@@ -312,7 +312,7 @@ call as `service()`.
 - Task 5: fix round 1/5 (2 addressed + the folded minors, 0 open; commits 565d8c3..19e5b4a; R15, the empty read-only tmpfs `.git` that keeps dsh's project-root walk at the repo root, checked against `dsh-agent-instructions`' `findProjectRoot` and found sound).
 - Task 5: complete (commits a3bdc93..19e5b4a, review clean after one fix round).
 - Task 5: minor (deferred): the six root documents are single-file binds, which pin the inode — a host `git checkout`/`pull` that rewrites one by rename leaves the running box on the old copy until `docker compose up` recreates it.
-- Task 5: minor (deferred): `npm ci` into the volume under a read-only `account/` is unobserved until the first `up` on a daemon.
+- Task 5: minor (deferred): `npm ci` into the volume under a read-only `account/` is unobserved until the first `up` on a daemon — and the volume's mount point `account/node_modules` must already exist inside the read-only bind (Docker likely cannot create it there), so `cd account && npm ci` on the host precedes the first `up` (the final review's Important 1; documented in the fix wave).
 
 ### Task 6
 
@@ -328,12 +328,36 @@ call as `service()`.
 - Account: 158 files, 157 pass, 1 fail (`test/unit/ui-superagent.test.ts`, the origin's known red); 2,840 tests, 2,839 pass (Task 3's run); typecheck clean.
 - Deferred minors (the "minor (deferred)" lines above): Task 1 — the orphan `src/contract/env-scrub.ts`; `NOTICE` line 2's wording; `import-closure.mjs` reach order and raw-text scan. Task 2 — `standinDir({})` pins less than it reads; the tsx-missing line under an override; the capture script's header width. Task 3 — the bind test cannot fail under port 0; an empty programmatic `hosts` entry. Task 4 — `main.ts` reads `FACE_BIND` a second time; no test of the boot line's suffix; `faceBind` typed `string`. Task 5 — the unpinned uv installer; the agent container as root; no `CMD` in `account/Dockerfile`; single-file binds pin the inode; `npm ci` under a read-only `account/` unobserved. (Task 2's two carried comments and Task 4's README line were fixed in Task 6; Task 3's two README items in Task 5.)
 - Hand-over to the operator, none done by the build:
-  1. Restart the host Account on the default home: `cd account && npm run account` (no `--home`, `BUYER_HOME` unset → `~/.buyer-agent-demo`). The service now on `~/.openpaper` is not the Account.
-  2. Update `.claude/launch.json`'s `account` entry to run `npm run account` in this repo's `account/`.
-  3. Run the two-box drill (`face/README.md` "The two-box drill") when Docker Desktop is up, stopping the host face and Account first; record it in `DEVELOPMENT.md` §7.4.
-  4. The `mcp-alpaca-kit` row in the live `~/.dsh` patch — unrelated, still the operator's to drop.
+  1. `cd account && npm ci` in the primary checkout after the merge — without it the face's seat row spawns nothing (`failOnStartupError: false`, Venues `not reachable`), `npm run account` cannot start, and the agent box's `account-modules` mount point is missing.
+  2. Restart the host Account on the default home: `cd account && npm run account` (no `--home`, `BUYER_HOME` unset → `~/.buyer-agent-demo`). The service now on `~/.openpaper` is not the Account.
+  3. Update `.claude/launch.json`'s `account` entry to run `npm run account` in this repo's `account/`.
+  4. Run the two-box drill (`face/README.md` "The two-box drill") when Docker Desktop is up, stopping the host face and Account first; record it in `DEVELOPMENT.md` §7.4.
+  5. The `mcp-alpaca-kit` row in the live `~/.dsh` patch — unrelated, still the operator's to drop.
 
 ### Task 6 — review (controller)
 
 - Task 6: review 1 — Needs fixes: Important the loops page's Gotchas line (`Gravit-Docs-and-Prompt-Loops.html` ~183) still calls the Account seat an external install; fix round 1 sent with it plus four cheap minors (the page's Commands summary, CLAUDE.md back to ≤ 67 lines, DEVELOPMENT §3.9's "byte-identical" overstatement, four unwrapped lines).
 - Task 6: minor (deferred): `dsh/skills/mechanics/account-seat-guide/SKILL.md` 8–9 still reads "Linqi's buyer-agent-demo, a program the operator runs on this machine" — true, read by Gravit, left for the operator's word (outside the brief's files).
+
+### Task 6 — re-review (controller)
+
+- Task 6: fix round 1/5 (5 addressed, 0 open; commits 3f0b1ce..dfcdc12).
+- Task 6: complete (commits 19e5b4a..dfcdc12, review clean after one fix round).
+
+## Final whole-branch review (fable, f36c78c..dfcdc12)
+
+- Verdict: ready to merge with fixes; no Critical; no ruling of R1–R15 reversed.
+- Important 1: the `account-modules` volume's mount point sits inside the read-only bind of `./account`; on a checkout with no `account/node_modules` (a fresh clone, the primary checkout after the merge) Docker likely cannot create it and the agent container fails before the entrypoint — the READMEs must say `cd account && npm ci` on the host precedes the first `up`.
+- Important 2: the hand-over list lacks `cd account && npm ci` as its first step — without it the merged face's seat row spawns nothing and the host Account cannot start.
+- Minors taken into the fix wave: the spec's first-run sentence (the entrypoint runs setup) and its `IFIND_*` env-file sentence against the built compose; the drill's "nothing else of the host" (files only: `host.docker.internal` still reaches the Mac's loopback services); a healthcheck `start_period`; `account/NOTICE` line 2; restart the box after a pull that rewrote a root document. Every other deferred minor: leave (the reviewer's triage).
+
+### Fix wave
+
+- Important 1: `compose.yml` gains a comment at the `account-modules` mount (its mount point must exist inside the read-only `./account` bind; `cd account && npm ci` on the host first); the `:ro` stays. `face/README.md` "The two-box drill" step 1 and "In the agent box", and `account/README.md` "In the box", say `npm ci` in `account/` on the host precedes the first `docker compose up`, with the reason. Task 5's deferred `npm ci` line carries the reason.
+- Important 2: the hand-over list gains step 1, `cd account && npm ci` in the primary checkout after the merge; the rest renumbered 2–5.
+- Spec §5: the env file carries the model key only; as built no `IFIND_*`, so the face's A-share quotes read iFinD unconfigured in the box until project 2 (checked in `face/src/quote-snapshots.ts`: no other quote source — Tencent serves symbol search only, so there is no Tencent quote fallback). Spec §7: the first run's setup is `face/docker-entrypoint.sh`'s, when the profile is absent. The drill says the IFIND point in one clause.
+- The drill's file fence: on Docker Desktop `host.docker.internal` still reaches the Mac's loopback services — no wider than the host dev loop, no Account secret (drill and the compose header comment).
+- `compose.yml` account healthcheck: `start_period: 20s`; `compose.test.ts` asserts only the healthcheck's command, so not extended.
+- `account/NOTICE` line 2: "that the copied source and tests import".
+- The after-a-pull paragraph: recreate the box after a pull that rewrote a root document — written `docker compose up --force-recreate agent`, since a plain `up` leaves an unchanged container as it is.
+- Gates: face `npm test` 1,654 tests, 1,631 pass, 23 skipped, 0 fail; typecheck clean; `compose.test.ts` 1/1; `docker compose config -q` exit 0 (daemon off: no build). `GRAVIT.md` unchanged.

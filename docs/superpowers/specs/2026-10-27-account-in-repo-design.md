@@ -131,7 +131,8 @@ workspace is the tree: channels are `strategies/*`, Gravit writes journals and a
 `GRAVIT.md` and `roles/` are read at boot). Its homes are volumes: `$DSH_HOME` (profiles, sessions,
 credentials written by dsh) and the seat's `BUYER_HOME` (`account/`'s `home.ts` default is
 `~/.buyer-agent-demo`; in the box it is `/seat-home`, holding `seats/gravit.json` and nothing else).
-It gets one env file: the model key(s) the face needs (`DEEPSEEK_API_KEY`; `IFIND_*` until project 2).
+It gets one env file: the model key the face needs (`DEEPSEEK_API_KEY`; as built, no `IFIND_*`, so
+the face's A-share quotes read iFinD unconfigured in the box until project 2).
 It publishes 3090 on the host's loopback only. Inside the box the face must listen on the container's
 interface: `face/src/overlay.ts` pins the webserver row to `127.0.0.1` so that no operator patch can
 widen it; this project adds one env, `FACE_BIND` (default `127.0.0.1`; the compose file sets
@@ -210,7 +211,8 @@ when its volume is empty (Linux binaries; the first `up` needs the network); the
 nothing at build. The `account` service has no bind mount: its image copies `account/` and runs `npm
 ci` at build. The agent box carries `account/`'s dependency tree only for the seat (my call). Ports `127.0.0.1:3090:3090` and
 `127.0.0.1:4820:4820`. `agent` depends on `account` with a health check on `GET /api/overview`.
-First run: `docker compose run agent npm run setup` writes the profile into `dsh-home`; the
+First run: as built, `face/docker-entrypoint.sh` runs `npm run setup` into `dsh-home` when the
+profile is absent; the
 operator's `cordis.patch.yml` rows (the skill roots, the model row — paths inside the box) are
 documented in `face/README.md` next to the host procedure. `agent`'s image installs `akshare-mcp`
 (Python, `~/.local/bin/akshare-mcp` today) until project 2 removes it; the face's
