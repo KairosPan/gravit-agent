@@ -2048,16 +2048,20 @@ archive cannot be undone there — a 409) and `POST /data/sessions/delete {sessi
 `readAnalysisRuns` in `channels.ts` from a real `strategies/<name>/analysis/` (a link there reads
 as no runs): `runs`, the run directories in the run-id form (`ANALYSIS_RUN_RE`, `<YYYYMMDD>T<HHMMSS>Z-<8 hex>`)
 newest first, at most 50 (`ANALYSIS_RUNS_CAP`), each `{run, asOf, session, snapshotId, sealed, kind,
-artifacts, marketRun, bytes}` — the first five from `run.json` (8 KiB compact, null and `sealed:
-false` when it is absent or unusable; `asOf` the wall clock of the newest evidence, `session` its
-trading day), `artifacts` one `{accepted: true, status, contractVersion, headline}` per module
+openedAt, sealedAt, frozen, artifacts, marketRun, bytes}` — all but the last three from `run.json`
+(8 KiB compact, null, `sealed: false` and `frozen: []` when it is absent or unusable; `asOf` the
+wall clock of the newest evidence, `session` its trading day, `frozen` the evidence entries'
+`source`s in order, a malformed entry dropped one by one), `artifacts` one `{accepted: true, status,
+contractVersion, headline, missingSources, marketRun}` per module
 that `run.json`'s `artifacts[]` names (A10: what a submit landed) whose file parses as an object
 within 24 KiB compact (an unnamed or unreadable one left out, so a run whose `run.json` cannot be
-read accepts none), `headline` its fields by `MODULE_HEADLINES`, `marketRun` the accepted `mode.json`'s
+read accepts none), `headline` its fields by `MODULE_HEADLINES`, `missingSources` the artifact's
+`missing_sources` (`[]` if absent or if any member is not a string), the artifact's `marketRun` its
+own `market_run` or null; the row's `marketRun` the accepted `mode.json`'s
 `market_run`, `bytes` every regular one-link file in the run directory by its size, the evidence
-included and never opened (the rows `/data/modules.json` builds from it add `frozen`, which drops
-a malformed `evidence` entry one by one, and each artifact's `missingSources`, which reads as `[]`
-if any member is not a string); `runsOmitted`, the run directories past the cap; and `latestRun`, the
+included and never opened (`/data/modules.json` projects these same rows, dropping `bytes`,
+`sealed`, `snapshotId`, `kind`, the row's `marketRun` and each artifact's `accepted` and
+`contractVersion`); `runsOmitted`, the run directories past the cap; and `latestRun`, the
 newest listed run that is sealed and holds an accepted artifact, `{run, asOf, session, snapshotId,
 artifacts: {<module>: {headline, json}}, marketRun}`, or null; the section's latest line reads
 `as of <asOf> · session <session>`. In a strategy channel `marketRun` is the `cn-market` run the
