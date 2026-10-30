@@ -414,7 +414,7 @@ test("freeze: index stores the up/down distribution as one counts item - counts,
   const { tools } = mount(root, undefined);
   const reply = JSON.parse(await tools.index.execute({ strategy: "cn-market" }, exec()));
   assert.equal(reply.host, "qt.gtimg.cn,web.ifzq.gtimg.cn,push2ex.eastmoney.com");
-  const klines = urls.filter((url) => url.host === "web.ifzq.gtimg.cn").map((url) => url.searchParams.get("param")).sort();
+  const klines = urls.filter((url) => url.host === "web.ifzq.gtimg.cn" && url.pathname.endsWith("/fqkline/get")).map((url) => url.searchParams.get("param")).sort();
   assert.deepEqual(klines, ["sh000001,day,,,120,qfq", "sh000300,day,,,120,qfq", "sz399001,day,,,120,qfq", "sz399006,day,,,120,qfq"]);
   // One Eastmoney request, the distribution; the clist is never asked.
   assert.deepEqual(urls.filter((url) => url.host.endsWith("eastmoney.com")).map((url) => url.pathname), ["/getTopicZDFenBu"]);
@@ -464,12 +464,13 @@ test("freeze: index lands the Tencent items when the distribution cannot be used
   assert.match(reply.counts.reason, /^东方财富返回的数据属于交易日 20261022，不是本次会话 20261023。$/);
   assert.equal(reply.host, "qt.gtimg.cn,web.ifzq.gtimg.cn");
   assert.equal(reply.delayed, false);
-  assert.equal(reply.items, 8);
+  assert.equal(reply.items, 12);
   assert.deepEqual(reply.derived.map((item: any) => item.value).slice(1), [null, null, null]);
   const dir = runDir(root, "cn-market", run);
   const evidence = await readJson(dir, "evidence-index.json");
   assert.deepEqual(evidence.items.map((item: any) => item.kind), [
-    "index", "index", "index", "index", "bars", "bars", "bars", "bars", "derived", "derived", "derived", "derived",
+    "index", "index", "index", "index", "bars", "bars", "bars", "bars", "minutes", "minutes", "minutes", "minutes",
+    "derived", "derived", "derived", "derived",
   ]);
   assert.deepEqual([evidence.host, evidence.delayed], ["qt.gtimg.cn,web.ifzq.gtimg.cn", false]);
   const measures = evidence.items.filter((item: any) => item.kind === "derived");
@@ -483,7 +484,7 @@ test("freeze: index lands the Tencent items when the distribution cannot be used
   // A failed request stands in the same way: no distribution file here, a 404, UPSTREAM_INVALID.
   const missing = await fixtures(t, (dir) => rm(join(dir, "distribution.json")));
   const failed = JSON.parse(await mount(root, missing).tools.index.execute({ strategy: "cn-market" }, exec()));
-  assert.deepEqual([failed.counts.frozen, failed.counts.refused, failed.items], [false, "UPSTREAM_INVALID", 8]);
+  assert.deepEqual([failed.counts.frozen, failed.counts.refused, failed.items], [false, "UPSTREAM_INVALID", 12]);
   assert.match(failed.counts.reason, /^东方财富响应无效（PROVIDER_HTTP_ERROR）。$/);
   // A distribution that landed says so, on a Friday and on the Saturday after it, whose session is Friday's.
   const landed = JSON.parse(await mount(root, await fixtures(t)).tools.index.execute({ strategy: "cn-market" }, exec()));
@@ -491,6 +492,56 @@ test("freeze: index lands the Tencent items when the distribution cannot be used
   const saturday = mount(root, await fixtures(t), {}, new Date("2026-10-24T02:00:00.000Z"));
   const weekend = JSON.parse(await saturday.tools.index.execute({ strategy: "cn-market" }, exec()));
   assert.deepEqual([weekend.session, weekend.counts], ["2026-10-23", { frozen: true }]);
+});
+
+test("freeze: index keeps each index's minute line of the session, one minutes item per index in INDICES order after the quotes, bars and counts", async (t) => {
+  const root = await strategiesRoot(t);
+  const { urls } = mockFetch(t, await fixtures(t));
+  const { tools } = mount(root, undefined);
+  const reply = JSON.parse(await tools.index.execute({ strategy: "cn-market" }, exec()));
+  assert.equal(reply.session, "2026-10-23");
+  assert.equal(reply.items, 13);
+  const asked = urls.filter((url) => url.pathname === "/appstock/app/day/query").map((url) => url.searchParams.get("code")).sort();
+  assert.deepEqual(asked, ["sh000001", "sh000300", "sz399001", "sz399006"]);
+  const evidence = await readJson(runDir(root, "cn-market", reply.run), "evidence-index.json");
+  assert.deepEqual(evidence.items.map((item: any) => item.kind), [
+    "index", "index", "index", "index", "bars", "bars", "bars", "bars", "counts", "minutes", "minutes", "minutes", "minutes",
+    "derived", "derived", "derived", "derived",
+  ]);
+  const minutes = evidence.items.filter((item: any) => item.kind === "minutes");
+  assert.deepEqual(minutes.map((item: any) => item.symbol), ["sh000001", "sz399001", "sz399006", "sh000300"]);
+  for (const item of minutes) {
+    assert.match(item.id, /^ev_/);
+    assert.deepEqual([item.session, item.through, item.price.length, item.volume.length, item.amount.length], ["2026-10-23", "15:00", 242, 242, 242]);
+  }
+  assert.deepEqual(minutes.map((item: any) => item.prec), [3697.52, 11534.38, 2638.23, 4103.54]);
+  assert.deepEqual([minutes[0].price[0], minutes[0].price[241], minutes[0].volume[0], minutes[0].volume[1]], [3697.52, 3648.34, 1000, 1100]);
+});
+
+test("freeze: an index whose minute line cannot be read is a minutes_missing item naming the reason, and the freeze still lands", async (t) => {
+  const root = await strategiesRoot(t);
+  // No file for sz399006: a 404, PROVIDER_HTTP_ERROR.
+  const missing = await fixtures(t, (dir) => rm(join(dir, "minutes-sz399006.json")));
+  const reply = JSON.parse(await mount(root, missing).tools.index.execute({ strategy: "cn-market" }, exec()));
+  assert.equal(reply.items, 13);
+  const evidence = await readJson(runDir(root, "cn-market", reply.run), "evidence-index.json");
+  const lines = evidence.items.filter((item: any) => item.kind === "minutes" || item.kind === "minutes_missing");
+  assert.deepEqual(lines.map((item: any) => [item.kind, item.symbol]), [
+    ["minutes", "sh000001"], ["minutes", "sz399001"], ["minutes_missing", "sz399006"], ["minutes", "sh000300"],
+  ]);
+  const { id, ...gone } = lines[2];
+  assert.match(id, /^ev_/);
+  assert.deepEqual(gone, { kind: "minutes_missing", symbol: "sz399006", reason: "PROVIDER_HTTP_ERROR" });
+  // A reply whose days lack the session's: INVALID_RESPONSE.
+  const stale = await fixtures(t, async (dir) => {
+    const file = join(dir, "minutes-sh000300.json");
+    const body = JSON.parse(await readFile(file, "utf8"));
+    body.data.sh000300.data = body.data.sh000300.data.filter((day: any) => day.date !== "20261023");
+    await writeFile(file, JSON.stringify(body));
+  });
+  const second = JSON.parse(await mount(root, stale).tools.index.execute({ strategy: "cn-market" }, exec()));
+  const last = (await readJson(runDir(root, "cn-market", second.run), "evidence-index.json")).items.find((item: any) => item.symbol === "sh000300" && item.kind.startsWith("minutes"));
+  assert.deepEqual([last.kind, last.reason], ["minutes_missing", "INVALID_RESPONSE"]);
 });
 
 test("freeze: two freezes of different sources on one run at once both land", async (t) => {

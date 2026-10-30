@@ -629,7 +629,10 @@ export function buildContext({
     for (const item of file.items) {
       // An item frozen in both runs keeps this run's own entry: the market run's comes after it.
       if (file.source.startsWith("market:") && items.has(item.id)) continue;
-      items.set(item.id, { source: file.source, kind: rowKind(item), scope: timeScope(item, file.session ?? null, session), item });
+      const kind = rowKind(item);
+      // Minute lines are the run view's, never a role's context (run view spec M5).
+      if (kind === "minutes" || kind === "minutes_missing") continue;
+      items.set(item.id, { source: file.source, kind, scope: timeScope(item, file.session ?? null, session), item });
     }
   const all = [...items.entries()];
   const derivedIds = new Set(all.filter(([, entry]) => entry.kind === "derived").map(([id]) => id));

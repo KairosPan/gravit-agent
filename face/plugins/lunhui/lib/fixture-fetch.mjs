@@ -9,6 +9,8 @@
  * - a URL whose host is `qt.gtimg.cn` gets `quotes.gb18030.txt` as raw bytes;
  * - a URL whose host is `web.ifzq.gtimg.cn` and whose `param` starts with `<symbol>,` (the
  *   provider grammar, `sh` or `sz` and six digits) gets `kline-<symbol>.json`;
+ * - a URL whose host is `web.ifzq.gtimg.cn`, whose path is `/appstock/app/day/query` and whose
+ *   `code` is a symbol in that grammar gets `minutes-<symbol>.json`;
  * - a URL whose host is `push2ex.eastmoney.com` gets the file its path names: `/getTopicZTPool`
  *   `zt-pool.json`, `/getTopicZBPool` `zb-pool.json`, `/getYesterdayZTPool` `yesterday-pool.json`,
  *   `/getTopicZDFenBu` `distribution.json`;
@@ -26,6 +28,9 @@ import { join } from "node:path";
 
 /** The provider grammar of a symbol, so `param` can never name a path outside the directory. */
 const KLINE_PARAM = /^((?:sh|sz)\d{6}),/;
+/** The minute line's path and its `code`, held to the same grammar. */
+const MINUTES_PATH = "/appstock/app/day/query";
+const SYMBOL = /^(?:sh|sz)\d{6}$/;
 
 /** The `push2ex` endpoints' files, by path: the three pools and the up/down distribution. */
 const POOL_FILES = new Map([
@@ -62,6 +67,10 @@ export function createFixtureFetch(dir) {
       return notFound();
     }
     if (target.host === "qt.gtimg.cn") return file("quotes.gb18030.txt");
+    if (target.host === "web.ifzq.gtimg.cn" && target.pathname === MINUTES_PATH) {
+      const symbol = target.searchParams.get("code") ?? "";
+      return SYMBOL.test(symbol) ? file(`minutes-${symbol}.json`) : notFound();
+    }
     if (target.host === "web.ifzq.gtimg.cn") {
       const symbol = KLINE_PARAM.exec(target.searchParams.get("param") ?? "")?.[1];
       if (symbol) return file(`kline-${symbol}.json`);

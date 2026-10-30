@@ -22,10 +22,18 @@ numbers are not those securities' prices.
   request; the four index files are keyed `day`, as real index replies are, so their bars parse
   with adjustment `none`. The last bar agrees with the symbol's quote line (open, close, high,
   low, volume; the quote's previous close is the bar before).
+- `minutes-<symbol>.json` — one `web.ifzq.gtimg.cn` `day/query` minute-line reply per index
+  (`sh000001`, `sz399001`, `sz399006`, `sh000300`): `{"code":0,"data":{"<symbol>":{"data":[{date,
+  prec, data: ["HHMM price cumVolume cumAmount", …]}, …]}}}`, five days 20261023 back to 20261019,
+  each the 242 points of the grid with the same made-up curve off its `prec`. Synthetic, like
+  everything here: `make-minutes.mjs` writes them (`node face/tests/fixtures/lunhui/make-minutes.mjs`,
+  no clock, no randomness), and its header gives the formula; edit the script and rerun it rather
+  than the files.
 
 `fetch.ts` serves them through `createFixtureFetch` (`face/plugins/lunhui/lib/fixture-fetch.mjs`),
 the one mapping a row's `config.fetch` uses too: a URL whose host is `qt.gtimg.cn` gets
 `quotes.gb18030.txt` as bytes, a URL whose host is `web.ifzq.gtimg.cn` and whose `param` starts
-with `<symbol>,` gets `kline-<symbol>.json`, any other URL a 404. The sibling directory
+with `<symbol>,` gets `kline-<symbol>.json`, a URL on that host whose path is
+`/appstock/app/day/query` gets `minutes-<code>.json`, any other URL a 404. The sibling directory
 `../lunhui-empty/` holds no replies at all, so a fetch served from there answers every URL with a
 404.

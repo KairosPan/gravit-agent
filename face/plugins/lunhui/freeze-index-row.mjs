@@ -4,7 +4,9 @@
  * run? })` freezes the four indices' Tencent quotes (each item the parsed quote, given `kind:
  * "index"`) and their 120-day daily bars (`kind: "bars"`), then the market's advance/decline counts
  * from Eastmoney's up/down distribution of the session (`kind: "counts"`: the counts, the buckets
- * the reply held, the hash of its data, its `host` and `delayed`; no row), into a market run's
+ * the reply held, the hash of its data, its `host` and `delayed`; no row), then each index's Tencent
+ * minute line of the session (`kind: "minutes"`, or `minutes_missing` naming the reason when the
+ * line cannot be read - which fails nothing), into a market run's
  * `evidence-index.json`, followed by `deriveIndex`'s and `deriveCounts`' measures. Any Tencent
  * failure fails the freeze, as does a reply with no priced quote (`NO_MARKET_DATA`). A distribution
  * the freeze cannot use - another session's, a failed or malformed request: any provider refusal -
@@ -18,7 +20,7 @@ import { refuse } from "./lib/errors.mjs";
 import { deriveCounts, deriveIndex } from "./lib/derive.mjs";
 import { fetchMarketCounts } from "./lib/eastmoney.mjs";
 import { RUN_PARAMETERS, SHARED_BOUNDS, defineFreeze, freezeDeps, hostsOf, idsOf, sessionOf, tencent } from "./lib/freeze-tool.mjs";
-import { fetchDailyBars, fetchQuotes } from "./lib/market.mjs";
+import { fetchDailyBars, fetchQuotes, minuteItems } from "./lib/market.mjs";
 import { LunhuiError } from "./lib/runs.mjs";
 
 export const name = "lunhui-freeze-index";
@@ -74,7 +76,15 @@ async function freeze(fetchImpl, _args, now) {
   // The counts item, when the distribution landed, carries its reply's host and delay (A28); the
   // Tencent items need no stamp.
   const countsItem = "counts" in distribution ? { kind: "counts", ...distribution.counts } : null;
-  const items = [...quotes, ...series.map((bars) => ({ kind: "bars", ...bars })), ...(countsItem === null ? [] : [countsItem])];
+  // Each index's minute line of the session, one `minutes` or `minutes_missing` item each: a line
+  // that cannot be read names its reason and fails nothing.
+  const lines = await minuteItems(INDICES.map((symbol) => ({ symbol })), session, { fetchImpl });
+  const items = [
+    ...quotes,
+    ...series.map((bars) => ({ kind: "bars", ...bars })),
+    ...(countsItem === null ? [] : [countsItem]),
+    ...lines,
+  ];
   const derived = [
     ...deriveIndex(quotes, idsOf(quotes, (quote) => ["quote", quote.symbol])),
     ...deriveCounts(countsItem, countsItem === null ? new Map() : idsOf([countsItem], () => ["counts"])),
