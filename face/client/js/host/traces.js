@@ -1,7 +1,7 @@
 // face/client/js/host/traces.js — a room member's trace (spec 2026-10-19 §7 Stage 3 "Research surfaces"): the turn that
 // produced a member's answer, read without activating the member's session (wire/member-traces.js reads the
 // projections cut, then pages the history back) and folded into messages the way the thread folds a window, so its
-// tool rows draw with the same renderers. Once per answer — an answer is its conversation and message id, since message
+// tool calls are stored but not drawn, the rest draws with the same renderers. Once per answer — an answer is its conversation and message id, since message
 // ids are log sequences two rooms repeat; a failure may be opened again.
 import { toMessages } from './kinds.js';
 import { reducers as host } from '../reducers/host.js';

@@ -285,6 +285,18 @@ test('the layout: one screen tall, the thread scrolls under a pinned composer, t
   assert.match(rule('.status-line'), /text-align: center/);
 });
 
+// a narrow window scrolls the page, not the thread: the main must grow to its content (the desktop's zero flex basis kept
+// it one screen tall, so the thread spilled out past a composer stranded mid-page), and the composer sticks to the bottom
+test('the narrow layout: the main grows with the page and the composer stays pinned to the bottom', () => {
+  const narrow = css.match(/@media \(max-width: 860px\) \{\n([\s\S]*?)\n\}/)?.[1] ?? '';
+  const rule = sel => narrow.match(new RegExp(`^\\s*${sel.replace(/[.]/g, '\\.')} \\{([^}]*)\\}`, 'm'))?.[1] ?? '';
+  assert.match(rule('.main'), /flex: none/, 'no zero basis: the main is as tall as what it holds');
+  assert.match(rule('.thread'), /overflow-y: visible/, 'the page scrolls, not the thread');
+  assert.match(rule('.composer'), /position: sticky/);
+  assert.match(rule('.composer'), /bottom: 0/);
+  assert.match(rule('.composer'), /background: var\(--bg\)/, 'the thread does not show through it');
+});
+
 test('Details never covers the conversation: it makes room, folding the list away on a medium window', () => {
   assert.match(css, /\.main\.with-drawer > \.head, \.main\.with-drawer > \.thread, \.main\.with-drawer > \.composer \{ margin-right: 400px; \}/);
   assert.match(css, /@media \(min-width: 861px\) and \(max-width: 1399px\) \{\s*\.list:has\(~ \.main\.with-drawer\) \{ display: none; \}/);
@@ -296,8 +308,8 @@ test('a long tool description is clamped to two lines, and the page keys keep a 
   assert.match(rule('.plug-key'), /gap: 8px/);
 });
 
-test('the tool row, the question card and the thinking row have their rules', () => {
-  for (const sel of ['.tool summary', '.tool pre', '.tool.danger', '.question .q', '.opt', '.thinking span', '.cut', '.status-line.bad']) {
+test('the question card and the thinking row have their rules', () => {
+  for (const sel of ['.question .q', '.opt', '.thinking span', '.cut', '.status-line.bad']) {
     assert.ok(new RegExp(sel.replace(/[.]/g, '\\.') + '\\s*\\{').test(css), sel);
   }
 });

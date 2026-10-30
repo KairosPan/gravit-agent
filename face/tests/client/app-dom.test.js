@@ -1393,13 +1393,13 @@ test("Talk to opens the bot's conversation", async () => {
   store.timers.clear();
 });
 
-test('an opened tool row stays open across the next render', async () => {
+test('an opened disclosure stays open across the next render', async () => {
   const f = fakeWindow({ hash: '' });
   const h = host({ rows: [row('s1')] });
   const store = started(f, h);
   await h.ready();
-  f.withSelector('details[id][open]', { tagName: 'DETAILS', id: 'tool-c1', open: true });
-  const again = f.withId('tool-c1', { tagName: 'DETAILS', open: false });
+  f.withSelector('details[id][open]', { tagName: 'DETAILS', id: 'trace-s1-e9', open: true });
+  const again = f.withId('trace-s1-e9', { tagName: 'DETAILS', open: false });
   store.dispatch('toggleRail');
   assert.equal(again.open, true, 'the render opens it again by its id');
   store.timers.clear();
@@ -1418,7 +1418,7 @@ test("opening Trace reads the member's session without following it", async () =
   assert.ok(h.calls.some(c => c[0] === 'session/page' && c[1].request.address.sessionId === 'm1'));
   assert.equal(h.streams.some(s => s.name === 'session/follow' && s.args.request.address.sessionId === 'm1'), false, 'never followed');
   assert.equal(store.get().traces.room.e9.status, 'ready');
-  assert.match(f.html(), /<details id="tool-mc1" class="tool">/);
+  assert.doesNotMatch(f.html(), /tool-mc1|class="tool/, "the member's tool call is not drawn");
   store.timers.clear();
 });
 

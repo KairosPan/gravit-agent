@@ -148,7 +148,7 @@ function bubble(view, speaker) {
   }
   if (view.role === 'gravit') {
     const text = view.text ?? '';
-    if (text.trim() === '' && view.interrupted !== true) return null; // a tool-only step: the tool row carries it
+    if (text.trim() === '' && view.interrupted !== true) return null; // a tool-only step: its tool calls are stored but not drawn, so it draws nothing
     return { ...b, from: speaker, kind: 'text', text, data: { markdown: true, interrupted: view.interrupted === true } };
   }
   // only the operator's own words are You; every other user-role record (a compaction checkpoint, a plugin notice,

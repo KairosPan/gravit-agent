@@ -156,8 +156,8 @@ All three of its stages are built:
   the face's own wire. The old `/market` and `/account` pages are gone (404);
 - **host-fed since stage 3**: a channel's page (`#/channel/<id>`: its status, thesis, an old
   strategy's backtests, journal, files, and its agent and bot rosters with their editors), Discover
-  (`#/discover`, the inventory of what Gravit runs — "Discover" below), the row actions, a tool
-  result drawn plain (its name and payload folded), a conversation's subagent children
+  (`#/discover`, the inventory of what Gravit runs — "Discover" below), the row actions, no tool
+  call drawn (not in the thread, not in a member's Trace), a conversation's subagent children
   ("Temporary subagents" below) and a room member's trace. There is no shop, no Mail and no
   Memory: what the demo drew with no back end left the tree;
 - **since the graft's stage 2** (2026-10-24): Trade (`#/trade`) and the owner's keys on Markets
@@ -2304,8 +2304,8 @@ question or escalation card renders **inline in the room**, under the bot's name
 against the member's own session. A member's answer that records its member session and turn
 carries a **Trace** disclosure under it: opening it reads that exact turn — the projections cut,
 then the history paged back as needed, never a follow — so it does not resume or prompt the
-member; its tool rows draw as the thread draws them, with `Loading…`, the loader's words or `No
-steps` (`client/js/host/traces.js` over `client/js/wire/member-traces.js`). Membership still
+member; it draws the turn's context lines and words — never a tool call — with `Loading…`, the
+loader's words or `No steps` (`client/js/host/traces.js` over `client/js/wire/member-traces.js`). Membership still
 follows the header: `parentSessionId` set, no `origin`, a bot preset, the parent running the host.
 A pending gate in a room counts toward the rail's Messages badge (the conversations with a card
 waiting on you).
@@ -2498,14 +2498,14 @@ fence-only like every `/data` read.
 The thread draws the kind table (`client/js/host/kinds.js`, `DEVELOPMENT.md` §5.3): the
 operator's words right, Gravit's left through DOM-built markdown, a bot's words in a group under
 its name, a context row — a compaction checkpoint, a plugin notice, the runtime snapshot — as a
-collapsed `context · <source>` details, a tool row as a collapsed details titled by the call
-(`running` until the result fills it, `.danger` on error; the result its `<pre>` — "Tool
-results" below), the seat's card, the approval card, the question card, a receipt and a
+collapsed `context · <source>` details — and no tool row: since 2026-10-28 (the operator's
+word) a call is not drawn, in the thread or a Trace, its gate, receipt or refusal being rows of their own
+("Tool results" below) —, the seat's card, the approval card, the question card, a receipt and a
 refusal; an answered or closed gate shows its end state as a chip and no keys. A disclosure you
-opened (a tool row, a Trace) stays open across the page's renders. The old chat page's
+opened (a Trace) stays open across the page's renders. The old chat page's
 closed **思考轨迹** disclosure (`client/answer-traces.js`, deleted) folded context, thinking and
-tool calls under every answer; on the gravit-ui client Gravit's own tool rows stand in the thread
-in order, a room member's answer has its **Trace** ("Rooms" above), and there is no `think` row
+tool calls under every answer; on the gravit-ui client the thread draws no
+tool call, a room member's answer has its **Trace** ("Rooms" above), and there is no `think` row
 (the reasoning text the mapper carries is not drawn).
 
 Thinking follows dsh's design: while the host streams a turn the thread's tail carries one
@@ -2521,11 +2521,11 @@ render exactly as typed.
 
 ### Tool results
 
-`client/js/render/tool-result.js` dresses no result since 2026-10-24: the old chat page's
-renderers for the Alpaca server's results (tables, tiles, a close chart) left with that server,
-so every tool result — one in a conversation written before then included — draws the plain row,
-the call's name and its payload folded under it. `toolResultHtml(name, text)` stays as the seam
-and returns `null`, so a server's result can be dressed again by its name. What holds is the
+No tool call is drawn since 2026-10-28 (the operator's word): not in the thread, not in a member's
+Trace — one in a conversation written before then included; the gate a call raises, the seat's
+receipt or refusal are rows of their own. `client/js/render/tool-result.js` left with the `.tool`
+rules: it was the seam that dressed a result by its server's name, and dressed none since the
+Alpaca server's renderers left on 2026-10-24. What holds is the
 host's side: dsh spills a tool result over its inline budget into head + tail with an
 elision seam and a note naming the full-output file. At 0.2.0 that budget is dsh-base's
 `spill-policy` `maxInlineTokens: 12500`, estimated as characters ÷ 4 — about 50 000
@@ -3451,12 +3451,12 @@ limit on it ("The Account seat" above), the face started with keys, a channel se
    order · $<left> of $<budget> left`, the paper venue with its `Paper` chip, no cards. Discover's
    MCP shelf lists `account` with 35 tools.
 2. **The read.** Ask Gravit: "What is my seat at the Account, and which paper venues are there?"
-   Expect `portfolio_account` in the tool row, no card, and an answer naming the seat as
-   authorised and `paper-1`.
+   Expect no card and an answer naming the seat as authorised and `paper-1` (the call,
+   `portfolio_account`, is not drawn in the thread).
 3. **The order.** Ask: "Buy $10 of AAPL on paper-1, market." Expect, in order: the face's orange
    card `Your call: buy $10 of AAPL · market · paper-1` with the dim line `paper-1 · Account seat
-   - mcp__account__portfolio_live_order: side=buy usd=10 symbol=AAPL …`; press ✓; the tool row's
-   answer and the receipt `Card raised on the Account page · card-NNNN · answer it there`; the
+   - mcp__account__portfolio_live_order: side=buy usd=10 symbol=AAPL …`; press ✓; the
+   receipt `Card raised on the Account page · card-NNNN · answer it there`; the
    Venues box counting `1 card waiting`. A model left to itself previews first
    (`portfolio_live_markets`, `portfolio_live_preview`: reads, no card); the card's title is made
    from the dim line, the host's own words, so it never waits on anything else.

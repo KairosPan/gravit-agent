@@ -46,15 +46,12 @@ test("Gravit's text renders through the markdown hook when one is set, escaped o
   assert.match(cut, /class="cut">Interrupted</);
 });
 
-test('a tool row is a collapsed details titled by the call; the result fills a pre; an error is marked danger', () => {
-  const call = renderMessage(msg({ id: 'tc1', kind: 'tool', text: 'python -m alpaca_kit.breadth', data: { callId: 'c1', name: 'bash', title: 'python -m alpaca_kit.breadth', args: {} } }), conv(), state);
-  assert.match(call, /<details id="tool-c1" class="tool"><summary>/); assert.match(call, /tool-name">python -m alpaca_kit.breadth</); assert.match(call, /running/);
-  assert.doesNotMatch(call, /<pre>/);
+test('a tool call draws nothing, whatever its state: running, done or failed', () => {
+  const running = renderMessage(msg({ id: 'tc1', kind: 'tool', text: 'python -m alpaca_kit.breadth', data: { callId: 'c1', name: 'bash', title: 'python -m alpaca_kit.breadth', args: {} } }), conv(), state);
   const done = renderMessage(msg({ id: 'tc1', kind: 'tool', text: 'python -m alpaca_kit.breadth', data: { callId: 'c1', name: 'bash', result: 'advancers 312 <ok>', isError: false } }), conv(), state);
-  assert.match(done, /<pre>advancers 312 &lt;ok&gt;<\/pre>/); assert.doesNotMatch(done, /running/);
   const bad = renderMessage(msg({ id: 'tc3', kind: 'tool', text: 'read', data: { callId: 'c3', result: 'ENOENT', isError: true } }), conv(), state);
-  assert.match(bad, /<details id="tool-c3" class="tool danger">/);
-  assert.match(call, /msg-body wide/);
+  const json = renderMessage(msg({ id: 'tc5', kind: 'tool', text: 'market_snapshot', data: { callId: 'c5', name: 'mcp__alpaca-kit__market_snapshot', result: JSON.stringify({ ok: true }), isError: false } }), conv(), state);
+  assert.deepEqual([running, done, bad, json], ['', '', '', '']);
 });
 
 test('the order card carries its title, the venue line, and Decline then Approve keys that answer rejected and allowed-once', () => {
@@ -137,23 +134,23 @@ test('the thread draws a divider after a 15-minute gap and the thinking row only
   assert.ok(busy.lastIndexOf('thinking') > busy.lastIndexOf('>b<'), 'the thinking row comes last');
 });
 
+test('the thread draws no tool row: a receipt the call raised stays, and a divider reads the gap between the rows it draws', () => {
+  const tool = msg({ id: 'tc1', seq: 2, at: NOW - 30 * MIN, kind: 'tool', text: 'mcp__account__portfolio_explore', data: { callId: 'c1', name: 'mcp__account__portfolio_explore', result: '{"ok":true}', isError: false } });
+  const failed = msg({ id: 'tc2', seq: 3, at: NOW - 30 * MIN, kind: 'tool', text: 'read', data: { callId: 'c2', result: 'ENOENT', isError: true } });
+  const running = msg({ id: 'tc3', seq: 4, at: NOW - 30 * MIN, kind: 'tool', text: 'bash', data: { callId: 'c3', name: 'bash', args: {} } });
+  const receipt = msg({ id: 'r1', seq: 5, at: NOW - 20 * MIN, kind: 'receipt', text: 'Order placed', data: { status: 'accepted' } });
+  const h = renderThread(conv({ messages: [msg({ id: 'e1', seq: 1, at: NOW - 40 * MIN, from: 'you', text: 'a' }), tool, failed, running, receipt] }), state, NOW);
+  assert.doesNotMatch(h, /class="tool|tool-name|portfolio_explore|ENOENT|running/);
+  assert.match(h, /class="bubble green"/);
+  assert.equal((h.match(/class="divider"/g) ?? []).length, 2, 'one before the first message, one for the 20 minutes between the two rows drawn');
+});
+
 test('helpers: chip, key, ticker, withTickers', () => {
   assert.equal(chip('x', 'up'), '<span class="chip up">x</span>');
   assert.match(key('yes', 'Approve', { 'data-action': 'answer' }), /class="key yes" aria-label="Approve" data-action="answer"/);
   assert.match(ticker('BTC'), /href="#\/markets\/BTC"/);
   assert.match(withTickers('hold {{BTC}} & {{ETH}}'), /class="ticker" href="#\/markets\/BTC"/);
   assert.match(withTickers('a & b'), /a &amp; b/);
-});
-
-test('a tool result draws its name and its payload folded, whatever its server; an error is the danger row', () => {
-  const result = JSON.stringify({ ok: true, rows: [{ symbol: 'AAPL', close: 101, prev_close: 100, volume: 5 }] });
-  const old = renderMessage(msg({ id: 'tc5', kind: 'tool', text: 'market_snapshot', data: { callId: 'c5', name: 'mcp__alpaca-kit__market_snapshot', result, isError: false } }), conv(), state);
-  assert.match(old, /<details id="tool-c5" class="tool"><summary><span class="tool-name">market_snapshot<\/span><\/summary><pre>\{&quot;ok&quot;:true/);
-  assert.doesNotMatch(old, /<table|viz-|class="raw"/);
-  const plain = renderMessage(msg({ id: 'tc6', kind: 'tool', text: 'ls', data: { callId: 'c6', name: 'bash', result: 'a\nb', isError: false } }), conv(), state);
-  assert.match(plain, /<pre>a\nb<\/pre>/); assert.doesNotMatch(plain, /viz-|class="raw"/);
-  const failed = renderMessage(msg({ id: 'tc7', kind: 'tool', text: 'account', data: { callId: 'c7', name: 'mcp__alpaca-kit__account', result: JSON.stringify({ ok: true, equity: '1' }), isError: true } }), conv(), state);
-  assert.match(failed, /<details id="tool-c7" class="tool danger">/);
 });
 
 test("a member's answer offers Trace; Gravit's and the operator's do not", () => {
@@ -166,17 +163,22 @@ test("a member's answer offers Trace; Gravit's and the operator's do not", () =>
   assert.doesNotMatch(renderMessage(msg({ id: 'e3', from: 'buffett', text: 'x', data: { name: 'Buffett' } }), room, state), /Trace/, 'an answer with no member turn has none');
 });
 
-test('a loaded trace draws its tool rows; loading and failure say so', () => {
+test('a loaded trace draws its context lines and words, no tool call; loading and failure say so', () => {
   const room = conv({ id: 'room', kind: 'group', members: ['gravit', 'buffett'] });
   const answer = msg({ id: 'e9', from: 'buffett', text: 'Hold', data: { name: 'Buffett', memberSessionId: 'm1', memberTurn: 3 } });
   const tool = msg({ id: 'tmc1', seq: 11, kind: 'tool', text: 'account', data: { callId: 'mc1', name: 'mcp__alpaca-kit__account', result: '{"ok":true,"equity":"100"}', isError: false } });
-  const loaded = renderMessage(answer, room, { ...state, traces: { room: { e9: { status: 'ready', messages: [tool] } } } });
-  assert.match(loaded, /class="trace-body"[\s\S]*?<details id="tool-mc1" class="tool">[\s\S]*?<pre>\{&quot;ok&quot;:true,&quot;equity&quot;:&quot;100&quot;\}<\/pre>/);
+  const failed = msg({ id: 'tmc2', seq: 12, kind: 'tool', text: 'read', data: { callId: 'mc2', result: 'ENOENT', isError: true } });
+  const ctx = msg({ id: 'e10', seq: 10, from: 'system', text: 'round 1' });
+  const words = msg({ id: 'e13', seq: 13, from: 'buffett', text: 'Checked the book' });
+  const loaded = renderMessage(answer, room, { ...state, traces: { room: { e9: { status: 'ready', messages: [ctx, tool, failed, words] } } } });
+  assert.match(loaded, /class="trace-body"><div class="sysline">round 1<\/div><div class="dsec-line">Checked the book<\/div><\/div>/);
+  assert.doesNotMatch(loaded, /class="tool|tool-mc|account|equity|ENOENT/, 'no tool call, not even a failed one');
+  assert.match(renderMessage(answer, room, { ...state, traces: { room: { e9: { status: 'ready', messages: [tool, failed] } } } }), /No steps/, 'a turn of tool calls alone has no steps to show');
   assert.match(renderMessage(answer, room, { ...state, traces: { room: { e9: { status: 'loading' } } } }), /trace-body[^>]*>[\s\S]*?Loading…/);
   assert.match(renderMessage(answer, room, { ...state, traces: { room: { e9: { status: 'failed', line: 'The member session does not exist.' } } } }), /The member session does not exist\./);
   assert.match(renderMessage(answer, room, { ...state, traces: { room: { e9: { status: 'ready', messages: [] } } } }), /No steps/);
   // another room's answer with the same message id is not this one's
-  const other = renderMessage(answer, conv({ id: 'room2', kind: 'group', members: ['gravit', 'buffett'] }), { ...state, traces: { room: { e9: { status: 'ready', messages: [tool] } } } });
+  const other = renderMessage(answer, conv({ id: 'room2', kind: 'group', members: ['gravit', 'buffett'] }), { ...state, traces: { room: { e9: { status: 'ready', messages: [ctx, words] } } } });
   assert.match(other, /<details id="trace-room2-e9" class="trace">/);
-  assert.doesNotMatch(other, /tool-mc1/);
+  assert.doesNotMatch(other, /Checked the book/);
 });

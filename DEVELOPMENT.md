@@ -1873,11 +1873,11 @@ sentence drawn as its words, the Account's and a channel's stale stamps, a tool 
 | `js/wire/summaries.js`, `room.js`, `speaker.js`, `markdown.js` | moved with them: `summaryOf` (restores `agentPreset` on a list row — the projection first, `/data/channels.json`'s `presets` second, never a guess), the pure room rules (`foldMembers`, `isMentionText`, `roundEndLine`, …), `isHostPreset`/`speakerFor`, the DOM-built markdown |
 | `js/wire/grouping.js`, `channelName.js`, `botId.js`, `botSettings.js`, `subagents.js`, `member-traces.js` | the old chat page's other pure modules, moved in stage 3 with their words in English (`tests/client/wire-words.test.js` greps the six for Chinese): `bucketFor` and its sentinel keys (`ARCHIVED_KEY`, `UNGROUPED_KEY`, `BOT_KEY_PREFIX`); `foldChannelName`; `proposeBotId`; `normalizeBotModel`, `botModelChoices`, `botSettingsPayload`; `isSubagentRow`, `composeSubagentCatalog`, `normalizeSubagentCatalog` and `subagentControls`, which returns a state enum (`unavailable`, `waiting`, `running`, `inactive`, `unknown`) with a diagnostic's `reason` and no sentence; `loadMemberTrace`. `draftBotSoul`, `botToolLabel`, `isBotKey`, `subagentAddress` and `subagentResult` moved too, and no page calls them |
 | `js/wire/market-model.js`, `market-quotes.js`, `market-search.js`, `account-model.js` | moved from the old instrument pages in stage 2: `normalizeAsset`, `readWatchlist`/`saveWatchlist` (the face's key, the kairos key read until the first save), `readAccountWatch`/`saveAccountWatch` (the Account's keys under `ACCOUNT_WATCH_KEY`, `gravit.account.watch.v1`, a hundred at most), `price`, `number`; `createLiveQuotes` (the SSE stream with its 15 s polling fallback, handed `cn:` ids alone; `parsePayload` exported for the hit read); `createSymbolSearch` (250 ms debounce, a 10 s timeout); `money`, `signedMoney`, `pct`, `sign`, `orderMatches`. Their Chinese labels and notes stay in the wire and never reach a screen |
-| `js/render/rail.js`, `messages.js`, `thread.js`, `avatars.js`, `controls.js` | the two-level rail (Discover in the first level) and the list's groups; the Messages screen (head, Details with the row actions and Children, composer, status line, new message with New channel…, empty state); the thread's kinds, a tool row's dressed result and its Raw, a member's Trace; avatars and clusters (a bot's letter from the host's bot names); the segs, the key-value rows, the inline editor and confirm pair |
+| `js/render/rail.js`, `messages.js`, `thread.js`, `avatars.js`, `controls.js` | the two-level rail (Discover in the first level) and the list's groups; the Messages screen (head, Details with the row actions and Children, composer, status line, new message with New channel…, empty state); the thread's kinds (no tool call drawn), a member's Trace; avatars and clusters (a bot's letter from the host's bot names); the segs, the key-value rows, the inline editor and confirm pair |
 | `js/render/markets.js`, `chart.js`, `account.js`, `js/market-fmt.js` | stage 2's screens (§5.4), on the Account's reads since the graft's stage 1: Markets — the Account's rows by tab beside the A shares — and a market's page (`renderMarketsScreen`, `marketPage`, `mkAv`, the face's own letter tile); the charts, one drawing in one box — `candlesSvg` (a market's closes from the Account's candles, the page's chart), `curveSvg` (the Portfolio's curve from its history); Account (`renderAccountScreen` — Portfolio, Venues with a venue's Details drawer and the Account seat box, Agents, Cards — the Statement drawer `renderStatement`, `orderWords`) and the Settings drawer (`renderSettings`); `chgHtml`, a change with its arrow (the A-share page's) |
 | `js/render/run-sheet.js` | a module card's Run sheet as a drawer of any screen (`renderRunSheet`, §5.4) |
 | `js/render/owner.js`, `trade.js` | stage 2 of the graft (§5.4): the device line under the Account head (`renderDeviceLine`), Settings › Devices (`renderDevices`), the owner sheet's drawer (`renderSheet`); the Trade screen (`renderTradeScreen`: the kinds, the picker, Under way, the ticket) |
-| `js/render/channel.js`, `discover.js`, `modules.js`, `tool-result.js` | stage 3's screens (§5.4): a channel's page (`renderChannelScreen`, `bytesWord`; its Research runs section from `runsView`); Discover, a shelf's grid — the Research shelf's module cards among them —, the Create page and an item's page (`renderDiscover`, `renderPlugin`); a Lunhui module's page (`renderModule`, with `moduleChip` and `runKey`, the card's and the page's chip and Run); a tool row's result seam (`toolResultHtml`, `toolResultFor` — `null` for every call since 2026-10-24, so every result draws plain) |
+| `js/render/channel.js`, `discover.js`, `modules.js` | stage 3's screens (§5.4): a channel's page (`renderChannelScreen`, `bytesWord`; its Research runs section from `runsView`); Discover, a shelf's grid — the Research shelf's module cards among them —, the Create page and an item's page (`renderDiscover`, `renderPlugin`); a Lunhui module's page (`renderModule`, with `moduleChip` and `runKey`, the card's and the page's chip and Run) |
 | `js/html.js`, `icons.js`, `time.js`, `router.js`, `messages.js` | `esc`/`attrs`/`cls`; the inline SVG icon set; `rowTime`/`divider`/`fmtDate`/`fmtClock`; `parseHash`/`toHash` (`#/module/<name>` among the routes); `LEVELS` — the host's kinds alone: text and tool grey, card, approval and question orange, refusal red, receipt green — `levelOf`/`needsAnswer` |
 | `css/tokens.css`, `css/app.css` | the tokens (Linqi's Cream and Black values, demo @ 0ef5131) and the one sheet |
 
@@ -1890,7 +1890,7 @@ the policy they proved is re-pinned in `tests/client/live.test.js` against a fak
 the two cases that are not), and `tests/client-mux-smoke.test.ts` still drives `api.js` +
 `mapper.js` against a real boot. Stage 3 deleted the rest of the old page — `channels.js` and
 `answer-traces.js` (DOM, replaced by string renderers), `js/wire/render.js` (ported to
-`render/tool-result.js`) — and the demo's last pieces: the shop's catalogue (`js/data/plugins.js`),
+`render/tool-result.js`, itself deleted 2026-10-28 when tool calls stopped being drawn) — and the demo's last pieces: the shop's catalogue (`js/data/plugins.js`),
 Mail (`js/render/mail.js`), the page-made ids (`js/ids.js`), the seed fixture
 (`tests/client/helpers/seed.js`) and the tests that stood on them (`tests/client/data.test.js`,
 `tests/answer-traces.test.ts`).
@@ -2112,12 +2112,12 @@ merge?}`, ids minted from the host's own: `e<seq>` for a record, `t<callId>` for
 |---|---|
 | `bubble` role `operator`, source `user` or none | `from:"you"`, `kind:"text"` (the `mention` list rides in `data`) |
 | `bubble` role `operator`, any other source (a compaction checkpoint, a plugin notice, a runtime snapshot, a member's delta) | `from:"system"` with `data.source` — drawn as a collapsed `context · <source>` details, never as the operator's bubble |
-| `bubble` role `gravit` | `from: speaker` (`gravit`, or the bot in its home session), `data.markdown = true`, `interrupted` carried; an empty text that is not interrupted (a tool-only step) yields nothing — the tool row carries it |
+| `bubble` role `gravit` | `from: speaker` (`gravit`, or the bot in its home session), `data.markdown = true`, `interrupted` carried; an empty text that is not interrupted (a tool-only step) yields nothing — the tool row carries it, which is not drawn |
 | `bubble` role `bot` (a member's answer) | `from: <bot id>`, `data.name` the display name, `data.markdown = true` — a member writes the same markdown Gravit does; `data.memberSessionId` and `data.memberTurn` when the record names the member turn that produced it (its Trace reads them) |
 | `room-line` | a system line, `roundEndLine(view)` |
 | `subagent-message` | a system line, `Report from <child>: …` (no link yet) |
 | `card` phase `call` | `kind:"tool"`, text = the mapper's title (a `bash` command) or the tool name, `data.args` from the `calls` map |
-| `card` phase `result` | the same id with `merge: true` — `data.result`, `data.isError` fill the row, and the call's `name` and `args` when its `tool/call` was seen (the row draws the name and the payload folded; no result is dressed); for a seat write (the twelve, raw or minted) `seatLift` follows: `Card raised on the Account page · card-… · answer it there` (pending), `Order placed` / `Order canceled · <seat line> · ord-… [· paper]`, `Batch · n of m legs placed · k cards raised on the Account page · j refused` (in Guard the Account answers a leg with a card of its own, which is not a fill), or `kind:"refusal"` with `<code> · <message>` in the Account's words (dsh's `Error: ` prefix on a failed call's text stripped first) — each flagged `data.seat`, which adds the seat's standing to the app's reload of the page; a seat read lifts nothing |
+| `card` phase `result` | the same id with `merge: true` — `data.result`, `data.isError` fill the row, and the call's `name` and `args` when its `tool/call` was seen (no tool row is drawn, in the thread or a member's Trace); for a seat write (the twelve, raw or minted) `seatLift` follows: `Card raised on the Account page · card-… · answer it there` (pending), `Order placed` / `Order canceled · <seat line> · ord-… [· paper]`, `Batch · n of m legs placed · k cards raised on the Account page · j refused` (in Guard the Account answers a leg with a card of its own, which is not a fill), or `kind:"refusal"` with `<code> · <message>` in the Account's words (dsh's `Error: ` prefix on a failed call's text stripped first) — each flagged `data.seat`, which adds the seat's standing to the app's reload of the page; a seat read lifts nothing |
 | `approval` | `kind:"approval"` (tool name, `reason`, `displayReason`) for anything not the seat's, an old session's order of the retired pair included — or, for a seat tool (the twelve under any server, or anything under the face's own `mcp__account__` prefix, which the host cards) `Your call: <seat line>` with the line's venue as the chip, or `Account seat` when the tool names none. The title is made from the host's OWN reason line and nothing else — `reasonArgs` parses Gate 2's `<prefix> - <tool>: key=value …` back pair by pair (scalars coerced, `{k=v}` and `[1: …; 2: …]` read, a JSON-quoted value read as one value), and titles nothing when the line names another tool or no pair — never from a `tool/call` frame: the approval waterfall and the session's follow stream are two streams on one socket, so the call can reach the page after the gate, and a later call under the same id must never change a card the operator may be reading (the security reviews of 2026-10-21) |
 | `question` | `kind:"question"` with the batch's questions |
 
@@ -2634,8 +2634,8 @@ module card's Run sheet is) — written to
 (by element id, else the control's data attributes), the typed value of every input with an id
 (an editor's box only while the same editor stays open; New message's Where select never — its
 channel is the store's), the ticked radios and checkboxes with an id (a question card's picks, the
-person's own until they press Answer), every `<details>` with an id the person had open (a tool
-row, its Raw, a Trace — open again by id), the composer's words (kept in a closure,
+person's own until they press Answer), every `<details>` with an id the person had open (a
+Trace, What you sign — open again by id), the composer's words (kept in a closure,
 `composerText`, never in the store), the scroll of the rows, the main pane on the same screen, a
 drawer body while it is the same drawer, and the thread's position while the person reads up,
 however much arrives (at the bottom, or on another conversation, the thread follows the tail).
@@ -2747,11 +2747,11 @@ left in grey through the markdown hook (headings, lists, code, quotes, GFM table
 `.viz-table` style, links coloured and underlined; an interrupted answer is cut-marked
 `Interrupted`); a
 bot's words in a group under its sender name, through the same markdown hook; a system line centred; a context row a collapsed
-`<details class="sysline ctx">` headed `context · <source>`; a tool row a collapsed `<details
-id="tool-<callId>" class="tool">` titled by the call, `running` until the result fills it,
-`.danger` on error — the result its `<pre>` (no result is dressed, below); a room member's answer that names
+`<details class="sysline ctx">` headed `context · <source>`; no tool row (the operator's word, 2026-10-28: `renderMessage` draws nothing for the kind and `renderThread` skips
+it, so a divider reads the gap between the rows it draws; a gate the call raised, a receipt or a
+refusal is a row of its own); a room member's answer that names
 its member turn followed by a `Trace` disclosure (`trace-<sessionId>-<msgId>`), read on opening: `Loading…`,
-the turn's steps (its tool rows drawn as the thread draws them, its context lines), the loader's
+the turn's context lines and words (its tool calls not drawn, so a turn of tool calls alone reads `No steps`), the loader's
 words, or `No steps`; the seat's card (`Your call: …`, the venue chip and the reason, ✗ Decline then ✓ Approve →
 `rejected` / `allowed-once`); the approval card (the tool name, the display reason, the audit
 reason only when it differs, the same two keys); the question card (`data-gate="<eventId>"`;
@@ -2989,12 +2989,11 @@ group, description and content. An unknown id reads `Loading…` while its listi
 `Create`; the new bot's page opens. Discover's own status line carries its refusals. No Install,
 Uninstall, Publish, review, install count or price.
 
-**Tool results** (`render/tool-result.js`) — no result is dressed since 2026-10-24: the
-the Alpaca server's renderers (its tables, tiles and close chart, `chartSvg`, and `parsePayload`) left
-with it, so every result — one in a conversation written before then included — draws the plain
-row, the call's name and its payload folded under it. `toolResultHtml(name, text)` stays as the
-seam (it returns `null`), so a server's result can be dressed again by its name; `toolResultFor`
-never dresses an error.
+**Tool results** — no tool call is drawn since 2026-10-28 (the operator's word), in the thread or
+a member's Trace, one in a conversation written before then included; `render/tool-result.js`, the
+seam that would dress a result by its server's name (`null` for every call since the Alpaca server's
+renderers — its tables, tiles and close chart, `chartSvg`, and `parsePayload` — left on 2026-10-24),
+left with the `.tool` rules.
 
 ### 5.5 State
 
@@ -3061,7 +3060,9 @@ head script applies the saved theme before first paint, `setTheme` at runtime. T
 `--font-sans` (Manrope, Noto Sans SC) and `--font-mono` (IBM Plex Mono); radii `--radius-s/m/l/pill`;
 the rail `--rail: 248px`. `css/app.css` is the one sheet: the rail and its mini strip, the list,
 the thread's bubbles and cards, the drawers, the responsive breaks (the list hides beside an open
-drawer between 861 and 1399 px), Markets' table narrowing (Volume and Source leave at 620 px,
+drawer between 861 and 1399 px; at 860 px and under the page scrolls instead of the thread, the main
+as tall as what it holds — `flex: none`, not the desktop's zero basis — and the composer sticky at
+the bottom), Markets' table narrowing (Volume and Source leave at 620 px,
 the 24 hours at 440 px), the Account's tables and two figures, the list's group heads, a channel's page, Discover's shelves,
 cards and item pages (a tool description clamped to two lines), a tool result's tables, tiles
 and stamp (`.viz-*`), `prefers-reduced-motion`. The sheet and the screens are checked both ways
@@ -3393,7 +3394,7 @@ refused, `parseHosts`). The face's:
   closing an open sheet), `actions` (the Remotes and routes each data-action
   sends: the row actions and their refusals, Talk to, a child's Stop), `live` (follow or page,
   promote, suspend and re-decide, gates by `eventId`, previews, host facts, the last good
-  channels, sessions-meta and bots), `thread` (a tool result drawn plain, a member's
+  channels, sessions-meta and bots), `thread` (no tool call drawn, in the thread or a Trace, a divider over the gap it leaves, a member's
   Trace), `rail` (the groups and their heads, Discover in the first level and lit on a plugin or module page, the Account's leading
   figure with `Paper` when Paper leads, the cards-waiting badge), `list-view` (the
   groups' order and folds), `messages-screen` (Details' row keys, Children, Where's channels by
@@ -3417,8 +3418,7 @@ refused, `parseHosts`). The face's:
   `newConversation` with Appendix B's text and recording it, a failed send keeping the sheet, a
   refused Run sending nothing, the listing moving under an open sheet, a double press, a failed
   page move),
-  `tool-result` (no result dressed, an old session's Alpaca result
-  included; an error never), `children-view` and `host-traces` (a conversation's children and their
+  `children-view` and `host-traces` (a conversation's children and their
   states; a member's trace read once per conversation and message, non-activating), `wire-words`
   (no Chinese in the six moved
   wire modules), `app` and `app-dom` (the boot: routes, the render loop, every data-action against

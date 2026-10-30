@@ -1,12 +1,11 @@
 // face/client/js/render/thread.js — the conversation body on host-shaped messages (spec 2026-10-19 §6):
-// bubbles, the tool row, the three gate cards, receipts and refusals, icon-only keys, centred dividers.
+// bubbles, the three gate cards, receipts and refusals, icon-only keys, centred dividers; no tool call is drawn.
 import { esc, attrs, cls } from '../html.js';
 import { icon } from '../icons.js';
 import { divider } from '../time.js';
 import { levelOf, needsAnswer } from '../messages.js';
 import { avatar } from './avatars.js';
 import { senderName } from './rail.js';
-import { toolResultFor } from './tool-result.js';
 
 export const chip = (text, tone = 'grey') => `<span class="${cls('chip', tone)}">${esc(text)}</span>`;
 
@@ -59,15 +58,6 @@ function question(m, conv) {
 function body(m, conv) {
   const d = m.data ?? {};
   switch (m.kind) {
-    case 'tool': {
-      // the row and its Raw keep ids, so a render opens again what the person opened
-      const running = d.result === undefined;
-      const id = esc(String(d.callId ?? m.id));
-      const raw = `<pre>${esc(d.result)}</pre>`;
-      const pretty = running ? null : toolResultFor(d);
-      const result = running ? '' : pretty ? `${pretty}<details id="raw-${id}" class="raw"><summary>Raw</summary>${raw}</details>` : raw;
-      return `<details id="tool-${id}" class="${cls('tool', d.isError && 'danger')}"><summary><span class="tool-name">${esc(m.text || d.title || d.name || 'tool')}</span>${running ? '<span class="dim">running</span>' : ''}</summary>${result}</details>`;
-    }
     case 'card':
       return `<div class="card orange"><div class="card-head"><div class="card-title">${esc(d.title ?? m.text)}</div>${stateChip(m)}</div>` +
         `<div class="dim">${esc([d.venue, d.line].filter(Boolean).join(' · '))}</div>${gateKeys(m, conv)}</div>`;
@@ -87,20 +77,24 @@ function body(m, conv) {
   }
 }
 
-// a room member's answer can open the turn that produced it: read on opening (host/traces.js), drawn with the
-// thread's own rows; the slice and the disclosure's id name the conversation, since two rooms repeat message ids
+// a room member's answer can open the turn that produced it: read on opening (host/traces.js), its context lines and
+// words drawn, its tool calls not; the slice and the disclosure's id name the conversation, since two rooms repeat
+// message ids
 function trace(m, conv, state) {
   if (typeof m.data?.memberSessionId !== 'string' || typeof m.data?.memberTurn !== 'number') return '';
   const t = state?.traces?.[conv.id]?.[m.id];
-  const item = x => (x.kind === 'tool' ? body(x, conv) : x.from === 'system' ? `<div class="sysline">${esc(x.text)}</div>` : `<div class="dsec-line">${esc(x.text)}</div>`);
+  const item = x => (x.from === 'system' ? `<div class="sysline">${esc(x.text)}</div>` : `<div class="dsec-line">${esc(x.text)}</div>`);
+  const steps = t?.status === 'ready' ? t.messages.filter(x => x.kind !== 'tool') : [];
   const inner = !t || t.status === 'loading' ? '<div class="dim">Loading…</div>'
     : t.status === 'failed' ? `<div class="dim">${esc(t.line)}</div>`
-      : t.messages.length ? t.messages.map(item).join('') : '<div class="dim">No steps</div>';
+      : steps.length ? steps.map(item).join('') : '<div class="dim">No steps</div>';
   return `<details id="trace-${esc(conv.id)}-${esc(m.id)}" class="trace"><summary data-action="openTrace" data-conv="${esc(conv.id)}" data-msg="${esc(m.id)}">Trace</summary>` +
     `<div class="trace-body">${inner}</div></details>`;
 }
 
 export function renderMessage(m, conv, state) {
+  // a tool call is drawn nowhere (the operator's word, 2026-10-28): its gate, receipt or refusal is a message of its own
+  if (m.kind === 'tool') return '';
   // a producer-sourced user record (a runtime snapshot, a plugin notice, a member's delta) is context, folded away under its source;
   // a line the page itself writes (a round end, a child's report) stays a centred line
   if (m.from === 'system') {
@@ -111,7 +105,7 @@ export function renderMessage(m, conv, state) {
   }
   if (m.from === 'you') return `<div class="msg you"><div class="bubble you">${m.text ? esc(m.text) : ''}</div>${avatar('you', 28)}</div>`;
   const name = conv.kind === 'group' && m.from !== 'gravit' ? `<div class="sender-name">${esc(m.data?.name ?? senderName(m.from, state))}</div>` : '';
-  // plain talk keeps a bubble's width; every card, tool row and green bubble runs wider (spec §16)
+  // plain talk keeps a bubble's width; every card and green bubble runs wider (spec §16)
   const wide = m.kind !== 'text';
   return `<div class="msg left">${name}<div class="msg-row">${avatar(m.from, 28, state)}<div class="${cls('msg-body', wide && 'wide')}">${body(m, conv)}${trace(m, conv, state)}</div></div></div>`;
 }
@@ -119,10 +113,12 @@ export function renderMessage(m, conv, state) {
 // the three-dot row while the host streams a turn
 const thinkingRow = conv => `<div class="msg left"><div class="msg-row">${avatar(conv.kind === 'bot' ? conv.preset : 'gravit', 28)}<div class="msg-body"><div class="bubble grey thinking" role="status" aria-label="thinking"><span></span><span></span><span></span></div></div></div></div>`;
 
+// a tool call leaves nothing in the thread, not even the time it held: a divider reads the gap between the rows drawn
 export function renderThread(conv, state, now) {
   let prev = null;
   const out = [];
   for (const m of conv.messages) {
+    if (m.kind === 'tool') continue;
     const d = divider(m.at, prev, now);
     if (d) out.push(`<div class="divider">${esc(d)}</div>`);
     out.push(renderMessage(m, conv, state));
