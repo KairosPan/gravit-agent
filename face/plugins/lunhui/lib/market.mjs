@@ -38,6 +38,11 @@
  *
  * Since plan 1 Task 8 `fetchDailyBars` takes `days`, the bar count it asks for (60 by default, as
  * it hard-coded; a whole number 1-640, else `INVALID_OPTIONS`), so the index freeze asks for 120.
+ *
+ * Since run view plan 1 Task 1 a new section after the provider's holds the minute line
+ * (`MINUTES_URL`, `minuteIndex`, `minuteLabel`, `parseTencentMinutes`, `fetchMinutes`,
+ * `minuteItems`) on the 242-point grid, `exchangeOf`, `limitRate` and `limitPrices`; it is this
+ * tree's code, not the source's, and reuses the provider's `fetchBytes`, `numeric` and caps.
  */
 import { coverageOf, holidayOn as tableHolidayOn, isTradingDay, isWeekend, loadCalendars } from "./calendar.mjs";
 
@@ -409,6 +414,238 @@ export async function fetchDailyBars(
     throw providerError("INVALID_ENCODING", "腾讯日K不是有效 UTF-8 文本。");
   }
   return parseTencentKlines(text, symbol);
+}
+
+// -------------------------------------------------------------------------------------------------
+// Minute lines, limit prices and exchange (run view plan 1 Task 1; spec Appendix B)
+// -------------------------------------------------------------------------------------------------
+
+// Reply measured 2026-10-30: `data.<symbol>.data` is five trading days, newest first, each
+// `{ date: "YYYYMMDD", prec, data: ["HHMM price cumVolume cumAmount", ...] }`; a stock day also
+// carries after-hours points to 1530, which fall off the grid and are dropped.
+export const MINUTES_URL = "https://web.ifzq.gtimg.cn/appstock/app/day/query";
+const MINUTE_POINTS = 242; // 09:30–11:30 = 0–120, 13:00–15:00 = 121–241
+const MAX_MINUTE_DAYS = 10;
+const MAX_MINUTE_ROWS = 600;
+const SESSION_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** "HHMM" (China time) to its grid index, or null off the grid. */
+export function minuteIndex(hhmm) {
+  if (typeof hhmm !== "string" || !/^\d{4}$/.test(hhmm)) return null;
+  const h = Number(hhmm.slice(0, 2));
+  const m = Number(hhmm.slice(2));
+  if (h > 23 || m > 59) return null;
+  const t = h * 60 + m;
+  if (t >= 570 && t <= 690) return t - 570;
+  if (t >= 780 && t <= 900) return t - 780 + 121;
+  return null;
+}
+
+/** A grid index to its "HH:MM" label. */
+export function minuteLabel(index) {
+  if (!Number.isSafeInteger(index) || index < 0 || index >= MINUTE_POINTS)
+    throw providerError("INVALID_OPTIONS", "分时序号须为 0–241 的整数。");
+  const t = index <= 120 ? 570 + index : 780 + index - 121;
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(Math.floor(t / 60))}:${pad(t % 60)}`;
+}
+
+function validateSession(session) {
+  if (typeof session !== "string" || !SESSION_DATE.test(session))
+    throw providerError("INVALID_OPTIONS", "交易日须为 YYYY-MM-DD。");
+  return session;
+}
+
+const fen = (value) => Math.round(value * 100) / 100;
+
+/** Parse JSON (or an already-decoded JSON object) into the session day's minute line. */
+export function parseTencentMinutes(payload, symbol, session) {
+  validateSymbol(symbol);
+  validateSession(session);
+  let data = payload;
+  if (typeof data === "string") {
+    if (data.length > MAX_RESPONSE_BYTES)
+      throw providerError("RESPONSE_TOO_LARGE", "分时响应超过大小限制。");
+    try {
+      data = JSON.parse(data.trim());
+    } catch {
+      throw providerError("INVALID_RESPONSE", "腾讯分时响应不是有效 JSON。");
+    }
+  }
+  if (
+    !data ||
+    typeof data !== "object" ||
+    Array.isArray(data) ||
+    !data.data ||
+    typeof data.data !== "object" ||
+    Array.isArray(data.data)
+  ) {
+    throw providerError("INVALID_RESPONSE", "腾讯分时响应结构无效。");
+  }
+  if (data.code !== undefined && data.code !== 0 && data.code !== "0") {
+    throw providerError("PROVIDER_ERROR", "腾讯分时接口返回错误状态。");
+  }
+  const node = Object.hasOwn(data.data, symbol) ? data.data[symbol] : null;
+  const days = node?.data;
+  if (
+    !node ||
+    typeof node !== "object" ||
+    !Array.isArray(days) ||
+    days.length > MAX_MINUTE_DAYS
+  ) {
+    throw providerError("INVALID_RESPONSE", "腾讯证券分时结构无效。");
+  }
+  const wanted = session.replaceAll("-", "");
+  const day = days.find(
+    (d) => d && typeof d === "object" && d.date === wanted,
+  );
+  if (!day) throw providerError("INVALID_RESPONSE", "腾讯分时响应缺少该交易日。");
+  const prec = numeric(day.prec, { positive: true });
+  if (prec === null || !Array.isArray(day.data) || day.data.length > MAX_MINUTE_ROWS)
+    throw providerError("INVALID_RESPONSE", "腾讯分时当日结构无效。");
+  const points = new Map();
+  for (const row of day.data) {
+    if (typeof row !== "string") continue;
+    const [hhmm, p, v, a] = row.trim().split(/\s+/);
+    const index = minuteIndex(hhmm);
+    if (index === null) continue; // After-hours or pre-open: off the grid.
+    const price = numeric(p, { positive: true });
+    const cumVolume = numeric(v, { nonnegative: true });
+    const cumAmount = numeric(a, { nonnegative: true });
+    if (price === null || cumVolume === null || cumAmount === null) continue;
+    points.set(index, { price, cumVolume, cumAmount });
+  }
+  if (points.size === 0)
+    throw providerError("INVALID_RESPONSE", "腾讯分时当日没有有效分时点。");
+  const last = Math.max(...points.keys());
+  const price = [];
+  const volume = [];
+  const amount = [];
+  let lastPrice = prec;
+  let lastVolume = 0;
+  let lastAmount = 0;
+  for (let i = 0; i <= last; i++) {
+    const point = points.get(i);
+    if (!point) {
+      // A grid gap repeats the last price with nothing traded.
+      price.push(lastPrice);
+      volume.push(0);
+      amount.push(0);
+      continue;
+    }
+    if (point.cumVolume < lastVolume || point.cumAmount < lastAmount)
+      throw providerError("INVALID_RESPONSE", "腾讯分时累计量回退。");
+    price.push(point.price);
+    volume.push(point.cumVolume - lastVolume);
+    amount.push(fen(point.cumAmount - lastAmount));
+    lastPrice = point.price;
+    lastVolume = point.cumVolume;
+    lastAmount = point.cumAmount;
+  }
+  return {
+    symbol,
+    session,
+    prec,
+    through: minuteLabel(last),
+    price,
+    volume,
+    amount,
+    provider: "tencent",
+  };
+}
+
+export async function fetchMinutes(
+  symbol,
+  session,
+  { fetchImpl = fetch, timeoutMs = 7000 } = {},
+) {
+  validateSymbol(symbol);
+  validateSession(session);
+  const url = new URL(MINUTES_URL);
+  url.searchParams.set("code", symbol);
+  const { bytes } = await fetchBytes(url.href, fetchImpl, timeoutMs);
+  let text;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw providerError("INVALID_ENCODING", "腾讯分时不是有效 UTF-8 文本。");
+  }
+  return parseTencentMinutes(text, symbol, session);
+}
+
+/** A six-digit A-share code's exchange: 6 → sh, 0/3 → sz; Beijing (4, 8, 92) and others → null. */
+export function exchangeOf(code) {
+  if (typeof code !== "string" || !/^\d{6}$/.test(code)) return null;
+  if (code.startsWith("6")) return "sh";
+  if (code.startsWith("0") || code.startsWith("3")) return "sz";
+  return null;
+}
+
+/**
+ * The daily price-limit rate: ±30% Beijing (4, 8, 92), ±20% ChiNext and STAR (30, 68), ±5% a
+ * main-board name with ST, else ±10%. ST on ChiNext, STAR and Beijing keeps the board's rate.
+ */
+export function limitRate(code, name = "") {
+  const c = String(code ?? "");
+  if (/^(4|8|92)/.test(c)) return 0.3;
+  if (/^(30|68)/.test(c)) return 0.2;
+  if (String(name ?? "").toUpperCase().includes("ST")) return 0.05;
+  return 0.1;
+}
+
+/** Limit-up and limit-down prices from the previous close, half up to the fen, in integer fen. */
+export function limitPrices(prec, rate) {
+  const cents = Math.round(prec * 100);
+  return {
+    up: Math.floor(cents * (1 + rate) + 0.5 + 1e-9) / 100,
+    down: Math.floor(cents * (1 - rate) + 0.5 + 1e-9) / 100,
+  };
+}
+
+/**
+ * One item per entry, in entry order, `inFlight` fetches at a time (as `freezeSample` groups them).
+ * A null symbol (no exchange) is never fetched.
+ */
+export async function minuteItems(
+  entries,
+  session,
+  { fetchImpl = fetch, inFlight = 4 } = {},
+) {
+  if (!Array.isArray(entries) || !Number.isSafeInteger(inFlight) || inFlight < 1)
+    throw providerError("INVALID_OPTIONS", "分时条目或并发设置无效。");
+  const withCode = (entry, item) =>
+    Object.hasOwn(entry, "code") ? { kind: item.kind, code: entry.code, ...item } : item;
+  const items = [];
+  for (let i = 0; i < entries.length; i += inFlight) {
+    const group = entries.slice(i, i + inFlight);
+    const settled = await Promise.allSettled(
+      group.map((entry) =>
+        entry.symbol === null
+          ? Promise.resolve(null)
+          : fetchMinutes(entry.symbol, session, { fetchImpl }),
+      ),
+    );
+    settled.forEach((result, k) => {
+      const entry = group[k];
+      if (entry.symbol === null) {
+        items.push(
+          withCode(entry, { kind: "minutes_missing", symbol: null, reason: "NO_EXCHANGE" }),
+        );
+      } else if (result.status === "fulfilled") {
+        items.push(withCode(entry, { kind: "minutes", ...result.value }));
+      } else {
+        const code = result.reason?.code;
+        items.push(
+          withCode(entry, {
+            kind: "minutes_missing",
+            symbol: entry.symbol,
+            reason: typeof code === "string" && code ? code : "UNKNOWN",
+          }),
+        );
+      }
+    });
+  }
+  return items;
 }
 
 // -------------------------------------------------------------------------------------------------

@@ -12,8 +12,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
-  assessQuote, fetchDailyBars, fetchQuotes, freezeSample, getMarketSession, normalizeQuotes,
-  parseTencentKlines, parseTencentQuotes, validateSymbols,
+  assessQuote, exchangeOf, fetchDailyBars, fetchMinutes, fetchQuotes, freezeSample, getMarketSession,
+  limitPrices, limitRate, MINUTES_URL, minuteIndex, minuteItems, minuteLabel, normalizeQuotes,
+  parseTencentKlines, parseTencentMinutes, parseTencentQuotes, validateSymbols,
 } from "../plugins/lunhui/lib/market.mjs";
 import { fixtureFetch } from "./fixtures/lunhui/fetch.ts";
 
@@ -931,4 +932,69 @@ test("freezeSample turns an empty daily reply into the source failure shape", as
   const { histories } = await freezeSample({ symbols: ["sh000001", "sh600519"], fetchImpl, now: FREEZE_AT });
   assert.deepEqual(histories.map((h) => h.symbol), ["sh000001", "sh600519"]);
   assert.deepEqual(histories[1], SH600519_FAILED);
+});
+
+// ---- the minute line, limits and exchange (run view plan 1 Task 1); synthetic replies only ----
+
+test("minuteIndex maps the session grid and nothing else", () => {
+  assert.deepEqual(["0930", "1130", "1300", "1500"].map(minuteIndex), [0, 120, 121, 241]);
+  assert.deepEqual(["0925", "1200", "1505"].map(minuteIndex), [null, null, null]);
+  assert.deepEqual([0, 120, 121, 241].map(minuteLabel), ["09:30", "11:30", "13:00", "15:00"]);
+});
+test("parseTencentMinutes picks the session day, fills gaps, drops after-hours", () => {
+  const reply = { code: 0, data: { sz000678: { data: [
+    { date: "20261028", prec: "16.01", data: ["0930 16.50 100 165000.00"] },
+    { date: "20261027", prec: "14.55", data: ["0930 15.24 1000 1524000.00", "0931 15.60 1500 2304000.00",
+      "1500 16.01 4000 6300000.00", "1505 16.01 4100 6460000.00"] }] } } };
+  const m = parseTencentMinutes(JSON.stringify(reply), "sz000678", "2026-10-27");
+  assert.equal(m.prec, 14.55); assert.equal(m.through, "15:00"); assert.equal(m.price.length, 242);
+  assert.deepEqual(m.price.slice(0, 3), [15.24, 15.6, 15.6]);
+  assert.deepEqual(m.volume.slice(0, 3), [1000, 500, 0]);
+  assert.equal(m.price[241], 16.01); assert.equal(m.volume[241], 2500); assert.equal(m.amount[1], 780000);
+});
+test("a mid-session day ends at through", () => {
+  const rows = Array.from({ length: 40 }, (_, i) => `${minuteLabel(i).replace(":", "")} 10.00 ${100 * (i + 1)} ${1000 * (i + 1)}.00`);
+  const m = parseTencentMinutes({ data: { sh600838: { data: [{ date: "20261028", prec: "13.31", data: rows }] } } }, "sh600838", "2026-10-28");
+  assert.equal(m.through, "10:09"); assert.equal(m.price.length, 40);
+});
+test("a reply without the session's day is INVALID_RESPONSE", () => {
+  assert.throws(() => parseTencentMinutes({ data: { sh600838: { data: [] } } }, "sh600838", "2026-10-27"),
+    (e: any) => e.code === "INVALID_RESPONSE");
+});
+test("limits round half up to the fen", () => {
+  assert.deepEqual(limitPrices(12.10, 0.1), { up: 13.31, down: 10.89 });
+  assert.equal(limitPrices(8.95, 0.1).up, 9.85); assert.equal(limitPrices(14.55, 0.1).up, 16.01);
+  assert.deepEqual(limitPrices(56.14, 0.2), { up: 67.37, down: 44.91 });
+  assert.equal(limitPrices(77.76, 0.2).down, 62.21); assert.equal(limitPrices(3.33, 0.1).down, 3.00);
+  assert.deepEqual([["600838", "上海九百"], ["301314", ""], ["688001", ""], ["000001", "*ST样本"], ["830001", ""]]
+    .map(([c, n]) => limitRate(c, n)), [0.1, 0.2, 0.2, 0.05, 0.3]);
+  assert.deepEqual(["600838", "000678", "301314", "830001", "920001"].map(exchangeOf), ["sh", "sz", "sz", null, null]);
+});
+test("minuteItems marks a code without an exchange and never fetches it", async () => {
+  let calls = 0;
+  const items = await minuteItems([{ code: "830001", symbol: null }], "2026-10-27", { fetchImpl: async () => { calls++; throw new Error("no"); } });
+  assert.deepEqual(items, [{ kind: "minutes_missing", code: "830001", symbol: null, reason: "NO_EXCHANGE" }]);
+  assert.equal(calls, 0);
+});
+test("fetchMinutes asks for code=<symbol> and minuteItems keeps entry order and failure codes", async () => {
+  const urls: string[] = [];
+  const day = (prec: string) => [{ date: "20261027", prec, data: ["0930 10.00 10 10000.00"] }];
+  const fetchImpl = async (url: string) => {
+    urls.push(url);
+    const code = new URL(url).searchParams.get("code")!;
+    if (code === "sz000002") return new Response("not json");
+    return new Response(JSON.stringify({ code: 0, data: { [code]: { data: day("9.90") } } }));
+  };
+  const m = await fetchMinutes("sh600838", "2026-10-27", { fetchImpl: fetchImpl as any });
+  assert.equal(urls[0], `${MINUTES_URL}?code=sh600838`);
+  assert.equal(m.provider, "tencent"); assert.equal(m.through, "09:30"); assert.deepEqual(m.price, [10]);
+  const items = await minuteItems([{ code: "600838", symbol: "sh600838" }, { symbol: "sz000002" }, { code: "830001", symbol: null }],
+    "2026-10-27", { fetchImpl: fetchImpl as any, inFlight: 2 });
+  assert.deepEqual(items.map((i: any) => [i.kind, i.code, i.symbol, i.reason]), [
+    ["minutes", "600838", "sh600838", undefined], ["minutes_missing", undefined, "sz000002", "INVALID_RESPONSE"],
+    ["minutes_missing", "830001", null, "NO_EXCHANGE"]]);
+  assert.equal(Object.hasOwn(items[1], "code"), false);
+  const plain = await minuteItems([{ symbol: "sh600838" }], "2026-10-27", { fetchImpl: (async () => { throw new Error("x"); }) as any });
+  assert.equal((plain[0] as any).reason, "UNKNOWN");
+  await assert.rejects(fetchMinutes("bj830001", "2026-10-27", { fetchImpl: fetchImpl as any }), (e: any) => e.code === "INVALID_SYMBOL");
 });
