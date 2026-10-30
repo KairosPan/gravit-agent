@@ -8,7 +8,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  NEGATIVE_TAIL_PCT, deriveBoards, deriveCounts, deriveIndex, deriveLimitUp, ladderCodes, rowKey,
+  NEGATIVE_TAIL_PCT, deriveBoards, deriveCounts, deriveIndex, deriveLimitUp, ladderCodes, promotion, rowKey,
 } from "../plugins/lunhui/lib/derive.mjs";
 import { syntheticPools1027 } from "./lunhui-view-fixtures.ts";
 import { evidenceId } from "../plugins/lunhui/lib/runs.mjs";
@@ -246,4 +246,44 @@ test("ladderCodes: ties fall to firstSealAt then code; a null firstSealAt sorts 
     { pool: "yesterday", code: "000006", yesterdayBoards: null },
   ];
   assert.deepEqual(ladderCodes({ zt, zb, yesterday }), ["000001", "000002", "000003", "000004", "000005"]);
+});
+
+const span = (prefix: string, from: number, to: number) =>
+  Array.from({ length: to - from + 1 }, (_, i) => prefix + String(from + i).padStart(6 - prefix.length, "0"));
+
+test("promotion: the ladder's rungs from yesterday's pool, the height and the first tries", () => {
+  const { height, rungs, firstTries } = promotion(syntheticPools1027());
+  assert.equal(height, 5);
+  assert.deepEqual(firstTries, { sealed: 29, tries: 53 });
+  assert.deepEqual(rungs.map((rung) => rung.n), [5, 4, 3, 2, 1]);
+  const [r5, r4, r3, r2, r1] = rungs;
+  assert.deepEqual(r5, { n: 5, sealed: ["600001"], from: 1, promoted: 1, missed: [], broke: [], gap: false });
+  // 600011 and 600012 sealed at 092501 and 092502, 600013 at 093409.
+  assert.deepEqual(r4, {
+    n: 4, sealed: ["600011", "600012", "600013"], from: 6, promoted: 3,
+    missed: ["600014", "600015", "600016"], broke: [], gap: false,
+  });
+  assert.deepEqual(r3, { n: 3, sealed: [], from: 8, promoted: 0, missed: span("0000", 22, 28), broke: ["000021"], gap: true });
+  assert.deepEqual(r2, {
+    n: 2, sealed: span("000", 101, 108), from: 40, promoted: 8,
+    missed: span("000", 112, 140), broke: ["000109", "000110", "000111"], gap: false,
+  });
+  assert.equal(r2.missed.length, 29);
+  assert.deepEqual(r1, { n: 1, sealed: span("002", 1, 29), from: null, promoted: null, missed: [], broke: span("003", 1, 24), gap: false });
+  // 002001 sits in zt and zb: it sealed, so it is no broken first try (Review Focus 4).
+  assert.ok(r1.sealed.includes("002001"));
+  assert.ok(!r1.broke.includes("002001"));
+});
+
+test("promotion: a yesterday 5-board with no zt row tops the ladder at 6, missed, no gap; the height stays 5", () => {
+  const pools = syntheticPools1027();
+  pools.yesterday.push({ pool: "yesterday", code: "600099", name: "样本600099", pct: 7.81, yesterdayBoards: 5 });
+  const { height, rungs } = promotion(pools);
+  assert.equal(height, 5);
+  assert.deepEqual(rungs.map((rung) => rung.n), [6, 5, 4, 3, 2, 1]);
+  assert.deepEqual(rungs[0], { n: 6, sealed: [], from: 1, promoted: 0, missed: ["600099"], broke: [], gap: false });
+});
+
+test("promotion: empty pools have height 0, no rungs and no first tries", () => {
+  assert.deepEqual(promotion({ zt: [], zb: [], yesterday: [] }), { height: 0, rungs: [], firstTries: { sealed: 0, tries: 0 } });
 });

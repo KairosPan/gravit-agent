@@ -129,6 +129,21 @@ function bySeal(a, b) {
 
 const byCode = (a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0);
 
+/** A board count as a number: a finite one, else 0. */
+const height = (value) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
+
+/**
+ * The tried height of a 炸板池 row, over `yesterday`: the same code's first `yesterdayBoards`,
+ * else 0, plus 1 - the board it broke trying.
+ * @param {any[]} yesterday
+ * @returns {(row: any) => number}
+ */
+function triedHeight(yesterday) {
+  const yesterdayBoards = new Map();
+  for (const row of yesterday) if (!yesterdayBoards.has(row.code)) yesterdayBoards.set(row.code, height(row.yesterdayBoards));
+  return (row) => (yesterdayBoards.get(row.code) ?? 0) + 1;
+}
+
 /**
  * The ladder's names (run view M6), the codes whose minute lines the limit-up freeze keeps: zt
  * rows at 2 boards or more, by boards descending, then `firstSealAt`, then code; then zb rows not
@@ -141,15 +156,12 @@ const byCode = (a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0);
  * @returns {string[]}
  */
 export function ladderCodes({ zt, zb, yesterday }, cap = LADDER_CAP) {
-  const height = (value) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
-  const yesterdayBoards = new Map();
-  for (const row of yesterday) if (!yesterdayBoards.has(row.code)) yesterdayBoards.set(row.code, height(row.yesterdayBoards));
   const sealed = new Set(zt.map((row) => row.code));
+  const tried = triedHeight(yesterday);
 
   const ladder = zt
     .filter((row) => height(row.boards) >= 2)
     .sort((a, b) => height(b.boards) - height(a.boards) || bySeal(a, b) || byCode(a, b));
-  const tried = (row) => (yesterdayBoards.get(row.code) ?? 0) + 1;
   const broken = zb
     .filter((row) => !sealed.has(row.code) && tried(row) >= 2)
     .sort((a, b) => tried(b) - tried(a) || byCode(a, b));
@@ -160,6 +172,54 @@ export function ladderCodes({ zt, zb, yesterday }, cap = LADDER_CAP) {
   const codes = new Set();
   for (const row of [...ladder, ...broken, ...fell]) codes.add(row.code);
   return [...codes].slice(0, cap);
+}
+
+/**
+ * @typedef {{ n: number, sealed: string[], from: number | null, promoted: number | null,
+ *   missed: string[], broke: string[], gap: boolean }} Rung
+ */
+/** @typedef {{ height: number, rungs: Rung[], firstTries: { sealed: number, tries: number } }} Promotion */
+
+/**
+ * The ladder's promotions from yesterday's pool (run view): one rung per board count `n`, from
+ * `max(height, the highest yesterdayBoards + 1)` down to 1, `height` being today's highest zt
+ * `boards` (0 for an empty zt). A rung's `sealed` are the zt codes at `n` boards, by `firstSealAt`
+ * then code; `from` the 昨日涨停 rows at `n - 1` boards, `promoted` how many of them sealed at `n`;
+ * `broke` the zb codes not in zt whose tried height is `n`, and `missed` the rest of `from`, both
+ * by code; `gap` a rung below the height with nothing sealed. At `n` 1 nothing comes from
+ * yesterday: `from` and `promoted` are null, and `firstTries` counts its sealed against its
+ * sealed plus broke. Codes only, no evidence ids: the view draws it, no role reads it.
+ * @param {{ zt: any[], zb: any[], yesterday: any[] }} pools
+ * @returns {Promotion}
+ */
+export function promotion({ zt, zb, yesterday }) {
+  const inZt = new Set(zt.map((row) => row.code));
+  const tried = triedHeight(yesterday);
+  const top = Math.max(0, ...zt.map((row) => height(row.boards)));
+  const topYesterday = Math.max(0, ...yesterday.map((row) => height(row.yesterdayBoards)));
+  const codesOf = (rows) => [...new Set(rows.map((row) => row.code))];
+
+  /** @type {Rung[]} */
+  const rungs = [];
+  for (let n = Math.max(top, yesterday.length > 0 ? topYesterday + 1 : 0); n >= 1; n--) {
+    const sealedRows = zt.filter((row) => height(row.boards) === n).sort((a, b) => bySeal(a, b) || byCode(a, b));
+    const sealed = codesOf(sealedRows);
+    const broke = codesOf(zb.filter((row) => !inZt.has(row.code) && tried(row) === n).sort(byCode));
+    const gap = sealed.length === 0 && n < top;
+    if (n === 1) {
+      rungs.push({ n, sealed, from: null, promoted: null, missed: [], broke, gap });
+      continue;
+    }
+    const from = codesOf(yesterday.filter((row) => height(row.yesterdayBoards) === n - 1));
+    const sealedHere = new Set(sealed);
+    const brokeHere = new Set(broke);
+    const promoted = from.filter((code) => sealedHere.has(code)).length;
+    const missed = from.filter((code) => !sealedHere.has(code) && !brokeHere.has(code)).sort();
+    rungs.push({ n, sealed, from: from.length, promoted, missed, broke, gap });
+  }
+  const first = rungs.find((rung) => rung.n === 1);
+  const firstTries = first ? { sealed: first.sealed.length, tries: first.sealed.length + first.broke.length } : { sealed: 0, tries: 0 };
+  return { height: top, rungs, firstTries };
 }
 
 /**
