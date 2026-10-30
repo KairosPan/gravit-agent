@@ -36,6 +36,8 @@ import { setupFaceProfile } from "../src/setup.ts";
 import { bootFace } from "../src/boot.ts";
 import { registerStatic, type IndexAuth } from "../src/static.ts";
 import { createSymbolSearch, registerSymbolSearchRoute } from "../src/symbol-search.ts";
+import { registerLunhuiViewRoute, type LunhuiViewService } from "../src/lunhui-view.ts";
+import { isTrustedDataRequest } from "../src/http.ts";
 import { hasApprovalGrant, type ApprovalEventLike } from "../src/orders.ts";
 import { LUNHUI_ROW_IDS, LUNHUI_TOOL_NAMES } from "../src/lunhui.ts";
 import { panelDeps, pluginListing } from "../src/panels.ts";
@@ -426,6 +428,18 @@ test("boot smoke: sign-in gates /api and the mux, the pages and /data answer, Gr
     const searchRes = await fetch(`${base}/data/symbols/search?q=603986&market=cn`);
     assert.equal(searchRes.status, 200);
     assert.deepEqual(((await searchRes.json()) as { assets: { id: string }[] }).assets.map((asset) => asset.id), ["cn:603986"]);
+
+    /* The run view's route (src/lunhui-view.ts), wired as main.ts wires it:
+     * through `ctx.get("lunhuiRuns")`. A run that does not exist answers 404
+     * (NO_SUCH_RUN, or NOT_A_STRATEGY where the root has no cn-market), not
+     * 503 - the booted tree provides the service the route reaches. */
+    registerLunhuiViewRoute(ctx.webServer, {
+      isTrusted: isTrustedDataRequest,
+      runs: () => ctx.get("lunhuiRuns") as LunhuiViewService | undefined,
+    });
+    const viewRes = await fetch(`${base}/data/lunhui/view?strategy=cn-market&run=20990101T000000Z-00000000`);
+    assert.equal(viewRes.status, 404);
+    assert.equal(((await viewRes.json()) as { ok: boolean }).ok, false);
 
     // The face's own producers and `/data/bars` left with stage 3 of the
     // graft: their old addresses answer the ordinary 404.

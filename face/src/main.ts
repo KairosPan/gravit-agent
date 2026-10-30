@@ -23,6 +23,7 @@ import { BOTS_ROOT, faceBind } from "./overlay.ts";
 import { isTrustedDataRequest } from "./http.ts";
 import { createSymbolSearch, registerSymbolSearchRoute } from "./symbol-search.ts";
 import { registerQuoteRoutes } from "./quotes.ts";
+import { registerLunhuiViewRoute, type LunhuiViewService } from "./lunhui-view.ts";
 import { registerAccountProxy } from "./account-proxy.ts";
 import { composedSeatRow, type SeatEntryLike } from "./account-seat.ts";
 import { registerSeatRoute } from "./seat.ts";
@@ -178,7 +179,14 @@ registerStatic(booted.ctx.webServer, clientDir, connection);
  * tests. */
 const disposeSearch = registerSymbolSearchRoute(booted.ctx.webServer, createSymbolSearch());
 const disposeQuotes = registerQuoteRoutes(booted.ctx.webServer, { isTrusted: isTrustedDataRequest });
-disposeData = () => { disposeSearch(); disposeQuotes(); };
+/* A sealed Lunhui run's view model (src/lunhui-view.ts), read through the plugin's
+ * `lunhuiRuns` service as provided at the moment of each request — the face
+ * imports nothing from plugins/. Behind the same `/data` fence. */
+const disposeView = registerLunhuiViewRoute(booted.ctx.webServer, {
+  isTrusted: isTrustedDataRequest,
+  runs: () => booted.ctx.get("lunhuiRuns") as LunhuiViewService | undefined,
+});
+disposeData = () => { disposeSearch(); disposeQuotes(); disposeView(); };
 /* The Account's reads for the screens (src/account-proxy.ts) and the seat's
  * standing for its box (src/seat.ts): loopback reads of the Account at the URL
  * of the `mcp-account` row AS COMPOSED — an operator patch may have pointed it
