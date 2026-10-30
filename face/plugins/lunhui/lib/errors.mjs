@@ -146,7 +146,7 @@ export function callerIsRole(exec) {
 }
 
 /** The providers a freeze reads, by the name its refusals give them. */
-const PROVIDERS = new Set(["腾讯行情", "东方财富"]);
+const PROVIDERS = new Set(["腾讯行情", "东方财富", "同花顺问财"]);
 
 /** `market.mjs`'s `normalizeQuotes` code-less errors, all meaning the reply held no usable quote. */
 const NO_QUOTE_MESSAGES = new Set(["Invalid response", "Empty response", "No usable quotes"]);
@@ -170,7 +170,7 @@ const INVALID_REPLY_CODES = new Set([
  * connection, a refused redirect, a dropped body. That one is `UPSTREAM_INVALID` to the model, a
  * fixed sentence; what failed - the message and its cause - goes to stderr.
  * @param {any} error
- * @param {"腾讯行情" | "东方财富"} provider the provider the texts name
+ * @param {"腾讯行情" | "东方财富" | "同花顺问财"} provider the provider the texts name
  * @returns {LunhuiError | null}
  */
 export function upstreamError(error, provider) {

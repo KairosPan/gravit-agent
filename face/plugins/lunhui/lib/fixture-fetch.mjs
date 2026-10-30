@@ -17,6 +17,8 @@
  * - a URL whose host is `push2.eastmoney.com` and whose path is `/api/qt/clist/get` gets the file
  *   its `fs` names (a `+` in the query reads as a space): `m:90 t:3` with a `fid0` parameter
  *   `board-flow.json`, `m:90 t:3 f:!50` `boards.json`, `b:<board code>…` `members-<code>.json`;
+ * - a URL whose host is `quantapi.51ifind.com` gets `wencai-token.json` for `/api/v1/get_access_token` and
+ *   `wencai-universe.json` for `/api/v1/smart_stock_picking`;
  * - any other URL, an unparsable one, or a file the directory does not hold gets a 404.
  *
  * Any other read error is thrown as Node raised it. `init` (signal, redirect, headers) is accepted
@@ -38,6 +40,11 @@ const POOL_FILES = new Map([
   ["/getTopicZBPool", "zb-pool.json"],
   ["/getYesterdayZTPool", "yesterday-pool.json"],
   ["/getTopicZDFenBu", "distribution.json"],
+]);
+/** The 问财 QuantAPI endpoints' files, by path: the token exchange and the all-market query. */
+const WENCAI_FILES = new Map([
+  ["/api/v1/get_access_token", "wencai-token.json"],
+  ["/api/v1/smart_stock_picking", "wencai-universe.json"],
 ]);
 const BOARDS_FS = "m:90 t:3 f:!50";
 const FLOW_FS = "m:90 t:3";
@@ -75,6 +82,8 @@ export function createFixtureFetch(dir) {
       const symbol = KLINE_PARAM.exec(target.searchParams.get("param") ?? "")?.[1];
       if (symbol) return file(`kline-${symbol}.json`);
     }
+    if (target.host === "quantapi.51ifind.com" && WENCAI_FILES.has(target.pathname))
+      return file(/** @type {string} */ (WENCAI_FILES.get(target.pathname)));
     if (target.host === "push2ex.eastmoney.com" && POOL_FILES.has(target.pathname))
       return file(/** @type {string} */ (POOL_FILES.get(target.pathname)));
     if (target.host === "push2.eastmoney.com" && target.pathname === "/api/qt/clist/get") {

@@ -32,7 +32,7 @@
  *
  * Since plan 1 Task 5 the provider's `fetchBytes` is exported for `eastmoney.mjs` and takes a
  * fourth argument, `{ redirect, headers, maxBytes }`, defaulting to the Tencent values it hard-coded
- * (`maxBytes` at most `MAX_RESPONSE_BYTES`); it resolves to `{ status, headers, bytes }`, and under
+ * (`maxBytes` at most `MAX_FETCH_BYTES`, 4 MiB; the default stays `MAX_RESPONSE_BYTES`); it resolves to `{ status, headers, bytes }`, and under
  * `redirect: "manual"` a 301, 302, 307 or 308 resolves with no body rather than failing.
  * `fetchQuotes` and `fetchDailyBars` pass no options, so their requests and codes are unchanged.
  *
@@ -60,6 +60,8 @@ import { coverageOf, holidayOn as tableHolidayOn, isTradingDay, isWeekend, loadC
 const SYMBOL = /^(sh|sz)\d{6}$/;
 const MAX_SYMBOLS = 100;
 const MAX_RESPONSE_BYTES = 512 * 1024;
+/** The ceiling a caller may raise `maxBytes` to: the 问财 universe reply is up to 4 MiB (boards stand-in S11). */
+const MAX_FETCH_BYTES = 4 * 1024 * 1024;
 const QUOTE_URL = "https://qt.gtimg.cn/q=";
 const DAILY_URL = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get";
 
@@ -285,7 +287,7 @@ export async function fetchBytes(
   if (
     !Number.isSafeInteger(maxBytes) ||
     maxBytes <= 0 ||
-    maxBytes > MAX_RESPONSE_BYTES ||
+    maxBytes > MAX_FETCH_BYTES ||
     typeof fetchImpl !== "function" ||
     !Number.isSafeInteger(timeoutMs) ||
     timeoutMs <= 0 ||
