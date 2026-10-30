@@ -491,7 +491,16 @@ export function apply(ctx, config) {
         const strategy = await runs.resolveStrategy(strategiesRoot, args.strategy);
         const { dir } = await runs.resolveRun(strategy.dir, args.run);
         const artifacts = await artifactsOf(dir, manifest.artifacts);
-        const view = manifest.sealed_at ? viewDigest(await service.view(args.strategy, args.run)) : null;
+        // service.view reads run.json again: a submit landing between the two reads can make them differ.
+        let view = null;
+        if (manifest.sealed_at) {
+          // The view is extra: any failure building it leaves the reply as it was, with view null.
+          try {
+            view = viewDigest(await service.view(args.strategy, args.run));
+          } catch (error) {
+            if (!(error instanceof runs.LunhuiError)) asToolError(error);
+          }
+        }
         return JSON.stringify({ manifest, metrics, artifacts, view });
       } catch (error) {
         throw asToolError(error);

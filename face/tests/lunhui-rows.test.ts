@@ -968,3 +968,35 @@ test("lunhui-runs: the view of a run frozen before minute lines builds, each ind
   assert.equal(view.through, null);
   assert.ok(viewDigest(view).length > 0);
 });
+
+test("lunhui_read_run: a sealed run whose view cannot be built still replies with its manifest and artifacts, view null", async (t) => {
+  const { root, service, tool, index, limitUp } = await viewBench(t);
+  const { run } = JSON.parse(await index.execute({ strategy: "cn-market" }, fakeExec()));
+  await limitUp.execute({ strategy: "cn-market", run }, fakeExec());
+  await service.readContext("cn-market", run, "environment", echo);
+  const dir = join(root, "cn-market", "analysis", run);
+  await nameArtifacts(dir, ["environment"]);
+  await writeFile(join(dir, "environment.json"), JSON.stringify({ module: "environment", index_state: "RISK_OFF" }));
+  await writeFile(join(dir, "evidence-index.json"), "{ not json");
+  await rejectsWith(service.view("cn-market", run), "NO_SUCH_RUN");
+  const body = JSON.parse(await tool.execute({ strategy: "cn-market", run }, fakeExec()));
+  assert.deepEqual(Object.keys(body), ["manifest", "metrics", "artifacts", "view"]);
+  assert.equal(body.manifest.run, run);
+  assert.ok(body.manifest.sealed_at);
+  assert.deepEqual(body.manifest.evidence.map((e: any) => e.source), ["index", "limit-up"]);
+  assert.deepEqual(body.artifacts, [{ module: "environment", accepted: true, headline: { index_state: "RISK_OFF" } }]);
+  assert.equal(body.view, null);
+});
+
+test("lunhui_read_run: a non-Lunhui failure building the view goes to stderr and the reply keeps view null", async (t) => {
+  const { service, tool, index } = await viewBench(t);
+  const { run } = JSON.parse(await index.execute({ strategy: "cn-market" }, fakeExec()));
+  await service.readContext("cn-market", run, "environment", echo);
+  t.mock.method(service, "view", async () => { throw new Error("view bug"); });
+  const writes: string[] = [];
+  t.mock.method(process.stderr, "write", (chunk: string) => { writes.push(String(chunk)); return true; });
+  const body = JSON.parse(await tool.execute({ strategy: "cn-market", run }, fakeExec()));
+  assert.equal(body.manifest.run, run);
+  assert.equal(body.view, null);
+  assert.ok(writes.some((w) => w.includes("lunhui: internal error") && w.includes("view bug")), writes.join(""));
+});
