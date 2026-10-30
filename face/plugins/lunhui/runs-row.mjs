@@ -35,6 +35,9 @@ export const inject = ["tools"];
 /** The largest artifact `lunhui_read_run` reads a headline from, or a module reads, on the compact JSON (spec §5.11). */
 const ARTIFACT_MAX_BYTES = 24 * 1024;
 
+/** The most sealed runs whose evidence a service keeps in memory for the run view, least recently viewed evicted first. */
+export const EVIDENCE_CACHE_RUNS = 8;
+
 /**
  * The `lunhuiRuns` service.
  * @typedef {{
@@ -111,7 +114,8 @@ export function createLunhuiRuns(strategiesRoot) {
   /**
    * Per sealed `<strategy>/<run>`, its evidence files as read and their `evidenceView` - a sealed
    * run's evidence never changes. In memory only, one map per service. Views share these blocks by
-   * reference and treat them as read-only.
+   * reference and treat them as read-only. At most `EVIDENCE_CACHE_RUNS` runs, the least recently
+   * viewed evicted first.
    * @type {Map<string, { evidence: ContextInput["evidence"], half: ReturnType<typeof evidenceView> }>}
    */
   const evidenceCache = new Map();
@@ -185,7 +189,14 @@ export function createLunhuiRuns(strategiesRoot) {
       if (cached === undefined) {
         const { evidence } = await contentsOf(located.dir, manifest, { artifacts: false });
         cached = { evidence, half: evidenceView({ manifest, evidence }) };
-        evidenceCache.set(key, cached);
+      } else {
+        // A hit moves the run to the newest end, so the map's first key is the least recently used.
+        evidenceCache.delete(key);
+      }
+      evidenceCache.set(key, cached);
+      for (const oldest of evidenceCache.keys()) {
+        if (evidenceCache.size <= EVIDENCE_CACHE_RUNS) break;
+        evidenceCache.delete(oldest);
       }
       const sealed = { strategy: located.strategy, run: located.run, manifest, metrics, evidence: cached.evidence, artifacts: await acceptedArtifacts(located.dir, manifest.artifacts) };
       return buildView(sealed, { modules, evidence: cached.half });
@@ -493,15 +504,19 @@ export function apply(ctx, config) {
         const artifacts = await artifactsOf(dir, manifest.artifacts);
         // service.view reads run.json again: a submit landing between the two reads can make them differ.
         let view = null;
+        /** @type {string | undefined} */
+        let viewError;
         if (manifest.sealed_at) {
-          // The view is extra: any failure building it leaves the reply as it was, with view null.
+          // The view is extra: a failure building it leaves the reply as it was, with view null and
+          // view_error the refusal's code, or INTERNAL for anything else.
           try {
             view = viewDigest(await service.view(args.strategy, args.run));
           } catch (error) {
-            if (!(error instanceof runs.LunhuiError)) asToolError(error);
+            // asToolError writes a non-Lunhui error's stack to stderr; its INTERNAL refusal is dropped.
+            viewError = error instanceof runs.LunhuiError ? error.code : (asToolError(error), "INTERNAL");
           }
         }
-        return JSON.stringify({ manifest, metrics, artifacts, view });
+        return JSON.stringify({ manifest, metrics, artifacts, view, ...(viewError === undefined ? {} : { view_error: viewError }) });
       } catch (error) {
         throw asToolError(error);
       }

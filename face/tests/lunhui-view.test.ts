@@ -293,6 +293,16 @@ test("viewDigest: the lines Gravit composes from, within 2,048 bytes", () => {
   assert.ok(!/closed/.test(digest));
 });
 
+test("viewDigest: the signals line writes ratios to two decimals as the breadth line does, counts whole", () => {
+  const signals = (sealed: SealedRun) => lines(viewDigest(buildView(sealed))).find((line) => line.startsWith("signals: "));
+  assert.equal(signals(syntheticSealedRun()),
+    "signals: UNKNOWN · money effect MIXED · contraction break_ratio 0.41, limit_down_count 22, yesterday_negative_tail 0.16 · relay seal_ratio 0.59, yesterday_return_median 0.82, max_streak 5 · 3 challenged");
+  // A ratio that lands on a whole number keeps its two decimals.
+  const whole = editItems(syntheticSealedRun(), (items) =>
+    items.map((i) => (i.kind === "derived" && i.measure === "break_ratio" ? { ...i, value: 1 } : i)));
+  assert.match(signals(whole)!, /contraction break_ratio 1\.00, limit_down_count 22,/);
+});
+
 test("viewDigest: a mid-session run says through 10:09 and never closed", () => {
   const cut = editItems(syntheticSealedRun(), (items, source) =>
     source !== "index" ? items : items.map((i) => i.kind !== "minutes" ? i : {

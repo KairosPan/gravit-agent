@@ -12,7 +12,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { apply, createLunhuiRuns, inject, name } from "../plugins/lunhui/runs-row.mjs";
+import { EVIDENCE_CACHE_RUNS, apply, createLunhuiRuns, inject, name } from "../plugins/lunhui/runs-row.mjs";
 import { MODULES } from "../plugins/lunhui/lib/modules.mjs";
 import { MODULE_BUDGET, asToolError, callerIsChild, callerIsRole, refuse, upstreamError } from "../plugins/lunhui/lib/errors.mjs";
 import { repairFor } from "../plugins/lunhui/lib/contract-core.mjs";
@@ -969,7 +969,7 @@ test("lunhui-runs: the view of a run frozen before minute lines builds, each ind
   assert.ok(viewDigest(view).length > 0);
 });
 
-test("lunhui_read_run: a sealed run whose view cannot be built still replies with its manifest and artifacts, view null", async (t) => {
+test("lunhui_read_run: a sealed run whose view cannot be built still replies with its manifest and artifacts, view null and view_error its code", async (t) => {
   const { root, service, tool, index, limitUp } = await viewBench(t);
   const { run } = JSON.parse(await index.execute({ strategy: "cn-market" }, fakeExec()));
   await limitUp.execute({ strategy: "cn-market", run }, fakeExec());
@@ -980,7 +980,8 @@ test("lunhui_read_run: a sealed run whose view cannot be built still replies wit
   await writeFile(join(dir, "evidence-index.json"), "{ not json");
   await rejectsWith(service.view("cn-market", run), "NO_SUCH_RUN");
   const body = JSON.parse(await tool.execute({ strategy: "cn-market", run }, fakeExec()));
-  assert.deepEqual(Object.keys(body), ["manifest", "metrics", "artifacts", "view"]);
+  assert.deepEqual(Object.keys(body), ["manifest", "metrics", "artifacts", "view", "view_error"]);
+  assert.equal(body.view_error, "NO_SUCH_RUN");
   assert.equal(body.manifest.run, run);
   assert.ok(body.manifest.sealed_at);
   assert.deepEqual(body.manifest.evidence.map((e: any) => e.source), ["index", "limit-up"]);
@@ -988,7 +989,7 @@ test("lunhui_read_run: a sealed run whose view cannot be built still replies wit
   assert.equal(body.view, null);
 });
 
-test("lunhui_read_run: a non-Lunhui failure building the view goes to stderr and the reply keeps view null", async (t) => {
+test("lunhui_read_run: a non-Lunhui failure building the view goes to stderr and the reply keeps view null, view_error INTERNAL", async (t) => {
   const { service, tool, index } = await viewBench(t);
   const { run } = JSON.parse(await index.execute({ strategy: "cn-market" }, fakeExec()));
   await service.readContext("cn-market", run, "environment", echo);
@@ -998,5 +999,29 @@ test("lunhui_read_run: a non-Lunhui failure building the view goes to stderr and
   const body = JSON.parse(await tool.execute({ strategy: "cn-market", run }, fakeExec()));
   assert.equal(body.manifest.run, run);
   assert.equal(body.view, null);
+  assert.equal(body.view_error, "INTERNAL");
   assert.ok(writes.some((w) => w.includes("lunhui: internal error") && w.includes("view bug")), writes.join(""));
+});
+
+test("lunhui-runs: the view's evidence cache keeps the last 8 runs viewed; a ninth evicts the least recently viewed", async (t) => {
+  assert.equal(EVIDENCE_CACHE_RUNS, 8);
+  const { service, index } = await viewBench(t);
+  const { run: first } = JSON.parse(await index.execute({ strategy: "cn-market" }, fakeExec()));
+  await service.sealRun("cn-market", first);
+  const frozen = JSON.parse(await readFile(join(service.strategiesRoot, "cn-market", "analysis", first, "evidence-index.json"), "utf8"));
+  const items = frozen.items.map(({ id: _id, ...item }: any) => item);
+  const runsOpened = [first];
+  for (let i = 1; i < 9; i++) {
+    const { run } = await service.openRun("cn-market", "market");
+    await service.addEvidence("cn-market", run, "index", items, { ...META, host: "qt.gtimg.cn" });
+    await service.sealRun("cn-market", run);
+    runsOpened.push(run);
+  }
+  const views = [];
+  for (const run of runsOpened.slice(0, 8)) views.push(await service.view("cn-market", run));
+  // A hit on the first run makes the second the least recently viewed.
+  assert.strictEqual((await service.view("cn-market", runsOpened[0])).indices, views[0].indices);
+  await service.view("cn-market", runsOpened[8]);
+  assert.strictEqual((await service.view("cn-market", runsOpened[0])).indices, views[0].indices, "the recently viewed first run stays cached");
+  assert.notStrictEqual((await service.view("cn-market", runsOpened[1])).indices, views[1].indices, "the second run was evicted");
 });

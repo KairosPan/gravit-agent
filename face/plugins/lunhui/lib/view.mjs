@@ -12,6 +12,14 @@
  * ladder and yesterday need `limit-up` ("limit-up not frozen"). Breadth without a counts item -
  * the distribution refused - is "counts not frozen". A run frozen before the minute lines existed
  * draws every block but the lines: each index row and stock is `minutesMissing: "NOT_FROZEN"`.
+ *
+ * The digest's number grammar (`viewDigest`), one rule for every line:
+ * - a negative number is written with U+2212 "−", never "-", and there is no negative zero;
+ * - a non-zero positive percentage carries "+" ("+0.82%"); zero is "0.00%", a negative "−1.33%";
+ * - prices, percentages and ratios have two decimals ("3697.52", "ratio 0.12", "break_ratio 0.41");
+ * - counts are whole numbers with no thousands separator ("4774 down", "limit_down_count 22");
+ * - turnover in CNY is "X.XX万亿" from 1e12, "X.XX亿" from 1e8, else whole yuan;
+ * - a value that is absent is "—".
  */
 import { promotion } from "./derive.mjs";
 import { exchangeOf, limitPrices, limitRate, minuteLabel } from "./market.mjs";
@@ -278,7 +286,8 @@ function stocksOf(items, pools) {
 
 /**
  * The evidence half of a sealed run's view. `through` is the latest `through` among the index
- * minute lines, null when none was frozen; `session` the manifest's.
+ * minute lines only, null when none was frozen - a stock's line may run later and does not move
+ * it; `session` the manifest's.
  * @param {SealedView} sealed
  * @returns {EvidenceView}
  */
@@ -370,7 +379,10 @@ const DIGEST_BYTES = 2048;
 /** @typedef {{ module: string, id: string, text: string }} Citation */
 /**
  * The run view (§5.5): the evidence half, the run's names and seal time, the sources, the
- * verdicts, the reviewer, the signals, and each stock's citations.
+ * verdicts, the reviewer, the signals, and each stock's citations. `through` is the max `through`
+ * across the index minute lines only (null without one); stock lines may run later than it.
+ * `stocks` is keyed by code and carries no `unavailable` - such a key would collide with a code -
+ * so a consumer reads `ladder.unavailable` to know whether the limit-up pools were frozen.
  * @typedef {Omit<EvidenceView, "stocks"> & { strategy: string, run: string, frozenAt: string | null,
  *   sources: SourceRow[], verdicts: Verdict[], reviewer: ReviewerBlock | null,
  *   signals: SignalsBlock | null, stocks: Record<string, StockFacts & { cited: Citation[] }> }} View
@@ -530,8 +542,11 @@ function turnoverText(x) {
   return String(Math.round(x));
 }
 
-/** A measure's value: an integer as it is, else two decimals. */
-const valueText = (x) => (Number.isInteger(x) ? String(x) : fix2(x));
+/** The signals' measures that are counts, written whole; every other measure is a ratio or a percentage. */
+const COUNT_MEASURES = new Set(["limit_down_count", "max_streak"]);
+
+/** A signal measure's value: a count whole, anything else to two decimals as the breadth ratio is. */
+const valueText = (name, x) => (COUNT_MEASURES.has(name) ? countText(x) : fix2(x));
 const countText = (x) => (x === null || x === undefined ? "—" : String(x));
 const nameText = (stock) => stock.name ?? stock.code;
 
@@ -596,7 +611,7 @@ function countLines(view) {
     : `yesterday: ${y.count} limit-ups · median ${pctText(y.median)} · ${y.belowMinus5Share === null ? "—" : fix2(y.belowMinus5Share * 100) + "%"} below −5%`);
   if (view.signals) {
     const s = view.signals;
-    const side = (name) => s.measures.filter((m) => m.side === name).map((m) => `${m.measure} ${valueText(m.value)}`).join(", ") || "—";
+    const side = (name) => s.measures.filter((m) => m.side === name).map((m) => `${m.measure} ${valueText(m.measure, m.value)}`).join(", ") || "—";
     out.push(`signals: ${s.state ?? "—"} · money effect ${s.moneyEffect ?? "—"} · contraction ${side("contraction")} · relay ${side("relay")} · ${s.challenges.length} challenged`);
   }
   return out;
