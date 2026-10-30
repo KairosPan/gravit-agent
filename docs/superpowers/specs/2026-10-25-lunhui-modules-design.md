@@ -729,3 +729,16 @@ index tool's description names the session's distribution and says what a refusa
 | two live replies seconds apart: byte-identical `data`, `svr` 177618783 and 177618276 | measured 2026-10-27 |
 | the moment `qdate` rolls after 09:15 | unmeasured; the window is empty only if Eastmoney rolls at exactly 09:15:00 |
 | an empty bucket omitted from `fenbu` | unmeasured; the replies measured held all 23 |
+
+## 18. Revision, 2026-10-30: the boards stand-in
+
+The three live drills of 2026-10-26, 27 and 28 saw Eastmoney's `push2` clist refuse every morning,
+so the theme module came back `NOT_EVALUABLE` each day. The boards freeze (§5.3, A20, A28) now has
+a stand-in: when any of its three Eastmoney reads refuses and an iFinD token is configured, the
+same call lands the boards from 同花顺问财 (one `smart_stock_picking` query, boards derived by host
+code from the members' concept lists), stamped and stated as such. The theme and leader contracts
+(§5.6, A19) accept a board code in either form, `BK` and four digits or `THS:<concept>`, and
+`CONTRACT_VERSION` goes from 2 to 3; the evidence meta and `run.json` gain an optional `provider`
+and, for the stand-in, `fallback_from`. The design, its decisions and its residuals are
+`2026-10-30-lunhui-boards-standin-design.md`; this section only points to it, as §16 and §17 are
+the record of their own changes.

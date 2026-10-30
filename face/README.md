@@ -54,6 +54,10 @@ cd face
 npm install
 npm run setup            # creates $DSH_HOME/profiles/face (never overwrites)
 source ../.env.deepseek  # DEEPSEEK_API_KEY - see below
+# Optional iFinD credentials (the Lunhui boards stand-in), exported to the server process:
+set -a
+[ ! -f ../.env.ifind ] || source ../.env.ifind
+set +a
 npm start                # prints http://127.0.0.1:3090/?token=…  (profile: face)
 ```
 
@@ -562,8 +566,10 @@ channels the mode knows by name. A channel with runs shows a **Research runs** s
 | `push2ex.eastmoney.com` | the three limit-up pools and the session's up/down distribution, the market counts (it answers directly) |
 | `push2.eastmoney.com` | the concept boards, a board's members and the board fund flow |
 | `push2delay.eastmoney.com` | `push2`'s one redirect, the only one followed: from this machine `push2` answers 302 here, with **delayed** quotes |
+| `quantapi.51ifind.com` | iFinD's QuantAPI, the boards stand-in alone: `POST /api/v1/get_access_token` and `POST /api/v1/smart_stock_picking`, only when Eastmoney's boards refused and an iFinD token is configured |
 
-Each request has a 7-second timeout (per hop, so a redirect can take 14 s) and a 512 KiB cap, at
+Each request has a 7-second timeout (per hop, so a redirect can take 14 s) and a 512 KiB cap — the
+QuantAPI requests alone a 15-second timeout and a 4 MiB cap — at
 most four Eastmoney requests run at once, and no numbered host (`17.push2…`) is ever called.
 Every Eastmoney item records the host that served it and whether it was delayed (a `push2ex` reply
 declares none, so its items read `delayed: false` by construction). One index freeze reads the
@@ -572,6 +578,33 @@ another session's, a failed request — leaves the counts out, the index items l
 `counts` says so (spec §17). The endpoints are unofficial: a changed reply is `UPSTREAM_INVALID`, and
 a day outside the calendar table (`plugins/lunhui/lib/calendar/2026.json`, only 2026 ships) is
 `CALENDAR_UNCOVERED` (`DEVELOPMENT.md` §9, R40–R41).
+
+**The boards stand-in** (spec `docs/superpowers/specs/2026-10-30-lunhui-boards-standin-design.md`).
+`lunhui_freeze_boards` reads Eastmoney first, always. When any of its three reads refuses
+(`UPSTREAM_TIMEOUT`, `UPSTREAM_TOO_LARGE`, `UPSTREAM_INVALID`, `NO_MARKET_DATA`) and an iFinD token
+is in the face's environment, the same call lands the whole boards file from 同花顺问财 instead: one
+`smart_stock_picking` query (`A股 <YYYY年MM月DD日>涨跌幅 成交额 主力资金流向 所属概念`, the session's
+date) returns every A share with its change, turnover, main-fund net flow and 同花顺 concept list,
+and host code derives the boards from the members — concepts with at least 10 members, minus the
+membership, index, screen and report tags named in `lib/wencai-excluded.mjs`; a board's change is
+its members' equal-weight mean (`pct_basis: "equal_weight"`), not an index's. The top 30 by change,
+the members of the first ten (≤ 100 each) and the top 30 by main net flow are the file's items, a
+board coded `THS:<concept name>`, its members by six-digit code. A `boards` argument names Eastmoney's
+BK codes, which the stand-in cannot honour: it takes its own first ten and the reply says so
+(`boards_ignored`). Every stand-in item is stamped `provider: "同花顺问财"`, `taxonomy: "同花顺概念"`,
+`host: "quantapi.51ifind.com"`, `delayed: false`; the evidence meta and `run.json` carry the
+`provider` (on both paths, `东方财富` or `同花顺问财`) and, for the stand-in, `fallback_from`
+(Eastmoney's refusal code) beside the query and the reply's hash; the 1.37 MB reply is not stored.
+The operator sees it on the runs card's theme chip and on Discover's theme card and module page
+(`· boards: iFinD (THS concepts)`), and the theme context says so to the analyst. With no token the
+step makes no request; when both sources fail the refusal carries Eastmoney's code and names both
+reasons, and nothing is written. One freeze call counts once against the run's eight whichever
+source lands. The access token is exchanged from `IFIND_REFRESH_TOKEN` (or `IFIND_ACCESS_TOKEN` is
+used as given), cached in memory only, and scrubbed from the CLI agents' children; Gravit's own shell
+can still read `../.env.ifind` (`DEVELOPMENT.md` R1b). Each stand-in freeze costs one 智能选股 call of
+the account's monthly quota. The live check is `node scripts/lunhui-standin-check.mjs` from `face/`
+with the token in the environment: it asks for the latest session, derives the boards and prints the
+counts and the top five, never the token.
 
 **Fixtures** are row config, used by the tests alone: a freeze row's `config.fetch` names a
 directory of recorded replies (`tests/fixtures/lunhui/`, `tests/fixtures/lunhui-eastmoney/`) and
@@ -1114,8 +1147,8 @@ leaves the volume unknown. `Live` means the trade time is under five minutes old
 whatever the provider; whether Tencent reaches this machine without delay during a session is not
 yet measured. The wire's own words — a quote's or a provider's message, a search note — are Chinese
 and never reach the screen; every word is drawn from the wire's enums. Until 2026-10-30 the iFinD
-QuantAPI quoted the A shares, with a token and a monthly quote quota; nothing in the face reads
-`IFIND_*` now.
+QuantAPI quoted the A shares, with a token and a monthly quote quota; the quote wire reads no
+`IFIND_*` now — only the Lunhui boards stand-in does ("Lunhui analysis").
 
 ### A market's page
 
