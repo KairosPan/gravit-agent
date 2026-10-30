@@ -1744,7 +1744,7 @@ Every child the face spawns for a local agent run or probe has these scrubbed â€
 `ANTHROPIC_BASE_URL`, `ANTHROPIC_CUSTOM_HEADERS`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`,
 `CODEX_API_KEY`, the Bedrock/Vertex/Foundry switches, both APCA keys (read nowhere in the tree
 since 2026-10-24, still scrubbed so an operator shell's Alpaca keys never reach a CLI agent),
-`DEEPSEEK_API_KEY`. Every other variable is inherited, `ANTHROPIC_MODEL` included; deliberately so
+`DEEPSEEK_API_KEY`, `IFIND_REFRESH_TOKEN`, `IFIND_ACCESS_TOKEN` (the boards stand-in's credential). Every other variable is inherited, `ANTHROPIC_MODEL` included; deliberately so
 for `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME` (the CLI logs itself in; the face
 never handles its credentials).
 

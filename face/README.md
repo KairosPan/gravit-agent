@@ -558,7 +558,7 @@ any other channel, the leader and mode modules refuse it (`WRONG_CHANNEL`); the 
 strategies, `strategies/lunhui-s01-repair/` and `strategies/lunhui-s02-rotation/`, are the strategy
 channels the mode knows by name. A channel with runs shows a **Research runs** section on its page.
 
-**Egress**, from the face process — the hosts AKShare itself calls for the same data:
+**Egress**, from the face process — the Tencent and Eastmoney hosts are those AKShare itself calls for the same data; `quantapi.51ifind.com` is the boards stand-in's own:
 
 | Host | What |
 |---|---|
@@ -594,7 +594,7 @@ BK codes, which the stand-in cannot honour: it takes its own first ten and the r
 (`boards_ignored`). Every stand-in item is stamped `provider: "同花顺问财"`, `taxonomy: "同花顺概念"`,
 `host: "quantapi.51ifind.com"`, `delayed: false`; the evidence meta and `run.json` carry the
 `provider` (on both paths, `东方财富` or `同花顺问财`) and, for the stand-in, `fallback_from`
-(Eastmoney's refusal code) beside the query and the reply's hash; the 1.37 MB reply is not stored.
+(Eastmoney's refusal code; `run.json` keeps `provider` and `fallback_from`, the evidence file alone also the query and the reply's hash); the 1.37 MB reply is not stored.
 The operator sees it on the runs card's theme chip and on Discover's theme card and module page
 (`· boards: iFinD (THS concepts)`), and the theme context says so to the analyst. With no token the
 step makes no request; when both sources fail the refusal carries Eastmoney's code and names both
