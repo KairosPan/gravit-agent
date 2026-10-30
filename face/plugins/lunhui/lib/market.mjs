@@ -583,13 +583,14 @@ export function exchangeOf(code) {
 
 /**
  * The daily price-limit rate: ±30% Beijing (4, 8, 92), ±20% ChiNext and STAR (30, 68), ±5% a
- * main-board name with ST, else ±10%. ST on ChiNext, STAR and Beijing keeps the board's rate.
+ * main-board name that opens with ST or *ST (trimmed, any case), else ±10%. ST on ChiNext, STAR
+ * and Beijing keeps the board's rate; "ST" inside a name is not ST.
  */
 export function limitRate(code, name = "") {
   const c = String(code ?? "");
   if (/^(4|8|92)/.test(c)) return 0.3;
   if (/^(30|68)/.test(c)) return 0.2;
-  if (String(name ?? "").toUpperCase().includes("ST")) return 0.05;
+  if (/^\*?ST/.test(String(name ?? "").trim().toUpperCase())) return 0.05;
   return 0.1;
 }
 
@@ -603,45 +604,75 @@ export function limitPrices(prec, rate) {
 }
 
 /**
- * One item per entry, in entry order, `inFlight` fetches at a time (as `freezeSample` groups them).
- * A null symbol (no exchange) is never fetched.
+ * One item per entry, in entry order, `inFlight` fetches at a time (as `freezeSample` groups them),
+ * each fetch under `timeoutMs` (4,000 ms by default). A null symbol (no exchange) is never fetched:
+ * `minutes_missing` with reason `NO_EXCHANGE`. With `deadlineMs`, the whole stage has that long from
+ * the call, by `clock` (`Date.now` by default) between groups and by a timer within one: once it
+ * passes, every entry not yet answered is `minutes_missing` with reason `DEADLINE`, and no fetch is
+ * started for the entries after it. A fetch still running at the deadline is left to its own timeout.
+ * @param {Array<{ code?: string, symbol: string | null }>} entries
+ * @param {string} session `YYYY-MM-DD`
+ * @param {{ fetchImpl?: typeof fetch, inFlight?: number, timeoutMs?: number, deadlineMs?: number, clock?: () => number }} [options]
+ * @returns {Promise<Array<Record<string, any>>>}
  */
 export async function minuteItems(
   entries,
   session,
-  { fetchImpl = fetch, inFlight = 4 } = {},
+  { fetchImpl = fetch, inFlight = 4, timeoutMs = 4000, deadlineMs, clock = Date.now } = {},
 ) {
-  if (!Array.isArray(entries) || !Number.isSafeInteger(inFlight) || inFlight < 1)
+  if (
+    !Array.isArray(entries) ||
+    !Number.isSafeInteger(inFlight) ||
+    inFlight < 1 ||
+    (deadlineMs !== undefined && (!Number.isSafeInteger(deadlineMs) || deadlineMs < 0)) ||
+    typeof clock !== "function"
+  )
     throw providerError("INVALID_OPTIONS", "分时条目或并发设置无效。");
   const withCode = (entry, item) =>
     Object.hasOwn(entry, "code") ? { kind: item.kind, code: entry.code, ...item } : item;
+  const missing = (entry, reason) =>
+    withCode(entry, { kind: "minutes_missing", symbol: entry.symbol, reason });
+  const started = clock();
+  const left = () => (deadlineMs === undefined ? Infinity : deadlineMs - (clock() - started));
   const items = [];
   for (let i = 0; i < entries.length; i += inFlight) {
     const group = entries.slice(i, i + inFlight);
-    const settled = await Promise.allSettled(
-      group.map((entry) =>
-        entry.symbol === null
+    const remaining = left();
+    if (remaining <= 0) {
+      for (const entry of entries.slice(i))
+        items.push(entry.symbol === null ? missing(entry, "NO_EXCHANGE") : missing(entry, "DEADLINE"));
+      break;
+    }
+    /** @type {Array<PromiseSettledResult<any> | undefined>} */
+    const settled = group.map(() => undefined);
+    const fetched = Promise.all(
+      group.map((entry, k) =>
+        (entry.symbol === null
           ? Promise.resolve(null)
-          : fetchMinutes(entry.symbol, session, { fetchImpl }),
+          : fetchMinutes(entry.symbol, session, { fetchImpl, timeoutMs })
+        ).then(
+          (value) => { settled[k] = { status: "fulfilled", value }; },
+          (reason) => { settled[k] = { status: "rejected", reason }; },
+        ),
       ),
     );
-    settled.forEach((result, k) => {
-      const entry = group[k];
+    let timer;
+    const expired = Number.isFinite(remaining)
+      ? new Promise((resolve) => { timer = setTimeout(resolve, remaining); timer.unref?.(); })
+      : new Promise(() => {});
+    await Promise.race([fetched, expired]);
+    clearTimeout(timer);
+    group.forEach((entry, k) => {
+      const result = settled[k];
       if (entry.symbol === null) {
-        items.push(
-          withCode(entry, { kind: "minutes_missing", symbol: null, reason: "NO_EXCHANGE" }),
-        );
+        items.push(missing(entry, "NO_EXCHANGE"));
+      } else if (result === undefined) {
+        items.push(missing(entry, "DEADLINE"));
       } else if (result.status === "fulfilled") {
         items.push(withCode(entry, { kind: "minutes", ...result.value }));
       } else {
         const code = result.reason?.code;
-        items.push(
-          withCode(entry, {
-            kind: "minutes_missing",
-            symbol: entry.symbol,
-            reason: typeof code === "string" && code ? code : "UNKNOWN",
-          }),
-        );
+        items.push(missing(entry, typeof code === "string" && code ? code : "UNKNOWN"));
       }
     });
   }

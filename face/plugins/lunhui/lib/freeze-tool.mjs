@@ -138,8 +138,13 @@ export function defineFreeze({ name, description, parameters, source, kind, chec
           } catch (error) {
             // A refusal from the count on - TOOL_BUDGET, RUN_SEALED, the freeze's own, the
             // evidence write's - leaves its code in the run's metrics.json under refusals[source].
-            // The refusal is what the caller is told: a failed record does not replace it.
-            if (error instanceof LunhuiError) await runs.recordRefusal(strategy, run, source, error.code).catch(() => {});
+            // The refusal is what the caller is told: a failed record does not replace it, and
+            // leaves one line on stderr.
+            if (error instanceof LunhuiError) {
+              await runs.recordRefusal(strategy, run, source, error.code).catch((failure) => {
+                process.stderr.write(`lunhui: refusal record failed: ${failure?.message ?? String(failure)}\n`);
+              });
+            }
             throw error;
           }
           const derivedIds = ids.slice(items.length);

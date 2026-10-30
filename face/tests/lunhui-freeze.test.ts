@@ -611,6 +611,73 @@ test("freeze: the limit-up fixture holds a stock minute line for every ladder na
   for (const item of evidence.items.filter((item: any) => item.kind === "derived")) for (const input of item.inputs) assert.ok(rowIds.has(input));
 });
 
+/** Pools of 500 rows each, the first 40 zt rows at 2 boards and up (the ladder), and a minute line for each ladder name; `pad` widens every row's 所属行业. */
+async function bigPools(t: Cleanup, pad: number): Promise<{ dir: string; ladder: string[] }> {
+  const ladder: string[] = [];
+  const dir = await fixtures(t, async (dir) => {
+    const minute = await readFile(join(dir, "minutes-sh600101.json"), "utf8");
+    for (const [file, prefix] of [["zt-pool.json", "60"], ["zb-pool.json", "00"], ["yesterday-pool.json", "30"]] as const) {
+      const reply = JSON.parse(await readFile(join(dir, file), "utf8"));
+      const base = reply.data.pool[0];
+      reply.data.pool = Array.from({ length: 500 }, (_, i) => {
+        const code = `${prefix}${String(i).padStart(4, "0")}`;
+        const row: any = { ...base, c: code, n: `样本${i}`, hybk: `行业${"甲".repeat(pad)}` };
+        if (file === "zt-pool.json") row.lbc = i < 40 ? 2 + (i % 3) : 1;
+        if (file === "yesterday-pool.json") row.ylbc = 1;
+        return row;
+      });
+      reply.data.tc = 500;
+      await writeFile(join(dir, file), JSON.stringify(reply));
+    }
+    for (let i = 0; i < 40; i++) {
+      const symbol = `sh60${String(i).padStart(4, "0")}`;
+      ladder.push(symbol.slice(2));
+      await writeFile(join(dir, `minutes-${symbol}.json`), minute.replace('"sh600101"', JSON.stringify(symbol)));
+    }
+  });
+  return { dir, ladder };
+}
+
+test("freeze: 500-row pools and 40 minute lines stay under the limit-up cap - minute lines from the tail give way as EVIDENCE_TOO_LARGE, every pool row kept", async (t) => {
+  const root = await strategiesRoot(t);
+  const { dir, ladder } = await bigPools(t, 50);
+  const reply = JSON.parse(await mount(root, dir).tools["limit-up"].execute({ strategy: "cn-market" }, exec()));
+  const file = join(runDir(root, "cn-market", reply.run), "evidence-limit-up.json");
+  const bytes = (await readFile(file)).length;
+  assert.ok(bytes <= 1024 * 1024, `${bytes} bytes`);
+  const evidence = JSON.parse(await readFile(file, "utf8"));
+  for (const pool of ["zt", "zb", "yesterday"]) assert.equal(evidence.items.filter((item: any) => item.pool === pool).length, 500, pool);
+  const lines = evidence.items.filter(isLine);
+  assert.equal(lines.length, 40);
+  assert.deepEqual(new Set(lines.map((item: any) => item.code)), new Set(ladder));
+  const kinds = lines.map((item: any) => item.kind);
+  const kept = kinds.indexOf("minutes_missing");
+  assert.ok(kept > 0, "some minute lines are kept");
+  // The kept lines come first, the dropped ones are the tail.
+  assert.deepEqual(kinds, [...Array(kept).fill("minutes"), ...Array(40 - kept).fill("minutes_missing")]);
+  const { id: _id, ...gone } = lines.at(-1);
+  assert.deepEqual(gone, { kind: "minutes_missing", code: lines.at(-1).code, symbol: `sh${lines.at(-1).code}`, reason: "EVIDENCE_TOO_LARGE" });
+});
+
+test("freeze: the same 500-row pools with narrow rows keep all 40 minute lines", async (t) => {
+  const root = await strategiesRoot(t);
+  const { dir } = await bigPools(t, 0);
+  const reply = JSON.parse(await mount(root, dir).tools["limit-up"].execute({ strategy: "cn-market" }, exec()));
+  const evidence = await readJson(runDir(root, "cn-market", reply.run), "evidence-limit-up.json");
+  assert.deepEqual(evidence.items.filter(isLine).map((item: any) => item.kind), Array(40).fill("minutes"));
+  assert.equal(limitUpRow.MINUTES_DEADLINE_MS, 20000);
+});
+
+test("freeze: a refusal whose record fails still reaches the caller, and the failed record leaves one stderr line", async (t) => {
+  const root = await strategiesRoot(t);
+  const { service, tools } = mount(root, await fixtures(t, (dir) => rm(join(dir, "zt-pool.json"))));
+  t.mock.method(service, "recordRefusal", async () => { throw new Error("disk full"); });
+  const writes: string[] = [];
+  t.mock.method(process.stderr, "write", (chunk: string) => { writes.push(String(chunk)); return true; });
+  await assert.rejects(tools["limit-up"].execute({ strategy: "cn-market" }, exec()), (error: any) => error instanceof LunhuiError);
+  assert.deepEqual(writes.filter((w) => w.startsWith("lunhui: refusal record failed")), ["lunhui: refusal record failed: disk full\n"]);
+});
+
 test("freeze: two freezes of different sources on one run at once both land", async (t) => {
   const root = await strategiesRoot(t);
   const { service, tools } = mount(root, await fixtures(t));

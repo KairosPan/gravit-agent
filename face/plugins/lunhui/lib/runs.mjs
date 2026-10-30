@@ -460,7 +460,7 @@ const MAX_EVIDENCE_BYTES = 256 * 1024;
  * to about 585 KB, so its file may reach 1 MiB (spec §12). `readText`'s 256 KiB bound does not
  * reach such a file; `readEvidence` reads each source back under the cap it was written under.
  */
-const EVIDENCE_CAPS = new Map([["limit-up", 1024 * 1024]]);
+export const EVIDENCE_CAPS = new Map([["limit-up", 1024 * 1024]]);
 
 /** A trading day, `YYYY-MM-DD`. */
 const SESSION_RE = /^\d{4}-\d{2}-\d{2}$/;

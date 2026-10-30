@@ -64,10 +64,13 @@ function reasonOf(error) {
  */
 async function freeze(fetchImpl, _args, now) {
   const session = sessionOf(now());
-  const [replied, series, distribution] = await Promise.all([
+  // Each index's minute line of the session, one `minutes` or `minutes_missing` item each, fetched
+  // beside the rest: a line that cannot be read names its reason and fails nothing.
+  const [replied, series, distribution, lines] = await Promise.all([
     tencent(fetchQuotes(INDICES, { fetchImpl })),
     tencent(Promise.all(INDICES.map((symbol) => fetchDailyBars(symbol, { fetchImpl, days: BAR_DAYS })))),
     marketCounts(session, fetchImpl),
+    minuteItems(INDICES.map((symbol) => ({ symbol })), session, { fetchImpl }),
   ]);
   // The item's kind is the freeze's to give, not the parser's instrument kind it happens to equal.
   const quotes = replied.map((quote) => ({ ...quote, kind: "index" }));
@@ -76,9 +79,6 @@ async function freeze(fetchImpl, _args, now) {
   // The counts item, when the distribution landed, carries its reply's host and delay (A28); the
   // Tencent items need no stamp.
   const countsItem = "counts" in distribution ? { kind: "counts", ...distribution.counts } : null;
-  // Each index's minute line of the session, one `minutes` or `minutes_missing` item each: a line
-  // that cannot be read names its reason and fails nothing.
-  const lines = await minuteItems(INDICES.map((symbol) => ({ symbol })), session, { fetchImpl });
   const items = [
     ...quotes,
     ...series.map((bars) => ({ kind: "bars", ...bars })),

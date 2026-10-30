@@ -182,8 +182,8 @@ export function ladderCodes({ zt, zb, yesterday }, cap = LADDER_CAP) {
 
 /**
  * The ladder's promotions from yesterday's pool (run view): one rung per board count `n`, from
- * `max(height, the highest yesterdayBoards + 1)` down to 1, `height` being today's highest zt
- * `boards` (0 for an empty zt). A rung's `sealed` are the zt codes at `n` boards, by `firstSealAt`
+ * `max(height, the highest yesterdayBoards + 1)` down to 1 - at least 1 when zb holds a code not in
+ * zt - `height` being today's highest zt `boards` (0 for an empty zt). A rung's `sealed` are the zt codes at `n` boards, by `firstSealAt`
  * then code; `from` the 昨日涨停 rows at `n - 1` boards, `promoted` how many of them sealed at `n`;
  * `broke` the zb codes not in zt whose tried height is `n`, and `missed` the rest of `from`, both
  * by code; `gap` a rung below the height with nothing sealed. At `n` 1 nothing comes from
@@ -201,7 +201,9 @@ export function promotion({ zt, zb, yesterday }) {
 
   /** @type {Rung[]} */
   const rungs = [];
-  for (let n = Math.max(top, yesterday.length > 0 ? topYesterday + 1 : 0); n >= 1; n--) {
+  // A zb break not in zt tried a board at least: with zt and yesterday empty, rung 1 still holds it.
+  const anyBroke = zb.some((row) => !inZt.has(row.code));
+  for (let n = Math.max(top, yesterday.length > 0 ? topYesterday + 1 : 0, anyBroke ? 1 : 0); n >= 1; n--) {
     const sealedRows = zt.filter((row) => height(row.boards) === n).sort((a, b) => bySeal(a, b) || byCode(a, b));
     const sealed = codesOf(sealedRows);
     const broke = codesOf(zb.filter((row) => !inZt.has(row.code) && tried(row) === n).sort(byCode));

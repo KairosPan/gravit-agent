@@ -287,3 +287,12 @@ test("promotion: a yesterday 5-board with no zt row tops the ladder at 6, missed
 test("promotion: empty pools have height 0, no rungs and no first tries", () => {
   assert.deepEqual(promotion({ zt: [], zb: [], yesterday: [] }), { height: 0, rungs: [], firstTries: { sealed: 0, tries: 0 } });
 });
+
+test("promotion: with zt and yesterday empty, zb's first-board breaks still build rung 1 and count the first tries", () => {
+  const zb = [{ code: "000102" }, { code: "000101" }];
+  assert.deepEqual(promotion({ zt: [], zb, yesterday: [] }), {
+    height: 0,
+    rungs: [{ n: 1, sealed: [], from: null, promoted: null, missed: [], broke: ["000101", "000102"], gap: false }],
+    firstTries: { sealed: 0, tries: 2 },
+  });
+});

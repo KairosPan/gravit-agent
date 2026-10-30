@@ -10,18 +10,56 @@
  * Each row carries the `host` and `delayed` of the reply that served its pool (A28). After the pool
  * rows, one Tencent minute line of the session per ladder name (`ladderCodes`, run view M6): a
  * `minutes` item, or `minutes_missing` naming the reason when the line cannot be read - which fails
- * nothing - each with its `code`; the derived measures read the pool rows alone. `cn-market` only.
+ * nothing - each with its `code`; the derived measures read the pool rows alone. The minute stage
+ * has `MINUTES_DEADLINE_MS` in all (a line not read by then is `DEADLINE`), and the stored items
+ * stay under `ITEMS_BUDGET`: past it, minute lines from the tail become `minutes_missing` with
+ * reason `EVIDENCE_TOO_LARGE`, so the pools always land. `cn-market` only.
  */
 import { deriveLimitUp, ladderCodes, rowKey } from "./lib/derive.mjs";
 import { fetchLimitUpPools } from "./lib/eastmoney.mjs";
 import { RUN_PARAMETERS, SHARED_BOUNDS, defineFreeze, freezeDeps, hostsOf, idsOf, sessionOf } from "./lib/freeze-tool.mjs";
 import { exchangeOf, minuteItems } from "./lib/market.mjs";
+import { EVIDENCE_CAPS } from "./lib/runs.mjs";
 
 export const name = "lunhui-freeze-limit-up";
 export const inject = ["tools", "lunhuiRuns"];
 
 /** The host serving the minute lines. */
 const MINUTES_HOST = "web.ifzq.gtimg.cn";
+
+/** The minute stage's whole budget: past it, the lines not yet read are `minutes_missing`, `DEADLINE`. */
+export const MINUTES_DEADLINE_MS = 20_000;
+
+/**
+ * The most the stored items may weigh: the source's evidence cap less 64 KiB for the file's own
+ * fields. The pools are irreplaceable, the minute lines are not: a file over it would be refused
+ * whole (`EVIDENCE_TOO_LARGE`), so minute lines give way first.
+ */
+export const ITEMS_BUDGET = /** @type {number} */ (EVIDENCE_CAPS.get("limit-up")) - 64 * 1024;
+
+/** What `addEvidence` adds to each item: `,"id":"ev_<24 hex>"`. */
+const ID_BYTES = Buffer.byteLength(`,"id":"ev_${"0".repeat(24)}"`);
+
+/** An item's weight in the file: its JSON, the comma before it and its id. */
+const weight = (item) => Buffer.byteLength(JSON.stringify(item)) + 1 + ID_BYTES;
+
+/**
+ * `items` with minute lines, from the tail, made `minutes_missing` with reason
+ * `EVIDENCE_TOO_LARGE` while `items` and `derived` together weigh more than `ITEMS_BUDGET`.
+ * @param {Record<string, any>[]} items the pool rows, then the minute items
+ * @param {Record<string, any>[]} derived
+ */
+function withinBudget(items, derived) {
+  let bytes = [...items, ...derived].reduce((sum, item) => sum + weight(item), 0);
+  const kept = [...items];
+  for (let i = kept.length - 1; i >= 0 && bytes > ITEMS_BUDGET; i--) {
+    if (kept[i].kind !== "minutes") continue;
+    const gone = { kind: "minutes_missing", code: kept[i].code, symbol: kept[i].symbol, reason: "EVIDENCE_TOO_LARGE" };
+    bytes += weight(gone) - weight(kept[i]);
+    kept[i] = gone;
+  }
+  return kept;
+}
 
 /**
  * A pool's rows with each code's first row only, and how many later rows repeated a code.
@@ -61,11 +99,12 @@ async function freeze(fetchImpl, _args, now) {
   const derived = deriveLimitUp(tagged, idsOf(items, (row) => [row.pool, row.code]));
   // The ladder's minute lines, after the derive step: the measures see pool rows only. A code with
   // no exchange is never fetched, so the minute host joins the meta only when one line was asked.
+  // The stage has MINUTES_DEADLINE_MS in all; the lines left when it passes are not fetched.
   const entries = ladderCodes(tagged).map((code) => ({ code, symbol: exchangeOf(code) && exchangeOf(code) + code }));
-  items.push(...(await minuteItems(entries, session, { fetchImpl })));
+  items.push(...(await minuteItems(entries, session, { fetchImpl, deadlineMs: MINUTES_DEADLINE_MS })));
   const asked = entries.some((entry) => entry.symbol !== null);
   return {
-    items,
+    items: withinBudget(items, derived),
     derived,
     meta: {
       received_at: now().toISOString(),

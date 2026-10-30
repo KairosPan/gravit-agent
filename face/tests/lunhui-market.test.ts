@@ -998,3 +998,49 @@ test("fetchMinutes asks for code=<symbol> and minuteItems keeps entry order and 
   assert.equal((plain[0] as any).reason, "UNKNOWN");
   await assert.rejects(fetchMinutes("bj830001", "2026-10-27", { fetchImpl: fetchImpl as any }), (e: any) => e.code === "INVALID_SYMBOL");
 });
+test("limitRate reads ST only at the head of the trimmed, upper-cased name: ST inside a name is the board's rate", () => {
+  assert.deepEqual([["600123", "BEST电子"], ["600124", "东方STAR"], ["000125", " *st样本 "], ["000126", "st样本"], ["300127", "ST创业"]]
+    .map(([c, n]) => limitRate(c, n)), [0.1, 0.1, 0.05, 0.05, 0.2]);
+});
+
+/** A minute reply for whatever `code` the URL names. */
+const minuteReply = (url: string) => {
+  const code = new URL(url).searchParams.get("code")!;
+  return new Response(JSON.stringify({ code: 0, data: { [code]: { data: [{ date: "20261027", prec: "9.90", data: ["0930 10.00 10 10000.00"] }] } } }));
+};
+/** A fetch that never answers, rejecting only when its request is aborted. */
+const hanging = (calls: { n: number }) => (async (_url: string, init?: RequestInit) => {
+  calls.n++;
+  return new Promise((_, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal!.reason)));
+}) as any;
+const sixEntries = () => Array.from({ length: 6 }, (_, i) => ({ code: `60000${i}`, symbol: `sh60000${i}` }));
+
+test("minuteItems passes timeoutMs to each fetch: a line that never answers is PROVIDER_TIMEOUT", async () => {
+  const calls = { n: 0 };
+  const items = await minuteItems([{ symbol: "sh600000" }], "2026-10-27", { fetchImpl: hanging(calls), timeoutMs: 30 });
+  assert.deepEqual(items, [{ kind: "minutes_missing", symbol: "sh600000", reason: "PROVIDER_TIMEOUT" }]);
+});
+
+test("minuteItems under deadlineMs: fetches that never resolve yield DEADLINE items within the deadline, and the later group is never fetched", async () => {
+  const calls = { n: 0 };
+  const started = Date.now();
+  const items = await minuteItems([...sixEntries(), { code: "830001", symbol: null }], "2026-10-27",
+    { fetchImpl: hanging(calls), timeoutMs: 2000, deadlineMs: 50 });
+  assert.ok(Date.now() - started < 1000, `${Date.now() - started} ms`);
+  assert.equal(calls.n, 4, "only the first group was started");
+  assert.deepEqual(items.map((i: any) => [i.code, i.reason]), [
+    ...sixEntries().map((e) => [e.code, "DEADLINE"]), ["830001", "NO_EXCHANGE"]]);
+  assert.deepEqual(items[0], { kind: "minutes_missing", code: "600000", symbol: "sh600000", reason: "DEADLINE" });
+});
+
+test("minuteItems reads the deadline from its clock between groups: past it, the rest are DEADLINE with no fetch", async () => {
+  const urls: string[] = [];
+  const times = [0, 1000, 25000];
+  const clock = () => times.shift() ?? 25000;
+  const items = await minuteItems(sixEntries(), "2026-10-27",
+    { fetchImpl: (async (url: string) => { urls.push(url); return minuteReply(url); }) as any, deadlineMs: 20000, clock });
+  assert.equal(urls.length, 4);
+  assert.deepEqual(items.map((i: any) => [i.kind, i.reason]), [
+    ...Array(4).fill(["minutes", undefined]), ["minutes_missing", "DEADLINE"], ["minutes_missing", "DEADLINE"]]);
+  await assert.rejects(minuteItems([], "2026-10-27", { deadlineMs: -1 }), (e: any) => e.code === "INVALID_OPTIONS");
+});
