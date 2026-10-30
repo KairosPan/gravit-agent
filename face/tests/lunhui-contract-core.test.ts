@@ -14,6 +14,12 @@ import {
   validateEnvelope as untypedValidateEnvelope,
 } from "../plugins/lunhui/lib/contract-core.mjs";
 import * as stage0 from "../plugins/lunhui/lib/contract.mjs";
+import { contract as environment } from "../plugins/lunhui/lib/contracts/environment.mjs";
+import { contract as sentiment } from "../plugins/lunhui/lib/contracts/sentiment.mjs";
+import { contract as theme } from "../plugins/lunhui/lib/contracts/theme.mjs";
+import { contract as leader } from "../plugins/lunhui/lib/contracts/leader.mjs";
+import { contract as mode } from "../plugins/lunhui/lib/contracts/mode.mjs";
+import { marketContract, strategyContract } from "../plugins/lunhui/lib/contracts/counterevidence.mjs";
 import * as core from "../plugins/lunhui/lib/contract-core.mjs";
 
 /** A fixture as the cases build one: a case may lay any field over it, valid or not. */
@@ -880,4 +886,45 @@ test("buildContext evidenceRequired: no evidence or derived row shown - none fro
   assert.deepEqual([context.evidence, context.derived], [[], []]);
   assert.deepEqual([context.status_expected, context.missing], ["NOT_EVALUABLE", ["limit-up", "index"]]);
   assert.deepEqual(cut.digest.missing, ["limit-up", "index"]);
+});
+
+/** The options `lib/module-tool.mjs` hands `buildContext` for a contract, over `evidence` (the module's `extra` aside). */
+function contractOptions(name: string, contract: Loose, evidence: Loose[], market: Loose | null): Loose {
+  return {
+    module: name, run: MANIFEST.run, manifest: { ...MANIFEST, evidence: evidence.map(({ source }) => ({ source })) }, evidence,
+    sources: contract.sources, derivedFirst: contract.derivedFirst, derivedView: contract.derivedView, priority: contract.priority,
+    hypotheses: contract.hypotheses, schema: contract.schema, hints: contract.hints, example: contract.example, required: contract.required,
+    requiredAny: contract.requiredAny, evidenceRequired: contract.evidenceRequired, runArtifacts: contract.runArtifacts,
+    derivedFilter: contract.derivedFilter, artifactViews: contract.artifactViews,
+    ...(contract.marketRun === undefined ? {} : { marketRun: contract.marketRun, market, marketSources: contract.marketSources, marketArtifacts: contract.marketArtifacts }),
+  };
+}
+
+test("buildContext: minute lines never enter a role's context - every contract's context is the same with minutes and minutes_missing items frozen", () => {
+  const quote = withId({ kind: "quote", symbol: "600001", last: 10 });
+  const minutes = ["sh000001", "sz399001", "sz399006"].map((symbol) =>
+    withId({ kind: "minutes", symbol, session: SESSION, prec: 3290, through: "15:00", price: [3290, 3291], volume: [1, 2], amount: [10, 20], provider: "tencent" }));
+  const missing = withId({ kind: "minutes_missing", code: "600001", symbol: "sh600001", reason: "no minute line" });
+  const plain = [
+    { source: "index", session: SESSION, items: [indexQuote, bars, advance] },
+    { source: "limit-up", session: SESSION, items: [zt, zb, sealRatio] },
+    { source: "boards", session: SESSION, items: [board, boardBreadth] },
+    { source: "quotes", session: SESSION, items: [quote] },
+  ];
+  const extended = plain.map((file) => file.source === "index" ? { ...file, items: [...file.items, ...minutes] }
+    : file.source === "limit-up" ? { ...file, items: [...file.items, missing] } : file);
+  const marketOf = (files: Loose[]) => ({
+    run: "r20261022", snapshot_id: `snap_${"b".repeat(64)}`, session: SESSION, evidence: files.filter((file) => file.source !== "quotes"), artifacts: {},
+  });
+  const contracts: Array<[string, Loose]> = [
+    ["environment", environment], ["sentiment", sentiment], ["theme", theme], ["leader", leader], ["mode", mode],
+    ["counterevidence", marketContract], ["counterevidence", strategyContract],
+  ];
+  for (const [name, contract] of contracts) {
+    const before = buildContext(contractOptions(name, contract, plain, marketOf(plain)));
+    const after = buildContext(contractOptions(name, contract, extended, marketOf(extended)));
+    assert.deepEqual(after, before, `${name}: the context is byte-identical`);
+    assert.ok(![...after.digest.items.values()].some((entry: Loose) => entry.kind === "minutes" || entry.kind === "minutes_missing"), `${name}: no minute item in the digest`);
+    assert.ok(!after.text.includes('"minutes'), `${name}: no minute item in the text`);
+  }
 });
