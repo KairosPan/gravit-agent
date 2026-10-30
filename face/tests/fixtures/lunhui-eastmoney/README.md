@@ -37,6 +37,12 @@ The clist files are `push2.eastmoney.com/api/qt/clist/get` replies in the live s
 - `board-flow.json` — the concept boards' fund flow today (`fid0=f62`): four rows with AKShare's
   `今日` fields, main net inflow `f62` and its share `f184` positive, negative and `"-"`.
 
+The minute files are Tencent `web.ifzq.gtimg.cn` `day/query` replies, the limit-up freeze's ladder
+lines: `minutes-sz000106.json` and `minutes-sh600101.json`, the shape of `../lunhui/`'s index
+lines. The ladder of the three pools is `000106`, `600101`, `000102`; the last has no file, so the
+freeze records it `minutes_missing` (`PROVIDER_HTTP_ERROR`). `../lunhui/make-minutes.mjs` writes
+them from the pool files (its header gives each shape); rerun it rather than editing them.
+
 `createFixtureFetch` (`face/plugins/lunhui/lib/fixture-fetch.mjs`) serves this directory: a URL
 whose host is `push2ex.eastmoney.com` gets the file its path names (`/getTopicZTPool`,
 `/getTopicZBPool`, `/getYesterdayZTPool`, `/getTopicZDFenBu`); a

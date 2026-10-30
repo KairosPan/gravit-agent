@@ -8,8 +8,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  NEGATIVE_TAIL_PCT, deriveBoards, deriveCounts, deriveIndex, deriveLimitUp, rowKey,
+  NEGATIVE_TAIL_PCT, deriveBoards, deriveCounts, deriveIndex, deriveLimitUp, ladderCodes, rowKey,
 } from "../plugins/lunhui/lib/derive.mjs";
+import { syntheticPools1027 } from "./lunhui-view-fixtures.ts";
 import { evidenceId } from "../plugins/lunhui/lib/runs.mjs";
 
 type Row = Record<string, unknown>;
@@ -211,4 +212,38 @@ test("derive: total_turnover is null when either composite or its amountCny is a
   assert.deepEqual(missing.inputs, [evidenceId(quotes[0])]);
   const blank = [quotes[0], { symbol: "sz399001", amountCny: null }];
   assert.equal(deriveIndex(blank, idsOf("quote", blank, "symbol"))[0].value, null);
+});
+
+test("ladderCodes: zt at 2+ boards, then zb tried at 2+, then yesterday at 2+ that did not seal again, unique, cut at the cap", () => {
+  const pools = syntheticPools1027();
+  const range = (prefix: string, from: number, to: number) =>
+    Array.from({ length: to - from + 1 }, (_, i) => prefix + String(from + i).padStart(6 - prefix.length, "0"));
+  assert.deepEqual(ladderCodes(pools), [
+    "600001", "600011", "600012", "600013",
+    ...range("000", 101, 108),
+    "000021", "000109", "000110", "000111",
+    "600014", "600015", "600016",
+    ...range("0000", 22, 28),
+  ]);
+  assert.equal(ladderCodes(pools).length, 26);
+  assert.deepEqual(ladderCodes(pools, 3), ["600001", "600011", "600012"]);
+  assert.deepEqual(ladderCodes({ zt: [], zb: [], yesterday: [] }), []);
+  // A first board, sealed or broken with no yesterday, is no ladder name; 002001 sits in zt and zb.
+  assert.ok(!ladderCodes(pools).some((code) => code.startsWith("002") || code.startsWith("003")));
+});
+
+test("ladderCodes: ties fall to firstSealAt then code; a null firstSealAt sorts last among its height", () => {
+  const zt = [
+    { pool: "zt", code: "000003", boards: 3, firstSealAt: null },
+    { pool: "zt", code: "000002", boards: 3, firstSealAt: "100000" },
+    { pool: "zt", code: "000001", boards: 3, firstSealAt: "100000" },
+    { pool: "zt", code: "000009", boards: 1, firstSealAt: "092500" },
+  ];
+  const zb = [{ pool: "zb", code: "000005" }, { pool: "zb", code: "000004" }];
+  const yesterday = [
+    { pool: "yesterday", code: "000005", yesterdayBoards: 1 },
+    { pool: "yesterday", code: "000004", yesterdayBoards: 1 },
+    { pool: "yesterday", code: "000006", yesterdayBoards: null },
+  ];
+  assert.deepEqual(ladderCodes({ zt, zb, yesterday }), ["000001", "000002", "000003", "000004", "000005"]);
 });

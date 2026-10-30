@@ -117,6 +117,51 @@ export function deriveLimitUp({ zt, zb, yesterday }, ids) {
   ];
 }
 
+/** The most ladder names whose minute lines a limit-up freeze keeps (run view M6). */
+export const LADDER_CAP = 40;
+
+/** `a` before `b` by `firstSealAt` ("HHMMSS"), a null one last. */
+function bySeal(a, b) {
+  const x = typeof a.firstSealAt === "string" ? a.firstSealAt : "~";
+  const y = typeof b.firstSealAt === "string" ? b.firstSealAt : "~";
+  return x < y ? -1 : x > y ? 1 : 0;
+}
+
+const byCode = (a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0);
+
+/**
+ * The ladder's names (run view M6), the codes whose minute lines the limit-up freeze keeps: zt
+ * rows at 2 boards or more, by boards descending, then `firstSealAt`, then code; then zb rows not
+ * in zt whose tried height - the same code's `yesterdayBoards`, else 0, plus 1 - is 2 or more, by
+ * tried height descending, then code; then 昨日涨停 rows at 2 `yesterdayBoards` or more not yet
+ * listed, by `yesterdayBoards` descending, then code. Unique, at most `cap`. A first board is never
+ * a ladder name.
+ * @param {{ zt: any[], zb: any[], yesterday: any[] }} pools
+ * @param {number} [cap]
+ * @returns {string[]}
+ */
+export function ladderCodes({ zt, zb, yesterday }, cap = LADDER_CAP) {
+  const height = (value) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
+  const yesterdayBoards = new Map();
+  for (const row of yesterday) if (!yesterdayBoards.has(row.code)) yesterdayBoards.set(row.code, height(row.yesterdayBoards));
+  const sealed = new Set(zt.map((row) => row.code));
+
+  const ladder = zt
+    .filter((row) => height(row.boards) >= 2)
+    .sort((a, b) => height(b.boards) - height(a.boards) || bySeal(a, b) || byCode(a, b));
+  const tried = (row) => (yesterdayBoards.get(row.code) ?? 0) + 1;
+  const broken = zb
+    .filter((row) => !sealed.has(row.code) && tried(row) >= 2)
+    .sort((a, b) => tried(b) - tried(a) || byCode(a, b));
+  const fell = yesterday
+    .filter((row) => height(row.yesterdayBoards) >= 2)
+    .sort((a, b) => height(b.yesterdayBoards) - height(a.yesterdayBoards) || byCode(a, b));
+
+  const codes = new Set();
+  for (const row of [...ladder, ...broken, ...fell]) codes.add(row.code);
+  return [...codes].slice(0, cap);
+}
+
 /**
  * Each fetched board's `breadth` - `advancers / (advancers + decliners)`, its own counts - and
  * `turnover_share` - its `amount` over the sum of the fetched boards' `amount`s (source `boards`),

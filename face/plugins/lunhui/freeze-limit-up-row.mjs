@@ -7,15 +7,21 @@
  * or holiday, or before 09:15, the previous session - and it is the session the evidence records;
  * one outside the calendar `defineFreeze` refuses before any run. A code a pool reply repeats keeps
  * its first row, so every row has its own key; the reply's `duplicates` counts the rows dropped.
- * Each row carries the `host` and `delayed` of the reply that served its pool (A28). `cn-market`
- * only.
+ * Each row carries the `host` and `delayed` of the reply that served its pool (A28). After the pool
+ * rows, one Tencent minute line of the session per ladder name (`ladderCodes`, run view M6): a
+ * `minutes` item, or `minutes_missing` naming the reason when the line cannot be read - which fails
+ * nothing - each with its `code`; the derived measures read the pool rows alone. `cn-market` only.
  */
-import { deriveLimitUp, rowKey } from "./lib/derive.mjs";
+import { deriveLimitUp, ladderCodes, rowKey } from "./lib/derive.mjs";
 import { fetchLimitUpPools } from "./lib/eastmoney.mjs";
-import { RUN_PARAMETERS, SHARED_BOUNDS, defineFreeze, freezeDeps, idsOf, sessionOf } from "./lib/freeze-tool.mjs";
+import { RUN_PARAMETERS, SHARED_BOUNDS, defineFreeze, freezeDeps, hostsOf, idsOf, sessionOf } from "./lib/freeze-tool.mjs";
+import { exchangeOf, minuteItems } from "./lib/market.mjs";
 
 export const name = "lunhui-freeze-limit-up";
 export const inject = ["tools", "lunhuiRuns"];
+
+/** The host serving the minute lines. */
+const MINUTES_HOST = "web.ifzq.gtimg.cn";
 
 /**
  * A pool's rows with each code's first row only, and how many later rows repeated a code.
@@ -53,10 +59,21 @@ async function freeze(fetchImpl, _args, now) {
   const tagged = { zt: tag("zt"), zb: tag("zb"), yesterday: tag("yesterday") };
   const items = [...tagged.zt, ...tagged.zb, ...tagged.yesterday];
   const derived = deriveLimitUp(tagged, idsOf(items, (row) => [row.pool, row.code]));
+  // The ladder's minute lines, after the derive step: the measures see pool rows only. A code with
+  // no exchange is never fetched, so the minute host joins the meta only when one line was asked.
+  const entries = ladderCodes(tagged).map((code) => ({ code, symbol: exchangeOf(code) && exchangeOf(code) + code }));
+  items.push(...(await minuteItems(entries, session, { fetchImpl })));
+  const asked = entries.some((entry) => entry.symbol !== null);
   return {
     items,
     derived,
-    meta: { received_at: now().toISOString(), session, host: pools.host, delayed: pools.delayed, truncated: pools.truncated },
+    meta: {
+      received_at: now().toISOString(),
+      session,
+      host: hostsOf([...pools.host.split(","), ...(asked ? [MINUTES_HOST] : [])]),
+      delayed: pools.delayed,
+      truncated: pools.truncated,
+    },
     summary: { duplicates },
   };
 }

@@ -20,6 +20,9 @@ import * as boardsRow from "../plugins/lunhui/freeze-boards-row.mjs";
 import * as indexRow from "../plugins/lunhui/freeze-index-row.mjs";
 import { createFixtureFetch } from "../plugins/lunhui/lib/fixture-fetch.mjs";
 import { LunhuiError } from "../plugins/lunhui/lib/runs.mjs";
+import { ladderCodes } from "../plugins/lunhui/lib/derive.mjs";
+import { fetchLimitUpPools } from "../plugins/lunhui/lib/eastmoney.mjs";
+import { exchangeOf } from "../plugins/lunhui/lib/market.mjs";
 
 type Cleanup = { after(fn: () => unknown): unknown };
 type ToolDef = { name: string; description: string; parameters: any; execute(args: unknown, exec: unknown): Promise<string> };
@@ -103,6 +106,14 @@ async function readJson(...parts: string[]) {
 
 const runDir = (root: string, strategy: string, run: string) => join(root, strategy, "analysis", run);
 
+/** The ladder codes of the Eastmoney fixture's pools, parsed as the freeze parses them. */
+async function fixtureLadder(): Promise<string[]> {
+  const pools = await fetchLimitUpPools({ date: "20261023", fetchImpl: createFixtureFetch(EASTMONEY) });
+  return ladderCodes(pools);
+}
+
+const isLine = (item: any) => item.kind === "minutes" || item.kind === "minutes_missing";
+
 /** A `globalThis.fetch` mock serving `dir`, recording each URL; `stall(url)` true leaves a request hanging until aborted. */
 function mockFetch(t: any, dir: string, stall: (url: URL) => boolean = () => false) {
   const serve = createFixtureFetch(dir);
@@ -155,8 +166,9 @@ test("freeze: lunhui_freeze_limit_up opens a run in cn-market, writes evidence-l
   assert.equal(reply.strategy, "cn-market");
   assert.equal(reply.source, "limit-up");
   assert.equal(reply.as_of, FRIDAY.toISOString());
-  assert.equal(reply.items, 6 + 3 + 5);
-  assert.equal(reply.host, "push2ex.eastmoney.com");
+  const ladder = await fixtureLadder();
+  assert.equal(reply.items, 6 + 3 + 5 + ladder.length);
+  assert.equal(reply.host, "push2ex.eastmoney.com,web.ifzq.gtimg.cn");
   assert.equal(reply.delayed, false);
   assert.equal(reply.truncated, false);
   assert.deepEqual(reply.derived.map((d: any) => d.measure), ["streak_distribution", "seal_ratio", "break_ratio", "yesterday_return_median", "yesterday_negative_tail"]);
@@ -166,8 +178,14 @@ test("freeze: lunhui_freeze_limit_up opens a run in cn-market, writes evidence-l
   assert.equal(manifest.kind, "market");
   assert.deepEqual(manifest.evidence.map((e: any) => e.source), ["limit-up"]);
   const evidence = await readJson(dir, "evidence-limit-up.json");
-  const rows = evidence.items.filter((item: any) => item.kind !== "derived");
+  assert.equal(evidence.host, "push2ex.eastmoney.com,web.ifzq.gtimg.cn");
+  const rows = evidence.items.filter((item: any) => item.kind !== "derived" && !isLine(item));
   assert.deepEqual(rows.map((row: any) => row.pool), [...Array(6).fill("zt"), ...Array(3).fill("zb"), ...Array(5).fill("yesterday")]);
+  // After the pool rows, one minute line per ladder name, each naming its code and symbol.
+  const lines = evidence.items.filter(isLine);
+  assert.ok(ladder.length > 0);
+  assert.deepEqual(lines.map((item: any) => [item.code, item.symbol]), ladder.map((code) => [code, `${exchangeOf(code)}${code}`]));
+  for (const item of lines.filter((item: any) => item.kind === "minutes")) assert.deepEqual([item.session, item.price.length], ["2026-10-23", 242]);
   for (const row of rows) assert.deepEqual([row.host, row.delayed], ["push2ex.eastmoney.com", false]);
   const derived = evidence.items.filter((item: any) => item.kind === "derived");
   assert.equal(derived.length, 5);
@@ -289,8 +307,9 @@ test("freeze: on a Saturday the limit-up pools are asked for the previous tradin
   const { urls } = mockFetch(t, await fixtures(t));
   const { service, tools } = mount(root, undefined, {}, new Date("2026-10-24T02:00:00.000Z"));
   const saturday = JSON.parse(await tools["limit-up"].execute({ strategy: "cn-market" }, exec()));
-  assert.equal(urls.length, 3);
-  for (const url of urls) assert.equal(url.searchParams.get("date"), "20261023");
+  const pools = (list: URL[]) => list.filter((url) => url.host === "push2ex.eastmoney.com");
+  assert.equal(pools(urls).length, 3);
+  for (const url of pools(urls)) assert.equal(url.searchParams.get("date"), "20261023");
   // The run records the trading day the pools belong to, the previous Friday, beside the wall clock.
   assert.equal(saturday.session, "2026-10-23");
   assert.equal(saturday.as_of, "2026-10-24T02:00:00.000Z");
@@ -303,7 +322,8 @@ test("freeze: on a Saturday the limit-up pools are asked for the previous tradin
   const early = mount(root, undefined, {}, new Date("2026-10-26T00:00:00.000Z"));
   urls.length = 0;
   await early.tools["limit-up"].execute({ strategy: "cn-market" }, exec());
-  for (const url of urls) assert.equal(url.searchParams.get("date"), "20261023");
+  assert.equal(pools(urls).length, 3);
+  for (const url of pools(urls)) assert.equal(url.searchParams.get("date"), "20261023");
 });
 
 test("freeze: a Tencent timeout on the quotes freeze is UPSTREAM_TIMEOUT and writes nothing", async (t) => {
@@ -544,6 +564,26 @@ test("freeze: an index whose minute line cannot be read is a minutes_missing ite
   assert.deepEqual([last.kind, last.reason], ["minutes_missing", "INVALID_RESPONSE"]);
 });
 
+test("freeze: the limit-up fixture holds a stock minute line for every ladder name but the last, which is minutes_missing; the file stays under 1 MiB", async (t) => {
+  const ladder = await fixtureLadder();
+  const held = (await readdir(EASTMONEY)).filter((name) => name.startsWith("minutes-")).sort();
+  assert.deepEqual(held, ladder.slice(0, -1).map((code) => `minutes-${exchangeOf(code)}${code}.json`).sort());
+  const root = await strategiesRoot(t);
+  const reply = JSON.parse(await mount(root, await fixtures(t)).tools["limit-up"].execute({ strategy: "cn-market" }, exec()));
+  const file = join(runDir(root, "cn-market", reply.run), "evidence-limit-up.json");
+  const evidence = JSON.parse(await readFile(file, "utf8"));
+  const lines = evidence.items.filter(isLine);
+  assert.deepEqual(lines.map((item: any) => item.kind), [...Array(ladder.length - 1).fill("minutes"), "minutes_missing"]);
+  const { id, ...gone } = lines.at(-1);
+  assert.match(id, /^ev_/);
+  const last = ladder.at(-1)!;
+  assert.deepEqual(gone, { kind: "minutes_missing", code: last, symbol: `${exchangeOf(last)}${last}`, reason: "PROVIDER_HTTP_ERROR" });
+  assert.ok((await readFile(file)).length < 1024 * 1024);
+  // The derived measures read the pool rows alone.
+  const rowIds = new Set(evidence.items.filter((item: any) => item.pool !== undefined).map((item: any) => item.id));
+  for (const item of evidence.items.filter((item: any) => item.kind === "derived")) for (const input of item.inputs) assert.ok(rowIds.has(input));
+});
+
 test("freeze: two freezes of different sources on one run at once both land", async (t) => {
   const root = await strategiesRoot(t);
   const { service, tools } = mount(root, await fixtures(t));
@@ -585,7 +625,7 @@ test("freeze: a code repeated inside one pool reply keeps its first row and coun
   const { tools } = mount(root, doubled);
   const reply = JSON.parse(await tools["limit-up"].execute({ strategy: "cn-market" }, exec()));
   assert.equal(reply.duplicates, 2);
-  assert.equal(reply.items, 6 + 3 + 5);
+  assert.equal(reply.items, 6 + 3 + 5 + (await fixtureLadder()).length);
   const evidence = await readJson(runDir(root, "cn-market", reply.run), "evidence-limit-up.json");
   const zt = evidence.items.filter((item: any) => item.pool === "zt");
   assert.equal(zt.length, 6);
