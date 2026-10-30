@@ -67,7 +67,7 @@ export function fakeScope(extra: Record<string, unknown> = {}) {
  * The backbone, the four freezes over the fixtures - `prepare` may rewrite the temp copy first -
  * and `row`'s two tools, the read and the submit.
  */
-export async function mount(t: Cleanup, row: ModuleRow, prepare?: (dir: string) => Promise<void>) {
+export async function mount(t: Cleanup, row: ModuleRow, prepare?: (dir: string) => Promise<void>, boardsConfig: Record<string, unknown> = {}) {
   const root = await strategiesRoot(t);
   const dir = await fixtures(t);
   await prepare?.(dir);
@@ -77,7 +77,7 @@ export async function mount(t: Cleanup, row: ModuleRow, prepare?: (dir: string) 
   const freeze: Record<string, ToolDef> = {};
   for (const [source, freezeRow] of [["index", indexRow], ["quotes", quotesRow], ["limit-up", limitUpRow], ["boards", boardsRow]] as const) {
     const scope = fakeScope({ lunhuiRuns: service });
-    freezeRow.apply(scope.ctx, { fetch: dir, now: () => FRIDAY });
+    freezeRow.apply(scope.ctx, { fetch: dir, now: () => FRIDAY, ...(source === "boards" ? boardsConfig : {}) });
     freeze[source] = scope.tools[0];
   }
   const scope = fakeScope({ lunhuiRuns: service });

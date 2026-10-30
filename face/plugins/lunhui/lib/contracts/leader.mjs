@@ -19,7 +19,7 @@
  * `lib/module-tool.mjs` consumes the `contract` object; the shared rules
  * are `contract-core.mjs`'s.
  */
-import { SCOPE_CLASSES, SCOPE_EXEMPT, fail, textEntries } from "../contract-core.mjs";
+import { BOARD_CODE, BOARD_CODE_PATTERN, SCOPE_CLASSES, SCOPE_EXEMPT, fail, textEntries } from "../contract-core.mjs";
 import { DERIVED_HINT, derivedRow, exampleOf, ownClaims, poolRow, quoteRow } from "./shared.mjs";
 
 /** Chapter 四 of the manuscript, in the tree's own words, paragraph ids only. */
@@ -28,8 +28,6 @@ export const HYPOTHESES =
   "地位是相对的：顺位只在引用的市场运行的主线候选之内排列，不在其涨停池或成分股中的个股不列为候选。" +
   "龙头只是一个可修订的候选标签（龙头候选），不是结论；下一交易日的冻结证据可以推翻它。" +
   "形态标记只描述冻结行的样子，不是打法名称。";
-
-const BOARD_RE = /^BK\d{4}$/;
 
 /** 龙头 as a conclusion: any 龙头 but 龙头候选, and 总龙头. */
 const LEADER_CONCLUSION = /总龙头|龙头(?!候选)/u;
@@ -55,7 +53,7 @@ const HINTS = {
     "evidence_ids 至少引用它的报价，和含它代码的那条涨停池行或成分股列表；同一 symbol 只列一次；没有把握时给空列表。",
   name: "name 照抄该报价证据的 name，一字不改；它是冻结的数据，不受用词检查，所以只写证券名，不写判断。",
   rank: "rank 是顺位：在引用的市场运行的主线候选之内排列，1 为首位；n 个候选的 rank 恰为 1 到 n，各用一次。",
-  board: "board 是候选所在的主线候选板块代码，只能是 theme 工件 mainline_candidates 里的板块，且该板块冻结的成分股含候选的代码；不确定时写 null。",
+  board: "board 是候选所在的主线候选板块代码（BK 加四位数字，或 THS: 加概念名，照冻结的写），只能是 theme 工件 mainline_candidates 里的板块，且该板块冻结的成分股含候选的代码；不确定时写 null。",
   top_pattern_flags:
     "0–5 个形态标记，只描述冻结行的样子：ACCELERATING 加速（连板中封板更早）、DIVERGENCE 分歧（炸板或回封）、BROKEN_STREAK 断板（昨日涨停今日未封）、HIGH_POSITION 高位（连板数高）、FIRST_BOARD 首板；没有就给空列表或只写 NONE。" +
     "除 NONE 外的标记须有一条不为 INSUFFICIENT 的声明引用一条市场涨停池行（market:limit-up）。",
@@ -86,7 +84,7 @@ const SCHEMA = {
           name: { type: "string", minLength: 1, maxLength: 20 },
           rank: { enum: [1, 2, 3, 4, 5] },
           // A string or null: `rules` checks it, the core's schema keywords having no union.
-          board: { type: ["string", "null"], pattern: "^BK\\d{4}$" },
+          board: { type: ["string", "null"], pattern: BOARD_CODE_PATTERN },
           evidence_ids: {
             type: "array", minItems: 1, maxItems: 16, uniqueItems: true,
             items: { type: "string", pattern: "^ev_[a-f0-9]{24}$" },
@@ -162,7 +160,7 @@ function rules(parsed, context) {
   const seen = new Set();
   for (const [i, candidate] of parsed.leader_candidates.entries()) {
     const path = `analysis.leader_candidates[${i}]`;
-    if (candidate.board !== null && (typeof candidate.board !== "string" || !BOARD_RE.test(candidate.board)))
+    if (candidate.board !== null && (typeof candidate.board !== "string" || !BOARD_CODE.test(candidate.board)))
       fail(`${path}.board: invalid string.`);
     const quote = items.find(([, entry]) => isQuote(entry) && entry.item.symbol === candidate.symbol);
     if (!quote) fail(`${path}.symbol: a candidate needs an equity quote this run froze; no such evidence reference.`);
@@ -251,7 +249,7 @@ export const contract = {
   schema: SCHEMA,
   owns: ["leader"],
   ownedBy: { leader: carriesLeader },
-  exemptPaths: ["leader_candidates[*].name"],
+  exemptPaths: ["leader_candidates[*].name", "leader_candidates[*].board"],
   rules,
   hypotheses: HYPOTHESES,
   hints,

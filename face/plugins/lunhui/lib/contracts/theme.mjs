@@ -15,7 +15,7 @@
  * and delay once, from the digest, and the evidence file keeps every stamp. `lib/module-tool.mjs` consumes the `contract` object; the
  * shared rules are `contract-core.mjs`'s.
  */
-import { fail } from "../contract-core.mjs";
+import { BOARD_CODE_PATTERN, fail } from "../contract-core.mjs";
 import { DERIVED_HINT, derivedRow, exampleOf, ownClaims } from "./shared.mjs";
 
 /** The members a context shows of a board's list: the first 10; the frozen file keeps them all. */
@@ -32,7 +32,7 @@ const HINTS = {
   derived: DERIVED_HINT,
   rows: "板块行只列代码、名称、涨跌幅、成交额与上涨、下跌家数（不列领涨股）；板块、成分股与资金流各行不列 host 与 delayed，见 served；冻结文件逐行保留。",
   mainline_candidates:
-    "0–5 个主线候选，每个 { board, name, evidence_ids }：board 是本运行已冻结的板块代码（BK 加四位数字），evidence_ids 至少引用该板块的 board 证据与它的 members 证据（同一代码），可再引用它的 breadth、turnover_share；同一板块只列一次；没有把握时给空列表。",
+    "0–5 个主线候选，每个 { board, name, evidence_ids }：board 是本运行已冻结的板块代码（BK 加四位数字，或 THS: 加概念名，照冻结的写），evidence_ids 至少引用该板块的 board 证据与它的 members 证据（同一代码），可再引用它的 breadth、turnover_share；同一板块只列一次；没有把握时给空列表。",
   name: "name 照抄该板块 board 证据的 name，一字不改；它是冻结的数据，不受用词检查，所以只写板块名，不写判断。",
   theme_stage:
     "START、FERMENT、DIVERGE、CLIMAX、FADE、CHAOS 或 UNKNOWN：题材所处阶段（启动、发酵、分歧、高潮、退潮、混沌）；不是 UNKNOWN 时，须有一条不为 INSUFFICIENT 的声明引用一条 boards 的派生量，且不是支撑 rotation 的那一条。",
@@ -62,7 +62,7 @@ const SCHEMA = {
         type: "object",
         required: ["board", "name", "evidence_ids"],
         properties: {
-          board: { type: "string", pattern: "^BK\\d{4}$" },
+          board: { type: "string", pattern: BOARD_CODE_PATTERN },
           name: { type: "string", minLength: 1, maxLength: 40 },
           evidence_ids: {
             type: "array", minItems: 1, maxItems: 16, uniqueItems: true,
@@ -86,6 +86,8 @@ function hints(digest) {
   if (rows.length === 0) return HINTS;
   const hosts = [...new Set(rows.map((row) => row.host).filter((host) => typeof host === "string"))].join("、") || "未记录";
   const delayed = rows.some((row) => row.delayed === true);
+  if (rows.some((row) => row.provider === "同花顺问财"))
+    return { ...HINTS, served: "板块来自同花顺问财（同花顺概念；涨跌幅为成分股等权平均，不是指数）；各行来自 quantapi.51ifind.com，均非延时行情。" };
   return { ...HINTS, served: `boards 各行来自 ${hosts}；${delayed ? "其中有延时行情（delayed 为 true）" : "均非延时行情（delayed 为 false）"}。` };
 }
 
@@ -157,7 +159,7 @@ export const contract = {
   schema: SCHEMA,
   owns: ["theme"],
   ownedBy: { theme: carriesTheme },
-  exemptPaths: ["mainline_candidates[*].name"],
+  exemptPaths: ["mainline_candidates[*].name", "mainline_candidates[*].board"],
   rules,
   hypotheses: HYPOTHESES,
   hints,

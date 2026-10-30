@@ -200,10 +200,20 @@ export function repairFor(category) {
 }
 
 /**
- * The version of the shared rules an artifact was validated under (A19): "2" since a derived item
- * with no inputs supports only an INSUFFICIENT claim (modules spec §17).
+ * The version of the shared rules an artifact was validated under (A19): "3" since a board code is
+ * a BK code or a 同花顺 concept `THS:<name>` (boards stand-in spec S7); "2" before it, a derived item
+ * with no inputs supporting only an INSUFFICIENT claim (modules spec §17).
  */
-export const CONTRACT_VERSION = "2";
+export const CONTRACT_VERSION = "3";
+
+/**
+ * The one board-code grammar of the theme and leader contracts: Eastmoney's BK and four digits, or
+ * the stand-in's `THS:` and the concept's name as the run froze it. Whether the run froze the code
+ * is the contracts' own membership rule.
+ */
+export const BOARD_CODE = /^(?:BK\d{4}|THS:[^\s"]{1,40})$/;
+/** `BOARD_CODE` as a schema `pattern`. */
+export const BOARD_CODE_PATTERN = BOARD_CODE.source;
 
 /**
  * The assertion classes (A21): a sentence matching one is a whole-market, sentiment, theme,

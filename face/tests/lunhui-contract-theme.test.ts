@@ -7,16 +7,24 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import * as themeRow from "../plugins/lunhui/theme-row.mjs";
 import { contract, HYPOTHESES } from "../plugins/lunhui/lib/contracts/theme.mjs";
-import { MAX_CONTEXT_BYTES, hypothesesVersion } from "../plugins/lunhui/lib/contract-core.mjs";
+import { BOARD_CODE_PATTERN, MAX_CONTEXT_BYTES, hypothesesVersion } from "../plugins/lunhui/lib/contract-core.mjs";
 import {
   ROLE, type Cleanup, type Source, type ToolDef, exec, fakeScope, frozenRun as freezeRun, idWhere, mount as mountRow, rejectsWith, rowsOf,
 } from "./lunhui-contract-harness.ts";
 
 const mount = (t: Cleanup, prepare?: (dir: string) => Promise<void>) => mountRow(t, themeRow, prepare);
+/** The 问财 stand-in: Eastmoney's board list refused (404) and the iFinD token set, so the boards freeze lands THS: concepts. */
+const standIn = (t: Cleanup, rename?: [string, string]) => mountRow(t, themeRow, async (dir) => {
+  await rm(join(dir, "boards.json"));
+  if (rename) {
+    const file = join(dir, "wencai-universe.json");
+    await writeFile(file, (await readFile(file, "utf8")).replaceAll(rename[0], rename[1]));
+  }
+}, { env: { IFIND_REFRESH_TOKEN: "fixture-refresh" } });
 /** A cn-market run frozen through the real rows, the sources in order. */
 const frozenRun = (freeze: Record<string, ToolDef>, sources: Source[] = ["boards", "limit-up"], boards?: string[] | null) =>
   freezeRun(freeze, sources, { boards });
@@ -64,7 +72,8 @@ test("theme contract: Chinese hypotheses restating THESIS.md hypothesis 3 with i
   const properties = contract.schema.properties as any;
   assert.equal(properties.mainline_candidates.minItems, 0);
   assert.equal(properties.mainline_candidates.maxItems, 5);
-  assert.equal(properties.mainline_candidates.items.properties.board.pattern, "^BK\\d{4}$");
+  assert.equal(properties.mainline_candidates.items.properties.board.pattern, BOARD_CODE_PATTERN);
+  assert.deepEqual(contract.exemptPaths, ["mainline_candidates[*].name", "mainline_candidates[*].board"]);
   assert.equal(properties.mainline_candidates.items.properties.name.maxLength, 40);
   assert.deepEqual(properties.theme_stage.enum, ["START", "FERMENT", "DIVERGE", "CLIMAX", "FADE", "CHAOS", "UNKNOWN"]);
   assert.deepEqual(properties.rotation.enum, ["NONE", "HIGH_LOW_SWITCH", "NEW_DIRECTION", "ROTATING", "UNKNOWN"]);
@@ -72,7 +81,6 @@ test("theme contract: Chinese hypotheses restating THESIS.md hypothesis 3 with i
   assert.deepEqual(contract.owns, ["theme"]);
   assert.deepEqual(contract.required, ["boards", "limit-up"]);
   assert.deepEqual(contract.sources, ["boards", "limit-up"]);
-  assert.deepEqual(contract.exemptPaths, ["mainline_candidates[*].name"]);
   assert.equal(typeof contract.hints, "function", "the hints state the boards source's stamps from the digest");
 });
 
@@ -326,4 +334,35 @@ test("theme: a full run of thirty boards and ten member lists passes 30 KiB - ev
 test("theme: a strategy run is WRONG_CHANNEL", async (t) => {
   const { read } = await mount(t);
   await rejectsWith(read.execute({ strategy: "alpha", run: "nope" }, exec(ROLE)), "WRONG_CHANNEL");
+});
+
+test("theme: a stand-in run - a THS: candidate the run froze is accepted, one it did not is REFERENCE; the served hint names 同花顺问财", async (t) => {
+  const { freeze, read, submit } = await standIn(t);
+  const run = await frozenRun(freeze, ["boards", "limit-up"], null);
+  const context = JSON.parse(await read.execute({ strategy: "cn-market", run }, exec(ROLE)));
+  assert.equal(context.hints.served, "板块来自同花顺问财（同花顺概念；涨跌幅为成分股等权平均，不是指数）；各行来自 quantapi.51ifind.com，均非延时行情。");
+  const robot = boardIds(context, "THS:人形机器人");
+  const claims = [{ id: "c1", text: "板块上涨占比见所引派生证据。", basis: "CURRENT", evidence_ids: [robot.breadth] }];
+  const good = { board: "THS:人形机器人", name: "人形机器人", evidence_ids: [robot.board, robot.members, robot.breadth] };
+  const unfrozen = { board: "THS:未冻结", name: "人形机器人", evidence_ids: [robot.board, robot.members] };
+  const refusal = await rejectsWith(submit.execute({ strategy: "cn-market", run, analysis: JSON.stringify(artifact(context, { mainline_candidates: [unfrozen], claims })) }, exec(ROLE)), "INVALID_ANALYSIS");
+  assert.match(refusal.message, /^INVALID_ANALYSIS: \[REFERENCE\] analysis\.mainline_candidates\[0\]\.board/u);
+  assert.equal((await submitted(submit, run, artifact(context, { mainline_candidates: [good], claims }))).accepted, true);
+});
+
+test("theme: a candidate's THS: board code is frozen data, outside the wording rules - a board named with a forbidden word passes", async (t) => {
+  const { freeze, read, submit } = await standIn(t, ["白酒概念", "买入概念"]);
+  const run = await frozenRun(freeze, ["boards", "limit-up"], null);
+  const context = JSON.parse(await read.execute({ strategy: "cn-market", run }, exec(ROLE)));
+  const ids = boardIds(context, "THS:买入概念");
+  const candidate = { board: "THS:买入概念", name: "买入概念", evidence_ids: [ids.board, ids.members] };
+  const claims = [{ id: "c1", text: "板块上涨占比见所引派生证据。", basis: "CURRENT", evidence_ids: [ids.breadth] }];
+  assert.equal((await submitted(submit, run, artifact(context, { mainline_candidates: [candidate], claims }))).accepted, true);
+});
+
+test("theme: an Eastmoney run keeps its served hint", async (t) => {
+  const { freeze, read } = await mount(t);
+  const run = await frozenRun(freeze);
+  const context = JSON.parse(await read.execute({ strategy: "cn-market", run }, exec(ROLE)));
+  assert.equal(context.hints.served, "boards 各行来自 push2.eastmoney.com；均非延时行情（delayed 为 false）。");
 });

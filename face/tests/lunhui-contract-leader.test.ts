@@ -11,7 +11,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import * as leaderRow from "../plugins/lunhui/leader-row.mjs";
 import * as environmentRow from "../plugins/lunhui/environment-row.mjs";
@@ -19,7 +19,7 @@ import * as sentimentRow from "../plugins/lunhui/sentiment-row.mjs";
 import * as themeRow from "../plugins/lunhui/theme-row.mjs";
 import * as quotesRow from "../plugins/lunhui/freeze-quotes-row.mjs";
 import { contract, HYPOTHESES } from "../plugins/lunhui/lib/contracts/leader.mjs";
-import { MAX_CONTEXT_BYTES, hypothesesVersion } from "../plugins/lunhui/lib/contract-core.mjs";
+import { BOARD_CODE_PATTERN, MAX_CONTEXT_BYTES, hypothesesVersion } from "../plugins/lunhui/lib/contract-core.mjs";
 import {
   ROLE, type Cleanup, type ToolDef, exec, fakeScope, frozenRun, idWhere, mount, rejectsWith, rowsOf,
 } from "./lunhui-contract-harness.ts";
@@ -63,10 +63,10 @@ const MAINLINE = [["BK0715", "示例电网"], ["BK1716", "示例算力"]];
  * freeze's argument (null for the freeze's own first ten).
  */
 async function setup(t: Cleanup, {
-  theme = true, prepare = addEquities, mainline = MAINLINE, symbols = SYMBOLS, boards,
-}: { theme?: boolean; prepare?: (dir: string) => Promise<void>; mainline?: string[][]; symbols?: string[]; boards?: string[] | null } = {}) {
+  theme = true, prepare = addEquities, mainline = MAINLINE, symbols = SYMBOLS, boards, boardsConfig,
+}: { boardsConfig?: Record<string, unknown>; theme?: boolean; prepare?: (dir: string) => Promise<void>; mainline?: string[][]; symbols?: string[]; boards?: string[] | null } = {}) {
   let fixtureDir = "";
-  const mounted = await mount(t, leaderRow, async (dir) => { fixtureDir = dir; await prepare(dir); });
+  const mounted = await mount(t, leaderRow, async (dir) => { fixtureDir = dir; await prepare(dir); }, boardsConfig);
   const { service, freeze } = mounted;
   const market = await frozenRun(freeze, ["index", "limit-up", "boards"], boards === undefined ? {} : { boards });
   for (const row of [environmentRow, sentimentRow]) {
@@ -150,7 +150,8 @@ test("leader contract: Chinese hypotheses of chapter 四 with its paragraph ids,
   assert.equal(candidate.properties.symbol.pattern, "^(sh|sz)\\d{6}$");
   assert.equal(candidate.properties.name.maxLength, 20);
   assert.deepEqual(candidate.properties.rank.enum, [1, 2, 3, 4, 5]);
-  assert.equal(candidate.properties.board.pattern, "^BK\\d{4}$");
+  assert.equal(candidate.properties.board.pattern, BOARD_CODE_PATTERN);
+  assert.deepEqual(contract.exemptPaths, ["leader_candidates[*].name", "leader_candidates[*].board"]);
   assert.deepEqual(properties.top_pattern_flags.items.enum, ["ACCELERATING", "DIVERGENCE", "BROKEN_STREAK", "HIGH_POSITION", "FIRST_BOARD", "NONE"]);
   assert.equal(properties.top_pattern_flags.maxItems, 5);
   assert.deepEqual(contract.schema.required, ["leader_candidates", "top_pattern_flags"]);
@@ -160,7 +161,6 @@ test("leader contract: Chinese hypotheses of chapter 四 with its paragraph ids,
   assert.deepEqual(contract.marketSources, ["limit-up", "boards"]);
   assert.deepEqual(contract.marketArtifacts, ["theme", "sentiment"]);
   assert.deepEqual(contract.required, ["quotes", "market:theme"]);
-  assert.deepEqual(contract.exemptPaths, ["leader_candidates[*].name"]);
 });
 
 test("leader: a context over a strategy run's quotes citing the day's market run - OK expected, the market's pools and members, the theme and sentiment artifacts, at most 30 KiB - whose example is accepted", async (t) => {
@@ -431,4 +431,32 @@ test("leader: a live-size market run - three 500-row pools, thirty boards, ten 1
     claims: [{ id: "c1", text: "中国平安是 BK2001 的成分股，列为龙头候选。", basis: "CURRENT", evidence_ids: [id.members("BK2001"), id.quote("sh601318")] }],
   });
   assert.equal((await submitted(submit, "alpha", strategy, analysis)).accepted, true);
+});
+
+/** The 问财 stand-in's fixture copy: no Eastmoney board list, 600519 and 000333 the first two members of 人形机器人. */
+async function standInFixtures(dir: string) {
+  await addEquities(dir);
+  await rm(join(dir, "boards.json"));
+  const file = join(dir, "wencai-universe.json");
+  await writeFile(file, (await readFile(file, "utf8")).replace("300100.SZ", "600519.SH").replace("300101.SZ", "000333.SZ"));
+}
+
+test("leader: a stand-in market run - a candidate's board is a THS: mainline candidate of the theme artifact, REFERENCE when not frozen", async (t) => {
+  const { service, market, strategy } = await setup(t, {
+    prepare: standInFixtures, boards: null, mainline: [["THS:人形机器人", "人形机器人"]], boardsConfig: { env: { IFIND_REFRESH_TOKEN: "fixture-refresh" } },
+  });
+  const [read, submit] = tools(service, leaderRow);
+  const context = JSON.parse(await read.execute({ strategy: "alpha", run: strategy, market_run: market }, exec(ROLE)));
+  const id = ids(context);
+  const candidate = (board: string | null) => ({ symbol: "sh600519", name: "贵州茅台", rank: 1, board, evidence_ids: [id.quote("sh600519"), id.members("THS:人形机器人")] });
+  const claims = [{ id: "c1", text: "贵州茅台是示例成分股，列为龙头候选。", basis: "CURRENT", evidence_ids: [id.quote("sh600519"), id.members("THS:人形机器人")] }];
+  const submit_ = (board: string | null) => submit.execute({ strategy: "alpha", run: strategy, analysis: JSON.stringify(artifact(context, { leader_candidates: [candidate(board)], claims })) }, exec(ROLE));
+  for (const board of ["THS:白酒概念", "THS:未冻结"]) {
+    const refusal = await rejectsWith(submit_(board), "INVALID_ANALYSIS");
+    assert.match(refusal.message, /^INVALID_ANALYSIS: \[REFERENCE\] analysis\.leader_candidates\[0\]\.board/u);
+  }
+  // A malformed code is SCHEMA, not REFERENCE.
+  const schema = await rejectsWith(submit_("THS:a b"), "INVALID_ANALYSIS");
+  assert.match(schema.message, /leader_candidates\[0\]\.board/u);
+  assert.equal(JSON.parse(await submit_("THS:人形机器人")).accepted, true);
 });

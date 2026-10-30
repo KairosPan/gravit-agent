@@ -9,7 +9,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  CONTRACT_VERSION, MAX_ANALYSIS_BYTES, MAX_CONTEXT_BYTES, SCOPE_CLASSES, SCOPE_EXEMPT, buildContext as untypedBuildContext,
+  BOARD_CODE, CONTRACT_VERSION, MAX_ANALYSIS_BYTES, MAX_CONTEXT_BYTES, SCOPE_CLASSES, SCOPE_EXEMPT, buildContext as untypedBuildContext,
   MODULE_REPAIRS, VALIDATION_REPAIRS, classifyValidationRejection, hash, hypothesesVersion, repairFor,
   validateEnvelope as untypedValidateEnvelope,
 } from "../plugins/lunhui/lib/contract-core.mjs";
@@ -375,7 +375,7 @@ test("buildContext: the envelope values, the module's sources only, derived item
   const parsed = JSON.parse(text);
   assert.equal(parsed.module, "sentiment");
   assert.equal(parsed.contract_version, CONTRACT_VERSION);
-  assert.equal(CONTRACT_VERSION, "2");
+  assert.equal(CONTRACT_VERSION, "3");
   assert.equal(parsed.hypotheses_version, hypothesesVersion(HYPOTHESES));
   assert.match(parsed.hypotheses_version, /^h_[0-9a-f]{12}$/);
   assert.deepEqual([parsed.run, parsed.snapshot_id, parsed.as_of, parsed.session], [MANIFEST.run, MANIFEST.snapshot_id, MANIFEST.as_of, SESSION]);
@@ -927,4 +927,11 @@ test("buildContext: minute lines never enter a role's context - every contract's
     assert.ok(![...after.digest.items.values()].some((entry: Loose) => entry.kind === "minutes" || entry.kind === "minutes_missing"), `${name}: no minute item in the digest`);
     assert.ok(!after.text.includes('"minutes'), `${name}: no minute item in the text`);
   }
+});
+
+test("BOARD_CODE: BK and four digits, or THS: and a name of 1-40 characters without whitespace or a double quote", () => {
+  for (const code of ["BK0715", "THS:人形机器人", "THS:ST板块", "THS:" + "概".repeat(40)])
+    assert.ok(BOARD_CODE.test(code), code);
+  for (const code of ["BK071", "BK07150", "bk0715", "THS:", "THS:" + "概".repeat(41), "THS:a b", 'THS:a"b', "THS:a\nb", "XX:概念", " BK0715"])
+    assert.ok(!BOARD_CODE.test(code), JSON.stringify(code));
 });
