@@ -426,6 +426,42 @@ test("runs: openRun writes run.json and metrics.json; addEvidence ids items and 
   await assert.rejects(openRun(strategyDir, "both" as never), (error: unknown) => !(error instanceof LunhuiError));
 });
 
+test("runs: addEvidence admits an optional provider, fallback_from, query and reply_sha256 - into the evidence file, and provider and fallback_from into run.json; absent stays absent; a bad one is host code's bug", async (t) => {
+  const { dir } = await openRun(await oneStrategy(t), "market");
+  const plain = await addEvidence(dir, "quotes", [{ code: "600519" }], meta);
+  const plainFile = JSON.parse(await readText(dir, plain.file));
+  for (const key of ["provider", "fallback_from", "query", "reply_sha256"]) assert.equal(Object.hasOwn(plainFile, key), false, key);
+  const eastmoney = await addEvidence(dir, "index", [{ code: "sh000001" }], { ...meta, provider: "东方财富" });
+  assert.equal(JSON.parse(await readText(dir, eastmoney.file)).provider, "东方财富");
+  const standIn = {
+    ...meta, host: "quantapi.51ifind.com", provider: "同花顺问财", fallback_from: { provider: "东方财富" as const, code: "UPSTREAM_INVALID" },
+    query: "A股 2026年10月23日涨跌幅 成交额 主力资金流向 所属概念", reply_sha256: "a".repeat(64),
+  };
+  const boards = await addEvidence(dir, "boards", [{ code: "THS:白酒概念" }], standIn);
+  const text = JSON.parse(await readText(dir, boards.file));
+  assert.deepEqual(
+    [text.provider, text.fallback_from, text.query, text.reply_sha256],
+    [standIn.provider, standIn.fallback_from, standIn.query, standIn.reply_sha256],
+  );
+  const entries = (await readRun(dir)).manifest.evidence as any[];
+  assert.equal(Object.hasOwn(entries[0], "provider"), false);
+  assert.equal(Object.hasOwn(entries[0], "fallback_from"), false);
+  assert.equal(entries[1].provider, "东方财富");
+  assert.equal(Object.hasOwn(entries[1], "fallback_from"), false);
+  assert.equal(entries[2].provider, "同花顺问财");
+  assert.deepEqual(entries[2].fallback_from, { provider: "东方财富", code: "UPSTREAM_INVALID" });
+  assert.equal(Object.hasOwn(entries[2], "query"), false);
+  assert.equal(Object.hasOwn(entries[2], "reply_sha256"), false);
+  const other = await openRun(await oneStrategy(t), "market");
+  for (const bad of [
+    { provider: "" }, { provider: 1 }, { fallback_from: { provider: "腾讯行情", code: "X" } }, { fallback_from: { provider: "东方财富", code: "" } },
+    { fallback_from: "东方财富" }, { query: 1 }, { reply_sha256: "abc" }, { reply_sha256: "A".repeat(64) },
+  ]) {
+    await assert.rejects(addEvidence(other.dir, "boards", [], { ...meta, ...bad } as any), (error: unknown) => error instanceof TypeError, JSON.stringify(bad));
+  }
+  assert.deepEqual((await readdir(other.dir)).sort(), ["metrics.json", "run.json"]);
+});
+
 test("runs: snapshot_id depends on the evidence bytes, not on the order the sources were added", async (t) => {
   const strategyDir = await oneStrategy(t);
   const later = { ...meta, received_at: "2026-10-23T07:00:03Z" };

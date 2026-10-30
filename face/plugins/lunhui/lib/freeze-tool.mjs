@@ -39,9 +39,10 @@ const tables = loadCalendars();
 /**
  * What a row's `freeze` returns: the source's rows, the derived items over them, the meta
  * `addEvidence` records - its `session` from `sessionOf` - and any fields of the row's own for the
- * reply's summary.
+ * reply's summary. The meta's optional fields (`provider`, `fallback_from`, `query`,
+ * `reply_sha256`) are the boards freeze's alone (boards stand-in spec S6).
  * @typedef {{ items: Record<string, unknown>[], derived: Record<string, unknown>[],
- *   meta: { received_at: string, session: string, host: string, delayed: boolean, truncated: boolean },
+ *   meta: import("./runs.mjs").EvidenceMeta,
  *   summary?: Record<string, unknown> }} Frozen
  */
 

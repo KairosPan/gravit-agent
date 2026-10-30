@@ -558,13 +558,16 @@ export async function openRun(strategyDir, kind, now = new Date()) {
  * pass 2 MiB. A source off `SOURCE_RE`, items that are not an array of plain objects without an
  * `id` of their own, a `received_at` that is no date, a `session` that is no `YYYY-MM-DD` date, an
  * empty `host` or a `delayed` or `truncated` that is not a boolean are host code's bug, a
- * `TypeError`. A
+ * `TypeError`. The meta's optional fields (boards stand-in spec S6), each a `TypeError` when
+ * present and malformed, each absent from the file when absent: `provider`, a non-empty string,
+ * and `fallback_from`, `{ provider: "东方财富", code }` with a non-empty code, both also written into
+ * the run.json entry; `query`, a string, and `reply_sha256`, 64 lowercase hex, the file's alone. A
  * `run.json` write that fails removes the evidence file it followed. Not serialized here: two
  * calls on one run at once are the caller's to order (the service's run mutex).
  * @param {string} dir a run directory `openRun` or `resolveRun` returned
  * @param {string} source e.g. `limit-up`
  * @param {unknown[]} items the source's rows
- * @param {{ received_at: string, session: string, host: string, delayed: boolean, truncated: boolean }} meta
+ * @param {EvidenceMeta} meta
  * @returns {Promise<{ file: string, sha256: string, bytes: number, ids: string[] }>}
  */
 export async function addEvidence(dir, source, items, meta) {
@@ -580,11 +583,12 @@ export async function addEvidence(dir, source, items, meta) {
   if (typeof session !== "string" || !SESSION_RE.test(session) || Number.isNaN(Date.parse(session))) throw new TypeError(`lunhui: session is a YYYY-MM-DD date, not ${JSON.stringify(session)}`);
   if (typeof host !== "string" || host === "") throw new TypeError(`lunhui: host is a non-empty string, not ${JSON.stringify(host)}`);
   if (typeof delayed !== "boolean" || typeof truncated !== "boolean") throw new TypeError("lunhui: delayed and truncated are booleans");
+  const { stamped, listed } = optionalMeta(meta);
   const manifest = await readManifest(dir);
   if (manifest.sealed_at) throw new LunhuiError("RUN_SEALED", "这个运行已封存（已读过上下文），不再接受证据；不带 run 冻结即开启新运行。");
   if (manifest.evidence.some((entry) => entry?.source === source)) throw sourceFrozen();
   const ids = items.map(evidenceId);
-  const text = JSON.stringify({ source, received_at, session, host, delayed, truncated, items: items.map((item, i) => ({ ...item, id: ids[i] })) });
+  const text = JSON.stringify({ source, received_at, session, host, delayed, truncated, ...stamped, items: items.map((item, i) => ({ ...item, id: ids[i] })) });
   const bytes = Buffer.byteLength(text, "utf8");
   const cap = EVIDENCE_CAPS.get(source) ?? MAX_EVIDENCE_BYTES;
   if (bytes > cap) throw new LunhuiError("EVIDENCE_TOO_LARGE", `这一来源冻结下来的回复超过单个证据文件的上限 ${sizeWord(cap)}，什么也没有写入。`);
@@ -599,7 +603,7 @@ export async function addEvidence(dir, source, items, meta) {
   }
   const sha256 = createHash("sha256").update(text).digest("hex");
   try {
-    await writeManifest(dir, { ...manifest, evidence: [...manifest.evidence, { source, file, sha256, bytes, received_at, session, host, delayed }] });
+    await writeManifest(dir, { ...manifest, evidence: [...manifest.evidence, { source, file, sha256, bytes, received_at, session, host, delayed, ...listed }] });
   } catch (error) {
     // Never through a run directory since swapped for a link. A cleanup that fails is swallowed,
     // so the run.json error is the one thrown; the orphan file left behind then makes every later
@@ -608,6 +612,46 @@ export async function addEvidence(dir, source, items, meta) {
     throw error;
   }
   return { file, sha256, bytes, ids };
+}
+
+/**
+ * The meta `addEvidence` takes: the reply's stamps, and the optional source fields only the boards
+ * freeze sets (boards stand-in spec S6).
+ * @typedef {{ received_at: string, session: string, host: string, delayed: boolean, truncated: boolean,
+ *   provider?: string, fallback_from?: { provider: "东方财富", code: string }, query?: string, reply_sha256?: string }} EvidenceMeta
+ */
+
+const SHA256_RE = /^[0-9a-f]{64}$/;
+
+/**
+ * `addEvidence`'s optional meta, checked: `stamped` for the evidence file, `listed` - `provider`
+ * and `fallback_from` - for its run.json entry; a field absent from `meta` is absent from both.
+ * @param {EvidenceMeta} meta
+ */
+function optionalMeta(meta) {
+  const { provider, fallback_from, query, reply_sha256 } = meta;
+  /** @type {Record<string, unknown>} */
+  const stamped = {};
+  /** @type {Record<string, unknown>} */
+  const listed = {};
+  if (provider !== undefined) {
+    if (typeof provider !== "string" || provider === "") throw new TypeError(`lunhui: provider is a non-empty string, not ${JSON.stringify(provider)}`);
+    stamped.provider = listed.provider = provider;
+  }
+  if (fallback_from !== undefined) {
+    if (!plainObject(fallback_from) || fallback_from.provider !== "东方财富" || typeof fallback_from.code !== "string" || fallback_from.code === "")
+      throw new TypeError(`lunhui: fallback_from is { provider: "东方财富", code }, not ${JSON.stringify(fallback_from)}`);
+    stamped.fallback_from = listed.fallback_from = { provider: fallback_from.provider, code: fallback_from.code };
+  }
+  if (query !== undefined) {
+    if (typeof query !== "string") throw new TypeError(`lunhui: query is a string, not ${JSON.stringify(query)}`);
+    stamped.query = query;
+  }
+  if (reply_sha256 !== undefined) {
+    if (typeof reply_sha256 !== "string" || !SHA256_RE.test(reply_sha256)) throw new TypeError(`lunhui: reply_sha256 is 64 lowercase hex, not ${JSON.stringify(reply_sha256)}`);
+    stamped.reply_sha256 = reply_sha256;
+  }
+  return { stamped, listed };
 }
 
 /**
