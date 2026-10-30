@@ -48,6 +48,7 @@ const ARTIFACT_MAX_BYTES = 24 * 1024;
  *   readThesis(strategyName: unknown): Promise<string | null>,
  *   withRun<T>(strategyName: unknown, run: unknown, fn: (located: { strategy: string, run: string, dir: string }) => Promise<T>): Promise<T>,
  *   countFreeze(strategyName: unknown, run: unknown): Promise<number>,
+ *   recordRefusal(strategyName: unknown, run: unknown, source: string, code: string): Promise<void>,
  *   readContext<T>(strategyName: unknown, run: unknown, module: string, build: (input: ContextInput, located: { strategy: string, run: string }) => T | Promise<T>): Promise<T>,
  *   submit(strategyName: unknown, run: unknown, module: string, text: unknown, validate: (text: unknown, located: { strategy: string, run: string }) => unknown): Promise<{ accepted: true, module: string, run: string }>,
  * }} LunhuiRuns
@@ -247,6 +248,18 @@ export function createLunhuiRuns(strategiesRoot) {
       await runs.writeMetrics(dir, { ...metrics, freezes });
       if (freezes > FREEZE_BUDGET) throw refuse.toolBudget();
       return freezes;
+    },
+    /**
+     * Record a refused freeze: append `code` to `metrics.refusals[source]`, written back through
+     * `writeMetrics`. The key `refusals` is absent until the first refusal. Called inside `withRun`,
+     * after `countFreeze`, so the refused call is already counted.
+     */
+    async recordRefusal(strategyName, run, source, code) {
+      const { dir } = await locate(strategyName, run);
+      const { metrics } = await runs.readRun(dir);
+      const refusals = metrics.refusals !== null && typeof metrics.refusals === "object" && !Array.isArray(metrics.refusals) ? metrics.refusals : {};
+      const recorded = Array.isArray(refusals[source]) ? refusals[source] : [];
+      await runs.writeMetrics(dir, { ...metrics, refusals: { ...refusals, [source]: [...recorded, code] } });
     },
     /**
      * Read `module`'s context of the run, under the run's mutex - the freezes' own - so a freeze

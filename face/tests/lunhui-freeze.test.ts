@@ -213,6 +213,33 @@ test("freeze: a second limit-up freeze on the same run is SOURCE_FROZEN; a freez
   await rejectsWith(tools.index.execute({ strategy: "cn-market", run: "../x" }, exec()), "BAD_RUN_ID");
 });
 
+test("freeze: a refused freeze leaves its code in metrics.json under refusals[source]; a run with none has no refusals key", async (t) => {
+  const root = await strategiesRoot(t);
+  const noBoards = await fixtures(t, (dir) => rm(join(dir, "boards.json")));
+  const { service, tools } = mount(root, await fixtures(t), { boards: { fetch: noBoards } });
+  const { run } = JSON.parse(await tools.index.execute({ strategy: "cn-market" }, exec()));
+  const dir = runDir(root, "cn-market", run);
+  assert.equal("refusals" in (await readJson(dir, "metrics.json")), false);
+  const codes: string[] = [];
+  for (let i = 0; i < 3; i++) {
+    await assert.rejects(tools.boards.execute({ strategy: "cn-market", run }, exec()), (error: any) => {
+      assert.ok(error instanceof LunhuiError);
+      assert.match(error.code, /^UPSTREAM_/);
+      codes.push(error.code);
+      return true;
+    });
+  }
+  assert.deepEqual((await readJson(dir, "metrics.json")).refusals, { boards: codes });
+  await service.sealRun("cn-market", run);
+  await rejectsWith(tools["limit-up"].execute({ strategy: "cn-market", run }, exec()), "RUN_SEALED");
+  const metrics = await readJson(dir, "metrics.json");
+  assert.deepEqual(metrics.refusals, { boards: codes, "limit-up": ["RUN_SEALED"] });
+  assert.equal(metrics.freezes, 5);
+  // The ninth freeze's TOOL_BUDGET is recorded too.
+  for (let i = 0; i < 4; i++) await rejectsWith(tools.index.execute({ strategy: "cn-market", run }, exec()), i < 3 ? "RUN_SEALED" : "TOOL_BUDGET");
+  assert.deepEqual((await readJson(dir, "metrics.json")).refusals.index, ["RUN_SEALED", "RUN_SEALED", "RUN_SEALED", "TOOL_BUDGET"]);
+});
+
 test("freeze: limit-up, boards and index refuse a strategy channel with WRONG_CHANNEL; quotes accepts both", async (t) => {
   const root = await strategiesRoot(t);
   const { tools } = mount(root, await fixtures(t));

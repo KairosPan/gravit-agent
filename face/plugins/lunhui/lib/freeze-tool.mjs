@@ -128,11 +128,20 @@ export function defineFreeze({ name, description, parameters, source, kind, chec
         const opened = args.run === undefined;
         const run = opened ? (await runs.openRun(strategy, market ? "market" : "strategy")).run : args.run;
         return await runs.withRun(strategy, run, async () => {
-          await runs.countFreeze(strategy, run);
-          const { manifest } = await runs.readRun(strategy, run);
-          if (manifest.sealed_at) throw refuse.runSealed();
-          const { items, derived, meta, summary } = await freeze(fetchImpl, args, now);
-          const { ids } = await runs.addEvidence(strategy, manifest.run, source, [...items, ...derived], meta);
+          let manifest, items, derived, meta, summary, ids;
+          try {
+            await runs.countFreeze(strategy, run);
+            ({ manifest } = await runs.readRun(strategy, run));
+            if (manifest.sealed_at) throw refuse.runSealed();
+            ({ items, derived, meta, summary } = await freeze(fetchImpl, args, now));
+            ({ ids } = await runs.addEvidence(strategy, manifest.run, source, [...items, ...derived], meta));
+          } catch (error) {
+            // A refusal from the count on - TOOL_BUDGET, RUN_SEALED, the freeze's own, the
+            // evidence write's - leaves its code in the run's metrics.json under refusals[source].
+            // The refusal is what the caller is told: a failed record does not replace it.
+            if (error instanceof LunhuiError) await runs.recordRefusal(strategy, run, source, error.code).catch(() => {});
+            throw error;
+          }
           const derivedIds = ids.slice(items.length);
           return JSON.stringify({
             run: manifest.run,
