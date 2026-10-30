@@ -1,7 +1,7 @@
-/** Shared live-quote contract — the A shares alone, polled from iFinD. Provider
+/** Shared live-quote contract — the A shares alone, polled from Tencent. Provider
  * event time and receipt time stay separate. */
 export type QuoteMarket = "cn";
-export type QuoteProvider = "ifind";
+export type QuoteProvider = "tencent";
 export interface QuoteIdentity { id: string; market: QuoteMarket; symbol: string }
 export type MarketStatus = "open" | "closed" | "unknown";
 export interface ProviderState {

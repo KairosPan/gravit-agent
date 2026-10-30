@@ -190,7 +190,7 @@ test('a cn row beside the Account rows under Stocks; Not listed line with Remove
   assert.equal(px, '¥1,688.00');
   assert.equal(text(move), '▲up 0.48%');
   assert.equal(volume, '2M shares');
-  assert.equal(text(source), 'iFinD', "the face's provider by its name, never the wire's own words");
+  assert.equal(text(source), 'Tencent', "the face's provider by its name, never the wire's own words");
   // the old star the Account could not find: Not listed, every figure a dash, Remove where the star would be, no page to open
   const zed = rowOf(stocks, 'us:ZZZZ');
   const z = cells(zed);
@@ -344,7 +344,7 @@ test('the page: no Buy, no Sell on a page that does not sign; the range seg; Acr
   assert.match(cn, /class="mk-asof">as of \d\d:\d\d · Live</);
   assert.match(cn, /<dt>Previous close<\/dt><dd>¥1,680\.00<\/dd>/);
   assert.match(cn, /<dt>Volume<\/dt><dd>2M shares<\/dd>/);
-  assert.match(cn, /<dt>Source<\/dt><dd>iFinD<\/dd>/);
+  assert.match(cn, /<dt>Source<\/dt><dd>Tencent<\/dd>/);
   assert.match(cn, /class="btn mk-on" data-action="toggleWatch" data-id="cn:600519" aria-pressed="true">/);
   assert.match(cn, /data-action="handToGravit" data-id="cn:600519"/);
   assert.match(section(cn, 'Gravit on it'), /600519 into the close/);
@@ -424,7 +424,7 @@ test('no CJK, no icon URL in any rendered string', () => {
   for (const item of predictions.items) item.icon = ICON;
   const candles = { ...fx('candles'), icon: ICON };
   // the face's own wire speaks Chinese in its messages and source names: none of it is drawn
-  const providers = [{ id: 'ifind', market: 'cn', status: 'unconfigured', source: '同花顺', feed: '', transport: 'poll', message: 'A 股行情待配置 iFinD 凭据' }];
+  const providers = [{ id: 'tencent', market: 'cn', status: 'limited', source: '腾讯', feed: 'snapshot', transport: 'poll', message: '部分 A 股标的暂无完整行情' }];
   const base = {
     all, predictions, cn: [MOUTAI, ZED], asked: { 'us:ZZZZ': null }, quotes: { 'cn:600519': moutaiQuote({ quote_status: 'stale' }) }, providers,
     connection: 'polling', account: true, watch: ['coin:BTC', 'stock:GONE'], candles: { id: 'stock:NVDA', range: '1D', data: candles },

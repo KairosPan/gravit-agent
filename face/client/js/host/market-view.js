@@ -17,8 +17,8 @@ export const ACCOUNT_TABS = [['all', 'All'], ['crypto', 'Crypto'], ['stocks', 'S
 export const ACCOUNT_SORTS = [{ id: 'volume', label: 'Most traded' }, { id: 'movers', label: 'Biggest moves' }, { id: 'closing', label: 'Closing soonest' }];
 export const CANDLE_RANGES = ['1D', '5D', '1M', '3M', '6M', 'YTD', '1Y', '5Y', 'MAX'];
 
-const PROVIDERS = { ifind: 'iFinD' };
-const MARKET_PROVIDER = { cn: 'iFinD' };
+const PROVIDERS = { tencent: 'Tencent' };
+const MARKET_PROVIDER = { cn: 'Tencent' };
 const PROVIDER_STATUS = { connecting: 'Connecting', connected: 'Connected', unconfigured: 'Not configured', error: 'Error', limited: 'Limited' };
 const QUOTE_STATUS = { live: 'Live', delayed: 'Delayed', stale: 'Stale' };
 const CONNECTION = { connecting: 'Connecting…', polling: 'Updating every 15 s', paused: 'Paused', error: 'Quotes unavailable' };
@@ -32,7 +32,7 @@ export function canonicalId(raw) {
 const blank = q => typeof q !== 'string' || !q.trim();
 
 /** The quote's state in a word or two: Live, Delayed, Stale or No quote, and Closed when the market is; with no price
- * from a market whose provider is not configured (no iFinD token), Not configured. */
+ * from a market whose provider says it is not configured, Not configured. */
 export function quoteWord(quote, providers = [], market = quote?.market) {
   if (!quote || number(quote.price) === null || !QUOTE_STATUS[quote.quote_status]) {
     const provider = (Array.isArray(providers) ? providers : []).find(p => p?.market === market);
@@ -368,7 +368,7 @@ function placeholderRow(key) {
   };
 }
 
-// a cn row, quoted by the face's own wire (the iFinD provider): its stream's quote, else the one its search read; its price in its
+// a cn row, quoted by the face's own wire (the Tencent provider): its stream's quote, else the one its search read; its price in its
 // currency, its volume in shares; its tile its code
 function cnRow(asset, markets, watched) {
   const quote = own(markets.quotes, asset.id) ?? own(markets.hitQuotes, asset.id) ?? null;

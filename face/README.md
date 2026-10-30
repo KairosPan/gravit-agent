@@ -54,10 +54,6 @@ cd face
 npm install
 npm run setup            # creates $DSH_HOME/profiles/face (never overwrites)
 source ../.env.deepseek  # DEEPSEEK_API_KEY - see below
-# Optional A-share quote credentials, exported to the server process:
-set -a
-[ ! -f ../.env.ifind ] || source ../.env.ifind
-set +a
 npm start                # prints http://127.0.0.1:3090/?token=…  (profile: face)
 ```
 
@@ -1096,29 +1092,30 @@ a cn page's own id — at most 100, re-subscribed when that set changes, paused 
 `GET /data/quotes?ids=…` for the 15-second fallback while SSE is down and for one read of up to 30
 search hits, and `GET /data/symbols/search?q=兆易创新&market=cn` (Tencent smartbox; the wire waits
 its own 250 ms on top of the screen's 300, cancels a superseded request and ignores a late
-answer). The iFinD provider quotes them. Since 2026-10-24 this wire is the face's only market
+answer). Tencent's public quote host quotes them (`qt.gtimg.cn`, the host the Lunhui quotes
+freeze already reads; no account, no quota), one GET per poll for the whole selected set.
+Since 2026-10-24 this wire is the face's only market
 source of its own — the Alpaca and Coinbase providers, the US and crypto search, the bars route
 and the three producer routes left with stage 3 of the graft (their old addresses answer 404): a
 well-formed `us:` or `crypto:` id is answered without a quote, and a `market=us` search is 400.
 
 | Environment variable | Default | Purpose |
 |---|---|---|
-| `IFIND_ACCESS_TOKEN` | — | iFinD token, preferred when set. |
-| `IFIND_REFRESH_TOKEN` | — | Alternative: obtain the current access token through the official token endpoint; cache it only in memory. |
-| `FACE_IFIND_POLL_MS` | `30000` | iFinD refresh period while selected; minimum 15000ms. Set according to the account's data quota. |
+| `FACE_QUOTE_POLL_MS` | `30000` | refresh period while selected; minimum 15000ms. |
 
-Without a token an A share's quote reads `Not configured`, and — once the face's wire has quoted an
-A share on the cn list (Markets opened once) — Account › Venues' `A-share quotes` line reads
-`iFinD · Not configured`; with no A share on the cn list the line is not drawn. Event timestamps
-are interpreted as Beijing time; volume stays unavailable until its provider units can be verified
-with an account. Copy `market-env.example` to the repo's gitignored `.env.ifind`,
-enter the credentials locally, export it before starting the server, then restart. No token is
-sent to the browser or returned in errors. iFinD's adapter is covered by mocked tests, but A-share
-live validation remains pending until an account is configured. The wire's own words — a quote's
-or a provider's message, a search note — are Chinese and never reach the screen; every word is
-drawn from the wire's enums. Provider references:
-[iFinD manual](https://quantapi.10jqka.com.cn/gwstatic/static/ds_web/quantapi-web/help-center/manual.html),
-[iFinD quotas](https://quantapi.10jqka.com.cn/gwstatic/static/ds_web/quantapi-web/help-center/permission.html).
+Once the face's wire has quoted an A share on the cn list (Markets opened once), Account › Venues'
+`A-share quotes` line reads the provider's state — `Tencent · Connected`, `Tencent · Limited` when
+a code has no quote, `Tencent · Error` when the request failed; with no A share on the cn list the
+line is not drawn. Event timestamps are Tencent's own — its quote's last update, which can run
+past the close (16:14 for a 15:00 close on 2026-10-30) — read as Beijing time, and receipt time
+never fills a missing one. Volume is in shares: Tencent counts lots of 100 on most boards and shares on
+STAR (measured 2026-10-30), so each reply's own turnover decides the unit, and a reply no unit fits
+leaves the volume unknown. `Live` means the trade time is under five minutes old, the hub's rule
+whatever the provider; whether Tencent reaches this machine without delay during a session is not
+yet measured. The wire's own words — a quote's or a provider's message, a search note — are Chinese
+and never reach the screen; every word is drawn from the wire's enums. Until 2026-10-30 the iFinD
+QuantAPI quoted the A shares, with a token and a monthly quote quota; nothing in the face reads
+`IFIND_*` now.
 
 ### A market's page
 
@@ -1204,7 +1201,7 @@ drawer — the keys marked *(signs)* below are drawn only while this page signs:
   *(signs)*), and **Disconnect…** *(signs;* asked in place, `Yes, disconnect`; none on an agent
   wallet, and the Account refuses while an order or a payment is open there*)*; under the list
   **Connect an account** and **Open a paper account** *(signs)*; under them, once the face's wire
-  has quoted an A share on the cn list, `A-share quotes` with the iFinD provider's state; then the **Account seat**
+  has quoted an A share on the cn list, `A-share quotes` with the Tencent provider's state; then the **Account seat**
   box (`/data/seat.json`, read on entering Venues or Agents, on Refresh, right after a seat receipt
   and on a card raised or answered): the service reachable or
   not with the Account's own mode and writes (`Guard · Trading on · $1 a move`), the seat (`Gravit
@@ -3652,9 +3649,8 @@ its own host path. On macOS a repo under `~/Desktop` needs Docker Desktop's Sett
 File sharing (Files and Folders › Desktop access), or the binds read EPERM. The model key comes
 from `../.env.deepseek` through `env_file` into the face's process env (optional; absent, the face
 boots and Gravit cannot answer; dsh scrubs `KEY`/`SECRET`/`TOKEN` names from every child it
-spawns, so Gravit's shell never inherits it). It carries the model key only: with no `IFIND_*`
-in the box the face's A-share quotes read iFinD unconfigured there (no other quote source; Tencent
-serves symbol search) until project 2. Never paste `docker compose config` output anywhere —
+spawns, so Gravit's shell never inherits it). It carries the model key only; the face's A-share
+quotes need no key (Tencent, as on the host). Never paste `docker compose config` output anywhere —
 it prints the `env_file` values resolved.
 
 `agent` (the face, dsh, Gravit's shell, AKShare, the seat) mounts an allowlist of the tree, never

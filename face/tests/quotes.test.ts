@@ -10,8 +10,8 @@ import type { ProviderState, QuoteIdentity, QuotePayload, QuoteUpdate, SnapshotR
 const CN: QuoteIdentity = { id: "cn:603986", market: "cn", symbol: "603986" };
 const CN2: QuoteIdentity = { id: "cn:600519", market: "cn", symbol: "600519" };
 const DAY = Date.parse("2026-09-15T05:00:00Z");
-const cnState: ProviderState = { id: "ifind", market: "cn", status: "connected", source: "iFinD", feed: "realtime", transport: "poll", message: "iFinD 实时行情" };
-const update = (extra: Partial<QuoteUpdate> = {}): QuoteUpdate => ({ id: CN.id, source: "iFinD", feed: "realtime", basis: "previous_close",
+const cnState: ProviderState = { id: "tencent", market: "cn", status: "connected", source: "腾讯", feed: "snapshot", transport: "poll", message: "腾讯行情" };
+const update = (extra: Partial<QuoteUpdate> = {}): QuoteUpdate => ({ id: CN.id, source: "腾讯", feed: "snapshot", basis: "previous_close",
   price: 100, prev_close: 80, volume: 1000, as_of: new Date(DAY).toISOString(), volume_as_of: "2026-09-15T01:30:00Z", market_status: "unknown", ...extra });
 const empty = (): SnapshotResult => ({ updates: [], providers: [] });
 
@@ -63,14 +63,14 @@ test("a us or crypto id is no longer quoted by the face", async () => {
     assert.equal(alone.status, 200);
     const body = JSON.parse(alone.chunks.join("")) as QuotePayload;
     assert.deepEqual(body.quotes, [], "no quote, and no provider, for us:AAPL");
-    assert.deepEqual(body.providers.map((provider) => [provider.id, provider.market, provider.source]), [["ifind", "cn", "iFinD"]]);
+    assert.deepEqual(body.providers.map((provider) => [provider.id, provider.market, provider.source]), [["tencent", "cn", "腾讯"]]);
     const mixed = JSON.parse((await invoke(false, "/data/quotes?ids=us:AAPL,crypto:BTC%2FUSD,cn:603986")).chunks.join("")) as QuotePayload;
     assert.deepEqual(mixed.quotes.map((quote) => quote.id), [CN.id]);
-    assert.deepEqual(mixed.providers.map((provider) => provider.id), ["ifind"]);
+    assert.deepEqual(mixed.providers.map((provider) => provider.id), ["tencent"]);
     const stream = await invoke(true, "/data/quotes/stream?ids=crypto:BTC%2FUSD,cn:603986");
     const first = JSON.parse(/data: (.*)\n/.exec(stream.chunks.join("").split("event: quotes\n")[1]!)![1]!) as QuotePayload;
     assert.deepEqual(first.quotes.map((quote) => quote.id), [CN.id]);
-    assert.deepEqual(first.providers.map((provider) => provider.id), ["ifind"]);
+    assert.deepEqual(first.providers.map((provider) => provider.id), ["tencent"]);
     stream.end();
     assert.deepEqual([...new Set(asked)], [CN.id], "the snapshots were never asked for a us or crypto id");
   } finally { dispose(); }
@@ -93,17 +93,17 @@ test("hub polls the subscribed cn ids and stops asking for unused ones", async (
   } finally { hub.close(); }
 });
 
-test("an unconfigured iFinD carries its message and null values", async () => {
+test("a provider in error carries its message and null values", async () => {
   const hub = createQuoteHub({ now: () => DAY, snapshots: { async load() { return { updates: [
-    { id: CN.id, source: "iFinD", feed: "realtime", basis: "previous_close", message: "A 股行情待配置 iFinD" }], providers: [
-    { id: "ifind", market: "cn", status: "unconfigured", source: "iFinD", feed: "realtime", transport: "poll", message: "A 股行情待配置 iFinD" }] }; } } });
+    { id: CN.id, source: "腾讯", feed: "snapshot", basis: "previous_close", message: "腾讯行情暂不可用，稍后重试" }], providers: [
+    { id: "tencent", market: "cn", status: "error", source: "腾讯", feed: "snapshot", transport: "poll", message: "腾讯行情暂不可用，稍后重试" }] }; } } });
   try {
     const result = await hub.snapshot([CN]);
     assert.equal(result.quotes[0]!.price, null);
     assert.equal(result.quotes[0]!.change_pct, null);
     assert.equal(result.quotes[0]!.quote_status, "unavailable");
-    assert.match(result.quotes[0]!.message, /iFinD/);
-    assert.equal(result.providers[0]!.status, "unconfigured");
+    assert.match(result.quotes[0]!.message, /腾讯/);
+    assert.equal(result.providers[0]!.status, "error");
   } finally { hub.close(); }
 });
 
@@ -212,7 +212,7 @@ test("a new trading day clears old volume and baseline until current-session dat
   try {
     await hub.snapshot([CN]);
     clock += 86_400_000;
-    next = { id: CN.id, source: "iFinD", feed: "realtime", basis: "previous_close", price: 120, as_of: new Date(clock).toISOString() };
+    next = { id: CN.id, source: "腾讯", feed: "snapshot", basis: "previous_close", price: 120, as_of: new Date(clock).toISOString() };
     let quote = (await hub.snapshot([CN])).quotes[0]!;
     assert.equal(quote.price, 120);
     assert.equal(quote.prev_close, null);

@@ -247,8 +247,8 @@ test('Venues: the rows with health, does and Paper; Details opens the drawer; th
   assert.equal(emptyState().account.detailsVenue, null);
 
   // the A-share quotes line: the face's cn provider alone, in its words
-  const quoted = draw(R.quotesUpdated(s, { quotes: {}, status: 'streaming', providers: [{ id: 'ifind', market: 'cn', status: 'connected' }, { id: 'alpaca', market: 'us', status: 'unconfigured' }] }));
-  has(quoted, '<div class="label">A-share quotes</div><div class="venues"><div class="venue"><span>iFinD · Connected</span></div></div></section>');
+  const quoted = draw(R.quotesUpdated(s, { quotes: {}, status: 'streaming', providers: [{ id: 'tencent', market: 'cn', status: 'connected' }, { id: 'alpaca', market: 'us', status: 'unconfigured' }] }));
+  has(quoted, '<div class="label">A-share quotes</div><div class="venues"><div class="venue"><span>Tencent · Connected</span></div></div></section>');
   lacks(quoted, 'Alpaca');
   lacks(html, 'A-share quotes', 'no cn provider reported: no line');
 

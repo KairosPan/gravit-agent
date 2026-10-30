@@ -10,10 +10,10 @@ const received = "2026-09-15T15:00:00.000Z";
 function quote(asset = moutai, extra: Partial<LiveQuote> = {}): LiveQuote {
   return { ...asset, market: asset.market as LiveQuote["market"], price: 120, prev_close: 100, change: 20, change_pct: 20,
     volume: 1000, as_of: "2026-09-15T14:59:58.123Z", received_at: received, volume_as_of: received,
-    source: "iFinD", feed: "realtime", basis: "previous_close", quote_status: "live", market_status: "unknown", message: "", ...extra };
+    source: "腾讯", feed: "snapshot", basis: "previous_close", quote_status: "live", market_status: "unknown", message: "", ...extra };
 }
 function provider(extra: Partial<ProviderState> = {}): ProviderState {
-  return { id: "ifind", market: "cn", status: "connected", source: "iFinD", feed: "realtime", transport: "poll", message: "", ...extra };
+  return { id: "tencent", market: "cn", status: "connected", source: "腾讯", feed: "snapshot", transport: "poll", message: "", ...extra };
 }
 function payload(quotes = [quote()], extra: Partial<QuotePayload> = {}): QuotePayload {
   return { ok: true, generated_at: received, quotes, providers: [provider()], ...extra };
@@ -84,7 +84,7 @@ test("empty watchlists do no network work; only unique selected IDs are subscrib
 test("full stream snapshots preserve event time, quote status, provider limits and percentage points", () => {
   const h = harness(); h.client.setAssets([moutai, catl, cn]);
   const missing = quote(cn, { price: null, prev_close: null, change: null, change_pct: null, volume: null, as_of: null,
-    received_at: null, volume_as_of: null, source: "iFinD", feed: "", quote_status: "unavailable", market_status: "unknown", message: "行情待配置 iFinD" });
+    received_at: null, volume_as_of: null, source: "腾讯", feed: "", quote_status: "unavailable", market_status: "unknown", message: "该标的暂无腾讯行情" });
   h.streams[0].emit("quotes", payload([quote(moutai, { change_pct: 2.3, quote_status: "delayed" }), quote(catl, { quote_status: "stale" }), missing], {
     providers: [provider({ status: "limited", message: "部分 A 股标的暂无完整行情" })],
   }));
@@ -206,12 +206,13 @@ test("a failed manual REST refresh does not relabel a still-healthy live stream 
   h.client.close();
 });
 
-test("a payload naming a provider other than iFinD, or quoting a us or crypto id, is refused", () => {
-  assert.equal(parsePayload(payload()).providers[0]!.id, "ifind");
+test("a payload naming a provider other than Tencent, or quoting a us or crypto id, is refused", () => {
+  assert.equal(parsePayload(payload()).providers[0]!.id, "tencent");
   for (const asset of [{ id: "us:AAPL", market: "us", symbol: "AAPL" }, { id: "crypto:BTC/USD", market: "crypto", symbol: "BTC/USD" }]) {
     assert.throws(() => parsePayload(payload([quote(asset)])), /行情响应格式无效/);
   }
-  for (const retired of [provider({ id: "alpaca" as unknown as ProviderState["id"], market: "us" as unknown as ProviderState["market"] }),
+  for (const retired of [provider({ id: "ifind" as unknown as ProviderState["id"] }),
+    provider({ id: "alpaca" as unknown as ProviderState["id"], market: "us" as unknown as ProviderState["market"] }),
     provider({ id: "coinbase" as unknown as ProviderState["id"], market: "crypto" as unknown as ProviderState["market"] }),
     provider({ market: "us" as unknown as ProviderState["market"] })]) {
     assert.throws(() => parsePayload(payload([quote()], { providers: [retired] })), /行情源状态无效/);

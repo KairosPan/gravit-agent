@@ -8,7 +8,7 @@ import { normalizeAsset, number } from "./market-model.js";
 const STATUSES = new Set(["live", "delayed", "stale", "unavailable"]);
 const PROVIDER_STATUSES = new Set(["connecting", "connected", "unconfigured", "error", "limited"]);
 const MARKETS = new Set(["cn"]);
-const PROVIDERS = new Set(["ifind"]);
+const PROVIDERS = new Set(["tencent"]);
 const timestamp = (value) => typeof value === "string" && Number.isFinite(Date.parse(value));
 
 /** Full payload validation prevents an error or malformed snapshot from clearing good quotes. */

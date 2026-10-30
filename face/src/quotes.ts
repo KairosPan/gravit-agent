@@ -1,4 +1,4 @@
-/** On-demand A-share quote hub: one shared iFinD poll for every subscribed
+/** On-demand A-share quote hub: one shared Tencent poll for every subscribed
  * `cn` id, a bounded latest-value cache, and no market-directory or PIT reads. */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { HttpError, FORBIDDEN } from "./http.ts";
@@ -10,7 +10,7 @@ export const QUOTE_LIMIT = 100;
 export const QUOTE_CLIENT_LIMIT = 8;
 const CACHE_LIMIT = 512;
 const CACHE_MS = 5_000;
-const PROVIDERS = { cn: "ifind" } as const;
+const PROVIDERS = { cn: "tencent" } as const;
 /** The ids the face quoted before the Account's graft (`us:AAPL`, `crypto:BTC/USD`): well-formed still, quoted by no
  * one now — a request naming one is answered without it, not refused. */
 const RETIRED = /^(?:us:[A-Z][A-Z0-9.-]{0,14}|crypto:[A-Z0-9]{1,15}\/[A-Z0-9]{2,10})$/;
@@ -41,11 +41,11 @@ export function parseQuoteRequest(rawUrl: string): QuoteIdentity[] {
 }
 
 function initialProvider(): ProviderState {
-  return { id: PROVIDERS.cn, market: "cn", status: "connecting", source: "iFinD", feed: "", transport: "poll", message: "正在连接行情…" };
+  return { id: PROVIDERS.cn, market: "cn", status: "connecting", source: "腾讯", feed: "", transport: "poll", message: "正在连接行情…" };
 }
 function initialQuote(asset: QuoteIdentity): LiveQuote {
   return { ...asset, price: null, prev_close: null, change: null, change_pct: null, volume: null,
-    as_of: null, received_at: null, volume_as_of: null, source: "iFinD",
+    as_of: null, received_at: null, volume_as_of: null, source: "腾讯",
     feed: "", basis: "previous_close", quote_status: "unavailable",
     market_status: "unknown", message: "正在连接行情…" };
 }
@@ -66,7 +66,7 @@ export interface QuoteHub {
 export function createQuoteHub(options: {
   snapshots?: SnapshotSource;
   now?: () => number;
-  ifindPollMs?: number;
+  pollMs?: number;
 } = {}): QuoteHub {
   const now = options.now ?? Date.now;
   const snapshots = options.snapshots ?? createQuoteSnapshots();
@@ -83,11 +83,11 @@ export function createQuoteHub(options: {
   let pollTimer: ReturnType<typeof setInterval> | undefined;
   let notifyTimer: ReturnType<typeof setTimeout> | undefined;
   let disposed = false;
-  const configuredPoll = Number(process.env.FACE_IFIND_POLL_MS);
-  const ifindPollMs = Math.max(15_000, options.ifindPollMs ?? (Number.isFinite(configuredPoll) && configuredPoll > 0 ? configuredPoll : 30_000));
+  const configuredPoll = Number(process.env.FACE_QUOTE_POLL_MS);
+  const pollMs = Math.max(15_000, options.pollMs ?? (Number.isFinite(configuredPoll) && configuredPoll > 0 ? configuredPoll : 30_000));
 
   const provider = (): ProviderState => polled ?? initialProvider();
-  /** Every payload names iFinD, the face's one provider, whatever was asked. */
+  /** Every payload names Tencent, the face's one provider, whatever was asked. */
   function payload(assets: QuoteIdentity[]): QuotePayload {
     const state = provider();
     return { ok: true, generated_at: new Date(now()).toISOString(),
@@ -195,7 +195,7 @@ export function createQuoteHub(options: {
     reserve([...active.values()]);
     if (active.size && !pollTimer) {
       pollTimer = setInterval(() => {
-        const due = [...active.values()].filter((asset) => now() - (attempts.get(asset.id) ?? -Infinity) >= ifindPollMs);
+        const due = [...active.values()].filter((asset) => now() - (attempts.get(asset.id) ?? -Infinity) >= pollMs);
         void refresh(due);
         publish();
       }, 5_000);

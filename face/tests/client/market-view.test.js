@@ -218,7 +218,7 @@ test('rowsOf: the fixture rows and two cn rows side by side; source words; the t
   assert.deepEqual(rows.find(r => r.id === 'cn:600519'), {
     id: 'cn:600519', source: 'face', asset: asset('cn:600519', { name: '贵州茅台', exchange: 'SSE' }), quote: moutai, kind: 'stock', name: '贵州茅台', tile: '600519', sub: 'SSE',
     priced: { price: 1450, unit: 'cny', changePct: -3, change24h: null, volume: 900000000, volumeUnit: 'shares', implied: null }, price: 1450,
-    live: null, sourceWord: 'iFinD', closeTime: null, pastEnd: false, paper: false, watched: true, atAccount: false, legs: [], tabs: ['all', 'stocks'],
+    live: null, sourceWord: 'Tencent', closeTime: null, pastEnd: false, paper: false, watched: true, atAccount: false, legs: [], tabs: ['all', 'stocks'],
   });
   const byId = Object.fromEntries(rows.map(r => [r.id, r]));
   // the latest quote at the row's most traded connected venue rides beside the item's price; the star is the operator's
@@ -227,7 +227,7 @@ test('rowsOf: the fixture rows and two cn rows side by side; source words; the t
   assert.equal(byId['coin:BTC'].live, null);
   assert.deepEqual(rows.filter(r => r.watched).map(r => r.id), ['coin:BTC', 'cn:600519', 'cn:000001']);
   // the Account's own words for where each price is from, the face's provider for the cn rows; the second line of each
-  assert.deepEqual(['stock:NVDA', 'coin:BTC', 'coin:LINK', 'cn:000001'].map(id => byId[id].sourceWord), ['Stand-in Broker', 'Stand-in Exchange', 'Stand-in Public Exchange', 'iFinD']);
+  assert.deepEqual(['stock:NVDA', 'coin:BTC', 'coin:LINK', 'cn:000001'].map(id => byId[id].sourceWord), ['Stand-in Broker', 'Stand-in Exchange', 'Stand-in Public Exchange', 'Tencent']);
   assert.deepEqual(['stock:NVDA', 'coin:BTC', 'perp:ETH', 'cn:000001'].map(id => byId[id].sub), ['Stand-in Broker', 'BTC', 'ETH · Perpetual', 'SZSE']);
   for (const r of rows) for (const word of [r.sub, r.sourceWord]) assert.doesNotMatch(word, CJK, word);
   assert.deepEqual(byId['cn:000001'].priced, { price: null, unit: 'cny', changePct: null, change24h: null, volume: null, volumeUnit: 'shares', implied: null });
@@ -779,12 +779,12 @@ test('every word is English, and each enum reads as it should', () => {
     words.push(quoteWord(quote('us:AAPL', { quote_status, market_status, message: '行情连接已断开，保留上次报价。' })));
   }
   for (const status of ['idle', 'connecting', 'streaming', 'polling', 'error', 'paused']) words.push(connectionWord(status));
-  for (const id of ['ifind', 'alpaca']) for (const status of ['connecting', 'connected', 'unconfigured', 'error', 'limited']) {
-    words.push(providerWord({ id, market: 'cn', status, source: 'iFinD', feed: 'realtime', transport: 'poll', message: 'A 股实时行情待开通 iFinD 账号并配置接口凭据' }));
+  for (const id of ['tencent', 'ifind', 'alpaca']) for (const status of ['connecting', 'connected', 'unconfigured', 'error', 'limited']) {
+    words.push(providerWord({ id, market: 'cn', status, source: '腾讯', feed: 'snapshot', transport: 'poll', message: '腾讯行情暂不可用，稍后重试' }));
   }
   for (const basis of ['previous_close', '24h']) words.push(basisWord(quote('us:AAPL', { basis })));
-  for (const feed of ['realtime', 'iex', '']) words.push(sourceWord(quote('cn:600519', { feed })));
-  words.push(sourceWord(quote('cn:600519', { source: '同花顺', feed: 'realtime' })));
+  for (const feed of ['snapshot', 'realtime', 'iex', '']) words.push(sourceWord(quote('cn:600519', { feed })));
+  words.push(sourceWord(quote('cn:600519', { source: '腾讯', feed: 'snapshot' })));
   for (const status of ['idle', 'loading', 'success', 'error']) words.push(searchWord({ query: 'zz', status, assets: [], partial: false, note: '搜索服务暂时不可用，请稍后重试。' }));
   for (const error of [null, 'read', 'unsaved', 'full']) words.push(watchWord(error));
   for (const word of words) assert.doesNotMatch(word, CJK, word);
@@ -794,12 +794,13 @@ test('every word is English, and each enum reads as it should', () => {
   assert.equal(quoteWord(quote('us:AAPL', { quote_status: 'unavailable', price: null, market_status: 'closed' })), 'No quote');
   assert.equal(quoteWord(undefined), 'No quote');
   assert.deepEqual(['streaming', 'idle', 'connecting', 'polling', 'paused', 'error'].map(connectionWord), ['', '', 'Connecting…', 'Updating every 15 s', 'Paused', 'Quotes unavailable']);
-  assert.equal(providerWord({ id: 'ifind', status: 'unconfigured' }), 'iFinD · Not configured');
-  assert.equal(providerWord({ id: 'ifind', status: 'connected' }), 'iFinD · Connected');
+  assert.equal(providerWord({ id: 'tencent', status: 'unconfigured' }), 'Tencent · Not configured');
+  assert.equal(providerWord({ id: 'tencent', status: 'connected' }), 'Tencent · Connected');
+  assert.equal(providerWord({ id: 'ifind', status: 'connected' }), 'Quotes · Connected', 'the retired iFinD provider is named by none of its own');
   assert.equal(providerWord({ id: 'alpaca', status: 'connected' }), 'Quotes · Connected', 'a provider the face no longer has is named by none of its own');
   assert.equal(basisWord(quote('crypto:BTC/USD', { basis: '24h' })), '24h');
   assert.equal(basisWord(quote('us:AAPL')), 'vs previous close');
-  assert.equal(sourceWord(quote('cn:600519', { source: 'iFinD', feed: 'realtime' })), 'iFinD');
+  assert.equal(sourceWord(quote('cn:600519', { source: '腾讯', feed: 'snapshot' })), 'Tencent');
   assert.equal(sourceWord({ market: 'us' }), 'Quotes', 'an old us: star has no provider of the face');
   assert.equal(sourceWord({ market: 'crypto' }), 'Quotes');
   assert.equal(searchWord({ query: 'zz', status: 'success', assets: [], partial: false }), 'Nothing matches “zz”');
@@ -845,7 +846,7 @@ test('volumeWord: shares for a stock, the base for a coin, — for null', () => 
 });
 
 test('a market whose provider is not configured says so instead of No quote', () => {
-  const unconfigured = [{ id: 'ifind', market: 'cn', status: 'unconfigured', source: 'iFinD', feed: '', transport: 'poll', message: 'A 股行情待配置 iFinD' }];
+  const unconfigured = [{ id: 'tencent', market: 'cn', status: 'unconfigured', source: '腾讯', feed: '', transport: 'poll', message: '行情待配置' }];
   assert.equal(quoteWord(undefined, unconfigured, 'cn'), 'Not configured');
   assert.equal(quoteWord(quote('cn:600519', { price: null, quote_status: 'unavailable' }), unconfigured), 'Not configured');
   assert.equal(quoteWord(quote('cn:600519'), unconfigured), 'Live', 'a price is a price');
