@@ -126,8 +126,14 @@ const newer = (a, b) => (a.run > b.run ? -1 : a.run < b.run ? 1 : 0);
 const artifactOf = (run, name) => (plain(run.artifacts) && plain(run.artifacts[name]) ? run.artifacts[name] : null);
 const runFacts = (c, r) => ({
   channel: c.channel, workspaceId: c.workspaceId, run: r.run, session: r.session ?? null,
-  openedAt: r.openedAt ?? null, sealedAt: r.sealedAt ?? null,
+  openedAt: r.openedAt ?? null, sealedAt: r.sealedAt ?? null, boardsProvider: typeof r.boardsProvider === 'string' ? r.boardsProvider : null,
 });
+
+// the theme module's words end with where its boards came from, when Eastmoney's failed and 问财 stood in
+export const THS_STAND_IN = '同花顺问财';
+export const THS_SUFFIX = ' · boards: iFinD (THS concepts)';
+export const withSource = (module, boardsProvider, words) =>
+  module === 'theme' && boardsProvider === THS_STAND_IN ? `${words}${THS_SUFFIX}` : words;
 
 // the latest run the module's card reads: each accepted channel's newest run, the greatest run id among them
 export function latestOf(listing, module) {
@@ -203,7 +209,8 @@ export function chipOf(listing, module, mounted = true, active = null) {
     const pre = m.channels === 'market' ? '' : `${latest.channel} · `;
     if (!latest.artifact) chip = { text: `${pre}not run`, tone: 'grey' };
     else {
-      const { words, tone } = artifactWords(module, latest.artifact);
+      const { words: base, tone } = artifactWords(module, latest.artifact);
+      const words = withSource(module, latest.boardsProvider, base);
       chip = { text: `${pre}${words}`, tone: tone ?? (QUIET.has(words) ? 'grey' : 'ok') };
     }
   }
@@ -229,7 +236,7 @@ export function runsOf(listing, module) {
     if (!accepts(m, c)) continue;
     for (const r of runsIn(c)) {
       const a = artifactOf(r, m.name);
-      if (a) rows.push({ ...runFacts(c, r), status: a.status ?? null, words: artifactWords(m.name, a).words });
+      if (a) rows.push({ ...runFacts(c, r), status: a.status ?? null, words: withSource(m.name, r.boardsProvider, artifactWords(m.name, a).words) });
     }
   }
   return rows.sort(newer).slice(0, RUNS_SHOWN);

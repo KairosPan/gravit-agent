@@ -87,7 +87,7 @@ test('latestOf: a strategy card reads the newest run across strategies, an eithe
   const l = modulesListing();
   assert.deepEqual(latestOf(l, 'environment'), {
     channel: 'cn-market', workspaceId: 'ws-cn-market', run: MARKET_RUN, session: '2026-10-28',
-    openedAt: '2026-10-28T02:09:53.000Z', sealedAt: '2026-10-28T02:10:02.000Z',
+    openedAt: '2026-10-28T02:09:53.000Z', sealedAt: '2026-10-28T02:10:02.000Z', boardsProvider: null,
     artifact: { status: 'OK', missingSources: [], headline: { index_state: 'WEAK', liquidity_state: 'STABLE', cycle_anchor: '低位反抽' }, marketRun: null },
   });
   assert.equal(latestOf(l, 'leader').run, S01_RUN);
@@ -146,7 +146,7 @@ test('runsOf and pageOf: the rows across channels newest first, the three boxes'
   assert.deepEqual(rows.map(r => [r.channel, r.words]), [['lunhui-s01-repair', '5 items'], ['cn-market', '4 items']]);
   assert.deepEqual(rows[1], {
     channel: 'cn-market', workspaceId: 'ws-cn-market', run: MARKET_RUN, session: '2026-10-28',
-    openedAt: '2026-10-28T02:09:53.000Z', sealedAt: '2026-10-28T02:10:02.000Z', status: 'OK', words: '4 items',
+    openedAt: '2026-10-28T02:09:53.000Z', sealedAt: '2026-10-28T02:10:02.000Z', boardsProvider: null, status: 'OK', words: '4 items',
   });
   const page = pageOf(modulesListing(), 'theme', true);
   assert.equal(page.module, moduleOf('theme'));
@@ -212,4 +212,23 @@ test('activeRuns: running, or younger than a minute; chipOf and researchItems re
   assert.deepEqual(activeRuns({ theme: null, mode: { sessionId: 7, title: 'x', startedAt: now } }, convs, now), {});
   assert.deepEqual(activeRuns(runs, null, now), { leader: { sessionId: 's-b', title: 'Leader · 10-28' } });
   assert.equal(researchItems(modulesListing(), true).every(i => i.running === false), true);
+});
+
+test('the theme card and page end with the boards source only when the newest run says 同花顺问财', () => {
+  const SUFFIX = ' · boards: iFinD (THS concepts)';
+  const withProvider = (provider) => {
+    const l = modulesListing();
+    const run = channelOf(l, 'cn-market').runs[0];
+    run.artifacts.theme = ok({ mainline_candidates: [{}, {}], theme_stage: 'FERMENT', rotation: 'ROTATING' });
+    if (provider !== undefined) run.boardsProvider = provider;
+    return l;
+  };
+  assert.equal(chipOf(withProvider('同花顺问财'), 'theme').text, `2 candidates · FERMENT · ROTATING${SUFFIX}`);
+  assert.equal(pageOf(withProvider('同花顺问财'), 'theme', true).chip.text, `2 candidates · FERMENT · ROTATING${SUFFIX}`);
+  assert.equal(researchItems(withProvider('同花顺问财'), true).find(i => i.id === 'module:theme').chip.text, `2 candidates · FERMENT · ROTATING${SUFFIX}`);
+  assert.equal(runsOf(withProvider('同花顺问财'), 'theme')[0].words, `2 candidates · FERMENT · ROTATING${SUFFIX}`);
+  for (const p of ['东方财富', null, undefined, 7]) assert.equal(chipOf(withProvider(p), 'theme').text, '2 candidates · FERMENT · ROTATING');
+  // not the other modules, and not a not-evaluable theme's words
+  const l = withProvider('同花顺问财');
+  assert.equal(chipOf(l, 'environment').text, 'WEAK · STABLE');
 });

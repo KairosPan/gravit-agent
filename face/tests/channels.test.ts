@@ -349,7 +349,7 @@ test("readChannelBody: runs list newest first with sealed, snapshotId and the ar
     {
       run: newer.run, asOf: null, session: null, snapshotId: null, sealed: false, kind: "market", artifacts: {}, marketRun: null,
       bytes: await filesBytes(newer.runDir),
-      openedAt: "2026-10-24T01:00:00.000Z", sealedAt: null, frozen: ["quotes"],
+      openedAt: "2026-10-24T01:00:00.000Z", sealedAt: null, frozen: ["quotes"], boardsProvider: null,
     },
     {
       run: older.run, asOf: older.manifest!.as_of, session: "2026-10-23", snapshotId: older.manifest!.snapshot_id, sealed: true, kind: "strategy",
@@ -366,7 +366,7 @@ test("readChannelBody: runs list newest first with sealed, snapshotId and the ar
       },
       marketRun: "20261023T010000Z-0000abcd",
       bytes: await filesBytes(older.runDir),
-      openedAt: "2026-10-23T01:00:00.000Z", sealedAt: "2026-10-23T01:00:01.000Z", frozen: ["quotes"],
+      openedAt: "2026-10-23T01:00:00.000Z", sealedAt: "2026-10-23T01:00:01.000Z", frozen: ["quotes"], boardsProvider: null,
     },
   ]);
   assert.equal(body.runsOmitted, 0);
@@ -602,7 +602,7 @@ test("readChannelBody: run.json that does not parse lists the run with nulls and
   // a manifest that does not parse names no artifact, so the mode.json beside it is not accepted
   assert.deepEqual(body.runs, [{
     run: broken.run, asOf: null, session: null, snapshotId: null, sealed: false, kind: null, artifacts: {}, marketRun: null,
-    bytes: await filesBytes(broken.runDir), openedAt: null, sealedAt: null, frozen: [],
+    bytes: await filesBytes(broken.runDir), openedAt: null, sealedAt: null, frozen: [], boardsProvider: null,
   }]);
   assert.equal(body.latestRun, null); // not known sealed
 
@@ -633,6 +633,22 @@ test("readAnalysisRuns: frozen is the evidence sources, in order, strings only; 
   assert.deepEqual((await readAnalysisRuns(dir)).runs[0].frozen, []);
   await writeFile(join(open.runDir, "run.json"), JSON.stringify({ ...manifest, evidence: "none" }));
   assert.deepEqual((await readAnalysisRuns(dir)).runs[0].frozen, []);
+});
+
+test("readAnalysisRuns: boardsProvider is the boards evidence entry's provider string; an older run, a non-object entry or a non-string reads null", async () => {
+  const dir = await strategyDir("face-runs-provider-");
+  const made = await makeRun(dir, new Date("2026-10-25T01:00:00Z"));
+  const manifest = JSON.parse(await readFile(join(made.runDir, "run.json"), "utf8"));
+  const read = async (evidence: unknown) => {
+    await writeFile(join(made.runDir, "run.json"), JSON.stringify({ ...manifest, evidence }));
+    return (await readAnalysisRuns(dir)).runs[0].boardsProvider;
+  };
+  assert.equal(await read([{ source: "quotes", provider: "x" }, { source: "boards", provider: "同花顺问财", fallback_from: { provider: "东方财富", code: "e" } }]), "同花顺问财");
+  assert.equal(await read([{ source: "boards", provider: "东方财富" }]), "东方财富");
+  assert.equal(await read([{ source: "boards" }]), null);
+  assert.equal(await read([{ source: "boards", provider: 7 }]), null);
+  assert.equal(await read(["boards", null, { source: "quotes", provider: "同花顺问财" }]), null);
+  assert.equal(await read("boards"), null);
 });
 
 test("readAnalysisRuns: an artifact's missingSources and marketRun; malformed fields read as empty and null", async () => {

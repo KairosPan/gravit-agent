@@ -135,7 +135,7 @@ test("readModulesChannels: cn-market is market, the rest strategy; the root and 
   assert.equal(strategy.artifacts.mode.status, null, "a mode artifact with no status reads null");
   assert.deepEqual(strategy.artifacts.counterevidence.headline, { items: [] });
 
-  assert.deepEqual(Object.keys(market).sort(), ["artifacts", "asOf", "frozen", "openedAt", "run", "sealedAt", "session"]);
+  assert.deepEqual(Object.keys(market).sort(), ["artifacts", "asOf", "boardsProvider", "frozen", "openedAt", "run", "sealedAt", "session"]);
   assert.equal("bytes" in market, false, "the listing's row is the card's shape, not the runs card's");
   assert.doesNotMatch(JSON.stringify(out), /EVIDENCE-ONLY/);
   assert.doesNotMatch(JSON.stringify(out), /not a headline field/);

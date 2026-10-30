@@ -111,7 +111,7 @@ const SCRUBBED_ENV = [
   // the workbench's own secrets — no business in a coding agent's child; the
   // APCA_* pair outlives the removed Python layer because the operator's shell
   // may still carry those Alpaca keys
-  "APCA_API_KEY_ID", "APCA_API_SECRET_KEY", "DEEPSEEK_API_KEY",
+  "APCA_API_KEY_ID", "APCA_API_SECRET_KEY", "DEEPSEEK_API_KEY", "IFIND_REFRESH_TOKEN", "IFIND_ACCESS_TOKEN",
 ] as const;
 
 /** `process.env` (or `base`) minus {@link SCRUBBED_ENV}. */

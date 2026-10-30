@@ -235,6 +235,16 @@ export interface RunRow {
   openedAt: string | null;
   sealedAt: string | null;
   frozen: string[];
+  /** The `provider` of `run.json`'s evidence entry whose `source` is `boards` (`"东方财富"` or
+   * `"同花顺问财"`); null when absent, an older run, or not a string. */
+  boardsProvider: string | null;
+}
+
+/** The first `boards` evidence entry's `provider`, when a string; null otherwise. */
+function boardsProviderOf(evidence: unknown): string | null {
+  if (!Array.isArray(evidence)) return null;
+  const entry = evidence.find((e) => isRecord(e) && e.source === "boards");
+  return isRecord(entry) && typeof entry.provider === "string" ? entry.provider : null;
 }
 
 /** The newest listed run that is sealed and holds an accepted artifact, each artifact whole beside
@@ -446,6 +456,7 @@ export async function readAnalysisRuns(strategyDir: string, options: { cap?: num
       frozen: Array.isArray(manifest.evidence)
         ? manifest.evidence.filter(isRecord).map((entry) => entry.source).filter((source): source is string => typeof source === "string")
         : [],
+      boardsProvider: boardsProviderOf(manifest.evidence),
     };
     out.runs.push(row);
     if (out.latestRun === null && row.sealed && Object.keys(whole).length > 0) {
@@ -852,6 +863,7 @@ export interface ModuleRunRow {
   openedAt: string | null;
   sealedAt: string | null;
   frozen: string[];
+  boardsProvider: string | null;
   artifacts: { [module: string]: { status: string | null; missingSources: string[]; headline: Record<string, unknown>; marketRun: string | null } };
 }
 
@@ -873,7 +885,7 @@ function moduleRunRow(row: RunRow): ModuleRunRow {
   }
   return {
     run: row.run, session: row.session, asOf: row.asOf, openedAt: row.openedAt, sealedAt: row.sealedAt,
-    frozen: row.frozen, artifacts,
+    frozen: row.frozen, boardsProvider: row.boardsProvider, artifacts,
   };
 }
 

@@ -233,6 +233,7 @@ test("scrubbedEnv drops credential overrides, endpoint redirects and workbench s
       OPENAI_API_KEY: "o", CODEX_API_KEY: "c", OPENAI_BASE_URL: "ou",
       CLAUDE_CODE_USE_BEDROCK: "1", CLAUDE_CODE_USE_VERTEX: "1", CLAUDE_CODE_USE_FOUNDRY: "1",
       APCA_API_KEY_ID: "k", APCA_API_SECRET_KEY: "s", DEEPSEEK_API_KEY: "d",
+      IFIND_REFRESH_TOKEN: "x", IFIND_ACCESS_TOKEN: "y",
     }),
     { PATH: "/bin", HOME: "/h", CLAUDE_CODE_OAUTH_TOKEN: "keep", CLAUDE_CONFIG_DIR: "/c", CODEX_HOME: "/x" });
 });

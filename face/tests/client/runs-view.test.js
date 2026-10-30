@@ -113,3 +113,19 @@ test('runsView: the mode chip is the mode word alone; no word reads the module; 
   delete b.latestRun.artifacts.mode;
   assert.equal(runsView(b).latest.review, null);
 });
+
+test('runsView: the theme chip ends with the boards source only when the run says 同花顺问财', () => {
+  const themeOk = (boardsProvider) => {
+    const b = runsBody();
+    b.runs[0].boardsProvider = boardsProvider;
+    b.latestRun.artifacts.theme = { headline: { mainline_candidates: [{}, {}], theme_stage: 'FERMENT' }, json: { status: 'OK' } };
+    return runsView(b).latest.chips.find(c => c.module === 'theme').text;
+  };
+  assert.equal(themeOk('同花顺问财'), 'theme: 2 items · FERMENT · boards: iFinD (THS concepts)');
+  assert.equal(themeOk('东方财富'), 'theme: 2 items · FERMENT');
+  assert.equal(themeOk(null), 'theme: 2 items · FERMENT');
+  assert.equal(themeOk(undefined), 'theme: 2 items · FERMENT');
+  // the other modules never take the suffix
+  const b = runsBody(); b.runs[0].boardsProvider = '同花顺问财';
+  assert.equal(runsView(b).latest.chips.find(c => c.module === 'sentiment').text, 'sentiment: ice · weak · 0.1235');
+});

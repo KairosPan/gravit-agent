@@ -22,13 +22,14 @@ export function valueWord(v) {
 
 // a module's chip: its headline values joined, `not evaluable` for a module whose evidence was missing, the
 // counterevidence by its items' count, the mode by its mode word alone (its card and review are lines of their own)
-function chipText(module, art, status) {
+function chipText(module, art, status, boardsProvider = null) {
   if (status === 'NOT_EVALUABLE') return `${module}: not evaluable`;
   const h = plain(art.headline) ? art.headline : {};
   if (module === 'counterevidence') return `${module}: ${countWord(Array.isArray(h.items) ? h.items.length : 0, 'item')}`;
   if (module === 'mode') return typeof h.mode === 'string' ? `${module}: ${h.mode}` : module;
   const words = Object.values(h).filter(v => v !== undefined).map(valueWord).filter(w => w !== '');
-  return words.length ? `${module}: ${words.join(' · ')}` : module;
+  const text = words.length ? `${module}: ${words.join(' · ')}` : module;
+  return module === 'theme' && boardsProvider === '同花顺问财' ? `${text} · boards: iFinD (THS concepts)` : text;
 }
 
 function compact(json) {
@@ -42,7 +43,7 @@ function latestOf(l, rows) {
   const modules = Object.entries(arts).filter(([, a]) => plain(a));
   const chips = modules.map(([module, a]) => {
     const status = str(plain(a.json) ? a.json.status : null) ?? str(row?.artifacts?.[module]?.status);
-    return { module, text: chipText(module, a, status) };
+    return { module, text: chipText(module, a, status, str(row?.boardsProvider)) };
   });
   const mode = plain(arts.mode) && plain(arts.mode.headline) ? arts.mode.headline : {};
   const exp = mode.expectation;
