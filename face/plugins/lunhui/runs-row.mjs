@@ -27,6 +27,7 @@ import { FREEZE_BUDGET, MODULE_BUDGET, asToolError, refuse } from "./lib/errors.
 import { MODULES, MODULE_NAMES } from "./lib/modules.mjs";
 import { repairFor } from "./lib/contract-core.mjs";
 import * as runs from "./lib/runs.mjs";
+import { buildView, evidenceView, viewDigest } from "./lib/view.mjs";
 
 export const name = "lunhui-runs";
 export const inject = ["tools"];
@@ -44,6 +45,7 @@ const ARTIFACT_MAX_BYTES = 24 * 1024;
  *   sealRun(strategyName: unknown, run: unknown): Promise<import("./lib/runs.mjs").RunManifest>,
  *   readRun(strategyName: unknown, run: unknown): Promise<{ manifest: import("./lib/runs.mjs").RunManifest, metrics: import("./lib/runs.mjs").RunMetrics, metricsReset: boolean }>,
  *   readSealedRun(strategyName: unknown, run: unknown): Promise<SealedRun>,
+ *   view(strategyName: unknown, run: unknown, options?: { modules?: string[] }): Promise<import("./lib/view.mjs").View>,
  *   previousArtifact(strategyName: unknown, run: unknown, module: string): Promise<PreviousArtifact | null>,
  *   readThesis(strategyName: unknown): Promise<string | null>,
  *   withRun<T>(strategyName: unknown, run: unknown, fn: (located: { strategy: string, run: string, dir: string }) => Promise<T>): Promise<T>,
@@ -106,6 +108,13 @@ export function createLunhuiRuns(strategiesRoot) {
    * forgets the reads and keeps the counts (§5.7). One set per service.
    */
   const reads = new Set();
+  /**
+   * Per sealed `<strategy>/<run>`, its evidence files as read and their `evidenceView` - a sealed
+   * run's evidence never changes. In memory only, one map per service. Views share these blocks by
+   * reference and treat them as read-only.
+   * @type {Map<string, { evidence: ContextInput["evidence"], half: ReturnType<typeof evidenceView> }>}
+   */
+  const evidenceCache = new Map();
 
   /**
    * Count one call of `module` on the run (A7): `calls[module]` plus one, written back through
@@ -158,6 +167,28 @@ export function createLunhuiRuns(strategiesRoot) {
       const { manifest } = await runs.readRun(located.dir);
       if (!manifest.sealed_at) throw refuse.missingEvidence("引用的运行");
       return { strategy: located.strategy, run: located.run, ...(await contentsOf(located.dir, manifest)) };
+    },
+    /**
+     * The run view of a sealed run (run view §5.5): `buildView` over the run's sealed `run.json`,
+     * its `metrics.json`, its evidence and its accepted artifacts keyed by module (`acceptedArtifacts`
+     * already keys them so). The evidence and its `evidenceView` are read once per run and cached;
+     * the manifest, the metrics and the artifacts are read on every call. Refuses as
+     * `readSealedRun` does - `MISSING_EVIDENCE` for an open run, nothing cached. No lock, nothing
+     * counted or written.
+     */
+    async view(strategyName, run, { modules } = {}) {
+      const located = await locate(strategyName, run);
+      const { manifest, metrics } = await runs.readRun(located.dir);
+      if (!manifest.sealed_at) throw refuse.missingEvidence("引用的运行");
+      const key = `${located.strategy}/${located.run}`;
+      let cached = evidenceCache.get(key);
+      if (cached === undefined) {
+        const { evidence } = await contentsOf(located.dir, manifest, { artifacts: false });
+        cached = { evidence, half: evidenceView({ manifest, evidence }) };
+        evidenceCache.set(key, cached);
+      }
+      const sealed = { strategy: located.strategy, run: located.run, manifest, metrics, evidence: cached.evidence, artifacts: await acceptedArtifacts(located.dir, manifest.artifacts) };
+      return buildView(sealed, { modules, evidence: cached.half });
     },
     /**
      * The strategy's newest earlier accepted `module` artifact of an earlier session (A11, A12: the
@@ -361,15 +392,16 @@ async function acceptedArtifacts(dir, named) {
  * it lists (`readEvidence`), and the accepted artifacts.
  * @param {string} dir the run directory
  * @param {import("./lib/runs.mjs").RunManifest} manifest the sealed `run.json`
+ * @param {{ artifacts?: boolean }} [options] `artifacts: false` skips the artifacts, `{}` (the view reads them itself)
  * @returns {Promise<ContextInput>}
  */
-async function contentsOf(dir, manifest) {
+async function contentsOf(dir, manifest, { artifacts = true } = {}) {
   const evidence = [];
   for (const entry of manifest.evidence) {
     const file = await runs.readEvidence(dir, entry.source);
     evidence.push({ source: entry.source, session: entry.session, items: file.items });
   }
-  return { manifest, evidence, artifacts: await acceptedArtifacts(dir, manifest.artifacts) };
+  return { manifest, evidence, artifacts: artifacts ? await acceptedArtifacts(dir, manifest.artifacts) : {} };
 }
 
 /**
@@ -443,7 +475,7 @@ export function apply(ctx, config) {
   ctx.effect(() => ctx.provide("lunhuiRuns", service));
   ctx.effect(() => ctx.tools.register(defineTool({
     name: "lunhui_read_run",
-    description: "读取研究运行，参数是策略名与运行编号，不是路径。带 run：返回该运行的清单、计数与各模块工件的要点。不带 run：列出该策略最近至多 5 个已封存的运行（运行编号、session、sealed_at、snapshot_id、已接受的工件），新的在前，用来找当日或前一个交易日的 cn-market 运行。",
+    description: "读取研究运行，参数是策略名与运行编号，不是路径。带 run：返回该运行的清单、计数与各模块工件的要点。不带 run：列出该策略最近至多 5 个已封存的运行（运行编号、session、sealed_at、snapshot_id、已接受的工件），新的在前，用来找当日或前一个交易日的 cn-market 运行。带 run 时另附 view：face 画图用的同一份数字的摘要；作答时标题与结论里的数字只取自这里。",
     parameters: {
       strategy: { type: "string", description: "策略名，即频道名（如 cn-market），不是路径。", required: true },
       run: { type: "string", description: "可选：运行编号，即冻结工具返回的 run；省略则列出最近已封存的运行。" },
@@ -458,7 +490,9 @@ export function apply(ctx, config) {
         const { manifest, metrics } = await service.readRun(args.strategy, args.run);
         const strategy = await runs.resolveStrategy(strategiesRoot, args.strategy);
         const { dir } = await runs.resolveRun(strategy.dir, args.run);
-        return JSON.stringify({ manifest, metrics, artifacts: await artifactsOf(dir, manifest.artifacts) });
+        const artifacts = await artifactsOf(dir, manifest.artifacts);
+        const view = manifest.sealed_at ? viewDigest(await service.view(args.strategy, args.run)) : null;
+        return JSON.stringify({ manifest, metrics, artifacts, view });
       } catch (error) {
         throw asToolError(error);
       }

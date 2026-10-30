@@ -483,12 +483,14 @@ function citedStocks(stocks, limitUp, artifacts) {
  * listed market modules, the reviewer, the signals, and each stock's citations. `modules` defaults
  * to the manifest's artifacts among `VIEW_MODULES`; unknown names are ignored, and a module whose
  * artifact was not read counts as unlisted. `reviewer` needs counterevidence, `signals` sentiment.
+ * `evidence`, when given, is `evidenceView(sealed)` computed earlier (the runs service's cache): it
+ * is used as it is, its blocks shared by reference with the view, so neither may be mutated.
  * @param {SealedView} sealed
- * @param {{ modules?: string[] }} [options]
+ * @param {{ modules?: string[], evidence?: ReturnType<typeof evidenceView> }} [options]
  * @returns {View}
  */
-export function buildView(sealed, { modules } = {}) {
-  const evidence = evidenceView(sealed);
+export function buildView(sealed, { modules, evidence: cached } = {}) {
+  const evidence = cached ?? evidenceView(sealed);
   const listed = modulesOf(sealed, modules);
   /** @type {Record<string, any>} */
   const artifacts = Object.fromEntries(listed.map((name) => [name, sealed.artifacts?.[name]]));

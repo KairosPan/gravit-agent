@@ -7,10 +7,11 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import fsPromises, { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
+import fsPromises, { cp, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { apply, createLunhuiRuns, inject, name } from "../plugins/lunhui/runs-row.mjs";
 import { MODULES } from "../plugins/lunhui/lib/modules.mjs";
 import { MODULE_BUDGET, asToolError, callerIsChild, callerIsRole, refuse, upstreamError } from "../plugins/lunhui/lib/errors.mjs";
@@ -22,6 +23,12 @@ import * as themeRow from "../plugins/lunhui/theme-row.mjs";
 import * as leaderRow from "../plugins/lunhui/leader-row.mjs";
 import * as modeRow from "../plugins/lunhui/mode-row.mjs";
 import * as reviewRow from "../plugins/lunhui/review-row.mjs";
+import * as indexRow from "../plugins/lunhui/freeze-index-row.mjs";
+import * as limitUpRow from "../plugins/lunhui/freeze-limit-up-row.mjs";
+import { createFixtureFetch } from "../plugins/lunhui/lib/fixture-fetch.mjs";
+import { fetchLimitUpPools } from "../plugins/lunhui/lib/eastmoney.mjs";
+import { promotion } from "../plugins/lunhui/lib/derive.mjs";
+import { viewDigest } from "../plugins/lunhui/lib/view.mjs";
 import { LUNHUI_ROW_IDS, LUNHUI_TOOL_NAMES } from "../src/lunhui.ts";
 
 type Cleanup = { after(fn: () => Promise<unknown>): unknown };
@@ -403,7 +410,7 @@ test("lunhui_read_run: an unexpected failure is INTERNAL, its detail on stderr o
   assert.match(stderr[0], /EACCES/);
 });
 
-const READ_RUN_DESCRIPTION = "读取研究运行，参数是策略名与运行编号，不是路径。带 run：返回该运行的清单、计数与各模块工件的要点。不带 run：列出该策略最近至多 5 个已封存的运行（运行编号、session、sealed_at、snapshot_id、已接受的工件），新的在前，用来找当日或前一个交易日的 cn-market 运行。";
+const READ_RUN_DESCRIPTION = "读取研究运行，参数是策略名与运行编号，不是路径。带 run：返回该运行的清单、计数与各模块工件的要点。不带 run：列出该策略最近至多 5 个已封存的运行（运行编号、session、sealed_at、snapshot_id、已接受的工件），新的在前，用来找当日或前一个交易日的 cn-market 运行。带 run 时另附 view：face 画图用的同一份数字的摘要；作答时标题与结论里的数字只取自这里。";
 
 /** Seal `run` of `strategy` with one evidence entry of `session`, naming `artifacts` accepted. */
 async function sealedRun(root: string, service: any, strategy: string, session: string, artifacts: string[] = []) {
@@ -848,4 +855,116 @@ test("lunhui-runs: readContext hands build the run's accepted artifacts, only th
   await writeFile(join(dir, "mode.json"), JSON.stringify({ module: "mode" }));
   const seen = await service.readContext("alpha", run, "mode", echo);
   assert.deepEqual(seen.artifacts, { leader: { module: "leader", leader_candidates: [] } });
+});
+
+// -------------------------------------------------------------------------------------------------
+// The run view (run view plan 1, Task 9): service.view builds the view of a sealed run, its evidence
+// half cached per run, and lunhui_read_run carries its digest.
+// -------------------------------------------------------------------------------------------------
+
+const TENCENT_FIXTURES = fileURLToPath(new URL("./fixtures/lunhui/", import.meta.url));
+const EASTMONEY_FIXTURES = fileURLToPath(new URL("./fixtures/lunhui-eastmoney/", import.meta.url));
+/** Friday 2026-10-23, 15:00 in China: after the close of a covered trading day. */
+const FRIDAY = new Date("2026-10-23T07:00:00.000Z");
+
+/** The backbone over a root holding `cn-market`, with the index and limit-up freeze rows over the FRIDAY fixtures. */
+async function viewBench(t: Cleanup) {
+  const root = await mkdtemp(join(tmpdir(), "lunhui-view-rows-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, "cn-market"));
+  await writeFile(join(root, "cn-market", "THESIS.md"), "# cn-market\n");
+  const fixtures = await mkdtemp(join(tmpdir(), "lunhui-view-fixtures-"));
+  t.after(() => rm(fixtures, { recursive: true, force: true }));
+  await cp(TENCENT_FIXTURES, fixtures, { recursive: true });
+  await cp(EASTMONEY_FIXTURES, fixtures, { recursive: true });
+  const { service, tool } = mounted(root);
+  const freezeTool = (row: any) => {
+    const scope = fakeScope();
+    (scope.ctx as any).lunhuiRuns = service;
+    row.apply(scope.ctx, { fetch: fixtures, now: () => FRIDAY });
+    return scope.tools[0];
+  };
+  return { root, service, tool, index: freezeTool(indexRow), limitUp: freezeTool(limitUpRow) };
+}
+
+test("lunhui-runs: view of a frozen and sealed run has the fixture pools' ladder; a second call reuses the cached evidence half", async (t) => {
+  const { service, index, limitUp } = await viewBench(t);
+  const { run } = JSON.parse(await index.execute({ strategy: "cn-market" }, fakeExec()));
+  await limitUp.execute({ strategy: "cn-market", run }, fakeExec());
+  await service.readContext("cn-market", run, "environment", echo);
+  const pools = await fetchLimitUpPools({ date: "20261023", fetchImpl: createFixtureFetch(EASTMONEY_FIXTURES) });
+  const view = await service.view("cn-market", run);
+  assert.equal(view.strategy, "cn-market");
+  assert.equal(view.run, run);
+  assert.equal(view.ladder.unavailable, null);
+  assert.equal(view.ladder.height, promotion(pools).height);
+  assert.equal(view.indices.rows.length, 4);
+  const again = await service.view("cn-market", run, { modules: [] });
+  assert.strictEqual(again.ladder, view.ladder);
+  assert.strictEqual(again.indices, view.indices);
+});
+
+test("lunhui-runs: view reads artifacts and metrics on every call, the evidence half cached", async (t) => {
+  const { root, service, index } = await viewBench(t);
+  const { run } = JSON.parse(await index.execute({ strategy: "cn-market" }, fakeExec()));
+  await service.readContext("cn-market", run, "environment", echo);
+  const before = await service.view("cn-market", run);
+  assert.deepEqual(before.verdicts, []);
+  const dir = join(root, "cn-market", "analysis", run);
+  await nameArtifacts(dir, ["environment"]);
+  await writeFile(join(dir, "environment.json"), JSON.stringify({ module: "environment", analysis: { status: "OK" }, state: "RISK_OFF", claims: [] }));
+  const after = await service.view("cn-market", run);
+  assert.deepEqual(after.verdicts.map((v: any) => v.module), ["environment"]);
+  assert.strictEqual(after.breadth, before.breadth);
+});
+
+test("lunhui-runs: view refuses as readSealedRun does - an open run MISSING_EVIDENCE, NO_SUCH_RUN, BAD_RUN_ID, NOT_A_STRATEGY", async (t) => {
+  const { service, index } = await viewBench(t);
+  const { run } = JSON.parse(await index.execute({ strategy: "cn-market" }, fakeExec()));
+  await rejectsWith(service.view("cn-market", run), "MISSING_EVIDENCE");
+  // The refusal is not cached: once sealed, the view builds.
+  await service.sealRun("cn-market", run);
+  assert.equal((await service.view("cn-market", run)).run, run);
+  await rejectsWith(service.view("cn-market", "../x"), "BAD_RUN_ID");
+  await rejectsWith(service.view("cn-market", "20261023T070000Z-0a1b2c3d"), "NO_SUCH_RUN");
+  await rejectsWith(service.view("../cn-market", run), "NOT_A_STRATEGY");
+});
+
+test("lunhui_read_run: with a sealed run the reply carries the view digest, at most 2,048 bytes; an open run's view is null", async (t) => {
+  const { service, tool, index, limitUp } = await viewBench(t);
+  const { run } = JSON.parse(await index.execute({ strategy: "cn-market" }, fakeExec()));
+  await limitUp.execute({ strategy: "cn-market", run }, fakeExec());
+  const open = JSON.parse(await tool.execute({ strategy: "cn-market", run }, fakeExec()));
+  assert.deepEqual(Object.keys(open), ["manifest", "metrics", "artifacts", "view"]);
+  assert.equal(open.view, null);
+  await service.readContext("cn-market", run, "environment", echo);
+  const sealed = JSON.parse(await tool.execute({ strategy: "cn-market", run }, fakeExec()));
+  assert.deepEqual(Object.keys(sealed), ["manifest", "metrics", "artifacts", "view"]);
+  assert.equal(typeof sealed.view, "string");
+  assert.ok(sealed.view.includes("ladder:"), sealed.view);
+  assert.ok(Buffer.byteLength(sealed.view, "utf8") <= 2048);
+  assert.equal(sealed.view, viewDigest(await service.view("cn-market", run)));
+});
+
+test("lunhui-runs: the view of a run frozen before minute lines builds, each index row NOT_FROZEN", async (t) => {
+  const { root, service, index } = await viewBench(t);
+  const { run: fresh } = JSON.parse(await index.execute({ strategy: "cn-market" }, fakeExec()));
+  const frozen = JSON.parse(await readFile(join(root, "cn-market", "analysis", fresh, "evidence-index.json"), "utf8"));
+  // The same index evidence as a run written before the run view: no minute items, no own ids.
+  const items = frozen.items
+    .filter((item: any) => item.kind !== "minutes" && item.kind !== "minutes_missing")
+    .map(({ id: _id, ...item }: any) => item);
+  assert.ok(items.length > 0 && items.length < frozen.items.length);
+  const { run } = await service.openRun("cn-market", "market");
+  await service.addEvidence("cn-market", run, "index", items, { ...META, host: "qt.gtimg.cn" });
+  await service.sealRun("cn-market", run);
+  const view = await service.view("cn-market", run);
+  assert.equal(view.indices.unavailable, null);
+  assert.equal(view.indices.rows.length, 4);
+  for (const row of view.indices.rows) {
+    assert.equal(row.minutes, null);
+    assert.equal(row.minutesMissing, "NOT_FROZEN");
+  }
+  assert.equal(view.through, null);
+  assert.ok(viewDigest(view).length > 0);
 });

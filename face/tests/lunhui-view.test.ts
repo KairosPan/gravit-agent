@@ -327,3 +327,12 @@ test("viewDigest: 40 long names a rung stay within 2,048 bytes, names dropped be
   assert.match(digest, SSE_LINE);
   assert.ok(all.some((line) => line.startsWith("yesterday: ")));
 });
+
+test("buildView: a precomputed evidence half is used as it is, its blocks shared by reference", () => {
+  const sealed = syntheticSealedRun();
+  const half = evidenceView(sealed);
+  const view = buildView(sealed, { evidence: half });
+  assert.strictEqual(view.ladder, half.ladder);
+  assert.strictEqual(view.indices, half.indices);
+  assert.deepEqual(view, buildView(sealed));
+});
