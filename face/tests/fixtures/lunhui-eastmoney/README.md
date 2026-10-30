@@ -41,7 +41,7 @@ The minute files are Tencent `web.ifzq.gtimg.cn` `day/query` replies, the limit-
 lines: `minutes-sz000106.json` and `minutes-sh600101.json`, the shape of `../lunhui/`'s index
 lines. The ladder of the three pools is `000106`, `600101`, `000102`; the last has no file, so the
 freeze records it `minutes_missing` (`PROVIDER_HTTP_ERROR`). `../lunhui/make-minutes.mjs` writes
-them from the pool files (its header gives each shape); rerun it rather than editing them.
+them from the pool files (its header gives each shape); rerun it rather than editing them. Like every file here the `minutes-*.json` are synthetic, written by `make-minutes.mjs`, never fetched.
 
 `createFixtureFetch` (`face/plugins/lunhui/lib/fixture-fetch.mjs`) serves this directory: a URL
 whose host is `push2ex.eastmoney.com` gets the file its path names (`/getTopicZTPool`,

@@ -70,6 +70,7 @@ exactly its tools, and no child process is spawned for it.
 
 - No trading, no order tool, no position, no paper trade of an A share: the Account's venues
   carry no A shares, and the expectation card is reviewed against later frozen facts, not fills.
+- (Minute lines are frozen for display since 2026-10-30, see 2026-10-30-lunhui-run-view-design.md; the modes still never read them.)
 - No minute bars, 竞价 detail, 封单 or 分时: the modes that need them — 一进二, 竞价战法, T板,
   首阴反包 (R02, R04, R05) — stay `research_only` labels the mode module may name and never
   select.
