@@ -325,3 +325,323 @@ export function mostMoved(minutes, span = 60) {
   }
   return { from: minuteLabel(best), to: minuteLabel(best + width), change: ((price[best + width] - price[best]) / prec) * 100 };
 }
+
+// ---- The artifact half (run view spec §5.3, §5.5) and the digest (M15) ----
+
+/** The market modules the view reads, in the order their verdicts are drawn (M14). */
+export const VIEW_MODULES = Object.freeze(["environment", "sentiment", "theme", "counterevidence"]);
+
+/** The sources the sources block lists, in its order. */
+const VIEW_SOURCES = ["index", "limit-up", "boards", "quotes"];
+
+/** The modules with a verdict tile. */
+const VERDICT_MODULES = ["environment", "sentiment", "theme"];
+
+/** The signals block's fixed table: each measure, in drawing order, on its side. */
+const SIGNAL_SIDES = [
+  ["break_ratio", "contraction"],
+  ["limit_down_count", "contraction"],
+  ["yesterday_negative_tail", "contraction"],
+  ["seal_ratio", "relay"],
+  ["yesterday_return_median", "relay"],
+  ["max_streak", "relay"],
+];
+
+/** The digest's budget in UTF-8 bytes. */
+const DIGEST_BYTES = 2048;
+
+/** @typedef {{ source: string, frozen: boolean, delayed: boolean, refusals: string[], missingIn: string[] }} SourceRow */
+/** @typedef {{ id: string, text: string }} VerdictLine */
+/**
+ * A market module's tile: `state` its headline state (environment `index_state`, sentiment
+ * `state`, theme `theme_stage`) or, for an artifact not `OK`, its status; `detail` the second
+ * headline (`liquidity …`, `money effect …`, `rotation …`) or `missing <sources>`; `challenged` the
+ * reviewer's items against it; `lines` its claims, then its limitations with id "—".
+ * @typedef {{ module: string, status: string | null, state: string | null, detail: string | null,
+ *   challenged: number, lines: VerdictLine[] }} Verdict
+ */
+/** @typedef {{ id: string, against: string | null, kind: string | null, text: string }} ReviewerItem */
+/** @typedef {{ items: ReviewerItem[] }} ReviewerBlock */
+/** @typedef {{ measure: string, value: number, side: "contraction" | "relay" }} SignalMeasure */
+/**
+ * @typedef {{ state: string | null, moneyEffect: string | null, conflict: string | null,
+ *   measures: SignalMeasure[], challenges: ReviewerItem[] }} SignalsBlock
+ */
+/** @typedef {{ module: string, id: string, text: string }} Citation */
+/**
+ * The run view (§5.5): the evidence half, the run's names and seal time, the sources, the
+ * verdicts, the reviewer, the signals, and each stock's citations.
+ * @typedef {Omit<EvidenceView, "stocks"> & { strategy: string, run: string, frozenAt: string | null,
+ *   sources: SourceRow[], verdicts: Verdict[], reviewer: ReviewerBlock | null,
+ *   signals: SignalsBlock | null, stocks: Record<string, StockFacts & { cited: Citation[] }> }} View
+ */
+
+const strings = (value) => (Array.isArray(value) ? value.filter((v) => typeof v === "string") : []);
+
+/** The view's modules: the listed ones (or the manifest's artifacts) among `VIEW_MODULES`, with an artifact read. */
+function modulesOf(sealed, modules) {
+  const wanted = new Set(Array.isArray(modules) ? modules : strings(sealed.manifest?.artifacts));
+  const artifacts = sealed.artifacts ?? {};
+  return VIEW_MODULES.filter((name) => wanted.has(name) && artifacts[name] && typeof artifacts[name] === "object");
+}
+
+/** @returns {SourceRow[]} */
+function sourcesOf(sealed, artifacts) {
+  const listed = sealed.manifest?.evidence ?? [];
+  const refusals = sealed.metrics?.refusals ?? {};
+  return VIEW_SOURCES.map((source) => {
+    const entry = listed.find((e) => e?.source === source);
+    return {
+      source,
+      frozen: entry !== undefined,
+      delayed: entry?.delayed === true,
+      refusals: strings(refusals[source]),
+      missingIn: Object.keys(artifacts).filter((module) => strings(artifacts[module].missing_sources).includes(source)),
+    };
+  });
+}
+
+/** @returns {ReviewerItem[]} */
+function reviewerItemsOf(artifact) {
+  return (Array.isArray(artifact?.items) ? artifact.items : []).map((item) => ({
+    id: String(item?.id ?? "—"), against: str(item?.against), kind: str(item?.kind), text: String(item?.text ?? ""),
+  }));
+}
+
+/** The headline state and the second headline of an OK artifact, by module. */
+const HEADLINES = {
+  environment: (a) => [str(a.index_state), a.liquidity_state ? `liquidity ${a.liquidity_state}` : null],
+  sentiment: (a) => [str(a.state), a.money_effect ? `money effect ${a.money_effect}` : null],
+  theme: (a) => [str(a.theme_stage), a.rotation ? `rotation ${a.rotation}` : null],
+};
+
+/** @returns {Verdict} */
+function verdictOf(module, artifact, reviewer) {
+  const status = str(artifact.status);
+  const missing = strings(artifact.missing_sources);
+  const [state, detail] = status === "OK"
+    ? HEADLINES[module](artifact)
+    : [status, missing.length ? `missing ${missing.join(", ")}` : null];
+  const claims = (Array.isArray(artifact.claims) ? artifact.claims : []).map((c) => ({ id: String(c?.id ?? "—"), text: String(c?.text ?? "") }));
+  const limitations = strings(artifact.limitations).map((text) => ({ id: "—", text }));
+  return {
+    module, status, state: state ?? status, detail,
+    challenged: (reviewer ?? []).filter((item) => item.against === module).length,
+    lines: [...claims, ...limitations],
+  };
+}
+
+/** A derived measure's value from either source's items. */
+function measureOf(sealed, name) {
+  for (const source of ["limit-up", "index"]) {
+    const value = measure(sourceItems(sealed, source) ?? [], name);
+    if (value !== null) return value;
+  }
+  return null;
+}
+
+/** @returns {SignalsBlock} */
+function signalsOf(sealed, sentiment, reviewer) {
+  const streaks = measureOf(sealed, "streak_distribution");
+  const keys = streaks && typeof streaks === "object" ? Object.keys(streaks).map(Number).filter(Number.isFinite) : [];
+  const value = (name) => (name === "max_streak" ? (keys.length ? Math.max(...keys) : null) : num(measureOf(sealed, name)));
+  return {
+    state: str(sentiment.state),
+    moneyEffect: str(sentiment.money_effect),
+    conflict: str(sentiment.conflict),
+    measures: SIGNAL_SIDES.flatMap(([name, side]) => {
+      const v = value(name);
+      return v === null ? [] : [{ measure: name, value: v, side }];
+    }),
+    challenges: (reviewer ?? []).filter((item) => item.against === "sentiment"),
+  };
+}
+
+/** Each stock with the claims and challenges citing it: its pool rows' ids among their evidence ids, or its name in their text. */
+function citedStocks(stocks, limitUp, artifacts) {
+  const ids = new Map();
+  for (const item of limitUp ?? [])
+    if (item && typeof item.pool === "string" && typeof item.code === "string" && typeof item.id === "string")
+      ids.set(item.code, [...(ids.get(item.code) ?? []), item.id]);
+  const texts = [];
+  for (const [module, artifact] of Object.entries(artifacts)) {
+    const rows = module === "counterevidence" ? [...(artifact.claims ?? []), ...(artifact.items ?? [])] : artifact.claims ?? [];
+    for (const row of Array.isArray(rows) ? rows : [])
+      if (row && typeof row.text === "string") texts.push({ module, id: String(row.id ?? "—"), text: row.text, evidence: strings(row.evidence_ids) });
+  }
+  return Object.fromEntries(Object.entries(stocks).map(([code, facts]) => {
+    const own = ids.get(code) ?? [];
+    const cited = texts
+      .filter((t) => t.evidence.some((id) => own.includes(id)) || (facts.name && t.text.includes(facts.name)))
+      .map(({ module, id, text }) => ({ module, id, text }));
+    return [code, { ...facts, cited }];
+  }));
+}
+
+/**
+ * A sealed run's whole view (§5.5): `evidenceView`'s blocks, plus the sources, the verdicts of the
+ * listed market modules, the reviewer, the signals, and each stock's citations. `modules` defaults
+ * to the manifest's artifacts among `VIEW_MODULES`; unknown names are ignored, and a module whose
+ * artifact was not read counts as unlisted. `reviewer` needs counterevidence, `signals` sentiment.
+ * @param {SealedView} sealed
+ * @param {{ modules?: string[] }} [options]
+ * @returns {View}
+ */
+export function buildView(sealed, { modules } = {}) {
+  const evidence = evidenceView(sealed);
+  const listed = modulesOf(sealed, modules);
+  /** @type {Record<string, any>} */
+  const artifacts = Object.fromEntries(listed.map((name) => [name, sealed.artifacts?.[name]]));
+  const reviewerItems = artifacts.counterevidence ? reviewerItemsOf(artifacts.counterevidence) : null;
+  return {
+    strategy: sealed.strategy,
+    run: sealed.run,
+    frozenAt: str(sealed.manifest?.sealed_at),
+    ...evidence,
+    sources: sourcesOf(sealed, artifacts),
+    verdicts: VERDICT_MODULES.filter((m) => artifacts[m]).map((m) => verdictOf(m, artifacts[m], reviewerItems)),
+    reviewer: reviewerItems ? { items: reviewerItems } : null,
+    signals: artifacts.sentiment ? signalsOf(sealed, artifacts.sentiment, reviewerItems) : null,
+    stocks: citedStocks(evidence.stocks, sourceItems(sealed, "limit-up"), artifacts),
+  };
+}
+
+/** Two decimals, U+2212 for a negative, no negative zero. */
+function fix2(x) {
+  if (x === null || x === undefined || !Number.isFinite(x)) return "—";
+  const text = (Math.round(x * 100) === 0 ? 0 : x).toFixed(2);
+  return text.startsWith("-") ? `−${text.slice(1)}` : text;
+}
+
+/** A signed percentage, two decimals: "+0.82%", "−1.33%", "0.00%". */
+function pctText(x) {
+  if (x === null || x === undefined || !Number.isFinite(x)) return "—";
+  const text = fix2(x);
+  return `${x > 0 && text !== "0.00" ? "+" : ""}${text}%`;
+}
+
+/** A turnover in CNY: 万亿 at 1e12 or more, 亿 at 1e8 or more. */
+function turnoverText(x) {
+  if (x === null || !Number.isFinite(x)) return "—";
+  if (Math.abs(x) >= 1e12) return `${fix2(x / 1e12)}万亿`;
+  if (Math.abs(x) >= 1e8) return `${fix2(x / 1e8)}亿`;
+  return String(Math.round(x));
+}
+
+/** A measure's value: an integer as it is, else two decimals. */
+const valueText = (x) => (Number.isInteger(x) ? String(x) : fix2(x));
+const countText = (x) => (x === null || x === undefined ? "—" : String(x));
+const nameText = (stock) => stock.name ?? stock.code;
+
+/** "UPSTREAM_TIMEOUT, UPSTREAM_INVALID×2": each code once, in first order, with its count past one. */
+function refusalText(codes) {
+  const counts = new Map();
+  for (const code of codes) counts.set(code, (counts.get(code) ?? 0) + 1);
+  return [...counts].map(([code, n]) => (n > 1 ? `${code}×${n}` : code)).join(", ");
+}
+
+/** An index row: close and pct, then high, low and the hour that moved most when a line was frozen. */
+function indexLine(row) {
+  let line = `${row.name ?? row.symbol} ${fix2(row.last)} ${pctText(row.pct)}`;
+  const price = row.minutes?.price;
+  if (!Array.isArray(price) || price.length === 0) return line;
+  let hi = 0;
+  let lo = 0;
+  price.forEach((p, i) => {
+    if (p > price[hi]) hi = i;
+    if (p < price[lo]) lo = i;
+  });
+  line += ` · high ${fix2(price[hi])} ${minuteLabel(hi)} · low ${fix2(price[lo])} ${minuteLabel(lo)}`;
+  const moved = mostMoved(row.minutes);
+  if (moved) line += ` · most moved ${moved.from}–${moved.to} ${pctText(moved.change)}`;
+  return line;
+}
+
+/** A rung's counts: "4: 3 sealed, from 3 3/6", "3: gap, from 2 0/8, 1 broke". */
+function rungText(rung) {
+  let text = `${rung.n}: ${rung.gap ? "gap" : `${rung.sealed.length} sealed`}`;
+  if (rung.from !== null) text += `, from ${rung.n - 1} ${rung.promoted}/${rung.from}`;
+  if (rung.broke.length) text += `, ${rung.broke.length} broke`;
+  return text;
+}
+
+/** The count lines, in order: what the digest keeps first. */
+function countLines(view) {
+  const out = [`run ${view.run} · session ${view.session ?? "—"}${view.through ? ` · through ${view.through}` : ""}`];
+  if (view.verdicts.length) out.push(`verdicts: ${view.verdicts.map((v) => `${v.module} ${v.state ?? "—"}`).join(" · ")}`);
+  if (view.reviewer) {
+    const against = VERDICT_MODULES.map((m) => [m, view.reviewer.items.filter((i) => i.against === m).length]).filter(([, n]) => n > 0);
+    out.push(`reviewer: ${view.reviewer.items.length} items${against.map(([m, n]) => ` · ${m} ${n}`).join("")}`);
+  }
+  out.push(`sources: ${view.sources.map((s) => {
+    if (s.frozen) return `${s.source} ✓${s.delayed ? " delayed" : ""}`;
+    if (s.refusals.length || s.missingIn.length) return `${s.source} ✗${s.refusals.length ? ` ${refusalText(s.refusals)}` : ""}`;
+    return `${s.source} —`;
+  }).join(" · ")}`);
+  const b = view.breadth;
+  out.push(b.unavailable
+    ? `breadth: ${b.unavailable}`
+    : `breadth: ${countText(b.advancers)} up · ${countText(b.unchanged)} unchanged · ${countText(b.decliners)} down · ratio ${fix2(b.ratio)} · limit-up ${countText(b.limitUp)} · limit-down ${countText(b.limitDown)} · turnover ${turnoverText(b.turnover)}`);
+  if (view.indices.unavailable) out.push(`indices: ${view.indices.unavailable}`);
+  else out.push(...view.indices.rows.map(indexLine));
+  const l = view.ladder;
+  out.push(l.unavailable
+    ? `ladder: ${l.unavailable}`
+    : `ladder: height ${l.height}${l.rungs.map((r) => ` · ${rungText(r)}`).join("")} · first tries ${l.firstTries.sealed}/${l.firstTries.tries}`);
+  const y = view.yesterday;
+  out.push(y.unavailable
+    ? `yesterday: ${y.unavailable}`
+    : `yesterday: ${y.count} limit-ups · median ${pctText(y.median)} · ${y.belowMinus5Share === null ? "—" : fix2(y.belowMinus5Share * 100) + "%"} below −5%`);
+  if (view.signals) {
+    const s = view.signals;
+    const side = (name) => s.measures.filter((m) => m.side === name).map((m) => `${m.measure} ${valueText(m.value)}`).join(", ") || "—";
+    out.push(`signals: ${s.state ?? "—"} · money effect ${s.moneyEffect ?? "—"} · contraction ${side("contraction")} · relay ${side("relay")} · ${s.challenges.length} challenged`);
+  }
+  return out;
+}
+
+/** The name lines, after every count: the ladder's names from two boards up, then yesterday's. */
+function nameLines(view) {
+  const out = [];
+  for (const rung of view.ladder.rungs) {
+    if (rung.n < 2) continue;
+    if (rung.sealed.length) out.push(`${rung.n} sealed: ${rung.sealed.map(nameText).join(", ")}`);
+    if (rung.broke.length) out.push(`${rung.n} broke: ${rung.broke.map(nameText).join(", ")}`);
+    if (rung.missed.length) out.push(`${rung.n} missed: ${rung.missed.map((s) => `${nameText(s)} ${pctText(s.pct)}`).join(", ")}`);
+  }
+  if (view.yesterday.rows.length)
+    out.push(`yesterday names: ${view.yesterday.rows.map((r) => `${r.name ?? r.code} ${r.yesterdayBoards}b ${pctText(r.pct)}`).join(", ")}`);
+  return out;
+}
+
+/** `text` cut to `limit` UTF-8 bytes with "…" at its end, at the last separator when one is near. */
+function cut(text, limit) {
+  const room = limit - Buffer.byteLength("…", "utf8");
+  let end = 0;
+  let bytes = 0;
+  for (const ch of text) {
+    const size = Buffer.byteLength(ch, "utf8");
+    if (bytes + size > room) break;
+    bytes += size;
+    end += ch.length;
+  }
+  const head = text.slice(0, end);
+  const at = Math.max(head.lastIndexOf(", "), head.lastIndexOf(" · "), head.lastIndexOf("\n"));
+  if (at > end / 2) return head[at] === "\n" ? `${head.slice(0, at + 1)}…` : `${head.slice(0, at)}…`;
+  return `${head}…`;
+}
+
+/**
+ * The text Gravit composes its answer from (M15): one line per fact the face will draw - the run,
+ * the verdicts, the reviewer, the sources, breadth, each index (close, pct, and with a minute line
+ * its high, low and the hour that moved most), the ladder's rungs and promotions, yesterday, the
+ * signals - then the names. At most 2,048 UTF-8 bytes: past that the tail is cut and ends in "…",
+ * so the name lists go before any count. Prices and percentages to two decimals, "−" for a
+ * negative. A run read mid-session says "through HH:MM"; nothing says closed.
+ * @param {View} view
+ * @returns {string}
+ */
+export function viewDigest(view) {
+  const text = [...countLines(view), ...nameLines(view)].join("\n");
+  return Buffer.byteLength(text, "utf8") <= DIGEST_BYTES ? text : cut(text, DIGEST_BYTES);
+}
