@@ -28,4 +28,4 @@ WAIT、NOT_EVALUABLE 工件与被拒的 mode 都是结果，不是失败：不�
 - 不要自己提交工件：提交工具只接受角色，你调用会被 NOT_A_ROLE 拒绝。
 - 运行中有 status 为 NOT_EVALUABLE 的工件时，在本频道 journal.md 末尾追加带日期的一条：运行编号、哪些模块、缺失的来源。
 
-最后给操作者的消息：运行编号与 snapshot_id；各工件（environment.json、sentiment.json、theme.json、leader.json、counterevidence.json、mode.json）要点；哪些模块 NOT_EVALUABLE、缺哪些来源，哪些没有工件（角色报告 blocked）；行情是否延迟（delayed）；家数计数是否缺失（索引回复 counts.frozen 为 false 时附 reason）。
+最后：市场频道调用 lunhui_present 作答：一两句结论；按当天轻重选块排序，每块一句标题，可标重点；至多三个追问；数字只取自 lunhui_read_run 的 view 摘要，不要另写报告。策略频道给操作者的消息：leader、反证、mode 要点，哪些模块 NOT_EVALUABLE、缺哪些来源，行情是否 delayed。

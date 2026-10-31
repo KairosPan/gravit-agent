@@ -34,3 +34,7 @@ test("GRAVIT.md names nothing of the removed layer and states that no read is gu
   for (const gone of ["alpaca_kit", "replay_days", "data/pit"]) assert.equal(text.includes(gone), false, gone);
   assert.match(text, /no lookahead guard/);
 });
+
+test("GRAVIT.md tells Gravit to answer a Lunhui market run with lunhui_present", () => {
+  assert.ok(readFileSync(GRAVIT_MD, "utf8").includes("lunhui_present"));
+});

@@ -29,7 +29,7 @@ test("the shipped lunhui-run.md reads, fits its budget, and states the cn-market
   assert.ok(at("role_cn_market_analyst") < at("role_cn_reviewer") && at("role_cn_reviewer") < at("lunhui_read_run"), "the analyst, then the reviewer, then the read");
   assert.ok(market.slice(at("role_cn_reviewer")).includes("不传 market_run"), "the market reviewer takes no market run");
   assert.ok(market.includes("可选"), "quotes are optional");
-  for (const word of ["cn-market", "RUN_SEALED", "analysis/", "NOT_A_ROLE", "NOT_EVALUABLE", "delayed", "journal.md", "environment.json", "sentiment.json", "theme.json", "counterevidence.json", "blocked"]) assert.ok(text.includes(word), `carries ${word}`);
+  for (const word of ["cn-market", "RUN_SEALED", "analysis/", "NOT_A_ROLE", "NOT_EVALUABLE", "delayed", "journal.md", "theme.json", "lunhui_present"]) assert.ok(text.includes(word), `carries ${word}`);
 });
 
 /* The strategy channel (spec §5.10, A5, A22, A27): find the market run by lunhui_read_run on cn-market
@@ -103,7 +103,7 @@ test("the shipped lunhui-module.md reads, fits its own budget under the loader's
   assert.ok(LUNHUI_MODULE_MAX_BYTES < PROTOCOL_MAX_BYTES);
   const text = readProtocol(LUNHUI_MODULE_PATH);
   assert.ok(/[一-鿿]/.test(text) && !text.includes("{{"));
-  for (const word of ["只做这一个模块", "lunhui:run", "role_cn_market_analyst", "点名只写", "没点名", "封存", "lunhui_freeze_quotes", "role_cn_stock_analyst", "role_cn_reviewer", "反证在 mode 之前", "ALREADY_SUBMITTED", "STALE_MARKET_RUN", "MISSING_EVIDENCE", "不自行开新的市场运行", "NOT_EVALUABLE", "delayed"]) assert.ok(text.includes(word), `carries ${word}`);
+  for (const word of ["只做这一个模块", "lunhui:run", "role_cn_market_analyst", "点名只写", "没点名", "封存", "lunhui_freeze_quotes", "role_cn_stock_analyst", "role_cn_reviewer", "反证在 mode 之前", "ALREADY_SUBMITTED", "STALE_MARKET_RUN", "MISSING_EVIDENCE", "不自行开新的市场运行", "NOT_EVALUABLE", "delayed", "lunhui_present"]) assert.ok(text.includes(word), `carries ${word}`);
   const at = (w: string) => text.indexOf(w);
   assert.ok(at("counterevidence 只在") < at("mode 只在"), "the reviewer's rule before the mode's");
   assert.ok(at("开新运行（cn-market）") < at("已有运行："), "a new run's freeze rule before the existing-run rule");

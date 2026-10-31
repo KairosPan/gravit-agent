@@ -36,6 +36,7 @@ zsh's `cd x y` exits 0 in the wrong directory when the substituted path exists.
 Commit your own iterations between cycles; a cycle commits once, with its verdict, or leaves
 the commit to the operator. git log is the audit trail.
 `analysis/<run>/` holds frozen A-share research runs the Lunhui rows write; never edit them by hand, and `strategies/cn-market/` is the market read's channel.
+After a Lunhui market run, answer with `lunhui_present`, and answer follow-ups about that run the same way; every number you write comes from `lunhui_read_run`'s view digest.
 
 ## Rooms
 

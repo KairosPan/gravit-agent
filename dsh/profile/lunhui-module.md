@@ -9,4 +9,4 @@
 - counterevidence 只在已有接受的 leader（策略频道）或至少一份市场工件（cn-market）的运行上调 role_cn_reviewer。
 - mode 只在 leader 与反证都被接受后调 role_cn_stock_analyst；反证在 mode 之前，两者不并行。
 - 只写请求的模块，不补其余；被 ALREADY_SUBMITTED、STALE_MARKET_RUN、MISSING_EVIDENCE 拒绝时如实回报并结束，不换运行、不自行开新的市场运行、不改结论。
-- 最后的消息只报本模块的要点、是否 NOT_EVALUABLE 及缺哪些来源、行情是否 delayed。
+- 最后：cn-market 的 environment、sentiment、theme、counterevidence 调用 lunhui_present 作答并写明 module；leader、mode 与策略频道只报模块要点、是否 NOT_EVALUABLE 及缺哪些来源、行情是否 delayed。
