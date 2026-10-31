@@ -475,6 +475,8 @@ test("freeze: Eastmoney answering never reaches QuantAPI, and its evidence names
   const reply = JSON.parse(await tools.boards.execute({ strategy: "cn-market" }, exec()));
   assert.equal(urls.filter((url) => url.host === "quantapi.51ifind.com").length, 0);
   assert.ok(urls.length > 0);
+  assert.equal(reply.provider, "东方财富");
+  assert.equal(Object.hasOwn(reply, "fallback_from"), false);
   const dir = runDir(root, "cn-market", reply.run);
   const evidence = await readJson(dir, "evidence-boards.json");
   assert.equal(evidence.provider, "东方财富");

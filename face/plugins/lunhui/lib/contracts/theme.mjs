@@ -144,8 +144,12 @@ function firstMembers(item) {
   return { ...unstamped(item), members: item.members.slice(0, MEMBERS_SHOWN), members_total: item.members.length };
 }
 
-/** A board, member-list or flow row without its per-item stamps; a board without its leader. */
-function unstamped({ host, delayed, leader, ...item }) {
+/**
+ * A board, member-list or flow row without its per-item stamps - the reply's host and delay and, on
+ * a stand-in day, the provider, the taxonomy and the board's pct basis, all said once in `served` -
+ * and a board without its leader.
+ */
+function unstamped({ host, delayed, leader, provider, taxonomy, pct_basis, ...item }) {
   return item;
 }
 

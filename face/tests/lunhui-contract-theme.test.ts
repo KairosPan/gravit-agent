@@ -341,6 +341,12 @@ test("theme: a stand-in run - a THS: candidate the run froze is accepted, one it
   const run = await frozenRun(freeze, ["boards", "limit-up"], null);
   const context = JSON.parse(await read.execute({ strategy: "cn-market", run }, exec(ROLE)));
   assert.equal(context.hints.served, "板块来自同花顺问财（同花顺概念；涨跌幅为成分股等权平均，不是指数）；各行来自 quantapi.51ifind.com，均非延时行情。");
+  // The source is said once, in `served`: no boards row of the context repeats a stamp.
+  const boardRows = context.evidence.filter((row: any) => ["board", "members", "flow"].includes(row.kind));
+  assert.ok(boardRows.some((row: any) => row.kind === "board") && boardRows.some((row: any) => row.kind === "members") && boardRows.some((row: any) => row.kind === "flow"));
+  for (const row of boardRows)
+    for (const stamp of ["provider", "taxonomy", "pct_basis", "host", "delayed"])
+      assert.equal(Object.hasOwn(row, stamp), false, `${row.kind} row carries ${stamp}`);
   const robot = boardIds(context, "THS:人形机器人");
   const claims = [{ id: "c1", text: "板块上涨占比见所引派生证据。", basis: "CURRENT", evidence_ids: [robot.breadth] }];
   const good = { board: "THS:人形机器人", name: "人形机器人", evidence_ids: [robot.board, robot.members, robot.breadth] };
@@ -356,6 +362,16 @@ test("theme: a candidate's THS: board code is frozen data, outside the wording r
   const context = JSON.parse(await read.execute({ strategy: "cn-market", run }, exec(ROLE)));
   const ids = boardIds(context, "THS:买入概念");
   const candidate = { board: "THS:买入概念", name: "买入概念", evidence_ids: [ids.board, ids.members] };
+  const claims = [{ id: "c1", text: "板块上涨占比见所引派生证据。", basis: "CURRENT", evidence_ids: [ids.breadth] }];
+  assert.equal((await submitted(submit, run, artifact(context, { mainline_candidates: [candidate], claims }))).accepted, true);
+});
+
+test("theme: a stand-in concept whose name holds an inner space is a citable THS: board", async (t) => {
+  const { freeze, read, submit } = await standIn(t, ["人形机器人", "中国机器人 50"]);
+  const run = await frozenRun(freeze, ["boards", "limit-up"], null);
+  const context = JSON.parse(await read.execute({ strategy: "cn-market", run }, exec(ROLE)));
+  const ids = boardIds(context, "THS:中国机器人 50");
+  const candidate = { board: "THS:中国机器人 50", name: "中国机器人 50", evidence_ids: [ids.board, ids.members] };
   const claims = [{ id: "c1", text: "板块上涨占比见所引派生证据。", basis: "CURRENT", evidence_ids: [ids.breadth] }];
   assert.equal((await submitted(submit, run, artifact(context, { mainline_candidates: [candidate], claims }))).accepted, true);
 });

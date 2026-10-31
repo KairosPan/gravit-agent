@@ -589,10 +589,10 @@ and host code derives the boards from the members — concepts with at least 10 
 membership, index, screen and report tags named in `lib/wencai-excluded.mjs`; a board's change is
 its members' equal-weight mean (`pct_basis: "equal_weight"`), not an index's. The top 30 by change,
 the members of the first ten (≤ 100 each) and the top 30 by main net flow are the file's items, a
-board coded `THS:<concept name>`, its members by six-digit code. A `boards` argument names Eastmoney's
+board coded `THS:<concept name>` (the name as 问财 spells it, single inner spaces kept — `THS:中国AI 50` —, ≤ 40 characters), its members by six-digit code. A `boards` argument names Eastmoney's
 BK codes, which the stand-in cannot honour: it takes its own first ten and the reply says so
 (`boards_ignored`). Every stand-in item is stamped `provider: "同花顺问财"`, `taxonomy: "同花顺概念"`,
-`host: "quantapi.51ifind.com"`, `delayed: false`; the evidence meta and `run.json` carry the
+`host: "quantapi.51ifind.com"`, `delayed: false`; the evidence meta, `run.json` and the freeze's reply carry the
 `provider` (on both paths, `东方财富` or `同花顺问财`) and, for the stand-in, `fallback_from`
 (Eastmoney's refusal code; `run.json` keeps `provider` and `fallback_from`, the evidence file alone also the query and the reply's hash); the 1.37 MB reply is not stored.
 The operator sees it on the runs card's theme chip and on Discover's theme card and module page
@@ -608,7 +608,9 @@ counts and the top five, never the token.
 
 **Fixtures** are row config, used by the tests alone: a freeze row's `config.fetch` names a
 directory of recorded replies (`tests/fixtures/lunhui/`, `tests/fixtures/lunhui-eastmoney/`) and
-`config.now` a clock. The rows read no environment variable; production rows set neither key.
+`config.now` a clock; production rows set neither key. The rows read no environment variable but
+the boards freeze's `IFIND_ACCESS_TOKEN` / `IFIND_REFRESH_TOKEN` from the face's environment, the
+stand-in's credential (`config.env` in tests).
 
 **The patch lines** (`$DSH_HOME/profiles/face/cordis.patch.yml`). The rows compose right after the
 seat and below this file, so a patch reaches them:

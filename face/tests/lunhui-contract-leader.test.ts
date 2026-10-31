@@ -448,6 +448,11 @@ test("leader: a stand-in market run - a candidate's board is a THS: mainline can
   const [read, submit] = tools(service, leaderRow);
   const context = JSON.parse(await read.execute({ strategy: "alpha", run: strategy, market_run: market }, exec(ROLE)));
   const id = ids(context);
+  // The leader shows a member list as codes: no stand-in stamp reaches its context.
+  const lists = context.evidence.filter((row: any) => row.kind === "members");
+  assert.ok(lists.length > 0);
+  for (const row of lists)
+    for (const stamp of ["provider", "taxonomy", "pct_basis", "host", "delayed"]) assert.equal(Object.hasOwn(row, stamp), false, stamp);
   const candidate = (board: string | null) => ({ symbol: "sh600519", name: "贵州茅台", rank: 1, board, evidence_ids: [id.quote("sh600519"), id.members("THS:人形机器人")] });
   const claims = [{ id: "c1", text: "贵州茅台是示例成分股，列为龙头候选。", basis: "CURRENT", evidence_ids: [id.quote("sh600519"), id.members("THS:人形机器人")] }];
   const submit_ = (board: string | null) => submit.execute({ strategy: "alpha", run: strategy, analysis: JSON.stringify(artifact(context, { leader_candidates: [candidate(board)], claims })) }, exec(ROLE));
@@ -456,7 +461,8 @@ test("leader: a stand-in market run - a candidate's board is a THS: mainline can
     assert.match(refusal.message, /^INVALID_ANALYSIS: \[REFERENCE\] analysis\.leader_candidates\[0\]\.board/u);
   }
   // A malformed code is SCHEMA, not REFERENCE.
-  const schema = await rejectsWith(submit_("THS:a b"), "INVALID_ANALYSIS");
+  const schema = await rejectsWith(submit_("THS:a  b"), "INVALID_ANALYSIS");
   assert.match(schema.message, /leader_candidates\[0\]\.board/u);
+  assert.doesNotMatch(schema.message, /\[REFERENCE\]/u);
   assert.equal(JSON.parse(await submit_("THS:人形机器人")).accepted, true);
 });

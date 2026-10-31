@@ -81,8 +81,46 @@ test("the access token is cached; a refused one is exchanged once more", async (
   resetWencaiToken();
   const dead = recorder((path) => (path.endsWith("smart_stock_picking") ? json({ errorcode: -1010, errmsg: "access_token invalid" }) : undefined));
   await refusal(universe(dead), "UPSTREAM_INVALID", /凭据被拒/);
-  assert.equal(dead.calls.filter((c) => c.path.endsWith("get_access_token")).length, 2);
-  assert.equal(dead.calls.filter((c) => c.path.endsWith("smart_stock_picking")).length, 2);
+  assert.deepEqual(dead.calls.map((c) => c.path), ["/api/v1/get_access_token", "/api/v1/smart_stock_picking"], "a fresh token is not exchanged again");
+});
+
+const PATHS = { x: "/api/v1/get_access_token", q: "/api/v1/smart_stock_picking" };
+/** A cached access token, then a query whose first `failures` answers are `errorcode`. */
+async function cachedThen(errorcode: number, failures: number) {
+  resetWencaiToken();
+  await universe(recorder());
+  const r = recorder((path, n) => (path.endsWith("smart_stock_picking") && n <= failures ? json({ errorcode, errmsg: "refused" }) : undefined));
+  return { r, out: universe(r) };
+}
+
+test("a cached token answered with any nonzero errorcode is exchanged once and the query asked once more", async () => {
+  const { r, out } = await cachedThen(-9999, 1);
+  assert.equal((await out).rows.length, 40);
+  assert.deepEqual(r.calls.map((c) => c.path), [PATHS.q, PATHS.x, PATHS.q]);
+  // The fresh token is cached: the next universe is one query.
+  const next = recorder();
+  await universe(next);
+  assert.deepEqual(next.calls.map((c) => c.path), [PATHS.q]);
+});
+
+test("a cached token's retry answered nonzero again refuses with its errorcode, or 凭据被拒 for a token code", async () => {
+  const unknown = await cachedThen(-9999, 2);
+  await refusal(unknown.out, "UPSTREAM_INVALID", /errorcode -9999/);
+  assert.deepEqual(unknown.r.calls.map((c) => c.path), [PATHS.q, PATHS.x, PATHS.q]);
+  const token = await cachedThen(-1301, 2);
+  await refusal(token.out, "UPSTREAM_INVALID", /凭据被拒/);
+  assert.deepEqual(token.r.calls.map((c) => c.path), [PATHS.q, PATHS.x, PATHS.q]);
+});
+
+test("a freshly exchanged token answered nonzero refuses at once - no second exchange", async () => {
+  resetWencaiToken();
+  const r = recorder((path) => (path.endsWith("smart_stock_picking") ? json({ errorcode: -9999, errmsg: "refused" }) : undefined));
+  await refusal(universe(r), "UPSTREAM_INVALID", /errorcode -9999/);
+  assert.deepEqual(r.calls.map((c) => c.path), [PATHS.x, PATHS.q]);
+  resetWencaiToken();
+  const direct = recorder((path) => (path.endsWith("smart_stock_picking") ? json({ errorcode: -9999, errmsg: "refused" }) : undefined));
+  await refusal(universe(direct, { IFIND_ACCESS_TOKEN: "fixture-access", IFIND_REFRESH_TOKEN: REFRESH }), "UPSTREAM_INVALID", /errorcode -9999/);
+  assert.deepEqual(direct.calls.map((c) => c.path), [PATHS.q], "a direct access token is never exchanged");
 });
 
 test("no token, an errorcode, missing columns, no rows, oversize and timeout refuse naming 同花顺问财 and never the token", async () => {

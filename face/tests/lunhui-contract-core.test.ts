@@ -929,9 +929,9 @@ test("buildContext: minute lines never enter a role's context - every contract's
   }
 });
 
-test("BOARD_CODE: BK and four digits, or THS: and a name of 1-40 characters without whitespace or a double quote", () => {
-  for (const code of ["BK0715", "THS:人形机器人", "THS:ST板块", "THS:" + "概".repeat(40)])
+test("BOARD_CODE: BK and four digits, or THS: and a name of 1-40 characters, single inner spaces only, no double quote", () => {
+  for (const code of ["BK0715", "THS:人形机器人", "THS:ST板块", "THS:" + "概".repeat(40), "THS:中国AI 50", "THS:a b c", "THS:" + "概".repeat(19) + " " + "概".repeat(20)])
     assert.ok(BOARD_CODE.test(code), code);
-  for (const code of ["BK071", "BK07150", "bk0715", "THS:", "THS:" + "概".repeat(41), "THS:a b", 'THS:a"b', "THS:a\nb", "XX:概念", " BK0715"])
+  for (const code of ["BK071", "BK07150", "bk0715", "THS:", "THS:" + "概".repeat(41), "THS:" + "概".repeat(20) + " " + "概".repeat(20), "THS: a", "THS:a ", "THS:a  b", "THS: ", 'THS:a"b', "THS:a\nb", "THS:a\tb", 'THS:中国AI "50', "XX:概念", " BK0715"])
     assert.ok(!BOARD_CODE.test(code), JSON.stringify(code));
 });

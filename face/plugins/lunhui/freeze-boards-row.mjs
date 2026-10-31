@@ -169,6 +169,8 @@ async function freezeEastmoney(fetchImpl, args, now) {
       truncated: members.some((reply) => reply.truncated),
       provider: EASTMONEY,
     },
+    // The reply names its source on either path (G2): Eastmoney's day says 东方财富.
+    summary: { provider: EASTMONEY },
   };
 }
 

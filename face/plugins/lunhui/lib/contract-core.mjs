@@ -208,10 +208,11 @@ export const CONTRACT_VERSION = "3";
 
 /**
  * The one board-code grammar of the theme and leader contracts: Eastmoney's BK and four digits, or
- * the stand-in's `THS:` and the concept's name as the run froze it. Whether the run froze the code
- * is the contracts' own membership rule.
+ * the stand-in's `THS:` and the concept's name as the run froze it - 1 to 40 characters, no double
+ * quote, words parted by single spaces (`THS:中国AI 50`), none leading or trailing. Whether the run
+ * froze the code is the contracts' own membership rule.
  */
-export const BOARD_CODE = /^(?:BK\d{4}|THS:[^\s"]{1,40})$/;
+export const BOARD_CODE = /^(?:BK\d{4}|THS:(?=[^"]{1,40}$)[^\s"]+(?: [^\s"]+)*)$/;
 /** `BOARD_CODE` as a schema `pattern`. */
 export const BOARD_CODE_PATTERN = BOARD_CODE.source;
 

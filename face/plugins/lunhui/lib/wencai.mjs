@@ -7,9 +7,11 @@
  *
  * - Credentials come from the caller's `env`: `IFIND_ACCESS_TOKEN` is used as it is; else
  *   `IFIND_REFRESH_TOKEN` is exchanged at `get_access_token` for an access token, cached in this
- *   module's memory for six days (never written anywhere). A query answered with a token errorcode
- *   re-exchanges once and asks once more; a second such answer refuses `凭据被拒`. A bare
- *   `IFIND_ACCESS_TOKEN` has nothing to re-exchange and refuses at the first such answer.
+ *   module's memory for six days (never written anywhere). A query made with the CACHED token and
+ *   answered with any nonzero errorcode (iFinD's token codes are not all known) forgets the cache,
+ *   exchanges once and asks once more; a second nonzero answer refuses with its errorcode, or
+ *   `凭据被拒` for a token code. A token freshly exchanged by this call, or a bare
+ *   `IFIND_ACCESS_TOKEN`, has nothing to re-exchange: its nonzero answer refuses at once.
  * - The query is `A股 <YYYY年MM月DD日>涨跌幅 成交额 主力资金流向 所属概念`, the date the session's.
  *   Columns are matched by their prefix - the reply dates them (`涨跌幅:前复权[20261030]`).
  * - This source alone has a 15-second timeout and a 4 MiB cap (S11); `fetchBytes` is GET-only, so
@@ -106,16 +108,19 @@ export async function fetchWencaiUniverse({ session, env, fetchImpl = fetch, tim
   const direct = env?.IFIND_ACCESS_TOKEN || "";
   if (!direct && !refresh) throw refuse("未配置（缺少 IFIND_ACCESS_TOKEN 或 IFIND_REFRESH_TOKEN）");
 
-  let token = direct || (cached && cached.until > Date.now() ? cached.value : await exchange(refresh, fetchImpl, timeoutMs, maxBytes));
+  // Only a token from the cache may be stale: it alone earns one re-exchange and one more query.
+  let fromCache = !direct && Boolean(cached && cached.until > Date.now());
+  let token = direct || (fromCache ? cached.value : await exchange(refresh, fetchImpl, timeoutMs, maxBytes));
   let reply;
-  for (let attempt = 0; ; attempt += 1) {
+  for (;;) {
     ({ json: reply } = await post("smart_stock_picking", { access_token: token }, { searchstring: query, searchtype: "stock" }, fetchImpl, timeoutMs, maxBytes));
-    const tokenRefused = reply === null || (reply.errorcode !== 0 && TOKEN_ERRORCODES.has(Number(reply.errorcode)));
-    if (!tokenRefused) break;
-    if (attempt > 0 || direct) throw refuse("凭据被拒（访问令牌无效）");
+    if (reply !== null && reply.errorcode === 0) break;
+    if (!fromCache) break;
+    fromCache = false;
     cached = null;
     token = await exchange(refresh, fetchImpl, timeoutMs, maxBytes);
   }
+  if (reply === null || TOKEN_ERRORCODES.has(Number(reply.errorcode))) throw refuse("凭据被拒（访问令牌无效）");
   if (reply.errorcode !== 0) throw refuse(`查询失败（errorcode ${Number(reply.errorcode)}）`);
 
   const table = reply.tables?.[0]?.table;
