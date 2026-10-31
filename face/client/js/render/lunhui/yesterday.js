@@ -6,7 +6,10 @@ import { seg } from '../controls.js';
 import { label, headline, readout, count, fix2, signedPct, stockLink } from './block.js';
 
 const tone = v => { const r = Number(Number(v).toFixed(2)); return r > 0 ? 'up' : r < 0 ? 'down' : 'flat'; };
-const pctOf = r => (Number.isFinite(Number(r?.pct)) ? Number(r.pct) : 0);
+const fin = v => v != null && v !== '' && Number.isFinite(Number(v));
+const pctText = v => (fin(v) ? signedPct(Number(v)) : '—');
+const num = v => (fin(v) ? count(v) : '—');
+const pctOf = r => (fin(r?.pct) ? Number(r.pct) : null);
 
 function nameHtml(r, view, key) {
   const held = typeof r.code === 'string' && view?.stocks && typeof view.stocks === 'object' && Object.hasOwn(view.stocks, r.code);
@@ -20,21 +23,21 @@ export function yesterdayHtml(view, block, ui, id, key) {
   }
   const rows = (Array.isArray(y.rows) ? y.rows : []).filter(r => r && typeof r === 'object');
   const mode = ui?.ysort === 'boards' ? 'boards' : 'pct';
-  const sorted = [...rows].sort((a, b) => (mode === 'boards' ? (Number(b.yesterdayBoards) || 0) - (Number(a.yesterdayBoards) || 0) : 0) || pctOf(a) - pctOf(b));
-  const max = Math.max(0, ...rows.map(r => Math.abs(pctOf(r))));
-  const below = `${fix2(Number(y.belowMinus5Share) * 100)}%`;
+  const sorted = [...rows].sort((a, b) => (mode === 'boards' ? (Number(b.yesterdayBoards) || 0) - (Number(a.yesterdayBoards) || 0) : 0) || (pctOf(a) ?? Infinity) - (pctOf(b) ?? Infinity) || 0);
+  const max = Math.max(0, ...rows.map(r => Math.abs(pctOf(r) ?? 0)));
+  const below = fin(y.belowMinus5Share) ? `${fix2(Number(y.belowMinus5Share) * 100)}%` : '—';
   const tile = (k, v) => `<div class="lh-stat"><span class="lh-stat-k">${esc(k)}</span><span class="lh-stat-v">${esc(v)}</span></div>`;
   const control = seg([['By change', 'pct'], ['By boards', 'boards']], mode, 'lunhuiUi', { 'data-id': id, 'data-field': 'ysort' });
   const list = sorted.length
     ? `<div class="lh-yrows">${sorted.map(r => {
       const p = pctOf(r);
-      const w = max > 0 ? Math.abs(p) / max * 100 : 0;
+      const w = p != null && max > 0 ? Math.abs(p) / max * 100 : 0;
       return `<div class="lh-yrow"><span class="lh-yname">${nameHtml(r, view, key)}</span><span class="lh-yb">${esc(r.yesterdayBoards)}b</span>` +
-        `<span class="${cls('lh-ypct', tone(p))}">${esc(signedPct(p))}</span>` +
-        `<span class="lh-ybar" aria-hidden="true"><span class="${cls('lh-ybar-fill', tone(p))}" style="width:${w.toFixed(1)}%"></span></span></div>`;
+        `<span class="${cls('lh-ypct', p == null ? 'flat' : tone(p))}">${esc(pctText(p))}</span>` +
+        `<span class="lh-ybar" aria-hidden="true">${p == null ? '' : `<span class="${cls('lh-ybar-fill', tone(p))}" style="width:${w.toFixed(1)}%"></span>`}</span></div>`;
     }).join('')}</div>`
     : '<div class="lh-none">No name at two boards or more yesterday.</div>';
-  return `${label(`Yesterday's limit-ups · ${count(y.count)}`)}${headline(block)}${control}` +
-    `<div class="lh-stats">${tile('Median', signedPct(y.median))}${tile('Below −5%', below)}</div>${list}` +
-    readout(`${count(y.count)} limit-ups yesterday · median ${signedPct(y.median)} · ${below} below −5%`);
+  return `${label(`Yesterday's limit-ups · ${num(y.count)}`)}${headline(block)}${control}` +
+    `<div class="lh-stats">${tile('Median', pctText(y.median))}${tile('Below −5%', below)}</div>${list}` +
+    readout(`${num(y.count)} limit-ups yesterday · median ${pctText(y.median)} · ${below} below −5%`);
 }

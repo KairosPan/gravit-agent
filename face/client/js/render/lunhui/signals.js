@@ -9,7 +9,7 @@ const NAMES = {
   seal_ratio: 'Seal ratio', yesterday_return_median: 'Yesterday median', max_streak: 'Highest streak',
 };
 const WHOLE = new Set(['limit_down_count', 'max_streak']);
-const value = m => (WHOLE.has(m.measure) ? count(m.value) : fix2(m.value));
+const value = m => (m.value == null || m.value === '' || !Number.isFinite(Number(m.value)) ? '—' : WHOLE.has(m.measure) ? count(m.value) : fix2(m.value));
 
 const column = (word, side, measures) => `<div class="lh-sig-col"><div class="lh-sig-h">${word}</div>` +
   measures.filter(m => m?.side === side).map(m => `<div class="lh-sig-m"><span class="lh-sig-k">${esc(NAMES[m.measure] ?? m.measure)}</span><span class="lh-sig-v">${esc(value(m))}</span></div>`).join('') + '</div>';

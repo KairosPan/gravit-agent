@@ -357,3 +357,16 @@ test('composed draws yesterday and signals, with skeletons while loading', () =>
   const loading = text(composedHtml(m, { status: 'loading' }, {}, { id: 'c1' }));
   assert.ok(loading.includes('Drawing yesterday…') && loading.includes('Drawing the signals…'));
 });
+
+test('null numbers draw as a dash, never as zero', () => {
+  const y = { count: null, median: null, belowMinus5Share: null, rows: [{ code: '600001', name: 'A', yesterdayBoards: 2, pct: null }, { code: '600011', name: 'B', yesterdayBoards: 2, pct: -3 }], unavailable: null };
+  const html = yesterdayHtml({ ...VIEW_1027, yesterday: y }, { kind: 'yesterday' }, {}, ID, 'K');
+  assert.equal(readout(html), '— limit-ups yesterday · median — · — below −5%');
+  assert.ok(text(html).includes('Median—') && text(html).includes('Below −5%—'));
+  assert.deepEqual(yNames(html), ['600011', '600001'], 'a null change sorts last');
+  assert.equal(html.split('lh-ybar-fill').length - 1, 1, 'a null change has no bar');
+  assert.ok(text(html).includes('2b—'));
+  const s = { ...VIEW_1027.signals, measures: [{ measure: 'break_ratio', value: null, side: 'contraction' }, { measure: 'max_streak', value: NaN, side: 'relay' }] };
+  const out = text(signalsHtml({ ...VIEW_1027, signals: s }, { kind: 'signals' }, {}, ID));
+  assert.ok(out.includes('Break ratio—') && out.includes('Highest streak—'));
+});
