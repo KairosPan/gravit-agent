@@ -13,12 +13,15 @@ import { fmtClock, fmtDate, rowTime, sameDay } from '../time.js';
 import { price, number } from '../wire/market-model.js';
 import { money, signedMoney, sign } from '../wire/account-model.js';
 import { seg } from './controls.js';
-import { candlesSvg } from './chart.js';
+import { candlesSvg, sessionsSvg } from './chart.js';
 import { orderWords } from './account.js';
 import {
   CANDLE_RANGES, isAccountKey, tableOf, pageOf, faceAssetOf, mentionsOf, volumeWordOf,
-  quoteWord, connectionWord, searchWord, watchWord, volumeWord, basisWord, sourceWord,
+  connectionWord, searchWord, watchWord, basisWord,
+  chinaWord, cnStateWord, cnPageOf, cnTileOf, cnBoardOf,
 } from '../host/market-view.js';
+import { yuan, fix2 } from './lunhui/block.js';
+import { intradaySvg } from './lunhui/intraday.js';
 import { tradeableOf } from '../host/trade-view.js';
 
 const EM = '—';
@@ -77,15 +80,19 @@ function nameCell(r) {
     : `<button type="button" class="mk-name" data-action="openMarket" data-id="${esc(r.id)}">${inner}</button>`;
 }
 
+// a row's volume: an A share's turnover in yuan (China's rows), else the view's word in its unit
+const volumeCell = p => (p.volumeUnit === 'yuan' ? yuan(p.volume) : volumeWordOf(p));
+
 function row(r) {
   return `<tr data-id="${esc(r.id)}"><td>${starCell(r)}</td><td class="mk-c-name">${nameCell(r)}</td>` +
     `<td class="r">${esc(priceWord(r.price, r.priced.unit))}</td><td class="r mk-c-chg">${moveHtml(r.priced)}</td>` +
-    `<td class="r mk-c-vol">${esc(volumeWordOf(r.priced))}</td><td class="r mk-c-st"><span class="mk-st">${esc(r.sourceWord)}</span></td></tr>`;
+    `<td class="r mk-c-vol">${esc(volumeCell(r.priced))}</td><td class="r mk-c-st"><span class="mk-st">${esc(r.sourceWord)}</span></td></tr>`;
 }
 
-function table(rows) {
+// China's table says Today and Turnover where the Account's say 24h and Volume (spec 2026-10-31 §4)
+function table(rows, { china = false } = {}) {
   const head = '<tr><th scope="col"><span class="sr-only">Watch</span></th><th scope="col" class="mk-c-name">Market</th><th scope="col" class="r">Price</th>' +
-    '<th scope="col" class="r mk-c-chg">24h</th><th scope="col" class="r mk-c-vol">Volume</th><th scope="col" class="r mk-c-st">Source</th></tr>';
+    `<th scope="col" class="r mk-c-chg">${china ? 'Today' : '24h'}</th><th scope="col" class="r mk-c-vol">${china ? 'Turnover' : 'Volume'}</th><th scope="col" class="r mk-c-st">Source</th></tr>`;
   return `<section class="cardbox mk-tcard" aria-label="Markets"><div class="mk-wrap"><table class="mk-t"><thead>${head}</thead><tbody>${rows.map(row).join('')}</tbody></table></div></section>`;
 }
 
@@ -93,6 +100,7 @@ function table(rows) {
 // read still on its way (and, while searching, the face's own search for the A shares); or one that failed before it answered
 function emptyWord(read, tab, searching, search) {
   if (tab === 'watching' && !searching) return 'Nothing watched yet';
+  if (tab === 'china' && !searching) return read.status === 'error' && !read.answered ? 'China unavailable' : read.answered && read.status === 'ready' ? 'No markets' : 'Loading…';
   const busy = searching && search?.status === 'loading';
   if (read.answered && !busy) return 'No markets';
   if (read.status !== 'error' || busy) return searching ? 'Searching…' : 'Loading…';
@@ -116,8 +124,8 @@ export function renderMarketsScreen(state, now) {
   const m = state.markets;
   const q = String(m.q ?? '').trim();
   const searching = q !== '';
-  const { rows, tabs, sorts, sort, read } = tableOf(m, now, state.account?.data);
-  const tabsHtml = `<div class="mk-tabs" role="group" aria-label="Markets">${tabs.map(t => `<button type="button" class="mk-tab" data-action="mkTab" data-value="${esc(t.id)}" aria-pressed="${t.id === m.tab}">${esc(t.count === null ? t.label : `${t.label} · ${t.count}`)}</button>`).join('')}</div>`;
+  const { rows, tabs, sorts, sort, read, china, session } = tableOf(m, now, state.account?.data);
+  const tabsHtml = `<div class="mk-tabs" role="group" aria-label="Markets">${tabs.map(t => `<button type="button" class="mk-tab" data-action="mkTab" data-value="${esc(t.id)}" aria-pressed="${t.id === m.tab}">${esc(t.count === null ? t.label : `${t.label} · ${t.count.toLocaleString('en-US')}`)}</button>`).join('')}</div>`;
   const left = searching
     ? `<p class="mk-q">${rows.length} market${rows.length === 1 ? '' : 's'} for “${esc(q)}” <button type="button" class="mk-clear" data-action="mkClear">Clear</button></p>`
     : '<span></span>';
@@ -128,8 +136,10 @@ export function renderMarketsScreen(state, now) {
   const emptyText = rows.length ? '' : emptyWord(read, m.tab, searching, m.search);
   const cnSearch = cnSearchWord(m, searching);
   const cnDrawn = rows.some(r => r.source === 'face' && !r.notListed);
-  const words = note(read.message) + note(cnSearch !== emptyText ? cnSearch : '') + (cnDrawn ? note(connectionWord(m.connection)) : '') + note(watchWord(m.watchError));
-  const body = rows.length ? table(rows) : empty(emptyText);
+  // China: the session's line (Closed, the midday break), and a refresh that failed over the rows kept
+  const chinaWords = china ? note(chinaWord(session)) + (read.status === 'error' && read.answered ? note('Couldn’t refresh China') : '') : '';
+  const words = chinaWords + note(read.message) + note(cnSearch !== emptyText ? cnSearch : '') + (cnDrawn ? note(connectionWord(m.connection)) : '') + note(watchWord(m.watchError));
+  const body = rows.length ? table(rows, { china }) : empty(emptyText);
   return `<main class="main mkts"><div class="mk-head"><h1 class="head-title">Markets</h1>` +
     `<div class="search"><label for="mq" class="sr-only">Search markets</label>${icon('search', 18, 2)}<input id="mq" type="search" autocomplete="off" placeholder="Search markets" data-action="mkQuery"${attrs({ value: m.q })}></div></div>` +
     `<div class="mk">${tabsHtml}${bar}${words}${body}</div></main>`;
@@ -238,19 +248,45 @@ function accountPage(id, view, state, now) {
 }
 
 // an A share's page, the face's own: its quote against the previous close, its facts, the conversations that name it
+// a figure of the A-share page in its unit's words (spec 2026-10-31 §5): yuan prices, yuan amounts in 万/亿/万亿, percents,
+// a ratio with U+2212 for a negative, shares in 万股/亿股; none is —
+function factWord({ value: v, unit }) {
+  if (v === null || v === undefined) return EM;
+  if (unit === 'cny') return price(v, 'CNY');
+  if (unit === 'yuan') return yuan(v);
+  if (unit === 'pct') return `${fix2(v)}%`;
+  if (unit === 'ratio') return fix2(v);
+  if (unit === 'shares') return v >= 1e8 ? `${(v / 1e8).toFixed(2)}亿股` : v >= 1e4 ? `${Math.round(v / 1e4)}万股` : `${Math.round(v)}股`;
+  return String(v);
+}
+
+// an A share's price history at its range: 1D the session chart, 5D the sessions on one grid, longer the closes in yuan on Beijing
+// dates; the notes as on an Account page
+function cnHistory(view) {
+  const h = view.history;
+  const svg = !h.current ? ''
+    : view.range === '1D' ? (h.sessions?.length ? intradaySvg(h.sessions.at(-1)) : '')
+      : view.range === '5D' ? sessionsSvg(h.sessions)
+        : candlesSvg(h.candles, { unit: 'cny', zone: 'Asia/Shanghai', range: view.range });
+  const failed = h.status === 'error' ? note(h.message || 'History unavailable') : '';
+  const drawnNow = h.current ? (svg || note('No history')) : h.status === 'loading' ? note('Loading…') : '';
+  return failed + drawnNow;
+}
+
 function cnPage(asset, state, now) {
   const m = state.markets;
-  const quote = own(m.quotes, asset.id) ?? own(m.hitQuotes, asset.id);
+  const view = cnPageOf(m, asset.id);
+  const quote = view.quote;
   const watched = records(m.watchlist).some(a => a.id === asset.id);
-  const sub = ['A-share', asset.symbol, asset.exchange].filter(Boolean).join(' · ');
-  const who = `<div class="mk-who">${mkAv(asset.symbol, 'lg')}<div><h1 class="head-title">${esc(asset.name || asset.symbol)}</h1><span class="mk-sub">${esc(sub)}</span></div></div>`;
+  const sub = ['A-share', asset.symbol, cnBoardOf(asset.symbol)].filter(Boolean).join(' · ');
+  const who = `<div class="mk-who">${mkAv(cnTileOf(asset.name, asset.symbol), 'lg')}<div><h1 class="head-title">${esc(asset.name || asset.symbol)}</h1><span class="mk-sub">${esc(sub)}</span></div></div>`;
   const priced = number(quote?.price) !== null;
-  const asOf = priced && quote.as_of && when(quote.as_of, now) ? `as of ${when(quote.as_of, now)} · ` : '';
-  const facts = [['Previous close', price(quote?.prev_close, asset.currency)], ['Volume', volumeWord(asset, quote)], ['Source', sourceWord(quote ?? { market: asset.market })]];
+  const stateWord = cnStateWord(quote, m.connection);
   const top = `<div class="mk-d-px"><span class="mk-big">${esc(price(quote?.price, asset.currency))}</span>` +
     `${priced ? `${chgHtml(number(quote.change_pct))}<span class="mk-basis">${esc(basisWord(quote))}</span>` : ''}</div>` +
-    `<p class="mk-asof">${esc(asOf + quoteWord(quote, m.providers, asset.market))}</p>` +
-    `<dl class="mk-facts">${facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>`;
+    `${stateWord ? `<p class="mk-asof">${esc(stateWord)}</p>` : ''}` +
+    `<dl class="mk-facts">${view.facts.map(f => `<div><dt>${esc(f.label)}</dt><dd>${esc(factWord(f))}</dd></div>`).join('')}</dl>`;
+  const left = [section('Price history', cnHistory(view), seg(CANDLE_RANGES.map(r => [r, r]), view.range, 'setRange', { 'data-id': asset.id }))];
   const about = aboutHtml(state.conversations, asset, now);
-  return pageHtml(who, keysHtml(asset.id, watched), top, [], about.length ? [section('Gravit on it', feed(about))] : []);
+  return pageHtml(who, keysHtml(asset.id, watched), top, left, about.length ? [section('Gravit on it', feed(about))] : []);
 }

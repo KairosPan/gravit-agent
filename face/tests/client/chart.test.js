@@ -4,6 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as chart from '../../client/js/render/chart.js';
+const { sessionsSvg } = chart;
 import { fmtClock, fmtDate } from '../../client/js/time.js';
 
 const { candlesSvg, curveSvg } = chart;
@@ -16,7 +17,7 @@ const word = i => `${fmtDate(Date.parse(at(i)))} ${fmtClock(Date.parse(at(i)))}`
 const GEOMETRY = /^M0\.0,[\d.]+L133\.3,6\.0L266\.7,134\.0L400\.0,[\d.]+$/;
 
 test('the charts are the Account\'s two: the daily_bars chart left with alpaca-kit', () => {
-  assert.deepEqual(Object.keys(chart).sort(), ['candlesSvg', 'curveSvg']);
+  assert.deepEqual(Object.keys(chart).sort(), ['candlesSvg', 'curveSvg', 'sessionsSvg']);
 });
 
 test("candlesSvg: a market's closes in the same box, the axis at its first and last bars' times; cents for an event; fewer than two closes draw nothing", () => {
@@ -62,4 +63,26 @@ test('curveSvg: the net worth in the same box, labelled by its points\' times; f
   // a point whose time does not parse is left out, as one without a number is
   const timeless = curveSvg([{ at: 'not a time', usd: 99 }, ...points([10, 20]), { usd: 5 }], { currency: 'USD' });
   assert.ok(timeless.includes(`aria-label="Net worth from ${word(0)} to ${word(1)}: from $10.00 to $20.00, low $10.00, high $20.00"`), timeless);
+});
+
+test('candlesSvg in yuan on Beijing dates; the Account call unchanged', () => {
+  const bars = [{ t: Date.parse('2026-10-29T07:00:00Z'), c: 1354 }, { t: Date.parse('2026-10-30T07:00:00Z'), c: 1392.05 }];
+  const svg = candlesSvg(bars, { unit: 'cny', zone: 'Asia/Shanghai', range: '1M' });
+  assert.match(svg, /<span>2026-10-29<\/span>/);
+  assert.match(svg, /<span>2026-10-30<\/span>/);
+  assert.match(svg, /Low ¥1,354\.00 · High ¥1,392\.05/);
+});
+
+test('sessionsSvg: five sessions on one grid, the previous close dashed, a separator between sessions', () => {
+  const session = (date, n = 242) => ({ date, prec: 100, price: Array.from({ length: n }, (_, i) => 100 + (i % 5)), amount: [] });
+  const five = sessionsSvg(['2026-10-26', '2026-10-27', '2026-10-28', '2026-10-29', '2026-10-30'].map(d => session(d)));
+  assert.equal((five.match(/class="mk-chart-sep"/g) ?? []).length, 4);
+  assert.equal((five.match(/class="mk-chart-prev"/g) ?? []).length, 1);
+  assert.equal((five.match(/class="mk-chart-line"/g) ?? []).length, 1);
+  assert.match(five, /<span>10-26<\/span>/);
+  assert.match(five, /<span>10-30<\/span>/);
+  assert.match(five, /Low ¥100\.00 · High ¥104\.00/);
+  assert.equal((sessionsSvg([session('2026-10-30', 2)]).match(/class="mk-chart-sep"/g) ?? []).length, 0);
+  assert.equal(sessionsSvg([]), '');
+  assert.equal(sessionsSvg([session('2026-10-30', 1)]), '');
 });

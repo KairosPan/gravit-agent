@@ -86,6 +86,9 @@ function marketStates() {
     page('event:predict:SI-FEDCUT-DEC'),
     R.candlesLoading(page('stock:NVDA'), { id: 'stock:NVDA', range: '5D' }),
     page('cn:600519'), page('coin:GONE'),
+    // an A share's 5D history: the sessions on one grid, the previous close dashed, a hairline between sessions
+    R.candlesLoaded(R.setRange(page('cn:600519'), { id: 'cn:600519', range: '5D' }), { id: 'cn:600519', range: '5D', at: NOW,
+      data: { ok: true, range: '5D', sessions: ['2026-10-29', '2026-10-30'].map(date => ({ date, prec: 100, price: [100, 101, 102], amount: [1, 1, 1] })) } }),
   ];
 }
 

@@ -105,7 +105,7 @@ test('the table: the Account tabs, rows with source words, cents for an event, c
   const tabs = [...html.matchAll(/<button type="button" class="mk-tab" data-action="mkTab" data-value="([^"]+)" aria-pressed="(true|false)">([^<]+)<\/button>/g)].map(m => [m[1], m[2], m[3]]);
   assert.deepEqual(tabs, [
     ['all', 'true', 'All · 30'], ['crypto', 'false', 'Crypto · 6'], ['stocks', 'false', 'Stocks · 4'], ['rwas', 'false', 'RWAs · 4'],
-    ['perps', 'false', 'Perps · 6'], ['preipo', 'false', 'Pre-IPO · 1'], ['predictions', 'false', 'Predictions · 9'],
+    ['perps', 'false', 'Perps · 6'], ['preipo', 'false', 'Pre-IPO · 1'], ['predictions', 'false', 'Predictions · 9'], ['china', 'false', 'China'],
   ]);
   assert.match(html, /<th scope="col" class="r">Price<\/th><th scope="col" class="r mk-c-chg">24h<\/th><th scope="col" class="r mk-c-vol">Volume<\/th><th scope="col" class="r mk-c-st">Source<\/th>/);
   // every row of the tab, each by its key, in the view's order: Most traded, the events' smaller volumes last
@@ -176,17 +176,18 @@ test('sorts: Most traded, Biggest moves, Closing soonest only with events', () =
   assert.doesNotMatch(screen({ all: one }).html, /data-action="mkSort"/);
 });
 
-test('a cn row beside the Account rows under Stocks; Not listed line with Remove for a missed star', () => {
+test('a cn row beside the Account rows under All, not under Stocks; Not listed line with Remove for a missed star', () => {
   const cnState = (over = {}) => screen({ cn: [MOUTAI, ZED], asked: { 'us:ZZZZ': null }, quotes: { 'cn:600519': moutaiQuote() }, ...over });
   const stocks = cnState({ tab: 'stocks' }).html;
-  // Stocks counts the A share; the Account's stocks first, then the face's, then the star the Account did not list
+  // Stocks is the Account's alone (China is the A shares' home); All counts the A share; the star the Account did not list stays
   assert.match(stocks, /data-value="all" aria-pressed="false">All · 31</);
-  assert.match(stocks, /data-value="stocks" aria-pressed="true">Stocks · 5</);
+  assert.match(stocks, /data-value="stocks" aria-pressed="true">Stocks · 4</);
   assert.match(stocks, /data-value="watching" aria-pressed="false">Watching</);
-  assert.deepEqual(rowIds(stocks), ['stock:NVDA', 'stock:SPY', 'stock:AAPL', 'cn:600519', 'us:ZZZZ']);
-  const [star, name, px, move, volume, source] = cells(rowOf(stocks, 'cn:600519'));
+  assert.deepEqual(rowIds(stocks), ['stock:NVDA', 'stock:SPY', 'stock:AAPL', 'us:ZZZZ']);
+  const all = cnState().html;
+  const [star, name, px, move, volume, source] = cells(rowOf(all, 'cn:600519'));
   assert.match(star, /^<button type="button" class="mk-star" data-action="toggleWatch" data-id="cn:600519" aria-pressed="true" aria-label="Stop watching Kweichow Moutai">/);
-  assert.match(name, /data-action="openMarket" data-id="cn:600519"><span class="mk-av" aria-hidden="true">6005<\/span><span class="mk-nm"><b>Kweichow Moutai<\/b><span class="mk-sub">SH<\/span>/);
+  assert.match(name, /data-action="openMarket" data-id="cn:600519"><span class="mk-av" aria-hidden="true">K<\/span><span class="mk-nm"><b>Kweichow Moutai<\/b><span class="mk-sub">600519 · SH<\/span>/);
   assert.equal(px, '¥1,688.00');
   assert.equal(text(move), '▲up 0.48%');
   assert.equal(volume, '2M shares');
@@ -199,7 +200,7 @@ test('a cn row beside the Account rows under Stocks; Not listed line with Remove
   assert.deepEqual(z.slice(2).map(text), ['—', '—', '—', '']);
   assert.doesNotMatch(zed, /mk-star|openMarket/);
   // the face's wire's connection word, only where a cn row is drawn
-  assert.match(cnState({ tab: 'stocks', connection: 'polling' }).html, /<p class="mk-note">Updating every 15 s<\/p>/);
+  assert.match(cnState({ connection: 'polling' }).html, /<p class="mk-note">Updating every 15 s<\/p>/);
   assert.doesNotMatch(stocks, /mk-note/, 'streaming says nothing');
   assert.doesNotMatch(cnState({ tab: 'crypto', connection: 'polling' }).html, /Updating every 15 s/, 'no cn row on Crypto');
   assert.match(cnState({ tab: 'stocks', watchError: 'full' }).html, /<p class="mk-note">The watchlist is full<\/p>/);
@@ -337,18 +338,17 @@ test('the page: no Buy, no Sell on a page that does not sign; the range seg; Acr
   assert.match(text(fill[0]), /Buy 50 SI-FEDCUT-DEC:YES · Will the Fed cut rates at its December meeting\? · Yes · market · at 0\.63 · -\$31\.50filled · You$/);
   for (const word of [/>Buy</, />Sell</, />Trade</, />Buy Yes</]) assert.doesNotMatch(fed.html, word, String(word));
 
-  // a cn page is the face's own quote: no venues, no chart, nothing held through the Account
+  // a cn page is the face's own quote and history: no venues, nothing held through the Account
   const cn = screen({ route: { screen: 'markets', id: 'cn:600519' }, cn: [MOUTAI], quotes: { 'cn:600519': moutaiQuote() }, account: true, conversations: [conv('s3', { title: '600519 into the close' })] }).html;
   assert.match(cn, /<h1 class="head-title">Kweichow Moutai<\/h1><span class="mk-sub">A-share · 600519 · SH<\/span>/);
   assert.match(cn, /<span class="mk-big">¥1,688\.00<\/span><span class="up">[\s\S]*?0\.48%<\/span><span class="mk-basis">vs previous close<\/span>/);
-  assert.match(cn, /class="mk-asof">as of \d\d:\d\d · Live</);
+  assert.match(cn, /class="mk-asof">Tencent · Live</);
   assert.match(cn, /<dt>Previous close<\/dt><dd>¥1,680\.00<\/dd>/);
-  assert.match(cn, /<dt>Volume<\/dt><dd>2M shares<\/dd>/);
-  assert.match(cn, /<dt>Source<\/dt><dd>Tencent<\/dd>/);
+  assert.match(cn, /<dt>Volume<\/dt><dd>200万股<\/dd>/);
   assert.match(cn, /class="btn mk-on" data-action="toggleWatch" data-id="cn:600519" aria-pressed="true">/);
   assert.match(cn, /data-action="handToGravit" data-id="cn:600519"/);
   assert.match(section(cn, 'Gravit on it'), /600519 into the close/);
-  assert.doesNotMatch(cn, /Price history|Across venues|You hold|On the statement|mk-chart/);
+  assert.doesNotMatch(cn, /Across venues|You hold|On the statement/);
   // a key no read lists, and an old face id, are no page: the table
   assert.match(page('coin:GONE').html, /^<main class="main mkts">/);
   assert.match(page('us:AAPL').html, /^<main class="main mkts">/);
@@ -438,7 +438,8 @@ test('no CJK, no icon URL in any rendered string', () => {
   ];
   assert.ok(states.filter(x => x.html.includes('mk-page')).length === 8, 'every page drew');
   for (const { html } of states) {
-    assert.doesNotMatch(html, CJK);
+    // the A-share units the spec approved (万股, ¥…亿, ¥…万亿) are the face's own words; the wire's Chinese prose never is
+    assert.doesNotMatch(html.replace(/\d(?:万亿|万股|亿股|万|亿)/g, ''), CJK);
     assert.ok(!html.includes('example-cdn'), 'no icon URL');
     assert.doesNotMatch(html, /<img\b/);
     assert.doesNotMatch(html, /NaN|undefined|\[object Object\]|>null</);
@@ -640,4 +641,75 @@ test('a market route keeps an Account key whole and canonicalises a face id', ()
   assert.deepEqual(nav('us:aapl'), { screen: 'markets', id: 'us:AAPL' });
   assert.deepEqual(nav('crypto:btc-usd'), { screen: 'markets', id: 'crypto:BTC/USD' });
   assert.deepEqual(nav('garbage'), { screen: 'markets', id: null });
+});
+
+// ── the China tab and the A-share page (spec 2026-10-31) ──
+
+const RANK = { ok: true, sort: 'volume', total: 5577, asOf: '2026-10-31T06:46:10Z', session: { phase: 'closed', lastSession: '2026-10-30' }, items: [
+  { id: 'cn:300502', symbol: '300502', name: '新易盛', price: 196, change_pct: -14.19, turnover: 21_607_600_000 },
+  { id: 'cn:688825', symbol: '688825', name: '长鑫科技', price: 41.8, change_pct: -2.5, turnover: 12_145_020_000 }] };
+function chinaScreen(rank = s => R.rankLoaded(s, { sort: 'volume', data: RANK, at: NOW })) {
+  const s = rank(R.setMarketsTab(screen().s, 'china'));
+  return { s, html: renderMarketsScreen(s, NOW) };
+}
+
+test("the China table: Today and Turnover in its header, a row's cells, the closed line", () => {
+  const { html } = chinaScreen();
+  assert.match(html, /data-value="china" aria-pressed="true">China · 5,577</);
+  assert.match(html, /<th scope="col" class="r mk-c-chg">Today<\/th>/);
+  assert.match(html, /<th scope="col" class="r mk-c-vol">Turnover<\/th>/);
+  assert.match(html, /<p class="mk-note">Closed · 10-30 15:00 Beijing<\/p>/);
+  assert.deepEqual(rowIds(html), ['cn:300502', 'cn:688825']);
+  const [, name, px, move, turnover, source] = cells(rowOf(html, 'cn:300502'));
+  assert.match(name, /<span class="mk-av" aria-hidden="true">新<\/span><span class="mk-nm"><b>新易盛<\/b><span class="mk-sub">300502 · ChiNext<\/span>/);
+  assert.equal(px, '¥196.00');
+  assert.equal(text(move), '▼down 14.19%');
+  assert.equal(turnover, '¥216.08亿');
+  assert.equal(text(source), 'Tencent');
+  assert.doesNotMatch(html, /Stale|New York|Closing soonest/);
+});
+
+test('the Account tabs keep 24h and Volume', () => {
+  assert.match(screen().html, /<th scope="col" class="r mk-c-chg">24h<\/th><th scope="col" class="r mk-c-vol">Volume<\/th>/);
+});
+
+test('China failing: Loading… before any answer, unavailable after a failure, the kept rows under a note', () => {
+  assert.match(chinaScreen(s => R.rankLoading(s, { sort: 'volume' })).html, /<p class="mk-empty">Loading…<\/p>/);
+  assert.match(chinaScreen(s => R.rankFailed(s, { sort: 'volume', at: NOW })).html, /<p class="mk-empty">China unavailable<\/p>/);
+  const kept = chinaScreen(s => R.rankFailed(R.rankLoaded(s, { sort: 'volume', data: RANK, at: NOW }), { sort: 'volume', at: NOW })).html;
+  assert.deepEqual(rowIds(kept), ['cn:300502', 'cn:688825']);
+  assert.match(kept, /<p class="mk-note">Couldn’t refresh China<\/p>/);
+});
+
+const MOUTAI_FACTS = { open: 1363, high: 1393.37, low: 1352.98, turnover: 8_257_380_000, turnover_rate: 0.48, market_cap: 1_740_176_000_000, pe_ttm: 21.18,
+  limit_up: 1489.4, limit_down: 1218.6, amplitude: 2.98 };
+const cnPage = (quote, candles = null) => screen({ route: { screen: 'markets', id: 'cn:600519' }, cn: [MOUTAI], quotes: { 'cn:600519': quote }, candles }).html;
+
+test("the A-share page: its state line, the twelve facts, Moutai's words", () => {
+  const html = cnPage(moutaiQuote({ price: 1392.05, prev_close: 1354, volume: 5_992_700, market_status: 'closed', quote_status: 'live', as_of: '2026-10-30T16:14:55+08:00', ...MOUTAI_FACTS }));
+  assert.match(html, /class="mk-asof">Tencent · Closed · 10-30 15:00 Beijing</);
+  assert.match(html, /<span class="mk-av mk-av-lg" aria-hidden="true">K<\/span>/);
+  const facts = [...html.matchAll(/<dt>([^<]+)<\/dt><dd>([^<]+)<\/dd>/g)].map(m => [m[1], m[2]]);
+  assert.deepEqual(facts, [['Previous close', '¥1,354.00'], ['Open', '¥1,363.00'], ['High', '¥1,393.37'], ['Low', '¥1,352.98'], ['Turnover', '¥82.57亿'],
+    ['Turnover rate', '0.48%'], ['Market cap', '¥1.74万亿'], ['P/E (TTM)', '21.18'], ['Limit up', '¥1,489.40'], ['Limit down', '¥1,218.60'], ['Volume', '599万股'], ['Amplitude', '2.98%']]);
+  assert.match(cnPage(moutaiQuote({ pe_ttm: -12.5 })), /<dt>P\/E \(TTM\)<\/dt><dd>−12\.50<\/dd>/);
+  assert.match(cnPage(moutaiQuote({ open: null })), /<dt>Open<\/dt><dd>—<\/dd>/);
+  assert.doesNotMatch(html, /Stale|New York|openTicket/);
+});
+
+test("the A-share page's price history: 1D the session chart, 5D the sessions chart, 1M yuan closes on Beijing dates", () => {
+  const session = (date, n = 242) => ({ date, prec: 1354, price: Array.from({ length: n }, (_, i) => 1354 + (i % 7)), amount: Array.from({ length: n }, () => 1e6) });
+  const one = cnPage(moutaiQuote(), { id: 'cn:600519', range: '1D', data: { ok: true, range: '1D', sessions: [session('2026-10-30')] } });
+  assert.match(section(one, 'Price history'), /class="lh-chart"/);
+  assert.match(section(one, 'Price history'), /data-action="setRange" data-value="1D"[^>]*data-id="cn:600519"|data-id="cn:600519"[^>]*data-action="setRange"/);
+  const r = R.setRange(screen({ route: { screen: 'markets', id: 'cn:600519' }, cn: [MOUTAI] }).s, { id: 'cn:600519', range: '5D' });
+  const five = renderMarketsScreen(R.candlesLoaded(r, { id: 'cn:600519', range: '5D', at: NOW,
+    data: { ok: true, range: '5D', sessions: ['2026-10-26', '2026-10-27', '2026-10-28', '2026-10-29', '2026-10-30'].map(d => session(d)) } }), NOW);
+  assert.equal((section(five, 'Price history').match(/class="mk-chart-sep"/g) ?? []).length, 4);
+  const single = renderMarketsScreen(R.candlesLoaded(r, { id: 'cn:600519', range: '5D', at: NOW, data: { ok: true, range: '5D', sessions: [session('2026-10-30', 3)] } }), NOW);
+  assert.match(section(single, 'Price history'), /class="mk-chart"/, 'a share listed this week still draws');
+  const m1 = R.setRange(screen({ route: { screen: 'markets', id: 'cn:600519' }, cn: [MOUTAI] }).s, { id: 'cn:600519', range: '1M' });
+  const month = renderMarketsScreen(R.candlesLoaded(m1, { id: 'cn:600519', range: '1M', at: NOW,
+    data: { ok: true, range: '1M', candles: [{ t: Date.parse('2026-10-29T07:00:00Z'), c: 1354 }, { t: Date.parse('2026-10-30T07:00:00Z'), c: 1392.05 }] } }), NOW);
+  assert.match(section(month, 'Price history'), /class="mk-chart"[\s\S]*<span>2026-10-30<\/span>/);
 });

@@ -30,16 +30,50 @@ const msOf = v => { const t = number(v); return t !== null && !Number.isNaN(new 
  *  first, as the Account sends them) drawn as their closes over the range, in the charts' box, the axis at the first and
  *  last bars' times; an event contract's closes, dollars a contract, in cents when the unit says so. A bar without a close or a
  *  time is left out; fewer than two draw nothing. */
-export function candlesSvg(candles, { unit, range } = {}) {
+export function candlesSvg(candles, { unit, range, zone } = {}) {
   const kept = (Array.isArray(candles) ? candles : [])
     .map(b => ({ t: msOf(b?.t), c: number(b?.c) }))
     .filter(b => b.c !== null && b.t !== null);
   if (kept.length < 2) return '';
   const cents = unit === 'cents';
-  const f = cents ? v => `${Number(v.toFixed(1))}¢` : v => price(v, 'USD');
+  const f = cents ? v => `${Number(v.toFixed(1))}¢` : v => price(v, unit === 'cny' ? 'CNY' : 'USD');
+  // an A share's bars (spec 2026-10-31 §5): their dates in the market's own zone, never the operator's clock
+  const end = zone ? t => dateIn(t, zone) : clockWord;
   return drawn(kept.map(b => (cents ? b.c * 100 : b.c)), {
-    label: range ? `Closes over ${range}` : 'Closes', first: clockWord(kept[0].t), last: clockWord(kept.at(-1).t), f,
+    label: range ? `Closes over ${range}` : 'Closes', first: end(kept[0].t), last: end(kept.at(-1).t), f,
   });
+}
+
+// a moment's date in a zone, `YYYY-MM-DD`
+const dateIn = (t, zone) => new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(t));
+
+const SESSION = 242;   // an A-share session's minutes on the grid: 09:30–11:30 and 13:00–15:00
+
+/** An A share's last sessions minute by minute (5D, spec 2026-10-31 §5): every session on one fixed grid of 242 points each, so a
+ *  session still trading fills only its part; the previous close before the first session dashed; a separator between sessions;
+ *  the axis at the first and last sessions' dates (`MM-DD`) with the low and the high in yuan. Fewer than two prices draw nothing. */
+export function sessionsSvg(sessions) {
+  const kept = (Array.isArray(sessions) ? sessions : []).filter(x => Array.isArray(x?.price) && x.price.length);
+  const prices = kept.flatMap(x => x.price.map(Number)).filter(Number.isFinite);
+  if (kept.length === 0 || prices.length < 2) return '';
+  const prec = number(kept[0].prec);
+  const lo = Math.min(...prices, ...(prec !== null ? [prec] : []));
+  const hi = Math.max(...prices, ...(prec !== null ? [prec] : []));
+  const span = hi - lo || 1;
+  const slots = Math.max(2, SESSION * kept.length);
+  const X = i => ((i * W) / (slots - 1)).toFixed(1);
+  const Y = v => (H - 6 - ((v - lo) / span) * (H - 12)).toFixed(1);
+  const points = kept.flatMap((x, k) => x.price.map((v, i) => [k * SESSION + i, Number(v)])).filter(([, v]) => Number.isFinite(v));
+  const line = points.map(([i, v], n) => `${n ? 'L' : 'M'}${X(i)},${Y(v)}`).join('');
+  const seps = kept.slice(1).map((_, k) => `<line class="mk-chart-sep" x1="${X((k + 1) * SESSION)}" y1="0" x2="${X((k + 1) * SESSION)}" y2="${H}"></line>`).join('');
+  const prev = prec !== null ? `<line class="mk-chart-prev" x1="0" y1="${Y(prec)}" x2="${W}" y2="${Y(prec)}"></line>` : '';
+  const f = v => price(v, 'CNY');
+  const day = d => (typeof d === 'string' ? d.slice(5) : '');
+  const first = day(kept[0].date), last = day(kept.at(-1).date);
+  const said = `The last ${kept.length} sessions, ${first} to ${last}: low ${f(lo)}, high ${f(hi)}`;
+  return `<svg class="mk-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${esc(said)}">${seps}${prev}` +
+    `<path class="mk-chart-area" d="${line}L${X(points.at(-1)[0])},${H}L0,${H}Z"></path><path class="mk-chart-line" d="${line}"></path></svg>` +
+    `<div class="mk-axis"><span>${esc(first)}</span><span>Low ${esc(f(lo))} · High ${esc(f(hi))}</span><span>${esc(last)}</span></div>`;
 }
 
 /** A figure of the Account's over the curve's range — Net worth, or Paper as the renderer names the figure the curve draws:
