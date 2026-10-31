@@ -106,6 +106,11 @@ export const refuse = {
       "MISSING_EVIDENCE",
       `策略频道的运行读取 ${module} 上下文须给 market_run：本运行 leader 工件引用的那个已封存 cn-market 运行；没有它就没有可审查的市场证据与工件。`,
     ),
+  /** `lunhui_present` on a run whose `run.json` kind is not `market` (run view spec M16). */
+  notMarketRun: () =>
+    new LunhuiError("NOT_A_MARKET_RUN", "lunhui_present 只用于市场运行（run.json 的 kind 为 market）；策略运行请用文字报告作答。"),
+  /** A composition `lunhui_present` refuses: the field, then the reason (run view spec §5.2). */
+  invalidPresent: (field, reason) => new LunhuiError("INVALID_PRESENT", `${field}: ${reason}`),
   // The quotes freeze's symbol list, stage 0's four refusals (its `checkSymbols`).
   symbolShape: () =>
     new LunhuiError("INVALID_SYMBOL", "symbols 须为 1–8 个证券代码组成的数组，每个代码是 sh 或 sz 加六位数字。"),
