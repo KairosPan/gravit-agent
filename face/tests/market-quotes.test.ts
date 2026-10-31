@@ -10,7 +10,8 @@ const received = "2026-09-15T15:00:00.000Z";
 function quote(asset = moutai, extra: Partial<LiveQuote> = {}): LiveQuote {
   return { ...asset, market: asset.market as LiveQuote["market"], price: 120, prev_close: 100, change: 20, change_pct: 20,
     volume: 1000, as_of: "2026-09-15T14:59:58.123Z", received_at: received, volume_as_of: received,
-    source: "腾讯", feed: "snapshot", basis: "previous_close", quote_status: "live", market_status: "unknown", message: "", ...extra };
+    source: "腾讯", feed: "snapshot", basis: "previous_close", quote_status: "live", market_status: "unknown", message: "", name: null, open: null, high: null, low: null,
+    turnover: null, turnover_rate: null, market_cap: null, pe_ttm: null, limit_up: null, limit_down: null, amplitude: null, ...extra };
 }
 function provider(extra: Partial<ProviderState> = {}): ProviderState {
   return { id: "tencent", market: "cn", status: "connected", source: "腾讯", feed: "snapshot", transport: "poll", message: "", ...extra };
@@ -217,4 +218,12 @@ test("a payload naming a provider other than Tencent, or quoting a us or crypto 
     provider({ market: "us" as unknown as ProviderState["market"] })]) {
     assert.throws(() => parsePayload(payload([quote()], { providers: [retired] })), /行情源状态无效/);
   }
+});
+
+test("parsePayload accepts the page's facts and the midday status, refuses a fact that is not a number", () => {
+  const facts = { name: "贵州茅台", open: 1363, high: 1393.37, low: 1352.98, turnover: 8_257_380_000, turnover_rate: 0.48,
+    market_cap: 1_740_176_000_000, pe_ttm: -12.5, limit_up: 1489.4, limit_down: 1218.6, amplitude: 2.98 };
+  assert.doesNotThrow(() => parsePayload(payload([quote(moutai, { ...facts, market_status: "midday" } as Partial<LiveQuote>)])));
+  assert.throws(() => parsePayload(payload([quote(moutai, { ...facts, turnover: "1" } as unknown as Partial<LiveQuote>)])));
+  assert.throws(() => parsePayload(payload([quote(moutai, { name: 7 } as unknown as Partial<LiveQuote>)])));
 });

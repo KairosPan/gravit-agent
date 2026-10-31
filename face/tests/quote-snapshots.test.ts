@@ -21,7 +21,7 @@ test("the snapshots read Tencent alone: one request, exchange prefixes, no crede
     return reply(quoted("sh603986"), quoted("sz300750"), quoted("bj920185"));
   } }).load([cn, id("300750"), id("920185"), cn]);
   assert.equal(seen.length, 1);
-  assert.equal(seen[0]!.url.href, "https://qt.gtimg.cn/q=sh603986,sz300750,bj920185");
+  assert.equal(seen[0]!.url.href, "https://qt.gtimg.cn/q=marketStat,sh000001,sh603986,sz300750,bj920185");
   assert.equal(seen[0]!.options.method ?? "GET", "GET");
   assert.equal(seen[0]!.options.body, undefined);
   assert.deepEqual([...new Headers(seen[0]!.options.headers).keys()], [], "no token, key or vendor header");
@@ -38,7 +38,8 @@ test("a quote carries the last price, the previous close and the provider's Beij
   assert.equal(update.source, "腾讯");
   assert.equal(update.feed, "snapshot");
   assert.equal(update.basis, "previous_close");
-  assert.equal(update.market_status, "unknown");
+  // no marketStat in the reply: the Beijing clock decides, never "unknown"
+  assert.ok(["open", "midday", "closed"].includes(update.market_status!));
   assert.equal(update.message, "");
   assert.equal(result.providers[0]!.status, "connected");
 });
@@ -98,7 +99,7 @@ test("a code Tencent cannot quote is never requested", async () => {
   assert.deepEqual(urls, []);
   assert.equal(none.providers[0]!.status, "limited");
   const mixed = await createQuoteSnapshots({ fetcher }).load([cn, id("123456")]);
-  assert.deepEqual(urls, ["https://qt.gtimg.cn/q=sh603986"]);
+  assert.deepEqual(urls, ["https://qt.gtimg.cn/q=marketStat,sh000001,sh603986"]);
   assert.match(mixed.updates[1]!.message!, /不支持/);
 });
 
@@ -152,4 +153,30 @@ test("an aborted load makes no request", async () => {
   const result = await createQuoteSnapshots({ fetcher: async () => { calls++; return reply(); } }).load([cn], controller.signal);
   assert.equal(calls, 0);
   assert.equal(result.providers[0]!.status, "error");
+});
+
+test("a quote carries the page's facts, in yuan and percent", async () => {
+  const moutai = line("sh600519", { 1: "@NAME@", 2: "600519", 3: "1392.05", 4: "1354.00", 5: "1363.00", 6: "59927",
+    30: "20261030161455", 33: "1393.37", 34: "1352.98", 37: "825738", 38: "0.48", 39: "21.18", 43: "2.98", 45: "17401.76",
+    47: "1489.40", 48: "1218.60" });
+  // the reply is GBK, as Tencent's is: 贵州茅台 is B9F3 D6DD C3A9 CCA8
+  const [head, tail] = moutai.split("@NAME@");
+  const gbk = Buffer.concat([Buffer.from(head!), Buffer.from([0xb9, 0xf3, 0xd6, 0xdd, 0xc3, 0xa9, 0xcc, 0xa8]), Buffer.from(tail!)]);
+  const [u] = (await createQuoteSnapshots({ fetcher: async () => new Response(gbk) }).load([id("600519")])).updates;
+  assert.deepEqual([u!.name, u!.open, u!.high, u!.low, u!.turnover, u!.turnover_rate, u!.market_cap, u!.pe_ttm, u!.limit_up, u!.limit_down, u!.amplitude],
+    ["贵州茅台", 1363, 1393.37, 1352.98, 8_257_380_000, 0.48, 1_740_176_000_000, 21.18, 1489.4, 1218.6, 2.98]);
+});
+
+test("a negative P/E is kept", async () => {
+  const [u] = (await createQuoteSnapshots({ fetcher: async () => reply(quoted("sh603986", { 39: "-12.50" })) }).load([cn])).updates;
+  assert.equal(u!.pe_ttm, -12.5);
+});
+
+test("the market status comes from the same reply: closed, open, midday", async () => {
+  const stat = (token: string) => `v_marketStat="2026-10-30 10:00:00|SH_${token}_x|SZ_${token}_x";\n`;
+  const index = line("sh000001", { 2: "000001", 30: "20261030113000" });
+  const at = (now: number, token: string) => createQuoteSnapshots({ now: () => now, fetcher: async () => reply(stat(token), index, quoted("sh603986")) }).load([cn]);
+  assert.equal((await at(Date.parse("2026-10-31T02:00:00Z"), "close")).updates[0]!.market_status, "closed");
+  assert.equal((await at(Date.parse("2026-10-30T02:00:00Z"), "open")).updates[0]!.market_status, "open");
+  assert.equal((await at(Date.parse("2026-10-30T04:00:00Z"), "close")).updates[0]!.market_status, "midday");
 });

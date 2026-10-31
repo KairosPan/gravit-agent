@@ -242,3 +242,18 @@ test("an explicit missing current-session volume clears it without erasing the v
     assert.equal(quote.price, 110);
   } finally { hub.close(); }
 });
+
+test("a closed or midday market's old quote is never stale; an open market's is", async () => {
+  const at = async (market_status: QuoteUpdate["market_status"]) => {
+    const hub = createQuoteHub({ now: () => DAY, snapshots: { async load() { return {
+      updates: [update({ as_of: new Date(DAY - 10 * 60_000).toISOString(), market_status, turnover: 8_257_380_000, name: "贵州茅台" })], providers: [cnState],
+    }; } } });
+    try { return (await hub.snapshot([CN])).quotes[0]!; } finally { hub.close(); }
+  };
+  assert.equal((await at("closed")).quote_status, "live");
+  assert.equal((await at("midday")).quote_status, "live");
+  const open = await at("open");
+  assert.equal(open.quote_status, "stale");
+  assert.equal(open.turnover, 8_257_380_000);
+  assert.equal(open.name, "贵州茅台");
+});

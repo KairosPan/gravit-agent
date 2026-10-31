@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { HttpError, FORBIDDEN } from "./http.ts";
 import type { RouteRegistrar } from "./static.ts";
 import { createQuoteSnapshots } from "./quote-snapshots.ts";
-import type { LiveQuote, ProviderState, QuoteIdentity, QuotePayload, QuoteUpdate, SnapshotSource } from "./quote-types.ts";
+import { QUOTE_FACTS, type LiveQuote, type ProviderState, type QuoteIdentity, type QuotePayload, type QuoteUpdate, type SnapshotSource } from "./quote-types.ts";
 
 export const QUOTE_LIMIT = 100;
 export const QUOTE_CLIENT_LIMIT = 8;
@@ -47,7 +47,9 @@ function initialQuote(asset: QuoteIdentity): LiveQuote {
   return { ...asset, price: null, prev_close: null, change: null, change_pct: null, volume: null,
     as_of: null, received_at: null, volume_as_of: null, source: "腾讯",
     feed: "", basis: "previous_close", quote_status: "unavailable",
-    market_status: "unknown", message: "正在连接行情…" };
+    market_status: "unknown", message: "正在连接行情…", name: null,
+    open: null, high: null, low: null, turnover: null, turnover_rate: null, market_cap: null, pe_ttm: null,
+    limit_up: null, limit_down: null, amplitude: null };
 }
 const usable = (state?: ProviderState): boolean => state?.status === "connected" || state?.status === "limited";
 const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
@@ -98,7 +100,8 @@ export function createQuoteHub(options: {
           quote.quote_status = "unavailable";
           quote.message = quote.message && quote.message !== "正在连接行情…" ? quote.message : state.message;
         } else {
-          const old = quote.market_status !== "closed" && now() - Date.parse(quote.as_of) > 5 * 60_000;
+          // a closed market's quote, or one at the midday break, is as fresh as the market lets it be
+          const old = quote.market_status !== "closed" && quote.market_status !== "midday" && now() - Date.parse(quote.as_of) > 5 * 60_000;
           quote.quote_status = !usable(state) || old || quoteErrors.has(asset.id) ? "stale" : "live";
           if (!usable(state)) quote.message = state.message || "行情连接已断开，保留上次报价。";
           else if (old && !quote.message) quote.message = "最近成交时间较早，请留意行情时间。";
@@ -149,6 +152,9 @@ export function createQuoteHub(options: {
       quote.volume_as_of = timestamp(update.volume_as_of) ? update.volume_as_of : null;
     } else if (update.volume === null && recent) { quote.volume = null; quote.volume_as_of = null; }
     if (update.market_status) quote.market_status = update.market_status;
+    // the page's facts ride with the quote they came in: each one an update names replaces the kept one
+    if (update.name !== undefined) quote.name = update.name;
+    for (const fact of QUOTE_FACTS) if (update[fact] !== undefined) quote[fact] = finite(update[fact]) ? update[fact] : null;
     if (!quote.feed) { quote.source = update.source; quote.feed = update.feed; quote.basis = update.basis; }
     quote.change = quote.price !== null && quote.prev_close !== null ? quote.price - quote.prev_close : null;
     quote.change_pct = quote.change !== null && quote.prev_close !== null ? quote.change / quote.prev_close * 100 : null;

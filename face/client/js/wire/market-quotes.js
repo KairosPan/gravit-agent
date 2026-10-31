@@ -10,6 +10,8 @@ const PROVIDER_STATUSES = new Set(["connecting", "connected", "unconfigured", "e
 const MARKETS = new Set(["cn"]);
 const PROVIDERS = new Set(["tencent"]);
 const timestamp = (value) => typeof value === "string" && Number.isFinite(Date.parse(value));
+// the A-share page's facts (src/quote-types.ts QUOTE_FACTS): each absent, null or a finite number
+const FACTS = ["open", "high", "low", "turnover", "turnover_rate", "market_cap", "pe_ttm", "limit_up", "limit_down", "amplitude"];
 
 /** Full payload validation prevents an error or malformed snapshot from clearing good quotes. */
 export function parsePayload(raw) {
@@ -18,9 +20,11 @@ export function parsePayload(raw) {
   for (const quote of raw.quotes) {
     const asset = normalizeAsset(quote);
     if (!asset || !MARKETS.has(asset.market) || quote.id !== asset.id || seen.has(quote.id) || !STATUSES.has(quote.quote_status)
-      || !["previous_close", "24h"].includes(quote.basis) || !["open", "closed", "unknown"].includes(quote.market_status)
+      || !["previous_close", "24h"].includes(quote.basis) || !["open", "midday", "closed", "unknown"].includes(quote.market_status)
       || typeof quote.source !== "string" || typeof quote.feed !== "string" || typeof quote.message !== "string"
       || (quote.transport !== undefined && !["stream", "poll"].includes(quote.transport))
+      || (quote.name !== undefined && quote.name !== null && typeof quote.name !== "string")
+      || FACTS.some((key) => quote[key] !== undefined && quote[key] !== null && (typeof quote[key] !== "number" || !Number.isFinite(quote[key])))
       || ["price", "prev_close", "change", "change_pct", "volume"].some((key) => quote[key] !== null && (typeof quote[key] !== "number" || !Number.isFinite(quote[key])))
       || ["as_of", "received_at", "volume_as_of"].some((key) => quote[key] !== null && !timestamp(quote[key]))) throw new Error("行情响应格式无效");
     seen.add(asset.id);

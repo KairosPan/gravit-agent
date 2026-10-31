@@ -1,14 +1,17 @@
 /** On-demand A-share quote snapshots from Tencent's public quote host, the one
  * the Lunhui quotes freeze already reads; no credential, no instrument
  * directory, no on-disk market cache. One GET per load:
- * https://qt.gtimg.cn/q=sh600519,sz300750,bj920185
+ * https://qt.gtimg.cn/q=marketStat,sh000001,sh600519,sz300750,bj920185 — the session's two
+ * codes first (cn-session.ts), then the quotes'.
  */
-import type { ProviderState, QuoteIdentity, QuoteUpdate, SnapshotResult, SnapshotSource } from "./quote-types.ts";
+import type { MarketStatus, ProviderState, QuoteIdentity, QuoteUpdate, SnapshotResult, SnapshotSource } from "./quote-types.ts";
+import { SESSION_CODES, sessionFromReply, type CnPhase } from "./cn-session.ts";
 
 export type QuoteFetch = (url: URL, options: RequestInit) => Promise<Response>;
 export interface QuoteSnapshotOptions {
   fetcher?: QuoteFetch;
   timeoutMs?: number;
+  now?: () => number;
 }
 export const QUOTE_RESPONSE_LIMIT = 1024 * 1024;
 export const QUOTE_TIMEOUT_MS = 7_000;
@@ -50,8 +53,20 @@ function volumeShares(fields: string[], price: number | null): number | null {
   }
   return null;
 }
+/** A finite number of either sign (a loss-making share's P/E), or null. */
+function signed(value: unknown): number | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+/** A figure Tencent gives in units of `scale` yuan (10,000 for turnover, 1e8 for market cap), in yuan. */
+function scaled(value: unknown, scale: number): number | null {
+  const parsed = number(value);
+  return parsed === null ? null : Math.round(parsed * scale);
+}
+const STATUS: Record<CnPhase, MarketStatus> = { trading: "open", midday: "midday", closed: "closed" };
 /** The exchange prefix Tencent files a six-digit A-share code under, or null. */
-function tencentCode(symbol: string): string | null {
+export function tencentCode(symbol: string): string | null {
   return /^6\d{5}$/.test(symbol) ? `sh${symbol}` : /^[03]\d{5}$/.test(symbol) ? `sz${symbol}` : /^[489]\d{5}$/.test(symbol) ? `bj${symbol}` : null;
 }
 function blank(asset: QuoteIdentity, message: string): QuoteUpdate {
@@ -72,6 +87,7 @@ function failureMessage(error: unknown): string {
 export function createQuoteSnapshots(options: QuoteSnapshotOptions = {}): SnapshotSource {
   const fetcher = options.fetcher ?? ((url, init) => fetch(url, init));
   const timeoutMs = options.timeoutMs ?? QUOTE_TIMEOUT_MS;
+  const now = options.now ?? Date.now;
 
   async function request(url: URL, outer?: AbortSignal): Promise<Buffer> {
     if (outer?.aborted) throw new ProviderError("abort");
@@ -120,12 +136,13 @@ export function createQuoteSnapshots(options: QuoteSnapshotOptions = {}): Snapsh
     const supported = [...codes.values()].filter((value): value is string => value !== null);
     if (!supported.length) return unavailable(assets, state("limited", "腾讯行情不支持这些证券代码"));
     try {
-      const body = await request(new URL(`${TENCENT_QUOTES}${supported.join(",")}`), signal);
+      const body = await request(new URL(`${TENCENT_QUOTES}${[...SESSION_CODES, ...supported].join(",")}`), signal);
       // GBK, decoded before the split: a GBK trail byte can read as "~" in any other decoding.
       const text = new TextDecoder("gbk").decode(body);
       const assignments = [...text.matchAll(/v_(\w+)="([^"]*)";/g)];
       // An unknown code answers `v_pv_none_match="1";`, so even a reply with no quote assigns something.
       if (!assignments.length) throw new ProviderError("payload");
+      const marketStatus = STATUS[sessionFromReply(text, now()).phase];
       const rows = new Map<string, string[]>();
       for (const [, code, value] of assignments) {
         const fields = value!.split("~");
@@ -138,7 +155,10 @@ export function createQuoteSnapshots(options: QuoteSnapshotOptions = {}): Snapsh
         const volume = asOf ? volumeShares(fields, price) : null;
         return { id: asset.id, source: SOURCE, feed: FEED, basis: "previous_close", price,
           prev_close: number(fields[4], true), volume, volume_as_of: volume === null ? null : asOf,
-          as_of: asOf, market_status: "unknown",
+          as_of: asOf, market_status: marketStatus,
+          name: fields[1]?.trim() || null, open: number(fields[5], true), high: number(fields[33], true), low: number(fields[34], true),
+          turnover: scaled(fields[37], 10_000), turnover_rate: number(fields[38]), market_cap: scaled(fields[45], 1e8),
+          pe_ttm: signed(fields[39]), limit_up: number(fields[47], true), limit_down: number(fields[48], true), amplitude: number(fields[43]),
           message: price === null ? "该标的暂无成交价" : !asOf ? "行情时间缺失" : "" };
       });
       const missing = updates.some((update) => !update.price || !update.as_of);

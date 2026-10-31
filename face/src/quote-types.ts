@@ -3,7 +3,7 @@
 export type QuoteMarket = "cn";
 export type QuoteProvider = "tencent";
 export interface QuoteIdentity { id: string; market: QuoteMarket; symbol: string }
-export type MarketStatus = "open" | "closed" | "unknown";
+export type MarketStatus = "open" | "midday" | "closed" | "unknown";
 export interface ProviderState {
   id: QuoteProvider;
   market: QuoteMarket;
@@ -27,7 +27,23 @@ export interface QuoteUpdate {
   volume_as_of?: string | null;
   market_status?: MarketStatus;
   message?: string;
+  /** The A-share page's facts (spec 2026-10-31 §5): yuan for `turnover` and `market_cap`, percent for
+   * `turnover_rate` and `amplitude`; a negative `pe_ttm` is a loss-making share's. */
+  name?: string | null;
+  open?: number | null;
+  high?: number | null;
+  low?: number | null;
+  turnover?: number | null;
+  turnover_rate?: number | null;
+  market_cap?: number | null;
+  pe_ttm?: number | null;
+  limit_up?: number | null;
+  limit_down?: number | null;
+  amplitude?: number | null;
 }
+/** The facts a quote carries beside its price, in the order the page draws them. */
+export const QUOTE_FACTS = ["open", "high", "low", "turnover", "turnover_rate", "market_cap", "pe_ttm", "limit_up", "limit_down", "amplitude"] as const;
+export type QuoteFact = typeof QUOTE_FACTS[number];
 export interface LiveQuote extends QuoteIdentity {
   transport?: "poll";
   price: number | null;
@@ -44,6 +60,17 @@ export interface LiveQuote extends QuoteIdentity {
   quote_status: "live" | "delayed" | "stale" | "unavailable";
   market_status: MarketStatus;
   message: string;
+  name: string | null;
+  open: number | null;
+  high: number | null;
+  low: number | null;
+  turnover: number | null;
+  turnover_rate: number | null;
+  market_cap: number | null;
+  pe_ttm: number | null;
+  limit_up: number | null;
+  limit_down: number | null;
+  amplitude: number | null;
 }
 export interface QuotePayload {
   ok: true;
