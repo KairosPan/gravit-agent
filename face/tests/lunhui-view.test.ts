@@ -201,11 +201,39 @@ test("sources: frozen or not, the refusals metrics records, the artifacts missin
   assert.deepEqual(view.sources.map((s: Row) => s.source), ["index", "limit-up", "boards", "quotes"]);
   const by = Object.fromEntries(view.sources.map((s: Row) => [s.source, s]));
   assert.deepEqual(by.boards, {
-    source: "boards", frozen: false, delayed: false,
+    source: "boards", frozen: false, delayed: false, provider: null, fallbackFrom: null,
     refusals: ["UPSTREAM_TIMEOUT", "UPSTREAM_INVALID", "UPSTREAM_INVALID"], missingIn: ["theme"],
   });
-  assert.deepEqual(by.index, { source: "index", frozen: true, delayed: false, refusals: [], missingIn: [] });
-  assert.deepEqual(by.quotes, { source: "quotes", frozen: false, delayed: false, refusals: [], missingIn: [] });
+  assert.deepEqual(by.index, { source: "index", frozen: true, delayed: false, provider: null, fallbackFrom: null, refusals: [], missingIn: [] });
+  assert.deepEqual(by.quotes, { source: "quotes", frozen: false, delayed: false, provider: null, fallbackFrom: null, refusals: [], missingIn: [] });
+});
+
+/** The run with a boards evidence entry added to the manifest, carrying `extra` (provider, fallback_from). */
+function withBoards(extra: Row): SealedRun {
+  const sealed = syntheticSealedRun();
+  sealed.manifest.evidence = [...sealed.manifest.evidence, { source: "boards", file: "evidence-boards.json", ...extra }];
+  return sealed;
+}
+
+test("sources: a stand-in boards row carries the provider and Eastmoney's refusal code", () => {
+  const row = buildView(withBoards({ provider: "同花顺问财", fallback_from: { provider: "东方财富", code: "UPSTREAM_INVALID" } }))
+    .sources.find((s: Row) => s.source === "boards")!;
+  assert.equal(row.frozen, true);
+  assert.equal(row.provider, "同花顺问财");
+  assert.equal(row.fallbackFrom, "UPSTREAM_INVALID");
+  const plain = buildView(withBoards({ provider: "东方财富" })).sources.find((s: Row) => s.source === "boards")!;
+  assert.deepEqual([plain.provider, plain.fallbackFrom], ["东方财富", null]);
+});
+
+test("viewDigest: the sources line says when boards came from iFinD", () => {
+  const sourcesLine = (sealed: SealedRun) => lines(viewDigest(buildView(sealed))).find((l) => l.startsWith("sources: "));
+  assert.equal(
+    sourcesLine(withBoards({ provider: "同花顺问财", fallback_from: { provider: "东方财富", code: "UPSTREAM_INVALID" } })),
+    "sources: index ✓ · limit-up ✓ · boards ✓ via iFinD (Eastmoney UPSTREAM_INVALID) · quotes —",
+  );
+  assert.equal(sourcesLine(withBoards({ provider: "同花顺问财" })), "sources: index ✓ · limit-up ✓ · boards ✓ via iFinD · quotes —");
+  assert.equal(sourcesLine(withBoards({ provider: "东方财富" })), "sources: index ✓ · limit-up ✓ · boards ✓ · quotes —");
+  assert.equal(sourcesLine(withBoards({})), "sources: index ✓ · limit-up ✓ · boards ✓ · quotes —");
 });
 
 test("verdicts: state, detail, challenges and lines per market module", () => {

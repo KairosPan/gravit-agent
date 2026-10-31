@@ -356,10 +356,18 @@ const SIGNAL_SIDES = [
   ["max_streak", "relay"],
 ];
 
+/** The provider whose boards stand in for Eastmoney's. */
+const STAND_IN_PROVIDER = "同花顺问财";
+
 /** The digest's budget in UTF-8 bytes. */
 const DIGEST_BYTES = 2048;
 
-/** @typedef {{ source: string, frozen: boolean, delayed: boolean, refusals: string[], missingIn: string[] }} SourceRow */
+/**
+ * A source's row: `provider` the manifest entry's provider (null on an older run), `fallbackFrom`
+ * the refusal code of the provider it stood in for (`fallback_from.code`, null without one).
+ * @typedef {{ source: string, frozen: boolean, delayed: boolean, provider: string | null, fallbackFrom: string | null,
+ *   refusals: string[], missingIn: string[] }} SourceRow
+ */
 /** @typedef {{ id: string, text: string }} VerdictLine */
 /**
  * A market module's tile: `state` its headline state (environment `index_state`, sentiment
@@ -407,6 +415,8 @@ function sourcesOf(sealed, artifacts) {
       source,
       frozen: entry !== undefined,
       delayed: entry?.delayed === true,
+      provider: str(entry?.provider),
+      fallbackFrom: str(entry?.fallback_from?.code),
       refusals: strings(refusals[source]),
       missingIn: Object.keys(artifacts).filter((module) => strings(artifacts[module].missing_sources).includes(source)),
     };
@@ -591,7 +601,7 @@ function countLines(view) {
     out.push(`reviewer: ${view.reviewer.items.length} items${against.map(([m, n]) => ` · ${m} ${n}`).join("")}`);
   }
   out.push(`sources: ${view.sources.map((s) => {
-    if (s.frozen) return `${s.source} ✓${s.delayed ? " delayed" : ""}`;
+    if (s.frozen) return `${s.source} ✓${s.provider === STAND_IN_PROVIDER ? ` via iFinD${s.fallbackFrom ? ` (Eastmoney ${s.fallbackFrom})` : ""}` : ""}${s.delayed ? " delayed" : ""}`;
     if (s.refusals.length || s.missingIn.length) return `${s.source} ✗${s.refusals.length ? ` ${refusalText(s.refusals)}` : ""}`;
     return `${s.source} —`;
   }).join(" · ")}`);

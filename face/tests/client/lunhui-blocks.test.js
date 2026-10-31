@@ -120,6 +120,18 @@ test('sources: one row each, frozen, refused with its codes counted, or not aske
   assert.match(rows[3], /^quotes—$/);
 });
 
+test('sources: a stand-in boards row reads via iFinD with Eastmoney\'s code; Eastmoney and older rows as before', () => {
+  const rowFor = extra => {
+    const sources = VIEW_1027.sources.map(s => (s.source === 'boards' ? { ...s, frozen: true, refusals: [], missingIn: [], ...extra } : s));
+    const html = sourcesHtml({ ...VIEW_1027, sources }, { kind: 'sources' });
+    return text([...html.matchAll(/<div class="lh-src">([\s\S]*?)<\/div>/g)].map(x => x[1])[2]);
+  };
+  assert.equal(rowFor({ provider: '同花顺问财', fallbackFrom: 'UPSTREAM_INVALID' }), 'boards✓ via iFinDEastmoney UPSTREAM_INVALID');
+  assert.equal(rowFor({ provider: '同花顺问财', fallbackFrom: null }), 'boards✓ via iFinD');
+  assert.equal(rowFor({ provider: '东方财富', fallbackFrom: null }), 'boards✓ frozen');
+  assert.equal(rowFor({}), 'boards✓ frozen');
+});
+
 test('the footer: the sources asked, the frozen time in China time, the run', () => {
   const saved = process.env.TZ;
   try {

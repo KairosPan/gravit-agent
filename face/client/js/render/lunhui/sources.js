@@ -12,8 +12,9 @@ export function codesWords(refusals) {
   return [...n].map(([c, k]) => (k > 1 ? `${c} ×${k}` : String(c))).join(', ');
 }
 
+// a stand-in run's boards came from iFinD (同花顺问财), Eastmoney's refusal code beside it
 function state(s) {
-  if (s.frozen) return `✓ frozen${s.delayed ? ' · delayed' : ''}`;
+  if (s.frozen) return `✓ ${s.provider === '同花顺问财' ? 'via iFinD' : 'frozen'}${s.delayed ? ' · delayed' : ''}`;
   if (!asked(s)) return '—';
   const codes = codesWords(s.refusals);
   return codes ? `✗ ${codes}` : '✗ not frozen';
@@ -23,7 +24,8 @@ export function sourcesHtml(view, block) {
   const sources = Array.isArray(view.sources) ? view.sources : [];
   const rows = sources.map(s => {
     const missing = Array.isArray(s.missingIn) && s.missingIn.length ? `<span class="lh-src-miss">missing in ${esc(s.missingIn.join(', '))}</span>` : '';
-    return `<div class="lh-src"><span class="lh-src-name">${esc(s.source)}</span><span class="lh-src-state">${esc(state(s))}</span>${missing}</div>`;
+    const from = s.frozen && s.provider === '同花顺问财' && typeof s.fallbackFrom === 'string' && s.fallbackFrom ? `<span class="lh-src-miss">Eastmoney ${esc(s.fallbackFrom)}</span>` : '';
+    return `<div class="lh-src"><span class="lh-src-name">${esc(s.source)}</span><span class="lh-src-state">${esc(state(s))}</span>${from}${missing}</div>`;
   }).join('');
   return `${label('Sources')}${headline(block)}<div class="lh-srcs">${rows}</div>`;
 }
