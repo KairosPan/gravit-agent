@@ -479,10 +479,11 @@ export function boot(win, host = {}) {
     if (!inTrade(r) && inTrade(was)) { stopTradeSearch(); trade.closeTicket(); }
     // a market's page (an Account key): its market followed on the stream with its candles and compare rows, and what is held of
     // it and the statement's lines about it read; leaving it lets the market go
-    const pageId = route => (route?.screen === 'markets' && isAccountKey(route.id) ? route.id : null);
+    // an A share's page (a cn: id) too: its history from the face's own route, nothing of the Account's
+    const pageId = route => (route?.screen === 'markets' && (isAccountKey(route.id) || /^cn:\d{6}$/.test(String(route.id))) ? route.id : null);
     if (pageId(r) !== pageId(was)) {
       markets.page(pageId(r));
-      if (pageId(r) !== null) { void account.loadHoldings(); void account.loadStatement(); }
+      if (isAccountKey(pageId(r))) { void account.loadHoldings(); void account.loadStatement(); }
     }
     // Trade entered on a market (#/trade/<id>), after a page left let its market go: the ticket on it — a buy, or the side a
     // market page's Buy or Sell asked for — unless one is open on it already

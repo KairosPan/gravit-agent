@@ -912,6 +912,23 @@ test("a market's page follows its market on the stream and reads what is held of
   store.timers.clear();
 });
 
+test("an A share's page, reached by a link, reads its 1D history from the face's own route; a range reads that range", async () => {
+  const f = fakeWindow({ hash: '#/markets', storage: memoryStorage() });
+  const h = accountHost({ rows: [row('s1')] });
+  const store = bootAccount(f, h, fakeMarkets());
+  await h.ready();
+  h.reads.length = 0;
+  f.win.location.hash = '#/markets/cn:600519';
+  await settle();
+  assert.ok(h.reads.includes('/data/cn/candles?id=cn%3A600519&range=1D'), JSON.stringify(h.reads));
+  assert.equal(h.reads.some(r => r.startsWith('/data/account/holdings')), false, 'nothing held of an A share is read from the Account');
+  h.reads.length = 0;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'setRange', id: 'cn:600519', value: '1M' } });
+  await settle();
+  assert.ok(h.reads.includes('/data/cn/candles?id=cn%3A600519&range=1M'), JSON.stringify(h.reads));
+  store.timers.clear();
+});
+
 test("a star on an Account market goes to the Account's own store and comes off in one press, an old star's find too; Remove forgets an old star not listed", async () => {
   // an old us: star the Account lists (its explore answers stock:NVDA for NVDA) and one it does not; the Account's store full, so
   // the found star stays on the cn list, starred as its key
