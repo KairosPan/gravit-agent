@@ -100,6 +100,7 @@ test('show reads explore now and every 20 s; quotes for the pairs in view every 
     tab: 'all', sort: 'volume', q: '',
     explore: {}, results: IDLE, accountQuotes: {}, candles: {}, compare: {}, watch: [], watchError: null, asked: {},
     watchlist: [], quotes: {}, providers: [], connection: 'idle', search: { query: '', status: 'idle', assets: [], partial: false }, hitQuotes: {},
+    rank: { status: 'idle', data: null, at: null, sort: 'volume', message: null },
   }, 'the slice the host starts from');
   // two quiet stocks past the fixture's twelve rows: Most traded puts them last, so the first twelve rows leave them out
   const quiet = (symbol, usd) => ({

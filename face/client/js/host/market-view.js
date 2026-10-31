@@ -150,10 +150,84 @@ export function isAccountKey(id) {
   return typeof id === 'string' && /^(coin|stock|perp|rwa|event|preipo|kalshi|pm|pmus):/.test(id);
 }
 
+// ── the China tab (spec 2026-10-31): the face's own ranking of the A shares, and the A-share words ──
+
+/** The China tab's id: the face's own tab, never one of the Account's (no explore read is ever asked for it). */
+export const CHINA_TAB = 'china';
+
+/** An A share's board from its code: STAR (688, 689), ChiNext (300–302), SH, SZ or BJ; '' for none. */
+export function cnBoardOf(symbol) {
+  const s = String(symbol ?? '');
+  if (/^68[89]/.test(s)) return 'STAR';
+  if (/^30[0-2]/.test(s)) return 'ChiNext';
+  if (/^6/.test(s)) return 'SH';
+  if (/^[03]/.test(s)) return 'SZ';
+  if (/^[489]/.test(s)) return 'BJ';
+  return '';
+}
+
+/** An A share's tile: its name's first character, else (no name, or the name is the code) its code. */
+export function cnTileOf(name, symbol) {
+  const n = typeof name === 'string' ? name.trim() : '';
+  return n && n !== symbol ? Array.from(n)[0] : String(symbol ?? '');
+}
+
+const beijing = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+// an instant's Beijing date and time, `MM-DD` and `HH:MM`; null for one that does not parse
+function beijingOf(iso) {
+  const t = typeof iso === 'string' ? Date.parse(iso) : NaN;
+  if (!Number.isFinite(t)) return null;
+  const p = Object.fromEntries(beijing.formatToParts(new Date(t)).map(x => [x.type, x.value]));
+  return { date: `${p.month}-${p.day}`, time: `${p.hour}:${p.minute}` };
+}
+
+/** The line above the China table, from the ranking's session: closed, the last session's close; the midday break; else nothing. */
+export function chinaWord(session) {
+  if (session?.phase === 'closed' && typeof session.lastSession === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(session.lastSession)) {
+    return `Closed · ${session.lastSession.slice(5)} 15:00 Beijing`;
+  }
+  if (session?.phase === 'midday') return 'Midday break · 11:30 Beijing';
+  return '';
+}
+
+/** An A-share page's state line (spec 2026-10-31 §5): the wire down, the midday break, closed (the quote's session's close),
+ *  live, delayed (the last trade's time), all in Beijing time; nothing before a priced quote. No Halted: no mark was found. */
+export function cnStateWord(quote, connection) {
+  if (connection === 'error') return 'Quotes unavailable';
+  if (!quote || number(quote.price) === null) return '';
+  const at = beijingOf(quote.as_of);
+  if (quote.market_status === 'midday') return 'Tencent · Midday break · 11:30 Beijing';
+  if (quote.market_status === 'closed') return at ? `Tencent · Closed · ${at.date} 15:00 Beijing` : 'Tencent · Closed';
+  if (quote.market_status === 'open') return quote.quote_status === 'live' ? 'Tencent · Live' : at ? `Tencent · Delayed · ${at.time} Beijing` : 'Tencent · Delayed';
+  return 'Tencent';
+}
+
+// the ranking's answer as the store keeps it, when it is one
+const rankOf = m => (m?.rank?.data?.ok === true && Array.isArray(m.rank.data.items) ? m.rank.data : null);
+
+/** China's rows: the ranking's items in its order, when the read is for the sort in effect (no rows in another sort's order). */
+export function chinaRowsOf(markets) {
+  const m = isRecord(markets) ? markets : {};
+  const data = rankOf(m);
+  const sort = m.sort === 'movers' ? 'movers' : 'volume';
+  if (!data || data.sort !== sort) return [];
+  const starred = new Set(records(m.watchlist).map(a => normalizeAsset(a)?.id).filter(Boolean));
+  return records(data.items).filter(i => /^cn:\d{6}$/.test(str(i.id))).map(i => {
+    const symbol = str(i.symbol) || i.id.slice(3);
+    const priced = { price: number(i.price), unit: 'cny', changePct: number(i.change_pct), change24h: null, volume: number(i.turnover), volumeUnit: 'yuan', implied: null };
+    return {
+      id: i.id, source: 'china', kind: 'stock', name: str(i.name) || symbol, tile: cnTileOf(str(i.name), symbol), sub: `${symbol} · ${cnBoardOf(symbol)}`,
+      priced, price: priced.price, live: null, sourceWord: 'Tencent', closeTime: null, pastEnd: false, paper: false,
+      watched: starred.has(i.id), atAccount: false, legs: [], tabs: [CHINA_TAB],
+    };
+  });
+}
+
 /** The table's tabs from All's explore answer: All first, with the Account's count and the cn rows', then the Account's tabs that
- *  have something in them, in ACCOUNT_TABS's order and words; Stocks counts the cn rows too, and is drawn for them alone. An
- *  answer not read, or one that is not an answer, is All, and Stocks for the cn rows. As the Account's page orders them, All
- *  results leads while `searching` and Watching closes the row while `watching` (anything is starred), neither with a count. */
+ *  have something in them, in ACCOUNT_TABS's order and words (Stocks is the Account's alone: the A shares' home is China). An
+ *  answer not read, or one that is not an answer, is All alone. China (`opts.china`, `{ count }`) follows the Account's tabs
+ *  (spec 2026-10-31 §4). As the Account's page orders them, All results leads while `searching` and Watching closes the row
+ *  while `watching` (anything is starred), neither with a count. */
 export function tabsOf(explore, cnCount, opts) {
   const cn = Math.max(0, number(cnCount) ?? 0);
   const counts = new Map();
@@ -162,12 +236,13 @@ export function tabsOf(explore, cnCount, opts) {
   }
   const out = [];
   for (const [id, label] of ACCOUNT_TABS) {
-    const count = (counts.get(id) ?? 0) + (id === 'all' || id === 'stocks' ? cn : 0);
+    const count = (counts.get(id) ?? 0) + (id === 'all' ? cn : 0);
     if (id === 'all' || count > 0) out.push({ id, label, count });
   }
   return [
     ...(opts?.searching ? [{ id: 'results', label: 'All results', count: null }] : []),
     ...out,
+    ...(opts?.china ? [{ id: CHINA_TAB, label: 'China', count: opts.china.count ?? null }] : []),
     ...(opts?.watching ? [{ id: 'watching', label: 'Watching', count: null }] : []),
   ];
 }
@@ -377,9 +452,10 @@ function cnRow(asset, markets, watched) {
     volume: number(quote?.volume), volumeUnit: 'shares', implied: null,
   };
   return {
-    id: asset.id, source: 'face', asset, quote, kind: 'stock', name: asset.name || asset.symbol, tile: asset.symbol, sub: asset.exchange || '',
+    id: asset.id, source: 'face', asset, quote, kind: 'stock', name: asset.name || asset.symbol, tile: cnTileOf(asset.name, asset.symbol),
+    sub: `${asset.symbol} · ${cnBoardOf(asset.symbol)}`,
     priced, price: priced.price, live: null, sourceWord: sourceWord(quote ?? { market: 'cn' }), closeTime: null, pastEnd: false, paper: false,
-    watched, atAccount: false, legs: [], tabs: ['all', 'stocks'],
+    watched, atAccount: false, legs: [], tabs: ['all'],
   };
 }
 
@@ -442,18 +518,23 @@ export function tableOf(markets, now = Date.now(), page = null) {
   const searching = !blank(m.q);
   const reads = isRecord(m.explore) ? m.explore : {};
   const atPage = watchKeysOf(page, exploreRowsOf(m));
-  const rows = unsortedRowsOf(m, searching, reads, now, atPage);
-  const { sorts, sort } = sortsOf(rows, m.sort);
+  // China (spec 2026-10-31 §4): the ranking's rows in its order, its two sorts, its read and its session
+  const onChina = m.tab === CHINA_TAB && !searching;
+  const rows = onChina ? chinaRowsOf(m) : unsortedRowsOf(m, searching, reads, now, atPage);
+  const { sorts, sort } = onChina
+    ? { sorts: ACCOUNT_SORTS.filter(s => s.id !== 'closing'), sort: m.sort === 'movers' ? 'movers' : 'volume' }
+    : sortsOf(rows, m.sort);
   const watchlist = records(m.watchlist).map(a => normalizeAsset(a)).filter(Boolean);
   const all = bodyOf(reads, 'all');
   const counted = all !== undefined && all !== null;
   const watching = starredOf(m).length > 0 || watchlist.length > 0 || atPage.length > 0;
-  const tabs = tabsOf(all, watchlist.filter(a => a.market === 'cn').length, { watching, searching })
-    .map(t => (counted ? t : { ...t, count: null }));
+  const chinaCount = rankOf(m) ? Math.max(0, number(rankOf(m).total) ?? 0) : null;
+  const tabs = tabsOf(all, watchlist.filter(a => a.market === 'cn').length, { watching, searching, china: { count: chinaCount } })
+    .map(t => (counted || t.id === CHINA_TAB ? t : { ...t, count: null }));
   const mine = own(reads, KIND_TABS.has(m.tab) ? m.tab : 'all');
-  const source = searching ? m.results : mine?.data ? mine : own(reads, 'all');
+  const source = onChina ? m.rank : searching ? m.results : mine?.data ? mine : own(reads, 'all');
   const read = { status: str(source?.status) || 'idle', answered: isRecord(source) && source.data != null, message: str(source?.message) || null };
-  return { rows: sorted(rows, sort), sorts, sort, tabs, read };
+  return { rows: onChina ? rows : sorted(rows, sort), sorts, sort, tabs, read, china: onChina, session: onChina ? rankOf(m)?.session ?? null : null };
 }
 
 /** The table's rows (tableOf's, `page` the Account's), sorted by the sort in effect. */
@@ -611,8 +692,42 @@ export function faceAssetOf(markets, id) {
   const canonical = canonicalId(id);
   if (!canonical) return null;
   const m = isRecord(markets) ? markets : {};
-  return [...records(m.watchlist), ...records(m.search?.assets)].map(a => normalizeAsset(a)).find(a => a?.id === canonical)
-    ?? normalizeAsset({ id: canonical });
+  const listed = [...records(m.watchlist), ...records(m.search?.assets)].map(a => normalizeAsset(a)).find(a => a?.id === canonical);
+  if (listed) return listed;
+  // a share the China ranking lists, else one whose quote has landed with its name (a deep link)
+  const ranked = records(rankOf(m)?.items).find(i => i.id === canonical);
+  const quoted = own(m.quotes, canonical);
+  const name = str(ranked?.name) || (isRecord(quoted) ? str(quoted.name) : '');
+  return normalizeAsset(name ? { id: canonical, name } : { id: canonical });
+}
+
+// the A-share page's facts, in the order the page draws them (spec 2026-10-31 §5), each a quote field and its unit
+const CN_FACTS = [
+  ['Previous close', 'prev_close', 'cny'], ['Open', 'open', 'cny'], ['High', 'high', 'cny'], ['Low', 'low', 'cny'],
+  ['Turnover', 'turnover', 'yuan'], ['Turnover rate', 'turnover_rate', 'pct'], ['Market cap', 'market_cap', 'yuan'], ['P/E (TTM)', 'pe_ttm', 'ratio'],
+  ['Limit up', 'limit_up', 'cny'], ['Limit down', 'limit_down', 'cny'], ['Volume', 'volume', 'shares'], ['Amplitude', 'amplitude', 'pct'],
+];
+
+/** An A share's page (spec 2026-10-31 §5), or null for an id that is not one: its asset, its quote (the live wire's, else its
+ *  search hit's), the twelve facts `{ label, value, unit }`, the range kept (1D until one is chosen) and its history read —
+ *  `sessions` (1D, 5D) or `candles` (longer), `current` once a read for the range has answered. */
+export function cnPageOf(markets, id) {
+  const asset = faceAssetOf(markets, id);
+  if (!asset || asset.market !== 'cn') return null;
+  const m = isRecord(markets) ? markets : {};
+  const quote = own(m.quotes, asset.id) ?? own(m.hitQuotes, asset.id) ?? null;
+  const chart = own(m.candles, asset.id);
+  const range = isRecord(chart) && CANDLE_RANGES.includes(chart.range) ? chart.range : '1D';
+  const data = isRecord(chart) && chart.data?.ok === true ? chart.data : null;
+  const current = data !== null && data.range === range;
+  return {
+    asset, quote, range,
+    facts: CN_FACTS.map(([label, key, unit]) => ({ label, value: number(quote?.[key]), unit })),
+    history: {
+      status: str(chart?.status) || 'idle', message: chart?.status === 'error' ? str(chart.message) || null : null, current,
+      sessions: current && Array.isArray(data.sessions) ? data.sessions : null, candles: current && Array.isArray(data.candles) ? data.candles : null,
+    },
+  };
 }
 
 /** What Hand to Gravit names a market by, `{ symbol, name }`: an Account key by its page's item — its base, else its name, and its
