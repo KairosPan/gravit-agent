@@ -3,23 +3,13 @@
 // proportion to the largest); the readout answers the switch (the up/down ratio) or the picked bucket (its count and share).
 import { esc, attrs, cls } from '../../html.js';
 import { seg } from '../controls.js';
-import { label, headline, readout, count } from './block.js';
+import { label, headline, readout, count, yuan } from './block.js';
 
 const NAMED = { '-11': 'Limit-down', 0: 'Unchanged', 11: 'Limit-up' };
 const signed = n => (n < 0 ? `−${-n}` : n > 0 ? `+${n}` : '0');
 const bucketName = n => NAMED[n] ?? `Bucket ${signed(n)}`;
 const pct = (n, total) => (total > 0 ? `${(n / total * 100).toFixed(1)}%` : '—');
 const stocks = n => `${n} stock${n === 1 ? '' : 's'}`;
-
-// the turnover in yuan, in plan 1's digest grammar (lib/view.mjs turnoverText) so the tile reads like the number Gravit
-// quotes: X.XX万亿 from 1e12, X.XX亿 from 1e8, else whole yuan
-function yuan(v) {
-  const n = Number(v);
-  if (v == null || !Number.isFinite(n)) return '—';
-  if (Math.abs(n) >= 1e12) return `¥${(n / 1e12).toFixed(2)}万亿`;
-  if (Math.abs(n) >= 1e8) return `¥${(n / 1e8).toFixed(2)}亿`;
-  return `¥${Math.round(n)}`;
-}
 
 function ratioWords(b) {
   const up = Number(b.advancers), down = Number(b.decliners);

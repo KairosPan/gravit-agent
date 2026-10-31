@@ -6,6 +6,7 @@
 // Every time drawn comes from the grid (minuteLabel, a copy of the plugin's lib/market.mjs one: the client cannot import the
 // plugin), never from a Date in the browser's zone: 09:30–11:30 are points 0–120, 13:00–15:00 are 121–241, China time.
 import { esc } from '../../html.js';
+import { yuan } from './block.js';
 
 const LAST = 241;
 const W = 760, H = 236, LEFT = 56, PLOT = 652, MID = 118, HALF = 108;
@@ -133,12 +134,11 @@ export function cursorPatch(view, symbol, minute) {
   const at = Math.min(price.length - 1, Math.max(0, Math.round(Number(minute)) || 0));
   const prec = Number(row.minutes.prec);
   const g = chartGeometry(row.minutes);
-  const amount = Number(row.minutes.amount?.[at]);
-  const yi = Number.isFinite(amount) ? `¥${(amount / 1e8).toFixed(1)}亿` : '¥—';
+  const amount = row.minutes.amount?.[at];
   const pct = prec > 0 ? signedPct((price[at] - prec) / prec * 100) : '—';
   return {
     x: n1(g.X(at)), y: n1(g.Y(price[at])),
-    readout: `${row.name ?? symbol} · ${minuteLabel(at)} · ${fix2(price[at])} · ${pct} · ${yi} this minute`,
+    readout: `${row.name ?? symbol} · ${minuteLabel(at)} · ${fix2(price[at])} · ${pct} · ${yuan(amount)} this minute`,
   };
 }
 
