@@ -762,7 +762,7 @@ export function boot(win, host = {}) {
     // a composed answer's picks, by the answer's id: a verdict tile (pressed again, it closes), Counts or By change, a bucket
     lunhuiUi: el => {
       const { id, field, value } = el.dataset;
-      let v = field === 'bucket' ? Number(value) : value;
+      let v = field === 'bucket' || field === 'rung' ? Number(value) : value;
       if (field === 'tile' && store.get().lunhui?.ui?.[id]?.tile === v) v = null;
       store.dispatch('lunhuiUi', { id, patch: { [field]: v } });
     },

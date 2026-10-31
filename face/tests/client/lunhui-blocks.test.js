@@ -150,3 +150,42 @@ test('a loaded composed answer draws the four in the call order and the footer a
   // loading: skeletons, no footer yet
   assert.doesNotMatch(composedHtml(m, { status: 'loading' }, {}, { id: 'c1' }), /lh-foot/);
 });
+
+test('the ladder: rungs top down, the gap rung stressed, promotions with meters, misses with today’s change', async () => {
+  const { ladderHtml } = await import('../../client/js/render/lunhui/ladder.js');
+  const html = ladderHtml(VIEW_1027, { kind: 'ladder' }, {}, ID);
+  assert.deepEqual([...html.matchAll(/data-field="rung" data-value="(\d+)"/g)].map(x => x[1]), ['5', '4', '3', '2', '1']);
+  assert.equal(text(html.match(/<div class="lh-label">[^]*?<\/div>/)[0]), 'Limit-up ladder · height 5 · 41 sealed');
+  const rows = html.split('<div class="lh-rung').slice(1);
+  const rung = n => rows.find(r => r.includes(`data-value="${n}"`));
+  assert.ok(rung(3).startsWith(' stress'));
+  assert.match(text(rung(3)), /gap · none of 8 sealed/);
+  assert.match(text(rung(3)), /2→3 0\/8/);
+  assert.match(rung(3), /width:0%/);
+  assert.ok(!rung(4).startsWith(' stress'));
+  assert.match(text(rung(4)), /样本600014 −9\.91%/);
+  assert.match(text(rung(4)), /broke 1/);
+  assert.match(text(rung(1)), /1st try 29\/53/);
+  assert.match(rung(1), /width:55%/);
+});
+
+test('the ladder readout follows the focus, the picked rung and the first boards', async () => {
+  const { ladderHtml } = await import('../../client/js/render/lunhui/ladder.js');
+  assert.match(readout(ladderHtml(VIEW_1027, { kind: 'ladder' }, {}, ID)), /^4→5 · 1 of 1 /);
+  const focused = ladderHtml(VIEW_1027, { kind: 'ladder', focus: { rung: 3 } }, {}, ID);
+  assert.match(readout(focused), /^2→3 · 0 of 8 · missed: 样本000022 \+1\.00%/);
+  assert.match(readout(focused), / · broke: 样本000021$/);
+  assert.match(focused, /aria-pressed="true"[^>]*>3</);
+  assert.equal(readout(ladderHtml(VIEW_1027, { kind: 'ladder' }, { rung: 1 }, ID)), 'First boards · 29 of 53 tries sealed · 24 broke');
+  assert.match(readout(ladderHtml(VIEW_1027, { kind: 'ladder', focus: { rung: 3 } }, { rung: 4 }, ID)), /^3→4 · 3 of 6 · missed: 样本600014 −9\.91%/);
+});
+
+test('the ladder escapes names and answers an unfrozen ladder', async () => {
+  const { ladderHtml } = await import('../../client/js/render/lunhui/ladder.js');
+  const view = { ladder: { height: 2, rungs: [{ n: 2, sealed: [{ name: '<b>x</b>', firstSeal: '09:30', breaks: 2 }], from: 1, promoted: 1, missed: [], broke: [], gap: false }], firstTries: { sealed: 0, tries: 0 }, unavailable: null } };
+  const html = ladderHtml(view, { kind: 'ladder' }, {}, ID);
+  assert.doesNotMatch(html, /<b>/);
+  assert.match(html, /&lt;b&gt;x&lt;\/b&gt;/);
+  assert.match(text(html), /09:30 broke 2/);
+  assert.match(ladderHtml({ ladder: { unavailable: 'limit-up not frozen' } }, { kind: 'ladder' }, {}, ID), /not frozen/);
+});
