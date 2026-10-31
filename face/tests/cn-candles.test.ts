@@ -61,10 +61,9 @@ test("each range asks Tencent for its own read", async () => {
     const answer = await candles(MOUTAI, range);
     assert.deepEqual(urls, [want[range]], range);
     assert.equal(answer.range, range);
-    if (answer.range === "1D") assert.deepEqual(answer.sessions.map((s) => s.date), ["2026-10-30"]);
-    else if (answer.range === "5D") assert.deepEqual(answer.sessions.map((s) => s.date), ["2026-10-29", "2026-10-30"]);
-    else if (answer.range === "YTD") assert.equal(answer.candles.length, 2, "bars from Jan 1 of the last bar's year");
-    else assert.equal(answer.candles.length, 3, range);
+    if ("sessions" in answer) {
+      assert.deepEqual(answer.sessions.map((s) => s.date), range === "1D" ? ["2026-10-30"] : ["2026-10-29", "2026-10-30"], range);
+    } else assert.equal(answer.candles.length, range === "YTD" ? 2 : 3, range);   // YTD: bars from Jan 1 of the last bar's year
   }
 });
 
