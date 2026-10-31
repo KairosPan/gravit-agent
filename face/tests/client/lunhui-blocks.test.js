@@ -68,8 +68,12 @@ test('breadth in Counts: the split bar, the counts row, the tiles and the ratio 
   for (const g of ['flex-grow:567', 'flex-grow:34', 'flex-grow:4774']) assert.ok(html.includes(g), g);
   assert.ok(html.indexOf('flex-grow:567') < html.indexOf('flex-grow:34') && html.indexOf('flex-grow:34') < html.indexOf('flex-grow:4774'));
   const t = text(html);
-  for (const s of ['↑ 567 up · 10.5%', '34 unchanged', '↓ 4774 down · 88.8%', 'Limit-up', '41', 'Limit-down', '22', 'Turnover', '¥1.46 tn']) assert.ok(t.includes(s), s);
+  for (const s of ['↑ 567 up · 10.5%', '34 unchanged', '↓ 4774 down · 88.8%', 'Limit-up', '41', 'Limit-down', '22', 'Turnover', '¥1.46万亿']) assert.ok(t.includes(s), s);
   assert.equal(readout(html), 'Up/down ratio 0.12 · about 1 riser for every 8 fallers');
+  // the digest's turnover grammar: 亿 from 1e8, whole yuan below
+  const tile = turnover => text(breadthHtml({ ...VIEW_1027, breadth: { ...VIEW_1027.breadth, turnover } }, { kind: 'breadth' }, {}, ID)).match(/Turnover(¥[^A-Z↑↓]*?)Up\/down/)?.[1];
+  assert.equal(tile(35_012_000_000), '¥350.12亿');
+  assert.equal(tile(98_765_432), '¥98765432');
   assert.match(html, /<div class="lh-readout" role="status" aria-live="polite">/);
   // the switch: Counts pressed, By change not, both naming this answer and the breadth field
   assert.match(html, /<button[^>]*class="seg-item pressed"[^>]*data-action="lunhuiUi" data-value="counts" data-id="c1-p7" data-field="breadth">Counts<\/button>/);
