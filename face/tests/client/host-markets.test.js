@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { createStore } from '../../client/js/store.js';
 import { reducers } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
-import { startMarkets, EXPLORE_MS, QUOTES_MS, QUOTE_PAIRS, WATCH_LIMIT } from '../../client/js/host/markets.js';
+import { startMarkets, EXPLORE_MS, QUOTES_MS, QUOTE_PAIRS, WATCH_LIMIT, RANK_PATH, CN_CANDLES_PATH } from '../../client/js/host/markets.js';
 import { rowsOf, pageOf } from '../../client/js/host/market-view.js';
 import { STORAGE_KEY, ACCOUNT_WATCH_KEY, readAccountWatch, saveAccountWatch } from '../../client/js/wire/market-model.js';
 
@@ -542,7 +542,7 @@ test('page: candles for the range, compare for a coin, the stream follow; leavin
   await settle();
   const quiet = r.reads.length;
   r.markets.page('cn:600519');
-  assert.equal(r.reads.length, quiet, "a cn page is the face's wire's");
+  assert.deepEqual(r.reads.slice(quiet), ['/data/cn/candles?id=cn%3A600519&range=1D'], "a cn page reads the face's own history, nothing of the Account");
   assert.deepEqual(r.follows.at(-1), [], 'and follows nothing of the Account');
   // back to a page: its kept range
   r.store.dispatch('setMarketsTab', 'all');
@@ -906,4 +906,74 @@ test("a refused setWatch is the Account's sentence in the watchlist's words; the
   await settle();
   assert.deepEqual(after.at(-1), ['setWatch', TAKEN.body]);
   r.markets.close();
+});
+
+// ── the China tab (spec 2026-10-31): the ranking while China is on screen, an A share's history ──
+
+const RANKED = sort => ({ ok: true, sort, total: 5577, asOf: '2026-10-31T06:46:10Z', session: { phase: 'closed', lastSession: '2026-10-30' },
+  items: [{ id: 'cn:300502', symbol: '300502', name: '新易盛', price: 196, change_pct: -14.19, turnover: 21_607_600_000 }] });
+const rankAnswer = path => (path.startsWith(RANK_PATH) ? RANKED(query(path).sort) : undefined);
+
+test('China on screen reads the ranking at once and every EXPLORE_MS, never the Account for a china tab', async () => {
+  const r = rig({ answer: rankAnswer });
+  r.store.dispatch('setMarketsTab', 'china');
+  r.markets.show(true);
+  await settle();
+  assert.ok(r.reads.includes('/data/cn/rank?sort=volume'));
+  assert.equal(r.m().rank.data.items[0].name, '新易盛');
+  const before = r.reads.filter(p => p.startsWith(RANK_PATH)).length;
+  r.fire(EXPLORE_MS);
+  await settle();
+  assert.equal(r.reads.filter(p => p.startsWith(RANK_PATH)).length, before + 1);
+  assert.equal(r.reads.some(p => p.includes('tab=china')), false);
+});
+
+test('a sort chosen on China reads that sort; the answer for the old sort lands nowhere', async () => {
+  const slow = deferred();
+  const r = rig({ answer: path => (path === '/data/cn/rank?sort=volume' ? slow.promise : rankAnswer(path)) });
+  r.store.dispatch('setMarketsTab', 'china');
+  r.markets.show(true);
+  r.store.dispatch('setMarketsSort', 'movers');
+  await settle();
+  assert.ok(r.reads.includes('/data/cn/rank?sort=movers'));
+  slow.resolve(RANKED('volume'));
+  await settle();
+  assert.equal(r.m().rank.sort, 'movers');
+  assert.equal(r.m().rank.data.sort, 'movers');
+});
+
+test('off screen, or on another tab, nothing reads the ranking', async () => {
+  const r = rig({ answer: rankAnswer });
+  r.store.dispatch('setMarketsTab', 'china');
+  await settle();
+  assert.equal(r.reads.some(p => p.startsWith(RANK_PATH)), false, 'not shown');
+  r.store.dispatch('setMarketsTab', 'crypto');
+  r.markets.show(true);
+  r.fire(EXPLORE_MS);
+  await settle();
+  assert.equal(r.reads.some(p => p.startsWith(RANK_PATH)), false, 'another tab');
+});
+
+test("an A share's page reads its 1D history; a range reads that range", async () => {
+  const r = rig({ answer: path => (path.startsWith(CN_CANDLES_PATH) ? { ok: true, range: query(path).range, sessions: [] } : undefined) });
+  r.markets.page('cn:600519');
+  await settle();
+  assert.ok(r.reads.includes('/data/cn/candles?id=cn%3A600519&range=1D'));
+  assert.equal(r.m().candles['cn:600519'].status, 'ready');
+  r.markets.range('cn:600519', '1M');
+  await settle();
+  assert.ok(r.reads.includes('/data/cn/candles?id=cn%3A600519&range=1M'));
+  assert.equal(r.m().candles['cn:600519'].range, '1M');
+});
+
+test("a star on a China row keeps the share's name", async () => {
+  const storage = memoryStorage();
+  const r = rig({ storage, answer: rankAnswer });
+  r.store.dispatch('setMarketsTab', 'china');
+  r.markets.show(true);
+  await settle();
+  r.markets.watch('cn:300502');
+  const saved = JSON.parse(storage.getItem(STORAGE_KEY)).items.find(a => a.id === 'cn:300502');
+  assert.equal(saved.name, '新易盛');
+  assert.equal(saved.currency, 'CNY');
 });

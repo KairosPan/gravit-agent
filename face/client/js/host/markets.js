@@ -10,12 +10,15 @@ import {
   readWatchlist, saveWatchlist, STORAGE_KEY, readAccountWatch, saveAccountWatch, ACCOUNT_WATCH_KEY, normalizeAsset,
 } from '../wire/market-model.js';
 import { parsePayload } from '../wire/market-quotes.js';
-import { ACCOUNT_TABS, canonicalId, isAccountKey, rowsOf, matchKey, pairsOf, pageOf, followOf, watchedOf, setWatchOf } from './market-view.js';
+import { ACCOUNT_TABS, CHINA_TAB, canonicalId, isAccountKey, rowsOf, matchKey, pairsOf, pageOf, followOf, watchedOf, setWatchOf } from './market-view.js';
 import { refusedAt, refusalOf } from './owner-view.js';
 
 export const EXPLORE_MS = 20_000, QUOTES_MS = 5_000, QUOTE_PAIRS = 12;
 export const WATCH_LIMIT = 100;   // either list's: the quote wire's own subscription limit, the Account keys' cap
 export const HIT_QUOTES = 30;     // the cn hits one search reads a quote for
+// the China tab's ranking and an A share's history (spec 2026-10-31): the face's own routes over Tencent
+export const RANK_PATH = '/data/cn/rank';
+export const CN_CANDLES_PATH = '/data/cn/candles';
 
 const EXPLORE = '/data/account/explore';
 const ROWS = 200;                 // the explore rows a tab's read and a search ask for
@@ -49,6 +52,7 @@ export function startMarkets({
   let exploreTimer = null;
   let quotesTimer = null;
   let readTab = null;        // the tab the explore poll reads for while shown
+  let readSort = null;       // the sort the China ranking was last asked for while shown
   let inView = null;         // the row ids rowsInView last named; null: every row
   let waiting = null;        // a page asked for whose market no read lists yet: its reads wait for the read that does
   let followed = false;      // the stream follows a page's market
@@ -100,6 +104,20 @@ export function startMarkets({
     }, ['exploreLoading', { tab }]);
   }
 
+  // China's ranking for the sort in effect: the answer for a sort the screen has left lands nowhere (one flight, the newer path's)
+  function readRank() {
+    const sort = store.get().markets.sort === 'movers' ? 'movers' : 'volume';
+    readSort = sort;
+    fly('rank', `${RANK_PATH}?sort=${sort}`, (body, refused) => {
+      if (!refused && answered(body, 'items')) store.dispatch('rankLoaded', { sort, data: body, at: now() });
+      else store.dispatch('rankFailed', { sort, at: now(), message: messageOf(body) });
+    }, ['rankLoading', { sort }]);
+  }
+  // the read for the tab on screen: China's ranking there, else the Account's explore
+  function readShown() {
+    if (store.get().markets.tab === CHINA_TAB) readRank(); else readExplore();
+  }
+
   // the quotes of the rows in view — the table's rows, those rowsInView last named — at their most traded connected lines,
   // twelve a call; none while one is out, so a slow Account is never asked again before it answers. A market's page names its
   // own key: when its market is no row of the tab on screen (a deep link to a market only a list beside the items carries, a
@@ -122,7 +140,7 @@ export function startMarkets({
 
   // while Markets is on screen: explore every EXPLORE_MS for the tab on screen, the quotes every QUOTES_MS
   function armExplore() {
-    exploreTimer = schedule(() => { exploreTimer = null; if (closed || !shown) return; armExplore(); readExplore(); }, EXPLORE_MS);
+    exploreTimer = schedule(() => { exploreTimer = null; if (closed || !shown) return; armExplore(); readShown(); }, EXPLORE_MS);
   }
   function armQuotes() {
     quotesTimer = schedule(() => { quotesTimer = null; if (closed || !shown) return; armQuotes(); readQuotes(); }, QUOTES_MS);
@@ -136,7 +154,7 @@ export function startMarkets({
     readTab = store.get().markets.tab;
     if (exploreTimer !== null) { cancelTimer(exploreTimer); exploreTimer = null; }
     armExplore();
-    readExplore();
+    readShown();
   }
 
   // the range a page's chart is drawn at: the one kept for it, 1D until one is chosen
@@ -152,6 +170,14 @@ export function startMarkets({
     fly(`candles:${id}`, path, (body, refused) => {
       if (rangeOf(id) !== range) return;
       if (!refused && answered(body, 'candles')) store.dispatch('candlesLoaded', { id, range, data: body, at: now() });
+      else store.dispatch('candlesFailed', { id, range, at: now(), message: messageOf(body) });
+    }, ['candlesLoading', { id, range }]);
+  }
+  // an A share's history at the range, from the face's own route; an answer for a range the page has left lands nowhere
+  function readCnCandles(id, range) {
+    fly(`candles:${id}`, `${CN_CANDLES_PATH}?id=${encodeURIComponent(id)}&range=${encodeURIComponent(range)}`, (body, refused) => {
+      if (rangeOf(id) !== range) return;
+      if (!refused && body?.ok === true) store.dispatch('candlesLoaded', { id, range, data: body, at: now() });
       else store.dispatch('candlesFailed', { id, range, at: now(), message: messageOf(body) });
     }, ['candlesLoading', { id, range }]);
   }
@@ -279,6 +305,7 @@ export function startMarkets({
     if (closed) return;
     sync();
     if (shown && store.get().markets.tab !== readTab) retab();
+    else if (shown && store.get().markets.tab === CHINA_TAB && (store.get().markets.sort === 'movers' ? 'movers' : 'volume') !== readSort) readRank();
     if (waiting !== null) open(waiting);
   }
   const onStorage = event => { if (!closed && (event?.key === STORAGE_KEY || event?.key === ACCOUNT_WATCH_KEY || event?.key === null)) load(); };
@@ -300,7 +327,7 @@ export function startMarkets({
       readTab = store.get().markets.tab;
       armExplore();
       armQuotes();
-      readExplore();
+      readShown();
     },
     /** The query typed: the Account's search (explore?q=, the latest one lands) into results, and the face's for the A shares. */
     search(raw) {
@@ -341,7 +368,10 @@ export function startMarkets({
       const m = store.get().markets;
       if (m.watchlist.some(a => a.id === id)) return;
       if (m.watchlist.length >= WATCH_LIMIT) { store.dispatch('watchlistLoaded', { items: m.watchlist, error: 'full' }); return; }
-      saveList([...m.watchlist, m.search.assets.find(a => a?.id === id) ?? normalizeAsset({ id })]);
+      // a share from the search, else from the China ranking (its name kept), else its id alone
+      const ranked = (m.rank?.data?.items ?? []).find(i => i?.id === id);
+      saveList([...m.watchlist, m.search.assets.find(a => a?.id === id)
+        ?? (ranked ? normalizeAsset({ id, market: 'cn', symbol: ranked.symbol, name: ranked.name, currency: 'CNY' }) : null) ?? normalizeAsset({ id })]);
     },
     /** A star taken off: an Account key off the Account's own list (setWatch off for the page's entry, on a page that signs)
      *  and off this browser's Account store, with any old star still listed as it — each where it is; a face id from the cn
@@ -372,10 +402,19 @@ export function startMarkets({
       waiting = null;
       if (isAccountKey(id)) { open(id); return; }
       if (id == null || followed) unfollow();
+      const cn = canonicalId(id);
+      if (cn?.startsWith('cn:')) readCnCandles(cn, rangeOf(cn));
     },
     /** A page's chart range, one of the Account's: kept for the page, and its candles read again for it. */
     range(id, value) {
-      if (closed || !isAccountKey(id)) return;
+      if (closed) return;
+      const cn = canonicalId(id);
+      if (cn?.startsWith('cn:')) {
+        store.dispatch('setRange', { id: cn, range: value });
+        if (rangeOf(cn) === value) readCnCandles(cn, value);
+        return;
+      }
+      if (!isAccountKey(id)) return;
       store.dispatch('setRange', { id, range: value });
       if (rangeOf(id) !== value) return;
       const s = store.get();
