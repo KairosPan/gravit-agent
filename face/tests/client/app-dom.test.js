@@ -2143,11 +2143,11 @@ test('a composed answer: a tile opens and closes, By change switches, a bucket i
 });
 
 // plan 3, task 2: a stock name in a composed answer opens the stock drawer's state — one overlay at a time; nav and Escape close it
-async function stockAnswer() {
+async function stockAnswer(more = {}) {
   const f = fakeWindow({ hash: '#/messages/s1' });
   const h = host({ rows: [row('s1', { agentAvailable: true })] });
   const store = boot(f.win, { openMux: h.openMux, call: h.call, postJson: h.postJson, markdown: null,
-    getJson: async path => (path.startsWith('/data/lunhui/view?') ? { ok: true, view: VIEW_1027 } : h.getJson(path)) });
+    getJson: async path => (path.startsWith('/data/lunhui/view?') ? { ok: true, view: VIEW_1027 } : h.getJson(path)), ...more });
   await h.ready();
   const follow = [...h.streams].reverse().find(x => x.name === 'session/follow' && x.args.request.address.sessionId === 's1');
   follow.cbs.onItem({ type: 'snapshot', records: [] });
@@ -2157,7 +2157,7 @@ async function stockAnswer() {
   await settle();
   const key = `cn-market/${VIEW_1027.run}/`;
   const open = () => f.click(f.element({ tagName: 'BUTTON', dataset: { action: 'lunhuiStock', key, code: '600001' } }));
-  return { f, store, key, open };
+  return { f, store, key, open, h, follow };
 }
 
 test('clicking a stock link opens the drawer state and closes Details', async () => {
@@ -2191,6 +2191,84 @@ test('Escape clears the open stock', async () => {
   assert.ok(store.get().lunhui.stock);
   f.fire('doc', 'keydown', { key: 'Escape' });
   assert.equal(store.get().lunhui.stock, null);
+  store.timers.clear();
+});
+
+// plan 3, task 4: the stock drawer itself — drawn inside <main>, its slider surviving a live redraw (Review Focus 2), Details
+// replacing it, Ask Gravit through the composer's own send path, Open in Markets
+test('the drawer survives a live redraw with its slider minute', async () => {
+  const { f, store, key, open, follow } = await stockAnswer();
+  open();
+  const id = 's-600001';
+  assert.match(f.html(), /<aside class="drawer stock" aria-label="上海九百">/);
+  assert.match(f.html(), /<main class="main with-drawer with-stock">/);
+  assert.match(f.html(), new RegExp(`id="minute-${id}"`));
+  assert.match(f.html(), /<aside class="drawer stock"[\s\S]*<\/main>/, 'inside <main>, like the other drawers');
+  const where = { id, strategy: VIEW_1027.strategy, run: VIEW_1027.run, symbol: 'sh600001' };
+  const drawn = { x1: '708', x2: '708' };
+  const cur = f.withId(`cur-${id}`, { attributes: { ...drawn }, renderedAttributes: drawn });
+  const read = f.withId(`read-${id}`);
+  const slider = f.withId(`minute-${id}`, { tagName: 'INPUT', type: 'range', rendered: '241', value: '241', max: '241', dataset: { action: 'lunhuiMinute', ...where } });
+  f.alsoAs('input[data-action="lunhuiMinute"]', slider);
+  const X = i => Number((56 + i / 241 * 652).toFixed(1));
+  slider.value = '120';
+  f.fire('root', 'input', { target: slider });
+  assert.equal(Number(cur.attributes.x1), X(120));
+  assert.equal(read.textContent, '上海九百 · 11:30 · 13.31 · +10.00% · at the limit-up');
+  const writes = f.writes;
+  // a live event redraws the thread while the operator holds the slider at 11:30
+  follow.cbs.onItem({ type: 'event', event: { type: 'tool/call', seq: 42, time: 1756512202000, data: { turn: 5, step: 1, callId: 'k2', name: 'bash', arguments: '{}' } } });
+  await settle();
+  assert.ok(f.writes > writes, 'the event redrew the page');
+  assert.deepEqual(store.get().lunhui.stock, { key, code: '600001' }, 'the drawer stays open');
+  assert.match(f.html(), /class="drawer stock"/);
+  assert.equal(slider.value, '120', 'the render restored the slider');
+  assert.equal(Number(cur.attributes.x1), X(120), 'and the cursor stands at its minute again');
+  store.timers.clear();
+});
+
+test('opening Details replaces the stock drawer', async () => {
+  const { f, store, open } = await stockAnswer();
+  open();
+  assert.match(f.html(), /class="drawer stock"/);
+  f.click(f.element({ tagName: 'BUTTON', dataset: { action: 'toggleDetails' } }));
+  assert.equal(store.get().lunhui.stock, null);
+  assert.doesNotMatch(f.html(), /class="drawer stock"|with-stock/);
+  assert.match(f.html(), /class="drawer details"/);
+  open();
+  f.click(f.element({ tagName: 'BUTTON', dataset: { action: 'lunhuiStockClose' } }));
+  assert.equal(store.get().lunhui.stock, null, 'its Close key closes it');
+  assert.doesNotMatch(f.html(), /class="drawer stock"/);
+  store.timers.clear();
+});
+
+test("Ask Gravit sends one message through the composer's path", async () => {
+  const { f, store, open, h } = await stockAnswer();
+  const say = f.withId('say', { tagName: 'INPUT' });
+  say.value = 'half a thought';
+  f.fire('root', 'input', { target: say });
+  open();
+  const before = h.calls.filter(c => c[0] === 'session/prompt').length;
+  f.click(f.element({ tagName: 'BUTTON', dataset: { action: 'lunhuiAsk', code: '600001' } }));
+  await settle();
+  const prompts = h.calls.filter(c => c[0] === 'session/prompt');
+  assert.equal(prompts.length, before + 1, 'one message');
+  assert.equal(prompts.at(-1)[1].request.sessionId, 's1');
+  assert.deepEqual(prompts.at(-1)[1].request.content, [{ type: 'text', text: '说说 上海九百（600001）在这次运行里的情况。' }]);
+  assert.equal(say.value, 'half a thought', 'the composer keeps what was typed');
+  store.timers.clear();
+});
+
+test('Open in Markets routes to cn:<code>', async () => {
+  // Markets' quotes and search are the fakes, so the page it opens starts no real wire
+  const mk = fakeMarkets();
+  const { f, store, open } = await stockAnswer({ createLiveQuotes: mk.createLiveQuotes, createSymbolSearch: mk.createSymbolSearch });
+  open();
+  f.click(f.element({ tagName: 'BUTTON', dataset: { action: 'lunhuiMarkets', code: '600001' } }));
+  await settle();
+  assert.equal(f.win.location.hash, '#/markets/cn:600001');
+  assert.deepEqual(store.get().route, { screen: 'markets', id: 'cn:600001' });
+  assert.equal(store.get().lunhui.stock, null, 'leaving the conversation closes the drawer');
   store.timers.clear();
 });
 

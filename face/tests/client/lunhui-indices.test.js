@@ -31,6 +31,20 @@ test('chartGeometry: X spans 56–708 over the 242-point grid, the previous clos
   assert.ok(flat.span > 0 && Number.isFinite(flat.Y(10)));
 });
 
+// plan 3, task 4: the stock drawer's limits widen the span; without them every index chart is as it was
+test('chartGeometry without limits is unchanged', () => {
+  const g = chartGeometry(SSE.minutes);
+  const same = chartGeometry(SSE.minutes, null);
+  assert.equal(same.span, g.span);
+  assert.equal(same.Y(3700), g.Y(3700));
+  assert.equal(intradaySvg(SSE.minutes, { minute: 241, id: ID }), intradaySvg(SSE.minutes, { minute: 241, id: ID, limits: null, seals: null }));
+  assert.doesNotMatch(intradaySvg(SSE.minutes, { minute: 241, id: ID }), /lh-limit|lh-seal/);
+  // limits inside the day's move change nothing; one beyond it widens the span to it, with the same 8% air
+  const far = Math.max(...SSE.minutes.price.map(p => Math.abs(p - SSE.minutes.prec)));
+  assert.equal(chartGeometry(SSE.minutes, { up: SSE.minutes.prec + far / 2, down: SSE.minutes.prec - far / 2 }).span, g.span);
+  assert.ok(Math.abs(chartGeometry(SSE.minutes, { up: SSE.minutes.prec + far * 2, down: null }).span - far * 2 * 1.08) < 1e-9);
+});
+
 test('intradaySvg: the band from 14:00 to 15:00, the midline, the path, the bars, high and low, the cursor, the grid', () => {
   const svg = intradaySvg(SSE.minutes, { focus: { from: '14:00', to: '15:00' }, minute: 241, id: ID });
   assert.match(svg, /^<svg[^>]*viewBox="0 0 760 236"/);

@@ -29,7 +29,8 @@ import { startRunSheet } from './host/run-sheet.js';
 import { renderRunSheet } from './render/run-sheet.js';
 import { itemById } from './host/discover-view.js';
 import { startTraces } from './host/traces.js';
-import { wantedViews, ensureViews, minuteAt, applyCursor, cursorFor, reapplyCursors } from './host/lunhui.js';
+import { wantedViews, ensureViews, minuteAt, applyCursor, cursorFor, reapplyCursors, marketKey, stockCode } from './host/lunhui.js';
+import { stockDrawerHtml, askText } from './render/lunhui/stock.js';
 import { loadMemberTrace } from './wire/member-traces.js';
 import { isHostPreset } from './wire/speaker.js';
 import { statementLinesOf, statementCsvOf, connectOptionsOf, asksOf } from './host/account-view.js';
@@ -174,8 +175,8 @@ function focusKey(el) {
 // the owner sheet is a drawer of any screen, over the one open (the order sheet is Trade's ticket, not a drawer)
 const sheetUp = s => Boolean(s.sheet) && s.sheet.kind !== 'order';
 // a module card's Run sheet is a drawer of any screen too, drawn after the owner sheet
-const overlayOf = s => (sheetUp(s) ? 'sheet' : s.runSheet || s.detailsOpen || s.settingsOpen || s.account.statementOpen || s.account.detailsVenue ? 'drawer' : null);
-const drawerOf = s => (sheetUp(s) ? `sheet:${s.sheet.kind}` : s.runSheet ? `run:${s.runSheet.module}` : s.detailsOpen ? 'details' : s.settingsOpen ? 'settings' : s.account.statementOpen ? 'statement'
+const overlayOf = s => (sheetUp(s) ? 'sheet' : s.runSheet || s.lunhui?.stock || s.detailsOpen || s.settingsOpen || s.account.statementOpen || s.account.detailsVenue ? 'drawer' : null);
+const drawerOf = s => (sheetUp(s) ? `sheet:${s.sheet.kind}` : s.runSheet ? `run:${s.runSheet.module}` : s.lunhui?.stock ? `stock:${s.lunhui.stock.code}` : s.detailsOpen ? 'details' : s.settingsOpen ? 'settings' : s.account.statementOpen ? 'statement'
   : s.account.detailsVenue ? `venue:${s.account.detailsVenue}` : null);
 const closeKeyOf = overlay => (overlay === 'sheet' ? '.drawer.sheet .close-key' : '.drawer .close-key');
 const editorOf = e => (e ? [e.kind, e.convId, e.id].join('|') : null);
@@ -353,8 +354,8 @@ export function boot(win, host = {}) {
       : s.route.screen === 'trade' ? renderTradeScreen(s, now())
       : s.route.screen === 'channel' ? renderChannelScreen(s, now()) : s.route.screen === 'discover' ? renderDiscover(s, now())
       : s.route.screen === 'plugin' ? renderPlugin(s) : s.route.screen === 'module' ? renderModule(s, now()) : renderMessagesScreen(s, now());
-    // the drawers of any screen, inside its <main>: Settings, the owner sheet over whatever is open, a module card's Run sheet
-    const drawers = (s.settingsOpen ? renderSettings(s) : '') + (sheetUp(s) ? renderSheet(s, now()) : '') + (s.runSheet ? renderRunSheet(s, now()) : '');
+    // the drawers of any screen, inside its <main>: Settings, the stock drawer, the owner sheet over whatever is open, a module card's Run sheet
+    const drawers = (s.settingsOpen ? renderSettings(s) : '') + stockDrawerHtml(s) + (sheetUp(s) ? renderSheet(s, now()) : '') + (s.runSheet ? renderRunSheet(s, now()) : '');
     root.innerHTML = renderRail(s, now()) + (drawers ? screen.replace(/<\/main>$/, drawers + '</main>') : screen);
     // the quotes poll asks for the rows the table drew, by id; a market's page, which draws none, for its own market (spec §6.1:
     // the page follows it on the stream and polls quotes for what the stream does not carry)
@@ -714,10 +715,16 @@ export function boot(win, host = {}) {
       live.promote(id);
       return;
     }
-    const sent = await actions.send(text);
+    const sent = await sendText(text);
     if (!sent) { composerText = text; render(); return; }
-    if (sent.sent === 'prompt' || sent.sent === 'say') live.promote(sent.sessionId);
     render();
+  }
+  // one message to the open conversation by the composer's own path (the composer, the stock drawer's Ask, a follow-up): what
+  // actions.send answers, the conversation promoted to a follow when it prompted; the composer's words are never touched
+  async function sendText(text) {
+    const sent = await actions.send(text);
+    if (sent && (sent.sent === 'prompt' || sent.sent === 'say')) live.promote(sent.sessionId);
+    return sent;
   }
 
   const act = {
@@ -761,6 +768,10 @@ export function boot(win, host = {}) {
     lunhuiRetry: el => { store.dispatch('lunhuiRetry', el.dataset.key); },
     // a stock name in a composed answer opens the stock drawer on that answer's view
     lunhuiStock: el => { store.dispatch('lunhuiStockOpen', { key: el.dataset.key, code: el.dataset.code }); },
+    // the stock drawer's keys: Close; Ask Gravit about it (one message, the open stock's words); its page on Markets
+    lunhuiStockClose: () => store.dispatch('lunhuiStockClose'),
+    lunhuiAsk: () => { const text = askText(store.get()); if (text) void sendText(text); },
+    lunhuiMarkets: () => { const code = stockCode(store.get().lunhui?.stock?.code); if (code) go({ screen: 'markets', id: marketKey(code) }); },
     // a composed answer's picks, by the answer's id: a verdict tile (pressed again, it closes), Counts or By change, a bucket
     lunhuiUi: el => {
       const { id, field, value } = el.dataset;

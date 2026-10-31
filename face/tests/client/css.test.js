@@ -25,6 +25,7 @@ import { MIN } from '../../client/js/time.js';
 import { renderMarkdown } from '../../client/js/wire/markdown.js';
 import { withMiniDocument } from './helpers/mini-dom.js';
 import { VIEW_1027 } from './helpers/lunhui-view.js';
+import { stockDrawerHtml } from '../../client/js/render/lunhui/stock.js';
 
 const NOW = new Date(2026, 9, 19, 14, 7).getTime();
 const css = await readFile(new URL('../../client/css/app.css', import.meta.url), 'utf8');
@@ -45,6 +46,10 @@ const KINDS = [
 ];
 // the composed answers' views by state (host/lunhui.js viewKey)
 // (ui: the loaded answer s1-p1 with no picks, then with a tile open and its breadth by change)
+// the stock drawer open on the loaded answer's view (plan 3, task 4): a limit-up with its line, a first board without, a name the
+// view does not hold, and the drawer over a view loading and failed
+const stockStates = s => [['loaded', '600011'], ['loaded', '600001'], ['loaded', '002001'], ['loaded', '999999'], ['loading', '600001'], ['failed', '600001']]
+  .map(([run, code]) => { const l = lunhuiStates(s); return { ...l, lunhui: { ...l.lunhui, stock: { key: `cn-market/${run}/`, code } } }; });
 const lunhuiStates = (s, ui = {}) => ({ ...s, lunhui: { views: { 'cn-market/loading/': { status: 'loading' }, 'cn-market/loaded/': { status: 'loaded', view: VIEW_1027 }, 'cn-market/failed/': { status: 'failed', error: 'HTTP 404' }, 'cn-market/bare/': { status: 'loaded', view: { ...VIEW_1027, breadth: null } } }, ui } });
 
 const asset = (id, over = {}) => ({ id, market: id.slice(0, id.indexOf(':')), symbol: id.slice(id.indexOf(':') + 1), name: id.slice(id.indexOf(':') + 1), exchange: 'NASDAQ', currency: id.startsWith('cn:') ? 'CNY' : 'USD', ...over });
@@ -225,7 +230,7 @@ function everyState() {
   const base = R.hostList(emptyState(), { conversations: [conv('s1', { messages: KINDS, running: true, usage: { tokenUsage: { outputTokens: 1 }, contextPressure: 0.5 }, created: NOW }), conv('g', { kind: 'group', members: ['gravit', 'buffett'], thinking: 'text', messages: [m('g1', { from: 'buffett', text: 'hold', data: { name: 'Buffett Type', markdown: true, memberSessionId: 'm1', memberTurn: 2 } })] })], channels: [{ workspaceId: 'w0', name: 'workbench', isRoot: true }], bots: [{ id: 'buffett', name: 'Buffett Type' }] });
   const open = R.nav(base, { screen: 'messages', id: 's1' });
   return [
-    emptyState(), open, lunhuiStates(open), lunhuiStates(open, { 's1-p1': { tile: 'environment', breadth: 'dist' } }), R.nav(base, { screen: 'messages', id: 'g' }), R.toggleDetails(open), R.askConfirm(R.toggleDetails(open), { action: 'stopGravit', id: 's1' }),
+    emptyState(), open, lunhuiStates(open), ...stockStates(open), lunhuiStates(open, { 's1-p1': { tile: 'environment', breadth: 'dist' } }), R.nav(base, { screen: 'messages', id: 'g' }), R.toggleDetails(open), R.askConfirm(R.toggleDetails(open), { action: 'stopGravit', id: 's1' }),
     R.startEdit(R.toggleDetails(open), { kind: 'rename', convId: 's1', error: 'Cannot be empty' }), R.openSettings(open), R.startDraft(open, { now: NOW }),
     R.startEdit(R.startDraft(open, { now: NOW }), { kind: 'newChannel', error: 'Letters, digits, - or _' }),
     R.hostStatus(open, { line: 'Reconnecting…', bad: true }), R.toggleRail(open),
@@ -241,8 +246,8 @@ const screenOf = (st, now) => (st.route.screen === 'markets' ? renderMarketsScre
 test('every class the screens emit has a rule in app.css, and app.css names no colour by hex', () => {
   assert.doesNotMatch(css, /#[0-9a-fA-F]{3,6}\b/, 'colours come from tokens.css');
   setMarkdown(null);
-  const html = everyState().map(st => renderRail(st, NOW) + screenOf(st, NOW) + (st.settingsOpen ? renderSettings(st) : '') + renderSheet(st, NOW) + renderRunSheet(st, NOW)).join('');
-  for (const c of ['mkts', 'mk-tab', 'mk-star', 'mk-name', 'mk-tag', 'mk-q', 'mk-clear', 'mk-note', 'mk-empty', 'mk-st', 'page-back', 'mk-chart', 'mk-axis', 'mk-facts', 'mk-big', 'mk-basis', 'mk-asof', 'mk-d-acts', 'mk-line', 'mk-on', 'mk-outs', 'mk-out', 'acct', 'networth', 'acct-figures', 'acct-second', 'acct-t', 'acct-shown', 'order-row', 'acct-note', 'activity-row', 'venue', 'account-line', 'pair-box', 'sheet', 'sheet-quote', 'sheet-left', 'sheet-check', 'stale', 'trade', 'tp-head', 'tk-seg', 'tk-pick', 'tk-row', 'tk-open', 'tk-said', 'tk-panel', 'tk-picked', 'tk-out', 'mk-yes', 'mk-no', 'tk-at', 'tk-side', 'tk-quote', 'tk-left', 'tk-msg', 'tk-go', 'tk-hand', 'research', 'pcard-meta', 'pcard-foot', 'pcard-link', 'mod-tags', 'mod-boxes', 'mod-runs-wrap', 'mod-runs', 'mod-legend', 'composed', 'notes', 'notes-body', 'lh-answer', 'lh-summary', 'lh-block', 'lh-skel', 'lh-title', 'lh-error', 'lh-label', 'lh-readout', 'lh-tiles', 'lh-tile', 'lh-tile-chal', 'lh-lines', 'lh-line', 'stress', 'lh-id', 'lh-split', 'lh-split-up', 'lh-split-down', 'lh-stats', 'lh-dist', 'lh-bucket', 'lh-bucket-bar', 'lh-srcs', 'lh-src', 'lh-src-miss', 'lh-foot', 'lh-ix-rows', 'lh-ix', 'lh-ix-name', 'lh-ix-last', 'lh-ix-pct', 'lh-spark', 'lh-spark-mid', 'lh-spark-line', 'lh-chart', 'lh-band', 'lh-tick', 'lh-grid', 'lh-mid', 'lh-axis', 'lh-bar', 'lh-path', 'lh-mark-dot', 'lh-mark', 'lh-cur', 'lh-dot', 'lh-minute', 'lh-stock']) assert.match(html, new RegExp(`class="[^"]*\\b${c}\\b`), `a screen emits ${c}`);
+  const html = everyState().map(st => renderRail(st, NOW) + screenOf(st, NOW) + (st.settingsOpen ? renderSettings(st) : '') + stockDrawerHtml(st) + renderSheet(st, NOW) + renderRunSheet(st, NOW)).join('');
+  for (const c of ['mkts', 'mk-tab', 'mk-star', 'mk-name', 'mk-tag', 'mk-q', 'mk-clear', 'mk-note', 'mk-empty', 'mk-st', 'page-back', 'mk-chart', 'mk-axis', 'mk-facts', 'mk-big', 'mk-basis', 'mk-asof', 'mk-d-acts', 'mk-line', 'mk-on', 'mk-outs', 'mk-out', 'acct', 'networth', 'acct-figures', 'acct-second', 'acct-t', 'acct-shown', 'order-row', 'acct-note', 'activity-row', 'venue', 'account-line', 'pair-box', 'sheet', 'sheet-quote', 'sheet-left', 'sheet-check', 'stale', 'trade', 'tp-head', 'tk-seg', 'tk-pick', 'tk-row', 'tk-open', 'tk-said', 'tk-panel', 'tk-picked', 'tk-out', 'mk-yes', 'mk-no', 'tk-at', 'tk-side', 'tk-quote', 'tk-left', 'tk-msg', 'tk-go', 'tk-hand', 'research', 'pcard-meta', 'pcard-foot', 'pcard-link', 'mod-tags', 'mod-boxes', 'mod-runs-wrap', 'mod-runs', 'mod-legend', 'composed', 'notes', 'notes-body', 'lh-answer', 'lh-summary', 'lh-block', 'lh-skel', 'lh-title', 'lh-error', 'lh-label', 'lh-readout', 'lh-tiles', 'lh-tile', 'lh-tile-chal', 'lh-lines', 'lh-line', 'stress', 'lh-id', 'lh-split', 'lh-split-up', 'lh-split-down', 'lh-stats', 'lh-dist', 'lh-bucket', 'lh-bucket-bar', 'lh-srcs', 'lh-src', 'lh-src-miss', 'lh-foot', 'lh-ix-rows', 'lh-ix', 'lh-ix-name', 'lh-ix-last', 'lh-ix-pct', 'lh-spark', 'lh-spark-mid', 'lh-spark-line', 'lh-chart', 'lh-band', 'lh-tick', 'lh-grid', 'lh-mid', 'lh-axis', 'lh-bar', 'lh-path', 'lh-mark-dot', 'lh-mark', 'lh-cur', 'lh-dot', 'lh-minute', 'lh-stock', 'stock', 'with-stock', 'lh-stk-head', 'lh-stk-sub', 'lh-stk-pool', 'lh-stk-price', 'lh-stk-tag', 'lh-stk-from', 'lh-stk-note', 'lh-stk-cite', 'lh-limit', 'lh-seal']) assert.match(html, new RegExp(`class="[^"]*\\b${c}\\b`), `a screen emits ${c}`);
   const classes = new Set(html.match(/class="([^"]+)"/g).flatMap(x => x.slice(7, -1).split(/\s+/)));
   const missing = [...classes].filter(c => c && !new RegExp(`\\.${c.replace(/[-]/g, '\\-')}(?![\\w-])`).test(css));
   assert.deepEqual(missing, [], 'classes without a rule');
@@ -275,7 +280,7 @@ test('every class app.css styles is emitted by some screen: no rule outlives the
   setMarkdown(null);
   const sample = '# H1\n\n## H\n\n### H3\n\n#### H4\n\n**b** `c` [l](https://x.test)\n\n- a\n\n> q\n\n---\n\n```\nx\n```\n\n| s | c |\n|---|---|\n| A | +1% |\n| B | -1% |';
   const page = readFileSync(new URL('../../client/index.html', import.meta.url), 'utf8');
-  const html = page + everyState().map(st => renderRail(st, NOW) + screenOf(st, NOW) + (st.settingsOpen ? renderSettings(st) : '') + renderSheet(st, NOW) + renderRunSheet(st, NOW)).join('') +
+  const html = page + everyState().map(st => renderRail(st, NOW) + screenOf(st, NOW) + (st.settingsOpen ? renderSettings(st) : '') + stockDrawerHtml(st) + renderSheet(st, NOW) + renderRunSheet(st, NOW)).join('') +
     withMiniDocument(() => renderMarkdown(sample).node.outerHTML);
   const emitted = new Set(html.match(/class="([^"]+)"/g).flatMap(x => x.slice(7, -1).split(/\s+/)));
   const styled = new Set([...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/\.([a-zA-Z][\w-]*)/g)].map(m => m[1]));

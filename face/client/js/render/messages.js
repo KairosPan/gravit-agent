@@ -136,5 +136,5 @@ export function renderMessagesScreen(state, now) {
   const conv = currentConversation(state);
   if (!conv) return emptyScreen(state);
   const placeholder = conv.kind === 'group' ? 'Tell Gravit… @ a bot by name' : 'Tell Gravit…';
-  return `<main class="${cls('main', state.detailsOpen && 'with-drawer')}">${renderHead(conv, state)}<div class="thread" id="thread">${renderThread(conv, state, now)}</div>${renderComposer({ placeholder })}${renderStatus(state.status)}${state.detailsOpen ? renderDetails(conv, state) : ''}</main>`;
+  return `<main class="${cls('main', (state.detailsOpen || state.lunhui?.stock) && 'with-drawer', state.lunhui?.stock && 'with-stock')}">${renderHead(conv, state)}<div class="thread" id="thread">${renderThread(conv, state, now)}</div>${renderComposer({ placeholder })}${renderStatus(state.status)}${state.detailsOpen ? renderDetails(conv, state) : ''}</main>`;
 }

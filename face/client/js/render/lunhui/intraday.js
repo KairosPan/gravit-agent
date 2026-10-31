@@ -35,10 +35,16 @@ const prices = minutes => (Array.isArray(minutes?.price) ? minutes.price.map(Num
 // one decimal in the markup, no trailing zero ("56", "545.7")
 const n1 = v => Number(Number(v).toFixed(1));
 
-/** The chart's geometry: X over the grid's 242 points, Y about the previous close with the day's farthest move plus 8%. */
-export function chartGeometry(minutes) {
+const fin = v => v != null && v !== '' && Number.isFinite(Number(v));
+
+/**
+ * The chart's geometry: X over the grid's 242 points, Y about the previous close with the day's farthest move plus 8%; with
+ * a stock's `limits` ({ up, down }, the view's own), the span reaches the limit-up too, so its line is always on the chart.
+ */
+export function chartGeometry(minutes, limits = null) {
   const prec = Number(minutes?.prec);
-  const far = Math.max(0, ...prices(minutes).filter(Number.isFinite).map(p => Math.abs(p - prec)));
+  const up = fin(limits?.up) ? [Math.abs(Number(limits.up) - prec)] : [];
+  const far = Math.max(0, ...prices(minutes).filter(Number.isFinite).map(p => Math.abs(p - prec)), ...up);
   // a flat day still needs a span: a thousandth of the close, or 1
   const span = far > 0 ? far * 1.08 : (Math.abs(prec) > 0 ? Math.abs(prec) * 0.001 : 1);
   return { X: i => LEFT + i / LAST * PLOT, Y: p => MID - (p - prec) / span * HALF, span };
@@ -61,8 +67,9 @@ function paths(price, dir, g) {
   return out.join('');
 }
 
-function bars(minutes, dir, g) {
-  const amount = Array.isArray(minutes.amount) ? minutes.amount.map(Number) : [];
+// each minute's bar, scaled to the busiest minute by amount (an index) or by volume (a stock: bars: 'volume')
+function bars(minutes, dir, g, field = 'amount') {
+  const amount = Array.isArray(minutes[field]) ? minutes[field].map(Number) : [];
   const max = Math.max(0, ...amount.filter(Number.isFinite));
   const w = n1(PLOT / LAST * 0.7);
   return dir.map((d, i) => {
@@ -83,11 +90,28 @@ function extreme(price, g, which) {
 
 const GRID = [[0], [60], [120, 121], [181], [241]];
 
-/** The intraday chart: viewBox 0 0 760 236, the cursor's line and dot named by `id` (cur-<id>, dot-<id>). */
-export function intradaySvg(minutes, { focus = null, minute = null, id = '' } = {}) {
+// a seal's grid minute: one before the open (the call auction, 09:25) sits on the open's point
+export const sealIndex = t => minuteIndex(t) ?? (typeof t === 'string' && /^\d{2}:\d{2}$/.test(t) && t < '09:30' ? 0 : null);
+
+// a stock's limit lines (the limit-down only inside the drawn span) and its first and last seal on the limit-up
+function limitMarks(minutes, g, limits, seals) {
+  if (!fin(limits?.up)) return '';
+  const prec = Number(minutes?.prec);
+  const line = (dir, p) => `<line class="lh-limit ${dir}" x1="${LEFT}" y1="${n1(g.Y(p))}" x2="${LEFT + PLOT}" y2="${n1(g.Y(p))}"/>`;
+  const up = Number(limits.up);
+  const down = fin(limits.down) && Math.abs(Number(limits.down) - prec) <= g.span ? line('down', Number(limits.down)) : '';
+  const at = [...new Set([seals?.first, seals?.last].map(sealIndex).filter(i => i !== null))];
+  return line('up', up) + down + at.map(i => `<circle class="lh-seal" cx="${n1(g.X(i))}" cy="${n1(g.Y(up))}" r="3"/>`).join('');
+}
+
+/**
+ * The intraday chart: viewBox 0 0 760 236, the cursor's line and dot named by `id` (cur-<id>, dot-<id>). A stock's chart
+ * adds `limits` ({ up, down }), `seals` ({ first, last }, "HH:MM") and `bars: 'volume'`; each is off by default.
+ */
+export function intradaySvg(minutes, { focus = null, minute = null, id = '', limits = null, seals = null, bars: barsBy = 'amount' } = {}) {
   const price = prices(minutes);
   const prec = Number(minutes?.prec);
-  const g = chartGeometry(minutes);
+  const g = chartGeometry(minutes, limits);
   const last = price.length - 1;
   const at = Math.min(last, Math.max(0, Number.isInteger(minute) ? minute : last));
   const dir = directions(price, prec);
@@ -105,7 +129,7 @@ export function intradaySvg(minutes, { focus = null, minute = null, id = '' } = 
     band + grid +
     `<line class="lh-mid" x1="${LEFT}" y1="${MID}" x2="${LEFT + PLOT}" y2="${MID}" stroke-dasharray="4 4"/>` +
     `<text class="lh-axis" x="${LEFT - 4}" y="${MID + 4}" text-anchor="end">${fix2(prec)}</text>` +
-    bars(minutes, dir, g) + paths(price, dir, g) + extreme(price, g, 'H') + extreme(price, g, 'L') +
+    bars(minutes, dir, g, barsBy === 'volume' ? 'volume' : 'amount') + limitMarks(minutes, g, limits, seals) + paths(price, dir, g) + extreme(price, g, 'H') + extreme(price, g, 'L') +
     `<line id="cur-${esc(id)}" class="lh-cur" x1="${cx}" y1="${TOP}" x2="${cx}" y2="${BOTTOM}"/>` +
     `<circle id="dot-${esc(id)}" class="lh-dot" cx="${cx}" cy="${cy}" r="3.5"/>` +
     `</svg>`;
@@ -123,11 +147,37 @@ export function sparklineSvg(minutes) {
     `<polyline class="lh-spark-line ${tone}" points="${pts}" fill="none" vector-effect="non-scaling-stroke"/></svg>`;
 }
 
+// at the limit-up within half a fen of it, and the limit-down mirrored
+export const atLimitUp = (p, f) => fin(p) && fin(f?.limitUp) && Number(p) >= Number(f.limitUp) - 0.005;
+export const atLimitDown = (p, f) => fin(p) && fin(f?.limitDown) && Number(p) <= Number(f.limitDown) + 0.005;
+const limitsOf = f => (fin(f?.limitUp) ? { up: Number(f.limitUp), down: fin(f.limitDown) ? Number(f.limitDown) : null } : null);
+
+// a stock's cursor (plan 3, task 4): name · time · price · change, and where it stands against the limits
+function stockPatch(stock, symbol, minute) {
+  const price = prices(stock.minutes);
+  if (price.length === 0) return null;
+  const at = Math.min(price.length - 1, Math.max(0, Math.round(Number(minute)) || 0));
+  const prec = Number(stock.minutes.prec);
+  const g = chartGeometry(stock.minutes, limitsOf(stock));
+  const p = price[at];
+  const pct = prec > 0 && fin(p) ? signedPct((p - prec) / prec * 100) : '—';
+  const where = atLimitUp(p, stock) ? ' · at the limit-up' : atLimitDown(p, stock) ? ' · at the limit-down' : '';
+  return {
+    x: n1(g.X(at)), y: n1(g.Y(p)),
+    readout: `${stock.name ?? stock.code ?? symbol} · ${minuteLabel(at)} · ${fin(p) ? fix2(p) : '—'} · ${pct}${where}`,
+  };
+}
+
 /** Where the cursor stands at `minute` on `symbol`'s line, and the readout's words; null when the view has no such line. */
 export function cursorPatch(view, symbol, minute) {
   const row = (Array.isArray(view?.indices?.rows) ? view.indices.rows : []).find(r => r?.symbol === symbol);
+  if (!row) {
+    const stocks = view?.stocks && typeof view.stocks === 'object' ? Object.values(view.stocks) : [];
+    const stock = stocks.find(s => s?.symbol === symbol);
+    return stock ? stockPatch(stock, symbol, minute) : null;
+  }
   const price = prices(row?.minutes);
-  if (!row || price.length === 0) return null;
+  if (price.length === 0) return null;
   const at = Math.min(price.length - 1, Math.max(0, Math.round(Number(minute)) || 0));
   const prec = Number(row.minutes.prec);
   const g = chartGeometry(row.minutes);

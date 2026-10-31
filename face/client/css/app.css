@@ -283,6 +283,19 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .lh-cur { stroke: var(--text); stroke-width: 1; stroke-dasharray: 2 2; pointer-events: none; }
 .lh-dot { fill: var(--surface); stroke: var(--text); stroke-width: 1.5; pointer-events: none; }
 .lh-minute { width: 100%; min-height: 28px; accent-color: var(--text); }
+/* the stock drawer (plan 3): its header's code line, the pool line, the limit lines and seals, the note, the citations */
+.lh-stk-head { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.lh-stk-sub { font-size: 12px; color: var(--dim); }
+.lh-stk-pool { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.lh-stk-price { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.lh-stk-tag { font-size: 13px; font-weight: 600; }
+.lh-stk-from { font-size: 12px; color: var(--dim); }
+.lh-stk-note { font-size: 12px; color: var(--dim); }
+.lh-stk-cite { display: flex; flex-direction: column; gap: 2px; font-size: 13px; line-height: 1.4; }
+.lh-limit { stroke-width: 1; }
+.lh-limit.up { stroke: var(--up); }
+.lh-limit.down { stroke: var(--down); }
+.lh-seal { fill: var(--surface); stroke: var(--up); stroke-width: 1.5; }
 .notes { padding-left: 36px; font-size: 12px; }
 .notes > summary { color: var(--dim); cursor: pointer; font-weight: 600; }
 .notes-body { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
@@ -367,6 +380,7 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 /* ---- drawers (Linqi's #drawer): right edge, 460, radius 20 0 0 20 ---- */
 .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(460px, 100%); display: flex; flex-direction: column; background: var(--surface); border-left: 1px solid var(--card-border); border-radius: var(--radius-l) 0 0 var(--radius-l); box-shadow: var(--shadow); overflow: hidden; z-index: 30; }
 .drawer.details { width: min(400px, 100%); }
+.drawer.stock { width: min(460px, 100%); }
 /* the page behind a drawer stays usable (spec §3.3): on a wide screen it makes room instead of hiding under it */
 @media (min-width: 1100px) {
   .acct.with-drawer { padding-right: 488px; }
@@ -374,6 +388,7 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 /* Details never lies over the conversation: the thread and the composer make room for it */
 @media (min-width: 861px) {
   .main.with-drawer > .head, .main.with-drawer > .thread, .main.with-drawer > .composer { margin-right: 400px; }
+  .main.with-drawer.with-stock > .head, .main.with-drawer.with-stock > .thread, .main.with-drawer.with-stock > .composer { margin-right: 460px; }
 }
 /* on a medium window the list folds away while Details is open, so the conversation keeps a usable width */
 @media (min-width: 861px) and (max-width: 1399px) {
