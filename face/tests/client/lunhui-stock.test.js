@@ -144,7 +144,7 @@ test('the drawer draws its header, pool line, minute line, tiles, citations and 
   assert.match(html, /<input type="range" id="minute-s-600011" class="lh-minute" data-action="lunhuiMinute" data-id="s-600011" data-strategy="cn-market" data-run="20261027T201627Z-6937d208" data-symbol="sh600011" min="0" max="241" value="241"/);
   assert.match(html, /id="cur-s-600011"/);
   assert.match(html, /<div class="lh-readout" id="read-s-600011" role="status" aria-live="polite">样本600011 · 15:00 · 22\.01 · \+10\.00% · at the limit-up<\/div>/);
-  for (const t of ['Seal funds¥80000000', 'Limit price22.01', 'Turnover9.39%', 'Amount¥1.17亿']) assert.ok(text(html).includes(t), t);
+  for (const t of ['Seal funds¥8000.00万', 'Limit price22.01', 'Turnover9.39%', 'Amount¥1.17亿']) assert.ok(text(html).includes(t), t);
   assert.ok(text(html).includes('No claim cites it; it is in the limit-up pool only.'));
   assert.match(html, /data-action="lunhuiAsk"[^>]*>Ask Gravit about 样本600011<\/button>/);
   assert.match(html, /data-action="lunhuiMarkets"[^>]*>Open in Markets<\/button>/);

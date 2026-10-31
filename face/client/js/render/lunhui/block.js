@@ -9,16 +9,25 @@ export const readout = words => `<div class="lh-readout" role="status" aria-live
 const TONE = { STRONG: 'up', EXPANDING: 'up', RELAY: 'up', WEAK: 'down', CONTRACTING: 'down', NOT_EVALUABLE: 'warn' };
 export const pill = state => `<span class="${cls('chip', TONE[state] ?? 'grey')}">${esc(state ?? '—')}</span>`;
 export const count = n => Number(n).toLocaleString('en-US');
-// an amount in yuan, in plan 1's digest grammar (lib/view.mjs turnoverText) so every amount the face draws reads like the
-// number Gravit quotes: X.XX万亿 from 1e12, X.XX亿 from 1e8, else whole yuan
+// an amount in yuan, in plan 1's digest grammar (lib/view.mjs turnoverText) with one tier more: X.XX万亿 from 1e12, X.XX亿
+// from 1e8, then the face's own X.XX万 from 1e4 (the digest has no 万 tier), else whole yuan. Gravit's number rule checks
+// Gravit's own text, not the face's tiles, so this tier changes nothing Gravit may write.
 export function yuan(v) {
   const n = Number(v);
   if (v == null || !Number.isFinite(n)) return '—';
   if (Math.abs(n) >= 1e12) return `¥${(n / 1e12).toFixed(2)}万亿`;
   if (Math.abs(n) >= 1e8) return `¥${(n / 1e8).toFixed(2)}亿`;
+  if (Math.abs(n) >= 1e4) return `¥${(n / 1e4).toFixed(2)}万`;
   return `¥${Math.round(n)}`;
 }
-export const fix2 = v => Number(v).toFixed(2);
+// two decimals in the digest's grammar (lib/view.mjs fix2): U+2212 for a negative, 0.00 for a value that rounds to zero
+// (never −0.00), a dash for none
+export function fix2(v) {
+  const n = Number(v);
+  if (v == null || v === '' || !Number.isFinite(n)) return '—';
+  const text = (Math.round(n * 100) === 0 ? 0 : n).toFixed(2);
+  return text.startsWith('-') ? `−${text.slice(1)}` : text;
+}
 // the digest's grammar: "−" for a negative, "+" on a positive percentage, "0.00%" for none (never a negative zero)
 export const signedPct = v => { const s = Math.abs(v).toFixed(2); return s === '0.00' ? '0.00%' : v < 0 ? `−${s}%` : `+${s}%`; };
 

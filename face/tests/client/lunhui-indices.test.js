@@ -143,9 +143,9 @@ test('cursorPatch: x and y on the chart, and the readout in the digest grammar',
   assert.match(cursorPatch(VIEW_1027, 'sh000001', 0).readout, / · 0\.00% · /, 'the close itself is 0.00%');
   assert.equal(cursorPatch(VIEW_1027, 'sh000001', 999).x, 708, 'a minute past the line is its last');
   assert.equal(cursorPatch(VIEW_1027, 'nope', 3), null);
-  // the digest's amount grammar, the same as breadth's turnover: 万亿 from 1e12, 亿 from 1e8, else whole yuan
+  // the digest's amount grammar, the same as breadth's turnover: 万亿 from 1e12, 亿 from 1e8, then the face's 万 from 1e4, else whole yuan
   const withAmount = amount => ({ ...VIEW_1027, indices: { ...VIEW_1027.indices, rows: [{ ...SSE, minutes: { ...SSE.minutes, amount: SSE.minutes.amount.map((x, i) => (i === 5 ? amount : x)) } }] } });
-  assert.match(cursorPatch(withAmount(98_765_432), 'sh000001', 5).readout, / · ¥98765432 this minute$/);
+  assert.match(cursorPatch(withAmount(98_765_432), 'sh000001', 5).readout, / · ¥9876\.54万 this minute$/);
   assert.match(cursorPatch(withAmount(1_234_000_000_000), 'sh000001', 5).readout, / · ¥1\.23万亿 this minute$/);
   assert.match(cursorPatch(withAmount(null), 'sh000001', 5).readout, / · — this minute$/);
 });

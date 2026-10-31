@@ -10,7 +10,7 @@ import { footerHtml } from '../../client/js/render/lunhui/footer.js';
 import { composedHtml } from '../../client/js/render/lunhui/composed.js';
 import { VIEW_1027 } from './helpers/lunhui-view.js';
 import { ladderHtml } from '../../client/js/render/lunhui/ladder.js';
-import { stockLink, linkNames, count, fix2, signedPct } from '../../client/js/render/lunhui/block.js';
+import { stockLink, linkNames, count, fix2, signedPct, yuan } from '../../client/js/render/lunhui/block.js';
 import { yesterdayHtml } from '../../client/js/render/lunhui/yesterday.js';
 import { signalsHtml } from '../../client/js/render/lunhui/signals.js';
 
@@ -74,10 +74,10 @@ test('breadth in Counts: the split bar, the counts row, the tiles and the ratio 
   const t = text(html);
   for (const s of ['↑ 567 up · 10.5%', '34 unchanged', '↓ 4,774 down · 88.8%', 'Limit-up', '41', 'Limit-down', '22', 'Turnover', '¥1.46万亿']) assert.ok(t.includes(s), s);
   assert.equal(readout(html), 'Up/down ratio 0.12 · about 1 riser for every 8 fallers');
-  // the digest's turnover grammar: 亿 from 1e8, whole yuan below
+  // the digest's turnover grammar from 1e8 (亿), plus the face's own 万 tier from 1e4, whole yuan below
   const tile = turnover => text(breadthHtml({ ...VIEW_1027, breadth: { ...VIEW_1027.breadth, turnover } }, { kind: 'breadth' }, {}, ID)).match(/Turnover(¥[^A-Z↑↓]*?)Up\/down/)?.[1];
   assert.equal(tile(35_012_000_000), '¥350.12亿');
-  assert.equal(tile(98_765_432), '¥98765432');
+  assert.equal(tile(98_765_432), '¥9876.54万');
   assert.match(html, /<div class="lh-readout" role="status" aria-live="polite">/);
   // the switch: Counts pressed, By change not, both naming this answer and the breadth field
   assert.match(html, /<button[^>]*class="seg-item pressed"[^>]*data-action="lunhuiUi" data-value="counts" data-id="c1-p7" data-field="breadth">Counts<\/button>/);
@@ -437,4 +437,30 @@ test("a yesterday row whose boards is null draws a dash, never a bare 'b'", () =
   const y = { ...VIEW_1027.yesterday, rows: [{ code: '600011', name: 'B', yesterdayBoards: null, pct: -3 }] };
   const html = yesterdayHtml({ ...VIEW_1027, yesterday: y }, { kind: 'yesterday' }, {}, ID, 'K');
   assert.match(html, /<span class="lh-yb">—<\/span>/);
+});
+
+// the first live run (2026-10-31): a negative two-decimal figure reads with U+2212, never an ASCII hyphen or −0.00
+test('fix2 writes a negative with U+2212 and a value that rounds to zero as 0.00', () => {
+  assert.equal(fix2(-0.28), '−0.28');
+  assert.equal(fix2(-0.004), '0.00');
+  assert.equal(fix2(0.004), '0.00');
+  assert.equal(fix2(3599.02), '3599.02');
+  assert.equal(fix2(null), '—');
+  assert.equal(fix2(NaN), '—');
+  const s = { ...VIEW_1027.signals, measures: VIEW_1027.signals.measures.map(m => (m.measure === 'yesterday_return_median' ? { ...m, value: -0.28 } : m)) };
+  const out = text(signalsHtml({ ...VIEW_1027, signals: s }, { kind: 'signals' }, {}, ID));
+  assert.ok(out.includes('Yesterday median−0.28'), out);
+  assert.ok(!out.includes('-0.28'));
+});
+
+// the face's amounts carry a 万 tier the digest does not (the drawer's seal funds read ¥57075239 on the first live run)
+test('yuan: 万亿 from 1e12, 亿 from 1e8, 万 from 1e4, whole yuan below, a dash for none', () => {
+  assert.equal(yuan(57075239), '¥5707.52万');
+  assert.equal(yuan(98765432), '¥9876.54万');
+  assert.equal(yuan(9999), '¥9999');
+  assert.equal(yuan(10000), '¥1.00万');
+  assert.equal(yuan(35_012_000_000), '¥350.12亿');
+  assert.equal(yuan(1_460_000_000_000), '¥1.46万亿');
+  assert.equal(yuan(null), '—');
+  assert.equal(yuan(Infinity), '—');
 });

@@ -3112,8 +3112,10 @@ a `stock` carries its `stockCode` and opens that stock's drawer, any other sends
 message. A loaded answer ends with the footer, `Evidence · <source> ✓|✗ · frozen <MM-DD HH:MM>
 CST · run <run>`, and, when a channel in `state.channels` is named the view's strategy, `Open run
 ›`, which goes to that channel's page. Amounts and percentages print in the digest's grammar (`yuan`:
-`X.XX万亿` from 10¹², `X.XX亿` from 10⁸; `signedPct`: U+2212 for a negative, `+` on a positive,
-`0.00%` for none, its tone from the rounded value), counts with thousands separators (`count`,
+`X.XX万亿` from 10¹², `X.XX亿` from 10⁸, then a `X.XX万` tier from 10⁴ the digest does not have —
+Gravit's number rule checks Gravit's text, not the face's tiles —, else whole yuan; `fix2`: two
+decimals, U+2212 for a negative, `0.00` for a value that rounds to zero; `signedPct`: U+2212 for a
+negative, `+` on a positive, `0.00%` for none, its tone from the rounded value), counts with thousands separators (`count`,
 `5,375`), so a figure the face draws reads as the one
 Gravit quotes. Every time is China time: grid minutes through `minuteLabel` (09:30–11:30 are
 points 0–120, 13:00–15:00 are 121–241), ISO stamps through `chinaStamp`
