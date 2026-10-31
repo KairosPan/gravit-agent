@@ -87,12 +87,12 @@ function minuteLine(view, f) {
   if (!hasLine(f)) return head + noteHtml;
   const id = `s-${f.code}`;
   const last = priceOf(f).length - 1;
-  const where = { 'data-id': id, 'data-strategy': view.strategy ?? '', 'data-run': view.run ?? '', 'data-symbol': f.symbol ?? '' };
+  const where = { 'data-id': id, 'data-strategy': view.strategy ?? '', 'data-run': view.run ?? '', 'data-symbol': f.symbol ?? f.code ?? '' };
   const limits = fin(f.limitUp) ? { up: Number(f.limitUp), down: fin(f.limitDown) ? Number(f.limitDown) : null } : null;
   const svg = intradaySvg(f.minutes, { minute: last, id, limits, seals: { first: f.firstSeal, last: f.lastSeal }, bars: 'volume' })
     .replace(/^<svg class="lh-chart"/, `<svg class="lh-chart"${attrs({ 'data-action': 'lunhuiHover', 'data-last': String(last), ...where })}`);
   const slider = `<input${attrs({ type: 'range', id: `minute-${id}`, class: 'lh-minute', 'data-action': 'lunhuiMinute', ...where, min: '0', max: String(last), value: String(last), step: '1', 'aria-label': `Minute on ${f.name ?? f.code}` })}>`;
-  const words = cursorPatch(view, f.symbol, last)?.readout ?? '';
+  const words = cursorPatch(view, f.symbol ?? f.code, last)?.readout ?? '';
   return head + svg + slider + `<div class="lh-readout" id="read-${esc(id)}" role="status" aria-live="polite">${esc(words)}</div>` + noteHtml;
 }
 

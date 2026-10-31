@@ -132,7 +132,9 @@ test("lunhui answer smoke: a sealed run's view over the real route, drawn as Gra
     store.dispatch("lunhuiStockOpen", { key: want.key, code: "600001" });
     const drawer = stockDrawerHtml(store.get());
     assert.match(drawer, /<aside class="drawer stock" aria-label="上海九百">/);
-    assert.match(drawer, /<svg[\s\S]*class="lh-limit up"/, "the minute chart with its limit-up line");
+    assert.equal(drawer.split("<svg").length - 1, 1, "the drawer draws one chart");
+    assert.match(drawer, /<svg class="lh-chart" data-action="lunhuiHover"[^>]*data-id="s-600001"[^>]*>(?:(?!<\/svg>)[\s\S])*class="lh-limit up"(?:(?!<\/svg>)[\s\S])*id="cur-s-600001"/,
+      "the drawer's own minute chart with its limit-up line");
   } finally {
     disposeView();
     await dispose();

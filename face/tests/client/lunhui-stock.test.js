@@ -233,3 +233,33 @@ test('the drawer under New York time reads China time', () => {
     else process.env.TZ = saved;
   }
 });
+
+// ---- final-review fixes ----
+
+test('two null-symbol stocks (codes exchangeOf does not know): each drawer and cursor resolve to its own stock', () => {
+  const a = facts({ code: '830001', symbol: null, name: '北交甲', minutes: line(10, () => 10.5) });
+  const b = facts({ code: '920002', symbol: null, name: '北交乙', minutes: line(10, () => 10.2) });
+  const view = { strategy: 'cn-market', run: 'r1', frozenAt: '2026-10-27T07:05:00Z', indices: { rows: [] }, stocks: { 830001: a, 920002: b } };
+  assert.match(cursorPatch(view, '830001', 0).readout, /^北交甲 · 09:30 · 10\.50/);
+  assert.match(cursorPatch(view, '920002', 0).readout, /^北交乙 · 09:30 · 10\.20/);
+  assert.equal(cursorPatch(view, null, 0), null, 'a null symbol finds no line');
+  for (const [code, name, p] of [['830001', '北交甲', '10.50'], ['920002', '北交乙', '10.20']]) {
+    const html = stockDrawerHtml({ lunhui: { views: { [KEY]: { status: 'loaded', view } }, ui: {}, stock: { key: KEY, code } } });
+    assert.match(html, new RegExp(`<svg class="lh-chart"[^>]*data-symbol="${code}"`));
+    assert.match(html, new RegExp(`<input type="range"[^>]*data-symbol="${code}"`));
+    assert.match(html, new RegExp(`id="read-s-${code}" role="status" aria-live="polite">${name} · 15:00 · ${p.replace('.', '\\.')}`));
+  }
+});
+
+test('the seal marks are drawn after the price line, so they sit on top of it', () => {
+  const minutes = line(10, i => (i < 4 ? 10.5 : 11));
+  const svg = intradaySvg(minutes, { id: 'x', limits: { up: 11, down: 9 }, seals: { first: '09:34', last: null }, bars: 'volume' });
+  const lastPath = svg.lastIndexOf('class="lh-path');
+  assert.ok(lastPath > 0 && svg.indexOf('lh-seal') > lastPath, 'lh-seal after every price path');
+  assert.ok(svg.indexOf('lh-limit up') < svg.indexOf('class="lh-path'), 'the limit lines stay under the price line');
+});
+
+test('stockHeadline: a limit-up that broke and closed below the limit has no held clause', () => {
+  const f = facts({ breaks: 2, minutes: line(10, i => (i < 4 ? 10.5 : i === 241 ? 11 - 0.006 : 11)) });
+  assert.equal(stockHeadline(f), 'Sealed 09:34, broke 2×');
+});

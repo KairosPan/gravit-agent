@@ -93,15 +93,22 @@ const GRID = [[0], [60], [120, 121], [181], [241]];
 // a seal's grid minute: one before the open (the call auction, 09:25) sits on the open's point
 export const sealIndex = t => minuteIndex(t) ?? (typeof t === 'string' && /^\d{2}:\d{2}$/.test(t) && t < '09:30' ? 0 : null);
 
-// a stock's limit lines (the limit-down only inside the drawn span) and its first and last seal on the limit-up
-function limitMarks(minutes, g, limits, seals) {
+// a stock's limit lines (the limit-down only inside the drawn span), under the price line
+function limitLines(minutes, g, limits) {
   if (!fin(limits?.up)) return '';
   const prec = Number(minutes?.prec);
   const line = (dir, p) => `<line class="lh-limit ${dir}" x1="${LEFT}" y1="${n1(g.Y(p))}" x2="${LEFT + PLOT}" y2="${n1(g.Y(p))}"/>`;
   const up = Number(limits.up);
   const down = fin(limits.down) && Math.abs(Number(limits.down) - prec) <= g.span ? line('down', Number(limits.down)) : '';
+  return line('up', up) + down;
+}
+
+// a stock's first and last seal on the limit-up, drawn after the price line so they sit on top of it
+function sealMarks(g, limits, seals) {
+  if (!fin(limits?.up)) return '';
+  const up = Number(limits.up);
   const at = [...new Set([seals?.first, seals?.last].map(sealIndex).filter(i => i !== null))];
-  return line('up', up) + down + at.map(i => `<circle class="lh-seal" cx="${n1(g.X(i))}" cy="${n1(g.Y(up))}" r="3"/>`).join('');
+  return at.map(i => `<circle class="lh-seal" cx="${n1(g.X(i))}" cy="${n1(g.Y(up))}" r="3"/>`).join('');
 }
 
 /**
@@ -129,7 +136,7 @@ export function intradaySvg(minutes, { focus = null, minute = null, id = '', lim
     band + grid +
     `<line class="lh-mid" x1="${LEFT}" y1="${MID}" x2="${LEFT + PLOT}" y2="${MID}" stroke-dasharray="4 4"/>` +
     `<text class="lh-axis" x="${LEFT - 4}" y="${MID + 4}" text-anchor="end">${fix2(prec)}</text>` +
-    bars(minutes, dir, g, barsBy === 'volume' ? 'volume' : 'amount') + limitMarks(minutes, g, limits, seals) + paths(price, dir, g) + extreme(price, g, 'H') + extreme(price, g, 'L') +
+    bars(minutes, dir, g, barsBy === 'volume' ? 'volume' : 'amount') + limitLines(minutes, g, limits) + paths(price, dir, g) + sealMarks(g, limits, seals) + extreme(price, g, 'H') + extreme(price, g, 'L') +
     `<line id="cur-${esc(id)}" class="lh-cur" x1="${cx}" y1="${TOP}" x2="${cx}" y2="${BOTTOM}"/>` +
     `<circle id="dot-${esc(id)}" class="lh-dot" cx="${cx}" cy="${cy}" r="3.5"/>` +
     `</svg>`;
@@ -173,7 +180,8 @@ export function cursorPatch(view, symbol, minute) {
   const row = (Array.isArray(view?.indices?.rows) ? view.indices.rows : []).find(r => r?.symbol === symbol);
   if (!row) {
     const stocks = view?.stocks && typeof view.stocks === 'object' ? Object.values(view.stocks) : [];
-    const stock = stocks.find(s => s?.symbol === symbol);
+    // a stock whose symbol is null (a code exchangeOf does not know) is found by its code
+    const stock = symbol == null || symbol === '' ? null : stocks.find(s => s?.symbol === symbol || s?.code === symbol);
     return stock ? stockPatch(stock, symbol, minute) : null;
   }
   const price = prices(row?.minutes);

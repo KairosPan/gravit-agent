@@ -57,19 +57,20 @@ function linkText(text, names, key) {
   return out;
 }
 
-/** Link every exact pool name in the text of `html` — never inside a tag or inside <a>…</a> — and leave every other byte as it is. */
+/** Link every exact pool name in the text of `html` — never inside a tag, inside <a>…</a> or inside <code>/<pre> — and leave every other byte as it is. */
 export function linkNames(html, view, key) {
   const src = String(html ?? '');
   const names = poolNames(view);
   if (!names.length) return src;
-  let out = '', inA = 0;
-  // a tag ends at the first > outside its quotes, so an attribute holding > stays inside the tag
+  let out = '', inside = 0;
+  // a tag ends at the first > outside its quotes, so an attribute holding > stays inside the tag; nothing inside <a>, <code>
+  // or <pre> (markdown's md-code and md-fence) is linked
   for (const part of src.split(/(<(?:[^>"']|"[^"]*"|'[^']*')*>)/)) {
     if (part.startsWith('<') && part.endsWith('>')) {
-      if (/^<a[\s>]/i.test(part)) inA += 1;
-      else if (/^<\/a\s*>/i.test(part)) inA = Math.max(0, inA - 1);
+      if (/^<(?:a|code|pre)[\s>]/i.test(part)) inside += 1;
+      else if (/^<\/(?:a|code|pre)\s*>/i.test(part)) inside = Math.max(0, inside - 1);
       out += part;
-    } else out += inA ? part : linkText(part, names, key);
+    } else out += inside ? part : linkText(part, names, key);
   }
   return out;
 }

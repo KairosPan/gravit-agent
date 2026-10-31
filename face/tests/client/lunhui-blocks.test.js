@@ -411,3 +411,18 @@ test('Open run appears only for a known channel', () => {
   assert.doesNotMatch(footerHtml(view), /lh-open-run/);
   assert.doesNotMatch(footerHtml(view, []), /lh-open-run/);
 });
+
+// final-review fixes
+test('linkNames leaves a name inside <code> or <pre> as it is', () => {
+  const view = { stocks: { 600001: { name: '上海九百' } } };
+  for (const html of ['<p><code class="md-code">上海九百</code></p>', '<pre class="md-fence"><code>上海九百 x</code></pre>', '<pre>上海九百</pre>']) {
+    assert.equal(linkNames(html, view, 'K'), html);
+  }
+  assert.match(linkNames('<p><code>x</code> 上海九百</p>', view, 'K'), /<\/code> <button[^>]*data-code="600001">上海九百<\/button>/, 'after the code span it links again');
+});
+
+test("a yesterday row whose boards is null draws a dash, never a bare 'b'", () => {
+  const y = { ...VIEW_1027.yesterday, rows: [{ code: '600011', name: 'B', yesterdayBoards: null, pct: -3 }] };
+  const html = yesterdayHtml({ ...VIEW_1027, yesterday: y }, { kind: 'yesterday' }, {}, ID, 'K');
+  assert.match(html, /<span class="lh-yb">—<\/span>/);
+});

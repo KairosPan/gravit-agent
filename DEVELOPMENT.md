@@ -3131,8 +3131,8 @@ its own minute.
 (`stockLink`: `<button class="lh-stock" data-action="lunhuiStock">` carrying the answer's view key
 and the code) only when its code is a key of `view.stocks`: in the ladder and yesterday rows, and,
 through `linkNames`, in the summary and every block's headline — there only where the text matches
-a pool name exactly, outside any tag and outside `<a>…</a>`, the longest name first, every other
-byte left as `markdownHtml` drew it. A click dispatches `lunhuiStockOpen` with the opening
+a pool name exactly, outside any tag and outside `<a>…</a>`, `<code>` and `<pre>` (markdown's
+`md-code` and `md-fence`), the longest name first, every other byte left as `markdownHtml` drew it. A click dispatches `lunhuiStockOpen` with the opening
 answer's `viewKey`; the drawer (`stockDrawerHtml`, a 460 px `<aside class="drawer stock">` inside
 `<main>`, the thread and composer making room at 861 px and wider) draws `state.lunhui.views[key]`:
 `Loading <code>…` while it loads, its error when it failed, `<code> is not in this run's pools.`
@@ -3140,8 +3140,10 @@ for a code it does not hold. Loaded, it draws the name, `<code> · <board> · <i
 line (price, the change chip, the pool tag, `From the limit-up pool frozen <stamp> by the market
 run`), **The minute line** — a headline derived from the line (`stockHeadline`), the chart against
 the view's own `limitUp` (and `limitDown`, drawn when it falls inside the drawn range, which the
-symmetric scale nearly always makes it) with the seal marks and volume bars, the slider and its
-readout (`… · at the limit-up` only at `price >= limitUp − 0.005`, the limit-down mirrored), and a
+symmetric scale nearly always makes it) with the seal marks (drawn over the price line) and volume
+bars, the slider and its readout (`… · at the limit-up` only at `price >= limitUp − 0.005`, the
+limit-down mirrored; the chart, the slider and the readout name the stock by its `symbol`, or by its
+code when the symbol is null — a code `exchangeOf` does not know, such as a BSE name), and a
 note (`stockNote`) —, the tiles by pool, **In this run** (each claim that cites the code, `module ·
 id` then its text, escaped), and two keys: **Ask Gravit about <name>**, which sends
 `说说 <name>（<code>）在这次运行里的情况。` (`askText`), and **Open in Markets**, which goes to
@@ -3881,10 +3883,10 @@ refused, `parseHosts`). The face's:
 - **The stock drawer and the rest** (plan 3 of the run view): `lunhui-present` (the seven kinds,
   sentiment's card blocks, the titles `yesterday` and `signals` need, `signals` refused without
   sentiment); the client's `lunhui-host` (`stockCode`, `marketKey`, `boardOf`), `lunhui-blocks`
-  (`stockLink`, `linkNames` — the longest name once, nothing inside a tag or `<a>` changed —,
+  (`stockLink`, `linkNames` — the longest name once, nothing inside a tag, `<a>`, `<code>` or `<pre>` changed —,
   yesterday's sort and links, signals' columns and `—` for a null, the follow-ups and `Open run ›`),
   `lunhui-stock` (the headline and the note, the 20% limit line, the limit-down in and out of range,
-  the seals, the readout at the limits, the full drawer, the no-line drawer, the tiles, the states,
+  the seals over the price line, the readout at the limits, two null-symbol names each resolving to its own line, the full drawer, the no-line drawer, the tiles, the states,
   the citations, escaping, China time), `lunhui-indices` (the geometry without limits unchanged),
   `thread`, `css` (the stock states and the new classes, styled from tokens) and `app-dom` (a link
   opening the drawer and closing Details, navigation and Escape closing it, a live redraw keeping

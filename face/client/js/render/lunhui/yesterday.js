@@ -32,7 +32,7 @@ export function yesterdayHtml(view, block, ui, id, key) {
     ? `<div class="lh-yrows">${sorted.map(r => {
       const p = pctOf(r);
       const w = p != null && max > 0 ? Math.abs(p) / max * 100 : 0;
-      return `<div class="lh-yrow"><span class="lh-yname">${nameHtml(r, view, key)}</span><span class="lh-yb">${esc(r.yesterdayBoards)}b</span>` +
+      return `<div class="lh-yrow"><span class="lh-yname">${nameHtml(r, view, key)}</span><span class="lh-yb">${fin(r.yesterdayBoards) ? `${num(r.yesterdayBoards)}b` : '—'}</span>` +
         `<span class="${cls('lh-ypct', p == null ? 'flat' : tone(p))}">${esc(pctText(p))}</span>` +
         `<span class="lh-ybar" aria-hidden="true">${p == null ? '' : `<span class="${cls('lh-ybar-fill', tone(p))}" style="width:${w.toFixed(1)}%"></span>`}</span></div>`;
     }).join('')}</div>`
