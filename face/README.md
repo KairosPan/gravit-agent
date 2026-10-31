@@ -412,12 +412,13 @@ every boot. Like AKShare's reads they carry no lookahead guard and are never evi
 Gravit freezes; a role reads each module's context of the frozen run and submits that module's
 artifact — `cn-market-analyst` the market read in `cn-market`, `cn-stock-analyst` the leader and
 the mode in a strategy channel, citing a market run, `cn-reviewer` the counterevidence in either;
-Gravit reads the run back and reports. The
+Gravit reads the run back and answers — in `cn-market` with `lunhui_present`, a composed answer
+the page draws from the run's view, in a strategy channel with a text report. The
 order is the run protocol, `../dsh/profile/lunhui-run.md`, which Gravit reads as its `lunhui:run`
 prompt section; a single module asked for on its own follows `../dsh/profile/lunhui-module.md`,
 the `lunhui:module` section one step after it.
 
-The design has eleven rows; plans 1–4 built them all:
+The design has eleven rows; plans 1–4 built them all, and plan 2 of the run view added a twelfth:
 
 | Row | Tool | State |
 |---|---|---|
@@ -432,6 +433,7 @@ The design has eleven rows; plans 1–4 built them all:
 | `lunhui-leader` (`plugins/lunhui/leader-row.mjs`) | `lunhui_read_leader_context`, `lunhui_submit_leader` — 龙头与个股地位: up to five `leader_candidates`, each a frozen quote held by a pool row or member list of the cited market run, ranked; `top_pattern_flags`; strategy channels only | built |
 | `lunhui-mode` (`plugins/lunhui/mode-row.mjs`) | `lunhui_read_mode_context`, `lunhui_submit_mode` — 模式选择与预期: `mode` (`S01`, `S02` or `WAIT`), its preconditions, `research_only_matches`, the expectation card and the review of the previous card; strategy channels only | built |
 | `lunhui-review` (`plugins/lunhui/review-row.mjs`) | `lunhui_read_counterevidence_context`, `lunhui_submit_counterevidence` — 反证: up to twelve `items`, each against a module whose artifact the context shows, of a kind (`CONTRADICTS`, `MISSING_EVIDENCE`, `STALE`, `RULING_CONFLICT`, `OVERREACH`), at most 160 characters, citing evidence of its own; either channel | built |
+| `lunhui-present` (`plugins/lunhui/present-row.mjs`) | `lunhui_present` — Gravit's composed answer to a sealed `cn-market` run: a summary of at most 160 characters, 1–6 blocks from the face's catalog (`verdicts`, `breadth`, `indices`, `ladder`, `sources`), a title each, an optional focus, at most three choices; every number must be one the run's view digest holds (`INVALID_PRESENT` names any other), a strategy run is `NOT_A_MARKET_RUN`; on ok it ends Gravit's turn; Gravit only, `cn-market` runs only | built |
 
 A freeze with no `run` opens a run, `strategies/<name>/analysis/<YYYYMMDD>T<HHMMSS>Z-<8 hex>/`,
 and answers its id; pass that id as `run` to add the other sources. One evidence file per source
@@ -529,10 +531,14 @@ never edit `analysis/`, never submit an artifact itself; journal a `cn-market` r
 `NOT_EVALUABLE` artifacts in `strategies/cn-market/journal.md`; and end with the run id, the
 `snapshot_id`, each artifact's file and headline (the leader's candidates, the counterevidence's
 item count, the mode and its `market_run`), what was not evaluable or has no artifact, and whether
-the quotes were delayed. The section is in Gravit's prompt
+the quotes were delayed — in a strategy channel. In `cn-market` the run ends instead with one
+`lunhui_present` call: a one- or two-sentence conclusion, blocks picked and ordered by the day's
+weight, a title each, an optional focus, at most three follow-ups, every number from
+`lunhui_read_run`'s view digest, and no separate report (since 2026-10-30, plan 2 of the run
+view). The section is in Gravit's prompt
 only while the Lunhui rows are mounted, never in a bot's or a role's.
 
-`lunhui:module` (`../dsh/profile/lunhui-module.md`, at most 1,500 bytes — 1,372 today, a budget
+`lunhui:module` (`../dsh/profile/lunhui-module.md`, at most 1,500 bytes — 1,500 today, at the cap, a budget
 `tests/protocols.test.ts` pins under the loader's 3,000) tells Gravit how to run one module on a
 module card's message, which names the module, the channel and the run (an existing one or a new
 one), and for a strategy module the `market_run` and optional codes; everything else is as
@@ -540,7 +546,9 @@ one), and for a strategy module the `market_run` and optional codes; everything 
 first role read; an existing run is not frozen again; the market analyst is told the one module to
 write; the reviewer runs before the mode, never beside it; a refusal it cannot cure
 (`ALREADY_SUBMITTED`, `STALE_MARKET_RUN`, `MISSING_EVIDENCE`) is reported as it is and the message
-ends, with no other run opened. It is gated like `lunhui:run`, on `lunhui_read_run`. Editing
+ends, with no other run opened. A `cn-market` environment, sentiment, theme or counterevidence run
+answers with `lunhui_present` naming its `module` (its blocks bounded to that module's); the leader,
+the mode and any strategy-channel run report the module's points in text. It is gated like `lunhui:run`, on `lunhui_read_run`. Editing
 either protocol file or a role means `npm run render:roles`, `npm test` and a restart ("Roles").
 
 **The market channel**: `strategies/cn-market/` is tracked, with a `THESIS.md` that states the
@@ -583,7 +591,7 @@ seat and below this file, so a patch reaches them:
 A module row disabled alone takes its pair away, and with it every call of its role —
 `cn-market-analyst` names all six market module tools, `cn-stock-analyst` all four strategy module
 tools, `cn-reviewer` the counterevidence pair (a role naming a tool the tree lacks is refused at
-delegation). To turn Lunhui off, disable all eleven — a freeze or module row injects the
+delegation). To turn Lunhui off, disable all twelve — a freeze or module row injects the
 `lunhuiRuns` service, so without `lunhui-runs` it stays pending and the boot's row audit refuses it
 (`waiting for service: lunhuiRuns`; reasoned from the audit, not yet pinned by a boot); the
 `lunhui:run` and `lunhui:module` sections leave Gravit's prompt with them:
@@ -600,15 +608,16 @@ delegation). To turn Lunhui off, disable all eleven — a freeze or module row i
 - { id: lunhui-leader, disabled: true }
 - { id: lunhui-mode, disabled: true }
 - { id: lunhui-review, disabled: true }
+- { id: lunhui-present, disabled: true }
 ```
 
 A patch that replaces `lunhui-runs`' config replaces it whole, so it restates `strategiesRoot`
 (an absolute existing directory; the default is this checkout's `strategies/`).
 
-The checks: `/data/plugins.json` lists the eleven rows ACTIVE, and Gravit's tools include the
-seventeen `lunhui_` names, `role_cn_market_analyst`, `role_cn_reviewer` and `role_cn_stock_analyst`
-(the schema block is 3,188 heuristic tokens for the seventeen and 689 for the three role tools,
-`DEVELOPMENT.md` §4.3).
+The checks: `/data/plugins.json` lists the twelve rows ACTIVE, and Gravit's tools include the
+eighteen `lunhui_` names, `role_cn_market_analyst`, `role_cn_reviewer` and `role_cn_stock_analyst`
+(the schema block was 3,188 heuristic tokens for the seventeen before `lunhui_present` and 689
+for the three role tools, `DEVELOPMENT.md` §4.3; the eighteenth is not yet measured).
 
 **The market run, automated** (`tests/lunhui-market-run-smoke.test.ts`, under `FACE_SMOKE=1`):
 one whole `cn-market` run on a real boot over the recorded replies and a stub model — Gravit
@@ -635,9 +644,9 @@ every freeze (`CALENDAR_UNCOVERED`).
    `session` and `as_of`), then `lunhui_freeze_limit_up` and `lunhui_freeze_boards` with that id;
    one `role_cn_market_analyst` call whose child (Details › Children) reads and submits environment,
    sentiment, theme in that order; one `role_cn_reviewer` call with no `market_run`, whose child
-   submits the counterevidence; `lunhui_read_run`; a final message naming the run, its
-   `snapshot_id`, each artifact's file and headline (the counterevidence's item count among them), any `NOT_EVALUABLE` module with its missing
-   sources, and that the quotes were delayed. A refused freeze (`UPSTREAM_*`, `NO_MARKET_DATA`) costs
+   submits the counterevidence; `lunhui_read_run`; then the answer as one `lunhui_present` call —
+   since the protocol split of 2026-10-30 a composed answer, its working notes folded above it,
+   with no text report after it ("The composed-answer drill" below checks the page). A refused freeze (`UPSTREAM_*`, `NO_MARKET_DATA`) costs
    only that source; the run keeps the rest.
 2. The channel page's **Research runs**: the run sealed, a chip per artifact. On disk,
    `strategies/cn-market/analysis/<run>/`: `run.json` with `sealed_at`, `snapshot_id` and
@@ -754,6 +763,41 @@ Record the outcome here, under the drill — the date, the run ids, what differe
 tracked files are committed on your word, or the run directories removed.
 
 **Not yet run** — owed after plan 3 of the module cards lands.
+
+**The composed-answer drill — owed, the operator's.** Run after any change to
+`plugins/lunhui/present-row.mjs`, `lib/present.mjs`, `client/js/host/lunhui.js`,
+`client/js/render/lunhui/` or the closing step of either protocol; keyed, the face from your own
+terminal (`npm start` after `source ../.env.deepseek`, as in "Run") and the Account beside it
+(`cd ../account && npm run account`), the browser on this Mac's New York zone:
+
+1. Open **cn-market** in Messages, start a New message, and send the live market run's prompt
+   (above). Expected: the thread ends in one composed answer — Gravit's summary, then the blocks in
+   the order Gravit chose, each drawn from the run's view (a skeleton line per block until the view
+   arrives), then the footer `Evidence · … · frozen <MM-DD HH:MM> CST · run <run>`; no text report
+   after it, and the turn ended (the composer free, no thinking row).
+2. Above the answer, **Working notes · N**, closed: open it, and the words Gravit wrote on the way
+   are there and nowhere else in the thread. A refused `lunhui_present` (a number the digest lacks)
+   followed by an ok one draws one answer, not two.
+3. The blocks answer their controls: a verdict tile opens its claims (pressed again, it closes);
+   breadth switches Counts and By change, and a bucket names its count and share; on indices, drag
+   the minute slider and move the pointer over the chart — the cursor line, the dot and the readout
+   follow, and a redraw while you drag (a live event arriving) leaves the cursor at the slider's
+   minute; a ladder rung names its promotions.
+4. Every time is China time: the chart's grid reads 09:30, 10:30, 11:30/13:00, 14:00, 15:00, the
+   readout's minute is a grid minute, and the footer's frozen time is CST — none in New York time.
+5. The failed view: move the run's directory aside (`mv ../strategies/cn-market/analysis/<run>
+   /tmp/`) and hard-reload the page: the summary stays, with one line `The run view could not be
+   loaded: HTTP 4xx` and **Retry** — never a blank. Move the directory back and press Retry: the
+   blocks draw.
+6. The split: in **lunhui-s01-repair**, the live strategy run's prompt still ends in a text
+   report, no composed answer; a Theme card run in `cn-market` ends in a composed answer of theme's
+   blocks alone.
+
+Record the outcome here, under the drill — the date, the run id, what differed — and mark the
+**Composed answer — manual** row of `DEVELOPMENT.md` §7.4. The run's tracked files are committed on
+your word, or the run directory removed.
+
+**Not yet run** — owed after plan 2 of the run view lands.
 
 ## The profile
 
@@ -2507,6 +2551,14 @@ closed **思考轨迹** disclosure (`client/answer-traces.js`, deleted) folded c
 tool calls under every answer; on the gravit-ui client the thread draws no
 tool call, a room member's answer has its **Trace** ("Rooms" above), and there is no `think` row
 (the reasoning text the mapper carries is not drawn).
+
+An ok `lunhui_present` call is the one tool call that draws, as Gravit's **composed answer**
+(since 2026-10-30, plan 2 of the run view; `client/js/render/lunhui/`, `DEVELOPMENT.md` §5.4):
+the summary as Gravit wrote it, then the blocks in its order, every number drawn by the face from
+the run's view (`GET /data/lunhui/view`, read once per answer by `client/js/host/lunhui.js`),
+the footer, and all times in China time. The words Gravit wrote on the way fold into one closed
+**Working notes · N** just above it; a view that cannot be read leaves the summary, one error
+line and **Retry**. A refused call draws nothing.
 
 Thinking follows dsh's design: while the host streams a turn the thread's tail carries one
 ephemeral three-dot row — NEVER content — set by the assistant-stream pulses of the followed
