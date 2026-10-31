@@ -228,3 +228,30 @@ test('the empty state carries no demo slice', () => {
   for (const gone of ['plugins', 'memory', 'mail', 'banner', 'call', 'compose']) assert.equal(gone in s, false, gone);
   for (const gone of ['addMemory', 'editMemory', 'forgetMemory', 'forgetAll', 'setMemorySwitch', 'append']) assert.equal(R[gone], undefined, gone);
 });
+
+// the China tab (spec 2026-10-31): the ranking's read, the tab, an A share's history
+test('the rank read: loading keeps the answer, loaded records its sort, a failure keeps the rows', () => {
+  const data = { ok: true, sort: 'movers', total: 5577, items: [{ id: 'cn:300030' }] };
+  assert.deepEqual(emptyState().markets.rank, { status: 'idle', data: null, at: null, sort: 'volume', message: null });
+  let s = R.rankLoaded(emptyState(), { sort: 'movers', data, at: 1 });
+  s = R.rankLoading(s, { sort: 'volume' });
+  assert.equal(s.markets.rank.data, data);
+  assert.equal(s.markets.rank.status, 'loading');
+  s = R.rankFailed(s, { sort: 'volume', at: 2, message: null });
+  assert.deepEqual([s.markets.rank.status, s.markets.rank.data, s.markets.rank.sort], ['error', data, 'volume']);
+  assert.equal(R.rankLoaded(s, { sort: 'price', data: {}, at: 3 }), s, 'an unknown sort changes nothing');
+});
+
+test('China is a tab, starting from Most traded', () => {
+  let s = R.setMarketsSort(emptyState(), 'movers');
+  s = R.setMarketsTab(s, 'china');
+  assert.deepEqual([s.markets.tab, s.markets.sort], ['china', 'volume']);
+});
+
+test('an A share page keeps its range and its history like an Account market', () => {
+  let s = R.setRange(emptyState(), { id: 'cn:600519', range: '5D' });
+  assert.equal(s.markets.candles['cn:600519'].range, '5D');
+  s = R.candlesLoaded(s, { id: 'cn:600519', range: '5D', data: { ok: true, range: '5D', sessions: [] }, at: 1 });
+  assert.equal(s.markets.candles['cn:600519'].status, 'ready');
+  assert.equal(R.setRange(emptyState(), { id: 'cn:12345', range: '5D' }).markets.candles['cn:12345'], undefined);
+});

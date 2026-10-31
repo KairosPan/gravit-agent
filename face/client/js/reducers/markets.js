@@ -15,9 +15,12 @@ const keyed = (s, field, key, patch) => mk(s, { [field]: { ...s.markets[field], 
 const read = (s, patch) => mk(s, { results: { ...s.markets.results, ...patch } });
 // the explore reads: All's and each kind's own; the tabs: those, Watching and All results
 const EXPLORED = new Set(ACCOUNT_TABS.map(([id]) => id));
-const TABS = new Set([...EXPLORED, 'watching', 'results']);
-// a market's history: an Account key's, at one of the Account's candle ranges
-const charted = (id, range) => isAccountKey(id) && CANDLE_RANGES.includes(range);
+const TABS = new Set([...EXPLORED, 'china', 'watching', 'results']);
+// a market's history: an Account key's or an A share's (cn:<code>), at one of the candle ranges
+const charted = (id, range) => (isAccountKey(id) || /^cn:\d{6}$/.test(String(id))) && CANDLE_RANGES.includes(range);
+// the China ranking's two sorts
+const RANKED = new Set(['volume', 'movers']);
+const rank = (s, patch) => mk(s, { rank: { ...s.markets.rank, ...patch } });
 const named = v => typeof v === 'string' && v !== '';
 const text = v => (typeof v === 'string' ? v : null);
 // a price's stamp as a time, or null when it has none that parses
@@ -39,6 +42,10 @@ export const reducers = {
   exploreLoading: (s, { tab } = {}) => (EXPLORED.has(tab) ? keyed(s, 'explore', tab, { status: 'loading' }) : s),
   exploreLoaded: (s, { tab, data, at } = {}) => (EXPLORED.has(tab) ? keyed(s, 'explore', tab, { status: 'ready', data, at, message: null }) : s),
   exploreFailed: (s, { tab, at, message = null } = {}) => (EXPLORED.has(tab) ? keyed(s, 'explore', tab, { status: 'error', at, message }) : s),
+  // the China tab's ranking (/data/cn/rank), by the sort it was read for: a failed read keeps its rows
+  rankLoading: (s, { sort } = {}) => (RANKED.has(sort) ? rank(s, { status: 'loading', sort }) : s),
+  rankLoaded: (s, { sort, data, at } = {}) => (RANKED.has(sort) ? rank(s, { status: 'ready', sort, data, at, message: null }) : s),
+  rankFailed: (s, { sort, at, message = null } = {}) => (RANKED.has(sort) ? rank(s, { status: 'error', sort, at, message }) : s),
   resultsLoading: s => read(s, { status: 'loading' }),
   resultsLoaded: (s, { data, at } = {}) => read(s, { status: 'ready', data, at, message: null }),
   resultsFailed: (s, { at, message = null } = {}) => read(s, { status: 'error', at, message }),

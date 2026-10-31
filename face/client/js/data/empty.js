@@ -40,6 +40,8 @@ export function emptyState() {
       watch: [], watchError: null, asked: {},
       watchlist: [], quotes: {}, providers: [], connection: 'idle',
       search: { query: '', status: 'idle', assets: [], partial: false }, hitQuotes: {},
+      // the China tab's ranking read (/data/cn/rank), with the sort it was read for
+      rank: { status: 'idle', data: null, at: null, sort: 'volume', message: null },
     },
     // the Account (host/account.js): its page with the sentence of its last refusal, its other reads, the history curve's
     // range, the Statement drawer, and the venue whose Details drawer is open (its id); and the connect sheet's reads — where
