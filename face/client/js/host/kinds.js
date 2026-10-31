@@ -112,6 +112,39 @@ export function seatLift(name, args, text, isError, callId) {
   return null;
 }
 
+// Gravit's composed answer (plan 2 of the Lunhui run view, task 4): an ok `lunhui_present` result is the face's own catalog
+// drawn from the run's view — the summary as Gravit wrote it, the blocks in the order the check confirmed them (each with
+// the call's title and focus), the choices, the view modules the answer reads. A refusal (a tool error: the turn goes on,
+// and a later ok call answers it) or any other tool lifts nothing, so only the ok call is drawn.
+export const PRESENT_TOOL = 'lunhui_present';
+const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
+export function presentLift(name, args, text, isError, callId) {
+  if (name !== PRESENT_TOOL || isError) return null;
+  const v = parseArgs(text);
+  if (v.ok !== true) return null;
+  const a = isObj(args) ? args : {};
+  const asked = Array.isArray(a.blocks) ? a.blocks.filter(isObj) : [];
+  const kinds = Array.isArray(v.blocks) ? v.blocks.filter(k => typeof k === 'string') : asked.map(b => b.kind);
+  const blocks = kinds.map(kind => {
+    const b = asked.find(x => x.kind === kind) ?? {};
+    return { kind, ...(typeof b.title === 'string' ? { title: b.title } : {}), ...(b.focus !== undefined ? { focus: b.focus } : {}) };
+  });
+  const summary = typeof a.summary === 'string' ? a.summary : '';
+  return {
+    kind: 'composed', text: summary,
+    data: {
+      callId, strategy: a.strategy, run: a.run, module: a.module, summary, blocks,
+      choices: Array.isArray(a.choices) ? a.choices.filter(isObj) : [],
+      modules: Array.isArray(v.modules) ? v.modules.filter(m => typeof m === 'string') : [],
+    },
+  };
+}
+// the tool results that lift a message of their own: a seat write's receipt or refusal, Gravit's composed answer
+function liftOf(name, args, text, isError, callId) {
+  const [prefix, lift] = isSeatWriteTool(name) ? ['r', seatLift(name, args, text, isError, callId)] : ['p', presentLift(name, args, text, isError, callId)];
+  return lift && { id: `${prefix}${callId}`, ...lift };
+}
+
 // a call id is a session's own (the host's guard treats them as non-unique too), so a call is kept by session AND id
 const callKey = (sessionId, callId) => `${typeof sessionId === 'string' ? sessionId : ''}:${callId}`;
 // the live layer calls this on every raw frame before mapping it: a tool/call's arguments are kept by session and callId
@@ -167,9 +200,9 @@ function toolMessages(view, calls) {
   }
   // the result names its call, when the call was seen: the row draws the call's name and its payload folded
   const row = { ...base(view), id: `t${callId}`, merge: true, from: 'gravit', kind: 'tool', text: '', data: { callId, result: c.text ?? '', isError: c.isError === true, ...(known ? { name: known.name, args: known.args } : {}) } };
-  if (!known || !isSeatWriteTool(known.name)) return [row];
-  const lift = seatLift(known.name, known.args, c.text ?? '', c.isError === true, callId);
-  return lift ? [row, { ...base(view), id: `r${callId}`, from: 'gravit', ...lift }] : [row];
+  if (!known) return [row];
+  const lift = liftOf(known.name, known.args, c.text ?? '', c.isError === true, callId);
+  return lift ? [row, { ...base(view), from: 'gravit', ...lift }] : [row];
 }
 
 function gate(view, now) {

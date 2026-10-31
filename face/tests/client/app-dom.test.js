@@ -2085,3 +2085,31 @@ test('after Run the card reads Running and links to the conversation; when the s
   assert.equal(listed(), before + 2);
   store.timers.clear();
 });
+
+// plan 2 of the Lunhui run view, task 4: an ok lunhui_present result draws a composed answer that reads its run's view; a
+// failed read (the face restarted, the run deleted) shows its summary, one error line and Retry, and Retry reads it again
+test('a composed answer reads its view; a 404 draws the summary, the error line and Retry; Retry reads again and the skeletons go', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const views = [];
+  let answer = () => { throw Object.assign(new Error('gone: HTTP 404'), { status: 404 }); };
+  const store = boot(f.win, { openMux: h.openMux, call: h.call, postJson: h.postJson, markdown: null,
+    getJson: async path => (path.startsWith('/data/lunhui/view?') ? (views.push(path), answer()) : h.getJson(path)) });
+  await h.ready();
+  const follow = [...h.streams].reverse().find(x => x.name === 'session/follow' && x.args.request.address.sessionId === 's1');
+  follow.cbs.onItem({ type: 'snapshot', records: [] });
+  const args = { strategy: 'cn-market', run: '20261027T201627Z-6937d208', summary: '弱势日，跌多涨少。', blocks: [{ kind: 'ladder' }] };
+  follow.cbs.onItem({ type: 'event', event: { type: 'tool/call', seq: 40, time: 1756512200000, data: { turn: 4, step: 1, callId: 'k1', name: 'lunhui_present', arguments: JSON.stringify(args) } } });
+  follow.cbs.onItem({ type: 'event', event: { type: 'tool/result', seq: 41, time: 1756512201000, surfaceOp: 'append', data: { turn: 4, step: 1, message: { id: 'm-41', role: 'tool', source: { kind: 'tool', callId: 'k1' }, toolCallId: 'k1', content: [{ type: 'text', text: JSON.stringify({ ok: true, blocks: ['ladder'], modules: [] }) }], isError: false } } } });
+  await settle();
+  assert.deepEqual(views, ['/data/lunhui/view?strategy=cn-market&run=20261027T201627Z-6937d208&modules=']);
+  assert.match(f.html(), /class="msg-body composed"/);
+  assert.match(f.html(), /弱势日，跌多涨少。/);
+  assert.match(f.html(), /The run view could not be loaded: HTTP 404/);
+  answer = () => ({ ok: true, view: { strategy: 'cn-market', run: args.run } });
+  f.click(f.element({ tagName: 'BUTTON', dataset: { action: 'lunhuiRetry', key: 'cn-market/20261027T201627Z-6937d208/' } }));
+  await settle();
+  assert.equal(views.length, 2, 'Retry reads the view again');
+  assert.doesNotMatch(f.html(), /could not be loaded|Drawing /);
+  assert.equal(store.get().lunhui.views['cn-market/20261027T201627Z-6937d208/'].status, 'loaded');
+});

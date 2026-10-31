@@ -10,5 +10,6 @@ import { reducers as traces } from './traces.js';
 import { reducers as owner } from './owner.js';
 import { reducers as trade } from './trade.js';
 import { reducers as runSheet } from './run-sheet.js';
+import { reducers as lunhui } from './lunhui.js';
 
-export const reducers = { ...messages, ...discover, ...account, ...controls, ...markets, ...host, ...channels, ...traces, ...owner, ...trade, ...runSheet };
+export const reducers = { ...messages, ...discover, ...account, ...controls, ...markets, ...host, ...channels, ...traces, ...owner, ...trade, ...runSheet, ...lunhui };

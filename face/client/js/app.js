@@ -29,6 +29,7 @@ import { startRunSheet } from './host/run-sheet.js';
 import { renderRunSheet } from './render/run-sheet.js';
 import { itemById } from './host/discover-view.js';
 import { startTraces } from './host/traces.js';
+import { wantedViews, ensureViews } from './host/lunhui.js';
 import { loadMemberTrace } from './wire/member-traces.js';
 import { isHostPreset } from './wire/speaker.js';
 import { statementLinesOf, statementCsvOf, connectOptionsOf, asksOf } from './host/account-view.js';
@@ -429,6 +430,8 @@ export function boot(win, host = {}) {
       if (caret && target === find(activeKey) && typeof target.setSelectionRange === 'function') target.setSelectionRange(caret[0], caret[1]);
     }
     last = { overlay, opener, under, screen: screenOf(s), drawer: drawerOf(s), thread: threadSig, editor: editorOf(s.edit), confirm: s.confirm };
+    // a composed answer drawn without its run's view asks for it now that the page is whole (its dispatches render again)
+    if (wantedViews(store.get()).length) void ensureViews(store, getJson);
   }
 
   // while an IME composes (pinyin), a render would replace the input and lose the composition: hold it until
@@ -752,6 +755,8 @@ export function boot(win, host = {}) {
     // the research surfaces: a child stopped by its parent (asked twice), a member's trace read on opening
     stopChild: el => store.dispatch('askConfirm', { action: 'stopChild', id: el.dataset.child, parent: el.dataset.parent, label: el.dataset.label }),
     openTrace: el => { void traces.open(el.dataset.conv, el.dataset.msg); },
+    // a composed answer's view that could not be read: forget it, and the render asks again
+    lunhuiRetry: el => { store.dispatch('lunhuiRetry', el.dataset.key); },
     confirmYes: () => confirmYes(),
     cancelConfirm: () => store.dispatch('cancelConfirm'),
     suggest: el => { composerText = el.dataset.text; render(); doc.getElementById('say')?.focus(); },

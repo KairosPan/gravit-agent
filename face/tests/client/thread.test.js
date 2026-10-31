@@ -182,3 +182,90 @@ test('a loaded trace draws its context lines and words, no tool call; loading an
   assert.match(other, /<details id="trace-room2-e9" class="trace">/);
   assert.doesNotMatch(other, /Checked the book/);
 });
+
+// plan 2 of the Lunhui run view, task 4: Gravit's composed answer, its working notes folded above it
+const RUN = '20261027T201627Z-6937d208';
+const KEY = `cn-market/${RUN}/environment,sentiment`;
+const composed = (over = {}) => msg({ id: 'p7', seq: 7, kind: 'composed', text: '弱势日，<b>跌多</b>涨少。', data: { callId: '7', strategy: 'cn-market', run: RUN, summary: '弱势日，<b>跌多</b>涨少。', blocks: [{ kind: 'breadth', title: '涨跌<i>分布</i>' }, { kind: 'ladder' }, { kind: 'sources' }], choices: [], modules: ['environment', 'sentiment'] }, ...over });
+const turn = () => [
+  msg({ id: 'e1', seq: 1, from: 'you', text: 'how was the market?' }),
+  msg({ id: 'e2', seq: 2, text: 'Reading the run.', data: { markdown: true } }),
+  msg({ id: 'tc3', seq: 3, kind: 'tool', text: '', data: { callId: '3', name: 'lunhui_read_run' } }),
+  msg({ id: 'e4', seq: 4, text: 'Breadth is weak.', data: { markdown: true } }),
+  msg({ id: 'e5', seq: 5, text: 'Composing.', data: { markdown: true } }),
+  composed(),
+];
+const withView = entry => ({ ...state, lunhui: { views: entry ? { [KEY]: entry } : {}, ui: {} } });
+
+test("the turn's Gravit words before a composed answer fold into one Working notes disclosure above it", async () => {
+  const { foldNotes } = await import('../../client/js/render/lunhui/notes.js');
+  assert.deepEqual([...foldNotes(turn())], [['p7', ['e2', 'e4', 'e5']]]);
+  setMarkdown(null);
+  const html = renderThread(conv({ id: 'c1', messages: turn() }), withView(null), NOW);
+  assert.equal(html.match(/<details /g)?.length, 1);
+  assert.match(html, /<details id="notes-c1-p7" class="notes"><summary>Working notes · 3<\/summary>/);
+  const notes = html.indexOf('id="notes-c1-p7"');
+  const body = html.indexOf('class="msg-body composed"');
+  assert.ok(html.indexOf('how was the market?') < notes && notes < body, 'the notes sit between the question and the answer');
+  for (const t of ['Reading the run.', 'Breadth is weak.', 'Composing.']) {
+    assert.equal(html.split(t).length - 1, 1, `${t} is drawn once`);
+    assert.ok(html.indexOf(t) > notes && html.indexOf(t) < body, `${t} is inside the notes`);
+  }
+});
+
+test('words after a later operator message are not folded; the fold starts after the latest operator message before the answer', async () => {
+  const { foldNotes } = await import('../../client/js/render/lunhui/notes.js');
+  const later = [...turn(), msg({ id: 'e8', seq: 8, from: 'you', text: 'and the ladder?' }), msg({ id: 'e9', seq: 9, text: 'Looking again.', data: { markdown: true } })];
+  assert.deepEqual([...foldNotes(later)], [['p7', ['e2', 'e4', 'e5']]]);
+  const html = renderThread(conv({ id: 'c1', messages: later }), withView(null), NOW);
+  assert.ok(html.indexOf('Looking again.') > html.indexOf('class="msg-body composed"'), 'drawn in its place, after the answer');
+  const second = [msg({ id: 'e1', seq: 1, from: 'you', text: 'q' }), msg({ id: 'e2', seq: 2, text: 'only note', data: { markdown: true } }), composed({ id: 'p3', seq: 3 }), msg({ id: 'e4', seq: 4, from: 'you', text: 'again' }), composed({ id: 'p5', seq: 5 })];
+  assert.deepEqual([...foldNotes(second)], [['p3', ['e2']], ['p5', []]]);
+  assert.doesNotMatch(renderThread(conv({ id: 'c1', messages: second }), withView(null), NOW), /notes-c1-p5/, 'an answer with no notes has no disclosure');
+});
+
+test('the composed body: class msg-body composed, the summary escaped through the prose path, a skeleton line per block in order while loading', () => {
+  setMarkdown(null);
+  for (const entry of [null, { status: 'loading' }]) {
+    const html = renderMessage(composed(), conv({ id: 'c1' }), withView(entry));
+    assert.match(html, /class="msg-body composed"/);
+    assert.match(html, /弱势日，&lt;b&gt;跌多&lt;\/b&gt;涨少。/);
+    assert.doesNotMatch(html, /<b>|<i>/, 'no model markup reaches the page');
+    const order = ['Drawing breadth…', 'Drawing the ladder…', 'Drawing the sources…'].map(t => html.indexOf(t));
+    assert.ok(order.every(i => i > 0) && order[0] < order[1] && order[1] < order[2], 'one skeleton per block, in the call\'s order');
+  }
+  setMarkdown(text => `<p>${text.toUpperCase()}</p>`);
+  assert.match(renderMessage(composed({ text: 'weak day' }), conv({ id: 'c1' }), withView(null)), /<p>WEAK DAY<\/p>/, 'the summary goes through the markdown renderer');
+  setMarkdown(null);
+  const loaded = renderMessage(composed(), conv({ id: 'c1' }), withView({ status: 'loaded', view: { strategy: 'cn-market' } }));
+  assert.doesNotMatch(loaded, /Drawing /, 'loaded: no skeleton');
+  assert.match(loaded, /涨跌&lt;i&gt;分布&lt;\/i&gt;/, "a block no drawer covers yet shows its title, escaped");
+});
+
+test('a failed view: the summary, one error line and a Retry key naming the view, never a blank (Review Focus 3)', () => {
+  setMarkdown(null);
+  const html = renderMessage(composed(), conv({ id: 'c1' }), withView({ status: 'failed', error: 'HTTP <404>' }));
+  assert.match(html, /弱势日/);
+  assert.equal(html.split('The run view could not be loaded').length - 1, 1);
+  assert.match(html, /The run view could not be loaded: HTTP &lt;404&gt;/);
+  assert.match(html, new RegExp(`<button type="button" class="btn-sm" data-action="lunhuiRetry" data-key="${KEY.replace(/[.]/g, '\\.')}">Retry</button>`));
+  assert.doesNotMatch(html, /Drawing /);
+});
+
+test('a refused lunhui_present call then an ok one in the same turn draws exactly one composed body (Review Focus 2)', async () => {
+  const { toMessages, rememberCall } = await import('../../client/js/host/kinds.js');
+  const { mapFrame } = await import('../../client/js/wire/mapper.js');
+  const { reducers: R } = await import('../../client/js/reducers/index.js');
+  const args = JSON.stringify({ strategy: 'cn-market', run: RUN, summary: '弱势日', blocks: [{ kind: 'sources' }] });
+  const ev = (seq, event) => ({ type: 'session/event', sessionId: 'c1', event: { seq, time: NOW, ...event } });
+  const callF = (seq, callId) => ev(seq, { type: 'tool/call', data: { turn: 1, step: seq, callId, name: 'lunhui_present', arguments: args } });
+  const resultF = (seq, callId, text, isError) => ev(seq, { type: 'tool/result', surfaceOp: 'append', data: { turn: 1, step: seq, message: { id: `m-${seq}`, role: 'tool', source: { kind: 'tool', callId }, toolCallId: callId, content: [{ type: 'text', text }], isError } } });
+  const frames = [callF(1, 'k1'), resultF(2, 'k1', 'Error: INVALID_PRESENT · numbers · 88.8%', true), callF(3, 'k2'), resultF(4, 'k2', JSON.stringify({ ok: true, blocks: ['sources'], modules: [] }), false)];
+  const calls = new Map();
+  let s = { ...state, conversations: [conv({ id: 'c1', messages: [] })] };
+  for (const f of frames) { rememberCall(calls, f); for (const message of toMessages(mapFrame(f), calls, NOW)) s = R.hostEvent(s, { convId: 'c1', message }); }
+  assert.deepEqual(s.conversations[0].messages.filter(m => m.kind === 'composed').map(m => m.id), ['pk2']);
+  const html = renderThread(s.conversations[0], s, NOW);
+  assert.equal(html.split('class="msg-body composed"').length - 1, 1);
+  assert.doesNotMatch(html, /INVALID_PRESENT/, 'the refused tool row stays hidden');
+});

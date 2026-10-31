@@ -1,11 +1,15 @@
 // face/client/js/render/thread.js — the conversation body on host-shaped messages (spec 2026-10-19 §6):
-// bubbles, the three gate cards, receipts and refusals, icon-only keys, centred dividers; no tool call is drawn.
+// bubbles, the three gate cards, receipts and refusals, Gravit's composed answers with their working notes folded,
+// icon-only keys, centred dividers; no tool call is drawn.
 import { esc, attrs, cls } from '../html.js';
 import { icon } from '../icons.js';
 import { divider } from '../time.js';
 import { levelOf, needsAnswer } from '../messages.js';
 import { avatar } from './avatars.js';
 import { senderName } from './rail.js';
+import { composedHtml, composedId } from './lunhui/composed.js';
+import { foldNotes, notesHtml } from './lunhui/notes.js';
+import { viewOf } from '../host/lunhui.js';
 
 export const chip = (text, tone = 'grey') => `<span class="${cls('chip', tone)}">${esc(text)}</span>`;
 
@@ -55,9 +59,12 @@ function question(m, conv) {
   return `<div class="card orange question" data-gate="${esc(m.id)}">${blocks}${stateChip(m)}${keys}</div>`;
 }
 
-function body(m, conv) {
+function body(m, conv, state) {
   const d = m.data ?? {};
   switch (m.kind) {
+    // Gravit's composed answer, drawn from its run's view as the lunhui slice holds it
+    case 'composed':
+      return composedHtml(m, state?.lunhui?.views?.[viewOf(m).key], state?.lunhui?.ui?.[composedId(m, conv)], conv);
     case 'card':
       return `<div class="card orange"><div class="card-head"><div class="card-title">${esc(d.title ?? m.text)}</div>${stateChip(m)}</div>` +
         `<div class="dim">${esc([d.venue, d.line].filter(Boolean).join(' · '))}</div>${gateKeys(m, conv)}</div>`;
@@ -105,22 +112,28 @@ export function renderMessage(m, conv, state) {
   }
   if (m.from === 'you') return `<div class="msg you"><div class="bubble you">${m.text ? esc(m.text) : ''}</div>${avatar('you', 28)}</div>`;
   const name = conv.kind === 'group' && m.from !== 'gravit' ? `<div class="sender-name">${esc(m.data?.name ?? senderName(m.from, state))}</div>` : '';
-  // plain talk keeps a bubble's width; every card and green bubble runs wider (spec §16)
-  const wide = m.kind !== 'text';
-  return `<div class="msg left">${name}<div class="msg-row">${avatar(m.from, 28, state)}<div class="${cls('msg-body', wide && 'wide')}">${body(m, conv)}${trace(m, conv, state)}</div></div></div>`;
+  // plain talk keeps a bubble's width; every card and green bubble runs wider (spec §16), a composed answer wider still
+  const width = m.kind === 'composed' ? 'composed' : m.kind !== 'text' && 'wide';
+  return `<div class="msg left">${name}<div class="msg-row">${avatar(m.from, 28, state)}<div class="${cls('msg-body', width)}">${body(m, conv, state)}${trace(m, conv, state)}</div></div></div>`;
 }
 
 // the three-dot row while the host streams a turn
 const thinkingRow = conv => `<div class="msg left"><div class="msg-row">${avatar(conv.kind === 'bot' ? conv.preset : 'gravit', 28)}<div class="msg-body"><div class="bubble grey thinking" role="status" aria-label="thinking"><span></span><span></span><span></span></div></div></div></div>`;
 
-// a tool call leaves nothing in the thread, not even the time it held: a divider reads the gap between the rows drawn
+// a tool call leaves nothing in the thread, not even the time it held: a divider reads the gap between the rows drawn;
+// the words a composed answer folds are drawn inside its Working notes, just above it, and nowhere else
 export function renderThread(conv, state, now) {
   let prev = null;
   const out = [];
+  const notes = foldNotes(conv.messages);
+  const folded = new Set([...notes.values()].flat());
+  const byId = new Map(conv.messages.map(m => [m.id, m]));
   for (const m of conv.messages) {
-    if (m.kind === 'tool') continue;
+    if (m.kind === 'tool' || folded.has(m.id)) continue;
     const d = divider(m.at, prev, now);
     if (d) out.push(`<div class="divider">${esc(d)}</div>`);
+    const ids = m.kind === 'composed' ? notes.get(m.id) ?? [] : [];
+    if (ids.length) out.push(notesHtml(conv, m, ids.length, ids.map(id => renderMessage(byId.get(id), conv, state)).join('')));
     out.push(renderMessage(m, conv, state));
     prev = m.at;
   }

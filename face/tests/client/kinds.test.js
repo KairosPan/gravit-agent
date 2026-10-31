@@ -329,3 +329,36 @@ test("round trip: reasonArgs(describeOrder(…)) gives back the title-relevant f
     assert.deepEqual(read.args, args, `${name}: ${describeOrder(name, args)}`);
   }
 });
+
+// plan 2 of the Lunhui run view, task 4: an ok lunhui_present result lifts Gravit's composed answer; a refusal, or any
+// other tool, lifts nothing (its tool row stays hidden like every tool row)
+const presentArgs = { strategy: 'cn-market', run: '2026-10-27-a', summary: '弱势日，跌多涨少。', blocks: [{ kind: 'breadth', title: '涨跌分布' }, { kind: 'ladder', title: '连板梯队', focus: { rung: 3 } }, { kind: 'sources' }], choices: [{ label: '看看连板' }] };
+test("an ok lunhui_present result lifts a composed message p<callId> carrying the summary, the blocks in the result's order and the view's modules", () => {
+  const c = new Map();
+  rememberCall(c, seatCallAs('c30', 'lunhui_present', presentArgs));
+  const ok = toMessages(mapFrame(seatResult(JSON.stringify({ ok: true, blocks: ['breadth', 'ladder', 'sources'], modules: ['environment', 'sentiment'] }), false, 'c30')), c, NOW);
+  assert.equal(ok.length, 2); assert.equal(ok[0].kind, 'tool');
+  const [, m] = ok;
+  assert.equal(m.kind, 'composed'); assert.equal(m.id, 'pc30'); assert.equal(m.from, 'gravit'); assert.equal(m.seq, 61);
+  assert.equal(m.text, '弱势日，跌多涨少。');
+  assert.deepEqual(m.data, {
+    callId: 'c30', strategy: 'cn-market', run: '2026-10-27-a', module: undefined, summary: '弱势日，跌多涨少。',
+    blocks: [{ kind: 'breadth', title: '涨跌分布' }, { kind: 'ladder', title: '连板梯队', focus: { rung: 3 } }, { kind: 'sources' }],
+    choices: [{ label: '看看连板' }], modules: ['environment', 'sentiment'],
+  });
+  assert.equal(renderMessage(ok[0], { id: 's1', kind: 'gravit' }, emptyState()), '', 'the tool row draws nothing');
+});
+
+test('a refused lunhui_present call lifts nothing; neither does a lunhui_read_run result or a present result that is not ok', () => {
+  const c = new Map();
+  rememberCall(c, seatCallAs('c31', 'lunhui_present', presentArgs));
+  const refused = toMessages(mapFrame(seatResult('Error: INVALID_PRESENT · numbers · 这些数字不在 view 摘要里：88.8%', true, 'c31')), c, NOW);
+  assert.deepEqual(refused.map(x => x.kind), ['tool']);
+  rememberCall(c, seatCallAs('c32', 'lunhui_present', presentArgs));
+  assert.deepEqual(toMessages(mapFrame(seatResult(JSON.stringify({ ok: false }), false, 'c32')), c, NOW).map(x => x.kind), ['tool']);
+  assert.deepEqual(toMessages(mapFrame(seatResult('not json', false, 'c32')), c, NOW).map(x => x.kind), ['tool']);
+  rememberCall(c, seatCallAs('c33', 'lunhui_read_run', { strategy: 'cn-market', run: '2026-10-27-a' }));
+  assert.deepEqual(toMessages(mapFrame(seatResult(JSON.stringify({ ok: true, blocks: [], modules: [] }), false, 'c33')), c, NOW).map(x => x.kind), ['tool']);
+  assert.equal(kinds.presentLift('lunhui_read_run', presentArgs, JSON.stringify({ ok: true }), false, 'c33'), null);
+  assert.equal(kinds.presentLift('lunhui_present', presentArgs, JSON.stringify({ ok: true }), true, 'c33'), null);
+});

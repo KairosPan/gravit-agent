@@ -24,6 +24,7 @@ import { emptyState } from '../../client/js/data/empty.js';
 import { MIN } from '../../client/js/time.js';
 import { renderMarkdown } from '../../client/js/wire/markdown.js';
 import { withMiniDocument } from './helpers/mini-dom.js';
+import { VIEW_1027 } from './helpers/lunhui-view.js';
 
 const NOW = new Date(2026, 9, 19, 14, 7).getTime();
 const css = await readFile(new URL('../../client/css/app.css', import.meta.url), 'utf8');
@@ -39,7 +40,11 @@ const KINDS = [
   m('rc1', { kind: 'receipt', text: 'Order accepted', data: {} }), m('rc2', { kind: 'refusal', text: 'no', data: { code: 'E1' } }),
   m('e9', { from: 'buffett', text: '买', data: { name: '巴菲特型' } }),
   m('e10', { from: 'system', text: 'runtime snapshot', data: { source: 'runtime' } }),
+  // Gravit's composed answers (Lunhui run view plan 2), their views loading, loaded and failed (lunhuiStates); the first folds e2
+  ...['loading', 'loaded', 'failed'].map((run, i) => m(`p${i}`, { kind: 'composed', text: '弱势日', data: { callId: String(i), strategy: 'cn-market', run, summary: '弱势日', blocks: [{ kind: 'breadth', title: '涨跌' }, { kind: 'ladder' }], choices: [], modules: [] } })),
 ];
+// the composed answers' views by state (host/lunhui.js viewKey)
+const lunhuiStates = s => ({ ...s, lunhui: { views: { 'cn-market/loading/': { status: 'loading' }, 'cn-market/loaded/': { status: 'loaded', view: VIEW_1027 }, 'cn-market/failed/': { status: 'failed', error: 'HTTP 404' } }, ui: {} } });
 
 const asset = (id, over = {}) => ({ id, market: id.slice(0, id.indexOf(':')), symbol: id.slice(id.indexOf(':') + 1), name: id.slice(id.indexOf(':') + 1), exchange: 'NASDAQ', currency: id.startsWith('cn:') ? 'CNY' : 'USD', ...over });
 const quote = (id, over = {}) => ({ id, market: id.slice(0, id.indexOf(':')), symbol: id.slice(id.indexOf(':') + 1), price: 10, prev_close: 9, change: 1, change_pct: 1.5, volume: 1000, as_of: '2026-10-19T14:30:00Z', received_at: null, volume_as_of: null, source: 'Alpaca', feed: 'iex', basis: 'previous_close', quote_status: 'live', market_status: 'closed', message: '', ...over });
@@ -219,7 +224,7 @@ function everyState() {
   const base = R.hostList(emptyState(), { conversations: [conv('s1', { messages: KINDS, running: true, usage: { tokenUsage: { outputTokens: 1 }, contextPressure: 0.5 }, created: NOW }), conv('g', { kind: 'group', members: ['gravit', 'buffett'], thinking: 'text', messages: [m('g1', { from: 'buffett', text: 'hold', data: { name: 'Buffett Type', markdown: true, memberSessionId: 'm1', memberTurn: 2 } })] })], channels: [{ workspaceId: 'w0', name: 'workbench', isRoot: true }], bots: [{ id: 'buffett', name: 'Buffett Type' }] });
   const open = R.nav(base, { screen: 'messages', id: 's1' });
   return [
-    emptyState(), open, R.nav(base, { screen: 'messages', id: 'g' }), R.toggleDetails(open), R.askConfirm(R.toggleDetails(open), { action: 'stopGravit', id: 's1' }),
+    emptyState(), open, lunhuiStates(open), R.nav(base, { screen: 'messages', id: 'g' }), R.toggleDetails(open), R.askConfirm(R.toggleDetails(open), { action: 'stopGravit', id: 's1' }),
     R.startEdit(R.toggleDetails(open), { kind: 'rename', convId: 's1', error: 'Cannot be empty' }), R.openSettings(open), R.startDraft(open, { now: NOW }),
     R.startEdit(R.startDraft(open, { now: NOW }), { kind: 'newChannel', error: 'Letters, digits, - or _' }),
     R.hostStatus(open, { line: 'Reconnecting…', bad: true }), R.toggleRail(open),
@@ -236,7 +241,7 @@ test('every class the screens emit has a rule in app.css, and app.css names no c
   assert.doesNotMatch(css, /#[0-9a-fA-F]{3,6}\b/, 'colours come from tokens.css');
   setMarkdown(null);
   const html = everyState().map(st => renderRail(st, NOW) + screenOf(st, NOW) + (st.settingsOpen ? renderSettings(st) : '') + renderSheet(st, NOW) + renderRunSheet(st, NOW)).join('');
-  for (const c of ['mkts', 'mk-tab', 'mk-star', 'mk-name', 'mk-tag', 'mk-q', 'mk-clear', 'mk-note', 'mk-empty', 'mk-st', 'page-back', 'mk-chart', 'mk-axis', 'mk-facts', 'mk-big', 'mk-basis', 'mk-asof', 'mk-d-acts', 'mk-line', 'mk-on', 'mk-outs', 'mk-out', 'acct', 'networth', 'acct-figures', 'acct-second', 'acct-t', 'acct-shown', 'order-row', 'acct-note', 'activity-row', 'venue', 'account-line', 'pair-box', 'sheet', 'sheet-quote', 'sheet-left', 'sheet-check', 'stale', 'trade', 'tp-head', 'tk-seg', 'tk-pick', 'tk-row', 'tk-open', 'tk-said', 'tk-panel', 'tk-picked', 'tk-out', 'mk-yes', 'mk-no', 'tk-at', 'tk-side', 'tk-quote', 'tk-left', 'tk-msg', 'tk-go', 'tk-hand', 'research', 'pcard-meta', 'pcard-foot', 'pcard-link', 'mod-tags', 'mod-boxes', 'mod-runs-wrap', 'mod-runs', 'mod-legend']) assert.match(html, new RegExp(`class="[^"]*\\b${c}\\b`), `a screen emits ${c}`);
+  for (const c of ['mkts', 'mk-tab', 'mk-star', 'mk-name', 'mk-tag', 'mk-q', 'mk-clear', 'mk-note', 'mk-empty', 'mk-st', 'page-back', 'mk-chart', 'mk-axis', 'mk-facts', 'mk-big', 'mk-basis', 'mk-asof', 'mk-d-acts', 'mk-line', 'mk-on', 'mk-outs', 'mk-out', 'acct', 'networth', 'acct-figures', 'acct-second', 'acct-t', 'acct-shown', 'order-row', 'acct-note', 'activity-row', 'venue', 'account-line', 'pair-box', 'sheet', 'sheet-quote', 'sheet-left', 'sheet-check', 'stale', 'trade', 'tp-head', 'tk-seg', 'tk-pick', 'tk-row', 'tk-open', 'tk-said', 'tk-panel', 'tk-picked', 'tk-out', 'mk-yes', 'mk-no', 'tk-at', 'tk-side', 'tk-quote', 'tk-left', 'tk-msg', 'tk-go', 'tk-hand', 'research', 'pcard-meta', 'pcard-foot', 'pcard-link', 'mod-tags', 'mod-boxes', 'mod-runs-wrap', 'mod-runs', 'mod-legend', 'composed', 'notes', 'notes-body', 'lh-answer', 'lh-summary', 'lh-block', 'lh-skel', 'lh-title', 'lh-error']) assert.match(html, new RegExp(`class="[^"]*\\b${c}\\b`), `a screen emits ${c}`);
   const classes = new Set(html.match(/class="([^"]+)"/g).flatMap(x => x.slice(7, -1).split(/\s+/)));
   const missing = [...classes].filter(c => c && !new RegExp(`\\.${c.replace(/[-]/g, '\\-')}(?![\\w-])`).test(css));
   assert.deepEqual(missing, [], 'classes without a rule');

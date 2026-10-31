@@ -167,6 +167,18 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .msg-row { display: flex; align-items: flex-end; gap: 8px; }
 .msg-body { max-width: 66%; min-width: 0; }
 .msg-body.wide { max-width: 80%; }
+/* Gravit's composed answer (the Lunhui run view): wider than a card, the summary over the face's blocks; its working
+   notes folded above it, closed until opened */
+.msg-body.composed { max-width: min(820px, 100%); }
+.lh-answer { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; border-radius: 18px 18px 18px 4px; background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-card); overflow-wrap: anywhere; }
+.lh-summary { font-size: 15px; line-height: 1.5; }
+.lh-block { display: flex; flex-direction: column; gap: 8px; }
+.lh-title { font-weight: 700; font-size: 13px; }
+.lh-skel { padding: 10px 12px; border-radius: var(--radius-s); background: var(--surface-2); color: var(--dim); font-size: 13px; }
+.lh-error { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 12px; border-radius: var(--radius-s); background: var(--warn-fill); color: var(--warn-text); font-size: 13px; }
+.notes { padding-left: 36px; font-size: 12px; }
+.notes > summary { color: var(--dim); cursor: pointer; font-weight: 600; }
+.notes-body { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 .sender-name { font-size: 11px; font-weight: 600; color: var(--dim); padding-left: 36px; }
 /* a pasted address or hash wraps instead of spilling out of its bubble */
 .bubble, .card { overflow-wrap: anywhere; }
