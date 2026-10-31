@@ -254,6 +254,22 @@ test("lunhui_present: a module the run has no artifact of is INVALID_PRESENT mod
   assert.equal(exec.calls, 0);
 });
 
+test("lunhui_present: a sealed strategy run is NOT_A_MARKET_RUN, before the module check and the view", async (t) => {
+  const bench = await presentBench(t);
+  const run = await sealedFridayRun(bench);
+  const file = join(bench.root, "cn-market", "analysis", run, "run.json");
+  const manifest = JSON.parse(await readFile(file, "utf8"));
+  await writeFile(file, JSON.stringify({ ...manifest, kind: "strategy" }));
+  let views = 0;
+  t.mock.method(bench.service, "view", async () => { views += 1; throw new Error("not reached"); });
+  for (const args of [composition(run), composition(run, { module: "sentiment", blocks: [{ kind: "sources" }] })]) {
+    const exec = countingExec();
+    await rejectsWith(bench.present.execute(args, exec), "NOT_A_MARKET_RUN");
+    assert.equal(exec.calls, 0);
+  }
+  assert.equal(views, 0);
+});
+
 test("lunhui_present: a card run of a module the run holds records that module and views it alone", async (t) => {
   const bench = await presentBench(t);
   const run = await sealedFridayRun(bench);

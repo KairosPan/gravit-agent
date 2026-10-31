@@ -6,8 +6,8 @@
  * from the run's view. The tool checks the composition against the same view the route serves and
  * its digest (`checkPresent`) and, on ok, ends Gravit's turn: the answer is the drawn composition.
  *
- * `execute`, in order: `NOT_GRAVIT` for a delegated child; the run's manifest (`readRun`); a card
- * run's `module` that the run has no artifact of is `INVALID_PRESENT` before any view is built; the
+ * `execute`, in order: `NOT_GRAVIT` for a delegated child; the run's manifest (`readRun`);
+ * `NOT_A_MARKET_RUN` for a strategy run (`checkPresent` keeps its own guard); a card run's `module` that the run has no artifact of is `INVALID_PRESENT` before any view is built; the
  * modules (`presentModules`); the view (`service.view`, `MISSING_EVIDENCE` for an open run); the
  * check; then `exec.concludeTurn()` and the reply `{ ok, blocks, modules }`. A refusal throws and
  * never concludes the turn, so Gravit may call again. Nothing is written or counted.
@@ -85,6 +85,8 @@ export function apply(ctx) {
       try {
         if (callerIsChild(exec)) throw refuse.notGravit();
         const { manifest } = await service.readRun(args.strategy, args.run);
+        // a strategy run keeps its text report (v1 answers market runs alone): refused before the module check and the view
+        if (manifest?.kind !== "market") throw refuse.notMarketRun();
         if (args.module !== undefined && !(Array.isArray(manifest.artifacts) && manifest.artifacts.includes(args.module)))
           throw refuse.invalidPresent("module", `这个运行没有 ${args.module} 的已接受工件；只能为已提交的模块作答`);
         const modules = presentModules(args, manifest);
