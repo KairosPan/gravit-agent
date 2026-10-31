@@ -15,3 +15,6 @@ export function yuan(v) {
   if (Math.abs(n) >= 1e8) return `¥${(n / 1e8).toFixed(2)}亿`;
   return `¥${Math.round(n)}`;
 }
+export const fix2 = v => Number(v).toFixed(2);
+// the digest's grammar: "−" for a negative, "+" on a positive percentage, "0.00%" for none (never a negative zero)
+export const signedPct = v => { const s = Math.abs(v).toFixed(2); return s === '0.00' ? '0.00%' : v < 0 ? `−${s}%` : `+${s}%`; };

@@ -189,3 +189,13 @@ test('the ladder escapes names and answers an unfrozen ladder', async () => {
   assert.match(text(html), /09:30 broke 2/);
   assert.match(ladderHtml({ ladder: { unavailable: 'limit-up not frozen' } }, { kind: 'ladder' }, {}, ID), /not frozen/);
 });
+
+test('the ladder prints a near-zero change as 0.00% and colours it neutral', async () => {
+  const { ladderHtml } = await import('../../client/js/render/lunhui/ladder.js');
+  const st = pct => ({ name: 'N', pct });
+  const view = { ladder: { height: 2, rungs: [{ n: 2, sealed: [], from: 3, promoted: 0, missed: [st(-0.004), st(0.004)], broke: [], gap: false }], firstTries: { sealed: 0, tries: 0 }, unavailable: null } };
+  const html = ladderHtml(view, { kind: 'ladder' }, {}, ID);
+  assert.doesNotMatch(html, /−0\.00|\+0\.00/);
+  assert.equal([...html.matchAll(/class="lh-lpct flat">0\.00%</g)].length, 2);
+  assert.match(readout(html), /missed: N 0\.00%, N 0\.00%/);
+});

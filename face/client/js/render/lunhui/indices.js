@@ -3,8 +3,8 @@
 // minute slider under it, and the readout that answers the slider or the pointer. The slider and the pointer move the cursor
 // in place (host/lunhui.js applyCursor); neither touches the store.
 import { esc, attrs, cls } from '../../html.js';
-import { label, headline } from './block.js';
-import { intradaySvg, sparklineSvg, cursorPatch, signedPct, fix2 } from './intraday.js';
+import { label, headline, signedPct, fix2 } from './block.js';
+import { intradaySvg, sparklineSvg, cursorPatch } from './intraday.js';
 
 const hasLine = row => Array.isArray(row?.minutes?.price) && row.minutes.price.length > 0;
 const num = v => (v != null && Number.isFinite(Number(v)) ? Number(v) : null);

@@ -3,13 +3,13 @@
 // today's change — and, at the right, how many of the rung below got through, as a number and a meter. The readout answers the
 // picked rung (default: the focus Gravit gave, else the height). Names are escaped text; stock links are plan 3's.
 import { esc, attrs, cls } from '../../html.js';
-import { label, headline, readout, count } from './block.js';
+import { label, headline, readout, count, signedPct } from './block.js';
 
-const pctText = v => (v == null || !Number.isFinite(Number(v)) ? '—' : Number(v) < 0 ? `−${(-Number(v)).toFixed(2)}%` : `${Number(v) > 0 ? '+' : ''}${Number(v).toFixed(2)}%`);
+const pctText = v => (v == null || !Number.isFinite(Number(v)) ? '—' : signedPct(Number(v)));
 const nameOf = s => String(s?.name ?? s?.code ?? '—');
 const withPct = s => `${nameOf(s)} ${pctText(s?.pct)}`;
 const list = a => (Array.isArray(a) ? a : []);
-const tone = v => (Number(v) > 0 ? 'up' : Number(v) < 0 ? 'down' : 'flat');
+const tone = v => { const r = Number(Number(v).toFixed(2)); return r > 0 ? 'up' : r < 0 ? 'down' : 'flat'; };
 
 function chip(s) {
   const breaks = Number(s?.breaks) > 0 ? ` <span class="lh-chip-note">broke ${Number(s.breaks)}</span>` : '';

@@ -6,7 +6,7 @@
 // Every time drawn comes from the grid (minuteLabel, a copy of the plugin's lib/market.mjs one: the client cannot import the
 // plugin), never from a Date in the browser's zone: 09:30–11:30 are points 0–120, 13:00–15:00 are 121–241, China time.
 import { esc } from '../../html.js';
-import { yuan } from './block.js';
+import { yuan, signedPct, fix2 } from './block.js';
 
 const LAST = 241;
 const W = 760, H = 236, LEFT = 56, PLOT = 652, MID = 118, HALF = 108;
@@ -34,9 +34,6 @@ export function minuteIndex(hhmm) {
 const prices = minutes => (Array.isArray(minutes?.price) ? minutes.price.map(Number) : []);
 // one decimal in the markup, no trailing zero ("56", "545.7")
 const n1 = v => Number(Number(v).toFixed(1));
-const fix2 = v => Number(v).toFixed(2);
-// the digest's grammar: "−" for a negative, "+" on a positive percentage, "0.00%" for none
-const signedPct = v => { const s = Math.abs(v).toFixed(2); return s === '0.00' ? '0.00%' : v < 0 ? `−${s}%` : `+${s}%`; };
 
 /** The chart's geometry: X over the grid's 242 points, Y about the previous close with the day's farthest move plus 8%. */
 export function chartGeometry(minutes) {
@@ -142,4 +139,3 @@ export function cursorPatch(view, symbol, minute) {
   };
 }
 
-export { signedPct, fix2 };
