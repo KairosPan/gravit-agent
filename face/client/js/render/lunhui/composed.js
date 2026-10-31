@@ -8,10 +8,10 @@
 // (state.lunhui.ui[id]), `id` the answer's page id (composedId) for element ids and data-id, `key` the answer's view key
 // (viewOf(m).key) for its stock links. A kind with no drawer yet draws its title alone. Pool names in the summary and in each
 // headline are stock links (block.js linkNames), and nowhere else.
-import { esc } from '../../html.js';
+import { esc, attrs } from '../../html.js';
 import { linkNames } from './block.js';
 import { markdownHtml } from '../markdown.js';
-import { viewOf } from '../../host/lunhui.js';
+import { viewOf, stockCode } from '../../host/lunhui.js';
 import { verdictsHtml } from './verdicts.js';
 import { breadthHtml } from './breadth.js';
 import { indicesHtml } from './indices.js';
@@ -47,11 +47,20 @@ function drawn(block, view, ui, id, key) {
 }
 
 // the footer after the blocks, once the view is here; one it cannot read costs only itself
-function footer(view) {
-  try { return footerHtml(view); } catch { return ''; }
+function footer(view, channels) {
+  try { return footerHtml(view, channels); } catch { return ''; }
 }
 
-export function composedHtml(m, entry, ui, conv) {
+// the follow-up buttons the call gave, in its order: a stock choice carries its code and opens the drawer, a plain one sends its
+// label; everything the model wrote is escaped
+function choicesHtml(d, key) {
+  const list = Array.isArray(d.choices) ? d.choices.filter(c => c && typeof c.label === 'string' && c.label !== '') : [];
+  if (!list.length) return '';
+  const btns = list.map(c => `<button${attrs({ type: 'button', class: 'lh-choice', 'data-action': 'lunhuiChoice', 'data-key': key, 'data-label': c.label, 'data-code': stockCode(c.stock) })}>${esc(c.label)}</button>`);
+  return `<div class="lh-choices">${btns.join('')}</div>`;
+}
+
+export function composedHtml(m, entry, ui, conv, channels) {
   const d = m.data ?? {};
   const blocks = Array.isArray(d.blocks) ? d.blocks.filter(b => b && typeof b.kind === 'string') : [];
   const loaded = entry?.status === 'loaded' && entry.view && typeof entry.view === 'object';
@@ -60,9 +69,9 @@ export function composedHtml(m, entry, ui, conv) {
   const summary = `<div class="lh-summary">${loaded ? linkNames(text, entry.view, key) : text}</div>`;
   if (entry?.status === 'failed') {
     return `<div class="lh-answer">${summary}<div class="lh-error" role="status">The run view could not be loaded: ${esc(entry.error ?? '')} ` +
-      `<button type="button" class="btn-sm" data-action="lunhuiRetry" data-key="${esc(key)}">Retry</button></div></div>`;
+      `<button type="button" class="btn-sm" data-action="lunhuiRetry" data-key="${esc(key)}">Retry</button></div>${choicesHtml(d, key)}</div>`;
   }
   const id = composedId(m, conv);
   const body = blocks.map(b => `<section class="lh-block">${loaded ? drawn(b, entry.view, ui, id, key) : skeleton(b)}</section>`).join('');
-  return `<div class="lh-answer">${summary}${body}${loaded ? footer(entry.view) : ''}</div>`;
+  return `<div class="lh-answer">${summary}${body}${choicesHtml(d, key)}${loaded ? footer(entry.view, channels) : ''}</div>`;
 }

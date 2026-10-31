@@ -370,3 +370,44 @@ test('null numbers draw as a dash, never as zero', () => {
   const out = text(signalsHtml({ ...VIEW_1027, signals: s }, { kind: 'signals' }, {}, ID));
   assert.ok(out.includes('Break ratio—') && out.includes('Highest streak—'));
 });
+
+// plan 3, task 5: follow-ups and Open run
+const choiceAnswer = choices => ({ id: 'p9', kind: 'composed', text: '弱势日', data: { strategy: 'cn-market', run: VIEW_1027.run, blocks: [{ kind: 'sources' }], choices } });
+const CHANNELS = [{ name: 'cn-market', workspaceId: 'w-cn' }, { name: 'other', workspaceId: 'w-o' }];
+
+test('choices draw after the blocks and before the footer, escaped, in the call\'s order', () => {
+  const m = choiceAnswer([{ label: '再看 <b>龙头</b>' }, { label: 'Second & third' }]);
+  const html = composedHtml(m, { status: 'loaded', view: VIEW_1027 }, {}, { id: 'c1' }, CHANNELS);
+  const at = s => html.indexOf(s);
+  assert.ok(at('class="lh-src"') < at('class="lh-choices"') && at('class="lh-choices"') < at('class="lh-foot"'));
+  assert.ok(at('再看 &lt;b&gt;龙头&lt;/b&gt;') < at('Second &amp; third'));
+  assert.doesNotMatch(html, /<b>龙头/);
+  assert.match(html, /<button type="button" class="lh-choice" data-action="lunhuiChoice" data-key="[^"]+" data-label="Second &amp; third">Second &amp; third<\/button>/);
+});
+
+test('a stock choice carries its code; a plain one does not', () => {
+  const html = composedHtml(choiceAnswer([{ label: '看上海九百', stock: 'sh600001' }, { label: 'plain' }, { label: 'bad', stock: 'nope' }]), { status: 'loaded', view: VIEW_1027 }, {}, { id: 'c1' }, CHANNELS);
+  const btns = html.match(/<button[^>]*lunhuiChoice[^>]*>/g);
+  assert.equal(btns.length, 3);
+  assert.match(btns[0], /data-code="600001"/);
+  assert.doesNotMatch(btns[1], /data-code/);
+  assert.doesNotMatch(btns[2], /data-code/);
+});
+
+test('choices draw while the view is loading and after it failed', () => {
+  const m = choiceAnswer([{ label: 'go on' }]);
+  for (const entry of [{ status: 'loading' }, { status: 'failed', error: 'boom' }, undefined]) {
+    const html = composedHtml(m, entry, {}, { id: 'c1' }, CHANNELS);
+    assert.match(html, /class="lh-choices"[^]*go on/, String(entry?.status));
+    assert.doesNotMatch(html, /lh-foot/);
+  }
+  assert.doesNotMatch(composedHtml(choiceAnswer([]), { status: 'loaded', view: VIEW_1027 }, {}, { id: 'c1' }, CHANNELS), /lh-choices/);
+});
+
+test('Open run appears only for a known channel', () => {
+  const view = { ...VIEW_1027, strategy: 'cn-market' };
+  assert.match(footerHtml(view, CHANNELS), /<button type="button" class="lh-open-run" data-action="lunhuiOpenRun" data-id="w-cn">Open run ›<\/button>/);
+  assert.doesNotMatch(footerHtml(view, [{ name: 'other', workspaceId: 'w-o' }]), /lh-open-run/);
+  assert.doesNotMatch(footerHtml(view), /lh-open-run/);
+  assert.doesNotMatch(footerHtml(view, []), /lh-open-run/);
+});

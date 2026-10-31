@@ -769,6 +769,12 @@ export function boot(win, host = {}) {
     // a stock name in a composed answer opens the stock drawer on that answer's view
     lunhuiStock: el => { store.dispatch('lunhuiStockOpen', { key: el.dataset.key, code: el.dataset.code }); },
     // the stock drawer's keys: Close; Ask Gravit about it (one message, the open stock's words); its page on Markets
+    // a follow-up: a stock opens its drawer, anything else is one message through the composer's path
+    lunhuiChoice: el => {
+      if (el.dataset.code) store.dispatch('lunhuiStockOpen', { key: el.dataset.key, code: el.dataset.code });
+      else if (el.dataset.label) void sendText(el.dataset.label);
+    },
+    lunhuiOpenRun: el => go({ screen: 'channel', id: el.dataset.id }),
     lunhuiStockClose: () => store.dispatch('lunhuiStockClose'),
     lunhuiAsk: () => { const text = askText(store.get()); if (text) void sendText(text); },
     lunhuiMarkets: () => { const code = stockCode(store.get().lunhui?.stock?.code); if (code) go({ screen: 'markets', id: marketKey(code) }); },

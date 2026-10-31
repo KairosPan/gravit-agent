@@ -259,6 +259,9 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .lh-src-name { min-width: 72px; font-weight: 600; }
 .lh-src-state { font-variant-numeric: tabular-nums; }
 .lh-src-miss { color: var(--warn-text); }
+.lh-choices { display: flex; flex-wrap: wrap; gap: 8px; }
+.lh-choice { min-height: 36px; padding: 0 14px; border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface-2); color: var(--text); font-size: 13px; text-align: left; }
+.lh-open-run { margin-left: 8px; padding: 0; border: 0; background: none; color: var(--primary); font-size: 12px; font-weight: 600; }
 .lh-foot { padding-top: 8px; border-top: 1px solid var(--border); font-size: 12px; color: var(--dim); overflow-wrap: anywhere; }
 .lh-ix-rows { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
 .lh-ix { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 2px 8px; min-height: 44px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--surface-2); color: var(--text); text-align: left; }

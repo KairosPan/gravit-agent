@@ -2320,3 +2320,66 @@ test('the minute cursor: the slider and the pointer patch the chart in place; a 
   assert.equal(Number(cur.attributes.x1), X(120), 'and the cursor stands at the slider\'s minute again');
   assert.equal(Number(cur.attributes.x2), X(120));
 });
+
+// plan 3, task 5: a composed answer's follow-ups and Open run
+async function choiceAnswer(choices) {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const store = boot(f.win, { openMux: h.openMux, call: h.call, postJson: h.postJson, markdown: null,
+    getJson: async path => (path.startsWith('/data/lunhui/view?') ? { ok: true, view: VIEW_1027 }
+      : path === '/data/channels.json' ? { ok: true, root: '/r', channels: [{ workspaceId: 'w-cn', name: VIEW_1027.strategy, isRoot: false, sessionIds: ['s1'] }], ungrouped: [], archived: [], presets: {} }
+      : h.getJson(path)) });
+  await h.ready();
+  const follow = [...h.streams].reverse().find(x => x.name === 'session/follow' && x.args.request.address.sessionId === 's1');
+  follow.cbs.onItem({ type: 'snapshot', records: [] });
+  const args = { strategy: VIEW_1027.strategy, run: VIEW_1027.run, summary: '弱势日。', blocks: [{ kind: 'ladder' }], choices };
+  follow.cbs.onItem({ type: 'event', event: { type: 'tool/call', seq: 40, time: 1756512200000, data: { turn: 4, step: 1, callId: 'k1', name: 'lunhui_present', arguments: JSON.stringify(args) } } });
+  follow.cbs.onItem({ type: 'event', event: { type: 'tool/result', seq: 41, time: 1756512201000, surfaceOp: 'append', data: { turn: 4, step: 1, message: { id: 'm-41', role: 'tool', source: { kind: 'tool', callId: 'k1' }, toolCallId: 'k1', content: [{ type: 'text', text: JSON.stringify({ ok: true, blocks: ['ladder'], modules: [] }) }], isError: false } } } });
+  await settle();
+  return { f, store, h };
+}
+const prompts = h => h.calls.filter(c => c[0] === 'session/prompt');
+
+test('a plain choice sends its label once per click', async () => {
+  const { f, store, h } = await choiceAnswer([{ label: '再看龙头' }]);
+  const before = prompts(h).length;
+  const btn = f.element({ tagName: 'BUTTON', dataset: { action: 'lunhuiChoice', label: '再看龙头' } });
+  f.click(btn);
+  await settle();
+  assert.equal(prompts(h).length, before + 1);
+  assert.deepEqual(prompts(h).at(-1)[1].request.content, [{ type: 'text', text: '再看龙头' }]);
+  f.click(btn);
+  await settle();
+  assert.equal(prompts(h).length, before + 2, 'two clicks, two sends');
+  store.timers.clear();
+});
+
+test('a choice with markup in its label sends it as plain text', async () => {
+  const label = '<b>x</b> & "y"';
+  const { f, store, h } = await choiceAnswer([{ label }]);
+  assert.doesNotMatch(f.html(), /<b>x<\/b>/);
+  f.click(f.element({ tagName: 'BUTTON', dataset: { action: 'lunhuiChoice', label } }));
+  await settle();
+  assert.deepEqual(prompts(h).at(-1)[1].request.content, [{ type: 'text', text: label }]);
+  store.timers.clear();
+});
+
+test('a stock choice opens the drawer', async () => {
+  const { f, store, h } = await choiceAnswer([{ label: '看上海九百', stock: 'sh600001' }]);
+  assert.match(f.html(), /data-action="lunhuiChoice" data-key="[^"]+" data-label="看上海九百" data-code="600001"/);
+  const before = prompts(h).length;
+  f.click(f.element({ tagName: 'BUTTON', dataset: { action: 'lunhuiChoice', label: '看上海九百', key: `${VIEW_1027.strategy}/${VIEW_1027.run}/`, code: '600001' } }));
+  await settle();
+  assert.deepEqual(store.get().lunhui.stock, { key: `${VIEW_1027.strategy}/${VIEW_1027.run}/`, code: '600001' });
+  assert.equal(prompts(h).length, before, 'nothing sent');
+  store.timers.clear();
+});
+
+test('Open run goes to the channel page', async () => {
+  const { f, store } = await choiceAnswer([]);
+  assert.match(f.html(), /data-action="lunhuiOpenRun" data-id="w-cn">Open run ›/);
+  f.click(f.element({ tagName: 'BUTTON', dataset: { action: 'lunhuiOpenRun', id: 'w-cn' } }));
+  await settle();
+  assert.deepEqual(store.get().route, { screen: 'channel', id: 'w-cn' });
+  store.timers.clear();
+});

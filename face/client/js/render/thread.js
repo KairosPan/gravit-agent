@@ -62,7 +62,7 @@ function body(m, conv, state) {
   switch (m.kind) {
     // Gravit's composed answer, drawn from its run's view as the lunhui slice holds it
     case 'composed':
-      return composedHtml(m, state?.lunhui?.views?.[viewOf(m).key], state?.lunhui?.ui?.[composedId(m, conv)], conv);
+      return composedHtml(m, state?.lunhui?.views?.[viewOf(m).key], state?.lunhui?.ui?.[composedId(m, conv)], conv, state?.channels);
     case 'card':
       return `<div class="card orange"><div class="card-head"><div class="card-title">${esc(d.title ?? m.text)}</div>${stateChip(m)}</div>` +
         `<div class="dim">${esc([d.venue, d.line].filter(Boolean).join(' · '))}</div>${gateKeys(m, conv)}</div>`;
