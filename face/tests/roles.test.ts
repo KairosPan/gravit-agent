@@ -47,6 +47,7 @@ test("Gravit's preset has three role rows: the shipped library is cn-market-anal
   for (const role of roles) {
     assert.equal(role.model, "deepseek-official/deepseek-flash", role.id);
     assert.ok(!role.allow.some((name) => name.startsWith("lunhui_freeze_")), `${role.id} carries no freeze`);
+    assert.ok(!role.allow.includes("lunhui_present"), `${role.id} cannot present: the composed answer is Gravit's`);
   }
   assert.deepEqual(market.allow.filter((name) => stock.allow.includes(name)), ["skill"], "the two analysts share no module tool");
   for (const analyst of [market, stock]) {

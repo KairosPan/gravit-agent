@@ -63,7 +63,6 @@ test("GET /data/lunhui/view: a missing or repeated strategy or run, or an unknow
     `strategy=cn-market&strategy=other&run=${RUN}`,
     `strategy=cn-market&run=${RUN}&run=${RUN}`,
     `strategy=cn-market&run=${RUN}&modules=environment,leader`,
-    `strategy=cn-market&run=${RUN}&modules=`,
     `strategy=cn-market&run=${RUN}&modules=environment&modules=theme`,
   ]) {
     const out = await call(route, url(query));
@@ -103,4 +102,9 @@ test("GET /data/lunhui/view: a sealed run answers 200 with its view, modules spl
   const all = await call(route, url(`strategy=cn-market&run=${RUN}`));
   assert.equal(all.status, 200);
   assert.deepEqual(seen, [["cn-market", RUN, {}]], "no modules parameter passes no modules");
+
+  seen.length = 0;
+  const none = await call(route, url(`strategy=cn-market&run=${RUN}&modules=`));
+  assert.equal(none.status, 200);
+  assert.deepEqual(seen, [["cn-market", RUN, { modules: [] }]], "an empty modules parameter passes no module at all");
 });

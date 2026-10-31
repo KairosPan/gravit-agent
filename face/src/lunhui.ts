@@ -5,14 +5,16 @@
  * ids replaces that row's config (a replacement restates `strategiesRoot`) and
  * `disabled: true` removes it.
  *
- * Eleven cordis file-plugin rows under `face/plugins/lunhui/`, in one insert:
+ * Twelve cordis file-plugin rows under `face/plugins/lunhui/`, in one insert:
  * `lunhui-runs`, the backbone that provides the `lunhuiRuns` service and
  * registers `lunhui_read_run`, then the four freeze rows, each injecting
  * `tools` and `lunhuiRuns` and registering one tool, then the six module
  * rows - the three market modules (environment, sentiment, theme), then the
  * leader and the mode, which read a strategy run, then `lunhui-review`, the
  * counterevidence module's row, which reads either channel - each injecting
- * the same and registering its read-context and submit pair. The tools are
+ * the same and registering its read-context and submit pair - and last
+ * `lunhui-present`, injecting the same and registering `lunhui_present`,
+ * Gravit's composed answer to a market run (run view spec §5.2). The tools are
  * registered tree-wide, as dsh's own are; no bot's allow list names one
  * (`tests/bots.test.ts`). A freeze or module row takes no config in
  * production: a freeze row's `fetch` and `now` keys are test-only. */
@@ -23,10 +25,10 @@ import type { FacePatchList } from "./boot.ts";
 export const LUNHUI_ROW_IDS = [
   "lunhui-runs", "lunhui-freeze-quotes", "lunhui-freeze-limit-up", "lunhui-freeze-boards", "lunhui-freeze-index",
   "lunhui-environment", "lunhui-sentiment", "lunhui-theme", "lunhui-leader", "lunhui-mode",
-  "lunhui-review",
+  "lunhui-review", "lunhui-present",
 ] as const;
 
-/** The seventeen tools the rows register, in row order, the backbone's first. */
+/** The eighteen tools the rows register, in row order, the backbone's first. */
 export const LUNHUI_TOOL_NAMES = [
   "lunhui_read_run", "lunhui_freeze_quotes", "lunhui_freeze_limit_up", "lunhui_freeze_boards", "lunhui_freeze_index",
   "lunhui_read_environment_context", "lunhui_submit_environment",
@@ -35,6 +37,7 @@ export const LUNHUI_TOOL_NAMES = [
   "lunhui_read_leader_context", "lunhui_submit_leader",
   "lunhui_read_mode_context", "lunhui_submit_mode",
   "lunhui_read_counterevidence_context", "lunhui_submit_counterevidence",
+  "lunhui_present",
 ] as const;
 
 /** `face/plugins/lunhui/`, beside this file's `src/`. */

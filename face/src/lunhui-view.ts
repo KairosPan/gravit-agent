@@ -32,7 +32,8 @@ const REFUSALS: Record<string, [number, string]> = {
 };
 
 /** The query, checked: `strategy` and `run` exactly once each, `modules` at most once and every
- * comma-separated name one of {@link LUNHUI_VIEW_MODULES}. */
+ * comma-separated name one of {@link LUNHUI_VIEW_MODULES}; an empty `modules=` is no module at all
+ * (`[]`), as a composition of a run with no market artifact records it. */
 function parseViewRequest(rawUrl: string): { strategy: string; run: string; modules?: string[] } {
   if (rawUrl.length > 8192 || /%(?![a-f\d]{2})/i.test(rawUrl)) throw new HttpError(400, "invalid view request");
   const url = new URL(rawUrl, "http://localhost");
@@ -45,7 +46,8 @@ function parseViewRequest(rawUrl: string): { strategy: string; run: string; modu
   const count = url.searchParams.getAll("modules").length;
   if (count === 0) return { strategy, run };
   if (count !== 1) throw new HttpError(400, "modules is given at most once");
-  const modules = url.searchParams.get("modules")!.split(",");
+  const raw = url.searchParams.get("modules")!;
+  const modules = raw === "" ? [] : raw.split(",");
   if (!modules.every((name) => LUNHUI_VIEW_MODULES.includes(name))) throw new HttpError(400, "unknown module");
   return { strategy, run, modules };
 }

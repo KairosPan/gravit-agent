@@ -720,10 +720,12 @@ const MODULE_ROWS = [
   [leaderRow, "leader", "lunhui-leader"], [modeRow, "mode", "lunhui-mode"], [reviewRow, "counterevidence", "lunhui-review"],
 ] as const;
 
-test("the composed module rows are the six, in order, and their pairs close LUNHUI_TOOL_NAMES", () => {
-  assert.deepEqual(LUNHUI_ROW_IDS.slice(5), MODULE_ROWS.map(([, , id]) => id));
-  assert.deepEqual(LUNHUI_ROW_IDS.slice(5), MODULE_ROWS.map(([row]) => row.name));
-  assert.deepEqual(LUNHUI_TOOL_NAMES.slice(5), MODULE_ROWS.flatMap(([, module]) => [`lunhui_read_${module}_context`, `lunhui_submit_${module}`]));
+test("the composed module rows are the six, in order, their pairs follow the freezes, and the present row closes both lists", () => {
+  assert.deepEqual(LUNHUI_ROW_IDS.slice(5, 11), MODULE_ROWS.map(([, , id]) => id));
+  assert.deepEqual(LUNHUI_ROW_IDS.slice(5, 11), MODULE_ROWS.map(([row]) => row.name));
+  assert.deepEqual(LUNHUI_TOOL_NAMES.slice(5, 17), MODULE_ROWS.flatMap(([, module]) => [`lunhui_read_${module}_context`, `lunhui_submit_${module}`]));
+  assert.deepEqual(LUNHUI_ROW_IDS.slice(11), ["lunhui-present"]);
+  assert.deepEqual(LUNHUI_TOOL_NAMES.slice(17), ["lunhui_present"]);
 });
 
 for (const [row, module, id] of MODULE_ROWS) {

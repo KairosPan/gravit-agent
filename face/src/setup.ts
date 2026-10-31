@@ -42,10 +42,11 @@ const PATCH_HEADER = `# face profile patch layer. The face's own host rows (webs
 # the operator's: their own rows go here (the default model, skill roots, an
 # MCP server of their own) per dsh/README.md. The face composes its AKShare
 # (mcp-akshare) and Account seat (mcp-account) rows itself, below this file:
-# a patch here reaches them, and disables one by its id. The eleven Lunhui
+# a patch here reaches them, and disables one by its id. The twelve Lunhui
 # rows (lunhui-runs, lunhui-freeze-quotes, lunhui-freeze-limit-up,
 # lunhui-freeze-boards, lunhui-freeze-index, lunhui-environment,
-# lunhui-sentiment, lunhui-theme, lunhui-leader, lunhui-mode, lunhui-review)
+# lunhui-sentiment, lunhui-theme, lunhui-leader, lunhui-mode, lunhui-review,
+# lunhui-present)
 # compose beside them the same way, and a patch replacing lunhui-runs' config
 # restates strategiesRoot.
 #

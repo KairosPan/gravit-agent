@@ -95,7 +95,8 @@ test("composeFace stacks exactly the layers it means to", () => {
     assert.deepEqual((patches[3 + policy.length] as InsertPatch).insert?.map((row) => row.id), [
       "lunhui-runs", "lunhui-freeze-quotes", "lunhui-freeze-limit-up", "lunhui-freeze-boards", "lunhui-freeze-index",
       "lunhui-environment", "lunhui-sentiment", "lunhui-theme", "lunhui-leader", "lunhui-mode", "lunhui-review",
-    ], "the eleven Lunhui rows sit right after the Account seat row, in one insert: the backbone, the freezes, then the modules");
+      "lunhui-present",
+    ], "the twelve Lunhui rows sit right after the Account seat row, in one insert: the backbone, the freezes, the modules, then the composed answer");
   } finally {
     if (previous === undefined) delete process.env.DSH_TELEMETRY_DISABLED;
     else process.env.DSH_TELEMETRY_DISABLED = previous;
@@ -259,7 +260,7 @@ test("the profile can disable the repo's Account seat row", () => {
  * an absolute file URL; the backbone anchors runs under THIS checkout's
  * strategies/, and a freeze or module row carries no config in production
  * (a freeze row's `fetch` and `now` are test-only keys). */
-test("composeFace mounts the eleven Lunhui rows by file URL, the backbone under this checkout's strategies/", () => {
+test("composeFace mounts the twelve Lunhui rows by file URL, the backbone under this checkout's strategies/", () => {
   const home = freshHome();
   const { patches } = composeFace({ profileName: "face", port: 3090, dshHome: home });
   const composed = composeEntries([patches]);
