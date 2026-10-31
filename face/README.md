@@ -1067,9 +1067,9 @@ keys are absent, not disabled, and the device line under the Account head says w
 
 One table under the search box (`Search markets`). Its tabs are the Account's: **All**, then
 **Crypto · Stocks · RWAs · Perps · Pre-IPO · Predictions** where the Account lists something
-(Stocks for the A shares alone too) — each with the Account's count once All's read has
-answered, All and Stocks counting the A shares too — with **All results** first while searching
-and **Watching** last once anything is starred;
+— each with the Account's count once All's read has answered, All counting the starred A shares
+too (Stocks is the Account's alone) — then the face's own **China**, then **Watching** last once
+anything is starred, with **All results** first while searching;
 a tab starts from Most traded. With two or more rows, the sorts **Most traded · Biggest moves**,
 and **Closing soonest** where a row closes: Most traded ranks the Account's rows by their volume
 (a Kalshi row's contracts by their number), then the A shares by turnover; Biggest moves by the
@@ -1096,6 +1096,18 @@ is unavailable` or `Some results may be missing`; the face's wire's state where 
 drawn (`Connecting…`, `Updating every 15 s` while its stream is down, `Quotes unavailable`); the
 watchlist's trouble (`Couldn't save the watchlist`, `The watchlist is full`, `Couldn't read the
 saved watchlist`).
+
+**China** (spec `docs/superpowers/specs/2026-10-31-china-tab-design.md`, the interim before A
+shares move into the Account) is the day's top 20 A shares from Tencent's ranking through the
+face's own `/data/cn/rank`: **Most traded** by turnover, **Biggest moves** by the size of the day's
+change, gainers and losers together. Its count is every A share the ranking lists (`China ·
+5,577`, Beijing listings included); its headers read **Today** and **Turnover**. A row: the star
+(the A shares' list), a tile with the name's first character, the name over `<code> · <board>`
+(`SH`, `SZ`, `ChiNext`, `STAR`, `BJ`), the price in yuan, the change against the previous close,
+the turnover (`¥216.08亿`) and `Tencent`. It is read when China comes on screen and every 20 s
+while it stays, nothing otherwise; a muted line says `Closed · 10-30 15:00 Beijing` or `Midday
+break · 11:30 Beijing`, and `Couldn’t refresh China` over the rows kept when a read fails
+(`China unavailable` with none). No row shows while the ranking for another sort is on its way.
 
 The stars are this browser's, in two stores — the Account's row keys (`coin:BTC`, `stock:AAPL`,
 `event:<venue>:<market>`, …) under `gravit.account.watch.v1`, the A shares (`cn:600519`) under
@@ -1196,9 +1208,16 @@ connected line, when it has one, in the 5-second quotes poll, taken from the pag
 the market is no row of the tab on screen (a deep link, Back onto another tab). Leaving lets the
 market go.
 
-A `cn:` page is the face's own quote, as before: the price in yuan, the change against the previous
-close, `as of 14:30 · Live`, the facts Previous close, Volume and Source, and Gravit on it — no
-chart, no venues.
+A `cn:` page is the face's own quote and history: the tile with the name's first character, `A-share
+· 600519 · SH`, the price in yuan with the change against the previous close, and a state line in
+Beijing time — `Tencent · Live`, `Tencent · Delayed · 09:41 Beijing` for an open market's old quote,
+`Tencent · Midday break · 11:30 Beijing`, `Tencent · Closed · 10-30 15:00 Beijing`, or `Quotes
+unavailable` while the wire is down. Then twelve facts from the same quote — Previous close, Open,
+High, Low, Turnover (`¥82.57亿`), Turnover rate, Market cap (`¥1.74万亿`), P/E (TTM) (`−12.50` for a
+loss), Limit up, Limit down, Volume (`599万股`), Amplitude — and **Price history** through the face's
+`/data/cn/candles`: 1D the session chart (09:30–15:00, the previous close dashed), 5D the five
+sessions on one grid, 1M to MAX forward-adjusted closes on Beijing dates. Gravit on it as before;
+no venues, no Buy or Sell.
 
 ### Account
 
