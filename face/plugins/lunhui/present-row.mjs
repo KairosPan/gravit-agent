@@ -21,7 +21,7 @@ export const name = "lunhui-present";
 export const inject = ["tools", "lunhuiRuns"];
 
 export const PRESENT_DESCRIPTION =
-  "市场运行的作答：一两句结论 summary，按当天轻重排的 blocks（verdicts、breadth、indices、ladder、sources），每块一句 title，可标 focus（ladder 的 rung，indices 的 from/to），至多三个 choices。数字只能取自 lunhui_read_run 的 view 摘要。成功即结束本轮。";
+  "市场运行的作答：一两句结论 summary，按当天轻重排的 blocks（verdicts、breadth、indices、ladder、yesterday、signals、sources），每块一句 title，可标 focus（ladder 的 rung，indices 的 from/to），至多三个 choices。数字只能取自 lunhui_read_run 的 view 摘要。成功即结束本轮。";
 
 /** The parameters, in the dsh DSL: every nested object closed. Lengths and counts are `checkPresent`'s. */
 const PARAMETERS = {
@@ -38,7 +38,7 @@ const PARAMETERS = {
       additionalProperties: false,
       properties: {
         kind: { type: "string", enum: [...PRESENT_KINDS], required: true },
-        title: { type: "string", description: "一句标题，至多 40 个字符；breadth、indices、ladder 必填。" },
+        title: { type: "string", description: "一句标题，至多 40 个字符；breadth、indices、ladder、yesterday、signals 必填。" },
         focus: {
           type: "object",
           additionalProperties: false,

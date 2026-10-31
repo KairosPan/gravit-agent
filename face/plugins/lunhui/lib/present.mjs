@@ -16,13 +16,13 @@ import { refuse } from "./errors.mjs";
 import { minuteIndex } from "./market.mjs";
 import { VIEW_MODULES } from "./view.mjs";
 
-/** The catalog's kinds `lunhui_present` takes (§5.3); plan 3 adds `yesterday` and `signals`. */
-export const PRESENT_KINDS = Object.freeze(["verdicts", "breadth", "indices", "ladder", "sources"]);
+/** The catalog's kinds `lunhui_present` takes (§5.3). */
+export const PRESENT_KINDS = Object.freeze(["verdicts", "breadth", "indices", "ladder", "yesterday", "signals", "sources"]);
 
 /** The kinds a card run of one module may draw (M20). */
 export const MODULE_BLOCKS = Object.freeze({
   environment: Object.freeze(["verdicts", "breadth", "indices", "sources"]),
-  sentiment: Object.freeze(["verdicts", "ladder", "sources"]),
+  sentiment: Object.freeze(["verdicts", "ladder", "yesterday", "signals", "sources"]),
   theme: Object.freeze(["verdicts", "sources"]),
   counterevidence: Object.freeze(["verdicts", "sources"]),
 });
@@ -31,7 +31,7 @@ export const MODULE_BLOCKS = Object.freeze({
 export const PRESENT_LIMITS = Object.freeze({ summary: 160, title: 40, blocks: 6, choices: 3, label: 30 });
 
 /** The kinds that need a title, and the ones whose view block carries `unavailable`. */
-const TITLED = new Set(["breadth", "indices", "ladder"]);
+const TITLED = new Set(["breadth", "indices", "ladder", "yesterday", "signals"]);
 
 const FULL_WIDTH = { "．": ".", "：": ":", "，": ",", "％": "%", "＋": "+", "－": "-", "−": "-" };
 
@@ -124,6 +124,7 @@ const gridIndex = (hhmm) => (typeof hhmm === "string" && /^\d{2}:\d{2}$/.test(hh
 function undrawable(kind, view) {
   if (kind === "sources") return null;
   if (kind === "verdicts") return view.verdicts?.length || view.reviewer ? null : "这个运行没有可画的模块结论或反证";
+  if (kind === "signals") return view.signals === null || view.signals === undefined ? "这个运行没有读到 sentiment，画不了 signals" : null;
   return view[kind]?.unavailable ?? null;
 }
 

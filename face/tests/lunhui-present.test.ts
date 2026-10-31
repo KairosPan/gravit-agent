@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildView, viewDigest } from "../plugins/lunhui/lib/view.mjs";
-import { checkPresent, unsupportedNumbers } from "../plugins/lunhui/lib/present.mjs";
+import { MODULE_BLOCKS, PRESENT_KINDS, checkPresent, unsupportedNumbers } from "../plugins/lunhui/lib/present.mjs";
 import { LunhuiError } from "../plugins/lunhui/lib/runs.mjs";
 import * as runsRow from "../plugins/lunhui/runs-row.mjs";
 import * as indexRow from "../plugins/lunhui/freeze-index-row.mjs";
@@ -70,6 +70,35 @@ test("an undrawable block is refused with the view's reason", () => {
 });
 test("a card run's module narrows the modules", () => {
   assert.deepEqual(checkPresent(ok({ module: "sentiment", blocks: [{ kind: "ladder", title: "断在 3 板" }] }), { view, digest, manifest: sealed.manifest }).modules, ["sentiment"]);
+});
+
+test("yesterday and signals are in the catalog, and sentiment's card may draw them", () => {
+  assert.deepEqual([...PRESENT_KINDS], ["verdicts", "breadth", "indices", "ladder", "yesterday", "signals", "sources"]);
+  assert.deepEqual([...MODULE_BLOCKS.sentiment], ["verdicts", "ladder", "yesterday", "signals", "sources"]);
+  assert.deepEqual([...MODULE_BLOCKS.environment], ["verdicts", "breadth", "indices", "sources"]);
+  assert.deepEqual([...MODULE_BLOCKS.theme], ["verdicts", "sources"]);
+  assert.deepEqual([...MODULE_BLOCKS.counterevidence], ["verdicts", "sources"]);
+});
+test("yesterday and signals need a title", () => {
+  for (const kind of ["yesterday", "signals"]) {
+    assert.throws(() => checkPresent(ok({ summary: "普跌", blocks: [{ kind }] }), { view, digest, manifest: sealed.manifest }),
+      (e: any) => e.code === "INVALID_PRESENT" && e.message.startsWith("INVALID_PRESENT: blocks[0].title"));
+  }
+});
+test("signals on a run without sentiment is refused by reason", () => {
+  const noSentiment = buildView(sealed, { modules: ["environment"] });
+  assert.throws(() => checkPresent(ok({ summary: "普跌", blocks: [{ kind: "signals", title: "信号" }] }), { view: noSentiment, digest: viewDigest(noSentiment), manifest: sealed.manifest }),
+    (e: any) => e.code === "INVALID_PRESENT" && /sentiment/.test(e.message));
+});
+test("yesterday on a run whose limit-up pools were not frozen is refused with the view's reason", () => {
+  const noLimitUp = buildView({ ...sealed, manifest: { ...sealed.manifest, evidence: sealed.manifest.evidence.filter((e: any) => e.source !== "limit-up") },
+    evidence: sealed.evidence.filter((e: any) => e.source !== "limit-up") });
+  assert.throws(() => checkPresent(ok({ summary: "普跌", blocks: [{ kind: "yesterday", title: "昨日涨停" }] }), { view: noLimitUp, digest: viewDigest(noLimitUp), manifest: sealed.manifest }),
+    (e: any) => e.code === "INVALID_PRESENT" && /limit-up not frozen/.test(e.message));
+});
+test("an ok call may draw yesterday and signals", () => {
+  assert.deepEqual(checkPresent(ok({ summary: "普跌", blocks: [{ kind: "yesterday", title: "昨日涨停今日回撤" }, { kind: "signals", title: "收缩与接力" }] }),
+    { view, digest, manifest: sealed.manifest }).blocks, ["yesterday", "signals"]);
 });
 
 // -------------------------------------------------------------------------------------------------
@@ -165,7 +194,7 @@ async function rejectsWith(promise: Promise<unknown>, code: string): Promise<Lun
   return refusal;
 }
 
-const PRESENT_DESCRIPTION = "市场运行的作答：一两句结论 summary，按当天轻重排的 blocks（verdicts、breadth、indices、ladder、sources），每块一句 title，可标 focus（ladder 的 rung，indices 的 from/to），至多三个 choices。数字只能取自 lunhui_read_run 的 view 摘要。成功即结束本轮。";
+const PRESENT_DESCRIPTION = "市场运行的作答：一两句结论 summary，按当天轻重排的 blocks（verdicts、breadth、indices、ladder、yesterday、signals、sources），每块一句 title，可标 focus（ladder 的 rung，indices 的 from/to），至多三个 choices。数字只能取自 lunhui_read_run 的 view 摘要。成功即结束本轮。";
 
 test("lunhui-present: name and inject; registers exactly lunhui_present, its description and closed parameters; unload disposes it", async (t) => {
   assert.equal(presentRow.name, "lunhui-present");
@@ -182,7 +211,7 @@ test("lunhui-present: name and inject; registers exactly lunhui_present, its des
   const block = p.properties.blocks.items;
   assert.equal(block.additionalProperties, false);
   assert.deepEqual(block.required, ["kind"]);
-  assert.deepEqual(block.properties.kind.enum, ["verdicts", "breadth", "indices", "ladder", "sources"]);
+  assert.deepEqual(block.properties.kind.enum, ["verdicts", "breadth", "indices", "ladder", "yesterday", "signals", "sources"]);
   assert.equal(block.properties.focus.additionalProperties, false);
   assert.deepEqual(Object.keys(block.properties.focus.properties), ["rung", "from", "to"]);
   assert.equal(block.properties.focus.properties.rung.type, "integer");
