@@ -9,6 +9,7 @@ const pctText = v => (v == null || !Number.isFinite(Number(v)) ? '—' : signedP
 const nameOf = s => String(s?.name ?? s?.code ?? '—');
 const withPct = s => `${nameOf(s)} ${pctText(s?.pct)}`;
 const list = a => (Array.isArray(a) ? a : []);
+const num = v => (v == null || !Number.isFinite(Number(v)) ? '—' : count(v));
 const tone = v => { const r = Number(Number(v).toFixed(2)); return r > 0 ? 'up' : r < 0 ? 'down' : 'flat'; };
 
 function chip(s) {
@@ -23,14 +24,15 @@ function right(r, tries) {
   const first = r.n === 1;
   const from = Number(r.from), promoted = Number(r.promoted);
   const done = first ? Number(tries?.sealed) : promoted, of = first ? Number(tries?.tries) : from;
-  const words = first ? `1st try ${done}/${of}` : `${r.n - 1}→${r.n} ${done}/${of}`;
+  const words = first ? `1st try ${num(done)}/${num(of)}` : `${r.n - 1}→${r.n} ${num(done)}/${num(of)}`;
   const w = of > 0 && Number.isFinite(done) ? Math.round(done / of * 100) : 0;
   return `<div class="lh-rright"><span class="lh-rnum">${esc(words)}</span><span class="lh-meter" aria-hidden="true"><span class="lh-meter-fill" style="width:${w}%"></span></span></div>`;
 }
 
 function row(r, on, stress, id, tries) {
   const sealed = list(r.sealed), missed = list(r.missed), broke = list(r.broke);
-  const gap = r.gap ? `<div class="lh-gap">gap · none of ${esc(r.from)} sealed</div>` : '';
+  // rung 1 has no rung below it (from: null): its gap is a day with no first boards
+  const gap = !r.gap ? '' : `<div class="lh-gap">${r.from == null ? 'gap · no first boards' : `gap · none of ${esc(num(r.from))} sealed`}</div>`;
   const chips = sealed.length ? `<div class="lh-chips">${sealed.map(chip).join(' ')}</div>` : '';
   const btn = `<button${attrs({ type: 'button', class: cls('lh-rung-n', on && 'pressed'), 'data-action': 'lunhuiUi', 'data-id': id, 'data-field': 'rung', 'data-value': String(r.n), 'aria-pressed': on ? 'true' : 'false', 'aria-label': `Rung ${r.n}` })}>${esc(r.n)}</button>`;
   return `<div class="${cls('lh-rung', stress && 'stress')}">${btn}<div class="lh-rbody">${chips}${gap}${group('missed', missed)}${group('broke', broke)}</div>${right(r, tries)}</div>`;
@@ -51,10 +53,10 @@ export function ladderHtml(view, block, ui, id) {
   const rows = rungs.map(r => row(r, r === picked, r.gap || r.n === focus, id, l.firstTries)).join('');
   let words = 'No such rung on the ladder';
   if (picked?.n === 1) {
-    words = `First boards · ${l.firstTries?.sealed} of ${l.firstTries?.tries} tries sealed · ${list(picked.broke).length} broke`;
+    words = `First boards · ${num(l.firstTries?.sealed)} of ${num(l.firstTries?.tries)} tries sealed · ${list(picked.broke).length} broke`;
   } else if (picked) {
     const missed = list(picked.missed), broke = list(picked.broke);
-    words = `${picked.n - 1}→${picked.n} · ${picked.promoted} of ${picked.from} · missed: ${missed.length ? missed.map(withPct).join(', ') : 'none'} · broke: ${broke.length ? broke.map(nameOf).join(', ') : 'none'}`;
+    words = `${picked.n - 1}→${picked.n} · ${num(picked.promoted)} of ${num(picked.from)} · missed: ${missed.length ? missed.map(withPct).join(', ') : 'none'} · broke: ${broke.length ? broke.map(nameOf).join(', ') : 'none'}`;
   }
   return `${label(`Limit-up ladder · height ${l.height} · ${count(sealedAll)} sealed`)}${headline(block)}<div class="lh-ladder">${rows}</div>${readout(words)}`;
 }

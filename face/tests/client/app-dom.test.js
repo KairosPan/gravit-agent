@@ -2139,7 +2139,7 @@ test('a composed answer: a tile opens and closes, By change switches, a bucket i
   press('breadth', 'dist');
   press('bucket', '-6');
   assert.equal(store.get().lunhui.ui[id].bucket, -6);
-  assert.match(f.html(), /Bucket −6: 458 stocks · 8\.5% of 5375/);
+  assert.match(f.html(), /Bucket −6: 458 stocks · 8\.5% of 5,375/);
 });
 
 // task 6: the indices block's minute cursor — the slider and the pointer move it in place with no store change and no render;

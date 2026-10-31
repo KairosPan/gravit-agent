@@ -272,14 +272,15 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
     void previews();
   }
   // the last SPOKEN line of a row, read without activating it (projections cut + a one-message page): the kind table
-  // decides what counts, so an injected context row (a system message in the thread) never becomes a preview
+  // decides what counts, so an injected context row (a system message in the thread) never becomes a preview; a composed
+  // answer (an ok lunhui_present) previews its summary
   function lastText(records) {
     let out = '';
     const seen = new Map();
     for (const r of Array.isArray(records) ? records : []) {
       const frame = { type: 'session/event', event: r?.event };
       rememberCall(seen, frame);
-      for (const m of toMessages(mapFrame(frame), seen, 0)) if (m.kind === 'text' && m.from !== 'system' && typeof m.text === 'string' && m.text.trim() !== '') out = m.text;
+      for (const m of toMessages(mapFrame(frame), seen, 0)) if ((m.kind === 'text' || m.kind === 'composed') && m.from !== 'system' && typeof m.text === 'string' && m.text.trim() !== '') out = m.text;
     }
     return out || null;
   }

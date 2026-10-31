@@ -68,7 +68,7 @@ test('breadth in Counts: the split bar, the counts row, the tiles and the ratio 
   for (const g of ['flex-grow:567', 'flex-grow:34', 'flex-grow:4774']) assert.ok(html.includes(g), g);
   assert.ok(html.indexOf('flex-grow:567') < html.indexOf('flex-grow:34') && html.indexOf('flex-grow:34') < html.indexOf('flex-grow:4774'));
   const t = text(html);
-  for (const s of ['↑ 567 up · 10.5%', '34 unchanged', '↓ 4774 down · 88.8%', 'Limit-up', '41', 'Limit-down', '22', 'Turnover', '¥1.46万亿']) assert.ok(t.includes(s), s);
+  for (const s of ['↑ 567 up · 10.5%', '34 unchanged', '↓ 4,774 down · 88.8%', 'Limit-up', '41', 'Limit-down', '22', 'Turnover', '¥1.46万亿']) assert.ok(t.includes(s), s);
   assert.equal(readout(html), 'Up/down ratio 0.12 · about 1 riser for every 8 fallers');
   // the digest's turnover grammar: 亿 from 1e8, whole yuan below
   const tile = turnover => text(breadthHtml({ ...VIEW_1027, breadth: { ...VIEW_1027.breadth, turnover } }, { kind: 'breadth' }, {}, ID)).match(/Turnover(¥[^A-Z↑↓]*?)Up\/down/)?.[1];
@@ -86,16 +86,16 @@ test('breadth by change: 23 buckets in proportion, the biggest picked by default
   const buckets = [...dflt.matchAll(/<button[^>]*data-field="bucket"[^>]*data-value="(-?\d+)"[^>]*>/g)].map(x => Number(x[1]));
   assert.equal(buckets.length, 23);
   assert.deepEqual(buckets, Array.from({ length: 23 }, (_, i) => i - 11));
-  assert.equal(readout(dflt), 'Bucket −4: 1023 stocks · 19.0% of 5375', 'the bucket with the most stocks');
+  assert.equal(readout(dflt), 'Bucket −4: 1,023 stocks · 19.0% of 5,375', 'the bucket with the most stocks');
   assert.match(dflt, /data-value="-4" aria-pressed="true"/);
   assert.match(dflt, /height:100\.0%/, 'the largest bucket is full height');
   assert.match(dflt, /height:2\.2%/, '22 of 1023');
   const picked = breadthHtml(VIEW_1027, { kind: 'breadth' }, { breadth: 'dist', bucket: -4 }, ID);
-  assert.equal(readout(picked), 'Bucket −4: 1023 stocks · 19.0% of 5375');
-  assert.equal(readout(breadthHtml(VIEW_1027, { kind: 'breadth' }, { breadth: 'dist', bucket: -11 }, ID)), 'Limit-down: 22 stocks · 0.4% of 5375');
-  assert.equal(readout(breadthHtml(VIEW_1027, { kind: 'breadth' }, { breadth: 'dist', bucket: 11 }, ID)), 'Limit-up: 41 stocks · 0.8% of 5375');
-  assert.equal(readout(breadthHtml(VIEW_1027, { kind: 'breadth' }, { breadth: 'dist', bucket: 0 }, ID)), 'Unchanged: 34 stocks · 0.6% of 5375');
-  assert.equal(readout(breadthHtml(VIEW_1027, { kind: 'breadth' }, { breadth: 'dist', bucket: 3 }, ID)), 'Bucket +3: 77 stocks · 1.4% of 5375');
+  assert.equal(readout(picked), 'Bucket −4: 1,023 stocks · 19.0% of 5,375');
+  assert.equal(readout(breadthHtml(VIEW_1027, { kind: 'breadth' }, { breadth: 'dist', bucket: -11 }, ID)), 'Limit-down: 22 stocks · 0.4% of 5,375');
+  assert.equal(readout(breadthHtml(VIEW_1027, { kind: 'breadth' }, { breadth: 'dist', bucket: 11 }, ID)), 'Limit-up: 41 stocks · 0.8% of 5,375');
+  assert.equal(readout(breadthHtml(VIEW_1027, { kind: 'breadth' }, { breadth: 'dist', bucket: 0 }, ID)), 'Unchanged: 34 stocks · 0.6% of 5,375');
+  assert.equal(readout(breadthHtml(VIEW_1027, { kind: 'breadth' }, { breadth: 'dist', bucket: 3 }, ID)), 'Bucket +3: 77 stocks · 1.4% of 5,375');
   assert.doesNotMatch(dflt, /flex-grow/, 'no split bar by change');
 });
 
@@ -198,4 +198,26 @@ test('the ladder prints a near-zero change as 0.00% and colours it neutral', asy
   assert.doesNotMatch(html, /−0\.00|\+0\.00/);
   assert.equal([...html.matchAll(/class="lh-lpct flat">0\.00%</g)].length, 2);
   assert.match(readout(html), /missed: N 0\.00%, N 0\.00%/);
+});
+
+test('the ladder: a gap on the first rung says no first boards, never a blank count', async () => {
+  const { ladderHtml } = await import('../../client/js/render/lunhui/ladder.js');
+  const view = { ladder: { height: 2, rungs: [
+    { n: 2, sealed: [{ name: 'A' }], from: 3, promoted: 1, missed: [], broke: [], gap: false },
+    { n: 1, sealed: [], from: null, promoted: null, missed: [], broke: [], gap: true },
+  ], firstTries: { sealed: 0, tries: 4 }, unavailable: null } };
+  const html = ladderHtml(view, { kind: 'ladder' }, {}, ID);
+  const first = html.split('<div class="lh-rung').slice(1).find(r => r.includes('data-value="1"'));
+  assert.match(text(first), /gap · no first boards/);
+  assert.doesNotMatch(text(html), /none of\s+sealed|none of null/);
+});
+
+test('the ladder prints its counts with thousands separators, like its label', async () => {
+  const { ladderHtml } = await import('../../client/js/render/lunhui/ladder.js');
+  const view = { ladder: { height: 2, rungs: [
+    { n: 2, sealed: [{ name: 'A' }], from: 1200, promoted: 1001, missed: [], broke: [], gap: false },
+    { n: 1, sealed: [], from: null, promoted: null, missed: [], broke: [], gap: false },
+  ], firstTries: { sealed: 1234, tries: 5678 }, unavailable: null } };
+  assert.equal(readout(ladderHtml(view, { kind: 'ladder' }, { rung: 1 }, ID)), 'First boards · 1,234 of 5,678 tries sealed · 0 broke');
+  assert.match(readout(ladderHtml(view, { kind: 'ladder' }, { rung: 2 }, ID)), /^1→2 · 1,001 of 1,200 · /);
 });

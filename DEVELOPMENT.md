@@ -2218,7 +2218,7 @@ conversation that was on screen when the last open one was deleted and nothing t
   fetches **previews**: for up to 12 rows other than the one on screen that were never read or
   whose session moved past the read (`updatedAt > previewAt`), one non-activating
   `session/projections` + `session/page` with `maxMessages: 1`, whose last SPOKEN line (through
-  the kind table: never a context row) becomes the row's preview — a row read and found silent
+  the kind table: never a context row; a composed answer's summary counts) becomes the row's preview — a row read and found silent
   waits for activity, and the conversation on screen previews from its own window (`previewOf`
   in `render/rail.js`);
 - **follow or page** — `open(id)` marks the conversation seen and reads it by `viewFor`: a LIVE
@@ -3084,14 +3084,16 @@ shares, Limit-up, Limit-down and Turnover tiles, the up/down ratio) or By change
 minute on the 242-point grid (`intraday.js`: the previous close dashed, the price line and each
 minute's amount in its minute's colour, the high and the low, Gravit's focus band), the minute
 slider under it and the readout. **ladder**: the rungs top down, a gap rung where nothing got
-there and the focus rung stressed, the names that sealed each (first seal, breaks), the misses and
+there (`gap · none of N sealed`; on rung 1, which has no rung below, `gap · no first boards`)
+and the focus rung stressed, the names that sealed each (first seal, breaks), the misses and
 the breaks with today's change, and at the right how many of the rung below got through as a
 number and a meter; names are escaped text. **sources**: a row per source, `✓ frozen` (`·
 delayed`), `✗` with its refusal codes (a repeat `×n`), or `—` not asked, and the modules whose
 artifacts named it missing. A loaded answer ends with the footer, `Evidence · <source> ✓|✗ · frozen
 <MM-DD HH:MM> CST · run <run>`. Amounts and percentages print in the digest's grammar (`yuan`:
 `X.XX万亿` from 10¹², `X.XX亿` from 10⁸; `signedPct`: U+2212 for a negative, `+` on a positive,
-`0.00%` for none, its tone from the rounded value), so a figure the face draws reads as the one
+`0.00%` for none, its tone from the rounded value), counts with thousands separators (`count`,
+`5,375`), so a figure the face draws reads as the one
 Gravit quotes. Every time is China time: grid minutes through `minuteLabel` (09:30–11:30 are
 points 0–120, 13:00–15:00 are 121–241), ISO stamps through `chinaStamp`
 (`Intl.DateTimeFormat(…, {timeZone: "Asia/Shanghai"})`), never the browser's zone. **The working

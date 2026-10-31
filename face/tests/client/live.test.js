@@ -277,6 +277,16 @@ test('previews: the last SPOKEN line, never an injected context row (a plugin no
   assert.equal(r.store.get().conversations[0].preview, 'Both pivots are technically valid.');
 });
 
+test('previews: a conversation that ends in a composed answer previews its summary', async () => {
+  const args = { strategy: 'cn-market', run: 'r1', summary: '上证涨 0.5%，15 家上涨。', blocks: [{ kind: 'sources' }] };
+  const call = { type: 'tool/call', seq: 40, time: 1756512200000, data: { turn: 4, step: 1, callId: 'k1', name: 'lunhui_present', arguments: JSON.stringify(args) } };
+  const result = { type: 'tool/result', seq: 41, time: 1756512201000, surfaceOp: 'append', data: { turn: 4, step: 1, message: { id: 'm-41', role: 'tool', source: { kind: 'tool', callId: 'k1' }, toolCallId: 'k1', content: [{ type: 'text', text: JSON.stringify({ ok: true, blocks: ['sources'], modules: [] }) }], isError: false } } };
+  const r = rig({ rows: [row('p1')], pages: { p1: [fixture(1), { type: 'event', event: call }, { type: 'event', event: result }] } });
+  await r.ready();
+  await settle(); await settle();
+  assert.equal(r.store.get().conversations[0].preview, '上证涨 0.5%，15 家上涨。');
+});
+
 test('opening marks the conversation seen; the list keeps the open one seen when its activity moves', async () => {
   const r = rig({ rows: [row('s1', { updatedAt: 50 })] });
   await r.ready();
