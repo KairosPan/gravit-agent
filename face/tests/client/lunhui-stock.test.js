@@ -85,12 +85,13 @@ test('a null number in the headline draws a dash, never a zero', () => {
 // ---- the limits ----
 
 test("a 20% code's limit line sits at the view's limitUp", () => {
-  // a ChiNext name: +20% from 10 is 12; the limit-down here is put out of the drawn range on purpose
+  // a ChiNext name: +20% from 10 is 12; the limit-down is outside the stock's own day, so it is not drawn
   const minutes = line(10, i => (i < 100 ? 10 + i * 0.02 : 12));
   const limits = { up: 12, down: 7.5 };
-  const g = chartGeometry(minutes, limits);
-  assert.ok(Math.abs(g.span - 2 * 1.08) < 1e-9, 'the span reaches the limit-up with 8% air');
-  const svg = intradaySvg(minutes, { id: 's-300100', limits, seals: { first: '11:10', last: null }, bars: 'volume' });
+  const g = chartGeometry(minutes, limits, { includeUp: true });
+  // the domain is the day's own range, prec to the limit-up, with 6% air each side
+  assert.ok(Math.abs(g.lo - (10 - 2 * 0.06)) < 1e-9 && Math.abs(g.hi - (12 + 2 * 0.06)) < 1e-9, `${g.lo}..${g.hi}`);
+  const svg = intradaySvg(minutes, { id: 's-300100', limits, includeUp: true, seals: { first: '11:10', last: null }, bars: 'volume' });
   const up = /<line class="lh-limit up" x1="56" y1="([\d.]+)" x2="708" y2="([\d.]+)"/.exec(svg);
   assert.ok(up, 'the limit-up line is drawn');
   assert.equal(Number(up[1]), Number(g.Y(12).toFixed(1)));
@@ -98,10 +99,45 @@ test("a 20% code's limit line sits at the view's limitUp", () => {
   // the first seal sits on the limit line at its grid minute (11:10 is point 100)
   assert.match(svg, new RegExp(`<circle class="lh-seal" cx="${Number(g.X(100).toFixed(1))}" cy="${up[1]}"`));
   assert.equal((svg.match(/lh-seal/g) ?? []).length, 1, 'no last seal, no second mark');
-  // in range, the limit-down is drawn too
-  assert.match(intradaySvg(minutes, { id: 'x', limits: { up: 12, down: 8 } }), /<line class="lh-limit down"/);
+  // a limit-down the line closes at is in the domain and drawn
+  const down = line(10, i => (i < 100 ? 10 - i * 0.01 : 9));
+  assert.match(intradaySvg(down, { id: 'x', limits: { up: 11, down: 9 } }), /<line class="lh-limit down"/);
   // no option, no limit and no seal
   assert.doesNotMatch(intradaySvg(minutes, { id: 'x' }), /lh-limit|lh-seal/);
+});
+
+// the first live run (2026-10-31): a name sealed most of the day drew as a flat line on a ±10% scale, its H/L over the limit
+test("a sealed stock's chart scales to its own day, prec and the limit-up in, no H/L marks", () => {
+  const prec = 18.13, upPrice = 19.94;
+  const minutes = line(prec, i => (i < 30 ? 19.89 + (i % 6) * 0.01 : upPrice));
+  const limits = { up: upPrice, down: 16.32 };
+  const g = chartGeometry(minutes, limits, { includeUp: true });
+  assert.ok(g.Y(19.94) < g.Y(18.13), 'the limit-up stands above the previous close');
+  assert.ok(g.lo < prec && g.hi > upPrice, 'prec and the limit-up are both inside the domain');
+  const svg = intradaySvg(minutes, { id: 's-x', limits, includeUp: true, bars: 'volume' });
+  const up = /<line class="lh-limit up" x1="56" y1="([\d.]+)"/.exec(svg);
+  assert.ok(up, 'the limit-up line is drawn');
+  assert.equal(Number(up[1]), Number(g.Y(upPrice).toFixed(1)));
+  assert.ok(Number(up[1]) >= 10 && Number(up[1]) <= 226, 'inside the plot');
+  // the previous close is drawn at its own y, not the centre
+  const mid = /<line class="lh-mid" x1="56" y1="([\d.]+)"/.exec(svg);
+  assert.equal(Number(mid[1]), Number(g.Y(prec).toFixed(1)));
+  assert.notEqual(Number(mid[1]), 118);
+  assert.doesNotMatch(svg, /lh-mark/, 'a stock chart draws no H/L marks');
+  assert.doesNotMatch(svg, /lh-limit down/, 'a limit-down the line never reached is not drawn');
+});
+
+test("a yesterday name that falls to −5% draws no limit-up line, the domain's top below it", () => {
+  const minutes = line(10, i => 10 - i / 241 * 0.5);
+  const limits = { up: 11, down: 9 };
+  const g = chartGeometry(minutes, limits, { includeUp: false });
+  assert.ok(g.hi < 11, `top ${g.hi}`);
+  assert.ok(g.lo < 9.5 && g.hi > 10, 'the day and prec are inside');
+  const svg = intradaySvg(minutes, { id: 'y', limits, bars: 'volume' });
+  assert.doesNotMatch(svg, /lh-limit/);
+  // a flat day still has height: a span of at least prec · 0.002
+  const flat = chartGeometry(line(10, () => 10), limits);
+  assert.ok(flat.hi - flat.lo >= 10 * 0.002 && Number.isFinite(flat.Y(10)));
 });
 
 test('bars: volume scales the bars to the busiest minute by volume; the default stays the amount', () => {
@@ -119,8 +155,9 @@ test('the stock readout says at the limit-up only at that price', () => {
   const low = { ...f, minutes: line(10, () => 8) };
   assert.equal(cursorPatch({ indices: { rows: [] }, stocks: { 300100: low } }, 'sz300100', 5).readout, '创业样本 · 09:35 · 8.00 · −20.00% · at the limit-down');
   // the cursor stands where the drawer's chart drew the point, on the limits' geometry
-  const g = chartGeometry(f.minutes, { up: 12, down: 8 });
+  const g = chartGeometry(f.minutes, { up: 12, down: 8 }, { includeUp: true });
   assert.equal(cursorPatch(view, 'sz300100', 0).y, Number(g.Y(12).toFixed(1)));
+  assert.equal(cursorPatch(view, 'sz300100', 10).y, Number(g.Y(11.98).toFixed(1)));
   // an index's readout is unchanged
   assert.match(cursorPatch(VIEW_1027, 'sh000001', 0).readout, /^上证指数 · 09:30 · [\d.]+ · [+−]?[\d.]+% · ¥[^ ]+ this minute$/);
   assert.equal(cursorPatch(view, 'sz999999', 0), null);
@@ -262,4 +299,31 @@ test('the seal marks are drawn after the price line, so they sit on top of it', 
 test('stockHeadline: a limit-up that broke and closed below the limit has no held clause', () => {
   const f = facts({ breaks: 2, minutes: line(10, i => (i < 4 ? 10.5 : i === 241 ? 11 - 0.006 : 11)) });
   assert.equal(stockHeadline(f), 'Sealed 09:34, broke 2×');
+});
+
+test("the drawer's cursor stands on the drawn chart's geometry, at every minute", () => {
+  const s = { lunhui: { views: { [KEY]: { status: 'loaded', view: VIEW_1027 } }, ui: {}, stock: { key: KEY, code: '600011' } } };
+  const html = stockDrawerHtml(s);
+  const f = VIEW_1027.stocks['600011'];
+  const g = chartGeometry(f.minutes, { up: Number(f.limitUp), down: Number(f.limitDown) }, { includeUp: true });
+  const price = f.minutes.price.map(Number);
+  const dot = /<circle id="dot-s-600011" class="lh-dot" cx="([\d.]+)" cy="([\d.]+)"/.exec(html);
+  assert.equal(Number(dot[2]), Number(g.Y(price[price.length - 1]).toFixed(1)));
+  for (const m of [0, 5, 60, 200]) assert.equal(cursorPatch(VIEW_1027, f.symbol, m).y, Number(g.Y(price[m]).toFixed(1)), `minute ${m}`);
+  // a broken name whose minutes never closed at the limit: the limit-up is in both the drawn domain and the cursor's
+  const zb = facts({ pool: 'zb', tried: 2, limitUp: 11, limitDown: 9, minutes: line(10, i => 10 + Math.min(i, 80) / 100) });
+  const zs = stateOf({ 600100: zb }, '600100');
+  const gz = chartGeometry(zb.minutes, { up: 11, down: 9 }, { includeUp: true });
+  assert.ok(gz.hi > 11, 'the limit-up is inside the domain');
+  const zdot = /<circle id="dot-s-600100" class="lh-dot" cx="([\d.]+)" cy="([\d.]+)"/.exec(stockDrawerHtml(zs));
+  assert.equal(Number(zdot[2]), Number(gz.Y(zb.minutes.price[241]).toFixed(1)));
+  for (const m of [0, 40, 200]) assert.equal(cursorPatch(zs.lunhui.views[KEY].view, 'sh600100', m).y, Number(gz.Y(zb.minutes.price[m]).toFixed(1)), `zb minute ${m}`);
+  // a yesterday name's drawn dot and cursor both use the domain without the limit-up
+  const y = facts({ pool: 'yesterday', limitUp: 11, limitDown: 9, minutes: line(10, i => 10 - i / 241 * 0.5) });
+  const ys = stateOf({ 600100: y }, '600100');
+  const gy = chartGeometry(y.minutes, { up: 11, down: 9 }, { includeUp: false });
+  const ydot = /<circle id="dot-s-600100" class="lh-dot" cx="([\d.]+)" cy="([\d.]+)"/.exec(stockDrawerHtml(ys));
+  assert.equal(Number(ydot[2]), Number(gy.Y(y.minutes.price[241]).toFixed(1)));
+  const yview = ys.lunhui.views[KEY].view;
+  for (const m of [0, 3, 120]) assert.equal(cursorPatch(yview, 'sh600100', m).y, Number(gy.Y(y.minutes.price[m]).toFixed(1)), `minute ${m}`);
 });

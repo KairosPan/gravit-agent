@@ -39,10 +39,10 @@ test('chartGeometry without limits is unchanged', () => {
   assert.equal(same.Y(3700), g.Y(3700));
   assert.equal(intradaySvg(SSE.minutes, { minute: 241, id: ID }), intradaySvg(SSE.minutes, { minute: 241, id: ID, limits: null, seals: null }));
   assert.doesNotMatch(intradaySvg(SSE.minutes, { minute: 241, id: ID }), /lh-limit|lh-seal/);
-  // limits inside the day's move change nothing; one beyond it widens the span to it, with the same 8% air
-  const far = Math.max(...SSE.minutes.price.map(p => Math.abs(p - SSE.minutes.prec)));
-  assert.equal(chartGeometry(SSE.minutes, { up: SSE.minutes.prec + far / 2, down: SSE.minutes.prec - far / 2 }).span, g.span);
-  assert.ok(Math.abs(chartGeometry(SSE.minutes, { up: SSE.minutes.prec + far * 2, down: null }).span - far * 2 * 1.08) < 1e-9);
+  // without limits the domain is symmetric about the previous close, prec on the midline; a stock's limits (the run view
+  // polish, 2026-10-31) switch to the stock's own asymmetric day, the index call never passes them
+  assert.ok(Math.abs(g.hi - SSE.minutes.prec - g.span) < 1e-9 && Math.abs(SSE.minutes.prec - g.lo - g.span) < 1e-9);
+  assert.equal(g.mid, 118);
 });
 
 test('intradaySvg: the band from 14:00 to 15:00, the midline, the path, the bars, high and low, the cursor, the grid', () => {

@@ -4,7 +4,7 @@
 // run's claims that cite it, and Ask Gravit / Open in Markets. Every number comes from the view; every word it holds is escaped.
 import { esc, attrs, cls } from '../../html.js';
 import { yuan, fix2, signedPct, count } from './block.js';
-import { intradaySvg, cursorPatch, minuteLabel, sealIndex, atLimitUp, atLimitDown } from './intraday.js';
+import { intradaySvg, cursorPatch, minuteLabel, sealIndex, atLimitUp, atLimitDown, limitsOf, includesUp } from './intraday.js';
 import { chinaStamp } from './time.js';
 import { boardOf } from '../../host/lunhui.js';
 
@@ -88,8 +88,8 @@ function minuteLine(view, f) {
   const id = `s-${f.code}`;
   const last = priceOf(f).length - 1;
   const where = { 'data-id': id, 'data-strategy': view.strategy ?? '', 'data-run': view.run ?? '', 'data-symbol': f.symbol ?? f.code ?? '' };
-  const limits = fin(f.limitUp) ? { up: Number(f.limitUp), down: fin(f.limitDown) ? Number(f.limitDown) : null } : null;
-  const svg = intradaySvg(f.minutes, { minute: last, id, limits, seals: { first: f.firstSeal, last: f.lastSeal }, bars: 'volume' })
+  // the same limits and domain the live cursor (cursorPatch) uses, so the two agree
+  const svg = intradaySvg(f.minutes, { minute: last, id, limits: limitsOf(f), includeUp: includesUp(f), seals: { first: f.firstSeal, last: f.lastSeal }, bars: 'volume' })
     .replace(/^<svg class="lh-chart"/, `<svg class="lh-chart"${attrs({ 'data-action': 'lunhuiHover', 'data-last': String(last), ...where })}`);
   const slider = `<input${attrs({ type: 'range', id: `minute-${id}`, class: 'lh-minute', 'data-action': 'lunhuiMinute', ...where, min: '0', max: String(last), value: String(last), step: '1', 'aria-label': `Minute on ${f.name ?? f.code}` })}>`;
   const words = cursorPatch(view, f.symbol ?? f.code, last)?.readout ?? '';

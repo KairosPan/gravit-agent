@@ -3143,9 +3143,13 @@ answer's `viewKey`; the drawer (`stockDrawerHtml`, a 460 px `<aside class="drawe
 `Loading <code>…` while it loads, its error when it failed, `<code> is not in this run's pools.`
 for a code it does not hold. Loaded, it draws the name, `<code> · <board> · <industry>`, the pool
 line (price, the change chip, the pool tag, `From the limit-up pool frozen <stamp> by the market
-run`), **The minute line** — a headline derived from the line (`stockHeadline`), the chart against
-the view's own `limitUp` (and `limitDown`, drawn when it falls inside the drawn range, which the
-symmetric scale nearly always makes it) with the seal marks (drawn over the price line) and volume
+run`), **The minute line** — a headline derived from the line (`stockHeadline`), the chart on the
+stock's own day (`chartGeometry(minutes, limits, {includeUp})`: an asymmetric domain over the minute
+prices and the previous close, the view's own `limitUp` only for pools `zt` and `zb` (`includesUp`),
+its `limitDown` only when the line closes at it, 6% air each side and a span of at least
+prec · 0.002; the previous close dashed at its own y; a limit line drawn only inside the domain;
+no H/L marks, which the headline, the seal marks and the readout carry; the index charts keep their
+symmetric scale about the previous close) with the seal marks (drawn over the price line) and volume
 bars, the slider and its readout (`… · at the limit-up` only at `price >= limitUp − 0.005`, the
 limit-down mirrored; the chart, the slider and the readout name the stock by its `symbol`, or by its
 code when the symbol is null — a code `exchangeOf` does not know, such as a BSE name), and a
