@@ -1,10 +1,13 @@
 // face/client/js/render/lunhui/block.js — the anatomy every composed-answer block shares (spec §5.3): the face's label, small
 // and grey, then Gravit's headline (block.title, escaped as written), then the readout line that answers the control.
-import { esc, attrs } from '../../html.js';
+import { esc, attrs, cls } from '../../html.js';
 
 export const label = words => `<div class="lh-label">${esc(words)}</div>`;
 export const headline = block => (typeof block?.title === 'string' && block.title !== '' ? `<div class="lh-title">${esc(block.title)}</div>` : '');
 export const readout = words => `<div class="lh-readout" role="status" aria-live="polite">${esc(words)}</div>`;
+// a state's pill tone: strength green, weakness red, a module that could not judge in the stress colour, the rest grey
+const TONE = { STRONG: 'up', EXPANDING: 'up', RELAY: 'up', WEAK: 'down', CONTRACTING: 'down', NOT_EVALUABLE: 'warn' };
+export const pill = state => `<span class="${cls('chip', TONE[state] ?? 'grey')}">${esc(state ?? '—')}</span>`;
 export const count = n => Number(n).toLocaleString('en-US');
 // an amount in yuan, in plan 1's digest grammar (lib/view.mjs turnoverText) so every amount the face draws reads like the
 // number Gravit quotes: X.XX万亿 from 1e12, X.XX亿 from 1e8, else whole yuan

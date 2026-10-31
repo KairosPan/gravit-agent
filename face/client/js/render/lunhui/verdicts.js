@@ -2,11 +2,8 @@
 // its state, the detail line, and how many reviewer items stand against it); the open tile (ui.tile) shows that module's
 // claims as the artifact wrote them, then the reviewer's items against it in the stress colour.
 import { esc, attrs, cls } from '../../html.js';
-import { label, headline } from './block.js';
+import { label, headline, pill } from './block.js';
 
-// a state's pill tone: strength green, weakness red, a module that could not judge in the stress colour, the rest grey
-const TONE = { STRONG: 'up', EXPANDING: 'up', RELAY: 'up', WEAK: 'down', CONTRACTING: 'down', NOT_EVALUABLE: 'warn' };
-const pill = state => `<span class="${cls('chip', TONE[state] ?? 'grey')}">${esc(state ?? '—')}</span>`;
 const line = (l, stress = false) => `<div class="${cls('lh-line', stress && 'stress')}"><span class="lh-id">${esc(l?.id ?? '—')}</span>${esc(l?.text ?? '')}</div>`;
 
 export function verdictsHtml(view, block, ui, id) {

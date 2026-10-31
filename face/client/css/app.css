@@ -232,6 +232,28 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .lh-rright { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; min-width: 76px; font-variant-numeric: tabular-nums; }
 .lh-meter { display: block; width: 100%; height: 4px; border-radius: var(--radius-pill); background: var(--border); overflow: hidden; }
 .lh-meter-fill { display: block; height: 100%; background: var(--up); }
+.lh-yrows { display: flex; flex-direction: column; gap: 2px; }
+.lh-yrow { display: grid; grid-template-columns: minmax(0, 1fr) 32px 64px 72px; align-items: center; gap: 8px; font-size: 13px; }
+.lh-yname { min-width: 0; overflow-wrap: anywhere; }
+.lh-yb { color: var(--dim); font-variant-numeric: tabular-nums; }
+.lh-ypct { text-align: right; font-variant-numeric: tabular-nums; }
+.lh-ypct.up { color: var(--up); }
+.lh-ypct.down { color: var(--down); }
+.lh-ypct.flat { color: var(--dim); }
+.lh-ybar { display: block; height: 6px; border-radius: var(--radius-pill); background: var(--border); overflow: hidden; }
+.lh-ybar-fill { display: block; height: 100%; }
+.lh-ybar-fill.up { background: var(--up); }
+.lh-ybar-fill.down { background: var(--down); }
+.lh-ybar-fill.flat { background: var(--dim); }
+.lh-sig-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 13px; }
+.lh-sig-money { color: var(--dim); }
+.lh-conflict { font-size: 13px; line-height: 1.5; }
+.lh-sig-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; }
+.lh-sig-col { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: var(--radius-s); background: var(--surface-2); }
+.lh-sig-h { font-size: 12px; font-weight: 600; color: var(--dim); }
+.lh-sig-m { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+.lh-sig-k { color: var(--text); }
+.lh-sig-v { font-weight: 700; font-variant-numeric: tabular-nums; }
 .lh-srcs { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
 .lh-src { display: flex; flex-wrap: wrap; gap: 4px 12px; }
 .lh-src-name { min-width: 72px; font-weight: 600; }

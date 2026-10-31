@@ -10,7 +10,9 @@ import { footerHtml } from '../../client/js/render/lunhui/footer.js';
 import { composedHtml } from '../../client/js/render/lunhui/composed.js';
 import { VIEW_1027 } from './helpers/lunhui-view.js';
 import { ladderHtml } from '../../client/js/render/lunhui/ladder.js';
-import { stockLink, linkNames } from '../../client/js/render/lunhui/block.js';
+import { stockLink, linkNames, count, fix2, signedPct } from '../../client/js/render/lunhui/block.js';
+import { yesterdayHtml } from '../../client/js/render/lunhui/yesterday.js';
+import { signalsHtml } from '../../client/js/render/lunhui/signals.js';
 
 const ID = 'c1-p7';
 const text = html => html.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
@@ -267,4 +269,91 @@ test("a name not in the view's stocks stays text", () => {
   assert.equal(linkNames(html, VIEW_1027, 'K'), html);
   const ladder = ladderHtml({ ...VIEW_1027, stocks: {} }, { kind: 'ladder' }, {}, ID, 'K');
   assert.doesNotMatch(ladder, /lh-stock/, 'a rung name whose code the view does not hold is text');
+});
+
+const yNames = html => [...html.matchAll(/data-code="(\d+)"/g)].map(m => m[1]);
+
+test('yesterday sorts by change by default and by boards on the switch', () => {
+  const rows = VIEW_1027.yesterday.rows;
+  const byPct = [...rows].sort((a, b) => a.pct - b.pct || 0);
+  const dflt = yesterdayHtml(VIEW_1027, { kind: 'yesterday' }, {}, ID, 'K');
+  assert.equal(yNames(dflt)[0], byPct[0].code);
+  assert.equal(yNames(dflt).length, rows.length);
+  assert.match(dflt, /data-value="pct" data-id="c1-p7" data-field="ysort"/);
+  assert.match(dflt, /data-value="boards" data-id="c1-p7" data-field="ysort"/);
+  const boards = yesterdayHtml(VIEW_1027, { kind: 'yesterday' }, { ysort: 'boards' }, ID, 'K');
+  const top = Math.max(...rows.map(r => r.yesterdayBoards));
+  const first = rows.filter(r => r.yesterdayBoards === top).sort((a, b) => a.pct - b.pct)[0];
+  assert.equal(yNames(boards)[0], first.code);
+  const order = yNames(boards).map(c => rows.find(r => r.code === c));
+  for (let i = 1; i < order.length; i++) assert.ok(order[i - 1].yesterdayBoards >= order[i].yesterdayBoards);
+});
+
+test("yesterday's readout and tiles read the view's numbers", () => {
+  const y = VIEW_1027.yesterday;
+  const html = yesterdayHtml(VIEW_1027, { kind: 'yesterday', title: 'T' }, {}, ID, 'K');
+  const below = `${fix2(y.belowMinus5Share * 100)}%`;
+  assert.equal(readout(html), `${count(y.count)} limit-ups yesterday · median ${signedPct(y.median)} · ${below} below −5%`);
+  assert.ok(text(html).includes(`Yesterday's limit-ups · ${count(y.count)}`));
+  assert.ok(text(html).includes(`Median${signedPct(y.median)}`));
+  assert.ok(text(html).includes(`Below −5%${below}`));
+  assert.match(html, /lh-title/);
+  const r = y.rows.find(x => x.pct === -10.02);
+  assert.ok(text(html).includes(`${r.yesterdayBoards}b`));
+  assert.ok(html.includes('style="width:100.0%"'), 'the largest move fills its bar');
+});
+
+test("yesterday's names are stock links", () => {
+  const html = yesterdayHtml(VIEW_1027, { kind: 'yesterday' }, {}, ID, 'K');
+  const r = VIEW_1027.yesterday.rows[0];
+  assert.ok(html.includes(stockLink({ code: r.code, name: r.name }, 'K')));
+  const bare = yesterdayHtml({ ...VIEW_1027, stocks: {} }, { kind: 'yesterday' }, {}, ID, 'K');
+  assert.doesNotMatch(bare, /lh-stock/);
+  assert.ok(text(bare).includes(r.name));
+});
+
+test('yesterday the run did not freeze, or with no names, says so', () => {
+  const gone = yesterdayHtml({ ...VIEW_1027, yesterday: { unavailable: 'x' } }, { kind: 'yesterday' }, {}, ID, 'K');
+  assert.ok(text(gone).includes("Yesterday's limit-ups were not frozen for this run."));
+  const none = yesterdayHtml({ ...VIEW_1027, yesterday: { ...VIEW_1027.yesterday, rows: [] } }, { kind: 'yesterday' }, {}, ID, 'K');
+  assert.ok(text(none).includes('No name at two boards or more yesterday.'));
+});
+
+test('signals splits its measures by side, in order, written as the digest writes them', () => {
+  const s = VIEW_1027.signals;
+  const html = signalsHtml(VIEW_1027, { kind: 'signals' }, {}, ID);
+  assert.ok(text(html).includes('Sentiment signals'));
+  assert.match(html, /chip grey|chip up|chip down|chip warn/);
+  assert.ok(text(html).includes(`${s.state}money effect ${s.moneyEffect}`));
+  assert.ok(text(html).includes(s.conflict));
+  const cols = html.split('<div class="lh-sig-col">').slice(1);
+  assert.equal(cols.length, 2);
+  assert.ok(text(cols[0]).startsWith('Contraction'));
+  assert.ok(text(cols[1]).startsWith('Relay'));
+  assert.equal(text(cols[0]), 'ContractionBreak ratio0.41Limit-downs22Yesterday below −5%0.16');
+  assert.equal(text(cols[1].split('<div class="lh-lines">')[0]), 'RelaySeal ratio0.59Yesterday median0.82Highest streak5');
+});
+
+test("signals draws the reviewer's challenges against sentiment, escaped", () => {
+  const view = { ...VIEW_1027, signals: { ...VIEW_1027.signals, challenges: [{ id: 'x9', against: 'sentiment', kind: 'K', text: 'a <b>bold</b> claim' }] } };
+  const html = signalsHtml(view, { kind: 'signals' }, {}, ID);
+  assert.ok(html.includes('&lt;b&gt;bold&lt;/b&gt;'));
+  assert.doesNotMatch(html, /<b>/);
+  assert.match(html, /lh-line stress/);
+  assert.ok(text(html).includes('x9'));
+  const three = signalsHtml(VIEW_1027, { kind: 'signals' }, {}, ID);
+  assert.equal(three.split('lh-line stress').length - 1, VIEW_1027.signals.challenges.length);
+});
+
+test('signals without sentiment says so', () => {
+  const html = signalsHtml({ ...VIEW_1027, signals: null }, { kind: 'signals' }, {}, ID);
+  assert.ok(text(html).includes('Sentiment was not read in this run.'));
+});
+
+test('composed draws yesterday and signals, with skeletons while loading', () => {
+  const m = { id: 'p8', kind: 'composed', text: 'x', data: { blocks: [{ kind: 'yesterday' }, { kind: 'signals' }] } };
+  const loaded = text(composedHtml(m, { status: 'loaded', view: VIEW_1027 }, {}, { id: 'c1' }));
+  assert.ok(loaded.includes("Yesterday's limit-ups") && loaded.includes('Sentiment signals'));
+  const loading = text(composedHtml(m, { status: 'loading' }, {}, { id: 'c1' }));
+  assert.ok(loading.includes('Drawing yesterday…') && loading.includes('Drawing the signals…'));
 });

@@ -16,15 +16,17 @@ import { verdictsHtml } from './verdicts.js';
 import { breadthHtml } from './breadth.js';
 import { indicesHtml } from './indices.js';
 import { ladderHtml } from './ladder.js';
+import { yesterdayHtml } from './yesterday.js';
+import { signalsHtml } from './signals.js';
 import { sourcesHtml } from './sources.js';
 import { footerHtml } from './footer.js';
 
 // kind → drawer
-const DRAWERS = { verdicts: verdictsHtml, breadth: breadthHtml, indices: indicesHtml, ladder: ladderHtml, sources: sourcesHtml };
+const DRAWERS = { verdicts: verdictsHtml, breadth: breadthHtml, indices: indicesHtml, ladder: ladderHtml, yesterday: yesterdayHtml, signals: signalsHtml, sources: sourcesHtml };
 
 const SKELETON = {
   verdicts: 'Drawing the verdicts…', breadth: 'Drawing breadth…', indices: 'Drawing the indices…',
-  ladder: 'Drawing the ladder…', sources: 'Drawing the sources…',
+  ladder: 'Drawing the ladder…', yesterday: 'Drawing yesterday…', signals: 'Drawing the signals…', sources: 'Drawing the sources…',
 };
 
 // the answer's id on the page: a message id is its log's own, so the conversation names it too

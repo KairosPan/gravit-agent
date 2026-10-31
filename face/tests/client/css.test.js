@@ -41,7 +41,7 @@ const KINDS = [
   m('e9', { from: 'buffett', text: '买', data: { name: '巴菲特型' } }),
   m('e10', { from: 'system', text: 'runtime snapshot', data: { source: 'runtime' } }),
   // Gravit's composed answers (Lunhui run view plan 2), their views loading, loaded, failed and loaded without breadth (lunhuiStates); the first folds e2
-  ...['loading', 'loaded', 'failed', 'bare'].map((run, i) => m(`p${i}`, { kind: 'composed', text: '弱势日', data: { callId: String(i), strategy: 'cn-market', run, summary: '弱势日', blocks: [{ kind: 'verdicts' }, { kind: 'breadth', title: '涨跌' }, { kind: 'indices', focus: { from: '14:00', to: '15:00' } }, { kind: 'sources' }, { kind: 'ladder' }], choices: [], modules: [] } })),
+  ...['loading', 'loaded', 'failed', 'bare'].map((run, i) => m(`p${i}`, { kind: 'composed', text: '弱势日', data: { callId: String(i), strategy: 'cn-market', run, summary: '弱势日', blocks: [{ kind: 'verdicts' }, { kind: 'breadth', title: '涨跌' }, { kind: 'indices', focus: { from: '14:00', to: '15:00' } }, { kind: 'sources' }, { kind: 'ladder' }, { kind: 'yesterday' }, { kind: 'signals' }], choices: [], modules: [] } })),
 ];
 // the composed answers' views by state (host/lunhui.js viewKey)
 // (ui: the loaded answer s1-p1 with no picks, then with a tile open and its breadth by change)
