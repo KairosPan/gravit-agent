@@ -56,6 +56,12 @@ export function parseSearchRequest(rawUrl: string): { query: string; market: Sea
   return { query, market: "cn" };
 }
 
+/** The kinds Tencent files an A share under: `GP-A`, and `GP-A-KCB` on the STAR
+ * Market, its CDRs among them. An index (`ZS`), a fund (`ETF`, `LOF`, `KJ`) and
+ * a B share (`GP-B`) are none: their codes collide with an A share's
+ * (`sh000001`, the index, beside `sz000001`) or are no code the quote wire files. */
+const A_SHARE_KINDS = new Set(["GP-A", "GP-A-KCB"]);
+
 /** Tencent's smartbox returns a JavaScript string assignment, not executable
  * data. Parse the quoted string as JSON; never evaluate vendor JavaScript. */
 export function parseTencentSearch(body: string): ProviderResult {
@@ -69,7 +75,7 @@ export function parseTencentSearch(body: string): ProviderResult {
   for (const row of rows) {
     if (row.split("~").length < 5) throw new Error("invalid provider response");
     const [venue, symbol, name, alias, kind] = row.split("~");
-    if (!venue || !["sh", "sz", "bj"].includes(venue) || kind !== "GP-A"
+    if (!venue || !["sh", "sz", "bj"].includes(venue) || !A_SHARE_KINDS.has(kind ?? "")
       || !symbol || !/^\d{6}$/.test(symbol) || !name?.trim()) continue;
     const asset: SearchAsset = {
       id: `cn:${symbol}`, market: "cn", symbol, name: name.trim(), currency: "CNY",

@@ -24,6 +24,12 @@ test("Tencent decodes Chinese suggestions, retains stable ids and excludes non-A
   assert.throws(() => parseTencentSearch("<html>temporarily unavailable</html>"));
 });
 
+test("STAR Market listings (GP-A-KCB), its CDRs among them, are A shares; an index, a fund and a B share are not", () => {
+  const star = 'v_hint="sh~688981~中芯国际~zxgj~GP-A-KCB^hk~00981~中芯国际~zxgj~GP^sh~689009~九号公司WD~jhgswd~GP-A-KCB^sh~000688~科创50~kc50~ZS^sh~588000~科创50ETF华夏~kc50etfhx~ETF^sh~506000~科创板基金~kcbjj~LOF^sh~900901~云赛B股~ysbg~GP-B";';
+  assert.deepEqual(parseTencentSearch(star).assets.map((asset) => asset.id), ["cn:688981", "cn:689009"]);
+  assert.equal(parseTencentSearch(star).assets[0]!.exchange, "SH");
+});
+
 test("suggestion limits are disclosed even when excluded markets reduce visible results", () => {
   const rows = Array.from({ length: 10 }, (_, index) => `hk~${index}~HK~hk~GP`).join("^");
   assert.equal(parseTencentSearch(`v_hint=${JSON.stringify(rows)};`).truncated, true);
