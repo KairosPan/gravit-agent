@@ -142,7 +142,8 @@ export function createQuoteSnapshots(options: QuoteSnapshotOptions = {}): Snapsh
       const assignments = [...text.matchAll(/v_(\w+)="([^"]*)";/g)];
       // An unknown code answers `v_pv_none_match="1";`, so even a reply with no quote assigns something.
       if (!assignments.length) throw new ProviderError("payload");
-      const marketStatus = STATUS[sessionFromReply(text, now()).phase];
+      const session = sessionFromReply(text, now());
+      const marketStatus = STATUS[session.phase];
       const rows = new Map<string, string[]>();
       for (const [, code, value] of assignments) {
         const fields = value!.split("~");
@@ -156,7 +157,7 @@ export function createQuoteSnapshots(options: QuoteSnapshotOptions = {}): Snapsh
         return { id: asset.id, source: SOURCE, feed: FEED, basis: "previous_close", price,
           prev_close: number(fields[4], true), volume, volume_as_of: volume === null ? null : asOf,
           as_of: asOf, market_status: marketStatus,
-          name: fields[1]?.trim() || null, open: number(fields[5], true), high: number(fields[33], true), low: number(fields[34], true),
+          name: fields[1]?.trim() || null, last_session: session.lastSession, open: number(fields[5], true), high: number(fields[33], true), low: number(fields[34], true),
           turnover: scaled(fields[37], 10_000), turnover_rate: number(fields[38]), market_cap: scaled(fields[45], 1e8),
           pe_ttm: signed(fields[39]), limit_up: number(fields[47], true), limit_down: number(fields[48], true), amplitude: number(fields[43]),
           message: price === null ? "该标的暂无成交价" : !asOf ? "行情时间缺失" : "" };

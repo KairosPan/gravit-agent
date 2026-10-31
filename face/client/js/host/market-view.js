@@ -201,7 +201,9 @@ export function cnStateWord(quote, connection, providers = []) {
   if (!quote || number(quote.price) === null) return '';
   const at = beijingOf(quote.as_of);
   if (quote.market_status === 'midday') return 'Tencent · Midday break · 11:30 Beijing';
-  if (quote.market_status === 'closed') return at ? `Tencent · Closed · ${at.date} 15:00 Beijing` : 'Tencent · Closed';
+  // the session's last trading day, else the quote's own (a halted share's last trade is not the market's)
+  const day = typeof quote.last_session === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(quote.last_session) ? quote.last_session.slice(5) : at?.date;
+  if (quote.market_status === 'closed') return day ? `Tencent · Closed · ${day} 15:00 Beijing` : 'Tencent · Closed';
   if (quote.market_status === 'open') return quote.quote_status === 'live' ? 'Tencent · Live' : at ? `Tencent · Delayed · ${at.time} Beijing` : 'Tencent · Delayed';
   return 'Tencent';
 }

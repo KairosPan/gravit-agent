@@ -86,3 +86,9 @@ test('sessionsSvg: five sessions on one grid, the previous close dashed, a separ
   assert.equal(sessionsSvg([]), '');
   assert.equal(sessionsSvg([session('2026-10-30', 1)]), '');
 });
+
+test('sessionsSvg writes every session date on its axis (minor #5)', () => {
+  const session = date => ({ date, prec: 100, price: [100, 101], amount: [] });
+  const svg = sessionsSvg(['2026-10-26', '2026-10-27', '2026-10-28', '2026-10-29', '2026-10-30'].map(session));
+  for (const d of ['10-26', '10-27', '10-28', '10-29', '10-30']) assert.match(svg, new RegExp(`<span>${d}</span>`), d);
+});

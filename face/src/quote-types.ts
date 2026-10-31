@@ -30,6 +30,8 @@ export interface QuoteUpdate {
   /** The A-share page's facts (spec 2026-10-31 §5): yuan for `turnover` and `market_cap`, percent for
    * `turnover_rate` and `amplitude`; a negative `pe_ttm` is a loss-making share's. */
   name?: string | null;
+  /** The session's last trading day, `YYYY-MM-DD` (上证指数's last trade): the Closed line's date. */
+  last_session?: string | null;
   open?: number | null;
   high?: number | null;
   low?: number | null;
@@ -61,6 +63,7 @@ export interface LiveQuote extends QuoteIdentity {
   market_status: MarketStatus;
   message: string;
   name: string | null;
+  last_session: string | null;
   open: number | null;
   high: number | null;
   low: number | null;

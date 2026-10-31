@@ -180,3 +180,10 @@ test("the market status comes from the same reply: closed, open, midday", async 
   assert.equal((await at(Date.parse("2026-10-30T02:00:00Z"), "open")).updates[0]!.market_status, "open");
   assert.equal((await at(Date.parse("2026-10-30T04:00:00Z"), "close")).updates[0]!.market_status, "midday");
 });
+
+test("a quote carries the session's last trading day from the same reply", async () => {
+  const stat = 'v_marketStat="2026-10-31 10:00:00|SH_close_x|SZ_close_x";\n';
+  const index = line("sh000001", { 2: "000001", 30: "20261030161400" });
+  const [u] = (await createQuoteSnapshots({ now: () => Date.parse("2026-10-31T02:00:00Z"), fetcher: async () => reply(stat, index, quoted("sh603986")) }).load([cn])).updates;
+  assert.equal(u!.last_session, "2026-10-30");
+});

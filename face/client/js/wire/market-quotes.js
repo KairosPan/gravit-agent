@@ -24,6 +24,7 @@ export function parsePayload(raw) {
       || typeof quote.source !== "string" || typeof quote.feed !== "string" || typeof quote.message !== "string"
       || (quote.transport !== undefined && !["stream", "poll"].includes(quote.transport))
       || (quote.name !== undefined && quote.name !== null && typeof quote.name !== "string")
+      || (quote.last_session !== undefined && quote.last_session !== null && !/^\d{4}-\d{2}-\d{2}$/.test(quote.last_session))
       || FACTS.some((key) => quote[key] !== undefined && quote[key] !== null && (typeof quote[key] !== "number" || !Number.isFinite(quote[key])))
       || ["price", "prev_close", "change", "change_pct", "volume"].some((key) => quote[key] !== null && (typeof quote[key] !== "number" || !Number.isFinite(quote[key])))
       || ["as_of", "received_at", "volume_as_of"].some((key) => quote[key] !== null && !timestamp(quote[key]))) throw new Error("行情响应格式无效");

@@ -44,3 +44,9 @@ test("sessionFromReply and readCnSession: one GET for marketStat and sh000001; a
   assert.deepEqual(read, { phase: "closed", lastSession: "2026-10-30" });
   assert.deepEqual(await readCnSession(async () => { throw new Error("down"); }, FRI_10), { phase: "trading", lastSession: null });
 });
+
+test("the session's own limits equal the quote wire's (minor #8)", async () => {
+  const { SESSION_RESPONSE_LIMIT, SESSION_TIMEOUT_MS } = await import("../src/cn-session.ts");
+  const { QUOTE_RESPONSE_LIMIT, QUOTE_TIMEOUT_MS } = await import("../src/quote-snapshots.ts");
+  assert.deepEqual([SESSION_RESPONSE_LIMIT, SESSION_TIMEOUT_MS], [QUOTE_RESPONSE_LIMIT, QUOTE_TIMEOUT_MS]);
+});

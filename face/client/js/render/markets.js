@@ -100,7 +100,7 @@ function table(rows, { china = false } = {}) {
 // read still on its way (and, while searching, the face's own search for the A shares); or one that failed before it answered
 function emptyWord(read, tab, searching, search) {
   if (tab === 'watching' && !searching) return 'Nothing watched yet';
-  if (tab === 'china' && !searching) return read.status === 'error' && !read.answered ? 'China unavailable' : read.answered && read.status === 'ready' ? 'No markets' : 'Loading…';
+  if (tab === 'china' && !searching) return read.status === 'error' ? 'China unavailable' : read.answered && read.status === 'ready' ? 'No markets' : 'Loading…';
   const busy = searching && search?.status === 'loading';
   if (read.answered && !busy) return 'No markets';
   if (read.status !== 'error' || busy) return searching ? 'Searching…' : 'Loading…';
@@ -138,7 +138,8 @@ export function renderMarketsScreen(state, now) {
   const cnDrawn = rows.some(r => r.source === 'face' && !r.notListed);
   // China: the session's line (Closed, the midday break), and a refresh that failed over the rows kept
   const chinaWords = china ? note(chinaWord(session)) + (read.status === 'error' && read.answered ? note('Couldn’t refresh China') : '') : '';
-  const words = chinaWords + note(read.message) + note(cnSearch !== emptyText ? cnSearch : '') + (cnDrawn ? note(connectionWord(m.connection)) : '') + note(watchWord(m.watchError));
+  // China's failure is said once, in the face's words: the route's own error text is not a sentence of the Account's
+  const words = chinaWords + note(china ? '' : read.message) + note(cnSearch !== emptyText ? cnSearch : '') + (cnDrawn ? note(connectionWord(m.connection)) : '') + note(watchWord(m.watchError));
   const body = rows.length ? table(rows, { china }) : empty(emptyText);
   return `<main class="main mkts"><div class="mk-head"><h1 class="head-title">Markets</h1>` +
     `<div class="search"><label for="mq" class="sr-only">Search markets</label>${icon('search', 18, 2)}<input id="mq" type="search" autocomplete="off" placeholder="Search markets" data-action="mkQuery"${attrs({ value: m.q })}></div></div>` +

@@ -10,7 +10,7 @@ const received = "2026-09-15T15:00:00.000Z";
 function quote(asset = moutai, extra: Partial<LiveQuote> = {}): LiveQuote {
   return { ...asset, market: asset.market as LiveQuote["market"], price: 120, prev_close: 100, change: 20, change_pct: 20,
     volume: 1000, as_of: "2026-09-15T14:59:58.123Z", received_at: received, volume_as_of: received,
-    source: "腾讯", feed: "snapshot", basis: "previous_close", quote_status: "live", market_status: "unknown", message: "", name: null, open: null, high: null, low: null,
+    source: "腾讯", feed: "snapshot", basis: "previous_close", quote_status: "live", market_status: "unknown", message: "", name: null, last_session: null, open: null, high: null, low: null,
     turnover: null, turnover_rate: null, market_cap: null, pe_ttm: null, limit_up: null, limit_down: null, amplitude: null, ...extra };
 }
 function provider(extra: Partial<ProviderState> = {}): ProviderState {

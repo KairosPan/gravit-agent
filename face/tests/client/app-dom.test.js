@@ -929,6 +929,18 @@ test("an A share's page, reached by a link, reads its 1D history from the face's
   store.timers.clear();
 });
 
+test("a non-canonical A-share link still reads its history at the canonical id (minor #7)", async () => {
+  const f = fakeWindow({ hash: '#/markets', storage: memoryStorage() });
+  const h = accountHost({ rows: [row('s1')] });
+  const store = bootAccount(f, h, fakeMarkets());
+  await h.ready();
+  h.reads.length = 0;
+  f.win.location.hash = '#/markets/cn:sh600519';
+  await settle();
+  assert.ok(h.reads.includes('/data/cn/candles?id=cn%3A600519&range=1D'), JSON.stringify(h.reads));
+  store.timers.clear();
+});
+
 test("a star on an Account market goes to the Account's own store and comes off in one press, an old star's find too; Remove forgets an old star not listed", async () => {
   // an old us: star the Account lists (its explore answers stock:NVDA for NVDA) and one it does not; the Account's store full, so
   // the found star stays on the cn list, starred as its key

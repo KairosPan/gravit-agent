@@ -943,3 +943,8 @@ test('Tencent itself down in the session reads Quotes unavailable, not Delayed (
 test('a closed session whose date did not parse still says Closed (final review #4)', () => {
   assert.equal(chinaWord({ phase: 'closed', lastSession: null }), 'Closed');
 });
+
+test("the Closed date is the session's, not a halted share's last trade (minor #6)", () => {
+  const q = { price: 10, as_of: '2026-09-12T15:00:00+08:00', last_session: '2026-10-30', quote_status: 'live', market_status: 'closed' };
+  assert.equal(cnStateWord(q, 'streaming'), 'Tencent · Closed · 10-30 15:00 Beijing');
+});

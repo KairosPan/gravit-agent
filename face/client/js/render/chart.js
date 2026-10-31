@@ -51,7 +51,7 @@ const SESSION = 242;   // an A-share session's minutes on the grid: 09:30–11:3
 
 /** An A share's last sessions minute by minute (5D, spec 2026-10-31 §5): every session on one fixed grid of 242 points each, so a
  *  session still trading fills only its part; the previous close before the first session dashed; a separator between sessions;
- *  the axis at the first and last sessions' dates (`MM-DD`) with the low and the high in yuan. Fewer than two prices draw nothing. */
+ *  every session's date (`MM-DD`) on the axis, the low and the high in yuan under it. Fewer than two prices draw nothing. */
 export function sessionsSvg(sessions) {
   const kept = (Array.isArray(sessions) ? sessions : []).filter(x => Array.isArray(x?.price) && x.price.length);
   const prices = kept.flatMap(x => x.price.map(Number)).filter(Number.isFinite);
@@ -73,7 +73,8 @@ export function sessionsSvg(sessions) {
   const said = `The last ${kept.length} sessions, ${first} to ${last}: low ${f(lo)}, high ${f(hi)}`;
   return `<svg class="mk-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${esc(said)}">${seps}${prev}` +
     `<path class="mk-chart-area" d="${line}L${X(points.at(-1)[0])},${H}L0,${H}Z"></path><path class="mk-chart-line" d="${line}"></path></svg>` +
-    `<div class="mk-axis"><span>${esc(first)}</span><span>Low ${esc(f(lo))} · High ${esc(f(hi))}</span><span>${esc(last)}</span></div>`;
+    `<div class="mk-axis">${kept.map(x => `<span>${esc(day(x.date))}</span>`).join('')}</div>` +
+    `<div class="mk-axis"><span></span><span>Low ${esc(f(lo))} · High ${esc(f(hi))}</span><span></span></div>`;
 }
 
 /** A figure of the Account's over the curve's range — Net worth, or Paper as the renderer names the figure the curve draws:

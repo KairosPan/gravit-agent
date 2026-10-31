@@ -47,7 +47,7 @@ function initialQuote(asset: QuoteIdentity): LiveQuote {
   return { ...asset, price: null, prev_close: null, change: null, change_pct: null, volume: null,
     as_of: null, received_at: null, volume_as_of: null, source: "腾讯",
     feed: "", basis: "previous_close", quote_status: "unavailable",
-    market_status: "unknown", message: "正在连接行情…", name: null,
+    market_status: "unknown", message: "正在连接行情…", name: null, last_session: null,
     open: null, high: null, low: null, turnover: null, turnover_rate: null, market_cap: null, pe_ttm: null,
     limit_up: null, limit_down: null, amplitude: null };
 }
@@ -154,6 +154,7 @@ export function createQuoteHub(options: {
     if (update.market_status) quote.market_status = update.market_status;
     // the page's facts ride with the quote they came in: each one an update names replaces the kept one
     if (update.name !== undefined) quote.name = update.name;
+    if (update.last_session !== undefined) quote.last_session = update.last_session;
     for (const fact of QUOTE_FACTS) if (update[fact] !== undefined) quote[fact] = finite(update[fact]) ? update[fact] : null;
     if (!quote.feed) { quote.source = update.source; quote.feed = update.feed; quote.basis = update.basis; }
     quote.change = quote.price !== null && quote.prev_close !== null ? quote.price - quote.prev_close : null;

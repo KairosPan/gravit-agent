@@ -713,3 +713,16 @@ test("the A-share page's price history: 1D the session chart, 5D the sessions ch
     data: { ok: true, range: '1M', candles: [{ t: Date.parse('2026-10-29T07:00:00Z'), c: 1354 }, { t: Date.parse('2026-10-30T07:00:00Z'), c: 1392.05 }] } }), NOW);
   assert.match(section(month, 'Price history'), /class="mk-chart"[\s\S]*<span>2026-10-30<\/span>/);
 });
+
+test('a ranking 503 draws one note, not the route words under it (minor #2)', () => {
+  const html = chinaScreen(s => R.rankFailed(R.rankLoaded(s, { sort: 'volume', data: RANK, at: NOW }), { sort: 'volume', at: NOW, message: 'ranking unavailable' })).html;
+  assert.match(html, /Couldn’t refresh China/);
+  assert.doesNotMatch(html, /ranking unavailable/);
+});
+
+test("a failed read right after a sort switch says China unavailable, not Loading… (minor #3)", () => {
+  const s = R.rankFailed(R.setMarketsSort(R.rankLoaded(R.setMarketsTab(screen().s, 'china'), { sort: 'volume', data: RANK, at: NOW }), 'movers'), { sort: 'movers', at: NOW });
+  const html = renderMarketsScreen(s, NOW);
+  assert.match(html, /<p class="mk-empty">China unavailable<\/p>/);
+  assert.doesNotMatch(html, /Loading…/);
+});

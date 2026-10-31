@@ -13,9 +13,9 @@ export interface CnSession { phase: CnPhase; lastSession: string | null }
 /** The codes a qt.gtimg.cn request carries for the session, ahead of any quote's. */
 export const SESSION_CODES = ["marketStat", "sh000001"] as const;
 
-/** Kept here, not imported from quote-snapshots.ts, which imports this module. */
-const RESPONSE_LIMIT = 1024 * 1024;
-const TIMEOUT_MS = 7_000;
+/** Kept here, not imported from quote-snapshots.ts, which imports this module; a test pins them to its own. */
+export const SESSION_RESPONSE_LIMIT = 1024 * 1024;
+export const SESSION_TIMEOUT_MS = 7_000;
 
 const clock = new Intl.DateTimeFormat("en-CA", {
   timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit", weekday: "short",
@@ -66,13 +66,13 @@ export async function readCnSession(fetcher: QuoteFetch, nowMs: number, signal?:
   const controller = new AbortController();
   const onAbort = () => controller.abort();
   signal?.addEventListener("abort", onAbort, { once: true });
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), SESSION_TIMEOUT_MS);
   try {
     const response = await fetcher(new URL(`https://qt.gtimg.cn/q=${SESSION_CODES.join(",")}`),
       { method: "GET", redirect: "error", signal: controller.signal });
     if (!response.ok) throw new Error("http");
     const body = new Uint8Array(await response.arrayBuffer());
-    if (body.byteLength > RESPONSE_LIMIT) throw new Error("payload");
+    if (body.byteLength > SESSION_RESPONSE_LIMIT) throw new Error("payload");
     return sessionFromReply(new TextDecoder("gbk").decode(body), nowMs);
   } catch {
     return { phase: cnPhase(nowMs, null, null), lastSession: null };
