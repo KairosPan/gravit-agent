@@ -2,7 +2,7 @@
 // by, which views the open conversation still wants, the read itself, and the slice it lands in.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { viewKey, viewPath, wantedViews, ensureViews } from '../../client/js/host/lunhui.js';
+import { viewKey, viewPath, wantedViews, ensureViews, stockCode, marketKey, boardOf } from '../../client/js/host/lunhui.js';
 import { createStore } from '../../client/js/store.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
@@ -74,7 +74,7 @@ test('a view read that fails (404, a dead face, no view in the answer, a throw b
 
 test('the lunhui slice: lunhuiUi merges a patch into one answer\'s ui; Retry deletes only its own key', () => {
   let s = emptyState();
-  assert.deepEqual(s.lunhui, { views: {}, ui: {} });
+  assert.deepEqual(s.lunhui, { views: {}, ui: {}, stock: null });
   s = R.lunhuiUi(s, { id: 'c1-p7', patch: { tile: 'theme' } });
   s = R.lunhuiUi(s, { id: 'c1-p7', patch: { breadth: 'dist' } });
   assert.deepEqual(s.lunhui.ui, { 'c1-p7': { tile: 'theme', breadth: 'dist' } });
@@ -82,4 +82,34 @@ test('the lunhui slice: lunhuiUi merges a patch into one answer\'s ui; Retry del
   const kept = R.lunhuiRetry(s, 'a');
   assert.deepEqual(Object.keys(kept.lunhui.views), ['b']);
   assert.equal(R.lunhuiRetry(kept, 'zzz'), kept, 'retrying an unknown key changes nothing');
+});
+
+// plan 3, task 2: one code for a stock however a source writes it, its market key and its board
+test('stockCode maps sh/sz/bj prefixes, bare six digits and cn: keys to the six digits; anything else is null', () => {
+  for (const [raw, code] of [['sh600838', '600838'], ['sz000001', '000001'], ['bj830799', '830799'], ['600838', '600838'], ['cn:600838', '600838']]) assert.equal(stockCode(raw), code, raw);
+  for (const raw of ['cn:AAPL', '', '60083', '6008381', 'hk600838', null, undefined, 600838]) assert.equal(stockCode(raw), null, String(raw));
+});
+
+test('marketKey is cn:<code>; boardOf names the board by the code\'s prefix', () => {
+  assert.equal(marketKey('600838'), 'cn:600838');
+  const boards = { '600838': 'SH main board', '601318': 'SH main board', '688981': 'STAR', '689009': 'STAR', '000001': 'SZ main board', '001979': 'SZ main board', '002594': 'SZ main board', '003816': 'SZ main board', '300750': 'ChiNext', '301269': 'ChiNext', '430047': 'BSE', '830799': 'BSE', '920099': 'BSE' };
+  for (const [code, board] of Object.entries(boards)) assert.equal(boardOf(code), board, code);
+  for (const code of ['900901', '200002', '510300', '', 'abc']) assert.equal(boardOf(code), null, code);
+});
+
+test('the open stock: lunhuiStockOpen closes every other overlay; Close, closeOverlays and nav clear it, a state with no lunhui too', () => {
+  let s = R.toggleDetails({ ...emptyState(), runSheet: { module: 'theme' } });
+  s = R.lunhuiStockOpen(s, { key: 'K', code: '600838' });
+  assert.deepEqual(s.lunhui.stock, { key: 'K', code: '600838' });
+  assert.equal(s.detailsOpen, false);
+  assert.equal(s.runSheet, null);
+  assert.equal(R.lunhuiStockOpen(s, { key: 'K' }), s, 'no code, no change');
+  assert.equal(R.lunhuiStockClose(s).lunhui.stock, null);
+  assert.equal(R.toggleDetails(s).lunhui.stock, null, 'Details replaces it');
+  assert.equal(R.openSettings(s).lunhui.stock, null, 'Settings replaces it');
+  assert.equal(R.nav(s, { screen: 'discover', id: null }).lunhui.stock, null);
+  const bare = { ...emptyState() };
+  delete bare.lunhui;
+  assert.equal(Object.hasOwn(R.nav(bare, { screen: 'discover', id: null }), 'lunhui'), false, 'nav adds no slice');
+  assert.equal(Object.hasOwn(R.toggleDetails(bare), 'lunhui'), false, 'closeOverlays adds no slice');
 });

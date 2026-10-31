@@ -2142,6 +2142,58 @@ test('a composed answer: a tile opens and closes, By change switches, a bucket i
   assert.match(f.html(), /Bucket −6: 458 stocks · 8\.5% of 5,375/);
 });
 
+// plan 3, task 2: a stock name in a composed answer opens the stock drawer's state — one overlay at a time; nav and Escape close it
+async function stockAnswer() {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const store = boot(f.win, { openMux: h.openMux, call: h.call, postJson: h.postJson, markdown: null,
+    getJson: async path => (path.startsWith('/data/lunhui/view?') ? { ok: true, view: VIEW_1027 } : h.getJson(path)) });
+  await h.ready();
+  const follow = [...h.streams].reverse().find(x => x.name === 'session/follow' && x.args.request.address.sessionId === 's1');
+  follow.cbs.onItem({ type: 'snapshot', records: [] });
+  const args = { strategy: 'cn-market', run: VIEW_1027.run, summary: '上海九百五连板。', blocks: [{ kind: 'ladder' }] };
+  follow.cbs.onItem({ type: 'event', event: { type: 'tool/call', seq: 40, time: 1756512200000, data: { turn: 4, step: 1, callId: 'k1', name: 'lunhui_present', arguments: JSON.stringify(args) } } });
+  follow.cbs.onItem({ type: 'event', event: { type: 'tool/result', seq: 41, time: 1756512201000, surfaceOp: 'append', data: { turn: 4, step: 1, message: { id: 'm-41', role: 'tool', source: { kind: 'tool', callId: 'k1' }, toolCallId: 'k1', content: [{ type: 'text', text: JSON.stringify({ ok: true, blocks: ['ladder'], modules: [] }) }], isError: false } } } });
+  await settle();
+  const key = `cn-market/${VIEW_1027.run}/`;
+  const open = () => f.click(f.element({ tagName: 'BUTTON', dataset: { action: 'lunhuiStock', key, code: '600001' } }));
+  return { f, store, key, open };
+}
+
+test('clicking a stock link opens the drawer state and closes Details', async () => {
+  const { f, store, key, open } = await stockAnswer();
+  assert.ok(f.html().includes(`data-action="lunhuiStock" data-key="${key}" data-code="600001">上海九百</button>`), 'the summary and the ladder draw the link');
+  store.dispatch('toggleDetails');
+  assert.equal(store.get().detailsOpen, true);
+  open();
+  assert.deepEqual(store.get().lunhui.stock, { key, code: '600001' });
+  assert.equal(store.get().detailsOpen, false, 'one overlay at a time');
+  store.dispatch('toggleDetails');
+  assert.equal(store.get().lunhui.stock, null, 'opening Details closes the stock');
+  store.timers.clear();
+});
+
+test('navigating away clears the open stock', async () => {
+  const { f, store, open } = await stockAnswer();
+  open();
+  assert.ok(store.get().lunhui.stock);
+  f.win.location.hash = '#/discover';
+  f.fire('win', 'hashchange');
+  await settle();
+  assert.equal(store.get().route.screen, 'discover');
+  assert.equal(store.get().lunhui.stock, null);
+  store.timers.clear();
+});
+
+test('Escape clears the open stock', async () => {
+  const { f, store, open } = await stockAnswer();
+  open();
+  assert.ok(store.get().lunhui.stock);
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  assert.equal(store.get().lunhui.stock, null);
+  store.timers.clear();
+});
+
 // task 6: the indices block's minute cursor — the slider and the pointer move it in place with no store change and no render;
 // a redraw that lands mid-drag (a live event) draws the cursor at the last minute, and the page puts it back at the slider's
 test('the minute cursor: the slider and the pointer patch the chart in place; a redraw mid-drag keeps the slider\'s minute', async () => {

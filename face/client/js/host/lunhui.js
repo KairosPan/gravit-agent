@@ -107,3 +107,26 @@ export function reapplyCursors(root, doc, state) {
     applyCursor(doc, el.dataset.id, cursorFor(state, el, Number(el.value)));
   }
 }
+
+// the stock drawer (plan 3, task 2): one code for a stock however a source writes it — sh600838 (the freezes' symbol), 600838
+// (the view's stocks key) or cn:600838 (the Markets key) — and the board its prefix names
+const CODE = /^(?:sh|sz|bj|cn:)?(\d{6})$/;
+/** The six digits of a stock's code, from sh/sz/bj600838, 600838 or cn:600838; anything else is null. */
+export function stockCode(raw) {
+  if (typeof raw !== 'string') return null;
+  const hit = CODE.exec(raw);
+  return hit ? hit[1] : null;
+}
+/** The Markets key of a code. */
+export const marketKey = code => `cn:${code}`;
+/** The board a code's prefix names, or null for one no board here lists. */
+export function boardOf(code) {
+  const c = stockCode(code);
+  if (!c) return null;
+  if (/^60/.test(c)) return 'SH main board';
+  if (/^68[89]/.test(c)) return 'STAR';
+  if (/^00[0-3]/.test(c)) return 'SZ main board';
+  if (/^30[01]/.test(c)) return 'ChiNext';
+  if (/^(?:4|8|92)/.test(c)) return 'BSE';
+  return null;
+}

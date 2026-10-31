@@ -1,9 +1,10 @@
 // face/client/js/render/lunhui/ladder.js — the limit-up ladder block: one row per rung, top down — the rung number (a button that
 // picks it), the names that sealed it (first seal, breaks), a gap row where nothing got there, the misses and the breaks with
 // today's change — and, at the right, how many of the rung below got through, as a number and a meter. The readout answers the
-// picked rung (default: the focus Gravit gave, else the height). Names are escaped text; stock links are plan 3's.
+// picked rung (default: the focus Gravit gave, else the height). A name whose code the view's stocks hold is a stock link
+// (block.js stockLink); any other is escaped text.
 import { esc, attrs, cls } from '../../html.js';
-import { label, headline, readout, count, signedPct } from './block.js';
+import { label, headline, readout, count, signedPct, stockLink } from './block.js';
 
 const pctText = v => (v == null || !Number.isFinite(Number(v)) ? '—' : signedPct(Number(v)));
 const nameOf = s => String(s?.name ?? s?.code ?? '—');
@@ -12,13 +13,20 @@ const list = a => (Array.isArray(a) ? a : []);
 const num = v => (v == null || !Number.isFinite(Number(v)) ? '—' : count(v));
 const tone = v => { const r = Number(Number(v).toFixed(2)); return r > 0 ? 'up' : r < 0 ? 'down' : 'flat'; };
 
-function chip(s) {
+// a rung's name: a link when the view's stocks hold its code, else its name
+const nameHtml = (s, view, key) => {
+  const code = s?.code;
+  const held = typeof code === 'string' && view?.stocks && typeof view.stocks === 'object' && Object.hasOwn(view.stocks, code);
+  return held ? stockLink({ code, name: nameOf(s) }, key) : esc(nameOf(s));
+};
+
+function chip(s, view, key) {
   const breaks = Number(s?.breaks) > 0 ? ` <span class="lh-chip-note">broke ${Number(s.breaks)}</span>` : '';
   const seal = s?.firstSeal ? ` <span class="lh-chip-note">${esc(s.firstSeal)}</span>` : '';
-  return `<span class="lh-chip">${esc(nameOf(s))}${seal}${breaks}</span>`;
+  return `<span class="lh-chip">${nameHtml(s, view, key)}${seal}${breaks}</span>`;
 }
-const named = s => `<span class="lh-lname">${esc(nameOf(s))} <span class="${cls('lh-lpct', tone(s?.pct))}">${esc(pctText(s?.pct))}</span></span>`;
-const group = (word, stocks) => (stocks.length ? `<div class="lh-lgroup"><span class="lh-lword">${word}</span> ${stocks.map(named).join(' ')}</div>` : '');
+const named = (s, view, key) => `<span class="lh-lname">${nameHtml(s, view, key)} <span class="${cls('lh-lpct', tone(s?.pct))}">${esc(pctText(s?.pct))}</span></span>`;
+const group = (word, stocks, view, key) => (stocks.length ? `<div class="lh-lgroup"><span class="lh-lword">${word}</span> ${stocks.map(s => named(s, view, key)).join(' ')}</div>` : '');
 
 function right(r, tries) {
   const first = r.n === 1;
@@ -29,16 +37,16 @@ function right(r, tries) {
   return `<div class="lh-rright"><span class="lh-rnum">${esc(words)}</span><span class="lh-meter" aria-hidden="true"><span class="lh-meter-fill" style="width:${w}%"></span></span></div>`;
 }
 
-function row(r, on, stress, id, tries) {
+function row(r, on, stress, id, tries, view, key) {
   const sealed = list(r.sealed), missed = list(r.missed), broke = list(r.broke);
   // rung 1 has no rung below it (from: null): its gap is a day with no first boards
   const gap = !r.gap ? '' : `<div class="lh-gap">${r.from == null ? 'gap · no first boards' : `gap · none of ${esc(num(r.from))} sealed`}</div>`;
-  const chips = sealed.length ? `<div class="lh-chips">${sealed.map(chip).join(' ')}</div>` : '';
+  const chips = sealed.length ? `<div class="lh-chips">${sealed.map(x => chip(x, view, key)).join(' ')}</div>` : '';
   const btn = `<button${attrs({ type: 'button', class: cls('lh-rung-n', on && 'pressed'), 'data-action': 'lunhuiUi', 'data-id': id, 'data-field': 'rung', 'data-value': String(r.n), 'aria-pressed': on ? 'true' : 'false', 'aria-label': `Rung ${r.n}` })}>${esc(r.n)}</button>`;
-  return `<div class="${cls('lh-rung', stress && 'stress')}">${btn}<div class="lh-rbody">${chips}${gap}${group('missed', missed)}${group('broke', broke)}</div>${right(r, tries)}</div>`;
+  return `<div class="${cls('lh-rung', stress && 'stress')}">${btn}<div class="lh-rbody">${chips}${gap}${group('missed', missed, view, key)}${group('broke', broke, view, key)}</div>${right(r, tries)}</div>`;
 }
 
-export function ladderHtml(view, block, ui, id) {
+export function ladderHtml(view, block, ui, id, key) {
   const l = view.ladder;
   if (!l || typeof l !== 'object' || l.unavailable) {
     return `${label('Limit-up ladder')}${headline(block)}<div class="lh-none">The ladder was not frozen for this run.</div>`;
@@ -50,7 +58,7 @@ export function ladderHtml(view, block, ui, id) {
   const picked = rungs.find(r => r.n === pickedN);
   const higher = rungs.filter(r => r.n > 1).reduce((n, r) => n + list(r.sealed).length, 0);
   const sealedAll = (Number(l.firstTries?.sealed) || 0) + higher;
-  const rows = rungs.map(r => row(r, r === picked, r.gap || r.n === focus, id, l.firstTries)).join('');
+  const rows = rungs.map(r => row(r, r === picked, r.gap || r.n === focus, id, l.firstTries, view, key)).join('');
   let words = 'No such rung on the ladder';
   if (picked?.n === 1) {
     words = `First boards · ${num(l.firstTries?.sealed)} of ${num(l.firstTries?.tries)} tries sealed · ${list(picked.broke).length} broke`;

@@ -759,6 +759,8 @@ export function boot(win, host = {}) {
     openTrace: el => { void traces.open(el.dataset.conv, el.dataset.msg); },
     // a composed answer's view that could not be read: forget it, and the render asks again
     lunhuiRetry: el => { store.dispatch('lunhuiRetry', el.dataset.key); },
+    // a stock name in a composed answer opens the stock drawer on that answer's view
+    lunhuiStock: el => { store.dispatch('lunhuiStockOpen', { key: el.dataset.key, code: el.dataset.code }); },
     // a composed answer's picks, by the answer's id: a verdict tile (pressed again, it closes), Counts or By change, a bucket
     lunhuiUi: el => {
       const { id, field, value } = el.dataset;
@@ -974,9 +976,10 @@ export function boot(win, host = {}) {
       const s = store.get();
       if (s.edit) { store.dispatch('cancelEdit'); return; }
       if (s.confirm) { store.dispatch('cancelConfirm'); return; }
-      // a module card's Run sheet first, then the owner sheet over any drawer; Trade's ticket after every drawer
+      // a module card's Run sheet first, then the owner sheet over any drawer, then the stock drawer; Trade's ticket after every drawer
       if (s.runSheet) runSheet.close();
       else if (sheetUp(s)) sheet.close();
+      else if (s.lunhui?.stock) store.dispatch('lunhuiStockClose');
       else if (s.detailsOpen) store.dispatch('toggleDetails');
       else if (s.settingsOpen) store.dispatch('closeSettings');
       else if (s.account.statementOpen) store.dispatch('closeStatement');

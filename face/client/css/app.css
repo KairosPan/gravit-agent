@@ -219,6 +219,9 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .lh-gap { font-weight: 600; }
 .lh-lgroup { display: flex; flex-wrap: wrap; gap: 2px 8px; font-size: 12px; }
 .lh-lname { white-space: nowrap; }
+/* a stock name: an inline text button that opens the stock drawer */
+.lh-stock { padding: 0; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; text-decoration: underline dotted var(--dim); text-underline-offset: 2px; }
+.lh-stock:hover { color: var(--primary); }
 .lh-rnum { font-size: 12px; white-space: nowrap; }
 .lh-lword { color: var(--dim); }
 .lh-rung.stress .lh-lword { color: inherit; }

@@ -242,6 +242,20 @@ test('the composed body: class msg-body composed, the summary escaped through th
   assert.match(loaded, /涨跌&lt;i&gt;分布&lt;\/i&gt;/, "a block no drawer covers yet shows its title, escaped");
 });
 
+// plan 3, task 2: pool names in the summary and in the headlines are stock links; the rest is the markdown renderer's own
+test('a composed answer links pool names in its summary and its titles', async () => {
+  const { VIEW_1027 } = await import('./helpers/lunhui-view.js');
+  setMarkdown(null);
+  const m = composed({ text: '上海九百五连板，<b>样本</b>', data: { callId: '7', strategy: 'cn-market', run: RUN, summary: 'x', blocks: [{ kind: 'ladder', title: '上海九百领跑' }, { kind: 'breadth', title: '上海九百' }], choices: [], modules: ['environment', 'sentiment'] } });
+  const html = renderMessage(m, conv({ id: 'c1' }), withView({ status: 'loaded', view: VIEW_1027 }));
+  const link = `<button type="button" class="lh-stock" data-action="lunhuiStock" data-key="${KEY}" data-code="600001">上海九百</button>`;
+  const summary = html.match(/<div class="lh-summary">([\s\S]*?)<\/div>/)[1];
+  assert.equal(summary, `${link}五连板，&lt;b&gt;样本&lt;/b&gt;`);
+  assert.ok(html.includes(`<div class="lh-title">${link}领跑</div>`), 'the ladder headline');
+  assert.ok(html.includes(`<div class="lh-title">${link}</div>`), 'the breadth headline');
+  assert.doesNotMatch(html, /<b>/, 'no model markup reaches the page');
+});
+
 test('a failed view: the summary, one error line and a Retry key naming the view, never a blank (Review Focus 3)', () => {
   setMarkdown(null);
   const html = renderMessage(composed(), conv({ id: 'c1' }), withView({ status: 'failed', error: 'HTTP <404>' }));

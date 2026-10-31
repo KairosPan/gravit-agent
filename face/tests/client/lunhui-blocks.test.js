@@ -9,6 +9,8 @@ import { sourcesHtml } from '../../client/js/render/lunhui/sources.js';
 import { footerHtml } from '../../client/js/render/lunhui/footer.js';
 import { composedHtml } from '../../client/js/render/lunhui/composed.js';
 import { VIEW_1027 } from './helpers/lunhui-view.js';
+import { ladderHtml } from '../../client/js/render/lunhui/ladder.js';
+import { stockLink, linkNames } from '../../client/js/render/lunhui/block.js';
 
 const ID = 'c1-p7';
 const text = html => html.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
@@ -220,4 +222,49 @@ test('the ladder prints its counts with thousands separators, like its label', a
   ], firstTries: { sealed: 1234, tries: 5678 }, unavailable: null } };
   assert.equal(readout(ladderHtml(view, { kind: 'ladder' }, { rung: 1 }, ID)), 'First boards · 1,234 of 5,678 tries sealed · 0 broke');
   assert.match(readout(ladderHtml(view, { kind: 'ladder' }, { rung: 2 }, ID)), /^1→2 · 1,001 of 1,200 · /);
+});
+
+// plan 3, task 2: stock names are links to an open stock
+test('a ladder chip is a stock link', () => {
+  const r5 = VIEW_1027.ladder.rungs.find(r => r.n === 5);
+  const html = ladderHtml(VIEW_1027, { kind: 'ladder' }, {}, ID, 'K');
+  const chip = html.match(/<span class="lh-chip">([\s\S]*?)<\/span>/)[1];
+  assert.match(html, /data-action="lunhuiStock"/);
+  assert.ok(html.includes(`data-code="${r5.sealed[0].code}"`), 'the rung\'s code');
+  assert.match(html, /data-key="K"/);
+  assert.ok(chip.includes(`data-code="${r5.sealed[0].code}"`));
+  assert.ok(chip.includes(`>${r5.sealed[0].name}</button>`));
+});
+
+test('stockLink draws a button with every value escaped, and the name alone without a code', () => {
+  assert.equal(stockLink({ code: '600838', name: '上海<九百>' }, 'a/"b"'),
+    '<button type="button" class="lh-stock" data-action="lunhuiStock" data-key="a/&quot;b&quot;" data-code="600838">上海&lt;九百&gt;</button>');
+  assert.equal(stockLink({ name: 'A&B' }, 'K'), 'A&amp;B');
+});
+
+test('linkNames links the longest name once and never inside a link', () => {
+  const view = { stocks: { 600838: { name: '上海九百' }, 600001: { name: '九百' } } };
+  const a = '<a href="https://x/上海九百">上海九百</a>';
+  const input = `<p>上海九百涨停，见 ${a}</p>`;
+  const out = linkNames(input, view, 'K');
+  assert.equal(out.split('class="lh-stock"').length - 1, 1, 'exactly one link');
+  assert.ok(out.indexOf('lh-stock') < out.indexOf('<a '), 'before the <a>');
+  assert.ok(out.includes(a), 'the <a> is unchanged');
+  assert.equal(out, `<p>${stockLink({ code: '600838', name: '上海九百' }, 'K')}涨停，见 ${a}</p>`, 'otherwise byte-identical');
+  assert.equal(linkNames(input, { stocks: {} }, 'K'), input);
+  assert.equal(linkNames(input, {}, 'K'), input);
+  // a name in an attribute stays as it is; an escaped name matches its escaped text; one character is never a name
+  const attr = '<p title="九百">x</p>';
+  assert.equal(linkNames(attr, view, 'K'), attr);
+  assert.equal(linkNames('<p>A&amp;B up, 九 down</p>', { stocks: { 1: { name: 'A&B' }, 2: { name: '九' } } }, 'K'),
+    `<p>${stockLink({ code: '1', name: 'A&B' }, 'K')} up, 九 down</p>`);
+  // an entity is never split by a name inside it
+  assert.equal(linkNames('<p>it&#39;s</p>', { stocks: { 3: { name: '39' } } }, 'K'), '<p>it&#39;s</p>');
+});
+
+test("a name not in the view's stocks stays text", () => {
+  const html = '<p>贵州茅台走强</p>';
+  assert.equal(linkNames(html, VIEW_1027, 'K'), html);
+  const ladder = ladderHtml({ ...VIEW_1027, stocks: {} }, { kind: 'ladder' }, {}, ID, 'K');
+  assert.doesNotMatch(ladder, /lh-stock/, 'a rung name whose code the view does not hold is text');
 });

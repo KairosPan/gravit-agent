@@ -71,8 +71,9 @@ export function emptyState() {
     // a module card's Run sheet open (host/run-sheet.js), and the Runs this page sent by module: { sessionId, title, startedAt }
     runSheet: null,
     moduleRuns: {},
-    // Gravit's composed answers (host/lunhui.js): each run view by its key, each answer's own picks by its id
-    lunhui: { views: {}, ui: {} },
+    // Gravit's composed answers (host/lunhui.js): each run view by its key, each answer's own picks by its id, the stock drawer
+    // open ({ key, code }: the opening answer's view key and the stock's code) or null
+    lunhui: { views: {}, ui: {}, stock: null },
     edit: null,
     confirm: null,
   };
