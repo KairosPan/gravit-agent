@@ -6,7 +6,8 @@
 import { esc, cls, attrs } from '../html.js';
 import { icon } from '../icons.js';
 import { fmtClock, fmtDate } from '../time.js';
-import { chip, markdownHtml } from './thread.js';
+import { chip } from './thread.js';
+import { markdownHtml } from './markdown.js';
 import { kv } from './controls.js';
 import { runsView, countWord } from '../host/runs-view.js';
 

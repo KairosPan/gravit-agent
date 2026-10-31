@@ -7,6 +7,7 @@ import { rowsOf, pairsOf } from '../../client/js/host/market-view.js';
 import { kidOf } from '../../client/js/wire/owner-key.js';
 import { fakeWindow } from './helpers/fake-dom.js';
 import { modulesListing } from './helpers/inventory.js';
+import { VIEW_1027 } from './helpers/lunhui-view.js';
 
 // every app booted here has its timers stopped after its test, so one that fails half-way never leaves Markets' polls running
 const booted = new Set();
@@ -2112,4 +2113,31 @@ test('a composed answer reads its view; a 404 draws the summary, the error line 
   assert.equal(views.length, 2, 'Retry reads the view again');
   assert.doesNotMatch(f.html(), /could not be loaded|Drawing /);
   assert.equal(store.get().lunhui.views['cn-market/20261027T201627Z-6937d208/'].status, 'loaded');
+});
+
+// task 5: a composed answer's picks — a verdict tile opens and, pressed again, closes; By change; a bucket held as a number
+test('a composed answer: a tile opens and closes, By change switches, a bucket is picked by number', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const store = boot(f.win, { openMux: h.openMux, call: h.call, postJson: h.postJson, markdown: null,
+    getJson: async path => (path.startsWith('/data/lunhui/view?') ? { ok: true, view: VIEW_1027 } : h.getJson(path)) });
+  await h.ready();
+  const follow = [...h.streams].reverse().find(x => x.name === 'session/follow' && x.args.request.address.sessionId === 's1');
+  follow.cbs.onItem({ type: 'snapshot', records: [] });
+  const args = { strategy: 'cn-market', run: VIEW_1027.run, summary: '弱势日。', blocks: [{ kind: 'verdicts' }, { kind: 'breadth' }] };
+  follow.cbs.onItem({ type: 'event', event: { type: 'tool/call', seq: 40, time: 1756512200000, data: { turn: 4, step: 1, callId: 'k1', name: 'lunhui_present', arguments: JSON.stringify(args) } } });
+  follow.cbs.onItem({ type: 'event', event: { type: 'tool/result', seq: 41, time: 1756512201000, surfaceOp: 'append', data: { turn: 4, step: 1, message: { id: 'm-41', role: 'tool', source: { kind: 'tool', callId: 'k1' }, toolCallId: 'k1', content: [{ type: 'text', text: JSON.stringify({ ok: true, blocks: ['verdicts', 'breadth'], modules: [] }) }], isError: false } } } });
+  await settle();
+  const id = 's1-pk1';
+  const press = (field, value) => f.click(f.element({ tagName: 'BUTTON', dataset: { action: 'lunhuiUi', id, field, value } }));
+  assert.match(f.html(), /Up\/down ratio 0\.12/);
+  press('tile', 'environment');
+  assert.equal(store.get().lunhui.ui[id].tile, 'environment');
+  assert.match(f.html(), /data-value="environment" aria-expanded="true"/);
+  press('tile', 'environment');
+  assert.equal(store.get().lunhui.ui[id].tile, null, 'pressed again, the tile closes');
+  press('breadth', 'dist');
+  press('bucket', '-6');
+  assert.equal(store.get().lunhui.ui[id].bucket, -6);
+  assert.match(f.html(), /Bucket −6: 458 stocks · 8\.5% of 5375/);
 });

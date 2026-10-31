@@ -10,7 +10,7 @@ import { renderMarketsScreen } from './render/markets.js';
 import { renderSettings, renderAccountScreen } from './render/account.js';
 import { renderSheet } from './render/owner.js';
 import { renderTradeScreen } from './render/trade.js';
-import { setMarkdown } from './render/thread.js';
+import { setMarkdown } from './render/markdown.js';
 import { renderMarkdown } from './wire/markdown.js';
 import { call as wireCall, openMux as wireOpenMux } from './wire/api.js';
 import { mapFrame } from './wire/mapper.js';
@@ -757,6 +757,13 @@ export function boot(win, host = {}) {
     openTrace: el => { void traces.open(el.dataset.conv, el.dataset.msg); },
     // a composed answer's view that could not be read: forget it, and the render asks again
     lunhuiRetry: el => { store.dispatch('lunhuiRetry', el.dataset.key); },
+    // a composed answer's picks, by the answer's id: a verdict tile (pressed again, it closes), Counts or By change, a bucket
+    lunhuiUi: el => {
+      const { id, field, value } = el.dataset;
+      let v = field === 'bucket' ? Number(value) : value;
+      if (field === 'tile' && store.get().lunhui?.ui?.[id]?.tile === v) v = null;
+      store.dispatch('lunhuiUi', { id, patch: { [field]: v } });
+    },
     confirmYes: () => confirmYes(),
     cancelConfirm: () => store.dispatch('cancelConfirm'),
     suggest: el => { composerText = el.dataset.text; render(); doc.getElementById('say')?.focus(); },

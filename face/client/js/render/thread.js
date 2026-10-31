@@ -2,6 +2,7 @@
 // bubbles, the three gate cards, receipts and refusals, Gravit's composed answers with their working notes folded,
 // icon-only keys, centred dividers; no tool call is drawn.
 import { esc, attrs, cls } from '../html.js';
+import { setMarkdown, markdownHtml } from './markdown.js';
 import { icon } from '../icons.js';
 import { divider } from '../time.js';
 import { levelOf, needsAnswer } from '../messages.js';
@@ -22,13 +23,10 @@ export const ticker = t => `<a class="ticker" href="#/markets/${esc(t)}">${esc(t
 
 export const withTickers = text => esc(text).replace(/\{\{([A-Z]+)\}\}/g, (_, t) => ticker(t));
 
-// Gravit's words carry markdown; the app hands in the DOM-built renderer (wire/markdown.js) at boot, tests a stub,
-// and with none set the text is escaped. Only a message flagged `markdown` goes through it.
-let markdown = null;
-export function setMarkdown(fn) { markdown = typeof fn === 'function' ? fn : null; }
-const prose = m => (m.data?.markdown && markdown ? markdown(m.text ?? '') : esc(m.text ?? ''));
-// any other markdown the screens draw (a channel's thesis), through the same renderer, escaped when none is set
-export const markdownHtml = text => (markdown ? markdown(text ?? '') : esc(text ?? ''));
+// Gravit's words carry markdown (render/markdown.js); only a message flagged `markdown` goes through it. setMarkdown and
+// markdownHtml are re-exported for the callers that named them here.
+export { setMarkdown, markdownHtml };
+const prose = m => (m.data?.markdown ? markdownHtml(m.text ?? '') : esc(m.text ?? ''));
 
 // a gate's end state, in the old client's words; a card still waiting shows nothing in that slot
 const ENDED = { approved: ['Approved', 'up'], rejected: ['Declined', 'grey'], answered: ['Answered', 'up'], closed: ['Closed', 'grey'], elsewhere: ['Settled elsewhere', 'grey'] };

@@ -8,11 +8,15 @@
 // (state.lunhui.ui[id]), `id` the answer's page id (composedId) for element ids and data-id. A kind with no drawer yet draws
 // its title alone.
 import { esc } from '../../html.js';
-import { markdownHtml } from '../thread.js';
+import { markdownHtml } from '../markdown.js';
 import { viewOf } from '../../host/lunhui.js';
+import { verdictsHtml } from './verdicts.js';
+import { breadthHtml } from './breadth.js';
+import { sourcesHtml } from './sources.js';
+import { footerHtml } from './footer.js';
 
-// kind → drawer; plan 2's tasks 5–7 add verdicts, breadth, sources (and the footer after the blocks), indices, ladder
-const DRAWERS = {};
+// kind → drawer; plan 2's tasks 6–7 add indices and ladder
+const DRAWERS = { verdicts: verdictsHtml, breadth: breadthHtml, sources: sourcesHtml };
 
 const SKELETON = {
   verdicts: 'Drawing the verdicts…', breadth: 'Drawing breadth…', indices: 'Drawing the indices…',
@@ -32,6 +36,11 @@ function drawn(block, view, ui, id) {
   try { return draw(view, block, ui ?? {}, id); } catch { return `<div class="lh-error">This block could not be drawn.</div>`; }
 }
 
+// the footer after the blocks, once the view is here; one it cannot read costs only itself
+function footer(view) {
+  try { return footerHtml(view); } catch { return ''; }
+}
+
 export function composedHtml(m, entry, ui, conv) {
   const d = m.data ?? {};
   const blocks = Array.isArray(d.blocks) ? d.blocks.filter(b => b && typeof b.kind === 'string') : [];
@@ -43,5 +52,5 @@ export function composedHtml(m, entry, ui, conv) {
   const loaded = entry?.status === 'loaded' && entry.view && typeof entry.view === 'object';
   const id = composedId(m, conv);
   const body = blocks.map(b => `<section class="lh-block">${loaded ? drawn(b, entry.view, ui, id) : skeleton(b)}</section>`).join('');
-  return `<div class="lh-answer">${summary}${body}</div>`;
+  return `<div class="lh-answer">${summary}${body}${loaded ? footer(entry.view) : ''}</div>`;
 }
