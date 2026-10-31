@@ -12,11 +12,12 @@ import { markdownHtml } from '../markdown.js';
 import { viewOf } from '../../host/lunhui.js';
 import { verdictsHtml } from './verdicts.js';
 import { breadthHtml } from './breadth.js';
+import { indicesHtml } from './indices.js';
 import { sourcesHtml } from './sources.js';
 import { footerHtml } from './footer.js';
 
-// kind → drawer; plan 2's tasks 6–7 add indices and ladder
-const DRAWERS = { verdicts: verdictsHtml, breadth: breadthHtml, sources: sourcesHtml };
+// kind → drawer; plan 2's task 7 adds the ladder
+const DRAWERS = { verdicts: verdictsHtml, breadth: breadthHtml, indices: indicesHtml, sources: sourcesHtml };
 
 const SKELETON = {
   verdicts: 'Drawing the verdicts…', breadth: 'Drawing breadth…', indices: 'Drawing the indices…',

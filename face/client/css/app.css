@@ -213,6 +213,29 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .lh-src-state { font-variant-numeric: tabular-nums; }
 .lh-src-miss { color: var(--warn-text); }
 .lh-foot { padding-top: 8px; border-top: 1px solid var(--border); font-size: 12px; color: var(--dim); overflow-wrap: anywhere; }
+.lh-ix-rows { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
+.lh-ix { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 2px 8px; min-height: 44px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--surface-2); color: var(--text); text-align: left; }
+.lh-ix.pressed { border-color: var(--text); background: var(--surface); }
+.lh-ix-name { grid-column: 1 / -1; font-weight: 700; font-size: 13px; }
+.lh-ix-last { font-variant-numeric: tabular-nums; font-size: 13px; }
+.lh-ix-pct { font-variant-numeric: tabular-nums; font-size: 13px; }
+.lh-spark { grid-column: 1 / -1; display: block; width: 100%; height: 28px; }
+.lh-spark-mid { stroke: var(--border); stroke-width: 1; stroke-dasharray: 3 3; }
+.lh-spark-line { stroke-width: 1.5; }
+.lh-spark-line.up, .lh-path.up { stroke: var(--up); }
+.lh-spark-line.down, .lh-path.down { stroke: var(--down); }
+.lh-chart { display: block; width: 100%; height: auto; touch-action: pan-y; }
+.lh-band { fill: var(--warn-fill); }
+.lh-tick { stroke: var(--border); stroke-width: 1; }
+.lh-grid, .lh-axis, .lh-mark { font-size: 10px; fill: var(--dim); font-variant-numeric: tabular-nums; }
+.lh-mid { stroke: var(--dim); stroke-width: 1; }
+.lh-bar.up { fill: var(--up-fill); }
+.lh-bar.down { fill: var(--down-fill); }
+.lh-path { stroke-width: 1.5; }
+.lh-mark-dot { fill: var(--text); }
+.lh-cur { stroke: var(--text); stroke-width: 1; stroke-dasharray: 2 2; pointer-events: none; }
+.lh-dot { fill: var(--surface); stroke: var(--text); stroke-width: 1.5; pointer-events: none; }
+.lh-minute { width: 100%; min-height: 28px; accent-color: var(--text); }
 .notes { padding-left: 36px; font-size: 12px; }
 .notes > summary { color: var(--dim); cursor: pointer; font-weight: 600; }
 .notes-body { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }

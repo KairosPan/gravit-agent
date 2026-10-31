@@ -3,6 +3,7 @@
 // route (GET /data/lunhui/view) once per key, and the answer lands in the lunhui slice — loaded, or failed with its words,
 // which the answer draws under its summary with a Retry. Pure but for the read it is handed.
 import { firstOpen } from './sessions.js';
+import { cursorPatch } from '../render/lunhui/intraday.js';
 
 const str = v => (typeof v === 'string' ? v : '');
 const modulesOf = d => (Array.isArray(d?.modules) ? d.modules.filter(m => typeof m === 'string') : []);
@@ -59,4 +60,50 @@ export async function ensureViews(store, getJson) {
       store.dispatch('lunhuiViewFailed', { key, error: wordsOf(error) });
     }
   }));
+}
+
+// the minute cursor (task 6): the slider and the pointer move an indices chart's cursor in place — its line, its dot and the
+// readout — and never the store, so a drag costs no render; a render that lands mid-drag draws the cursor at the last
+// minute, and reapplyCursors (called right after the render restores the inputs) puts it back where the slider stands
+
+/** The grid minute under the pointer: the chart's box mapped onto its 760-wide viewBox, the plot 56–708, clamped. */
+export function minuteAt(clientX, rect, last) {
+  const width = Number(rect?.width);
+  if (!(width > 0)) return last;
+  const i = Math.round(((clientX - rect.left) / width * 760 - 56) / 652 * 241);
+  return Math.min(last, Math.max(0, i));
+}
+
+/** Set the cursor of answer `id` from a cursorPatch: the line's x1/x2, the dot's cx/cy, the readout's words. Dispatches nothing. */
+export function applyCursor(doc, id, patch) {
+  if (!patch) return;
+  const cur = doc.getElementById(`cur-${id}`);
+  const dot = doc.getElementById(`dot-${id}`);
+  const read = doc.getElementById(`read-${id}`);
+  if (cur) { cur.setAttribute('x1', String(patch.x)); cur.setAttribute('x2', String(patch.x)); }
+  if (dot) { dot.setAttribute('cx', String(patch.x)); dot.setAttribute('cy', String(patch.y)); }
+  if (read) read.textContent = patch.readout;
+}
+
+/** A loaded run view by its strategy and run: every view of one run holds the same indices, whichever modules it asked. */
+export function runView(state, strategy, run) {
+  for (const entry of Object.values(state?.lunhui?.views ?? {})) {
+    if (entry?.status === 'loaded' && entry.view?.strategy === strategy && entry.view?.run === run) return entry.view;
+  }
+  return null;
+}
+
+/** The patch for a slider or a chart, by its data (data-strategy, data-run, data-symbol), at `minute`. */
+export function cursorFor(state, el, minute) {
+  const d = el?.dataset ?? {};
+  const view = runView(state, d.strategy, d.run);
+  return view ? cursorPatch(view, d.symbol, minute) : null;
+}
+
+/** After a render: every minute slider not at its max gets its cursor back at its own minute. */
+export function reapplyCursors(root, doc, state) {
+  for (const el of root.querySelectorAll('input[data-action="lunhuiMinute"]')) {
+    if (String(el.value) === String(el.max)) continue;
+    applyCursor(doc, el.dataset.id, cursorFor(state, el, Number(el.value)));
+  }
 }

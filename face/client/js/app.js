@@ -29,7 +29,7 @@ import { startRunSheet } from './host/run-sheet.js';
 import { renderRunSheet } from './render/run-sheet.js';
 import { itemById } from './host/discover-view.js';
 import { startTraces } from './host/traces.js';
-import { wantedViews, ensureViews } from './host/lunhui.js';
+import { wantedViews, ensureViews, minuteAt, applyCursor, cursorFor, reapplyCursors } from './host/lunhui.js';
 import { loadMemberTrace } from './wire/member-traces.js';
 import { isHostPreset } from './wire/speaker.js';
 import { statementLinesOf, statementCsvOf, connectOptionsOf, asksOf } from './host/account-view.js';
@@ -370,6 +370,8 @@ export function boot(win, host = {}) {
       // Where's channel is the store's (draft.where), never the box's: New channel… must not stick in it
       if (el && id !== 'say' && id !== 'nm-where' && (sameEditor || !id.startsWith('edit-'))) el.value = value;
     }
+    // a minute slider the person moved: the redraw drew its cursor at the last minute, put it back at the slider's
+    reapplyCursors(root, doc, s);
     // a pick on a question card is the person's own until they press Answer: it lives in the DOM, not the store
     for (const id of ticked) {
       const el = doc.getElementById(id);
@@ -927,7 +929,17 @@ export function boot(win, host = {}) {
     else if (el.dataset?.action === 'dq') store.dispatch('setDiscoverQuery', el.value);
     else if (isField(el) && typesWords(el)) changeField(el.name, el.value);
     else if (el.dataset?.action === 'runSheetField' && typesWords(el)) act.runSheetField(el);
+    else if (el.dataset?.action === 'lunhuiMinute') moveCursor(el, Number(el.value));
   }
+  // an indices chart's cursor, from its slider or the pointer over the chart: patched in place, never through the store
+  function moveCursor(el, minute) {
+    applyCursor(doc, el.dataset.id, cursorFor(store.get(), el, minute));
+  }
+  root.addEventListener('pointermove', ev => {
+    const el = ev.target?.closest?.('[data-action="lunhuiHover"]');
+    if (!el || typeof el.getBoundingClientRect !== 'function') return;
+    moveCursor(el, minuteAt(ev.clientX, el.getBoundingClientRect(), Number(el.dataset.last)));
+  }, { passive: true });
   root.addEventListener('input', ev => { if (!ev.isComposing && !composing) typed(ev.target); });
   root.addEventListener('change', ev => {
     const el = ev.target;

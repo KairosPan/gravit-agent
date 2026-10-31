@@ -6,7 +6,8 @@
 // An element registered with presentIf (a RegExp) is found only while the last render's markup matches it; one
 // registered under a selector naming [open] answers it only while it is open. A click runs the listeners, then the
 // browser's own default for a <summary>: unless a listener cancelled it, the <details> the clicked summary belongs to
-// toggles — that element, even when a render has replaced it meanwhile.
+// toggles — that element, even when a render has replaced it meanwhile. One given renderedAttributes gets them back on
+// every render, as the browser's fresh node would (an SVG cursor a render redraws).
 
 export function fakeWindow({ hash = '#/messages/c-1', storage = null, prompt = () => null, confirm = () => true } = {}) {
   const byId = new Map();
@@ -25,6 +26,7 @@ export function fakeWindow({ hash = '#/messages/c-1', storage = null, prompt = (
       focus() { doc.activeElement = el; },
       setSelectionRange(a, b) { el.selectionStart = a; el.selectionEnd = b; },
       getAttribute(n) { return el.attributes[n] ?? null; },
+      setAttribute(n, v) { el.attributes[n] = String(v); },
       closest(sel) { return el.closestMap?.[sel] ?? null; },
       click() { el.clicks = (el.clicks ?? 0) + 1; },
       ...props,
@@ -45,6 +47,7 @@ export function fakeWindow({ hash = '#/messages/c-1', storage = null, prompt = (
         el.scrollLeft = 0;
         el.value = el.rendered;
         el.checked = el.renderedChecked ?? false;
+        if (el.renderedAttributes) el.attributes = { ...el.renderedAttributes };
       }
       doc.activeElement = body;
     },
@@ -94,6 +97,8 @@ export function fakeWindow({ hash = '#/messages/c-1', storage = null, prompt = (
     // register an element the app will look up by id, or by an exact selector
     withId(id, props = {}) { const el = element({ id, ...props }); byId.set(id, el); return el; },
     withSelector(sel, props = {}) { const el = element(props); bySelector.set(sel, [...(bySelector.get(sel) ?? []), el]); return el; },
+    // one element answering a selector too (a slider by its id for the typed-text pass, by its action for another)
+    alsoAs(sel, el) { bySelector.set(sel, [...(bySelector.get(sel) ?? []), el]); return el; },
     fire(target, type, event = {}) { for (const fn of listeners[target][type] ?? []) fn({ preventDefault() {}, ...event }); },
     // a click on an element carrying data-action, the way delegation finds it
     click(el) {

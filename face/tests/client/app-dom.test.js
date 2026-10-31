@@ -2141,3 +2141,52 @@ test('a composed answer: a tile opens and closes, By change switches, a bucket i
   assert.equal(store.get().lunhui.ui[id].bucket, -6);
   assert.match(f.html(), /Bucket −6: 458 stocks · 8\.5% of 5375/);
 });
+
+// task 6: the indices block's minute cursor — the slider and the pointer move it in place with no store change and no render;
+// a redraw that lands mid-drag (a live event) draws the cursor at the last minute, and the page puts it back at the slider's
+test('the minute cursor: the slider and the pointer patch the chart in place; a redraw mid-drag keeps the slider\'s minute', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const store = boot(f.win, { openMux: h.openMux, call: h.call, postJson: h.postJson, markdown: null,
+    getJson: async path => (path.startsWith('/data/lunhui/view?') ? { ok: true, view: VIEW_1027 } : h.getJson(path)) });
+  await h.ready();
+  const follow = [...h.streams].reverse().find(x => x.name === 'session/follow' && x.args.request.address.sessionId === 's1');
+  follow.cbs.onItem({ type: 'snapshot', records: [] });
+  const args = { strategy: 'cn-market', run: VIEW_1027.run, summary: '弱势日。', blocks: [{ kind: 'indices', focus: { from: '14:00', to: '15:00' } }] };
+  follow.cbs.onItem({ type: 'event', event: { type: 'tool/call', seq: 40, time: 1756512200000, data: { turn: 4, step: 1, callId: 'k1', name: 'lunhui_present', arguments: JSON.stringify(args) } } });
+  follow.cbs.onItem({ type: 'event', event: { type: 'tool/result', seq: 41, time: 1756512201000, surfaceOp: 'append', data: { turn: 4, step: 1, message: { id: 'm-41', role: 'tool', source: { kind: 'tool', callId: 'k1' }, toolCallId: 'k1', content: [{ type: 'text', text: JSON.stringify({ ok: true, blocks: ['indices'], modules: [] }) }], isError: false } } } });
+  await settle();
+  const id = 's1-pk1';
+  assert.match(f.html(), new RegExp(`id="minute-${id}"`));
+  // the page's own nodes, as a redraw leaves them: the cursor at 15:00, the slider at its max
+  const where = { id, strategy: VIEW_1027.strategy, run: VIEW_1027.run, symbol: 'sh000001' };
+  const drawn = { x1: '708', x2: '708' };
+  const cur = f.withId(`cur-${id}`, { attributes: { ...drawn }, renderedAttributes: drawn });
+  const dot = f.withId(`dot-${id}`, { attributes: { cx: '708' }, renderedAttributes: { cx: '708' } });
+  const read = f.withId(`read-${id}`);
+  const slider = f.withId(`minute-${id}`, { tagName: 'INPUT', type: 'range', rendered: '241', value: '241', max: '241', dataset: { action: 'lunhuiMinute', ...where } });
+  f.alsoAs('input[data-action="lunhuiMinute"]', slider);
+  const X = i => Number((56 + i / 241 * 652).toFixed(1));
+  const before = store.get(), writes = f.writes;
+  slider.value = '120';
+  f.fire('root', 'input', { target: slider });
+  assert.equal(Number(cur.attributes.x1), X(120));
+  assert.equal(Number(dot.attributes.cx), X(120));
+  assert.match(read.textContent, /^上证指数 · 11:30 · /);
+  assert.equal(store.get(), before, 'the slider changes no state');
+  assert.equal(f.writes, writes, 'and draws nothing');
+  // the pointer over the chart: 10:00 is point 30
+  const chart = f.element({ dataset: { action: 'lunhuiHover', last: '241', ...where }, getBoundingClientRect: () => ({ left: 0, width: 760 }) });
+  f.fire('root', 'pointermove', { target: { closest: sel => (sel === '[data-action="lunhuiHover"]' ? chart : null) }, clientX: X(30) });
+  assert.match(read.textContent, /^上证指数 · 10:00 · 3712\.31 · /);
+  assert.equal(store.get(), before, 'the pointer changes no state');
+  assert.equal(f.writes, writes);
+  // Review Focus 4: the operator holds the slider at 120 and a live event redraws the page
+  slider.value = '120';
+  follow.cbs.onItem({ type: 'event', event: { type: 'tool/call', seq: 42, time: 1756512202000, data: { turn: 5, step: 1, callId: 'k2', name: 'bash', arguments: '{}' } } });
+  await settle();
+  assert.ok(f.writes > writes, 'the event redrew the page');
+  assert.equal(slider.value, '120', 'the render restored the slider');
+  assert.equal(Number(cur.attributes.x1), X(120), 'and the cursor stands at the slider\'s minute again');
+  assert.equal(Number(cur.attributes.x2), X(120));
+});
