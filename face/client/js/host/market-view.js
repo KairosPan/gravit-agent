@@ -186,14 +186,18 @@ export function chinaWord(session) {
   if (session?.phase === 'closed' && typeof session.lastSession === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(session.lastSession)) {
     return `Closed · ${session.lastSession.slice(5)} 15:00 Beijing`;
   }
+  if (session?.phase === 'closed') return 'Closed';
   if (session?.phase === 'midday') return 'Midday break · 11:30 Beijing';
   return '';
 }
 
 /** An A-share page's state line (spec 2026-10-31 §5): the wire down, the midday break, closed (the quote's session's close),
  *  live, delayed (the last trade's time), all in Beijing time; nothing before a priced quote. No Halted: no mark was found. */
-export function cnStateWord(quote, connection) {
+export function cnStateWord(quote, connection, providers = []) {
   if (connection === 'error') return 'Quotes unavailable';
+  // the face's wire alive but Tencent itself failing: its stale price is no delay, it is an outage
+  const tencent = (Array.isArray(providers) ? providers : []).find(p => p?.market === 'cn');
+  if (quote?.quote_status === 'stale' && tencent && tencent.status !== 'connected' && tencent.status !== 'limited') return 'Quotes unavailable';
   if (!quote || number(quote.price) === null) return '';
   const at = beijingOf(quote.as_of);
   if (quote.market_status === 'midday') return 'Tencent · Midday break · 11:30 Beijing';

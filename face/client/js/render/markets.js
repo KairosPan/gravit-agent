@@ -281,7 +281,7 @@ function cnPage(asset, state, now) {
   const sub = ['A-share', asset.symbol, cnBoardOf(asset.symbol)].filter(Boolean).join(' · ');
   const who = `<div class="mk-who">${mkAv(cnTileOf(asset.name, asset.symbol), 'lg')}<div><h1 class="head-title">${esc(asset.name || asset.symbol)}</h1><span class="mk-sub">${esc(sub)}</span></div></div>`;
   const priced = number(quote?.price) !== null;
-  const stateWord = cnStateWord(quote, m.connection);
+  const stateWord = cnStateWord(quote, m.connection, m.providers);
   const top = `<div class="mk-d-px"><span class="mk-big">${esc(price(quote?.price, asset.currency))}</span>` +
     `${priced ? `${chgHtml(number(quote.change_pct))}<span class="mk-basis">${esc(basisWord(quote))}</span>` : ''}</div>` +
     `${stateWord ? `<p class="mk-asof">${esc(stateWord)}</p>` : ''}` +

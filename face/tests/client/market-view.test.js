@@ -932,3 +932,14 @@ test('a deep link names the share from the ranking or the quote once either land
   assert.equal(faceAssetOf(china(), 'cn:300502').name, '新易盛');
   assert.equal(faceAssetOf(markets({ quotes: { 'cn:300502': quote('cn:300502', { name: '新易盛' }) } }), 'cn:300502').name, '新易盛');
 });
+
+test('Tencent itself down in the session reads Quotes unavailable, not Delayed (final review #1)', () => {
+  const q = { price: 1392.05, as_of: '2026-10-30T09:41:00+08:00', quote_status: 'stale', market_status: 'open' };
+  const down = [{ id: 'tencent', market: 'cn', status: 'error' }];
+  assert.equal(cnStateWord(q, 'streaming', down), 'Quotes unavailable');
+  assert.equal(cnStateWord(q, 'streaming', [{ id: 'tencent', market: 'cn', status: 'connected' }]), 'Tencent · Delayed · 09:41 Beijing');
+});
+
+test('a closed session whose date did not parse still says Closed (final review #4)', () => {
+  assert.equal(chinaWord({ phase: 'closed', lastSession: null }), 'Closed');
+});
