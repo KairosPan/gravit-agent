@@ -766,7 +766,7 @@ tracked files are committed on your word, or the run directories removed.
 
 **The composed-answer drill — owed, the operator's.** Run after any change to
 `plugins/lunhui/present-row.mjs`, `lib/present.mjs`, `client/js/host/lunhui.js`,
-`client/js/render/lunhui/` or the closing step of either protocol; keyed, the face from your own
+`client/js/render/lunhui/`, `client/js/reducers/lunhui.js` or the closing step of either protocol; keyed, the face from your own
 terminal (`npm start` after `source ../.env.deepseek`, as in "Run") and the Account beside it
 (`cd ../account && npm run account`), the browser on this Mac's New York zone:
 
@@ -792,12 +792,27 @@ terminal (`npm start` after `source ../.env.deepseek`, as in "Run") and the Acco
 6. The split: in **lunhui-s01-repair**, the live strategy run's prompt still ends in a text
    report, no composed answer; a Theme card run in `cn-market` ends in a composed answer of theme's
    blocks alone.
+7. Back in the `cn-market` answer (a ladder in it — ask for one if Gravit left it out), click a
+   ladder name: the stock drawer opens on the right, 460 px, the thread making room — the name,
+   `<code> · <board> · <industry>`, the pool line, **The minute line** with its headline, the chart
+   with the limit-up line where the view puts it (a sealed name's line runs along it, seal marks on
+   it, volume bars under it), the slider whose readout says `at the limit-up` only at that price,
+   the tiles and **In this run**. A first board, or a name whose minute freeze failed, draws one
+   note line and no chart. A name in the summary or a headline opens the same drawer; one inside a
+   link does not.
+8. Press Escape: the drawer closes. Open it again, then Details: Details replaces it.
+9. Click a follow-up under the blocks: a stock one opens that stock's drawer; any other sends its
+   label once as your message (the composer keeps what you had typed), and Gravit answers it.
+   **Ask Gravit about <name>** in the drawer sends `说说 <name>（<code>）在这次运行里的情况。` the same
+   way; **Open in Markets** opens `#/markets/cn:<code>`.
+10. Click **Open run ›** in the footer: the `cn-market` channel page opens, the run among its
+   Research runs.
 
 Record the outcome here, under the drill — the date, the run id, what differed — and mark the
 **Composed answer — manual** row of `DEVELOPMENT.md` §7.4. The run's tracked files are committed on
 your word, or the run directory removed.
 
-**Not yet run** — owed after plan 2 of the run view lands.
+**Not yet run** — owed after plan 2 of the run view lands; steps 7–10 since plan 3.
 
 ## The profile
 
@@ -2590,10 +2605,10 @@ D18); a `spill-policy` row in the profile patch changes it.
 ```bash
 npm test                  # offline unit tests - no keys, no network, no port
 npm run typecheck         # strict tsc against the pinned .d.ts (skipLibCheck: false) - the contract test
-FACE_SMOKE=1 npm test     # + the 23 isolated real boots; local stubs, no external model calls
+FACE_SMOKE=1 npm test     # + the 24 isolated real boots; local stubs, no external model calls
 ```
 
-Offline, `npm test` skips the 23 real boots listed below; `FACE_SMOKE=1` runs
+Offline, `npm test` skips the 24 real boots listed below; `FACE_SMOKE=1` runs
 them too. The typecheck includes the dependencies' own `.d.ts`, so a green one
 means the face compiles against the installed dsh, not just against itself.
 
@@ -2626,6 +2641,7 @@ and `node --test` gives each file its own:
 | `roles-smoke.test.ts` | a role is a one-shot child with its own persona and tools, over two fixture roles made from `roles/_template` under the test's own roles root: `role_auditor` and `role_worker` each spawn a child whose tool list EQUALS the role's `allow` (every `role_*` tool and the forbidden ones gone — compared exactly, because dsh exempts a scope's own registrations from `restrict()`); for the auditor's child the smoke also checks the system prompt — the role's persona (shadowing Gravit's), the date line, no `gravit:roles` section and no cycle contract — the header (`origin: subagent`, `agentPreset: gravit`, its parent's cwd), the root `GRAVIT.md` in its `agent-instructions` baseline, and its text returning through the tool, while Gravit's own prompt carries the roles section and the cycle contract (`Step 0 — ask once`); a `subagent_fork` child's first request carries Gravit's system text whole — the cycle contract included — and Gravit's tools in order; a plain `subagent` child (unseeded) can call `create_goal` and every role tool yet carries neither the cycle contract nor the roles section, only the date; a role naming a tool the tree lacks fails at delegation with `tools.restrict() names unknown global tool "…"` and creates no child. The MCP tools the roles name are `mcp__fixture__*` stand-ins; a foreground one-shot child leaves `ctx.sessions` as its result returns, so the smoke copies each session's header while serving its request. A second boot takes the shipped `cn-market-analyst` from a fixture copy of `roles/` with its route turned to the stub, over a temp strategies root: its tools EQUAL its allow list, its persona is its own, its read and `NOT_EVALUABLE` submit land in an empty `cn-market` run; the same submit from Gravit's root is `NOT_A_ROLE`; a freeze is out of the role child's reach, and a plain `subagent` child that can reach one is `NOT_GRAVIT`; a third boot takes `cn-stock-analyst` the same way: its tools EQUAL its allow list, its persona is its own, its leader read citing a sealed `cn-market` run (sentiment and theme artifacts landed through the booted service) and its submit landing `leader.json` with that `market_run`; Gravit's root leader submit is `NOT_A_ROLE`; a fourth boot takes `cn-reviewer` the same way: its tools EQUAL its allow list, its persona is its own, its read of a sealed `cn-market` run with no `market_run` shows the run's three artifacts and its submit lands `counterevidence.json`; Gravit's root submit is `NOT_A_ROLE` |
 | `lunhui-market-run-smoke.test.ts` | one whole `cn-market` run ("Lunhui analysis"): AKShare and the seat off, the stub as the model, the freeze rows on the recorded replies, a temp strategies root holding a copy of `cn-market`; Gravit freezes index, limit-up and boards into one run, calls `role_cn_market_analyst`, then `role_cn_reviewer` with no `market_run`, and reads the run back, the analyst's child reads the three contexts and submits three `OK` artifacts built from them and the reviewer's child one item against the sentiment; the run sealed with three evidence files, the four artifacts named in `run.json` and valid again against the sealed files, the budget kept, four chips on the runs card, the protocol in Gravit's prompt. The freezes read the system clock (a row's `now` cannot cross the boot's structured clone of patches), so the file shifts `Date` to Friday 2026-10-23 15:00 China time for the boot's lifetime |
 | `lunhui-strategy-run-smoke.test.ts` | an `S01` registered on Friday and graded on Monday ("Lunhui analysis"): the market smoke's boot with copies of `cn-market` and `lunhui-s01-repair` and the three roles on the stub; each day Gravit does the reviewed market run, finds it with the listing read, freezes two stocks' quotes on the strategy and calls `role_cn_stock_analyst` for the leader, `role_cn_reviewer` with both run ids and `role_cn_stock_analyst` for the mode, each child building its artifact from its context; Friday's mode `S01` with a card of at most 2,048 bytes, every review item answered, Monday's grading it; every artifact of the four runs valid again against digests rebuilt from the sealed runs, the runs card's latest run Monday's with its review line, the protocol's strategy channel in Gravit's prompt. `Date` is replaced, Friday 2026-10-23 15:00 China time, then Monday 2026-10-26 15:00 |
+| `lunhui-answer-smoke.test.ts` | Gravit's composed answer end to end: AKShare and the seat off, `lunhui-runs` over a scratch strategies root holding the synthetic sealed 10-27 run; the view read over `GET /data/lunhui/view` (registered as `main.ts` does) with the signed-in cookie; an ok `lunhui_present` lifted through `host/kinds.js` and drawn by the client's own `renderThread` — the seven kinds' labels in the call's order, the follow-ups, the footer with `Open run ›`, a stock link — and `stockDrawerHtml` for 上海九百 drawing its minute chart with the limit-up line; no model called |
 | `goal-smoke.test.ts` | the goal loop `../dsh/profile/cycle.md` rests on, through the face's own wire (prompts, the Stop button's `session/cancel`, a slash line's `commands/execute`): `create_goal` in a human turn returns the id and revision 1, armed; each round arrives at idle as a user message whose source is `goal` (`<goal_round>`, the objective, `Round: n/N`); the model's `blocked` in round 1 is refused (`blocked requires at least 3 consecutive goal rounds; current round is 1`), in round 3 accepted with the code `model-reported` and followed by the `<goal_blocked>` wrap-up; a second `create_goal` is refused while that goal is blocked (`GOAL_ALREADY_EXISTS`); at the cap the driver blocks with `round-limit` and sends the model nothing more; Stop mid-round pauses the goal, the model's resume of it is refused (`GOAL_TOOL_RESUME_PAUSED`: `the model cannot resume a paused goal; the user must resume it`) and `/goal resume` re-arms it; a face stopped mid-round and booted again on the same home leaves the goal active and disarmed with no request until "continue", whose `update_goal` resume bumps the revision and re-arms the rounds |
 
 `bot-sandbox-smoke.test.ts` and `askuser-noclient-smoke.test.ts` also print one

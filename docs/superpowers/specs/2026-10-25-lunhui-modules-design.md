@@ -74,6 +74,7 @@ exactly its tools, and no child process is spawned for it.
 - No minute bars, 竞价 detail, 封单 or 分时: the modes that need them — 一进二, 竞价战法, T板,
   首阴反包 (R02, R04, R05) — stay `research_only` labels the mode module may name and never
   select.
+  (The face draws a pool name's 分时 against its limit price in the stock drawer since 2026-10-30, display only: see 2026-10-30-lunhui-run-view-design.md §5.4 and §5.6.)
 - No point-in-time history before the first freeze: the Eastmoney pools and boards are live
   queries; a run freezes them, and the record grows forward from the day the freezes begin.
 - No scheduler, no unattended run (charter P5); the daily rhythm the source describes
