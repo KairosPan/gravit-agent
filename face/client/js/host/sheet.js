@@ -4,9 +4,10 @@
 // after a quiet spell; a press on a form that changed since the shown preparation prepares again instead of signing; a
 // preparation with a `deadline` counts down every second and is prepared again at zero, and a press under thirty seconds prepares
 // again and signs the fresh one. Only the latest ask lands, and only it is handed to `onPrepared` (plan 4b Task 2: a bridge's
-// routes are read beside it). The engine draws nothing, knows no kind's fields, holds no key and
+// routes are read beside it). A sheet that asks something before it signs (plan 4b Task 6: a sign-out in Beast with its Guard box
+// ticked, host/sheet-view.js guardFirstOf) has `beforeSign` asked first, and signs nothing when it refuses. The engine draws nothing, knows no kind's fields, holds no key and
 // logs nothing of a preparation or an answer.
-import { draftOf, fieldsOf } from './sheet-view.js';
+import { draftOf, fieldsOf, guardFirstOf, guardFirstDone, guardFirstRefused } from './sheet-view.js';
 import { refusedAt, refusalOf, saidOf } from './owner-view.js';
 
 /** A change is prepared after this long without another. */
@@ -35,7 +36,7 @@ export function askedOf(s) {
   return typeof draft === 'string' ? null : JSON.stringify(draft);
 }
 
-export function startSheet({ store, owner, schedule, cancelTimer, now, afterAction, onChange = () => {}, onPrepared = () => {} }) {
+export function startSheet({ store, owner, schedule, cancelTimer, now, afterAction, onChange = () => {}, onPrepared = () => {}, beforeSign = async () => null }) {
   let seq = 0;            // the latest ask: an answer for an older one, or for a sheet since closed, is dropped
   let opened = 0;         // the open sheet's generation: a sign's answer lands only on the sheet it was pressed on
   let quietTimer = null;  // the change waiting for its quiet spell
@@ -127,15 +128,28 @@ export function startSheet({ store, owner, schedule, cancelTimer, now, afterActi
     seq += 1;   // an ask still in the air would land over the sign: dropped
     clearQuiet();
     store.dispatch('sheetSigning');
+    // what the sheet asks before it signs (`beforeSign(sheet)`: null goes on, words stop it — nothing is signed, and the words
+    // are the sheet's); a sheet closed or reopened meanwhile signs nothing
+    const first = guardFirstOf(s);
+    if (first) {
+      let stop;
+      try { stop = await beforeSign(s); } catch (err) { stop = String(err?.message || err || 'no answer'); }
+      if (mine !== opened || !current()) return;
+      if (typeof stop === 'string') { stopTick(); store.dispatch('sheetRefused', { message: stop }); return; }
+    }
     const r = await owner.submit(prepared);
     const here = mine === opened && current() !== null;
     if (refusedAt(r)) {
-      if (here) { stopTick(); store.dispatch('sheetRefused', refusalOf(r)); }
+      if (here) {
+        stopTick();
+        const refusal = refusalOf(r);
+        store.dispatch('sheetRefused', first ? { ...refusal, message: guardFirstRefused(refusal.message) } : refusal);
+      }
       return;
     }
     // taken: the Account changed, whether or not the sheet is still open, and whatever a subscriber did at done
     try {
-      if (here) { stopTick(); store.dispatch('sheetDone', { said: saidOf(r.body) }); }
+      if (here) { stopTick(); store.dispatch('sheetDone', { said: first ? guardFirstDone(saidOf(r.body)) : saidOf(r.body) }); }
     } finally {
       afterAction(s.kind, r.body);
     }

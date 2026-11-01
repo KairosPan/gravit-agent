@@ -41,7 +41,7 @@ import { startOwner, postVia } from './host/owner.js';
 import { startSheet, PREPARE_QUIET_MS } from './host/sheet.js';
 import { moveSeedOf, earnSeedOf, earnSaidOf, subWalletSeedOf } from './host/sheet-money.js';
 import { startSellMany } from './host/sell-many.js';
-import { limitSeedOf, grantOf, keyfileAskOf, reachAskOf, letDeviceSeedOf, paperSeedOf, connectOptionOf, isWalletOption } from './host/sheet-view.js';
+import { limitSeedOf, grantOf, keyfileAskOf, reachAskOf, letDeviceSeedOf, paperSeedOf, signOutSeedOf, connectOptionOf, isWalletOption } from './host/sheet-view.js';
 import { startTrade } from './host/trade.js';
 import { tradeableOf } from './host/trade-view.js';
 import { indexedDbKeys, memoryKeys, signedOutFlag } from './wire/key-store.js';
@@ -350,6 +350,13 @@ export function boot(win, host = {}) {
     store, owner, schedule, cancelTimer, now, afterAction,
     onChange: (kind, name) => { if (kind === 'connect') { checkConnectSoon(); if (name === 'connector') void findConnectWallets(); } },
     onPrepared: (kind, prepared, draft) => { if (kind === 'move' && prepared?.action?.kind === 'bridge') void account.bridgeRoutes(draft); },
+    // a sign-out in Beast with Guard first ticked: Guard (unsigned) before the signature, and refused, nothing signed (plan 4b
+    // Task 6, agents-mount.js signOutAsk)
+    beforeSign: async () => {
+      let r;
+      try { r = await account.guard(); } catch { r = null; }
+      return r?.taken === true ? null : `Not signed out: Guard was refused — ${r?.message || 'no answer'}`;
+    },
   });
   // Sell many (plan 4b Task 3): up to ten holdings at market, each prepared and signed in turn over the owner device; a DEX
   // sale's send started on the operator's own wallet; the Account read again once a run ends
@@ -806,6 +813,23 @@ export function boot(win, host = {}) {
     const a = store.get().account;
     void sheet.open('earn', earnSeedOf(a.earn.data, a.data, preset));
   }
+  // Cards' Grant: the sheet that grants the ask (host/sheet-view.js grantOf); a venue not on the page waits for where the account
+  // can connect to be read, and opens only when no other sheet was opened meanwhile and the page still signs
+  async function grantAsk(id) {
+    const ask = () => asksOf(store.get().account.data).find(k => k.id === id);
+    const grant = () => grantOf(ask(), store.get().account.data, store.get().account.venuesHere.data);
+    let g = grant();
+    if (!g && ask()?.kind === 'venue' && store.get().account.venuesHere.data === null) {
+      const opened = sheetOpens;
+      await account.loadVenuesHere();
+      if (opened !== sheetOpens || !signs()) return;
+      g = grant();
+    }
+    if (!g) return;
+    if (g.kind === 'connect') { connectAsked = { keyfile: null, reach: null }; store.dispatch('connectReset'); }
+    void sheet.open(g.kind, g.seed);
+    if (g.kind === 'connect') { checkConnect(); void findConnectWallets(); }
+  }
   async function openOnRead(kind) {
     const slice = () => store.get().account[kind === 'connect' ? 'venuesHere' : 'paperBooks'];
     const read = kind === 'connect' ? account.loadVenuesHere() : account.loadPaperBooks();
@@ -986,7 +1010,7 @@ export function boot(win, host = {}) {
     // the owner device: the pair box's code, Sign in, and — on a page that signs — Settings › Devices' Sign out and Let it sign
     pairDevice: () => { void owner.ready(doc.getElementById('pair-code')?.value?.trim() || undefined); },
     signIn: () => { void owner.signIn(); },
-    signOut: () => { if (signs()) void sheet.open('signOut', { kid: store.get().owner.kid }); },
+    signOut: () => { if (signs()) void sheet.open('signOut', signOutSeedOf(store.get().account.data, store.get().owner)); },
     letDevice: el => {
       if (!signs()) return;
       const s = store.get();
@@ -1024,12 +1048,7 @@ export function boot(win, host = {}) {
     },
     askRevoke: el => { if (signs()) store.dispatch('askConfirm', { action: 'revoke', name: el.dataset.name ?? '', address: el.dataset.address ?? '' }); },
     askDisconnect: el => { if (signs()) store.dispatch('askConfirm', { action: 'disconnect', venue: el.dataset.venue ?? '', name: el.dataset.name ?? '' }); },
-    grant: el => {
-      if (!signs()) return;
-      const page = store.get().account.data;
-      const g = grantOf(asksOf(page).find(k => k.id === el.dataset.ask), page);
-      if (g) void sheet.open(g.kind, g.seed);
-    },
+    grant: el => { if (signs()) void grantAsk(el.dataset.ask); },
     // the sheet: a seg's pick, named by its field (its boxes and fields answer through input and change), Sign, Prepare again,
     // Cancel
     sheetField: el => changeField(el.name, el.dataset.value),

@@ -7,7 +7,7 @@ import { esc, attrs, cls } from '../html.js';
 import { fmtDate } from '../time.js';
 import { pageOk } from '../host/account-view.js';
 import { standingWords, devicesOf, whatYouSignLines, goodForWords } from '../host/owner-view.js';
-import { titleOf, goWord, connectCheckOf, connectOptionOf, isWalletOption, whoOf } from '../host/sheet-view.js';
+import { titleOf, goWord, connectCheckOf, connectOptionOf, isWalletOption, whoOf, signOutLineOf } from '../host/sheet-view.js';
 import { askedOf } from '../host/sheet.js';
 import { moveHintsOf, moveSaysOf, routesWordsOf, earnHintsOf, earnSaysOf } from '../host/sheet-money.js';
 import { seg } from './controls.js';
@@ -148,13 +148,16 @@ export function renderSheet(state, now) {
   const check = checked ? `<p class="sheet-hint">${esc(checked)}</p>` : '';
   // a move's lines under its fields (the cap on each move, where it would go that is not served here), and a bridge's routes
   // under the quote, beside the preparation they were read for (plan 4b Task 2)
-  const hints = [...moveHintsOf(s), ...earnHintsOf(s)].map(h => `<p class="sheet-hint">${esc(h)}</p>`).join('');
+  // a sign-out's line under its box: who keeps signing once this page no longer does (plan 4b Task 6)
+  const hints = [...moveHintsOf(s), ...earnHintsOf(s), signOutLineOf(s)].filter(Boolean).map(h => `<p class="sheet-hint">${esc(h)}</p>`).join('');
   const r = routesWordsOf(s, state.account?.routes);
   // the page's words under a move's quote (where it goes, Can't be undone.), only beside the preparation that is the form's
   // and an earn's (what it is worth, its yield and lock, where it lands taken out: plan 4b Task 3)
   const says = s.status === 'ready' || s.status === 'signing' ? [...moveSaysOf(s), ...earnSaysOf(s)].map(l => `<p class="sheet-hint">${esc(l)}</p>`).join('') : '';
   const routes = r ? `<p class="sheet-hint sheet-routes">${r.lead.startsWith('Via ') ? `<b>${esc(r.lead)}</b>` : esc(r.lead)}${r.others ? `<br>${esc(r.others)}` : ''}</p>` : '';
   const keys = `<div class="btn-row">${key('sheetClose', 'Cancel')}<button${attrs({ type: 'button', class: 'btn-primary', 'data-action': 'sheetSubmit', disabled: !live })}>${esc(goWord(s.kind, s.seed, s.fields))}</button></div>`;
+  // a granting sheet's line under its title: the ask in the Account's words (plan 4b Task 6)
+  const asked = typeof s.seed?.askedWords === 'string' && s.seed.askedWords ? `<p class="sheet-hint">${esc(s.seed.askedWords)}</p>` : '';
   return `<aside${attrs({ class: 'drawer sheet', 'aria-label': title })}><div class="drawer-head"><h2>${esc(title)}</h2><button type="button" class="close-key" data-action="sheetClose" aria-label="Close">×</button></div>` +
-    `<div class="drawer-body">${fields}${check}${hints}${quoteBox(s)}${routes}${says}${left ? `<p class="sheet-left">${esc(left)}</p>` : ''}${signs}${said}${keys}</div></aside>`;
+    `<div class="drawer-body">${asked}${fields}${check}${hints}${quoteBox(s)}${routes}${says}${left ? `<p class="sheet-left">${esc(left)}</p>` : ''}${signs}${said}${keys}</div></aside>`;
 }

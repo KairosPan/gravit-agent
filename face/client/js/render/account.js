@@ -31,7 +31,7 @@ import { walletRow } from './wallet-row.js';
 import { providerWord } from '../host/market-view.js';
 import { chip } from './thread.js';
 import { seg, segLinks, sec, confirmPair } from './controls.js';
-import { grantOf } from '../host/sheet-view.js';
+import { grantsAsk } from '../host/sheet-view.js';
 import { curveSvg } from './chart.js';
 import { renderDeviceLine, renderDevices } from './owner.js';
 
@@ -386,12 +386,13 @@ function cardRow(c, now, owner) {
     `${shown ? `<details${attrs({ id: `shown-${c.id}`, class: 'acct-shown' })}><summary>What it asks</summary>${shown}</details>` : ''}</div>${keys}</div>`;
 }
 
-// an ask in its words; for a page that signs, Grant when the face grants it (grantOf: a limit, a venue, a key, a top-up — a
-// session, leverage or the mode is granted on the Account page) and Decline
-function askRow(k, page, owner) {
+// an ask in its words; for a page that signs, Grant for every kind an agent asks (grantsAsk: a limit, a venue, a key, a top-up,
+// a session, leverage, the mode — each its sheet, host/sheet-view.js grantOf; a venue not on the page once where the account can
+// connect is read) and Decline
+function askRow(k, owner) {
   const words = esc([k.agentName, k.text, k.kind].filter(Boolean).join(' · '));
   if (!owner || !k.id) return `<div class="order-row">${words}</div>`;
-  const grant = grantOf(k, page) ? `<button${attrs({ type: 'button', class: 'btn-sm', 'data-action': 'grant', 'data-ask': k.id })}>Grant</button>` : '';
+  const grant = grantsAsk(k) ? `<button${attrs({ type: 'button', class: 'btn-sm', 'data-action': 'grant', 'data-ask': k.id })}>Grant</button>` : '';
   return `<div class="order-row"><span>${words}</span><span class="spacer"></span>${rowKeys([grant, sheetKey('declineAsk', { 'data-ask': k.id }, 'Decline')].filter(Boolean))}</div>`;
 }
 
@@ -401,7 +402,7 @@ function cardsTab(state, now) {
   if (unread !== null) return unread;
   const owner = signs(state);
   const groups = cardsOf(a.data).map(g => `<div class="dsec-label">${esc(g.agentName)}</div><div class="venues">${g.cards.map(c => cardRow(c, now, owner)).join('')}</div>`).join('');
-  const asks = asksOf(a.data).map(k => askRow(k, a.data, owner)).join('');
+  const asks = asksOf(a.data).map(k => askRow(k, owner)).join('');
   return `<div class="cards">${box(`${title('Waiting for you')}${groups || note('Nothing waiting')}`, 'Cards')}` +
     `${asks ? box(`${title('Asks')}<div class="acct-orders">${asks}</div>`, 'Asks') : ''}</div>`;
 }

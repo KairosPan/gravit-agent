@@ -504,11 +504,16 @@ test("the owner's keys on Agents and Cards: Let in, Give a limit, End limit, Rev
   const asks = box(html, 'Asks');
   has(asks, '<div class="order-row"><span>Claude Code · Raise my trading budget to $1,000 so I can finish the SOL position you asked for · limit</span><span class="spacer"></span><span class="btn-row">' +
     `<button type="button" class="btn-sm" data-action="grant" data-ask="ask-0001">Grant</button>${sheetKey('declineAsk', { ask: 'ask-0001' }, 'Decline')}</span></div>`);
-  has(asks, `<button type="button" class="btn-sm" data-action="grant" data-ask="ask-0002">Grant</button>${sheetKey('declineAsk', { ask: 'ask-0002' }, 'Decline')}`, 'a venue ask grants as a limit');
-  // an ask granted on the Account page (a session) has Decline alone; an ask with no id, no key
-  const session = draw(signing(state({ tab: 'cards', page: { ...page, asks: [{ id: 'ask-0003', agentName: 'Claude Code', kind: 'session', text: 'A session' }, { kind: 'limit', text: 'No id' }] } })));
-  has(session, `<span>Claude Code · A session · session</span><span class="spacer"></span><span class="btn-row">${sheetKey('declineAsk', { ask: 'ask-0003' }, 'Decline')}</span></div>`);
-  lacks(session, 'data-action="grant"');
+  has(asks, `<button type="button" class="btn-sm" data-action="grant" data-ask="ask-0002">Grant</button>${sheetKey('declineAsk', { ask: 'ask-0002' }, 'Decline')}`, 'a venue ask has its Grant');
+  // every kind an agent asks has its Grant (plan 4b Task 6); a kind the face does not know has Decline alone; an ask with no id, no key
+  const session = draw(signing(state({ tab: 'cards', page: { ...page, asks: [
+    { id: 'ask-0003', agentName: 'Claude Code', kind: 'session', text: 'A session' }, { id: 'ask-0004', agentName: 'Claude Code', kind: 'memory', text: 'Remember' },
+    { kind: 'limit', text: 'No id' },
+  ] } })));
+  for (const [id, kind] of [['ask-0003', 'session'], ['ask-0004', 'memory']]) assert.ok(session.includes(`data-ask="${id}"`), kind);
+  has(session, `<span>Claude Code · A session · session</span><span class="spacer"></span><span class="btn-row"><button type="button" class="btn-sm" data-action="grant" data-ask="ask-0003">Grant</button>${sheetKey('declineAsk', { ask: 'ask-0003' }, 'Decline')}</span></div>`);
+  has(session, `<span>Claude Code · Remember · memory</span><span class="spacer"></span><span class="btn-row">${sheetKey('declineAsk', { ask: 'ask-0004' }, 'Decline')}</span></div>`);
+  lacks(session, 'data-action="grant" data-ask="ask-0004"');
   has(session, '<div class="order-row">No id · limit</div>');
   // a card with no hash is not answered here
   lacks(draw(signing(state({ tab: 'cards', page: { ...page, cards: [{ ...card, hash: '' }] } }))), 'data-kind="approveCard"');

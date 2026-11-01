@@ -4,12 +4,12 @@
 // form is not complete, the words for what is missing; and the connect sheet's check (what to ask, its words). The sheet engine
 // (host/sheet.js) prepares the draft, the renderer draws the fields; the Account judges everything else in its own words. `now` is the caller's clock in milliseconds; `validUntil`
 // values are numbers (the Account's u64 fields), the dollar amounts strings as typed. No DOM, no store.
-import { pageOk, venuesOf, keyfileWords, paperBooksOf, writesOn } from './account-view.js';
+import { pageOk, venuesOf, keyfileWords, paperBooksOf, writesOn, walletsOf, connectOptionsOf } from './account-view.js';
 import { tradeFieldsOf, tradeDraftOf } from './trade-view.js';
 import { MARKET_KINDS, marketTitleOf, marketGoOf, marketFieldsOf, marketDraftOf } from './sheet-market.js';
 import { RULES_KINDS, rulesTitleOf, rulesGoOf, rulesFieldsOf, rulesDraftOf } from './sheet-rules.js';
-import { MONEY_KINDS, moneyTitleOf, moneyGoOf, moneyFieldsOf, moneyRefieldsOf, moneyDraftOf } from './sheet-money.js';
-import { canMove, servedHere } from './money-view.js';
+import { MONEY_KINDS, moneyTitleOf, moneyGoOf, moneyFieldsOf, moneyRefieldsOf, moneyDraftOf, moveSeedOf, subWalletSeedOf } from './sheet-money.js';
+import { canMove, servedHere, moveSourcesOf } from './money-view.js';
 
 const DAY = 86_400_000;
 const ZERO = '0x0000000000000000000000000000000000000000';
@@ -272,6 +272,10 @@ export function fieldsOf(kind, seed) {
       { name: 'label', label: 'Name', type: 'text', placeholder: 'Momentum', value: '' },
       { name: 'usd', label: 'Paper dollars to start with', type: 'number', placeholder: '10000', value: '' },
     ];
+    // Beast in force: switching to Guard first is offered, ticked for the last device (agents-mount.js signOutAsk)
+    case 'signOut': return s.mode === 'open'
+      ? [{ name: 'guard', label: 'Switch to Guard first: whatever an agent asks for waits for a signature', type: 'check', value: othersOf(s) === 0 }]
+      : [];
     case 'topUp': return [{ name: 'usd', label: 'Paper dollars to add', type: 'number', placeholder: '1000', value: str(s.usd) }];
     case 'resetPaper': return [{ name: 'usd', label: 'Start again with, in dollars', type: 'number', placeholder: '10000', value: str(s.usd) }];
     // the Trade ticket's, from the ticket view the trade host seeds it with (`seed.ticket`, host/trade-view.js ticketOf)
@@ -461,20 +465,104 @@ export function draftOf(kind, fields, seed, now) {
   }
 }
 
-/** The sheet that grants an agent's ask (the page's `asks`), seeded from it and the page: a bigger limit or a venue → `limit`
- *  (`limitSeedOf` — the page's venues and the agent's standing trade limit — with the asked venue ticked and the asked dollars
- *  as the budget), a knocking key → `letIn`, a top-up → `topUp`. A session, leverage or the mode is granted on the Account
- *  page: null. */
-export function grantOf(ask, page) {
-  if (!isRecord(ask)) return null;
+// ── Settings › Devices' sign-out (plan 4b Task 6, agents-mount.js signOutAsk) ──
+
+// the owners on the page other than this page's device, as the seed counts them
+const othersOf = s => (Number.isInteger(s?.others) && s.others >= 0 ? s.others : 0);
+
+/** The sign-out sheet's seed: this page's key id, the mode in force (`open` is Beast) and how many owners other than this
+ *  page's device sign for the account (the page's `signers.owners`, any kind). */
+export function signOutSeedOf(page, owner) {
+  const kid = str(owner?.kid);
+  if (!pageOk(page)) return { kid, mode: '', others: 0 };
+  const mine = kid ? `device:${kid}` : null;
+  const mode = page.mode === 'open' || page.mode === 'guard' ? page.mode : '';
+  return { kid, mode, others: records(page.signers?.owners).filter(o => str(o.id) !== mine).length };
+}
+
+/** The line under the sign-out's fields: who keeps signing — the other devices, or none until one pairs again (agents-mount.js
+ *  signOutAsk's words). Another sheet: ''. */
+export function signOutLineOf(sheet) {
+  if (!isRecord(sheet) || sheet.kind !== 'signOut') return '';
+  const n = othersOf(sheet.seed);
+  if (n > 0) return `Your ${n} other ${n === 1 ? 'device keeps' : 'devices keep'} signing.`;
+  return 'No browser will sign for the account until one pairs again, with a new pairing code: the terminal the Account runs in shows it, or npm run account:service -- code when it runs in the background.';
+}
+
+/** The sheet asks Guard before it signs (the engine's `beforeSign`): a sign-out in Beast with its Guard box ticked. */
+export function guardFirstOf(sheet) {
+  if (!isRecord(sheet) || sheet.kind !== 'signOut' || sheet.seed?.mode !== 'open') return false;
+  const f = (Array.isArray(sheet.fields) ? sheet.fields : []).find(x => isRecord(x) && x.name === 'guard');
+  return f?.value === true || f?.value === 'true';
+}
+/** A sign-out signed after a taken Guard: what it said, ending `Guard is on.` */
+export const guardFirstDone = said => {
+  const s = str(said).trim();
+  return s ? `${/[.!?]$/.test(s) ? s : `${s}.`} Guard is on.` : 'Guard is on.';
+};
+/** A sign-out refused after a taken Guard (Guard stays): the Account's words. */
+export const guardFirstRefused = words => `Not signed out: ${str(words) || 'the account did not answer'}`;
+
+// ── granting an agent's ask (plan 4b Task 6, portfolio.js pfGrant) ──
+
+/** The kinds of ask an agent sends (sign.ts agentAsk) that the face grants: each answered by a sheet. */
+export const GRANT_KINDS = ['limit', 'venue', 'letIn', 'topup', 'session', 'leverage', 'mode'];
+/** The ask is one the face grants (Cards draws its Grant key): a venue ask's sheet may still wait for where the account can
+ *  connect to be read (`grantOf` with `venuesHere`). */
+export const grantsAsk = ask => isRecord(ask) && GRANT_KINDS.includes(ask.kind);
+
+// the line under a granting sheet's title: the ask in the Account's words
+const askedWordsOf = ask => (str(ask.text) ? `${str(ask.agentName) || 'An agent'} asked: “${ask.text}”` : '');
+// the name an agent wallet is first given: the agent's, letters and digits, at most 16 (portfolio.js pfWalletForm)
+const walletNameOf = name => str(name).replace(/[^A-Za-z0-9]/g, '').slice(0, 16) || 'agent';
+// the connect option a venue is reached through: one of its kind, else the exchange account that lists it (portfolio.js
+// pfConnectVenue); none: every way of connecting
+function connectPresetOf(options, venue) {
+  const byKind = options.find(o => o.kind === venue);
+  if (byKind) return { connector: byKind.connector };
+  const ex = options.find(o => o.kind === 'exchange' && listOf(o.venues).includes(venue));
+  if (!ex) return { connector: '' };
+  return needsExchange(ex) ? { connector: ex.connector, exchange: venue } : { connector: ex.connector };
+}
+
+/** The sheet that grants an agent's ask (the page's `asks`), seeded from it and the page, its title line under it the ask
+ *  (`askedWords`, `<agentName> asked: “<text>”`): a bigger limit → `limit` (`limitSeedOf`, the asked venue ticked and the asked
+ *  dollars as the budget); a venue → the same when it is on the page, else `connect` on the option it is reached through —
+ *  `venuesHere` the Venues read of where the account can connect, the sheet null until it has landed; a knocking key → `letIn`
+ *  at the ask's own address (never a name's); a top-up → `move` into the agent's wallet, matched by the agent's address, with
+ *  the ask's dollars, or with none an agent wallet (`subWallet`) for it; a session → `session`; leverage → `leverageCap`; the
+ *  mode → `beast`. Any other kind: null. */
+export function grantOf(ask, page, venuesHere = null) {
+  if (!grantsAsk(ask)) return null;
+  const askedWords = askedWordsOf(ask);
+  const dial = pageOk(page) && isRecord(page.dial) ? page.dial : {};
   switch (ask.kind) {
-    case 'limit':
     case 'venue':
-      return { kind: 'limit', seed: { ...limitSeedOf(page, ask.agent, ask.agentName), asked: str(ask.venue), budget: str(ask.usd) } };
+      if (!venuesOf(page).some(v => v.id === str(ask.venue))) {
+        if (venuesHere === null || venuesHere === undefined) return null;
+        const options = connectOptionsOf(page, venuesHere);
+        return { kind: 'connect', seed: { options, venues: venuesOf(page).map(v => ({ id: v.id })), ...connectPresetOf(options, str(ask.venue)), askedWords } };
+      }
+    // falls through: a venue on the page is ticked on the agent's trading limit
+    case 'limit':
+      return { kind: 'limit', seed: { ...limitSeedOf(page, ask.agent, ask.agentName), asked: str(ask.venue), budget: str(ask.usd), askedWords } };
     case 'letIn':
-      return { kind: 'letIn', seed: { address: str(ask.agent), name: str(ask.agentName) || str(ask.text) } };
-    case 'topup':
-      return { kind: 'topUp', seed: { venue: str(ask.venue), usd: str(ask.usd) } };
+      return { kind: 'letIn', seed: { address: str(ask.agent), name: str(ask.agentName) || str(ask.text), askedWords } };
+    case 'topup': {
+      const wallet = walletsOf(page).find(w => sameAddress(w.agent, str(ask.agent)));
+      if (wallet) {
+        const from = moveSourcesOf(page).find(x => !x.agent)?.id ?? '';
+        return { kind: 'move', seed: { ...moveSeedOf(page, { from, to: wallet.venue, amount: str(ask.usd) }), askedWords } };
+      }
+      const float = Number(ask.usd) > 0 ? str(ask.usd) : '50';
+      return { kind: 'subWallet', seed: { ...subWalletSeedOf(page, { agent: str(ask.agent), name: walletNameOf(ask.agentName), float }), askedWords } };
+    }
+    case 'session':
+      return { kind: 'session', seed: { ended: dial.sessionEnded === true, askedWords } };
+    case 'leverage':
+      return { kind: 'leverageCap', seed: { max: dial.maxLeverage, askedWords } };
+    case 'mode':
+      return { kind: 'beast', seed: { askedWords } };
     default:
       return null;
   }

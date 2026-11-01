@@ -82,6 +82,7 @@ function rig(opts = {}) {
   const sheet = startSheet({
     store, owner, schedule: timers.schedule, cancelTimer: timers.cancelTimer, now: () => clock.t,
     afterAction: (kind, body) => done.push([kind, body]), onChange: (...a) => changes.push(a), onPrepared: (...a) => prepared.push(a),
+    ...(opts.beforeSign ? { beforeSign: opts.beforeSign } : {}),
   });
   return { store, owner, timers, clock, sheet, types, done, changes, prepared, s: () => store.get().sheet };
 }
@@ -430,4 +431,64 @@ test('a throwing onPrepared leaves the preparation shown', async () => {
   const got = await sheet.open('topUp', SEED);
   assert.equal(store.get().sheet.status, 'ready');
   assert.equal(got, store.get().sheet.prepared);
+});
+
+// plan 4b Task 6: a sign-out in Beast with Guard first ticked asks beforeSign before it signs
+const SIGN_OUT = { kid: 'a5048199a8081854', mode: 'open', others: 0 };
+const OUT_DONE = { status: 200, body: { ok: true, kind: 'result', result: { ok: true } } };
+const OUT_REFUSED = { status: 409, body: { ok: false, refusal: { ok: false, code: 'E_ACCOUNT_LAST_OWNER', layer: 'account', message: 'the last owner cannot leave yet' } } };
+
+test("beforeSign's refusal stops the signature and says it", async () => {
+  const asked = [];
+  const r = rig({ beforeSign: async sheet => { asked.push(sheet.kind); return 'Not signed out: Guard was refused — the account is read-only'; } });
+  await r.sheet.open('signOut', SIGN_OUT);
+  assert.equal(r.s().status, 'ready');
+  await r.sheet.submit();
+  assert.deepEqual(asked, ['signOut']);
+  assert.deepEqual(r.owner.envelopes, [], 'nothing signed');
+  assert.deepEqual([r.s().status, r.s().message, r.s().prepared], ['refused', 'Not signed out: Guard was refused — the account is read-only', null]);
+  assert.deepEqual(r.done, []);
+  // taken: the signature goes on, and its done line ends Guard is on.
+  const t = rig({ beforeSign: async () => null });
+  t.owner.submitWith.push(OUT_DONE);
+  await t.sheet.open('signOut', SIGN_OUT);
+  await t.sheet.submit();
+  assert.equal(t.owner.envelopes.length, 1);
+  assert.deepEqual([t.s().status, t.s().said], ['done', 'Done. Guard is on.']);
+  // taken, and the sign-out refused: its words, Not signed out
+  const u = rig({ beforeSign: async () => null });
+  u.owner.submitWith.push(OUT_REFUSED);
+  await u.sheet.open('signOut', SIGN_OUT);
+  await u.sheet.submit();
+  assert.deepEqual([u.s().status, u.s().message], ['refused', 'Not signed out: the last owner cannot leave yet']);
+  // a sheet closed while Guard is asked signs nothing
+  const later = deferred();
+  const v = rig({ beforeSign: () => later.promise });
+  await v.sheet.open('signOut', SIGN_OUT);
+  const press = v.sheet.submit();
+  v.sheet.close();
+  later.resolve(null);
+  await press;
+  assert.deepEqual(v.owner.envelopes, []);
+});
+
+test('beforeSign is not asked for a sheet that does not need it', async () => {
+  const asked = [];
+  const r = rig({ beforeSign: async sheet => { asked.push(sheet.kind); return 'stop'; } });
+  // another kind
+  await r.sheet.open('topUp', SEED);
+  await r.sheet.submit();
+  assert.equal(r.owner.envelopes.length, 1);
+  // a sign-out in Guard; and one in Beast with the box unticked
+  r.owner.submitWith.push(OUT_REFUSED);
+  await r.sheet.open('signOut', { ...SIGN_OUT, mode: 'guard' });
+  await r.sheet.submit();
+  assert.equal(r.s().message, 'the last owner cannot leave yet', 'the Account\'s words as they are');
+  await r.sheet.open('signOut', { ...SIGN_OUT, others: 1 });
+  assert.equal(r.s().fields[0].value, false);
+  r.owner.submitWith.push(OUT_DONE);
+  await r.sheet.submit();
+  assert.deepEqual(asked, []);
+  assert.equal(r.owner.envelopes.length, 3);
+  assert.equal(r.s().said, 'Done', 'no Guard words');
 });

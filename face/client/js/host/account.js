@@ -210,20 +210,23 @@ export function startAccount({ store, getJson, post = noDoor, now = Date.now, sc
    *  never signed: tightening is the Account's safer direction. One in the air at a time — a second press while it is joins
    *  it. Said done only when the Account took it (a 2xx its own refused test passes); a refusal is the Account's words (`refusal.message`,
    *  else `error`, else no answer). Then the page is read past the face's cache, so the mode drawn is the page's. `post` is the
-   *  owner door's (host/owner.js postVia: `{ status, body }`, never throwing). */
+   *  owner door's (host/owner.js postVia: `{ status, body }`, never throwing). Resolves `{ taken, message }` — the Account's words
+   *  when it did not take it — for a caller that waits on it (the sign-out's Guard first, plan 4b Task 6). */
   let guarding = null;
   function guard() {
-    if (closed) return Promise.resolve();
+    if (closed) return Promise.resolve({ taken: false, message: NO_ANSWER });
     if (guarding) return guarding;
     store.dispatch('guardAsking');
     const current = (async () => {
       let r;
       try { r = await post(GUARD, {}); } catch { r = { status: 0, body: {} }; }
-      if (closed) return;
+      if (closed) return { taken: false, message: NO_ANSWER };
       // taken only on a 2xx its refused test does not call refused (the owner device's own `taken`)
-      if (!(r?.status >= 200 && r.status < 300) || refusedAt(r)) store.dispatch('guardRefused', messageOf(r?.body) ?? NO_ANSWER);
-      else store.dispatch('guardSaid', GUARD_SAID);
+      const taken = r?.status >= 200 && r.status < 300 && !refusedAt(r);
+      const message = taken ? null : messageOf(r?.body) ?? NO_ANSWER;
+      if (taken) store.dispatch('guardSaid', GUARD_SAID); else store.dispatch('guardRefused', message);
       await load({ fresh: true });
+      return { taken, message };
     })().finally(() => { if (guarding === current) guarding = null; });
     guarding = current;
     return current;

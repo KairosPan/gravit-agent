@@ -1737,7 +1737,9 @@ test("Settings' Let it sign seeds the owners and the waiting key; Sign out, sign
   f.fire('doc', 'keydown', { key: 'Escape' });
   assert.deepEqual([store.get().sheet, store.get().settingsOpen], [null, true], 'Escape closes the sheet, the drawer under it stays');
   f.click({ tagName: 'BUTTON', dataset: { action: 'signOut' } });
-  assert.deepEqual([store.get().sheet.kind, store.get().sheet.seed], ['signOut', { kid: door.kid }]);
+  assert.deepEqual([store.get().sheet.kind, store.get().sheet.seed], ['signOut', { kid: door.kid, mode: 'guard', others: 1 }]);
+  assert.match(f.html(), /Your 1 other device keeps signing\./);
+  assert.doesNotMatch(f.html(), /name="guard"/, 'no Guard box in Guard');
   await until(() => store.get().sheet.status === 'ready', 'the preparation');
   f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
   await until(() => store.get().owner.role === 'signed-out', 'the page signed out');
@@ -1749,6 +1751,124 @@ test("Settings' Let it sign seeds the owners and the waiting key; Sign out, sign
   await settle();
   assert.equal(door.sent('/data/account/pair').length, pairs, 'signed out: no page pairs it again');
   assert.equal(store.get().owner.role, 'signed-out');
+  store.timers.clear();
+});
+
+// plan 4b Task 6: Cards grants every kind of ask
+test('Grant on a session ask signs setPolicy session', async () => {
+  const f = fakeWindow({ hash: '#/account/cards', storage: memoryStorage() });
+  const door = ownerDoor();
+  const ask = { id: 'ask-0007', agent: '0x3a087530887bd175ccc38828ee3776e5b6ea1ac6', agentName: 'Claude Code', kind: 'session', venue: '', usd: '', text: 'My session ran out', at: '', expiresAt: '' };
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => ({ ...door.page(), asks: [ask] }) } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  assert.match(f.html(), /data-action="grant" data-ask="ask-0007">Grant<\/button>/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'grant', ask: 'ask-0007' } });
+  assert.equal(store.get().sheet.kind, 'session');
+  await until(() => store.get().sheet.status === 'ready', 'the preparation');
+  assert.deepEqual(door.sent('/data/account/prepare').at(-1).draft, { type: 'setPolicy', change: 'session', value: '30d' });
+  assert.match(f.html(), /<p class="sheet-hint">Claude Code asked: “My session ran out”<\/p>/, "the ask under the sheet's title");
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
+  await until(() => door.sent('/data/account/exchange').length === 1, 'the signature');
+  assert.deepEqual(door.sent('/data/account/exchange')[0].action, { ...door.sent('/data/account/exchange')[0].action, type: 'setPolicy', change: 'session', value: '30d' });
+  store.timers.clear();
+});
+
+test('a venue ask not on the page: Grant reads where the account can connect, then opens the connect sheet on its option', async () => {
+  const f = fakeWindow({ hash: '#/account/cards', storage: memoryStorage() });
+  const door = ownerDoor();
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => ({ ...door.page(), asks: [{ ...fx('account').asks[1], venue: 'okx' }] }), '/data/account/venues': fx('venues'), '/data/account/keyfile': fx('keyfile'), '/data/account/connect/reach': { ok: true, reach: [] } } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  assert.match(f.html(), /data-action="grant" data-ask="ask-0002">Grant<\/button>/, 'Grant drawn before the read');
+  h.reads.length = 0;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'grant', ask: 'ask-0002' } });
+  assert.equal(store.get().sheet, null, 'not before the read');
+  await until(() => store.get().sheet?.kind === 'connect', 'the connect sheet');
+  assert.equal(h.reads[0], '/data/account/venues');
+  const field = name => store.get().sheet.fields.find(x => x.name === name)?.value;
+  assert.deepEqual([field('connector'), field('exchange')], ['live:exchange', 'okx']);
+  store.timers.clear();
+});
+
+// Review Focus: Settings › Devices' sign-out of the last device in Beast, Guard first
+test('the last device signs out in Beast: Guard refused, nothing signed and the device still signs; Guard taken and the sign-out refused, Guard stays and the words say so', async () => {
+  const f = fakeWindow({ hash: '#/account/portfolio', storage: memoryStorage() });
+  let mode = 'open';
+  let guardAnswer = { status: 409, body: { ok: false, refusal: { ok: false, code: 'E_ACCOUNT_READ_ONLY', layer: 'account', message: 'the account is read-only' } } };
+  const door = ownerDoor({ exchange: action => (action.type === 'signOut' ? { ok: false, refusal: { ok: false, code: 'E_ACCOUNT_LAST_OWNER', layer: 'account', message: 'the last owner cannot leave yet' } } : { ok: true, kind: 'result', result: { ok: true } }) });
+  const post = door.post;
+  door.post = async (path, body) => {
+    if (path !== '/data/account/guard') return post(path, body);
+    door.posts.push([path, body]);
+    if (guardAnswer.status === 200) mode = 'guard';
+    return guardAnswer;
+  };
+  // this page the only owner (the seed key gone), in Beast until a Guard is taken
+  const page = () => { const p = door.page(); return { ...p, mode, signers: { ...p.signers, owners: p.signers.owners.filter(o => o.id === `device:${door.kid}`) } }; };
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': page } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'refreshAccount' } });
+  await until(() => store.get().account.data?.signers?.owners?.length === 1, 'the page naming this device alone');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSettings' } });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'signOut' } });
+  assert.deepEqual(store.get().sheet.seed, { kid: door.kid, mode: 'open', others: 0 });
+  await until(() => store.get().sheet.status === 'ready', 'the preparation');
+  assert.deepEqual(door.sent('/data/account/prepare').at(-1).draft, { type: 'signOut', device: `device:${door.kid}` });
+  const html = f.html();
+  assert.match(html, /<input type="checkbox" name="guard" value="true" checked data-action="sheetField">Switch to Guard first: whatever an agent asks for waits for a signature<\/label>/);
+  assert.match(html, /No browser will sign for the account until one pairs again, with a new pairing code: the terminal the Account runs in shows it, or npm run account:service -- code when it runs in the background\./);
+  // Guard refused: nothing signed, the words, the device still signs
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
+  await until(() => store.get().sheet?.status === 'refused', 'the refusal');
+  assert.equal(door.sent('/data/account/guard').length, 1);
+  assert.equal(door.sent('/data/account/exchange').length, 0, 'nothing signed');
+  assert.equal(store.get().sheet.message, 'Not signed out: Guard was refused — the account is read-only');
+  assert.match(f.html(), /Not signed out: Guard was refused — the account is read-only/);
+  assert.equal(store.get().owner.role, 'signs', 'the device still signs');
+  // Guard taken, the sign-out refused: Guard stays, the words say so, the device still signs
+  guardAnswer = { status: 200, body: { ok: true, mode: 'guard' } };
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sheetAgain' } });
+  await until(() => store.get().sheet.status === 'ready', 'prepared again');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
+  await until(() => store.get().sheet?.status === 'refused', 'the sign-out refused');
+  assert.equal(door.sent('/data/account/guard').length, 2);
+  assert.equal(door.sent('/data/account/exchange').length, 1, 'signed once Guard was taken');
+  assert.equal(store.get().sheet.message, 'Not signed out: the last owner cannot leave yet');
+  assert.equal(store.get().owner.role, 'signs');
+  await until(() => store.get().account.data.mode === 'guard', 'Guard on the page');
+  assert.equal(mode, 'guard', 'Guard stays');
+  store.timers.clear();
+});
+
+test('the last device signs out in Beast with Guard taken: signed out, and the done line ends Guard is on.', async () => {
+  const f = fakeWindow({ hash: '#/account/portfolio', storage: memoryStorage() });
+  let mode = 'open';
+  const door = ownerDoor();
+  const post = door.post;
+  door.post = async (path, body) => { if (path === '/data/account/guard') { door.posts.push([path, body]); mode = 'guard'; return { status: 200, body: { ok: true, mode: 'guard' } }; } return post(path, body); };
+  const page = () => { const p = door.page(); return { ...p, mode, signers: { ...p.signers, owners: p.signers.owners.filter(o => o.id === `device:${door.kid}`) } }; };
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': page } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'refreshAccount' } });
+  await until(() => store.get().account.data?.signers?.owners?.length === 1, 'the page naming this device alone');
+  const said = [];
+  store.subscribe((st, type) => { if (type === 'sheetDone') said.push(st.sheet.said); });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'signOut' } });
+  await until(() => store.get().sheet.status === 'ready', 'the preparation');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
+  await until(() => store.get().owner.role === 'signed-out', 'the page signed out');
+  const [g] = door.posts.map(([p]) => p).filter(p => p === '/data/account/guard' || p === '/data/account/exchange');
+  assert.equal(g, '/data/account/guard', 'Guard before the signature');
+  assert.match(said[0], / Guard is on\.$/);
   store.timers.clear();
 });
 
