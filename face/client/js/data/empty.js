@@ -48,7 +48,8 @@ export function emptyState() {
     },
     // the Account (host/account.js): its page with the sentence of its last refusal, its other reads, the history curve's
     // range, the Statement drawer, and the venue whose Details drawer is open (its id); and the connect sheet's reads — where
-    // this account can connect, the kept paper books, the last key file's check with what it asked, a venue's reach
+    // this account can connect, the kept paper books, the last key file's check with what it asked, a venue's reach; the Rules
+    // tab's Guard press (plan 4a Task 5): in the air, said, or refused in the Account's words
     account: {
       status: 'idle', data: null, at: null, message: null,
       holdings: { status: 'idle', data: null, at: null },
@@ -60,6 +61,7 @@ export function emptyState() {
       paperBooks: { status: 'idle', data: null, at: null, message: null },
       keyfile: { status: 'idle', data: null, at: null, message: null, asked: null },
       reach: { status: 'idle', data: null, at: null, message: null },
+      guard: { status: 'idle', said: null, message: null },
       statementOpen: false,
       detailsVenue: null,
     },

@@ -150,6 +150,7 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: var(--radius-pill); background: var(--surface-2); align-self: flex-start; }
 .seg-item { display: inline-flex; align-items: center; min-height: 38px; padding: 0 14px; border: 0; border-radius: var(--radius-pill); background: transparent; color: var(--dim); font-size: 13px; font-weight: 600; }
 .seg-item.pressed { background: var(--surface); color: var(--text); font-weight: 700; box-shadow: var(--shadow-card); }
+.seg-item:disabled { opacity: .5; cursor: default; }
 
 /* ---- the thread ---- */
 .thread { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 6px; padding: 18px 28px 22px; overflow-y: auto; }

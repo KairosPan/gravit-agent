@@ -1,5 +1,5 @@
 // face/client/js/reducers/account.js — Account on the face: what host/account.js and host/seat.js bring in, the Statement
-// drawer, a venue's Details drawer, the Settings drawer
+// drawer, a venue's Details drawer, the Settings drawer, and the Rules tab's Guard press
 import { closeOverlays } from './messages.js';
 
 const acc = (s, patch) => ({ ...s, account: { ...s.account, ...patch } });
@@ -53,6 +53,11 @@ export const reducers = {
   reachLoading: s => read(s, 'reach', { status: 'loading' }),
   reachLoaded: (s, { data, at }) => read(s, 'reach', { status: 'ready', data, at, message: null }),
   reachFailed: (s, { at, message = null }) => read(s, 'reach', { status: 'error', at, message }),
+  // Guard (host/account.js guard, plan 4a Task 5): the press in the air, then what the Account's answer said — done in the
+  // face's words, or its refusal in its own; the mode drawn stays the page's
+  guardAsking: s => acc(s, { guard: { status: 'asking', said: null, message: null } }),
+  guardSaid: (s, said) => acc(s, { guard: { status: 'said', said: typeof said === 'string' ? said : null, message: null } }),
+  guardRefused: (s, message) => acc(s, { guard: { status: 'refused', said: null, message: typeof message === 'string' ? message : null } }),
   // the curve's range; one the Account does not draw leaves the slice as it is
   setHistoryRange: (s, range) => (RANGES.includes(range) && range !== s.account.history.range ? read(s, 'history', { range }) : s),
   // the Statement is a drawer: one at a time, as Settings and Details are

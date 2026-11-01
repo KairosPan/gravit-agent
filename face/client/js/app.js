@@ -33,7 +33,8 @@ import { wantedViews, ensureViews, minuteAt, applyCursor, cursorFor, reapplyCurs
 import { stockDrawerHtml, askText } from './render/lunhui/stock.js';
 import { loadMemberTrace } from './wire/member-traces.js';
 import { isHostPreset } from './wire/speaker.js';
-import { statementLinesOf, statementCsvOf, connectOptionsOf, asksOf } from './host/account-view.js';
+import { statementLinesOf, statementCsvOf, connectOptionsOf, asksOf, pageOk } from './host/account-view.js';
+import { rulesOf } from './host/rules-view.js';
 import { isAccountKey, handWordsOf, watchedOf } from './host/market-view.js';
 import { isCnKey } from './wire/china.js';
 import { startOwner, postVia } from './host/owner.js';
@@ -224,16 +225,18 @@ export function boot(win, host = {}) {
   // this page as an owner device of the Account (spec 2026-10-22 §6.3): its key in this browser's IndexedDB (in memory where
   // there is none), every call through the face's proxy (a test hands in its own door); the standing read off every page that
   // lands — the first one pairs it once
+  // the owner door: the owner device's calls, and the Rules tab's Guard (the Account's one unsigned switch), through the face's proxy
+  const ownerPost = host.ownerPost ?? postVia((path, init) => win.fetch(path, init));
   const owner = startOwner({
     store,
-    post: host.ownerPost ?? postVia((path, init) => win.fetch(path, init)),
+    post: ownerPost,
     subtle: win.crypto?.subtle ?? null,
     keys: win.indexedDB ? indexedDbKeys(win.indexedDB) : memoryKeys(),
     flag: signedOutFlag(storage),
   });
   // the Account's page: read at boot, on entering Account, on Refresh, right after a receipt and on the stream's events; every
-  // 20 s while Account is on screen in a visible tab, 80 s while the stream is open
-  const account = startAccount({ store, getJson, now, schedule, cancelTimer, streamOpen: () => stream.status() === 'open', onPage: body => { void owner.standing(body); } });
+  // 20 s while Account is on screen in a visible tab, 80 s while the stream is open; Guard posted through the owner door
+  const account = startAccount({ store, getJson, post: ownerPost, now, schedule, cancelTimer, streamOpen: () => stream.status() === 'open', onPage: body => { void owner.standing(body); } });
   void account.load();
   // the Account seat's standing (spec 2026-10-20 §6.3): read on entering Venues or Agents, on Refresh, right after a seat receipt
   // and on a card's event
@@ -684,6 +687,17 @@ export function boot(win, host = {}) {
         limitPrice: d.limitPrice ?? '', stopPrice: d.stopPrice ?? '', side: d.side ?? '', base: d.base ?? '',
       }); break;
       case 'leverage': void sheet.open('leverage', { venue: d.venue ?? '', venueName: d.venueName ?? '', symbol: d.symbol ?? '', name: d.name ?? '', leverage: d.leverage ?? '' }); break;
+      // the Rules tab's (plan 4a Task 5): each seeded from the page as it stands — the cap now, whether the session ended, their
+      // leverage now; the three limits only for an Account that takes writes
+      case 'beast': void sheet.open('beast', {}); break;
+      case 'cap': case 'session': case 'leverageCap': {
+        const r = rulesOf(page, now());
+        if (!r.writes) break;
+        if (d.kind === 'cap') void sheet.open('cap', { capUsd: r.cap?.usd ?? null });
+        else if (d.kind === 'session' && r.session) void sheet.open('session', { ended: r.session.ended });
+        else if (d.kind === 'leverageCap' && r.leverage) void sheet.open('leverageCap', { max: r.leverage.max });
+        break;
+      }
       default: break;
     }
   }
@@ -875,6 +889,8 @@ export function boot(win, host = {}) {
     },
     // the owner's keys on Account: each its sheet; Revoke… and Disconnect… ask in place first; Grant the sheet that grants the ask
     openSheet: el => openSheetFrom(el),
+    // the Rules tab's Guard: one unsigned click, on any page that reads the Account (one in the air at a time)
+    setGuard: () => { if (pageOk(store.get().account.data)) void account.guard(); },
     askRevoke: el => { if (signs()) store.dispatch('askConfirm', { action: 'revoke', name: el.dataset.name ?? '', address: el.dataset.address ?? '' }); },
     askDisconnect: el => { if (signs()) store.dispatch('askConfirm', { action: 'disconnect', venue: el.dataset.venue ?? '', name: el.dataset.name ?? '' }); },
     grant: el => {

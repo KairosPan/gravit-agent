@@ -1,8 +1,9 @@
 // face/client/js/render/account.js — Account on the face (spec 2026-10-22 §6.2): the Account's own page and reads through
-// the face's proxy, in four tabs — Portfolio (the two figures, the change for the range and its curve, Assets, Positions,
+// the face's proxy, in five tabs — Portfolio (the two figures, the change for the range and its curve, Assets, Positions,
 // Open orders), Venues (each venue with its health and what it does, its Details drawer; the A-share quotes line; the seat
 // box), Agents (Gravit's seat first, then the Account's agents and the keys knocking), Cards (what waits for the owner, and
-// the agents' asks) — the Statement drawer, the Settings drawer with Devices; the owner device's line under
+// the agents' asks), Rules (plan 4a Task 5: the mode with its door-by-door rules, the cap on each move, the agents' session and
+// their leverage; Guard one unsigned click, the rest signed, their keys only on a page that signs) — the Statement drawer, the Settings drawer with Devices; the owner device's line under
 // the head (render/owner.js), and for a page that signs the keys that open the owner's sheets on Venues, Agents and Cards
 // (Connect an account, Open a paper account, Disconnect, Top up, Start over; Let in, Give a limit, End limit, Revoke,
 // Approve, Reject, Grant, Decline) — and, for an Account that takes writes, each position's Close… (Sell…) and a perpetual's
@@ -17,6 +18,7 @@ import {
   venuesOf, agentsOf, cardsOf, asksOf, requestsOf, seatWords, writesOn,
 } from '../host/account-view.js';
 import { amendSeedOf, closeSeedOf, leverageSeedOf } from '../host/sheet-market.js';
+import { rulesOf } from '../host/rules-view.js';
 import { providerWord } from '../host/market-view.js';
 import { chip } from './thread.js';
 import { seg, segLinks, sec, confirmPair } from './controls.js';
@@ -24,7 +26,7 @@ import { grantOf } from '../host/sheet-view.js';
 import { curveSvg } from './chart.js';
 import { renderDeviceLine, renderDevices } from './owner.js';
 
-const TABS = [['portfolio', 'Portfolio'], ['venues', 'Venues'], ['agents', 'Agents'], ['cards', 'Cards']];
+const TABS = [['portfolio', 'Portfolio'], ['venues', 'Venues'], ['agents', 'Agents'], ['cards', 'Cards'], ['rules', 'Rules']];
 // the curve's ranges, the Account's own names and their words
 const RANGES = [['1d', '1D'], ['1w', '1W'], ['1m', '1M'], ['all', 'All']];
 // a venue's Details facts, each under its label
@@ -329,6 +331,57 @@ function cardsTab(state, now) {
     `${asks ? box(`${title('Asks')}<div class="acct-orders">${asks}</div>`, 'Asks') : ''}</div>`;
 }
 
+// ── Rules (plan 4a Task 5) ──
+
+const RULES_LEAD = 'Guard: what agents ask for waits for you on a card. Beast: inside the limits you signed, it goes at once. Guard is one click; Beast is signed.';
+// Beast lifts the Account's card alone: this face's own gate on Gravit's orders (face/src/orders.ts) stands in both modes
+const GATE2 = "Beast removes the Account's card only: Gravit's orders still raise their Gate 2 card in this face first.";
+const READ_ONLY = what => `Read-only: the Account was started without trading, so there is no ${what}.`;
+const usd = n => (n === null ? '—' : `$${Number(n).toLocaleString('en-US', { maximumFractionDigits: 2 })}`);
+const ruleRow = (head, words, key = '') => `<div class="venue"><span>${lines(head, [words])}</span>${key}</div>`;
+
+// the switch: Guard one click on any page that reads the Account; Beast a signed sheet, its key only on a page that signs
+function modeSeg(mode, owner) {
+  const item = (label, value, data) => `<button${attrs({ type: 'button', class: cls('seg-item', mode === value && 'pressed'), 'aria-pressed': mode === value ? 'true' : 'false', ...data })}>${label}</button>`;
+  return `<div class="seg">${item('Guard', 'guard', { 'data-action': 'setGuard' })}${item('Beast', 'open', owner ? { 'data-action': 'openSheet', 'data-kind': 'beast' } : { disabled: true })}</div>`;
+}
+
+// what each mode does, door by door, as the Account has it; the mode in force marked Now
+function modeTable(r) {
+  if (!r.modeRows.length) return note('The account did not say what each mode does.');
+  const th = (label, m) => `<th scope="col">${label}${r.mode === m ? ` ${chip('Now')}` : ''}</th>`;
+  return `<div class="acct-wrap"><table class="acct-t"><thead><tr><th scope="col">An agent, inside its limit</th>${th('Guard', 'guard')}${th('Beast', 'open')}</tr></thead>` +
+    `<tbody>${r.modeRows.map(row => `<tr><td>${esc(row.door)}</td><td>${esc(row.guard)}</td><td>${esc(row.beast)}</td></tr>`).join('')}</tbody></table></div>`;
+}
+
+function rulesTab(state, now) {
+  const a = state.account;
+  const unread = pageNote(a);
+  if (unread !== null) return unread;
+  const r = rulesOf(a.data, now);
+  const owner = signs(state);
+  const g = a.guard ?? {};
+  const said = g.status === 'said' && g.said ? note(g.said) : g.status === 'refused' && g.message ? note(g.message) : '';
+  const card = r.cardMinutes === null ? '' : note(`A card nobody answers in ${r.cardMinutes} ${r.cardMinutes === 1 ? 'minute' : 'minutes'} expires.`);
+  const mode = box(`${title('Mode')}${modeSeg(r.mode, owner)}${said}${owner ? '' : note('Only a browser that signs switches to Beast.')}` +
+    `${note(RULES_LEAD)}${note(GATE2)}${modeTable(r)}${card}`, 'Mode');
+  const key = (kind, word) => (owner ? `<span class="btn-row">${sheetKey(kind, {}, word)}</span>` : '');
+  const cap = r.writes
+    ? ruleRow('Each move at most', `${usd(r.cap?.usd ?? null)} an order or a move`, key('cap', 'Change…'))
+    : ruleRow('Each move at most', READ_ONLY('cap to set'));
+  let session = '';
+  if (!r.writes) session = ruleRow("Agents' session", READ_ONLY('session to open'));
+  else if (r.session) {
+    const until = Date.parse(r.session.until);
+    const words = r.session.ended ? 'Ended: agents can do nothing until you start a new one.' : `Agents may act until ${Number.isNaN(until) ? '—' : fmtDate(until)}.`;
+    session = ruleRow("Agents' session", words, key('session', r.session.ended ? 'Start a new one' : 'Renew for 30 days'));
+  }
+  let leverage = '';
+  if (r.leverageOffered && !r.writes) leverage = ruleRow('Their leverage', READ_ONLY('leverage to set'));
+  else if (r.leverageOffered && r.leverage) leverage = ruleRow('Their leverage', `Up to ${r.leverage.max}x on a perpetual, at a venue that sets leverage from here.`, key('leverageCap', 'Change…'));
+  return `<div class="cards">${mode}${box(`<div class="venues">${cap}${session}${leverage}</div>`, 'Limits')}</div>`;
+}
+
 // ── the drawers ──
 
 // the Statement: the Account's lines newest first, each with who it was by, its status in the Account's word and its fee
@@ -360,7 +413,8 @@ export function renderAccountScreen(state, now) {
   const tab = TABS.some(([id]) => id === state.route.tab) ? state.route.tab : 'portfolio';
   const statement = a.statementOpen && !state.settingsOpen;
   const venue = statement || state.settingsOpen || !a.detailsVenue ? null : venuesOf(a.data).find(v => v.id === a.detailsVenue) ?? null;
-  const body = tab === 'venues' ? venues(state, now) : tab === 'agents' ? agentsTab(state, now) : tab === 'cards' ? cardsTab(state, now) : portfolio(state, now);
+  const body = tab === 'venues' ? venues(state, now) : tab === 'agents' ? agentsTab(state, now) : tab === 'cards' ? cardsTab(state, now)
+    : tab === 'rules' ? rulesTab(state, now) : portfolio(state, now);
   return `<main class="${cls('main', 'acct', (state.settingsOpen || statement || venue) && 'with-drawer')}">${head(state)}${a.message ? note(a.message) : ''}${tabs(state, tab)}${body}` +
     `${statement ? renderStatement(state, now) : ''}${venue ? venueDetails(venue, state) : ''}</main>`;
 }

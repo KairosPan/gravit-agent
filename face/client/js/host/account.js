@@ -3,8 +3,10 @@
 // history curve, the statement and the agents — and the connect sheet's reads (where this account can connect, the kept paper
 // books, a key file's check, a venue's reach), each kind one flight at a time; the page at the Account's own cadence (every
 // 20 s on screen, 80 s while the stream is open); and the stream's account events as the reads they name, past the face's
-// cache. The views over what lands are account-view.js's.
+// cache; and Guard (plan 4a Task 5), the Account's one unsigned switch, posted through the face's proxy. The views over what
+// lands are account-view.js's.
 import { pageOk, worthOf } from './account-view.js';
+import { refusedAt } from './owner-view.js';
 
 export const ACCOUNT_POLL_MS = 20_000, ACCOUNT_POLL_STREAM_MS = 80_000;
 
@@ -22,8 +24,13 @@ const hasPaper = page => pageOk(page) && page.venues.some(v => v?.paper === true
 // a read past the face's cache: the face's own flag, never forwarded
 const freshOf = path => `${path}${path.includes('?') ? '&' : '?'}fresh=1`;
 const nothing = () => {};
+const GUARD = '/data/account/guard';
+const GUARD_SAID = 'Guard: what agents ask for waits for you on a card.';
+const NO_ANSWER = 'The account did not answer. Try again.';
+// no door handed in: nothing answers
+const noDoor = async () => ({ status: 0, body: { ok: false, error: NO_ANSWER } });
 
-export function startAccount({ store, getJson, now = Date.now, schedule, cancelTimer, streamOpen = () => false, onPage = nothing }) {
+export function startAccount({ store, getJson, post = noDoor, now = Date.now, schedule, cancelTimer, streamOpen = () => false, onPage = nothing }) {
   let closed = false;
   let timer = null;
   let holdingsDue = 0;       // loadAll calls whose holdings read is still to come: a page landing leaves the paper lens to them
@@ -187,10 +194,33 @@ export function startAccount({ store, getJson, now = Date.now, schedule, cancelT
     else if (type === 'snapshot') void loadAll();
   }
 
+  /** Guard: one POST to the face's proxy (`/data/account/guard`, `{}` — the proxy sends the Account its fixed `{"mode":"guard"}`),
+   *  never signed: tightening is the Account's safer direction. One in the air at a time — a second press while it is joins
+   *  it. Said done only when the Account took it (a 2xx its own refused test passes); a refusal is the Account's words (`refusal.message`,
+   *  else `error`, else no answer). Then the page is read past the face's cache, so the mode drawn is the page's. `post` is the
+   *  owner door's (host/owner.js postVia: `{ status, body }`, never throwing). */
+  let guarding = null;
+  function guard() {
+    if (closed) return Promise.resolve();
+    if (guarding) return guarding;
+    store.dispatch('guardAsking');
+    const current = (async () => {
+      let r;
+      try { r = await post(GUARD, {}); } catch { r = { status: 0, body: {} }; }
+      if (closed) return;
+      // taken only on a 2xx its refused test does not call refused (the owner device's own `taken`)
+      if (!(r?.status >= 200 && r.status < 300) || refusedAt(r)) store.dispatch('guardRefused', messageOf(r?.body) ?? NO_ANSWER);
+      else store.dispatch('guardSaid', GUARD_SAID);
+      await load({ fresh: true });
+    })().finally(() => { if (guarding === current) guarding = null; });
+    guarding = current;
+    return current;
+  }
+
   function close() {
     closed = true;
     poll(false);
   }
 
-  return { load, loadHoldings, loadHistory, loadStatement, loadAgents, loadAll, loadVenuesHere, loadPaperBooks, checkKeyfile, reach, poll, onStreamEvent, close };
+  return { load, guard, loadHoldings, loadHistory, loadStatement, loadAgents, loadAll, loadVenuesHere, loadPaperBooks, checkKeyfile, reach, poll, onStreamEvent, close };
 }

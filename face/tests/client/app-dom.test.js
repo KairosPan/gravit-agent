@@ -1531,6 +1531,7 @@ function ownerDoor({ role = 'owner', requests = [], exchange = () => ({ ok: true
     }
     if (path === '/data/account/prepare') return { status: 200, body: preparationOf(body.draft) };
     if (path === '/data/account/exchange') return { status: 200, body: exchange(body.action) };
+    if (path === '/data/account/guard') return { status: 200, body: { ok: true, mode: 'guard' } };
     return { status: 404, body: { ok: false, error: 'no such route' } };
   };
   door.page = () => {
@@ -2550,5 +2551,63 @@ test('Open run goes to the channel page', async () => {
   f.click(f.element({ tagName: 'BUTTON', dataset: { action: 'lunhuiOpenRun', id: 'w-cn' } }));
   await settle();
   assert.deepEqual(store.get().route, { screen: 'channel', id: 'w-cn' });
+  store.timers.clear();
+});
+
+// ── Rules (plan 4a Task 5): Guard is one unsigned click, on any page that reads the Account ──
+
+test('Guard pressed twice in a row on a page that does not sign: one POST to /data/account/guard, the said line once; Beast opens no sheet', async () => {
+  const f = fakeWindow({ hash: '#/account/rules', storage: memoryStorage() });
+  const door = ownerDoor({ role: 'needs-code' });
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page() } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(() => store.get().owner.role === 'needs-code', 'the page to need the code');
+  await settle();
+  assert.match(f.html(), /data-action="setGuard">Guard<\/button>/);
+  assert.match(f.html(), /aria-pressed="false" disabled>Beast<\/button>/);
+  assert.match(f.html(), /Only a browser that signs switches to Beast\./);
+  const pagesBefore = h.reads.filter(isPage).length;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'setGuard' } });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'setGuard' } });
+  await settle();
+  assert.equal(door.sent('/data/account/guard').length, 1, 'one POST');
+  assert.deepEqual(door.sent('/data/account/guard')[0], {});
+  const said = f.html().match(/<p class="acct-note">Guard: what agents ask for waits for you on a card\.<\/p>/g) ?? [];
+  assert.equal(said.length, 1, 'the said line once');
+  assert.ok(h.reads.filter(isPage).slice(pagesBefore).includes('/data/account?fresh=1'), 'the page read fresh');
+  // Beast: no key on this page; were one pressed, no sheet
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'beast' } });
+  await settle();
+  assert.equal(store.get().sheet, null);
+  assert.equal(door.sent('/data/account/prepare').length, 0);
+  store.timers.clear();
+});
+
+test('on a page that signs, Beast and the three Change keys open their signed sheets, each prepared as the Account drafts it', async () => {
+  const f = fakeWindow({ hash: '#/account/rules', storage: memoryStorage() });
+  const door = ownerDoor();
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page() } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  const html = f.html();
+  for (const kind of ['beast', 'cap', 'session', 'leverageCap']) assert.match(html, new RegExp(`data-action="openSheet" data-kind="${kind}"`), kind);
+  const open = async kind => {
+    f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind } });
+    await settle();
+    return store.get().sheet;
+  };
+  assert.equal((await open('beast')).kind, 'beast');
+  assert.deepEqual(door.sent('/data/account/prepare').at(-1).draft, { type: 'setPolicy', change: 'mode', value: 'open' });
+  assert.equal((await open('session')).seed.ended, false);
+  assert.deepEqual(door.sent('/data/account/prepare').at(-1).draft, { type: 'setPolicy', change: 'session', value: '30d' });
+  const cap = await open('cap');
+  assert.deepEqual(cap.seed, { capUsd: 250 });
+  assert.match(f.html(), /That is the cap now/);
+  const lev = await open('leverageCap');
+  assert.deepEqual(lev.seed, { max: 5 });
+  assert.match(f.html(), /That is their leverage now/);
   store.timers.clear();
 });

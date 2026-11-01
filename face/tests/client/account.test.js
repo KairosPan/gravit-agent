@@ -46,13 +46,13 @@ function state({ tab = 'portfolio', page = fx('account'), holdings = fx('holding
 const draw = s => renderAccountScreen(s, NOW);
 const SEAT_BOX = /<section class="cardbox" aria-label="Account seat">[\s\S]*?<\/section>/;
 
-test('the head: Guard and Trading on chips; Refresh and Settings; four tabs with the cards count', () => {
+test('the head: Guard and Trading on chips; Refresh and Settings; five tabs with the cards count', () => {
   const html = draw(state());
   assert.match(html, /^<main class="main acct">/);
   has(html, '<div class="acct-head"><h1 class="head-title">Account</h1><span class="chip grey">Guard</span><span class="chip grey">Trading on · $250 a move</span><span class="spacer"></span>' +
     '<button type="button" class="pill" data-action="refreshAccount">Refresh</button><button type="button" class="pill" data-action="openSettings">Settings</button></div>');
   has(html, '<div class="seg"><a class="seg-item pressed" aria-current="page" href="#/account/portfolio">Portfolio</a><a class="seg-item" href="#/account/venues">Venues</a>' +
-    '<a class="seg-item" href="#/account/agents">Agents</a><a class="seg-item" href="#/account/cards">Cards · 1</a></div>', 'the four tabs, the Cards tab counting its one card');
+    '<a class="seg-item" href="#/account/agents">Agents</a><a class="seg-item" href="#/account/cards">Cards · 1</a><a class="seg-item" href="#/account/rules">Rules</a></div>', 'the five tabs, the Cards tab counting its one card');
   const page = fx('account');
   assert.match(draw(state({ page: { ...page, cards: [] } })), /href="#\/account\/cards">Cards<\/a>/, 'no count with nothing waiting');
   const two = draw(state({ page: { ...page, cards: [page.cards[0], { ...page.cards[0], id: 'card-0002', agent: '0xb0b', agentName: 'Scout' }] } }));
@@ -65,7 +65,7 @@ test('the head: Guard and Trading on chips; Refresh and Settings; four tabs with
   const bare = draw(state({ page: null }));
   has(bare, '<h1 class="head-title">Account</h1><span class="spacer"></span>');
   assert.doesNotMatch(bare, /class="chip/);
-  for (const tab of ['venues', 'agents', 'cards']) {
+  for (const tab of ['venues', 'agents', 'cards', 'rules']) {
     assert.match(draw(state({ tab })), new RegExp(`<a class="seg-item pressed" aria-current="page" href="#/account/${tab}">`), tab);
   }
   // Settings: the theme seg, drawn by app.js into whichever screen is up; the screen makes room for it
@@ -553,8 +553,8 @@ test("the Venues' keys: Connect an account, Open a paper account, Disconnect, To
   for (const p of [null, { ok: true }]) lacks(draw(signing(state({ tab: 'venues', page: p }))), 'data-action="openSheet"');
 });
 
-test('router: account tabs agents and cards parse; an unknown tab is portfolio', () => {
-  for (const tab of ['portfolio', 'venues', 'agents', 'cards']) {
+test('router: account tabs agents, cards and rules parse; an unknown tab is portfolio', () => {
+  for (const tab of ['portfolio', 'venues', 'agents', 'cards', 'rules']) {
     assert.deepEqual(parseHash(`#/account/${tab}`), { screen: 'account', tab });
     assert.equal(toHash({ screen: 'account', tab }), `#/account/${tab}`);
   }
@@ -563,4 +563,84 @@ test('router: account tabs agents and cards parse; an unknown tab is portfolio',
   // the screen draws the tab its route names, one it does not know as Portfolio
   assert.match(draw(R.nav(emptyState(), parseHash('#/account/cards'))), /<a class="seg-item pressed" aria-current="page" href="#\/account\/cards">/);
   assert.match(draw(R.nav(emptyState(), { screen: 'account', tab: 'memory' })), /<a class="seg-item pressed" aria-current="page" href="#\/account\/portfolio">/);
+});
+
+// ── Rules (plan 4a Task 5): Guard one unsigned click; Beast, the cap, the session and their leverage signed ──
+
+const RULES_KID = 'a5048199a8081854';
+const signingRules = s => R.ownerStanding(s, { role: 'signs', kid: RULES_KID });
+const rulesKey = (kind, word) => `<button type="button" class="btn-sm" data-action="openSheet" data-kind="${kind}">${word}</button>`;
+const GATE2 = "Beast removes the Account's card only: Gravit's orders still raise their Gate 2 card in this face first.";
+const LEAD = 'Guard: what agents ask for waits for you on a card. Beast: inside the limits you signed, it goes at once. Guard is one click; Beast is signed.';
+
+test('Rules on a writes-on page that signs: Mode, the door rules, each move, the session, their leverage, every key and the Gate 2 sentence', () => {
+  const html = draw(signingRules(state({ tab: 'rules' })));
+  has(html, '<a class="seg-item pressed" aria-current="page" href="#/account/rules">Rules</a>');
+  // Mode: Guard pressed, Beast a signed sheet
+  has(html, '<div class="seg"><button type="button" class="seg-item pressed" aria-pressed="true" data-action="setGuard">Guard</button>' +
+    '<button type="button" class="seg-item" aria-pressed="false" data-action="openSheet" data-kind="beast">Beast</button></div>');
+  has(html, esc(LEAD));
+  has(html, esc(GATE2));
+  lacks(html, 'Only a browser that signs switches to Beast.');
+  // the door-by-door table, the mode in force marked Now
+  has(html, '<th scope="col">An agent, inside its limit</th><th scope="col">Guard <span class="chip grey">Now</span></th><th scope="col">Beast</th>');
+  has(html, '<tr><td>Place or enlarge an order</td><td>Waits on a card</td><td>At once</td></tr>');
+  has(html, 'A card nobody answers in 30 minutes expires.');
+  // each move, the session, their leverage — each with its key
+  has(html, '$250 an order or a move');
+  has(html, rulesKey('cap', 'Change…'));
+  has(html, `Agents may act until ${fmtDate(Date.parse('2026-11-21T07:35:46.773Z'))}.`);
+  has(html, rulesKey('session', 'Renew for 30 days'));
+  has(html, 'Up to 5x on a perpetual, at a venue that sets leverage from here.');
+  has(html, rulesKey('leverageCap', 'Change…'));
+  lacks(html, 'Read-only:');
+  // Beast in force: Beast pressed, Now on its column
+  const page = fx('account');
+  const beast = draw(signingRules(state({ tab: 'rules', page: { ...page, mode: 'open' } })));
+  has(beast, 'aria-pressed="false" data-action="setGuard">Guard</button><button type="button" class="seg-item pressed" aria-pressed="true" data-action="openSheet" data-kind="beast">Beast</button>');
+  has(beast, '<th scope="col">Guard</th><th scope="col">Beast <span class="chip grey">Now</span></th>');
+  // an ended session starts a new one
+  const ended = draw(signingRules(state({ tab: 'rules', page: { ...page, dial: { ...page.dial, sessionEnded: true } } })));
+  has(ended, 'Ended: agents can do nothing until you start a new one.');
+  has(ended, rulesKey('session', 'Start a new one'));
+  // no venue sets leverage: no leverage row
+  const flat = { ...page, venues: page.venues.map(v => (v.trade ? { ...v, trade: { ...v.trade, leverage: false } } : v)) };
+  lacks(draw(signingRules(state({ tab: 'rules', page: flat }))), 'Their leverage');
+  // what the Guard press said, and a refusal, under the switch
+  has(draw(R.guardSaid(signingRules(state({ tab: 'rules' })), 'Guard: what agents ask for waits for you on a card.')), '<p class="acct-note">Guard: what agents ask for waits for you on a card.</p>');
+  has(draw(R.guardRefused(signingRules(state({ tab: 'rules' })), 'No & no')), '<p class="acct-note">No &amp; no</p>');
+  // the head's chips stay
+  has(html, '<span class="chip grey">Guard</span><span class="chip grey">Trading on · $250 a move</span>');
+});
+
+test('Rules on a read-only page: the three Read-only sentences, no key', () => {
+  const page = fx('account');
+  const ro = { ...page, connectLive: { ...page.connectLive, writes: { on: false, capUsd: 250 } } };
+  const html = draw(signingRules(state({ tab: 'rules', page: ro })));
+  has(html, 'Read-only: the Account was started without trading, so there is no cap to set.');
+  has(html, 'Read-only: the Account was started without trading, so there is no session to open.');
+  has(html, 'Read-only: the Account was started without trading, so there is no leverage to set.');
+  for (const k of ['cap', 'session', 'leverageCap']) lacks(html, `data-kind="${k}"`);
+  lacks(html, '$250 an order or a move');
+  // Mode still stands: Guard one click, and the Gate 2 sentence
+  has(html, 'data-action="setGuard">Guard</button>');
+  has(html, esc(GATE2));
+});
+
+test('Rules on a page that does not sign: the Guard seg live, no Beast sheet key, no Change…', () => {
+  for (const role of ['unknown', 'needs-code', 'pending', 'signed-out']) {
+    const html = draw(R.ownerStanding(state({ tab: 'rules' }), { role, kid: '' }));
+    has(html, '<button type="button" class="seg-item pressed" aria-pressed="true" data-action="setGuard">Guard</button>', role);
+    has(html, '<button type="button" class="seg-item" aria-pressed="false" disabled>Beast</button>', role);
+    has(html, 'Only a browser that signs switches to Beast.');
+    lacks(html, 'data-action="openSheet"', role);
+    lacks(html, 'Change…', role);
+    lacks(html, 'Renew for 30 days', role);
+    // the rules read as they stand
+    has(html, '$250 an order or a move');
+    has(html, esc(GATE2));
+  }
+  // an unread page: its note, no rule
+  lacks(draw(state({ tab: 'rules', page: null })), 'data-action="setGuard"');
+  has(draw(state({ tab: 'rules', page: { ok: true } })), 'Account unreadable');
 });

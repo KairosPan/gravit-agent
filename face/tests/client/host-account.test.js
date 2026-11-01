@@ -28,7 +28,7 @@ const leadOf = html => html.match(/<div class="label">([^<]*)<\/div><div class="
 // the host over a recording getJson — `json` answers a path by its exact text, else by the path without its fresh=1, else by
 // the path without its query: a body, an Error it rejects with, or a function of the path returning a promise — and recorded
 // timers ({ fn, ms, handle }, kept until run or cancelled); streamOpen answers r.streamIsOpen
-function rig({ json = {}, onPage } = {}) {
+function rig({ json = {}, onPage, post } = {}) {
   const store = createStore({ initial: emptyState(), reducers });
   const reads = [];
   const getJson = path => {
@@ -57,6 +57,7 @@ function rig({ json = {}, onPage } = {}) {
     cancelTimer: handle => { r.cancelled.push(handle); timers.delete(handle); },
     streamOpen: () => r.streamIsOpen,
     ...(onPage ? { onPage } : {}),
+    ...(post ? { post } : {}),
   });
   return r;
 }
@@ -684,4 +685,60 @@ test("a refused venues, books, key-file or reach read keeps its last answer and 
   assert.equal(again.a().venuesHere.message, null);
   await again.account.loadVenuesHere();
   assert.deepEqual([again.a().venuesHere.status, again.a().venuesHere.message], ['error', null]);
+});
+
+// ── Guard: one unsigned click (plan 4a Task 5) ──
+
+test('guard posts once while one is in the air, says the Account\'s words, and reads the page fresh', async () => {
+  const posts = [];
+  let release;
+  const post = (path, body) => { posts.push([path, body]); return new Promise(res => { release = res; }); };
+  const r = rig({ json: { '/data/account': noPaper({ mode: 'guard' }) }, post });
+  const one = r.account.guard();
+  const two = r.account.guard();
+  assert.equal(two, one, 'a second press while one is in the air joins it');
+  assert.equal(r.a().guard.status, 'asking');
+  await tick();
+  assert.deepEqual(posts, [['/data/account/guard', {}]], 'one POST, an empty body');
+  release({ status: 200, body: { ok: true, mode: 'guard' } });
+  await one;
+  await settle();
+  assert.equal(r.a().guard.status, 'said');
+  assert.equal(r.a().guard.said, 'Guard: what agents ask for waits for you on a card.');
+  assert.deepEqual(r.reads, ['/data/account?fresh=1'], 'the page read past the face\'s cache');
+  assert.equal(r.a().data.mode, 'guard');
+  // once settled, the next press posts again
+  const three = r.account.guard();
+  assert.notEqual(three, one);
+  await tick();
+  assert.equal(posts.length, 2);
+  release({ status: 200, body: { ok: true, mode: 'guard' } });
+  await three;
+});
+
+test('a refused guard says the refusal and leaves the mode drawn as the page has it', async () => {
+  const answers = [
+    { status: 409, body: { ok: false, refusal: { code: 'E_ACCOUNT_X', message: 'The account would not switch now.' } } },
+    { status: 503, body: { ok: false, unreachable: 'ECONNREFUSED', error: 'unreachable' } },
+    { status: 0, body: {} },
+  ];
+  const post = async () => answers.shift();
+  const r = rig({ json: { '/data/account': noPaper({ mode: 'open' }) }, post });
+  await r.account.guard();
+  await settle();
+  assert.equal(r.a().guard.status, 'refused');
+  assert.equal(r.a().guard.message, 'The account would not switch now.');
+  assert.equal(r.a().data.mode, 'open', 'the page as read: still Beast');
+  assert.deepEqual(r.reads, ['/data/account?fresh=1']);
+  const html = renderAccountScreen({ ...r.store.get(), route: { screen: 'account', tab: 'rules' } }, Date.now());
+  assert.match(html, /The account would not switch now\./);
+  assert.match(html, /aria-pressed="true" data-action="openSheet" data-kind="beast"|aria-pressed="true"[^>]*>Beast</, 'Beast drawn pressed');
+  await r.account.guard();
+  assert.equal(r.a().guard.message, 'unreachable', 'else its error');
+  await r.account.guard();
+  assert.equal(r.a().guard.message, 'The account did not answer. Try again.', 'else the fixed words');
+  // a post that throws is no answer
+  const r2 = rig({ json: { '/data/account': noPaper() }, post: async () => { throw new Error('boom'); } });
+  await r2.account.guard();
+  assert.equal(r2.a().guard.message, 'The account did not answer. Try again.');
 });
