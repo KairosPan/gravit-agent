@@ -22,8 +22,8 @@ const MARGIN_LABELS = { cross: 'Cross', isolated: 'Isolated' };
 // the margin modes a seed offers: a list, or the comma-joined string a key's data-* drew it as; only the two the Account knows
 const modesOf = v => (Array.isArray(v) ? v : str(v).split(','))
   .map(x => (typeof x === 'string' ? x.trim() : '')).filter((x, i, all) => Object.hasOwn(MARGIN_LABELS, x) && all.indexOf(x) === i);
-// the most leverage a seed allows: a whole figure of 1 or more, else none said
-const maxOf = v => { const n = Number(figure(v)); return Number.isInteger(n) && n >= 1 ? n : null; };
+// the most leverage a seed allows: a positive figure as the page takes one (a fraction too), else none said
+const maxOf = v => { const n = Number(figure(v)); return Number.isFinite(n) && n > 0 ? n : null; };
 
 /** The Market half's sheet kinds. */
 export const MARKET_KINDS = ['close', 'amend', 'leverage'];
@@ -144,7 +144,7 @@ const canAt = (page, venue) => venuesOf(page).find(v => v.id === venue)?.tradeCa
 export function amendSeedOf(order, page) {
   const o = isRecord(order) ? order : {};
   if (!str(o.id) || !str(o.venue) || !CHANGEABLE.has(o.type) || !canAt(page, o.venue).amend) return null;
-  if (o.waitingForWallet === true || o.canceling === true || o.unfollowed === true || o.changing === true) return null;
+  if (o.waitingForWallet === true || o.canceling === true || o.unfollowed === true || o.changing === true || o.unconfirmed === true) return null;
   return {
     venue: o.venue, order: o.id, type: o.type, kind: str(o.kind), qty: figure(o.qty), limitPrice: figure(o.limitPrice),
     stopPrice: figure(o.stopPrice), side: str(o.side), base: str(o.base),

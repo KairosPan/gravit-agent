@@ -663,5 +663,5 @@ test("a Leverage key carries the most and the modes the market's read says; a Ch
   assert.match(said, /data-leverage="3" data-max-leverage="50" data-margin-modes="cross,isolated"/);
   const order = { id: 'ord-0004', venue: 'ex', type: 'stop', kind: 'spot', qty: 0.6, stopPrice: 137.83, side: 'sell', base: 'SOL' };
   assert.match(changeKey(order, page), /Change…/);
-  for (const flag of ['waitingForWallet', 'canceling', 'unfollowed', 'changing']) assert.equal(changeKey({ ...order, [flag]: true }, page), '', flag);
+  for (const flag of ['waitingForWallet', 'canceling', 'unfollowed', 'changing', 'unconfirmed']) assert.equal(changeKey({ ...order, [flag]: true }, page), '', flag);
 });

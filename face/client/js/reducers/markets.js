@@ -25,6 +25,12 @@ const charted = (id, range) => (isCnKey(id) || (isAccountKey(id) && !String(id).
 const RANKED = new Set(['volume', 'movers']);
 const rank = (s, patch) => mk(s, { rank: { ...s.markets.rank, ...patch } });
 const named = v => typeof v === 'string' && v !== '';
+// what the market says of its leverage — the most it takes and the margin modes it sets — kept only where it says them (the Leverage
+// sheet bounds its field by them)
+const limitsOf = m => ({
+  ...(number(m?.maxLeverage) !== null && number(m.maxLeverage) > 0 ? { maxLeverage: number(m.maxLeverage) } : {}),
+  ...(Array.isArray(m?.marginModes) ? { marginModes: m.marginModes.filter(x => typeof x === 'string') } : {}),
+});
 const text = v => (typeof v === 'string' ? v : null);
 // a price's stamp as a time, or null when it has none that parses
 const timeOf = v => { const t = typeof v === 'string' ? Date.parse(v) : NaN; return Number.isFinite(t) ? t : null; };
@@ -78,7 +84,7 @@ export const reducers = {
       next ??= { ...s.markets.accountQuotes };
       next[key] = {
         price: number(m.price), bid: number(m.bid), ask: number(m.ask), quoteAt: text(m.quoteAt), quoteFrom: text(m.quoteFrom),
-        changePct24h: number(m.changePct24h), volumeUsd24h: number(m.volumeUsd24h),
+        changePct24h: number(m.changePct24h), volumeUsd24h: number(m.volumeUsd24h), ...limitsOf(m),
       };
     }
     return next ? mk(s, { accountQuotes: next }) : s;
@@ -100,7 +106,7 @@ export const reducers = {
           // its last trade, else the middle: the Account's page's own order (its ui/stream.js stPrice), but for a perpetual, middle first there
           price: last ?? (bid !== null && ask !== null ? (bid + ask) / 2 : null), bid, ask,
           quoteAt: text(data.priceAt) ?? text(data.at), quoteFrom: text(data.from),
-          changePct24h: was?.changePct24h ?? null, volumeUsd24h: was?.volumeUsd24h ?? null, streamed: true,
+          changePct24h: was?.changePct24h ?? null, volumeUsd24h: was?.volumeUsd24h ?? null, streamed: true, ...limitsOf(was),
         },
       },
     });

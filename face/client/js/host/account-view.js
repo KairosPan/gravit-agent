@@ -164,7 +164,7 @@ export function orderRowsOf(orders, keys) {
       // what keeps an order from being changed (the Account page's tkAmendable, and the Account's own refusal of a change not yet
       // confirmed): waiting for the wallet to send it, being canceled, not followed since a restart, a change the venue has not confirmed
       waitingForWallet: Boolean(o.walletTxs) && !str(o.ref), canceling: o.canceling === true, unfollowed: Boolean(o.unfollowed),
-      changing: Boolean(o.changing),
+      changing: Boolean(o.changing), unconfirmed: Boolean(o.unconfirmed) && !str(o.ref),
     };
   });
 }

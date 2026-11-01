@@ -106,8 +106,9 @@ test("leverage is bounded by the market's own most and offers the modes the venu
   assert.deepEqual(marketFieldsOf('leverage', cross)[1].options, [{ value: '', label: 'Keep it' }, { value: 'cross', label: 'Cross' }]);
   assert.equal(marketDraftOf('leverage', { leverage: '5', marginMode: 'isolated' }, cross), 'That margin mode is not offered here', 'isolated is not offered there');
   assert.equal(marketDraftOf('leverage', { leverage: '5', marginMode: 'cross' }, cross).marginMode, 'cross');
-  // a most that is not a whole figure of 1 or more says nothing
-  for (const maxLeverage of ['', 'x', '0', '2.5', undefined]) assert.equal(marketDraftOf('leverage', { leverage: '100' }, { ...seed, maxLeverage }).leverage, '100', String(maxLeverage));
+  assert.equal(marketDraftOf('leverage', { leverage: '3' }, { ...seed, maxLeverage: '2.5' }), 'Leverage is at most 2.5x here', 'a fractional most, as the page takes one');
+  // a most that is not a figure above zero of 1 or more says nothing
+  for (const maxLeverage of ['', 'x', '0', '-3', undefined]) assert.equal(marketDraftOf('leverage', { leverage: '100' }, { ...seed, maxLeverage }).leverage, '100', String(maxLeverage));
 });
 
 test("the seeds from the stand-in's rows: Change on a resting order at a venue that amends, Leverage on a perpetual where its venue sets it", () => {
@@ -120,7 +121,7 @@ test("the seeds from the stand-in's rows: Change on a resting order at a venue t
   assert.equal(amendSeedOf({ ...orders[0], id: '' }, page), null);
   // the Account page's own rule: no Change on an order waiting for its wallet, being canceled, not followed, or mid-change
   assert.notEqual(amendSeedOf(orders[2], page), null);
-  for (const flag of ['waitingForWallet', 'canceling', 'unfollowed', 'changing']) assert.equal(amendSeedOf({ ...orders[2], [flag]: true }, page), null, flag);
+  for (const flag of ['waitingForWallet', 'canceling', 'unfollowed', 'changing', 'unconfirmed']) assert.equal(amendSeedOf({ ...orders[2], [flag]: true }, page), null, flag);
   const positions = positionsOf(fx('holdings'));
   assert.deepEqual(closeSeedOf(positions[0]), { venue: 'ex', symbol: 'BTC/USDT:USDT', name: 'BTC perpetual', side: 'long', qty: '0.01', kind: 'perp' });
   assert.equal(closeSeedOf(positions[2]).kind, 'event');
@@ -142,4 +143,24 @@ test("the seeds from the stand-in's rows: Change on a resting order at a venue t
     { venue: 'ex', venueName: 'Stand-in Exchange', symbol: 'BTC/USDT:USDT', name: 'BTC perpetual', leverage: '3', maxLeverage: '50', marginModes: 'cross,isolated' });
   assert.equal(marketLeverageSeedOf({ kind: 'spot' }, legs, positions, page), null);
   assert.equal(marketLeverageSeedOf({ kind: 'perp' }, [{ ...legs[1], connected: false }], positions, page), null, 'a public listing only');
+});
+
+test('the real path: a quotes answer into the store bounds the Leverage field of a position and of a market page', async () => {
+  const { createStore } = await import('../../client/js/store.js');
+  const { reducers } = await import('../../client/js/reducers/index.js');
+  const { emptyState } = await import('../../client/js/data/empty.js');
+  const store = createStore({ initial: emptyState(), reducers });
+  store.dispatch('accountQuotesLoaded', { quotes: [{ venue: 'ex', symbol: 'BTC/USDT:USDT', market: { price: 62000, quoteAt: '2026-11-01T12:00:00Z', maxLeverage: 20, marginModes: ['cross', 'isolated', 7] } }] });
+  const quotes = store.get().markets.accountQuotes;
+  const page = fx('account');
+  const positions = positionsOf(fx('holdings'));
+  const seed = leverageSeedOf(positions[0], page, quotes);
+  assert.deepEqual([seed.maxLeverage, seed.marginModes], ['20', 'cross,isolated']);
+  assert.equal(marketDraftOf('leverage', { leverage: '25' }, seed), 'Leverage is at most 20x here');
+  assert.equal(marketFieldsOf('leverage', seed)[0].label, 'Leverage, 1 to 20');
+  const legs = [{ venue: 'ex', venueName: 'Stand-in Exchange', symbol: 'BTC/USDT:USDT', connected: true }];
+  assert.equal(marketLeverageSeedOf({ kind: 'perp', name: 'BTC perpetual' }, legs, positions, page, quotes).maxLeverage, '20');
+  // a later quote without them (or the stream's) keeps nothing it was not told, and a stream frame keeps what the poll said
+  store.dispatch('streamQuote', { data: { venue: 'ex', symbol: 'BTC/USDT:USDT', last: 62100, at: '2026-11-01T12:00:05Z' } });
+  assert.equal(leverageSeedOf(positions[0], page, store.get().markets.accountQuotes).maxLeverage, '20');
 });
