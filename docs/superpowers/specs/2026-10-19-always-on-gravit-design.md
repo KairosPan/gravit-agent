@@ -555,6 +555,55 @@ reported in the same line ("cycle in <channel> is disarmed; type continue in its
 this moot for briefs; the desk session's annotations queue behind the operator's message in dsh's
 inbox). Operator messages in the face or on the phone never wait for the clock.
 
+**As built (P2, 2026-10-21):**
+
+- **`standing.yml` is a mapping**, `budget:` and `orders:`, which only the face parses, with
+  js-yaml's `CORE_SCHEMA` (`face/src/standing.ts`): an unquoted date stays the text `2026-11-30`,
+  a boolean is only `true` or `false`, a time only `HH:MM` and a duration only `<n>s` or `<n>m`.
+  An order without its arming fields (`armedAt`, `sha256`, a script's `producerSha256`) is
+  refused `not armed`, and so is a `close-Nm` whose minutes cannot hold the producer's deadline,
+  the turn's and the 5-minute grace; any fault stops every order until it is fixed, with one
+  `standing-error` event and one phone line per distinct error. There is no file watch and no
+  `reload` command: the clock row re-reads the file when its size, mtime or inode moves, at its
+  next 30-second tick.
+- **Producers are `scripts/<file>.py`, hash-pinned, or `builtin:<name>`, and there is no
+  `scripts/desk_brief.py`**: the pre-close brief is `builtin:brief` (`face/src/brief.ts`), the
+  desk's book priced from one snapshot of the face's quote hub. A script runs with no shell, its
+  cwd the repository root rather than the order's directory, an allow-listed environment and its
+  input as JSON on stdin; the face runs a private copy of exactly the bytes it verified, so the
+  read-after-check gap is closed for the script as for the text. A producer that fails does not
+  skip the turn: the wake message says so.
+- **`dir: desk` runs in `desk/journal`**, behind the instruction-chain fence for that cwd
+  (`findChainViolation`), checked before the firing, at its turn's start and after it;
+  `dir: strategies/<name>` runs in that directory (P4).
+- **The calendar is asked at boot — the clock row's first tick — and on each ET date change**,
+  not at 00:05 ET (`scripts/market_clock.py`, ten days ahead); a failed ask is asked again at most
+  every 10 minutes, and while no window covers the day no anchored order fires, with one
+  `calendar-error` and one phone line.
+- **A busy firing queues**: one firing runs at a time, and a queued one runs even past its grace.
+  A refusal consumes nothing, so a rearm or a resume inside the grace fires that day; the key is
+  consumed only by the `started` record, appended once under the ledger's lock, so two faces on
+  one home start a firing once. The files a turn wrote are a bounded walk of its cwd before and
+  after it (2,000 entries, no link followed), not `git status`. The disarmed-cycle line of
+  "Restart and gaps" is not built (P2-17).
+- **Arming is `npm run desk -- arm`, `rearm` and `rearm --expires`**, run from a terminal on the
+  checkout the service runs: `arm <dir> --id <id> --at <anchor> --expires <date>` pins the text's
+  sha256 (and a script's) and appends the entry, writing only over the file it read; `rearm <id>`
+  re-pins a changed file after the operator has reviewed it; `rearm <id> --expires <date>`
+  extends an order, an expired one too, and only what was reviewed: it is refused while a pinned
+  file has changed, so the way after an edit is review, `rearm <id>`, then `rearm <id> --expires
+  <date>`.
+- **The budget is the plain sum of the four buckets** of every `desk-turn` since 00:00 ET — the
+  phone's, the browser's and the firings' alike — against `budget.dailyTokens`; spent, firings are
+  refused, with one `budget-spent` event and one phone line a day, and each phone post is answered
+  with one line instead of a turn. `OFF` outranks it.
+- **Delivery stops at the order's market moment**: a `close-Nm` firing's text goes only before the
+  close, an `open-Nm` one's only before the open, and after it one line goes instead
+  (`<id> finished after the close; not sent - it describes a market that has moved`). Everything
+  a firing sends leaves through the desk conversation's `deliver`, so a pause in force holds it
+  back. The Desk panel's Standing orders card and `npm run service -- status` show each order's
+  next anchor, its pins and its last firing.
+
 ### 5.5 Levels, rules, holdings and the watch row
 
 **`levels.yml`** (desk and per strategy; loaded from both, each capped at 40 entries, mine):

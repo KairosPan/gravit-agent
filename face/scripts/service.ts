@@ -318,8 +318,10 @@ function lastRunLine(runs: DeskRun[]): string | undefined {
  * plist launchd has no job for, so a face answering on the port is not credited to a job launchd
  * lacks; then, when the face answered, its address and the desk's lines (src/desk.ts
  * `deskStatusLines`, which the phone's `/status` prints too): uptime, boot time and whether its
- * desk is on on the address's line, then the pause when the desk is paused and the Telegram bridge
- * when the face reports one, their times in New York and dated when not today; then the ledger's
+ * desk is on on the address's line, then the pause when the desk is paused, the Telegram bridge
+ * when the face reports one, the day's token budget and, while their clock runs, the standing
+ * orders (src/desk.ts `budgetLine` and `standingLines`), their times in New York and dated when not
+ * today; then the ledger's
  * read error when there is one, the sleep gaps when there were any, and how the run before it
  * ended - or else `not answering on <port>`; and last the sign-in URL from the log.
  * @param args - `label`, the job; `info`, {@link parseLaunchctlPrint}'s; `installed`, whether the

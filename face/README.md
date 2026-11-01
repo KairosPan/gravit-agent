@@ -115,6 +115,7 @@ outside the whole repo.
 | `FACE_DESK` | unset | `0` mounts none of the desk's rows — no ledger `boot` or `shutdown`, no sleep watch, no desk conversation, no Telegram bridge — for a second face beside the service, which runs on a scratch home ("Run as a service" below); `/data/desk/status` and the Pause route still answer, `desk.enabled: false`. Any other value, empty included, leaves the desk on |
 | `FACE_DESK_MODEL` | `deepseek-official/deepseek-flash` | the desk session's model route, `provider/model`; one the tree does not serve falls back to the tree's default selection — Gravit's model — with one line ("The desk" below) |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_OPERATOR_ID` | — | the bot's token and the operator's numeric Telegram user id; with both set (and the desk on) the face runs the Telegram bridge, with either missing it runs none ("The desk" below). The token is a key: it lives in `$DSH_HOME/.env` |
+| `FACE_PYTHON` | `python3` | the interpreter the instruments' producers, the market clock and a standing order's script producer run on: it must import `alpaca_kit` and `pandas_market_calendars` (`pip install -e ".[live]"` at the repo root). Without the calendar no standing order fires, with one phone line a day naming the interpreter, and `npm run desk -- arm` refuses. For the service, put it in `$DSH_HOME/.env` by hand ("Standing orders" below) |
 | `DSH_HOME` | `~/.dsh` | the harness home: profiles, sessions, storages, credentials — the browser-session signing secret included |
 | `DEEPSEEK_API_KEY` | — | resolved per request through the credential seam, then the environment |
 | `DSH_TELEMETRY_DISABLED` | unset | the telemetry row is already off by the face's policy layer (D3); this switch matters only once an operator patch re-enables it, and then still wins — ANY non-empty value (`0` and `false` included) disables it again |
@@ -200,9 +201,11 @@ job loading.
 shell's `PATH` into the plist (less the `node_modules` folders npm puts first)
 and runs the first `node` on it, which it prints with the home (`home: …`,
 `node: …`). That `PATH` must find the same `node` and a `python3` with
-`alpaca_kit` installed (`pip install -e .` at the repo root): that python
-serves the instruments' producers, and the Alpaca MCP server too if the
-operator's row runs `python -m alpaca_kit.mcp`. The service runs profile
+`alpaca_kit` and `pandas_market_calendars` installed (`pip install -e ".[live]"`
+at the repo root): that python serves the instruments' producers, the market
+clock and a standing order's script producer ("Standing orders" in "The desk")
+— unless `FACE_PYTHON` in the home's `.env` names another — and the Alpaca MCP
+server too if the operator's row runs `python -m alpaca_kit.mcp`. The service runs profile
 `face` on the shell's `DSH_HOME`, so `install` refuses a home with no
 `profiles/face` — `no profile at …: run "cd face && npm run setup" with
 DSH_HOME=… first` — rather than install a face that would exit 1 every 30 s.
@@ -215,7 +218,10 @@ plist's and what dsh reads from the home's `.env` at boot: `FACE_PYTHON`,
 `FACE_PROFILE`, `FACE_AKSHARE_MCP_COMMAND`, `DSH_PERMISSION_MODE` and anything
 else exported only in a terminal never reach it — it runs `python3` from its
 `PATH`, profile `face`, AKShare at `~/.local/bin/akshare-mcp` and the
-`workspace-write` sandbox mode.
+`workspace-write` sandbox mode. A name the face reads after boot can live in
+the home's `.env` instead, which dsh fills in at boot: `FACE_PYTHON` is the one
+to set there when the `python3` on the frozen `PATH` lacks `alpaca_kit` or
+`pandas_market_calendars`.
 
 **Keys.** The plist's environment is `PATH`, `HOME` and `DSH_HOME`, plus
 `FACE_PORT` for a port asked for (`--port`, kept by a reinstall) — never a key:
@@ -1876,13 +1882,14 @@ turn (`DEVELOPMENT.md` §9).
 
 **In the browser.** The rail's first item, **Desk** (`/#desk`), is the Desk panel: the desk —
 on or off, up since when, the pause and its control — then the Telegram bridge, the desk
-conversation, today's desk turns and their tokens, and the desk's sessions. Pause offers 30
+conversation, today's desk turns and their tokens, the standing orders and the day's budget
+("Standing orders" below), and the desk's sessions. Pause offers 30
 minutes, 2 hours, 1 day or until resumed (`POST /data/desk/pause`), and the panel shows the pause
 the face answered with, which may be a longer one that stood; there is no resume control. The
 cards refresh every 30 s while the panel shows, leaving the Pause control as it is — a dropdown
 you hold open stays open — and the Telegram card shows `poll failing since …` while the polls
-fail. A desk session opens in place, titled
-`Desk · <date>` when it has no title of its own; a text from the phone carries a ☎ over the
+fail. A desk session opens in place — a standing order's firing titled `<order> · <date>`, any
+other `Desk · <date>` when it has no title of its own; a text from the phone carries a ☎ over the
 operator's bubble. A card parked on a desk session — the session nobody watches — puts a
 `waiting` chip on its row and on the conversation card, and a badge on the rail's Desk item while
 another panel shows. The desk's sessions stay out of the folder picker and the strategy list,
@@ -1890,6 +1897,151 @@ an archived one but in its archived group.
 Both desk routes, `GET /data/desk/status` and `POST /data/desk/pause`, keep only the `/data`
 loopback fence and no cookie ("Data routes and caches"), so anything on this machine — a shell
 turn included — can read the status and pause the desk: the safe direction (charter D17).
+
+### Standing orders (src/schedule.ts + src/firing.ts + src/standing.ts + src/brief.ts + client/desk-standing.js)
+
+The desk's clock fires the operator's standing orders on the exchange calendar (the desk spec's
+P2, §5.4 and §5.9): each is a text the operator wrote and armed, fired at its anchor in a fresh
+desk session whose final text goes to the phone — informing, never ordering (charter §1). The
+first is the pre-close brief: `desk/STANDING.md`, tracked, with `builtin:brief`, the face's own
+producer, which prices the desk's book — `desk/holdings.yml`, `desk/levels.yml` and every
+`strategies/<name>/levels.yml`, gitignored, with `desk/holdings.example.yml` and
+`desk/levels.example.yml` tracked beside them — and the index and sector ETFs from one snapshot
+of the quote hub.
+
+**Arm it** from a terminal, in `face/` of the checkout the service runs: `arm` hashes that
+checkout's files, and the service checks its own (`DEVELOPMENT.md` §9, R42).
+
+```bash
+cd face
+npm run desk -- arm desk --id preclose --at close-30m --producer builtin:brief --expires 2026-12-31
+# armed preclose in <root>: desk/STANDING.md sha256 <12 hex>…, at close-30m, expires 2026-12-31, producer builtin:brief; the face reads standing.yml again within 30 s
+```
+
+`arm` adds the order to `$DSH_HOME/face/desk/standing.yml` (mode `0600`) — on the harness home
+this shell resolves, as `npm run desk -- pause` does — with the sha256 of `desk/STANDING.md` and,
+for a script producer, of its script. Its arguments:
+
+- `desk` or `strategies/NAME` — where the order's text lives and its turn runs: `desk` runs in
+  `desk/journal/`, `strategies/NAME` in that directory;
+- `--id` — a-z, 0-9 and `-`, opening with a letter, at most 40 characters;
+- `--at` — `open`, `close`, `open±Nm` or `close±Nm` (N 1–600; `open-Nm` at most 570 and
+  `close+Nm` at most 479, so the anchor stays on its session's New York date), or `HH:MM` New
+  York time; XNYS sessions only, early closes included: `close-30m` is 15:30 ET, and 12:30 ET on
+  2026-11-27 and 2026-12-24, while a `15:30` order stays at 15:30. A `close-Nm` must leave room
+  for the producer's deadline, the turn's and the 5-minute grace (`close-15m leaves 15 min before
+  the close; its producer (5 min), its turn (10 min) and the 5-minute grace need 20 min`);
+- `--expires YYYY-MM-DD` — required: the last New York date it fires, not before today;
+- `--producer scripts/FILE.py | builtin:NAME` — what runs before the turn, its output quoted in
+  the wake message: `builtin:brief`, or one `.py` file directly under `scripts/`, pinned by its
+  bytes and run from a private copy of them with no shell, cwd the repository root, its input as
+  JSON on stdin and an environment of `PATH`, `HOME`, `LANG`, `TZ`, `LC_*`, `APCA_*`, `ALPACA_*`,
+  `ALPHA_*` and `GRAVIT_ROOT` (`DEVELOPMENT.md` §3.5);
+- `--turn-deadline` (1–30 min, `10m` by default) and `--producer-deadline` (10 s–180 min, `5m` by
+  default), each `<n>s` or `<n>m`;
+- `--model PROVIDER/MODEL` — the turn's route; without it a firing runs Gravit's default model,
+  not the desk's flash; one the tree does not serve falls back to the default with one line;
+- `--no-wake` — run the producer alone: no turn, and no message unless it fails.
+
+`arm` refuses with one line, `cannot arm <id>: <reason>`, and writes nothing: a taken id
+(`<id> is already armed; npm run desk -- rearm <id> takes a changed file's new hash`), a bad value,
+a market calendar that does not answer for today (`… FACE_PYTHON must name an interpreter with
+pandas_market_calendars`: it asks under this shell's `FACE_PYTHON`, else `python3`), a
+`standing.yml` the face refuses, and a file changed between its read and its write (`run the
+command again`). A `standing.yml` refused because an order in it is not armed — one written by hand
+without its `armedAt` and pins — names the way out: remove that order from `standing.yml`, then arm
+it again.
+
+**After an edit** to `STANDING.md` or a script, the next anchor is refused with its line
+(`preclose · <date> refused: desk/STANDING.md changed since arming. Review it, then: npm run desk --
+rearm preclose`) until you review the change and re-arm:
+
+```bash
+npm run desk -- rearm preclose                        # take the reviewed files' new hashes
+npm run desk -- rearm preclose --expires 2027-03-31   # extend its last day, an expired order's too
+```
+
+`rearm <id> --expires` moves only the last day, and is refused while a pinned file has changed
+(`cannot re-arm preclose: desk/STANDING.md changed since arming; review it, then: npm run desk --
+rearm preclose`): an expired order never fires, so nothing refused that edit. The way after an edit
+is review, `rearm <id>`, then `rearm <id> --expires <date>`. A re-arm inside the 5-minute grace
+fires that day.
+
+**`standing.yml`** is yours: `arm` and `rearm` write it, you may edit it by hand, and the face only
+reads it. It is a mapping of `budget:` and `orders:`, read strictly — a date `YYYY-MM-DD`, a boolean
+only `true` or `false`, a time only `HH:MM`, a duration only `<n>s` or `<n>m` — and any fault (a
+typo, an unknown key, an order without its arming fields) stops every order until it is fixed, with
+one phone line per distinct error. `enabled: false` silences an order without removing it.
+
+```yaml
+budget:
+  dailyTokens: 2000000   # the desk's tokens per New York day
+orders:
+  - id: "preclose"
+    # … as arm wrote it
+```
+
+`budget.dailyTokens` caps the plain sum of the four token buckets of every desk turn since 00:00
+ET — the phone's, the browser's and the firings'. Set it after the first measured week (the spec's
+§6); until then the status says `cap not set`. Spent, the standing orders are refused for the rest
+of the day with one line, and each phone text is answered with the budget line instead of a turn;
+a turn opened in the browser still runs, and the pause outranks the budget.
+
+**When an order fires.** The clock ticks every 30 s and asks the market calendar —
+`scripts/market_clock.py`, pandas_market_calendars' XNYS — once a New York day. An order is due
+from its anchor to 5 minutes past it. Before it runs the face checks the pause, the day's budget,
+the text's and the script's pins and the instruction-chain fence ("The fence" above); a refusal
+consumes nothing, so an order lifted inside the grace still fires. One firing runs at a time, a
+queued one even past its grace. A firing is a fresh `gravit-desk` session in the order's
+directory — never the phone's conversation — woken once with the verified text, the session's
+times and the producer's output, under the order's turn deadline; its final text goes to the phone
+through the same pause as every desk message. A close-anchored text that finishes after the close
+is held back with one line, since it describes a market that has moved. The brief's turn also saves
+its message as `desk/journal/briefs/<date>-preclose.md`. An anchor the face missed — asleep, not
+running, or found past its grace — is never run late, and a firing a restart cut off never runs
+twice. Every step is a line in `$DSH_HOME/face/desk/firings.jsonl`.
+
+**`FACE_PYTHON`.** The market clock and a script producer run on the face's interpreter:
+`FACE_PYTHON`, else the first `python3` on the `PATH` the service's plist froze at install ("Run as
+a service"). It must import `alpaca_kit` and `pandas_market_calendars` — `pip install -e ".[live]"`
+at the repo root. The service reads `FACE_PYTHON` from `$DSH_HOME/.env`, which dsh loads at boot;
+`install` does not copy it, so add the line by hand (`FACE_PYTHON=<an interpreter with both>`) and
+restart. Without a calendar no anchored order fires that day, with one line naming the interpreter.
+
+**What the phone gets**, besides each firing's text — `<id> · <date>` is the order and its
+session's date, times New York's:
+
+| When | Line |
+|---|---|
+| the turn timed out with no text | `<id> · <date> timed out after <n> min; a card or a long tool was pending` |
+| the turn ended with no text | `<id> · <date> ended with no text` |
+| the model call failed | `<id> · <date> could not answer: <error>; nothing was done` |
+| something cancelled the turn first | `<id> · <date> was cancelled (<cause>); nothing more will be said` |
+| the fence refused it | `<id> · <date> refused: <path> exists; it would steer every desk turn. Remove it.` |
+| no turn started | `<id> · <date> never started a turn; nothing ran` |
+| the session could not run | `<id> · <date> could not run: <reason>` |
+| the turn left a fence violation | `<id> · <date> left <path> behind; every desk turn is refused until it is removed` |
+| its text or script changed | `<id> · <date> refused: <path> changed since arming. Review it, then: npm run desk -- rearm <id>` |
+| its text or script is missing | `<id> · <date> refused: <path> is missing. Restore it, or remove the order from standing.yml` |
+| finished after its moment | `<id> finished after the close; not sent - it describes a market that has moved` (`the open` for an open-anchored one) |
+| the budget spent | `standing orders are refused for the rest of the day: the desk's token budget is spent (<used> of <cap> tokens since 00:00 ET)` |
+| missed | `<id> · <date> missed its <HH:MM ET> anchor: <why>. A standing order never runs late` — `the face was asleep from … to …`, `the face was not running` or `found at …, past the 5-minute grace` |
+| cut off by a restart | `<id> · <date> was cut off by a restart; a standing order never runs twice` |
+| expired | `<id> expired after <expires> and no longer fires; extend it with npm run desk -- rearm <id> --expires <YYYY-MM-DD> to keep it` |
+| a `--no-wake` producer failed | `<id> · <date> producer <spec> failed (<error>); nothing was woken` |
+| `standing.yml` refused | `standing.yml is refused, so no standing order runs until it is fixed: <errors>` |
+| `firings.jsonl` unreadable | `the firing ledger <path> cannot be read (<code>), so no standing order runs until it can` |
+| no calendar | `no standing order runs today: the market calendar failed in <python> (<error>). FACE_PYTHON must name an interpreter with pandas_market_calendars` |
+| a phone text while the budget is spent | `the desk's token budget for today is spent: <used> of <cap> tokens since 00:00 ET. It opens again at midnight ET, or raise budget.dailyTokens in standing.yml` |
+
+The pause sends none of them: a paused order is refused in silence.
+
+**Where to see it.** `npm run service -- status` and the phone's `/status` end with the budget
+line (`budget: 1,234,567 of 2,000,000 tokens today`) and a line per order —
+`standing preclose: close-30m, next 12:30 ET; last delivered 2026-11-26 15:31 ET`, or what holds
+it (`desk/STANDING.md changed since arming (npm run desk -- rearm preclose)`, `expired after …`,
+`disabled`). The Desk panel's Standing orders card shows the same, with the ten most recent
+firings — wall time, tokens, files written — each opening its session in place.
 
 ## The wire and the transcript (client/api.js + client/mapper.js + client/chat.js)
 
@@ -2033,10 +2185,10 @@ the seam is dropped and the table's meta line says so.
 ```bash
 npm test                  # offline unit tests - no keys, no network, no port
 npm run typecheck         # strict tsc against the pinned .d.ts (skipLibCheck: false) - the contract test
-FACE_SMOKE=1 npm test     # + the 17 isolated real boots; local stubs, no external model calls
+FACE_SMOKE=1 npm test     # + the 18 isolated real boots; local stubs, no external model calls
 ```
 
-Offline, `npm test` skips the 17 real boots listed below; `FACE_SMOKE=1` runs
+Offline, `npm test` skips the 18 real boots listed below; `FACE_SMOKE=1` runs
 them too. The typecheck includes the dependencies' own `.d.ts`, so a green one
 means the face compiles against the installed dsh, not just against itself.
 
@@ -2067,6 +2219,7 @@ and `node --test` gives each file its own:
 | `goal-smoke.test.ts` | the goal loop `../dsh/profile/cycle.md` rests on, through the face's own wire (prompts, the Stop button's `session/cancel`, a slash line's `commands/execute`): `create_goal` in a human turn returns the id and revision 1, armed; each round arrives at idle as a user message whose source is `goal` (`<goal_round>`, the objective, `Round: n/N`); the model's `blocked` in round 1 is refused (`blocked requires at least 3 consecutive goal rounds; current round is 1`), in round 3 accepted with the code `model-reported` and followed by the `<goal_blocked>` wrap-up; a second `create_goal` is refused while that goal is blocked (`GOAL_ALREADY_EXISTS`); at the cap the driver blocks with `round-limit` and sends the model nothing more; Stop mid-round pauses the goal, the model's resume of it is refused (`GOAL_TOOL_RESUME_PAUSED`: `the model cannot resume a paused goal; the user must resume it`) and `/goal resume` re-arms it; a face stopped mid-round and booted again on the same home leaves the goal active and disarmed with no request until "continue", whose `update_goal` resume bumps the revision and re-arms the rounds |
 | `desk-smoke.test.ts` | the desk on a real tree, as `main.ts` installs it, its fixture root inside the repository so the repository's `GRAVIT.md` heads the chain: the `gravit-desk` session runs in `desk/journal/` under `workspace-write`; its tools are exactly `DESK_ALLOW` expanded on this tree plus `desk_quotes` and `desk_state`, each `mcp__*__<raw>` entry matching one server's tool, and neither desk tool reaches Gravit's session or the global view; the write tools take the path arguments the guard's write check reads, and `str_replace_editor`'s commands are `view`, `create`, `str_replace` and `insert`; the desk's prompt carries Gravit's persona prefix, the date and `# The desk`, and no cycle contract or roles section; a desk turn naming the order stand-in gets Gate 2's visibility refusal and its body never runs; a `write` to `../levels.yml` is refused by the sandbox inside the tool's content while a journal write lands, with no card; Gravit's own write of a `GRAVIT.md` lands; with a listener in front answering allow, the guard's backstop still denies the desk's write of `GRAVIT.md` and its read of a `.env` file, while Gravit's own read of that file goes through unjudged; `/stop` on a turn parked on an escalation card, two texts queued behind it, cuts that turn alone — recorded `cancelled`, `stopped from the phone` — and both texts are answered, in order; the desk's write of a journal `.gitignore` holding `!*` and of a `CLAUDE.md` are denied with no file written, and its read of a dot-config in the repository is denied by name while Gravit reads it; the read tools take exactly the parameters the read check reads; a `GRAVIT.md` planted in the journal reaches a desk session's first request behind the repository's, which is the threat the fence refuses, and the next post is refused with `desk-refused` and no turn; each supervised turn is one `desk-turn` with four token buckets and the stub's route |
 | `telegram-smoke.test.ts` | the bridge end to end on a real tree against a `node:http` Bot API stub on 127.0.0.1: the token and the operator's id come from the scratch home's `.env`, and the MCP child dsh spawns has the id and not the token; a stranger and a group are dropped and counted, unanswered, and the operator's `hi` is answered in the operator's chat; `/status` counts the drops and names the desk session; `/pause` writes `OFF` by `telegram`, a text then gets the paused line and opens no turn, and `/resume` is text that never reaches the model; a 503 queues the reply in the outbox and the next poll flushes it, in order, each reply sent once; a 409 is recorded and waited out; a card parked by an escalated write to `../levels.yml` is cut at the desk's deadline (1,500 ms here) with the timed-out line; the canary — the desk's write of `GRAVIT.md` is denied by the desk guard and no request carries a planted text, then a `GRAVIT.md` the harness plants is refused by the fence with no turn; its read case — `send me ~/.dsh/.env`: the read of the scratch home's `.env` is refused as outside the repository, the token handed to a market read is refused as a secret, no tool result carries the token or a second secret, and the stub's reply, which names both, reaches the phone as `I could not read it: <secret> <token>`; across the file every send went to the operator's chat, the token is in no file of the desk's directory, and no `STANDING.md`, `levels.yml`, `rules.yml` or `holdings.yml` changed |
+| `schedule-smoke.test.ts` | the standing orders' clock end to end, as `main.ts` installs the desk, on one early-close session (2026-11-27), a fake clock and calendar, a stub model and a recorder for the phone, its fixture root, harness home and bots root under `tests/tmp/`: a firing a restart cut off is reported `interrupted` at boot and never run; the pre-close brief wakes one fresh `gravit-desk` session in `desk/journal` under `workspace-write`, with the armed text — hashing to its pin — and the producer's block in its wake message, and its final text reaches the phone; `firings.jsonl` holds `started`, `producer`, `woke` and `finished`, `events.jsonl` one `desk-turn` with `source: "schedule"` and four token buckets; a script producer's stderr reaches only the face's log; a turn waiting in a long tool is cut at its 10-minute deadline and the order queued behind it fires after; an edited text is refused with one line, then in silence, and fires once re-armed inside its grace; the pause refuses in silence and a spent budget with one line; an anchor slept across is `missed`; a `wake: false` order runs only its producer; a planted `GRAVIT.md` refuses the firing; the canary's firing half — a poisoned turn's writes of `../STANDING.md`, of `standing.yml` and of a journal `GRAVIT.md` are all refused, no card raised, every text and `standing.yml` unchanged — and a `GRAVIT.md` the harness plants refuses the next order; the clock's dispose cuts a firing in a long tool and settles; every text the desk sent went through the recorder |
 
 `bot-sandbox-smoke.test.ts` and `askuser-noclient-smoke.test.ts` also print one
 `observed:` line each (S4, S7), the measurements the bots spec's amendments were
@@ -2921,10 +3074,11 @@ date and the pin.
 `goal-smoke.test.ts`, and the cycle assertions of `bots-smoke` and `roles-smoke` under
 `FACE_SMOKE=1 npm test`); steps 1–5 are the operator's.
 
-## The desk drill (run after any change to scripts/service.ts, src/desk*.ts, src/telegram.ts, client/desk-panel.js or main.ts's exits)
+## The desk drill (run after any change to scripts/service.ts, scripts/desk.ts, src/desk*.ts, src/telegram.ts, src/{schedule,firing,standing,producer,market-clock,brief}.ts, ../scripts/market_clock.py, client/desk-panel.js, client/desk-standing.js, client/desk-time.js or main.ts's exits)
 
 The desk spec's drill (`../docs/superpowers/specs/2026-10-19-always-on-gravit-design.md` §9 and
-§12), in two halves so far: P0's, the face as a service, and P1's, the phone and the Desk panel.
+§12), in three parts so far: P0's, the face as a service; P1's, the phone and the Desk panel; and
+P2's, the clock and the pre-close brief.
 It is the operator's, never an agent's — every step drives the operator's own launchd, harness
 home, bot and phone.
 
@@ -3065,3 +3219,45 @@ and what steps 6 and 7 met in `DEVELOPMENT.md` §7.4's P1 **Desk** row.
 
 **Not yet run.** The automated half passes 2026-10-21; the phone, the bot and a real model are the
 operator's.
+
+### P2: the clock and the pre-close brief
+
+PASS is P2's done criterion — a brief has arrived before the close on three sessions in a row, and
+a deliberately edited `STANDING.md` was refused — and its way back, a re-arm.
+
+**The automated half, no Telegram.** `npm test` runs `producer`, `market-clock`, `standing`,
+`desk-arm`, `desk-book`, `brief`, `firing`, `schedule`, `desk-weight` and `desk-standing`, with P2's
+cases in `desk`, `desk-conversation`, `desk-session`, `telegram`, `service`, `desk-panel`,
+`desk-cli` and `cycle`; `python -m pytest` runs `tests/test_market_clock.py`; `FACE_SMOKE=1 npm
+test` boots `schedule-smoke`, the canary's firing half among it ("Tests" above). What only this
+drill checks: a real model writing the brief from its block; the real calendar on the service's
+interpreter; the brief on the phone before a real close; the Desk panel over the real ledger.
+
+**The drill**, after P1's, with the service running the merged code, its `FACE_PYTHON` (or the
+`python3` on its `PATH`) importing `pandas_market_calendars`, and the browser signed in:
+
+1. Arm `preclose`, from `face/` in the primary checkout: `npm run desk -- arm desk --id preclose
+   --at close-30m --producer builtin:brief --expires <a date past the drill>`. PASS: `armed
+   preclose in <the primary checkout>: …`; within 30 s `npm run service -- status` shows `standing
+   preclose: close-30m, next 15:30 ET` (12:30 ET on an early close).
+2. On three sessions in a row, the brief. PASS each day: the brief reaches the phone before the
+   close, its prices labelled with their feed and time; the Desk panel's Standing orders card and
+   `status` show `last delivered <time>`; `$DSH_HOME/face/desk/firings.jsonl` holds the day's
+   `started`, `producer`, `woke` and `finished`, and `desk/journal/briefs/<date>-preclose.md` the
+   message.
+3. Edit one word of `desk/STANDING.md`. PASS: at the next anchor the phone gets `preclose · <date>
+   refused: desk/STANDING.md changed since arming. Review it, then: npm run desk -- rearm
+   preclose`, the card shows the pin changed, and no brief comes.
+4. `npm run desk -- rearm preclose`. PASS: `re-armed preclose: desk/STANDING.md sha256 <12 hex>…`;
+   the next anchor runs and delivers — the same day when the re-arm lands inside the 5-minute
+   grace. Undo the word afterwards and re-arm again.
+5. On 2026-11-27, if it falls inside the drill: PASS, the brief arrives at 12:30 ET, before the
+   13:00 ET early close.
+
+**PASS is steps 1–4, and 5 when 2026-11-27 falls inside the drill.** Record the date, the commit,
+the desk's interpreter, each day's delivery time and the brief's tokens (`firings.jsonl`'s
+`finished`) in `DEVELOPMENT.md` §7.4's P2 **Desk** row — the first measured week sets
+`budget.dailyTokens`.
+
+**Not yet run.** The automated half passes 2026-11-01; the calendar, the phone and a real model
+are the operator's.
