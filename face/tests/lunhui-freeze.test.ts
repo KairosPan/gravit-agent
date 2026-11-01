@@ -23,7 +23,6 @@ import { LunhuiError } from "../plugins/lunhui/lib/runs.mjs";
 import { ladderCodes } from "../plugins/lunhui/lib/derive.mjs";
 import { fetchLimitUpPools } from "../plugins/lunhui/lib/eastmoney.mjs";
 import { exchangeOf } from "../plugins/lunhui/lib/market.mjs";
-import { resetWencaiToken } from "../plugins/lunhui/lib/wencai.mjs";
 
 type Cleanup = { after(fn: () => unknown): unknown };
 type ToolDef = { name: string; description: string; parameters: any; execute(args: unknown, exec: unknown): Promise<string> };
@@ -216,7 +215,8 @@ test("freeze: a second limit-up freeze on the same run is SOURCE_FROZEN; a freez
 
 test("freeze: a refused freeze leaves its code in metrics.json under refusals[source]; a run with none has no refusals key", async (t) => {
   const root = await strategiesRoot(t);
-  const noBoards = await fixtures(t, (dir) => rm(join(dir, "boards.json")));
+  // Eastmoney's board list and the 问财 stand-in both answer 404: every boards freeze refuses.
+  const noBoards = await fixtures(t, async (dir) => { await rm(join(dir, "boards.json")); await rm(join(dir, "wencai-universe.json")); });
   const { service, tools } = mount(root, await fixtures(t), { boards: { fetch: noBoards } });
   const { run } = JSON.parse(await tools.index.execute({ strategy: "cn-market" }, exec()));
   const dir = runDir(root, "cn-market", run);
@@ -446,9 +446,8 @@ test("freeze: each Eastmoney item records the host that served it; a members rep
 
 // The 问财 stand-in (boards stand-in spec S1, S4, S6, S9, S10, §5).
 
-/** A refresh token the fixture exchanges for `fixture-access`; neither may reach a file or a reply. */
-const IFIND_ENV = { IFIND_REFRESH_TOKEN: "fixture-refresh" };
-const SECRETS = ["fixture-refresh", "fixture-access"];
+/** No token travels: no request, file or reply names one. */
+const TOKEN_WORDS = /access_token|refresh_token/;
 const STAMPS = { provider: "同花顺问财", taxonomy: "同花顺概念", host: "quantapi.51ifind.com", delayed: false };
 
 /** The fixtures with one Eastmoney file removed, so that read answers 404 (`UPSTREAM_INVALID`). */
@@ -468,10 +467,9 @@ async function filesUnder(dir: string): Promise<Array<[string, string]>> {
 }
 
 test("freeze: Eastmoney answering never reaches QuantAPI, and its evidence names 东方财富 as the provider", async (t) => {
-  resetWencaiToken();
   const root = await strategiesRoot(t);
   const { urls } = mockFetch(t, await fixtures(t));
-  const { tools } = mount(root, undefined, { boards: { env: IFIND_ENV } });
+  const { tools } = mount(root, undefined);
   const reply = JSON.parse(await tools.boards.execute({ strategy: "cn-market" }, exec()));
   assert.equal(urls.filter((url) => url.host === "quantapi.51ifind.com").length, 0);
   assert.ok(urls.length > 0);
@@ -493,9 +491,8 @@ for (const [label, missing] of [
   ["a refused flow rank", "board-flow.json"],
 ] as const) {
   test(`freeze: ${label} lands the stand-in whole - every item stamped, THS: codes, the provider and Eastmoney's refusal in the evidence, run.json and the reply`, async (t) => {
-    resetWencaiToken();
-    const root = await strategiesRoot(t);
-    const { tools } = mount(root, await withoutEastmoney(t, missing), { boards: { env: IFIND_ENV } });
+      const root = await strategiesRoot(t);
+    const { tools } = mount(root, await withoutEastmoney(t, missing));
     const reply = JSON.parse(await tools.boards.execute({ strategy: "cn-market" }, exec()));
     assert.equal(reply.provider, "同花顺问财");
     assert.equal(reply.taxonomy, "同花顺概念");
@@ -535,25 +532,39 @@ for (const [label, missing] of [
   });
 }
 
-test("freeze: with no iFinD token a refused Eastmoney read refuses naming both, writes nothing and asks QuantAPI nothing", async (t) => {
-  resetWencaiToken();
+/**
+ * `globalThis.fetch` over the fixtures, every request recorded; the 问财 query rejected with
+ * `rejectWencai`'s code when given, as the Account adapter rejects the iFinD route's refusals.
+ */
+function recordFetch(t: any, dir: string, rejectWencai?: string) {
+  const serve = createFixtureFetch(dir);
+  const sent: Array<{ url: URL; init: RequestInit }> = [];
+  t.mock.method(globalThis, "fetch", async (url: string, init: RequestInit = {}) => {
+    const target = new URL(url);
+    sent.push({ url: target, init });
+    if (rejectWencai && target.host === "quantapi.51ifind.com") throw Object.assign(new Error(`refused: ${rejectWencai}`), { code: rejectWencai });
+    return serve(url, init);
+  });
+  return sent;
+}
+
+test("freeze: with no iFinD token at the Account a refused Eastmoney read refuses naming both and writes nothing", async (t) => {
   const root = await strategiesRoot(t);
-  const { urls } = mockFetch(t, await withoutEastmoney(t, "boards.json"));
-  const { tools } = mount(root, undefined, { boards: { env: {} } });
+  const sent = recordFetch(t, await withoutEastmoney(t, "boards.json"), "IFIND_UNCONFIGURED");
+  const { tools } = mount(root, undefined);
   await assert.rejects(tools.boards.execute({ strategy: "cn-market" }, exec()), (error: any) => {
     assert.ok(error instanceof LunhuiError);
     assert.equal(error.code, "UPSTREAM_INVALID");
-    assert.match(error.message, /东方财富板块请求失败（UPSTREAM_INVALID）/);
-    assert.match(error.message, /同花顺问财备用未配置/);
+    // Today's exact sentence, then the run note every refusal of an opened run carries.
+    assert.match(error.message, /^UPSTREAM_INVALID: 东方财富板块请求失败（UPSTREAM_INVALID）；同花顺问财备用未配置；本次未写入任何文件[；。]/);
     return true;
   });
-  assert.equal(urls.filter((url) => url.host === "quantapi.51ifind.com").length, 0);
+  assert.equal(sent.filter(({ url }) => url.host === "quantapi.51ifind.com").length, 1);
   const [run] = await readdir(join(root, "cn-market", "analysis"));
   assert.deepEqual((await readdir(runDir(root, "cn-market", run))).sort(), ["metrics.json", "run.json"]);
 });
 
 test("freeze: a failing stand-in refuses with Eastmoney's code and both reasons, and writes nothing", async (t) => {
-  resetWencaiToken();
   const root = await strategiesRoot(t);
   // Eastmoney's board list answers 404; 问财 answers with no usable row (NO_MARKET_DATA of its own).
   const dir = await withoutEastmoney(t, "boards.json", async (d) => {
@@ -561,7 +572,7 @@ test("freeze: a failing stand-in refuses with Eastmoney's code and both reasons,
       "股票代码": ["x"], "股票简称": ["x"], "涨跌幅:前复权[20261023]": [1], "成交额[20261023]": [1], "主力资金流向[20261023]": [1], "所属概念": ["白酒概念"],
     } }] }));
   });
-  const { tools } = mount(root, dir, { boards: { env: IFIND_ENV } });
+  const { tools } = mount(root, dir);
   await assert.rejects(tools.boards.execute({ strategy: "cn-market" }, exec()), (error: any) => {
     assert.ok(error instanceof LunhuiError);
     assert.equal(error.code, "UPSTREAM_INVALID");
@@ -570,7 +581,7 @@ test("freeze: a failing stand-in refuses with Eastmoney's code and both reasons,
     assert.match(error.message, /没有可用行/);
     assert.match(error.message, /NO_MARKET_DATA/);
     assert.doesNotMatch(error.message, /\/|\\/);
-    for (const secret of SECRETS) assert.doesNotMatch(error.message, new RegExp(secret));
+    assert.doesNotMatch(error.message, TOKEN_WORDS);
     return true;
   });
   const [run] = await readdir(join(root, "cn-market", "analysis"));
@@ -579,9 +590,8 @@ test("freeze: a failing stand-in refuses with Eastmoney's code and both reasons,
 });
 
 test("freeze: boards given as BK codes are ignored by the stand-in, and the reply says so", async (t) => {
-  resetWencaiToken();
   const root = await strategiesRoot(t);
-  const { tools } = mount(root, await withoutEastmoney(t, "members-BK1716.json"), { boards: { env: IFIND_ENV } });
+  const { tools } = mount(root, await withoutEastmoney(t, "members-BK1716.json"));
   const reply = JSON.parse(await tools.boards.execute({ strategy: "cn-market", boards: ["BK1716", "BK0715"] }, exec()));
   assert.equal(reply.provider, "同花顺问财");
   assert.deepEqual(reply.boards_ignored, ["BK1716", "BK0715"]);
@@ -591,15 +601,34 @@ test("freeze: boards given as BK codes are ignored by the stand-in, and the repl
   assert.ok(members.every((item: any) => item.board.startsWith("THS:")));
 });
 
-test("freeze: the iFinD token is in no file of a stand-in run and not in its reply", async (t) => {
-  resetWencaiToken();
+test("freeze: a refused exchange at the Account refuses naming both, 凭据被拒, and writes nothing", async (t) => {
   const root = await strategiesRoot(t);
-  const { tools } = mount(root, await withoutEastmoney(t, "board-flow.json"), { boards: { env: IFIND_ENV } });
+  recordFetch(t, await withoutEastmoney(t, "boards.json"), "IFIND_CREDENTIAL");
+  const { tools } = mount(root, undefined);
+  await assert.rejects(tools.boards.execute({ strategy: "cn-market" }, exec()), (error: any) => {
+    assert.ok(error instanceof LunhuiError);
+    assert.equal(error.code, "UPSTREAM_INVALID");
+    assert.match(error.message, /东方财富板块请求失败（UPSTREAM_INVALID：/);
+    assert.match(error.message, /同花顺问财备用也失败（UPSTREAM_INVALID：同花顺问财凭据被拒（令牌换取未通过））/);
+    return true;
+  });
+  const [run] = await readdir(join(root, "cn-market", "analysis"));
+  assert.deepEqual((await readdir(runDir(root, "cn-market", run))).sort(), ["metrics.json", "run.json"]);
+});
+
+test("freeze: no token travels: the stand-in's request carries none and no file names one", async (t) => {
+  const root = await strategiesRoot(t);
+  const sent = recordFetch(t, await withoutEastmoney(t, "board-flow.json"));
+  const { tools } = mount(root, undefined);
   const text = await tools.boards.execute({ strategy: "cn-market" }, exec());
-  for (const secret of SECRETS) assert.doesNotMatch(text, new RegExp(secret));
+  assert.equal(JSON.parse(text).provider, "同花顺问财");
+  assert.doesNotMatch(text, TOKEN_WORDS);
+  const posts = sent.filter(({ url }) => url.host === "quantapi.51ifind.com");
+  assert.deepEqual(posts.map(({ url, init }) => [url.pathname, init.method]), [["/api/v1/smart_stock_picking", "POST"]]);
+  assert.deepEqual([...new Headers(posts[0].init.headers).keys()].sort(), ["accept", "content-type"]);
   const files = await filesUnder(join(root, "cn-market"));
   assert.ok(files.some(([path]) => path.endsWith("evidence-boards.json")));
-  for (const [path, content] of files) for (const secret of SECRETS) assert.doesNotMatch(content, new RegExp(secret), path);
+  for (const [path, content] of files) assert.doesNotMatch(content, TOKEN_WORDS, path);
 });
 
 test("freeze: the boards description names the 问财 stand-in", async (t) => {
@@ -608,12 +637,14 @@ test("freeze: the boards description names the 问财 stand-in", async (t) => {
   assert.match(tools.boards.description, /东方财富板块请求失败时改用同花顺问财（同花顺概念，涨跌幅为成分股等权平均），回复写明来源。/);
 });
 
-test("freeze: a boards row refuses an env that is not an object", async (t) => {
+test("freeze: a boards row refuses any env, naming the Account", async (t) => {
   const root = await strategiesRoot(t);
   const backbone = fakeScope();
   applyRuns(backbone.ctx, { strategiesRoot: root });
-  const scope = fakeScope({ lunhuiRuns: backbone.provided[0][1] });
-  assert.throws(() => boardsRow.apply(scope.ctx, { env: "IFIND_REFRESH_TOKEN=x" as any }), /lunhui-freeze-boards: env/);
+  for (const env of [{}, { IFIND_REFRESH_TOKEN: "x" }, "IFIND_REFRESH_TOKEN=x", null]) {
+    const scope = fakeScope({ lunhuiRuns: backbone.provided[0][1] });
+    assert.throws(() => boardsRow.apply(scope.ctx, { env } as any), /lunhui-freeze-boards: env is gone - the iFinD token is the Account's \(IFIND_\* in the Account's environment\)/);
+  }
 });
 
 test("freeze: every row refuses CALENDAR_UNCOVERED before any run when the previous session lies outside the calendar", async (t) => {

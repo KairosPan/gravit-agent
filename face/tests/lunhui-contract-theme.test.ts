@@ -17,14 +17,14 @@ import {
 } from "./lunhui-contract-harness.ts";
 
 const mount = (t: Cleanup, prepare?: (dir: string) => Promise<void>) => mountRow(t, themeRow, prepare);
-/** The 问财 stand-in: Eastmoney's board list refused (404) and the iFinD token set, so the boards freeze lands THS: concepts. */
+/** The 问财 stand-in: Eastmoney's board list refused (404) and the fixture's 问财 answering, so the boards freeze lands THS: concepts. */
 const standIn = (t: Cleanup, rename?: [string, string]) => mountRow(t, themeRow, async (dir) => {
   await rm(join(dir, "boards.json"));
   if (rename) {
     const file = join(dir, "wencai-universe.json");
     await writeFile(file, (await readFile(file, "utf8")).replaceAll(rename[0], rename[1]));
   }
-}, { env: { IFIND_REFRESH_TOKEN: "fixture-refresh" } });
+});
 /** A cn-market run frozen through the real rows, the sources in order. */
 const frozenRun = (freeze: Record<string, ToolDef>, sources: Source[] = ["boards", "limit-up"], boards?: string[] | null) =>
   freezeRun(freeze, sources, { boards });
