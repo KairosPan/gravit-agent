@@ -94,17 +94,17 @@ function cardsWaiting(page, now) {
 }
 
 // a row waiting for the operator's own browser wallet (a DEX order, a payment the Account built): Waiting for your wallet, what
-// the last send said (host/wallet-send.js, by its key), and — on a page that signs — Send from wallet…, or Report again where the
-// wallet sent a hash whose report the Account has not taken (it reports that hash, it never sends again); none while one is in
-// the air
-function walletRow(what, id, key, data, sends, signs) {
+// the last send said (host/wallet-send.js, by its key), and — on a page that signs — Send from wallet…, or Report again where a
+// hash was sent: one this page keeps (it reports that hash), or one the Account already holds (the send asks the Account
+// again and reports it); neither ever sends again; disabled while one is in the air. An order keeps its Cancel beside it
+function walletRow(what, id, key, data, reported, sends, signs, cancel) {
   const at = key && isRecord(sends) && isRecord(sends[key]) ? sends[key] : null;
   const said = at && str(at.said) ? `<span class="tk-why">${esc(at.said)}</span>` : '';
   const sending = at?.status === 'sending';
   const keyOf = !signs ? '' : at?.again === true
     ? `<button type="button"${attrs({ class: 'btn-sm', 'data-action': 'reportAgain', 'data-key': key, disabled: sending })}>Report again</button>`
-    : `<button type="button"${attrs({ class: 'btn-sm', 'data-action': 'sendFromWallet', ...data, disabled: sending })}>Send from wallet…</button>`;
-  return `<tr><td><b>${esc(what)}</b><span class="tk-why">${esc(['Waiting for your wallet', id].filter(Boolean).join(' · '))}</span>${said}</td><td class="r">${keyOf}</td></tr>`;
+    : `<button type="button"${attrs({ class: 'btn-sm', 'data-action': 'sendFromWallet', ...data, disabled: sending })}>${reported ? 'Report again' : 'Send from wallet…'}</button>`;
+  return `<tr><td><b>${esc(what)}</b><span class="tk-why">${esc(['Waiting for your wallet', id].filter(Boolean).join(' · '))}</span>${said}</td><td class="r">${keyOf}${cancel}</td></tr>`;
 }
 
 // the page's working orders, by anyone, in the Account screen's words; Cancel where the Account knows what cancels it, on a
@@ -118,9 +118,9 @@ function underWay(state, signs, now) {
   }
   const change = marketKeysOn(state);
   const rows = underWayOf(a.data).map(o => {
-    if (o.payment) return walletRow(o.words, o.payment, o.key, { 'data-payment': o.payment }, a.wallet, signs);
-    if (o.walletSend) return walletRow(orderWords(o), o.id, o.walletKey, { 'data-order': o.walletSend.order }, a.wallet, signs);
     const cancel = signs && o.cancel ? `<button type="button"${attrs({ class: 'btn-sm', 'data-action': 'cancelOrder', 'data-venue': o.cancel.venue, 'data-order': o.cancel.order })}>Cancel</button>` : '';
+    if (o.payment) return walletRow(o.words, o.payment, o.key, { 'data-payment': o.payment }, o.walletReported, a.wallet, signs, '');
+    if (o.walletSend) return walletRow(orderWords(o), o.id, o.walletKey, { 'data-order': o.walletSend.order }, o.walletReported, a.wallet, signs, cancel);
     return `<tr><td><b>${esc(orderWords(o))}</b>${o.id ? `<span class="tk-why">${esc(o.id)}</span>` : ''}</td><td class="r">${change ? changeKey(o, a.data) : ''}${cancel}</td></tr>`;
   });
   const table = `<div class="mk-wrap"><table class="mk-t tk-t"><thead><tr><th scope="col">Order</th><th scope="col" class="r"><span class="sr-only">Actions</span></th></tr></thead><tbody>${rows.join('')}</tbody></table></div>`;

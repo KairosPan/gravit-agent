@@ -79,8 +79,15 @@ test('walletFor finds the wallet that holds the address, in any case, else says 
   const other = wallet(fakeProvider({ accounts: ['0x' + '99'.repeat(20)] }), 'Other');
   const mine = wallet(fakeProvider({ accounts: [ADDRESS.toUpperCase().replace('0X', '0x')] }), 'Mine');
   assert.equal(await walletFor([other, mine], ADDRESS), mine);
-  assert.equal(mine.provider.count('eth_requestAccounts'), 0, 'asked with eth_accounts, which opens no prompt');
+  assert.equal(mine.provider.count('eth_requestAccounts'), 0, 'asked with eth_accounts first, which opens no prompt');
+  // a wallet not yet connected to the face's origin answers eth_accounts with none: its own connect prompt is asked then
+  const unconnected = wallet(fakeProvider({ answers: { eth_accounts: () => [] } }), 'Unconnected');
+  assert.equal(await walletFor([other, unconnected], ADDRESS), unconnected);
+  assert.deepEqual(unconnected.provider.methods(), ['eth_accounts', 'eth_requestAccounts']);
+  assert.equal(other.provider.count('eth_requestAccounts'), 1, 'every wallet asked, after none answered for it unprompted');
   await assert.rejects(walletFor([other], ADDRESS), { message: `No wallet on this page holds ${short(ADDRESS)}` });
+  const declines = wallet(fakeProvider({ answers: { eth_accounts: () => [], eth_requestAccounts: () => { throw { code: 4001, message: 'User rejected' }; } } }), 'Declines');
+  await assert.rejects(walletFor([declines], ADDRESS), { message: `No wallet on this page holds ${short(ADDRESS)}` });
   assert.equal(short(ADDRESS), '0x121212…1212');
 });
 
@@ -106,6 +113,11 @@ test('sendTxs waits for the approval on chain, requotes once, sends the fresh sw
   ]);
   assert.deepEqual(provider.methods().filter(m => m !== 'eth_getTransactionReceipt'),
     ['wallet_switchEthereumChain', 'eth_sendTransaction', 'wallet_switchEthereumChain', 'eth_sendTransaction'], 'every send on its own chain first');
+  assert.deepEqual(provider.requests.filter(r => r.method === 'wallet_switchEthereumChain').map(r => r.params), [[{ chainId: '0x2105' }], [{ chainId: '0x2105' }]]);
+  // a swap on another chain: the switch names that chain
+  const p4 = fakeProvider();
+  await sendTxs(wallet(p4), [TX('swap', { chainId: 4663, chainIdHex: '0x1237' })], { schedule: now });
+  assert.deepEqual(p4.requests[0], { method: 'wallet_switchEthereumChain', params: [{ chainId: '0x1237' }] });
   // a requote that keeps the swap built (null): the swap as it was
   const p2 = fakeProvider();
   await sendTxs(wallet(p2), [TX('approve'), TX('swap', { data: '0x5a5a' })], { requote: async () => null, schedule: now });

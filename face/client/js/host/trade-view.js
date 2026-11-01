@@ -316,23 +316,27 @@ function paymentWordsOf(p, page) {
 /** Under way: the page's working orders (openOrdersOf's rows, by anyone), each with what cancels it — the Account's
  *  `liveCancel` seed, `{ venue, order }`, or null for an order with no id or venue (one the Account knows by its client id
  *  alone: nothing to cancel it by) — and `walletSend`: `{ order: id }` for a DEX order waiting for the operator's wallet to send
- *  it (`walletTxs`, no `ref`; such a row has no cancel, the Account page's own rule: trade.js tkDrawOpen), its `walletKey` the
- *  order's client id; else null. Then the page's payments waiting for the wallet (`legs[0].native.walletTx`, `authorized`), each
- *  `{ payment: id, words, key }` — `key` its `<id>@<at>`. */
+ *  it (`walletTxs`, no `ref`; it keeps its own Cancel, which takes it back before the wallet sends it and frees its limit, as the
+ *  Account page's row does: trade.js tkOpenActs), its `walletKey` the order's client id and `walletReported` whether the Account
+ *  already holds a hash for it (`reported`); else null. Then the page's payments waiting for the wallet
+ *  (`legs[0].native.walletTx`, `authorized`), each `{ payment: id, words, key, walletReported }` — `key` its `<id>@<at>`,
+ *  `walletReported` its `live.reported`. */
 export function underWayOf(page) {
   const raw = pageOk(page) ? records(page.orders) : [];
   const orders = openOrdersOf(page).map(o => {
     const waits = o.waitingForWallet === true && o.id !== '';
+    const at = waits ? raw.find(x => x.id === o.id) : undefined;
     return {
       ...o,
-      cancel: !waits && o.id && o.venue ? { venue: o.venue, order: o.id } : null,
+      cancel: o.id && o.venue ? { venue: o.venue, order: o.id } : null,
       walletSend: waits ? { order: o.id } : null,
-      walletKey: waits ? str(raw.find(x => x.id === o.id)?.clientId) || null : null,
+      walletKey: waits ? str(at?.clientId) || null : null,
+      walletReported: waits ? str(at?.reported) !== '' : false,
     };
   });
   const payments = (pageOk(page) ? records(page.payments) : [])
     .filter(p => p.status === 'authorized' && str(p.id) !== '' && isRecord(records(p.legs)[0]?.native?.walletTx))
-    .map(p => ({ payment: p.id, words: paymentWordsOf(p, page), key: `${p.id}@${str(p.at)}` }));
+    .map(p => ({ payment: p.id, words: paymentWordsOf(p, page), key: `${p.id}@${str(p.at)}`, walletReported: str(p.live?.reported) !== '' }));
   return [...orders, ...payments];
 }
 

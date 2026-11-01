@@ -148,6 +148,28 @@ test('the wallet sent and the report failed: Report again reports the kept hash 
   assert.deepEqual(o.acct.sent('/data/account/live/order-sent'), [{ order: 'ord-0031', hash: hashOf(2) }, { order: 'ord-0031', hash: hashOf(2) }]);
 });
 
+test("a hash kept when the order is then taken back is still reported: the Account learns the wallet did send", async () => {
+  let pageNow = { ok: true, orders: [ORDER] };
+  let reports = 0;
+  const h = harness({ page: () => pageNow, answers: { '/data/account/live/order-sent': () => (++reports === 1 ? { status: 0, body: { ok: false, error: 'The Account did not answer' } } : { status: 200, body: { ok: true } }) } });
+  assert.equal((await h.ws.order(ORDER)).status, 'refused');
+  pageNow = { ok: true, orders: [{ ...ORDER, status: 'canceled' }] };
+  const reads = h.acct.reads();
+  assert.deepEqual(await h.ws.order(ORDER), { key: ORDER.clientId, status: 'sent', said: `Fake Wallet sent it: ${short(hashOf(2))}` });
+  assert.equal(h.acct.reads(), reads, 'reported before the page is asked');
+  assert.equal(h.provider.count('eth_sendTransaction'), 2, 'its approval and swap, once');
+  assert.deepEqual(h.acct.sent('/data/account/live/order-sent'), [{ order: 'ord-0031', hash: hashOf(2) }, { order: 'ord-0031', hash: hashOf(2) }]);
+});
+
+test('an Account that cannot be read says so in words and sends nothing', async () => {
+  const store = fakeStore();
+  const provider = fakeProvider();
+  const ws = startWalletSend({ store, post: async () => ({ status: 200, body: { ok: true } }), getJson: async path => { throw Object.assign(new Error(`${path}: HTTP 502`), { status: 502 }); }, getWallets: async () => [{ id: 'f', name: 'Fake Wallet', icon: '', provider }], schedule: now });
+  assert.deepEqual(await ws.payment(PAY, TX('send')), { key: paymentKeyOf(PAY), status: 'refused', said: 'The Account could not be read: nothing was sent' });
+  assert.equal((await ws.order(ORDER)).said, 'The Account could not be read: nothing was sent');
+  assert.equal(provider.requests.length, 0);
+});
+
 test('an order taken back since the page was read sends nothing and says so', async () => {
   const h = harness({ page: { ok: true, orders: [{ ...ORDER, status: 'canceled' }] } });
   assert.deepEqual(await h.ws.order(ORDER), { key: ORDER.clientId, status: 'refused', said: 'ord-0031 is no longer waiting for your wallet (canceled): nothing was sent' });

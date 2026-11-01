@@ -84,14 +84,20 @@ export async function proveWallet(wallet, post) {
   return { address: p.body?.address ?? address, wallet: wallet.name };
 }
 
-/** The wallet of `wallets` whose `eth_accounts` holds `address` (in any case); none: an Error naming the address. */
+/** The wallet of `wallets` that holds `address` (in any case): asked first with `eth_accounts`, which opens no prompt; none of
+ *  them answering for it, each asked with `eth_requestAccounts` (core.js walletFor), the wallet's own connect prompt — a wallet
+ *  authorizes each origin apart, and the face's is not the Account page's. Called only inside the operator's press. None: an
+ *  Error naming the address. */
 export async function walletFor(wallets, address) {
   const want = String(address ?? '').toLowerCase();
-  for (const w of Array.isArray(wallets) ? wallets : []) {
+  const all = Array.isArray(wallets) ? wallets : [];
+  const holds = async (w, method) => {
     let accounts = [];
-    try { accounts = await w.provider.request({ method: 'eth_accounts' }); } catch { accounts = []; }
-    if ((Array.isArray(accounts) ? accounts : []).some(a => String(a).toLowerCase() === want)) return w;
-  }
+    try { accounts = await w.provider.request({ method }); } catch { accounts = []; }
+    return (Array.isArray(accounts) ? accounts : []).some(a => String(a).toLowerCase() === want);
+  };
+  for (const w of all) if (await holds(w, 'eth_accounts')) return w;
+  for (const w of all) if (await holds(w, 'eth_requestAccounts')) return w;
   throw new Error(`No wallet on this page holds ${short(address)}`);
 }
 

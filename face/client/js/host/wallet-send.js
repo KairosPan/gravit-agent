@@ -57,8 +57,10 @@ export function startWalletSend({ store, post, getJson, getWallets, schedule }) 
     return say(key, 'sent', `${k.name || 'Your wallet'} sent it: ${short(k.hash)}`);
   }
 
+  // the Account's page, asked again past the face's cache; unreadable: said in words, and nothing is sent
   async function pageNow() {
-    const page = await getJson(PAGE);
+    let page;
+    try { page = await getJson(PAGE); } catch { throw new Error('The Account could not be read: nothing was sent'); }
     return isRecord(page) ? page : {};
   }
 
@@ -69,10 +71,12 @@ export function startWalletSend({ store, post, getJson, getWallets, schedule }) 
     payment(p, tx, txs) {
       const key = paymentKeyOf(p);
       return once(key, async () => {
+        // a hash the wallet already sent is reported first, whatever became of the payment since: the Account learns it was sent
+        if (kept.has(key)) return report(key);
         const now = list((await pageNow()).payments).find(x => x.id === p.id && x.at === p.at);
         if (!now || !(now.status === 'authorized' || (now.status === 'failed' && now.live?.expired))) throw gone(p.id, now);
-        if (!kept.has(key) && str(now.live?.reported)) kept.set(key, { kind: 'payment', id: p.id, hash: now.live.reported, name: '' });
-        if (!kept.has(key)) {
+        if (str(now.live?.reported)) kept.set(key, { kind: 'payment', id: p.id, hash: now.live.reported, name: '' });
+        else {
           const all = list(txs).length ? list(txs) : list([tx]);
           if (!all.length) throw new Error(`${p.id} has nothing for your wallet to send`);
           const wallet = await walletFor(await getWallets(), all[0].from);
@@ -88,10 +92,12 @@ export function startWalletSend({ store, post, getJson, getWallets, schedule }) 
     order(o) {
       const key = orderKeyOf(o);
       return once(key, async () => {
+        // a hash the wallet already sent is reported first, even for an order taken back since (the Account takes it back on)
+        if (kept.has(key)) return report(key);
         const now = list((await pageNow()).orders).find(x => x.id === o.id);
         if (!now || str(now.ref) || now.status !== 'pending') throw gone(o.id, now);
-        if (!kept.has(key) && str(now.reported)) kept.set(key, { kind: 'order', id: o.id, hash: now.reported, name: '' });
-        if (!kept.has(key)) {
+        if (str(now.reported)) kept.set(key, { kind: 'order', id: o.id, hash: now.reported, name: '' });
+        else {
           const txs = list(now.walletTxs);
           if (!txs.length) throw new Error(`${o.id} has nothing for your wallet to send`);
           const wallet = await walletFor(await getWallets(), txs[0].from);

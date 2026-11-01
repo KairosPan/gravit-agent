@@ -252,7 +252,8 @@ export function boot(win, host = {}) {
     // it shows the transaction and sends it, and its hash is reported (the Account page's money.js done, trade.js placeOrder)
     const out = body?.kind === 'result' && body.result !== null && typeof body.result === 'object' ? body.result : null;
     if (out?.wallet && out.payment) sendFromWallet(walletSend.payment(out.payment, out.wallet, out.walletTxs));
-    else if (body?.kind === 'order' && body.order?.walletTxs && !body.order.ref) sendFromWallet(walletSend.order(body.order));
+    // an order placed from the ticket and waiting for the wallet; never a cancel's answer, whose order also has walletTxs
+    else if (kind === 'order' && body?.kind === 'order' && body.order?.status === 'pending' && body.order.walletTxs && !body.order.ref) sendFromWallet(walletSend.order(body.order));
     void account.load({ fresh: true });
     void account.loadHoldings({ fresh: true });
     void account.loadStatement({ fresh: true });

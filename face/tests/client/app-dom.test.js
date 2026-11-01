@@ -1993,7 +1993,7 @@ test("Under way's Send from wallet… sends the waiting order through the fake w
   const html = f.html();
   assert.match(html, /Waiting for your wallet · ord-0031/);
   assert.match(html, /<button type="button" class="btn-sm" data-action="sendFromWallet" data-order="ord-0031">Send from wallet…<\/button>/);
-  assert.doesNotMatch(html, /data-action="cancelOrder"[^>]*data-order="ord-0031"/, 'no Cancel on an order waiting for the wallet');
+  assert.match(html, /data-order="ord-0031">Send from wallet…<\/button><button type="button" class="btn-sm" data-action="cancelOrder" data-venue="dex" data-order="ord-0031">Cancel<\/button>/, 'its Cancel beside it: it takes the order back before the wallet sends it');
   assert.doesNotMatch(html, /data-kind="amend"[^>]*data-order="ord-0031"/, 'no Change… either');
   h.reads.length = 0;
   f.click({ tagName: 'BUTTON', dataset: { action: 'sendFromWallet', order: 'ord-0031' } });
@@ -2043,14 +2043,17 @@ test("a payment's report the Account did not take keeps Report again, which repo
   store.timers.clear();
 });
 
-test("an exchange answered with a DEX order waiting for the wallet sends it at once and reports it", async () => {
-  const f = fakeWindow({ hash: '#/trade', storage: memoryStorage() });
+test("an order signed on the ticket that waits for the wallet is sent at once and reported; a cancel's answer starts nothing", async () => {
+  const f = fakeWindow({ hash: '#/markets/coin:BTC', storage: memoryStorage() });
   const provider = fakeProvider();
   const tx = { chainId: 8453, chainIdHex: '0x2105', from: WALLET_ADDRESS, to: '0x' + '34'.repeat(20), data: '0xabcd', value: '0x0' };
   let placed = false;
-  // any signed action's answer reaches afterAction: here Cancel's, answered (as a stand-in) with an order built for the wallet
   const dex = { id: 'ord-0031', clientId: 'c0ffee00c0ffee00', venue: 'dex', status: 'pending', walletTxs: [tx] };
-  const door = ownerDoor({ exchange: () => ({ ok: true, kind: 'order', order: dex }) });
+  // the ticket's liveOrder answered with an order built for the wallet; a cancel's with that order taken back (it still has its
+  // walletTxs and no ref, as the Account answers one: live-orders.ts)
+  const door = ownerDoor({ exchange: action => (action.type === 'liveCancel'
+    ? { ok: true, kind: 'order', order: { ...dex, id: action.order, status: 'canceled' } }
+    : { ok: true, kind: 'order', order: dex }) });
   const page = () => { const p = door.page(); return { ...p, orders: [placed ? { ...dex, ref: '0xsent', status: 'open' } : dex, ...p.orders] }; };
   const post = async (path, body) => {
     if (path === '/data/account/live/order-sent') { door.posts.push([path, body]); placed = true; return { status: 200, body: { ok: true } }; }
@@ -2061,11 +2064,52 @@ test("an exchange answered with a DEX order waiting for the wallet sends it at o
   await h.ready();
   await until(signs(store), 'the page to sign');
   await settle();
+  // a cancel first: its answer reaches afterAction as kind cancel, and the wallet is never asked
   f.click({ tagName: 'BUTTON', dataset: { action: 'cancelOrder', venue: 'ex', order: 'ord-0010' } });
+  await until(() => store.get().trade.said !== null, 'the cancel said');
+  await settle();
+  const cancelSaid = store.get().trade.said;
+  assert.equal(provider.requests.length, 0, 'a cancel starts no wallet send');
+  assert.deepEqual(store.get().account.wallet, {});
+  assert.equal(store.get().trade.said, cancelSaid, "the cancel's line stays");
+  // the ticket: a buy typed, prepared, signed
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openTicket', id: 'coin:BTC', side: 'buy' } });
+  await settle();
+  assert.equal(store.get().sheet.kind, 'order');
+  f.fire('root', 'input', { target: { tagName: 'INPUT', type: 'text', id: 'tk-amount', name: 'amount', value: '25', dataset: { action: 'ticketField' } } });
+  await until(() => store.get().sheet?.status === 'ready', 'the preparation');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
   await until(() => door.sent('/data/account/live/order-sent').length === 1, 'the report');
+  assert.equal(door.sent('/data/account/exchange').at(-1).action.type, 'liveOrder');
   assert.equal(provider.count('eth_sendTransaction'), 1);
   assert.deepEqual(door.sent('/data/account/live/order-sent'), [{ order: 'ord-0031', hash: hashOf(1) }]);
   await until(() => store.get().trade.said === 'Fake Wallet sent it: 0xaaaaaa…aaa1', 'the words said');
+  store.timers.clear();
+});
+
+test("a row whose hash the Account already holds reads Report again, and pressing it reports that hash without the wallet", async () => {
+  const f = fakeWindow({ hash: '#/trade', storage: memoryStorage() });
+  const provider = fakeProvider();
+  const held = '0x' + 'bb'.repeat(32);
+  const tx = { chainId: 8453, chainIdHex: '0x2105', from: WALLET_ADDRESS, to: '0x' + '34'.repeat(20), data: '0xabcd', value: '0x0' };
+  const pay = { id: 'pay-0012', at: '2026-11-01T14:03:00.000Z', kind: 'send', from: 'ex', to: 'ex', status: 'authorized', legs: [{ native: { walletTx: tx } }], live: { reported: held } };
+  let taken = false;
+  const door = ownerDoor();
+  const page = () => ({ ...door.page(), payments: taken ? [] : [pay] });
+  const post = async (path, body) => {
+    if (path === '/data/account/live/sent') { door.posts.push([path, body]); taken = true; return { status: 200, body: { ok: true } }; }
+    return door.post(path, body);
+  };
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': page } });
+  const store = bootAccount(f, h, fakeMarkets(), { ownerPost: post, getWallets: async () => [{ id: 'fake', name: 'Fake Wallet', icon: '', provider }] });
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  assert.match(f.html(), /<button type="button" class="btn-sm" data-action="sendFromWallet" data-payment="pay-0012">Report again<\/button>/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sendFromWallet', payment: 'pay-0012' } });
+  await until(() => door.sent('/data/account/live/sent').length === 1, 'the report');
+  assert.deepEqual(door.sent('/data/account/live/sent'), [{ payment: 'pay-0012', hash: held }]);
+  assert.equal(provider.requests.length, 0, 'the wallet is never asked');
   store.timers.clear();
 });
 
