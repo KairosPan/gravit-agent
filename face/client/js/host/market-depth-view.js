@@ -30,7 +30,12 @@ export function assetKeyOf(item) {
   return '';
 }
 
-const EMPTY_HERE = Object.freeze({ held: null, positions: [], orders: [], cost: [], agents: [], missing: [] });
+const EMPTY_HERE = Object.freeze({ held: null, paperHeld: null, positions: [], orders: [], cost: [], paperCost: [], agents: [], missing: [] });
+const costRows = v => records(v).map(c => ({
+  key: str(c.key), side: str(c.side), symbol: str(c.symbol), avgCostUsd: number(c.avgCostUsd), costUsd: number(c.costUsd),
+  coveredQty: number(c.coveredQty), ofQty: number(c.ofQty), words: str(c.words),
+}));
+const heldRow = row => (isRecord(row) ? assetsOf({ ok: true, rows: [row] })[0] ?? null : null);
 
 /** You here, from the asset sheet: what is held of it across its venues (`held`, the holdings row as assetsOf words one, or
  *  null), its positions (as positionsOf rows), its open orders with who placed them (as openOrdersOf names them, the page's
@@ -38,30 +43,34 @@ const EMPTY_HERE = Object.freeze({ held: null, positions: [], orders: [], cost: 
  *  words }` — the row's key, a position's `position:<venue>:<symbol>`, an event's own), what the agents do here (`agents`: its
  *  orders whose author is not the owner, `{ type: 'order', order }`, then its statement lines whose `by` is not You,
  *  `{ type: 'line', line }`, newest first), and the venues it could not read, one sentence
- *  each. A refusal, or a body that is not the asset read, is the empty shape. */
+ *  each. The paper accounts' holding of it (the sheet's `paper`, the Paper lens) is apart: `paperHeld` its row and
+ *  `paperCost` that row's cost, its positions among `positions` (each `paper`, its cost among `cost`) but for a spot one,
+ *  which is the row again. A refusal, or a body that is not the asset read, is the empty shape. */
 export function hereOf(body, page) {
   if (body?.ok !== true || !Array.isArray(body.positions) || !Array.isArray(body.orders)) return { ...EMPTY_HERE };
   const orders = orderRowsOf(body.orders, isRecord(page) ? page.keys : []);
   const theirs = orders.filter(o => o.who !== 'You');
   const said = statementLinesOf({ ok: true, lines: body.lines }).filter(l => l.by !== '' && l.by !== 'You');
-  const held = isRecord(body.row) ? assetsOf({ ok: true, rows: [body.row] })[0] ?? null : null;
+  const paper = isRecord(body.paper) ? body.paper : {};
+  const paperCost = costRows(paper.cost);
+  const atPosition = c => c.key.startsWith('position:');
   return {
-    held,
-    positions: positionsOf(body),
+    held: heldRow(body.row),
+    paperHeld: heldRow(paper.row),
+    positions: [...positionsOf(body), ...positionsOf({ ok: true, positions: paper.positions }).filter(p => p.kind !== 'spot').map(p => ({ ...p, paper: true }))],
     orders,
-    cost: records(body.cost).map(c => ({
-      key: str(c.key), side: str(c.side), symbol: str(c.symbol), avgCostUsd: number(c.avgCostUsd), costUsd: number(c.costUsd),
-      coveredQty: number(c.coveredQty), ofQty: number(c.ofQty), words: str(c.words),
-    })),
+    cost: [...costRows(body.cost), ...paperCost.filter(atPosition)],
+    paperCost: paperCost.filter(c => !atPosition(c)),
     agents: [...theirs.map(order => ({ type: 'order', order })), ...said.map(line => ({ type: 'line', line }))],
     missing: missingWords(body.missing),
   };
 }
 
 /** The cost row of a position (`position:<venue>:<symbol>`, else an event contract's own `event:<symbol>`), or of the asset
- *  held (its row's key): null when the sheet names none. */
-export function costOf(here, { venue = '', symbol = '', kind = '', key = '' } = {}) {
-  const rows = Array.isArray(here?.cost) ? here.cost : [];
+ *  held (its row's key; `paper`: the paper accounts' row's): null when the sheet names none. */
+export function costOf(here, { venue = '', symbol = '', kind = '', key = '', paper = false } = {}) {
+  const kept = paper && key ? here?.paperCost : here?.cost;
+  const rows = Array.isArray(kept) ? kept : [];
   const want = key ? [key] : [`position:${venue}:${symbol}`, kind === 'event' ? `event:${symbol}` : ''].filter(Boolean);
   return rows.find(c => want.includes(c.key)) ?? null;
 }

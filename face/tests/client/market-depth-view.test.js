@@ -54,8 +54,35 @@ test('hereOf names who placed each order and lists the agents’ actions', () =>
   assert.deepEqual(missed.missing, ['every venue did not answer', 'Stand-in Exchange did not answer']);
 });
 
+test('hereOf keeps the paper accounts’ holding apart: its row and cost, its positions but the spot one', () => {
+  const body = {
+    ok: true, key: 'crypto:BTC', positions: [], orders: [], lines: [], missing: [],
+    cost: [],
+    paper: {
+      row: { key: 'crypto:BTC', asset: 'BTC', class: 'crypto', amount: 0.1, usd: 6300, venues: [{ venue: 'paper-1', venueName: 'Paper account', amount: 0.1, usd: 6300 }] },
+      positions: [
+        { venue: 'paper-1', venueName: 'Paper account', symbol: 'BTC/USD', kind: 'spot', side: 'long', qty: 0.1, paper: true },
+        { venue: 'paper-1', venueName: 'Paper account', symbol: 'BTC-PERP', kind: 'perp', side: 'short', qty: 0.02 },
+      ],
+      cost: [
+        { key: 'crypto:BTC', coveredQty: 0.1, ofQty: 0.1, avgCostUsd: 60010, words: 'cost known for 0.1 of 0.1 BTC' },
+        { key: 'position:paper-1:BTC-PERP', side: 'short', symbol: 'BTC-PERP', avgCostUsd: 61000, coveredQty: 0.02, ofQty: 0.02 },
+      ],
+    },
+  };
+  const here = hereOf(body, fx('account'));
+  assert.equal(here.held, null, 'no real row');
+  assert.deepEqual([here.paperHeld.key, here.paperHeld.amount, here.paperHeld.usd], ['crypto:BTC', 0.1, 6300]);
+  assert.deepEqual(here.positions.map(p => [p.symbol, p.kind, p.paper]), [['BTC-PERP', 'perp', true]], 'the spot position is the row again');
+  assert.equal(costOf(here, { key: 'crypto:BTC' }), null, 'the real row’s cost is not the paper one');
+  assert.equal(costOf(here, { key: 'crypto:BTC', paper: true }).avgCostUsd, 60010);
+  assert.equal(costOf(here, here.positions[0]).avgCostUsd, 61000);
+  // a sheet with no paper accounts connected has none
+  assert.equal(hereOf(fx('asset-sol'), fx('account')).paperHeld, null);
+});
+
 test('hereOf of a refusal or an unknown body is empty', () => {
-  const empty = { held: null, positions: [], orders: [], cost: [], agents: [], missing: [] };
+  const empty = { held: null, paperHeld: null, positions: [], orders: [], cost: [], paperCost: [], agents: [], missing: [] };
   for (const body of [
     { ok: false, refusal: { code: 'E_ACCOUNT_BAD_ACTION', message: 'an asset is named by its key' } },
     { ok: true }, { ok: true, positions: 'x', orders: [] }, { positions: [], orders: [] }, null, undefined, '<!DOCTYPE html>', [],

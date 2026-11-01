@@ -245,6 +245,8 @@ function youHere(view, part, here, keyed, page, now, quotes = null) {
     const h = here.held;
     const lines = [
       ...(h ? [line('·', esc(`${[qtyWord(h.amount), h.asset].filter(Boolean).join(' ')} · ${money(h.usd)}`), esc(costWords(costOf(here, { key: h.key }), unit)))] : []),
+      ...(here.paperHeld ? [line('·', `${esc(`${[qtyWord(here.paperHeld.amount), here.paperHeld.asset].filter(Boolean).join(' ')} · ${money(here.paperHeld.usd)}`)} ${tag('Paper')}`,
+        esc(costWords(costOf(here, { key: here.paperHeld.key, paper: true }), unit)))] : []),
       ...here.positions.map(p => line('·', `${esc(`${p.venueName || p.venue} · ${[p.side, qtyWord(p.qty), p.symbol].filter(Boolean).join(' ')} · `)}` +
         `<span class="${tone(p.unrealizedUsd)}">${esc(signedMoney(p.unrealizedUsd))}</span>${p.paper ? ` ${tag('Paper')}` : ''}`,
         esc(costWords(costOf(here, p), unit)), '', keyed ? tail(positionKeys(p, page, quotes)) : '')),
@@ -362,7 +364,7 @@ function accountPage(id, view, state, now) {
   // the hand order is the owner's: Buy and Sell only on a page that signs, for a market of a Trade kind (a perpetual, a pre-IPO
   // one, is listed, not traded from the face), Sell only where something of it is held
   // what is held is the asset sheet's once it has answered, else the holdings' as the page read them
-  const holds = hereAnswered ? here.held !== null || here.positions.length > 0 : view.held.assets.length > 0 || view.held.positions.length > 0;
+  const holds = hereAnswered ? here.held !== null || here.paperHeld !== null || here.positions.length > 0 : view.held.assets.length > 0 || view.held.positions.length > 0;
   const trade = state.owner?.role === 'signs' && tradeableOf(view.item) ? { held: holds } : null;
   // a perpetual's Leverage…: its first connected line whose venue sets leverage, the leverage held there
   const leverage = keyed ? marketLeverageSeedOf(view.item, view.legs, hereAnswered ? here.positions : view.held.positions, page, state.markets?.accountQuotes) : null;

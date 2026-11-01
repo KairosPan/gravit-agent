@@ -1338,9 +1338,23 @@ export class PortfolioService {
       else if (n.payment && (k.cls === "stable" || k.cls === "cash") && [n.payment.token, n.payment.sourceToken].some((t) => typeof t === "string" && t.toUpperCase() === k.name)) keys.add(r.detail.key);
     }
     const lines = keys.size ? this.statement().filter((l) => keys.has(l.key)).slice(0, 50) : [];
-    const held = new Set(positions.map((p) => `position:${p.venue}:${p.symbol}`));
-    const cost = (h.view.cost ?? []).filter((c) => c.key === k.key || held.has(c.key));
-    return { key: k.key, ...(row ? { row } : {}), ...(compare ? { compare } : {}), ...(candles.got ? { candles: candles.got } : {}), positions, orders, lines, cost, missing };
+    const costOf = (v: HoldingsView, ps: VenuePosition[]) => {
+      const at = new Set(ps.map((p) => `position:${p.venue}:${p.symbol}`));
+      return (v.cost ?? []).filter((c) => c.key === k.key || at.has(c.key));
+    };
+    const cost = costOf(h.view, positions);
+    // the paper accounts' holding of it is the Paper lens's, apart from the real one: read only where a paper account is connected
+    let paper: AssetDetail["paper"];
+    if (h.page.venues.some((v) => v.paper)) {
+      const p = await this.held({ cost: true, paper: true });
+      if (isRefusal(p)) missing.push({ venue: "*", venueName: "the paper accounts", why: p.message, code: p.code, part: "paper" });
+      else {
+        const prow = p.view.rows.find((r) => r.key === k.key);
+        const ppos = (p.view.positions ?? []).filter((x) => sameThing(k, x.kind, x.symbol, x.symbol));
+        paper = { ...(prow ? { row: prow } : {}), positions: ppos, cost: costOf(p.view, ppos) };
+      }
+    }
+    return { key: k.key, ...(row ? { row } : {}), ...(compare ? { compare } : {}), ...(candles.got ? { candles: candles.got } : {}), positions, orders, lines, cost, ...(paper ? { paper } : {}), missing };
   }
 
   /** ONE MARKET'S PRICE HISTORY, as the Market sheet, the Trade page's chart and the Asset sheet draw it: at a venue connected live, its
@@ -3844,7 +3858,7 @@ export interface ReadMissing {
   why: string;
   code?: string | undefined;
   /** which read: its 24 hours, its positions, its price history, the comparison, its earn, its funding */
-  part?: "stats" | "positions" | "candles" | "compare" | "earn" | "funding" | undefined;
+  part?: "stats" | "positions" | "candles" | "compare" | "earn" | "funding" | "paper" | undefined;
 }
 
 /** EARN across the venues connected live: which venues earn (and whether the key or wallet may put money in), the products they offer, what
@@ -3988,6 +4002,8 @@ export interface AssetDetail {
   lines: StatementLine[];
   /** what was paid for it: its row's, and its positions' */
   cost: CostBasis[];
+  /** the paper accounts' own row, positions and cost of it (the Paper lens), when a paper account is connected */
+  paper?: { row?: HeldRow | undefined; positions: VenuePosition[]; cost: CostBasis[] } | undefined;
   missing: ReadMissing[];
 }
 

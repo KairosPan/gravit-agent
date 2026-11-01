@@ -330,6 +330,10 @@ test('the page: no Buy, no Sell on a page that does not sign; the range seg; Acr
     '·Stand-in Broker · NVDA · $182.40 Best', '·Momentum · paper · NVDA · $182.40 Paper', '·Stand-in · 15 min delayed · NVDA · $182.40Connect to trade',
   ]);
   assert.deepEqual(linesOf(section(nvda.html, 'You here')).map(text), ['·2 NVDA · $364.80cost known for 0 of 2 NVDA'], 'nothing working: no order line');
+  // what the paper accounts hold of it is its own line, marked Paper, with the paper cost: a sheet with no real row
+  const papered = page('stock:NVDA', { here: { ok: true, key: 'equity:NVDA', positions: [], orders: [], lines: [], cost: [], missing: [],
+    paper: { row: { key: 'equity:NVDA', asset: 'NVDA', class: 'equity', amount: 3, usd: 547.2 }, positions: [], cost: [{ key: 'equity:NVDA', words: 'cost known for 3 of 3 NVDA' }] } } });
+  assert.deepEqual(linesOf(section(papered.html, 'You here')).map(text), ['·3 NVDA · $547.20 Papercost known for 3 of 3 NVDA']);
   assert.match(section(nvda.html, 'On the statement'), /<p class="mk-empty">Nothing on the statement about it yet\.<\/p>/);
   assert.equal(section(nvda.html, 'Gravit on it'), '');
   // a range chosen and still reading: Loading…, that range pressed; one answered with no closes: No history
