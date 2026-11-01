@@ -57,6 +57,8 @@ export const reducers = {
   // face's words, or its refusal in its own; the mode drawn stays the page's
   guardAsking: s => acc(s, { guard: { status: 'asking', said: null, message: null } }),
   guardSaid: (s, said) => acc(s, { guard: { status: 'said', said: typeof said === 'string' ? said : null, message: null } }),
+  // a signed Beast done: the last Guard press's words are no longer the news
+  guardClear: s => acc(s, { guard: { status: 'idle', said: null, message: null } }),
   guardRefused: (s, message) => acc(s, { guard: { status: 'refused', said: null, message: typeof message === 'string' ? message : null } }),
   // the curve's range; one the Account does not draw leaves the slice as it is
   setHistoryRange: (s, range) => (RANGES.includes(range) && range !== s.account.history.range ? read(s, 'history', { range }) : s),

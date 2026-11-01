@@ -597,7 +597,8 @@ test('Rules on a writes-on page that signs: Mode, the door rules, each move, the
   // Beast in force: Beast pressed, Now on its column
   const page = fx('account');
   const beast = draw(signingRules(state({ tab: 'rules', page: { ...page, mode: 'open' } })));
-  has(beast, 'aria-pressed="false" data-action="setGuard">Guard</button><button type="button" class="seg-item pressed" aria-pressed="true" data-action="openSheet" data-kind="beast">Beast</button>');
+  has(beast, 'aria-pressed="false" data-action="setGuard">Guard</button><button type="button" class="seg-item pressed" aria-pressed="true">Beast</button>');
+  lacks(beast, 'data-kind="beast"', 'Beast in force: pressed, no sheet to sign');
   has(beast, '<th scope="col">Guard</th><th scope="col">Beast <span class="chip grey">Now</span></th>');
   // an ended session starts a new one
   const ended = draw(signingRules(state({ tab: 'rules', page: { ...page, dial: { ...page.dial, sessionEnded: true } } })));
@@ -608,7 +609,15 @@ test('Rules on a writes-on page that signs: Mode, the door rules, each move, the
   lacks(draw(signingRules(state({ tab: 'rules', page: flat }))), 'Their leverage');
   // what the Guard press said, and a refusal, under the switch
   has(draw(R.guardSaid(signingRules(state({ tab: 'rules' })), 'Guard: what agents ask for waits for you on a card.')), '<p class="acct-note">Guard: what agents ask for waits for you on a card.</p>');
-  has(draw(R.guardRefused(signingRules(state({ tab: 'rules' })), 'No & no')), '<p class="acct-note">No &amp; no</p>');
+  const openPage = { tab: 'rules', page: { ...page, mode: 'open' } };
+  has(draw(R.guardRefused(signingRules(state(openPage)), 'No & no')), '<p class="acct-note">No &amp; no</p>');
+  // a line the page no longer bears out is not drawn: Guard said, then Beast signed (the page in Beast); a refusal, then the
+  // page in Guard after all
+  const stale = draw(R.guardSaid(signingRules(state(openPage)), 'Guard: what agents ask for waits for you on a card.'));
+  lacks(stale, '<p class="acct-note">Guard: what agents ask for waits for you on a card.</p>');
+  lacks(draw(R.guardRefused(signingRules(state({ tab: 'rules' })), 'No & no')), 'No &amp; no');
+  // a signed Beast clears it
+  assert.deepEqual(R.guardClear(R.guardSaid(signingRules(state(openPage)), 'x')).account.guard, { status: 'idle', said: null, message: null });
   // the head's chips stay
   has(html, '<span class="chip grey">Guard</span><span class="chip grey">Trading on · $250 a move</span>');
 });

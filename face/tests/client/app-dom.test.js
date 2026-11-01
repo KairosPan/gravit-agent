@@ -2611,3 +2611,32 @@ test('on a page that signs, Beast and the three Change keys open their signed sh
   assert.match(f.html(), /That is their leverage now/);
   store.timers.clear();
 });
+
+test('Guard said, then Beast signed: the said line goes with Guard, and Beast in force opens no sheet', async () => {
+  const f = fakeWindow({ hash: '#/account/rules', storage: memoryStorage() });
+  let mode = 'guard';
+  const door = ownerDoor({ exchange: action => { if (action?.type === 'setPolicy' && action.change === 'mode') mode = action.value; return { ok: true, kind: 'result', result: { ok: true } }; } });
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => ({ ...door.page(), mode }) } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  const SAID = '<p class="acct-note">Guard: what agents ask for waits for you on a card.</p>';
+  f.click({ tagName: 'BUTTON', dataset: { action: 'setGuard' } });
+  await settle();
+  assert.ok(f.html().includes(SAID), 'Guard said');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'beast' } });
+  await until(() => store.get().sheet?.status === 'ready', 'the Beast sheet prepared');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
+  await until(() => store.get().sheet === null && store.get().account.data?.mode === 'open', 'Beast signed and read');
+  await settle();
+  assert.equal(mode, 'open');
+  assert.ok(!f.html().includes(SAID), 'the said line is gone');
+  assert.match(f.html(), /<button type="button" class="seg-item pressed" aria-pressed="true">Beast<\/button>/);
+  const prepares = door.sent('/data/account/prepare').length;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'beast' } });
+  await settle();
+  assert.equal(store.get().sheet, null, 'Beast in force: no sheet');
+  assert.equal(door.sent('/data/account/prepare').length, prepares);
+  store.timers.clear();
+});

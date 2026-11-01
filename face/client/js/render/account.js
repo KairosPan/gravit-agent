@@ -340,10 +340,12 @@ const READ_ONLY = what => `Read-only: the Account was started without trading, s
 const usd = n => (n === null ? '—' : `$${Number(n).toLocaleString('en-US', { maximumFractionDigits: 2 })}`);
 const ruleRow = (head, words, key = '') => `<div class="venue"><span>${lines(head, [words])}</span>${key}</div>`;
 
-// the switch: Guard one click on any page that reads the Account; Beast a signed sheet, its key only on a page that signs
+// the switch: Guard one click on any page that reads the Account (in Guard too: the Account takes it again); Beast a signed
+// sheet, its key only on a page that signs and only while Beast is not in force — pressed, it then does nothing, as on the
+// Account's own page (a signature that changes nothing is never asked)
 function modeSeg(mode, owner) {
   const item = (label, value, data) => `<button${attrs({ type: 'button', class: cls('seg-item', mode === value && 'pressed'), 'aria-pressed': mode === value ? 'true' : 'false', ...data })}>${label}</button>`;
-  return `<div class="seg">${item('Guard', 'guard', { 'data-action': 'setGuard' })}${item('Beast', 'open', owner ? { 'data-action': 'openSheet', 'data-kind': 'beast' } : { disabled: true })}</div>`;
+  return `<div class="seg">${item('Guard', 'guard', { 'data-action': 'setGuard' })}${item('Beast', 'open', !owner ? { disabled: true } : mode === 'open' ? {} : { 'data-action': 'openSheet', 'data-kind': 'beast' })}</div>`;
 }
 
 // what each mode does, door by door, as the Account has it; the mode in force marked Now
@@ -361,7 +363,8 @@ function rulesTab(state, now) {
   const r = rulesOf(a.data, now);
   const owner = signs(state);
   const g = a.guard ?? {};
-  const said = g.status === 'said' && g.said ? note(g.said) : g.status === 'refused' && g.message ? note(g.message) : '';
+  // what the last Guard press said, only while it still reads true: done while the page is in Guard, a refusal while it is not
+  const said = g.status === 'said' && g.said && r.mode === 'guard' ? note(g.said) : g.status === 'refused' && g.message && r.mode !== 'guard' ? note(g.message) : '';
   const card = r.cardMinutes === null ? '' : note(`A card nobody answers in ${r.cardMinutes} ${r.cardMinutes === 1 ? 'minute' : 'minutes'} expires.`);
   const mode = box(`${title('Mode')}${modeSeg(r.mode, owner)}${said}${owner ? '' : note('Only a browser that signs switches to Beast.')}` +
     `${note(RULES_LEAD)}${note(GATE2)}${modeTable(r)}${card}`, 'Mode');

@@ -732,7 +732,7 @@ test('a refused guard says the refusal and leaves the mode drawn as the page has
   assert.deepEqual(r.reads, ['/data/account?fresh=1']);
   const html = renderAccountScreen({ ...r.store.get(), route: { screen: 'account', tab: 'rules' } }, Date.now());
   assert.match(html, /The account would not switch now\./);
-  assert.match(html, /aria-pressed="true" data-action="openSheet" data-kind="beast"|aria-pressed="true"[^>]*>Beast</, 'Beast drawn pressed');
+  assert.match(html, /aria-pressed="true"[^>]*>Beast</, 'Beast drawn pressed');
   await r.account.guard();
   assert.equal(r.a().guard.message, 'unreachable', 'else its error');
   await r.account.guard();

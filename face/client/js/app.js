@@ -251,6 +251,8 @@ export function boot(win, host = {}) {
     void account.loadStatement({ fresh: true });
     markets.afterAction();
     if (SEAT_KINDS.has(kind)) void seat.load({ fresh: true });
+    // a signed Beast: the Rules tab's last Guard line goes with the mode it spoke of
+    if (kind === 'beast') store.dispatch('guardClear');
     const s = store.get().sheet;
     if (kind !== 'order' && s?.kind === kind && s.status === 'done') sheet.close();
   }
@@ -689,7 +691,8 @@ export function boot(win, host = {}) {
       case 'leverage': void sheet.open('leverage', { venue: d.venue ?? '', venueName: d.venueName ?? '', symbol: d.symbol ?? '', name: d.name ?? '', leverage: d.leverage ?? '' }); break;
       // the Rules tab's (plan 4a Task 5): each seeded from the page as it stands — the cap now, whether the session ended, their
       // leverage now; the three limits only for an Account that takes writes
-      case 'beast': void sheet.open('beast', {}); break;
+      // Beast only while it is not in force: a signature that changes nothing is never asked
+      case 'beast': if (rulesOf(page, now()).mode !== 'open') void sheet.open('beast', {}); break;
       case 'cap': case 'session': case 'leverageCap': {
         const r = rulesOf(page, now());
         if (!r.writes) break;
