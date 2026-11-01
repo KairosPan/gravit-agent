@@ -1,5 +1,5 @@
 // face/client/js/host/sell-many.js — Sell many (plan 4b Task 3), the retired page openSellMany
-// (account/src/portfolio/public/ui/earn.js:219-360) on the face: what the Account says can be sold (/data/account/sellable),
+// (the retired page at 9614314c, ui/earn.js:219-360) on the face: what the Account says can be sold (/data/account/sellable),
 // up to SELL_MANY_MAX of it picked, each leg prepared by the Account in turn (a market sell of what is held, or — a perpetual,
 // a future — the position's close), then one signature each, in turn, through the owner device (owner.prepare, owner.submit:
 // the face holds no key). Each leg's answer stays where it landed: sold, the Account's refusal in its words, or — a DEX sale —

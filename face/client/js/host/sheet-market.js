@@ -1,6 +1,6 @@
 // face/client/js/host/sheet-market.js — the Market half's three sheets (plan 4a Task 3): Close (or Sell) a position, Change an
 // order still working, and a perpetual's Leverage — each the Account's own draft for its type, `liveClose`, `liveAmend` and
-// `liveLeverage`, with the fields its own page signs them with (account/src/portfolio/public/ui/trade.js openClose, openAmend
+// `liveLeverage`, with the fields its own page signs them with (the retired page at 9614314c, ui/trade.js openClose, openAmend
 // and the ticket's leverage editor), nothing added and nothing renamed. host/sheet-view.js delegates the three kinds here; the
 // sheet engine (host/sheet.js) prepares the draft and What you sign shows it, as it does Trade's order. No clock: each deadline
 // is the Account's prepare's. And each kind's seed from a row the screens draw — a working order, a position, a market's

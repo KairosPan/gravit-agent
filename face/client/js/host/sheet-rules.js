@@ -1,6 +1,6 @@
 // face/client/js/host/sheet-rules.js — the Rules tab's four signed sheets (plan 4a Task 5): Beast, the cap on each move, the
 // agents' session and their leverage — each the Account's own `setPolicy` draft, with the checks and words its own page signs it
-// with (account/src/portfolio/public/ui/agents-mount.js setMode, openCap and renderDial), nothing added and nothing renamed.
+// with (the retired page at 9614314c, ui/agents-mount.js setMode, openCap and renderDial), nothing added and nothing renamed.
 // Guard is no sheet: it is the Account's one unsigned write (host/account.js guard). host/sheet-view.js delegates the four kinds
 // here; the sheet engine (host/sheet.js) prepares the draft and What you sign shows it. No clock. No DOM, no store.
 

@@ -1,5 +1,5 @@
 // face/client/js/host/sheet-money.js — the Money tab's signed sheet (plan 4b Task 2): Move, the Account's own `liveMove` draft with
-// the fields its own page signs it with (account/src/portfolio/public/ui/money.js openLiveMove, :59-183), nothing added and
+// the fields its own page signs it with (the retired page at 9614314c, ui/money.js openLiveMove, :59-183), nothing added and
 // nothing renamed. Its fields follow the account it moves from and the kind of move: `refieldsOf` rebuilds them as either
 // changes, keeping every value whose field survives. The seed is the page's at the press (`moveSeedOf`): every source with what
 // it offers, so the sheet never reads the page again. host/sheet-view.js delegates the kind here; the sheet engine
@@ -256,7 +256,7 @@ export function moveSaysOf(sheet) {
   return lines;
 }
 
-// ── Earn (plan 4b Task 3; account/src/portfolio/public/ui/earn.js openEarn, :40-196) ──
+// ── Earn (plan 4b Task 3; the retired page at 9614314c, ui/earn.js openEarn, :40-196) ──
 
 const SIDES = [{ value: 'supply', label: 'Put in' }, { value: 'withdraw', label: 'Take out' }];
 const sideWord = v => (v === 'withdraw' ? 'withdraw' : 'supply');
@@ -365,7 +365,7 @@ export function earnSaidOf(body) {
   return `${e.kind === 'withdraw' ? 'Taking out' : 'Putting in'} ${e.all ? 'all' : qty(Number(e.amount))} ${str(e.asset)} · ${str(e.productName)}: ${status === 'done' ? 'done' : status}${str(e.note) ? ` · ${e.note}` : ''}`;
 }
 
-// ── An agent wallet (plan 4b Task 5; account/src/portfolio/public/ui/portfolio.js pfWalletForm, :1263-1279, and money.js
+// ── An agent wallet (plan 4b Task 5; the retired page at 9614314c, ui/portfolio.js pfWalletForm, :1263-1279, and money.js
 // renderWallets, :381-389) ──
 
 // portfolio.js:1270 — a wallet's name: a letter or a digit, then letters, digits, spaces, _ and -, up to 16 in all

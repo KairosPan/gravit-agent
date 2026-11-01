@@ -1,5 +1,5 @@
 // face/client/js/wire/wallet.js — the operator's own browser wallet, as the retired page speaks to it (plan 4b Task 1): the
-// wallets this browser has (EIP-6963, account/src/portfolio/public/ui/connect.js findWallets), an address proven by the wallet's
+// wallets this browser has (EIP-6963, the retired page at 9614314c, ui/connect.js findWallets), an address proven by the wallet's
 // signature on the Account's sentence (connect.js proveWallet), the wallet that holds an address (core.js walletFor), and the
 // transactions the Account built sent by that wallet — an approval waited for on chain (core.js mined), the swap built again
 // after it, every send on its own chain, Robinhood Chain offered to a wallet that does not know it (trade.js tkSwitchChain).
