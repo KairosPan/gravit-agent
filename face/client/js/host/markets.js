@@ -8,7 +8,7 @@
 // us:/crypto: star asked of the Account once. Every market read is the Account's: the face's own quote wire is read by nothing
 // here. The views over what lands are market-view.js's. Nothing here touches the DOM.
 import {
-  readWatchlist, saveWatchlist, STORAGE_KEY, readAccountWatch, saveAccountWatch, ACCOUNT_WATCH_KEY, normalizeAsset,
+  readWatchlist, saveWatchlist, STORAGE_KEY, readAccountWatch, saveAccountWatch, ACCOUNT_WATCH_KEY,
 } from '../wire/market-model.js';
 import { CHINA_VENUE, isCnKey, chinaPairOf, rankOf, cnQuoteOf, cnHitsOf } from '../wire/china.js';
 import { ACCOUNT_TABS, CHINA_TAB, canonicalId, isAccountKey, rowsOf, matchKey, pairsOf, pageOf, followOf, watchedOf, setWatchOf } from './market-view.js';
@@ -232,6 +232,12 @@ export function startMarkets({
     if (leg) { followed = true; stream.follow([`${leg.venue}:${leg.symbol}`]); } else if (followed) unfollow();
   }
 
+  // the key a star names at the Account: an A share's cn key (`cn:sh600519` canonicalised), another Account key as it is; else null
+  const accountKeyOf = raw => {
+    const cn = typeof raw === 'string' && raw.startsWith('cn:') ? canonicalId(raw) : null;
+    return isCnKey(cn) ? cn : isAccountKey(raw) && !String(raw).startsWith('cn:') ? raw : null;
+  };
+
   // the two stores as this browser keeps them; either one unreadable is said, as `read`
   function load() {
     const cn = readWatchlist(storage);
@@ -295,6 +301,30 @@ export function startMarkets({
     }
   }
 
+  // The old cn list's A shares moved once into this browser's Account-key store, as the old us:/crypto: stars were: each cn star
+  // appended (once each) while the store has room under WATCH_LIMIT, then the cn list saved without those that moved — what did
+  // not fit stays on the cn list, still starred, and the store's error reads full. Nothing is signed: on a page that signs too,
+  // the stars move into this browser's store, for the operator to put on the Account's list. Either store unreadable (load's
+  // `read`) moves nothing, so neither stored value is written over; a failed write of the keys moves nothing either.
+  function moveCnStars() {
+    const m = store.get().markets;
+    if (m.watchError) return;
+    const cn = m.watchlist.filter(a => isCnKey(a?.id));
+    if (!cn.length) return;
+    let keys = m.watch;
+    const moved = new Set();
+    let full = false;
+    for (const { id } of cn) {
+      if (keys.includes(id)) { moved.add(id); continue; }
+      if (keys.length >= WATCH_LIMIT) { full = true; continue; }
+      keys = [...keys, id];
+      moved.add(id);
+    }
+    if (keys !== m.watch && saveKeys(keys)) return;   // unsaved: the cn list keeps them all, and the error stands
+    if (moved.size) saveList(store.get().markets.watchlist.filter(a => !moved.has(a.id)));
+    if (full) store.dispatch('accountWatchLoaded', { items: store.get().markets.watch, error: 'full' });
+  }
+
   function onStore() {
     if (closed) return;
     if (shown && store.get().markets.tab !== readTab) retab();
@@ -305,6 +335,7 @@ export function startMarkets({
   const unsubscribe = store.subscribe(onStore);
   win?.addEventListener?.('storage', onStorage);
   load();
+  moveCnStars();
   void askOld();
 
   return {
@@ -337,46 +368,38 @@ export function startMarkets({
         } else store.dispatch('resultsFailed', { at: now(), message: messageOf(body) });
       }, ['resultsLoading']);
     },
-    /** A star: an Account key, on a page that signs, to the Account's own list (setWatch at the line setWatchOf names; one
-     *  starred on either list already is starred) — else, or where no line names it, to this browser's Account store as before;
-     *  a cn id to the cn list; anything else is no one's to star. */
+    /** A star: an Account key — an A share's `cn:<code>` (`cn:sh600519` canonicalised) among them — on a page that signs, to the
+     *  Account's own list (setWatch at the line setWatchOf names, an A share's `china|<code>`; one starred on either list already
+     *  is starred) — else, or where no line names it, to this browser's Account store; anything else is no one's to star. */
     watch(raw) {
       if (closed) return;
-      if (!isCnKey(raw) && isAccountKey(raw)) {
-        const s = store.get();
-        if (signs()) {
-          if (watchedOf(s.markets, raw, s.account?.data)) return;
-          const { on } = setWatchOf(s.markets, s.account?.data, raw);
-          if (on) { void setWatch(raw, on, 'true'); return; }
-        }
-        const keys = s.markets.watch;
-        if (keys.includes(raw)) return;
-        if (keys.length >= WATCH_LIMIT) { store.dispatch('accountWatchLoaded', { items: keys, error: 'full' }); return; }
-        saveKeys([...keys, raw]);
-        return;
+      const key = accountKeyOf(raw);
+      if (key === null) return;
+      const s = store.get();
+      if (signs()) {
+        if (watchedOf(s.markets, key, s.account?.data)) return;
+        const { on } = setWatchOf(s.markets, s.account?.data, key);
+        if (on) { void setWatch(key, on, 'true'); return; }
       }
-      const id = canonicalId(raw);
-      if (!id?.startsWith('cn:')) return;
-      const m = store.get().markets;
-      if (m.watchlist.some(a => a.id === id)) return;
-      if (m.watchlist.length >= WATCH_LIMIT) { store.dispatch('watchlistLoaded', { items: m.watchlist, error: 'full' }); return; }
-      // a share from the search, else from the China ranking (its name kept), else its id alone
-      const ranked = (m.rank?.data?.items ?? []).find(i => i?.id === id);
-      saveList([...m.watchlist, cnHitsOf(m.results?.data).assets.find(a => a.id === id)
-        ?? (ranked ? normalizeAsset({ id, market: 'cn', symbol: ranked.symbol, name: ranked.name, currency: 'CNY' }) : null) ?? normalizeAsset({ id })]);
+      const keys = s.markets.watch;
+      if (keys.includes(key) || (isCnKey(key) && s.markets.watchlist.some(a => a.id === key))) return;
+      if (keys.length >= WATCH_LIMIT) { store.dispatch('accountWatchLoaded', { items: keys, error: 'full' }); return; }
+      saveKeys([...keys, key]);
     },
-    /** A star taken off: an Account key off the Account's own list (setWatch off for the page's entry, on a page that signs)
-     *  and off this browser's Account store, with any old star still listed as it — each where it is; a face id from the cn
-     *  list, an old us:/crypto: one forgotten as asked. */
+    /** A star taken off: an Account key (an A share's among them) off the Account's own list (setWatch off for the page's
+     *  entry, on a page that signs) and off this browser's Account store, with any old star still listed as it — each where it
+     *  is; a face id from the cn list, an old us:/crypto: one forgotten as asked. */
     unwatch(raw) {
       if (closed) return;
       const s = store.get();
       const m = s.markets;
-      if (!isCnKey(raw) && isAccountKey(raw)) {
-        const { off } = signs() ? setWatchOf(m, s.account?.data, raw) : { off: null };
-        if (off) void setWatch(raw, off, '');
-        if (m.watch.includes(raw)) saveKeys(m.watch.filter(k => k !== raw));
-        const old = new Set(m.watchlist.filter(a => Object.hasOwn(m.asked, a.id) && m.asked[a.id] === raw).map(a => a.id));
+      const key = accountKeyOf(raw);
+      if (key !== null) {
+        const { off } = signs() ? setWatchOf(m, s.account?.data, key) : { off: null };
+        if (off) void setWatch(key, off, '');
+        if (m.watch.includes(key)) saveKeys(m.watch.filter(k => k !== key));
+        // an old star still listed as it: an us:/crypto: one found as this key, or the A share itself left on the cn list
+        const old = new Set(m.watchlist.filter(a => a.id === key || (Object.hasOwn(m.asked, a.id) && m.asked[a.id] === key)).map(a => a.id));
         if (old.size) {
           saveList(store.get().markets.watchlist.filter(a => !old.has(a.id)));
           for (const id of old) store.dispatch('forgetAsked', id);

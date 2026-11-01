@@ -196,6 +196,15 @@ test('Portfolio: an unrecognised page reads Account unreadable and draws no figu
   has(draw(state({ page: { ...fx('account'), stale: true } })), '· stale</p>', 'a page that says it is stale');
 });
 
+test("the Venues line says the Account's China words", () => {
+  const s = state({ tab: 'venues' });
+  const said = 'Tencent is not answering: A shares cannot be read now';
+  const html = draw({ ...s, markets: { ...s.markets, providers: [{ id: 'tencent', market: 'cn', status: 'error', said }] } });
+  has(html, `<div class="label">A-share quotes</div><div class="venues"><div class="venue"><span>${said}</span></div></div></section>`);
+  const escaped = draw({ ...s, markets: { ...s.markets, providers: [{ id: 'tencent', market: 'cn', status: 'error', said: '<b>x</b> & y' }] } });
+  has(escaped, '<span>&lt;b&gt;x&lt;/b&gt; &amp; y</span>', "the Account's words are escaped");
+});
+
 test('Venues: the rows with health, does and Paper; Details opens the drawer; the seat box and Open the Account page stay', () => {
   const s = state({ tab: 'venues' });
   const html = draw(s);
@@ -246,10 +255,12 @@ test('Venues: the rows with health, does and Paper; Details opens the drawer; th
   assert.equal(R.openVenueDetails(s, ''), s);
   assert.equal(emptyState().account.detailsVenue, null);
 
-  // the A-share quotes line: China's state as the Account says it, in the face's words
+  // the A-share quotes line: China's state in the Account's own words where it says some, else the face's word
   const quoted = draw(R.chinaStatusUpdated(s, { status: { state: 'live', said: 'Tencent · answering' } }));
-  has(quoted, '<div class="label">A-share quotes</div><div class="venues"><div class="venue"><span>Tencent · Connected</span></div></div></section>');
+  has(quoted, '<div class="label">A-share quotes</div><div class="venues"><div class="venue"><span>Tencent · answering</span></div></div></section>');
   lacks(quoted, 'Alpaca');
+  const wordless = draw(R.chinaStatusUpdated(s, { status: { state: 'live' } }));
+  has(wordless, '<div class="label">A-share quotes</div><div class="venues"><div class="venue"><span>Tencent · Connected</span></div></div></section>');
   lacks(html, 'A-share quotes', 'no cn provider reported: no line');
 
   // the seat box under them, as before: nothing read, then the service, the seat and its limit, the venues, the cards, the link

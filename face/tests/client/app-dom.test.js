@@ -380,10 +380,12 @@ test("typing in the search box searches; a star watches and writes the face's ke
   assert.deepEqual(reads.filter(p => p.startsWith('/data/account/explore?q=')), ['/data/account/explore?q=600&limit=200'], "one read, the Account's");
   assert.match(f.html(), /<tr data-id="cn:600519">/);
   f.click({ tagName: 'BUTTON', dataset: { action: 'toggleWatch', id: 'cn:600519' } });
-  assert.deepEqual(JSON.parse(storage.getItem('gravit.market.watchlist.v1')).items.map(a => [a.id, a.name]), [['cn:600519', '贵州茅台']]);
+  // an A share is an Account key: its star is kept in this browser's Account store (the page does not sign), never the cn list
+  assert.deepEqual(JSON.parse(storage.getItem('gravit.account.watch.v1')).items, ['cn:600519']);
+  assert.equal(storage.getItem('gravit.market.watchlist.v1'), null, 'the cn list is not written');
   assert.match(f.html(), /data-id="cn:600519" aria-pressed="true" aria-label="Stop watching 贵州茅台"/);
   f.click({ tagName: 'BUTTON', dataset: { action: 'toggleWatch', id: 'cn:600519' } });
-  assert.deepEqual(JSON.parse(storage.getItem('gravit.market.watchlist.v1')).items, [], 'a second press stops watching');
+  assert.deepEqual(JSON.parse(storage.getItem('gravit.account.watch.v1')).items, [], 'a second press stops watching');
   f.click({ tagName: 'BUTTON', dataset: { action: 'mkClear' } });
   assert.equal(store.get().markets.q, '');
   assert.equal(store.get().markets.results.data, null, 'Clear lets the search go');

@@ -630,6 +630,43 @@ test("watchKeysOf: the page's own watch list as Account keys, through the lines 
   assert.deepEqual(watchKeysOf(page, null), []);
 });
 
+test('watchKeysOf names a china entry by its cn key with no read', () => {
+  const page = fx('account');
+  const at = '2026-11-01T01:00:00.000Z';
+  const china = { ...page, watch: [{ venue: 'china', symbol: '600519', at }, ...page.watch, { venue: 'china', symbol: '60051x', at }, { venue: 'china', symbol: '000001', at }] };
+  assert.deepEqual(watchKeysOf(china, []), ['cn:600519', 'cn:000001'], 'no row needed; one not six digits left out');
+  assert.deepEqual(watchKeysOf(china, everyRowOf(fx('explore-all'))), ['cn:600519', 'coin:BTC', 'coin:DOGE', 'cn:000001'], "in the page's order");
+});
+
+test('Watching and All draw a starred A share as its A-share row', () => {
+  const at = '2026-11-01T01:00:00.000Z';
+  const page = { ...fx('account'), watch: [{ venue: 'china', symbol: '000001', at }] };
+  const explore = fx('explore-all');
+  // 600519 the operator's own Account key (named by its quote), 000001 on the Account's list alone, 300750 an old cn star the move
+  // left on the cn list
+  const m = markets({
+    explore: { all: read(explore) }, watch: ['coin:BTC', 'cn:600519'], watchlist: [asset('cn:300750', { name: 'CATL' })],
+    quotes: { 'cn:600519': { id: 'cn:600519', market: 'cn', symbol: '600519', name: '贵州茅台', price: 1392.05, change_pct: 2.81, quote_status: 'live', market_status: 'open' } },
+  });
+  const watching = rowsOf({ ...m, tab: 'watching' }, NOW, page);
+  assert.deepEqual(watching.map(r => [r.id, r.source, r.watched, r.atAccount === true]), [
+    ['coin:BTC', 'account', true, false], ['cn:600519', 'face', true, false], ['cn:000001', 'face', true, true], ['cn:300750', 'face', true, false],
+  ]);
+  assert.equal(watching.some(r => r.placeholder === true), false, 'an A share is never a placeholder');
+  const moutai = watching.find(r => r.id === 'cn:600519');
+  assert.deepEqual([moutai.name, moutai.price, moutai.sub], ['贵州茅台', 1392.05, '600519 · SH']);
+  assert.equal(watching.find(r => r.id === 'cn:000001').name, '000001', 'its code where nothing names it');
+  const all = rowsOf(m, NOW, page);
+  assert.deepEqual(all.filter(r => r.id.startsWith('cn:')).map(r => [r.id, r.source, r.watched]).sort(), [
+    ['cn:000001', 'face', true], ['cn:300750', 'face', true], ['cn:600519', 'face', true],
+  ]);
+  assert.equal(all.some(r => r.source === 'account' && r.id.startsWith('cn:')), false);
+  for (const id of ['cn:600519', 'cn:000001', 'cn:300750', 'cn:sh600519']) assert.equal(watchedOf(m, id, page), true, id);
+  assert.equal(watchedOf(m, 'cn:000001'), false, 'no page: the Account list is not read');
+  assert.equal(watchedOf(m, 'cn:688981', page), false);
+  assert.equal(tableOf(m, NOW, page).tabs.at(-1).id, 'watching');
+});
+
 test("Watching is the Account's list and the face's together: watchedOf, the rows' watched, the tab, a market's page", () => {
   const page = fx('account');
   const explore = fx('explore-all');
@@ -679,7 +716,12 @@ test('setWatchOf: what a star signs — on, the followed line (a public listing 
   assert.deepEqual(setWatchOf(m, page, 'rwa:TSLA'), { on: { venue: 'standin-stock-tokens', symbol: 'TSLA' }, off: null });
   assert.deepEqual(setWatchOf(m, page, 'stock:QQQ'), { on: null, off: null });
   assert.deepEqual(setWatchOf(m, null, 'coin:BTC'), { on: { venue: 'ex', symbol: 'BTC/USDT' }, off: null });
-  for (const id of ['coin:GONE', 'cn:600519', '', null]) assert.deepEqual(setWatchOf(m, page, id), { on: null, off: null }, String(id));
+  for (const id of ['coin:GONE', 'cn:60051x', '', null]) assert.deepEqual(setWatchOf(m, page, id), { on: null, off: null }, String(id));
+  // an A share: its own line at the china venue from its key alone, no read needed; off, the page's china entry at its code
+  const china = { ...page, watch: [...page.watch, { venue: 'china', symbol: '600519', at: '2026-11-01T01:00:00.000Z' }] };
+  assert.deepEqual(setWatchOf(markets(), china, 'cn:600519'), { on: { venue: 'china', symbol: '600519' }, off: { venue: 'china', symbol: '600519' } });
+  assert.deepEqual(setWatchOf(markets(), page, 'cn:600519'), { on: { venue: 'china', symbol: '600519' }, off: null });
+  assert.deepEqual(setWatchOf(markets(), china, 'cn:000001'), { on: { venue: 'china', symbol: '000001' }, off: null });
   // a refusal is kept as the Account's sentence, and said as it is
   assert.equal(watchWord('ETH/USDT is not listed at Stand-in Exchange.'), 'ETH/USDT is not listed at Stand-in Exchange.');
   for (const v of [42, {}, undefined]) assert.equal(watchWord(v), '');
@@ -880,6 +922,11 @@ test("China's rows: the ranking's order, the code and board, the name's first ch
   assert.deepEqual(t.rows.map(r => [r.id, r.tile, r.sub, r.sourceWord, r.priced.unit, r.priced.volumeUnit, r.priced.volume, r.priced.changePct, r.price]),
     [['cn:300502', '新', '300502 · ChiNext', 'Tencent', 'cny', 'yuan', 21_607_600_000, -14.19, 196], ['cn:688825', '长', '688825 · STAR', 'Tencent', 'cny', 'yuan', 12_145_020_000, -2.5, 41.8]]);
   assert.equal(chinaRowsOf(china({ watchlist: [asset('cn:688825')] }))[1].watched, true);
+  // the Account keys starred and the page's china entries fill China's stars too
+  assert.deepEqual(chinaRowsOf(china({ watch: ['cn:300502'] })).map(r => r.watched), [true, false]);
+  assert.deepEqual(chinaRowsOf(china(), ['cn:688825']).map(r => r.watched), [false, true]);
+  const onChina = tableOf(china({ tab: CHINA_TAB }), NOW, { ...fx('account'), watch: [{ venue: 'china', symbol: '688825', at: '2026-11-01T01:00:00.000Z' }] });
+  assert.deepEqual(onChina.rows.map(r => r.watched), [false, true], "the page's china entry, through tableOf");
   assert.equal(tableOf(markets({ explore: { all: read(fx('explore-all')) } }), NOW).china, false, 'an Account tab is not China');
 });
 

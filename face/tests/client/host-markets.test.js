@@ -344,8 +344,8 @@ test('search reads explore?q alone; results land in results', async () => {
   r.markets.close();
 });
 
-test('watch: an Account key goes to the account store, a cn id to the cn list', async () => {
-  const storage = memoryStorage({ [STORAGE_KEY]: saved([asset('cn:000001', { name: 'Ping An Bank', exchange: 'SZ' }), asset('us:MSFT')]) });
+test('watch: an Account key goes to the account store, an A share among them', async () => {
+  const storage = memoryStorage({ [STORAGE_KEY]: saved([asset('us:MSFT')]) });
   const r = rig({ storage, answer: () => ({ ok: true, items: [] }) });
   await settle();
   assert.equal(r.m().asked['us:MSFT'], null, 'the old star was asked and missed');
@@ -354,27 +354,30 @@ test('watch: an Account key goes to the account store, a cn id to the cn list', 
   assert.deepEqual(r.m().watch, ['coin:BTC']);
   assert.equal(r.m().watchError, null);
   assert.deepEqual(JSON.parse(storage.map.get(ACCOUNT_WATCH_KEY)), { version: 1, items: ['coin:BTC'] });
-  assert.deepEqual(r.m().watchlist.map(a => a.id), ['cn:000001', 'us:MSFT'], 'the cn list as it was');
+  assert.deepEqual(r.m().watchlist.map(a => a.id), ['us:MSFT'], 'the cn list as it was');
   r.markets.watch('coin:BTC');
   r.markets.watch('event:predict:SI-FEDCUT-DEC');
   assert.deepEqual(r.m().watch, ['coin:BTC', 'event:predict:SI-FEDCUT-DEC'], 'once each');
+  // an A share is an Account key: the Account store, never the cn list; cn:sh600519 is the same share
   r.markets.watch('cn:600519');
-  assert.deepEqual(r.m().watchlist.map(a => a.id), ['cn:000001', 'us:MSFT', 'cn:600519']);
-  assert.deepEqual(JSON.parse(storage.map.get(STORAGE_KEY)).items.map(a => a.id), ['cn:000001', 'us:MSFT', 'cn:600519']);
+  r.markets.watch('cn:sh600519');
+  assert.deepEqual(r.m().watch, ['coin:BTC', 'event:predict:SI-FEDCUT-DEC', 'cn:600519']);
+  assert.deepEqual(r.m().watchlist.map(a => a.id), ['us:MSFT']);
+  assert.deepEqual(JSON.parse(storage.map.get(STORAGE_KEY)).items.map(a => a.id), ['us:MSFT']);
   const writes = storage.writes.length;
-  for (const id of ['us:AAPL', 'crypto:ETH/USD', 'garbage', '', null]) r.markets.watch(id);
-  assert.equal(storage.writes.length, writes, 'a us:, crypto: or unknown id is nobody’s to star');
-  assert.deepEqual(r.m().watchlist.map(a => a.id), ['cn:000001', 'us:MSFT', 'cn:600519']);
-  assert.deepEqual(r.m().watch, ['coin:BTC', 'event:predict:SI-FEDCUT-DEC']);
+  for (const id of ['us:AAPL', 'crypto:ETH/USD', 'cn:60051x', 'cn:', 'garbage', '', null]) r.markets.watch(id);
+  assert.equal(storage.writes.length, writes, 'a us:, crypto:, malformed cn or unknown id is nobody’s to star');
+  assert.deepEqual(r.m().watchlist.map(a => a.id), ['us:MSFT']);
+  assert.deepEqual(r.m().watch, ['coin:BTC', 'event:predict:SI-FEDCUT-DEC', 'cn:600519']);
 
   r.markets.unwatch('coin:BTC');
+  assert.deepEqual(r.m().watch, ['event:predict:SI-FEDCUT-DEC', 'cn:600519']);
+  r.markets.unwatch('cn:600519');
   assert.deepEqual(r.m().watch, ['event:predict:SI-FEDCUT-DEC']);
   assert.deepEqual(JSON.parse(storage.map.get(ACCOUNT_WATCH_KEY)).items, ['event:predict:SI-FEDCUT-DEC']);
-  r.markets.unwatch('cn:600519');
-  assert.deepEqual(r.m().watchlist.map(a => a.id), ['cn:000001', 'us:MSFT']);
   // an old star still listed is taken off the cn list, and what it was found as is forgotten
   r.markets.unwatch('us:MSFT');
-  assert.deepEqual(r.m().watchlist.map(a => a.id), ['cn:000001']);
+  assert.deepEqual(r.m().watchlist.map(a => a.id), []);
   assert.equal(Object.hasOwn(r.m().asked, 'us:MSFT'), false);
 
   // another tab's storage event for either key reloads both; other keys are ignored
@@ -399,9 +402,9 @@ test('watch: an Account key goes to the account store, a cn id to the cn list', 
   assert.equal(failing.m().watchError, 'unsaved');
 
   // the stored keys: the Account's grammar only, once each, the first hundred; the stored value is left as it is
-  const junk = memoryStorage({ [ACCOUNT_WATCH_KEY]: saved(['coin:BTC', 'coin:BTC', 'us:AAPL', 42, 'cn:600519', ...hundred, 'stock:LAST']) });
+  const junk = memoryStorage({ [ACCOUNT_WATCH_KEY]: saved(['coin:BTC', 'coin:BTC', 'us:AAPL', 42, 'cn:600519', 'cn:60051x', ...hundred, 'stock:LAST']) });
   const read = readAccountWatch(junk);
-  assert.deepEqual(read.items, ['coin:BTC', ...hundred.slice(0, WATCH_LIMIT - 1)]);
+  assert.deepEqual(read.items, ['coin:BTC', 'cn:600519', ...hundred.slice(0, WATCH_LIMIT - 2)]);
   assert.equal(typeof read.error, 'string', 'the unreadable entries are said');
   assert.deepEqual(junk.writes, []);
   assert.deepEqual(readAccountWatch(memoryStorage()), { items: [], error: null });
@@ -575,10 +578,11 @@ test('old us: and crypto: stars are asked of the Account once; a hit moves the s
 
   assert.deepEqual(r.m().asked, { 'us:AAPL': 'stock:AAPL', 'crypto:BTC/USD': 'coin:BTC', 'us:ZZZZ': null });
   assert.equal(Object.hasOwn(r.m().asked, 'crypto:DOGE/USD'), false, 'a failed read leaves it for the next boot');
-  assert.deepEqual(r.m().watch, ['stock:AAPL', 'coin:BTC'], 'a hit moves the star to the Account key');
-  assert.deepEqual(JSON.parse(storage.map.get(ACCOUNT_WATCH_KEY)).items, ['stock:AAPL', 'coin:BTC']);
-  assert.deepEqual(r.m().watchlist.map(a => a.id), ['cn:600519', 'us:ZZZZ', 'crypto:DOGE/USD']);
-  assert.deepEqual(JSON.parse(storage.map.get(STORAGE_KEY)).items.map(a => a.id), ['cn:600519', 'us:ZZZZ', 'crypto:DOGE/USD']);
+  // the cn star moved at load, before any ask; a hit moves an old star to the Account key after it
+  assert.deepEqual(r.m().watch, ['cn:600519', 'stock:AAPL', 'coin:BTC'], 'a hit moves the star to the Account key');
+  assert.deepEqual(JSON.parse(storage.map.get(ACCOUNT_WATCH_KEY)).items, ['cn:600519', 'stock:AAPL', 'coin:BTC']);
+  assert.deepEqual(r.m().watchlist.map(a => a.id), ['us:ZZZZ', 'crypto:DOGE/USD']);
+  assert.deepEqual(JSON.parse(storage.map.get(STORAGE_KEY)).items.map(a => a.id), ['us:ZZZZ', 'crypto:DOGE/USD']);
 
   // the rows: the moved stars are the Account's rows, starred; the miss is listed once, Not listed at the Account; the
   // un-asked star draws nothing
@@ -598,7 +602,8 @@ test('old us: and crypto: stars are asked of the Account once; a hit moves the s
   assert.equal(asks(), 5);
   // Remove on the Not listed line takes it off and forgets it
   r.markets.unwatch('us:ZZZZ');
-  assert.deepEqual(r.m().watchlist.map(a => a.id), ['cn:600519', 'crypto:DOGE/USD', 'cn:600000']);
+  assert.deepEqual(r.m().watchlist.map(a => a.id), ['crypto:DOGE/USD']);
+  assert.deepEqual(r.m().watch, ['cn:600519', 'stock:AAPL', 'coin:BTC', 'cn:600000'], 'a new A-share star is an Account key');
   assert.equal(Object.hasOwn(r.m().asked, 'us:ZZZZ'), false);
 
   // the Account's list full: the star stays where it is, found as its key and starred so, until it is taken off as that key
@@ -807,13 +812,6 @@ test('a star on a signing page acts setWatch for the followed line; un-starring 
   r.markets.unwatch('stock:AAPL');
   assert.equal(owner.acts.length, acts);
   assert.deepEqual(r.m().watch, []);
-  // a cn id is the face's list alone, whatever the page
-  r.markets.watch('cn:600519');
-  assert.equal(owner.acts.length, acts);
-  assert.deepEqual(r.m().watchlist.map(a => a.id), ['cn:600519']);
-  r.markets.unwatch('cn:600519');
-  assert.equal(owner.acts.length, acts);
-  assert.deepEqual(r.m().watchlist, []);
 
   // a page that does not sign: the face's list, one click, no signature
   r.store.dispatch('ownerStanding', { role: 'pending', kid: '' });
@@ -1096,25 +1094,149 @@ test('search is one explore?q read; its A shares are hits with their prices', as
   const rows = rowsOf(r.m(), NOW);
   assert.deepEqual(rows.map(x => [x.id, x.source]), [['stock:AAPL', 'account'], ['cn:600519', 'face'], ['cn:688981', 'face'], ['cn:300750', 'face']]);
   assert.equal(rows.find(x => x.id === 'cn:600519').price, 1392.05, "a hit priced as the search carries it");
-  // a star on a hit keeps its name
+  // a star on a hit: its key in the Account store, its row starred under its name
   r.markets.watch('cn:600519');
-  const kept = JSON.parse(storage.getItem(STORAGE_KEY)).items.find(a => a.id === 'cn:600519');
-  assert.equal(kept.name, '贵州茅台');
+  assert.deepEqual(JSON.parse(storage.getItem(ACCOUNT_WATCH_KEY)).items, ['cn:600519']);
+  assert.equal(storage.getItem(STORAGE_KEY), null, 'the cn list is not written');
+  const hit = rowsOf(r.m(), NOW).find(x => x.id === 'cn:600519');
+  assert.deepEqual([hit.watched, hit.name], [true, '贵州茅台']);
   assert.ok(r.reads.every(p => !faceWire(p)), 'nothing reads the face wire');
   r.markets.close();
 });
 
-test("a star on a China row keeps the share's name", async () => {
+test("a star on a China row is its Account key, the row filled; under All and Watching it keeps the share's name", async () => {
   const storage = memoryStorage();
   const r = rig({ storage, answer: chinaAnswer });
   r.store.dispatch('setMarketsTab', 'china');
   r.markets.show(true);
   await settle();
   r.markets.watch('cn:688981');
-  const saved = JSON.parse(storage.getItem(STORAGE_KEY)).items.find(a => a.id === 'cn:688981');
-  assert.equal(saved.name, '中芯国际');
-  assert.equal(saved.currency, 'CNY');
+  assert.deepEqual(JSON.parse(storage.getItem(ACCOUNT_WATCH_KEY)).items, ['cn:688981']);
+  assert.equal(rowsOf(r.m(), NOW).find(x => x.id === 'cn:688981').watched, true, 'on China the starred row is filled');
+  for (const tab of ['all', 'watching']) {
+    r.store.dispatch('setMarketsTab', tab);
+    const row = rowsOf(r.m(), NOW).find(x => x.id === 'cn:688981');
+    assert.deepEqual([row.source, row.watched, row.name, row.asset.currency], ['face', true, '中芯国际', 'CNY'], tab);
+  }
   r.markets.unwatch('cn:688981');
-  assert.equal(r.m().watchlist.some(a => a.id === 'cn:688981'), false, 'and comes off the cn list');
+  assert.deepEqual(r.m().watch, [], 'and comes off the Account store');
+  assert.deepEqual(JSON.parse(storage.getItem(ACCOUNT_WATCH_KEY)).items, []);
   r.markets.close();
+});
+
+// ── A shares on the Account's watch list (plan 1, task 7) ──
+
+test('an A-share star on a page that signs is the Account setWatch china|<code>', async () => {
+  const owner = fakeOwner();
+  const after = [];
+  const storage = memoryStorage();
+  const r = rig({ storage, owner, afterAction: (kind, body) => after.push([kind, body]) });
+  const page = fx('account');
+  r.store.dispatch('accountLoaded', { data: page, at: NOW });
+  r.store.dispatch('ownerStanding', { role: 'signs', kid: 'a5048199a8081854' });
+  r.markets.watch('cn:600519');
+  assert.deepEqual(owner.acts, [{ type: 'setWatch', venue: 'china', symbol: '600519', on: 'true' }], 'no read needed');
+  await settle();
+  assert.deepEqual(after, [['setWatch', TAKEN.body]]);
+  assert.deepEqual(storage.writes, [], 'nothing kept in this browser');
+  assert.deepEqual(r.m().watch, []);
+  // the page read again lists it: starred, the press signs it off with the page's own entry
+  r.store.dispatch('accountLoaded', { data: { ...page, watch: [...page.watch, { venue: 'china', symbol: '600519', at: '2026-11-01T01:00:00.000Z' }] }, at: NOW });
+  r.markets.watch('cn:600519');
+  assert.equal(owner.acts.length, 1, 'starred already: nothing signed');
+  r.markets.unwatch('cn:600519');
+  assert.deepEqual(owner.acts.at(-1), { type: 'setWatch', venue: 'china', symbol: '600519', on: '' });
+  await settle();
+  assert.deepEqual(storage.writes, []);
+  r.markets.close();
+});
+
+test("an A-share star on a page that does not sign is kept in the browser's Account store", async () => {
+  const owner = fakeOwner();
+  const storage = memoryStorage();
+  const r = rig({ storage, owner });
+  r.store.dispatch('ownerStanding', { role: 'pending', kid: '' });
+  r.markets.watch('cn:600519');
+  assert.deepEqual(owner.acts, []);
+  assert.deepEqual(JSON.parse(storage.map.get(ACCOUNT_WATCH_KEY)).items, ['cn:600519']);
+  assert.equal(storage.map.has(STORAGE_KEY), false, 'the cn list untouched');
+  r.markets.unwatch('cn:600519');
+  assert.deepEqual(JSON.parse(storage.map.get(ACCOUNT_WATCH_KEY)).items, []);
+  assert.equal(storage.map.has(STORAGE_KEY), false);
+  r.markets.close();
+});
+
+test('the old cn list moves to the Account store once at load', async () => {
+  const storage = memoryStorage({ [STORAGE_KEY]: saved([asset('cn:000001', { name: 'Ping An Bank' }), asset('us:MSFT'), asset('cn:600519')]) });
+  const owner = fakeOwner();
+  const r = rig({ storage, owner, answer: () => ({ ok: true, items: [] }) });
+  assert.deepEqual(JSON.parse(storage.map.get(ACCOUNT_WATCH_KEY)).items, ['cn:000001', 'cn:600519']);
+  assert.deepEqual(JSON.parse(storage.map.get(STORAGE_KEY)).items.map(a => a.id), ['us:MSFT']);
+  assert.deepEqual(r.m().watch, ['cn:000001', 'cn:600519']);
+  assert.deepEqual(r.m().watchlist.map(a => a.id), ['us:MSFT']);
+  assert.equal(r.m().watchError, null);
+  assert.deepEqual(owner.acts, [], 'nothing is signed on its own');
+  await settle();
+  r.markets.close();
+  // a second boot moves nothing: the stores as the first left them
+  const writes = storage.writes.length;
+  const again = rig({ storage, answer: () => ({ ok: true, items: [] }) });
+  assert.equal(storage.writes.slice(writes).filter(k => k === ACCOUNT_WATCH_KEY).length, 0);
+  assert.deepEqual(again.m().watch, ['cn:000001', 'cn:600519']);
+  again.markets.close();
+  // one already in the Account store moves without a second copy; an unreadable store moves nothing over it
+  const dup = memoryStorage({ [ACCOUNT_WATCH_KEY]: saved(['cn:600519']), [STORAGE_KEY]: saved([asset('cn:600519')]) });
+  const d = rig({ storage: dup });
+  assert.deepEqual(JSON.parse(dup.map.get(ACCOUNT_WATCH_KEY)).items, ['cn:600519']);
+  assert.deepEqual(JSON.parse(dup.map.get(STORAGE_KEY)).items, []);
+  d.markets.close();
+  const damaged = memoryStorage({ [ACCOUNT_WATCH_KEY]: '{not json', [STORAGE_KEY]: saved([asset('cn:600519')]) });
+  const x = rig({ storage: damaged });
+  assert.deepEqual(damaged.writes, [], 'the damaged store is kept as it was');
+  assert.equal(x.m().watchError, 'read');
+  x.markets.close();
+  // a failed write of the keys leaves the cn list whole
+  const failing = memoryStorage({ [STORAGE_KEY]: saved([asset('cn:600519')]) }, { failKeys: [ACCOUNT_WATCH_KEY] });
+  const f = rig({ storage: failing });
+  assert.deepEqual(JSON.parse(failing.map.get(STORAGE_KEY)).items.map(a => a.id), ['cn:600519']);
+  assert.equal(f.m().watchError, 'unsaved');
+  f.markets.close();
+});
+
+test('the move keeps what does not fit and says the store is full', async () => {
+  const ninetyNine = Array.from({ length: WATCH_LIMIT - 1 }, (_, i) => `stock:S${i}`);
+  const storage = memoryStorage({
+    [ACCOUNT_WATCH_KEY]: saved(ninetyNine),
+    [STORAGE_KEY]: saved([asset('cn:000001'), asset('us:MSFT'), asset('cn:600519', { name: 'Kweichow Moutai' })]),
+  });
+  const r = rig({ storage, answer: () => ({ ok: true, items: [] }) });
+  assert.deepEqual(r.m().watch, [...ninetyNine, 'cn:000001']);
+  assert.deepEqual(JSON.parse(storage.map.get(ACCOUNT_WATCH_KEY)).items, [...ninetyNine, 'cn:000001']);
+  assert.deepEqual(JSON.parse(storage.map.get(STORAGE_KEY)).items.map(a => a.id), ['us:MSFT', 'cn:600519'], 'what did not fit stays');
+  assert.equal(r.m().watchError, 'full');
+  // never dropped: still starred, still drawn under its name, and a press takes it off the cn list
+  const row = rowsOf({ ...r.m(), tab: 'watching' }, NOW).find(x => x.id === 'cn:600519');
+  assert.deepEqual([row.watched, row.name], [true, 'Kweichow Moutai']);
+  r.markets.watch('cn:600519');
+  assert.deepEqual(JSON.parse(storage.map.get(STORAGE_KEY)).items.map(a => a.id), ['us:MSFT', 'cn:600519'], 'starred already: a second star changes nothing');
+  r.markets.unwatch('cn:600519');
+  assert.deepEqual(JSON.parse(storage.map.get(STORAGE_KEY)).items.map(a => a.id), ['us:MSFT']);
+  await settle();
+  r.markets.close();
+  // room made, the next boot moves the rest
+  const room = memoryStorage({ [ACCOUNT_WATCH_KEY]: saved(ninetyNine.slice(1)), [STORAGE_KEY]: saved([asset('cn:600519')]) });
+  const next = rig({ storage: room });
+  assert.deepEqual(next.m().watch.slice(-1), ['cn:600519']);
+  assert.deepEqual(JSON.parse(room.map.get(STORAGE_KEY)).items, []);
+  assert.equal(next.m().watchError, null);
+  next.markets.close();
+});
+
+test('readAccountWatch keeps cn:600519 and drops cn:60051x', () => {
+  const storage = memoryStorage({ [ACCOUNT_WATCH_KEY]: saved(['cn:600519', 'cn:60051x', 'cn:6005190', 'cn:sh600519', 'coin:BTC']) });
+  const read = readAccountWatch(storage);
+  assert.deepEqual(read.items, ['cn:600519', 'coin:BTC']);
+  assert.equal(typeof read.error, 'string', 'the unreadable ones are said');
+  assert.equal(saveAccountWatch(memoryStorage(), ['cn:600519']), null);
+  assert.equal(typeof saveAccountWatch(memoryStorage(), ['cn:60051x']), 'string');
 });

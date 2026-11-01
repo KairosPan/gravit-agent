@@ -175,9 +175,10 @@ function venues(state, now) {
   // for a page that signs, the page's own sheets: what to connect comes from its connectLive, so an unread page has none
   const keys = signs(state) && pageOk(a.data) ? `<div class="btn-row">${sheetKey('connect', {}, 'Connect an account')}${sheetKey('paper', {}, 'Open a paper account')}</div>` : '';
   const list = (pageNote(a) ?? (rows ? `<div class="venues">${rows}</div>` : note('No venues'))) + keys;
-  // of the face's own quote providers only the A-share one is still the screens' (the one kind the face quotes)
+  // the A-share quotes' provider, as the Account's China status names it: the Account's own sentence where it says one, else its word
   const cn = (Array.isArray(state.markets?.providers) ? state.markets.providers : []).filter(p => p?.market === 'cn');
-  const quotes = cn.length ? `<div class="label">A-share quotes</div><div class="venues">${cn.map(p => `<div class="venue"><span>${esc(providerWord(p))}</span></div>`).join('')}</div>` : '';
+  const said = p => (typeof p.said === 'string' && p.said.trim() ? p.said : providerWord(p));
+  const quotes = cn.length ? `<div class="label">A-share quotes</div><div class="venues">${cn.map(p => `<div class="venue"><span>${esc(said(p))}</span></div>`).join('')}</div>` : '';
   return `<div class="cards">${box(`${title('Venues')}${list}${quotes}`, 'Venues')}${seatBox(state, now)}</div>`;
 }
 

@@ -9,7 +9,7 @@
 // wire's own text (a quote's message, a provider's message, a search note, a source name) is Chinese and never reaches a word
 // here. No DOM.
 import { normalizeAsset, number } from '../wire/market-model.js';
-import { isCnKey, cnHitsOf } from '../wire/china.js';
+import { CHINA_VENUE, isCnKey, cnHitsOf } from '../wire/china.js';
 import { MIN, HOUR, DAY } from '../time.js';
 import { pageOk, assetsOf, positionsOf, openOrdersOf, statementLinesOf, worthOf } from './account-view.js';
 
@@ -205,13 +205,15 @@ export function cnStateWord(quote, connection, providers = []) {
 // the ranking's answer as the store keeps it, when it is one
 const rankOf = m => (m?.rank?.data?.ok === true && Array.isArray(m.rank.data.items) ? m.rank.data : null);
 
-/** China's rows: the ranking's items in its order, when the read is for the sort in effect (no rows in another sort's order). */
-export function chinaRowsOf(markets) {
+/** China's rows: the ranking's items in its order, when the read is for the sort in effect (no rows in another sort's order); a
+ *  row starred (cnStarsOf's: the Account keys starred, the page's china entries `atPage` names, an old cn star not yet moved)
+ *  reads watched. */
+export function chinaRowsOf(markets, atPage = []) {
   const m = isRecord(markets) ? markets : {};
   const data = rankOf(m);
   const sort = m.sort === 'movers' ? 'movers' : 'volume';
   if (!data || data.sort !== sort) return [];
-  const starred = new Set(records(m.watchlist).map(a => normalizeAsset(a)?.id).filter(Boolean));
+  const starred = new Set(cnStarsOf(m, atPage));
   return records(data.items).filter(i => /^cn:\d{6}$/.test(str(i.id))).map(i => {
     const symbol = str(i.symbol) || i.id.slice(3);
     const priced = { price: number(i.price), unit: 'cny', changePct: number(i.change_pct), change24h: null, volume: number(i.turnover), volumeUnit: 'yuan', implied: null };
@@ -352,6 +354,22 @@ function starredOf(m) {
   const old = records(m.watchlist).map(a => normalizeAsset(a)).filter(a => a && a.market !== 'cn');
   return [...new Set([...(Array.isArray(m.watch) ? m.watch : []), ...old.map(a => own(m.asked, a.id))].filter(k => typeof k === 'string' && k !== ''))];
 }
+// the A shares starred, as their cn keys, once each: the operator's own (the Account keys), then those the page's own watch list
+// names (`atPage`, watchKeysOf's), then an old cn star the move left on the cn list (the Account store full)
+function cnStarsOf(m, atPage = []) {
+  const old = records(m.watchlist).map(a => normalizeAsset(a)?.id);
+  return [...new Set([...starredOf(m), ...(Array.isArray(atPage) ? atPage : []), ...old].filter(isCnKey))];
+}
+// a starred A share as the asset its row draws: the cn list's own, else the search's hit, the ranking's row or its quote (their
+// names kept), else its code alone
+function cnAssetOf(m, key) {
+  const listed = records(m.watchlist).map(a => normalizeAsset(a)).find(a => a?.id === key);
+  if (listed) return listed;
+  const hit = cnHitsOf(m.results?.data).assets.find(a => a.id === key);
+  if (hit) return hit;
+  const named = [...records(m.rank?.data?.items).filter(i => i.id === key), own(m.quotes, key)].find(i => isRecord(i) && str(i.name));
+  return normalizeAsset({ id: key, market: 'cn', symbol: key.slice(3), name: named ? str(named.name) : '', currency: 'CNY' });
+}
 
 // ── the Account's own watch list (`page.watch`, `{ venue, symbol, at }`, set by the signed setWatch): the face's stars beside it ──
 
@@ -371,17 +389,26 @@ function watches(item, w) {
 
 /** The page's own watch list as Account keys: each entry (`{ venue, symbol }`) as the key of every row of `rows` (explore items)
  *  whose lines name it (legsOf's, an outcome's), in the page's order, once each; an entry no row lists is left out, and a page
- *  the face does not recognise watches nothing. */
+ *  the face does not recognise watches nothing. An entry at the china venue is its A share's cn key (`cn:<symbol>`) with no row
+ *  needed — one whose symbol is not six digits is left out. */
 export function watchKeysOf(page, rows) {
-  const items = records(rows).filter(i => isAccountKey(i.key));
-  const keys = watchEntries(page).flatMap(w => items.filter(i => watches(i, w)).map(i => i.key));
+  const items = records(rows).filter(i => isAccountKey(i.key) && !isCnKey(i.key));
+  const keys = watchEntries(page).flatMap(w => (w.venue === CHINA_VENUE
+    ? [`cn:${w.symbol}`].filter(isCnKey)
+    : items.filter(i => watches(i, w)).map(i => i.key)));
   return [...new Set(keys)];
 }
 
-/** What a star on an Account key signs at the Account (setWatch), the market found in any read of the slice: `on`, the line it
+/** What a star on an Account key signs at the Account (setWatch), the market found in any read of the slice (an A share's
+ *  `cn:<code>` needs none: `{ venue: 'china', symbol: <code> }`): `on`, the line it
  *  would watch — the line the page follows (followOf) when that is connected, else a public listing by the venue it connects
  *  to (none connecting: null); `off`, the page's own entry for the market as it keeps it, or null. Each `{ venue, symbol }`. */
 export function setWatchOf(markets, page, id) {
+  // an A share: its own line at the china venue, read from its key alone; off, the page's china entry at its code
+  if (isCnKey(id)) {
+    const symbol = id.slice(3);
+    return { on: { venue: CHINA_VENUE, symbol }, off: watchEntries(page).find(w => w.venue === CHINA_VENUE && w.symbol === symbol) ?? null };
+  }
   const m = isRecord(markets) ? markets : {};
   const item = isAccountKey(id) ? exploreRowsOf(m).find(i => i.key === id) : undefined;
   if (!item) return { on: null, off: null };
@@ -393,10 +420,12 @@ export function setWatchOf(markets, page, id) {
 
 /** Whether a market is starred, as its star is drawn — what a press on it takes off or puts on: an Account key the operator's
  *  own, an old us:/crypto: star's find while that star is listed, or one the page (`page`, the Account's) watches at any line
- *  a read lists; a face id, canonicalised, on the cn list. */
+ *  a read lists; an A share (`cn:sh600519` canonicalised) as one of cnStarsOf's; an old face id, canonicalised, on the cn list. */
 export function watchedOf(markets, id, page = null) {
   const m = isRecord(markets) ? markets : {};
-  if (!isCnKey(id) && isAccountKey(id)) return starredOf(m).includes(id) || watchKeysOf(page, exploreRowsOf(m)).includes(id);
+  const cn = typeof id === 'string' && id.startsWith('cn:') ? canonicalId(id) : null;
+  if (isCnKey(cn)) return cnStarsOf(m, watchKeysOf(page, [])).includes(cn);
+  if (isAccountKey(id)) return starredOf(m).includes(id) || watchKeysOf(page, exploreRowsOf(m)).includes(id);
   const canonical = canonicalId(id);
   return canonical !== null && records(m.watchlist).some(a => a.id === canonical);
 }
@@ -445,7 +474,7 @@ function placeholderRow(key) {
 
 // a cn row, quoted by the Account (venue china, Tencent's): its quotes poll's quote, else the price its search hit carried; its
 // price in its currency, its volume in shares; its tile its code
-function cnRow(asset, markets, watched) {
+function cnRow(asset, markets, watched, atAccount = false) {
   const quote = own(markets.quotes, asset.id) ?? own(markets.hitQuotes, asset.id) ?? null;
   const priced = {
     price: number(quote?.price), unit: asset.currency === 'CNY' ? 'cny' : 'usd', changePct: number(quote?.change_pct), change24h: null,
@@ -455,7 +484,7 @@ function cnRow(asset, markets, watched) {
     id: asset.id, source: 'face', asset, quote, kind: 'stock', name: asset.name || asset.symbol, tile: cnTileOf(asset.name, asset.symbol),
     sub: `${asset.symbol} · ${cnBoardOf(asset.symbol)}`,
     priced, price: priced.price, live: null, sourceWord: sourceWord(quote ?? { market: 'cn' }), closeTime: null, pastEnd: false, paper: false,
-    watched, atAccount: false, legs: [], tabs: ['all'],
+    watched, atAccount, legs: [], tabs: ['all'],
   };
 }
 
@@ -505,8 +534,8 @@ export function sortsOf(rows, kept) {
  *  figures by kind, the price it shows (`price`: the latest quote at its most traded connected venue, `live`, where that says
  *  one, in the row's unit — an event's in cents — else the explore read's), where its price is from and its lines: a tab's rows
  *  are its own explore read's (`explore[tab]`) once that has answered, else All's (`explore.all`), of the tab's kind; while
- *  there is a query, the search's (`results`) once it has answered. Beside them the face's: the cn watchlist (starred by being
- *  on it), or while searching the cn hits alone; and an old us:/crypto: star — one not asked of the Account yet draws nothing,
+ *  there is a query, the search's (`results`) once it has answered. Beside them the A-share rows: the A shares starred (cnStarsOf's —
+ *  the Account keys, the page's china entries, an old cn star the move left), or while searching the cn hits alone; and an old us:/crypto: star — one not asked of the Account yet draws nothing,
  *  one it found stars the Account's row, one it could not find is listed once, Not listed at the Account. All is every row, a
  *  kind's tab the rows whose tabs name it, All results (`results`) the search's own. Watching is every star, found in any list
  *  of its tab's read or All's (items, movers, closing, most traded), else a placeholder that can still be un-starred; a query
@@ -520,7 +549,7 @@ export function tableOf(markets, now = Date.now(), page = null) {
   const atPage = watchKeysOf(page, exploreRowsOf(m));
   // China (spec 2026-10-31 §4): the ranking's rows in its order, its two sorts, its read and its session
   const onChina = m.tab === CHINA_TAB && !searching;
-  const rows = onChina ? chinaRowsOf(m) : unsortedRowsOf(m, searching, reads, now, atPage);
+  const rows = onChina ? chinaRowsOf(m, atPage) : unsortedRowsOf(m, searching, reads, now, atPage);
   const { sorts, sort } = onChina
     ? { sorts: ACCOUNT_SORTS.filter(s => s.id !== 'closing'), sort: m.sort === 'movers' ? 'movers' : 'volume' }
     : sortsOf(rows, m.sort);
@@ -529,7 +558,7 @@ export function tableOf(markets, now = Date.now(), page = null) {
   const counted = all !== undefined && all !== null;
   const watching = starredOf(m).length > 0 || watchlist.length > 0 || atPage.length > 0;
   const chinaCount = rankOf(m) ? Math.max(0, number(rankOf(m).total) ?? 0) : null;
-  const tabs = tabsOf(all, watchlist.filter(a => a.market === 'cn').length, { watching, searching, china: { count: chinaCount } })
+  const tabs = tabsOf(all, cnStarsOf(m, atPage).length, { watching, searching, china: { count: chinaCount } })
     .map(t => (counted || t.id === CHINA_TAB ? t : { ...t, count: null }));
   const mine = own(reads, KIND_TABS.has(m.tab) ? m.tab : 'all');
   const source = onChina ? m.rank : searching ? m.results : mine?.data ? mine : own(reads, 'all');
@@ -546,15 +575,18 @@ function unsortedRowsOf(m, searching, reads, now, atPage) {
   const tab = searching && m.tab === 'watching' ? 'results' : m.tab;
   const all = bodyOf(reads, 'all');
   const watchlist = records(m.watchlist).map(a => normalizeAsset(a)).filter(Boolean);
-  const cn = watchlist.filter(a => a.market === 'cn');
   const old = watchlist.filter(a => a.market !== 'cn');
-  const starred = starredOf(m);
+  // the A shares starred (the Account keys', the page's china entries, an old cn star not moved): drawn as their A-share rows
+  const cnStars = cnStarsOf(m, atPage);
+  const cnPageOnly = new Set(atPage.filter(isCnKey).filter(key => !starredOf(m).includes(key) && !watchlist.some(a => a.id === key)));
+  const cn = cnStars.map(key => cnAssetOf(m, key)).filter(Boolean);
+  const starred = starredOf(m).filter(key => !isCnKey(key));
   const isStarred = new Set(starred);
-  const pageOnly = atPage.filter(key => !isStarred.has(key));
+  const pageOnly = atPage.filter(key => !isCnKey(key) && !isStarred.has(key));
   const atAccount = new Set(pageOnly);
   const quotes = isRecord(m.accountQuotes) ? m.accountQuotes : {};
   const row = item => { const key = str(item.key); return accountRow(item, quotes, isStarred.has(key) || atAccount.has(key), now, atAccount.has(key)); };
-  const face = () => [...cn.map(a => cnRow(a, m, true)), ...old.filter(a => own(m.asked, a.id) === null).map(notListedRow)];
+  const face = () => [...cn.map(a => cnRow(a, m, true, cnPageOnly.has(a.id))), ...old.filter(a => own(m.asked, a.id) === null).map(notListedRow)];
   const fromResults = searching && readable(m.results?.data);
   const listed = new Set(cn.map(a => a.id));
   // the search's A shares: its cn items, drawn as the cn rows they are (their prices the hits' own), never as the Account's rows
