@@ -3879,9 +3879,10 @@ and a face browser that signs (`npm run account:owners`, "The owner drill").
       `cd account && npx tsx test/standin/ui-standin.ts --port 4821` (at its default cap; `--cap
       <usd>` sets another), a face started with `FACE_ACCOUNT_URL=http://127.0.0.1:4821` on a
       scratch home. Observed: each sheet started, prepared and shown on the face and signed against
-      simulated venues. The stand-in reaches no network, so a venue's sign-in ends at its start: the
-      sign-in sheet shows the Account's refusal on the face, and no venue page, redirect or callback
-      follows.
+      simulated venues. The stand-in reaches no network, so a venue's sign-in is expected to end at
+      its start (expected, not yet observed: how that start fails with no network, a quick refusal
+      or a wait to a timeout, is the drill's to see): the sign-in sheet shows the Account's refusal
+      on the face, and no venue page, redirect or callback follows.
 
    PASS: each signed act shows What you sign before the signature and is read back from the
    Account; nothing moves on a real venue.
@@ -3889,7 +3890,7 @@ and a face browser that signs (`npm run account:owners`, "The owner drill").
    1. `curl -s 127.0.0.1:4820/` answers 404 with `NO_PAGE` (`The Account serves no page: its
       owner's screens are Gravit's face (Markets, Trade, Account). …`).
    2. On the stand-in's face (as in drill 5), the sign-in sheet started from Account › Venues ›
-      Connect an account shows the Account's refusal on the face. Then open
+      Connect an account shows the Account's refusal on the face (expected, as in 5.5). Then open
       `http://127.0.0.1:<the face's port>/data/account/signin/callback?state=drill` in that browser:
       the Account's HTML answer (`this sign-in is not one this server started, or it ran out: …`)
       is drawn on the face's origin under the callback's content-security-policy. A sign-in run to

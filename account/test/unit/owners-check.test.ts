@@ -18,12 +18,15 @@ describe("account:owners", () => {
     expect(r.lines.join("\n")).toContain("A label is a hint, not a proof");
   });
 
-  it("owners without the face's device stop, naming Settings › Devices and never --fresh", () => {
+  it("owners without the face's device stop, naming the remedies left since the page retired, in order, --fresh last", () => {
     const r = ownerStanding(signers([{ id: "0x1", kind: "device", label: "Account page" }, { id: "0x2", kind: "wallet", label: "Gravit face" }]));
     expect(r.verdict).toBe("stop");
     const text = r.lines.join("\n");
-    expect(text).toContain("Settings › Devices");
-    expect(text).toContain("Never --fresh");
+    expect(text).not.toContain("the page's Settings");
+    const steps = ["a face browser that already signs", "Settings › Devices", "9614314c", "same home", "--fresh"].map((w) => text.indexOf(w));
+    expect(steps.every((i) => i >= 0)).toBe(true);
+    expect([...steps].sort((a, b) => a - b)).toEqual(steps);
+    expect(text).toContain("throws away the owner, the venues, the agents and their limits");
   });
 
   it("an unreadable signers shape stops", () => {

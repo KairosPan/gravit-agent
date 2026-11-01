@@ -936,7 +936,7 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
   app.post("/api/account/brain-test", wrap(async (req, res) => {
     if (!mounted(res)) return;
     if (!svc.desk) return void res.status(404).json({ ok: false, error: "this account keeps no desk" });
-    if (req.headers["sec-fetch-site"] !== "same-origin" && typeof req.headers.origin !== "string") return void res.status(403).json({ ok: false, error: "Testing a brain's key is asked from the owner's Gravit face: a request without a browser's headers is not taken." });
+    if (req.headers["sec-fetch-site"] !== "same-origin" && typeof req.headers.origin !== "string") return void res.status(403).json({ ok: false, error: "Testing a brain's key is asked from a browser page of the owner's (the face does not offer it: the brains stay off the face): a request without a browser's headers is not taken." });
     const { provider, model } = (req.body ?? {}) as { provider?: unknown; model?: unknown };
     if (typeof provider !== "string" || !BRAIN_ID.test(provider)) return void bad(res, "need {provider: a brain's id, as the Brains place names it (deepseek, openai, claude …)}");
     if (typeof model === "string" && keyShaped(model.trim())) return void bad(res, KEY_SHAPED_WORDS.model);

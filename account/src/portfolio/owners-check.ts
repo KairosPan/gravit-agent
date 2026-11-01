@@ -1,4 +1,4 @@
-/** OWNERS CHECK — before the Account's own page is retired: does the face sign for the Account the operator runs? It reads the `signers` of
+/** OWNERS CHECK — does the face sign for the Account the operator runs (the face being, since 2026-11-01, the Account's only page)? It reads the `signers` of
  * `GET /api/account` (the owners, the devices waiting) and says one of three things:
  *
  *   ownerless   no owner yet: retiring the page locks nobody out, the face pairs as the first owner
@@ -22,7 +22,7 @@ export const DEFAULT_ACCOUNT_URL = "http://127.0.0.1:4820";
 export const SENTENCE: Record<OwnerVerdict, string> = {
   ownerless: "No owner yet: retiring the page locks nobody out. The face pairs as the first owner with the code the Account prints.",
   "face-signs": 'A device labelled Gravit face is an owner. A label is a hint, not a proof: open the face\'s Account screen and check that its device line reads "This page signs for the account" before the page goes.',
-  stop: "STOP: no owner device is the face's. Before the page goes, let the face in from the page's Settings › Devices (the face asks under Settings › Devices first), or sign the page's device out there so that the Account prints a new code the face pairs with. Never --fresh: it throws away the owner, the venues, the agents and their limits.",
+  stop: "STOP: no owner device is the face's, and the Account serves no page of its own any more. In order: from a face browser that already signs, let this one in under its Settings › Devices; with none, run the retired page from 9614314c on the same home (git worktree add <dir> 9614314c, npm ci and npm run account there with this Account stopped) and let the face in from that page's Settings › Devices, or sign its device out there so that the Account prints a new code the face pairs with; --fresh only last: it throws away the owner, the venues, the agents and their limits.",
 };
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);

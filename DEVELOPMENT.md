@@ -693,7 +693,12 @@ the Account running there (`ownerStanding` over its `signers`): `ownerless` (no 
 pairs as the first owner with the printed code), `face-signs` (an owner device carries the face's
 pairing label `Gravit face`, `FACE_DEVICE_LABEL` — a hint, not a proof: the face's device line is the
 check) or `stop` (owners and none the face's, an unreadable shape, no answer); it prints each owner
-as `kind · label` and the count of devices waiting — no key, id or kid — and exits 0, 0 or 3.
+as `kind · label` and the count of devices waiting — no key, id or kid — and exits 0, 0 or 3. `stop`'s
+sentence (`SENTENCE.stop`) names the remedies left since the page retired, in order: a face browser
+that already signs lets this one in under Settings › Devices; with none, the retired page run from
+`9614314c` on the same home (the running Account stopped) lets the face in or signs its own device
+out so that the Account prints a new code; `--fresh` last, which loses the owner, the venues, the
+agents and their limits (R53 is the case where no device that signs is left at all).
 
 **No page** (2026-11-01). The Account answers its API and nothing else: after the fence, every path
 outside `/api/` is `404 {ok: false, error: NO_PAGE}` (`server.ts`, "The Account serves no page: its
