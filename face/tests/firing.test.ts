@@ -1375,7 +1375,7 @@ test("a WallClock waits for a timer's own work: a tick that re-arms after real I
     other.setTimeout(tock, 30_000);
     void (async () => {
       for (let i = 0; i < 20; i++) await stat(fx.root);
-    })();
+    })().catch(() => {}); // the fixture may be gone by the time a late stat runs (p2-m25)
   };
   other.setTimeout(tock, 30_000);
   await other.advance(120_000);
@@ -1385,6 +1385,11 @@ test("a WallClock waits for a timer's own work: a tick that re-arms after real I
   const failing = new WallClock(FIRED);
   failing.setTimeout(async () => { throw new Error("the tick broke"); }, 1_000);
   await assert.rejects(failing.advance(1_000), /the tick broke/);
+
+  /* work that waits on a later timer of the same clock is bounded in real time, the timer named (p2-m24) */
+  const stuck = new WallClock(FIRED, { workBoundMs: 50 });
+  stuck.setTimeout(() => new Promise<void>((done) => { stuck.setTimeout(done, 1_000); }), 1_000);
+  await assert.rejects(stuck.advance(5_000), /WallClock: the timer due at 2026-11-27T17:30:05\.000Z returned work that did not settle in 50 ms of real time/);
 });
 
 /* ---------- the fix wave: a setup that hangs (M1), the fence's label (p2-m18), both pins named (p2-m11) ---------- */

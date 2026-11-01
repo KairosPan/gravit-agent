@@ -34,15 +34,20 @@ const isThenable = (value: unknown): value is PromiseLike<unknown> =>
  *
  * THE CONTRACT for a callback that starts async work - a tick that reads the disk, then re-arms itself: it returns
  * that work's promise, or it re-arms before its first await. Work it leaves running gets only the flush, which real
- * I/O outlasts: a re-arm made after it lands once the advance has moved on, and that interval is lost.
+ * I/O outlasts: a re-arm made after it lands once the advance has moved on, and that interval is lost. And the work it
+ * returns must not wait on a later timer of the same clock - the advance awaits it before it looks for that timer, so
+ * the two would wait on each other: the await is raced against `workBoundMs` of real time (10 s by default), past
+ * which the advance rejects naming the timer, instead of the test hanging (npm test has no timeout of its own).
  */
 export class WallClock implements DeskClock {
   private t: number;
   private timers: { at: number; fn: () => unknown; id: number }[] = [];
   private nextId = 1;
+  private readonly workBoundMs: number;
 
-  constructor(startIso: string) {
+  constructor(startIso: string, opts: { workBoundMs?: number } = {}) {
     this.t = WallClock.instant(startIso);
+    this.workBoundMs = opts.workBoundMs ?? 10_000;
   }
 
   private static instant(iso: string): number {
@@ -87,11 +92,22 @@ export class WallClock implements DeskClock {
       this.timers = this.timers.filter((timer) => timer.id !== due.id);
       this.t = Math.max(this.t, due.at);
       const work = due.fn();
-      if (isThenable(work)) await work;
+      if (isThenable(work)) await this.bounded(work, due.at);
       await this.flush();
     }
     this.t = Math.max(this.t, until);
     await this.flush();
+  }
+
+  /** `work`, raced against {@link workBoundMs} of real time: past it, a rejection naming the timer due at `at`. */
+  private bounded(work: PromiseLike<unknown>, at: number): Promise<unknown> {
+    let timer: NodeJS.Timeout | undefined;
+    const late = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error(`WallClock: the timer due at ${new Date(at).toISOString()} returned work that did not settle in ${this.workBoundMs} ms of real time - does it wait on a later timer of this clock?`));
+      }, this.workBoundMs);
+    });
+    return Promise.race([Promise.resolve(work), late]).finally(() => clearTimeout(timer));
   }
 
   /** Move `ms` forward and fire nothing. */
@@ -295,7 +311,8 @@ export function fakeCalendar(days: Record<string, MarketSession | "closed">, pyt
         ? { ok: false, date, error: `the fake calendar has no ${date}` }
         : { ok: true, date, session: day, source: "fake calendar" };
       if (latest === undefined || date >= latest.date) latest = answer;
-      answered = true;
+      /* as the face's calendar, only a window that holds the date makes the window known (p2-m26) */
+      if (answer.ok) answered = true;
       return answer;
     },
     peek: () => latest,
