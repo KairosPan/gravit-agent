@@ -28,7 +28,7 @@ export const RWA_CATEGORY = "RWA";
 /** a token market that says it stands for a share or a fund */
 export const isRwaMarket = (m: { kind: string; category?: string | undefined }): boolean => m.kind === "token" && m.category === RWA_CATEGORY;
 
-export type TabId = "all" | "crypto" | "stocks" | "rwas" | "perps" | "preipo" | "predictions";
+export type TabId = "all" | "crypto" | "stocks" | "rwas" | "perps" | "preipo" | "predictions" | "china";
 
 /** every tab, in the order the screen shows them; a tab with nothing in it is not shown. All is first and holds every row (each row's `tabs`
  * starts with it); the page adds its own Watching after these */
