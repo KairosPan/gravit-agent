@@ -283,9 +283,10 @@ export function deskToolDefinitions(deps: DeskToolDeps): DeskToolDefinition[] {
   const quotes: DeskToolDefinition = {
     name: "desk_quotes",
     description:
-      "The price now for 1 to 20 US stocks, from the face's live quote hub (Alpaca), one line each: the price and its change on " +
+      "The price now for 1 to 20 US stocks, from the desk's US quote source, one line each: the price and its change on " +
       "the previous close; the feed and the exchange time in New York (IEX 15:21:03 ET, dated when not today); transport (stream " +
-      "or poll); status (live, delayed, stale or unavailable). The price now, never backtest evidence.",
+      "or poll); status (live, delayed, stale or unavailable). The price now, never evidence. With no US source wired it answers " +
+      "unavailable and why.",
     parameters: {
       type: "object",
       properties: {
@@ -316,7 +317,9 @@ export function deskToolDefinitions(deps: DeskToolDeps): DeskToolDefinition[] {
     },
     timeoutMs: 15_000,
     async execute(args, exec) {
-      const assets: QuoteIdentity[] = symbolsOf(args).map((symbol) => ({ id: `us:${symbol}`, market: "us", symbol }));
+      const symbols = symbolsOf(args);
+      if (deps.hub.unavailable !== undefined) return { error: `unavailable: ${deps.hub.unavailable}` };
+      const assets: QuoteIdentity[] = symbols.map((symbol) => ({ id: `us:${symbol}`, market: "us", symbol }));
       let payload: QuotePayload;
       try {
         payload = await untilCancelled(exec.signal, () => deps.hub.snapshot(assets));

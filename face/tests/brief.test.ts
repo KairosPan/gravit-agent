@@ -18,6 +18,7 @@ import { loadHoldings, loadLevels } from "../src/desk-book.ts";
 import { HttpError } from "../src/http.ts";
 import { capText, PRODUCER_TEXT_MAX, type ProducerInput, type ProducerOutput } from "../src/producer.ts";
 import type { UsLiveQuote as LiveQuote, UsProviderState as ProviderState, UsQuoteIdentity as QuoteIdentity, UsQuotePayload as QuotePayload } from "../src/us-quotes.ts";
+import { NO_US_QUOTES, unwiredUsQuotes } from "../src/us-quotes.ts";
 import { STANDING_TEXT_MAX_BYTES } from "../src/standing.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -256,19 +257,19 @@ test("a snapshot with no price at all fails the brief, naming the provider's sta
 
   assert.equal(hub.calls.length, 1);
   assert.equal(out.ok, false, "a brief with no price is no success");
-  assert.equal((out as { error: string }).error, "quotes unavailable: the hub has no price for any symbol (alpaca unconfigured)");
+  assert.equal((out as { error: string }).error, "quotes unavailable: the source has no price for any symbol (US provider unconfigured)");
   assert.ok(!(out.text ?? "").includes("美股"), "the provider's UI message never reaches the model");
   const b = briefOf(out);
-  assert.equal(b.quotesError, "quotes unavailable: the hub has no price for any symbol (alpaca unconfigured)");
+  assert.equal(b.quotesError, "quotes unavailable: the source has no price for any symbol (US provider unconfigured)");
   assert.deepEqual(b.holdings.rows.map((row) => [row.symbol, row.last, row.noStop]), [["NVDA", null, false], ["AAPL", null, true]], "the files were still read");
   assert.equal(b.levels.loaded, 3);
 
   /* No US provider in the payload, or a state that is not one of the hub's words: unknown. */
   const bare = await buildBrief({ hub: fakeHub({}).hub, root, now: () => NOW }, INPUT);
-  assert.equal((bare as { error: string }).error, "quotes unavailable: the hub has no price for any symbol (alpaca unknown)");
+  assert.equal((bare as { error: string }).error, "quotes unavailable: the source has no price for any symbol (US provider unknown)");
   const odd = { ...alpaca("error"), status: "断开" as ProviderState["status"] };
   const strange = await buildBrief({ hub: fakeHub({}, { providers: [odd] }).hub, root, now: () => NOW }, INPUT);
-  assert.equal((strange as { error: string }).error, "quotes unavailable: the hub has no price for any symbol (alpaca unknown)");
+  assert.equal((strange as { error: string }).error, "quotes unavailable: the source has no price for any symbol (US provider unknown)");
 
   /* One price anywhere - a holding's, with every index and sector unpriced - and the brief is ok. */
   const one = await buildBrief({ hub: fakeHub({ AAPL: { price: 228.9 } }, { providers: [alpaca("limited")] }).hub, root, now: () => NOW }, INPUT);
@@ -493,4 +494,20 @@ test("desk/STANDING.md is the pre-close order", () => {
     "IEX 15:21:03 ET", "desk/holdings.yml", "Never recommend a trade", "briefs/<date>-preclose.md"]) assert.ok(text.includes(phrase), phrase);
   assert.ok(text.startsWith("# The pre-close brief\n\n"), "it opens with its title");
   assert.ok(text.endsWith("under your directory.\n"), "it ends with the save, and one newline");
+});
+
+test("an unwired US source: the brief asks nothing, every price is null, and quotesError says why", async () => {
+  const root = await makeRoot("unwired", { "desk/holdings.yml": HOLDINGS_YML, "desk/levels.yml": LEVELS_YML });
+  let asked = 0;
+  const source = unwiredUsQuotes();
+  const out = await buildBrief({ hub: { unavailable: source.unavailable, snapshot: (assets) => { asked += 1; return source.snapshot(assets); } }, root, now: () => NOW }, INPUT);
+  assert.equal(asked, 0, "nothing is asked of a source that has no price");
+  assert.equal(out.ok, false);
+  assert.equal((out as { error: string }).error, `quotes unavailable: ${NO_US_QUOTES}`);
+  const b = briefOf(out);
+  assert.equal(b.quotesError, `quotes unavailable: ${NO_US_QUOTES}`);
+  assert.match(b.quotesError ?? "", /A shares only \(Tencent\)/);
+  for (const quote of [...b.indexes, ...b.sectors, ...b.holdings.rows]) assert.equal(quote.last, null, quote.symbol);
+  assert.deepEqual(b.holdings.rows.map((row) => row.symbol), ["NVDA", "AAPL"], "the book is still read");
+  assert.equal(b.levels.loaded, 3);
 });

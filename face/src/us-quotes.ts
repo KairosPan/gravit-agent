@@ -5,9 +5,10 @@
  * `us:` id as retired). The desk keeps its own copy of those shapes so it does not depend on the
  * A-share hub's types.
  *
- * NO SOURCE IS WIRED. main.ts hands the desk {@link unwiredUsQuotes}, whose every snapshot rejects
- * with {@link NO_US_QUOTES}: the brief degrades to every price null with that reason as its
- * `quotesError`, and `desk_quotes` answers it as its `error`. Which source to wire - the Account's
+ * NO SOURCE IS WIRED. main.ts hands the desk {@link unwiredUsQuotes}, `unavailable` set to
+ * {@link NO_US_QUOTES}: the brief asks nothing and degrades to every price null with
+ * `quotes unavailable: <that reason>` as its `quotesError`, and `desk_quotes` answers
+ * `unavailable: <that reason>` as its `error`. Which source to wire - the Account's
  * market reads through src/account-proxy.ts, the seat, a desk-owned IEX source, or another - is the
  * operator's decision; this module invents none.
  * @module
@@ -54,16 +55,19 @@ export interface UsQuotePayload {
   providers: UsProviderState[];
 }
 
-/** A US quote source: one snapshot per call. A rejection with an `HttpError` 429 means busy. */
+/** A US quote source: one snapshot per call. A rejection with an `HttpError` 429 means busy. `unavailable`, when
+ * set, is why the source has no price at all: its readers answer that reason and ask nothing. */
 export interface UsQuoteSource {
   snapshot(assets: UsQuoteIdentity[]): Promise<UsQuotePayload>;
+  readonly unavailable?: string;
 }
 
 /** Why the desk has no US price: the reason the brief's `quotesError` and `desk_quotes`' `error` carry. */
 export const NO_US_QUOTES =
   "no US quote source is wired: the face's quote wire serves A shares only (Tencent) since 2026-10-30, and the operator has not chosen a US source";
 
-/** The source main.ts hands the desk while no US source is wired: every snapshot rejects with {@link NO_US_QUOTES}. */
+/** The source main.ts hands the desk while no US source is wired: `unavailable` is {@link NO_US_QUOTES}, and a
+ * snapshot asked anyway rejects with it. */
 export function unwiredUsQuotes(): UsQuoteSource {
-  return { snapshot: () => Promise.reject(new Error(NO_US_QUOTES)) };
+  return { unavailable: NO_US_QUOTES, snapshot: () => Promise.reject(new Error(NO_US_QUOTES)) };
 }

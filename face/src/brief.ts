@@ -35,7 +35,9 @@
  * model can say what is unavailable. `quotesError` is:
  * - `quotes unavailable: busy` when the hub refuses with 429 - its own message is the quotes page's, in Chinese;
  * - `quotes unavailable: <message>` for any other throw;
- * - `quotes unavailable: the hub has no price for any symbol (alpaca <state>)` when the snapshot answers without a
+ * - `quotes unavailable: <reason>`, nothing asked, when the source is `unavailable` (src/us-quotes.ts) - main.ts
+ *   wires none now, so the face's brief says `quotes unavailable: no US quote source is wired: …`;
+ * - `quotes unavailable: the source has no price for any symbol (US provider <state>)` when the snapshot answers without a
  *   single price - no keys, or a feed that is down - `<state>` the US provider's state as its English word
  *   (`unconfigured`, `error`, …), and `unknown` when the payload names no US provider or a state that is not one of
  *   those words: never its UI message. A brief with no price is no success.
@@ -387,7 +389,9 @@ export async function buildBrief(deps: BriefDeps, input: ProducerInput): Promise
   const snapshot = new Map<string, LiveQuote>();
   let payload: QuotePayload | undefined;
   let quotesError: string | undefined;
-  try {
+  if (deps.hub.unavailable !== undefined) {
+    quotesError = `quotes unavailable: ${deps.hub.unavailable}`;
+  } else try {
     const assets = asked.map((symbol): QuoteIdentity => ({ id: `us:${symbol}`, market: "us", symbol }));
     payload = await deps.hub.snapshot(assets);
     for (const quote of payload.quotes) snapshot.set(quote.id, quote);
@@ -402,7 +406,7 @@ export async function buildBrief(deps: BriefDeps, input: ProducerInput): Promise
     left.has(symbol) ? { symbol, last: null, chgPct: null, prevClose: null, at: null, status: OMITTED } : briefQuote(symbol, snapshot.get(`us:${symbol}`), now),
   ] as const));
   if (quotesError === undefined && ![...quotes.values()].some((quote) => quote.last !== null)) {
-    quotesError = `quotes unavailable: the hub has no price for any symbol (alpaca ${usProviderState(payload)})`;
+    quotesError = `quotes unavailable: the source has no price for any symbol (US provider ${usProviderState(payload)})`;
   }
   /* Every symbol the brief prices is one the snapshot was asked for, so each has its quote. */
   const quoteFor = (symbol: string): BriefQuote => quotes.get(symbol) as BriefQuote;

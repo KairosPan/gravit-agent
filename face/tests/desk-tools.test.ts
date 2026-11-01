@@ -14,6 +14,7 @@ import { appendEvent, installDesk, type DeskRun, type DeskStatus } from "../src/
 import { deskToolDefinitions, installDeskTools, type DeskAgentLike, type DeskGuardCtxLike, type DeskToolDefinition } from "../src/desk-tools.ts";
 import { HttpError } from "../src/http.ts";
 import type { UsLiveQuote as LiveQuote, UsQuoteIdentity as QuoteIdentity, UsQuotePayload as QuotePayload } from "../src/us-quotes.ts";
+import { NO_US_QUOTES, unwiredUsQuotes } from "../src/us-quotes.ts";
 import { recorder } from "./route-recorder.ts";
 
 type Listener = (event: { agent: DeskAgentLike }) => undefined;
@@ -374,4 +375,13 @@ test("installDesk installs the desk tools whatever enabled says, desk_state read
   assert.equal(root.guards.length, 1, "but the guard");
   assert.equal(root.backstops.length, 1, "and its backstop");
   await guardOnly.dispose(0);
+});
+
+test("desk_quotes over an unwired US source answers unavailable and why, asks nothing, and still refuses a bad argument", async () => {
+  const quotes = byName(deskToolDefinitions({ hub: unwiredUsQuotes(), readState: readStatus }), "desk_quotes");
+  const answer = await quotes.execute({ symbols: ["NVDA"] }, exec());
+  assert.deepEqual(answer, { error: `unavailable: ${NO_US_QUOTES}` });
+  assert.deepEqual(quotes.output.render({ symbols: ["NVDA"] }, answer), [{ type: "text", text: `unavailable: ${NO_US_QUOTES}` }]);
+  await assert.rejects(quotes.execute({ symbols: ["nvda"] }, exec()));
+  assert.match(quotes.description, /none is wired|no US source wired/i);
 });
