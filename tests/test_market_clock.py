@@ -5,12 +5,14 @@ dicts - so a fake calendar drives it on any interpreter, while the calendar-back
 XNYS facts the face anchors on: 251 sessions in 2026, the two early closes at 18:00Z, the DST instants,
 the holidays, and no session on a weekend or a DST-change day. Offline: the calendar is local data,
 and every test that needs it calls pytest.importorskip("pandas_market_calendars") itself, so an
-interpreter without it skips those. The usage, missing-calendar, planted-calendar and fence tests run
-anywhere pytest does.
+interpreter without it skips those. The usage, missing-calendar, planted-calendar and fence tests need
+only pandas (the fake calendar builds its frames) and run wherever it is installed. The script is
+loaded by its path, so importing it leaves sys.path as it was.
 """
 from __future__ import annotations
 
 import ast
+import importlib.util
 import json
 import os
 import shutil
@@ -25,8 +27,9 @@ import pandas as pd
 import pytest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "market_clock.py"
-sys.path.insert(0, str(SCRIPT.parent))
-import market_clock  # noqa: E402
+_SPEC = importlib.util.spec_from_file_location("market_clock", SCRIPT)
+market_clock = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(market_clock)
 
 USAGE = {"ok": False, "error": "usage: market_clock.py sessions --from YYYY-MM-DD --days N (1-31)"}
 NEW_YORK = ZoneInfo("America/New_York")
@@ -231,14 +234,16 @@ def test_read_only_and_keyless():
         elif isinstance(node, ast.ImportFrom):
             imported.add((node.module or ".").split(".")[0])
     assert imported.isdisjoint({"requests", "urllib", "urllib3", "http", "httpx", "socket", "ssl", "alpaca", "alpaca_kit"})
-    assert imported <= {"__future__", "json", "os", "re", "sys", "datetime", "pathlib", "pandas_market_calendars"}, imported
-    # no key read: the one environment variable it reads is GRAVIT_ROOT, on the sys.path line
+    assert imported <= {"__future__", "json", "re", "sys", "datetime", "pandas_market_calendars"}, imported
+    # no key read and no environment read at all; nothing from the repository
     assert "APCA_" not in src and "getenv" not in src and "importlib" not in src and "__import__" not in src
-    assert src.count("os.environ") == 1
+    assert "os.environ" not in src and "environ" not in src
 
 
-def test_repo_root_first_on_sys_path():
-    assert 'sys.path.insert(0, os.environ.get("GRAVIT_ROOT") or str(Path(__file__).resolve().parents[1]))' in SCRIPT.read_text()
+def test_sys_path_untouched():
+    """The face runs a private copy under python -I: the script puts nothing on sys.path of its own."""
+    src = SCRIPT.read_text()
+    assert "sys.path.insert" not in src and "sys.path.append" not in src and "GRAVIT_ROOT" not in src
 
 
 PLANTED = '''__version__ = "planted"
@@ -252,23 +257,27 @@ def get_calendar(name):
 '''
 
 
-def _run(script, env):
-    done = subprocess.run([sys.executable, str(script), "sessions", "--from", "2026-11-28", "--days", "2"],
+def _run(script, env, *flags):
+    done = subprocess.run([sys.executable, *flags, str(script), "sessions", "--from", "2026-11-28", "--days", "2"],
                           capture_output=True, text=True, env=env, timeout=60)
     return done.returncode, json.loads(done.stdout)
 
 
-def test_the_repo_root_comes_from_gravit_root_else_from_the_scripts_place(tmp_path):
-    """A module at the root shadows the installed one: proof that the root is first on sys.path."""
-    env = {k: v for k, v in os.environ.items() if k != "GRAVIT_ROOT"}
+def test_run_as_the_face_runs_it_no_planted_module_loads(tmp_path):
+    """Under -I, as the face runs it, a pandas_market_calendars planted at GRAVIT_ROOT, at the repository root,
+    beside the script or on PYTHONPATH is never the one imported."""
     planted = tmp_path / "planted"
     planted.mkdir()
     (planted / "pandas_market_calendars.py").write_text(PLANTED)
-    code, out = _run(SCRIPT, {**env, "GRAVIT_ROOT": str(planted)})
-    assert (code, out["source"], out["sessions"]) == (0, "pandas_market_calendars planted", [])
     repo = tmp_path / "repo"
     (repo / "scripts").mkdir(parents=True)
     shutil.copy(SCRIPT, repo / "scripts" / "market_clock.py")
     (repo / "pandas_market_calendars.py").write_text(PLANTED)
+    (repo / "scripts" / "pandas_market_calendars.py").write_text(PLANTED)
+    env = {**os.environ, "GRAVIT_ROOT": str(planted), "PYTHONPATH": str(planted)}
+    code, out = _run(repo / "scripts" / "market_clock.py", env, "-I")
+    assert "planted" not in json.dumps(out), out
+    assert code in (0, 1), (code, out)
+    # without -I the script's own directory is first on sys.path: the reason the face passes it
     code, out = _run(repo / "scripts" / "market_clock.py", env)
-    assert (code, out["source"]) == (0, "pandas_market_calendars planted")
+    assert (code, out.get("source")) == (0, "pandas_market_calendars planted")

@@ -7,7 +7,7 @@
  * ticks are driven by hand - `tick()` at a time the test sets - so no case depends on how many turns of the event loop
  * a tick's I/O takes. Each case's repository root and harness home sit INSIDE the repository, under
  * tests/tmp/schedule-<pid>/, and are removed afterwards; createDeskSchedule's case runs a stand-in clock - JavaScript
- * under scripts/market_clock.py, run by node itself (process.execPath). */
+ * under scripts/market_clock.py, pinned by its own hash and run by node itself (process.execPath) from its private copy. */
 import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
 import { chmod, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -1061,7 +1061,8 @@ test("createDeskSchedule: the market clock under the face's interpreter, its fai
     on: fakeBus().on,
     deliver: (text) => out.deliver(text),
     log: (line) => { lines.push(line); },
-    seams: { clock, tickMs: DAY_MS, runScript: defaultProducerRunner(process.execPath, []) },
+    /* the stand-in is JavaScript under the clock's name: node runs its private copy, pinned by its own hash */
+    seams: { clock, tickMs: DAY_MS, runScript: defaultProducerRunner(process.execPath, []), marketClockSha256: sha256Hex(await readFile(join(fx.root, "scripts", "market_clock.py"))) },
   });
   clock.set("2026-11-27T15:00:00Z");
   await schedule.tick();

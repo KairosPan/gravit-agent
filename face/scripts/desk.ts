@@ -29,7 +29,7 @@
  * @module
  */
 import { existsSync, realpathSync } from "node:fs";
-import { constants as fsConstants, open, readFile, type FileHandle } from "node:fs/promises";
+import { constants as fsConstants, mkdir, open, readFile, type FileHandle } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveDshHome } from "@deepseek-ai/dsh-home-paths";
@@ -365,7 +365,15 @@ async function arm(args: string[], deps: DeskDeps, now: number): Promise<number>
   if (load.orders.some((order) => order.id === id)) return refuse(`${id} is already armed; npm run desk -- rearm ${id} takes a changed file's new hash`);
 
   const python = process.env.FACE_PYTHON || "python3";
-  const ask = deps.marketClock ?? m.clock.pythonMarketClock({ root, python });
+  /* the clock runs from a private copy in the desk's run base, as the face's does: its directory first */
+  if (deps.marketClock === undefined) {
+    try {
+      await mkdir(deskDir(deps.home), { recursive: true });
+    } catch (err) {
+      return refuse(`cannot make ${deskDir(deps.home)}: ${reasonOf(err)}`);
+    }
+  }
+  const ask = deps.marketClock ?? m.clock.pythonMarketClock({ root, python, runBase: join(deskDir(deps.home), "run") });
   const day = await m.clock.createMarketCalendar({ ask, python }).today(now);
   if (!day.ok) return refuse(`the market calendar failed in ${python}: ${day.error}; FACE_PYTHON must name an interpreter with pandas_market_calendars`);
 

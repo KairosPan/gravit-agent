@@ -6,14 +6,20 @@
  * weekend is a date the window holds with no session; DST is already inside the instants, so an
  * anchor is plain arithmetic on them.
  *
- * {@link pythonMarketClock} runs the script through a {@link ProducerRunner}: by path, under the face's
- * interpreter (`FACE_PYTHON || python3`, the one `face_data.py` runs on), cwd the repository root, a
- * {@link MARKET_CLOCK_TIMEOUT_MS} deadline and {@link baseEnv}'s environment - PATH, HOME, LANG, TZ and
- * LC_*, never a market key: the calendar is offline and needs none. A run that answers no window hands
- * the tail of its stderr - a Python traceback ends in its cause - to its owner, one line, which the
- * clock row logs. It is not hash-pinned, unlike a standing order's producer: like `face_data.py` it is
- * face infrastructure. A recorded residual: a change to it in the tree takes effect at the face's next
- * ask, unreviewed.
+ * {@link pythonMarketClock} runs the script through a {@link ProducerRunner} under the face's interpreter
+ * (`FACE_PYTHON || python3`, the one `face_data.py` runs on) as `python -I` - isolated: no user site, no
+ * `PYTHON*` variable, neither the repository nor the script's directory on `sys.path` - cwd the repository root,
+ * a {@link MARKET_CLOCK_TIMEOUT_MS} deadline and {@link baseEnv}'s environment - PATH, HOME, LANG, TZ and LC_*,
+ * never a market key: the calendar is offline and needs none. It is PINNED BY A CONSTANT IN THE FACE'S OWN CODE:
+ * each ask reads `scripts/market_clock.py` once, runs it only when those bytes hash to
+ * {@link MARKET_CLOCK_SHA256}, and runs a private copy of them in the desk's run base (producer.ts
+ * `runPinnedScript`, the copy path a standing order's producer takes), so an edit to the file in the tree never
+ * runs: the clock answers no window - `scripts/market_clock.py changed since this face was built` - until the
+ * constant moves with it, which a test of the tracked file holds in CI. The face's own code is not pinned
+ * (`DEVELOPMENT.md` §9, R37). A run that answers no window hands the tail of its stderr - a Python traceback
+ * ends in its cause - to its owner, one line, which the clock row logs. The calendar is as good as the
+ * pandas_market_calendars installed in that interpreter: a closure announced after its release is unknown
+ * until an upgrade.
  *
  * {@link createMarketCalendar} keeps the answer. It asks for a {@link CALENDAR_DAYS}-day window once per
  * New York date - at the first `today()`, then whenever `etDate(now)` changes - and concurrent calls
@@ -27,9 +33,8 @@
  * does not load it.
  * @module
  */
-import { resolve } from "node:path";
 import { etDate } from "./et.ts";
-import { baseEnv, defaultProducerRunner, formatDuration, type ProducerRunner, type RunResult } from "./producer.ts";
+import { baseEnv, defaultProducerRunner, formatDuration, isOverflow, runPinnedScript, type ProducerRunner, type RunResult } from "./producer.ts";
 
 /* ---------- the window ---------- */
 
@@ -191,8 +196,13 @@ export type MarketClock = (from: string, days: number) => Promise<MarketWindow>;
 /** How long one run of the clock may take: a whole spawn measured 0.70 s. */
 export const MARKET_CLOCK_TIMEOUT_MS = 30_000;
 
-/** The runner's two overflow errors (producer.ts's `RunResult`): not spawn codes, so reported as they are. */
-const OVERFLOWS: ReadonlySet<string> = new Set(["stdout over 1 MiB", "stderr over 1 MiB"]);
+/** The clock's file, repo-relative. */
+export const MARKET_CLOCK_SCRIPT = "scripts/market_clock.py";
+
+/** The hex SHA-256 of the only `scripts/market_clock.py` the face runs. An edit to the script moves this with it:
+ * tests/market-clock.test.ts hashes the tracked file against it, so a change that forgets it fails CI, not a
+ * trading afternoon. */
+export const MARKET_CLOCK_SHA256 = "9f3bdfdad49902d2560961596bda260cd535f8326478e9dfdfd98ba03097c3fa";
 
 /** The clock's own error when `stdout` is its `{ "ok": false, "error": … }`, else `undefined`. */
 function failureOf(stdout: string): string | undefined {
@@ -206,47 +216,66 @@ function failureOf(stdout: string): string | undefined {
 }
 
 /**
- * The face's clock: `scripts/market_clock.py` under `python`, run by path - not hash-pinned (the module
- * doc's residual). Each ask runs `[<root>/scripts/market_clock.py, "sessions", "--from", from, "--days",
- * String(days)]` with cwd `root`, `baseEnv(process.env)` as read at that ask (no market key), no stdin and
- * the deadline. Its stderr never reaches the answer: a crash reads `exit <code>`. A run that answers no
- * window - whatever its exit - hands its stderr's tail to `stderr` when it wrote anything but blanks: its
- * last 300 characters on one line (a cut opens with `…`), where a Python traceback names its cause (P2 Task
- * 8's ruling 2). A hook that throws costs nothing but its line.
- * @param opts - `root` the repository root; `python` the interpreter, named in a failure to start;
- *   `run` the runner, `defaultProducerRunner(python)` by default; `timeoutMs` the deadline,
- *   {@link MARKET_CLOCK_TIMEOUT_MS} by default; `stderr`, where a failed run's stderr tail goes - dropped
- *   when absent.
- * @returns a {@link MarketClock} that resolves with {@link parseMarketWindow}'s window of an exit 0, and
- *   rejects with the clock's own `error` (an exit with `{ ok: false }`, or `ok: false` at exit 0),
- *   `exit <code>` (an exit without it), `timed out after 30 s`, `stdout over 1 MiB` or `stderr over 1 MiB`,
- *   `could not start <python>: <code>` (a spawn failure: `ENOENT`, `EACCES`, …), or parseMarketWindow's fault.
+ * The face's clock: `scripts/market_clock.py` under `python -I`, pinned by {@link MARKET_CLOCK_SHA256} (the module
+ * doc). Each ask runs a private copy of the verified bytes in `runBase` with the arguments `sessions --from <from>
+ * --days <days>`, cwd `root`, `baseEnv(process.env)` as read at that ask (no market key), no stdin and the
+ * deadline. Its stderr never reaches the answer: a crash reads `exit <code>`. A run that answers no window -
+ * whatever its exit - hands its stderr's tail to `stderr` when it wrote anything but blanks: its last 300
+ * characters on one line (a cut opens with `…`), where a Python traceback names its cause (P2 Task 8's ruling 2).
+ * A hook that throws costs nothing but its line.
+ * @param opts - `root` the repository root; `python` the interpreter, named in a failure to start; `runBase` where
+ *   the private copy is made - the desk's `<desk dir>/run`; `run` the runner, `defaultProducerRunner(python)` (with
+ *   `-I`) by default; `timeoutMs` the deadline, {@link MARKET_CLOCK_TIMEOUT_MS} by default; `stderr`, where a failed
+ *   run's stderr tail goes - dropped when absent; `log`, for a run directory left behind (stderr by default);
+ *   `sha256`, the pin, {@link MARKET_CLOCK_SHA256} by default - a seam for tests that run a stand-in clock.
+ * @returns a {@link MarketClock} that resolves with {@link parseMarketWindow}'s window of an exit 0, and rejects
+ *   with `scripts/market_clock.py changed since this face was built` or `scripts/market_clock.py is missing` (or
+ *   `leaves scripts/`, `is not a regular file`) - nothing run -, the clock's own `error` (an exit with
+ *   `{ ok: false }`, or `ok: false` at exit 0), `exit <code>` (an exit without it), `timed out after 30 s`, `stdout
+ *   over 1 MiB` or `stderr over 1 MiB`, `could not start <python>: <code>` (a spawn failure: `ENOENT`, `EACCES`, …,
+ *   or a run base that cannot be used), or parseMarketWindow's fault.
  */
 export function pythonMarketClock(opts: {
   root: string;
   python: string;
+  runBase: string;
   run?: ProducerRunner;
   timeoutMs?: number;
   stderr?: (tail: string) => void;
+  log?: (line: string) => void;
+  sha256?: string;
 }): MarketClock {
   const run = opts.run ?? defaultProducerRunner(opts.python);
   const timeoutMs = opts.timeoutMs ?? MARKET_CLOCK_TIMEOUT_MS;
-  const script = resolve(opts.root, "scripts", "market_clock.py");
+  const log = opts.log ?? ((line: string): void => { console.error(line); });
   /** The window a run answered, or why it answered none. */
   const windowOf = (result: RunResult): MarketWindow => {
     if (result.timedOut) throw new Error(`timed out after ${formatDuration(timeoutMs)}`);
     if (result.error !== undefined) {
-      throw new Error(OVERFLOWS.has(result.error) ? result.error : `could not start ${opts.python}: ${result.error}`);
+      throw new Error(isOverflow(result.error) ? result.error : `could not start ${opts.python}: ${result.error}`);
     }
     if (result.code !== 0) throw new Error(failureOf(result.stdout) ?? `exit ${result.code}`);
     return parseMarketWindow(result.stdout);
   };
   return async (from, days) => {
-    const result = await run([script, "sessions", "--from", from, "--days", String(days)], {
+    const pinned = await runPinnedScript({
+      root: opts.root,
+      script: MARKET_CLOCK_SCRIPT,
+      sha256: opts.sha256 ?? MARKET_CLOCK_SHA256,
+      changed: "changed since this face was built",
+      runBase: opts.runBase,
+      run,
+      args: ["sessions", "--from", from, "--days", String(days)],
       cwd: opts.root,
       env: baseEnv(process.env),
       timeoutMs,
+      label: "the market clock",
+      log,
     });
+    /* a changed or missing clock never runs: a calendar failure, which no anchored order outlives */
+    if ("refused" in pinned) throw new Error(pinned.error);
+    if ("failed" in pinned) throw new Error(`could not start ${opts.python}: ${pinned.failed}`);
+    const result = pinned.ran;
     try {
       return windowOf(result);
     } catch (error) {

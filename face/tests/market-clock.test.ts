@@ -3,19 +3,32 @@
  * running the clock (its argv, its keyless environment, its deadline, how each failure reads and the tail of
  * a failed run's stderr), and the calendar's cache - one ask per New York date, shared by concurrent calls, a
  * failed ask answered from a window that still covers the date and asked again every ten minutes until a
- * window holds it. Offline: a fake runner and a fake ask, except one test that runs scripts/market_clock.py
- * under the face's interpreter and skips when that interpreter has no pandas_market_calendars. */
-import test from "node:test";
+ * window holds it; and the clock's pin - the tracked file hashes to MARKET_CLOCK_SHA256, and a changed or missing
+ * clock never runs. Offline: a fake runner and a fake ask, except one test that runs scripts/market_clock.py under
+ * the face's interpreter and skips when that interpreter has no pandas_market_calendars. A run's private copy is
+ * made under tests/tmp/market-clock-<pid>/, removed afterwards. */
+import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
-import { dirname, join } from "node:path";
+import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  CALENDAR_DAYS, CALENDAR_RETRY_MS, MARKET_CLOCK_TIMEOUT_MS, createMarketCalendar, parseMarketWindow, pythonMarketClock, sessionFor, windowCovers,
+  CALENDAR_DAYS, CALENDAR_RETRY_MS, MARKET_CLOCK_SHA256, MARKET_CLOCK_TIMEOUT_MS, createMarketCalendar, parseMarketWindow, pythonMarketClock, sessionFor, windowCovers,
   type DayAnswer, type MarketClock, type MarketSession, type MarketWindow,
 } from "../src/market-clock.ts";
 import { baseEnv, type ProducerRunner, type RunResult } from "../src/producer.ts";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const TEST_DIR = join(dirname(fileURLToPath(import.meta.url)), "tmp", `market-clock-${process.pid}`);
+/** The run base a test's clock copies itself into, as the face's `<desk dir>/run`. */
+const RUN_BASE = join(TEST_DIR, "run");
+before(async () => {
+  await rm(TEST_DIR, { recursive: true, force: true });
+  await mkdir(TEST_DIR, { recursive: true });
+});
+after(() => rm(TEST_DIR, { recursive: true, force: true }));
 
 const S = (date: string, open: string, close: string, early = false): MarketSession => ({ date, open, close, early });
 const FULL = (date: string): MarketSession => S(date, `${date}T14:30:00Z`, `${date}T21:00:00Z`);
@@ -115,13 +128,17 @@ test("pythonMarketClock runs the clock with the face's interpreter, no market ke
     calls.push({ argv, opts });
     return result;
   };
-  const root = "/repo";
+  const root = REPO_ROOT;
   const saved = process.env.APCA_API_KEY_ID;
   process.env.APCA_API_KEY_ID = "PK-TEST";
   try {
-    const clock = pythonMarketClock({ root, python: "python3", run });
+    const clock = pythonMarketClock({ root, python: "python3", runBase: RUN_BASE, run });
     assert.equal((await clock("2026-11-24", 10)).sessions.length, 7);
-    assert.deepEqual(calls[0].argv, [join(root, "scripts", "market_clock.py"), "sessions", "--from", "2026-11-24", "--days", "10"]);
+    const [copy, ...rest] = calls[0].argv;
+    assert.deepEqual(rest, ["sessions", "--from", "2026-11-24", "--days", "10"]);
+    assert.equal(basename(copy), "market_clock.py");
+    assert.equal(dirname(dirname(copy)), RUN_BASE, "a private copy in the run base runs, never the file in scripts/");
+    assert.equal(existsSync(dirname(copy)), false, "its run directory is gone");
     assert.equal(calls[0].opts.cwd, root);
     assert.equal(calls[0].opts.timeoutMs, MARKET_CLOCK_TIMEOUT_MS);
     assert.equal(MARKET_CLOCK_TIMEOUT_MS, 30_000);
@@ -148,7 +165,7 @@ test("pythonMarketClock runs the clock with the face's interpreter, no market ke
     await rejects({ ...ended, code: 0, stdout: '{"ok":false,"error":"the XNYS calendar failed: RuntimeError: x"}' },
       "the XNYS calendar failed: RuntimeError: x");
 
-    const slow = pythonMarketClock({ root, python: "/opt/py/bin/python3", run, timeoutMs: 60_000 });
+    const slow = pythonMarketClock({ root, python: "/opt/py/bin/python3", runBase: RUN_BASE, run, timeoutMs: 60_000 });
     result = { code: null, stdout: "", stderr: "", timedOut: true };
     await assert.rejects(slow("2026-11-24", 10), { message: "timed out after 1 min" });
     assert.equal(calls.at(-1)!.opts.timeoutMs, 60_000);
@@ -164,7 +181,7 @@ test("pythonMarketClock over the real script: the face's interpreter answers ten
   const python = process.env.FACE_PYTHON || "python3";
   let window: MarketWindow;
   try {
-    window = await pythonMarketClock({ root: REPO_ROOT, python })("2026-11-24", CALENDAR_DAYS);
+    window = await pythonMarketClock({ root: REPO_ROOT, python, runBase: RUN_BASE })("2026-11-24", CALENDAR_DAYS);
   } catch (error) {
     const message = (error as Error).message;
     if (/is not importable in|^could not start/.test(message)) {
@@ -179,6 +196,34 @@ test("pythonMarketClock over the real script: the face's interpreter answers ten
   assert.deepEqual(window.sessions.map((s) => s.date), ["2026-11-24", "2026-11-25", "2026-11-27", "2026-11-30", "2026-12-01", "2026-12-02", "2026-12-03"]);
   assert.deepEqual(sessionFor(window, "2026-11-27"), S("2026-11-27", "2026-11-27T14:30:00Z", "2026-11-27T18:00:00Z", true));
   assert.equal(sessionFor(window, "2026-11-26"), "closed");
+});
+
+test("the clock is pinned: the tracked scripts/market_clock.py hashes to MARKET_CLOCK_SHA256", async () => {
+  const bytes = await readFile(join(REPO_ROOT, "scripts", "market_clock.py"));
+  assert.equal(createHash("sha256").update(bytes).digest("hex"), MARKET_CLOCK_SHA256,
+    "scripts/market_clock.py changed: review it, then move MARKET_CLOCK_SHA256 in src/market-clock.ts to its new hash");
+});
+
+test("a changed or missing clock never runs: the ask rejects, naming it, and the runner is never called", async () => {
+  const runs: string[][] = [];
+  const run: ProducerRunner = async (argv) => { runs.push(argv); return { code: 0, stdout: JSON.stringify(WINDOW), stderr: "", timedOut: false }; };
+  const root = join(TEST_DIR, "repo");
+  await mkdir(join(root, "scripts"), { recursive: true });
+  const script = join(root, "scripts", "market_clock.py");
+  const ask = pythonMarketClock({ root, python: "python3", runBase: RUN_BASE, run });
+  await assert.rejects(ask("2026-11-24", 10), { message: "scripts/market_clock.py is missing" });
+  await writeFile(script, `${await readFile(join(REPO_ROOT, "scripts", "market_clock.py"), "utf8")}\nimport os  # an edit\n`);
+  await assert.rejects(ask("2026-11-24", 10), { message: "scripts/market_clock.py changed since this face was built" });
+  assert.deepEqual(runs, [], "neither ran");
+  /* the face's real calendar turns the refusal into a failed day: no anchored order fires */
+  const day = await createMarketCalendar({ ask, python: "python3" }).today(Date.parse("2026-11-24T15:00:00Z"));
+  assert.deepEqual(day, { ok: false, date: "2026-11-24", error: "scripts/market_clock.py changed since this face was built" });
+  /* the same bytes run once the pin is theirs - the seam a stand-in clock's test uses */
+  const repinned = pythonMarketClock({ root, python: "python3", runBase: RUN_BASE, run, sha256: createHash("sha256").update(await readFile(script)).digest("hex") });
+  assert.equal((await repinned("2026-11-24", 10)).sessions.length, 7);
+  assert.equal(runs.length, 1);
+  await assert.rejects(pythonMarketClock({ root: REPO_ROOT, python: "python3", runBase: join(TEST_DIR, "no-such", "run"), run })("2026-11-24", 10),
+    { message: "could not start python3: ENOENT" }, "a run base that cannot be made is a failure to start");
 });
 
 /* ---------- the calendar ---------- */
@@ -303,7 +348,7 @@ test("pythonMarketClock hands the tail of a failed run's stderr - its last 300 c
   let result: RunResult = { code: 0, stdout: JSON.stringify(WINDOW), stderr: "", timedOut: false };
   const run: ProducerRunner = async () => result;
   const told: string[] = [];
-  const clock = pythonMarketClock({ root: "/repo", python: "python3", run, stderr: (tail) => { told.push(tail); } });
+  const clock = pythonMarketClock({ root: REPO_ROOT, python: "python3", runBase: RUN_BASE, run, stderr: (tail) => { told.push(tail); } });
   const fails = async (r: RunResult, message: string): Promise<void> => {
     result = r;
     await assert.rejects(clock("2026-11-24", 10), { message });
@@ -325,7 +370,7 @@ test("pythonMarketClock hands the tail of a failed run's stderr - its last 300 c
   assert.equal(told.length, 4, "a run that answered hands nothing");
 
   /* a hook that throws costs the ask nothing but the line: the ask still rejects with its own error */
-  const throwing = pythonMarketClock({ root: "/repo", python: "python3", run, stderr: () => { throw new Error("a broken log"); } });
+  const throwing = pythonMarketClock({ root: REPO_ROOT, python: "python3", runBase: RUN_BASE, run, stderr: () => { throw new Error("a broken log"); } });
   result = { code: 1, stdout: "", stderr: "boom\n", timedOut: false };
   await assert.rejects(throwing("2026-11-24", 10), { message: "exit 1" });
 });

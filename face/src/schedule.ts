@@ -790,12 +790,14 @@ const FACE_CLOCK: DeskClock = {
 
 /**
  * The clock row as the face runs it: {@link installSchedule} with the face's defaults - the market calendar over
- * scripts/market_clock.py under `python` (src/market-clock.ts; a failed run's stderr tail one line, once per distinct
- * tail), a script producer under the same interpreter, `builtin:brief` over the quote hub when there is one (src/brief.ts),
+ * scripts/market_clock.py, pinned by src/market-clock.ts `MARKET_CLOCK_SHA256` and run from a private copy in
+ * `<desk dir>/run` under `python -I` (a failed run's stderr tail one line, once per distinct tail until a good ask),
+ * a script producer under the same runner, `builtin:brief` over the quote hub when there is one (src/brief.ts),
  * a fresh desk agent per firing (src/desk-session.ts `createDeskAgent`), the order's route (src/firing.ts
  * `resolveFiringRoute`, on the booted context's default model and model calls), and the day's budget against the last
  * good load's cap. `seams` replaces the clock - the wall clock by default, its timers `unref`'d - the calendar, the
- * script runner, the builtins, the tick and the grace.
+ * runner (the clock's and a script producer's), the clock's pin (for a stand-in clock), the builtins, the tick and
+ * the grace.
  * @param opts - `home` the harness home; `root` the repository root; `python` the face's interpreter (`FACE_PYTHON ||
  *   python3`); `hub` the quote hub; `session` the desk session's deps; `sessionCtx` the booted ROOT context, whose
  *   `agentDefaultModel` and `llm` a firing's route needs - a firing on a context without them could not run; `on` the
@@ -811,7 +813,7 @@ export function createDeskSchedule(opts: {
   on: SessionEventsOn;
   deliver: (text: string) => Promise<DeliverResult>;
   log?: (line: string) => void;
-  seams?: { clock?: DeskClock } & Partial<Pick<ScheduleDeps, "calendar" | "runScript" | "builtins" | "tickMs" | "graceMs">>;
+  seams?: { clock?: DeskClock; marketClockSha256?: string } & Partial<Pick<ScheduleDeps, "calendar" | "runScript" | "builtins" | "tickMs" | "graceMs">>;
 }): ScheduleHandle {
   const log = opts.log ?? defaultLog;
   const seams = opts.seams ?? {};
@@ -819,18 +821,27 @@ export function createDeskSchedule(opts: {
   let toldTail: string | undefined;
   /* one runner for the clock and a script producer: the face's interpreter, isolated */
   const runScript = seams.runScript ?? defaultProducerRunner(opts.python);
+  const clockAsk = pythonMarketClock({
+    root: opts.root,
+    python: opts.python,
+    runBase: join(deskDir(opts.home), "run"),
+    run: runScript,
+    log,
+    ...(seams.marketClockSha256 === undefined ? {} : { sha256: seams.marketClockSha256 }),
+    stderr: (tail) => {
+      if (tail === toldTail) return;
+      toldTail = tail;
+      log(`${BIN}: desk: schedule calendar: scripts/market_clock.py under ${opts.python} failed; its stderr ends: ${tail}`);
+    },
+  });
   const calendar = seams.calendar ?? createMarketCalendar({
     python: opts.python,
-    ask: pythonMarketClock({
-      root: opts.root,
-      python: opts.python,
-      run: runScript,
-      stderr: (tail) => {
-        if (tail === toldTail) return;
-        toldTail = tail;
-        log(`${BIN}: desk: schedule calendar: scripts/market_clock.py under ${opts.python} failed; its stderr ends: ${tail}`);
-      },
-    }),
+    /* a good ask clears the tail last told, so the same failure after a recovery is logged again (p2-m32) */
+    ask: async (from, days) => {
+      const window = await clockAsk(from, days);
+      toldTail = undefined;
+      return window;
+    },
   });
   const { sessionCtx } = opts;
   const handle: ScheduleHandle = installSchedule({

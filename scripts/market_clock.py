@@ -18,20 +18,17 @@ Read-only and keyless: it imports no network or order path and reads no key; the
 PATH, HOME, LANG, TZ and LC_* only, and a test greps the source for it. The calendar is as good as the
 installed pandas_market_calendars: a closure announced after its release is unknown until an upgrade.
 
-Not hash-pinned, unlike a standing order's producer: the face runs this file by path, as it runs
-face_data.py - it is face infrastructure. A recorded residual: a change to it in the tree takes
-effect at the face's next ask, unreviewed.
+Pinned by a constant in the face's own code: the face runs this file only when its bytes hash to
+MARKET_CLOCK_SHA256 (face/src/market-clock.ts), from a private copy under $DSH_HOME/face/desk/run,
+as `python -I` - isolated, so neither the repository nor this file's directory is on sys.path. It
+imports nothing from the repository. An edit here moves that constant too; a test fails until it does.
 """
 from __future__ import annotations
 
 import json
-import os
 import re
 import sys
 from datetime import date, timedelta, timezone
-from pathlib import Path
-
-sys.path.insert(0, os.environ.get("GRAVIT_ROOT") or str(Path(__file__).resolve().parents[1]))
 
 CALENDAR = "XNYS"
 MAX_DAYS = 31
