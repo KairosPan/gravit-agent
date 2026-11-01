@@ -286,7 +286,9 @@ it refused ("The desk" below).
 that `DSH_HOME`, as the desk drill's step 6 does. Two dsh processes on one
 harness home are unexamined, so no second face runs on the service's home —
 where the ledger, too, assumes one desk-enabled face (a second one's `boot`
-would mark the service's run lost). `FACE_DESK=0` mounts none of the desk's
+would mark the service's run lost; its clock row waits out a firing the service
+has under way - a `started` younger than its deadline and a minute - before it
+would call it cut off). `FACE_DESK=0` mounts none of the desk's
 rows, and its `/data/desk/status` still answers, `desk.enabled: false`; it
 matters on any home, because the desk's Telegram bridge is the one poller a
 bot token allows — a second one gets Telegram's 409, and both faces' bridges
@@ -1904,10 +1906,12 @@ The desk's clock fires the operator's standing orders on the exchange calendar (
 P2, §5.4 and §5.9): each is a text the operator wrote and armed, fired at its anchor in a fresh
 desk session whose final text goes to the phone — informing, never ordering (charter §1). The
 first is the pre-close brief: `desk/STANDING.md`, tracked, with `builtin:brief`, the face's own
-producer, which prices the desk's book — `desk/holdings.yml`, `desk/levels.yml` and every
-`strategies/<name>/levels.yml`, gitignored, with `desk/holdings.example.yml` and
-`desk/levels.example.yml` tracked beside them — and the index and sector ETFs from one snapshot
-of the quote hub.
+producer, which prices the desk's book — `desk/holdings.yml` and `desk/levels.yml`, gitignored,
+with `desk/holdings.example.yml` and `desk/levels.example.yml` tracked beside them — and the
+index and sector ETFs from one snapshot of the quote hub (at most 200 symbols; any past that are
+named in the brief). A strategy's `strategies/<name>/levels.yml` is not read yet: research
+sessions can write it, and the brief's text reaches the phone, so it joins once P4 pins each one
+at arming (`DEVELOPMENT.md` §9, R44); the brief says so.
 
 **Arm it** from a terminal, in `face/` of the checkout the service runs: `arm` hashes that
 checkout's files, and the service checks its own (`DEVELOPMENT.md` §9, R42).
@@ -1929,14 +1933,18 @@ for a script producer, of its script. Its arguments:
   `close+Nm` at most 479, so the anchor stays on its session's New York date), or `HH:MM` New
   York time; XNYS sessions only, early closes included: `close-30m` is 15:30 ET, and 12:30 ET on
   2026-11-27 and 2026-12-24, while a `15:30` order stays at 15:30. A `close-Nm` must leave room
-  for the producer's deadline, the turn's and the 5-minute grace (`close-15m leaves 15 min before
-  the close; its producer (5 min), its turn (10 min) and the 5-minute grace need 20 min`);
+  for what runs before the close and the 5-minute grace — the producer's deadline when there is
+  one, the turn's when it wakes one (`close-15m leaves 15 min before the close; its producer
+  (5 min), its turn (10 min) and the 5-minute grace need 20 min`; a `--no-wake` order, `close-5m
+  leaves 5 min before the close; its producer (5 min) and the 5-minute grace need 10 min`);
 - `--expires YYYY-MM-DD` — required: the last New York date it fires, not before today;
 - `--producer scripts/FILE.py | builtin:NAME` — what runs before the turn, its output quoted in
   the wake message: `builtin:brief`, or one `.py` file directly under `scripts/`, pinned by its
-  bytes and run from a private copy of them with no shell, cwd the repository root, its input as
-  JSON on stdin and an environment of `PATH`, `HOME`, `LANG`, `TZ`, `LC_*`, `APCA_*`, `ALPACA_*`,
-  `ALPHA_*` and `GRAVIT_ROOT` (`DEVELOPMENT.md` §3.5);
+  bytes and run from a private copy of them as `python -I` with no shell, cwd the repository root,
+  its input as JSON on stdin and an environment of `PATH`, `HOME`, `LANG`, `TZ`, `LC_*`, `APCA_*`,
+  `ALPACA_*`, `ALPHA_*` and `GRAVIT_ROOT` (`DEVELOPMENT.md` §3.5), its whole process group killed
+  at its deadline. The pin covers the script's bytes; what it imports from the repository tree
+  (via `GRAVIT_ROOT`) is not pinned (`DEVELOPMENT.md` §9, R40);
 - `--turn-deadline` (1–30 min, `10m` by default) and `--producer-deadline` (10 s–180 min, `5m` by
   default), each `<n>s` or `<n>m`;
 - `--model PROVIDER/MODEL` — the turn's route; without it a firing runs Gravit's default model,
@@ -1948,7 +1956,9 @@ for a script producer, of its script. Its arguments:
 a market calendar that does not answer for today (`… FACE_PYTHON must name an interpreter with
 pandas_market_calendars`: it asks under this shell's `FACE_PYTHON`, else `python3`), a
 `standing.yml` the face refuses, and a file changed between its read and its write (`run the
-command again`). A `standing.yml` refused because an order in it is not armed — one written by hand
+command again`). An order armed at the anchor of another enabled one gets a `note:` line: orders
+sharing an anchor run one after another, so the later may start late — and a close-anchored text
+that finishes after the close is held back. A `standing.yml` refused because an order in it is not armed — one written by hand
 without its `armedAt` and pins — names the way out: remove that order from `standing.yml`, then arm
 it again.
 
@@ -1963,7 +1973,7 @@ npm run desk -- rearm preclose --expires 2027-03-31   # extend its last day, an 
 
 `rearm <id> --expires` moves only the last day, and is refused while a pinned file has changed
 (`cannot re-arm preclose: desk/STANDING.md changed since arming; review it, then: npm run desk --
-rearm preclose`): an expired order never fires, so nothing refused that edit. The way after an edit
+rearm preclose`, every moved pin named; a plain `rearm` marks each pin it took `(changed)`): an expired order never fires, so nothing refused that edit. The way after an edit
 is review, `rearm <id>`, then `rearm <id> --expires <date>`. A re-arm inside the 5-minute grace
 fires that day.
 
@@ -1988,11 +1998,15 @@ of the day with one line, and each phone text is answered with the budget line i
 a turn opened in the browser still runs, and the pause outranks the budget.
 
 **When an order fires.** The clock ticks every 30 s and asks the market calendar —
-`scripts/market_clock.py`, pandas_market_calendars' XNYS — once a New York day. An order is due
-from its anchor to 5 minutes past it. Before it runs the face checks the pause, the day's budget,
-the text's and the script's pins and the instruction-chain fence ("The fence" above); a refusal
-consumes nothing, so an order lifted inside the grace still fires. One firing runs at a time, a
-queued one even past its grace. A firing is a fresh `gravit-desk` session in the order's
+`scripts/market_clock.py`, pandas_market_calendars' XNYS — once a New York day, and again every
+10 minutes after a failed ask until one answers. The clock script is pinned by a constant in the
+face's own code (`MARKET_CLOCK_SHA256` in `src/market-clock.ts`) and runs from a private copy as
+`python -I`: an edit to it is a calendar failure until that constant moves with it. An order is
+due from its anchor to 5 minutes past it. Before it runs the face checks the pause, the day's
+budget, the instruction-chain fence ("The fence" above) and then the text's and the script's
+pins; a refusal consumes nothing, so an order lifted inside the grace still fires. One firing
+runs at a time, a queued one even past its grace — so orders sharing an anchor run one after
+another, the later starting late. A firing is a fresh `gravit-desk` session in the order's
 directory — never the phone's conversation — woken once with the verified text, the session's
 times and the producer's output, under the order's turn deadline; its final text goes to the phone
 through the same pause as every desk message. A close-anchored text that finishes after the close
@@ -2004,7 +2018,8 @@ twice. Every step is a line in `$DSH_HOME/face/desk/firings.jsonl`.
 **`FACE_PYTHON`.** The market clock and a script producer run on the face's interpreter:
 `FACE_PYTHON`, else the first `python3` on the `PATH` the service's plist froze at install ("Run as
 a service"). It must import `alpaca_kit` and `pandas_market_calendars` — `pip install -e ".[live]"`
-at the repo root. The service reads `FACE_PYTHON` from `$DSH_HOME/.env`, which dsh loads at boot;
+at the repo root — as `python -I` runs them: from the interpreter's own site-packages, since
+`-I` leaves out the user site (`pip install --user`) and `PYTHONPATH`. The service reads `FACE_PYTHON` from `$DSH_HOME/.env`, which dsh loads at boot;
 `install` does not copy it, so add the line by hand (`FACE_PYTHON=<an interpreter with both>`) and
 restart. Without a calendar no anchored order fires that day, with one line naming the interpreter.
 
@@ -2013,7 +2028,7 @@ session's date, times New York's:
 
 | When | Line |
 |---|---|
-| the turn timed out with no text | `<id> · <date> timed out after <n> min; a card or a long tool was pending` |
+| the turn timed out with no text | `<id> · <date> timed out after <n> min; a card or a long tool was pending` (`<n> s` when not whole minutes) |
 | the turn ended with no text | `<id> · <date> ended with no text` |
 | the model call failed | `<id> · <date> could not answer: <error>; nothing was done` |
 | something cancelled the turn first | `<id> · <date> was cancelled (<cause>); nothing more will be said` |
@@ -2021,20 +2036,24 @@ session's date, times New York's:
 | no turn started | `<id> · <date> never started a turn; nothing ran` |
 | the session could not run | `<id> · <date> could not run: <reason>` |
 | the turn left a fence violation | `<id> · <date> left <path> behind; every desk turn is refused until it is removed` |
-| its text or script changed | `<id> · <date> refused: <path> changed since arming. Review it, then: npm run desk -- rearm <id>` |
+| its text or script changed | `<id> · <date> refused: <path> changed since arming. Review it, then: npm run desk -- rearm <id>` (both moved: `<text> and <script> changed since arming. Review them, then: …`) |
 | its text or script is missing | `<id> · <date> refused: <path> is missing. Restore it, or remove the order from standing.yml` |
 | finished after its moment | `<id> finished after the close; not sent - it describes a market that has moved` (`the open` for an open-anchored one) |
 | the budget spent | `standing orders are refused for the rest of the day: the desk's token budget is spent (<used> of <cap> tokens since 00:00 ET)` |
 | missed | `<id> · <date> missed its <HH:MM ET> anchor: <why>. A standing order never runs late` — `the face was asleep from … to …`, `the face was not running` or `found at …, past the 5-minute grace` |
-| cut off by a restart | `<id> · <date> was cut off by a restart; a standing order never runs twice` |
+| cut off by a restart | `<id> · <date> was cut off by a restart; a standing order never runs twice` — it may follow a brief that did arrive: a crash between the delivery and its record |
 | expired | `<id> expired after <expires> and no longer fires; extend it with npm run desk -- rearm <id> --expires <YYYY-MM-DD> to keep it` |
 | a `--no-wake` producer failed | `<id> · <date> producer <spec> failed (<error>); nothing was woken` |
-| `standing.yml` refused | `standing.yml is refused, so no standing order runs until it is fixed: <errors>` |
+| `standing.yml` refused | `standing.yml is refused, so no standing order runs until it is fixed: <errors>` (joined with `; `, cut at 500 characters) |
 | `firings.jsonl` unreadable | `the firing ledger <path> cannot be read (<code>), so no standing order runs until it can` |
 | no calendar | `no standing order runs today: the market calendar failed in <python> (<error>). FACE_PYTHON must name an interpreter with pandas_market_calendars` |
 | a phone text while the budget is spent | `the desk's token budget for today is spent: <used> of <cap> tokens since 00:00 ET. It opens again at midnight ET, or raise budget.dailyTokens in standing.yml` |
 
-The pause sends none of them: a paused order is refused in silence.
+The pause sends none of them: a paused order is refused in silence. A line the pause holds back
+is not lost: a missed, interrupted or expired line and a firing's refusal go out, in order, at
+the first tick after the lift, and a `standing.yml` refusal, an unreadable ledger or a day without
+a calendar is phoned then if it still stands. This table is the source for the phone's lines; it
+supersedes the P2 plan's, which has no `cancelled` row.
 
 **Where to see it.** `npm run service -- status` and the phone's `/status` end with the budget
 line (`budget: 1,234,567 of 2,000,000 tokens today`) and a line per order —
