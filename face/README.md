@@ -1361,7 +1361,7 @@ twelve writes, the sign-in's callback):
 
 | Route | What it reads at the Account | TTL | Abort | Query names |
 |---|---|---|---|---|
-| `GET /data/account` | `GET /api/account`: the page — venues, health, cards, orders, keys, signers, the mode and writes | 15 s | 7 s | `fresh` |
+| `GET /data/account` | `GET /api/account`: the Account's read — venues, health, cards, orders, keys, signers, the mode and writes | 15 s | 7 s | `fresh` |
 | `GET /data/account/explore` | its markets, by tab, or a search | 20 s | 10 s | `tab`, `q`, `key`, `sort` (China's ranking), `limit` |
 | `GET /data/account/market` | one market at one venue | 3 s | 7 s | `venue`, `symbol` |
 | `GET /data/account/quotes` | the latest quotes of up to twelve markets | 3 s | 7 s | `pairs` (2,000 characters) |
@@ -1447,7 +1447,7 @@ Account's status and body (its refusal past 32 streams among them). The upstream
 the tab's connection closes, when the browser falls 256 KiB behind, and at shutdown — `main.ts`
 disposes the proxy after the web server stops. `stream/markets` takes a body declared
 `application/json` (else 415) on a bare path (any query name is 400), at most 4,096 bytes (413),
-and posts it on as it came. `/data/seat.json` reads the page through the proxy's own `account`
+and posts it on as it came. `/data/seat.json` reads the Account's read through the proxy's own `account`
 reader, so the seat box and the Account screen share one upstream read within the 15 seconds.
 
 **The cadence** — the retired page's, no faster:
@@ -1458,7 +1458,7 @@ reader, so the seat box and the Account screen share one upstream read within th
 | `explore` | the tab on screen, at once and every 20 s while Markets is on screen in a visible tab (`limit=200`, a kind's tab with its `tab`); the search once the box has been quiet for 300 ms (`q`, `limit=200`); each old `us:`/`crypto:` star once per boot (`q`, `limit=12`) |
 | `quotes` | every 5 s while Markets is on screen in a visible tab: the drawn rows' most traded connected lines, twelve a call, none while one is out; on a market's page its own market's line, from the page's own view when that market is no row of the tab |
 | `candles`, `compare` | on opening a market's page; `candles` again on a range |
-| `holdings`, `history` | on entering Portfolio (the holdings, then the leading curve), on Refresh (the holdings), on a range (the curve), on opening a market's page (the holdings); when a page naming a paper venue lands with its lens never read, or after a page the face did not recognise (the holdings — then past the cache — and the leading curve); on the stream's events |
+| `holdings`, `history` | on entering Portfolio (the holdings, then the leading curve), on Refresh (the holdings), on a range (the curve), on opening a market's page (the holdings); when an Account's read naming a paper venue lands with its lens never read, or after a read the face did not recognise (the holdings — then past the cache — and the leading curve); on the stream's events |
 | `statement` | on opening the Statement and a market's page; on the stream's events |
 | `agents` | on entering Agents; on a `snapshot` |
 | `asset`, `book`, `trades`, `funding` | on opening a market's page: the asset sheet (again past the cache after an owner action there), the book and the latest trades at the line it follows (the trades no more once the source said it publishes none), a perpetual's funding |
@@ -1470,10 +1470,10 @@ reader, so the seat box and the Account screen share one upstream read within th
 | `venues`, `paper/books` (stage 2) | on pressing Connect an account and Open a paper account — the sheet opens with what was read, else once the read lands |
 | `keyfile`, `connect/reach` (stage 2) | for an open Connect an account sheet: on opening, and after the sheet's 300 ms quiet when the key file or the connector it would ask about changed |
 | `pair`, `prepare`, `exchange` (stage 2) | `pair` on each load's first page (unless this browser signed out), when a page no longer lists this device after it signed or waited, on Pair and on Sign in; `prepare` when a sheet's form is complete and after 300 ms without a change, at a signature's ten minutes and on a press under its last 30 seconds, and on a ticket's moved market; `exchange` on the sheet's go key, a star, a Cancel |
-| after an owner action | the page, the holdings and the statement past the cache; the seat box too after Let in, a limit or Revoke |
+| after an owner action | the Account's read, the holdings and the statement past the cache; the seat box too after Let in, a limit or Revoke |
 
 A stream event reads again what it names, past the cache: `order`, `fill`, `paper`, `balance` and
-`position` the holdings and the page; `statement` the statement; `card` the page, and the seat box
+`position` the holdings and the Account's read; `statement` the statement; `card` the Account's read, and the seat box
 for a card raised or answered; `snapshot` everything, and the prices the stream had kept are
 dropped — the Account never resumes market events. A `quote` frame is the followed market's price
 (its last trade, else the middle of its bid and ask). A hidden tab stops every poll and closes its
@@ -3870,23 +3870,31 @@ and a face browser that signs (`npm run account:owners`, "The owner drill").
       thread; no Account card follows. Switch back to Guard.
    4. The fifteen items of the spec's §5.1 on the face (§5.9): Close…, Change… and Leverage… (a
       market's page, the Portfolio; Change… on Trade), a market's You here, order book, latest
-      trades and a perpetual's funding; Rules; Close to agents and Reopen…; Receive; Move, Earn and
-      Sell many; agent wallets; every limit scope and Gravit's own row; the connectors; every ask
-      granted; Sign out's Guard first — on the paper venue where it can be done there.
-   5. The real-money ones — a browser wallet, the Robinhood sign-in, Move, Earn — on the stand-in
-      only (`cd account && npx tsx test/standin/ui-standin.ts --port 4821`, a face started with
-      `FACE_ACCOUNT_URL=http://127.0.0.1:4821` on a scratch home), never on 4820, and connecting no
-      real account: what is observed is each sheet started, prepared and shown on the face, and
-      the sign-in's way back landing on the face.
+      trades and a perpetual's funding; Rules; Close to agents and Reopen…; Sell many; opening an
+      agent wallet; every limit scope and Gravit's own row; every ask granted; Sign out's Guard
+      first — on the paper venue, where each can be done there.
+   5. The rest only on the stand-in, never on 4820: every connector but a paper account (a key
+      file, an address, the command-line connector, a browser wallet, the Robinhood sign-in), an
+      agent wallet's Top up… and Take back…, Receive, Move and Earn. The stand-in:
+      `cd account && npx tsx test/standin/ui-standin.ts --port 4821` (at its default cap; `--cap
+      <usd>` sets another), a face started with `FACE_ACCOUNT_URL=http://127.0.0.1:4821` on a
+      scratch home. Observed: each sheet started, prepared and shown on the face and signed against
+      simulated venues. The stand-in reaches no network, so a venue's sign-in ends at its start: the
+      sign-in sheet shows the Account's refusal on the face, and no venue page, redirect or callback
+      follows.
 
    PASS: each signed act shows What you sign before the signature and is read back from the
    Account; nothing moves on a real venue.
 6. **The page gone.**
    1. `curl -s 127.0.0.1:4820/` answers 404 with `NO_PAGE` (`The Account serves no page: its
       owner's screens are Gravit's face (Markets, Trade, Account). …`).
-   2. A venue's sign-in started from Account › Venues › Connect an account (on the stand-in, as in
-      drill 5) comes back through the face's `/data/account/signin/callback`: the Account's answer
-      drawn on the face's origin, and the sheet's state read from `signin/status`.
+   2. On the stand-in's face (as in drill 5), the sign-in sheet started from Account › Venues ›
+      Connect an account shows the Account's refusal on the face. Then open
+      `http://127.0.0.1:<the face's port>/data/account/signin/callback?state=drill` in that browser:
+      the Account's HTML answer (`this sign-in is not one this server started, or it ran out: …`)
+      is drawn on the face's origin under the callback's content-security-policy. A sign-in run to
+      completion against the host 4820 Account with network would connect a real account: that is
+      not part of this drill.
 
    PASS: nothing at the Account answers but its API; no face sentence sends the operator elsewhere.
 7. **The two boxes with 4820 unpublished** — "The two-box drill" below.
