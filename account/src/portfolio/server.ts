@@ -146,6 +146,7 @@
  * content's hash (?v=), which is kept a year unchanged (immutable); a file asked for without it, or with an older one, is revalidated.
  * The fonts (public/fonts, named by their version) are kept a year.
  */
+import { akshareCommand, createAkshare, type Akshare, type AkshareWord } from "./live/akshare.ts";
 import { createHash } from "node:crypto";
 import express from "express";
 import { readFileSync } from "node:fs";
@@ -299,10 +300,14 @@ export interface PortfolioServerOptions {
   cn?: { relay: CnRelay; ifind: CnIfind } | undefined;
   /** how long past a relay target's own limit a request may wait for a slot in the relay's queue (milliseconds): 3000 unless said */
   cnQueueMs?: number | undefined;
+  /** the AKShare sidecar (live/akshare.ts) behind /api/akshare/*; absent, both routes answer `off` and no child is ever spawned. The server's close ends it */
+  akshare?: Akshare | undefined;
 }
 
 const RELAY_STATUS = { "not-listed": 403, timeout: 504, "too-large": 502, unreachable: 502, off: 503 } as const;
 const IFIND_STATUS = { unconfigured: 503, credential: 502, timeout: 504, "too-large": 502, unreachable: 502, "not-the-query": 400, off: 503 } as const;
+
+const AKSHARE_STATUS = { off: 503, "unknown-tool": 400, "bad-arguments": 400, unavailable: 503, timeout: 504, "too-large": 502 } as const satisfies Record<AkshareWord, number>;
 
 export interface PortfolioServerHandle {
   url: string;
@@ -534,6 +539,30 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
     const a = await opts.cn.ifind.ask(q);
     if (a.kind === "refused") return refuse(a.word);
     res.status(a.status).set("x-cn-ifind", "upstream").set("x-content-type-options", "nosniff").set("content-type", a.contentType ?? "application/octet-stream").send(Buffer.from(a.bytes));
+  }));
+
+  // The AKShare sidecar: two reads (they work on a --read-only account), behind the fence above, nothing written. The child's answer comes back
+  // unchanged; a refusal is the route's own word and status
+  const akshareRefuse = (res: express.Response, word: AkshareWord, message: string) => void res.status(AKSHARE_STATUS[word]).json({ ok: false, akshare: word, message });
+  /** aborted when the caller goes away before the answer is sent */
+  const callerGone = (res: express.Response) => {
+    const c = new AbortController();
+    res.on("close", () => { if (!res.writableFinished) c.abort(); });
+    return c.signal;
+  };
+  app.get("/api/akshare/tools", wrap(async (_req, res) => {
+    if (!opts.akshare) return akshareRefuse(res, "off", "this Account runs no AKShare sidecar");
+    const a = await opts.akshare.tools(callerGone(res));
+    if (a.kind === "refused") return akshareRefuse(res, a.word, a.message);
+    res.json({ ok: true, tools: a.value });
+  }));
+  app.post("/api/akshare/call", wrap(async (req, res) => {
+    const body = req.body as { tool?: unknown; arguments?: unknown } | undefined;
+    if (typeof body?.tool !== "string") return akshareRefuse(res, "bad-arguments", "the body is {tool: string, arguments?: object}");
+    if (!opts.akshare) return akshareRefuse(res, "off", "this Account runs no AKShare sidecar");
+    const a = await opts.akshare.call(body.tool, body.arguments, callerGone(res));
+    if (a.kind === "refused") return akshareRefuse(res, a.word, a.message);
+    res.json({ ok: true, tool: body.tool, isError: a.value.isError, content: a.value.content });
   }));
 
   app.get("/api/overview", wrap(async (_req, res) => {
@@ -1141,6 +1170,7 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
       svc.closeStreams();
       await svc.flushPaper();
       await snapping;
+      await opts.akshare?.close();
       await new Promise<void>((resolve) => {
         server.close(() => resolve());
         server.closeAllConnections();
@@ -1181,7 +1211,8 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   // China (live/china.ts) is the real server's alone, as its streams are: a service made anywhere else never asks Tencent
   const service = await PortfolioService.create({ home: at("--home") ?? defaultHome(), live, fresh, china: chinaSource(), ...(liveWrites ? { liveWrites } : {}), ...(code ? { pairingCode: code } : {}), ...(classic ? {} : { venues: "frontline" as const, real: true, openness }) });
   const cn = { relay: createCnRelay(realCnHttp), ifind: createIfind({ env: () => process.env, http: cnHosts(realCnHttp as CnHttp, [IFIND_HOST]) }) };
-  const srv = await startPortfolioServer({ port, service, bind: process.env.PORTFOLIO_BIND || undefined, hosts: parseHosts(process.env.PORTFOLIO_HOSTS), cn }).catch((e: NodeJS.ErrnoException) => {
+  const akshare = createAkshare({ command: akshareCommand() });
+  const srv = await startPortfolioServer({ port, service, bind: process.env.PORTFOLIO_BIND || undefined, hosts: parseHosts(process.env.PORTFOLIO_HOSTS), cn, akshare }).catch((e: NodeJS.ErrnoException) => {
     if (e.code !== "EADDRINUSE") throw e;
     // the usual reason: this server is already running in another terminal
     console.error(`port ${port} is already in use: a portfolio server is probably running already. Open http://127.0.0.1:${port}/account, or start a second one: npm run portfolio -- --port ${port + 1} --home <another directory>`);
@@ -1194,6 +1225,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   else if (!classic) console.log(`read-only: nothing is traded or moved from this server (started with --read-only)${owned ? "" : `\n  pairing code: ${code} — the first browser becomes the owner only with this code, typed on the page`}`);
   console.log(classic ? `simulated statement at ${srv.url} · ${service.accounts().length} accounts · MetaMask ${live ? "LIVE via mm" : "simulated (--mm for live)"} · no account layer · ledger ${service.ledgerPath()} · Ctrl-C to stop` : `your account at ${srv.url} · real accounts only: connect them on the page · ledger ${service.ledgerPath()} · Ctrl-C to stop`);
   console.log(`Lunhui's reach: /api/cn/relay (Tencent, Eastmoney) · ${cn.ifind.configured() ? "iFinD configured" : "iFinD not configured (IFIND_REFRESH_TOKEN or IFIND_ACCESS_TOKEN in this process's environment)"}`);
+  console.log(`AKShare: ${akshareCommand()} · started on first use (/api/akshare/tools, /api/akshare/call)`);
   // where the owner can connect, kept fresh without anyone asking: the venues' own answers to this network, and their terms matched to where
   // it is (live/availability.ts) — so the page and the agents know before anyone makes a key
   if (!classic && service.account) service.watchVenues();
