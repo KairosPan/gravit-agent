@@ -229,17 +229,19 @@ function doesOf(v) {
 }
 
 /** The Venues tab from the page's `venues`: each venue's connector, value, front line, health, what it does and what it trades
- *  (`trade.what`), the paper flag, when it was read (`stale` the Account's words where it says them), and the Details drawer's
+ *  (`trade.what`), the paper flag, whether it is closed to agents (`closedToAgents`, in the page's `dial.revoked`), when it was read (`stale` the Account's words where it says them), and the Details drawer's
  *  facts — the key file's path when it has one, never what is in it. */
 export function venuesOf(page) {
   if (!pageOk(page)) return [];
   const health = isRecord(page.health) ? page.health : {};
+  // the venues closed to agents (the page's dial.revoked): agents keep reading them, and place or move nothing there
+  const revoked = new Set(isRecord(page.dial) && Array.isArray(page.dial.revoked) ? page.dial.revoked.filter(x => typeof x === 'string') : []);
   return records(page.venues).map(v => {
     const id = str(v.id);
     return {
       id, name: str(v.name), connector: str(v.connector), usd: number(v.usd), frontLine: str(v.frontLine),
       ...healthOf(Object.hasOwn(health, id) ? health[id] : undefined),
-      does: doesOf(v), what: str(v.trade?.what), paper: v.paper === true, asOf: str(v.asOf),
+      does: doesOf(v), what: str(v.trade?.what), paper: v.paper === true, asOf: str(v.asOf), closedToAgents: id !== '' && revoked.has(id),
       tradeCan: { amend: v.trade?.amend === true, leverage: v.trade?.leverage === true, close: v.trade?.close === true },
       stale: typeof v.stale === 'string' ? v.stale : v.stale === true,
       details: {
@@ -331,15 +333,13 @@ export function requestsOf(page) {
 
 // ── the connect sheet's reads (plan 2 Task 8) ──
 
-// what is connected on the Account page, not here: a venue's own sign-in, a proven address, a command line on its machine
-const ELSEWHERE = new Set(['sign-in', 'address', 'cli']);
 const strings = v => (Array.isArray(v) ? v.filter(x => typeof x === 'string' && x !== '') : []);
 
 /** What the connect sheet offers (its seed's `options`): the page's `connectLive.options`, each with where this account can
  *  connect it — the verdict, the venue's own words when it is not connectable (`said`) and its group, from the venues read
  *  (`/data/account/venues`, joined by connector; an option it does not name, or a venues read not landed, keeps
- *  `verdict: null`) — and `elsewhere` for one connected on the Account page (a sign-in, an address, a command line), which
- *  never drafts here. In the Account's order; the paper account among them (its own sheet leaves it out). */
+ *  `verdict: null`). Every kind connects here — a key file, an address (a browser wallet's among them), a venue's sign-in, a
+ *  command line — by what it `needs`. In the Account's order; the paper account among them (its own sheet leaves it out). */
 export function connectOptionsOf(page, venuesHere) {
   if (!pageOk(page)) return [];
   const here = new Map(listOf(venuesHere, 'venues').filter(v => typeof v.connector === 'string').map(v => [v.connector, v]));
@@ -349,7 +349,6 @@ export function connectOptionsOf(page, venuesHere) {
       connector: o.connector, label: str(o.label), needs: str(o.needs), example: str(o.example), defaultRef: str(o.defaultRef),
       venues: strings(o.venues), kind: str(o.kind),
       verdict: v && typeof v.verdict === 'string' ? v.verdict : null, said: str(v?.said), group: str(v?.group),
-      elsewhere: ELSEWHERE.has(o.needs),
     };
   });
 }

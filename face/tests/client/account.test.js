@@ -209,10 +209,12 @@ test('Venues: the rows with health, does and Paper; Details opens the drawer; th
   const s = state({ tab: 'venues' });
   const html = draw(s);
   const venues = html.match(/<section class="cardbox" aria-label="Venues">[\s\S]*?<\/section>/)?.[0] ?? '';
-  const row = (id, inner) => `<div class="venue">${inner}<button type="button" class="btn-sm" data-action="openVenueDetails" data-id="${id}">Details</button></div>`;
+  // every venue but a paper one has Close to agents, on any page that reads the Account (plan 4b Task 4)
+  const close = id => `<button type="button" class="btn-sm" data-action="closeToAgents" data-venue="${id}">Close to agents</button>`;
+  const row = (id, inner, paper = false) => `<div class="venue">${inner}<button type="button" class="btn-sm" data-action="openVenueDetails" data-id="${id}">Details</button>${paper ? '' : close(id)}</div>`;
   has(venues, row('broker', '<span><b>Stand-in Broker</b><br><span class="dim">$3,050.00 · Stocks · US stocks and ETFs</span><br><span class="dim">Not read yet · Trades</span></span>'));
   has(venues, row('ex', '<span><b>Stand-in Exchange</b><br><span class="dim">$21,638.93 · Exchange · spot and perpetuals</span><br><span class="dim">Answers · Trades · Moves money · Earns</span></span>'));
-  has(venues, row('paper', '<span><b>Stand-in Paper</b> <span class="chip grey">Paper</span><br><span class="dim">$400.00 · Exchange · perpetuals</span><br><span class="dim">Not read yet · Trades</span></span>'));
+  has(venues, row('paper', '<span><b>Stand-in Paper</b> <span class="chip grey">Paper</span><br><span class="dim">$400.00 · Exchange · perpetuals</span><br><span class="dim">Not read yet · Trades</span></span>', true));
   has(venues, row('agent-claude-code', '<span><b>Agent wallet · Claude Code</b><br><span class="dim">$47.37 · On-chain</span><br><span class="dim">Not read yet · Receives</span></span>'));
   assert.equal((venues.match(/data-action="openVenueDetails"/g) ?? []).length, 7);
   // health from the page: not answering since the last failure; stale in the Account's words, or the word
@@ -524,13 +526,14 @@ test("the Venues' keys: Connect an account, Open a paper account, Disconnect, To
 
   const html = venuesBox(draw(signing(state({ tab: 'venues' }))));
   has(html, `<div class="btn-row">${sheetKey('connect', {}, 'Connect an account')}${sheetKey('paper', {}, 'Open a paper account')}</div>`);
-  has(html, `data-id="ex">Details</button>${disconnect('ex', 'Stand-in Exchange')}</div>`);
+  const close = id => `<button type="button" class="btn-sm" data-action="closeToAgents" data-venue="${id}">Close to agents</button>`;
+  has(html, `data-id="ex">Details</button>${close('ex')}${disconnect('ex', 'Stand-in Exchange')}</div>`);
   has(html, `data-id="paper-momentum">Details</button>${disconnect('paper-momentum', 'Momentum · paper')}</div>`);
   assert.equal((html.match(/data-action="askDisconnect"/g) ?? []).length, 6, 'every venue but the agent wallet, which the Account never disconnects');
-  has(html, 'data-id="agent-claude-code">Details</button></div>');
+  has(html, `data-id="agent-claude-code">Details</button>${close('agent-claude-code')}</div>`);
   // Disconnect… asks twice: the confirm for this venue in its place
   const asking = venuesBox(draw(R.askConfirm(signing(state({ tab: 'venues' })), { action: 'disconnect', venue: 'ex', name: 'Stand-in Exchange' })));
-  has(asking, 'data-id="ex">Details</button><span class="confirm"><button type="button" class="btn-danger" data-action="confirmYes">Yes, disconnect</button><button type="button" class="btn-sm" data-action="cancelConfirm">No</button></span></div>');
+  has(asking, `data-id="ex">Details</button>${close('ex')}<span class="confirm"><button type="button" class="btn-danger" data-action="confirmYes">Yes, disconnect</button><button type="button" class="btn-sm" data-action="cancelConfirm">No</button></span></div>`);
   assert.equal((asking.match(/data-action="askDisconnect"/g) ?? []).length, 5, 'the other venues keep theirs');
   assert.equal((venuesBox(draw(R.askConfirm(signing(state({ tab: 'venues' })), { action: 'revoke', name: 'ex' }))).match(/askDisconnect/g) ?? []).length, 6, "another confirm is not this one's");
   // every seed escaped
@@ -547,7 +550,7 @@ test("the Venues' keys: Connect an account, Open a paper account, Disconnect, To
   for (const role of ['pending', 'none', 'needs-code', 'signed-out', 'unknown']) {
     const out = draw(R.openVenueDetails(R.ownerStanding(state({ tab: 'venues' }), { role, kid: KID }), 'paper-momentum'));
     for (const k of ['data-action="openSheet"', 'askDisconnect', 'Connect an account', 'Open a paper account', 'Disconnect…', 'Top up', 'Start over']) lacks(out, k, `${role}: ${k}`);
-    has(out, 'data-id="ex">Details</button></div>');
+    has(out, `data-id="ex">Details</button>${close('ex')}</div>`, `${role}: Close to agents needs no signature`);
   }
   // a page that signs but is not read, or not one the face recognises: nothing to connect from, no keys
   for (const p of [null, { ok: true }]) lacks(draw(signing(state({ tab: 'venues', page: p }))), 'data-action="openSheet"');

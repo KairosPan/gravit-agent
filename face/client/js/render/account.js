@@ -174,13 +174,23 @@ function disconnectKey(v, state) {
     : `<button${attrs({ type: 'button', class: 'btn-danger', 'data-action': 'askDisconnect', 'data-venue': v.id, 'data-name': v.name })}>Disconnect…</button>`;
 }
 
+// a connected venue's switch to agents (plan 4b Task 4; portfolio.js pfAgentsSwitch): one closed to them, its Reopen… on a page
+// that signs (widening what agents may do is signed); any other, its Close to agents on any page that reads the Account (free,
+// the safer direction), off while its press is in the air. A paper venue has neither.
+function agentsKey(v, state) {
+  if (v.paper || !v.id) return '';
+  if (v.closedToAgents) return signs(state) ? sheetKey('reopen', { 'data-venue': v.id, 'data-name': v.name || v.id }, 'Reopen…') : '';
+  const busy = state.account.closing?.[v.id]?.status === 'asking';
+  return `<button${attrs({ type: 'button', class: 'btn-sm', 'data-action': 'closeToAgents', 'data-venue': v.id, disabled: busy })}>Close to agents</button>`;
+}
+
 function venueRow(v, now, state) {
   const since = v.health === 'not-answering' ? when(v.since, now) : '';
   const health = since ? `${v.healthWords} since ${since}` : v.healthWords;
   const stale = v.stale === true ? 'stale' : typeof v.stale === 'string' ? v.stale : '';
   const facts = [v.usd === null ? '' : money(v.usd), v.frontLine, v.what].filter(Boolean).join(' · ');
-  return `<div class="venue"><span>${lines(v.name || v.id, [facts, [health, ...v.does, stale].filter(Boolean).join(' · ')], v.paper ? 'Paper' : '')}</span>` +
-    `<button type="button" class="btn-sm" data-action="openVenueDetails"${attrs({ 'data-id': v.id })}>Details</button>${disconnectKey(v, state)}</div>`;
+  return `<div class="venue"><span>${lines(v.name || v.id, [facts, [health, ...v.does, stale].filter(Boolean).join(' · ')], v.paper ? 'Paper' : v.closedToAgents ? 'Closed to agents' : '')}</span>` +
+    `<button type="button" class="btn-sm" data-action="openVenueDetails"${attrs({ 'data-id': v.id })}>Details</button>${agentsKey(v, state)}${disconnectKey(v, state)}</div>`;
 }
 
 // a venue's Details: what it holds there and the Account's facts about it, each under its label — the key file by its path,
@@ -200,7 +210,9 @@ function venues(state, now) {
   const rows = venuesOf(a.data).map(v => venueRow(v, now, state)).join('');
   // for a page that signs, the page's own sheets: what to connect comes from its connectLive, so an unread page has none
   const keys = signs(state) && pageOk(a.data) ? `<div class="btn-row">${sheetKey('connect', {}, 'Connect an account')}${sheetKey('paper', {}, 'Open a paper account')}</div>` : '';
-  const list = (pageNote(a) ?? (rows ? `<div class="venues">${rows}</div>` : note('No venues'))) + keys;
+  // what the last Close to agents said, each venue's: the face's sentence, or the Account's refusal
+  const closings = pageOk(a.data) ? Object.values(a.closing ?? {}).map(c => c?.said || c?.message).filter(Boolean).map(note).join('') : '';
+  const list = (pageNote(a) ?? (rows ? `<div class="venues">${rows}</div>` : note('No venues'))) + closings + keys;
   // the A-share quotes' provider, as the Account's China status names it: the Account's own sentence where it says one, else its word
   const cn = (Array.isArray(state.markets?.providers) ? state.markets.providers : []).filter(p => p?.market === 'cn');
   const said = p => (typeof p.said === 'string' && p.said.trim() ? p.said : providerWord(p));

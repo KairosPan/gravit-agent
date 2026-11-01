@@ -69,6 +69,13 @@ export function emptyState() {
       routes: { asked: null, status: 'idle', data: null, message: null },
       // Earn (plan 4b Task 3): the products and what is in them, and what the last taken earn said
       earn: { status: 'idle', data: null, at: null, message: null, said: null },
+      // the connect sheet's browser wallet (plan 4b Task 4): the wallets this page found, asked or signed for an address, or
+      // refused in the wallet's or the Account's words; a venue's sign-in started from it, by its connector — starting, waiting
+      // for the owner on the venue's page (`tab` false when no tab opened, so the venue's link is drawn instead), ready, failed,
+      // run out; and Close to agents by venue: in the air, said, or refused in the Account's words
+      connectWallet: { status: 'idle', wallets: [], wallet: '', address: '', message: null },
+      signIn: { status: 'idle', connector: '', url: '', tab: false, state: '', message: null },
+      closing: {},
       statementOpen: false,
       detailsVenue: null,
     },

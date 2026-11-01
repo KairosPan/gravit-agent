@@ -4,8 +4,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { SHEET_KINDS, fieldsOf, draftOf, titleOf, goWord, grantOf, limitSeedOf, letDeviceSeedOf, paperSeedOf } from '../../client/js/host/sheet-view.js';
-import { venuesOf } from '../../client/js/host/account-view.js';
+import { SHEET_KINDS, fieldsOf, refieldsOf, draftOf, titleOf, goWord, grantOf, limitSeedOf, letDeviceSeedOf, paperSeedOf, connectCheckOf } from '../../client/js/host/sheet-view.js';
+import { venuesOf, connectOptionsOf } from '../../client/js/host/account-view.js';
 
 const fx = name => JSON.parse(readFileSync(new URL(`../fixtures/account/${name}.json`, import.meta.url), 'utf8'));
 const NOW = Date.UTC(2026, 9, 22, 7, 35, 46);
@@ -18,9 +18,9 @@ const AGENT = '0x3a087530887bd175ccc38828ee3776e5b6ea1ac6';
 
 test('SHEET_KINDS: every kind with a title and its go word', () => {
   assert.deepEqual(SHEET_KINDS, ['letIn', 'limit', 'endLimit', 'revoke', 'connect', 'paper', 'topUp', 'resetPaper', 'disconnect',
-    'approveCard', 'declineAsk', 'letDevice', 'signOut', 'order', 'close', 'amend', 'leverage', 'beast', 'cap', 'session', 'leverageCap', 'move', 'earn']);
+    'approveCard', 'declineAsk', 'letDevice', 'signOut', 'order', 'reopen', 'close', 'amend', 'leverage', 'beast', 'cap', 'session', 'leverageCap', 'move', 'earn']);
   assert.deepEqual(SHEET_KINDS.map(k => goWord(k)), ['Let it in', 'Give the limit', 'End the limit', 'Revoke', 'Connect', 'Open the account',
-    'Top up', 'Start over', 'Disconnect', 'Approve', 'Decline', 'Let it sign', 'Sign out', 'Sign and place', 'Sign and close', 'Sign and change', 'Sign leverage',
+    'Top up', 'Start over', 'Disconnect', 'Approve', 'Decline', 'Let it sign', 'Sign out', 'Sign and place', 'Sign and reopen', 'Sign and close', 'Sign and change', 'Sign leverage',
     'Sign Beast', 'Sign the cap', 'Renew for 30 days', 'Sign leverage', 'Sign and move', 'Sign and put in']);
   assert.equal(goWord('approveCard', { decision: 'reject' }), 'Reject');
   assert.equal(goWord('approveCard', { decision: 'approve' }), 'Approve');
@@ -81,6 +81,108 @@ test('endLimit: the same agent, scope and venues at zero, for a day', () => {
     { type: 'approveSpend', agent: AGENT, scope: 'trade', allow: 'paper,ex', perPayment: '0', budget: '0', windowHours: 0, validUntil: NOW + DAY });
   assert.equal(draftOf('endLimit', [], { address: AGENT, allow: ['paper', 'ex'] }, NOW).allow, 'paper,ex');
   assert.equal(typeof draftOf('endLimit', [], { address: '', allow: 'paper' }, NOW), 'string');
+});
+
+// ── every connector kind the Account offers (plan 4b Task 4; connect.js openConnect) ──
+
+const connectSeed = (venues = venuesOf(fx('account')).map(v => ({ id: v.id }))) => ({ options: connectOptionsOf(fx('account'), null), venues });
+// the connect sheet with a connector picked, as the reducer rebuilds it on the pick, then the values typed
+const picked = (seed, connector, values = {}) => set(refieldsOf('connect', set(fieldsOf('connect', seed), { connector }), seed), values);
+const HL = '0x' + 'AbCdEf'.repeat(6) + 'abcd';
+
+test('an address connects under the kind, or kind-<6 hex> when the kind is on the page', () => {
+  const seed = connectSeed();
+  const fields = picked(seed, 'live:hyperliquid', { ref: HL, label: 'Main' });
+  assert.deepEqual(fields.map(f => [f.name, f.label, f.type]), [['connector', 'What to connect', 'select'], ['ref', 'Address', 'text'], ['label', 'Shown as', 'text']]);
+  assert.equal(fields[1].placeholder, '0x…');
+  assert.deepEqual(draftOf('connect', fields, seed, NOW), { type: 'connectVenue', venue: 'hyperliquid', connector: 'live:hyperliquid', label: 'Main', credentialRef: HL });
+  // the stand-in's page has a venue called wallet already: a second wallet is numbered by its address, lower-cased
+  const wallet = picked(seed, 'live:wallet', { ref: HL, label: '' });
+  assert.deepEqual(draftOf('connect', wallet, seed, NOW), { type: 'connectVenue', venue: 'wallet-abcdef', connector: 'live:wallet', label: '', credentialRef: HL });
+  assert.equal(draftOf('connect', wallet, connectSeed([]), NOW).venue, 'wallet', 'no wallet on the page: the kind itself');
+  // the shape follows the pick: back to a key file, the name kept and the address gone
+  const back = refieldsOf('connect', set(wallet, { connector: 'live:alpaca', label: 'Kept' }), seed);
+  assert.deepEqual(back.map(f => f.name), ['connector', 'exchange', 'venue', 'label', 'credentialRef']);
+  assert.equal(valueOf(back, 'label'), 'Kept');
+  // another address kind keeps the form as it is
+  assert.equal(refieldsOf('connect', set(wallet, { connector: 'live:hyperliquid' }), seed).find(f => f.name === 'ref').value, HL);
+});
+
+test('a bad address is said', () => {
+  const seed = connectSeed();
+  for (const ref of ['', '0x12', HL.slice(0, 41), `${HL}0`, HL.replace('0x', '0X'), 'z'.repeat(42)]) {
+    assert.equal(draftOf('connect', picked(seed, 'live:wallet', { ref }), seed, NOW), 'An address is 0x and 40 hex digits', JSON.stringify(ref));
+  }
+});
+
+test('a sign-in drafts only once signed in, with the state', () => {
+  const seed = connectSeed();
+  const fields = picked(seed, 'live:robinhood');
+  assert.deepEqual(fields.map(f => [f.name, f.type]), [['connector', 'select'], ['credentialRef', 'hidden']], 'nothing typed: the state lands hidden');
+  assert.equal(draftOf('connect', fields, seed, NOW), 'Sign in at Robinhood first');
+  assert.deepEqual(draftOf('connect', set(fields, { credentialRef: 'st-123' }), seed, NOW),
+    { type: 'connectVenue', venue: 'robinhood', connector: 'live:robinhood', label: '', credentialRef: 'st-123' });
+  // a state never carried to another kind
+  const other = refieldsOf('connect', set(fields, { connector: 'live:metamask', credentialRef: 'st-123' }), seed);
+  assert.deepEqual(other.map(f => f.name), ['connector']);
+});
+
+test('a cli option drafts with blank label and ref', () => {
+  const seed = connectSeed();
+  const fields = picked(seed, 'live:metamask');
+  assert.deepEqual(fields.map(f => f.name), ['connector']);
+  assert.deepEqual(draftOf('connect', fields, seed, NOW), { type: 'connectVenue', venue: 'metamask', connector: 'live:metamask', label: '', credentialRef: '' });
+  // its check line: what to run on this machine, the Account's own example
+  const example = seed.options.find(o => o.connector === 'live:metamask').example;
+  const none = { status: 'idle', data: null };
+  assert.equal(connectCheckOf({ kind: 'connect', seed, fields }, none, none), example);
+  const reach = { status: 'ready', data: { ok: true, reach: [{ connector: 'live:metamask', state: 'setup', said: 'mm is not signed in on this machine' }] } };
+  assert.equal(connectCheckOf({ kind: 'connect', seed, fields }, none, reach), `${example} · mm is not signed in on this machine`, 'beside its reach');
+});
+
+test('no option is Connect on the Account page any more', () => {
+  const seed = connectSeed();
+  const none = { status: 'idle', data: null };
+  const wallet = { status: 'none', wallets: [] }, signIn = { status: 'waiting', connector: 'live:robinhood', tab: true };
+  for (const o of seed.options) {
+    for (const fields of [picked(seed, o.connector), picked(seed, o.connector, { ref: HL, label: 'x', venue: 'v', credentialRef: 'st' })]) {
+      const draft = draftOf('connect', fields, seed, NOW);
+      const check = connectCheckOf({ kind: 'connect', seed, fields }, none, none, { wallet, signIn });
+      assert.ok(!JSON.stringify(draft).includes('Account page') && !check.includes('Account page'), o.connector);
+    }
+  }
+});
+
+test("the connect sheet's check speaks for the browser wallet and for a sign-in", () => {
+  const seed = connectSeed();
+  const none = { status: 'idle', data: null };
+  const sheet = fields => ({ kind: 'connect', seed, fields });
+  const w = picked(seed, 'live:wallet', { ref: HL });
+  const check = (fields, more) => connectCheckOf(sheet(fields), none, none, more);
+  assert.equal(check(w, { wallet: { status: 'none' } }), 'No browser wallet answered on this page. Type the address to watch it.');
+  assert.equal(check(w, { wallet: { status: 'asking', wallet: 'Fake Wallet' } }), 'Waiting for Fake Wallet…');
+  assert.equal(check(w, { wallet: { status: 'proven', wallet: 'Fake Wallet', address: HL.toLowerCase() } }), 'Fake Wallet signed: 0xabcdef…abcd is yours.');
+  assert.equal(check(set(w, { ref: '0x' + '9'.repeat(40) }), { wallet: { status: 'proven', wallet: 'Fake Wallet', address: HL } }), '', 'another address typed since: not that one');
+  assert.equal(check(w, { wallet: { status: 'refused', message: 'User rejected the request.' } }), 'User rejected the request.');
+  // a sign-in, for its own option only
+  const rh = picked(seed, 'live:robinhood');
+  const si = (status, more = {}) => check(rh, { signIn: { status, connector: 'live:robinhood', tab: true, ...more } });
+  assert.equal(si('starting'), 'Asking Robinhood where to sign in…');
+  assert.equal(si('waiting'), "Sign in on Robinhood's page, then come back.");
+  assert.equal(si('waiting', { tab: false }), '', 'no tab: the link is drawn instead');
+  assert.equal(si('ready'), 'Signed in. Connect it.');
+  assert.equal(si('expired'), 'The sign-in ran out: start again.');
+  assert.equal(si('failed', { message: 'access_denied' }), 'access_denied');
+  assert.equal(check(rh, { signIn: { status: 'ready', connector: 'live:other' } }), '');
+});
+
+test('reopen drafts setPolicy restore', () => {
+  const seed = { venue: 'ex', name: 'Stand-in Exchange' };
+  assert.equal(titleOf('reopen', seed), 'Reopen Stand-in Exchange to agents');
+  assert.equal(goWord('reopen', seed), 'Sign and reopen');
+  assert.deepEqual(fieldsOf('reopen', seed), []);
+  assert.deepEqual(draftOf('reopen', [], seed, NOW), { type: 'setPolicy', change: 'restore', value: 'ex' });
+  assert.equal(draftOf('reopen', [], {}, NOW), 'No venue to reopen');
 });
 
 test('revoke: approveAgent with the zero address and the key\'s name, until 0', () => {

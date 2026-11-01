@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { createStore } from '../../client/js/store.js';
 import { reducers } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
-import { startAccount, ACCOUNT_POLL_MS, ACCOUNT_POLL_STREAM_MS } from '../../client/js/host/account.js';
+import { startAccount, ACCOUNT_POLL_MS, ACCOUNT_POLL_STREAM_MS, SIGNIN_POLL_MS, SIGNIN_WITHIN_MS } from '../../client/js/host/account.js';
 import { renderAccountScreen } from '../../client/js/render/account.js';
 
 const tick = () => new Promise(r => setTimeout(r, 0));
@@ -28,7 +28,7 @@ const leadOf = html => html.match(/<div class="label">([^<]*)<\/div><div class="
 // the host over a recording getJson — `json` answers a path by its exact text, else by the path without its fresh=1, else by
 // the path without its query: a body, an Error it rejects with, or a function of the path returning a promise — and recorded
 // timers ({ fn, ms, handle }, kept until run or cancelled); streamOpen answers r.streamIsOpen
-function rig({ json = {}, onPage, post } = {}) {
+function rig({ json = {}, onPage, post, openTab } = {}) {
   const store = createStore({ initial: emptyState(), reducers });
   const reads = [];
   const getJson = path => {
@@ -43,6 +43,8 @@ function rig({ json = {}, onPage, post } = {}) {
   let t = 100;
   const r = {
     store, reads, cancelled: [], streamIsOpen: false,
+    // the rig's clock moved on by `ms`
+    clock: ms => { t += ms; },
     a: () => store.get().account,
     pending: () => [...timers.values()],
     run(timer) {
@@ -58,6 +60,7 @@ function rig({ json = {}, onPage, post } = {}) {
     streamOpen: () => r.streamIsOpen,
     ...(onPage ? { onPage } : {}),
     ...(post ? { post } : {}),
+    ...(openTab ? { openTab } : {}),
   });
   return r;
 }
@@ -827,4 +830,121 @@ test('a fresh page forgets every Receive address read; a plain one keeps them', 
   assert.equal(r.a().receive['okx|USDT|Base'].status, 'ready', 'the poll keeps it');
   await r.account.load({ fresh: true });
   assert.deepEqual(r.a().receive, {}, 'after a move, a stream event or Refresh: forgotten');
+});
+
+// ── Venues: Close to agents and a venue's sign-in (plan 4b Task 4) ──
+
+test('revoke posts once per venue while in the air and reads the page fresh', async () => {
+  const posts = [];
+  const release = {};
+  const post = (path, body) => { posts.push([path, body]); return new Promise(res => { release[body.account] = res; }); };
+  const r = rig({ json: { '/data/account': noPaper() }, post });
+  await r.account.load();
+  r.reads.length = 0;
+  const one = r.account.revoke('ex');
+  assert.equal(r.account.revoke('ex'), one, 'a second press on the same venue joins the first');
+  const other = r.account.revoke('broker');
+  assert.notEqual(other, one, 'another venue goes on its own');
+  assert.deepEqual([r.a().closing.ex.status, r.a().closing.broker.status], ['asking', 'asking']);
+  await tick();
+  assert.deepEqual(posts, [['/data/account/revoke', { account: 'ex' }], ['/data/account/revoke', { account: 'broker' }]], 'one POST a venue, never signed');
+  release.ex({ status: 200, body: { ok: true } });
+  await one;
+  await settle();
+  assert.deepEqual(r.a().closing.ex, { status: 'said', said: 'Stand-in Exchange is closed to agents: they keep reading it, and place or move nothing there. Reopening it is signed.', message: null });
+  assert.deepEqual(r.reads, ['/data/account?fresh=1'], "the page read past the face's cache");
+  // the Account's refusal in its words
+  release.broker({ status: 404, body: { ok: false, refusal: { code: 'E_ACCOUNT_UNKNOWN_VENUE', message: 'no account "broker" here' } } });
+  await other;
+  assert.deepEqual(r.a().closing.broker, { status: 'refused', said: null, message: 'no account "broker" here' });
+  // settled: the next press posts again
+  const again = r.account.revoke('ex');
+  await tick();
+  assert.equal(posts.length, 3);
+  release.ex({ status: 200, body: { ok: true } });
+  await again;
+  assert.equal(await r.account.revoke(''), undefined, 'no venue: nothing posted');
+  assert.equal(posts.length, 3);
+});
+
+const RH = { connector: 'live:robinhood', kind: 'robinhood', label: "Robinhood · investing accounts, through Robinhood's own sign-in", needs: 'sign-in' };
+// a tab as the window opens it: its opener, where it was sent, whether it was closed
+const fakeTab = () => ({ opener: {}, location: { href: 'about:blank' }, closed: false, close() { this.closed = true; } });
+
+test('signIn starts, sends the tab to the venue, polls the status and stops when the sheet closes', async () => {
+  const opened = [];
+  const tab = fakeTab();
+  const openTab = (url, target) => { opened.push([url, target]); return tab; };
+  const posts = [];
+  const post = async (path, body) => { posts.push([path, body]); return { status: 200, body: { ok: true, url: 'https://robinhood.example/oauth?state=st-9', state: 'st-9' } }; };
+  const statuses = [{ ok: true, status: 'pending' }, { ok: true, status: 'ready', stale: true }, { ok: true, status: 'unknown' }, { ok: true, status: 'pending' }];
+  const r = rig({ json: { '/data/account/signin/status': () => Promise.resolve(statuses.shift()) }, post, openTab });
+  let open = true;
+  const ready = [];
+  const going = r.account.signIn(RH, { alive: () => open, onReady: s => ready.push(s) });
+  assert.deepEqual(opened, [['about:blank', '_blank']], 'the tab opened at once, inside the press');
+  assert.equal(tab.opener, null, 'its opener cleared');
+  assert.equal(r.a().signIn.status, 'starting');
+  await going;
+  assert.deepEqual(posts, [['/data/account/signin/start', { connector: 'robinhood' }]]);
+  assert.equal(tab.location.href, 'https://robinhood.example/oauth?state=st-9', "sent to the venue's page");
+  assert.deepEqual([r.a().signIn.status, r.a().signIn.tab, r.a().signIn.state], ['waiting', true, 'st-9']);
+  assert.deepEqual(r.reads, ['/data/account/signin/status?state=st-9']);
+  // every 1.5 s; a ready the face re-served as stale, or an unknown, is not the final status
+  for (let i = 0; i < 2; i++) {
+    const [t] = r.pending();
+    assert.equal(t.ms, SIGNIN_POLL_MS);
+    r.run(t);
+    await settle();
+  }
+  assert.equal(r.a().signIn.status, 'waiting', 'a stale ready is unknown: still waiting');
+  assert.deepEqual(ready, []);
+  assert.equal(r.reads.length, 3);
+  // the sheet closed: the next beat reads nothing and schedules nothing
+  open = false;
+  r.run(r.pending()[0]);
+  await settle();
+  assert.equal(r.reads.length, 3, 'nothing read once the sheet is gone');
+  assert.deepEqual(r.pending(), []);
+
+  // started again: a ready lands its state, and the poll ends
+  const answers = [{ ok: true, status: 'ready' }];
+  const r2 = rig({ json: { '/data/account/signin/status': () => Promise.resolve(answers.shift()) }, post, openTab: () => fakeTab() });
+  const got = [];
+  await r2.account.signIn(RH, { onReady: s => got.push(s) });
+  assert.deepEqual(got, ['st-9']);
+  assert.equal(r2.a().signIn.status, 'ready');
+  assert.deepEqual(r2.pending(), [], 'ready: no more asking');
+
+  // no tab (a blocker): the address kept for the link; a failed status says the Account's words
+  const r3 = rig({ json: { '/data/account/signin/status': { ok: true, status: 'failed', error: 'access_denied' } }, post, openTab: () => null });
+  await r3.account.signIn(RH);
+  assert.equal(r3.a().signIn.tab, false);
+  assert.equal(r3.a().signIn.url, 'https://robinhood.example/oauth?state=st-9');
+  assert.deepEqual([r3.a().signIn.status, r3.a().signIn.message], ['failed', 'access_denied']);
+  // a start the Account refuses closes the tab and says its words
+  const t4 = fakeTab();
+  const r4 = rig({ post: async () => ({ status: 400, body: { ok: false, error: 'there is no sign-in for "robinhood"' } }), openTab: () => t4 });
+  await r4.account.signIn(RH);
+  assert.equal(t4.closed, true);
+  assert.deepEqual([r4.a().signIn.status, r4.a().signIn.message], ['failed', 'there is no sign-in for "robinhood"']);
+  assert.deepEqual(r4.reads, []);
+});
+
+test('the sign-in runs out after 15 minutes', async () => {
+  const post = async () => ({ status: 200, body: { ok: true, url: 'https://robinhood.example/oauth', state: 'st-1' } });
+  const r = rig({ json: { '/data/account/signin/status': { ok: true, status: 'pending' } }, post, openTab: () => fakeTab() });
+  // the rig's clock moves one millisecond a call: a beat that jumps it past the window
+  await r.account.signIn(RH);
+  assert.equal(SIGNIN_WITHIN_MS, 15 * 60_000);
+  let beats = 0;
+  while (r.pending().length && beats < 5) {
+    if (beats === 2) r.clock(SIGNIN_WITHIN_MS);
+    r.run(r.pending()[0]);
+    await settle();
+    beats += 1;
+  }
+  assert.equal(r.a().signIn.status, 'expired');
+  assert.deepEqual(r.pending(), [], 'run out: no more asking');
+  assert.equal(beats, 3, 'it ran out on the beat after the window passed');
 });

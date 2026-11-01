@@ -85,6 +85,20 @@ export const reducers = {
   earnLoaded: (s, { data, at }) => read(s, 'earn', { status: 'ready', data, at, message: null }),
   earnFailed: (s, { at, message = null }) => read(s, 'earn', { status: 'error', at, message }),
   earnSaid: (s, said) => read(s, 'earn', { said: typeof said === 'string' && said ? said : null }),
+  // the connect sheet's browser wallet and a venue's sign-in (plan 4b Task 4): each a patch over what it was; both forgotten when a
+  // connect sheet opens
+  connectWallet: (s, patch) => (patch && typeof patch === 'object' ? acc(s, { connectWallet: { ...s.account.connectWallet, ...patch } }) : s),
+  signIn: (s, patch) => (patch && typeof patch === 'object' ? acc(s, { signIn: { ...s.account.signIn, ...patch } }) : s),
+  connectReset: s => acc(s, {
+    connectWallet: { status: 'idle', wallets: [], wallet: '', address: '', message: null },
+    signIn: { status: 'idle', connector: '', url: '', tab: false, state: '', message: null },
+  }),
+  // Close to agents (host/account.js revoke): a venue's press in the air, then the face's words or the Account's refusal
+  closing: (s, { venue, status, said = null, message = null } = {}) => (typeof venue === 'string' && venue !== ''
+    ? acc(s, { closing: { ...s.account.closing, [venue]: { status, said: typeof said === 'string' ? said : null, message: typeof message === 'string' ? message : null } } }) : s),
+  // a venue reopened to agents (signed): what an earlier Close to agents said of it is no longer the news
+  closingClear: (s, venue) => (typeof venue === 'string' && Object.hasOwn(s.account.closing ?? {}, venue)
+    ? acc(s, { closing: Object.fromEntries(Object.entries(s.account.closing).filter(([k]) => k !== venue)) }) : s),
   // Sell many (host/sell-many.js, plan 4b Task 3): the drawer's whole state as the engine sets it, null when closed
   sellManySet: (s, next) => ({ ...s, sellMany: next !== null && typeof next === 'object' ? next : null }),
   // the curve's range; one the Account does not draw leaves the slice as it is

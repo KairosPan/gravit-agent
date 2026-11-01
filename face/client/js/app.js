@@ -33,7 +33,7 @@ import { wantedViews, ensureViews, minuteAt, applyCursor, cursorFor, reapplyCurs
 import { stockDrawerHtml, askText } from './render/lunhui/stock.js';
 import { loadMemberTrace } from './wire/member-traces.js';
 import { isHostPreset } from './wire/speaker.js';
-import { statementLinesOf, statementCsvOf, connectOptionsOf, asksOf, pageOk, writesOn } from './host/account-view.js';
+import { statementLinesOf, statementCsvOf, connectOptionsOf, asksOf, pageOk, writesOn, venuesOf } from './host/account-view.js';
 import { rulesOf } from './host/rules-view.js';
 import { isAccountKey, handWordsOf, watchedOf } from './host/market-view.js';
 import { isCnKey } from './wire/china.js';
@@ -41,13 +41,13 @@ import { startOwner, postVia } from './host/owner.js';
 import { startSheet, PREPARE_QUIET_MS } from './host/sheet.js';
 import { moveSeedOf, earnSeedOf, earnSaidOf } from './host/sheet-money.js';
 import { startSellMany } from './host/sell-many.js';
-import { limitSeedOf, grantOf, keyfileAskOf, reachAskOf, letDeviceSeedOf, paperSeedOf } from './host/sheet-view.js';
+import { limitSeedOf, grantOf, keyfileAskOf, reachAskOf, letDeviceSeedOf, paperSeedOf, connectOptionOf, isWalletOption } from './host/sheet-view.js';
 import { startTrade } from './host/trade.js';
 import { tradeableOf } from './host/trade-view.js';
 import { indexedDbKeys, memoryKeys, signedOutFlag } from './wire/key-store.js';
 import { firstOpen } from './host/sessions.js';
 import { createAccountStream } from './wire/account-stream.js';
-import { discoverWallets } from './wire/wallet.js';
+import { discoverWallets, proveWallet } from './wire/wallet.js';
 import { startWalletSend } from './host/wallet-send.js';
 
 export const PREFS_KEY = 'gravit-ui.prefs';
@@ -240,7 +240,11 @@ export function boot(win, host = {}) {
   });
   // the Account's page: read at boot, on entering Account, on Refresh, right after a receipt and on the stream's events; every
   // 20 s while Account is on screen in a visible tab, 80 s while the stream is open; Guard posted through the owner door
-  const account = startAccount({ store, getJson, post: ownerPost, now, schedule, cancelTimer, streamOpen: () => stream.status() === 'open', onPage: body => { void owner.standing(body); } });
+  // a venue's sign-in opens its tab through the window, inside the operator's press (host/account.js signIn)
+  const account = startAccount({
+    store, getJson, post: ownerPost, now, schedule, cancelTimer, streamOpen: () => stream.status() === 'open', onPage: body => { void owner.standing(body); },
+    openTab: (url, target) => (typeof win.open === 'function' ? win.open(url, target) : null),
+  });
   void account.load();
   // the Account seat's standing (spec 2026-10-20 §6.3): read on entering Venues or Agents, on Refresh, right after a seat receipt
   // and on a card's event
@@ -265,6 +269,8 @@ export function boot(win, host = {}) {
     if (kind === 'earn') { store.dispatch('earnSaid', earnSaidOf(body)); void account.loadEarn({ fresh: true }); }
     // a signed Beast: the Rules tab's last Guard line goes with the mode it spoke of
     if (kind === 'beast') store.dispatch('guardClear');
+    // a venue reopened to agents: its Close to agents line goes with the state it spoke of
+    if (kind === 'reopen') { const v = store.get().sheet?.seed?.venue; if (typeof v === 'string') store.dispatch('closingClear', v); }
     const s = store.get().sheet;
     if (kind !== 'order' && s?.kind === kind && s.status === 'done') sheet.close();
   }
@@ -289,7 +295,48 @@ export function boot(win, host = {}) {
   // the operator's own browser wallet (wire/wallet.js): the wallets this browser announces, asked when one has to send; what
   // the Account built for it sent once and reported once (host/wallet-send.js) — the face holds no key, the wallet signs; its
   // last words said on Trade, and the Account read again past the cache
-  const walletSend = startWalletSend({ store, post: ownerPost, getJson, getWallets: host.getWallets ?? (() => discoverWallets(win)), schedule });
+  const getWallets = host.getWallets ?? (() => discoverWallets(win));
+  const walletSend = startWalletSend({ store, post: ownerPost, getJson, getWallets, schedule });
+  // the connect sheet's browser wallets (plan 4b Task 4): found once per connect sheet when its wallet kind is picked, kept here
+  // with their providers (never in the store); a tile's press has the wallet sign the Account's sentence for its address, which
+  // fills the address — and the name, when none is typed — or says the wallet's or the Account's refusal
+  let connectWallets = [];
+  let walletsFor = null;   // the connect sheet's seed they were found for
+  const sameConnect = seed => { const t = store.get().sheet; return t?.kind === 'connect' && t.seed === seed; };
+  async function findConnectWallets() {
+    const s = store.get().sheet;
+    if (s?.kind !== 'connect' || !isWalletOption(connectOptionOf(s)) || walletsFor === s.seed) return;
+    const seed = s.seed;
+    walletsFor = seed;
+    connectWallets = [];
+    store.dispatch('connectWallet', { status: 'finding', wallets: [] });
+    let found = [];
+    try { found = await getWallets(); } catch { found = []; }
+    if (!sameConnect(seed)) return;
+    connectWallets = (Array.isArray(found) ? found : []).filter(w => w && typeof w.id === 'string' && w.provider);
+    store.dispatch('connectWallet', connectWallets.length
+      ? { status: 'found', wallets: connectWallets.map(w => ({ id: w.id, name: typeof w.name === 'string' && w.name ? w.name : 'Browser wallet' })) }
+      : { status: 'none', wallets: [] });
+  }
+  async function proveConnectWallet(id) {
+    const s = store.get().sheet;
+    const w = connectWallets.find(x => x.id === id);
+    if (s?.kind !== 'connect' || !w || store.get().account.connectWallet.status === 'asking') return;
+    const seed = s.seed;
+    const name = typeof w.name === 'string' && w.name ? w.name : 'Browser wallet';
+    store.dispatch('connectWallet', { status: 'asking', wallet: name, address: '', message: null });
+    try {
+      const proven = await proveWallet({ ...w, name }, ownerPost);
+      if (!sameConnect(seed)) return;
+      sheet.change('ref', proven.address);
+      const label = (store.get().sheet.fields ?? []).find(f => f?.name === 'label');
+      if (label && (typeof label.value !== 'string' || !label.value.trim())) sheet.change('label', name);
+      store.dispatch('connectWallet', { status: 'proven', address: proven.address });
+    } catch (err) {
+      if (!sameConnect(seed)) return;
+      store.dispatch('connectWallet', { status: 'refused', message: String(err?.message || err || 'the wallet refused').slice(0, 200) });
+    }
+  }
   function sendFromWallet(flight) {
     void Promise.resolve(flight).then(r => {
       if (!r) return;
@@ -301,7 +348,7 @@ export function boot(win, host = {}) {
   // a bridge's preparation, once it is the one the sheet shows, has its routes read beside it (the Account page's money.js show)
   const sheet = startSheet({
     store, owner, schedule, cancelTimer, now, afterAction,
-    onChange: kind => { if (kind === 'connect') checkConnectSoon(); },
+    onChange: (kind, name) => { if (kind === 'connect') { checkConnectSoon(); if (name === 'connector') void findConnectWallets(); } },
     onPrepared: (kind, prepared, draft) => { if (kind === 'move' && prepared?.action?.kind === 'bridge') void account.bridgeRoutes(draft); },
   });
   // Sell many (plan 4b Task 3): up to ten holdings at market, each prepared and signed in turn over the owner device; a DEX
@@ -713,6 +760,8 @@ export function boot(win, host = {}) {
       case 'declineAsk': void sheet.open('declineAsk', { ask: d.ask ?? '' }); break;
       case 'topUp': case 'resetPaper': void sheet.open(d.kind, { venue: d.venue ?? '', name: d.name ?? '' }); break;
       case 'connect': case 'paper': void openOnRead(d.kind); break;
+      // a venue closed to agents opened again (plan 4b Task 4): signed
+      case 'reopen': void sheet.open('reopen', { venue: d.venue ?? '', name: d.name ?? '' }); break;
       // the Market half's (plan 4a Task 3): the seed as the key drew it, its figures the strings drawn, the market's kind its
       // data-market-kind
       case 'close': void sheet.open('close', { venue: d.venue ?? '', symbol: d.symbol ?? '', name: d.name ?? '', side: d.side ?? '', qty: d.qty ?? '', kind: d.marketKind ?? '' }); break;
@@ -765,8 +814,11 @@ export function boot(win, host = {}) {
     const page = store.get().account.data;
     if (kind === 'paper') { void sheet.open('paper', paperSeedOf(page, slice().data)); return; }
     connectAsked = { keyfile: null, reach: null };
-    void sheet.open('connect', { options: connectOptionsOf(page, slice().data) });
+    store.dispatch('connectReset');
+    // the page's venue ids beside the options: a second address of a kind already on the page is numbered by its address
+    void sheet.open('connect', { options: connectOptionsOf(page, slice().data), venues: venuesOf(page).map(v => ({ id: v.id })) });
     checkConnect();
+    void findConnectWallets();
   }
 
   async function sendNow() {
@@ -952,6 +1004,21 @@ export function boot(win, host = {}) {
     sellManyClose: () => sellMany.close(),
     // the Rules tab's Guard: one unsigned click, on any page that reads the Account (one in the air at a time)
     setGuard: () => { if (pageOk(store.get().account.data)) void account.guard(); },
+    // a venue's Close to agents: one unsigned click, on any page that reads the Account (one in the air per venue)
+    closeToAgents: el => { if (pageOk(store.get().account.data) && el.dataset.venue) void account.revoke(el.dataset.venue); },
+    // the connect sheet's wallet tile and a venue's Sign in at …: each inside the operator's press (the wallet's prompt, the tab)
+    connectWallet: el => { if (signs()) void proveConnectWallet(el.dataset.wallet); },
+    connectSignIn: () => {
+      if (!signs()) return;
+      const s = store.get().sheet;
+      const option = connectOptionOf(s);
+      if (option?.needs !== 'sign-in') return;
+      const seed = s.seed;
+      void account.signIn(option, {
+        alive: () => sameConnect(seed) && connectOptionOf(store.get().sheet)?.connector === option.connector,
+        onReady: state => sheet.change('credentialRef', state),
+      });
+    },
     askRevoke: el => { if (signs()) store.dispatch('askConfirm', { action: 'revoke', name: el.dataset.name ?? '', address: el.dataset.address ?? '' }); },
     askDisconnect: el => { if (signs()) store.dispatch('askConfirm', { action: 'disconnect', venue: el.dataset.venue ?? '', name: el.dataset.name ?? '' }); },
     grant: el => {

@@ -7,7 +7,7 @@ import { esc, attrs, cls } from '../html.js';
 import { fmtDate } from '../time.js';
 import { pageOk } from '../host/account-view.js';
 import { standingWords, devicesOf, whatYouSignLines, goodForWords } from '../host/owner-view.js';
-import { titleOf, goWord, connectCheckOf } from '../host/sheet-view.js';
+import { titleOf, goWord, connectCheckOf, connectOptionOf, isWalletOption, whoOf } from '../host/sheet-view.js';
 import { askedOf } from '../host/sheet.js';
 import { moveHintsOf, moveSaysOf, routesWordsOf, earnHintsOf, earnSaysOf } from '../host/sheet-money.js';
 import { seg } from './controls.js';
@@ -66,6 +66,9 @@ function field(f) {
       const boxes = options.map(o => `<label class="sheet-check"><input${attrs({ type: 'checkbox', name: f.name, value: o.value, checked: ticked.has(o.value), 'data-action': 'sheetField' })}>${esc(o.label)}</label>`).join('');
       return `<div${attrs({ class: 'field', role: 'group', 'aria-label': f.label })}><span class="field-label">${label}</span>${boxes}</div>`;
     }
+    // a value the sheet holds for the draft, never typed (a sign-in's state): nothing drawn
+    case 'hidden':
+      return '';
     case 'check':
       return `<label class="sheet-check"><input${attrs({ type: 'checkbox', name: f.name, value: 'true', checked: f.value === true || f.value === 'true', 'data-action': 'sheetField' })}>${label}</label>`;
     case 'select': {
@@ -96,6 +99,28 @@ function quoteBox(s) {
   return inner ? `<div class="sheet-quote">${inner}</div>` : '';
 }
 
+// the connect sheet's own keys (plan 4b Task 4): above the address, a tile per browser wallet this page found for the wallet
+// kind — its signature fills the address — and, for a venue's sign-in, the key that starts it, or the venue's page as a link
+// when no tab opened for it
+function connectKeys(s, account) {
+  const option = connectOptionOf(s);
+  if (!option) return { above: '', below: '' };
+  if (isWalletOption(option)) {
+    const w = account?.connectWallet;
+    const wallets = Array.isArray(w?.wallets) ? w.wallets : [];
+    const asking = w?.status === 'asking';
+    const tiles = wallets.map(x => `<button${attrs({ type: 'button', class: 'btn-sm', 'data-action': 'connectWallet', 'data-wallet': x.id, disabled: asking })}>${esc(`Use ${x.name}`)}</button>`).join('');
+    return { above: tiles ? `<div class="btn-row">${tiles}</div>` : '', below: '' };
+  }
+  if (option.needs !== 'sign-in') return { above: '', below: '' };
+  const who = whoOf(option);
+  const si = account?.signIn;
+  const mine = si?.connector === option.connector;
+  const link = mine && si.status === 'waiting' && si.tab === false && si.url
+    ? `<p class="sheet-hint"><a${attrs({ href: si.url, target: '_blank', rel: 'noopener noreferrer' })}>${esc(`Open ${who}'s sign-in page`)}</a>, then come back.</p>` : '';
+  return { above: '', below: `<div class="btn-row">${key('connectSignIn', `Sign in at ${who}`, { disabled: mine && si.status === 'starting' })}</div>${link}` };
+}
+
 /** The open sheet as a drawer: its title, its fields (a connect sheet's check under them), the quote box, the signature's minutes, What you sign (dimmed while the form
  *  is not the draft the shown preparation was asked for), what the Account said, Cancel and the go key — on only while the sheet
  *  is ready and the form's draft is the one asked for. No sheet open: nothing. */
@@ -103,7 +128,12 @@ export function renderSheet(state, now) {
   const s = state.sheet;
   if (!s) return '';
   const title = titleOf(s.kind, s.seed, s.fields);
-  const fields = (Array.isArray(s.fields) ? s.fields : []).filter(f => f && typeof f.name === 'string').map(field).join('');
+  const all = (Array.isArray(s.fields) ? s.fields : []).filter(f => f && typeof f.name === 'string');
+  const extra = s.kind === 'connect' ? connectKeys(s, state.account) : { above: '', below: '' };
+  // a connect sheet's wallet tiles sit between what to connect and the address they fill
+  const fields = s.kind === 'connect'
+    ? `${all.filter(f => f.name === 'connector').map(field).join('')}${extra.above}${all.filter(f => f.name !== 'connector').map(field).join('')}${extra.below}`
+    : all.map(field).join('');
   const current = s.asked !== null && askedOf(s) === s.asked;
   const live = s.status === 'ready' && current;
   const left = s.deadline !== null && (s.status === 'ready' || s.status === 'signing') ? goodForWords(s.deadline - now) : '';
@@ -112,9 +142,9 @@ export function renderSheet(state, now) {
     ? `<details${attrs({ class: cls('acct-shown', s.status === 'ready' && !current && 'stale') })}><summary>What you sign</summary>${lines.map(l => `<div class="dsec-line">${esc(l)}</div>`).join('')}</details>`
     : '';
   const said = s.status === 'done' && s.said ? note(s.said) : '';
-  // a connect sheet's check, under its fields: the key file found or missing, the venue's reach, the Account page for what
-  // connects there — the Account's words, a key file by its path, never what it holds
-  const checked = s.kind === 'connect' ? connectCheckOf(s, state.account?.keyfile, state.account?.reach) : '';
+  // a connect sheet's check, under its fields: the key file found or missing, the venue's reach, a browser wallet's or a
+  // sign-in's words, a command line's example — the Account's words, a key file by its path, never what it holds
+  const checked = s.kind === 'connect' ? connectCheckOf(s, state.account?.keyfile, state.account?.reach, { wallet: state.account?.connectWallet, signIn: state.account?.signIn }) : '';
   const check = checked ? `<p class="sheet-hint">${esc(checked)}</p>` : '';
   // a move's lines under its fields (the cap on each move, where it would go that is not served here), and a bridge's routes
   // under the quote, beside the preparation they were read for (plan 4b Task 2)

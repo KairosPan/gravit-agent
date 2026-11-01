@@ -228,6 +228,15 @@ test('statementLinesOf and statementCsvOf: newest first; the CSV header and a qu
   }
 });
 
+test('venuesOf marks a venue in dial.revoked', () => {
+  const page = fx('account');
+  assert.ok(venuesOf(page).every(v => v.closedToAgents === false), 'none closed on the stand-in');
+  const closed = venuesOf({ ...page, dial: { ...page.dial, revoked: ['ex', 7, 'gone'] } });
+  assert.deepEqual(closed.filter(v => v.closedToAgents).map(v => v.id), ['ex'], 'only a venue on the page, by its id');
+  assert.ok(venuesOf({ ...page, dial: undefined }).every(v => v.closedToAgents === false), 'no dial: none closed');
+  assert.ok(venuesOf({ ...page, dial: { revoked: 'ex' } }).every(v => v.closedToAgents === false), 'a list only');
+});
+
 test('venuesOf: health from lastOkAt/lastFailAt; does words; the paper flag; details without a key value', () => {
   const page = fx('account');
   const venues = venuesOf(page);
@@ -236,7 +245,7 @@ test('venuesOf: health from lastOkAt/lastFailAt; does words; the paper flag; det
     ['agent-claude-code', 'not-read', false], ['wallet', 'not-read', false], ['predict', 'not-read', false],
   ]);
   const { details, ...ex } = venues[1];
-  assert.deepEqual(ex, { id: 'ex', name: 'Stand-in Exchange', connector: 'live:standin-exchange', usd: 21638.93, frontLine: 'Exchange', health: 'answers', healthWords: 'Answers', since: null, does: ['Trades', 'Moves money', 'Earns'], what: 'spot and perpetuals', paper: false, asOf: '2026-10-22T07:35:46.781Z', stale: false, tradeCan: { amend: true, leverage: true, close: false } });
+  assert.deepEqual(ex, { id: 'ex', name: 'Stand-in Exchange', connector: 'live:standin-exchange', usd: 21638.93, frontLine: 'Exchange', health: 'answers', healthWords: 'Answers', since: null, does: ['Trades', 'Moves money', 'Earns'], what: 'spot and perpetuals', paper: false, asOf: '2026-10-22T07:35:46.781Z', closedToAgents: false, stale: false, tradeCan: { amend: true, leverage: true, close: false } });
   assert.equal(details.holdings.length, 7);
   assert.deepEqual(details.holdings[0], { asset: 'BTC', amount: 0.12, usd: 7497.6 });
   assert.deepEqual({ ...details, holdings: [] }, { holdings: [], noTradeBecause: '', restricted: '', notServed: '', closeOnly: '', watchOnly: 'Live · read-only', keyFile: '' });
@@ -416,7 +425,7 @@ const withNotServed = () => {
   return { ...body, venues: body.venues.map(v => (v.connector === 'live:kalshi' ? { ...v, verdict: 'not-served', said: KALSHI_SAID } : v)) };
 };
 
-test("connectOptionsOf: connectLive's options joined with the venues' verdicts; sign-in, address and cli options are elsewhere", () => {
+test('connectOptionsOf keeps every kind and carries no elsewhere', () => {
   const page = fx('account');
   const options = connectOptionsOf(page, withNotServed());
   assert.deepEqual(options.map(o => o.connector), page.connectLive.options.map(o => o.connector), "every option, in the Account's order");
@@ -424,12 +433,13 @@ test("connectOptionsOf: connectLive's options joined with the venues' verdicts; 
   assert.deepEqual(by('live:alpaca-paper'), {
     connector: 'live:alpaca-paper', label: 'Alpaca · paper trading on its paper account, API key (no real money)', needs: 'key-file',
     example: '{"keyId": "…", "secret": "…"} (the keys of your Alpaca PAPER account: in the dashboard switch to Paper, then Generate New Keys)',
-    defaultRef: 'credentials/<venue>/api-key.json', venues: [], kind: 'alpaca-paper', verdict: 'connectable', said: '', group: 'Brokers', elsewhere: false,
+    defaultRef: 'credentials/<venue>/api-key.json', venues: [], kind: 'alpaca-paper', verdict: 'connectable', said: '', group: 'Brokers',
   });
   // a not-served venue carries the venue's own words
-  assert.deepEqual([by('live:kalshi').verdict, by('live:kalshi').said, by('live:kalshi').elsewhere], ['not-served', KALSHI_SAID, false]);
-  // connected on the Account page, not here: a sign-in, an address, a command line
-  assert.deepEqual(options.filter(o => o.elsewhere).map(o => [o.connector, o.needs]),
+  assert.deepEqual([by('live:kalshi').verdict, by('live:kalshi').said], ['not-served', KALSHI_SAID]);
+  // every kind connects here, by what it needs: a sign-in, a command line, an address among the key files
+  assert.ok(options.every(o => !Object.hasOwn(o, 'elsewhere')));
+  assert.deepEqual(options.filter(o => o.needs !== 'key-file' && o.needs !== 'none').map(o => [o.connector, o.needs]),
     [['live:robinhood', 'sign-in'], ['live:metamask', 'cli'], ['live:wallet', 'address'], ['live:hyperliquid', 'address']]);
   // an option the venues list does not name keeps no verdict: the bare exchange (the list names each live:exchange:<id>)
   assert.deepEqual([by('live:exchange').verdict, by('live:exchange').said, by('live:exchange').group, by('live:exchange').venues], [null, '', '', ['binance', 'okx', 'bybit', 'kraken']]);
@@ -438,14 +448,14 @@ test("connectOptionsOf: connectLive's options joined with the venues' verdicts; 
     const bare = connectOptionsOf(page, venues);
     assert.equal(bare.length, options.length);
     assert.ok(bare.every(o => o.verdict === null && o.said === ''));
-    assert.equal(bare.find(o => o.connector === 'live:robinhood').elsewhere, true, 'elsewhere is the option\'s own need');
+    assert.equal(bare.find(o => o.connector === 'live:robinhood').needs, 'sign-in', "the option's own need");
   }
   // a page that is not one: nothing to connect
   assert.deepEqual(connectOptionsOf({ ok: true }, withNotServed()), []);
-  // the connect sheet takes them as its seed: the paper account is its own sheet; an elsewhere option never drafts
+  // the connect sheet takes them as its seed: the paper account is its own sheet; a sign-in drafts once signed in
   const fields = fieldsOf('connect', { options });
   assert.ok(!fields[0].options.some(o => o.value === 'live:paper'));
-  assert.equal(draftOf('connect', { connector: 'live:robinhood', venue: 'rh', label: 'Robinhood' }, { options }, 0), 'Connect on the Account page');
+  assert.equal(draftOf('connect', { connector: 'live:robinhood', venue: 'rh', label: 'Robinhood' }, { options }, 0), 'Sign in at Robinhood first');
   assert.deepEqual(draftOf('connect', { connector: 'live:alpaca-paper', venue: 'alpaca', label: 'Alpaca paper' }, { options }, 0),
     { type: 'connectVenue', venue: 'alpaca', connector: 'live:alpaca-paper', label: 'Alpaca paper', credentialRef: 'credentials/alpaca/api-key.json' });
 });
@@ -484,10 +494,10 @@ test("the connect sheet's check: what to ask, and the words from the key file's 
   assert.equal(keyfileAskOf(blank), null);
   assert.equal(reachAskOf(blank), null);
   assert.equal(connectCheckOf(blank, none, none), '');
-  // elsewhere: the Account page, whatever was read
+  // a sign-in reads no key file; its line is its sign-in's, and the venue's reach
   const rh = sheet({ connector: 'live:robinhood', venue: 'rh' });
   assert.equal(keyfileAskOf(rh), null, 'a sign-in reads no key file');
-  assert.equal(connectCheckOf(rh, read(fx('keyfile'), null), none), 'Connect on the Account page');
+  assert.equal(connectCheckOf(rh, read(fx('keyfile'), null), none), 'Robinhood did not answer', "the venue's own words, never a key file's");
 
   // a key-file option: the key file asked by its kind, venue and typed path; the reach by its connector
   const ap = sheet({ connector: 'live:alpaca-paper', venue: 'alpaca-paper' });

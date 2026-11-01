@@ -25,7 +25,7 @@ const str = v => (typeof v === 'string' ? v : '');
  *  `amend` and `leverage` are the Market half's: everything about them is host/sheet-market.js's. `beast`, `cap`, `session` and
  *  `leverageCap` are the Rules tab's: host/sheet-rules.js's. `move` and `earn` are the Money tab's: host/sheet-money.js's (plan 4b Tasks 2-3). */
 export const SHEET_KINDS = ['letIn', 'limit', 'endLimit', 'revoke', 'connect', 'paper', 'topUp', 'resetPaper', 'disconnect',
-  'approveCard', 'declineAsk', 'letDevice', 'signOut', 'order', ...MARKET_KINDS, ...RULES_KINDS, ...MONEY_KINDS];
+  'approveCard', 'declineAsk', 'letDevice', 'signOut', 'order', 'reopen', ...MARKET_KINDS, ...RULES_KINDS, ...MONEY_KINDS];
 const isMarket = kind => MARKET_KINDS.includes(kind);
 const isRules = kind => RULES_KINDS.includes(kind);
 const isMoney = kind => MONEY_KINDS.includes(kind);
@@ -34,6 +34,7 @@ const GO = new Map([
   ['letIn', 'Let it in'], ['limit', 'Give the limit'], ['endLimit', 'End the limit'], ['revoke', 'Revoke'], ['connect', 'Connect'],
   ['paper', 'Open the account'], ['topUp', 'Top up'], ['resetPaper', 'Start over'], ['disconnect', 'Disconnect'], ['approveCard', 'Approve'],
   ['declineAsk', 'Decline'], ['letDevice', 'Let it sign'], ['signOut', 'Sign out'], ['order', 'Sign and place'],
+  ['reopen', 'Sign and reopen'],
 ]);
 
 /** The sheet's go key: a card's is `Reject` when the seed's decision is to reject; an earn's by the side its fields picked. */
@@ -67,6 +68,7 @@ export function titleOf(kind, seed, fields) {
     case 'letDevice': return str(s.kid) ? `Let ${s.kid} sign` : 'Let a browser sign';
     case 'signOut': return 'Sign this page out';
     case 'order': return 'Place an order';
+    case 'reopen': return `Reopen ${place || 'the venue'} to agents`;
     default: return '';
   }
 }
@@ -158,9 +160,22 @@ export function fieldsOf(kind, seed) {
     case 'connect': {
       const options = connectOptions(s);
       const picked = options.find(o => o.connector === s.connector);
+      const pick = { name: 'connector', label: 'What to connect', type: 'select', options: options.map(o => ({ value: o.connector, label: str(o.label) || o.connector })), value: picked ? picked.connector : '' };
+      // by what the option needs (the Account's connect.js openConnect): an address and the name it is shown as; a sign-in at
+      // the venue, whose state lands in the hidden credentialRef once it is ready; a command line on this machine, nothing
+      switch (picked?.needs) {
+        case 'address': return [
+          pick,
+          { name: 'ref', label: 'Address', type: 'text', placeholder: '0x…', value: str(s.ref) },
+          { name: 'label', label: 'Shown as', type: 'text', value: str(s.label) },
+        ];
+        case 'sign-in': return [pick, { name: 'credentialRef', label: '', type: 'hidden', value: '' }];
+        case 'cli': return [pick];
+        default: break;
+      }
       const exchanges = exchangesOf(s);
       return [
-        { name: 'connector', label: 'What to connect', type: 'select', options: options.map(o => ({ value: o.connector, label: str(o.label) || o.connector })), value: picked ? picked.connector : '' },
+        pick,
         ...(exchanges.length ? [{ name: 'exchange', label: 'Exchange', type: 'select', options: exchanges.map(x => ({ value: x, label: x })), value: exchanges.includes(s.exchange) ? s.exchange : '' }] : []),
         { name: 'venue', label: 'Venue id', type: 'text', placeholder: 'okx', value: str(s.venue) },
         { name: 'label', label: 'Name', type: 'text', placeholder: 'My exchange account', value: str(s.label) },
@@ -184,7 +199,22 @@ export function fieldsOf(kind, seed) {
  *  it moves from and the kind of move — rebuilt, every value kept whose field survives; every other kind's as they are. */
 export function refieldsOf(kind, fields, seed) {
   if (isMoney(kind)) return moneyRefieldsOf(kind, fields, seed);
+  if (kind === 'connect') return connectRefieldsOf(fields, seed);
   return fields;
+}
+
+// what a connect option needs, as its fields are shaped: a key file (or nothing picked yet), an address, a sign-in, a command line
+const shapeOf = option => (option && ['address', 'sign-in', 'cli'].includes(option.needs) ? option.needs : 'key-file');
+// a connect sheet's fields after the connector changed to an option of another shape: that shape's fields, the connector and the
+// name kept (a key file's path, a typed address and a sign-in's state never carried to another kind)
+function connectRefieldsOf(fields, seed) {
+  const options = connectOptions(seed);
+  const connector = text(fields, 'connector');
+  const picked = options.find(o => o.connector === connector);
+  const names = new Set((Array.isArray(fields) ? fields : []).map(f => f?.name));
+  const shape = names.has('ref') ? 'address' : names.has('venue') ? 'key-file' : names.has('credentialRef') ? 'sign-in' : 'cli';
+  if (shapeOf(picked) === shape) return fields;
+  return fieldsOf('connect', { ...(isRecord(seed) ? seed : {}), connector, label: text(fields, 'label') });
 }
 
 // ── the drafts ──
@@ -241,7 +271,20 @@ export function draftOf(kind, fields, seed, now) {
     case 'connect': {
       const option = connectOptions(s).find(o => o.connector === text(fields, 'connector'));
       if (!option) return 'Pick what to connect';
-      if (option.needs !== 'key-file') return 'Connect on the Account page';
+      const kind = str(option.kind);
+      if (option.needs === 'address') {
+        const ref = text(fields, 'ref');
+        if (!ADDRESS.test(ref)) return 'An address is 0x and 40 hex digits';
+        // the venue id the Account's page gives it (connect.js venueId): the kind, or a second one numbered by its address
+        const venue = records(s.venues).some(v => v.id === kind) ? `${kind}-${ref.slice(2, 8).toLowerCase()}` : kind;
+        return { type: 'connectVenue', venue, connector: option.connector, label: text(fields, 'label'), credentialRef: ref };
+      }
+      if (option.needs === 'sign-in') {
+        const state = text(fields, 'credentialRef');
+        if (!state) return `Sign in at ${whoOf(option)} first`;
+        return { type: 'connectVenue', venue: kind, connector: option.connector, label: '', credentialRef: state };
+      }
+      if (option.needs === 'cli') return { type: 'connectVenue', venue: kind, connector: option.connector, label: '', credentialRef: '' };
       let connector = option.connector, exchange = '';
       if (needsExchange(option)) {
         exchange = text(fields, 'exchange');
@@ -308,6 +351,10 @@ export function draftOf(kind, fields, seed, now) {
       return { type: 'signOut', device: `device:${s.kid}` };
     // the liveOrder draft from the Trade ticket (host/trade-view.js): no clock — its deadline is the Account's prepare's
     case 'order': return tradeDraftOf(fields, s.ticket);
+    // a venue closed to agents opened to them again: widening what they may do is signed (portfolio.js pfAgentsSwitch)
+    case 'reopen':
+      if (!str(s.venue)) return 'No venue to reopen';
+      return { type: 'setPolicy', change: 'restore', value: s.venue };
     default: return 'Nothing to sign here';
   }
 }
@@ -336,6 +383,13 @@ export function grantOf(ask, page) {
 // the option the open connect sheet has picked, or nothing
 const pickedOption = sheet => (isRecord(sheet) && sheet.kind === 'connect'
   ? connectOptions(sheet.seed).find(o => o.connector === text(sheet.fields, 'connector')) ?? null : null);
+/** The option the open connect sheet has picked (its seed's, as connectOptionsOf gave it), or null: what the renderer draws a
+ *  wallet's tiles or a sign-in's key for. */
+export const connectOptionOf = sheet => pickedOption(sheet);
+/** Who a sign-in option signs in at: its label's first part (`Robinhood` of `Robinhood · investing accounts…`). */
+export const whoOf = option => str(option?.label).split(' · ')[0] || str(option?.kind);
+/** A browser wallet's tiles go with this option: the Account's own wallet kind, read by an address. */
+export const isWalletOption = option => isRecord(option) && option.kind === 'wallet' && option.needs === 'address';
 // an exchange account's exchange, when the one picked is the option's
 const exchangeOf = (sheet, option) => { const x = text(sheet.fields, 'exchange'); return listOf(option.venues).includes(x) ? x : ''; };
 // the reach's states in words, where the venue gives none of its own
@@ -347,7 +401,7 @@ const sameAsk = (a, b) => isRecord(a) && isRecord(b) && ['kind', 'venue', 'ref',
  *  default for the venue) and the exchange. Nothing to check — no key-file option picked, no venue yet: null. */
 export function keyfileAskOf(sheet) {
   const option = pickedOption(sheet);
-  if (!option || option.needs !== 'key-file' || option.elsewhere === true) return null;
+  if (!option || option.needs !== 'key-file') return null;
   const exchange = needsExchange(option) ? exchangeOf(sheet, option) : '';
   const venue = text(sheet.fields, 'venue') || exchange;
   if (!venue || !str(option.kind)) return null;
@@ -364,21 +418,50 @@ export function reachAskOf(sheet) {
   return exchange ? `live:exchange:${exchange}` : null;
 }
 
-/** The connect sheet's check, one line from the Account's own words: for an option connected on the Account page, that; else
- *  the venue's words when it is not connectable here, a reach that does not answer from here (its words, or the state's), and
- *  the key file's check — `Key file found: <path>`, `Missing: a, b`, else the Account's sentence — only when it was asked for
- *  the form as it stands (`keyfileAskOf`). `keyfile` and `reach` are the account slice's reads. Another sheet, or nothing
- *  picked: ''. */
-export function connectCheckOf(sheet, keyfile, reach) {
+// a browser wallet's part of the check (the account slice's `connectWallet`): looking, none, asked, signed — only while the
+// address it signed for is the one in the form — or its refusal (the wallet's words, or the Account's)
+function walletWords(sheet, w) {
+  if (!isRecord(w)) return '';
+  if (w.status === 'none') return 'No browser wallet answered on this page. Type the address to watch it.';
+  if (w.status === 'asking') return `Waiting for ${str(w.wallet) || 'the wallet'}…`;
+  if (w.status === 'refused') return str(w.message);
+  if (w.status === 'proven' && str(w.address) && text(sheet.fields, 'ref').toLowerCase() === w.address.toLowerCase()) return `${str(w.wallet) || 'The wallet'} signed: ${short(w.address)} is yours.`;
+  return '';
+}
+// a sign-in's part (the account slice's `signIn`), only for the option it was started for
+function signInWords(option, si) {
+  if (!isRecord(si) || si.connector !== option.connector) return '';
+  const who = whoOf(option);
+  switch (si.status) {
+    case 'starting': return `Asking ${who} where to sign in…`;
+    // with no tab of its own, the renderer draws the link to the venue's page in its place
+    case 'waiting': return si.tab === false ? '' : `Sign in on ${who}'s page, then come back.`;
+    case 'ready': return 'Signed in. Connect it.';
+    case 'expired': return 'The sign-in ran out: start again.';
+    case 'failed': return str(si.message) || 'The sign-in did not finish.';
+    default: return '';
+  }
+}
+// a long hex address as the Account's page shortens it (core.js short)
+const short = a => (/^0x[0-9a-fA-F]{16,}$/.test(a) ? `${a.slice(0, 8)}…${a.slice(-4)}` : a);
+
+/** The connect sheet's check, one line from the Account's own words: the venue's words when it is not connectable here, a
+ *  reach that does not answer from here (its words, or the state's); then by what the option needs — a browser wallet's words
+ *  (`more.wallet`, the slice's `connectWallet`) for the wallet kind, the option's own example for another address and for a
+ *  command line (what to run on this machine), a sign-in's words (`more.signIn`), and the key file's check —
+ *  `Key file found: <path>`, `Missing: a, b`, else the Account's sentence — only when it was asked for the form as it stands
+ *  (`keyfileAskOf`). `keyfile` and `reach` are the account slice's reads. Another sheet, or nothing picked: ''. */
+export function connectCheckOf(sheet, keyfile, reach, more = {}) {
   const option = pickedOption(sheet);
   if (!option) return '';
-  // as draftOf: whatever does not connect by a key file connects on the Account page
-  if (option.elsewhere === true || option.needs !== 'key-file') return 'Connect on the Account page';
   const parts = [];
+  if (option.needs === 'cli' || (option.needs === 'address' && !isWalletOption(option))) parts.push(str(option.example));
   if (option.verdict && option.verdict !== 'connectable' && str(option.said)) parts.push(option.said);
   const connector = reachAskOf(sheet);
   const r = connector && reach?.data?.ok === true ? records(reach.data.reach).find(e => e.connector === connector) : null;
   if (r && r.state !== 'ok') parts.push(str(r.said) || (Object.hasOwn(REACH_WORDS, r.state) ? REACH_WORDS[r.state] : ''));
+  if (isWalletOption(option)) parts.push(walletWords(sheet, more?.wallet));
+  if (option.needs === 'sign-in') parts.push(signInWords(option, more?.signIn));
   const ask = keyfileAskOf(sheet);
   if (ask && sameAsk(keyfile?.asked, ask)) {
     if (keyfile.status === 'loading') parts.push('Checking the key file…');

@@ -238,7 +238,7 @@ test('every Account string is escaped: a name with markup in the title, the fiel
 });
 
 // plan 2 Task 8: the connect sheet's check, a muted line under its fields, from the key file's check and the venue's reach
-test("a connect sheet draws its check under the fields: the key file found or missing, the Account page for what connects there", () => {
+test("a connect sheet draws its check under the fields: the key file found or missing; a sign-in's key, or the venue's link", () => {
   const options = connectOptionsOf(fx('account'), fx('venues'));
   const open = opened('connect', { options, connector: 'live:alpaca-paper', venue: 'alpaca-paper' });
   const LINE = /<p class="sheet-hint">([^<]*)<\/p>/;
@@ -255,8 +255,16 @@ test("a connect sheet draws its check under the fields: the key file found or mi
   // the reach: a venue that does not answer from here says so first
   const unreached = R.reachLoaded(checked(open, body), { data: { ok: true, reach: [{ connector: 'live:alpaca-paper', state: 'location', said: 'not offered here', at: '2026-10-24T15:00:00.000Z' }] }, at: NOW });
   assert.equal(line(unreached), `not offered here · ${esc(body.message)}`);
-  // an option that connects on the Account page
-  assert.equal(line(opened('connect', { options, connector: 'live:robinhood' })), 'Connect on the Account page');
+  // a sign-in connects here too: its key under the fields (its state a hidden field, drawn as nothing), the venue's own words
+  const rh = opened('connect', { options, connector: 'live:robinhood' });
+  const rhHtml = renderSheet(rh, NOW);
+  has(rhHtml, '<div class="btn-row"><button type="button" class="btn-sm" data-action="connectSignIn">Sign in at Robinhood</button></div>');
+  assert.ok(!rhHtml.includes('name="credentialRef"'), 'the state is never a box to type in');
+  assert.ok(!rhHtml.includes('Account page'));
+  assert.equal(line(rh), 'Robinhood did not answer');
+  // no tab opened for it: the venue's page as a link, the address escaped
+  const noTab = R.signIn(rh, { status: 'waiting', connector: 'live:robinhood', url: 'https://robinhood.example/o?a=1&b="2"', tab: false, state: 'st' });
+  has(renderSheet(noTab, NOW), '<p class="sheet-hint"><a href="https://robinhood.example/o?a=1&amp;b=&quot;2&quot;" target="_blank" rel="noopener noreferrer">Open Robinhood&#39;s sign-in page</a>, then come back.</p>');
   // another sheet draws no check, whatever was read
   const letIn = checked(opened('letIn', { address: ADDRESS, name: 'Claude Code' }), body);
   assert.equal(line(letIn), null);

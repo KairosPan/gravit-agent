@@ -3,12 +3,15 @@
 // history curve, the statement and the agents — and the connect sheet's reads (where this account can connect, the kept paper
 // books, a key file's check, a venue's reach), each kind one flight at a time; the page at the Account's own cadence (every
 // 20 s on screen, 80 s while the stream is open); and the stream's account events as the reads they name, past the face's
-// cache; and Guard (plan 4a Task 5), the Account's one unsigned switch, posted through the face's proxy. The views over what
-// lands are account-view.js's.
-import { pageOk, worthOf } from './account-view.js';
+// cache; and Guard (plan 4a Task 5) and Close to agents (plan 4b Task 4), the Account's unsigned switches, posted through the
+// face's proxy; and a venue's own sign-in for the connect sheet, its tab and its status poll. The views over what lands are
+// account-view.js's.
+import { pageOk, worthOf, venuesOf } from './account-view.js';
 import { refusedAt } from './owner-view.js';
 
 export const ACCOUNT_POLL_MS = 20_000, ACCOUNT_POLL_STREAM_MS = 80_000;
+/** A venue's sign-in is asked how it stands this often, for at most this long (the Account's connect.js). */
+export const SIGNIN_POLL_MS = 1_500, SIGNIN_WITHIN_MS = 15 * 60_000;
 
 // the stream's events that move money, an order or a position: the holdings and the page are read again
 const MOVES = new Set(['order', 'fill', 'paper', 'balance', 'position']);
@@ -31,7 +34,13 @@ const RECEIVE_ELSEWHERE = 'The account answered for another account or network: 
 // no door handed in: nothing answers
 const noDoor = async () => ({ status: 0, body: { ok: false, error: NO_ANSWER } });
 
-export function startAccount({ store, getJson, post = noDoor, now = Date.now, schedule, cancelTimer, streamOpen = () => false, onPage = nothing }) {
+// a venue's sign-in page, as the Account answers it: a web address, nothing else
+const webUrl = v => (typeof v === 'string' && /^https?:\/\//i.test(v) ? v : '');
+// who a sign-in option signs in at (sheet-view.js whoOf)
+const whoOf = option => (typeof option?.label === 'string' ? option.label.split(' · ')[0] : '') || str(option?.kind);
+const noTab = () => null;
+
+export function startAccount({ store, getJson, post = noDoor, now = Date.now, schedule, cancelTimer, streamOpen = () => false, onPage = nothing, openTab = noTab }) {
   let closed = false;
   let timer = null;
   let holdingsDue = 0;       // loadAll calls whose holdings read is still to come: a page landing leaves the paper lens to them
@@ -265,10 +274,91 @@ export function startAccount({ store, getJson, post = noDoor, now = Date.now, sc
   const loadEarn = ({ fresh = false } = {}) =>
     fly('earn', '/data/account/earn', { fresh, loading: 'earnLoading', land: landing('earnLoaded', 'earnFailed') });
 
+  // ── Venues (plan 4b Task 4) ──
+
+  /** Close to agents: one POST to the face's proxy (`/data/account/revoke`, `{ account: venue }`), never signed — agents keep
+   *  their reads and place or move nothing there, the Account's safer direction (portfolio.js pfAgentsSwitch). One in the air
+   *  per venue: a second press while it is joins it. Said in the Account page's own sentence when the Account took it, else the
+   *  Account's words; then the page is read past the face's cache, so the row drawn is the page's. */
+  const closing = new Map();
+  function revoke(venue) {
+    const id = str(venue);
+    if (closed || !id) return Promise.resolve();
+    if (closing.has(id)) return closing.get(id);
+    store.dispatch('closing', { venue: id, status: 'asking' });
+    const current = (async () => {
+      let r;
+      try { r = await post('/data/account/revoke', { account: id }); } catch { r = { status: 0, body: {} }; }
+      if (closed) return;
+      if (!(r?.status >= 200 && r.status < 300) || refusedAt(r)) store.dispatch('closing', { venue: id, status: 'refused', message: messageOf(r?.body) ?? NO_ANSWER });
+      else {
+        const name = venuesOf(store.get().account.data).find(v => v.id === id)?.name || id;
+        store.dispatch('closing', { venue: id, status: 'said', said: `${name} is closed to agents: they keep reading it, and place or move nothing there. Reopening it is signed.` });
+      }
+      await load({ fresh: true });
+    })().finally(() => { if (closing.get(id) === current) closing.delete(id); });
+    closing.set(id, current);
+    return current;
+  }
+
+  /** A venue's own sign-in (OAuth) for the connect sheet's sign-in option, as the Account's connect.js runs it: a tab opened at
+   *  once — inside the operator's press, so no popup blocker stops it — its opener cleared; `POST /data/account/signin/start`
+   *  `{ connector: option.kind }`; the tab sent to the venue's page the answer names (no tab: the slice keeps the address, and
+   *  the sheet draws the link); then `/data/account/signin/status?state=` every SIGNIN_POLL_MS for at most SIGNIN_WITHIN_MS,
+   *  only while `alive()` (the sheet it was started from, on this option) — `ready` lands the state through `onReady(state)`,
+   *  `failed` the Account's words; an answer the face re-served as stale, an `unknown`, or no answer is not the final status:
+   *  the poll goes on. A second start supersedes the first's poll. */
+  let signInSeq = 0;
+  let signInTimer = null;
+  function stopSignIn() { if (signInTimer !== null) { cancelTimer(signInTimer); signInTimer = null; } }
+  async function signIn(option, { alive = () => true, onReady = nothing } = {}) {
+    if (closed || !option || typeof option.connector !== 'string') return;
+    const mine = ++signInSeq;
+    stopSignIn();
+    let tab = null;
+    try { tab = openTab('about:blank', '_blank') ?? null; } catch { tab = null; }
+    try { if (tab) tab.opener = null; } catch { /* a tab that will not say */ }
+    const connector = option.connector;
+    const live = () => !closed && mine === signInSeq && alive();
+    store.dispatch('signIn', { status: 'starting', connector, url: '', tab: tab !== null, state: '', message: null });
+    let r;
+    try { r = await post('/data/account/signin/start', { connector: str(option.kind) }); } catch { r = { status: 0, body: {} }; }
+    const url = webUrl(r?.body?.url), state = str(r?.body?.state);
+    if (!live()) { try { tab?.close?.(); } catch { /* gone already */ } return; }
+    if (!(r?.status >= 200 && r.status < 300) || refusedAt(r) || !url || !state) {
+      try { tab?.close?.(); } catch { /* gone already */ }
+      store.dispatch('signIn', { status: 'failed', message: messageOf(r?.body) ?? 'The sign-in could not start.' });
+      return;
+    }
+    let sent = false;
+    try { if (tab) { tab.location.href = url; sent = true; } } catch { sent = false; }
+    store.dispatch('signIn', { status: 'waiting', url, tab: sent, state });
+    const until = now() + SIGNIN_WITHIN_MS;
+    const ask = async () => {
+      signInTimer = null;
+      if (!live()) return;
+      let st = null;
+      try { st = await getJson(`/data/account/signin/status?state=${encodeURIComponent(state)}`); } catch { st = null; }
+      if (!live()) return;
+      // a status the face re-served from before (`stale`) says nothing of now: unknown, as no answer is
+      const known = st?.ok === true && st.stale !== true ? st.status : 'unknown';
+      if (known === 'ready') {
+        store.dispatch('signIn', { status: 'ready', message: null });
+        onReady(state);
+        return;
+      }
+      if (known === 'failed') { store.dispatch('signIn', { status: 'failed', message: words(st.error) ?? 'The sign-in did not finish.' }); return; }
+      if (now() >= until) { store.dispatch('signIn', { status: 'expired' }); return; }
+      signInTimer = schedule(() => { void ask(); }, SIGNIN_POLL_MS);
+    };
+    await ask();
+  }
+
   function close() {
     closed = true;
     poll(false);
+    stopSignIn();
   }
 
-  return { load, guard, receive, bridgeRoutes, loadEarn, loadHoldings, loadHistory, loadStatement, loadAgents, loadAll, loadVenuesHere, loadPaperBooks, checkKeyfile, reach, poll, onStreamEvent, close };
+  return { load, guard, revoke, signIn, receive, bridgeRoutes, loadEarn, loadHoldings, loadHistory, loadStatement, loadAgents, loadAll, loadVenuesHere, loadPaperBooks, checkKeyfile, reach, poll, onStreamEvent, close };
 }
