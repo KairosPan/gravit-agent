@@ -29,6 +29,14 @@ const text = v => (typeof v === 'string' ? v : null);
 // a price's stamp as a time, or null when it has none that parses
 const timeOf = v => { const t = typeof v === 'string' ? Date.parse(v) : NaN; return Number.isFinite(t) ? t : null; };
 const blank = q => !String(q ?? '').trim();
+// a market page's four reads beside its price: an Account key's (never an A share's), each part kept as keyed keeps a read
+const DEPTH_PARTS = new Set(['here', 'book', 'trades', 'funding']);
+const depthed = (id, part) => isAccountKey(id) && !String(id).startsWith('cn:') && DEPTH_PARTS.has(part);
+const DEPTH_IDLE = { status: 'idle', data: null, at: null, message: null, freshAt: null };
+const depth = (s, id, part, patch) => {
+  const page = own(s.markets.depth, id);
+  return mk(s, { depth: { ...s.markets.depth, [id]: { ...(isRecord(page) ? page : {}), [part]: { ...DEPTH_IDLE, ...own(page, part), ...patch } } } });
+};
 // a tab starts from Most traded, as Linqi's does
 const onTab = tab => ({ tab, sort: 'volume' });
 
@@ -115,6 +123,26 @@ export const reducers = {
   compareLoading: (s, { base } = {}) => (named(base) ? keyed(s, 'compare', base, { status: 'loading' }) : s),
   compareLoaded: (s, { base, data, at } = {}) => (named(base) ? keyed(s, 'compare', base, { status: 'ready', data, at }) : s),
   compareFailed: (s, { base, at } = {}) => (named(base) ? keyed(s, 'compare', base, { status: 'error', at }) : s),
+
+  // a market page's four reads beside its price (plan 4a Task 4), by its key, each part { status, data, at, message, freshAt }:
+  // `here` the asset sheet, `book`, `trades`, and `funding` — a perpetual's, one read a venue, its data the answers by venue. A
+  // failed read keeps its last data, with the Account's sentence when it refused; an answer the proxy re-served stale keeps
+  // the time of the last fresh one (`freshAt`, null when none landed); leaving the page drops them all
+  depthLoading: (s, { id, part } = {}) => (depthed(id, part) ? depth(s, id, part, { status: 'loading' }) : s),
+  depthLoaded(s, { id, part, data, at = null, venue = null } = {}) {
+    if (!depthed(id, part) || (part === 'funding' && !named(venue))) return s;
+    const was = own(own(s.markets.depth, id), part);
+    const stale = isRecord(data) && data.stale === true;
+    const freshAt = stale ? (was?.freshAt ?? null) : at;
+    const next = part === 'funding' ? { ...(isRecord(was?.data) ? was.data : {}), [venue]: data } : data;
+    return depth(s, id, part, { status: 'ready', data: next, at, message: null, freshAt });
+  },
+  depthFailed: (s, { id, part, at = null, message = null } = {}) => (depthed(id, part) ? depth(s, id, part, { status: 'error', at, message }) : s),
+  depthDropped(s, { id } = {}) {
+    if (!Object.hasOwn(s.markets.depth, id)) return s;
+    const { [id]: _gone, ...rest } = s.markets.depth;
+    return mk(s, { depth: rest });
+  },
 
   // the Account keys starred, as stored under their own key; and what each old us:/crypto: star was asked as and found — the
   // Account's key, or null for none — until it is taken off

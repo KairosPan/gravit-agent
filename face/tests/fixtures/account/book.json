@@ -1,0 +1,24 @@
+{
+  "ok": true,
+  "venue": "ex",
+  "venueName": "Stand-in Exchange",
+  "symbol": "BTC/USDT:USDT",
+  "book": {
+    "bids": [
+      [
+        62495.6,
+        null
+      ]
+    ],
+    "asks": [
+      [
+        62502,
+        null
+      ]
+    ],
+    "at": "2026-11-01T12:06:43.836Z",
+    "from": "Stand-in Exchange",
+    "depth": "top",
+    "topOnly": "unread"
+  }
+}

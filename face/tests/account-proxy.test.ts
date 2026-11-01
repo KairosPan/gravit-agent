@@ -288,7 +288,7 @@ test("a repeated or unknown name, an over-long value: 400 invalid account reques
     reach: ["connector"],
     keyfile: ["kind", "venue", "ref", "exchange"],
     books: [],
-    asset: ["key", "interval", "range"],
+    asset: ["key", "interval", "range", "fresh"],
     book: ["venue", "symbol", "depth"],
     trades: ["venue", "symbol", "limit"],
     funding: ["venue", "limit"],
@@ -957,7 +957,7 @@ test("the new reads keep their whitelists and TTLs", async () => {
   const ttl = { asset: 5_000, book: 2_000, trades: 2_000, funding: 60_000, receive: 60_000, earn: 15_000, sellable: 5_000, signinStatus: 1_000 };
   const abort = { asset: 25_000, book: 7_000, trades: 7_000, funding: 12_000, receive: 30_000, earn: 30_000, sellable: 30_000, signinStatus: 7_000 };
   const names = {
-    asset: ["key", "interval", "range"], book: ["venue", "symbol", "depth"], trades: ["venue", "symbol", "limit"], funding: ["venue", "limit"],
+    asset: ["key", "interval", "range", "fresh"], book: ["venue", "symbol", "depth"], trades: ["venue", "symbol", "limit"], funding: ["venue", "limit"],
     receive: ["venue", "asset", "network"], earn: ["venue", "asset", "fresh"], sellable: ["fresh"], signinStatus: ["state"],
   };
   for (const [face, account, route, query] of NEW_READS) {

@@ -1,0 +1,72 @@
+{
+  "ok": true,
+  "key": "event:SI-FEDCUT-DEC:YES",
+  "positions": [
+    {
+      "symbol": "SI-FEDCUT-DEC:YES",
+      "name": "Will the Fed cut rates at its December meeting? \u00b7 Yes",
+      "kind": "event",
+      "side": "long",
+      "qty": 50,
+      "entryPrice": 0.63,
+      "markPrice": 0.62,
+      "usd": 31,
+      "unrealizedUsd": -0.5,
+      "venue": "predict",
+      "venueName": "Stand-in Predictions"
+    }
+  ],
+  "orders": [],
+  "lines": [
+    {
+      "key": "order:b75ccfcd482275bfdaab922fcccf39f8",
+      "id": "ord-0006",
+      "at": "2026-11-01T12:06:43.713Z",
+      "updatedAt": "2026-11-01T12:06:43.713Z",
+      "type": "trade",
+      "kind": "buy",
+      "account": "predict",
+      "accountName": "Stand-in Predictions",
+      "description": "Buy 50 SI-FEDCUT-DEC:YES \u00b7 Will the Fed cut rates at its December meeting? \u00b7 Yes \u00b7 market \u00b7 at 0.63",
+      "amountUsd": -31.5,
+      "worthUsd": 31.5,
+      "feeUsd": 0.2205,
+      "status": "filled",
+      "by": "You",
+      "ref": "se-00001"
+    }
+  ],
+  "cost": [
+    {
+      "key": "event:SI-FEDCUT-DEC:YES",
+      "asset": "SI-FEDCUT-DEC:YES",
+      "class": "event",
+      "avgCostUsd": 0.63,
+      "costUsd": 31.5,
+      "coveredQty": 50,
+      "ofQty": 50,
+      "unrealizedUsd": -0.5,
+      "realizedUsd": 0,
+      "source": "venue",
+      "words": "cost known for 50 of 50 SI-FEDCUT-DEC:YES",
+      "parts": [
+        {
+          "source": "venue",
+          "venue": "predict",
+          "venueName": "Stand-in Predictions",
+          "qty": 50,
+          "costUsd": 31.5
+        }
+      ],
+      "markets": [
+        {
+          "venue": "predict",
+          "symbol": "SI-FEDCUT-DEC:YES"
+        }
+      ],
+      "lastFillAt": "2026-11-01T12:06:43.713Z",
+      "orders": 1
+    }
+  ],
+  "missing": []
+}

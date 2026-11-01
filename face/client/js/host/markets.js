@@ -5,14 +5,18 @@
 // china) and its base's compare rows, and the page's market followed on the Account's stream; one explore?q read for a search,
 // its A shares the hits; the stars in this browser's two stores (the Account's keys under their own key, the A shares under the
 // face's) and, on a page that signs, an Account market's star as the Account's own signed setWatch (plan 2 Task 12); each old
-// us:/crypto: star asked of the Account once. Every market read is the Account's: the face's own quote wire is read by nothing
-// here. The views over what lands are market-view.js's. Nothing here touches the DOM.
+// us:/crypto: star asked of the Account once; and beside a market page's candles (an Account key's, never an A share's) its
+// four reads (plan 4a Task 4): the asset sheet once on entering and after every owner action taken, its order book and latest
+// trades at once and every 5 s while the page is on screen, a perpetual's funding once, one read a connected line's venue.
+// Every market read is the Account's: the face's own quote wire is read by nothing here. The views over what lands are
+// market-view.js's and market-depth-view.js's. Nothing here touches the DOM.
 import {
   readWatchlist, saveWatchlist, STORAGE_KEY, readAccountWatch, saveAccountWatch, ACCOUNT_WATCH_KEY,
 } from '../wire/market-model.js';
 import { CHINA_VENUE, isCnKey, chinaPairOf, rankOf, cnQuoteOf, cnHitsOf } from '../wire/china.js';
 import { ACCOUNT_TABS, CHINA_TAB, NOT_ANSWERING_WORD, canonicalId, isAccountKey, rowsOf, matchKey, pairsOf, pageOf, followOf, watchedOf, setWatchOf } from './market-view.js';
 import { refusedAt, refusalOf } from './owner-view.js';
+import { assetKeyOf } from './market-depth-view.js';
 
 // China's state while the proxy re-serves the Account's last read: the Account is not answering
 const NOT_ANSWERING = { state: 'unavailable', said: NOT_ANSWERING_WORD };
@@ -21,6 +25,8 @@ export const EXPLORE_MS = 20_000, QUOTES_MS = 5_000, QUOTE_PAIRS = 12;
 export const WATCH_LIMIT = 100;   // either list's: the cn list's, the Account keys' cap
 // the China tab's rows one ranking read asks for
 export const RANK_ROWS = 20;
+// a market page's book, the levels a side; its latest trades; a perpetual's funding lines, a venue's read
+export const BOOK_DEPTH = 10, TRADES_LIMIT = 20, FUNDING_LIMIT = 100;
 
 const EXPLORE = '/data/account/explore';
 const QUOTES = '/data/account/quotes';
@@ -59,6 +65,8 @@ export function startMarkets({
   let inView = null;         // the row ids rowsInView last named; null: every row
   let waiting = null;        // a page asked for whose market no read lists yet: its reads wait for the read that does
   let followed = false;      // the stream follows a page's market
+  let depthId = null;        // the Account market page whose four reads are read, from entering it to leaving it
+  const fundingKinds = new Set();   // the funding reads' kinds, one a venue, of the page on screen
   const kinds = new Map();   // a kind of read → { flight, path, seq }
   const signing = new Set(); // the Account keys whose setWatch is in the air
 
@@ -174,7 +182,7 @@ export function startMarkets({
     exploreTimer = schedule(() => { exploreTimer = null; if (closed || !shown) return; armExplore(); readShown(); }, EXPLORE_MS);
   }
   function armQuotes() {
-    quotesTimer = schedule(() => { quotesTimer = null; if (closed || !shown) return; armQuotes(); readQuotes(); readCnQuotes(); }, QUOTES_MS);
+    quotesTimer = schedule(() => { quotesTimer = null; if (closed || !shown) return; armQuotes(); readQuotes(); readCnQuotes(); beatDepth(); }, QUOTES_MS);
   }
   function stopPolls() {
     if (exploreTimer !== null) { cancelTimer(exploreTimer); exploreTimer = null; }
@@ -240,6 +248,70 @@ export function startMarkets({
     if (leg) readCandles(id, leg, rangeOf(id));
     if (COMPARED.has(view.item.kind) && named(view.item.base)) readCompare(view.item.base);
     if (leg) { followed = true; stream.follow([`${leg.venue}:${leg.symbol}`]); } else if (followed) unfollow();
+    if (depthId !== id) {
+      leaveDepth();
+      depthId = id;
+      readHere(id, view.item);
+      readFunding(id, view);
+    }
+    readMarketDepth(id, view.item);
+  }
+
+  // ---- a market page's four reads beside its price (plan 4a Task 4): each a flight of its own kind, the latest alone landing,
+  // nothing after leaving the page or close(). A body of another shape than the read's is a failure, said in the Account's
+  // sentence when it carries one (an HTML 404 page, a 503 unreachable carry none)
+  function landDepth(id, part, ok, extra = {}) {
+    return (body, refused) => {
+      if (closed || depthId !== id) return;
+      if (!refused && body?.ok === true && ok(body)) store.dispatch('depthLoaded', { id, part, data: body, at: now(), ...extra });
+      else store.dispatch('depthFailed', { id, part, at: now(), message: messageOf(body) });
+    };
+  }
+  // the asset sheet: what is held of it, its orders, its lines and its cost — the asset the Account's own page reads it as;
+  // `fresh` past the face's cache (after an owner action)
+  function readHere(id, item, fresh = false) {
+    const key = assetKeyOf(item);
+    if (!key) return;
+    fly('asset', `/data/account/asset?key=${encodeURIComponent(key)}${fresh ? '&fresh=1' : ''}`,
+      landDepth(id, 'here', b => Array.isArray(b.positions) && Array.isArray(b.orders)), ['depthLoading', { id, part: 'here' }]);
+  }
+  // the book and the latest trades at the line the page follows; the trades no more once the source said it publishes none
+  function readMarketDepth(id, item) {
+    const leg = followOf(item);
+    if (!leg) return;
+    const at = `venue=${encodeURIComponent(leg.venue)}&symbol=${encodeURIComponent(leg.symbol)}`;
+    fly('book', `/data/account/book?${at}&depth=${BOOK_DEPTH}`, landDepth(id, 'book', b => b.book !== null && typeof b.book === 'object'),
+      ['depthLoading', { id, part: 'book' }]);
+    const kept = store.get().markets.depth?.[id]?.trades;
+    if (kept?.status === 'ready' && typeof kept.data?.none === 'string' && kept.data.none.trim() !== '') return;
+    fly('trades', `/data/account/trades?${at}&limit=${TRADES_LIMIT}`, landDepth(id, 'trades', b => Array.isArray(b.trades)),
+      ['depthLoading', { id, part: 'trades' }]);
+  }
+  // a perpetual's funding: one read a venue its connected lines are at
+  function readFunding(id, view) {
+    if (view.item.kind !== 'perp') return;
+    const venues = [...new Set(view.legs.filter(l => l.connected === true && named(l.venue)).map(l => l.venue))];
+    for (const venue of venues) {
+      const kind = `funding:${venue}`;
+      fundingKinds.add(kind);
+      fly(kind, `/data/account/funding?venue=${encodeURIComponent(venue)}&limit=${FUNDING_LIMIT}`,
+        landDepth(id, 'funding', b => Array.isArray(b.lines), { venue }), ['depthLoading', { id, part: 'funding' }]);
+    }
+  }
+  // the page left: its reads in the air land nowhere, and what they read goes
+  function leaveDepth() {
+    if (depthId === null) return;
+    for (const kind of ['asset', 'book', 'trades', ...fundingKinds]) drop(kind);
+    fundingKinds.clear();
+    store.dispatch('depthDropped', { id: depthId });
+    depthId = null;
+  }
+  // the 5 s beat, while the page is on screen: its book and its trades again
+  function beatDepth() {
+    if (depthId === null || waiting !== null) return;
+    const s = store.get();
+    const view = pageOf(s.markets, s.account, depthId, now());
+    if (view) readMarketDepth(depthId, view.item);
   }
 
   // the key a star names at the Account: an A share's cn key (`cn:sh600519` canonicalised), another Account key as it is; else null
@@ -426,6 +498,7 @@ export function startMarkets({
     page(id) {
       if (closed) return;
       waiting = null;
+      if (id !== depthId) leaveDepth();
       if (isCnKey(id)) {
         if (followed) unfollow();
         readCnCandles(id, rangeOf(id));
@@ -451,6 +524,15 @@ export function startMarkets({
       const leg = view ? followOf(view.item) : null;
       if (leg) readCandles(id, leg, value);
     },
+    /** An owner action taken: the asset sheet of the market page on screen read again, past the face's cache. */
+    afterAction() {
+      if (closed || depthId === null) return;
+      const s = store.get();
+      const view = pageOf(s.markets, s.account, depthId, now());
+      if (!view) return;
+      drop('asset');
+      readHere(depthId, view.item, true);
+    },
     /** The table's rows on screen, by id: the quotes poll asks for theirs alone. */
     rowsInView(ids) {
       inView = Array.isArray(ids) ? new Set(ids) : null;
@@ -462,6 +544,7 @@ export function startMarkets({
       unsubscribe();
       win?.removeEventListener?.('storage', onStorage);
       unfollow();
+      for (const kind of ['asset', 'book', 'trades', ...fundingKinds]) drop(kind);
     },
   };
 }

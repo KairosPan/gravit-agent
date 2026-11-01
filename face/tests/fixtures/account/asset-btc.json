@@ -1,0 +1,157 @@
+{
+  "ok": true,
+  "key": "crypto:BTC",
+  "row": {
+    "key": "crypto:BTC",
+    "asset": "BTC",
+    "class": "crypto",
+    "amount": 0.124,
+    "usd": 7747.4,
+    "venues": [
+      {
+        "venue": "ex",
+        "venueName": "Stand-in Exchange",
+        "amount": 0.12,
+        "usd": 7497.6,
+        "note": "spot"
+      },
+      {
+        "venue": "wallet",
+        "venueName": "Stand-in Wallet",
+        "amount": 0.004,
+        "usd": 249.8,
+        "note": "Base"
+      }
+    ],
+    "price": 62479.03226,
+    "changePct24h": 2.3,
+    "changeFrom": {
+      "venue": "ex",
+      "venueName": "Stand-in Exchange"
+    }
+  },
+  "positions": [
+    {
+      "symbol": "BTC/USDT:USDT",
+      "name": "BTC perpetual",
+      "kind": "perp",
+      "side": "long",
+      "qty": 0.01,
+      "entryPrice": 60520,
+      "markPrice": 62498.8,
+      "usd": 624.99,
+      "unrealizedUsd": 19.79,
+      "leverage": 3,
+      "marginMode": "cross",
+      "liquidationPrice": 40649.3,
+      "venue": "ex",
+      "venueName": "Stand-in Exchange"
+    }
+  ],
+  "orders": [
+    {
+      "id": "ord-0003",
+      "clientId": "3d85785d2a6631e347b390456e2b20d1",
+      "at": "2026-11-01T12:06:43.707Z",
+      "venue": "ex",
+      "venueName": "Stand-in Exchange",
+      "symbol": "BTC/USDT",
+      "name": "BTC / USDT",
+      "kind": "spot",
+      "base": "BTC",
+      "side": "sell",
+      "type": "limit",
+      "qty": 0.002,
+      "limitPrice": 63226.6,
+      "price": 63226.6,
+      "usd": 126.4532,
+      "status": "open",
+      "filledQty": 0,
+      "ref": "sx-00003",
+      "signer": "device:a5048199a8081854",
+      "authority": "owner",
+      "action": "0xbb797fde4623a145b80675193cc7869382b9205ccb74aaf2d3b4c1345af1a121",
+      "note": "on Stand-in Exchange's book at 63,226.6",
+      "updatedAt": "2026-11-01T12:06:43.707Z"
+    }
+  ],
+  "lines": [
+    {
+      "key": "order:67d6f7227423a83b57450c4182fa356b",
+      "id": "ord-0008",
+      "at": "2026-11-01T12:06:43.716Z",
+      "updatedAt": "2026-11-01T12:06:43.718Z",
+      "type": "trade",
+      "kind": "buy",
+      "account": "ex",
+      "accountName": "Stand-in Exchange",
+      "description": "Buy 0.001 BTC \u00b7 BTC / USDT \u00b7 limit 59,352.9",
+      "amountUsd": 0,
+      "worthUsd": 59.35,
+      "status": "canceled",
+      "by": "You",
+      "ref": "sx-00006"
+    },
+    {
+      "key": "order:3d85785d2a6631e347b390456e2b20d1",
+      "id": "ord-0003",
+      "at": "2026-11-01T12:06:43.707Z",
+      "updatedAt": "2026-11-01T12:06:43.707Z",
+      "type": "trade",
+      "kind": "sell",
+      "account": "ex",
+      "accountName": "Stand-in Exchange",
+      "description": "Sell 0.002 BTC \u00b7 BTC / USDT \u00b7 limit 63,226.6",
+      "amountUsd": 0,
+      "worthUsd": 126.45,
+      "status": "open",
+      "by": "You",
+      "ref": "sx-00003"
+    }
+  ],
+  "cost": [
+    {
+      "key": "crypto:BTC",
+      "asset": "BTC",
+      "class": "crypto",
+      "coveredQty": 0,
+      "ofQty": 0.124,
+      "realizedUsd": 0,
+      "source": "none",
+      "words": "cost known for 0 of 0.124 BTC",
+      "parts": [],
+      "markets": [],
+      "orders": 0
+    },
+    {
+      "key": "position:ex:BTC/USDT:USDT",
+      "asset": "BTC perpetual",
+      "class": "position",
+      "symbol": "BTC/USDT:USDT",
+      "side": "long",
+      "avgCostUsd": 60520,
+      "coveredQty": 0.01,
+      "ofQty": 0.01,
+      "unrealizedUsd": 19.79,
+      "source": "venue",
+      "words": "cost known for 0.01 of 0.01 contracts",
+      "parts": [
+        {
+          "source": "venue",
+          "venue": "ex",
+          "venueName": "Stand-in Exchange",
+          "qty": 0.01
+        }
+      ],
+      "realizedUsd": 0,
+      "markets": [
+        {
+          "venue": "ex",
+          "symbol": "BTC/USDT:USDT"
+        }
+      ],
+      "orders": 0
+    }
+  ],
+  "missing": []
+}

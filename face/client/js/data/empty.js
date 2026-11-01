@@ -42,6 +42,9 @@ export function emptyState() {
       watchlist: [], quotes: {}, providers: [], connection: 'idle', hitQuotes: {},
       // the China tab's ranking read (the Account's explore?tab=china), with the sort it was read for
       rank: { status: 'idle', data: null, at: null, sort: 'volume', message: null },
+      // the market page on screen's four reads beside its price, by its key (plan 4a Task 4): `here` (the asset sheet), `book`,
+      // `trades`, `funding` (a perpetual's, by venue) — each { status, data, at, message, freshAt }; dropped on leaving
+      depth: {},
     },
     // the Account (host/account.js): its page with the sentence of its last refusal, its other reads, the history curve's
     // range, the Statement drawer, and the venue whose Details drawer is open (its id); and the connect sheet's reads — where

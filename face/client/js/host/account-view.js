@@ -145,10 +145,15 @@ const OPEN = new Set(['open', 'partial', 'pending']);
  *  is: You for the owner's; an agent's is `Agent · <name>`, the name the page's keys give the order's agent address, else
  *  An agent (an order carries the address, never the name). */
 export function openOrdersOf(page) {
-  if (!pageOk(page)) return [];
-  const keys = records(page.keys);
-  const nameAt = address => str(keys.find(k => sameAddress(k.address, address))?.name);
-  return records(page.orders).filter(o => OPEN.has(o.status)).map(o => {
+  return pageOk(page) ? orderRowsOf(page.orders, page.keys) : [];
+}
+
+/** The orders still working of a list as the Account sends its orders (the page's, an asset read's), each worded as
+ *  openOrdersOf words it, `keys` (the page's) naming an agent's address. */
+export function orderRowsOf(orders, keys) {
+  const named = records(keys);
+  const nameAt = address => str(named.find(k => sameAddress(k.address, address))?.name);
+  return records(orders).filter(o => OPEN.has(o.status)).map(o => {
     const name = o.authority === 'owner' ? '' : nameAt(o.agent);
     return {
       id: str(o.id), venue: str(o.venue), venueName: str(o.venueName), symbol: str(o.symbol), side: str(o.side), type: str(o.type),

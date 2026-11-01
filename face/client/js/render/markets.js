@@ -6,8 +6,11 @@
 // every word about a market is a view's (host/market-view.js): this module puts a figure in its unit's words, joins the views'
 // words, and says, where rows or lines would be, how far their read has got. On a page that signs for the Account, an Account
 // market's page carries Buy, and Sell where the market is held: each opens the Trade ticket (spec 2026-10-22 §6.4); and, for an
-// Account that takes writes, You hold's Close… (Sell…) and Leverage…, Open orders' Change…, and a perpetual's Leverage… among
-// its keys (plan 4a Task 3).
+// Account that takes writes, a position's Close… (Sell…) and Leverage…, an open order's Change…, and a perpetual's Leverage…
+// among its keys (plan 4a Task 3). An Account market's page draws, from the Account's four reads beside its price (plan 4a
+// Task 4; host/market-depth-view.js): You here — the asset sheet's holding, positions with their cost, open orders with who
+// placed them, and what agents do here — its order book, its latest trades, and a perpetual's funding; each as far as its own
+// read has got. An A share's page reads none of the four.
 import { esc, attrs, cls } from '../html.js';
 import { icon } from '../icons.js';
 import { chgHtml } from '../market-fmt.js';
@@ -18,8 +21,9 @@ import { seg } from './controls.js';
 import { candlesSvg, sessionsSvg } from './chart.js';
 import { orderWords, marketKeysOn, marketKey, changeKey, positionKeys } from './account.js';
 import { marketLeverageSeedOf } from '../host/sheet-market.js';
+import { assetKeyOf, hereOf, costOf, bookOf, tradesOf, fundingOf } from '../host/market-depth-view.js';
 import {
-  CANDLE_RANGES, isAccountKey, tableOf, pageOf, faceAssetOf, mentionsOf, volumeWordOf,
+  CANDLE_RANGES, isAccountKey, tableOf, pageOf, faceAssetOf, mentionsOf, volumeWordOf, followOf,
   connectionWord, watchWord, basisWord, watchedOf,
   chinaWord, cnStateWord, NOT_ANSWERING_WORD, cnPageOf, cnTileOf, cnBoardOf,
 } from '../host/market-view.js';
@@ -204,6 +208,91 @@ export function marketPage(id, state, now) {
 // a statement line done: its mark is a tick
 const DONE = new Set(['filled', 'settled']);
 
+// ---- the four reads beside the price (plan 4a Task 4)
+
+// a part of the four as its read allows: Loading… until it has answered, and once it has failed before any answer the
+// Account's sentence over <unavailable>; after an answer what `draw` draws — under a later failure's sentence, and, for an
+// answer the proxy re-served as kept (`stale: true`), As of the time it is from (`timeOf`: the source's own stamp, else the
+// last fresh answer's landing)
+function depthBody(part, draw, unavailable, now, timeOf = () => '') {
+  const p = isRecord(part) ? part : {};
+  const data = p.data;
+  // a read lands its answer (a perpetual's funding: its answers by venue) only once it has one
+  const answered = data != null;
+  const said = p.status === 'error' ? note(p.message) : '';
+  if (!answered) return `${said}${empty(p.status === 'error' ? unavailable : 'Loading…')}`;
+  const stale = isRecord(data) && (data.stale === true || (data.ok === undefined && Object.values(data).some(b => b?.stale === true)));
+  const at = stale ? (timeOf() || (typeof p.freshAt === 'number' ? new Date(p.freshAt).toISOString() : '')) : '';
+  const asOf = stale ? note(at ? `As of ${when(at, now)}` : 'As of the last read') : '';
+  return `${said}${asOf}${draw()}`;
+}
+
+// what was paid, under a holding or a position: the average paid in the market's unit and the cost, then the Account's words
+function costWords(c, unit) {
+  if (!c) return '';
+  const avg = c.avgCostUsd === null ? '' : `avg ${priceWord(unit === 'cents' ? c.avgCostUsd * 100 : c.avgCostUsd, unit)}`;
+  return [avg, c.costUsd === null ? '' : `cost ${money(c.costUsd)}`, c.words].filter(Boolean).join(' · ');
+}
+
+// You here: the venues the sheet could not read; the holding, the positions with their cost and keys, the open orders with who
+// placed them and Change…; and under What agents do here a line per agent action — an order of theirs working here, a
+// statement line by them. A market the asset read does not name (an event no venue connected lists) holds nothing here.
+function youHere(view, part, here, keyed, page, now) {
+  if (!assetKeyOf(view.item)) return empty('You don’t hold any.');
+  const unit = view.priced.unit;
+  const tail = keys => (keys.length ? `<span class="btn-row">${keys.join('')}</span>` : '');
+  return depthBody(part, () => {
+    const h = here.held;
+    const lines = [
+      ...(h ? [line('·', esc(`${[qtyWord(h.amount), h.asset].filter(Boolean).join(' ')} · ${money(h.usd)}`), esc(costWords(costOf(here, { key: h.key }), unit)))] : []),
+      ...here.positions.map(p => line('·', `${esc(`${p.venueName || p.venue} · ${[p.side, qtyWord(p.qty), p.symbol].filter(Boolean).join(' ')} · `)}` +
+        `<span class="${tone(p.unrealizedUsd)}">${esc(signedMoney(p.unrealizedUsd))}</span>${p.paper ? ` ${tag('Paper')}` : ''}`,
+        esc(costWords(costOf(here, p), unit)), '', keyed ? tail(positionKeys(p, page)) : '')),
+      ...here.orders.map(o => line('·', esc(orderWords(o)), '', '', keyed ? tail([changeKey(o, page)].filter(Boolean)) : '')),
+    ];
+    const agents = here.agents.map(a => (a.type === 'order' ? line('·', esc(orderWords(a.order)))
+      : line(DONE.has(a.line.status) ? '✓' : '·', esc([when(a.line.at, now), a.line.description, money(a.line.amountUsd)].filter(Boolean).join(' · ')),
+        esc([a.line.status, a.line.by].filter(Boolean).join(' · ')), DONE.has(a.line.status) ? 'ok' : '')));
+    return here.missing.map(note).join('') + (lines.length ? feed(lines) : empty('You don’t hold any.')) +
+      (agents.length ? `<div class="mk-h3">What agents do here</div>${feed(agents)}` : '');
+  }, 'Account unavailable', now);
+}
+
+// a figure of the book or the trades in the market's unit (an event's in cents), a size as the source gives it
+const unitPrice = (v, unit) => priceWord(v === null ? null : unit === 'cents' ? Number((v * 100).toPrecision(12)) : v, unit);
+const sizeWord = n => (n === null || n === undefined ? EM : qtyWord(n));
+
+// the order book: ten levels a side, best first, bids beside asks; whose book it is, in its words; Top of book only for a book
+// that is the best bid and ask alone
+function bookHtml(b, unit) {
+  const rows = Math.min(10, Math.max(b.bids.length, b.asks.length));
+  if (!rows) return empty('No orders on the book.');
+  const cell = (l, side) => (l ? `<td class="r ${side}">${esc(unitPrice(l.price, unit))}</td><td class="r">${esc(sizeWord(l.size))}</td>` : '<td></td><td></td>');
+  const body = Array.from({ length: rows }, (_, i) => `<tr>${cell(b.bids[i], 'up')}${cell(b.asks[i], 'down')}</tr>`).join('');
+  return `<table class="mk-book"><thead><tr><th scope="col" class="r">Bid</th><th scope="col" class="r">Size</th><th scope="col" class="r">Ask</th><th scope="col" class="r">Size</th></tr></thead>` +
+    `<tbody>${body}</tbody></table>${note([b.from, b.depth === 'top' ? 'Top of book only' : ''].filter(Boolean).join(' · '))}`;
+}
+
+// the latest trades: twenty, newest first — the price, the size, the side that took where the source says it, when — or the
+// Account's sentence when the source publishes none
+function tradesHtml(t, unit, now) {
+  if (!t.trades.length) return empty(t.none || 'No trades yet.');
+  return feed(t.trades.slice(0, 20).map(x => line('·', esc([unitPrice(x.price, unit), sizeWord(x.size)].join(' · ')),
+    esc([x.side === 'buy' ? 'Buy' : x.side === 'sell' ? 'Sell' : '', when(x.at, now)].filter(Boolean).join(' · ')), x.side === 'buy' ? 'up' : x.side === 'sell' ? 'down' : '')));
+}
+
+// a perpetual's funding: what was paid out of the position, what was received, each hour's line newest first; None yet. when
+// there is none
+function fundingHtml(lines, now) {
+  if (!lines.length) return empty('None yet.');
+  return feed(lines.map(l => {
+    const paid = l.usd === null ? '' : l.usd >= 0 ? `Paid ${money(l.usd)}` : `Received ${money(-l.usd)}`;
+    const rate = l.rate === null ? '' : `rate ${(l.rate * 100).toFixed(4)}%`;
+    return line('·', `${esc(paid || EM)}${l.paper ? ` ${tag('Paper')}` : ''}`,
+      esc([when(l.at, now), l.venueName, [l.side, qtyWord(l.qty)].filter(Boolean).join(' '), rate].filter(Boolean).join(' · ')), l.usd !== null && l.usd < 0 ? 'ok' : '');
+  }));
+}
+
 function accountPage(id, view, state, now) {
   const { priced } = view;
   const unit = priced.unit;
@@ -237,21 +326,29 @@ function accountPage(id, view, state, now) {
     '', '', !l.connected && l.public ? '<a class="link mk-link" href="#/account/venues">Connect to trade</a>' : ''));
   if (venues.length) left.push(section('Across venues', feed(venues)));
 
-  // what is held of it, what is working on it and what was stated for it, each as far as its own read has got; on a page that
-  // signs for an Account that takes writes, a position's Close… (Sell…) and Leverage…, an order's Change…
+  // You here, from the asset sheet: what is held of it, its positions with their cost, its open orders with who placed them, and
+  // what agents do here; on a page that signs for an Account that takes writes, a position's Close… (Sell…) and Leverage…, an
+  // order's Change…
   const keyed = marketKeysOn(state);
   const page = state.account?.data;
-  const tail = keys => (keys.length ? `<span class="btn-row">${keys.join('')}</span>` : '');
-  const held = [
-    ...view.held.assets.map(a => line('·', esc(`${[qtyWord(a.amount), a.asset].filter(Boolean).join(' ')} · ${money(a.usd)}`))),
-    ...view.held.positions.map(p => line('·', `${esc(`${p.venueName || p.venue} · ${[p.side, qtyWord(p.qty), p.symbol].filter(Boolean).join(' ')} · `)}` +
-      `<span class="${tone(p.unrealizedUsd)}">${esc(signedMoney(p.unrealizedUsd))}</span>${p.paper ? ` ${tag('Paper')}` : ''}`, '', '', keyed ? tail(positionKeys(p, page)) : '')),
-  ];
-  right.push(section('You hold', partBody(view.reads.held, held, 'You don’t hold any.', view.reads.held.unreadable ? 'Account unreadable' : 'Holdings unavailable')));
-  const orders = view.orders.map(o => line('·', esc(orderWords(o)), '', '', keyed ? tail([changeKey(o, page)].filter(Boolean)) : ''));
-  // nothing working once the page has answered: no section; a page the face does not recognise: unreadable, never loading
-  if (orders.length || !view.reads.orders.answered || view.reads.orders.failed) {
-    right.push(section('Open orders', partBody(view.reads.orders, orders, '', view.reads.orders.unreadable ? 'Account unreadable' : 'Account unavailable')));
+  const kept = own(state.markets?.depth, id);
+  const depth = Object.fromEntries(['here', 'book', 'trades', 'funding'].map(k => [k, isRecord(own(kept, k)) ? kept[k] : {}]));
+  const here = hereOf(depth.here.data, page);
+  const hereAnswered = depth.here.data != null;
+  right.push(section('You here', youHere(view, depth.here, here, keyed, page, now)));
+  // the order book and the latest trades at the line the page follows
+  const follows = followOf(view.item) !== null;
+  if (follows) {
+    left.push(section('Order book', depthBody(depth.book, () => bookHtml(bookOf(depth.book.data), unit), 'Order book unavailable', now,
+      () => bookOf(depth.book.data).at)));
+    left.push(section('Latest trades', depthBody(depth.trades, () => tradesHtml(tradesOf(depth.trades.data), unit, now), 'Trades unavailable', now,
+      () => tradesOf(depth.trades.data).trades[0]?.at ?? '')));
+  }
+  // a perpetual's funding: what was paid and received at its lines
+  if (view.item.kind === 'perp') {
+    const bodies = isRecord(depth.funding.data) ? Object.values(depth.funding.data) : [];
+    const symbols = view.legs.filter(l => l.connected === true).map(l => l.symbol);
+    right.push(section('Funding', depthBody(depth.funding, () => fundingHtml(fundingOf(bodies, symbols), now), 'Funding unavailable', now)));
   }
   const about = aboutHtml(state.conversations, view.about, now);
   if (about.length) right.push(section('Gravit on it', feed(about)));
@@ -261,9 +358,11 @@ function accountPage(id, view, state, now) {
     '<button type="button" class="link mk-link" data-action="openStatement">Open the Statement →</button>'));
   // the hand order is the owner's: Buy and Sell only on a page that signs, for a market of a Trade kind (a perpetual, a pre-IPO
   // one, is listed, not traded from the face), Sell only where something of it is held
-  const trade = state.owner?.role === 'signs' && tradeableOf(view.item) ? { held: view.held.assets.length > 0 || view.held.positions.length > 0 } : null;
-  // a perpetual's Leverage…: its first connected line whose venue sets leverage
-  const leverage = keyed ? marketLeverageSeedOf(view.item, view.legs, view.held.positions, page) : null;
+  // what is held is the asset sheet's once it has answered, else the holdings' as the page read them
+  const holds = hereAnswered ? here.held !== null || here.positions.length > 0 : view.held.assets.length > 0 || view.held.positions.length > 0;
+  const trade = state.owner?.role === 'signs' && tradeableOf(view.item) ? { held: holds } : null;
+  // a perpetual's Leverage…: its first connected line whose venue sets leverage, the leverage held there
+  const leverage = keyed ? marketLeverageSeedOf(view.item, view.legs, hereAnswered ? here.positions : view.held.positions, page) : null;
   return pageHtml(who, keysHtml(id, view.watched, trade, leverage), top, left, right);
 }
 

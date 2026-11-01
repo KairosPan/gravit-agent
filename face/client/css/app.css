@@ -645,6 +645,12 @@ a.mk-line:hover .mk-t1 { text-decoration: underline; text-underline-offset: 3px;
 .mk-t1 { font-size: 14px; font-weight: 500; }
 .mk-t2 { font-size: 12px; color: var(--dim); }
 .mk-link { min-height: 36px; display: inline-flex; align-items: center; border: 0; padding: 0; background: none; }
+/* a market's page's four reads beside its price: What agents do here under You here; the order book, bids beside asks */
+.mk-h3 { margin: 14px 0 2px; font-size: 13px; font-weight: 700; color: var(--dim); }
+.mk-book { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.mk-book th { padding: 6px 4px; font-size: 12px; font-weight: 600; color: var(--dim); }
+.mk-book td { padding: 3px 4px; border-top: 1px solid var(--border); }
+.mk-book .r { text-align: right; }
 
 /* ---- Trade, after gravit-ui's (Linqi's ui/trade.css): the picker and Under way on the left, the ticket on the right ---- */
 .tp { container-type: inline-size; min-width: 0; }

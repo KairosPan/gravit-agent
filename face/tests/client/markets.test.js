@@ -12,6 +12,9 @@ import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { rowsOf, CANDLE_RANGES } from '../../client/js/host/market-view.js';
 import { fmtClock, fmtDate, sameDay } from '../../client/js/time.js';
+import { createStore } from '../../client/js/store.js';
+import { startMarkets } from '../../client/js/host/markets.js';
+import { getJsonVia } from '../../client/js/app.js';
 
 // the renderer's clock: the stand-in's day — its statement is from that morning, its events close after it
 const NOW = Date.parse('2026-10-22T12:00:00.000Z');
@@ -57,7 +60,7 @@ const conv = (id, over = {}) => ({ id, title: 'T ' + id, kind: 'gravit', members
 function screen({
   route = { screen: 'markets', id: null }, all = fx('explore-all'), predictions = null, tab = null, sort = null, q = '', results = null,
   cn = [], quotes = {}, connection = 'polling', status = null, watch = [], asked = {}, live = [], candles = null, account = false,
-  conversations = [], watchError = null, role = null,
+  conversations = [], watchError = null, role = null, here,
 } = {}) {
   let s = R.nav(emptyState(), route);
   if (all) s = R.exploreLoaded(s, { tab: 'all', data: all, at: NOW });
@@ -75,6 +78,10 @@ function screen({
     s = R.paperLoaded(s, { data: fx('holdings-paper'), at: NOW });
     s = R.statementLoaded(s, { data: fx('statement'), at: NOW });
   }
+  // the asset sheet of the page's market, the stand-in's (a market it holds nothing of: an empty sheet), with the Account's
+  // reads; `here` another body, or null for none landed
+  const sheet = here !== undefined ? here : account && route.id ? assetSheet(route.id) : null;
+  if (sheet) s = R.depthLoaded(s, { id: route.id, part: 'here', data: sheet, at: NOW });
   if (tab) s = R.setMarketsTab(s, tab);
   if (q) s = R.setMarketsQuery(s, q);
   if (results) s = R.resultsLoaded(s, { data: results, at: NOW });
@@ -83,6 +90,9 @@ function screen({
   if (role) s = R.ownerStanding(s, { role, kid: role === 'signs' ? 'a5048199a8081854' : '' });
   return { s, html: renderMarketsScreen(s, NOW) };
 }
+// the stand-in's asset sheet for a market's page, by the asset the Account reads it as
+const SHEETS = { 'coin:BTC': 'asset-btc', 'perp:BTC': 'asset-btc', 'coin:SOL': 'asset-sol', 'stock:NVDA': 'asset-nvda', 'event:predict:SI-FEDCUT-DEC': 'asset-event' };
+const assetSheet = id => (Object.hasOwn(SHEETS, id) ? fx(SHEETS[id]) : { ok: true, key: id, positions: [], orders: [], lines: [], cost: [], missing: [] });
 const rowIds = html => [...html.matchAll(/<tr data-id="([^"]+)"/g)].map(m => m[1]);
 const rowOf = (html, id) => html.match(new RegExp(`<tr data-id="${id.replace(/[/.:]/g, c => `\\${c}`)}">[\\s\\S]*?</tr>`))?.[0] ?? '';
 const cells = tr => [...tr.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map(m => m[1]);
@@ -244,7 +254,7 @@ test("Watching is the Account's list and the face's: a row watched at the Accoun
   assert.match(renderMarketsScreen(s, NOW), /<p class="mk-note">ETH\/USDT is not listed at Stand-in Exchange\.<\/p>/);
 });
 
-test('the page: no Buy, no Sell on a page that does not sign; the range seg; Across venues with best and Connect to trade; You hold and Open orders; On the statement', () => {
+test('the page: no Buy, no Sell on a page that does not sign; the range seg; Across venues with best and Connect to trade; You here; On the statement', () => {
   const page = (id, over = {}) => screen({ route: { screen: 'markets', id }, account: true, ...over });
   const btc = page('coin:BTC', {
     watch: ['coin:BTC'],
@@ -280,9 +290,15 @@ test('the page: no Buy, no Sell on a page that does not sign; the range seg; Acr
   assert.match(across[3], /<div class="mk-t1">Stand-in Public Exchange · BTC\/USD · \$62,480\.00<\/div><\/div><a class="link mk-link" href="#\/account\/venues">Connect to trade<\/a>/);
   assert.equal(across.filter(l => l.includes('Connect to trade')).length, 1, 'only the public line');
   assert.equal(across.filter(l => l.includes('>Best<')).length, 1);
-  // You hold: the coin across its venues; Open orders: the one still working at its lines, the canceled one not
-  assert.deepEqual(linesOf(section(html, 'You hold')).map(text), ['·0.124 BTC · $7,747.40']);
-  assert.deepEqual(linesOf(section(html, 'Open orders')).map(text), ['·Stand-in Exchange · Sell 0.002 BTC/USDT · limit 63,226.6 · open · You']);
+  // You here, from the asset sheet: the coin across its venues and the perpetual on it, each with what was paid; the order still
+  // working, with who placed it; no agent acts here. You hold and Open orders are no more
+  assert.deepEqual(linesOf(section(html, 'You here')).map(text), [
+    '·0.124 BTC · $7,747.40cost known for 0 of 0.124 BTC',
+    '·Stand-in Exchange · long 0.01 BTC/USDT:USDT · +$19.79avg $60,520.00 · cost known for 0.01 of 0.01 contracts',
+    '·Stand-in Exchange · Sell 0.002 BTC/USDT · limit 63,226.6 · open · You',
+  ]);
+  assert.doesNotMatch(section(html, 'You here'), /What agents do here/);
+  for (const gone of ['You hold', 'Open orders']) assert.equal(section(html, gone), '', gone);
   // On the statement: the lines that name it, newest first, in the Account's words; the Statement a click away
   const stated = section(html, 'On the statement');
   assert.match(stated, /<div class="mk-sec-head"><div class="mk-h2">On the statement<\/div><button type="button" class="link mk-link" data-action="openStatement">Open the Statement →<\/button><\/div>/);
@@ -297,7 +313,7 @@ test('the page: no Buy, no Sell on a page that does not sign; the range seg; Acr
   // before the Account's reads answer, nothing is claimed of what is held, working or stated: each part says Loading…
   const unread = page('coin:BTC', { account: false }).html;
   assert.match(unread, /aria-label="Across venues"/);
-  for (const part of ['You hold', 'Open orders', 'On the statement']) assert.match(section(unread, part), /<p class="mk-empty">Loading…<\/p>/, part);
+  for (const part of ['You here', 'On the statement']) assert.match(section(unread, part), /<p class="mk-empty">Loading…<\/p>/, part);
   assert.doesNotMatch(unread, /You don’t hold any|Nothing on the statement/);
 
   // a stock's page with its history: the closes for the range, the Account's own words under them; the public line is the
@@ -313,8 +329,7 @@ test('the page: no Buy, no Sell on a page that does not sign; the range seg; Acr
   assert.deepEqual(linesOf(section(nvda.html, 'Across venues')).map(text), [
     '·Stand-in Broker · NVDA · $182.40 Best', '·Momentum · paper · NVDA · $182.40 Paper', '·Stand-in · 15 min delayed · NVDA · $182.40Connect to trade',
   ]);
-  assert.deepEqual(linesOf(section(nvda.html, 'You hold')).map(text), ['·2 NVDA · $364.80']);
-  assert.equal(section(nvda.html, 'Open orders'), '', 'nothing working: no section');
+  assert.deepEqual(linesOf(section(nvda.html, 'You here')).map(text), ['·2 NVDA · $364.80cost known for 0 of 2 NVDA'], 'nothing working: no order line');
   assert.match(section(nvda.html, 'On the statement'), /<p class="mk-empty">Nothing on the statement about it yet\.<\/p>/);
   assert.equal(section(nvda.html, 'Gravit on it'), '');
   // a range chosen and still reading: Loading…, that range pressed; one answered with no closes: No history
@@ -333,7 +348,7 @@ test('the page: no Buy, no Sell on a page that does not sign; the range seg; Acr
   assert.match(fed.html, /<span class="mk-big">62¢<\/span><span class="up"><span aria-hidden="true">▲<\/span><span class="sr-only">up<\/span> 4¢<\/span><span class="mk-basis">24h<\/span><\/div><div class="mk-outs"><span class="mk-out">Yes 62¢<\/span><span class="mk-out">No 38¢<\/span><\/div>/);
   assert.match(fed.html, /<dt>24h volume<\/dt><dd>\$1\.8M<\/dd>/);
   assert.deepEqual(linesOf(section(fed.html, 'Across venues')).map(text), ['·Stand-in Predictions · SI-FEDCUT-DEC:YES · 62¢ Best']);
-  assert.match(section(fed.html, 'You hold'), /Stand-in Predictions · long 50 SI-FEDCUT-DEC:YES · <span class="down">-\$0\.50<\/span>/);
+  assert.match(section(fed.html, 'You here'), /Stand-in Predictions · long 50 SI-FEDCUT-DEC:YES · <span class="down">-\$0\.50<\/span><\/div><div class="mk-t2">avg 63¢ · cost \$31\.50 · cost known for 50 of 50 SI-FEDCUT-DEC:YES<\/div>/);
   const fill = linesOf(section(fed.html, 'On the statement'));
   assert.equal(fill.length, 1);
   assert.match(fill[0], /^<span class="mk-mark ok">✓<\/span>/);
@@ -350,7 +365,7 @@ test('the page: no Buy, no Sell on a page that does not sign; the range seg; Acr
   assert.match(cn, /class="btn mk-on" data-action="toggleWatch" data-id="cn:600519" aria-pressed="true">/);
   assert.match(cn, /data-action="handToGravit" data-id="cn:600519"/);
   assert.match(section(cn, 'Gravit on it'), /600519 into the close/);
-  assert.doesNotMatch(cn, /Across venues|You hold|On the statement/);
+  assert.doesNotMatch(cn, /Across venues|You hold|You here|Order book|Latest trades|Funding|On the statement/);
   // a key no read lists, and an old face id, are no page: the table
   assert.match(page('coin:GONE').html, /^<main class="main mkts">/);
   assert.match(page('us:AAPL').html, /^<main class="main mkts">/);
@@ -511,55 +526,43 @@ test("while searching, an answer without China's hits says the search is unavail
 test("each part of a market's page stands on its own read: Loading… until it answers, its empty words only after an answer, its failure said", () => {
   const bare = screen({ route: { screen: 'markets', id: 'coin:BTC' } }).s;
   const draw = s => renderMarketsScreen(s, NOW);
-  // the Account's page alone: Open orders are its own; what is held and what is stated are still unread — and, the page naming
-  // paper venues, what is held waits for the paper lens too
-  const paged = R.accountLoaded(bare, { data: fx('account'), at: NOW });
+  const here = (s, data) => R.depthLoaded(s, { id: 'coin:BTC', part: 'here', data, at: NOW });
+  // You here is the asset sheet's: Loading… until it answers, whatever else has — the page, the holdings
+  const paged = R.paperLoaded(R.holdingsLoaded(R.accountLoaded(bare, { data: fx('account'), at: NOW }), { data: fx('holdings'), at: NOW }), { data: fx('holdings-paper'), at: NOW });
   const pagedHtml = draw(paged);
-  assert.match(section(pagedHtml, 'Open orders'), /Stand-in Exchange · Sell 0\.002 BTC\/USDT · limit 63,226\.6 · open · You/);
-  assert.match(section(pagedHtml, 'You hold'), /<p class="mk-empty">Loading…<\/p>/);
+  assert.match(section(pagedHtml, 'You here'), /<p class="mk-empty">Loading…<\/p>/);
   assert.match(section(pagedHtml, 'On the statement'), /<p class="mk-empty">Loading…<\/p>/);
   assert.doesNotMatch(pagedHtml, /You don’t hold any|Nothing on the statement/);
-  const holdings = R.holdingsLoaded(paged, { data: fx('holdings'), at: NOW });
-  assert.match(section(draw(holdings), 'You hold'), /<p class="mk-empty">Loading…<\/p>/);
-  const lensed = R.paperLoaded(holdings, { data: fx('holdings-paper'), at: NOW });
-  assert.deepEqual(linesOf(section(draw(lensed), 'You hold')).map(text), ['·0.124 BTC · $7,747.40']);
+  const sheeted = here(paged, fx('asset-btc'));
+  assert.equal(linesOf(section(draw(sheeted), 'You here')).length, 3);
   // the statement read: the lines that name it; one that names nothing of it, the empty words
-  const stated = R.statementLoaded(lensed, { data: fx('statement'), at: NOW });
+  const stated = R.statementLoaded(sheeted, { data: fx('statement'), at: NOW });
   assert.equal(linesOf(section(draw(stated), 'On the statement')).length, 2);
-  assert.match(section(draw(R.statementLoaded(lensed, { data: { ok: true, lines: [] }, at: NOW })), 'On the statement'), /<p class="mk-empty">Nothing on the statement about it yet\.<\/p>/);
-  // read and holding nothing of it: the empty words
-  const empty = { ...fx('holdings'), rows: [], positions: [] };
-  const nothingHeld = R.paperLoaded(R.holdingsLoaded(paged, { data: empty, at: NOW }), { data: { ...fx('holdings-paper'), rows: [], positions: [] }, at: NOW });
-  assert.match(section(draw(nothingHeld), 'You hold'), /<p class="mk-empty">You don’t hold any\.<\/p>/);
+  assert.match(section(draw(R.statementLoaded(sheeted, { data: { ok: true, lines: [] }, at: NOW })), 'On the statement'), /<p class="mk-empty">Nothing on the statement about it yet\.<\/p>/);
+  // the sheet answered holding nothing of it: the empty words
+  const nothing = here(paged, { ok: true, key: 'crypto:BTC', positions: [], orders: [], lines: [], cost: [], missing: [] });
+  assert.match(section(draw(nothing), 'You here'), /<p class="mk-empty">You don’t hold any\.<\/p>/);
+  // the venues the sheet could not read, said over what it read
+  const missed = here(paged, { ...fx('asset-btc'), missing: [{ venue: 'wallet', venueName: 'Stand-in Wallet', why: 'no answer' }] });
+  assert.match(section(draw(missed), 'You here'), /<div class="mk-h2">You here<\/div><p class="mk-note">Stand-in Wallet did not answer<\/p><div class="mk-feed">/);
   // a read that failed before it answered says so, with the Account's sentence where the read keeps one
-  assert.match(section(draw(R.statementFailed(lensed, { at: NOW })), 'On the statement'), /<p class="mk-empty">Statement unavailable<\/p>/);
-  assert.match(section(draw(R.holdingsFailed(paged, { at: NOW })), 'You hold'), /<p class="mk-empty">Holdings unavailable<\/p>/);
-  assert.match(section(draw(R.paperFailed(holdings, { at: NOW })), 'You hold'), /<p class="mk-empty">Holdings unavailable<\/p>/);
-  const refused = draw(R.accountFailed(bare, { at: NOW, message: 'The account is restarting' }));
-  assert.match(section(refused, 'Open orders'), /<p class="mk-note">The account is restarting<\/p><p class="mk-empty">Account unavailable<\/p>/);
-  // the holdings and the statement keep their own sentences too
-  assert.match(section(draw(R.holdingsFailed(paged, { at: NOW, message: 'Venues are still settling.' })), 'You hold'),
-    /<p class="mk-note">Venues are still settling\.<\/p><p class="mk-empty">Holdings unavailable<\/p>/);
-  assert.match(section(draw(R.statementFailed(lensed, { at: NOW, message: 'The statement is being rebuilt.' })), 'On the statement'),
+  assert.match(section(draw(R.statementFailed(sheeted, { at: NOW })), 'On the statement'), /<p class="mk-empty">Statement unavailable<\/p>/);
+  const failed = m => R.depthFailed(paged, { id: 'coin:BTC', part: 'here', at: NOW, message: m });
+  assert.match(section(draw(failed(null)), 'You here'), /<div class="mk-h2">You here<\/div><p class="mk-empty">Account unavailable<\/p><\/section>/);
+  assert.match(section(draw(failed('Venues are still settling.')), 'You here'), /<p class="mk-note">Venues are still settling\.<\/p><p class="mk-empty">Account unavailable<\/p>/);
+  assert.match(section(draw(R.statementFailed(sheeted, { at: NOW, message: 'The statement is being rebuilt.' })), 'On the statement'),
     /<p class="mk-note">The statement is being rebuilt\.<\/p><p class="mk-empty">Statement unavailable<\/p>/);
   assert.match(section(draw(R.statementFailed(stated, { at: NOW, message: 'The statement is being rebuilt.' })), 'On the statement'),
     /<p class="mk-note">The statement is being rebuilt\.<\/p><div class="mk-feed">/, 'over the lines kept');
   // a failure after an answer keeps what was read, with the sentence over it
-  const kept = draw(R.accountFailed(stated, { at: NOW, message: 'The account is restarting' }));
-  assert.match(section(kept, 'Open orders'), /<p class="mk-note">The account is restarting<\/p><div class="mk-feed">[\s\S]*Sell 0\.002 BTC\/USDT/);
-  // answered with nothing working on it: no Open orders at all
-  assert.equal(section(draw(R.accountLoaded(bare, { data: { ...fx('account'), orders: [] }, at: NOW })), 'Open orders'), '');
-  // the Account's page landed as one the face does not recognise: Open orders are unreadable, never still loading
-  const moved = section(draw(R.accountLoaded(bare, { data: { ...fx('account'), venues: undefined }, at: NOW })), 'Open orders');
-  assert.match(moved, /<p class="mk-empty">Account unreadable<\/p>/);
-  assert.doesNotMatch(moved, /Loading…|Account unavailable/);
-  // and so is what is held, the holdings and the paper lens read or not: which lens leads is the page's to say, never the real
-  // book's in its place
-  const unread = R.accountLoaded(bare, { data: { ...fx('account'), venues: undefined }, at: NOW });
-  const heldUnder = section(draw(R.paperLoaded(R.holdingsLoaded(unread, { data: fx('holdings'), at: NOW }), { data: fx('holdings-paper'), at: NOW })), 'You hold');
-  assert.match(heldUnder, /<p class="mk-empty">Account unreadable<\/p>/);
-  assert.equal(linesOf(heldUnder).length, 0, 'no holding drawn under it');
-  assert.doesNotMatch(heldUnder, /You don’t hold any|Holdings unavailable|Loading…/);
+  const kept = draw(R.depthFailed(stated, { id: 'coin:BTC', part: 'here', at: NOW, message: 'The account is restarting' }));
+  assert.match(section(kept, 'You here'), /<p class="mk-note">The account is restarting<\/p><div class="mk-feed">[\s\S]*Sell 0\.002 BTC\/USDT/);
+  // a kept answer the proxy re-served: As of the last fresh answer
+  const staleHtml = draw(R.depthLoaded(sheeted, { id: 'coin:BTC', part: 'here', data: { ...fx('asset-btc'), stale: true }, at: NOW + 60_000 }));
+  assert.match(section(staleHtml, 'You here'), new RegExp(`<p class="mk-note">As of ${fmtClock(NOW)}</p><div class="mk-feed">`));
+  // a market the asset read names nothing for (an event no connected venue lists) holds nothing here, never Loading…
+  const paris = screen({ route: { screen: 'markets', id: PARIS }, all: withEvents(), here: null }).html;
+  assert.match(section(paris, 'You here'), /<p class="mk-empty">You don’t hold any\.<\/p>/);
 });
 
 test("a failed history read says so under the range seg — the Account's sentence, else History unavailable — and the closes kept for the range stay", () => {
@@ -767,15 +770,15 @@ test("on a page that signs for an Account that takes writes, a market's page car
   // a perpetual: Leverage… among its keys at its first connected line, the leverage held there; You hold its Close… and Leverage…
   const btc = page('perp:BTC');
   assert.ok(keys(btc).startsWith('<div class="mk-d-acts"><button type="button" class="btn" data-action="openSheet" data-kind="leverage" data-venue="ex" data-venue-name="Stand-in Exchange" data-symbol="BTC/USDT:USDT" data-name="BTC perpetual" data-leverage="3">Leverage…</button>'), keys(btc));
-  const held = section(btc, 'You hold');
+  const held = section(btc, 'You here');
   assert.match(held, /data-kind="close" data-venue="ex" data-symbol="BTC\/USDT:USDT"[^>]*>Close…<\/button>/);
   assert.match(held, /data-kind="leverage" data-venue="ex"[^>]*>Leverage…<\/button>/);
   // a market with orders working: Open orders' Change… on each resting one at a venue that amends
-  const sol = section(page('coin:SOL'), 'Open orders');
+  const sol = section(page('coin:SOL'), 'You here');
   for (const id of ['ord-0010', 'ord-0004', 'ord-0002']) assert.match(sol, new RegExp(`data-kind="amend" data-venue="ex" data-order="${id}"[^>]*>Change…</button>`), id);
   assert.doesNotMatch(keys(page('coin:SOL')), /data-kind="leverage"/, 'spot sets no leverage');
   // an event held is sold
-  assert.match(section(page('event:predict:SI-FEDCUT-DEC', { predictions: fx('explore-predictions'), tab: 'predictions' }), 'You hold'), /data-kind="close" data-venue="predict"[^>]*>Sell…<\/button>/);
+  assert.match(section(page('event:predict:SI-FEDCUT-DEC', { predictions: fx('explore-predictions'), tab: 'predictions' }), 'You here'), /data-kind="close" data-venue="predict"[^>]*>Sell…<\/button>/);
   // a page that does not sign, or an Account that is read-only: none of the three
   const none = /data-kind="(close|amend|leverage)"/;
   for (const role of [null, 'pending', 'signed-out']) assert.doesNotMatch(page('perp:BTC', { role }) + page('coin:SOL', { role }), none, String(role));
@@ -784,4 +787,134 @@ test("on a page that signs for an Account that takes writes, a market's page car
     const { s } = screen({ route: { screen: 'markets', id }, account: true, role: 'signs' });
     assert.doesNotMatch(renderMarketsScreen(R.accountLoaded(s, { data: ro, at: NOW }), NOW), none, `read-only ${id}`);
   }
+});
+
+// ── a market page's four reads beside its price (plan 4a Task 4) ──
+
+// a full book of `n` levels a side about 62,500, the size of the third bid not given
+const fullBook = (n, over = {}) => ({
+  ok: true, venue: 'ex', venueName: 'Stand-in Exchange', symbol: 'BTC/USDT',
+  book: {
+    bids: Array.from({ length: n }, (_, i) => [62500 - i, i === 2 ? null : 0.1 * (i + 1)]), asks: Array.from({ length: n }, (_, i) => [62501 + i, 0.2]),
+    at: '2026-10-22T11:59:30.000Z', from: 'Stand-in Exchange', depth: 'full',
+  },
+  ...over,
+});
+const trade = (i, side) => ({ price: 62500 + i, size: 0.01, ...(side ? { side } : {}), at: new Date(NOW - (30 - i) * 1_000).toISOString() });
+const depthOf = (s, id, part, data, extra = {}) => R.depthLoaded(s, { id, part, data, at: NOW, ...extra });
+
+test('the four reads: You here with what agents do here, the order book, the latest trades, a perpetual’s funding', () => {
+  // You here: the holding, the orders with who placed them, then a line per agent action
+  const sol = screen({ route: { screen: 'markets', id: 'coin:SOL' }, account: true }).html;
+  const solHere = section(sol, 'You here');
+  const [mine, agents] = solHere.split('<div class="mk-h3">What agents do here</div>');
+  assert.deepEqual(linesOf(mine).map(text), [
+    '·25 SOL · $3,571.25cost known for 0 of 25 SOL',
+    '·Stand-in Exchange · Buy 0.707 SOL/USDT · limit 141.44 · open · Agent · Claude Code',
+    '·Stand-in Exchange · Sell 0.6 SOL/USDT · stop · open · You',
+    '·Stand-in Exchange · Buy 0.5 SOL/USDT · limit 142.44 · open · You',
+  ]);
+  const at = fx('asset-sol').lines.find(l => l.by !== 'You').at;
+  assert.deepEqual(linesOf(agents).map(text), [
+    '·Stand-in Exchange · Buy 0.707 SOL/USDT · limit 141.44 · open · Agent · Claude Code',
+    `·${stamp(at)} · Buy 0.707 SOL · SOL / USDT · limit 141.44 · $0.00open · Claude Code, inside its limit`,
+  ]);
+
+  // the order book: ten levels a side, best first, a size not given as —, the source in its words
+  const base = screen({ route: { screen: 'markets', id: 'coin:BTC' }, account: true }).s;
+  const draw = s => renderMarketsScreen(s, NOW);
+  const booked = draw(depthOf(base, 'coin:BTC', 'book', fullBook(12)));
+  const book = section(booked, 'Order book');
+  const rows = [...book.matchAll(/<tr><td class="r up">([^<]*)<\/td><td class="r">([^<]*)<\/td><td class="r down">([^<]*)<\/td><td class="r">([^<]*)<\/td><\/tr>/g)].map(m => m.slice(1));
+  assert.equal(rows.length, 10, 'ten levels a side');
+  assert.deepEqual(rows[0], ['$62,500.00', '0.1', '$62,501.00', '0.2']);
+  assert.deepEqual(rows[2], ['$62,498.00', '—', '$62,503.00', '0.2']);
+  assert.match(book, /<\/table><p class="mk-note">Stand-in Exchange<\/p><\/section>$/);
+  // the stand-in's: the best bid and ask alone
+  const top = section(draw(depthOf(base, 'coin:BTC', 'book', fx('book'))), 'Order book');
+  assert.match(top, /<p class="mk-note">Stand-in Exchange · Top of book only<\/p>/);
+  assert.equal([...top.matchAll(/<tr><td class="r up">/g)].length, 1);
+
+  // the latest trades: twenty, newest first, the side that took where the source says it — or the Account's none sentence
+  const traded = section(draw(depthOf(base, 'coin:BTC', 'trades', { ok: true, venue: 'ex', symbol: 'BTC/USDT', trades: Array.from({ length: 25 }, (_, i) => trade(i, i % 2 ? 'sell' : '')) })), 'Latest trades');
+  const lines = linesOf(traded).map(text);
+  assert.equal(lines.length, 20);
+  assert.equal(lines[0], `·$62,524.00 · 0.01${fmtClock(NOW - 6_000)}`, 'the newest first, no side said');
+  assert.equal(lines[1], `·$62,523.00 · 0.01Sell · ${fmtClock(NOW - 7_000)}`);
+  assert.match(section(draw(depthOf(base, 'coin:BTC', 'trades', fx('trades'))), 'Latest trades'), /<p class="mk-empty">Stand-in Exchange publishes no trades the account can read<\/p>/);
+
+  // each before its read answers: Loading…; failed before an answer: unavailable, in the Account's sentence where it gave one
+  for (const [part, label] of [['book', 'Order book'], ['trades', 'Latest trades']]) assert.match(section(draw(base), label), /<p class="mk-empty">Loading…<\/p>/, label);
+  const failed = (s, part, message = null) => R.depthFailed(s, { id: 'coin:BTC', part, at: NOW, message });
+  assert.match(section(draw(failed(base, 'book', 'Stand-in Exchange did not answer in time')), 'Order book'), /<p class="mk-note">Stand-in Exchange did not answer in time<\/p><p class="mk-empty">Order book unavailable<\/p>/);
+  assert.match(section(draw(failed(base, 'trades')), 'Latest trades'), /<p class="mk-empty">Trades unavailable<\/p>/);
+  // a kept book re-served stale: As of its own stamp
+  assert.match(section(draw(depthOf(base, 'coin:BTC', 'book', { ...fullBook(2), stale: true })), 'Order book'), new RegExp(`<p class="mk-note">As of ${fmtClock(Date.parse('2026-10-22T11:59:30.000Z'))}</p><table class="mk-book">`));
+  // no funding on a coin's page
+  assert.equal(section(booked, 'Funding'), '');
+
+  // a perpetual's funding: what was paid and received, newest first, at its lines alone; None yet. when there is none
+  const perp = screen({ route: { screen: 'markets', id: 'perp:BTC' }, account: true }).s;
+  assert.match(section(draw(perp), 'Funding'), /<p class="mk-empty">Loading…<\/p>/);
+  const paid = depthOf(perp, 'perp:BTC', 'funding', {
+    ok: true, missing: [], lines: [
+      { at: '2026-10-22T10:00:00.000Z', symbol: 'BTC/USDT:USDT', side: 'long', qty: 0.01, rate: 0.0001, usd: 0.06, venue: 'ex', venueName: 'Stand-in Exchange' },
+      { at: '2026-10-22T11:00:00.000Z', symbol: 'BTC/USDT:USDT', side: 'long', qty: 0.01, rate: -0.00005, usd: -0.03, venue: 'ex', venueName: 'Stand-in Exchange' },
+      { at: '2026-10-22T11:30:00.000Z', symbol: 'ETH/USDT:USDT', side: 'long', qty: 1, rate: 0.0001, usd: 0.3, venue: 'ex', venueName: 'Stand-in Exchange' },
+    ],
+  }, { venue: 'ex' });
+  assert.deepEqual(linesOf(section(draw(paid), 'Funding')).map(text), [
+    `·Received $0.03${fmtClock(Date.parse('2026-10-22T11:00:00.000Z'))} · Stand-in Exchange · long 0.01 · rate -0.0050%`,
+    `·Paid $0.06${fmtClock(Date.parse('2026-10-22T10:00:00.000Z'))} · Stand-in Exchange · long 0.01 · rate 0.0100%`,
+  ]);
+  assert.match(section(draw(depthOf(perp, 'perp:BTC', 'funding', { ok: true, missing: [], lines: [] }, { venue: 'ex' })), 'Funding'), /<p class="mk-empty">None yet\.<\/p>/);
+  assert.match(section(draw(R.depthFailed(perp, { id: 'perp:BTC', part: 'funding', at: NOW, message: 'Stand-in Exchange lists no funding to the account' })), 'Funding'),
+    /<p class="mk-note">Stand-in Exchange lists no funding to the account<\/p><p class="mk-empty">Funding unavailable<\/p>/);
+  // a stock's page has none
+  assert.equal(section(screen({ route: { screen: 'markets', id: 'stock:NVDA' }, account: true }).html, 'Funding'), '');
+});
+
+test('an Account that answers the book with express’s 404 page, and the trades with 503 unreachable', async () => {
+  // the face's getJson over a fetch that answers as the proxy passes the Account through: its reads, but the book (an express
+  // 404 page, HTML) and the trades (the proxy's 503 for an Account it cannot reach)
+  const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+  const fetch = async path => {
+    const [route, query = ''] = path.split('?');
+    const q = new URLSearchParams(query);
+    switch (route) {
+      case '/data/account/explore': return json(fx('explore-all'));
+      case '/data/account/candles': return json({ ...fx('candles'), venue: q.get('venue'), symbol: q.get('symbol'), range: q.get('range') });
+      case '/data/account/compare': return json({ ...fx('compare'), base: q.get('base') });
+      case '/data/account/quotes': return json({ ok: true, quotes: [] });
+      case '/data/account/asset': return json(fx('asset-btc'));
+      case '/data/account/book': return new Response('<!DOCTYPE html>\n<html lang="en"><head><meta charset="utf-8"><title>Error</title></head><body><pre>Cannot GET /api/account/book</pre></body></html>\n',
+        { status: 404, headers: { 'content-type': 'text/html; charset=utf-8' } });
+      case '/data/account/trades': return json({ ok: false, unreachable: 'ECONNREFUSED' }, 503);
+      default: return json({ ok: false, error: 'no such route' }, 404);
+    }
+  };
+  const errors = [];
+  const saved = { error: console.error, warn: console.warn, log: console.log };
+  for (const k of Object.keys(saved)) console[k] = (...a) => { errors.push([k, a]); };
+  try {
+    const store = createStore({ initial: R.nav(emptyState(), { screen: 'markets', id: 'coin:BTC' }), reducers: R });
+    const storage = { getItem: () => null, setItem() {}, removeItem() {} };
+    const markets = startMarkets({ store, getJson: getJsonVia(fetch), storage, win: null, stream: { follow() {} }, schedule: () => null, cancelTimer() {}, now: () => NOW });
+    markets.show(true);
+    markets.page('coin:BTC');
+    for (let i = 0; i < 20; i++) await new Promise(r => setTimeout(r, 0));
+    const html = renderMarketsScreen(store.get(), NOW);
+    // its price, its history and You here are drawn
+    assert.match(html, /<span class="mk-big">\$62,480\.00<\/span>/);
+    assert.match(section(html, 'Price history'), /class="mk-chart"/);
+    assert.match(section(html, 'You here'), /0\.124 BTC · \$7,747\.40/);
+    // the book and the trades are unavailable, with no words of the face's error in their place
+    assert.match(section(html, 'Order book'), /<div class="mk-h2">Order book<\/div><p class="mk-empty">Order book unavailable<\/p><\/section>/);
+    assert.match(section(html, 'Latest trades'), /<div class="mk-h2">Latest trades<\/div><p class="mk-empty">Trades unavailable<\/p><\/section>/);
+    assert.doesNotMatch(html, /Cannot GET|DOCTYPE|ECONNREFUSED|HTTP 404|HTTP 503|SyntaxError/);
+    markets.close();
+  } finally {
+    Object.assign(console, saved);
+  }
+  assert.deepEqual(errors, [], 'no parse error reaches the console');
 });

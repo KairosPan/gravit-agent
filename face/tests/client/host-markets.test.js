@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { createStore } from '../../client/js/store.js';
 import { reducers } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
-import { startMarkets, EXPLORE_MS, QUOTES_MS, QUOTE_PAIRS, WATCH_LIMIT, RANK_ROWS } from '../../client/js/host/markets.js';
+import { startMarkets, EXPLORE_MS, QUOTES_MS, QUOTE_PAIRS, WATCH_LIMIT, RANK_ROWS, BOOK_DEPTH, TRADES_LIMIT, FUNDING_LIMIT } from '../../client/js/host/markets.js';
 import { rowsOf, pageOf, cnStateWord } from '../../client/js/host/market-view.js';
 import { STORAGE_KEY, ACCOUNT_WATCH_KEY, readAccountWatch, saveAccountWatch } from '../../client/js/wire/market-model.js';
 
@@ -33,6 +33,8 @@ const pairsIn = path => query(path).pairs.split(',');
 const ALL = '/data/account/explore?limit=200';
 const PREDICTIONS = '/data/account/explore?tab=predictions&limit=200';
 const IDLE = { status: 'idle', data: null, at: null };
+// a market page's four reads beside its price (plan 4a Task 4)
+const DEPTH_READ = /^\/data\/account\/(asset|book|trades|funding)\?/;
 
 // the Account's quotes?pairs= answer: each pair's market (the stand-in's NVDA figures, stamped), the paper perp's refused, and any
 // pair named in `refuse` refused too
@@ -90,7 +92,7 @@ test('show reads explore now and every 20 s; quotes for the pairs in view every 
     tab: 'all', sort: 'volume', q: '',
     explore: {}, results: IDLE, accountQuotes: {}, candles: {}, compare: {}, watch: [], watchError: null, asked: {},
     watchlist: [], quotes: {}, providers: [], connection: 'idle', hitQuotes: {},
-    rank: { status: 'idle', data: null, at: null, sort: 'volume', message: null },
+    rank: { status: 'idle', data: null, at: null, sort: 'volume', message: null }, depth: {},
   }, 'the slice the host starts from');
   // two quiet stocks past the fixture's twelve rows: Most traded puts them last, so the first twelve rows leave them out
   const quiet = (symbol, usd) => ({
@@ -437,13 +439,15 @@ test('page: candles for the range, compare for a coin, the stream follow; leavin
       return undefined;
     },
   });
+  // the reads this test is about: the page's four beside its price are the next test's
+  const older = () => r.reads.filter(p => !DEPTH_READ.test(p));
   // a deep link: All's read has not answered, so the page's reads wait for the read that lists its market
   r.markets.page('coin:ETH');
-  assert.deepEqual(r.reads, []);
+  assert.deepEqual(older(), []);
   assert.deepEqual(r.follows, []);
   r.markets.show(true);
   await settle();
-  assert.deepEqual(r.reads, [ALL, '/data/account/candles?venue=ex&symbol=ETH%2FUSDT&range=1D', '/data/account/compare?base=ETH&side=buy']);
+  assert.deepEqual(older(), [ALL, '/data/account/candles?venue=ex&symbol=ETH%2FUSDT&range=1D', '/data/account/compare?base=ETH&side=buy']);
   assert.deepEqual(r.follows.at(-1), ['ex:ETH/USDT'], 'its first connected line, venue:symbol');
   await settle();
   assert.equal(r.m().candles['coin:ETH'].status, 'ready');
@@ -455,20 +459,20 @@ test('page: candles for the range, compare for a coin, the stream follow; leavin
   assert.deepEqual(view.compare.map(x => x.venue), ['ex', 'wallet']);
   r.fire(EXPLORE_MS);
   await settle();
-  assert.equal(r.reads.filter(p => p.startsWith('/data/account/candles')).length, 1, "the page's reads ran once");
+  assert.equal(older().filter(p => p.startsWith('/data/account/candles')).length, 1, "the page's reads ran once");
 
   // a range re-reads the candles for it, and the page keeps it; a range the Account does not draw is nothing
   r.markets.range('coin:ETH', '5D');
   assert.equal(r.m().candles['coin:ETH'].range, '5D');
   assert.equal(r.m().candles['coin:ETH'].status, 'loading');
   assert.equal(r.m().candles['coin:ETH'].data.range, '1D', 'the last candles stay while the next are read');
-  assert.equal(r.reads.at(-1), '/data/account/candles?venue=ex&symbol=ETH%2FUSDT&range=5D');
+  assert.equal(older().at(-1), '/data/account/candles?venue=ex&symbol=ETH%2FUSDT&range=5D');
   await settle();
   assert.equal(r.m().candles['coin:ETH'].data.range, '5D');
-  const n = r.reads.length;
+  const n = older().length;
   r.markets.range('coin:ETH', '2D');
   r.markets.range('coin:ETH', '1d');
-  assert.equal(r.reads.length, n);
+  assert.equal(older().length, n);
   assert.equal(r.m().candles['coin:ETH'].range, '5D');
   // a range left before its candles answer: they land nowhere
   r.markets.range('coin:ETH', '1M');
@@ -491,31 +495,31 @@ test('page: candles for the range, compare for a coin, the stream follow; leavin
   assert.deepEqual(r.follows.at(-1), []);
   // a stock is compared; an RWA only a public listing names follows that listing and is not compared; a cn page reads nothing
   r.markets.page('stock:NVDA');
-  assert.deepEqual(r.reads.slice(-2), ['/data/account/candles?venue=broker&symbol=NVDA&range=1D', '/data/account/compare?base=NVDA&side=buy']);
+  assert.deepEqual(older().slice(-2), ['/data/account/candles?venue=broker&symbol=NVDA&range=1D', '/data/account/compare?base=NVDA&side=buy']);
   assert.deepEqual(r.follows.at(-1), ['broker:NVDA']);
   r.markets.page('perp:ETH');
-  assert.deepEqual(r.reads.slice(-2), ['/data/account/candles?venue=ex&symbol=ETH%2FUSDT%3AUSDT&range=1D', '/data/account/compare?base=ETH&side=buy'], 'a perpetual is compared');
+  assert.deepEqual(older().slice(-2), ['/data/account/candles?venue=ex&symbol=ETH%2FUSDT%3AUSDT&range=1D', '/data/account/compare?base=ETH&side=buy'], 'a perpetual is compared');
   assert.deepEqual(r.follows.at(-1), ['ex:ETH/USDT:USDT']);
   await settle();
-  const rwa = r.reads.length;
+  const rwa = older().length;
   r.markets.page('rwa:NVDA');
-  assert.deepEqual(r.reads.slice(rwa), ['/data/account/candles?venue=standin-stock-tokens&symbol=NVDA&range=1D'], 'a mover is listed too; an RWA is not compared');
+  assert.deepEqual(older().slice(rwa), ['/data/account/candles?venue=standin-stock-tokens&symbol=NVDA&range=1D'], 'a mover is listed too; an RWA is not compared');
   assert.deepEqual(r.follows.at(-1), ['standin-stock-tokens:NVDA'], 'no connected line: its first public listing');
   r.store.dispatch('setMarketsTab', 'predictions');
   await settle();
-  const before = r.reads.length;
+  const before = older().length;
   r.markets.page('event:predict:SI-FEDCUT-DEC');
-  assert.deepEqual(r.reads.slice(before), ['/data/account/candles?venue=predict&symbol=SI-FEDCUT-DEC%3AYES&range=1D'], 'an event is not compared');
+  assert.deepEqual(older().slice(before), ['/data/account/candles?venue=predict&symbol=SI-FEDCUT-DEC%3AYES&range=1D'], 'an event is not compared');
   assert.deepEqual(r.follows.at(-1), ['predict:SI-FEDCUT-DEC:YES']);
   await settle();
-  const quiet = r.reads.length;
+  const quiet = older().length;
   r.markets.page('cn:600519');
-  assert.deepEqual(r.reads.slice(quiet), ['/data/account/candles?venue=china&symbol=600519&range=1D', '/data/account/quotes?pairs=china%7C600519'], "a cn page reads its history at the Account's china venue, and its price at once");
+  assert.deepEqual(older().slice(quiet), ['/data/account/candles?venue=china&symbol=600519&range=1D', '/data/account/quotes?pairs=china%7C600519'], "a cn page reads its history at the Account's china venue, and its price at once");
   assert.deepEqual(r.follows.at(-1), [], 'and follows nothing on the stream');
   // back to a page: its kept range
   r.store.dispatch('setMarketsTab', 'all');
   r.markets.page('coin:ETH');
-  assert.equal(r.reads.filter(p => p.startsWith('/data/account/candles?')).at(-1), '/data/account/candles?venue=ex&symbol=ETH%2FUSDT&range=3M');
+  assert.equal(older().filter(p => p.startsWith('/data/account/candles?')).at(-1), '/data/account/candles?venue=ex&symbol=ETH%2FUSDT&range=3M');
   assert.deepEqual(r.follows.at(-1), ['ex:ETH/USDT']);
   await settle();
   // a failed read keeps the last candles, under the range asked
@@ -531,15 +535,15 @@ test('page: candles for the range, compare for a coin, the stream follow; leavin
   await settle();
   assert.deepEqual([r.m().candles['coin:ETH'].status, r.m().candles['coin:ETH'].message], ['ready', null]);
   // a page whose market no read lists: nothing is read, and the page it left lets its follow go
-  const unlisted = r.reads.length;
+  const unlisted = older().length;
   r.markets.page('coin:NOPE');
-  assert.equal(r.reads.length, unlisted);
+  assert.equal(older().length, unlisted);
   assert.deepEqual(r.follows.at(-1), []);
   r.markets.close();
-  const closedReads = r.reads.length;
+  const closedReads = older().length;
   r.markets.page('stock:SPY');
   r.markets.range('coin:ETH', '1Y');
-  assert.equal(r.reads.length, closedReads, 'closed: nothing is read');
+  assert.equal(older().length, closedReads, 'closed: nothing is read');
 });
 
 test('old us: and crypto: stars are asked of the Account once; a hit moves the star, a miss is Not listed', async () => {
@@ -1252,4 +1256,182 @@ test('readAccountWatch keeps cn:600519 and drops cn:60051x', () => {
   assert.equal(typeof read.error, 'string', 'the unreadable ones are said');
   assert.equal(saveAccountWatch(memoryStorage(), ['cn:600519']), null);
   assert.equal(typeof saveAccountWatch(memoryStorage(), ['cn:60051x']), 'string');
+});
+
+// ── a market page's four reads beside its price (plan 4a Task 4): the asset sheet once on entering and after an owner action,
+// its book and latest trades at once and every 5 s while the page is on screen, a perpetual's funding once a connected venue
+
+const BOOK = { ok: true, venue: 'ex', venueName: 'Stand-in Exchange', symbol: 'BTC/USDT:USDT', book: { bids: [[62495.6, 0.4]], asks: [[62502, 1]], at: '2026-10-22T07:59:59.000Z', from: 'Stand-in Exchange', depth: 'full' } };
+const TRADES = { ok: true, venue: 'ex', venueName: 'Stand-in Exchange', symbol: 'BTC/USDT:USDT', trades: [{ price: 62500, size: 0.01, side: 'buy', at: '2026-10-22T07:59:58.000Z' }] };
+const FUNDING = venue => ({ ok: true, missing: [], lines: [{ at: '2026-10-22T07:00:00.000Z', symbol: 'BTC/USDT:USDT', side: 'long', qty: 0.01, rate: 0.0001, usd: 0.06, venue, venueName: venue }] });
+// the four reads' answers, the stand-in's asset sheet for any key
+function depthAnswer(path) {
+  const q = query(path);
+  if (path.startsWith('/data/account/asset?')) return { ...fx('asset-btc'), key: q.key };
+  if (path.startsWith('/data/account/book?')) return { ...BOOK, venue: q.venue, symbol: q.symbol };
+  if (path.startsWith('/data/account/trades?')) return { ...TRADES, venue: q.venue, symbol: q.symbol };
+  if (path.startsWith('/data/account/funding?')) return FUNDING(q.venue);
+  return undefined;
+}
+// All's read with the BTC perpetual connected at a second venue, the paper account
+function allWithPerp() {
+  const all = fx('explore-all');
+  itemOf(all, 'perp:BTC').at.push({ venue: 'paper', venueName: 'Paper', symbol: 'BTC/USDC:USDC', connected: true, canTrade: true, public: false, price: 62490, open: true });
+  return all;
+}
+const depthReads = r => r.reads.filter(p => DEPTH_READ.test(p));
+
+test('a market page reads its asset, book, trades and, for a perpetual, funding; the book and trades every 5 s; nothing after leaving', async () => {
+  const r = rig({ answer: path => (path === ALL ? allWithPerp() : depthAnswer(path) ?? (path.startsWith('/data/account/explore?') ? { ok: true, items: [] } : undefined)) });
+  r.markets.show(true);
+  await settle();
+  r.markets.page('perp:BTC');
+  assert.deepEqual(depthReads(r), [
+    '/data/account/asset?key=crypto%3ABTC',
+    '/data/account/funding?venue=ex&limit=100',
+    '/data/account/funding?venue=paper&limit=100',
+    '/data/account/book?venue=ex&symbol=BTC%2FUSDT%3AUSDT&depth=10',
+    '/data/account/trades?venue=ex&symbol=BTC%2FUSDT%3AUSDT&limit=20',
+  ], 'the asset its coin as the Account reads it, funding one a connected venue, the book and trades at the followed line');
+  assert.deepEqual([BOOK_DEPTH, TRADES_LIMIT, FUNDING_LIMIT], [10, 20, 100]);
+  const d = () => r.m().depth['perp:BTC'];
+  assert.deepEqual(['here', 'book', 'trades', 'funding'].map(k => d()[k].status), ['loading', 'loading', 'loading', 'loading']);
+  await settle();
+  assert.deepEqual(['here', 'book', 'trades', 'funding'].map(k => d()[k].status), ['ready', 'ready', 'ready', 'ready']);
+  assert.equal(d().here.data.key, 'crypto:BTC');
+  assert.equal(d().here.at, NOW);
+  assert.deepEqual(Object.keys(d().funding.data).sort(), ['ex', 'paper'], 'funding kept by venue');
+  assert.equal(d().book.data.book.from, 'Stand-in Exchange');
+
+  // every 5 s the book and the trades again; the asset sheet and the funding not
+  const n = depthReads(r).length;
+  r.fire(QUOTES_MS);
+  assert.deepEqual(depthReads(r).slice(n), ['/data/account/book?venue=ex&symbol=BTC%2FUSDT%3AUSDT&depth=10', '/data/account/trades?venue=ex&symbol=BTC%2FUSDT%3AUSDT&limit=20']);
+  await settle();
+  r.fire(QUOTES_MS);
+  assert.equal(depthReads(r).length, n + 4);
+  await settle();
+  // an owner action taken: the asset sheet again, past the face's cache
+  r.markets.afterAction();
+  assert.equal(depthReads(r).at(-1), '/data/account/asset?key=crypto%3ABTC&fresh=1');
+  await settle();
+
+  // hidden: no beat; shown again, the beat goes on
+  r.markets.show(false);
+  const hidden = depthReads(r).length;
+  r.fire(QUOTES_MS);
+  assert.equal(depthReads(r).length, hidden);
+  r.markets.show(true);
+  await settle();
+
+  // leaving: what was read goes, nothing more is read, an action reads nothing
+  r.markets.page(null);
+  assert.equal(Object.hasOwn(r.m().depth, 'perp:BTC'), false, 'dropped on leaving');
+  const left = depthReads(r).length;
+  r.fire(QUOTES_MS);
+  r.markets.afterAction();
+  await settle();
+  assert.equal(depthReads(r).length, left);
+  // a read in the air when the page is left lands nowhere
+  const slow = deferred();
+  const r2 = rig({ answer: path => (path === ALL ? allWithPerp() : path.startsWith('/data/account/book?') ? slow.promise : depthAnswer(path)) });
+  r2.markets.show(true);
+  await settle();
+  r2.markets.page('perp:BTC');
+  r2.markets.page('stock:NVDA');
+  slow.resolve(BOOK);
+  await settle();
+  assert.equal(Object.hasOwn(r2.m().depth, 'perp:BTC'), false);
+  // and nothing after close()
+  r2.markets.close();
+  const closed = depthReads(r2).length;
+  r2.fire(QUOTES_MS);
+  r2.markets.page('perp:BTC');
+  r2.markets.afterAction();
+  assert.equal(depthReads(r2).length, closed);
+});
+
+test("a stock's page reads no funding", async () => {
+  const r = rig({ answer: path => (path === ALL ? fx('explore-all') : depthAnswer(path)) });
+  r.markets.show(true);
+  await settle();
+  r.markets.page('stock:NVDA');
+  assert.deepEqual(depthReads(r), [
+    '/data/account/asset?key=equity%3ANVDA',
+    '/data/account/book?venue=broker&symbol=NVDA&depth=10',
+    '/data/account/trades?venue=broker&symbol=NVDA&limit=20',
+  ]);
+  await settle();
+  assert.equal(r.m().depth['stock:NVDA'].funding, undefined);
+  // a source that publishes no trades: said once, and asked no more while the page is on
+  const none = rig({ answer: path => (path === ALL ? fx('explore-all') : path.startsWith('/data/account/trades?') ? fx('trades') : depthAnswer(path)) });
+  none.markets.show(true);
+  await settle();
+  none.markets.page('stock:NVDA');
+  await settle();
+  none.fire(QUOTES_MS);
+  assert.deepEqual(depthReads(none).filter(p => p.startsWith('/data/account/trades?')).length, 1);
+  assert.equal(depthReads(none).filter(p => p.startsWith('/data/account/book?')).length, 2, 'the book still beats');
+});
+
+test("an A share's page reads none of the four", async () => {
+  const r = rig({ answer: path => (path === ALL ? fx('explore-all') : path.startsWith('/data/account/candles?') ? fx('candles-china-1d') : depthAnswer(path)) });
+  r.markets.show(true);
+  await settle();
+  r.markets.page('cn:600519');
+  await settle();
+  r.fire(QUOTES_MS);
+  r.markets.afterAction();
+  await settle();
+  assert.deepEqual(depthReads(r), []);
+  assert.deepEqual(r.m().depth, {});
+});
+
+test('only the latest book read lands', async () => {
+  const first = deferred();
+  const third = deferred();
+  let books = 0;
+  const r = rig({
+    answer: path => {
+      if (path === ALL) return fx('explore-all');
+      if (path.startsWith('/data/account/book?')) { books += 1; return books === 1 ? first.promise : books === 3 ? third.promise : { ...BOOK, venue: query(path).venue }; }
+      return depthAnswer(path);
+    },
+  });
+  r.markets.show(true);
+  await settle();
+  // in the air on the coin's page; the page left for another and come back to: a new read
+  r.markets.page('coin:BTC');
+  r.markets.page('stock:NVDA');
+  await settle();
+  r.markets.page('coin:BTC');
+  assert.equal(books, 3);
+  // the first answer, overtaken, lands nowhere; the latest does
+  first.resolve({ ...BOOK, book: { ...BOOK.book, from: 'the first' } });
+  await settle();
+  assert.equal(r.m().depth['coin:BTC'].book.status, 'loading');
+  assert.equal(r.m().depth['coin:BTC'].book.data, null);
+  third.resolve({ ...BOOK, book: { ...BOOK.book, from: 'the latest' } });
+  await settle();
+  assert.equal(r.m().depth['coin:BTC'].book.data.book.from, 'the latest');
+  // a refusal lands as a failure with the Account's sentence, the book kept; an answer re-served stale keeps the last fresh time
+  books = 10;
+  const refusing = rig({
+    answer: path => {
+      if (path === ALL) return fx('explore-all');
+      if (path.startsWith('/data/account/book?')) return (books += 1) === 12 ? refused(409, { ok: false, refusal: { message: 'Stand-in Exchange did not answer in time' } }) : books === 13 ? { ...BOOK, stale: true } : BOOK;
+      return depthAnswer(path);
+    },
+  });
+  refusing.markets.show(true);
+  await settle();
+  refusing.markets.page('coin:BTC');
+  await settle();
+  refusing.fire(QUOTES_MS);
+  await settle();
+  const book = () => refusing.m().depth['coin:BTC'].book;
+  assert.deepEqual([book().status, book().message, book().data.book.from], ['error', 'Stand-in Exchange did not answer in time', 'Stand-in Exchange']);
+  refusing.fire(QUOTES_MS);
+  await settle();
+  assert.deepEqual([book().status, book().data.stale, book().freshAt], ['ready', true, NOW]);
 });

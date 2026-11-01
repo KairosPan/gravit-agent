@@ -239,13 +239,14 @@ export function boot(win, host = {}) {
   // and on a card's event
   const seat = startSeat({ store, getJson, now });
   // what an owner action changed, read as the Account's own page reads it after one: the page, the holdings and the statement
-  // past the face's cache, and the seat's standing after one about an agent's key or limit; a done sheet then closes itself
-  // (the order sheet's words stay on the ticket)
+  // past the face's cache, a market page's asset sheet (plan 4a Task 4), and the seat's standing after one about an agent's key
+  // or limit; a done sheet then closes itself (the order sheet's words stay on the ticket)
   const SEAT_KINDS = new Set(['letIn', 'limit', 'endLimit', 'revoke']);
   function afterAction(kind) {
     void account.load({ fresh: true });
     void account.loadHoldings({ fresh: true });
     void account.loadStatement({ fresh: true });
+    markets.afterAction();
     if (SEAT_KINDS.has(kind)) void seat.load({ fresh: true });
     const s = store.get().sheet;
     if (kind !== 'order' && s?.kind === kind && s.status === 'done') sheet.close();
@@ -469,8 +470,9 @@ export function boot(win, host = {}) {
     // Trade left: its ticket closes and lets its line go — before a market's page follows its own
     const inTrade = route => route?.screen === 'trade';
     if (!inTrade(r) && inTrade(was)) { stopTradeSearch(); trade.closeTicket(); }
-    // a market's page (an Account key): its market followed on the stream with its candles and compare rows, and what is held of
-    // it and the statement's lines about it read; leaving it lets the market go
+    // a market's page (an Account key): its market followed on the stream with its candles and compare rows, its asset sheet,
+    // book, latest trades and a perpetual's funding (host/markets.js), and the holdings and the statement's lines about it read;
+    // leaving it lets the market go
     // an A share's page (a cn: id) too: its history at the Account's china venue, and nothing held or stated read for it
     const pageId = route => (route?.screen === 'markets' && (isCnKey(route.id) || isAccountKey(route.id)) ? route.id : null);
     if (pageId(r) !== pageId(was)) {

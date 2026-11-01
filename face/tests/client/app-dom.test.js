@@ -497,6 +497,7 @@ test('Hand to Gravit opens New message with the words in the composer', async ()
 const fx = name => JSON.parse(readFileSync(new URL(`../fixtures/account/${name}.json`, import.meta.url), 'utf8'));
 const isPage = path => path.split('?')[0] === '/data/account';
 const SEAT = { ok: true, url: 'http://127.0.0.1:4820', reachable: true, asOf: '2026-10-19T18:40:00.000Z', mode: 'guard', writes: { on: true, capUsd: 100 }, seat: { name: 'Gravit', status: 'admitted', limits: [] }, venues: [], cards: [], others: 0 };
+const ASSET_SHEETS = { 'crypto:BTC': 'asset-btc', 'crypto:SOL': 'asset-sol', 'equity:NVDA': 'asset-nvda', 'event:SI-FEDCUT-DEC:YES': 'asset-event' };
 function standinAnswer(path) {
   const [route, query = ''] = path.split('?');
   const q = new URLSearchParams(query);
@@ -511,6 +512,12 @@ function standinAnswer(path) {
     case '/data/account/candles': return { ...fx('candles'), venue: q.get('venue'), symbol: q.get('symbol'), range: q.get('range') };
     case '/data/account/compare': return { ...fx('compare'), base: q.get('base') };
     case '/data/account/quotes': return { ok: true, quotes: [] };
+    // a market page's four reads (plan 4a Task 4): the asset sheet the stand-in keeps for the key, else an empty one; its book (the
+    // best bid and ask alone), its trades (none published), no funding
+    case '/data/account/asset': return ASSET_SHEETS[q.get('key')] ? fx(ASSET_SHEETS[q.get('key')]) : { ok: true, key: q.get('key'), positions: [], orders: [], lines: [], cost: [], missing: [] };
+    case '/data/account/book': return { ...fx('book'), venue: q.get('venue'), symbol: q.get('symbol') };
+    case '/data/account/trades': return { ...fx('trades'), venue: q.get('venue'), symbol: q.get('symbol') };
+    case '/data/account/funding': return { ok: true, lines: [], missing: [] };
     case '/data/seat.json': return SEAT;
     default: return undefined;
   }
@@ -880,11 +887,15 @@ test("a market's page follows its market on the stream and reads what is held of
   await settle();
   assert.deepEqual(store.get().route, { screen: 'markets', id: 'coin:BTC' });
   assert.deepEqual(st.follows.at(-1), ['ex:BTC/USDT'], 'its first connected line');
-  for (const read of ['/data/account/holdings?cost=1', '/data/account/holdings?cost=1&paper=1', '/data/account/statement', '/data/account/candles?venue=ex&symbol=BTC%2FUSDT&range=1D', '/data/account/compare?base=BTC&side=buy']) {
+  for (const read of ['/data/account/holdings?cost=1', '/data/account/holdings?cost=1&paper=1', '/data/account/statement', '/data/account/candles?venue=ex&symbol=BTC%2FUSDT&range=1D', '/data/account/compare?base=BTC&side=buy',
+    '/data/account/asset?key=crypto%3ABTC', '/data/account/book?venue=ex&symbol=BTC%2FUSDT&depth=10', '/data/account/trades?venue=ex&symbol=BTC%2FUSDT&limit=20']) {
     assert.ok(h.reads.includes(read), read);
   }
-  // what is held of it and the statement's lines about it, from their own reads
+  // what is held of it (the asset sheet) and the statement's lines about it, from their own reads; its book and its trades
   assert.match(f.html(), /0\.124 BTC · \$7,747\.40/);
+  assert.match(f.html(), /Stand-in Exchange · Top of book only/);
+  assert.match(f.html(), /Stand-in Exchange publishes no trades the account can read/);
+  assert.equal(h.reads.filter(p => p.startsWith('/data/account/funding')).length, 0, 'a coin has no funding');
   assert.doesNotMatch(f.html(), /Loading…/);
   // a range: its candles
   h.reads.length = 0;
