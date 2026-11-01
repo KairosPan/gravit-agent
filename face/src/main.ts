@@ -21,10 +21,6 @@ import { installBotRuntime, registerBotRuntimeRoutes } from "./bot-runtime.ts";
 import { readBotJournal } from "./bot-journal.ts";
 import { BOTS_ROOT, faceBind } from "./overlay.ts";
 import { isTrustedDataRequest } from "./http.ts";
-import { createSymbolSearch, registerSymbolSearchRoute } from "./symbol-search.ts";
-import { registerQuoteRoutes } from "./quotes.ts";
-import { createCnRank, registerCnRankRoute } from "./cn-rank.ts";
-import { createCnCandles, registerCnCandlesRoute } from "./cn-candles.ts";
 import { registerLunhuiViewRoute, type LunhuiViewService } from "./lunhui-view.ts";
 import { registerAccountProxy } from "./account-proxy.ts";
 import { composedSeatRow, type SeatEntryLike } from "./account-seat.ts";
@@ -174,23 +170,17 @@ if (connection === undefined) {
   throw new Error(`${BIN}: the connection service is missing - / could not sign the browser in`);
 }
 registerStatic(booted.ctx.webServer, clientDir, connection);
-/* The face's own wire, on the same webserver as the page that reads it: the
- * symbol search (src/symbol-search.ts) and the quotes (src/quotes.ts), both
- * behind http.ts's `/data` fence. Left at their defaults on purpose: no
- * injection seam belongs on the entry point — `fetch`/`now`/`hub` exist for the
- * tests. */
-const disposeSearch = registerSymbolSearchRoute(booted.ctx.webServer, createSymbolSearch());
-const disposeQuotes = registerQuoteRoutes(booted.ctx.webServer, { isTrusted: isTrustedDataRequest });
-const disposeRank = registerCnRankRoute(booted.ctx.webServer, createCnRank());
-const disposeCandles = registerCnCandlesRoute(booted.ctx.webServer, createCnCandles());
-/* A sealed Lunhui run's view model (src/lunhui-view.ts), read through the plugin's
- * `lunhuiRuns` service as provided at the moment of each request — the face
- * imports nothing from plugins/. Behind the same `/data` fence. */
+/* The face reaches no market host of its own: quotes, search, the China
+ * ranking and candles are the Account's, read through the proxy below
+ * (tests/no-market-hosts.test.ts pins it). A sealed Lunhui run's view model
+ * (src/lunhui-view.ts), read through the plugin's `lunhuiRuns` service as
+ * provided at the moment of each request — the face imports nothing from
+ * plugins/. Behind http.ts's `/data` fence. */
 const disposeView = registerLunhuiViewRoute(booted.ctx.webServer, {
   isTrusted: isTrustedDataRequest,
   runs: () => booted.ctx.get("lunhuiRuns") as LunhuiViewService | undefined,
 });
-disposeData = () => { disposeSearch(); disposeQuotes(); disposeRank(); disposeCandles(); disposeView(); };
+disposeData = () => { disposeView(); };
 /* The Account's reads for the screens (src/account-proxy.ts) and the seat's
  * standing for its box (src/seat.ts): loopback reads of the Account at the URL
  * of the `mcp-account` row AS COMPOSED — an operator patch may have pointed it

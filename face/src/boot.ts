@@ -32,8 +32,8 @@
  *    service, and the operator's default model lives in the profile patch.
  * 3. No `installProxyFromEnvironment` (D10): 0.1.1 had no proxy policy, and it
  *    is not a no-op when `HTTP(S)_PROXY` is set — it would reroute the face's
- *    own A-share quote and symbol-search fetches too (NEW packages/util/http-proxy/src/
- *    install.ts:62-68, 296-303).
+ *    own outbound fetches too (NEW packages/util/http-proxy/src/install.ts:62-68,
+ *    296-303).
  * 4. No `createProcessShutdown`, no SIGINT/SIGTERM and no `installFailLoud`
  *    here: `main.ts` owns process lifetime and installs `installFailLoud`
  *    itself; `ctx.appExit` stays a plain `process.exit`.
