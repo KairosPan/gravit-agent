@@ -69,6 +69,18 @@ test('pickerOf: Crypto — the coins held from the leading lens by matchKey, the
   assert.deepEqual(p.results, [], 'no query, no results');
 });
 
+test('pickerOf: an A share starred (the Account key, the page\'s china entry) never reaches the picker, whatever its tabs', () => {
+  const all = fx('explore-all');
+  // the worst case: an A-share item a read lists under the stocks tab
+  all.items.push({ key: 'cn:600519', kind: 'stock', name: '贵州茅台', base: '600519', tabs: ['all', 'stocks'], at: [] });
+  const page = { ...fx('account'), watch: [...fx('account').watch, { venue: 'china', symbol: '000001', at: '2026-11-01T01:00:00.000Z' }] };
+  for (const { id: kind } of TRADE_KINDS) {
+    const p = pickerOf(stateWith({ kind, all, page, watch: ['cn:600519', 'stock:NVDA', 'coin:BTC'] }), NOW);
+    assert.equal(ids(p.watching).some(id => id.startsWith('cn:')), false, kind);
+  }
+  assert.deepEqual(ids(pickerOf(stateWith({ kind: 'stocks', all, page, watch: ['cn:600519', 'stock:NVDA'] }), NOW).watching), ['stock:NVDA']);
+});
+
 test('pickerOf: Stocks held by matchKey; a prediction held opens as a sell of its outcome at its venue', () => {
   const stocks = pickerOf(stateWith({ kind: 'stocks', watch: ['stock:NVDA', 'coin:BTC'] }), NOW);
   assert.deepEqual(ids(stocks.held), ['stock:AAPL', 'stock:NVDA']);

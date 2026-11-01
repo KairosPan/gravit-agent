@@ -12,6 +12,7 @@
 import { number, price } from '../wire/market-model.js';
 import { ACCOUNT_TABS, pageOf, legsOf, matchKey, priceOf, watchKeysOf } from './market-view.js';
 import { pageOk, assetsOf, positionsOf, openOrdersOf, worthOf } from './account-view.js';
+import { isCnKey } from '../wire/china.js';
 
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const records = v => (Array.isArray(v) ? v.filter(isRecord) : []);
@@ -136,7 +137,8 @@ export function pickerOf(state, now) {
   const watch = [...(Array.isArray(state?.markets?.watch) ? state.markets.watch : []), ...watchKeysOf(state?.account?.data, rows)];
   return {
     held: heldRows(state, kind, rows),
-    watching: [...new Set(watch.filter(k => typeof k === 'string' && k !== ''))].filter(k => {
+    // an A share starred (a cn key, the face's or the page's china entry) is not Trade's: the face does not trade A shares
+    watching: [...new Set(watch.filter(k => typeof k === 'string' && k !== '' && !isCnKey(k)))].filter(k => {
       const item = findItem(rows, k);
       return item ? kindOfItem(item) === kind : kindOfKey(k) === kind;
     }).map(k => { const item = findItem(rows, k); return item ? marketRow(item, trading) : placeholderRow(k); }),

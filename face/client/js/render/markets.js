@@ -17,7 +17,7 @@ import { candlesSvg, sessionsSvg } from './chart.js';
 import { orderWords } from './account.js';
 import {
   CANDLE_RANGES, isAccountKey, tableOf, pageOf, faceAssetOf, mentionsOf, volumeWordOf,
-  connectionWord, watchWord, basisWord,
+  connectionWord, watchWord, basisWord, watchedOf,
   chinaWord, cnStateWord, cnPageOf, cnTileOf, cnBoardOf,
 } from '../host/market-view.js';
 import { yuan, fix2 } from './lunhui/block.js';
@@ -287,7 +287,8 @@ function cnPage(asset, state, now) {
   const m = state.markets;
   const view = cnPageOf(m, asset.id);
   const quote = view.quote;
-  const watched = records(m.watchlist).some(a => a.id === asset.id);
+  // starred as the press reads it (app.js toggles by watchedOf): the Account keys, the page's china entry, an old cn star
+  const watched = watchedOf(m, asset.id, state.account?.data);
   const sub = ['A-share', asset.symbol, cnBoardOf(asset.symbol)].filter(Boolean).join(' · ');
   const who = `<div class="mk-who">${mkAv(cnTileOf(asset.name, asset.symbol), 'lg')}<div><h1 class="head-title">${esc(asset.name || asset.symbol)}</h1><span class="mk-sub">${esc(sub)}</span></div></div>`;
   const priced = number(quote?.price) !== null;

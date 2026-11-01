@@ -747,3 +747,16 @@ test("a failed read right after a sort switch says China unavailable, not Loadin
   assert.match(html, /<p class="mk-empty">China unavailable<\/p>/);
   assert.doesNotMatch(html, /Loading…/);
 });
+
+test("an A-share page's star reads the Account's list: an Account key, the page's china entry, an old cn star", () => {
+  const route = { screen: 'markets', id: 'cn:600519' };
+  const starOf = html => html.match(/data-action="toggleWatch" data-id="cn:600519" aria-pressed="(true|false)">[\s\S]*?(Watching|Watch)<\/button>/)?.slice(1).join(' ');
+  assert.equal(starOf(screen({ route, all: null }).html), 'false Watch');
+  assert.equal(starOf(screen({ route, all: null, watch: ['cn:600519'] }).html), 'true Watching', "in this browser's Account store");
+  assert.equal(starOf(screen({ route, all: null, cn: [MOUTAI] }).html), 'true Watching', 'an old cn star the move left');
+  const { s } = screen({ route, all: null });
+  const page = { ...fx('account'), watch: [{ venue: 'china', symbol: '600519', at: '2026-11-01T01:00:00.000Z' }] };
+  const atAccount = R.accountLoaded(s, { data: page, at: NOW });
+  assert.equal(starOf(renderMarketsScreen(atAccount, NOW)), 'true Watching', "on the Account's own list");
+  assert.equal(starOf(renderMarketsScreen(R.accountLoaded(s, { data: fx('account'), at: NOW }), NOW)), 'false Watch');
+});
