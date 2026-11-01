@@ -73,4 +73,35 @@ describe("cn-relay", () => {
     releases[1]!(); releases[2]!();
     for (const a of await Promise.all(all)) expect(a.kind).toBe("upstream");
   });
+
+  it("an abandoned queued ask leaves the queue and never reaches the upstream", async () => {
+    const releases: Array<() => void> = [];
+    const urls: string[] = [];
+    const relay = createCnRelay((u) => new Promise((resolve) => { urls.push(u); releases.push(() => resolve({ status: 200, bytes: new Uint8Array() })); }), { inFlight: 1 });
+    const first = relay("https://qt.gtimg.cn/q=sh600519", {});
+    const gone = new AbortController();
+    const queued = relay("https://qt.gtimg.cn/q=sh000001", {}, gone.signal);
+    await new Promise((r) => setTimeout(r, 10));
+    gone.abort();
+    expect(await queued).toEqual({ kind: "refused", word: "timeout" });
+    releases[0]!();
+    await first;
+    await new Promise((r) => setTimeout(r, 10));
+    expect(urls).toEqual(["https://qt.gtimg.cn/q=sh600519"]);
+    // the slot was handed back: a new ask runs
+    const next = relay("https://qt.gtimg.cn/q=sz000001", {});
+    await new Promise((r) => setTimeout(r, 10));
+    expect(urls.length).toBe(2);
+    releases[1]!();
+    expect((await next).kind).toBe("upstream");
+  });
+
+  it("a burst past the waiting cap is refused, not queued", async () => {
+    const releases: Array<() => void> = [];
+    const relay = createCnRelay(() => new Promise((resolve) => { releases.push(() => resolve({ status: 200, bytes: new Uint8Array() })); }), { inFlight: 1, waiting: 2 });
+    const all = [1, 2, 3, 4].map(() => relay("https://qt.gtimg.cn/q=sh600519", {}));
+    expect(await all[3]).toEqual({ kind: "refused", word: "timeout" });
+    for (let i = 0; i < 3; i++) { await new Promise((r) => setTimeout(r, 5)); releases[i]!(); }
+    expect((await Promise.all(all.slice(0, 3))).every((a) => a.kind === "upstream")).toBe(true);
+  });
 });

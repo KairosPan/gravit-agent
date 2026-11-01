@@ -7,6 +7,7 @@ export const RELAY_TIMEOUT_MS = 7_000;
 export const MINUTES_TIMEOUT_MS = 4_000;
 export const RELAY_MAX_BYTES = 512 * 1024;
 export const RELAY_IN_FLIGHT = 16;
+export const RELAY_WAITING = 64;
 export const RELAY_URL_MAX = 2_048;
 export const RELAY_HOSTS: readonly string[] = ["qt.gtimg.cn", "web.ifzq.gtimg.cn", "push2ex.eastmoney.com", "push2.eastmoney.com", "push2delay.eastmoney.com"];
 export const RELAY_HEADERS = ["accept", "referer", "user-agent"] as const;
@@ -42,7 +43,8 @@ export type RelayWord = "not-listed" | "timeout" | "too-large" | "unreachable";
 export type RelayAnswer =
   | { kind: "upstream"; status: number; contentType?: string; location?: string; bytes: Uint8Array }
   | { kind: "refused"; word: RelayWord };
-export type CnRelay = (url: string, headers: Record<string, string>) => Promise<RelayAnswer>;
+/** the signal ends a wait: an ask aborted while queued leaves the queue and never reaches the upstream */
+export type CnRelay = (url: string, headers: Record<string, string>, signal?: AbortSignal) => Promise<RelayAnswer>;
 
 function passedHeaders(headers: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = {};
@@ -54,23 +56,36 @@ function passedHeaders(headers: Record<string, string>): Record<string, string> 
   return out;
 }
 
-export function createCnRelay(http: CnHttp, opts: { inFlight?: number } = {}): CnRelay {
+export function createCnRelay(http: CnHttp, opts: { inFlight?: number; waiting?: number } = {}): CnRelay {
   const guarded = cnHosts(http, RELAY_HOSTS);
   const cap = opts.inFlight ?? RELAY_IN_FLIGHT;
+  const maxWaiting = opts.waiting ?? RELAY_WAITING;
   let active = 0;
   const waiting: Array<() => void> = [];
-  const acquire = async (): Promise<void> => {
-    if (active < cap) { active++; return; }
-    await new Promise<void>((resolve) => waiting.push(resolve));
+  /** true when a slot is held; false when the queue is full or the signal ended the wait */
+  const acquire = async (signal?: AbortSignal): Promise<boolean> => {
+    if (signal?.aborted) return false;
+    if (active < cap) { active++; return true; }
+    if (waiting.length >= maxWaiting) return false;
+    return new Promise<boolean>((resolve) => {
+      const turn = (): void => { signal?.removeEventListener("abort", leave); resolve(true); };
+      const leave = (): void => {
+        const i = waiting.indexOf(turn);
+        if (i >= 0) waiting.splice(i, 1);
+        resolve(false);
+      };
+      waiting.push(turn);
+      signal?.addEventListener("abort", leave, { once: true });
+    });
   };
   const release = (): void => {
     const next = waiting.shift();
     if (next) next(); else active--;
   };
-  return async (url, headers) => {
+  return async (url, headers, signal) => {
     const target = relayTarget(url);
     if (!target) return { kind: "refused", word: "not-listed" };
-    await acquire();
+    if (!(await acquire(signal))) return { kind: "refused", word: "timeout" };
     try {
       const r = await guarded(target.url, { timeoutMs: target.timeoutMs, maxBytes: target.maxBytes, headers: passedHeaders(headers) });
       return { kind: "upstream", status: r.status, ...(r.contentType ? { contentType: r.contentType } : {}), ...(r.location ? { location: r.location } : {}), bytes: r.bytes };

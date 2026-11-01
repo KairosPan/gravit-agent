@@ -33,6 +33,7 @@ describe("the relay route", () => {
       const r = await fetch(`${srv.url}/api/cn/relay?url=${encodeURIComponent(U)}`, { redirect: "manual", headers: { accept: "a/b", referer: "https://x.example/", "user-agent": "ua", cookie: "secret=1" } });
       expect(r.status).toBe(302);
       expect(r.headers.get("x-cn-relay")).toBe("upstream");
+      expect(r.headers.get("x-content-type-options")).toBe("nosniff");
       expect(r.headers.get("location")).toBe("https://push2delay.eastmoney.com/x");
       expect(s.seen.relay[0]!.url).toBe(U);
       expect(Object.keys(s.seen.relay[0]!.headers).sort()).toEqual(["accept", "referer", "user-agent"]);
@@ -73,7 +74,10 @@ describe("the relay route", () => {
   });
 
   it("bounds a queued request's whole wait", async () => {
+    let signal: AbortSignal | undefined;
     const s = stubs(() => new Promise<RelayAnswer>(() => {}));
+    const inner = s.cn.relay;
+    s.cn.relay = (u, h, sg) => { signal = sg; return inner(u, h, sg); };
     const srv = await startPortfolioServer({ port: 0, service: await service(), cn: s.cn, cnQueueMs: 1 });
     try {
       // the minutes endpoint has the shortest limit (4 s); the wait is that plus the allowance
@@ -82,6 +86,7 @@ describe("the relay route", () => {
       expect(r.status).toBe(504);
       expect(r.headers.get("x-cn-relay")).toBe("refused");
       expect(Date.now() - t0).toBeLessThan(6_000);
+      expect(signal?.aborted).toBe(true); // the abandoned ask is told to leave the queue
     } finally { await srv.close(); }
   }, 10_000);
 });

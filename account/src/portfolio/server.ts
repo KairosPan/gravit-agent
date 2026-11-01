@@ -517,10 +517,12 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
     // a request queued for a slot has no deadline of its own until it holds one: its whole wait is bounded here
     let timer: NodeJS.Timeout | undefined;
     const late = new Promise<"late">((resolve) => { timer = setTimeout(() => resolve("late"), target.timeoutMs + (opts.cnQueueMs ?? 3_000)); });
-    const a = await Promise.race([opts.cn.relay(raw, headers), late]).finally(() => clearTimeout(timer));
-    if (a === "late") return refuse("timeout");
+    const gone = new AbortController();
+    res.on("close", () => gone.abort());
+    const a = await Promise.race([opts.cn.relay(raw, headers, gone.signal), late]).finally(() => clearTimeout(timer));
+    if (a === "late") { gone.abort(); return refuse("timeout"); }
     if (a.kind === "refused") return refuse(a.word);
-    res.status(a.status).set("x-cn-relay", "upstream").set("content-type", a.contentType ?? "application/octet-stream");
+    res.status(a.status).set("x-cn-relay", "upstream").set("x-content-type-options", "nosniff").set("content-type", a.contentType ?? "application/octet-stream");
     if (a.status >= 300 && a.status < 400 && a.location) res.set("location", a.location);
     res.send(Buffer.from(a.bytes));
   }));
@@ -531,7 +533,7 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
     if (!opts.cn) return refuse("off");
     const a = await opts.cn.ifind.ask(q);
     if (a.kind === "refused") return refuse(a.word);
-    res.status(a.status).set("x-cn-ifind", "upstream").set("content-type", a.contentType ?? "application/octet-stream").send(Buffer.from(a.bytes));
+    res.status(a.status).set("x-cn-ifind", "upstream").set("x-content-type-options", "nosniff").set("content-type", a.contentType ?? "application/octet-stream").send(Buffer.from(a.bytes));
   }));
 
   app.get("/api/overview", wrap(async (_req, res) => {
