@@ -5,6 +5,7 @@ Install once: `npm ci` here.
 
 - Run: `npm run account` (127.0.0.1:4820; flags `--read-only`, `--live-cap <usd>`, `--port <n>`, `--fresh`); the home is the code's default `~/.buyer-agent-demo`.
 - The seat: `npm run portfolio:mcp` — the MCP seat the face's `mcp-account` row spawns.
+- Markets: beside the venues' public markets the Account serves China, the A shares as Tencent ranks, quotes, charts and finds them (`src/portfolio/live/china.ts`; `explore?tab=china`, `quotes?pairs=china|<code>`, `candles?venue=china`, the seat's `china` tab). Keyless, GET-only on Tencent's four hosts; view-only (`canTrade: false`) and priced in CNY, in the China tab alone and never in `all`. Only the real server builds it, so tests and other services never reach Tencent.
 - Tests: `npm test` (vitest, one file at a time); `npm run typecheck`.
 
 Design: `docs/superpowers/specs/2026-10-27-account-in-repo-design.md`. The face's side: `face/README.md` "The Account seat".

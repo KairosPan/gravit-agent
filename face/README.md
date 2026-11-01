@@ -152,8 +152,8 @@ All three of its stages are built:
   stars, a search, and a market's page with its candles and venues — and Account
   (`#/account/portfolio`, `venues`, `agents`, `cards`) — the Account's Portfolio, Venues, Agents
   and Cards and the Statement drawer — both read from the Account through the face's proxy
-  since 2026-10-22 ("Markets and Account" and "The Account in the face" below), the A shares on
-  the face's own wire. The old `/market` and `/account` pages are gone (404);
+  since 2026-10-22 ("Markets and Account" and "The Account in the face" below), the A shares
+  included since 2026-11-01. The old `/market` and `/account` pages are gone (404);
 - **host-fed since stage 3**: a channel's page (`#/channel/<id>`: its status, thesis, an old
   strategy's backtests, journal, files, and its agent and bot rosters with their editors), Discover
   (`#/discover`, the inventory of what Gravit runs — "Discover" below), the row actions, no tool
@@ -166,8 +166,8 @@ All three of its stages are built:
 
 What the browser keeps is three keys: `localStorage["gravit-ui.prefs"]` — the theme, the rail's
 fold, the list groups you folded, the last conversation, what was seen — and the stars: the
-Account's markets under `gravit.account.watch.v1`, the A shares under
-`gravit.market.watchlist.v1`; and, once it has paired with the Account, two more: its owner key in
+Account's markets (the A shares among them, as `cn:<code>`) under `gravit.account.watch.v1`, and the
+old face list under `gravit.market.watchlist.v1`, which only an older star still sits on; and, once it has paired with the Account, two more: its owner key in
 IndexedDB (`gravit-face-owner`) and `gravit.owner.signedOut.v1` after a sign-out. Nothing else: a
 reload rebuilds the page from the host. The demo's director (`d`), its scripted Gravit and its seed are gone with
 the move; `tests/client/*.test.js` keep the renderers and the host layer honest on a fake DOM
@@ -1053,7 +1053,7 @@ shares the face quotes itself — and **Account** (`#/account/portfolio`, `venue
 `cards`), the Account's own page. Both read the Account through the face's proxy ("The Account in
 the face" below): market data comes the Account's way — keyless, server-side at the Account, read
 by what the page is looking at, one push channel per tab — and every figure on either screen is
-the Account's but an A share's quote. Both are screens of the client at `/` since stage 2 of
+the Account's, A shares included. Both are screens of the client at `/` since stage 2 of
 route A; the old `/market` and `/account` pages are gone, and their addresses answer 404. Gravit
 orders through the seat's tools, behind Gate 2 and the Account's own card. Since 2026-10-24 the
 operator orders by hand too: the face's page can be one of the Account's owner devices, and while
@@ -1068,11 +1068,11 @@ keys are absent, not disabled, and the device line under the Account head says w
 One table under the search box (`Search markets`). Its tabs are the Account's: **All**, then
 **Crypto · Stocks · RWAs · Perps · Pre-IPO · Predictions** where the Account lists something
 — each with the Account's count once All's read has answered, All counting the starred A shares
-too (Stocks is the Account's alone) — then the face's own **China**, then **Watching** last once
+too (Stocks is the Account's alone) — then **China**, the Account's own tab, then **Watching** last once
 anything is starred, with **All results** first while searching;
 a tab starts from Most traded. With two or more rows, the sorts **Most traded · Biggest moves**,
 and **Closing soonest** where a row closes: Most traded ranks the Account's rows by their volume
-(a Kalshi row's contracts by their number), then the A shares by turnover; Biggest moves by the
+(a Kalshi row's contracts by their number), then the A shares by turnover (China's rows, in yuan); Biggest moves by the
 size of the 24-hour move; Closing soonest by the close; a row without the figure sorts last.
 
 A row: the star (`Watch BTC` / `Stop watching BTC`); the tile — the face's own letters, never an
@@ -1086,32 +1086,31 @@ connected line where the quotes poll or the stream has one, else the explore rea
 price is from in the Account's own words (`Robinhood · real time`, `Cboe · 15 min delayed`), with
 its age once it is more than five seconds old (`· 2 min ago`). Missing values stay em dashes.
 
-With a query the rows are the Account's search and the face's A-share hits (`N markets for “q”`,
+With a query the rows are the Account's search, its A-share hits among them (`N markets for “q”`,
 and Clear). With no rows the table says `Nothing watched yet` (Watching), `No markets` for an
 answer with none, `Loading…` or `Searching…` while a read is on its way, and `Markets
 unavailable` (`Search is unavailable` while searching) when the read failed before it ever
 answered. The muted lines say what is going on and nothing else: the Account's own sentence when
-the read the rows are from refused (the rows read before it stay); the A-share search's `Search
-is unavailable` or `Some results may be missing`; the face's wire's state where an A share is
-drawn (`Connecting…`, `Updating every 15 s` while its stream is down, `Quotes unavailable`); the
-watchlist's trouble (`Couldn't save the watchlist`, `The watchlist is full`, `Couldn't read the
+the read the rows are from refused (the rows read before it stay); the search's `Search
+is unavailable` or `Some results may be missing` (the Account's answer names China among what is
+missing when Tencent did not answer); the watchlist's trouble (`Couldn't save the watchlist`, `The watchlist is full`, `Couldn't read the
 saved watchlist`).
 
-**China** (spec `docs/superpowers/specs/2026-10-31-china-tab-design.md`, the interim before A
-shares move into the Account) is the day's top 20 A shares from Tencent's ranking through the
-face's own `/data/cn/rank`: **Most traded** by turnover, **Biggest moves** by the size of the day's
+**China** (specs `docs/superpowers/specs/2026-10-31-china-tab-design.md` and
+`2026-11-01-account-two-parts-design.md` §4) is the day's top 20 A shares from Tencent's ranking,
+the Account's `explore?tab=china&sort=` through the face's proxy: **Most traded** by turnover, **Biggest moves** by the size of the day's
 change, gainers and losers together. Its count is every A share the ranking lists (`China ·
 5,577`, Beijing listings included); its headers read **Today** and **Turnover**. A row: the star
-(the A shares' list), a tile with the name's first character, the name over `<code> · <board>`
+(the Account's watch list, like any row), a tile with the name's first character, the name over `<code> · <board>`
 (`SH`, `SZ`, `ChiNext`, `STAR`, `BJ`), the price in yuan, the change against the previous close,
 the turnover (`¥216.08亿`) and `Tencent`. It is read when China comes on screen and every 20 s
 while it stays, nothing otherwise; a muted line says `Closed · 10-30 15:00 Beijing` or `Midday
 break · 11:30 Beijing`, and `Couldn’t refresh China` over the rows kept when a read fails
 (`China unavailable` with none). No row shows while the ranking for another sort is on its way.
 
-The stars are this browser's, in two stores — the Account's row keys (`coin:BTC`, `stock:AAPL`,
-`event:<venue>:<market>`, …) under `gravit.account.watch.v1`, the A shares (`cn:600519`) under
-`gravit.market.watchlist.v1`, the key the old page wrote (a browser that saved before the
+The stars are this browser's, in one store — the Account's row keys (`coin:BTC`, `stock:AAPL`,
+`event:<venue>:<market>`, `cn:600519`, …) under `gravit.account.watch.v1` — plus the old face list
+under `gravit.market.watchlist.v1`, whose A shares move into the first store once, unsigned, and the key the old page wrote (a browser that saved before the
 2026-10-08 rename keeps its list too: `kairos.market.watchlist.v1` is read while the new key is
 absent and never written or deleted) — at most 100 each, in step across same-origin tabs through
 storage events, never synchronised across devices. An old `us:` or `crypto:` star on the face's
@@ -1132,37 +1131,31 @@ twelve markets a call; the search reads
 once the box has been quiet for 300 ms. Another screen or a hidden tab stops both ("The Account in
 the face" has every read).
 
-The A shares — the one kind the Account has no source for — stay on the face's own wire, for `cn:`
-ids alone: `GET /data/quotes/stream?ids=cn:600519,…` for Server-Sent Events (each named `quotes`
-event the selected set's whole snapshot, a `heartbeat` every 15 seconds) over the cn watchlist and
-a cn page's own id — at most 100, re-subscribed when that set changes, paused off Markets —
-`GET /data/quotes?ids=…` for the 15-second fallback while SSE is down and for one read of up to 30
-search hits, and `GET /data/symbols/search?q=兆易创新&market=cn` (Tencent smartbox; the wire waits
-its own 250 ms on top of the screen's 300, cancels a superseded request and ignores a late
-answer). Tencent's public quote host quotes them (`qt.gtimg.cn`, the host the Lunhui quotes
-freeze already reads; no account, no quota), one GET per poll for the whole selected set.
-Since 2026-10-24 this wire is the face's only market
-source of its own — the Alpaca and Coinbase providers, the US and crypto search, the bars route
-and the three producer routes left with stage 3 of the graft (their old addresses answer 404): a
-well-formed `us:` or `crypto:` id is answered without a quote, and a `market=us` search is 400.
+The A shares are the Account's like every other market (since 2026-11-01; `DEVELOPMENT.md` §3.9
+"China"): the ranking is `explore?tab=china&sort=volume|movers`, the search is the same `explore?q=`
+(Tencent's smartbox, merged with the other markets' hits, so there is no second read), the prices and
+the page's facts are `quotes?pairs=china|<code>`, the history is `candles?venue=china`, all through
+the proxy and its allow-list. China has no push channel, so these are polled with the rest (5 s for
+the prices). The face holds no market wire of its own: it serves no `/data/quotes`,
+`/data/symbols/search` or `/data/cn/*` (none is served), reaches no market host, and has
+no `FACE_QUOTE_POLL_MS`; `tests/no-market-hosts.test.ts` pins it. A `cn:` id is an Account key
+(`cn:` and six digits); a `us:` or `crypto:` star left on the old list is asked of the Account once
+per boot, as before. The Account reads Tencent's public hosts (no account, no key); a row's
+`Tencent` source and the page's state lines are the Account's own words.
 
-| Environment variable | Default | Purpose |
-|---|---|---|
-| `FACE_QUOTE_POLL_MS` | `30000` | refresh period while selected; minimum 15000ms. |
-
-Once the face's wire has quoted an A share on the cn list (Markets opened once), Account › Venues'
-`A-share quotes` line reads the provider's state — `Tencent · Connected`, `Tencent · Limited` when
-a code has no quote, `Tencent · Error` when the request failed; with no A share on the cn list the
-line is not drawn. Event timestamps are Tencent's own — its quote's last update, which can run
+Once the Account has answered for China (a ranking or a quote read), Account › Venues'
+`A-share quotes` line reads its state in the Account's words — `Tencent · Connected`, `Tencent ·
+Limited` when the Account says its read is stale, `Tencent · Error` when Tencent did not answer;
+before any China read it is not drawn. Event timestamps are Tencent's own — its quote's last update, which can run
 past the close (16:14 for a 15:00 close on 2026-10-30) — read as Beijing time, and receipt time
 never fills a missing one. Volume is in shares: Tencent counts lots of 100 on most boards and shares on
 STAR (measured 2026-10-30), so each reply's own turnover decides the unit, and a reply no unit fits
 leaves the volume unknown. `Live` means the trade time is under five minutes old, the hub's rule
 whatever the provider; whether Tencent reaches this machine without delay during a session is not
-yet measured. The wire's own words — a quote's or a provider's message, a search note — are Chinese
-and never reach the screen; every word is drawn from the wire's enums. Until 2026-10-30 the iFinD
-QuantAPI quoted the A shares, with a token and a monthly quote quota; the quote wire reads no
-`IFIND_*` now — only the Lunhui boards stand-in does ("Lunhui analysis").
+yet measured. Tencent's own words are Chinese and never reach the screen; every word is drawn from the
+Account's enums and sentences. Until 2026-10-30 the iFinD QuantAPI quoted the A shares, with a token
+and a monthly quote quota; nothing in the quote path reads `IFIND_*` now — only the Lunhui boards
+stand-in does ("Lunhui analysis").
 
 ### A market's page
 
@@ -1208,14 +1201,14 @@ connected line, when it has one, in the 5-second quotes poll, taken from the pag
 the market is no row of the tab on screen (a deep link, Back onto another tab). Leaving lets the
 market go.
 
-A `cn:` page is the face's own quote and history: the tile with the name's first character, `A-share
+A `cn:` page is the Account's quote and history: the tile with the name's first character, `A-share
 · 600519 · SH`, the price in yuan with the change against the previous close, and a state line in
 Beijing time — `Tencent · Live`, `Tencent · Delayed · 09:41 Beijing` for an open market's old quote,
 `Tencent · Midday break · 11:30 Beijing`, `Tencent · Closed · 10-30 15:00 Beijing`, or `Quotes
-unavailable` while the wire is down. Then twelve facts from the same quote — Previous close, Open,
+unavailable` while the Account cannot read Tencent. Then twelve facts from the same quote — Previous close, Open,
 High, Low, Turnover (`¥82.57亿`), Turnover rate, Market cap (`¥1.74万亿`), P/E (TTM) (`−12.50` for a
-loss), Limit up, Limit down, Volume (`599万股`), Amplitude — and **Price history** through the face's
-`/data/cn/candles`: 1D the session chart (09:30–15:00, the previous close dashed), 5D the five
+loss), Limit up, Limit down, Volume (`599万股`), Amplitude — and **Price history** through the Account's
+`candles?venue=china`: 1D the session chart (09:30–15:00, the previous close dashed), 5D the five
 sessions on one grid, 1M to MAX forward-adjusted closes on Beijing dates. Gravit on it as before;
 no venues, no Buy or Sell.
 
@@ -1254,8 +1247,8 @@ drawer — the keys marked *(signs)* below are drawn only while this page signs:
   `Key file` by its path, never what is in it; a paper venue's **Top up** and **Start over**
   *(signs)*), and **Disconnect…** *(signs;* asked in place, `Yes, disconnect`; none on an agent
   wallet, and the Account refuses while an order or a payment is open there*)*; under the list
-  **Connect an account** and **Open a paper account** *(signs)*; under them, once the face's wire
-  has quoted an A share on the cn list, `A-share quotes` with the Tencent provider's state; then the **Account seat**
+  **Connect an account** and **Open a paper account** *(signs)*; under them, once the Account has answered
+  for China, `A-share quotes` with the Tencent provider's state; then the **Account seat**
   box (`/data/seat.json`, read on entering Venues or Agents, on Refresh, right after a seat receipt
   and on a card raised or answered): the service reachable or
   not with the Account's own mode and writes (`Guard · Trading on · $1 a move`), the seat (`Gravit
@@ -1936,7 +1929,7 @@ as a convenience.
   thousands of characters). The composed row tree the listing also carries (`rows` — about 110 at
   0.2.0-rc.2, ids of the form `include:<row id>`) is not drawn; it is in the JSON.
 
-Every `/data` route — Discover's, the A-share quote and search routes, the
+Every `/data` route — Discover's, the
 Account proxy's and the seat box's, the channel, bot, room and session routes —
 stands behind a browser-trust fence modelled on the one the harness
 puts in front of `/api` (`isTrustedDataRequest`): a loopback Host, no
@@ -2679,7 +2672,7 @@ and `node --test` gives each file its own:
 | `order-gate-midboot-smoke.test.ts` | Gate 2 armed while `boot()` is still pending: a slow fixture row holds the boot open while a seat-write stand-in registers, and with `bootFace` unresolved and unary `/api` already serving, the order call is HELD with `approval/asked` logged and its body not run, an agentless call is denied by the listener, the same order with its ask swallowed by an outer listener is denied by the guard alone; once the boot is released the held card reaches the first tab and `allowed-once` dispatches exactly once; a restart of the real `approval` row re-arms the listener once |
 | `account-seat-smoke.test.ts` | the Account seat against the Account's own stand-in (run from the repo's `account/`, or `FACE_ACCOUNT_SEAT_DIR` when set; skipped without its `npm ci`): the seat's 35 tools and exactly its nine real-account writes gated, a read as the admitted seat, a seat order rejected at the face's card never reaching the seat, the same order allowed once answered by the stand-in with a card, a batch answered leg by leg with cards, and `/data/seat.json` reading that standing with the Account's ISO expiry as milliseconds |
 | `account-graft-smoke.test.ts` | the Account's reads through the face's proxy against the Account's own stand-in (run from the repo's `account/`, or `FACE_ACCOUNT_SEAT_DIR` when set; skipped without its `npm ci`; "The Account in the face"): `/data/account` 200 with `ok` and its venues, `/data/account/explore` listing items, `explore?force=1` refused 400 without asking the Account, `/data/account/stream` an event stream whose first named frame carries JSON within 5 s, and `/data/seat.json` reading the Account reachable through the proxy's reader; then the owner's half through the face's port — the client's own `host/owner.js` under Node paired with the stand-in's code, a watch signed on and off, a $25 ETH market buy whose `fill` the stream tells and whose ETH the holdings count, a SOL limit resting and cancelled by its id, the seeded card approved and its `card` frame `approved`, a foreign origin's exchange refused 403, and neither the code nor any signature sent in the face's output |
-| `gravit-client-smoke.test.ts` | the new page on a real boot: `/` with its title and script, the modules under `/client` with their types (Markets' `js/wire/market-quotes.js` and `js/host/markets.js` among them), the old `chat.js` gone and `/market` and `/account` answering 404; the host layer (`client/js/host/live.js` over the page's own wire) listing a session just created and opening it (live, so a follow) into a loaded window with a clean status line; a bare `bootFace` mounts no `/data` route, which the list tolerates |
+| `gravit-client-smoke.test.ts` | the new page on a real boot: `/` with its title and script, the modules under `/client` with their types (Markets' `js/wire/china.js` and `js/host/markets.js` among them), the old `chat.js` gone and `/market` and `/account` answering 404; the host layer (`client/js/host/live.js` over the page's own wire) listing a session just created and opening it (live, so a follow) into a loaded window with a clean status line; a bare `bootFace` mounts no `/data` route, which the list tolerates |
 | `client-mux-smoke.test.ts` | the page's own `client/js/wire/api.js` and `client/js/wire/mapper.js`, unmodified, against the host: ready, calls, emits, the control baseline, a follow's snapshot and tail, an approval answered and one rejected, a second tab's `cancel` and its refused late answer, Stop withdrawing a gate, a question answered, a gate replayed to a late tab, the non-activating page and projections reads |
 | `askuser-noclient-smoke.test.ts` | with no browser connected, an agent's question BLOCKS (parked for the next client); an agentless one is refused `NO_PROVIDER` |
 | `bots-smoke.test.ts` | the roster (a broken fixture listed with its reason, never `_template`); the shipped relative plugin path rebased onto the real `plugins/bot.js`; a bot sees allow ∩ tree, never a `role_<id>` tool, while Gravit sees the host's whole roster plus `role_cn_market_analyst` and `role_cn_stock_analyst`; a tool registered after the declaration is admitted; the bot's persona shadows Gravit's; Gravit's prompt carries the `deployment:today` line, the cycle contract (`Step 0 — ask once`) and the `lunhui:run` protocol and a bot's carries none of them — the probe bot can call `create_goal`, so its missing contract is the preset's scoping, not the `create_goal` gate; a session naming a broken preset is refused with dsh's `agent-preset/*` code; Gate 2 holds for a bot |
@@ -3703,8 +3696,8 @@ its own host path. On macOS a repo under `~/Desktop` needs Docker Desktop's Sett
 File sharing (Files and Folders › Desktop access), or the binds read EPERM. The model key comes
 from `../.env.deepseek` through `env_file` into the face's process env (optional; absent, the face
 boots and Gravit cannot answer; dsh scrubs `KEY`/`SECRET`/`TOKEN` names from every child it
-spawns, so Gravit's shell never inherits it). It carries the model key only; the face's A-share
-quotes need no key (Tencent, as on the host). Never paste `docker compose config` output anywhere —
+spawns, so Gravit's shell never inherits it). It carries the model key only; the Account box's A-share
+reads need no key (Tencent, as on the host). Never paste `docker compose config` output anywhere —
 it prints the `env_file` values resolved.
 
 `agent` (the face, dsh, Gravit's shell, AKShare, the seat) mounts an allowlist of the tree, never
