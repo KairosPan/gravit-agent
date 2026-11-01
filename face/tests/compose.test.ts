@@ -9,6 +9,7 @@ const composeFile = fileURLToPath(new URL("../../compose.yml", import.meta.url))
 
 type Service = {
   ports: string[];
+  expose: string[];
   depends_on: Record<string, { condition: string }>;
   healthcheck: { test: string[] };
   environment: Record<string, string>;
@@ -23,7 +24,9 @@ test("compose.yml runs the face and the Account as two boxes, the agent box with
   const c = load(await readFile(composeFile, "utf8")) as Compose;
   assert.deepEqual(Object.keys(c.services).sort(), ["account", "agent"]);
   assert.deepEqual(c.services.agent.ports, ["127.0.0.1:3090:3090"]);
-  assert.deepEqual(c.services.account.ports, ["127.0.0.1:4820:4820"]);
+  assert.equal(c.services.account.ports, undefined);
+  assert.deepEqual(c.services.account.expose, ["4820"]);
+  assert.ok(Object.values(c.services).every(s => (s.ports ?? []).every(p => !String(p).includes("4820"))), "no service publishes 4820");
   assert.equal(c.services.agent.depends_on.account.condition, "service_healthy");
   assert.match(c.services.account.healthcheck.test.join(" "), /\/api\/overview/);
   assert.equal(c.services.account.environment.PORTFOLIO_BIND, "0.0.0.0");

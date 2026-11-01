@@ -3689,8 +3689,9 @@ origin with its own key.
 The isolated run: the face and the Account as two boxes (`../compose.yml`, `Dockerfile` and
 `docker-entrypoint.sh` here, `../account/Dockerfile`; the design's §5 and §7). The host dev loop —
 two host processes — stays the default; this run is started on purpose, with Docker Desktop's
-daemon up. **Stop the host face and the host Account first**: both boxes publish 3090 and 4820 on
-the host's loopback, which the host dev loop holds. Run every `docker compose` command at the repo
+daemon up. **Stop the host face first**: the agent box alone publishes 3090 on the host's
+loopback, which the host dev loop holds; the account box publishes nothing (stopping the host
+Account too is advised, one Account in sight, not required). Run every `docker compose` command at the repo
 root: the agent box mounts an allowlist of the repo's paths under `${PWD}`, so the tree lands at
 its own host path. On macOS a repo under `~/Desktop` needs Docker Desktop's Settings › Resources ›
 File sharing (Files and Folders › Desktop access), or the binds read EPERM. The model key comes
@@ -3712,8 +3713,8 @@ and `compose.yml` are not in the box.** Beside them: `dsh-home`, `seat-home` (th
 path of the Account's home**. That fence is on files: on Docker Desktop `host.docker.internal`
 still reaches the Mac's loopback services from the box — no wider than the host dev loop, and no
 Account secret. `account` runs the in-tree service with
-`--home /data` on `account-home`. The face reaches `http://account:4820` over the `gravit`
-network; the agent waits for the account's health check (`GET /api/overview`, its HTTP status).
+`--home /data` on `account-home`. Only the agent box reaches `http://account:4820`, over the `gravit`
+network; the account box publishes no port; the agent waits for the account's health check (`GET /api/overview`, its HTTP status).
 The box sets `FACE_BIND=0.0.0.0` so the face listens on the container's interface. **`FACE_BIND`
 is for the box only**: the `/data` routes' `Host` fence is the DNS-rebinding defence, not
 authentication, and `FACE_BIND=0.0.0.0` on the host Mac would serve them to the LAN to any peer
@@ -3727,21 +3728,27 @@ that forges `Host`. The same holds for the Account's `PORTFOLIO_BIND` (`../accou
    Expect the face's boot line `gravit-face: http://127.0.0.1:3090/?token=… (profile: face) ·
    listening on 0.0.0.0` and the seat's `[agent-portfolio-manager] up (stdio) →
    http://account:4820`.
-2. **Pair.** `docker compose logs account` prints the pairing code; pair on
-   `http://127.0.0.1:4820` and open a paper account there (the volume starts empty — or carry the
+2. **Pair.** `docker compose logs account` prints the code; open the face's tokenized URL,
+   Account, and type the code at "Pair with the code the Account printed in its terminal"; open
+   a paper account from Account › Venues on the face (the volume starts empty — or carry the
    host's home in first, `../account/README.md` "In the box").
-3. **The standing.** Open the tokenized URL. Account › Venues: the Account seat box reads
+3. **The fence.** `curl -s -m 3 http://127.0.0.1:4820/api/now` fails (nothing listens on the
+   host), and `docker compose exec agent node -e "fetch('http://account:4820/api/now').then(r=>console.log(r.status))"`
+   prints 200.
+4. **The standing.** Open the tokenized URL. Account › Venues: the Account seat box reads
    `account:4820 · reachable` (expected, not yet observed); on an empty `seat-home` the seat
-   reads not on the account, then knocking after Gravit's first seat call, until you admit it as
-   **Gravit** on the Account page ("The Account seat" above). Discover's MCP shelf lists `account`
+   reads not on the account, then knocking after Gravit's first seat call, until you let it in
+   under Account › Agents on the face as **Gravit** ("The Account seat" above). Discover's MCP shelf lists `account`
    with its 36 tools and no `akshare` card; the CLI agents (`claude`, `codex`) read unavailable.
-4. **The read.** Ask Gravit for a read-only AAPL quote: `portfolio_explore` (tab=stocks, q=AAPL)
+5. **The read.** Ask Gravit for a read-only AAPL quote: `portfolio_explore` (tab=stocks, q=AAPL)
    answers with no card, as in the 2026-10-27 drill on the real service ("The account-seat
    drill" above).
-5. **The negative.** `docker compose exec agent ls /data` fails (no such file or directory: the
+6. **AKShare in the box.** Ask Gravit one AKShare question; `portfolio_akshare` answers with no
+   card.
+7. **The negative.** `docker compose exec agent ls /data` fails (no such file or directory: the
    Account's home is not mounted there), and `docker compose exec agent ls /var/run/docker.sock`
    fails too.
-6. **Down.** `docker compose down` (the volumes stay; `down -v` drops them, the box's Account
+8. **Down.** `docker compose down` (the volumes stay; `down -v` drops them, the box's Account
    home with them).
 
 After a pull that changes `face/package-lock.json` or `account/package-lock.json`: `docker compose
