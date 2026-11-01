@@ -61,7 +61,8 @@ describe("the face's origin", () => {
   it("faceOriginOf takes a loopback http:// origin given once, with or without a port, and nothing else", () => {
     const of = (v?: string | string[]) => faceOriginOf({ headers: v === undefined ? {} : { [H]: v } } as never);
     for (const good of ["http://127.0.0.1:3090", "http://localhost:3090", "http://[::1]:3090", "http://127.0.0.53:3090", "http://localhost", "http://127.0.0.1"]) expect(of(good), good).toBe(good);
-    for (const bad of [undefined, "", "https://127.0.0.1:3090", "http://evil.example:3090", "http://127.0.0.1.evil.example:3090", "http://127.0.0.1:3090/", "http://127.0.0.1:3090/account", "http://127.0.0.1:3090?x=1", "http://user@127.0.0.1:3090", "http://10.0.0.2:3090", "http://0.0.0.0:3090", "http://127.0.0.1:3090, http://127.0.0.1:3090", " http://127.0.0.1:3090"]) {
+    for (const bad of [undefined, "", "https://127.0.0.1:3090", "http://evil.example:3090", "http://127.0.0.1.evil.example:3090", "http://127.0.0.1:3090/", "http://127.0.0.1:3090/account", "http://127.0.0.1:3090?x=1", "http://user@127.0.0.1:3090", "http://10.0.0.2:3090", "http://0.0.0.0:3090", "http://127.0.0.1:3090, http://127.0.0.1:3090", " http://127.0.0.1:3090",
+      "http://127.0.0.1:99999", "http://127.0.0.1:65536", "http://127.0.0.1:0", "http://127.999.0.1:3090", "http://127.0.0.256:3090", "http://127.0.0.01:3090", "http://127.0.0.1:80"]) {
       expect(of(bad), String(bad)).toBeUndefined();
     }
     expect(of([FACE, FACE]), "given twice").toBeUndefined();
@@ -83,6 +84,8 @@ describe("the face's origin", () => {
       expect(await redirectOf({})).toBe(own);
       for (const bad of ["http://evil.example:3090", "https://127.0.0.1:3090", "http://127.0.0.1:3090/x"]) expect(await redirectOf({ [H]: bad }), bad).toBe(own);
       expect(await redirectOf({ [H]: [FACE, FACE] }), "given twice").toBe(own);
+      // a shape the pattern lets through but no URL is (a port past 65535, an octet past 255): its own Host, never a 500
+      for (const bad of ["http://127.0.0.1:99999", "http://127.999.0.1:3090"]) expect(await redirectOf({ [H]: bad }), bad).toBe(own);
     } finally { await srv.close(); }
   });
 
@@ -101,6 +104,11 @@ describe("the face's origin", () => {
       const host = new URL(srv.url).host;
       expect(String(own.body.message).split("\n")[0]).toBe(`${host} wants you to sign in with your Ethereum account:`);
       expect(String(own.body.message)).toContain(`\nURI: http://${host}/account\n`);
+      for (const bad of ["http://127.0.0.1:99999", "http://127.999.0.1:3090"]) {
+        const r = await post(srv.url, "/api/account/wallet/challenge", { address, wallet: "MetaMask", chainId: 1 }, { [H]: bad });
+        expect(r.status, bad).toBe(200);
+        expect(String(r.body.message).split("\n")[0], bad).toBe(`${host} wants you to sign in with your Ethereum account:`);
+      }
     } finally { await srv.close(); }
   });
 

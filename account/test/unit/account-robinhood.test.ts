@@ -273,7 +273,7 @@ describe("Robinhood's investing accounts, through its MCP server", () => {
 
   it("without a finished sign-in, with no tool to read by, or with answers it cannot read, it says so instead of showing zero", async () => {
     const plain = await boot({ http: robinhoodSignIn(), openMcp: mcpServer({}).open });
-    expect(refusal(await plain.own({ type: "connectVenue", venue: "robinhood", connector: "live:robinhood", label: "", credentialRef: "made-up-state" })).message).toBe("Robinhood: nobody has signed in for this connection yet — sign in from the account page first");
+    expect(refusal(await plain.own({ type: "connectVenue", venue: "robinhood", connector: "live:robinhood", label: "", credentialRef: "made-up-state" })).message).toBe("Robinhood: nobody has signed in for this connection yet — sign in from Gravit, under Account › Venues, first");
 
     const tradingOnly = await signedIn(robinhoodSignIn(), mcpServer({}, [{ name: "place_equity_order" }, { name: "cancel_equity_order" }]));
     const none = refusal(await tradingOnly.own({ type: "connectVenue", venue: "robinhood", connector: "live:robinhood", label: "", credentialRef: tradingOnly.state }));

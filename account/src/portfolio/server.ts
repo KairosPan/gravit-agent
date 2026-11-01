@@ -350,7 +350,15 @@ export function parseAgent(raw: unknown): AgentId {
 const FACE_ORIGIN = /^http:\/\/(localhost|127\.\d{1,3}\.\d{1,3}\.\d{1,3}|\[::1\])(:\d{1,5})?$/;
 export function faceOriginOf(req: express.Request): string | undefined {
   const v = req.headers["x-gravit-face-origin"];
-  return typeof v === "string" && FACE_ORIGIN.test(v) ? v : undefined;
+  if (typeof v !== "string" || !FACE_ORIGIN.test(v)) return undefined;
+  // the shape alone lets through a port past 65535 or an octet past 255, which `new URL` throws on: parsed here, never later unguarded
+  let u: URL;
+  try { u = new URL(v); } catch { return undefined; }
+  if (u.protocol !== "http:" || u.username || u.password || u.pathname !== "/" || u.search || u.hash) return undefined;
+  if (u.port !== "" && !(Number(u.port) >= 1 && Number(u.port) <= 65535)) return undefined;
+  const loopback = u.hostname === "localhost" || u.hostname === "[::1]" || /^127\.(25[0-5]|2[0-4]\d|1?\d?\d)\.(25[0-5]|2[0-4]\d|1?\d?\d)\.(25[0-5]|2[0-4]\d|1?\d?\d)$/.test(u.hostname);
+  // the parsed host must be the one written: WHATWG rewrites spellings (a leading zero, `:80`), and the account uses the value as given
+  return loopback && u.origin === v ? v : undefined;
 }
 
 /** the page a venue's sign-in sends the browser back to: whether it finished, in the account page's paper and ink, and nothing else */

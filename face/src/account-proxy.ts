@@ -84,7 +84,8 @@
  *   {@link CALLBACK_QUERY}, each name at most once and within its bound (else
  *   400), and forwarded to `GET /api/account/signin/callback`, cut at 30 s,
  *   never kept and never stale. The Account's status and its HTML page come back
- *   with {@link CALLBACK_HEADERS}; a failed fetch or a disabled row is 503 with
+ *   with {@link CALLBACK_HEADERS} (a content-security-policy of no script, no load,
+ *   no form, no frame among them); a failed fetch or a disabled row is 503 with
  *   the fixed page {@link CALLBACK_UNREACHABLE}.
  * - Nothing of a body, a query or a frame is logged here.
  * @module
@@ -166,10 +167,14 @@ export const CALLBACK_QUERY: ReadonlyMap<string, number> = new Map([
 /** How long the Account may take to finish a sign-in, headers and body: it trades the code at the venue. */
 export const CALLBACK_ABORT_MS = 30_000;
 
-/** The callback's answer headers: the Account's page, never kept, never sniffed, and its URL (which carried the
- * code) never sent on as a referrer. */
+/** The callback's answer headers: the Account's page, never kept, never sniffed, its URL (which carried the code)
+ * never sent on as a referrer — and, since the page is served on the face's own origin beside the owner's key in
+ * IndexedDB, a policy that lets it run no script, load nothing, post no form and be framed by no one: its inline
+ * style alone is drawn. (The Account's success page carries an inline `window.close()` after 1.5 s; the policy
+ * blocks it, so the tab stays open, as its words already say it may be closed.) */
 export const CALLBACK_HEADERS = {
   "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "referrer-policy": "no-referrer",
+  "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
 } as const;
 
 /** The callback's page when the Account did not answer, or the row is disabled. */

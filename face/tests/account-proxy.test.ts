@@ -1083,7 +1083,7 @@ test("the callback forwards a venue's navigation and answers the Account's page"
   const a = await call(routes, `${CALLBACK}?state=s1&code=c1&iss=https%3A%2F%2Fexample`, NAVIGATION);
   assert.equal(a.status, 200);
   assert.equal(a.body, page, "the Account's bytes");
-  assert.deepEqual(a.headers, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "referrer-policy": "no-referrer" });
+  assert.deepEqual(a.headers, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "referrer-policy": "no-referrer", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" });
   assert.deepEqual(fetched, [`${URL_}/api/account/signin/callback?state=s1&code=c1&iss=https%3A%2F%2Fexample`], "once, the rebuilt query");
   assert.equal(inits[0]!.redirect, "error");
   assert.equal(inits[0]!.headers, undefined, "a plain loopback fetch: no Origin, no Sec-Fetch-*, no cookie");
@@ -1134,7 +1134,7 @@ test("the callback: a fetch, a form, an Origin, a rebound Host are 403; a bad qu
 
 test("the callback: an Account that does not answer, and a disabled row, are 503 with the fixed page", async () => {
   const fixed = "The Account did not answer. Go back to Gravit and start the sign-in again.";
-  const html = { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "referrer-policy": "no-referrer" };
+  const html = { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "referrer-policy": "no-referrer", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" };
   const refused = proxyWith(async () => { throw Object.assign(new TypeError("fetch failed: secret text"), { cause: { code: "ECONNREFUSED" } }); });
   const a = await call(refused.routes, `${CALLBACK}?state=s1`, NAVIGATION);
   assert.equal(a.status, 503); assert.equal(a.body, fixed); assert.deepEqual(a.headers, html);
