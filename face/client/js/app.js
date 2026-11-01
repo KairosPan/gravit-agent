@@ -7,7 +7,7 @@ import { parseHash, toHash } from './router.js';
 import { renderRail } from './render/rail.js';
 import { renderMessagesScreen, currentConversation } from './render/messages.js';
 import { renderMarketsScreen } from './render/markets.js';
-import { renderSettings, renderAccountScreen } from './render/account.js';
+import { renderSettings, renderAccountScreen, renderSellMany } from './render/account.js';
 import { renderSheet } from './render/owner.js';
 import { renderTradeScreen } from './render/trade.js';
 import { setMarkdown } from './render/markdown.js';
@@ -39,7 +39,8 @@ import { isAccountKey, handWordsOf, watchedOf } from './host/market-view.js';
 import { isCnKey } from './wire/china.js';
 import { startOwner, postVia } from './host/owner.js';
 import { startSheet, PREPARE_QUIET_MS } from './host/sheet.js';
-import { moveSeedOf } from './host/sheet-money.js';
+import { moveSeedOf, earnSeedOf, earnSaidOf } from './host/sheet-money.js';
+import { startSellMany } from './host/sell-many.js';
 import { limitSeedOf, grantOf, keyfileAskOf, reachAskOf, letDeviceSeedOf, paperSeedOf } from './host/sheet-view.js';
 import { startTrade } from './host/trade.js';
 import { tradeableOf } from './host/trade-view.js';
@@ -178,8 +179,8 @@ function focusKey(el) {
 // the owner sheet is a drawer of any screen, over the one open (the order sheet is Trade's ticket, not a drawer)
 const sheetUp = s => Boolean(s.sheet) && s.sheet.kind !== 'order';
 // a module card's Run sheet is a drawer of any screen too, drawn after the owner sheet
-const overlayOf = s => (sheetUp(s) ? 'sheet' : s.runSheet || s.lunhui?.stock || s.detailsOpen || s.settingsOpen || s.account.statementOpen || s.account.detailsVenue ? 'drawer' : null);
-const drawerOf = s => (sheetUp(s) ? `sheet:${s.sheet.kind}` : s.runSheet ? `run:${s.runSheet.module}` : s.lunhui?.stock ? `stock:${s.lunhui.stock.code}` : s.detailsOpen ? 'details' : s.settingsOpen ? 'settings' : s.account.statementOpen ? 'statement'
+const overlayOf = s => (sheetUp(s) ? 'sheet' : s.sellMany || s.runSheet || s.lunhui?.stock || s.detailsOpen || s.settingsOpen || s.account.statementOpen || s.account.detailsVenue ? 'drawer' : null);
+const drawerOf = s => (sheetUp(s) ? `sheet:${s.sheet.kind}` : s.sellMany ? 'sellMany' : s.runSheet ? `run:${s.runSheet.module}` : s.lunhui?.stock ? `stock:${s.lunhui.stock.code}` : s.detailsOpen ? 'details' : s.settingsOpen ? 'settings' : s.account.statementOpen ? 'statement'
   : s.account.detailsVenue ? `venue:${s.account.detailsVenue}` : null);
 const closeKeyOf = overlay => (overlay === 'sheet' ? '.drawer.sheet .close-key' : '.drawer .close-key');
 const editorOf = e => (e ? [e.kind, e.convId, e.id].join('|') : null);
@@ -260,6 +261,8 @@ export function boot(win, host = {}) {
     void account.loadStatement({ fresh: true });
     markets.afterAction();
     if (SEAT_KINDS.has(kind)) void seat.load({ fresh: true });
+    // a taken earn (plan 4b Task 3): what it said on Money's Earn, and the earn read again past the cache (earn.js:186-194)
+    if (kind === 'earn') { store.dispatch('earnSaid', earnSaidOf(body)); void account.loadEarn({ fresh: true }); }
     // a signed Beast: the Rules tab's last Guard line goes with the mode it spoke of
     if (kind === 'beast') store.dispatch('guardClear');
     const s = store.get().sheet;
@@ -301,6 +304,9 @@ export function boot(win, host = {}) {
     onChange: kind => { if (kind === 'connect') checkConnectSoon(); },
     onPrepared: (kind, prepared, draft) => { if (kind === 'move' && prepared?.action?.kind === 'bridge') void account.bridgeRoutes(draft); },
   });
+  // Sell many (plan 4b Task 3): up to ten holdings at market, each prepared and signed in turn over the owner device; a DEX
+  // sale's send started on the operator's own wallet; the Account read again once a run ends
+  const sellMany = startSellMany({ store, getJson, owner, walletSend, afterAction, now });
   // a receipt reloads the Account's page past the cache, and one from the Account seat (every receipt the kind table
   // lifts today) the seat's standing too
   const live = startLive({ store, openMux: host.openMux ?? wireOpenMux, call, mapFrame, getJson, timers, now, onReceipt: m => { if (m?.data?.seat) void seat.load({ fresh: true }); void account.load({ fresh: true }); } });
@@ -377,7 +383,7 @@ export function boot(win, host = {}) {
       : s.route.screen === 'channel' ? renderChannelScreen(s, now()) : s.route.screen === 'discover' ? renderDiscover(s, now())
       : s.route.screen === 'plugin' ? renderPlugin(s) : s.route.screen === 'module' ? renderModule(s, now()) : renderMessagesScreen(s, now());
     // the drawers of any screen, inside its <main>: Settings, the stock drawer, the owner sheet over whatever is open, a module card's Run sheet
-    const drawers = (s.settingsOpen ? renderSettings(s) : '') + stockDrawerHtml(s) + (sheetUp(s) ? renderSheet(s, now()) : '') + (s.runSheet ? renderRunSheet(s, now()) : '');
+    const drawers = (s.settingsOpen ? renderSettings(s) : '') + stockDrawerHtml(s) + (s.sellMany ? renderSellMany(s) : '') + (sheetUp(s) ? renderSheet(s, now()) : '') + (s.runSheet ? renderRunSheet(s, now()) : '');
     root.innerHTML = renderRail(s, now()) + (drawers ? screen.replace(/<\/main>$/, drawers + '</main>') : screen);
     // the quotes poll asks for the rows the table drew, by id; a market's page, which draws none, for its own market (spec §6.1:
     // the page follows it on the stream and polls quotes for what the stream does not carry)
@@ -497,6 +503,7 @@ export function boot(win, host = {}) {
     if (entered('portfolio')) void account.loadHoldings().then(() => account.loadHistory());
     if (entered('venues') || entered('agents')) void seat.load();
     if (entered('agents')) void account.loadAgents();
+    if (entered('money')) void account.loadEarn();
     // Trade left: its ticket closes and lets its line go — before a market's page follows its own
     const inTrade = route => route?.screen === 'trade';
     if (!inTrade(r) && inTrade(was)) { stopTradeSearch(); trade.closeTicket(); }
@@ -716,6 +723,8 @@ export function boot(win, host = {}) {
       case 'leverage': void sheet.open('leverage', { venue: d.venue ?? '', venueName: d.venueName ?? '', symbol: d.symbol ?? '', name: d.name ?? '', leverage: d.leverage ?? '', maxLeverage: d.maxLeverage ?? '', marginModes: d.marginModes ?? '' }); break;
       // the Money tab's Move… (plan 4b Task 2): the page's sources as they stand, from the one pressed
       case 'move': if (writesOn(page)) void sheet.open('move', moveSeedOf(page, { from: d.from ?? '', to: d.to ?? '', kind: d.moveKind ?? '', amount: d.amount ?? '' })); break;
+      // Earn's Put in… and Take out… (plan 4b Task 3): seeded from the earn read, read first when it never was
+      case 'earn': if (writesOn(page)) void openEarn({ venue: d.venue ?? '', side: d.side ?? '', product: d.product ?? '' }); break;
       // the Rules tab's (plan 4a Task 5): each seeded from the page as it stands — the cap now, whether the session ended, their
       // leverage now; the three limits only for an Account that takes writes
       // Beast only while it is not in force: a signature that changes nothing is never asked
@@ -734,6 +743,17 @@ export function boot(win, host = {}) {
   // the connect and paper sheets are seeded from a read beside the page (where this account can connect, the kept paper
   // books): at once with what was read, else once the read lands — when no other sheet was opened meanwhile and the page
   // still signs
+  // the Earn sheet from the earn read as it stands; never read: read first, and opened only when no other sheet was opened
+  // meanwhile and the page still signs
+  async function openEarn(preset) {
+    if (store.get().account.earn.data === null) {
+      const opened = sheetOpens;
+      await account.loadEarn();
+      if (opened !== sheetOpens || !signs()) return;
+    }
+    const a = store.get().account;
+    void sheet.open('earn', earnSeedOf(a.earn.data, a.data, preset));
+  }
   async function openOnRead(kind) {
     const slice = () => store.get().account[kind === 'connect' ? 'venuesHere' : 'paperBooks'];
     const read = kind === 'connect' ? account.loadVenuesHere() : account.loadPaperBooks();
@@ -924,6 +944,12 @@ export function boot(win, host = {}) {
     copyText: el => {
       try { void Promise.resolve(win.navigator?.clipboard?.writeText?.(el.dataset.text ?? '')).catch(() => {}); } catch { /* no clipboard here */ }
     },
+    // Sell many (plan 4b Task 3): opened from the Portfolio's Assets on a page that signs for an Account that takes writes
+    openSellMany: () => { if (signs() && writesOn(store.get().account.data)) void sellMany.open(); },
+    sellManyReview: () => { void sellMany.review(); },
+    sellManyRun: () => { if (signs()) void sellMany.run(); },
+    sellManyBack: () => sellMany.back(),
+    sellManyClose: () => sellMany.close(),
     // the Rules tab's Guard: one unsigned click, on any page that reads the Account (one in the air at a time)
     setGuard: () => { if (pageOk(store.get().account.data)) void account.guard(); },
     askRevoke: el => { if (signs()) store.dispatch('askConfirm', { action: 'revoke', name: el.dataset.name ?? '', address: el.dataset.address ?? '' }); },
@@ -1018,6 +1044,7 @@ export function boot(win, host = {}) {
     else if (el.dataset?.action === 'dq') store.dispatch('setDiscoverQuery', el.value);
     else if (isField(el) && typesWords(el)) changeField(el.name, el.value);
     else if (el.dataset?.action === 'runSheetField' && typesWords(el)) act.runSheetField(el);
+    else if (el.dataset?.action === 'sellManyQty') sellMany.setQty(el.dataset.index, el.value);
     else if (el.dataset?.action === 'lunhuiMinute') moveCursor(el, Number(el.value));
   }
   // an indices chart's cursor, from its slider or the pointer over the chart: patched in place, never through the store
@@ -1038,6 +1065,7 @@ export function boot(win, host = {}) {
     if (el.type === 'checkbox' && el.name === 'roster') store.dispatch('toggleRosterTick', { value: el.value, on: el.checked === true });
     if (isField(el) && !typesWords(el)) changeField(el.name, fieldValueOf(el));
     if (el.dataset?.action === 'runSheetField' && !typesWords(el)) act.runSheetField(el);
+    if (el.type === 'checkbox' && el.dataset?.action === 'sellManyPick') sellMany.toggle(el.value);
   });
   let pressSeq = 0;   // a press's own timeout ends only that press, never a later one
   root.addEventListener('pointerdown', ev => {
@@ -1066,6 +1094,7 @@ export function boot(win, host = {}) {
       // a module card's Run sheet first, then the owner sheet over any drawer, then the stock drawer; Trade's ticket after every drawer
       if (s.runSheet) runSheet.close();
       else if (sheetUp(s)) sheet.close();
+      else if (s.sellMany) sellMany.close();
       else if (s.lunhui?.stock) store.dispatch('lunhuiStockClose');
       else if (s.detailsOpen) store.dispatch('toggleDetails');
       else if (s.settingsOpen) store.dispatch('closeSettings');
@@ -1114,7 +1143,7 @@ export function boot(win, host = {}) {
   if (!doc.hidden) stream.open();
   follow();
   render();
-  return Object.assign(store, { timers, live, actions, markets, channels, discover, owner, sheet, trade, walletSend });
+  return Object.assign(store, { timers, live, actions, markets, channels, discover, owner, sheet, trade, walletSend, sellMany });
 }
 
 if (typeof window !== 'undefined' && window.document) boot(window);

@@ -21,7 +21,9 @@ import {
 } from '../host/account-view.js';
 import { amendSeedOf, closeSeedOf, leverageSeedOf } from '../host/sheet-market.js';
 import { rulesOf } from '../host/rules-view.js';
-import { receiveRowsOf, receiveNetworkWords, moveSourcesOf } from '../host/money-view.js';
+import { receiveRowsOf, receiveNetworkWords, moveSourcesOf, earnListOf, earnRate, earnOutAt } from '../host/money-view.js';
+import { SELL_MANY_MAX, smLegName, smLegWords } from '../host/sell-many.js';
+import { whatYouSignLines } from '../host/owner-view.js';
 import { underWayOf } from '../host/trade-view.js';
 import { walletRow } from './wallet-row.js';
 import { providerWord } from '../host/market-view.js';
@@ -97,14 +99,24 @@ function changeLine(a, paperLeads) {
 // Assets and Positions are the leading lens's read: the paper book's (holdings?cost=1&paper=1) while Paper leads, else real
 // money's (holdings?cost=1). When that read refused, the Account's sentence: where Holdings unavailable would be before any
 // answer (the fixed word only when there is none), over the rows kept after one
-function assetsBox(lens) {
+// on a page that signs, for an Account that takes writes, an Earning row's Take out… (the Earn sheet on Take out, the product
+// the row is in — the one it names, else its venue's), and the Assets' Sell many… (plan 4b Task 3; portfolio.js:634, :675)
+function earnOutKey(r, state) {
+  if (r.cls !== 'earn' || !marketKeysOn(state)) return '';
+  const page = state.account.data;
+  const at = r.earn && earnOutAt(page, r.earn.venue) ? { venue: r.earn.venue, product: r.earn.product } : (v => (v ? { venue: v.venue, product: v.product } : null))(r.venues.find(v => earnOutAt(page, v.venue)));
+  return at ? `<br>${sheetKey('earn', { 'data-venue': at.venue, 'data-side': 'withdraw', 'data-product': at.product }, 'Take out…')}` : '';
+}
+
+function assetsBox(lens, state) {
   const rows = assetsOf(lens.data).map(r => [
-    lines(r.asset, r.venues.map(v => [v.venueName || v.venue, numWord(v.amount), v.stale ? 'stale' : ''].filter(Boolean).join(' · '))),
+    lines(r.asset, r.venues.map(v => [v.venueName || v.venue, numWord(v.amount), v.stale ? 'stale' : ''].filter(Boolean).join(' · '))) + earnOutKey(r, state),
     esc(numWord(r.amount)), esc(price(r.price)), `<span class="${tone(r.changePct24h)}">${esc(pctWord(r.changePct24h))}</span>`, esc(money(r.usd)),
   ]);
   const said = lens.status === 'error' && lens.message ? note(lens.message) : '';
   const body = rows.length ? table(['Asset', 'Amount', 'Price', '24h', 'Value'], rows) : said && lens.data === null ? '' : readNote(lens, 'Holdings unavailable', 'No assets');
-  return box(`${title('Assets')}${said}${body}`, 'Assets');
+  const tools = marketKeysOn(state) ? `<div class="btn-row"><button type="button" class="btn-sm" data-action="openSellMany">Sell many…</button></div>` : '';
+  return box(`${title('Assets')}${tools}${said}${body}`, 'Assets');
 }
 
 // the Positions table; on a page that signs, for an Account that takes writes, each row's Close… (Sell…) and a perpetual's
@@ -148,7 +160,7 @@ function portfolio(state, now) {
     `${curveSvg(a.history.data?.points, { currency: 'USD', label: w.lead.label })}${gone.length ? note(gone.join(' · ')) : ''}${stale}` +
     `<div class="btn-row">${failed ? retry : ''}<button type="button" class="btn-sm" data-action="openStatement">Statement</button></div>`, 'Portfolio');
   const lens = w.paperLeads ? a.paper : a.holdings;
-  return `<div class="cards">${worth}${assetsBox(lens)}${positionsBox(lens, state)}${ordersBox(a)}</div>`;
+  return `<div class="cards">${worth}${assetsBox(lens, state)}${positionsBox(lens, state)}${ordersBox(a)}</div>`;
 }
 
 // ── Venues ──
@@ -445,7 +457,100 @@ function moneyTab(state) {
   const waiting = underWayOf(a.data).filter(o => o.payment)
     .map(o => walletRow(o.words, o.payment, o.key, { 'data-payment': o.payment }, o.walletReported, a.wallet, owner, ''));
   const wallet = waiting.length ? box(`${title('Waiting for your wallet')}<div class="mk-wrap"><table class="mk-t tk-t"><tbody>${waiting.join('')}</tbody></table></div>`, 'Waiting for your wallet') : '';
-  return `<div class="cards">${receive}${move}${wallet}</div>`;
+  return `<div class="cards">${receive}${move}${earnBox(state)}${wallet}</div>`;
+}
+
+// Earn (plan 4b Task 3; earn.js openEarn): what is in each product — its venue, asset, amount and yield — with Take out…, and Put
+// in…, the keys on a page that signs for an Account that takes writes; the venues not served here named once, a read that
+// failed and a key that can't earn each in their words; what the last taken earn said
+const EARN_READ_ONLY = 'Read-only: the Account was started without trading, so no money goes in or out of earn.';
+function earnBox(state) {
+  const a = state.account;
+  const e = a.earn ?? {};
+  const keys = signs(state) && writesOn(a.data);
+  const said = e.said ? note(e.said) : '';
+  if (!e.data) return box(`${title('Earn')}${said}${note(e.status === 'error' ? e.message || 'Earn could not be read.' : 'Loading…')}`, 'Earn');
+  const l = earnListOf(e.data, a.data, 'withdraw');
+  const rows = l.products.map(p => {
+    const held = p.held ?? {};
+    const facts = [p.venueName || p.venue, `${numWord(typeof held.amount === 'number' ? held.amount : null)} ${held.asset || p.asset}`, earnRate(typeof held.apy === 'number' ? { ...p, apy: held.apy, apyHigh: undefined } : p)].filter(Boolean).join(' · ');
+    const out = keys && earnOutAt(a.data, p.venue) ? `<span class="btn-row">${sheetKey('earn', { 'data-venue': p.venue, 'data-side': 'withdraw', 'data-product': p.id }, 'Take out…')}</span>` : '';
+    return `<div class="venue"><span>${lines(p.name || p.id, [facts])}</span>${out}</div>`;
+  }).join('');
+  const failedNote = e.status === 'error' && e.message ? note(e.message) : '';
+  const away = l.away.length ? note(`Not served on this network now: ${l.away.map(m => m.venueName).join(', ')}.`) : '';
+  const failed = l.failed.map(m => note(`${m.venueName} could not be read: ${m.why}`)).join('');
+  const refusing = l.refusing.map(v => note(`${v.venueName}: ${v.why}`)).join('');
+  const put = keys ? `<div class="btn-row">${sheetKey('earn', { 'data-side': 'supply' }, 'Put in…')}</div>` : '';
+  const ro = writesOn(a.data) ? '' : note(EARN_READ_ONLY);
+  return box(`${title('Earn')}${said}${failedNote}${rows ? `<div class="venues">${rows}</div>` : note('Nothing is earning to take out.')}${put}${ro}${away}${failed}${refusing}`, 'Earn');
+}
+
+// ── Sell many (plan 4b Task 3; earn.js openSellMany) ──
+
+const SM_LEAD = max => `Pick up to ${max}: each is its own order at market and its own signature.`;
+const smPlural = (n, one) => `${n} ${n === 1 ? one : `${one}s`}`;
+
+// a leg in the review or the run: its name and venue, then where it stands — asking, what it would sign, waiting, signing, or
+// its answer where it landed
+function smLeg(l, i) {
+  const head = `<div><b>${esc(smLegName(l.item))}</b> · ${esc(l.item.venueName || l.item.venue)}</div>`;
+  let body = '';
+  if (l.state === 'asking') body = note('Asking…');
+  else if (l.state === 'refused') body = `<p class="acct-note sm-no">${esc(l.why)}</p>`;
+  else if (l.state === 'waiting') body = note('waiting');
+  else if (l.state === 'signing') body = note('signing…');
+  else if (l.state === 'sold' || l.state === 'wallet') body = note(l.said);
+  else if (l.state === 'ready') {
+    const w = smLegWords(l);
+    const shown = whatYouSignLines(l.prepared);
+    body = (w ? `<div class="sheet-quote"><b>${esc(w.head)}</b>${w.usd ? ` <span class="dim">${esc(w.usd)}</span>` : ''}<br><span class="dim">${esc(w.path)}</span></div>` : '') +
+      (shown.length ? `<details${attrs({ id: `sm-shown-${i}`, class: 'acct-shown' })}><summary>What you sign</summary>${shown.map(x => `<div class="dsec-line">${esc(x)}</div>`).join('')}</details>` : '');
+  }
+  return `<li${attrs({ class: 'sm-leg', 'data-leg': String(i) })}>${head}${body}</li>`;
+}
+
+/** Sell many's drawer: everything held that isn't a dollar, picked up to ten, reviewed leg by leg, then signed one by one —
+ *  each leg's answer where it landed. Its words are the Account page's (earn.js:250-356). None open: nothing. */
+export function renderSellMany(state) {
+  const m = state.sellMany;
+  if (!m) return '';
+  const owner = signs(state);
+  const venueName = m.venue ? (venuesOf(state.account.data).find(v => v.id === m.venue)?.name || m.venue) : '';
+  const lead = note(`Everything you hold that isn't a dollar${venueName ? ` at ${venueName}` : ''}. ${SM_LEAD(SELL_MANY_MAX)}`);
+  let body = '';
+  if (m.status === 'reading') body = note('Loading…');
+  else if (m.status === 'picking') {
+    const missing = (Array.isArray(m.missing) ? m.missing : []);
+    const away = missing.filter(x => x.code === 'E_VENUE_GEOBLOCKED');
+    const missed = (away.length ? note(`Not served on this network now: ${[...new Set(away.map(x => x.venueName || x.venue))].join(', ')}.`) : '') +
+      missing.filter(x => x.code !== 'E_VENUE_GEOBLOCKED').map(x => note(`${x.venueName || x.venue} could not be read: ${x.why}`)).join('');
+    if (m.message) body = note(m.message);
+    else if (!m.items.length) body = note(m.hidden ? `Nothing here can be sold right now: ${smPlural(m.hidden, 'holding')} ${m.hidden === 1 ? 'is' : 'are'} left out.` : 'Nothing to sell: everything here is in dollars.') + missed;
+    else {
+      const picked = new Set(m.picked);
+      const rows = m.items.map((x, i) => {
+        const qty = Object.hasOwn(m.qtys ?? {}, i) ? m.qtys[i] : String(x.sellQty);
+        const facts = [x.venueName || x.venue, `${numWord(typeof x.held === 'number' ? x.held : null)} held`, typeof x.usd === 'number' ? `≈ ${money(x.usd)}` : ''].filter(Boolean).join(' · ');
+        return `<li class="sm-row"><label class="sheet-check"><input${attrs({ type: 'checkbox', name: 'pick', value: String(i), checked: picked.has(i), 'data-action': 'sellManyPick', 'aria-label': `Sell ${x.asset} at ${x.venueName || x.venue}` })}>` +
+          `<span>${lines(smLegName(x), [facts])}</span></label><input${attrs({ id: `sm-q-${i}`, class: 'input small', type: 'text', inputmode: 'decimal', autocomplete: 'off', value: qty, 'data-action': 'sellManyQty', 'data-index': String(i), 'aria-label': `How much ${x.asset} to sell` })}></li>`;
+      }).join('');
+      const n = m.picked.length;
+      const hidden = m.hidden ? note(`${smPlural(m.hidden, 'holding')} can't be sold from here right now and ${m.hidden === 1 ? 'is' : 'are'} left out.`) : '';
+      body = `<ul class="sm-list" role="list">${rows}</ul>${hidden}${missed}${m.full ? note(`At most ${SELL_MANY_MAX} at once`) : ''}` +
+        `<div class="btn-row"><button${attrs({ type: 'button', class: 'btn-primary', 'data-action': 'sellManyReview', disabled: !n })}>${esc(n ? `Review ${smPlural(n, 'sale')}` : 'Review')}</button></div>`;
+    }
+  } else {
+    const legs = `<ol class="sm-legs">${m.legs.map(smLeg).join('')}</ol>`;
+    const ready = m.legs.filter(l => l.state === 'ready').length;
+    const asking = m.legs.some(l => l.state === 'asking');
+    let keys = '';
+    if (m.status === 'reviewing') keys = `<div class="btn-row"><button type="button" class="btn-sm" data-action="sellManyBack">Back</button><button${attrs({ type: 'button', class: 'btn-primary', 'data-action': 'sellManyRun', disabled: asking || !ready || !owner })}>${esc(`Sign ${ready}`)}</button></div>`;
+    else if (m.status === 'done') keys = `${m.said ? note(m.said) : ''}<div class="btn-row"><button type="button" class="btn-sm" data-action="sellManyClose">Done</button></div>`;
+    body = legs + keys;
+  }
+  return `<aside class="drawer" aria-label="Sell many"><div class="drawer-head"><h2>Sell many</h2><button type="button" class="close-key" data-action="sellManyClose" aria-label="Close">×</button></div>` +
+    `<div class="drawer-body">${lead}${body}</div></aside>`;
 }
 
 // ── the drawers ──

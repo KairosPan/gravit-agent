@@ -223,3 +223,81 @@ test("the page's lines under a move's quote: where it goes, a bridge's delivery,
   assert.deepEqual(moveSaysOf({ kind: 'move', seed }), []);
   assert.deepEqual(moveSaysOf({ kind: 'topUp', prepared: { action: {} } }), []);
 });
+
+// ── Earn (plan 4b Task 3; earn.js openEarn :40-196) ──
+
+test('earn drafts supply and withdraw, all of it as all', async () => {
+  const { earnSeedOf, earnHintsOf, earnSaysOf, earnSaidOf } = await import('../../client/js/host/sheet-money.js');
+  const { earnBody, earnPage } = await import('./helpers/earn-fixture.js');
+  const seed = earnSeedOf(earnBody(), earnPage(), {});
+  const fields = fieldsOf('earn', seed);
+  assert.deepEqual(fields.map(f => [f.name, f.type]), [['side', 'seg'], ['product', 'select'], ['amount', 'number']], 'Put in: no All of it');
+  assert.deepEqual(fields[0].options, [{ value: 'supply', label: 'Put in' }, { value: 'withdraw', label: 'Take out' }]);
+  assert.deepEqual(fields[1].options, [
+    { value: 'ex|flex:USDT', label: 'USDT · Flexible (stand-in) · Stand-in Exchange · USDT · 4.60% APY' },
+    { value: 'ex|flex:DOGE', label: 'DOGE · Flexible · Stand-in Exchange · DOGE · 1.00% APR' },
+    { value: 'ex|bond:ETH', label: 'ETH · Bonded · Stand-in Exchange · ETH · 3.00%–5.00% APY · Closed: Full for now', disabled: true },
+  ]);
+  assert.equal(valueOf(fields, 'product'), 'ex|flex:USDT', 'the first that takes money');
+  assert.equal(fields[2].label, 'Amount (USDT)');
+  assert.equal(titleOf('earn', seed, fields), 'Earn');
+  assert.equal(goWord('earn', seed, fields), 'Sign and put in');
+  assert.equal(draftOf('earn', fields, seed, NOW), 'Type an amount.');
+  assert.deepEqual(draftOf('earn', set(fields, { amount: '25' }), seed, NOW),
+    { type: 'liveEarn', venue: 'ex', kind: 'supply', product: 'flex:USDT', asset: 'USDT', amount: '25' }, 'earn.js:40');
+  assert.deepEqual(earnHintsOf({ kind: 'earn', seed, fields }), ['5,700 USDT at Stand-in Exchange', 'Money taken out lands in the funding account.', 'At least 1 USDT.']);
+  // Take out: the side changed, the fields rebuilt — only what something is in, and All of it
+  const out = refieldsOf('earn', set(fields, { side: 'withdraw', amount: '25' }), seed);
+  assert.deepEqual(out.map(f => f.name), ['side', 'product', 'amount', 'all']);
+  assert.deepEqual(out[1].options.map(o => o.value), ['ex|flex:USDT']);
+  assert.equal(valueOf(out, 'amount'), '25', 'the same asset: the amount stays');
+  assert.equal(goWord('earn', seed, out), 'Sign and take out');
+  assert.equal(draftOf('earn', set(out, { amount: '' }), seed, NOW), 'Type an amount, or take all of it.');
+  assert.deepEqual(draftOf('earn', out, seed, NOW), { type: 'liveEarn', venue: 'ex', kind: 'withdraw', product: 'flex:USDT', asset: 'USDT', amount: '25' });
+  assert.deepEqual(draftOf('earn', set(out, { all: true }), seed, NOW), { type: 'liveEarn', venue: 'ex', kind: 'withdraw', product: 'flex:USDT', asset: 'USDT', amount: 'all' }, 'the box ticked');
+  assert.equal(draftOf('earn', set(out, { amount: 'ALL' }), seed, NOW).amount, 'all', 'the word typed (earn.js:138)');
+  assert.equal(draftOf('earn', set(fields, { amount: 'all' }), seed, NOW), 'Type an amount.', 'all of it is a withdrawal\'s only');
+  // back to Put in: All of it goes with Take out and never reaches the draft
+  const back = refieldsOf('earn', set(out, { side: 'supply', all: true }), seed);
+  assert.deepEqual(back.map(f => f.name), ['side', 'product', 'amount']);
+  assert.equal(draftOf('earn', back, seed, NOW).amount, '25');
+  // a product in another asset: the amount typed for USDT is not carried (earn.js:93-97)
+  const doge = refieldsOf('earn', set(fields, { amount: '25', product: 'ex|flex:DOGE' }), seed);
+  assert.equal(valueOf(doge, 'amount'), '');
+  assert.equal(doge[2].label, 'Amount (DOGE)');
+  // a seed for the product an Earning row names, on Take out
+  const preset = earnSeedOf(earnBody(), earnPage(), { venue: 'ex', side: 'withdraw', product: 'flex:USDT' });
+  assert.equal(valueOf(fieldsOf('earn', preset), 'product'), 'ex|flex:USDT');
+  assert.equal(valueOf(fieldsOf('earn', preset), 'side'), 'withdraw');
+  // the quote's lines and what a taken one said
+  const prepared = { action: { type: 'liveEarn' }, shown: [], quote: { earn: { words: 'take 25 USDT out of USDT · Flexible at Stand-in Exchange', usd: 25, apy: 0.046, lockDays: 0, lands: 'the funding account', held: { amount: 150, asset: 'USDT', usd: 150 } } } };
+  assert.deepEqual(earnSaysOf({ kind: 'earn', prepared }), ['≈ $25.00', '4.60% APY · out at once', 'Taken out, it lands in the funding account', 'In it now: 150 USDT ($150.00)']);
+  assert.equal(earnSaidOf({ ok: true, kind: 'result', result: { earn: { kind: 'withdraw', all: true, asset: 'USDT', productName: 'USDT · Flexible', status: 'done' } } }), 'Taking out all USDT · USDT · Flexible: done');
+  assert.equal(earnSaidOf({ ok: true, kind: 'result', result: { earn: { kind: 'supply', amount: 25, asset: 'USDT', productName: 'USDT · Flexible', status: 'pending', note: 'the venue settles it' } } }), 'Putting in 25 USDT · USDT · Flexible: pending · the venue settles it');
+});
+
+test('no product picked: Pick a product', async () => {
+  const { earnSeedOf } = await import('../../client/js/host/sheet-money.js');
+  const { earnBody, earnPage } = await import('./helpers/earn-fixture.js');
+  const body = earnBody();
+  for (const p of body.products) p.canSupply = false;
+  const seed = earnSeedOf(body, earnPage(), {});
+  const fields = fieldsOf('earn', seed);
+  assert.equal(valueOf(fields, 'product'), '', 'every product closed: none picked');
+  assert.equal(draftOf('earn', set(fields, { amount: '25' }), seed, NOW), 'Pick a product');
+  assert.equal(draftOf('earn', set(fields, { amount: '25', product: 'ex|nope' }), seed, NOW), 'Pick a product', 'a product the list does not have');
+  const empty = earnSeedOf({ ok: true, products: [], positions: [], venues: [], missing: [] }, earnPage(), {});
+  assert.equal(draftOf('earn', fieldsOf('earn', empty), empty, NOW), 'No product takes money from here right now.');
+  assert.equal(draftOf('earn', fieldsOf('earn', { ...empty, side: 'withdraw' }), { ...empty, side: 'withdraw' }, NOW), 'Nothing is earning to take out.');
+});
+
+test('the earn sheet through the owner reducer: Take out picked, All of it ticked', async () => {
+  const { earnSeedOf } = await import('../../client/js/host/sheet-money.js');
+  const { earnBody, earnPage } = await import('./helpers/earn-fixture.js');
+  const seed = earnSeedOf(earnBody(), earnPage(), {});
+  let s = R.sheetOpen(emptyState(), { kind: 'earn', seed, fields: fieldsOf('earn', seed) });
+  s = R.sheetField(s, { name: 'side', value: 'withdraw' });
+  assert.deepEqual(s.sheet.fields.map(f => f.name), ['side', 'product', 'amount', 'all']);
+  s = R.sheetField(s, { name: 'all', value: true });
+  assert.equal(draftOf('earn', s.sheet.fields, seed, NOW).amount, 'all');
+});

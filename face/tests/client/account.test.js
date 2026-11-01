@@ -778,3 +778,87 @@ test("the bridge's routes line: under the quote for the preparation shown, findi
   t = R.sheetPrepared(t, { prepared: { action: draftOf('move', wf, w, NOW), shown: [] }, at: NOW, asked: JSON.stringify(draftOf('move', wf, w, NOW)), deadline: null });
   lacks(renderSheet(t, NOW), 'sheet-routes');
 });
+
+// ── Earn and Sell many (plan 4b Task 3) ──
+
+test('Money\'s Earn: what is in each product with Take out…, and Put in…, on a page that signs for an Account that takes writes', async () => {
+  const { earnBody, earnPage } = await import('./helpers/earn-fixture.js');
+  const withEarn = s => R.earnLoaded(s, { data: earnBody(), at: NOW });
+  const html = draw(moneySigns(withEarn(state({ tab: 'money', page: earnPage() }))));
+  const earn = html.match(MONEY_BOX('Earn'))?.[0] ?? '';
+  has(earn, '<b>USDT · Flexible (stand-in)</b><br><span class="dim">Stand-in Exchange · 150 USDT · 4.60% APY</span>', 'venue, amount and asset, yield');
+  has(earn, 'data-action="openSheet" data-kind="earn" data-venue="ex" data-side="withdraw" data-product="flex:USDT">Take out…</button>');
+  has(earn, 'data-action="openSheet" data-kind="earn" data-side="supply">Put in…</button>');
+  lacks(earn, 'ETH · Bonded', 'nothing in it');
+  lacks(earn, 'USDT · Savings', 'OKX is not served here');
+  has(earn, 'Not served on this network now: OKX.');
+  has(earn, 'Kraken could not be read: the venue said 429');
+  has(earn, 'MetaMask: the agent wallet has not been approved for vaults');
+  // what the last taken earn said
+  has(draw(R.earnSaid(moneySigns(withEarn(state({ tab: 'money', page: earnPage() }))), 'Taking out all USDT · USDT · Flexible: done')), 'Taking out all USDT · USDT · Flexible: done');
+  // a page that does not sign: what is in each product, no key
+  const looks = draw(withEarn(state({ tab: 'money', page: earnPage() }))).match(MONEY_BOX('Earn'))?.[0] ?? '';
+  has(looks, 'USDT · Flexible (stand-in)');
+  lacks(looks, 'data-kind="earn"');
+  // an Account that takes no writes: no key, and why
+  const ro = earnPage();
+  ro.connectLive.writes.on = false;
+  const roEarn = draw(moneySigns(withEarn(state({ tab: 'money', page: ro })))).match(MONEY_BOX('Earn'))?.[0] ?? '';
+  lacks(roEarn, 'data-kind="earn"');
+  has(roEarn, 'Read-only: the Account was started without trading, so no money goes in or out of earn.');
+  // not read yet, then refused in the Account's words
+  has(draw(moneySigns(state({ tab: 'money', page: earnPage() }))).match(MONEY_BOX('Earn'))?.[0] ?? '', 'Loading…');
+  has(draw(moneySigns(R.earnFailed(state({ tab: 'money', page: earnPage() }), { at: NOW, message: 'earn is off at this account' }))), 'earn is off at this account');
+});
+
+test('the Portfolio\'s Sell many… and an Earning row\'s Take out… only on a page that signs for an Account that takes writes', () => {
+  const ASSETS = /<section class="cardbox" aria-label="Assets">[\s\S]*?<\/section>/;
+  const html = draw(moneySigns(state()));
+  const assets = html.match(ASSETS)?.[0] ?? '';
+  has(assets, '<button type="button" class="btn-sm" data-action="openSellMany">Sell many…</button>');
+  has(assets, 'data-action="openSheet" data-kind="earn" data-venue="ex" data-side="withdraw" data-product="flex:USDT">Take out…</button>', 'the product the Earning row names');
+  assert.equal((assets.match(/Take out…/g) ?? []).length, 1, 'only the Earning row');
+  const looks = draw(state()).match(ASSETS)?.[0] ?? '';
+  lacks(looks, 'Sell many…');
+  lacks(looks, 'Take out…');
+  const p = fx('account');
+  p.connectLive.writes.on = false;
+  const ro = draw(moneySigns(state({ page: p }))).match(ASSETS)?.[0] ?? '';
+  lacks(ro, 'Sell many…');
+  lacks(ro, 'Take out…');
+});
+
+test('Sell many\'s drawer: the picks, the review, the run\'s answers where they landed', async () => {
+  const { renderSellMany } = await import('../../client/js/render/account.js');
+  const it = (asset, over = {}) => ({ asset, venue: 'ex', venueName: 'Stand-in Exchange', action: 'sell', symbol: `${asset}/USDT`, held: 2, sellQty: 2, usd: 20, ready: true, ...over });
+  const base = moneySigns(state());
+  const at = sm => renderSellMany(R.sellManySet(base, sm));
+  assert.equal(renderSellMany(base), '', 'none open');
+  has(at({ status: 'reading', items: [], picked: [], legs: [] }), 'Loading…');
+  const picking = { status: 'picking', venue: '', items: [it('SOL'), it('BTC', { action: 'close', side: 'long' })], hidden: 1, missing: [], picked: [], qtys: {}, legs: [], full: false };
+  const none = at(picking);
+  has(none, esc("Everything you hold that isn't a dollar. Pick up to 10: each is its own order at market and its own signature."));
+  has(none, '<b>Close long BTC</b>');
+  has(none, 'value="2" data-action="sellManyQty" data-index="0"');
+  has(none, esc("1 holding can't be sold from here right now and is left out."));
+  assert.match(none, /data-action="sellManyReview" disabled>Review<\/button>/);
+  const two = at({ ...picking, picked: [0, 1] });
+  has(two, '>Review 2 sales</button>');
+  has(at({ ...picking, picked: [0], full: true }), 'At most 10 at once');
+  has(at({ ...picking, items: [], hidden: 0 }), 'Nothing to sell: everything here is in dollars.');
+  has(at({ ...picking, message: 'the account is read-only' }), 'the account is read-only');
+  const prepared = { action: { type: 'liveOrder', symbol: 'SOL/USDT' }, shown: [{ name: 'Sell', value: 'SOL/USDT' }], quote: { order: { words: 'sell 2 SOL at market', notionalUsd: 20 } } };
+  const review = at({ ...picking, status: 'reviewing', legs: [{ item: it('SOL'), state: 'ready', prepared }, { item: it('ETH'), state: 'refused', why: 'below the smallest order' }] });
+  has(review, '<b>sell 2 SOL at market</b> <span class="dim">≈ $20.00</span>');
+  has(review, '<div class="dsec-line">Sell: SOL/USDT</div>', 'What you sign');
+  has(review, 'below the smallest order');
+  has(review, '>Sign 1</button>');
+  has(review, 'data-action="sellManyBack">Back</button>');
+  const looks = renderSellMany(R.sellManySet(state(), { ...picking, status: 'reviewing', legs: [{ item: it('SOL'), state: 'ready', prepared }] }));
+  assert.match(looks, /data-action="sellManyRun" disabled>Sign 1<\/button>/, 'a page that does not sign signs nothing');
+  const done = at({ ...picking, status: 'done', said: 'Sell many: 1 of 2 sales went through', legs: [{ item: it('SOL'), state: 'sold', said: 'Sold · ord-1 · filled' }, { item: it('WETH'), state: 'wallet', said: 'Your wallet has to send it: it waits under Trade › Under way, Send from wallet…' }] });
+  has(done, 'Sold · ord-1 · filled');
+  has(done, 'Your wallet has to send it: it waits under Trade › Under way, Send from wallet…');
+  has(done, 'Sell many: 1 of 2 sales went through');
+  has(done, 'data-action="sellManyClose">Done</button>');
+});

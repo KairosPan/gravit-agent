@@ -79,6 +79,14 @@ export const reducers = {
   routesAsking: (s, asked) => acc(s, { routes: { asked: typeof asked === 'string' ? asked : null, status: 'asking', data: null, message: null } }),
   routesLanded: (s, { asked, data } = {}) => acc(s, { routes: { asked, status: 'ready', data, message: null } }),
   routesFailed: (s, { asked, message = null } = {}) => acc(s, { routes: { asked, status: 'error', data: null, message } }),
+  // Earn (plan 4b Task 3): the earn read, a failed one keeping its last answer with the Account's words; and what the last
+  // taken earn said (earn.js:186), cleared by the next sheet's answer
+  earnLoading: s => read(s, 'earn', { status: 'loading' }),
+  earnLoaded: (s, { data, at }) => read(s, 'earn', { status: 'ready', data, at, message: null }),
+  earnFailed: (s, { at, message = null }) => read(s, 'earn', { status: 'error', at, message }),
+  earnSaid: (s, said) => read(s, 'earn', { said: typeof said === 'string' && said ? said : null }),
+  // Sell many (host/sell-many.js, plan 4b Task 3): the drawer's whole state as the engine sets it, null when closed
+  sellManySet: (s, next) => ({ ...s, sellMany: next !== null && typeof next === 'object' ? next : null }),
   // the curve's range; one the Account does not draw leaves the slice as it is
   setHistoryRange: (s, range) => (RANGES.includes(range) && range !== s.account.history.range ? read(s, 'history', { range }) : s),
   // the Statement is a drawer: one at a time, as Settings and Details are

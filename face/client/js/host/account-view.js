@@ -126,7 +126,9 @@ export function assetsOf(holdingsBody) {
   return listOf(holdingsBody, 'rows').map(row => ({
     key: str(row.key), asset: str(row.asset), cls: str(row.class),
     amount: number(row.amount), usd: number(row.usd), price: number(row.price), changePct24h: number(row.changePct24h),
-    venues: records(row.venues).map(v => ({ venue: str(v.venue), venueName: str(v.venueName), amount: number(v.amount), usd: number(v.usd), stale: v.stale === true })),
+    venues: records(row.venues).map(v => ({ venue: str(v.venue), venueName: str(v.venueName), amount: number(v.amount), usd: number(v.usd), stale: v.stale === true, product: str(v.product) })),
+    // an Earning row's product, where the row names it (holdings: one row a product, `earn:<venue>:<product>`)
+    earn: isRecord(row.earn) ? { venue: str(row.earn.venue), product: str(row.earn.product) } : null,
   })).sort(largestFirst);
 }
 

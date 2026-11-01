@@ -121,10 +121,12 @@ test('assetsOf and positionsOf: the fixture rows in order, amounts numeric, a ro
   assert.deepEqual(assets.map(a => a.key), ['crypto:BTC', 'stable:USDT', 'crypto:ETH', 'crypto:SOL', 'cash:USD', 'rwa:USDY', 'stable:USDC', 'equity:AAPL', 'equity:NVDA', 'earn:ex:flex:USDT']);
   assert.deepEqual(assets[0], {
     key: 'crypto:BTC', asset: 'BTC', cls: 'crypto', amount: 0.124, usd: 7747.4, price: 62479.03226, changePct24h: 2.3,
-    venues: [{ venue: 'ex', venueName: 'Stand-in Exchange', amount: 0.12, usd: 7497.6, stale: false }, { venue: 'wallet', venueName: 'Stand-in Wallet', amount: 0.004, usd: 249.8, stale: false }],
+    venues: [{ venue: 'ex', venueName: 'Stand-in Exchange', amount: 0.12, usd: 7497.6, stale: false, product: '' }, { venue: 'wallet', venueName: 'Stand-in Wallet', amount: 0.004, usd: 249.8, stale: false, product: '' }],
+    earn: null,
   });
   assert.equal(assets[1].changePct24h, null, 'USDT carries no 24h change');
   assert.equal(assets[9].cls, 'earn');
+  assert.deepEqual(assets[9].earn, { venue: 'ex', product: 'flex:USDT' }, 'an Earning row names its product (plan 4b Task 3)');
   const hand = assetsOf({ ok: true, rows: [
     { key: 'a', asset: 'A', class: 'crypto', amount: 1, usd: 5, venues: [{ venue: 'ex', venueName: 'Ex', amount: 1, usd: 5, stale: true }] },
     { key: 'b', asset: 'B', class: 'crypto', amount: 2, venues: [] },

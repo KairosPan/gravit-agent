@@ -67,6 +67,8 @@ export function emptyState() {
       // the Money tab (plan 4b Task 2): Receive's addresses by row key, and a bridge's routes for the draft asked
       receive: {},
       routes: { asked: null, status: 'idle', data: null, message: null },
+      // Earn (plan 4b Task 3): the products and what is in them, and what the last taken earn said
+      earn: { status: 'idle', data: null, at: null, message: null, said: null },
       statementOpen: false,
       detailsVenue: null,
     },
@@ -75,6 +77,8 @@ export function emptyState() {
     // the owner device (host/owner.js): whether this page signs for the Account, its key's id there, the Account's last
     // refusal to it, a pairing or sign-out in the air
     owner: { role: 'unknown', kid: '', refusal: null, busy: false },
+    // Sell many's drawer (host/sell-many.js, plan 4b Task 3): reading, picking, reviewing, running, done — none open
+    sellMany: null,
     // the owner sheet open (host/sheet.js): prepare, What you sign, sign — none open
     sheet: null,
     // Trade (host/trade.js): the kind it is on, the query, the kinds' picks reads by kind and the trade search's, the ticket

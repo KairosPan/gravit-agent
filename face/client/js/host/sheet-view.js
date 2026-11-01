@@ -23,7 +23,7 @@ const str = v => (typeof v === 'string' ? v : '');
 
 /** Every sheet kind. `order` is the Trade ticket's: its fields and draft are the trade view's, from `seed.ticket`. `close`,
  *  `amend` and `leverage` are the Market half's: everything about them is host/sheet-market.js's. `beast`, `cap`, `session` and
- *  `leverageCap` are the Rules tab's: host/sheet-rules.js's. `move` is the Money tab's: host/sheet-money.js's (plan 4b Task 2). */
+ *  `leverageCap` are the Rules tab's: host/sheet-rules.js's. `move` and `earn` are the Money tab's: host/sheet-money.js's (plan 4b Tasks 2-3). */
 export const SHEET_KINDS = ['letIn', 'limit', 'endLimit', 'revoke', 'connect', 'paper', 'topUp', 'resetPaper', 'disconnect',
   'approveCard', 'declineAsk', 'letDevice', 'signOut', 'order', ...MARKET_KINDS, ...RULES_KINDS, ...MONEY_KINDS];
 const isMarket = kind => MARKET_KINDS.includes(kind);
@@ -36,12 +36,12 @@ const GO = new Map([
   ['declineAsk', 'Decline'], ['letDevice', 'Let it sign'], ['signOut', 'Sign out'], ['order', 'Sign and place'],
 ]);
 
-/** The sheet's go key: a card's is `Reject` when the seed's decision is to reject. */
-export function goWord(kind, seed) {
+/** The sheet's go key: a card's is `Reject` when the seed's decision is to reject; an earn's by the side its fields picked. */
+export function goWord(kind, seed, fields) {
   if (kind === 'approveCard' && seed?.decision === 'reject') return 'Reject';
   if (isMarket(kind)) return marketGoOf(kind, seed);
   if (isRules(kind)) return rulesGoOf(kind, seed);
-  if (isMoney(kind)) return moneyGoOf(kind);
+  if (isMoney(kind)) return moneyGoOf(kind, seed, fields);
   return GO.get(kind) ?? '';
 }
 

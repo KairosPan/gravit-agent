@@ -119,3 +119,42 @@ test('moveAssetsOf: the dollars it holds, else the first two the Account knows; 
   assert.deepEqual(moveAssetsOf(p, { holdings: [] }).assets, ['USDC', 'USDC.E']);
   assert.equal(moveAssetsOf(p, pageVenueOf(p, 'ex')).toAssets.includes('USD'), false);
 });
+
+// ── Earn (plan 4b Task 3; earn.js:11-38) ──
+
+test('earnListOf puts the products whose asset is ready first and the closed last', async () => {
+  const { earnListOf, earnRate } = await import('../../client/js/host/money-view.js');
+  const { earnBody, earnPage } = await import('./helpers/earn-fixture.js');
+  const l = earnListOf(earnBody(), earnPage(), 'supply');
+  assert.deepEqual(l.products.map(p => p.id), ['flex:USDT', 'flex:DOGE', 'bond:ETH'], 'USDT ready at the exchange first, then DOGE that takes money, then the closed one; OKX not served here');
+  assert.equal(l.products[0].ready, 5700, 'what is ready there in USDT: spot and futures, not the 150 already earning');
+  assert.equal(l.products[0].held.amount, 150);
+  assert.equal(l.products[2].why, 'Full for now');
+  assert.deepEqual(l.away, [{ venue: 'okx', venueName: 'OKX', why: 'OKX does not serve this location' }], 'a venue not served here named once, apart');
+  assert.deepEqual(l.failed, [{ venue: 'kraken', venueName: 'Kraken', why: 'the venue said 429' }]);
+  assert.deepEqual(l.refusing, [{ venue: 'mm', venueName: 'MetaMask', why: 'the agent wallet has not been approved for vaults' }]);
+  assert.equal(earnRate(l.products[0]), '4.60% APY', 'earn.js:42');
+  assert.equal(earnRate(l.products[2]), '3.00%–5.00% APY');
+  assert.equal(earnRate(l.products[1]), '1.00% APR');
+  assert.equal(earnRate({ name: 'no rate' }), '');
+  // a read's own place refusal takes a venue out too, named once
+  const geo = earnBody();
+  geo.missing.push({ venue: 'ex', venueName: 'Stand-in Exchange', why: 'blocked here', code: 'E_VENUE_GEOBLOCKED' });
+  const away = earnListOf(geo, earnPage(), 'supply');
+  assert.deepEqual(away.products, []);
+  assert.deepEqual(away.away.map(m => m.venue), ['ex', 'okx']);
+  assert.deepEqual(earnListOf({ ok: false, refusal: { message: 'no' } }, earnPage(), 'supply').products, [], 'a refusal lists nothing');
+});
+
+test('take out lists only what something is in', async () => {
+  const { earnListOf, earnOutAt } = await import('../../client/js/host/money-view.js');
+  const { earnBody, earnPage } = await import('./helpers/earn-fixture.js');
+  const l = earnListOf(earnBody(), earnPage(), 'withdraw');
+  assert.deepEqual(l.products.map(p => [p.id, p.held.amount]), [['flex:USDT', 150]], 'not the ETH product holding nothing, not OKX not served here');
+  assert.equal(earnOutAt(earnPage(), 'ex'), true, 'the exchange earns, its key may, it is served');
+  assert.equal(earnOutAt(earnPage(), 'okx'), false, 'not served here');
+  assert.equal(earnOutAt(earnPage(), 'broker'), false, 'it does not earn');
+  const ro = earnPage();
+  ro.connectLive.writes.on = false;
+  assert.equal(earnOutAt(ro, 'ex'), false, 'an Account that takes no writes');
+});

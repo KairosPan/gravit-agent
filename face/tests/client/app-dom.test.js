@@ -2832,3 +2832,72 @@ test('the Money tab: Show address reads the row and draws it; Move… opens the 
   assert.match(f.html(), /<b>Via across · at least \$9\.90 USDC arrives · ~20 s<\/b>/);
   store.timers.clear();
 });
+
+// ── Earn and Sell many (plan 4b Task 3) ──
+
+test('the Money tab reads Earn; Put in… opens the Earn sheet, prepared as liveEarn, and a taken earn reads Earn again and says it', async () => {
+  const { earnBody } = await import('./helpers/earn-fixture.js');
+  const f = fakeWindow({ hash: '#/account/money', storage: memoryStorage() });
+  const door = ownerDoor({ exchange: action => (action?.type === 'liveEarn'
+    ? { ok: true, kind: 'result', result: { earn: { kind: 'supply', amount: 25, asset: 'USDT', productName: 'USDT · Flexible (stand-in)', status: 'done' } } }
+    : { ok: true, kind: 'result', result: { ok: true } }) });
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page(), '/data/account/earn': () => earnBody() } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await until(() => store.get().account.earn.status === 'ready', 'the earn read');
+  assert.ok(h.reads.includes('/data/account/earn'), 'read on entering Money');
+  await settle();
+  assert.match(f.html(), /data-kind="earn" data-venue="ex" data-side="withdraw" data-product="flex:USDT">Take out…<\/button>/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'earn', side: 'supply' } });
+  await settle();
+  assert.equal(store.get().sheet.kind, 'earn');
+  assert.match(f.html(), />Sign and put in<\/button>/);
+  f.fire('root', 'input', { target: { tagName: 'INPUT', type: 'text', name: 'amount', value: '25', dataset: { action: 'sheetField' } } });
+  await until(() => store.get().sheet?.status === 'ready', 'the preparation');
+  assert.deepEqual(door.sent('/data/account/prepare').at(-1).draft, { type: 'liveEarn', venue: 'ex', kind: 'supply', product: 'flex:USDT', asset: 'USDT', amount: '25' });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
+  await until(() => store.get().sheet === null, 'the sheet closed once taken');
+  await until(() => h.reads.includes('/data/account/earn?fresh=1'), 'earn read again past the cache');
+  await settle();
+  assert.match(f.html(), /Putting in 25 USDT · USDT · Flexible \(stand-in\): done/);
+  store.timers.clear();
+});
+
+test('Sell many… on the Portfolio: the drawer reads what can be sold, a pick, Review, Sign — one signature, the Account read again', async () => {
+  const f = fakeWindow({ hash: '#/account/portfolio', storage: memoryStorage() });
+  const door = ownerDoor({ exchange: action => (action?.type === 'liveOrder' ? { ok: true, kind: 'order', order: { id: 'ord-0042', status: 'filled' } } : { ok: true, kind: 'result', result: { ok: true } }) });
+  const sellable = { ok: true, items: [
+    { key: 'crypto:SOL', asset: 'SOL', venue: 'ex', venueName: 'Stand-in Exchange', action: 'sell', symbol: 'SOL/USDT', held: 25, sellQty: 25, usd: 3571.25, ready: true },
+    { key: 'crypto:ETH', asset: 'ETH', venue: 'ex', venueName: 'Stand-in Exchange', action: 'sell', symbol: 'ETH/USDT', held: 1.8, sellQty: 1.8, ready: true },
+  ], missing: [] };
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page(), '/data/account/sellable': () => sellable } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  assert.match(f.html(), /data-action="openSellMany">Sell many…<\/button>/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSellMany' } });
+  await until(() => store.get().sellMany?.status === 'picking', 'what can be sold');
+  assert.ok(h.reads.includes('/data/account/sellable?fresh=1'));
+  assert.match(f.html(), /aria-label="Sell many"/);
+  f.fire('root', 'change', { target: { tagName: 'INPUT', type: 'checkbox', name: 'pick', value: '1', checked: true, dataset: { action: 'sellManyPick' } } });
+  f.fire('root', 'input', { target: { tagName: 'INPUT', type: 'text', value: '1', dataset: { action: 'sellManyQty', index: '1' } } });
+  assert.deepEqual(store.get().sellMany.picked, [1]);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sellManyReview' } });
+  await until(() => store.get().sellMany?.legs?.[0]?.state === 'ready', 'the leg prepared');
+  assert.deepEqual(door.sent('/data/account/prepare').at(-1).draft, { type: 'liveOrder', venue: 'ex', symbol: 'ETH/USDT', side: 'sell', orderType: 'market', qty: '1', limitPrice: '', stopPrice: '', tif: '', postOnly: '', reduceOnly: '' });
+  await settle();
+  assert.match(f.html(), />Sign 1<\/button>/);
+  const pagesBefore = h.reads.filter(isPage).length;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sellManyRun' } });
+  await until(() => store.get().sellMany?.status === 'done', 'the run');
+  assert.equal(door.sent('/data/account/exchange').length, 1, 'one signature');
+  await settle();
+  assert.match(f.html(), /Sold · ord-0042 · filled/);
+  assert.match(f.html(), /Sell many: 1 of 1 sale went through/);
+  assert.ok(h.reads.filter(isPage).slice(pagesBefore).includes('/data/account?fresh=1'), 'the page read again');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sellManyClose' } });
+  assert.equal(store.get().sellMany, null);
+  store.timers.clear();
+});

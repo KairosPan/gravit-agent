@@ -259,10 +259,16 @@ export function startAccount({ store, getJson, post = noDoor, now = Date.now, sc
     else store.dispatch('routesFailed', { asked, message: messageOf(r?.body) });
   }
 
+  /** Earn (plan 4b Task 3): the products the connected venues offer and what is in them (`/data/account/earn`), into
+   *  `account.earn` — read on entering Money and, past the face's cache, after every taken earn. A refusal keeps the last answer
+   *  and carries the Account's words. */
+  const loadEarn = ({ fresh = false } = {}) =>
+    fly('earn', '/data/account/earn', { fresh, loading: 'earnLoading', land: landing('earnLoaded', 'earnFailed') });
+
   function close() {
     closed = true;
     poll(false);
   }
 
-  return { load, guard, receive, bridgeRoutes, loadHoldings, loadHistory, loadStatement, loadAgents, loadAll, loadVenuesHere, loadPaperBooks, checkKeyfile, reach, poll, onStreamEvent, close };
+  return { load, guard, receive, bridgeRoutes, loadEarn, loadHoldings, loadHistory, loadStatement, loadAgents, loadAll, loadVenuesHere, loadPaperBooks, checkKeyfile, reach, poll, onStreamEvent, close };
 }

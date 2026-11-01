@@ -164,3 +164,66 @@ export function moveAssetsOf(page, v) {
 
 /** A page's venue by id (its own record), or null. */
 export const pageVenueOf = (page, id) => venuesOfPage(page).find(v => v.id === id) ?? null;
+
+// ── Earn (earn.js:9-52) ──
+
+/** earn.js:42 — a yield as the venue states it: `5.20% APY`, or a range `4.00%–6.00% APR`; none stated: ''. */
+export function earnRate(x) {
+  if (!isRecord(x) || typeof x.apy !== 'number' || !Number.isFinite(x.apy)) return '';
+  const high = typeof x.apyHigh === 'number' && Number.isFinite(x.apyHigh) ? `–${(x.apyHigh * 100).toFixed(2)}%` : '';
+  return `${(x.apy * 100).toFixed(2)}%${high} ${(str(x.rateKind) || 'apy').toUpperCase()}`;
+}
+
+const upper = v => String(v ?? '').toUpperCase();
+// earn.js:12-15 — what is ready at a product's venue in its asset, to put in: not what is on its way, nor what is already in an
+// earn product there
+function earnReady(page, p) {
+  const v = pageVenueOf(page, p.venue);
+  return records(v?.holdings).filter(h => upper(h.asset) === upper(p.asset) && !h.inTransit && h.class !== 'earn')
+    .reduce((s, h) => s + (typeof h.amount === 'number' && Number.isFinite(h.amount) ? h.amount : 0), 0);
+}
+
+/** earn.js:11-38, :203-213 — the products Earn lists for a side, from the Account's earn read and its page. Only venues served on
+ *  the network the Account runs on now are offered (a read's place refusal, or a venue marked `notServed`). To put money in
+ *  (`supply`): the products that take money now, those whose asset is ready at their venue first, then the rest that take money,
+ *  then the closed ones (each with its `why`); to take it out (`withdraw`): the products something is in. Each product is the
+ *  Account's own, with `held` (the position in it, or null) and `ready` (what is ready at its venue in its asset). Beside them:
+ *  `away` (the venues not served here, each once, with their words), `failed` (the reads that failed, each once, in their words)
+ *  and `refusing` (a venue whose key can't put money to earn, with its words). */
+export function earnListOf(earnBody, page, side) {
+  const body = isRecord(earnBody) && earnBody.ok !== false ? earnBody : {};
+  const missing = records(body.missing);
+  const awayMiss = m => m.code === 'E_VENUE_GEOBLOCKED' || !servedHere(pageVenueOf(page, m.venue));
+  const awayRead = new Set(missing.filter(awayMiss).map(m => str(m.venue)));
+  const here = id => !awayRead.has(id) && servedHere(pageVenueOf(page, id));
+  const products = records(body.products).filter(p => here(str(p.venue)));
+  const positions = records(body.positions).filter(h => here(str(h.venue)));
+  const heldIn = p => positions.find(h => h.venue === p.venue && h.product === p.id) ?? null;
+  const row = p => ({ ...p, held: heldIn(p), ready: earnReady(page, p) });
+  let list;
+  if (side === 'withdraw') list = products.filter(p => { const h = heldIn(p); return !!h && h.amount > 0; });
+  else {
+    const open = products.filter(p => p.canSupply === true);
+    const ready = new Set(open.filter(p => earnReady(page, p) > 0));
+    list = [...open.filter(p => ready.has(p)), ...open.filter(p => !ready.has(p)), ...products.filter(p => p.canSupply !== true)];
+  }
+  // earn.js:31-38 — the venues not served here, each once: the read's, then a connected venue that earns and is marked so
+  const away = new Map();
+  for (const m of missing) if (awayMiss(m) && !away.has(str(m.venue))) away.set(str(m.venue), { venue: str(m.venue), venueName: str(m.venueName) || str(m.venue), why: str(m.why) });
+  for (const v of venuesOfPage(page)) {
+    if (v.live === true && v.earn && !servedHere(v) && !away.has(str(v.id))) away.set(str(v.id), { venue: str(v.id), venueName: str(v.name) || str(v.id), why: str(v.notServed?.said) || (typeof v.notServed === 'string' ? v.notServed : '') });
+  }
+  const seen = new Set(away.keys());
+  const failed = missing.filter(m => !seen.has(str(m.venue)) && seen.add(str(m.venue))).map(m => ({ venue: str(m.venue), venueName: str(m.venueName) || str(m.venue), why: str(m.why) }));
+  // earn.js:78 — a venue whose key may not put money to earn, in its words
+  const refusing = records(body.venues).filter(v => v.can === false && !away.has(str(v.venue)))
+    .map(v => ({ venue: str(v.venue), venueName: str(v.venueName) || str(v.venue), why: str(v.whyNot) || "this key can't put money to earn" }));
+  return { products: list.map(row), away: [...away.values()], failed, refusing };
+}
+
+/** portfolio.js:668 — money can be taken out of an earn product at this venue from here: the Account takes writes, the venue is
+ *  connected, earns, its key may, and it is served here. (Only a page that signs draws the key.) */
+export function earnOutAt(page, venue) {
+  const v = connected(page).find(x => x.id === venue);
+  return writesOn(page) && !!v && isRecord(v.earn) && v.earn.can !== false && servedHere(v);
+}
