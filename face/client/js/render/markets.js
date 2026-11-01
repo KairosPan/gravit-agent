@@ -301,7 +301,7 @@ function accountPage(id, view, state, now) {
     `<span class="mk-sub">${esc([...view.sub, closes].filter(Boolean).join(' · '))}${view.item.pastEnd === true ? ` ${tag('Closed')}` : ''}</span></div></div>`;
 
   // the price it shows, its 24 hours and its volume the explore read's; where the price is from, with its age, once, under it, as
-  // the Account's page says it; an event's outcomes under the price
+  // the retired page says it; an event's outcomes under the price
   const moved = (unit === 'cents' ? priced.change24h : priced.changePct) !== null;
   const outcomes = view.outcomes.map(o => `<span class="mk-out">${esc(`${o.label} ${priceWord(o.cents, 'cents')}`)}</span>`);
   const facts = [['24h volume', volumeWordOf(priced)], ['Venues', String(view.legs.length)]];
@@ -346,7 +346,7 @@ function accountPage(id, view, state, now) {
   }
   // a perpetual's funding: what was paid and received at its lines
   if (view.item.kind === 'perp') {
-    // the one read at every venue that lists it, as the Account's own page reads it: the venues of the page's lines it could not
+    // the one read at every venue that lists it, as the retired page reads it: the venues of the page's lines it could not
     // read said under the lines, Not read: …; Unavailable only when the read itself failed
     const connected = view.legs.filter(l => l.connected === true);
     const body = depth.funding.data;
@@ -383,7 +383,7 @@ function factWord({ value: v, unit }) {
 }
 
 // an A share's price history at its range: 1D the session chart, 5D the sessions on one grid, longer the closes in yuan on Beijing
-// dates; the notes as on an Account page
+// dates; the notes as on the retired page
 function cnHistory(view) {
   const h = view.history;
   const svg = !h.current ? ''

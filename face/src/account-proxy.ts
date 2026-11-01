@@ -103,7 +103,7 @@ export type ReadRoute =
   | "venues" | "reach" | "keyfile" | "books"
   | "asset" | "book" | "trades" | "funding" | "receive" | "earn" | "sellable" | "signinStatus";
 
-/** How long one answer is served without asking again, per route: the Account's own page's cadence (spec §5.1). */
+/** How long one answer is served without asking again, per route: the retired page's cadence (spec §5.1). */
 export const ACCOUNT_TTL_MS: Readonly<Record<ReadRoute, number>> = {
   account: 15_000, explore: 20_000, market: 3_000, quotes: 3_000, compare: 15_000, candles: 30_000,
   holdings: 8_000, positions: 10_000, statement: 10_000, history: 60_000, agents: 15_000,
@@ -168,7 +168,7 @@ export const CALLBACK_QUERY: ReadonlyMap<string, number> = new Map([
 /** How long the Account may take to finish a sign-in, headers and body: it trades the code at the venue. */
 export const CALLBACK_ABORT_MS = 30_000;
 
-/** The callback's answer headers: the Account's page, never kept, never sniffed, its URL (which carried the code)
+/** The callback's answer headers: the callback's page, never kept, never sniffed, its URL (which carried the code)
  * never sent on as a referrer — and, since the page is served on the face's own origin beside the owner's key in
  * IndexedDB, a policy that lets it run no script, load nothing, post no form and be framed by no one: its inline
  * style alone is drawn. (The Account's success page carries no script: its words say the tab may be closed.) */
@@ -486,7 +486,7 @@ const handler = (route: ReadRoute, reads: Reads, disabled: boolean) => async (re
   return kept === undefined ? send(res, 503, unreachable(answer.unreachable)) : send(res, 200, markStale(kept.body));
 };
 
-/** `signin/callback`: {@link isTrustedNavigation}, the rebuilt query, then the Account's page, forwarded as it
+/** `signin/callback`: {@link isTrustedNavigation}, the rebuilt query, then the callback's page, forwarded as it
  * answers with {@link CALLBACK_HEADERS}; never kept, never stale. */
 const callbackHandler = (s: Settings) => async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
   /* FIRST: a script's fetch, a form's POST, a rebound Host reach neither the parser nor the Account. */

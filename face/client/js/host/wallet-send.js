@@ -1,6 +1,6 @@
 // face/client/js/host/wallet-send.js — what the Account built for the operator's own browser wallet, sent by that wallet and
-// reported to the Account once (plan 4b Task 1; the Account's page money.js sendFromWallet, trade.js sendOrderFromWallet): a
-// payment (a move out of a wallet, a bridge) or a DEX order. The Account's page is asked again first — what is no longer waiting
+// reported to the Account once (plan 4b Task 1; the retired page money.js sendFromWallet, trade.js sendOrderFromWallet): a
+// payment (a move out of a wallet, a bridge) or a DEX order. The retired page is asked again first — what is no longer waiting
 // for the wallet sends nothing, and a hash the Account already holds is reported again, never sent again; then the wallet that
 // holds the transactions' address sends them (wire/wallet.js sendTxs), and the hash it returns is reported. A hash the wallet
 // sent is kept, per key, until the Account takes its report: Report again reports that same hash and never asks the wallet to
@@ -15,7 +15,7 @@ const str = v => (typeof v === 'string' ? v : '');
 const list = v => (Array.isArray(v) ? v.filter(isRecord) : []);
 const PAGE = '/data/account?fresh=1';
 
-/** The key a payment's wallet flow is held by (the Account's page: its id and time, which no other run of the Account reuses). */
+/** The key a payment's wallet flow is held by (the retired page: its id and time, which no other run of the Account reuses). */
 export const paymentKeyOf = p => `${str(p?.id)}@${str(p?.at)}`;
 /** The key a DEX order's wallet flow is held by: its client id. */
 export const orderKeyOf = o => str(o?.clientId);
@@ -57,7 +57,7 @@ export function startWalletSend({ store, post, getJson, getWallets, schedule }) 
     return say(key, 'sent', `${k.name || 'Your wallet'} sent it: ${short(k.hash)}`);
   }
 
-  // the Account's page, asked again past the face's cache; unreadable: said in words, and nothing is sent
+  // the Account's read, asked again past the face's cache; unreadable: said in words, and nothing is sent
   async function pageNow() {
     let page;
     try { page = await getJson(PAGE); } catch { throw new Error('The Account could not be read: nothing was sent'); }
@@ -66,7 +66,7 @@ export function startWalletSend({ store, post, getJson, getWallets, schedule }) 
 
   return {
     /** A payment the Account built for the wallet (`/data/account/exchange`'s `result.payment` with `result.wallet` and
-     *  `walletTxs`, or a page payment's `legs[0].native.walletTx`/`walletTxs`): sent only while the Account's page, asked again,
+     *  `walletTxs`, or a page payment's `legs[0].native.walletTx`/`walletTxs`): sent only while the Account's read, asked again,
      *  still has it `authorized` (or `failed` with `live.expired`); a `live.reported` hash reported, not sent again. */
     payment(p, tx, txs) {
       const key = paymentKeyOf(p);
@@ -86,7 +86,7 @@ export function startWalletSend({ store, post, getJson, getWallets, schedule }) 
         return report(key);
       });
     },
-    /** A DEX order waiting for the wallet (`walletTxs`, no `ref`): sent only while the Account's page, asked again, still has it
+    /** A DEX order waiting for the wallet (`walletTxs`, no `ref`): sent only while the Account's read, asked again, still has it
      *  `pending` with no `ref`; its `reported` hash reported, not sent again; after its approvals the swap built again from a
      *  fresh quote (`live/order-requote`; a refusal that it cannot build the swap again keeps the one built). */
     order(o) {

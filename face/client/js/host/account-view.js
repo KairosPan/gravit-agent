@@ -78,7 +78,7 @@ const sameAddress = (a, b) => typeof a === 'string' && typeof b === 'string' && 
 const largestFirst = (a, b) => (a.usd === b.usd ? 0 : a.usd === null ? 1 : b.usd === null ? -1 : b.usd - a.usd);
 const newestFirst = (a, b) => { const ta = stamp(a.at), tb = stamp(b.at); return ta === tb ? 0 : ta === null ? 1 : tb === null ? -1 : tb - ta; };
 
-/** True when the body is the Account's page as /data/account serves it: an answer with its venues, cards and orders, its
+/** True when the body is the Account's read as /data/account serves it: an answer with its venues, cards and orders, its
  *  signers and connectLive. The page views below answer their empty shapes for anything else. */
 export function pageOk(page) {
   return Boolean(page?.ok === true && Array.isArray(page.venues) && Array.isArray(page.cards) && Array.isArray(page.orders) && page.signers && page.connectLive);
@@ -163,7 +163,7 @@ export function orderRowsOf(orders, keys) {
       kind: str(o.kind), stopPrice: number(o.stopPrice), base: str(o.base),
       who: o.authority === 'owner' ? 'You' : name ? `Agent · ${name}` : 'An agent',
       paper: o.paper === true,
-      // what keeps an order from being changed (the Account page's tkAmendable, and the Account's own refusal of a change not yet
+      // what keeps an order from being changed (the retired page's tkAmendable, and the Account's own refusal of a change not yet
       // confirmed): waiting for the wallet to send it, being canceled, not followed since a restart, a change the venue has not confirmed
       waitingForWallet: Boolean(o.walletTxs) && !str(o.ref), canceling: o.canceling === true, unfollowed: Boolean(o.unfollowed),
       changing: Boolean(o.changing), unconfirmed: Boolean(o.unconfirmed) && !str(o.ref),
@@ -335,7 +335,7 @@ export function asksOf(page) {
   }));
 }
 
-// core.js:621 — the Account page's slug, an agent wallet's venue id being `agent-<slug of its name>` (portfolio.js:23)
+// core.js:621 — the retired page's slug, an agent wallet's venue id being `agent-<slug of its name>` (portfolio.js:23)
 const slug = v => String(v).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
 
 /** The agent wallets (the page's `subAccounts`): each its id, name, the agent it pays for (its address, and its name as the

@@ -268,7 +268,7 @@ export function startMarkets({
       else store.dispatch('depthFailed', { id, part, at: now(), message: messageOf(body) });
     };
   }
-  // the asset sheet: what is held of it, its orders, its lines and its cost — the asset the Account's own page reads it as;
+  // the asset sheet: what is held of it, its orders, its lines and its cost — the asset the retired page reads it as;
   // `fresh` past the face's cache (after an owner action)
   function readHere(id, item, fresh = false) {
     const key = assetKeyOf(item);
@@ -288,7 +288,7 @@ export function startMarkets({
     fly('trades', `/data/account/trades?${at}&limit=${TRADES_LIMIT}`, landDepth(id, 'trades', b => Array.isArray(b.trades)),
       ['depthLoading', { id, part: 'trades' }]);
   }
-  // a perpetual's funding: one read at every venue that lists it, as the Account's own page reads it (ui/terminal.js ttFunding);
+  // a perpetual's funding: one read at every venue that lists it, as the retired page reads it (ui/terminal.js ttFunding);
   // a venue it could not read is in the answer's `missing`, never a failure of the read
   function readFunding(id, view) {
     if (view.item.kind !== 'perp') return;

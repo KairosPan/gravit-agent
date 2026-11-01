@@ -104,7 +104,7 @@ const dollarsText = v => (typeof v === 'number' && Number.isFinite(v) ? String(v
 
 // ── the kinds of limit (portfolio.js:1186-1200 pfLimitForm, agents-mount.js:193-196) ──
 
-/** The kinds of limit an agent is given, in the Account page's words: what it may do, what one of its amounts is (an order, a
+/** The kinds of limit an agent is given, in the retired page's words: what it may do, what one of its amounts is (an order, a
  *  move, each time, a payment) and the limit's name. */
 export const LIMIT_SCOPES = [
   { value: 'trade', label: 'Trading', per: 'per order', limit: 'trading limit' },
@@ -381,7 +381,7 @@ export function draftOf(kind, fields, seed, now) {
       if (option.needs === 'address') {
         const ref = text(fields, 'ref');
         if (!ADDRESS.test(ref)) return 'An address is 0x and 40 hex digits';
-        // the venue id the Account's page gives it (connect.js venueId): the kind, or a second one numbered by its address
+        // the venue id the retired page gives it (connect.js venueId): the kind, or a second one numbered by its address
         const venue = records(s.venues).some(v => v.id === kind) ? `${kind}-${ref.slice(2, 8).toLowerCase()}` : kind;
         return { type: 'connectVenue', venue, connector: option.connector, label: text(fields, 'label'), credentialRef: ref };
       }
@@ -515,7 +515,7 @@ const standingKey = (page, agent) => pageOk(page) && records(page.keys).some(k =
 // the agent's wallet on the page, by its address
 const walletOfAsk = (page, ask) => walletsOf(page).find(w => sameAddress(w.agent, str(ask.agent))) ?? null;
 
-/** The ask is one this page grants (Cards draws its Grant key), as the Account page's pfGrantable judges it: a venue on a page
+/** The ask is one this page grants (Cards draws its Grant key), as the retired page's pfGrantable judges it: a venue on a page
  *  that connects; a limit, a session or leverage only for an Account that takes writes (the last two on a page with its dial);
  *  a top-up for one that takes writes, into the agent's wallet from an account money moves from that is not an agent wallet,
  *  or — with no wallet — an agent wallet for a key standing on the page (never another agent's); the mode only while Beast is
@@ -659,7 +659,7 @@ function signInWords(option, si) {
     default: return '';
   }
 }
-// a long hex address as the Account's page shortens it (core.js short)
+// a long hex address as the retired page shortens it (core.js short)
 const short = a => (/^0x[0-9a-fA-F]{16,}$/.test(a) ? `${a.slice(0, 8)}…${a.slice(-4)}` : a);
 
 /** The connect sheet's check, one line from the Account's own words: the venue's words when it is not connectable here, a

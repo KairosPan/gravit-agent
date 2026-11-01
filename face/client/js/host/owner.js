@@ -1,7 +1,7 @@
 // face/client/js/host/owner.js — the owner device (spec 2026-10-22 §6.3, plan 2): this page as an owner device of the
 // Account, the Account's own owner.js under the face's names (docs/research/2026-10-22-account-owner-path-map.md §1–§2) —
 // the key from the injected store (made and kept when there is none), paired at /data/account/pair, the standing read off
-// every /data/account page, prepare at /data/account/prepare, the signed envelope to /data/account/exchange, sign-out and
+// every /data/account read, prepare at /data/account/prepare, the signed envelope to /data/account/exchange, sign-out and
 // sign-in. Everything goes through the face's proxy, never to the Account directly. The host draws nothing and owns no
 // words for the screen: it dispatches ownerStanding, ownerRefusal and ownerBusy and hands every answer back as it came.
 // No key material, code or envelope is logged or kept beyond the call.

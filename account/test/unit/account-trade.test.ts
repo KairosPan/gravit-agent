@@ -213,7 +213,7 @@ describe("orders at venues connected live", () => {
   it("an agent trades only inside the trading limit the owner signed: which venues, how much an order, how much in all", async () => {
     const x = await boot();
     await x.own({ type: "approveAgent", agentAddress: cc.address, agentName: "Claude Code", validUntil: START + 30 * DAY });
-    expect(refusal(await x.ag(ask())).message).toBe("the owner has not approved this agent to trade: it gets a trading limit on the account page (Agents)");
+    expect(refusal(await x.ag(ask())).message).toBe("the owner has not approved this agent to trade: it gets a trading limit on the owner's Gravit face (Account › Agents)");
     // a limit to MOVE money is not a limit to trade
     await x.own({ type: "approveSpend", agent: cc.address, scope: "venues", allow: "ex", perPayment: "50", budget: "100", windowHours: 0, validUntil: START + 7 * DAY });
     expect(code(await x.ag(ask()))).toBe("E_MANDATE_NONE");

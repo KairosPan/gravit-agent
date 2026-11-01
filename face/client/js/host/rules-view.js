@@ -1,4 +1,4 @@
-// face/client/js/host/rules-view.js — the Rules tab's view (plan 4a Task 5): what the Account's page says about how its agents
+// face/client/js/host/rules-view.js — the Rules tab's view (plan 4a Task 5): what the Account's read says about how its agents
 // may act — the mode in force (`guard`, `open` for Beast) and, door by door, what each mode does with an agent's request inside
 // its limit (`modeRules`, account/mode-rules.ts), how long a card waits, whether the Account takes writes at all
 // (`connectLive.writes`), the most one order or move may be worth (its cap), the agents' session (`dial.sessionExpiresAt`,
@@ -11,7 +11,7 @@ const isNum = v => typeof v === 'number' && Number.isFinite(v);
 const str = v => (typeof v === 'string' ? v : '');
 const EMPTY = Object.freeze({ mode: '', modeRows: [], cardMinutes: null, writes: false, cap: null, session: null, leverage: null, leverageOffered: false });
 
-/** The Rules tab's reading of the Account's page at `now` (the caller's clock, milliseconds): `{ mode, modeRows, cardMinutes,
+/** The Rules tab's reading of the Account's read at `now` (the caller's clock, milliseconds): `{ mode, modeRows, cardMinutes,
  *  writes, cap: { usd } | null, session: { until, ended } | null, leverage: { max } | null, leverageOffered }`. A page the face
  *  does not recognise is all empty. */
 export function rulesOf(page, now) {

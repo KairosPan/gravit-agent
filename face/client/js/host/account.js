@@ -281,7 +281,7 @@ export function startAccount({ store, getJson, post = noDoor, now = Date.now, sc
 
   /** Close to agents: one POST to the face's proxy (`/data/account/revoke`, `{ account: venue }`), never signed — agents keep
    *  their reads and place or move nothing there, the Account's safer direction (portfolio.js pfAgentsSwitch). One in the air
-   *  per venue: a second press while it is joins it. Said in the Account page's own sentence when the Account took it, else the
+   *  per venue: a second press while it is joins it. Said in the Account's own sentence when the Account took it, else the
    *  Account's words; then the page is read past the face's cache, so the row drawn is the page's. */
   const closing = new Map();
   function revoke(venue) {

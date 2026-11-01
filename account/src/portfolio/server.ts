@@ -51,7 +51,7 @@
  *                                      the markets it follows, from the venues' own streams (live/stream-hub.ts). Past the bus's room, 503
  *   POST /api/account/stream/markets {client, markets: ["<venue>:<symbol>"], n}   what that page shows now: its markets followed instead
  *                                      (a key with "~" before it: a market whose price alone it shows — its quote only, no book streamed);
- *                                      `n` the page's own number for the telling, rising: one no later than the last taken is let be
+ *                                      `n` the face's own number for the telling, rising: one no later than the last taken is let be
  *   GET  /api/account/markets?venue=okx&q=BTC        what a venue connected live trades (a read)
  *   GET  /api/account/market?venue=okx&symbol=BTC/USDT   one market: a fresh price, the smallest order, the steps, open or not (a read)
  *   GET  /api/account/compare?base=BTC&side=buy&usd=     the same coin or stock at every venue connected live, ranked by the price an
@@ -77,7 +77,7 @@
  *   GET  /api/account/quotes?pairs=okx|BTC/USDT,…        fresh prices for up to twelve markets
  *   GET  /api/account/sellable                           everything held that is not a dollar, and what selling it would sign
  *   GET  /api/account/agents                             the agents one by one: keys, limits, cards, orders, payments, wallets, intents
- *   GET  /api/account/desk                               THE DESK (account/desk.ts): the account's own agents, as the page draws them — the
+ *   GET  /api/account/desk                               THE DESK (account/desk.ts): the account's own agents, as the face draws them — the
  *                                                        objective, the seats and their standing at the door, the session, the equity
  *                                                        and its curve, the leads, the tape, the room
  *   GET  /api/account/desk/catalog                       what hiring offers: the roles and their charters, the house seats' keys, the brains
@@ -90,7 +90,7 @@
  *                                                        objective, the brain's standing with its fix — the room's tail only, all of one
  *                                                        moment
  *   GET  /api/account/desk/seat?address=                 the desk as one seat reads it (portfolio_desk): its charter, the room's last lines
- *   POST /api/account/brain-key {envelope, apiKey}       A BRAIN'S KEY, typed by the owner on the page (account/brain-keys.ts): the owner's
+ *   POST /api/account/brain-key {envelope, apiKey}       A BRAIN'S KEY, typed by the owner on the face (account/brain-keys.ts): the owner's
  *                                                        signed setBrainKey (provider, base URL, model, the key's fingerprint — never the
  *                                                        key) and the key beside it, once. Its own small reader (the server's JSON parser
  *                                                        skips this path, and a body it cannot read is answered with one fixed sentence,
@@ -130,9 +130,9 @@
  *                                                        vaults through mm, OKX Simple Earn, Kraken Earn), what is in them, and the venues
  *                                                        that could not be read (money in or out is a signed liveEarn / agentLiveEarn)
  *   POST /api/account/bridge-routes {draft}              the routes a bridge could take from a wallet of the owner's, the chosen one first
- *   POST /api/account/live/order-sent {order, hash}      the page says which transaction the wallet sent for a DEX order
+ *   POST /api/account/live/order-sent {order, hash}      the face says which transaction the wallet sent for a DEX order
  *   POST /api/account/live/order-requote {order}         a wallet order whose approval is on chain: the swap built again from a fresh quote
- *   POST /api/account/live/sent {payment, hash}          the page says which transaction the wallet sent for a movement
+ *   POST /api/account/live/sent {payment, hash}          the face says which transaction the wallet sent for a movement
  *   POST /api/exchange {action, nonce, signature}   THE door: every instruction, signed — an owner action by an owner key, an agent's by an
  *                                      authorised agent key (200 done · 202 a card is waiting · 401 not a signer · 409 refused)
  *
@@ -177,17 +177,17 @@ import { type CnIfind, IFIND_HOST, IFIND_QUERY, createIfind } from "./live/cn-if
 
 /** what every request outside /api/ is answered (404), with or without the account layer: the Account serves no page */
 export const NO_PAGE = "The Account serves no page: its owner's screens are Gravit's face (Markets, Trade, Account). This address answers its API under /api/.";
-/** the MCP seat an agent mounts (mcp.ts), by its absolute path: the command the page hands an agent's owner runs from any folder */
+/** the MCP seat an agent mounts (mcp.ts), by its absolute path: the command the face hands an agent's owner runs from any folder */
 const MCP_ENTRY = fileURLToPath(new URL("./mcp.ts", import.meta.url));
 
-/** the lists the door accepts, published with the page so that the page and the seats draw their choices from the same place: the dollar
+/** the lists the door accepts, published so that the face and the seats draw their choices from the same place: the dollar
  * stablecoins a movement may be in (live/types.ts), the chains they travel on (live/chain.ts STABLECOINS) and the chains a bridge goes
  * between (live/bridge.ts, Robinhood Chain in USDG among them) */
 export const DOOR_LISTS = { dollars: [...STABLES], networks: [...new Set(STABLECOINS.map((s) => s.chain))], bridgeChains: [...BRIDGE_CHAINS] } as const;
 
-/** what the page reads of a REAL account, as it goes on the wire: the simulation's runway rows, doors, swap table, ledgers and address book
+/** what the face reads of a REAL account, as it goes on the wire: the simulation's runway rows, doors, swap table, ledgers and address book
  * belong to no venue on it, so they do not travel (the type, account/exchange.ts AccountPage, still names them for the simulated statement);
- * the lists the door accepts go with it. Every field the page or a seat reads stays */
+ * the lists the door accepts go with it. Every field the face or a seat reads stays */
 function realPage(view: AccountPage): Record<string, unknown> {
   const { destinations: _destinations, ...top } = view;
   return { ...top, venues: view.venues.map(({ runways: _runways, agentKey: _agentKey, in: _in, out: _out, swaps: _swaps, fiat: _fiat, ledgers: _ledgers, ...v }) => v), ...DOOR_LISTS };
@@ -357,7 +357,7 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
   svc.sayHandler = async (text) => (await agent.say(text.trim().slice(0, 200))).no;
 
   // A route that throws: a refusal thrown is answered as the refusal it is; anything else is answered with one fixed sentence, and what it
-  // said goes to this process's log — no exception's words, paths or hosts reach the page or a seat
+  // said goes to this process's log — no exception's words, paths or hosts reach the face or a seat
   const wrap = (fn: (req: express.Request, res: express.Response) => Promise<void> | void) => (req: express.Request, res: express.Response) => {
     Promise.resolve(fn(req, res)).catch((err: unknown) => {
       if (res.headersSent) return;
@@ -391,7 +391,7 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
     const site = req.headers["sec-fetch-site"];
     const foreignOrigin = typeof origin === "string" && origin !== `${req.protocol}://${host}`;
     const foreignSite = site === "cross-site" || site === "same-site";
-    if (!local || foreignOrigin || foreignSite) return void res.status(403).json({ ok: false, error: "this server answers only its own pages on this machine" });
+    if (!local || foreignOrigin || foreignSite) return void res.status(403).json({ ok: false, error: "this server answers only programs on this machine" });
     next();
   });
   // no page: everything outside /api/ that passed the fence is one sentence naming the face, with the account layer or without it
@@ -399,7 +399,7 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
   // JSON bodies are read only once the request is known to be this machine's own (above): a foreign page's body is never parsed. The one
   // route that takes a secret, a brain's key, reads its own body (account/brain-keys.ts): the parser skips it in every spelling express
   // routes to it (case, a trailing slash), so that a body it could not read never becomes an error that carries the key's own characters.
-  // No body is inflated (inflate: false): the page never compresses one, and a body declared gzip that is not would otherwise end in zlib's
+  // No body is inflated (inflate: false): the face never compresses one, and a body declared gzip that is not would otherwise end in zlib's
   // error — an HTML page with a stack, logged — instead of the one fixed sentence below
   const json = express.json({ inflate: false });
   app.use((req, res, next) => (isBrainKeyPath(req.path) ? next() : json(req, res, next)));
@@ -485,7 +485,7 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
     const view = await svc.accountView();
     if (!view) return void res.status(404).json({ ok: false, error: "the account layer is not mounted (--classic)" });
     const o = svc.policy();
-    // the dial as the page needs it: the agents' session, the venues switched off for agents, the most leverage they may set
+    // the dial as the face needs it: the agents' session, the venues switched off for agents, the most leverage they may set
     // and how each venue connected live has answered lately (its health, for the Venues board)
     // and the command an agent's owner runs to add this account's seat (the server's own origin, the seat by its absolute path)
     res.json({ ok: true, ...(view.real ? realPage(view) : view), mode: o.mode, live: svc.live, dial: { sessionExpiresAt: o.sessionExpiresAt, sessionEnded: Date.parse(o.sessionExpiresAt) <= Date.parse(view.now), revoked: o.revoked, maxLeverage: o.maxLeverage ?? 1 }, health: svc.venueHealth(), memoryAsks: svc.memoryAsks(), agentSetup: agentSetupOf(hosts.length > 0 ? `http://${hosts[0]}` : origin || `${req.protocol}://${req.get("host") ?? "127.0.0.1"}`) });
@@ -498,7 +498,7 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
     res.status(isRefusal(r) ? 400 : 200).json(isRefusal(r) ? { ok: false, refusal: r } : r);
   });
 
-  // the exchanges the unified library covers, for the page's list of real venues (the library is loaded on first ask)
+  // the exchanges the unified library covers, for the face's list of real venues (the library is loaded on first ask)
   app.get("/api/account/exchanges", wrap(async (_req, res) => void res.json({ ok: true, exchanges: await exchangeList() })));
 
   // the paper books in the home that no connection has open now, each said of itself (live/paper.ts summaryOf): connecting one of their ids
@@ -593,15 +593,15 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
   // machine's own pages, under this server's own host) — what changes on the account, told as it happens. A page that comes back names the
   // last event it heard (the browser's own Last-Event-ID on a reconnect, or ?since= on a stream it opens anew): the events after it come
   // again, or — anything not shaped as one of this bus's ids, one from another run, one too old — a snapshot. One stream a tab: past the
-  // bus's room a further one is answered 503 in words, and the page goes on reading as it did before it had a stream
+  // bus's room a further one is answered 503 in words, and the face goes on reading as it did before it had a stream
   // A page names itself (?client=, a name of its own its tab keeps) and may say at once which markets it shows (?markets=, each
   // `<venue>:<symbol>`, comma-separated): their quote, book and trades come on the stream as the venues' own streams move
   // (live/stream-hub.ts). What it shows later it says at POST /api/account/stream/markets
   app.get("/api/account/stream", (req, res) => {
     if (!svc.account) return void res.status(404).json({ ok: false, error: "the account layer is not mounted" });
-    // the page opens its stream as an EventSource (cors, empty), never as a page of its own: a navigation here — from any site, the address
+    // the face opens its stream as an EventSource (cors, empty), never as a page of its own: a navigation here — from any site, the address
     // bar too — holds no slot of the bus and follows no market
-    if (req.headers["sec-fetch-mode"] === "navigate" || req.headers["sec-fetch-dest"] === "document") return void res.status(403).json({ ok: false, error: "this server answers only its own pages on this machine" });
+    if (req.headers["sec-fetch-mode"] === "navigate" || req.headers["sec-fetch-dest"] === "document") return void res.status(403).json({ ok: false, error: "this server answers only programs on this machine" });
     const q = strings(req, res, { since: 64, client: 48, markets: 4_000 });
     if (!q) return;
     const asked = String(req.get("last-event-id") ?? q.since).trim().slice(0, 64);
@@ -611,7 +611,7 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
     if (q.client && q.markets) svc.stream.follow(q.client, q.markets.split(",").slice(0, MAX_FOLLOWS));
   });
   // WHAT A PAGE SHOWS NOW: the markets whose quote, book and trades its stream carries, in place of what it showed before ({client, markets:
-  // [`<venue>:<symbol>`]}, at most MAX_FOLLOWS) — 404 when no stream of that name is open (the page opens one first). `n`, where the page
+  // [`<venue>:<symbol>`]}, at most MAX_FOLLOWS) — 404 when no stream of that name is open (the face opens one first). `n`, where the face
   // numbers its tellings (a whole number, one more each): a telling that arrives after a later one is let be, and the answer says what the
   // page follows now
   app.post("/api/account/stream/markets", (req, res) => {
@@ -620,7 +620,7 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
     const client = typeof body.client === "string" ? body.client : "";
     if (!CLIENT_ID.test(client)) return void bad(res, "a page names itself in 8 to 48 letters, digits, dashes or underscores (\"client\")");
     if (!Array.isArray(body.markets) || !body.markets.every((m) => typeof m === "string")) return void bad(res, "\"markets\" is a list of `<venue>:<symbol>`");
-    if (body.n !== undefined && !(typeof body.n === "number" && Number.isSafeInteger(body.n) && body.n > 0)) return void bad(res, "\"n\" is the page's own number for this telling: a whole number above 0");
+    if (body.n !== undefined && !(typeof body.n === "number" && Number.isSafeInteger(body.n) && body.n > 0)) return void bad(res, "\"n\" is the face's own number for this telling: a whole number above 0");
     const following = svc.stream.follow(client, (body.markets as string[]).slice(0, MAX_FOLLOWS), body.n as number | undefined);
     if (!following) return void res.status(404).json({ ok: false, error: "no stream of that page is open: it opens one at GET /api/account/stream first" });
     res.json({ ok: true, following });
@@ -660,7 +660,7 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
     if (!svc.account) return void res.status(404).json({ ok: false, error: "the account layer is not mounted" });
     const q = strings(req, res, { venue: 40 });
     if (!q) return;
-    // each position with the logo the page shows beside it, by its contract's symbol (live/icons.ts positionIcon): the page's, not the seat's
+    // each position with the logo the face shows beside it, by its contract's symbol (live/icons.ts positionIcon): the face's, not the seat's
     const withIcon = <P extends { symbol: string; kind?: string | undefined }>(p: P): P & { icon?: string } => {
       const logo = positionIcon(p);
       return logo ? { ...p, icon: logo } : p;
@@ -704,7 +704,7 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
     if (!mounted(res)) return;
     const q = strings(req, res, { cost: 5, paper: 5 });
     if (!q) return;
-    // paper=1: the paper accounts' holdings, for the page's Paper lens
+    // paper=1: the paper accounts' holdings, for the face's Paper lens
     answerOf(res, await svc.holdings({ cost: q.cost === "1", paper: q.paper === "1" }));
   }));
 
@@ -758,7 +758,7 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
     answerOf(res, await svc.agents());
   }));
 
-  // THE DESK (account/desk.ts): the account's own agents — the view the page draws (the objective, the seats and their standing, the
+  // THE DESK (account/desk.ts): the account's own agents — the view the face draws (the objective, the seats and their standing, the
   // session, the equity, the leads, the tape, the room), what hiring offers (the roles and their charters, the house seats' keys, the
   // brain's standing), and a seat's own read of it (its charter, the objective, the room's last lines: portfolio_desk)
   app.get("/api/account/desk", wrap(async (_req, res) => {
@@ -772,13 +772,13 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
     res.json({ ok: true, ...svc.desk.catalog() });
   }));
   // the floor's read (the Superagent's): polled every second, so it reads the room's tail and nothing it need not. `since` is
-  // the room's last seq the page holds: a whole number 0 or more, in digits (none: 0), nothing a number parser would also take
+  // the room's last seq the face holds: a whole number 0 or more, in digits (none: 0), nothing a number parser would also take
   app.get("/api/account/desk/feed", wrap(async (req, res) => {
     if (!mounted(res)) return;
     if (!svc.desk) return void res.status(404).json({ ok: false, error: "this account keeps no desk" });
     const q = strings(req, res, { since: 17 });
     if (!q) return;
-    if (q.since !== "" && !/^\d{1,15}$/.test(q.since)) return void bad(res, "since is the room's last seq the page has: a whole number, 0 or more, in digits");
+    if (q.since !== "" && !/^\d{1,15}$/.test(q.since)) return void bad(res, "since is the room's last seq the face has: a whole number, 0 or more, in digits");
     const feed = await svc.desk.feed(q.since === "" ? 0 : Number(q.since));
     res.json(feed ? { ok: true, ...feed } : { ok: true, desk: null });
   }));
@@ -845,7 +845,7 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
     res.status(isRefusal(r) ? 409 : 200).json(isRefusal(r) ? { ok: false, refusal: r } : { ok: true, routes: r });
   }));
 
-  // the page says which transaction the wallet sent for a DEX order that was waiting for it; the chain decides from then on
+  // the face says which transaction the wallet sent for a DEX order that was waiting for it; the chain decides from then on
   app.post("/api/account/live/order-sent", wrap(async (req, res) => {
     if (!svc.account) return void res.status(404).json({ ok: false, error: "the account layer is not mounted" });
     const { order, hash } = req.body as { order?: unknown; hash?: unknown };
@@ -861,7 +861,7 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
     res.status(isRefusal(r) ? 409 : 200).json(isRefusal(r) ? { ok: false, refusal: r } : r);
   }));
 
-  // the page says which transaction the wallet sent for a real-money payment that was waiting for it; the chain decides whether it is that one
+  // the face says which transaction the wallet sent for a real-money payment that was waiting for it; the chain decides whether it is that one
   app.post("/api/account/live/sent", wrap(async (req, res) => {
     if (!svc.account) return void res.status(404).json({ ok: false, error: "the account layer is not mounted" });
     const { payment, hash } = req.body as { payment?: unknown; hash?: unknown };
@@ -883,14 +883,14 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
     res.status(r.kind === "card" ? 202 : 200).json(r);
   }));
 
-  // A BRAIN'S KEY, typed by the owner on the page (account/brain-keys.ts, where every step is said). This route reads its own body, at most
+  // A BRAIN'S KEY, typed by the owner on the face (account/brain-keys.ts, where every step is said). This route reads its own body, at most
   // 4 KB of application/json, and answers anything it cannot take with one of the fixed sentences there — nothing sent is logged or said
   // back. BEFORE the door: the model and the base URL the owner signed hold neither the key nor anything shaped like one (a key pasted into
   // the wrong field would be signed into the ledger, which cannot be cleaned), and the key is checked against the fingerprint the owner
   // signed — a refusal there writes nothing, stages nothing and spends no nonce. Then the key is staged in memory under the action's hash
   // while the envelope goes through the ordinary door — whose handler takes it, writes the provider's key file and tells the desk the key
   // changed — and deleted from memory when this answers, whatever happened. The standing in the answer is the desk's own (the catalog's and
-  // the feed's), so the page never reads "ready" here beside "Key refused" there
+  // the feed's), so the face never reads "ready" here beside "Key refused" there
   app.post("/api/account/brain-key", wrap(async (req, res) => {
     if (!svc.account) return void res.status(404).json({ ok: false, error: "the account layer is not mounted" });
     const type = String(req.headers["content-type"] ?? "").toLowerCase();
@@ -936,7 +936,7 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
   app.post("/api/account/brain-test", wrap(async (req, res) => {
     if (!mounted(res)) return;
     if (!svc.desk) return void res.status(404).json({ ok: false, error: "this account keeps no desk" });
-    if (req.headers["sec-fetch-site"] !== "same-origin" && typeof req.headers.origin !== "string") return void res.status(403).json({ ok: false, error: "Testing a brain's key is asked from the account's own page: a request without a browser's headers is not taken." });
+    if (req.headers["sec-fetch-site"] !== "same-origin" && typeof req.headers.origin !== "string") return void res.status(403).json({ ok: false, error: "Testing a brain's key is asked from the owner's Gravit face: a request without a browser's headers is not taken." });
     const { provider, model } = (req.body ?? {}) as { provider?: unknown; model?: unknown };
     if (typeof provider !== "string" || !BRAIN_ID.test(provider)) return void bad(res, "need {provider: a brain's id, as the Brains place names it (deepseek, openai, claude …)}");
     if (typeof model === "string" && keyShaped(model.trim())) return void bad(res, KEY_SHAPED_WORDS.model);
@@ -1139,7 +1139,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   console.log(`Lunhui's reach: /api/cn/relay (Tencent, Eastmoney) · ${cn.ifind.configured() ? "iFinD configured" : "iFinD not configured (IFIND_REFRESH_TOKEN or IFIND_ACCESS_TOKEN in this process's environment)"}`);
   console.log(`AKShare: ${akshareCommand()} · started on first use (/api/akshare/tools, /api/akshare/call)`);
   // where the owner can connect, kept fresh without anyone asking: the venues' own answers to this network, and their terms matched to where
-  // it is (live/availability.ts) — so the page and the agents know before anyone makes a key
+  // it is (live/availability.ts) — so the face and the agents know before anyone makes a key
   if (!classic && service.account) service.watchVenues();
   // the paper accounts' own clock: their resting orders, stops, days and funding looked at every few seconds (service.ts watchPaper)
   if (!classic && service.account) service.watchPaper();

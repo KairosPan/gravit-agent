@@ -201,7 +201,7 @@ export function boot(win, host = {}) {
   // Gravit's markdown is DOM-built (wire/markdown.js); a test hands in its own or none
   if (host.markdown !== undefined) setMarkdown(host.markdown);
   else if (typeof document !== 'undefined') setMarkdown(gravitMarkdown);
-  // the Account's page is polled only while Account is on screen in a visible tab
+  // the Account's read is polled only while Account is on screen in a visible tab
   const accountShown = () => store.get().route.screen === 'account' && !doc.hidden;
   const showAccount = () => account.poll(accountShown());
   // the Account's push channel, one for this tab (wire/account-stream.js), open while the tab is visible: an event is the reads
@@ -238,7 +238,7 @@ export function boot(win, host = {}) {
     keys: win.indexedDB ? indexedDbKeys(win.indexedDB) : memoryKeys(),
     flag: signedOutFlag(storage),
   });
-  // the Account's page: read at boot, on entering Account, on Refresh, right after a receipt and on the stream's events; every
+  // the Account's read: read at boot, on entering Account, on Refresh, right after a receipt and on the stream's events; every
   // 20 s while Account is on screen in a visible tab, 80 s while the stream is open; Guard posted through the owner door
   // a venue's sign-in opens its tab through the window, inside the operator's press (host/account.js signIn)
   const account = startAccount({
@@ -249,13 +249,13 @@ export function boot(win, host = {}) {
   // the Account seat's standing (spec 2026-10-20 §6.3): read on entering Venues or Agents, on Refresh, right after a seat receipt
   // and on a card's event
   const seat = startSeat({ store, getJson, now });
-  // what an owner action changed, read as the Account's own page reads it after one: the page, the holdings and the statement
+  // what an owner action changed, read as the retired page read it after one: the page, the holdings and the statement
   // past the face's cache, a market page's asset sheet (plan 4a Task 4), and the seat's standing after one about an agent's key
   // or limit; a done sheet then closes itself (the order sheet's words stay on the ticket)
   const SEAT_KINDS = new Set(['letIn', 'limit', 'endLimit', 'revoke']);
   function afterAction(kind, body) {
     // what the Account built for the operator's own wallet (a move out of a wallet, a DEX order) goes to that wallet at once:
-    // it shows the transaction and sends it, and its hash is reported (the Account page's money.js done, trade.js placeOrder)
+    // it shows the transaction and sends it, and its hash is reported (the retired page's money.js done, trade.js placeOrder)
     const out = body?.kind === 'result' && body.result !== null && typeof body.result === 'object' ? body.result : null;
     if (out?.wallet && out.payment) sendFromWallet(walletSend.payment(out.payment, out.wallet, out.walletTxs));
     // an order placed from the ticket and waiting for the wallet; never a cancel's answer, whose order also has walletTxs
@@ -345,7 +345,7 @@ export function boot(win, host = {}) {
     });
   }
   // the owner sheet (prepare → What you sign → sign) over the owner device
-  // a bridge's preparation, once it is the one the sheet shows, has its routes read beside it (the Account page's money.js show)
+  // a bridge's preparation, once it is the one the sheet shows, has its routes read beside it (the retired page's money.js show)
   const sheet = startSheet({
     store, owner, schedule, cancelTimer, now, afterAction,
     onChange: (kind, name) => { if (kind === 'connect') { checkConnectSoon(); if (name === 'connector') void findConnectWallets(); } },
@@ -361,7 +361,7 @@ export function boot(win, host = {}) {
   // Sell many (plan 4b Task 3): up to ten holdings at market, each prepared and signed in turn over the owner device; a DEX
   // sale's send started on the operator's own wallet; the Account read again once a run ends
   const sellMany = startSellMany({ store, getJson, owner, walletSend, afterAction, now });
-  // a receipt reloads the Account's page past the cache, and one from the Account seat (every receipt the kind table
+  // a receipt reloads the Account's read past the cache, and one from the Account seat (every receipt the kind table
   // lifts today) the seat's standing too
   const live = startLive({ store, openMux: host.openMux ?? wireOpenMux, call, mapFrame, getJson, timers, now, onReceipt: m => { if (m?.data?.seat) void seat.load({ fresh: true }); void account.load({ fresh: true }); } });
   // answers go through the live layer, which settles the gate it delivered once the answer wins
@@ -1203,7 +1203,7 @@ export function boot(win, host = {}) {
     if (ev.key === 'Enter' && !ev.isComposing && ev.keyCode !== 229 && store.get().edit && a?.closest?.('.inline-edit') && a.tagName !== 'BUTTON') { ev.preventDefault(); commitEdit(); }
   });
 
-  // a hidden tab stops everything — the Markets polls and the face's wire, the Account's page, and its stream with the market a
+  // a hidden tab stops everything — the Markets polls and the face's wire, the Account's read, and its stream with the market a
   // page follows — and a visible one starts again what its screen reads
   win.addEventListener('hashchange', follow);
   doc.addEventListener('visibilitychange', () => {

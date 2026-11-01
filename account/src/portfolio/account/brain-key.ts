@@ -23,8 +23,8 @@
  *
  * What a key LOOKS like (keyShaped) is decided here once, for every place that must refuse one where it does not belong — a model's name,
  * a base URL's path, a provider's id: the desk (desk.ts parseBrain), the brains (brain-openai.ts, brain-claude.ts), the key route and the
- * door (brain-keys.ts, server.ts), and the page (ui/brains.js brKeyShaped, a mirror of it). A base URL is judged by its own rule
- * (baseUrlKeyShaped, mirrored by the page's brBaseKeyShaped): its host as it was typed, label by label, and its path — where a segment that
+ * door (brain-keys.ts, server.ts), and the face (the retired page mirrored it in ui/brains.js brKeyShaped at 9614314c). A base URL is judged by its own rule
+ * (baseUrlKeyShaped, mirrored by the retired page's brBaseKeyShaped): its host as it was typed, label by label, and its path — where a segment that
  * is nothing but 32 to 39 hex characters is an account's id (Cloudflare's), not a key. The desk's own words (its name, the objective, the
  * charters), which may hold a 0x address, are asked only whether they hold a key that says what it is (prefixedKey). And a provider's own
  * words are shown only scrubbed of anything key-shaped (scrubbed), the key in use first, and every piece of it eight characters or longer.
@@ -120,7 +120,7 @@ function randomRun(run: string): boolean {
   return false;
 }
 
-/** WHETHER SOME TEXT HOLDS WHAT LOOKS LIKE AN API KEY — the one check the account, the routes and the page (ui/brains.js brKeyShaped mirrors
+/** WHETHER SOME TEXT HOLDS WHAT LOOKS LIKE AN API KEY — the one check the account, the routes and the face (the retired page's ui/brains.js brKeyShaped at 9614314c mirrored
  * it) share, so a key pasted into the wrong field (a model's name, a base URL's path, a provider's id) is refused before it can land
  * anywhere a key must never be: the ledger, the room, desk.json, a response, or the model field of a request sent to another provider.
  * True for: a key that says what it is by its prefix (PREFIXED_KEY), a key block or a signed token, thirty-two or more hex characters in a

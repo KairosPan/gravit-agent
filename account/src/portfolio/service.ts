@@ -2225,7 +2225,7 @@ export class PortfolioService {
   /** THE MARKETS A PAGE SHOWS (account/stream.ts follow, told here): each key — `<venue>:<symbol>` — held from the venues' streams while
    * the page follows it (its book too: the page shows it), its quote, book and trades pushed to the page as they move (marketTold), and
    * the ones it no longer follows let go (each stream a minute after nothing wants it: live/stream-hub.ts). A key with a "~" before it is a
-   * market whose PRICE ALONE the page shows (a position's mark under the trading area's panels, ui/terminal.js): held without its book, and
+   * market whose PRICE ALONE the page shows (a position's mark under the trading area's panels of the retired page, ui/terminal.js at 9614314c): held without its book, and
    * only its quote pushed */
   private pageFollows(client: string, keys: string[]): void {
     const had = this.pageHolds.get(client) ?? new Map<string, { source: string; symbol: string; release: () => void }>();
@@ -4089,7 +4089,7 @@ const EXPLORE_SORTS: readonly ExploreSort[] = ["volume", "movers", "closing"];
 const STATS_MS = 4_000;
 const CANDLE_MS = 6_000;
 /** how long a chart's first view may take (Nasdaq's whole history of a share is about ten seconds), and one page scrolled left — the page
- * waits longer than either (ui/core.js HISTORY_TIMEOUT_MS and API_TIMEOUT_MS; test/unit/ui-chart.test.ts holds them apart) */
+ * waits longer than either (the retired page's HISTORY_TIMEOUT_MS and API_TIMEOUT_MS, ui/core.js at 9614314c, which its deleted test/unit/ui-chart.test.ts held apart) */
 export const HISTORY_WAIT_MS = 20_000;
 export const PAGE_WAIT_MS = 12_000;
 /** WHOSE BARS A CHART SAYS THEY ARE (CandlesView.from): the source the market is priced from (`named`), unless its page names another

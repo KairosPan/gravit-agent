@@ -205,7 +205,7 @@ describe("earn at venues connected live: an agent, inside the earn limit the own
   it("no earn limit, no earn: a trading limit is not one; the limit names venues, or one product at a venue", async () => {
     const x = await boot();
     await x.own({ type: "approveAgent", agentAddress: cc.address, agentName: "Claude Code", validUntil: START + 30 * DAY });
-    expect(refusal(await x.ag(ask())).message).toBe("the owner has not approved this agent to put money to earn: it gets an earn limit on the account page (Agents)");
+    expect(refusal(await x.ag(ask())).message).toBe("the owner has not approved this agent to put money to earn: it gets an earn limit on the owner's Gravit face (Account › Agents)");
     await x.own({ type: "approveSpend", agent: cc.address, scope: "trade", allow: "ex", perPayment: "50", budget: "100", windowHours: 0, validUntil: START + 7 * DAY });
     expect(refusal(await x.ag(ask())).code).toBe("E_MANDATE_NONE");
     await x.own({ type: "approveSpend", agent: cc.address, scope: "earn", allow: "ex:staking:ETH", perPayment: "50", budget: "100", windowHours: 0, validUntil: START + 7 * DAY });

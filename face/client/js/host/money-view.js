@@ -1,8 +1,8 @@
-// face/client/js/host/money-view.js — the Money tab's pure rules (plan 4b Task 2), the Account page's own ported, each cited
+// face/client/js/host/money-view.js — the Money tab's pure rules (plan 4b Task 2), the retired page ported, each cited
 // (account/src/portfolio/public/ui/core.js and money.js): which account is served from the network the Account runs on, which
 // moves money and which gives an address to send to; the Account's published lists (its dollars, the chains money moves on, the
 // chains a bridge joins) with the page's own fallbacks; the Receive rows, one account × one network each; and Move's sources,
-// kinds and destinations. Every word is the Account page's. No DOM, no store.
+// kinds and destinations. Every word is the retired page's. No DOM, no store.
 import { pageOk, writesOn } from './account-view.js';
 
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);

@@ -4,7 +4,7 @@
 // and the ticket's leverage editor), nothing added and nothing renamed. host/sheet-view.js delegates the three kinds here; the
 // sheet engine (host/sheet.js) prepares the draft and What you sign shows it, as it does Trade's order. No clock: each deadline
 // is the Account's prepare's. And each kind's seed from a row the screens draw — a working order, a position, a market's
-// line — with the Account's page saying whether its venue changes, closes or sets leverage. No DOM, no store.
+// line — with the retired page saying whether its venue changes, closes or sets leverage. No DOM, no store.
 import { eventPriceOf } from './trade-view.js';
 import { venuesOf } from './account-view.js';
 
@@ -139,7 +139,7 @@ export function marketDraftOf(kind, fields, seed) {
 const canAt = (page, venue) => venuesOf(page).find(v => v.id === venue)?.tradeCan ?? { amend: false, leverage: false, close: false };
 
 /** A working order's Change seed (an openOrdersOf row), or null: only an order with an id, at a venue the page says changes
- *  orders in place, of a resting type — and one the Account's own page would let you change: not waiting for its wallet to send
+ *  orders in place, of a resting type — and one the retired page would let you change: not waiting for its wallet to send
  *  it, not being canceled, not unfollowed since a restart, with no change the venue has yet to confirm. */
 export function amendSeedOf(order, page) {
   const o = isRecord(order) ? order : {};
@@ -158,7 +158,7 @@ export function closeSeedOf(position) {
   return { venue: p.venue, symbol: p.symbol, name: str(p.name) || p.symbol, side: str(p.side), qty: figure(p.qty), kind: str(p.kind) };
 }
 
-// what the venue says of a market's leverage, as the Account page's ticket reads it: the most it takes (the market read's
+// what the venue says of a market's leverage, as the retired page's ticket reads it: the most it takes (the market read's
 // `maxLeverage`) and the margin modes it sets (the market read's `marginModes`, else the venue's `trade.marginModes`) — `quotes`
 // the markets' reads by `venue|symbol`; nothing said is left out
 function limitsAt(page, quotes, venue, symbol) {

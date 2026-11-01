@@ -7,7 +7,7 @@ description: How the Account seat's MCP tools behave — paper venues only, the 
 
 The `mcp__account__*` tools are Gravit's seat at the operator's Account (Linqi's
 buyer-agent-demo, a program the operator runs on this machine). The Account holds the
-operator's venues; the seat trades inside limits the operator signs on the Account page.
+operator's venues; the seat trades inside limits the operator signs on the face (Account › Agents).
 
 - **Paper venues only.** Name the venue in every order; `portfolio_account` lists them
   (`paperVenues`) and the limits you hold (`approvals`). Never place anything at a venue
@@ -15,7 +15,7 @@ operator's venues; the seat trades inside limits the operator signs on the Accou
   operator signs no `venues`, `payees` or `earn` limit.
 - **Every write stops twice.** `portfolio_live_order`, `_batch`, `_amend`, `_cancel`,
   `_close`, `_leverage`, `_move`, `_earn` and `portfolio_pay` raise the face's card first
-  (the operator answers it in the conversation), then the Account's own card on its page
+  (the operator answers it in the conversation), then the Account's own card, answered in the face's Cards (Account › Cards)
   (Guard mode, thirty minutes). The answer to a carded order is `{pending: true, card: {id}}`:
   tell the operator the card id, then `portfolio_wait {card}` (55 s at most; ask again until
   `done`) or `portfolio_approval {id}`. Do not place the order again while a card waits.

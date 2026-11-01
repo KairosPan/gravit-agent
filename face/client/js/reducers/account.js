@@ -14,7 +14,7 @@ export const reducers = {
   seatLoading: s => seat(s, { status: 'loading' }),
   seatLoaded: (s, { data, at }) => seat(s, { status: 'ready', data, at }),
   seatFailed: (s, { at }) => seat(s, { status: 'error', at }),
-  // the Account's page (host/account.js): /data/account as read
+  // the Account's read (host/account.js): /data/account as read
   accountLoading: s => acc(s, { status: 'loading' }),
   accountLoaded: (s, { data, at }) => acc(s, { status: 'ready', data, at, message: null }),
   // a failed read keeps the last data: the screen says it is not current rather than going blank; `message` is the

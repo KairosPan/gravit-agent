@@ -72,8 +72,8 @@ export function orderLine(o: LiveOrder, agentName: (address: string) => string):
   const sign = o.side === "buy" ? -1 : 1;
   const done = o.filledQty > 0 && o.filledQty < o.qty ? ` · ${qty(o.filledQty)} of ${qty(o.qty)} filled` : "";
   // one fixed shape, its prices grouped (figure): "Buy 0.5 SOL · SOL / USDT · limit 142.44 · at 141.9 · 0.2 of 0.5 filled",
-  // "Sell 0.002 BTC · BTC / USDT · limit 63,226.6". The Trade terminal's history reads an order it does not have back from these words
-  // (ui/terminal.js ttOrderRec), so a figure there may carry commas
+  // "Sell 0.002 BTC · BTC / USDT · limit 63,226.6". The retired Trade terminal's history read an order it did not have back from these words
+  // (the retired page, ui/terminal.js ttOrderRec at 9614314c), so a figure there may carry commas
   return {
     key: `order:${o.clientId}`,
     id: o.id,

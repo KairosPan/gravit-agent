@@ -301,7 +301,7 @@ export function quoteOf(prepared) {
   };
 }
 
-// a payment in the Account page's words (statement.js whatOf): a swap, a transfer between one venue's ledgers, else its kind,
+// a payment in the retired page's words (statement.js whatOf): a swap, a transfer between one venue's ledgers, else its kind,
 // from → to, on its network; a venue by its name on the page
 function paymentWordsOf(p, page) {
   const nameOf = id => str(records(page?.venues).find(v => v.id === id)?.name) || str(id);
@@ -317,7 +317,7 @@ function paymentWordsOf(p, page) {
  *  `liveCancel` seed, `{ venue, order }`, or null for an order with no id or venue (one the Account knows by its client id
  *  alone: nothing to cancel it by) — and `walletSend`: `{ order: id }` for a DEX order waiting for the operator's wallet to send
  *  it (`walletTxs`, no `ref`; it keeps its own Cancel, which takes it back before the wallet sends it and frees its limit, as the
- *  Account page's row does: trade.js tkOpenActs), its `walletKey` the order's client id and `walletReported` whether the Account
+ *  the retired page's row does: trade.js tkOpenActs), its `walletKey` the order's client id and `walletReported` whether the Account
  *  already holds a hash for it (`reported`); else null. Then the page's payments waiting for the wallet
  *  (`legs[0].native.walletTx`, `authorized`), each `{ payment: id, words, key, walletReported }` — `key` its `<id>@<at>`,
  *  `walletReported` its `live.reported`. */

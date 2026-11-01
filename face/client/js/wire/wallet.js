@@ -1,4 +1,4 @@
-// face/client/js/wire/wallet.js — the operator's own browser wallet, as the Account's page speaks to it (plan 4b Task 1): the
+// face/client/js/wire/wallet.js — the operator's own browser wallet, as the retired page speaks to it (plan 4b Task 1): the
 // wallets this browser has (EIP-6963, account/src/portfolio/public/ui/connect.js findWallets), an address proven by the wallet's
 // signature on the Account's sentence (connect.js proveWallet), the wallet that holds an address (core.js walletFor), and the
 // transactions the Account built sent by that wallet — an approval waited for on chain (core.js mined), the swap built again
@@ -7,14 +7,14 @@
 // wallet's provider and to the `post` it is handed (the face's /data/account/* proxy), nothing else.
 
 /* Robinhood Chain, for a wallet that does not know it yet: the wallet shows it to the owner before adding it (chain 4663; its own
- * RPC and the explorer Robinhood publishes for it) — the Account page's TK_ROBINHOOD_CHAIN */
+ * RPC and the explorer Robinhood publishes for it) — the retired page's TK_ROBINHOOD_CHAIN */
 export const ROBINHOOD_CHAIN = Object.freeze({
   chainId: '0x1237', chainName: 'Robinhood Chain', nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
   rpcUrls: ['https://rpc.mainnet.chain.robinhood.com/'], blockExplorerUrls: ['https://robinhoodchain.blockscout.com'],
 });
 export const MINED_EVERY_MS = 2_000, MINED_WITHIN_MS = 120_000;
 
-/** A long hex address or hash as the Account's page shortens it (core.js short): `0x123456…cdef`; anything else as it is. */
+/** A long hex address or hash as the retired page shortens it (core.js short): `0x123456…cdef`; anything else as it is. */
 export const short = a => (/^0x[0-9a-fA-F]{16,}$/.test(String(a)) ? `${String(a).slice(0, 8)}…${String(a).slice(-4)}` : String(a));
 /** A sentence as the hex `personal_sign` takes (connect.js hexOf). */
 export const hexOf = text => '0x' + [...new TextEncoder().encode(String(text))].map(b => b.toString(16).padStart(2, '0')).join('');
@@ -34,7 +34,7 @@ const ethName = eth => (eth.isOkxWallet || eth.isOKExWallet ? 'OKX Wallet' : eth
 
 /** The wallets this browser has: every EIP-6963 `announceProvider` answer to one `requestProvider`, heard for `waitMs`, each once
  *  (by its uuid, else its rdns, else its name; the last answer kept); none announced and a `win.ethereum`: that one, as the EIP
- *  says, named as the Account's page names it; none at all: []. Each `{ id, name, icon, provider }`. */
+ *  says, named as the retired page names it; none at all: []. Each `{ id, name, icon, provider }`. */
 export async function discoverWallets(win, { waitMs = 120 } = {}) {
   const found = new Map();
   const hear = e => {
@@ -86,7 +86,7 @@ export async function proveWallet(wallet, post) {
 
 /** The wallet of `wallets` that holds `address` (in any case): asked first with `eth_accounts`, which opens no prompt; none of
  *  them answering for it, each asked with `eth_requestAccounts` (core.js walletFor), the wallet's own connect prompt — a wallet
- *  authorizes each origin apart, and the face's is not the Account page's. Called only inside the operator's press. None: an
+ *  authorizes each origin apart, and the face's is not the retired page's. Called only inside the operator's press. None: an
  *  Error naming the address. */
 export async function walletFor(wallets, address) {
   const want = String(address ?? '').toLowerCase();

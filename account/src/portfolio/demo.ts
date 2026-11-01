@@ -6,7 +6,7 @@
  *
  *   npm run portfolio:demo                     headless, everything simulated
  *   npm run portfolio:demo -- --mm             the MetaMask and Polymarket beats read the real wallet
- *   npm run portfolio:demo -- --serve --hold   also open the page at :4820 and keep it up
+ *   npm run portfolio:demo -- --serve --hold   also serve the API at :4820 and keep it up
  */
 import { formatRefusal, isRefusal, type Refusal } from "../core/errors.ts";
 import { agentCode, CAP_LABEL, describeIntent, qtyText, r2, type Intent } from "./accounts.ts";
@@ -400,7 +400,7 @@ async function main(): Promise<number> {
   note(`accounts 8 · writes ok ${svc.counters.writes} · refusals ${svc.counters.refusals} · cards ${svc.counters.cards} · loss $0.00 (no money went anywhere the user had not agreed to)`);
   note(`ledger ${svc.ledgerPath()}`);
   if (server && flag("--hold")) {
-    note(`holding the page open at ${server.url} (Ctrl-C to stop)`);
+    note(`holding the service up at ${server.url} (Ctrl-C to stop)`);
     await new Promise<void>((resolve) => process.once("SIGINT", () => resolve()));
   }
   await server?.close();

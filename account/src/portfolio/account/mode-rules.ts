@@ -1,4 +1,4 @@
-/** What each mode does with an agent's request, door by door — and how long a card waits. The Mode sheet (ui/agents-mount.js) and the
+/** What each mode does with an agent's request, door by door — and how long a card waits. The face's Mode sheet (a port of the retired page's ui/agents-mount.js at 9614314c) and the
  * agents' account read (mcp.ts portfolio_account) draw from here, so neither drifts from the doors.
  *
  * The wire values stay `guard` | `open` (signed rows, old ledgers); Guard and Beast are the words a person reads. Each row is worded from the

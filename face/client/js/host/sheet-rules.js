@@ -10,7 +10,7 @@ const isNum = v => typeof v === 'number' && Number.isFinite(v);
 const figure = v => (isNum(v) ? String(v) : typeof v === 'string' ? v : '');
 // the cap the Account takes: dollars to the cent, at most seven digits before the point
 const CAP = /^\d{1,7}(\.\d{1,2})?$/;
-// the leverage steps the Account's page offers, its figure now among them
+// the leverage steps the retired page offers, its figure now among them
 const STEPS = [1, 2, 3, 5, 10, 20];
 const leverageNow = s => (isNum(s.max) && s.max >= 1 ? s.max : Number(s.max) >= 1 ? Number(s.max) : 1);
 const stepsOf = s => [...new Set([...STEPS, leverageNow(s)])].sort((a, b) => a - b);

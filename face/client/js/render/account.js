@@ -1,4 +1,4 @@
-// face/client/js/render/account.js — Account on the face (spec 2026-10-22 §6.2): the Account's own page and reads through
+// face/client/js/render/account.js — Account on the face (spec 2026-10-22 §6.2): the Account's reads through
 // the face's proxy, in six tabs — Portfolio (the two figures, the change for the range and its curve, Assets, Positions,
 // Open orders), Money (plan 4b Task 2: Receive, an address per account and network on a press; Move, the move sheet from each
 // account money moves from, on a page that signs for an Account that takes writes; the payments waiting for the operator's
@@ -224,7 +224,7 @@ function venues(state, now) {
 
 // the Account seat's standing (spec 2026-10-20 §6.3): the service with the Account's own mode and writes, the seat and its
 // limits, the venues with the paper ones marked, the cards waiting — answered on the face's own Cards tab, the way there drawn
-// while any wait (spec §5.8: no key leads to the Account's own page). Its words are the Account's; the stamp is when the face
+// while any wait (spec §5.8: no key leads off the face). Its words are the Account's; the stamp is when the face
 // answered.
 function seatBox(state, now) {
   const s = state.seat;
@@ -238,7 +238,7 @@ function seatBox(state, now) {
     const rows = [row(w.service, [[w.mode, w.writes].filter(Boolean).join(' · ')])];
     if (w.seat) rows.push(row(w.seat, w.limits));
     for (const v of w.venues) rows.push(row(v.name, [[v.usd, v.note].filter(Boolean).join(' · ')], v.paper ? 'Paper' : ''));
-    // the view's own stamp — when the seat route answered, the Account's page it reduced kept up to 15 s by the proxy's reader —
+    // the view's own stamp — when the seat route answered, the Account's read it reduced kept up to 15 s by the proxy's reader —
     // else, for an unreachable answer, which carries none, when this page's read landed
     const read = typeof s.at === 'number' ? new Date(s.at).toISOString() : undefined;
     const stamp = `As of ${when(s.data.asOf ?? read, now) || 'earlier'}${s.status === 'error' ? ' · stale' : ''}`;
@@ -387,7 +387,7 @@ function cardRow(c, now, owner) {
     `${shown ? `<details${attrs({ id: `shown-${c.id}`, class: 'acct-shown' })}><summary>What it asks</summary>${shown}</details>` : ''}</div>${keys}</div>`;
 }
 
-// an ask in its words; for a page that signs, Grant where this page grants it (grantsAsk, as the Account page's pfGrantable:
+// an ask in its words; for a page that signs, Grant where this page grants it (grantsAsk, as the retired page's pfGrantable:
 // a limit, a venue, a key, a top-up, a session, leverage, the mode — each its sheet, host/sheet-view.js grantOf; a venue not
 // on the page once where the account can connect is read) and Decline; under the asks, a Grant that could not open, in words
 function askRow(k, page, owner) {
@@ -419,7 +419,7 @@ const ruleRow = (head, words, key = '') => `<div class="venue"><span>${lines(hea
 
 // the switch: Guard one click on any page that reads the Account (in Guard too: the Account takes it again); Beast a signed
 // sheet, its key only on a page that signs and only while Beast is not in force — pressed, it then does nothing, as on the
-// Account's own page (a signature that changes nothing is never asked)
+// retired page (a signature that changes nothing is never asked)
 function modeSeg(mode, owner) {
   const item = (label, value, data) => `<button${attrs({ type: 'button', class: cls('seg-item', mode === value && 'pressed'), 'aria-pressed': mode === value ? 'true' : 'false', ...data })}>${label}</button>`;
   return `<div class="seg">${item('Guard', 'guard', { 'data-action': 'setGuard' })}${item('Beast', 'open', !owner ? { disabled: true } : mode === 'open' ? {} : { 'data-action': 'openSheet', 'data-kind': 'beast' })}</div>`;
@@ -571,7 +571,7 @@ function smLeg(l, i) {
 }
 
 /** Sell many's drawer: everything held that isn't a dollar, picked up to ten, reviewed leg by leg, then signed one by one —
- *  each leg's answer where it landed. Its words are the Account page's (earn.js:250-356). None open: nothing. */
+ *  each leg's answer where it landed. Its words are the retired page's (earn.js:250-356). None open: nothing. */
 export function renderSellMany(state) {
   const m = state.sellMany;
   if (!m) return '';

@@ -236,7 +236,7 @@ export function chinaRowsOf(markets, atPage = []) {
 /** The table's tabs from All's explore answer: All first, with the Account's count and the cn rows', then the Account's tabs that
  *  have something in them, in ACCOUNT_TABS's order and words (Stocks is the Account's alone: the A shares' home is China). An
  *  answer not read, or one that is not an answer, is All alone. China (`opts.china`, `{ count }`) follows the Account's tabs
- *  (spec 2026-10-31 §4). As the Account's page orders them, All results leads while `searching` and Watching closes the row
+ *  (spec 2026-10-31 §4). As the retired page orders them, All results leads while `searching` and Watching closes the row
  *  while `watching` (anything is starred), neither with a count. */
 export function tabsOf(explore, cnCount, opts) {
   const cn = Math.max(0, number(cnCount) ?? 0);
@@ -260,7 +260,7 @@ export function tabsOf(explore, cnCount, opts) {
 // dollars per contract as cents, without the float's noise (0.14 × 100 is 14, not 14.000000000000002)
 const cents = v => { const n = number(v); return n === null ? null : Number((n * 100).toPrecision(12)); };
 
-/** A row's figures by kind, as the Account's page draws them: an event's price and 24h change are dollars per contract, in
+/** A row's figures by kind, as the retired page draws them: an event's price and 24h change are dollars per contract, in
  *  cents here, with no percent; Kalshi counts its volume in contracts (`contracts24h`), never dollars; anything else is in
  *  dollars, with its 24h percent (the Account's: 2.3 is 2.3 %); a pre-IPO perpetual carries the venue's implied valuation
  *  (`implied.usd`) beside the contract's price. A figure the Account does not give, or one that does not parse, is null. */
@@ -346,7 +346,7 @@ const unpriced = () => ({ price: null, unit: 'usd', changePct: null, change24h: 
 const KIND_TABS = new Set(ACCOUNT_TABS.map(([id]) => id).filter(id => id !== 'all'));
 // a contract on a venue's estimate of a private company's valuation: its implied valuation, or its tab, says so
 const isPreipo = item => isRecord(item.implied) || (Array.isArray(item.tabs) && item.tabs.includes('preipo'));
-// what a market is, in a word, as the Account's page says it
+// what a market is, in a word, as the retired page says it
 const KIND_WORDS = { coin: 'Crypto', stock: 'Stock', perp: 'Perpetual', rwa: 'Tokenized asset', event: 'Prediction' };
 // an outcome as a person says it: YES → Yes, UP → Up; a named outcome as its venue writes it
 const OUTCOMES = { YES: 'Yes', NO: 'No', UP: 'Up', DOWN: 'Down' };
@@ -355,7 +355,7 @@ const outcomeWord = label => { const s = str(label); return Object.hasOwn(OUTCOM
 const inUnit = (v, unit) => (unit === 'cents' ? cents(v) : number(v));
 // the price a row or a page shows: the latest quote at its line where that says one, else the explore read's
 const shownPrice = (live, priced) => inUnit(live?.price, priced.unit) ?? priced.price;
-// the word a market's tile takes its letters from, as the Account's page draws it: an event's category, else its base or name
+// the word a market's tile takes its letters from, as the retired page draws it: an event's category, else its base or name
 const tileOf = item => (item.kind === 'event' ? str(item.category) || 'Event' : str(item.base) || str(item.name));
 // the Account's keys starred: the operator's own, then each an old us:/crypto: star was found as
 function starredOf(m) {
@@ -386,7 +386,7 @@ function cnAssetOf(m, key) {
 const exploreRowsOf = m => [...Object.values(isRecord(m.explore) ? m.explore : {}).map(r => own(r, 'data')), m.results?.data].flatMap(everyRow);
 // the page's watch entries that name a market: a venue and a symbol, as the page keeps them
 const watchEntries = page => (pageOk(page) ? records(page.watch).filter(named).map(w => ({ venue: w.venue, symbol: w.symbol })) : []);
-// an entry is one of a row's markets, as the Account's page reads it: a line of the row's own or of an outcome's at the entry's
+// an entry is one of a row's markets, as the retired page reads it: a line of the row's own or of an outcome's at the entry's
 // symbol, at the entry's venue by its own id or — a public listing — by the venue it connects to
 function watches(item, w) {
   const legs = legsOf(item);
@@ -547,7 +547,7 @@ export function sortsOf(rows, kept) {
  *  one it found stars the Account's row, one it could not find is listed once, Not listed at the Account. All is every row, a
  *  kind's tab the rows whose tabs name it, All results (`results`) the search's own. Watching is every star, found in any list
  *  of its tab's read or All's (items, movers, closing, most traded), else a placeholder that can still be un-starred; a query
- *  typed on Watching searches every market, as the Account's page does. The stars are the face's and the page's (`page`, the
+ *  typed on Watching searches every market, as the retired page does. The stars are the face's and the page's (`page`, the
  *  Account's own watch list: watchKeysOf over every read), one list: a row starred on the page's alone is `atAccount`; on
  *  Watching the page's follow the face's, each found in whichever read lists it. */
 export function tableOf(markets, now = Date.now(), page = null) {
@@ -663,7 +663,7 @@ const saidBy = read => (read?.status === 'error' ? str(read.message) || null : n
  *    and the positions, real and paper, at any of its lines (an event's: every outcome's) — its open orders there, and the
  *    statement's lines that name its base or one of those lines' symbols; with what each stands on (`reads`): what is held, the
  *    holdings read and, while the page names a paper venue, its paper lens's, and the page that says which lens leads; the
- *    orders, the Account's page — both `unreadable` when the page that landed is one the face does not recognise; the lines,
+ *    orders, the Account's read — both `unreadable` when the page that landed is one the face does not recognise; the lines,
  *    the statement read. */
 export function pageOf(markets, account, id, now = Date.now()) {
   const m = isRecord(markets) ? markets : {};
@@ -688,7 +688,7 @@ export function pageOf(markets, account, id, now = Date.now()) {
   const a = isRecord(account) ? account : {};
   const lens = worthOf(a.data, a.holdings?.data, a.paper?.data).paperLeads ? a.paper?.data : a.holdings?.data;
   const paperNamed = pageOk(a.data) && a.data.venues.some(v => v?.paper === true);
-  // the Account's page landed as one the face does not recognise: its orders, and what is held, are unreadable, never loading
+  // the Account's read landed as one the face does not recognise: its orders, and what is held, are unreadable, never loading
   const unreadable = a.data != null && !pageOk(a.data);
   // every line the market trades at: its own, and an event's every outcome's (its YES and its NO)
   const places = [...legs, ...records(item.outcomes).flatMap(o => records(o.at))].filter(named);

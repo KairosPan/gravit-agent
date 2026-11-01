@@ -533,7 +533,7 @@ export function applyOwner(state: AccountState, action: OwnerAction, envelope: E
 export function spendFor(s: AccountState, agent: string, scope: SpendApproval["scope"], nowMs: number): SpendApproval | Refusal {
   const all = s.spends.filter((x) => x.agent === agent.toLowerCase() && x.scope === scope);
   const live = all.find((x) => x.revokedAt === undefined);
-  if (!live) return no("E_MANDATE_NONE", { message: scope === "venues" ? "the owner has not approved this agent to move money between venues" : scope === "trade" ? "the owner has not approved this agent to trade: it gets a trading limit on the account page (Agents)" : scope === "earn" ? "the owner has not approved this agent to put money to earn: it gets an earn limit on the account page (Agents)" : "the owner has not approved this agent to pay anyone", detail: { scope, hadOne: all.length > 0 } });
+  if (!live) return no("E_MANDATE_NONE", { message: scope === "venues" ? "the owner has not approved this agent to move money between venues" : scope === "trade" ? "the owner has not approved this agent to trade: it gets a trading limit on the owner's Gravit face (Account › Agents)" : scope === "earn" ? "the owner has not approved this agent to put money to earn: it gets an earn limit on the owner's Gravit face (Account › Agents)" : "the owner has not approved this agent to pay anyone", detail: { scope, hadOne: all.length > 0 } });
   if (nowMs >= live.validUntil) return no("E_MANDATE_EXPIRED", { detail: { approval: live.id, validUntil: new Date(live.validUntil).toISOString() } });
   return live;
 }
