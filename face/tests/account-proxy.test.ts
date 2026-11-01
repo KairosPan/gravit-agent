@@ -20,6 +20,7 @@ import {
   ACCOUNT_CACHE_KEYS,
   ACCOUNT_QUERY,
   ACCOUNT_TTL_MS,
+  CALLBACK_QUERY,
   STREAM_BODY_LIMIT,
   STREAM_CLIENT,
   FACE_ORIGIN_HEADER,
@@ -1108,6 +1109,15 @@ test("the callback forwards a venue's navigation and answers the Account's page"
   assert.equal(r.headers["content-type"], "text/html; charset=utf-8");
 });
 
+test("the callback forwards error_uri", async () => {
+  const { routes, fetched } = proxyWith(answering("<p>The sign-in did not finish</p>", 400));
+  const q = "state=s4&error=access_denied&error_uri=https%3A%2F%2Fexample%2Fe";
+  const out = await call(routes, `${CALLBACK}?${q}`, NAVIGATION);
+  assert.equal(out.status, 400, "the Account's own answer");
+  assert.deepEqual(fetched, [`${URL_}/api/account/signin/callback?${q}`], "both names reach the stub Account");
+  assert.equal(CALLBACK_QUERY.size, 6);
+});
+
 test("the callback: a fetch, a form, an Origin, a rebound Host are 403; a bad query 400; nothing is fetched", async () => {
   const { routes, fetched } = proxyWith(answering("<p>ok</p>"));
   const q = `${CALLBACK}?state=s1&code=c1`;
@@ -1124,12 +1134,13 @@ test("the callback: a fetch, a form, an Origin, a rebound Host are 403; a bad qu
     assert.equal(out.status, 403, why); assert.equal(out.body, FORBIDDEN, why);
   }
   for (const bad of ["?foo=1", "?state=a&state=b", `?state=s&code=${"c".repeat(2_001)}`, `?state=${"s".repeat(241)}`,
-    `?error_description=${"d".repeat(1_001)}`, `?iss=${"i".repeat(501)}`, `?error=${"e".repeat(241)}`, "?fresh=1"]) {
+    `?error_description=${"d".repeat(1_001)}`, `?iss=${"i".repeat(501)}`, `?error=${"e".repeat(241)}`, `?error_uri=${"u".repeat(501)}`, "?fresh=1"]) {
     const out = await call(routes, `${CALLBACK}${bad}`, NAVIGATION);
     assert.equal(out.status, 400, bad.slice(0, 40)); assert.equal(out.body, INVALID);
   }
   assert.equal(fetched.length, 0, "nothing reaches the Account");
   assert.equal((await call(routes, `${CALLBACK}?state=s&code=${"c".repeat(2_000)}`, NAVIGATION)).status, 200, "2 000 characters pass");
+  assert.equal((await call(routes, `${CALLBACK}?state=s&error_uri=${"u".repeat(500)}`, NAVIGATION)).status, 200, "an error_uri of 500 characters passes");
 });
 
 test("the callback: an Account that does not answer, and a disabled row, are 503 with the fixed page", async () => {

@@ -159,9 +159,10 @@ export function faceOriginOf(req: IncomingMessage): string | null {
 }
 
 /** The OAuth callback's query names, each with the longest value it may carry, in characters, decoded: what a
- * venue's authorization server sends back (RFC 6749 §4.1.2, RFC 9207's `iss`). */
+ * venue's authorization server sends back (RFC 6749 §4.1.2, `error_uri` among them, which the Account's `finish` ignores; RFC 9207's
+ * `iss`). */
 export const CALLBACK_QUERY: ReadonlyMap<string, number> = new Map([
-  ["state", 240], ["code", 2_000], ["error", 240], ["error_description", 1_000], ["iss", 500],
+  ["state", 240], ["code", 2_000], ["error", 240], ["error_description", 1_000], ["error_uri", 500], ["iss", 500],
 ]);
 
 /** How long the Account may take to finish a sign-in, headers and body: it trades the code at the venue. */
@@ -170,8 +171,7 @@ export const CALLBACK_ABORT_MS = 30_000;
 /** The callback's answer headers: the Account's page, never kept, never sniffed, its URL (which carried the code)
  * never sent on as a referrer — and, since the page is served on the face's own origin beside the owner's key in
  * IndexedDB, a policy that lets it run no script, load nothing, post no form and be framed by no one: its inline
- * style alone is drawn. (The Account's success page carries an inline `window.close()` after 1.5 s; the policy
- * blocks it, so the tab stays open, as its words already say it may be closed.) */
+ * style alone is drawn. (The Account's success page carries no script: its words say the tab may be closed.) */
 export const CALLBACK_HEADERS = {
   "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "referrer-policy": "no-referrer",
   "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",

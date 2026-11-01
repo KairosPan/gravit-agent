@@ -30,11 +30,11 @@ describe("the account as a background service", () => {
   });
 
   it("`code` shows the pairing code of the run that is up now — the last one it said: a new one replaces the code it started with once the last browser signs out — never an earlier run's", () => {
-    const earlier = "TRADING IS ON · real orders …\n  pairing code: AAAA-BBBB — the first browser becomes the owner only with this code, typed on the page";
-    const started = "TRADING IS ON · real orders …\n  pairing code: CCCC-DDDD — the first browser becomes the owner only with this code, typed on the page";
-    const signedOut = "signed out: no browser signs for the account now\n  pairing code: EEEE-FFFF — the next browser becomes the owner only with this code, typed on the page (the code before it no longer works)";
-    expect(codeLine(`${earlier}\nyour account at …\n${started}\nyour account at …`)).toBe("pairing code: CCCC-DDDD — the first browser becomes the owner only with this code, typed on the page");
-    expect(codeLine(`${earlier}\n${started}\n${signedOut}\n${signedOut.replace("EEEE-FFFF", "GGGG-HHHH")}`)).toBe("pairing code: GGGG-HHHH — the next browser becomes the owner only with this code, typed on the page (the code before it no longer works)");
+    const earlier = "TRADING IS ON · real orders …\n  pairing code: AAAA-BBBB — the first browser becomes the owner only with this code, typed on Gravit's face (Account)";
+    const started = "TRADING IS ON · real orders …\n  pairing code: CCCC-DDDD — the first browser becomes the owner only with this code, typed on Gravit's face (Account)";
+    const signedOut = "signed out: no browser signs for the account now\n  pairing code: EEEE-FFFF — the next browser becomes the owner only with this code, typed on Gravit's face (Account) (the code before it no longer works)";
+    expect(codeLine(`${earlier}\nyour account at …\n${started}\nyour account at …`)).toBe("pairing code: CCCC-DDDD — the first browser becomes the owner only with this code, typed on Gravit's face (Account)");
+    expect(codeLine(`${earlier}\n${started}\n${signedOut}\n${signedOut.replace("EEEE-FFFF", "GGGG-HHHH")}`)).toBe("pairing code: GGGG-HHHH — the next browser becomes the owner only with this code, typed on Gravit's face (Account) (the code before it no longer works)");
     // a run that started owned said no code: an earlier run's is not this run's
     expect(codeLine(`${earlier}\nTRADING IS ON · real orders …\nyour account at …`)).toBeUndefined();
     expect(codeLine("")).toBeUndefined();

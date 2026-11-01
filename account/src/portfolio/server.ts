@@ -1,6 +1,7 @@
-/** The account page — the user's real accounts on one page — and the API behind it and the MCP server.
+/** The Account: the user's real accounts behind one API, which the MCP seat and Gravit's face reach. It serves no page: the owner's
+ * screens are Gravit's face (Markets, Trade, Account); every request outside /api/ is 404 with NO_PAGE.
  *
- *   npm run account                   → http://127.0.0.1:4820 · the Account: real accounts only, connected on the page, trading on
+ *   npm run account                   → http://127.0.0.1:4820 · the Account: real accounts only, connected from Gravit's face, trading on
  *                                       (`npm run portfolio` is the same; `--read-only` places and moves nothing; `--live-cap 100` is the most
  *                                       one order or movement may be worth)
  *   npm run account -- --classic      → the original simulated statement (no account layer); `--mm` there reads the real `mm` CLI
@@ -21,9 +22,8 @@
  * With the account layer mounted (the default for this server; `--classic` runs the original accounts without it). It holds REAL accounts
  * only: the venues the owner connects through their own interfaces; no simulated venue is mounted.
  *
- *   GET  /                             the page: net worth, accounts, activity, agents, devices (`/account` sends you here)
- *   GET  /api/account                  what that page reads, with `agentSetup`: the command an agent's owner runs to add this account's MCP seat,
- *                                      and the lists the door accepts (`dollars`, `networks`, `bridgeChains`)
+ *   GET  /api/account                  what the face's Account screens read, with `agentSetup`: the command an agent's owner runs to add
+ *                                      this account's MCP seat, and the lists the door accepts (`dollars`, `networks`, `bridgeChains`)
  *   GET  /api/now                      the service's clock (a signer takes its nonce from here)
  *   POST /api/account/pair   {jwk}     a browser offers the public half of its device key; the first one becomes the owner's device
  *   POST /api/account/prepare {draft}  turn what the owner asked for into the exact action to sign (a movement gets its route, fee and arrival;
@@ -38,12 +38,13 @@
  *                                      (its first, keyless question; a location rule in the venue's words) — live/reach.ts
  *   POST /api/account/wallet/challenge {address, wallet, chainId}   the sentence a wallet signs to show an address is the owner's (EIP-4361)
  *   POST /api/account/wallet/prove {address, signature}            that signature, checked; the address is then proven, not watched
- *   POST /api/account/signin/start {connector}     a venue's own OAuth sign-in (Robinhood): the page to open, and its state
+ *   POST /api/account/signin/start {connector}     a venue's own OAuth sign-in (Robinhood): the page to open, and its state — started
+ *                                      only from Gravit's face, whose x-gravit-face-origin names the callback (none: 400)
  *   GET  /api/account/signin/status?state=         how that sign-in stands
- *   GET  /api/account/signin/callback              where the venue sends the owner's browser back (through the face's
- *                                      /data/account/signin/callback when the face's x-gravit-face-origin named it at the start)
+ *   GET  /api/account/signin/callback              where the face forwards the venue's navigation back (its own
+ *                                      /data/account/signin/callback, the one the start registered)
  *   GET  /api/account/statement        every transaction at the real venues, across the account's runs, newest first
- *   GET  /api/account/stream[?since=&client=&markets=]  THE PUSH CHANNEL (account/stream.ts): text/event-stream, one a tab (ui/stream.js) —
+ *   GET  /api/account/stream[?since=&client=&markets=]  THE PUSH CHANNEL (account/stream.ts): text/event-stream, one a tab —
  *                                      what changes on the account as it happens: order, fill, position, balance, paper, statement, card,
  *                                      desk; a heartbeat every 15 s; a page that comes back resumes after the last id it heard (Last-Event-ID,
  *                                      or ?since=), or is sent a snapshot. A page that names itself (client) gets the quote, book and trades of
@@ -132,7 +133,6 @@
  *   POST /api/account/live/order-sent {order, hash}      the page says which transaction the wallet sent for a DEX order
  *   POST /api/account/live/order-requote {order}         a wallet order whose approval is on chain: the swap built again from a fresh quote
  *   POST /api/account/live/sent {payment, hash}          the page says which transaction the wallet sent for a movement
- *   GET  /ui/<name>.js|css                               the account page's own scripts and styles
  *   POST /api/exchange {action, nonce, signature}   THE door: every instruction, signed — an owner action by an owner key, an agent's by an
  *                                      authorised agent key (200 done · 202 a card is waiting · 401 not a signer · 409 refused)
  *
@@ -141,19 +141,11 @@
  * owner's and arrive as signed actions; tightening (Guard, an account off) stays free. On the real account /api/markets and /api/quote
  * answer a refusal: the fixture's event contracts and the simulated router are not on it.
  *
- * Answers under /api/ are never stored by the browser (cache-control: no-store). The page's own files are read from disk once per process
- * (NODE_ENV=development reads them each time) and go out compressed (brotli or gzip, as the browser asks; made once per content) under a
- * weak ETag of their content: the page itself is revalidated each time (no-cache) and names each of its scripts and styles with that
- * content's hash (?v=), which is kept a year unchanged (immutable); a file asked for without it, or with an older one, is revalidated.
- * The fonts (public/fonts, named by their version) are kept a year.
+ * No answer is stored by the browser (cache-control: no-store).
  */
 import { akshareCommand, createAkshare, type Akshare, type AkshareWord } from "./live/akshare.ts";
-import { createHash } from "node:crypto";
 import express from "express";
-import { readFileSync } from "node:fs";
 import type { Server } from "node:http";
-import { brotliCompressSync, constants as zlibConstants, gzipSync } from "node:zlib";
-import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isRefusal, type Refusal } from "../core/errors.ts";
 import { parseIntent, parseOrder } from "./intents.ts";
@@ -183,7 +175,8 @@ import { type CnHttp, cnHosts, realCnHttp } from "./live/cn-http.ts";
 import { type CnRelay, RELAY_URL_MAX, createCnRelay, relayTarget } from "./live/cn-relay.ts";
 import { type CnIfind, IFIND_HOST, IFIND_QUERY, createIfind } from "./live/cn-ifind.ts";
 
-const PUBLIC = fileURLToPath(new URL("./public/", import.meta.url));
+/** what every request outside /api/ is answered (404), with or without the account layer: the Account serves no page */
+export const NO_PAGE = "The Account serves no page: its owner's screens are Gravit's face (Markets, Trade, Account). This address answers its API under /api/.";
 /** the MCP seat an agent mounts (mcp.ts), by its absolute path: the command the page hands an agent's owner runs from any folder */
 const MCP_ENTRY = fileURLToPath(new URL("./mcp.ts", import.meta.url));
 
@@ -191,78 +184,6 @@ const MCP_ENTRY = fileURLToPath(new URL("./mcp.ts", import.meta.url));
  * stablecoins a movement may be in (live/types.ts), the chains they travel on (live/chain.ts STABLECOINS) and the chains a bridge goes
  * between (live/bridge.ts, Robinhood Chain in USDG among them) */
 export const DOOR_LISTS = { dollars: [...STABLES], networks: [...new Set(STABLECOINS.map((s) => s.chain))], bridgeChains: [...BRIDGE_CHAINS] } as const;
-
-/** one of the page's own files as the wire carries it: its bytes, the hash of its content (its ETag, and the ?v= the page names it with),
- * and its brotli and gzip forms, each made the first time a browser asks for it */
-interface PageFile {
-  body: Buffer;
-  hash: string;
-  br?: Buffer;
-  gz?: Buffer;
-}
-/** the page's own files, read from disk once per process and kept (NODE_ENV=development reads them each time, for work on the page — and
- * keeps what was made of one whose content did not change); a name that is not there is none */
-const pages = new Map<string, PageFile>();
-function pageFile(rel: string): PageFile | undefined {
-  const kept = pages.get(rel);
-  if (kept !== undefined && process.env.NODE_ENV !== "development") return kept;
-  let body: Buffer;
-  try {
-    body = readFileSync(join(PUBLIC, rel));
-  } catch {
-    return undefined;
-  }
-  const hash = createHash("sha256").update(body).digest("hex").slice(0, 16);
-  if (kept && kept.hash === hash) return kept;
-  const made: PageFile = { body, hash };
-  pages.set(rel, made);
-  return made;
-}
-/** the scripts and styles the page names, each named with its content's hash (?v=…): a browser keeps them a year, and a changed file is a
- * new name. The page so named is kept beside the page as written, until either changes */
-const ASSET_REF = /(\b(?:src|href)=")(\/(?:ui\/[a-z0-9-]+\.(?:js|css)|owner\.js|account\.css))(")/g;
-const versioned = new Map<string, { from: string; made: PageFile }>();
-function pageVersioned(rel: string): PageFile | undefined {
-  const page = pageFile(rel);
-  if (!page) return undefined;
-  const text = page.body.toString("utf8").replace(ASSET_REF, (all, pre: string, path: string, post: string) => {
-    const f = pageFile(path.slice(1));
-    return f ? `${pre}${path}?v=${f.hash}${post}` : all;
-  });
-  const kept = versioned.get(rel);
-  if (kept && kept.from === text) return kept.made;
-  const body = Buffer.from(text, "utf8");
-  const made: PageFile = { body, hash: createHash("sha256").update(body).digest("hex").slice(0, 16) };
-  versioned.set(rel, { from: text, made });
-  return made;
-}
-/** the encoding a browser asked for, of the two kept: brotli first, then gzip, else none (one it refused with q=0 is not used) */
-function encodingFor(accept: string | undefined): "br" | "gzip" | "" {
-  const ok = new Set(
-    String(accept ?? "")
-      .split(",")
-      .map((x) => x.trim().toLowerCase().split(";"))
-      .filter(([, q]) => !q || !/^q=0(\.0*)?$/.test(q.trim()))
-      .map(([name]) => name),
-  );
-  return ok.has("br") ? "br" : ok.has("gzip") ? "gzip" : "";
-}
-/** one of the page's own files on the wire: compressed as the browser asks (not a font, which is compressed already, nor a file under a
- * kilobyte), under a weak ETag of its content (the same for every encoding of it), answered 304 when the browser has it */
-function sendPage(req: express.Request, res: express.Response, f: PageFile, type: string, cache: string, compress = true): void {
-  const enc = compress && f.body.length >= 1024 ? encodingFor(req.headers["accept-encoding"]) : "";
-  const etag = `W/"${f.hash}"`;
-  res.setHeader("cache-control", cache);
-  res.setHeader("etag", etag);
-  if (compress) res.setHeader("vary", "Accept-Encoding");
-  const asked = String(req.headers["if-none-match"] ?? "");
-  if (asked && asked.split(",").some((x) => x.trim().replace(/^W\//, "") === etag.slice(2))) return void res.status(304).end();
-  const body = enc === "br" ? (f.br ??= brotliCompressSync(f.body, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 11, [zlibConstants.BROTLI_PARAM_SIZE_HINT]: f.body.length } })) : enc === "gzip" ? (f.gz ??= gzipSync(f.body, { level: 9 })) : f.body;
-  if (enc) res.setHeader("content-encoding", enc);
-  res.type(type).send(body);
-}
-/* a file named with its content's hash is kept a year as it is; any other answer is revalidated each time */
-const KEEP_A_YEAR = "public, max-age=31536000, immutable";
 
 /** what the page reads of a REAL account, as it goes on the wire: the simulation's runway rows, doors, swap table, ledgers and address book
  * belong to no venue on it, so they do not travel (the type, account/exchange.ts AccountPage, still names them for the simulated statement);
@@ -361,10 +282,11 @@ export function faceOriginOf(req: express.Request): string | undefined {
   return loopback && u.origin === v ? v : undefined;
 }
 
-/** the page a venue's sign-in sends the browser back to: whether it finished, in the account page's paper and ink, and nothing else */
+/** the page a venue's sign-in sends the browser back to (through the face's callback): whether it finished, in paper and ink, and nothing
+ * else — no script */
 function signedInPage(error?: string): string {
   const esc = (t: string) => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Robinhood sign-in</title><style>:root{--paper:#f6f1e7;--ink:#1d1a16;--dim:#6b6358}@media (prefers-color-scheme:dark){:root{--paper:#17150f;--ink:#ece4d4;--dim:#a39a8a}}body{margin:0;padding:56px 16px;background:var(--paper);color:var(--ink);font:17px/1.55 Georgia,"Times New Roman",serif}main{max-width:520px;margin:0 auto}h1{font-weight:400;font-size:28px;margin:0 0 12px}p{color:var(--dim);margin:0}</style></head><body><main><h1>${error ? "The sign-in did not finish" : "Signed in at Robinhood"}</h1><p>${error ? esc(error) : "Go back to Gravit: it carries on from here. This tab can be closed."}</p></main>${error ? "" : "<script>setTimeout(() => window.close(), 1500)</script>"}</body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Robinhood sign-in</title><style>:root{--paper:#f6f1e7;--ink:#1d1a16;--dim:#6b6358}@media (prefers-color-scheme:dark){:root{--paper:#17150f;--ink:#ece4d4;--dim:#a39a8a}}body{margin:0;padding:56px 16px;background:var(--paper);color:var(--ink);font:17px/1.55 Georgia,"Times New Roman",serif}main{max-width:520px;margin:0 auto}h1{font-weight:400;font-size:28px;margin:0 0 12px}p{color:var(--dim);margin:0}</style></head><body><main><h1>${error ? "The sign-in did not finish" : "Signed in at Robinhood"}</h1><p>${error ? esc(error) : "Go back to Gravit: it carries on from here. This tab can be closed."}</p></main></body></html>`;
 }
 
 /** the refusals that say the signer is not one the account takes: answered 401, every other refusal 409 */
@@ -426,46 +348,10 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
   /** this server's own origin, once it listens: what an agent's seat is pointed at */
   let origin = "";
   const app = express();
-  // the account's answers are never stored by the browser (balances, keys, cards); the page's own files are kept and revalidated by their
-  // ETag, which express puts on every answer it sends whole
-  app.use((req, res, next) => {
-    res.setHeader("cache-control", req.path.startsWith("/api/") ? "no-store" : "no-cache");
+  // the account's answers are never stored by the browser (balances, keys, cards), nor is anything else it says
+  app.use((_req, res, next) => {
+    res.setHeader("cache-control", "no-store");
     next();
-  });
-  // a page file; one asked for by the hash of what it is now (?v=, as the page names it) is kept a year, anything else revalidated
-  const file = (name: string, type: string) => (req: express.Request, res: express.Response) => {
-    const f = pageFile(name);
-    if (f === undefined) return void res.sendStatus(404);
-    sendPage(req, res, f, type, req.query.v === f.hash ? KEEP_A_YEAR : "no-cache");
-  };
-  // one page: the account when the layer is mounted (its scripts and styles named by their content's hash), the original simulated
-  // statement when it is not (--classic)
-  app.get("/", (req, res) => {
-    if (!svc.account) return file("index.html", "html")(req, res);
-    const f = pageVersioned("account.html");
-    if (f === undefined) return void res.sendStatus(404);
-    sendPage(req, res, f, "html", "no-cache");
-  });
-  app.get("/portfolio.js", file("portfolio.js", "application/javascript"));
-  app.get("/portfolio.css", file("portfolio.css", "text/css"));
-  app.get("/account", (_req, res) => res.redirect(302, "/"));
-  app.get("/account.css", file("account.css", "text/css"));
-  app.get("/owner.js", file("owner.js", "application/javascript"));
-  // the account page's own scripts and styles: a plain name in ui/ and .js or .css, nothing else. The pattern is matched on the path as it
-  // arrived, before any decoding, so a folder, a second dot or anything percent-encoded is not a name here: it is a 404
-  app.get(/^\/ui\/([a-z0-9-]+)\.(js|css)$/, (req, res) => {
-    const [name, ext] = [req.params[0], req.params[1]];
-    const f = pageFile(join("ui", `${name}.${ext}`));
-    if (f === undefined) return void res.sendStatus(404);
-    sendPage(req, res, f, ext === "js" ? "application/javascript" : "text/css", req.query.v === f.hash ? KEEP_A_YEAR : "no-cache");
-  });
-  // the page's three faces (SIL Open Font License, public/fonts/OFL.txt): Manrope for the Account, IBM Plex Mono for hashes and signed
-  // payloads, Inter for the trading area (Hyperliquid's own face). A plain name and .woff2, nothing else; named by their version, so kept a
-  // year
-  app.get(/^\/fonts\/([a-z0-9-]+)\.woff2$/, (req, res) => {
-    const f = pageFile(join("fonts", `${req.params[0]}.woff2`));
-    if (f === undefined) return void res.sendStatus(404);
-    sendPage(req, res, f, "font/woff2", KEEP_A_YEAR, false);
   });
   // the owner talks to the page's scripted agent through a signed instruction (setPolicy · say); this is where it lands
   svc.sayHandler = async (text) => (await agent.say(text.trim().slice(0, 200))).no;
@@ -492,25 +378,24 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
     return out;
   };
 
-  // Only this machine's own pages and programs talk to the account: a request that names another site as its origin, or reaches it under a
-  // host name that is not this server's (a DNS-rebinding page), is turned away before any route sees it. The page, the MCP seat and the
-  // terminal scripts send no foreign origin and use 127.0.0.1 or localhost
+  // Only this machine's own programs talk to the account: a request that names another site as its origin, or reaches it under a host name
+  // that is not this server's (a DNS-rebinding page), is turned away before any route sees it. The face, the MCP seat and the terminal
+  // scripts send no foreign origin and use 127.0.0.1 or localhost
   app.use((req, res, next) => {
     const host = String(req.headers.host ?? "");
     // a Host named in PORTFOLIO_HOSTS (a compose peer's `account:4820`) is local too, matched exactly; its origin is checked as any other
     const local = LOCAL_HOST.test(host) || hosts.includes(host);
     const origin = req.headers.origin;
-    // a browser says where a request comes from (Fetch Metadata): another site's request is refused, except a top-level navigation — a link to
-    // the page, or a venue's sign-in page sending the owner back (Robinhood's OAuth callback) — and only to those: no other site navigates a
-    // tab to a route of the account's own (its push channel among them, which would hold a stream open and follow markets for that site)
+    // a browser says where a request comes from (Fetch Metadata): another site's request is refused, a navigation among them — the Account
+    // serves no page, and a venue's sign-in comes back through the face's own callback, which asks here as a program does
     const site = req.headers["sec-fetch-site"];
-    const navigable = !req.path.startsWith("/api/") || req.path === "/api/account/signin/callback";
-    const topLevel = req.headers["sec-fetch-mode"] === "navigate" && req.headers["sec-fetch-dest"] === "document" && req.method === "GET" && navigable;
     const foreignOrigin = typeof origin === "string" && origin !== `${req.protocol}://${host}`;
-    const foreignSite = (site === "cross-site" || site === "same-site") && !topLevel;
+    const foreignSite = site === "cross-site" || site === "same-site";
     if (!local || foreignOrigin || foreignSite) return void res.status(403).json({ ok: false, error: "this server answers only its own pages on this machine" });
     next();
   });
+  // no page: everything outside /api/ that passed the fence is one sentence naming the face, with the account layer or without it
+  app.use((req, res, next) => (req.path.startsWith("/api/") ? next() : void res.status(404).json({ ok: false, error: NO_PAGE })));
   // JSON bodies are read only once the request is known to be this machine's own (above): a foreign page's body is never parsed. The one
   // route that takes a secret, a brain's key, reads its own body (account/brain-keys.ts): the parser skips it in every spelling express
   // routes to it (case, a trailing slash), so that a body it could not read never becomes an error that carries the key's own characters.
@@ -674,13 +559,13 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
   // instruction, which names the sign-in by its state.
   app.post("/api/account/signin/start", wrap(async (req, res) => {
     if (!svc.account) return void res.status(404).json({ ok: false, error: "the account layer is not mounted" });
+    // a sign-in starts from Gravit's face, whose callback forwards the venue's navigation here: without the face's origin, nothing is asked
+    const face = faceOriginOf(req);
+    if (!face) return void res.status(400).json({ ok: false, refusal: no("E_ACCOUNT_BAD_ACTION", { message: "a venue's sign-in starts from Gravit's face, under Account › Venues: open it there" }) });
     const kind = String((req.body as { connector?: unknown }).connector ?? "");
     const signIn = svc.signIn(kind);
     if (!signIn) return void bad(res, `there is no sign-in for "${kind.slice(0, 40)}"`);
-    const host = req.get("host") ?? "127.0.0.1";
-    // the face's own callback when Gravit's face asked (it forwards the venue's navigation here); else this server's
-    const face = faceOriginOf(req);
-    const r = await signIn.start(face ? `${face}/data/account/signin/callback` : `${req.protocol}://${host}/api/account/signin/callback`);
+    const r = await signIn.start(`${face}/data/account/signin/callback`);
     res.status(isRefusal(r) ? 502 : 200).json(isRefusal(r) ? { ok: false, refusal: r } : { ok: true, url: r.url, state: r.state });
   }));
   app.get("/api/account/signin/status", (req, res) => {
@@ -886,7 +771,7 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
     if (!svc.desk) return void res.status(404).json({ ok: false, error: "this account keeps no desk" });
     res.json({ ok: true, ...svc.desk.catalog() });
   }));
-  // the floor's read (the Superagent, ui/superagent.js): polled every second, so it reads the room's tail and nothing it need not. `since` is
+  // the floor's read (the Superagent's): polled every second, so it reads the room's tail and nothing it need not. `since` is
   // the room's last seq the page holds: a whole number 0 or more, in digits (none: 0), nothing a number parser would also take
   app.get("/api/account/desk/feed", wrap(async (req, res) => {
     if (!mounted(res)) return;
@@ -1216,9 +1101,9 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   };
   const port = Number(at("--port") ?? 4820);
   const classic = args.includes("--classic");
-  // the `mm` reads stand in for the simulated statement's MetaMask: a real account connects MetaMask from the page instead
+  // the `mm` reads stand in for the simulated statement's MetaMask: a real account connects MetaMask from Gravit's face instead
   const live = (args.includes("--mm") || process.env.PORTFOLIO_MM === "1") && classic;
-  if (!classic && args.includes("--mm")) console.log("--mm is for --classic: on your account, connect MetaMask from the page (it uses the same mm)");
+  if (!classic && args.includes("--mm")) console.log("--mm is for --classic: on your account, connect MetaMask from Gravit's face (Account › Venues)");
   // REAL orders and movements at venues connected live: on for the account (an airport where nothing takes off is no airport), off with
   // --read-only. With them on, the first owner pairs with a code printed here, in the terminal; every order is the owner's signature or
   // inside a limit the owner signed, and none is worth more than --live-cap
@@ -1242,15 +1127,15 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const srv = await startPortfolioServer({ port, service, bind: process.env.PORTFOLIO_BIND || undefined, hosts: parseHosts(process.env.PORTFOLIO_HOSTS), cn, akshare }).catch((e: NodeJS.ErrnoException) => {
     if (e.code !== "EADDRINUSE") throw e;
     // the usual reason: this server is already running in another terminal
-    console.error(`port ${port} is already in use: a portfolio server is probably running already. Open http://127.0.0.1:${port}/account, or start a second one: npm run portfolio -- --port ${port + 1} --home <another directory>`);
+    console.error(`port ${port} is already in use: an Account is probably running already. Start a second one with npm run account -- --port ${port + 1} --home <another directory>`);
     process.exit(1);
   });
   const r = service.restored;
   if (r) console.log(`restored from ${r.runs} earlier run${r.runs === 1 ? "" : "s"} (since ${r.from}): ${r.owner ? "your browser is still the owner" : "no owner yet"} · ${r.agents} agent${r.agents === 1 ? "" : "s"} · ${r.limits} limit${r.limits === 1 ? "" : "s"} · ${r.venues.length} venue${r.venues.length === 1 ? "" : "s"} connecting again · ${r.orders + r.payments} in flight followed again · ${r.mode}${r.skipped.length ? `\n  not brought back: ${r.skipped.join("; ")}` : ""}\n  (--fresh starts the account from nothing)`);
   const owned = (service.account?.state.owners.length ?? 0) > 0;
-  if (liveWrites) console.log(`TRADING IS ON · real orders and movements at the accounts you connect · at most $${liveWrites.capUsd} an order or a movement (--live-cap; --read-only turns it off) · every one is signed by you, or inside a limit you signed for an agent · money leaves a venue only for a place shown to be yours${owned ? "" : `\n  pairing code: ${liveWrites.pairingCode} — the first browser becomes the owner only with this code, typed on the page`}`);
-  else if (!classic) console.log(`read-only: nothing is traded or moved from this server (started with --read-only)${owned ? "" : `\n  pairing code: ${code} — the first browser becomes the owner only with this code, typed on the page`}`);
-  console.log(classic ? `simulated statement at ${srv.url} · ${service.accounts().length} accounts · MetaMask ${live ? "LIVE via mm" : "simulated (--mm for live)"} · no account layer · ledger ${service.ledgerPath()} · Ctrl-C to stop` : `your account at ${srv.url} · real accounts only: connect them on the page · ledger ${service.ledgerPath()} · Ctrl-C to stop`);
+  if (liveWrites) console.log(`TRADING IS ON · real orders and movements at the accounts you connect · at most $${liveWrites.capUsd} an order or a movement (--live-cap; --read-only turns it off) · every one is signed by you, or inside a limit you signed for an agent · money leaves a venue only for a place shown to be yours${owned ? "" : `\n  pairing code: ${liveWrites.pairingCode} — the first browser becomes the owner only with this code, typed on Gravit's face (Account)`}`);
+  else if (!classic) console.log(`read-only: nothing is traded or moved from this server (started with --read-only)${owned ? "" : `\n  pairing code: ${code} — the first browser becomes the owner only with this code, typed on Gravit's face (Account)`}`);
+  console.log(classic ? `simulated statement at ${srv.url} · ${service.accounts().length} accounts · MetaMask ${live ? "LIVE via mm" : "simulated (--mm for live)"} · no account layer · ledger ${service.ledgerPath()} · Ctrl-C to stop` : `your account at ${srv.url} · real accounts only: connect them on Gravit's face · ledger ${service.ledgerPath()} · Ctrl-C to stop`);
   console.log(`Lunhui's reach: /api/cn/relay (Tencent, Eastmoney) · ${cn.ifind.configured() ? "iFinD configured" : "iFinD not configured (IFIND_REFRESH_TOKEN or IFIND_ACCESS_TOKEN in this process's environment)"}`);
   console.log(`AKShare: ${akshareCommand()} · started on first use (/api/akshare/tools, /api/akshare/call)`);
   // where the owner can connect, kept fresh without anyone asking: the venues' own answers to this network, and their terms matched to where

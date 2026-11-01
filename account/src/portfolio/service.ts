@@ -2483,7 +2483,7 @@ export class PortfolioService {
   private newPairingCode(): void {
     if (this.pairCode === undefined) return;
     this.pairCode = pairingCode();
-    console.log(`signed out: no browser signs for the account now\n  pairing code: ${this.pairCode} — the next browser becomes the owner only with this code, typed on the page (the code before it no longer works)`);
+    console.log(`signed out: no browser signs for the account now\n  pairing code: ${this.pairCode} — the next browser becomes the owner only with this code, typed on Gravit's face (Account) (the code before it no longer works)`);
   }
 
   /** A PAPER ACCOUNT the account keeps itself, as its owner runs it — what a signed resetPaper or topUpPaper does, once the door has checked

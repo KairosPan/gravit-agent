@@ -1,20 +1,15 @@
 /** SIGNING OUT (account/sign.ts signOut): a browser's last signature. The door takes it only from the device it names and only at once; the
  * device leaves the account's signers; the last one gone leaves no owner's browser, and a new pairing code replaces the one the server
- * started with; a restart replays it. Then the browser's own key code (public/owner.js) against a real account over HTTP — its WebCrypto
- * key, an in-memory stand-in for its IndexedDB and localStorage: it pairs with the printed code, signs itself out through the page's own
- * routes, deletes its key, stays signed out across a reload, and signs in again only when asked, with the new code. Nothing leaves the
- * process. */
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+ * started with, said where the first one was and typed on Gravit's face; a restart replays it. The browser that signs is the face's
+ * (face/client/js/host/owner.js, tested in face/tests/). Nothing leaves the process. */
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { createContext, runInContext, Script } from "node:vm";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { isRefusal, type Refusal } from "../../src/core/errors.ts";
 import type { Outcome } from "../../src/portfolio/account/exchange.ts";
 import { SIGN_OUT_TTL_MS, signDevice, signOwner, simKey, type OwnerAction, type SimKey } from "../../src/portfolio/account/sign.ts";
 import type { LiveDeps } from "../../src/portfolio/live/index.ts";
-import { startPortfolioServer } from "../../src/portfolio/server.ts";
 import { PortfolioService } from "../../src/portfolio/service.ts";
 
 type NoNonce<T> = T extends unknown ? Omit<T, "nonce"> : never;
@@ -109,6 +104,8 @@ describe("signing out: a browser's last signature, taken at the door", () => {
     expect(next).toMatch(/^[2-9A-HJKMNP-Z]{4}-[2-9A-HJKMNP-Z]{4}$/);
     expect(next).not.toBe(CODE);
     expect(out.lines.join("\n")).toContain("signed out: no browser signs for the account now");
+    // typed on Gravit's face, the owner's screens now that the Account serves no page
+    expect(out.lines.join("\n")).toContain(`pairing code: ${next} — the next browser becomes the owner only with this code, typed on Gravit's face (Account) (the code before it no longer works)`);
     // a browser now asks for the code — the one signed out too, were its key still here
     expect(x.engine.pairDevice(a.jwk)).toMatchObject({ role: "needs-code" });
     expect(x.engine.pairDevice(c.jwk)).toMatchObject({ role: "needs-code" });
@@ -140,105 +137,5 @@ describe("signing out: a browser's last signature, taken at the door", () => {
     expect(owners(three)).toEqual([`device:${c.kid}`]);
     expect(code(await three.by(a, watch))).toBe("E_ACCOUNT_BAD_SIGNATURE");
     expect(code(await three.by(c, watch))).toBe("account");
-  });
-});
-
-// ---- the browser's own key code against a real account ----------------------------------------------------------------------------------
-
-const OWNER_JS = readFileSync(fileURLToPath(new URL("../../src/portfolio/public/owner.js", import.meta.url)), "utf8");
-
-/** IndexedDB as owner.js uses it — one store, get, put and delete, each request answered in a later turn — over a Map that outlives a page */
-function idbOver(keys: Map<string, unknown>) {
-  const request = <T>(fn: () => T) => {
-    const r: { result?: T; error?: unknown; onsuccess?: () => void; onerror?: () => void } = {};
-    queueMicrotask(() => {
-      try {
-        r.result = fn();
-        r.onsuccess?.();
-      } catch (e) {
-        r.error = e;
-        r.onerror?.();
-      }
-    });
-    return r;
-  };
-  const store = { get: (k: string) => request(() => keys.get(k)), put: (v: unknown, k: string) => request(() => (keys.set(k, v), k)), delete: (k: string) => request(() => void keys.delete(k)) };
-  return { open: () => request(() => ({ transaction: () => ({ objectStore: () => store }) })) };
-}
-
-/** owner.js as a page of this browser loads it: its key in `keys`, its localStorage in `kept`, its requests to the account at `base`, each
- * counted by path */
-function browserPage(base: string, keys: Map<string, unknown>, kept: Map<string, string>) {
-  const asked: string[] = [];
-  const sandbox: Record<string, unknown> = {
-    indexedDB: idbOver(keys),
-    localStorage: { getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => void kept.set(k, String(v)), removeItem: (k: string) => void kept.delete(k) },
-    crypto: globalThis.crypto,
-    fetch: (path: string, init?: RequestInit) => {
-      asked.push(path);
-      return fetch(`${base}${path}`, init);
-    },
-    btoa,
-    TextEncoder,
-    location: { reload() {} },
-    addEventListener() {},
-  };
-  const ctx = createContext(sandbox);
-  new Script(`${OWNER_JS}\nglobalThis.Owner = Owner;`, { filename: "owner.js" }).runInContext(ctx);
-  return { Owner: runInContext("Owner", ctx) as { ready(code?: string): Promise<{ role: string; refusal?: string }>; signOut(): Promise<{ status: number; body: Record<string, unknown> }>; signIn(): Promise<{ role: string }>; role: string; kid: string }, asked };
-}
-
-describe("signing out from the browser: owner.js against a real account over HTTP", () => {
-  it("pairs with the printed code, signs itself out through prepare and the door, deletes its key and stays signed out across a reload — asking nothing, making no key — until it signs in again: a new key, then the new code", async () => {
-    const x = await run(fresh());
-    const srv = await startPortfolioServer({ port: 0, service: x.svc, snapshotMs: 0 });
-    try {
-      const keys = new Map<string, unknown>();
-      const kept = new Map<string, string>();
-      const page = browserPage(srv.url, keys, kept);
-      expect(await page.Owner.ready()).toEqual({ role: "needs-code" });
-      expect(await page.Owner.ready(CODE)).toEqual({ role: "owner" });
-      const kid = page.Owner.kid;
-      expect(keys.has("device")).toBe(true);
-      expect(owners(x)).toEqual([`device:${kid}`]);
-      // signing out: the page's own routes — prepare, then the door — with the browser's WebCrypto signature over what was shown
-      const out = said();
-      const r = await page.Owner.signOut();
-      expect(r).toMatchObject({ status: 200, body: { ok: true, kind: "account" } });
-      expect(page.asked.slice(-2)).toEqual(["/api/account/prepare", "/api/exchange"]);
-      expect([page.Owner.role, page.Owner.kid, keys.has("device"), kept.get("buyer-agent-signed-out")]).toEqual(["signed-out", "", false, "1"]);
-      const account = (await (await fetch(`${srv.url}/api/account`)).json()) as { signers: { owners: unknown[] } };
-      expect(account.signers.owners).toEqual([]);
-      // signing out again, signed out: nothing to sign, nothing asked
-      expect(await page.Owner.signOut()).toEqual({ status: 0, body: { ok: false, error: "This browser does not sign for the account." } });
-      // a reload: signed out still — no key made, nothing offered to the account
-      const reloaded = browserPage(srv.url, keys, kept);
-      expect(await reloaded.Owner.ready()).toEqual({ role: "signed-out" });
-      expect([reloaded.asked, keys.size]).toEqual([[], 0]);
-      // signing in again: a new key, and the account asks for a code — the old one is refused, the new one said in the server's output lets it in
-      expect(await reloaded.Owner.signIn()).toEqual({ role: "needs-code" });
-      expect(keys.has("device")).toBe(true);
-      expect(kept.has("buyer-agent-signed-out")).toBe(false);
-      expect((await reloaded.Owner.ready(CODE)).refusal).toBe("that is not the pairing code this server printed in its terminal (4 tries left)");
-      expect(await reloaded.Owner.ready(out.code())).toEqual({ role: "owner" });
-      expect(reloaded.Owner.kid).not.toBe(kid);
-      expect(owners(x)).toEqual([`device:${reloaded.Owner.kid}`]);
-    } finally {
-      await srv.close();
-    }
-  });
-
-  it("a sign-out the account did not take leaves the browser signing, its key kept: the service not answering", async () => {
-    const x = await run(fresh());
-    const srv = await startPortfolioServer({ port: 0, service: x.svc, snapshotMs: 0 });
-    const keys = new Map<string, unknown>();
-    const kept = new Map<string, string>();
-    const page = browserPage(srv.url, keys, kept);
-    expect(await page.Owner.ready(CODE)).toEqual({ role: "owner" });
-    await srv.close();
-    const r = await page.Owner.signOut();
-    expect(r).toEqual({ status: 0, body: { ok: false, error: "The account did not answer. Try again." } });
-    expect([page.Owner.role, keys.has("device"), kept.has("buyer-agent-signed-out")]).toEqual(["owner", true, false]);
-    expect(owners(x)).toHaveLength(1);
   });
 });

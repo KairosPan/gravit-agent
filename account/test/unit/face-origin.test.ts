@@ -68,24 +68,24 @@ describe("the face's origin", () => {
     expect(of([FACE, FACE]), "given twice").toBeUndefined();
   });
 
-  it("signin/start registers and sends the face's callback when the face names its origin; else its own", async () => {
+  it("signin/start sends the face's callback when the face names its origin, and refuses without it", async () => {
     const { http, srv } = await boot();
     try {
-      const redirectOf = async (headers: Record<string, string | string[]>) => {
+      const registered = () => http.asked.filter((a) => a.url.endsWith("/register")).map((a) => (JSON.parse(a.body!) as { redirect_uris: string[] }).redirect_uris);
+      // without the face's origin — none, a shape that is not one, given twice, a port or an octet out of range — no sign-in starts: the
+      // venue is asked nothing, and the refusal says where the sign-in starts
+      for (const headers of [{}, { [H]: "http://evil.example:3090" }, { [H]: "https://127.0.0.1:3090" }, { [H]: "http://127.0.0.1:3090/x" }, { [H]: [FACE, FACE] }, { [H]: "http://127.0.0.1:99999" }, { [H]: "http://127.999.0.1:3090" }] as Array<Record<string, string | string[]>>) {
         const r = await post(srv.url, "/api/account/signin/start", { connector: "robinhood" }, headers);
-        expect(r.status, JSON.stringify(r.body)).toBe(200);
-        return new URL(String(r.body.url)).searchParams.get("redirect_uri");
-      };
-      expect(await redirectOf({ [H]: FACE })).toBe(`${FACE}/data/account/signin/callback`);
-      const registered = http.asked.filter((a) => a.url.endsWith("/register")).map((a) => (JSON.parse(a.body!) as { redirect_uris: string[] }).redirect_uris);
-      expect(registered).toEqual([[`${FACE}/data/account/signin/callback`]]);
-      const own = `${srv.url}/api/account/signin/callback`;
-      expect(own).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/api\/account\/signin\/callback$/);
-      expect(await redirectOf({})).toBe(own);
-      for (const bad of ["http://evil.example:3090", "https://127.0.0.1:3090", "http://127.0.0.1:3090/x"]) expect(await redirectOf({ [H]: bad }), bad).toBe(own);
-      expect(await redirectOf({ [H]: [FACE, FACE] }), "given twice").toBe(own);
-      // a shape the pattern lets through but no URL is (a port past 65535, an octet past 255): its own Host, never a 500
-      for (const bad of ["http://127.0.0.1:99999", "http://127.999.0.1:3090"]) expect(await redirectOf({ [H]: bad }), bad).toBe(own);
+        expect(r.status, JSON.stringify(headers)).toBe(400);
+        expect(r.body).toMatchObject({ ok: false, refusal: { code: "E_ACCOUNT_BAD_ACTION" } });
+        expect(String((r.body.refusal as { message: string }).message)).toContain("Account › Venues");
+      }
+      expect(registered()).toEqual([]);
+      expect(http.asked).toEqual([]);
+      const r = await post(srv.url, "/api/account/signin/start", { connector: "robinhood" }, { [H]: FACE });
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      expect(new URL(String(r.body.url)).searchParams.get("redirect_uri")).toBe(`${FACE}/data/account/signin/callback`);
+      expect(registered()).toEqual([[`${FACE}/data/account/signin/callback`]]);
     } finally { await srv.close(); }
   });
 
@@ -109,6 +109,18 @@ describe("the face's origin", () => {
         expect(r.status, bad).toBe(200);
         expect(String(r.body.message).split("\n")[0], bad).toBe(`${host} wants you to sign in with your Ethereum account:`);
       }
+    } finally { await srv.close(); }
+  });
+
+  it("the success page carries no script", async () => {
+    const { srv } = await boot();
+    try {
+      const started = await post(srv.url, "/api/account/signin/start", { connector: "robinhood" }, { [H]: FACE });
+      const done = await fetch(`${srv.url}/api/account/signin/callback?state=${String(started.body.state)}&code=code-made-up&iss=${encodeURIComponent(ISSUER)}`);
+      expect(done.status).toBe(200);
+      const page = await done.text();
+      expect(page).toContain("Signed in at Robinhood");
+      expect(page).not.toMatch(/<script/i);
     } finally { await srv.close(); }
   });
 

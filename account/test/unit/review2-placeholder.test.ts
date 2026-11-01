@@ -12,7 +12,7 @@
  *   F7  the Alpaca connector never asks Alpaca about its crypto wallets (GET /v2/wallets) before declaring it moves nothing — closed: asked
  *       once at connect, its answer is the answer (a writer that receives, or Alpaca's own words)
  *   F8  the MCP seat's move schema is narrower than the door: no USDG, no Robinhood Chain for a bridge
- *   F9  the page keeps its own dollar lists, out of step with the account's STABLES
+ *   F9  the page kept its own dollar lists, out of step with the account's STABLES — gone with the Account's page
  */
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -245,7 +245,7 @@ describe("F7 · Alpaca (alpaca.ts:86 'Alpaca's API moves no cash'): the Trading 
   });
 });
 
-// ---- F8 · F9: the seat's schema and the page's own tables ----------------------------------------------------------------------------------
+// ---- F8: the seat's schema -------------------------------------------------------------------------------------------------------------------
 describe("F8 · mcp.ts: the seat's live-move schema is as wide as the door (live-moves.ts planBridge takes bridge.chains incl. Robinhood Chain in USDG)", () => {
   // the service round closed this by IMPORTING the door's own lists rather than retyping them (the review asked for exactly that), so the
   // check reads the enums' sources, not a literal list: toNetwork is z.enum over live/bridge.ts BRIDGE_CHAINS (Robinhood Chain in USDG among
@@ -262,26 +262,5 @@ describe("F8 · mcp.ts: the seat's live-move schema is as wide as the door (live
     expect(src).toMatch(/asset: z\.enum\(DOLLARS\)/);
     expect(src).toMatch(/toAsset: z\.enum\(DOLLARS\)/);
     expect([...STABLES]).toEqual(expect.arrayContaining(["USDG", "USDT0"]));
-  });
-});
-
-describe("F9 · the page keeps ONE dollar list, core.js DOLLARS_KNOWN, equal to the account's STABLES (live/types.ts), and reads A.dollars first", () => {
-  const src = readFileSync(join(ROOT, "src/portfolio/public/ui/core.js"), "utf8");
-  const list = (name: string): string[] => {
-    const m = new RegExp(`const ${name} = \\[([^\\]]*)\\]`).exec(src);
-    return (m?.[1] ?? "").split(",").map((s) => s.trim().replace(/^"|"$/g, "")).filter(Boolean);
-  };
-  it("core.js DOLLARS_KNOWN names exactly the account's stablecoins", () => {
-    const ui = new Set(list("DOLLARS_KNOWN").map((s) => s.toUpperCase()));
-    const onlyUi = [...ui].filter((s) => !STABLES.has(s));
-    const onlyAccount = [...STABLES].filter((s) => !ui.has(s));
-    expect({ onlyUi, onlyAccount }).toEqual({ onlyUi: [], onlyAccount: [] });
-  });
-  it("the page reads the account's own list (A.dollars) before its fallback, and no other script keeps a dollar table", () => {
-    expect(src).toMatch(/A\.dollars/);
-    for (const file of ["trade.js", "portfolio.js", "money.js"]) {
-      const other = readFileSync(join(ROOT, "src/portfolio/public/ui", file), "utf8");
-      expect(other).not.toMatch(/TK_DOLLARS|PF_DOLLAR_ASSETS|new Set\(\["USD"/);
-    }
   });
 });
