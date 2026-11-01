@@ -349,36 +349,23 @@ test('the theme comes from the prefs before the host answers, and a change is wr
   store.timers.clear();
 });
 
-// Markets through host: fake live quotes and search, the browser's storage a memory
-function fakeMarkets() {
-  const live = { assets: [], visible: [], onUpdate: null };
-  const search = { queries: [], onUpdate: null, cancelled: 0 };
-  return {
-    live, search,
-    createLiveQuotes: onUpdate => { live.onUpdate = onUpdate; return { setAssets(a) { live.assets.push(a.map(x => x.id)); }, setVisible(v) { live.visible.push(v); }, refresh() {}, close() {} }; },
-    createSymbolSearch: onUpdate => {
-      search.onUpdate = onUpdate;
-      return {
-        search(q, market) { search.queries.push([q, market]); onUpdate({ query: q.trim(), market, status: q.trim() ? 'loading' : 'idle', assets: [], partial: false, truncated: false, note: '' }); },
-        cancel() { search.cancelled++; onUpdate({ query: '', market: 'cn', status: 'idle', assets: [], partial: false, truncated: false, note: '' }); },
-      };
-    },
-  };
-}
+// Markets through host: every market read is the Account's, through the host's getJson — there is no wire of the face's to fake
+// (a test's own fakes, `more`, beside); the browser's storage a memory
+const fakeMarkets = () => ({});
 const memoryStorage = () => { const m = new Map(); return { getItem: k => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k), m }; };
-const bootMarkets = (f, h, mk, more = {}) => boot(f.win, { openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, createLiveQuotes: mk.createLiveQuotes, createSymbolSearch: mk.createSymbolSearch, ...more });
-const MOUTAI = { id: 'cn:600519', market: 'cn', symbol: '600519', name: 'Kweichow Moutai', exchange: 'SH', currency: 'CNY' };
+const bootMarkets = (f, h, _mk, more = {}) => boot(f.win, { openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, ...more });
 
-// the face's own wire searches and stars the A shares alone: a us: or crypto: market is the Account's
+// the Account's search finds the A shares too: a hit is a cn row, starred on the face's cn list
 test("typing in the search box searches; a star watches and writes the face's key; a row opens its page", async () => {
   const storage = memoryStorage();
   const f = fakeWindow({ hash: '#/markets', storage });
   const mq = f.withId('mq', { tagName: 'INPUT', type: 'search', dataset: { action: 'mkQuery' } });
   const h = host();
-  const mk = fakeMarkets();
+  const reads = [];
+  const getJson = async path => { reads.push(path); return path.startsWith('/data/account/explore?q=600&') ? fx('explore-search-china') : h.getJson(path); };
   // the search waits for a quiet moment in the box: that wait is held here, and run
   const timers = new HeldTimers(ms => ms === 300);
-  const store = bootMarkets(f, h, mk, { timers });
+  const store = bootMarkets(f, { ...h, getJson }, null, { timers });
   await h.ready();
   assert.match(f.html(), /<main class="main mkts">/);
   // what the fake host answers to the Account's explore is not an explore answer: nothing to list, and the screen says so
@@ -387,20 +374,20 @@ test("typing in the search box searches; a star watches and writes the face's ke
   f.fire('root', 'input', { target: mq });
   assert.equal(store.get().markets.q, '600');
   assert.match(f.html(), /Searching…/);
-  assert.deepEqual(mk.search.queries, []);
+  assert.equal(reads.some(p => p.startsWith('/data/account/explore?q=')), false, 'nothing searched before the wait');
   timers.run(300);
-  assert.deepEqual(mk.search.queries.at(-1), ['600', 'cn']);
-  mk.search.onUpdate({ query: '600', market: 'cn', status: 'success', assets: [MOUTAI], partial: false, truncated: false, note: '' });
   await settle();
+  assert.deepEqual(reads.filter(p => p.startsWith('/data/account/explore?q=')), ['/data/account/explore?q=600&limit=200'], "one read, the Account's");
   assert.match(f.html(), /<tr data-id="cn:600519">/);
   f.click({ tagName: 'BUTTON', dataset: { action: 'toggleWatch', id: 'cn:600519' } });
-  assert.deepEqual(JSON.parse(storage.getItem('gravit.market.watchlist.v1')).items.map(a => [a.id, a.name]), [['cn:600519', 'Kweichow Moutai']]);
-  assert.match(f.html(), /data-id="cn:600519" aria-pressed="true" aria-label="Stop watching Kweichow Moutai"/);
+  assert.deepEqual(JSON.parse(storage.getItem('gravit.market.watchlist.v1')).items.map(a => [a.id, a.name]), [['cn:600519', '贵州茅台']]);
+  assert.match(f.html(), /data-id="cn:600519" aria-pressed="true" aria-label="Stop watching 贵州茅台"/);
   f.click({ tagName: 'BUTTON', dataset: { action: 'toggleWatch', id: 'cn:600519' } });
   assert.deepEqual(JSON.parse(storage.getItem('gravit.market.watchlist.v1')).items, [], 'a second press stops watching');
   f.click({ tagName: 'BUTTON', dataset: { action: 'mkClear' } });
   assert.equal(store.get().markets.q, '');
-  assert.equal(mk.search.cancelled, 1, 'Clear cancels the search');
+  assert.equal(store.get().markets.results.data, null, 'Clear lets the search go');
+  assert.ok(reads.every(p => !/^\/data\/(quotes|symbols|cn)\b/.test(p)), "nothing reads the face's own wire");
   f.click({ tagName: 'BUTTON', dataset: { action: 'openMarket', id: 'cn:600519' } });
   await settle();
   assert.equal(f.win.location.hash, '#/markets/cn:600519');
@@ -427,23 +414,24 @@ test('Clear empties the search box as well as the query', async () => {
 test('leaving Markets pauses the quotes and coming back resumes them; a hidden tab pauses them too', async () => {
   const f = fakeWindow({ hash: '#/markets', storage: memoryStorage() });
   const h = host({ rows: [row('s1')] });
-  const mk = fakeMarkets();
-  const store = bootMarkets(f, h, mk);
+  const timers = new HeldTimers(ms => ms === 5_000 || ms === 20_000);
+  const store = bootMarkets(f, h, null, { timers });
   await h.ready();
-  assert.equal(mk.live.visible.at(-1), true);
+  const polling = () => timers.delays().includes(5_000);
+  assert.equal(polling(), true, 'the quotes poll, the A shares\' with it');
   assert.equal(store.get().route.screen, 'markets', 'the list landing does not pull the page to Messages');
   f.win.location.hash = '#/messages/s1';
   await settle();
-  assert.equal(mk.live.visible.at(-1), false);
+  assert.equal(polling(), false);
   f.win.location.hash = '#/markets';
   await settle();
-  assert.equal(mk.live.visible.at(-1), true);
+  assert.equal(polling(), true);
   f.doc.hidden = true;
   f.fire('doc', 'visibilitychange');
-  assert.equal(mk.live.visible.at(-1), false);
+  assert.equal(polling(), false);
   f.doc.hidden = false;
   f.fire('doc', 'visibilitychange');
-  assert.equal(mk.live.visible.at(-1), true);
+  assert.equal(polling(), true);
   store.timers.clear();
 });
 
@@ -459,19 +447,20 @@ test('#/markets/garbage opens Markets; a lower-case id is written canonical', as
   store.timers.clear();
 });
 
-// the face's daily bars are read by no screen: Markets on screen reads the Account's explore instead; an A share's page is the
-// face's own, drawn with no read at all
+// the face's daily bars are read by no screen: Markets on screen reads the Account's explore instead; an A share's page, reached
+// cold, is drawn at once and reads its history at the Account's china venue
 test('a market page reads no /data/bars, whatever its id; Markets on screen reads the Account', async () => {
   const f = fakeWindow({ hash: '#/markets/cn:600519', storage: memoryStorage() });
   const h = host();
   const reads = [];
   const getJson = async path => { reads.push(path); return h.getJson(path); };
-  const mk = fakeMarkets();
-  const store = boot(f.win, { openMux: h.openMux, call: h.call, getJson, postJson: h.postJson, markdown: h.markdown, createLiveQuotes: mk.createLiveQuotes, createSymbolSearch: mk.createSymbolSearch });
+  const store = boot(f.win, { openMux: h.openMux, call: h.call, getJson, postJson: h.postJson, markdown: h.markdown });
   await h.ready();
   assert.match(f.html(), /<main class="main mkts mk-page">/);
+  assert.match(f.html(), /A-share · 600519 · SH/, 'the A-share page, cold');
   assert.ok(reads.includes('/data/account/explore?limit=200'), "Markets on screen reads the Account's explore");
-  mk.live.onUpdate({ quotes: {}, providers: [], status: 'streaming', refreshing: false, generatedAt: null, note: '', limited: 0 });
+  assert.ok(reads.includes('/data/account/candles?venue=china&symbol=600519&range=1D'), 'its history at venue china');
+  assert.equal(reads.some(p => p.startsWith('/data/account/holdings') || p.startsWith('/data/account/statement')), false, 'nothing held or stated read for an A share');
   await settle();
   for (const hash of ['#/markets/crypto:BTC/USD', '#/markets/cn:600519', '#/markets/us:AAPL']) {
     f.win.location.hash = hash;
@@ -535,7 +524,7 @@ function accountHost(opts = {}, { answers = {} } = {}) {
   };
   return { ...h, getJson, reads, accountReads: () => reads.filter(isPage).length };
 }
-const bootAccount = (f, h, mk = fakeMarkets(), more = {}) => boot(f.win, { openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, createLiveQuotes: mk.createLiveQuotes, createSymbolSearch: mk.createSymbolSearch, ...more });
+const bootAccount = (f, h, _mk = fakeMarkets(), more = {}) => boot(f.win, { openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, ...more });
 
 // the Account's push channel as the app is handed it: its opens, closes and follows recorded, its status the test's to set; the
 // app's two callbacks kept, so a test delivers an event or a change of status as the stream would
@@ -920,12 +909,12 @@ test("an A share's page, reached by a link, reads its 1D history from the face's
   h.reads.length = 0;
   f.win.location.hash = '#/markets/cn:600519';
   await settle();
-  assert.ok(h.reads.includes('/data/cn/candles?id=cn%3A600519&range=1D'), JSON.stringify(h.reads));
+  assert.ok(h.reads.includes('/data/account/candles?venue=china&symbol=600519&range=1D'), JSON.stringify(h.reads));
   assert.equal(h.reads.some(r => r.startsWith('/data/account/holdings')), false, 'nothing held of an A share is read from the Account');
   h.reads.length = 0;
   f.click({ tagName: 'BUTTON', dataset: { action: 'setRange', id: 'cn:600519', value: '1M' } });
   await settle();
-  assert.ok(h.reads.includes('/data/cn/candles?id=cn%3A600519&range=1M'), JSON.stringify(h.reads));
+  assert.ok(h.reads.includes('/data/account/candles?venue=china&symbol=600519&range=1M'), JSON.stringify(h.reads));
   store.timers.clear();
 });
 
@@ -937,7 +926,7 @@ test("a non-canonical A-share link still reads its history at the canonical id (
   h.reads.length = 0;
   f.win.location.hash = '#/markets/cn:sh600519';
   await settle();
-  assert.ok(h.reads.includes('/data/cn/candles?id=cn%3A600519&range=1D'), JSON.stringify(h.reads));
+  assert.ok(h.reads.includes('/data/account/candles?venue=china&symbol=600519&range=1D'), JSON.stringify(h.reads));
   store.timers.clear();
 });
 
@@ -1009,16 +998,15 @@ test('the search box moves the query at once and searches after 300 ms of quiet:
   const f = fakeWindow({ hash: '#/markets', storage: memoryStorage() });
   const mq = f.withId('mq', { tagName: 'INPUT', type: 'search', dataset: { action: 'mkQuery' } });
   const h = accountHost({ rows: [row('s1')] });
-  const mk = fakeMarkets();
   const timers = new HeldTimers(ms => ms >= 5_000 || ms === 300);
-  const store = bootAccount(f, h, mk, { timers });
+  const store = bootAccount(f, h, null, { timers });
   await h.ready();
   const searched = () => h.reads.filter(p => p.startsWith('/data/account/explore?q='));
   mq.value = 'BT';
   f.fire('root', 'input', { target: mq });
   assert.equal(store.get().markets.q, 'BT', 'the query moves at once');
   assert.equal(store.get().markets.tab, 'results');
-  assert.deepEqual([searched(), mk.search.queries], [[], []], 'nothing searched yet');
+  assert.deepEqual(searched(), [], 'nothing searched yet');
   const first = timers.ids().filter(id => timers.held.get(id).ms === 300);
   mq.value = 'BTC';
   f.fire('root', 'input', { target: mq });
@@ -1027,8 +1015,7 @@ test('the search box moves the query at once and searches after 300 ms of quiet:
   assert.notDeepEqual(second, first, 'a keystroke restarts it');
   timers.run(300);
   await settle();
-  assert.deepEqual(searched(), ['/data/account/explore?q=BTC&limit=200'], "the Account's search, once, for what was typed last");
-  assert.deepEqual(mk.search.queries, [['BTC', 'cn']], 'and the A-share search');
+  assert.deepEqual(searched(), ['/data/account/explore?q=BTC&limit=200'], "the Account's search, once, for what was typed last — the A shares' with it");
   // a wait cut short by Clear: the search goes blank at once, and the wait never searches
   mq.value = 'ETH';
   f.fire('root', 'input', { target: mq });
@@ -1036,7 +1023,6 @@ test('the search box moves the query at once and searches after 300 ms of quiet:
   assert.equal(store.get().markets.q, '');
   assert.equal(mq.value, '');
   assert.equal(timers.delays().includes(300), false, 'the wait is cancelled');
-  assert.equal(mk.search.cancelled, 1, 'the A-share search cancelled');
   assert.equal(searched().length, 1, 'ETH never searched');
   // a box emptied by hand searches blank at once too
   mq.value = 'SOL';
@@ -1044,7 +1030,7 @@ test('the search box moves the query at once and searches after 300 ms of quiet:
   mq.value = '';
   f.fire('root', 'input', { target: mq });
   assert.equal(timers.delays().includes(300), false);
-  assert.equal(mk.search.cancelled, 2);
+  assert.equal(searched().length, 1);
   store.timers.clear();
 });
 
@@ -1055,11 +1041,10 @@ test('a press holds renders until it ends, so a streaming quote cannot swallow t
   storage.setItem('gravit.market.watchlist.v1', JSON.stringify({ version: 1, items: [{ id: 'crypto:BTC/USD', market: 'crypto', symbol: 'BTC/USD', name: 'Bitcoin', exchange: '', currency: 'USD' }] }));
   const f = fakeWindow({ hash: '#/markets', storage });
   const h = host();
-  const mk = fakeMarkets();
-  const store = boot(f.win, { openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, createLiveQuotes: mk.createLiveQuotes, createSymbolSearch: mk.createSymbolSearch, pointerHoldMs: 20 });
+  const store = boot(f.win, { openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, pointerHoldMs: 20 });
   await h.ready();
-  const quote = price => ({ id: 'crypto:BTC/USD', market: 'crypto', symbol: 'BTC/USD', price, prev_close: 1, change: 1, change_pct: 1, volume: 1, as_of: '2026-10-20T14:00:00Z', received_at: null, volume_as_of: null, source: 'Coinbase', feed: 'exchange', basis: '24h', quote_status: 'live', market_status: 'open', message: '' });
-  const tick = price => mk.live.onUpdate({ quotes: { 'crypto:BTC/USD': quote(price) }, providers: [], status: 'streaming', refreshing: false, generatedAt: 'x', note: '', limited: 0 });
+  // a quote landing, as the quotes poll lands one: a store change, which renders
+  const tick = price => store.dispatch('accountQuotesLoaded', { quotes: [{ venue: 'ex', symbol: 'BTC/USDT', market: { price, quoteAt: '2026-10-20T14:00:00Z' } }] });
   // the old star is a star: Watching is among the tabs until it goes
   assert.match(f.html(), /data-action="mkTab" data-value="watching"/);
   const before = f.writes;
@@ -1769,17 +1754,14 @@ test("the connect sheet opens once where it can connect is read; after the quiet
 test("#/trade shows Trade and reads its kind's picks; Markets' polls stop; leaving Trade stops its own", async () => {
   const f = fakeWindow({ hash: '#/markets', storage: memoryStorage() });
   const timers = new HeldTimers();
-  const mk = fakeMarkets();
   const h = accountHost({ rows: [row('s1')] });
-  const store = bootAccount(f, h, mk, { timers });
+  const store = bootAccount(f, h, null, { timers });
   await h.ready();
-  assert.equal(mk.live.visible.at(-1), true);
   assert.ok(timers.delays().includes(5_000), "Markets' quotes poll");
   f.win.location.hash = '#/trade';
   await settle();
   assert.equal(store.get().route.screen, 'trade');
   assert.match(f.html(), /<main class="main trade">/);
-  assert.equal(mk.live.visible.at(-1), false, "Markets' quotes paused");
   assert.equal(timers.delays().includes(5_000), false, "Markets' polls stopped");
   assert.ok(h.reads.includes('/data/account/explore?tab=crypto&limit=12'), "the kind's picks");
   const picks = timers.delays().filter(ms => ms === 20_000).length;
@@ -2289,14 +2271,14 @@ test("Ask Gravit sends one message through the composer's path", async () => {
 });
 
 test('Open in Markets routes to cn:<code>', async () => {
-  // Markets' quotes and search are the fakes, so the page it opens starts no real wire
-  const mk = fakeMarkets();
-  const { f, store, open } = await stockAnswer({ createLiveQuotes: mk.createLiveQuotes, createSymbolSearch: mk.createSymbolSearch });
+  const { f, store, open, h } = await stockAnswer();
   open();
   f.click(f.element({ tagName: 'BUTTON', dataset: { action: 'lunhuiMarkets', code: '600001' } }));
   await settle();
   assert.equal(f.win.location.hash, '#/markets/cn:600001');
   assert.deepEqual(store.get().route, { screen: 'markets', id: 'cn:600001' });
+  assert.match(f.html(), /<main class="main mkts mk-page">[\s\S]*A-share · 600001 · SH/, 'the A-share page, reached cold');
+  assert.ok(h.reads.includes('/data/account/candles?venue=china&symbol=600001&range=1D'), 'its history at venue china');
   assert.equal(store.get().lunhui.stock, null, 'leaving the conversation closes the drawer');
   store.timers.clear();
 });

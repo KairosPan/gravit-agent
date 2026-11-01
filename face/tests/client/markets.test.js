@@ -6,7 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { renderMarketsScreen, mkAv } from '../../client/js/render/markets.js';
+import { renderMarketsScreen, marketPage, mkAv } from '../../client/js/render/markets.js';
 import { candlesSvg } from '../../client/js/render/chart.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
@@ -56,7 +56,7 @@ const conv = (id, over = {}) => ({ id, title: 'T ' + id, kind: 'gravit', members
 // what the screen draws of it
 function screen({
   route = { screen: 'markets', id: null }, all = fx('explore-all'), predictions = null, tab = null, sort = null, q = '', results = null,
-  cn = [], quotes = {}, connection = 'streaming', providers = [], watch = [], asked = {}, live = [], candles = null, account = false,
+  cn = [], quotes = {}, connection = 'polling', status = null, watch = [], asked = {}, live = [], candles = null, account = false,
   conversations = [], watchError = null, role = null,
 } = {}) {
   let s = R.nav(emptyState(), route);
@@ -65,7 +65,8 @@ function screen({
   s = R.accountWatchLoaded(s, { items: watch, error: null });
   s = R.watchlistLoaded(s, { items: cn, error: watchError });
   for (const [faceId, key] of Object.entries(asked)) s = R.askedOfAccount(s, { faceId, key });
-  s = R.quotesUpdated(s, { quotes, providers, status: connection, note: '实时连接已断开，正在读取备用报价。' });
+  s = R.quotesUpdated(s, { quotes, connection });
+  if (status) s = R.chinaStatusUpdated(s, { status });
   if (live.length) s = R.accountQuotesLoaded(s, { quotes: live });
   if (candles) s = R.candlesLoaded(s, { at: NOW, ...candles });
   if (account) {
@@ -199,10 +200,11 @@ test('a cn row beside the Account rows under All, not under Stocks; Not listed l
   assert.match(z[1], /^<span class="mk-who"><span class="mk-av" aria-hidden="true">Zed<\/span><span class="mk-nm"><b>Zed Corp<\/b><span class="mk-sub">Not listed at the Account<\/span><\/span><\/span>$/);
   assert.deepEqual(z.slice(2).map(text), ['—', '—', '—', '']);
   assert.doesNotMatch(zed, /mk-star|openMarket/);
-  // the face's wire's connection word, only where a cn row is drawn
-  assert.match(cnState({ connection: 'polling' }).html, /<p class="mk-note">Updating every 15 s<\/p>/);
-  assert.doesNotMatch(stocks, /mk-note/, 'streaming says nothing');
-  assert.doesNotMatch(cnState({ tab: 'crypto', connection: 'polling' }).html, /Updating every 15 s/, 'no cn row on Crypto');
+  // the A shares' quotes read's state, only where a cn row is drawn: polling, as it always is, says nothing; a failed read is said
+  assert.match(cnState({ connection: 'error' }).html, /<p class="mk-note">Quotes unavailable<\/p>/);
+  assert.doesNotMatch(cnState().html, /mk-note/, 'polling says nothing');
+  assert.doesNotMatch(stocks, /mk-note/);
+  assert.doesNotMatch(cnState({ tab: 'crypto', connection: 'error' }).html, /Quotes unavailable/, 'no cn row on Crypto');
   assert.match(cnState({ tab: 'stocks', watchError: 'full' }).html, /<p class="mk-note">The watchlist is full<\/p>/);
   // Watching: every star — the Account's found in the read, a key no read lists as a placeholder, the A share, the Not listed line
   const watching = cnState({ watch: ['coin:BTC', 'kalshi:KXGONE-26'], tab: 'watching' }).html;
@@ -424,9 +426,9 @@ test('no CJK, no icon URL in any rendered string', () => {
   for (const item of predictions.items) item.icon = ICON;
   const candles = { ...fx('candles'), icon: ICON };
   // the face's own wire speaks Chinese in its messages and source names: none of it is drawn
-  const providers = [{ id: 'tencent', market: 'cn', status: 'limited', source: '腾讯', feed: 'snapshot', transport: 'poll', message: '部分 A 股标的暂无完整行情' }];
+  const status = { state: 'stale', said: 'Tencent answered late' };
   const base = {
-    all, predictions, cn: [MOUTAI, ZED], asked: { 'us:ZZZZ': null }, quotes: { 'cn:600519': moutaiQuote({ quote_status: 'stale' }) }, providers,
+    all, predictions, cn: [MOUTAI, ZED], asked: { 'us:ZZZZ': null }, quotes: { 'cn:600519': moutaiQuote({ quote_status: 'stale' }) }, status,
     connection: 'polling', account: true, watch: ['coin:BTC', 'stock:GONE'], candles: { id: 'stock:NVDA', range: '1D', data: candles },
     live: [{ venue: 'ex', symbol: 'BTC/USDT', market: { price: 62481, quoteFrom: 'Stand-in Exchange', quoteAt: ago(3_000), icon: ICON } }],
     conversations: [conv('s1', { title: 'BTC into the weekend' })],
@@ -486,24 +488,22 @@ test('empty states: Loading… before a read, No markets for an empty answer, No
   assert.match(said, /<p class="mk-empty">Search is unavailable<\/p>/);
 });
 
-test("while searching, the A-share search's own failure or partial answer is a muted line, never its silence", () => {
-  const searched = screen({ q: 'fed', results: fx('explore-predictions') }).s;
-  const draw = search => renderMarketsScreen(R.searchUpdated(searched, { query: 'fed', assets: [], partial: false, ...search }), NOW);
-  // it failed: said, the Account's hits drawn under it
-  const failed = draw({ status: 'error' });
+test("while searching, an answer without China's hits says the search is unavailable for them, over the Account's hits", () => {
+  const missed = { ...fx('explore-predictions'), missing: [{ venue: 'china', venueName: 'Tencent', connected: false, why: 'no answer in time', code: 'E_ACCOUNT_BAD_ACTION' }] };
+  const failed = screen({ q: 'fed', results: missed }).html;
   assert.match(failed, /<p class="mk-note">Search is unavailable<\/p>/);
-  assert.equal(rowIds(failed).length, 9);
-  // it answered in part: said beside its hits
-  const partial = draw({ status: 'success', assets: [MOUTAI], partial: true });
-  assert.match(partial, /<p class="mk-note">Some results may be missing<\/p>/);
-  assert.ok(rowIds(partial).includes('cn:600519'));
-  // its other states are the table's: on its way, or nothing of its own beside the Account's hits
-  for (const status of ['loading', 'success']) assert.doesNotMatch(draw({ status }), /mk-note/, status);
-  // no query, no word from it
-  assert.doesNotMatch(renderMarketsScreen(R.searchUpdated(screen().s, { query: 'fed', status: 'error', assets: [], partial: false }), NOW), /Search is unavailable/);
-  // both halves failed: said once, where the rows would be
-  const both = R.searchUpdated(R.resultsFailed(screen({ q: 'zz' }).s, { at: NOW, message: null }), { query: 'zz', status: 'error', assets: [], partial: false });
-  const html = renderMarketsScreen(both, NOW);
+  assert.equal(rowIds(failed).length, 9, "the Account's hits drawn under it");
+  assert.doesNotMatch(failed, /no answer in time/, "the Account's reason is not the face's line");
+  // China answered: its hits are cn rows, priced as the search carries them, and nothing is said
+  const hit = { ...fx('explore-search-china') };
+  const found = screen({ q: 'mao', results: hit }).html;
+  assert.doesNotMatch(found, /mk-note/);
+  assert.ok(rowIds(found).includes('cn:600519'));
+  assert.match(rowOf(found, 'cn:600519'), /<span class="mk-sub">600519 · SH<\/span>/, 'drawn as an A share, not as an Account row');
+  // another venue missing is not China's
+  assert.doesNotMatch(screen({ q: 'fed', results: { ...missed, missing: [{ venue: 'okx' }] } }).html, /Search is unavailable/);
+  // the whole search failed: said once, where the rows would be
+  const html = renderMarketsScreen(R.resultsFailed(screen({ q: 'zz' }).s, { at: NOW, message: null }), NOW);
   assert.equal(html.split('Search is unavailable').length - 1, 1);
   assert.match(html, /<p class="mk-empty">Search is unavailable<\/p>/);
 });
@@ -679,6 +679,27 @@ test('China failing: Loading… before any answer, unavailable after a failure, 
   const kept = chinaScreen(s => R.rankFailed(R.rankLoaded(s, { sort: 'volume', data: RANK, at: NOW }), { sort: 'volume', at: NOW })).html;
   assert.deepEqual(rowIds(kept), ['cn:300502', 'cn:688825']);
   assert.match(kept, /<p class="mk-note">Couldn’t refresh China<\/p>/);
+});
+
+test('China as last read: the Account not answering is said over the kept rows; a stale read of its own in its words', () => {
+  // the proxy re-served the kept ranking flagged stale: the Account is not answering, and the rows are never drawn bare
+  const asLast = chinaScreen(s => R.rankLoaded(s, { sort: 'volume', data: { ...RANK, stale: true, status: { state: 'live', said: '' } }, at: NOW })).html;
+  assert.deepEqual(rowIds(asLast), ['cn:300502', 'cn:688825']);
+  assert.match(asLast, /<p class="mk-note">Closed · 10-30 15:00 Beijing<\/p><p class="mk-note">The Account is not answering · China as last read<\/p>/);
+  // the Account answering that Tencent's ranking is stale: its own words, not the face's
+  const said = chinaScreen(s => R.rankLoaded(s, { sort: 'volume', data: { ...RANK, stale: true, status: { state: 'stale', said: 'Tencent has not answered since 14:52' } }, at: NOW })).html;
+  assert.match(said, /<p class="mk-note">Tencent has not answered since 14:52<\/p>/);
+  assert.doesNotMatch(said, /The Account is not answering/);
+  // a live read says neither
+  assert.doesNotMatch(chinaScreen(s => R.rankLoaded(s, { sort: 'volume', data: { ...RANK, stale: false, status: { state: 'live', said: '' } }, at: NOW })).html, /not answering|Couldn’t refresh/);
+});
+
+test('an A-share page reached cold draws as an A share, with no Account read', () => {
+  const html = screen({ route: { screen: 'markets', id: 'cn:600519' }, all: null }).html;
+  assert.equal(marketPage('cn:600519', screen({ route: { screen: 'markets', id: 'cn:600519' }, all: null }).s, NOW), html);
+  assert.match(html, /<h1 class="head-title">600519<\/h1><span class="mk-sub">A-share · 600519 · SH<\/span>/);
+  assert.match(html, /aria-label="Price history"/);
+  assert.doesNotMatch(html, /openTicket|You hold|Across venues/);
 });
 
 const MOUTAI_FACTS = { open: 1363, high: 1393.37, low: 1352.98, turnover: 8_257_380_000, turnover_rate: 0.48, market_cap: 1_740_176_000_000, pe_ttm: 21.18,

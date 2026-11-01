@@ -108,10 +108,11 @@ export const WRITE_ABORT_MS: Readonly<Record<WriteRoute, number>> = { pair: 7_00
 /** Most queries kept per route; the least recently used leaves first. */
 export const ACCOUNT_CACHE_KEYS = 64;
 
-/** The whitelist: route → allowed query names; a value is at most 240 characters (`quotes`' `pairs` 2 000), each name at most once. */
+/** The whitelist: route → allowed query names (`explore`'s `sort` is China's ranking's, `volume` or `movers`, beside its
+ * `tab=china`); a value is at most 240 characters (`quotes`' `pairs` 2 000), each name at most once. */
 export const ACCOUNT_QUERY: Readonly<Record<ReadRoute, readonly string[]>> = {
   account: ["fresh"],
-  explore: ["tab", "q", "key", "limit"],
+  explore: ["tab", "q", "key", "sort", "limit"],
   market: ["venue", "symbol"],
   quotes: ["pairs"],
   compare: ["base", "side", "usd", "asset"],

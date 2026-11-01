@@ -1,16 +1,16 @@
 // The Markets host layer (spec 2026-10-22 §6.1): the Account's reads through the face's proxy — explore for the tab on screen,
 // the quotes of the rows in view, a market page's candles and compare rows, the page's market followed on the Account's stream —
-// the two watch stores, the old us:/crypto: stars asked of the Account once, and the face's own wire for the A shares alone;
-// over the stand-in's answers (tests/fixtures/account/), with recording timers, a recording getJson, a fake stream, fake cn wire
-// factories and a memory storage.
+// the two watch stores, the old us:/crypto: stars asked of the Account once, and the A shares — China's ranking, their quotes,
+// history and search — from the Account too, never the face's own wire; over the stand-in's answers (tests/fixtures/account/),
+// with recording timers, a recording getJson, a fake stream and a memory storage.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createStore } from '../../client/js/store.js';
 import { reducers } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
-import { startMarkets, EXPLORE_MS, QUOTES_MS, QUOTE_PAIRS, WATCH_LIMIT, RANK_PATH, CN_CANDLES_PATH } from '../../client/js/host/markets.js';
-import { rowsOf, pageOf } from '../../client/js/host/market-view.js';
+import { startMarkets, EXPLORE_MS, QUOTES_MS, QUOTE_PAIRS, WATCH_LIMIT, RANK_ROWS } from '../../client/js/host/markets.js';
+import { rowsOf, pageOf, cnStateWord } from '../../client/js/host/market-view.js';
 import { STORAGE_KEY, ACCOUNT_WATCH_KEY, readAccountWatch, saveAccountWatch } from '../../client/js/wire/market-model.js';
 
 const tick = () => new Promise(r => setTimeout(r, 0));
@@ -61,16 +61,6 @@ function memoryStorage(seed = {}, { failWrites = false, failKeys = [] } = {}) {
 
 function rig({ storage = memoryStorage(), answer = () => undefined, owner, afterAction } = {}) {
   const store = createStore({ initial: emptyState(), reducers });
-  const live = { assets: [], visible: [], closed: false };
-  const createLiveQuotes = onUpdate => {
-    live.onUpdate = onUpdate;
-    return { setAssets(a) { live.assets.push(a.map(x => x.id)); }, setVisible(v) { live.visible.push(v); }, refresh() {}, close() { live.closed = true; } };
-  };
-  const search = { queries: [], cancelled: 0, onUpdate: null };
-  const createSymbolSearch = onUpdate => {
-    search.onUpdate = onUpdate;
-    return { search(q, market) { search.queries.push([q, market]); }, cancel() { search.cancelled++; } };
-  };
   const reads = [];
   const getJson = path => {
     reads.push(path);
@@ -90,16 +80,16 @@ function rig({ storage = memoryStorage(), answer = () => undefined, owner, after
     addEventListener(type, fn) { (listeners[type] ??= new Set()).add(fn); },
     removeEventListener(type, fn) { listeners[type]?.delete(fn); },
   };
-  const markets = startMarkets({ store, getJson, createLiveQuotes, createSymbolSearch, storage, win, stream, schedule, cancelTimer, now: () => NOW, owner, afterAction });
+  const markets = startMarkets({ store, getJson, storage, win, stream, schedule, cancelTimer, now: () => NOW, owner, afterAction });
   const emit = (type, event) => { for (const fn of listeners[type] ?? []) fn(event); };
-  return { store, markets, live, search, reads, storage, timers, due, fire, follows, listeners, emit, m: () => store.get().markets };
+  return { store, markets, reads, storage, timers, due, fire, follows, listeners, emit, m: () => store.get().markets };
 }
 
 test('show reads explore now and every 20 s; quotes for the pairs in view every 5 s, twelve a call; show(false) cancels', async () => {
   assert.deepEqual(emptyState().markets, {
     tab: 'all', sort: 'volume', q: '',
     explore: {}, results: IDLE, accountQuotes: {}, candles: {}, compare: {}, watch: [], watchError: null, asked: {},
-    watchlist: [], quotes: {}, providers: [], connection: 'idle', search: { query: '', status: 'idle', assets: [], partial: false }, hitQuotes: {},
+    watchlist: [], quotes: {}, providers: [], connection: 'idle', hitQuotes: {},
     rank: { status: 'idle', data: null, at: null, sort: 'volume', message: null },
   }, 'the slice the host starts from');
   // two quiet stocks past the fixture's twelve rows: Most traded puts them last, so the first twelve rows leave them out
@@ -122,12 +112,10 @@ test('show reads explore now and every 20 s; quotes for the pairs in view every 
   });
   assert.deepEqual(r.reads, [], 'nothing is read until Markets is on screen');
   assert.deepEqual(r.due(), []);
-  assert.equal(r.live.visible[0], false, "the face's wire is paused until then too");
 
   r.markets.show(true);
   assert.deepEqual(r.reads, [ALL], 'explore at once');
   assert.equal(r.m().explore.all.status, 'loading');
-  assert.equal(r.live.visible.at(-1), true);
   assert.deepEqual(r.due().map(t => t.ms).sort((a, b) => a - b), [QUOTES_MS, EXPLORE_MS]);
   assert.deepEqual([EXPLORE_MS, QUOTES_MS, QUOTE_PAIRS], [20_000, 5_000, 12]);
   r.markets.show(true);
@@ -192,7 +180,6 @@ test('show reads explore now and every 20 s; quotes for the pairs in view every 
   assert.equal(r.reads.at(-1), ALL, "Watching reads All's");
 
   r.markets.show(false);
-  assert.equal(r.live.visible.at(-1), false);
   assert.deepEqual(r.due(), [], 'both polls cancelled');
   assert.equal(r.timers.filter(t => t.cancelled).length >= 2, true);
   const hidden = r.reads.length;
@@ -202,8 +189,6 @@ test('show reads explore now and every 20 s; quotes for the pairs in view every 
   assert.equal(r.reads.at(-1), '/data/account/explore?tab=crypto&limit=200', 'shown again: the tab on screen at once');
   r.markets.close();
   assert.deepEqual(r.due(), [], 'close leaves no timer');
-  assert.equal(r.live.closed, true);
-  assert.equal(r.search.cancelled, 1);
   assert.deepEqual(r.follows.at(-1), [], 'close lets every follow go');
   r.markets.show(true);
   assert.deepEqual(r.due(), [], 'closed: nothing starts again');
@@ -274,7 +259,7 @@ test('an explore refusal keeps the last rows and the Account message', async () 
   assert.equal(r.m(), closed);
 });
 
-test('search reads explore?q and the cn search; results land in results', async () => {
+test('search reads explore?q alone; results land in results', async () => {
   const all = fx('explore-all');
   const only = base => ({ ...fx('explore-all'), items: all.items.filter(i => i.base === base) });
   const btc = deferred();
@@ -288,7 +273,6 @@ test('search reads explore?q and the cn search; results land in results', async 
       if (q.q === 'sol') return only('SOL');
       if (q.q === 'none') return refused(409, { ok: false, refusal: { message: 'Search is busy.' } });
       if (q.q === 'late') return late.promise;
-      if (path.startsWith('/data/quotes?')) return { ok: true, generated_at: '2026-10-22T07:59:59Z', providers: [], quotes: [] };
       return { ok: true, items: [] };
     },
   });
@@ -301,7 +285,6 @@ test('search reads explore?q and the cn search; results land in results', async 
   assert.equal(r.m().tab, 'results', 'a query from nothing opens All results');
   assert.equal(r.m().sort, 'volume', 'from Most traded, as any tab');
   assert.equal(r.reads.at(-1), '/data/account/explore?q=eth&limit=200');
-  assert.deepEqual(r.search.queries.at(-1), ['eth', 'cn'], "the face's search, for the A shares alone");
   assert.equal(r.m().results.status, 'loading');
   r.markets.search('eth');
   assert.equal(r.reads.filter(p => query(p).q === 'eth').length, 1, 'the same search in the air is one read');
@@ -319,10 +302,6 @@ test('search reads explore?q and the cn search; results land in results', async 
   await settle();
   assert.deepEqual(rowsOf(r.m(), NOW).map(x => x.id), ['perp:SOL', 'coin:SOL']);
   assert.equal(r.m().tab, 'results', 'the tab stays while the query changes');
-  // the cn search's hits get one quote read on the face's wire, as today
-  r.search.onUpdate({ query: 'sol', market: 'cn', status: 'success', assets: [asset('cn:600519', { name: 'Kweichow Moutai', exchange: 'SH' })], partial: false, truncated: false, note: '' });
-  assert.equal(r.reads.at(-1), '/data/quotes?ids=cn%3A600519');
-  assert.deepEqual(r.m().search, { query: 'sol', status: 'success', assets: [asset('cn:600519', { name: 'Kweichow Moutai', exchange: 'SH' })], partial: false });
   // a refusal keeps the last results with the Account's sentence; the text is trimmed and encoded
   r.markets.search('none');
   await settle();
@@ -331,15 +310,13 @@ test('search reads explore?q and the cn search; results land in results', async 
   assert.deepEqual(rowsOf(r.m(), NOW).map(x => x.id).slice(0, 2), ['perp:SOL', 'coin:SOL']);
   r.markets.search(' S&P 500 ');
   assert.equal(r.reads.at(-1), '/data/account/explore?q=S%26P%20500&limit=200');
-  assert.deepEqual(r.search.queries.at(-1), [' S&P 500 ', 'cn']);
 
-  // a blank query: back to All, the results idle, the cn search cancelled, and a read still out dropped
+  // a blank query: back to All, the results idle, and a read still out dropped
   r.markets.search('late');
   r.markets.search('');
   assert.equal(r.m().q, '');
   assert.equal(r.m().tab, 'all', 'cleared on All results: back to All');
   assert.deepEqual(r.m().results, IDLE);
-  assert.equal(r.search.cancelled, 1);
   late.resolve(only('ETH'));
   await settle();
   assert.deepEqual(r.m().results, IDLE, 'the read it overtook lands nowhere');
@@ -367,11 +344,10 @@ test('search reads explore?q and the cn search; results land in results', async 
   r.markets.close();
 });
 
-test('watch: an Account key goes to the account store, a cn id to the cn list; the cn wire subscribes cn only', async () => {
+test('watch: an Account key goes to the account store, a cn id to the cn list', async () => {
   const storage = memoryStorage({ [STORAGE_KEY]: saved([asset('cn:000001', { name: 'Ping An Bank', exchange: 'SZ' }), asset('us:MSFT')]) });
   const r = rig({ storage, answer: () => ({ ok: true, items: [] }) });
   await settle();
-  assert.deepEqual(r.live.assets.at(-1), ['cn:000001'], 'never us:MSFT: the Account quotes it, or no one does');
   assert.equal(r.m().asked['us:MSFT'], null, 'the old star was asked and missed');
 
   r.markets.watch('coin:BTC');
@@ -385,28 +361,17 @@ test('watch: an Account key goes to the account store, a cn id to the cn list; t
   r.markets.watch('cn:600519');
   assert.deepEqual(r.m().watchlist.map(a => a.id), ['cn:000001', 'us:MSFT', 'cn:600519']);
   assert.deepEqual(JSON.parse(storage.map.get(STORAGE_KEY)).items.map(a => a.id), ['cn:000001', 'us:MSFT', 'cn:600519']);
-  assert.deepEqual(r.live.assets.at(-1), ['cn:000001', 'cn:600519']);
   const writes = storage.writes.length;
   for (const id of ['us:AAPL', 'crypto:ETH/USD', 'garbage', '', null]) r.markets.watch(id);
   assert.equal(storage.writes.length, writes, 'a us:, crypto: or unknown id is nobody’s to star');
   assert.deepEqual(r.m().watchlist.map(a => a.id), ['cn:000001', 'us:MSFT', 'cn:600519']);
   assert.deepEqual(r.m().watch, ['coin:BTC', 'event:predict:SI-FEDCUT-DEC']);
 
-  // a cn page's own id joins the subscription first; an Account or us: page adds nothing
-  r.store.reset({ ...r.store.get(), route: { screen: 'markets', id: 'cn:600000' } });
-  assert.deepEqual(r.live.assets.at(-1), ['cn:600000', 'cn:000001', 'cn:600519']);
-  r.store.reset({ ...r.store.get(), route: { screen: 'markets', id: 'coin:BTC' } });
-  assert.deepEqual(r.live.assets.at(-1), ['cn:000001', 'cn:600519']);
-  const subscriptions = r.live.assets.length;
-  r.store.reset({ ...r.store.get(), route: { screen: 'markets', id: 'us:AAPL' } });
-  assert.equal(r.live.assets.length, subscriptions, 'the same ids are not subscribed again');
-
   r.markets.unwatch('coin:BTC');
   assert.deepEqual(r.m().watch, ['event:predict:SI-FEDCUT-DEC']);
   assert.deepEqual(JSON.parse(storage.map.get(ACCOUNT_WATCH_KEY)).items, ['event:predict:SI-FEDCUT-DEC']);
   r.markets.unwatch('cn:600519');
   assert.deepEqual(r.m().watchlist.map(a => a.id), ['cn:000001', 'us:MSFT']);
-  assert.deepEqual(r.live.assets.at(-1), ['cn:000001']);
   // an old star still listed is taken off the cn list, and what it was found as is forgotten
   r.markets.unwatch('us:MSFT');
   assert.deepEqual(r.m().watchlist.map(a => a.id), ['cn:000001']);
@@ -542,8 +507,8 @@ test('page: candles for the range, compare for a coin, the stream follow; leavin
   await settle();
   const quiet = r.reads.length;
   r.markets.page('cn:600519');
-  assert.deepEqual(r.reads.slice(quiet), ['/data/cn/candles?id=cn%3A600519&range=1D'], "a cn page reads the face's own history, nothing of the Account");
-  assert.deepEqual(r.follows.at(-1), [], 'and follows nothing of the Account');
+  assert.deepEqual(r.reads.slice(quiet), ['/data/account/candles?venue=china&symbol=600519&range=1D'], "a cn page reads its history at the Account's china venue");
+  assert.deepEqual(r.follows.at(-1), [], 'and follows nothing on the stream');
   // back to a page: its kept range
   r.store.dispatch('setMarketsTab', 'all');
   r.markets.page('coin:ETH');
@@ -614,7 +579,6 @@ test('old us: and crypto: stars are asked of the Account once; a hit moves the s
   assert.deepEqual(JSON.parse(storage.map.get(ACCOUNT_WATCH_KEY)).items, ['stock:AAPL', 'coin:BTC']);
   assert.deepEqual(r.m().watchlist.map(a => a.id), ['cn:600519', 'us:ZZZZ', 'crypto:DOGE/USD']);
   assert.deepEqual(JSON.parse(storage.map.get(STORAGE_KEY)).items.map(a => a.id), ['cn:600519', 'us:ZZZZ', 'crypto:DOGE/USD']);
-  assert.deepEqual(r.live.assets.at(-1), ['cn:600519'], 'the old stars were never on the wire');
 
   // the rows: the moved stars are the Account's rows, starred; the miss is listed once, Not listed at the Account; the
   // un-asked star draws nothing
@@ -678,7 +642,7 @@ test("an old star whose key the Account's store could not take stays on the cn l
   r.markets.close();
 });
 
-test('an old us star is asked of the Account, never quoted by the face', async () => {
+test('an old us star is asked of the Account, never quoted as an A share', async () => {
   const all = fx('explore-all');
   const storage = memoryStorage({ [STORAGE_KEY]: saved([asset('us:AAPL', { name: 'Apple' }), asset('cn:600519', { name: 'Kweichow Moutai' })]) });
   const r = rig({
@@ -686,7 +650,7 @@ test('an old us star is asked of the Account, never quoted by the face', async (
     answer: path => {
       if (query(path).q === 'AAPL') return { ok: true, items: [] };
       if (path === ALL) return all;
-      if (path.startsWith('/data/quotes?')) return { ok: true, generated_at: '2026-10-22T07:59:59Z', providers: [], quotes: [] };
+      if (path.startsWith('/data/account/quotes?')) return { ok: true, quotes: [] };
       return undefined;
     },
   });
@@ -697,10 +661,10 @@ test('an old us star is asked of the Account, never quoted by the face', async (
   await settle();
   assert.deepEqual(r.reads.filter(p => query(p).limit === '12'), ['/data/account/explore?q=AAPL&limit=12'], 'asked of the Account once');
   assert.equal(r.m().asked['us:AAPL'], null, 'not listed there');
-  assert.ok(r.live.assets.length > 0, 'the cn wire was subscribed');
-  for (const ids of r.live.assets) assert.equal(ids.includes('us:AAPL'), false, 'never handed to the live quotes: ' + ids);
-  assert.deepEqual(r.live.assets.at(-1), ['cn:600519']);
-  assert.equal(r.reads.some(p => p.startsWith('/data/quotes') && decodeURIComponent(p).includes('us:')), false, 'never read from /data/quotes');
+  r.fire(QUOTES_MS);
+  const cnQuotes = r.reads.filter(p => p.startsWith('/data/account/quotes?') && pairsIn(p).some(x => x.startsWith('china|')));
+  assert.deepEqual(cnQuotes.map(pairsIn), [['china|600519']], 'the A share alone is quoted at china');
+  assert.ok(r.reads.every(p => !faceWire(p) && !decodeURIComponent(p).includes('us:')), 'the old star is never asked for as itself');
   assert.deepEqual(rowsOf(r.m(), NOW).filter(x => x.notListed).map(x => [x.id, x.sub]), [['us:AAPL', 'Not listed at the Account']]);
   r.markets.close();
 });
@@ -908,72 +872,249 @@ test("a refused setWatch is the Account's sentence in the watchlist's words; the
   r.markets.close();
 });
 
-// ── the China tab (spec 2026-10-31): the ranking while China is on screen, an A share's history ──
+// ── China (spec 2026-10-31, plan 2026-11-01): the ranking, an A share's history, its quotes and its search, all the Account's ──
 
-const RANKED = sort => ({ ok: true, sort, total: 5577, asOf: '2026-10-31T06:46:10Z', session: { phase: 'closed', lastSession: '2026-10-30' },
-  items: [{ id: 'cn:300502', symbol: '300502', name: '新易盛', price: 196, change_pct: -14.19, turnover: 21_607_600_000 }] });
-const rankAnswer = path => (path.startsWith(RANK_PATH) ? RANKED(query(path).sort) : undefined);
+const CHINA = sort => `/data/account/explore?tab=china&sort=${sort}&limit=20`;
+// the Account's china tab answer for a sort: the stand-in's, read for that sort
+const ranked = sort => { const body = fx('explore-china'); body.china.sort = sort; return body; };
+const isChina = path => path.startsWith('/data/account/explore?tab=china&');
+const chinaAnswer = path => (isChina(path) ? ranked(query(path).sort) : undefined);
+// the face's own wire, which nothing reads any more
+const faceWire = path => /^\/data\/(quotes|symbols|cn)\b/.test(path);
+// a quotes?pairs= answer of china rows from the stand-in's, each pair asked for its own row (refused where named, or not listed)
+const cnQuoted = (path, refuse = []) => {
+  const rows = fx('quotes-china').quotes;
+  return {
+    ok: true,
+    quotes: pairsIn(path).map(p => {
+      const symbol = p.slice(p.indexOf('|') + 1);
+      const row = rows.find(q => q.symbol === symbol && q.market);
+      if (refuse.includes(symbol) || !row) return { venue: 'china', symbol, refusal: { ok: false, code: 'E_ACCOUNT_BAD_ACTION', message: `no A-share quote for ${symbol}` } };
+      return row;
+    }),
+  };
+};
 
-test('China on screen reads the ranking at once and every EXPLORE_MS, never the Account for a china tab', async () => {
-  const r = rig({ answer: rankAnswer });
+test('China reads the Account: explore tab=china now, every 20 s, and again on a new sort', async () => {
+  const r = rig({ answer: chinaAnswer });
   r.store.dispatch('setMarketsTab', 'china');
+  assert.equal(RANK_ROWS, 20);
   r.markets.show(true);
+  assert.deepEqual(r.reads, [CHINA('volume')], 'at once, nothing else');
+  assert.equal(r.m().rank.status, 'loading');
   await settle();
-  assert.ok(r.reads.includes('/data/cn/rank?sort=volume'));
-  assert.equal(r.m().rank.data.items[0].name, '新易盛');
-  const before = r.reads.filter(p => p.startsWith(RANK_PATH)).length;
+  assert.equal(r.m().rank.status, 'ready');
+  assert.deepEqual(r.m().rank.data.items.map(i => [i.id, i.name]), [['cn:600519', '贵州茅台'], ['cn:688981', '中芯国际'], ['cn:300750', '宁德时代']]);
+  assert.equal(r.m().rank.data.total, 5577);
+  assert.deepEqual(r.m().providers, [{ id: 'tencent', market: 'cn', status: 'connected', said: 'Tencent · answering' }], "China's state, the Account's");
+  assert.deepEqual(rowsOf(r.m(), NOW).map(x => x.id), ['cn:600519', 'cn:688981', 'cn:300750']);
   r.fire(EXPLORE_MS);
+  assert.equal(r.reads.at(-1), CHINA('volume'), 'every 20 s');
   await settle();
-  assert.equal(r.reads.filter(p => p.startsWith(RANK_PATH)).length, before + 1);
-  assert.equal(r.reads.some(p => p.includes('tab=china')), false);
+  r.store.dispatch('setMarketsSort', 'movers');
+  assert.equal(r.reads.at(-1), CHINA('movers'), 'again on a new sort');
+  await settle();
+  assert.equal(r.m().rank.data.sort, 'movers');
+  assert.ok(r.reads.every(p => !faceWire(p)), 'nothing reads the face wire');
+  r.markets.close();
 });
 
-test('a sort chosen on China reads that sort; the answer for the old sort lands nowhere', async () => {
+test('a sort chosen on China reads that sort; the answer for the old sort lands nowhere; a refusal is said in its words', async () => {
   const slow = deferred();
-  const r = rig({ answer: path => (path === '/data/cn/rank?sort=volume' ? slow.promise : rankAnswer(path)) });
+  let refuse = false;
+  const r = rig({ answer: path => (refuse && isChina(path) ? refused(409, { ok: false, refusal: { message: 'China is not read on this account' } })
+    : path === CHINA('volume') ? slow.promise : chinaAnswer(path)) });
   r.store.dispatch('setMarketsTab', 'china');
   r.markets.show(true);
   r.store.dispatch('setMarketsSort', 'movers');
   await settle();
-  assert.ok(r.reads.includes('/data/cn/rank?sort=movers'));
-  slow.resolve(RANKED('volume'));
+  assert.ok(r.reads.includes(CHINA('movers')));
+  slow.resolve(ranked('volume'));
   await settle();
   assert.equal(r.m().rank.sort, 'movers');
   assert.equal(r.m().rank.data.sort, 'movers');
+  // an answer for another sort than the one asked is no ranking
+  const wrong = rig({ answer: path => (isChina(path) ? ranked('movers') : undefined) });
+  wrong.store.dispatch('setMarketsTab', 'china');
+  wrong.markets.show(true);
+  await settle();
+  assert.equal(wrong.m().rank.status, 'error');
+  assert.equal(wrong.m().rank.data, null);
+  // the Account refusing: the rows kept, its sentence as the read's
+  refuse = true;
+  r.fire(EXPLORE_MS);
+  await settle();
+  assert.equal(r.m().rank.status, 'error');
+  assert.equal(r.m().rank.message, 'China is not read on this account');
+  assert.equal(r.m().rank.data.items.length, 3, 'the rows kept');
+  for (const x of [r, wrong]) x.markets.close();
+});
+
+test('the Account down while China is on screen: the kept ranking re-served stale lands marked stale, never bare', async () => {
+  let stale = false;
+  const r = rig({ answer: path => (isChina(path) ? { ...ranked(query(path).sort), ...(stale ? { stale: true } : {}) } : undefined) });
+  r.store.dispatch('setMarketsTab', 'china');
+  r.markets.show(true);
+  await settle();
+  assert.equal(r.m().rank.data.stale, false);
+  stale = true;
+  r.fire(EXPLORE_MS);
+  await settle();
+  assert.equal(r.m().rank.status, 'ready');
+  assert.equal(r.m().rank.data.stale, true, 'the proxy said it is the last read');
+  r.markets.close();
 });
 
 test('off screen, or on another tab, nothing reads the ranking', async () => {
-  const r = rig({ answer: rankAnswer });
+  const r = rig({ answer: chinaAnswer });
   r.store.dispatch('setMarketsTab', 'china');
   await settle();
-  assert.equal(r.reads.some(p => p.startsWith(RANK_PATH)), false, 'not shown');
+  assert.equal(r.reads.some(isChina), false, 'not shown');
   r.store.dispatch('setMarketsTab', 'crypto');
   r.markets.show(true);
   r.fire(EXPLORE_MS);
   await settle();
-  assert.equal(r.reads.some(p => p.startsWith(RANK_PATH)), false, 'another tab');
+  assert.equal(r.reads.some(isChina), false, 'another tab');
+  r.markets.close();
 });
 
-test("an A share's page reads its 1D history; a range reads that range", async () => {
-  const r = rig({ answer: path => (path.startsWith(CN_CANDLES_PATH) ? { ok: true, range: query(path).range, sessions: [] } : undefined) });
+test('an A share page reached cold reads its candles at venue china', async () => {
+  const r = rig({ answer: path => (path.startsWith('/data/account/candles?') ? (query(path).range === '1D' ? fx('candles-china-1d') : { ...fx('candles-china-1m'), range: query(path).range }) : undefined) });
+  assert.deepEqual(r.m().rank.data, null, 'nothing read: no ranking, no search, no star');
   r.markets.page('cn:600519');
+  assert.deepEqual(r.reads, ['/data/account/candles?venue=china&symbol=600519&range=1D']);
   await settle();
-  assert.ok(r.reads.includes('/data/cn/candles?id=cn%3A600519&range=1D'));
   assert.equal(r.m().candles['cn:600519'].status, 'ready');
+  assert.equal(r.m().candles['cn:600519'].data.sessions.length, 1, "the 1D answer's sessions kept as they are");
+  r.markets.range('cn:600519', '5D');
+  assert.equal(r.reads.at(-1), '/data/account/candles?venue=china&symbol=600519&range=5D');
+  await settle();
+  assert.equal(r.m().candles['cn:600519'].range, '5D');
   r.markets.range('cn:600519', '1M');
   await settle();
-  assert.ok(r.reads.includes('/data/cn/candles?id=cn%3A600519&range=1M'));
-  assert.equal(r.m().candles['cn:600519'].range, '1M');
+  assert.equal(r.m().candles['cn:600519'].data.candles.length, 2);
+  assert.deepEqual(r.follows, [], 'an A share follows nothing on the stream');
+  assert.ok(r.reads.every(p => !faceWire(p)), 'nothing reads the face wire');
+  r.markets.close();
+});
+
+test('A-share quotes: the page first, then the cn rows in view, twelve a call, every 5 s', async () => {
+  const many = Array.from({ length: 14 }, (_, i) => asset(`cn:6000${String(10 + i)}`));
+  const storage = memoryStorage({ [STORAGE_KEY]: saved([asset('cn:600519', { name: 'Kweichow Moutai' }), asset('cn:600000')]) });
+  const r = rig({ storage, answer: path => (path.startsWith('/data/account/quotes?') ? cnQuoted(path) : path === ALL ? { ok: true, items: [] } : undefined) });
+  r.store.dispatch('nav', { screen: 'markets', id: 'cn:600000' });
+  r.markets.show(true);
+  await settle();
+  assert.equal(r.reads.some(p => p.startsWith('/data/account/quotes?')), false, 'on the 5 s tick, not before');
+  r.fire(QUOTES_MS);
+  const asked = r.reads.filter(p => p.startsWith('/data/account/quotes?'));
+  assert.deepEqual(asked, ['/data/account/quotes?pairs=china%7C600000%2Cchina%7C600519'], 'the page first, then the cn rows, once each');
+  await settle();
+  const moutai = r.m().quotes['cn:600519'];
+  assert.equal(moutai.price, 1392.05);
+  assert.equal(moutai.quote_status, 'live');
+  assert.equal(moutai.market_status, 'closed');
+  assert.equal(r.m().connection, 'polling');
+  // the rows in view alone, as the screen names them; twelve a call
+  r.store.dispatch('nav', { screen: 'markets', id: null });
+  r.markets.rowsInView(['cn:600519']);
+  r.fire(QUOTES_MS);
+  assert.deepEqual(pairsIn(r.reads.at(-1)), ['china|600519']);
+  await settle();
+  r.store.dispatch('watchlistLoaded', { items: many, error: null });
+  r.markets.rowsInView(null);
+  r.fire(QUOTES_MS);
+  assert.equal(pairsIn(r.reads.at(-1)).length, QUOTE_PAIRS);
+  await settle();
+  // one in the air at a time
+  const held = deferred();
+  const slow = rig({ storage, answer: path => (path.startsWith('/data/account/quotes?') ? held.promise : undefined) });
+  slow.markets.show(true);
+  slow.fire(QUOTES_MS);
+  const n = slow.reads.length;
+  slow.fire(QUOTES_MS);
+  assert.equal(slow.reads.length, n, 'the tick while one is out asks nothing');
+  held.resolve({ ok: true, quotes: [] });
+  await settle();
+  // a quote kept, then the Account refusing that share: the price kept, marked stale, and China's state its sentence
+  const refusing = rig({ storage, answer: path => (path.startsWith('/data/account/quotes?') ? cnQuoted(path, refusingNow ? ['600519'] : []) : undefined) });
+  let refusingNow = false;
+  refusing.markets.show(true);
+  refusing.fire(QUOTES_MS);
+  await settle();
+  refusingNow = true;
+  refusing.fire(QUOTES_MS);
+  await settle();
+  assert.equal(refusing.m().quotes['cn:600519'].price, 1392.05, 'the kept price');
+  assert.equal(refusing.m().quotes['cn:600519'].quote_status, 'stale');
+  assert.deepEqual(refusing.m().providers, [{ id: 'tencent', market: 'cn', status: 'error', said: 'no A-share quote for 600519' }]);
+  assert.equal(cnStateWord(refusing.m().quotes['cn:600519'], refusing.m().connection, refusing.m().providers), 'Quotes unavailable', 'said over the last price');
+  for (const x of [r, slow, refusing]) assert.ok(x.reads.every(p => !faceWire(p)), 'nothing reads the face wire');
+  for (const x of [r, slow, refusing]) x.markets.close();
+});
+
+test('a failed A-share quote read keeps the price and says the connection failed; a stale re-served answer marks its prices stale', async () => {
+  let mode = 'ok';
+  const storage = memoryStorage({ [STORAGE_KEY]: saved([asset('cn:600519', { name: 'Kweichow Moutai' })]) });
+  const r = rig({
+    storage,
+    answer: path => {
+      if (!path.startsWith('/data/account/quotes?')) return undefined;
+      if (mode === 'down') return refused(503, { ok: false, unreachable: 'ECONNREFUSED' });
+      return mode === 'stale' ? { ...cnQuoted(path), stale: true } : cnQuoted(path);
+    },
+  });
+  r.markets.show(true);
+  r.fire(QUOTES_MS);
+  await settle();
+  assert.equal(r.m().quotes['cn:600519'].price, 1392.05);
+  mode = 'down';
+  r.fire(QUOTES_MS);
+  await settle();
+  assert.equal(r.m().quotes['cn:600519'].price, 1392.05, 'the price kept');
+  assert.equal(r.m().connection, 'error');
+  assert.equal(cnStateWord(r.m().quotes['cn:600519'], r.m().connection, r.m().providers), 'Quotes unavailable');
+  mode = 'stale';
+  r.fire(QUOTES_MS);
+  await settle();
+  assert.equal(r.m().connection, 'polling');
+  assert.equal(r.m().quotes['cn:600519'].quote_status, 'stale', "the proxy's last read is no live price");
+  assert.ok(r.reads.every(p => !faceWire(p)), 'nothing reads the face wire');
+  r.markets.close();
+});
+
+test('search is one explore?q read; its A shares are hits with their prices', async () => {
+  const storage = memoryStorage();
+  const r = rig({ storage, answer: path => (query(path).q === 'mao' ? fx('explore-search-china') : path === ALL ? { ok: true, items: [] } : undefined) });
+  r.markets.show(true);
+  await settle();
+  const before = r.reads.length;
+  r.markets.search('mao');
+  assert.deepEqual(r.reads.slice(before), ['/data/account/explore?q=mao&limit=200'], 'one read');
+  await settle();
+  assert.deepEqual(r.m().hitQuotes['cn:600519'], { price: 1392.05, change_pct: 2.81 });
+  const rows = rowsOf(r.m(), NOW);
+  assert.deepEqual(rows.map(x => [x.id, x.source]), [['stock:AAPL', 'account'], ['cn:600519', 'face'], ['cn:688981', 'face'], ['cn:300750', 'face']]);
+  assert.equal(rows.find(x => x.id === 'cn:600519').price, 1392.05, "a hit priced as the search carries it");
+  // a star on a hit keeps its name
+  r.markets.watch('cn:600519');
+  const kept = JSON.parse(storage.getItem(STORAGE_KEY)).items.find(a => a.id === 'cn:600519');
+  assert.equal(kept.name, '贵州茅台');
+  assert.ok(r.reads.every(p => !faceWire(p)), 'nothing reads the face wire');
+  r.markets.close();
 });
 
 test("a star on a China row keeps the share's name", async () => {
   const storage = memoryStorage();
-  const r = rig({ storage, answer: rankAnswer });
+  const r = rig({ storage, answer: chinaAnswer });
   r.store.dispatch('setMarketsTab', 'china');
   r.markets.show(true);
   await settle();
-  r.markets.watch('cn:300502');
-  const saved = JSON.parse(storage.getItem(STORAGE_KEY)).items.find(a => a.id === 'cn:300502');
-  assert.equal(saved.name, '新易盛');
+  r.markets.watch('cn:688981');
+  const saved = JSON.parse(storage.getItem(STORAGE_KEY)).items.find(a => a.id === 'cn:688981');
+  assert.equal(saved.name, '中芯国际');
   assert.equal(saved.currency, 'CNY');
+  r.markets.unwatch('cn:688981');
+  assert.equal(r.m().watchlist.some(a => a.id === 'cn:688981'), false, 'and comes off the cn list');
+  r.markets.close();
 });

@@ -152,6 +152,7 @@ async function call(routes: WebRoute[], url: string, headers?: Record<string, st
 
 test("rebuildQuery: the whitelist, once each, 240 characters, fresh stripped", () => {
   assert.deepEqual(rebuildQuery("explore", "/data/account/explore?tab=crypto&q=btc&limit=60"), { query: "tab=crypto&q=btc&limit=60", fresh: false });
+  assert.deepEqual(rebuildQuery("explore", "/data/account/explore?tab=china&sort=movers&limit=20"), { query: "tab=china&sort=movers&limit=20", fresh: false }, "China's ranking by its sort");
   assert.deepEqual(rebuildQuery("holdings", "/data/account/holdings?cost=1&fresh=1"), { query: "cost=1", fresh: true });
   assert.equal(rebuildQuery("explore", "/data/account/explore?tab=a&tab=b"), null, "a repeated name");
   assert.equal(rebuildQuery("explore", "/data/account/explore?force=1"), null, "an unknown name");
@@ -227,7 +228,7 @@ test("a repeated or unknown name, an over-long value: 400 invalid account reques
   assert.equal(fetched.length, 0, "a refused query never reaches the Account");
   assert.deepEqual(ACCOUNT_QUERY, {
     account: ["fresh"],
-    explore: ["tab", "q", "key", "limit"],
+    explore: ["tab", "q", "key", "sort", "limit"],
     market: ["venue", "symbol"],
     quotes: ["pairs"],
     compare: ["base", "side", "usd", "asset"],

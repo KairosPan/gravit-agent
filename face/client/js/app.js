@@ -35,15 +35,14 @@ import { loadMemberTrace } from './wire/member-traces.js';
 import { isHostPreset } from './wire/speaker.js';
 import { statementLinesOf, statementCsvOf, connectOptionsOf, asksOf } from './host/account-view.js';
 import { isAccountKey, handWordsOf, watchedOf } from './host/market-view.js';
+import { isCnKey } from './wire/china.js';
 import { startOwner, postVia } from './host/owner.js';
 import { startSheet, PREPARE_QUIET_MS } from './host/sheet.js';
 import { limitSeedOf, grantOf, keyfileAskOf, reachAskOf, letDeviceSeedOf, paperSeedOf } from './host/sheet-view.js';
 import { startTrade } from './host/trade.js';
 import { tradeableOf } from './host/trade-view.js';
 import { indexedDbKeys, memoryKeys, signedOutFlag } from './wire/key-store.js';
-import { createLiveQuotes } from './wire/market-quotes.js';
 import { firstOpen } from './host/sessions.js';
-import { createSymbolSearch } from './wire/market-search.js';
 import { createAccountStream } from './wire/account-stream.js';
 
 export const PREFS_KEY = 'gravit-ui.prefs';
@@ -276,17 +275,9 @@ export function boot(win, host = {}) {
   const live = startLive({ store, openMux: host.openMux ?? wireOpenMux, call, mapFrame, getJson, timers, now, onReceipt: m => { if (m?.data?.seat) void seat.load({ fresh: true }); void account.load({ fresh: true }); } });
   // answers go through the live layer, which settles the gate it delivered once the answer wins
   const actions = makeActions({ store, call, answerGate: (eventId, value) => live.answer(eventId, value), postJson });
-  // Markets: the Account's reads on the app's timers, a market's page followed on the stream; the face's live quotes and symbol
-  // search for the A shares (a test hands in its own); the stars in this browser's storage
-  const markets = startMarkets({
-    store,
-    createLiveQuotes: host.createLiveQuotes ?? (onUpdate => createLiveQuotes(onUpdate, {
-      fetcher: (...a) => win.fetch(...a),
-      createEventSource: typeof win.EventSource === 'function' ? url => new win.EventSource(url) : null,
-    })),
-    createSymbolSearch: host.createSymbolSearch ?? (onUpdate => createSymbolSearch(onUpdate, { fetcher: (...a) => win.fetch(...a) })),
-    storage, getJson, win, now, stream, schedule, cancelTimer, owner, afterAction,
-  });
+  // Markets: the Account's reads on the app's timers — the A shares' among them — a market's page followed on the stream; the
+  // stars in this browser's storage
+  const markets = startMarkets({ store, storage, getJson, win, now, stream, schedule, cancelTimer, owner, afterAction });
   // Trade: the kinds' picks on screen, a ticket's order sheet, its line on the stream, Under way's Cancel
   const trade = startTrade({ store, getJson, owner, sheet, stream, schedule, cancelTimer, now, afterAction });
   // a channel's page: its overview read on entering it
@@ -361,7 +352,8 @@ export function boot(win, host = {}) {
     // the page follows it on the stream and polls quotes for what the stream does not carry)
     if (s.route.screen === 'markets') {
       const drawn = [...root.querySelectorAll('tr[data-id]')].map(el => el.dataset.id);
-      markets.rowsInView(drawn.length === 0 && isAccountKey(s.route.id) ? [s.route.id] : drawn);
+      // (an A share's page reads its own quote by its route, beside the rows: it names none)
+      markets.rowsInView(drawn.length === 0 && !isCnKey(s.route.id) && isAccountKey(s.route.id) ? [s.route.id] : drawn);
     }
 
     const sameEditor = editorOf(s.edit) === last.editor;
@@ -479,11 +471,11 @@ export function boot(win, host = {}) {
     if (!inTrade(r) && inTrade(was)) { stopTradeSearch(); trade.closeTicket(); }
     // a market's page (an Account key): its market followed on the stream with its candles and compare rows, and what is held of
     // it and the statement's lines about it read; leaving it lets the market go
-    // an A share's page (a cn: id) too: its history from the face's own route, nothing of the Account's
-    const pageId = route => (route?.screen === 'markets' && (isAccountKey(route.id) || /^cn:\d{6}$/.test(String(route.id))) ? route.id : null);
+    // an A share's page (a cn: id) too: its history at the Account's china venue, and nothing held or stated read for it
+    const pageId = route => (route?.screen === 'markets' && (isCnKey(route.id) || isAccountKey(route.id)) ? route.id : null);
     if (pageId(r) !== pageId(was)) {
       markets.page(pageId(r));
-      if (isAccountKey(pageId(r))) { void account.loadHoldings(); void account.loadStatement(); }
+      if (!isCnKey(pageId(r)) && isAccountKey(pageId(r))) { void account.loadHoldings(); void account.loadStatement(); }
     }
     // Trade entered on a market (#/trade/<id>), after a page left let its market go: the ticket on it — a buy, or the side a
     // market page's Buy or Sell asked for — unless one is open on it already

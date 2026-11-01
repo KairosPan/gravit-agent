@@ -23,9 +23,9 @@ export const reducers = {
     if (route.screen === 'messages' && !(route.id === 'new' && state.draft) && !state.conversations.some(c => c.id === route.id)) {
       route = { screen: 'messages', id: firstOpen(state.conversations)?.id ?? null };
     }
-    // a market id is the Account's key as it is (coin:BTC, event:predict:…), or the face's (us:AAPL, crypto:BTC/USD, cn:600519)
-    // canonicalised; one that is neither opens Markets
-    if (route.screen === 'markets' && route.id) route = { screen: 'markets', id: isAccountKey(route.id) ? route.id : canonicalId(route.id) };
+    // a market id is the Account's key as it is (coin:BTC, event:predict:…), or an A share's or an old face id (cn:600519 from
+    // cn:sh600519, us:AAPL, crypto:BTC/USD) canonicalised; one that is neither opens Markets
+    if (route.screen === 'markets' && route.id) route = { screen: 'markets', id: !String(route.id).startsWith('cn:') && isAccountKey(route.id) ? route.id : canonicalId(route.id) };
     let s = { ...state, route, detailsOpen: false, settingsOpen: false, edit: null, confirm: null, ...stockClosed(state) };
     // the first level's Messages key returns to the conversation you last had open
     if (route.screen === 'messages' && route.id && route.id !== 'new') s.lastConv = route.id;

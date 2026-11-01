@@ -1,8 +1,8 @@
 // face/client/js/render/markets.js — Markets on the face (spec 2026-10-22 §6.1): the Account's markets in one table, by its
 // tabs, with its sorts and its search — each row's price by kind and where the price is from, in the Account's own words —
-// beside the face's own A-share (cn:) rows, quoted by the face's wire; and a market's page (#/markets/<key>) from the Account's
-// reads: its price and 24 hours, its facts, its price history for the range chosen, its lines across venues, what is held,
-// working and stated for it, the conversations that name it. A cn: page is the face's own quote, as before. Every figure and
+// beside the A-share (cn:) rows, quoted by the Account too; and a market's page (#/markets/<key>) from the Account's reads: its
+// price and 24 hours, its facts, its price history for the range chosen, its lines across venues, what is held, working and
+// stated for it, the conversations that name it. A cn: page is the A share's own, from its quote and its history. Every figure and
 // every word about a market is a view's (host/market-view.js): this module puts a figure in its unit's words, joins the views'
 // words, and says, where rows or lines would be, how far their read has got. On a page that signs for the Account, an Account
 // market's page carries Buy, and Sell where the market is held: each opens the Trade ticket (spec 2026-10-22 §6.4).
@@ -17,12 +17,13 @@ import { candlesSvg, sessionsSvg } from './chart.js';
 import { orderWords } from './account.js';
 import {
   CANDLE_RANGES, isAccountKey, tableOf, pageOf, faceAssetOf, mentionsOf, volumeWordOf,
-  connectionWord, searchWord, watchWord, basisWord,
+  connectionWord, watchWord, basisWord,
   chinaWord, cnStateWord, cnPageOf, cnTileOf, cnBoardOf,
 } from '../host/market-view.js';
 import { yuan, fix2 } from './lunhui/block.js';
 import { intradaySvg } from './lunhui/intraday.js';
 import { tradeableOf } from '../host/trade-view.js';
+import { isCnKey } from '../wire/china.js';
 
 const EM = '—';
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -97,22 +98,31 @@ function table(rows, { china = false } = {}) {
 }
 
 // where the rows would be when there are none, from the read they are from: nothing starred; an answer with nothing in it; a
-// read still on its way (and, while searching, the face's own search for the A shares); or one that failed before it answered
-function emptyWord(read, tab, searching, search) {
+// read still on its way; or one that failed before it answered
+function emptyWord(read, tab, searching) {
   if (tab === 'watching' && !searching) return 'Nothing watched yet';
   if (tab === 'china' && !searching) return read.status === 'error' ? 'China unavailable' : read.answered && read.status === 'ready' ? 'No markets' : 'Loading…';
-  const busy = searching && search?.status === 'loading';
-  if (read.answered && !busy) return 'No markets';
-  if (read.status !== 'error' || busy) return searching ? 'Searching…' : 'Loading…';
+  if (read.answered) return 'No markets';
+  if (read.status !== 'error') return searching ? 'Searching…' : 'Loading…';
   return searching ? 'Search is unavailable' : 'Markets unavailable';
 }
 
-// the face's own search for the A shares, while a query is active: its failure, or its answer when it says it is partial, in its
-// own words — never its silence; its other states are the table's (its hits drawn, Searching…, No markets)
+// the search's A shares, while a query is active: the Account answered without China's hits (its `missing` names china) —
+// Search is unavailable for them; else nothing (their hits drawn, or none matching)
 function cnSearchWord(m, searching) {
-  const s = m.search;
-  const said = s?.status === 'error' || (s?.status === 'success' && s.partial === true && records(s.assets).length > 0);
-  return searching && said ? searchWord(s) : '';
+  const body = m.results?.data;
+  const missed = body?.ok === true && records(body.missing).some(x => x.venue === 'china');
+  return searching && missed ? 'Search is unavailable' : '';
+}
+
+// China's muted lines: the session's (Closed, the midday break); then the Account's own words when it says China's read is stale,
+// else, for a ranking the proxy re-served as last read (the Account not answering), that; else a refresh that failed over the
+// rows kept
+function chinaLines(read, data, session) {
+  const why = data?.status?.state === 'stale' ? String(data.status.said ?? '').trim()
+    : data?.stale === true ? 'The Account is not answering · China as last read'
+    : read.status === 'error' && read.answered ? 'Couldn’t refresh China' : '';
+  return note(chinaWord(session)) + note(why);
 }
 
 export function renderMarketsScreen(state, now) {
@@ -133,11 +143,10 @@ export function renderMarketsScreen(state, now) {
   // the muted lines: the Account's own sentence when the read the rows are from refused, the A-share search's when it failed or
   // answered in part (said once: not again under a table that already says it), the face's wire's state where an A share is
   // drawn, the watchlist's
-  const emptyText = rows.length ? '' : emptyWord(read, m.tab, searching, m.search);
+  const emptyText = rows.length ? '' : emptyWord(read, m.tab, searching);
   const cnSearch = cnSearchWord(m, searching);
   const cnDrawn = rows.some(r => r.source === 'face' && !r.notListed);
-  // China: the session's line (Closed, the midday break), and a refresh that failed over the rows kept
-  const chinaWords = china ? note(chinaWord(session)) + (read.status === 'error' && read.answered ? note('Couldn’t refresh China') : '') : '';
+  const chinaWords = china ? chinaLines(read, m.rank?.data, session) : '';
   // China's failure is said once, in the face's words: the route's own error text is not a sentence of the Account's
   const words = chinaWords + note(china ? '' : read.message) + note(cnSearch !== emptyText ? cnSearch : '') + (cnDrawn ? note(connectionWord(m.connection)) : '') + note(watchWord(m.watchError));
   const body = rows.length ? table(rows, { china }) : empty(emptyText);
@@ -177,10 +186,10 @@ function partBody(r, lines, none, unavailable) {
   return `${said}${lines.length ? feed(lines) : none ? empty(none) : ''}`;
 }
 
-/** A market's page, or '' for an id no read lists (the screen then draws the table): an Account key's from its reads, a cn:
- *  id's from the face's own quote. */
+/** A market's page, or '' for an id no read lists (the screen then draws the table): an A share's (a cn: id) its own, from its
+ *  quote and history, reached cold or not; another Account key's from its reads. */
 export function marketPage(id, state, now) {
-  if (isAccountKey(id)) {
+  if (!isCnKey(id) && isAccountKey(id)) {
     const view = pageOf(state.markets, state.account, id, now);
     return view ? accountPage(id, view, state, now) : '';
   }
@@ -248,7 +257,7 @@ function accountPage(id, view, state, now) {
   return pageHtml(who, keysHtml(id, view.watched, trade), top, left, right);
 }
 
-// an A share's page, the face's own: its quote against the previous close, its facts, the conversations that name it
+// an A share's page: its quote (the Account's) against the previous close, its facts, the conversations that name it
 // a figure of the A-share page in its unit's words (spec 2026-10-31 §5): yuan prices, yuan amounts in 万/亿/万亿, percents,
 // a ratio with U+2212 for a negative, shares in 万股/亿股; none is —
 function factWord({ value: v, unit }) {

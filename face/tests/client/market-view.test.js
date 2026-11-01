@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  canonicalId, quoteWord, connectionWord, providerWord, basisWord, sourceWord, volumeWord, volumeWordOf, searchWord, watchWord, mentionsOf,
+  canonicalId, quoteWord, connectionWord, providerWord, basisWord, sourceWord, volumeWord, volumeWordOf, watchWord, mentionsOf,
   ACCOUNT_TABS, ACCOUNT_SORTS, CANDLE_RANGES, isAccountKey, tabsOf, priceOf, sourceWordOf, legsOf, rowsOf, tableOf, sortsOf, matchKey, pairsOf,
   pageOf, faceAssetOf, handWordsOf, watchedOf, watchKeysOf, setWatchOf,
   CHINA_TAB, cnBoardOf, cnTileOf, chinaRowsOf, chinaWord, cnStateWord, cnPageOf,
@@ -34,7 +34,7 @@ const quote = (id, over = {}) => ({
 // tab: `all` is explore?limit=200, a kind's own explore?tab=<kind>&limit=200
 const markets = (over = {}) => ({
   tab: 'all', sort: 'volume', q: '', watchlist: [], watchError: null, quotes: {}, providers: [], connection: 'idle',
-  search: { query: '', status: 'idle', assets: [], partial: false }, hitQuotes: {},
+  hitQuotes: {},
   explore: {}, results: { status: 'idle', data: null, at: null },
   accountQuotes: {}, candles: {}, compare: {}, watch: [], asked: {}, ...over,
 });
@@ -42,6 +42,11 @@ const markets = (over = {}) => ({
 const accountSlice = (over = {}) => ({
   status: 'ready', data: fx('account'), at: 1, message: null,
   holdings: read(fx('holdings')), paper: read(fx('holdings-paper')), statement: read(fx('statement')), ...over,
+});
+// an A share as the Account's explore?q answer carries it (its hit), at venue china
+const cnItem = (code, name, over = {}) => ({
+  key: `cn:${code}`, kind: 'ashare', name, base: code, currency: 'CNY', price: null, changePct24h: null, quoteFrom: 'Tencent', tabs: ['china'],
+  at: [{ venue: 'china', venueName: 'Tencent', symbol: code, connected: false, canTrade: false, public: true, price: null, quoteFrom: 'Tencent' }], ...over,
 });
 const UNPRICED = { price: null, unit: 'usd', changePct: null, change24h: null, volume: null, volumeUnit: 'usd', implied: null };
 
@@ -83,11 +88,9 @@ test('tabsOf: the fixture tabs in order, All first; Stocks raised by cn rows; Wa
   assert.deepEqual(rowsOf({ ...m, tab: 'watching' }).map(r => r.id), ['stock:AAPL', 'coin:ETH', 'cn:600519']);
   const sol = fx('explore-all');
   sol.items = sol.items.filter(i => i.base === 'SOL');
-  const searching = {
-    ...m, q: 'sol', tab: 'results', results: read(sol),
-    search: { query: 'sol', status: 'success', assets: [asset('crypto:SOL/USD'), asset('cn:601012', { name: 'LONGi' })], partial: false },
-  };
-  assert.deepEqual(rowsOf(searching).map(r => r.id), ['perp:SOL', 'coin:SOL', 'cn:601012'], "the Account's hits and the cn hits; never a crypto hit of the face's");
+  sol.items.push(cnItem('601012', 'LONGi'));
+  const searching = { ...m, q: 'sol', tab: 'results', results: read(sol) };
+  assert.deepEqual(rowsOf(searching).map(r => [r.id, r.source]), [['perp:SOL', 'account'], ['coin:SOL', 'account'], ['cn:601012', 'face']], "the Account's hits, and its A shares drawn as cn rows");
   assert.deepEqual(rowsOf({ ...searching, tab: 'all' }).map(r => r.id), ['perp:SOL', 'coin:SOL', 'cn:601012'], 'while searching, All is the search too');
   assert.deepEqual(rowsOf({ ...searching, tab: 'watching' }).map(r => r.id), ['perp:SOL', 'coin:SOL', 'cn:601012'], 'a search typed on Watching searches every market: the watchlist is not searched');
   assert.deepEqual(rowsOf({ ...searching, q: '' }), [], 'no query, no results');
@@ -281,11 +284,10 @@ test('rowsOf: the fixture rows and two cn rows side by side; source words; the t
 
   // while searching, the Account's rows are its search's and the cn rows its hits alone, never the whole cn watchlist
   const searching = {
-    ...m, q: 'ping', results: read({ ...fx('explore-all'), items: [] }),
-    search: { query: 'ping', status: 'success', assets: [asset('cn:000001', { name: '平安银行', exchange: 'SZSE' }), asset('cn:601318', { name: '中国平安', exchange: 'SSE' })], partial: false },
-    hitQuotes: { 'cn:601318': quote('cn:601318', { price: 52.1, change_pct: 0.4, volume: 5e7 }) },
+    ...m, q: 'ping', results: read({ ...fx('explore-all'), items: [cnItem('000001', '平安银行'), cnItem('601318', '中国平安')] }),
+    hitQuotes: { 'cn:601318': { price: 52.1, change_pct: 0.4 } },
   };
-  assert.deepEqual(rowsOf(searching).map(r => [r.id, r.watched]), [['cn:601318', false], ['cn:000001', true]], 'a hit on the watchlist is starred');
+  assert.deepEqual(rowsOf(searching).map(r => [r.id, r.watched]), [['cn:000001', true], ['cn:601318', false]], 'a hit on the watchlist is starred; the hits carry no volume, so in the search order');
   assert.equal(rowsOf(searching).find(r => r.id === 'cn:601318').priced.price, 52.1, 'a hit takes the quote its search read');
   assert.deepEqual(rowsOf({ ...searching, tab: 'stocks' }).map(r => r.id), []);
   assert.deepEqual(rowsOf({ ...searching, tab: 'crypto' }), []);
@@ -352,7 +354,9 @@ test('matchKey and pairsOf', () => {
   // and never the face's ids
   for (const key of ['coin:BTC', 'stock:AAPL', 'perp:ETH', 'rwa:NVDA', 'kalshi:KXFED-DEC', `pm:0x${'ab'.repeat(32)}`, 'pmus:fed-dec', 'event:predict:SI-FEDCUT-DEC', 'preipo:anthropic']) assert.equal(isAccountKey(key), true, key);
   for (const body of [fx('explore-all'), fx('explore-predictions')]) for (const item of [...body.items, ...body.movers, ...body.closing, ...body.mostTraded]) assert.equal(isAccountKey(item.key), true, item.key);
-  for (const id of ['cn:600519', 'us:AAPL', 'crypto:BTC/USD', 'coinBTC', 'BTC', 'events:x', '', null, undefined]) assert.equal(isAccountKey(id), false, String(id));
+  // an A share is the Account's too, at its china venue
+  assert.equal(isAccountKey('cn:600519'), true);
+  for (const id of ['us:AAPL', 'crypto:BTC/USD', 'coinBTC', 'BTC', 'events:x', '', null, undefined]) assert.equal(isAccountKey(id), false, String(id));
 
   // an old us:/crypto: star: nothing until it is asked; found, it stars the Account's row; not found, the Not listed line; found
   // but in no read, a placeholder that can still be un-starred
@@ -739,7 +743,7 @@ test('handWordsOf: an Account key by its base and name; a face id by its watchli
   const m = markets({
     explore: { all: read(fx('explore-all')), predictions: read(fx('explore-predictions')) },
     watchlist: [asset('cn:600519', { name: 'Kweichow Moutai', exchange: 'SH' }), asset('us:AAPL', { name: 'Apple' })],
-    search: { query: '0000', status: 'success', assets: [asset('cn:000001', { name: 'Ping An Bank', exchange: 'SZ' })], partial: false },
+    q: '0000', results: read({ ...fx('explore-all'), items: [cnItem('000001', 'Ping An Bank')] }),
   });
   const acct = accountSlice();
   // the Account's, from its page's item: its base and its name; an event has no base, so its name is both
@@ -753,7 +757,10 @@ test('handWordsOf: an Account key by its base and name; a face id by its watchli
   // the face's: the watchlist's asset, else the search's, else the id's own — the id canonicalised
   assert.deepEqual(handWordsOf(m, acct, 'cn:600519', NOW), { symbol: '600519', name: 'Kweichow Moutai' });
   assert.deepEqual(handWordsOf(m, acct, 'us:aapl', NOW), { symbol: 'AAPL', name: 'Apple' });
-  assert.deepEqual(handWordsOf(m, acct, 'cn:000001', NOW), { symbol: '000001', name: 'Ping An Bank' });
+  assert.deepEqual(handWordsOf(m, acct, 'cn:000001', NOW), { symbol: '000001', name: 'Ping An Bank' }, "a search's A-share hit");
+  const ranked = markets({ tab: 'china', rank: { status: 'ready', sort: 'volume', at: 1, message: null, data: { ok: true, sort: 'volume', total: 1, items: [{ id: 'cn:600519', symbol: '600519', name: '贵州茅台', price: 1392.05, change_pct: 2.81, turnover: 2.161e10 }] } } });
+  assert.deepEqual(handWordsOf(ranked, acct, 'cn:600519', NOW), { symbol: '600519', name: '贵州茅台' }, 'one the China ranking lists');
+  assert.deepEqual(handWordsOf(markets(), acct, 'cn:600519', NOW), { symbol: '600519', name: '600519' }, 'one no read lists: its code');
   assert.deepEqual(handWordsOf(m, acct, 'crypto:eth-usd', NOW), { symbol: 'ETH/USD', name: 'ETH/USD' });
   for (const id of ['garbage', '', null, undefined]) assert.equal(handWordsOf(m, acct, id, NOW), null, String(id));
   // faceAssetOf: the asset a face id names, its exchange and currency with it; nothing for an Account key
@@ -786,7 +793,6 @@ test('every word is English, and each enum reads as it should', () => {
   for (const basis of ['previous_close', '24h']) words.push(basisWord(quote('us:AAPL', { basis })));
   for (const feed of ['snapshot', 'realtime', 'iex', '']) words.push(sourceWord(quote('cn:600519', { feed })));
   words.push(sourceWord(quote('cn:600519', { source: '腾讯', feed: 'snapshot' })));
-  for (const status of ['idle', 'loading', 'success', 'error']) words.push(searchWord({ query: 'zz', status, assets: [], partial: false, note: '搜索服务暂时不可用，请稍后重试。' }));
   for (const error of [null, 'read', 'unsaved', 'full']) words.push(watchWord(error));
   for (const word of words) assert.doesNotMatch(word, CJK, word);
 
@@ -794,7 +800,7 @@ test('every word is English, and each enum reads as it should', () => {
   assert.equal(quoteWord(quote('us:AAPL', { quote_status: 'delayed', market_status: 'closed' })), 'Delayed · Closed');
   assert.equal(quoteWord(quote('us:AAPL', { quote_status: 'unavailable', price: null, market_status: 'closed' })), 'No quote');
   assert.equal(quoteWord(undefined), 'No quote');
-  assert.deepEqual(['streaming', 'idle', 'connecting', 'polling', 'paused', 'error'].map(connectionWord), ['', '', 'Connecting…', 'Updating every 15 s', 'Paused', 'Quotes unavailable']);
+  assert.deepEqual(['streaming', 'idle', 'connecting', 'polling', 'paused', 'error'].map(connectionWord), ['', '', 'Connecting…', '', 'Paused', 'Quotes unavailable']);
   assert.equal(providerWord({ id: 'tencent', status: 'unconfigured' }), 'Tencent · Not configured');
   assert.equal(providerWord({ id: 'tencent', status: 'connected' }), 'Tencent · Connected');
   assert.equal(providerWord({ id: 'ifind', status: 'connected' }), 'Quotes · Connected', 'the retired iFinD provider is named by none of its own');
@@ -804,12 +810,6 @@ test('every word is English, and each enum reads as it should', () => {
   assert.equal(sourceWord(quote('cn:600519', { source: '腾讯', feed: 'snapshot' })), 'Tencent');
   assert.equal(sourceWord({ market: 'us' }), 'Quotes', 'an old us: star has no provider of the face');
   assert.equal(sourceWord({ market: 'crypto' }), 'Quotes');
-  assert.equal(searchWord({ query: 'zz', status: 'success', assets: [], partial: false }), 'Nothing matches “zz”');
-  assert.equal(searchWord({ query: 'zz', status: 'loading', assets: [], partial: false }), 'Searching…');
-  assert.equal(searchWord({ query: 'zz', status: 'error', assets: [], partial: false }), 'Search is unavailable');
-  assert.equal(searchWord({ query: 'zz', status: 'success', assets: [asset('us:ZZ')], partial: true }), 'Some results may be missing');
-  assert.equal(searchWord({ query: 'zz', status: 'success', assets: [asset('us:ZZ')], partial: false }), '');
-  assert.equal(searchWord({ query: '', status: 'idle', assets: [], partial: false }), '');
   assert.deepEqual([null, 'read', 'unsaved', 'full'].map(watchWord), ['', "Couldn't read the saved watchlist", "Couldn't save the watchlist", 'The watchlist is full']);
 });
 

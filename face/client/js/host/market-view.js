@@ -9,6 +9,7 @@
 // wire's own text (a quote's message, a provider's message, a search note, a source name) is Chinese and never reaches a word
 // here. No DOM.
 import { normalizeAsset, number } from '../wire/market-model.js';
+import { isCnKey, cnHitsOf } from '../wire/china.js';
 import { MIN, HOUR, DAY } from '../time.js';
 import { pageOk, assetsOf, positionsOf, openOrdersOf, statementLinesOf, worthOf } from './account-view.js';
 
@@ -21,7 +22,8 @@ const PROVIDERS = { tencent: 'Tencent' };
 const MARKET_PROVIDER = { cn: 'Tencent' };
 const PROVIDER_STATUS = { connecting: 'Connecting', connected: 'Connected', unconfigured: 'Not configured', error: 'Error', limited: 'Limited' };
 const QUOTE_STATUS = { live: 'Live', delayed: 'Delayed', stale: 'Stale' };
-const CONNECTION = { connecting: 'Connecting…', polling: 'Updating every 15 s', paused: 'Paused', error: 'Quotes unavailable' };
+// `polling` is the A shares' quotes read from the Account every 5 s as they always are now: like streaming, nothing to say
+const CONNECTION = { connecting: 'Connecting…', paused: 'Paused', error: 'Quotes unavailable' };
 const WATCH = { read: "Couldn't read the saved watchlist", unsaved: "Couldn't save the watchlist", full: 'The watchlist is full' };
 
 /** A face instrument id in canonical form (`us:aapl` → `us:AAPL`, `crypto:btc-usd` → `crypto:BTC/USD`), or null. */
@@ -88,15 +90,6 @@ export function volumeWordOf(priced) {
   return `$${compact(volume)}`;
 }
 
-export function searchWord(search) {
-  if (!search || blank(search.query)) return '';
-  if (search.status === 'loading') return 'Searching…';
-  if (search.status === 'error') return 'Search is unavailable';
-  if (search.status !== 'success') return '';
-  if (!search.assets?.length) return `Nothing matches “${search.query.trim()}”`;
-  return search.partial ? 'Some results may be missing' : '';
-}
-
 /** The watchlist's words: this browser's store's (`read`, `unsaved`, `full`), else the Account's own sentence when it refused
  *  a setWatch (host/markets.js keeps it as the error); nothing else. */
 export function watchWord(error) {
@@ -144,15 +137,16 @@ const noIcon = v => (!hasIcon(v) ? v : Array.isArray(v) ? v.map(noIcon)
   : Object.fromEntries(Object.entries(v).filter(([k]) => k !== 'icon').map(([k, x]) => [k, noIcon(x)])));
 
 /** True for the Account's own row keys — `coin:BTC`, `stock:AAPL`, `perp:ETH`, `rwa:NVDA`, `kalshi:…`, `pm:…`, `pmus:…`, an
- *  event at any other venue (`event:<venue>:<market>`) and a pre-IPO perpetual (`preipo:<company>`) — never a face id (`cn:`,
- *  `us:`, `crypto:`). */
+ *  event at any other venue (`event:<venue>:<market>`), a pre-IPO perpetual (`preipo:<company>`) and an A share (`cn:600519`,
+ *  the Account's china venue) — never an old face id (`us:`, `crypto:`). An A share's path differs from the others' wherever
+ *  its page, its reads or its star are concerned: a caller tests isCnKey first. */
 export function isAccountKey(id) {
-  return typeof id === 'string' && /^(coin|stock|perp|rwa|event|preipo|kalshi|pm|pmus):/.test(id);
+  return typeof id === 'string' && /^(coin|stock|perp|rwa|event|preipo|kalshi|pm|pmus|cn):/.test(id);
 }
 
-// ── the China tab (spec 2026-10-31): the face's own ranking of the A shares, and the A-share words ──
+// ── the China tab (spec 2026-10-31): the Account's ranking of the A shares, and the A-share words ──
 
-/** The China tab's id: the face's own tab, never one of the Account's (no explore read is ever asked for it). */
+/** The China tab's id: the Account's china tab (explore?tab=china, its ranking by a sort), drawn after its other tabs. */
 export const CHINA_TAB = 'china';
 
 /** An A share's board from its code: STAR (688, 689), ChiNext (300–302), SH, SZ or BJ; '' for none. */
@@ -195,7 +189,7 @@ export function chinaWord(session) {
  *  live, delayed (the last trade's time), all in Beijing time; nothing before a priced quote. No Halted: no mark was found. */
 export function cnStateWord(quote, connection, providers = []) {
   if (connection === 'error') return 'Quotes unavailable';
-  // the face's wire alive but Tencent itself failing: its stale price is no delay, it is an outage
+  // the Account answering but Tencent itself failing (China's state not live): a stale price is no delay, it is an outage
   const tencent = (Array.isArray(providers) ? providers : []).find(p => p?.market === 'cn');
   if (quote?.quote_status === 'stale' && tencent && tencent.status !== 'connected' && tencent.status !== 'limited') return 'Quotes unavailable';
   if (!quote || number(quote.price) === null) return '';
@@ -402,7 +396,7 @@ export function setWatchOf(markets, page, id) {
  *  a read lists; a face id, canonicalised, on the cn list. */
 export function watchedOf(markets, id, page = null) {
   const m = isRecord(markets) ? markets : {};
-  if (isAccountKey(id)) return starredOf(m).includes(id) || watchKeysOf(page, exploreRowsOf(m)).includes(id);
+  if (!isCnKey(id) && isAccountKey(id)) return starredOf(m).includes(id) || watchKeysOf(page, exploreRowsOf(m)).includes(id);
   const canonical = canonicalId(id);
   return canonical !== null && records(m.watchlist).some(a => a.id === canonical);
 }
@@ -449,8 +443,8 @@ function placeholderRow(key) {
   };
 }
 
-// a cn row, quoted by the face's own wire (the Tencent provider): its stream's quote, else the one its search read; its price in its
-// currency, its volume in shares; its tile its code
+// a cn row, quoted by the Account (venue china, Tencent's): its quotes poll's quote, else the price its search hit carried; its
+// price in its currency, its volume in shares; its tile its code
 function cnRow(asset, markets, watched) {
   const quote = own(markets.quotes, asset.id) ?? own(markets.hitQuotes, asset.id) ?? null;
   const priced = {
@@ -563,7 +557,9 @@ function unsortedRowsOf(m, searching, reads, now, atPage) {
   const face = () => [...cn.map(a => cnRow(a, m, true)), ...old.filter(a => own(m.asked, a.id) === null).map(notListedRow)];
   const fromResults = searching && readable(m.results?.data);
   const listed = new Set(cn.map(a => a.id));
-  const hits = searching ? records(m.search?.assets).map(a => normalizeAsset(a)).filter(a => a?.market === 'cn').map(a => cnRow(a, m, listed.has(a.id))) : [];
+  // the search's A shares: its cn items, drawn as the cn rows they are (their prices the hits' own), never as the Account's rows
+  const hits = searching ? cnHitsOf(m.results?.data).assets.map(a => cnRow(a, m, listed.has(a.id))) : [];
+  const dollars = body => itemsOf(body).filter(i => !isCnKey(i.key));
   let rows;
   if (tab === 'watching') {
     const lists = [...everyRow(bodyOf(reads, 'watching')), ...everyRow(all)];
@@ -574,11 +570,11 @@ function unsortedRowsOf(m, searching, reads, now, atPage) {
       ...face(),
     ];
   } else if (tab === 'results') {
-    rows = searching ? [...(fromResults ? itemsOf(m.results.data).map(row) : []), ...hits] : [];
+    rows = searching ? [...(fromResults ? dollars(m.results.data).map(row) : []), ...hits] : [];
   } else {
     const tabBody = bodyOf(reads, tab);
     const body = fromResults ? m.results.data : readable(tabBody) ? tabBody : all;
-    rows = [...itemsOf(body).map(row), ...(searching ? hits : face())];
+    rows = [...dollars(body).map(row), ...(searching ? hits : face())];
     if (KIND_TABS.has(tab)) rows = rows.filter(r => r.tabs.includes(tab));
   }
   return rows;
@@ -698,7 +694,7 @@ export function faceAssetOf(markets, id) {
   const canonical = canonicalId(id);
   if (!canonical) return null;
   const m = isRecord(markets) ? markets : {};
-  const listed = [...records(m.watchlist), ...records(m.search?.assets)].map(a => normalizeAsset(a)).find(a => a?.id === canonical);
+  const listed = [...records(m.watchlist), ...cnHitsOf(m.results?.data).assets].map(a => normalizeAsset(a)).find(a => a?.id === canonical);
   if (listed) return listed;
   // a share the China ranking lists, else one whose quote has landed with its name (a deep link)
   const ranked = records(rankOf(m)?.items).find(i => i.id === canonical);
@@ -739,7 +735,7 @@ export function cnPageOf(markets, id) {
 /** What Hand to Gravit names a market by, `{ symbol, name }`: an Account key by its page's item — its base, else its name, and its
  *  name — a face id by its asset's symbol and name; null for a key no read lists, or an id that is neither. */
 export function handWordsOf(markets, account, id, now = Date.now()) {
-  if (isAccountKey(id)) {
+  if (!isCnKey(id) && isAccountKey(id)) {
     const item = pageOf(markets, account, id, now)?.item;
     const name = str(item?.name);
     const symbol = str(item?.base) || name;
