@@ -302,7 +302,17 @@ export function boot(win, host = {}) {
   // fills the address — and the name, when none is typed — or says the wallet's or the Account's refusal
   let connectWallets = [];
   let walletsFor = null;   // the connect sheet's seed they were found for
-  const sameConnect = seed => { const t = store.get().sheet; return t?.kind === 'connect' && t.seed === seed; };
+  const sameConnect = (seed, connector) => {
+    const t = store.get().sheet;
+    return t?.kind === 'connect' && t.seed === seed && (connector === undefined || connectOptionOf(t)?.connector === connector);
+  };
+  // the connector changed: a wallet's proof (or its refusal) was for the option before, and is forgotten; the wallets found stay
+  function connectorChanged() {
+    const cw = store.get().account.connectWallet;
+    if (['asking', 'proven', 'refused'].includes(cw?.status)) {
+      store.dispatch('connectWallet', { status: connectWallets.length ? 'found' : 'none', wallet: '', address: '', message: null });
+    }
+  }
   async function findConnectWallets() {
     const s = store.get().sheet;
     if (s?.kind !== 'connect' || !isWalletOption(connectOptionOf(s)) || walletsFor === s.seed) return;
@@ -323,17 +333,19 @@ export function boot(win, host = {}) {
     const w = connectWallets.find(x => x.id === id);
     if (s?.kind !== 'connect' || !w || store.get().account.connectWallet.status === 'asking') return;
     const seed = s.seed;
+    const connector = connectOptionOf(s)?.connector;
     const name = typeof w.name === 'string' && w.name ? w.name : 'Browser wallet';
     store.dispatch('connectWallet', { status: 'asking', wallet: name, address: '', message: null });
     try {
       const proven = await proveWallet({ ...w, name }, ownerPost);
-      if (!sameConnect(seed)) return;
+      // proven for the option it was asked on, and only landed there
+      if (!sameConnect(seed, connector)) return;
       sheet.change('ref', proven.address);
       const label = (store.get().sheet.fields ?? []).find(f => f?.name === 'label');
       if (label && (typeof label.value !== 'string' || !label.value.trim())) sheet.change('label', name);
       store.dispatch('connectWallet', { status: 'proven', address: proven.address });
     } catch (err) {
-      if (!sameConnect(seed)) return;
+      if (!sameConnect(seed, connector)) return;
       store.dispatch('connectWallet', { status: 'refused', message: String(err?.message || err || 'the wallet refused').slice(0, 200) });
     }
   }
@@ -348,7 +360,7 @@ export function boot(win, host = {}) {
   // a bridge's preparation, once it is the one the sheet shows, has its routes read beside it (the retired page's money.js show)
   const sheet = startSheet({
     store, owner, schedule, cancelTimer, now, afterAction,
-    onChange: (kind, name) => { if (kind === 'connect') { checkConnectSoon(); if (name === 'connector') void findConnectWallets(); } },
+    onChange: (kind, name) => { if (kind === 'connect') { checkConnectSoon(); if (name === 'connector') { connectorChanged(); void findConnectWallets(); } } },
     onPrepared: (kind, prepared, draft) => { if (kind === 'move' && prepared?.action?.kind === 'bridge') void account.bridgeRoutes(draft); },
     // a sign-out in Beast with Guard first ticked: Guard (unsigned) before the signature, and refused, nothing signed (plan 4b
     // Task 6, agents-mount.js signOutAsk)
@@ -359,8 +371,9 @@ export function boot(win, host = {}) {
     },
   });
   // Sell many (plan 4b Task 3): up to ten holdings at market, each prepared and signed in turn over the owner device; a DEX
-  // sale's send started on the operator's own wallet; the Account read again once a run ends
-  const sellMany = startSellMany({ store, getJson, owner, walletSend, afterAction, now });
+  // sale's send handed to sendFromWallet, which reads the Account again once the wallet answers; the Account read again once a
+  // run ends
+  const sellMany = startSellMany({ store, getJson, owner, sendOrder: o => sendFromWallet(walletSend.order(o)), afterAction, now });
   // a receipt reloads the Account's read past the cache, and one from the Account seat (every receipt the kind table
   // lifts today) the seat's standing too
   const live = startLive({ store, openMux: host.openMux ?? wireOpenMux, call, mapFrame, getJson, timers, now, onReceipt: m => { if (m?.data?.seat) void seat.load({ fresh: true }); void account.load({ fresh: true }); } });

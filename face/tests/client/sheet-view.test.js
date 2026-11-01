@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 import { SHEET_KINDS, fieldsOf, refieldsOf, draftOf, titleOf, goWord, grantOf, grantsAsk, limitSeedOf, letDeviceSeedOf, paperSeedOf, signOutSeedOf, signOutLineOf, guardFirstOf, connectCheckOf } from '../../client/js/host/sheet-view.js';
 import { moveSeedOf } from '../../client/js/host/sheet-money.js';
 import { venuesOf, connectOptionsOf } from '../../client/js/host/account-view.js';
+import { moveSourcesOf } from '../../client/js/host/money-view.js';
 
 const fx = name => JSON.parse(readFileSync(new URL(`../fixtures/account/${name}.json`, import.meta.url), 'utf8'));
 const NOW = Date.UTC(2026, 9, 22, 7, 35, 46);
@@ -230,8 +231,23 @@ test('an address connects under the kind, or kind-<6 hex> when the kind is on th
   const back = refieldsOf('connect', set(wallet, { connector: 'live:alpaca', label: 'Kept' }), seed);
   assert.deepEqual(back.map(f => f.name), ['connector', 'exchange', 'venue', 'label', 'credentialRef']);
   assert.equal(valueOf(back, 'label'), 'Kept');
-  // another address kind keeps the form as it is
-  assert.equal(refieldsOf('connect', set(wallet, { connector: 'live:hyperliquid' }), seed).find(f => f.name === 'ref').value, HL);
+});
+
+test('changing the connector keeps the label and drops a typed or proven address, even for another address option', () => {
+  const seed = connectSeed();
+  // typed (or filled by the wallet's proof, which lands in the same field) for one address kind
+  const wallet = picked(seed, 'live:wallet', { ref: HL, label: 'Mine' });
+  const other = refieldsOf('connect', set(wallet, { connector: 'live:hyperliquid' }), seed);
+  assert.deepEqual(other.map(f => f.name), ['connector', 'ref', 'label'], 'the same shape');
+  assert.equal(valueOf(other, 'connector'), 'live:hyperliquid');
+  assert.equal(valueOf(other, 'ref'), '', 'the address is not carried to another option');
+  assert.equal(valueOf(other, 'label'), 'Mine', 'the name kept');
+  // typing on the same option keeps what is typed
+  const typed = refieldsOf('connect', set(other, { ref: HL }), seed);
+  assert.equal(valueOf(typed, 'ref'), HL);
+  assert.equal(refieldsOf('connect', typed, seed), typed, 'nothing changed: the same fields');
+  // and back to the first kind: still nothing carried
+  assert.equal(valueOf(refieldsOf('connect', set(typed, { connector: 'live:wallet' }), seed), 'ref'), '');
 });
 
 test('a bad address is said', () => {
@@ -479,6 +495,20 @@ test('grantOf answers a sheet for every kind of ask', () => {
   for (const kind of ['limit', 'venue', 'letIn', 'topup', 'session', 'leverage', 'mode']) assert.equal(grantsAsk(ask({ kind }), page), true, kind);
   assert.equal(grantOf(null), null);
   assert.equal(grantsAsk(ask({ kind: 'letIn' }), null), false, 'no page read');
+});
+
+test('a topup with no own source seeds an empty from', () => {
+  const page = fx('account');
+  const ask = { id: 'ask-0010', kind: 'topup', agent: AGENT, agentName: 'Claude Code', venue: '', usd: '25', text: 'Please', at: '', expiresAt: '' };
+  assert.equal(grantOf(ask, page).seed.from, 'ex', 'an own source: the first');
+  // every account money moves from is an agent wallet: no Grant key, and grantOf answers no sheet rather than read a source
+  // that is not there (`?.id ?? ''`, should grantsAsk ever let it through)
+  const own = new Set(moveSourcesOf(page).filter(x => !x.agent).map(x => x.id));
+  const none = { ...page, venues: page.venues.filter(v => !own.has(v.id)) };
+  assert.deepEqual(moveSourcesOf(none).filter(x => !x.agent), []);
+  assert.equal(grantsAsk(ask, none), false);
+  assert.doesNotThrow(() => grantOf(ask, none));
+  assert.equal(grantOf(ask, none), null);
 });
 
 test("grantsAsk follows the Account page's pfGrantable: Beast in force, a read-only Account, no dial", () => {

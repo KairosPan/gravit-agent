@@ -14,6 +14,8 @@ const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const str = v => (typeof v === 'string' ? v : '');
 const list = v => (Array.isArray(v) ? v.filter(isRecord) : []);
 const PAGE = '/data/account?fresh=1';
+/** What a press with nothing to key it by answers: nothing was sent. */
+export const NO_KEY = 'Nothing was sent: this one carries no id the Account can send for. Refresh and try again.';
 
 /** The key a payment's wallet flow is held by (the retired page: its id and time, which no other run of the Account reuses). */
 export const paymentKeyOf = p => `${str(p?.id)}@${str(p?.at)}`;
@@ -31,9 +33,10 @@ export function startWalletSend({ store, post, getJson, getWallets, schedule }) 
   };
   const gone = (id, now) => new Error(`${id} is no longer waiting for your wallet (${now ? str(now.status) || 'gone' : 'gone'}): nothing was sent`);
 
-  // one flow per key: a second press while one is in the air joins it
+  // one flow per key: a second press while one is in the air joins it; no key (no payment id, no client id): nothing sent, and
+  // the answer says why — no row to hang it on, so nothing lands in the store (app.js sendFromWallet says it under Trade)
   function once(key, run) {
-    if (!key || key.startsWith('@')) return Promise.resolve(null);
+    if (!key || key.startsWith('@')) return Promise.resolve({ key: '', status: 'refused', said: NO_KEY });
     const inAir = flights.get(key);
     if (inAir) return inAir;
     if (closed) return Promise.resolve(null);

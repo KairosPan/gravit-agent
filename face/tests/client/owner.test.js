@@ -270,3 +270,17 @@ test("a connect sheet draws its check under the fields: the key file found or mi
   assert.equal(line(letIn), null);
   clean(renderSheet(unreached, NOW));
 });
+
+test('Sign in at is off while the sign-in starts, waits or is ready', () => {
+  const options = connectOptionsOf(fx('account'), fx('venues'));
+  const rh = opened('connect', { options, connector: 'live:robinhood' });
+  const ON = '<button type="button" class="btn-sm" data-action="connectSignIn">Sign in at Robinhood</button>';
+  const OFF = '<button type="button" class="btn-sm" data-action="connectSignIn" disabled>Sign in at Robinhood</button>';
+  for (const status of ['starting', 'waiting', 'ready']) {
+    has(renderSheet(R.signIn(rh, { status, connector: 'live:robinhood', url: 'https://robinhood.example/o', tab: true, state: 'st' }), NOW), OFF, status);
+  }
+  // over, or never started: pressable again
+  for (const status of ['idle', 'failed', 'expired']) has(renderSheet(R.signIn(rh, { status, connector: 'live:robinhood' }), NOW), ON, status);
+  // another option's sign-in does not hold this one's key
+  has(renderSheet(R.signIn(rh, { status: 'waiting', connector: 'live:other' }), NOW), ON);
+});

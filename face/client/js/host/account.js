@@ -310,7 +310,8 @@ export function startAccount({ store, getJson, post = noDoor, now = Date.now, sc
    *  the sheet draws the link); then `/data/account/signin/status?state=` every SIGNIN_POLL_MS for at most SIGNIN_WITHIN_MS,
    *  only while `alive()` (the sheet it was started from, on this option) — `ready` lands the state through `onReady(state)`,
    *  `failed` the Account's words; an answer the face re-served as stale, an `unknown`, or no answer is not the final status:
-   *  the poll goes on. A second start supersedes the first's poll. */
+   *  the poll goes on. A second start supersedes the first's poll, and clears the state a first one kept in the sheet's hidden
+   *  `credentialRef` before it asks. */
   let signInSeq = 0;
   let signInTimer = null;
   function stopSignIn() { if (signInTimer !== null) { cancelTimer(signInTimer); signInTimer = null; } }
@@ -324,6 +325,8 @@ export function startAccount({ store, getJson, post = noDoor, now = Date.now, sc
     const connector = option.connector;
     const live = () => !closed && mine === signInSeq && alive();
     store.dispatch('signIn', { status: 'starting', connector, url: '', tab: tab !== null, state: '', message: null });
+    // a state an earlier sign-in kept in the sheet's hidden field is not this one's: cleared before the Account is asked
+    if (alive()) store.dispatch('sheetField', { name: 'credentialRef', value: '' });
     let r;
     try { r = await post('/data/account/signin/start', { connector: str(option.kind) }); } catch { r = { status: 0, body: {} }; }
     const url = webUrl(r?.body?.url), state = str(r?.body?.state);

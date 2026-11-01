@@ -1984,6 +1984,14 @@ test("the connect sheet's wallet tile proves the fake wallet and fills the addre
   await until(() => door.sent('/data/account/prepare').some(b => b.draft.connector === 'live:wallet'), 'the preparation');
   assert.deepEqual(door.sent('/data/account/prepare').find(b => b.draft.connector === 'live:wallet').draft,
     { type: 'connectVenue', venue: 'wallet-121212', connector: 'live:wallet', label: 'Fake Wallet', credentialRef: WALLET_ADDRESS });
+  // another address option picked: the proven address is not carried to it, the name is, and the proof is forgotten
+  pickConnector(f, 'live:hyperliquid');
+  await settle();
+  const moved = Object.fromEntries(store.get().sheet.fields.map(fl => [fl.name, fl.value]));
+  assert.deepEqual([moved.connector, moved.ref, moved.label], ['live:hyperliquid', '', 'Fake Wallet']);
+  assert.equal(store.get().account.connectWallet.status, 'found', 'the wallets found stay, the proof does not');
+  assert.equal(store.get().account.connectWallet.address, '');
+  assert.doesNotMatch(f.html(), /is yours\./);
   store.timers.clear();
 });
 
@@ -3244,5 +3252,48 @@ test('Sell many… on the Portfolio: the drawer reads what can be sold, a pick, 
   assert.ok(h.reads.filter(isPage).slice(pagesBefore).includes('/data/account?fresh=1'), 'the page read again');
   f.click({ tagName: 'BUTTON', dataset: { action: 'sellManyClose' } });
   assert.equal(store.get().sellMany, null);
+  store.timers.clear();
+});
+
+test("Sell many's DEX leg reads the Account again after the wallet answers", async () => {
+  const f = fakeWindow({ hash: '#/account/portfolio', storage: memoryStorage() });
+  const provider = fakeProvider({ flags: { isMetaMask: true } });
+  f.win.ethereum = provider;
+  const tx = { chainId: 8453, chainIdHex: '0x2105', from: WALLET_ADDRESS, to: '0x' + '34'.repeat(20), data: '0xabcd', value: '0x0', what: 'swap' };
+  let placed = false, reported = null;
+  const dexOf = base => ({ ...base, id: 'ord-0031', clientId: 'c0ffee00c0ffee01', venue: 'dex', venueName: 'Uniswap', status: 'pending', ref: undefined, walletTxs: [tx], ...(reported ? { ref: reported, status: 'open' } : {}) });
+  const door = ownerDoor({ exchange: action => (action?.type === 'liveOrder'
+    ? (placed = true, { ok: true, kind: 'order', order: dexOf(door.page().orders.find(o => o.id === 'ord-0009')) })
+    : { ok: true, kind: 'result', result: { ok: true } }) });
+  const page = () => {
+    const p = door.page();
+    return placed ? { ...p, orders: [dexOf(p.orders.find(o => o.id === 'ord-0009')), ...p.orders] } : p;
+  };
+  let readsAtReport = null;
+  const post = async (path, body) => {
+    if (path === '/data/account/live/order-sent') { door.posts.push([path, body]); reported = body.hash; readsAtReport = h.reads.length; return { status: 200, body: { ok: true } }; }
+    return door.post(path, body);
+  };
+  const sellable = { ok: true, items: [
+    { key: 'crypto:WETH', asset: 'WETH', venue: 'dex', venueName: 'Uniswap', action: 'sell', symbol: 'WETH/USDC', held: 0.35, sellQty: 0.35, ready: true },
+  ], missing: [] };
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': page, '/data/account/sellable': () => sellable } });
+  const store = bootOwner(f, h, door, fakeMarkets(), { ownerPost: post });
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSellMany' } });
+  await until(() => store.get().sellMany?.status === 'picking', 'what can be sold');
+  f.fire('root', 'change', { target: { tagName: 'INPUT', type: 'checkbox', name: 'pick', value: '0', checked: true, dataset: { action: 'sellManyPick' } } });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sellManyReview' } });
+  await until(() => store.get().sellMany?.legs?.[0]?.state === 'ready', 'the leg prepared');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sellManyRun' } });
+  await until(() => store.get().sellMany?.status === 'done', 'the run');
+  assert.equal(store.get().sellMany.said, 'Sell many: 0 of 1 sale went through, 1 waiting for your wallet');
+  await until(() => door.sent('/data/account/live/order-sent').length === 1, 'the report');
+  assert.equal(provider.count('eth_sendTransaction'), 1, 'the swap sent once');
+  await until(() => store.get().trade.said !== null, 'the wallet\'s words said');
+  assert.equal(store.get().trade.said, 'MetaMask sent it: 0xaaaaaa…aaa1');
+  await until(() => h.reads.slice(readsAtReport).includes('/data/account?fresh=1'), 'the Account read again after the wallet answered');
   store.timers.clear();
 });

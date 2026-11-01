@@ -913,6 +913,22 @@ test('Money\'s Earn: what is in each product with Take out…, and Put in…, on
   has(draw(moneySigns(R.earnFailed(state({ tab: 'money', page: earnPage() }), { at: NOW, message: 'earn is off at this account' }))), 'earn is off at this account');
 });
 
+test('a failed earn read shows its refusal and no "Nothing is earning" line', async () => {
+  const { earnPage } = await import('./helpers/earn-fixture.js');
+  const box = s => draw(moneySigns(s)).match(MONEY_BOX('Earn'))?.[0] ?? '';
+  const NOTHING = 'Nothing is earning to take out.';
+  // the first read refused: its words alone
+  const first = box(R.earnFailed(state({ tab: 'money', page: earnPage() }), { at: NOW, message: 'earn is off at this account' }));
+  has(first, 'earn is off at this account');
+  lacks(first, NOTHING);
+  // a read with nothing in it, then a refused one: the refusal alone, not the empty list's line under it
+  const empty = R.earnLoaded(state({ tab: 'money', page: earnPage() }), { data: { ok: true, products: [], positions: [], venues: [], missing: [] }, at: NOW });
+  has(box(empty), NOTHING, 'read, and nothing is earning');
+  const refused = box(R.earnFailed(empty, { at: NOW, message: 'the venue timed out' }));
+  has(refused, 'the venue timed out');
+  lacks(refused, NOTHING);
+});
+
 test('the Portfolio\'s Sell many… and an Earning row\'s Take out… only on a page that signs for an Account that takes writes', () => {
   const ASSETS = /<section class="cardbox" aria-label="Assets">[\s\S]*?<\/section>/;
   const html = draw(moneySigns(state()));

@@ -931,6 +931,28 @@ test('signIn starts, sends the tab to the venue, polls the status and stops when
   assert.deepEqual(r4.reads, []);
 });
 
+test('a new sign-in start clears the kept credentialRef', async () => {
+  // the connect sheet, a first sign-in's state kept in its hidden field
+  let pending = null;
+  const post = () => new Promise(res => { pending = res; });
+  const r = rig({ json: { '/data/account/signin/status': { ok: true, status: 'pending' } }, post, openTab: () => fakeTab() });
+  r.store.dispatch('sheetOpen', { kind: 'connect', seed: { options: [RH], venues: [] }, fields: [
+    { name: 'connector', type: 'select', options: [], value: 'live:robinhood', builtFor: 'live:robinhood' },
+    { name: 'credentialRef', label: '', type: 'hidden', value: 'st-first' },
+  ] });
+  const ref = () => r.store.get().sheet.fields.find(f => f.name === 'credentialRef').value;
+  const going = r.account.signIn(RH);
+  assert.equal(ref(), '', 'cleared before the Account is asked');
+  assert.equal(r.a().signIn.status, 'starting');
+  pending({ status: 200, body: { ok: true, url: 'https://robinhood.example/oauth', state: 'st-second' } });
+  await going;
+  assert.equal(r.a().signIn.state, 'st-second');
+  // a sign-in started with no sheet open changes nothing there
+  const r2 = rig({ post: async () => ({ status: 400, body: { ok: false } }), openTab: () => fakeTab() });
+  await r2.account.signIn(RH);
+  assert.equal(r2.store.get().sheet, null);
+});
+
 test('the sign-in runs out after 15 minutes', async () => {
   const post = async () => ({ status: 200, body: { ok: true, url: 'https://robinhood.example/oauth', state: 'st-1' } });
   const r = rig({ json: { '/data/account/signin/status': { ok: true, status: 'pending' } }, post, openTab: () => fakeTab() });

@@ -214,3 +214,14 @@ test('nothing lands after close()', async () => {
   assert.equal(h.store.seen.length, seen);
   assert.equal(await h.ws.payment({ ...PAY, at: 'later' }, TX('send')), null, 'closed: nothing starts');
 });
+
+test('a payment with no id answers why and sends nothing', async () => {
+  const h = harness({ page: { ok: true, payments: [PAY], orders: [ORDER] } });
+  const WHY = { key: '', status: 'refused', said: 'Nothing was sent: this one carries no id the Account can send for. Refresh and try again.' };
+  assert.deepEqual(await h.ws.payment({ ...PAY, id: '' }, TX('send')), WHY, 'a payment with no id');
+  assert.deepEqual(await h.ws.order({ ...ORDER, clientId: '' }), WHY, 'an order with no client id');
+  assert.equal(h.provider.requests.length, 0, 'the wallet was asked nothing');
+  assert.equal(h.acct.reads(), 0, 'nor the Account');
+  assert.deepEqual(h.acct.posts, []);
+  assert.deepEqual(h.store.seen, [], 'no row to hang it on: nothing dispatched');
+});

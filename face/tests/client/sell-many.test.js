@@ -50,10 +50,13 @@ function rig({ sellable = SELLABLE } = {}) {
     if (owner.onSubmit) owner.onSubmit(prepared);
     return r ?? { status: 200, body: { ok: true, kind: 'order', order: { id: `ord-${owner.submitted.length}`, status: 'filled' } } };
   };
-  const wallet = { orders: [], order(o) { this.orders.push(o); if (this.onOrder) this.onOrder(o); return Promise.resolve({ status: 'sending' }); } };
+  // the app's sendOrder (app.js: the order handed to sendFromWallet, which reads the Account again once the wallet answers)
+  const wallet = { orders: [], order(o) { this.orders.push(o); if (this.onOrder) this.onOrder(o); } };
+  // the wallet engine itself, handed in too: the run never reaches for it
+  const engine = { orders: [], order(o) { this.orders.push(o); return Promise.resolve({ status: 'sending' }); } };
   const after = [];
-  const sm = startSellMany({ store, getJson, owner, walletSend: wallet, afterAction: k => after.push(k), now: () => clock.t });
-  return { store, sm, owner, wallet, after, reads, clock, state: () => store.get().sellMany };
+  const sm = startSellMany({ store, getJson, owner, sendOrder: o => wallet.order(o), walletSend: engine, afterAction: k => after.push(k), now: () => clock.t });
+  return { store, sm, owner, wallet, engine, after, reads, clock, state: () => store.get().sellMany };
 }
 
 const REFUSED = message => ({ status: 409, body: { ok: false, refusal: { code: 'E_ACCOUNT_BAD_ACTION', message } } });
@@ -182,6 +185,38 @@ test('a run with a refused prepare, a refused signature, a DEX sale and the draw
   assert.deepEqual(r.owner.submitted.map(p => p.action.symbol), ['BTC/USDT:USDT', 'WETH/USDC'], 'a refused preparation is never signed; nothing after the close');
   assert.equal(r.state(), null, 'closed');
   assert.deepEqual(r.after, ['sellMany'], 'the Account read again once');
+});
+
+test('a DEX leg is handed to sendOrder, not sent from inside the run', async () => {
+  const r = rig();
+  await r.sm.open();
+  r.sm.toggle(2);
+  const dex = { id: 'ord-dex', clientId: 'c-dex', status: 'pending', walletTxs: [{ from: '0x1', to: '0x2', data: '0x' }] };
+  r.owner.submitAs['WETH/USDC'] = { status: 200, body: { ok: true, kind: 'order', order: dex } };
+  await r.sm.review();
+  await r.sm.run();
+  await settle();
+  assert.deepEqual(r.wallet.orders, [dex], 'handed to sendOrder once');
+  assert.deepEqual(r.engine.orders, [], 'the wallet engine is never reached from inside the run');
+  assert.deepEqual(r.state().legs.map(l => [l.state, l.said]), [['wallet', WALLET_WORDS]]);
+});
+
+test('the closing line counts the legs waiting for the wallet', async () => {
+  const r = rig();
+  await r.sm.open();
+  for (const i of [0, 2, 3]) r.sm.toggle(i);
+  r.owner.submitAs['WETH/USDC'] = { status: 200, body: { ok: true, kind: 'order', order: { id: 'ord-dex', clientId: 'c-dex', status: 'pending', walletTxs: [{ from: '0x1' }] } } };
+  await r.sm.review();
+  await r.sm.run();
+  assert.deepEqual(r.state().legs.map(l => l.state), ['sold', 'wallet', 'sold']);
+  assert.equal(r.state().said, 'Sell many: 2 of 3 sales went through, 1 waiting for your wallet');
+  // none waiting: the line as it was
+  const two = rig();
+  await two.sm.open();
+  two.sm.toggle(0);
+  await two.sm.review();
+  await two.sm.run();
+  assert.equal(two.state().said, 'Sell many: 1 of 1 sale went through');
 });
 
 test('closed while a signature is in the air: its answer lands nothing and nothing further is signed', async () => {

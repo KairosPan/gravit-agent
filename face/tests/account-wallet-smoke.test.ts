@@ -119,7 +119,7 @@ test("account wallet smoke: through the face's port, the owner receives, moves, 
         return r?.taken === true ? null : `Not signed out: Guard was refused — ${r?.message || "no answer"}`;
       }) as never,
     });
-    const sellMany = startSellMany({ store, getJson, owner, walletSend: { order: async () => undefined }, now: Date.now });
+    const sellMany = startSellMany({ store, getJson, owner, sendOrder: () => undefined, now: Date.now });
     closeHosts = () => { sellMany.close(); sheet.close(); account.close(); };
     const page0 = await pageNow();
     assert.ok(writesOn(page0), `the stand-in takes writes: ${json(page0.connectLive)}`);

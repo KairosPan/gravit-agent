@@ -245,7 +245,8 @@ export function fieldsOf(kind, seed) {
     case 'connect': {
       const options = connectOptions(s);
       const picked = options.find(o => o.connector === s.connector);
-      const pick = { name: 'connector', label: 'What to connect', type: 'select', options: options.map(o => ({ value: o.connector, label: str(o.label) || o.connector })), value: picked ? picked.connector : '' };
+      // `builtFor`: the option these fields were built for, so a change of connector is seen (connectRefieldsOf)
+      const pick = { name: 'connector', label: 'What to connect', type: 'select', options: options.map(o => ({ value: o.connector, label: str(o.label) || o.connector })), value: picked ? picked.connector : '', builtFor: picked ? picked.connector : '' };
       // by what the option needs (the Account's connect.js openConnect): an address and the name it is shown as; a sign-in at
       // the venue, whose state lands in the hidden credentialRef once it is ready; a command line on this machine, nothing
       switch (picked?.needs) {
@@ -293,17 +294,13 @@ export function refieldsOf(kind, fields, seed) {
   return fields;
 }
 
-// what a connect option needs, as its fields are shaped: a key file (or nothing picked yet), an address, a sign-in, a command line
-const shapeOf = option => (option && ['address', 'sign-in', 'cli'].includes(option.needs) ? option.needs : 'key-file');
-// a connect sheet's fields after the connector changed to an option of another shape: that shape's fields, the connector and the
-// name kept (a key file's path, a typed address and a sign-in's state never carried to another kind)
+// a connect sheet's fields after the connector changed — to any other option, of whatever shape: that option's fields, the
+// connector and the name kept (a key file's path, a typed or wallet-proven address and a sign-in's state never carried to another
+// option, even one of the same shape); the connector as it was built for: the fields as they are
 function connectRefieldsOf(fields, seed) {
-  const options = connectOptions(seed);
   const connector = text(fields, 'connector');
-  const picked = options.find(o => o.connector === connector);
-  const names = new Set((Array.isArray(fields) ? fields : []).map(f => f?.name));
-  const shape = names.has('ref') ? 'address' : names.has('venue') ? 'key-file' : names.has('credentialRef') ? 'sign-in' : 'cli';
-  if (shapeOf(picked) === shape) return fields;
+  const pick = (Array.isArray(fields) ? fields : []).find(f => f?.name === 'connector');
+  if (pick && str(pick.builtFor) === connector) return fields;
   return fieldsOf('connect', { ...(isRecord(seed) ? seed : {}), connector, label: text(fields, 'label') });
 }
 
@@ -578,7 +575,7 @@ export function grantOf(ask, page, venuesHere = null) {
     case 'topup': {
       const wallet = walletOfAsk(page, ask);
       if (wallet) {
-        const from = moveSourcesOf(page).find(x => !x.agent).id;
+        const from = moveSourcesOf(page).find(x => !x.agent)?.id ?? '';
         return { kind: 'move', seed: { ...moveSeedOf(page, { from, to: wallet.venue, amount: str(ask.usd) }), askedWords } };
       }
       const float = Number(ask.usd) > 0 ? str(ask.usd) : '50';

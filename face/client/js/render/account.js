@@ -537,13 +537,15 @@ function earnBox(state) {
     const out = keys && earnOutAt(a.data, p.venue) ? `<span class="btn-row">${sheetKey('earn', { 'data-venue': p.venue, 'data-side': 'withdraw', 'data-product': p.id }, 'Take out…')}</span>` : '';
     return `<div class="venue"><span>${lines(p.name || p.id, [facts])}</span>${out}</div>`;
   }).join('');
-  const failedNote = e.status === 'error' && e.message ? note(e.message) : '';
+  const failedNote = e.status === 'error' ? note(e.message || 'Earn could not be read.') : '';
   const away = l.away.length ? note(`Not served on this network now: ${l.away.map(m => m.venueName).join(', ')}.`) : '';
   const failed = l.failed.map(m => note(`${m.venueName} could not be read: ${m.why}`)).join('');
   const refusing = l.refusing.map(v => note(`${v.venueName}: ${v.why}`)).join('');
   const put = keys ? `<div class="btn-row">${sheetKey('earn', { 'data-side': 'supply' }, 'Put in…')}</div>` : '';
   const ro = writesOn(a.data) ? '' : note(EARN_READ_ONLY);
-  return box(`${title('Earn')}${said}${failedNote}${rows ? `<div class="venues">${rows}</div>` : note('Nothing is earning to take out.')}${put}${ro}${away}${failed}${refusing}`, 'Earn');
+  // a failed read says its refusal alone: the empty list's line is not drawn under it
+  const list = rows ? `<div class="venues">${rows}</div>` : e.status === 'error' ? '' : note('Nothing is earning to take out.');
+  return box(`${title('Earn')}${said}${failedNote}${list}${put}${ro}${away}${failed}${refusing}`, 'Earn');
 }
 
 // ── Sell many (plan 4b Task 3; earn.js openSellMany) ──

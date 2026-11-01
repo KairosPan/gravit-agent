@@ -118,7 +118,9 @@ function connectKeys(s, account) {
   const mine = si?.connector === option.connector;
   const link = mine && si.status === 'waiting' && si.tab === false && si.url
     ? `<p class="sheet-hint"><a${attrs({ href: si.url, target: '_blank', rel: 'noopener noreferrer' })}>${esc(`Open ${who}'s sign-in page`)}</a>, then come back.</p>` : '';
-  return { above: '', below: `<div class="btn-row">${key('connectSignIn', `Sign in at ${who}`, { disabled: mine && si.status === 'starting' })}</div>${link}` };
+  // off while this option's sign-in is under way or done: a second press would open a stray tab for a state never used
+  const busy = mine && ['starting', 'waiting', 'ready'].includes(si.status);
+  return { above: '', below: `<div class="btn-row">${key('connectSignIn', `Sign in at ${who}`, { disabled: busy })}</div>${link}` };
 }
 
 /** The open sheet as a drawer: its title, its fields (a connect sheet's check under them), the quote box, the signature's minutes, What you sign (dimmed while the form
