@@ -3,13 +3,16 @@
 The Account (Linqi's buyer-agent-demo, its portfolio part) as this tree's own package; origin and licence in `NOTICE` and `LICENSE`.
 Install once: `npm ci` here.
 
-- Run: `npm run account` (127.0.0.1:4820; flags `--read-only`, `--live-cap <usd>`, `--port <n>`, `--fresh`); the home is the code's default `~/.buyer-agent-demo`.
-- The seat: `npm run portfolio:mcp` — the MCP seat the face's `mcp-account` row spawns.
+- Run: `npm run account` (127.0.0.1:4820; flags `--read-only`, `--live-cap <usd>`, `--port <n>`, `--fresh`); the home is the code's default `~/.buyer-agent-demo`. As a LaunchAgent: `npm run account:service -- install` (`status`, `restart`, `logs`, `code`, `uninstall`).
+- The Account serves no page (since 2026-11-01): it answers its API under `/api/`, and every other request is 404 with `NO_PAGE` (`src/portfolio/server.ts`: "The Account serves no page: its owner's screens are Gravit's face (Markets, Trade, Account). …"). Its owner's screens are Gravit's face (`../face/`, 127.0.0.1:3090), which reaches it through its proxy (`/data/account…`); a cross-site navigation is refused like any cross-site request, and `POST /api/account/signin/start` without the face's origin header is refused.
+- The first owner: an Account with no owner prints a pairing code on its start line (`pairing code: …`; under the LaunchAgent `npm run account:service -- code`), typed on the face (Account, "Pair with the code the Account printed in its terminal"). Once it has an owner, a new device is let in only by a device that signs (the face's Settings › Devices): keep a second face browser paired.
+- Who signs: `npm run account:owners` (`--url <origin>` for another Account) reads `GET /api/account`'s signers once and says `ownerless`, `face-signs` (a device labelled `Gravit face` is an owner — a hint, not a proof: check the face's device line) or `stop` (exit 3); it prints each owner as `kind · label` and the count of devices waiting, never a key.
+- The seat: `npm run portfolio:mcp` — the MCP seat the face's `mcp-account` row spawns. Its writes stop for the face's Gate 2 card, then, in Guard, for the Account's card, answered on the face under Account › Cards.
 - Markets: beside the venues' public markets the Account serves China, the A shares as Tencent ranks, quotes, charts and finds them (`src/portfolio/live/china.ts`; `explore?tab=china`, `quotes?pairs=china|<code>`, `candles?venue=china`, the seat's `china` tab). Keyless, GET-only on Tencent's four hosts; view-only (`canTrade: false`) and priced in CNY, in the China tab alone and never in `all`. Only the real server builds it, so tests and other services never reach Tencent.
 - Lunhui's reach: `GET /api/cn/relay?url=` forwards the Lunhui freezes' Tencent and Eastmoney GETs (an allow-list of their endpoints, the bytes unchanged) and `POST /api/cn/ifind` runs the boards stand-in's 问财 query with the iFinD token this process holds (`IFIND_REFRESH_TOKEN` or `IFIND_ACCESS_TOKEN` in its environment; start it with `set -a; [ ! -f ../.env.ifind ] || . ../.env.ifind; set +a; npm run account`). Both are reads, behind the `Host` fence, and work with `--read-only`; the start line says whether iFinD is configured, never the token.
-- Tests: `npm test` (vitest, one file at a time); `npm run typecheck`.
+- Tests: `npm test` (vitest, one file at a time), green with no known red (the page's tests, `test/unit/ui-superagent.test.ts` among them, left with the page); `npm run typecheck`. `test/standin/ui-standin.ts` is the face smokes' stand-in (the Account over simulated venues: no network, no money), never on 4820.
 
-Design: `docs/superpowers/specs/2026-10-27-account-in-repo-design.md`. The face's side: `face/README.md` "The Account seat".
+Design: `docs/superpowers/specs/2026-10-27-account-in-repo-design.md`, and for the page retired and A shares here `docs/superpowers/specs/2026-11-01-account-two-parts-design.md`. The face's side: `face/README.md` "The Account seat", "Markets and Account", "The Account in the face"; the owed live runs: "The two-parts drills".
 
 ## AKShare, the sidecar
 
