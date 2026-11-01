@@ -32,6 +32,15 @@ test('rankOf: the ranking in the shape chinaRowsOf reads', () => {
   assert.equal(rankOf(fx('explore-all'), 'volume'), null);
 });
 
+test('rankOf: the Account\'s own stale ranking is stale', () => {
+  const body = fx('explore-china');
+  const stale = { ...body, china: { ...body.china, status: { state: 'stale', said: 'Tencent is slow: the last good ranking', at: '2026-10-31T02:20:00.000Z' } } };
+  const r = rankOf(stale, 'volume');
+  assert.equal(r.stale, true);
+  assert.equal(r.status.state, 'stale');
+  assert.equal(rankOf(body, 'volume').stale, false);
+});
+
 test('cnQuoteOf: the twelve facts, the phase and the status', () => {
   const [moutai, , refused] = fx('quotes-china').quotes;
   const q = cnQuoteOf(moutai, NOW);

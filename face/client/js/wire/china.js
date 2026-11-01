@@ -32,7 +32,7 @@ export function rankOf(body, sort = "volume") {
   const status = isRecord(read.status) ? read.status : { state: "unavailable", said: "" };
   return {
     ok: true, sort, total: numOrNull(read.total) ?? items.length, asOf: str(read.asOf) || str(body.asOf),
-    session: isRecord(read.session) ? read.session : { phase: "closed", lastSession: null }, status, stale: body.stale === true, items,
+    session: isRecord(read.session) ? read.session : { phase: "closed", lastSession: null }, status, stale: body.stale === true || status.state === "stale", items,
   };
 }
 
