@@ -1,7 +1,7 @@
 /** OWNERS CHECK — does the face sign for the Account the operator runs (the face being, since 2026-11-01, the Account's only page)? It reads the `signers` of
  * `GET /api/account` (the owners, the devices waiting) and says one of three things:
  *
- *   ownerless   no owner yet: retiring the page locks nobody out, the face pairs as the first owner
+ *   ownerless   no owner yet: nobody is locked out, the face pairs as the first owner
  *   face-signs  an owner device carries the face's pairing label (a hint, not a proof)
  *   stop        owners exist and none is the face's, or the shape cannot be read, or the Account did not answer
  *
@@ -20,8 +20,8 @@ export const FACE_DEVICE_LABEL = "Gravit face";
 export const DEFAULT_ACCOUNT_URL = "http://127.0.0.1:4820";
 
 export const SENTENCE: Record<OwnerVerdict, string> = {
-  ownerless: "No owner yet: retiring the page locks nobody out. The face pairs as the first owner with the code the Account prints.",
-  "face-signs": 'A device labelled Gravit face is an owner. A label is a hint, not a proof: open the face\'s Account screen and check that its device line reads "This page signs for the account" before the page goes.',
+  ownerless: "No owner yet: nobody is locked out. The face pairs as the first owner with the code the Account prints.",
+  "face-signs": 'A device labelled Gravit face is an owner. A label is a hint, not a proof: open the face\'s Account screen and check that its device line reads "This page signs for the account".',
   stop: "STOP: no owner device is the face's, and the Account serves no page of its own any more. In order: from a face browser that already signs, let this one in under its Settings › Devices; with none, run the retired page from 9614314c on the same home (git worktree add <dir> 9614314c, npm ci and npm run account there with this Account stopped) and let the face in from that page's Settings › Devices, or sign its device out there so that the Account prints a new code the face pairs with; --fresh only last: it throws away the owner, the venues, the agents and their limits.",
 };
 
