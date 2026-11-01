@@ -425,7 +425,7 @@ export function startMarkets({
   void askOld();
 
   return {
-    /** The Account's page answered afresh (not a page the proxy re-served stale): China's state, when last said as the Account
+    /** The Account's read answered afresh (not one the proxy re-served stale): China's state, when last said as the Account
      *  not answering, is read again, on any screen. */
     accountAnswered(body) {
       if (closed || body?.stale === true) return;
