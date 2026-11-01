@@ -1088,3 +1088,46 @@ Settled here and marked as mine (the builder's two other questions): a phone tur
 5-minute deadline and the desk preset carries no role, paper-account or AKShare tool (§2, §5.3);
 the model's live view is the two desk-scoped tools plus the state injected with each phone
 message, not a new alpaca-kit tool (§5.3, §13).
+
+## 15. Re-plan after the main merge (2026-11-01)
+
+Main (c06367c3) was merged into the desk at 12b91a0f. It removed what P3 and P4 were planned on:
+alpaca_kit, the PIT beds, every Python reader, the Alpaca IEX stream and the `us:` ids of the face's
+quote hub. P0-P2 were re-landed on main's tree (1e02865b, 54071ae0, 8c4da7f8). The plans
+`docs/superpowers/plans/2026-11-01-desk-p3-watch.md` and `…-p4-premarket.md` replace the 2026-10-20
+ones and argue from this section where it and §5.5, §5.9, §5.10 or §12 disagree.
+
+- **M1 — Markets.** Both markets are in scope, US shares and A shares, on the operator's word
+  "都统一放进markets部分". The desk reads, shows and speaks them as the face's Markets screen does:
+  US through the Account's read (`src/us-quotes.ts` `accountUsQuotes`), A shares through the face's
+  own Tencent wire (`src/quotes.ts` `QuoteHub`). The dropped Desk panel's content (status, standing
+  orders, levels, alerts, the watch) is a Desk view inside Markets, and a level shows on its market's
+  row and page. This is the controller's reading; the operator may overturn it at review.
+- **M2 — Filings in Node.** The EDGAR reader is face code (`src/edgar.ts`), US symbols only, with
+  `ALPHA_EDGAR_USER_AGENT` as its contact header. No Python, no script, no pin: it is held as the
+  face itself is (charter D26). No test, smoke or browser check reaches the SEC; the first live poll is
+  a drill step.
+- **M3 — Symbols.** A book entry names `symbol:`. Six digits is an A share (`cn:<6>`); anything else
+  that matches the US ticker grammar is a US share. Nothing else marks the market.
+- **M4 — Prices, polled.** No stream exists, so the watch polls. US quotes come from the Account's
+  explore read, no faster than its 20 s cache, with at most six reads in flight. A-share quotes come
+  from the hub's Tencent snapshot. Everything stream-shaped in §5.5 (the 30 slots, their ranking, the
+  stream-down line, the IEX labels) is void. Every alert names its source (`Account` or `Tencent`) and
+  the quote's exchange time.
+- **M5 — Sessions.** US prices are judged inside the XNYS session (`src/market-clock.ts`). An A-share
+  price is judged only while Tencent says the market is open, inside 09:30-11:30 or 13:00-15:00
+  Beijing. An A-share order needs its sessions ahead of time, so the face gains an XSHG closure table
+  copied from the SSE's published 2026 schedule. A date past the table is a calendar failure, said,
+  never guessed. Shanghai has no daylight time.
+- **M6 — Done, replacing §12's P3 and P4 criteria.**
+  - **P3:** a real level crossing reached the phone with its plan, within one poll interval plus
+    10 s, for one US and one A-share symbol; an annotation followed inside 90 s as a reply; and one
+    live EDGAR filing alert, or a recorded `suppressed:` line, arrived.
+  - **P4:** one strategy's report preceded its market's open on three sessions and said truthfully
+    what it says about its screen. A Lunhui strategy qualifies.
+- **M7 — The screen line.** No screen exists. A strategy's research run before the open is its
+  Lunhui run (`strategies/<name>/analysis/<run>/run.json`). The report's first line says whether a
+  sealed run covers the previous session, which one and when, or `no screen is wired for this
+  strategy`.
+- **M8 — The strategy's market.** A standing order carries `market: us | cn`, `us` by default; its
+  `open-Nm` and `close-Nm` are its market's. The pre-close brief stays US.

@@ -1,5 +1,7 @@
 # The Desk, P4 — the Per-strategy Pre-market Report Implementation Plan
 
+> **Superseded 2026-11-01** by `docs/superpowers/plans/2026-11-01-desk-p4-premarket.md` (the re-plan after the main merge; spec §15). Kept for the tasks the new plan cites as "the old Task N".
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** before the open, every strategy the operator armed gets a report on the phone, written by an unattended desk turn that informs and never orders. The report covers the strategy's status, its levels against the previous close and the overnight print, and a true line saying whether its screen ran. A firing is refused, loudly and once, when the strategy's standing text or its `levels.yml` changed since arming.

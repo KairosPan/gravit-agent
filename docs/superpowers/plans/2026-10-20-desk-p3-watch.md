@@ -1,5 +1,7 @@
 # The Desk, P3 — the Watch Implementation Plan
 
+> **Superseded 2026-11-01** by `docs/superpowers/plans/2026-11-01-desk-p3-watch.md` (the re-plan after the main merge; spec §15). Kept for the tasks the new plan cites as "the old Task N".
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** The face watches the operator's price levels, urgent-event rules and filings on live data, and sends each alert to the phone itself.
