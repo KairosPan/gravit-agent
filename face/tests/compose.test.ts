@@ -32,7 +32,7 @@ test("compose.yml runs the face and the Account as two boxes, the agent box with
   assert.equal(c.services.agent.environment.FACE_ACCOUNT_URL, "http://account:4820");
   assert.equal(c.services.agent.environment.BUYER_HOME, "/seat-home");
   assert.equal(c.services.agent.environment.DSH_HOME, "/dsh-home");
-  assert.equal(c.services.agent.environment.FACE_AKSHARE_MCP_COMMAND, "/usr/local/bin/akshare-mcp");
+  assert.equal(c.services.agent.environment.FACE_AKSHARE_MCP_COMMAND, undefined);
   assert.deepEqual(c.services.agent.env_file, [{ path: ".env.deepseek", required: false }]);
   assert.deepEqual(c.services.account.env_file, [{ path: ".env.ifind", required: false }]);
   assert.ok(Object.keys(c.services.agent.environment).every(k => !k.startsWith("IFIND")));
@@ -56,4 +56,14 @@ test("compose.yml runs the face and the Account as two boxes, the agent box with
   assert.ok(agentMounts.every(v => !v.includes("docker.sock") && !v.includes("account-home")));
   assert.ok(agentMounts.some(v => v.startsWith("face-modules:")) && agentMounts.some(v => v.startsWith("account-modules:")));
   assert.deepEqual(Object.keys(c.volumes).sort(), ["account-home", "account-modules", "dsh-home", "face-modules", "seat-home"]);
+});
+
+test("the agent image carries no AKShare, the account image carries it at the pin", async () => {
+  const faceFile = await readFile(fileURLToPath(new URL("../Dockerfile", import.meta.url)), "utf8");
+  const accountFile = await readFile(fileURLToPath(new URL("../../account/Dockerfile", import.meta.url)), "utf8");
+  assert.doesNotMatch(faceFile, /akshare|astral\.sh|uv tool|--python/i);
+  assert.ok(accountFile.includes("uv tool install --python 3.12 --with 'mcp<2'"));
+  assert.ok(accountFile.includes("git+https://github.com/xiaozhozho/akshare-mcp.git@9b6a22b6d83cce2a996a5072743bb06686040ce0"));
+  assert.ok(accountFile.includes("PORTFOLIO_AKSHARE_BIN=/usr/local/bin/akshare-mcp"));
+  assert.ok(accountFile.indexOf("uv tool install") < accountFile.indexOf("COPY package.json"), "the install layer comes before the source copy");
 });

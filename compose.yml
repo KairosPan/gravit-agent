@@ -6,6 +6,8 @@
 # records absolute paths). Stop the host face and Account first: both boxes publish 3090 and
 # 4820 on the host's loopback.
 #
+# The account box runs AKShare (the sidecar installed in its image); the agent box runs no data source.
+#
 # The agent box mounts no docker socket and no path of the Account's home: Gravit's shell sees
 # the allowlisted paths and the box's volumes, no other host file (on Docker Desktop
 # host.docker.internal still reaches the Mac's loopback services, as the host dev loop does).
@@ -70,7 +72,6 @@ services:
       FACE_ACCOUNT_URL: "http://account:4820"
       BUYER_HOME: /seat-home
       DSH_HOME: /dsh-home
-      FACE_AKSHARE_MCP_COMMAND: /usr/local/bin/akshare-mcp
     ports: ["127.0.0.1:3090:3090"]
     depends_on:
       account:
