@@ -386,7 +386,8 @@ Remaining directions below are not completed capabilities. Further design remain
   content is the face's Markets, Trade and Account and the face's page is an owner device
   (`docs/superpowers/specs/2026-10-22-account-graft-design.md`). Closed 2026-11-01 (plans 4a
   and 4b): Guard · Beast and the cap on the face; the venues that connected only on the
-  Account's own page; perpetuals and leverage from the ticket. Open: the face's keyed sources as wallets — accounts connected with a key — offered as MCP
+  Account's own page; leverage, set on a perpetual's market page and its positions. Open: perpetuals
+  on Trade's ticket (it trades crypto, stocks, RWAs and predictions alone); the face's keyed sources as wallets — accounts connected with a key — offered as MCP
   servers (the operator's direction of 2026-10-22, the next step of 借鉴 Account 完善 Gravit).
   The face's own producers and keyed quote providers retired on 2026-10-24, with the Python
   package, the PIT beds and the backtests (the design's §12). Since 2026-10-27 the Account
