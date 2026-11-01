@@ -6,6 +6,7 @@
 // values are numbers (the Account's u64 fields), the dollar amounts strings as typed. No DOM, no store.
 import { pageOk, venuesOf, keyfileWords, paperBooksOf } from './account-view.js';
 import { tradeFieldsOf, tradeDraftOf } from './trade-view.js';
+import { MARKET_KINDS, marketTitleOf, marketGoOf, marketFieldsOf, marketDraftOf } from './sheet-market.js';
 
 const DAY = 86_400_000;
 const ZERO = '0x0000000000000000000000000000000000000000';
@@ -18,9 +19,11 @@ const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const records = v => (Array.isArray(v) ? v.filter(isRecord) : []);
 const str = v => (typeof v === 'string' ? v : '');
 
-/** Every sheet kind. `order` is the Trade ticket's: its fields and draft are the trade view's, from `seed.ticket`. */
+/** Every sheet kind. `order` is the Trade ticket's: its fields and draft are the trade view's, from `seed.ticket`. `close`,
+ *  `amend` and `leverage` are the Market half's: everything about them is host/sheet-market.js's. */
 export const SHEET_KINDS = ['letIn', 'limit', 'endLimit', 'revoke', 'connect', 'paper', 'topUp', 'resetPaper', 'disconnect',
-  'approveCard', 'declineAsk', 'letDevice', 'signOut', 'order'];
+  'approveCard', 'declineAsk', 'letDevice', 'signOut', 'order', ...MARKET_KINDS];
+const isMarket = kind => MARKET_KINDS.includes(kind);
 
 const GO = new Map([
   ['letIn', 'Let it in'], ['limit', 'Give the limit'], ['endLimit', 'End the limit'], ['revoke', 'Revoke'], ['connect', 'Connect'],
@@ -31,11 +34,13 @@ const GO = new Map([
 /** The sheet's go key: a card's is `Reject` when the seed's decision is to reject. */
 export function goWord(kind, seed) {
   if (kind === 'approveCard' && seed?.decision === 'reject') return 'Reject';
+  if (isMarket(kind)) return marketGoOf(kind, seed);
   return GO.get(kind) ?? '';
 }
 
 /** The sheet's title, naming what the seed names. */
 export function titleOf(kind, seed) {
+  if (isMarket(kind)) return marketTitleOf(kind, seed);
   const s = isRecord(seed) ? seed : {};
   const place = str(s.name) || str(s.venue);
   switch (kind) {
@@ -114,6 +119,7 @@ export function paperSeedOf(page, books) {
 /** The sheet's fields, each `{ name, label, type, options?, placeholder?, value }` — `options` as `{ value, label }`, a `pick`'s
  *  value a list, the rest strings — filled from the seed where it says. */
 export function fieldsOf(kind, seed) {
+  if (isMarket(kind)) return marketFieldsOf(kind, seed);
   const s = isRecord(seed) ? seed : {};
   switch (kind) {
     case 'letIn': return [
@@ -179,6 +185,7 @@ const slug = v => v.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g
 
 /** The Account's draft for the sheet, from its fields and its seed — or, while something is missing, the words for it. */
 export function draftOf(kind, fields, seed, now) {
+  if (isMarket(kind)) return marketDraftOf(kind, fields, seed);
   const s = isRecord(seed) ? seed : {};
   switch (kind) {
     case 'letIn': {

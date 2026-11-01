@@ -1,6 +1,7 @@
 // face/client/js/render/trade.js — Trade on the face (spec 2026-10-22 §6.4, plan 2 Task 11), after gravit-ui's Trade (itself
 // after Linqi's buyer-agent-demo ui/trade.js): the head with the Account's own writes chip, the kinds (the Account's tabs), the
-// picker — what is held, starred and most traded of the kind, or a search's results — Under way with its one-click Cancel and
+// picker — what is held, starred and most traded of the kind, or a search's results — Under way with its one-click Cancel (and
+// Change…, the Account's liveAmend sheet, where the venue changes the order in place) and
 // the cards waiting (Review → to Cards), and the ticket: Where (the able lines as keys, the best marked, a public listing
 // leading to Venues), Buy or Sell, the amount and its unit, Market or Limit, extended hours on a limit where the picked line
 // offers them, the Account's quote, the signature's minutes, What you sign verbatim, what the Account said, and Sign and place
@@ -18,7 +19,7 @@ import { goWord } from '../host/sheet-view.js';
 import { askedOf } from '../host/sheet.js';
 import { chip } from './thread.js';
 import { mkAv, priceWord } from './markets.js';
-import { orderWords, cardFactsOf } from './account.js';
+import { orderWords, cardFactsOf, marketKeysOn, changeKey } from './account.js';
 
 // the kinds' glyphs, Linqi's sprite
 const KIND_ICONS = { crypto: 'coin', stocks: 'stock', rwas: 'rwa', predictions: 'prediction' };
@@ -93,7 +94,7 @@ function cardsWaiting(page, now) {
 }
 
 // the page's working orders, by anyone, in the Account screen's words; Cancel where the Account knows what cancels it, on a
-// page that signs; what was said on Trade (a cancel's answer, a fill) over them; the cards waiting under them
+// page that signs; Change… where its venue changes it in place, on a page that signs for an Account that takes writes; what was said on Trade (a cancel's answer, a fill) over them; the cards waiting under them
 function underWay(state, signs, now) {
   const a = state.account;
   const said = str(state.trade.said) ? `<p class="tk-said" role="status">${esc(state.trade.said)}</p>` : '';
@@ -101,9 +102,10 @@ function underWay(state, signs, now) {
   if (!pageOk(a?.data)) {
     return `<section class="cardbox tk-open">${head(null)}${said}${empty(a?.data ? 'Account unreadable' : a?.status === 'error' ? 'Account unavailable' : 'Loading…')}</section>`;
   }
+  const change = marketKeysOn(state);
   const rows = underWayOf(a.data).map(o => {
     const cancel = signs && o.cancel ? `<button type="button"${attrs({ class: 'btn-sm', 'data-action': 'cancelOrder', 'data-venue': o.cancel.venue, 'data-order': o.cancel.order })}>Cancel</button>` : '';
-    return `<tr><td><b>${esc(orderWords(o))}</b>${o.id ? `<span class="tk-why">${esc(o.id)}</span>` : ''}</td><td class="r">${cancel}</td></tr>`;
+    return `<tr><td><b>${esc(orderWords(o))}</b>${o.id ? `<span class="tk-why">${esc(o.id)}</span>` : ''}</td><td class="r">${change ? changeKey(o, a.data) : ''}${cancel}</td></tr>`;
   });
   const table = `<div class="mk-wrap"><table class="mk-t tk-t"><thead><tr><th scope="col">Order</th><th scope="col" class="r"><span class="sr-only">Actions</span></th></tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
   return `<section class="cardbox tk-open">${head(rows.length)}${said}${rows.length ? table : empty('Nothing under way.')}${cardsWaiting(a.data, now)}</section>`;

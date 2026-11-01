@@ -760,3 +760,28 @@ test("an A-share page's star reads the Account's list: an Account key, the page'
   assert.equal(starOf(renderMarketsScreen(atAccount, NOW)), 'true Watching', "on the Account's own list");
   assert.equal(starOf(renderMarketsScreen(R.accountLoaded(s, { data: fx('account'), at: NOW }), NOW)), 'false Watch');
 });
+
+test("on a page that signs for an Account that takes writes, a market's page carries Close…, Change… and a perpetual's Leverage…", () => {
+  const keys = html => html.match(/<div class="mk-d-acts">[\s\S]*?<\/div>/)?.[0] ?? '';
+  const page = (id, over = {}) => screen({ route: { screen: 'markets', id }, account: true, role: 'signs', ...over }).html;
+  // a perpetual: Leverage… among its keys at its first connected line, the leverage held there; You hold its Close… and Leverage…
+  const btc = page('perp:BTC');
+  assert.ok(keys(btc).startsWith('<div class="mk-d-acts"><button type="button" class="btn" data-action="openSheet" data-kind="leverage" data-venue="ex" data-venue-name="Stand-in Exchange" data-symbol="BTC/USDT:USDT" data-name="BTC perpetual" data-leverage="3">Leverage…</button>'), keys(btc));
+  const held = section(btc, 'You hold');
+  assert.match(held, /data-kind="close" data-venue="ex" data-symbol="BTC\/USDT:USDT"[^>]*>Close…<\/button>/);
+  assert.match(held, /data-kind="leverage" data-venue="ex"[^>]*>Leverage…<\/button>/);
+  // a market with orders working: Open orders' Change… on each resting one at a venue that amends
+  const sol = section(page('coin:SOL'), 'Open orders');
+  for (const id of ['ord-0010', 'ord-0004', 'ord-0002']) assert.match(sol, new RegExp(`data-kind="amend" data-venue="ex" data-order="${id}"[^>]*>Change…</button>`), id);
+  assert.doesNotMatch(keys(page('coin:SOL')), /data-kind="leverage"/, 'spot sets no leverage');
+  // an event held is sold
+  assert.match(section(page('event:predict:SI-FEDCUT-DEC', { predictions: fx('explore-predictions'), tab: 'predictions' }), 'You hold'), /data-kind="close" data-venue="predict"[^>]*>Sell…<\/button>/);
+  // a page that does not sign, or an Account that is read-only: none of the three
+  const none = /data-kind="(close|amend|leverage)"/;
+  for (const role of [null, 'pending', 'signed-out']) assert.doesNotMatch(page('perp:BTC', { role }) + page('coin:SOL', { role }), none, String(role));
+  const ro = { ...fx('account'), connectLive: { ...fx('account').connectLive, writes: { on: false, capUsd: 250 } } };
+  for (const id of ['perp:BTC', 'coin:SOL']) {
+    const { s } = screen({ route: { screen: 'markets', id }, account: true, role: 'signs' });
+    assert.doesNotMatch(renderMarketsScreen(R.accountLoaded(s, { data: ro, at: NOW }), NOW), none, `read-only ${id}`);
+  }
+});

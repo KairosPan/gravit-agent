@@ -5,7 +5,8 @@
 // the agents' asks) — the Statement drawer, the Settings drawer with Devices; the owner device's line under
 // the head (render/owner.js), and for a page that signs the keys that open the owner's sheets on Venues, Agents and Cards
 // (Connect an account, Open a paper account, Disconnect, Top up, Start over; Let in, Give a limit, End limit, Revoke,
-// Approve, Reject, Grant, Decline). Every figure and word is a view's (host/account-view.js);
+// Approve, Reject, Grant, Decline) — and, for an Account that takes writes, each position's Close… (Sell…) and a perpetual's
+// Leverage… on Portfolio (plan 4a Task 3). Every figure and word is a view's (host/account-view.js);
 // this module draws them.
 import { esc, attrs, cls } from '../html.js';
 import { fmtClock, fmtDate, sameDay } from '../time.js';
@@ -13,8 +14,9 @@ import { money, signedMoney, sign } from '../wire/account-model.js';
 import { price } from '../wire/market-model.js';
 import {
   pageOk, headOf, worthOf, changeOf, assetsOf, positionsOf, openOrdersOf, missingWords, statementLinesOf,
-  venuesOf, agentsOf, cardsOf, asksOf, requestsOf, seatWords,
+  venuesOf, agentsOf, cardsOf, asksOf, requestsOf, seatWords, writesOn,
 } from '../host/account-view.js';
+import { amendSeedOf, closeSeedOf, leverageSeedOf } from '../host/sheet-market.js';
 import { providerWord } from '../host/market-view.js';
 import { chip } from './thread.js';
 import { seg, segLinks, sec, confirmPair } from './controls.js';
@@ -98,12 +100,17 @@ function assetsBox(lens) {
   return box(`${title('Assets')}${said}${body}`, 'Assets');
 }
 
-function positionsBox(lens) {
+// the Positions table; on a page that signs, for an Account that takes writes, each row's Close… (Sell…) and a perpetual's
+// Leverage… where its venue sets it
+function positionsBox(lens, state) {
+  const keyed = marketKeysOn(state);
   const rows = positionsOf(lens.data).map(p => [
     lines(p.symbol, [[p.venueName || p.venue, p.side, numWord(p.qty)].filter(Boolean).join(' · ')], p.paper ? 'Paper' : ''),
     esc(money(p.usd)), esc(price(p.entryPrice)), esc(price(p.markPrice)), `<span class="${tone(p.unrealizedUsd)}">${esc(signedMoney(p.unrealizedUsd))}</span>`,
+    ...(keyed ? [rowKeys(positionKeys(p, state.account.data))] : []),
   ]);
-  return rows.length ? box(`${title('Positions')}${table(['Position', 'Value', 'Entry', 'Mark', 'P&L'], rows)}`, 'Positions') : '';
+  const head = ['Position', 'Value', 'Entry', 'Mark', 'P&L', ...(keyed ? [''] : [])];
+  return rows.length ? box(`${title('Positions')}${table(head, rows)}`, 'Positions') : '';
 }
 
 // an order in a line: `Stand-in Exchange · Buy 0.5 SOL/USDT · limit 142.44 · open · You` (a market's page lists its own so)
@@ -134,7 +141,7 @@ function portfolio(state, now) {
     `${curveSvg(a.history.data?.points, { currency: 'USD', label: w.lead.label })}${gone.length ? note(gone.join(' · ')) : ''}${stale}` +
     `<div class="btn-row">${failed ? retry : ''}<button type="button" class="btn-sm" data-action="openStatement">Statement</button></div>`, 'Portfolio');
   const lens = w.paperLeads ? a.paper : a.holdings;
-  return `<div class="cards">${worth}${assetsBox(lens)}${positionsBox(lens)}${ordersBox(a)}</div>`;
+  return `<div class="cards">${worth}${assetsBox(lens)}${positionsBox(lens, state)}${ordersBox(a)}</div>`;
 }
 
 // ── Venues ──
@@ -219,6 +226,32 @@ const countsOf = r => `Cards ${r.cards === null ? '—' : r.cards} · Open order
 const signs = state => state.owner?.role === 'signs';
 const sheetKey = (kind, data, word, klass = 'btn-sm') => `<button${attrs({ type: 'button', class: klass, 'data-action': 'openSheet', 'data-kind': kind, ...data })}>${esc(word)}</button>`;
 const rowKeys = keys => (keys.length ? `<span class="btn-row">${keys.join('')}</span>` : '');
+
+// ── the Market half's keys (plan 4a Task 3): Close…, Change… and Leverage… ──
+// Drawn only for a page that signs and an Account that takes writes (its page's connectLive.writes.on), wherever a working
+// order or a position is: Trade's Under way, a market's page, the Portfolio. Each carries its sheet's seed as data-* — the
+// market's kind as data-market-kind, data-kind being the sheet's — and app.js's openSheetFrom reads it back as the strings drawn.
+export const marketKeysOn = state => signs(state) && writesOn(state.account?.data);
+const SEED_ATTRS = {
+  venue: 'data-venue', venueName: 'data-venue-name', symbol: 'data-symbol', name: 'data-name', side: 'data-side', qty: 'data-qty',
+  kind: 'data-market-kind', order: 'data-order', type: 'data-type', limitPrice: 'data-limit-price', stopPrice: 'data-stop-price',
+  base: 'data-base', leverage: 'data-leverage',
+};
+const seedAttrs = seed => Object.fromEntries(Object.entries(seed).filter(([k]) => Object.hasOwn(SEED_ATTRS, k)).map(([k, v]) => [SEED_ATTRS[k], String(v)]));
+/** The key that opens a Market sheet on its seed. */
+export const marketKey = (kind, seed, word, klass = 'btn-sm') => sheetKey(kind, seedAttrs(seed), word, klass);
+/** A working order's Change…, where its venue changes it in place and its type rests; else ''. */
+export function changeKey(order, page) {
+  const seed = amendSeedOf(order, page);
+  return seed ? marketKey('amend', seed, 'Change…') : '';
+}
+/** A position's keys: Close… (Sell… for a stock or an event), and Leverage… on a perpetual whose venue sets it. */
+export function positionKeys(position, page) {
+  const close = closeSeedOf(position);
+  const lev = leverageSeedOf(position, page);
+  const sells = close && (close.kind === 'stock' || close.kind === 'event');
+  return [close ? marketKey('close', close, sells ? 'Sell…' : 'Close…') : '', lev ? marketKey('leverage', lev, 'Leverage…') : ''].filter(Boolean);
+}
 
 // an agent's keys: Give a limit…, End limit on each trade limit standing (its ids comma-joined, never *), Revoke… — asked twice,
 // the confirm for this agent in its place. Gravit's own row has none: its seat is admitted on the Account page.

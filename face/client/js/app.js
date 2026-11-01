@@ -674,6 +674,14 @@ export function boot(win, host = {}) {
       case 'declineAsk': void sheet.open('declineAsk', { ask: d.ask ?? '' }); break;
       case 'topUp': case 'resetPaper': void sheet.open(d.kind, { venue: d.venue ?? '', name: d.name ?? '' }); break;
       case 'connect': case 'paper': void openOnRead(d.kind); break;
+      // the Market half's (plan 4a Task 3): the seed as the key drew it, its figures the strings drawn, the market's kind its
+      // data-market-kind
+      case 'close': void sheet.open('close', { venue: d.venue ?? '', symbol: d.symbol ?? '', name: d.name ?? '', side: d.side ?? '', qty: d.qty ?? '', kind: d.marketKind ?? '' }); break;
+      case 'amend': void sheet.open('amend', {
+        venue: d.venue ?? '', order: d.order ?? '', type: d.type ?? '', kind: d.marketKind ?? '', qty: d.qty ?? '',
+        limitPrice: d.limitPrice ?? '', stopPrice: d.stopPrice ?? '', side: d.side ?? '', base: d.base ?? '',
+      }); break;
+      case 'leverage': void sheet.open('leverage', { venue: d.venue ?? '', venueName: d.venueName ?? '', symbol: d.symbol ?? '', name: d.name ?? '', leverage: d.leverage ?? '' }); break;
       default: break;
     }
   }

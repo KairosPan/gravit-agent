@@ -76,7 +76,7 @@ test('the screen with no ticket: the head with the Account\'s writes chip, the k
   assert.match(html, /<li><button type="button" class="tk-row" data-action="pickMarket" data-id="coin:BTC" data-venue="ex"><span class="mk-av mk-av-sm" aria-hidden="true">BTC<\/span><span class="tk-rn"><b>BTC<\/b><span class="mk-sub">0\.124 · Stand-in Exchange, Stand-in Wallet<\/span><\/span><span class="tk-rp"><span class="num">\$62,479\.03<\/span><\/span><\/button><\/li>/);
   assert.match(html, /data-action="pickMarket" data-id="coin:GONE"><span class="mk-av mk-av-sm" aria-hidden="true">GONE<\/span><span class="tk-rn"><b>GONE<\/b><span class="mk-sub">Not in this read<\/span>/);
   assert.match(html, /data-action="pickMarket" data-id="coin:DOGE">/);
-  assert.doesNotMatch(html, /data-side=|data-outcome=/, 'a coin opens as a buy, with no outcome');
+  assert.doesNotMatch(html, /data-action="pickMarket"[^>]*data-(side|outcome)=/, 'a coin opens as a buy, with no outcome');
   // Under way: the page's working orders in the Account screen's words, Cancel where the Account knows what cancels it
   const under = underWayOf(s.account.data);
   assert.ok(under.length > 0);

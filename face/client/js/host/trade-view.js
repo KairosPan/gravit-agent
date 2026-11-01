@@ -228,6 +228,18 @@ function valueOf(fields, name) {
 const textOf = v => (typeof v === 'string' ? v.trim() : typeof v === 'number' && Number.isFinite(v) ? String(v) : '');
 const field = (fields, name) => textOf(valueOf(fields, name));
 
+/** A prediction's price typed in cents as the dollars the Account signs: the Account's tkPriceIn — dollars to six places,
+ *  trailing zeros trimmed, a plain decimal, never an exponent — or null for anything but a plain decimal with `0 < c < 100`
+ *  (or one too small to be a dollar figure at six places). The Trade ticket's limit and a Change sheet's prices alike. */
+export function eventPriceOf(typed) {
+  const t = typeof typed === 'string' ? typed.trim() : '';
+  if (!DECIMAL.test(t)) return null;
+  const c = Number(t);
+  if (!(c > 0 && c < 100)) return null;
+  const dollars = (c / 100).toFixed(6).replace(/\.?0+$/, '');
+  return dollars === '0' ? null : dollars;
+}
+
 /** The Account's liveOrder draft from the ticket's fields — its Trade ticket's type and fifteen fields in its order (prepare adds
  *  maxNotional and deadline: the seventeen it signs): `type`, `venue`, `symbol` (the line's; a prediction's, the picked
  *  outcome's at that venue), `side`, `orderType`, `qty` or `usd` by `unit` (as typed), `limitPrice` (for a limit: as typed; a
@@ -256,10 +268,8 @@ export function tradeDraftOf(fields, ticket) {
     const typed = field(fields, 'limit');
     if (!DECIMAL.test(typed)) return 'Type the limit price';
     if (ticket.event) {
-      const c = Number(typed);
-      // the Account's tkPriceIn: dollars to six places, trailing zeros trimmed — a plain decimal, never an exponent
-      const dollars = (c / 100).toFixed(6).replace(/\.?0+$/, '');
-      if (!(c > 0 && c < 100) || dollars === '0') return 'A price in cents is between 0 and 100';
+      const dollars = eventPriceOf(typed);
+      if (dollars === null) return 'A price in cents is between 0 and 100';
       limitPrice = dollars;
     } else {
       if (!(Number(typed) > 0)) return 'Type the limit price';

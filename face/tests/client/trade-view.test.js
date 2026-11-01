@@ -8,7 +8,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  TRADE_KINDS, tradeableOf, pickerOf, ticketOf, tradeFieldsOf, tradeDraftOf, quoteOf, underWayOf, fillWords,
+  TRADE_KINDS, tradeableOf, pickerOf, ticketOf, tradeFieldsOf, tradeDraftOf, quoteOf, underWayOf, fillWords, eventPriceOf,
 } from '../../client/js/host/trade-view.js';
 import { ACCOUNT_TABS } from '../../client/js/host/market-view.js';
 import { fieldsOf, draftOf } from '../../client/js/host/sheet-view.js';
@@ -379,4 +379,13 @@ test('the views read the store as it boots without throwing', () => {
   assert.deepEqual(pickerOf(s, NOW), { held: [], watching: [], most: [], results: [] });
   assert.equal(ticketOf(s, NOW), null);
   assert.equal(ticketOf({ ...s, trade: { ...s.trade, ticket: { id: 'coin:ETH', side: 'buy', venue: null, outcome: 0 } } }, NOW), null);
+});
+
+test('eventPriceOf: cents typed as the dollars the Account signs, six places, trailing zeros trimmed; null outside 0 < c < 100', () => {
+  assert.equal(eventPriceOf('62'), '0.62');
+  assert.equal(eventPriceOf('0.5'), '0.005');
+  assert.equal(eventPriceOf(' 10 '), '0.1');
+  assert.equal(eventPriceOf('99.99'), '0.9999');
+  for (const t of ['100', '0', '150', '-5', '', 'abc', '1e1', '0.00001']) assert.equal(eventPriceOf(t), null, JSON.stringify(t));
+  assert.equal(eventPriceOf(62), null, 'a typed string only');
 });

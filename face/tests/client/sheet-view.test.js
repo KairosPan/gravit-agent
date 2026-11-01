@@ -18,9 +18,9 @@ const AGENT = '0x3a087530887bd175ccc38828ee3776e5b6ea1ac6';
 
 test('SHEET_KINDS: every kind with a title and its go word', () => {
   assert.deepEqual(SHEET_KINDS, ['letIn', 'limit', 'endLimit', 'revoke', 'connect', 'paper', 'topUp', 'resetPaper', 'disconnect',
-    'approveCard', 'declineAsk', 'letDevice', 'signOut', 'order']);
+    'approveCard', 'declineAsk', 'letDevice', 'signOut', 'order', 'close', 'amend', 'leverage']);
   assert.deepEqual(SHEET_KINDS.map(k => goWord(k)), ['Let it in', 'Give the limit', 'End the limit', 'Revoke', 'Connect', 'Open the account',
-    'Top up', 'Start over', 'Disconnect', 'Approve', 'Decline', 'Let it sign', 'Sign out', 'Sign and place']);
+    'Top up', 'Start over', 'Disconnect', 'Approve', 'Decline', 'Let it sign', 'Sign out', 'Sign and place', 'Sign and close', 'Sign and change', 'Sign leverage']);
   assert.equal(goWord('approveCard', { decision: 'reject' }), 'Reject');
   assert.equal(goWord('approveCard', { decision: 'approve' }), 'Approve');
   for (const k of SHEET_KINDS) assert.ok(titleOf(k, {}).length > 0, k);
@@ -271,4 +271,23 @@ test('limitSeedOf: the page\'s venues, paper first, and the agent\'s standing tr
   page.spend[0].expired = true;
   assert.equal(limitSeedOf(page, AGENT, 'Claude Code').current, null);
   assert.deepEqual(limitSeedOf({ ok: false }, AGENT, 'Claude Code'), { address: AGENT, name: 'Claude Code', venues: [], current: null });
+});
+
+// the Market half's three kinds (plan 4a Task 3): the sheet view answers what host/sheet-market.js answers
+test('close, amend and leverage: the sheet view delegates each to the Market half', () => {
+  const close = { venue: 'ex', symbol: 'BTC/USDT:USDT', name: 'BTC perpetual', side: 'long', qty: '0.01', kind: 'perp' };
+  assert.equal(titleOf('close', close), 'Close BTC perpetual');
+  assert.equal(goWord('close', { ...close, kind: 'event' }), 'Sign and sell');
+  assert.deepEqual(fieldsOf('close', close).map(f => [f.name, f.label, f.placeholder]), [['qty', 'How much', 'All 0.01']]);
+  assert.deepEqual(draftOf('close', set(fieldsOf('close', close), { qty: '0.005' }), close, NOW), { type: 'liveClose', venue: 'ex', symbol: 'BTC/USDT:USDT', qty: '0.005' });
+  const amend = { venue: 'predict', order: 'ord-0020', type: 'limit', kind: 'event', qty: '50', limitPrice: '0.6', stopPrice: '', side: 'buy', base: 'X' };
+  assert.equal(titleOf('amend', amend), 'Change ord-0020');
+  assert.deepEqual(fieldsOf('amend', amend).map(f => f.name), ['qty', 'limitPrice']);
+  assert.deepEqual(draftOf('amend', { limitPrice: '62' }, amend, NOW), { type: 'liveAmend', venue: 'predict', order: 'ord-0020', qty: '', limitPrice: '0.62', stopPrice: '' });
+  assert.equal(draftOf('amend', {}, amend, NOW), 'Type what changes');
+  const lev = { venue: 'ex', venueName: 'Stand-in Exchange', symbol: 'BTC/USDT:USDT', name: 'BTC perpetual', leverage: '3' };
+  assert.equal(titleOf('leverage', lev), 'Leverage · BTC perpetual');
+  assert.equal(goWord('leverage', lev), 'Sign leverage');
+  assert.deepEqual(draftOf('leverage', { leverage: '5', marginMode: 'isolated' }, lev, NOW), { type: 'liveLeverage', venue: 'ex', symbol: 'BTC/USDT:USDT', leverage: '5', marginMode: 'isolated' });
+  assert.equal(draftOf('leverage', { leverage: '0' }, lev, NOW), 'Leverage is a whole number, 1 or more');
 });

@@ -1952,6 +1952,133 @@ test("Cancel in Under way is the Account's liveCancel, signed, and its answer sa
   store.timers.clear();
 });
 
+// ── the Market half's sheets (plan 4a Task 3): Close…, Change… and Leverage… ──
+
+const typeIn = (f, name, value) => f.fire('root', 'input', { target: { tagName: 'INPUT', type: 'text', name, value, dataset: { action: 'sheetField' } } });
+// a working order's Change… key as Under way and a market's page draw it
+const changeKeyRe = id => new RegExp(`data-action="openSheet" data-kind="amend" data-venue="ex" data-order="${id}"[^>]*>Change…</button>`);
+
+test('Under way offers Change… on a resting limit at a venue that amends, and opens the amend sheet', async () => {
+  const f = fakeWindow({ hash: '#/trade', storage: memoryStorage() });
+  const door = ownerDoor();
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page() } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  const html = f.html();
+  assert.match(html, /<button type="button" class="btn-sm" data-action="openSheet" data-kind="amend" data-venue="ex" data-order="ord-0002" data-type="limit" data-market-kind="spot" data-qty="0\.5" data-limit-price="142\.44" data-stop-price="" data-side="buy" data-base="SOL">Change…<\/button><button type="button" class="btn-sm" data-action="cancelOrder" data-venue="ex" data-order="ord-0002">Cancel<\/button>/);
+  assert.match(html, changeKeyRe('ord-0004'), 'a stop rests too');
+  assert.doesNotMatch(html, /data-kind="amend" data-venue="broker"/, 'the broker changes no order in place');
+  // the key's data-*, as a browser hands them over
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'amend', venue: 'ex', order: 'ord-0002', type: 'limit', marketKind: 'spot', qty: '0.5', limitPrice: '142.44', stopPrice: '', side: 'buy', base: 'SOL' } });
+  const sheet = store.get().sheet;
+  assert.equal(sheet.kind, 'amend');
+  assert.deepEqual(sheet.seed, { venue: 'ex', order: 'ord-0002', type: 'limit', kind: 'spot', qty: '0.5', limitPrice: '142.44', stopPrice: '', side: 'buy', base: 'SOL' });
+  assert.deepEqual(sheet.fields.map(x => [x.name, x.placeholder]), [['qty', '0.5'], ['limitPrice', '142.44']]);
+  assert.equal(sheet.status, 'incomplete', 'nothing typed: nothing to prepare');
+  assert.match(f.html(), /<aside class="drawer sheet" aria-label="Change ord-0002">/);
+  assert.match(f.html(), /Type what changes/);
+  assert.equal(door.sent('/data/account/prepare').length, 0);
+  typeIn(f, 'limitPrice', '143');
+  await until(() => store.get().sheet?.status === 'ready', 'the preparation');
+  assert.deepEqual(door.sent('/data/account/prepare').at(-1).draft, { type: 'liveAmend', venue: 'ex', order: 'ord-0002', qty: '', limitPrice: '143', stopPrice: '' });
+  assert.match(f.html(), /data-action="sheetSubmit">Sign and change<\/button>/, 'the go key is on');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
+  await until(() => door.sent('/data/account/exchange').length === 1, 'the signature');
+  assert.equal(door.sent('/data/account/exchange')[0].action.type, 'liveAmend');
+  store.timers.clear();
+});
+
+test("the Portfolio's BTC perpetual offers Close… and Leverage…", async () => {
+  const f = fakeWindow({ hash: '#/account/portfolio', storage: memoryStorage() });
+  const door = ownerDoor();
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page() } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await until(() => /aria-label="Positions"/.test(f.html()), 'the positions');
+  const html = f.html();
+  assert.match(html, /data-action="openSheet" data-kind="close" data-venue="ex" data-symbol="BTC\/USDT:USDT" data-name="BTC perpetual" data-side="long" data-qty="0\.01" data-market-kind="perp">Close…<\/button>/);
+  assert.match(html, /data-action="openSheet" data-kind="leverage" data-venue="ex" data-venue-name="Stand-in Exchange" data-symbol="BTC\/USDT:USDT" data-name="BTC perpetual" data-leverage="3">Leverage…<\/button>/);
+  assert.match(html, /data-kind="close" data-venue="predict" data-symbol="SI-FEDCUT-DEC:YES"[^>]*data-market-kind="event">Sell…<\/button>/, 'an event is sold');
+  assert.doesNotMatch(html, /data-kind="leverage" data-venue="predict"/, 'no leverage on an event');
+  // Close…: blank closes all of it, so the sheet prepares at once
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'close', venue: 'ex', symbol: 'BTC/USDT:USDT', name: 'BTC perpetual', side: 'long', qty: '0.01', marketKind: 'perp' } });
+  assert.equal(store.get().sheet.kind, 'close');
+  await until(() => store.get().sheet?.status === 'ready', 'the close prepared');
+  assert.deepEqual(door.sent('/data/account/prepare').at(-1).draft, { type: 'liveClose', venue: 'ex', symbol: 'BTC/USDT:USDT', qty: '' });
+  assert.match(f.html(), /aria-label="Close BTC perpetual"[\s\S]*How much[\s\S]*placeholder="All 0\.01"[\s\S]*>Sign and close<\/button>/);
+  // Leverage…: a whole number typed, prepared after the quiet
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'leverage', venue: 'ex', venueName: 'Stand-in Exchange', symbol: 'BTC/USDT:USDT', name: 'BTC perpetual', leverage: '3' } });
+  assert.equal(store.get().sheet.kind, 'leverage');
+  assert.match(f.html(), /aria-label="Leverage · BTC perpetual"[\s\S]*placeholder="3"[\s\S]*<option value="" selected>Keep it<\/option>/);
+  typeIn(f, 'leverage', '5');
+  await until(() => store.get().sheet?.status === 'ready', 'the leverage prepared');
+  assert.deepEqual(door.sent('/data/account/prepare').at(-1).draft, { type: 'liveLeverage', venue: 'ex', symbol: 'BTC/USDT:USDT', leverage: '5', marginMode: '' });
+  store.timers.clear();
+});
+
+test('a read-only page draws none of the three', async () => {
+  const f = fakeWindow({ hash: '#/trade', storage: memoryStorage() });
+  const door = ownerDoor();
+  const readOnly = () => { const p = door.page(); return { ...p, connectLive: { ...p.connectLive, writes: { on: false, capUsd: 250 } } }; };
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': readOnly } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  const none = /data-kind="(close|amend|leverage)"/;
+  assert.match(f.html(), /data-action="cancelOrder" data-venue="ex" data-order="ord-0002">Cancel</, 'Cancel stays: the safer direction');
+  assert.doesNotMatch(f.html(), none, 'Under way');
+  f.win.location.hash = '#/account/portfolio';
+  await until(() => /aria-label="Positions"/.test(f.html()), 'the positions');
+  assert.doesNotMatch(f.html(), none, 'the Portfolio');
+  store.timers.clear();
+});
+
+test('an order the stream reports filled while its Change… sheet is open', async () => {
+  const f = fakeWindow({ hash: '#/trade', storage: memoryStorage() });
+  const st = fakeStream();
+  const door = ownerDoor();
+  let filled = false;
+  // the page once ord-0010 has filled: no longer working
+  const page = () => { const p = door.page(); return filled ? { ...p, orders: p.orders.map(o => (o.id === 'ord-0010' ? { ...o, status: 'filled', filledQty: o.qty } : o)) } : p; };
+  // the Account's answer to a change of an order that filled: its 409, in its words
+  const REFUSAL = { code: 'E_ACCOUNT_BAD_ACTION', message: 'ord-0010 is filled: there is nothing to change at the venue', venue: 'ex', detail: { order: 'ord-0010' } };
+  const post = async (path, body) => (path === '/data/account/prepare' && filled && body.draft?.type === 'liveAmend'
+    ? (door.posts.push([path, body]), { status: 409, body: { ok: false, refusal: REFUSAL } }) : door.post(path, body));
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': page } });
+  const store = bootAccount(f, h, fakeMarkets(), { ownerPost: post, createAccountStream: st.create });
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  assert.match(f.html(), changeKeyRe('ord-0010'));
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'amend', venue: 'ex', order: 'ord-0010', type: 'limit', marketKind: 'spot', qty: '0.707', limitPrice: '141.44', stopPrice: '', side: 'buy', base: 'SOL' } });
+  assert.equal(store.get().sheet.kind, 'amend');
+  // it fills: the stream says so, and the page is read again past the cache
+  filled = true;
+  h.reads.length = 0;
+  st.event('fill', { side: 'buy', qty: 0.707, symbol: 'SOL/USDT', price: 141.44, venueName: 'Stand-in Exchange' }, 'r.1');
+  await until(() => h.reads.includes('/data/account?fresh=1'), 'the page read fresh');
+  await settle();
+  // the order and its key are gone from Under way; the sheet stays open on what was asked
+  assert.doesNotMatch(f.html(), /data-order="ord-0010"/, 'the row and its keys are gone');
+  assert.match(f.html(), changeKeyRe('ord-0002'), 'the others stay');
+  assert.equal(store.get().sheet?.kind, 'amend');
+  // a change typed: the Account refuses it in its words, and nothing signs for a gone order
+  typeIn(f, 'limitPrice', '140');
+  await until(() => store.get().sheet?.status === 'refused', 'the refusal');
+  assert.deepEqual(door.sent('/data/account/prepare').at(-1).draft, { type: 'liveAmend', venue: 'ex', order: 'ord-0010', qty: '', limitPrice: '140', stopPrice: '' });
+  const html = f.html();
+  assert.match(html, /<p class="acct-note">ord-0010 is filled: there is nothing to change at the venue<\/p>/);
+  assert.match(html, /<button type="button" class="btn-primary" data-action="sheetSubmit" disabled>Sign and change<\/button>/, 'the go key stays off');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
+  await settle();
+  assert.equal(door.sent('/data/account/exchange').length, 0, 'nothing signed');
+  store.timers.clear();
+});
+
 test('Run on a card opens the sheet; Escape closes it; Run sends the message, the page moves to the new conversation', async () => {
   const f = fakeWindow({ hash: '' });
   const close = f.withSelector('.drawer .close-key', { tagName: 'BUTTON', presentIf: /run-sheet/ });

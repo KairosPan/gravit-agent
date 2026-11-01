@@ -84,6 +84,12 @@ export function pageOk(page) {
   return Boolean(page?.ok === true && Array.isArray(page.venues) && Array.isArray(page.cards) && Array.isArray(page.orders) && page.signers && page.connectLive);
 }
 
+/** Whether the Account takes writes now (its page's `connectLive.writes.on`): a read-only Account, or a page the face does not
+ *  recognise, offers no key that would write. */
+export function writesOn(page) {
+  return pageOk(page) && page.connectLive.writes?.on === true;
+}
+
 /** The head's two chips: the Account's mode (`Guard`, `Beast`) and its writes (`Trading on · $250 a move`, `Read-only`). */
 export function headOf(page) {
   if (!pageOk(page)) return { mode: '', writes: '' };
@@ -129,7 +135,7 @@ export function positionsOf(holdingsBody) {
   return listOf(holdingsBody, 'positions').map(p => ({
     venue: str(p.venue), venueName: str(p.venueName), symbol: str(p.symbol), name: str(p.name), side: str(p.side),
     qty: number(p.qty), entryPrice: number(p.entryPrice), markPrice: number(p.markPrice), usd: number(p.usd), unrealizedUsd: number(p.unrealizedUsd),
-    paper: p.paper === true,
+    paper: p.paper === true, kind: str(p.kind), leverage: number(p.leverage),
   }));
 }
 
@@ -147,6 +153,7 @@ export function openOrdersOf(page) {
     return {
       id: str(o.id), venue: str(o.venue), venueName: str(o.venueName), symbol: str(o.symbol), side: str(o.side), type: str(o.type),
       qty: number(o.qty), filledQty: number(o.filledQty), limitPrice: number(o.limitPrice), status: o.status,
+      kind: str(o.kind), stopPrice: number(o.stopPrice), base: str(o.base),
       who: o.authority === 'owner' ? 'You' : name ? `Agent · ${name}` : 'An agent',
       paper: o.paper === true,
     };
@@ -222,6 +229,7 @@ export function venuesOf(page) {
       id, name: str(v.name), connector: str(v.connector), usd: number(v.usd), frontLine: str(v.frontLine),
       ...healthOf(Object.hasOwn(health, id) ? health[id] : undefined),
       does: doesOf(v), what: str(v.trade?.what), paper: v.paper === true, asOf: str(v.asOf),
+      tradeCan: { amend: v.trade?.amend === true, leverage: v.trade?.leverage === true, close: v.trade?.close === true },
       stale: typeof v.stale === 'string' ? v.stale : v.stale === true,
       details: {
         holdings: records(v.holdings).map(h => ({ asset: str(h.asset), amount: number(h.amount), usd: number(h.usd) })),

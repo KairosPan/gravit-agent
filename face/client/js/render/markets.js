@@ -5,7 +5,9 @@
 // stated for it, the conversations that name it. A cn: page is the A share's own, from its quote and its history. Every figure and
 // every word about a market is a view's (host/market-view.js): this module puts a figure in its unit's words, joins the views'
 // words, and says, where rows or lines would be, how far their read has got. On a page that signs for the Account, an Account
-// market's page carries Buy, and Sell where the market is held: each opens the Trade ticket (spec 2026-10-22 §6.4).
+// market's page carries Buy, and Sell where the market is held: each opens the Trade ticket (spec 2026-10-22 §6.4); and, for an
+// Account that takes writes, You hold's Close… (Sell…) and Leverage…, Open orders' Change…, and a perpetual's Leverage… among
+// its keys (plan 4a Task 3).
 import { esc, attrs, cls } from '../html.js';
 import { icon } from '../icons.js';
 import { chgHtml } from '../market-fmt.js';
@@ -14,7 +16,8 @@ import { price, number } from '../wire/market-model.js';
 import { money, signedMoney, sign } from '../wire/account-model.js';
 import { seg } from './controls.js';
 import { candlesSvg, sessionsSvg } from './chart.js';
-import { orderWords } from './account.js';
+import { orderWords, marketKeysOn, marketKey, changeKey, positionKeys } from './account.js';
+import { marketLeverageSeedOf } from '../host/sheet-market.js';
 import {
   CANDLE_RANGES, isAccountKey, tableOf, pageOf, faceAssetOf, mentionsOf, volumeWordOf,
   connectionWord, watchWord, basisWord, watchedOf,
@@ -170,8 +173,9 @@ const pageHtml = (who, keys, top, left, right) => {
 // a key opening the Trade ticket on the market, at a side
 const ticketKey = (id, side, word) => `<button type="button" class="btn" data-action="openTicket" data-id="${esc(id)}" data-side="${side}">${word}</button>`;
 // the page's keys: Buy, and Sell where it is held, when `trade` is given (an Account market on a page that signs); Hand to
-// Gravit; Watch
-const keysHtml = (id, watched, trade = null) => `<div class="mk-d-acts">${trade ? ticketKey(id, 'buy', 'Buy') + (trade.held ? ticketKey(id, 'sell', 'Sell') : '') : ''}` +
+// Gravit; Watch — and a perpetual's Leverage… (`leverage`, its seed) where it is given
+const keysHtml = (id, watched, trade = null, leverage = null) => `<div class="mk-d-acts">${trade ? ticketKey(id, 'buy', 'Buy') + (trade.held ? ticketKey(id, 'sell', 'Sell') : '') : ''}` +
+  `${leverage ? marketKey('leverage', leverage, 'Leverage…', 'btn') : ''}` +
   `<button type="button" class="btn" data-action="handToGravit" data-id="${esc(id)}">${icon('agent', 16, 2)}Hand to Gravit</button>` +
   `<button type="button" class="${cls('btn', watched && 'mk-on')}" data-action="toggleWatch" data-id="${esc(id)}" aria-pressed="${watched}">${icon('star', 16, 2)}${watched ? 'Watching' : 'Watch'}</button></div>`;
 const aboutHtml = (conversations, asset, now) => mentionsOf(conversations, asset).map(c => `<a class="mk-line" href="#/messages/${esc(c.id)}" data-action="open" data-id="${esc(c.id)}"><span class="mk-mark">→</span>` +
@@ -233,14 +237,18 @@ function accountPage(id, view, state, now) {
     '', '', !l.connected && l.public ? '<a class="link mk-link" href="#/account/venues">Connect to trade</a>' : ''));
   if (venues.length) left.push(section('Across venues', feed(venues)));
 
-  // what is held of it, what is working on it and what was stated for it, each as far as its own read has got
+  // what is held of it, what is working on it and what was stated for it, each as far as its own read has got; on a page that
+  // signs for an Account that takes writes, a position's Close… (Sell…) and Leverage…, an order's Change…
+  const keyed = marketKeysOn(state);
+  const page = state.account?.data;
+  const tail = keys => (keys.length ? `<span class="btn-row">${keys.join('')}</span>` : '');
   const held = [
     ...view.held.assets.map(a => line('·', esc(`${[qtyWord(a.amount), a.asset].filter(Boolean).join(' ')} · ${money(a.usd)}`))),
     ...view.held.positions.map(p => line('·', `${esc(`${p.venueName || p.venue} · ${[p.side, qtyWord(p.qty), p.symbol].filter(Boolean).join(' ')} · `)}` +
-      `<span class="${tone(p.unrealizedUsd)}">${esc(signedMoney(p.unrealizedUsd))}</span>${p.paper ? ` ${tag('Paper')}` : ''}`)),
+      `<span class="${tone(p.unrealizedUsd)}">${esc(signedMoney(p.unrealizedUsd))}</span>${p.paper ? ` ${tag('Paper')}` : ''}`, '', '', keyed ? tail(positionKeys(p, page)) : '')),
   ];
   right.push(section('You hold', partBody(view.reads.held, held, 'You don’t hold any.', view.reads.held.unreadable ? 'Account unreadable' : 'Holdings unavailable')));
-  const orders = view.orders.map(o => line('·', esc(orderWords(o))));
+  const orders = view.orders.map(o => line('·', esc(orderWords(o)), '', '', keyed ? tail([changeKey(o, page)].filter(Boolean)) : ''));
   // nothing working once the page has answered: no section; a page the face does not recognise: unreadable, never loading
   if (orders.length || !view.reads.orders.answered || view.reads.orders.failed) {
     right.push(section('Open orders', partBody(view.reads.orders, orders, '', view.reads.orders.unreadable ? 'Account unreadable' : 'Account unavailable')));
@@ -254,7 +262,9 @@ function accountPage(id, view, state, now) {
   // the hand order is the owner's: Buy and Sell only on a page that signs, for a market of a Trade kind (a perpetual, a pre-IPO
   // one, is listed, not traded from the face), Sell only where something of it is held
   const trade = state.owner?.role === 'signs' && tradeableOf(view.item) ? { held: view.held.assets.length > 0 || view.held.positions.length > 0 } : null;
-  return pageHtml(who, keysHtml(id, view.watched, trade), top, left, right);
+  // a perpetual's Leverage…: its first connected line whose venue sets leverage
+  const leverage = keyed ? marketLeverageSeedOf(view.item, view.legs, view.held.positions, page) : null;
+  return pageHtml(who, keysHtml(id, view.watched, trade, leverage), top, left, right);
 }
 
 // an A share's page: its quote (the Account's) against the previous close, its facts, the conversations that name it
