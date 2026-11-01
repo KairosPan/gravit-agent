@@ -1,0 +1,24 @@
+{
+  "ok": true,
+  "venue": "china",
+  "venueName": "Tencent",
+  "symbol": "600519",
+  "range": "1D",
+  "sessions": [
+    {
+      "date": "2026-10-30",
+      "prec": 1354,
+      "price": [
+        1354,
+        1355,
+        1356
+      ],
+      "amount": [
+        0,
+        136300,
+        98100
+      ]
+    }
+  ],
+  "source": "Tencent"
+}

@@ -1,0 +1,92 @@
+{
+  "ok": true,
+  "quotes": [
+    {
+      "venue": "china",
+      "symbol": "600519",
+      "market": {
+        "symbol": "600519",
+        "name": "贵州茅台",
+        "kind": "stock",
+        "base": "600519",
+        "quote": "CNY",
+        "currency": "CNY",
+        "open": false,
+        "types": [],
+        "price": 1392.05,
+        "quoteAt": "2026-10-30T15:00:03+08:00",
+        "quoteFrom": "Tencent",
+        "change24h": 38.05,
+        "changePct24h": 2.81,
+        "session": {
+          "open": false
+        },
+        "cn": {
+          "prevClose": 1354,
+          "open": 1363,
+          "high": 1399.9,
+          "low": 1360.1,
+          "turnover": 21610000000,
+          "turnoverRate": 0.17,
+          "marketCap": 1740000000000,
+          "peTtm": 20.5,
+          "limitUp": 1489.4,
+          "limitDown": 1218.6,
+          "volume": 2161000,
+          "amplitude": 2.4,
+          "lastSession": "2026-10-30",
+          "phase": "closed",
+          "quoteStatus": "live"
+        }
+      }
+    },
+    {
+      "venue": "china",
+      "symbol": "688981",
+      "market": {
+        "symbol": "688981",
+        "name": "中芯国际",
+        "kind": "stock",
+        "base": "688981",
+        "quote": "CNY",
+        "currency": "CNY",
+        "open": false,
+        "types": [],
+        "price": 98.6,
+        "quoteAt": "2026-10-30T15:00:03+08:00",
+        "quoteFrom": "Tencent",
+        "change24h": -0.4,
+        "changePct24h": -0.4,
+        "session": {
+          "open": false
+        },
+        "cn": {
+          "prevClose": 99,
+          "open": 99.1,
+          "high": 100.2,
+          "low": 97.8,
+          "turnover": 2957500000,
+          "turnoverRate": 0.17,
+          "marketCap": 1740000000000,
+          "peTtm": 20.5,
+          "limitUp": 108.9,
+          "limitDown": 89.1,
+          "volume": 29575000,
+          "amplitude": 2.4,
+          "lastSession": "2026-10-30",
+          "phase": "closed",
+          "quoteStatus": "live"
+        }
+      }
+    },
+    {
+      "venue": "china",
+      "symbol": "000002",
+      "refusal": {
+        "code": "E_ACCOUNT_BAD_ACTION",
+        "message": "no A-share quote for 000002",
+        "venue": "china"
+      }
+    }
+  ]
+}

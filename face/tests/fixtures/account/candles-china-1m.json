@@ -1,0 +1,25 @@
+{
+  "ok": true,
+  "venue": "china",
+  "venueName": "Tencent",
+  "symbol": "600519",
+  "range": "1M",
+  "candles": [
+    {
+      "t": 1793257200000,
+      "o": 1350,
+      "h": 1366,
+      "l": 1348,
+      "c": 1354
+    },
+    {
+      "t": 1793343600000,
+      "o": 1363,
+      "h": 1399.9,
+      "l": 1360.1,
+      "c": 1392.05
+    }
+  ],
+  "source": "Tencent",
+  "adjustment": "forward-adjusted (前复权)"
+}
