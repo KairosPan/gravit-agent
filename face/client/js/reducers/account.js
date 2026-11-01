@@ -55,6 +55,8 @@ export const reducers = {
   reachFailed: (s, { at, message = null }) => read(s, 'reach', { status: 'error', at, message }),
   // Guard (host/account.js guard, plan 4a Task 5): the press in the air, then what the Account's answer said — done in the
   // face's words, or its refusal in its own; the mode drawn stays the page's
+  // a Cards Grant that could not open its sheet, in words; null clears it (plan 4b Task 6)
+  grantSaid: (s, words) => acc(s, { grantSaid: typeof words === 'string' && words ? words : null }),
   guardAsking: s => acc(s, { guard: { status: 'asking', said: null, message: null } }),
   guardSaid: (s, said) => acc(s, { guard: { status: 'said', said: typeof said === 'string' ? said : null, message: null } }),
   // a signed Beast done: the last Guard press's words are no longer the news

@@ -460,7 +460,7 @@ test("beforeSign's refusal stops the signature and says it", async () => {
   u.owner.submitWith.push(OUT_REFUSED);
   await u.sheet.open('signOut', SIGN_OUT);
   await u.sheet.submit();
-  assert.deepEqual([u.s().status, u.s().message], ['refused', 'Not signed out: the last owner cannot leave yet']);
+  assert.deepEqual([u.s().status, u.s().message], ['refused', 'Not signed out: the last owner cannot leave yet. Guard is on.']);
   // a sheet closed while Guard is asked signs nothing
   const later = deferred();
   const v = rig({ beforeSign: () => later.promise });

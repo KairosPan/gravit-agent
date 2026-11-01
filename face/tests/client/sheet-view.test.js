@@ -475,9 +475,30 @@ test('grantOf answers a sheet for every kind of ask', () => {
   // an ask with no words: no line
   assert.equal(grantOf(ask({ kind: 'session', text: '' }), page).seed.askedWords, '');
   // a kind the face does not know: no sheet, and no Grant key
-  for (const kind of ['memory', '', 'LIMIT']) { assert.equal(grantOf(ask({ kind }), page), null, kind); assert.equal(grantsAsk(ask({ kind })), false, kind); }
-  for (const kind of ['limit', 'venue', 'letIn', 'topup', 'session', 'leverage', 'mode']) assert.equal(grantsAsk(ask({ kind })), true, kind);
+  for (const kind of ['memory', '', 'LIMIT']) { assert.equal(grantOf(ask({ kind }), page), null, kind); assert.equal(grantsAsk(ask({ kind }), page), false, kind); }
+  for (const kind of ['limit', 'venue', 'letIn', 'topup', 'session', 'leverage', 'mode']) assert.equal(grantsAsk(ask({ kind }), page), true, kind);
   assert.equal(grantOf(null), null);
+  assert.equal(grantsAsk(ask({ kind: 'letIn' }), null), false, 'no page read');
+});
+
+test("grantsAsk follows the Account page's pfGrantable: Beast in force, a read-only Account, no dial", () => {
+  const page = fx('account');
+  const ask = kind => ({ id: 'ask-0009', agent: AGENT, agentName: 'Claude Code', kind, venue: kind === 'venue' ? 'paper' : '', usd: '25', text: 'Please' });
+  // Beast in force: a mode ask opens no sheet
+  const beast = { ...page, mode: 'open' };
+  assert.equal(grantsAsk(ask('mode'), beast), false);
+  assert.equal(grantOf(ask('mode'), beast), null);
+  // a read-only Account: no limit, top-up, session or leverage; a venue, a knock and the mode still
+  const readOnly = { ...page, connectLive: { ...page.connectLive, writes: { ...page.connectLive.writes, on: false } } };
+  for (const kind of ['limit', 'topup', 'session', 'leverage']) { assert.equal(grantsAsk(ask(kind), readOnly), false, kind); assert.equal(grantOf(ask(kind), readOnly), null, kind); }
+  for (const kind of ['venue', 'letIn', 'mode']) assert.equal(grantsAsk(ask(kind), readOnly), true, kind);
+  // no dial: no session or leverage
+  const { dial, ...noDial } = page;
+  for (const kind of ['session', 'leverage']) assert.equal(grantOf(ask(kind), noDial), null, kind);
+  assert.ok(dial);
+  // a top-up into the agent's wallet with nothing but agent wallets to move from: none
+  const onlyAgents = { ...page, venues: page.venues.filter(v => v.id.startsWith('agent-')) };
+  assert.equal(grantOf(ask('topup'), onlyAgents), null);
 });
 
 test('a venue ask on a venue not connected opens the connect sheet with its connector', () => {
@@ -517,6 +538,12 @@ test('a top-up with no wallet opens an agent wallet seeded with the ask', () => 
   // another agent's wallet is not this one's: never matched by name
   const other = { ...fx('account'), subAccounts: [{ ...fx('account').subAccounts[0], agent: '0x1111111111111111111111111111111111111111' }] };
   assert.equal(grantOf(ask, other).kind, 'subWallet');
+  // an agent not standing on the page (not let in, or its key not ok): no agent wallet for it, nor for another agent
+  const STRANGER = '0x2222222222222222222222222222222222222222';
+  assert.equal(grantOf({ ...ask, agent: STRANGER }, page), null);
+  assert.equal(grantsAsk({ ...ask, agent: STRANGER }, page), false);
+  const paused = { ...page, keys: page.keys.map(k => ({ ...k, status: 'paused' })) };
+  assert.equal(grantOf(ask, paused), null);
 });
 
 test("the sign-out's Guard box is there only in Beast, ticked for the last device", () => {

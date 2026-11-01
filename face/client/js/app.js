@@ -818,12 +818,19 @@ export function boot(win, host = {}) {
   async function grantAsk(id) {
     const ask = () => asksOf(store.get().account.data).find(k => k.id === id);
     const grant = () => grantOf(ask(), store.get().account.data, store.get().account.venuesHere.data);
+    store.dispatch('grantSaid', null);
     let g = grant();
     if (!g && ask()?.kind === 'venue' && store.get().account.venuesHere.data === null) {
       const opened = sheetOpens;
       await account.loadVenuesHere();
       if (opened !== sheetOpens || !signs()) return;
       g = grant();
+      // the read failed: said, under the asks
+      if (!g && store.get().account.venuesHere.data === null) {
+        const why = store.get().account.venuesHere.message;
+        store.dispatch('grantSaid', `Not opened: where this account can connect was not read${typeof why === 'string' && why ? ` — ${why}` : ''}. Try Grant again.`);
+        return;
+      }
     }
     if (!g) return;
     if (g.kind === 'connect') { connectAsked = { keyfile: null, reach: null }; store.dispatch('connectReset'); }

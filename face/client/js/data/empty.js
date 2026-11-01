@@ -76,6 +76,7 @@ export function emptyState() {
       connectWallet: { status: 'idle', wallets: [], wallet: '', address: '', message: null },
       signIn: { status: 'idle', connector: '', url: '', tab: false, state: '', message: null },
       closing: {},
+      grantSaid: null,
       statementOpen: false,
       detailsVenue: null,
     },

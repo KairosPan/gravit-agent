@@ -514,6 +514,10 @@ test("the owner's keys on Agents and Cards: Let in, Give a limit, End limit, Rev
   has(session, `<span>Claude Code · A session · session</span><span class="spacer"></span><span class="btn-row"><button type="button" class="btn-sm" data-action="grant" data-ask="ask-0003">Grant</button>${sheetKey('declineAsk', { ask: 'ask-0003' }, 'Decline')}</span></div>`);
   has(session, `<span>Claude Code · Remember · memory</span><span class="spacer"></span><span class="btn-row">${sheetKey('declineAsk', { ask: 'ask-0004' }, 'Decline')}</span></div>`);
   lacks(session, 'data-action="grant" data-ask="ask-0004"');
+  // Beast in force: a mode ask has Decline alone (the Account page's pfGrantable)
+  const beast = draw(signing(state({ tab: 'cards', page: { ...page, mode: 'open', asks: [{ id: 'ask-0005', agentName: 'Claude Code', kind: 'mode', text: 'Beast' }] } })));
+  has(beast, `<span>Claude Code · Beast · mode</span><span class="spacer"></span><span class="btn-row">${sheetKey('declineAsk', { ask: 'ask-0005' }, 'Decline')}</span></div>`);
+  lacks(beast, 'data-action="grant"');
   has(session, '<div class="order-row">No id · limit</div>');
   // a card with no hash is not answered here
   lacks(draw(signing(state({ tab: 'cards', page: { ...page, cards: [{ ...card, hash: '' }] } }))), 'data-kind="approveCard"');

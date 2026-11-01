@@ -1795,6 +1795,22 @@ test('a venue ask not on the page: Grant reads where the account can connect, th
   store.timers.clear();
 });
 
+test('a venue Grant whose read of where the account can connect fails says so under the asks', async () => {
+  const f = fakeWindow({ hash: '#/account/cards', storage: memoryStorage() });
+  const door = ownerDoor();
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => ({ ...door.page(), asks: [{ ...fx('account').asks[1], venue: 'okx' }] }), '/data/account/venues': () => { throw new Error('offline'); } } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'grant', ask: 'ask-0002' } });
+  await until(() => typeof store.get().account.grantSaid === 'string', 'the words');
+  assert.equal(store.get().sheet, null, 'no sheet');
+  assert.match(store.get().account.grantSaid, /^Not opened: where this account can connect was not read/);
+  assert.match(f.html(), /<p class="acct-note">Not opened: where this account can connect was not read/);
+  store.timers.clear();
+});
+
 // Review Focus: Settings › Devices' sign-out of the last device in Beast, Guard first
 test('the last device signs out in Beast: Guard refused, nothing signed and the device still signs; Guard taken and the sign-out refused, Guard stays and the words say so', async () => {
   const f = fakeWindow({ hash: '#/account/portfolio', storage: memoryStorage() });
@@ -1840,7 +1856,7 @@ test('the last device signs out in Beast: Guard refused, nothing signed and the 
   await until(() => store.get().sheet?.status === 'refused', 'the sign-out refused');
   assert.equal(door.sent('/data/account/guard').length, 2);
   assert.equal(door.sent('/data/account/exchange').length, 1, 'signed once Guard was taken');
-  assert.equal(store.get().sheet.message, 'Not signed out: the last owner cannot leave yet');
+  assert.equal(store.get().sheet.message, 'Not signed out: the last owner cannot leave yet. Guard is on.');
   assert.equal(store.get().owner.role, 'signs');
   await until(() => store.get().account.data.mode === 'guard', 'Guard on the page');
   assert.equal(mode, 'guard', 'Guard stays');

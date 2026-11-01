@@ -500,16 +500,43 @@ export const guardFirstDone = said => {
   const s = str(said).trim();
   return s ? `${/[.!?]$/.test(s) ? s : `${s}.`} Guard is on.` : 'Guard is on.';
 };
-/** A sign-out refused after a taken Guard (Guard stays): the Account's words. */
-export const guardFirstRefused = words => `Not signed out: ${str(words) || 'the account did not answer'}`;
+/** A sign-out refused after a taken Guard (Guard stays, and says so): the Account's words. */
+export const guardFirstRefused = words => {
+  const w = (str(words) || 'the account did not answer').trim();
+  return `Not signed out: ${/[.!?]$/.test(w) ? w : `${w}.`} Guard is on.`;
+};
 
 // ── granting an agent's ask (plan 4b Task 6, portfolio.js pfGrant) ──
 
 /** The kinds of ask an agent sends (sign.ts agentAsk) that the face grants: each answered by a sheet. */
 export const GRANT_KINDS = ['limit', 'venue', 'letIn', 'topup', 'session', 'leverage', 'mode'];
-/** The ask is one the face grants (Cards draws its Grant key): a venue ask's sheet may still wait for where the account can
- *  connect to be read (`grantOf` with `venuesHere`). */
-export const grantsAsk = ask => isRecord(ask) && GRANT_KINDS.includes(ask.kind);
+// the ask's agent among the keys standing on the page (let in, `status` ok): the only agent an agent wallet is made for
+const standingKey = (page, agent) => pageOk(page) && records(page.keys).some(k => k.status === 'ok' && sameAddress(str(k.address), agent));
+// the agent's wallet on the page, by its address
+const walletOfAsk = (page, ask) => walletsOf(page).find(w => sameAddress(w.agent, str(ask.agent))) ?? null;
+
+/** The ask is one this page grants (Cards draws its Grant key), as the Account page's pfGrantable judges it: a venue on a page
+ *  that connects; a limit, a session or leverage only for an Account that takes writes (the last two on a page with its dial);
+ *  a top-up for one that takes writes, into the agent's wallet from an account money moves from that is not an agent wallet,
+ *  or — with no wallet — an agent wallet for a key standing on the page (never another agent's); the mode only while Beast is
+ *  not in force; a knocking key always. A venue ask's sheet may still wait for where the account can connect to be read
+ *  (`grantOf` with `venuesHere`). */
+export function grantsAsk(ask, page) {
+  if (!isRecord(ask) || !GRANT_KINDS.includes(ask.kind) || !pageOk(page)) return false;
+  switch (ask.kind) {
+    case 'venue': return isRecord(page.connectLive);
+    case 'limit': return writesOn(page);
+    case 'topup':
+      if (!writesOn(page)) return false;
+      return walletOfAsk(page, ask)
+        ? moveSourcesOf(page).some(x => !x.agent)
+        : standingKey(page, str(ask.agent));
+    case 'session':
+    case 'leverage': return writesOn(page) && isRecord(page.dial);
+    case 'mode': return page.mode !== 'open';
+    default: return true;
+  }
+}
 
 // the line under a granting sheet's title: the ask in the Account's words
 const askedWordsOf = ask => (str(ask.text) ? `${str(ask.agentName) || 'An agent'} asked: “${ask.text}”` : '');
@@ -531,9 +558,9 @@ function connectPresetOf(options, venue) {
  *  `venuesHere` the Venues read of where the account can connect, the sheet null until it has landed; a knocking key → `letIn`
  *  at the ask's own address (never a name's); a top-up → `move` into the agent's wallet, matched by the agent's address, with
  *  the ask's dollars, or with none an agent wallet (`subWallet`) for it; a session → `session`; leverage → `leverageCap`; the
- *  mode → `beast`. Any other kind: null. */
+ *  mode → `beast`. An ask this page does not grant (`grantsAsk`): null. */
 export function grantOf(ask, page, venuesHere = null) {
-  if (!grantsAsk(ask)) return null;
+  if (!grantsAsk(ask, page)) return null;
   const askedWords = askedWordsOf(ask);
   const dial = pageOk(page) && isRecord(page.dial) ? page.dial : {};
   switch (ask.kind) {
@@ -549,9 +576,9 @@ export function grantOf(ask, page, venuesHere = null) {
     case 'letIn':
       return { kind: 'letIn', seed: { address: str(ask.agent), name: str(ask.agentName) || str(ask.text), askedWords } };
     case 'topup': {
-      const wallet = walletsOf(page).find(w => sameAddress(w.agent, str(ask.agent)));
+      const wallet = walletOfAsk(page, ask);
       if (wallet) {
-        const from = moveSourcesOf(page).find(x => !x.agent)?.id ?? '';
+        const from = moveSourcesOf(page).find(x => !x.agent).id;
         return { kind: 'move', seed: { ...moveSeedOf(page, { from, to: wallet.venue, amount: str(ask.usd) }), askedWords } };
       }
       const float = Number(ask.usd) > 0 ? str(ask.usd) : '50';
