@@ -31,6 +31,9 @@ export const reducers = {
     if (route.screen === 'messages' && route.id && route.id !== 'new') s.lastConv = route.id;
     // the Statement and a venue's Details belong to Account
     if (route.screen !== 'account' && (s.account.statementOpen || s.account.detailsVenue)) s.account = { ...s.account, statementOpen: false, detailsVenue: null };
+    // a Receive address read on the Money tab is drawn only while the tab stays on screen: leaving it forgets every one
+    const onMoney = r => r?.screen === 'account' && r.tab === 'money';
+    if (onMoney(state.route) && !onMoney(route) && s.account.receive && Object.keys(s.account.receive).length) s.account = { ...s.account, receive: {} };
     // a plugin or module page goes back to the Discover view it was opened from; opened from outside Discover, to Discover itself
     const page = r => r === 'plugin' || r === 'module';
     if (route.screen === 'discover') s.lastDiscover = route;

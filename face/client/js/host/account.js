@@ -27,6 +27,7 @@ const nothing = () => {};
 const GUARD = '/data/account/guard';
 const GUARD_SAID = 'Guard: what agents ask for waits for you on a card.';
 const NO_ANSWER = 'The account did not answer. Try again.';
+const RECEIVE_ELSEWHERE = 'The account answered for another account or network: nothing is shown. Read again.';
 // no door handed in: nothing answers
 const noDoor = async () => ({ status: 0, body: { ok: false, error: NO_ANSWER } });
 
@@ -88,6 +89,8 @@ export function startAccount({ store, getJson, post = noDoor, now = Date.now, sc
           const held = store.get().account.data;
           const afterUnread = held != null && !pageOk(held);
           store.dispatch('accountLoaded', { data: body, at: now() });
+          // a fresh page may name an account connected again, or another key: the Receive addresses read before it are not drawn
+          if (fresh) store.dispatch('receiveClear');
           if (holdingsDue === 0 && hasPaper(body) && (afterUnread || store.get().account.paper.data === null)) {
             void loadHoldings({ fresh: afterUnread }).then(() => loadHistory());
           }
@@ -229,7 +232,11 @@ export function startAccount({ store, getJson, post = noDoor, now = Date.now, sc
     return fly(`receive:${key}`, `/data/account/receive?${new URLSearchParams(q).toString()}`, {
       loading: 'receiveLoading', asking: key,
       land: (body, refused) => {
-        if (!refused && body?.ok === true) store.dispatch('receiveLoaded', { key, data: body, at: now() });
+        // the answer names the account, asset and network it is for (service.ts receive): one for another is never drawn here
+        const named = (k, v) => typeof body?.[k] !== 'string' || body[k].toLowerCase() === v.toLowerCase();
+        if (!refused && body?.ok === true && !(named('venue', q.venue) && named('asset', q.asset) && named('network', q.network))) {
+          store.dispatch('receiveFailed', { key, at: now(), message: RECEIVE_ELSEWHERE });
+        } else if (!refused && body?.ok === true && typeof body.address === 'string' && body.address !== '') store.dispatch('receiveLoaded', { key, data: body, at: now() });
         else store.dispatch('receiveFailed', { key, at: now(), message: messageOf(body) });
       },
     });

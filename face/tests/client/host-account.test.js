@@ -806,3 +806,25 @@ test('bridgeRoutes lands only for the latest preparation', async () => {
   await c;
   assert.deepEqual(r.a().routes, { asked: JSON.stringify(one), status: 'error', data: null, message: 'no bridge joins these chains' });
 });
+
+test("an answer for another account, asset or network is never landed as the row's address", async () => {
+  const r = rig({ json: { '/data/account/receive': { ...ADDRESS, network: 'Arbitrum' } } });
+  await r.account.receive({ venue: 'okx', asset: 'USDT', network: 'Base' });
+  const got = r.a().receive['okx|USDT|Base'];
+  assert.equal(got.status, 'error');
+  assert.equal(got.data, null);
+  assert.match(got.message, /another account or network/);
+  // an answer with no address is no address
+  const e = rig({ json: { '/data/account/receive': { ok: true, venue: 'okx', asset: 'USDT', network: 'Base' } } });
+  await e.account.receive({ venue: 'okx', asset: 'USDT', network: 'Base' });
+  assert.equal(e.a().receive['okx|USDT|Base'].status, 'error');
+});
+
+test('a fresh page forgets every Receive address read; a plain one keeps them', async () => {
+  const r = rig({ json: { '/data/account': page(), '/data/account/receive': ADDRESS } });
+  await r.account.receive({ venue: 'okx', asset: 'USDT', network: 'Base' });
+  await r.account.load();
+  assert.equal(r.a().receive['okx|USDT|Base'].status, 'ready', 'the poll keeps it');
+  await r.account.load({ fresh: true });
+  assert.deepEqual(r.a().receive, {}, 'after a move, a stream event or Refresh: forgotten');
+});

@@ -727,10 +727,20 @@ test('Show address: asking, then the address, its memo, whose it is and the note
   s = R.receiveLoaded(s, { key, at: NOW, data: { ok: true, address, tag: '889', whose: 'the agent wallet this account holds the key of', note: 'any EVM network' } });
   const html = draw(s);
   has(html, `<span class="mono">${address}</span>`);
-  has(html, '<span class="mono">Memo 889</span>');
+  has(html, '<span class="dim">Memo / tag — needed with it</span> <span class="mono">889</span> <button type="button" class="btn-sm" data-action="copyText" data-text="889">Copy</button>', 'the memo, needed, with its own Copy');
   has(html, 'The agent wallet this account holds the key of · any EVM network.');
-  has(html, `data-action="copyText" data-text="${address}">Copy</button>`);
+  has(html, `data-action="copyText" data-text="${address}">Copy</button><button type="button" class="btn-sm" data-action="showAddress" data-venue="agent-claude-code" data-asset="USDC" data-network="Base">Read again</button>`, 'Copy, and Read again beside it');
   lacks(html, 'Show address</button>', 'the row read shows its address');
+  // read again: the address is not drawn while the new answer is in the air
+  const again = draw(R.receiveLoading(s, key));
+  lacks(again, address);
+  has(again, 'Asking Agent wallet · Claude Code…');
+  // leaving the tab forgets it; coming back asks again
+  const left = R.nav(s, { screen: 'account', tab: 'venues' });
+  assert.deepEqual(left.account.receive, {});
+  has(draw(R.nav(left, { screen: 'account', tab: 'money' })), 'data-network="Base">Show address</button>');
+  assert.equal(R.nav(s, { screen: 'account', tab: 'money' }).account.receive[key].status, 'ready', 'staying on the tab keeps it');
+  assert.deepEqual(R.receiveClear(s).account.receive, {});
   const refused = R.receiveFailed(moneySigns(state({ tab: 'money' })), { key, at: NOW, message: 'the wallet gives no address on Robinhood Chain' });
   has(draw(refused), 'the wallet gives no address on Robinhood Chain');
 });
@@ -752,6 +762,7 @@ test("the bridge's routes line: under the quote for the preparation shown, findi
   has(html, '<h2>Move money · My wallet</h2>');
   has(html, '<p class="sheet-hint">Only to your own accounts. Up to $250.00 a move.</p>');
   has(html, 'Sign and move</button>');
+  has(html, "<p class=\"sheet-hint\">Your wallet sends it; it lands on Optimism when the bridge delivers. Can&#39;t be undone.</p>");
   s = R.routesAsking(s, asked);
   has(renderSheet(s, NOW), '<p class="sheet-hint sheet-routes">Finding the routes…</p>');
   s = R.routesLanded(s, { asked, data: { ok: true, routes: [{ tool: 'across', receiveUsd: 19.8, etaSec: 30, gasUsd: 0.02, feeUsd: 0.2 }, { tool: 'relay', receiveUsd: 19.7, etaSec: 120, feeUsd: 0.3 }] } });

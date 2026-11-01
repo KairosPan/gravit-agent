@@ -74,6 +74,8 @@ export const reducers = {
     ? acc(s, { receive: { ...s.account.receive, [key]: { status: 'ready', data, at, message: null } } }) : s),
   receiveFailed: (s, { key, at, message = null } = {}) => (typeof key === 'string' && key
     ? acc(s, { receive: { ...s.account.receive, [key]: { data: null, ...s.account.receive[key], status: 'error', at, message } } }) : s),
+  // a fresh page landed (after a move, a stream event, Refresh) or the tab was left: every address read is forgotten
+  receiveClear: s => (s.account.receive && Object.keys(s.account.receive).length ? acc(s, { receive: {} }) : s),
   routesAsking: (s, asked) => acc(s, { routes: { asked: typeof asked === 'string' ? asked : null, status: 'asking', data: null, message: null } }),
   routesLanded: (s, { asked, data } = {}) => acc(s, { routes: { asked, status: 'ready', data, message: null } }),
   routesFailed: (s, { asked, message = null } = {}) => acc(s, { routes: { asked, status: 'error', data: null, message } }),

@@ -9,7 +9,7 @@ import { pageOk } from '../host/account-view.js';
 import { standingWords, devicesOf, whatYouSignLines, goodForWords } from '../host/owner-view.js';
 import { titleOf, goWord, connectCheckOf } from '../host/sheet-view.js';
 import { askedOf } from '../host/sheet.js';
-import { moveHintsOf, routesWordsOf } from '../host/sheet-money.js';
+import { moveHintsOf, moveSaysOf, routesWordsOf } from '../host/sheet-money.js';
 import { seg } from './controls.js';
 
 const note = text => `<p class="acct-note">${esc(text)}</p>`;
@@ -118,8 +118,10 @@ export function renderSheet(state, now) {
   // under the quote, beside the preparation they were read for (plan 4b Task 2)
   const hints = moveHintsOf(s).map(h => `<p class="sheet-hint">${esc(h)}</p>`).join('');
   const r = routesWordsOf(s, state.account?.routes);
+  // the page's words under a move's quote (where it goes, Can't be undone.), only beside the preparation that is the form's
+  const says = s.status === 'ready' || s.status === 'signing' ? moveSaysOf(s).map(l => `<p class="sheet-hint">${esc(l)}</p>`).join('') : '';
   const routes = r ? `<p class="sheet-hint sheet-routes">${r.lead.startsWith('Via ') ? `<b>${esc(r.lead)}</b>` : esc(r.lead)}${r.others ? `<br>${esc(r.others)}` : ''}</p>` : '';
   const keys = `<div class="btn-row">${key('sheetClose', 'Cancel')}<button${attrs({ type: 'button', class: 'btn-primary', 'data-action': 'sheetSubmit', disabled: !live })}>${esc(goWord(s.kind, s.seed))}</button></div>`;
   return `<aside${attrs({ class: 'drawer sheet', 'aria-label': title })}><div class="drawer-head"><h2>${esc(title)}</h2><button type="button" class="close-key" data-action="sheetClose" aria-label="Close">×</button></div>` +
-    `<div class="drawer-body">${fields}${check}${hints}${quoteBox(s)}${routes}${left ? `<p class="sheet-left">${esc(left)}</p>` : ''}${signs}${said}${keys}</div></aside>`;
+    `<div class="drawer-body">${fields}${check}${hints}${quoteBox(s)}${routes}${says}${left ? `<p class="sheet-left">${esc(left)}</p>` : ''}${signs}${said}${keys}</div></aside>`;
 }

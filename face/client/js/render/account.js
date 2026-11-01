@@ -23,7 +23,7 @@ import { amendSeedOf, closeSeedOf, leverageSeedOf } from '../host/sheet-market.j
 import { rulesOf } from '../host/rules-view.js';
 import { receiveRowsOf, receiveNetworkWords, moveSourcesOf } from '../host/money-view.js';
 import { underWayOf } from '../host/trade-view.js';
-import { walletRow } from './trade.js';
+import { walletRow } from './wallet-row.js';
 import { providerWord } from '../host/market-view.js';
 import { chip } from './thread.js';
 import { seg, segLinks, sec, confirmPair } from './controls.js';
@@ -398,25 +398,28 @@ const MOVE_READ_ONLY = 'Read-only: the Account was started without trading, so i
 const capFirst = s => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '');
 
 // a Receive row: the account and its network words (an exchange's asset chip beside them), Show address, and once read, the
-// address, its memo where there is one, whose it is with the Account's note, and Copy — or the Account's refusal in its words
+// address, its memo where there is one (needed with it, with its own Copy), whose it is with the Account's note, Copy and Read
+// again — or the Account's refusal in its words. An address is drawn only from an answer that landed and is not being read again
 function receiveRow(row, receive) {
   const key = `${row.venue}|${row.asset}|${row.network}`;
   const read = receive && Object.hasOwn(receive, key) ? receive[key] : null;
   const head = `<b>${esc(`${row.venueName} · ${receiveNetworkWords(row)}`)}</b>${row.chip ? ` ${chip(row.asset)}` : ''}`;
-  const ask = `<button${attrs({ type: 'button', class: 'btn-sm', 'data-action': 'showAddress', 'data-venue': row.venue, 'data-asset': row.asset, 'data-network': row.network, disabled: read?.status === 'loading' })}>Show address</button>`;
-  let body = '';
-  if (read?.status === 'loading') body = `<br><span class="dim">${esc(`Asking ${row.venueName}…`)}</span>`;
-  else if (read?.status === 'error') body = `<br><span class="dim">${esc(read.message || 'No answer.')}</span>`;
-  if (read?.data && read.status !== 'error') {
+  const asking = read?.status === 'loading';
+  const ask = word => `<button${attrs({ type: 'button', class: 'btn-sm', 'data-action': 'showAddress', 'data-venue': row.venue, 'data-asset': row.asset, 'data-network': row.network, disabled: asking })}>${word}</button>`;
+  const copy = text => `<button${attrs({ type: 'button', class: 'btn-sm', 'data-action': 'copyText', 'data-text': text })}>Copy</button>`;
+  if (read?.status === 'ready' && read.data) {
     const d = read.data;
+    const address = String(d.address ?? '');
     const whose = [capFirst(typeof d.whose === 'string' ? d.whose : ''), typeof d.note === 'string' ? d.note : ''].filter(Boolean).join(' · ');
-    body += `<br><span class="mono">${esc(String(d.address ?? ''))}</span>` +
-      `${typeof d.tag === 'string' && d.tag ? `<br><span class="mono">${esc(`Memo ${d.tag}`)}</span>` : ''}` +
-      `${whose ? `<br><span class="dim">${esc(`${whose}.`)}</span>` : ''}`;
-    const copy = `<button${attrs({ type: 'button', class: 'btn-sm', 'data-action': 'copyText', 'data-text': String(d.address ?? '') })}>Copy</button>`;
-    return `<div class="venue"><span>${head}${body}</span><span class="btn-row">${copy}</span></div>`;
+    const tag = typeof d.tag === 'string' && d.tag ? d.tag : '';
+    const memo = tag ? `<br><span class="dim">Memo / tag — needed with it</span> <span class="mono">${esc(tag)}</span> ${copy(tag)}` : '';
+    return `<div class="venue"><span>${head}<br><span class="mono">${esc(address)}</span>${memo}${whose ? `<br><span class="dim">${esc(`${whose}.`)}</span>` : ''}</span>` +
+      `<span class="btn-row">${copy(address)}${ask('Read again')}</span></div>`;
   }
-  return `<div class="venue"><span>${head}${body}</span><span class="btn-row">${ask}</span></div>`;
+  let body = '';
+  if (asking) body = `<br><span class="dim">${esc(`Asking ${row.venueName}…`)}</span>`;
+  else if (read?.status === 'error') body = `<br><span class="dim">${esc(read.message || 'No answer.')}</span>`;
+  return `<div class="venue"><span>${head}${body}</span><span class="btn-row">${ask(read?.status === 'error' ? 'Read again' : 'Show address')}</span></div>`;
 }
 
 // a source of Move: its name and what it holds, and Move… (the move sheet from it)

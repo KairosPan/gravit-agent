@@ -65,6 +65,17 @@ const destOptions = src => records(src.dests).map(d => ({ value: d.id, label: `$
 // money.js:154-158 — money to an agent wallet starts on the chain that wallet already holds money or gas on
 const fundedAt = (src, to) => str(records(src.dests).find(d => d.id === to)?.funded);
 
+// money.js:154-158, :164-166 — on every change of destination the network follows it: to the chain that destination (an agent
+// wallet) already holds money or gas on, where it is one the field offers; a destination holding nothing leaves the network as
+// picked. The network field records the destination it last followed (`followed`), so a rebuild tells a new destination from the
+// same one, and the operator's own pick of network stands until the destination changes again
+function followTo(network, src, to, followed) {
+  const funded = to ? fundedAt(src, to) : '';
+  const moved = to !== (typeof followed === 'string' ? followed : null);
+  const value = moved && funded && network.options.some(o => o.value === funded && o.disabled !== true) ? funded : network.value;
+  return { ...network, value, followed: to };
+}
+
 /** The fields for a source and a kind (money.js:79-85, the `What` select first after `From`), each value the one given in
  *  `values` where its field still takes it, else the page's own start. */
 function build(seed, values) {
@@ -95,9 +106,10 @@ function build(seed, values) {
   } else if (k === 'bridge') {
     const to = [{ value: src.id, label: 'This wallet, on the other chain' }, ...records(src.dests).filter(d => !d.address || d.proven).map(d => ({ value: d.id, label: d.name }))];
     const asset = select('asset', 'Send', assets, values.asset);
+    const toField = select('to', 'To', to, values.to);
     rest = [
-      select('to', 'To', to, values.to),
-      select('network', 'From chain', chains, values.network, src.chains?.[0]),
+      toField,
+      followTo(select('network', 'From chain', chains, values.network, src.chains?.[0]), src, toField.value, values.followed),
       select('toLedger', 'To chain', chains, values.toLedger, src.chains?.[1] ?? src.chains?.[0]),
       asset,
       select('toAsset', 'Arrives as', toAssets, values.toAsset, firstAsset),
@@ -107,9 +119,10 @@ function build(seed, values) {
     // a withdrawal or a send: where it goes (none to offer: no field, and the draft says to connect one first), the network,
     // the currency
     const dests = destOptions(src);
-    const to = dests.some(o => o.disabled !== true) ? [select('to', 'To', dests, values.to)] : [];
-    const funded = to.length ? fundedAt(src, to[0].value) : '';
-    rest = [...to, select('network', 'Network', nets, values.network, funded), select('asset', 'Currency', assets, values.asset), amountField('25', values.amount)];
+    // every destination watched: still listed, each disabled, as the page lists them — so the operator sees why none is picked
+    const to = dests.length ? [select('to', 'To', dests, values.to)] : [];
+    const network = followTo(select('network', 'Network', nets, values.network), src, to[0]?.value ?? '', values.followed);
+    rest = [...to, network, select('asset', 'Currency', assets, values.asset), amountField('25', values.amount)];
   } else rest = [];
   return [fromField, kindField, ...rest];
 }
@@ -128,7 +141,9 @@ export function moneyFieldsOf(kind, seed) {
 export function moneyRefieldsOf(kind, fields, seed) {
   if (kind !== 'move' || !Array.isArray(fields)) return fields;
   const values = Object.fromEntries(fields.filter(f => isRecord(f) && typeof f.name === 'string').map(f => [f.name, typeof f.value === 'string' ? f.value : '']));
-  return build(isRecord(seed) ? seed : {}, values);
+  // the destination the network last followed travels with the network field
+  const followed = fields.find(f => isRecord(f) && f.name === 'network')?.followed;
+  return build(isRecord(seed) ? seed : {}, { ...values, ...(typeof followed === 'string' ? { followed } : {}) });
 }
 
 /** The sheet's title: the source picked. */
@@ -208,4 +223,23 @@ export function routesWordsOf(sheet, routes) {
     ...(num(best.gasUsd) ? [`network fee about ${fine(best.gasUsd)} in your wallet`] : [])].join(' · ');
   const others = list.length > 1 ? `Other routes: ${list.slice(1).map(x => `${str(x.tool)} fee ${fine(x.feeUsd)}, ${eta(x.etaSec)}`).join('; ')}` : '';
   return { lead, others };
+}
+
+/** money.js:119-121 — the page's lines under a move's quote, for the preparation shown: where it goes (an address the Account
+ *  holds the key of, one the owner's wallet signed for, or a venue's deposit address checked again), a bridge's `Your wallet
+ *  sends it; it lands on <chain> when the bridge delivers.`, and `Can't be undone.` Nothing prepared, or another sheet: []. */
+export function moveSaysOf(sheet) {
+  if (!isRecord(sheet) || sheet.kind !== 'move' || !isRecord(sheet.prepared?.action)) return [];
+  const a = sheet.prepared.action;
+  const src = sourceOf(sheet.seed, str(a.from));
+  const to = src ? records(src.dests).find(d => d.id === a.to) : null;
+  if (a.kind === 'bridge') return [`Your wallet sends it; it lands on ${str(a.toLedger)} when the bridge delivers. Can't be undone.`];
+  const lines = [];
+  if (str(a.toAddress)) {
+    const name = str(to?.name) || str(a.to);
+    lines.push(to?.address ? (/holds its key/.test(str(to.proven)) ? "The agent wallet's own address: this account holds its key." : 'The address your wallet signed for.')
+      : `${name}'s deposit address, checked again before sending.`);
+  }
+  lines.push("Can't be undone.");
+  return lines;
 }

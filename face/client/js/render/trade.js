@@ -20,6 +20,7 @@ import { askedOf } from '../host/sheet.js';
 import { chip } from './thread.js';
 import { mkAv, priceWord } from './markets.js';
 import { orderWords, cardFactsOf, marketKeysOn, changeKey } from './account.js';
+import { walletRow } from './wallet-row.js';
 
 // the kinds' glyphs, Linqi's sprite
 const KIND_ICONS = { crypto: 'coin', stocks: 'stock', rwas: 'rwa', predictions: 'prediction' };
@@ -91,20 +92,6 @@ function cardsWaiting(page, now) {
   if (!rows.length) return '';
   return `<div class="tk-pg"><div class="tk-pg-h">Cards waiting</div><div class="mk-wrap"><table class="mk-t tk-t"><thead><tr><th scope="col">Card</th>` +
     `<th scope="col" class="r"><span class="sr-only">Review</span></th></tr></thead><tbody>${rows.join('')}</tbody></table></div></div>`;
-}
-
-// a row waiting for the operator's own browser wallet (a DEX order, a payment the Account built): Waiting for your wallet, what
-// the last send said (host/wallet-send.js, by its key), and — on a page that signs — Send from wallet…, or Report again where a
-// hash was sent: one this page keeps (it reports that hash), or one the Account already holds (the send asks the Account
-// again and reports it); neither ever sends again; disabled while one is in the air. An order keeps its Cancel beside it
-export function walletRow(what, id, key, data, reported, sends, signs, cancel) {
-  const at = key && isRecord(sends) && isRecord(sends[key]) ? sends[key] : null;
-  const said = at && str(at.said) ? `<span class="tk-why">${esc(at.said)}</span>` : '';
-  const sending = at?.status === 'sending';
-  const keyOf = !signs ? '' : at?.again === true
-    ? `<button type="button"${attrs({ class: 'btn-sm', 'data-action': 'reportAgain', 'data-key': key, disabled: sending })}>Report again</button>`
-    : `<button type="button"${attrs({ class: 'btn-sm', 'data-action': 'sendFromWallet', ...data, disabled: sending })}>${reported ? 'Report again' : 'Send from wallet…'}</button>`;
-  return `<tr><td><b>${esc(what)}</b><span class="tk-why">${esc(['Waiting for your wallet', id].filter(Boolean).join(' · '))}</span>${said}</td><td class="r">${keyOf}${cancel}</td></tr>`;
 }
 
 // the page's working orders, by anyone, in the Account screen's words; Cancel where the Account knows what cancels it, on a

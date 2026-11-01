@@ -179,3 +179,47 @@ test('the routes line: finding, the chosen and the others, the Account\'s words,
   assert.equal(routesWordsOf({ ...sheet, prepared: { action: { kind: 'withdraw' } } }, {}), null, 'a bridge only');
   assert.equal(routesWordsOf({ ...sheet, kind: 'topUp' }, {}), null);
 });
+
+// a second agent wallet, funded on Optimism, and an exchange that receives (it holds nothing a network follows)
+const second = { id: 'agent-scout', name: 'Agent wallet · Scout', live: true, watchOnly: 'Live · read-only', connector: 'live:agent-wallet', address: '0x' + '22'.repeat(20), proven: 'this account holds its key',
+  liveCan: { withdraw: false, ledgers: [], transfer: false, swap: false, receive: true, send: 'account' }, holdings: [{ asset: 'USDC', amount: 5, usd: 5, class: 'stable', note: 'Optimism' }] };
+const okx = { id: 'okx', name: 'OKX', live: true, watchOnly: 'Live · read-only', liveCan: { withdraw: true, ledgers: ['spot'], transfer: false, swap: false, receive: true, send: false }, holdings: [] };
+
+test('the network follows every change of destination to the chain it holds money on, and the pick stands otherwise', () => {
+  const seed = moveSeedOf(page([second, okx]), { from: 'ex', to: 'agent-claude-code', amount: '10' });
+  let fields = fieldsOf('move', seed);
+  assert.equal(valueOf(fields, 'network'), 'Base', 'the first wallet holds its money on Base');
+  fields = change(fields, seed, 'to', 'agent-scout');
+  assert.equal(valueOf(fields, 'network'), 'Optimism', 'money to a second agent wallet lands on that wallet\'s chain');
+  assert.equal(draftOf('move', fields, seed, NOW).network, 'Optimism');
+  fields = change(fields, seed, 'network', 'Arbitrum');
+  assert.equal(valueOf(fields, 'network'), 'Arbitrum', 'the operator\'s own pick stands while the destination does not change');
+  fields = change(fields, seed, 'amount', '12');
+  assert.equal(valueOf(fields, 'network'), 'Arbitrum');
+  fields = change(fields, seed, 'to', 'okx');
+  assert.equal(valueOf(fields, 'network'), 'Arbitrum', 'a destination holding nothing leaves the network as picked');
+  fields = change(fields, seed, 'to', 'agent-claude-code');
+  assert.equal(valueOf(fields, 'network'), 'Base', 'and back to the first wallet: its chain again');
+});
+
+test('every destination watched: the To select still lists them, disabled, and nothing is picked', () => {
+  const p = page([{ id: 'watched', name: 'Watched', live: true, watchOnly: 'Live · read-only', address: '0x' + '33'.repeat(20), liveCan: { withdraw: false, ledgers: [], transfer: false, swap: false, receive: true, send: false }, holdings: [] }]);
+  p.venues = p.venues.map(v => (v.id === 'agent-claude-code' ? { ...v, liveCan: { ...v.liveCan, receive: false } } : v));
+  const seed = moveSeedOf(p, { from: 'ex', amount: '10' });
+  const to = fieldsOf('move', seed).find(f => f.name === 'to');
+  assert.deepEqual(to.options, [{ value: 'watched', label: 'Watched · watched', disabled: true }]);
+  assert.equal(to.value, '');
+  assert.equal(draftOf('move', fieldsOf('move', seed), seed, NOW), 'Connect where it should go first.');
+});
+
+test("the page's lines under a move's quote: where it goes, a bridge's delivery, Can't be undone.", async () => {
+  const { moveSaysOf } = await import('../../client/js/host/sheet-money.js');
+  const seed = moveSeedOf(page([okx]), { from: 'ex' });
+  const at = action => ({ kind: 'move', seed, prepared: { action } });
+  assert.deepEqual(moveSaysOf(at({ kind: 'withdraw', from: 'ex', to: 'agent-claude-code', toAddress: '0x7f' })), ["The agent wallet's own address: this account holds its key.", "Can't be undone."]);
+  assert.deepEqual(moveSaysOf(at({ kind: 'withdraw', from: 'ex', to: 'okx', toAddress: '0xabc' })), ["OKX's deposit address, checked again before sending.", "Can't be undone."]);
+  assert.deepEqual(moveSaysOf(at({ kind: 'swap', from: 'ex', to: 'ex' })), ["Can't be undone."]);
+  assert.deepEqual(moveSaysOf(at({ kind: 'bridge', from: 'ex', to: 'ex', toLedger: 'Optimism' })), ["Your wallet sends it; it lands on Optimism when the bridge delivers. Can't be undone."]);
+  assert.deepEqual(moveSaysOf({ kind: 'move', seed }), []);
+  assert.deepEqual(moveSaysOf({ kind: 'topUp', prepared: { action: {} } }), []);
+});
