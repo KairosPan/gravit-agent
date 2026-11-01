@@ -1757,9 +1757,11 @@ tool since `alpaca_kit` left the tree). No shell and no
 background jobs: an unattended turn on untrusted text — a forwarded message, a web page, a
 filing — must not read the key files and reach the network. No order or account tool, no
 question tool, no goals, no delegation, no AKShare. Two tools are the desk's own:
-`desk_quotes`, the price now for 1 to 20 US symbols, its time in New York (`IEX 15:21:03 ET`) —
-once a US quote source is wired: none is since the merge onto main, whose quote wire speaks A
-shares alone, so it answers `unavailable: no US quote source is wired: …` (`src/us-quotes.ts`); and `desk_state`, what `/data/desk/status` says, with the ledger's
+`desk_quotes`, the price now for 1 to 20 US symbols, its source and its time in New York
+(`NASDAQ REAL-TIME 15:21:03 ET`), from the Account's market read (`src/us-quotes.ts`: its
+`explore` row per symbol, through the proxy in-process) — with the Account not running it
+answers `unavailable: the Account is not reachable …`, and a symbol it lists no share for has no
+price; and `desk_state`, what `/data/desk/status` says, with the ledger's
 last 10 runs. An order tool the desk names is refused by Gate 2 with no card: the session
 cannot see it.
 
@@ -1964,9 +1966,9 @@ first is the pre-close brief: `desk/STANDING.md`, tracked, with `builtin:brief`,
 producer, which prices the desk's book — `desk/holdings.yml` and `desk/levels.yml`, gitignored,
 with `desk/holdings.example.yml` and `desk/levels.example.yml` tracked beside them — and the
 index and sector ETFs from one snapshot of the desk's US quote source (at most 200 symbols; any
-past that are named in the brief). None is wired since the merge onto main, so today the brief
-reads the book and carries every price null, its `quotesError` `quotes unavailable: no US quote
-source is wired: …` (`src/us-quotes.ts`). A strategy's `strategies/<name>/levels.yml` is not read yet: research
+past that are named in the brief). That source is the Account's market read
+(`src/us-quotes.ts`); with the Account down the brief reads the book and carries every price
+null, its `quotesError` `quotes unavailable: the Account is not reachable …`. A strategy's `strategies/<name>/levels.yml` is not read yet: research
 sessions can write it, and the brief's text reaches the phone, so it joins once P4 pins each one
 at arming (`DEVELOPMENT.md` §9, R65); the brief says so.
 
@@ -4349,9 +4351,9 @@ P2's, the clock and the pre-close brief.
 **Since the merge onto main (2026-11-01)** the steps below are as written for the desk's branch,
 and three things read differently on the merged tree: the Desk panel's steps (P1's 4, 6 and 8,
 P2's 2 and 3) have no panel until its gravit-ui port (P3) — read `npm run service -- status`,
-the phone's `/status` and the ledgers instead; a price asked of the desk (P1's step 1) answers
-that no US quote source is wired, and the brief (P2's step 2) carries every price null with that
-reason; and the calendar needs no interpreter. The drill is to be run again on the merged tree.
+the phone's `/status` and the ledgers instead; a price asked of the desk (P1's step 1) and the
+brief (P2's step 2) come from the Account's market read, so the Account must be running
+(`npm run account`); and the calendar needs no interpreter. The drill is to be run again on the merged tree.
 It is the operator's, never an agent's — every step drives the operator's own launchd, harness
 home, bot and phone.
 
