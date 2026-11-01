@@ -351,6 +351,30 @@ test('underWayOf: the page\'s working orders, each with what cancels it', () => 
   assert.deepEqual(underWayOf({ ok: false }), []);
 });
 
+test('underWayOf marks a DEX order waiting for the wallet and gives it no cancel', () => {
+  const page = fx('account');
+  const tx = { chainId: 8453, chainIdHex: '0x2105', from: '0x' + '12'.repeat(20), to: '0x' + '34'.repeat(20), data: '0xabcd', value: '0x0' };
+  const base = page.orders.find(o => o.id === 'ord-0009');
+  page.orders = [
+    { ...base, id: 'ord-0031', clientId: 'c0ffee', status: 'pending', walletTxs: [tx], ref: undefined },
+    { ...base, id: 'ord-0032', clientId: 'c0ffef', status: 'pending', walletTxs: [tx], ref: '0xsent' },
+    page.orders.find(o => o.id === 'ord-0002'),
+  ];
+  page.venues = [...page.venues, { id: 'w1', name: 'My Wallet' }];
+  page.payments = [
+    { id: 'pay-0009', at: '2026-11-01T14:00:00.000Z', kind: 'send', from: 'w1', to: 'ex', status: 'authorized', legs: [{ native: { walletTx: tx } }], live: { network: 'Base' } },
+    { id: 'pay-0010', at: '2026-11-01T14:01:00.000Z', kind: 'send', from: 'w1', to: 'ex', status: 'pending', legs: [{ native: { walletTx: tx } }] },
+    { id: 'pay-0011', at: '2026-11-01T14:02:00.000Z', kind: 'withdraw', from: 'ex', to: 'w1', status: 'authorized', legs: [{}] },
+  ];
+  const rows = underWayOf(page);
+  const [waits, placed, rests, pay] = rows;
+  assert.equal(rows.length, 4);
+  assert.deepEqual([waits.id, waits.walletSend, waits.cancel, waits.walletKey], ['ord-0031', { order: 'ord-0031' }, null, 'c0ffee']);
+  assert.deepEqual([placed.walletSend, placed.cancel], [null, { venue: placed.venue, order: 'ord-0032' }], 'sent (its ref): an order like any other');
+  assert.deepEqual([rests.walletSend, rests.walletKey, rests.cancel], [null, null, { venue: 'ex', order: 'ord-0002' }]);
+  assert.deepEqual(pay, { payment: 'pay-0009', words: 'Send · My Wallet → Stand-in Exchange · Base', key: 'pay-0009@2026-11-01T14:00:00.000Z' });
+});
+
 test('fillWords: a fill frame as one line — the side, the size and base, the price, the venue, paper said', () => {
   const fill = {
     venue: 'ex', venueName: 'Stand-in Exchange', ref: 'sx-00009', clientId: 'c1', filledQty: 0.04, symbol: 'ETH/USDT', name: 'ETH / USDT',

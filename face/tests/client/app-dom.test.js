@@ -8,6 +8,7 @@ import { kidOf } from '../../client/js/wire/owner-key.js';
 import { fakeWindow } from './helpers/fake-dom.js';
 import { modulesListing } from './helpers/inventory.js';
 import { VIEW_1027 } from './helpers/lunhui-view.js';
+import { fakeProvider, ADDRESS as WALLET_ADDRESS, hashOf } from './helpers/fake-wallet.js';
 
 // every app booted here has its timers stopped after its test, so one that fails half-way never leaves Markets' polls running
 const booted = new Set();
@@ -1961,6 +1962,110 @@ test("Cancel in Under way is the Account's liveCancel, signed, and its answer sa
   st.event('fill', { side: 'buy', qty: 0.04, symbol: 'ETH/USDT', price: 3120.5, venueName: 'Stand-in Exchange' }, 'r.9');
   assert.equal(store.get().trade.said, 'Bought 0.04 ETH @ 3,120.50 · Stand-in Exchange');
   assert.match(f.html(), /<p class="tk-said" role="status">Bought 0\.04 ETH @ 3,120\.50 · Stand-in Exchange<\/p>/);
+  store.timers.clear();
+});
+
+test("Under way's Send from wallet… sends the waiting order through the fake wallet and reports it", async () => {
+  const f = fakeWindow({ hash: '#/trade', storage: memoryStorage() });
+  // the operator's wallet, injected as window.ethereum (no EIP-6963 events in the fake window): a fake EIP-1193 provider
+  const provider = fakeProvider({ flags: { isMetaMask: true } });
+  f.win.ethereum = provider;
+  const door = ownerDoor();
+  const tx = what => ({ chainId: 8453, chainIdHex: '0x2105', from: WALLET_ADDRESS, to: '0x' + '34'.repeat(20), data: '0xabcd', value: '0x0', what });
+  let reported = null;
+  // the page with a DEX order waiting for the wallet (an approval, then its swap), placed once its hash is reported
+  const page = () => {
+    const p = door.page();
+    const base = p.orders.find(o => o.id === 'ord-0009');
+    const dex = { ...base, id: 'ord-0031', clientId: 'c0ffee00c0ffee00', venue: 'dex', venueName: 'Uniswap', status: 'pending', ref: undefined, walletTxs: [tx('approve'), tx('swap')], ...(reported ? { ref: reported, status: 'open' } : {}) };
+    return { ...p, orders: [dex, ...p.orders] };
+  };
+  const post = async (path, body) => {
+    if (path === '/data/account/live/order-requote') { door.posts.push([path, body]); return { status: 200, body: { ok: true, order: { walletTxs: [tx('approve'), { ...tx('swap'), data: '0xfeed' }] } } }; }
+    if (path === '/data/account/live/order-sent') { door.posts.push([path, body]); reported = body.hash; return { status: 200, body: { ok: true } }; }
+    return door.post(path, body);
+  };
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': page } });
+  const store = bootAccount(f, h, fakeMarkets(), { ownerPost: post });
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  const html = f.html();
+  assert.match(html, /Waiting for your wallet · ord-0031/);
+  assert.match(html, /<button type="button" class="btn-sm" data-action="sendFromWallet" data-order="ord-0031">Send from wallet…<\/button>/);
+  assert.doesNotMatch(html, /data-action="cancelOrder"[^>]*data-order="ord-0031"/, 'no Cancel on an order waiting for the wallet');
+  assert.doesNotMatch(html, /data-kind="amend"[^>]*data-order="ord-0031"/, 'no Change… either');
+  h.reads.length = 0;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sendFromWallet', order: 'ord-0031' } });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sendFromWallet', order: 'ord-0031' } });
+  await until(() => door.sent('/data/account/live/order-sent').length === 1, 'the report');
+  assert.equal(h.reads[0], '/data/account?fresh=1', 'the Account asked again before the wallet');
+  assert.equal(provider.count('eth_sendTransaction'), 2, 'its approval and its swap, once each, pressed twice');
+  assert.equal(provider.requests.filter(r => r.method === 'eth_sendTransaction').at(-1).params[0].data, '0xfeed', 'the swap built again');
+  assert.deepEqual(door.sent('/data/account/live/order-requote'), [{ order: 'ord-0031' }]);
+  assert.deepEqual(door.sent('/data/account/live/order-sent'), [{ order: 'ord-0031', hash: hashOf(2) }]);
+  await until(() => store.get().trade.said !== null, 'the words said');
+  assert.equal(store.get().trade.said, 'MetaMask sent it: 0xaaaaaa…aaa2');
+  await settle();
+  assert.doesNotMatch(f.html(), /data-action="sendFromWallet"/, 'placed: the page read again, the row an order like any other');
+  store.timers.clear();
+});
+
+test("a payment's report the Account did not take keeps Report again, which reports the same hash and never sends again", async () => {
+  const f = fakeWindow({ hash: '#/trade', storage: memoryStorage() });
+  const provider = fakeProvider();
+  const tx = { chainId: 8453, chainIdHex: '0x2105', from: WALLET_ADDRESS, to: '0x' + '34'.repeat(20), data: '0xabcd', value: '0x0' };
+  const pay = { id: 'pay-0009', at: '2026-11-01T14:00:00.000Z', kind: 'send', from: 'ex', to: 'ex', status: 'authorized', legs: [{ native: { walletTx: tx } }], live: { network: 'Base' } };
+  let taken = false;
+  let reports = 0;
+  const door = ownerDoor();
+  const page = () => ({ ...door.page(), payments: taken ? [] : [pay] });
+  const post = async (path, body) => {
+    if (path === '/data/account/live/sent') { door.posts.push([path, body]); reports += 1; if (reports === 1) return { status: 0, body: { ok: false, error: 'The Account did not answer' } }; taken = true; return { status: 200, body: { ok: true } }; }
+    return door.post(path, body);
+  };
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': page } });
+  const store = bootAccount(f, h, fakeMarkets(), { ownerPost: post, getWallets: async () => [{ id: 'fake', name: 'Fake Wallet', icon: '', provider }] });
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  assert.match(f.html(), /<button type="button" class="btn-sm" data-action="sendFromWallet" data-payment="pay-0009">Send from wallet…<\/button>/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sendFromWallet', payment: 'pay-0009' } });
+  await until(() => store.get().account.wallet[`${pay.id}@${pay.at}`]?.status === 'refused', 'the report refused');
+  await settle();
+  const key = `${pay.id}@${pay.at}`;
+  assert.match(f.html(), new RegExp(`<button type="button" class="btn-sm" data-action="reportAgain" data-key="${key.replace(/\./g, '\\.')}">Report again</button>`));
+  assert.match(f.html(), /Your wallet sent 0xaaaaaa…aaa1: Report again reports that same transaction, it does not send another/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'reportAgain', key } });
+  await until(() => store.get().account.wallet[key]?.status === 'sent', 'the report taken');
+  assert.equal(provider.count('eth_sendTransaction'), 1, 'Report again never asks the wallet to send');
+  assert.deepEqual(door.sent('/data/account/live/sent'), [{ payment: 'pay-0009', hash: hashOf(1) }, { payment: 'pay-0009', hash: hashOf(1) }]);
+  store.timers.clear();
+});
+
+test("an exchange answered with a DEX order waiting for the wallet sends it at once and reports it", async () => {
+  const f = fakeWindow({ hash: '#/trade', storage: memoryStorage() });
+  const provider = fakeProvider();
+  const tx = { chainId: 8453, chainIdHex: '0x2105', from: WALLET_ADDRESS, to: '0x' + '34'.repeat(20), data: '0xabcd', value: '0x0' };
+  let placed = false;
+  // any signed action's answer reaches afterAction: here Cancel's, answered (as a stand-in) with an order built for the wallet
+  const dex = { id: 'ord-0031', clientId: 'c0ffee00c0ffee00', venue: 'dex', status: 'pending', walletTxs: [tx] };
+  const door = ownerDoor({ exchange: () => ({ ok: true, kind: 'order', order: dex }) });
+  const page = () => { const p = door.page(); return { ...p, orders: [placed ? { ...dex, ref: '0xsent', status: 'open' } : dex, ...p.orders] }; };
+  const post = async (path, body) => {
+    if (path === '/data/account/live/order-sent') { door.posts.push([path, body]); placed = true; return { status: 200, body: { ok: true } }; }
+    return door.post(path, body);
+  };
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': page } });
+  const store = bootAccount(f, h, fakeMarkets(), { ownerPost: post, getWallets: async () => [{ id: 'fake', name: 'Fake Wallet', icon: '', provider }] });
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'cancelOrder', venue: 'ex', order: 'ord-0010' } });
+  await until(() => door.sent('/data/account/live/order-sent').length === 1, 'the report');
+  assert.equal(provider.count('eth_sendTransaction'), 1);
+  assert.deepEqual(door.sent('/data/account/live/order-sent'), [{ order: 'ord-0031', hash: hashOf(1) }]);
+  await until(() => store.get().trade.said === 'Fake Wallet sent it: 0xaaaaaa…aaa1', 'the words said');
   store.timers.clear();
 });
 

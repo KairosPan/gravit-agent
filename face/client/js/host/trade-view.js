@@ -301,11 +301,39 @@ export function quoteOf(prepared) {
   };
 }
 
+// a payment in the Account page's words (statement.js whatOf): a swap, a transfer between one venue's ledgers, else its kind,
+// from → to, on its network; a venue by its name on the page
+function paymentWordsOf(p, page) {
+  const nameOf = id => str(records(page?.venues).find(v => v.id === id)?.name) || str(id);
+  const legs = records(p.legs);
+  if (p.kind === 'swap') return `Swap at ${nameOf(p.from)} · ${str(p.sourceToken)} → ${str(p.token)}`;
+  if (p.kind === 'transfer' && p.from === p.to) return `Transfer at ${nameOf(p.from)} · ${str(legs[0]?.fromLedger)} → ${str(legs[0]?.toLedger)}`;
+  const kind = str(p.kind) || 'payment';
+  const network = str(p.live?.network);
+  return `${kind[0].toUpperCase()}${kind.slice(1)} · ${nameOf(p.from)} → ${nameOf(p.to)}${network ? ` · ${network}` : ''}`;
+}
+
 /** Under way: the page's working orders (openOrdersOf's rows, by anyone), each with what cancels it — the Account's
  *  `liveCancel` seed, `{ venue, order }`, or null for an order with no id or venue (one the Account knows by its client id
- *  alone: nothing to cancel it by). */
+ *  alone: nothing to cancel it by) — and `walletSend`: `{ order: id }` for a DEX order waiting for the operator's wallet to send
+ *  it (`walletTxs`, no `ref`; such a row has no cancel, the Account page's own rule: trade.js tkDrawOpen), its `walletKey` the
+ *  order's client id; else null. Then the page's payments waiting for the wallet (`legs[0].native.walletTx`, `authorized`), each
+ *  `{ payment: id, words, key }` — `key` its `<id>@<at>`. */
 export function underWayOf(page) {
-  return openOrdersOf(page).map(o => ({ ...o, cancel: o.id && o.venue ? { venue: o.venue, order: o.id } : null }));
+  const raw = pageOk(page) ? records(page.orders) : [];
+  const orders = openOrdersOf(page).map(o => {
+    const waits = o.waitingForWallet === true && o.id !== '';
+    return {
+      ...o,
+      cancel: !waits && o.id && o.venue ? { venue: o.venue, order: o.id } : null,
+      walletSend: waits ? { order: o.id } : null,
+      walletKey: waits ? str(raw.find(x => x.id === o.id)?.clientId) || null : null,
+    };
+  });
+  const payments = (pageOk(page) ? records(page.payments) : [])
+    .filter(p => p.status === 'authorized' && str(p.id) !== '' && isRecord(records(p.legs)[0]?.native?.walletTx))
+    .map(p => ({ payment: p.id, words: paymentWordsOf(p, page), key: `${p.id}@${str(p.at)}` }));
+  return [...orders, ...payments];
 }
 
 // a fill's price as the Account's toast groups it: 3,120.50, 0.12143

@@ -45,6 +45,8 @@ import { tradeableOf } from './host/trade-view.js';
 import { indexedDbKeys, memoryKeys, signedOutFlag } from './wire/key-store.js';
 import { firstOpen } from './host/sessions.js';
 import { createAccountStream } from './wire/account-stream.js';
+import { discoverWallets } from './wire/wallet.js';
+import { startWalletSend } from './host/wallet-send.js';
 
 export const PREFS_KEY = 'gravit-ui.prefs';
 // how long a press may hold renders: a click lands well inside it, and a release that never arrives cannot freeze the page
@@ -245,7 +247,12 @@ export function boot(win, host = {}) {
   // past the face's cache, a market page's asset sheet (plan 4a Task 4), and the seat's standing after one about an agent's key
   // or limit; a done sheet then closes itself (the order sheet's words stay on the ticket)
   const SEAT_KINDS = new Set(['letIn', 'limit', 'endLimit', 'revoke']);
-  function afterAction(kind) {
+  function afterAction(kind, body) {
+    // what the Account built for the operator's own wallet (a move out of a wallet, a DEX order) goes to that wallet at once:
+    // it shows the transaction and sends it, and its hash is reported (the Account page's money.js done, trade.js placeOrder)
+    const out = body?.kind === 'result' && body.result !== null && typeof body.result === 'object' ? body.result : null;
+    if (out?.wallet && out.payment) sendFromWallet(walletSend.payment(out.payment, out.wallet, out.walletTxs));
+    else if (body?.kind === 'order' && body.order?.walletTxs && !body.order.ref) sendFromWallet(walletSend.order(body.order));
     void account.load({ fresh: true });
     void account.loadHoldings({ fresh: true });
     void account.loadStatement({ fresh: true });
@@ -273,6 +280,17 @@ export function boot(win, host = {}) {
     if (fileKey !== connectAsked.keyfile) { connectAsked.keyfile = fileKey; if (file) void account.checkKeyfile(file); }
     const connector = reachAskOf(s);
     if ((connector || null) !== connectAsked.reach) { connectAsked.reach = connector || null; if (connector) void account.reach(connector); }
+  }
+  // the operator's own browser wallet (wire/wallet.js): the wallets this browser announces, asked when one has to send; what
+  // the Account built for it sent once and reported once (host/wallet-send.js) — the face holds no key, the wallet signs; its
+  // last words said on Trade, and the Account read again past the cache
+  const walletSend = startWalletSend({ store, post: ownerPost, getJson, getWallets: host.getWallets ?? (() => discoverWallets(win)), schedule });
+  function sendFromWallet(flight) {
+    void Promise.resolve(flight).then(r => {
+      if (!r) return;
+      if (typeof r.said === 'string') store.dispatch('tradeSaid', r.said);
+      void account.load({ fresh: true });
+    });
   }
   // the owner sheet (prepare → What you sign → sign) over the owner device
   const sheet = startSheet({ store, owner, schedule, cancelTimer, now, afterAction, onChange: kind => { if (kind === 'connect') checkConnectSoon(); } });
@@ -927,6 +945,22 @@ export function boot(win, host = {}) {
     // What you sign is the <details>' own: the click toggles it, and the render keeps it open by its id
     toggleSigns: () => {},
     cancelOrder: el => { if (signs()) void trade.cancel(el.dataset.venue, el.dataset.order); },
+    // Under way's Send from wallet…: a DEX order or a payment waiting for the operator's wallet, as the page last read it (the
+    // host asks the Account again before the wallet is asked); Report again reports the hash the wallet sent, never sends again
+    sendFromWallet: el => {
+      if (!signs()) return;
+      const page = store.get().account.data;
+      const listOf = k => (Array.isArray(page?.[k]) ? page[k] : []);
+      if (el.dataset.order) {
+        const o = listOf('orders').find(x => x?.id === el.dataset.order);
+        if (o) sendFromWallet(walletSend.order(o));
+      } else if (el.dataset.payment) {
+        const p = listOf('payments').find(x => x?.id === el.dataset.payment);
+        const nat = p?.legs?.[0]?.native;
+        if (nat?.walletTx) sendFromWallet(walletSend.payment(p, nat.walletTx, nat.walletTxs));
+      }
+    },
+    reportAgain: el => { if (signs() && el.dataset.key) sendFromWallet(walletSend.reportAgain(el.dataset.key)); },
   };
 
   root.addEventListener('click', ev => {
@@ -1066,7 +1100,7 @@ export function boot(win, host = {}) {
   if (!doc.hidden) stream.open();
   follow();
   render();
-  return Object.assign(store, { timers, live, actions, markets, channels, discover, owner, sheet, trade });
+  return Object.assign(store, { timers, live, actions, markets, channels, discover, owner, sheet, trade, walletSend });
 }
 
 if (typeof window !== 'undefined' && window.document) boot(window);

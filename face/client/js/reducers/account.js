@@ -60,6 +60,11 @@ export const reducers = {
   // a signed Beast done: the last Guard press's words are no longer the news
   guardClear: s => acc(s, { guard: { status: 'idle', said: null, message: null } }),
   guardRefused: (s, message) => acc(s, { guard: { status: 'refused', said: null, message: typeof message === 'string' ? message : null } }),
+  // the browser wallet's sends (host/wallet-send.js, plan 4b Task 1), by key (a payment's `<id>@<at>`, an order's client id):
+  // in the air, sent, or refused in the Account's or the wallet's words; `again` while a hash the wallet sent is kept for
+  // Report again
+  walletSaid: (s, { key, status, said, again = false } = {}) => (typeof key === 'string' && key !== ''
+    ? acc(s, { wallet: { ...s.account.wallet, [key]: { status, said: typeof said === 'string' ? said : null, again: again === true } } }) : s),
   // the curve's range; one the Account does not draw leaves the slice as it is
   setHistoryRange: (s, range) => (RANGES.includes(range) && range !== s.account.history.range ? read(s, 'history', { range }) : s),
   // the Statement is a drawer: one at a time, as Settings and Details are
