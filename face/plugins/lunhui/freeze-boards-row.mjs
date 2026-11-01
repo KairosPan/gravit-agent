@@ -176,7 +176,7 @@ async function freezeEastmoney(fetchImpl, args, now) {
 
 /**
  * @param {any} ctx the row's context, injecting `tools` and `lunhuiRuns`
- * @param {{ fetch?: string, now?: () => Date }} config test-only keys; an `env` is refused
+ * @param {{ fetch?: string, account?: string, now?: () => Date }} config test-only keys; an `env` is refused
  */
 export function apply(ctx, config) {
   if (config !== null && typeof config === "object" && Object.hasOwn(config, "env")) {

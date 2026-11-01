@@ -561,7 +561,9 @@ export async function openRun(strategyDir, kind, now = new Date()) {
  * `TypeError`. The meta's optional fields (boards stand-in spec S6), each a `TypeError` when
  * present and malformed, each absent from the file when absent: `provider`, a non-empty string,
  * and `fallback_from`, `{ provider: "东方财富", code }` with a non-empty code, both also written into
- * the run.json entry; `query`, a string, and `reply_sha256`, 64 lowercase hex, the file's alone. A
+ * the run.json entry; `query`, a string, and `reply_sha256`, 64 lowercase hex, the file's alone;
+ * `via`, exactly `"account"` - the evidence came through the Account - on both the file and its
+ * run.json entry, a file-level field: the items' shapes and ids do not change with it. A
  * `run.json` write that fails removes the evidence file it followed. Not serialized here: two
  * calls on one run at once are the caller's to order (the service's run mutex).
  * @param {string} dir a run directory `openRun` or `resolveRun` returned
@@ -615,21 +617,22 @@ export async function addEvidence(dir, source, items, meta) {
 }
 
 /**
- * The meta `addEvidence` takes: the reply's stamps, and the optional source fields only the boards
- * freeze sets (boards stand-in spec S6).
+ * The meta `addEvidence` takes: the reply's stamps, the optional source fields only the boards
+ * freeze sets (boards stand-in spec S6), and `via`, which every freeze fetching through the Account sets.
  * @typedef {{ received_at: string, session: string, host: string, delayed: boolean, truncated: boolean,
- *   provider?: string, fallback_from?: { provider: "东方财富", code: string }, query?: string, reply_sha256?: string }} EvidenceMeta
+ *   provider?: string, fallback_from?: { provider: "东方财富", code: string }, query?: string, reply_sha256?: string,
+ *   via?: "account" }} EvidenceMeta
  */
 
 const SHA256_RE = /^[0-9a-f]{64}$/;
 
 /**
- * `addEvidence`'s optional meta, checked: `stamped` for the evidence file, `listed` - `provider`
- * and `fallback_from` - for its run.json entry; a field absent from `meta` is absent from both.
+ * `addEvidence`'s optional meta, checked: `stamped` for the evidence file, `listed` - `provider`,
+ * `fallback_from` and `via` - for its run.json entry; a field absent from `meta` is absent from both.
  * @param {EvidenceMeta} meta
  */
 function optionalMeta(meta) {
-  const { provider, fallback_from, query, reply_sha256 } = meta;
+  const { provider, fallback_from, query, reply_sha256, via } = meta;
   /** @type {Record<string, unknown>} */
   const stamped = {};
   /** @type {Record<string, unknown>} */
@@ -650,6 +653,10 @@ function optionalMeta(meta) {
   if (reply_sha256 !== undefined) {
     if (typeof reply_sha256 !== "string" || !SHA256_RE.test(reply_sha256)) throw new TypeError(`lunhui: reply_sha256 is 64 lowercase hex, not ${JSON.stringify(reply_sha256)}`);
     stamped.reply_sha256 = reply_sha256;
+  }
+  if (via !== undefined) {
+    if (via !== "account") throw new TypeError(`lunhui: via is "account", not ${JSON.stringify(via)}`);
+    stamped.via = listed.via = via;
   }
   return { stamped, listed };
 }
