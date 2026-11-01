@@ -394,6 +394,11 @@ async function arm(args: string[], deps: DeskDeps, now: number): Promise<number>
   }
   const producerPart = producerText === undefined ? "" : `, producer ${producerText}${scriptSha === undefined ? "" : ` sha256 ${short(scriptSha)}`}`;
   deps.out(`armed ${id} in ${root}: ${dir}/${file} sha256 ${short(text.sha256)}, at ${atFlag}, expires ${expires}${producerPart}; the face reads standing.yml again within 30 s`);
+  /* orders sharing an anchor run one after another: the later may start late, and a close-Nm one be held back (M5) */
+  const sharing = load.orders.filter((o) => o.enabled && standing.formatAnchor(o.anchor) === standing.formatAnchor(anchor)).map((o) => o.id);
+  if (sharing.length > 0) {
+    deps.out(`note: ${sharing.join(", ")} also fire${sharing.length > 1 ? "" : "s"} at ${atFlag}; orders sharing an anchor run one after another, so ${id} may start late - and a close-anchored text that finishes after the close is held back`);
+  }
   return 0;
 }
 
@@ -474,9 +479,14 @@ async function rearm(args: string[], deps: DeskDeps, now: () => number): Promise
   }
   /* --expires extends what was reviewed and pinned, never an edit made since: an expired order is never fired,
    * so no firing refused that edit - re-pinning it is a plain rearm's, after the operator has read it. */
+  const textMoved = text.sha256 !== order.sha256;
+  const scriptMoved = script !== undefined && scriptSha !== order.producerSha256;
   if (expires !== undefined) {
-    const changed = text.sha256 !== order.sha256 ? `${order.dir}/${order.file}` : scriptSha !== order.producerSha256 ? script : undefined;
-    if (changed !== undefined) return refuse(`${changed} changed since arming; review it, then: npm run desk -- rearm ${id}`);
+    /* every pin that moved, the text first (p2-m11) */
+    const changed = [...(textMoved ? [`${order.dir}/${order.file}`] : []), ...(scriptMoved ? [script] : [])];
+    if (changed.length > 0) {
+      return refuse(`${changed.join(" and ")} changed since arming; review ${changed.length > 1 ? "them" : "it"}, then: npm run desk -- rearm ${id}`);
+    }
   }
   if (text.sha256 === order.sha256 && scriptSha === order.producerSha256 && (expires === undefined || expires === order.expires)) {
     deps.out(`${id}: nothing changed since arming`);
@@ -493,9 +503,11 @@ async function rearm(args: string[], deps: DeskDeps, now: () => number): Promise
   } catch (err) {
     return refuse(`cannot write ${path}: ${reasonOf(err)}`);
   }
-  const scriptPart = script === undefined || scriptSha === undefined ? "" : `, ${script} sha256 ${short(scriptSha)}`;
+  /* each pin marked when it moved, so the operator sees what the re-arm took (p2-m11) */
+  const moved = (yes: boolean): string => (yes ? " (changed)" : "");
+  const scriptPart = script === undefined || scriptSha === undefined ? "" : `, ${script} sha256 ${short(scriptSha)}${moved(scriptMoved)}`;
   const expiresPart = expires === undefined ? "" : `, expires ${expires}`;
-  deps.out(`re-armed ${id}: ${order.dir}/${order.file} sha256 ${short(text.sha256)}${scriptPart}${expiresPart}`);
+  deps.out(`re-armed ${id}: ${order.dir}/${order.file} sha256 ${short(text.sha256)}${moved(textMoved)}${scriptPart}${expiresPart}`);
   return 0;
 }
 

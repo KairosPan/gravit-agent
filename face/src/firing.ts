@@ -7,10 +7,11 @@
  *
  * BEFORE IT RUNS ({@link checkFiring}), in this order: the pause - one in force refuses, and so does a switch that
  * cannot be read; the day's token budget - spent, it refuses, and one that cannot be read lets the firing go on (the
- * plan's ruling 8); the order's text, whose bytes must hash to the pin `npm run desk -- arm` recorded, read as
- * strictly as arm read them (src/producer.ts `readScriptBytes`: no link followed, no FIFO waited on); a script
- * producer's bytes, likewise; and the instruction-chain fence for the order's cwd (src/desk-session.ts
- * `findChainViolation`). A refusal consumes nothing: the clock row records it and may ask again inside the grace. What
+ * plan's ruling 8); the instruction-chain fence for the order's cwd (src/desk-session.ts `findChainViolation`) -
+ * before any file is read, so a `desk/` swapped for a link is refused before a read could follow it (M9); the order's
+ * text, whose bytes must hash to the pin `npm run desk -- arm` recorded, read as strictly as arm read them
+ * (src/producer.ts `readScriptBytes`: no link followed, no FIFO waited on, no more than the 16,384 bytes arm took); and
+ * a script producer's bytes, likewise - both checked, so a refusal names every pin that moved. A refusal consumes nothing: the clock row records it and may ask again inside the grace. What
  * passes carries the very bytes it hashed ({@link Verified}), so the text the model reads is the text the operator
  * armed - never a second read the file could change under.
  *
@@ -21,9 +22,10 @@
  *   for a script swapped between the check and the run - is a fact the turn is told, never a reason to skip it;
  *   `wake: false` runs the producer alone and speaks only when it fails.
  * - the session: fresh from src/desk-session.ts `createDeskAgent` - no `desk-session` record, so a firing never
- *   becomes the phone's conversation - in the order's cwd, on the order's route ({@link resolveFiringRoute}),
- *   supervised with the order's own deadline and the chain fence, and woken once ({@link wakeMessage}) with the
- *   schedule's source.
+ *   becomes the phone's conversation - in the order's cwd, on the order's route ({@link resolveFiringRoute}), the two
+ *   together bounded by the order's turn deadline on the clock, so a setup that hangs ends the firing as `error`
+ *   rather than holding the runner (M1); supervised with the order's own deadline and the chain fence, and woken
+ *   once ({@link wakeMessage}) with the schedule's source.
  * - the watchdog: a turn the supervisor never reports - none started, or one hung past its cancel - is cancelled
  *   {@link FIRING_SLACK_MS} after the deadline, and the firing ends without it.
  * - the turn's end: recorded in `events.jsonl` exactly as the desk conversation records a phone turn, so a firing's
@@ -38,10 +40,11 @@
  *   and then the supervision's end going on alone.
  * Each step is a line in `firings.jsonl` ({@link FiringRecord}); the clock row writes the other kinds.
  *
- * EVERY TURN IT OUTLIVES IS COUNTED. A turn the supervisor reports once the firing has stopped waiting for its own - the
- * hung turn after the watchdog, the cut one after an abort, a browser's post on its session - gets its `desk-turn` (or
- * `desk-refused`) in `events.jsonl` all the same, so its tokens reach the budget; it adds nothing to `firings.jsonl`
- * and sends nothing.
+ * EVERY TURN IT OUTLIVES IS COUNTED - BUT FOR ONE EDGE. A turn the supervisor reports once the firing has stopped
+ * waiting for its own - the hung turn after the watchdog, the cut one after an abort, a browser's post on its session -
+ * gets its `desk-turn` (or `desk-refused`) in `events.jsonl` all the same, so its tokens reach the budget; it adds
+ * nothing to `firings.jsonl` and sends nothing. The edge: a record the supervisor queued in a microtask at the instant
+ * the supervision ends is dropped with it, so such a turn, rarely, goes uncounted (`DEVELOPMENT.md` §9, R45).
  *
  * AN ABORT - the clock row's shutdown - cancels the turn under way as `shutdown`, records nothing more in
  * `firings.jsonl`, sends nothing more, lets the session go and resolves `undefined`: a `started` with no `finished`
@@ -57,11 +60,12 @@ import { lstat, readdir } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { createUserMessage } from "@deepseek-ai/dsh-llm";
 import {
-  appendEvent, appendRecord, budgetReplyLine, deskDir, deskTime, FIRINGS_FILE, readOffState, type BudgetState, type DeskEvent, type TurnUsage,
+  appendEvent, appendRecord, budgetReplyLine, deskDir, deskTime, FIRINGS_FILE, readOffState, type BudgetState, type TurnUsage,
 } from "./desk.ts";
 import type { DeliverResult } from "./desk-conversation.ts";
 import {
-  findChainViolation, provenanceLine, resolveDeskRoute, superviseDeskTurns, type DeskClock, type DeskTurnRecord, type SessionEventsOn,
+  cutOffLine, deskTurnEvent, findChainViolation, provenanceLine, resolveDeskRoute, superviseDeskTurns, type DeskClock, type DeskTurnRecord,
+  type SessionEventsOn,
 } from "./desk-session.ts";
 import { etClock } from "./et.ts";
 import type { MarketSession } from "./market-clock.ts";
@@ -112,11 +116,12 @@ export type FileChange = { path: string; change: "added" | "modified" | "removed
 export const OVERSIZED = "oversized";
 
 /** Why {@link checkFiring} refused a firing. A `hash` or `producer-hash` detail is the sha the file holds now,
- * `missing`, or {@link OVERSIZED}; a `fence` detail is the violation's path, relative to the repository root. */
+ * `missing`, or {@link OVERSIZED}; a `hash` refusal's `producerDetail`, the script producer's, when its pin moved too;
+ * a `fence` detail is the violation's path, relative to the repository root. */
 export type Refusal =
   | { reason: "off" }
   | { reason: "budget"; state: BudgetState }
-  | { reason: "hash"; detail: string }
+  | { reason: "hash"; detail: string; producerDetail?: string }
   | { reason: "producer-hash"; detail: string }
   | { reason: "fence"; detail: string };
 
@@ -170,7 +175,8 @@ export type FinishedRecord = {
 };
 /** A refusal, as the clock row records it: `reported` when its phone line went out. */
 export type RefusedRecord = {
-  t: string; kind: "refused"; key: string; order: string; date: string; reason: Refusal["reason"]; detail?: string; reported: boolean;
+  t: string; kind: "refused"; key: string; order: string; date: string; reason: Refusal["reason"]; detail?: string; producerDetail?: string;
+  reported: boolean;
 };
 /** An anchor found past its grace: why - the face `asleep` across it (the gap), `down` when it came, or found `late` -
  * and when it was found. */
@@ -306,9 +312,11 @@ export const LINES = {
   /** The turn left a fence violation behind. */
   leftBehind: (id: string, date: string, path: string): string =>
     `${of(id, date)} left ${path} behind; every desk turn is refused until it is removed`,
-  /** Its text or its script changed since arming. */
-  changed: (id: string, date: string, path: string): string =>
-    `${of(id, date)} refused: ${path} changed since arming. Review it, then: npm run desk -- rearm ${id}`,
+  /** Its text or its script changed since arming - or both, each named (p2-m11). */
+  changed: (id: string, date: string, paths: string | readonly string[]): string => {
+    const named = typeof paths === "string" ? [paths] : paths;
+    return `${of(id, date)} refused: ${named.join(" and ")} changed since arming. Review ${named.length > 1 ? "them" : "it"}, then: npm run desk -- rearm ${id}`;
+  },
   /** Its text or its script is missing. */
   missing: (id: string, date: string, path: string): string =>
     `${of(id, date)} refused: ${path} is missing. Restore it, or remove the order from standing.yml`,
@@ -496,11 +504,13 @@ export interface FiringDeps {
 /**
  * Whether `order` may fire now, in this order (see the module header): the pause - in force, or a switch that cannot be
  * read (one line), refuses `off`; the budget - spent, refuses `budget`; one that cannot be read lets the firing on, with
- * one line; the order's text, `<root>/<dir>/<file>` read once as arm reads it (a link, a FIFO, anything but a regular
- * file reads as missing) - refused `hash`, the detail its sha or `missing`, unless its bytes hash to `order.sha256`; a
- * script producer's bytes, found under `scripts/` and read the same way, against `order.producerSha256` - refused
- * `producer-hash` likewise; and the chain fence over the order's cwd - refused `fence`, the detail the violation's
- * repo-relative path. A refusal never consumes the key: that is the clock row's `started`.
+ * one line; the chain fence over the order's cwd, before any file is read - refused `fence`, the detail the
+ * violation's repo-relative path; the order's text, `<root>/<dir>/<file>` read once as arm reads it (a link, a FIFO,
+ * anything but a regular file reads as missing; past 16,384 bytes {@link OVERSIZED}) - refused `hash`, the detail its
+ * sha, `missing` or `oversized`, unless its bytes hash to `order.sha256`, with `producerDetail` when the script's pin
+ * moved too; and a script producer's bytes, found under `scripts/` and read the same way, against
+ * `order.producerSha256` - refused `producer-hash` likewise. A refusal never consumes the key: that is the clock row's
+ * `started`.
  * @param deps - `home`, `root`, `clock` (the pause's expiry is judged on it), `budget` and `log`, as {@link FiringDeps}.
  * @param order - the order, as last loaded.
  * @returns `{ refuse }` or `{ go }`: the cwd, the text as the bytes hashed, decoded as UTF-8 - so `go.standingText`'s
@@ -528,21 +538,24 @@ export async function checkFiring(
   } catch (err) {
     log(`${BIN}: desk: the token budget could not be read (${reasonOf(err)}); standing order ${order.id} goes on`);
   }
+  /* the fence first of all the reads: a desk/ swapped for a link is refused before any read follows it (M9) */
+  const violation = await findChainViolation(deps.root, cwd);
+  if (violation !== undefined) return { refuse: { reason: "fence", detail: violation } };
   const text = await readScriptBytes(join(deps.root, order.dir, order.file), STANDING_TEXT_MAX_BYTES);
   /* a text past the limit arm read it under has changed since arming: refused as changed, never read whole */
-  if (typeof text === "string") return { refuse: { reason: "hash", detail: text === "oversized" ? OVERSIZED : "missing" } };
-  const standingSha = sha256Hex(text);
-  if (standingSha !== order.sha256) return { refuse: { reason: "hash", detail: standingSha } };
+  const standingSha = typeof text === "string" ? (text === "oversized" ? OVERSIZED : "missing") : sha256Hex(text);
   let producerSha: string | undefined;
+  let producerMoved: string | undefined;
   if (order.producer?.kind === "script") {
     const found = await resolveScript(deps.root, order.producer.script);
     const bytes = "error" in found ? "missing" : await readScriptBytes(found.path);
-    if (typeof bytes === "string") return { refuse: { reason: "producer-hash", detail: bytes === "oversized" ? OVERSIZED : "missing" } };
-    producerSha = sha256Hex(bytes);
-    if (producerSha !== order.producerSha256) return { refuse: { reason: "producer-hash", detail: producerSha } };
+    producerSha = typeof bytes === "string" ? (bytes === "oversized" ? OVERSIZED : "missing") : sha256Hex(bytes);
+    if (producerSha !== order.producerSha256) producerMoved = producerSha;
   }
-  const violation = await findChainViolation(deps.root, cwd);
-  if (violation !== undefined) return { refuse: { reason: "fence", detail: violation } };
+  if (typeof text === "string" || standingSha !== order.sha256) {
+    return { refuse: { reason: "hash", detail: standingSha, ...(producerMoved === undefined ? {} : { producerDetail: producerMoved }) } };
+  }
+  if (producerMoved !== undefined) return { refuse: { reason: "producer-hash", detail: producerMoved } };
   return { go: { cwd, standingText: text.toString("utf8"), standingSha, ...(producerSha === undefined ? {} : { producerSha }) } };
 }
 
@@ -644,6 +657,30 @@ function unlessAborted<T>(p: Promise<T>, signal: AbortSignal): Promise<T | typeo
       },
       (err: unknown) => {
         signal.removeEventListener("abort", onAbort);
+        reject(err);
+      },
+    );
+  });
+}
+
+/** What a wait the open's bound cut short resolves to. */
+const LATE: unique symbol = Symbol("late");
+
+/** `p`'s value, or {@link LATE} once `clock` reaches `at` first - `p` then left to settle alone, its rejection
+ * handled; a rejection that comes first is `p`'s own. */
+function beforeOpenBy<T>(clock: DeskClock, at: number, p: Promise<T>): Promise<T | typeof LATE> {
+  return new Promise((resolveWith, reject) => {
+    const timer = clock.setTimeout(() => {
+      p.catch(() => {});
+      resolveWith(LATE);
+    }, Math.max(0, at - clock.now()));
+    p.then(
+      (value) => {
+        clock.clearTimeout(timer);
+        resolveWith(value);
+      },
+      (err: unknown) => {
+        clock.clearTimeout(timer);
         reject(err);
       },
     );
@@ -845,24 +882,6 @@ function turnOf(r: DeskTurnRecord, sessionId: string): FiringTurn {
   };
 }
 
-/** A turn's end as the desk conversation records a phone turn (src/desk-conversation.ts `record`): a `desk-refused`
- * for a turn the fence cut, else a `desk-turn` with its tokens and why it was cancelled or failed. */
-function turnEvent(r: DeskTurnRecord, t: string, cwdRel: string): DeskEvent {
-  if (r.outcome === "refused") return { t, kind: "desk-refused", reason: "fence", path: r.violation ?? cwdRel };
-  return {
-    t, kind: "desk-turn", sessionId: r.sessionId, source: r.source, turn: r.turn, outcome: r.outcome, wallMs: r.wallMs,
-    ...(r.usage === undefined ? {} : { usage: r.usage }),
-    ...(r.cancel === undefined ? {} : { cancel: r.cancel }),
-    ...(r.error === undefined ? {} : { error: r.error }),
-  };
-}
-
-/** The line after an answer a cut interrupted mid-stream, in the desk conversation's form: `(cut off: <what cut it>)` -
- * the order's deadline, or what cancelled the turn. */
-function cutOffLine(r: DeskTurnRecord, order: StandingOrder): string {
-  return `(cut off: ${r.outcome === "timed-out" ? `timed out after ${formatDuration(order.turnDeadlineMs)}` : r.cancel ?? r.outcome})`;
-}
-
 /** What a firing's turn sends: for a turn the fence refused, the fence's line - never a text written over a
  * violation; else its final text, with its cut-off line when a cut interrupted it - or, past the market moment, the
  * after-the-close or after-the-open line instead; else the line for why it said nothing. */
@@ -882,7 +901,7 @@ function whatToSay(item: FiringItem, turn: FiringTurn, record: DeskTurnRecord | 
         ? { text: LINES.afterClose(id), withheld: "after the close", chars }
         : { text: LINES.afterOpen(id), withheld: "after the open", chars };
     }
-    return { text: record.interrupted === true ? `${record.finalText}\n${cutOffLine(record, order)}` : record.finalText, chars };
+    return { text: record.interrupted === true ? `${record.finalText}\n${cutOffLine(record)}` : record.finalText, chars };
   }
   switch (turn.outcome) {
     case "timed-out":
@@ -968,11 +987,14 @@ async function wake(run: Run, quoted: Quoted | undefined): Promise<FinishedRecor
   const cwd = verified.cwd;
   const cwdRel = repoRelative(deps.root, cwd);
 
-  /* 3. the session */
+  /* 3. the session: the route and the create together bounded by the order's turn deadline on the clock (M1) */
+  const openBy = clock.now() + order.turnDeadlineMs;
+  const notOpened = `the session did not open in ${formatDuration(order.turnDeadlineMs)}`;
   let route: Route;
   try {
-    const routed = await unlessAborted(deps.resolveRoute(order.model), signal);
+    const routed = await unlessAborted(beforeOpenBy(clock, openBy, Promise.resolve().then(() => deps.resolveRoute(order.model))), signal);
     if (routed === ABORTED) return undefined;
+    if (routed === LATE) return couldNotRun(run, quoted, notOpened);
     route = routed;
   } catch (err) {
     return couldNotRun(run, quoted, errText(err));
@@ -981,13 +1003,18 @@ async function wake(run: Run, quoted: Quoted | undefined): Promise<FinishedRecor
   if (signal.aborted) return undefined;
   /* a then-callback, so a create that throws is a rejection, and a could-not-run, like one that rejects */
   const creating = Promise.resolve().then(() => deps.createAgent({ cwd, route }));
+  /* made after the abort or the bound: nobody else holds it */
+  const letGo = (): void => { creating.then((late) => late.dispose(), () => {}).catch(() => {}); };
   let session: Awaited<typeof creating>;
   try {
-    const made = await unlessAborted(creating, signal);
+    const made = await unlessAborted(beforeOpenBy(clock, openBy, creating), signal);
     if (made === ABORTED) {
-      /* made after the abort: nobody else holds it */
-      creating.then((late) => late.dispose(), () => {}).catch(() => {});
+      letGo();
       return undefined;
+    }
+    if (made === LATE) {
+      letGo();
+      return couldNotRun(run, quoted, notOpened);
     }
     session = made;
   } catch (err) {
@@ -999,7 +1026,7 @@ async function wake(run: Run, quoted: Quoted | undefined): Promise<FinishedRecor
    * tokens reach the budget. A turn outlived gets only that event: no firings.jsonl record, no line. */
   let counted: Promise<void> = Promise.resolve();
   const count = (record: DeskTurnRecord): Promise<void> => {
-    counted = counted.then(() => appendEvent(deps.home, turnEvent(record, stamp(deps), cwdRel), { log }));
+    counted = counted.then(() => appendEvent(deps.home, deskTurnEvent(record, stamp(deps), cwdRel), { log }));
     return counted;
   };
   /* The wait for the firing's turn, which its record, the watchdog or a failed wake ends - and an abort, after which
@@ -1043,6 +1070,7 @@ async function wake(run: Run, quoted: Quoted | undefined): Promise<FinishedRecor
         clock,
         log,
         fence: () => findChainViolation(deps.root, cwd),
+        fenceLabel: cwdRel,
         onTurnEnd,
       });
       const text = wakeMessage({ item, firedAt: clock.now(), verified, ...(quoted === undefined ? {} : { producer: quoted }) });

@@ -196,20 +196,10 @@ function pausedLine(state: OffState, now: Date, deskTime: Machinery["desk"]["des
   return `paused since ${deskTime(new Date(state.setAt), now)} by ${state.by}${until}; a terminal resumes it: npm run desk -- resume`;
 }
 
-/** A deadline as the phone's lines name it: the Global Constraints' "5 min" for the default deadline, whole or
- * fractional seconds for any other. */
-const deadlineText = (deadlineMs: number): string => (deadlineMs === 300_000 ? "5 min" : `${deadlineMs / 1000} s`);
-
-/** The phone's line for a turn its deadline cut before it said anything. */
-function timedOutLine(deadlineMs: number): string {
-  return `timed out after ${deadlineText(deadlineMs)}; a card or a long tool was pending`;
-}
-
-/** The line after an answer a cut interrupted mid-stream: `(cut off: <what cut it>)` - the deadline, or what
- * cancelled the turn (`stopped from the phone`, `shutdown`, `stopped in the browser`). */
-function cutOffLine(r: DeskTurnRecord): string {
-  const by = r.outcome === "timed-out" ? `timed out after ${deadlineText(r.deadlineMs)}` : r.cancel ?? r.outcome;
-  return `(cut off: ${by})`;
+/** The phone's line for a turn its deadline cut before it said anything, the deadline as desk-session.ts's
+ * `formatDuration` spells it - the default `5 min`, a firing's alike. */
+function timedOutLine(deadlineMs: number, m: Machinery): string {
+  return `timed out after ${m.session.formatDuration(deadlineMs)}; a card or a long tool was pending`;
 }
 
 /** The phone's line for a turn that ended on an error before it said anything. */
@@ -225,8 +215,8 @@ const notOpenedLine = (reason: string): string => `the desk could not open a tur
  * is answered by the bridge, a shutdown by nobody). */
 function replyOf(r: DeskTurnRecord, m: Machinery): string {
   if (r.outcome === "refused") return m.session.fenceRefusalLine(r.violation ?? JOURNAL);
-  if (r.finalText !== "") return r.interrupted === true ? `${r.finalText}\n${cutOffLine(r)}` : r.finalText;
-  if (r.outcome === "timed-out") return timedOutLine(r.deadlineMs);
+  if (r.finalText !== "") return r.interrupted === true ? `${r.finalText}\n${m.session.cutOffLine(r)}` : r.finalText;
+  if (r.outcome === "timed-out") return timedOutLine(r.deadlineMs, m);
   if (r.outcome === "failed") return notAnsweredLine(r.error ?? "error");
   return "";
 }
@@ -324,17 +314,7 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
   let delivering: Promise<void> = Promise.resolve();
 
   const record = async (r: DeskTurnRecord, m: Machinery): Promise<void> => {
-    const t = stamp();
-    if (r.outcome === "refused") {
-      await m.desk.appendEvent(home, { t, kind: "desk-refused", reason: "fence", path: r.violation ?? JOURNAL }, { log });
-      return;
-    }
-    await m.desk.appendEvent(home, {
-      t, kind: "desk-turn", sessionId: r.sessionId, source: r.source, turn: r.turn, outcome: r.outcome, wallMs: r.wallMs,
-      ...(r.usage === undefined ? {} : { usage: r.usage }),
-      ...(r.cancel === undefined ? {} : { cancel: r.cancel }),
-      ...(r.error === undefined ? {} : { error: r.error }),
-    }, { log });
+    await m.desk.appendEvent(home, m.session.deskTurnEvent(r, stamp(), JOURNAL), { log });
   };
 
   /** {@link DeskConversation.deliver}, its failure lines opening with `unsent` - the turn's reply, or a message -

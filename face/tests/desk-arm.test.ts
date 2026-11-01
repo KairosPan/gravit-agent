@@ -114,6 +114,18 @@ test("arm hashes STANDING.md, checks the calendar, appends a verified 0600 entry
   assert.equal((await stat(r.standing)).mode & 0o777, 0o600);
 });
 
+test("arm notes another enabled order at the same anchor: they run one after another (M5)", async () => {
+  const r = await rig();
+  assert.equal(await runDesk("arm", PRECLOSE, r.deps), 0);
+  r.take();
+  assert.equal(await runDesk("arm", ["desk", "--id", "second", "--at", "close-30m", "--expires", "2026-11-30"], r.deps), 0);
+  const said = r.take();
+  assert.equal(said.length, 2, said.join(" | "));
+  assert.equal(said[1], "note: preclose also fires at close-30m; orders sharing an anchor run one after another, so second may start late - and a close-anchored text that finishes after the close is held back");
+  assert.equal(await runDesk("arm", ["desk", "--id", "third", "--at", "close-15m", "--expires", "2026-11-30", "--turn-deadline", "5m"], r.deps), 0);
+  assert.equal(r.take().length, 1, "another anchor: no note");
+});
+
 test("arm and rearm a script producer: its hash is recorded, printed and re-taken", async () => {
   const r = await rig();
   assert.equal(await runDesk("arm", ["desk", "--id", "cap", "--at", "close-30m", "--producer", "scripts/p.py", "--expires", "2026-11-30", "--no-wake",
@@ -133,7 +145,8 @@ test("arm and rearm a script producer: its hash is recorded, printed and re-take
   await writeFile(join(r.root, "scripts", "p.py"), "print('changed')\n");
   const newPsha = sha256Hex("print('changed')\n");
   assert.equal(await runDesk("rearm", ["cap"], r.deps), 0);
-  assert.deepEqual(r.take(), [`re-armed cap: desk/STANDING.md sha256 ${sha.slice(0, 12)}…, scripts/p.py sha256 ${newPsha.slice(0, 12)}…`]);
+  assert.deepEqual(r.take(), [`re-armed cap: desk/STANDING.md sha256 ${sha.slice(0, 12)}…, scripts/p.py sha256 ${newPsha.slice(0, 12)}… (changed)`],
+    "the moved pin marked (p2-m11)");
   const [rearmed] = await ordersIn(r);
   assert.deepEqual(rearmed, { ...armed, producerSha256: newPsha }, "only the script's hash moved; armedAt too stays");
   assert.equal(await runDesk("rearm", ["cap"], r.deps), 0);
@@ -284,7 +297,7 @@ test("rearm takes a changed text's new hash and leaves the rest", async () => {
   const newSha = sha256Hex(edited);
 
   assert.equal(await runDesk("rearm", ["preclose"], r.deps), 0);
-  assert.deepEqual(r.take(), [`re-armed preclose: desk/STANDING.md sha256 ${newSha.slice(0, 12)}…`]);
+  assert.deepEqual(r.take(), [`re-armed preclose: desk/STANDING.md sha256 ${newSha.slice(0, 12)}… (changed)`]);
   assert.equal(await readFile(r.standing, "utf8"), armed.replace(sha, newSha), "only the hash moved; armedAt too stays");
   const [order] = await ordersIn(r);
   assert.equal(order.sha256, newSha);
@@ -371,15 +384,15 @@ test("an edit made while an order was expired is reviewed and re-pinned before i
   assert.equal(await readFile(r.standing, "utf8"), armed, "nothing written");
   await writeFile(join(r.root, "desk", "STANDING.md"), text);
   assert.equal(await runDesk("rearm", ["cap", "--expires", "2026-12-31"], later), 1);
-  assert.deepEqual(r.take(), ["cannot re-arm cap: desk/STANDING.md changed since arming; review it, then: npm run desk -- rearm cap"],
-    "both changed: the text is named first");
+  assert.deepEqual(r.take(), ["cannot re-arm cap: desk/STANDING.md and scripts/p.py changed since arming; review them, then: npm run desk -- rearm cap"],
+    "both changed: both named, the text first (p2-m11)");
   assert.equal(await readFile(r.standing, "utf8"), armed, "nothing written");
 
   /* step one, after the review: the plain rearm re-pins both files, the date untouched */
   const sha = sha256Hex(text);
   const psha = sha256Hex(script);
   assert.equal(await runDesk("rearm", ["cap"], later), 0);
-  assert.deepEqual(r.take(), [`re-armed cap: desk/STANDING.md sha256 ${sha.slice(0, 12)}…, scripts/p.py sha256 ${psha.slice(0, 12)}…`]);
+  assert.deepEqual(r.take(), [`re-armed cap: desk/STANDING.md sha256 ${sha.slice(0, 12)}… (changed), scripts/p.py sha256 ${psha.slice(0, 12)}… (changed)`]);
   const [pinned] = await ordersIn(r);
   assert.deepEqual([pinned.sha256, pinned.producerSha256, pinned.expires], [sha, psha, "2026-10-20"]);
 

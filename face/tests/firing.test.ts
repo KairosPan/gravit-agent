@@ -259,7 +259,7 @@ test("wakeMessage carries the provenance line, the session, the deadline, the ve
 
 /* ---------- the checks before a firing ---------- */
 
-test("checkFiring refuses in order: OFF, the budget, a changed or missing text, a changed script, the fence", async () => {
+test("checkFiring refuses in order: OFF, the budget, the fence, then a changed or missing text and a changed script, each pin named", async () => {
   const fx = await fixture();
   const script = printing("P");
   const order: StandingOrder = { ...ORDER, producer: { kind: "script", script: "scripts/p.py" }, producerSha256: sha256Hex(script) };
@@ -283,9 +283,11 @@ test("checkFiring refuses in order: OFF, the budget, a changed or missing text, 
   const gravit = join(fx.root, "desk", "GRAVIT.md");
   await writeFile(p, printing("Q"));
   await writeFile(gravit, "steer\n");
-  assert.deepEqual(await checkFiring(deps, order), { refuse: { reason: "hash", detail: sha256Hex(edited) } }, "the text before the script and the fence; the detail is the sha found");
-  await writeFile(p, script);
+  assert.deepEqual(await checkFiring(deps, order), { refuse: { reason: "fence", detail: "desk/GRAVIT.md" } }, "the fence before any file is read (M9)");
   await rm(gravit);
+  assert.deepEqual(await checkFiring(deps, order), { refuse: { reason: "hash", detail: sha256Hex(edited), producerDetail: sha256Hex(printing("Q")) } },
+    "the text before the script, the script's moved pin named with it (p2-m11)");
+  await writeFile(p, script);
   assert.deepEqual(await checkFiring(deps, order), { refuse: { reason: "hash", detail: sha256Hex(edited) } });
   await rm(text);
   assert.deepEqual(await checkFiring(deps, order), { refuse: { reason: "hash", detail: "missing" } });
@@ -293,20 +295,15 @@ test("checkFiring refuses in order: OFF, the budget, a changed or missing text, 
   await symlink(join(fx.root, "copy.md"), text);
   assert.deepEqual(await checkFiring(deps, order), { refuse: { reason: "hash", detail: "missing" } }, "a link is never read through - not even to the armed bytes - as arm refuses one");
   await rm(text);
+  await writeFile(text, `${STANDING}${"x".repeat(16_384)}`);
+  assert.deepEqual(await checkFiring(deps, order), { refuse: { reason: "hash", detail: "oversized" } }, "past the 16,384 bytes arm took: changed, never read whole");
   await writeFile(text, STANDING);
 
   await writeFile(p, printing("Q"));
-  await writeFile(gravit, "steer\n");
-  assert.deepEqual(await checkFiring(deps, order), { refuse: { reason: "producer-hash", detail: sha256Hex(printing("Q")) } }, "the script before the fence");
-  await rm(gravit);
   assert.deepEqual(await checkFiring(deps, order), { refuse: { reason: "producer-hash", detail: sha256Hex(printing("Q")) } });
   await rm(p);
   assert.deepEqual(await checkFiring(deps, order), { refuse: { reason: "producer-hash", detail: "missing" } });
   await writeFile(p, script);
-
-  await writeFile(gravit, "steer\n");
-  assert.deepEqual(await checkFiring(deps, order), { refuse: { reason: "fence", detail: "desk/GRAVIT.md" } });
-  await rm(gravit);
 
   const go = await checkFiring(deps, order);
   assert.deepEqual(go, { go: { cwd: fx.cwd, standingText: STANDING, standingSha: sha256Hex(STANDING), producerSha: sha256Hex(script) } });
@@ -1388,4 +1385,60 @@ test("a WallClock waits for a timer's own work: a tick that re-arms after real I
   const failing = new WallClock(FIRED);
   failing.setTimeout(async () => { throw new Error("the tick broke"); }, 1_000);
   await assert.rejects(failing.advance(1_000), /the tick broke/);
+});
+
+/* ---------- the fix wave: a setup that hangs (M1), the fence's label (p2-m18), both pins named (p2-m11) ---------- */
+
+test("a route or a create that hangs past the turn deadline ends the firing as error, and a late session is let go (M1)", async () => {
+  /* the create hangs, then arrives late */
+  {
+    const fx = await fixture();
+    let arrive!: (made: Awaited<ReturnType<FiringDeps["createAgent"]>>) => void;
+    let disposed = 0;
+    const r = rig(fx, { over: { createAgent: () => new Promise((done) => { arrive = done; }) } });
+    const running = runFiring(r.deps, ITEM, verifiedFor(fx), signal());
+    await waitFor("the create", () => arrive !== undefined);
+    await r.clock.advance(599_999);
+    let settled = false;
+    void running.then(() => { settled = true; });
+    await r.clock.flush();
+    assert.equal(settled, false, "a millisecond before its bound it still waits");
+    await r.clock.advance(1);
+    const finished = await running;
+    assert.deepEqual(r.out.texts, ["preclose · 2026-11-27 could not run: the session did not open in 10 min"]);
+    assert.deepEqual(finished?.turn, { outcome: "error", deadlineMs: 600_000, error: "the session did not open in 10 min" });
+    arrive({ agent: {} as never, sessionId: "late", dispose: async () => { disposed += 1; } });
+    await waitFor("the late session's dispose", () => disposed === 1);
+  }
+  /* the route hangs */
+  {
+    const fx = await fixture();
+    const r = rig(fx, { over: { resolveRoute: () => new Promise<never>(() => {}) } });
+    const running = runFiring(r.deps, ITEM, verifiedFor(fx), signal());
+    await r.clock.flush();
+    await r.clock.advance(600_000);
+    const finished = await running;
+    assert.deepEqual(r.out.texts, ["preclose · 2026-11-27 could not run: the session did not open in 10 min"]);
+    assert.equal(finished?.turn?.outcome, "error");
+    assert.equal(r.agents.agents.length, 0, "no session was asked for");
+  }
+});
+
+test("a firing's supervision counts a fence check that fails at the firing's own cwd, not desk/journal (p2-m18)", async () => {
+  const fx = await fixture();
+  const r = rig(fx);
+  const strategy = itemWith({ id: "nightly", dir: "strategies/demo", file: "NIGHTLY.md" });
+  await mkdir(join(fx.root, "strategies", "demo"), { recursive: true });
+  const running = runFiring(r.deps, strategy, { ...verifiedFor(fx), cwd: join(fx.root, "strategies", "demo") }, signal());
+  await waitFor("the supervision", () => r.sup.calls.length === 1);
+  assert.equal(r.sup.calls[0].fenceLabel, "strategies/demo");
+  await r.clock.advance(660_000);
+  await running;
+});
+
+test("LINES.changed names every pin that moved", () => {
+  assert.equal(LINES.changed("p", "2026-11-27", "desk/STANDING.md"),
+    "p · 2026-11-27 refused: desk/STANDING.md changed since arming. Review it, then: npm run desk -- rearm p");
+  assert.equal(LINES.changed("p", "2026-11-27", ["desk/STANDING.md", "scripts/p.py"]),
+    "p · 2026-11-27 refused: desk/STANDING.md and scripts/p.py changed since arming. Review them, then: npm run desk -- rearm p");
 });

@@ -135,6 +135,10 @@ type HashState = StandingStatus["orders"][number]["hash"];
 /** Whether a line of the firing ledger, its object, is a record of `kind` for `key`. */
 const recordOf = (kind: FiringRecord["kind"], key: string) => (x: unknown): boolean => isFiringRecord(x) && x.kind === kind && x.key === key;
 
+/** A refusal's detail as the dedupe compares it: the text's, and the script's when its pin moved too. */
+const refusalDetail = (detail: string, producerDetail: string | undefined): string =>
+  (producerDetail === undefined ? detail : `${detail} ${producerDetail}`);
+
 /** The kinds a rotation hands on for today's keys (p2-m28). */
 const CARRIED: ReadonlySet<string> = new Set(["started", "finished", "interrupted", "missed", "refused"]);
 
@@ -299,9 +303,9 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
         missed.add(r.key);
         break;
       case "refused":
-        refusals.set(r.key, { reason: r.reason, ...(r.detail === undefined ? {} : { detail: r.detail }) });
+        refusals.set(r.key, { reason: r.reason, ...(r.detail === undefined ? {} : { detail: refusalDetail(r.detail, r.producerDetail) }) });
         if (r.reported === true && (r.reason === "hash" || r.reason === "producer-hash") && typeof r.detail === "string") {
-          phonedDetail.set(`${r.order} ${r.reason}`, r.detail);
+          phonedDetail.set(`${r.order} ${r.reason}`, refusalDetail(r.detail, r.producerDetail));
         }
         break;
       case "expired": {
@@ -709,7 +713,7 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
       if (refusal.reason === "off" || refusal.reason === "budget") return;
       if (refusal.reason === "hash") {
         hash = state(refusal.detail);
-        producerHash = script ? "unknown" : undefined;
+        producerHash = !script ? undefined : refusal.producerDetail === undefined ? "unknown" : state(refusal.producerDetail);
       } else if (refusal.reason === "producer-hash") {
         hash = "ok";
         producerHash = state(refusal.detail);
@@ -751,9 +755,12 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
       case "hash":
       case "producer-hash": {
         const told = `${order.id} ${refusal.reason}`;
-        if (phonedDetail.get(told) === refusal.detail) return undefined;
+        const both = refusal.reason === "hash" ? refusal.producerDetail : undefined;
+        if (phonedDetail.get(told) === refusalDetail(refusal.detail, both)) return undefined;
         const path = refusal.reason === "hash" ? `${order.dir}/${order.file}` : scriptOf(order);
-        return refusal.detail === "missing" ? LINES.missing(order.id, date, path) : LINES.changed(order.id, date, path);
+        if (refusal.detail === "missing") return LINES.missing(order.id, date, path);
+        /* the text and the script both moved: one line names both (p2-m11) */
+        return LINES.changed(order.id, date, both === undefined ? path : [path, scriptOf(order)]);
       }
       case "fence":
         return LINES.fence(order.id, date, refusal.detail);
@@ -763,14 +770,15 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
   /** A refusal, recorded only when it differs from the key's last, with its line when it has one. */
   const refuseFiring = async (item: FiringItem, refusal: Refusal, now: number): Promise<void> => {
     const detail = "detail" in refusal ? refusal.detail : undefined;
+    const producerDetail = refusal.reason === "hash" ? refusal.producerDetail : undefined;
     const last = refusals.get(item.key);
-    if (last !== undefined && last.reason === refusal.reason && last.detail === detail) return;
+    if (last !== undefined && last.reason === refusal.reason && last.detail === (detail === undefined ? undefined : refusalDetail(detail, producerDetail))) return;
     const line = await refusalLine(item, refusal, now);
     /* its line held back by the pause is no report: `reported: false`, and the line goes out once the pause lifts */
     const reported = line !== undefined && (await sendOnce(line));
     const record: RefusedRecord = {
       t: iso(now), kind: "refused", key: item.key, order: item.order.id, date: item.date, reason: refusal.reason,
-      ...(detail === undefined ? {} : { detail }), reported,
+      ...(detail === undefined ? {} : { detail }), ...(producerDetail === undefined ? {} : { producerDetail }), reported,
     };
     note(record);
     await appendRecord(home, FIRINGS_FILE, record, ledgerOpts);

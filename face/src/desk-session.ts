@@ -51,9 +51,10 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
 import { installModelSelection as installDshModelSelection } from "@deepseek-ai/dsh-agent";
 import { deriveTurnTokenUsage } from "@deepseek-ai/dsh-token-meter/client";
-import { appendEvent, deskTime, lastDeskSession, readEvents, type TurnUsage } from "./desk.ts";
+import { appendEvent, deskTime, lastDeskSession, readEvents, type DeskEvent, type TurnUsage } from "./desk.ts";
 import { FENCE_NAMES, fenceNameOf } from "./desk-names.ts";
 import { DESK_PRESET } from "./desk-preset.ts";
+import { formatDuration } from "./producer.ts";
 import type { AgentLike, MemberSetup, ResumeMemberOptions, RoomContextLike, RoomDeps, SessionLike } from "./room.ts";
 import { finalTextOf, parseModelRoute, type EventLike, type MessageLike } from "./room-rules.ts";
 
@@ -582,11 +583,39 @@ export interface DeskTurnRecord {
   error?: string;
 }
 
+/**
+ * A turn's end as `events.jsonl` records it, the one builder both owners use - the desk conversation's phone turns
+ * and a firing's turn (p2-m22): a `desk-refused` for a turn the fence cut, at its violation or `fallbackPath`; else a
+ * `desk-turn` with its source, its outcome, its wall time, its tokens and why it was cancelled or failed.
+ * @param r - the supervisor's record.
+ * @param t - the event's time.
+ * @param fallbackPath - the repo-relative path a refusal without a violation names: the turn's cwd.
+ */
+export function deskTurnEvent(r: DeskTurnRecord, t: string, fallbackPath: string): DeskEvent {
+  if (r.outcome === "refused") return { t, kind: "desk-refused", reason: "fence", path: r.violation ?? fallbackPath };
+  return {
+    t, kind: "desk-turn", sessionId: r.sessionId, source: r.source, turn: r.turn, outcome: r.outcome, wallMs: r.wallMs,
+    ...(r.usage === undefined ? {} : { usage: r.usage }),
+    ...(r.cancel === undefined ? {} : { cancel: r.cancel }),
+    ...(r.error === undefined ? {} : { error: r.error }),
+  };
+}
+
+/** The line after an answer a cut interrupted mid-stream, one form for both owners: `(cut off: <what cut it>)` - its
+ * deadline, as producer.ts `formatDuration` spells it (`5 min`, `1.5 s`), or what cancelled it (`stopped from the
+ * phone`, `shutdown`, `stopped in the browser`). */
+export function cutOffLine(r: DeskTurnRecord): string {
+  return `(cut off: ${r.outcome === "timed-out" ? `timed out after ${formatDuration(r.deadlineMs)}` : r.cancel ?? r.outcome})`;
+}
+
+export { formatDuration };
+
 /** What {@link superviseDeskTurns} needs. `deadlineMs` is every turn's deadline - a whole number of
  * milliseconds in 1..2147483647, the longest a timer holds - and the ceiling of any shorter one
  * `deadlineFor` gives a source; `onTurnEnd`, the owner's hand for each record, synchronous or async;
- * `fence`, the instruction-chain check run at every turn's start (none when absent); `clock`, the timers
- * (the global ones by default); `log`, where a failure line goes (stderr). */
+ * `fence`, the instruction-chain check run at every turn's start (none when absent), and `fenceLabel`, the
+ * repo-relative path a check that rejects counts as a violation at - the turn's cwd, `desk/journal` by default
+ * (p2-m18); `clock`, the timers (the global ones by default); `log`, where a failure line goes (stderr). */
 export interface SuperviseDeskTurnsDeps {
   on: SessionEventsOn;
   sessionId: string;
@@ -595,6 +624,7 @@ export interface SuperviseDeskTurnsDeps {
   clock?: DeskClock;
   onTurnEnd: (record: DeskTurnRecord) => void | Promise<void>;
   fence?: () => Promise<string | undefined>;
+  fenceLabel?: string;
   deadlineFor?: (sourceKind: string) => number | undefined;
   log?: (line: string) => void;
 }
@@ -836,8 +866,9 @@ export function superviseDeskTurns(deps: SuperviseDeskTurnsDeps): () => void {
         },
         (err: unknown) => {
           if (disposed || open !== turn) return; // the turn is over: nothing to refuse, nothing to say
-          log(`${BIN}: desk: the fence check for turn ${turn.turn} on ${where} failed (${errText(err)}); it counts as a violation at ${JOURNAL}`);
-          cut(turn, { by: "fence", violation: JOURNAL });
+          const at = deps.fenceLabel ?? JOURNAL;
+          log(`${BIN}: desk: the fence check for turn ${turn.turn} on ${where} failed (${errText(err)}); it counts as a violation at ${at}`);
+          cut(turn, { by: "fence", violation: at });
         },
       );
   };
