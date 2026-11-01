@@ -1,6 +1,7 @@
 /** The desk's book: the operator's holdings (`desk/holdings.yml`) and price levels (`desk/levels.yml` and each
- * strategy's `strategies/<name>/levels.yml`), as the pre-close brief prices them and the watch (P3) and the
- * per-strategy report (P4) read them (rulings P2-5, P2-13; spec §5.5).
+ * strategy's `strategies/<name>/levels.yml`), as the pre-close brief prices the desk's two - a strategy's joins it
+ * only once P4 pins it at arming - and the watch (P3) and the per-strategy report (P4) read them (rulings P2-5,
+ * P2-13; spec §5.5).
  *
  * THE FILES. Each is a YAML list of entries the operator writes by hand. The real files are gitignored - the
  * repository is public (B4) - and `desk/holdings.example.yml` and `desk/levels.example.yml` are the tracked

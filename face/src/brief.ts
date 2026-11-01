@@ -6,14 +6,17 @@
  * index and sector ETFs' day moves, the operator's holdings against their stops and targets, and the levels within
  * {@link NEAR_PCT}% of triggering - the block the model writes the operator's pre-close message from.
  *
- * WHAT IT READS. The operator's book and nothing else: `desk/holdings.yml`, `desk/levels.yml` and each
- * `strategies/<name>/levels.yml` - the strategies channels.ts `listChannelDirs` lists, never the repository root,
- * the template or a hidden directory - each through desk-book.ts's loaders, whose results it carries as they are:
- * a refused entry is a refusal in the brief, a refused file an error, and a missing file is `missing` (holdings) or
- * absent from `files` (levels). Then ONE `hub.snapshot()` over the index ETFs, the sector ETFs, the holdings and the
- * levels' symbols, in that order, each once: the face's live quotes, the numbers `desk_quotes` shows (P2-2 - no
- * Python and no bars). Before any of it, the firing's ET date is checked once: one that is not `YYYY-MM-DD` fails the
- * producer with one error, and nothing is read or asked.
+ * WHAT IT READS. The desk's own book and nothing else: `desk/holdings.yml` and `desk/levels.yml`, each through
+ * desk-book.ts's loaders, whose results it carries as they are: a refused entry is a refusal in the brief, a refused
+ * file an error, and a missing file is `missing` (holdings) or absent from `files` (levels). NOT a strategy's
+ * `strategies/<name>/levels.yml`: those sit in directories the research sessions can write, and the brief quotes a
+ * level's plan into an unattended turn whose text reaches the phone, so they join the brief only once P4 pins each one
+ * at arming (charter D20; the P2 fix wave's I3) - `notYet` says so, and the model does not report them as nothing.
+ * Then ONE `hub.snapshot()` over the index ETFs, the sector ETFs, the holdings and the levels' symbols, in that order,
+ * each once and at most {@link BRIEF_SYMBOLS_MAX} of them - below the hub's cache limit, which would refuse the whole
+ * snapshot as busy - those past the bound named in `quotesOmitted` (p2-m15): the face's live quotes, the numbers
+ * `desk_quotes` shows (P2-2 - no Python and no bars). Before any of it, the firing's ET date is checked once: one that
+ * is not `YYYY-MM-DD` fails the producer with one error, and nothing is read or asked.
  *
  * EVERY NUMBER NAMES ITS SOURCE AND TIME (dsh/profile/desk.md). A price carries `at`, desk-tools.ts's `quoteTime`:
  * the feed and New York's clock to the second (`IEX 15:21:03 ET`), dated when the quote is from another ET day. The
@@ -36,22 +39,21 @@
  *   single price - no keys, or a feed that is down - `<state>` the US provider's state as its English word
  *   (`unconfigured`, `error`, …), and `unknown` when the payload names no US provider or a state that is not one of
  *   those words: never its UI message. A brief with no price is no success.
- * A file that is missing, refused or unreadable is named in its block and never fails the brief, and a
- * `strategies/` that cannot be listed is a levels error naming `strategies/` and its code. {@link briefProducer}
- * never rejects.
+ * A file that is missing, refused or unreadable is named in its block and never fails the brief.
+ * {@link briefProducer} never rejects.
  *
  * A CUT KEEPS THE ERRORS. The firing quotes at most 32,768 characters of a producer's text (producer.ts
  * `PRODUCER_TEXT_MAX`) and cuts the rest, so the brief's keys are written with the long lists last: `quotesError`
  * straight after the session, ahead of every quote; in each block, the file's state and its errors ahead of its rows,
  * near levels and refusals; `notYet` at the very end. A book past the cap loses the tail of its refusals and of its
- * near levels - nearest first, so the farthest go - before any error.
+ * near levels - nearest first, so the farthest go - before the levels error, with one exception: the holdings rows
+ * come ahead of the whole levels block, so many long-labelled holdings can push the levels error past the cap first.
  *
- * MODULE WEIGHT. It brings desk-book.ts (and js-yaml with it), channels.ts and desk.ts, so only a firing loads it
+ * MODULE WEIGHT. It brings desk-book.ts (and js-yaml with it) and desk.ts, so only a firing loads it
  * - through the schedule, itself loaded on first use - and the pause switch (scripts/desk.ts) never does.
  * @module
  */
 import { join } from "node:path";
-import { listChannelDirs } from "./channels.ts";
 import { loadHoldings, loadLevels, type Holding, type Level, type LevelKind, type LoadRefusal } from "./desk-book.ts";
 import { deskTime } from "./desk.ts";
 import { quoteTime } from "./desk-tools.ts";
@@ -70,17 +72,22 @@ export const BRIEF_INDEXES = ["SPY", "QQQ", "IWM", "DIA"] as const;
 /** The eleven Select Sector SPDR ETFs. */
 export const BRIEF_SECTORS = ["XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU", "XLV", "XLY"] as const;
 
+/** The most symbols one brief asks the hub for: well below the hub's cache limit (512, its own and the page's quotes
+ * counted with them), past which the hub refuses the snapshot whole. The book's caps (60 holdings, 40 levels) and the
+ * 15 ETFs stay under it today; P4's strategies' levels would not. */
+export const BRIEF_SYMBOLS_MAX = 200;
+
+/** A quote's status when the brief left its symbol out of the snapshot: past {@link BRIEF_SYMBOLS_MAX}. */
+const OMITTED = "omitted: past the brief's symbol bound";
+
 /** A level within this many percent of the last price, either way, is near: about to trigger. */
 export const NEAR_PCT = 2;
 
 /** The book's files, as the brief labels them: repo-relative. */
 const HOLDINGS_FILE = "desk/holdings.yml";
 const DESK_LEVELS_FILE = "desk/levels.yml";
-/** The label a `strategies/` that cannot be listed is named by. */
-const STRATEGIES = "strategies/";
-
 /** What the brief does not carry yet, said in the brief so the model does not report it as nothing. */
-const NOT_YET = "alerts, suppressed alerts and filings arrive with the watch (P3)";
+const NOT_YET = "alerts, suppressed alerts and filings arrive with the watch (P3); strategies' levels.yml join once each is pinned at arming (P4)";
 
 /** A quote's status when the snapshot holds none for its symbol: the hub's own word for a symbol without a price. */
 const UNAVAILABLE = "unavailable";
@@ -102,6 +109,8 @@ export interface BriefDeps {
   hub: Pick<QuoteHub, "snapshot">;
   root: string;
   now?: () => number;
+  /** The symbol bound, {@link BRIEF_SYMBOLS_MAX} by default; for tests. */
+  symbolsMax?: number;
 }
 
 /** One quote as the brief carries it: the last price; its move from the previous close, in percent; the previous
@@ -169,6 +178,7 @@ export interface Brief {
   takenAt: string;
   session: { open: string; close: string; early: boolean };
   quotesError?: string;
+  quotesOmitted?: string[];
   indexes: BriefQuote[];
   sectors: BriefQuote[];
   holdings: {
@@ -186,7 +196,7 @@ export interface Brief {
     near: NearLevel[];
     refusals: LoadRefusal[];
   };
-  notYet: "alerts, suppressed alerts and filings arrive with the watch (P3)";
+  notYet: typeof NOT_YET;
 }
 
 /* ---------- the numbers ---------- */
@@ -196,12 +206,6 @@ function messageOf(error: unknown): string {
   if (error instanceof Error) return error.message;
   const message = (error as { message?: unknown } | null | undefined)?.message;
   return typeof message === "string" ? message : String(error);
-}
-
-/** An errno's code, or the error's message when it has none. */
-function codeOf(error: unknown): string {
-  const code = (error as NodeJS.ErrnoException | null | undefined)?.code;
-  return typeof code === "string" ? code : messageOf(error);
 }
 
 /** Whether `value` is a price as the hub keeps one: a finite number above 0. */
@@ -343,17 +347,6 @@ function nearLevels(levels: readonly Level[], quotes: ReadonlyMap<string, BriefQ
   return near.sort((a, b) => Math.abs(a.distancePct) - Math.abs(b.distancePct));
 }
 
-/** Each strategy's levels file, `strategies/<name>/levels.yml`, for the strategies channels.ts lists - or the code
- * of the failure when `strategies/` cannot be listed (`ENOTDIR`, `EACCES`; a missing `strategies/` is no strategies). */
-async function strategyLevelFiles(root: string): Promise<{ path: string; file: string }[] | { error: string }> {
-  try {
-    const dirs = await listChannelDirs(root);
-    return dirs.filter((dir) => !dir.isRoot).map((dir) => ({ path: join(dir.dir, "levels.yml"), file: `strategies/${dir.name}/levels.yml` }));
-  } catch (error) {
-    return { error: codeOf(error) };
-  }
-}
-
 /** A session instant (`2026-10-20T13:30:00Z`) as New York's wall time, `09:30 ET`; one `Date` cannot read stays as given. */
 function sessionTime(instant: string): string {
   return Number.isFinite(Date.parse(instant)) ? etTime(new Date(instant)) : instant;
@@ -378,23 +371,25 @@ export async function buildBrief(deps: BriefDeps, input: ProducerInput): Promise
   const clock = deps.now ?? Date.now;
   /* The loaders never throw: a file's every fault is in its result, and the one argument they refuse - the date - is
    * checked above. */
-  const [holdings, deskLevels, listed] = await Promise.all([
+  const [holdings, deskLevels] = await Promise.all([
     loadHoldings(join(deps.root, "desk", "holdings.yml"), HOLDINGS_FILE),
     loadLevels(join(deps.root, "desk", "levels.yml"), DESK_LEVELS_FILE, input.date),
-    strategyLevelFiles(deps.root),
   ]);
-  const strategyLevels = Array.isArray(listed) ? await Promise.all(listed.map(({ path, file }) => loadLevels(path, file, input.date))) : [];
-  const levelResults = [deskLevels, ...strategyLevels];
+  const levelResults = [deskLevels];
   const levels = levelResults.flatMap((result) => result.entries);
 
   const symbols = [...new Set<string>([
     ...BRIEF_INDEXES, ...BRIEF_SECTORS, ...holdings.entries.map((holding) => holding.symbol), ...levels.map((level) => level.symbol),
   ])];
+  /* the first ones in the order above are asked; the rest are named, never silently dropped */
+  const bound = deps.symbolsMax ?? BRIEF_SYMBOLS_MAX;
+  const asked = symbols.slice(0, bound);
+  const omitted = symbols.slice(bound);
   const snapshot = new Map<string, LiveQuote>();
   let payload: QuotePayload | undefined;
   let quotesError: string | undefined;
   try {
-    const assets = symbols.map((symbol): QuoteIdentity => ({ id: `us:${symbol}`, market: "us", symbol }));
+    const assets = asked.map((symbol): QuoteIdentity => ({ id: `us:${symbol}`, market: "us", symbol }));
     payload = await deps.hub.snapshot(assets);
     for (const quote of payload.quotes) snapshot.set(quote.id, quote);
   } catch (error) {
@@ -402,7 +397,11 @@ export async function buildBrief(deps: BriefDeps, input: ProducerInput): Promise
   }
 
   const now = clock();
-  const quotes = new Map(symbols.map((symbol) => [symbol, briefQuote(symbol, snapshot.get(`us:${symbol}`), now)] as const));
+  const left = new Set(omitted);
+  const quotes = new Map(symbols.map((symbol) => [
+    symbol,
+    left.has(symbol) ? { symbol, last: null, chgPct: null, prevClose: null, at: null, status: OMITTED } : briefQuote(symbol, snapshot.get(`us:${symbol}`), now),
+  ] as const));
   if (quotesError === undefined && ![...quotes.values()].some((quote) => quote.last !== null)) {
     quotesError = `quotes unavailable: the hub has no price for any symbol (alpaca ${usProviderState(payload)})`;
   }
@@ -415,6 +414,7 @@ export async function buildBrief(deps: BriefDeps, input: ProducerInput): Promise
     takenAt: `${etClock(new Date(now))} ET`,
     session: { open: sessionTime(input.session.open), close: sessionTime(input.session.close), early: input.session.early },
     ...(quotesError === undefined ? {} : { quotesError }),
+    ...(omitted.length === 0 ? {} : { quotesOmitted: omitted }),
     indexes: BRIEF_INDEXES.map((symbol) => quoteFor(symbol)),
     sectors: strongestFirst(BRIEF_SECTORS.map((symbol) => quoteFor(symbol))),
     holdings: {
@@ -428,11 +428,7 @@ export async function buildBrief(deps: BriefDeps, input: ProducerInput): Promise
     levels: {
       files: levelResults.filter((result) => result.missing !== true).map((result) => result.file),
       loaded: levels.length,
-      errors: [
-        ...(deskLevels.error === undefined ? [] : [{ file: deskLevels.file, error: deskLevels.error }]),
-        ...(Array.isArray(listed) ? [] : [{ file: STRATEGIES, error: listed.error }]),
-        ...strategyLevels.flatMap((result) => (result.error === undefined ? [] : [{ file: result.file, error: result.error }])),
-      ],
+      errors: deskLevels.error === undefined ? [] : [{ file: deskLevels.file, error: deskLevels.error }],
       near: nearLevels(levels, quotes),
       refusals: levelResults.flatMap((result) => result.refusals),
     },
