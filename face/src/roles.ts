@@ -98,6 +98,11 @@ const NEVER: ReadonlyArray<{ what: string; because: string; names: readonly stri
   { what: "the PTC transport",
     because: "run_code is the reserved PTC mode presentation transport, which tools.restrict() refuses to name, so every delegation would fail; name the end-capability tools instead",
     names: ["run_code"], prefixes: [], rawNames: [] },
+  /* Above the account rule: the first matching rule's words are the refusal's, so the seat's passthrough
+   * (`mcp__account__portfolio_akshare`) is refused as an AKShare tool, not as an account tool. */
+  { what: "an AKShare tool",
+    because: "the AKShare tools carry no point-in-time guard and are never evidence; the evidence is forward paper trading at the Account",
+    names: [], prefixes: ["mcp__akshare__"], rawNames: ["portfolio_akshare"] },
   { what: "an account or order tool",
     because: "orders go through the Account seat alone, behind its one gate (the face's per-order card); the seat is Gravit's, and a role has no reason to read the account",
     names: [], prefixes: ["mcp__account__"],
@@ -106,9 +111,6 @@ const NEVER: ReadonlyArray<{ what: string; because: string; names: readonly stri
       "portfolio_live_order", "portfolio_live_batch", "portfolio_live_amend", "portfolio_live_cancel", "portfolio_live_close",
       "portfolio_live_leverage", "portfolio_live_move", "portfolio_live_earn", "portfolio_pay",
       "portfolio_order", "portfolio_execute", "portfolio_transfer"] },
-  { what: "an AKShare tool",
-    because: "the AKShare tools carry no point-in-time guard and are never evidence; the evidence is forward paper trading at the Account",
-    names: [], prefixes: ["mcp__akshare__"], rawNames: [] },
 ];
 
 /** Why a role may not carry `entry`, as the end of a refusal; `undefined` when it may. */

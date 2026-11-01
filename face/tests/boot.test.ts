@@ -237,7 +237,7 @@ test("composeFace mounts the Account seat from FACE_ACCOUNT_SEAT_DIR and FACE_AC
     assert.deepEqual(config.args, ["/tmp/face-test-seat/node_modules/tsx/dist/cli.mjs", "src/portfolio/mcp.ts"]);
     assert.equal(config.cwd, "/tmp/face-test-seat");
     assert.deepEqual(config.env, { PORTFOLIO_URL: "http://127.0.0.1:4899", PORTFOLIO_AGENT: "Gravit" });
-    assert.equal(config.toolCallTimeoutMs, 90_000);
+    assert.equal(config.toolCallTimeoutMs, 130_000);
     assert.equal(config.failOnStartupError, false);
   } finally {
     if (previousDir === undefined) delete process.env.FACE_ACCOUNT_SEAT_DIR;

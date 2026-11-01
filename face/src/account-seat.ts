@@ -18,11 +18,11 @@
  *   `$BUYER_HOME/seats/<slug>.json` (exclusive create, mode 0600), never read
  *   here; the seat's name is what the Account page shows, so the operator
  *   admits it as Gravit and signs its limit under that name;
- * - it registers its 35 real-account tools even when the service is not
+ * - it registers its 36 real-account tools even when the service is not
  *   reachable (its startup GET of `/api/account` fails closed to "real"), so a
  *   face booted before the service still carries the tools, and a call then
  *   fails in the seat's own words;
- * - it sets no `instructions`, so no prompt section; its 35 schemas enter the
+ * - it sets no `instructions`, so no prompt section; its 36 schemas enter the
  *   tool block of every request (DEVELOPMENT.md §4.3 prices them);
  * - `portfolio_wait` polls at most 55 s, hence the 90 s call timeout.
  *
@@ -114,7 +114,7 @@ export function accountSeatPatches(dir = seatDir(), url = seatUrl()): FacePatchL
         args: [join(dir, "node_modules", "tsx", "dist", "cli.mjs"), "src/portfolio/mcp.ts"],
         cwd: dir,
         env: { PORTFOLIO_URL: url, PORTFOLIO_AGENT: ACCOUNT_SEAT_NAME },
-        toolCallTimeoutMs: 90_000,
+        toolCallTimeoutMs: 130_000, /* the Account's 120 s AKShare deadline plus margin; portfolio_wait's 55 s fits */
         failOnStartupError: false,
       } satisfies StdioConfig,
     }],
