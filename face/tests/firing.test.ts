@@ -1418,9 +1418,11 @@ test("a route or a create that hangs past the turn deadline ends the firing as e
   /* the route hangs */
   {
     const fx = await fixture();
-    const r = rig(fx, { over: { resolveRoute: () => new Promise<never>(() => {}) } });
+    let asked = false;
+    const r = rig(fx, { over: { resolveRoute: () => { asked = true; return new Promise<never>(() => {}); } } });
     const running = runFiring(r.deps, ITEM, verifiedFor(fx), signal());
-    await r.clock.flush();
+    /* the producer's record is real I/O: wait for the route to be asked - its bound is set by then - before time moves */
+    await waitFor("the route", () => asked);
     await r.clock.advance(600_000);
     const finished = await running;
     assert.deepEqual(r.out.texts, ["preclose · 2026-11-27 could not run: the session did not open in 10 min"]);
