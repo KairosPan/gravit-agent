@@ -3,7 +3,8 @@
 // the owner device (host/owner.js) and the sheet's pure shape (host/sheet-view.js). A complete form is prepared at once, a change
 // after a quiet spell; a press on a form that changed since the shown preparation prepares again instead of signing; a
 // preparation with a `deadline` counts down every second and is prepared again at zero, and a press under thirty seconds prepares
-// again and signs the fresh one. Only the latest ask lands. The engine draws nothing, knows no kind's fields, holds no key and
+// again and signs the fresh one. Only the latest ask lands, and only it is handed to `onPrepared` (plan 4b Task 2: a bridge's
+// routes are read beside it). The engine draws nothing, knows no kind's fields, holds no key and
 // logs nothing of a preparation or an answer.
 import { draftOf, fieldsOf } from './sheet-view.js';
 import { refusedAt, refusalOf, saidOf } from './owner-view.js';
@@ -34,7 +35,7 @@ export function askedOf(s) {
   return typeof draft === 'string' ? null : JSON.stringify(draft);
 }
 
-export function startSheet({ store, owner, schedule, cancelTimer, now, afterAction, onChange = () => {} }) {
+export function startSheet({ store, owner, schedule, cancelTimer, now, afterAction, onChange = () => {}, onPrepared = () => {} }) {
   let seq = 0;            // the latest ask: an answer for an older one, or for a sheet since closed, is dropped
   let opened = 0;         // the open sheet's generation: a sign's answer lands only on the sheet it was pressed on
   let quietTimer = null;  // the change waiting for its quiet spell
@@ -84,6 +85,9 @@ export function startSheet({ store, owner, schedule, cancelTimer, now, afterActi
     const deadline = deadlineOf(r.body.action);
     store.dispatch('sheetPrepared', { prepared: r.body, at: now(), asked, deadline });
     if (deadline !== null) armTick(); else stopTick();
+    // the preparation the sheet now shows, with the draft it was asked for (a bridge's routes are read beside it): never one
+    // dropped as stale above
+    try { onPrepared(s.kind, r.body, draft); } catch { /* a hook's failure never undoes the preparation shown */ }
     return r.body;
   }
 

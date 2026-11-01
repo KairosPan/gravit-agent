@@ -64,6 +64,9 @@ export function emptyState() {
       reach: { status: 'idle', data: null, at: null, message: null },
       guard: { status: 'idle', said: null, message: null },
       wallet: {},
+      // the Money tab (plan 4b Task 2): Receive's addresses by row key, and a bridge's routes for the draft asked
+      receive: {},
+      routes: { asked: null, status: 'idle', data: null, message: null },
       statementOpen: false,
       detailsVenue: null,
     },

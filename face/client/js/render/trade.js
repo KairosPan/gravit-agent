@@ -97,7 +97,7 @@ function cardsWaiting(page, now) {
 // the last send said (host/wallet-send.js, by its key), and — on a page that signs — Send from wallet…, or Report again where a
 // hash was sent: one this page keeps (it reports that hash), or one the Account already holds (the send asks the Account
 // again and reports it); neither ever sends again; disabled while one is in the air. An order keeps its Cancel beside it
-function walletRow(what, id, key, data, reported, sends, signs, cancel) {
+export function walletRow(what, id, key, data, reported, sends, signs, cancel) {
   const at = key && isRecord(sends) && isRecord(sends[key]) ? sends[key] : null;
   const said = at && str(at.said) ? `<span class="tk-why">${esc(at.said)}</span>` : '';
   const sending = at?.status === 'sending';

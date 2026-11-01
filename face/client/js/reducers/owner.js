@@ -5,6 +5,7 @@
 // `incomplete` (the missing `words`), `asking`, `ready` (the Account's `prepared`, when it landed, the draft it was `asked`
 // for, its `deadline` when it carries one), `refused` (the Account's `message`, `again` when preparing again is the answer),
 // `signing`, `done` (what the Account `said`).
+import { refieldsOf } from '../host/sheet-view.js';
 
 const ROLES = new Set(['unknown', 'signs', 'pending', 'needs-code', 'signed-out', 'none']);
 const own = (s, patch) => {
@@ -23,7 +24,9 @@ function withField(s, { name, value } = {}) {
   const { fields } = s.sheet;
   if (Array.isArray(fields)) {
     if (!fields.some(f => f?.name === name)) return s;
-    return sheet(s, { fields: fields.map(f => (f?.name === name ? { ...f, value } : f)) });
+    // a kind whose fields follow a field (a move's: its source and its kind) has them rebuilt, the values that survive kept
+    const changed = fields.map(f => (f?.name === name ? { ...f, value } : f));
+    return sheet(s, { fields: refieldsOf(s.sheet.kind, changed, s.sheet.seed) });
   }
   return sheet(s, { fields: { ...(fields && typeof fields === 'object' ? fields : {}), [name]: value } });
 }

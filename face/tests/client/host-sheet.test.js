@@ -78,12 +78,12 @@ function rig(opts = {}) {
   store.subscribe((_, type) => types.push(type));
   const owner = fakeOwner(clock, opts);
   const timers = fakeTimers(clock);
-  const done = [], changes = [];
+  const done = [], changes = [], prepared = [];
   const sheet = startSheet({
     store, owner, schedule: timers.schedule, cancelTimer: timers.cancelTimer, now: () => clock.t,
-    afterAction: (kind, body) => done.push([kind, body]), onChange: (...a) => changes.push(a),
+    afterAction: (kind, body) => done.push([kind, body]), onChange: (...a) => changes.push(a), onPrepared: (...a) => prepared.push(a),
   });
-  return { store, owner, timers, clock, sheet, types, done, changes, s: () => store.get().sheet };
+  return { store, owner, timers, clock, sheet, types, done, changes, prepared, s: () => store.get().sheet };
 }
 
 test('a complete sheet prepares at once and an incomplete one says what is missing', async () => {
@@ -389,4 +389,45 @@ test('close cancels the timers', async () => {
   assert.equal(r.s().status, 'ready', 'not done: that answer was the closed sheet’s');
   assert.equal(r.s().seed.venue, 'paper-c');
   assert.equal(r.done.length, 1);
+});
+
+test('onPrepared is called with the preparation the sheet shows, never with one dropped as stale', async () => {
+  const r = rig();
+  const slow = deferred();
+  r.owner.prepareWith.push(slow.promise);
+  r.sheet.open('topUp', SEED);
+  // a change overtakes the first ask: its answer, when it lands, is dropped
+  r.sheet.change('usd', '700');
+  await r.timers.advance(PREPARE_QUIET_MS);
+  assert.equal(r.prepared.length, 1, 'the newer ask landed');
+  const [kind, shown, draft] = r.prepared[0];
+  assert.equal(kind, 'topUp');
+  assert.equal(shown, r.s().prepared, 'the preparation the sheet shows');
+  assert.deepEqual(draft, { ...DRAFT, usd: '700' }, 'with the draft it was asked for');
+  slow.resolve({ status: 200, body: { ...watch(), action: { ...DRAFT, nonce: 1 }, shown: [] } });
+  await settle();
+  assert.equal(r.prepared.length, 1, 'the stale one is never handed on');
+  assert.equal(r.s().prepared, shown);
+  // a refusal and an incomplete form hand nothing on; a sheet closed drops its answer
+  r.owner.prepareWith.push(BAD);
+  await r.sheet.again();
+  r.sheet.change('usd', '');
+  await r.timers.advance(PREPARE_QUIET_MS);
+  const late = deferred();
+  r.owner.prepareWith.push(late.promise);
+  r.sheet.open('topUp', SEED);
+  r.sheet.close();
+  late.resolve({ status: 200, body: { ...watch(), action: { ...DRAFT, nonce: 2 }, shown: [] } });
+  await settle();
+  assert.equal(r.prepared.length, 1);
+});
+
+test('a throwing onPrepared leaves the preparation shown', async () => {
+  const clock = { t: START };
+  const store = createStore({ initial: emptyState(), reducers });
+  const timers = fakeTimers(clock);
+  const sheet = startSheet({ store, owner: fakeOwner(clock), schedule: timers.schedule, cancelTimer: timers.cancelTimer, now: () => clock.t, afterAction: () => {}, onPrepared: () => { throw new Error('boom'); } });
+  const got = await sheet.open('topUp', SEED);
+  assert.equal(store.get().sheet.status, 'ready');
+  assert.equal(got, store.get().sheet.prepared);
 });

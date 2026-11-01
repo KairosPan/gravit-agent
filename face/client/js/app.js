@@ -33,12 +33,13 @@ import { wantedViews, ensureViews, minuteAt, applyCursor, cursorFor, reapplyCurs
 import { stockDrawerHtml, askText } from './render/lunhui/stock.js';
 import { loadMemberTrace } from './wire/member-traces.js';
 import { isHostPreset } from './wire/speaker.js';
-import { statementLinesOf, statementCsvOf, connectOptionsOf, asksOf, pageOk } from './host/account-view.js';
+import { statementLinesOf, statementCsvOf, connectOptionsOf, asksOf, pageOk, writesOn } from './host/account-view.js';
 import { rulesOf } from './host/rules-view.js';
 import { isAccountKey, handWordsOf, watchedOf } from './host/market-view.js';
 import { isCnKey } from './wire/china.js';
 import { startOwner, postVia } from './host/owner.js';
 import { startSheet, PREPARE_QUIET_MS } from './host/sheet.js';
+import { moveSeedOf } from './host/sheet-money.js';
 import { limitSeedOf, grantOf, keyfileAskOf, reachAskOf, letDeviceSeedOf, paperSeedOf } from './host/sheet-view.js';
 import { startTrade } from './host/trade.js';
 import { tradeableOf } from './host/trade-view.js';
@@ -294,7 +295,12 @@ export function boot(win, host = {}) {
     });
   }
   // the owner sheet (prepare → What you sign → sign) over the owner device
-  const sheet = startSheet({ store, owner, schedule, cancelTimer, now, afterAction, onChange: kind => { if (kind === 'connect') checkConnectSoon(); } });
+  // a bridge's preparation, once it is the one the sheet shows, has its routes read beside it (the Account page's money.js show)
+  const sheet = startSheet({
+    store, owner, schedule, cancelTimer, now, afterAction,
+    onChange: kind => { if (kind === 'connect') checkConnectSoon(); },
+    onPrepared: (kind, prepared, draft) => { if (kind === 'move' && prepared?.action?.kind === 'bridge') void account.bridgeRoutes(draft); },
+  });
   // a receipt reloads the Account's page past the cache, and one from the Account seat (every receipt the kind table
   // lifts today) the seat's standing too
   const live = startLive({ store, openMux: host.openMux ?? wireOpenMux, call, mapFrame, getJson, timers, now, onReceipt: m => { if (m?.data?.seat) void seat.load({ fresh: true }); void account.load({ fresh: true }); } });
@@ -708,6 +714,8 @@ export function boot(win, host = {}) {
         limitPrice: d.limitPrice ?? '', stopPrice: d.stopPrice ?? '', side: d.side ?? '', base: d.base ?? '',
       }); break;
       case 'leverage': void sheet.open('leverage', { venue: d.venue ?? '', venueName: d.venueName ?? '', symbol: d.symbol ?? '', name: d.name ?? '', leverage: d.leverage ?? '', maxLeverage: d.maxLeverage ?? '', marginModes: d.marginModes ?? '' }); break;
+      // the Money tab's Move… (plan 4b Task 2): the page's sources as they stand, from the one pressed
+      case 'move': if (writesOn(page)) void sheet.open('move', moveSeedOf(page, { from: d.from ?? '', to: d.to ?? '', kind: d.moveKind ?? '', amount: d.amount ?? '' })); break;
       // the Rules tab's (plan 4a Task 5): each seeded from the page as it stands — the cap now, whether the session ended, their
       // leverage now; the three limits only for an Account that takes writes
       // Beast only while it is not in force: a signature that changes nothing is never asked
@@ -911,6 +919,11 @@ export function boot(win, host = {}) {
     },
     // the owner's keys on Account: each its sheet; Revoke… and Disconnect… ask in place first; Grant the sheet that grants the ask
     openSheet: el => openSheetFrom(el),
+    // the Money tab's Show address (a read, on any page that reads the Account) and Copy
+    showAddress: el => { void account.receive({ venue: el.dataset.venue, asset: el.dataset.asset, network: el.dataset.network }); },
+    copyText: el => {
+      try { void Promise.resolve(win.navigator?.clipboard?.writeText?.(el.dataset.text ?? '')).catch(() => {}); } catch { /* no clipboard here */ }
+    },
     // the Rules tab's Guard: one unsigned click, on any page that reads the Account (one in the air at a time)
     setGuard: () => { if (pageOk(store.get().account.data)) void account.guard(); },
     askRevoke: el => { if (signs()) store.dispatch('askConfirm', { action: 'revoke', name: el.dataset.name ?? '', address: el.dataset.address ?? '' }); },

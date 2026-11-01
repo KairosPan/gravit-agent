@@ -217,10 +217,45 @@ export function startAccount({ store, getJson, post = noDoor, now = Date.now, sc
     return current;
   }
 
+  // ── the Money tab (plan 4b Task 2) ──
+
+  /** A Receive row's address (`/data/account/receive?venue=&asset=&network=`), the Account's answer landing under the row's key
+   *  (`<venue>|<asset>|<network>`) in `account.receive` — the address, its memo, whose it is and the Account's note, or its
+   *  refusal in its words. One read per key: a second press while one is in the air joins it. */
+  function receive({ venue, asset, network } = {}) {
+    const q = { venue: str(venue), asset: str(asset), network: str(network) };
+    if (!q.venue || !q.asset || !q.network) return Promise.resolve();
+    const key = `${q.venue}|${q.asset}|${q.network}`;
+    return fly(`receive:${key}`, `/data/account/receive?${new URLSearchParams(q).toString()}`, {
+      loading: 'receiveLoading', asking: key,
+      land: (body, refused) => {
+        if (!refused && body?.ok === true) store.dispatch('receiveLoaded', { key, data: body, at: now() });
+        else store.dispatch('receiveFailed', { key, at: now(), message: messageOf(body) });
+      },
+    });
+  }
+
+  /** A bridge's routes (`POST /data/account/bridge-routes`, `{ draft }`), read after its preparation lands, beside the quote the
+   *  Account signs for: the chosen one first. Only the latest ask lands in `account.routes` — `asked` the draft it was asked
+   *  for, as the sheet's own `asked` reads, so the sheet draws them only beside that preparation. A failure is said, and stops
+   *  nothing. `post` is the owner door's (`{ status, body }`, never throwing). */
+  let routesSeq = 0;
+  async function bridgeRoutes(draft) {
+    if (closed || draft === null || typeof draft !== 'object') return;
+    const mine = ++routesSeq;
+    const asked = JSON.stringify(draft);
+    store.dispatch('routesAsking', asked);
+    let r;
+    try { r = await post('/data/account/bridge-routes', { draft }); } catch { r = { status: 0, body: {} }; }
+    if (closed || mine !== routesSeq) return;
+    if (r?.status >= 200 && r.status < 300 && !refusedAt(r) && Array.isArray(r.body?.routes)) store.dispatch('routesLanded', { asked, data: r.body });
+    else store.dispatch('routesFailed', { asked, message: messageOf(r?.body) });
+  }
+
   function close() {
     closed = true;
     poll(false);
   }
 
-  return { load, guard, loadHoldings, loadHistory, loadStatement, loadAgents, loadAll, loadVenuesHere, loadPaperBooks, checkKeyfile, reach, poll, onStreamEvent, close };
+  return { load, guard, receive, bridgeRoutes, loadHoldings, loadHistory, loadStatement, loadAgents, loadAll, loadVenuesHere, loadPaperBooks, checkKeyfile, reach, poll, onStreamEvent, close };
 }

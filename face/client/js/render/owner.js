@@ -9,6 +9,7 @@ import { pageOk } from '../host/account-view.js';
 import { standingWords, devicesOf, whatYouSignLines, goodForWords } from '../host/owner-view.js';
 import { titleOf, goWord, connectCheckOf } from '../host/sheet-view.js';
 import { askedOf } from '../host/sheet.js';
+import { moveHintsOf, routesWordsOf } from '../host/sheet-money.js';
 import { seg } from './controls.js';
 
 const note = text => `<p class="acct-note">${esc(text)}</p>`;
@@ -71,7 +72,7 @@ function field(f) {
       // a value no option has (nothing picked yet) is an empty option the box shows, never the first option it would not send
       const known = options.some(o => o.value === f.value);
       const items = (known ? '' : '<option value="" selected disabled></option>') +
-        options.map(o => `<option${attrs({ value: o.value, selected: o.value === f.value })}>${esc(o.label)}</option>`).join('');
+        options.map(o => `<option${attrs({ value: o.value, selected: o.value === f.value, disabled: o.disabled === true })}>${esc(o.label)}</option>`).join('');
       return `<label class="field"><span class="field-label">${label}</span><select${attrs({ class: 'input', name: f.name, 'data-action': 'sheetField' })}>${items}</select></label>`;
     }
     default:
@@ -99,7 +100,7 @@ function quoteBox(s) {
 export function renderSheet(state, now) {
   const s = state.sheet;
   if (!s) return '';
-  const title = titleOf(s.kind, s.seed);
+  const title = titleOf(s.kind, s.seed, s.fields);
   const fields = (Array.isArray(s.fields) ? s.fields : []).filter(f => f && typeof f.name === 'string').map(field).join('');
   const current = s.asked !== null && askedOf(s) === s.asked;
   const live = s.status === 'ready' && current;
@@ -113,7 +114,12 @@ export function renderSheet(state, now) {
   // connects there — the Account's words, a key file by its path, never what it holds
   const checked = s.kind === 'connect' ? connectCheckOf(s, state.account?.keyfile, state.account?.reach) : '';
   const check = checked ? `<p class="sheet-hint">${esc(checked)}</p>` : '';
+  // a move's lines under its fields (the cap on each move, where it would go that is not served here), and a bridge's routes
+  // under the quote, beside the preparation they were read for (plan 4b Task 2)
+  const hints = moveHintsOf(s).map(h => `<p class="sheet-hint">${esc(h)}</p>`).join('');
+  const r = routesWordsOf(s, state.account?.routes);
+  const routes = r ? `<p class="sheet-hint sheet-routes">${r.lead.startsWith('Via ') ? `<b>${esc(r.lead)}</b>` : esc(r.lead)}${r.others ? `<br>${esc(r.others)}` : ''}</p>` : '';
   const keys = `<div class="btn-row">${key('sheetClose', 'Cancel')}<button${attrs({ type: 'button', class: 'btn-primary', 'data-action': 'sheetSubmit', disabled: !live })}>${esc(goWord(s.kind, s.seed))}</button></div>`;
   return `<aside${attrs({ class: 'drawer sheet', 'aria-label': title })}><div class="drawer-head"><h2>${esc(title)}</h2><button type="button" class="close-key" data-action="sheetClose" aria-label="Close">×</button></div>` +
-    `<div class="drawer-body">${fields}${check}${quoteBox(s)}${left ? `<p class="sheet-left">${esc(left)}</p>` : ''}${signs}${said}${keys}</div></aside>`;
+    `<div class="drawer-body">${fields}${check}${hints}${quoteBox(s)}${routes}${left ? `<p class="sheet-left">${esc(left)}</p>` : ''}${signs}${said}${keys}</div></aside>`;
 }

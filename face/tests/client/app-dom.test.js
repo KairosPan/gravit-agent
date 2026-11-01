@@ -2789,3 +2789,46 @@ test('Guard said, then Beast signed: the said line goes with Guard, and Beast in
   assert.equal(door.sent('/data/account/prepare').length, prepares);
   store.timers.clear();
 });
+
+// ── the Money tab (plan 4b Task 2) ──
+
+test('the Money tab: Show address reads the row and draws it; Move… opens the move sheet, its fields follow the kind, and a bridge reads its routes', async () => {
+  const f = fakeWindow({ hash: '#/account/money', storage: memoryStorage() });
+  const mm = { id: 'wallet-mm', name: 'My wallet', live: true, watchOnly: 'Live · read-only', address: '0x' + '11'.repeat(20), proven: 'signed by its wallet', liveCan: { withdraw: false, ledgers: [], transfer: false, swap: false, receive: true, send: 'wallet' }, holdings: [] };
+  const door = ownerDoor();
+  const page = () => { const p = door.page(); return { ...p, venues: [...p.venues, mm] }; };
+  const post = async (path, body) => {
+    if (path === '/data/account/bridge-routes') { door.posts.push([path, body]); return { status: 200, body: { ok: true, routes: [{ tool: 'across', receiveUsd: 9.9, etaSec: 20, feeUsd: 0.1 }] } }; }
+    return door.post(path, body);
+  };
+  const address = { ok: true, venue: 'agent-claude-code', asset: 'USDC', network: 'Base', address: '0x7f89224D3Ad6cACd933242ba0c07e1187e3467C2', whose: "the agent wallet's own address" };
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': page, '/data/account/receive': () => address } });
+  const store = bootAccount(f, h, fakeMarkets(), { ownerPost: post });
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  assert.match(f.html(), /data-action="showAddress" data-venue="agent-claude-code" data-asset="USDC" data-network="Base">Show address<\/button>/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'showAddress', venue: 'agent-claude-code', asset: 'USDC', network: 'Base' } });
+  await until(() => store.get().account.receive['agent-claude-code|USDC|Base']?.status === 'ready', 'the address');
+  assert.ok(h.reads.includes('/data/account/receive?venue=agent-claude-code&asset=USDC&network=Base'));
+  assert.match(f.html(), /<span class="mono">0x7f89224D3Ad6cACd933242ba0c07e1187e3467C2<\/span>/);
+  // Move… from the exchange: a withdrawal first; the kind changed to a swap drops its destination and network
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'move', from: 'ex' } });
+  await settle();
+  assert.equal(store.get().sheet.kind, 'move');
+  assert.deepEqual(store.get().sheet.fields.map(x => x.name), ['from', 'kind', 'to', 'network', 'asset', 'amount']);
+  f.fire('root', 'change', { target: { tagName: 'SELECT', name: 'kind', value: 'swap', dataset: { action: 'sheetField' } } });
+  assert.deepEqual(store.get().sheet.fields.map(x => x.name), ['from', 'kind', 'asset', 'toAsset', 'amount']);
+  f.fire('root', 'input', { target: { tagName: 'INPUT', type: 'text', name: 'amount', value: '10', dataset: { action: 'sheetField' } } });
+  await until(() => store.get().sheet?.status === 'ready', 'the preparation');
+  const swap = door.sent('/data/account/prepare').at(-1).draft;
+  assert.deepEqual([swap.type, swap.kind, swap.from, swap.to, swap.network, swap.amount], ['liveMove', 'swap', 'ex', 'ex', '', '10']);
+  assert.equal(door.sent('/data/account/bridge-routes').length, 0, 'a swap reads no routes');
+  // a bridge from the proven wallet: its routes read after its preparation lands, and drawn beside it
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'move', from: 'wallet-mm', moveKind: 'bridge', amount: '10' } });
+  await until(() => door.sent('/data/account/bridge-routes').length === 1, 'the routes');
+  assert.equal(door.sent('/data/account/bridge-routes')[0].draft.kind, 'bridge');
+  await until(() => /Via across/.test(f.html()), 'the routes drawn');
+  assert.match(f.html(), /<b>Via across · at least \$9\.90 USDC arrives · ~20 s<\/b>/);
+  store.timers.clear();
+});

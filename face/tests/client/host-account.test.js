@@ -742,3 +742,67 @@ test('a refused guard says the refusal and leaves the mode drawn as the page has
   await r2.account.guard();
   assert.equal(r2.a().guard.message, 'The account did not answer. Try again.');
 });
+
+// ── the Money tab (plan 4b Task 2) ──
+
+const ADDRESS = { ok: true, venue: 'okx', venueName: 'OKX', asset: 'USDT', network: 'Base', address: '0x2222222222222222222222222222222222222222', tag: '1234', whose: "OKX's own deposit address", note: 'checked a minute ago' };
+
+test('receive reads one row once while it is in the air', async () => {
+  let release;
+  const r = rig({ json: { '/data/account/receive': () => new Promise(res => { release = res; }) } });
+  const row = { venue: 'okx', asset: 'USDT', network: 'Base' };
+  const first = r.account.receive(row);
+  assert.equal(r.account.receive({ ...row }), first, 'a second press joins the read in the air');
+  await settle();
+  assert.equal(r.account.receive({ ...row }), first, 'and a third, still in the air');
+  await settle();
+  assert.deepEqual(r.reads, ['/data/account/receive?venue=okx&asset=USDT&network=Base']);
+  assert.equal(r.a().receive['okx|USDT|Base'].status, 'loading');
+  release(ADDRESS);
+  await first;
+  assert.deepEqual(r.a().receive['okx|USDT|Base'], { status: 'ready', data: ADDRESS, at: r.a().receive['okx|USDT|Base'].at, message: null });
+  // another row is its own read
+  void r.account.receive({ venue: 'okx', asset: 'USDC', network: 'Base' });
+  await settle();
+  assert.equal(r.reads.length, 2);
+  release({ ...ADDRESS, asset: 'USDC' });
+  await settle();
+  assert.equal(r.a().receive['okx|USDC|Base'].data.asset, 'USDC');
+  assert.equal(r.a().receive['okx|USDT|Base'].data.asset, 'USDT', 'each row under its own key');
+  // a row with a part missing reads nothing
+  await r.account.receive({ venue: 'okx', asset: '', network: 'Base' });
+  assert.equal(r.reads.length, 2);
+});
+
+test("a refused receive lands the Account's words under its row", async () => {
+  const refusal = { ok: false, refusal: { ok: false, code: 'E_LIVE_NO_DEPOSIT', layer: 'live', message: 'OKX gives no USDT address on Robinhood Chain' } };
+  const r = rig({ json: { '/data/account/receive': rejected('/data/account/receive', 409, refusal) } });
+  await r.account.receive({ venue: 'okx', asset: 'USDT', network: 'Robinhood Chain' });
+  const got = r.a().receive['okx|USDT|Robinhood Chain'];
+  assert.equal(got.status, 'error');
+  assert.equal(got.message, 'OKX gives no USDT address on Robinhood Chain');
+});
+
+test('bridgeRoutes lands only for the latest preparation', async () => {
+  const answers = [];
+  const posted = [];
+  const post = (path, body) => { posted.push([path, body]); return new Promise(res => answers.push(res)); };
+  const r = rig({ post });
+  const one = { type: 'liveMove', kind: 'bridge', from: 'w', amount: '10' };
+  const two = { ...one, amount: '20' };
+  const a = r.account.bridgeRoutes(one);
+  assert.deepEqual(r.a().routes, { asked: JSON.stringify(one), status: 'asking', data: null, message: null });
+  const b = r.account.bridgeRoutes(two);
+  assert.deepEqual(posted, [['/data/account/bridge-routes', { draft: one }], ['/data/account/bridge-routes', { draft: two }]]);
+  answers[1]({ status: 200, body: { ok: true, routes: [{ tool: 'across' }] } });
+  await b;
+  answers[0]({ status: 200, body: { ok: true, routes: [{ tool: 'stale' }] } });
+  await a;
+  assert.equal(r.a().routes.asked, JSON.stringify(two));
+  assert.deepEqual(r.a().routes.data.routes, [{ tool: 'across' }], 'the older answer is dropped');
+  // a refusal is the Account's words
+  const c = r.account.bridgeRoutes(one);
+  answers[2]({ status: 409, body: { ok: false, refusal: { message: 'no bridge joins these chains' } } });
+  await c;
+  assert.deepEqual(r.a().routes, { asked: JSON.stringify(one), status: 'error', data: null, message: 'no bridge joins these chains' });
+});

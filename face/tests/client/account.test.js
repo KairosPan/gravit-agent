@@ -46,13 +46,13 @@ function state({ tab = 'portfolio', page = fx('account'), holdings = fx('holding
 const draw = s => renderAccountScreen(s, NOW);
 const SEAT_BOX = /<section class="cardbox" aria-label="Account seat">[\s\S]*?<\/section>/;
 
-test('the head: Guard and Trading on chips; Refresh and Settings; five tabs with the cards count', () => {
+test('the head: Guard and Trading on chips; Refresh and Settings; six tabs with the cards count', () => {
   const html = draw(state());
   assert.match(html, /^<main class="main acct">/);
   has(html, '<div class="acct-head"><h1 class="head-title">Account</h1><span class="chip grey">Guard</span><span class="chip grey">Trading on · $250 a move</span><span class="spacer"></span>' +
     '<button type="button" class="pill" data-action="refreshAccount">Refresh</button><button type="button" class="pill" data-action="openSettings">Settings</button></div>');
-  has(html, '<div class="seg"><a class="seg-item pressed" aria-current="page" href="#/account/portfolio">Portfolio</a><a class="seg-item" href="#/account/venues">Venues</a>' +
-    '<a class="seg-item" href="#/account/agents">Agents</a><a class="seg-item" href="#/account/cards">Cards · 1</a><a class="seg-item" href="#/account/rules">Rules</a></div>', 'the five tabs, the Cards tab counting its one card');
+  has(html, '<div class="seg"><a class="seg-item pressed" aria-current="page" href="#/account/portfolio">Portfolio</a><a class="seg-item" href="#/account/money">Money</a><a class="seg-item" href="#/account/venues">Venues</a>' +
+    '<a class="seg-item" href="#/account/agents">Agents</a><a class="seg-item" href="#/account/cards">Cards · 1</a><a class="seg-item" href="#/account/rules">Rules</a></div>', 'the six tabs, the Cards tab counting its one card');
   const page = fx('account');
   assert.match(draw(state({ page: { ...page, cards: [] } })), /href="#\/account\/cards">Cards<\/a>/, 'no count with nothing waiting');
   const two = draw(state({ page: { ...page, cards: [page.cards[0], { ...page.cards[0], id: 'card-0002', agent: '0xb0b', agentName: 'Scout' }] } }));
@@ -664,4 +664,106 @@ test("a Leverage key carries the most and the modes the market's read says; a Ch
   const order = { id: 'ord-0004', venue: 'ex', type: 'stop', kind: 'spot', qty: 0.6, stopPrice: 137.83, side: 'sell', base: 'SOL' };
   assert.match(changeKey(order, page), /Change…/);
   for (const flag of ['waitingForWallet', 'canceling', 'unfollowed', 'changing', 'unconfirmed']) assert.equal(changeKey({ ...order, [flag]: true }, page), '', flag);
+});
+
+// ── Money (plan 4b Task 2) ──
+
+const MONEY_KID = 'a5048199a8081854';
+const moneySigns = s => R.ownerStanding(s, { role: 'signs', kid: MONEY_KID });
+const MONEY_BOX = name => new RegExp(`<section class="cardbox" aria-label="${name}">[\\s\\S]*?</section>`);
+// the stand-in's page with one payment waiting for the operator's wallet
+function walletPage() {
+  const p = fx('account');
+  p.payments = [{ ...p.payments[0], id: 'pay-0009', status: 'authorized', at: '2026-10-22T07:30:00.000Z', legs: [{ ...(p.payments[0].legs?.[0] ?? {}), native: { walletTx: { from: '0x1', to: '0x2', data: '0x', value: '0x0', chainIdHex: '0x2105' } } }] }];
+  return p;
+}
+
+test('the Money tab on a writes-on page that signs: Receive rows with Show address, Move… per source, the payments waiting for the wallet', () => {
+  assert.deepEqual(parseHash('#/account/money'), { screen: 'account', tab: 'money' });
+  assert.equal(toHash({ screen: 'account', tab: 'money' }), '#/account/money');
+  const html = draw(moneySigns(state({ tab: 'money', page: walletPage() })));
+  has(html, '<a class="seg-item pressed" aria-current="page" href="#/account/money">Money</a>');
+  const receive = html.match(MONEY_BOX('Receive'))?.[0] ?? '';
+  has(receive, 'Agent wallet · Claude Code · All EVM networks: Base, Arbitrum, Optimism, Polygon, Ethereum, BNB Chain, Robinhood Chain', 'the wallet over every EVM network');
+  has(receive, 'data-action="showAddress" data-venue="agent-claude-code" data-asset="USDC" data-network="Base">Show address</button>');
+  lacks(receive, 'Stand-in Exchange', 'the stand-in exchange gives no address');
+  const move = html.match(MONEY_BOX('Move'))?.[0] ?? '';
+  has(move, 'data-action="openSheet" data-kind="move" data-from="ex">Move…</button>');
+  has(move, 'data-action="openSheet" data-kind="move" data-from="agent-claude-code">Move…</button>', 'an agent wallet, for Take back');
+  has(move, '<span class="chip grey">Agent wallet</span>');
+  const waiting = html.match(MONEY_BOX('Waiting for your wallet'))?.[0] ?? '';
+  has(waiting, 'Waiting for your wallet · pay-0009');
+  has(waiting, 'data-action="sendFromWallet" data-payment="pay-0009">Send from wallet…</button>');
+  // a page that does not sign: Receive only (Show address is a read), no Move, no wallet key
+  const looks = draw(state({ tab: 'money', page: walletPage() }));
+  has(looks, 'data-action="showAddress"');
+  lacks(looks, 'aria-label="Move"');
+  lacks(looks, 'data-action="sendFromWallet"');
+  has(looks, 'Waiting for your wallet · pay-0009', 'the payment is said; only a page that signs sends it');
+});
+
+test('the Money tab on a read-only page says Move moves no money', () => {
+  const p = fx('account');
+  p.connectLive.writes.on = false;
+  const html = draw(moneySigns(state({ tab: 'money', page: p })));
+  const move = html.match(MONEY_BOX('Move'))?.[0] ?? '';
+  has(move, 'Read-only: the Account was started without trading, so it moves no money.');
+  lacks(move, 'data-kind="move"');
+  // an unread page: its note, nothing else
+  has(draw(state({ tab: 'money', page: { ok: true } })), 'Account unreadable');
+  // no account receives: the page's words
+  const none = fx('account');
+  none.venues = none.venues.filter(v => v.id !== 'agent-claude-code');
+  has(draw(moneySigns(state({ tab: 'money', page: none }))), 'None of your accounts gives an address to send to from here.');
+});
+
+test('Show address: asking, then the address, its memo, whose it is and the note, with Copy; a refusal in its words', () => {
+  const key = 'agent-claude-code|USDC|Base';
+  let s = moneySigns(state({ tab: 'money' }));
+  s = R.receiveLoading(s, key);
+  has(draw(s), 'Asking Agent wallet · Claude Code…');
+  has(draw(s), 'data-action="showAddress" data-venue="agent-claude-code" data-asset="USDC" data-network="Base" disabled>Show address</button>', 'held while asked');
+  const address = '0x7f89224D3Ad6cACd933242ba0c07e1187e3467C2';
+  s = R.receiveLoaded(s, { key, at: NOW, data: { ok: true, address, tag: '889', whose: 'the agent wallet this account holds the key of', note: 'any EVM network' } });
+  const html = draw(s);
+  has(html, `<span class="mono">${address}</span>`);
+  has(html, '<span class="mono">Memo 889</span>');
+  has(html, 'The agent wallet this account holds the key of · any EVM network.');
+  has(html, `data-action="copyText" data-text="${address}">Copy</button>`);
+  lacks(html, 'Show address</button>', 'the row read shows its address');
+  const refused = R.receiveFailed(moneySigns(state({ tab: 'money' })), { key, at: NOW, message: 'the wallet gives no address on Robinhood Chain' });
+  has(draw(refused), 'the wallet gives no address on Robinhood Chain');
+});
+
+test("the bridge's routes line: under the quote for the preparation shown, finding, then the chosen and the others", async () => {
+  const { renderSheet } = await import('../../client/js/render/owner.js');
+  const { moveSeedOf } = await import('../../client/js/host/sheet-money.js');
+  const { fieldsOf, draftOf } = await import('../../client/js/host/sheet-view.js');
+  const p = fx('account');
+  p.venues.push({ id: 'wallet-mm', name: 'My wallet', live: true, watchOnly: 'Live · read-only', address: '0x1111111111111111111111111111111111111111', proven: 'signed by its wallet', liveCan: { withdraw: false, ledgers: [], transfer: false, swap: false, receive: true, send: 'wallet' }, holdings: [{ asset: 'USDC', amount: 80, usd: 80, class: 'stable', note: 'Base' }] });
+  const seed = moveSeedOf(p, { from: 'wallet-mm', kind: 'bridge', amount: '20' });
+  const fields = fieldsOf('move', seed);
+  const draft = draftOf('move', fields, seed, NOW);
+  const asked = JSON.stringify(draft);
+  let s = moneySigns(state({ tab: 'money', page: p }));
+  s = R.sheetOpen(s, { kind: 'move', seed, fields });
+  s = R.sheetPrepared(s, { prepared: { action: { ...draft, maxFee: '0.4', toAddress: '0x1111' }, shown: [{ name: 'amount', value: '20' }] }, at: NOW, asked, deadline: null });
+  let html = renderSheet(s, NOW);
+  has(html, '<h2>Move money · My wallet</h2>');
+  has(html, '<p class="sheet-hint">Only to your own accounts. Up to $250.00 a move.</p>');
+  has(html, 'Sign and move</button>');
+  s = R.routesAsking(s, asked);
+  has(renderSheet(s, NOW), '<p class="sheet-hint sheet-routes">Finding the routes…</p>');
+  s = R.routesLanded(s, { asked, data: { ok: true, routes: [{ tool: 'across', receiveUsd: 19.8, etaSec: 30, gasUsd: 0.02, feeUsd: 0.2 }, { tool: 'relay', receiveUsd: 19.7, etaSec: 120, feeUsd: 0.3 }] } });
+  html = renderSheet(s, NOW);
+  has(html, '<p class="sheet-hint sheet-routes"><b>Via across · at least $19.80 USDC arrives · ~30 s · network fee about $0.02 in your wallet</b><br>Other routes: relay fee $0.30, ~2 min</p>');
+  // routes read for another preparation: still finding this one's
+  has(renderSheet(R.routesLanded(s, { asked: '{}', data: { ok: true, routes: [] } }), NOW), 'Finding the routes…');
+  has(renderSheet(R.routesFailed(s, { asked, message: 'no bridge joins these chains' }), NOW), '<p class="sheet-hint sheet-routes">no bridge joins these chains</p>');
+  // a withdrawal's sheet has no routes line
+  const w = moveSeedOf(p, { from: 'ex', amount: '5' });
+  const wf = fieldsOf('move', w);
+  let t = R.sheetOpen(moneySigns(state({ page: p })), { kind: 'move', seed: w, fields: wf });
+  t = R.sheetPrepared(t, { prepared: { action: draftOf('move', wf, w, NOW), shown: [] }, at: NOW, asked: JSON.stringify(draftOf('move', wf, w, NOW)), deadline: null });
+  lacks(renderSheet(t, NOW), 'sheet-routes');
 });

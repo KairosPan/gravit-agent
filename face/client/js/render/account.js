@@ -1,6 +1,8 @@
 // face/client/js/render/account.js — Account on the face (spec 2026-10-22 §6.2): the Account's own page and reads through
-// the face's proxy, in five tabs — Portfolio (the two figures, the change for the range and its curve, Assets, Positions,
-// Open orders), Venues (each venue with its health and what it does, its Details drawer; the A-share quotes line; the seat
+// the face's proxy, in six tabs — Portfolio (the two figures, the change for the range and its curve, Assets, Positions,
+// Open orders), Money (plan 4b Task 2: Receive, an address per account and network on a press; Move, the move sheet from each
+// account money moves from, on a page that signs for an Account that takes writes; the payments waiting for the operator's
+// wallet), Venues (each venue with its health and what it does, its Details drawer; the A-share quotes line; the seat
 // box), Agents (Gravit's seat first, then the Account's agents and the keys knocking), Cards (what waits for the owner, and
 // the agents' asks), Rules (plan 4a Task 5: the mode with its door-by-door rules, the cap on each move, the agents' session and
 // their leverage; Guard one unsigned click, the rest signed, their keys only on a page that signs) — the Statement drawer, the Settings drawer with Devices; the owner device's line under
@@ -19,6 +21,9 @@ import {
 } from '../host/account-view.js';
 import { amendSeedOf, closeSeedOf, leverageSeedOf } from '../host/sheet-market.js';
 import { rulesOf } from '../host/rules-view.js';
+import { receiveRowsOf, receiveNetworkWords, moveSourcesOf } from '../host/money-view.js';
+import { underWayOf } from '../host/trade-view.js';
+import { walletRow } from './trade.js';
 import { providerWord } from '../host/market-view.js';
 import { chip } from './thread.js';
 import { seg, segLinks, sec, confirmPair } from './controls.js';
@@ -26,7 +31,7 @@ import { grantOf } from '../host/sheet-view.js';
 import { curveSvg } from './chart.js';
 import { renderDeviceLine, renderDevices } from './owner.js';
 
-const TABS = [['portfolio', 'Portfolio'], ['venues', 'Venues'], ['agents', 'Agents'], ['cards', 'Cards'], ['rules', 'Rules']];
+const TABS = [['portfolio', 'Portfolio'], ['money', 'Money'], ['venues', 'Venues'], ['agents', 'Agents'], ['cards', 'Cards'], ['rules', 'Rules']];
 // the curve's ranges, the Account's own names and their words
 const RANGES = [['1d', '1D'], ['1w', '1W'], ['1m', '1M'], ['all', 'All']];
 // a venue's Details facts, each under its label
@@ -385,6 +390,61 @@ function rulesTab(state, now) {
   return `<div class="cards">${mode}${box(`<div class="venues">${cap}${session}${leverage}</div>`, 'Limits')}</div>`;
 }
 
+// ── Money (plan 4b Task 2) ──
+
+const NO_RECEIVE = 'None of your accounts gives an address to send to from here. Connect a wallet you prove is yours, or an exchange whose key reads deposit addresses.';
+const NO_SOURCE = 'None of your accounts can send money from here: connect one whose key may withdraw, or a wallet you prove is yours.';
+const MOVE_READ_ONLY = 'Read-only: the Account was started without trading, so it moves no money.';
+const capFirst = s => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '');
+
+// a Receive row: the account and its network words (an exchange's asset chip beside them), Show address, and once read, the
+// address, its memo where there is one, whose it is with the Account's note, and Copy — or the Account's refusal in its words
+function receiveRow(row, receive) {
+  const key = `${row.venue}|${row.asset}|${row.network}`;
+  const read = receive && Object.hasOwn(receive, key) ? receive[key] : null;
+  const head = `<b>${esc(`${row.venueName} · ${receiveNetworkWords(row)}`)}</b>${row.chip ? ` ${chip(row.asset)}` : ''}`;
+  const ask = `<button${attrs({ type: 'button', class: 'btn-sm', 'data-action': 'showAddress', 'data-venue': row.venue, 'data-asset': row.asset, 'data-network': row.network, disabled: read?.status === 'loading' })}>Show address</button>`;
+  let body = '';
+  if (read?.status === 'loading') body = `<br><span class="dim">${esc(`Asking ${row.venueName}…`)}</span>`;
+  else if (read?.status === 'error') body = `<br><span class="dim">${esc(read.message || 'No answer.')}</span>`;
+  if (read?.data && read.status !== 'error') {
+    const d = read.data;
+    const whose = [capFirst(typeof d.whose === 'string' ? d.whose : ''), typeof d.note === 'string' ? d.note : ''].filter(Boolean).join(' · ');
+    body += `<br><span class="mono">${esc(String(d.address ?? ''))}</span>` +
+      `${typeof d.tag === 'string' && d.tag ? `<br><span class="mono">${esc(`Memo ${d.tag}`)}</span>` : ''}` +
+      `${whose ? `<br><span class="dim">${esc(`${whose}.`)}</span>` : ''}`;
+    const copy = `<button${attrs({ type: 'button', class: 'btn-sm', 'data-action': 'copyText', 'data-text': String(d.address ?? '') })}>Copy</button>`;
+    return `<div class="venue"><span>${head}${body}</span><span class="btn-row">${copy}</span></div>`;
+  }
+  return `<div class="venue"><span>${head}${body}</span><span class="btn-row">${ask}</span></div>`;
+}
+
+// a source of Move: its name and what it holds, and Move… (the move sheet from it)
+function moveRow(src) {
+  const key = sheetKey('move', { 'data-from': src.id }, 'Move…');
+  return `<div class="venue"><span>${lines(src.name, [src.usd === null ? '' : money(src.usd)], src.agent ? 'Agent wallet' : '')}</span><span class="btn-row">${key}</span></div>`;
+}
+
+function moneyTab(state) {
+  const a = state.account;
+  const unread = pageNote(a);
+  if (unread !== null) return unread;
+  const owner = signs(state);
+  const rows = receiveRowsOf(a.data);
+  const receive = box(`${title('Receive')}${rows.length ? `${note('Send only the asset on the network the row names: anything else may not arrive.')}<div class="venues">${rows.map(r => receiveRow(r, a.receive)).join('')}</div>` : note(NO_RECEIVE)}`, 'Receive');
+  let move = '';
+  if (!writesOn(a.data)) move = box(`${title('Move')}${note(MOVE_READ_ONLY)}`, 'Move');
+  else if (owner) {
+    const sources = moveSourcesOf(a.data);
+    move = box(`${title('Move')}${sources.length ? `<div class="venues">${sources.map(moveRow).join('')}</div>` : note(NO_SOURCE)}`, 'Move');
+  }
+  // the payments the Account built for the operator's own wallet (plan 4b Task 1), as Trade's Under way draws them
+  const waiting = underWayOf(a.data).filter(o => o.payment)
+    .map(o => walletRow(o.words, o.payment, o.key, { 'data-payment': o.payment }, o.walletReported, a.wallet, owner, ''));
+  const wallet = waiting.length ? box(`${title('Waiting for your wallet')}<div class="mk-wrap"><table class="mk-t tk-t"><tbody>${waiting.join('')}</tbody></table></div>`, 'Waiting for your wallet') : '';
+  return `<div class="cards">${receive}${move}${wallet}</div>`;
+}
+
 // ── the drawers ──
 
 // the Statement: the Account's lines newest first, each with who it was by, its status in the Account's word and its fee
@@ -416,7 +476,7 @@ export function renderAccountScreen(state, now) {
   const tab = TABS.some(([id]) => id === state.route.tab) ? state.route.tab : 'portfolio';
   const statement = a.statementOpen && !state.settingsOpen;
   const venue = statement || state.settingsOpen || !a.detailsVenue ? null : venuesOf(a.data).find(v => v.id === a.detailsVenue) ?? null;
-  const body = tab === 'venues' ? venues(state, now) : tab === 'agents' ? agentsTab(state, now) : tab === 'cards' ? cardsTab(state, now)
+  const body = tab === 'money' ? moneyTab(state) : tab === 'venues' ? venues(state, now) : tab === 'agents' ? agentsTab(state, now) : tab === 'cards' ? cardsTab(state, now)
     : tab === 'rules' ? rulesTab(state, now) : portfolio(state, now);
   return `<main class="${cls('main', 'acct', (state.settingsOpen || statement || venue) && 'with-drawer')}">${head(state)}${a.message ? note(a.message) : ''}${tabs(state, tab)}${body}` +
     `${statement ? renderStatement(state, now) : ''}${venue ? venueDetails(venue, state) : ''}</main>`;

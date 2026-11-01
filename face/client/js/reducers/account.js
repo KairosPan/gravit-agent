@@ -65,6 +65,18 @@ export const reducers = {
   // Report again
   walletSaid: (s, { key, status, said, again = false } = {}) => (typeof key === 'string' && key !== ''
     ? acc(s, { wallet: { ...s.account.wallet, [key]: { status, said: typeof said === 'string' ? said : null, again: again === true } } }) : s),
+  // the Money tab (plan 4b Task 2): a Receive row's address by its key (`<venue>|<asset>|<network>`), each { status, data, at,
+  // message }, a failed read keeping its last answer and carrying the Account's words; and the bridge's routes for the draft
+  // `asked`, only the latest ask's
+  receiveLoading: (s, key) => (typeof key === 'string' && key
+    ? acc(s, { receive: { ...s.account.receive, [key]: { data: null, at: null, message: null, ...s.account.receive[key], status: 'loading' } } }) : s),
+  receiveLoaded: (s, { key, data, at } = {}) => (typeof key === 'string' && key
+    ? acc(s, { receive: { ...s.account.receive, [key]: { status: 'ready', data, at, message: null } } }) : s),
+  receiveFailed: (s, { key, at, message = null } = {}) => (typeof key === 'string' && key
+    ? acc(s, { receive: { ...s.account.receive, [key]: { data: null, ...s.account.receive[key], status: 'error', at, message } } }) : s),
+  routesAsking: (s, asked) => acc(s, { routes: { asked: typeof asked === 'string' ? asked : null, status: 'asking', data: null, message: null } }),
+  routesLanded: (s, { asked, data } = {}) => acc(s, { routes: { asked, status: 'ready', data, message: null } }),
+  routesFailed: (s, { asked, message = null } = {}) => acc(s, { routes: { asked, status: 'error', data: null, message } }),
   // the curve's range; one the Account does not draw leaves the slice as it is
   setHistoryRange: (s, range) => (RANGES.includes(range) && range !== s.account.history.range ? read(s, 'history', { range }) : s),
   // the Statement is a drawer: one at a time, as Settings and Details are
