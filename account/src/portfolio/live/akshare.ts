@@ -3,11 +3,12 @@
  * live in account/README.md; the command is PORTFOLIO_AKSHARE_BIN, else ~/.local/bin/akshare-mcp - argv only, never a shell.
  *
  * Started on use, not at boot: one child is shared by every caller while it lives; when it exits (or a start fails) it is forgotten and
- * the next ask starts a new one - no eager restart, no restart loop. Its environment is the Account's with every KEY/SECRET/TOKEN/PASSWORD
- * name dropped, so the iFinD token the Account holds never reaches Python; its stderr is the Account's.
+ * the next ask starts a new one - no eager restart, no restart loop. A call that times out recycles the child (closed and forgotten), so a
+ * blocked server loop cannot wedge every later ask. Its environment is an allowlist of the Account's (sidecarEnv), so the iFinD token and
+ * every wallet or venue secret the Account holds never reach Python; its stderr is the Account's.
  *
- * Every ask - a cold start, the tool listing, the call - is bounded by one deadline (AKSHARE_CALL_MS). A timeout ends the ask, not the
- * work: the MCP cancellation is sent, but the Python call already running in the child runs on until it returns. A reply whose content
+ * Every ask - a cold start, the tool listing, the call - is bounded by one deadline (AKSHARE_CALL_MS). A timeout ends the ask; the child it
+ * timed out on is closed (stdin ended, SIGTERM after the SDK's 2 s), so a Python call still running there dies with it. A reply whose content
  * serializes past AKSHARE_REPLY_MAX is refused; a tool's own error (isError) is an answer, not a refusal. */
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -35,17 +36,23 @@ export const AKSHARE_CALL_MS = 120_000;
 export const AKSHARE_REPLY_MAX = 4 * 1024 * 1024;
 export const AKSHARE_ARGS_MAX = 16 * 1024;
 const TOOL_NAME_MAX = 64;
-const SECRET_NAME = /KEY|SECRET|TOKEN|PASSWORD/i;
+/** the names the child is given from the Account's environment; every other name stays behind (a wallet's mnemonic, a venue's key) */
+const PASSED = new Set(["PATH", "HOME", "USER", "LANG", "TMPDIR", "TMP", "TEMP", "SSL_CERT_FILE", "SSL_CERT_DIR", "FASTMCP_LOG_LEVEL"]);
+const PROXY = new Set(["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy"]);
+const passed = (k: string) => PASSED.has(k) || k.startsWith("LC_") || PROXY.has(k);
+/** a proxy URL without its user:password@ */
+const noUserinfo = (v: string) => v.replace(/^([a-z][a-z0-9+.-]*:\/\/)?[^/@]*@/i, "$1");
 
 /** PORTFOLIO_AKSHARE_BIN when set and not empty, else the uv tool install's default place */
 export function akshareCommand(env: NodeJS.ProcessEnv = process.env): string {
   return env.PORTFOLIO_AKSHARE_BIN || join(homedir(), ".local", "bin", "akshare-mcp");
 }
 
-/** The child's environment: the Account's own without a secret's name, plus unbuffered Python and the server's row cap */
+/** The child's environment: an allowlist of the Account's own (PATH, HOME, USER, LANG and LC_*, the temp dirs, the TLS roots, the proxies
+ * without their userinfo, FastMCP's log level), plus unbuffered Python and the server's row cap. Nothing else - no key, token or seed */
 export function sidecarEnv(env: NodeJS.ProcessEnv): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(env)) if (v !== undefined && !SECRET_NAME.test(k)) out[k] = v;
+  for (const [k, v] of Object.entries(env)) if (v !== undefined && passed(k)) out[k] = PROXY.has(k) ? noUserinfo(v) : v;
   out.PYTHONUNBUFFERED = "1";
   out.AKSHARE_MCP_MAX_ROWS = "500";
   return out;
@@ -119,8 +126,11 @@ export function createAkshare(opts: { command: string; args?: string[]; env?: No
     return p;
   }
 
+  const isTimeout = (e: unknown, signal: AbortSignal) =>
+    signal.aborted || (e instanceof McpError && e.code === ErrorCode.RequestTimeout) || (typeof e === "object" && e !== null && (e as { name?: unknown }).name === "TimeoutError");
+
   function refusal(e: unknown, signal: AbortSignal): AkshareAnswer<never> {
-    if (signal.aborted || (e instanceof McpError && e.code === ErrorCode.RequestTimeout)) {
+    if (isTimeout(e, signal)) {
       const why = signal.aborted && !(signal.reason instanceof DOMException && signal.reason.name === "TimeoutError") ? "the ask was aborted" : `no answer within ${callMs} ms`;
       return refused("timeout", `akshare-mcp (${command}): ${why}`);
     }
@@ -131,10 +141,18 @@ export function createAkshare(opts: { command: string; args?: string[]; env?: No
   async function ask<T>(caller: AbortSignal | undefined, work: (c: Connected, signal: AbortSignal) => Promise<AkshareAnswer<T>>): Promise<AkshareAnswer<T>> {
     const deadline = AbortSignal.timeout(callMs);
     const signal = caller ? AbortSignal.any([deadline, caller]) : deadline;
+    let joined: Promise<Connected> | undefined;
+    let c: Connected | undefined;
     try {
-      const c = await within(current ?? start(), signal);
+      joined = current ?? start();
+      c = await within(joined, signal);
       return await within(work(c, signal), signal);
     } catch (e) {
+      // a timeout on a child that was up recycles it: a blocked loop there must not wedge the next ask (a start that failed closed itself)
+      if (c && isTimeout(e, signal)) {
+        if (current === joined) current = null;
+        void c.client.close().catch(() => {});
+      }
       return refusal(e, signal);
     }
   }

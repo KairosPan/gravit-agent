@@ -10,8 +10,9 @@ const SECRETS = { IFIND_ACCESS_TOKEN: "a", IFIND_REFRESH_TOKEN: "r", SOME_API_KE
 
 const open: Akshare[] = [];
 const dirs: string[] = [];
-function fake(opts: { env?: NodeJS.ProcessEnv; callMs?: number; command?: string } = {}): Akshare {
-  const a = createAkshare({ command: opts.command ?? process.execPath, args: opts.command ? [] : [FIXTURE], env: opts.env ?? process.env, ...(opts.callMs !== undefined ? { callMs: opts.callMs } : {}) });
+/** the stand-in, driven by argv (`--start-log <file>`, `--silent`): its environment is the sidecar's allowlist, so no FAKE_* name reaches it */
+function fake(opts: { env?: NodeJS.ProcessEnv; callMs?: number; command?: string; args?: string[] } = {}): Akshare {
+  const a = createAkshare({ command: opts.command ?? process.execPath, args: opts.command ? [] : [FIXTURE, ...(opts.args ?? [])], env: opts.env ?? process.env, ...(opts.callMs !== undefined ? { callMs: opts.callMs } : {}) });
   open.push(a);
   return a;
 }
@@ -26,7 +27,7 @@ function okText(r: AkshareAnswer<AkshareCall>): string {
   const c = r.value.content[0] as { type: string; text: string };
   return c.text;
 }
-const discover = async (a: Akshare) => JSON.parse(okText(await a.call("akshare_discover", {}))) as { pid: number; env: string[]; maxRows: string };
+const discover = async (a: Akshare) => JSON.parse(okText(await a.call("akshare_discover", {}))) as { pid: number; env: string[]; maxRows: string; httpsProxy?: string };
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 
 afterEach(async () => {
@@ -49,12 +50,15 @@ describe("the AKShare sidecar", () => {
   });
 
   it("the child inherits no secret", async () => {
-    const e = sidecarEnv({ PATH: "/bin", ifind_access_token: "x", ...SECRETS, KEEP: "1" });
-    expect(e).toEqual({ PATH: "/bin", KEEP: "1", PYTHONUNBUFFERED: "1", AKSHARE_MCP_MAX_ROWS: "500" });
-    const d = await discover(fake({ env: { ...process.env, ...SECRETS } }));
-    for (const k of ["PATH", "HOME", "PYTHONUNBUFFERED", "AKSHARE_MCP_MAX_ROWS"]) expect(d.env).toContain(k);
-    for (const k of Object.keys(SECRETS)) expect(d.env).not.toContain(k);
+    const e = sidecarEnv({ PATH: "/bin", HOME: "/h", LC_ALL: "C", TMPDIR: "/t", FASTMCP_LOG_LEVEL: "WARNING", ifind_access_token: "x", MM_MNEMONIC: "m", SOME_PRIVATE_KEY: "k", KEEP: "1", HTTPS_PROXY: "http://u:p@proxy.local:8080", no_proxy: "localhost", ...SECRETS });
+    expect(e).toEqual({ PATH: "/bin", HOME: "/h", LC_ALL: "C", TMPDIR: "/t", FASTMCP_LOG_LEVEL: "WARNING", HTTPS_PROXY: "http://proxy.local:8080", no_proxy: "localhost", PYTHONUNBUFFERED: "1", AKSHARE_MCP_MAX_ROWS: "500" });
+    expect(sidecarEnv({ ALL_PROXY: "user:pass@socks.local:1080" }).ALL_PROXY).toBe("socks.local:1080");
+    const leak = { ...SECRETS, MM_MNEMONIC: "word word word", SOME_PRIVATE_KEY: "0xabc", WALLET_SEED: "s", A_PASSPHRASE: "p", X_COOKIE: "c" };
+    const d = await discover(fake({ env: { ...process.env, ...leak, https_proxy: "http://user:pass@proxy.local:8080" } }));
+    for (const k of ["PATH", "HOME", "PYTHONUNBUFFERED", "AKSHARE_MCP_MAX_ROWS", "https_proxy"]) expect(d.env).toContain(k);
+    for (const k of Object.keys(leak)) expect(d.env).not.toContain(k);
     expect(d.maxRows).toBe("500");
+    expect(d.httpsProxy).toBe("http://proxy.local:8080");
   });
 
   it("tools lists the child's tools", async () => {
@@ -91,7 +95,7 @@ describe("the AKShare sidecar", () => {
 
   it("two calls on a cold sidecar start one child", async () => {
     const log = startLog();
-    const a = fake({ env: { ...process.env, FAKE_AKSHARE_START_LOG: log } });
+    const a = fake({ args: ["--start-log", log] });
     const [x, y] = await Promise.all([discover(a), discover(a)]);
     expect(x.pid).toBe(y.pid);
     expect(lines(log)).toHaveLength(1);
@@ -99,7 +103,7 @@ describe("the AKShare sidecar", () => {
 
   it("a child that exits mid-call is unavailable, and the next call starts a new one", async () => {
     const log = startLog();
-    const a = fake({ env: { ...process.env, FAKE_AKSHARE_START_LOG: log } });
+    const a = fake({ args: ["--start-log", log] });
     const first = await discover(a);
     const t0 = Date.now();
     const r = await a.call("akshare_stock_a", { method: "exit" });
@@ -122,13 +126,51 @@ describe("the AKShare sidecar", () => {
   });
 
   it("the deadline bounds the whole ask", async () => {
-    const a = fake({ callMs: 300 });
-    await discover(a); // the child is warm: the 300 ms bound the sleep, not the start
+    // 500 ms, not less: the following call starts a fresh child (the timed-out one is recycled), and a cold start takes ~100 ms
+    const a = fake({ callMs: 500 });
+    await discover(a);
     const t0 = Date.now();
     const r = await a.call("akshare_stock_a", { method: "sleep" });
     expect(r.kind === "refused" && r.word).toBe("timeout");
     expect(Date.now() - t0).toBeLessThan(1_000);
     expect((await a.call("akshare_discover", {})).kind).toBe("ok");
+  });
+
+  it("a call that times out recycles its child", async () => {
+    const log = startLog();
+    const a = fake({ callMs: 500, args: ["--start-log", log] });
+    const first = await discover(a);
+    const r = await a.call("akshare_stock_a", { method: "sleep" });
+    expect(r.kind === "refused" && r.word).toBe("timeout");
+    const next = await discover(a);
+    expect(next.pid).not.toBe(first.pid);
+    expect(lines(log)).toHaveLength(2);
+    const until = Date.now() + 3_000;
+    while (alive(first.pid) && Date.now() < until) await new Promise((res) => setTimeout(res, 50));
+    expect(alive(first.pid)).toBe(false);
+  });
+
+  it("a child that never speaks is bounded, and killed", async () => {
+    const log = startLog();
+    const a = fake({ callMs: 300, args: ["--silent", "--start-log", log] });
+    const t0 = Date.now();
+    const r = await a.tools();
+    expect(r.kind === "refused" && r.word).toBe("timeout");
+    expect(Date.now() - t0).toBeLessThan(1_000);
+    const pid = Number(lines(log)[0]);
+    const until = Date.now() + 3_000;
+    while (alive(pid) && Date.now() < until) await new Promise((res) => setTimeout(res, 50));
+    expect(alive(pid)).toBe(false);
+  });
+
+  it("a caller who joins a cold start whose deadline fires is told timeout", async () => {
+    const a = fake({ callMs: 300, args: ["--silent"] });
+    const first = a.tools();
+    await new Promise((res) => setTimeout(res, 150)); // the joiner's own deadline is still 150 ms off when the start's fires
+    const joiner = await a.call("akshare_discover", {});
+    expect(joiner.kind === "refused" && joiner.word).toBe("timeout");
+    const r = await first;
+    expect(r.kind === "refused" && r.word).toBe("timeout");
   });
 
   it("an abort ends the ask", async () => {
