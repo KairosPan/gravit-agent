@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { AKSHARE_TOOLS } from "../src/portfolio/live/akshare.ts";
 import { cardHash } from "../src/portfolio/account/exchange.ts";
 import { signOwner, simKey, type OwnerAction } from "../src/portfolio/account/sign.ts";
 import { no } from "../src/portfolio/refuse.ts";
@@ -115,7 +116,7 @@ afterAll(async () => {
 describe("an agent harness on the real account, through the MCP seat", () => {
   it("has a key of its own, kept in the home — not one anyone could derive from its name", async () => {
     const names = (await client.listTools()).tools.map((x) => x.name);
-    expect(names).toEqual(expect.arrayContaining(["portfolio_live_order", "portfolio_live_amend", "portfolio_live_positions", "portfolio_live_close", "portfolio_live_leverage", "portfolio_wait", "portfolio_statement", "portfolio_pay"]));
+    expect(names).toEqual(expect.arrayContaining(["portfolio_live_order", "portfolio_live_amend", "portfolio_live_positions", "portfolio_live_close", "portfolio_live_leverage", "portfolio_wait", "portfolio_statement", "portfolio_pay", "portfolio_akshare"]));
     const a = await tool("portfolio_account");
     const path = join(home, "seats", "deepseek-harness.json");
     expect([existsSync(path), statSync(path).mode & 0o777]).toEqual([true, 0o600]);
@@ -171,6 +172,15 @@ describe("the wallet through the MCP seat: what the page reads, steering, a prev
     // this account mounts no China source: the Account's refusal comes back, not a schema error
     const china = await tool("portfolio_explore", { tab: "china" });
     expect(china.body).toMatchObject({ code: "E_ACCOUNT_BAD_ACTION", message: "China is not read on this account" });
+  });
+
+  it("the seat passes AKShare through, and says so where the Account runs none", async () => {
+    const t = (await client.listTools()).tools.find((x) => x.name === "portfolio_akshare")!;
+    expect(t.annotations?.readOnlyHint).toBe(true);
+    for (const name of [...AKSHARE_TOOLS, "akshare_discover", "500 rows", "120 s"]) expect(t.description).toContain(name);
+    const r = await tool("portfolio_akshare", { tool: "akshare_discover" });
+    expect(r.error).toBe(true);
+    expect(r.body).toMatchObject({ ok: false, akshare: "off" });
   });
 
   it("reads what the page reads — markets, holdings, the curve, one asset, where to receive — with the same answers as over HTTP", async () => {
