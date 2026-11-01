@@ -9,7 +9,9 @@ of the Account (§1, §3, §4, §5, §7.3, §8, §9; D18 added), and again 2026-
 the Python package, the PIT beds and backtests (§1, §2, §3, §4, §5 — D3 and D16 resolved, D1, D8
 and D10 rewritten — §6, §7.2, §8, §9); revised 2026-10-26 for the Lunhui rows and their three
 roles (§1, §4, D10, §7.2); revised 2026-10-27 for the Account service in this tree and its two
-boxes (§1, §3, D17, §7.3, §9) ·
+boxes (§1, §3, D17, §7.3, §9); revised 2026-11-01 for the desk merged onto main - its phone
+(the always-on design's P1) and its clock (P2): §1, §3, §4, §5 (D5, and the desk's D19-D27, its
+D17-D25 renumbered past main's D18), §7.3, §8, §9 ·
 **Owner:** the operator ·
 **Authority:** this charter carries intent and principles; mechanism lives in `DEVELOPMENT.md`,
 `face/README.md` (the current face contracts and drills), and code. On a question of intent, the charter
@@ -66,10 +68,16 @@ strategy directory. The operator reads the face's Markets, Trade and Account scr
 git diff, and teaches: trading style lives in an operator-owned skill pack; taste and judgment
 arrive through conversation and review, not through machinery. One strategy was carried from
 idea to a retirement verdict on 2026-09-02, by its own pre-registered falsification terms and
-the backtests of the time — in the working tree; its directory has not been committed.
+the backtests of the time — in the working tree; its directory has not been committed. Away from
+the screen the operator has the desk: a private Telegram chat with Gravit on their phone, one
+long-lived desk conversation that answers what they ask — the desk's own state, its standing
+orders, and the price now once a US quote source is wired (none is: D25) — and informs, never
+orders. The operator trades in their own broker app on what the desk tells them.
 
 **What it is not.** Not an automated trading system, not an autonomy ladder, not a hosted or
-multi-user service. Nothing *starts* unattended. A research cycle the operator starts runs to
+multi-user service.
+Nothing starts unattended except a standing order the operator armed in the harness home, with a cap and an expiry; a standing turn informs the operator — it never orders, asks, opens a goal or edits what it runs.
+A research cycle the operator starts runs to
 its verdict inside its strategy directory without further attention; the operator judges it
 afterwards from the journal and the diff.
 
@@ -116,20 +124,30 @@ the design economizes it but never designs it away.
 ┌──────────────────────────────────────────────────────────────────┐
 │ OPERATOR   teaches via skills · reviews via git · reads the      │  outside the
 │            face's screens · owns ~/.dsh (profile patch, LLM      │  agent's reach
-│            key) and the Account's grants and cap (D17, D18)      │  (except key files)
+│            key) and the Account's grants and cap (D17, D18) ·    │  (except key files)
+│            the desk's pause and its standing orders, armed       │
+│            from a terminal · talks to the desk from the phone ·  │
+│            trades in their own broker app                        │
 ├──────────────────────────────────────────────────────────────────┤
 │ FACE       gravit-face, one Node process at 127.0.0.1:3090:      │  the operator's
 │            hosts dsh in-process · chat per channel · Markets ·   │  surface; also
 │            Trade · Account · the per-order approval card         │  where Gate 2 lives
 │            (Gate 2) · bot settings · room comparisons ·          │
-│            child task history                                    │
+│            child task history · the desk: one desk session,      │
+│            its ledger and pause, the Telegram bridge (polls      │
+│            outbound; nothing listens), the clock (standing       │
+│            orders on the XNYS calendar, each a fresh desk turn   │
+│            with a deadline, under the desk's daily budget)       │
 ├──────────────────────────────────────────────────────────────────┤
 │ GRAVIT     dsh runtime · skills (mechanics + style) ·            │  the agent
 │            works strategies/ ·                                   │
 │            runs research cycles under a goal ·                   │
 │            queries via MCP tools · consults room bots ·          │
 │            delegates bounded child tasks (and roles, when        │
-│            one ships) · may call rostered local CLIs as tools    │
+│            one ships) · may call rostered local CLIs as tools ·  │
+│            on the desk (gravit-desk): informs, never orders; no  │
+│            shell, no order tools; writes only desk/journal/,     │
+│            reads only inside the repository                      │
 ├──────────────────────────────────────────────────────────────────┤
 │ MCP ROWS   composed by the face: the Account seat                │  the workbench
 │            (mcp__account__*) · AKShare (A shares) ·              │  (this repo)
@@ -144,8 +162,14 @@ the design economizes it but never designs it away.
 └────────────────────────────────┴─────────────────────────────────┘
 ```
 
-The face presents saved bot settings, actual session configuration, room evidence and child
-task progress. dsh owns execution, permissions and session history; the face adds no second
+The desk is the face's always-on side: one desk session — the `gravit-desk` preset, its cwd
+`desk/journal/` — that the operator's phone reaches through a private Telegram chat. The face
+polls Telegram; nothing on this machine listens for the outside (§7.3). The desk's clock fires
+the standing orders the operator armed in the harness home (`standing.yml`) on the exchange
+calendar, a rule table in the face's own code: each firing is one turn in a fresh `gravit-desk`
+session in the order's directory, under its own deadline and the desk's daily token budget, and
+its final text goes to the phone — the pre-close brief is the first. The face presents saved bot
+settings, actual session configuration, room evidence and child task progress. dsh owns execution, permissions and session history; the face adds no second
 task registry or execution queue. Mechanism lives in `DEVELOPMENT.md`, `face/README.md` and
 code. This charter does not restate tool tables or route tables.
 
@@ -164,7 +188,11 @@ Who may change what. This table is the charter's core; everything else supports 
 | Bot definitions: `preset.yml`, `SOUL.md`, composition and skills under `bots/` | operator, through the face's supported settings or file edits; Gravit and temporary subagents may propose changes, never author them | git and review; settings saves check revisions, and inspection distinguishes saved settings from mounted configuration (D13) |
 | `bots/<id>/journal/notes.md` | operator; the bot in its own home session, subject to that session's permissions | home work is scoped to its own `journal/`; room sessions start read-only (D12). Context loading only reads notes and records the consumed snapshot; it never writes them |
 | Role definitions: `roles/<id>/` (`ROLE.md`, `role.yml`), and the mirror `bots/gravit/agent.cordis.yml` generated from them | operator, by file edit; Gravit proposes a role in conversation and never authors one | git and review; the face refuses a malformed role at boot, a drift test fails while the mirror differs from the render, and the reader keeps the account and order tools, `ask_user_question` and the AKShare tools out of every role's `allow` |
-| `dsh/profile/cycle.md` | operator only | the research-cycle contract Gravit runs; Gravit proposes changes in conversation and never edits it; git |
+| `$DSH_HOME/face/desk/`: the desk's ledger, its pause switch `OFF`, the Telegram bridge's records, offset and outbox, and the firing ledger `firings.jsonl` | the face — `desk.ts`, the bridge, and the clock (`schedule.ts`, with `firing.ts`), which writes `firings.jsonl` and its events in the ledger; the operator sets the pause from the phone, `POST /data/desk/pause` or a terminal, and lifts it only from a terminal | outside the workspace, as the rest of the home; the phone and the page can only pause (D19); every pause and lift, desk conversation, desk turn — with its tokens, a firing's too — and refused turn is a ledger line, and every firing a line per step in `firings.jsonl` |
+| `$DSH_HOME/face/desk/standing.yml`: the standing orders and the desk's daily token budget | operator only: `npm run desk -- arm` and `rearm` from a terminal, or a hand edit | outside the workspace, as the rest of the home: no route or phone command writes it, nor a desk turn without an approved card (D19); arming pins the order's text — and a script producer's bytes — by sha256, and a pinned file that changed is refused at its anchor, with one phone line, until the operator reviews it and re-arms; any fault in the file stops every order until it is fixed |
+| `desk/STANDING.md`, and the book: `desk/holdings.yml`, `desk/levels.yml` | operator only, by file edit | `STANDING.md` is tracked, and pinned by its order in `standing.yml`; the book is ignored by git (D24), loaded with every refusal named, and stale the moment the operator trades (D21); a desk turn's sandbox keeps its writes in `desk/journal/`, and `GRAVIT.md` puts all four of the desk's control files on Gravit's never-edit list |
+| `desk/journal/` | **Gravit**, in the desk session and in each standing order's firing (the `gravit-desk` preset, its cwd, `workspace-write`); the pre-close brief's turn saves its message under `briefs/` | ignored by git (D24), so no history records it; the sandbox keeps the desk's writes in its cwd and the temp areas; the face's desk guard and pre-turn fence keep instruction files out of it (D25) |
+| `dsh/profile/cycle.md`, `dsh/profile/desk.md` | operator only | the research-cycle contract and the desk's contract Gravit runs; Gravit proposes changes in conversation and never edits them; git |
 | orders at the Account seat (`mcp__account__*` writes) — Gravit's only order path | nobody today — Gravit, under both cards, once the operator admits the seat as Gravit on the Account page and signs it a `trade` limit naming a paper venue | **Gate 2** cards every seat write before it leaves dsh (the twelve writes, and any seat tool the face has not classified), and the Account's Guard cards it again under the owner's device key — answered in the face's Cards since 2026-10-24; the seat's reach is exactly the limits the operator signs — the face process holds no key and signs nothing, and draws the Account's venues as the Account reports them (D17, D18); under a `never` policy, or with no session to ask in, a seat write is denied rather than asked, and `place_order`/`cancel_order` under any server are denied outright and refuse the boot (the retired tools); the automated drill runs on `mcp__drill__*` stand-ins of the seat's writes; a limit on a real venue is the real-money trigger (§8) |
 | the owner's hand orders at the Account (the face's Trade screen, since 2026-10-24) | the operator, by hand, each order signed with the browser's device key at the Account's door (`POST /api/exchange`, carried by the face's proxy) | no gate of this tree's: the Account's live cap on each order and movement, its venues' rules, and *What you sign* drawn before every signature; no card — the owner's act is not the agent's; the face process carries bytes, holds no key and signs nothing (D18). On a real venue this is the owner's own money by the owner's own hand (§8) |
 
@@ -177,7 +205,8 @@ the answer route's browser cookie is signed by a secret stored in the harness ho
 shell turn can read — leaving a genuine one-shot approval in the log, so the guard proves that a
 grant was recorded, not who recorded it (D10; Rule 2 applied honestly). Third, the workspace
 boundary protects the runtime, not the repo: the face, the mechanics skills and Gate 2's own
-code are inside the workspace and are protected by review and tests, not by placement.
+code are inside the workspace and are protected by review and tests, not by placement — and the service starts the
+face on whatever code is there, unattended after a crash (D26).
 
 ## 5. Debts, carried openly
 
@@ -190,7 +219,7 @@ solved would be worse than carrying them.
 | D2 | Agent commits and operator commits are indistinguishable in git | single operator, low volume | cheap fix (distinct commit identity for Gravit) on first confusion |
 | D3 | *Resolved 2026-10-24: there is no Gate 1 to arm.* The order flag and its tools left with the Python package; a person reading a seat write's card is the account-seat drill's, owed with D17 | — | — |
 | D4 | Mechanics skills are prose-protected only | single user; every edit reviewed | if skills ever get a second writer, including Gravit |
-| D5 | Per-session LLM usage is visible, but there is no combined accounting across Gravit, room members and temporary descendants, nor complete LLM + data API spend accounting | operator reviews usage and provider bills | first surprise bill, or any scheduled autonomous runs, or the first cycle whose usage surprises the operator |
+| D5 | Per-session LLM usage is visible, but there is no combined accounting across Gravit, room members and temporary descendants, nor complete LLM + data API spend accounting. Since the desk's P2 (2026-11-01) it is partially closed: desk sessions have a thresholded daily budget; interactive sessions still have per-session usage only | operator reviews usage and provider bills; the desk's spend — its standing orders' firings and its phone turns, though not a turn opened in the browser — stops for the rest of the New York day once `budget.dailyTokens` in `standing.yml` is spent, the cap set after the first measured week | first surprise bill, or any scheduled autonomous run outside the desk's budget, or the first cycle whose usage surprises the operator |
 | D6 | The mechanics red-lines have no drill; no test reads the content of the skill packs | single user; every edit reviewed | carried rule: a new guard ships with its drill in the same change |
 | D7 | No instrument for net-negative drift: nothing compares "now" against "never-evolved" | strategies are few; the operator still reads everything | when an independent evaluator exists (see D1) |
 | D8 | Gate 2 is prose against a shell: it holds the seat's tool surface, and the seat's key file in the Account's home can be read by a shell turn, which signs at the Account's door with no card here — the seat's R1; and Gate 2 exists only inside the face | paper venues only by the operator's rule; the Account's own Guard card and cap | real-money intent (D17's and D18's triggers), or any host other than the face running the profile with the seat mounted |
@@ -204,6 +233,14 @@ solved would be worse than carrying them.
 | D16 | *Resolved 2026-10-24:* the research cycle calls no role and keeps no role-call count; the round cap stays the goal's (the 24 is Gravit's argument to create_goal, as cycle.md instructs; dsh's own default is 256) | — | — |
 | D17 | The Account seat's fence is the operator's grants on the Account page, not code in this tree: a limit signed on a real venue would reach real money through the same two cards, and the face cannot tell a paper venue from a real one; two cards per seat write meanwhile; the seat's key file is written by a child of the face outside the workspace, in the Account's home, and a shell turn can read it and sign at the Account's door with no card here (the seat's R1); under compose the Account's home is a volume the agent box does not mount; the seat's own key stays with the seat in the agent box, and the Account's card on every seat write stands against a shell that signs with it; the seat is matched by the name the owner typed | paper venues only by the operator's rule; the Account's own Guard, `--live-cap` and limits; both cards; one operator, one machine | the first limit signed on a non-paper venue, or a real venue connected to that Account with the seat granted reach — the real-money trigger (§8); a second human |
 | D18 | The face's page is an owner device of the Account (2026-10-24): the browser profile that holds the key can sign anything the owner can — hand orders up to the Account's cap on every venue the operator connected there, seats' limits, cards, venue connections. The key is the browser's (WebCrypto, non-extractable, the page's origin), lost with the profile and admitted again by another device; the pairing code and the envelopes pass through the face process unlogged; the signing client is the Account's door protocol reproduced in `face/client`, which this tree keeps in step with the Account by hand (the smoke is the canary) | held by: loopback only; the Account's own cap and *What you sign*; the proxied rows are an allow-list and the Account's fence covers everything else; a local process reaches the proxied owner routes as it reaches the Account's own and does nothing without an admitted key; one operator, one machine | a real venue connected to the Account and an order placed on it by hand from the face (the owner's money; the first real-money surface in the face); a second human or machine; a change in the Account's envelope (every signature refused until the client follows) |
+| D19 | The desk's pause switch (`OFF`) and its arming file (`standing.yml`) are hand-editable files in the harness home, and the pause route (`POST /data/desk/pause`) is loopback-reachable like every `/data` route (D10) | the safe direction: the phone and the page can only pause, never resume or shorten a pause in force; only a terminal, the file's deletion or the pause's own expiry lifts one; every set and lift through the face or `npm run desk` is a ledger line (a hand edit is not). The operator's `standing.yml` in the harness home is written only from a terminal — `npm run desk -- arm` and `rearm`, or a hand edit — never by a route or the phone, and a standing turn cannot write it without an approved card: the file lies outside the turn's cwd and outside its sandbox's writable roots | a route or a phone command that resumes the desk, arms anything, or writes more than the pause |
+| D20 | The Telegram token is a key file like the others (R1): whoever holds it can read what the operator sends — through `getUpdates`, or a webhook it sets — which the bridge sees only as a 409 conflict, and can message the operator as the bot. The bridge admits by the operator's user id, so a lost or compromised phone that is still signed in can chat with the desk — have it read inside the repository, write in its journal and spend tokens — and pause it | one allow-listed numeric user id in a private chat; every other sender dropped, counted and shown; outbound only, every message to the operator's chat with every secret value redacted; the desk orders nothing, and its guard keeps its reads inside the repository and off key files (D27); the phone can only pause | a lost phone: end its session from another device (Telegram → Settings → Devices), or unset `TELEGRAM_OPERATOR_ID` until then — rotating the token does not stop a device that is still signed in; rotate it when the token itself leaked. A second Telegram user or any group (§8) |
+| D21 | `desk/holdings.yml`: holdings are what the operator typed — the desk's book is stale the moment they trade | the pre-close brief names the file's last edit beside the holdings it prices, and `desk/STANDING.md` has the message say it; the desk informs and orders nothing, and the operator, who trades in their own broker app, knows when they last did | any broker read |
+| D23 | No US price reaches the desk: since the merge onto main (2026-11-01) the face's quote wire speaks A shares alone (Tencent), and no US quote source is wired for the desk (`face/src/us-quotes.ts`) — `desk_quotes` answers that none is wired and the pre-close brief carries every price null with `quotesError` saying why | the desk says so in every answer that would carry a price, and shows no number it cannot source and time | the operator wires a source: the Account's market reads, the seat, a desk-owned IEX feed, or another |
+| D24 | The book — `desk/holdings.yml`, every `levels.yml`, the desk's journal — lives on this disk in files git ignores; the repository is public, so a `git add -A` by habit or a file tracked by mistake publishes it | the ignore rules, review, and — as the files arrive — a tracked `.example` sibling for each | the repository goes private, or the book moves into git (§8) |
+| D25 | The desk's writable cwd sits on dsh's instruction chain: an instruction file (`GRAVIT.md`, `GRAVIT.local.md`), a `.git` or a skill root (`.dsh`, `.agents`) in `desk/journal/` — which the desk's sandbox lets it write and git ignores — or in `desk/` above it would steer every later desk turn. So would files other tools obey there: a `.gitignore` holding `!*` would have git list the journal for the next `git add -A` (D24), and a `CLAUDE.md` or `AGENTS.md` would reach the operator's coding agents, which load it from that folder and have a shell. The face holds this, not the sandbox | the desk guard — one listener and a deny-only backstop over every call a desk agent makes, its write check first — denies a desk turn's write of such a name, of any dot-file and of any `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md` or `AGENTS.override.md` before it runs, and the pre-turn fence refuses every desk turn while one exists there, a `.dsh` or `.agents` sits at the repository root, or a symlink sits in the fenced tree — both code, drilled on a real tree, the fence failing closed. The desk has no shell: an unattended turn on untrusted text must not read key files and reach the network. Not held: the root `GRAVIT.local.md`, the operator's overlay, which every desk turn reads and a root workbench session can write (`DEVELOPMENT.md` §9, R54) | the desk given a shell, a job tool or a write outside its journal; the first fence refusal nobody can explain |
+| D26 | The face runs from a tree its agent sessions can write: an edit to `face/` or `scripts/` from a workbench session takes effect at the face's next start, which launchd makes unattended after a crash | single operator; every edit reviewed in the diff; the desk session cannot write there without an approved card. A standing order's script producer runs only the bytes its arming pinned — the pin covers the script's bytes, and nothing is imported from the tree (a research package is installed into the interpreter, never put on `sys.path` from the repository) — and the market clock is the face's own code, under this same hold (`DEVELOPMENT.md` §9, R61, R62) | the first unexplained change under `face/` or `scripts/`; anything that runs workspace code on a schedule without a pin |
+| D27 | The desk reads what it is asked to, and what it reads goes to DeepSeek in the tool result. The sandbox lets every read through, so the face's desk guard holds the read side: its read check denies a read outside the repository (where the volume says the path lands) or of any dot-file in it — a `.env` or `.git` name, `.mcp.json`, `.claude/`, `.codex/` — and a search that could reach a dot-file; its secret check denies any call whose arguments carry the value of a key in the face's environment, as it is, JSON-escaped or URL-encoded, but not a lower-case `%3a`, base64 or a value split across arguments, so the read check is the line; the bridge redacts every such value from the phone. Not held: a key kept in a file whose name says nothing and starts with no dot, or returned by an MCP tool, still reaches DeepSeek in a tool result, which the face does not filter yet; a hard link, or a symlink swapped between the check and the open, is not seen | single operator; the keys live in `.env` files, dot-files and the harness home, which the read check refuses or keeps outside; the desk cannot make a link (no shell, its writes kept to its journal and the temp areas); the canary drills the read and the secret on a real tree (`DEVELOPMENT.md` §9, R55) | a key kept in the repository in a file whose name starts with no dot; the first secret seen in a desk turn's tool result or on the phone. The filter is a follow-up, not missing infrastructure: dsh-tools' `tools/post-execute` seam can already redact the face's secret values from a desk agent's tool results (`DEVELOPMENT.md` §10, item 5) |
 
 ## 6. Rules carried forward
 
@@ -310,9 +347,12 @@ is the copy source).
 - **No proposal queue.** Change lands by editing; git is the ledger and the rollback. A
   deliberation pipeline is bureaucracy at this scale.
 - **No bespoke harness.** dsh owns the runtime — sessions, tools, sandboxing, subagents, and
-  the approval channel. The face hosts it in-process and registers the order producer on dsh's
-  published `tools/pre-execute` seam; that is configuration in code on a pinned version, not a
-  fork, and the two pins make the dependence explicit. We do not fork it or wrap its loop.
+  the approval channel. The face hosts it in-process and registers the order producer and the
+  desk's guard on dsh's published `tools/pre-execute` seam; that is configuration in code
+  on a pinned version, not a fork, and the two pins make the dependence explicit. We do not fork
+  it or wrap its loop.
+- **No inbound.** The Telegram bridge polls; nothing on this machine listens for the outside; the
+  browser card remains the only approval surface.
 - **No hosted face.** Loopback only, one machine, no authentication machinery of the face's own
   on the local surfaces — dsh 0.2's browser cookie on `/api` is dsh's (see D10 for what that
   costs).
@@ -346,6 +386,11 @@ Few and concrete. Each names the section it reopens.
 | A limit signed for the Account seat on a venue that is not a paper account, or a real venue connected to that Account with the seat granted reach there | §4 Gate 2 and the Account's card · D8 · D17 · D1, should the operator adopt its proposed trigger · the next charter (the venue-plugins handoff's §12.1, C1–C5) |
 | A real venue connected to the Account and an order placed on it by hand from the face | D18 · the Account's cap and *What you sign* · the next charter (the handoff's §12.1 stays the agenda for the agent's path) |
 | A second human, or any hosted deployment | this charter is the wrong document; write the next one |
+| A second Telegram user id, or any group, on the desk's bridge | this charter is the wrong document; write the next one · D20 |
+| Any order, approval or trade-proposal path from the phone or from a scheduled turn | §4 Gate 2 · D8 · D10 |
+| The desk's preset given a shell, a job tool, an account write tool, a role, or the browser watchlist's write path | §7.2 · D8 · D12 · D25 · D27 · run the order drill under that preset |
+| A secret seen in a desk turn's tool result or on the phone, or a key kept in the repository in a file whose name starts with no dot | D27 · the post-execute redaction of what a desk tool returns, which dsh's `tools/post-execute` seam already allows |
+| The repository going private, or the book moving into git | D24 · the desk's directory layout |
 
 ## 9. Forward
 
@@ -392,7 +437,8 @@ Remaining directions below are not completed capabilities. Further design remain
   cards and task histories make review possible; they do not perform these checks themselves.
 - **Maintain notes and account for the whole task** (D5, D15). Design operator-reviewed journal
   updates with sources and conflict handling, and combined usage across parent, room members
-  and descendants. The current journal hook only reads, and current usage remains per session.
+  and descendants. The current journal hook only reads, and outside the desk's daily budget
+  current usage remains per session.
 - **The next round: persona, memory, the teaching channel.** The persona's mechanics paragraphs
   move to the tool descriptions, scoped sections and skills dsh provides; the style pack moves
   into a memory substrate the operator designs; the teaching channel is designed with it.
