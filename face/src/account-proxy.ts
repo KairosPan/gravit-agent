@@ -5,15 +5,16 @@
  * origin — so the face's page never asks it: the page asks the face, and the
  * face asks the Account with a plain loopback fetch (no Origin, no
  * Sec-Fetch-Site, no cookie, the URL's own Host, `redirect: "error"`).
- * Thirty-seven routes: twenty-three reads ({@link ReadRoute} — the Account,
+ * Thirty-eight routes: twenty-three reads ({@link ReadRoute} — the Account,
  * its markets, holdings and venues, and for the Market half and the wallet
  * half `asset`, `book`, `trades`, `funding`, `receive`, `earn`, `sellable`
  * and `signin/status`), the Account's push channel — `stream`, and
  * `stream/markets`, the markets it follows — and twelve writes
  * ({@link WriteRoute}: `pair`, `prepare`, `exchange`, `wallet/challenge`,
  * `wallet/prove`, `signin/start`, `bridge-routes`, `live/order-sent`,
- * `live/order-requote`, `live/sent`, `revoke` and `guard`); each an `exact`
- * route, never a prefix: the route table is the allow-list, and nothing else
+ * `live/order-requote`, `live/sent`, `revoke` and `guard`) — and the OAuth
+ * sign-in's callback, `signin/callback`, the one route a venue's page navigates
+ * the browser to; each an `exact` route, never a prefix: the route table is the allow-list, and nothing else
  * of the Account's surface is reachable through the face.
  * {@link registerAccountProxy} returns the `account` route's reader, which
  * `main.ts` hands to `seat.ts`: `/data/seat.json` and `/data/account` share
@@ -76,12 +77,21 @@
  * - `wallet/challenge` and `signin/start` alone carry {@link FACE_ORIGIN_HEADER},
  *   `http://` and the browser's own loopback `Host` ({@link faceOriginOf}), never
  *   a header the browser names.
+ * - `signin/callback` has its own fence, `isTrustedNavigation` (a loopback Host, a
+ *   GET top-level document navigation, no Origin; any Sec-Fetch-Site, since the
+ *   venue's page sends `cross-site`), else 403 with the fixed body; every other
+ *   route still refuses that navigation. Its query is rebuilt from
+ *   {@link CALLBACK_QUERY}, each name at most once and within its bound (else
+ *   400), and forwarded to `GET /api/account/signin/callback`, cut at 30 s,
+ *   never kept and never stale. The Account's status and its HTML page come back
+ *   with {@link CALLBACK_HEADERS}; a failed fetch or a disabled row is 503 with
+ *   the fixed page {@link CALLBACK_UNREACHABLE}.
  * - Nothing of a body, a query or a frame is logged here.
  * @module
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { seatUrl } from "./account-seat.ts";
-import { FORBIDDEN, HttpError, isJsonBody, isLoopbackHost, isTrustedDataRequest, markStale, readBody } from "./http.ts";
+import { FORBIDDEN, HttpError, isJsonBody, isLoopbackHost, isTrustedDataRequest, isTrustedNavigation, markStale, readBody } from "./http.ts";
 import type { RouteRegistrar } from "./static.ts";
 
 /** The Account's reads the face proxies: `account` is its `GET /api/account`, `reach` its
@@ -146,6 +156,24 @@ export function faceOriginOf(req: IncomingMessage): string | null {
     return null;
   }
 }
+
+/** The OAuth callback's query names, each with the longest value it may carry, in characters, decoded: what a
+ * venue's authorization server sends back (RFC 6749 §4.1.2, RFC 9207's `iss`). */
+export const CALLBACK_QUERY: ReadonlyMap<string, number> = new Map([
+  ["state", 240], ["code", 2_000], ["error", 240], ["error_description", 1_000], ["iss", 500],
+]);
+
+/** How long the Account may take to finish a sign-in, headers and body: it trades the code at the venue. */
+export const CALLBACK_ABORT_MS = 30_000;
+
+/** The callback's answer headers: the Account's page, never kept, never sniffed, and its URL (which carried the
+ * code) never sent on as a referrer. */
+export const CALLBACK_HEADERS = {
+  "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "referrer-policy": "no-referrer",
+} as const;
+
+/** The callback's page when the Account did not answer, or the row is disabled. */
+export const CALLBACK_UNREACHABLE = "The Account did not answer. Go back to Gravit and start the sign-in again.";
 
 /** Most queries kept per route; the least recently used leaves first. */
 export const ACCOUNT_CACHE_KEYS = 64;
@@ -307,6 +335,20 @@ function rebuildStreamQuery(rawUrl: string, lastEventId: string | string[] | und
   return rebuilt.toString();
 }
 
+/** The callback's query, rebuilt from {@link CALLBACK_QUERY} in the order the names came, each at most once and
+ * within its bound, re-encoded; `null` for anything else, as {@link rebuildQuery} refuses it. */
+export function rebuildCallbackQuery(rawUrl: string): string | null {
+  const asked = searchOf(rawUrl);
+  if (asked === null) return null;
+  const rebuilt = new URLSearchParams();
+  for (const [name, value] of asked) {
+    const max = CALLBACK_QUERY.get(name);
+    if (max === undefined || rebuilt.has(name) || value.length > max) return null;
+    rebuilt.append(name, value);
+  }
+  return rebuilt.toString();
+}
+
 /** Whether a request target names no query parameter: a route whose row allows none refuses any. */
 const queryless = (rawUrl: string): boolean => searchOf(rawUrl)?.size === 0;
 
@@ -439,6 +481,19 @@ const handler = (route: ReadRoute, reads: Reads, disabled: boolean) => async (re
   return kept === undefined ? send(res, 503, unreachable(answer.unreachable)) : send(res, 200, markStale(kept.body));
 };
 
+/** `signin/callback`: {@link isTrustedNavigation}, the rebuilt query, then the Account's page, forwarded as it
+ * answers with {@link CALLBACK_HEADERS}; never kept, never stale. */
+const callbackHandler = (s: Settings) => async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+  /* FIRST: a script's fetch, a form's POST, a rebound Host reach neither the parser nor the Account. */
+  if (!isTrustedNavigation(req)) return send(res, 403, FORBIDDEN);
+  const query = rebuildCallbackQuery(req.url ?? "");
+  if (query === null) return send(res, 400, INVALID);
+  const page = (status: number, body: string): void => { res.writeHead(status, CALLBACK_HEADERS); res.end(body); };
+  if (s.disabled) return page(503, CALLBACK_UNREACHABLE);
+  const answer = await askAccount(s.doFetch, `${s.url}/api/account/signin/callback${query === "" ? "" : `?${query}`}`, CALLBACK_ABORT_MS);
+  return "status" in answer ? page(answer.status, answer.body) : page(503, CALLBACK_UNREACHABLE);
+};
+
 /** One browser connection's stream: the Account's 200 written through chunk by chunk as it comes, unchanged,
  * and ended when the Account ends it; a browser {@link STREAM_UNREAD_MAX} bytes behind is dropped; any other
  * answer is the Account's status and body, a failure 503 with its code. A response the browser has closed
@@ -543,7 +598,8 @@ const originHeader = (req: IncomingMessage): Record<string, string> => {
   return origin === null ? {} : { [FACE_ORIGIN_HEADER]: origin };
 };
 
-/** Mount the twenty-three read routes, the two stream routes and the twelve write routes on the host webserver.
+/** Mount the twenty-three read routes, the two stream routes, the twelve write routes and the OAuth sign-in's
+ * callback (`signin/callback`, behind `isTrustedNavigation`) — thirty-eight in all — on the host webserver.
  * The reader returned is the `account` route's own: it and `/data/account` read through one cache, so the
  * seat route `main.ts` hands it to shares that route's upstream read. `dispose` forgets every kept answer
  * and aborts every open stream's upstream. */
@@ -568,6 +624,7 @@ export function registerAccountProxy(webServer: RouteRegistrar, deps: AccountPro
     const { face, account } = WRITE_PATHS[route];
     webServer.register({ kind: "exact", path: `/data/account/${face}`, handler: postHandler(s, account, WRITE_BODY_LIMIT[route], WRITE_ABORT_MS[route], options) });
   }
+  webServer.register({ kind: "exact", path: "/data/account/signin/callback", handler: callbackHandler(s) });
   return {
     reader: readerOf(accountReads),
     dispose: () => {

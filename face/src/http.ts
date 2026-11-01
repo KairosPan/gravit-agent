@@ -122,6 +122,25 @@ export function isTrustedDataRequest(req: IncomingMessage): boolean {
 }
 
 /**
+ * The fence for the one route a venue's page sends the browser back to, the
+ * OAuth sign-in's callback (`/data/account/signin/callback`, account-proxy.ts):
+ * a loopback Host, a GET, a top-level document navigation (`Sec-Fetch-Mode:
+ * navigate`, `Sec-Fetch-Dest: document`) and no `Origin` — a browser sends
+ * none on a top-level GET navigation, while a script's `fetch()` or a form's
+ * POST carries its mode, its destination or its Origin. Any `Sec-Fetch-Site`
+ * passes: the venue's page sends `cross-site`. Used by that route alone;
+ * {@link isTrustedDataRequest} is every other route's fence.
+ * @param req - the incoming request; only its method and headers are read.
+ */
+export function isTrustedNavigation(req: IncomingMessage): boolean {
+  return isLoopbackHost(req.headers.host)
+    && req.method === "GET"
+    && req.headers["sec-fetch-mode"] === "navigate"
+    && req.headers["sec-fetch-dest"] === "document"
+    && req.headers.origin === undefined;
+}
+
+/**
  * Whether a request declares a JSON body. The POST shells refuse anything else
  * with 415: a cross-site "simple" POST can carry only text/plain or form
  * media types without a CORS preflight the face never answers, so requiring

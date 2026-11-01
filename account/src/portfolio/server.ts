@@ -40,7 +40,8 @@
  *   POST /api/account/wallet/prove {address, signature}            that signature, checked; the address is then proven, not watched
  *   POST /api/account/signin/start {connector}     a venue's own OAuth sign-in (Robinhood): the page to open, and its state
  *   GET  /api/account/signin/status?state=         how that sign-in stands
- *   GET  /api/account/signin/callback              where the venue sends the owner's browser back
+ *   GET  /api/account/signin/callback              where the venue sends the owner's browser back (through the face's
+ *                                      /data/account/signin/callback when the face's x-gravit-face-origin named it at the start)
  *   GET  /api/account/statement        every transaction at the real venues, across the account's runs, newest first
  *   GET  /api/account/stream[?since=&client=&markets=]  THE PUSH CHANNEL (account/stream.ts): text/event-stream, one a tab (ui/stream.js) —
  *                                      what changes on the account as it happens: order, fill, position, balance, paper, statement, card,
@@ -342,10 +343,20 @@ export function parseAgent(raw: unknown): AgentId {
   return { id, name, code };
 }
 
+/** the face's origin as the browser reached it (Gravit's face proxies the account under /data/account), from the one header the face sets
+ * on the wallet's challenge and the sign-in's start: an http:// origin on this machine — 127.x.x.x, localhost or [::1], a port or none, no
+ * path — given once; anything else, or none, is undefined and the account builds on its own Host as before. Safe to take from any local
+ * caller: such an origin can only send a sign-in's code back, or name a wallet sentence's domain, to a server on this same machine */
+const FACE_ORIGIN = /^http:\/\/(localhost|127\.\d{1,3}\.\d{1,3}\.\d{1,3}|\[::1\])(:\d{1,5})?$/;
+export function faceOriginOf(req: express.Request): string | undefined {
+  const v = req.headers["x-gravit-face-origin"];
+  return typeof v === "string" && FACE_ORIGIN.test(v) ? v : undefined;
+}
+
 /** the page a venue's sign-in sends the browser back to: whether it finished, in the account page's paper and ink, and nothing else */
 function signedInPage(error?: string): string {
   const esc = (t: string) => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Robinhood sign-in</title><style>:root{--paper:#f6f1e7;--ink:#1d1a16;--dim:#6b6358}@media (prefers-color-scheme:dark){:root{--paper:#17150f;--ink:#ece4d4;--dim:#a39a8a}}body{margin:0;padding:56px 16px;background:var(--paper);color:var(--ink);font:17px/1.55 Georgia,"Times New Roman",serif}main{max-width:520px;margin:0 auto}h1{font-weight:400;font-size:28px;margin:0 0 12px}p{color:var(--dim);margin:0}</style></head><body><main><h1>${error ? "The sign-in did not finish" : "Signed in at Robinhood"}</h1><p>${error ? esc(error) : "Go back to the account page: it carries on from here. This tab can be closed."}</p></main>${error ? "" : "<script>setTimeout(() => window.close(), 1500)</script>"}</body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Robinhood sign-in</title><style>:root{--paper:#f6f1e7;--ink:#1d1a16;--dim:#6b6358}@media (prefers-color-scheme:dark){:root{--paper:#17150f;--ink:#ece4d4;--dim:#a39a8a}}body{margin:0;padding:56px 16px;background:var(--paper);color:var(--ink);font:17px/1.55 Georgia,"Times New Roman",serif}main{max-width:520px;margin:0 auto}h1{font-weight:400;font-size:28px;margin:0 0 12px}p{color:var(--dim);margin:0}</style></head><body><main><h1>${error ? "The sign-in did not finish" : "Signed in at Robinhood"}</h1><p>${error ? esc(error) : "Go back to Gravit: it carries on from here. This tab can be closed."}</p></main>${error ? "" : "<script>setTimeout(() => window.close(), 1500)</script>"}</body></html>`;
 }
 
 /** the refusals that say the signer is not one the account takes: answered 401, every other refusal 409 */
@@ -638,7 +649,9 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
     if (!svc.account) return void res.status(404).json({ ok: false, error: "the account layer is not mounted" });
     const { address, wallet, chainId } = req.body as { address?: unknown; wallet?: unknown; chainId?: unknown };
     const host = req.get("host") ?? "127.0.0.1";
-    const r = svc.proofs.challenge(String(address ?? ""), String(wallet ?? ""), { domain: host, uri: `${req.protocol}://${host}/account` }, Number(chainId) || 1);
+    const face = faceOriginOf(req);
+    const page = face ? { domain: new URL(face).host, uri: `${face}/` } : { domain: host, uri: `${req.protocol}://${host}/account` };
+    const r = svc.proofs.challenge(String(address ?? ""), String(wallet ?? ""), page, Number(chainId) || 1);
     res.status(isRefusal(r) ? 400 : 200).json(isRefusal(r) ? { ok: false, refusal: r } : { ok: true, address: r.address, message: r.message, expiresAt: r.expiresAt });
   });
   app.post("/api/account/wallet/prove", wrap(async (req, res) => {
@@ -657,7 +670,9 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
     const signIn = svc.signIn(kind);
     if (!signIn) return void bad(res, `there is no sign-in for "${kind.slice(0, 40)}"`);
     const host = req.get("host") ?? "127.0.0.1";
-    const r = await signIn.start(`${req.protocol}://${host}/api/account/signin/callback`);
+    // the face's own callback when Gravit's face asked (it forwards the venue's navigation here); else this server's
+    const face = faceOriginOf(req);
+    const r = await signIn.start(face ? `${face}/data/account/signin/callback` : `${req.protocol}://${host}/api/account/signin/callback`);
     res.status(isRefusal(r) ? 502 : 200).json(isRefusal(r) ? { ok: false, refusal: r } : { ok: true, url: r.url, state: r.state });
   }));
   app.get("/api/account/signin/status", (req, res) => {
@@ -670,7 +685,7 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
     const q = req.query as Record<string, unknown>;
     const state = text(q.state) ?? "";
     const signIn = svc.signInHolding(state);
-    const r = signIn ? await signIn.finish({ state, code: text(q.code), error: text(q.error), error_description: text(q.error_description), iss: text(q.iss) }) : no("E_ACCOUNT_BAD_ACTION", { message: "this sign-in is not one this server started, or it ran out: start it again from the account page" });
+    const r = signIn ? await signIn.finish({ state, code: text(q.code), error: text(q.error), error_description: text(q.error_description), iss: text(q.iss) }) : no("E_ACCOUNT_BAD_ACTION", { message: "this sign-in is not one this server started, or it ran out: start it again from Gravit, under Account › Venues" });
     res.status(isRefusal(r) ? 400 : 200).type("html").send(signedInPage(isRefusal(r) ? r.message : undefined));
   }));
 

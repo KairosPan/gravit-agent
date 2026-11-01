@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { WebRoute } from "@deepseek-ai/dsh-host-webserver";
-import { FORBIDDEN, HttpError, isJsonBody, isLoopbackHost, isTrustedDataRequest, readBody } from "../src/http.ts";
+import { FORBIDDEN, HttpError, isJsonBody, isLoopbackHost, isTrustedDataRequest, isTrustedNavigation, readBody } from "../src/http.ts";
 import { registerLunhuiViewRoute } from "../src/lunhui-view.ts";
 
 const FACE = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -55,6 +55,26 @@ test("isTrustedDataRequest: the harness's /api fence restated — Host, Sec-Fetc
   assert.equal(isJsonBody(req({ "content-type": "Application/JSON; charset=utf-8" })), true);
   assert.equal(isJsonBody(req({ "content-type": "text/plain;charset=UTF-8" })), false, "the media type a no-preflight POST is stuck with");
   assert.equal(isJsonBody(req({})), false);
+});
+
+test("isTrustedNavigation: only a GET top-level document on a loopback Host", () => {
+  const req = (headers: Record<string, string>, method = "GET"): IncomingMessage => ({ method, headers }) as unknown as IncomingMessage;
+  const nav = { host: "127.0.0.1:3090", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" };
+  for (const site of ["cross-site", "none", undefined]) {
+    const headers: Record<string, string> = site === undefined ? { ...nav } : { ...nav, "sec-fetch-site": site };
+    assert.equal(isTrustedNavigation(req(headers)), true, String(site));
+  }
+  assert.equal(isTrustedNavigation(req({ ...nav, host: "localhost:3090" })), true);
+  assert.equal(isTrustedNavigation(req({ ...nav, host: "evil.example:3090" })), false, "a rebound Host");
+  assert.equal(isTrustedNavigation(req({ ...nav, "sec-fetch-mode": "navigate", host: "" })), false, "an empty Host");
+  assert.equal(isTrustedNavigation(req({ "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" })), false, "no Host");
+  assert.equal(isTrustedNavigation(req({ ...nav, origin: "https://evil.example" })), false, "an Origin");
+  assert.equal(isTrustedNavigation(req({ ...nav, origin: "http://127.0.0.1:3090" })), false, "even its own Origin: a navigation sends none");
+  assert.equal(isTrustedNavigation(req({ ...nav, "sec-fetch-mode": "cors" })), false, "a fetch()");
+  assert.equal(isTrustedNavigation(req({ ...nav, "sec-fetch-dest": "empty" })), false);
+  assert.equal(isTrustedNavigation(req({ ...nav, "sec-fetch-dest": "iframe" })), false, "a frame is not top-level");
+  assert.equal(isTrustedNavigation(req({ host: "127.0.0.1:3090" })), false, "no Fetch Metadata");
+  assert.equal(isTrustedNavigation(req(nav, "POST")), false, "a POST");
 });
 
 test("isLoopbackHost accepts the loopback spellings and nothing else", () => {

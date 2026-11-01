@@ -6,7 +6,8 @@
  * forwarded — and the twelve writes, `pair`, `prepare`, `exchange` and the
  * Market and wallet halves' nine, forwarded as `stream/markets` is, `guard`
  * with its fixed body and `wallet/challenge` and `signin/start` with the face's
- * origin. */
+ * origin — and the OAuth sign-in's callback, a venue's navigation forwarded
+ * behind its own fence. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
@@ -71,6 +72,9 @@ const NEW_READS: ReadonlyArray<readonly [face: string, account: string, route: "
   ["/data/account/signin/status", "/api/account/signin/status", "signinStatus", "state=s1"],
 ];
 const STREAM = "/data/account/stream";
+const CALLBACK = "/data/account/signin/callback";
+/** A venue's page sending the browser back: a top-level GET document navigation, cross-site, no Origin. */
+const NAVIGATION = { host: "127.0.0.1:3090", "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" };
 const FOLLOW = "/data/account/stream/markets";
 /** The three write paths, in the order they are registered, the Account path each one asks, and its row. */
 const WRITES: ReadonlyArray<readonly [face: string, account: string, route: "pair" | "prepare" | "exchange"]> = [
@@ -191,13 +195,13 @@ test("rebuildQuery: the whitelist, once each, 240 characters, fresh stripped", (
   assert.deepEqual(rebuildQuery("account", "/data/account"), { query: "", fresh: false });
 });
 
-test("the routes: thirty-seven exact paths; the fence refuses a foreign Origin and a missing Host before any fetch", async () => {
+test("the routes: thirty-eight exact paths, the callback last; the fence refuses a foreign Origin and a missing Host before any fetch", async () => {
   const { routes, fetched } = proxyWith(answering(OK_BODY));
   const paths = [
     ...ROUTES.map(([face]) => face), ...NEW_READS.map(([face]) => face), STREAM, FOLLOW,
-    ...WRITES.map(([face]) => face), ...NEW_WRITES.map(([face]) => face),
+    ...WRITES.map(([face]) => face), ...NEW_WRITES.map(([face]) => face), CALLBACK,
   ];
-  assert.equal(paths.length, 37);
+  assert.equal(paths.length, 38);
   assert.ok(routes.every((r) => r.kind === "exact"), "no prefix route");
   assert.deepEqual(routes.map((r) => `${r.kind} ${r.path}`), paths.map((face) => `exact ${face}`));
   for (const face of paths) {
@@ -208,6 +212,12 @@ test("the routes: thirty-seven exact paths; the fence refuses a foreign Origin a
     assert.equal(noHost.status, 403, face); assert.equal(noHost.body, FORBIDDEN);
     assert.equal((await call(routes, face, { host: "evil.example:3090" })).status, 403, "a rebound Host");
     assert.equal((await call(routes, face, { host: "127.0.0.1:3090", "sec-fetch-site": "cross-site" })).status, 403, "a cross-site page");
+    if (face === CALLBACK) continue;
+    /* The callback's exception is its own: every other route still refuses a venue's navigation, GET or POST. */
+    for (const method of ["GET", "POST"]) {
+      const nav = await call(routes, face, method === "POST" ? { ...NAVIGATION, "content-type": "application/json" } : NAVIGATION, method, method === "POST" ? "{}" : undefined);
+      assert.equal(nav.status, 403, `${method} ${face} refuses a navigation`); assert.equal(nav.body, FORBIDDEN);
+    }
   }
   const refusedFirst = await call(routes, "/data/account/explore?force=1", { host: "127.0.0.1:3090", origin: "https://evil.example" });
   assert.equal(refusedFirst.status, 403, "the fence comes before the query");
@@ -1065,4 +1075,92 @@ test("nothing of a new write's body is logged", async (t) => {
     }
   }
   assert.equal(seen.some((line) => line.includes("0xabc") || line.includes("0xdef")), false);
+});
+
+test("the callback forwards a venue's navigation and answers the Account's page", async () => {
+  const page = "<!doctype html><title>Robinhood sign-in</title><p>Go back to Gravit</p>";
+  const { routes, fetched, inits } = proxyWith(answering(page));
+  const a = await call(routes, `${CALLBACK}?state=s1&code=c1&iss=https%3A%2F%2Fexample`, NAVIGATION);
+  assert.equal(a.status, 200);
+  assert.equal(a.body, page, "the Account's bytes");
+  assert.deepEqual(a.headers, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "referrer-policy": "no-referrer" });
+  assert.deepEqual(fetched, [`${URL_}/api/account/signin/callback?state=s1&code=c1&iss=https%3A%2F%2Fexample`], "once, the rebuilt query");
+  assert.equal(inits[0]!.redirect, "error");
+  assert.equal(inits[0]!.headers, undefined, "a plain loopback fetch: no Origin, no Sec-Fetch-*, no cookie");
+  assert.equal(inits[0]!.method, undefined, "a GET");
+
+  /* Every name the venue may send, and a navigation with no Sec-Fetch-Site or `none` (typed, or a bookmark). */
+  const all = "state=s2&code=c2&error=access_denied&error_description=the+owner+said+no&iss=https%3A%2F%2Fexample";
+  await call(routes, `${CALLBACK}?${all}`, { ...NAVIGATION, "sec-fetch-site": "none" });
+  assert.equal(fetched.at(-1), `${URL_}/api/account/signin/callback?${all}`);
+  const { "sec-fetch-site": _site, ...noSite } = NAVIGATION;
+  assert.equal((await call(routes, `${CALLBACK}?state=s3`, noSite)).status, 200);
+
+  /* Not kept: the same callback asks again. */
+  const before = fetched.length;
+  await call(routes, `${CALLBACK}?state=s3`, NAVIGATION);
+  assert.equal(fetched.length, before + 1, "never kept");
+
+  /* A refusal is the Account's page, its status passed through. */
+  const refused = proxyWith(answering("<p>this sign-in is not one this server started</p>", 400));
+  const r = await call(refused.routes, `${CALLBACK}?state=x`, NAVIGATION);
+  assert.equal(r.status, 400); assert.equal(r.body, "<p>this sign-in is not one this server started</p>");
+  assert.equal(r.headers["content-type"], "text/html; charset=utf-8");
+});
+
+test("the callback: a fetch, a form, an Origin, a rebound Host are 403; a bad query 400; nothing is fetched", async () => {
+  const { routes, fetched } = proxyWith(answering("<p>ok</p>"));
+  const q = `${CALLBACK}?state=s1&code=c1`;
+  for (const [headers, method, why] of [
+    [{ ...NAVIGATION, "sec-fetch-mode": "cors", "sec-fetch-dest": "empty" }, "GET", "a fetch()"],
+    [{ ...NAVIGATION, "sec-fetch-dest": "empty" }, "GET", "not a document"],
+    [{ ...NAVIGATION, "sec-fetch-dest": "iframe" }, "GET", "a frame"],
+    [{ ...NAVIGATION, origin: "https://evil.example" }, "GET", "an Origin"],
+    [{ ...NAVIGATION, host: "evil.example:3090" }, "GET", "a rebound Host"],
+    [{ host: "127.0.0.1:3090" }, "GET", "no Fetch Metadata"],
+    [NAVIGATION, "POST", "a form's POST"],
+  ] as const) {
+    const out = await call(routes, q, { ...headers }, method);
+    assert.equal(out.status, 403, why); assert.equal(out.body, FORBIDDEN, why);
+  }
+  for (const bad of ["?foo=1", "?state=a&state=b", `?state=s&code=${"c".repeat(2_001)}`, `?state=${"s".repeat(241)}`,
+    `?error_description=${"d".repeat(1_001)}`, `?iss=${"i".repeat(501)}`, `?error=${"e".repeat(241)}`, "?fresh=1"]) {
+    const out = await call(routes, `${CALLBACK}${bad}`, NAVIGATION);
+    assert.equal(out.status, 400, bad.slice(0, 40)); assert.equal(out.body, INVALID);
+  }
+  assert.equal(fetched.length, 0, "nothing reaches the Account");
+  assert.equal((await call(routes, `${CALLBACK}?state=s&code=${"c".repeat(2_000)}`, NAVIGATION)).status, 200, "2 000 characters pass");
+});
+
+test("the callback: an Account that does not answer, and a disabled row, are 503 with the fixed page", async () => {
+  const fixed = "The Account did not answer. Go back to Gravit and start the sign-in again.";
+  const html = { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "referrer-policy": "no-referrer" };
+  const refused = proxyWith(async () => { throw Object.assign(new TypeError("fetch failed: secret text"), { cause: { code: "ECONNREFUSED" } }); });
+  const a = await call(refused.routes, `${CALLBACK}?state=s1`, NAVIGATION);
+  assert.equal(a.status, 503); assert.equal(a.body, fixed); assert.deepEqual(a.headers, html);
+  /* A good answer first, then a failure: never re-served stale. */
+  let fail = false;
+  const flaky = proxyWith(async () => { if (fail) throw new TypeError("x"); return ok("<p>signed in</p>"); });
+  await call(flaky.routes, `${CALLBACK}?state=s1`, NAVIGATION);
+  fail = true;
+  const b = await call(flaky.routes, `${CALLBACK}?state=s1`, NAVIGATION);
+  assert.equal(b.status, 503); assert.equal(b.body, fixed, "never stale");
+  const disabled = proxyWith(answering("<p>ok</p>"), () => NOW, { disabled: true });
+  const c = await call(disabled.routes, `${CALLBACK}?state=s1`, NAVIGATION);
+  assert.equal(c.status, 503); assert.equal(c.body, fixed); assert.deepEqual(c.headers, html);
+  assert.equal(disabled.fetched.length, 0);
+});
+
+test("the callback's abort is thirty seconds", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const hanging = proxyWith((_url, init) => new Promise<FakeAnswer>((_resolve, reject) => init.signal.addEventListener("abort", () => reject(aborted()))));
+  const one = start(hanging.routes, `${CALLBACK}?state=s1`, NAVIGATION);
+  for (let i = 0; i < 50 && hanging.inits.length === 0; i += 1) await new Promise<void>((r) => setImmediate(r));
+  assert.equal(hanging.inits.length, 1, "the callback asked the Account");
+  t.mock.timers.tick(29_999);
+  assert.equal(hanging.inits[0].signal.aborted, false, "waits 29 999 ms");
+  t.mock.timers.tick(1);
+  assert.equal(hanging.inits[0].signal.aborted, true, "cut at 30 s");
+  await one.done;
+  assert.equal(one.out.status, 503); assert.equal(one.out.body, "The Account did not answer. Go back to Gravit and start the sign-in again.");
 });
