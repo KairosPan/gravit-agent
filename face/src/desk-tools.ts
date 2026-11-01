@@ -13,11 +13,11 @@
  * the role tools. They unwind with the agent.
  *
  * WHAT THEY CLOSE OVER: process state main.ts owns, as `agent_<bin>` and `dispatch` close over theirs
- * (src/agents.ts, src/room.ts) - the quote hub main.ts creates once and shares with `/data/quotes`, and
+ * (src/agents.ts, src/room.ts) - the US quote source main.ts creates once over the Account's explore read
+ * (src/us-quotes.ts, through src/account-proxy.ts's cache), and
  * the desk's status reader, which src/desk.ts `installDesk` binds to the deps of `GET /data/desk/status`,
  * so the tool and the route agree on all but `runs`, which the tool cuts to the last ten. `desk_quotes`
- * asks the hub for a snapshot: a REST call for any symbol the hub has not refreshed in the last five
- * seconds. `desk_state` reads the ledger and `OFF` afresh.
+ * asks the source for a snapshot: one Account explore read per symbol, kept by the proxy for 20 seconds. `desk_state` reads the ledger and `OFF` afresh.
  *
  * WHAT THE MODEL READS: `desk_quotes` renders one line per quote, its time as the desk contract quotes
  * one (dsh/profile/desk.md: `IEX 15:21:03 ET`), so the model never converts a UTC time itself; its value
@@ -125,7 +125,7 @@ const STATE_RUNS = 10;
 const SYMBOL_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
 
 /** `desk_quotes`' answer when the hub refuses with 429 - its own message is the page's, in Chinese. */
-const BUSY = "busy: the quote hub is serving its maximum of clients; try again shortly";
+const BUSY = "busy: the US quote source refused for now; try again shortly";
 
 const NUMBER_OR_NULL = { oneOf: [{ type: "number" }, { type: "null" }] };
 const STRING_OR_NULL = { oneOf: [{ type: "string" }, { type: "null" }] };
@@ -285,8 +285,8 @@ export function deskToolDefinitions(deps: DeskToolDeps): DeskToolDefinition[] {
     description:
       "The price now for 1 to 20 US stocks, from the desk's US quote source, one line each: the price and its change on " +
       "the previous close; the feed and the exchange time in New York (IEX 15:21:03 ET, dated when not today); transport (stream " +
-      "or poll); status (live, delayed, stale or unavailable). The price now, never evidence. With no US source wired it answers " +
-      "unavailable and why.",
+      "or poll); status (live, delayed, stale or unavailable). The price now, never evidence. The source is the Account's market " +
+      "read; when the Account cannot be asked it answers unavailable and why.",
     parameters: {
       type: "object",
       properties: {
@@ -325,7 +325,8 @@ export function deskToolDefinitions(deps: DeskToolDeps): DeskToolDefinition[] {
         payload = await untilCancelled(exec.signal, () => deps.hub.snapshot(assets));
       } catch (error) {
         if (error instanceof HttpError && error.status === 429) return { error: BUSY };
-        throw error;
+        if (exec.signal.aborted) throw error;
+        return { error: `unavailable: ${error instanceof Error ? error.message : String(error)}` };
       }
       return { quotes: payload.quotes.map(deskQuote) };
     },

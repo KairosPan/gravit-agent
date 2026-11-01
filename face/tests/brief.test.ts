@@ -506,7 +506,7 @@ test("an unwired US source: the brief asks nothing, every price is null, and quo
   assert.equal((out as { error: string }).error, `quotes unavailable: ${NO_US_QUOTES}`);
   const b = briefOf(out);
   assert.equal(b.quotesError, `quotes unavailable: ${NO_US_QUOTES}`);
-  assert.match(b.quotesError ?? "", /A shares only \(Tencent\)/);
+  assert.match(b.quotesError ?? "", /no Account read to ask/);
   for (const quote of [...b.indexes, ...b.sectors, ...b.holdings.rows]) assert.equal(quote.last, null, quote.symbol);
   assert.deepEqual(b.holdings.rows.map((row) => row.symbol), ["NVDA", "AAPL"], "the book is still read");
   assert.equal(b.levels.loaded, 3);

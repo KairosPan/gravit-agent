@@ -461,12 +461,19 @@ const postHandler = (s: Settings, path: string, limit: number, abortMs: number) 
  * The reader returned is the `account` route's own: it and `/data/account` read through one cache, so the
  * seat route `main.ts` hands it to shares that route's upstream read. `dispose` forgets every kept answer
  * and aborts every open stream's upstream. */
-export function registerAccountProxy(webServer: RouteRegistrar, deps: AccountProxyDeps = {}): { reader: AccountReader; dispose(): void } {
+/** One read route's reads in-process, through the same cache and flights its `/data/account/<route>` is served from:
+ * `query` is one {@link rebuildQuery} would pass on. A disabled row answers `{ unreachable: "disabled" }` and asks nothing.
+ * No stale answer is re-served here: a failure is the failure. */
+export type AccountRouteRead = (query: string) => Promise<AccountAnswer>;
+
+export function registerAccountProxy(webServer: RouteRegistrar, deps: AccountProxyDeps = {}): { reader: AccountReader; explore: AccountRouteRead; dispose(): void } {
   const s = settingsOf(deps);
   const accountReads = routeReads("account", s);
   const all: Reads[] = [];
+  let exploreReads: Reads | undefined;
   for (const route of READ_ROUTES) {
     const reads = route === "account" ? accountReads : routeReads(route, s);
+    if (route === "explore") exploreReads = reads;
     all.push(reads);
     webServer.register({ kind: "exact", path: facePath(route), handler: handler(route, reads, s.disabled) });
   }
@@ -477,8 +484,10 @@ export function registerAccountProxy(webServer: RouteRegistrar, deps: AccountPro
   for (const route of WRITE_ROUTES) {
     webServer.register({ kind: "exact", path: `/data/account/${route}`, handler: postHandler(s, WRITE_PATHS[route], WRITE_BODY_LIMIT[route], WRITE_ABORT_MS[route]) });
   }
+  const explore = exploreReads as Reads;
   return {
     reader: readerOf(accountReads),
+    explore: (query) => explore.read(query, false),
     dispose: () => {
       for (const reads of all) reads.clear();
       for (const stream of open) stream.abort();

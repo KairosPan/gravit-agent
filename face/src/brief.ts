@@ -34,9 +34,10 @@
  * and it still carries itself: the files read, every price null, `quotesError` set, so the firing quotes it and the
  * model can say what is unavailable. `quotesError` is:
  * - `quotes unavailable: busy` when the hub refuses with 429 - its own message is the quotes page's, in Chinese;
- * - `quotes unavailable: <message>` for any other throw;
+ * - `quotes unavailable: <message>` for any other throw - from the Account's source, why it could not be asked
+ *   (not reachable, timed out, the seat row disabled);
  * - `quotes unavailable: <reason>`, nothing asked, when the source is `unavailable` (src/us-quotes.ts) - main.ts
- *   wires none now, so the face's brief says `quotes unavailable: no US quote source is wired: …`;
+ *   wires the Account's market read, so this is a face with no Account wired;
  * - `quotes unavailable: the source has no price for any symbol (US provider <state>)` when the snapshot answers without a
  *   single price - no keys, or a feed that is down - `<state>` the US provider's state as its English word
  *   (`unconfigured`, `error`, …), and `unknown` when the payload names no US provider or a state that is not one of

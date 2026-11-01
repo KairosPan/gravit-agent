@@ -232,14 +232,14 @@ test("desk_quotes validates, caps at 20, maps the hub's fields and survives 429"
     readState: readStatus,
   }), "desk_quotes");
   const refusal = await busy.execute({ symbols: ["NVDA"] }, exec());
-  assert.deepEqual(refusal, { error: "busy: the quote hub is serving its maximum of clients; try again shortly" });
+  assert.deepEqual(refusal, { error: "busy: the US quote source refused for now; try again shortly" });
   assert.deepEqual(busy.output.render({ symbols: ["NVDA"] }, refusal),
-    [{ type: "text", text: "busy: the quote hub is serving its maximum of clients; try again shortly" }]);
+    [{ type: "text", text: "busy: the US quote source refused for now; try again shortly" }]);
   const failing = byName(deskToolDefinitions({
     hub: { async snapshot(): Promise<QuotePayload> { throw new HttpError(503, "quote service stopped"); } },
     readState: readStatus,
   }), "desk_quotes");
-  await assert.rejects(failing.execute({ symbols: ["NVDA"] }, exec()), /quote service stopped/, "any other failure is the call's error");
+  assert.deepEqual(await failing.execute({ symbols: ["NVDA"] }, exec()), { error: "unavailable: quote service stopped" }, "any other failure is unavailable and why");
 
   assert.deepEqual(quotes.presentCall({ symbols: ["NVDA", "AAPL"] }), { card: "generic", title: "Quotes: NVDA, AAPL", kind: "read" });
   assert.deepEqual(quotes.presentCall("junk"), { card: "generic", title: "Quotes", kind: "read" });
@@ -383,5 +383,5 @@ test("desk_quotes over an unwired US source answers unavailable and why, asks no
   assert.deepEqual(answer, { error: `unavailable: ${NO_US_QUOTES}` });
   assert.deepEqual(quotes.output.render({ symbols: ["NVDA"] }, answer), [{ type: "text", text: `unavailable: ${NO_US_QUOTES}` }]);
   await assert.rejects(quotes.execute({ symbols: ["nvda"] }, exec()));
-  assert.match(quotes.description, /none is wired|no US source wired/i);
+  assert.match(quotes.description, /Account's market read; when the Account cannot be asked it answers unavailable and why/);
 });
