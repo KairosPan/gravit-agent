@@ -3901,7 +3901,7 @@ and a face browser that signs (`npm run account:owners`, "The owner drill").
 7. **The two boxes with 4820 unpublished** — "The two-box drill" below.
 
 **PASS criteria are observations.** Record each run in `DEVELOPMENT.md` §7.4 with the date and the
-tree's commit (`git rev-parse --short HEAD`). **Not yet run** — owed after plan 5.
+tree's commit (`git rev-parse --short HEAD`). **First run 2026-11-01 on `2697cdcd`** — drills 1, 2.1–2.3, 3, 4, 6 and 5 in Guard passed; Beast and the other Rules signatures, most of 5.4–5.5, and 7 not run; four findings recorded in `DEVELOPMENT.md` §7.4.
 
 ## The two-box drill (run before the branch lands, and after any change to compose.yml or a Dockerfile)
 
