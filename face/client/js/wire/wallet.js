@@ -7,7 +7,7 @@
 // wallet's provider and to the `post` it is handed (the face's /data/account/* proxy), nothing else.
 
 /* Robinhood Chain, for a wallet that does not know it yet: the wallet shows it to the owner before adding it (chain 4663; its own
-   RPC and the explorer Robinhood publishes for it) — the Account page's TK_ROBINHOOD_CHAIN */
+ * RPC and the explorer Robinhood publishes for it) — the Account page's TK_ROBINHOOD_CHAIN */
 export const ROBINHOOD_CHAIN = Object.freeze({
   chainId: '0x1237', chainName: 'Robinhood Chain', nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
   rpcUrls: ['https://rpc.mainnet.chain.robinhood.com/'], blockExplorerUrls: ['https://robinhoodchain.blockscout.com'],

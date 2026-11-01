@@ -46,7 +46,7 @@ const goKey = html => { const m = html.match(GO); assert.ok(m, 'the go key is dr
 test('the device line: the six standings, each its line and its one key', () => {
   const signs = renderDeviceLine(standing('signs', KID));
   assert.equal(signs, '<p class="acct-note">This page signs for the account</p>');
-  assert.equal(renderDeviceLine(standing('pending', KID)), '<p class="acct-note">Waiting to be let in — Let it sign on the Account page, under Devices</p>');
+  assert.equal(renderDeviceLine(standing('pending', KID)), '<p class="acct-note">Waiting to be let in — a browser that signs lets it in, under Settings › Devices</p>');
   assert.equal(renderDeviceLine(standing('none')), '<p class="acct-note">This browser cannot sign for the account</p>');
   assert.equal(renderDeviceLine(standing('unknown')), '', 'not known yet: nothing');
   // the pair box, only for a page that needs the code

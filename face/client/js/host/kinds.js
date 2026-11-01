@@ -92,7 +92,7 @@ export function seatLift(name, args, text, isError, callId) {
     return { kind: 'refusal', text: line, data: { seat: true, toolName: name, callId } };
   }
   if (v.pending === true && typeof v.card?.id === 'string') {
-    return { kind: 'receipt', text: `Card raised on the Account page · ${v.card.id} · answer it there`, data: { seat: true, cardId: v.card.id, callId } };
+    return { kind: 'receipt', text: `Card raised · ${v.card.id} · answer it under Account › Cards`, data: { seat: true, cardId: v.card.id, callId } };
   }
   if (typeof v.order?.id === 'string') {
     const word = v.order.status === 'canceled' ? 'Order canceled' : 'Order placed';
@@ -105,7 +105,7 @@ export function seatLift(name, args, text, isError, callId) {
     const refused = legs.filter(l => l.ok === false).length;
     const parts = [];
     if (placed > 0 || (cards === 0 && refused === 0)) parts.push(`${placed} of ${legs.length} legs placed`);
-    if (cards > 0) parts.push(`${cards} card${cards === 1 ? '' : 's'} raised on the Account page`);
+    if (cards > 0) parts.push(`${cards} card${cards === 1 ? '' : 's'} raised · answer under Account › Cards`);
     if (refused > 0) parts.push(`${refused} refused`);
     return { kind: 'receipt', text: `Batch · ${parts.join(' · ')}`, data: { seat: true, callId } };
   }

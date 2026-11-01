@@ -205,7 +205,7 @@ test("the Venues line says the Account's China words", () => {
   has(escaped, '<span>&lt;b&gt;x&lt;/b&gt; &amp; y</span>', "the Account's words are escaped");
 });
 
-test('Venues: the rows with health, does and Paper; Details opens the drawer; the seat box and Open the Account page stay', () => {
+test('Venues: the rows with health, does and Paper; Details opens the drawer; the seat box with Refresh and, while cards wait, Answer under Cards', () => {
   const s = state({ tab: 'venues' });
   const html = draw(s);
   const venues = html.match(/<section class="cardbox" aria-label="Venues">[\s\S]*?<\/section>/)?.[0] ?? '';
@@ -265,17 +265,22 @@ test('Venues: the rows with health, does and Paper; Details opens the drawer; th
   has(wordless, '<div class="label">A-share quotes</div><div class="venues"><div class="venue"><span>Tencent · Connected</span></div></div></section>');
   lacks(html, 'A-share quotes', 'no cn provider reported: no line');
 
-  // the seat box under them, as before: nothing read, then the service, the seat and its limit, the venues, the cards, the link
+  // the seat box under them, as before: nothing read, then the service, the seat and its limit, the venues, the cards, its keys
   has(html, '<section class="cardbox" aria-label="Account seat"><div class="cardbox-title">Account seat</div><p class="acct-note">Loading…</p>');
   const seat = draw(state({ tab: 'venues', seat: seatView() })).match(SEAT_BOX)?.[0] ?? '';
   has(seat, '<div class="venue"><span><b>127.0.0.1:4820 · reachable</b><br><span class="dim">Guard · Trading on · $100 a move</span></span></div>');
   has(seat, '<div class="venue"><span><b>Gravit · admitted until Nov 19</b><br><span class="dim">trade · paper-1 · $100 an order · $850 of $1,000 left</span></span></div>');
   has(seat, '<div class="venue"><span><b>Paper account · paper</b> <span class="chip grey">Paper</span><br><span class="dim">$10,000</span></span></div>');
   has(seat, `<p class="acct-note">2 cards waiting · As of ${hhmm('2026-10-22T07:32:00.000Z')}</p>`);
-  has(seat, '<div class="btn-row"><a class="btn-sm" href="http://127.0.0.1:4820" target="_blank" rel="noopener">Open the Account page</a><button type="button" class="btn-sm" data-action="refreshAccount">Refresh</button></div>');
+  has(seat, '<div class="btn-row"><button type="button" class="btn-sm" data-action="refreshAccount">Refresh</button><a class="btn-sm" href="#/account/cards">Answer under Cards</a></div>');
+  assert.doesNotMatch(seat, /Account page|4820"/, 'no way to the Account\'s own page');
+  // no card waiting: Refresh alone
+  const none = draw(state({ tab: 'venues', seat: seatView({ cards: [] }) })).match(SEAT_BOX)?.[0] ?? '';
+  has(none, '<div class="btn-row"><button type="button" class="btn-sm" data-action="refreshAccount">Refresh</button></div>');
   const off = draw(R.seatFailed(state({ tab: 'venues', seat: { ok: true, url: 'http://127.0.0.1:4820', reachable: false, error: 'ECONNREFUSED' } }), { at: NOW }));
   has(off, '<div class="venues"><div class="venue"><span><b>127.0.0.1:4820 · not reachable</b></span></div></div>');
-  has(off, 'Open the Account page</a>');
+  has(off, '<div class="btn-row"><button type="button" class="btn-sm" data-action="refreshAccount">Refresh</button></div>');
+  assert.doesNotMatch(off, /Account page/);
   assert.ok(html.indexOf('aria-label="Venues"') < html.indexOf('aria-label="Account seat"'), 'the seat box under the venues');
 });
 
@@ -421,7 +426,7 @@ test('no CJK, no icon URL, no raw JSON in any rendered string', () => {
     const html = draw(s) + renderStatement(s, NOW) + renderSettings(s);
     assert.doesNotMatch(html, CJK);
     assert.doesNotMatch(html, /<img|\bsrc=|elbstream|favicon/);
-    for (const [url] of html.matchAll(/https?:\/\/[^\s"'<]+/g)) assert.equal(url, 'http://127.0.0.1:4820', 'the only address drawn is the Account page link');
+    assert.deepEqual([...html.matchAll(/https?:\/\/[^\s"'<]+/g)].map(m => m[0]), [], 'no address is drawn: no link to the Account\'s own page');
     assert.doesNotMatch(html, /\{"|":|\[object Object\]|undefined|NaN|\bnull\b/);
   }
 });

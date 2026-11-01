@@ -223,8 +223,9 @@ function venues(state, now) {
 }
 
 // the Account seat's standing (spec 2026-10-20 §6.3): the service with the Account's own mode and writes, the seat and its
-// limits, the venues with the paper ones marked, the cards waiting — answered on the face's Cards tab, or on the Account page —
-// and the way to the Account page. Its words are the Account's; the stamp is when the face answered.
+// limits, the venues with the paper ones marked, the cards waiting — answered on the face's own Cards tab, the way there drawn
+// while any wait (spec §5.8: no key leads to the Account's own page). Its words are the Account's; the stamp is when the face
+// answered.
 function seatBox(state, now) {
   const s = state.seat;
   const w = seatWords(s.data);
@@ -243,8 +244,8 @@ function seatBox(state, now) {
     const stamp = `As of ${when(s.data.asOf ?? read, now) || 'earlier'}${s.status === 'error' ? ' · stale' : ''}`;
     body = `<div class="venues">${rows.join('')}</div>${note([w.cards, stamp].filter(Boolean).join(' · '))}`;
   }
-  const keys = `<div class="btn-row">${w.url ? `<a class="btn-sm" href="${esc(w.url)}" target="_blank" rel="noopener">Open the Account page</a>` : ''}` +
-    `<button type="button" class="btn-sm" data-action="refreshAccount">Refresh</button></div>`;
+  const keys = `<div class="btn-row"><button type="button" class="btn-sm" data-action="refreshAccount">Refresh</button>` +
+    `${w.cards ? '<a class="btn-sm" href="#/account/cards">Answer under Cards</a>' : ''}</div>`;
   return box(`<div class="cardbox-title">Account seat</div>${body}${keys}`, 'Account seat');
 }
 

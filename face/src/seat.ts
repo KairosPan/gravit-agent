@@ -4,7 +4,7 @@
  * local process — and reduces it to what the seat box draws: the service
  * reachable or not, the seat absent / knocking / admitted / expired / revoked
  * with its limits, the venues with the paper ones marked, the cards waiting
- * on the Account page. The seat is found by the NAME the owner typed when
+ * for the owner under the face's Account › Cards. The seat is found by the NAME the owner typed when
  * admitting it (`face/src/account-seat.ts` ACCOUNT_SEAT_NAME): the face never
  * reads the seat's key file, and this route touches no key and no home.
  *
@@ -96,7 +96,7 @@ export interface SeatView {
 export interface SeatDeps {
   /** The Account service; default `FACE_ACCOUNT_URL` or `http://127.0.0.1:4820`. */
   url?: string;
-  /** The seat's name on the Account page; default `Gravit`. */
+  /** The seat's name at the Account (the face's Account › Agents); default `Gravit`. */
   seatName?: string;
   /** The Account's `GET /api/account` through the proxy's cache: `main.ts` hands the one
    * `registerAccountProxy` returns. None: the route makes its own from `url`, `fetch`, `now` and `timeoutMs`. */

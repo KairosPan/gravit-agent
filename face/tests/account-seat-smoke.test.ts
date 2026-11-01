@@ -163,7 +163,7 @@ test("account seat smoke: the seat mounts, its writes are gated, a read answers,
     assert.ok(typeof view.seat?.validUntil === "number" && view.seat.validUntil > Date.now(), `the Account's ISO expiry reaches the box as milliseconds: ${JSON.stringify(view.seat)}`);
     assert.ok(view.seat?.limits.some((l) => typeof l.validUntil === "number"), "a limit's expiry too");
     assert.ok(view.venues?.some((v) => v.id === "paper-momentum" && v.paper === true), JSON.stringify(view.venues));
-    assert.ok((view.cards?.length ?? 0) >= 1, `the card the seat raised waits on the Account page: ${JSON.stringify(view.cards)}`);
+    assert.ok((view.cards?.length ?? 0) >= 1, `the card the seat raised waits for the owner under Account › Cards: ${JSON.stringify(view.cards)}`);
     assert.ok(view.cards?.some((c) => c.id === answered.card?.id), "and it is that card");
   } finally {
     for (const off of cleanups) off();

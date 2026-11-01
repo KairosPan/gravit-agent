@@ -48,7 +48,7 @@ export function seatWords(data) {
   const s = data.seat && typeof data.seat === 'object' ? data.seat : {};
   const name = typeof s.name === 'string' && s.name ? s.name : 'Gravit';
   const seat = s.status === 'admitted' ? `${name} · admitted${isNum(s.validUntil) ? ` until ${fmtDate(s.validUntil)}` : ''}`
-    : s.status === 'knocking' ? `${name} · knocking — let it in under Agents`
+    : s.status === 'knocking' ? `${name} · knocking — let it in under Account › Agents`
       : s.status === 'expired' ? `${name} · expired`
         : s.status === 'revoked' ? `${name} · revoked`
           : s.status === 'unknown' ? `${name} · on the account · standing unknown`

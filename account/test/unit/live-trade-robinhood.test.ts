@@ -568,7 +568,7 @@ describe("Robinhood stocks: orders through its MCP server, in the Agentic accoun
     expect(trader.whyNot).toBeUndefined();
     // no Agentic account for this sign-in: it may not trade, and why, in Robinhood's terms, with how that account is opened
     const none = (await stocks(server({ ...READS, get_accounts: accounts(false) }))).trader;
-    expect([none.can, none.whyNot]).toEqual([false, "this sign-in has no Robinhood Agentic account, the one account an agent may trade in (Robinhood marks it agentic_allowed): Robinhood opens it, as a self-directed individual investing account it calls the MCP account, during the sign-in that first connects an agent, so sign in again from the account page and open it there"]);
+    expect([none.can, none.whyNot]).toEqual([false, "this sign-in has no Robinhood Agentic account, the one account an agent may trade in (Robinhood marks it agentic_allowed): Robinhood opens it, as a self-directed individual investing account it calls the MCP account, during the sign-in that first connects an agent, so sign in again from Gravit, under Account › Venues, and open it there"]);
     // accounts that do not say: unknown, and no reason given for a no that was not said
     const unsaid = (await stocks(server({ ...READS, get_accounts: accounts(undefined) }))).trader;
     expect([unsaid.can, unsaid.whyNot]).toEqual(["unknown", undefined]);

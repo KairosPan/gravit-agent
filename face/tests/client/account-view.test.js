@@ -33,7 +33,7 @@ test('seatWords: nothing read, not reachable, and every standing in its words', 
   assert.deepEqual(on.venues, [{ id: 'paper-1', name: 'Paper account · paper', paper: true, usd: '$10,000', note: '' }, { id: 'okx', name: 'OKX', paper: false, usd: '$0', note: 'OKX does not serve this location' }]);
   assert.equal(on.cards, '2 cards waiting'); assert.equal(on.url, 'http://127.0.0.1:4820');
   const standing = status => seatWords(seatView({ seat: { name: 'Gravit', status, limits: [] } })).seat;
-  assert.equal(standing('knocking'), 'Gravit · knocking — let it in under Agents');
+  assert.equal(standing('knocking'), 'Gravit · knocking — let it in under Account › Agents');
   assert.equal(standing('absent'), 'Gravit · not on the account');
   assert.equal(standing('expired'), 'Gravit · expired');
   assert.equal(standing('revoked'), 'Gravit · revoked');
@@ -310,7 +310,7 @@ test('agentsOf: Gravit first from the seat view, then the Account agents with th
   // with no address on the seat view (knocking: no key yet), the seat's agents are found by name, in any case, and all counted
   const knocking = agentsOf(more, seatView({ seat: { name: 'Gravit', status: 'knocking', limits: [] } }));
   assert.deepEqual(knocking.map(a => [a.name, a.gravit, a.cards, a.orders]), [['Gravit', true, 2, 4], ['Claude Code', false, 1, 1], ['Gravitas', false, 0, 0]]);
-  assert.equal(knocking[0].standing, 'Gravit · knocking — let it in under Agents');
+  assert.equal(knocking[0].standing, 'Gravit · knocking — let it in under Account › Agents');
   // the seat's name is the seat view's
   const scout = agentsOf({ ...agents, agents: [{ name: 'SCOUT', status: 'ok' }, { name: 'Gravit', status: 'ok' }] }, seatView({ seat: { name: 'Scout', status: 'admitted', limits: [] } }));
   assert.deepEqual(scout.map(a => [a.name, a.gravit, a.standing ?? a.status]), [['Scout', true, 'Scout · admitted'], ['Gravit', false, 'ok']]);

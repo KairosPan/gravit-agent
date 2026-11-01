@@ -302,7 +302,7 @@ describe("Robinhood's investing accounts, through its MCP server", () => {
     const said = refusal(await x.svc.account!.prepare({ type: "liveOrder", venue: "robinhood", symbol: "AAPL", side: "buy", orderType: "market", qty: "1" }));
     expect([said.code, said.message]).toEqual([
       "E_VENUE_PERMISSION",
-      "Robinhood: this sign-in has no Robinhood Agentic account, the one account an agent may trade in (Robinhood marks it agentic_allowed): Robinhood opens it, as a self-directed individual investing account it calls the MCP account, during the sign-in that first connects an agent, so sign in again from the account page and open it there",
+      "Robinhood: this sign-in has no Robinhood Agentic account, the one account an agent may trade in (Robinhood marks it agentic_allowed): Robinhood opens it, as a self-directed individual investing account it calls the MCP account, during the sign-in that first connects an agent, so sign in again from Gravit, under Account › Venues, and open it there",
     ]);
     // not a quote, not an order: nothing was asked of Robinhood
     expect(server.called).toEqual([]);

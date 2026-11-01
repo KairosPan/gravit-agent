@@ -16,8 +16,9 @@
  * What the seat does, read at buyer-agent-demo @ 133b9a7:
  * - its key is the Account's, made on its first tool call under
  *   `$BUYER_HOME/seats/<slug>.json` (exclusive create, mode 0600), never read
- *   here; the seat's name is what the Account page shows, so the operator
- *   admits it as Gravit and signs its limit under that name;
+ *   here; the seat's name is what the Account shows on the face's Account ›
+ *   Agents, so the operator lets it in as Gravit and signs its limit under that
+ *   name;
  * - it registers its 36 real-account tools even when the service is not
  *   reachable (its startup GET of `/api/account` fails closed to "real"), so a
  *   face booted before the service still carries the tools, and a call then
@@ -47,7 +48,7 @@ export const ACCOUNT_SEAT_ROW_ID = "mcp-account";
 /** The server name, hence the tool prefix `mcp__account__`: Linqi's own name for the dsh row. */
 export const ACCOUNT_SEAT_SERVER = "account";
 export const SEAT_TOOL_PREFIX = `mcp__${ACCOUNT_SEAT_SERVER}__`;
-/** The seat's name on the Account page; its slug `gravit` names the key file there. */
+/** The seat's name at the Account, as the face's Account › Agents shows it; its slug `gravit` names the key file there. */
 export const ACCOUNT_SEAT_NAME = "Gravit";
 /** The repo's `account/`, the Account service's install, resolved from this module's own location (as
  * `roles.ts` resolves `ROLES_ROOT`); `FACE_ACCOUNT_SEAT_DIR` overrides it ({@link seatDir}). */

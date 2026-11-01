@@ -717,7 +717,7 @@ export function agenticIn(data: unknown): { seen: boolean; account?: { number: s
  * external agent", read 2026-10-05: the MCP account is "a type of self-directed, individual investing account", opened during the first
  * sign-in; the agent "can only place trades in your Robinhood Agentic account") */
 const NO_AGENTIC =
-  "this sign-in has no Robinhood Agentic account, the one account an agent may trade in (Robinhood marks it agentic_allowed): Robinhood opens it, as a self-directed individual investing account it calls the MCP account, during the sign-in that first connects an agent, so sign in again from the account page and open it there";
+  "this sign-in has no Robinhood Agentic account, the one account an agent may trade in (Robinhood marks it agentic_allowed): Robinhood opens it, as a self-directed individual investing account it calls the MCP account, during the sign-in that first connects an agent, so sign in again from Gravit, under Account › Venues, and open it there";
 
 /** what a tool would be sent that its schema, as the server lists it now, no longer takes or now requires: an order is not sent on a guess */
 function unfit(tool: McpTool | undefined, args: Record<string, unknown>): string[] {
@@ -790,7 +790,7 @@ export async function robinhoodStocksSource(req: { venue: string; label: string;
   /** the Agentic account, as the last read of get_accounts found it */
   let agentic: { number: string; type: string } | undefined;
   let agenticSeen = false;
-  const words = { permission: `${name} refused: through its MCP server an agent trades only in the Robinhood Agentic account, which Robinhood opens during the sign-in that first connects an agent`, unauthorized: `${name} no longer accepts this sign-in: sign in again from the account page` };
+  const words = { permission: `${name} refused: through its MCP server an agent trades only in the Robinhood Agentic account, which Robinhood opens during the sign-in that first connects an agent`, unauthorized: `${name} no longer accepts this sign-in: sign in again from Gravit, under Account › Venues` };
   /** What Robinhood's MCP server answered over HTTP when it did not take a request at all — the SDK's StreamableHTTPError carries the status
    * in `code` and the body after "Error POSTing to endpoint: " — as the account's refusal: its place rule (451, its words), the server in
    * front of it refusing this network, a ban or a rate limit, a sign-in it no longer takes, no answer (5xx). Nothing when no HTTP answer
