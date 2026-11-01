@@ -11,6 +11,23 @@ Install once: `npm ci` here.
 
 Design: `docs/superpowers/specs/2026-10-27-account-in-repo-design.md`. The face's side: `face/README.md` "The Account seat".
 
+## AKShare, the sidecar
+
+The Account runs `akshare-mcp` (a Python MCP server over AKShare, public A-share and other Chinese market data) as its own MCP child over stdio (`src/portfolio/live/akshare.ts`). Gravit reaches it through the seat's one read tool, `portfolio_akshare` (`{tool, arguments}`); the face runs no AKShare.
+
+- Host install, once (needs `uv`; the Git source is intentional, because PyPI's normalized `akshare-mcp` is another project, and `mcp<2` stays because this revision uses the SDK 1.x FastMCP API):
+
+  ```bash
+  uv tool install --python 3.12 --with 'mcp<2' \
+    'git+https://github.com/xiaozhozho/akshare-mcp.git@9b6a22b6d83cce2a996a5072743bb06686040ce0'
+  ```
+
+- The command is `PORTFOLIO_AKSHARE_BIN`, default `~/.local/bin/akshare-mcp` (argv only, no shell). The account image installs the same pin and sets it to `/usr/local/bin/akshare-mcp`.
+- The child starts on the first ask, not at boot, and starts again on the next ask after it exits. One 120 s deadline covers a cold start, the tool listing and the call; a call that times out recycles the child. A reply past 4 MiB is refused `too-large`, arguments past 16 KiB `bad-arguments`; the child returns at most 500 rows (`AKSHARE_MCP_MAX_ROWS`), and a result says `truncated` when it cut.
+- The child's environment is an allowlist of the Account's own (`PATH`, `HOME`, `USER`, `LANG`/`LC_*`, the temp dirs, the TLS roots, proxies without their userinfo, `FASTMCP_LOG_LEVEL`): no wallet or iFinD secret reaches Python. Its stderr is this process's.
+- Two routes, both reads (no ledger line, no card; they work with `--read-only`, behind the `Host` fence): `GET /api/akshare/tools` lists the child's tools, `POST /api/akshare/call` takes `{tool, arguments}`. A refusal is `{ok: false, akshare: <word>, message}` with `off`, `unknown-tool`, `bad-arguments` (400), `unavailable` (503), `timeout` (504) or `too-large` (502).
+- Live check: `curl -s 127.0.0.1:4820/api/akshare/tools` lists 14 tools. A 4820 started from an older tree answers that the route does not exist: restart it from this tree.
+
 ## In the box
 
 `docker compose up` at the repo root runs this service as the `account` box (`compose.yml`, `Dockerfile` here: the image copies `account/` and runs `npm ci` at build) beside the face's `agent` box. Stop the host service first: the box publishes 4820 on the host's loopback. Run `npm ci` here on the host before the first `docker compose up` (the dev loop needs it anyway): the agent box's `account-modules` volume mounts at `account/node_modules` inside a read-only bind of this directory, so the mount point must already exist.

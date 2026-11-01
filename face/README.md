@@ -116,7 +116,6 @@ outside the whole repo.
 | `DEEPSEEK_API_KEY` | — | resolved per request through the credential seam, then the environment |
 | `DSH_TELEMETRY_DISABLED` | unset | the telemetry row is already off by the face's policy layer (D3); this switch matters only once an operator patch re-enables it, and then still wins — ANY non-empty value (`0` and `false` included) disables it again |
 | `DSH_PERMISSION_MODE` | `workspace-write` | sandbox mode. `danger-full-access` also sets the approval policy to `never` — it DISARMS the Gate-2 surface below (the order gate then refuses orders rather than running them) |
-| `FACE_AKSHARE_MCP_COMMAND` | `~/.local/bin/akshare-mcp` (expanded absolute path) | AKShare MCP executable; no shell command or arguments |
 | `HTTP_PROXY` / `HTTPS_PROXY` | — | not applied inside the face process — neither to its own quote, search and Account fetches nor to dsh's requests: the face does not install dsh 0.2.0's proxy policy (D10), matching 0.1.1, which had none. Tool subprocesses still inherit the variables |
 
 `FACE_PORT` and `FACE_PROFILE` read an empty value as unset, not as a literal:
@@ -255,78 +254,69 @@ it boots with `deferReady` and calls `commitReady()` last, which refuses a tree
 that stopped in the meantime. A tab still holding its cookie reconnects the
 moment the gateway admits it, so it must never find `/data` half-mounted.
 
-## AKShare MCP — A-share queries in Gravit
+## AKShare — through the Account
 
-The project mounts AKShare through `src/akshare.ts` on each boot. This is a dsh
-connection, independent of any Codex MCP configuration. The installed executable
-can be shared by both clients; each client starts its own stdio server process.
-
-Install the selected community implementation once with uv:
-
-```bash
-uv tool install --python 3.12 --with 'mcp<2' \
-  'git+https://github.com/xiaozhozho/akshare-mcp.git@9b6a22b6d83cce2a996a5072743bb06686040ce0'
-```
-
-The Git source is intentional: PyPI's normalized `akshare-mcp` package name
-belongs to a different implementation. This revision uses the MCP SDK 1.x
-FastMCP API, so retain the `mcp<2` constraint. Startup does not install or update
-packages. A missing executable is logged without taking down the chat host.
-
-After starting/restarting the face, **Plugin → akshare** shows the live tool
-roster. `/data/plugins.json` should list `server: "akshare"` with 14 tools,
-including `mcp__akshare__akshare_discover` and `mcp__akshare__akshare_stock_a`.
-Use discovery first; the Tencent A-share snapshot call is:
+The face mounts no AKShare and runs no AKShare process. AKShare is the Account's
+sidecar (`../account/README.md` "AKShare, the sidecar": the install and its pin, the
+routes `/api/akshare/*`, the limits); Gravit reaches it through the seat's one read
+tool, `mcp__account__portfolio_akshare` (`src/account-seat.ts`), which takes
+`{tool, arguments}`. Use `akshare_discover` first; the Tencent A-share snapshot is:
 
 ```json
-{"method":"stock_zh_a_spot_tx"}
+{"tool":"akshare_stock_a","arguments":{"method":"stock_zh_a_spot_tx"}}
 ```
 
-Pass that to `mcp__akshare__akshare_stock_a`. This fetches the whole vendor
-snapshot before returning at most 500 rows; inspect `truncated` and `row_count`
-before drawing whole-market conclusions. Calls have a 120-second timeout.
-These public-source queries have no lookahead guard (no read in the tree has one
-since 2026-10-24) and answer what their sources hold now.
-Data timestamps and retrieval time are different, and source errors must remain
-visible (the Eastmoney and Xueqiu quote tests failed on 2026-09-15).
+The sidecar fetches the whole vendor snapshot before returning at most 500 rows;
+inspect `truncated` and `row_count` before drawing whole-market conclusions. The seat's
+call timeout is 130 s, above the Account's 120 s deadline. The call is a read: Gate 2
+raises no card, and no role carries it (`src/roles.ts`, the `NEVER` table). Like every
+read in the tree it has no lookahead guard (since 2026-10-24) and answers what the
+source holds now; data timestamps and retrieval time differ, and source errors stay
+visible (the Eastmoney and Xueqiu quote tests failed on 2026-09-15). No `mcp:akshare`
+prompt section exists any more, and nothing falls back to a face-side AKShare when the
+Account is down.
 
-The `mcp-akshare` row is composed after the base bundle and the face's policy
-defaults, and before the operator's profile/home patches. An operator patch can
-replace its config or disable it with `- { id: mcp-akshare, disabled: true }`.
-No installed profile patch is rewritten to add this connection.
+**What the operator changes** (the face never edits the home):
 
-**What dsh 0.2.0 changed for every MCP row** — this one and the Account seat's
-alike; no config key changed (`src/akshare.ts` records it):
+- A `- id: mcp-akshare` entry in `$DSH_HOME/profiles/face/cordis.patch.yml` or
+  `$DSH_HOME/cordis.patch.yml` is inert now; delete it by hand.
+- `FACE_AKSHARE_MCP_COMMAND` in a start line is unread.
+- The face's start line (`.claude/launch.json`) no longer needs `~/.local/bin` (where
+  `akshare-mcp` lives) on its `PATH`; the Account's line keeps it, or sets
+  `PORTFOLIO_AKSHARE_BIN`.
+- The host Account must be restarted from this tree before Gravit's AKShare works: it
+  spawns `akshare-mcp` (default `~/.local/bin/akshare-mcp`), and an older 4820 answers
+  that the route does not exist.
+
+**What dsh 0.2.0 changed for every MCP row** — the Account seat's alike; no config key
+changed (`src/account-seat.ts` records it):
 
 - The client moved to `@modelcontextprotocol/client` 2.0 with version
   negotiation, and stdio negotiation starts a temporary probe process before
-  the serving one: each server is spawned **twice** per connect, which doubles
-  each server's start cost at boot.
+  the serving one: the server is spawned **twice** per connect, which doubles
+  its start cost at boot.
 - A connected server's `instructions` enter the system prompt as a section
-  named `mcp:<serverName>`, with no switch. akshare-mcp sets them, so Gravit's
-  prompt — and every bot's, because prompt sections are not masked the way
-  tools are — gains an `mcp:akshare` section. Instructions over
+  named `mcp:<serverName>`, with no switch, and every bot's prompt gains it,
+  because prompt sections are not masked the way tools are. Instructions over
   `maxInstructionBytes` (32 KiB by default) now fail the connection.
 - The three MCP resource tools dsh-base 0.2.0 adds (`list_mcp_resources`,
   `list_mcp_resource_templates`, `read_mcp_resource`) are off by the face's
   policy layer (D7).
 - `failOnStartupError` stays `false`: a server that cannot start leaves its row
   ACTIVE with no tools, so the boot audit cannot see it. The check is
-  `/data/plugins.json` (or **Plugin → <server>**): `akshare` with its 14 tools,
-  and `account` with the seat's 35. A one-tool FastMCP server on the
-  operator's interpreter (`mcp` 1.28.1) negotiated with the 0.2.0 client in a
-  2026-09-30 probe; the real AKShare server is a live-drill item of the go-live
-  runbook (`../docs/superpowers/runbooks/2026-09-30-dsh-0.2.0-rc.2-go-live.md`).
+  `/data/plugins.json` (or **Plugin → <server>**): `account` with the seat's 36
+  tools. The go-live runbook is
+  `../docs/superpowers/runbooks/2026-09-30-dsh-0.2.0-rc.2-go-live.md`.
 
 ## The Account seat — Gravit at the Account
 
-Since 2026-10-20 the face composes a second project-owned MCP row beside AKShare,
+Since 2026-10-20 the face composes a project-owned MCP row,
 `mcp-account` (`src/account-seat.ts`): the MCP seat of the Account — the service
 that puts your exchange, broker, wallet and prediction-market accounts on one page
 at `127.0.0.1:4820` and lets agents trade inside limits you sign. Since 2026-10-27
 it is this tree's `../account/`, copied from Linqi's
 [buyer-agent-demo](https://github.com/linqizhe07/buyer-agent-demo) @ 133b9a7
-(`../account/NOTICE`). Gravit's tools gain `mcp__account__portfolio_*` (35 on a
+(`../account/NOTICE`). Gravit's tools gain `mcp__account__portfolio_*` (36 on a
 real account). The Account is yours to run, a second process beside the face; the
 face never starts it. **Paper venues only** in this round
 (`../docs/superpowers/specs/2026-10-20-account-seat-design.md`; the charter's §8
@@ -368,7 +358,7 @@ old one's standing.
 | `FACE_ACCOUNT_SEAT_DIR` | the repo's `account/` | the Account package the seat process runs from; set it only to run the seat from another copy |
 | `FACE_ACCOUNT_URL` | `http://127.0.0.1:4820` | the running service (the seat's `PORTFOLIO_URL`; `/data/seat.json` and the proxy's `/data/account…` read the row as composed, a patch's URL and seat name included) |
 
-The checks: after a boot, `/data/plugins.json` lists `server: "account"` with 35 tools and the
+The checks: after a boot, `/data/plugins.json` lists `server: "account"` with 36 tools and the
 boot line reads `order gate armed for mcp__account__portfolio_live_order, …`; Account › Venues
 shows the **Account seat** box — the service reachable, the seat admitted until when with its
 limit, the paper venue marked, the cards waiting, and **Open the Account page**. A missing
@@ -412,7 +402,7 @@ The Lunhui rows freeze hashed samples of the A-share market into a strategy's di
 later analysis reads a fixed set of evidence instead of live data
 (`../docs/superpowers/specs/2026-10-25-lunhui-modules-design.md`). They are cordis rows inside
 the face process, not an MCP server: nothing to install, no child process, and they come up with
-every boot. Like AKShare's reads they carry no lookahead guard and are never evidence of a trade.
+every boot. Like the seat's reads they carry no lookahead guard and are never evidence of a trade.
 Gravit freezes; a role reads each module's context of the frozen run and submits that module's
 artifact — `cn-market-analyst` the market read in `cn-market`, `cn-stock-analyst` the leader and
 the mode in a strategy channel, citing a market run, `cn-reviewer` the counterevidence in either;
@@ -870,7 +860,7 @@ the comment is optional and the operator's to do.
 Mount the operator's rows — the two skill roots and the default model below —
 into `cordis.patch.yml` per `../dsh/README.md` steps 1–5 (step 2 is the rows).
 No server of this repo's exists to mount since 2026-10-24: the face composes
-AKShare and the Account seat itself. A harness home that still carries the
+the Account seat itself (AKShare is the Account's). A harness home that still carries the
 Alpaca MCP row from before then should drop it — its command names the Python
 package the tree removed, so the server never starts — and should any row
 register `place_order` or `cancel_order`, the face refuses to boot until that
@@ -910,8 +900,7 @@ keys. dsh 0.2.0's DeepSeek catalog is `deepseek-flash` and `deepseek-v4-pro`;
    (`storage`, `storage-json`, `storage-domain`) and `session-projection-cache`,
    rows the face mounted itself at 0.1.1;
 2. the face's policy defaults (`src/policy.ts`; "The policy layer" below);
-3. the project's AKShare connection (`mcp-akshare`) and, right after it, the
-   Account seat (`mcp-account`);
+3. the project's Account seat (`mcp-account`);
 4. this profile's `cordis.patch.yml`;
 5. the machine-local `$DSH_HOME/cordis.patch.yml` — then, for a tool only, an
    in-memory layer (`bootFace`'s `extraPatches`; `scripts/check-home.ts` uses
@@ -974,7 +963,7 @@ header says so.
 
 The research cycle is the face's too: `../dsh/profile/cycle.md`, the one file that tells Gravit
 how to run a cycle — one batched question, then a goal of at most 24 rounds to a verdict, in which
-Gravit reads the Account through its seat and AKShare and trades forward on the paper venue (no
+Gravit reads the Account through its seat (AKShare among its reads) and trades forward on the paper venue (no
 role calls, nothing backtested). It is not a patch on a dsh-base row but a key of the default
 preset: `composeFace` reads it beside `../roles/` (`readCycle`, `src/cycle.ts`) and hands the text
 to the preset's `gravit` row as `cycle`, which `plugins/gravit.js` mounts as the `gravit:cycle`
@@ -1417,7 +1406,7 @@ capture, `npm test` says which view moved.
 
 **The smoke** — `tests/account-graft-smoke.test.ts` is the canary for the Account's reads moving
 under the face, as `account-seat-smoke` is for its seat. It starts the stand-in on a free port,
-boots a face on a scratch home — AKShare and the seat row off, so no seat process starts and
+boots a face on a scratch home — the seat row off, so no seat process starts and
 nothing lands under `~/.buyer-agent-demo` — with `FACE_ACCOUNT_URL` at it, registers the proxy and
 the seat route as `main.ts` does, and asks the face's own port: `/data/account` answers 200 with
 `ok` and its venues; `/data/account/explore` lists items; `explore?force=1` is refused 400 and never
@@ -1917,7 +1906,7 @@ as a convenience.
   will get. Runs are one at a time per agent (a second call is refused while
   one is in flight), ten-minute kill with SIGKILL after a five-second grace,
   16 MB output cap. A tool call runs under the session's normal policy — like
-  AKShare's tools it raises no approval card; a `tools/pre-execute`
+  the seat's reads it raises no approval card; a `tools/pre-execute`
   `ask` hook is the knob if the operator ever wants one per delegation.
   Hermes deliberately has NO recipe: its default provider config reuses those
   tokens, so it stays a directory entry until its provider is pinned.
@@ -2248,7 +2237,7 @@ render and fails while the two differ, so a role edit that skipped the script is
 by set membership against the tools the child inherits — no glob, no prefix (the spec's first
 `mcp__*__<raw>` expansion, as `plugins/bot.js` does for a bot, was dropped on that finding: spec
 §11.1 (a)). An MCP tool therefore carries the server name the operator's profile mounts it under
-(the face's own rows mount `akshare` and `account`, which a role may not carry anyway), and a
+(the face's own row mounts `account`, which a role may not carry anyway), and a
 server mounted under another name means editing every role that names its tools (the `NEVER` table
 of `src/roles.ts` refuses the account and order names under any server name). Whether a named tool
 exists is a fact about the tree at the moment a role is CALLED, not about the file, so the boot
@@ -2265,7 +2254,8 @@ tool; `run_code`, the reserved PTC transport, which `tools.restrict()` refuses t
 or order tool under any server name (anything under `mcp__account__`, the seat's twelve writes,
 and `account`, `positions`, `orders`, `place_order`, `cancel_order`, bare or as
 `mcp__<server>__<raw>`, matched by raw suffix as Gate 2 matches — the seat is Gravit's); any
-`mcp__akshare__` tool. The message gives the reason (the `NEVER` table).
+`mcp__akshare__` tool (an operator's own row) or `portfolio_akshare` under any server
+name. The message gives the reason (the `NEVER` table).
 
 **The job tools are a `bash` role's own.** A child's `bash` command runs under bash-sandbox's
 60,000 ms default deadline; a call may pass `timeoutMs`, capped at 600,000. A command still
@@ -2680,7 +2670,7 @@ and `node --test` gives each file its own:
 | `order-gate.test.ts` (its real-tree case) | Gate 2's listener is registered: it asks for the seat-write stand-in `mcp__drill__portfolio_live_order` (the card `Account seat - …` naming `AAPL`, `side=buy` and the venue), `mcp__drill__portfolio_live_cancel` and a renamed server's `portfolio_pay`, refuses an agentless call, lets a seat read and `mcp__drill__orders` through; the guard refuses the stand-in whose ask an outer listener swallowed, and a session whose log it cannot read with its own sentence |
 | `order-gate-smoke.test.ts` | Gate 2's POSITIVE path: an approved stand-in order dispatches, a rejected one does not; then the same through the real `$events` channel |
 | `order-gate-midboot-smoke.test.ts` | Gate 2 armed while `boot()` is still pending: a slow fixture row holds the boot open while a seat-write stand-in registers, and with `bootFace` unresolved and unary `/api` already serving, the order call is HELD with `approval/asked` logged and its body not run, an agentless call is denied by the listener, the same order with its ask swallowed by an outer listener is denied by the guard alone; once the boot is released the held card reaches the first tab and `allowed-once` dispatches exactly once; a restart of the real `approval` row re-arms the listener once |
-| `account-seat-smoke.test.ts` | the Account seat against the Account's own stand-in (run from the repo's `account/`, or `FACE_ACCOUNT_SEAT_DIR` when set; skipped without its `npm ci`): the seat's 35 tools and exactly its nine real-account writes gated, a read as the admitted seat, a seat order rejected at the face's card never reaching the seat, the same order allowed once answered by the stand-in with a card, a batch answered leg by leg with cards, and `/data/seat.json` reading that standing with the Account's ISO expiry as milliseconds |
+| `account-seat-smoke.test.ts` | the Account seat against the Account's own stand-in (run from the repo's `account/`, or `FACE_ACCOUNT_SEAT_DIR` when set; skipped without its `npm ci`): the seat's 36 tools and exactly its nine real-account writes gated, a read as the admitted seat, a seat order rejected at the face's card never reaching the seat, the same order allowed once answered by the stand-in with a card, a batch answered leg by leg with cards, and `/data/seat.json` reading that standing with the Account's ISO expiry as milliseconds |
 | `account-graft-smoke.test.ts` | the Account's reads through the face's proxy against the Account's own stand-in (run from the repo's `account/`, or `FACE_ACCOUNT_SEAT_DIR` when set; skipped without its `npm ci`; "The Account in the face"): `/data/account` 200 with `ok` and its venues, `/data/account/explore` listing items, `explore?force=1` refused 400 without asking the Account, `/data/account/stream` an event stream whose first named frame carries JSON within 5 s, and `/data/seat.json` reading the Account reachable through the proxy's reader; then the owner's half through the face's port — the client's own `host/owner.js` under Node paired with the stand-in's code, a watch signed on and off, a $25 ETH market buy whose `fill` the stream tells and whose ETH the holdings count, a SOL limit resting and cancelled by its id, the seeded card approved and its `card` frame `approved`, a foreign origin's exchange refused 403, and neither the code nor any signature sent in the face's output |
 | `gravit-client-smoke.test.ts` | the new page on a real boot: `/` with its title and script, the modules under `/client` with their types (Markets' `js/wire/china.js` and `js/host/markets.js` among them), the old `chat.js` gone and `/market` and `/account` answering 404; the host layer (`client/js/host/live.js` over the page's own wire) listing a session just created and opening it (live, so a follow) into a loaded window with a clean status line; a bare `bootFace` mounts no `/data` route, which the list tolerates |
 | `client-mux-smoke.test.ts` | the page's own `client/js/wire/api.js` and `client/js/wire/mapper.js`, unmodified, against the host: ready, calls, emits, the control baseline, a follow's snapshot and tail, an approval answered and one rejected, a second tab's `cancel` and its refused late answer, Stop withdrawing a gate, a question answered, a gate replayed to a late tab, the non-activating page and projections reads |
@@ -2693,9 +2683,9 @@ and `node --test` gives each file its own:
 | `subagents-smoke.test.ts` | the native subagent tools and Remotes: creation, child messages kept apart from settlement notices, permission inheritance, parent ownership, ordinary writes to managed children refused, and — after a reboot — catalog and history reads that activate neither side |
 | `instructions-smoke.test.ts` | what the `agent-instructions` baseline carries on a first request after the face's instructions patch: `GRAVIT.md` and `GRAVIT.local.md` for Gravit at the repo root; the root file plus the channel's own `strategies/x/GRAVIT.md` for a channel session; the root file for a bot session; `AGENTS.md` for none of them, `CLAUDE.md` for neither Gravit nor the channel session |
 | `roles-smoke.test.ts` | a role is a one-shot child with its own persona and tools, over two fixture roles made from `roles/_template` under the test's own roles root: `role_auditor` and `role_worker` each spawn a child whose tool list EQUALS the role's `allow` (every `role_*` tool and the forbidden ones gone — compared exactly, because dsh exempts a scope's own registrations from `restrict()`); for the auditor's child the smoke also checks the system prompt — the role's persona (shadowing Gravit's), the date line, no `gravit:roles` section and no cycle contract — the header (`origin: subagent`, `agentPreset: gravit`, its parent's cwd), the root `GRAVIT.md` in its `agent-instructions` baseline, and its text returning through the tool, while Gravit's own prompt carries the roles section and the cycle contract (`Step 0 — ask once`); a `subagent_fork` child's first request carries Gravit's system text whole — the cycle contract included — and Gravit's tools in order; a plain `subagent` child (unseeded) can call `create_goal` and every role tool yet carries neither the cycle contract nor the roles section, only the date; a role naming a tool the tree lacks fails at delegation with `tools.restrict() names unknown global tool "…"` and creates no child. The MCP tools the roles name are `mcp__fixture__*` stand-ins; a foreground one-shot child leaves `ctx.sessions` as its result returns, so the smoke copies each session's header while serving its request. A second boot takes the shipped `cn-market-analyst` from a fixture copy of `roles/` with its route turned to the stub, over a temp strategies root: its tools EQUAL its allow list, its persona is its own, its read and `NOT_EVALUABLE` submit land in an empty `cn-market` run; the same submit from Gravit's root is `NOT_A_ROLE`; a freeze is out of the role child's reach, and a plain `subagent` child that can reach one is `NOT_GRAVIT`; a third boot takes `cn-stock-analyst` the same way: its tools EQUAL its allow list, its persona is its own, its leader read citing a sealed `cn-market` run (sentiment and theme artifacts landed through the booted service) and its submit landing `leader.json` with that `market_run`; Gravit's root leader submit is `NOT_A_ROLE`; a fourth boot takes `cn-reviewer` the same way: its tools EQUAL its allow list, its persona is its own, its read of a sealed `cn-market` run with no `market_run` shows the run's three artifacts and its submit lands `counterevidence.json`; Gravit's root submit is `NOT_A_ROLE` |
-| `lunhui-market-run-smoke.test.ts` | one whole `cn-market` run ("Lunhui analysis"): AKShare and the seat off, the stub as the model, the freeze rows on the recorded replies, a temp strategies root holding a copy of `cn-market`; Gravit freezes index, limit-up and boards into one run, calls `role_cn_market_analyst`, then `role_cn_reviewer` with no `market_run`, and reads the run back, the analyst's child reads the three contexts and submits three `OK` artifacts built from them and the reviewer's child one item against the sentiment; the run sealed with three evidence files, the four artifacts named in `run.json` and valid again against the sealed files, the budget kept, four chips on the runs card, the protocol in Gravit's prompt. The freezes read the system clock (a row's `now` cannot cross the boot's structured clone of patches), so the file shifts `Date` to Friday 2026-10-23 15:00 China time for the boot's lifetime |
+| `lunhui-market-run-smoke.test.ts` | one whole `cn-market` run ("Lunhui analysis"): the seat off, the stub as the model, the freeze rows on the recorded replies, a temp strategies root holding a copy of `cn-market`; Gravit freezes index, limit-up and boards into one run, calls `role_cn_market_analyst`, then `role_cn_reviewer` with no `market_run`, and reads the run back, the analyst's child reads the three contexts and submits three `OK` artifacts built from them and the reviewer's child one item against the sentiment; the run sealed with three evidence files, the four artifacts named in `run.json` and valid again against the sealed files, the budget kept, four chips on the runs card, the protocol in Gravit's prompt. The freezes read the system clock (a row's `now` cannot cross the boot's structured clone of patches), so the file shifts `Date` to Friday 2026-10-23 15:00 China time for the boot's lifetime |
 | `lunhui-strategy-run-smoke.test.ts` | an `S01` registered on Friday and graded on Monday ("Lunhui analysis"): the market smoke's boot with copies of `cn-market` and `lunhui-s01-repair` and the three roles on the stub; each day Gravit does the reviewed market run, finds it with the listing read, freezes two stocks' quotes on the strategy and calls `role_cn_stock_analyst` for the leader, `role_cn_reviewer` with both run ids and `role_cn_stock_analyst` for the mode, each child building its artifact from its context; Friday's mode `S01` with a card of at most 2,048 bytes, every review item answered, Monday's grading it; every artifact of the four runs valid again against digests rebuilt from the sealed runs, the runs card's latest run Monday's with its review line, the protocol's strategy channel in Gravit's prompt. `Date` is replaced, Friday 2026-10-23 15:00 China time, then Monday 2026-10-26 15:00 |
-| `lunhui-answer-smoke.test.ts` | Gravit's composed answer end to end: AKShare and the seat off, `lunhui-runs` over a scratch strategies root holding the synthetic sealed 10-27 run; the view read over `GET /data/lunhui/view` (registered as `main.ts` does) with the signed-in cookie; an ok `lunhui_present` lifted through `host/kinds.js` and drawn by the client's own `renderThread` — the seven kinds' labels in the call's order, the follow-ups, the footer with `Open run ›`, a stock link — and `stockDrawerHtml` for 上海九百 drawing its minute chart with the limit-up line; no model called |
+| `lunhui-answer-smoke.test.ts` | Gravit's composed answer end to end: the seat off, `lunhui-runs` over a scratch strategies root holding the synthetic sealed 10-27 run; the view read over `GET /data/lunhui/view` (registered as `main.ts` does) with the signed-in cookie; an ok `lunhui_present` lifted through `host/kinds.js` and drawn by the client's own `renderThread` — the seven kinds' labels in the call's order, the follow-ups, the footer with `Open run ›`, a stock link — and `stockDrawerHtml` for 上海九百 drawing its minute chart with the limit-up line; no model called |
 | `goal-smoke.test.ts` | the goal loop `../dsh/profile/cycle.md` rests on, through the face's own wire (prompts, the Stop button's `session/cancel`, a slash line's `commands/execute`): `create_goal` in a human turn returns the id and revision 1, armed; each round arrives at idle as a user message whose source is `goal` (`<goal_round>`, the objective, `Round: n/N`); the model's `blocked` in round 1 is refused (`blocked requires at least 3 consecutive goal rounds; current round is 1`), in round 3 accepted with the code `model-reported` and followed by the `<goal_blocked>` wrap-up; a second `create_goal` is refused while that goal is blocked (`GOAL_ALREADY_EXISTS`); at the cap the driver blocks with `round-limit` and sends the model nothing more; Stop mid-round pauses the goal, the model's resume of it is refused (`GOAL_TOOL_RESUME_PAUSED`: `the model cannot resume a paused goal; the user must resume it`) and `/goal resume` re-arms it; a face stopped mid-round and booted again on the same home leaves the goal active and disarmed with no request until "continue", whose `update_goal` resume bumps the revision and re-arms the rounds |
 
 `bot-sandbox-smoke.test.ts` and `askuser-noclient-smoke.test.ts` also print one
@@ -3522,7 +3512,7 @@ judges the result.
    THESIS.md and `status: researching`, then rounds follow by themselves: the chat shows a round
    header per round — the client's collapsed `context · goal` row, whose summary reads
    `<goal_round>` and whose body carries the objective and `Round: n/24` — reads through the seat
-   (`mcp__account__portfolio_*`) and AKShare, a forward paper trade on the granted venue (Gate 2's
+   (`mcp__account__portfolio_*`, AKShare among them), a forward paper trade on the granted venue (Gate 2's
    card in the conversation, then the Account's Guard card in Account › Cards — answer both;
    Gravit waits with `portfolio_wait`), and dated journal entries carrying the Account's own
    figures and the order ids. No role call and no backtest. No other card — Gravit commits
@@ -3571,7 +3561,7 @@ limit on it ("The Account seat" above), the face started with keys, a channel se
 1. **The standing.** Account › Venues: the Account seat box reads `127.0.0.1:4820 · reachable`,
    `Guard · Trading on · $1 a move`, `Gravit · admitted until <date>`, `trade · paper-1 · $<n> an
    order · $<left> of $<budget> left`, the paper venue with its `Paper` chip, no cards. Discover's
-   MCP shelf lists `account` with 35 tools.
+   MCP shelf lists `account` with 36 tools.
 2. **The read.** Ask Gravit: "What is my seat at the Account, and which paper venues are there?"
    Expect no card and an answer naming the seat as authorised and `paper-1` (the call,
    `portfolio_account`, is not drawn in the thread).
@@ -3710,7 +3700,7 @@ spawns, so Gravit's shell never inherits it). It carries the model key only; the
 reads need no key (Tencent, as on the host). Never paste `docker compose config` output anywhere —
 it prints the `env_file` values resolved.
 
-`agent` (the face, dsh, Gravit's shell, AKShare, the seat) mounts an allowlist of the tree, never
+`agent` (the face, dsh, Gravit's shell, the seat) mounts an allowlist of the tree, never
 its root: read-write `face/`, `strategies/`, `bots/`, `roles/`; read-only `account/` (the account
 box's build context and the seat's code — its `node_modules` is the writable `account-modules`
 volume), `dsh/`, `docs/` and the root documents `GRAVIT.md`, `CLAUDE.md`, `AGENTS.md`,
@@ -3744,7 +3734,7 @@ that forges `Host`. The same holds for the Account's `PORTFOLIO_BIND` (`../accou
    `account:4820 · reachable` (expected, not yet observed); on an empty `seat-home` the seat
    reads not on the account, then knocking after Gravit's first seat call, until you admit it as
    **Gravit** on the Account page ("The Account seat" above). Discover's MCP shelf lists `account`
-   with its tools and `akshare` with 14; the CLI agents (`claude`, `codex`) read unavailable.
+   with its 36 tools and no `akshare` card; the CLI agents (`claude`, `codex`) read unavailable.
 4. **The read.** Ask Gravit for a read-only AAPL quote: `portfolio_explore` (tab=stocks, q=AAPL)
    answers with no card, as in the 2026-10-27 drill on the real service ("The account-seat
    drill" above).

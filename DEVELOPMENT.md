@@ -89,7 +89,7 @@ service of its own (the LLM) — plus the Account on loopback, this tree's `acco
 second process (§3.9), whose markets and page
 the Markets, Trade and Account screens read through the face's proxy (§4.4), at whose door the
 page signs as one of its owner devices (§5.3), and whose own egress `face/README.md` lists, AKShare's
-upstreams, and the Lunhui rows' Tencent and Eastmoney hosts (`face/README.md` "Lunhui analysis").
+upstreams (through its sidecar, §3.1), and the Lunhui rows' Tencent and Eastmoney hosts (`face/README.md` "Lunhui analysis").
 
 ```
  browser (operator) ── http://127.0.0.1:3090/?token=… once, then a 30-day cookie ──────┐
@@ -109,7 +109,7 @@ upstreams, and the Lunhui rows' Tencent and Eastmoney hosts (`face/README.md` "L
  │  ├─ Gate 2: armed inside boot's `prepare` (`armOrderGate`) on `tools/pre-execute` +   │
  │  │   `tools.guard`, the moment those services exist; the rules live in `src/orders.ts` │
  │  └─ children:                                                                          │
- │       ├─ MCP servers: akshare-mcp, the Account seat (project rows); stdio              │
+ │       ├─ MCP server: the Account seat (a project row); stdio                            │
  │       ├─ sandboxed shell turns  (dsh-bash-sandbox; env less KEY|PASSWORD|SECRET|TOKEN) │
  │       └─ `claude` / `codex` runs  (`agent_<bin>` tools; roster-gated per channel)      │
  └────────────────────────────────────────────────────────────────────────────────────────┘
@@ -160,8 +160,8 @@ citations resolve; the history is the design, the plan
 ### 3.1 The profile — template versus installed
 
 `dsh/profile/cordis.yml` is the *content* of the profile in indicative shape: the deepseek LLM row
-and the two skill **group** roots; it names no MCP server (the face composes AKShare and the
-Account seat itself, below), and since 2026-10-24 no server of this repo's exists to mount. It is
+and the two skill **group** roots; it names no MCP server (the face composes the
+Account seat itself, below; AKShare is the Account's), and since 2026-10-24 no server of this repo's exists to mount. It is
 not a validated dsh config; a real profile is a list of plugin rows, and an unrecognised key
 merges silently — its `permissions.always_ask` block is inert and stays as the record of what did
 not work. The install path is `dsh/README.md`; the installed state is `$DSH_HOME/profiles/face/`,
@@ -194,21 +194,23 @@ that closure falls through to `$DSH_HOME/profiles/` itself, where a stale 0.1.1
 `profiles/node_modules` farm would answer with a 0.1.1 package — harmless for the operator's
 rows, and the reason PLAN D13 deletes the farm once no 0.1.1 tool runs on the home.
 
-AKShare is a project-owned default in `face/src/akshare.ts`: a separate stdio `mcp-akshare` row,
-inserted after the bundle and policy layers and before operator profile/home patches, which can
-override or disable it. It launches the separately installed `~/.local/bin/akshare-mcp` (override:
-`FACE_AKSHARE_MCP_COMMAND`), passes a 500-row response limit and uses a 120-second tool timeout.
-Startup failure is logged and does not stop the host (`failOnStartupError: false`: the row is
-ACTIVE either way). These vendor reads have no lookahead guard (no read in the tree has one since
-2026-10-24). Since 0.2.0 an MCP server's `instructions` enter the system prompt as a
-`mcp:<serverName>` section with no switch — akshare-mcp sets them, so Gravit's prompt and every
-bot's carry an `mcp:akshare` section — and instructions over 32 KiB fail the connection; stdio
-negotiation starts a probe process before the serving one, so each MCP server is spawned twice per
-connect. Installation, source limitations and the live-roster check are in `face/README.md`.
+AKShare is the Account's, not the face's: a Python MCP child (`akshare-mcp`) of the Account service
+(`account/src/portfolio/live/akshare.ts`, §3.9), reached through the seat's one read tool,
+`portfolio_akshare`. The face mounts no AKShare row and runs no AKShare process; nothing falls back
+to a face-side AKShare when the Account is down. The child is started on the first ask and again
+after it exits, under one 120 s deadline per ask; a call that times out recycles the child. Its
+environment is an allowlist of the Account's own (no wallet or iFinD secret reaches Python). The
+seat's call timeout is 130 s, above that deadline. These vendor reads have no lookahead guard (no
+read in the tree has one since 2026-10-24). Since 0.2.0 an MCP server's `instructions` enter the
+system prompt as a `mcp:<serverName>` section with no switch, and instructions over 32 KiB fail the
+connection; stdio negotiation starts a probe process before the serving one, so each MCP server is
+spawned twice per connect. Installation, the routes and the live check are in `account/README.md`
+"AKShare, the sidecar"; the operator's cleanup (an inert `mcp-akshare` patch row, the start line) is
+in `face/README.md` "AKShare — through the Account".
 
 The Account seat is the second project-owned row, `face/src/account-seat.ts` (spec
-`docs/superpowers/specs/2026-10-20-account-seat-design.md`): a stdio `mcp-account` row composed right
-after AKShare, below the operator's patches, that spawns the Account's MCP seat from the repo's
+`docs/superpowers/specs/2026-10-20-account-seat-design.md`): a stdio `mcp-account` row composed
+below the operator's patches, that spawns the Account's MCP seat from the repo's
 `account/` (`DEFAULT_SEAT_DIR`, resolved from the face's own location; `FACE_ACCOUNT_SEAT_DIR`
 overrides) against the service the operator runs at `FACE_ACCOUNT_URL`, default
 `http://127.0.0.1:4820` (§3.9), with this process's node and `account/`'s own `tsx`, never `npx`; the seat is named `Gravit`
@@ -244,7 +246,7 @@ findings never overrule them. Style yields to findings, but the conflict is repo
 
 The workspace map every dsh agent in the tree reads on its first request — Gravit, its role
 children (§3.8) and the bots alike — so it states facts and rules only, never identity or persona:
-the three layers and where each lives (the Account through the seat, AKShare), that no read is
+the three layers and where each lives (the Account through the seat, AKShare among its reads), that no read is
 guarded against lookahead and the evidence is forward paper trading, the strategy directory
 contract and lifecycle, the room caps sentence (pinned to `ROOM_CAPS`), the seat's paragraph, the
 never-edit list (`dsh/profile/` on it since plan 3). Its commit rule is "between cycles; a cycle
@@ -343,8 +345,7 @@ default broken, and the boot refuses).
 | `skill` | `tool-skill` + `skill-filesystem` | loads one `SKILL.md` by catalog name; the catalog (name + description) is what the model chooses from |
 | `web_search` | `tool-web` (`fetch: false`, PLAN D6) over `web-search-deepseek` | outbound to `https://api.deepseek.com/anthropic/v1` with `DEEPSEEK_API_KEY`; no page fetch |
 | `ask_user_question` | `tool-ask-user` (face overlay; the blocking `legacy` mode) | §4.3; the answer is model-visible, so not a gate |
-| `mcp__akshare__*` | project `mcp-akshare` row | public A-share/other market queries, unguarded; check source errors and truncation |
-| `mcp__account__*` | project `mcp-account` row (§3.1) | the Account seat: the Account at `127.0.0.1:4820`, `account/` (§3.9); 35 real-account tools (42 against a simulated service); the twelve writes carded by Gate 2 (§4.7), the reads public, seconds old and unguarded — read as they are, with no lookahead guard; `portfolio_wait` polls a card or an order for 55 s at most |
+| `mcp__account__*` | project `mcp-account` row (§3.1) | the Account seat: the Account at `127.0.0.1:4820`, `account/` (§3.9); 36 real-account tools (43 against a simulated service); the twelve writes carded by Gate 2 (§4.7), the reads public, seconds old and unguarded — read as they are, with no lookahead guard; `mcp__account__portfolio_akshare` passes one AKShare tool and its arguments to the Account's sidecar (a read: no card, never a role's; the seat's call timeout 130 s); `portfolio_wait` polls a card or an order for 55 s at most |
 | `lunhui_read_run`, `lunhui_freeze_quotes`, `lunhui_freeze_limit_up`, `lunhui_freeze_boards`, `lunhui_freeze_index` | the project Lunhui rows (`src/lunhui.ts`, §4.3): `lunhui-runs` registers the first, one freeze row each of the other four | frozen A-share research runs (spec `docs/superpowers/specs/2026-10-25-lunhui-modules-design.md`, plan 1 of four): every tool takes a strategy name — the channel's — and a run id, never a path, anchored under the `lunhui-runs` row's `strategiesRoot` by `face/plugins/lunhui/lib/runs.mjs`; a freeze with `run` omitted opens a run in `strategies/<name>/analysis/<run>/` (`run.json`, `metrics.json`) and answers its id, with `run` it adds to that open run, and each writes one `evidence-<source>.json` (`quotes`, `limit-up`, `boards`, `index`) of hashed items and the derived items over them — a second freeze of one source in one run is `SOURCE_FROZEN`; `lunhui_freeze_quotes` (Tencent quotes and 60-day bars, 1–8 symbols, stage 0's rule) in any channel, the other three in `cn-market` only (`WRONG_CHANNEL`): the 涨停, 炸板 and 昨日涨停 pools (≤ 500 rows each), the top 30 concept boards by change with up to ten boards' members (≤ 100 each) and the board fund-flow rank, the four indices with 120-day bars and the market's advance/decline counts from Eastmoney's up/down distribution (a distribution the freeze cannot use — another session's, a failed request — lands the index items without the counts, the three count measures null, the reply's `counts` naming the refusal; spec §17) — the Eastmoney items stamped with the host that served them and `delayed` — and, when any of the boards freeze's three Eastmoney reads refuses and the Account holds an iFinD token, the boards file from 同花顺问财 instead (boards stand-in spec: one `smart_stock_picking` query, boards derived by `lib/wencai-boards.mjs` from the members' concept lists, items coded `THS:<concept>` and stamped `provider`, `taxonomy`, `host: quantapi.51ifind.com`, `delayed: false`, boards `pct_basis: "equal_weight"`; the evidence meta, the `run.json` entry and the reply carry `provider` on both paths and `fallback_from` on the stand-in, the file also `query` and `reply_sha256`; both providers failing is one refusal with Eastmoney's code naming both reasons, an absent token at the Account makes no iFinD request and the refusal says 同花顺问财备用未配置; one call counts once); every upstream read of the four freezes goes through the Account (`lib/account-fetch.mjs` over `GET /api/cn/relay` and `POST /api/cn/ifind`, §3.9; `FACE_ACCOUNT_URL`), no freeze reaches an upstream host, and each evidence file and its `run.json` entry carry `via: "account"` (`CONTRACT_VERSION` stays 3: no contract reads a file-level field); eight freezes a run, a refused one counted, then `TOOL_BUDGET`; a delegated child is refused `NOT_GRAVIT`; a China date no calendar table covers, or one whose latest opened session lies outside the calendar, is `CALENDAR_UNCOVERED`; each evidence file and its `run.json` entry record `session`, the trading day the data belongs to (`getMarketSession(now).expectedQuoteDate`, the previous session on a weekend, a holiday or before 09:15), beside `received_at`, the wall clock, and the reply carries both as `session` and `as_of`; an evidence file is at most 256 KiB — `limit-up`'s 1 MiB, three full pools — and a run's evidence 2 MiB; a code a pool reply repeats keeps its first row, the reply's `duplicates` counting the rest; a quotes freeze's quote items are `kind: "quote"` (the parsed index or equity kind kept as `instrument`), the index freeze's `kind: "index"`; every refusal is a thrown `LunhuiError`, `Error: <CODE> …` to the model, naming no path; a run seals on the first module context read (next row), after which a freeze is `RUN_SEALED`; `lunhui_read_run` answers `run.json`, the counters (`metrics.json`) and each module artifact file present, by `MODULES` order, with its headline when `run.json` `artifacts[]` names the module and the file is an object within 24 KiB compact — any other file listed unaccepted with no headline — and, with `run` omitted, lists the strategy's newest sealed runs instead: at most five of its last 50 run ids, newest first, each `{run, session, sealed_at, snapshot_id, artifacts}` (`artifacts` the modules `run.json` names accepted), an open, missing or unusable run passed over, no lock taken, nothing counted or written, so Gravit finds the day's or the previous trading day's `cn-market` run from a strategy channel; unguarded and never evidence of a trade, like AKShare's; named by no bot's allow list (`tests/bots.test.ts`) Since 2026-10-30 (run view, plan 1) the evidence also carries minute lines, for display only (`lib/market.mjs`: `fetchMinutes` reads `web.ifzq.gtimg.cn/appstock/app/day/query?code=` through `parseTencentMinutes`, `minuteItems` lays a session on the 242-point grid, 09:30-11:30 as 0-120 and 13:00-15:00 as 121-241, points after 15:00 dropped, times China-time `HH:MM` strings; `exchangeOf`, `limitRate` and `limitPrices` give the limit prices, ±10%, ±20% for 30/68, ±5% for a main-board name opening with ST or *ST (trimmed, any case; "ST" inside a name is not ST), ±30% for BSE, half up to the fen from the previous close): items `{kind: "minutes", code?, symbol, session, prec, through, price[], volume[], amount[], provider}` and `{kind: "minutes_missing", code?, symbol, reason}`; each line has 4,000 ms (`minuteItems`' `timeoutMs`). The index freeze fetches the four indices' lines beside its quotes, bars and counts and appends their items; the limit-up freeze appends one per ladder name, as `ladderCodes` in `lib/derive.mjs` picks them (zt boards >= 2, zb tried height >= 2, yesterday `yesterdayBoards` >= 2; at most 40), and adds `web.ifzq.gtimg.cn` to its host; its minute stage has 20 s in all (`MINUTES_DEADLINE_MS`), a line not read by then `minutes_missing` with reason `DEADLINE` and never fetched, and its items stay 64 KiB under the 1 MiB cap (`ITEMS_BUDGET`): past it, minute lines from the tail become `minutes_missing` with reason `EVIDENCE_TOO_LARGE`, so the pools always land; `lib/contract-core.mjs` skips both kinds, so no role context changes and no contract names them. `metrics.json` gains `refusals: {source: [code]}` for a freeze refused after the freeze count (`TOOL_BUDGET` and `RUN_SEALED` included), absent until the first refusal; `promotion()` in `lib/derive.mjs` derives the ladder's promotions from yesterday's pool (rung 1 present whenever zb holds a code not in zt). `lib/view.mjs` builds the run view of a sealed run: `evidenceView(sealed)` (the evidence half), `buildView(sealed, {modules, evidence})` (adds the artifact half for `VIEW_MODULES`: environment, sentiment, theme, counterevidence), `mostMoved` and `viewDigest(view)` (the digest, <= 2,048 bytes); the view's `through` is the latest `through` across the index minute lines only, and a stock's line may run later; `stocks` carries no `unavailable` (the key would collide with a code), so a consumer reads `ladder.unavailable`. The digest writes a negative with U+2212 "−", a non-zero positive percentage with "+", prices, percentages and ratios (the signals' too) to two decimals, counts whole with no thousands separator, and turnover as `X.XX万亿` or `X.XX亿`. The `lunhuiRuns` service's `view(strategy, run, {modules})` caches the evidence half per run, the last 8 runs viewed (`EVIDENCE_CACHE_RUNS`, least recently viewed out first), and `lunhui_read_run` with a run adds `view`, the digest, or null for an open run or when the view cannot be built (the reply is kept either way), the latter with `view_error`, the refusal's code or `INTERNAL` (a non-Lunhui error's stack to stderr). The route is `GET /data/lunhui/view` (§4.4). |
 | `lunhui_read_environment_context`, `lunhui_submit_environment`, `lunhui_read_sentiment_context`, `lunhui_submit_sentiment`, `lunhui_read_theme_context`, `lunhui_submit_theme` | the project Lunhui module rows (`src/lunhui.ts`, §4.3): `lunhui-environment`, `lunhui-sentiment`, `lunhui-theme`, one pair each, built by `defineModule` (`face/plugins/lunhui/lib/module-tool.mjs`) over the module's contract (`lib/contracts/<module>.mjs`) | the three market modules (spec §5.4–§5.7, plan 2 of four), `cn-market` runs only (`WRONG_CHANNEL` otherwise), every argument a strategy name and a run id: a read, open to any caller, counts the call, seals the run when it is open (A4: `snapshot_id` and `session` fixed, no evidence lands after) and answers the module's context — a digest of at most 30 KiB of UTF-8 JSON (A24) with the envelope fields to copy, the module's hypotheses, schema, hints and an example built from the digest, its sources' derived items first, then rows by the module's priority, the rest named in `truncated` — and says `NOT_EVALUABLE` when a required source is missing (environment needs `index`; sentiment `limit-up` and `index`; theme `boards` and `limit-up`); a submit takes `analysis`, the artifact as JSON text, from a delegated role child only (`NOT_A_ROLE` for a root session or a seeded fork, A23), after that module's read in this process (`READ_FIRST`), once a module a run (`ALREADY_SUBMITTED`), validated fail-closed by `validateEnvelope` (`[<category>] <reason>\n修复：<repair>`, code `INVALID_ANALYSIS`) and landed as `<module>.json`, named in `run.json` `artifacts[]`; ten calls a module a run, reads and submits together, the refusals inside a resolved run counted, then `TOOL_BUDGET`; the headlines are environment's `index_state`, `liquidity_state`, `cycle_anchor`, sentiment's `state` (one of the seven), `money_effect`, `freeze_type` (and, in an `OK` artifact, a `conflict` beside an `UNKNOWN` state), theme's `mainline_candidates`, `theme_stage`, `rotation`; the role `cn-market-analyst` is the only allow list that names them (§3.8), and no bot's does |
 | `lunhui_read_leader_context`, `lunhui_submit_leader`, `lunhui_read_mode_context`, `lunhui_submit_mode` | the project Lunhui module rows `lunhui-leader` and `lunhui-mode` (`src/lunhui.ts`, §4.3), one pair each, `defineModule` over `lib/contracts/leader.mjs` and `lib/contracts/mode.mjs` | the two strategy modules (spec §5.4–§5.6, A5, A12, A18, A22, A27, E4; plan 3 of four), a run of any strategy but `cn-market` (`WRONG_CHANNEL` there), otherwise as the market pairs — budget, `NOT_A_ROLE`, `READ_FIRST`, `ALREADY_SUBMITTED`, `INVALID_ANALYSIS`. The read takes a third argument, `market_run`: a sealed `cn-market` run (`NO_SUCH_RUN` when there is none, `MISSING_EVIDENCE` while it is open) whose `session` is the strategy run's or the trading day before it by the calendar tables (`STALE_MARKET_RUN` otherwise, and for a strategy session no table covers), shape-checked before the strategy run is touched and checked fresh after the seal; the context shows that run's evidence as `market:<source>` rows and its accepted artifacts as bounded views citable as `<module>@<snapshot_id>`, and its envelope carries `market_run` and `market_snapshot_id`. The submit takes no `market_run`: the artifact copies both from the read, and they bind as the other envelope fields do. **leader** — `leader_candidates` (at most five, each a priced equity quote the strategy run froze whose code a pool row or member list of the cited run holds, its 顺位 `rank` 1 to n, its `board` a mainline board of the cited theme artifact whose frozen members hold the code, or null) and `top_pattern_flags` — needs the cited run's accepted theme artifact (`NOT_EVALUABLE` naming `market:theme` otherwise) and writes 龙头 only as 龙头候选. **mode** — `mode` (`S01`, `S02` or `WAIT`), `preconditions`, `research_only_matches`, `expectation`, `expectation_review`, with `parameters_used` and `addressed` beside them — needs the run's accepted leader artifact and the cited run's sentiment and theme views (`NOT_EVALUABLE` naming `leader`, `market:sentiment` or `market:theme` otherwise — a view the 30 KiB cap leaves out counts as missing), the leader cited on the same market run (`MISSING_EVIDENCE` naming the leader's otherwise); an `S01` or `S02` needs the run's counterevidence accepted `OK`, with an `items` array and the mode's own `market_run`, every item answered by its `x` id; its card is at most 2,048 bytes of compact JSON (`BYTE_LIMIT`); it registers `S01` only in `lunhui-s01-repair`, `S02` only in `lunhui-s02-rotation` and never while its catalyst has no source — so today not at all — and `WAIT` anywhere, adding `INADMISSIBLE_STATE` and `UNADDRESSED_COUNTEREVIDENCE` to the core's categories; the role `cn-stock-analyst` is the only allow list that names the four (§3.8), and no bot's does |
@@ -354,8 +355,8 @@ default broken, and the boot refuses).
 | `dispatch` | face `room.ts` (`installRoom`) | Gravit's own: refused in any session whose header or `agentPreset` projection names a bot (§6.8) |
 | `role_<id>` (one per `roles/<id>/`; today `role_cn_market_analyst`, `role_cn_reviewer` and `role_cn_stock_analyst`, the three roles `roles/` ships beside `_template`) | one `dsh-tool-subagent` row per role inside Gravit's preset, rendered by `src/roles.ts` (§3.8) | scoped: a bot never sees one, and a role child removes them through its own allow list (a `subagent_fork` child, restricted by nothing, keeps them, and so does a plain `subagent` child, though neither its roles section nor the cycle contract reaches it, §3.8); a one-shot `spawn` child with the role's persona and exactly the role's tools; the arguments are `description` (its label in Details' Children, §5.4) and `prompt`, and the call waits unless `run_in_background` is set |
 
-Not tools, but in the same prompt: a connected MCP server's `instructions` (the `mcp:akshare`
-section, §3.1). The MCP resource tools and their prompt section are off by policy (PLAN D7).
+Not tools, but in the same prompt: a connected MCP server's `instructions` (the sections
+`mcp:<serverName>`, §3.1). The MCP resource tools and their prompt section are off by policy (PLAN D7).
 
 ### 3.7 The bot directory contract
 
@@ -567,7 +568,7 @@ goal and todo tools (Gravit tracks them); `run_code`, the reserved PTC transport
 and order tools under any server name — the `mcp__account__` prefix, the seat's twelve writes, and
 `account`, `positions`, `orders`, `place_order`, `cancel_order`, bare or as any
 `mcp__<server>__<raw>`, matched by raw suffix as Gate 2's `isOrderTool` matches the seat's writes
-(the Account seat is Gravit's, §4.7); and the `mcp__akshare__` prefix.
+(the Account seat is Gravit's, §4.7); `portfolio_akshare` under any server name; and the `mcp__akshare__` prefix (an operator's own AKShare row).
 
 The job tools are a `bash` role's own. A child's `bash` command runs under the deadline of
 dsh-base's `bash-sandbox` row, 60,000 ms by default; a call may pass `timeoutMs`, capped at
@@ -677,6 +678,8 @@ rewritten as `gravit-account`, and the lock's root entry follows it).
 `mcp-account` row spawns, §3.1), `account:demo`, `account:service`, `account:check`, `test`
 (vitest, one file at a time), `typecheck` (`tsc --noEmit`). The home is the code's default,
 `~/.buyer-agent-demo` (`BUYER_HOME` overrides; `home.ts`), for the service and the seat's key alike.
+
+**The AKShare sidecar** (`src/portfolio/live/akshare.ts`; spec `docs/superpowers/specs/2026-11-01-account-two-parts-design.md` §4.3). `createAkshare` runs `akshare-mcp` (`akshareCommand()`: `PORTFOLIO_AKSHARE_BIN`, else `~/.local/bin/akshare-mcp`; argv only, no shell) as an MCP child over stdio with the SDK client. It starts on the first ask and again after it exits, never eagerly. One deadline, `AKSHARE_CALL_MS` (120 s), bounds a cold start, the listing and the call; a call that times out recycles the child (closed and forgotten), so a stuck Python call dies with it and cannot wedge later asks. The child's environment is an allowlist of the Account's own (`sidecarEnv`: `PATH`, `HOME`, `USER`, `LANG`/`LC_*`, the temp dirs, the TLS roots, proxies without userinfo, `FASTMCP_LOG_LEVEL`) plus `PYTHONUNBUFFERED=1` and `AKSHARE_MCP_MAX_ROWS=500`: no wallet or iFinD secret reaches Python; its stderr is the Account's. A reply past `AKSHARE_REPLY_MAX` (4 MiB) is refused `too-large`, arguments past `AKSHARE_ARGS_MAX` (16 KiB) `bad-arguments`. `server.ts` serves two reads behind the `Host` fence, working with `--read-only`, writing nothing: `GET /api/akshare/tools` and `POST /api/akshare/call` (`{tool, arguments}`), refusals `{ok: false, akshare: <word>, message}` with `off`, `unknown-tool`, `bad-arguments`, `unavailable`, `timeout` and `too-large`. The seat's `portfolio_akshare` (`mcp.ts`, `readOnlyHint`) posts to the call route and returns the sidecar's content; the face classifies it a read (`SEAT_READ_RAW_NAMES` in `orders.ts`: no card), and the seat's call timeout (`toolCallTimeoutMs`) is 130 s, above the Account's 120 s. The account image installs the same pin (`account/Dockerfile`, `PORTFOLIO_AKSHARE_BIN=/usr/local/bin/akshare-mcp`); the agent image carries none. The operator restarts the host Account from this tree for it to take effect.
 
 **The one change to the copy: the fence's second address.** `server.ts` listens where
 `PORTFOLIO_BIND` says (default `127.0.0.1`) and admits, beside the loopback `Host` values
@@ -833,7 +836,7 @@ row audit; and the policy layer.
    skipped, not thrown — the face refuses the compose), **rewrite `<profile>/cordis.yml` to
    `[]`** (the loader's write-back would otherwise bake composed rows in and double every
    bundle insert next boot), stack the patches — bundle layers (`dsh-base`) → the face policy
-   layer (§4.3) → project AKShare → the Account seat → the Lunhui rows (§4.3) → the profile's
+   layer (§4.3) → the Account seat → the Lunhui rows (§4.3) → the profile's
    `cordis.patch.yml` → the home's
    `cordis.patch.yml` → a caller's in-memory `extraPatches` (`main.ts` passes none;
    `scripts/check-home.ts` disables a home copy's MCP rows with it) — apply the guarded
@@ -920,8 +923,7 @@ smoke that boots without `main.ts` relies on.
 | `boot.ts` | the mirror of the dsh CLI's `runProfile` (§4.1): `composeFace` (its last step renders the default preset from `roles/`, `dsh/profile/cycle.md` and the run protocols; `FaceBootOptions.protocolsDir` points a test at a fixture), the runtime resolution, the strict row audit, the required-service and answerer checks, `ask_user_question` in the live registry, Gate 2 registration, the preset-roster checks, `declareBots`, `commitReady` |
 | `overlay.ts` | the thirteen host rows `dsh-base` does not mount (§4.3), `satisfies`-checked against each plugin's own config type; `BOTS_ROOT`, `DEFAULT_PRESET`, `GRAVIT_PLUGIN_RELATIVE`, `presetRowId` |
 | `policy.ts` | the policy layer (§4.3): `POLICY_ID_PATCHES`, `POLICY_INSERTS`, `facePolicyPatches` — each row a PLAN decision; a missing target is reported on stderr, never skipped silently |
-| `akshare.ts` | project AKShare MCP defaults, composed below operator profile/home patches |
-| `account-seat.ts` | the Account seat row (§3.1): `ACCOUNT_SEAT_ROW_ID`, `ACCOUNT_SEAT_SERVER`, `SEAT_TOOL_PREFIX`, `ACCOUNT_SEAT_NAME`, `DEFAULT_SEAT_DIR` (the repo's `account/`, resolved from this file's location, never `homedir()`), `seatDir`/`seatUrl` (the env or the defaults), `accountSeatPatches` — this process's node, `account/`'s `tsx`, the seat's env, 90 s, failing soft; composed right after AKShare — and `composedSeatRow` (the row AS COMPOSED, read off the Loader's entries: disabled by a patch, or its service URL and seat name), which `main.ts` hands the seat route so the box follows an operator's patch, never the environment alone |
+| `account-seat.ts` | the Account seat row (§3.1): `ACCOUNT_SEAT_ROW_ID`, `ACCOUNT_SEAT_SERVER`, `SEAT_TOOL_PREFIX`, `ACCOUNT_SEAT_NAME`, `DEFAULT_SEAT_DIR` (the repo's `account/`, resolved from this file's location, never `homedir()`), `seatDir`/`seatUrl` (the env or the defaults), `accountSeatPatches` — this process's node, `account/`'s `tsx`, the seat's env, 130 s (the Account's 120 s AKShare deadline plus margin), failing soft — and `composedSeatRow` (the row AS COMPOSED, read off the Loader's entries: disabled by a patch, or its service URL and seat name), which `main.ts` hands the seat route so the box follows an operator's patch, never the environment alone |
 | `lunhui.ts` | the Lunhui rows (§4.3; modules spec §5.12): `LUNHUI_ROW_IDS`, `LUNHUI_TOOL_NAMES`, `lunhuiPatches(repoRoot?)` — one insert of twelve file-plugin rows under `face/plugins/lunhui/`, each `name` the absolute `file:` URL of its file (`lunhui-runs` → `runs-row.mjs`, `lunhui-freeze-quotes` → `freeze-quotes-row.mjs`, …, `lunhui-mode` → `mode-row.mjs`, `lunhui-review` → `review-row.mjs`, `lunhui-present` → `present-row.mjs`), `lunhui-runs`' config `{strategiesRoot}` (this checkout's `strategies/`) and the four freeze, six module and present rows' `{}`; `LUNHUI_TOOL_NAMES` the eighteen tools in row order, `lunhui_present` last; composed right after the seat; plain data, nothing mounted |
 | `protocols.ts` | Gravit's run protocols (§4.3): `readProtocol` reads one prose file — trimmed, refused with its absolute path first when missing, unreadable, empty, over `PROTOCOL_MAX_BYTES` (3,000 raw bytes, inclusive) or carrying `{{` — and `readProtocols(dir?)` returns every shipped one as `{name, probe, text}`, in section order: `lunhui:run` (`LUNHUI_RUN_SECTION`) from `lunhui-run.md` (`LUNHUI_RUN_FILE`, `LUNHUI_RUN_PATH`), then `lunhui:module` (`LUNHUI_MODULE_SECTION`) from `lunhui-module.md` (`LUNHUI_MODULE_FILE`, `LUNHUI_MODULE_PATH`), both under `PROTOCOLS_DIR` (`dsh/profile/`, resolved from the module) and gated on `lunhui_read_run`; `LUNHUI_MODULE_MAX_BYTES` (1,500) is the module file's own budget under the loader's 3,000, pinned by `tests/protocols.test.ts`, not enforced by the loader; dependency-free |
 | `orders.ts` | Gate 2 decision logic, pure: `isOrderTool` (the seat's twelve writes — `SEAT_WRITE_RAW_NAMES` — and any tool under the face's own seat prefix outside `SEAT_READ_RAW_NAMES`), `isSeatWriteTool`, `RETIRED_ORDER_RAW_NAMES` and `isRetiredOrderTool` (`place_order`, `cancel_order` under any server: denied, never carded), `effectiveApprovalPolicy`, `orderApprovalDecision` (with the `displayReason` twin), `describeOrder` (the seat's keys in a readable order; a key field shown whole or the call denied), `hasApprovalGrant`, `orderGuardReason`, `orderGuardReasonForSession` (the guard's one producer; a retired tool denied first; reads `snapshotEvents()`, a distinct denial for an unreadable log), `auditOrderTools` (`{gated, uncovered, retired}`) — depends on nothing (structural types only) |
@@ -1052,8 +1054,7 @@ after which dsh's round driver prompts Gravit again at idle until it completes o
 `get_goal` for the id and revision `update_goal` needs; after a restart or an errored or max-tokens
 round the goal is only disarmed and "continue" re-arms it (`update_goal` `resume`), while the
 face's Stop during a round pauses it and only the operator's `/goal resume` reopens it (R30);
-rounds in which Gravit itself reads the Account through the seat (`mcp__account__portfolio_*`) and
-AKShare, places a forward paper trade on the paper venue the operator granted, waits for the fill
+rounds in which Gravit itself reads the Account through the seat (`mcp__account__portfolio_*`, AKShare among its reads), places a forward paper trade on the paper venue the operator granted, waits for the fill
 and the statement, and journals every result as a dated entry with the Account's own figures and
 the order ids — nothing is backtested, no read is guarded against lookahead, and no role is called;
 no commit inside the rounds (a commit from the channel session raises an approval card, §3.3); in
@@ -1165,7 +1166,7 @@ before the cycle, gated alike), `boot.test.ts` (a protocols directory with `lunh
 carries it).
 
 **The policy layer** (`src/policy.ts`) composes directly above the bundle layer and BELOW
-AKShare, the profile and the home, so an operator row with the same id wins — the opposite of
+the Account seat, the profile and the home, so an operator row with the same id wins — the opposite of
 the overlay, on purpose: these are defaults, not the face's contract. Each row restores a 0.1.1
 posture dsh-base 0.2.0 changed, and each is an operator decision (§4.8):
 
@@ -1189,9 +1190,9 @@ plus re-enabling `web-fetch-http` and restating `web` with `fetchProvider: http`
 after the operator layers. Outside the layer, and undecided (PLAN D18): dsh-base's spill budget
 moved from `maxInlineBytes: 50000` to `maxInlineTokens: 12500` (§9, R27).
 
-**The project layer** is three members, in this order, each composed above the policy layer and
+**The project layer** is two members, in this order, each composed above the policy layer and
 below the profile and the home, so an operator row with one of their ids replaces that row's config
-and `disabled: true` removes it: AKShare's `mcp-akshare` (`src/akshare.ts`), the Account seat's
+and `disabled: true` removes it: the Account seat's
 `mcp-account` (`src/account-seat.ts`), and the Lunhui rows (`src/lunhui.ts`, modules spec §5.12) —
 one insert of twelve cordis file-plugin rows, in-process, no child process:
 
@@ -1674,8 +1675,8 @@ rm -rf "$SCRATCH/dsh-sizes"
 `tail -9` is the group lines, the total and the smallest tool; a group that reads 0 tools means
 its row did not connect (stderr says why). When the operator's home adds no MCP row of its own, a fresh home
 does as well and copies nothing — plan 4's measurement: `DSH_HOME="$SCRATCH/dsh-sizes" npm run
-setup` in `face/`, then the same `schema-sizes.ts` line; the face composes its AKShare and seat
-rows itself, so only an operator row would be missing.
+setup` in `face/`, then the same `schema-sizes.ts` line; the face composes its seat
+row itself, so only an operator row would be missing.
 
 ### 4.4 Route table
 
@@ -1770,7 +1771,6 @@ face's `WorkspaceLike`). Recorded, not fixed.
 |---|---|---|---|
 | `FACE_PORT` | `main.ts` | `3090` | `"0"` asks the OS; `""` means default |
 | `FACE_PROFILE` | `main.ts`, `setup.ts` | `face` | honored by both `setup` and `start` |
-| `FACE_AKSHARE_MCP_COMMAND` | `akshare.ts` | `~/.local/bin/akshare-mcp` | the AKShare server's executable |
 | `FACE_ACCOUNT_SEAT_DIR` | `account-seat.ts` (`seatDir`) | the repo's `account/` (`DEFAULT_SEAT_DIR`) | the Account package the seat process runs from (`npm ci` there); set it only to run the seat from another copy |
 | `FACE_BIND` | `overlay.ts` (`faceBind`), for the `webserver` row; `main.ts` for the boot line | `127.0.0.1` | the webserver's bind (§4.3): `0.0.0.0` in the compose agent box only — never on the host, where it would serve the `/data` routes to the LAN behind a forgeable `Host` fence (§9, R51) |
 | `PORTFOLIO_BIND`, `PORTFOLIO_HOSTS` | `account/src/portfolio/server.ts`, not the face | `127.0.0.1`, none | the Account's listener and the extra `host:port` values its `Host` fence admits (§3.9); set by `compose.yml` for the Account box (`0.0.0.0`, `account:4820`) and nowhere else |
@@ -3316,7 +3316,7 @@ Under `danger-full-access` the listener denies outright. A retired `place_order`
 is denied by the guard before any card, and a home that registers one does not boot (§4.7).
 
 **6.2 A dated market read.** There is no guarded read since 2026-10-24: the seat's market reads
-(`portfolio_markets`, `portfolio_quote`, `portfolio_candles`, `portfolio_history`, …) and AKShare's
+(`portfolio_markets`, `portfolio_quote`, `portfolio_candles`, `portfolio_history`, …) and AKShare's (`portfolio_akshare`)
 answer what their sources hold now, and Gravit's evidence is the forward paper trade of 6.1 with
 the Account's statement (`dsh/profile/cycle.md`).
 
@@ -3496,7 +3496,7 @@ refusing `account:4820`, `PORTFOLIO_HOSTS` admitting it, `evil:4820` and a forei
 refused, `parseHosts`). The face's:
 
 - **Composition and boot** — `boot` (the layer order ending with the overlay; the policy layer
-  between bundle and AKShare, the Account seat row right after AKShare with its config from
+  between bundle and the Account seat, the Account seat row with its config from
   `FACE_ACCOUNT_SEAT_DIR` and `FACE_ACCOUNT_URL` and an operator's disable kept, and `account-seat`
   pinning `DEFAULT_SEAT_DIR` to the repo's `account/`; the storage chain and projection cache composed once, from
   dsh-base, and reachable by an operator patch; the persona patch setting `personaPrefix` and
@@ -3779,7 +3779,7 @@ refused, `parseHosts`). The face's:
   falling back to the face's `seatDir()`, and the skip naming `npm ci in account/`), `compose`
   (`compose.yml` read offline: two services; both ports on the host's loopback; the agent waiting
   on the Account's health check on `/api/overview`; the Account's `PORTFOLIO_BIND`/`PORTFOLIO_HOSTS`,
-  the agent's `FACE_BIND`, `FACE_ACCOUNT_URL`, `BUYER_HOME`, `DSH_HOME` and AKShare command; the
+  the agent's `FACE_BIND`, `FACE_ACCOUNT_URL`, `BUYER_HOME` and `DSH_HOME`; the account's `PORTFOLIO_AKSHARE_BIN`; the
   optional `.env.deepseek`; the allowlist at `${PWD}` with no root mount and no `.env` path,
   `account/` read-only and bound once, the read-only tmpfs `.git`, the two module volumes; no
   docker socket and no `account-home` in the agent box; the five volumes), and the room suites
@@ -4025,8 +4025,8 @@ each speaks the browser's wire through `tests/remote.ts` (`mountClient`, `signIn
   `account-graft-smoke` shares.
 - `account-graft-smoke.test.ts` — the Account's reads through the face's proxy on a real boot
   (run from the repo's `account/`, or `FACE_ACCOUNT_SEAT_DIR` when set; skipped when that
-  directory has no `node_modules/tsx`): the Account's own stand-in on a free port (never 4820), the face booted on a scratch home with AKShare
-  and the `mcp-account` row disabled — no seat process, nothing written under `~/.buyer-agent-demo`
+  directory has no `node_modules/tsx`): the Account's own stand-in on a free port (never 4820), the face booted on a scratch home with
+  the `mcp-account` row disabled — no seat process, nothing written under `~/.buyer-agent-demo`
   — and `FACE_ACCOUNT_URL` at the stand-in; the proxy and the seat route registered on the booted web
   server as `main.ts` registers them (a bare `bootFace` mounts no `/data` route), and then, over the
   face's own port: `/data/account` 200 with `ok` and its venues, `/data/account/explore` listing
@@ -4145,7 +4145,7 @@ each speaks the browser's wire through `tests/remote.ts` (`mountClient`, `signIn
   expecting `NOT_EVALUABLE` naming `index`, `limit-up` and `boards` (no evidence row), and its submit
   of that example landing `counterevidence.json` in the run, its report returning through the tool.
 - `lunhui-market-run-smoke.test.ts` — one whole `cn-market` run on a real boot (modules spec §10
-  item 2, A22, §5.10): AKShare and the seat off, the stub as the default model, `lunhui-runs` over
+  item 2, A22, §5.10): the seat off, the stub as the default model, `lunhui-runs` over
   a temp strategies root holding a copy of the shipped `cn-market`, the four freeze rows' `fetch`
   one directory holding both fixture sets, a fixture roles root with `cn-market-analyst` routed to
   the stub. Gravit, played by the stub, freezes the index (opening the run), the limit-up pools and
@@ -4184,7 +4184,7 @@ each speaks the browser's wire through `tests/remote.ts` (`mountClient`, `signIn
   rebuilt from the sealed runs as the read built it; the card at most 2,048 bytes; the runs card's
   latest run Monday's, with its review line; Gravit's prompt carrying the strategy channel.
 - `lunhui-answer-smoke.test.ts` — Gravit's composed answer drawn end to end (run view plan 3):
-  AKShare and the seat off, `lunhui-runs` replaced over a scratch strategies root holding
+  the seat off, `lunhui-runs` replaced over a scratch strategies root holding
   `cn-market` and the synthetic sealed 10-27 run (`syntheticSealedRun`, written as its own
   `run.json`, `metrics.json`, evidence and artifact files); the view route registered as `main.ts`
   registers it (a bare `bootFace` mounts no `/data`) and read with the signed-in cookie at the
@@ -4477,7 +4477,7 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
   a server's `instructions` become an unswitchable `mcp:<server>` prompt section that bots see
   too (sections are not masked like tools), and instructions over 32 KiB fail the connection. A
   one-tool FastMCP server on the operator's interpreter (`mcp` 1.28.1) negotiated with the 0.2
-  client; AKShare's install and live listing are a drill still owed (§7.4).
+  client; AKShare is the Account's sidecar since 2026-11-01, so its negotiation is the Account's SDK client's, not dsh's.
 - **R24 — `agentPresets/read` hands any signed-in client a bot's composition**: its persona text
   and the absolute rebased paths (the face's install path). 0.1.1 had no such Remote; `/api` is
   cookie-gated, which R3a qualifies.
@@ -4524,16 +4524,18 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
   spec's §11 (e) took the client to send no slash commands; it does, since the 0.2.0 port. The
   cycle drill's restart step runs a real model's path on an active goal; a real model meeting a
   paused goal has not been drilled.
-- **R31 — The tool-schema block is AKShare's fourteen tools; the lever is not pulled.** 32,003 of
+- **R31 — The tool-schema block was AKShare's fourteen tools; the lever is pulled (2026-11-01).** 32,003 of
   the 2026-10-10 first request's heuristic tokens were schemas (§4.3), the largest part.
   `face/scripts/schema-sizes.ts` priced it per tool on 2026-10-19 (a scratch home; §4.3 has the
   table): AKShare's fourteen tools, whose descriptions enumerate every method, were 24,426 of the
   31,620 heuristic tokens measured (77%), the host's 26 tools 5,857, the three role tools 685 and
   the Alpaca server's seven keyless tools 654 — those last two gone since 2026-10-24, the seat's
   15,727 come since (R35). AKShare's price in billed tokens is not measured: AKShare's schemas hold 18,211 CJK ideographs, which the heuristic prices at a quarter
-  of a token each. Which tools Gravit may lose — the
-  lever is a mask on its own preset, `tools.restrict` in `gravit.js`, as `plugins/bot.js` does
-  for a bot — is the operator's decision on those numbers, in the next round (§10).
+  of a token each. Plan 3 of the Account's two parts pulled the lever differently: the face mounts no
+  AKShare, the fourteen schemas leave the tool block, and the seat's one `portfolio_akshare` description
+  replaces them. The new block is not re-measured; `npm run schema-sizes` on the next live boot does.
+  A mask on Gravit's own preset (`tools.restrict` in `gravit.js`, as `plugins/bot.js` does for a bot)
+  remains the lever for the seat's and the host's tools.
 - **R32 — Two cards per seat write.** A seat order stops for the face's Gate 2 card in the conversation
   and then for the Account's own Guard card, signed with an owner's device key: since the graft's
   stage 2 the second card is answered in the face's Cards too (✓ Approve / ✗ Reject on a page that
@@ -4999,10 +5001,13 @@ In order; each with what "done" is and which charter row it reopens.
    wire (`/data/quotes*`, `/data/symbols/search`, `/data/cn/*` and the modules behind them) is
    deleted and the Markets screens read the Account through the proxy. *Built, plan 2 (2026-11-01):*
    the Lunhui freezes fetch through the Account: `GET /api/cn/relay` and `POST /api/cn/ifind`
-   (§3.9), the iFinD token the Account's alone, `via: "account"` on each evidence file. *Still ahead
-   (plan 3):* AKShare as a sidecar of the Account box, reaching Gravit only through the seat; the
-   agent box holding no data source of its own. Done when the agent
-   box's image carries no `akshare-mcp` and no Lunhui row reaches an upstream host. Reopens the
+   (§3.9), the iFinD token the Account's alone, `via: "account"` on each evidence file. *Built, plan 3
+   (2026-11-01):* AKShare is the Account's sidecar (`akshare-mcp` over stdio, §3.9), reached by Gravit
+   only through the seat's `portfolio_akshare`; the face mounts no AKShare, the agent box's image
+   carries no `akshare-mcp` and no Lunhui row reaches an upstream host, so all three halves are in
+   and the item moves to the built log. Owed: the live drill (a restarted host Account, then the
+   face; `GET /api/akshare/tools` lists 14 tools; Gravit answers an A-share question with
+   `portfolio_akshare`, no card) and the image half in the two-box drill (item 24). Reopens the
    charter's §1 MARKET line and §3.
 23. **The Account's own page retired** (project 3, after 22). `account/src/portfolio/public`
    leaves; Guard, Beast and the live cap — the owner settings still changed only on that page —
@@ -5043,10 +5048,10 @@ In order; each with what "done" is and which charter row it reopens.
 | `DSH_PERMISSION_MODE` | dsh | sandbox preset; `danger-full-access` ⇒ approval policy `never` |
 | `DSH_TELEMETRY_DISABLED` | face boot | any non-empty value disables telemetry; composed after the operator layers, it still wins over an operator's re-enable of the row the policy layer disables |
 | `FACE_PORT`, `FACE_PROFILE` | face | port, profile name |
-| `FACE_AKSHARE_MCP_COMMAND` | face (`akshare.ts`) | the AKShare MCP executable, default `~/.local/bin/akshare-mcp` |
+| `PORTFOLIO_AKSHARE_BIN` | the Account (`live/akshare.ts`, §3.9) | the AKShare sidecar's executable, default `~/.local/bin/akshare-mcp`; the account image sets `/usr/local/bin/akshare-mcp` |
 | `IFIND_ACCESS_TOKEN`, `IFIND_REFRESH_TOKEN` | the Account (`cn-ifind.ts`, §3.9) | the Lunhui boards stand-in's iFinD credential, held by the Account alone |
 | `FACE_SMOKE` | face tests | enables the twenty-four real boots |
-| `FASTMCP_LOG_LEVEL` | an MCP row (AKShare's server is FastMCP) | `WARNING` silences FastMCP's INFO noise |
+| `FASTMCP_LOG_LEVEL` | the Account's AKShare sidecar (a FastMCP server; one of the names its child inherits) | `WARNING` silences FastMCP's INFO noise |
 
 The Python package's variables — the two APCA keys and `APCA_API_BASE_URL`, `ALPHA_DATA_SOURCE`,
 `ALPHA_PIT_ROOT`, `ALPHA_DATA_FEED`, `ALPHA_DATA_COMPOSITE*`, `ALPHA_UNIVERSE_SCREEN`, the three

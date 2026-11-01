@@ -19,7 +19,8 @@ deferring. Every style-gravit SKILL.md carries that scope header at the top.
 ## Install
 
 There is no Python side and no server of this repo's to mount: the face composes its own MCP
-rows (AKShare, the Account seat) on every boot, and the operator adds two rows of their own.
+row (the Account seat; AKShare is the Account's, reached through the seat's `portfolio_akshare`)
+on every boot, and the operator adds two rows of their own.
 
 1. **Create the harness home and the face profile.** `cd face && npm install && npm run setup`
    creates `$DSH_HOME/profiles/face/` (`$DSH_HOME` defaults to `~/.dsh`): a `package.json`
@@ -47,12 +48,12 @@ rows (AKShare, the Account seat) on every boot, and the operator adds two rows o
    ```
    Confirm what actually booted in the face's plugin panel (`/data/plugins.json`: every loader
    row with its phase, and the tools each MCP server registered). `dsh --profile face
-   --dump-config` shows the profile's own layers only — never the face's policy, AKShare,
+   --dump-config` shows the profile's own layers only — never the face's policy,
    Account seat and host rows — and only a 0.2.0 CLI may run it on this home (step 1).
 3. **Give it the model's key.** `source .env.deepseek` in the shell that launches the face
    (`DEEPSEEK_API_KEY`), or put the variable in the home profile's env block. The file is not
    loaded automatically and is not in git. No server of this repo's needs a key: the Account
-   seat signs with the Account's own seat key and AKShare is keyless (`face/README.md`).
+   seat signs with the Account's own seat key and its AKShare sidecar is keyless (`face/README.md`).
 4. **Gate 2 — per-write human approval — is the face's, not the profile's.**
    `face/src/orders.ts` registers a `tools/pre-execute` listener that raises an approval card
    for every write of the Account seat, matched on the raw tool name so a renamed MCP server
@@ -73,7 +74,7 @@ The template above is realized, live and drilled, in the face's profile. The sha
 actually bound, for the next install or the next pin bump:
 
 - **The MCP bridge is `@deepseek-ai/dsh-mcp-client`, and it is NOT in dsh-base.** The face's
-  AKShare and Account seat rows use it. It is declared in `face/package.json` at the exact
+  Account seat row uses it. It is declared in `face/package.json` at the exact
   `DSH_PIN` (the lockstep sweep in `face/tests/version.test.ts` covers it automatically), not
   installed into the profile — rows resolve plugin names from the face's dependency closure
   through the runtime module resolution the face computes from `face/package.json` at every
