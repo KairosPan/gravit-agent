@@ -5,8 +5,9 @@
 /** The hosts an A share is read from: Tencent's quote, search, rank and chart hosts */
 export const CN_HOSTS: readonly string[] = ["qt.gtimg.cn", "smartbox.gtimg.cn", "proxy.finance.qq.com", "web.ifzq.gtimg.cn"];
 
-export interface CnReply { status: number; bytes: Uint8Array }
-export type CnHttp = (url: string, init: { timeoutMs: number; maxBytes: number; headers?: Record<string, string> }) => Promise<CnReply>;
+export interface CnReply { status: number; bytes: Uint8Array; contentType?: string; location?: string }
+/** `body` makes the request a POST (the iFinD route's alone); without it the request is a GET */
+export type CnHttp = (url: string, init: { timeoutMs: number; maxBytes: number; headers?: Record<string, string>; body?: string }) => Promise<CnReply>;
 
 /** The body of a stream, read to its end; past `maxBytes` the read is cancelled and throws "too-large" */
 export async function readCapped(body: ReadableStream<Uint8Array>, maxBytes: number): Promise<Uint8Array> {
@@ -31,20 +32,23 @@ export async function readCapped(body: ReadableStream<Uint8Array>, maxBytes: num
   return out;
 }
 
-/** A GET with no redirect followed, the body streamed and cut at `maxBytes`, the whole bounded by `timeoutMs` ("timeout") */
+/** A GET (a POST when a body is given) with no redirect followed, the body streamed and cut at `maxBytes`, the whole bounded by `timeoutMs` ("timeout") */
 export const realCnHttp: CnHttp = async (url, init) => {
   const controller = new AbortController();
   let rejectTimeout!: (e: Error) => void;
   const timedOut = new Promise<never>((_, reject) => { rejectTimeout = reject; });
   const timer = setTimeout(() => { controller.abort(); rejectTimeout(new Error("timeout")); }, init.timeoutMs);
   const work = (async (): Promise<CnReply> => {
-    const r = await fetch(url, { method: "GET", redirect: "manual", signal: controller.signal, ...(init.headers ? { headers: init.headers } : {}) });
+    const r = await fetch(url, { method: init.body !== undefined ? "POST" : "GET", ...(init.body !== undefined ? { body: init.body } : {}), redirect: "manual", signal: controller.signal, ...(init.headers ? { headers: init.headers } : {}) });
+    const contentType = r.headers.get("content-type") ?? undefined;
+    const location = r.headers.get("location") ?? undefined;
+    const meta = { ...(contentType ? { contentType } : {}), ...(location ? { location } : {}) };
     if (!r.body || Number(r.headers.get("content-length")) > init.maxBytes) {
       void r.body?.cancel();
       if (r.body) throw new Error("too-large");
-      return { status: r.status, bytes: new Uint8Array() };
+      return { status: r.status, bytes: new Uint8Array(), ...meta };
     }
-    return { status: r.status, bytes: await readCapped(r.body, init.maxBytes) };
+    return { status: r.status, bytes: await readCapped(r.body, init.maxBytes), ...meta };
   })();
   work.catch(() => {});
   try { return await Promise.race([work, timedOut]); }

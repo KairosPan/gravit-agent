@@ -25,4 +25,11 @@ describe("cn-http", () => {
     await expect(readCapped(stream(3), 1_024)).rejects.toThrow("too-large");
     expect((await readCapped(stream(1), 1_024)).byteLength).toBe(600);
   });
+
+  it("cnHosts passes a POST body through", async () => {
+    let got: string | undefined;
+    const http = cnHosts(async (_u, init) => { got = init.body; return { status: 200, bytes: new Uint8Array() }; });
+    await http("https://qt.gtimg.cn/q=x", { timeoutMs: 1, maxBytes: 1, body: '{"a":1}' });
+    expect(got).toBe('{"a":1}');
+  });
 });
