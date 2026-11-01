@@ -54,12 +54,16 @@ cd face
 npm install
 npm run setup            # creates $DSH_HOME/profiles/face (never overwrites)
 source ../.env.deepseek  # DEEPSEEK_API_KEY - see below
-# Optional iFinD credentials (the Lunhui boards stand-in), exported to the server process:
-set -a
-[ ! -f ../.env.ifind ] || source ../.env.ifind
-set +a
 npm start                # prints http://127.0.0.1:3090/?token=…  (profile: face)
 ```
+
+The face sources `.env.deepseek` only: it holds no iFinD token. The iFinD token (`.env.ifind`) is
+the Account's, sourced by the Account's own start. An operator's untracked `.claude/launch.json`
+therefore changes in two lines: the face line drops `[ ! -f ../.env.ifind ] || . ../.env.ifind;`,
+and the account line becomes
+`cd …/account || exit 1; set -a; [ ! -f ../.env.ifind ] || . ../.env.ifind; set +a; exec npm run account -- --read-only`.
+The Account must be restarted from this tree: an older Account has no `/api/cn/relay`, and every
+Lunhui freeze then refuses `UPSTREAM_INVALID`, naming the Account.
 
 No Alpaca key file is sourced any more: since 2026-10-24 nothing in the face reads one (the
 Python package, its producers and the keyed quote providers left with stage 3 of the graft). An
@@ -558,7 +562,7 @@ any other channel, the leader and mode modules refuse it (`WRONG_CHANNEL`); the 
 strategies, `strategies/lunhui-s01-repair/` and `strategies/lunhui-s02-rotation/`, are the strategy
 channels the mode knows by name. A channel with runs shows a **Research runs** section on its page.
 
-**Egress**, from the face process — the Tencent and Eastmoney hosts are those AKShare itself calls for the same data; `quantapi.51ifind.com` is the boards stand-in's own:
+**Egress**, from the Account process. The face process reaches no Tencent, Eastmoney or iFinD host: the four freezes send every read to the Account at `FACE_ACCOUNT_URL` (default `http://127.0.0.1:4820`, `http://account:4820` under compose), which relays the allow-listed GETs (`GET /api/cn/relay?url=`, the status, content type and bytes unchanged, a 16-slot queue, 7 s and 512 KiB per read, 4 s for `/appstock/app/day/query`) and runs the boards stand-in's query (`POST /api/cn/ifind`, 15 s for the whole ask, 4 MiB); there is no direct-to-upstream fallback, and an Account that is down or refusing is a freeze refusal (`UPSTREAM_TIMEOUT`, `UPSTREAM_TOO_LARGE` or `UPSTREAM_INVALID`). The Tencent and Eastmoney hosts are those AKShare itself calls for the same data; `quantapi.51ifind.com` is the boards stand-in's own:
 
 | Host | What |
 |---|---|
@@ -596,21 +600,22 @@ BK codes, which the stand-in cannot honour: it takes its own first ten and the r
 `provider` (on both paths, `东方财富` or `同花顺问财`) and, for the stand-in, `fallback_from`
 (Eastmoney's refusal code; `run.json` keeps `provider` and `fallback_from`, the evidence file alone also the query and the reply's hash); the 1.37 MB reply is not stored.
 The operator sees it on the runs card's theme chip and on Discover's theme card and module page
-(`· boards: iFinD (THS concepts)`), and the theme context says so to the analyst. With no token the
-step makes no request; when both sources fail the refusal carries Eastmoney's code and names both
+(`· boards: iFinD (THS concepts)`), and the theme context says so to the analyst. With no token at the Account the
+step makes no iFinD request (the refusal says 同花顺问财备用未配置); when both sources fail the refusal carries Eastmoney's code and names both
 reasons, and nothing is written. One freeze call counts once against the run's eight whichever
-source lands. The access token is exchanged from `IFIND_REFRESH_TOKEN` (or `IFIND_ACCESS_TOKEN` is
-used as given), cached in memory only, and scrubbed from the CLI agents' children; Gravit's own shell
-can still read `../.env.ifind` (`DEVELOPMENT.md` R1b). Each stand-in freeze costs one 智能选股 call of
+source lands. The Account exchanges the access token from `IFIND_REFRESH_TOKEN` (or uses
+`IFIND_ACCESS_TOKEN` as given), caches it in memory only, and re-exchanges once on a rejected token;
+the face holds none and sends none, the names stay scrubbed from the CLI agents' children, and
+Gravit's own shell can still read `../.env.ifind` (`DEVELOPMENT.md` R1b). Each evidence file and its
+`run.json` entry carry `via: "account"`. Each stand-in freeze costs one 智能选股 call of
 the account's monthly quota. The live check is `node scripts/lunhui-standin-check.mjs` from `face/`
-with the token in the environment: it asks for the latest session, derives the boards and prints the
+with the Account running and holding the token: it goes through the Account (no `IFIND_*` in its environment), asks for the latest session, derives the boards and prints the
 counts and the top five, never the token.
 
 **Fixtures** are row config, used by the tests alone: a freeze row's `config.fetch` names a
-directory of recorded replies (`tests/fixtures/lunhui/`, `tests/fixtures/lunhui-eastmoney/`) and
-`config.now` a clock; production rows set neither key. The rows read no environment variable but
-the boards freeze's `IFIND_ACCESS_TOKEN` / `IFIND_REFRESH_TOKEN` from the face's environment, the
-stand-in's credential (`config.env` in tests).
+directory of recorded replies (`tests/fixtures/lunhui/`, `tests/fixtures/lunhui-eastmoney/`),
+`config.now` a clock and `config.account` an Account address; production rows set none of the keys
+and reach the Account at `FACE_ACCOUNT_URL`. The rows read no credential variable.
 
 **The patch lines** (`$DSH_HOME/profiles/face/cordis.patch.yml`). The rows compose right after the
 seat and below this file, so a patch reaches them:
@@ -1159,8 +1164,8 @@ leaves the volume unknown. `Live` means the trade time is under five minutes old
 whatever the provider; whether Tencent reaches this machine without delay during a session is not
 yet measured. Tencent's own words are Chinese and never reach the screen; every word is drawn from the
 Account's enums and sentences. Until 2026-10-30 the iFinD QuantAPI quoted the A shares, with a token
-and a monthly quote quota; nothing in the quote path reads `IFIND_*` now — only the Lunhui boards
-stand-in does ("Lunhui analysis").
+and a monthly quote quota; nothing in the face reads `IFIND_*` now — only the Account does, for the Lunhui boards
+stand-in ("Lunhui analysis").
 
 ### A market's page
 

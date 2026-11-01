@@ -15,7 +15,7 @@ Design: `docs/superpowers/specs/2026-10-27-account-in-repo-design.md`. The face'
 
 `docker compose up` at the repo root runs this service as the `account` box (`compose.yml`, `Dockerfile` here: the image copies `account/` and runs `npm ci` at build) beside the face's `agent` box. Stop the host service first: the box publishes 4820 on the host's loopback. Run `npm ci` here on the host before the first `docker compose up` (the dev loop needs it anyway): the agent box's `account-modules` volume mounts at `account/node_modules` inside a read-only bind of this directory, so the mount point must already exist.
 
-- The box reads `.env.ifind` (the compose line is added with the Lunhui side): the iFinD token reaches this process's environment there, nowhere else.
+- The box reads `.env.ifind` (`compose.yml`'s `env_file`, optional): the iFinD token reaches this process's environment there, nowhere else.
 - The home is the volume `account-home`, mounted at `/data` (`npm run account -- --home /data`); it starts empty. The first owner pairs with the code the box prints: `docker compose logs account`.
 - A key-file venue reads a path on the service's own filesystem, so the file goes into the volume first — `docker compose cp <file> account:/data/<name>` — and the venue is named by that path, `/data/<name>`.
 - Optional, before the first start: carry the host's home (its book, devices and seats) into the box — `docker compose create account` (the container, not started; `cp` needs one), then `docker compose cp ~/.buyer-agent-demo/. account:/data`, then `docker compose up`. Otherwise the paper venue is opened again in the box.

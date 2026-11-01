@@ -18,6 +18,10 @@ services:
       # For the box only: the Host fence is the DNS-rebinding defence, not authentication.
       PORTFOLIO_BIND: "0.0.0.0"
       PORTFOLIO_HOSTS: "account:4820"
+    # The iFinD token is the Account's alone (POST /api/cn/ifind); the agent box never reads it.
+    env_file:
+      - path: .env.ifind
+        required: false
     ports: ["127.0.0.1:4820:4820"]
     volumes: ["account-home:/data"]
     healthcheck:

@@ -34,6 +34,8 @@ test("compose.yml runs the face and the Account as two boxes, the agent box with
   assert.equal(c.services.agent.environment.DSH_HOME, "/dsh-home");
   assert.equal(c.services.agent.environment.FACE_AKSHARE_MCP_COMMAND, "/usr/local/bin/akshare-mcp");
   assert.deepEqual(c.services.agent.env_file, [{ path: ".env.deepseek", required: false }]);
+  assert.deepEqual(c.services.account.env_file, [{ path: ".env.ifind", required: false }]);
+  assert.ok(Object.keys(c.services.agent.environment).every(k => !k.startsWith("IFIND")));
   const agentMounts = c.services.agent.volumes.map(String);
   // An allowlist of the tree at its own host path, never the root: compose runs at the repo
   // root, so `./<name>` is the repo's and `${PWD}` is the same directory as the shell sees it.
