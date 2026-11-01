@@ -301,7 +301,7 @@ async function openEventsTab(port: number, cookie: string) {
 test("mid-boot: while a slow row holds boot() open, a live order tool is held for a card or denied - never dispatched", {
   skip: gated && "set FACE_SMOKE=1",
 }, async () => {
-  /* A scratch home: AKShare off (never the operator's data server), then the
+  /* A scratch home: the seat off (never the operator's Account), then the
    * two fixture rows. The stand-in carries a seat write's name, so the gate
    * sees what the seat's real tool would show it. */
   const home = mkdtempSync(join(tmpdir(), "face-ordergate-midboot-"));
@@ -311,8 +311,6 @@ test("mid-boot: while a slow row holds boot() open, a live order tool is held fo
   const description = "place an order - mid-boot drill stand-in, nothing behind it";
   writeFileSync(patchPath, [
     patch,
-    "- id: mcp-akshare",
-    "  disabled: true",
     "- id: mcp-account",
     "  disabled: true",
     "- insert:",

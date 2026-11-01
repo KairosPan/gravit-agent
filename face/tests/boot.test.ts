@@ -8,7 +8,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { composeEntries } from "@deepseek-ai/dsh-app-boot";
 import { setupFaceProfile } from "../src/setup.ts";
 import { composeFace } from "../src/boot.ts";
-import { AKSHARE_MCP_ROW_ID } from "../src/akshare.ts";
 import { ACCOUNT_SEAT_ROW_ID } from "../src/account-seat.ts";
 import { LUNHUI_ROW_IDS } from "../src/lunhui.ts";
 import { PERSONA_PATH, readPersona } from "../src/persona.ts";
@@ -70,7 +69,7 @@ test("composeFace: patch order ends with the face overlay; root is rewritten emp
 
 /* The exact layer count, so a lost or duplicated layer is a failure rather
  * than a silent change of shape. With the telemetry switch unset the stack is:
- * dsh-base insert + the policy layer (src/policy.ts) + AKShare insert + the
+ * dsh-base insert + the policy layer (src/policy.ts) + the
  * Account seat insert + the Lunhui rows' insert + hmr disable + system-prompt persona +
  * agent-instructions + face overlay. The
  * policy layer is pinned both by size (8 id patches + 1 insert against
@@ -88,11 +87,10 @@ test("composeFace stacks exactly the layers it means to", () => {
     );
     const policy = facePolicyPatches(baseRows);
     assert.equal(policy.length, 9, "8 id patches + 1 insert at dsh-base 0.2.0-rc.2");
-    assert.equal(patches.length, 8 + policy.length, patches.map((p) => p.id ?? "insert").join(","));
+    assert.equal(patches.length, 7 + policy.length, patches.map((p) => p.id ?? "insert").join(","));
     assert.deepEqual(patches.slice(1, 1 + policy.length), policy, "the policy layer sits right above the bundle layer");
-    assert.equal((patches[1 + policy.length] as InsertPatch).insert?.[0]?.id, AKSHARE_MCP_ROW_ID, "the AKShare row sits right above the policy layer");
-    assert.equal((patches[2 + policy.length] as InsertPatch).insert?.[0]?.id, ACCOUNT_SEAT_ROW_ID, "the Account seat row sits right after the AKShare row");
-    assert.deepEqual((patches[3 + policy.length] as InsertPatch).insert?.map((row) => row.id), [
+    assert.equal((patches[1 + policy.length] as InsertPatch).insert?.[0]?.id, ACCOUNT_SEAT_ROW_ID, "the Account seat row sits right above the policy layer");
+    assert.deepEqual((patches[2 + policy.length] as InsertPatch).insert?.map((row) => row.id), [
       "lunhui-runs", "lunhui-freeze-quotes", "lunhui-freeze-limit-up", "lunhui-freeze-boards", "lunhui-freeze-index",
       "lunhui-environment", "lunhui-sentiment", "lunhui-theme", "lunhui-leader", "lunhui-mode", "lunhui-review",
       "lunhui-present",
@@ -123,7 +121,6 @@ test("every face row lands in the composed tree exactly once", () => {
   // patch could reach - a duplicate there would mean one copy stayed enabled.
   assert.equal(counts.get("hmr"), 1);
   assert.equal(counts.get("approval"), 1);
-  assert.equal(counts.get(AKSHARE_MCP_ROW_ID), 1, "AKShare must be registered exactly once");
   assert.equal(counts.get(ACCOUNT_SEAT_ROW_ID), 1, "the Account seat must be registered exactly once");
   for (const id of LUNHUI_ROW_IDS) assert.equal(counts.get(id), 1, `${id} must be registered exactly once`);
   // dsh-base's own gateway: the face must not have added a second one.
@@ -162,30 +159,30 @@ test("an operator patch now reaches the base-owned storage rows", () => {
   assert.deepEqual(row?.config, { root: "/tmp/x" });
 });
 
-test("composeFace mounts AKShare with the requested command", () => {
+/* AKShare is the Account's (account/README.md): Gravit reaches it through the
+ * seat's portfolio_akshare, and the face composes no AKShare row and runs no
+ * AKShare process. The retired env switch and an operator's stale patch both
+ * stay inert. */
+test("composeFace mounts no AKShare: no mcp-akshare row and no MCP row serving akshare", () => {
   const home = freshHome();
   const previous = process.env.FACE_AKSHARE_MCP_COMMAND;
   try {
     process.env.FACE_AKSHARE_MCP_COMMAND = "/tmp/face-test-akshare-mcp";
     const { patches } = composeFace({ profileName: "face", port: 3090, dshHome: home });
-    const row = composeEntries([patches]).find((r) => r.id === AKSHARE_MCP_ROW_ID);
-    assert.ok(row);
-    assert.equal(row.name, "@deepseek-ai/dsh-mcp-client");
-    const config = row.config as { serverName?: string; transport?: string; command?: string };
-    assert.equal(config.serverName, "akshare");
-    assert.equal(config.transport, "stdio");
-    assert.equal(config.command, "/tmp/face-test-akshare-mcp");
+    const rows = composeEntries([patches]);
+    assert.equal(rows.some((r) => r.id === "mcp-akshare"), false);
+    assert.equal(rows.some((r) => r.name === "@deepseek-ai/dsh-mcp-client"
+      && (r.config as { serverName?: string } | undefined)?.serverName === "akshare"), false);
   } finally {
     if (previous === undefined) delete process.env.FACE_AKSHARE_MCP_COMMAND;
     else process.env.FACE_AKSHARE_MCP_COMMAND = previous;
   }
 });
 
-test("the profile can override or disable the repo's AKShare row", () => {
+test("a profile or home patch still naming mcp-akshare composes, and mounts nothing for it", () => {
   const home = freshHome();
-  const profilePatch = join(home, "profiles", "face", "cordis.patch.yml");
-  writeFileSync(profilePatch, [
-    `- id: ${AKSHARE_MCP_ROW_ID}`,
+  writeFileSync(join(home, "profiles", "face", "cordis.patch.yml"), [
+    "- id: mcp-akshare",
     "  config:",
     "    transport: stdio",
     "    serverName: akshare",
@@ -193,21 +190,10 @@ test("the profile can override or disable the repo's AKShare row", () => {
     "    args: [--profile-test]",
     "",
   ].join("\n"));
-  const overridden = composeFace({ profileName: "face", port: 3090, dshHome: home });
-  const rows = composeEntries([overridden.patches]).filter((r) => r.id === AKSHARE_MCP_ROW_ID);
-  assert.equal(rows.length, 1);
-  assert.deepEqual(rows[0].config, {
-    transport: "stdio",
-    serverName: "akshare",
-    command: "/tmp/profile-akshare-mcp",
-    args: ["--profile-test"],
-  });
-
-  writeFileSync(profilePatch, `- id: ${AKSHARE_MCP_ROW_ID}\n  disabled: true\n`);
-  const disabled = composeFace({ profileName: "face", port: 3090, dshHome: home });
-  const disabledRows = composeEntries([disabled.patches]).filter((r) => r.id === AKSHARE_MCP_ROW_ID);
-  assert.equal(disabledRows.length, 1);
-  assert.equal(disabledRows[0].disabled, true, "the default must not re-enable an operator-disabled row");
+  writeFileSync(join(home, "cordis.patch.yml"), "- id: mcp-akshare\n  disabled: true\n");
+  let composed: ReturnType<typeof composeFace> | undefined;
+  assert.doesNotThrow(() => { composed = composeFace({ profileName: "face", port: 3090, dshHome: home }); });
+  assert.equal(composeEntries([composed!.patches]).some((r) => r.id === "mcp-akshare"), false);
 });
 
 /* The Account seat row (src/account-seat.ts): the seat process of the

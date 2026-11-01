@@ -28,7 +28,7 @@
  *
  * ONE BOOT PER PROCESS (smoke.test.ts header): `bootFace` sets
  * `process.env.DSH_HOME`, so this is its own file. The scratch home is a
- * `mkdtemp` directory, never `~/.dsh`, and AKShare is disabled.
+ * `mkdtemp` directory, never `~/.dsh`, and the seat is disabled.
  * @module
  */
 import test from "node:test";
@@ -90,7 +90,7 @@ test("client mux smoke: the page's own api.js + mapper.js against a real host - 
   const patchPath = join(home, "profiles", "face", "cordis.patch.yml");
   const patch = readFileSync(patchPath, "utf8").replace(/^\[\][ \t]*$/m, "");
   // This smoke owns a scratch profile and must not start the operator's data server.
-  writeFileSync(patchPath, `${patch}\n- id: mcp-akshare\n  disabled: true\n- id: mcp-account\n  disabled: true\n`);
+  writeFileSync(patchPath, `${patch}\n- id: mcp-account\n  disabled: true\n`);
   const { ctx, dispose } = await bootFace({ profileName: "face", port: 0, dshHome: home, botsRoot: await makeBotsRoot() });
 
   const scope = globalThis as Record<string, unknown>;

@@ -6,8 +6,8 @@
  * with Open run, the stock links, and the stock drawer of a ladder name with its minute chart.
  *
  * ONE BOOT PER PROCESS (smoke.test.ts header): `bootFace` sets `process.env.DSH_HOME`, so this is
- * its own file. The scratch home is a `mkdtemp` directory, never `~/.dsh`; AKShare and the
- * Account seat are disabled, and `lunhui-runs` is replaced by a row over a scratch strategies
+ * its own file. The scratch home is a `mkdtemp` directory, never `~/.dsh`; the
+ * Account seat is disabled, and `lunhui-runs` is replaced by a row over a scratch strategies
  * root (a replacement restates `strategiesRoot`, src/lunhui.ts) holding `cn-market` and the
  * synthetic sealed 10-27 run (`syntheticSealedRun`), written as the run's own files. A bare
  * `bootFace` mounts no `/data` route, so the view route is registered here as `src/main.ts`
@@ -70,7 +70,7 @@ test("lunhui answer smoke: a sealed run's view over the real route, drawn as Gra
   const patchPath = join(home, "profiles", "face", "cordis.patch.yml");
   const patch = readFileSync(patchPath, "utf8").replace(/^\[\][ \t]*$/m, "");
   // This smoke owns a scratch profile: no data server, no seat, and the backbone over the scratch root.
-  writeFileSync(patchPath, `${patch}\n- id: mcp-akshare\n  disabled: true\n- id: mcp-account\n  disabled: true\n- id: lunhui-runs\n  config:\n    strategiesRoot: ${JSON.stringify(strategies)}\n`);
+  writeFileSync(patchPath, `${patch}\n- id: mcp-account\n  disabled: true\n- id: lunhui-runs\n  config:\n    strategiesRoot: ${JSON.stringify(strategies)}\n`);
   const { ctx, dispose } = await bootFace({ profileName: "face", port: 0, dshHome: home, botsRoot: await makeBotsRoot() });
   const disposeView = registerLunhuiViewRoute(ctx.webServer, {
     isTrusted: isTrustedDataRequest,

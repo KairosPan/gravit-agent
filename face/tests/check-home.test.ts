@@ -23,7 +23,7 @@ import { constants, zstdCompressSync } from "node:zlib";
 import { composeEntries } from "@deepseek-ai/dsh-app-boot";
 import { setupFaceProfile } from "../src/setup.ts";
 import { composeFace } from "../src/boot.ts";
-import { AKSHARE_MCP_ROW_ID } from "../src/akshare.ts";
+import { ACCOUNT_SEAT_ROW_ID } from "../src/account-seat.ts";
 import {
   EXIT_REFUSED, MARKER_FILE, MCP_CLIENT_PACKAGE, checkTarget, classifyRefusal, describeChanges, diffInventory, findPatchRow,
   inventory, liveHomeCandidates, mcpRowIdsToDisable, mcpRowsIn, readLogText, reportPathFor, scanRawSessions, summarize, zstdFrames,
@@ -288,17 +288,16 @@ test("inventory/diffInventory tell added, removed, modified and rewritten apart,
   ]);
 });
 
-test("mcpRowIdsToDisable: every MCP row the composition names, and the face's AKShare row by id - no alpaca row id expected", () => {
-  assert.deepEqual(mcpRowIdsToDisable([]), [AKSHARE_MCP_ROW_ID]);
-  const rows: Array<{ id?: string; serverName?: string }> = [{ id: "mcp-account", serverName: "account" }, { id: AKSHARE_MCP_ROW_ID, serverName: "akshare" }, { id: "mcp-mine" }];
-  assert.deepEqual(mcpRowIdsToDisable(rows),
-    ["mcp-account", AKSHARE_MCP_ROW_ID, "mcp-mine"]);
+test("mcpRowIdsToDisable: every MCP row the composition names, and the face's seat row by id - no alpaca row id expected", () => {
+  assert.deepEqual(mcpRowIdsToDisable([]), [ACCOUNT_SEAT_ROW_ID]);
+  const rows: Array<{ id?: string; serverName?: string }> = [{ id: "mcp-account", serverName: "account" }, { id: "mcp-mine" }];
+  assert.deepEqual(mcpRowIdsToDisable(rows), ["mcp-account", "mcp-mine"]);
   assert.equal(mcpRowIdsToDisable([{ id: "mcp-x" }]).includes("mcp-alpaca-kit"), false);
 });
 
 test("mcpRowsIn finds every MCP client row, inside groups too; findPatchRow reports the last write", () => {
   const entries = [
-    { id: "mcp-akshare", name: MCP_CLIENT_PACKAGE, config: { serverName: "akshare" } },
+    { id: "mcp-mine", name: MCP_CLIENT_PACKAGE, config: { serverName: "mine" } },
     { id: "tools", name: "@deepseek-ai/dsh-tools" },
     { id: "grp", name: "@deepseek-ai/cordis-plugin-group", group: true, config: [
       { id: "mcp-nested", name: MCP_CLIENT_PACKAGE, config: { serverName: "nested" } },
@@ -306,7 +305,7 @@ test("mcpRowsIn finds every MCP client row, inside groups too; findPatchRow repo
     { name: MCP_CLIENT_PACKAGE, config: { serverName: "anonymous" } },
   ];
   assert.deepEqual(mcpRowsIn(entries), [
-    { id: "mcp-akshare", serverName: "akshare" }, { id: "mcp-nested", serverName: "nested" }, { serverName: "anonymous" },
+    { id: "mcp-mine", serverName: "mine" }, { id: "mcp-nested", serverName: "nested" }, { serverName: "anonymous" },
   ]);
   assert.equal(findPatchRow([{ insert: [{ id: "x" }] }], "agent-default-model"), undefined);
   assert.deepEqual(findPatchRow([
@@ -338,15 +337,15 @@ test("extraPatches compose AFTER the operator's layers: they disable an operator
     "    - id: mcp-mine",
     `      name: '${MCP_CLIENT_PACKAGE}'`,
     "      config: { transport: stdio, serverName: mine, command: /bin/false }",
-    `- id: ${AKSHARE_MCP_ROW_ID}`,
+    `- id: ${ACCOUNT_SEAT_ROW_ID}`,
     "  disabled: false",
     "",
   ].join("\n"));
-  const extra = [{ id: "mcp-mine", disabled: true }, { id: AKSHARE_MCP_ROW_ID, disabled: true }];
+  const extra = [{ id: "mcp-mine", disabled: true }, { id: ACCOUNT_SEAT_ROW_ID, disabled: true }];
   const callerCopy = structuredClone(extra);
   const { patches } = composeFace({ profileName: "face", port: 3090, dshHome: home, extraPatches: extra });
   assert.equal(row(patches, "mcp-mine")?.disabled, true, "the operator's inserted row is disabled");
-  assert.equal(row(patches, AKSHARE_MCP_ROW_ID)?.disabled, true, "the operator's re-enable loses to the extra layer");
+  assert.equal(row(patches, ACCOUNT_SEAT_ROW_ID)?.disabled, true, "the operator's re-enable loses to the extra layer");
   assert.deepEqual(extra, callerCopy, "the caller's patch objects are not rewritten by the composition");
   const without = composeFace({ profileName: "face", port: 3090, dshHome: home }).patches;
   assert.notEqual(row(without, "mcp-mine")?.disabled, true, "and without it the operator's row stays enabled");

@@ -10,7 +10,7 @@
  * listing the four; the channel's runs card listing the run with four chips; Gravit's prompt carrying the run
  * protocol.
  *
- * The boot: a temp DSH_HOME, port 0, AKShare and the seat off, the default model the stub, `lunhui-runs`
+ * The boot: a temp DSH_HOME, port 0, the seat off, the default model the stub, `lunhui-runs`
  * over a temp strategies root holding a copy of the shipped cn-market, the four freeze rows' `fetch` one
  * directory holding both fixture sets, and a fixture roles root whose cn-market-analyst is routed to the
  * stub. The clock: a freeze row's `config.now` is a function, and `bootFace` structured-clones every patch
@@ -207,7 +207,7 @@ test("market run smoke: Gravit freezes three sources into one run, the analyst s
     const patchPath = join(home, "profiles", "face", "cordis.patch.yml");
     const patch = readFileSync(patchPath, "utf8").replace(/^\[\][ \t]*$/m, "");
     const freezeRows = FREEZE_ROWS.map((id) => `- id: ${id}\n  config:\n    fetch: ${JSON.stringify(fixtures)}\n`).join("");
-    writeFileSync(patchPath, `${patch}\n- id: mcp-akshare\n  disabled: true\n- id: mcp-account\n  disabled: true\n- id: agent-default-model\n  config:\n    provider: stub\n    model: echo\n- id: lunhui-runs\n  config:\n    strategiesRoot: ${JSON.stringify(strategies)}\n${freezeRows}`);
+    writeFileSync(patchPath, `${patch}\n- id: mcp-account\n  disabled: true\n- id: agent-default-model\n  config:\n    provider: stub\n    model: echo\n- id: lunhui-runs\n  config:\n    strategiesRoot: ${JSON.stringify(strategies)}\n${freezeRows}`);
     const booted = await bootFace({ profileName: "face", port: 0, dshHome: home, botsRoot: bots, rolesRoot: fixtureRoles });
     dispose = booted.dispose;
     const { ctx } = booted;

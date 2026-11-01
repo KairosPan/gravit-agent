@@ -16,7 +16,7 @@
  * written under the operator's `~/.buyer-agent-demo`.
  *
  * ONE BOOT PER PROCESS (smoke.test.ts header): `bootFace` sets `process.env.DSH_HOME`, so this is its own file. The
- * scratch home is a `mkdtemp` directory, never `~/.dsh`, and AKShare is disabled. This is the canary for the
+ * scratch home is a `mkdtemp` directory, never `~/.dsh`, and the seat is disabled. This is the canary for the
  * Account's reads moving under the face, beside `account-seat-smoke`'s for its seat. */
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -142,10 +142,10 @@ test("account graft smoke: the Account's page and markets, a refused query, its 
   /* What the face's process says, from its boot on: no pairing code and no signature may be in it. */
   const output = captureOutput();
   try {
-    /* 1. A scratch face home, AKShare and the seat row off; the face booted with the stand-in as its Account. */
+    /* 1. A scratch face home, the seat row off; the face booted with the stand-in as its Account. */
     setupFaceProfile(home);
     const patchPath = join(home, "profiles", "face", "cordis.patch.yml");
-    writeFileSync(patchPath, `${readFileSync(patchPath, "utf8").replace(/^\[\][ \t]*$/m, "")}\n- id: mcp-akshare\n  disabled: true\n- id: mcp-account\n  disabled: true\n`);
+    writeFileSync(patchPath, `${readFileSync(patchPath, "utf8").replace(/^\[\][ \t]*$/m, "")}\n- id: mcp-account\n  disabled: true\n`);
     process.env.FACE_ACCOUNT_URL = standin.url;
     const booted = await bootFace({ profileName: "face", port: 0, dshHome: home, botsRoot: await makeBotsRoot() });
     dispose = booted.dispose;

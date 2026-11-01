@@ -9,7 +9,7 @@
  * spawns it from the repo's `account/` (`npm ci` there; `FACE_ACCOUNT_SEAT_DIR`
  * names another install) and points it at the service the operator runs
  * (`FACE_ACCOUNT_URL`); the face never starts the service.
- * Composed beside the AKShare row — after dsh-base and the policy layer,
+ * Composed in the project layer — after dsh-base and the policy layer,
  * before the profile and home patches — so an operator patch can replace its
  * config or disable it (`- { id: mcp-account, disabled: true }`).
  *

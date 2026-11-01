@@ -13,7 +13,7 @@
  * list here, not offline. */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -48,13 +48,11 @@ test("account seat smoke: the seat mounts, its writes are gated, a read answers,
   const cleanups: (() => void)[] = [];
   let dispose: (() => Promise<void>) | undefined;
   try {
-    /* 1. A scratch face home: AKShare off as in every smoke, the seat row ON
-     * and replaced whole by this test's config (the operator's own override
-     * path: an id patch with `config`), pointed at the stand-in as its seeded
-     * agent, the seat's home a scratch directory. */
+    /* 1. A scratch face home, its profile patch as setup writes it: the seat
+     * row ON and replaced whole by this test's config (the operator's own
+     * override path: an id patch with `config`), pointed at the stand-in as its
+     * seeded agent, the seat's home a scratch directory. */
     setupFaceProfile(home);
-    const patchPath = join(home, "profiles", "face", "cordis.patch.yml");
-    writeFileSync(patchPath, `${readFileSync(patchPath, "utf8").replace(/^\[\][ \t]*$/m, "")}\n- id: mcp-akshare\n  disabled: true\n`);
     const extraPatches: FacePatchList = [{
       id: ACCOUNT_SEAT_ROW_ID,
       config: {

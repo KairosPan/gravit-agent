@@ -105,7 +105,7 @@ test("room discussion smoke: structured brief, private journals, serial disagree
      * (NEW packages/core/agent-default-model/src/index.ts:74-91; PLAN D1/D2).
      * So the scratch profile names the stub route up front, the same way the
      * operator names theirs, and the boot below asserts it took. */
-    writeFileSync(patchPath, `${patch}\n- id: mcp-akshare\n  disabled: true\n- id: mcp-account\n  disabled: true\n` +
+    writeFileSync(patchPath, `${patch}\n- id: mcp-account\n  disabled: true\n` +
       `- id: agent-default-model\n  config:\n    provider: stub\n    model: host-default\n`);
     const { ctx, dispose } = await bootFace({ profileName: "face", port: 0, dshHome: home, botsRoot: bots });
     let disposeRuntime = (): void => undefined;

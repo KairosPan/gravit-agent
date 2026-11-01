@@ -126,7 +126,6 @@ import { PERSONA_PATH, readPersona } from "./persona.ts";
 import { CYCLE_PATH, readCycle } from "./cycle.ts";
 import { readProtocols } from "./protocols.ts";
 import { AGENT_INSTRUCTIONS_ROW_ID, instructionsPatch } from "./instructions.ts";
-import { aksharePatches } from "./akshare.ts";
 import { accountSeatPatches } from "./account-seat.ts";
 import { lunhuiPatches } from "./lunhui.ts";
 import { facePolicyPatches } from "./policy.ts";
@@ -283,7 +282,7 @@ function composedRowIds(layers: readonly FacePatchList[]): Set<string> {
 /**
  * Compose the face's full patch stack over its profile, in application order:
  * bundle layers in `dsh.profile.bundles` order, the face's policy defaults
- * (src/policy.ts), the project's AKShare connection, the profile's own user
+ * (src/policy.ts), the project's rows (the Account seat, the Lunhui rows), the profile's own user
  * layer, the machine-local home layer (`$DSH_HOME/cordis.patch.yml`, which
  * outranks the per-profile one), the caller's in-memory
  * {@link FaceBootOptions.extraPatches} (usually none), the telemetry switch,
@@ -343,9 +342,8 @@ export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; ro
     composedRowIds([bundlePatches]),
     (line) => { process.stderr.write(`${BIN}: warning: ${line}\n`); },
   );
-  const marketPatches = aksharePatches();
-  /* The Account seat (src/account-seat.ts): the same project layer, right
-   * after AKShare, below everything the operator writes. */
+  /* The Account seat (src/account-seat.ts): the project layer, right after
+   * the policy defaults, below everything the operator writes. */
   const seatPatches = accountSeatPatches();
   /* The Lunhui rows (src/lunhui.ts, modules spec §5.12): the same project
    * layer, right after the seat, below everything the operator writes. */
@@ -356,7 +354,7 @@ export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; ro
    * could rewrite them under the caller. */
   const extraPatches: FacePatchList = structuredClone(opts.extraPatches ?? []);
   const patches: FacePatchList = [
-    ...bundlePatches, ...policyPatches, ...marketPatches, ...seatPatches, ...lunhuiRows, ...profile.patches, ...homePatches, ...extraPatches,
+    ...bundlePatches, ...policyPatches, ...seatPatches, ...lunhuiRows, ...profile.patches, ...homePatches, ...extraPatches,
   ];
   /* Both switches below are guarded on the row actually being in the composed
    * tree. A patch that matches nothing is inert and — measured, not assumed —
@@ -367,7 +365,7 @@ export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; ro
    * never mounted the row. (With the policy layer disabling
    * `session-telemetry-otel` by default the env switch is redundant until an
    * operator re-enables the row - and then it still wins, composing after.) */
-  const below = composeEntries([bundlePatches, policyPatches, marketPatches, seatPatches, lunhuiRows, profile.patches, homePatches, extraPatches]);
+  const below = composeEntries([bundlePatches, policyPatches, seatPatches, lunhuiRows, profile.patches, homePatches, extraPatches]);
   const rows = new Set(below.flatMap((row) => (typeof row.id === "string" ? [row.id] : [])));
   /* app-boot exports the CLI's own resolver now (NEW packages/boot/app-boot/
    * src/profile-context.ts:52-55): ANY non-empty value disables, and a
