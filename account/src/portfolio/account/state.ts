@@ -189,7 +189,7 @@ export interface AccountState {
   agents: AgentKey[];
   /** every address that was ever revoked: none is authorised again */
   tombstones: Hex[];
-  /** keys that tried to act and are not authorised: the page offers them to the owner */
+  /** keys that tried to act and are not authorised: the face offers them to the owner */
   requests: Array<{ address: Hex; name: string; at: string }>;
   fees: FeeApproval[];
   spends: SpendApproval[];
@@ -423,7 +423,7 @@ export function applyOwner(state: AccountState, action: OwnerAction, envelope: E
       if (!nameKey(name)) return bad("a sub-account's name has a letter or a digit in it");
       if (Number.isNaN(cap) || !(cap > 0)) return bad("a sub-account's float is more than zero");
       if (agentStatus(s, agent, nowMs) !== "ok") return bad("a sub-account belongs to an agent key that is authorised now");
-      // a wallet's key file and its place on the page go by its name in lower case, letters and digits only: "Ops", "ops" and "o.p.s" would
+      // a wallet's key file and its place in the face go by its name in lower case, letters and digits only: "Ops", "ops" and "o.p.s" would
       // be one key, so they are one name
       const same = s.subAccounts.find((x) => nameKey(x.name) === nameKey(name));
       if (same) return bad(same.name === name ? `a sub-account named "${name}" exists` : `"${name}" is the same name as the sub-account "${same.name}" (a name is told apart by its letters and digits, not their case or the marks between them)`);

@@ -515,7 +515,7 @@ const standingKey = (page, agent) => pageOk(page) && records(page.keys).some(k =
 // the agent's wallet on the page, by its address
 const walletOfAsk = (page, ask) => walletsOf(page).find(w => sameAddress(w.agent, str(ask.agent))) ?? null;
 
-/** The ask is one this page grants (Cards draws its Grant key), as the retired page's pfGrantable judges it: a venue on a page
+/** The ask is one this face grants (Cards draws its Grant key), as the retired page's pfGrantable judges it: a venue on a page
  *  that connects; a limit, a session or leverage only for an Account that takes writes (the last two on a page with its dial);
  *  a top-up for one that takes writes, into the agent's wallet from an account money moves from that is not an agent wallet,
  *  or — with no wallet — an agent wallet for a key standing on the page (never another agent's); the mode only while Beast is

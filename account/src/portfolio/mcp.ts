@@ -1,7 +1,7 @@
 /** The agent-facing surface: a stdio MCP server any skill-capable agent
  * (Claude Code, Codex, Cursor, …) can mount. It holds no venue credential and
  * no state — every tool is a call to the running portfolio service (:4820), so
- * the page, the ledger and the agent see one truth.
+ * the face, the ledger and the agent see one truth.
  *
  *   npm run account                 # the service
  *   npm run portfolio:mcp           # this, over stdio; PORTFOLIO_URL overrides the base
@@ -363,7 +363,7 @@ if (!REAL) {
 
 // ---- the account: what this seat's key may do, and the two ways it moves money -------------------
 
-/** what this seat may ask of a venue connected live, in the words the page uses */
+/** what this seat may ask of a venue connected live, in the words the face uses */
 function liveMoney(v: AccountLite["venues"][number], writes: boolean): string {
   if (v.notServed) return `nothing now: ${v.name} does not serve the network the account runs on (its own rule); asked again when a check of this network finds it answering`;
   if (v.paper) return "none: a paper account's balance is not money, and none of it moves from here";
@@ -377,7 +377,7 @@ function liveMoney(v: AccountLite["venues"][number], writes: boolean): string {
   return `ask with portfolio_live_move (the owner signs every one): ${[...out, c.receive ? "receive" : ""].filter(Boolean).join(", ")}`;
 }
 
-/** what this seat may trade at a venue connected live, in the words the page uses */
+/** what this seat may trade at a venue connected live, in the words the face uses */
 function liveTrading(v: AccountLite["venues"][number], writes: boolean): string {
   if (!writes) return "no orders: this server was started read-only";
   // the venue's own rule for the network the account runs on now: nothing is sent to it until a check of this network finds it answering

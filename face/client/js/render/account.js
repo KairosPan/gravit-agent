@@ -387,7 +387,7 @@ function cardRow(c, now, owner) {
     `${shown ? `<details${attrs({ id: `shown-${c.id}`, class: 'acct-shown' })}><summary>What it asks</summary>${shown}</details>` : ''}</div>${keys}</div>`;
 }
 
-// an ask in its words; for a page that signs, Grant where this page grants it (grantsAsk, as the retired page's pfGrantable:
+// an ask in its words; for a page that signs, Grant where this face grants it (grantsAsk, as the retired page's pfGrantable:
 // a limit, a venue, a key, a top-up, a session, leverage, the mode — each its sheet, host/sheet-view.js grantOf; a venue not
 // on the page once where the account can connect is read) and Decline; under the asks, a Grant that could not open, in words
 function askRow(k, page, owner) {

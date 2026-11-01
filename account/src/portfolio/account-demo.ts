@@ -1,6 +1,6 @@
 /** `npm run account:demo` — the ACCOUNT, in fourteen beats. Each beat lets something through and
  * turns something away; ✓ / ✗ / FAIL lines; exit 0 iff no assertion failed. No port is opened; the
- * venues and the payees are in-process simulations; nothing leaves the process. (The Account page
+ * venues and the payees are in-process simulations; nothing leaves the process. (The Account's retired page
  * shows real accounts only, so this run's simulated state is not served to it.)
  *
  * The account is the airport between a trading agent and the user's money. Its functions are the

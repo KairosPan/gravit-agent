@@ -513,7 +513,7 @@ export class PortfolioService {
           // a new session for the agents: thirty days from now. Widening, so it is the owner's to sign
           this.openness = { ...this.openness, sessionExpiresAt: new Date(Date.parse(this.now()) + 30 * 86_400_000).toISOString() };
           this.ledger.append({ kind: "note", venue: "*", reason: `a new session for the agents, until ${this.openness.sessionExpiresAt}`, detail: this.dialNow() });
-          // the day as the face writes dates (New York, no year); the exact moment is the dial's, on the account page
+          // the day as the face writes dates (New York, no year); the exact moment is the dial's, on the Account
           return { ok: true, summary: `agents may act again, until ${nyDay(this.openness.sessionExpiresAt)}` };
         }
         if (change === "restore") {
@@ -1171,7 +1171,7 @@ export class PortfolioService {
     return { ...base, address: r.address, ...(r.tag ? { tag: r.tag } : {}), ...(r.note ? { note: r.note } : {}), whose: `${v.name}'s own deposit address, as ${v.name} gives it` };
   }
 
-  /** One point on the net worth curve (account/networth.ts): the account page's total, by class and by venue (every venue connected, with
+  /** One point on the net worth curve (account/networth.ts): the Account's total, by class and by venue (every venue connected, with
    * what it holds, 0 included), and which venues' numbers are stale; with `event`, the venue connected or disconnected just now. None while
    * a restart is still connecting the venues again: a venue that is not back yet is not money gone */
   async snapshot(event?: NetWorthSnapshot["event"]): Promise<{ written: boolean; at: string } | Refusal | undefined> {
@@ -2778,7 +2778,7 @@ export class PortfolioService {
     }
   }
 
-  /** what the Account page reads: the engine's page, with what each venue connected live has in its earn products added to that venue
+  /** what the Account's read carries: the engine's page, with what each venue connected live has in its earn products added to that venue
    * (account/holdings.ts withEarn) — so the venue's total, the live total and the net worth curve count it, once */
   async accountView(): Promise<AccountPage | undefined> {
     const page = await this.account?.view();
@@ -3273,7 +3273,7 @@ export class PortfolioService {
     return this.opts.real === true;
   }
 
-  /** The statement page's whole view. On a real account every venue is read as the account page reads it (`accountView`: what is in its
+  /** The statement page's whole view. On a real account every venue is read as the Account's read has it (`accountView`: what is in its
    * earn products counted, once, with its balance), so the totals here are the ones /api/account and /holdings give; the simulation's dial,
    * its compiled openness and the agent's day against its cap are left out, and `live` says whether venues connected live are on it */
   async overview(): Promise<Overview> {
@@ -3297,7 +3297,7 @@ export class PortfolioService {
       agents.set(f.agent.id, a);
     }
     const portfolio = aggregate(accounts, holdings);
-    // the account page's total also counts money in flight between venues and what open payment sessions hold: the same number here
+    // the Account's total also counts money in flight between venues and what open payment sessions hold: the same number here
     if (page) portfolio.totalUsd = page.totalUsd;
     return {
       now,
@@ -3866,7 +3866,7 @@ export interface HeldRow extends AssetRow {
 
 export interface HoldingsView {
   asOf: string;
-  /** the account page's total: the venues, and what is in flight or held in escrow between them */
+  /** the Account's total: the venues, and what is in flight or held in escrow between them */
   totalUsd: number;
   rows: HeldRow[];
   /** the dollars that are ready, and where they can go (account/holdings.ts) */

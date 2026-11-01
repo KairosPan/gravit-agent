@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 const FACE = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SEAT = join(FACE, "..", "account", "src", "portfolio", "mcp.ts");
 const SEAT_STATE = join(FACE, "..", "account", "src", "portfolio", "account", "state.ts");
-const FACE_WORDS = [/\baccount(?:'s)?(?: own)? page\b/i, /answer it there/i];
+const FACE_WORDS = [/\baccount(?:['’]s)?(?: own)? page\b/i, /answer it there/i];
 
 /** Every file under `dir` whose name ends with `ext`, sorted. */
 function filesUnder(dir: string, ext: string): string[] {
@@ -33,9 +33,9 @@ function pointersIn(file: string, text: string, words: RegExp[]): string[] {
 
 test("the words test finds a pointer on every line, comments and template-literal lines included", () => {
   const text = ["Open the Account page", "the Account's page says", "on the Account's own page", " * on the Account page", "account pages", "const x = `answer it there`;",
-    "the retired page (account/src/portfolio/public/ui/trade.js:2948 at 9614314c)", "the Account's read"].join("\n");
+    "the retired page (account/src/portfolio/public/ui/trade.js:2948 at 9614314c)", "the Account’s page says", "the Account's read"].join("\n");
   assert.deepEqual(pointersIn("x.js", text, FACE_WORDS),
-    ["x.js:1: Open the Account page", "x.js:2: the Account's page says", "x.js:3: on the Account's own page", "x.js:4: * on the Account page", "x.js:6: const x = `answer it there`;"]);
+    ["x.js:1: Open the Account page", "x.js:2: the Account's page says", "x.js:3: on the Account's own page", "x.js:4: * on the Account page", "x.js:6: const x = `answer it there`;", "x.js:8: the Account’s page says"]);
 });
 
 test("no face sentence points at the Account's own page", () => {
