@@ -47,6 +47,7 @@ export interface ChinaSource {
   /** at most SEARCH_RESULTS (30) symbols */
   quotes(symbols: readonly string[]): Promise<Map<string, ChinaMarket> | Refusal>;
   history(symbol: string, range: ChinaRange): Promise<ChinaHistory | Refusal>;
+  /** the last ranking's or quote read's outcome; a quote read made only to price a search's hits is not one */
   status(): ChinaStatus;
 }
 
@@ -167,26 +168,28 @@ export function chinaSource(deps: { http?: CnHttp; clock?: () => number } = {}):
   const quoteKeeper = keeper<Map<string, ChinaMarket>>(() => QUOTES_TTL_MS);
   const isMarkets = (v: Map<string, ChinaMarket> | Refusal): v is Map<string, ChinaMarket> => v instanceof Map;
 
-  async function readQuotes(symbols: string[]): Promise<Map<string, ChinaMarket> | Refusal> {
+  /** `said`: whether this read's outcome is China's status — a quote read asked for itself is; one made only to price a search's hits is
+   * not, so a failed side read never says China is unavailable while its ranking answers */
+  async function readQuotes(symbols: string[], said: boolean): Promise<Map<string, ChinaMarket> | Refusal> {
     const codes = symbols.map((s) => tencentCode(s)!);
     try {
       const text = decodeGbk(await get(`https://qt.gtimg.cn/q=${[...SESSION_CODES, ...codes].join(",")}`, QUOTE_TIMEOUT_MS, QUOTE_RESPONSE_LIMIT));
       const at = now();
       const { session, quotes } = parseTencentQuotes(text, symbols, at);
-      status = { state: "live", said: LIVE_SAID, at: new Date(at).toISOString() };
+      if (said) status = { state: "live", said: LIVE_SAID, at: new Date(at).toISOString() };
       return new Map([...quotes].map(([s, q]) => [s, marketOf(q, session, at)]));
     } catch {
-      status = { state: "unavailable", said: UNAVAILABLE_SAID };
+      if (said) status = { state: "unavailable", said: UNAVAILABLE_SAID };
       return unavailable();
     }
   }
-  async function quotes(asked: readonly string[]): Promise<Map<string, ChinaMarket> | Refusal> {
+  async function quotes(asked: readonly string[], said = true): Promise<Map<string, ChinaMarket> | Refusal> {
     const symbols = [...new Set(asked)];
     if (symbols.length > SEARCH_RESULTS) return badAction(`at most ${SEARCH_RESULTS} A shares are quoted at once`);
     const filed = symbols.filter((s) => tencentCode(s) !== null);
     if (!filed.length) return new Map();
     // kept by the set asked, asked of Tencent in the order given
-    const got = await quoteKeeper.ask([...filed].sort().join(","), () => readQuotes(filed), isMarkets);
+    const got = await quoteKeeper.ask([...filed].sort().join(","), () => readQuotes(filed, said), isMarkets);
     if (!isMarkets(got)) return got;
     return new Map(symbols.flatMap((s) => (got.has(s) ? [[s, got.get(s)!] as const] : [])));
   }
@@ -243,7 +246,8 @@ export function chinaSource(deps: { http?: CnHttp; clock?: () => number } = {}):
     if (!isHits(hits)) return hits;
     while (searches.kept.size > SEARCH_KEEP) searches.kept.delete(searches.kept.keys().next().value!);
     if (!hits.length) return [];
-    const priced = await quotes(hits.map((h) => h.symbol));
+    // a side read: its outcome is not China's status
+    const priced = await quotes(hits.map((h) => h.symbol), false);
     const markets = isMarkets(priced) ? priced : new Map<string, ChinaMarket>();
     return hits.map((h) => {
       const m = markets.get(h.symbol);
@@ -254,7 +258,7 @@ export function chinaSource(deps: { http?: CnHttp; clock?: () => number } = {}):
   return {
     rank: (sort) => ranks.ask(sort, () => readRank(sort), freshRank),
     search,
-    quotes,
+    quotes: (symbols) => quotes(symbols),
     history,
     status: () => status,
   };

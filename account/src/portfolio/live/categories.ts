@@ -40,6 +40,8 @@ export const TABS: ReadonlyArray<{ id: TabId; label: string }> = [
   { id: "perps", label: "Perps" },
   { id: "preipo", label: "Pre-IPO" },
   { id: "predictions", label: "Predictions" },
+  // the A shares Tencent ranks (china.ts): never in All, their own tab alone
+  { id: "china", label: "China" },
 ];
 
 /** a venue's category or tag, as it is matched: lower case, "&" as "and", anything but letters and digits as one space */

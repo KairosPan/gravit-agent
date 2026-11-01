@@ -164,6 +164,15 @@ async function seat(name: string): Promise<(tool: string, args?: Record<string, 
 }
 
 describe("the wallet through the MCP seat: what the page reads, steering, a preview, a batch", () => {
+  it("the seat's explore takes the china tab, and answers the Account's own words where China is not read", async () => {
+    const explore = (await client.listTools()).tools.find((x) => x.name === "portfolio_explore")!;
+    expect((explore.inputSchema.properties as Record<string, { enum?: string[] }>).tab!.enum).toEqual(["all", "crypto", "stocks", "rwas", "perps", "preipo", "predictions", "china"]);
+    expect(explore.description).toContain("`china` is the A shares Tencent ranks");
+    // this account mounts no China source: the Account's refusal comes back, not a schema error
+    const china = await tool("portfolio_explore", { tab: "china" });
+    expect(china.body).toMatchObject({ code: "E_ACCOUNT_BAD_ACTION", message: "China is not read on this account" });
+  });
+
   it("reads what the page reads — markets, holdings, the curve, one asset, where to receive — with the same answers as over HTTP", async () => {
     const names = (await client.listTools()).tools.map((x) => x.name);
     expect(names).toEqual(expect.arrayContaining(["portfolio_explore", "portfolio_holdings", "portfolio_history", "portfolio_asset", "portfolio_receive", "portfolio_watchlist", "portfolio_report", "portfolio_ask", "portfolio_live_preview", "portfolio_live_batch"]));

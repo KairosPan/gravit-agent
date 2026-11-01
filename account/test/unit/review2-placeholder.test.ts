@@ -32,7 +32,7 @@ import { polymarketTradeSource } from "../../src/portfolio/live/polymarket-clob.
 import type { PublicSource } from "../../src/portfolio/live/public-markets.ts";
 import type { Candle, LiveTrader, Market, OrderState } from "../../src/portfolio/live/trade.ts";
 import { STABLES, type Http, type HttpReply } from "../../src/portfolio/live/types.ts";
-import { PortfolioService } from "../../src/portfolio/service.ts";
+import { PortfolioService, type CandlesView } from "../../src/portfolio/service.ts";
 
 type NoNonce<T> = T extends unknown ? Omit<T, "nonce"> : never;
 const ROOT = join(import.meta.dirname, "..", "..");
@@ -173,7 +173,7 @@ describe("F3 · Polymarket by key: the connector knows the wallet pUSD lands in 
 // ---- F4: the Asset drawer's price history -----------------------------------------------------------------------------------------------
 describe("F4 · the Asset drawer (service.asset → candlesFor) falls back to the keyless public OHLCV that /api/account/candles already serves", () => {
   it("GET /api/account/candles answers for the public source (the interface exists)", async () => {
-    const c = answer(await svc.candles("pubex", "BTC/USD", "1h"));
+    const c = answer(await svc.candles("pubex", "BTC/USD", "1h")) as CandlesView;
     expect(c.candles.length).toBe(24);
     expect(c.public).toBe(true);
   });

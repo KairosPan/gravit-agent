@@ -174,6 +174,7 @@ import { sessionFrom } from "./openness.ts";
 import type { OrderPlan } from "./router.ts";
 import { isPending, loadOpenness, PortfolioService } from "./service.ts";
 import { defaultHome } from "./home.ts";
+import { chinaSource } from "./live/china.ts";
 import { pairingCode } from "./account/pairing.ts";
 import type { Side } from "./venues.ts";
 
@@ -1134,7 +1135,8 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   // a real account continues its earlier runs — the owner's device, the venues, the agents and their limits come back (account/restore.ts);
   // --fresh starts it from nothing
   const fresh = args.includes("--fresh");
-  const service = await PortfolioService.create({ home: at("--home") ?? defaultHome(), live, fresh, ...(liveWrites ? { liveWrites } : {}), ...(code ? { pairingCode: code } : {}), ...(classic ? {} : { venues: "frontline" as const, real: true, openness }) });
+  // China (live/china.ts) is the real server's alone, as its streams are: a service made anywhere else never asks Tencent
+  const service = await PortfolioService.create({ home: at("--home") ?? defaultHome(), live, fresh, china: chinaSource(), ...(liveWrites ? { liveWrites } : {}), ...(code ? { pairingCode: code } : {}), ...(classic ? {} : { venues: "frontline" as const, real: true, openness }) });
   const srv = await startPortfolioServer({ port, service, bind: process.env.PORTFOLIO_BIND || undefined, hosts: parseHosts(process.env.PORTFOLIO_HOSTS) }).catch((e: NodeJS.ErrnoException) => {
     if (e.code !== "EADDRINUSE") throw e;
     // the usual reason: this server is already running in another terminal

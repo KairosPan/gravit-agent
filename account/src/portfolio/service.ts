@@ -64,6 +64,9 @@ import type { Payment } from "./account/payments.ts";
 import { exploreAcross, type Exploration, type ExploreSort, type ExploreVenue } from "./live/explore.ts";
 import { holdBackMs, KEEP_MS as LISTING_KEEP_MS, publicSources, type PublicSource } from "./live/public-markets.ts";
 import { TABS, type TabId } from "./live/categories.ts";
+import { CHINA_ID, CHINA_NAME, CHINA_NOTE, type ChinaHistory, type ChinaMarket, type ChinaSource } from "./live/china.ts";
+import type { ChinaRange } from "./live/cn-history.ts";
+import { RANK_ROWS } from "./live/cn-rank.ts";
 import { CHAIN_BY_ID, CHAINS, type ChainName } from "./live/chain.ts";
 import { mountPayees, type PayeeWorld } from "./account/payees.ts";
 import { doorOf, EXCHANGES } from "./account/doors.ts";
@@ -164,7 +167,15 @@ export interface ServiceOptions {
   /** THE VENUES' LIVE STREAMS as a test hands them in (a hub over a stand-in WebSocket, or test/standin's stand-in prices): the real server
    * starts its own instead (watchStreams), and without either nothing is streamed — every price is a REST read, as before */
   streams?: MarketHub | undefined;
+  /** CHINA: the A shares Tencent ranks, quotes, charts and finds (live/china.ts) — the China tab, China's hits in a search, an A share's
+   * quote and history. The real server mounts its own (server.ts), as it does `streams`; without one China is not read at all, and nothing
+   * here ever asks Tencent */
+  china?: ChinaSource | undefined;
 }
+
+/** how long a search waits for China's hits beside the other sources (exploreAcross's per-source budget): late, they are `missing` */
+export const CHINA_SEARCH_WAIT_MS = 4_000;
+const CHINA_NOT_READ = "China is not read on this account";
 
 /** one slice of an order (or any step an agent flies): where, what, and the agent's words for it */
 export interface BatchStep {
@@ -913,6 +924,10 @@ export class PortfolioService {
     if (key.length > 200) return no("E_ACCOUNT_BAD_ACTION", { message: "a row's key is at most 200 characters" });
     const limit = o.limit === undefined ? 60 : Math.floor(o.limit);
     if (!(limit >= 1 && limit <= 200)) return no("E_ACCOUNT_BAD_ACTION", { message: "a limit is 1 to 200 markets" });
+    // CHINA is its own tab, asked of its own source (which keeps its reads): never kept here, never in All
+    if (tab === "china") return this.exploreChina(q, sort, limit);
+    // a search on All asks China too, beside the other sources and within their budget; no other tab ever asks it
+    const china = q && !key && (tab === undefined || tab === "all") ? this.opts.china : undefined;
     // each connected venue with the connection it was made with: exploreAcross leaves out the public source that connection speaks for
     // and its own place rule for this network, where it has one that bars an order from here (placed)
     const connected: ExploreVenue[] = this.tradingVenues().map((v) => {
@@ -930,8 +945,33 @@ export class PortfolioService {
       // close-only too, for a venue not connected: nothing held there to sell, and nothing it would take from here
       const refusing = new Set((this.venuesKept?.v ?? []).filter((x) => x.verdict === "not-served" || x.verdict === "closed" || x.verdict === "close-only").map((x) => x.connector));
       const serves = (r: { id: string; connected: boolean; connector?: string | undefined }): boolean => (r.connected ? !away.has(r.id) : !(r.connector !== undefined && refusing.has(r.connector)));
-      return exploreAcross({ connected: placed, public: this.publicMarkets() }, { q, ...(key ? { key } : {}), limit, clock: () => this.realNow(), serves, ...(tab ? { tab: tab as TabId } : {}), ...(sort ? { sort: sort as ExploreSort } : {}) });
+      const [explored, hits] = await Promise.all([
+        exploreAcross({ connected: placed, public: this.publicMarkets() }, { q, ...(key ? { key } : {}), limit, clock: () => this.realNow(), serves, ...(tab ? { tab: tab as TabId } : {}), ...(sort ? { sort: sort as ExploreSort } : {}) }),
+        china ? within(CHINA_SEARCH_WAIT_MS, china.search(q), CHINA_ID, CHINA_NAME) : undefined,
+      ]);
+      if (hits === undefined) return explored;
+      // China's hits after the dollar rows; a late or refused China half is said in `missing`, the rest answered without it
+      if (isRefusal(hits)) return { ...explored, missing: [...explored.missing, { venue: CHINA_ID, venueName: CHINA_NAME, connected: false, why: hits.message, code: hits.code }] };
+      return { ...explored, items: [...explored.items, ...hits].slice(0, limit) };
     });
+  }
+
+  /** THE CHINA TAB: Tencent's ranking by turnover (`volume`, the default) or by the day's move (`movers`), at most RANK_ROWS rows, with its
+   * read — the sort, how many A shares there are, the session and whether Tencent answered — or, with `q`, China's hits alone. A refusal of
+   * the source is the answer */
+  private async exploreChina(q: string, sort: string | undefined, limit: number): Promise<Exploration | Refusal> {
+    const china = this.opts.china;
+    if (!china) return no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: CHINA_NOT_READ });
+    if (sort === "closing") return no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: "China is sorted by volume or movers" });
+    const body = { movers: [], closing: [], mostTraded: [], missing: [], notes: [CHINA_NOTE] };
+    if (q) {
+      const hits = await china.search(q);
+      if (isRefusal(hits)) return hits;
+      return { asOf: new Date(this.realNow()).toISOString(), tabs: [{ id: "china", label: "China", count: hits.length }], items: hits.slice(0, limit), ...body };
+    }
+    const got = await china.rank(sort === "movers" ? "movers" : "volume");
+    if (isRefusal(got)) return got;
+    return { asOf: got.read.asOf, tabs: [{ id: "china", label: "China", count: got.read.total }], items: got.items.slice(0, Math.min(limit, RANK_ROWS)), ...body, china: got.read };
   }
 
   /** PORTFOLIO: what the account holds, by asset across every venue (account/holdings.ts), the dollars that are ready and where they can go,
@@ -1319,12 +1359,21 @@ export class PortfolioService {
    * (`gaps`) and a daily bar built from intraday ones (`today`). Each answer kept seconds to minutes in a bounded memory (historyRead). The
    * symbol is only ever handed to the venue's own client or put in a fixed host's query string, encoded: nothing here is asked of a host the
    * symbol names */
-  async candles(venue: string, symbol: string, interval: string, ask: { range?: string | undefined; before?: string | number | undefined; limit?: string | number | undefined } = {}): Promise<CandlesView | Refusal> {
+  async candles(venue: string, symbol: string, interval: string, ask: { range?: string | undefined; before?: string | number | undefined; limit?: string | number | undefined } = {}): Promise<CandlesView | ChinaHistory | Refusal> {
     if (!this.account) return no("E_ACCOUNT_BAD_ACTION", { message: "the account layer is not mounted" });
     const id = venue.trim();
     const sym = symbol.trim();
     if (!/^[a-z0-9][a-z0-9-]{0,59}$/.test(id)) return no("E_ACCOUNT_BAD_ACTION", { message: "a venue is named by its id: lower-case letters, digits and dashes" });
     if (!sym || sym.length > 160 || !isPlain(sym)) return no("E_ACCOUNT_BAD_ACTION", { message: "a market is named by its symbol at that venue: 1 to 160 characters of plain text" });
+    // an A share's history is Tencent's, by range, in Shanghai's sessions (china.ts history): decided before any bar size or New York window
+    if (id === CHINA_ID) {
+      const china = this.opts.china;
+      if (!china) return no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: CHINA_NOT_READ });
+      if (ask.before !== undefined && String(ask.before).trim() !== "") return no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: "an A share's history is read by range" });
+      const range = (ask.range ?? "").trim();
+      if (!(CANDLE_RANGES as readonly string[]).includes(range)) return no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: `a range is one of ${CANDLE_RANGES.join(", ")}` });
+      return china.history(sym, range as ChinaRange);
+    }
     const asked = historyAsk(interval, ask);
     if (isRefusal(asked)) return asked;
     const { iv, range, before, limit } = asked;
@@ -1658,7 +1707,21 @@ export class PortfolioService {
   async quotes(pairs: Array<{ venue: string; symbol: string }>): Promise<Array<{ venue: string; symbol: string; market?: Market; refusal?: Refusal }> | Refusal> {
     if (!this.account) return no("E_ACCOUNT_BAD_ACTION", { message: "the account layer is not mounted" });
     if (!pairs.length || pairs.length > 12) return no("E_ACCOUNT_BAD_ACTION", { message: "quotes are asked for 1 to 12 markets at once, each venue|symbol" });
+    // the A shares go to China's source in ONE read; every other pair as before
+    const six = (p: { symbol: string }) => /^\d{6}$/.test(p.symbol);
+    const asked = pairs.filter((p) => p.venue === CHINA_ID && six(p)).map((p) => p.symbol);
+    const china = this.opts.china;
+    const cn: Promise<Map<string, ChinaMarket> | Refusal> = !asked.length ? Promise.resolve(new Map())
+      : china ? china.quotes(asked) : Promise.resolve(no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: CHINA_NOT_READ }));
     return Promise.all(pairs.map(async (p) => {
+      if (p.venue === CHINA_ID) {
+        if (!china) return { ...p, refusal: no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: CHINA_NOT_READ }) };
+        if (!six(p)) return { ...p, refusal: no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: "an A share is its six digits" }) };
+        const got = await cn;
+        if (isRefusal(got)) return { ...p, refusal: got };
+        const m = got.get(p.symbol);
+        return m ? { ...p, market: m } : { ...p, refusal: no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: `no A-share quote for ${p.symbol}` }) };
+      }
       const r = await this.liveMarket(p.venue, p.symbol);
       return isRefusal(r) ? { ...p, refusal: r } : { ...p, market: r };
     }));

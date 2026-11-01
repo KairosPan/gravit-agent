@@ -4,7 +4,7 @@ import { categoryOf, isExcludedCategory, isIpoCategory, KALSHI_SERIES, roleOfCat
 /** The Markets screen's tabs, the table of venues' category words, and the Kalshi series the public read is made of. */
 
 describe("the tabs", () => {
-  it("are All first, then Crypto, Stocks, RWAs, Perps, Pre-IPO, Predictions — no Now, no Venues", () => {
+  it("are All first, then Crypto, Stocks, RWAs, Perps, Pre-IPO, Predictions, China — no Now, no Venues", () => {
     expect(TABS).toEqual([
       { id: "all", label: "All" },
       { id: "crypto", label: "Crypto" },
@@ -13,6 +13,7 @@ describe("the tabs", () => {
       { id: "perps", label: "Perps" },
       { id: "preipo", label: "Pre-IPO" },
       { id: "predictions", label: "Predictions" },
+      { id: "china", label: "China" },
     ]);
     const ids: TabId[] = TABS.map((t) => t.id);
     expect(ids).not.toContain("now");
