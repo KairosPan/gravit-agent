@@ -25,7 +25,8 @@
  * A role never carries what a delegated child cannot use or must not hold: a tool that needs
  * a human, the open web, delegation, the cycle's goal and todo bookkeeping, the reserved PTC
  * transport `run_code`, the account and order tools under any server name, the AKShare tools
- * (the `NEVER` table, with the reason for each). The job tools are a bash role's own: a
+ * (`mcp__akshare__*` and the seat's `portfolio_akshare`, refused under any server name; the `NEVER`
+ * table, with the reason for each). The job tools are a bash role's own: a
  * command that outruns the executor's default timeout moves to a background job the child
  * owns, which it reads with `job_output` and stops with `job_kill`, and which is cancelled
  * when the child is. The reader refuses a never-carried `allow` entry where it reads the

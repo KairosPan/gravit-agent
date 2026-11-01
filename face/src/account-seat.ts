@@ -24,7 +24,8 @@
  *   fails in the seat's own words;
  * - it sets no `instructions`, so no prompt section; its 36 schemas enter the
  *   tool block of every request (DEVELOPMENT.md §4.3 prices them);
- * - `portfolio_wait` polls at most 55 s, hence the 90 s call timeout.
+ * - `portfolio_wait` polls at most 55 s, and the Account's AKShare sidecar call
+ *   is bounded at 120 s, so the seat waits longer: the 130 s call timeout.
  *
  * dsh 0.2.0-rc.2 spawns a stdio server twice per connect (a probe, then the
  * serving process); the probe calls no tool, so the lazily made key is the
