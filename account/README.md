@@ -6,6 +6,7 @@ Install once: `npm ci` here.
 - Run: `npm run account` (127.0.0.1:4820; flags `--read-only`, `--live-cap <usd>`, `--port <n>`, `--fresh`); the home is the code's default `~/.buyer-agent-demo`.
 - The seat: `npm run portfolio:mcp` — the MCP seat the face's `mcp-account` row spawns.
 - Markets: beside the venues' public markets the Account serves China, the A shares as Tencent ranks, quotes, charts and finds them (`src/portfolio/live/china.ts`; `explore?tab=china`, `quotes?pairs=china|<code>`, `candles?venue=china`, the seat's `china` tab). Keyless, GET-only on Tencent's four hosts; view-only (`canTrade: false`) and priced in CNY, in the China tab alone and never in `all`. Only the real server builds it, so tests and other services never reach Tencent.
+- Lunhui's reach: `GET /api/cn/relay?url=` forwards the Lunhui freezes' Tencent and Eastmoney GETs (an allow-list of their endpoints, the bytes unchanged) and `POST /api/cn/ifind` runs the boards stand-in's 问财 query with the iFinD token this process holds (`IFIND_REFRESH_TOKEN` or `IFIND_ACCESS_TOKEN` in its environment; start it with `set -a; [ ! -f ../.env.ifind ] || . ../.env.ifind; set +a; npm run account`). Both are reads, behind the `Host` fence, and work with `--read-only`; the start line says whether iFinD is configured, never the token.
 - Tests: `npm test` (vitest, one file at a time); `npm run typecheck`.
 
 Design: `docs/superpowers/specs/2026-10-27-account-in-repo-design.md`. The face's side: `face/README.md` "The Account seat".
@@ -14,6 +15,7 @@ Design: `docs/superpowers/specs/2026-10-27-account-in-repo-design.md`. The face'
 
 `docker compose up` at the repo root runs this service as the `account` box (`compose.yml`, `Dockerfile` here: the image copies `account/` and runs `npm ci` at build) beside the face's `agent` box. Stop the host service first: the box publishes 4820 on the host's loopback. Run `npm ci` here on the host before the first `docker compose up` (the dev loop needs it anyway): the agent box's `account-modules` volume mounts at `account/node_modules` inside a read-only bind of this directory, so the mount point must already exist.
 
+- The box reads `.env.ifind` (the compose line is added with the Lunhui side): the iFinD token reaches this process's environment there, nowhere else.
 - The home is the volume `account-home`, mounted at `/data` (`npm run account -- --home /data`); it starts empty. The first owner pairs with the code the box prints: `docker compose logs account`.
 - A key-file venue reads a path on the service's own filesystem, so the file goes into the volume first — `docker compose cp <file> account:/data/<name>` — and the venue is named by that path, `/data/<name>`.
 - Optional, before the first start: carry the host's home (its book, devices and seats) into the box — `docker compose create account` (the container, not started; `cp` needs one), then `docker compose cp ~/.buyer-agent-demo/. account:/data`, then `docker compose up`. Otherwise the paper venue is opened again in the box.

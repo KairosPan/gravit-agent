@@ -177,6 +177,9 @@ import { defaultHome } from "./home.ts";
 import { chinaSource } from "./live/china.ts";
 import { pairingCode } from "./account/pairing.ts";
 import type { Side } from "./venues.ts";
+import { type CnHttp, cnHosts, realCnHttp } from "./live/cn-http.ts";
+import { type CnRelay, RELAY_URL_MAX, createCnRelay, relayTarget } from "./live/cn-relay.ts";
+import { type CnIfind, IFIND_HOST, IFIND_QUERY, createIfind } from "./live/cn-ifind.ts";
 
 const PUBLIC = fileURLToPath(new URL("./public/", import.meta.url));
 /** the MCP seat an agent mounts (mcp.ts), by its absolute path: the command the page hands an agent's owner runs from any folder */
@@ -292,7 +295,14 @@ export interface PortfolioServerOptions {
   /** how often the net worth curve gets a point (account/networth.ts), in milliseconds, on the real clock: 300000 (five minutes) unless
    * said; 0 takes none, nor the points a connection or a disconnection adds. Only with the account layer mounted */
   snapshotMs?: number | undefined;
+  /** Lunhui's reach (live/cn-relay.ts, cn-ifind.ts): the relay and the iFinD client behind /api/cn/*; absent, both routes answer `off` and never the network */
+  cn?: { relay: CnRelay; ifind: CnIfind } | undefined;
+  /** how long past a relay target's own limit a request may wait for a slot in the relay's queue (milliseconds): 3000 unless said */
+  cnQueueMs?: number | undefined;
 }
+
+const RELAY_STATUS = { "not-listed": 403, timeout: 504, "too-large": 502, unreachable: 502, off: 503 } as const;
+const IFIND_STATUS = { unconfigured: 503, credential: 502, timeout: 504, "too-large": 502, unreachable: 502, "not-the-query": 400, off: 503 } as const;
 
 export interface PortfolioServerHandle {
   url: string;
@@ -492,6 +502,37 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
   const signedOnly = (res: express.Response, what: string, as: string) => void res.status(401).json({ ok: false, refusal: no("E_ACCOUNT_BAD_SIGNATURE", { tool: what, message: `${what} takes no unsigned caller: an authorised agent key signs ${svc.real ? "`agentLiveOrder` / `agentLiveMove`" : `\`${as}\``} at POST /api/exchange` }) });
   // the fixture's event contracts and the simulated router are the simulated statement's: a real account answers from its venues
   const simulatedOnly = (res: express.Response) => void res.status(409).json({ ok: false, refusal: no("E_ACCOUNT_BAD_ACTION", { message: "this account holds real accounts only: Markets is GET /api/account/explore, a price is GET /api/account/market" }) });
+
+  // Lunhui's reach: two reads (they work on a --read-only account), behind the fence above. Each answers the upstream's status, content type
+  // and bytes unchanged, marked by a header; a refusal is its own word and status
+  app.get("/api/cn/relay", wrap(async (req, res) => {
+    const refuse = (word: keyof typeof RELAY_STATUS) => void res.status(RELAY_STATUS[word]).set("x-cn-relay", "refused").json({ ok: false, relay: word });
+    const raw = req.query.url;
+    if (typeof raw !== "string" || raw.length > RELAY_URL_MAX) return refuse("not-listed");
+    if (!opts.cn) return refuse("off");
+    const target = relayTarget(raw);
+    if (!target) return refuse("not-listed");
+    const headers: Record<string, string> = {};
+    for (const k of ["accept", "referer", "user-agent"]) { const v = req.headers[k]; if (typeof v === "string") headers[k] = v; }
+    // a request queued for a slot has no deadline of its own until it holds one: its whole wait is bounded here
+    let timer: NodeJS.Timeout | undefined;
+    const late = new Promise<"late">((resolve) => { timer = setTimeout(() => resolve("late"), target.timeoutMs + (opts.cnQueueMs ?? 3_000)); });
+    const a = await Promise.race([opts.cn.relay(raw, headers), late]).finally(() => clearTimeout(timer));
+    if (a === "late") return refuse("timeout");
+    if (a.kind === "refused") return refuse(a.word);
+    res.status(a.status).set("x-cn-relay", "upstream").set("content-type", a.contentType ?? "application/octet-stream");
+    if (a.status >= 300 && a.status < 400 && a.location) res.set("location", a.location);
+    res.send(Buffer.from(a.bytes));
+  }));
+  app.post("/api/cn/ifind", wrap(async (req, res) => {
+    const refuse = (word: keyof typeof IFIND_STATUS) => void res.status(IFIND_STATUS[word]).set("x-cn-ifind", "refused").json({ ok: false, ifind: word });
+    const q = (req.body as { query?: unknown } | undefined)?.query;
+    if (typeof q !== "string" || !IFIND_QUERY.test(q)) return refuse("not-the-query");
+    if (!opts.cn) return refuse("off");
+    const a = await opts.cn.ifind.ask(q);
+    if (a.kind === "refused") return refuse(a.word);
+    res.status(a.status).set("x-cn-ifind", "upstream").set("content-type", a.contentType ?? "application/octet-stream").send(Buffer.from(a.bytes));
+  }));
 
   app.get("/api/overview", wrap(async (_req, res) => {
     await svc.account?.settle();
@@ -1137,7 +1178,8 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const fresh = args.includes("--fresh");
   // China (live/china.ts) is the real server's alone, as its streams are: a service made anywhere else never asks Tencent
   const service = await PortfolioService.create({ home: at("--home") ?? defaultHome(), live, fresh, china: chinaSource(), ...(liveWrites ? { liveWrites } : {}), ...(code ? { pairingCode: code } : {}), ...(classic ? {} : { venues: "frontline" as const, real: true, openness }) });
-  const srv = await startPortfolioServer({ port, service, bind: process.env.PORTFOLIO_BIND || undefined, hosts: parseHosts(process.env.PORTFOLIO_HOSTS) }).catch((e: NodeJS.ErrnoException) => {
+  const cn = { relay: createCnRelay(realCnHttp), ifind: createIfind({ env: () => process.env, http: cnHosts(realCnHttp as CnHttp, [IFIND_HOST]) }) };
+  const srv = await startPortfolioServer({ port, service, bind: process.env.PORTFOLIO_BIND || undefined, hosts: parseHosts(process.env.PORTFOLIO_HOSTS), cn }).catch((e: NodeJS.ErrnoException) => {
     if (e.code !== "EADDRINUSE") throw e;
     // the usual reason: this server is already running in another terminal
     console.error(`port ${port} is already in use: a portfolio server is probably running already. Open http://127.0.0.1:${port}/account, or start a second one: npm run portfolio -- --port ${port + 1} --home <another directory>`);
@@ -1149,6 +1191,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   if (liveWrites) console.log(`TRADING IS ON · real orders and movements at the accounts you connect · at most $${liveWrites.capUsd} an order or a movement (--live-cap; --read-only turns it off) · every one is signed by you, or inside a limit you signed for an agent · money leaves a venue only for a place shown to be yours${owned ? "" : `\n  pairing code: ${liveWrites.pairingCode} — the first browser becomes the owner only with this code, typed on the page`}`);
   else if (!classic) console.log(`read-only: nothing is traded or moved from this server (started with --read-only)${owned ? "" : `\n  pairing code: ${code} — the first browser becomes the owner only with this code, typed on the page`}`);
   console.log(classic ? `simulated statement at ${srv.url} · ${service.accounts().length} accounts · MetaMask ${live ? "LIVE via mm" : "simulated (--mm for live)"} · no account layer · ledger ${service.ledgerPath()} · Ctrl-C to stop` : `your account at ${srv.url} · real accounts only: connect them on the page · ledger ${service.ledgerPath()} · Ctrl-C to stop`);
+  console.log(`Lunhui's reach: /api/cn/relay (Tencent, Eastmoney) · ${cn.ifind.configured() ? "iFinD configured" : "iFinD not configured (IFIND_REFRESH_TOKEN or IFIND_ACCESS_TOKEN in this process's environment)"}`);
   // where the owner can connect, kept fresh without anyone asking: the venues' own answers to this network, and their terms matched to where
   // it is (live/availability.ts) — so the page and the agents know before anyone makes a key
   if (!classic && service.account) service.watchVenues();
