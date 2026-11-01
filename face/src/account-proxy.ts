@@ -4,12 +4,17 @@
  * answers only bare loopback requests — its fence refuses any page at another
  * origin — so the face's page never asks it: the page asks the face, and the
  * face asks the Account with a plain loopback fetch (no Origin, no
- * Sec-Fetch-Site, no cookie, the URL's own Host, `redirect: "error"`). Twenty routes: fifteen
- * reads, the Account's push channel — `stream`, and `stream/markets`, the
- * markets it follows — and three writes, `pair`, `prepare` and `exchange`
- * ({@link WriteRoute}); each an `exact` route, never a prefix: the route
- * table is the allow-list, and nothing else of the Account's surface is
- * reachable through the face.
+ * Sec-Fetch-Site, no cookie, the URL's own Host, `redirect: "error"`).
+ * Thirty-seven routes: twenty-three reads ({@link ReadRoute} — the Account,
+ * its markets, holdings and venues, and for the Market half and the wallet
+ * half `asset`, `book`, `trades`, `funding`, `receive`, `earn`, `sellable`
+ * and `signin/status`), the Account's push channel — `stream`, and
+ * `stream/markets`, the markets it follows — and twelve writes
+ * ({@link WriteRoute}: `pair`, `prepare`, `exchange`, `wallet/challenge`,
+ * `wallet/prove`, `signin/start`, `bridge-routes`, `live/order-sent`,
+ * `live/order-requote`, `live/sent`, `revoke` and `guard`); each an `exact`
+ * route, never a prefix: the route table is the allow-list, and nothing else
+ * of the Account's surface is reachable through the face.
  * {@link registerAccountProxy} returns the `account` route's reader, which
  * `main.ts` hands to `seat.ts`: `/data/seat.json` and `/data/account` share
  * one upstream read. {@link createAccountReader} is that read without a
@@ -54,9 +59,10 @@
  *   falls 256 KiB behind (the response then destroyed, as `quotes.ts` does)
  *   and on `dispose`. Any other answer is the Account's status and body — its
  *   refusal past 32 streams among them.
- * - The four POST routes — `stream/markets` and the writes `pair`
- *   (`/api/account/pair`), `prepare` (`/api/account/prepare`) and `exchange`
- *   (`/api/exchange`) — take a body declared `application/json` (else 415, as
+ * - The thirteen POST routes — `stream/markets` and the twelve writes, each at
+ *   its Account path ({@link WRITE_PATHS}: `exchange` is `/api/exchange`,
+ *   `revoke` `/api/revoke`, `guard` `/api/mode`, the rest
+ *   `/api/account/<path>`) — take a body declared `application/json` (else 415, as
  *   the face's other POST routes answer) and a target that names no query
  *   parameter (else 400), both refused before the body is read. The body — at
  *   most the route's bytes ({@link STREAM_BODY_LIMIT}, {@link WRITE_BODY_LIMIT}),
@@ -65,12 +71,17 @@
  *   body is read. The Account's status and body come back as they are, never
  *   kept and never stale; the request is cut at the route's abort
  *   ({@link WRITE_ABORT_MS}; 7 s for `stream/markets`).
+ * - The one exception to "forwarded as posted": `guard`'s body is read under
+ *   its 256 bytes and discarded; the Account always receives `{"mode":"guard"}`.
+ * - `wallet/challenge` and `signin/start` alone carry {@link FACE_ORIGIN_HEADER},
+ *   `http://` and the browser's own loopback `Host` ({@link faceOriginOf}), never
+ *   a header the browser names.
  * - Nothing of a body, a query or a frame is logged here.
  * @module
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { seatUrl } from "./account-seat.ts";
-import { FORBIDDEN, HttpError, isJsonBody, isTrustedDataRequest, markStale, readBody } from "./http.ts";
+import { FORBIDDEN, HttpError, isJsonBody, isLoopbackHost, isTrustedDataRequest, markStale, readBody } from "./http.ts";
 import type { RouteRegistrar } from "./static.ts";
 
 /** The Account's reads the face proxies: `account` is its `GET /api/account`, `reach` its
@@ -78,13 +89,15 @@ import type { RouteRegistrar } from "./static.ts";
  * the face's path is the same under `/data/account`. */
 export type ReadRoute =
   | "account" | "explore" | "market" | "quotes" | "compare" | "candles" | "holdings" | "positions" | "statement" | "history" | "agents"
-  | "venues" | "reach" | "keyfile" | "books";
+  | "venues" | "reach" | "keyfile" | "books"
+  | "asset" | "book" | "trades" | "funding" | "receive" | "earn" | "sellable" | "signinStatus";
 
 /** How long one answer is served without asking again, per route: the Account's own page's cadence (spec §5.1). */
 export const ACCOUNT_TTL_MS: Readonly<Record<ReadRoute, number>> = {
   account: 15_000, explore: 20_000, market: 3_000, quotes: 3_000, compare: 15_000, candles: 30_000,
   holdings: 8_000, positions: 10_000, statement: 10_000, history: 60_000, agents: 15_000,
   venues: 60_000, reach: 5_000, keyfile: 5_000, books: 5_000,
+  asset: 5_000, book: 2_000, trades: 2_000, funding: 60_000, receive: 60_000, earn: 15_000, sellable: 5_000, signinStatus: 1_000,
 };
 
 /** How long the Account may take, headers and body, per route: the reads that settle venue polls take
@@ -93,17 +106,46 @@ export const ACCOUNT_ABORT_MS: Readonly<Record<ReadRoute, number>> = {
   account: 7_000, explore: 10_000, market: 7_000, quotes: 7_000, compare: 7_000, candles: 25_000,
   holdings: 12_000, positions: 7_000, statement: 7_000, history: 12_000, agents: 7_000,
   venues: 30_000, reach: 30_000, keyfile: 30_000, books: 30_000,
+  asset: 25_000, book: 7_000, trades: 7_000, funding: 12_000, receive: 30_000, earn: 30_000, sellable: 30_000, signinStatus: 7_000,
 };
 
-/** The owner's writes the face proxies, each a POST: `pair` is the Account's `/api/account/pair`, `prepare` its
- * `/api/account/prepare`, `exchange` its `/api/exchange`; the face's path is `/data/account/<route>`. */
-export type WriteRoute = "pair" | "prepare" | "exchange";
+/** The writes the face proxies, each a POST, at the face's and the Account's paths in {@link WRITE_PATHS}: the
+ * owner's `pair`, `prepare` and `exchange`; the wallet's `challenge` and `prove`; the sign-in's `signinStart`;
+ * `bridgeRoutes`; the live order's `orderSent`, `orderRequote` and `sent`; and the two unsigned writes the
+ * Account itself defines as the safer direction, `revoke` (Close to agents) and `guard`. */
+export type WriteRoute =
+  | "pair" | "prepare" | "exchange"
+  | "challenge" | "prove" | "signinStart" | "bridgeRoutes" | "orderSent" | "orderRequote" | "sent" | "revoke" | "guard";
 
-/** Most bytes a write's body may carry, per route. */
-export const WRITE_BODY_LIMIT: Readonly<Record<WriteRoute, number>> = { pair: 4_096, prepare: 16_384, exchange: 65_536 };
+/** Most bytes a write's body may carry, per route; `guard`'s is read under its limit and discarded. */
+export const WRITE_BODY_LIMIT: Readonly<Record<WriteRoute, number>> = {
+  pair: 4_096, prepare: 16_384, exchange: 65_536,
+  challenge: 1_024, prove: 2_048, signinStart: 512, bridgeRoutes: 4_096, orderSent: 512, orderRequote: 512, sent: 512, revoke: 512, guard: 256,
+};
 
 /** How long the Account may take on a write, headers and body, per route: a prepare asks the venue for a quote. */
-export const WRITE_ABORT_MS: Readonly<Record<WriteRoute, number>> = { pair: 7_000, prepare: 30_000, exchange: 30_000 };
+export const WRITE_ABORT_MS: Readonly<Record<WriteRoute, number>> = {
+  pair: 7_000, prepare: 30_000, exchange: 30_000,
+  challenge: 7_000, prove: 12_000, signinStart: 30_000, bridgeRoutes: 30_000, orderSent: 30_000, orderRequote: 30_000, sent: 30_000,
+  revoke: 7_000, guard: 7_000,
+};
+
+/** The header that tells the Account the browser's own origin on the face, set on `challenge` and `signinStart`
+ * alone: the Account builds the wallet message's domain and the sign-in's redirect on it. */
+export const FACE_ORIGIN_HEADER = "x-gravit-face-origin";
+
+/** The face's origin as the browser reached it: `http://` and the request's `Host` as WHATWG parses it, only for
+ * a loopback Host ({@link isLoopbackHost}); else `null`. Derived from the Host alone, never from a header the
+ * browser could name. */
+export function faceOriginOf(req: IncomingMessage): string | null {
+  const host = req.headers.host;
+  if (!isLoopbackHost(host)) return null;
+  try {
+    return `http://${new URL(`http://${host}`).host}`;
+  } catch {
+    return null;
+  }
+}
 
 /** Most queries kept per route; the least recently used leaves first. */
 export const ACCOUNT_CACHE_KEYS = 64;
@@ -126,6 +168,14 @@ export const ACCOUNT_QUERY: Readonly<Record<ReadRoute, readonly string[]>> = {
   reach: ["connector"],
   keyfile: ["kind", "venue", "ref", "exchange"],
   books: [],
+  asset: ["key", "interval", "range"],
+  book: ["venue", "symbol", "depth"],
+  trades: ["venue", "symbol", "limit"],
+  funding: ["venue", "limit"],
+  receive: ["venue", "asset", "network"],
+  earn: ["venue", "asset", "fresh"],
+  sellable: ["fresh"],
+  signinStatus: ["state"],
 };
 
 /** The name a tab gives its stream, in the Account's grammar; the face's page mints `face-<24 hex>`. */
@@ -176,14 +226,33 @@ const JSON_ONLY = '{"ok":false,"error":"application/json only"}';
 const unreachable = (code: string): string => JSON.stringify({ ok: false, unreachable: code });
 
 /** A read's path under `/api/account` and `/data/account` where it is not `/<route>`. */
-const READ_PATHS: Readonly<Partial<Record<ReadRoute, string>>> = { account: "", reach: "/connect/reach", books: "/paper/books" };
+const READ_PATHS: Readonly<Partial<Record<ReadRoute, string>>> = {
+  account: "", reach: "/connect/reach", books: "/paper/books", signinStatus: "/signin/status",
+};
 const subPath = (route: ReadRoute): string => READ_PATHS[route] ?? `/${route}`;
 const facePath = (route: ReadRoute): string => `/data/account${subPath(route)}`;
 const accountUrl = (base: string, route: ReadRoute, query: string): string =>
   `${base}/api/account${subPath(route)}${query === "" ? "" : `?${query}`}`;
-/** The Account's path for each write. */
-const WRITE_PATHS: Readonly<Record<WriteRoute, string>> = { pair: "/api/account/pair", prepare: "/api/account/prepare", exchange: "/api/exchange" };
+/** Each write's sub-path under the face's `/data/account/`, and the Account's path. */
+const WRITE_PATHS: Readonly<Record<WriteRoute, { face: string; account: string }>> = {
+  pair: { face: "pair", account: "/api/account/pair" },
+  prepare: { face: "prepare", account: "/api/account/prepare" },
+  exchange: { face: "exchange", account: "/api/exchange" },
+  challenge: { face: "wallet/challenge", account: "/api/account/wallet/challenge" },
+  prove: { face: "wallet/prove", account: "/api/account/wallet/prove" },
+  signinStart: { face: "signin/start", account: "/api/account/signin/start" },
+  bridgeRoutes: { face: "bridge-routes", account: "/api/account/bridge-routes" },
+  orderSent: { face: "live/order-sent", account: "/api/account/live/order-sent" },
+  orderRequote: { face: "live/order-requote", account: "/api/account/live/order-requote" },
+  sent: { face: "live/sent", account: "/api/account/live/sent" },
+  revoke: { face: "revoke", account: "/api/revoke" },
+  guard: { face: "guard", account: "/api/mode" },
+};
 const WRITE_ROUTES = Object.keys(WRITE_PATHS) as WriteRoute[];
+/** The writes whose upstream carries {@link FACE_ORIGIN_HEADER}. */
+const ORIGIN_ROUTES: ReadonlySet<WriteRoute> = new Set(["challenge", "signinStart"]);
+/** What `guard` always sends the Account, whatever the browser posted. */
+const GUARD_BODY = '{"mode":"guard"}';
 
 /** The query a read may pass on, rebuilt from the route's whitelisted names in the order they came, each
  * at most once, each value at most 240 characters ({@link LONG_VALUES} names the longer ones), re-encoded;
@@ -446,19 +515,35 @@ async function readJsonPost(req: IncomingMessage, res: ServerResponse, limit: nu
   }
 }
 
-/** A POST route — `stream/markets` or a write: {@link readJsonPost}, then the body forwarded as posted to the
- * Account's `path`, cut at `abortMs`; its status and body come back as they are, never kept, never stale. */
-const postHandler = (s: Settings, path: string, limit: number, abortMs: number) => async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-  const body = await readJsonPost(req, res, limit);
-  if (body === null) return;
+/** What a POST route adds to the plain forward: headers derived from the browser's request (never copied from
+ * it), and a body sent in place of the browser's, which is then read under the limit and discarded. */
+interface PostOptions {
+  extraHeaders?: (req: IncomingMessage) => Record<string, string>;
+  fixedBody?: string;
+}
+
+/** A POST route — `stream/markets` or a write: {@link readJsonPost}, then the body forwarded as posted (or
+ * `fixedBody`) to the Account's `path`, cut at `abortMs`; its status and body come back as they are, never kept,
+ * never stale. */
+const postHandler = (s: Settings, path: string, limit: number, abortMs: number, options: PostOptions = {}) =>
+  async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+  const posted = await readJsonPost(req, res, limit);
+  if (posted === null) return;
   if (s.disabled) return send(res, 503, unreachable("disabled"));
+  const body = options.fixedBody ?? posted;
   const answer = await askAccount(s.doFetch, `${s.url}${path}`, abortMs, {
-    method: "POST", headers: { "content-type": "application/json" }, body,
+    method: "POST", headers: { ...options.extraHeaders?.(req), "content-type": "application/json" }, body,
   });
   return "status" in answer ? send(res, answer.status, answer.body) : send(res, 503, unreachable(answer.unreachable));
 };
 
-/** Mount the fifteen read routes, the two stream routes and the three write routes on the host webserver.
+/** {@link FACE_ORIGIN_HEADER} for the upstream request, when the browser's Host gives an origin. */
+const originHeader = (req: IncomingMessage): Record<string, string> => {
+  const origin = faceOriginOf(req);
+  return origin === null ? {} : { [FACE_ORIGIN_HEADER]: origin };
+};
+
+/** Mount the twenty-three read routes, the two stream routes and the twelve write routes on the host webserver.
  * The reader returned is the `account` route's own: it and `/data/account` read through one cache, so the
  * seat route `main.ts` hands it to shares that route's upstream read. `dispose` forgets every kept answer
  * and aborts every open stream's upstream. */
@@ -476,7 +561,12 @@ export function registerAccountProxy(webServer: RouteRegistrar, deps: AccountPro
   webServer.register({ kind: "exact", path: "/data/account/stream", handler: streamHandler(s, open) });
   webServer.register({ kind: "exact", path: "/data/account/stream/markets", handler: postHandler(s, "/api/account/stream/markets", STREAM_BODY_LIMIT, FOLLOW_ABORT_MS) });
   for (const route of WRITE_ROUTES) {
-    webServer.register({ kind: "exact", path: `/data/account/${route}`, handler: postHandler(s, WRITE_PATHS[route], WRITE_BODY_LIMIT[route], WRITE_ABORT_MS[route]) });
+    const options: PostOptions = {
+      ...(ORIGIN_ROUTES.has(route) ? { extraHeaders: originHeader } : {}),
+      ...(route === "guard" ? { fixedBody: GUARD_BODY } : {}),
+    };
+    const { face, account } = WRITE_PATHS[route];
+    webServer.register({ kind: "exact", path: `/data/account/${face}`, handler: postHandler(s, account, WRITE_BODY_LIMIT[route], WRITE_ABORT_MS[route], options) });
   }
   return {
     reader: readerOf(accountReads),
