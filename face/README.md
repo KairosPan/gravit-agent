@@ -1837,7 +1837,7 @@ environment holds that value; a hard link, or a symlink swapped between the chec
 is not seen; and a `grep` with no include, which ripgrep keeps off hidden files, searches one
 that an ignore file whitelists — a negation such as `!.env.alpaca` in a `.gitignore`, `.ignore`
 or `.rgignore` in the tree it searches or above it; a test keeps the repository's tracked ignore
-files free of one, and the desk cannot write one (`DEVELOPMENT.md` §9, R55). Keep keys in `.env`
+files free of one, and the desk cannot write one (`DEVELOPMENT.md` §9, R57). Keep keys in `.env`
 files, in dot-files or in the harness home.
 
 **The model.** `FACE_DESK_MODEL` is the desk's route, `provider/model`; unset, it is
@@ -1970,10 +1970,10 @@ past that are named in the brief). That source is the Account's market read
 (`src/us-quotes.ts`); with the Account down the brief reads the book and carries every price
 null, its `quotesError` `quotes unavailable: the Account is not reachable …`. A strategy's `strategies/<name>/levels.yml` is not read yet: research
 sessions can write it, and the brief's text reaches the phone, so it joins once P4 pins each one
-at arming (`DEVELOPMENT.md` §9, R65); the brief says so.
+at arming (`DEVELOPMENT.md` §9, R67); the brief says so.
 
 **Arm it** from a terminal, in `face/` of the checkout the service runs: `arm` hashes that
-checkout's files, and the service checks its own (`DEVELOPMENT.md` §9, R63).
+checkout's files, and the service checks its own (`DEVELOPMENT.md` §9, R65).
 
 ```bash
 cd face
@@ -2004,7 +2004,7 @@ for a script producer, of its script. Its arguments:
   `ALPACA_*`, `ALPHA_*` and `GRAVIT_ROOT` (the root, for reading files; never an import path), its
   whole process group killed at its deadline. The pin covers the script's bytes; a research
   package it imports is installed into the interpreter, never imported from the tree
-  (`DEVELOPMENT.md` §9, R61);
+  (`DEVELOPMENT.md` §9, R63);
 - `--turn-deadline` (1–30 min, `10m` by default) and `--producer-deadline` (10 s–180 min, `5m` by
   default), each `<n>s` or `<n>m`;
 - `--model PROVIDER/MODEL` — the turn's route; without it a firing runs Gravit's default model,
@@ -2060,7 +2060,7 @@ a turn opened in the browser still runs, and the pause outranks the budget.
 table in `src/market-clock.ts`, Node alone (the fixed holidays with weekend observance, the
 Monday holidays, Good Friday by the computus, Juneteenth, the 13:00 ET early closes and a table
 of ad-hoc closures) — once a New York day. A closure NYSE announces after that table's last edit
-is unknown until it is added (`DEVELOPMENT.md` §9, R62). An order is
+is unknown until it is added (`DEVELOPMENT.md` §9, R64). An order is
 due from its anchor to 5 minutes past it. Before it runs the face checks the pause, the day's
 budget, the instruction-chain fence ("The fence" above) and then the text's and the script's
 pins; a refusal consumes nothing, so an order lifted inside the grace still fires. One firing
@@ -4404,7 +4404,7 @@ you run the face from ("Run as a service"), and no other face on 3090:
 4. `time npm run service -- stop`. PASS, part four: `status` says `com.gravit.face: not loaded`
    and `not answering on 3090`, and its ledger line reads `ledger: last boot … - ended … code 0`.
    Record how long the stop took — the face's real exit against the script's 10 s wait
-   (`DEVELOPMENT.md` §9, R53); a `launchctl bootout … failed` followed by `not loaded` means the
+   (`DEVELOPMENT.md` §9, R55); a `launchctl bootout … failed` followed by `not loaded` means the
    face took longer than that wait. Then `npm run service -- start`; `status` says `running`
    again.
 5. Log out and back in, and start no face. PASS, part five: `npm run service -- status`, from a
