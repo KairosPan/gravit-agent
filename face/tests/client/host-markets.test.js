@@ -510,7 +510,7 @@ test('page: candles for the range, compare for a coin, the stream follow; leavin
   await settle();
   const quiet = r.reads.length;
   r.markets.page('cn:600519');
-  assert.deepEqual(r.reads.slice(quiet), ['/data/account/candles?venue=china&symbol=600519&range=1D'], "a cn page reads its history at the Account's china venue");
+  assert.deepEqual(r.reads.slice(quiet), ['/data/account/candles?venue=china&symbol=600519&range=1D', '/data/account/quotes?pairs=china%7C600519'], "a cn page reads its history at the Account's china venue, and its price at once");
   assert.deepEqual(r.follows.at(-1), [], 'and follows nothing on the stream');
   // back to a page: its kept range
   r.store.dispatch('setMarketsTab', 'all');
@@ -960,6 +960,12 @@ test('the Account down while China is on screen: the kept ranking re-served stal
   await settle();
   assert.equal(r.m().rank.status, 'ready');
   assert.equal(r.m().rank.data.stale, true, 'the proxy said it is the last read');
+  // the Venues line: never the Account's last live sentence while it is not answering (plan-1 final review #3)
+  assert.deepEqual(r.m().providers, [{ id: 'tencent', market: 'cn', status: 'error', said: 'The Account is not answering · China as last read' }]);
+  stale = false;
+  r.fire(EXPLORE_MS);
+  await settle();
+  assert.equal(r.m().providers[0].status, 'connected', 'the Account back: its own state again');
   r.markets.close();
 });
 
@@ -980,7 +986,8 @@ test('an A share page reached cold reads its candles at venue china', async () =
   const r = rig({ answer: path => (path.startsWith('/data/account/candles?') ? (query(path).range === '1D' ? fx('candles-china-1d') : { ...fx('candles-china-1m'), range: query(path).range }) : undefined) });
   assert.deepEqual(r.m().rank.data, null, 'nothing read: no ranking, no search, no star');
   r.markets.page('cn:600519');
-  assert.deepEqual(r.reads, ['/data/account/candles?venue=china&symbol=600519&range=1D']);
+  // its price at once, not on the 5 s tick (plan-1 final review #2)
+  assert.deepEqual(r.reads, ['/data/account/candles?venue=china&symbol=600519&range=1D', '/data/account/quotes?pairs=china%7C600519']);
   await settle();
   assert.equal(r.m().candles['cn:600519'].status, 'ready');
   assert.equal(r.m().candles['cn:600519'].data.sessions.length, 1, "the 1D answer's sessions kept as they are");
@@ -1075,8 +1082,14 @@ test('a failed A-share quote read keeps the price and says the connection failed
   mode = 'stale';
   r.fire(QUOTES_MS);
   await settle();
-  assert.equal(r.m().connection, 'polling');
+  assert.equal(r.m().connection, 'stale', 'the Account not answering is its own connection (plan-1 final review #1)');
   assert.equal(r.m().quotes['cn:600519'].quote_status, 'stale', "the proxy's last read is no live price");
+  assert.match(cnStateWord(r.m().quotes['cn:600519'], r.m().connection, r.m().providers), /^The Account is not answering · as of \d{2}-\d{2} \d{2}:\d{2} Beijing$/);
+  assert.equal(r.m().providers[0]?.said, 'The Account is not answering · China as last read', 'nor Tencent answering on Venues');
+  mode = 'ok';
+  r.fire(QUOTES_MS);
+  await settle();
+  assert.equal(r.m().connection, 'polling');
   assert.ok(r.reads.every(p => !faceWire(p)), 'nothing reads the face wire');
   r.markets.close();
 });

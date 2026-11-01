@@ -11,8 +11,11 @@ import {
   readWatchlist, saveWatchlist, STORAGE_KEY, readAccountWatch, saveAccountWatch, ACCOUNT_WATCH_KEY,
 } from '../wire/market-model.js';
 import { CHINA_VENUE, isCnKey, chinaPairOf, rankOf, cnQuoteOf, cnHitsOf } from '../wire/china.js';
-import { ACCOUNT_TABS, CHINA_TAB, canonicalId, isAccountKey, rowsOf, matchKey, pairsOf, pageOf, followOf, watchedOf, setWatchOf } from './market-view.js';
+import { ACCOUNT_TABS, CHINA_TAB, NOT_ANSWERING_WORD, canonicalId, isAccountKey, rowsOf, matchKey, pairsOf, pageOf, followOf, watchedOf, setWatchOf } from './market-view.js';
 import { refusedAt, refusalOf } from './owner-view.js';
+
+// China's state while the proxy re-serves the Account's last read: the Account is not answering
+const NOT_ANSWERING = { state: 'unavailable', said: NOT_ANSWERING_WORD };
 
 export const EXPLORE_MS = 20_000, QUOTES_MS = 5_000, QUOTE_PAIRS = 12;
 export const WATCH_LIMIT = 100;   // either list's: the cn list's, the Account keys' cap
@@ -101,7 +104,8 @@ export function startMarkets({
       const data = refused ? null : rankOf(body, sort);
       if (!data) { store.dispatch('rankFailed', { sort, at: now(), message: messageOf(body) }); return; }
       store.dispatch('rankLoaded', { sort, data, at: now() });
-      store.dispatch('chinaStatusUpdated', { status: body.china.status });
+      // a ranking the proxy re-served stale is the Account not answering: its last sentence is no state of now
+      store.dispatch('chinaStatusUpdated', { status: body.stale === true ? NOT_ANSWERING : body.china.status });
     }, ['rankLoading', { sort }]);
   }
   // the read for the tab on screen: China's ranking there, else the Account's explore
@@ -129,14 +133,15 @@ export function startMarkets({
     });
   }
 
-  // the A shares' prices, the Account's (venue china): the cn page's own first, then the cn rows in view — twelve a call, none while
+  // the A shares' prices, the Account's (venue china), on the tick and at once for a page reached (its own id first): the cn page's own first, then the cn rows in view — twelve a call, none while
   // one is out. Each priced row lands over the quotes kept; one the Account refused keeps its kept price, marked stale, with the
-  // Account's sentence as China's state; an answer the proxy re-serves stale (the Account not answering) lands every price stale;
+  // Account's sentence as China's state; an answer the proxy re-serves stale (the Account not answering) lands every price stale, the connection
+  // 'stale' and China's state the Account not answering;
   // a read that fails keeps every price and says the connection failed
-  function readCnQuotes() {
+  function readCnQuotes(pageId = null) {
     if (inAir('cnQuotes')) return;
     const s = store.get();
-    const page = s.route?.screen === 'markets' && isCnKey(s.route.id) ? s.route.id : null;
+    const page = isCnKey(pageId) ? pageId : s.route?.screen === 'markets' && isCnKey(s.route.id) ? s.route.id : null;
     const rows = rowsOf(s.markets, now(), s.account?.data).filter(r => isCnKey(r.id) && (inView === null || inView.has(r.id))).map(r => r.id);
     const ids = [...new Set([page, ...rows].filter(Boolean))].slice(0, QUOTE_PAIRS);
     if (!ids.length) return;
@@ -153,6 +158,11 @@ export function startMarkets({
         if (!isCnKey(id) || row.refusal === undefined) continue;
         if (Object.hasOwn(kept, id)) next[id] = { ...kept[id], quote_status: 'stale' };
         refusal ??= row.refusal;
+      }
+      if (body.stale === true) {
+        store.dispatch('quotesUpdated', { quotes: next, connection: 'stale' });
+        store.dispatch('chinaStatusUpdated', { status: NOT_ANSWERING });
+        return;
       }
       store.dispatch('quotesUpdated', { quotes: next, connection: 'polling' });
       if (refusal) store.dispatch('chinaStatusUpdated', { status: { state: 'unavailable', said: words(refusal?.message) ?? '' } });
@@ -419,6 +429,7 @@ export function startMarkets({
       if (isCnKey(id)) {
         if (followed) unfollow();
         readCnCandles(id, rangeOf(id));
+        readCnQuotes(id);
         return;
       }
       if (isAccountKey(id)) { open(id); return; }

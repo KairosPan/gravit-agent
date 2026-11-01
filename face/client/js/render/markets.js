@@ -18,7 +18,7 @@ import { orderWords } from './account.js';
 import {
   CANDLE_RANGES, isAccountKey, tableOf, pageOf, faceAssetOf, mentionsOf, volumeWordOf,
   connectionWord, watchWord, basisWord, watchedOf,
-  chinaWord, cnStateWord, cnPageOf, cnTileOf, cnBoardOf,
+  chinaWord, cnStateWord, NOT_ANSWERING_WORD, cnPageOf, cnTileOf, cnBoardOf,
 } from '../host/market-view.js';
 import { yuan, fix2 } from './lunhui/block.js';
 import { intradaySvg } from './lunhui/intraday.js';
@@ -120,7 +120,7 @@ function cnSearchWord(m, searching) {
 // rows kept
 function chinaLines(read, data, session) {
   const why = data?.status?.state === 'stale' ? String(data.status.said ?? '').trim()
-    : data?.stale === true ? 'The Account is not answering · China as last read'
+    : data?.stale === true ? NOT_ANSWERING_WORD
     : read.status === 'error' && read.answered ? 'Couldn’t refresh China' : '';
   return note(chinaWord(session)) + note(why);
 }

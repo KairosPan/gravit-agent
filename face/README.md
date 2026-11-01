@@ -1144,9 +1144,14 @@ per boot, as before. The Account reads Tencent's public hosts (no account, no ke
 `Tencent` source and the page's state lines are the Account's own words.
 
 Once the Account has answered for China (a ranking or a quote read), Account › Venues'
-`A-share quotes` line reads its state in the Account's words — `Tencent · Connected`, `Tencent ·
-Limited` when the Account says its read is stale, `Tencent · Error` when Tencent did not answer;
-before any China read it is not drawn. Event timestamps are Tencent's own — its quote's last update, which can run
+`A-share quotes` line reads its state in the Account's own sentence — `Tencent · answering`,
+`Tencent did not answer · China as of hh:mm Beijing` when its read is stale, `Tencent is not
+answering: A shares cannot be read now` when it has none — falling back to the face's
+`Tencent · Connected` / `Limited` / `Error` only when the Account said nothing; while the proxy
+re-serves the Account's last read (the Account not answering) it reads `The Account is not
+answering · China as last read`, as the China tab and Watching do, and an A share's page says
+`The Account is not answering · as of MM-DD HH:MM Beijing` over its last price, never Delayed or
+Closed; before any China read it is not drawn. Event timestamps are Tencent's own — its quote's last update, which can run
 past the close (16:14 for a 15:00 close on 2026-10-30) — read as Beijing time, and receipt time
 never fills a missing one. Volume is in shares: Tencent counts lots of 100 on most boards and shares on
 STAR (measured 2026-10-30), so each reply's own turnover decides the unit, and a reply no unit fits
