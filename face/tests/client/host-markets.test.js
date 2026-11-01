@@ -1263,14 +1263,18 @@ test('readAccountWatch keeps cn:600519 and drops cn:60051x', () => {
 
 const BOOK = { ok: true, venue: 'ex', venueName: 'Stand-in Exchange', symbol: 'BTC/USDT:USDT', book: { bids: [[62495.6, 0.4]], asks: [[62502, 1]], at: '2026-10-22T07:59:59.000Z', from: 'Stand-in Exchange', depth: 'full' } };
 const TRADES = { ok: true, venue: 'ex', venueName: 'Stand-in Exchange', symbol: 'BTC/USDT:USDT', trades: [{ price: 62500, size: 0.01, side: 'buy', at: '2026-10-22T07:59:58.000Z' }] };
-const FUNDING = venue => ({ ok: true, missing: [], lines: [{ at: '2026-10-22T07:00:00.000Z', symbol: 'BTC/USDT:USDT', side: 'long', qty: 0.01, rate: 0.0001, usd: 0.06, venue, venueName: venue }] });
+// the funding read at every venue that lists it: a line at one, the other not read
+const FUNDING = {
+  ok: true, lines: [{ at: '2026-10-22T07:00:00.000Z', symbol: 'BTC/USDT:USDT', side: 'long', qty: 0.01, rate: 0.0001, usd: 0.06, venue: 'ex', venueName: 'Stand-in Exchange' }],
+  missing: [{ venue: 'paper', venueName: 'Paper', why: 'lists no funding to the account', part: 'funding' }],
+};
 // the four reads' answers, the stand-in's asset sheet for any key
 function depthAnswer(path) {
   const q = query(path);
   if (path.startsWith('/data/account/asset?')) return { ...fx('asset-btc'), key: q.key };
   if (path.startsWith('/data/account/book?')) return { ...BOOK, venue: q.venue, symbol: q.symbol };
   if (path.startsWith('/data/account/trades?')) return { ...TRADES, venue: q.venue, symbol: q.symbol };
-  if (path.startsWith('/data/account/funding?')) return FUNDING(q.venue);
+  if (path.startsWith('/data/account/funding?')) return FUNDING;
   return undefined;
 }
 // All's read with the BTC perpetual connected at a second venue, the paper account
@@ -1288,11 +1292,10 @@ test('a market page reads its asset, book, trades and, for a perpetual, funding;
   r.markets.page('perp:BTC');
   assert.deepEqual(depthReads(r), [
     '/data/account/asset?key=crypto%3ABTC',
-    '/data/account/funding?venue=ex&limit=100',
-    '/data/account/funding?venue=paper&limit=100',
+    '/data/account/funding?limit=100',
     '/data/account/book?venue=ex&symbol=BTC%2FUSDT%3AUSDT&depth=10',
     '/data/account/trades?venue=ex&symbol=BTC%2FUSDT%3AUSDT&limit=20',
-  ], 'the asset its coin as the Account reads it, funding one a connected venue, the book and trades at the followed line');
+  ], 'the asset its coin as the Account reads it, funding once at every venue as the Account’s page reads it, the book and trades at the followed line');
   assert.deepEqual([BOOK_DEPTH, TRADES_LIMIT, FUNDING_LIMIT], [10, 20, 100]);
   const d = () => r.m().depth['perp:BTC'];
   assert.deepEqual(['here', 'book', 'trades', 'funding'].map(k => d()[k].status), ['loading', 'loading', 'loading', 'loading']);
@@ -1300,7 +1303,7 @@ test('a market page reads its asset, book, trades and, for a perpetual, funding;
   assert.deepEqual(['here', 'book', 'trades', 'funding'].map(k => d()[k].status), ['ready', 'ready', 'ready', 'ready']);
   assert.equal(d().here.data.key, 'crypto:BTC');
   assert.equal(d().here.at, NOW);
-  assert.deepEqual(Object.keys(d().funding.data).sort(), ['ex', 'paper'], 'funding kept by venue');
+  assert.deepEqual([d().funding.data.lines.length, d().funding.data.missing.length], [1, 1], 'the one answer, its missing venue with it');
   assert.equal(d().book.data.book.from, 'Stand-in Exchange');
 
   // every 5 s the book and the trades again; the asset sheet and the funding not

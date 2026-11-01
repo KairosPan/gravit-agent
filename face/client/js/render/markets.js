@@ -21,7 +21,7 @@ import { seg } from './controls.js';
 import { candlesSvg, sessionsSvg } from './chart.js';
 import { orderWords, marketKeysOn, marketKey, changeKey, positionKeys } from './account.js';
 import { marketLeverageSeedOf } from '../host/sheet-market.js';
-import { assetKeyOf, hereOf, costOf, bookOf, tradesOf, fundingOf } from '../host/market-depth-view.js';
+import { assetKeyOf, hereOf, costOf, bookOf, tradesOf, fundingOf, fundingMissingOf } from '../host/market-depth-view.js';
 import {
   CANDLE_RANGES, isAccountKey, tableOf, pageOf, faceAssetOf, mentionsOf, volumeWordOf, followOf,
   connectionWord, watchWord, basisWord, watchedOf,
@@ -217,11 +217,11 @@ const DONE = new Set(['filled', 'settled']);
 function depthBody(part, draw, unavailable, now, timeOf = () => '') {
   const p = isRecord(part) ? part : {};
   const data = p.data;
-  // a read lands its answer (a perpetual's funding: its answers by venue) only once it has one
+  // a read lands its answer only once it has one
   const answered = data != null;
   const said = p.status === 'error' ? note(p.message) : '';
   if (!answered) return `${said}${empty(p.status === 'error' ? unavailable : 'Loading…')}`;
-  const stale = isRecord(data) && (data.stale === true || (data.ok === undefined && Object.values(data).some(b => b?.stale === true)));
+  const stale = isRecord(data) && data.stale === true;
   const at = stale ? (timeOf() || (typeof p.freshAt === 'number' ? new Date(p.freshAt).toISOString() : '')) : '';
   const asOf = stale ? note(at ? `As of ${when(at, now)}` : 'As of the last read') : '';
   return `${said}${asOf}${draw()}`;
@@ -234,9 +234,9 @@ function costWords(c, unit) {
   return [avg, c.costUsd === null ? '' : `cost ${money(c.costUsd)}`, c.words].filter(Boolean).join(' · ');
 }
 
-// You here: the venues the sheet could not read; the holding, the positions with their cost and keys, the open orders with who
-// placed them and Change…; and under What agents do here a line per agent action — an order of theirs working here, a
-// statement line by them. A market the asset read does not name (an event no venue connected lists) holds nothing here.
+// You here: the venues the sheet could not read; the holding, the positions with their cost and keys, the owner's open orders
+// with Change…; and under What agents do here a line per agent action — an order of theirs working here (with its Change…), a
+// statement line by them — so an agent's order is drawn once. A market the asset read does not name (an event no venue connected lists) holds nothing here.
 function youHere(view, part, here, keyed, page, now) {
   if (!assetKeyOf(view.item)) return empty('You don’t hold any.');
   const unit = view.priced.unit;
@@ -248,9 +248,9 @@ function youHere(view, part, here, keyed, page, now) {
       ...here.positions.map(p => line('·', `${esc(`${p.venueName || p.venue} · ${[p.side, qtyWord(p.qty), p.symbol].filter(Boolean).join(' ')} · `)}` +
         `<span class="${tone(p.unrealizedUsd)}">${esc(signedMoney(p.unrealizedUsd))}</span>${p.paper ? ` ${tag('Paper')}` : ''}`,
         esc(costWords(costOf(here, p), unit)), '', keyed ? tail(positionKeys(p, page)) : '')),
-      ...here.orders.map(o => line('·', esc(orderWords(o)), '', '', keyed ? tail([changeKey(o, page)].filter(Boolean)) : '')),
+      ...here.orders.filter(o => o.who === 'You').map(o => line('·', esc(orderWords(o)), '', '', keyed ? tail([changeKey(o, page)].filter(Boolean)) : '')),
     ];
-    const agents = here.agents.map(a => (a.type === 'order' ? line('·', esc(orderWords(a.order)))
+    const agents = here.agents.map(a => (a.type === 'order' ? line('·', esc(orderWords(a.order)), '', '', keyed ? tail([changeKey(a.order, page)].filter(Boolean)) : '')
       : line(DONE.has(a.line.status) ? '✓' : '·', esc([when(a.line.at, now), a.line.description, money(a.line.amountUsd)].filter(Boolean).join(' · ')),
         esc([a.line.status, a.line.by].filter(Boolean).join(' · ')), DONE.has(a.line.status) ? 'ok' : '')));
     return here.missing.map(note).join('') + (lines.length ? feed(lines) : empty('You don’t hold any.')) +
@@ -346,9 +346,12 @@ function accountPage(id, view, state, now) {
   }
   // a perpetual's funding: what was paid and received at its lines
   if (view.item.kind === 'perp') {
-    const bodies = isRecord(depth.funding.data) ? Object.values(depth.funding.data) : [];
-    const symbols = view.legs.filter(l => l.connected === true).map(l => l.symbol);
-    right.push(section('Funding', depthBody(depth.funding, () => fundingHtml(fundingOf(bodies, symbols), now), 'Funding unavailable', now)));
+    // the one read at every venue that lists it, as the Account's own page reads it: the venues of the page's lines it could not
+    // read said under the lines, Not read: …; Unavailable only when the read itself failed
+    const connected = view.legs.filter(l => l.connected === true);
+    const body = depth.funding.data;
+    right.push(section('Funding', depthBody(depth.funding, () => fundingHtml(fundingOf([body], connected.map(l => l.symbol)), now) +
+      note(fundingMissingOf(body, connected.map(l => l.venue))), 'Funding unavailable', now)));
   }
   const about = aboutHtml(state.conversations, view.about, now);
   if (about.length) right.push(section('Gravit on it', feed(about)));

@@ -810,7 +810,6 @@ test('the four reads: You here with what agents do here, the order book, the lat
   const [mine, agents] = solHere.split('<div class="mk-h3">What agents do here</div>');
   assert.deepEqual(linesOf(mine).map(text), [
     '·25 SOL · $3,571.25cost known for 0 of 25 SOL',
-    '·Stand-in Exchange · Buy 0.707 SOL/USDT · limit 141.44 · open · Agent · Claude Code',
     '·Stand-in Exchange · Sell 0.6 SOL/USDT · stop · open · You',
     '·Stand-in Exchange · Buy 0.5 SOL/USDT · limit 142.44 · open · You',
   ]);
@@ -819,6 +818,8 @@ test('the four reads: You here with what agents do here, the order book, the lat
     '·Stand-in Exchange · Buy 0.707 SOL/USDT · limit 141.44 · open · Agent · Claude Code',
     `·${stamp(at)} · Buy 0.707 SOL · SOL / USDT · limit 141.44 · $0.00open · Claude Code, inside its limit`,
   ]);
+  // the agent's order is drawn once, under what agents do here, never in the owner's list too
+  assert.equal(solHere.split('Buy 0.707 SOL/USDT · limit 141.44 · open · Agent · Claude Code').length - 1, 1);
 
   // the order book: ten levels a side, best first, a size not given as —, the source in its words
   const base = screen({ route: { screen: 'markets', id: 'coin:BTC' }, account: true }).s;
@@ -857,19 +858,25 @@ test('the four reads: You here with what agents do here, the order book, the lat
   const perp = screen({ route: { screen: 'markets', id: 'perp:BTC' }, account: true }).s;
   assert.match(section(draw(perp), 'Funding'), /<p class="mk-empty">Loading…<\/p>/);
   const paid = depthOf(perp, 'perp:BTC', 'funding', {
-    ok: true, missing: [], lines: [
+    ok: true, lines: [
       { at: '2026-10-22T10:00:00.000Z', symbol: 'BTC/USDT:USDT', side: 'long', qty: 0.01, rate: 0.0001, usd: 0.06, venue: 'ex', venueName: 'Stand-in Exchange' },
       { at: '2026-10-22T11:00:00.000Z', symbol: 'BTC/USDT:USDT', side: 'long', qty: 0.01, rate: -0.00005, usd: -0.03, venue: 'ex', venueName: 'Stand-in Exchange' },
       { at: '2026-10-22T11:30:00.000Z', symbol: 'ETH/USDT:USDT', side: 'long', qty: 1, rate: 0.0001, usd: 0.3, venue: 'ex', venueName: 'Stand-in Exchange' },
     ],
-  }, { venue: 'ex' });
-  assert.deepEqual(linesOf(section(draw(paid), 'Funding')).map(text), [
+    // a venue of the page's lines not read, and one the page trades nothing at
+    missing: [{ venue: 'ex', venueName: 'Stand-in Exchange', why: 'no answer in time.', part: 'funding' }, { venue: 'okx', venueName: 'OKX', why: 'a key without read rights', part: 'funding' }],
+  });
+  assert.match(section(draw(paid), 'Funding'), /<\/div><p class="mk-note">Not read: Stand-in Exchange: no answer in time\.<\/p><\/section>$/, 'the page’s venues alone, in the Account’s words');
+  assert.deepEqual(linesOf(section(draw(paid), 'Funding').split('<p class="mk-note">Not read')[0]).map(text), [
     `·Received $0.03${fmtClock(Date.parse('2026-10-22T11:00:00.000Z'))} · Stand-in Exchange · long 0.01 · rate -0.0050%`,
     `·Paid $0.06${fmtClock(Date.parse('2026-10-22T10:00:00.000Z'))} · Stand-in Exchange · long 0.01 · rate 0.0100%`,
   ]);
-  assert.match(section(draw(depthOf(perp, 'perp:BTC', 'funding', { ok: true, missing: [], lines: [] }, { venue: 'ex' })), 'Funding'), /<p class="mk-empty">None yet\.<\/p>/);
-  assert.match(section(draw(R.depthFailed(perp, { id: 'perp:BTC', part: 'funding', at: NOW, message: 'Stand-in Exchange lists no funding to the account' })), 'Funding'),
-    /<p class="mk-note">Stand-in Exchange lists no funding to the account<\/p><p class="mk-empty">Funding unavailable<\/p>/);
+  assert.match(section(draw(depthOf(perp, 'perp:BTC', 'funding', { ok: true, missing: [], lines: [] })), 'Funding'), /<p class="mk-empty">None yet\.<\/p><\/section>$/);
+  // the stand-in's: no venue lists funding — None yet., never unavailable
+  assert.match(section(draw(depthOf(perp, 'perp:BTC', 'funding', { ok: true, lines: [], missing: [] })), 'Funding'), /None yet\./);
+  // unavailable only when the read itself failed: in the Account's sentence where it gave one
+  assert.match(section(draw(R.depthFailed(perp, { id: 'perp:BTC', part: 'funding', at: NOW, message: 'the account layer is not mounted' })), 'Funding'),
+    /<p class="mk-note">the account layer is not mounted<\/p><p class="mk-empty">Funding unavailable<\/p>/);
   // a stock's page has none
   assert.equal(section(screen({ route: { screen: 'markets', id: 'stock:NVDA' }, account: true }).html, 'Funding'), '');
 });

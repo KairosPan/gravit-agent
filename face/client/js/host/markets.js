@@ -7,7 +7,7 @@
 // face's) and, on a page that signs, an Account market's star as the Account's own signed setWatch (plan 2 Task 12); each old
 // us:/crypto: star asked of the Account once; and beside a market page's candles (an Account key's, never an A share's) its
 // four reads (plan 4a Task 4): the asset sheet once on entering and after every owner action taken, its order book and latest
-// trades at once and every 5 s while the page is on screen, a perpetual's funding once, one read a connected line's venue.
+// trades at once and every 5 s while the page is on screen, a perpetual's funding once (every venue that lists it, one read).
 // Every market read is the Account's: the face's own quote wire is read by nothing here. The views over what lands are
 // market-view.js's and market-depth-view.js's. Nothing here touches the DOM.
 import {
@@ -25,8 +25,10 @@ export const EXPLORE_MS = 20_000, QUOTES_MS = 5_000, QUOTE_PAIRS = 12;
 export const WATCH_LIMIT = 100;   // either list's: the cn list's, the Account keys' cap
 // the China tab's rows one ranking read asks for
 export const RANK_ROWS = 20;
-// a market page's book, the levels a side; its latest trades; a perpetual's funding lines, a venue's read
+// a market page's book, the levels a side; its latest trades; a perpetual's funding lines
 export const BOOK_DEPTH = 10, TRADES_LIMIT = 20, FUNDING_LIMIT = 100;
+// the four reads' kinds of flight
+const DEPTH_KINDS = ['asset', 'book', 'trades', 'funding'];
 
 const EXPLORE = '/data/account/explore';
 const QUOTES = '/data/account/quotes';
@@ -66,7 +68,6 @@ export function startMarkets({
   let waiting = null;        // a page asked for whose market no read lists yet: its reads wait for the read that does
   let followed = false;      // the stream follows a page's market
   let depthId = null;        // the Account market page whose four reads are read, from entering it to leaving it
-  const fundingKinds = new Set();   // the funding reads' kinds, one a venue, of the page on screen
   const kinds = new Map();   // a kind of read → { flight, path, seq }
   const signing = new Set(); // the Account keys whose setWatch is in the air
 
@@ -260,10 +261,10 @@ export function startMarkets({
   // ---- a market page's four reads beside its price (plan 4a Task 4): each a flight of its own kind, the latest alone landing,
   // nothing after leaving the page or close(). A body of another shape than the read's is a failure, said in the Account's
   // sentence when it carries one (an HTML 404 page, a 503 unreachable carry none)
-  function landDepth(id, part, ok, extra = {}) {
+  function landDepth(id, part, ok) {
     return (body, refused) => {
       if (closed || depthId !== id) return;
-      if (!refused && body?.ok === true && ok(body)) store.dispatch('depthLoaded', { id, part, data: body, at: now(), ...extra });
+      if (!refused && body?.ok === true && ok(body)) store.dispatch('depthLoaded', { id, part, data: body, at: now() });
       else store.dispatch('depthFailed', { id, part, at: now(), message: messageOf(body) });
     };
   }
@@ -287,22 +288,17 @@ export function startMarkets({
     fly('trades', `/data/account/trades?${at}&limit=${TRADES_LIMIT}`, landDepth(id, 'trades', b => Array.isArray(b.trades)),
       ['depthLoading', { id, part: 'trades' }]);
   }
-  // a perpetual's funding: one read a venue its connected lines are at
+  // a perpetual's funding: one read at every venue that lists it, as the Account's own page reads it (ui/terminal.js ttFunding);
+  // a venue it could not read is in the answer's `missing`, never a failure of the read
   function readFunding(id, view) {
     if (view.item.kind !== 'perp') return;
-    const venues = [...new Set(view.legs.filter(l => l.connected === true && named(l.venue)).map(l => l.venue))];
-    for (const venue of venues) {
-      const kind = `funding:${venue}`;
-      fundingKinds.add(kind);
-      fly(kind, `/data/account/funding?venue=${encodeURIComponent(venue)}&limit=${FUNDING_LIMIT}`,
-        landDepth(id, 'funding', b => Array.isArray(b.lines), { venue }), ['depthLoading', { id, part: 'funding' }]);
-    }
+    fly('funding', `/data/account/funding?limit=${FUNDING_LIMIT}`, landDepth(id, 'funding', b => Array.isArray(b.lines)),
+      ['depthLoading', { id, part: 'funding' }]);
   }
   // the page left: its reads in the air land nowhere, and what they read goes
   function leaveDepth() {
     if (depthId === null) return;
-    for (const kind of ['asset', 'book', 'trades', ...fundingKinds]) drop(kind);
-    fundingKinds.clear();
+    for (const kind of DEPTH_KINDS) drop(kind);
     store.dispatch('depthDropped', { id: depthId });
     depthId = null;
   }
@@ -544,7 +540,7 @@ export function startMarkets({
       unsubscribe();
       win?.removeEventListener?.('storage', onStorage);
       unfollow();
-      for (const kind of ['asset', 'book', 'trades', ...fundingKinds]) drop(kind);
+      for (const kind of DEPTH_KINDS) drop(kind);
     },
   };
 }

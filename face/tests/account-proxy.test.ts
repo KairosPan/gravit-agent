@@ -1164,3 +1164,13 @@ test("the callback's abort is thirty seconds", async (t) => {
   await one.done;
   assert.equal(one.out.status, 503); assert.equal(one.out.body, "The Account did not answer. Go back to Gravit and start the sign-in again.");
 });
+
+test("funding is read with no venue, as the Account's own page reads it: every venue that lists it", async () => {
+  const { routes, fetched } = proxyWith(answering(OK_BODY), () => NOW);
+  const a = await call(routes, "/data/account/funding?limit=100");
+  assert.equal(a.status, 200); assert.equal(a.body, OK_BODY);
+  assert.equal(fetched[0], `${URL_}/api/account/funding?limit=100`);
+  const bare = await call(routes, "/data/account/funding");
+  assert.equal(bare.status, 200);
+  assert.equal(fetched[1], `${URL_}/api/account/funding`);
+});

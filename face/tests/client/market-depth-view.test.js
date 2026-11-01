@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { assetKeyOf, hereOf, costOf, bookOf, tradesOf, fundingOf } from '../../client/js/host/market-depth-view.js';
+import { assetKeyOf, hereOf, costOf, bookOf, tradesOf, fundingOf, fundingMissingOf } from '../../client/js/host/market-depth-view.js';
 
 const fx = name => JSON.parse(readFileSync(new URL(`../fixtures/account/${name}.json`, import.meta.url), 'utf8'));
 
@@ -118,4 +118,10 @@ test('fundingOf keeps the page’s symbol only, newest first', () => {
   ]);
   assert.deepEqual(fundingOf([ex], 'ETH/USDT:USDT').map(l => l.usd), [0.3], 'one symbol given as a string');
   assert.deepEqual(fundingOf('x', 'BTC'), []);
+  // the venues the read could not read, as the Account's page says them; among the page's venues when given
+  const missed = { ok: true, lines: [], missing: [{ venue: 'ex', venueName: 'Stand-in Exchange', why: 'no answer in time. ' }, { venue: 'hl', venueName: 'Hyperliquid', why: 'rate limited' }] };
+  assert.equal(fundingMissingOf(missed), 'Not read: Stand-in Exchange: no answer in time · Hyperliquid: rate limited.');
+  assert.equal(fundingMissingOf(missed, ['hl']), 'Not read: Hyperliquid: rate limited.');
+  assert.equal(fundingMissingOf(missed, ['paper']), '');
+  assert.equal(fundingMissingOf({ ok: false, refusal: {} }), '');
 });

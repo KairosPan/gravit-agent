@@ -125,17 +125,14 @@ export const reducers = {
   compareFailed: (s, { base, at } = {}) => (named(base) ? keyed(s, 'compare', base, { status: 'error', at }) : s),
 
   // a market page's four reads beside its price (plan 4a Task 4), by its key, each part { status, data, at, message, freshAt }:
-  // `here` the asset sheet, `book`, `trades`, and `funding` — a perpetual's, one read a venue, its data the answers by venue. A
-  // failed read keeps its last data, with the Account's sentence when it refused; an answer the proxy re-served stale keeps
+  // `here` the asset sheet, `book`, `trades`, and `funding` — a perpetual's, one read at every venue that lists it. A failed read keeps its last data, with the Account's sentence when it refused; an answer the proxy re-served stale keeps
   // the time of the last fresh one (`freshAt`, null when none landed); leaving the page drops them all
   depthLoading: (s, { id, part } = {}) => (depthed(id, part) ? depth(s, id, part, { status: 'loading' }) : s),
-  depthLoaded(s, { id, part, data, at = null, venue = null } = {}) {
-    if (!depthed(id, part) || (part === 'funding' && !named(venue))) return s;
+  depthLoaded(s, { id, part, data, at = null } = {}) {
+    if (!depthed(id, part)) return s;
     const was = own(own(s.markets.depth, id), part);
-    const stale = isRecord(data) && data.stale === true;
-    const freshAt = stale ? (was?.freshAt ?? null) : at;
-    const next = part === 'funding' ? { ...(isRecord(was?.data) ? was.data : {}), [venue]: data } : data;
-    return depth(s, id, part, { status: 'ready', data: next, at, message: null, freshAt });
+    const freshAt = isRecord(data) && data.stale === true ? (was?.freshAt ?? null) : at;
+    return depth(s, id, part, { status: 'ready', data, at, message: null, freshAt });
   },
   depthFailed: (s, { id, part, at = null, message = null } = {}) => (depthed(id, part) ? depth(s, id, part, { status: 'error', at, message }) : s),
   depthDropped(s, { id } = {}) {

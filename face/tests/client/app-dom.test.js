@@ -2030,6 +2030,24 @@ test("the Portfolio's BTC perpetual offers Close… and Leverage…", async () =
   store.timers.clear();
 });
 
+test("an owner action taken on a market's page reads its asset sheet again, past the face's cache", async () => {
+  const f = fakeWindow({ hash: '#/markets/perp:BTC', storage: memoryStorage() });
+  const door = ownerDoor();
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page() } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await until(() => /aria-label="You here"[\s\S]*data-kind="close"/.test(f.html()), 'You here with its Close…');
+  assert.deepEqual(h.reads.filter(p => p.startsWith('/data/account/asset')), ['/data/account/asset?key=crypto%3ABTC'], 'once on entering');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'close', venue: 'ex', symbol: 'BTC/USDT:USDT', name: 'BTC perpetual', side: 'long', qty: '0.01', marketKind: 'perp' } });
+  await until(() => store.get().sheet?.status === 'ready', 'the close prepared');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
+  await until(() => door.sent('/data/account/exchange').length === 1, 'the signature');
+  await until(() => h.reads.includes('/data/account/asset?key=crypto%3ABTC&fresh=1'), 'the asset sheet read again');
+  assert.equal(door.sent('/data/account/exchange')[0].action.type, 'liveClose');
+  store.timers.clear();
+});
+
 test('a read-only page draws none of the three', async () => {
   const f = fakeWindow({ hash: '#/trade', storage: memoryStorage() });
   const door = ownerDoor();

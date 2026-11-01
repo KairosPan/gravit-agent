@@ -108,3 +108,13 @@ export function fundingOf(bodies, symbol) {
     }))
     .sort(newestFirst);
 }
+
+/** The venues a funding read could not read, among `venues` (the page's connected lines'; null: every one), as the Account's
+ *  own page says them under its rows (ui/terminal.js ttFunding): `Not read: Stand-in Exchange: lists no funding.`; '' for none. */
+export function fundingMissingOf(body, venues = null) {
+  if (body?.ok !== true) return '';
+  const only = Array.isArray(venues) ? new Set(venues) : null;
+  const missed = records(body.missing).filter(m => only === null || only.has(m.venue))
+    .map(m => `${str(m.venueName) || str(m.venue)}: ${str(m.why).replace(/[.\s]+$/, '')}`);
+  return missed.length ? `Not read: ${missed.join(' · ')}.` : '';
+}
