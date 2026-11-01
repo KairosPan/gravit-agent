@@ -31,6 +31,15 @@ const post = (base: string, body: unknown, headers: Record<string, string> = {})
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 
 describe("the AKShare routes", () => {
+  it("close ends the sidecar even when the paper flush throws", async () => {
+    const s = stub();
+    const svc = await service();
+    svc.flushPaper = async () => { throw new Error("flush failed"); };
+    const srv = await startPortfolioServer({ port: 0, service: svc, akshare: s.akshare });
+    await expect(srv.close()).rejects.toThrow("flush failed");
+    expect(s.seen.closed).toBe(1);
+  });
+
   it("the call route passes the tool's answer through", async () => {
     const s = stub();
     const srv = await startPortfolioServer({ port: 0, service: await service(), akshare: s.akshare });

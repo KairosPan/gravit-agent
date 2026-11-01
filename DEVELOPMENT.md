@@ -215,8 +215,8 @@ below the operator's patches, that spawns the Account's MCP seat from the repo's
 overrides) against the service the operator runs at `FACE_ACCOUNT_URL`, default
 `http://127.0.0.1:4820` (§3.9), with this process's node and `account/`'s own `tsx`, never `npx`; the seat is named `Gravit`
 (`PORTFOLIO_AGENT`), its key the Account's (`$BUYER_HOME/seats/gravit.json`, made by the seat on its
-first tool call), the call timeout 90 s (`portfolio_wait` runs 55 s at most), startup failure logged
-and not fatal. The seat sets no `instructions`; it registers its 35 real-account tools even with no
+first tool call), the call timeout 130 s (`portfolio_wait` runs 55 s at most), startup failure logged
+and not fatal. The seat sets no `instructions`; it registers its 36 real-account tools even with no
 service to reach (§4.3 prices them). A missing `account/node_modules` (no `npm ci` there) is a spawn failure dsh logs: the row stays
 ACTIVE with no tools and the Account screen's seat box says the service is not reachable. The seat's
 twelve writes are Gate 2's (§4.7); its standing reaches the screen through `/data/seat.json` (§4.4);
@@ -4366,7 +4366,7 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
 - **R7 — Gate 2 exists only inside the face.** A dsh tree composed without it has only the
   Account's own Guard card; the profile's `always_ask` block is inert.
 - **R8 — Registration is not readiness.** *Resolved 2026-10-24 by removal* for the case it named
-  (the Python package's snapshot-backed tools). The shape remains in the seat: it registers its 35
+  (the Python package's snapshot-backed tools). The shape remains in the seat: it registers its 36
   tools with no service to reach (§3.1), so a listed tool is not a reachable Account — the seat box
   (`/data/seat.json`) says which.
 - **R9 — The never-edit list is prose, not a fence.** No sandbox deny path and no test protect

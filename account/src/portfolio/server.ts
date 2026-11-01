@@ -1168,9 +1168,13 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
       // streams closed, and every paper book's last change written
       svc.stream.end();
       svc.closeStreams();
-      await svc.flushPaper();
-      await snapping;
-      await opts.akshare?.close();
+      // the AKShare child ends whatever the flush does: a throwing flush never leaves it running
+      try {
+        await svc.flushPaper();
+        await snapping;
+      } finally {
+        await opts.akshare?.close();
+      }
       await new Promise<void>((resolve) => {
         server.close(() => resolve());
         server.closeAllConnections();

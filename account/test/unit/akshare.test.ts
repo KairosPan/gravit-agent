@@ -184,6 +184,17 @@ describe("the AKShare sidecar", () => {
     expect(Date.now() - t0).toBeLessThan(500);
   });
 
+  it("a caller's abort leaves the shared child up for the others", async () => {
+    const a = fake();
+    const first = await discover(a);
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 50);
+    const r = await a.call("akshare_stock_a", { method: "sleep" }, ac.signal);
+    expect(r.kind === "refused" && r.word).toBe("timeout");
+    expect((await discover(a)).pid).toBe(first.pid);
+    expect(alive(first.pid)).toBe(true);
+  });
+
   it("a reply past 4 MiB is refused", async () => {
     const r = await fake().call("akshare_stock_a", { method: "flood" });
     expect(r.kind === "refused" && r.word).toBe("too-large");

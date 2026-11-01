@@ -149,7 +149,8 @@ export function createAkshare(opts: { command: string; args?: string[]; env?: No
       return await within(work(c, signal), signal);
     } catch (e) {
       // a timeout on a child that was up recycles it: a blocked loop there must not wedge the next ask (a start that failed closed itself)
-      if (c && isTimeout(e, signal)) {
+      // only on this ask's own deadline: a caller's abort leaves the shared child to its other in-flight calls
+      if (c && isTimeout(e, signal) && !(caller?.aborted && !deadline.aborted)) {
         if (current === joined) current = null;
         void c.client.close().catch(() => {});
       }

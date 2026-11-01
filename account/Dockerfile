@@ -10,6 +10,7 @@ RUN apt-get update \
 # uv, from its official standalone installer, then AKShare's MCP server, the Account's sidecar,
 # its executable at /usr/local/bin/akshare-mcp. Before the source copy: the layer survives a
 # source change.
+# PORTFOLIO_AKSHARE_BIN, last, is not uv's: it is the runtime path the Account reads (akshareCommand) to find the sidecar.
 ENV UV_INSTALL_DIR=/usr/local/bin \
     UV_TOOL_DIR=/opt/uv-tools \
     UV_TOOL_BIN_DIR=/usr/local/bin \
