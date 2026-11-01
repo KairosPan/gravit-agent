@@ -3,7 +3,7 @@
  * It reads. Real orders, moves and earn go through the account's live doors (account/live-orders.ts, live-moves.ts, live-earn.ts), on the
  * owner's signature or inside a limit the owner signed — never through the simulated door this adapter wraps: `execute` refuses, in the
  * venue's words, and there is no `credit`, `debit`, `convert` or `shift`; the simulated doors compiled for it are shut (account/doors.ts
- * reads `watchOnly`). Reads are cached, because a real venue counts requests: the page asks for the account every few seconds, the venue is
+ * reads `watchOnly`). Reads are cached, because a real venue counts requests: the face asks for the account every few seconds, the venue is
  * asked at most once per `ttlMs`. When a refresh fails the last good numbers stay, with the time they were read and what went wrong — and
  * a venue that said it cannot be asked just now (it banned this machine's address until a time, its edge refused this network, it is
  * rate-limiting) is not asked again before the hold its refusal carries runs out (public-markets.ts holdBackMs, the one rule), nor while
@@ -114,7 +114,7 @@ export async function liveAccount(id: string, source: LiveSource, opts: LiveAcco
         return rows;
       }
       took(rows);
-      // read in part (an address source whose chain or the venue's API did not answer for some of it): what was read stands, the page says
+      // read in part (an address source whose chain or the venue's API did not answer for some of it): what was read stands, the face says
       // what was not, and the rest is asked again soon
       const unread = source.unread?.();
       if (unread) {
@@ -122,7 +122,7 @@ export async function liveAccount(id: string, source: LiveSource, opts: LiveAcco
         waitFor(0);
       }
     } catch (err) {
-      // the last good numbers stay; the page says how old they are and why — the words with this machine's address taken out before they
+      // the last good numbers stay; the face says how old they are and why — the words with this machine's address taken out before they
       // are cut, as they are served on /api/account. The venue is not asked again for a while: for as long as its refusal holds it back
       // (until a ban's time, ten minutes for a place rule or an edge page), fifteen seconds at least. A refusal's own time is on the wall
       // clock, as the venue said it and the refusal was stamped, so its hold is measured on that clock

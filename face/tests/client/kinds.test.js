@@ -109,10 +109,10 @@ test('a seat tool without a venue, or one the face never classified, is a card a
 test("a seat write's result lifts a card-raised line, a placed or canceled order, the Account's refusal, or a batch count; a seat read lifts nothing", () => {
   const c = new Map();
   rememberCall(c, seatCall);
-  const raised = toMessages(mapFrame(seatResult(JSON.stringify({ ok: true, pending: true, card: { id: 'card-0007', usd: 100 }, next: 'the owner answers this card on the Account page' }), false)), c, NOW);
+  const raised = toMessages(mapFrame(seatResult(JSON.stringify({ ok: true, pending: true, card: { id: 'card-0007', usd: 100 }, next: "the owner answers this card on the owner's Gravit face (Account › Cards)" }), false)), c, NOW);
   assert.equal(raised.length, 2); assert.equal(raised[0].kind, 'tool');
   assert.equal(raised[1].kind, 'receipt'); assert.equal(raised[1].id, 'rc10'); assert.equal(raised[1].from, 'gravit'); assert.equal(raised[1].seq, 61);
-  assert.equal(raised[1].text, 'Card raised on the Account page · card-0007 · answer it there');
+  assert.equal(raised[1].text, 'Card raised · card-0007 · answer it under Account › Cards');
   assert.deepEqual(raised[1].data, { seat: true, cardId: 'card-0007', callId: 'c10' });
   const placed = toMessages(mapFrame(seatResult(JSON.stringify({ ok: true, order: { id: 'ord-0001', status: 'filled', paper: true } }), false)), c, NOW);
   assert.equal(placed[1].kind, 'receipt'); assert.equal(placed[1].text, 'Order placed · buy $100 of AAPL · market · paper-1 · ord-0001 · paper');
@@ -130,9 +130,9 @@ test("a seat write's result lifts a card-raised line, a placed or canceled order
   assert.equal(batch[1].kind, 'receipt'); assert.equal(batch[1].text, 'Batch · 2 of 3 legs placed · 1 refused');
   // in Guard the Account answers every leg with a card of its own and places nothing: the receipt says so (the final review's Important 2)
   const guard = toMessages(mapFrame(seatResult(JSON.stringify({ ok: true, legs: [{ leg: 1, ok: true, pending: true, card: { id: 'card-1' } }, { leg: 2, ok: true, pending: true, card: { id: 'card-2' } }, { leg: 3, ok: false, code: 'E_X', message: 'no' }] }), false, 'c13')), b, NOW);
-  assert.equal(guard[1].kind, 'receipt'); assert.equal(guard[1].text, 'Batch · 2 cards raised on the Account page · 1 refused');
+  assert.equal(guard[1].kind, 'receipt'); assert.equal(guard[1].text, 'Batch · 2 cards raised · answer under Account › Cards · 1 refused');
   const mixed = toMessages(mapFrame(seatResult(JSON.stringify({ ok: true, legs: [{ leg: 1, ok: true, order: { id: 'ord-1' } }, { leg: 2, ok: true, pending: true, card: { id: 'card-2' } }] }), false, 'c13')), b, NOW);
-  assert.equal(mixed[1].text, 'Batch · 1 of 2 legs placed · 1 card raised on the Account page');
+  assert.equal(mixed[1].text, 'Batch · 1 of 2 legs placed · 1 card raised · answer under Account › Cards');
   const none = toMessages(mapFrame(seatResult(JSON.stringify({ ok: false, legs: [{ leg: 1, ok: false, code: 'E_MANDATE_RECIPIENT', message: 'okx is not in your limit' }, { leg: 2, ok: false, code: 'E_MANDATE_RECIPIENT', message: 'okx is not in your limit' }] }), true, 'c13')), b, NOW);
   assert.equal(none[1].kind, 'refusal'); assert.equal(none[1].text, 'Batch · 2 of 2 legs refused · E_MANDATE_RECIPIENT · okx is not in your limit');
   const r = new Map();

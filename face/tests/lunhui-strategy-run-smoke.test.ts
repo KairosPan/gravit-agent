@@ -12,7 +12,7 @@
  * digest rebuilt from the sealed runs as the read built it; the card at most 2,048 bytes; the runs card's latest run
  * Monday's, with its review line; Gravit's prompt carrying the run protocol with its strategy channel.
  *
- * The boot is the market smoke's: a temp DSH_HOME, port 0, AKShare and the seat off, the stub the default model,
+ * The boot is the market smoke's: a temp DSH_HOME, port 0, the seat off, the stub the default model,
  * `lunhui-runs` over a temp strategies root holding copies of the shipped cn-market and lunhui-s01-repair, the
  * freeze rows' `fetch` one directory holding both fixture sets, and a fixture roles root whose three roles are
  * routed to the stub. The clock: a patch cannot carry `config.now` into a booted row, so `Date` is replaced - its
@@ -322,7 +322,7 @@ test("strategy run smoke: an S01 registered on Friday and graded on Monday - eac
     const patchPath = join(home, "profiles", "face", "cordis.patch.yml");
     const patch = readFileSync(patchPath, "utf8").replace(/^\[\][ \t]*$/m, "");
     const freezeRows = FREEZE_ROWS.map((id) => `- id: ${id}\n  config:\n    fetch: ${JSON.stringify(fixtures)}\n`).join("");
-    writeFileSync(patchPath, `${patch}\n- id: mcp-akshare\n  disabled: true\n- id: mcp-account\n  disabled: true\n- id: agent-default-model\n  config:\n    provider: stub\n    model: echo\n- id: lunhui-runs\n  config:\n    strategiesRoot: ${JSON.stringify(strategies)}\n${freezeRows}`);
+    writeFileSync(patchPath, `${patch}\n- id: mcp-account\n  disabled: true\n- id: agent-default-model\n  config:\n    provider: stub\n    model: echo\n- id: lunhui-runs\n  config:\n    strategiesRoot: ${JSON.stringify(strategies)}\n${freezeRows}`);
     const booted = await bootFace({ profileName: "face", port: 0, dshHome: home, botsRoot: bots, rolesRoot: fixtureRoles });
     dispose = booted.dispose;
     const { ctx } = booted;

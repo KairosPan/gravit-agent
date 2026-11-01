@@ -17,17 +17,19 @@
  * `taxonomy: "同花顺概念"`, `host: "quantapi.51ifind.com"`, `delayed: false`, a board also
  * `pct_basis: "equal_weight"`; the meta adds `fallback_from: { provider: "东方财富", code }`, the
  * query and the reply's hash, and the reply's summary the provider, the taxonomy, the refusal and,
- * when `boards` was given, `boards_ignored` - BK codes the stand-in cannot honour. No iFinD
- * credential in the env (`config.env`, else `process.env`, read at call time) refuses with
- * Eastmoney's code and no request; a stand-in refusal does too, naming both reasons. Never the
- * token: it is in no file, reply or refusal.
+ * when `boards` was given, `boards_ignored` - BK codes the stand-in cannot honour. The row holds
+ * no iFinD credential and reads no environment: the token is the Account's, and the query goes
+ * through the row's fetch, for the Account to ask with it. An Account with no token
+ * (`NOT_CONFIGURED` from the client) refuses with Eastmoney's code and the 备用未配置 sentence;
+ * any other stand-in refusal does too, naming both reasons. Never the token: it is in no request
+ * of this row, file, reply or refusal.
  */
 import { refuse } from "./lib/errors.mjs";
 import { deriveBoards } from "./lib/derive.mjs";
 import { fetchBoardFundFlow, fetchBoardMembers, fetchBoards } from "./lib/eastmoney.mjs";
 import { RUN_PARAMETERS, SHARED_BOUNDS, defineFreeze, freezeDeps, hostsOf, idsOf, sessionOf } from "./lib/freeze-tool.mjs";
 import { LunhuiError } from "./lib/runs.mjs";
-import { WENCAI_PROVIDER, fetchWencaiUniverse, hasWencaiCredentials } from "./lib/wencai.mjs";
+import { WENCAI_NOT_CONFIGURED, WENCAI_PROVIDER, fetchWencaiUniverse } from "./lib/wencai.mjs";
 import { deriveStandInBoards } from "./lib/wencai-boards.mjs";
 
 export const name = "lunhui-freeze-boards";
@@ -60,15 +62,14 @@ const STAND_IN_STAMPS = Object.freeze({ provider: WENCAI_PROVIDER, taxonomy: "�
  * @param {import("./lib/freeze-tool.mjs").FetchLike} fetchImpl
  * @param {{ boards?: string[] }} args checked
  * @param {() => Date} now
- * @param {Record<string, string | undefined>} env
  * @returns {Promise<import("./lib/freeze-tool.mjs").Frozen>}
  */
-async function freeze(fetchImpl, args, now, env) {
+async function freeze(fetchImpl, args, now) {
   try {
     return await freezeEastmoney(fetchImpl, args, now);
   } catch (error) {
     if (!(error instanceof LunhuiError) || !FALLBACK_CODES.has(error.code)) throw error;
-    return await freezeStandIn(fetchImpl, args, now, env, error);
+    return await freezeStandIn(fetchImpl, args, now, error);
   }
 }
 
@@ -86,21 +87,20 @@ function reasonOf(error) {
  * @param {import("./lib/freeze-tool.mjs").FetchLike} fetchImpl
  * @param {{ boards?: string[] }} args checked
  * @param {() => Date} now
- * @param {Record<string, string | undefined>} env
  * @param {LunhuiError} refused Eastmoney's refusal
  * @returns {Promise<import("./lib/freeze-tool.mjs").Frozen>}
  */
-async function freezeStandIn(fetchImpl, args, now, env, refused) {
+async function freezeStandIn(fetchImpl, args, now, refused) {
   const code = refused.code;
-  if (!hasWencaiCredentials(env)) {
-    throw new LunhuiError(code, `${EASTMONEY}板块请求失败（${code}）；${WENCAI_PROVIDER}备用未配置；本次未写入任何文件。`);
-  }
   const session = sessionOf(now());
   let universe;
   try {
-    universe = await fetchWencaiUniverse({ session, env, fetchImpl });
+    universe = await fetchWencaiUniverse({ session, fetchImpl });
   } catch (error) {
     if (!(error instanceof LunhuiError)) throw error;
+    if (error.code === WENCAI_NOT_CONFIGURED) {
+      throw new LunhuiError(code, `${EASTMONEY}板块请求失败（${code}）；${WENCAI_PROVIDER}备用未配置；本次未写入任何文件。`);
+    }
     throw new LunhuiError(code, `${EASTMONEY}板块请求失败（${code}：${reasonOf(refused)}）；${WENCAI_PROVIDER}备用也失败（${error.code}：${reasonOf(error)}）；本次未写入任何文件。`);
   }
   const derivedLists = deriveStandInBoards(universe.rows);
@@ -176,14 +176,13 @@ async function freezeEastmoney(fetchImpl, args, now) {
 
 /**
  * @param {any} ctx the row's context, injecting `tools` and `lunhuiRuns`
- * @param {{ fetch?: string, now?: () => Date, env?: Record<string, string | undefined> }} config `env`
- *   for tests; production reads `process.env`
+ * @param {{ fetch?: string, account?: string, now?: () => Date }} config test-only keys; an `env` is refused
  */
 export function apply(ctx, config) {
+  if (config !== null && typeof config === "object" && Object.hasOwn(config, "env")) {
+    throw new Error(`${name}: env is gone - the iFinD token is the Account's (IFIND_* in the Account's environment)`);
+  }
   const deps = freezeDeps(name, ctx, config);
-  const env = config?.env;
-  if (env !== undefined && (env === null || typeof env !== "object" || Array.isArray(env))) throw new Error(`${name}: env must be an object of strings`);
-  const envOf = () => env ?? process.env;
   ctx.effect(() => ctx.tools.register(defineFreeze({
     name: "lunhui_freeze_boards",
     description:
@@ -203,7 +202,7 @@ export function apply(ctx, config) {
     source: "boards",
     kind: "market",
     check: checkBoards,
-    freeze: (fetchImpl, args, now) => freeze(fetchImpl, args, now, envOf()),
+    freeze,
     ...deps,
   })));
 }

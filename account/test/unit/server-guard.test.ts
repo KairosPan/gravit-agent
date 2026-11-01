@@ -24,7 +24,7 @@ const rawOf = (base: string) => (path: string, headers: Record<string, string>) 
   });
 
 describe("who the server answers", () => {
-  it("its own page and local programs; not another site's script, nor a request the browser marks as cross-site — but a link or a venue's sign-in sending the owner back, yes", async () => {
+  it("local programs and pages; not another site's script, nor a request the browser marks as cross-site — a navigation from another site is refused like any cross-site request", async () => {
     const svc = await service();
     const srv = await startPortfolioServer({ port: 0, service: svc });
     try {
@@ -34,14 +34,16 @@ describe("who the server answers", () => {
       expect(await get("/api/account", { origin: "https://evil.example" })).toBe(403);
       expect(await get("/api/account", { origin: "null" })).toBe(403);
       expect(await get("/api/account", { "sec-fetch-site": "cross-site", "sec-fetch-mode": "no-cors", "sec-fetch-dest": "image" })).toBe(403);
-      expect(await get("/", { "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" })).toBe(200);
-      // a navigation from another site reaches the page and the venue's sign-in callback, never another route of the account's own (asked
-      // over node:http: fetch puts its own sec-fetch-mode on every request)
+      expect(await get("/", { "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" })).toBe(403);
+      // a navigation from another site reaches no route: the Account serves no page, and a venue's sign-in comes back through the face's
+      // own callback, which asks this one as a program does (asked over node:http: fetch puts its own sec-fetch-mode on every request)
       const raw = rawOf(srv.url);
       const navigation = { "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" };
       expect(await raw("/api/account", navigation)).toBe(403);
       expect(await raw("/api/account/stream?client=tab-navigated-1", navigation)).toBe(403);
-      expect(await raw("/api/account/signin/callback", navigation)).toBe(400);
+      expect(await raw("/", navigation)).toBe(403);
+      expect(await raw("/api/account/signin/callback", navigation)).toBe(403);
+      expect(await raw("/api/account/signin/callback", { "sec-fetch-site": "same-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" })).toBe(403);
       expect(await get("/api/account", { "sec-fetch-site": "same-origin", "sec-fetch-mode": "cors", "sec-fetch-dest": "empty" })).toBe(200);
     } finally {
       await srv.close();

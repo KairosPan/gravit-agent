@@ -122,12 +122,12 @@ export function saveWatchlist(storage, items) {
   }
 }
 
-/** Where this browser keeps the Account's markets it stars: their row keys (`coin:BTC`, `stock:AAPL`, `event:<venue>:<market>`),
- *  the Account's grammar and not the face's, so under a key of their own (spec 2026-10-22 §6.1). */
+/** Where this browser keeps the Account's markets it stars: their row keys (`coin:BTC`, `stock:AAPL`, `event:<venue>:<market>`,
+ *  an A share's `cn:600519`), the Account's grammar and not the face's, so under a key of their own (spec 2026-10-22 §6.1). */
 export const ACCOUNT_WATCH_KEY = "gravit.account.watch.v1";
 const ACCOUNT_WATCH_LIMIT = 100;
-/** An Account row key, shaped as host/market-view.js's isAccountKey reads one. */
-const ACCOUNT_KEY = /^(coin|stock|perp|rwa|event|preipo|kalshi|pm|pmus):/;
+/** An Account row key, shaped as host/market-view.js's isAccountKey reads one; an A share's exactly `cn:` and six digits. */
+const ACCOUNT_KEY = /^(?:(?:coin|stock|perp|rwa|event|preipo|kalshi|pm|pmus):|cn:\d{6}$)/;
 /** @param {unknown} value @returns {value is string} */
 const isAccountWatchKey = (value) => typeof value === "string" && ACCOUNT_KEY.test(value);
 

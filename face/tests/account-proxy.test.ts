@@ -3,8 +3,11 @@
  * passed through, the per-route caches and their flights, the failure codes,
  * the disabled row, and the shared `account` reader `seat.ts` reads — and its
  * push channel: `stream` piped per browser connection, `stream/markets`
- * forwarded — and the owner's three writes, `pair`, `prepare` and `exchange`,
- * forwarded as `stream/markets` is. */
+ * forwarded — and the twelve writes, `pair`, `prepare`, `exchange` and the
+ * Market and wallet halves' nine, forwarded as `stream/markets` is, `guard`
+ * with its fixed body and `wallet/challenge` and `signin/start` with the face's
+ * origin — and the OAuth sign-in's callback, a venue's navigation forwarded
+ * behind its own fence. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
@@ -17,11 +20,14 @@ import {
   ACCOUNT_CACHE_KEYS,
   ACCOUNT_QUERY,
   ACCOUNT_TTL_MS,
+  CALLBACK_QUERY,
   STREAM_BODY_LIMIT,
   STREAM_CLIENT,
+  FACE_ORIGIN_HEADER,
   WRITE_ABORT_MS,
   WRITE_BODY_LIMIT,
   createAccountReader,
+  faceOriginOf,
   rebuildQuery,
   registerAccountProxy,
   type AccountProxyDeps,
@@ -54,7 +60,22 @@ const ROUTES: ReadonlyArray<readonly [face: string, account: string]> = [
   ["/data/account/keyfile", "/api/account/keyfile"],
   ["/data/account/paper/books", "/api/account/paper/books"],
 ];
+/** The Market half's and the wallet half's eight reads, in the order they are registered after the fifteen: the
+ * Account path, the route's row, and a query of its names. */
+const NEW_READS: ReadonlyArray<readonly [face: string, account: string, route: "asset" | "book" | "trades" | "funding" | "receive" | "earn" | "sellable" | "signinStatus", query: string]> = [
+  ["/data/account/asset", "/api/account/asset", "asset", "key=crypto%3ABTC&interval=1h&range=1d"],
+  ["/data/account/book", "/api/account/book", "book", "venue=paper&symbol=BTC%2FUSDT&depth=20"],
+  ["/data/account/trades", "/api/account/trades", "trades", "venue=paper&symbol=BTC%2FUSDT&limit=50"],
+  ["/data/account/funding", "/api/account/funding", "funding", "venue=paper&limit=10"],
+  ["/data/account/receive", "/api/account/receive", "receive", "venue=paper&asset=USDC&network=base"],
+  ["/data/account/earn", "/api/account/earn", "earn", "venue=paper&asset=USDC"],
+  ["/data/account/sellable", "/api/account/sellable", "sellable", ""],
+  ["/data/account/signin/status", "/api/account/signin/status", "signinStatus", "state=s1"],
+];
 const STREAM = "/data/account/stream";
+const CALLBACK = "/data/account/signin/callback";
+/** A venue's page sending the browser back: a top-level GET document navigation, cross-site, no Origin. */
+const NAVIGATION = { host: "127.0.0.1:3090", "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" };
 const FOLLOW = "/data/account/stream/markets";
 /** The three write paths, in the order they are registered, the Account path each one asks, and its row. */
 const WRITES: ReadonlyArray<readonly [face: string, account: string, route: "pair" | "prepare" | "exchange"]> = [
@@ -62,6 +83,21 @@ const WRITES: ReadonlyArray<readonly [face: string, account: string, route: "pai
   ["/data/account/prepare", "/api/account/prepare", "prepare"],
   ["/data/account/exchange", "/api/exchange", "exchange"],
 ];
+type NewWrite = "challenge" | "prove" | "signinStart" | "bridgeRoutes" | "orderSent" | "orderRequote" | "sent" | "revoke" | "guard";
+/** The nine writes of the two halves, in the order they are registered after the three. */
+const NEW_WRITES: ReadonlyArray<readonly [face: string, account: string, route: NewWrite]> = [
+  ["/data/account/wallet/challenge", "/api/account/wallet/challenge", "challenge"],
+  ["/data/account/wallet/prove", "/api/account/wallet/prove", "prove"],
+  ["/data/account/signin/start", "/api/account/signin/start", "signinStart"],
+  ["/data/account/bridge-routes", "/api/account/bridge-routes", "bridgeRoutes"],
+  ["/data/account/live/order-sent", "/api/account/live/order-sent", "orderSent"],
+  ["/data/account/live/order-requote", "/api/account/live/order-requote", "orderRequote"],
+  ["/data/account/live/sent", "/api/account/live/sent", "sent"],
+  ["/data/account/revoke", "/api/revoke", "revoke"],
+  ["/data/account/guard", "/api/mode", "guard"],
+];
+/** The new writes whose body passes as posted: every one but `guard`. */
+const FORWARDING = NEW_WRITES.filter(([, , route]) => route !== "guard");
 /** A tab's stream name as the face's page mints it: `face-` and 24 hex. */
 const CLIENT = "face-0123456789abcdef01234567";
 const JSON_POST = { host: "127.0.0.1:3090", "content-type": "application/json" };
@@ -152,6 +188,7 @@ async function call(routes: WebRoute[], url: string, headers?: Record<string, st
 
 test("rebuildQuery: the whitelist, once each, 240 characters, fresh stripped", () => {
   assert.deepEqual(rebuildQuery("explore", "/data/account/explore?tab=crypto&q=btc&limit=60"), { query: "tab=crypto&q=btc&limit=60", fresh: false });
+  assert.deepEqual(rebuildQuery("explore", "/data/account/explore?tab=china&sort=movers&limit=20"), { query: "tab=china&sort=movers&limit=20", fresh: false }, "China's ranking by its sort");
   assert.deepEqual(rebuildQuery("holdings", "/data/account/holdings?cost=1&fresh=1"), { query: "cost=1", fresh: true });
   assert.equal(rebuildQuery("explore", "/data/account/explore?tab=a&tab=b"), null, "a repeated name");
   assert.equal(rebuildQuery("explore", "/data/account/explore?force=1"), null, "an unknown name");
@@ -159,9 +196,14 @@ test("rebuildQuery: the whitelist, once each, 240 characters, fresh stripped", (
   assert.deepEqual(rebuildQuery("account", "/data/account"), { query: "", fresh: false });
 });
 
-test("the routes: twenty exact paths; the fence refuses a foreign Origin and a missing Host before any fetch", async () => {
+test("the routes: thirty-eight exact paths, the callback last; the fence refuses a foreign Origin and a missing Host before any fetch", async () => {
   const { routes, fetched } = proxyWith(answering(OK_BODY));
-  const paths = [...ROUTES.map(([face]) => face), STREAM, FOLLOW, ...WRITES.map(([face]) => face)];
+  const paths = [
+    ...ROUTES.map(([face]) => face), ...NEW_READS.map(([face]) => face), STREAM, FOLLOW,
+    ...WRITES.map(([face]) => face), ...NEW_WRITES.map(([face]) => face), CALLBACK,
+  ];
+  assert.equal(paths.length, 38);
+  assert.ok(routes.every((r) => r.kind === "exact"), "no prefix route");
   assert.deepEqual(routes.map((r) => `${r.kind} ${r.path}`), paths.map((face) => `exact ${face}`));
   for (const face of paths) {
     const foreign = await call(routes, face, { host: "127.0.0.1:3090", origin: "https://evil.example" });
@@ -171,6 +213,12 @@ test("the routes: twenty exact paths; the fence refuses a foreign Origin and a m
     assert.equal(noHost.status, 403, face); assert.equal(noHost.body, FORBIDDEN);
     assert.equal((await call(routes, face, { host: "evil.example:3090" })).status, 403, "a rebound Host");
     assert.equal((await call(routes, face, { host: "127.0.0.1:3090", "sec-fetch-site": "cross-site" })).status, 403, "a cross-site page");
+    if (face === CALLBACK) continue;
+    /* The callback's exception is its own: every other route still refuses a venue's navigation, GET or POST. */
+    for (const method of ["GET", "POST"]) {
+      const nav = await call(routes, face, method === "POST" ? { ...NAVIGATION, "content-type": "application/json" } : NAVIGATION, method, method === "POST" ? "{}" : undefined);
+      assert.equal(nav.status, 403, `${method} ${face} refuses a navigation`); assert.equal(nav.body, FORBIDDEN);
+    }
   }
   const refusedFirst = await call(routes, "/data/account/explore?force=1", { host: "127.0.0.1:3090", origin: "https://evil.example" });
   assert.equal(refusedFirst.status, 403, "the fence comes before the query");
@@ -227,7 +275,7 @@ test("a repeated or unknown name, an over-long value: 400 invalid account reques
   assert.equal(fetched.length, 0, "a refused query never reaches the Account");
   assert.deepEqual(ACCOUNT_QUERY, {
     account: ["fresh"],
-    explore: ["tab", "q", "key", "limit"],
+    explore: ["tab", "q", "key", "sort", "limit"],
     market: ["venue", "symbol"],
     quotes: ["pairs"],
     compare: ["base", "side", "usd", "asset"],
@@ -241,6 +289,14 @@ test("a repeated or unknown name, an over-long value: 400 invalid account reques
     reach: ["connector"],
     keyfile: ["kind", "venue", "ref", "exchange"],
     books: [],
+    asset: ["key", "interval", "range", "fresh"],
+    book: ["venue", "symbol", "depth"],
+    trades: ["venue", "symbol", "limit"],
+    funding: ["venue", "limit"],
+    receive: ["venue", "asset", "network"],
+    earn: ["venue", "asset", "fresh"],
+    sellable: ["fresh"],
+    signinStatus: ["state"],
   });
   assert.equal((await call(routes, `/data/account/explore?q=${"x".repeat(240)}`)).status, 200, "240 characters pass");
   assert.deepEqual(fetched, [`${URL_}/api/account/explore?q=${"x".repeat(240)}`]);
@@ -310,6 +366,7 @@ test("two reads within the TTL fetch once; ?fresh=1 fetches again and never join
     account: 15_000, explore: 20_000, market: 3_000, quotes: 3_000, compare: 15_000, candles: 30_000,
     holdings: 8_000, positions: 10_000, statement: 10_000, history: 60_000, agents: 15_000,
     venues: 60_000, reach: 5_000, keyfile: 5_000, books: 5_000,
+    asset: 5_000, book: 2_000, trades: 2_000, funding: 60_000, receive: 60_000, earn: 15_000, sellable: 5_000, signinStatus: 1_000,
   });
   let clock = NOW;
   const { routes, fetched, proxy } = proxyWith(answering(OK_BODY), () => clock);
@@ -395,6 +452,7 @@ test("an unreachable, hanging, refusing or unreadable Account: 503 with the code
     account: 7_000, explore: 10_000, market: 7_000, quotes: 7_000, compare: 7_000, candles: 25_000,
     holdings: 12_000, positions: 7_000, statement: 7_000, history: 12_000, agents: 7_000,
     venues: 30_000, reach: 30_000, keyfile: 30_000, books: 30_000,
+    asset: 25_000, book: 7_000, trades: 7_000, funding: 12_000, receive: 30_000, earn: 30_000, sellable: 30_000, signinStatus: 7_000,
   });
   const refused = proxyWith(async () => { throw Object.assign(new TypeError("fetch failed secret-host-name"), { cause: { code: "ECONNREFUSED" } }); });
   const a = await call(refused.routes, "/data/account/holdings?cost=1");
@@ -807,7 +865,10 @@ test("a write forwards its body as bytes with the Account's status", async () =>
 });
 
 test("a write past its limit is 413, a non-JSON one 415, a query on it 400", async () => {
-  assert.deepEqual(WRITE_BODY_LIMIT, { pair: 4_096, prepare: 16_384, exchange: 65_536 });
+  assert.deepEqual(WRITE_BODY_LIMIT, {
+    pair: 4_096, prepare: 16_384, exchange: 65_536,
+    challenge: 1_024, prove: 2_048, signinStart: 512, bridgeRoutes: 4_096, orderSent: 512, orderRequote: 512, sent: 512, revoke: 512, guard: 256,
+  });
   const { routes, fetched } = proxyWith(answering(OK_BODY));
   for (const [face, , route] of WRITES) {
     const limit: number = WRITE_BODY_LIMIT[route];
@@ -873,9 +934,13 @@ test("an unreachable Account on a write is 503 with the code", async () => {
 });
 
 test("a write's abort is the row's", async (t) => {
-  assert.deepEqual(WRITE_ABORT_MS, { pair: 7_000, prepare: 30_000, exchange: 30_000 });
+  assert.deepEqual(WRITE_ABORT_MS, {
+    pair: 7_000, prepare: 30_000, exchange: 30_000,
+    challenge: 7_000, prove: 12_000, signinStart: 30_000, bridgeRoutes: 30_000, orderSent: 30_000, orderRequote: 30_000, sent: 30_000,
+    revoke: 7_000, guard: 7_000,
+  });
   t.mock.timers.enable({ apis: ["setTimeout"] });
-  for (const [face, , route] of WRITES) {
+  for (const [face, , route] of [...WRITES, ...NEW_WRITES]) {
     const hanging = proxyWith((_url, init) => new Promise<FakeAnswer>((_resolve, reject) => init.signal.addEventListener("abort", () => reject(aborted()))));
     const one = start(hanging.routes, face, JSON_POST, "POST", "{}");
     for (let i = 0; i < 50 && hanging.inits.length === 0; i += 1) await new Promise<void>((r) => setImmediate(r));
@@ -887,4 +952,236 @@ test("a write's abort is the row's", async (t) => {
     await one.done;
     assert.equal(one.out.status, 503); assert.equal(one.out.body, '{"ok":false,"unreachable":"timeout"}');
   }
+});
+
+test("the new reads keep their whitelists and TTLs", async () => {
+  const ttl = { asset: 5_000, book: 2_000, trades: 2_000, funding: 60_000, receive: 60_000, earn: 15_000, sellable: 5_000, signinStatus: 1_000 };
+  const abort = { asset: 25_000, book: 7_000, trades: 7_000, funding: 12_000, receive: 30_000, earn: 30_000, sellable: 30_000, signinStatus: 7_000 };
+  const names = {
+    asset: ["key", "interval", "range", "fresh"], book: ["venue", "symbol", "depth"], trades: ["venue", "symbol", "limit"], funding: ["venue", "limit"],
+    receive: ["venue", "asset", "network"], earn: ["venue", "asset", "fresh"], sellable: ["fresh"], signinStatus: ["state"],
+  };
+  for (const [face, account, route, query] of NEW_READS) {
+    assert.equal(ACCOUNT_TTL_MS[route], ttl[route], `${route} TTL`);
+    assert.equal(ACCOUNT_ABORT_MS[route], abort[route], `${route} abort`);
+    assert.deepEqual(ACCOUNT_QUERY[route], names[route], `${route} names`);
+    let clock = NOW;
+    const { routes, fetched } = proxyWith(answering(OK_BODY), () => clock);
+    const unknown = await call(routes, `${face}?${query}${query === "" ? "" : "&"}force=1`);
+    assert.equal(unknown.status, 400, `${face}: an unknown name`); assert.equal(unknown.body, INVALID);
+    assert.equal(fetched.length, 0, `${face}: nothing fetched for an unknown name`);
+    const url = query === "" ? face : `${face}?${query}`;
+    const a = await call(routes, url);
+    assert.equal(a.status, 200); assert.equal(a.body, OK_BODY);
+    assert.equal(fetched[0], `${URL_}${account}${query === "" ? "" : `?${query}`}`, `${face}: the query rebuilt in order`);
+    await call(routes, url);
+    assert.equal(fetched.length, 1, `${face}: a second read inside the TTL fetches once`);
+    clock += ttl[route];
+    await call(routes, url);
+    assert.equal(fetched.length, 2, `${face}: the TTL expires at ${ttl[route]} ms`);
+  }
+  const { routes, fetched } = proxyWith(answering(OK_BODY));
+  await call(routes, "/data/account/sellable");
+  await call(routes, "/data/account/sellable?fresh=1");
+  assert.deepEqual(fetched, [`${URL_}/api/account/sellable`, `${URL_}/api/account/sellable`], "sellable?fresh=1 asks again, fresh never forwarded");
+});
+
+test("the new writes forward their bodies as bytes", async () => {
+  const refusal = '{"ok":false,"refusal":{"code":"E_X","message":"no"}}';
+  const { routes, fetched, inits } = proxyWith(answering(refusal, 409));
+  const body = '{"venue":"paper",  "asset":"USDC", "note":"café"}';
+  for (const [face, account, route] of FORWARDING) {
+    assert.ok(Buffer.byteLength(body) <= WRITE_BODY_LIMIT[route]);
+    const a = await call(routes, face, JSON_POST, "POST", body);
+    assert.equal(a.status, 409, face); assert.equal(a.body, refusal);
+    assert.equal(a.headers["content-type"], JSON_TYPE); assert.equal(a.headers["cache-control"], "no-store");
+    assert.equal(fetched.at(-1), `${URL_}${account}`, `${face} asks ${account}`);
+    const init = inits.at(-1)!;
+    assert.equal(init.method, "POST"); assert.equal(init.body, body, `${face}: the body as posted`);
+    assert.equal((init.headers as Record<string, string>)["content-type"], "application/json");
+    assert.equal(init.redirect, "error");
+  }
+  const n = fetched.length;
+  for (const [face, , route] of NEW_WRITES) {
+    const limit = WRITE_BODY_LIMIT[route];
+    const big = await call(routes, face, JSON_POST, "POST", "x".repeat(limit + 1));
+    assert.equal(big.status, 413, `${face} at ${limit + 1} bytes`);
+    const plain = await call(routes, face, { host: "127.0.0.1:3090", "content-type": "text/plain" }, "POST", "{}");
+    assert.equal(plain.status, 415, `${face} text/plain`);
+    const queried = await call(routes, `${face}?x=1`, JSON_POST, "POST", "{}");
+    assert.equal(queried.status, 400, `${face} with a query`); assert.equal(queried.body, INVALID);
+  }
+  assert.equal(fetched.length, n, "no refused write reaches the Account");
+});
+
+test("guard sends the fixed body whatever the browser posted", async () => {
+  const answer = '{"ok":true,  "mode":"guard"}';
+  const { routes, fetched, inits } = proxyWith(answering(answer, 202));
+  const a = await call(routes, "/data/account/guard", JSON_POST, "POST", '{"mode":"open"}');
+  assert.equal(fetched.at(-1), `${URL_}/api/mode`);
+  assert.equal(inits.at(-1)!.body, '{"mode":"guard"}', "the browser's body never reaches the Account");
+  assert.deepEqual(inits.at(-1)!.headers, { "content-type": "application/json" });
+  assert.equal(a.status, 202); assert.equal(a.body, answer, "the Account's status and body as they are");
+  const big = await call(routes, "/data/account/guard", JSON_POST, "POST", "x".repeat(257));
+  assert.equal(big.status, 413);
+  assert.equal(fetched.length, 1, "a body past 256 bytes is refused and nothing is fetched");
+  await call(routes, "/data/account/guard", JSON_POST, "POST", "x".repeat(256));
+  assert.equal(inits.at(-1)!.body, '{"mode":"guard"}', "256 bytes are read and discarded");
+});
+
+test("the face's origin rides challenge and signin/start only", async () => {
+  assert.equal(FACE_ORIGIN_HEADER, "x-gravit-face-origin");
+  for (const [host, origin] of [["localhost:3090", "http://localhost:3090"], ["127.0.0.1:3090", "http://127.0.0.1:3090"], ["LOCALHOST:3090", "http://localhost:3090"]]) {
+    const { routes, fetched, inits } = proxyWith(answering(OK_BODY));
+    const headers = { host, "content-type": "application/json", [FACE_ORIGIN_HEADER]: "http://evil.example" };
+    for (const [face, account, route] of [...WRITES, ...NEW_WRITES]) {
+      await call(routes, face, headers, "POST", "{}");
+      assert.equal(fetched.at(-1), `${URL_}${account}`);
+      const sent = inits.at(-1)!.headers as Record<string, string>;
+      if (route === "challenge" || route === "signinStart") {
+        assert.deepEqual(sent, { "content-type": "application/json", [FACE_ORIGIN_HEADER]: origin }, `${face} on ${host}: the browser's own Host`);
+      } else {
+        assert.deepEqual(sent, { "content-type": "application/json" }, `${face}: no origin header`);
+      }
+    }
+    for (const [face] of [...ROUTES, ...NEW_READS]) await call(routes, face, headers);
+    await call(routes, FOLLOW, headers, "POST", "{}");
+    const reads = inits.filter((init) => init.method !== "POST");
+    assert.ok(reads.length > 0);
+    for (const init of reads) assert.equal(JSON.stringify(init.headers ?? {}).includes(FACE_ORIGIN_HEADER), false, "no read carries it");
+    assert.deepEqual(inits.at(-1)!.headers, { "content-type": "application/json" }, "stream/markets carries none");
+  }
+  const reqOf = (host?: string): IncomingMessage => ({ url: "/", method: "POST", headers: host === undefined ? {} : { host } }) as unknown as IncomingMessage;
+  assert.equal(faceOriginOf(reqOf("127.0.0.1:3090")), "http://127.0.0.1:3090");
+  assert.equal(faceOriginOf(reqOf("[::1]:3090")), "http://[::1]:3090");
+  assert.equal(faceOriginOf(reqOf("evil.example:3090")), null);
+  assert.equal(faceOriginOf(reqOf("10.0.0.2:3090")), null);
+  assert.equal(faceOriginOf(reqOf()), null);
+  assert.equal(faceOriginOf(reqOf("::1")), null, "a loopback spelling with no URL form gives no origin");
+});
+
+test("nothing of a new write's body is logged", async (t) => {
+  const seen: string[] = [];
+  const keep = (...args: unknown[]): void => { seen.push(args.map(String).join(" ")); };
+  t.mock.method(console, "log", keep);
+  t.mock.method(console, "error", keep);
+  t.mock.method(console, "warn", keep);
+  t.mock.method(console, "info", keep);
+  const body = '{"address":"0xabc1234567","signature":"0xdef7654321"}';
+  for (const doFetch of [answering(OK_BODY), answering('{"ok":false}', 409), (async () => { throw Object.assign(new TypeError("x"), { cause: { code: "ECONNREFUSED" } }); }) as FakeFetch]) {
+    const { routes } = proxyWith(doFetch);
+    for (const [face] of NEW_WRITES) {
+      await call(routes, face, JSON_POST, "POST", body);
+      await call(routes, face, JSON_POST, "POST", body + "x".repeat(5_000));
+    }
+  }
+  assert.equal(seen.some((line) => line.includes("0xabc") || line.includes("0xdef")), false);
+});
+
+test("the callback forwards a venue's navigation and answers the Account's page", async () => {
+  const page = "<!doctype html><title>Robinhood sign-in</title><p>Go back to Gravit</p>";
+  const { routes, fetched, inits } = proxyWith(answering(page));
+  const a = await call(routes, `${CALLBACK}?state=s1&code=c1&iss=https%3A%2F%2Fexample`, NAVIGATION);
+  assert.equal(a.status, 200);
+  assert.equal(a.body, page, "the Account's bytes");
+  assert.deepEqual(a.headers, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "referrer-policy": "no-referrer", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" });
+  assert.deepEqual(fetched, [`${URL_}/api/account/signin/callback?state=s1&code=c1&iss=https%3A%2F%2Fexample`], "once, the rebuilt query");
+  assert.equal(inits[0]!.redirect, "error");
+  assert.equal(inits[0]!.headers, undefined, "a plain loopback fetch: no Origin, no Sec-Fetch-*, no cookie");
+  assert.equal(inits[0]!.method, undefined, "a GET");
+
+  /* Every name the venue may send, and a navigation with no Sec-Fetch-Site or `none` (typed, or a bookmark). */
+  const all = "state=s2&code=c2&error=access_denied&error_description=the+owner+said+no&iss=https%3A%2F%2Fexample";
+  await call(routes, `${CALLBACK}?${all}`, { ...NAVIGATION, "sec-fetch-site": "none" });
+  assert.equal(fetched.at(-1), `${URL_}/api/account/signin/callback?${all}`);
+  const { "sec-fetch-site": _site, ...noSite } = NAVIGATION;
+  assert.equal((await call(routes, `${CALLBACK}?state=s3`, noSite)).status, 200);
+
+  /* Not kept: the same callback asks again. */
+  const before = fetched.length;
+  await call(routes, `${CALLBACK}?state=s3`, NAVIGATION);
+  assert.equal(fetched.length, before + 1, "never kept");
+
+  /* A refusal is the Account's page, its status passed through. */
+  const refused = proxyWith(answering("<p>this sign-in is not one this server started</p>", 400));
+  const r = await call(refused.routes, `${CALLBACK}?state=x`, NAVIGATION);
+  assert.equal(r.status, 400); assert.equal(r.body, "<p>this sign-in is not one this server started</p>");
+  assert.equal(r.headers["content-type"], "text/html; charset=utf-8");
+});
+
+test("the callback forwards error_uri", async () => {
+  const { routes, fetched } = proxyWith(answering("<p>The sign-in did not finish</p>", 400));
+  const q = "state=s4&error=access_denied&error_uri=https%3A%2F%2Fexample%2Fe";
+  const out = await call(routes, `${CALLBACK}?${q}`, NAVIGATION);
+  assert.equal(out.status, 400, "the Account's own answer");
+  assert.deepEqual(fetched, [`${URL_}/api/account/signin/callback?${q}`], "both names reach the stub Account");
+  assert.equal(CALLBACK_QUERY.size, 6);
+});
+
+test("the callback: a fetch, a form, an Origin, a rebound Host are 403; a bad query 400; nothing is fetched", async () => {
+  const { routes, fetched } = proxyWith(answering("<p>ok</p>"));
+  const q = `${CALLBACK}?state=s1&code=c1`;
+  for (const [headers, method, why] of [
+    [{ ...NAVIGATION, "sec-fetch-mode": "cors", "sec-fetch-dest": "empty" }, "GET", "a fetch()"],
+    [{ ...NAVIGATION, "sec-fetch-dest": "empty" }, "GET", "not a document"],
+    [{ ...NAVIGATION, "sec-fetch-dest": "iframe" }, "GET", "a frame"],
+    [{ ...NAVIGATION, origin: "https://evil.example" }, "GET", "an Origin"],
+    [{ ...NAVIGATION, host: "evil.example:3090" }, "GET", "a rebound Host"],
+    [{ host: "127.0.0.1:3090" }, "GET", "no Fetch Metadata"],
+    [NAVIGATION, "POST", "a form's POST"],
+  ] as const) {
+    const out = await call(routes, q, { ...headers }, method);
+    assert.equal(out.status, 403, why); assert.equal(out.body, FORBIDDEN, why);
+  }
+  for (const bad of ["?foo=1", "?state=a&state=b", `?state=s&code=${"c".repeat(2_001)}`, `?state=${"s".repeat(241)}`,
+    `?error_description=${"d".repeat(1_001)}`, `?iss=${"i".repeat(501)}`, `?error=${"e".repeat(241)}`, `?error_uri=${"u".repeat(501)}`, "?fresh=1"]) {
+    const out = await call(routes, `${CALLBACK}${bad}`, NAVIGATION);
+    assert.equal(out.status, 400, bad.slice(0, 40)); assert.equal(out.body, INVALID);
+  }
+  assert.equal(fetched.length, 0, "nothing reaches the Account");
+  assert.equal((await call(routes, `${CALLBACK}?state=s&code=${"c".repeat(2_000)}`, NAVIGATION)).status, 200, "2 000 characters pass");
+  assert.equal((await call(routes, `${CALLBACK}?state=s&error_uri=${"u".repeat(500)}`, NAVIGATION)).status, 200, "an error_uri of 500 characters passes");
+});
+
+test("the callback: an Account that does not answer, and a disabled row, are 503 with the fixed page", async () => {
+  const fixed = "The Account did not answer. Go back to Gravit and start the sign-in again.";
+  const html = { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "referrer-policy": "no-referrer", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" };
+  const refused = proxyWith(async () => { throw Object.assign(new TypeError("fetch failed: secret text"), { cause: { code: "ECONNREFUSED" } }); });
+  const a = await call(refused.routes, `${CALLBACK}?state=s1`, NAVIGATION);
+  assert.equal(a.status, 503); assert.equal(a.body, fixed); assert.deepEqual(a.headers, html);
+  /* A good answer first, then a failure: never re-served stale. */
+  let fail = false;
+  const flaky = proxyWith(async () => { if (fail) throw new TypeError("x"); return ok("<p>signed in</p>"); });
+  await call(flaky.routes, `${CALLBACK}?state=s1`, NAVIGATION);
+  fail = true;
+  const b = await call(flaky.routes, `${CALLBACK}?state=s1`, NAVIGATION);
+  assert.equal(b.status, 503); assert.equal(b.body, fixed, "never stale");
+  const disabled = proxyWith(answering("<p>ok</p>"), () => NOW, { disabled: true });
+  const c = await call(disabled.routes, `${CALLBACK}?state=s1`, NAVIGATION);
+  assert.equal(c.status, 503); assert.equal(c.body, fixed); assert.deepEqual(c.headers, html);
+  assert.equal(disabled.fetched.length, 0);
+});
+
+test("the callback's abort is thirty seconds", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const hanging = proxyWith((_url, init) => new Promise<FakeAnswer>((_resolve, reject) => init.signal.addEventListener("abort", () => reject(aborted()))));
+  const one = start(hanging.routes, `${CALLBACK}?state=s1`, NAVIGATION);
+  for (let i = 0; i < 50 && hanging.inits.length === 0; i += 1) await new Promise<void>((r) => setImmediate(r));
+  assert.equal(hanging.inits.length, 1, "the callback asked the Account");
+  t.mock.timers.tick(29_999);
+  assert.equal(hanging.inits[0].signal.aborted, false, "waits 29 999 ms");
+  t.mock.timers.tick(1);
+  assert.equal(hanging.inits[0].signal.aborted, true, "cut at 30 s");
+  await one.done;
+  assert.equal(one.out.status, 503); assert.equal(one.out.body, "The Account did not answer. Go back to Gravit and start the sign-in again.");
+});
+
+test("funding is read with no venue, as the Account's own page reads it: every venue that lists it", async () => {
+  const { routes, fetched } = proxyWith(answering(OK_BODY), () => NOW);
+  const a = await call(routes, "/data/account/funding?limit=100");
+  assert.equal(a.status, 200); assert.equal(a.body, OK_BODY);
+  assert.equal(fetched[0], `${URL_}/api/account/funding?limit=100`);
+  const bare = await call(routes, "/data/account/funding");
+  assert.equal(bare.status, 200);
+  assert.equal(fetched[1], `${URL_}/api/account/funding`);
 });

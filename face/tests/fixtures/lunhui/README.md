@@ -37,3 +37,9 @@ with `<symbol>,` gets `kline-<symbol>.json`, a URL on that host whose path is
 `/appstock/app/day/query` gets `minutes-<code>.json`, any other URL a 404. The sibling directory
 `../lunhui-empty/` holds no replies at all, so a fetch served from there answers every URL with a
 404.
+
+`account.ts` is a fake Account over the same mapping, for the freeze tests of a row mounted with
+no `config.fetch`, whose fetch is the Account's: it answers `GET /api/cn/relay?url=` with the
+mapped reply for the decoded URL (status, bytes, `content-type`, `location`) marked
+`x-cn-relay: upstream`, and `POST /api/cn/ifind` with `wencai-universe.json` marked
+`x-cn-ifind: upstream` (or the `unconfigured` refusal), recording every request it is sent.

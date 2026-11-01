@@ -38,3 +38,10 @@ test("GRAVIT.md names nothing of the removed layer and states that no read is gu
 test("GRAVIT.md tells Gravit to answer a Lunhui market run with lunhui_present", () => {
   assert.ok(readFileSync(GRAVIT_MD, "utf8").includes("lunhui_present"));
 });
+
+test("GRAVIT.md reaches AKShare through the seat", () => {
+  const text = readFileSync(GRAVIT_MD, "utf8");
+  assert.match(text, /mcp__account__portfolio_akshare/);
+  assert.match(text, /akshare_discover/);
+  assert.equal(text.includes("mcp__akshare__"), false);
+});

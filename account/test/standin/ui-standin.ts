@@ -1,10 +1,11 @@
-/** A STAND-IN ACCOUNT: the real account page, server and doors, over stand-in venues — to look at and click through the page with NO
- * network and NO real money.
+/** A STAND-IN ACCOUNT: the real Account server and doors, over stand-in venues — the face smokes' stand-in, and the one to drive Gravit's
+ * face against (FACE_ACCOUNT_URL=http://127.0.0.1:4821) with NO network and NO real money. The Account serves no page of its own: its owner's
+ * screens are the face's.
  *
  *   npx tsx test/standin/ui-standin.ts --port 4821      (never 4820: that port is the real account's)
  *     --cap 250        the most one order or movement may be worth (the server's --live-cap)
  *     --tick 3000      how often prices move, in milliseconds
- *     --no-desk        no desk hired: the page's own setup, with the real brains behind it — every preset the account knows (brains.ts:
+ *     --no-desk        no desk hired: the owner's own setup, with the real brains behind it — every preset the account knows (brains.ts:
  *                      Claude, OpenAI, DeepSeek, Grok · xAI, Muse · Meta, Kimi, Qwen, OpenRouter, Gemini, Groq, Together, Ollama,
  *                      vLLM, a custom endpoint) — each saying honestly that this home holds no key for it (the no-key fix: its key file's
  *                      path and the command that makes it), and Ollama and vLLM, which need no key and no file, that they need a model's
@@ -12,22 +13,21 @@
  *                      network: its calls and its "Test the key" answer that the endpoint could not be reached
  *     --superagent     the desk hired as the SUPERAGENT at the account's own paper account (paper-momentum), its autonomy on paper signed,
  *                      its clock running every ten seconds and a cycle every minute, the first a few seconds after the start
- *     --cards          with --superagent: hired with the autonomy OFF, so in Guard every lead it clears waits for you on a card — the
- *                      Superagent pane's "Waits for you" strip, with real cards to approve or reject
- *     --no-paper       no paper account connected (neither the stand-in's own nor the account's live:paper one): Trade's paper onboarding
- *                      card shows, and opening one from it is signed there as any connection is (feat/paper-live phase 4). Not with
- *                      --superagent, which trades a paper account
+ *     --cards          with --superagent: hired with the autonomy OFF, so in Guard every lead it clears waits for you on a card — real
+ *                      cards to approve or reject (the face's Cards answers them)
+ *     --no-paper       no paper account connected (neither the stand-in's own nor the account's live:paper one): opening one is signed as
+ *                      any connection is (feat/paper-live phase 4). Not with --superagent, which trades a paper account
  *     --brain-refuses  the scripted brain answers as the API does to a key it refuses (E_BRAIN_KEY_REJECTED, brain-key.ts): the desk's
  *                      standing turns "not ready" with the rejected-key fix, and the room says so once. The stand-in writes a stand-in key
  *                      to <home>/credentials/anthropic/api-key.json at the start; change what that file holds (the fix's command opens
- *                      it), or save a key for Claude on the page (credentials/brains/claude.json, which is read before it), and the next
+ *                      it), or save a key for Claude at POST /api/account/brain-key (credentials/brains/claude.json, which is read before it), and the next
  *                      call is answered, as a replaced key would be
  *
  * THE BRAINS. With a desk (the default, --superagent), the desk thinks with a SCRIPT — never a model — held under Claude's preset id
- * ("claude", labelled "A script (stand-in, as Claude)"), beside every other preset's real brain: so the Brains place shows every provider
+ * ("claude", labelled "A script (stand-in, as Claude)"), beside every other preset's real brain: so the desk's catalog shows every provider
  * with its honest standing (no key in this fresh home; Ollama and vLLM ready once a model is named, needing neither key nor file), and
- * switching the brain away and back can be clicked through. The real brains here read no variable from the shell that started the stand-in
- * (so no ANTHROPIC_BASE_URL or OPENAI_API_KEY there changes what the page shows) and reach no network: a key saved on the page makes one
+ * the brain can be switched away and back. The real brains here read no variable from the shell that started the stand-in
+ * (so no ANTHROPIC_BASE_URL or OPENAI_API_KEY there changes what the account says) and reach no network: a key saved at its route makes one
  * ready, and its calls then answer that the endpoint could not be reached.
  *
  * It starts the account exactly as `npm run account` does — real accounts only, trading on with a small cap, a pairing code printed here —
@@ -58,7 +58,7 @@
  *                 saying how (Account › Memory)
  *   the curve     net worth points over the last seven days, off the stand-in's own price curves, so the curve draws at once
  *
- * PAIRING. The seed key paired first, with the code, the way a browser does. The page then asks this browser for the code too: typed
+ * PAIRING. The seed key paired first, with the code, the way a browser does. The face then asks its browser for the code too: typed
  * right, the seed key signs one owner action (convertToMultiSigUser) that makes this browser an owner beside it, one signature enough.
  * The seed key stays an owner because every limit it signed is checked against the owners each time it is used: a limit whose signer is
  * gone no longer stands. A second browser after that waits until an owner lets it in under Devices, as on the real account.
@@ -66,7 +66,7 @@
  * The agent wallet's key is made in the home the way a real one is (account/keystore.ts), so its address is a real address on every EVM
  * chain: its balance here is the stand-in chain's, and nothing real should ever be sent to it.
  *
- * While it runs: prices move every few seconds — the paper accounts' quotes and the page's pushed quote, book and trades with them, through a
+ * While it runs: prices move every few seconds — the paper accounts' quotes and the pushed quote, book and trades with them, through a
  * stand-in for the venues' live streams (venues.ts standinHub; only while prices move, never in tests that step them) — a resting order fills
  * when the price crosses it (at the broker, only while the US market is open), a stop fires, the fifteen-minute bitcoin market rolls over and settles; Claude Code reports when its order fills, and when its
  * card expires unanswered the seed key closes it and Claude Code asks again (in Guard only).
@@ -116,11 +116,11 @@ export interface StandinOptions {
   code?: string | undefined;
   /** where the account keeps its ledger (a fresh temporary home unless given) */
   home?: string | undefined;
-  /** the desk hired and run twice (true unless said): false leaves it to the page, with the scripted brain behind it (`--no-desk`) */
+  /** the desk hired and run twice (true unless said): false leaves it to the owner, with the scripted brain behind it (`--no-desk`) */
   desk?: boolean | undefined;
   /** the desk hired as a SUPERAGENT instead (`--superagent`): at the account's own paper account (paper-momentum), the paper autonomy
    * signed on, its clock running every ten seconds and a cycle every minute, the script picking from the very rows Search is shown — so
-   * the Superagent pane's floor (#/trade?mode=superagent) plays real cycles: scans, handoffs, a rejection now and then, orders, fills and
+   * the desk's floor (GET /api/account/desk/feed) plays real cycles: scans, handoffs, a rejection now and then, orders, fills and
    * exits */
   superagent?: boolean | undefined;
   /** with `superagent`: hired with its autonomy off (`--cards`), so in Guard each lead it clears waits for the owner on a card */
@@ -224,7 +224,7 @@ export async function startStandin(o: StandinOptions): Promise<Standin> {
   const agent = simKey("agent:ui-standin-claude-code");
   const paired = engine.pairDevice(seed.jwk, "Stand-in seed key", code);
   if (isRefusal(paired) || paired.role !== "owner") throw new Error("the stand-in's seed key could not pair as the first owner");
-  /** the owner asks, as the page does: prepared by the account, signed over exactly what it shows, sent through the door */
+  /** the owner asks, as the face does: prepared by the account, signed over exactly what it shows, sent through the door */
   const own = async (draft: Record<string, unknown>): Promise<Outcome> => {
     const p = await engine.prepare(draft);
     if (isRefusal(p)) return p;
@@ -383,7 +383,7 @@ export async function startStandin(o: StandinOptions): Promise<Standin> {
   // ---- while it runs ----
   let reported = false;
   const agentLooks = async () => {
-    // how the orders stand at the venues, as a page read asks
+    // how the orders stand at the venues, as a read asks
     await engine.settle();
     const mine = engine.orders.find((x) => x.id === orders.agentSol);
     if (!reported && mine?.status === "filled") {
@@ -466,7 +466,7 @@ async function drawThePast(svc: PortfolioService, world: World, home: string, wa
     const asset = k.split("|")[2]!;
     return { asset, amount, ...(isStable(asset) ? { class: "stable" as const } : {}) };
   });
-  // what is in earn is the exchange's too (the account page counts it there), priced on the same curves
+  // what is in earn is the exchange's too (the account counts it there), priced on the same curves
   const earned: LiveBalance[] = [...world.earn.held].filter(([, amount]) => amount > 0).map(([product, amount]) => {
     const asset = world.earn.specs.find((x) => x.id === product)!.asset;
     return { asset, amount, ...(isStable(asset) ? { class: "stable" as const } : {}) };
@@ -531,7 +531,7 @@ function superagentBrain() {
 }
 
 /** The stand-in's brain answering as the Anthropic API does to a key it refuses (`--brain-refuses`): every call throws E_BRAIN_KEY_REJECTED
- * with the fix brain-claude.ts gives for a key from the file (the file opened again, no restart), so the page shows the rejected-key
+ * with the fix brain-claude.ts gives for a key from the file (the file opened again, no restart), so the account says the rejected-key
  * standing with real paths. A stand-in key is written to <home>/credentials/anthropic/api-key.json, the user's alone, at the start: while
  * the file holds exactly that, the calls are refused; once it holds anything else — the owner "replaced the key" — the script answers
  * again, and the desk clears the fault on that answer. Its standing (ready) stays the script's: a refused key's shape looks fine, which is
@@ -542,7 +542,7 @@ function refusingIf(on: boolean, brain: Brain, home: string): Brain {
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
   writeFileSync(file, '{"apiKey": "sk-ant-standin-key-the-api-refuses-0000"}\n', { mode: 0o600 });
   const refused = readFileSync(file, "utf8");
-  // the file Claude's brain reads now: the new one once it is there (a key saved on the page), else the older one
+  // the file Claude's brain reads now: the new one once it is there (a key saved at its route), else the older one
   const inUse = (): string => (present(home, CLAUDE_KEY_REF) ? join(home, CLAUDE_KEY_REF) : file);
   const now = (): string => {
     try {
@@ -578,7 +578,7 @@ function realBrains(home: string): Brain[] {
 }
 
 /** The desk's brains in the stand-in: every preset's real brain, with Claude's place held by the stand-in's script — its id "claude"
- * (so the desk is hired with it as with the default brain, and the Brains place can switch away and back), Claude's listed models, what
+ * (so the desk is hired with it as with the default brain, and the brain can be switched away and back), Claude's listed models, what
  * Claude's real brain says of its place (its base URL, its key file and the key's tail), and a label that says it is a script */
 function standinBrains(home: string, script: Brain): Brain[] {
   const real = realBrains(home);
@@ -625,7 +625,7 @@ if (isMain) {
   if (args.includes("--no-paper") && args.includes("--superagent")) throw new Error("--no-paper does not go with --superagent: the superagent trades a paper account");
   const s = await startStandin({ port, capUsd, tickMs, desk: !args.includes("--no-desk"), superagent: args.includes("--superagent"), cards: args.includes("--cards"), brainRefuses: args.includes("--brain-refuses"), paper: !args.includes("--no-paper") }).catch((e: NodeJS.ErrnoException) => {
     if (e.code === "EADDRINUSE") {
-      console.error(`port ${port} is already in use: is a stand-in running already? Open http://127.0.0.1:${port}, or pick another with --port`);
+      console.error(`port ${port} is already in use: is a stand-in running already? Point the face at it (FACE_ACCOUNT_URL=http://127.0.0.1:${port}), or pick another with --port`);
       process.exit(1);
     }
     throw e;
@@ -633,16 +633,16 @@ if (isMain) {
   const v = s.seeded;
   console.log(
     [
-      "STAND-IN ACCOUNT · no network, no real money: every venue, price and fill on this page is made up (test/standin)",
-      `  page          ${s.url}`,
-      `  pairing code  ${s.code}  — type it on the page: your browser becomes an owner beside the stand-in's seed key`,
+      "STAND-IN ACCOUNT · no network, no real money: every venue, price and fill on it is made up (test/standin)",
+      `  account       ${s.url}  — no page: start the face with FACE_ACCOUNT_URL=${s.url}`,
+      `  pairing code  ${s.code}  — type it on Gravit's face (Account): your browser becomes an owner beside the stand-in's seed key`,
       `  home          ${s.home}  (fresh, kept after you stop; its ledger is ${s.svc.ledgerPath()})`,
       `  trading       on, at most $${capUsd} an order or a movement`,
       `  agent wallet  ${v.agent.wallet} holds a real key made in this home, so its address is a real one: send it nothing real`,
       `  seeded        venues ${v.venues.join(", ")} · ${Object.keys(v.orders).length} orders · ${v.agent.name} with trade, venues and payees limits and an agent wallet · 1 card waiting (${v.card}) · ${v.intents.length} intents · a report · ${v.asks} asks · ${v.watch} watched markets · ${v.curvePoints} net worth points over 7 days`,
-      ...(args.includes("--superagent") ? [`  superagent    the desk at paper-momentum (paper money), ${args.includes("--cards") ? "its autonomy off: in Guard each lead it clears waits for you on a card" : "trading on its own on paper"} · ${s.url}/#/trade?mode=superagent`] : []),
+      ...(args.includes("--superagent") ? [`  superagent    the desk at paper-momentum (paper money), ${args.includes("--cards") ? "its autonomy off: in Guard each lead it clears waits for you on a card" : "trading on its own on paper"} · its floor at ${s.url}/api/account/desk/feed`] : []),
       args.includes("--no-desk") ? "  brains        every preset's real brain, none with a key in this fresh home; they reach no network here" : "  brain         a script under Claude's id (no model thinks here), beside every other preset's real brain (no key, no network)",
-      ...(args.includes("--brain-refuses") ? [`  brain         refuses its key, as the API does, until ${join(s.home, ANTHROPIC_KEY_REF)} holds something else (or a key is saved for Claude on the page)`] : []),
+      ...(args.includes("--brain-refuses") ? [`  brain         refuses its key, as the API does, until ${join(s.home, ANTHROPIC_KEY_REF)} holds something else (or a key is saved for Claude at POST /api/account/brain-key)`] : []),
       `  prices move every ${tickMs / 1000} s · Ctrl-C to stop`,
     ].join("\n"),
   );

@@ -1,0 +1,112 @@
+{
+  "ok": true,
+  "asOf": "2026-10-31T02:30:12.000Z",
+  "tabs": [
+    {
+      "id": "china",
+      "label": "China",
+      "count": 5577
+    }
+  ],
+  "items": [
+    {
+      "key": "cn:600519",
+      "kind": "ashare",
+      "name": "贵州茅台",
+      "base": "600519",
+      "currency": "CNY",
+      "price": 1392.05,
+      "changePct24h": 2.81,
+      "turnoverCny": 21610000000,
+      "quoteFrom": "Tencent",
+      "tabs": [
+        "china"
+      ],
+      "at": [
+        {
+          "venue": "china",
+          "venueName": "Tencent",
+          "symbol": "600519",
+          "connected": false,
+          "canTrade": false,
+          "public": true,
+          "price": 1392.05,
+          "quoteFrom": "Tencent"
+        }
+      ]
+    },
+    {
+      "key": "cn:688981",
+      "kind": "ashare",
+      "name": "中芯国际",
+      "base": "688981",
+      "currency": "CNY",
+      "price": 98.6,
+      "changePct24h": -0.4,
+      "turnoverCny": 2957500000,
+      "quoteFrom": "Tencent",
+      "tabs": [
+        "china"
+      ],
+      "at": [
+        {
+          "venue": "china",
+          "venueName": "Tencent",
+          "symbol": "688981",
+          "connected": false,
+          "canTrade": false,
+          "public": true,
+          "price": 98.6,
+          "quoteFrom": "Tencent"
+        }
+      ]
+    },
+    {
+      "key": "cn:300750",
+      "kind": "ashare",
+      "name": "宁德时代",
+      "base": "300750",
+      "currency": "CNY",
+      "price": 412.3,
+      "changePct24h": 1.12,
+      "turnoverCny": 1830000000,
+      "quoteFrom": "Tencent",
+      "tabs": [
+        "china"
+      ],
+      "at": [
+        {
+          "venue": "china",
+          "venueName": "Tencent",
+          "symbol": "300750",
+          "connected": false,
+          "canTrade": false,
+          "public": true,
+          "price": 412.3,
+          "quoteFrom": "Tencent"
+        }
+      ]
+    }
+  ],
+  "movers": [],
+  "closing": [],
+  "mostTraded": [],
+  "missing": [],
+  "notes": [
+    "China: A shares as Tencent ranks them, view-only and priced in CNY; no venue here trades them."
+  ],
+  "china": {
+    "sort": "volume",
+    "total": 5577,
+    "asOf": "2026-10-31T02:30:12.000Z",
+    "session": {
+      "phase": "closed",
+      "lastSession": "2026-10-30"
+    },
+    "status": {
+      "state": "live",
+      "said": "Tencent · answering",
+      "at": "2026-10-31T02:30:12.000Z"
+    }
+  }
+}

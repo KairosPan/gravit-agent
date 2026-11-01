@@ -108,7 +108,7 @@ async function freeze(fetchImpl, _args, now) {
 
 /**
  * @param {any} ctx the row's context, injecting `tools` and `lunhuiRuns`
- * @param {{ fetch?: string, now?: () => Date }} config
+ * @param {{ fetch?: string, account?: string, now?: () => Date }} config
  */
 export function apply(ctx, config) {
   const deps = freezeDeps(name, ctx, config);

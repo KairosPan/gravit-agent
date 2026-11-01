@@ -8,6 +8,7 @@ import { kidOf } from '../../client/js/wire/owner-key.js';
 import { fakeWindow } from './helpers/fake-dom.js';
 import { modulesListing } from './helpers/inventory.js';
 import { VIEW_1027 } from './helpers/lunhui-view.js';
+import { fakeProvider, ADDRESS as WALLET_ADDRESS, hashOf } from './helpers/fake-wallet.js';
 
 // every app booted here has its timers stopped after its test, so one that fails half-way never leaves Markets' polls running
 const booted = new Set();
@@ -349,36 +350,23 @@ test('the theme comes from the prefs before the host answers, and a change is wr
   store.timers.clear();
 });
 
-// Markets through host: fake live quotes and search, the browser's storage a memory
-function fakeMarkets() {
-  const live = { assets: [], visible: [], onUpdate: null };
-  const search = { queries: [], onUpdate: null, cancelled: 0 };
-  return {
-    live, search,
-    createLiveQuotes: onUpdate => { live.onUpdate = onUpdate; return { setAssets(a) { live.assets.push(a.map(x => x.id)); }, setVisible(v) { live.visible.push(v); }, refresh() {}, close() {} }; },
-    createSymbolSearch: onUpdate => {
-      search.onUpdate = onUpdate;
-      return {
-        search(q, market) { search.queries.push([q, market]); onUpdate({ query: q.trim(), market, status: q.trim() ? 'loading' : 'idle', assets: [], partial: false, truncated: false, note: '' }); },
-        cancel() { search.cancelled++; onUpdate({ query: '', market: 'cn', status: 'idle', assets: [], partial: false, truncated: false, note: '' }); },
-      };
-    },
-  };
-}
+// Markets through host: every market read is the Account's, through the host's getJson — there is no wire of the face's to fake
+// (a test's own fakes, `more`, beside); the browser's storage a memory
+const fakeMarkets = () => ({});
 const memoryStorage = () => { const m = new Map(); return { getItem: k => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k), m }; };
-const bootMarkets = (f, h, mk, more = {}) => boot(f.win, { openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, createLiveQuotes: mk.createLiveQuotes, createSymbolSearch: mk.createSymbolSearch, ...more });
-const MOUTAI = { id: 'cn:600519', market: 'cn', symbol: '600519', name: 'Kweichow Moutai', exchange: 'SH', currency: 'CNY' };
+const bootMarkets = (f, h, _mk, more = {}) => boot(f.win, { openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, ...more });
 
-// the face's own wire searches and stars the A shares alone: a us: or crypto: market is the Account's
+// the Account's search finds the A shares too: a hit is a cn row, starred on the face's cn list
 test("typing in the search box searches; a star watches and writes the face's key; a row opens its page", async () => {
   const storage = memoryStorage();
   const f = fakeWindow({ hash: '#/markets', storage });
   const mq = f.withId('mq', { tagName: 'INPUT', type: 'search', dataset: { action: 'mkQuery' } });
   const h = host();
-  const mk = fakeMarkets();
+  const reads = [];
+  const getJson = async path => { reads.push(path); return path.startsWith('/data/account/explore?q=600&') ? fx('explore-search-china') : h.getJson(path); };
   // the search waits for a quiet moment in the box: that wait is held here, and run
   const timers = new HeldTimers(ms => ms === 300);
-  const store = bootMarkets(f, h, mk, { timers });
+  const store = bootMarkets(f, { ...h, getJson }, null, { timers });
   await h.ready();
   assert.match(f.html(), /<main class="main mkts">/);
   // what the fake host answers to the Account's explore is not an explore answer: nothing to list, and the screen says so
@@ -387,20 +375,22 @@ test("typing in the search box searches; a star watches and writes the face's ke
   f.fire('root', 'input', { target: mq });
   assert.equal(store.get().markets.q, '600');
   assert.match(f.html(), /Searching…/);
-  assert.deepEqual(mk.search.queries, []);
+  assert.equal(reads.some(p => p.startsWith('/data/account/explore?q=')), false, 'nothing searched before the wait');
   timers.run(300);
-  assert.deepEqual(mk.search.queries.at(-1), ['600', 'cn']);
-  mk.search.onUpdate({ query: '600', market: 'cn', status: 'success', assets: [MOUTAI], partial: false, truncated: false, note: '' });
   await settle();
+  assert.deepEqual(reads.filter(p => p.startsWith('/data/account/explore?q=')), ['/data/account/explore?q=600&limit=200'], "one read, the Account's");
   assert.match(f.html(), /<tr data-id="cn:600519">/);
   f.click({ tagName: 'BUTTON', dataset: { action: 'toggleWatch', id: 'cn:600519' } });
-  assert.deepEqual(JSON.parse(storage.getItem('gravit.market.watchlist.v1')).items.map(a => [a.id, a.name]), [['cn:600519', 'Kweichow Moutai']]);
-  assert.match(f.html(), /data-id="cn:600519" aria-pressed="true" aria-label="Stop watching Kweichow Moutai"/);
+  // an A share is an Account key: its star is kept in this browser's Account store (the page does not sign), never the cn list
+  assert.deepEqual(JSON.parse(storage.getItem('gravit.account.watch.v1')).items, ['cn:600519']);
+  assert.equal(storage.getItem('gravit.market.watchlist.v1'), null, 'the cn list is not written');
+  assert.match(f.html(), /data-id="cn:600519" aria-pressed="true" aria-label="Stop watching 贵州茅台"/);
   f.click({ tagName: 'BUTTON', dataset: { action: 'toggleWatch', id: 'cn:600519' } });
-  assert.deepEqual(JSON.parse(storage.getItem('gravit.market.watchlist.v1')).items, [], 'a second press stops watching');
+  assert.deepEqual(JSON.parse(storage.getItem('gravit.account.watch.v1')).items, [], 'a second press stops watching');
   f.click({ tagName: 'BUTTON', dataset: { action: 'mkClear' } });
   assert.equal(store.get().markets.q, '');
-  assert.equal(mk.search.cancelled, 1, 'Clear cancels the search');
+  assert.equal(store.get().markets.results.data, null, 'Clear lets the search go');
+  assert.ok(reads.every(p => !/^\/data\/(quotes|symbols|cn)\b/.test(p)), "nothing reads the face's own wire");
   f.click({ tagName: 'BUTTON', dataset: { action: 'openMarket', id: 'cn:600519' } });
   await settle();
   assert.equal(f.win.location.hash, '#/markets/cn:600519');
@@ -427,23 +417,24 @@ test('Clear empties the search box as well as the query', async () => {
 test('leaving Markets pauses the quotes and coming back resumes them; a hidden tab pauses them too', async () => {
   const f = fakeWindow({ hash: '#/markets', storage: memoryStorage() });
   const h = host({ rows: [row('s1')] });
-  const mk = fakeMarkets();
-  const store = bootMarkets(f, h, mk);
+  const timers = new HeldTimers(ms => ms === 5_000 || ms === 20_000);
+  const store = bootMarkets(f, h, null, { timers });
   await h.ready();
-  assert.equal(mk.live.visible.at(-1), true);
+  const polling = () => timers.delays().includes(5_000);
+  assert.equal(polling(), true, 'the quotes poll, the A shares\' with it');
   assert.equal(store.get().route.screen, 'markets', 'the list landing does not pull the page to Messages');
   f.win.location.hash = '#/messages/s1';
   await settle();
-  assert.equal(mk.live.visible.at(-1), false);
+  assert.equal(polling(), false);
   f.win.location.hash = '#/markets';
   await settle();
-  assert.equal(mk.live.visible.at(-1), true);
+  assert.equal(polling(), true);
   f.doc.hidden = true;
   f.fire('doc', 'visibilitychange');
-  assert.equal(mk.live.visible.at(-1), false);
+  assert.equal(polling(), false);
   f.doc.hidden = false;
   f.fire('doc', 'visibilitychange');
-  assert.equal(mk.live.visible.at(-1), true);
+  assert.equal(polling(), true);
   store.timers.clear();
 });
 
@@ -459,19 +450,20 @@ test('#/markets/garbage opens Markets; a lower-case id is written canonical', as
   store.timers.clear();
 });
 
-// the face's daily bars are read by no screen: Markets on screen reads the Account's explore instead; an A share's page is the
-// face's own, drawn with no read at all
+// the face's daily bars are read by no screen: Markets on screen reads the Account's explore instead; an A share's page, reached
+// cold, is drawn at once and reads its history at the Account's china venue
 test('a market page reads no /data/bars, whatever its id; Markets on screen reads the Account', async () => {
   const f = fakeWindow({ hash: '#/markets/cn:600519', storage: memoryStorage() });
   const h = host();
   const reads = [];
   const getJson = async path => { reads.push(path); return h.getJson(path); };
-  const mk = fakeMarkets();
-  const store = boot(f.win, { openMux: h.openMux, call: h.call, getJson, postJson: h.postJson, markdown: h.markdown, createLiveQuotes: mk.createLiveQuotes, createSymbolSearch: mk.createSymbolSearch });
+  const store = boot(f.win, { openMux: h.openMux, call: h.call, getJson, postJson: h.postJson, markdown: h.markdown });
   await h.ready();
   assert.match(f.html(), /<main class="main mkts mk-page">/);
+  assert.match(f.html(), /A-share · 600519 · SH/, 'the A-share page, cold');
   assert.ok(reads.includes('/data/account/explore?limit=200'), "Markets on screen reads the Account's explore");
-  mk.live.onUpdate({ quotes: {}, providers: [], status: 'streaming', refreshing: false, generatedAt: null, note: '', limited: 0 });
+  assert.ok(reads.includes('/data/account/candles?venue=china&symbol=600519&range=1D'), 'its history at venue china');
+  assert.equal(reads.some(p => p.startsWith('/data/account/holdings') || p.startsWith('/data/account/statement')), false, 'nothing held or stated read for an A share');
   await settle();
   for (const hash of ['#/markets/crypto:BTC/USD', '#/markets/cn:600519', '#/markets/us:AAPL']) {
     f.win.location.hash = hash;
@@ -506,6 +498,7 @@ test('Hand to Gravit opens New message with the words in the composer', async ()
 const fx = name => JSON.parse(readFileSync(new URL(`../fixtures/account/${name}.json`, import.meta.url), 'utf8'));
 const isPage = path => path.split('?')[0] === '/data/account';
 const SEAT = { ok: true, url: 'http://127.0.0.1:4820', reachable: true, asOf: '2026-10-19T18:40:00.000Z', mode: 'guard', writes: { on: true, capUsd: 100 }, seat: { name: 'Gravit', status: 'admitted', limits: [] }, venues: [], cards: [], others: 0 };
+const ASSET_SHEETS = { 'crypto:BTC': 'asset-btc', 'crypto:SOL': 'asset-sol', 'equity:NVDA': 'asset-nvda', 'event:SI-FEDCUT-DEC:YES': 'asset-event' };
 function standinAnswer(path) {
   const [route, query = ''] = path.split('?');
   const q = new URLSearchParams(query);
@@ -520,6 +513,12 @@ function standinAnswer(path) {
     case '/data/account/candles': return { ...fx('candles'), venue: q.get('venue'), symbol: q.get('symbol'), range: q.get('range') };
     case '/data/account/compare': return { ...fx('compare'), base: q.get('base') };
     case '/data/account/quotes': return { ok: true, quotes: [] };
+    // a market page's four reads (plan 4a Task 4): the asset sheet the stand-in keeps for the key, else an empty one; its book (the
+    // best bid and ask alone), its trades (none published), no funding
+    case '/data/account/asset': return ASSET_SHEETS[q.get('key')] ? fx(ASSET_SHEETS[q.get('key')]) : { ok: true, key: q.get('key'), positions: [], orders: [], lines: [], cost: [], missing: [] };
+    case '/data/account/book': return { ...fx('book'), venue: q.get('venue'), symbol: q.get('symbol') };
+    case '/data/account/trades': return { ...fx('trades'), venue: q.get('venue'), symbol: q.get('symbol') };
+    case '/data/account/funding': return { ok: true, lines: [], missing: [] };
     case '/data/seat.json': return SEAT;
     default: return undefined;
   }
@@ -535,7 +534,7 @@ function accountHost(opts = {}, { answers = {} } = {}) {
   };
   return { ...h, getJson, reads, accountReads: () => reads.filter(isPage).length };
 }
-const bootAccount = (f, h, mk = fakeMarkets(), more = {}) => boot(f.win, { openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, createLiveQuotes: mk.createLiveQuotes, createSymbolSearch: mk.createSymbolSearch, ...more });
+const bootAccount = (f, h, _mk = fakeMarkets(), more = {}) => boot(f.win, { openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, ...more });
 
 // the Account's push channel as the app is handed it: its opens, closes and follows recorded, its status the test's to set; the
 // app's two callbacks kept, so a test delivers an event or a change of status as the stream would
@@ -889,11 +888,15 @@ test("a market's page follows its market on the stream and reads what is held of
   await settle();
   assert.deepEqual(store.get().route, { screen: 'markets', id: 'coin:BTC' });
   assert.deepEqual(st.follows.at(-1), ['ex:BTC/USDT'], 'its first connected line');
-  for (const read of ['/data/account/holdings?cost=1', '/data/account/holdings?cost=1&paper=1', '/data/account/statement', '/data/account/candles?venue=ex&symbol=BTC%2FUSDT&range=1D', '/data/account/compare?base=BTC&side=buy']) {
+  for (const read of ['/data/account/holdings?cost=1', '/data/account/holdings?cost=1&paper=1', '/data/account/statement', '/data/account/candles?venue=ex&symbol=BTC%2FUSDT&range=1D', '/data/account/compare?base=BTC&side=buy',
+    '/data/account/asset?key=crypto%3ABTC', '/data/account/book?venue=ex&symbol=BTC%2FUSDT&depth=10', '/data/account/trades?venue=ex&symbol=BTC%2FUSDT&limit=20']) {
     assert.ok(h.reads.includes(read), read);
   }
-  // what is held of it and the statement's lines about it, from their own reads
+  // what is held of it (the asset sheet) and the statement's lines about it, from their own reads; its book and its trades
   assert.match(f.html(), /0\.124 BTC · \$7,747\.40/);
+  assert.match(f.html(), /Stand-in Exchange · Top of book only/);
+  assert.match(f.html(), /Stand-in Exchange publishes no trades the account can read/);
+  assert.equal(h.reads.filter(p => p.startsWith('/data/account/funding')).length, 0, 'a coin has no funding');
   assert.doesNotMatch(f.html(), /Loading…/);
   // a range: its candles
   h.reads.length = 0;
@@ -920,12 +923,12 @@ test("an A share's page, reached by a link, reads its 1D history from the face's
   h.reads.length = 0;
   f.win.location.hash = '#/markets/cn:600519';
   await settle();
-  assert.ok(h.reads.includes('/data/cn/candles?id=cn%3A600519&range=1D'), JSON.stringify(h.reads));
+  assert.ok(h.reads.includes('/data/account/candles?venue=china&symbol=600519&range=1D'), JSON.stringify(h.reads));
   assert.equal(h.reads.some(r => r.startsWith('/data/account/holdings')), false, 'nothing held of an A share is read from the Account');
   h.reads.length = 0;
   f.click({ tagName: 'BUTTON', dataset: { action: 'setRange', id: 'cn:600519', value: '1M' } });
   await settle();
-  assert.ok(h.reads.includes('/data/cn/candles?id=cn%3A600519&range=1M'), JSON.stringify(h.reads));
+  assert.ok(h.reads.includes('/data/account/candles?venue=china&symbol=600519&range=1M'), JSON.stringify(h.reads));
   store.timers.clear();
 });
 
@@ -937,7 +940,7 @@ test("a non-canonical A-share link still reads its history at the canonical id (
   h.reads.length = 0;
   f.win.location.hash = '#/markets/cn:sh600519';
   await settle();
-  assert.ok(h.reads.includes('/data/cn/candles?id=cn%3A600519&range=1D'), JSON.stringify(h.reads));
+  assert.ok(h.reads.includes('/data/account/candles?venue=china&symbol=600519&range=1D'), JSON.stringify(h.reads));
   store.timers.clear();
 });
 
@@ -1009,16 +1012,15 @@ test('the search box moves the query at once and searches after 300 ms of quiet:
   const f = fakeWindow({ hash: '#/markets', storage: memoryStorage() });
   const mq = f.withId('mq', { tagName: 'INPUT', type: 'search', dataset: { action: 'mkQuery' } });
   const h = accountHost({ rows: [row('s1')] });
-  const mk = fakeMarkets();
   const timers = new HeldTimers(ms => ms >= 5_000 || ms === 300);
-  const store = bootAccount(f, h, mk, { timers });
+  const store = bootAccount(f, h, null, { timers });
   await h.ready();
   const searched = () => h.reads.filter(p => p.startsWith('/data/account/explore?q='));
   mq.value = 'BT';
   f.fire('root', 'input', { target: mq });
   assert.equal(store.get().markets.q, 'BT', 'the query moves at once');
   assert.equal(store.get().markets.tab, 'results');
-  assert.deepEqual([searched(), mk.search.queries], [[], []], 'nothing searched yet');
+  assert.deepEqual(searched(), [], 'nothing searched yet');
   const first = timers.ids().filter(id => timers.held.get(id).ms === 300);
   mq.value = 'BTC';
   f.fire('root', 'input', { target: mq });
@@ -1027,8 +1029,7 @@ test('the search box moves the query at once and searches after 300 ms of quiet:
   assert.notDeepEqual(second, first, 'a keystroke restarts it');
   timers.run(300);
   await settle();
-  assert.deepEqual(searched(), ['/data/account/explore?q=BTC&limit=200'], "the Account's search, once, for what was typed last");
-  assert.deepEqual(mk.search.queries, [['BTC', 'cn']], 'and the A-share search');
+  assert.deepEqual(searched(), ['/data/account/explore?q=BTC&limit=200'], "the Account's search, once, for what was typed last — the A shares' with it");
   // a wait cut short by Clear: the search goes blank at once, and the wait never searches
   mq.value = 'ETH';
   f.fire('root', 'input', { target: mq });
@@ -1036,7 +1037,6 @@ test('the search box moves the query at once and searches after 300 ms of quiet:
   assert.equal(store.get().markets.q, '');
   assert.equal(mq.value, '');
   assert.equal(timers.delays().includes(300), false, 'the wait is cancelled');
-  assert.equal(mk.search.cancelled, 1, 'the A-share search cancelled');
   assert.equal(searched().length, 1, 'ETH never searched');
   // a box emptied by hand searches blank at once too
   mq.value = 'SOL';
@@ -1044,7 +1044,7 @@ test('the search box moves the query at once and searches after 300 ms of quiet:
   mq.value = '';
   f.fire('root', 'input', { target: mq });
   assert.equal(timers.delays().includes(300), false);
-  assert.equal(mk.search.cancelled, 2);
+  assert.equal(searched().length, 1);
   store.timers.clear();
 });
 
@@ -1055,11 +1055,10 @@ test('a press holds renders until it ends, so a streaming quote cannot swallow t
   storage.setItem('gravit.market.watchlist.v1', JSON.stringify({ version: 1, items: [{ id: 'crypto:BTC/USD', market: 'crypto', symbol: 'BTC/USD', name: 'Bitcoin', exchange: '', currency: 'USD' }] }));
   const f = fakeWindow({ hash: '#/markets', storage });
   const h = host();
-  const mk = fakeMarkets();
-  const store = boot(f.win, { openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, createLiveQuotes: mk.createLiveQuotes, createSymbolSearch: mk.createSymbolSearch, pointerHoldMs: 20 });
+  const store = boot(f.win, { openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, pointerHoldMs: 20 });
   await h.ready();
-  const quote = price => ({ id: 'crypto:BTC/USD', market: 'crypto', symbol: 'BTC/USD', price, prev_close: 1, change: 1, change_pct: 1, volume: 1, as_of: '2026-10-20T14:00:00Z', received_at: null, volume_as_of: null, source: 'Coinbase', feed: 'exchange', basis: '24h', quote_status: 'live', market_status: 'open', message: '' });
-  const tick = price => mk.live.onUpdate({ quotes: { 'crypto:BTC/USD': quote(price) }, providers: [], status: 'streaming', refreshing: false, generatedAt: 'x', note: '', limited: 0 });
+  // a quote landing, as the quotes poll lands one: a store change, which renders
+  const tick = price => store.dispatch('accountQuotesLoaded', { quotes: [{ venue: 'ex', symbol: 'BTC/USDT', market: { price, quoteAt: '2026-10-20T14:00:00Z' } }] });
   // the old star is a star: Watching is among the tabs until it goes
   assert.match(f.html(), /data-action="mkTab" data-value="watching"/);
   const before = f.writes;
@@ -1533,6 +1532,7 @@ function ownerDoor({ role = 'owner', requests = [], exchange = () => ({ ok: true
     }
     if (path === '/data/account/prepare') return { status: 200, body: preparationOf(body.draft) };
     if (path === '/data/account/exchange') return { status: 200, body: exchange(body.action) };
+    if (path === '/data/account/guard') return { status: 200, body: { ok: true, mode: 'guard' } };
     return { status: 404, body: { ok: false, error: 'no such route' } };
   };
   door.page = () => {
@@ -1692,6 +1692,37 @@ test('Grant opens the limit sheet on the ask, Decline its own, Revoke… asks tw
   store.timers.clear();
 });
 
+// plan 4b Task 5: the limit sheet's kind of limit, End limit… by its kind, Open an agent wallet…, Top up… and Take back…
+test('Agents: a limit changes kind on the seg, End limit… ends its own kind, an agent wallet opens on the keys let in, Top up… and Take back… open the move sheet', async () => {
+  const f = fakeWindow({ hash: '#/account/agents', storage: memoryStorage() });
+  const door = ownerDoor();
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page() } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  const CC = '0x3a087530887bd175ccc38828ee3776e5b6ea1ac6';
+  const field = name => store.get().sheet.fields.find(x => x.name === name);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'limit', address: CC, name: 'Claude Code' } });
+  assert.deepEqual([store.get().sheet.kind, field('scope').value], ['limit', 'trade']);
+  f.click({ tagName: 'BUTTON', name: 'scope', dataset: { action: 'sheetField', value: 'payees' } });
+  assert.deepEqual([field('scope').value, field('payees').value, field('allow')], ['payees', 'api.example.com', undefined], 'the pick swapped for the hosts');
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'endLimit', address: CC, name: 'Claude Code', scope: 'venues', allow: 'ex,agent-claude-code' } });
+  await until(() => store.get().sheet.status === 'ready', 'the preparation');
+  assert.deepEqual(door.sent('/data/account/prepare').at(-1).draft, { ...door.sent('/data/account/prepare').at(-1).draft, type: 'approveSpend', agent: CC, scope: 'venues', allow: 'ex,agent-claude-code', budget: '0' });
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'subWallet' } });
+  assert.deepEqual([store.get().sheet.kind, field('agent').value], ['subWallet', CC]);
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'move', from: 'ex', to: 'agent-claude-code' } });
+  assert.deepEqual([store.get().sheet.kind, field('from').value, field('to')?.value], ['move', 'ex', 'agent-claude-code']);
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'move', from: 'agent-claude-code' } });
+  assert.deepEqual([store.get().sheet.kind, field('from').value], ['move', 'agent-claude-code']);
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  store.timers.clear();
+});
+
 test("Settings' Let it sign seeds the owners and the waiting key; Sign out, signed, signs this page out and the next page pairs nothing", async () => {
   const f = fakeWindow({ hash: '#/account/portfolio', storage: memoryStorage() });
   const door = ownerDoor();
@@ -1706,7 +1737,9 @@ test("Settings' Let it sign seeds the owners and the waiting key; Sign out, sign
   f.fire('doc', 'keydown', { key: 'Escape' });
   assert.deepEqual([store.get().sheet, store.get().settingsOpen], [null, true], 'Escape closes the sheet, the drawer under it stays');
   f.click({ tagName: 'BUTTON', dataset: { action: 'signOut' } });
-  assert.deepEqual([store.get().sheet.kind, store.get().sheet.seed], ['signOut', { kid: door.kid }]);
+  assert.deepEqual([store.get().sheet.kind, store.get().sheet.seed], ['signOut', { kid: door.kid, mode: 'guard', others: 1 }]);
+  assert.match(f.html(), /Your 1 other device keeps signing\./);
+  assert.doesNotMatch(f.html(), /name="guard"/, 'no Guard box in Guard');
   await until(() => store.get().sheet.status === 'ready', 'the preparation');
   f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
   await until(() => store.get().owner.role === 'signed-out', 'the page signed out');
@@ -1718,6 +1751,140 @@ test("Settings' Let it sign seeds the owners and the waiting key; Sign out, sign
   await settle();
   assert.equal(door.sent('/data/account/pair').length, pairs, 'signed out: no page pairs it again');
   assert.equal(store.get().owner.role, 'signed-out');
+  store.timers.clear();
+});
+
+// plan 4b Task 6: Cards grants every kind of ask
+test('Grant on a session ask signs setPolicy session', async () => {
+  const f = fakeWindow({ hash: '#/account/cards', storage: memoryStorage() });
+  const door = ownerDoor();
+  const ask = { id: 'ask-0007', agent: '0x3a087530887bd175ccc38828ee3776e5b6ea1ac6', agentName: 'Claude Code', kind: 'session', venue: '', usd: '', text: 'My session ran out', at: '', expiresAt: '' };
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => ({ ...door.page(), asks: [ask] }) } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  assert.match(f.html(), /data-action="grant" data-ask="ask-0007">Grant<\/button>/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'grant', ask: 'ask-0007' } });
+  assert.equal(store.get().sheet.kind, 'session');
+  await until(() => store.get().sheet.status === 'ready', 'the preparation');
+  assert.deepEqual(door.sent('/data/account/prepare').at(-1).draft, { type: 'setPolicy', change: 'session', value: '30d' });
+  assert.match(f.html(), /<p class="sheet-hint">Claude Code asked: “My session ran out”<\/p>/, "the ask under the sheet's title");
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
+  await until(() => door.sent('/data/account/exchange').length === 1, 'the signature');
+  assert.deepEqual(door.sent('/data/account/exchange')[0].action, { ...door.sent('/data/account/exchange')[0].action, type: 'setPolicy', change: 'session', value: '30d' });
+  store.timers.clear();
+});
+
+test('a venue ask not on the page: Grant reads where the account can connect, then opens the connect sheet on its option', async () => {
+  const f = fakeWindow({ hash: '#/account/cards', storage: memoryStorage() });
+  const door = ownerDoor();
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => ({ ...door.page(), asks: [{ ...fx('account').asks[1], venue: 'okx' }] }), '/data/account/venues': fx('venues'), '/data/account/keyfile': fx('keyfile'), '/data/account/connect/reach': { ok: true, reach: [] } } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  assert.match(f.html(), /data-action="grant" data-ask="ask-0002">Grant<\/button>/, 'Grant drawn before the read');
+  h.reads.length = 0;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'grant', ask: 'ask-0002' } });
+  assert.equal(store.get().sheet, null, 'not before the read');
+  await until(() => store.get().sheet?.kind === 'connect', 'the connect sheet');
+  assert.equal(h.reads[0], '/data/account/venues');
+  const field = name => store.get().sheet.fields.find(x => x.name === name)?.value;
+  assert.deepEqual([field('connector'), field('exchange')], ['live:exchange', 'okx']);
+  store.timers.clear();
+});
+
+test('a venue Grant whose read of where the account can connect fails says so under the asks', async () => {
+  const f = fakeWindow({ hash: '#/account/cards', storage: memoryStorage() });
+  const door = ownerDoor();
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => ({ ...door.page(), asks: [{ ...fx('account').asks[1], venue: 'okx' }] }), '/data/account/venues': () => { throw new Error('offline'); } } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'grant', ask: 'ask-0002' } });
+  await until(() => typeof store.get().account.grantSaid === 'string', 'the words');
+  assert.equal(store.get().sheet, null, 'no sheet');
+  assert.match(store.get().account.grantSaid, /^Not opened: where this account can connect was not read/);
+  assert.match(f.html(), /<p class="acct-note">Not opened: where this account can connect was not read/);
+  store.timers.clear();
+});
+
+// Review Focus: Settings › Devices' sign-out of the last device in Beast, Guard first
+test('the last device signs out in Beast: Guard refused, nothing signed and the device still signs; Guard taken and the sign-out refused, Guard stays and the words say so', async () => {
+  const f = fakeWindow({ hash: '#/account/portfolio', storage: memoryStorage() });
+  let mode = 'open';
+  let guardAnswer = { status: 409, body: { ok: false, refusal: { ok: false, code: 'E_ACCOUNT_READ_ONLY', layer: 'account', message: 'the account is read-only' } } };
+  const door = ownerDoor({ exchange: action => (action.type === 'signOut' ? { ok: false, refusal: { ok: false, code: 'E_ACCOUNT_LAST_OWNER', layer: 'account', message: 'the last owner cannot leave yet' } } : { ok: true, kind: 'result', result: { ok: true } }) });
+  const post = door.post;
+  door.post = async (path, body) => {
+    if (path !== '/data/account/guard') return post(path, body);
+    door.posts.push([path, body]);
+    if (guardAnswer.status === 200) mode = 'guard';
+    return guardAnswer;
+  };
+  // this page the only owner (the seed key gone), in Beast until a Guard is taken
+  const page = () => { const p = door.page(); return { ...p, mode, signers: { ...p.signers, owners: p.signers.owners.filter(o => o.id === `device:${door.kid}`) } }; };
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': page } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'refreshAccount' } });
+  await until(() => store.get().account.data?.signers?.owners?.length === 1, 'the page naming this device alone');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSettings' } });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'signOut' } });
+  assert.deepEqual(store.get().sheet.seed, { kid: door.kid, mode: 'open', others: 0 });
+  await until(() => store.get().sheet.status === 'ready', 'the preparation');
+  assert.deepEqual(door.sent('/data/account/prepare').at(-1).draft, { type: 'signOut', device: `device:${door.kid}` });
+  const html = f.html();
+  assert.match(html, /<input type="checkbox" name="guard" value="true" checked data-action="sheetField">Switch to Guard first: whatever an agent asks for waits for a signature<\/label>/);
+  assert.match(html, /No browser will sign for the account until one pairs again, with a new pairing code: the terminal the Account runs in shows it, or npm run account:service -- code when it runs in the background\./);
+  // Guard refused: nothing signed, the words, the device still signs
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
+  await until(() => store.get().sheet?.status === 'refused', 'the refusal');
+  assert.equal(door.sent('/data/account/guard').length, 1);
+  assert.equal(door.sent('/data/account/exchange').length, 0, 'nothing signed');
+  assert.equal(store.get().sheet.message, 'Not signed out: Guard was refused — the account is read-only');
+  assert.match(f.html(), /Not signed out: Guard was refused — the account is read-only/);
+  assert.equal(store.get().owner.role, 'signs', 'the device still signs');
+  // Guard taken, the sign-out refused: Guard stays, the words say so, the device still signs
+  guardAnswer = { status: 200, body: { ok: true, mode: 'guard' } };
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sheetAgain' } });
+  await until(() => store.get().sheet.status === 'ready', 'prepared again');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
+  await until(() => store.get().sheet?.status === 'refused', 'the sign-out refused');
+  assert.equal(door.sent('/data/account/guard').length, 2);
+  assert.equal(door.sent('/data/account/exchange').length, 1, 'signed once Guard was taken');
+  assert.equal(store.get().sheet.message, 'Not signed out: the last owner cannot leave yet. Guard is on.');
+  assert.equal(store.get().owner.role, 'signs');
+  await until(() => store.get().account.data.mode === 'guard', 'Guard on the page');
+  assert.equal(mode, 'guard', 'Guard stays');
+  store.timers.clear();
+});
+
+test('the last device signs out in Beast with Guard taken: signed out, and the done line ends Guard is on.', async () => {
+  const f = fakeWindow({ hash: '#/account/portfolio', storage: memoryStorage() });
+  let mode = 'open';
+  const door = ownerDoor();
+  const post = door.post;
+  door.post = async (path, body) => { if (path === '/data/account/guard') { door.posts.push([path, body]); mode = 'guard'; return { status: 200, body: { ok: true, mode: 'guard' } }; } return post(path, body); };
+  const page = () => { const p = door.page(); return { ...p, mode, signers: { ...p.signers, owners: p.signers.owners.filter(o => o.id === `device:${door.kid}`) } }; };
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': page } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'refreshAccount' } });
+  await until(() => store.get().account.data?.signers?.owners?.length === 1, 'the page naming this device alone');
+  const said = [];
+  store.subscribe((st, type) => { if (type === 'sheetDone') said.push(st.sheet.said); });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'signOut' } });
+  await until(() => store.get().sheet.status === 'ready', 'the preparation');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
+  await until(() => store.get().owner.role === 'signed-out', 'the page signed out');
+  const [g] = door.posts.map(([p]) => p).filter(p => p === '/data/account/guard' || p === '/data/account/exchange');
+  assert.equal(g, '/data/account/guard', 'Guard before the signature');
+  assert.match(said[0], / Guard is on\.$/);
   store.timers.clear();
 });
 
@@ -1766,20 +1933,264 @@ test("the connect sheet opens once where it can connect is read; after the quiet
   store.timers.clear();
 });
 
+// ── Venues: every connector kind, and Close to agents (plan 4b Task 4) ──
+
+// the owner door with the browser wallet's two routes and Close to agents answered as the Account answers them; what was posted kept
+function walletDoor({ role = 'owner', prove = () => ({ status: 200, body: { ok: true, address: WALLET_ADDRESS } }) } = {}) {
+  const door = ownerDoor({ role });
+  const inner = door.post;
+  door.post = async (path, body) => {
+    if (path === '/data/account/wallet/challenge') { door.posts.push([path, body]); return { status: 200, body: { ok: true, message: 'localhost wants you to sign in with your Ethereum account' } }; }
+    if (path === '/data/account/wallet/prove') { door.posts.push([path, body]); return prove(body); }
+    if (path === '/data/account/revoke') { door.posts.push([path, body]); door.revoked.push(body.account); return { status: 200, body: { ok: true } }; }
+    return inner(path, body);
+  };
+  door.revoked = [];
+  const page = door.page;
+  door.page = () => { const p = page(); return { ...p, dial: { ...p.dial, revoked: [...door.revoked] } }; };
+  return door;
+}
+const pickConnector = (f, connector) => f.fire('root', 'change', { target: { tagName: 'SELECT', type: 'select-one', name: 'connector', value: connector, dataset: { action: 'sheetField' } } });
+async function openConnect(f, store) {
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'connect' } });
+  await until(() => store.get().sheet?.kind === 'connect', 'the connect sheet');
+}
+
+test("the connect sheet's wallet tile proves the fake wallet and fills the address", async () => {
+  const f = fakeWindow({ hash: '#/account/venues', storage: memoryStorage() });
+  const provider = fakeProvider();
+  const door = walletDoor();
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page(), '/data/account/venues': fx('venues'), '/data/account/connect/reach': { ok: true, reach: [] } } });
+  const store = bootOwner(f, h, door, fakeMarkets(), { getWallets: async () => [{ id: 'fake', name: 'Fake Wallet', icon: '', provider }] });
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await openConnect(f, store);
+  pickConnector(f, 'live:wallet');
+  await until(() => store.get().account.connectWallet.status === 'found', 'the wallets found');
+  const html = f.html();
+  assert.match(html, /<button type="button" class="btn-sm" data-action="connectWallet" data-wallet="fake">Use Fake Wallet<\/button>/);
+  assert.ok(html.indexOf('Use Fake Wallet') < html.indexOf('name="ref"'), 'the tile above the address it fills');
+  assert.doesNotMatch(html, /Connect on the Account page/);
+  assert.equal(provider.requests.length, 0, 'nothing asked of the wallet before the press');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'connectWallet', wallet: 'fake' } });
+  await until(() => store.get().account.connectWallet.status === 'proven', 'the wallet signed');
+  assert.deepEqual(provider.methods(), ['eth_requestAccounts', 'eth_chainId', 'personal_sign']);
+  assert.deepEqual(door.sent('/data/account/wallet/challenge'), [{ address: WALLET_ADDRESS, wallet: 'Fake Wallet', chainId: 8453 }]);
+  assert.equal(door.sent('/data/account/wallet/prove')[0].address, WALLET_ADDRESS);
+  const fields = Object.fromEntries(store.get().sheet.fields.map(fl => [fl.name, fl.value]));
+  assert.deepEqual([fields.ref, fields.label], [WALLET_ADDRESS, 'Fake Wallet'], 'the address, and the name left blank');
+  assert.match(f.html(), /Fake Wallet signed: 0x121212…1212 is yours\./);
+  // after the sheet's quiet the form is prepared: the page has a wallet already, so this one is numbered by its address
+  await until(() => door.sent('/data/account/prepare').some(b => b.draft.connector === 'live:wallet'), 'the preparation');
+  assert.deepEqual(door.sent('/data/account/prepare').find(b => b.draft.connector === 'live:wallet').draft,
+    { type: 'connectVenue', venue: 'wallet-121212', connector: 'live:wallet', label: 'Fake Wallet', credentialRef: WALLET_ADDRESS });
+  // another address option picked: the proven address is not carried to it, the name is, and the proof is forgotten
+  pickConnector(f, 'live:hyperliquid');
+  await settle();
+  const moved = Object.fromEntries(store.get().sheet.fields.map(fl => [fl.name, fl.value]));
+  assert.deepEqual([moved.connector, moved.ref, moved.label], ['live:hyperliquid', '', 'Fake Wallet']);
+  assert.equal(store.get().account.connectWallet.status, 'found', 'the wallets found stay, the proof does not');
+  assert.equal(store.get().account.connectWallet.address, '');
+  assert.doesNotMatch(f.html(), /is yours\./);
+  store.timers.clear();
+});
+
+test("a wallet prompt still open across a connector change: no second prompt until it settles, and its answer lands only on its option", async () => {
+  const f = fakeWindow({ hash: '#/account/venues', storage: memoryStorage() });
+  const held = [];
+  const provider = fakeProvider({ answers: { personal_sign: () => new Promise(res => held.push(() => res('0x' + 'ee'.repeat(65)))) } });
+  const door = walletDoor();
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page(), '/data/account/venues': fx('venues'), '/data/account/connect/reach': { ok: true, reach: [] } } });
+  const store = bootOwner(f, h, door, fakeMarkets(), { getWallets: async () => [{ id: 'fake', name: 'Fake Wallet', icon: '', provider }] });
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await openConnect(f, store);
+  pickConnector(f, 'live:wallet');
+  await until(() => store.get().account.connectWallet.status === 'found', 'the wallets found');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'connectWallet', wallet: 'fake' } });
+  await until(() => held.length === 1, 'the wallet prompt open');
+  // away and back while the prompt is open: still asking, the tile off, and a press asks the wallet nothing more
+  pickConnector(f, 'live:hyperliquid');
+  await settle();
+  assert.equal(store.get().account.connectWallet.status, 'asking');
+  pickConnector(f, 'live:wallet');
+  await settle();
+  assert.match(f.html(), /data-action="connectWallet" data-wallet="fake" disabled>Use Fake Wallet</);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'connectWallet', wallet: 'fake' } });
+  await settle();
+  assert.equal(provider.count('personal_sign'), 1, 'one prompt at a time');
+  // away again, and the prompt answers there: nothing lands on the other option, and the tiles are free
+  pickConnector(f, 'live:hyperliquid');
+  await settle();
+  held[0]();
+  await until(() => store.get().account.connectWallet.status === 'found', 'settled elsewhere');
+  const fields = Object.fromEntries(store.get().sheet.fields.map(fl => [fl.name, fl.value]));
+  assert.deepEqual([fields.connector, fields.ref], ['live:hyperliquid', ''], 'the address not landed on another option');
+  pickConnector(f, 'live:wallet');
+  await settle();
+  assert.match(f.html(), /data-action="connectWallet" data-wallet="fake">Use Fake Wallet</, 'pressable again');
+  store.timers.clear();
+});
+
+test("no wallet on the page: the sheet says to type the address; a declined signature says the wallet's words and posts no proof", async () => {
+  const f = fakeWindow({ hash: '#/account/venues', storage: memoryStorage() });
+  const door = walletDoor();
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page(), '/data/account/venues': fx('venues'), '/data/account/connect/reach': { ok: true, reach: [] } } });
+  const store = bootOwner(f, h, door, fakeMarkets(), { getWallets: async () => [] });
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await openConnect(f, store);
+  pickConnector(f, 'live:wallet');
+  await until(() => store.get().account.connectWallet.status === 'none', 'no wallet found');
+  assert.match(f.html(), /No browser wallet answered on this page\. Type the address to watch it\./);
+  assert.doesNotMatch(f.html(), /data-action="connectWallet"/, 'no tile');
+  store.timers.clear();
+
+  // a wallet that declines to sign: its words, and no proof posted
+  const f2 = fakeWindow({ hash: '#/account/venues', storage: memoryStorage() });
+  const declines = fakeProvider({ answers: { personal_sign: () => { throw Object.assign(new Error('User rejected the request.'), { code: 4001 }); } } });
+  const door2 = walletDoor();
+  const h2 = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door2.page(), '/data/account/venues': fx('venues'), '/data/account/connect/reach': { ok: true, reach: [] } } });
+  const store2 = bootOwner(f2, h2, door2, fakeMarkets(), { getWallets: async () => [{ id: 'fake', name: 'Fake Wallet', icon: '', provider: declines }] });
+  await h2.ready();
+  await until(signs(store2), 'the page to sign');
+  await openConnect(f2, store2);
+  pickConnector(f2, 'live:wallet');
+  await until(() => store2.get().account.connectWallet.status === 'found', 'the wallet found');
+  f2.click({ tagName: 'BUTTON', dataset: { action: 'connectWallet', wallet: 'fake' } });
+  await until(() => store2.get().account.connectWallet.status === 'refused', 'the refusal');
+  // after the venue's own words on where it answers from (the stand-in's wallet verdict), the wallet's
+  assert.match(f2.html(), /<p class="sheet-hint">[^<]* · User rejected the request\.<\/p>/);
+  assert.deepEqual(door2.sent('/data/account/wallet/prove'), [], 'no proof posted');
+  assert.equal(store2.get().sheet.fields.find(fl => fl.name === 'ref').value, '', 'the address left as it was');
+  store2.timers.clear();
+});
+
+test("Sign in at Robinhood opens a tab inside the press, sends it to the venue's page, and the state signed in is what connects", async () => {
+  const f = fakeWindow({ hash: '#/account/venues', storage: memoryStorage() });
+  const tabs = [];
+  f.win.open = (url, target) => { const t = { opener: {}, location: { href: url }, target, close() {} }; tabs.push(t); return t; };
+  const door = walletDoor();
+  const inner = door.post;
+  door.post = async (path, body) => (path === '/data/account/signin/start'
+    ? (door.posts.push([path, body]), { status: 200, body: { ok: true, url: 'https://robinhood.example/oauth?state=st-7', state: 'st-7' } })
+    : inner(path, body));
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page(), '/data/account/venues': fx('venues'), '/data/account/connect/reach': { ok: true, reach: [] }, '/data/account/signin/status': { ok: true, status: 'ready' } } });
+  const store = bootOwner(f, h, door, fakeMarkets());
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await openConnect(f, store);
+  pickConnector(f, 'live:robinhood');
+  await settle();
+  assert.match(f.html(), /<button type="button" class="btn-sm" data-action="connectSignIn">Sign in at Robinhood<\/button>/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'connectSignIn' } });
+  assert.equal(tabs.length, 1, 'the tab opened inside the press');
+  assert.deepEqual([tabs[0].location.href, tabs[0].target, tabs[0].opener], ['about:blank', '_blank', null]);
+  await until(() => store.get().account.signIn.status === 'ready', 'signed in');
+  assert.equal(tabs[0].location.href, 'https://robinhood.example/oauth?state=st-7');
+  assert.deepEqual(door.sent('/data/account/signin/start'), [{ connector: 'robinhood' }]);
+  assert.ok(h.reads.includes('/data/account/signin/status?state=st-7'));
+  assert.match(f.html(), /Signed in\. Connect it\./);
+  await until(() => door.sent('/data/account/prepare').some(b => b.draft.connector === 'live:robinhood'), 'the preparation');
+  assert.deepEqual(door.sent('/data/account/prepare').find(b => b.draft.connector === 'live:robinhood').draft,
+    { type: 'connectVenue', venue: 'robinhood', connector: 'live:robinhood', label: '', credentialRef: 'st-7' });
+  store.timers.clear();
+});
+
+test('a sign-in the Account refuses says its words once, however many times it is pressed', async () => {
+  const f = fakeWindow({ hash: '#/account/venues', storage: memoryStorage() });
+  f.win.open = () => ({ opener: {}, location: { href: '' }, close() {} });
+  const door = walletDoor();
+  const inner = door.post;
+  door.post = async (path, body) => (path === '/data/account/signin/start'
+    ? (door.posts.push([path, body]), { status: 502, body: { ok: false, refusal: { code: 'E_VENUE_UNREACHABLE', message: 'Robinhood did not answer' } } })
+    : inner(path, body));
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page(), '/data/account/venues': fx('venues'), '/data/account/connect/reach': { ok: true, reach: [] } } });
+  const store = bootOwner(f, h, door, fakeMarkets());
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await openConnect(f, store);
+  pickConnector(f, 'live:robinhood');
+  await settle();
+  for (let i = 1; i <= 3; i += 1) {
+    f.click({ tagName: 'BUTTON', dataset: { action: 'connectSignIn' } });
+    await until(() => door.sent('/data/account/signin/start').length === i && store.get().account.signIn.status === 'failed', `refusal ${i}`);
+    await settle();
+    assert.equal(f.html().split('Robinhood did not answer').length - 1, 1, `said once after ${i} presses`);
+  }
+  store.timers.clear();
+});
+
+test('Close to agents on a page that does not sign posts the revoke; Reopen… needs a page that signs', async () => {
+  const f = fakeWindow({ hash: '#/account/venues', storage: memoryStorage() });
+  const door = walletDoor({ role: 'pending' });
+  door.revoked.push('broker');
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page() } });
+  const store = bootOwner(f, h, door, fakeMarkets());
+  await h.ready();
+  await settle();
+  assert.notEqual(store.get().owner.role, 'signs');
+  let html = f.html();
+  assert.match(html, /<b>Stand-in Broker<\/b> <span class="chip grey">Closed to agents<\/span>/);
+  assert.doesNotMatch(html, /data-kind="reopen"/, 'reopening is signed: not on a page that does not sign');
+  assert.match(html, /data-action="closeToAgents" data-venue="ex">Close to agents<\/button>/);
+  assert.doesNotMatch(html, /data-action="closeToAgents" data-venue="paper-momentum"/, 'a paper venue has neither');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'closeToAgents', venue: 'ex' } });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'closeToAgents', venue: 'ex' } });
+  await until(() => store.get().account.closing.ex?.status === 'said', 'the revoke said');
+  await settle();
+  assert.deepEqual(door.sent('/data/account/revoke'), [{ account: 'ex' }], 'one unsigned POST, pressed twice');
+  html = f.html();
+  assert.match(html, /Stand-in Exchange is closed to agents: they keep reading it, and place or move nothing there\. Reopening it is signed\./);
+  assert.match(html, /<b>Stand-in Exchange<\/b> <span class="chip grey">Closed to agents<\/span>/, 'the page read again draws it closed');
+  store.timers.clear();
+
+  // a page that signs: Reopen…, the signed setPolicy restore
+  const f2 = fakeWindow({ hash: '#/account/venues', storage: memoryStorage() });
+  const door2 = walletDoor();
+  door2.revoked.push('broker');
+  const h2 = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door2.page() } });
+  const store2 = bootOwner(f2, h2, door2, fakeMarkets());
+  await h2.ready();
+  await until(signs(store2), 'the page to sign');
+  await settle();
+  assert.match(f2.html(), /<button type="button" class="btn-sm" data-action="openSheet" data-kind="reopen" data-venue="broker" data-name="Stand-in Broker">Reopen…<\/button>/);
+  f2.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'reopen', venue: 'broker', name: 'Stand-in Broker' } });
+  await until(() => store2.get().sheet?.status === 'ready', 'the preparation');
+  assert.match(f2.html(), /<h2>Reopen Stand-in Broker to agents<\/h2>/);
+  assert.deepEqual(door2.sent('/data/account/prepare').at(-1).draft, { type: 'setPolicy', change: 'restore', value: 'broker' });
+  f2.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
+  await until(() => door2.sent('/data/account/exchange').length === 1, 'signed');
+  assert.deepEqual(door2.sent('/data/account/revoke'), [], 'reopening posts no revoke');
+  // what Close to agents said of a venue goes once it is reopened
+  const f3 = fakeWindow({ hash: '#/account/venues', storage: memoryStorage() });
+  const door3 = walletDoor();
+  const h3 = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door3.page() } });
+  const store3 = bootOwner(f3, h3, door3, fakeMarkets());
+  await h3.ready();
+  await until(signs(store3), 'the page to sign');
+  f3.click({ tagName: 'BUTTON', dataset: { action: 'closeToAgents', venue: 'ex' } });
+  await until(() => store3.get().account.closing.ex?.status === 'said', 'closed');
+  await settle();
+  f3.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'reopen', venue: 'ex', name: 'Stand-in Exchange' } });
+  await until(() => store3.get().sheet?.status === 'ready', 'the preparation');
+  f3.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
+  await until(() => !store3.get().account.closing.ex, 'the line gone');
+  store3.timers.clear();
+  store2.timers.clear();
+});
+
 test("#/trade shows Trade and reads its kind's picks; Markets' polls stop; leaving Trade stops its own", async () => {
   const f = fakeWindow({ hash: '#/markets', storage: memoryStorage() });
   const timers = new HeldTimers();
-  const mk = fakeMarkets();
   const h = accountHost({ rows: [row('s1')] });
-  const store = bootAccount(f, h, mk, { timers });
+  const store = bootAccount(f, h, null, { timers });
   await h.ready();
-  assert.equal(mk.live.visible.at(-1), true);
   assert.ok(timers.delays().includes(5_000), "Markets' quotes poll");
   f.win.location.hash = '#/trade';
   await settle();
   assert.equal(store.get().route.screen, 'trade');
   assert.match(f.html(), /<main class="main trade">/);
-  assert.equal(mk.live.visible.at(-1), false, "Markets' quotes paused");
   assert.equal(timers.delays().includes(5_000), false, "Markets' polls stopped");
   assert.ok(h.reads.includes('/data/account/explore?tab=crypto&limit=12'), "the kind's picks");
   const picks = timers.delays().filter(ms => ms === 20_000).length;
@@ -1965,6 +2376,299 @@ test("Cancel in Under way is the Account's liveCancel, signed, and its answer sa
   st.event('fill', { side: 'buy', qty: 0.04, symbol: 'ETH/USDT', price: 3120.5, venueName: 'Stand-in Exchange' }, 'r.9');
   assert.equal(store.get().trade.said, 'Bought 0.04 ETH @ 3,120.50 · Stand-in Exchange');
   assert.match(f.html(), /<p class="tk-said" role="status">Bought 0\.04 ETH @ 3,120\.50 · Stand-in Exchange<\/p>/);
+  store.timers.clear();
+});
+
+test("Under way's Send from wallet… sends the waiting order through the fake wallet and reports it", async () => {
+  const f = fakeWindow({ hash: '#/trade', storage: memoryStorage() });
+  // the operator's wallet, injected as window.ethereum (no EIP-6963 events in the fake window): a fake EIP-1193 provider
+  const provider = fakeProvider({ flags: { isMetaMask: true } });
+  f.win.ethereum = provider;
+  const door = ownerDoor();
+  const tx = what => ({ chainId: 8453, chainIdHex: '0x2105', from: WALLET_ADDRESS, to: '0x' + '34'.repeat(20), data: '0xabcd', value: '0x0', what });
+  let reported = null;
+  // the page with a DEX order waiting for the wallet (an approval, then its swap), placed once its hash is reported
+  const page = () => {
+    const p = door.page();
+    const base = p.orders.find(o => o.id === 'ord-0009');
+    const dex = { ...base, id: 'ord-0031', clientId: 'c0ffee00c0ffee00', venue: 'dex', venueName: 'Uniswap', status: 'pending', ref: undefined, walletTxs: [tx('approve'), tx('swap')], ...(reported ? { ref: reported, status: 'open' } : {}) };
+    return { ...p, orders: [dex, ...p.orders] };
+  };
+  const post = async (path, body) => {
+    if (path === '/data/account/live/order-requote') { door.posts.push([path, body]); return { status: 200, body: { ok: true, order: { walletTxs: [tx('approve'), { ...tx('swap'), data: '0xfeed' }] } } }; }
+    if (path === '/data/account/live/order-sent') { door.posts.push([path, body]); reported = body.hash; return { status: 200, body: { ok: true } }; }
+    return door.post(path, body);
+  };
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': page } });
+  const store = bootAccount(f, h, fakeMarkets(), { ownerPost: post });
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  const html = f.html();
+  assert.match(html, /Waiting for your wallet · ord-0031/);
+  assert.match(html, /<button type="button" class="btn-sm" data-action="sendFromWallet" data-order="ord-0031">Send from wallet…<\/button>/);
+  assert.match(html, /data-order="ord-0031">Send from wallet…<\/button><button type="button" class="btn-sm" data-action="cancelOrder" data-venue="dex" data-order="ord-0031">Cancel<\/button>/, 'its Cancel beside it: it takes the order back before the wallet sends it');
+  assert.doesNotMatch(html, /data-kind="amend"[^>]*data-order="ord-0031"/, 'no Change… either');
+  h.reads.length = 0;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sendFromWallet', order: 'ord-0031' } });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sendFromWallet', order: 'ord-0031' } });
+  await until(() => door.sent('/data/account/live/order-sent').length === 1, 'the report');
+  assert.equal(h.reads[0], '/data/account?fresh=1', 'the Account asked again before the wallet');
+  assert.equal(provider.count('eth_sendTransaction'), 2, 'its approval and its swap, once each, pressed twice');
+  assert.equal(provider.requests.filter(r => r.method === 'eth_sendTransaction').at(-1).params[0].data, '0xfeed', 'the swap built again');
+  assert.deepEqual(door.sent('/data/account/live/order-requote'), [{ order: 'ord-0031' }]);
+  assert.deepEqual(door.sent('/data/account/live/order-sent'), [{ order: 'ord-0031', hash: hashOf(2) }]);
+  await until(() => store.get().trade.said !== null, 'the words said');
+  assert.equal(store.get().trade.said, 'MetaMask sent it: 0xaaaaaa…aaa2');
+  await settle();
+  assert.doesNotMatch(f.html(), /data-action="sendFromWallet"/, 'placed: the page read again, the row an order like any other');
+  store.timers.clear();
+});
+
+test("a payment's report the Account did not take keeps Report again, which reports the same hash and never sends again", async () => {
+  const f = fakeWindow({ hash: '#/trade', storage: memoryStorage() });
+  const provider = fakeProvider();
+  const tx = { chainId: 8453, chainIdHex: '0x2105', from: WALLET_ADDRESS, to: '0x' + '34'.repeat(20), data: '0xabcd', value: '0x0' };
+  const pay = { id: 'pay-0009', at: '2026-11-01T14:00:00.000Z', kind: 'send', from: 'ex', to: 'ex', status: 'authorized', legs: [{ native: { walletTx: tx } }], live: { network: 'Base' } };
+  let taken = false;
+  let reports = 0;
+  const door = ownerDoor();
+  const page = () => ({ ...door.page(), payments: taken ? [] : [pay] });
+  const post = async (path, body) => {
+    if (path === '/data/account/live/sent') { door.posts.push([path, body]); reports += 1; if (reports === 1) return { status: 0, body: { ok: false, error: 'The Account did not answer' } }; taken = true; return { status: 200, body: { ok: true } }; }
+    return door.post(path, body);
+  };
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': page } });
+  const store = bootAccount(f, h, fakeMarkets(), { ownerPost: post, getWallets: async () => [{ id: 'fake', name: 'Fake Wallet', icon: '', provider }] });
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  assert.match(f.html(), /<button type="button" class="btn-sm" data-action="sendFromWallet" data-payment="pay-0009">Send from wallet…<\/button>/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sendFromWallet', payment: 'pay-0009' } });
+  await until(() => store.get().account.wallet[`${pay.id}@${pay.at}`]?.status === 'refused', 'the report refused');
+  await settle();
+  const key = `${pay.id}@${pay.at}`;
+  assert.match(f.html(), new RegExp(`<button type="button" class="btn-sm" data-action="reportAgain" data-key="${key.replace(/\./g, '\\.')}">Report again</button>`));
+  assert.match(f.html(), /Your wallet sent 0xaaaaaa…aaa1: Report again reports that same transaction, it does not send another/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'reportAgain', key } });
+  await until(() => store.get().account.wallet[key]?.status === 'sent', 'the report taken');
+  assert.equal(provider.count('eth_sendTransaction'), 1, 'Report again never asks the wallet to send');
+  assert.deepEqual(door.sent('/data/account/live/sent'), [{ payment: 'pay-0009', hash: hashOf(1) }, { payment: 'pay-0009', hash: hashOf(1) }]);
+  store.timers.clear();
+});
+
+test("an order signed on the ticket that waits for the wallet is sent at once and reported; a cancel's answer starts nothing", async () => {
+  const f = fakeWindow({ hash: '#/markets/coin:BTC', storage: memoryStorage() });
+  const provider = fakeProvider();
+  const tx = { chainId: 8453, chainIdHex: '0x2105', from: WALLET_ADDRESS, to: '0x' + '34'.repeat(20), data: '0xabcd', value: '0x0' };
+  let placed = false;
+  const dex = { id: 'ord-0031', clientId: 'c0ffee00c0ffee00', venue: 'dex', status: 'pending', walletTxs: [tx] };
+  // the ticket's liveOrder answered with an order built for the wallet; a cancel's with that order taken back (it still has its
+  // walletTxs and no ref, as the Account answers one: live-orders.ts)
+  const door = ownerDoor({ exchange: action => (action.type === 'liveCancel'
+    ? { ok: true, kind: 'order', order: { ...dex, id: action.order, status: 'canceled' } }
+    : { ok: true, kind: 'order', order: dex }) });
+  const page = () => { const p = door.page(); return { ...p, orders: [placed ? { ...dex, ref: '0xsent', status: 'open' } : dex, ...p.orders] }; };
+  const post = async (path, body) => {
+    if (path === '/data/account/live/order-sent') { door.posts.push([path, body]); placed = true; return { status: 200, body: { ok: true } }; }
+    return door.post(path, body);
+  };
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': page } });
+  const store = bootAccount(f, h, fakeMarkets(), { ownerPost: post, getWallets: async () => [{ id: 'fake', name: 'Fake Wallet', icon: '', provider }] });
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  // a cancel first: its answer reaches afterAction as kind cancel, and the wallet is never asked
+  f.click({ tagName: 'BUTTON', dataset: { action: 'cancelOrder', venue: 'ex', order: 'ord-0010' } });
+  await until(() => store.get().trade.said !== null, 'the cancel said');
+  await settle();
+  const cancelSaid = store.get().trade.said;
+  assert.equal(provider.requests.length, 0, 'a cancel starts no wallet send');
+  assert.deepEqual(store.get().account.wallet, {});
+  assert.equal(store.get().trade.said, cancelSaid, "the cancel's line stays");
+  // the ticket: a buy typed, prepared, signed
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openTicket', id: 'coin:BTC', side: 'buy' } });
+  await settle();
+  assert.equal(store.get().sheet.kind, 'order');
+  f.fire('root', 'input', { target: { tagName: 'INPUT', type: 'text', id: 'tk-amount', name: 'amount', value: '25', dataset: { action: 'ticketField' } } });
+  await until(() => store.get().sheet?.status === 'ready', 'the preparation');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
+  await until(() => door.sent('/data/account/live/order-sent').length === 1, 'the report');
+  assert.equal(door.sent('/data/account/exchange').at(-1).action.type, 'liveOrder');
+  assert.equal(provider.count('eth_sendTransaction'), 1);
+  assert.deepEqual(door.sent('/data/account/live/order-sent'), [{ order: 'ord-0031', hash: hashOf(1) }]);
+  await until(() => store.get().trade.said === 'Fake Wallet sent it: 0xaaaaaa…aaa1', 'the words said');
+  store.timers.clear();
+});
+
+test("a row whose hash the Account already holds reads Report again, and pressing it reports that hash without the wallet", async () => {
+  const f = fakeWindow({ hash: '#/trade', storage: memoryStorage() });
+  const provider = fakeProvider();
+  const held = '0x' + 'bb'.repeat(32);
+  const tx = { chainId: 8453, chainIdHex: '0x2105', from: WALLET_ADDRESS, to: '0x' + '34'.repeat(20), data: '0xabcd', value: '0x0' };
+  const pay = { id: 'pay-0012', at: '2026-11-01T14:03:00.000Z', kind: 'send', from: 'ex', to: 'ex', status: 'authorized', legs: [{ native: { walletTx: tx } }], live: { reported: held } };
+  let taken = false;
+  const door = ownerDoor();
+  const page = () => ({ ...door.page(), payments: taken ? [] : [pay] });
+  const post = async (path, body) => {
+    if (path === '/data/account/live/sent') { door.posts.push([path, body]); taken = true; return { status: 200, body: { ok: true } }; }
+    return door.post(path, body);
+  };
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': page } });
+  const store = bootAccount(f, h, fakeMarkets(), { ownerPost: post, getWallets: async () => [{ id: 'fake', name: 'Fake Wallet', icon: '', provider }] });
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  assert.match(f.html(), /<button type="button" class="btn-sm" data-action="sendFromWallet" data-payment="pay-0012">Report again<\/button>/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sendFromWallet', payment: 'pay-0012' } });
+  await until(() => door.sent('/data/account/live/sent').length === 1, 'the report');
+  assert.deepEqual(door.sent('/data/account/live/sent'), [{ payment: 'pay-0012', hash: held }]);
+  assert.equal(provider.requests.length, 0, 'the wallet is never asked');
+  store.timers.clear();
+});
+
+// ── the Market half's sheets (plan 4a Task 3): Close…, Change… and Leverage… ──
+
+const typeIn = (f, name, value) => f.fire('root', 'input', { target: { tagName: 'INPUT', type: 'text', name, value, dataset: { action: 'sheetField' } } });
+// a working order's Change… key as Under way and a market's page draw it
+const changeKeyRe = id => new RegExp(`data-action="openSheet" data-kind="amend" data-venue="ex" data-order="${id}"[^>]*>Change…</button>`);
+
+test('Under way offers Change… on a resting limit at a venue that amends, and opens the amend sheet', async () => {
+  const f = fakeWindow({ hash: '#/trade', storage: memoryStorage() });
+  const door = ownerDoor();
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page() } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  const html = f.html();
+  assert.match(html, /<button type="button" class="btn-sm" data-action="openSheet" data-kind="amend" data-venue="ex" data-order="ord-0002" data-type="limit" data-market-kind="spot" data-qty="0\.5" data-limit-price="142\.44" data-stop-price="" data-side="buy" data-base="SOL">Change…<\/button><button type="button" class="btn-sm" data-action="cancelOrder" data-venue="ex" data-order="ord-0002">Cancel<\/button>/);
+  assert.match(html, changeKeyRe('ord-0004'), 'a stop rests too');
+  assert.doesNotMatch(html, /data-kind="amend" data-venue="broker"/, 'the broker changes no order in place');
+  // the key's data-*, as a browser hands them over
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'amend', venue: 'ex', order: 'ord-0002', type: 'limit', marketKind: 'spot', qty: '0.5', limitPrice: '142.44', stopPrice: '', side: 'buy', base: 'SOL' } });
+  const sheet = store.get().sheet;
+  assert.equal(sheet.kind, 'amend');
+  assert.deepEqual(sheet.seed, { venue: 'ex', order: 'ord-0002', type: 'limit', kind: 'spot', qty: '0.5', limitPrice: '142.44', stopPrice: '', side: 'buy', base: 'SOL' });
+  assert.deepEqual(sheet.fields.map(x => [x.name, x.placeholder]), [['qty', '0.5'], ['limitPrice', '142.44']]);
+  assert.equal(sheet.status, 'incomplete', 'nothing typed: nothing to prepare');
+  assert.match(f.html(), /<aside class="drawer sheet" aria-label="Change ord-0002">/);
+  assert.match(f.html(), /Type what changes/);
+  assert.equal(door.sent('/data/account/prepare').length, 0);
+  typeIn(f, 'limitPrice', '143');
+  await until(() => store.get().sheet?.status === 'ready', 'the preparation');
+  assert.deepEqual(door.sent('/data/account/prepare').at(-1).draft, { type: 'liveAmend', venue: 'ex', order: 'ord-0002', qty: '', limitPrice: '143', stopPrice: '' });
+  assert.match(f.html(), /data-action="sheetSubmit">Sign and change<\/button>/, 'the go key is on');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
+  await until(() => door.sent('/data/account/exchange').length === 1, 'the signature');
+  assert.equal(door.sent('/data/account/exchange')[0].action.type, 'liveAmend');
+  store.timers.clear();
+});
+
+test("the Portfolio's BTC perpetual offers Close… and Leverage…", async () => {
+  const f = fakeWindow({ hash: '#/account/portfolio', storage: memoryStorage() });
+  const door = ownerDoor();
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page() } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await until(() => /aria-label="Positions"/.test(f.html()), 'the positions');
+  const html = f.html();
+  assert.match(html, /data-action="openSheet" data-kind="close" data-venue="ex" data-symbol="BTC\/USDT:USDT" data-name="BTC perpetual" data-side="long" data-qty="0\.01" data-market-kind="perp">Close…<\/button>/);
+  assert.match(html, /data-action="openSheet" data-kind="leverage" data-venue="ex" data-venue-name="Stand-in Exchange" data-symbol="BTC\/USDT:USDT" data-name="BTC perpetual" data-leverage="3">Leverage…<\/button>/);
+  assert.match(html, /data-kind="close" data-venue="predict" data-symbol="SI-FEDCUT-DEC:YES"[^>]*data-market-kind="event">Sell…<\/button>/, 'an event is sold');
+  assert.doesNotMatch(html, /data-kind="leverage" data-venue="predict"/, 'no leverage on an event');
+  // Close…: blank closes all of it, so the sheet prepares at once
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'close', venue: 'ex', symbol: 'BTC/USDT:USDT', name: 'BTC perpetual', side: 'long', qty: '0.01', marketKind: 'perp' } });
+  assert.equal(store.get().sheet.kind, 'close');
+  await until(() => store.get().sheet?.status === 'ready', 'the close prepared');
+  assert.deepEqual(door.sent('/data/account/prepare').at(-1).draft, { type: 'liveClose', venue: 'ex', symbol: 'BTC/USDT:USDT', qty: '' });
+  assert.match(f.html(), /aria-label="Close BTC perpetual"[\s\S]*How much[\s\S]*placeholder="All 0\.01"[\s\S]*>Sign and close<\/button>/);
+  // Leverage…: a whole number typed, prepared after the quiet
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'leverage', venue: 'ex', venueName: 'Stand-in Exchange', symbol: 'BTC/USDT:USDT', name: 'BTC perpetual', leverage: '3', maxLeverage: '20', marginModes: 'cross,isolated' } });
+  assert.equal(store.get().sheet.kind, 'leverage');
+  assert.match(f.html(), /aria-label="Leverage · BTC perpetual"[\s\S]*placeholder="3"[\s\S]*<option value="" selected>Keep it<\/option>/);
+  typeIn(f, 'leverage', '5');
+  await until(() => store.get().sheet?.status === 'ready', 'the leverage prepared');
+  assert.deepEqual(door.sent('/data/account/prepare').at(-1).draft, { type: 'liveLeverage', venue: 'ex', symbol: 'BTC/USDT:USDT', leverage: '5', marginMode: '' });
+  store.timers.clear();
+});
+
+test("an owner action taken on a market's page reads its asset sheet again, past the face's cache", async () => {
+  const f = fakeWindow({ hash: '#/markets/perp:BTC', storage: memoryStorage() });
+  const door = ownerDoor();
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page() } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await until(() => /aria-label="You here"[\s\S]*data-kind="close"/.test(f.html()), 'You here with its Close…');
+  assert.deepEqual(h.reads.filter(p => p.startsWith('/data/account/asset')), ['/data/account/asset?key=crypto%3ABTC'], 'once on entering');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'close', venue: 'ex', symbol: 'BTC/USDT:USDT', name: 'BTC perpetual', side: 'long', qty: '0.01', marketKind: 'perp' } });
+  await until(() => store.get().sheet?.status === 'ready', 'the close prepared');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
+  await until(() => door.sent('/data/account/exchange').length === 1, 'the signature');
+  await until(() => h.reads.includes('/data/account/asset?key=crypto%3ABTC&fresh=1'), 'the asset sheet read again');
+  assert.equal(door.sent('/data/account/exchange')[0].action.type, 'liveClose');
+  store.timers.clear();
+});
+
+test('a read-only page draws none of the three', async () => {
+  const f = fakeWindow({ hash: '#/trade', storage: memoryStorage() });
+  const door = ownerDoor();
+  const readOnly = () => { const p = door.page(); return { ...p, connectLive: { ...p.connectLive, writes: { on: false, capUsd: 250 } } }; };
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': readOnly } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  const none = /data-kind="(close|amend|leverage)"/;
+  assert.match(f.html(), /data-action="cancelOrder" data-venue="ex" data-order="ord-0002">Cancel</, 'Cancel stays: the safer direction');
+  assert.doesNotMatch(f.html(), none, 'Under way');
+  f.win.location.hash = '#/account/portfolio';
+  await until(() => /aria-label="Positions"/.test(f.html()), 'the positions');
+  assert.doesNotMatch(f.html(), none, 'the Portfolio');
+  store.timers.clear();
+});
+
+test('an order the stream reports filled while its Change… sheet is open', async () => {
+  const f = fakeWindow({ hash: '#/trade', storage: memoryStorage() });
+  const st = fakeStream();
+  const door = ownerDoor();
+  let filled = false;
+  // the page once ord-0010 has filled: no longer working
+  const page = () => { const p = door.page(); return filled ? { ...p, orders: p.orders.map(o => (o.id === 'ord-0010' ? { ...o, status: 'filled', filledQty: o.qty } : o)) } : p; };
+  // the Account's answer to a change of an order that filled: its 409, in its words
+  const REFUSAL = { code: 'E_ACCOUNT_BAD_ACTION', message: 'ord-0010 is filled: there is nothing to change at the venue', venue: 'ex', detail: { order: 'ord-0010' } };
+  const post = async (path, body) => (path === '/data/account/prepare' && filled && body.draft?.type === 'liveAmend'
+    ? (door.posts.push([path, body]), { status: 409, body: { ok: false, refusal: REFUSAL } }) : door.post(path, body));
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': page } });
+  const store = bootAccount(f, h, fakeMarkets(), { ownerPost: post, createAccountStream: st.create });
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  assert.match(f.html(), changeKeyRe('ord-0010'));
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'amend', venue: 'ex', order: 'ord-0010', type: 'limit', marketKind: 'spot', qty: '0.707', limitPrice: '141.44', stopPrice: '', side: 'buy', base: 'SOL' } });
+  assert.equal(store.get().sheet.kind, 'amend');
+  // it fills: the stream says so, and the page is read again past the cache
+  filled = true;
+  h.reads.length = 0;
+  st.event('fill', { side: 'buy', qty: 0.707, symbol: 'SOL/USDT', price: 141.44, venueName: 'Stand-in Exchange' }, 'r.1');
+  await until(() => h.reads.includes('/data/account?fresh=1'), 'the page read fresh');
+  await settle();
+  // the order and its key are gone from Under way; the sheet stays open on what was asked
+  assert.doesNotMatch(f.html(), /data-order="ord-0010"/, 'the row and its keys are gone');
+  assert.match(f.html(), changeKeyRe('ord-0002'), 'the others stay');
+  assert.equal(store.get().sheet?.kind, 'amend');
+  // a change typed: the Account refuses it in its words, and nothing signs for a gone order
+  typeIn(f, 'limitPrice', '140');
+  await until(() => store.get().sheet?.status === 'refused', 'the refusal');
+  assert.deepEqual(door.sent('/data/account/prepare').at(-1).draft, { type: 'liveAmend', venue: 'ex', order: 'ord-0010', qty: '', limitPrice: '140', stopPrice: '' });
+  const html = f.html();
+  assert.match(html, /<p class="acct-note">ord-0010 is filled: there is nothing to change at the venue<\/p>/);
+  assert.match(html, /<button type="button" class="btn-primary" data-action="sheetSubmit" disabled>Sign and change<\/button>/, 'the go key stays off');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
+  await settle();
+  assert.equal(door.sent('/data/account/exchange').length, 0, 'nothing signed');
   store.timers.clear();
 });
 
@@ -2289,14 +2993,14 @@ test("Ask Gravit sends one message through the composer's path", async () => {
 });
 
 test('Open in Markets routes to cn:<code>', async () => {
-  // Markets' quotes and search are the fakes, so the page it opens starts no real wire
-  const mk = fakeMarkets();
-  const { f, store, open } = await stockAnswer({ createLiveQuotes: mk.createLiveQuotes, createSymbolSearch: mk.createSymbolSearch });
+  const { f, store, open, h } = await stockAnswer();
   open();
   f.click(f.element({ tagName: 'BUTTON', dataset: { action: 'lunhuiMarkets', code: '600001' } }));
   await settle();
   assert.equal(f.win.location.hash, '#/markets/cn:600001');
   assert.deepEqual(store.get().route, { screen: 'markets', id: 'cn:600001' });
+  assert.match(f.html(), /<main class="main mkts mk-page">[\s\S]*A-share · 600001 · SH/, 'the A-share page, reached cold');
+  assert.ok(h.reads.includes('/data/account/candles?venue=china&symbol=600001&range=1D'), 'its history at venue china');
   assert.equal(store.get().lunhui.stock, null, 'leaving the conversation closes the drawer');
   store.timers.clear();
 });
@@ -2410,5 +3114,247 @@ test('Open run goes to the channel page', async () => {
   f.click(f.element({ tagName: 'BUTTON', dataset: { action: 'lunhuiOpenRun', id: 'w-cn' } }));
   await settle();
   assert.deepEqual(store.get().route, { screen: 'channel', id: 'w-cn' });
+  store.timers.clear();
+});
+
+// ── Rules (plan 4a Task 5): Guard is one unsigned click, on any page that reads the Account ──
+
+test('Guard pressed twice in a row on a page that does not sign: one POST to /data/account/guard, the said line once; Beast opens no sheet', async () => {
+  const f = fakeWindow({ hash: '#/account/rules', storage: memoryStorage() });
+  const door = ownerDoor({ role: 'needs-code' });
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page() } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(() => store.get().owner.role === 'needs-code', 'the page to need the code');
+  await settle();
+  assert.match(f.html(), /data-action="setGuard">Guard<\/button>/);
+  assert.match(f.html(), /aria-pressed="false" disabled>Beast<\/button>/);
+  assert.match(f.html(), /Only a browser that signs switches to Beast\./);
+  const pagesBefore = h.reads.filter(isPage).length;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'setGuard' } });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'setGuard' } });
+  await settle();
+  assert.equal(door.sent('/data/account/guard').length, 1, 'one POST');
+  assert.deepEqual(door.sent('/data/account/guard')[0], {});
+  const said = f.html().match(/<p class="acct-note">Guard: what agents ask for waits for you on a card\.<\/p>/g) ?? [];
+  assert.equal(said.length, 1, 'the said line once');
+  assert.ok(h.reads.filter(isPage).slice(pagesBefore).includes('/data/account?fresh=1'), 'the page read fresh');
+  // Beast: no key on this page; were one pressed, no sheet
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'beast' } });
+  await settle();
+  assert.equal(store.get().sheet, null);
+  assert.equal(door.sent('/data/account/prepare').length, 0);
+  store.timers.clear();
+});
+
+test('on a page that signs, Beast and the three Change keys open their signed sheets, each prepared as the Account drafts it', async () => {
+  const f = fakeWindow({ hash: '#/account/rules', storage: memoryStorage() });
+  const door = ownerDoor();
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page() } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  const html = f.html();
+  for (const kind of ['beast', 'cap', 'session', 'leverageCap']) assert.match(html, new RegExp(`data-action="openSheet" data-kind="${kind}"`), kind);
+  const open = async kind => {
+    f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind } });
+    await settle();
+    return store.get().sheet;
+  };
+  assert.equal((await open('beast')).kind, 'beast');
+  assert.deepEqual(door.sent('/data/account/prepare').at(-1).draft, { type: 'setPolicy', change: 'mode', value: 'open' });
+  assert.equal((await open('session')).seed.ended, false);
+  assert.deepEqual(door.sent('/data/account/prepare').at(-1).draft, { type: 'setPolicy', change: 'session', value: '30d' });
+  const cap = await open('cap');
+  assert.deepEqual(cap.seed, { capUsd: 250 });
+  assert.match(f.html(), /That is the cap now/);
+  const lev = await open('leverageCap');
+  assert.deepEqual(lev.seed, { max: 5 });
+  assert.match(f.html(), /That is their leverage now/);
+  store.timers.clear();
+});
+
+test('Guard said, then Beast signed: the said line goes with Guard, and Beast in force opens no sheet', async () => {
+  const f = fakeWindow({ hash: '#/account/rules', storage: memoryStorage() });
+  let mode = 'guard';
+  const door = ownerDoor({ exchange: action => { if (action?.type === 'setPolicy' && action.change === 'mode') mode = action.value; return { ok: true, kind: 'result', result: { ok: true } }; } });
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => ({ ...door.page(), mode }) } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  const SAID = '<p class="acct-note">Guard: what agents ask for waits for you on a card.</p>';
+  f.click({ tagName: 'BUTTON', dataset: { action: 'setGuard' } });
+  await settle();
+  assert.ok(f.html().includes(SAID), 'Guard said');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'beast' } });
+  await until(() => store.get().sheet?.status === 'ready', 'the Beast sheet prepared');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
+  await until(() => store.get().sheet === null && store.get().account.data?.mode === 'open', 'Beast signed and read');
+  await settle();
+  assert.equal(mode, 'open');
+  assert.ok(!f.html().includes(SAID), 'the said line is gone');
+  assert.match(f.html(), /<button type="button" class="seg-item pressed" aria-pressed="true">Beast<\/button>/);
+  const prepares = door.sent('/data/account/prepare').length;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'beast' } });
+  await settle();
+  assert.equal(store.get().sheet, null, 'Beast in force: no sheet');
+  assert.equal(door.sent('/data/account/prepare').length, prepares);
+  store.timers.clear();
+});
+
+// ── the Money tab (plan 4b Task 2) ──
+
+test('the Money tab: Show address reads the row and draws it; Move… opens the move sheet, its fields follow the kind, and a bridge reads its routes', async () => {
+  const f = fakeWindow({ hash: '#/account/money', storage: memoryStorage() });
+  const mm = { id: 'wallet-mm', name: 'My wallet', live: true, watchOnly: 'Live · read-only', address: '0x' + '11'.repeat(20), proven: 'signed by its wallet', liveCan: { withdraw: false, ledgers: [], transfer: false, swap: false, receive: true, send: 'wallet' }, holdings: [] };
+  const door = ownerDoor();
+  const page = () => { const p = door.page(); return { ...p, venues: [...p.venues, mm] }; };
+  const post = async (path, body) => {
+    if (path === '/data/account/bridge-routes') { door.posts.push([path, body]); return { status: 200, body: { ok: true, routes: [{ tool: 'across', receiveUsd: 9.9, etaSec: 20, feeUsd: 0.1 }] } }; }
+    return door.post(path, body);
+  };
+  const address = { ok: true, venue: 'agent-claude-code', asset: 'USDC', network: 'Base', address: '0x7f89224D3Ad6cACd933242ba0c07e1187e3467C2', whose: "the agent wallet's own address" };
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': page, '/data/account/receive': () => address } });
+  const store = bootAccount(f, h, fakeMarkets(), { ownerPost: post });
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  assert.match(f.html(), /data-action="showAddress" data-venue="agent-claude-code" data-asset="USDC" data-network="Base">Show address<\/button>/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'showAddress', venue: 'agent-claude-code', asset: 'USDC', network: 'Base' } });
+  await until(() => store.get().account.receive['agent-claude-code|USDC|Base']?.status === 'ready', 'the address');
+  assert.ok(h.reads.includes('/data/account/receive?venue=agent-claude-code&asset=USDC&network=Base'));
+  assert.match(f.html(), /<span class="mono">0x7f89224D3Ad6cACd933242ba0c07e1187e3467C2<\/span>/);
+  // Move… from the exchange: a withdrawal first; the kind changed to a swap drops its destination and network
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'move', from: 'ex' } });
+  await settle();
+  assert.equal(store.get().sheet.kind, 'move');
+  assert.deepEqual(store.get().sheet.fields.map(x => x.name), ['from', 'kind', 'to', 'network', 'asset', 'amount']);
+  f.fire('root', 'change', { target: { tagName: 'SELECT', name: 'kind', value: 'swap', dataset: { action: 'sheetField' } } });
+  assert.deepEqual(store.get().sheet.fields.map(x => x.name), ['from', 'kind', 'asset', 'toAsset', 'amount']);
+  f.fire('root', 'input', { target: { tagName: 'INPUT', type: 'text', name: 'amount', value: '10', dataset: { action: 'sheetField' } } });
+  await until(() => store.get().sheet?.status === 'ready', 'the preparation');
+  const swap = door.sent('/data/account/prepare').at(-1).draft;
+  assert.deepEqual([swap.type, swap.kind, swap.from, swap.to, swap.network, swap.amount], ['liveMove', 'swap', 'ex', 'ex', '', '10']);
+  assert.equal(door.sent('/data/account/bridge-routes').length, 0, 'a swap reads no routes');
+  // a bridge from the proven wallet: its routes read after its preparation lands, and drawn beside it
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'move', from: 'wallet-mm', moveKind: 'bridge', amount: '10' } });
+  await until(() => door.sent('/data/account/bridge-routes').length === 1, 'the routes');
+  assert.equal(door.sent('/data/account/bridge-routes')[0].draft.kind, 'bridge');
+  await until(() => /Via across/.test(f.html()), 'the routes drawn');
+  assert.match(f.html(), /<b>Via across · at least \$9\.90 USDC arrives · ~20 s<\/b>/);
+  store.timers.clear();
+});
+
+// ── Earn and Sell many (plan 4b Task 3) ──
+
+test('the Money tab reads Earn; Put in… opens the Earn sheet, prepared as liveEarn, and a taken earn reads Earn again and says it', async () => {
+  const { earnBody } = await import('./helpers/earn-fixture.js');
+  const f = fakeWindow({ hash: '#/account/money', storage: memoryStorage() });
+  const door = ownerDoor({ exchange: action => (action?.type === 'liveEarn'
+    ? { ok: true, kind: 'result', result: { earn: { kind: 'supply', amount: 25, asset: 'USDT', productName: 'USDT · Flexible (stand-in)', status: 'done' } } }
+    : { ok: true, kind: 'result', result: { ok: true } }) });
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page(), '/data/account/earn': () => earnBody() } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await until(() => store.get().account.earn.status === 'ready', 'the earn read');
+  assert.ok(h.reads.includes('/data/account/earn'), 'read on entering Money');
+  await settle();
+  assert.match(f.html(), /data-kind="earn" data-venue="ex" data-side="withdraw" data-product="flex:USDT">Take out…<\/button>/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'earn', side: 'supply' } });
+  await settle();
+  assert.equal(store.get().sheet.kind, 'earn');
+  assert.match(f.html(), />Sign and put in<\/button>/);
+  f.fire('root', 'input', { target: { tagName: 'INPUT', type: 'text', name: 'amount', value: '25', dataset: { action: 'sheetField' } } });
+  await until(() => store.get().sheet?.status === 'ready', 'the preparation');
+  assert.deepEqual(door.sent('/data/account/prepare').at(-1).draft, { type: 'liveEarn', venue: 'ex', kind: 'supply', product: 'flex:USDT', asset: 'USDT', amount: '25' });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
+  await until(() => store.get().sheet === null, 'the sheet closed once taken');
+  await until(() => h.reads.includes('/data/account/earn?fresh=1'), 'earn read again past the cache');
+  await settle();
+  assert.match(f.html(), /Putting in 25 USDT · USDT · Flexible \(stand-in\): done/);
+  store.timers.clear();
+});
+
+test('Sell many… on the Portfolio: the drawer reads what can be sold, a pick, Review, Sign — one signature, the Account read again', async () => {
+  const f = fakeWindow({ hash: '#/account/portfolio', storage: memoryStorage() });
+  const door = ownerDoor({ exchange: action => (action?.type === 'liveOrder' ? { ok: true, kind: 'order', order: { id: 'ord-0042', status: 'filled' } } : { ok: true, kind: 'result', result: { ok: true } }) });
+  const sellable = { ok: true, items: [
+    { key: 'crypto:SOL', asset: 'SOL', venue: 'ex', venueName: 'Stand-in Exchange', action: 'sell', symbol: 'SOL/USDT', held: 25, sellQty: 25, usd: 3571.25, ready: true },
+    { key: 'crypto:ETH', asset: 'ETH', venue: 'ex', venueName: 'Stand-in Exchange', action: 'sell', symbol: 'ETH/USDT', held: 1.8, sellQty: 1.8, ready: true },
+  ], missing: [] };
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page(), '/data/account/sellable': () => sellable } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  assert.match(f.html(), /data-action="openSellMany">Sell many…<\/button>/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSellMany' } });
+  await until(() => store.get().sellMany?.status === 'picking', 'what can be sold');
+  assert.ok(h.reads.includes('/data/account/sellable?fresh=1'));
+  assert.match(f.html(), /aria-label="Sell many"/);
+  f.fire('root', 'change', { target: { tagName: 'INPUT', type: 'checkbox', name: 'pick', value: '1', checked: true, dataset: { action: 'sellManyPick' } } });
+  f.fire('root', 'input', { target: { tagName: 'INPUT', type: 'text', value: '1', dataset: { action: 'sellManyQty', index: '1' } } });
+  assert.deepEqual(store.get().sellMany.picked, [1]);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sellManyReview' } });
+  await until(() => store.get().sellMany?.legs?.[0]?.state === 'ready', 'the leg prepared');
+  assert.deepEqual(door.sent('/data/account/prepare').at(-1).draft, { type: 'liveOrder', venue: 'ex', symbol: 'ETH/USDT', side: 'sell', orderType: 'market', qty: '1', limitPrice: '', stopPrice: '', tif: '', postOnly: '', reduceOnly: '' });
+  await settle();
+  assert.match(f.html(), />Sign 1<\/button>/);
+  const pagesBefore = h.reads.filter(isPage).length;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sellManyRun' } });
+  await until(() => store.get().sellMany?.status === 'done', 'the run');
+  assert.equal(door.sent('/data/account/exchange').length, 1, 'one signature');
+  await settle();
+  assert.match(f.html(), /Sold · ord-0042 · filled/);
+  assert.match(f.html(), /Sell many: 1 of 1 sale went through/);
+  assert.ok(h.reads.filter(isPage).slice(pagesBefore).includes('/data/account?fresh=1'), 'the page read again');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sellManyClose' } });
+  assert.equal(store.get().sellMany, null);
+  store.timers.clear();
+});
+
+test("Sell many's DEX leg reads the Account again after the wallet answers", async () => {
+  const f = fakeWindow({ hash: '#/account/portfolio', storage: memoryStorage() });
+  const provider = fakeProvider({ flags: { isMetaMask: true } });
+  f.win.ethereum = provider;
+  const tx = { chainId: 8453, chainIdHex: '0x2105', from: WALLET_ADDRESS, to: '0x' + '34'.repeat(20), data: '0xabcd', value: '0x0', what: 'swap' };
+  let placed = false, reported = null;
+  const dexOf = base => ({ ...base, id: 'ord-0031', clientId: 'c0ffee00c0ffee01', venue: 'dex', venueName: 'Uniswap', status: 'pending', ref: undefined, walletTxs: [tx], ...(reported ? { ref: reported, status: 'open' } : {}) });
+  const door = ownerDoor({ exchange: action => (action?.type === 'liveOrder'
+    ? (placed = true, { ok: true, kind: 'order', order: dexOf(door.page().orders.find(o => o.id === 'ord-0009')) })
+    : { ok: true, kind: 'result', result: { ok: true } }) });
+  const page = () => {
+    const p = door.page();
+    return placed ? { ...p, orders: [dexOf(p.orders.find(o => o.id === 'ord-0009')), ...p.orders] } : p;
+  };
+  let readsAtReport = null;
+  const post = async (path, body) => {
+    if (path === '/data/account/live/order-sent') { door.posts.push([path, body]); reported = body.hash; readsAtReport = h.reads.length; return { status: 200, body: { ok: true } }; }
+    return door.post(path, body);
+  };
+  const sellable = { ok: true, items: [
+    { key: 'crypto:WETH', asset: 'WETH', venue: 'dex', venueName: 'Uniswap', action: 'sell', symbol: 'WETH/USDC', held: 0.35, sellQty: 0.35, ready: true },
+  ], missing: [] };
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': page, '/data/account/sellable': () => sellable } });
+  const store = bootOwner(f, h, door, fakeMarkets(), { ownerPost: post });
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSellMany' } });
+  await until(() => store.get().sellMany?.status === 'picking', 'what can be sold');
+  f.fire('root', 'change', { target: { tagName: 'INPUT', type: 'checkbox', name: 'pick', value: '0', checked: true, dataset: { action: 'sellManyPick' } } });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sellManyReview' } });
+  await until(() => store.get().sellMany?.legs?.[0]?.state === 'ready', 'the leg prepared');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sellManyRun' } });
+  await until(() => store.get().sellMany?.status === 'done', 'the run');
+  assert.equal(store.get().sellMany.said, 'Sell many: 0 of 1 sale went through, 1 waiting for your wallet');
+  await until(() => door.sent('/data/account/live/order-sent').length === 1, 'the report');
+  assert.equal(provider.count('eth_sendTransaction'), 1, 'the swap sent once');
+  await until(() => store.get().trade.said !== null, 'the wallet\'s words said');
+  assert.equal(store.get().trade.said, 'MetaMask sent it: 0xaaaaaa…aaa1');
+  await until(() => h.reads.slice(readsAtReport).includes('/data/account?fresh=1'), 'the Account read again after the wallet answered');
   store.timers.clear();
 });

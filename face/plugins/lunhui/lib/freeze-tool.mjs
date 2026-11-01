@@ -2,7 +2,11 @@
 /**
  * The one shape of the four Lunhui freeze tools (modules spec §5.3, §5.5, §5.7, A7, A15, A23, A25,
  * A27): `freezeDeps` checks a freeze row's mount - the `lunhuiRuns` service its backbone row
- * provides, its `config.fetch` fixture directory, its clock - and `defineFreeze` builds the tool.
+ * provides, its fetch, its clock - and `defineFreeze` builds the tool. The production fetch is the
+ * Account's (`lib/account-fetch.mjs`): every upstream read a freeze makes, the boards stand-in's 问财
+ * query among them, goes to the Account at `FACE_ACCOUNT_URL` (default `http://127.0.0.1:4820`) and
+ * nowhere else, and its evidence says `via: "account"`. A row's `config.fetch` (a fixture directory)
+ * and `config.account` (another address) are the tests' keys; there is no direct-to-upstream fetch.
  *
  * A freeze's `execute`, in order: `NOT_GRAVIT` for a delegated child; the strategy resolved by name;
  * `WRONG_CHANNEL` for a market freeze outside `cn-market` (or a strategy freeze inside it); the
@@ -25,6 +29,7 @@ import { isAbsolute } from "node:path";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { coverageOf, loadCalendars } from "./calendar.mjs";
 import { asToolError, callerIsChild, refuse, upstreamError } from "./errors.mjs";
+import { DEFAULT_ACCOUNT_URL, accountFetch, accountOrigin } from "./account-fetch.mjs";
 import { createFixtureFetch } from "./fixture-fetch.mjs";
 import { getMarketSession } from "./market.mjs";
 import { LunhuiError, evidenceId } from "./runs.mjs";
@@ -61,15 +66,17 @@ export function sessionOf(at) {
 }
 
 /**
- * The checked mount of a freeze row: `ctx.lunhuiRuns`, the fetch (`createFixtureFetch` over
- * `config.fetch` when set, else the global `fetch`, read at call time), and the clock
- * (`config.now`, a function returning a Date, for tests; else the system clock). A mount without
- * the backbone, or with a `fetch` that is not an absolute path to an existing directory or a `now`
- * that is not a function, throws a reason naming the row.
+ * The checked mount of a freeze row: `ctx.lunhuiRuns`, the fetch, and the clock (`config.now`, a
+ * function returning a Date, for tests; else the system clock). The fetch is `createFixtureFetch`
+ * over `config.fetch` when set (tests: no `via`), else `accountFetch` onto the Account at
+ * `accountOrigin(config.account ?? (FACE_ACCOUNT_URL || DEFAULT_ACCOUNT_URL))`, the address read
+ * here, at mount, and `via: "account"`. A mount without the backbone, with a `fetch` that is not an
+ * absolute path to an existing directory, with both `fetch` and `account`, with an Account address
+ * that is not an origin, or with a `now` that is not a function, throws a reason naming the row.
  * @param {string} rowName
  * @param {any} ctx
- * @param {{ fetch?: unknown, now?: unknown }} config
- * @returns {{ runs: import("../runs-row.mjs").LunhuiRuns, fetchImpl: FetchLike, now: () => Date }}
+ * @param {{ fetch?: unknown, account?: unknown, now?: unknown }} config
+ * @returns {{ runs: import("../runs-row.mjs").LunhuiRuns, fetchImpl: FetchLike, now: () => Date, via?: "account" }}
  */
 export function freezeDeps(rowName, ctx, config) {
   const runs = ctx?.lunhuiRuns;
@@ -78,13 +85,20 @@ export function freezeDeps(rowName, ctx, config) {
   if (dir !== undefined && (typeof dir !== "string" || !isAbsolute(dir) || !statSync(dir, { throwIfNoEntry: false })?.isDirectory())) {
     throw new Error(`${rowName}: fetch must be an absolute path to an existing directory`);
   }
+  const account = config?.account;
+  if (dir !== undefined && account !== undefined) throw new Error(`${rowName}: fetch (a fixture directory) and account are exclusive`);
   const now = config?.now;
   if (now !== undefined && typeof now !== "function") throw new Error(`${rowName}: now must be a function returning a Date`);
-  return {
-    runs,
-    fetchImpl: dir === undefined ? (url, init) => globalThis.fetch(url, init) : createFixtureFetch(dir),
-    now: /** @type {() => Date} */ (now ?? (() => new Date())),
-  };
+  const clock = /** @type {() => Date} */ (now ?? (() => new Date()));
+  if (dir !== undefined) return { runs, fetchImpl: createFixtureFetch(dir), now: clock };
+  const named = account !== undefined ? "account" : process.env.FACE_ACCOUNT_URL ? "FACE_ACCOUNT_URL" : null;
+  let origin;
+  try {
+    origin = accountOrigin(account ?? (process.env.FACE_ACCOUNT_URL || DEFAULT_ACCOUNT_URL));
+  } catch (error) {
+    throw new Error(`${rowName}: ${named ?? "the default Account address"} - ${/** @type {Error} */ (error).message}`);
+  }
+  return { runs, fetchImpl: accountFetch(origin), now: clock, via: "account" };
 }
 
 /** The `strategy` and `run` parameters every freeze takes. */
@@ -104,11 +118,12 @@ export const SHARED_BOUNDS =
  *   kind: "market" | "strategy" | "any",
  *   check?: (args: any, now: () => Date) => void,
  *   freeze: (fetchImpl: FetchLike, args: any, now: () => Date) => Promise<Frozen>,
- *   runs: import("../runs-row.mjs").LunhuiRuns, fetchImpl: FetchLike, now: () => Date,
+ *   runs: import("../runs-row.mjs").LunhuiRuns, fetchImpl: FetchLike, now: () => Date, via?: "account",
  * }} spec `check` refuses bad arguments before any run is touched; `freeze` fetches and derives,
- *   its refusals `LunhuiError`s, calling `now` after its fetch for `received_at`
+ *   its refusals `LunhuiError`s, calling `now` after its fetch for `received_at`; `via`, when given,
+ *   joins the meta handed to `addEvidence`
  */
-export function defineFreeze({ name, description, parameters, source, kind, check, freeze, runs, fetchImpl, now }) {
+export function defineFreeze({ name, description, parameters, source, kind, check, freeze, runs, fetchImpl, now, via }) {
   return defineTool({
     name,
     description,
@@ -135,7 +150,7 @@ export function defineFreeze({ name, description, parameters, source, kind, chec
             ({ manifest } = await runs.readRun(strategy, run));
             if (manifest.sealed_at) throw refuse.runSealed();
             ({ items, derived, meta, summary } = await freeze(fetchImpl, args, now));
-            ({ ids } = await runs.addEvidence(strategy, manifest.run, source, [...items, ...derived], meta));
+            ({ ids } = await runs.addEvidence(strategy, manifest.run, source, [...items, ...derived], via === undefined ? meta : { ...meta, via }));
           } catch (error) {
             // A refusal from the count on - TOOL_BUDGET, RUN_SEALED, the freeze's own, the
             // evidence write's - leaves its code in the run's metrics.json under refusals[source].

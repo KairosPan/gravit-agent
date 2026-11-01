@@ -391,6 +391,16 @@ describe("a paper account beside a real one", () => {
     if (isRefusal(realHold) || isRefusal(paperHold)) throw new Error("holdings");
     expect((realHold.cost ?? []).some((c) => c.key === "crypto:BTC")).toBe(false);
     expect((paperHold.cost ?? []).find((c) => c.key === "crypto:BTC")).toMatchObject({ coveredQty: 0.1 });
+    // the asset read says the same apart: no real row, and the paper lens's row and cost of it
+    const asset = await svc.asset("crypto:BTC", "1h");
+    if (isRefusal(asset)) throw new Error(asset.message);
+    expect(asset.row).toBeUndefined();
+    expect(asset.cost.some((c) => c.key === "crypto:BTC")).toBe(false);
+    expect(asset.paper?.row).toMatchObject({ key: "crypto:BTC", amount: 0.1 });
+    expect(asset.paper?.cost.find((c) => c.key === "crypto:BTC")).toMatchObject({ coveredQty: 0.1 });
+    // the paper account says its spot holding as a position too, and the real read has none
+    expect(asset.paper?.positions.map((x) => [x.venue, x.symbol, x.qty, x.paper])).toEqual([["paper-1", "BTC/USD", 0.1, true]]);
+    expect(asset.positions).toEqual([]);
   });
 
   it("a bracket through the door: the entry signed with its exits, the exits placed by the paper account when it fills, the one that fills on the Statement as that order's, by whoever placed it", async () => {

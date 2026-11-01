@@ -1,21 +1,22 @@
-// One-shot live check of the Lunhui boards stand-in against the real iFinD QuantAPI:
-// `fetchWencaiUniverse` for the latest session, then `deriveStandInBoards`; prints counts and the
-// top five boards. One 问财 call (and a token exchange when none is cached). Never prints the token.
+// One-shot live check of the Lunhui boards stand-in against the real iFinD QuantAPI, through the
+// Account: `fetchWencaiUniverse` for the latest session over the Account adapter (the Account at
+// FACE_ACCOUNT_URL, default http://127.0.0.1:4820, holds the token and asks iFinD), then
+// `deriveStandInBoards`; prints counts and the top five boards. One 问财 call. This script reads no
+// IFIND_* variable and never sees a token.
 //
-//   cd face && set -a && . ../.env.ifind && set +a && node scripts/lunhui-standin-check.mjs
+//   cd face && node scripts/lunhui-standin-check.mjs        (the Account running)
 //
-// Exit 0 on success, 1 on a refusal (its code and message, which carry no token), 2 on no token.
+// Exit 0 on success, 1 on a refusal (its code and message, which carry no token), 2 when the
+// Account holds no iFinD token.
+import { DEFAULT_ACCOUNT_URL, accountFetch, accountOrigin } from "../plugins/lunhui/lib/account-fetch.mjs";
 import { sessionOf } from "../plugins/lunhui/lib/freeze-tool.mjs";
-import { fetchWencaiUniverse, hasWencaiCredentials } from "../plugins/lunhui/lib/wencai.mjs";
+import { WENCAI_NOT_CONFIGURED, fetchWencaiUniverse } from "../plugins/lunhui/lib/wencai.mjs";
 import { deriveStandInBoards } from "../plugins/lunhui/lib/wencai-boards.mjs";
 
-if (!hasWencaiCredentials(process.env)) {
-  console.error("no IFIND_REFRESH_TOKEN or IFIND_ACCESS_TOKEN in the environment");
-  process.exit(2);
-}
+const fetchImpl = accountFetch(accountOrigin(process.env.FACE_ACCOUNT_URL || DEFAULT_ACCOUNT_URL));
 const session = sessionOf(new Date());
 try {
-  const universe = await fetchWencaiUniverse({ session, env: process.env });
+  const universe = await fetchWencaiUniverse({ session, fetchImpl });
   const derived = deriveStandInBoards(universe.rows);
   const eligible = deriveStandInBoards(universe.rows, { top: Infinity }).boards.length;
   const concepts = new Set(universe.rows.flatMap((row) => row.concepts));
@@ -30,6 +31,10 @@ try {
     console.log(`  ${board.code}  pct ${fmt(board.pct)}  up ${board.advancers} down ${board.decliners}  leader ${board.leader ?? "n/a"}`);
   }
 } catch (error) {
+  if (error?.code === WENCAI_NOT_CONFIGURED) {
+    console.error("the Account holds no iFinD token: start it with .env.ifind sourced");
+    process.exit(2);
+  }
   console.error(`refused: ${error?.code ?? "ERROR"} ${error?.message ?? error}`);
   process.exit(1);
 }

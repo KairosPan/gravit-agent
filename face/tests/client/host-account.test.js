@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { createStore } from '../../client/js/store.js';
 import { reducers } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
-import { startAccount, ACCOUNT_POLL_MS, ACCOUNT_POLL_STREAM_MS } from '../../client/js/host/account.js';
+import { startAccount, ACCOUNT_POLL_MS, ACCOUNT_POLL_STREAM_MS, SIGNIN_POLL_MS, SIGNIN_WITHIN_MS } from '../../client/js/host/account.js';
 import { renderAccountScreen } from '../../client/js/render/account.js';
 
 const tick = () => new Promise(r => setTimeout(r, 0));
@@ -28,7 +28,7 @@ const leadOf = html => html.match(/<div class="label">([^<]*)<\/div><div class="
 // the host over a recording getJson — `json` answers a path by its exact text, else by the path without its fresh=1, else by
 // the path without its query: a body, an Error it rejects with, or a function of the path returning a promise — and recorded
 // timers ({ fn, ms, handle }, kept until run or cancelled); streamOpen answers r.streamIsOpen
-function rig({ json = {}, onPage } = {}) {
+function rig({ json = {}, onPage, post, openTab } = {}) {
   const store = createStore({ initial: emptyState(), reducers });
   const reads = [];
   const getJson = path => {
@@ -43,6 +43,8 @@ function rig({ json = {}, onPage } = {}) {
   let t = 100;
   const r = {
     store, reads, cancelled: [], streamIsOpen: false,
+    // the rig's clock moved on by `ms`
+    clock: ms => { t += ms; },
     a: () => store.get().account,
     pending: () => [...timers.values()],
     run(timer) {
@@ -57,6 +59,8 @@ function rig({ json = {}, onPage } = {}) {
     cancelTimer: handle => { r.cancelled.push(handle); timers.delete(handle); },
     streamOpen: () => r.streamIsOpen,
     ...(onPage ? { onPage } : {}),
+    ...(post ? { post } : {}),
+    ...(openTab ? { openTab } : {}),
   });
   return r;
 }
@@ -684,4 +688,308 @@ test("a refused venues, books, key-file or reach read keeps its last answer and 
   assert.equal(again.a().venuesHere.message, null);
   await again.account.loadVenuesHere();
   assert.deepEqual([again.a().venuesHere.status, again.a().venuesHere.message], ['error', null]);
+});
+
+// ── Guard: one unsigned click (plan 4a Task 5) ──
+
+test('guard posts once while one is in the air, says the Account\'s words, and reads the page fresh', async () => {
+  const posts = [];
+  let release;
+  const post = (path, body) => { posts.push([path, body]); return new Promise(res => { release = res; }); };
+  const r = rig({ json: { '/data/account': noPaper({ mode: 'guard' }) }, post });
+  const one = r.account.guard();
+  const two = r.account.guard();
+  assert.equal(two, one, 'a second press while one is in the air joins it');
+  assert.equal(r.a().guard.status, 'asking');
+  await tick();
+  assert.deepEqual(posts, [['/data/account/guard', {}]], 'one POST, an empty body');
+  release({ status: 200, body: { ok: true, mode: 'guard' } });
+  await one;
+  await settle();
+  assert.equal(r.a().guard.status, 'said');
+  assert.equal(r.a().guard.said, 'Guard: what agents ask for waits for you on a card.');
+  assert.deepEqual(r.reads, ['/data/account?fresh=1'], 'the page read past the face\'s cache');
+  assert.equal(r.a().data.mode, 'guard');
+  // once settled, the next press posts again
+  const three = r.account.guard();
+  assert.notEqual(three, one);
+  await tick();
+  assert.equal(posts.length, 2);
+  release({ status: 200, body: { ok: true, mode: 'guard' } });
+  await three;
+});
+
+test('a refused guard says the refusal and leaves the mode drawn as the page has it', async () => {
+  const answers = [
+    { status: 409, body: { ok: false, refusal: { code: 'E_ACCOUNT_X', message: 'The account would not switch now.' } } },
+    { status: 503, body: { ok: false, unreachable: 'ECONNREFUSED', error: 'unreachable' } },
+    { status: 0, body: {} },
+  ];
+  const post = async () => answers.shift();
+  const r = rig({ json: { '/data/account': noPaper({ mode: 'open' }) }, post });
+  await r.account.guard();
+  await settle();
+  assert.equal(r.a().guard.status, 'refused');
+  assert.equal(r.a().guard.message, 'The account would not switch now.');
+  assert.equal(r.a().data.mode, 'open', 'the page as read: still Beast');
+  assert.deepEqual(r.reads, ['/data/account?fresh=1']);
+  const html = renderAccountScreen({ ...r.store.get(), route: { screen: 'account', tab: 'rules' } }, Date.now());
+  assert.match(html, /The account would not switch now\./);
+  assert.match(html, /aria-pressed="true"[^>]*>Beast</, 'Beast drawn pressed');
+  await r.account.guard();
+  assert.equal(r.a().guard.message, 'unreachable', 'else its error');
+  await r.account.guard();
+  assert.equal(r.a().guard.message, 'The account did not answer. Try again.', 'else the fixed words');
+  // a post that throws is no answer
+  const r2 = rig({ json: { '/data/account': noPaper() }, post: async () => { throw new Error('boom'); } });
+  await r2.account.guard();
+  assert.equal(r2.a().guard.message, 'The account did not answer. Try again.');
+});
+
+// ── the Money tab (plan 4b Task 2) ──
+
+const ADDRESS = { ok: true, venue: 'okx', venueName: 'OKX', asset: 'USDT', network: 'Base', address: '0x2222222222222222222222222222222222222222', tag: '1234', whose: "OKX's own deposit address", note: 'checked a minute ago' };
+
+test('receive reads one row once while it is in the air', async () => {
+  let release;
+  const r = rig({ json: { '/data/account/receive': () => new Promise(res => { release = res; }) } });
+  const row = { venue: 'okx', asset: 'USDT', network: 'Base' };
+  const first = r.account.receive(row);
+  assert.equal(r.account.receive({ ...row }), first, 'a second press joins the read in the air');
+  await settle();
+  assert.equal(r.account.receive({ ...row }), first, 'and a third, still in the air');
+  await settle();
+  assert.deepEqual(r.reads, ['/data/account/receive?venue=okx&asset=USDT&network=Base']);
+  assert.equal(r.a().receive['okx|USDT|Base'].status, 'loading');
+  release(ADDRESS);
+  await first;
+  assert.deepEqual(r.a().receive['okx|USDT|Base'], { status: 'ready', data: ADDRESS, at: r.a().receive['okx|USDT|Base'].at, message: null });
+  // another row is its own read
+  void r.account.receive({ venue: 'okx', asset: 'USDC', network: 'Base' });
+  await settle();
+  assert.equal(r.reads.length, 2);
+  release({ ...ADDRESS, asset: 'USDC' });
+  await settle();
+  assert.equal(r.a().receive['okx|USDC|Base'].data.asset, 'USDC');
+  assert.equal(r.a().receive['okx|USDT|Base'].data.asset, 'USDT', 'each row under its own key');
+  // a row with a part missing reads nothing
+  await r.account.receive({ venue: 'okx', asset: '', network: 'Base' });
+  assert.equal(r.reads.length, 2);
+});
+
+test("a refused receive lands the Account's words under its row", async () => {
+  const refusal = { ok: false, refusal: { ok: false, code: 'E_LIVE_NO_DEPOSIT', layer: 'live', message: 'OKX gives no USDT address on Robinhood Chain' } };
+  const r = rig({ json: { '/data/account/receive': rejected('/data/account/receive', 409, refusal) } });
+  await r.account.receive({ venue: 'okx', asset: 'USDT', network: 'Robinhood Chain' });
+  const got = r.a().receive['okx|USDT|Robinhood Chain'];
+  assert.equal(got.status, 'error');
+  assert.equal(got.message, 'OKX gives no USDT address on Robinhood Chain');
+});
+
+test('bridgeRoutes lands only for the latest preparation', async () => {
+  const answers = [];
+  const posted = [];
+  const post = (path, body) => { posted.push([path, body]); return new Promise(res => answers.push(res)); };
+  const r = rig({ post });
+  const one = { type: 'liveMove', kind: 'bridge', from: 'w', amount: '10' };
+  const two = { ...one, amount: '20' };
+  const a = r.account.bridgeRoutes(one);
+  assert.deepEqual(r.a().routes, { asked: JSON.stringify(one), status: 'asking', data: null, message: null });
+  const b = r.account.bridgeRoutes(two);
+  assert.deepEqual(posted, [['/data/account/bridge-routes', { draft: one }], ['/data/account/bridge-routes', { draft: two }]]);
+  answers[1]({ status: 200, body: { ok: true, routes: [{ tool: 'across' }] } });
+  await b;
+  answers[0]({ status: 200, body: { ok: true, routes: [{ tool: 'stale' }] } });
+  await a;
+  assert.equal(r.a().routes.asked, JSON.stringify(two));
+  assert.deepEqual(r.a().routes.data.routes, [{ tool: 'across' }], 'the older answer is dropped');
+  // a refusal is the Account's words
+  const c = r.account.bridgeRoutes(one);
+  answers[2]({ status: 409, body: { ok: false, refusal: { message: 'no bridge joins these chains' } } });
+  await c;
+  assert.deepEqual(r.a().routes, { asked: JSON.stringify(one), status: 'error', data: null, message: 'no bridge joins these chains' });
+});
+
+test("an answer for another account, asset or network is never landed as the row's address", async () => {
+  const r = rig({ json: { '/data/account/receive': { ...ADDRESS, network: 'Arbitrum' } } });
+  await r.account.receive({ venue: 'okx', asset: 'USDT', network: 'Base' });
+  const got = r.a().receive['okx|USDT|Base'];
+  assert.equal(got.status, 'error');
+  assert.equal(got.data, null);
+  assert.match(got.message, /another account or network/);
+  // an answer with no address is no address
+  const e = rig({ json: { '/data/account/receive': { ok: true, venue: 'okx', asset: 'USDT', network: 'Base' } } });
+  await e.account.receive({ venue: 'okx', asset: 'USDT', network: 'Base' });
+  assert.equal(e.a().receive['okx|USDT|Base'].status, 'error');
+});
+
+test('a fresh page forgets every Receive address read; a plain one keeps them', async () => {
+  const r = rig({ json: { '/data/account': page(), '/data/account/receive': ADDRESS } });
+  await r.account.receive({ venue: 'okx', asset: 'USDT', network: 'Base' });
+  await r.account.load();
+  assert.equal(r.a().receive['okx|USDT|Base'].status, 'ready', 'the poll keeps it');
+  await r.account.load({ fresh: true });
+  assert.deepEqual(r.a().receive, {}, 'after a move, a stream event or Refresh: forgotten');
+});
+
+// ── Venues: Close to agents and a venue's sign-in (plan 4b Task 4) ──
+
+test('revoke posts once per venue while in the air and reads the page fresh', async () => {
+  const posts = [];
+  const release = {};
+  const post = (path, body) => { posts.push([path, body]); return new Promise(res => { release[body.account] = res; }); };
+  const r = rig({ json: { '/data/account': noPaper() }, post });
+  await r.account.load();
+  r.reads.length = 0;
+  const one = r.account.revoke('ex');
+  assert.equal(r.account.revoke('ex'), one, 'a second press on the same venue joins the first');
+  const other = r.account.revoke('broker');
+  assert.notEqual(other, one, 'another venue goes on its own');
+  assert.deepEqual([r.a().closing.ex.status, r.a().closing.broker.status], ['asking', 'asking']);
+  await tick();
+  assert.deepEqual(posts, [['/data/account/revoke', { account: 'ex' }], ['/data/account/revoke', { account: 'broker' }]], 'one POST a venue, never signed');
+  release.ex({ status: 200, body: { ok: true } });
+  await one;
+  await settle();
+  assert.deepEqual(r.a().closing.ex, { status: 'said', said: 'Stand-in Exchange is closed to agents: they keep reading it, and place or move nothing there. Reopening it is signed.', message: null });
+  assert.deepEqual(r.reads, ['/data/account?fresh=1'], "the page read past the face's cache");
+  // the Account's refusal in its words
+  release.broker({ status: 404, body: { ok: false, refusal: { code: 'E_ACCOUNT_UNKNOWN_VENUE', message: 'no account "broker" here' } } });
+  await other;
+  assert.deepEqual(r.a().closing.broker, { status: 'refused', said: null, message: 'no account "broker" here' });
+  // settled: the next press posts again
+  const again = r.account.revoke('ex');
+  await tick();
+  assert.equal(posts.length, 3);
+  release.ex({ status: 200, body: { ok: true } });
+  await again;
+  assert.equal(await r.account.revoke(''), undefined, 'no venue: nothing posted');
+  assert.equal(posts.length, 3);
+});
+
+const RH = { connector: 'live:robinhood', kind: 'robinhood', label: "Robinhood · investing accounts, through Robinhood's own sign-in", needs: 'sign-in' };
+// a tab as the window opens it: its opener, where it was sent, whether it was closed
+const fakeTab = () => ({ opener: {}, location: { href: 'about:blank' }, closed: false, close() { this.closed = true; } });
+
+test('signIn starts, sends the tab to the venue, polls the status and stops when the sheet closes', async () => {
+  const opened = [];
+  const tab = fakeTab();
+  const openTab = (url, target) => { opened.push([url, target]); return tab; };
+  const posts = [];
+  const post = async (path, body) => { posts.push([path, body]); return { status: 200, body: { ok: true, url: 'https://robinhood.example/oauth?state=st-9', state: 'st-9' } }; };
+  const statuses = [{ ok: true, status: 'pending' }, { ok: true, status: 'ready', stale: true }, { ok: true, status: 'unknown' }, { ok: true, status: 'pending' }];
+  const r = rig({ json: { '/data/account/signin/status': () => Promise.resolve(statuses.shift()) }, post, openTab });
+  let open = true;
+  const ready = [];
+  const going = r.account.signIn(RH, { alive: () => open, onReady: s => ready.push(s) });
+  assert.deepEqual(opened, [['about:blank', '_blank']], 'the tab opened at once, inside the press');
+  assert.equal(tab.opener, null, 'its opener cleared');
+  assert.equal(r.a().signIn.status, 'starting');
+  await going;
+  assert.deepEqual(posts, [['/data/account/signin/start', { connector: 'robinhood' }]]);
+  assert.equal(tab.location.href, 'https://robinhood.example/oauth?state=st-9', "sent to the venue's page");
+  assert.deepEqual([r.a().signIn.status, r.a().signIn.tab, r.a().signIn.state], ['waiting', true, 'st-9']);
+  assert.deepEqual(r.reads, ['/data/account/signin/status?state=st-9']);
+  // every 1.5 s; a ready the face re-served as stale, or an unknown, is not the final status
+  for (let i = 0; i < 2; i++) {
+    const [t] = r.pending();
+    assert.equal(t.ms, SIGNIN_POLL_MS);
+    r.run(t);
+    await settle();
+  }
+  assert.equal(r.a().signIn.status, 'waiting', 'a stale ready is unknown: still waiting');
+  assert.deepEqual(ready, []);
+  assert.equal(r.reads.length, 3);
+  // the sheet closed: the next beat reads nothing and schedules nothing
+  open = false;
+  r.run(r.pending()[0]);
+  await settle();
+  assert.equal(r.reads.length, 3, 'nothing read once the sheet is gone');
+  assert.deepEqual(r.pending(), []);
+
+  // started again: a ready lands its state, and the poll ends
+  const answers = [{ ok: true, status: 'ready' }];
+  const r2 = rig({ json: { '/data/account/signin/status': () => Promise.resolve(answers.shift()) }, post, openTab: () => fakeTab() });
+  const got = [];
+  await r2.account.signIn(RH, { onReady: s => got.push(s) });
+  assert.deepEqual(got, ['st-9']);
+  assert.equal(r2.a().signIn.status, 'ready');
+  assert.deepEqual(r2.pending(), [], 'ready: no more asking');
+
+  // no tab (a blocker): the address kept for the link; a failed status says the Account's words
+  const r3 = rig({ json: { '/data/account/signin/status': { ok: true, status: 'failed', error: 'access_denied' } }, post, openTab: () => null });
+  await r3.account.signIn(RH);
+  assert.equal(r3.a().signIn.tab, false);
+  assert.equal(r3.a().signIn.url, 'https://robinhood.example/oauth?state=st-9');
+  assert.deepEqual([r3.a().signIn.status, r3.a().signIn.message], ['failed', 'access_denied']);
+  // a start the Account refuses closes the tab and says its words
+  const t4 = fakeTab();
+  const r4 = rig({ post: async () => ({ status: 400, body: { ok: false, error: 'there is no sign-in for "robinhood"' } }), openTab: () => t4 });
+  await r4.account.signIn(RH);
+  assert.equal(t4.closed, true);
+  assert.deepEqual([r4.a().signIn.status, r4.a().signIn.message], ['failed', 'there is no sign-in for "robinhood"']);
+  assert.deepEqual(r4.reads, []);
+});
+
+test('a new sign-in start clears the kept credentialRef', async () => {
+  // the connect sheet, a first sign-in's state kept in its hidden field
+  let pending = null;
+  const post = () => new Promise(res => { pending = res; });
+  const r = rig({ json: { '/data/account/signin/status': { ok: true, status: 'pending' } }, post, openTab: () => fakeTab() });
+  r.store.dispatch('sheetOpen', { kind: 'connect', seed: { options: [RH], venues: [] }, fields: [
+    { name: 'connector', type: 'select', options: [], value: 'live:robinhood', builtFor: 'live:robinhood' },
+    { name: 'credentialRef', label: '', type: 'hidden', value: 'st-first' },
+  ] });
+  const ref = () => r.store.get().sheet.fields.find(f => f.name === 'credentialRef').value;
+  const going = r.account.signIn(RH);
+  assert.equal(ref(), '', 'cleared before the Account is asked');
+  assert.equal(r.a().signIn.status, 'starting');
+  pending({ status: 200, body: { ok: true, url: 'https://robinhood.example/oauth', state: 'st-second' } });
+  await going;
+  assert.equal(r.a().signIn.state, 'st-second');
+  // a sign-in started with no sheet open changes nothing there
+  const r2 = rig({ post: async () => ({ status: 400, body: { ok: false } }), openTab: () => fakeTab() });
+  await r2.account.signIn(RH);
+  assert.equal(r2.store.get().sheet, null);
+});
+
+test('a sign-in the slice no longer names stops polling: the connector changed under it', async () => {
+  const post = async () => ({ status: 200, body: { ok: true, url: 'https://robinhood.example/oauth', state: 'st-3' } });
+  // the first status read is held until the connector has changed
+  let release;
+  const held = rig({ json: { '/data/account/signin/status': () => new Promise(res => { release = res; }) }, post, openTab: () => fakeTab() });
+  held.store.dispatch('sheetOpen', { kind: 'connect', seed: { options: [RH], venues: [] }, fields: [
+    { name: 'connector', type: 'select', options: [], value: 'live:robinhood', builtFor: 'live:robinhood' },
+    { name: 'credentialRef', label: '', type: 'hidden', value: '' },
+  ] });
+  const ready = [];
+  const going = held.account.signIn(RH, { onReady: s => ready.push(s) });
+  await settle();
+  assert.equal(held.a().signIn.status, 'waiting');
+  held.store.dispatch('sheetField', { name: 'connector', value: 'live:metamask' });
+  assert.equal(held.a().signIn.status, 'idle', 'forgotten on the switch');
+  release({ ok: true, status: 'ready' });
+  await going;
+  await settle();
+  assert.deepEqual(ready, [], 'its ready lands nowhere');
+  assert.equal(held.a().signIn.status, 'idle');
+  assert.deepEqual(held.pending(), [], 'and nothing more is asked');
+});
+
+test('the sign-in runs out after 15 minutes', async () => {
+  const post = async () => ({ status: 200, body: { ok: true, url: 'https://robinhood.example/oauth', state: 'st-1' } });
+  const r = rig({ json: { '/data/account/signin/status': { ok: true, status: 'pending' } }, post, openTab: () => fakeTab() });
+  // the rig's clock moves one millisecond a call: a beat that jumps it past the window
+  await r.account.signIn(RH);
+  assert.equal(SIGNIN_WITHIN_MS, 15 * 60_000);
+  let beats = 0;
+  while (r.pending().length && beats < 5) {
+    if (beats === 2) r.clock(SIGNIN_WITHIN_MS);
+    r.run(r.pending()[0]);
+    await settle();
+    beats += 1;
+  }
+  assert.equal(r.a().signIn.status, 'expired');
+  assert.deepEqual(r.pending(), [], 'run out: no more asking');
+  assert.equal(beats, 3, 'it ran out on the beat after the window passed');
 });

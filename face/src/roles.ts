@@ -25,7 +25,8 @@
  * A role never carries what a delegated child cannot use or must not hold: a tool that needs
  * a human, the open web, delegation, the cycle's goal and todo bookkeeping, the reserved PTC
  * transport `run_code`, the account and order tools under any server name, the AKShare tools
- * (the `NEVER` table, with the reason for each). The job tools are a bash role's own: a
+ * (`mcp__akshare__*` and the seat's `portfolio_akshare`, refused under any server name; the `NEVER`
+ * table, with the reason for each). The job tools are a bash role's own: a
  * command that outruns the executor's default timeout moves to a background job the child
  * owns, which it reads with `job_output` and stops with `job_kill`, and which is cancelled
  * when the child is. The reader refuses a never-carried `allow` entry where it reads the
@@ -98,6 +99,11 @@ const NEVER: ReadonlyArray<{ what: string; because: string; names: readonly stri
   { what: "the PTC transport",
     because: "run_code is the reserved PTC mode presentation transport, which tools.restrict() refuses to name, so every delegation would fail; name the end-capability tools instead",
     names: ["run_code"], prefixes: [], rawNames: [] },
+  /* Above the account rule: the first matching rule's words are the refusal's, so the seat's passthrough
+   * (`mcp__account__portfolio_akshare`) is refused as an AKShare tool, not as an account tool. */
+  { what: "an AKShare tool",
+    because: "the AKShare tools carry no point-in-time guard and are never evidence; the evidence is forward paper trading at the Account",
+    names: [], prefixes: ["mcp__akshare__"], rawNames: ["portfolio_akshare"] },
   { what: "an account or order tool",
     because: "orders go through the Account seat alone, behind its one gate (the face's per-order card); the seat is Gravit's, and a role has no reason to read the account",
     names: [], prefixes: ["mcp__account__"],
@@ -106,9 +112,6 @@ const NEVER: ReadonlyArray<{ what: string; because: string; names: readonly stri
       "portfolio_live_order", "portfolio_live_batch", "portfolio_live_amend", "portfolio_live_cancel", "portfolio_live_close",
       "portfolio_live_leverage", "portfolio_live_move", "portfolio_live_earn", "portfolio_pay",
       "portfolio_order", "portfolio_execute", "portfolio_transfer"] },
-  { what: "an AKShare tool",
-    because: "the AKShare tools carry no point-in-time guard and are never evidence; the evidence is forward paper trading at the Account",
-    names: [], prefixes: ["mcp__akshare__"], rawNames: [] },
 ];
 
 /** Why a role may not carry `entry`, as the end of a refusal; `undefined` when it may. */

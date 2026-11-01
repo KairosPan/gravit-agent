@@ -13,7 +13,7 @@
  * list here, not offline. */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -48,13 +48,11 @@ test("account seat smoke: the seat mounts, its writes are gated, a read answers,
   const cleanups: (() => void)[] = [];
   let dispose: (() => Promise<void>) | undefined;
   try {
-    /* 1. A scratch face home: AKShare off as in every smoke, the seat row ON
-     * and replaced whole by this test's config (the operator's own override
-     * path: an id patch with `config`), pointed at the stand-in as its seeded
-     * agent, the seat's home a scratch directory. */
+    /* 1. A scratch face home, its profile patch as setup writes it: the seat
+     * row ON and replaced whole by this test's config (the operator's own
+     * override path: an id patch with `config`), pointed at the stand-in as its
+     * seeded agent, the seat's home a scratch directory. */
     setupFaceProfile(home);
-    const patchPath = join(home, "profiles", "face", "cordis.patch.yml");
-    writeFileSync(patchPath, `${readFileSync(patchPath, "utf8").replace(/^\[\][ \t]*$/m, "")}\n- id: mcp-akshare\n  disabled: true\n`);
     const extraPatches: FacePatchList = [{
       id: ACCOUNT_SEAT_ROW_ID,
       config: {
@@ -71,7 +69,7 @@ test("account seat smoke: the seat mounts, its writes are gated, a read answers,
       execute(exec: { callId: string; name: string; arguments: unknown; agent: object; signal: AbortSignal }): Promise<{ isError: boolean; content?: { type?: string; text?: string }[] }>;
     };
 
-    /* 2. The seat mounts: its 35 real-account tools, the nine writes gated, no
+    /* 2. The seat mounts: its 36 real-account tools, the nine writes gated, no
      * read gated, the seat covered. */
     const deadline = Date.now() + 120_000;
     let names: string[] = [];
@@ -81,12 +79,12 @@ test("account seat smoke: the seat mounts, its writes are gated, a read answers,
       await sleep(500);
     }
     const seatNames = names.filter((name) => name.startsWith(SEAT_TOOL_PREFIX)).sort();
-    assert.equal(seatNames.length, 35, `the seat's 35 real-account tools; saw ${seatNames.length}: ${seatNames.join(", ")}\nstand-in:\n${standin.log()}`);
+    assert.equal(seatNames.length, 36, `the seat's 36 real-account tools; saw ${seatNames.length}: ${seatNames.join(", ")}\nstand-in:\n${standin.log()}`);
     const audit = auditOrderTools(tools.schemas());
     const gatedSeat = audit.gated.filter((name) => name.startsWith(SEAT_TOOL_PREFIX)).sort();
     assert.deepEqual(gatedSeat, REAL_WRITES.map((raw) => `${SEAT_TOOL_PREFIX}${raw}`).sort(), "exactly the seat's real-account writes are gated");
     assert.deepEqual(audit.uncovered, [], "the seat is covered");
-    for (const read of ["portfolio_account", "portfolio_holdings", "portfolio_wait", "portfolio_live_preview"]) assert.ok(seatNames.includes(`${SEAT_TOOL_PREFIX}${read}`), read);
+    for (const read of ["portfolio_account", "portfolio_holdings", "portfolio_wait", "portfolio_live_preview", "portfolio_akshare"]) assert.ok(seatNames.includes(`${SEAT_TOOL_PREFIX}${read}`), read);
 
     /* 3. A real session with an open turn, and the outermost answerer, as the
      * order-gate smoke does. */
@@ -165,7 +163,7 @@ test("account seat smoke: the seat mounts, its writes are gated, a read answers,
     assert.ok(typeof view.seat?.validUntil === "number" && view.seat.validUntil > Date.now(), `the Account's ISO expiry reaches the box as milliseconds: ${JSON.stringify(view.seat)}`);
     assert.ok(view.seat?.limits.some((l) => typeof l.validUntil === "number"), "a limit's expiry too");
     assert.ok(view.venues?.some((v) => v.id === "paper-momentum" && v.paper === true), JSON.stringify(view.venues));
-    assert.ok((view.cards?.length ?? 0) >= 1, `the card the seat raised waits on the Account page: ${JSON.stringify(view.cards)}`);
+    assert.ok((view.cards?.length ?? 0) >= 1, `the card the seat raised waits for the owner under Account › Cards: ${JSON.stringify(view.cards)}`);
     assert.ok(view.cards?.some((c) => c.id === answered.card?.id), "and it is that card");
   } finally {
     for (const off of cleanups) off();

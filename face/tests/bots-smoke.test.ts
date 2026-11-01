@@ -102,7 +102,7 @@ test("bots smoke: roster, mask, persona, a default that masks nothing, the shipp
     const patchPath = join(home, "profiles", "face", "cordis.patch.yml");
     const patch = readFileSync(patchPath, "utf8").replace(/^\[\][ \t]*$/m, "");
     // This smoke owns a scratch profile and must not start the operator's data server.
-    writeFileSync(patchPath, `${patch}\n- id: mcp-akshare\n  disabled: true\n- id: mcp-account\n  disabled: true\n`);
+    writeFileSync(patchPath, `${patch}\n- id: mcp-account\n  disabled: true\n`);
     const { ctx, dispose, botPresets } = await bootFace({ profileName: "face", port: 0, dshHome: home, botsRoot: bots });
     try {
       /* bootFace's declaration handle (PLAN S6) is what this smoke checks:

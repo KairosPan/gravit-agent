@@ -1,5 +1,5 @@
 /** WHERE THIS USER CAN CONNECT — detected from the network the Account runs on, for every venue it knows, without the owner opening
- * anything: the page's list of accounts, its Markets and Trade buttons, and the agents (MCP portfolio_venues, portfolio_account) all read
+ * anything: the face's list of accounts, its Markets and Trade buttons, and the agents (MCP portfolio_venues, portfolio_account) all read
  * the same answer. Two things decide it, both the venue's:
  *
  *   its answer to this network   each connection's own first, keyless question (live/reach.ts): an exchange's public clock, a broker's
@@ -46,7 +46,7 @@ export interface VenueHere {
   /** the connection, as connectVenue takes it: `live:exchange:okx`, `live:kalshi` */
   connector: string;
   name: string;
-  /** what kind of account it is, as the page groups them */
+  /** what kind of account it is, as the face groups them */
   group: "Exchanges" | "Brokers" | "Wallets" | "Markets and tokens" | "Paper";
   /** how it is connected: a key file, the venue's own sign-in, an address, the mm command line — or nothing (a paper account) */
   needs: "key-file" | "sign-in" | "address" | "cli" | "none";

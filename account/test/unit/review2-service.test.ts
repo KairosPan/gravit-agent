@@ -7,7 +7,6 @@
  * asked again for twenty seconds", "an answer still on its way is waited for"; explore "what the connected venues list"; the routes'
  * `{ok:false, refusal}` shape; "a throw is a refusal too"; overview "the totals here are the ones /api/account and /holdings give"). */
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
-import { get as httpGet } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -409,19 +408,9 @@ describe("a real account's overview, markets and quote (the statement page's rea
   });
 });
 
-describe("the page's own files and the account's answers", () => {
-  it("a script is kept and revalidated by its ETag; an answer under /api/ is never stored", async () => {
-    const first = await fetch(`${server.url}/ui/core.js`);
-    expect(first.status).toBe(200);
-    expect(first.headers.get("cache-control")).toBe("no-cache");
-    const etag = first.headers.get("etag");
-    expect(etag).toBeTruthy();
-    // a browser's revalidation (fetch() itself marks a conditional request no-cache, so the plain client stands in for the browser here)
-    const again = await new Promise<number>((resolve, reject) => httpGet(`${server.url}/ui/core.js`, { headers: { "if-none-match": etag! } }, (res) => (res.resume(), resolve(res.statusCode ?? 0))).on("error", reject));
-    expect(again).toBe(304);
-    expect((await fetch(`${server.url}/`)).headers.get("cache-control")).toBe("no-cache");
+describe("the account's answers", () => {
+  it("an answer under /api/ is never stored", async () => {
     expect((await fetch(`${server.url}/api/account`)).headers.get("cache-control")).toBe("no-store");
-    expect((await fetch(`${server.url}/ui/nope.js`)).status).toBe(404);
   });
 });
 

@@ -120,7 +120,7 @@ test("no bot sees a lunhui_ tool: DEFAULT_ALLOW and every shipped bot's allow li
     "lunhui_read_counterevidence_context", "lunhui_submit_counterevidence",
     "lunhui_present",
   ], "the eighteen tools the rows register, every one masked below");
-  const known = new Set([...DEFAULT_ALLOW, "subagent", "ralph", "mcp__akshare__stock_zh_a_hist", "mcp__account__portfolio_balances", ...LUNHUI_TOOL_NAMES]);
+  const known = new Set([...DEFAULT_ALLOW, "subagent", "ralph", "mcp__account__portfolio_akshare", "mcp__account__portfolio_balances", ...LUNHUI_TOOL_NAMES]);
   const isLunhui = (name: string) => name.startsWith("lunhui_");
   assert.deepEqual(expandAllow([...DEFAULT_ALLOW], known).allow.filter(isLunhui), [], "DEFAULT_ALLOW");
   const shipped = await listBots(BOTS_ROOT, noPresets);

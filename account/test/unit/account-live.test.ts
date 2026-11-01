@@ -378,7 +378,7 @@ describe("a wallet proves an address is the user's", () => {
     const c = proofs.challenge(wallet.address.toLowerCase(), "OKX Wallet", page, 8453);
     if (isRefusal(c)) throw new Error(c.message);
     // EIP-4361, line for line: the page, the checksummed address, what is being agreed to, and the fields that bind it
-    expect(c.message).toBe(siweMessage({ domain: "127.0.0.1:4820", address: wallet.address, statement: "Show this wallet's balances on my account page. Read-only: this is not a transaction and it lets nothing be moved.", uri: "http://127.0.0.1:4820/account", chainId: 8453, nonce: c.nonce, issuedAt: new Date(5_000_000).toISOString(), expirationTime: new Date(5_000_000 + 600_000).toISOString() }));
+    expect(c.message).toBe(siweMessage({ domain: "127.0.0.1:4820", address: wallet.address, statement: "Show this wallet's balances on my account. Read-only: this is not a transaction and it lets nothing be moved.", uri: "http://127.0.0.1:4820/account", chainId: 8453, nonce: c.nonce, issuedAt: new Date(5_000_000).toISOString(), expirationTime: new Date(5_000_000 + 600_000).toISOString() }));
     expect(c.message.split("\n").slice(0, 2)).toEqual(["127.0.0.1:4820 wants you to sign in with your Ethereum account:", wallet.address]);
     expect(proofs.proven(wallet.address)).toBeUndefined();
 

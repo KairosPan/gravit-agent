@@ -150,6 +150,7 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: var(--radius-pill); background: var(--surface-2); align-self: flex-start; }
 .seg-item { display: inline-flex; align-items: center; min-height: 38px; padding: 0 14px; border: 0; border-radius: var(--radius-pill); background: transparent; color: var(--dim); font-size: 13px; font-weight: 600; }
 .seg-item.pressed { background: var(--surface); color: var(--text); font-weight: 700; box-shadow: var(--shadow-card); }
+.seg-item:disabled { opacity: .5; cursor: default; }
 
 /* ---- the thread ---- */
 .thread { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 6px; padding: 18px 28px 22px; overflow-y: auto; }
@@ -541,6 +542,12 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .sheet-left { margin: 0; color: var(--dim); font-size: 13px; font-variant-numeric: tabular-nums; }
 .sheet-hint { margin: 0; color: var(--dim); font-size: 13px; overflow-wrap: anywhere; }
 .sheet-check { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+/* Sell many's drawer (plan 4b Task 3): the picks, each with how much to sell, and the legs with their answers */
+.sm-list, .sm-legs { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.sm-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sm-row .input { width: 96px; flex: none; }
+.sm-leg { display: grid; gap: 4px; }
+.sm-no { color: var(--down, var(--dim)); }
 /* a module card's Run sheet, in the owner sheet's drawer: each On option its radio beside its label, the detail or the
    reason under it, a greyed one dim */
 .run-sheet .drawer-body > .kv-list { padding-top: 4px; border-top: 1px solid var(--border); }
@@ -645,6 +652,12 @@ a.mk-line:hover .mk-t1 { text-decoration: underline; text-underline-offset: 3px;
 .mk-t1 { font-size: 14px; font-weight: 500; }
 .mk-t2 { font-size: 12px; color: var(--dim); }
 .mk-link { min-height: 36px; display: inline-flex; align-items: center; border: 0; padding: 0; background: none; }
+/* a market's page's four reads beside its price: What agents do here under You here; the order book, bids beside asks */
+.mk-h3 { margin: 14px 0 2px; font-size: 13px; font-weight: 700; color: var(--dim); }
+.mk-book { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.mk-book th { padding: 6px 4px; font-size: 12px; font-weight: 600; color: var(--dim); }
+.mk-book td { padding: 3px 4px; border-top: 1px solid var(--border); }
+.mk-book .r { text-align: right; }
 
 /* ---- Trade, after gravit-ui's (Linqi's ui/trade.css): the picker and Under way on the left, the ticket on the right ---- */
 .tp { container-type: inline-size; min-width: 0; }

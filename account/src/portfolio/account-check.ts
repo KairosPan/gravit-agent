@@ -91,7 +91,7 @@ export async function accountCheck(o: { home: string; keys?: boolean; deps?: Par
     venues.map(async (venue) => {
       const kind = CONNECTORS.find((c) => c.kind === venue && c.needs === "key-file")?.kind;
       const connector = kind ? `live:${kind}` : exchanges.some((x) => x.id === venue) ? `live:exchange:${venue}` : "";
-      if (!connector) return { venue, connector: "", said: `no connection reads credentials/${venue}/ by itself: connect it from the page, which names its exchange` };
+      if (!connector) return { venue, connector: "", said: `no connection reads credentials/${venue}/ by itself: connect it from Gravit's face (Account › Venues), which names its exchange` };
       const opened = await within(openLive({ venue, connector, label: "", reference: "" }, deps), SOURCE_MS * 2, lateNo(venue) as never);
       if (isRefusal(opened)) return { venue, connector, said: opened.message, code: opened.code };
       const markets = opened.source.trader ? await within(opened.source.trader.markets("").then((m) => (isRefusal(m) ? undefined : m.length)), SOURCE_MS, undefined) : undefined;

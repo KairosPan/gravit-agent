@@ -1,0 +1,45 @@
+{
+  "ok": true,
+  "key": "equity:NVDA",
+  "row": {
+    "key": "equity:NVDA",
+    "asset": "NVDA",
+    "class": "equity",
+    "amount": 2,
+    "usd": 364.8,
+    "venues": [
+      {
+        "venue": "broker",
+        "venueName": "Stand-in Broker",
+        "amount": 2,
+        "usd": 364.8,
+        "note": "stocks"
+      }
+    ],
+    "price": 182.4,
+    "changePct24h": 1.9,
+    "changeFrom": {
+      "venue": "broker",
+      "venueName": "Stand-in Broker"
+    }
+  },
+  "positions": [],
+  "orders": [],
+  "lines": [],
+  "cost": [
+    {
+      "key": "equity:NVDA",
+      "asset": "NVDA",
+      "class": "equity",
+      "coveredQty": 0,
+      "ofQty": 2,
+      "realizedUsd": 0,
+      "source": "none",
+      "words": "cost known for 0 of 2 NVDA",
+      "parts": [],
+      "markets": [],
+      "orders": 0
+    }
+  ],
+  "missing": []
+}

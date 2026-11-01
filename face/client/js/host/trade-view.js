@@ -12,6 +12,7 @@
 import { number, price } from '../wire/market-model.js';
 import { ACCOUNT_TABS, pageOf, legsOf, matchKey, priceOf, watchKeysOf } from './market-view.js';
 import { pageOk, assetsOf, positionsOf, openOrdersOf, worthOf } from './account-view.js';
+import { isCnKey } from '../wire/china.js';
 
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const records = v => (Array.isArray(v) ? v.filter(isRecord) : []);
@@ -136,7 +137,8 @@ export function pickerOf(state, now) {
   const watch = [...(Array.isArray(state?.markets?.watch) ? state.markets.watch : []), ...watchKeysOf(state?.account?.data, rows)];
   return {
     held: heldRows(state, kind, rows),
-    watching: [...new Set(watch.filter(k => typeof k === 'string' && k !== ''))].filter(k => {
+    // an A share starred (a cn key, the face's or the page's china entry) is not Trade's: the face does not trade A shares
+    watching: [...new Set(watch.filter(k => typeof k === 'string' && k !== '' && !isCnKey(k)))].filter(k => {
       const item = findItem(rows, k);
       return item ? kindOfItem(item) === kind : kindOfKey(k) === kind;
     }).map(k => { const item = findItem(rows, k); return item ? marketRow(item, trading) : placeholderRow(k); }),
@@ -226,6 +228,18 @@ function valueOf(fields, name) {
 const textOf = v => (typeof v === 'string' ? v.trim() : typeof v === 'number' && Number.isFinite(v) ? String(v) : '');
 const field = (fields, name) => textOf(valueOf(fields, name));
 
+/** A prediction's price typed in cents as the dollars the Account signs: the Account's tkPriceIn — dollars to six places,
+ *  trailing zeros trimmed, a plain decimal, never an exponent — or null for anything but a plain decimal with `0 < c < 100`
+ *  (or one too small to be a dollar figure at six places). The Trade ticket's limit and a Change sheet's prices alike. */
+export function eventPriceOf(typed) {
+  const t = typeof typed === 'string' ? typed.trim() : '';
+  if (!DECIMAL.test(t)) return null;
+  const c = Number(t);
+  if (!(c > 0 && c < 100)) return null;
+  const dollars = (c / 100).toFixed(6).replace(/\.?0+$/, '');
+  return dollars === '0' ? null : dollars;
+}
+
 /** The Account's liveOrder draft from the ticket's fields — its Trade ticket's type and fifteen fields in its order (prepare adds
  *  maxNotional and deadline: the seventeen it signs): `type`, `venue`, `symbol` (the line's; a prediction's, the picked
  *  outcome's at that venue), `side`, `orderType`, `qty` or `usd` by `unit` (as typed), `limitPrice` (for a limit: as typed; a
@@ -254,10 +268,8 @@ export function tradeDraftOf(fields, ticket) {
     const typed = field(fields, 'limit');
     if (!DECIMAL.test(typed)) return 'Type the limit price';
     if (ticket.event) {
-      const c = Number(typed);
-      // the Account's tkPriceIn: dollars to six places, trailing zeros trimmed — a plain decimal, never an exponent
-      const dollars = (c / 100).toFixed(6).replace(/\.?0+$/, '');
-      if (!(c > 0 && c < 100) || dollars === '0') return 'A price in cents is between 0 and 100';
+      const dollars = eventPriceOf(typed);
+      if (dollars === null) return 'A price in cents is between 0 and 100';
       limitPrice = dollars;
     } else {
       if (!(Number(typed) > 0)) return 'Type the limit price';
@@ -289,11 +301,43 @@ export function quoteOf(prepared) {
   };
 }
 
+// a payment in the retired page's words (statement.js whatOf): a swap, a transfer between one venue's ledgers, else its kind,
+// from → to, on its network; a venue by its name on the page
+function paymentWordsOf(p, page) {
+  const nameOf = id => str(records(page?.venues).find(v => v.id === id)?.name) || str(id);
+  const legs = records(p.legs);
+  if (p.kind === 'swap') return `Swap at ${nameOf(p.from)} · ${str(p.sourceToken)} → ${str(p.token)}`;
+  if (p.kind === 'transfer' && p.from === p.to) return `Transfer at ${nameOf(p.from)} · ${str(legs[0]?.fromLedger)} → ${str(legs[0]?.toLedger)}`;
+  const kind = str(p.kind) || 'payment';
+  const network = str(p.live?.network);
+  return `${kind[0].toUpperCase()}${kind.slice(1)} · ${nameOf(p.from)} → ${nameOf(p.to)}${network ? ` · ${network}` : ''}`;
+}
+
 /** Under way: the page's working orders (openOrdersOf's rows, by anyone), each with what cancels it — the Account's
  *  `liveCancel` seed, `{ venue, order }`, or null for an order with no id or venue (one the Account knows by its client id
- *  alone: nothing to cancel it by). */
+ *  alone: nothing to cancel it by) — and `walletSend`: `{ order: id }` for a DEX order waiting for the operator's wallet to send
+ *  it (`walletTxs`, no `ref`; it keeps its own Cancel, which takes it back before the wallet sends it and frees its limit, as the
+ *  the retired page's row does: trade.js tkOpenActs), its `walletKey` the order's client id and `walletReported` whether the Account
+ *  already holds a hash for it (`reported`); else null. Then the page's payments waiting for the wallet
+ *  (`legs[0].native.walletTx`, `authorized`), each `{ payment: id, words, key, walletReported }` — `key` its `<id>@<at>`,
+ *  `walletReported` its `live.reported`. */
 export function underWayOf(page) {
-  return openOrdersOf(page).map(o => ({ ...o, cancel: o.id && o.venue ? { venue: o.venue, order: o.id } : null }));
+  const raw = pageOk(page) ? records(page.orders) : [];
+  const orders = openOrdersOf(page).map(o => {
+    const waits = o.waitingForWallet === true && o.id !== '';
+    const at = waits ? raw.find(x => x.id === o.id) : undefined;
+    return {
+      ...o,
+      cancel: o.id && o.venue ? { venue: o.venue, order: o.id } : null,
+      walletSend: waits ? { order: o.id } : null,
+      walletKey: waits ? str(at?.clientId) || null : null,
+      walletReported: waits ? str(at?.reported) !== '' : false,
+    };
+  });
+  const payments = (pageOk(page) ? records(page.payments) : [])
+    .filter(p => p.status === 'authorized' && str(p.id) !== '' && isRecord(records(p.legs)[0]?.native?.walletTx))
+    .map(p => ({ payment: p.id, words: paymentWordsOf(p, page), key: `${p.id}@${str(p.at)}`, walletReported: str(p.live?.reported) !== '' }));
+  return [...orders, ...payments];
 }
 
 // a fill's price as the Account's toast groups it: 3,120.50, 0.12143

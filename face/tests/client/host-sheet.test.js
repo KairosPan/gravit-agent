@@ -78,12 +78,13 @@ function rig(opts = {}) {
   store.subscribe((_, type) => types.push(type));
   const owner = fakeOwner(clock, opts);
   const timers = fakeTimers(clock);
-  const done = [], changes = [];
+  const done = [], changes = [], prepared = [];
   const sheet = startSheet({
     store, owner, schedule: timers.schedule, cancelTimer: timers.cancelTimer, now: () => clock.t,
-    afterAction: (kind, body) => done.push([kind, body]), onChange: (...a) => changes.push(a),
+    afterAction: (kind, body) => done.push([kind, body]), onChange: (...a) => changes.push(a), onPrepared: (...a) => prepared.push(a),
+    ...(opts.beforeSign ? { beforeSign: opts.beforeSign } : {}),
   });
-  return { store, owner, timers, clock, sheet, types, done, changes, s: () => store.get().sheet };
+  return { store, owner, timers, clock, sheet, types, done, changes, prepared, s: () => store.get().sheet };
 }
 
 test('a complete sheet prepares at once and an incomplete one says what is missing', async () => {
@@ -389,4 +390,105 @@ test('close cancels the timers', async () => {
   assert.equal(r.s().status, 'ready', 'not done: that answer was the closed sheet’s');
   assert.equal(r.s().seed.venue, 'paper-c');
   assert.equal(r.done.length, 1);
+});
+
+test('onPrepared is called with the preparation the sheet shows, never with one dropped as stale', async () => {
+  const r = rig();
+  const slow = deferred();
+  r.owner.prepareWith.push(slow.promise);
+  r.sheet.open('topUp', SEED);
+  // a change overtakes the first ask: its answer, when it lands, is dropped
+  r.sheet.change('usd', '700');
+  await r.timers.advance(PREPARE_QUIET_MS);
+  assert.equal(r.prepared.length, 1, 'the newer ask landed');
+  const [kind, shown, draft] = r.prepared[0];
+  assert.equal(kind, 'topUp');
+  assert.equal(shown, r.s().prepared, 'the preparation the sheet shows');
+  assert.deepEqual(draft, { ...DRAFT, usd: '700' }, 'with the draft it was asked for');
+  slow.resolve({ status: 200, body: { ...watch(), action: { ...DRAFT, nonce: 1 }, shown: [] } });
+  await settle();
+  assert.equal(r.prepared.length, 1, 'the stale one is never handed on');
+  assert.equal(r.s().prepared, shown);
+  // a refusal and an incomplete form hand nothing on; a sheet closed drops its answer
+  r.owner.prepareWith.push(BAD);
+  await r.sheet.again();
+  r.sheet.change('usd', '');
+  await r.timers.advance(PREPARE_QUIET_MS);
+  const late = deferred();
+  r.owner.prepareWith.push(late.promise);
+  r.sheet.open('topUp', SEED);
+  r.sheet.close();
+  late.resolve({ status: 200, body: { ...watch(), action: { ...DRAFT, nonce: 2 }, shown: [] } });
+  await settle();
+  assert.equal(r.prepared.length, 1);
+});
+
+test('a throwing onPrepared leaves the preparation shown', async () => {
+  const clock = { t: START };
+  const store = createStore({ initial: emptyState(), reducers });
+  const timers = fakeTimers(clock);
+  const sheet = startSheet({ store, owner: fakeOwner(clock), schedule: timers.schedule, cancelTimer: timers.cancelTimer, now: () => clock.t, afterAction: () => {}, onPrepared: () => { throw new Error('boom'); } });
+  const got = await sheet.open('topUp', SEED);
+  assert.equal(store.get().sheet.status, 'ready');
+  assert.equal(got, store.get().sheet.prepared);
+});
+
+// plan 4b Task 6: a sign-out in Beast with Guard first ticked asks beforeSign before it signs
+const SIGN_OUT = { kid: 'a5048199a8081854', mode: 'open', others: 0 };
+const OUT_DONE = { status: 200, body: { ok: true, kind: 'result', result: { ok: true } } };
+const OUT_REFUSED = { status: 409, body: { ok: false, refusal: { ok: false, code: 'E_ACCOUNT_LAST_OWNER', layer: 'account', message: 'the last owner cannot leave yet' } } };
+
+test("beforeSign's refusal stops the signature and says it", async () => {
+  const asked = [];
+  const r = rig({ beforeSign: async sheet => { asked.push(sheet.kind); return 'Not signed out: Guard was refused — the account is read-only'; } });
+  await r.sheet.open('signOut', SIGN_OUT);
+  assert.equal(r.s().status, 'ready');
+  await r.sheet.submit();
+  assert.deepEqual(asked, ['signOut']);
+  assert.deepEqual(r.owner.envelopes, [], 'nothing signed');
+  assert.deepEqual([r.s().status, r.s().message, r.s().prepared], ['refused', 'Not signed out: Guard was refused — the account is read-only', null]);
+  assert.deepEqual(r.done, []);
+  // taken: the signature goes on, and its done line ends Guard is on.
+  const t = rig({ beforeSign: async () => null });
+  t.owner.submitWith.push(OUT_DONE);
+  await t.sheet.open('signOut', SIGN_OUT);
+  await t.sheet.submit();
+  assert.equal(t.owner.envelopes.length, 1);
+  assert.deepEqual([t.s().status, t.s().said], ['done', 'Done. Guard is on.']);
+  // taken, and the sign-out refused: its words, Not signed out
+  const u = rig({ beforeSign: async () => null });
+  u.owner.submitWith.push(OUT_REFUSED);
+  await u.sheet.open('signOut', SIGN_OUT);
+  await u.sheet.submit();
+  assert.deepEqual([u.s().status, u.s().message], ['refused', 'Not signed out: the last owner cannot leave yet. Guard is on.']);
+  // a sheet closed while Guard is asked signs nothing
+  const later = deferred();
+  const v = rig({ beforeSign: () => later.promise });
+  await v.sheet.open('signOut', SIGN_OUT);
+  const press = v.sheet.submit();
+  v.sheet.close();
+  later.resolve(null);
+  await press;
+  assert.deepEqual(v.owner.envelopes, []);
+});
+
+test('beforeSign is not asked for a sheet that does not need it', async () => {
+  const asked = [];
+  const r = rig({ beforeSign: async sheet => { asked.push(sheet.kind); return 'stop'; } });
+  // another kind
+  await r.sheet.open('topUp', SEED);
+  await r.sheet.submit();
+  assert.equal(r.owner.envelopes.length, 1);
+  // a sign-out in Guard; and one in Beast with the box unticked
+  r.owner.submitWith.push(OUT_REFUSED);
+  await r.sheet.open('signOut', { ...SIGN_OUT, mode: 'guard' });
+  await r.sheet.submit();
+  assert.equal(r.s().message, 'the last owner cannot leave yet', 'the Account\'s words as they are');
+  await r.sheet.open('signOut', { ...SIGN_OUT, others: 1 });
+  assert.equal(r.s().fields[0].value, false);
+  r.owner.submitWith.push(OUT_DONE);
+  await r.sheet.submit();
+  assert.deepEqual(asked, []);
+  assert.equal(r.owner.envelopes.length, 3);
+  assert.equal(r.s().said, 'Done', 'no Guard words');
 });

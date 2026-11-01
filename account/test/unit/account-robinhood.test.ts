@@ -273,7 +273,7 @@ describe("Robinhood's investing accounts, through its MCP server", () => {
 
   it("without a finished sign-in, with no tool to read by, or with answers it cannot read, it says so instead of showing zero", async () => {
     const plain = await boot({ http: robinhoodSignIn(), openMcp: mcpServer({}).open });
-    expect(refusal(await plain.own({ type: "connectVenue", venue: "robinhood", connector: "live:robinhood", label: "", credentialRef: "made-up-state" })).message).toBe("Robinhood: nobody has signed in for this connection yet — sign in from the account page first");
+    expect(refusal(await plain.own({ type: "connectVenue", venue: "robinhood", connector: "live:robinhood", label: "", credentialRef: "made-up-state" })).message).toBe("Robinhood: nobody has signed in for this connection yet — sign in from Gravit, under Account › Venues, first");
 
     const tradingOnly = await signedIn(robinhoodSignIn(), mcpServer({}, [{ name: "place_equity_order" }, { name: "cancel_equity_order" }]));
     const none = refusal(await tradingOnly.own({ type: "connectVenue", venue: "robinhood", connector: "live:robinhood", label: "", credentialRef: tradingOnly.state }));
@@ -302,7 +302,7 @@ describe("Robinhood's investing accounts, through its MCP server", () => {
     const said = refusal(await x.svc.account!.prepare({ type: "liveOrder", venue: "robinhood", symbol: "AAPL", side: "buy", orderType: "market", qty: "1" }));
     expect([said.code, said.message]).toEqual([
       "E_VENUE_PERMISSION",
-      "Robinhood: this sign-in has no Robinhood Agentic account, the one account an agent may trade in (Robinhood marks it agentic_allowed): Robinhood opens it, as a self-directed individual investing account it calls the MCP account, during the sign-in that first connects an agent, so sign in again from the account page and open it there",
+      "Robinhood: this sign-in has no Robinhood Agentic account, the one account an agent may trade in (Robinhood marks it agentic_allowed): Robinhood opens it, as a self-directed individual investing account it calls the MCP account, during the sign-in that first connects an agent, so sign in again from Gravit, under Account › Venues, and open it there",
     ]);
     // not a quote, not an order: nothing was asked of Robinhood
     expect(server.called).toEqual([]);

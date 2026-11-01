@@ -1,32 +1,40 @@
 /**
- * The 问财 client, `plugins/lunhui/lib/wencai.mjs`: one token exchange and one all-market query
- * through the QuantAPI fixtures, the cached access token, and every refusal naming 同花顺问财
- * without the token. Nothing reaches the network.
+ * The 问财 client, `plugins/lunhui/lib/wencai.mjs`: one all-market query through the QuantAPI
+ * fixtures, with no token - the Account holds it and does the exchange - and every refusal naming
+ * 同花顺问财. The Account's two iFinD answers Lunhui words itself (no token there, a refused
+ * exchange there) arrive as the adapter's IFIND_* codes. Nothing reaches the network.
  */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { createFixtureFetch } from "../plugins/lunhui/lib/fixture-fetch.mjs";
-import { fetchWencaiUniverse, hasWencaiCredentials, resetWencaiToken, WENCAI_PROVIDER } from "../plugins/lunhui/lib/wencai.mjs";
+import { IFIND_CREDENTIAL, IFIND_UNCONFIGURED } from "../plugins/lunhui/lib/account-fetch.mjs";
+import * as wencai from "../plugins/lunhui/lib/wencai.mjs";
+import { fetchWencaiUniverse, WENCAI_NOT_CONFIGURED, WENCAI_PROVIDER } from "../plugins/lunhui/lib/wencai.mjs";
 import { LunhuiError } from "../plugins/lunhui/lib/runs.mjs";
 
 const serve = createFixtureFetch(fileURLToPath(new URL("./fixtures/lunhui/", import.meta.url)));
-const REFRESH = "fake-refresh-value";
-const ENV = { IFIND_REFRESH_TOKEN: REFRESH };
 
-type Call = { path: string; headers: Record<string, string>; body: any };
-function recorder(over: (path: string, n: number) => Response | undefined = () => undefined) {
+type Call = { path: string; method: string; headers: Record<string, string>; body: any };
+function recorder(over: (path: string, n: number) => Response | Promise<Response> | undefined = () => undefined) {
   const calls: Call[] = [];
   const fetchImpl = async (url: string | URL, init?: RequestInit) => {
     const path = new URL(url).pathname;
-    calls.push({ path, headers: { ...(init?.headers as Record<string, string>) }, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+    calls.push({
+      path,
+      method: String(init?.method),
+      headers: { ...(init?.headers as Record<string, string>) },
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    });
     return over(path, calls.filter((c) => c.path === path).length) ?? serve(url, init);
   };
   return { calls, fetchImpl };
 }
 const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status });
-const universe = (r: ReturnType<typeof recorder>, env: Record<string, string> = ENV) =>
-  fetchWencaiUniverse({ session: "2026-10-30", env, fetchImpl: r.fetchImpl });
+const universe = (r: ReturnType<typeof recorder>, opts: Record<string, unknown> = {}) =>
+  fetchWencaiUniverse({ session: "2026-10-30", fetchImpl: r.fetchImpl, ...opts });
+/** A fetch whose query is answered by the adapter's rejection coded `code`. */
+const rejecting = (code: string) => recorder(() => Promise.reject(Object.assign(new Error(`the Account at http://127.0.0.1:4820 refused through its iFinD route: ${code}`), { code })));
 
 async function refusal(p: Promise<unknown>, code: string, reason: RegExp): Promise<void> {
   await assert.rejects(p, (error: unknown) => {
@@ -34,26 +42,29 @@ async function refusal(p: Promise<unknown>, code: string, reason: RegExp): Promi
     assert.equal(error.code, code);
     assert.match(error.message, /同花顺问财/);
     assert.match(error.message, reason);
-    assert.ok(!error.message.includes("fixture-access") && !error.message.includes(REFRESH), "no token in the message");
+    assert.doesNotMatch(error.message, /access_token|refresh_token|127\.0\.0\.1/);
     return true;
   });
 }
 
-test("a universe is one token exchange and one query, the session's date in it", async () => {
-  resetWencaiToken();
+test("a universe is one query, the session's date in it, and no token", async () => {
   const r = recorder();
   const out = await universe(r);
-  assert.deepEqual(r.calls.map((c) => c.path), ["/api/v1/get_access_token", "/api/v1/smart_stock_picking"]);
-  assert.equal(r.calls[0].headers.refresh_token, REFRESH);
-  assert.equal(r.calls[1].headers.access_token, "fixture-access");
-  assert.equal(r.calls[1].body.searchstring, "A股 2026年10月30日涨跌幅 成交额 主力资金流向 所属概念");
-  assert.equal(r.calls[1].body.searchtype, "stock");
+  assert.deepEqual(r.calls.map((c) => c.path), ["/api/v1/smart_stock_picking"]);
+  const [call] = r.calls;
+  assert.equal(call.method, "POST");
+  assert.deepEqual(Object.keys(call.headers).sort(), ["Accept", "Content-Type"]);
+  for (const name of Object.keys(call.headers)) assert.doesNotMatch(name, /access_token|refresh_token/i);
+  assert.deepEqual(call.body, { searchstring: "A股 2026年10月30日涨跌幅 成交额 主力资金流向 所属概念", searchtype: "stock" });
   assert.equal(out.host, "quantapi.51ifind.com");
   assert.equal(out.rows.length, 40);
 });
 
+test("the client keeps no token, no cache and no env", () => {
+  assert.deepEqual(Object.keys(wencai).sort(), ["WENCAI_NOT_CONFIGURED", "WENCAI_PROVIDER", "fetchWencaiUniverse"]);
+});
+
 test("rows carry six-digit codes and split concepts", async () => {
-  resetWencaiToken();
   const { rows } = await universe(recorder());
   const row = rows.find((x) => x.code === "603890")!;
   assert.equal(row.name, "白酒1");
@@ -66,100 +77,57 @@ test("rows carry six-digit codes and split concepts", async () => {
   assert.equal(rows.filter((x) => x.concepts.includes("人形机器人")).length, 12);
 });
 
-test("the access token is cached; a refused one is exchanged once more", async () => {
-  resetWencaiToken();
-  const first = recorder();
-  await universe(first);
-  const second = recorder();
-  await universe(second);
-  assert.deepEqual(second.calls.map((c) => c.path), ["/api/v1/smart_stock_picking"]);
-
-  const stale = recorder((path, n) => (path.endsWith("smart_stock_picking") && n === 1 ? json({ errorcode: -1010, errmsg: "access_token invalid" }) : undefined));
-  await universe(stale);
-  assert.deepEqual(stale.calls.map((c) => c.path), ["/api/v1/smart_stock_picking", "/api/v1/get_access_token", "/api/v1/smart_stock_picking"]);
-
-  resetWencaiToken();
-  const dead = recorder((path) => (path.endsWith("smart_stock_picking") ? json({ errorcode: -1010, errmsg: "access_token invalid" }) : undefined));
-  await refusal(universe(dead), "UPSTREAM_INVALID", /凭据被拒/);
-  assert.deepEqual(dead.calls.map((c) => c.path), ["/api/v1/get_access_token", "/api/v1/smart_stock_picking"], "a fresh token is not exchanged again");
+test("the Account without a token is NOT_CONFIGURED", async () => {
+  await refusal(universe(rejecting(IFIND_UNCONFIGURED)), WENCAI_NOT_CONFIGURED, /未配置（账户没有 iFinD 凭据）；本次未写入任何文件。$/);
+  assert.equal(WENCAI_NOT_CONFIGURED, "NOT_CONFIGURED");
 });
 
-const PATHS = { x: "/api/v1/get_access_token", q: "/api/v1/smart_stock_picking" };
-/** A cached access token, then a query whose first `failures` answers are `errorcode`. */
-async function cachedThen(errorcode: number, failures: number) {
-  resetWencaiToken();
-  await universe(recorder());
-  const r = recorder((path, n) => (path.endsWith("smart_stock_picking") && n <= failures ? json({ errorcode, errmsg: "refused" }) : undefined));
-  return { r, out: universe(r) };
-}
-
-test("a cached token answered with any nonzero errorcode is exchanged once and the query asked once more", async () => {
-  const { r, out } = await cachedThen(-9999, 1);
-  assert.equal((await out).rows.length, 40);
-  assert.deepEqual(r.calls.map((c) => c.path), [PATHS.q, PATHS.x, PATHS.q]);
-  // The fresh token is cached: the next universe is one query.
-  const next = recorder();
-  await universe(next);
-  assert.deepEqual(next.calls.map((c) => c.path), [PATHS.q]);
+test("a refused exchange at the Account is 凭据被拒", async () => {
+  await refusal(universe(rejecting(IFIND_CREDENTIAL)), "UPSTREAM_INVALID", /同花顺问财凭据被拒（令牌换取未通过）/);
 });
 
-test("a cached token's retry answered nonzero again refuses with its errorcode, or 凭据被拒 for a token code", async () => {
-  const unknown = await cachedThen(-9999, 2);
-  await refusal(unknown.out, "UPSTREAM_INVALID", /errorcode -9999/);
-  assert.deepEqual(unknown.r.calls.map((c) => c.path), [PATHS.q, PATHS.x, PATHS.q]);
-  const token = await cachedThen(-1301, 2);
-  await refusal(token.out, "UPSTREAM_INVALID", /凭据被拒/);
-  assert.deepEqual(token.r.calls.map((c) => c.path), [PATHS.q, PATHS.x, PATHS.q]);
+test("a 401 is 凭据被拒（访问令牌无效）", async () => {
+  for (const status of [401, 403]) {
+    const r = recorder(() => json({ errorcode: -1010, errmsg: "refused" }, status));
+    await refusal(universe(r), "UPSTREAM_INVALID", /凭据被拒（访问令牌无效）/);
+    assert.equal(r.calls.length, 1, "one query, never a second");
+  }
+  const code = recorder(() => json({ errorcode: -1301, errmsg: "refused" }));
+  await refusal(universe(code), "UPSTREAM_INVALID", /凭据被拒（访问令牌无效）/);
+  assert.equal(code.calls.length, 1);
 });
 
-test("a freshly exchanged token answered nonzero refuses at once - no second exchange", async () => {
-  resetWencaiToken();
-  const r = recorder((path) => (path.endsWith("smart_stock_picking") ? json({ errorcode: -9999, errmsg: "refused" }) : undefined));
-  await refusal(universe(r), "UPSTREAM_INVALID", /errorcode -9999/);
-  assert.deepEqual(r.calls.map((c) => c.path), [PATHS.x, PATHS.q]);
-  resetWencaiToken();
-  const direct = recorder((path) => (path.endsWith("smart_stock_picking") ? json({ errorcode: -9999, errmsg: "refused" }) : undefined));
-  await refusal(universe(direct, { IFIND_ACCESS_TOKEN: "fixture-access", IFIND_REFRESH_TOKEN: REFRESH }), "UPSTREAM_INVALID", /errorcode -9999/);
-  assert.deepEqual(direct.calls.map((c) => c.path), [PATHS.q], "a direct access token is never exchanged");
-});
-
-test("no token, an errorcode, missing columns, no rows, oversize and timeout refuse naming 同花顺问财 and never the token", async () => {
-  const run = async (env: Record<string, string>, over: (path: string, n: number) => any, opts: any = {}) => {
-    resetWencaiToken();
-    const r = recorder(over);
-    return fetchWencaiUniverse({ session: "2026-10-30", env, fetchImpl: r.fetchImpl, ...opts });
-  };
-  await refusal(run({}, () => undefined), "UPSTREAM_INVALID", /未配置/);
-  await refusal(run(ENV, (p) => (p.endsWith("get_access_token") ? json({ errorcode: -1301, errmsg: "Refresh_Token is expired or illegal." }, 401) : undefined)), "UPSTREAM_INVALID", /凭据被拒/);
-  await refusal(run(ENV, (p) => (p.endsWith("get_access_token") ? json({ errorcode: -1301, errmsg: "bad" }) : undefined)), "UPSTREAM_INVALID", /凭据被拒/);
-  await refusal(run(ENV, (p) => (p.endsWith("smart_stock_picking") ? json({ errorcode: -4001, errmsg: "no data" }) : undefined)), "UPSTREAM_INVALID", /errorcode -4001/);
+test("an errorcode, missing columns, no rows, oversize, timeout and an unreachable Account refuse naming 同花顺问财", async () => {
+  const run = (over: (path: string, n: number) => any, opts: any = {}) => universe(recorder(over), opts);
+  await refusal(run(() => json({ errorcode: -4001, errmsg: "no data" })), "UPSTREAM_INVALID", /errorcode -4001/);
   const body = JSON.parse(await (await serve("https://quantapi.51ifind.com/api/v1/smart_stock_picking")).text());
   const noConcept = structuredClone(body);
   delete noConcept.tables[0].table["所属概念"];
-  await refusal(run(ENV, (p) => (p.endsWith("smart_stock_picking") ? json(noConcept) : undefined)), "UPSTREAM_INVALID", /缺少列/);
+  await refusal(run(() => json(noConcept)), "UPSTREAM_INVALID", /缺少列/);
   const empty = structuredClone(body);
   for (const k of Object.keys(empty.tables[0].table)) empty.tables[0].table[k] = [];
-  await refusal(run(ENV, (p) => (p.endsWith("smart_stock_picking") ? json(empty) : undefined)), "NO_MARKET_DATA", /没有可用行/);
-  await refusal(run(ENV, (p) => (p.endsWith("smart_stock_picking") ? new Response("x".repeat(2000)) : undefined), { maxBytes: 1000 }), "UPSTREAM_TOO_LARGE", /响应过大/);
-  resetWencaiToken();
-  const slow = async (url: string | URL, init?: RequestInit) => {
-    if (new URL(url).pathname.endsWith("smart_stock_picking"))
-      return new Promise<Response>((_, rej) => init?.signal?.addEventListener("abort", () => rej(init.signal!.reason)));
-    return serve(url, init);
-  };
-  await refusal(fetchWencaiUniverse({ session: "2026-10-30", env: ENV, fetchImpl: slow, timeoutMs: 30 }), "UPSTREAM_TIMEOUT", /超时/);
+  await refusal(run(() => json(empty)), "NO_MARKET_DATA", /没有可用行/);
+  await refusal(run(() => new Response("x".repeat(2000)), { maxBytes: 1000 }), "UPSTREAM_TOO_LARGE", /响应过大/);
+  await refusal(run(() => new Response("not json")), "UPSTREAM_INVALID", /不是 JSON 对象/);
+  const slow = async (_url: string | URL, init?: RequestInit) =>
+    new Promise<Response>((_, rej) => init?.signal?.addEventListener("abort", () => rej(init.signal!.reason)));
+  await refusal(fetchWencaiUniverse({ session: "2026-10-30", fetchImpl: slow, timeoutMs: 30 }), "UPSTREAM_TIMEOUT", /超时/);
+  const unreachable = recorder(() => Promise.reject(new Error("the Account at http://127.0.0.1:4820 did not answer")));
+  const stderr = process.stderr.write;
+  process.stderr.write = (() => true) as any;
+  try {
+    await refusal(universe(unreachable), "UPSTREAM_INVALID", /请求未完成/);
+  } finally {
+    process.stderr.write = stderr;
+  }
 });
 
 test("sha256 is over the reply's data and the query is recorded", async () => {
-  resetWencaiToken();
   const a = await universe(recorder());
-  resetWencaiToken();
   const b = await universe(recorder());
   assert.match(a.sha256, /^[0-9a-f]{64}$/);
   assert.equal(a.sha256, b.sha256);
   assert.equal(a.query, "A股 2026年10月30日涨跌幅 成交额 主力资金流向 所属概念");
   assert.ok(a.dataVol > 0);
-  assert.equal(hasWencaiCredentials(ENV), true);
-  assert.equal(hasWencaiCredentials({}), false);
   assert.equal(WENCAI_PROVIDER, "同花顺问财");
 });

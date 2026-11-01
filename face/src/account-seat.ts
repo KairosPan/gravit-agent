@@ -9,22 +9,24 @@
  * spawns it from the repo's `account/` (`npm ci` there; `FACE_ACCOUNT_SEAT_DIR`
  * names another install) and points it at the service the operator runs
  * (`FACE_ACCOUNT_URL`); the face never starts the service.
- * Composed beside the AKShare row — after dsh-base and the policy layer,
+ * Composed in the project layer — after dsh-base and the policy layer,
  * before the profile and home patches — so an operator patch can replace its
  * config or disable it (`- { id: mcp-account, disabled: true }`).
  *
  * What the seat does, read at buyer-agent-demo @ 133b9a7:
  * - its key is the Account's, made on its first tool call under
  *   `$BUYER_HOME/seats/<slug>.json` (exclusive create, mode 0600), never read
- *   here; the seat's name is what the Account page shows, so the operator
- *   admits it as Gravit and signs its limit under that name;
- * - it registers its 35 real-account tools even when the service is not
+ *   here; the seat's name is what the Account shows on the face's Account ›
+ *   Agents, so the operator lets it in as Gravit and signs its limit under that
+ *   name;
+ * - it registers its 36 real-account tools even when the service is not
  *   reachable (its startup GET of `/api/account` fails closed to "real"), so a
  *   face booted before the service still carries the tools, and a call then
  *   fails in the seat's own words;
- * - it sets no `instructions`, so no prompt section; its 35 schemas enter the
+ * - it sets no `instructions`, so no prompt section; its 36 schemas enter the
  *   tool block of every request (DEVELOPMENT.md §4.3 prices them);
- * - `portfolio_wait` polls at most 55 s, hence the 90 s call timeout.
+ * - `portfolio_wait` polls at most 55 s, and the Account's AKShare sidecar call
+ *   is bounded at 120 s, so the seat waits longer: the 130 s call timeout.
  *
  * dsh 0.2.0-rc.2 spawns a stdio server twice per connect (a probe, then the
  * serving process); the probe calls no tool, so the lazily made key is the
@@ -46,7 +48,7 @@ export const ACCOUNT_SEAT_ROW_ID = "mcp-account";
 /** The server name, hence the tool prefix `mcp__account__`: Linqi's own name for the dsh row. */
 export const ACCOUNT_SEAT_SERVER = "account";
 export const SEAT_TOOL_PREFIX = `mcp__${ACCOUNT_SEAT_SERVER}__`;
-/** The seat's name on the Account page; its slug `gravit` names the key file there. */
+/** The seat's name at the Account, as the face's Account › Agents shows it; its slug `gravit` names the key file there. */
 export const ACCOUNT_SEAT_NAME = "Gravit";
 /** The repo's `account/`, the Account service's install, resolved from this module's own location (as
  * `roles.ts` resolves `ROLES_ROOT`); `FACE_ACCOUNT_SEAT_DIR` overrides it ({@link seatDir}). */
@@ -114,7 +116,7 @@ export function accountSeatPatches(dir = seatDir(), url = seatUrl()): FacePatchL
         args: [join(dir, "node_modules", "tsx", "dist", "cli.mjs"), "src/portfolio/mcp.ts"],
         cwd: dir,
         env: { PORTFOLIO_URL: url, PORTFOLIO_AGENT: ACCOUNT_SEAT_NAME },
-        toolCallTimeoutMs: 90_000,
+        toolCallTimeoutMs: 130_000, /* the Account's 120 s AKShare deadline plus margin; portfolio_wait's 55 s fits */
         failOnStartupError: false,
       } satisfies StdioConfig,
     }],

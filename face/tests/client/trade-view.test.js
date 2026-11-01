@@ -8,7 +8,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  TRADE_KINDS, tradeableOf, pickerOf, ticketOf, tradeFieldsOf, tradeDraftOf, quoteOf, underWayOf, fillWords,
+  TRADE_KINDS, tradeableOf, pickerOf, ticketOf, tradeFieldsOf, tradeDraftOf, quoteOf, underWayOf, fillWords, eventPriceOf,
 } from '../../client/js/host/trade-view.js';
 import { ACCOUNT_TABS } from '../../client/js/host/market-view.js';
 import { fieldsOf, draftOf } from '../../client/js/host/sheet-view.js';
@@ -67,6 +67,18 @@ test('pickerOf: Crypto — the coins held from the leading lens by matchKey, the
   // a coin listed only publicly and at the paper account
   assert.equal(p.most.find(r => r.id === 'coin:DOGE').sub, 'Momentum · paper · 1 public venue');
   assert.deepEqual(p.results, [], 'no query, no results');
+});
+
+test('pickerOf: an A share starred (the Account key, the page\'s china entry) never reaches the picker, whatever its tabs', () => {
+  const all = fx('explore-all');
+  // the worst case: an A-share item a read lists under the stocks tab
+  all.items.push({ key: 'cn:600519', kind: 'stock', name: '贵州茅台', base: '600519', tabs: ['all', 'stocks'], at: [] });
+  const page = { ...fx('account'), watch: [...fx('account').watch, { venue: 'china', symbol: '000001', at: '2026-11-01T01:00:00.000Z' }] };
+  for (const { id: kind } of TRADE_KINDS) {
+    const p = pickerOf(stateWith({ kind, all, page, watch: ['cn:600519', 'stock:NVDA', 'coin:BTC'] }), NOW);
+    assert.equal(ids(p.watching).some(id => id.startsWith('cn:')), false, kind);
+  }
+  assert.deepEqual(ids(pickerOf(stateWith({ kind: 'stocks', all, page, watch: ['cn:600519', 'stock:NVDA'] }), NOW).watching), ['stock:NVDA']);
 });
 
 test('pickerOf: Stocks held by matchKey; a prediction held opens as a sell of its outcome at its venue', () => {
@@ -339,6 +351,34 @@ test('underWayOf: the page\'s working orders, each with what cancels it', () => 
   assert.deepEqual(underWayOf({ ok: false }), []);
 });
 
+test('underWayOf marks a DEX order waiting for the wallet; it keeps its own cancel', () => {
+  const page = fx('account');
+  const tx = { chainId: 8453, chainIdHex: '0x2105', from: '0x' + '12'.repeat(20), to: '0x' + '34'.repeat(20), data: '0xabcd', value: '0x0' };
+  const base = page.orders.find(o => o.id === 'ord-0009');
+  page.orders = [
+    { ...base, id: 'ord-0031', clientId: 'c0ffee', status: 'pending', walletTxs: [tx], ref: undefined },
+    { ...base, id: 'ord-0032', clientId: 'c0ffef', status: 'pending', walletTxs: [tx], ref: '0xsent' },
+    { ...base, id: 'ord-0033', clientId: 'c0fff0', status: 'pending', walletTxs: [tx], ref: undefined, reported: '0x' + 'bb'.repeat(32) },
+    page.orders.find(o => o.id === 'ord-0002'),
+  ];
+  page.venues = [...page.venues, { id: 'w1', name: 'My Wallet' }];
+  page.payments = [
+    { id: 'pay-0009', at: '2026-11-01T14:00:00.000Z', kind: 'send', from: 'w1', to: 'ex', status: 'authorized', legs: [{ native: { walletTx: tx } }], live: { network: 'Base' } },
+    { id: 'pay-0010', at: '2026-11-01T14:01:00.000Z', kind: 'send', from: 'w1', to: 'ex', status: 'pending', legs: [{ native: { walletTx: tx } }] },
+    { id: 'pay-0011', at: '2026-11-01T14:02:00.000Z', kind: 'withdraw', from: 'ex', to: 'w1', status: 'authorized', legs: [{}] },
+    { id: 'pay-0012', at: '2026-11-01T14:03:00.000Z', kind: 'send', from: 'w1', to: 'ex', status: 'authorized', legs: [{ native: { walletTx: tx } }], live: { reported: '0x' + 'cc'.repeat(32) } },
+  ];
+  const rows = underWayOf(page);
+  const [waits, placed, held, rests, pay, payHeld] = rows;
+  assert.equal(rows.length, 6);
+  assert.deepEqual([waits.id, waits.walletSend, waits.cancel, waits.walletKey, waits.walletReported], ['ord-0031', { order: 'ord-0031' }, { venue: waits.venue, order: 'ord-0031' }, 'c0ffee', false]);
+  assert.deepEqual([held.walletSend, held.walletReported], [{ order: 'ord-0033' }, true], 'a hash the Account already holds');
+  assert.equal(payHeld.walletReported, true);
+  assert.deepEqual([placed.walletSend, placed.cancel], [null, { venue: placed.venue, order: 'ord-0032' }], 'sent (its ref): an order like any other');
+  assert.deepEqual([rests.walletSend, rests.walletKey, rests.cancel], [null, null, { venue: 'ex', order: 'ord-0002' }]);
+  assert.deepEqual(pay, { payment: 'pay-0009', words: 'Send · My Wallet → Stand-in Exchange · Base', key: 'pay-0009@2026-11-01T14:00:00.000Z', walletReported: false });
+});
+
 test('fillWords: a fill frame as one line — the side, the size and base, the price, the venue, paper said', () => {
   const fill = {
     venue: 'ex', venueName: 'Stand-in Exchange', ref: 'sx-00009', clientId: 'c1', filledQty: 0.04, symbol: 'ETH/USDT', name: 'ETH / USDT',
@@ -367,4 +407,13 @@ test('the views read the store as it boots without throwing', () => {
   assert.deepEqual(pickerOf(s, NOW), { held: [], watching: [], most: [], results: [] });
   assert.equal(ticketOf(s, NOW), null);
   assert.equal(ticketOf({ ...s, trade: { ...s.trade, ticket: { id: 'coin:ETH', side: 'buy', venue: null, outcome: 0 } } }, NOW), null);
+});
+
+test('eventPriceOf: cents typed as the dollars the Account signs, six places, trailing zeros trimmed; null outside 0 < c < 100', () => {
+  assert.equal(eventPriceOf('62'), '0.62');
+  assert.equal(eventPriceOf('0.5'), '0.005');
+  assert.equal(eventPriceOf(' 10 '), '0.1');
+  assert.equal(eventPriceOf('99.99'), '0.9999');
+  for (const t of ['100', '0', '150', '-5', '', 'abc', '1e1', '0.00001']) assert.equal(eventPriceOf(t), null, JSON.stringify(t));
+  assert.equal(eventPriceOf(62), null, 'a typed string only');
 });

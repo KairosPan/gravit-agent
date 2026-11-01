@@ -3,10 +3,15 @@
 // history curve, the statement and the agents — and the connect sheet's reads (where this account can connect, the kept paper
 // books, a key file's check, a venue's reach), each kind one flight at a time; the page at the Account's own cadence (every
 // 20 s on screen, 80 s while the stream is open); and the stream's account events as the reads they name, past the face's
-// cache. The views over what lands are account-view.js's.
-import { pageOk, worthOf } from './account-view.js';
+// cache; and Guard (plan 4a Task 5) and Close to agents (plan 4b Task 4), the Account's unsigned switches, posted through the
+// face's proxy; and a venue's own sign-in for the connect sheet, its tab and its status poll. The views over what lands are
+// account-view.js's.
+import { pageOk, worthOf, venuesOf } from './account-view.js';
+import { refusedAt } from './owner-view.js';
 
 export const ACCOUNT_POLL_MS = 20_000, ACCOUNT_POLL_STREAM_MS = 80_000;
+/** A venue's sign-in is asked how it stands this often, for at most this long (the Account's connect.js). */
+export const SIGNIN_POLL_MS = 1_500, SIGNIN_WITHIN_MS = 15 * 60_000;
 
 // the stream's events that move money, an order or a position: the holdings and the page are read again
 const MOVES = new Set(['order', 'fill', 'paper', 'balance', 'position']);
@@ -22,8 +27,20 @@ const hasPaper = page => pageOk(page) && page.venues.some(v => v?.paper === true
 // a read past the face's cache: the face's own flag, never forwarded
 const freshOf = path => `${path}${path.includes('?') ? '&' : '?'}fresh=1`;
 const nothing = () => {};
+const GUARD = '/data/account/guard';
+const GUARD_SAID = 'Guard: what agents ask for waits for you on a card.';
+const NO_ANSWER = 'The account did not answer. Try again.';
+const RECEIVE_ELSEWHERE = 'The account answered for another account or network: nothing is shown. Read again.';
+// no door handed in: nothing answers
+const noDoor = async () => ({ status: 0, body: { ok: false, error: NO_ANSWER } });
 
-export function startAccount({ store, getJson, now = Date.now, schedule, cancelTimer, streamOpen = () => false, onPage = nothing }) {
+// a venue's sign-in page, as the Account answers it: a web address, nothing else
+const webUrl = v => (typeof v === 'string' && /^https?:\/\//i.test(v) ? v : '');
+// who a sign-in option signs in at (sheet-view.js whoOf)
+const whoOf = option => (typeof option?.label === 'string' ? option.label.split(' · ')[0] : '') || str(option?.kind);
+const noTab = () => null;
+
+export function startAccount({ store, getJson, post = noDoor, now = Date.now, schedule, cancelTimer, streamOpen = () => false, onPage = nothing, openTab = noTab }) {
   let closed = false;
   let timer = null;
   let holdingsDue = 0;       // loadAll calls whose holdings read is still to come: a page landing leaves the paper lens to them
@@ -81,6 +98,8 @@ export function startAccount({ store, getJson, now = Date.now, schedule, cancelT
           const held = store.get().account.data;
           const afterUnread = held != null && !pageOk(held);
           store.dispatch('accountLoaded', { data: body, at: now() });
+          // a fresh page may name an account connected again, or another key: the Receive addresses read before it are not drawn
+          if (fresh) store.dispatch('receiveClear');
           if (holdingsDue === 0 && hasPaper(body) && (afterUnread || store.get().account.paper.data === null)) {
             void loadHoldings({ fresh: afterUnread }).then(() => loadHistory());
           }
@@ -187,10 +206,166 @@ export function startAccount({ store, getJson, now = Date.now, schedule, cancelT
     else if (type === 'snapshot') void loadAll();
   }
 
+  /** Guard: one POST to the face's proxy (`/data/account/guard`, `{}` — the proxy sends the Account its fixed `{"mode":"guard"}`),
+   *  never signed: tightening is the Account's safer direction. One in the air at a time — a second press while it is joins
+   *  it. Said done only when the Account took it (a 2xx its own refused test passes); a refusal is the Account's words (`refusal.message`,
+   *  else `error`, else no answer). Then the page is read past the face's cache, so the mode drawn is the page's. `post` is the
+   *  owner door's (host/owner.js postVia: `{ status, body }`, never throwing). Resolves `{ taken, message }` — the Account's words
+   *  when it did not take it — for a caller that waits on it (the sign-out's Guard first, plan 4b Task 6). */
+  let guarding = null;
+  function guard() {
+    if (closed) return Promise.resolve({ taken: false, message: NO_ANSWER });
+    if (guarding) return guarding;
+    store.dispatch('guardAsking');
+    const current = (async () => {
+      let r;
+      try { r = await post(GUARD, {}); } catch { r = { status: 0, body: {} }; }
+      if (closed) return { taken: false, message: NO_ANSWER };
+      // taken only on a 2xx its refused test does not call refused (the owner device's own `taken`)
+      const taken = r?.status >= 200 && r.status < 300 && !refusedAt(r);
+      const message = taken ? null : messageOf(r?.body) ?? NO_ANSWER;
+      if (taken) store.dispatch('guardSaid', GUARD_SAID); else store.dispatch('guardRefused', message);
+      await load({ fresh: true });
+      return { taken, message };
+    })().finally(() => { if (guarding === current) guarding = null; });
+    guarding = current;
+    return current;
+  }
+
+  // ── the Money tab (plan 4b Task 2) ──
+
+  /** A Receive row's address (`/data/account/receive?venue=&asset=&network=`), the Account's answer landing under the row's key
+   *  (`<venue>|<asset>|<network>`) in `account.receive` — the address, its memo, whose it is and the Account's note, or its
+   *  refusal in its words. One read per key: a second press while one is in the air joins it. */
+  function receive({ venue, asset, network } = {}) {
+    const q = { venue: str(venue), asset: str(asset), network: str(network) };
+    if (!q.venue || !q.asset || !q.network) return Promise.resolve();
+    const key = `${q.venue}|${q.asset}|${q.network}`;
+    return fly(`receive:${key}`, `/data/account/receive?${new URLSearchParams(q).toString()}`, {
+      loading: 'receiveLoading', asking: key,
+      land: (body, refused) => {
+        // the answer names the account, asset and network it is for (service.ts receive): one for another is never drawn here
+        const named = (k, v) => typeof body?.[k] !== 'string' || body[k].toLowerCase() === v.toLowerCase();
+        if (!refused && body?.ok === true && !(named('venue', q.venue) && named('asset', q.asset) && named('network', q.network))) {
+          store.dispatch('receiveFailed', { key, at: now(), message: RECEIVE_ELSEWHERE });
+        } else if (!refused && body?.ok === true && typeof body.address === 'string' && body.address !== '') store.dispatch('receiveLoaded', { key, data: body, at: now() });
+        else store.dispatch('receiveFailed', { key, at: now(), message: messageOf(body) });
+      },
+    });
+  }
+
+  /** A bridge's routes (`POST /data/account/bridge-routes`, `{ draft }`), read after its preparation lands, beside the quote the
+   *  Account signs for: the chosen one first. Only the latest ask lands in `account.routes` — `asked` the draft it was asked
+   *  for, as the sheet's own `asked` reads, so the sheet draws them only beside that preparation. A failure is said, and stops
+   *  nothing. `post` is the owner door's (`{ status, body }`, never throwing). */
+  let routesSeq = 0;
+  async function bridgeRoutes(draft) {
+    if (closed || draft === null || typeof draft !== 'object') return;
+    const mine = ++routesSeq;
+    const asked = JSON.stringify(draft);
+    store.dispatch('routesAsking', asked);
+    let r;
+    try { r = await post('/data/account/bridge-routes', { draft }); } catch { r = { status: 0, body: {} }; }
+    if (closed || mine !== routesSeq) return;
+    if (r?.status >= 200 && r.status < 300 && !refusedAt(r) && Array.isArray(r.body?.routes)) store.dispatch('routesLanded', { asked, data: r.body });
+    else store.dispatch('routesFailed', { asked, message: messageOf(r?.body) });
+  }
+
+  /** Earn (plan 4b Task 3): the products the connected venues offer and what is in them (`/data/account/earn`), into
+   *  `account.earn` — read on entering Money and, past the face's cache, after every taken earn. A refusal keeps the last answer
+   *  and carries the Account's words. */
+  const loadEarn = ({ fresh = false } = {}) =>
+    fly('earn', '/data/account/earn', { fresh, loading: 'earnLoading', land: landing('earnLoaded', 'earnFailed') });
+
+  // ── Venues (plan 4b Task 4) ──
+
+  /** Close to agents: one POST to the face's proxy (`/data/account/revoke`, `{ account: venue }`), never signed — agents keep
+   *  their reads and place or move nothing there, the Account's safer direction (portfolio.js pfAgentsSwitch). One in the air
+   *  per venue: a second press while it is joins it. Said in the Account's own sentence when the Account took it, else the
+   *  Account's words; then the page is read past the face's cache, so the row drawn is the page's. */
+  const closing = new Map();
+  function revoke(venue) {
+    const id = str(venue);
+    if (closed || !id) return Promise.resolve();
+    if (closing.has(id)) return closing.get(id);
+    store.dispatch('closing', { venue: id, status: 'asking' });
+    const current = (async () => {
+      let r;
+      try { r = await post('/data/account/revoke', { account: id }); } catch { r = { status: 0, body: {} }; }
+      if (closed) return;
+      if (!(r?.status >= 200 && r.status < 300) || refusedAt(r)) store.dispatch('closing', { venue: id, status: 'refused', message: messageOf(r?.body) ?? NO_ANSWER });
+      else {
+        const name = venuesOf(store.get().account.data).find(v => v.id === id)?.name || id;
+        store.dispatch('closing', { venue: id, status: 'said', said: `${name} is closed to agents: they keep reading it, and place or move nothing there. Reopening it is signed.` });
+      }
+      await load({ fresh: true });
+    })().finally(() => { if (closing.get(id) === current) closing.delete(id); });
+    closing.set(id, current);
+    return current;
+  }
+
+  /** A venue's own sign-in (OAuth) for the connect sheet's sign-in option, as the Account's connect.js runs it: a tab opened at
+   *  once — inside the operator's press, so no popup blocker stops it — its opener cleared; `POST /data/account/signin/start`
+   *  `{ connector: option.kind }`; the tab sent to the venue's page the answer names (no tab: the slice keeps the address, and
+   *  the sheet draws the link); then `/data/account/signin/status?state=` every SIGNIN_POLL_MS for at most SIGNIN_WITHIN_MS,
+   *  only while `alive()` (the sheet it was started from, on this option) — `ready` lands the state through `onReady(state)`,
+   *  `failed` the Account's words; an answer the face re-served as stale, an `unknown`, or no answer is not the final status:
+   *  the poll goes on. A second start supersedes the first's poll, and clears the state a first one kept in the sheet's hidden
+   *  `credentialRef` before it asks. */
+  let signInSeq = 0;
+  let signInTimer = null;
+  function stopSignIn() { if (signInTimer !== null) { cancelTimer(signInTimer); signInTimer = null; } }
+  async function signIn(option, { alive = () => true, onReady = nothing } = {}) {
+    if (closed || !option || typeof option.connector !== 'string') return;
+    const mine = ++signInSeq;
+    stopSignIn();
+    let tab = null;
+    try { tab = openTab('about:blank', '_blank') ?? null; } catch { tab = null; }
+    try { if (tab) tab.opener = null; } catch { /* a tab that will not say */ }
+    const connector = option.connector;
+    // and while the slice still names this sign-in: a sheet opened or closed, or the connector changed, forgets it (reducers/owner.js)
+    const live = () => !closed && mine === signInSeq && alive() && store.get().account.signIn?.connector === connector;
+    store.dispatch('signIn', { status: 'starting', connector, url: '', tab: tab !== null, state: '', message: null });
+    // a state an earlier sign-in kept in the sheet's hidden field is not this one's: cleared before the Account is asked
+    if (alive()) store.dispatch('sheetField', { name: 'credentialRef', value: '' });
+    let r;
+    try { r = await post('/data/account/signin/start', { connector: str(option.kind) }); } catch { r = { status: 0, body: {} }; }
+    const url = webUrl(r?.body?.url), state = str(r?.body?.state);
+    if (!live()) { try { tab?.close?.(); } catch { /* gone already */ } return; }
+    if (!(r?.status >= 200 && r.status < 300) || refusedAt(r) || !url || !state) {
+      try { tab?.close?.(); } catch { /* gone already */ }
+      store.dispatch('signIn', { status: 'failed', message: messageOf(r?.body) ?? 'The sign-in could not start.' });
+      return;
+    }
+    let sent = false;
+    try { if (tab) { tab.location.href = url; sent = true; } } catch { sent = false; }
+    store.dispatch('signIn', { status: 'waiting', url, tab: sent, state });
+    const until = now() + SIGNIN_WITHIN_MS;
+    const ask = async () => {
+      signInTimer = null;
+      if (!live()) return;
+      let st = null;
+      try { st = await getJson(`/data/account/signin/status?state=${encodeURIComponent(state)}`); } catch { st = null; }
+      if (!live()) return;
+      // a status the face re-served from before (`stale`) says nothing of now: unknown, as no answer is
+      const known = st?.ok === true && st.stale !== true ? st.status : 'unknown';
+      if (known === 'ready') {
+        store.dispatch('signIn', { status: 'ready', message: null });
+        onReady(state);
+        return;
+      }
+      if (known === 'failed') { store.dispatch('signIn', { status: 'failed', message: words(st.error) ?? 'The sign-in did not finish.' }); return; }
+      if (now() >= until) { store.dispatch('signIn', { status: 'expired' }); return; }
+      signInTimer = schedule(() => { void ask(); }, SIGNIN_POLL_MS);
+    };
+    await ask();
+  }
+
   function close() {
     closed = true;
     poll(false);
+    stopSignIn();
   }
 
-  return { load, loadHoldings, loadHistory, loadStatement, loadAgents, loadAll, loadVenuesHere, loadPaperBooks, checkKeyfile, reach, poll, onStreamEvent, close };
+  return { load, guard, revoke, signIn, receive, bridgeRoutes, loadEarn, loadHoldings, loadHistory, loadStatement, loadAgents, loadAll, loadVenuesHere, loadPaperBooks, checkKeyfile, reach, poll, onStreamEvent, close };
 }

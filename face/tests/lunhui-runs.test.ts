@@ -462,6 +462,28 @@ test("runs: addEvidence admits an optional provider, fallback_from, query and re
   assert.deepEqual((await readdir(other.dir)).sort(), ["metrics.json", "run.json"]);
 });
 
+test("runs: addEvidence records via on the file and its run.json entry", async (t) => {
+  const { dir } = await openRun(await oneStrategy(t), "market");
+  const plain = await addEvidence(dir, "quotes", [{ code: "600519" }], meta);
+  const relayed = await addEvidence(dir, "index", [{ code: "sh000001" }], { ...meta, via: "account" });
+  assert.equal(Object.hasOwn(JSON.parse(await readText(dir, plain.file)), "via"), false);
+  const file = JSON.parse(await readText(dir, relayed.file));
+  assert.equal(file.via, "account");
+  // The items keep their shapes and ids: via is the file's, not an item's.
+  assert.deepEqual(file.items, [{ code: "sh000001", id: relayed.ids[0] }]);
+  const entries = (await readRun(dir)).manifest.evidence as any[];
+  assert.equal(Object.hasOwn(entries[0], "via"), false);
+  assert.equal(entries[1].via, "account");
+});
+
+test("runs: addEvidence refuses a via that is not \"account\"", async (t) => {
+  const { dir } = await openRun(await oneStrategy(t), "market");
+  for (const via of ["direct", "", 1, null]) {
+    await assert.rejects(addEvidence(dir, "boards", [], { ...meta, via } as any), (error: unknown) => error instanceof TypeError, JSON.stringify(via));
+  }
+  assert.deepEqual((await readdir(dir)).sort(), ["metrics.json", "run.json"]);
+});
+
 test("runs: snapshot_id depends on the evidence bytes, not on the order the sources were added", async (t) => {
   const strategyDir = await oneStrategy(t);
   const later = { ...meta, received_at: "2026-10-23T07:00:03Z" };

@@ -7,7 +7,7 @@
  * one-row operator patch, not a code change.
  *
  * WHERE IT COMPOSES (boot.ts `composeFace`): directly ABOVE the bundle layer
- * and BELOW everything the operator writes — AKShare, the profile's
+ * and BELOW everything the operator writes — the project rows, the profile's
  * `cordis.patch.yml`, the home layer. So an operator row with the same id wins
  * (the last write per row wins: NEW packages/bundle/base/cordis.patch.yml:1-4),
  * which is the opposite of the face's overlay rows, and on purpose: these are

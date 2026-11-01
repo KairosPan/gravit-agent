@@ -2,8 +2,8 @@
 /**
  * A deliberately SLOW plugin row, for tests/order-gate-midboot-smoke.test.ts
  * only. It stands in for any row that keeps dsh's `boot()` pending while the
- * rest of the tree already serves - an MCP server still importing (AKShare's
- * FastMCP server is spawned twice per connect, src/akshare.ts), a bot, a
+ * rest of the tree already serves - an MCP server still importing (dsh's
+ * stdio client spawns a probe process before the serving one), a bot, a
  * plugin doing I/O in `apply`. `boot()` resolves only once the Loader has
  * settled every row (NEW packages/boot/app-boot/src/index.ts:1004-1012), so
  * while this row's `apply` is pending, `bootFace` cannot return - which is the

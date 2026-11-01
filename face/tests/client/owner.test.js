@@ -46,7 +46,7 @@ const goKey = html => { const m = html.match(GO); assert.ok(m, 'the go key is dr
 test('the device line: the six standings, each its line and its one key', () => {
   const signs = renderDeviceLine(standing('signs', KID));
   assert.equal(signs, '<p class="acct-note">This page signs for the account</p>');
-  assert.equal(renderDeviceLine(standing('pending', KID)), '<p class="acct-note">Waiting to be let in — Let it sign on the Account page, under Devices</p>');
+  assert.equal(renderDeviceLine(standing('pending', KID)), '<p class="acct-note">Waiting to be let in — a browser that signs lets it in, under Settings › Devices</p>');
   assert.equal(renderDeviceLine(standing('none')), '<p class="acct-note">This browser cannot sign for the account</p>');
   assert.equal(renderDeviceLine(standing('unknown')), '', 'not known yet: nothing');
   // the pair box, only for a page that needs the code
@@ -238,7 +238,7 @@ test('every Account string is escaped: a name with markup in the title, the fiel
 });
 
 // plan 2 Task 8: the connect sheet's check, a muted line under its fields, from the key file's check and the venue's reach
-test("a connect sheet draws its check under the fields: the key file found or missing, the Account page for what connects there", () => {
+test("a connect sheet draws its check under the fields: the key file found or missing; a sign-in's key, or the venue's link", () => {
   const options = connectOptionsOf(fx('account'), fx('venues'));
   const open = opened('connect', { options, connector: 'live:alpaca-paper', venue: 'alpaca-paper' });
   const LINE = /<p class="sheet-hint">([^<]*)<\/p>/;
@@ -255,10 +255,56 @@ test("a connect sheet draws its check under the fields: the key file found or mi
   // the reach: a venue that does not answer from here says so first
   const unreached = R.reachLoaded(checked(open, body), { data: { ok: true, reach: [{ connector: 'live:alpaca-paper', state: 'location', said: 'not offered here', at: '2026-10-24T15:00:00.000Z' }] }, at: NOW });
   assert.equal(line(unreached), `not offered here · ${esc(body.message)}`);
-  // an option that connects on the Account page
-  assert.equal(line(opened('connect', { options, connector: 'live:robinhood' })), 'Connect on the Account page');
+  // a sign-in connects here too: its key under the fields (its state a hidden field, drawn as nothing), the venue's own words
+  const rh = opened('connect', { options, connector: 'live:robinhood' });
+  const rhHtml = renderSheet(rh, NOW);
+  has(rhHtml, '<div class="btn-row"><button type="button" class="btn-sm" data-action="connectSignIn">Sign in at Robinhood</button></div>');
+  assert.ok(!rhHtml.includes('name="credentialRef"'), 'the state is never a box to type in');
+  assert.ok(!rhHtml.includes('Account page'));
+  assert.equal(line(rh), 'Robinhood did not answer');
+  // no tab opened for it: the venue's page as a link, the address escaped
+  const noTab = R.signIn(rh, { status: 'waiting', connector: 'live:robinhood', url: 'https://robinhood.example/o?a=1&b="2"', tab: false, state: 'st' });
+  has(renderSheet(noTab, NOW), '<p class="sheet-hint"><a href="https://robinhood.example/o?a=1&amp;b=&quot;2&quot;" target="_blank" rel="noopener noreferrer">Open Robinhood&#39;s sign-in page</a>, then come back.</p>');
   // another sheet draws no check, whatever was read
   const letIn = checked(opened('letIn', { address: ADDRESS, name: 'Claude Code' }), body);
   assert.equal(line(letIn), null);
   clean(renderSheet(unreached, NOW));
+});
+
+test('Sign in at is off while the sign-in starts, waits or is ready', () => {
+  const options = connectOptionsOf(fx('account'), fx('venues'));
+  const rh = opened('connect', { options, connector: 'live:robinhood' });
+  const ON = '<button type="button" class="btn-sm" data-action="connectSignIn">Sign in at Robinhood</button>';
+  const OFF = '<button type="button" class="btn-sm" data-action="connectSignIn" disabled>Sign in at Robinhood</button>';
+  for (const status of ['starting', 'waiting', 'ready']) {
+    has(renderSheet(R.signIn(rh, { status, connector: 'live:robinhood', url: 'https://robinhood.example/o', tab: true, state: 'st' }), NOW), OFF, status);
+  }
+  // over, or never started: pressable again
+  for (const status of ['idle', 'failed', 'expired']) has(renderSheet(R.signIn(rh, { status, connector: 'live:robinhood' }), NOW), ON, status);
+  // another option's sign-in does not hold this one's key
+  has(renderSheet(R.signIn(rh, { status: 'waiting', connector: 'live:other' }), NOW), ON);
+});
+
+test('a sign-in belongs to its sheet and option: ready, Cancel, reopen — and waiting, another connector, back — the key is on', () => {
+  const options = connectOptionsOf(fx('account'), fx('venues'));
+  const seed = { options, connector: 'live:robinhood' };
+  const ON = '<button type="button" class="btn-sm" data-action="connectSignIn">Sign in at Robinhood</button>';
+  const OFF = '<button type="button" class="btn-sm" data-action="connectSignIn" disabled>Sign in at Robinhood</button>';
+  // ready, then Cancel, then Connect on Robinhood again: the new sheet's sign-in is not started, so its key is on
+  const ready = R.signIn(opened('connect', seed), { status: 'ready', connector: 'live:robinhood', url: 'https://robinhood.example/o', tab: true, state: 'st' });
+  has(renderSheet(ready, NOW), OFF, 'ready on its own sheet: off');
+  const closed = R.sheetClose(ready);
+  assert.equal(closed.account.signIn.status, 'idle', 'forgotten with its sheet');
+  has(renderSheet(opened('connect', seed, closed), NOW), ON);
+  // and a sign-in kept somehow across an open is forgotten by the open itself
+  has(renderSheet(opened('connect', seed, ready), NOW), ON);
+  // waiting, the connector switched away and back: forgotten on the switch, so the key is on again
+  const waiting = R.signIn(opened('connect', seed), { status: 'waiting', connector: 'live:robinhood', url: 'https://robinhood.example/o', tab: true, state: 'st' });
+  has(renderSheet(waiting, NOW), OFF);
+  const away = R.sheetField(waiting, { name: 'connector', value: 'live:metamask' });
+  assert.equal(away.account.signIn.status, 'idle');
+  has(renderSheet(R.sheetField(away, { name: 'connector', value: 'live:robinhood' }), NOW), ON);
+  // another field's change keeps it
+  assert.equal(R.sheetField(waiting, { name: 'credentialRef', value: '' }).account.signIn.status, 'waiting');
+  assert.equal(R.sheetField(waiting, { name: 'connector', value: 'live:robinhood' }).account.signIn.status, 'waiting', 'the same connector picked again');
 });

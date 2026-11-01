@@ -32,20 +32,25 @@ export function emptyState() {
     },
     // the host's markets (host/markets.js) and the screen's own tab, sort and query: the Account's explore reads by tab (`all`,
     // a kind's own) and the search's, the quotes by 'venue|symbol', a page's candles by its key and compare rows by base, the
-    // Account keys starred and what each old us:/crypto: star was found as; then the face's own wire for the A shares as today
+    // Account keys starred and what each old us:/crypto: star was found as; then the A shares — the cn list, their quotes by cn
+    // id and that read's state, China's state as a provider, the search hits' prices
     markets: {
       tab: 'all', sort: 'volume', q: '',
       explore: {}, results: { status: 'idle', data: null, at: null },
       accountQuotes: {}, candles: {}, compare: {},
       watch: [], watchError: null, asked: {},
-      watchlist: [], quotes: {}, providers: [], connection: 'idle',
-      search: { query: '', status: 'idle', assets: [], partial: false }, hitQuotes: {},
-      // the China tab's ranking read (/data/cn/rank), with the sort it was read for
+      watchlist: [], quotes: {}, providers: [], connection: 'idle', hitQuotes: {},
+      // the China tab's ranking read (the Account's explore?tab=china), with the sort it was read for
       rank: { status: 'idle', data: null, at: null, sort: 'volume', message: null },
+      // the market page on screen's four reads beside its price, by its key (plan 4a Task 4): `here` (the asset sheet), `book`,
+      // `trades`, `funding` (a perpetual's) — each { status, data, at, message, freshAt }; dropped on leaving
+      depth: {},
     },
     // the Account (host/account.js): its page with the sentence of its last refusal, its other reads, the history curve's
     // range, the Statement drawer, and the venue whose Details drawer is open (its id); and the connect sheet's reads — where
-    // this account can connect, the kept paper books, the last key file's check with what it asked, a venue's reach
+    // this account can connect, the kept paper books, the last key file's check with what it asked, a venue's reach; the Rules
+    // tab's Guard press (plan 4a Task 5): in the air, said, or refused in the Account's words; the browser wallet's sends by key
+    // (plan 4b Task 1)
     account: {
       status: 'idle', data: null, at: null, message: null,
       holdings: { status: 'idle', data: null, at: null },
@@ -57,6 +62,21 @@ export function emptyState() {
       paperBooks: { status: 'idle', data: null, at: null, message: null },
       keyfile: { status: 'idle', data: null, at: null, message: null, asked: null },
       reach: { status: 'idle', data: null, at: null, message: null },
+      guard: { status: 'idle', said: null, message: null },
+      wallet: {},
+      // the Money tab (plan 4b Task 2): Receive's addresses by row key, and a bridge's routes for the draft asked
+      receive: {},
+      routes: { asked: null, status: 'idle', data: null, message: null },
+      // Earn (plan 4b Task 3): the products and what is in them, and what the last taken earn said
+      earn: { status: 'idle', data: null, at: null, message: null, said: null },
+      // the connect sheet's browser wallet (plan 4b Task 4): the wallets this page found, asked or signed for an address, or
+      // refused in the wallet's or the Account's words; a venue's sign-in started from it, by its connector — starting, waiting
+      // for the owner on the venue's page (`tab` false when no tab opened, so the venue's link is drawn instead), ready, failed,
+      // run out; and Close to agents by venue: in the air, said, or refused in the Account's words
+      connectWallet: { status: 'idle', wallets: [], wallet: '', address: '', message: null },
+      signIn: { status: 'idle', connector: '', url: '', tab: false, state: '', message: null },
+      closing: {},
+      grantSaid: null,
       statementOpen: false,
       detailsVenue: null,
     },
@@ -65,6 +85,8 @@ export function emptyState() {
     // the owner device (host/owner.js): whether this page signs for the Account, its key's id there, the Account's last
     // refusal to it, a pairing or sign-out in the air
     owner: { role: 'unknown', kid: '', refusal: null, busy: false },
+    // Sell many's drawer (host/sell-many.js, plan 4b Task 3): reading, picking, reviewing, running, done — none open
+    sellMany: null,
     // the owner sheet open (host/sheet.js): prepare, What you sign, sign — none open
     sheet: null,
     // Trade (host/trade.js): the kind it is on, the query, the kinds' picks reads by kind and the trade search's, the ticket

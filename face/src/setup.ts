@@ -40,14 +40,14 @@ const PATCH_HEADER = `# face profile patch layer. The face's own host rows (webs
 # connection, the Remote controllers, the agent preset registry) are inserted
 # programmatically by gravit-face at boot - do NOT add them here. This file is
 # the operator's: their own rows go here (the default model, skill roots, an
-# MCP server of their own) per dsh/README.md. The face composes its AKShare
-# (mcp-akshare) and Account seat (mcp-account) rows itself, below this file:
-# a patch here reaches them, and disables one by its id. The twelve Lunhui
-# rows (lunhui-runs, lunhui-freeze-quotes, lunhui-freeze-limit-up,
-# lunhui-freeze-boards, lunhui-freeze-index, lunhui-environment,
-# lunhui-sentiment, lunhui-theme, lunhui-leader, lunhui-mode, lunhui-review,
-# lunhui-present)
-# compose beside them the same way, and a patch replacing lunhui-runs' config
+# MCP server of their own) per dsh/README.md. The face composes its Account
+# seat row (mcp-account) itself, below this file - AKShare is the Account's
+# (account/README.md): a patch here reaches the seat row, and disables it by
+# its id. The twelve Lunhui rows (lunhui-runs, lunhui-freeze-quotes,
+# lunhui-freeze-limit-up, lunhui-freeze-boards, lunhui-freeze-index,
+# lunhui-environment, lunhui-sentiment, lunhui-theme, lunhui-leader,
+# lunhui-mode, lunhui-review, lunhui-present)
+# compose beside it the same way, and a patch replacing lunhui-runs' config
 # restates strategiesRoot.
 #
 # Face-owned rows are applied AFTER this file and win over it, silently: a

@@ -7,7 +7,7 @@ import { parseHash, toHash } from './router.js';
 import { renderRail } from './render/rail.js';
 import { renderMessagesScreen, currentConversation } from './render/messages.js';
 import { renderMarketsScreen } from './render/markets.js';
-import { renderSettings, renderAccountScreen } from './render/account.js';
+import { renderSettings, renderAccountScreen, renderSellMany } from './render/account.js';
 import { renderSheet } from './render/owner.js';
 import { renderTradeScreen } from './render/trade.js';
 import { setMarkdown } from './render/markdown.js';
@@ -33,18 +33,22 @@ import { wantedViews, ensureViews, minuteAt, applyCursor, cursorFor, reapplyCurs
 import { stockDrawerHtml, askText } from './render/lunhui/stock.js';
 import { loadMemberTrace } from './wire/member-traces.js';
 import { isHostPreset } from './wire/speaker.js';
-import { statementLinesOf, statementCsvOf, connectOptionsOf, asksOf } from './host/account-view.js';
+import { statementLinesOf, statementCsvOf, connectOptionsOf, asksOf, pageOk, writesOn, venuesOf } from './host/account-view.js';
+import { rulesOf } from './host/rules-view.js';
 import { isAccountKey, handWordsOf, watchedOf } from './host/market-view.js';
+import { isCnKey } from './wire/china.js';
 import { startOwner, postVia } from './host/owner.js';
 import { startSheet, PREPARE_QUIET_MS } from './host/sheet.js';
-import { limitSeedOf, grantOf, keyfileAskOf, reachAskOf, letDeviceSeedOf, paperSeedOf } from './host/sheet-view.js';
+import { moveSeedOf, earnSeedOf, earnSaidOf, subWalletSeedOf } from './host/sheet-money.js';
+import { startSellMany } from './host/sell-many.js';
+import { limitSeedOf, grantOf, keyfileAskOf, reachAskOf, letDeviceSeedOf, paperSeedOf, signOutSeedOf, connectOptionOf, isWalletOption } from './host/sheet-view.js';
 import { startTrade } from './host/trade.js';
 import { tradeableOf } from './host/trade-view.js';
 import { indexedDbKeys, memoryKeys, signedOutFlag } from './wire/key-store.js';
-import { createLiveQuotes } from './wire/market-quotes.js';
 import { firstOpen } from './host/sessions.js';
-import { createSymbolSearch } from './wire/market-search.js';
 import { createAccountStream } from './wire/account-stream.js';
+import { discoverWallets, proveWallet } from './wire/wallet.js';
+import { startWalletSend, settleWalletFlight } from './host/wallet-send.js';
 
 export const PREFS_KEY = 'gravit-ui.prefs';
 // how long a press may hold renders: a click lands well inside it, and a release that never arrives cannot freeze the page
@@ -175,8 +179,8 @@ function focusKey(el) {
 // the owner sheet is a drawer of any screen, over the one open (the order sheet is Trade's ticket, not a drawer)
 const sheetUp = s => Boolean(s.sheet) && s.sheet.kind !== 'order';
 // a module card's Run sheet is a drawer of any screen too, drawn after the owner sheet
-const overlayOf = s => (sheetUp(s) ? 'sheet' : s.runSheet || s.lunhui?.stock || s.detailsOpen || s.settingsOpen || s.account.statementOpen || s.account.detailsVenue ? 'drawer' : null);
-const drawerOf = s => (sheetUp(s) ? `sheet:${s.sheet.kind}` : s.runSheet ? `run:${s.runSheet.module}` : s.lunhui?.stock ? `stock:${s.lunhui.stock.code}` : s.detailsOpen ? 'details' : s.settingsOpen ? 'settings' : s.account.statementOpen ? 'statement'
+const overlayOf = s => (sheetUp(s) ? 'sheet' : s.sellMany || s.runSheet || s.lunhui?.stock || s.detailsOpen || s.settingsOpen || s.account.statementOpen || s.account.detailsVenue ? 'drawer' : null);
+const drawerOf = s => (sheetUp(s) ? `sheet:${s.sheet.kind}` : s.sellMany ? 'sellMany' : s.runSheet ? `run:${s.runSheet.module}` : s.lunhui?.stock ? `stock:${s.lunhui.stock.code}` : s.detailsOpen ? 'details' : s.settingsOpen ? 'settings' : s.account.statementOpen ? 'statement'
   : s.account.detailsVenue ? `venue:${s.account.detailsVenue}` : null);
 const closeKeyOf = overlay => (overlay === 'sheet' ? '.drawer.sheet .close-key' : '.drawer .close-key');
 const editorOf = e => (e ? [e.kind, e.convId, e.id].join('|') : null);
@@ -197,7 +201,7 @@ export function boot(win, host = {}) {
   // Gravit's markdown is DOM-built (wire/markdown.js); a test hands in its own or none
   if (host.markdown !== undefined) setMarkdown(host.markdown);
   else if (typeof document !== 'undefined') setMarkdown(gravitMarkdown);
-  // the Account's page is polled only while Account is on screen in a visible tab
+  // the Account's read is polled only while Account is on screen in a visible tab
   const accountShown = () => store.get().route.screen === 'account' && !doc.hidden;
   const showAccount = () => account.poll(accountShown());
   // the Account's push channel, one for this tab (wire/account-stream.js), open while the tab is visible: an event is the reads
@@ -225,29 +229,48 @@ export function boot(win, host = {}) {
   // this page as an owner device of the Account (spec 2026-10-22 §6.3): its key in this browser's IndexedDB (in memory where
   // there is none), every call through the face's proxy (a test hands in its own door); the standing read off every page that
   // lands — the first one pairs it once
+  // the owner door: the owner device's calls, and the Rules tab's Guard (the Account's one unsigned switch), through the face's proxy
+  const ownerPost = host.ownerPost ?? postVia((path, init) => win.fetch(path, init));
   const owner = startOwner({
     store,
-    post: host.ownerPost ?? postVia((path, init) => win.fetch(path, init)),
+    post: ownerPost,
     subtle: win.crypto?.subtle ?? null,
     keys: win.indexedDB ? indexedDbKeys(win.indexedDB) : memoryKeys(),
     flag: signedOutFlag(storage),
   });
-  // the Account's page: read at boot, on entering Account, on Refresh, right after a receipt and on the stream's events; every
-  // 20 s while Account is on screen in a visible tab, 80 s while the stream is open
-  const account = startAccount({ store, getJson, now, schedule, cancelTimer, streamOpen: () => stream.status() === 'open', onPage: body => { void owner.standing(body); } });
+  // the Account's read: read at boot, on entering Account, on Refresh, right after a receipt and on the stream's events; every
+  // 20 s while Account is on screen in a visible tab, 80 s while the stream is open; Guard posted through the owner door
+  // a venue's sign-in opens its tab through the window, inside the operator's press (host/account.js signIn)
+  const account = startAccount({
+    store, getJson, post: ownerPost, now, schedule, cancelTimer, streamOpen: () => stream.status() === 'open', onPage: body => { void owner.standing(body); markets.accountAnswered(body); },
+    openTab: (url, target) => (typeof win.open === 'function' ? win.open(url, target) : null),
+  });
   void account.load();
   // the Account seat's standing (spec 2026-10-20 §6.3): read on entering Venues or Agents, on Refresh, right after a seat receipt
   // and on a card's event
   const seat = startSeat({ store, getJson, now });
-  // what an owner action changed, read as the Account's own page reads it after one: the page, the holdings and the statement
-  // past the face's cache, and the seat's standing after one about an agent's key or limit; a done sheet then closes itself
-  // (the order sheet's words stay on the ticket)
+  // what an owner action changed, read as the retired page read it after one: the page, the holdings and the statement
+  // past the face's cache, a market page's asset sheet (plan 4a Task 4), and the seat's standing after one about an agent's key
+  // or limit; a done sheet then closes itself (the order sheet's words stay on the ticket)
   const SEAT_KINDS = new Set(['letIn', 'limit', 'endLimit', 'revoke']);
-  function afterAction(kind) {
+  function afterAction(kind, body) {
+    // what the Account built for the operator's own wallet (a move out of a wallet, a DEX order) goes to that wallet at once:
+    // it shows the transaction and sends it, and its hash is reported (the retired page's money.js done, trade.js placeOrder)
+    const out = body?.kind === 'result' && body.result !== null && typeof body.result === 'object' ? body.result : null;
+    if (out?.wallet && out.payment) sendFromWallet(walletSend.payment(out.payment, out.wallet, out.walletTxs));
+    // an order placed from the ticket and waiting for the wallet; never a cancel's answer, whose order also has walletTxs
+    else if (kind === 'order' && body?.kind === 'order' && body.order?.status === 'pending' && body.order.walletTxs && !body.order.ref) sendFromWallet(walletSend.order(body.order));
     void account.load({ fresh: true });
     void account.loadHoldings({ fresh: true });
     void account.loadStatement({ fresh: true });
+    markets.afterAction();
     if (SEAT_KINDS.has(kind)) void seat.load({ fresh: true });
+    // a taken earn (plan 4b Task 3): what it said on Money's Earn, and the earn read again past the cache (earn.js:186-194)
+    if (kind === 'earn') { store.dispatch('earnSaid', earnSaidOf(body)); void account.loadEarn({ fresh: true }); }
+    // a signed Beast: the Rules tab's last Guard line goes with the mode it spoke of
+    if (kind === 'beast') store.dispatch('guardClear');
+    // a venue reopened to agents: its Close to agents line goes with the state it spoke of
+    if (kind === 'reopen') { const v = store.get().sheet?.seed?.venue; if (typeof v === 'string') store.dispatch('closingClear', v); }
     const s = store.get().sheet;
     if (kind !== 'order' && s?.kind === kind && s.status === 'done') sheet.close();
   }
@@ -269,24 +292,103 @@ export function boot(win, host = {}) {
     const connector = reachAskOf(s);
     if ((connector || null) !== connectAsked.reach) { connectAsked.reach = connector || null; if (connector) void account.reach(connector); }
   }
+  // the operator's own browser wallet (wire/wallet.js): the wallets this browser announces, asked when one has to send; what
+  // the Account built for it sent once and reported once (host/wallet-send.js) — the face holds no key, the wallet signs; its
+  // last words said on Trade, and the Account read again past the cache
+  const getWallets = host.getWallets ?? (() => discoverWallets(win));
+  const walletSend = startWalletSend({ store, post: ownerPost, getJson, getWallets, schedule });
+  // the connect sheet's browser wallets (plan 4b Task 4): found once per connect sheet when its wallet kind is picked, kept here
+  // with their providers (never in the store); a tile's press has the wallet sign the Account's sentence for its address, which
+  // fills the address — and the name, when none is typed — or says the wallet's or the Account's refusal
+  let connectWallets = [];
+  let walletsFor = null;   // the connect sheet's seed they were found for
+  const sameConnect = (seed, connector) => {
+    const t = store.get().sheet;
+    return t?.kind === 'connect' && t.seed === seed && (connector === undefined || connectOptionOf(t)?.connector === connector);
+  };
+  // the connector changed: a wallet's proof (or its refusal) was for the option before, and is forgotten; the wallets found stay.
+  // A proof still asking stays asking — the wallet's prompt is open, so no second one is asked until it settles (its answer
+  // then lands only on the option it was asked on, proveConnectWallet)
+  const foundStatus = () => (connectWallets.length ? 'found' : 'none');
+  function connectorChanged() {
+    const cw = store.get().account.connectWallet;
+    if (['proven', 'refused'].includes(cw?.status)) {
+      store.dispatch('connectWallet', { status: foundStatus(), wallet: '', address: '', message: null });
+    }
+  }
+  async function findConnectWallets() {
+    const s = store.get().sheet;
+    if (s?.kind !== 'connect' || !isWalletOption(connectOptionOf(s)) || walletsFor === s.seed) return;
+    const seed = s.seed;
+    walletsFor = seed;
+    connectWallets = [];
+    store.dispatch('connectWallet', { status: 'finding', wallets: [] });
+    let found = [];
+    try { found = await getWallets(); } catch { found = []; }
+    if (!sameConnect(seed)) return;
+    connectWallets = (Array.isArray(found) ? found : []).filter(w => w && typeof w.id === 'string' && w.provider);
+    store.dispatch('connectWallet', connectWallets.length
+      ? { status: 'found', wallets: connectWallets.map(w => ({ id: w.id, name: typeof w.name === 'string' && w.name ? w.name : 'Browser wallet' })) }
+      : { status: 'none', wallets: [] });
+  }
+  // a proof that settled after its option was left, on the same sheet: nothing landed, the prompt is closed
+  function settledElsewhere(seed) {
+    if (sameConnect(seed) && store.get().account.connectWallet.status === 'asking') {
+      store.dispatch('connectWallet', { status: foundStatus(), wallet: '', address: '', message: null });
+    }
+  }
+  async function proveConnectWallet(id) {
+    const s = store.get().sheet;
+    const w = connectWallets.find(x => x.id === id);
+    if (s?.kind !== 'connect' || !w || store.get().account.connectWallet.status === 'asking') return;
+    const seed = s.seed;
+    const connector = connectOptionOf(s)?.connector;
+    const name = typeof w.name === 'string' && w.name ? w.name : 'Browser wallet';
+    store.dispatch('connectWallet', { status: 'asking', wallet: name, address: '', message: null });
+    try {
+      const proven = await proveWallet({ ...w, name }, ownerPost);
+      // proven for the option it was asked on, and only landed there; settled on another option: the tiles free again
+      if (!sameConnect(seed, connector)) { settledElsewhere(seed); return; }
+      sheet.change('ref', proven.address);
+      const label = (store.get().sheet.fields ?? []).find(f => f?.name === 'label');
+      if (label && (typeof label.value !== 'string' || !label.value.trim())) sheet.change('label', name);
+      store.dispatch('connectWallet', { status: 'proven', address: proven.address });
+    } catch (err) {
+      if (!sameConnect(seed, connector)) { settledElsewhere(seed); return; }
+      store.dispatch('connectWallet', { status: 'refused', message: String(err?.message || err || 'the wallet refused').slice(0, 200) });
+    }
+  }
+  // a wallet flight's words said under Trade and the Account read again once it settles — a rejected one too (host/wallet-send.js
+  // settleWalletFlight)
+  function sendFromWallet(flight) {
+    void settleWalletFlight(flight, { say: said => store.dispatch('tradeSaid', said), reload: () => { void account.load({ fresh: true }); } });
+  }
   // the owner sheet (prepare → What you sign → sign) over the owner device
-  const sheet = startSheet({ store, owner, schedule, cancelTimer, now, afterAction, onChange: kind => { if (kind === 'connect') checkConnectSoon(); } });
-  // a receipt reloads the Account's page past the cache, and one from the Account seat (every receipt the kind table
+  // a bridge's preparation, once it is the one the sheet shows, has its routes read beside it (the retired page's money.js show)
+  const sheet = startSheet({
+    store, owner, schedule, cancelTimer, now, afterAction,
+    onChange: (kind, name) => { if (kind === 'connect') { checkConnectSoon(); if (name === 'connector') { connectorChanged(); void findConnectWallets(); } } },
+    onPrepared: (kind, prepared, draft) => { if (kind === 'move' && prepared?.action?.kind === 'bridge') void account.bridgeRoutes(draft); },
+    // a sign-out in Beast with Guard first ticked: Guard (unsigned) before the signature, and refused, nothing signed (plan 4b
+    // Task 6, agents-mount.js signOutAsk)
+    beforeSign: async () => {
+      let r;
+      try { r = await account.guard(); } catch { r = null; }
+      return r?.taken === true ? null : `Not signed out: Guard was refused — ${r?.message || 'no answer'}`;
+    },
+  });
+  // Sell many (plan 4b Task 3): up to ten holdings at market, each prepared and signed in turn over the owner device; a DEX
+  // sale's send handed to sendFromWallet, which reads the Account again once the wallet answers; the Account read again once a
+  // run ends
+  const sellMany = startSellMany({ store, getJson, owner, sendOrder: o => sendFromWallet(walletSend.order(o)), afterAction, now });
+  // a receipt reloads the Account's read past the cache, and one from the Account seat (every receipt the kind table
   // lifts today) the seat's standing too
   const live = startLive({ store, openMux: host.openMux ?? wireOpenMux, call, mapFrame, getJson, timers, now, onReceipt: m => { if (m?.data?.seat) void seat.load({ fresh: true }); void account.load({ fresh: true }); } });
   // answers go through the live layer, which settles the gate it delivered once the answer wins
   const actions = makeActions({ store, call, answerGate: (eventId, value) => live.answer(eventId, value), postJson });
-  // Markets: the Account's reads on the app's timers, a market's page followed on the stream; the face's live quotes and symbol
-  // search for the A shares (a test hands in its own); the stars in this browser's storage
-  const markets = startMarkets({
-    store,
-    createLiveQuotes: host.createLiveQuotes ?? (onUpdate => createLiveQuotes(onUpdate, {
-      fetcher: (...a) => win.fetch(...a),
-      createEventSource: typeof win.EventSource === 'function' ? url => new win.EventSource(url) : null,
-    })),
-    createSymbolSearch: host.createSymbolSearch ?? (onUpdate => createSymbolSearch(onUpdate, { fetcher: (...a) => win.fetch(...a) })),
-    storage, getJson, win, now, stream, schedule, cancelTimer, owner, afterAction,
-  });
+  // Markets: the Account's reads on the app's timers — the A shares' among them — a market's page followed on the stream; the
+  // stars in this browser's storage
+  const markets = startMarkets({ store, storage, getJson, win, now, stream, schedule, cancelTimer, owner, afterAction });
   // Trade: the kinds' picks on screen, a ticket's order sheet, its line on the stream, Under way's Cancel
   const trade = startTrade({ store, getJson, owner, sheet, stream, schedule, cancelTimer, now, afterAction });
   // a channel's page: its overview read on entering it
@@ -355,13 +457,14 @@ export function boot(win, host = {}) {
       : s.route.screen === 'channel' ? renderChannelScreen(s, now()) : s.route.screen === 'discover' ? renderDiscover(s, now())
       : s.route.screen === 'plugin' ? renderPlugin(s) : s.route.screen === 'module' ? renderModule(s, now()) : renderMessagesScreen(s, now());
     // the drawers of any screen, inside its <main>: Settings, the stock drawer, the owner sheet over whatever is open, a module card's Run sheet
-    const drawers = (s.settingsOpen ? renderSettings(s) : '') + stockDrawerHtml(s) + (sheetUp(s) ? renderSheet(s, now()) : '') + (s.runSheet ? renderRunSheet(s, now()) : '');
+    const drawers = (s.settingsOpen ? renderSettings(s) : '') + stockDrawerHtml(s) + (s.sellMany ? renderSellMany(s) : '') + (sheetUp(s) ? renderSheet(s, now()) : '') + (s.runSheet ? renderRunSheet(s, now()) : '');
     root.innerHTML = renderRail(s, now()) + (drawers ? screen.replace(/<\/main>$/, drawers + '</main>') : screen);
     // the quotes poll asks for the rows the table drew, by id; a market's page, which draws none, for its own market (spec §6.1:
     // the page follows it on the stream and polls quotes for what the stream does not carry)
     if (s.route.screen === 'markets') {
       const drawn = [...root.querySelectorAll('tr[data-id]')].map(el => el.dataset.id);
-      markets.rowsInView(drawn.length === 0 && isAccountKey(s.route.id) ? [s.route.id] : drawn);
+      // (an A share's page reads its own quote by its route, beside the rows: it names none)
+      markets.rowsInView(drawn.length === 0 && !isCnKey(s.route.id) && isAccountKey(s.route.id) ? [s.route.id] : drawn);
     }
 
     const sameEditor = editorOf(s.edit) === last.editor;
@@ -474,16 +577,18 @@ export function boot(win, host = {}) {
     if (entered('portfolio')) void account.loadHoldings().then(() => account.loadHistory());
     if (entered('venues') || entered('agents')) void seat.load();
     if (entered('agents')) void account.loadAgents();
+    if (entered('money')) void account.loadEarn();
     // Trade left: its ticket closes and lets its line go — before a market's page follows its own
     const inTrade = route => route?.screen === 'trade';
     if (!inTrade(r) && inTrade(was)) { stopTradeSearch(); trade.closeTicket(); }
-    // a market's page (an Account key): its market followed on the stream with its candles and compare rows, and what is held of
-    // it and the statement's lines about it read; leaving it lets the market go
-    // an A share's page (a cn: id) too: its history from the face's own route, nothing of the Account's
-    const pageId = route => (route?.screen === 'markets' && (isAccountKey(route.id) || /^cn:\d{6}$/.test(String(route.id))) ? route.id : null);
+    // a market's page (an Account key): its market followed on the stream with its candles and compare rows, its asset sheet,
+    // book, latest trades and a perpetual's funding (host/markets.js), and the holdings and the statement's lines about it read;
+    // leaving it lets the market go
+    // an A share's page (a cn: id) too: its history at the Account's china venue, and nothing held or stated read for it
+    const pageId = route => (route?.screen === 'markets' && (isCnKey(route.id) || isAccountKey(route.id)) ? route.id : null);
     if (pageId(r) !== pageId(was)) {
       markets.page(pageId(r));
-      if (isAccountKey(pageId(r))) { void account.loadHoldings(); void account.loadStatement(); }
+      if (!isCnKey(pageId(r)) && isAccountKey(pageId(r))) { void account.loadHoldings(); void account.loadStatement(); }
     }
     // Trade entered on a market (#/trade/<id>), after a page left let its market go: the ticket on it — a buy, or the side a
     // market page's Buy or Sell asked for — unless one is open on it already
@@ -676,18 +781,82 @@ export function boot(win, host = {}) {
     const page = store.get().account.data;
     switch (d.kind) {
       case 'letIn': void sheet.open('letIn', { address: d.address ?? '', name: d.name ?? '' }); break;
-      case 'limit': void sheet.open('limit', limitSeedOf(page, d.address, d.name)); break;
-      case 'endLimit': void sheet.open('endLimit', { ...limitSeedOf(page, d.address, d.name), allow: d.allow ?? '' }); break;
+      // a limit of the kind the key names (plan 4b Task 5), trading where it names none
+      case 'limit': void sheet.open('limit', limitSeedOf(page, d.address, d.name, d.scope || 'trade')); break;
+      case 'endLimit': void sheet.open('endLimit', { ...limitSeedOf(page, d.address, d.name, d.scope || 'trade'), scope: d.scope || 'trade', allow: d.allow ?? '' }); break;
       case 'approveCard': void sheet.open('approveCard', { card: d.card ?? '', hash: d.hash ?? '', decision: d.decision ?? '' }); break;
       case 'declineAsk': void sheet.open('declineAsk', { ask: d.ask ?? '' }); break;
       case 'topUp': case 'resetPaper': void sheet.open(d.kind, { venue: d.venue ?? '', name: d.name ?? '' }); break;
       case 'connect': case 'paper': void openOnRead(d.kind); break;
+      // a venue closed to agents opened again (plan 4b Task 4): signed
+      case 'reopen': void sheet.open('reopen', { venue: d.venue ?? '', name: d.name ?? '' }); break;
+      // the Market half's (plan 4a Task 3): the seed as the key drew it, its figures the strings drawn, the market's kind its
+      // data-market-kind
+      case 'close': void sheet.open('close', { venue: d.venue ?? '', symbol: d.symbol ?? '', name: d.name ?? '', side: d.side ?? '', qty: d.qty ?? '', kind: d.marketKind ?? '' }); break;
+      case 'amend': void sheet.open('amend', {
+        venue: d.venue ?? '', order: d.order ?? '', type: d.type ?? '', kind: d.marketKind ?? '', qty: d.qty ?? '',
+        limitPrice: d.limitPrice ?? '', stopPrice: d.stopPrice ?? '', side: d.side ?? '', base: d.base ?? '',
+      }); break;
+      case 'leverage': void sheet.open('leverage', { venue: d.venue ?? '', venueName: d.venueName ?? '', symbol: d.symbol ?? '', name: d.name ?? '', leverage: d.leverage ?? '', maxLeverage: d.maxLeverage ?? '', marginModes: d.marginModes ?? '' }); break;
+      // the Money tab's Move… (plan 4b Task 2): the page's sources as they stand, from the one pressed
+      case 'move': if (writesOn(page)) void sheet.open('move', moveSeedOf(page, { from: d.from ?? '', to: d.to ?? '', kind: d.moveKind ?? '', amount: d.amount ?? '' })); break;
+      // Earn's Put in… and Take out… (plan 4b Task 3): seeded from the earn read, read first when it never was
+      case 'earn': if (writesOn(page)) void openEarn({ venue: d.venue ?? '', side: d.side ?? '', product: d.product ?? '' }); break;
+      // Agents' Open an agent wallet… (plan 4b Task 5): the keys let in as the page stands
+      case 'subWallet': if (writesOn(page)) void sheet.open('subWallet', subWalletSeedOf(page, { agent: d.agent ?? '', name: d.name ?? '', float: d.float ?? '' })); break;
+      // the Rules tab's (plan 4a Task 5): each seeded from the page as it stands — the cap now, whether the session ended, their
+      // leverage now; the three limits only for an Account that takes writes
+      // Beast only while it is not in force: a signature that changes nothing is never asked
+      case 'beast': if (rulesOf(page, now()).mode !== 'open') void sheet.open('beast', {}); break;
+      case 'cap': case 'session': case 'leverageCap': {
+        const r = rulesOf(page, now());
+        if (!r.writes) break;
+        if (d.kind === 'cap') void sheet.open('cap', { capUsd: r.cap?.usd ?? null });
+        else if (d.kind === 'session' && r.session) void sheet.open('session', { ended: r.session.ended });
+        else if (d.kind === 'leverageCap' && r.leverage) void sheet.open('leverageCap', { max: r.leverage.max });
+        break;
+      }
       default: break;
     }
   }
   // the connect and paper sheets are seeded from a read beside the page (where this account can connect, the kept paper
   // books): at once with what was read, else once the read lands — when no other sheet was opened meanwhile and the page
   // still signs
+  // the Earn sheet from the earn read as it stands; never read: read first, and opened only when no other sheet was opened
+  // meanwhile and the page still signs
+  async function openEarn(preset) {
+    if (store.get().account.earn.data === null) {
+      const opened = sheetOpens;
+      await account.loadEarn();
+      if (opened !== sheetOpens || !signs()) return;
+    }
+    const a = store.get().account;
+    void sheet.open('earn', earnSeedOf(a.earn.data, a.data, preset));
+  }
+  // Cards' Grant: the sheet that grants the ask (host/sheet-view.js grantOf); a venue not on the page waits for where the account
+  // can connect to be read, and opens only when no other sheet was opened meanwhile and the page still signs
+  async function grantAsk(id) {
+    const ask = () => asksOf(store.get().account.data).find(k => k.id === id);
+    const grant = () => grantOf(ask(), store.get().account.data, store.get().account.venuesHere.data);
+    store.dispatch('grantSaid', null);
+    let g = grant();
+    if (!g && ask()?.kind === 'venue' && store.get().account.venuesHere.data === null) {
+      const opened = sheetOpens;
+      await account.loadVenuesHere();
+      if (opened !== sheetOpens || !signs()) return;
+      g = grant();
+      // the read failed: said, under the asks
+      if (!g && store.get().account.venuesHere.data === null) {
+        const why = store.get().account.venuesHere.message;
+        store.dispatch('grantSaid', `Not opened: where this account can connect was not read${typeof why === 'string' && why ? ` — ${why}` : ''}. Try Grant again.`);
+        return;
+      }
+    }
+    if (!g) return;
+    if (g.kind === 'connect') { connectAsked = { keyfile: null, reach: null }; store.dispatch('connectReset'); }
+    void sheet.open(g.kind, g.seed);
+    if (g.kind === 'connect') { checkConnect(); void findConnectWallets(); }
+  }
   async function openOnRead(kind) {
     const slice = () => store.get().account[kind === 'connect' ? 'venuesHere' : 'paperBooks'];
     const read = kind === 'connect' ? account.loadVenuesHere() : account.loadPaperBooks();
@@ -699,8 +868,11 @@ export function boot(win, host = {}) {
     const page = store.get().account.data;
     if (kind === 'paper') { void sheet.open('paper', paperSeedOf(page, slice().data)); return; }
     connectAsked = { keyfile: null, reach: null };
-    void sheet.open('connect', { options: connectOptionsOf(page, slice().data) });
+    store.dispatch('connectReset');
+    // the page's venue ids beside the options: a second address of a kind already on the page is numbered by its address
+    void sheet.open('connect', { options: connectOptionsOf(page, slice().data), venues: venuesOf(page).map(v => ({ id: v.id })) });
     checkConnect();
+    void findConnectWallets();
   }
 
   async function sendNow() {
@@ -865,7 +1037,7 @@ export function boot(win, host = {}) {
     // the owner device: the pair box's code, Sign in, and — on a page that signs — Settings › Devices' Sign out and Let it sign
     pairDevice: () => { void owner.ready(doc.getElementById('pair-code')?.value?.trim() || undefined); },
     signIn: () => { void owner.signIn(); },
-    signOut: () => { if (signs()) void sheet.open('signOut', { kid: store.get().owner.kid }); },
+    signOut: () => { if (signs()) void sheet.open('signOut', signOutSeedOf(store.get().account.data, store.get().owner)); },
     letDevice: el => {
       if (!signs()) return;
       const s = store.get();
@@ -873,14 +1045,37 @@ export function boot(win, host = {}) {
     },
     // the owner's keys on Account: each its sheet; Revoke… and Disconnect… ask in place first; Grant the sheet that grants the ask
     openSheet: el => openSheetFrom(el),
+    // the Money tab's Show address (a read, on any page that reads the Account) and Copy
+    showAddress: el => { void account.receive({ venue: el.dataset.venue, asset: el.dataset.asset, network: el.dataset.network }); },
+    copyText: el => {
+      try { void Promise.resolve(win.navigator?.clipboard?.writeText?.(el.dataset.text ?? '')).catch(() => {}); } catch { /* no clipboard here */ }
+    },
+    // Sell many (plan 4b Task 3): opened from the Portfolio's Assets on a page that signs for an Account that takes writes
+    openSellMany: () => { if (signs() && writesOn(store.get().account.data)) void sellMany.open(); },
+    sellManyReview: () => { void sellMany.review(); },
+    sellManyRun: () => { if (signs()) void sellMany.run(); },
+    sellManyBack: () => sellMany.back(),
+    sellManyClose: () => sellMany.close(),
+    // the Rules tab's Guard: one unsigned click, on any page that reads the Account (one in the air at a time)
+    setGuard: () => { if (pageOk(store.get().account.data)) void account.guard(); },
+    // a venue's Close to agents: one unsigned click, on any page that reads the Account (one in the air per venue)
+    closeToAgents: el => { if (pageOk(store.get().account.data) && el.dataset.venue) void account.revoke(el.dataset.venue); },
+    // the connect sheet's wallet tile and a venue's Sign in at …: each inside the operator's press (the wallet's prompt, the tab)
+    connectWallet: el => { if (signs()) void proveConnectWallet(el.dataset.wallet); },
+    connectSignIn: () => {
+      if (!signs()) return;
+      const s = store.get().sheet;
+      const option = connectOptionOf(s);
+      if (option?.needs !== 'sign-in') return;
+      const seed = s.seed;
+      void account.signIn(option, {
+        alive: () => sameConnect(seed) && connectOptionOf(store.get().sheet)?.connector === option.connector,
+        onReady: state => sheet.change('credentialRef', state),
+      });
+    },
     askRevoke: el => { if (signs()) store.dispatch('askConfirm', { action: 'revoke', name: el.dataset.name ?? '', address: el.dataset.address ?? '' }); },
     askDisconnect: el => { if (signs()) store.dispatch('askConfirm', { action: 'disconnect', venue: el.dataset.venue ?? '', name: el.dataset.name ?? '' }); },
-    grant: el => {
-      if (!signs()) return;
-      const page = store.get().account.data;
-      const g = grantOf(asksOf(page).find(k => k.id === el.dataset.ask), page);
-      if (g) void sheet.open(g.kind, g.seed);
-    },
+    grant: el => { if (signs()) void grantAsk(el.dataset.ask); },
     // the sheet: a seg's pick, named by its field (its boxes and fields answer through input and change), Sign, Prepare again,
     // Cancel
     sheetField: el => changeField(el.name, el.dataset.value),
@@ -906,6 +1101,22 @@ export function boot(win, host = {}) {
     // What you sign is the <details>' own: the click toggles it, and the render keeps it open by its id
     toggleSigns: () => {},
     cancelOrder: el => { if (signs()) void trade.cancel(el.dataset.venue, el.dataset.order); },
+    // Under way's Send from wallet…: a DEX order or a payment waiting for the operator's wallet, as the page last read it (the
+    // host asks the Account again before the wallet is asked); Report again reports the hash the wallet sent, never sends again
+    sendFromWallet: el => {
+      if (!signs()) return;
+      const page = store.get().account.data;
+      const listOf = k => (Array.isArray(page?.[k]) ? page[k] : []);
+      if (el.dataset.order) {
+        const o = listOf('orders').find(x => x?.id === el.dataset.order);
+        if (o) sendFromWallet(walletSend.order(o));
+      } else if (el.dataset.payment) {
+        const p = listOf('payments').find(x => x?.id === el.dataset.payment);
+        const nat = p?.legs?.[0]?.native;
+        if (nat?.walletTx) sendFromWallet(walletSend.payment(p, nat.walletTx, nat.walletTxs));
+      }
+    },
+    reportAgain: el => { if (signs() && el.dataset.key) sendFromWallet(walletSend.reportAgain(el.dataset.key)); },
   };
 
   root.addEventListener('click', ev => {
@@ -949,6 +1160,7 @@ export function boot(win, host = {}) {
     else if (el.dataset?.action === 'dq') store.dispatch('setDiscoverQuery', el.value);
     else if (isField(el) && typesWords(el)) changeField(el.name, el.value);
     else if (el.dataset?.action === 'runSheetField' && typesWords(el)) act.runSheetField(el);
+    else if (el.dataset?.action === 'sellManyQty') sellMany.setQty(el.dataset.index, el.value);
     else if (el.dataset?.action === 'lunhuiMinute') moveCursor(el, Number(el.value));
   }
   // an indices chart's cursor, from its slider or the pointer over the chart: patched in place, never through the store
@@ -969,6 +1181,7 @@ export function boot(win, host = {}) {
     if (el.type === 'checkbox' && el.name === 'roster') store.dispatch('toggleRosterTick', { value: el.value, on: el.checked === true });
     if (isField(el) && !typesWords(el)) changeField(el.name, fieldValueOf(el));
     if (el.dataset?.action === 'runSheetField' && !typesWords(el)) act.runSheetField(el);
+    if (el.type === 'checkbox' && el.dataset?.action === 'sellManyPick') sellMany.toggle(el.value);
   });
   let pressSeq = 0;   // a press's own timeout ends only that press, never a later one
   root.addEventListener('pointerdown', ev => {
@@ -997,6 +1210,7 @@ export function boot(win, host = {}) {
       // a module card's Run sheet first, then the owner sheet over any drawer, then the stock drawer; Trade's ticket after every drawer
       if (s.runSheet) runSheet.close();
       else if (sheetUp(s)) sheet.close();
+      else if (s.sellMany) sellMany.close();
       else if (s.lunhui?.stock) store.dispatch('lunhuiStockClose');
       else if (s.detailsOpen) store.dispatch('toggleDetails');
       else if (s.settingsOpen) store.dispatch('closeSettings');
@@ -1009,7 +1223,7 @@ export function boot(win, host = {}) {
     if (ev.key === 'Enter' && !ev.isComposing && ev.keyCode !== 229 && store.get().edit && a?.closest?.('.inline-edit') && a.tagName !== 'BUTTON') { ev.preventDefault(); commitEdit(); }
   });
 
-  // a hidden tab stops everything — the Markets polls and the face's wire, the Account's page, and its stream with the market a
+  // a hidden tab stops everything — the Markets polls and the face's wire, the Account's read, and its stream with the market a
   // page follows — and a visible one starts again what its screen reads
   win.addEventListener('hashchange', follow);
   doc.addEventListener('visibilitychange', () => {
@@ -1045,7 +1259,7 @@ export function boot(win, host = {}) {
   if (!doc.hidden) stream.open();
   follow();
   render();
-  return Object.assign(store, { timers, live, actions, markets, channels, discover, owner, sheet, trade });
+  return Object.assign(store, { timers, live, actions, markets, channels, discover, owner, sheet, trade, walletSend, sellMany });
 }
 
 if (typeof window !== 'undefined' && window.document) boot(window);

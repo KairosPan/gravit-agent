@@ -48,7 +48,7 @@ export function seatWords(data) {
   const s = data.seat && typeof data.seat === 'object' ? data.seat : {};
   const name = typeof s.name === 'string' && s.name ? s.name : 'Gravit';
   const seat = s.status === 'admitted' ? `${name} · admitted${isNum(s.validUntil) ? ` until ${fmtDate(s.validUntil)}` : ''}`
-    : s.status === 'knocking' ? `${name} · knocking — admit it on the Account page`
+    : s.status === 'knocking' ? `${name} · knocking — let it in under Account › Agents`
       : s.status === 'expired' ? `${name} · expired`
         : s.status === 'revoked' ? `${name} · revoked`
           : s.status === 'unknown' ? `${name} · on the account · standing unknown`
@@ -78,10 +78,16 @@ const sameAddress = (a, b) => typeof a === 'string' && typeof b === 'string' && 
 const largestFirst = (a, b) => (a.usd === b.usd ? 0 : a.usd === null ? 1 : b.usd === null ? -1 : b.usd - a.usd);
 const newestFirst = (a, b) => { const ta = stamp(a.at), tb = stamp(b.at); return ta === tb ? 0 : ta === null ? 1 : tb === null ? -1 : tb - ta; };
 
-/** True when the body is the Account's page as /data/account serves it: an answer with its venues, cards and orders, its
+/** True when the body is the Account's read as /data/account serves it: an answer with its venues, cards and orders, its
  *  signers and connectLive. The page views below answer their empty shapes for anything else. */
 export function pageOk(page) {
   return Boolean(page?.ok === true && Array.isArray(page.venues) && Array.isArray(page.cards) && Array.isArray(page.orders) && page.signers && page.connectLive);
+}
+
+/** Whether the Account takes writes now (its page's `connectLive.writes.on`): a read-only Account, or a page the face does not
+ *  recognise, offers no key that would write. */
+export function writesOn(page) {
+  return pageOk(page) && page.connectLive.writes?.on === true;
 }
 
 /** The head's two chips: the Account's mode (`Guard`, `Beast`) and its writes (`Trading on · $250 a move`, `Read-only`). */
@@ -120,7 +126,9 @@ export function assetsOf(holdingsBody) {
   return listOf(holdingsBody, 'rows').map(row => ({
     key: str(row.key), asset: str(row.asset), cls: str(row.class),
     amount: number(row.amount), usd: number(row.usd), price: number(row.price), changePct24h: number(row.changePct24h),
-    venues: records(row.venues).map(v => ({ venue: str(v.venue), venueName: str(v.venueName), amount: number(v.amount), usd: number(v.usd), stale: v.stale === true })),
+    venues: records(row.venues).map(v => ({ venue: str(v.venue), venueName: str(v.venueName), amount: number(v.amount), usd: number(v.usd), stale: v.stale === true, product: str(v.product) })),
+    // an Earning row's product, where the row names it (holdings: one row a product, `earn:<venue>:<product>`)
+    earn: isRecord(row.earn) ? { venue: str(row.earn.venue), product: str(row.earn.product) } : null,
   })).sort(largestFirst);
 }
 
@@ -129,7 +137,7 @@ export function positionsOf(holdingsBody) {
   return listOf(holdingsBody, 'positions').map(p => ({
     venue: str(p.venue), venueName: str(p.venueName), symbol: str(p.symbol), name: str(p.name), side: str(p.side),
     qty: number(p.qty), entryPrice: number(p.entryPrice), markPrice: number(p.markPrice), usd: number(p.usd), unrealizedUsd: number(p.unrealizedUsd),
-    paper: p.paper === true,
+    paper: p.paper === true, kind: str(p.kind), leverage: number(p.leverage),
   }));
 }
 
@@ -139,16 +147,26 @@ const OPEN = new Set(['open', 'partial', 'pending']);
  *  is: You for the owner's; an agent's is `Agent · <name>`, the name the page's keys give the order's agent address, else
  *  An agent (an order carries the address, never the name). */
 export function openOrdersOf(page) {
-  if (!pageOk(page)) return [];
-  const keys = records(page.keys);
-  const nameAt = address => str(keys.find(k => sameAddress(k.address, address))?.name);
-  return records(page.orders).filter(o => OPEN.has(o.status)).map(o => {
+  return pageOk(page) ? orderRowsOf(page.orders, page.keys) : [];
+}
+
+/** The orders still working of a list as the Account sends its orders (the page's, an asset read's), each worded as
+ *  openOrdersOf words it, `keys` (the page's) naming an agent's address. */
+export function orderRowsOf(orders, keys) {
+  const named = records(keys);
+  const nameAt = address => str(named.find(k => sameAddress(k.address, address))?.name);
+  return records(orders).filter(o => OPEN.has(o.status)).map(o => {
     const name = o.authority === 'owner' ? '' : nameAt(o.agent);
     return {
       id: str(o.id), venue: str(o.venue), venueName: str(o.venueName), symbol: str(o.symbol), side: str(o.side), type: str(o.type),
       qty: number(o.qty), filledQty: number(o.filledQty), limitPrice: number(o.limitPrice), status: o.status,
+      kind: str(o.kind), stopPrice: number(o.stopPrice), base: str(o.base),
       who: o.authority === 'owner' ? 'You' : name ? `Agent · ${name}` : 'An agent',
       paper: o.paper === true,
+      // what keeps an order from being changed (the retired page's tkAmendable, and the Account's own refusal of a change not yet
+      // confirmed): waiting for the wallet to send it, being canceled, not followed since a restart, a change the venue has not confirmed
+      waitingForWallet: Boolean(o.walletTxs) && !str(o.ref), canceling: o.canceling === true, unfollowed: Boolean(o.unfollowed),
+      changing: Boolean(o.changing), unconfirmed: Boolean(o.unconfirmed) && !str(o.ref),
     };
   });
 }
@@ -211,17 +229,20 @@ function doesOf(v) {
 }
 
 /** The Venues tab from the page's `venues`: each venue's connector, value, front line, health, what it does and what it trades
- *  (`trade.what`), the paper flag, when it was read (`stale` the Account's words where it says them), and the Details drawer's
+ *  (`trade.what`), the paper flag, whether it is closed to agents (`closedToAgents`, in the page's `dial.revoked`), when it was read (`stale` the Account's words where it says them), and the Details drawer's
  *  facts — the key file's path when it has one, never what is in it. */
 export function venuesOf(page) {
   if (!pageOk(page)) return [];
   const health = isRecord(page.health) ? page.health : {};
+  // the venues closed to agents (the page's dial.revoked): agents keep reading them, and place or move nothing there
+  const revoked = new Set(isRecord(page.dial) && Array.isArray(page.dial.revoked) ? page.dial.revoked.filter(x => typeof x === 'string') : []);
   return records(page.venues).map(v => {
     const id = str(v.id);
     return {
       id, name: str(v.name), connector: str(v.connector), usd: number(v.usd), frontLine: str(v.frontLine),
       ...healthOf(Object.hasOwn(health, id) ? health[id] : undefined),
-      does: doesOf(v), what: str(v.trade?.what), paper: v.paper === true, asOf: str(v.asOf),
+      does: doesOf(v), what: str(v.trade?.what), paper: v.paper === true, asOf: str(v.asOf), closedToAgents: id !== '' && revoked.has(id),
+      tradeCan: { amend: v.trade?.amend === true, leverage: v.trade?.leverage === true, close: v.trade?.close === true },
       stale: typeof v.stale === 'string' ? v.stale : v.stale === true,
       details: {
         holdings: records(v.holdings).map(h => ({ asset: str(h.asset), amount: number(h.amount), usd: number(h.usd) })),
@@ -254,8 +275,11 @@ const agentRow = a => ({
  *  while the seat view carries no address (knocking: no key yet); it is left out of the list while Gravit's row stands, so
  *  Gravit is listed once, and a display name alone never hides a row an address could tell. With no seat view to stand on,
  *  the Account's list is the whole answer. The knocking keys are the page's (`requestsOf`). Every row carries its address
- *  (Gravit's the seat view's) and each limit as `{ id, scope, allow, expired, words }` — what the owner's keys name back. */
-export function agentsOf(agentsBody, seatView) {
+ *  and each limit as `{ id, scope, allow, expired, words }` — what the owner's keys name back. Gravit's row also carries the
+ *  seat's status (`seatStatus`) and, while it knocks, the page's one request at the seat view's address, in any case
+ *  (`request: { address, name }`); with no address on the seat view, or none or several requests there, null — a request is
+ *  never bound to the seat by its name. */
+export function agentsOf(agentsBody, seatView, page = null) {
   const w = seatWords(seatView);
   const read = agentsBody?.ok === true && Array.isArray(agentsBody.agents);
   const agents = read ? records(agentsBody.agents) : [];
@@ -264,8 +288,15 @@ export function agentsOf(agentsBody, seatView) {
   const name = typeof s.name === 'string' && s.name ? s.name : 'Gravit';   // the name seatWords gives the seat
   const isSeat = typeof s.address === 'string' && s.address ? a => sameAddress(a.address, s.address) : a => sameName(a.name, name);
   const seats = agents.filter(isSeat);
+  // the seat's knock is bound by the seat view's address alone, and only when exactly one request stands there: a name can be
+  // anyone's, so a request that only shares the seat's name is never let in as Gravit
+  const addr = str(s.address);
+  const hits = s.status === 'knocking' && addr ? requestsOf(page).filter(r => sameAddress(r.address, addr)) : [];
+  const knock = hits.length === 1 ? hits[0] : null;
   return [
-    { gravit: true, name, address: str(s.address), standing: w.seat, limits: records(s.limits).map(l => limitOf(l, l.perOrderUsd)),
+    { gravit: true, name, address: addr, standing: w.seat, seatStatus: str(s.status),
+      request: knock ? { address: knock.address, name: knock.name } : null,
+      limits: records(s.limits).map(l => limitOf(l, l.perOrderUsd)),
       cards: read ? seats.reduce((n, a) => n + cardCount(a), 0) : null,
       orders: read ? seats.reduce((n, a) => n + openCount(a), 0) : null },
     ...agents.filter(a => !isSeat(a)).map(agentRow),
@@ -304,6 +335,21 @@ export function asksOf(page) {
   }));
 }
 
+// core.js:621 — the retired page's slug, an agent wallet's venue id being `agent-<slug of its name>` (portfolio.js:23)
+const slug = v => String(v).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+
+/** The agent wallets (the page's `subAccounts`): each its id, name, the agent it pays for (its address, and its name as the
+ *  Account gives it), its own address, how much it keeps at most and holds (`capUsd`, `balanceUsd`; null when they do not
+ *  parse), and the venue it is on the page as (`agent-<slug of its name>`, portfolio.js:23) — what Top up and Take back move to
+ *  and from. */
+export function walletsOf(page) {
+  if (!pageOk(page)) return [];
+  return records(page.subAccounts).filter(w => str(w.name)).map(w => ({
+    id: str(w.id), name: w.name, agent: str(w.agent), agentName: str(w.agentName), address: str(w.address),
+    capUsd: number(w.capUsd), balanceUsd: number(w.balanceUsd), venue: `agent-${slug(w.name)}`,
+  }));
+}
+
 /** The keys knocking to be let in (the page's `requests`). */
 export function requestsOf(page) {
   if (!pageOk(page)) return [];
@@ -312,15 +358,13 @@ export function requestsOf(page) {
 
 // ── the connect sheet's reads (plan 2 Task 8) ──
 
-// what is connected on the Account page, not here: a venue's own sign-in, a proven address, a command line on its machine
-const ELSEWHERE = new Set(['sign-in', 'address', 'cli']);
 const strings = v => (Array.isArray(v) ? v.filter(x => typeof x === 'string' && x !== '') : []);
 
 /** What the connect sheet offers (its seed's `options`): the page's `connectLive.options`, each with where this account can
  *  connect it — the verdict, the venue's own words when it is not connectable (`said`) and its group, from the venues read
  *  (`/data/account/venues`, joined by connector; an option it does not name, or a venues read not landed, keeps
- *  `verdict: null`) — and `elsewhere` for one connected on the Account page (a sign-in, an address, a command line), which
- *  never drafts here. In the Account's order; the paper account among them (its own sheet leaves it out). */
+ *  `verdict: null`). Every kind connects here — a key file, an address (a browser wallet's among them), a venue's sign-in, a
+ *  command line — by what it `needs`. In the Account's order; the paper account among them (its own sheet leaves it out). */
 export function connectOptionsOf(page, venuesHere) {
   if (!pageOk(page)) return [];
   const here = new Map(listOf(venuesHere, 'venues').filter(v => typeof v.connector === 'string').map(v => [v.connector, v]));
@@ -330,7 +374,6 @@ export function connectOptionsOf(page, venuesHere) {
       connector: o.connector, label: str(o.label), needs: str(o.needs), example: str(o.example), defaultRef: str(o.defaultRef),
       venues: strings(o.venues), kind: str(o.kind),
       verdict: v && typeof v.verdict === 'string' ? v.verdict : null, said: str(v?.said), group: str(v?.group),
-      elsewhere: ELSEWHERE.has(o.needs),
     };
   });
 }

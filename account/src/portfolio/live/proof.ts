@@ -47,7 +47,7 @@ export class WalletProofs {
     const checksummed = getAddress(address);
     const now = this.clock();
     const nonce = randomBytes(12).toString("hex");
-    const message = siweMessage({ domain: page.domain, address: checksummed, statement: "Show this wallet's balances on my account page. Read-only: this is not a transaction and it lets nothing be moved.", uri: page.uri, chainId: Number.isInteger(chainId) && chainId > 0 ? chainId : 1, nonce, issuedAt: new Date(now).toISOString(), expirationTime: new Date(now + TTL_MS).toISOString() });
+    const message = siweMessage({ domain: page.domain, address: checksummed, statement: "Show this wallet's balances on my account. Read-only: this is not a transaction and it lets nothing be moved.", uri: page.uri, chainId: Number.isInteger(chainId) && chainId > 0 ? chainId : 1, nonce, issuedAt: new Date(now).toISOString(), expirationTime: new Date(now + TTL_MS).toISOString() });
     const c = { address: checksummed, message, nonce, expiresAt: now + TTL_MS, wallet: wallet.trim().slice(0, 40) || "wallet" };
     this.open.set(checksummed.toLowerCase(), c);
     return { address: c.address, message: c.message, nonce: c.nonce, expiresAt: c.expiresAt };

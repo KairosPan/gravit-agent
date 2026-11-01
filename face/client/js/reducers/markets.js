@@ -1,9 +1,11 @@
 // face/client/js/reducers/markets.js — Markets on the face: what the host layer (host/markets.js) brings in — the Account's
 // explore reads by tab and the search's, the quotes of the rows in view and of the market a page follows, a page's candles and
-// its base's compare rows, the Account keys starred and what each old us:/crypto: star was found as; the face's own A-share wire
-// as today — and the screen's own view of it: the tab, the sort, the query, a page's range
+// its base's compare rows, the Account keys starred and what each old us:/crypto: star was found as; the A shares' quotes, their
+// search hits' prices and China's state, the Account's too — and the screen's own view of it: the tab, the sort, the query, a
+// page's range
 import { ACCOUNT_TABS, ACCOUNT_SORTS, CANDLE_RANGES, isAccountKey } from '../host/market-view.js';
 import { number } from '../wire/market-model.js';
+import { chinaProviderOf, isCnKey } from '../wire/china.js';
 
 const mk = (s, patch) => ({ ...s, markets: { ...s.markets, ...patch } });
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -16,33 +18,50 @@ const read = (s, patch) => mk(s, { results: { ...s.markets.results, ...patch } }
 // the explore reads: All's and each kind's own; the tabs: those, Watching and All results
 const EXPLORED = new Set(ACCOUNT_TABS.map(([id]) => id));
 const TABS = new Set([...EXPLORED, 'china', 'watching', 'results']);
-// a market's history: an Account key's or an A share's (cn:<code>), at one of the candle ranges
-const charted = (id, range) => (isAccountKey(id) || /^cn:\d{6}$/.test(String(id))) && CANDLE_RANGES.includes(range);
+// a market's history: an A share's (cn: and its six digits, never another cn: id) or another Account key's, at one of the
+// candle ranges
+const charted = (id, range) => (isCnKey(id) || (isAccountKey(id) && !String(id).startsWith('cn:'))) && CANDLE_RANGES.includes(range);
 // the China ranking's two sorts
 const RANKED = new Set(['volume', 'movers']);
 const rank = (s, patch) => mk(s, { rank: { ...s.markets.rank, ...patch } });
 const named = v => typeof v === 'string' && v !== '';
+// what the market says of its leverage — the most it takes and the margin modes it sets — kept only where it says them (the Leverage
+// sheet bounds its field by them)
+const limitsOf = m => ({
+  ...(number(m?.maxLeverage) !== null && number(m.maxLeverage) > 0 ? { maxLeverage: number(m.maxLeverage) } : {}),
+  ...(Array.isArray(m?.marginModes) ? { marginModes: m.marginModes.filter(x => typeof x === 'string') } : {}),
+});
 const text = v => (typeof v === 'string' ? v : null);
 // a price's stamp as a time, or null when it has none that parses
 const timeOf = v => { const t = typeof v === 'string' ? Date.parse(v) : NaN; return Number.isFinite(t) ? t : null; };
 const blank = q => !String(q ?? '').trim();
+// a market page's four reads beside its price: an Account key's (never an A share's), each part kept as keyed keeps a read
+const DEPTH_PARTS = new Set(['here', 'book', 'trades', 'funding']);
+const depthed = (id, part) => isAccountKey(id) && !String(id).startsWith('cn:') && DEPTH_PARTS.has(part);
+const DEPTH_IDLE = { status: 'idle', data: null, at: null, message: null, freshAt: null };
+const depth = (s, id, part, patch) => {
+  const page = own(s.markets.depth, id);
+  return mk(s, { depth: { ...s.markets.depth, [id]: { ...(isRecord(page) ? page : {}), [part]: { ...DEPTH_IDLE, ...own(page, part), ...patch } } } });
+};
 // a tab starts from Most traded, as Linqi's does
 const onTab = tab => ({ tab, sort: 'volume' });
 
 export const reducers = {
-  // the face's own wire, for the A shares: the cn watchlist as stored, the live quotes and the search without their notes (the
-  // wire's Chinese prose never reaches the store), the hits' one REST read
+  // the A shares: the cn watchlist as stored; their quotes by cn id (the Account's, host/markets.js merges them) and the state of
+  // that read; China's state as the Account says it (its ranking's status, or a refused quote's), the only setter of the
+  // providers; the prices a search's A-share hits carry, by cn id
   watchlistLoaded: (s, { items, error }) => mk(s, { watchlist: items, watchError: error }),
-  quotesUpdated: (s, q) => mk(s, { quotes: q.quotes, providers: q.providers, connection: q.status }),
-  searchUpdated: (s, r) => mk(s, { search: { query: r.query, status: r.status, assets: r.assets, partial: r.partial === true } }),
-  hitQuotesLoaded: (s, { quotes }) => mk(s, { hitQuotes: Object.fromEntries((quotes ?? []).map(q => [q.id, q])) }),
+  quotesUpdated: (s, { quotes, connection }) => mk(s, { quotes, connection }),
+  chinaStatusUpdated: (s, { status } = {}) => mk(s, { providers: chinaProviderOf(status) }),
+  hitQuotesLoaded: (s, { quotes } = {}) => mk(s, { hitQuotes: isRecord(quotes) ? quotes : {} }),
 
   // the Account's explore reads by tab (`all` is explore?limit=200, a kind's its own explore?tab=<kind>&limit=200), and the
   // search's (explore?q=): a failed read keeps its rows, with the Account's sentence when it refused (`message`, else null)
   exploreLoading: (s, { tab } = {}) => (EXPLORED.has(tab) ? keyed(s, 'explore', tab, { status: 'loading' }) : s),
   exploreLoaded: (s, { tab, data, at } = {}) => (EXPLORED.has(tab) ? keyed(s, 'explore', tab, { status: 'ready', data, at, message: null }) : s),
   exploreFailed: (s, { tab, at, message = null } = {}) => (EXPLORED.has(tab) ? keyed(s, 'explore', tab, { status: 'error', at, message }) : s),
-  // the China tab's ranking (/data/cn/rank), by the sort it was read for: a failed read keeps its rows
+  // the China tab's ranking (the Account's explore?tab=china, as rankOf keeps it), by the sort it was read for: a failed read keeps
+  // its rows
   rankLoading: (s, { sort } = {}) => (RANKED.has(sort) ? rank(s, { status: 'loading', sort }) : s),
   rankLoaded: (s, { sort, data, at } = {}) => (RANKED.has(sort) ? rank(s, { status: 'ready', sort, data, at, message: null }) : s),
   rankFailed: (s, { sort, at, message = null } = {}) => (RANKED.has(sort) ? rank(s, { status: 'error', sort, at, message }) : s),
@@ -65,7 +84,7 @@ export const reducers = {
       next ??= { ...s.markets.accountQuotes };
       next[key] = {
         price: number(m.price), bid: number(m.bid), ask: number(m.ask), quoteAt: text(m.quoteAt), quoteFrom: text(m.quoteFrom),
-        changePct24h: number(m.changePct24h), volumeUsd24h: number(m.volumeUsd24h),
+        changePct24h: number(m.changePct24h), volumeUsd24h: number(m.volumeUsd24h), ...limitsOf(m),
       };
     }
     return next ? mk(s, { accountQuotes: next }) : s;
@@ -84,10 +103,10 @@ export const reducers = {
       accountQuotes: {
         ...s.markets.accountQuotes,
         [key]: {
-          // its last trade, else the middle: the Account's page's own order (its ui/stream.js stPrice), but for a perpetual, middle first there
+          // its last trade, else the middle: the retired page's order (its ui/stream.js stPrice), but for a perpetual, middle first there
           price: last ?? (bid !== null && ask !== null ? (bid + ask) / 2 : null), bid, ask,
           quoteAt: text(data.priceAt) ?? text(data.at), quoteFrom: text(data.from),
-          changePct24h: was?.changePct24h ?? null, volumeUsd24h: was?.volumeUsd24h ?? null, streamed: true,
+          changePct24h: was?.changePct24h ?? null, volumeUsd24h: was?.volumeUsd24h ?? null, streamed: true, ...limitsOf(was),
         },
       },
     });
@@ -110,6 +129,23 @@ export const reducers = {
   compareLoading: (s, { base } = {}) => (named(base) ? keyed(s, 'compare', base, { status: 'loading' }) : s),
   compareLoaded: (s, { base, data, at } = {}) => (named(base) ? keyed(s, 'compare', base, { status: 'ready', data, at }) : s),
   compareFailed: (s, { base, at } = {}) => (named(base) ? keyed(s, 'compare', base, { status: 'error', at }) : s),
+
+  // a market page's four reads beside its price (plan 4a Task 4), by its key, each part { status, data, at, message, freshAt }:
+  // `here` the asset sheet, `book`, `trades`, and `funding` — a perpetual's, one read at every venue that lists it. A failed read keeps its last data, with the Account's sentence when it refused; an answer the proxy re-served stale keeps
+  // the time of the last fresh one (`freshAt`, null when none landed); leaving the page drops them all
+  depthLoading: (s, { id, part } = {}) => (depthed(id, part) ? depth(s, id, part, { status: 'loading' }) : s),
+  depthLoaded(s, { id, part, data, at = null } = {}) {
+    if (!depthed(id, part)) return s;
+    const was = own(own(s.markets.depth, id), part);
+    const freshAt = isRecord(data) && data.stale === true ? (was?.freshAt ?? null) : at;
+    return depth(s, id, part, { status: 'ready', data, at, message: null, freshAt });
+  },
+  depthFailed: (s, { id, part, at = null, message = null } = {}) => (depthed(id, part) ? depth(s, id, part, { status: 'error', at, message }) : s),
+  depthDropped(s, { id } = {}) {
+    if (!Object.hasOwn(s.markets.depth, id)) return s;
+    const { [id]: _gone, ...rest } = s.markets.depth;
+    return mk(s, { depth: rest });
+  },
 
   // the Account keys starred, as stored under their own key; and what each old us:/crypto: star was asked as and found — the
   // Account's key, or null for none — until it is taken off

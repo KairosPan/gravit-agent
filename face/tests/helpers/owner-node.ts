@@ -26,8 +26,11 @@ export interface OwnerCalls {
   signIn(): Promise<void>;
   close(): void;
 }
-/** A started device: its calls, its standing as the store holds it, the signatures it sent, and `close`. */
-export interface OwnerNode { owner: OwnerCalls; standing: () => OwnerStanding; signatures: () => string[]; close: () => void }
+/** The client's store the device stands in, as `createStore` returns it: what the client's other hosts (the sheet engine, the
+ * Account host, Sell many) are started over, so they read the same owner standing the device writes. */
+export interface ClientStore { get(): Record<string, unknown>; dispatch(type: string, payload?: unknown): void }
+/** A started device: its calls, its standing as the store holds it, its store, the signatures it sent, and `close`. */
+export interface OwnerNode { owner: OwnerCalls; store: ClientStore; standing: () => OwnerStanding; signatures: () => string[]; close: () => void }
 
 /** The owner device paired through the face at `faceOrigin` (`http://127.0.0.1:<port>`), labelled `label`. Every
  * `signature.es256` value it posts is kept, in this process only, for a smoke to look for in the face's output. */
@@ -45,6 +48,7 @@ export function startOwnerNode(faceOrigin: string, label = "Gravit face smoke"):
   const owner = startOwner({ store, post, subtle: globalThis.crypto.subtle, keys: memoryKeys(), flag, label }) as OwnerCalls;
   return {
     owner,
+    store: store as ClientStore,
     standing: () => (store.get() as { owner: OwnerStanding }).owner,
     signatures: () => [...sent],
     close: () => owner.close(),

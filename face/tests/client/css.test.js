@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { renderRail } from '../../client/js/render/rail.js';
 import { renderMessagesScreen } from '../../client/js/render/messages.js';
 import { renderMarketsScreen } from '../../client/js/render/markets.js';
-import { renderSettings, renderAccountScreen } from '../../client/js/render/account.js';
+import { renderSettings, renderAccountScreen, renderSellMany } from '../../client/js/render/account.js';
 import { renderSheet } from '../../client/js/render/owner.js';
 import { renderTradeScreen } from '../../client/js/render/trade.js';
 import { ticketOf } from '../../client/js/host/trade-view.js';
@@ -84,6 +84,8 @@ function marketStates() {
     R.watchlistLoaded(read, { items: read.markets.watchlist, error: 'full' }),
     { ...R.candlesLoaded(page('coin:BTC', starred), { id: 'coin:BTC', range: '1D', data: fx('candles'), at: NOW }), conversations: [conv('s7', { title: 'Is BTC cheap?' })] },
     page('event:predict:SI-FEDCUT-DEC'),
+    // a market page's four reads (plan 4a Task 4): You here with what agents do here, the order book
+    R.depthLoaded(R.depthLoaded(page('coin:SOL'), { id: 'coin:SOL', part: 'here', data: fx('asset-sol'), at: NOW }), { id: 'coin:SOL', part: 'book', data: fx('book'), at: NOW }),
     R.candlesLoading(page('stock:NVDA'), { id: 'stock:NVDA', range: '5D' }),
     page('cn:600519'), page('coin:GONE'),
     // an A share's 5D history: the sessions on one grid, the previous close dashed, a hairline between sessions
@@ -111,7 +113,16 @@ function accountStates() {
     R.askConfirm(R.ownerStanding(at('agents'), { role: 'signs', kid: 'a5048199a8081854' }), { action: 'revoke', name: 'Claude Code', address: '0x3a087530887bd175ccc38828ee3776e5b6ea1ac6' }),
     // the Venues' keys on a page that signs: one Disconnect asked twice, a paper venue's Details with Top up and Start over
     R.askConfirm(R.openVenueDetails(R.ownerStanding(at('venues'), { role: 'signs', kid: 'a5048199a8081854' }), 'paper-momentum'), { action: 'disconnect', venue: 'ex', name: 'Stand-in Exchange' }),
+    // Sell many's drawer (plan 4b Task 3): the picks, then the legs with their answers
+    ...sellManyStates(R.ownerStanding(read, { role: 'signs', kid: 'a5048199a8081854' })),
   ];
+}
+
+function sellManyStates(base) {
+  const it = asset => ({ asset, venue: 'ex', venueName: 'Stand-in Exchange', action: 'sell', symbol: `${asset}/USDT`, held: 2, sellQty: 2, usd: 20, ready: true });
+  const prepared = { action: { type: 'liveOrder' }, shown: [{ name: 'Sell', value: 'SOL/USDT' }], quote: { order: { words: 'sell 2 SOL', notionalUsd: 20 } } };
+  const picking = { status: 'picking', venue: '', items: [it('SOL'), it('ETH')], hidden: 1, missing: [], picked: [0], qtys: {}, legs: [], full: false };
+  return [R.sellManySet(base, picking), R.sellManySet(base, { ...picking, status: 'reviewing', legs: [{ item: it('SOL'), state: 'ready', prepared }, { item: it('ETH'), state: 'refused', why: 'no' }] })];
 }
 
 // the owner device (render/owner.js): the pair box, Sign in, Devices with a device waiting; the sheets — a Let in incomplete, a
@@ -249,8 +260,8 @@ const screenOf = (st, now) => (st.route.screen === 'markets' ? renderMarketsScre
 test('every class the screens emit has a rule in app.css, and app.css names no colour by hex', () => {
   assert.doesNotMatch(css, /#[0-9a-fA-F]{3,6}\b/, 'colours come from tokens.css');
   setMarkdown(null);
-  const html = everyState().map(st => renderRail(st, NOW) + screenOf(st, NOW) + (st.settingsOpen ? renderSettings(st) : '') + stockDrawerHtml(st) + renderSheet(st, NOW) + renderRunSheet(st, NOW)).join('');
-  for (const c of ['mkts', 'mk-tab', 'mk-star', 'mk-name', 'mk-tag', 'mk-q', 'mk-clear', 'mk-note', 'mk-empty', 'mk-st', 'page-back', 'mk-chart', 'mk-axis', 'mk-facts', 'mk-big', 'mk-basis', 'mk-asof', 'mk-d-acts', 'mk-line', 'mk-on', 'mk-outs', 'mk-out', 'acct', 'networth', 'acct-figures', 'acct-second', 'acct-t', 'acct-shown', 'order-row', 'acct-note', 'activity-row', 'venue', 'account-line', 'pair-box', 'sheet', 'sheet-quote', 'sheet-left', 'sheet-check', 'stale', 'trade', 'tp-head', 'tk-seg', 'tk-pick', 'tk-row', 'tk-open', 'tk-said', 'tk-panel', 'tk-picked', 'tk-out', 'mk-yes', 'mk-no', 'tk-at', 'tk-side', 'tk-quote', 'tk-left', 'tk-msg', 'tk-go', 'tk-hand', 'research', 'pcard-meta', 'pcard-foot', 'pcard-link', 'mod-tags', 'mod-boxes', 'mod-runs-wrap', 'mod-runs', 'mod-legend', 'composed', 'notes', 'notes-body', 'lh-answer', 'lh-summary', 'lh-block', 'lh-skel', 'lh-title', 'lh-error', 'lh-label', 'lh-readout', 'lh-tiles', 'lh-tile', 'lh-tile-chal', 'lh-lines', 'lh-line', 'stress', 'lh-id', 'lh-split', 'lh-split-up', 'lh-split-down', 'lh-stats', 'lh-dist', 'lh-bucket', 'lh-bucket-bar', 'lh-srcs', 'lh-src', 'lh-src-miss', 'lh-foot', 'lh-choices', 'lh-choice', 'lh-open-run', 'lh-ix-rows', 'lh-ix', 'lh-ix-name', 'lh-ix-last', 'lh-ix-pct', 'lh-spark', 'lh-spark-mid', 'lh-spark-line', 'lh-chart', 'lh-band', 'lh-tick', 'lh-grid', 'lh-mid', 'lh-axis', 'lh-bar', 'lh-path', 'lh-mark-dot', 'lh-mark', 'lh-cur', 'lh-dot', 'lh-minute', 'lh-stock', 'stock', 'with-stock', 'lh-stk-head', 'lh-stk-sub', 'lh-stk-pool', 'lh-stk-price', 'lh-stk-tag', 'lh-stk-from', 'lh-stk-note', 'lh-stk-cite', 'lh-limit', 'lh-seal']) assert.match(html, new RegExp(`class="[^"]*\\b${c}\\b`), `a screen emits ${c}`);
+  const html = everyState().map(st => renderRail(st, NOW) + screenOf(st, NOW) + (st.settingsOpen ? renderSettings(st) : '') + stockDrawerHtml(st) + renderSellMany(st) + renderSheet(st, NOW) + renderRunSheet(st, NOW)).join('');
+  for (const c of ['mkts', 'mk-tab', 'mk-star', 'mk-name', 'mk-tag', 'mk-q', 'mk-clear', 'mk-note', 'mk-empty', 'mk-st', 'page-back', 'mk-chart', 'mk-axis', 'mk-facts', 'mk-big', 'mk-basis', 'mk-asof', 'mk-d-acts', 'mk-line', 'mk-h3', 'mk-book', 'mk-on', 'mk-outs', 'mk-out', 'acct', 'networth', 'acct-figures', 'acct-second', 'acct-t', 'acct-shown', 'order-row', 'acct-note', 'activity-row', 'venue', 'account-line', 'pair-box', 'sheet', 'sheet-quote', 'sheet-left', 'sheet-check', 'stale', 'trade', 'tp-head', 'tk-seg', 'tk-pick', 'tk-row', 'tk-open', 'tk-said', 'tk-panel', 'tk-picked', 'tk-out', 'mk-yes', 'mk-no', 'tk-at', 'tk-side', 'tk-quote', 'tk-left', 'tk-msg', 'tk-go', 'tk-hand', 'research', 'pcard-meta', 'pcard-foot', 'pcard-link', 'mod-tags', 'mod-boxes', 'mod-runs-wrap', 'mod-runs', 'mod-legend', 'composed', 'notes', 'notes-body', 'lh-answer', 'lh-summary', 'lh-block', 'lh-skel', 'lh-title', 'lh-error', 'lh-label', 'lh-readout', 'lh-tiles', 'lh-tile', 'lh-tile-chal', 'lh-lines', 'lh-line', 'stress', 'lh-id', 'lh-split', 'lh-split-up', 'lh-split-down', 'lh-stats', 'lh-dist', 'lh-bucket', 'lh-bucket-bar', 'lh-srcs', 'lh-src', 'lh-src-miss', 'lh-foot', 'lh-choices', 'lh-choice', 'lh-open-run', 'lh-ix-rows', 'lh-ix', 'lh-ix-name', 'lh-ix-last', 'lh-ix-pct', 'lh-spark', 'lh-spark-mid', 'lh-spark-line', 'lh-chart', 'lh-band', 'lh-tick', 'lh-grid', 'lh-mid', 'lh-axis', 'lh-bar', 'lh-path', 'lh-mark-dot', 'lh-mark', 'lh-cur', 'lh-dot', 'lh-minute', 'lh-stock', 'stock', 'with-stock', 'lh-stk-head', 'lh-stk-sub', 'lh-stk-pool', 'lh-stk-price', 'lh-stk-tag', 'lh-stk-from', 'lh-stk-note', 'lh-stk-cite', 'lh-limit', 'lh-seal']) assert.match(html, new RegExp(`class="[^"]*\\b${c}\\b`), `a screen emits ${c}`);
   const classes = new Set(html.match(/class="([^"]+)"/g).flatMap(x => x.slice(7, -1).split(/\s+/)));
   const missing = [...classes].filter(c => c && !new RegExp(`\\.${c.replace(/[-]/g, '\\-')}(?![\\w-])`).test(css));
   assert.deepEqual(missing, [], 'classes without a rule');
@@ -283,7 +294,7 @@ test('every class app.css styles is emitted by some screen: no rule outlives the
   setMarkdown(null);
   const sample = '# H1\n\n## H\n\n### H3\n\n#### H4\n\n**b** `c` [l](https://x.test)\n\n- a\n\n> q\n\n---\n\n```\nx\n```\n\n| s | c |\n|---|---|\n| A | +1% |\n| B | -1% |';
   const page = readFileSync(new URL('../../client/index.html', import.meta.url), 'utf8');
-  const html = page + everyState().map(st => renderRail(st, NOW) + screenOf(st, NOW) + (st.settingsOpen ? renderSettings(st) : '') + stockDrawerHtml(st) + renderSheet(st, NOW) + renderRunSheet(st, NOW)).join('') +
+  const html = page + everyState().map(st => renderRail(st, NOW) + screenOf(st, NOW) + (st.settingsOpen ? renderSettings(st) : '') + stockDrawerHtml(st) + renderSellMany(st) + renderSheet(st, NOW) + renderRunSheet(st, NOW)).join('') +
     withMiniDocument(() => renderMarkdown(sample).node.outerHTML);
   const emitted = new Set(html.match(/class="([^"]+)"/g).flatMap(x => x.slice(7, -1).split(/\s+/)));
   const styled = new Set([...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/\.([a-zA-Z][\w-]*)/g)].map(m => m[1]));

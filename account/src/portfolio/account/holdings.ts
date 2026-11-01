@@ -4,8 +4,8 @@
  * BTC at a broker are one row with three venue lines under it. Nothing here asks a venue anything: it reads what the account page already
  * holds (AccountPage.venues[].holdings, account/exchange.ts), and the same input always gives the same rows.
  *
- *   byAsset(venues, opts)   the rows, largest first, and the dollars that are ready (`money`), split the way the page's Cash ready card
- *                           splits them (public/account.js renderLiquidity): traded where they are, moved between the user's own
+ *   byAsset(venues, opts)   the rows, largest first, and the dollars that are ready (`money`), split the way the face's Cash ready card
+ *                           splits them (the retired page's account.js renderLiquidity at 9614314c): traded where they are, moved between the user's own
  *                           accounts, or taken out only at the venue itself
  *   change24h(rows, stats)  what the rows gained or lost in the last 24 hours, from each market's own 24-hour change, and how much of the
  *                           total that covers
@@ -115,7 +115,7 @@ export interface ByAssetOptions {
   /** this server moves real money (AccountPage.connectLive.writes.on). Off, or absent: nothing trades or moves from here, every ready dollar
    * stays where it is */
   writes?: boolean | undefined;
-  /** the PAPER accounts' holdings instead of the real ones (the page's Paper lens): their paper money as the rows and the ready cash,
+  /** the PAPER accounts' holdings instead of the real ones (the face's Paper lens): their paper money as the rows and the ready cash,
    * summed as paper money, never as the account's */
   paper?: boolean | undefined;
 }
@@ -156,7 +156,7 @@ export function marketKey(m: { kind: MarketKind; base: string; symbol: string; c
   return assetKey(normalBase(m.base || m.symbol, m.kind) || m.base, cls);
 }
 
-// ---- where a venue's dollars can go: the page's own rules (public/account.js canTrade, canMove, watched) ----------------------------
+// ---- where a venue's dollars can go: the face's own rules (the retired page's account.js canTrade, canMove, watched at 9614314c) ----------------------------
 
 /** an address the owner watches: shown, never traded or sent from */
 export const isWatched = (v: Pick<HoldingsVenue, "address" | "proven">): boolean => !!v.address && !v.proven;

@@ -13,6 +13,7 @@ import type { Listing, PublicSource } from "../../src/portfolio/live/public-mark
 import { INTERVAL_MS, type Candle, type CandleInterval, type CandlePage, type CandleWindow } from "../../src/portfolio/live/trade.ts";
 import { no } from "../../src/portfolio/refuse.ts";
 import { historyAsk, PortfolioService, type CandlesView } from "../../src/portfolio/service.ts";
+import type { ChinaHistory } from "../../src/portfolio/live/china.ts";
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -23,8 +24,9 @@ const homes: string[] = [];
 afterAll(() => {
   for (const h of homes) rmSync(h, { recursive: true, force: true });
 });
-const view = (r: CandlesView | Refusal): CandlesView => {
+const view = (r: CandlesView | ChinaHistory | Refusal): CandlesView => {
   if (isRefusal(r)) throw new Error(`refused: ${r.code} ${r.message}`);
+  if (!("interval" in r)) throw new Error("an A share's history, not a market's bars");
   return r;
 };
 const refusal = (r: unknown): Refusal => {

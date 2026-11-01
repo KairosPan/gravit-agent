@@ -36,7 +36,6 @@ import { setupFaceProfile } from "../src/setup.ts";
 import { bootFace } from "../src/boot.ts";
 import { registerStatic, type IndexAuth } from "../src/static.ts";
 import { installDesk } from "../src/desk.ts";
-import { createSymbolSearch, registerSymbolSearchRoute } from "../src/symbol-search.ts";
 import { registerLunhuiViewRoute, type LunhuiViewService } from "../src/lunhui-view.ts";
 import { isTrustedDataRequest } from "../src/http.ts";
 import { hasApprovalGrant, type ApprovalEventLike } from "../src/orders.ts";
@@ -204,7 +203,7 @@ test("boot smoke: sign-in gates /api and the mux, the pages and /data answer, Gr
   const patchPath = join(home, "profiles", "face", "cordis.patch.yml");
   const patch = readFileSync(patchPath, "utf8").replace(/^\[\][ \t]*$/m, "");
   // This smoke owns a scratch profile and must not start the operator's data server.
-  writeFileSync(patchPath, `${patch}\n- id: mcp-akshare\n  disabled: true\n- id: mcp-account\n  disabled: true\n`);
+  writeFileSync(patchPath, `${patch}\n- id: mcp-account\n  disabled: true\n`);
   /* Booted the way main.ts boots: `deferReady`, so the browser streams open
    * only when `commitReady()` runs after the face's own routes (step 7 below
    * drills both sides of that commit). Every other smoke takes the default,
@@ -415,25 +414,16 @@ test("boot smoke: sign-in gates /api and the mux, the pages and /data answer, Gr
       await page.body?.cancel();
     }
 
-    /* 8. The face's own `/data` wire, end to end: the symbol search route →
-     * the search → JSON on the wire, with everything but the provider real (a
-     * fake fetch answers Tencent's shape). `/data` is unchanged by 0.2.0:
-     * still fence-only, no cookie (PLAN D8).
+    /* 8. The face's own `/data` wire, end to end: the run view's route
+     * (src/lunhui-view.ts), wired as main.ts wires it: through
+     * `ctx.get("lunhuiRuns")`. `/data` is unchanged by 0.2.0: still
+     * fence-only, no cookie (PLAN D8). A run that does not exist answers 404
+     * (NO_SUCH_RUN, or NOT_A_STRATEGY where the root has no cn-market), not
+     * 503 - the booted tree provides the service the route reaches.
      *
      * Registered HERE and nowhere else in this file: the webserver throws on a
      * duplicate (kind, path), which is the guard, so the smoke must claim the
      * path exactly once. */
-    registerSymbolSearchRoute(ctx.webServer, createSymbolSearch({
-      fetch: async () => new Response('v_hint="sh~603986~\\u5146\\u6613\\u521b\\u65b0~zycx~GP-A";'),
-    }));
-    const searchRes = await fetch(`${base}/data/symbols/search?q=603986&market=cn`);
-    assert.equal(searchRes.status, 200);
-    assert.deepEqual(((await searchRes.json()) as { assets: { id: string }[] }).assets.map((asset) => asset.id), ["cn:603986"]);
-
-    /* The run view's route (src/lunhui-view.ts), wired as main.ts wires it:
-     * through `ctx.get("lunhuiRuns")`. A run that does not exist answers 404
-     * (NO_SUCH_RUN, or NOT_A_STRATEGY where the root has no cn-market), not
-     * 503 - the booted tree provides the service the route reaches. */
     registerLunhuiViewRoute(ctx.webServer, {
       isTrusted: isTrustedDataRequest,
       runs: () => ctx.get("lunhuiRuns") as LunhuiViewService | undefined,
@@ -449,12 +439,18 @@ test("boot smoke: sign-in gates /api and the mux, the pages and /data answer, Gr
       assert.equal(gone.status, 404, path);
       await gone.body?.cancel();
     }
+    // Nor the face's own A-share wire: China is the Account's, read through the proxy.
+    for (const path of ["/data/quotes?ids=cn:600519", "/data/symbols/search?q=1", "/data/cn/rank?sort=volume", "/data/cn/candles?id=cn:600519&range=1D"]) {
+      const gone = await fetch(`${base}${path}`);
+      assert.equal(gone.status, 404, path);
+      await gone.body?.cancel();
+    }
 
     // And the SAME fence over `/data`. It is a second implementation
     // (http.ts's own `isLoopbackHost`, not dsh-client-connection's) guarding
     // every `/data` route, so it is drilled separately rather than assumed to
     // ride along with the `/api` one above.
-    const forgedData = await sendWithHost(port, "/data/symbols/search?q=603986&market=cn", "evil.example.com");
+    const forgedData = await sendWithHost(port, "/data/lunhui/view?strategy=cn-market&run=20990101T000000Z-00000000", "evil.example.com");
     assert.equal(forgedData, 403);
 
     /* 9. The desk (src/desk.ts) on the real webserver: `installDesk` mounts

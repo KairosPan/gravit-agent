@@ -1,5 +1,5 @@
-/** THE ACCOUNT'S PUSH CHANNEL: what changes on the account, told to the pages listening as it happens (GET /api/account/stream, server.ts;
- * the page's end is ui/stream.js). One bus for the service: the paper accounts' books (live/paper.ts: an order's state, a fill, a position, the
+/** THE ACCOUNT'S PUSH CHANNEL: what changes on the account, told to the listeners as it happens (GET /api/account/stream, server.ts;
+ * the face's proxy holds the listening end; the retired page's was ui/stream.js at 9614314c). One bus for the service: the paper accounts' books (live/paper.ts: an order's state, a fill, a position, the
  * cash, the book itself — a background look's fills as the owner's own; service.ts paperSaid), the account's own record (every statement line
  * the ledger takes, an order with it; a card raised) and the desk's floor (account/desk.ts, told on each change of its record or its work)
  * are emitted here, and each page holds one stream.

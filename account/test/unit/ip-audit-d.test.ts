@@ -331,7 +331,7 @@ describe("Robinhood's sign-in: what this network is told", () => {
     }
     answer = json({ error: "invalid_grant", error_description: "The refresh token is invalid." }, 400);
     const ran = refusal(await s.token(started.state));
-    expect([ran.code, ran.message]).toEqual(["E_ACCOUNT_CREDENTIAL", "Robinhood's sign-in ran out and could not be renewed: sign in again from the account page"]);
+    expect([ran.code, ran.message]).toEqual(["E_ACCOUNT_CREDENTIAL", "Robinhood's sign-in ran out and could not be renewed: sign in again from Gravit, under Account › Venues"]);
     answer = json({ access_token: "access-made-up-2", refresh_token: "refresh-made-up-2", expires_in: 3600 });
     expect(await s.token(started.state)).toBe("access-made-up-2");
   });

@@ -1,0 +1,105 @@
+{
+  "ok": true,
+  "asOf": "2026-10-31T02:30:12.000Z",
+  "tabs": [
+    {
+      "id": "all",
+      "label": "All",
+      "count": 3
+    }
+  ],
+  "items": [
+    {
+      "key": "stock:AAPL",
+      "kind": "stock",
+      "name": "Apple",
+      "base": "AAPL",
+      "price": 270,
+      "tabs": [
+        "all",
+        "stocks"
+      ],
+      "at": []
+    },
+    {
+      "key": "cn:600519",
+      "kind": "ashare",
+      "name": "贵州茅台",
+      "base": "600519",
+      "currency": "CNY",
+      "price": 1392.05,
+      "changePct24h": 2.81,
+      "quoteFrom": "Tencent",
+      "tabs": [
+        "china"
+      ],
+      "at": [
+        {
+          "venue": "china",
+          "venueName": "Tencent",
+          "symbol": "600519",
+          "connected": false,
+          "canTrade": false,
+          "public": true,
+          "price": 1392.05,
+          "quoteFrom": "Tencent"
+        }
+      ]
+    },
+    {
+      "key": "cn:688981",
+      "kind": "ashare",
+      "name": "中芯国际",
+      "base": "688981",
+      "currency": "CNY",
+      "price": 98.6,
+      "changePct24h": -0.4,
+      "quoteFrom": "Tencent",
+      "tabs": [
+        "china"
+      ],
+      "at": [
+        {
+          "venue": "china",
+          "venueName": "Tencent",
+          "symbol": "688981",
+          "connected": false,
+          "canTrade": false,
+          "public": true,
+          "price": 98.6,
+          "quoteFrom": "Tencent"
+        }
+      ]
+    },
+    {
+      "key": "cn:300750",
+      "kind": "ashare",
+      "name": "宁德时代",
+      "base": "300750",
+      "currency": "CNY",
+      "price": 412.3,
+      "changePct24h": 1.12,
+      "quoteFrom": "Tencent",
+      "tabs": [
+        "china"
+      ],
+      "at": [
+        {
+          "venue": "china",
+          "venueName": "Tencent",
+          "symbol": "300750",
+          "connected": false,
+          "canTrade": false,
+          "public": true,
+          "price": 412.3,
+          "quoteFrom": "Tencent"
+        }
+      ]
+    }
+  ],
+  "movers": [],
+  "closing": [],
+  "mostTraded": [],
+  "missing": [],
+  "notes": []
+}

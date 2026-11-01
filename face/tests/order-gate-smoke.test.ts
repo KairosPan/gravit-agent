@@ -13,7 +13,7 @@
  * `packages/core/tools/tests/tools.spec.ts:799-842`: an `approval/request`
  * answerer returns a fixed outcome, `ctx.tools.execute` runs the call, and the
  * body's side effect is the evidence. Six steps (PLAN S7):
- * 1. a scratch home with AKShare disabled, then `bootFace`;
+ * 1. a scratch home with the seat disabled, then `bootFace`;
  * 2. a stand-in `mcp__drill__portfolio_live_order` - the seat write's raw-name
  *    suffix exercises the identical gate code path with nothing behind it (no
  *    seat, no Account, no venue);
@@ -133,12 +133,12 @@ test("Gate 2 positive path: an approved seat order dispatches; a rejected one do
   skip: gated && "set FACE_SMOKE=1",
 }, async () => {
   /* 1. Scratch home. This smoke owns a scratch profile and must not start the
-   * operator's data server, so the AKShare row is disabled in the patch. */
+   * operator's Account, so the seat row is disabled in the patch. */
   const home = mkdtempSync(join(tmpdir(), "face-ordergate-positive-"));
   setupFaceProfile(home);
   const patchPath = join(home, "profiles", "face", "cordis.patch.yml");
   const patch = readFileSync(patchPath, "utf8").replace(/^\[\][ \t]*$/m, "");
-  writeFileSync(patchPath, `${patch}\n- id: mcp-akshare\n  disabled: true\n- id: mcp-account\n  disabled: true\n`);
+  writeFileSync(patchPath, `${patch}\n- id: mcp-account\n  disabled: true\n`);
   const { ctx, dispose } = await bootFace({ profileName: "face", port: 0, dshHome: home, botsRoot: await makeBotsRoot() });
   const cleanups: (() => void)[] = [];
   try {

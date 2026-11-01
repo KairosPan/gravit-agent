@@ -81,6 +81,13 @@ test("effectiveApprovalPolicy: a runtime switch to danger-full-access disarms th
 
 /* --- the registry cross-check --------------------------------------------- */
 
+test("the seat's AKShare passthrough is a read: no card, covered", () => {
+  assert.equal(isOrderTool("mcp__account__portfolio_akshare"), false);
+  const audit = auditOrderTools([{ name: "mcp__account__portfolio_akshare" }, { name: "mcp__account__portfolio_live_order" }]);
+  assert.deepEqual(audit.gated, ["mcp__account__portfolio_live_order"]);
+  assert.deepEqual(audit.uncovered, []);
+});
+
 test("auditOrderTools: reports the covered seat writes", () => {
   const audit = auditOrderTools([
     { name: "mcp__account__portfolio_live_order", description: "Place an order at a venue the owner connected live" },

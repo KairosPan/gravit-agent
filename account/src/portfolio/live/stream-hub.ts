@@ -1,6 +1,6 @@
 /** THE MARKET-DATA HUB (feat/paper-live, phase 2): the venues' own public WebSocket streams, read without a key and kept in memory, for the
  * markets someone is looking at now — a paper account's resting orders and positions (live/paper.ts: each look renews its interest) and the
- * markets a page on the push channel shows (service.ts followMarkets) — so a paper fill, a stop's trigger, a perpetual's mark and the page's
+ * markets a page on the push channel shows (service.ts followMarkets) — so a paper fill, a stop's trigger, a perpetual's mark and the face's
  * quote are the venue's price of this moment, not a listing a minute old. Nothing is written anywhere and nothing goes to a store of ours:
  * what a stream says lives here while its market is wanted, and a minute after, and goes.
  *

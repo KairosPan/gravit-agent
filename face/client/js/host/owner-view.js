@@ -10,7 +10,7 @@ const str = v => (typeof v === 'string' ? v : '');
 
 const STANDING = new Map([
   ['signs', { line: 'This page signs for the account', key: null }],
-  ['pending', { line: 'Waiting to be let in — Let it sign on the Account page, under Devices', key: null }],
+  ['pending', { line: 'Waiting to be let in — a browser that signs lets it in, under Settings › Devices', key: null }],
   ['needs-code', { line: 'Pair with the code the Account printed in its terminal', key: 'pair' }],
   ['signed-out', { line: 'Signed out', key: 'signIn' }],
   ['none', { line: 'This browser cannot sign for the account', key: null }],

@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { renderAccountScreen, renderStatement, renderSettings } from '../../client/js/render/account.js';
+import { renderAccountScreen, renderStatement, renderSettings, positionKeys, changeKey } from '../../client/js/render/account.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { parseHash, toHash } from '../../client/js/router.js';
@@ -46,13 +46,13 @@ function state({ tab = 'portfolio', page = fx('account'), holdings = fx('holding
 const draw = s => renderAccountScreen(s, NOW);
 const SEAT_BOX = /<section class="cardbox" aria-label="Account seat">[\s\S]*?<\/section>/;
 
-test('the head: Guard and Trading on chips; Refresh and Settings; four tabs with the cards count', () => {
+test('the head: Guard and Trading on chips; Refresh and Settings; six tabs with the cards count', () => {
   const html = draw(state());
   assert.match(html, /^<main class="main acct">/);
   has(html, '<div class="acct-head"><h1 class="head-title">Account</h1><span class="chip grey">Guard</span><span class="chip grey">Trading on · $250 a move</span><span class="spacer"></span>' +
     '<button type="button" class="pill" data-action="refreshAccount">Refresh</button><button type="button" class="pill" data-action="openSettings">Settings</button></div>');
-  has(html, '<div class="seg"><a class="seg-item pressed" aria-current="page" href="#/account/portfolio">Portfolio</a><a class="seg-item" href="#/account/venues">Venues</a>' +
-    '<a class="seg-item" href="#/account/agents">Agents</a><a class="seg-item" href="#/account/cards">Cards · 1</a></div>', 'the four tabs, the Cards tab counting its one card');
+  has(html, '<div class="seg"><a class="seg-item pressed" aria-current="page" href="#/account/portfolio">Portfolio</a><a class="seg-item" href="#/account/money">Money</a><a class="seg-item" href="#/account/venues">Venues</a>' +
+    '<a class="seg-item" href="#/account/agents">Agents</a><a class="seg-item" href="#/account/cards">Cards · 1</a><a class="seg-item" href="#/account/rules">Rules</a></div>', 'the six tabs, the Cards tab counting its one card');
   const page = fx('account');
   assert.match(draw(state({ page: { ...page, cards: [] } })), /href="#\/account\/cards">Cards<\/a>/, 'no count with nothing waiting');
   const two = draw(state({ page: { ...page, cards: [page.cards[0], { ...page.cards[0], id: 'card-0002', agent: '0xb0b', agentName: 'Scout' }] } }));
@@ -65,7 +65,7 @@ test('the head: Guard and Trading on chips; Refresh and Settings; four tabs with
   const bare = draw(state({ page: null }));
   has(bare, '<h1 class="head-title">Account</h1><span class="spacer"></span>');
   assert.doesNotMatch(bare, /class="chip/);
-  for (const tab of ['venues', 'agents', 'cards']) {
+  for (const tab of ['venues', 'agents', 'cards', 'rules']) {
     assert.match(draw(state({ tab })), new RegExp(`<a class="seg-item pressed" aria-current="page" href="#/account/${tab}">`), tab);
   }
   // Settings: the theme seg, drawn by app.js into whichever screen is up; the screen makes room for it
@@ -196,14 +196,25 @@ test('Portfolio: an unrecognised page reads Account unreadable and draws no figu
   has(draw(state({ page: { ...fx('account'), stale: true } })), '· stale</p>', 'a page that says it is stale');
 });
 
-test('Venues: the rows with health, does and Paper; Details opens the drawer; the seat box and Open the Account page stay', () => {
+test("the Venues line says the Account's China words", () => {
+  const s = state({ tab: 'venues' });
+  const said = 'Tencent is not answering: A shares cannot be read now';
+  const html = draw({ ...s, markets: { ...s.markets, providers: [{ id: 'tencent', market: 'cn', status: 'error', said }] } });
+  has(html, `<div class="label">A-share quotes</div><div class="venues"><div class="venue"><span>${said}</span></div></div></section>`);
+  const escaped = draw({ ...s, markets: { ...s.markets, providers: [{ id: 'tencent', market: 'cn', status: 'error', said: '<b>x</b> & y' }] } });
+  has(escaped, '<span>&lt;b&gt;x&lt;/b&gt; &amp; y</span>', "the Account's words are escaped");
+});
+
+test('Venues: the rows with health, does and Paper; Details opens the drawer; the seat box with Refresh and, while cards wait, Answer under Cards', () => {
   const s = state({ tab: 'venues' });
   const html = draw(s);
   const venues = html.match(/<section class="cardbox" aria-label="Venues">[\s\S]*?<\/section>/)?.[0] ?? '';
-  const row = (id, inner) => `<div class="venue">${inner}<button type="button" class="btn-sm" data-action="openVenueDetails" data-id="${id}">Details</button></div>`;
+  // every venue but a paper one has Close to agents, on any page that reads the Account (plan 4b Task 4)
+  const close = id => `<button type="button" class="btn-sm" data-action="closeToAgents" data-venue="${id}">Close to agents</button>`;
+  const row = (id, inner, paper = false) => `<div class="venue">${inner}<button type="button" class="btn-sm" data-action="openVenueDetails" data-id="${id}">Details</button>${paper ? '' : close(id)}</div>`;
   has(venues, row('broker', '<span><b>Stand-in Broker</b><br><span class="dim">$3,050.00 · Stocks · US stocks and ETFs</span><br><span class="dim">Not read yet · Trades</span></span>'));
   has(venues, row('ex', '<span><b>Stand-in Exchange</b><br><span class="dim">$21,638.93 · Exchange · spot and perpetuals</span><br><span class="dim">Answers · Trades · Moves money · Earns</span></span>'));
-  has(venues, row('paper', '<span><b>Stand-in Paper</b> <span class="chip grey">Paper</span><br><span class="dim">$400.00 · Exchange · perpetuals</span><br><span class="dim">Not read yet · Trades</span></span>'));
+  has(venues, row('paper', '<span><b>Stand-in Paper</b> <span class="chip grey">Paper</span><br><span class="dim">$400.00 · Exchange · perpetuals</span><br><span class="dim">Not read yet · Trades</span></span>', true));
   has(venues, row('agent-claude-code', '<span><b>Agent wallet · Claude Code</b><br><span class="dim">$47.37 · On-chain</span><br><span class="dim">Not read yet · Receives</span></span>'));
   assert.equal((venues.match(/data-action="openVenueDetails"/g) ?? []).length, 7);
   // health from the page: not answering since the last failure; stale in the Account's words, or the word
@@ -246,23 +257,30 @@ test('Venues: the rows with health, does and Paper; Details opens the drawer; th
   assert.equal(R.openVenueDetails(s, ''), s);
   assert.equal(emptyState().account.detailsVenue, null);
 
-  // the A-share quotes line: the face's cn provider alone, in its words
-  const quoted = draw(R.quotesUpdated(s, { quotes: {}, status: 'streaming', providers: [{ id: 'tencent', market: 'cn', status: 'connected' }, { id: 'alpaca', market: 'us', status: 'unconfigured' }] }));
-  has(quoted, '<div class="label">A-share quotes</div><div class="venues"><div class="venue"><span>Tencent · Connected</span></div></div></section>');
+  // the A-share quotes line: China's state in the Account's own words where it says some, else the face's word
+  const quoted = draw(R.chinaStatusUpdated(s, { status: { state: 'live', said: 'Tencent · answering' } }));
+  has(quoted, '<div class="label">A-share quotes</div><div class="venues"><div class="venue"><span>Tencent · answering</span></div></div></section>');
   lacks(quoted, 'Alpaca');
+  const wordless = draw(R.chinaStatusUpdated(s, { status: { state: 'live' } }));
+  has(wordless, '<div class="label">A-share quotes</div><div class="venues"><div class="venue"><span>Tencent · Connected</span></div></div></section>');
   lacks(html, 'A-share quotes', 'no cn provider reported: no line');
 
-  // the seat box under them, as before: nothing read, then the service, the seat and its limit, the venues, the cards, the link
+  // the seat box under them, as before: nothing read, then the service, the seat and its limit, the venues, the cards, its keys
   has(html, '<section class="cardbox" aria-label="Account seat"><div class="cardbox-title">Account seat</div><p class="acct-note">Loading…</p>');
   const seat = draw(state({ tab: 'venues', seat: seatView() })).match(SEAT_BOX)?.[0] ?? '';
   has(seat, '<div class="venue"><span><b>127.0.0.1:4820 · reachable</b><br><span class="dim">Guard · Trading on · $100 a move</span></span></div>');
   has(seat, '<div class="venue"><span><b>Gravit · admitted until Nov 19</b><br><span class="dim">trade · paper-1 · $100 an order · $850 of $1,000 left</span></span></div>');
   has(seat, '<div class="venue"><span><b>Paper account · paper</b> <span class="chip grey">Paper</span><br><span class="dim">$10,000</span></span></div>');
   has(seat, `<p class="acct-note">2 cards waiting · As of ${hhmm('2026-10-22T07:32:00.000Z')}</p>`);
-  has(seat, '<div class="btn-row"><a class="btn-sm" href="http://127.0.0.1:4820" target="_blank" rel="noopener">Open the Account page</a><button type="button" class="btn-sm" data-action="refreshAccount">Refresh</button></div>');
+  has(seat, '<div class="btn-row"><button type="button" class="btn-sm" data-action="refreshAccount">Refresh</button><a class="btn-sm" href="#/account/cards">Answer under Cards</a></div>');
+  assert.doesNotMatch(seat, /Account page|4820"/, 'no way to the Account\'s own page');
+  // no card waiting: Refresh alone
+  const none = draw(state({ tab: 'venues', seat: seatView({ cards: [] }) })).match(SEAT_BOX)?.[0] ?? '';
+  has(none, '<div class="btn-row"><button type="button" class="btn-sm" data-action="refreshAccount">Refresh</button></div>');
   const off = draw(R.seatFailed(state({ tab: 'venues', seat: { ok: true, url: 'http://127.0.0.1:4820', reachable: false, error: 'ECONNREFUSED' } }), { at: NOW }));
   has(off, '<div class="venues"><div class="venue"><span><b>127.0.0.1:4820 · not reachable</b></span></div></div>');
-  has(off, 'Open the Account page</a>');
+  has(off, '<div class="btn-row"><button type="button" class="btn-sm" data-action="refreshAccount">Refresh</button></div>');
+  assert.doesNotMatch(off, /Account page/);
   assert.ok(html.indexOf('aria-label="Venues"') < html.indexOf('aria-label="Account seat"'), 'the seat box under the venues');
 });
 
@@ -408,7 +426,7 @@ test('no CJK, no icon URL, no raw JSON in any rendered string', () => {
     const html = draw(s) + renderStatement(s, NOW) + renderSettings(s);
     assert.doesNotMatch(html, CJK);
     assert.doesNotMatch(html, /<img|\bsrc=|elbstream|favicon/);
-    for (const [url] of html.matchAll(/https?:\/\/[^\s"'<]+/g)) assert.equal(url, 'http://127.0.0.1:4820', 'the only address drawn is the Account page link');
+    assert.deepEqual([...html.matchAll(/https?:\/\/[^\s"'<]+/g)].map(m => m[0]), [], 'no address is drawn: no link to the Account\'s own page');
     assert.doesNotMatch(html, /\{"|":|\[object Object\]|undefined|NaN|\bnull\b/);
   }
 });
@@ -444,32 +462,40 @@ test("the owner's keys on Agents and Cards: Let in, Give a limit, End limit, Rev
   const box = (html, label) => html.match(new RegExp(`<section class="cardbox" aria-label="${label}">[\\s\\S]*?</section>`))?.[0] ?? '';
   const sheetKey = (kind, data, word, cl = 'btn-sm') => `<button type="button" class="${cl}" data-action="openSheet" data-kind="${kind}"${Object.entries(data).map(([k, v]) => ` data-${k}="${v}"`).join('')}>${word}</button>`;
 
-  // Agents: a knocking key's Let in…, an agent's Give a limit…, End limit on its trade limit, Revoke…; Gravit's own row none
+  // Agents: a knocking key's Let in…, an agent's Give a limit…, End limit… on each limit by its kind, Revoke…
   const agents = box(draw(signing(state({ tab: 'agents', seat: seatView(), page: knocks }))), 'Agents');
   has(agents, `<span class="dim">0xab12 · ${hhmm('2026-10-22T07:30:00.000Z')}</span></span><span class="btn-row">${sheetKey('letIn', { address: '0xab12', name: 'Scout' }, 'Let in…')}</span></div>`);
   has(agents, '<span class="dim">Cards 1 · Open orders 1</span></span><span class="btn-row">' +
     sheetKey('limit', { address: CC, name: 'Claude Code' }, 'Give a limit…') +
-    sheetKey('endLimit', { address: CC, name: 'Claude Code', allow: 'ex,predict,wallet' }, 'End limit') +
+    sheetKey('endLimit', { address: CC, name: 'Claude Code', scope: 'trade', allow: 'ex,predict,wallet' }, 'End limit…') +
+    sheetKey('endLimit', { address: CC, name: 'Claude Code', scope: 'venues', allow: 'ex,agent-claude-code' }, 'End limit…') +
+    sheetKey('endLimit', { address: CC, name: 'Claude Code', scope: 'payees', allow: 'api.example.com' }, 'End limit…') +
     `<button type="button" class="btn-danger" data-action="askRevoke" data-address="${CC}" data-name="Claude Code">Revoke…</button></span></div>`);
-  assert.equal((agents.match(/data-kind="endLimit"/g) ?? []).length, 1, 'the trade limit alone: venues and payees are not ended here');
-  has(agents, '<span class="dim">Cards 0 · Open orders 0</span></span></div>', "Gravit's row: no key — the seat is admitted on the Account page");
+  assert.equal((agents.match(/data-kind="endLimit"/g) ?? []).length, 4, "every limit standing, Gravit's trade limit among them");
   // Revoke… asks twice: the confirm for this agent stands in its place
   const asking = box(draw(R.askConfirm(signing(state({ tab: 'agents', seat: seatView() })), { action: 'revoke', name: 'Claude Code', address: CC })), 'Agents');
-  has(asking, 'data-allow="ex,predict,wallet">End limit</button><span class="confirm"><button type="button" class="btn-danger" data-action="confirmYes">Yes, revoke</button><button type="button" class="btn-sm" data-action="cancelConfirm">No</button></span></span></div>');
-  lacks(asking, 'data-action="askRevoke"');
+  has(asking, 'data-allow="api.example.com">End limit…</button><span class="dim">Revoke Claude Code? Its key can do nothing on this account from then on, and cannot be let in again under the same key: a new key is needed. Its limits end with it.</span>' +
+    '<span class="confirm"><button type="button" class="btn-danger" data-action="confirmYes">Yes, revoke</button><button type="button" class="btn-sm" data-action="cancelConfirm">No</button></span></span></div>');
+  lacks(asking, `data-action="askRevoke" data-address="${CC}"`);
+  has(asking, 'data-action="askRevoke" data-address="0xab12" data-name="Gravit"', "Gravit's own stands");
   has(box(draw(R.askConfirm(signing(state({ tab: 'agents' })), { action: 'revoke', name: 'Someone else', address: '0xb0b' })), 'Agents'), 'data-action="askRevoke"', 'a confirm for another agent leaves this one');
-  // each trade limit standing gets End limit, its ids comma-joined, never *; an expired one, or one naming nothing, none
+  // each limit standing gets End limit…, its ids comma-joined, never * (but a payees limit's any payee); an expired one, or one
+  // naming nothing, none
   const agentsBody = fx('agents');
   const more = { ...agentsBody, agents: [{ ...agentsBody.agents[0], limits: [
     { id: 'spend-1', scope: 'trade', allow: ['ex'], perPaymentUsd: 10, budgetUsd: 20 },
     { id: 'spend-2', scope: 'trade', allow: ['*', 'paper', 'broker'], perPaymentUsd: 10, budgetUsd: 20 },
     { id: 'spend-3', scope: 'trade', allow: ['wallet'], expired: true },
     { id: 'spend-4', scope: 'trade', allow: ['*'] },
+    { id: 'spend-5', scope: 'payees', allow: ['*'] },
+    { id: 'spend-6', scope: 'earn', allow: ['*', 'ex'] },
+    { id: 'spend-7', allow: ['ex'] },
+    { id: 'spend-8', scope: 'mode', allow: ['ex'] },
   ] }] };
-  const ends = [...draw(signing(state({ tab: 'agents', agents: more }))).matchAll(/data-kind="endLimit"[^>]*data-allow="([^"]*)"/g)].map(m => m[1]);
-  assert.deepEqual(ends, ['ex', 'paper,broker']);
+  const ends = [...draw(signing(state({ tab: 'agents', agents: more }))).matchAll(/data-kind="endLimit"[^>]*data-scope="([^"]*)" data-allow="([^"]*)"/g)].map(m => `${m[1]}:${m[2]}`);
+  assert.deepEqual(ends, ['trade:ex', 'trade:paper,broker', 'payees:*', 'earn:ex']);
   // an agent with no address: Revoke… by its name alone; nothing that needs the address; every seed escaped
-  const odd = draw(signing(state({ tab: 'agents', agents: { ok: true, agents: [{ name: 'Bob "<b>"', status: 'ok', limits: [{ scope: 'trade', allow: ['ex'] }] }] } })));
+  const odd = box(draw(signing(state({ tab: 'agents', agents: { ok: true, agents: [{ name: 'Bob "<b>"', status: 'ok', limits: [{ scope: 'trade', allow: ['ex'] }] }] } }))), 'Agents');
   has(odd, '<button type="button" class="btn-danger" data-action="askRevoke" data-address="" data-name="Bob &quot;&lt;b&gt;&quot;">Revoke…</button>');
   lacks(odd, 'data-action="openSheet"');
   const quoted = draw(signing(state({ tab: 'agents', page: { ...page, requests: [{ address: '0x"><i>', name: '<Scout>', at: '' }] } })));
@@ -483,11 +509,20 @@ test("the owner's keys on Agents and Cards: Let in, Give a limit, End limit, Rev
   const asks = box(html, 'Asks');
   has(asks, '<div class="order-row"><span>Claude Code · Raise my trading budget to $1,000 so I can finish the SOL position you asked for · limit</span><span class="spacer"></span><span class="btn-row">' +
     `<button type="button" class="btn-sm" data-action="grant" data-ask="ask-0001">Grant</button>${sheetKey('declineAsk', { ask: 'ask-0001' }, 'Decline')}</span></div>`);
-  has(asks, `<button type="button" class="btn-sm" data-action="grant" data-ask="ask-0002">Grant</button>${sheetKey('declineAsk', { ask: 'ask-0002' }, 'Decline')}`, 'a venue ask grants as a limit');
-  // an ask granted on the Account page (a session) has Decline alone; an ask with no id, no key
-  const session = draw(signing(state({ tab: 'cards', page: { ...page, asks: [{ id: 'ask-0003', agentName: 'Claude Code', kind: 'session', text: 'A session' }, { kind: 'limit', text: 'No id' }] } })));
-  has(session, `<span>Claude Code · A session · session</span><span class="spacer"></span><span class="btn-row">${sheetKey('declineAsk', { ask: 'ask-0003' }, 'Decline')}</span></div>`);
-  lacks(session, 'data-action="grant"');
+  has(asks, `<button type="button" class="btn-sm" data-action="grant" data-ask="ask-0002">Grant</button>${sheetKey('declineAsk', { ask: 'ask-0002' }, 'Decline')}`, 'a venue ask has its Grant');
+  // every kind an agent asks has its Grant (plan 4b Task 6); a kind the face does not know has Decline alone; an ask with no id, no key
+  const session = draw(signing(state({ tab: 'cards', page: { ...page, asks: [
+    { id: 'ask-0003', agentName: 'Claude Code', kind: 'session', text: 'A session' }, { id: 'ask-0004', agentName: 'Claude Code', kind: 'memory', text: 'Remember' },
+    { kind: 'limit', text: 'No id' },
+  ] } })));
+  for (const [id, kind] of [['ask-0003', 'session'], ['ask-0004', 'memory']]) assert.ok(session.includes(`data-ask="${id}"`), kind);
+  has(session, `<span>Claude Code · A session · session</span><span class="spacer"></span><span class="btn-row"><button type="button" class="btn-sm" data-action="grant" data-ask="ask-0003">Grant</button>${sheetKey('declineAsk', { ask: 'ask-0003' }, 'Decline')}</span></div>`);
+  has(session, `<span>Claude Code · Remember · memory</span><span class="spacer"></span><span class="btn-row">${sheetKey('declineAsk', { ask: 'ask-0004' }, 'Decline')}</span></div>`);
+  lacks(session, 'data-action="grant" data-ask="ask-0004"');
+  // Beast in force: a mode ask has Decline alone (the Account page's pfGrantable)
+  const beast = draw(signing(state({ tab: 'cards', page: { ...page, mode: 'open', asks: [{ id: 'ask-0005', agentName: 'Claude Code', kind: 'mode', text: 'Beast' }] } })));
+  has(beast, `<span>Claude Code · Beast · mode</span><span class="spacer"></span><span class="btn-row">${sheetKey('declineAsk', { ask: 'ask-0005' }, 'Decline')}</span></div>`);
+  lacks(beast, 'data-action="grant"');
   has(session, '<div class="order-row">No id · limit</div>');
   // a card with no hash is not answered here
   lacks(draw(signing(state({ tab: 'cards', page: { ...page, cards: [{ ...card, hash: '' }] } }))), 'data-kind="approveCard"');
@@ -502,6 +537,83 @@ test("the owner's keys on Agents and Cards: Let in, Give a limit, End limit, Rev
   }
 });
 
+// plan 4b Task 5: the Agent wallets, each with Top up… and Take back… through the move sheet, and Open an agent wallet…; Gravit's
+// own row with Give a limit…, End limit… and Revoke… while admitted, and Let in… while it knocks
+const sheetKeyOf = (kind, data, word) => `<button type="button" class="btn-sm" data-action="openSheet" data-kind="${kind}"${Object.entries(data).map(([k, v]) => ` data-${k}="${v}"`).join('')}>${word}</button>`;
+const boxOf = (html, label) => html.match(new RegExp(`<section class="cardbox" aria-label="${label}">[\\s\\S]*?</section>`))?.[0] ?? '';
+const signingAs = (s, role = 'signs') => R.ownerStanding(s, { role, kid: 'a5048199a8081854' });
+
+test("the Agents tab's wallet rows and keys", () => {
+  const wallets = boxOf(draw(signingAs(state({ tab: 'agents', seat: seatView() }))), 'Agent wallets');
+  has(wallets, '<div class="cardbox-title">Agent wallets</div><div class="venues"><div class="venue"><span><b>Claude Code</b><br>' +
+    '<span class="dim">pays for Claude Code · 0x7f89224d3ad6cacd933242ba0c07e1187e3467c2 · $47.37 of up to $100.00</span></span><span class="btn-row">' +
+    sheetKeyOf('move', { from: 'ex', to: 'agent-claude-code' }, 'Top up…') + sheetKeyOf('move', { from: 'agent-claude-code' }, 'Take back…') + '</span></div></div>' +
+    `<div class="btn-row">${sheetKeyOf('subWallet', {}, 'Open an agent wallet…')}</div>`);
+  // Top up… from the first account money moves from that is not an agent wallet; none such: no Top up…
+  const page = fx('account');
+  const lone = { ...page, venues: page.venues.map(v => (v.id === 'ex' ? { ...v, liveCan: { ...v.liveCan, withdraw: false, transfer: false, swap: false } } : v)) };
+  const noSource = boxOf(draw(signingAs(state({ tab: 'agents', page: lone }))), 'Agent wallets');
+  lacks(noSource, 'Top up…');
+  has(noSource, sheetKeyOf('move', { from: 'agent-claude-code' }, 'Take back…'));
+  // a wallet the page does not list as a venue it moves from: no Take back…; an amount that does not parse is —
+  const away = { ...page, subAccounts: [{ ...page.subAccounts[0], name: 'Elsewhere', capUsd: 'n/a' }] };
+  const elsewhere = boxOf(draw(signingAs(state({ tab: 'agents', page: away }))), 'Agent wallets');
+  has(elsewhere, '$47.37 of up to —');
+  lacks(elsewhere, 'Take back…');
+  has(elsewhere, sheetKeyOf('move', { from: 'ex', to: 'agent-elsewhere' }, 'Top up…'));
+  // a read-only Account, or a page that does not sign: the rows, no key
+  const readOnly = { ...page, connectLive: { ...page.connectLive, writes: { on: false, capUsd: 250 } } };
+  for (const html of [boxOf(draw(signingAs(state({ tab: 'agents', page: readOnly }))), 'Agent wallets'), boxOf(draw(signingAs(state({ tab: 'agents' }), 'pending')), 'Agent wallets')]) {
+    has(html, 'pays for Claude Code');
+    lacks(html, 'data-action="openSheet"');
+  }
+  // no wallet: the page's words; nobody let in: the words for that, and nothing to open
+  has(boxOf(draw(signingAs(state({ tab: 'agents', page: { ...page, subAccounts: [] } }))), 'Agent wallets'), '<p class="acct-note">No agent wallet yet.</p>');
+  const nobody = boxOf(draw(signingAs(state({ tab: 'agents', page: { ...page, subAccounts: [], keys: [] } }))), 'Agent wallets');
+  has(nobody, '<p class="acct-note">Let an agent in first: a wallet pays for one agent.</p>');
+  lacks(nobody, 'Open an agent wallet…');
+  // every word escaped
+  const odd = { ...page, subAccounts: [{ ...page.subAccounts[0], name: '<b>x</b>', agentName: '"Bob"' }] };
+  has(boxOf(draw(signingAs(state({ tab: 'agents', page: odd }))), 'Agent wallets'), '<b>&lt;b&gt;x&lt;/b&gt;</b><br><span class="dim">pays for &quot;Bob&quot; · ');
+});
+
+test("Gravit's row: Revoke…, Give a limit… and End limit… on a page that signs, none on one that does not; Let in… while it knocks", () => {
+  const gravitRow = html => boxOf(html, 'Agents').match(/<div class="venue"><span><b>Gravit · [\s\S]*?<\/div>/)?.[0] ?? '';
+  const row = gravitRow(draw(signingAs(state({ tab: 'agents', seat: seatView() }))));
+  has(row, '<span class="dim">Cards 0 · Open orders 0</span></span><span class="btn-row">' +
+    sheetKeyOf('limit', { address: '0xab12', name: 'Gravit' }, 'Give a limit…') +
+    sheetKeyOf('endLimit', { address: '0xab12', name: 'Gravit', scope: 'trade', allow: 'paper-1' }, 'End limit…') +
+    '<button type="button" class="btn-danger" data-action="askRevoke" data-address="0xab12" data-name="Gravit">Revoke…</button></span></div>');
+  // Revoke… asked first, in words that say Gravit's orders stop
+  const asking = gravitRow(draw(R.askConfirm(signingAs(state({ tab: 'agents', seat: seatView() })), { action: 'revoke', name: 'Gravit', address: '0xab12' })));
+  has(asking, `<span class="dim">Revoke Gravit? Its key can do nothing on this account from then on: ${esc("Gravit's")} orders stop, and it places and moves nothing more. ` +
+    'It cannot be let in again under the same key: a new key is needed. Its limits end with it.</span><span class="confirm"><button type="button" class="btn-danger" data-action="confirmYes">Yes, revoke</button>');
+  // a page that does not sign: Gravit's row has no key
+  for (const role of ['pending', 'none', 'needs-code', 'signed-out', 'unknown']) {
+    const quiet = gravitRow(draw(signingAs(state({ tab: 'agents', seat: seatView() }), role)));
+    has(quiet, 'Gravit · admitted', role);
+    for (const k of ['data-action="openSheet"', 'data-action="askRevoke"']) lacks(quiet, k, `${role}: ${k}`);
+  }
+  // knocking: Let in… on the one request at the seat view's address, listed once; no limit or Revoke… yet
+  const page = { ...fx('account'), requests: [{ address: '0xfeed', name: 'Gravit', at: '2026-10-22T07:30:00.000Z' }, { address: '0xab34', name: 'Scout', at: '' }] };
+  const knocks = seatView({ seat: { name: 'Gravit', status: 'knocking', address: '0xFEED', limits: [] } });
+  const agents = boxOf(draw(signingAs(state({ tab: 'agents', seat: knocks, page }))), 'Agents');
+  has(gravitRow(agents), `<span class="btn-row">${sheetKeyOf('letIn', { address: '0xfeed', name: 'Gravit' }, 'Let in…')}</span></div>`);
+  for (const k of ['data-kind="limit"', 'data-action="askRevoke"']) lacks(gravitRow(agents), k);
+  assert.equal((agents.match(/data-address="0xfeed"/g) ?? []).length, 1, 'the seat knocks on its own row, not again under Knocking');
+  has(agents, sheetKeyOf('letIn', { address: '0xab34', name: 'Scout' }, 'Let in…'));
+  // no address on the seat view: a request named "Gravit" is not bound — no key on Gravit's row, listed under Knocking with its own Let in…
+  const unbound = boxOf(draw(signingAs(state({ tab: 'agents', seat: seatView({ seat: { name: 'Gravit', status: 'knocking', limits: [] } }), page }))), 'Agents');
+  lacks(gravitRow(unbound), 'data-action=');
+  has(unbound, `<div class="label">Knocking</div><div class="venues"><div class="venue"><span><b>Gravit</b>`);
+  has(unbound, sheetKeyOf('letIn', { address: '0xfeed', name: 'Gravit' }, 'Let in…'));
+  has(unbound, sheetKeyOf('letIn', { address: '0xab34', name: 'Scout' }, 'Let in…'));
+  // knocking with no request at its address, or an expired or revoked seat: no key on its row
+  for (const seat of [knocks, seatView({ seat: { name: 'Gravit', status: 'expired', address: '0xab12', limits: [] } }), seatView({ seat: { name: 'Gravit', status: 'revoked', address: '0xab12', limits: [] } })]) {
+    lacks(gravitRow(draw(signingAs(state({ tab: 'agents', seat })))), 'data-action=', seat.seat.status);
+  }
+});
+
 // the Venues' keys (plan 2 Task 8): Connect an account and Open a paper account under the list, Disconnect… on a row — asked
 // twice —, Top up and Start over in a paper venue's Details; drawn only for a page that signs, absent otherwise
 test("the Venues' keys: Connect an account, Open a paper account, Disconnect, Top up and Start over for a page that signs", () => {
@@ -513,13 +625,14 @@ test("the Venues' keys: Connect an account, Open a paper account, Disconnect, To
 
   const html = venuesBox(draw(signing(state({ tab: 'venues' }))));
   has(html, `<div class="btn-row">${sheetKey('connect', {}, 'Connect an account')}${sheetKey('paper', {}, 'Open a paper account')}</div>`);
-  has(html, `data-id="ex">Details</button>${disconnect('ex', 'Stand-in Exchange')}</div>`);
+  const close = id => `<button type="button" class="btn-sm" data-action="closeToAgents" data-venue="${id}">Close to agents</button>`;
+  has(html, `data-id="ex">Details</button>${close('ex')}${disconnect('ex', 'Stand-in Exchange')}</div>`);
   has(html, `data-id="paper-momentum">Details</button>${disconnect('paper-momentum', 'Momentum · paper')}</div>`);
   assert.equal((html.match(/data-action="askDisconnect"/g) ?? []).length, 6, 'every venue but the agent wallet, which the Account never disconnects');
-  has(html, 'data-id="agent-claude-code">Details</button></div>');
+  has(html, `data-id="agent-claude-code">Details</button>${close('agent-claude-code')}</div>`);
   // Disconnect… asks twice: the confirm for this venue in its place
   const asking = venuesBox(draw(R.askConfirm(signing(state({ tab: 'venues' })), { action: 'disconnect', venue: 'ex', name: 'Stand-in Exchange' })));
-  has(asking, 'data-id="ex">Details</button><span class="confirm"><button type="button" class="btn-danger" data-action="confirmYes">Yes, disconnect</button><button type="button" class="btn-sm" data-action="cancelConfirm">No</button></span></div>');
+  has(asking, `data-id="ex">Details</button>${close('ex')}<span class="confirm"><button type="button" class="btn-danger" data-action="confirmYes">Yes, disconnect</button><button type="button" class="btn-sm" data-action="cancelConfirm">No</button></span></div>`);
   assert.equal((asking.match(/data-action="askDisconnect"/g) ?? []).length, 5, 'the other venues keep theirs');
   assert.equal((venuesBox(draw(R.askConfirm(signing(state({ tab: 'venues' })), { action: 'revoke', name: 'ex' }))).match(/askDisconnect/g) ?? []).length, 6, "another confirm is not this one's");
   // every seed escaped
@@ -536,14 +649,14 @@ test("the Venues' keys: Connect an account, Open a paper account, Disconnect, To
   for (const role of ['pending', 'none', 'needs-code', 'signed-out', 'unknown']) {
     const out = draw(R.openVenueDetails(R.ownerStanding(state({ tab: 'venues' }), { role, kid: KID }), 'paper-momentum'));
     for (const k of ['data-action="openSheet"', 'askDisconnect', 'Connect an account', 'Open a paper account', 'Disconnect…', 'Top up', 'Start over']) lacks(out, k, `${role}: ${k}`);
-    has(out, 'data-id="ex">Details</button></div>');
+    has(out, `data-id="ex">Details</button>${close('ex')}</div>`, `${role}: Close to agents needs no signature`);
   }
   // a page that signs but is not read, or not one the face recognises: nothing to connect from, no keys
   for (const p of [null, { ok: true }]) lacks(draw(signing(state({ tab: 'venues', page: p }))), 'data-action="openSheet"');
 });
 
-test('router: account tabs agents and cards parse; an unknown tab is portfolio', () => {
-  for (const tab of ['portfolio', 'venues', 'agents', 'cards']) {
+test('router: account tabs agents, cards and rules parse; an unknown tab is portfolio', () => {
+  for (const tab of ['portfolio', 'venues', 'agents', 'cards', 'rules']) {
     assert.deepEqual(parseHash(`#/account/${tab}`), { screen: 'account', tab });
     assert.equal(toHash({ screen: 'account', tab }), `#/account/${tab}`);
   }
@@ -552,4 +665,318 @@ test('router: account tabs agents and cards parse; an unknown tab is portfolio',
   // the screen draws the tab its route names, one it does not know as Portfolio
   assert.match(draw(R.nav(emptyState(), parseHash('#/account/cards'))), /<a class="seg-item pressed" aria-current="page" href="#\/account\/cards">/);
   assert.match(draw(R.nav(emptyState(), { screen: 'account', tab: 'memory' })), /<a class="seg-item pressed" aria-current="page" href="#\/account\/portfolio">/);
+});
+
+// ── Rules (plan 4a Task 5): Guard one unsigned click; Beast, the cap, the session and their leverage signed ──
+
+const RULES_KID = 'a5048199a8081854';
+const signingRules = s => R.ownerStanding(s, { role: 'signs', kid: RULES_KID });
+const rulesKey = (kind, word) => `<button type="button" class="btn-sm" data-action="openSheet" data-kind="${kind}">${word}</button>`;
+const GATE2 = "Beast removes the Account's card only: Gravit's orders still raise their Gate 2 card in this face first.";
+const LEAD = 'Guard: what agents ask for waits for you on a card. Beast: inside the limits you signed, it goes at once. Guard is one click; Beast is signed.';
+
+test('Rules on a writes-on page that signs: Mode, the door rules, each move, the session, their leverage, every key and the Gate 2 sentence', () => {
+  const html = draw(signingRules(state({ tab: 'rules' })));
+  has(html, '<a class="seg-item pressed" aria-current="page" href="#/account/rules">Rules</a>');
+  // Mode: Guard pressed, Beast a signed sheet
+  has(html, '<div class="seg"><button type="button" class="seg-item pressed" aria-pressed="true" data-action="setGuard">Guard</button>' +
+    '<button type="button" class="seg-item" aria-pressed="false" data-action="openSheet" data-kind="beast">Beast</button></div>');
+  has(html, esc(LEAD));
+  has(html, esc(GATE2));
+  lacks(html, 'Only a browser that signs switches to Beast.');
+  // the door-by-door table, the mode in force marked Now
+  has(html, '<th scope="col">An agent, inside its limit</th><th scope="col">Guard <span class="chip grey">Now</span></th><th scope="col">Beast</th>');
+  has(html, '<tr><td>Place or enlarge an order</td><td>Waits on a card</td><td>At once</td></tr>');
+  has(html, 'A card nobody answers in 30 minutes expires.');
+  // each move, the session, their leverage — each with its key
+  has(html, '$250 an order or a move');
+  has(html, rulesKey('cap', 'Change…'));
+  has(html, `Agents may act until ${fmtDate(Date.parse('2026-11-21T07:35:46.773Z'))}.`);
+  has(html, rulesKey('session', 'Renew for 30 days'));
+  has(html, 'Up to 5x on a perpetual, at a venue that sets leverage from here.');
+  has(html, rulesKey('leverageCap', 'Change…'));
+  lacks(html, 'Read-only:');
+  // Beast in force: Beast pressed, Now on its column
+  const page = fx('account');
+  const beast = draw(signingRules(state({ tab: 'rules', page: { ...page, mode: 'open' } })));
+  has(beast, 'aria-pressed="false" data-action="setGuard">Guard</button><button type="button" class="seg-item pressed" aria-pressed="true">Beast</button>');
+  lacks(beast, 'data-kind="beast"', 'Beast in force: pressed, no sheet to sign');
+  has(beast, '<th scope="col">Guard</th><th scope="col">Beast <span class="chip grey">Now</span></th>');
+  // an ended session starts a new one
+  const ended = draw(signingRules(state({ tab: 'rules', page: { ...page, dial: { ...page.dial, sessionEnded: true } } })));
+  has(ended, 'Ended: agents can do nothing until you start a new one.');
+  has(ended, rulesKey('session', 'Start a new one'));
+  // no venue sets leverage: no leverage row
+  const flat = { ...page, venues: page.venues.map(v => (v.trade ? { ...v, trade: { ...v.trade, leverage: false } } : v)) };
+  lacks(draw(signingRules(state({ tab: 'rules', page: flat }))), 'Their leverage');
+  // what the Guard press said, and a refusal, under the switch
+  has(draw(R.guardSaid(signingRules(state({ tab: 'rules' })), 'Guard: what agents ask for waits for you on a card.')), '<p class="acct-note">Guard: what agents ask for waits for you on a card.</p>');
+  const openPage = { tab: 'rules', page: { ...page, mode: 'open' } };
+  has(draw(R.guardRefused(signingRules(state(openPage)), 'No & no')), '<p class="acct-note">No &amp; no</p>');
+  // a line the page no longer bears out is not drawn: Guard said, then Beast signed (the page in Beast); a refusal, then the
+  // page in Guard after all
+  const stale = draw(R.guardSaid(signingRules(state(openPage)), 'Guard: what agents ask for waits for you on a card.'));
+  lacks(stale, '<p class="acct-note">Guard: what agents ask for waits for you on a card.</p>');
+  lacks(draw(R.guardRefused(signingRules(state({ tab: 'rules' })), 'No & no')), 'No &amp; no');
+  // a signed Beast clears it
+  assert.deepEqual(R.guardClear(R.guardSaid(signingRules(state(openPage)), 'x')).account.guard, { status: 'idle', said: null, message: null });
+  // the head's chips stay
+  has(html, '<span class="chip grey">Guard</span><span class="chip grey">Trading on · $250 a move</span>');
+});
+
+test('Rules on a read-only page: the three Read-only sentences, no key', () => {
+  const page = fx('account');
+  const ro = { ...page, connectLive: { ...page.connectLive, writes: { on: false, capUsd: 250 } } };
+  const html = draw(signingRules(state({ tab: 'rules', page: ro })));
+  has(html, 'Read-only: the Account was started without trading, so there is no cap to set.');
+  has(html, 'Read-only: the Account was started without trading, so there is no session to open.');
+  has(html, 'Read-only: the Account was started without trading, so there is no leverage to set.');
+  for (const k of ['cap', 'session', 'leverageCap']) lacks(html, `data-kind="${k}"`);
+  lacks(html, '$250 an order or a move');
+  // Mode still stands: Guard one click, and the Gate 2 sentence
+  has(html, 'data-action="setGuard">Guard</button>');
+  has(html, esc(GATE2));
+});
+
+test('Rules on a page that does not sign: the Guard seg live, no Beast sheet key, no Change…', () => {
+  for (const role of ['unknown', 'needs-code', 'pending', 'signed-out']) {
+    const html = draw(R.ownerStanding(state({ tab: 'rules' }), { role, kid: '' }));
+    has(html, '<button type="button" class="seg-item pressed" aria-pressed="true" data-action="setGuard">Guard</button>', role);
+    has(html, '<button type="button" class="seg-item" aria-pressed="false" disabled>Beast</button>', role);
+    has(html, 'Only a browser that signs switches to Beast.');
+    lacks(html, 'data-action="openSheet"', role);
+    lacks(html, 'Change…', role);
+    lacks(html, 'Renew for 30 days', role);
+    // the rules read as they stand
+    has(html, '$250 an order or a move');
+    has(html, esc(GATE2));
+  }
+  // an unread page: its note, no rule
+  lacks(draw(state({ tab: 'rules', page: null })), 'data-action="setGuard"');
+  has(draw(state({ tab: 'rules', page: { ok: true } })), 'Account unreadable');
+});
+
+test("a Leverage key carries the most and the modes the market's read says; a Change key is not drawn for an order that cannot be changed", () => {
+  const page = JSON.parse(readFileSync(new URL('./../fixtures/account/account.json', import.meta.url), 'utf8'));
+  const perp = { venue: 'ex', venueName: 'Stand-in Exchange', symbol: 'BTC/USDT:USDT', name: 'BTC perpetual', kind: 'perp', leverage: 3 };
+  const [bare] = positionKeys(perp, page).filter(k => k.includes('data-kind="leverage"'));
+  assert.doesNotMatch(bare, /data-max-leverage|data-margin-modes/, 'nothing said, nothing drawn');
+  const [said] = positionKeys(perp, page, { 'ex|BTC/USDT:USDT': { maxLeverage: 50, marginModes: ['cross', 'isolated'] } }).filter(k => k.includes('data-kind="leverage"'));
+  assert.match(said, /data-leverage="3" data-max-leverage="50" data-margin-modes="cross,isolated"/);
+  const order = { id: 'ord-0004', venue: 'ex', type: 'stop', kind: 'spot', qty: 0.6, stopPrice: 137.83, side: 'sell', base: 'SOL' };
+  assert.match(changeKey(order, page), /Change…/);
+  for (const flag of ['waitingForWallet', 'canceling', 'unfollowed', 'changing', 'unconfirmed']) assert.equal(changeKey({ ...order, [flag]: true }, page), '', flag);
+});
+
+// ── Money (plan 4b Task 2) ──
+
+const MONEY_KID = 'a5048199a8081854';
+const moneySigns = s => R.ownerStanding(s, { role: 'signs', kid: MONEY_KID });
+const MONEY_BOX = name => new RegExp(`<section class="cardbox" aria-label="${name}">[\\s\\S]*?</section>`);
+// the stand-in's page with one payment waiting for the operator's wallet
+function walletPage() {
+  const p = fx('account');
+  p.payments = [{ ...p.payments[0], id: 'pay-0009', status: 'authorized', at: '2026-10-22T07:30:00.000Z', legs: [{ ...(p.payments[0].legs?.[0] ?? {}), native: { walletTx: { from: '0x1', to: '0x2', data: '0x', value: '0x0', chainIdHex: '0x2105' } } }] }];
+  return p;
+}
+
+test('the Money tab on a writes-on page that signs: Receive rows with Show address, Move… per source, the payments waiting for the wallet', () => {
+  assert.deepEqual(parseHash('#/account/money'), { screen: 'account', tab: 'money' });
+  assert.equal(toHash({ screen: 'account', tab: 'money' }), '#/account/money');
+  const html = draw(moneySigns(state({ tab: 'money', page: walletPage() })));
+  has(html, '<a class="seg-item pressed" aria-current="page" href="#/account/money">Money</a>');
+  const receive = html.match(MONEY_BOX('Receive'))?.[0] ?? '';
+  has(receive, 'Agent wallet · Claude Code · All EVM networks: Base, Arbitrum, Optimism, Polygon, Ethereum, BNB Chain, Robinhood Chain', 'the wallet over every EVM network');
+  has(receive, 'data-action="showAddress" data-venue="agent-claude-code" data-asset="USDC" data-network="Base">Show address</button>');
+  lacks(receive, 'Stand-in Exchange', 'the stand-in exchange gives no address');
+  const move = html.match(MONEY_BOX('Move'))?.[0] ?? '';
+  has(move, 'data-action="openSheet" data-kind="move" data-from="ex">Move…</button>');
+  has(move, 'data-action="openSheet" data-kind="move" data-from="agent-claude-code">Move…</button>', 'an agent wallet, for Take back');
+  has(move, '<span class="chip grey">Agent wallet</span>');
+  const waiting = html.match(MONEY_BOX('Waiting for your wallet'))?.[0] ?? '';
+  has(waiting, 'Waiting for your wallet · pay-0009');
+  has(waiting, 'data-action="sendFromWallet" data-payment="pay-0009">Send from wallet…</button>');
+  // a page that does not sign: Receive only (Show address is a read), no Move, no wallet key
+  const looks = draw(state({ tab: 'money', page: walletPage() }));
+  has(looks, 'data-action="showAddress"');
+  lacks(looks, 'aria-label="Move"');
+  lacks(looks, 'data-action="sendFromWallet"');
+  has(looks, 'Waiting for your wallet · pay-0009', 'the payment is said; only a page that signs sends it');
+});
+
+test('the Money tab on a read-only page says Move moves no money', () => {
+  const p = fx('account');
+  p.connectLive.writes.on = false;
+  const html = draw(moneySigns(state({ tab: 'money', page: p })));
+  const move = html.match(MONEY_BOX('Move'))?.[0] ?? '';
+  has(move, 'Read-only: the Account was started without trading, so it moves no money.');
+  lacks(move, 'data-kind="move"');
+  // an unread page: its note, nothing else
+  has(draw(state({ tab: 'money', page: { ok: true } })), 'Account unreadable');
+  // no account receives: the page's words
+  const none = fx('account');
+  none.venues = none.venues.filter(v => v.id !== 'agent-claude-code');
+  has(draw(moneySigns(state({ tab: 'money', page: none }))), 'None of your accounts gives an address to send to from here.');
+});
+
+test('Show address: asking, then the address, its memo, whose it is and the note, with Copy; a refusal in its words', () => {
+  const key = 'agent-claude-code|USDC|Base';
+  let s = moneySigns(state({ tab: 'money' }));
+  s = R.receiveLoading(s, key);
+  has(draw(s), 'Asking Agent wallet · Claude Code…');
+  has(draw(s), 'data-action="showAddress" data-venue="agent-claude-code" data-asset="USDC" data-network="Base" disabled>Show address</button>', 'held while asked');
+  const address = '0x7f89224D3Ad6cACd933242ba0c07e1187e3467C2';
+  s = R.receiveLoaded(s, { key, at: NOW, data: { ok: true, address, tag: '889', whose: 'the agent wallet this account holds the key of', note: 'any EVM network' } });
+  const html = draw(s);
+  has(html, `<span class="mono">${address}</span>`);
+  has(html, '<span class="dim">Memo / tag — needed with it</span> <span class="mono">889</span> <button type="button" class="btn-sm" data-action="copyText" data-text="889">Copy</button>', 'the memo, needed, with its own Copy');
+  has(html, 'The agent wallet this account holds the key of · any EVM network.');
+  has(html, `data-action="copyText" data-text="${address}">Copy</button><button type="button" class="btn-sm" data-action="showAddress" data-venue="agent-claude-code" data-asset="USDC" data-network="Base">Read again</button>`, 'Copy, and Read again beside it');
+  lacks(html, 'Show address</button>', 'the row read shows its address');
+  // read again: the address is not drawn while the new answer is in the air
+  const again = draw(R.receiveLoading(s, key));
+  lacks(again, address);
+  has(again, 'Asking Agent wallet · Claude Code…');
+  // leaving the tab forgets it; coming back asks again
+  const left = R.nav(s, { screen: 'account', tab: 'venues' });
+  assert.deepEqual(left.account.receive, {});
+  has(draw(R.nav(left, { screen: 'account', tab: 'money' })), 'data-network="Base">Show address</button>');
+  assert.equal(R.nav(s, { screen: 'account', tab: 'money' }).account.receive[key].status, 'ready', 'staying on the tab keeps it');
+  assert.deepEqual(R.receiveClear(s).account.receive, {});
+  const refused = R.receiveFailed(moneySigns(state({ tab: 'money' })), { key, at: NOW, message: 'the wallet gives no address on Robinhood Chain' });
+  has(draw(refused), 'the wallet gives no address on Robinhood Chain');
+});
+
+test("the bridge's routes line: under the quote for the preparation shown, finding, then the chosen and the others", async () => {
+  const { renderSheet } = await import('../../client/js/render/owner.js');
+  const { moveSeedOf } = await import('../../client/js/host/sheet-money.js');
+  const { fieldsOf, draftOf } = await import('../../client/js/host/sheet-view.js');
+  const p = fx('account');
+  p.venues.push({ id: 'wallet-mm', name: 'My wallet', live: true, watchOnly: 'Live · read-only', address: '0x1111111111111111111111111111111111111111', proven: 'signed by its wallet', liveCan: { withdraw: false, ledgers: [], transfer: false, swap: false, receive: true, send: 'wallet' }, holdings: [{ asset: 'USDC', amount: 80, usd: 80, class: 'stable', note: 'Base' }] });
+  const seed = moveSeedOf(p, { from: 'wallet-mm', kind: 'bridge', amount: '20' });
+  const fields = fieldsOf('move', seed);
+  const draft = draftOf('move', fields, seed, NOW);
+  const asked = JSON.stringify(draft);
+  let s = moneySigns(state({ tab: 'money', page: p }));
+  s = R.sheetOpen(s, { kind: 'move', seed, fields });
+  s = R.sheetPrepared(s, { prepared: { action: { ...draft, maxFee: '0.4', toAddress: '0x1111' }, shown: [{ name: 'amount', value: '20' }] }, at: NOW, asked, deadline: null });
+  let html = renderSheet(s, NOW);
+  has(html, '<h2>Move money · My wallet</h2>');
+  has(html, '<p class="sheet-hint">Only to your own accounts. Up to $250.00 a move.</p>');
+  has(html, 'Sign and move</button>');
+  has(html, "<p class=\"sheet-hint\">Your wallet sends it; it lands on Optimism when the bridge delivers. Can&#39;t be undone.</p>");
+  s = R.routesAsking(s, asked);
+  has(renderSheet(s, NOW), '<p class="sheet-hint sheet-routes">Finding the routes…</p>');
+  s = R.routesLanded(s, { asked, data: { ok: true, routes: [{ tool: 'across', receiveUsd: 19.8, etaSec: 30, gasUsd: 0.02, feeUsd: 0.2 }, { tool: 'relay', receiveUsd: 19.7, etaSec: 120, feeUsd: 0.3 }] } });
+  html = renderSheet(s, NOW);
+  has(html, '<p class="sheet-hint sheet-routes"><b>Via across · at least $19.80 USDC arrives · ~30 s · network fee about $0.02 in your wallet</b><br>Other routes: relay fee $0.30, ~2 min</p>');
+  // routes read for another preparation: still finding this one's
+  has(renderSheet(R.routesLanded(s, { asked: '{}', data: { ok: true, routes: [] } }), NOW), 'Finding the routes…');
+  has(renderSheet(R.routesFailed(s, { asked, message: 'no bridge joins these chains' }), NOW), '<p class="sheet-hint sheet-routes">no bridge joins these chains</p>');
+  // a withdrawal's sheet has no routes line
+  const w = moveSeedOf(p, { from: 'ex', amount: '5' });
+  const wf = fieldsOf('move', w);
+  let t = R.sheetOpen(moneySigns(state({ page: p })), { kind: 'move', seed: w, fields: wf });
+  t = R.sheetPrepared(t, { prepared: { action: draftOf('move', wf, w, NOW), shown: [] }, at: NOW, asked: JSON.stringify(draftOf('move', wf, w, NOW)), deadline: null });
+  lacks(renderSheet(t, NOW), 'sheet-routes');
+});
+
+// ── Earn and Sell many (plan 4b Task 3) ──
+
+test('Money\'s Earn: what is in each product with Take out…, and Put in…, on a page that signs for an Account that takes writes', async () => {
+  const { earnBody, earnPage } = await import('./helpers/earn-fixture.js');
+  const withEarn = s => R.earnLoaded(s, { data: earnBody(), at: NOW });
+  const html = draw(moneySigns(withEarn(state({ tab: 'money', page: earnPage() }))));
+  const earn = html.match(MONEY_BOX('Earn'))?.[0] ?? '';
+  has(earn, '<b>USDT · Flexible (stand-in)</b><br><span class="dim">Stand-in Exchange · 150 USDT · 4.60% APY</span>', 'venue, amount and asset, yield');
+  has(earn, 'data-action="openSheet" data-kind="earn" data-venue="ex" data-side="withdraw" data-product="flex:USDT">Take out…</button>');
+  has(earn, 'data-action="openSheet" data-kind="earn" data-side="supply">Put in…</button>');
+  lacks(earn, 'ETH · Bonded', 'nothing in it');
+  lacks(earn, 'USDT · Savings', 'OKX is not served here');
+  has(earn, 'Not served on this network now: OKX.');
+  has(earn, 'Kraken could not be read: the venue said 429');
+  has(earn, 'MetaMask: the agent wallet has not been approved for vaults');
+  // what the last taken earn said
+  has(draw(R.earnSaid(moneySigns(withEarn(state({ tab: 'money', page: earnPage() }))), 'Taking out all USDT · USDT · Flexible: done')), 'Taking out all USDT · USDT · Flexible: done');
+  // a page that does not sign: what is in each product, no key
+  const looks = draw(withEarn(state({ tab: 'money', page: earnPage() }))).match(MONEY_BOX('Earn'))?.[0] ?? '';
+  has(looks, 'USDT · Flexible (stand-in)');
+  lacks(looks, 'data-kind="earn"');
+  // an Account that takes no writes: no key, and why
+  const ro = earnPage();
+  ro.connectLive.writes.on = false;
+  const roEarn = draw(moneySigns(withEarn(state({ tab: 'money', page: ro })))).match(MONEY_BOX('Earn'))?.[0] ?? '';
+  lacks(roEarn, 'data-kind="earn"');
+  has(roEarn, 'Read-only: the Account was started without trading, so no money goes in or out of earn.');
+  // not read yet, then refused in the Account's words
+  has(draw(moneySigns(state({ tab: 'money', page: earnPage() }))).match(MONEY_BOX('Earn'))?.[0] ?? '', 'Loading…');
+  has(draw(moneySigns(R.earnFailed(state({ tab: 'money', page: earnPage() }), { at: NOW, message: 'earn is off at this account' }))), 'earn is off at this account');
+});
+
+test('a failed earn read shows its refusal and no "Nothing is earning" line', async () => {
+  const { earnPage } = await import('./helpers/earn-fixture.js');
+  const box = s => draw(moneySigns(s)).match(MONEY_BOX('Earn'))?.[0] ?? '';
+  const NOTHING = 'Nothing is earning to take out.';
+  // the first read refused: its words alone
+  const first = box(R.earnFailed(state({ tab: 'money', page: earnPage() }), { at: NOW, message: 'earn is off at this account' }));
+  has(first, 'earn is off at this account');
+  lacks(first, NOTHING);
+  // a read with nothing in it, then a refused one: the refusal alone, not the empty list's line under it
+  const empty = R.earnLoaded(state({ tab: 'money', page: earnPage() }), { data: { ok: true, products: [], positions: [], venues: [], missing: [] }, at: NOW });
+  has(box(empty), NOTHING, 'read, and nothing is earning');
+  const refused = box(R.earnFailed(empty, { at: NOW, message: 'the venue timed out' }));
+  has(refused, 'the venue timed out');
+  lacks(refused, NOTHING);
+});
+
+test('the Portfolio\'s Sell many… and an Earning row\'s Take out… only on a page that signs for an Account that takes writes', () => {
+  const ASSETS = /<section class="cardbox" aria-label="Assets">[\s\S]*?<\/section>/;
+  const html = draw(moneySigns(state()));
+  const assets = html.match(ASSETS)?.[0] ?? '';
+  has(assets, '<button type="button" class="btn-sm" data-action="openSellMany">Sell many…</button>');
+  has(assets, 'data-action="openSheet" data-kind="earn" data-venue="ex" data-side="withdraw" data-product="flex:USDT">Take out…</button>', 'the product the Earning row names');
+  assert.equal((assets.match(/Take out…/g) ?? []).length, 1, 'only the Earning row');
+  const looks = draw(state()).match(ASSETS)?.[0] ?? '';
+  lacks(looks, 'Sell many…');
+  lacks(looks, 'Take out…');
+  const p = fx('account');
+  p.connectLive.writes.on = false;
+  const ro = draw(moneySigns(state({ page: p }))).match(ASSETS)?.[0] ?? '';
+  lacks(ro, 'Sell many…');
+  lacks(ro, 'Take out…');
+});
+
+test('Sell many\'s drawer: the picks, the review, the run\'s answers where they landed', async () => {
+  const { renderSellMany } = await import('../../client/js/render/account.js');
+  const it = (asset, over = {}) => ({ asset, venue: 'ex', venueName: 'Stand-in Exchange', action: 'sell', symbol: `${asset}/USDT`, held: 2, sellQty: 2, usd: 20, ready: true, ...over });
+  const base = moneySigns(state());
+  const at = sm => renderSellMany(R.sellManySet(base, sm));
+  assert.equal(renderSellMany(base), '', 'none open');
+  has(at({ status: 'reading', items: [], picked: [], legs: [] }), 'Loading…');
+  const picking = { status: 'picking', venue: '', items: [it('SOL'), it('BTC', { action: 'close', side: 'long' })], hidden: 1, missing: [], picked: [], qtys: {}, legs: [], full: false };
+  const none = at(picking);
+  has(none, esc("Everything you hold that isn't a dollar. Pick up to 10: each is its own order at market and its own signature."));
+  has(none, '<b>Close long BTC</b>');
+  has(none, 'value="2" data-action="sellManyQty" data-index="0"');
+  has(none, esc("1 holding can't be sold from here right now and is left out."));
+  assert.match(none, /data-action="sellManyReview" disabled>Review<\/button>/);
+  const two = at({ ...picking, picked: [0, 1] });
+  has(two, '>Review 2 sales</button>');
+  has(at({ ...picking, picked: [0], full: true }), 'At most 10 at once');
+  has(at({ ...picking, items: [], hidden: 0 }), 'Nothing to sell: everything here is in dollars.');
+  has(at({ ...picking, message: 'the account is read-only' }), 'the account is read-only');
+  const prepared = { action: { type: 'liveOrder', symbol: 'SOL/USDT' }, shown: [{ name: 'Sell', value: 'SOL/USDT' }], quote: { order: { words: 'sell 2 SOL at market', notionalUsd: 20 } } };
+  const review = at({ ...picking, status: 'reviewing', legs: [{ item: it('SOL'), state: 'ready', prepared }, { item: it('ETH'), state: 'refused', why: 'below the smallest order' }] });
+  has(review, '<b>sell 2 SOL at market</b> <span class="dim">≈ $20.00</span>');
+  has(review, '<div class="dsec-line">Sell: SOL/USDT</div>', 'What you sign');
+  has(review, 'below the smallest order');
+  has(review, '>Sign 1</button>');
+  has(review, 'data-action="sellManyBack">Back</button>');
+  const looks = renderSellMany(R.sellManySet(state(), { ...picking, status: 'reviewing', legs: [{ item: it('SOL'), state: 'ready', prepared }] }));
+  assert.match(looks, /data-action="sellManyRun" disabled>Sign 1<\/button>/, 'a page that does not sign signs nothing');
+  const done = at({ ...picking, status: 'done', said: 'Sell many: 1 of 2 sales went through', legs: [{ item: it('SOL'), state: 'sold', said: 'Sold · ord-1 · filled' }, { item: it('WETH'), state: 'wallet', said: 'Your wallet has to send it: it waits under Trade › Under way, Send from wallet…' }] });
+  has(done, 'Sold · ord-1 · filled');
+  has(done, 'Your wallet has to send it: it waits under Trade › Under way, Send from wallet…');
+  has(done, 'Sell many: 1 of 2 sales went through');
+  has(done, 'data-action="sellManyClose">Done</button>');
 });

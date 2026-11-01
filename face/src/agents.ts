@@ -110,7 +110,8 @@ const SCRUBBED_ENV = [
   "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY",
   // the workbench's own secrets — no business in a coding agent's child; the
   // APCA_* pair outlives the removed Python layer because the operator's shell
-  // may still carry those Alpaca keys
+  // may still carry those Alpaca keys; the IFIND_* pair is the Account's now (the face reads
+  // neither), scrubbed for the same reason
   "APCA_API_KEY_ID", "APCA_API_SECRET_KEY", "DEEPSEEK_API_KEY", "IFIND_REFRESH_TOKEN", "IFIND_ACCESS_TOKEN",
   // the desk's Telegram bot token: the face's own bridge (telegram.ts) is its one user
   "TELEGRAM_BOT_TOKEN",

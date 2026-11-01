@@ -6,8 +6,8 @@ import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { WebRoute } from "@deepseek-ai/dsh-host-webserver";
-import { FORBIDDEN, HttpError, fencedGet, fencedPost, isJsonBody, isLoopbackHost, isTrustedDataRequest, readBody, send } from "../src/http.ts";
-import { createSymbolSearch, registerSymbolSearchRoute } from "../src/symbol-search.ts";
+import { FORBIDDEN, HttpError, fencedGet, fencedPost, isJsonBody, isLoopbackHost, isTrustedDataRequest, isTrustedNavigation, readBody, send } from "../src/http.ts";
+import { registerLunhuiViewRoute } from "../src/lunhui-view.ts";
 import { recorder } from "./route-recorder.ts";
 
 const FACE = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -147,6 +147,26 @@ test("isTrustedDataRequest: the harness's /api fence restated — Host, Sec-Fetc
   assert.equal(isJsonBody(req({})), false);
 });
 
+test("isTrustedNavigation: only a GET top-level document on a loopback Host", () => {
+  const req = (headers: Record<string, string>, method = "GET"): IncomingMessage => ({ method, headers }) as unknown as IncomingMessage;
+  const nav = { host: "127.0.0.1:3090", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" };
+  for (const site of ["cross-site", "none", undefined]) {
+    const headers: Record<string, string> = site === undefined ? { ...nav } : { ...nav, "sec-fetch-site": site };
+    assert.equal(isTrustedNavigation(req(headers)), true, String(site));
+  }
+  assert.equal(isTrustedNavigation(req({ ...nav, host: "localhost:3090" })), true);
+  assert.equal(isTrustedNavigation(req({ ...nav, host: "evil.example:3090" })), false, "a rebound Host");
+  assert.equal(isTrustedNavigation(req({ ...nav, "sec-fetch-mode": "navigate", host: "" })), false, "an empty Host");
+  assert.equal(isTrustedNavigation(req({ "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" })), false, "no Host");
+  assert.equal(isTrustedNavigation(req({ ...nav, origin: "https://evil.example" })), false, "an Origin");
+  assert.equal(isTrustedNavigation(req({ ...nav, origin: "http://127.0.0.1:3090" })), false, "even its own Origin: a navigation sends none");
+  assert.equal(isTrustedNavigation(req({ ...nav, "sec-fetch-mode": "cors" })), false, "a fetch()");
+  assert.equal(isTrustedNavigation(req({ ...nav, "sec-fetch-dest": "empty" })), false);
+  assert.equal(isTrustedNavigation(req({ ...nav, "sec-fetch-dest": "iframe" })), false, "a frame is not top-level");
+  assert.equal(isTrustedNavigation(req({ host: "127.0.0.1:3090" })), false, "no Fetch Metadata");
+  assert.equal(isTrustedNavigation(req(nav, "POST")), false, "a POST");
+});
+
 test("isLoopbackHost accepts the loopback spellings and nothing else", () => {
   for (const good of ["127.0.0.1", "127.0.0.1:3090", "localhost", "localhost:3090", "LocalHost:3090", "[::1]", "[::1]:3090", "::1", "127.0.0.53:3090"]) {
     assert.equal(isLoopbackHost(good), true, good);
@@ -162,27 +182,37 @@ test("isLoopbackHost accepts the loopback spellings and nothing else", () => {
  * modules; the symbol search, which data.ts used to mount beside them, now
  * registers itself. The booted face's 404 for the four paths is drilled in
  * smoke.test.ts (FACE_SMOKE=1). */
-test("the producer routes and bars are gone", async () => {
-  for (const file of ["src/data.ts", "src/bars.ts", "src/watchlist.ts", "client/market-catalog.js"]) {
+test("the producer routes, bars and the face's own quote wire are gone", async () => {
+  for (const file of ["src/data.ts", "src/bars.ts", "src/watchlist.ts", "client/market-catalog.js",
+    "src/quotes.ts", "src/symbol-search.ts", "src/cn-rank.ts", "src/cn-candles.ts"]) {
     assert.equal(existsSync(join(FACE, file)), false, file);
   }
   const main = readFileSync(join(FACE, "src", "main.ts"), "utf8");
   assert.doesNotMatch(main, /registerDataRoutes|FACE_PYTHON|\.\/data\.ts/);
-  assert.match(main, /registerSymbolSearchRoute\(/);
+  assert.doesNotMatch(main, /registerQuoteRoutes|registerSymbolSearchRoute|registerCnRankRoute|registerCnCandlesRoute/);
+  assert.match(main, /registerLunhuiViewRoute\(/);
 
+  // `/data`'s example route, the one that stays: the Lunhui view, behind the same fence.
   const routes: WebRoute[] = [];
-  const search = createSymbolSearch({ fetch: async () => new Response('v_hint="sh~603986~\\u5146\\u6613\\u521b\\u65b0~zycx~GP-A";') });
-  const dispose = registerSymbolSearchRoute({ register: (route) => routes.push(route) }, search);
+  const dispose = registerLunhuiViewRoute({ register: (route) => routes.push(route) }, {
+    isTrusted: isTrustedDataRequest,
+    runs: () => ({ async view() { return { ok: true }; } }),
+  });
   assert.equal(typeof dispose, "function");
-  assert.deepEqual(routes.map((route) => [route.kind, route.path]), [["exact", "/data/symbols/search"]]);
-  for (const gone of ["/data/account.json", "/data/market.json", "/data/watchlist.json", "/data/bars"]) {
+  assert.deepEqual(routes.map((route) => [route.kind, route.path]), [["exact", "/data/lunhui/view"]]);
+  for (const gone of ["/data/account.json", "/data/market.json", "/data/watchlist.json", "/data/bars",
+    "/data/quotes", "/data/symbols/search", "/data/cn/rank", "/data/cn/candles"]) {
     assert.ok(!routes.some((route) => route.path === gone), gone);
   }
 
-  const out = { status: 0, body: "" };
-  const res = { writeHead(status: number) { out.status = status; }, end(body: string) { out.body = body; } } as unknown as ServerResponse;
-  const req = { method: "GET", url: "/data/symbols/search?q=603986&market=cn", headers: { host: "127.0.0.1:3090" } } as unknown as IncomingMessage;
-  await routes[0]!.handler(req, res);
-  assert.equal(out.status, 200, out.body);
-  assert.deepEqual((JSON.parse(out.body) as { assets: { id: string }[] }).assets.map((asset) => asset.id), ["cn:603986"]);
+  const send = async (host: string) => {
+    const out = { status: 0, body: "" };
+    const res = { writeHead(status: number) { out.status = status; }, end(body: string) { out.body = body; } } as unknown as ServerResponse;
+    const req = { method: "GET", url: "/data/lunhui/view?strategy=cn-market&run=20990101T000000Z-00000000", headers: { host } } as unknown as IncomingMessage;
+    await routes[0]!.handler(req, res);
+    return out;
+  };
+  const trusted = await send("127.0.0.1:3090");
+  assert.equal(trusted.status, 200, trusted.body);
+  assert.equal((await send("evil.example.com")).status, 403);
 });

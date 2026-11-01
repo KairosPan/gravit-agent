@@ -15,7 +15,7 @@ const refusal = (status, code, message) => ({ status, body: { ok: false, refusal
 
 test('standingWords: the six standings, each its line and its key', () => {
   assert.deepEqual(standingWords(owner('signs', 'a5048199a8081854')), { line: 'This page signs for the account', key: null });
-  assert.deepEqual(standingWords(owner('pending', 'a5048199a8081854')), { line: 'Waiting to be let in — Let it sign on the Account page, under Devices', key: null });
+  assert.deepEqual(standingWords(owner('pending', 'a5048199a8081854')), { line: 'Waiting to be let in — a browser that signs lets it in, under Settings › Devices', key: null });
   assert.deepEqual(standingWords(owner('needs-code')), { line: 'Pair with the code the Account printed in its terminal', key: 'pair' });
   assert.deepEqual(standingWords(owner('signed-out')), { line: 'Signed out', key: 'signIn' });
   assert.deepEqual(standingWords(owner('none')), { line: 'This browser cannot sign for the account', key: null });

@@ -189,7 +189,7 @@ export interface AccountState {
   agents: AgentKey[];
   /** every address that was ever revoked: none is authorised again */
   tombstones: Hex[];
-  /** keys that tried to act and are not authorised: the page offers them to the owner */
+  /** keys that tried to act and are not authorised: the face offers them to the owner */
   requests: Array<{ address: Hex; name: string; at: string }>;
   fees: FeeApproval[];
   spends: SpendApproval[];
@@ -423,7 +423,7 @@ export function applyOwner(state: AccountState, action: OwnerAction, envelope: E
       if (!nameKey(name)) return bad("a sub-account's name has a letter or a digit in it");
       if (Number.isNaN(cap) || !(cap > 0)) return bad("a sub-account's float is more than zero");
       if (agentStatus(s, agent, nowMs) !== "ok") return bad("a sub-account belongs to an agent key that is authorised now");
-      // a wallet's key file and its place on the page go by its name in lower case, letters and digits only: "Ops", "ops" and "o.p.s" would
+      // a wallet's key file and its place in the face go by its name in lower case, letters and digits only: "Ops", "ops" and "o.p.s" would
       // be one key, so they are one name
       const same = s.subAccounts.find((x) => nameKey(x.name) === nameKey(name));
       if (same) return bad(same.name === name ? `a sub-account named "${name}" exists` : `"${name}" is the same name as the sub-account "${same.name}" (a name is told apart by its letters and digits, not their case or the marks between them)`);
@@ -533,7 +533,7 @@ export function applyOwner(state: AccountState, action: OwnerAction, envelope: E
 export function spendFor(s: AccountState, agent: string, scope: SpendApproval["scope"], nowMs: number): SpendApproval | Refusal {
   const all = s.spends.filter((x) => x.agent === agent.toLowerCase() && x.scope === scope);
   const live = all.find((x) => x.revokedAt === undefined);
-  if (!live) return no("E_MANDATE_NONE", { message: scope === "venues" ? "the owner has not approved this agent to move money between venues" : scope === "trade" ? "the owner has not approved this agent to trade: it gets a trading limit on the account page (Agents)" : scope === "earn" ? "the owner has not approved this agent to put money to earn: it gets an earn limit on the account page (Agents)" : "the owner has not approved this agent to pay anyone", detail: { scope, hadOne: all.length > 0 } });
+  if (!live) return no("E_MANDATE_NONE", { message: scope === "venues" ? "the owner has not approved this agent to move money between venues" : scope === "trade" ? "the owner has not approved this agent to trade: it gets a trading limit on the owner's Gravit face (Account › Agents)" : scope === "earn" ? "the owner has not approved this agent to put money to earn: it gets an earn limit on the owner's Gravit face (Account › Agents)" : "the owner has not approved this agent to pay anyone", detail: { scope, hadOne: all.length > 0 } });
   if (nowMs >= live.validUntil) return no("E_MANDATE_EXPIRED", { detail: { approval: live.id, validUntil: new Date(live.validUntil).toISOString() } });
   return live;
 }

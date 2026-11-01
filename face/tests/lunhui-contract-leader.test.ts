@@ -443,7 +443,7 @@ async function standInFixtures(dir: string) {
 
 test("leader: a stand-in market run - a candidate's board is a THS: mainline candidate of the theme artifact, REFERENCE when not frozen", async (t) => {
   const { service, market, strategy } = await setup(t, {
-    prepare: standInFixtures, boards: null, mainline: [["THS:人形机器人", "人形机器人"]], boardsConfig: { env: { IFIND_REFRESH_TOKEN: "fixture-refresh" } },
+    prepare: standInFixtures, boards: null, mainline: [["THS:人形机器人", "人形机器人"]],
   });
   const [read, submit] = tools(service, leaderRow);
   const context = JSON.parse(await read.execute({ strategy: "alpha", run: strategy, market_run: market }, exec(ROLE)));

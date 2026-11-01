@@ -1,5 +1,5 @@
 // face/client/js/wire/owner-key.js — the owner key's arithmetic (spec 2026-10-22, plan 2): the face's page signs the
-// Account's owner envelope exactly as the Account's own page does (its owner.js `sign` ≡ sign.ts `deviceSigningInput`;
+// Account's owner envelope exactly as the retired page does (its owner.js `sign` ≡ sign.ts `deviceSigningInput`;
 // docs/research/2026-10-22-account-owner-path-map.md §1.1–§1.2, §2.1):
 // - canonical(v): JSON with object keys sorted recursively, keys whose value is undefined dropped, arrays in order, no
 //   whitespace (null stays null);

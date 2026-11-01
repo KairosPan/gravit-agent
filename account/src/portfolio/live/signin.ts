@@ -99,7 +99,7 @@ export class OAuthSignIn {
   /** the venue sent the browser back: the code is traded for a token, once */
   async finish(q: { state?: string | undefined; code?: string | undefined; error?: string | undefined; error_description?: string | undefined; iss?: string | undefined }): Promise<{ ok: true } | Refusal> {
     const s = q.state ? this.sessions.get(q.state) : undefined;
-    if (!s) return no("E_ACCOUNT_BAD_ACTION", { venue: this.o.venue, message: "this sign-in is not one this server started, or it ran out: start it again from the account page" });
+    if (!s) return no("E_ACCOUNT_BAD_ACTION", { venue: this.o.venue, message: "this sign-in is not one this server started, or it ran out: start it again from Gravit, under Account › Venues" });
     if (s.status !== "waiting") return no("E_ACCOUNT_BAD_ACTION", { venue: this.o.venue, message: "this sign-in has already come back" });
     const fail = (why: string | Refusal): Refusal => {
       const r = typeof why === "string" ? no("E_VENUE_REJECTED", { venue: this.o.venue, message: why }) : why;
@@ -122,9 +122,9 @@ export class OAuthSignIn {
   /** a token for a finished sign-in, refreshed when it has run out */
   async token(state: string): Promise<string | Refusal> {
     const s = this.sessions.get(state);
-    if (!s || s.status !== "ready" || !s.access) return no("E_ACCOUNT_CREDENTIAL", { venue: this.o.venue, message: `${this.o.name}: nobody has signed in for this connection yet — sign in from the account page first` });
+    if (!s || s.status !== "ready" || !s.access) return no("E_ACCOUNT_CREDENTIAL", { venue: this.o.venue, message: `${this.o.name}: nobody has signed in for this connection yet — sign in from Gravit, under Account › Venues, first` });
     if (s.expiresAt === undefined || this.o.clock() < s.expiresAt - 30_000) return s.access;
-    if (!s.refresh) return no("E_ACCOUNT_CREDENTIAL", { venue: this.o.venue, message: `${this.o.name}'s sign-in ran out: sign in again from the account page` });
+    if (!s.refresh) return no("E_ACCOUNT_CREDENTIAL", { venue: this.o.venue, message: `${this.o.name}'s sign-in ran out: sign in again from Gravit, under Account › Venues` });
     const r = await this.post(this.endpoints!.token, new URLSearchParams({ grant_type: "refresh_token", refresh_token: s.refresh, client_id: s.clientId, resource: this.o.resource }).toString(), "application/x-www-form-urlencoded", [s.refresh]);
     if ("ok" in r) return r;
     const took = this.took(s, r, "renewing the sign-in", [s.refresh]);
@@ -132,7 +132,7 @@ export class OAuthSignIn {
     // only the OAuth answers that say so mean the sign-in ran out (RFC 6749 §5.2: the refresh token, or this client, is no longer good);
     // anything else — this network refused, a ban, a rate limit, no answer — is said as that, the sign-in stays, and the next call asks again
     const err = (r.body as { error?: unknown } | undefined)?.error;
-    if (took.code === "E_VENUE_REJECTED" && (r.status === 400 || r.status === 401) && (err === "invalid_grant" || err === "invalid_token" || err === "invalid_client")) return no("E_ACCOUNT_CREDENTIAL", { venue: this.o.venue, message: `${this.o.name}'s sign-in ran out and could not be renewed: sign in again from the account page`, native: { status: r.status, error: err } });
+    if (took.code === "E_VENUE_REJECTED" && (r.status === 400 || r.status === 401) && (err === "invalid_grant" || err === "invalid_token" || err === "invalid_client")) return no("E_ACCOUNT_CREDENTIAL", { venue: this.o.venue, message: `${this.o.name}'s sign-in ran out and could not be renewed: sign in again from Gravit, under Account › Venues`, native: { status: r.status, error: err } });
     return took;
   }
 

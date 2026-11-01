@@ -64,6 +64,9 @@ import type { Payment } from "./account/payments.ts";
 import { exploreAcross, type Exploration, type ExploreSort, type ExploreVenue } from "./live/explore.ts";
 import { holdBackMs, KEEP_MS as LISTING_KEEP_MS, publicSources, type PublicSource } from "./live/public-markets.ts";
 import { TABS, type TabId } from "./live/categories.ts";
+import { CHINA_ID, CHINA_NAME, CHINA_NOTE, type ChinaHistory, type ChinaMarket, type ChinaSource } from "./live/china.ts";
+import type { ChinaRange } from "./live/cn-history.ts";
+import { RANK_ROWS } from "./live/cn-rank.ts";
 import { CHAIN_BY_ID, CHAINS, type ChainName } from "./live/chain.ts";
 import { mountPayees, type PayeeWorld } from "./account/payees.ts";
 import { doorOf, EXCHANGES } from "./account/doors.ts";
@@ -159,12 +162,20 @@ export interface ServiceOptions {
   /** THE DESK (account/desk.ts), on a real account: the brains its house seats may think with and how often its clock ticks (0: only when
    * asked, as in tests). The brains, by default: every provider the Brains place offers (account/brains.ts brainProviders) — Claude through
    * the Anthropic API and each OpenAI-format preset — each ready when its key is there; a scripted one in tests. `env`: the environment
-   * those brains read before their key files, as the answer to a key typed on the page says it (envWins); the process's own by default */
+   * those brains read before their key files, as the answer to a key typed on the face says it (envWins); the process's own by default */
   desk?: { brain?: Brain | Brain[] | undefined; tickMs?: number | undefined; firstCycleMs?: number | undefined; env?: NodeJS.ProcessEnv | undefined } | undefined;
   /** THE VENUES' LIVE STREAMS as a test hands them in (a hub over a stand-in WebSocket, or test/standin's stand-in prices): the real server
    * starts its own instead (watchStreams), and without either nothing is streamed — every price is a REST read, as before */
   streams?: MarketHub | undefined;
+  /** CHINA: the A shares Tencent ranks, quotes, charts and finds (live/china.ts) — the China tab, China's hits in a search, an A share's
+   * quote and history. The real server mounts its own (server.ts), as it does `streams`; without one China is not read at all, and nothing
+   * here ever asks Tencent */
+  china?: ChinaSource | undefined;
 }
+
+/** how long a search waits for China's hits beside the other sources (exploreAcross's per-source budget): late, they are `missing` */
+export const CHINA_SEARCH_WAIT_MS = 4_000;
+const CHINA_NOT_READ = "China is not read on this account";
 
 /** one slice of an order (or any step an agent flies): where, what, and the agent's words for it */
 export interface BatchStep {
@@ -350,7 +361,7 @@ export class PortfolioService {
    * the desk's floor moving (Desk onChange) are emitted on it as they happen; a page that cannot resume from where it stopped is sent what
    * streamSnapshot() says the account is now. The server's close() ends it */
   readonly stream = new AccountStream({ snapshot: () => this.streamSnapshot(), onFollow: (client, keys) => this.pageFollows(client, keys), onAgain: (client, keys) => this.pageAgain(client, keys) });
-  /** A brain's key typed on the page (account/brain-keys.ts), held in memory from the moment its route has checked it against the signed
+  /** A brain's key typed on the face (account/brain-keys.ts), held in memory from the moment its route has checked it against the signed
    * fingerprint until that route answers — taken once by the door's handler, which writes the provider's key file. Nothing else reads it */
   readonly brainKeys = new BrainKeyStage();
   /** the most one order or movement may be worth, in dollars: the server's `--live-cap` to start with, then what the owner last signed
@@ -502,7 +513,7 @@ export class PortfolioService {
           // a new session for the agents: thirty days from now. Widening, so it is the owner's to sign
           this.openness = { ...this.openness, sessionExpiresAt: new Date(Date.parse(this.now()) + 30 * 86_400_000).toISOString() };
           this.ledger.append({ kind: "note", venue: "*", reason: `a new session for the agents, until ${this.openness.sessionExpiresAt}`, detail: this.dialNow() });
-          // the day as the page writes dates (New York, no year); the exact moment is the dial's, on the account page
+          // the day as the face writes dates (New York, no year); the exact moment is the dial's, on the Account
           return { ok: true, summary: `agents may act again, until ${nyDay(this.openness.sessionExpiresAt)}` };
         }
         if (change === "restore") {
@@ -601,7 +612,7 @@ export class PortfolioService {
       desk: (action, who) => (this.desk ? this.desk.apply(action, who) : Promise.resolve(no("E_ACCOUNT_BAD_ACTION", { message: "this account keeps no desk: it is the real account's" }))),
       // a brain's key (account/brain-keys.ts): the key staged for this signature is taken here — once — and written to the provider's file.
       // Taken whatever the handler answers, so a key is never left behind in memory by a refusal. Once a key file was written or removed, the
-      // desk is told (Desk.keyChanged): a refusal the provider gave the OLD key stops being the brain's standing — the page, the feed and the
+      // desk is told (Desk.keyChanged): a refusal the provider gave the OLD key stops being the brain's standing — the face, the feed and the
       // answer to this route then agree with no cycle in between — and the room says the key changed, by its fingerprint only (the desk
       // keeps a refusal standing when a variable in the service's environment wins over the file: that key is still the one in use). A clear
       // that found no file changed nothing, so the desk is not told: its line would say a key was taken away that never was
@@ -663,7 +674,7 @@ export class PortfolioService {
     return isRefusal(v) ? v : this.kept(v).markets(query);
   }
 
-  /** what is held at a venue connected live, fifteen seconds old at most (the page asks often; the venue is asked once) */
+  /** what is held at a venue connected live, fifteen seconds old at most (the face asks often; the venue is asked once) */
   /** a venue on the account is a paper account (LiveSource.paper): its positions, orders and balances are no money */
   paperVenue(venue: string): boolean {
     return this.liveVenues.get(venue)?.paper === true;
@@ -913,6 +924,10 @@ export class PortfolioService {
     if (key.length > 200) return no("E_ACCOUNT_BAD_ACTION", { message: "a row's key is at most 200 characters" });
     const limit = o.limit === undefined ? 60 : Math.floor(o.limit);
     if (!(limit >= 1 && limit <= 200)) return no("E_ACCOUNT_BAD_ACTION", { message: "a limit is 1 to 200 markets" });
+    // CHINA is its own tab, asked of its own source (which keeps its reads): never kept here, never in All
+    if (tab === "china") return this.exploreChina(q, sort, limit);
+    // a search on All asks China too, beside the other sources and within their budget; no other tab ever asks it
+    const china = q && !key && (tab === undefined || tab === "all") ? this.opts.china : undefined;
     // each connected venue with the connection it was made with: exploreAcross leaves out the public source that connection speaks for
     // and its own place rule for this network, where it has one that bars an order from here (placed)
     const connected: ExploreVenue[] = this.tradingVenues().map((v) => {
@@ -930,15 +945,40 @@ export class PortfolioService {
       // close-only too, for a venue not connected: nothing held there to sell, and nothing it would take from here
       const refusing = new Set((this.venuesKept?.v ?? []).filter((x) => x.verdict === "not-served" || x.verdict === "closed" || x.verdict === "close-only").map((x) => x.connector));
       const serves = (r: { id: string; connected: boolean; connector?: string | undefined }): boolean => (r.connected ? !away.has(r.id) : !(r.connector !== undefined && refusing.has(r.connector)));
-      return exploreAcross({ connected: placed, public: this.publicMarkets() }, { q, ...(key ? { key } : {}), limit, clock: () => this.realNow(), serves, ...(tab ? { tab: tab as TabId } : {}), ...(sort ? { sort: sort as ExploreSort } : {}) });
+      const [explored, hits] = await Promise.all([
+        exploreAcross({ connected: placed, public: this.publicMarkets() }, { q, ...(key ? { key } : {}), limit, clock: () => this.realNow(), serves, ...(tab ? { tab: tab as TabId } : {}), ...(sort ? { sort: sort as ExploreSort } : {}) }),
+        china ? within(CHINA_SEARCH_WAIT_MS, china.search(q), CHINA_ID, CHINA_NAME) : undefined,
+      ]);
+      if (hits === undefined) return explored;
+      // China's hits after the dollar rows; a late or refused China half is said in `missing`, the rest answered without it
+      if (isRefusal(hits)) return { ...explored, missing: [...explored.missing, { venue: CHINA_ID, venueName: CHINA_NAME, connected: false, why: hits.message, code: hits.code }] };
+      return { ...explored, items: [...explored.items, ...hits].slice(0, limit) };
     });
+  }
+
+  /** THE CHINA TAB: Tencent's ranking by turnover (`volume`, the default) or by the day's move (`movers`), at most RANK_ROWS rows, with its
+   * read — the sort, how many A shares there are, the session and whether Tencent answered — or, with `q`, China's hits alone. A refusal of
+   * the source is the answer */
+  private async exploreChina(q: string, sort: string | undefined, limit: number): Promise<Exploration | Refusal> {
+    const china = this.opts.china;
+    if (!china) return no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: CHINA_NOT_READ });
+    if (sort === "closing") return no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: "China is sorted by volume or movers" });
+    const body = { movers: [], closing: [], mostTraded: [], missing: [], notes: [CHINA_NOTE] };
+    if (q) {
+      const hits = await china.search(q);
+      if (isRefusal(hits)) return hits;
+      return { asOf: new Date(this.realNow()).toISOString(), tabs: [{ id: "china", label: "China", count: hits.length }], items: hits.slice(0, limit), ...body };
+    }
+    const got = await china.rank(sort === "movers" ? "movers" : "volume");
+    if (isRefusal(got)) return got;
+    return { asOf: got.read.asOf, tabs: [{ id: "china", label: "China", count: got.read.total }], items: got.items.slice(0, Math.min(limit, RANK_ROWS)), ...body, china: got.read };
   }
 
   /** PORTFOLIO: what the account holds, by asset across every venue (account/holdings.ts), the dollars that are ready and where they can go,
    * and what the holdings did in the last 24 hours — each coin's and share's own 24-hour change as a venue reports it (the connected
    * venues' first, then the exchanges' public tickers), never estimated: what no venue reports is `missing`. `cost`: also what was paid for
    * what is held (account/costbasis.ts), from the account's own orders and each venue's positions */
-  /** `paper`: the PAPER accounts' holdings instead of the real ones — the page's Paper lens — summed as paper money, never as the account's */
+  /** `paper`: the PAPER accounts' holdings instead of the real ones — the face's Paper lens — summed as paper money, never as the account's */
   async holdings(opts: { cost?: boolean | undefined; paper?: boolean | undefined } = {}): Promise<HoldingsView | Refusal> {
     const h = await this.held(opts);
     return isRefusal(h) ? h : h.view;
@@ -1131,7 +1171,7 @@ export class PortfolioService {
     return { ...base, address: r.address, ...(r.tag ? { tag: r.tag } : {}), ...(r.note ? { note: r.note } : {}), whose: `${v.name}'s own deposit address, as ${v.name} gives it` };
   }
 
-  /** One point on the net worth curve (account/networth.ts): the account page's total, by class and by venue (every venue connected, with
+  /** One point on the net worth curve (account/networth.ts): the Account's total, by class and by venue (every venue connected, with
    * what it holds, 0 included), and which venues' numbers are stale; with `event`, the venue connected or disconnected just now. None while
    * a restart is still connecting the venues again: a venue that is not back yet is not money gone */
   async snapshot(event?: NetWorthSnapshot["event"]): Promise<{ written: boolean; at: string } | Refusal | undefined> {
@@ -1298,9 +1338,23 @@ export class PortfolioService {
       else if (n.payment && (k.cls === "stable" || k.cls === "cash") && [n.payment.token, n.payment.sourceToken].some((t) => typeof t === "string" && t.toUpperCase() === k.name)) keys.add(r.detail.key);
     }
     const lines = keys.size ? this.statement().filter((l) => keys.has(l.key)).slice(0, 50) : [];
-    const held = new Set(positions.map((p) => `position:${p.venue}:${p.symbol}`));
-    const cost = (h.view.cost ?? []).filter((c) => c.key === k.key || held.has(c.key));
-    return { key: k.key, ...(row ? { row } : {}), ...(compare ? { compare } : {}), ...(candles.got ? { candles: candles.got } : {}), positions, orders, lines, cost, missing };
+    const costOf = (v: HoldingsView, ps: VenuePosition[]) => {
+      const at = new Set(ps.map((p) => `position:${p.venue}:${p.symbol}`));
+      return (v.cost ?? []).filter((c) => c.key === k.key || at.has(c.key));
+    };
+    const cost = costOf(h.view, positions);
+    // the paper accounts' holding of it is the Paper lens's, apart from the real one: read only where a paper account is connected
+    let paper: AssetDetail["paper"];
+    if (h.page.venues.some((v) => v.paper)) {
+      const p = await this.held({ cost: true, paper: true });
+      if (isRefusal(p)) missing.push({ venue: "*", venueName: "the paper accounts", why: p.message, code: p.code, part: "paper" });
+      else {
+        const prow = p.view.rows.find((r) => r.key === k.key);
+        const ppos = (p.view.positions ?? []).filter((x) => sameThing(k, x.kind, x.symbol, x.symbol));
+        paper = { ...(prow ? { row: prow } : {}), positions: ppos, cost: costOf(p.view, ppos) };
+      }
+    }
+    return { key: k.key, ...(row ? { row } : {}), ...(compare ? { compare } : {}), ...(candles.got ? { candles: candles.got } : {}), positions, orders, lines, cost, ...(paper ? { paper } : {}), missing };
   }
 
   /** ONE MARKET'S PRICE HISTORY, as the Market sheet, the Trade page's chart and the Asset sheet draw it: at a venue connected live, its
@@ -1319,12 +1373,21 @@ export class PortfolioService {
    * (`gaps`) and a daily bar built from intraday ones (`today`). Each answer kept seconds to minutes in a bounded memory (historyRead). The
    * symbol is only ever handed to the venue's own client or put in a fixed host's query string, encoded: nothing here is asked of a host the
    * symbol names */
-  async candles(venue: string, symbol: string, interval: string, ask: { range?: string | undefined; before?: string | number | undefined; limit?: string | number | undefined } = {}): Promise<CandlesView | Refusal> {
+  async candles(venue: string, symbol: string, interval: string, ask: { range?: string | undefined; before?: string | number | undefined; limit?: string | number | undefined } = {}): Promise<CandlesView | ChinaHistory | Refusal> {
     if (!this.account) return no("E_ACCOUNT_BAD_ACTION", { message: "the account layer is not mounted" });
     const id = venue.trim();
     const sym = symbol.trim();
     if (!/^[a-z0-9][a-z0-9-]{0,59}$/.test(id)) return no("E_ACCOUNT_BAD_ACTION", { message: "a venue is named by its id: lower-case letters, digits and dashes" });
     if (!sym || sym.length > 160 || !isPlain(sym)) return no("E_ACCOUNT_BAD_ACTION", { message: "a market is named by its symbol at that venue: 1 to 160 characters of plain text" });
+    // an A share's history is Tencent's, by range, in Shanghai's sessions (china.ts history): decided before any bar size or New York window
+    if (id === CHINA_ID) {
+      const china = this.opts.china;
+      if (!china) return no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: CHINA_NOT_READ });
+      if (ask.before !== undefined && String(ask.before).trim() !== "") return no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: "an A share's history is read by range" });
+      const range = (ask.range ?? "").trim();
+      if (!(CANDLE_RANGES as readonly string[]).includes(range)) return no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: `a range is one of ${CANDLE_RANGES.join(", ")}` });
+      return china.history(sym, range as ChinaRange);
+    }
     const asked = historyAsk(interval, ask);
     if (isRefusal(asked)) return asked;
     const { iv, range, before, limit } = asked;
@@ -1357,7 +1420,7 @@ export class PortfolioService {
       const got = await within(wait, this.kept(live).candles!(sym, iv, w), id, live.name);
       if (isRefusal(got)) return got;
       // a paper account's bars are its market's public source's: named, so the chart never calls them the paper account's own — and named
-      // as the page names them where they are another exchange's (a Kraken pair's drawn from Coinbase Exchange: barsFrom)
+      // as the face names them where they are another exchange's (a Kraken pair's drawn from Coinbase Exchange: barsFrom)
       const named = live.trader.pricesFrom ? await live.trader.pricesFrom(sym).catch(() => undefined) : undefined;
       const page = pageOf(got, iv, held);
       const from = named !== undefined ? barsFrom(page, named, this.publicMarkets().find((x) => x.name === named)?.kind) : undefined;
@@ -1385,7 +1448,7 @@ export class PortfolioService {
    * source with no book) is the market shown as what it carries: its best bid and best ask (`depth: "top"`, no size, since none is given),
    * named by the source its quote came from, stamped with the quote's own time, and with why that is all (`topOnly`: "none" where the source
    * publishes no depth at all — US stocks' public quotes — else "unread": it has a book the account does not read); one with neither says
-   * so. Each answer kept a second and a half (BOOK_KEEP_MS), so the page's poll every two seconds asks the venue once. A read */
+   * so. Each answer kept a second and a half (BOOK_KEEP_MS), so the face's poll every two seconds asks the venue once. A read */
   async marketBook(venue: string, symbol: string, depth = 20): Promise<BookView | Refusal> {
     const asked = this.oneMarket(venue, symbol);
     if (isRefusal(asked)) return asked;
@@ -1408,7 +1471,7 @@ export class PortfolioService {
         if (got !== undefined) return isRefusal(got) ? got : { venue: id, venueName: live.name, symbol: sym, book: got as OrderBook };
       }
       // no book read here: the best bid and ask the market itself carries, as that. A paper account's comes from its source's listing, kept up
-      // to LISTED_QUOTE_UP_TO_MS by then, and its market kept MARKET_KEEP_MS more here: where the quote carries no time of its own, the page
+      // to LISTED_QUOTE_UP_TO_MS by then, and its market kept MARKET_KEEP_MS more here: where the quote carries no time of its own, the face
       // is told how old it may be
       const m = await within(BOOK_WAIT_MS, this.kept(live).market(sym), id, live.name);
       if (isRefusal(m)) return m;
@@ -1440,7 +1503,7 @@ export class PortfolioService {
    * A venue or source that publishes no trades at all (a US stock's public quote; a paper account's market priced from one; a connection
    * with neither a trades read nor a public twin) is not refused: that is the source's fact, as a book that is only its best bid and ask is
    * answered as that. The answer is an empty list with `none`, the sentence saying so ("US stocks publishes no trades the account can
-   * read"), and the page's Trades tab shows the sentence and stops asking until the market changes. Every other refusal — no answer in
+   * read"), and the face's Trades tab shows the sentence and stops asking until the market changes. Every other refusal — no answer in
    * time, a place rule, a market the source does not list — stays the refusal it is */
   async marketTrades(venue: string, symbol: string, limit = 30): Promise<TradesView | Refusal> {
     const asked = this.oneMarket(venue, symbol);
@@ -1653,12 +1716,26 @@ export class PortfolioService {
     return { ...base, symbol: m.symbol, kind: m.kind, sellQty: qty, ...(price !== undefined ? { price } : {}), ...(usd !== undefined ? { usd } : {}), ready: why === undefined, ...(why ? { why } : {}) };
   }
 
-  /** a fresh price for each of a few markets at venues connected live (each kept three seconds, as the order ticket's): what the page polls
+  /** a fresh price for each of a few markets at venues connected live (each kept three seconds, as the order ticket's): what the face polls
    * for the cards it shows */
   async quotes(pairs: Array<{ venue: string; symbol: string }>): Promise<Array<{ venue: string; symbol: string; market?: Market; refusal?: Refusal }> | Refusal> {
     if (!this.account) return no("E_ACCOUNT_BAD_ACTION", { message: "the account layer is not mounted" });
     if (!pairs.length || pairs.length > 12) return no("E_ACCOUNT_BAD_ACTION", { message: "quotes are asked for 1 to 12 markets at once, each venue|symbol" });
+    // the A shares go to China's source in ONE read; every other pair as before
+    const six = (p: { symbol: string }) => /^\d{6}$/.test(p.symbol);
+    const asked = pairs.filter((p) => p.venue === CHINA_ID && six(p)).map((p) => p.symbol);
+    const china = this.opts.china;
+    const cn: Promise<Map<string, ChinaMarket> | Refusal> = !asked.length ? Promise.resolve(new Map())
+      : china ? china.quotes(asked) : Promise.resolve(no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: CHINA_NOT_READ }));
     return Promise.all(pairs.map(async (p) => {
+      if (p.venue === CHINA_ID) {
+        if (!china) return { ...p, refusal: no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: CHINA_NOT_READ }) };
+        if (!six(p)) return { ...p, refusal: no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: "an A share is its six digits" }) };
+        const got = await cn;
+        if (isRefusal(got)) return { ...p, refusal: got };
+        const m = got.get(p.symbol);
+        return m ? { ...p, market: m } : { ...p, refusal: no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: `no A-share quote for ${p.symbol}` }) };
+      }
       const r = await this.liveMarket(p.venue, p.symbol);
       return isRefusal(r) ? { ...p, refusal: r } : { ...p, market: r };
     }));
@@ -1700,7 +1777,7 @@ export class PortfolioService {
       memory: this.memory ? { notes: this.memory.notes(k.address).filter((n) => !n.waiting).length, waiting: this.memory.notes(k.address).filter((n) => n.waiting).length } : { notes: 0, waiting: 0 },
       flights: this.flights.filter((f) => f.agent.name === k.name && f.agent.code === k.code).slice(-10).reverse().map((f) => ({ no: f.no, at: f.at, request: f.request, legs: f.legs.map((l) => `${l.mark === "ok" ? "✓" : l.mark === "no" ? "✗" : l.mark === "wait" ? "▣" : "·"} ${l.text}`) })),
     }));
-    // the mode as every other read wires it (`guard` is Guard, `open` is Beast): the page puts the words on it
+    // the mode as every other read wires it (`guard` is Guard, `open` is Beast): the face puts the words on it
     return { asOf: page.now, mode: this.openness.mode === "open" ? "open" : "guard", agents, requests: page.requests };
   }
 
@@ -1984,7 +2061,7 @@ export class PortfolioService {
       log: (row) => void this.ledger.append(unaddressedRow(row)),
     };
   }
-  /** How one of the desk's brains stands now that its key changed (account/brain-keys.ts), as the page, the feed and a seat read it — the
+  /** How one of the desk's brains stands now that its key changed (account/brain-keys.ts), as the face, the feed and a seat read it — the
    * desk's own standing (Desk.catalog), which is the brain's word about itself (a key file is read again at every check, so a key just
    * written needs no restart) overlaid with a refusal the provider gave its key at a call, while that refusal stands. So the answer to the
    * route that set the key never says "ready" beside a card that says "Key refused": they are read from the same place. And the variable in
@@ -2002,7 +2079,7 @@ export class PortfolioService {
 
   /** "Test the key" (POST /api/account/brain-test): the brain's own test — the one call that bills nothing, to the provider's own base URL
    * (desk.ts Brain.test, through brains.ts testBrain). One at a time per brain AND model: a second ask for the same pair while one is out
-   * waits for the same answer, so the page (or anything local that asks) cannot make a run of calls of it — and an ask for another model
+   * waits for the same answer, so the face (or anything local that asks) cannot make a run of calls of it — and an ask for another model
    * is its own test, so that its answer ("… X is listed") is never the words of a test about a different model. A brain with no test (a
    * script) says so; nothing is sent then. Undefined: no desk, or no brain of that id */
   async brainTest(provider: string, model = ""): Promise<BrainTest | undefined> {
@@ -2036,7 +2113,7 @@ export class PortfolioService {
    * time only when it settles (AccountEngine.settle), and it settles when it is read. A page on the push channel reads it far less often
    * (shell.js REFRESH_SLOW) — so, while one listens, the door looks by itself every DOOR_LOOK_MS: a resting order filled at Coinbase, at
    * Alpaca's paper account or Hyperliquid's testnet, a payment landed, an earn request answered or a card past its time is told to the
-   * page (toldRow) as soon as it would have been while the page read every twenty seconds, or sooner. Only while something is under way
+   * page (toldRow) as soon as it would have been while the face read every twenty seconds, or sooner. Only while something is under way
    * at a venue that does not tell its own book (the account's paper books tell theirs as they are written: paperSaid), and a card waiting
    * is only expired (the quick settle). One look at a time; never while no page listens, and never in tests (they look themselves) */
   watchDoor(everyMs = DOOR_LOOK_MS): () => void {
@@ -2075,7 +2152,7 @@ export class PortfolioService {
       if (changed.length) {
         for (const v of changed) {
           this.marketReads.drop(v, true);
-          // its balance read too: the cash and holdings the page shows are the book's after the fill, not those kept from before it
+          // its balance read too: the cash and holdings the face shows are the book's after the fill, not those kept from before it
           this.adapters.get(v)?.wake?.();
           this.account?.trade.dueNow(v);
         }
@@ -2160,9 +2237,9 @@ export class PortfolioService {
   private readonly followers = new Map<string, Map<string, number>>();
 
   /** THE MARKETS A PAGE SHOWS (account/stream.ts follow, told here): each key — `<venue>:<symbol>` — held from the venues' streams while
-   * the page follows it (its book too: the page shows it), its quote, book and trades pushed to the page as they move (marketTold), and
+   * the face follows it (its book too: the face shows it), its quote, book and trades pushed to the face as they move (marketTold), and
    * the ones it no longer follows let go (each stream a minute after nothing wants it: live/stream-hub.ts). A key with a "~" before it is a
-   * market whose PRICE ALONE the page shows (a position's mark under the trading area's panels, ui/terminal.js): held without its book, and
+   * market whose PRICE ALONE the face shows (a position's mark under the trading area's panels of the retired page, ui/terminal.js at 9614314c): held without its book, and
    * only its quote pushed */
   private pageFollows(client: string, keys: string[]): void {
     const had = this.pageHolds.get(client) ?? new Map<string, { source: string; symbol: string; release: () => void }>();
@@ -2182,7 +2259,7 @@ export class PortfolioService {
     for (const key of keys) if (!kept.has(key)) void this.followKey(client, key).catch(() => undefined);
   }
   /** one key a page follows, held from its stream — once what it stands for is known (a paper market's source, read first where it has not
-   * been yet) and only if the page still follows it then; what the stream has now told to the page at once */
+   * been yet) and only if the face still follows it then; what the stream has now told to the face at once */
   private async followKey(client: string, key: string): Promise<void> {
     const marked = key.startsWith("~");
     const at = await this.streamAt(marked ? key.slice(1) : key);
@@ -2200,7 +2277,7 @@ export class PortfolioService {
     for (const what of priceOnly ? (["quote"] as const) : (["quote", "book", "trades"] as const)) this.tellMarket(k, what);
   }
   /** A PAGE'S STREAM OPENED AGAIN carrying over what it followed (account/stream.ts attach: the same tab come back before its old stream
-   * was let go): each market it holds told to it again now — its quote, and its book and trades where it shows them whole — since the page
+   * was let go): each market it holds told to it again now — its quote, and its book and trades where it shows them whole — since the face
    * let go of what its old stream pushed as that dropped, and a quiet market would otherwise say nothing until its next move. A key whose
    * stream is still being found tells itself once it is held (followKey) */
   private pageAgain(client: string, keys: string[]): void {
@@ -2243,7 +2320,7 @@ export class PortfolioService {
     return this.hub?.covers(venue, symbol) ? { source: venue, symbol } : undefined;
   }
   /** a stream's word, told to the pages that follow its market: a quote, a book or trades as they moved — and both quote and book when it
-   * went live or stopped being so (the page says its age then) */
+   * went live or stopped being so (the face says its age then) */
   private marketTold(t: HubTick): void {
     const k = `${t.source}|${t.symbol}`;
     if (!this.followers.get(k)?.size) return;
@@ -2299,15 +2376,15 @@ export class PortfolioService {
   }
 
   /** A PAPER ACCOUNT'S BOOK MOVED (live/paper.ts PaperChange, told as the book is written — the owner's own order, a look of the service's
-   * own, a reset or paper money added alike): told to the pages at once as the account's own events, in the shapes the page already reads —
-   *   order      each order whose state moved: the account's own record of it (by the client id the account gave it, as the page's orders
+   * own, a reset or paper money added alike): told to the pages at once as the account's own events, in the shapes the face already reads —
+   *   order      each order whose state moved: the account's own record of it (by the client id the account gave it, as the face's orders
    *              list carries it) with the book's state over it, since the account's door hears of it only at its next poll; an order the
    *              account has no record of (a bracket's exit not yet taken on) in the book's own words, with its client id
    *   fill       each fill, a background look's as the owner's own — its order's id where the account has one
    *   position   each position or holding as the account's positions read lists it (live/paper.ts positionRow), at its venue; null: gone
    *   balance    the paper cash, when it moved          paper   the book said of itself (and `reset` when it was started again)
    *   statement  read the statement again: a fill no order of the account's placed (a liquidation, a settlement) is a line read from the book
-   * A change that moved what is held or the cash lets go of what was kept of the venue's reads (its balance among them), so the page's next
+   * A change that moved what is held or the cash lets go of what was kept of the venue's reads (its balance among them), so the face's next
    * read is the book's; and the account's door asks how its orders there stand at its next poll (a page read is one), not after their wait */
   private paperSaid(venue: string, c: PaperChange): void {
     const venueName = this.nameOf(venue);
@@ -2335,7 +2412,7 @@ export class PortfolioService {
 
   /** WHAT THE LEDGER TOOK, told to the pages (the push channel; every row passes here as it is written): a statement line (`statement`,
    * with the line — the history tabs read the statement again), an order's new state as the account placed it or follows it (`order`: the
-   * account's own record of it, as the page's orders list carries it), with a `fill` for what it filled since it was last told (toldFill),
+   * account's own record of it, as the face's orders list carries it), with a `fill` for what it filled since it was last told (toldFill),
    * a card raised or answered (`card`) — and, as a `card` too (`waits`: what it is), what now waits for the owner without a card, which the
    * page shows in its counts and reads only with the account: an agent knocking to be let in (a new one, or one that gave a new name), an
    * agent's ask or a note it keeps for the owner to answer, a device asking to sign. Nothing else of the ledger goes out */
@@ -2384,11 +2461,11 @@ export class PortfolioService {
   private readonly toldFills = new Map<string, { qty: number; avg: number | undefined }>();
   /** AN ORDER THAT FILLED MORE SINCE THE PAGES WERE LAST TOLD OF IT: told as a fill of its own (`fill`, the shape a paper account's book
    * tells one in), so every fill is said once as it happens — at a real venue, at a venue's own paper account (Alpaca paper, Hyperliquid's
-   * testnet) and an agent's order that filled as it was placed alike — however the page's own copy of the order stands: its read may have
+   * testnet) and an agent's order that filled as it was placed alike — however the face's own copy of the order stands: its read may have
    * come back with the fill before this push did. What it adds is the size since the last told, at its own price: (the new average × what
    * has filled − the old average × what had) ÷ what it adds, where both averages are known — else the order's average, said as one. The
    * account's own paper books (live:paper) tell their fills themselves as they are written (paperSaid): nothing is told twice from here. The
-   * client id and what has filled in all are the page's key for a fill said once (core FILLS_SAID), whichever of this, the order's own
+   * client id and what has filled in all are the face's key for a fill said once (core FILLS_SAID), whichever of this, the order's own
    * answer and the book's fill comes first */
   private toldFill(o: LiveOrder): void {
     const was = this.toldFills.get(o.id) ?? { qty: 0, avg: undefined };
@@ -2409,7 +2486,7 @@ export class PortfolioService {
   }
 
   /** what a page that cannot resume is told the account is now (account/stream.ts snapshot): the orders still on a book or on their way, as
-   * the page's orders list carries them, and each paper account's book said of itself. The page reads the rest afresh */
+   * the face's orders list carries them, and each paper account's book said of itself. The page reads the rest afresh */
   private streamSnapshot(): Record<string, unknown> {
     return { orders: (this.account?.orders ?? []).filter((o) => !DONE.has(o.status)).slice(0, 60), paper: [...this.paperControls.values()].map((c) => c.summary()) };
   }
@@ -2420,7 +2497,7 @@ export class PortfolioService {
   private newPairingCode(): void {
     if (this.pairCode === undefined) return;
     this.pairCode = pairingCode();
-    console.log(`signed out: no browser signs for the account now\n  pairing code: ${this.pairCode} — the next browser becomes the owner only with this code, typed on the page (the code before it no longer works)`);
+    console.log(`signed out: no browser signs for the account now\n  pairing code: ${this.pairCode} — the next browser becomes the owner only with this code, typed on Gravit's face (Account) (the code before it no longer works)`);
   }
 
   /** A PAPER ACCOUNT the account keeps itself, as its owner runs it — what a signed resetPaper or topUpPaper does, once the door has checked
@@ -2551,13 +2628,13 @@ export class PortfolioService {
     // neither for one nor the other until the hold runs out (of the mm connection's, only what is mm's own holds its other reads)
     const adapter = await liveAccount(venue, opened.source, { connector, first: opened.first, clock: deps.clock, ...(opened.price ? { price: opened.price } : {}), held: () => this.shutNow(venue), refused: (r) => (connector !== "live:metamask" || connectionWide(r)) && this.marketReads.hold(venue, r) && this.sawRule(venue, r) });
     const src = opened.source;
-    // a venue's own words for what it does not do here, as the page and the ledger show them, with this machine's address taken out (not all
+    // a venue's own words for what it does not do here, as the face and the ledger show them, with this machine's address taken out (not all
     // of them passed through no())
     if (src.readOnlyBecause) src.readOnlyBecause = unaddressed(src.readOnlyBecause);
     if (src.noTradeBecause) src.noTradeBecause = unaddressed(src.noTradeBecause);
     // who showed the address is the user's: the wallet that signed the account's sentence, or the mm session on this machine
     const proven = src.address === undefined ? undefined : connector === "live:metamask" ? "the mm session on this machine" : deps.proofs.proven(src.address)?.wallet;
-    // the account's own paper account says what it started with (paper.ts probe): the page shows what it made or lost since
+    // the account's own paper account says what it started with (paper.ts probe): the face shows what it made or lost since
     const native = (src.probe as { native?: { startCashUsd?: unknown } } | undefined)?.native;
     const paperStart = src.paper && typeof native?.startCashUsd === "number" && native.startCashUsd > 0 ? native.startCashUsd : undefined;
     // and the paper money its owner added since (topUpPaper), which is put in and not made
@@ -2565,11 +2642,11 @@ export class PortfolioService {
     Object.assign(adapter.account, { ...(proven ? { proven } : {}), ...(src.writer ? { liveCan: src.writer.can } : {}), ...(src.noTradeBecause ? { noTradeBecause: src.noTradeBecause } : {}), ...(src.readOnlyBecause ? { readOnlyBecause: src.readOnlyBecause } : {}), ...(src.paper ? { paper: true as const, ...(paperStart ? { paperStartUsd: paperStart } : {}), ...(paperAdded ? { paperAddedUsd: paperAdded } : {}) } : {}) });
     // what the key may do is read from the trader each time: a venue can say it only after connecting (Kalshi's key scopes)
     const trader = src.trader;
-    // the kinds of market its trader offers, where it says them itself (the mm trader: tokens, event contracts, perpetuals); the page falls
+    // the kinds of market its trader offers, where it says them itself (the mm trader: tokens, event contracts, perpetuals); the face falls
     // back to the connector's own (accounts.ts tradeKinds) where it does not
     if (trader) Object.defineProperty(adapter.account, "liveTrade", { get: () => ({ can: trader.can, what: trader.what, ...(trader.kinds ? { kinds: [...trader.kinds] } : {}), positions: !!trader.positions, amend: !!trader.amend, leverage: !!trader.setLeverage, close: !!trader.close }), enumerable: true, configurable: true });
     this.liveVenues.set(venue, { id: venue, name: adapter.account.name, kind: adapter.account.kind, ...(src.address ? { address: src.address } : {}), ...(proven ? { proven } : {}), ...(src.writer ? { writer: src.writer } : {}), ...(src.readOnlyBecause ? { readOnlyBecause: src.readOnlyBecause } : {}), ...(src.trader ? { trader: src.trader } : {}), ...(src.noTradeBecause ? { noTradeBecause: src.noTradeBecause } : {}), ...(src.paper ? { paper: true as const } : {}), via: src.via });
-    // a paper account the account keeps itself is looked at between the page's reads (watchPaper): its stops, its days, its funding; its
+    // a paper account the account keeps itself is looked at between the face's reads (watchPaper): its stops, its days, its funding; its
     // owner starts it again or adds paper money through its book's own controls (paperControl)
     if (src.settle) this.paperLooks.set(venue, src.settle);
     else this.paperLooks.delete(venue);
@@ -2621,7 +2698,7 @@ export class PortfolioService {
     if (!a) return no("E_WALLET_ACCOUNT_UNKNOWN", { venue });
     if (!a.account.plugged) return no("E_ACCOUNT_BAD_ACTION", { venue, message: `${a.account.name} is one of the venues the account opened with: only a venue that was plugged in can be unplugged` });
     // an agent wallet is the account's own: this account holds its key, and the money in it is the owner's. Disconnecting it would only
-    // hide that money (and leave the wallet with no way back on the page); it is emptied instead, and goes with the agent's sub-account
+    // hide that money (and leave the wallet with no way back on the face); it is emptied instead, and goes with the agent's sub-account
     if (a.account.connector === "live:agent-wallet") return no("E_ACCOUNT_BAD_ACTION", { venue, message: `${a.account.name} is an agent wallet: it is not disconnected, because it holds money this account has the key for. Empty it with Take back… first; it leaves the account with the agent's sub-account` });
     this.liveVenues.delete(venue);
     this.paperLooks.delete(venue);
@@ -2715,7 +2792,7 @@ export class PortfolioService {
     }
   }
 
-  /** what the Account page reads: the engine's page, with what each venue connected live has in its earn products added to that venue
+  /** what the Account's read carries: the engine's page, with what each venue connected live has in its earn products added to that venue
    * (account/holdings.ts withEarn) — so the venue's total, the live total and the net worth curve count it, once */
   async accountView(): Promise<AccountPage | undefined> {
     const page = await this.account?.view();
@@ -2866,7 +2943,7 @@ export class PortfolioService {
     this.ledgerChain = fresh ? [] : history.files;
     if (fresh) return;
     // a replayed agent wallet is the key file it was made with: one that is gone is not made again under the same name (the wallet is
-    // named, never the file: the message reaches the page and the agents' seats)
+    // named, never the file: the message reaches the face and the agents' seats)
     const home = this.opts.home;
     const r = await rebuild(history.rows, engine.state, { ...engine.applyOptions(), codeRequired: (this.opts.liveWrites?.pairingCode ?? this.opts.pairingCode) !== undefined, walletAddress: (name) => (hasKey(agentWalletKeyPath(home, name)) ? (() => { const k = agentWalletKey(home, name); return isRefusal(k) ? k : (k.address as Hex); })() : no("E_ACCOUNT_CREDENTIAL", { message: `the agent wallet "${name}" is not brought back: its key file is gone from this account's home, and an agent wallet is the key it was made with`, detail: { wallet: name } })) });
     engine.adopt(r.state, r.ids);
@@ -2952,7 +3029,7 @@ export class PortfolioService {
    * read nowhere, for the owner to connect it again (one signature, after mending the key) or disconnect it; no check asks it again */
   private readonly waiting = new Map<string, Waiting>();
 
-  /** the next ask for a waiting connection, and the words for it (kept on it: the page, the doors and the agents read them) */
+  /** the next ask for a waiting connection, and the words for it (kept on it: the face, the doors and the agents read them) */
   private waitLater(w: Waiting): string {
     if (w.timer) clearTimeout(w.timer);
     w.timer = undefined;
@@ -3082,7 +3159,7 @@ export class PortfolioService {
     return w.how === "restart" ? `${name} has not come back after the restart yet: ${w.said}` : `${name} is connected but has not answered this network yet: ${w.said}`;
   }
 
-  /** the connections waiting for their venue, as the page and the agents read them (account/exchange.ts WaitingConnection): the venue,
+  /** the connections waiting for their venue, as the face and the agents read them (account/exchange.ts WaitingConnection): the venue,
    * the connector, the key file's place or the address as the owner signed them, why, since when, and how they came to wait */
   waitingList(): WaitingConnection[] {
     const options = liveOptions(this.opts.home).options;
@@ -3210,7 +3287,7 @@ export class PortfolioService {
     return this.opts.real === true;
   }
 
-  /** The statement page's whole view. On a real account every venue is read as the account page reads it (`accountView`: what is in its
+  /** The statement page's whole view. On a real account every venue is read as the Account's read has it (`accountView`: what is in its
    * earn products counted, once, with its balance), so the totals here are the ones /api/account and /holdings give; the simulation's dial,
    * its compiled openness and the agent's day against its cap are left out, and `live` says whether venues connected live are on it */
   async overview(): Promise<Overview> {
@@ -3234,7 +3311,7 @@ export class PortfolioService {
       agents.set(f.agent.id, a);
     }
     const portfolio = aggregate(accounts, holdings);
-    // the account page's total also counts money in flight between venues and what open payment sessions hold: the same number here
+    // the Account's total also counts money in flight between venues and what open payment sessions hold: the same number here
     if (page) portfolio.totalUsd = page.totalUsd;
     return {
       now,
@@ -3723,7 +3800,7 @@ export class PortfolioService {
    * whole (`native`: the order or the payment). An earlier run is a ledger this run continues, or any other ledger in the home that an
    * account run wrote (its first row carries the run mark: an earlier line of runs, one `--fresh` left behind); a ledger no account run
    * wrote — a demo's, a test's, another program's — is not the account's and is not read. An earlier run's file is read once and kept while
-   * its size stays the same: the page asks for the statement every few seconds, and an old ledger only grows when another process shares
+   * its size stays the same: the face asks for the statement every few seconds, and an old ledger only grows when another process shares
    * the home */
   private statementRows(): { before: StatementRow[]; now: StatementRow[] } {
     const dir = join(this.opts.home, "portfolio");
@@ -3781,7 +3858,7 @@ export interface ReadMissing {
   why: string;
   code?: string | undefined;
   /** which read: its 24 hours, its positions, its price history, the comparison, its earn, its funding */
-  part?: "stats" | "positions" | "candles" | "compare" | "earn" | "funding" | undefined;
+  part?: "stats" | "positions" | "candles" | "compare" | "earn" | "funding" | "paper" | undefined;
 }
 
 /** EARN across the venues connected live: which venues earn (and whether the key or wallet may put money in), the products they offer, what
@@ -3803,7 +3880,7 @@ export interface HeldRow extends AssetRow {
 
 export interface HoldingsView {
   asOf: string;
-  /** the account page's total: the venues, and what is in flight or held in escrow between them */
+  /** the Account's total: the venues, and what is in flight or held in escrow between them */
   totalUsd: number;
   rows: HeldRow[];
   /** the dollars that are ready, and where they can go (account/holdings.ts) */
@@ -3882,7 +3959,7 @@ export interface TradesView {
   symbol: string;
   trades: PublicTrade[];
   /** the source publishes no trades at all, in a sentence ("US stocks publishes no trades the account can read"); `trades` is then empty and
-   * asking again would say the same, so the page stops asking until the market changes */
+   * asking again would say the same, so the face stops asking until the market changes */
   none?: string | undefined;
   public?: true | undefined;
 }
@@ -3925,6 +4002,8 @@ export interface AssetDetail {
   lines: StatementLine[];
   /** what was paid for it: its row's, and its positions' */
   cost: CostBasis[];
+  /** the paper accounts' own row, positions and cost of it (the Paper lens), when a paper account is connected */
+  paper?: { row?: HeldRow | undefined; positions: VenuePosition[]; cost: CostBasis[] } | undefined;
   missing: ReadMissing[];
 }
 
@@ -4025,13 +4104,13 @@ const EXPLORE_SORTS: readonly ExploreSort[] = ["volume", "movers", "closing"];
 /** how long a venue has for its 24 hours, and for its price history */
 const STATS_MS = 4_000;
 const CANDLE_MS = 6_000;
-/** how long a chart's first view may take (Nasdaq's whole history of a share is about ten seconds), and one page scrolled left — the page
- * waits longer than either (ui/core.js HISTORY_TIMEOUT_MS and API_TIMEOUT_MS; test/unit/ui-chart.test.ts holds them apart) */
+/** how long a chart's first view may take (Nasdaq's whole history of a share is about ten seconds), and one page scrolled left — the face
+ * waits longer than either (the retired page's HISTORY_TIMEOUT_MS and API_TIMEOUT_MS, ui/core.js at 9614314c, which its deleted test/unit/ui-chart.test.ts held apart) */
 export const HISTORY_WAIT_MS = 20_000;
 export const PAGE_WAIT_MS = 12_000;
 /** WHOSE BARS A CHART SAYS THEY ARE (CandlesView.from): the source the market is priced from (`named`), unless its page names another
  * exchange's bars (a Kraken pair's chart drawn from Coinbase Exchange or OKX: its `source` "Coinbase Exchange · BTC-USD") — then that venue,
- * so the chart's name and the page's source never disagree. A source that speaks for several venues (the US stocks line, Robinhood's and
+ * so the chart's name and the face's source never disagree. A source that speaks for several venues (the US stocks line, Robinhood's and
  * Nasdaq's and Cboe's bars under it) keeps its own name */
 function barsFrom(page: CandlePage, named: string, kind: PublicSource["kind"] | undefined): string {
   const venue = page.source?.split(" · ")[0]?.trim();
@@ -4062,7 +4141,7 @@ export function historyAsk(interval: string, ask: { range?: string | undefined; 
   return { iv: iv as CandleInterval, range: before !== undefined ? undefined : (range ?? INTERVAL_RANGE[iv as CandleInterval]), ...(before !== undefined ? { before } : {}), limit: l ? Number(l) : b ? 300 : HISTORY_MOST };
 }
 
-/** how long a book and the latest trades are kept (the page asks every two and every four seconds), and how long either is waited for */
+/** how long a book and the latest trades are kept (the face asks every two and every four seconds), and how long either is waited for */
 const BOOK_KEEP_MS = 1_500;
 const TRADES_KEEP_MS = 3_000;
 const BOOK_WAIT_MS = 5_000;
@@ -4072,7 +4151,7 @@ const noBookAt = (r: unknown): r is Refusal => isRefusal(r) && r.code === "E_VEN
 type TopOnly = NonNullable<OrderBook["topOnly"]>;
 /** A market's best bid and best ask as the market itself carries them, as a book of depth "top", and why that is all (`topOnly`): a source
  * that publishes no book (a US stock's public quote) shown as exactly that, and one whose book the account does not read said to be so. No
- * size: the market gives none. Stamped with the quote's own time where it has one (the page says it once it is old); else with now, and —
+ * size: the market gives none. Stamped with the quote's own time where it has one (the face says it once it is old); else with now, and —
  * where the market came from a list kept a while (`keptMs`: a public listing's, a hundred and ten seconds, LISTED_QUOTE_UP_TO_MS) — how old
  * its quote may be (`upToMs`), so a kept quote is never taken for a live one. Named by the source its quote came from (`quoteFrom`), else the venue. Nothing when it carries
  * neither */
@@ -4147,7 +4226,7 @@ async function dollarMarket(t: LiveTrader, row: AssetRow, line: AssetRow["venues
   return fits.find((m) => m.quote.toUpperCase() === "USD") ?? fits[0];
 }
 
-/** what a restarted account brought back from its ledgers (account/restore.ts), as the page and the log say it */
+/** what a restarted account brought back from its ledgers (account/restore.ts), as the face and the log say it */
 export interface RestoreReport {
   /** how many earlier runs the account continues, and the first of them */
   runs: number;
@@ -4203,7 +4282,7 @@ const KEEP_HELD_MS = 120_000;
 const PAIR_MS = 120_000;
 
 /** the venues the account knows, as connections to judge (live/availability.ts): each well-known exchange by its own id, and every other
- * way of connecting the server offers, under the names and groups the page gives them */
+ * way of connecting the server offers, under the names and groups the face gives them */
 const EXCHANGE_NAMES: Record<string, string> = { okx: "OKX", okxus: "OKX US", kraken: "Kraken", coinbase: "Coinbase", bybit: "Bybit", binance: "Binance", binanceus: "Binance.US", kucoin: "KuCoin", gate: "Gate", bitget: "Bitget", mexc: "MEXC", deribit: "Deribit", krakenfutures: "Kraken Futures", kucoinfutures: "KuCoin Futures", cryptocom: "Crypto.com", gemini: "Gemini", bitstamp: "Bitstamp", bitfinex: "Bitfinex", htx: "HTX" };
 const KIND_HERE: Record<string, { name: string; group: VenueHere["group"] }> = {
   alpaca: { name: "Alpaca", group: "Brokers" },
@@ -4242,7 +4321,7 @@ const MARKET_KEEP_MS = 3_000;
 /** how long one public market's line asked alone (PublicSource.line) is kept here: a paper account's quote of a share it knows stands on it,
  * its prices the background reader's while that is live */
 const LINE_KEEP_MS = 3_000;
-/** the paper accounts' curve, and each market's bars it is told with, are kept a minute: the page asks every minute */
+/** the paper accounts' curve, and each market's bars it is told with, are kept a minute: the face asks every minute */
 const PAPER_CURVE_MS = 60_000;
 /** the orders whose fills the pages were told of, kept to say only what each fills next (toldFill) */
 const TOLD_FILLS_MAX = 5_000;
@@ -4373,7 +4452,7 @@ function reachedVenue(r: Exclude<Outcome, Refusal>): "yes" | "maybe" | "no" {
   return "yes";
 }
 
-/** a day as the page writes one: New York, weekday, day and month — "Thu Nov 5" */
+/** a day as the face writes one: New York, weekday, day and month — "Thu Nov 5" */
 const nyDay = (iso: string): string => new Date(iso).toLocaleDateString("en-US", { timeZone: "America/New_York", weekday: "short", day: "numeric", month: "short" }).replace(",", "");
 
 /** the liquidity map of a real account: each venue's ready dollars, movable or not as that venue's own writer says (account/holdings.ts

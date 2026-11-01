@@ -3,8 +3,11 @@
 # the default; this file is started on purpose. Run `docker compose` at the repo root: the agent
 # box mounts an allowlist of the repo's paths (sources relative to this file's directory) under
 # `${PWD}`, the shell's directory, so the tree lands in the box at the repo's own host path (dsh
-# records absolute paths). Stop the host face and Account first: both boxes publish 3090 and
-# 4820 on the host's loopback.
+# records absolute paths). Stop the host face first: the agent box publishes 3090 on the host's
+# loopback. The account box publishes nothing: only the agent box reaches it, at account:4820 on
+# the gravit network. Stopping the host Account too is advised (one Account in sight), not required.
+#
+# The account box runs AKShare (the sidecar installed in its image); the agent box runs no data source.
 #
 # The agent box mounts no docker socket and no path of the Account's home: Gravit's shell sees
 # the allowlisted paths and the box's volumes, no other host file (on Docker Desktop
@@ -18,7 +21,11 @@ services:
       # For the box only: the Host fence is the DNS-rebinding defence, not authentication.
       PORTFOLIO_BIND: "0.0.0.0"
       PORTFOLIO_HOSTS: "account:4820"
-    ports: ["127.0.0.1:4820:4820"]
+    # The iFinD token is the Account's alone (POST /api/cn/ifind); the agent box never reads it.
+    env_file:
+      - path: .env.ifind
+        required: false
+    expose: ["4820"]
     volumes: ["account-home:/data"]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4820/api/overview').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
@@ -66,7 +73,6 @@ services:
       FACE_ACCOUNT_URL: "http://account:4820"
       BUYER_HOME: /seat-home
       DSH_HOME: /dsh-home
-      FACE_AKSHARE_MCP_COMMAND: /usr/local/bin/akshare-mcp
     ports: ["127.0.0.1:3090:3090"]
     depends_on:
       account:

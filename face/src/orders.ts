@@ -6,7 +6,8 @@
  * order, moves money, pays or sets leverage — and any tool under the face's
  * own seat prefix the face has not classified stop for a human here first,
  * and then again on the Account's own Guard card. Nothing else is gated: the
- * seat's reads and words, AKShare, the host's tools pass untouched.
+ * seat's reads and words (AKShare's passthrough, `portfolio_akshare`, among them),
+ * the host's tools pass untouched.
  *
  * The approval CHANNEL's only producer used to be a sandbox escalation, and an
  * MCP call never takes that path — so without this module an order tool would
@@ -64,7 +65,7 @@ export const SEAT_READ_RAW_NAMES = [
   "portfolio_candles", "portfolio_book", "portfolio_receive", "portfolio_venues", "portfolio_earn", "portfolio_watchlist",
   "portfolio_report", "portfolio_ask", "portfolio_memory", "portfolio_remember", "portfolio_forget", "portfolio_desk",
   "portfolio_desk_say", "portfolio_live_preview", "portfolio_live_markets", "portfolio_live_compare", "portfolio_live_positions",
-  "portfolio_openness",
+  "portfolio_openness", "portfolio_akshare",
 ] as const;
 
 /** The retired order tools: alpaca-kit's pair, which left the tree in stage 3

@@ -87,6 +87,7 @@ import { normalBase, scopeOf, type CompareMissing, type PlaceRule } from "./comp
 import { iconOf } from "./icons.ts";
 import { impliedUsd, PER_SHARE, PRE_IPO_CATEGORY, PRE_IPO_GROUP, PRE_IPO_PER_POINT } from "./preipo.ts";
 import type { EventsQuery, Listing, PublicSource } from "./public-markets.ts";
+import type { ChinaRead } from "./china.ts";
 import { inDollars, type LiveTrader, type Market, type MarketSession, type MarketStats } from "./trade.ts";
 import { isStable } from "./types.ts";
 
@@ -110,7 +111,9 @@ export interface ExploreSources {
   public?: PublicSource[] | undefined;
 }
 
-export type ExploreKind = "coin" | "stock" | "perp" | "event" | "rwa";
+export type ExploreKind = "coin" | "stock" | "perp" | "event" | "rwa" | "ashare";
+/** the kinds a dollar row is made of: an event is priced per contract, an A share (china.ts) in CNY and never in `exploreAcross` */
+type DollarKind = Exclude<ExploreKind, "event" | "ashare">;
 export type ExploreSort = "volume" | "movers" | "closing";
 
 export interface ExploreOptions {
@@ -136,7 +139,7 @@ export interface ExploreOptions {
   /** how many movers, closing events and parts of Now (8 each) */
   top?: number | undefined;
   /** the least 24-hour dollar volume a mover must have: one figure for every kind, or by kind ($1,000,000; a perpetual $10,000,000) */
-  moversMinUsd?: number | Partial<Record<Exclude<ExploreKind, "event">, number>> | undefined;
+  moversMinUsd?: number | Partial<Record<DollarKind, number>> | undefined;
   /** what "closing soon" means, in milliseconds from now (a day) */
   closingWithinMs?: number | undefined;
   clock?: (() => number) | undefined;
@@ -208,14 +211,16 @@ export interface ExploreOutcome {
 }
 
 export interface ExploreItem {
-  /** `coin:BTC`, `stock:AAPL`, `perp:ETH`, `rwa:NVDA`, `kalshi:<market ticker>`, `pm:<condition id>`, `pmus:<market slug>` */
+  /** `coin:BTC`, `stock:AAPL`, `perp:ETH`, `rwa:NVDA`, `kalshi:<market ticker>`, `pm:<condition id>`, `pmus:<market slug>`, `cn:600519` */
   key: string;
   kind: ExploreKind;
   name: string;
   /** the one name for the thing (BTC, AAPL); an event has none */
   base?: string | undefined;
-  /** dollars; an event's is its first outcome's */
+  /** dollars; an event's is its first outcome's; an A share's (kind ashare) is in CNY, as `currency` says */
   price?: number | undefined;
+  /** the currency `price` is in where it is not dollars: an A share's, CNY (china.ts) */
+  currency?: "CNY" | undefined;
   /** which source `price` came from and how far behind the market it is, in its words (ExploreAt.quoteFrom), where the line that priced the
    * row says: a US stock's real-time or delayed quote */
   quoteFrom?: string | undefined;
@@ -227,6 +232,8 @@ export interface ExploreItem {
   changeFrom?: { venue: string; venueName: string } | undefined;
   /** the dollars traded in 24 hours: each exchange's market counted once, the exchanges summed (an event: its one market's) */
   volumeUsd24h?: number | undefined;
+  /** an A share's turnover in the session, in yuan (china.ts): it carries no dollar volume */
+  turnoverCny?: number | undefined;
   /** the event contracts traded in 24 hours, where a venue counts contracts instead of dollars (Kalshi) */
   contracts24h?: number | undefined;
   /** an event market's whole event, all its markets together, in dollars over 24 hours, where the venue reports it (Polymarket): how hot the
@@ -257,7 +264,7 @@ export interface ExploreItem {
   /** a pre-IPO perpetual: the median of its venues' implied company valuations, in dollars, and what that figure is (each venue's own is on
    * its line, in the venue's own unit) */
   implied?: { usd: number; unit: string } | undefined;
-  /** the tabs it is in: `all` first, then its own */
+  /** the tabs it is in: `all` first, then its own; an A share is in `china` alone, never in `all` */
   tabs: TabId[];
   at: ExploreAt[];
   /** every line of the row is a paper account's: its price is that test environment's, and it carries no volume */
@@ -286,6 +293,8 @@ export interface Exploration {
   /** coins, stocks, perpetuals and tokens by their 24-hour dollar volume */
   mostTraded: ExploreItem[];
   missing: ExploreMissing[];
+  /** the China tab's read (china.ts): its sort, its count, the session and whether Tencent answered */
+  china?: ChinaRead | undefined;
   /** plain sentences for under the list, each under 160 characters: what the lists are made of (the sources' own words, and this file's
    * about Predictions) */
   notes: string[];
@@ -338,7 +347,7 @@ const MAX_MS = 2_147_483_647;
 const DAY_MS = 86_400_000;
 /** the least a mover trades in a day, by kind: a perpetual ten times a coin, since Hyperliquid alone lists hundreds of thin perpetuals whose
  * jumps are not news */
-const FLOOR_USD: Record<Exclude<ExploreKind, "event">, number> = { coin: 1_000_000, stock: 1_000_000, rwa: 1_000_000, perp: 10_000_000 };
+const FLOOR_USD: Record<DollarKind, number> = { coin: 1_000_000, stock: 1_000_000, rwa: 1_000_000, perp: 10_000_000 };
 const HEX_ID = /^0x[0-9a-f]{64}$/i;
 
 /** a call as an answer, never a throw */
@@ -654,7 +663,7 @@ function atOf(r: Reader, m: Market, symbol = m.symbol, price = priceOf(m), open 
   };
 }
 
-const TAB_OF: Record<Exclude<ExploreKind, "event">, TabId> = { coin: "crypto", stock: "stocks", rwa: "rwas", perp: "perps" };
+const TAB_OF: Record<DollarKind, TabId> = { coin: "crypto", stock: "stocks", rwa: "rwas", perp: "perps" };
 const displayLabel = (label: string): string => (/^yes$/i.test(label) ? "Yes" : /^no$/i.test(label) ? "No" : label);
 
 /** one row from a thing's markets, venue by venue (connected venues first, a paper account's after every real one); markets set aside by
@@ -721,7 +730,7 @@ function rowOf(key: string, kind: ExploreKind, venues: Map<string, Got[]>, aside
     ...(sessioned ? { session: sessionOf(sessioned.m) } : {}),
     ...(issued ? { issuer: issued.m.issuer } : {}),
     ...(eligible ? { eligibility: eligible.m.eligibility } : {}),
-    tabs: ["all", TAB_OF[kind as Exclude<ExploreKind, "event">]],
+    tabs: ["all", TAB_OF[kind as DollarKind]],
     at: [...entries.map((e) => atOf(e.r, e.m, e.m.symbol, priceOf(e.m), e.m.open, !(trades && e.r.readOnly !== undefined))), ...papers.map((e) => atOf(e.r, e.m, e.m.symbol, priceOf(e.m), e.m.open))],
   };
 }
@@ -910,7 +919,7 @@ export async function exploreAcross(sources: ExploreSources, opts: ExploreOption
   const window = pos(opts.closingWithinMs) ?? DAY_MS;
   const q = (opts.q ?? "").trim();
   const only = (opts.key ?? "").trim();
-  const floor = (k: Exclude<ExploreKind, "event">): number => (typeof opts.moversMinUsd === "number" ? opts.moversMinUsd : (opts.moversMinUsd?.[k] ?? FLOOR_USD[k]));
+  const floor = (k: DollarKind): number => (typeof opts.moversMinUsd === "number" ? opts.moversMinUsd : (opts.moversMinUsd?.[k] ?? FLOOR_USD[k]));
 
   const connected = sources.connected ?? [];
   // a source nothing is ever traded through (Stock Tokens) is the public side of no connection: it is always asked
@@ -966,7 +975,7 @@ export async function exploreAcross(sources: ExploreSources, opts: ExploreOption
   if (all.some((i) => i.tabs.includes("preipo"))) notes.push("Pre-IPO perpetuals are contracts on a venue's estimate of a private company's valuation, not shares; each venue says who may trade them once a key connects.");
 
   const traded = all.filter((i) => i.kind !== "event" && i.volumeUsd24h !== undefined).sort(byVolume);
-  const movers = oneEach(all.filter((i): i is Mover => i.kind !== "event" && fin(i.changePct24h) !== undefined && (i.volumeUsd24h ?? -1) >= floor(i.kind as Exclude<ExploreKind, "event">))).sort(byMove).slice(0, top);
+  const movers = oneEach(all.filter((i): i is Mover => i.kind !== "event" && fin(i.changePct24h) !== undefined && (i.volumeUsd24h ?? -1) >= floor(i.kind as DollarKind))).sort(byMove).slice(0, top);
   const soon = all.filter((i) => i.kind === "event" && closeMs(i) > now && closeMs(i) <= now + window).sort(byVolume).slice(0, top);
   const closing = [...soon].sort(byClose(now));
   const mostTraded = traded.slice(0, top);

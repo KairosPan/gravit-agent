@@ -59,10 +59,10 @@ export const freePort = (): Promise<number> => new Promise((resolvePort, reject)
   });
 });
 
-/** A started stand-in: its page's URL, its temporary home, the pairing code it printed, the process, and what it said. */
+/** A started stand-in: its URL, its temporary home, the pairing code it printed, the process, and what it said. */
 export interface Standin { url: string; home: string; code: string; child: ChildProcess; log: () => string }
 
-/** Start the stand-in from the install `dir` ({@link STANDIN_DIR} unless given) on `port` and wait for its page,
+/** Start the stand-in from the install `dir` ({@link STANDIN_DIR} unless given) on `port` and wait for its account,
  * pairing code and home lines (one write, at once). */
 export function startStandin(port: number, dir = STANDIN_DIR): Promise<Standin> {
   if (port === REAL_ACCOUNT_PORT) return Promise.reject(new Error(`port ${REAL_ACCOUNT_PORT} is the real Account's: no stand-in starts there`));
@@ -71,9 +71,9 @@ export function startStandin(port: number, dir = STANDIN_DIR): Promise<Standin> 
     const child = spawn(process.execPath, [cli, script, "--port", String(port), "--no-desk"], { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
     let out = "";
     const log = (): string => out;
-    const timer = setTimeout(() => { child.kill("SIGINT"); reject(new Error(`the stand-in printed no page line in ${START_MS / 1000} s:\n${out}`)); }, START_MS);
+    const timer = setTimeout(() => { child.kill("SIGINT"); reject(new Error(`the stand-in printed no account line in ${START_MS / 1000} s:\n${out}`)); }, START_MS);
     const look = (): void => {
-      const url = /^\s*page\s+(\S+)/m.exec(out)?.[1];
+      const url = /^\s*account\s+(http\S+)/m.exec(out)?.[1];
       const code = /^\s*pairing code\s+(\S+)/m.exec(out)?.[1];
       const home = /^\s*home\s+(\S+)/m.exec(out)?.[1];
       if (url !== undefined && code !== undefined && home !== undefined) { clearTimeout(timer); resolveStandin({ url, home, code, child, log }); }

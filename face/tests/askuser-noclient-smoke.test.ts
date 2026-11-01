@@ -46,7 +46,7 @@ test("S7: ask() with no client either blocks or fails loud - never answers silen
   const patchPath = join(home, "profiles", "face", "cordis.patch.yml");
   const patch = readFileSync(patchPath, "utf8").replace(/^\[\][ \t]*$/m, "");
   // This smoke owns a scratch profile and must not start the operator's data server.
-  writeFileSync(patchPath, `${patch}\n- id: mcp-akshare\n  disabled: true\n- id: mcp-account\n  disabled: true\n`);
+  writeFileSync(patchPath, `${patch}\n- id: mcp-account\n  disabled: true\n`);
   const { ctx, dispose } = await bootFace({ profileName: "face", port: 0, dshHome: home, botsRoot: await makeBotsRoot() });
   try {
     const questions = ctx.get("userQuestions") as {
