@@ -2,7 +2,7 @@
 // reports the kept hash and never asks the wallet to send.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { startWalletSend, paymentKeyOf, orderKeyOf } from '../../client/js/host/wallet-send.js';
+import { startWalletSend, paymentKeyOf, orderKeyOf, settleWalletFlight } from '../../client/js/host/wallet-send.js';
 import { reducers } from '../../client/js/reducers/account.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { short } from '../../client/js/wire/wallet.js';
@@ -224,4 +224,20 @@ test('a payment with no id answers why and sends nothing', async () => {
   assert.equal(h.acct.reads(), 0, 'nor the Account');
   assert.deepEqual(h.acct.posts, []);
   assert.deepEqual(h.store.seen, [], 'no row to hang it on: nothing dispatched');
+});
+
+test('a flight that rejects says why and reads the Account again, with no unhandled rejection', async () => {
+  const seen = [];
+  const host = { say: w => seen.push(['say', w]), reload: () => seen.push(['reload']) };
+  await settleWalletFlight(Promise.reject(new Error('the provider went away')), host);
+  assert.deepEqual(seen, [['say', "Your wallet's send did not finish: the provider went away"], ['reload']]);
+  // an answer: its words, then the read; none (closed): nothing
+  seen.length = 0;
+  await settleWalletFlight(Promise.resolve({ key: 'k', status: 'sent', said: 'Fake Wallet sent it' }), host);
+  await settleWalletFlight(Promise.resolve(null), host);
+  assert.deepEqual(seen, [['say', 'Fake Wallet sent it'], ['reload']]);
+  // a say that throws is caught too: the read still happens
+  const after = [];
+  await settleWalletFlight(Promise.resolve({ said: 'x' }), { say: () => { throw new Error('store gone'); }, reload: () => after.push('reload') });
+  assert.deepEqual(after, ['reload']);
 });

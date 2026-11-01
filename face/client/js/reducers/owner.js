@@ -18,6 +18,11 @@ const sheet = (s, patch) => (s.sheet ? { ...s, sheet: { ...s.sheet, ...patch } }
 // no preparation left to sign: the countdown with it
 const UNPREPARED = { prepared: null, preparedAt: null, asked: null, deadline: null };
 
+// a venue's sign-in belongs to the sheet and the option it was started from: forgotten when a sheet opens or closes and when
+// the connector changes, so Sign in at is pressable again (host/account.js signIn stops its poll once the slice no longer names it)
+const SIGNIN_IDLE = { status: 'idle', connector: '', url: '', tab: false, state: '', message: null };
+const signInIdle = s => (s.account && s.account.signIn?.status !== 'idle' ? { ...s, account: { ...s.account, signIn: { ...SIGNIN_IDLE } } } : s);
+
 // a field's new value: the sheet-view's field list by name (a name it does not have changes nothing), or a plain form
 function withField(s, { name, value } = {}) {
   if (!s.sheet || typeof name !== 'string') return s;
@@ -26,7 +31,9 @@ function withField(s, { name, value } = {}) {
     if (!fields.some(f => f?.name === name)) return s;
     // a kind whose fields follow a field (a move's: its source and its kind) has them rebuilt, the values that survive kept
     const changed = fields.map(f => (f?.name === name ? { ...f, value } : f));
-    return sheet(s, { fields: refieldsOf(s.sheet.kind, changed, s.sheet.seed) });
+    const was = fields.find(f => f?.name === name)?.value;
+    const t = s.sheet.kind === 'connect' && name === 'connector' && value !== was ? signInIdle(s) : s;
+    return sheet(t, { fields: refieldsOf(s.sheet.kind, changed, s.sheet.seed) });
   }
   return sheet(s, { fields: { ...(fields && typeof fields === 'object' ? fields : {}), [name]: value } });
 }
@@ -39,7 +46,7 @@ export const reducers = {
   ownerBusy: (s, on) => own(s, { busy: on === true }),
 
   sheetOpen: (s, { kind, seed, fields } = {}) => ({
-    ...s,
+    ...signInIdle(s),
     sheet: {
       kind, seed, fields, status: 'incomplete', words: '', ...UNPREPARED, message: null, again: false, said: null,
     },
@@ -62,5 +69,5 @@ export const reducers = {
   sheetDone: (s, { said } = {}) => sheet(s, { status: 'done', deadline: null, said: typeof said === 'string' ? said : '' }),
   // the countdown's second: a new state, so subscribers draw the words from deadline − now
   sheetTick: s => sheet(s, {}),
-  sheetClose: s => (s.sheet ? { ...s, sheet: null } : s),
+  sheetClose: s => (s.sheet ? { ...signInIdle(s), sheet: null } : s),
 };

@@ -52,11 +52,9 @@ function rig({ sellable = SELLABLE } = {}) {
   };
   // the app's sendOrder (app.js: the order handed to sendFromWallet, which reads the Account again once the wallet answers)
   const wallet = { orders: [], order(o) { this.orders.push(o); if (this.onOrder) this.onOrder(o); } };
-  // the wallet engine itself, handed in too: the run never reaches for it
-  const engine = { orders: [], order(o) { this.orders.push(o); return Promise.resolve({ status: 'sending' }); } };
   const after = [];
-  const sm = startSellMany({ store, getJson, owner, sendOrder: o => wallet.order(o), walletSend: engine, afterAction: k => after.push(k), now: () => clock.t });
-  return { store, sm, owner, wallet, engine, after, reads, clock, state: () => store.get().sellMany };
+  const sm = startSellMany({ store, getJson, owner, sendOrder: o => wallet.order(o), afterAction: k => after.push(k), now: () => clock.t });
+  return { store, sm, owner, wallet, after, reads, clock, state: () => store.get().sellMany };
 }
 
 const REFUSED = message => ({ status: 409, body: { ok: false, refusal: { code: 'E_ACCOUNT_BAD_ACTION', message } } });
@@ -187,7 +185,7 @@ test('a run with a refused prepare, a refused signature, a DEX sale and the draw
   assert.deepEqual(r.after, ['sellMany'], 'the Account read again once');
 });
 
-test('a DEX leg is handed to sendOrder, not sent from inside the run', async () => {
+test('a DEX leg is handed to sendOrder, once', async () => {
   const r = rig();
   await r.sm.open();
   r.sm.toggle(2);
@@ -196,8 +194,9 @@ test('a DEX leg is handed to sendOrder, not sent from inside the run', async () 
   await r.sm.review();
   await r.sm.run();
   await settle();
+  // handed over, once — what sendOrder does with it (app.js: sendFromWallet, the Account read again after the wallet answers) is
+  // app-dom.test.js's "Sell many's DEX leg reads the Account again after the wallet answers"
   assert.deepEqual(r.wallet.orders, [dex], 'handed to sendOrder once');
-  assert.deepEqual(r.engine.orders, [], 'the wallet engine is never reached from inside the run');
   assert.deepEqual(r.state().legs.map(l => [l.state, l.said]), [['wallet', WALLET_WORDS]]);
 });
 

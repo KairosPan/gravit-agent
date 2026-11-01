@@ -284,3 +284,27 @@ test('Sign in at is off while the sign-in starts, waits or is ready', () => {
   // another option's sign-in does not hold this one's key
   has(renderSheet(R.signIn(rh, { status: 'waiting', connector: 'live:other' }), NOW), ON);
 });
+
+test('a sign-in belongs to its sheet and option: ready, Cancel, reopen — and waiting, another connector, back — the key is on', () => {
+  const options = connectOptionsOf(fx('account'), fx('venues'));
+  const seed = { options, connector: 'live:robinhood' };
+  const ON = '<button type="button" class="btn-sm" data-action="connectSignIn">Sign in at Robinhood</button>';
+  const OFF = '<button type="button" class="btn-sm" data-action="connectSignIn" disabled>Sign in at Robinhood</button>';
+  // ready, then Cancel, then Connect on Robinhood again: the new sheet's sign-in is not started, so its key is on
+  const ready = R.signIn(opened('connect', seed), { status: 'ready', connector: 'live:robinhood', url: 'https://robinhood.example/o', tab: true, state: 'st' });
+  has(renderSheet(ready, NOW), OFF, 'ready on its own sheet: off');
+  const closed = R.sheetClose(ready);
+  assert.equal(closed.account.signIn.status, 'idle', 'forgotten with its sheet');
+  has(renderSheet(opened('connect', seed, closed), NOW), ON);
+  // and a sign-in kept somehow across an open is forgotten by the open itself
+  has(renderSheet(opened('connect', seed, ready), NOW), ON);
+  // waiting, the connector switched away and back: forgotten on the switch, so the key is on again
+  const waiting = R.signIn(opened('connect', seed), { status: 'waiting', connector: 'live:robinhood', url: 'https://robinhood.example/o', tab: true, state: 'st' });
+  has(renderSheet(waiting, NOW), OFF);
+  const away = R.sheetField(waiting, { name: 'connector', value: 'live:metamask' });
+  assert.equal(away.account.signIn.status, 'idle');
+  has(renderSheet(R.sheetField(away, { name: 'connector', value: 'live:robinhood' }), NOW), ON);
+  // another field's change keeps it
+  assert.equal(R.sheetField(waiting, { name: 'credentialRef', value: '' }).account.signIn.status, 'waiting');
+  assert.equal(R.sheetField(waiting, { name: 'connector', value: 'live:robinhood' }).account.signIn.status, 'waiting', 'the same connector picked again');
+});

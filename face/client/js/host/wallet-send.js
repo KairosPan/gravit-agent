@@ -17,6 +17,19 @@ const PAGE = '/data/account?fresh=1';
 /** What a press with nothing to key it by answers: nothing was sent. */
 export const NO_KEY = 'Nothing was sent: this one carries no id the Account can send for. Refresh and try again.';
 
+/** A flight's end as the face says it: its words (`say`) and the Account read again (`reload`); no answer (closed): nothing. A
+ *  flight that rejected — past the engine's own words — says why instead of leaving an unhandled rejection. */
+export function settleWalletFlight(flight, { say, reload }) {
+  return Promise.resolve(flight).then(r => {
+    if (!r) return;
+    if (typeof r.said === 'string') say(r.said);
+    reload();
+  }).catch(err => {
+    try { say(`Your wallet's send did not finish: ${String(err?.message || err || 'no answer').slice(0, 200)}`); } catch { /* nowhere to say it */ }
+    try { reload(); } catch { /* nothing to read again */ }
+  });
+}
+
 /** The key a payment's wallet flow is held by (the retired page: its id and time, which no other run of the Account reuses). */
 export const paymentKeyOf = p => `${str(p?.id)}@${str(p?.at)}`;
 /** The key a DEX order's wallet flow is held by: its client id. */

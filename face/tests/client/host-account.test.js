@@ -953,6 +953,29 @@ test('a new sign-in start clears the kept credentialRef', async () => {
   assert.equal(r2.store.get().sheet, null);
 });
 
+test('a sign-in the slice no longer names stops polling: the connector changed under it', async () => {
+  const post = async () => ({ status: 200, body: { ok: true, url: 'https://robinhood.example/oauth', state: 'st-3' } });
+  // the first status read is held until the connector has changed
+  let release;
+  const held = rig({ json: { '/data/account/signin/status': () => new Promise(res => { release = res; }) }, post, openTab: () => fakeTab() });
+  held.store.dispatch('sheetOpen', { kind: 'connect', seed: { options: [RH], venues: [] }, fields: [
+    { name: 'connector', type: 'select', options: [], value: 'live:robinhood', builtFor: 'live:robinhood' },
+    { name: 'credentialRef', label: '', type: 'hidden', value: '' },
+  ] });
+  const ready = [];
+  const going = held.account.signIn(RH, { onReady: s => ready.push(s) });
+  await settle();
+  assert.equal(held.a().signIn.status, 'waiting');
+  held.store.dispatch('sheetField', { name: 'connector', value: 'live:metamask' });
+  assert.equal(held.a().signIn.status, 'idle', 'forgotten on the switch');
+  release({ ok: true, status: 'ready' });
+  await going;
+  await settle();
+  assert.deepEqual(ready, [], 'its ready lands nowhere');
+  assert.equal(held.a().signIn.status, 'idle');
+  assert.deepEqual(held.pending(), [], 'and nothing more is asked');
+});
+
 test('the sign-in runs out after 15 minutes', async () => {
   const post = async () => ({ status: 200, body: { ok: true, url: 'https://robinhood.example/oauth', state: 'st-1' } });
   const r = rig({ json: { '/data/account/signin/status': { ok: true, status: 'pending' } }, post, openTab: () => fakeTab() });

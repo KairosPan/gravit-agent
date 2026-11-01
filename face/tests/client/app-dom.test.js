@@ -1995,6 +1995,43 @@ test("the connect sheet's wallet tile proves the fake wallet and fills the addre
   store.timers.clear();
 });
 
+test("a wallet prompt still open across a connector change: no second prompt until it settles, and its answer lands only on its option", async () => {
+  const f = fakeWindow({ hash: '#/account/venues', storage: memoryStorage() });
+  const held = [];
+  const provider = fakeProvider({ answers: { personal_sign: () => new Promise(res => held.push(() => res('0x' + 'ee'.repeat(65)))) } });
+  const door = walletDoor();
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page(), '/data/account/venues': fx('venues'), '/data/account/connect/reach': { ok: true, reach: [] } } });
+  const store = bootOwner(f, h, door, fakeMarkets(), { getWallets: async () => [{ id: 'fake', name: 'Fake Wallet', icon: '', provider }] });
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await openConnect(f, store);
+  pickConnector(f, 'live:wallet');
+  await until(() => store.get().account.connectWallet.status === 'found', 'the wallets found');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'connectWallet', wallet: 'fake' } });
+  await until(() => held.length === 1, 'the wallet prompt open');
+  // away and back while the prompt is open: still asking, the tile off, and a press asks the wallet nothing more
+  pickConnector(f, 'live:hyperliquid');
+  await settle();
+  assert.equal(store.get().account.connectWallet.status, 'asking');
+  pickConnector(f, 'live:wallet');
+  await settle();
+  assert.match(f.html(), /data-action="connectWallet" data-wallet="fake" disabled>Use Fake Wallet</);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'connectWallet', wallet: 'fake' } });
+  await settle();
+  assert.equal(provider.count('personal_sign'), 1, 'one prompt at a time');
+  // away again, and the prompt answers there: nothing lands on the other option, and the tiles are free
+  pickConnector(f, 'live:hyperliquid');
+  await settle();
+  held[0]();
+  await until(() => store.get().account.connectWallet.status === 'found', 'settled elsewhere');
+  const fields = Object.fromEntries(store.get().sheet.fields.map(fl => [fl.name, fl.value]));
+  assert.deepEqual([fields.connector, fields.ref], ['live:hyperliquid', ''], 'the address not landed on another option');
+  pickConnector(f, 'live:wallet');
+  await settle();
+  assert.match(f.html(), /data-action="connectWallet" data-wallet="fake">Use Fake Wallet</, 'pressable again');
+  store.timers.clear();
+});
+
 test("no wallet on the page: the sheet says to type the address; a declined signature says the wallet's words and posts no proof", async () => {
   const f = fakeWindow({ hash: '#/account/venues', storage: memoryStorage() });
   const door = walletDoor();

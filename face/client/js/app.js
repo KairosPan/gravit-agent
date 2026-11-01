@@ -48,7 +48,7 @@ import { indexedDbKeys, memoryKeys, signedOutFlag } from './wire/key-store.js';
 import { firstOpen } from './host/sessions.js';
 import { createAccountStream } from './wire/account-stream.js';
 import { discoverWallets, proveWallet } from './wire/wallet.js';
-import { startWalletSend } from './host/wallet-send.js';
+import { startWalletSend, settleWalletFlight } from './host/wallet-send.js';
 
 export const PREFS_KEY = 'gravit-ui.prefs';
 // how long a press may hold renders: a click lands well inside it, and a release that never arrives cannot freeze the page
@@ -306,11 +306,14 @@ export function boot(win, host = {}) {
     const t = store.get().sheet;
     return t?.kind === 'connect' && t.seed === seed && (connector === undefined || connectOptionOf(t)?.connector === connector);
   };
-  // the connector changed: a wallet's proof (or its refusal) was for the option before, and is forgotten; the wallets found stay
+  // the connector changed: a wallet's proof (or its refusal) was for the option before, and is forgotten; the wallets found stay.
+  // A proof still asking stays asking — the wallet's prompt is open, so no second one is asked until it settles (its answer
+  // then lands only on the option it was asked on, proveConnectWallet)
+  const foundStatus = () => (connectWallets.length ? 'found' : 'none');
   function connectorChanged() {
     const cw = store.get().account.connectWallet;
-    if (['asking', 'proven', 'refused'].includes(cw?.status)) {
-      store.dispatch('connectWallet', { status: connectWallets.length ? 'found' : 'none', wallet: '', address: '', message: null });
+    if (['proven', 'refused'].includes(cw?.status)) {
+      store.dispatch('connectWallet', { status: foundStatus(), wallet: '', address: '', message: null });
     }
   }
   async function findConnectWallets() {
@@ -328,6 +331,12 @@ export function boot(win, host = {}) {
       ? { status: 'found', wallets: connectWallets.map(w => ({ id: w.id, name: typeof w.name === 'string' && w.name ? w.name : 'Browser wallet' })) }
       : { status: 'none', wallets: [] });
   }
+  // a proof that settled after its option was left, on the same sheet: nothing landed, the prompt is closed
+  function settledElsewhere(seed) {
+    if (sameConnect(seed) && store.get().account.connectWallet.status === 'asking') {
+      store.dispatch('connectWallet', { status: foundStatus(), wallet: '', address: '', message: null });
+    }
+  }
   async function proveConnectWallet(id) {
     const s = store.get().sheet;
     const w = connectWallets.find(x => x.id === id);
@@ -338,23 +347,21 @@ export function boot(win, host = {}) {
     store.dispatch('connectWallet', { status: 'asking', wallet: name, address: '', message: null });
     try {
       const proven = await proveWallet({ ...w, name }, ownerPost);
-      // proven for the option it was asked on, and only landed there
-      if (!sameConnect(seed, connector)) return;
+      // proven for the option it was asked on, and only landed there; settled on another option: the tiles free again
+      if (!sameConnect(seed, connector)) { settledElsewhere(seed); return; }
       sheet.change('ref', proven.address);
       const label = (store.get().sheet.fields ?? []).find(f => f?.name === 'label');
       if (label && (typeof label.value !== 'string' || !label.value.trim())) sheet.change('label', name);
       store.dispatch('connectWallet', { status: 'proven', address: proven.address });
     } catch (err) {
-      if (!sameConnect(seed, connector)) return;
+      if (!sameConnect(seed, connector)) { settledElsewhere(seed); return; }
       store.dispatch('connectWallet', { status: 'refused', message: String(err?.message || err || 'the wallet refused').slice(0, 200) });
     }
   }
+  // a wallet flight's words said under Trade and the Account read again once it settles — a rejected one too (host/wallet-send.js
+  // settleWalletFlight)
   function sendFromWallet(flight) {
-    void Promise.resolve(flight).then(r => {
-      if (!r) return;
-      if (typeof r.said === 'string') store.dispatch('tradeSaid', r.said);
-      void account.load({ fresh: true });
-    });
+    void settleWalletFlight(flight, { say: said => store.dispatch('tradeSaid', said), reload: () => { void account.load({ fresh: true }); } });
   }
   // the owner sheet (prepare → What you sign → sign) over the owner device
   // a bridge's preparation, once it is the one the sheet shows, has its routes read beside it (the retired page's money.js show)

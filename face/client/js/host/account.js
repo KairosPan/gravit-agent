@@ -323,7 +323,8 @@ export function startAccount({ store, getJson, post = noDoor, now = Date.now, sc
     try { tab = openTab('about:blank', '_blank') ?? null; } catch { tab = null; }
     try { if (tab) tab.opener = null; } catch { /* a tab that will not say */ }
     const connector = option.connector;
-    const live = () => !closed && mine === signInSeq && alive();
+    // and while the slice still names this sign-in: a sheet opened or closed, or the connector changed, forgets it (reducers/owner.js)
+    const live = () => !closed && mine === signInSeq && alive() && store.get().account.signIn?.connector === connector;
     store.dispatch('signIn', { status: 'starting', connector, url: '', tab: tab !== null, state: '', message: null });
     // a state an earlier sign-in kept in the sheet's hidden field is not this one's: cleared before the Account is asked
     if (alive()) store.dispatch('sheetField', { name: 'credentialRef', value: '' });
