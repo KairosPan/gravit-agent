@@ -242,7 +242,7 @@ export function boot(win, host = {}) {
   // 20 s while Account is on screen in a visible tab, 80 s while the stream is open; Guard posted through the owner door
   // a venue's sign-in opens its tab through the window, inside the operator's press (host/account.js signIn)
   const account = startAccount({
-    store, getJson, post: ownerPost, now, schedule, cancelTimer, streamOpen: () => stream.status() === 'open', onPage: body => { void owner.standing(body); },
+    store, getJson, post: ownerPost, now, schedule, cancelTimer, streamOpen: () => stream.status() === 'open', onPage: body => { void owner.standing(body); markets.accountAnswered(body); },
     openTab: (url, target) => (typeof win.open === 'function' ? win.open(url, target) : null),
   });
   void account.load();

@@ -1068,6 +1068,7 @@ test('a failed A-share quote read keeps the price and says the connection failed
   const r = rig({
     storage,
     answer: path => {
+      if (isChina(path)) return ranked(query(path).sort);
       if (!path.startsWith('/data/account/quotes?')) return undefined;
       if (mode === 'down') return refused(503, { ok: false, unreachable: 'ECONNREFUSED' });
       return mode === 'stale' ? { ...cnQuoted(path), stale: true } : cnQuoted(path);
@@ -1094,7 +1095,36 @@ test('a failed A-share quote read keeps the price and says the connection failed
   r.fire(QUOTES_MS);
   await settle();
   assert.equal(r.m().connection, 'polling');
+  // the Account back off the China tab: its state read again, never the not-answering sentence left on Venues
+  await settle();
+  assert.equal(r.m().providers[0]?.status, 'connected', 'China’s state read again once the Account answers');
   assert.ok(r.reads.every(p => !faceWire(p)), 'nothing reads the face wire');
+  r.markets.close();
+});
+
+test('the Account answering afresh on another screen reads China’s state again, once, only when it was said not answering', async () => {
+  let stale = true;
+  const r = rig({ answer: path => (isChina(path) ? { ...ranked(query(path).sort), ...(stale ? { stale: true } : {}) } : undefined) });
+  const ranks = () => r.reads.filter(isChina).length;
+  // China's state as the Account's: a fresh page asks nothing
+  r.store.dispatch('chinaStatusUpdated', { status: { state: 'live', said: 'Tencent · live' } });
+  r.markets.accountAnswered({ ok: true });
+  await settle();
+  assert.equal(ranks(), 0);
+  // said not answering: a page the proxy re-served stale asks nothing, a fresh one reads the state again
+  r.store.dispatch('chinaStatusUpdated', { status: { state: 'unavailable', said: 'The Account is not answering · China as last read' } });
+  r.markets.accountAnswered({ ok: true, stale: true });
+  await settle();
+  assert.equal(ranks(), 0);
+  stale = false;
+  r.markets.accountAnswered({ ok: true });
+  r.markets.accountAnswered({ ok: true });
+  await settle();
+  assert.equal(ranks(), 1, 'one read in the air');
+  assert.equal(r.m().providers[0].status, 'connected');
+  r.markets.accountAnswered({ ok: true });
+  await settle();
+  assert.equal(ranks(), 1, 'its state known again: nothing more');
   r.markets.close();
 });
 

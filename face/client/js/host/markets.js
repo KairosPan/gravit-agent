@@ -117,6 +117,13 @@ export function startMarkets({
       store.dispatch('chinaStatusUpdated', { status: body.stale === true ? NOT_ANSWERING : body.china.status });
     }, ['rankLoading', { sort }]);
   }
+  // China's state last said as the Account not answering, and the Account answering afresh: its state read again, off the China
+  // ranking that carries it — else that sentence would stay on Venues and Markets until a reload
+  function recheckChina() {
+    const said = store.get().markets.providers;
+    if (!Array.isArray(said) || !said.some(p => p?.market === 'cn' && p.said === NOT_ANSWERING_WORD)) return;
+    if (!inAir('rank')) readRank();
+  }
   // the read for the tab on screen: China's ranking there, else the Account's explore
   function readShown() {
     if (store.get().markets.tab === CHINA_TAB) readRank(); else readExplore();
@@ -175,6 +182,7 @@ export function startMarkets({
       }
       store.dispatch('quotesUpdated', { quotes: next, connection: 'polling' });
       if (refusal) store.dispatch('chinaStatusUpdated', { status: { state: 'unavailable', said: words(refusal?.message) ?? '' } });
+      else recheckChina();
     });
   }
 
@@ -417,6 +425,12 @@ export function startMarkets({
   void askOld();
 
   return {
+    /** The Account's page answered afresh (not a page the proxy re-served stale): China's state, when last said as the Account
+     *  not answering, is read again, on any screen. */
+    accountAnswered(body) {
+      if (closed || body?.stale === true) return;
+      recheckChina();
+    },
     /** Markets on screen in a visible tab, or not: the reads run only while it is. */
     show(on) {
       if (closed) return;
