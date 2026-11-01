@@ -485,6 +485,7 @@ test("the owner's keys on Agents and Cards: Let in, Give a limit, End limit, Rev
     { id: 'spend-5', scope: 'payees', allow: ['*'] },
     { id: 'spend-6', scope: 'earn', allow: ['*', 'ex'] },
     { id: 'spend-7', allow: ['ex'] },
+    { id: 'spend-8', scope: 'mode', allow: ['ex'] },
   ] }] };
   const ends = [...draw(signing(state({ tab: 'agents', agents: more }))).matchAll(/data-kind="endLimit"[^>]*data-scope="([^"]*)" data-allow="([^"]*)"/g)].map(m => `${m[1]}:${m[2]}`);
   assert.deepEqual(ends, ['trade:ex', 'trade:paper,broker', 'payees:*', 'earn:ex']);
@@ -579,15 +580,21 @@ test("Gravit's row: Revoke…, Give a limit… and End limit… on a page that s
     has(quiet, 'Gravit · admitted', role);
     for (const k of ['data-action="openSheet"', 'data-action="askRevoke"']) lacks(quiet, k, `${role}: ${k}`);
   }
-  // knocking: Let in… seeded from the page's request under the seat's name, listed once; no limit or Revoke… yet
+  // knocking: Let in… on the one request at the seat view's address, listed once; no limit or Revoke… yet
   const page = { ...fx('account'), requests: [{ address: '0xfeed', name: 'Gravit', at: '2026-10-22T07:30:00.000Z' }, { address: '0xab34', name: 'Scout', at: '' }] };
-  const knocks = seatView({ seat: { name: 'Gravit', status: 'knocking', limits: [] } });
+  const knocks = seatView({ seat: { name: 'Gravit', status: 'knocking', address: '0xFEED', limits: [] } });
   const agents = boxOf(draw(signingAs(state({ tab: 'agents', seat: knocks, page }))), 'Agents');
   has(gravitRow(agents), `<span class="btn-row">${sheetKeyOf('letIn', { address: '0xfeed', name: 'Gravit' }, 'Let in…')}</span></div>`);
-  for (const k of ['data-kind="limit"', 'data-action="askRevoke" data-address="0xfeed"']) lacks(gravitRow(agents), k);
+  for (const k of ['data-kind="limit"', 'data-action="askRevoke"']) lacks(gravitRow(agents), k);
   assert.equal((agents.match(/data-address="0xfeed"/g) ?? []).length, 1, 'the seat knocks on its own row, not again under Knocking');
   has(agents, sheetKeyOf('letIn', { address: '0xab34', name: 'Scout' }, 'Let in…'));
-  // knocking with no request under its name, or an expired or revoked seat: no key on its row
+  // no address on the seat view: a request named "Gravit" is not bound — no key on Gravit's row, listed under Knocking with its own Let in…
+  const unbound = boxOf(draw(signingAs(state({ tab: 'agents', seat: seatView({ seat: { name: 'Gravit', status: 'knocking', limits: [] } }), page }))), 'Agents');
+  lacks(gravitRow(unbound), 'data-action=');
+  has(unbound, `<div class="label">Knocking</div><div class="venues"><div class="venue"><span><b>Gravit</b>`);
+  has(unbound, sheetKeyOf('letIn', { address: '0xfeed', name: 'Gravit' }, 'Let in…'));
+  has(unbound, sheetKeyOf('letIn', { address: '0xab34', name: 'Scout' }, 'Let in…'));
+  // knocking with no request at its address, or an expired or revoked seat: no key on its row
   for (const seat of [knocks, seatView({ seat: { name: 'Gravit', status: 'expired', address: '0xab12', limits: [] } }), seatView({ seat: { name: 'Gravit', status: 'revoked', address: '0xab12', limits: [] } })]) {
     lacks(gravitRow(draw(signingAs(state({ tab: 'agents', seat })))), 'data-action=', seat.seat.status);
   }

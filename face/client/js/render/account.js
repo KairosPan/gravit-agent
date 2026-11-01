@@ -286,6 +286,8 @@ export function positionKeys(position, page, quotes = null) {
   return [close ? marketKey('close', close, sells ? 'Sell…' : 'Close…') : '', lev ? marketKey('leverage', lev, 'Leverage…') : ''].filter(Boolean);
 }
 
+// the kinds of limit the face ends (host/sheet-view.js LIMIT_SCOPES)
+const SCOPES = new Set(['trade', 'venues', 'payees', 'earn']);
 // agents-mount.js:228 — what revoking a key does, asked before its sheet; Gravit's seat revoked stops Gravit's orders too
 const revokeWords = r => (r.gravit
   ? `Revoke ${r.name}? Its key can do nothing on this account from then on: ${r.name}'s orders stop, and it places and moves nothing more. It cannot be let in again under the same key: a new key is needed. Its limits end with it.`
@@ -294,7 +296,7 @@ const revokeWords = r => (r.gravit
 // an agent's keys, by its address: Give a limit…, End limit… on each limit standing by its scope (its ids comma-joined, never *
 // but a payees limit's any payee), Revoke… — asked twice, the Account's words and the confirm for this agent in its place.
 // Gravit's own row has them while its seat is admitted (by the seat view's address and the seat's name) and, while it knocks,
-// Let in… on the page's request under the seat's name; any other standing, none.
+// Let in… on the one request at the seat view's address (never one bound by name alone); any other standing, none.
 function agentKeys(r, state) {
   if (r.gravit && r.seatStatus !== 'admitted') {
     return r.seatStatus === 'knocking' && r.request ? rowKeys([sheetKey('letIn', { 'data-address': r.request.address, 'data-name': r.request.name || r.name }, 'Let in…')]) : '';
@@ -304,7 +306,7 @@ function agentKeys(r, state) {
     keys.push(sheetKey('limit', { 'data-address': r.address, 'data-name': r.name }, 'Give a limit…'));
     for (const l of r.limits) {
       const allow = l.scope === 'payees' ? l.allow : l.allow.filter(id => id !== '*');
-      if (l.scope && !l.expired && allow.length) keys.push(sheetKey('endLimit', { 'data-address': r.address, 'data-name': r.name, 'data-scope': l.scope, 'data-allow': allow.join(',') }, 'End limit…'));
+      if (SCOPES.has(l.scope) && !l.expired && allow.length) keys.push(sheetKey('endLimit', { 'data-address': r.address, 'data-name': r.name, 'data-scope': l.scope, 'data-allow': allow.join(',') }, 'End limit…'));
     }
   }
   if (r.name) {
@@ -356,7 +358,7 @@ function agentsTab(state, now) {
       `${owner ? agentKeys(r, state) : ''}</div>`;
   }).join('');
   const status = a.agents.data === null ? note(a.agents.status === 'error' ? 'Agents unavailable' : 'Loading…') : rows ? '' : note('No agents');
-  // the seat's own knock is let in on Gravit's row: listed once
+  // the seat's own knock, bound by its address on Gravit's row, is let in there: listed once; any other request keeps its own
   const seatKnock = all.find(r => r.gravit)?.request?.address ?? '';
   const knocking = requestsOf(a.data).filter(q => !seatKnock || q.address.toLowerCase() !== seatKnock.toLowerCase())
     .map(q => `<div class="venue"><span>${lines(q.name || 'An agent', [[q.address, when(q.at, now)].filter(Boolean).join(' · ')])}</span>` +

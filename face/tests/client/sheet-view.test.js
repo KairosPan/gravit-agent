@@ -200,6 +200,8 @@ test('endLimit ends the scope it names', () => {
       { type: 'approveSpend', agent: AGENT, scope, allow: scope === 'payees' ? '*' : 'ex', perPayment: '0', budget: '0', windowHours: 0, validUntil: NOW + DAY });
   }
   assert.equal(draftOf('endLimit', [], { address: AGENT, allow: 'ex' }, NOW).scope, 'trade', 'trading where it names none');
+  // a kind it does not know is refused, never ended as a trading limit
+  for (const scope of ['mode', 'TRADE', 7]) assert.equal(draftOf('endLimit', [], { address: AGENT, scope, allow: 'ex' }, NOW), 'No limit of that kind to end', String(scope));
   assert.equal(titleOf('endLimit', { name: 'Gravit', scope: 'venues' }), "End Gravit's limit to move money");
   assert.equal(titleOf('endLimit', { name: 'Gravit', scope: 'payees' }), "End Gravit's payments limit");
   assert.equal(titleOf('endLimit', { name: 'Gravit' }), "End Gravit's trading limit");

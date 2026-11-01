@@ -352,17 +352,25 @@ test("walletsOf names each wallet's venue as the Account does", () => {
 });
 
 test("Gravit's row carries the knocking request's address", () => {
-  const page = { ...fx('account'), requests: [{ address: '0xFEED', name: 'gravit', at: '2026-10-22T07:30:00.000Z' }, { address: '0xab12', name: 'Scout', at: '' }] };
-  const knocking = seatView({ seat: { name: 'Gravit', status: 'knocking', limits: [] } });
-  const [row] = agentsOf(fx('agents'), knocking, page);
-  assert.deepEqual([row.gravit, row.seatStatus, row.address, row.request], [true, 'knocking', '0xFEED', { address: '0xFEED', name: 'gravit' }], 'the request under the seat\'s name, in any case');
-  // no request under its name, or no page read: no address to let in
-  assert.deepEqual(pick(agentsOf(fx('agents'), knocking, { ...page, requests: [page.requests[1]] })[0]), ['', null]);
-  assert.deepEqual(pick(agentsOf(fx('agents'), knocking)[0]), ['', null]);
-  // admitted: the seat view's address, whatever knocks under its name
-  const admitted = agentsOf(fx('agents'), seatView(), page)[0];
-  assert.deepEqual([admitted.seatStatus, admitted.address, admitted.request], ['admitted', '0xab12', null]);
-  function pick(r) { return [r.address, r.request]; }
+  const page = { ...fx('account'), requests: [{ address: '0xFEED', name: 'Someone', at: '2026-10-22T07:30:00.000Z' }, { address: '0xab34', name: 'gravit', at: '' }] };
+  const knockingAt = address => seatView({ seat: { name: 'Gravit', status: 'knocking', ...(address ? { address } : {}), limits: [] } });
+  const pick = r => [r.address, r.request];
+  // the seat view's address and exactly one request there, in any case: bound, whatever name the request gives
+  const [row] = agentsOf(fx('agents'), knockingAt('0xfeed'), page);
+  assert.deepEqual([row.gravit, row.seatStatus, ...pick(row)], [true, 'knocking', '0xfeed', { address: '0xFEED', name: 'Someone' }]);
+  // no address on the seat view: a request named as the seat is not bound, and the row has no address of its own
+  assert.deepEqual(pick(agentsOf(fx('agents'), knockingAt(), page)[0]), ['', null]);
+  // two requests named "gravit", no address: not bound
+  const twins = { ...page, requests: [{ address: '0x01', name: 'gravit', at: '' }, { address: '0x02', name: 'Gravit', at: '' }] };
+  assert.deepEqual(pick(agentsOf(fx('agents'), knockingAt(), twins)[0]), ['', null]);
+  // two requests at the seat's address: not bound; none there, or no page read: not bound
+  const doubled = { ...page, requests: [{ address: '0xfeed', name: 'a', at: '' }, { address: '0xFEED', name: 'b', at: '' }] };
+  assert.equal(agentsOf(fx('agents'), knockingAt('0xfeed'), doubled)[0].request, null);
+  assert.equal(agentsOf(fx('agents'), knockingAt('0x99'), page)[0].request, null);
+  assert.equal(agentsOf(fx('agents'), knockingAt('0xfeed'))[0].request, null);
+  // admitted: the seat view's address, no request bound
+  const admitted = agentsOf(fx('agents'), seatView(), { ...page, requests: [{ address: '0xab12', name: 'Gravit', at: '' }] })[0];
+  assert.deepEqual([admitted.seatStatus, ...pick(admitted)], ['admitted', '0xab12', null]);
 });
 
 test('cardsOf, asksOf, requestsOf: grouped by agent; shown verbatim', () => {

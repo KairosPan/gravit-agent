@@ -362,7 +362,10 @@ export function draftOf(kind, fields, seed, now) {
     case 'endLimit': {
       const agent = str(s.address), allow = listOf(s.allow).join(',');
       if (!agent || !allow) return 'No limit to end';
-      return { type: 'approveSpend', agent, scope: scopeOf(s.scope).value, allow, perPayment: '0', budget: '0', windowHours: 0, validUntil: now + DAY };
+      // a kind it does not know is refused, never ended as another; none named is a trading limit
+      const scope = s.scope === undefined || s.scope === '' ? 'trade' : s.scope;
+      if (!LIMIT_SCOPES.some(x => x.value === scope)) return 'No limit of that kind to end';
+      return { type: 'approveSpend', agent, scope, allow, perPayment: '0', budget: '0', windowHours: 0, validUntil: now + DAY };
     }
     case 'revoke':
       if (!str(s.name)) return 'No key to revoke';
