@@ -144,7 +144,7 @@ function rig(fx: Fixture, opts: { start?: string; deliver?: DeliverResult; over?
     home: fx.home,
     root: fx.root,
     clock,
-    runScript: defaultProducerRunner(process.execPath),
+    runScript: defaultProducerRunner(process.execPath, []),
     builtins: {
       brief: async (input) => {
         inputs.push(input);

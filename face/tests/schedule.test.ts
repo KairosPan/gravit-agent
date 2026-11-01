@@ -152,7 +152,7 @@ function rig(fx: Fixture, start: string, opts: {
     root: fx.root,
     clock,
     calendar: opts.calendar ?? fakeCalendar(DAYS),
-    runScript: defaultProducerRunner(process.execPath),
+    runScript: defaultProducerRunner(process.execPath, []),
     builtins: {},
     createAgent: (o) => agents.createAgent(o),
     resolveRoute: async () => ({ provider: "stub", model: "echo" }),
@@ -1061,7 +1061,7 @@ test("createDeskSchedule: the market clock under the face's interpreter, its fai
     on: fakeBus().on,
     deliver: (text) => out.deliver(text),
     log: (line) => { lines.push(line); },
-    seams: { clock, tickMs: DAY_MS },
+    seams: { clock, tickMs: DAY_MS, runScript: defaultProducerRunner(process.execPath, []) },
   });
   clock.set("2026-11-27T15:00:00Z");
   await schedule.tick();

@@ -60,6 +60,7 @@ import type { DeskConversationCtxLike } from "../src/desk-conversation.ts";
 import { deskJournalDir, type DeskSessionDeps } from "../src/desk-session.ts";
 import { FIRING_DISPOSE_MS, isFiringRecord, type FiringRecord, type StartedRecord } from "../src/firing.ts";
 import type { MarketSession } from "../src/market-clock.ts";
+import { defaultProducerRunner } from "../src/producer.ts";
 import { setupFaceProfile } from "../src/setup.ts";
 import { parseStanding, rehashOrder, renderOrder, STANDING_FILE, writeStanding, type ArmEntry } from "../src/standing.ts";
 import { GRAVIT_PLUGIN_ABS, populateBotsRoot } from "./bots-fixture.ts";
@@ -387,7 +388,7 @@ test("schedule smoke: a real firing end to end, its deadline, refusals, missed a
     });
 
     /* The desk, as main.ts installs it, with the clock row's seams: the WallClock at 08:00 ET, the one session, a
-     * day-long tick, the builtin brief; python is node. */
+     * day-long tick, the builtin brief; python is node, run with none of python's flags. */
     const sessionCtx = ctx as unknown as DeskConversationCtxLike;
     const install: NonNullable<DeskSessionDeps["installModelSelection"]> = (agentCtx, ref) => installModelSelection(agentCtx as unknown as Context, ref);
     const clock = new WallClock(BOOT_AT);
@@ -396,7 +397,7 @@ test("schedule smoke: a real firing end to end, its deadline, refusals, missed a
       home: HOME, enabled: true, root: ROOT, route: STUB, sessionCtx, installModelSelection: install, ctx,
       hub: { snapshot: async () => ({ ok: true, generated_at: new Date().toISOString(), quotes: [], providers: [] }) },
       python: process.execPath,
-      schedule: { clock, calendar, tickMs: TICK_MS, builtins: { brief: async () => ({ ok: true, text: BRIEF }) } },
+      schedule: { clock, calendar, tickMs: TICK_MS, runScript: defaultProducerRunner(process.execPath, []), builtins: { brief: async () => ({ ok: true, text: BRIEF }) } },
       log: (line) => { faceLog.push(line); },
     });
     const conversation = desk.conversation;

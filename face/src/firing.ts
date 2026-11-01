@@ -71,7 +71,7 @@ import {
 } from "./producer.ts";
 import type { AgentLike } from "./room.ts";
 import type { MessageLike } from "./room-rules.ts";
-import { orderCwd, sha256Hex, type StandingOrder } from "./standing.ts";
+import { orderCwd, sha256Hex, STANDING_TEXT_MAX_BYTES, type StandingOrder } from "./standing.ts";
 
 /** Diagnostic label, the one every `${BIN}:`-prefixed line in the face uses; desk lines add `desk:`. */
 const BIN = "gravit-face";
@@ -108,8 +108,11 @@ export interface FiringItem {
 /** A file a firing turn added, modified or removed, by its path relative to the turn's cwd, `/`-joined. */
 export type FileChange = { path: string; change: "added" | "modified" | "removed" };
 
-/** Why {@link checkFiring} refused a firing. A `hash` or `producer-hash` detail is the sha the file holds now, or
- * `missing`; a `fence` detail is the violation's path, relative to the repository root. */
+/** A `hash` or `producer-hash` detail for a file now past the size it was armed under: changed, never read whole. */
+export const OVERSIZED = "oversized";
+
+/** Why {@link checkFiring} refused a firing. A `hash` or `producer-hash` detail is the sha the file holds now,
+ * `missing`, or {@link OVERSIZED}; a `fence` detail is the violation's path, relative to the repository root. */
 export type Refusal =
   | { reason: "off" }
   | { reason: "budget"; state: BudgetState }
@@ -520,15 +523,16 @@ export async function checkFiring(
   } catch (err) {
     log(`${BIN}: desk: the token budget could not be read (${reasonOf(err)}); standing order ${order.id} goes on`);
   }
-  const text = await readScriptBytes(join(deps.root, order.dir, order.file));
-  if (typeof text === "string") return { refuse: { reason: "hash", detail: "missing" } };
+  const text = await readScriptBytes(join(deps.root, order.dir, order.file), STANDING_TEXT_MAX_BYTES);
+  /* a text past the limit arm read it under has changed since arming: refused as changed, never read whole */
+  if (typeof text === "string") return { refuse: { reason: "hash", detail: text === "oversized" ? OVERSIZED : "missing" } };
   const standingSha = sha256Hex(text);
   if (standingSha !== order.sha256) return { refuse: { reason: "hash", detail: standingSha } };
   let producerSha: string | undefined;
   if (order.producer?.kind === "script") {
     const found = await resolveScript(deps.root, order.producer.script);
     const bytes = "error" in found ? "missing" : await readScriptBytes(found.path);
-    if (typeof bytes === "string") return { refuse: { reason: "producer-hash", detail: "missing" } };
+    if (typeof bytes === "string") return { refuse: { reason: "producer-hash", detail: bytes === "oversized" ? OVERSIZED : "missing" } };
     producerSha = sha256Hex(bytes);
     if (producerSha !== order.producerSha256) return { refuse: { reason: "producer-hash", detail: producerSha } };
   }

@@ -4,30 +4,40 @@
  * bytes `arm` hash-pins, or `builtin:<name>`, a face-side builder with nothing to hash
  * ({@link BUILTIN_PRODUCERS}; an unknown name is refused). A script runs through a
  * {@link ProducerRunner}: `execFile` of the face's interpreter (`FACE_PYTHON || python3`, the caller's
- * to choose - the one `scripts/face_data.py` runs on) with no shell, the argv as given, cwd the
- * repository root, the {@link ProducerInput} as JSON on stdin, an environment cut to an allow-list
- * ({@link producerEnv}: never `DEEPSEEK_*` or `TELEGRAM_*`) and `SIGKILL` at the deadline. Its stdout
- * is the text the wake message quotes; its stderr never reaches the model - it becomes one face log
- * line of at most {@link STDERR_LOG_MAX} characters. Every producer's text, a builtin's too, is cut at
- * {@link PRODUCER_TEXT_MAX} by {@link capText}; the cut is the firing's step, not this module's.
+ * to choose - the one `scripts/face_data.py` runs on) isolated (`-I`, {@link PYTHON_FLAGS}: no user
+ * site, no `PYTHON*` variable, no script directory on `sys.path`), with no shell, the argv as given, cwd
+ * the repository root, the {@link ProducerInput} as JSON on stdin, an environment cut to an allow-list
+ * ({@link producerEnv}: never `DEEPSEEK_*` or `TELEGRAM_*`) and `SIGKILL` to its whole process group at
+ * the deadline. Its stdout is the text the wake message quotes; its stderr never reaches the model - it
+ * becomes one face log line of at most {@link STDERR_LOG_MAX} characters. Every producer's text, a
+ * builtin's too, is cut at {@link PRODUCER_TEXT_MAX} by {@link capText}; the cut is the firing's step,
+ * not this module's.
  *
- * The runner executes exactly the bytes it verified ({@link runScriptProducer}): it reads the script
- * once, checks those bytes against the hash pinned at arming, and runs a private copy of them, never
- * the file in `scripts/`, which another process could swap between the check and the exec. The copy
- * lives in a run base the caller names - a firing's is `<desk dir>/run`, under `$DSH_HOME/face/desk/`,
- * which neither the desk's sandbox nor a sandboxed workbench session can write (both can write under
- * `$TMPDIR`, so the copy never lives there). The residual: an unsandboxed process running as the
- * operator can still race the copy - and such a process can read the keys anyway. The copy lives
- * outside the repository, so a producer finds the repository through `GRAVIT_ROOT`, set in its
- * environment, and opens with:
+ * The runner executes exactly the bytes it verified ({@link runPinnedScript}, which
+ * {@link runScriptProducer} and the market clock share): it reads the script once, checks those bytes
+ * against the hash pinned - at arming, or in the face's own code for the clock - and runs a private copy
+ * of them, never the file in `scripts/`, which another process could swap between the check and the
+ * exec. The copy lives in a run base the caller names - a firing's is `<desk dir>/run`, under
+ * `$DSH_HOME/face/desk/`, which neither the desk's sandbox nor a sandboxed workbench session can write
+ * (both can write under `$TMPDIR`, so the copy never lives there). The residual: an unsandboxed process
+ * running as the operator can still race the copy - and such a process can read the keys anyway.
+ *
+ * THE PIN COVERS THE SCRIPT'S BYTES; WHAT IT IMPORTS FROM THE REPOSITORY TREE (VIA `GRAVIT_ROOT`) IS NOT
+ * PINNED. The copy lives outside the repository, so a producer that needs the repository's code finds it
+ * through `GRAVIT_ROOT`, set in its environment, and opens with:
  *
  *     sys.path.insert(0, os.environ.get("GRAVIT_ROOT") or str(Path(__file__).resolve().parents[1]))
+ *
+ * After that line a module under the root - `alpaca_kit/`, or a `<root>/json.py` shadowing the standard
+ * library - runs with the producer's environment, the market keys included, and a workbench session can
+ * write it. `-I` closes the interpreter's own routes in (the user site, `PYTHONPATH`, the script's
+ * directory), not that one. No script producer ships yet; P4's first one decides its import story.
  *
  * Self-contained: it imports none of the face's modules and the pause switch (`npm run desk`) does not
  * load it.
  * @module
  */
-import { execFile, type ExecFileException } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { constants as fsConstants, lstat, mkdir, mkdtemp, open, realpath, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
 import { constants } from "node:os";
@@ -201,9 +211,19 @@ export type ProducerRunner = (
 
 /** The most a child may write to either stream before it is killed: 1 MiB, in bytes. */
 const STDIO_MAX_BYTES = 1_048_576;
-/** The two overflow errors; neither is a spawn code, so {@link runScriptProducer} reports them as they are. */
-const STDOUT_OVER = "stdout over 1 MiB";
-const STDERR_OVER = "stderr over 1 MiB";
+/** The two overflow errors; neither is a spawn code, so {@link runScriptProducer} and the market clock report
+ * them as they are ({@link isOverflow}). */
+export const STDOUT_OVER = "stdout over 1 MiB";
+export const STDERR_OVER = "stderr over 1 MiB";
+
+/** Whether a {@link RunResult}'s `error` is one of the two overflows rather than a spawn code. */
+export function isOverflow(error: string | undefined): boolean {
+  return error === STDOUT_OVER || error === STDERR_OVER;
+}
+
+/** The interpreter's flags before every script the face runs: `-I`, isolated mode - no user site-packages, no
+ * `PYTHON*` variable read, and neither the script's directory nor the cwd put on `sys.path`. */
+export const PYTHON_FLAGS: readonly string[] = ["-I"];
 
 /** A thrown or emitted error's code, as text. */
 function codeOf(error: unknown): string {
@@ -211,61 +231,102 @@ function codeOf(error: unknown): string {
   return typeof code === "string" ? code : "unknown error";
 }
 
-/** How a child ended, from `execFile`'s callback. The order matters: an overflow is a kill with a code of
- * its own and no `killed`; only the deadline sets `killed`, as only it calls `kill`; a signal the face
- * never sent - a crash, an outside kill - reads as the shell's 128 + n, so it is still an exit code. */
-function ending(error: ExecFileException | null, stdout: string, stderr: string): RunResult {
-  if (error === null) return { code: 0, stdout, stderr, timedOut: false };
-  if (error.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") {
-    return { code: null, stdout, stderr, timedOut: false, error: error.message.startsWith("stderr") ? STDERR_OVER : STDOUT_OVER };
-  }
-  if (typeof error.code === "number") return { code: error.code, stdout, stderr, timedOut: false };
-  if (error.killed === true) return { code: null, stdout, stderr, timedOut: true };
-  if (typeof error.signal === "string") return { code: 128 + (constants.signals[error.signal] ?? 0), stdout, stderr, timedOut: false };
-  return { code: null, stdout, stderr, timedOut: false, error: codeOf(error) };
-}
-
 /**
- * The real runner: `execFile` of `python` - no shell, so the argv reaches the child exactly as given -
- * with the cwd, the environment (exactly as given; the caller cuts it, {@link producerEnv} or
- * {@link baseEnv}) and stdin from `opts`. Stdin is always ended, empty when `opts.stdin` is absent, so a
- * child that reads it never waits on the face. At `timeoutMs` the child gets `SIGKILL` - a deadline of
- * zero or less kills at once, never "no deadline"; a child that writes more than 1 MiB to either stream
- * is killed the same way. Never rejects: a spawn failure, a refused argument and a broken stdin pipe all
- * end in a {@link RunResult}.
+ * The real runner: `spawn` of `python` with `flags` before the argv - no shell, so the argv reaches the child
+ * exactly as given - with the cwd, the environment (exactly as given; the caller cuts it, {@link producerEnv} or
+ * {@link baseEnv}) and stdin from `opts`. Stdin is always ended, empty when `opts.stdin` is absent, so a child
+ * that reads it never waits on the face. The child leads a process group of its own (`detached`), and at
+ * `timeoutMs` that whole group gets `SIGKILL` - a process the script started dies with it, and one holding its
+ * stdout open no longer keeps the run waiting; a deadline of zero or less kills at once, never "no deadline". A
+ * child that writes more than 1 MiB to either stream is killed the same way, its group with it, what it wrote up
+ * to the limit kept. Never rejects: a spawn failure, a refused argument and a broken stdin pipe all end in a
+ * {@link RunResult}.
  * @param python - the interpreter: an absolute path, or a name looked up on the `PATH` of the environment
  *   each run is GIVEN (none there is `ENOENT`; both allow-lists keep `PATH`). The face passes
  *   `FACE_PYTHON || python3`.
+ * @param flags - the interpreter's own arguments, before the argv: {@link PYTHON_FLAGS} (`-I`) by default;
+ *   the tests, which run node as the interpreter, pass none.
  * @returns a {@link ProducerRunner}.
  */
-export function defaultProducerRunner(python: string): ProducerRunner {
+export function defaultProducerRunner(python: string, flags: readonly string[] = PYTHON_FLAGS): ProducerRunner {
   return (argv, opts) => new Promise<RunResult>((done) => {
-    let child: ReturnType<typeof execFile>;
+    let child: ChildProcess;
     try {
-      child = execFile(python, argv, {
-        cwd: opts.cwd,
-        env: opts.env,
-        encoding: "utf8",
-        /* execFile reads a timeout of 0 as "none"; the clamp keeps a zero or negative deadline a deadline. */
-        timeout: Math.max(1, Math.ceil(opts.timeoutMs)),
-        killSignal: "SIGKILL",
-        maxBuffer: STDIO_MAX_BYTES,
-      }, (error, stdout, stderr) => done(ending(error, stdout, stderr)));
+      child = spawn(python, [...flags, ...argv], { cwd: opts.cwd, env: opts.env, detached: true, stdio: ["pipe", "pipe", "pipe"] });
     } catch (error) {
-      /* A synchronous refusal (a NUL in an argument, a timeout that is not a number): nothing started. */
+      /* A synchronous refusal (a NUL in an argument): nothing started. */
       done({ code: null, stdout: "", stderr: "", timedOut: false, error: codeOf(error) });
       return;
     }
+    let timedOut = false;
+    let overflow: string | undefined;
+    let settled = false;
+    const out: Buffer[] = [];
+    const err: Buffer[] = [];
+    const sizes = { out: 0, err: 0 };
+    /** SIGKILL to the child's group, the child included; a group already gone is no failure. */
+    const killGroup = (): void => {
+      const pid = child.pid;
+      if (pid === undefined) return;
+      try {
+        process.kill(-pid, "SIGKILL");
+      } catch {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          /* gone */
+        }
+      }
+    };
+    /* A zero, negative or non-finite deadline is a deadline at once, never "none". */
+    const ms = Number.isFinite(opts.timeoutMs) ? Math.max(1, Math.ceil(opts.timeoutMs)) : 1;
+    const deadline = setTimeout(() => {
+      timedOut = true;
+      killGroup();
+    }, ms);
+    const finish = (result: Omit<RunResult, "stdout" | "stderr">): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadline);
+      done({ ...result, stdout: Buffer.concat(out).toString("utf8"), stderr: Buffer.concat(err).toString("utf8") });
+    };
+    /** One stream's chunk kept, up to the limit; past it the child is killed as an overflow. */
+    const keep = (which: "out" | "err", into: Buffer[], over: string) => (chunk: Buffer): void => {
+      if (overflow !== undefined) return;
+      const room = STDIO_MAX_BYTES - sizes[which];
+      if (chunk.length > room) {
+        into.push(chunk.subarray(0, room));
+        sizes[which] = STDIO_MAX_BYTES;
+        overflow = over;
+        killGroup();
+        return;
+      }
+      into.push(chunk);
+      sizes[which] += chunk.length;
+    };
+    child.stdout?.on("data", keep("out", out, STDOUT_OVER));
+    child.stderr?.on("data", keep("err", err, STDERR_OVER));
+    child.on("error", (error) => {
+      /* a spawn that failed (ENOENT, EACCES) has no pid and no exit to wait for */
+      if (child.pid === undefined) finish({ code: null, timedOut: false, error: codeOf(error) });
+    });
+    child.on("close", (code, signal) => {
+      if (timedOut) finish({ code: null, timedOut: true });
+      else if (overflow !== undefined) finish({ code: null, timedOut: false, error: overflow });
+      else if (typeof code === "number") finish({ code, timedOut: false });
+      /* a signal the face never sent - a crash, an outside kill - reads as the shell's 128 + n */
+      else finish({ code: 128 + (signal === null ? 0 : constants.signals[signal] ?? 0), timedOut: false });
+    });
     const stdin = child.stdin;
     if (stdin === null) return;
     /* A child that exits without reading its input breaks the pipe (EPIPE): unhandled, that error would end
-     * the face. Its exit is reported by the callback, which this cannot affect. */
+     * the face. Its exit is reported by `close`, which this cannot affect. */
     stdin.on("error", () => {});
     try {
       if (opts.stdin === undefined) stdin.end();
       else stdin.end(opts.stdin);
     } catch {
-      /* the same broken pipe, met synchronously; the callback still reports the exit */
+      /* the same broken pipe, met synchronously; `close` still reports the exit */
     }
   });
 }
@@ -313,7 +374,7 @@ function oneLine(text: string): string {
 /** A finished run as the firing reads it. A spawn failure is the one `error` that is a code. */
 function outputOf(result: RunResult, timeoutMs: number): ProducerOutput {
   if (result.timedOut) return { ok: false, error: `timed out after ${formatDuration(timeoutMs)}` };
-  if (result.error === STDOUT_OVER || result.error === STDERR_OVER) return { ok: false, error: result.error };
+  if (isOverflow(result.error)) return { ok: false, error: result.error as string };
   if (result.error !== undefined) return { ok: false, error: `could not start: ${result.error}` };
   if (result.code === 0) return { ok: true, text: result.stdout };
   return { ok: false, error: `exit ${result.code}`, text: result.stdout };
@@ -334,6 +395,9 @@ export interface RunScriptResult {
 /** A run's private directory in the run base: this prefix and mkdtemp's six. */
 const RUN_DIR_PREFIX = "gravit-producer-";
 
+/** The most bytes a script the face runs may hold: 1 MiB. A larger one is never read whole. */
+export const SCRIPT_MAX_BYTES = 1_048_576;
+
 /** The hex SHA-256 of `bytes`, as `arm` pins a script. */
 function sha256Hex(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
@@ -342,19 +406,32 @@ function sha256Hex(bytes: Uint8Array): string {
 /**
  * Read a resolved script's bytes once, from what is still a regular file at the checked path: the open
  * follows no link swapped in for it (`O_NOFOLLOW`; the path is a real path, so a link there is a swap) and
- * never waits on a FIFO (`O_NONBLOCK`), and the type is checked on the descriptor that is read. The firing's
- * read ({@link runScriptProducer}) and `npm run desk -- arm`'s, so a script is hashed at arming exactly as
- * strictly as it is read before it runs.
+ * never waits on a FIFO (`O_NONBLOCK`), and the type and the size are checked on the descriptor that is read.
+ * The firing's read ({@link runScriptProducer}), the market clock's and `npm run desk -- arm`'s, so a script is
+ * hashed at arming exactly as strictly as it is read before it runs.
  * @param path - the script's real path, from {@link resolveScript}.
+ * @param maxBytes - the most bytes it may hold, {@link SCRIPT_MAX_BYTES} by default; at most one byte past it is
+ *   read, so a file that grows under the read is still refused.
  * @returns the bytes; `"irregular"` when the path now holds a link, a FIFO or anything but a regular file;
- *   `"missing"` when it cannot be opened or read at all (gone, or no longer readable).
+ *   `"oversized"` when it holds more than `maxBytes`; `"missing"` when it cannot be opened or read at all (gone,
+ *   or no longer readable).
  */
-export async function readScriptBytes(path: string): Promise<Buffer | "irregular" | "missing"> {
+export async function readScriptBytes(path: string, maxBytes: number = SCRIPT_MAX_BYTES): Promise<Buffer | "irregular" | "oversized" | "missing"> {
   let handle: FileHandle | undefined;
   try {
     handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
-    if (!(await handle.stat()).isFile()) return "irregular";
-    return await handle.readFile();
+    const info = await handle.stat();
+    if (!info.isFile()) return "irregular";
+    if (info.size > maxBytes) return "oversized";
+    const buffer = Buffer.alloc(maxBytes + 1);
+    let length = 0;
+    for (;;) {
+      const { bytesRead } = await handle.read(buffer, length, buffer.length - length, length);
+      if (bytesRead === 0) break;
+      length += bytesRead;
+      if (length > maxBytes) return "oversized";
+    }
+    return buffer.subarray(0, length);
   } catch (error) {
     return codeOf(error) === "ELOOP" ? "irregular" : "missing";
   } finally {
@@ -365,7 +442,8 @@ export async function readScriptBytes(path: string): Promise<Buffer | "irregular
 /**
  * Make sure the run base is a directory of the face's own before a run directory is made in it: created
  * (0700, no parents) when missing, refused when it is a symlink - it could point the copy anywhere.
- * @param runBase - the run base the caller named.
+ * @param runBase - the run base, an absolute path with no trailing separator (`resolve`d by the caller, so a
+ *   trailing slash cannot make `lstat` follow a link).
  * @returns why the run base cannot be used - `<runBase> is a symlink`, or the code of a failed `mkdir` or
  *   `lstat` - or `undefined` when it can.
  */
@@ -382,19 +460,96 @@ async function runBaseProblem(runBase: string): Promise<string | undefined> {
   }
 }
 
+/** How {@link runPinnedScript} ended: the run's result; or nothing run - `refused` for want of the pinned bytes,
+ * with why, or `failed`, a run base that cannot be used. */
+export type PinnedRun =
+  | { ran: RunResult }
+  | { refused: "hash" | "missing"; error: string }
+  | { failed: string };
+
 /**
- * Run a script producer once, on exactly the bytes armed. The script is found by {@link resolveScript}
- * and its bytes read ONCE and hashed. Nothing runs - `code` null, `chars` 0 - when:
+ * Run a script under `scripts/` on exactly the bytes pinned, the one copy path every script the face runs on its
+ * own takes - a standing order's producer ({@link runScriptProducer}) and the market clock (market-clock.ts). The
+ * script is found by {@link resolveScript} and its bytes read ONCE ({@link readScriptBytes}) and hashed. Nothing
+ * runs when:
  * - the script cannot be found or read as a regular file under `scripts/`: `refused: "missing"`, the error
  *   `<script> is missing`, `<script> leaves scripts/` or `<script> is not a regular file`;
- * - its bytes do not hash to `sha256`: `refused: "hash"`, the error `<script> changed since arming`;
- * - the run base cannot be used: `could not start: <runBase> is a symlink`, or the code of the failure.
+ * - its bytes are over {@link SCRIPT_MAX_BYTES} or do not hash to `sha256`: `refused: "hash"`, the error
+ *   `<script> <changed>` (`changed` the caller's words, `changed since arming` by default);
+ * - the run base cannot be used: `failed`, `<runBase> is a symlink` or the code of the failure.
  *
- * Verified bytes are written to a private copy - a fresh `gravit-producer-*` directory (0700) in
- * `runBase`, holding the script's file name (0400) - and `[<copy>]` runs under `opts.run`: cwd `root`,
- * the environment {@link producerEnv} of the face's plus `GRAVIT_ROOT` (the absolute `root`), stdin
- * `JSON.stringify(input)`. The run directory is removed afterwards whatever happened, and one that cannot
- * be is one `log` line; `runBase` itself stays.
+ * Verified bytes are written to a private copy - a fresh `gravit-producer-*` directory (0700) in the run base,
+ * `resolve`d first, holding the script's file name (0400) - and `[<copy>, ...args]` runs under `run` with `cwd`,
+ * `env`, `stdin` and the deadline as given. The run directory is removed afterwards whatever happened, and one that
+ * cannot be is one `log` line naming `label`; the run base itself stays. A copy that cannot be made (a run base
+ * that is not a directory, a full disk) or a runner that broke its never-reject contract ends as a run whose
+ * `error` is the code. Never rejects.
+ * @param opts - `root` the repository root; `script` the repo-relative `scripts/<file>.py`; `sha256` the hex pin;
+ *   `changed` the refusal's words for a moved pin; `runBase` where the copy is made; `run` the runner; `args`
+ *   after the copy's path; `cwd`, `env`, `stdin`, `timeoutMs` the run's; `label` the log line's subject; `log`.
+ */
+export async function runPinnedScript(opts: {
+  root: string;
+  script: string;
+  sha256: string;
+  changed?: string;
+  runBase: string;
+  run: ProducerRunner;
+  args?: readonly string[];
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  stdin?: string;
+  timeoutMs: number;
+  label: string;
+  log: (line: string) => void;
+}): Promise<PinnedRun> {
+  const changed = `${opts.script} ${opts.changed ?? "changed since arming"}`;
+  const found = await resolveScript(opts.root, opts.script);
+  if ("error" in found) return { refused: "missing", error: found.error };
+  const bytes = await readScriptBytes(found.path);
+  if (bytes === "missing") return { refused: "missing", error: `${opts.script} is missing` };
+  if (bytes === "irregular") return { refused: "missing", error: `${opts.script} is not a regular file` };
+  if (bytes === "oversized" || sha256Hex(bytes) !== opts.sha256) return { refused: "hash", error: changed };
+  const runBase = resolve(opts.runBase);
+  const baseProblem = await runBaseProblem(runBase);
+  if (baseProblem !== undefined) return { failed: baseProblem };
+
+  let dir: string | undefined;
+  let result: RunResult;
+  try {
+    dir = await mkdtemp(join(runBase, RUN_DIR_PREFIX));
+    const copy = join(dir, basename(opts.script));
+    await writeFile(copy, bytes, { mode: 0o400, flag: "wx" });
+    result = await opts.run([copy, ...(opts.args ?? [])], {
+      cwd: opts.cwd,
+      env: opts.env,
+      timeoutMs: opts.timeoutMs,
+      ...(opts.stdin === undefined ? {} : { stdin: opts.stdin }),
+    });
+  } catch (error) {
+    /* The copy could not be made (a run base that is not a directory, a full disk), or a runner broke
+     * its never-reject contract: nothing ran that could be reported. */
+    result = { code: null, stdout: "", stderr: "", timedOut: false, error: codeOf(error) };
+  } finally {
+    if (dir !== undefined) {
+      const runDir = dir;
+      await rm(runDir, { recursive: true, force: true }).catch((error: unknown) => {
+        opts.log(`${BIN}: desk: ${opts.label} left its run directory ${runDir} behind: ${codeOf(error)}`);
+      });
+    }
+  }
+  return { ran: result };
+}
+
+/**
+ * Run a script producer once, on exactly the bytes armed: {@link runPinnedScript} with the pin `sha256`, the
+ * run base `runBase` and, as its arguments, none. Nothing runs - `code` null, `chars` 0 - when the script is
+ * refused (`refused: "missing"` or `"hash"`, the error {@link runPinnedScript}'s, `<script> changed since arming`
+ * for a moved pin) or the run base cannot be used (`could not start: <runBase> is a symlink`, or the code of the
+ * failure).
+ *
+ * The copy runs under `opts.run`: cwd `root`, the environment {@link producerEnv} of the face's plus
+ * `GRAVIT_ROOT` (the absolute `root`), stdin `JSON.stringify(input)`.
  *
  * Exit 0 is `{ ok: true, text: stdout }`. Another exit is `{ ok: false, error: "exit <code>", text: stdout }`,
  * as a producer's own failure report is worth quoting. A kill at the deadline is `timed out after
@@ -430,39 +585,22 @@ export async function runScriptProducer(opts: {
   const notRun = (error: string, refused?: "hash" | "missing"): RunScriptResult => ({
     output: { ok: false, error }, code: null, timedOut: false, wallMs: now() - started, chars: 0, ...(refused === undefined ? {} : { refused }),
   });
-  const found = await resolveScript(opts.root, opts.script);
-  if ("error" in found) return notRun(found.error, "missing");
-  const bytes = await readScriptBytes(found.path);
-  if (bytes === "missing") return notRun(`${opts.script} is missing`, "missing");
-  if (bytes === "irregular") return notRun(`${opts.script} is not a regular file`, "missing");
-  if (sha256Hex(bytes) !== opts.sha256) return notRun(`${opts.script} changed since arming`, "hash");
-  const baseProblem = await runBaseProblem(opts.runBase);
-  if (baseProblem !== undefined) return notRun(`could not start: ${baseProblem}`);
-
-  let dir: string | undefined;
-  let result: RunResult;
-  try {
-    dir = await mkdtemp(join(opts.runBase, RUN_DIR_PREFIX));
-    const copy = join(dir, basename(opts.script));
-    await writeFile(copy, bytes, { mode: 0o400, flag: "wx" });
-    result = await opts.run([copy], {
-      cwd: opts.root,
-      env: { ...producerEnv(process.env), GRAVIT_ROOT: resolve(opts.root) },
-      timeoutMs: opts.timeoutMs,
-      stdin: JSON.stringify(opts.input),
-    });
-  } catch (error) {
-    /* The copy could not be made (a run base that is not a directory, a full disk), or a runner broke
-     * its never-reject contract: nothing ran that could be reported. */
-    result = { code: null, stdout: "", stderr: "", timedOut: false, error: codeOf(error) };
-  } finally {
-    if (dir !== undefined) {
-      const runDir = dir;
-      await rm(runDir, { recursive: true, force: true }).catch((error: unknown) => {
-        opts.log(`${BIN}: desk: producer ${opts.script} left its run directory ${runDir} behind: ${codeOf(error)}`);
-      });
-    }
-  }
+  const pinned = await runPinnedScript({
+    root: opts.root,
+    script: opts.script,
+    sha256: opts.sha256,
+    runBase: opts.runBase,
+    run: opts.run,
+    cwd: opts.root,
+    env: { ...producerEnv(process.env), GRAVIT_ROOT: resolve(opts.root) },
+    stdin: JSON.stringify(opts.input),
+    timeoutMs: opts.timeoutMs,
+    label: `producer ${opts.script}`,
+    log: opts.log,
+  });
+  if ("refused" in pinned) return notRun(pinned.error, pinned.refused);
+  if ("failed" in pinned) return notRun(`could not start: ${pinned.failed}`);
+  const result = pinned.ran;
   const wallMs = now() - started;
   if (result.stderr !== "") {
     opts.log(`${BIN}: desk: producer ${opts.script} wrote to stderr: ${oneLine(capText(result.stderr, STDERR_LOG_MAX).text)}`);

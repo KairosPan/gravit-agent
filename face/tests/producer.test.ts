@@ -12,11 +12,12 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { chmod, mkdir, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  BUILTIN_PRODUCERS, PRODUCER_TEXT_MAX, STDERR_LOG_MAX, baseEnv, capText, defaultProducerRunner, formatDuration, formatProducer,
-  parseProducer, producerEnv, resolveScript, runScriptProducer,
+  BUILTIN_PRODUCERS, PRODUCER_TEXT_MAX, PYTHON_FLAGS, SCRIPT_MAX_BYTES, STDERR_LOG_MAX, STDERR_OVER, STDOUT_OVER, baseEnv, capText,
+  defaultProducerRunner, formatDuration, formatProducer, isOverflow, parseProducer, producerEnv, readScriptBytes, resolveScript,
+  runPinnedScript, runScriptProducer,
   type ProducerInput, type ProducerOutput, type ProducerRunner, type RunResult,
 } from "../src/producer.ts";
 
@@ -174,7 +175,7 @@ test("resolveScript refuses a missing file, a directory and a link that leaves s
 /* ---------- the real runner ---------- */
 
 test("defaultProducerRunner: no shell, argv as given, stdin in, env as given, stderr apart", async () => {
-  const run = defaultProducerRunner(process.execPath);
+  const run = defaultProducerRunner(process.execPath, []);
   const echo = join(SCRIPTS, "echo.mjs");
   const cwd = await realpath(ROOT);
   await withEnv({ SECRET: "in the parent only" }, async () => {
@@ -190,7 +191,7 @@ test("defaultProducerRunner: no shell, argv as given, stdin in, env as given, st
 });
 
 test("defaultProducerRunner never rejects: SIGKILL at the deadline, no interpreter, a flood, a signal, an unread stdin, a refused argv", async () => {
-  const run = defaultProducerRunner(process.execPath);
+  const run = defaultProducerRunner(process.execPath, []);
   const at = (name: string) => join(SCRIPTS, name);
   const opts = { cwd: ROOT, env: {}, timeoutMs: 10_000 };
 
@@ -200,7 +201,7 @@ test("defaultProducerRunner never rejects: SIGKILL at the deadline, no interpret
   assert.deepEqual(await run([at("sleep.mjs")], { ...opts, timeoutMs: 0 }), { code: null, stdout: "", stderr: "", timedOut: true },
     "a zero deadline kills at once; it is never 'no deadline'");
 
-  assert.deepEqual(await defaultProducerRunner("/no/such/python")([at("echo.mjs")], { ...opts, stdin: "{}" }),
+  assert.deepEqual(await defaultProducerRunner("/no/such/python", [])([at("echo.mjs")], { ...opts, stdin: "{}" }),
     { code: null, stdout: "", stderr: "", timedOut: false, error: "ENOENT" });
 
   const flood = await run([at("flood.mjs")], opts);
@@ -275,7 +276,7 @@ test("a script changed after its hash was taken is refused, and never runs", asy
   await writeFile(path, marking("ran-armed", "ARMED"));
   const pinned = await shaOf(path);
   await writeFile(path, marking("ran-swapped", "SWAPPED"));
-  const real = defaultProducerRunner(process.execPath);
+  const real = defaultProducerRunner(process.execPath, []);
   const runs: string[][] = [];
   const run: ProducerRunner = (argv, opts) => { runs.push(argv); return real(argv, opts); };
   const logs: string[] = [];
@@ -298,7 +299,7 @@ test("the bytes run are the ones verified, even when the file changes between th
   const path = join(SCRIPTS, "race.py");
   await writeFile(path, marking("ran-verified", "VERIFIED"));
   const pinned = await shaOf(path);
-  const real = defaultProducerRunner(process.execPath);
+  const real = defaultProducerRunner(process.execPath, []);
   /* the swap lands after the runner's check and its copy, just before the exec */
   const run: ProducerRunner = async (argv, opts) => {
     await writeFile(path, marking("ran-rewritten", "REWRITTEN"));
@@ -313,7 +314,7 @@ test("the bytes run are the ones verified, even when the file changes between th
 });
 
 test("the run directory is gone afterwards: after an exit 0, a non-zero exit and a timeout", async () => {
-  const real = defaultProducerRunner(process.execPath);
+  const real = defaultProducerRunner(process.execPath, []);
   const cases: Array<[script: string, timeoutMs: number, output: ProducerOutput]> = [
     ["scripts/ok.py", 10_000, { ok: true, text: "OK" }],
     ["scripts/fail.py", 10_000, { ok: false, error: "exit 3", text: "half" }],
@@ -425,7 +426,7 @@ test("a script producer end to end: the real runner, the allow-listed environmen
   await withEnv({ DEEPSEEK_API_KEY: "fake-deepseek", TELEGRAM_BOT_TOKEN: "fake-telegram", APCA_API_KEY_ID: "fake-apca" }, async () => {
     const logs: string[] = [];
     const r = await runScriptProducer({ root: ROOT, script: "scripts/e2e.py", sha256: await shaOf(join(SCRIPTS, "e2e.py")), runBase: RUN_BASE,
-      run: defaultProducerRunner(process.execPath), input: INPUT, timeoutMs: 10_000, log: (line) => { logs.push(line); } });
+      run: defaultProducerRunner(process.execPath, []), input: INPUT, timeoutMs: 10_000, log: (line) => { logs.push(line); } });
     if (!r.output.ok) throw new Error(`the producer failed: ${r.output.error}`);
     const seen = JSON.parse(r.output.text) as { input: unknown; names: string[]; root: string | null; cwd: string; script: string };
     assert.deepEqual(seen.input, INPUT);
@@ -467,4 +468,127 @@ test("formatDuration: whole minutes in min, anything else in s", () => {
   assert.equal(formatDuration(90_000), "90 s");
   assert.equal(formatDuration(30_000), "30 s");
   assert.equal(formatDuration(10_000), "10 s");
+});
+
+/* ---------- the fix wave: the process group, the interpreter's flags, the run base's spelling, the size bound ---------- */
+
+test("the deadline kills the child's whole process group: a grandchild holding stdout dies with it", async () => {
+  const pidFile = join(TEST_DIR, "grandchild.pid");
+  /* the child starts a grandchild that inherits its stdout - so the pipe stays open after the child is gone - and sleeps */
+  await writeFile(join(SCRIPTS, "spawner.mjs"), [
+    'import { spawn } from "node:child_process";',
+    'import { writeFileSync } from "node:fs";',
+    'const grandchild = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "inherit" });',
+    "writeFileSync(process.argv[2], String(grandchild.pid));",
+    'process.stdout.write("started");',
+    "setTimeout(() => {}, 60_000);",
+    "",
+  ].join("\n"));
+  const run = defaultProducerRunner(process.execPath, []);
+  const t0 = Date.now();
+  const r = await run([join(SCRIPTS, "spawner.mjs"), pidFile], { cwd: ROOT, env: { PATH: process.env.PATH }, timeoutMs: 1_000 });
+  assert.ok(Date.now() - t0 < 10_000, "the run ends at its deadline, though a grandchild held the pipe");
+  assert.equal(r.timedOut, true);
+  assert.equal(r.code, null);
+  assert.equal(r.stdout, "started", "what it wrote before the deadline is kept");
+  const pid = Number(await readFile(pidFile, "utf8"));
+  const alive = (): boolean => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  for (let i = 0; i < 40 && alive(); i++) await new Promise((done) => setTimeout(done, 50));
+  assert.equal(alive(), false, `the grandchild ${pid} died with its group`);
+});
+
+test("defaultProducerRunner puts the interpreter's flags before the argv: -I by default, none when told", async () => {
+  assert.deepEqual(PYTHON_FLAGS, ["-I"]);
+  /* node as the interpreter: --no-warnings is a flag node takes, shown in process.execArgv */
+  const shown = join(SCRIPTS, "flags.mjs");
+  await writeFile(shown, "process.stdout.write(JSON.stringify({ execArgv: process.execArgv, argv: process.argv.slice(2) }));\n");
+  const flagged = await defaultProducerRunner(process.execPath, ["--no-warnings"])([shown, "a"], { cwd: ROOT, env: {}, timeoutMs: 10_000 });
+  assert.deepEqual(JSON.parse(flagged.stdout), { execArgv: ["--no-warnings"], argv: ["a"] });
+  const bare = await defaultProducerRunner(process.execPath, [])([shown], { cwd: ROOT, env: {}, timeoutMs: 10_000 });
+  assert.deepEqual(JSON.parse(bare.stdout), { execArgv: [], argv: [] });
+});
+
+test("a script producer runs isolated under the face's python: -I, no PYTHONPATH, no script directory on sys.path", async (t) => {
+  const python = process.env.FACE_PYTHON || "python3";
+  const probe = await defaultProducerRunner(python)(["-c", "print(1)"], { cwd: ROOT, env: baseEnv(process.env), timeoutMs: 30_000 });
+  if (probe.code !== 0) {
+    t.skip(`no ${python} to run`);
+    return;
+  }
+  const path = join(SCRIPTS, "isolated.py");
+  await writeFile(path, [
+    "import json, os, sys",
+    'print(json.dumps({"isolated": sys.flags.isolated, "path": sys.path, "root": os.environ.get("GRAVIT_ROOT")}))',
+    "",
+  ].join("\n"));
+  await withEnv({ PYTHONPATH: join(TEST_DIR, "planted") }, async () => {
+    const r = await runScriptProducer({ root: ROOT, script: "scripts/isolated.py", sha256: await shaOf(path), runBase: RUN_BASE,
+      run: defaultProducerRunner(python), input: INPUT, timeoutMs: 30_000, log: () => {} });
+    if (!r.output.ok) throw new Error(`the producer failed: ${r.output.error}`);
+    const seen = JSON.parse(r.output.text) as { isolated: number; path: string[]; root: string };
+    assert.equal(seen.isolated, 1, "isolated mode");
+    assert.equal(seen.root, ROOT, "GRAVIT_ROOT is still given");
+    assert.ok(!seen.path.some((entry) => entry.includes("planted") || entry.includes("gravit-producer-") || entry === ""),
+      `neither PYTHONPATH, the copy's directory nor the cwd is on sys.path: ${seen.path.join(" ")}`);
+  });
+});
+
+test("the run base is resolved first: a trailing slash cannot pass a symlinked one, and a relative one lands where it names", async () => {
+  const runs: string[][] = [];
+  const run: ProducerRunner = async (argv) => { runs.push(argv); return { code: 0, stdout: "OK", stderr: "", timedOut: false }; };
+  const p = await shaOf(join(SCRIPTS, "p.py"));
+  const at = (runBase: string) =>
+    runScriptProducer({ root: ROOT, script: "scripts/p.py", sha256: p, runBase, run, input: INPUT, timeoutMs: 10_000, log: () => {}, now: () => 0 });
+  const target = join(TEST_DIR, "slash-target");
+  await mkdir(target);
+  const linked = join(TEST_DIR, "slash-run");
+  await symlink(target, linked);
+  assert.deepEqual((await at(`${linked}/`)).output, { ok: false, error: `could not start: ${linked} is a symlink` },
+    "lstat of the spelling with a slash would follow the link");
+  assert.deepEqual(runs, []);
+  const relativeBase = relative(process.cwd(), join(TEST_DIR, "relative-run"));
+  assert.ok(!isAbsolute(relativeBase), relativeBase);
+  assert.deepEqual((await at(relativeBase)).output, { ok: true, text: "OK" });
+  assert.equal(dirname(dirname(runs[0][0])), join(TEST_DIR, "relative-run"), "the copy is made under the absolute run base");
+});
+
+test("a script over 1 MiB is never read whole: refused as changed since arming, nothing run", async () => {
+  assert.equal(SCRIPT_MAX_BYTES, 1_048_576);
+  const big = join(SCRIPTS, "big.py");
+  await writeFile(big, `# ${"x".repeat(SCRIPT_MAX_BYTES)}\n`);
+  assert.equal(await readScriptBytes(await realpath(big)), "oversized");
+  assert.equal(await readScriptBytes(join(SCRIPTS, "p.py"), 5), "oversized", "the bound is the caller's");
+  assert.deepEqual(await readScriptBytes(join(SCRIPTS, "p.py"), 11), Buffer.from("print('p')\n"), "a file at the bound reads");
+  const runs: string[][] = [];
+  const run: ProducerRunner = async (argv) => { runs.push(argv); return { code: 0, stdout: "", stderr: "", timedOut: false }; };
+  const r = await runScriptProducer({ root: ROOT, script: "scripts/big.py", sha256: await shaOf(big), runBase: RUN_BASE, run, input: INPUT,
+    timeoutMs: 10_000, log: () => {}, now: () => 0 });
+  assert.deepEqual(r, { output: { ok: false, error: "scripts/big.py changed since arming" }, code: null, timedOut: false, wallMs: 0, chars: 0, refused: "hash" });
+  assert.deepEqual(runs, []);
+});
+
+test("runPinnedScript: the copy path the clock shares - its arguments after the copy, its own words for a moved pin, its label", async () => {
+  const calls: Array<{ argv: string[]; opts: Parameters<ProducerRunner>[1] }> = [];
+  const run: ProducerRunner = async (argv, opts) => { calls.push({ argv, opts }); return { code: 0, stdout: "{}", stderr: "", timedOut: false }; };
+  const p = await shaOf(join(SCRIPTS, "p.py"));
+  const base = { root: ROOT, script: "scripts/p.py", runBase: RUN_BASE, run, cwd: ROOT, env: { PATH: "/bin" }, timeoutMs: 5_000, label: "the clock", log: () => {} };
+  const ran = await runPinnedScript({ ...base, sha256: p, args: ["sessions", "--days", "10"] });
+  assert.deepEqual(ran, { ran: { code: 0, stdout: "{}", stderr: "", timedOut: false } });
+  assert.deepEqual(calls[0].argv.slice(1), ["sessions", "--days", "10"]);
+  assert.equal(basename(calls[0].argv[0]), "p.py");
+  assert.deepEqual(calls[0].opts, { cwd: ROOT, env: { PATH: "/bin" }, timeoutMs: 5_000 }, "no stdin given, none passed");
+  assert.deepEqual(await runPinnedScript({ ...base, sha256: "0".repeat(64), changed: "changed since this face was built" }),
+    { refused: "hash", error: "scripts/p.py changed since this face was built" });
+  assert.deepEqual(await runPinnedScript({ ...base, script: "scripts/nope.py", sha256: p }), { refused: "missing", error: "scripts/nope.py is missing" });
+  assert.deepEqual(await runPinnedScript({ ...base, sha256: p, runBase: join(TEST_DIR, "no-such-home", "run") }), { failed: "ENOENT" });
+  assert.equal(calls.length, 1);
+  assert.equal(isOverflow(STDOUT_OVER) && isOverflow(STDERR_OVER), true);
+  assert.equal(isOverflow("ENOENT") || isOverflow(undefined), false);
 });

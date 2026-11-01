@@ -192,9 +192,9 @@ async function hashText(m: Machinery, root: string, dir: string, file: string): 
 /**
  * A script producer's bytes, found and read exactly as a firing finds and reads them - producer.ts's
  * `resolveScript` (a regular file whose real path lies under `<root>/scripts/`) and `readScriptBytes` (no link
- * followed, no FIFO waited on, the type checked on the descriptor read) - and hashed.
+ * followed, no FIFO waited on, the type and the size checked on the descriptor read) - and hashed.
  * @returns its sha256, or why not, in the firing's words: `<script> is missing`, `leaves scripts/` or `is not a
- *   regular file`.
+ *   regular file` - or `is over the 1,048,576-byte limit`, which no firing would read whole.
  */
 async function hashScript(m: Machinery, root: string, script: string): Promise<{ sha256: string } | { error: string }> {
   const found = await m.producer.resolveScript(root, script);
@@ -202,6 +202,7 @@ async function hashScript(m: Machinery, root: string, script: string): Promise<{
   const bytes = await m.producer.readScriptBytes(found.path);
   if (bytes === "missing") return { error: `${script} is missing` };
   if (bytes === "irregular") return { error: `${script} is not a regular file` };
+  if (bytes === "oversized") return { error: `${script} is over the ${m.producer.SCRIPT_MAX_BYTES.toLocaleString("en-US")}-byte limit` };
   return { sha256: m.standing.sha256Hex(bytes) };
 }
 

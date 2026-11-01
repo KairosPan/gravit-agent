@@ -817,11 +817,14 @@ export function createDeskSchedule(opts: {
   const seams = opts.seams ?? {};
   const clock = seams.clock ?? FACE_CLOCK;
   let toldTail: string | undefined;
+  /* one runner for the clock and a script producer: the face's interpreter, isolated */
+  const runScript = seams.runScript ?? defaultProducerRunner(opts.python);
   const calendar = seams.calendar ?? createMarketCalendar({
     python: opts.python,
     ask: pythonMarketClock({
       root: opts.root,
       python: opts.python,
+      run: runScript,
       stderr: (tail) => {
         if (tail === toldTail) return;
         toldTail = tail;
@@ -835,7 +838,7 @@ export function createDeskSchedule(opts: {
     root: opts.root,
     clock,
     calendar,
-    runScript: seams.runScript ?? defaultProducerRunner(opts.python),
+    runScript,
     builtins: seams.builtins ?? (opts.hub === undefined ? {} : { brief: briefProducer({ hub: opts.hub, root: opts.root }) }),
     createAgent: (o) => createDeskAgent(opts.session, o),
     resolveRoute: async (raw) => {
