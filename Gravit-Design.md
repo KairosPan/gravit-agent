@@ -9,7 +9,9 @@ of the Account (§1, §3, §4, §5, §7.3, §8, §9; D18 added), and again 2026-
 the Python package, the PIT beds and backtests (§1, §2, §3, §4, §5 — D3 and D16 resolved, D1, D8
 and D10 rewritten — §6, §7.2, §8, §9); revised 2026-10-26 for the Lunhui rows and their three
 roles (§1, §4, D10, §7.2); revised 2026-10-27 for the Account service in this tree and its two
-boxes (§1, §3, D17, §7.3, §9) ·
+boxes (§1, §3, D17, §7.3, §9); revised 2026-11-01 for the Account's two parts — A shares,
+Lunhui's reach and AKShare in the Account box, the wallet and Market halves on the face, the
+Account's page retired (§1, §3, §4, §5 — D17, D18 — §7.3, §8, §9) ·
 **Owner:** the operator ·
 **Authority:** this charter carries intent and principles; mechanism lives in `DEVELOPMENT.md`,
 `face/README.md` (the current face contracts and drills), and code. On a question of intent, the charter
@@ -35,13 +37,17 @@ shipped since 2026-10-26, the Lunhui analysts and reviewer — is the prebuilt f
 delegation (§7.2). One principal agent
 does not mean only one execution context.
 
-- **MARKET** — the Account's markets through Gravit's seat — crypto, US stocks, RWAs,
-  perpetuals, predictions, read keyless and server-side by the Account — and AKShare for A
-  shares; no beds, no replay and no lookahead firewall since 2026-10-24, by the operator's
-  decision: the Account's history is read as it is, and a strategy's evidence is forward paper
-  trading on the Account's paper venue. The Lunhui rows freeze hashed Tencent and Eastmoney
-  samples into a strategy directory for read-only research (since 2026-10-25); like the AKShare
-  reads they carry no lookahead guard and are never evidence of a trade.
+- **MARKET** — the Account provides every market — crypto, US stocks, RWAs, perpetuals,
+  predictions and A shares (China, view-only, in CNY) — read keyless and server-side by the
+  Account, and Gravit reads them through its seat; AKShare is the Account's sidecar, reached
+  through the seat's `portfolio_akshare`. No beds, no replay and no lookahead firewall since
+  2026-10-24, by the operator's decision: the Account's history is read as it is, and a
+  strategy's evidence is forward paper trading on the Account's paper venue. The Lunhui rows
+  freeze hashed Tencent and Eastmoney samples into a strategy directory for read-only research
+  (since 2026-10-25), fetched through the Account's relay (the boards stand-in through its iFinD
+  route), the evidence saying `via: "account"`; like the AKShare reads they carry no lookahead
+  guard and are never evidence of a trade. The agent box reaches no market host and holds the
+  DeepSeek key only.
 - **STRATEGY** — Gravit's arena. A strategy is a directory under `strategies/`, meant to be
   git-versioned: a thesis with falsification terms, a journal of its evidence (forward paper
   trades among it), a lifecycle state. In the face, each strategy directory is a **channel**:
@@ -53,14 +59,16 @@ does not mean only one execution context.
   paper venues only. The Account is the Account service in this tree (`account/`, copied from
   Linqi's buyer-agent-demo @ 133b9a7 on 2026-10-27), run as its own process — and, under
   `docker compose`, as its own box. Every seat write passes Gate 2 here and the Account's own
-  card there (D17). Since 2026-10-24 the Account is also what the face's Markets and Account
-  screens show — read through a loopback proxy — and the face's page is one of the Account's
-  owner devices: the operator trades there by hand, each order signed with the browser's device
-  key at the Account's door, under the Account's own cap (D18). The Account is the account: the
-  operator's own Alpaca paper account, when wanted, is one of its venues.
+  card there (D17). The face is the Account's only face, read through a loopback proxy: its
+  Markets and Trade are the Account's Market part, its Account screen the wallet part
+  (Portfolio · Money · Venues · Agents · Cards · Rules); the Account serves no page of its own
+  since 2026-11-01. The face's page is the Account's owner device: the operator acts there by
+  hand, each act signed with the browser's device key at the Account's door, under the
+  Account's own cap (D18). The Account is the account: the operator's own Alpaca paper account,
+  when wanted, is one of its venues.
 
 **What a working day looks like.** The operator opens the face at `127.0.0.1:3090`, picks a
-channel, and talks to Gravit. Gravit reads the market through its Account seat and AKShare,
+channel, and talks to Gravit. Gravit reads the market, AKShare included, through its Account seat,
 trades on the Account's paper venue under both cards, and writes thesis and journal into the
 strategy directory. The operator reads the face's Markets, Trade and Account screens, reads the
 git diff, and teaches: trading style lives in an operator-owned skill pack; taste and judgment
@@ -131,16 +139,16 @@ the design economizes it but never designs it away.
 │            delegates bounded child tasks (and roles, when        │
 │            one ships) · may call rostered local CLIs as tools    │
 ├──────────────────────────────────────────────────────────────────┤
-│ MCP ROWS   composed by the face: the Account seat                │  the workbench
-│            (mcp__account__*) · AKShare (A shares) ·              │  (this repo)
-│            no lookahead guard on either                          │
+│ MCP ROWS   composed by the face: the Account seat alone          │  the workbench
+│            (mcp__account__*, AKShare through it) ·               │  (this repo)
+│            no lookahead guard                                    │
 ├────────────────────────────────┬─────────────────────────────────┤
 │ MARKET                         │ ACCOUNT                         │
 │ the Account's markets: crypto, │ the Account (account/, its own  │
-│ US stocks, RWAs, perpetuals,   │ process): venues read by the    │
-│ predictions — keyless, read    │ face, traded by hand from it;   │
-│ server-side by the Account ·   │ Gravit's seat there, carded,    │
-│ AKShare: public A shares       │ on paper venues only            │
+│ US stocks, RWAs, perpetuals,   │ process, no page): both halves  │
+│ predictions, A shares —        │ on the face, signed by hand     │
+│ keyless, server-side by the    │ from it; Gravit's seat there,   │
+│ Account · AKShare in its box   │ carded, on paper venues only    │
 └────────────────────────────────┴─────────────────────────────────┘
 ```
 
@@ -155,7 +163,7 @@ Who may change what. This table is the charter's core; everything else supports 
 
 | Surface | Writer | Audit / gate |
 |---|---|---|
-| `strategies/` | **Gravit**, including any role children and the bounded tasks it delegates to under inherited permissions; and the Lunhui rows, writing only under `strategies/<name>/analysis/`, from the face process, outside any session sandbox, when a non-bot session holding their tools calls them — Gravit, its forks and plain subagents, or the three roles | git history is the ledger (a run's evidence files are not in it, only their hashes); Gravit checks delegated results and the operator reviews diffs; the Lunhui rows anchor every write to a strategy name and a run id, never a path, and take a module's artifact only from a role child |
+| `strategies/` | **Gravit**, including any role children and the bounded tasks it delegates to under inherited permissions; and the Lunhui rows, writing only under `strategies/<name>/analysis/`, from the face process, outside any session sandbox, when a non-bot session holding their tools calls them — Gravit, its forks and plain subagents, or the three roles | git history is the ledger (a run's evidence files are not in it, only their hashes); Gravit checks delegated results and the operator reviews diffs; the Lunhui rows anchor every write to a strategy name and a run id, never a path, take a module's artifact only from a role child, and fetch every upstream sample through the Account, its evidence saying `via: "account"` |
 | `face/` and its tests | normal engineering (operator and coding agents, reviewed) | the offline suite, the gated smokes and the drills — this tier includes the code of the order gate |
 | `dsh/skills/mechanics/` | operator only | law, not style: tool mechanics (today the Account seat's guide); Gravit treats them as binding |
 | `dsh/skills/style-gravit/` | operator only | Gravit proposes changes in its journal or in conversation; it never edits the pack |
@@ -165,8 +173,8 @@ Who may change what. This table is the charter's core; everything else supports 
 | `bots/<id>/journal/notes.md` | operator; the bot in its own home session, subject to that session's permissions | home work is scoped to its own `journal/`; room sessions start read-only (D12). Context loading only reads notes and records the consumed snapshot; it never writes them |
 | Role definitions: `roles/<id>/` (`ROLE.md`, `role.yml`), and the mirror `bots/gravit/agent.cordis.yml` generated from them | operator, by file edit; Gravit proposes a role in conversation and never authors one | git and review; the face refuses a malformed role at boot, a drift test fails while the mirror differs from the render, and the reader keeps the account and order tools, `ask_user_question` and the AKShare tools out of every role's `allow` |
 | `dsh/profile/cycle.md` | operator only | the research-cycle contract Gravit runs; Gravit proposes changes in conversation and never edits it; git |
-| orders at the Account seat (`mcp__account__*` writes) — Gravit's only order path | nobody today — Gravit, under both cards, once the operator admits the seat as Gravit on the Account page and signs it a `trade` limit naming a paper venue | **Gate 2** cards every seat write before it leaves dsh (the twelve writes, and any seat tool the face has not classified), and the Account's Guard cards it again under the owner's device key — answered in the face's Cards since 2026-10-24; the seat's reach is exactly the limits the operator signs — the face process holds no key and signs nothing, and draws the Account's venues as the Account reports them (D17, D18); under a `never` policy, or with no session to ask in, a seat write is denied rather than asked, and `place_order`/`cancel_order` under any server are denied outright and refuse the boot (the retired tools); the automated drill runs on `mcp__drill__*` stand-ins of the seat's writes; a limit on a real venue is the real-money trigger (§8) |
-| the owner's hand orders at the Account (the face's Trade screen, since 2026-10-24) | the operator, by hand, each order signed with the browser's device key at the Account's door (`POST /api/exchange`, carried by the face's proxy) | no gate of this tree's: the Account's live cap on each order and movement, its venues' rules, and *What you sign* drawn before every signature; no card — the owner's act is not the agent's; the face process carries bytes, holds no key and signs nothing (D18). On a real venue this is the owner's own money by the owner's own hand (§8) |
+| orders at the Account seat (`mcp__account__*` writes) — Gravit's only order path | nobody today — Gravit, under both cards, once the operator admits the seat as Gravit on the face (Account › Agents) and signs it a `trade` limit naming a paper venue | **Gate 2** cards every seat write before it leaves dsh (the twelve writes, and any seat tool the face has not classified), and the Account's Guard cards it again under the owner's device key — answered in the face's Cards; the seat's reach is exactly the limits the operator signs — the face process holds no key and signs nothing, and draws the Account's venues as the Account reports them (D17, D18); under a `never` policy, or with no session to ask in, a seat write is denied rather than asked, and `place_order`/`cancel_order` under any server are denied outright and refuse the boot (the retired tools); the automated drill runs on `mcp__drill__*` stand-ins of the seat's writes; a limit on a real venue is the real-money trigger (§8) |
+| the owner's hand acts at the Account, both halves on the face (since 2026-10-24; all of them since 2026-11-01) — orders, close, change, leverage, Money's moves and Earn, venues, agent wallets and limits, cards, Rules | the operator, by hand, each act signed with the browser's device key at the Account's door (`POST /api/exchange`, carried by the face's proxy); Guard and Close to agents are the two unsigned writes, both the Account's safer direction | no gate of this tree's: the Account's live cap on each order and movement, its venues' rules, and *What you sign* drawn before every signature; no card — the owner's act is not the agent's; the face process carries bytes, holds no key and signs nothing (D18). On a real venue this is the owner's own money by the owner's own hand (§8) |
 
 Three honesty notes the table depends on. First, Gate 2 holds the MCP tool *surface*, not the
 account: the seat's key file in the Account's home is readable from a shell turn, which can sign
@@ -202,8 +210,8 @@ solved would be worse than carrying them.
 | D14 | Structured room evidence, child-task results and role reports have no independent verification or result-acceptance mechanism; passing runtime drills does not establish better research | originals, request snapshots and task histories remain reviewable; Gravit checks results and the operator judges them | before claiming a research-quality gain or reducing review on the strength of these features |
 | D15 | Bot journal context is a bounded read of historical notes; freshness, conflicts and note selection still depend on manual maintenance | each request records what it consumed and exposes missing or truncated notes | when stale, conflicting or omitted notes materially affect a conclusion |
 | D16 | *Resolved 2026-10-24:* the research cycle calls no role and keeps no role-call count; the round cap stays the goal's (the 24 is Gravit's argument to create_goal, as cycle.md instructs; dsh's own default is 256) | — | — |
-| D17 | The Account seat's fence is the operator's grants on the Account page, not code in this tree: a limit signed on a real venue would reach real money through the same two cards, and the face cannot tell a paper venue from a real one; two cards per seat write meanwhile; the seat's key file is written by a child of the face outside the workspace, in the Account's home, and a shell turn can read it and sign at the Account's door with no card here (the seat's R1); under compose the Account's home is a volume the agent box does not mount; the seat's own key stays with the seat in the agent box, and the Account's card on every seat write stands against a shell that signs with it; the seat is matched by the name the owner typed | paper venues only by the operator's rule; the Account's own Guard, `--live-cap` and limits; both cards; one operator, one machine | the first limit signed on a non-paper venue, or a real venue connected to that Account with the seat granted reach — the real-money trigger (§8); a second human |
-| D18 | The face's page is an owner device of the Account (2026-10-24): the browser profile that holds the key can sign anything the owner can — hand orders up to the Account's cap on every venue the operator connected there, seats' limits, cards, venue connections. The key is the browser's (WebCrypto, non-extractable, the page's origin), lost with the profile and admitted again by another device; the pairing code and the envelopes pass through the face process unlogged; the signing client is the Account's door protocol reproduced in `face/client`, which this tree keeps in step with the Account by hand (the smoke is the canary) | held by: loopback only; the Account's own cap and *What you sign*; the proxied rows are an allow-list and the Account's fence covers everything else; a local process reaches the proxied owner routes as it reaches the Account's own and does nothing without an admitted key; one operator, one machine | a real venue connected to the Account and an order placed on it by hand from the face (the owner's money; the first real-money surface in the face); a second human or machine; a change in the Account's envelope (every signature refused until the client follows) |
+| D17 | The Account seat's fence is the operator's grants at the Account, signed from the face, not code in this tree: a limit signed on a real venue would reach real money through the same two cards, and the face cannot tell a paper venue from a real one; two cards per seat write meanwhile; the seat's key file is written by a child of the face outside the workspace, in the Account's home, and a shell turn can read it and sign at the Account's door with no card here (the seat's R1); under compose the Account's home is a volume the agent box does not mount, the iFinD token and `akshare-mcp` live in the Account box, and 4820 is published to nobody but the agent box; the seat's own key stays with the seat in the agent box, and the Account's card on every seat write stands against a shell that signs with it; the seat is matched by the name the owner typed | paper venues only by the operator's rule; the Account's own Guard, `--live-cap` and limits; both cards; one operator, one machine | the first limit signed on a non-paper venue, or a real venue connected to that Account with the seat granted reach — the real-money trigger (§8); a second human |
+| D18 | The face's page is an owner device of the Account (2026-10-24), and since 2026-11-01 the Account's only page: the browser profile that holds the key can sign anything the owner can — hand orders up to the Account's cap on every venue the operator connected there, money moves, seats' limits, cards, venue connections. The key is the browser's (WebCrypto, non-extractable, the page's origin); a browser wallet signs in its own extension; the pairing code and the envelopes pass through the face process unlogged; the proxy is an allow-list of thirty-eight exact routes, and a venue's OAuth callback is the one navigation, forwarded through the face; the signing client is the Account's door protocol reproduced in `face/client`, which this tree keeps in step with the Account by hand (the smoke is the canary). With one owner device, a lost browser profile leaves the Account with no device that can sign and no code (a code is printed only while it has no owner) — only `--fresh`, which loses the owner, venues, agents and limits | held by: loopback only; the Account's own cap and *What you sign*; the Account's fence covers everything the allow-list does not carry; a local process reaches the proxied owner routes as it reaches the Account's own and does nothing without an admitted key; a second face browser kept paired (Settings › Devices) against the lost profile; one operator, one machine | a real venue connected to the Account and an order placed on it, or money moved on it (Move, Earn, a browser wallet's send), by hand from the face (the owner's money; the first real-money surface in the face); a second human or machine; a change in the Account's envelope (every signature refused until the client follows) |
 
 ## 6. Rules carried forward
 
@@ -320,8 +328,8 @@ is the copy source).
   The risks are named here in one line each instead of being built against: a hosted or
   multi-user deployment invalidates this charter rather than extending it. The Account seat's key
   is the Account's — the service in `account/`, its home — and the owner's device key is the
-  browser's: on the Account's page, and since 2026-10-24 on the face's page as a second owner
-  device, where `face/client` speaks the Account's door protocol as a client speaks it (a P-256
+  browser's, on the face's page alone (the Account's own page retired 2026-11-01), where
+  `face/client` speaks the Account's door protocol as a client speaks it (a P-256
   key the browser holds, the Account's envelope and nonce) and designs none of its own. The face
   process holds no key and signs nothing; Gate 2 stays the face's only gate for the agent; the
   owner's hand orders pass through no gate of this tree's (D18).
@@ -344,7 +352,7 @@ Few and concrete. Each names the section it reopens.
 | Stale, conflicting or truncated journal notes affect a conclusion | §7.1 · D15 · maintenance and retrieval requirements before choosing a new memory store |
 | Expanding the interface migration in §9 | §3 (the FACE row) · §7.3 "No bespoke harness" and "No hosted face" · the two pins · the row and RPC inventory against the CLI's |
 | A limit signed for the Account seat on a venue that is not a paper account, or a real venue connected to that Account with the seat granted reach there | §4 Gate 2 and the Account's card · D8 · D17 · D1, should the operator adopt its proposed trigger · the next charter (the venue-plugins handoff's §12.1, C1–C5) |
-| A real venue connected to the Account and an order placed on it by hand from the face | D18 · the Account's cap and *What you sign* · the next charter (the handoff's §12.1 stays the agenda for the agent's path) |
+| A real venue connected to the Account and an order placed on it, or money moved on it (Move, Earn, a browser wallet's send), by hand from the face | D18 · the Account's cap and *What you sign* · the next charter (the handoff's §12.1 stays the agenda for the agent's path) |
 | A second human, or any hosted deployment | this charter is the wrong document; write the next one |
 
 ## 9. Forward
@@ -375,16 +383,18 @@ Remaining directions below are not completed capabilities. Further design remain
   (a per-seat paper autonomy on the Account's side); the seat's tool block (`DEVELOPMENT.md` §4.3,
   15,727 heuristic tokens) against the mask on Gravit's preset. Since 2026-10-24 the Account's
   content is the face's Markets and Account and the face's page is an owner device
-  (`docs/superpowers/specs/2026-10-22-account-graft-design.md`). Open: Guard · Beast and the cap
-  on the face (the operator's "先不管"); the venues that connect only on the Account's page;
-  perpetuals and leverage from the ticket; the face's keyed sources as wallets — accounts connected with a key — offered as MCP
+  (`docs/superpowers/specs/2026-10-22-account-graft-design.md`). Closed 2026-11-01 (plans 4a
+  and 4b): Guard · Beast and the cap on the face; the venues that connected only on the
+  Account's own page; perpetuals and leverage from the ticket. Open: the face's keyed sources as wallets — accounts connected with a key — offered as MCP
   servers (the operator's direction of 2026-10-22, the next step of 借鉴 Account 完善 Gravit).
   The face's own producers and keyed quote providers retired on 2026-10-24, with the Python
-  package, the PIT beds and the backtests (the design's §12); the face's own quote wire speaks A
-  shares alone. Since 2026-10-27 the Account service is this tree's `account/`, runnable as two
-  boxes under `docker compose` (`docs/superpowers/specs/2026-10-27-account-in-repo-design.md`);
-  next, A shares into the Account box, then the Account's own page retired (that design's
-  projects 2 and 3).
+  package, the PIT beds and the backtests (the design's §12). Since 2026-10-27 the Account
+  service is this tree's `account/`, runnable as two boxes under `docker compose`
+  (`docs/superpowers/specs/2026-10-27-account-in-repo-design.md`). Built 2026-11-01: A shares
+  into the Account box, then the Account's own page retired — the face holds no market wire of
+  its own, the Lunhui rows and AKShare reach the market through the Account, and both halves
+  live on the face (`docs/superpowers/specs/2026-11-01-account-two-parts-design.md`); the live
+  drills are owed (`face/README.md` "The two-parts drills").
 - **Evaluate real research and make acceptance explicit** (D14, D16). Compare representative
   research tasks for evidence accuracy, useful disagreement, revision of conclusions, operator
   effort, elapsed time and usage. Develop traceability from claims to source material and from
